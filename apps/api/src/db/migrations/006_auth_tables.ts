@@ -24,22 +24,12 @@ export const authTables: Migration = {
       .addColumn('updatedAt', 'integer', (col) => col.notNull())
       .addColumn('ipAddress', 'text')
       .addColumn('userAgent', 'text')
-      .addColumn('userId', 'text', (col) =>
-        col.notNull().references('user.id').onDelete('cascade')
-      )
+      .addColumn('userId', 'text', (col) => col.notNull().references('user.id').onDelete('cascade'))
       .execute();
 
-    await db.schema
-      .createIndex('session_userId_idx')
-      .on('session')
-      .column('userId')
-      .execute();
+    await db.schema.createIndex('session_userId_idx').on('session').column('userId').execute();
 
-    await db.schema
-      .createIndex('session_token_idx')
-      .on('session')
-      .column('token')
-      .execute();
+    await db.schema.createIndex('session_token_idx').on('session').column('token').execute();
 
     // Tabela de accounts (providers)
     await db.schema
@@ -47,9 +37,7 @@ export const authTables: Migration = {
       .addColumn('id', 'text', (col) => col.primaryKey())
       .addColumn('accountId', 'text', (col) => col.notNull())
       .addColumn('providerId', 'text', (col) => col.notNull())
-      .addColumn('userId', 'text', (col) =>
-        col.notNull().references('user.id').onDelete('cascade')
-      )
+      .addColumn('userId', 'text', (col) => col.notNull().references('user.id').onDelete('cascade'))
       .addColumn('accessToken', 'text')
       .addColumn('refreshToken', 'text')
       .addColumn('idToken', 'text')
@@ -61,11 +49,7 @@ export const authTables: Migration = {
       .addColumn('updatedAt', 'integer', (col) => col.notNull())
       .execute();
 
-    await db.schema
-      .createIndex('account_userId_idx')
-      .on('account')
-      .column('userId')
-      .execute();
+    await db.schema.createIndex('account_userId_idx').on('account').column('userId').execute();
 
     // Tabela de verificação (tokens de reset, email verification, etc.)
     await db.schema

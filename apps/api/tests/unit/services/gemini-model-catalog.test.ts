@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'bun:test';
-import { createGeminiModelCatalogService, GeminiApiKeyMissingError } from '../../../src/services/gemini';
+import {
+  createGeminiModelCatalogService,
+  GeminiApiKeyMissingError,
+} from '../../../src/services/gemini';
 import { createMockModel } from '../../support/mocks/mock-gemini-client';
 
 const TEST_USER = 'test-user';
@@ -87,7 +90,9 @@ describe('createGeminiModelCatalogService', () => {
 
   it('returns idle and empty arrays when no API key is configured', async () => {
     const service = createGeminiModelCatalogService({
-      getApiKey: async () => { throw new GeminiApiKeyMissingError(); },
+      getApiKey: async () => {
+        throw new GeminiApiKeyMissingError();
+      },
       listModels: async () => {
         throw new Error('should not list models');
       },

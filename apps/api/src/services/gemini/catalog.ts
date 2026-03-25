@@ -106,7 +106,7 @@ export function createGeminiModelCatalogService(
     for (const c of connectors) {
       try {
         const models: string[] = JSON.parse(c.enabledModels);
-        models.forEach(m => enabled.add(m));
+        models.forEach((m) => enabled.add(m));
       } catch {
         // Ignore parse errors
       }
@@ -118,7 +118,7 @@ export function createGeminiModelCatalogService(
     const enabledIds = await getEnabledModelIds(userId);
     const fullCatalog = getFullCatalog(userId);
     const snap = getSnapshot(userId);
-    
+
     snapshots.set(userId, {
       ...snap,
       configured: true,
@@ -126,8 +126,8 @@ export function createGeminiModelCatalogService(
       allModels: fullCatalog,
       discoveredTextModels: fullCatalog.filter(isTextModel),
       discoveredImageModels: fullCatalog.filter(isImageModel),
-      textModels: fullCatalog.filter(m => isTextModel(m) && enabledIds.has(m.modelId)),
-      imageModels: fullCatalog.filter(m => isImageModel(m) && enabledIds.has(m.modelId)),
+      textModels: fullCatalog.filter((m) => isTextModel(m) && enabledIds.has(m.modelId)),
+      imageModels: fullCatalog.filter((m) => isImageModel(m) && enabledIds.has(m.modelId)),
     });
   };
 
@@ -144,10 +144,10 @@ export function createGeminiModelCatalogService(
           const discovered = (await listModels(apiKey))
             .map(normalizeModelOption)
             .sort((left, right) => left.displayName.localeCompare(right.displayName));
-          
+
           fullCatalogs.set(userId, discovered);
           await recalculateSnapshot(userId);
-          
+
           const snap = getSnapshot(userId);
           snap.lastSyncedAt = now();
           snapshots.set(userId, snap);
@@ -160,7 +160,8 @@ export function createGeminiModelCatalogService(
             return snap;
           }
 
-          const message = error instanceof Error ? error.message : 'Unknown Gemini catalog refresh error.';
+          const message =
+            error instanceof Error ? error.message : 'Unknown Gemini catalog refresh error.';
           const snap = {
             ...createEmptySnapshot(),
             status: 'error' as const,
@@ -177,7 +178,10 @@ export function createGeminiModelCatalogService(
       return refreshPromise;
     },
 
-    refreshIfStale(userId: string, reason: GeminiModelCatalogRefreshReason): GeminiModelCatalogResponse {
+    refreshIfStale(
+      userId: string,
+      reason: GeminiModelCatalogRefreshReason
+    ): GeminiModelCatalogResponse {
       if (isStale(userId) && !refreshPromises.has(userId)) {
         this.refreshGeminiModelCatalog(userId, reason).catch(() => {});
       }
@@ -220,11 +224,18 @@ export function createGeminiModelCatalogService(
 
 const geminiModelCatalogService = createGeminiModelCatalogService();
 
-export const refreshGeminiModelCatalog = geminiModelCatalogService.refreshGeminiModelCatalog.bind(geminiModelCatalogService);
-export const refreshIfStale = geminiModelCatalogService.refreshIfStale.bind(geminiModelCatalogService);
-export const clearGeminiModelCatalog = geminiModelCatalogService.clearGeminiModelCatalog.bind(geminiModelCatalogService);
-export const getGeminiModelCatalog = geminiModelCatalogService.getGeminiModelCatalog.bind(geminiModelCatalogService);
-export const getDefaultTextModel = geminiModelCatalogService.getDefaultTextModel.bind(geminiModelCatalogService);
-export const getDefaultImageModel = geminiModelCatalogService.getDefaultImageModel.bind(geminiModelCatalogService);
+export const refreshGeminiModelCatalog =
+  geminiModelCatalogService.refreshGeminiModelCatalog.bind(geminiModelCatalogService);
+export const refreshIfStale =
+  geminiModelCatalogService.refreshIfStale.bind(geminiModelCatalogService);
+export const clearGeminiModelCatalog =
+  geminiModelCatalogService.clearGeminiModelCatalog.bind(geminiModelCatalogService);
+export const getGeminiModelCatalog =
+  geminiModelCatalogService.getGeminiModelCatalog.bind(geminiModelCatalogService);
+export const getDefaultTextModel =
+  geminiModelCatalogService.getDefaultTextModel.bind(geminiModelCatalogService);
+export const getDefaultImageModel =
+  geminiModelCatalogService.getDefaultImageModel.bind(geminiModelCatalogService);
 export const hasTextModel = geminiModelCatalogService.hasTextModel.bind(geminiModelCatalogService);
-export const hasImageModel = geminiModelCatalogService.hasImageModel.bind(geminiModelCatalogService);
+export const hasImageModel =
+  geminiModelCatalogService.hasImageModel.bind(geminiModelCatalogService);

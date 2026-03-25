@@ -84,6 +84,7 @@ export function createMockSecretMetadataRow(
     lastValidatedAt: timestamp - 60000,
     lastValidationError: null,
     enabledModels: JSON.stringify(['gemini-pro', 'gemini-flash']),
+    userId: null,
     ...overrides,
   };
 }

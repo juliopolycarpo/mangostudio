@@ -11,9 +11,7 @@ describe('Auth routes', () => {
   });
 
   test('GET /auth/ok — deve retornar ok', async () => {
-    const res = await app.handle(
-      new Request('http://localhost/auth/ok')
-    );
+    const res = await app.handle(new Request('http://localhost/auth/ok'));
     expect(res.status).toBe(200);
   });
 
@@ -23,7 +21,11 @@ describe('Auth routes', () => {
       new Request('http://localhost/auth/sign-up/email', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: 'test@example.com', password: 'x'.repeat(200), name: 'Test' }),
+        body: JSON.stringify({
+          email: 'test@example.com',
+          password: 'x'.repeat(200),
+          name: 'Test',
+        }),
       })
     );
     expect(res.status).toBeGreaterThanOrEqual(400);

@@ -11,9 +11,9 @@ export function useGalleryQuery() {
   return useInfiniteQuery({
     queryKey: galleryKeys.lists(),
     queryFn: async ({ pageParam }) => {
-      const query = pageParam ? { cursor: pageParam, limit: '20' } : { limit: '20' };
-      const { data, error } = await client.api.messages.images.get({ query });
-      if (error) throw new Error(error.value as string);
+      const $query = pageParam ? { cursor: pageParam, limit: '20' } : { limit: '20' };
+      const { data, error } = await client.api.messages.images.get({ $query });
+      if (error) throw new Error(error.value as unknown as string);
       return data as { items: GalleryItem[]; nextCursor: string | null };
     },
     initialPageParam: null as string | null,

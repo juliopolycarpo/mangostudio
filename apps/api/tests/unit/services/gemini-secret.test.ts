@@ -1,10 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import type { SecretMetadataRow } from '@mangostudio/shared/types';
 import type { SecretMetadataInput } from '../../../src/services/secret-store/metadata';
-import {
-  createGeminiSecretService,
-  InvalidGeminiApiKeyError,
-} from '../../../src/services/gemini';
+import { createGeminiSecretService, InvalidGeminiApiKeyError } from '../../../src/services/gemini';
 import { InMemorySecretStore } from '../../support/mocks/mock-secret-store';
 
 const TEST_USER = 'test-user';
@@ -15,8 +12,7 @@ function createMetadataHarness(initial: SecretMetadataRow[] = []) {
 
   return {
     listMetadata: async (_provider: string, _userId: string) => [...rows],
-    getMetadataById: async (id: string, _userId: string) =>
-      rows.find((r) => r.id === id) ?? null,
+    getMetadataById: async (id: string, _userId: string) => rows.find((r) => r.id === id) ?? null,
     upsertMetadata: async (input: SecretMetadataInput) => {
       const idx = rows.findIndex((r) => r.id === input.id);
       const row: SecretMetadataRow = {

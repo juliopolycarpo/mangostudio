@@ -15,7 +15,7 @@ export function useGeminiCatalog() {
     queryKey: catalogKeys.all,
     queryFn: async () => {
       const { data, error } = await client.api.settings.models.gemini.get();
-      if (error) throw new Error(error.value as string);
+      if (error) throw new Error(error.value as unknown as string);
       return data as GeminiModelCatalogResponse;
     },
     staleTime: 1000 * 60 * 55, // 55 minutes
@@ -26,9 +26,12 @@ export function useGeminiCatalog() {
     await refetch();
   }, [refetch]);
 
-  const setCatalog = useCallback((newData: GeminiModelCatalogResponse) => {
-    queryClient.setQueryData(catalogKeys.all, newData);
-  }, [queryClient]);
+  const setCatalog = useCallback(
+    (newData: GeminiModelCatalogResponse) => {
+      queryClient.setQueryData(catalogKeys.all, newData);
+    },
+    [queryClient]
+  );
 
   return {
     catalog: data || EMPTY_GEMINI_MODEL_CATALOG,

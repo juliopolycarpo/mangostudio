@@ -31,7 +31,7 @@ export function ChatFeed({ messages }: { messages: Message[] }) {
   };
 
   return (
-    <section 
+    <section
       ref={parentRef}
       className="flex-1 overflow-y-auto px-6 py-8 hide-scrollbar max-w-5xl mx-auto w-full"
     >
@@ -84,7 +84,9 @@ export function ChatFeed({ messages }: { messages: Message[] }) {
                           {imageErrors[`ref-${msg.id}`] ? (
                             <div className="w-full aspect-square bg-surface-container-high flex flex-col items-center justify-center text-on-surface-variant/50 p-4 text-center">
                               <ImageOff size={24} className="mb-2" />
-                              <span className="text-[10px] font-label">Image no longer available</span>
+                              <span className="text-[10px] font-label">
+                                Image no longer available
+                              </span>
                             </div>
                           ) : (
                             <img

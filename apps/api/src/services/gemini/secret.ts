@@ -13,10 +13,7 @@ import {
   deleteSecretMetadata,
   type SecretMetadataInput,
 } from '../secret-store/metadata';
-import {
-  bunSecretStore,
-  type SecretStore,
-} from '../secret-store/store';
+import { bunSecretStore, type SecretStore } from '../secret-store/store';
 import { join } from 'path';
 import { homedir } from 'os';
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
@@ -105,15 +102,15 @@ export function createGeminiSecretService(dependencies: GeminiSecretServiceDepen
       const content = readFileSync(configPath, 'utf8');
       const parsed = parseToml(content) as any;
       const tomlKeys = parsed.gemini_api_keys || {};
-      
+
       const currentMetadata = await listMetadata(GEMINI_PROVIDER, userId);
-      const configConnectors = currentMetadata.filter(m => m.source === 'config-file');
+      const configConnectors = currentMetadata.filter((m) => m.source === 'config-file');
 
       // 1. Add missing connectors from TOML to DB
       for (const [name, key] of Object.entries(tomlKeys)) {
         if (typeof key !== 'string') continue;
-        
-        const exists = configConnectors.find(c => c.name === name);
+
+        const exists = configConnectors.find((c) => c.name === name);
         if (!exists) {
           const id = randomUUID();
           await upsertMetadata({
@@ -170,11 +167,12 @@ export function createGeminiSecretService(dependencies: GeminiSecretServiceDepen
           return null;
         }
 
-      case 'environment':
+      case 'environment': {
         const envVar = `GEMINI_API_KEY_${connector.name.toUpperCase().replace(/[^A-Z0-9]/g, '_')}`;
         return process.env[envVar] || process.env.GEMINI_API_KEY || null;
+      }
 
-      case 'config-file':
+      case 'config-file': {
         try {
           const configPath = resolvedTomlFilePath;
           if (existsSync(configPath)) {
@@ -186,6 +184,7 @@ export function createGeminiSecretService(dependencies: GeminiSecretServiceDepen
           return null;
         }
         return null;
+      }
 
       default:
         return null;
@@ -198,7 +197,7 @@ export function createGeminiSecretService(dependencies: GeminiSecretServiceDepen
      */
     async getGeminiSecretStatus(userId: string): Promise<GeminiSecretStatus> {
       await syncConfigFileConnectors(userId);
-      
+
       const metadataRows = await listMetadata(GEMINI_PROVIDER, userId);
       const storageAvailable = await secretStore.isAvailable();
 
@@ -225,12 +224,12 @@ export function createGeminiSecretService(dependencies: GeminiSecretServiceDepen
      */
     async getResolvedGeminiApiKey(userId: string, requestedModel?: string): Promise<string> {
       await syncConfigFileConnectors(userId);
-      
+
       const metadataRows = await listMetadata(GEMINI_PROVIDER, userId);
-      
+
       for (const row of metadataRows) {
         if (!row.configured) continue;
-        
+
         const enabledModels: string[] = JSON.parse(row.enabledModels);
         if (requestedModel && !enabledModels.includes(requestedModel)) continue;
 
@@ -252,7 +251,9 @@ export function createGeminiSecretService(dependencies: GeminiSecretServiceDepen
           headers: { 'x-goog-api-key': apiKey },
         });
       } catch (error) {
-        throw new GeminiValidationUnavailableError(error instanceof Error ? error.message : undefined);
+        throw new GeminiValidationUnavailableError(
+          error instanceof Error ? error.message : undefined
+        );
       }
 
       if (response.ok) return;
@@ -275,10 +276,13 @@ export function createGeminiSecretService(dependencies: GeminiSecretServiceDepen
       // Persist the actual secret
       switch (body.source) {
         case 'bun-secrets':
-          await secretStore.setSecret({ service: 'mangostudio', name: `gemini-api-key:${id}` }, apiKey);
+          await secretStore.setSecret(
+            { service: 'mangostudio', name: `gemini-api-key:${id}` },
+            apiKey
+          );
           break;
 
-        case 'config-file':
+        case 'config-file': {
           const configPath = resolvedTomlFilePath;
           mkdirSync(join(homedir(), '.mango'), { recursive: true });
           let config: any = {};
@@ -289,8 +293,9 @@ export function createGeminiSecretService(dependencies: GeminiSecretServiceDepen
           config.gemini_api_keys[body.name] = apiKey;
           writeFileSync(configPath, stringifyToml(config));
           break;
+        }
 
-        case 'environment':
+        case 'environment': {
           const envPath = getEnvFilePath();
           const envVar = `GEMINI_API_KEY_${body.name.toUpperCase().replace(/[^A-Z0-9]/g, '_')}`;
           const envEntry = `
@@ -300,6 +305,7 @@ ${envVar}="${apiKey}"
           writeFileSync(envPath, currentContent + envEntry);
           process.env[envVar] = apiKey;
           break;
+        }
       }
 
       // Save metadata
@@ -319,13 +325,17 @@ ${envVar}="${apiKey}"
       await upsertMetadata(input);
 
       const status = await this.getGeminiSecretStatus(userId);
-      return status.connectors.find(c => c.id === id)!;
+      return status.connectors.find((c) => c.id === id)!;
     },
 
     /**
      * Updates the list of enabled models for a connector.
      */
-    async updateConnectorModels(userId: string, id: string, enabledModels: string[]): Promise<void> {
+    async updateConnectorModels(
+      userId: string,
+      id: string,
+      enabledModels: string[]
+    ): Promise<void> {
       const metadata = await getMetadataById(id, userId);
       if (!metadata) throw new Error('Connector not found');
 
@@ -387,15 +397,20 @@ ${envVar}="${apiKey}"
       }
 
       await deleteMetadata(id, userId);
-    }
+    },
   };
 }
 
 const geminiSecretService = createGeminiSecretService();
 
-export const getGeminiSecretStatus = geminiSecretService.getGeminiSecretStatus.bind(geminiSecretService);
-export const getResolvedGeminiApiKey = geminiSecretService.getResolvedGeminiApiKey.bind(geminiSecretService);
-export const validateGeminiApiKey = geminiSecretService.validateGeminiApiKey.bind(geminiSecretService);
+export const getGeminiSecretStatus =
+  geminiSecretService.getGeminiSecretStatus.bind(geminiSecretService);
+export const getResolvedGeminiApiKey =
+  geminiSecretService.getResolvedGeminiApiKey.bind(geminiSecretService);
+export const validateGeminiApiKey =
+  geminiSecretService.validateGeminiApiKey.bind(geminiSecretService);
 export const addGeminiConnector = geminiSecretService.addGeminiConnector.bind(geminiSecretService);
-export const updateConnectorModels = geminiSecretService.updateConnectorModels.bind(geminiSecretService);
-export const deleteGeminiConnector = geminiSecretService.deleteGeminiConnector.bind(geminiSecretService);
+export const updateConnectorModels =
+  geminiSecretService.updateConnectorModels.bind(geminiSecretService);
+export const deleteGeminiConnector =
+  geminiSecretService.deleteGeminiConnector.bind(geminiSecretService);

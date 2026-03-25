@@ -9,10 +9,5 @@ export const Route = createFileRoute('/_authenticated/settings/connectors')({
 function ConnectorsSettingsRoute() {
   const app = useApp();
 
-  return (
-    <ConnectorsSettings
-      modelCatalog={app.catalog}
-      reloadModelCatalog={app.refreshCatalog}
-    />
-  );
+  return <ConnectorsSettings modelCatalog={app.catalog} reloadModelCatalog={app.refreshCatalog} />;
 }

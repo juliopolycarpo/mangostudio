@@ -8,11 +8,7 @@ export const addUserOwnership: Migration = {
       .addColumn('userId', 'text', (col) => col.references('user.id').onDelete('cascade'))
       .execute();
 
-    await db.schema
-      .createIndex('chats_userId_idx')
-      .on('chats')
-      .column('userId')
-      .execute();
+    await db.schema.createIndex('chats_userId_idx').on('chats').column('userId').execute();
 
     // secret_metadata também precisa de userId
     // (cada usuário gerencia seus próprios connectors)

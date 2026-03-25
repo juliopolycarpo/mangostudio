@@ -16,9 +16,7 @@ function SettingsLayout() {
         <div className="p-3 bg-primary-container text-on-primary-container rounded-2xl">
           <Settings size={24} />
         </div>
-        <h1 className="text-3xl font-bold font-headline text-on-background">
-          {t.settings.title}
-        </h1>
+        <h1 className="text-3xl font-bold font-headline text-on-background">{t.settings.title}</h1>
       </div>
       <SettingsTabs />
       <Outlet />

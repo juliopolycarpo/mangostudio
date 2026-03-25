@@ -11,7 +11,7 @@ export default defineConfig({
       generatedRouteTree: './src/routeTree.gen.ts',
     }),
     react(),
-    tailwindcss()
+    tailwindcss(),
   ],
   resolve: {
     alias: {

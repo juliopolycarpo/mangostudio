@@ -66,85 +66,99 @@ export function useAppState() {
     async (chatId: string, model: string) => {
       const field = composerMode === 'chat' ? 'textModel' : 'imageModel';
       await chats.updateChatModel(chatId, field, model);
-    }, [chats, composerMode]
+    },
+    [chats, composerMode]
   );
 
   const handleSelectChat = useCallback(
     (chatId: string) => {
       chats.selectChat(chatId);
       void navigate({ to: '/' });
-    }, [chats, navigate]
+    },
+    [chats, navigate]
   );
 
   const handleUpdateChatTitle = useCallback(
     async (chatId: string, title: string) => {
       await chats.updateChatTitle(chatId, title);
-    }, [chats]
+    },
+    [chats]
   );
 
   const handleDeleteChat = useCallback(
     async (chatId: string) => {
       await chats.deleteChat(chatId);
-    }, [chats]
+    },
+    [chats]
   );
 
   const handleNavigate = useCallback(
     (page: 'chat' | 'gallery' | 'settings') => {
       const routes = { chat: '/', gallery: '/gallery', settings: '/settings' } as const;
       void navigate({ to: routes[page] });
-    }, [navigate]
+    },
+    [navigate]
   );
 
   // Helper for optimistic updates
-  const appendOptimisticMessages = useCallback((chatId: string, newMessages: Message[]) => {
-    queryClient.setQueryData(messageKeys.list(chatId), (oldData: any) => {
-      if (!oldData) return oldData;
-      const firstPage = oldData.pages[0];
-      const updatedFirstPage = {
-        ...firstPage,
-        messages: [...firstPage.messages, ...newMessages]
-      };
-      return {
-        ...oldData,
-        pages: [updatedFirstPage, ...oldData.pages.slice(1)]
-      };
-    });
-  }, [queryClient]);
-
-  const replaceOptimisticMessages = useCallback((chatId: string, oldIds: string[], newMessages: Message[]) => {
-    queryClient.setQueryData(messageKeys.list(chatId), (oldData: any) => {
-      if (!oldData) return oldData;
-      
-      const newPages = oldData.pages.map((page: any) => {
-        const filtered = page.messages.filter((m: Message) => !oldIds.includes(m.id));
+  const appendOptimisticMessages = useCallback(
+    (chatId: string, newMessages: Message[]) => {
+      queryClient.setQueryData(messageKeys.list(chatId), (oldData: any) => {
+        if (!oldData) return oldData;
+        const firstPage = oldData.pages[0];
+        const updatedFirstPage = {
+          ...firstPage,
+          messages: [...firstPage.messages, ...newMessages],
+        };
         return {
-          ...page,
-          messages: page === oldData.pages[0] ? [...filtered, ...newMessages] : filtered
+          ...oldData,
+          pages: [updatedFirstPage, ...oldData.pages.slice(1)],
         };
       });
+    },
+    [queryClient]
+  );
 
-      return {
-        ...oldData,
-        pages: newPages
-      };
-    });
-  }, [queryClient]);
+  const replaceOptimisticMessages = useCallback(
+    (chatId: string, oldIds: string[], newMessages: Message[]) => {
+      queryClient.setQueryData(messageKeys.list(chatId), (oldData: any) => {
+        if (!oldData) return oldData;
 
-  const updateOptimisticMessage = useCallback((chatId: string, msgId: string, updates: Partial<Message>) => {
-    queryClient.setQueryData(messageKeys.list(chatId), (oldData: any) => {
-      if (!oldData) return oldData;
-      
-      const newPages = oldData.pages.map((page: any) => ({
-        ...page,
-        messages: page.messages.map((m: Message) => m.id === msgId ? { ...m, ...updates } : m)
-      }));
+        const newPages = oldData.pages.map((page: any) => {
+          const filtered = page.messages.filter((m: Message) => !oldIds.includes(m.id));
+          return {
+            ...page,
+            messages: page === oldData.pages[0] ? [...filtered, ...newMessages] : filtered,
+          };
+        });
 
-      return {
-        ...oldData,
-        pages: newPages
-      };
-    });
-  }, [queryClient]);
+        return {
+          ...oldData,
+          pages: newPages,
+        };
+      });
+    },
+    [queryClient]
+  );
+
+  const updateOptimisticMessage = useCallback(
+    (chatId: string, msgId: string, updates: Partial<Message>) => {
+      queryClient.setQueryData(messageKeys.list(chatId), (oldData: any) => {
+        if (!oldData) return oldData;
+
+        const newPages = oldData.pages.map((page: any) => ({
+          ...page,
+          messages: page.messages.map((m: Message) => (m.id === msgId ? { ...m, ...updates } : m)),
+        }));
+
+        return {
+          ...oldData,
+          pages: newPages,
+        };
+      });
+    },
+    [queryClient]
+  );
 
   // Generation handlers
   const handleRespond = useCallback(
@@ -234,7 +248,15 @@ export function useAppState() {
         void queryClient.invalidateQueries({ queryKey: messageKeys.list(activeChatId!) });
       }
     },
-    [chats, getActiveModel, settings.globalTextSystemPrompt, appendOptimisticMessages, replaceOptimisticMessages, updateOptimisticMessage, queryClient]
+    [
+      chats,
+      getActiveModel,
+      settings.globalTextSystemPrompt,
+      appendOptimisticMessages,
+      replaceOptimisticMessages,
+      updateOptimisticMessage,
+      queryClient,
+    ]
   );
 
   const handleGenerate = useCallback(
@@ -254,7 +276,7 @@ export function useAppState() {
       // Upload reference image if provided as File
       let refImageUrl: string | null = null;
       let previewUrl: string | null = null;
-      
+
       if (referenceImage) {
         previewUrl = URL.createObjectURL(referenceImage);
         refImageUrl = await uploadReferenceImage(referenceImage);
@@ -341,7 +363,16 @@ export function useAppState() {
         void queryClient.invalidateQueries({ queryKey: galleryKeys.lists() });
       }
     },
-    [chats, getActiveModel, settings.globalImageSystemPrompt, settings.globalImageQuality, appendOptimisticMessages, replaceOptimisticMessages, updateOptimisticMessage, queryClient]
+    [
+      chats,
+      getActiveModel,
+      settings.globalImageSystemPrompt,
+      settings.globalImageQuality,
+      appendOptimisticMessages,
+      replaceOptimisticMessages,
+      updateOptimisticMessage,
+      queryClient,
+    ]
   );
 
   const handleSubmit = useCallback(
@@ -350,7 +381,8 @@ export function useAppState() {
         return handleRespond(prompt);
       }
       return handleGenerate(prompt, referenceImage);
-    }, [composerMode, handleRespond, handleGenerate]
+    },
+    [composerMode, handleRespond, handleGenerate]
   );
 
   // Initial data loading

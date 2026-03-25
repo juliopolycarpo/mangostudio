@@ -5,7 +5,11 @@ import { settingsRoutes } from '../../../src/routes/settings';
 import { clearGeminiModelCatalog } from '../../../src/services/gemini';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
 
-const TEST_USER = { id: 'test-user-integration', name: 'Test User', email: 'test@mangostudio.test' };
+const TEST_USER = {
+  id: 'test-user-integration',
+  name: 'Test User',
+  email: 'test@mangostudio.test',
+};
 
 let restoreAuth: (() => void) | null = null;
 

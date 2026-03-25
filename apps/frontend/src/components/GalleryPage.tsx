@@ -14,13 +14,7 @@ export function GalleryPage() {
   const loadMoreRef = useRef<HTMLDivElement>(null);
   const { t } = useI18n();
 
-  const {
-    data,
-    fetchNextPage,
-    hasNextPage,
-    isFetchingNextPage,
-    status
-  } = useGalleryQuery();
+  const { data, fetchNextPage, hasNextPage, isFetchingNextPage, status } = useGalleryQuery();
 
   const items = data?.pages.flatMap((page) => page.items) || [];
 
@@ -86,7 +80,9 @@ export function GalleryPage() {
                     className="p-2 bg-white/20 hover:bg-white/30 backdrop-blur-md rounded-lg text-white transition-colors flex-1 flex items-center justify-center gap-2"
                   >
                     <Maximize2 size={16} />
-                    <span className="text-xs font-bold uppercase tracking-wider">{t.gallery.view}</span>
+                    <span className="text-xs font-bold uppercase tracking-wider">
+                      {t.gallery.view}
+                    </span>
                   </button>
                   <a
                     href={item.imageUrl}
