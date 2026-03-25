@@ -36,6 +36,8 @@ interface GeminiSecretServiceDependencies {
   getMetadataById?: (id: string, userId: string) => Promise<SecretMetadataRow | null>;
   upsertMetadata?: (input: SecretMetadataInput) => Promise<void>;
   deleteMetadata?: (id: string, userId: string) => Promise<void>;
+  /** Override the TOML config file path (useful in tests to prevent real file reads). */
+  tomlFilePath?: string;
 }
 
 /** Error thrown when no active Gemini API key can be resolved. */
@@ -90,13 +92,14 @@ export function createGeminiSecretService(dependencies: GeminiSecretServiceDepen
   const getMetadataById = dependencies.getMetadataById ?? getSecretMetadataById;
   const upsertMetadata = dependencies.upsertMetadata ?? upsertSecretMetadata;
   const deleteMetadata = dependencies.deleteMetadata ?? deleteSecretMetadata;
+  const resolvedTomlFilePath = dependencies.tomlFilePath ?? getTomlFilePath();
 
   /**
    * Syncs connectors from config.toml into the metadata database.
    */
   const syncConfigFileConnectors = async (userId: string): Promise<void> => {
     try {
-      const configPath = getTomlFilePath();
+      const configPath = resolvedTomlFilePath;
       if (!existsSync(configPath)) return;
 
       const content = readFileSync(configPath, 'utf8');
@@ -173,7 +176,7 @@ export function createGeminiSecretService(dependencies: GeminiSecretServiceDepen
 
       case 'config-file':
         try {
-          const configPath = getTomlFilePath();
+          const configPath = resolvedTomlFilePath;
           if (existsSync(configPath)) {
             const content = readFileSync(configPath, 'utf8');
             const parsed = parseToml(content) as any;
@@ -276,7 +279,7 @@ export function createGeminiSecretService(dependencies: GeminiSecretServiceDepen
           break;
 
         case 'config-file':
-          const configPath = getTomlFilePath();
+          const configPath = resolvedTomlFilePath;
           mkdirSync(join(homedir(), '.mango'), { recursive: true });
           let config: any = {};
           if (existsSync(configPath)) {
@@ -354,7 +357,7 @@ ${envVar}="${apiKey}"
 
       if (metadata.source === 'config-file') {
         try {
-          const configPath = getTomlFilePath();
+          const configPath = resolvedTomlFilePath;
           if (existsSync(configPath)) {
             const config: any = parseToml(readFileSync(configPath, 'utf8'));
             if (config.gemini_api_keys) {
