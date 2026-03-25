@@ -1,0 +1,503 @@
+/* global fetch, console */
+import { useState, useEffect } from 'react';
+import type {
+  ApiErrorResponse,
+  Connector,
+  GeminiSecretStatus,
+  GeminiModelCatalogResponse,
+} from '@mangostudio/shared';
+import {
+  Plus,
+  Trash2,
+  Settings,
+  Eye,
+  EyeOff,
+  KeyRound,
+  LoaderCircle,
+  Database,
+  FileCode,
+  ShieldCheck,
+  CheckCircle2,
+  XCircle,
+} from 'lucide-react';
+import { Button } from '@/components/ui/Button';
+import { Input } from '@/components/ui/Input';
+import { Card } from '@/components/ui/Card';
+import { useToast } from '@/components/ui/Toast';
+import { useI18n } from '@/hooks/use-i18n';
+
+interface ConnectorsSettingsProps {
+  modelCatalog: GeminiModelCatalogResponse;
+  reloadModelCatalog: () => Promise<void>;
+}
+
+/**
+ * Connectors settings tab: add, delete, and configure Gemini API connectors.
+ * Uses design system components; replaces window.confirm with toast feedback.
+ */
+export function ConnectorsSettings({
+  modelCatalog,
+  reloadModelCatalog,
+}: ConnectorsSettingsProps) {
+  const { t } = useI18n();
+  const { toast } = useToast();
+  const s = t.settings.connectors;
+
+  const [geminiStatus, setGeminiStatus] = useState<GeminiSecretStatus | null>(null);
+  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [isModelsModalOpen, setIsModelsModalOpen] = useState(false);
+  const [selectedConnector, setSelectedConnector] = useState<Connector | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+
+  const [newConnector, setNewConnector] = useState({
+    name: '',
+    apiKey: '',
+    source: 'bun-secrets' as Connector['source'],
+  });
+  const [isSaving, setIsSaving] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [showKey, setShowKey] = useState(false);
+
+  const loadStatus = async () => {
+    try {
+      const response = await fetch('/api/settings/secrets/gemini');
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error((data as ApiErrorResponse).error || 'Failed to load status.');
+      }
+      setGeminiStatus(data);
+    } catch (error) {
+      console.error('[connectors] Failed to load Gemini secret status', error);
+    }
+  };
+
+  useEffect(() => {
+    void loadStatus();
+  }, []);
+
+  const handleAddConnector = async () => {
+    if (!newConnector.name.trim() || !newConnector.apiKey.trim()) {
+      setFormError(s.errorRequired);
+      return;
+    }
+
+    setIsSaving(true);
+    setFormError(null);
+
+    try {
+      const response = await fetch('/api/settings/connectors/gemini', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newConnector),
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error((data as ApiErrorResponse).error || 'Failed to add connector');
+      }
+
+      await loadStatus();
+      await reloadModelCatalog();
+      setIsAddModalOpen(false);
+      setNewConnector({ name: '', apiKey: '', source: 'bun-secrets' });
+      toast(s.addSuccess, 'success');
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : 'Unknown error');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleDeleteConnector = async (id: string) => {
+    try {
+      const response = await fetch(`/api/settings/connectors/gemini/${id}`, {
+        method: 'DELETE',
+      });
+
+      if (!response.ok) throw new Error('Failed to delete connector');
+
+      await loadStatus();
+      await reloadModelCatalog();
+      setConfirmDeleteId(null);
+      toast(s.deleteSuccess, 'success');
+    } catch (err) {
+      console.error(err);
+      toast('Failed to delete connector', 'error');
+    }
+  };
+
+  const handleUpdateModels = async (connectorId: string, enabledModels: string[]) => {
+    try {
+      const response = await fetch(`/api/settings/connectors/gemini/${connectorId}/models`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabledModels }),
+      });
+
+      if (!response.ok) throw new Error('Failed to update models');
+
+      await loadStatus();
+      await reloadModelCatalog();
+      toast(s.updateModelsSuccess, 'success');
+    } catch (err) {
+      console.error(err);
+      toast('Failed to update models', 'error');
+    }
+  };
+
+  const connectors = geminiStatus?.connectors || [];
+
+  const SOURCE_OPTIONS = [
+    {
+      id: 'bun-secrets' as const,
+      label: s.sources.bunSecrets,
+      icon: <ShieldCheck size={16} />,
+      desc: s.sources.bunSecretsDesc,
+    },
+    {
+      id: 'config-file' as const,
+      label: s.sources.configFile,
+      icon: <FileCode size={16} />,
+      desc: s.sources.configFileDesc,
+    },
+    {
+      id: 'environment' as const,
+      label: s.sources.envFile,
+      icon: <Database size={16} />,
+      desc: s.sources.envFileDesc,
+    },
+  ];
+
+  return (
+    <div className="space-y-4">
+      <Card variant="solid" className="p-6 space-y-4">
+        <div className="flex items-center justify-between">
+          <h2 className="text-xs uppercase tracking-widest font-bold text-on-surface-variant/80 font-label">
+            {s.title}
+          </h2>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => setIsAddModalOpen(true)}
+            className="gap-1.5"
+          >
+            <Plus size={14} />
+            {s.addButton}
+          </Button>
+        </div>
+
+        {connectors.length === 0 ? (
+          <div className="bg-surface-container-lowest border border-dashed border-outline-variant/30 rounded-2xl p-8 text-center space-y-4">
+            <div className="p-4 bg-surface-container-high rounded-full w-fit mx-auto text-on-surface-variant/40">
+              <KeyRound size={32} />
+            </div>
+            <div className="space-y-1">
+              <p className="text-on-surface font-bold">{s.emptyTitle}</p>
+              <p className="text-sm text-on-surface-variant/60">{s.emptyDescription}</p>
+            </div>
+            <Button variant="primary" onClick={() => setIsAddModalOpen(true)}>
+              {s.addConnectorButton}
+            </Button>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 gap-3">
+            {connectors.map((c) => (
+              <div
+                key={c.id}
+                className="bg-surface-container-lowest border border-outline-variant/10 rounded-2xl p-4 flex items-center justify-between gap-4"
+              >
+                <div className="flex items-center gap-4">
+                  <div className={`p-2.5 rounded-xl ${c.configured ? 'bg-primary/10 text-primary' : 'bg-red-500/10 text-red-300'}`}>
+                    {c.configured ? <CheckCircle2 size={20} /> : <XCircle size={20} />}
+                  </div>
+                  <div className="space-y-0.5">
+                    <h3 className="font-bold text-on-surface">{c.name}</h3>
+                    <div className="flex items-center gap-2 text-xs">
+                      <span className="flex items-center gap-1 text-on-surface-variant/60">
+                        {c.source === 'bun-secrets' && <ShieldCheck size={12} />}
+                        {c.source === 'config-file' && <FileCode size={12} />}
+                        {c.source === 'environment' && <Database size={12} />}
+                        {c.source.replace('-', ' ')}
+                      </span>
+                      <span className="text-outline-variant">•</span>
+                      <span className="font-mono text-on-surface-variant/60">****{c.maskedSuffix}</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      setSelectedConnector(c);
+                      setIsModelsModalOpen(true);
+                    }}
+                    title={s.configureModels}
+                    className="p-2"
+                  >
+                    <Settings size={18} />
+                  </Button>
+
+                  {confirmDeleteId === c.id ? (
+                    <div className="flex items-center gap-1">
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => setConfirmDeleteId(null)}
+                      >
+                        {s.cancelButton}
+                      </Button>
+                      <Button
+                        variant="primary"
+                        size="sm"
+                        onClick={() => handleDeleteConnector(c.id)}
+                        className="bg-red-500 hover:bg-red-400 shadow-red-500/20"
+                      >
+                        <Trash2 size={14} />
+                      </Button>
+                    </div>
+                  ) : (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setConfirmDeleteId(c.id)}
+                      title={s.deleteConnector}
+                      className="p-2 text-red-300 hover:text-red-400 hover:bg-red-500/10"
+                    >
+                      <Trash2 size={18} />
+                    </Button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+
+      {/* ── Add Connector Modal ── */}
+      {isAddModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-surface-container-high w-full max-w-md rounded-3xl p-8 shadow-2xl border border-outline-variant/20 space-y-6">
+            <div className="space-y-2">
+              <h3 className="text-xl font-bold text-on-surface">{s.addModalTitle}</h3>
+              <p className="text-sm text-on-surface-variant/70">{s.addModalDescription}</p>
+            </div>
+
+            <div className="space-y-4">
+              <Input
+                id="connector-name"
+                label={s.nameLabel}
+                type="text"
+                value={newConnector.name}
+                onChange={(e) => setNewConnector({ ...newConnector, name: e.target.value })}
+                placeholder={s.namePlaceholder}
+              />
+
+              <div className="flex flex-col gap-1.5">
+                <label htmlFor="connector-apikey" className="text-sm font-medium text-on-surface-variant">
+                  {s.apiKeyLabel}
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    id="connector-apikey"
+                    type={showKey ? 'text' : 'password'}
+                    value={newConnector.apiKey}
+                    onChange={(e) => setNewConnector({ ...newConnector, apiKey: e.target.value })}
+                    className="
+                      flex-1 rounded-xl px-4 py-2.5 text-sm
+                      bg-surface-container-high text-on-surface
+                      border border-outline-variant/20
+                      placeholder:text-on-surface/30
+                      focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/20
+                      transition-colors
+                    "
+                    placeholder={s.apiKeyPlaceholder}
+                  />
+                  <Button
+                    variant="secondary"
+                    size="md"
+                    onClick={() => setShowKey(!showKey)}
+                    className="px-3"
+                    type="button"
+                  >
+                    {showKey ? <EyeOff size={18} /> : <Eye size={18} />}
+                  </Button>
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <label className="text-xs font-bold text-on-surface-variant uppercase ml-1">
+                  {s.saveToLabel}
+                </label>
+                <div className="grid grid-cols-1 gap-2">
+                  {SOURCE_OPTIONS.map((src) => (
+                    <button
+                      key={src.id}
+                      type="button"
+                      onClick={() => setNewConnector({ ...newConnector, source: src.id })}
+                      className={`flex items-start gap-4 p-4 rounded-2xl border text-left transition-all ${
+                        newConnector.source === src.id
+                          ? 'bg-primary/10 border-primary text-primary'
+                          : 'bg-surface-container-lowest border-outline-variant/10 text-on-surface hover:border-outline-variant/30'
+                      }`}
+                    >
+                      <div className="mt-1">{src.icon}</div>
+                      <div className="space-y-0.5">
+                        <div className="text-sm font-bold">{src.label}</div>
+                        <div className={`text-[10px] ${newConnector.source === src.id ? 'text-primary/70' : 'text-on-surface-variant/60'}`}>
+                          {src.desc}
+                        </div>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {formError && (
+              <p className="text-xs text-red-400 font-medium text-center">{formError}</p>
+            )}
+
+            <div className="flex gap-3">
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  setIsAddModalOpen(false);
+                  setFormError(null);
+                }}
+                className="flex-1"
+              >
+                {s.cancelButton}
+              </Button>
+              <Button
+                variant="primary"
+                onClick={handleAddConnector}
+                loading={isSaving}
+                disabled={isSaving}
+                className="flex-1"
+              >
+                {isSaving ? (
+                  <>
+                    <LoaderCircle size={16} className="animate-spin" />
+                    {s.validating}
+                  </>
+                ) : (
+                  s.addConnectorButton
+                )}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Models Selection Modal ── */}
+      {isModelsModalOpen && selectedConnector && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-surface-container-high w-full max-w-lg rounded-3xl p-8 shadow-2xl border border-outline-variant/20 flex flex-col max-h-[80vh]">
+            <div className="space-y-2 mb-6">
+              <h3 className="text-xl font-bold text-on-surface">{s.modelsModalTitle}</h3>
+              <p className="text-sm text-on-surface-variant/70">
+                {s.modelsModalDescription}{' '}
+                <span className="text-primary font-bold">{selectedConnector.name}</span>{' '}
+                {s.modelsModalDescriptionSuffix}
+              </p>
+            </div>
+
+            <div className="flex-1 overflow-y-auto pr-2 space-y-6 hide-scrollbar">
+              <div className="space-y-3">
+                <h4 className="text-[10px] uppercase tracking-widest font-bold text-on-surface-variant/60">
+                  {s.textModelsLabel}
+                </h4>
+                <div className="grid grid-cols-1 gap-2">
+                  {modelCatalog.discoveredTextModels.map((m) => {
+                    const isEnabled = selectedConnector.enabledModels.includes(m.modelId);
+                    return (
+                      <label
+                        key={m.modelId}
+                        className={`flex items-center gap-4 p-4 rounded-xl border cursor-pointer transition-all ${
+                          isEnabled
+                            ? 'bg-primary/10 border-primary/30'
+                            : 'bg-surface-container-lowest border-outline-variant/10 hover:border-outline-variant/30'
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={isEnabled}
+                          onChange={(e) => {
+                            const next = e.target.checked
+                              ? [...selectedConnector.enabledModels, m.modelId]
+                              : selectedConnector.enabledModels.filter((id) => id !== m.modelId);
+                            const updated = { ...selectedConnector, enabledModels: next };
+                            setSelectedConnector(updated);
+                            void handleUpdateModels(selectedConnector.id, next);
+                          }}
+                          className="w-5 h-5 rounded border-outline-variant text-primary focus:ring-primary bg-surface-container-lowest"
+                        />
+                        <div className="space-y-0.5">
+                          <div className={`text-sm font-bold ${isEnabled ? 'text-primary' : 'text-on-surface'}`}>
+                            {m.displayName}
+                          </div>
+                          <div className="text-[10px] font-mono text-on-surface-variant/60">{m.modelId}</div>
+                        </div>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <h4 className="text-[10px] uppercase tracking-widest font-bold text-on-surface-variant/60">
+                  {s.imageModelsLabel}
+                </h4>
+                <div className="grid grid-cols-1 gap-2">
+                  {modelCatalog.discoveredImageModels.map((m) => {
+                    const isEnabled = selectedConnector.enabledModels.includes(m.modelId);
+                    return (
+                      <label
+                        key={m.modelId}
+                        className={`flex items-center gap-4 p-4 rounded-xl border cursor-pointer transition-all ${
+                          isEnabled
+                            ? 'bg-primary/10 border-primary/30'
+                            : 'bg-surface-container-lowest border-outline-variant/10 hover:border-outline-variant/30'
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={isEnabled}
+                          onChange={(e) => {
+                            const next = e.target.checked
+                              ? [...selectedConnector.enabledModels, m.modelId]
+                              : selectedConnector.enabledModels.filter((id) => id !== m.modelId);
+                            const updated = { ...selectedConnector, enabledModels: next };
+                            setSelectedConnector(updated);
+                            void handleUpdateModels(selectedConnector.id, next);
+                          }}
+                          className="w-5 h-5 rounded border-outline-variant text-primary focus:ring-primary bg-surface-container-lowest"
+                        />
+                        <div className="space-y-0.5">
+                          <div className={`text-sm font-bold ${isEnabled ? 'text-primary' : 'text-on-surface'}`}>
+                            {m.displayName}
+                          </div>
+                          <div className="text-[10px] font-mono text-on-surface-variant/60">{m.modelId}</div>
+                        </div>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+
+            <Button
+              variant="primary"
+              onClick={() => setIsModelsModalOpen(false)}
+              className="mt-8 w-full py-4"
+            >
+              {s.doneButton}
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

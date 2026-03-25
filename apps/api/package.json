@@ -1,0 +1,38 @@
+{
+  "name": "@mangostudio/api",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "main": "./src/app.ts",
+  "types": "./src/app.ts",
+  "scripts": {
+    "dev": "bun --env-file=../../.env --env-file=../../.env.local run --watch src/index.ts",
+    "start": "bun --env-file=../../.env --env-file=../../.env.local run src/index.ts",
+    "build": "bun build src/index.ts --target=bun --outdir=dist",
+    "lint": "eslint src --ext .ts --max-warnings 0 && tsc --noEmit",
+    "format": "prettier --write 'src/**/*.{ts,json}'",
+    "migrate": "bun --env-file=../../.env --env-file=../../.env.local run src/db/migrate.ts",
+    "test": "bun run test:unit && bun run test:integration",
+    "test:unit": "bun test tests/unit",
+    "test:integration": "bun test tests/integration"
+  },
+  "dependencies": {
+    "@elysiajs/cors": "^1.4.1",
+    "@elysiajs/openapi": "^1.4.14",
+    "@elysiajs/static": "^1.2.0",
+    "@google/genai": "^1.46.0",
+    "@mangostudio/shared": "workspace:*",
+    "better-auth": "^1.5.6",
+    "elysia": "^1.2.25",
+    "file-type": "^21.3.4",
+    "kysely": "^0.27.6",
+    "kysely-bun-sqlite": "^0.3.2",
+    "smol-toml": "^1.6.1"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.2.0",
+    "@vitest/ui": "^4.1.1",
+    "typescript": "~5.8.2",
+    "vitest": "^4.1.1"
+  }
+}

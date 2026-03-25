@@ -1,0 +1,16 @@
+# MangoStudio Configuration Example
+# Copy this file to ~/.mango/config.toml to manage your connectors.
+
+# Connectors defined here will automatically appear in the Settings UI.
+# You can enable/disable specific models for each connector in the UI.
+[gemini_api_keys]
+personal = "AIzaSy..."
+work = "AIzaSy..."
+experiment = "AIzaSy..."
+
+# The resolution hierarchy for a requested model is:
+# 1. OS Secret Store (Secure Storage)
+# 2. Environment Variables (.env / process.env)
+# 3. This config file (~/.mango/config.toml)
+#
+# MangoStudio will use the first valid key that has the requested model enabled.
