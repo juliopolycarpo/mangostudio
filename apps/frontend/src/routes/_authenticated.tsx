@@ -1,4 +1,4 @@
-import { createFileRoute, redirect, Outlet, useRouterState } from '@tanstack/react-router';
+import { createFileRoute, redirect, Outlet, useRouterState, useNavigate } from '@tanstack/react-router';
 import { useEffect, Suspense } from 'react';
 import { Spinner } from '@/components/ui/Spinner';
 import { Layout } from '@/components/layout/Layout';
@@ -19,9 +19,16 @@ export const Route = createFileRoute('/_authenticated')({
 });
 
 function AuthenticatedLayout() {
+  const { auth } = Route.useRouteContext();
+  const navigate = useNavigate();
   const app = useAppState();
   const routerState = useRouterState();
   const currentPath = routerState.location.pathname;
+
+  if (!auth.isAuthenticated) {
+    void navigate({ to: '/login' });
+    return null;
+  }
 
   let activePage: 'chat' | 'gallery' | 'settings' = 'chat';
   if (currentPath.includes('/gallery')) activePage = 'gallery';
