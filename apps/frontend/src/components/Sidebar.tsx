@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { MessageSquare, LayoutGrid, Settings, Plus, Pencil, Trash2 } from 'lucide-react';
 import type { Chat } from '@mangostudio/shared';
-import { useToast } from '@/components/ui/Toast';
+import { useToast } from '@/components/ui';
 import { useI18n } from '@/hooks/use-i18n';
 
 interface Props {
