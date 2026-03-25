@@ -6,7 +6,7 @@ const LOCALE_STORAGE_KEY = 'mangostudio:locale';
 
 const locales: Record<Locale, Messages> = {
   'pt-BR': ptBR,
-  'en': en,
+  en: en,
 };
 
 function detectLocale(): Locale {
@@ -33,11 +33,7 @@ export function I18nProvider({ children }: { children: ReactNode }) {
     localStorage.setItem(LOCALE_STORAGE_KEY, newLocale);
   }, []);
 
-  return (
-    <I18nContext.Provider value={{ t, locale, setLocale }}>
-      {children}
-    </I18nContext.Provider>
-  );
+  return <I18nContext.Provider value={{ t, locale, setLocale }}>{children}</I18nContext.Provider>;
 }
 
 export function useI18n(): I18nContextValue {

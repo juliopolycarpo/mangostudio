@@ -60,9 +60,7 @@ export function Header({
           activeModels={activeModels}
           isDisabled={isModelSelectorDisabled}
           onSelect={(modelId) =>
-            currentChatId
-              ? onUpdateChatModel(currentChatId, modelId)
-              : onSetPageModel(modelId)
+            currentChatId ? onUpdateChatModel(currentChatId, modelId) : onSetPageModel(modelId)
           }
           geminiModelCatalog={geminiModelCatalog}
         />

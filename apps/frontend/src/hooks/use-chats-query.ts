@@ -15,7 +15,7 @@ export function useChatsQuery() {
     queryKey: chatKeys.lists(),
     queryFn: async () => {
       const { data, error } = await client.api.chats.get();
-      if (error) throw new Error(error.value as string);
+      if (error) throw new Error(error.value as unknown as string);
       return data as Chat[];
     },
   });
@@ -26,11 +26,11 @@ export function useCreateChatMutation() {
   return useMutation({
     mutationFn: async (newChat: Chat) => {
       const { data, error } = await client.api.chats.post(newChat);
-      if (error) throw new Error(error.value as string);
+      if (error) throw new Error(error.value as unknown as string);
       return data;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: chatKeys.lists() });
+      void queryClient.invalidateQueries({ queryKey: chatKeys.lists() });
     },
   });
 }
@@ -40,12 +40,12 @@ export function useUpdateChatMutation() {
   return useMutation({
     mutationFn: async ({ id, updates }: { id: string; updates: Partial<Chat> }) => {
       const { data, error } = await client.api.chats[id].put(updates);
-      if (error) throw new Error(error.value as string);
+      if (error) throw new Error(error.value as unknown as string);
       return data;
     },
     onSuccess: (_, variables) => {
-      queryClient.invalidateQueries({ queryKey: chatKeys.lists() });
-      queryClient.invalidateQueries({ queryKey: chatKeys.detail(variables.id) });
+      void queryClient.invalidateQueries({ queryKey: chatKeys.lists() });
+      void queryClient.invalidateQueries({ queryKey: chatKeys.detail(variables.id) });
     },
   });
 }
@@ -55,11 +55,11 @@ export function useDeleteChatMutation() {
   return useMutation({
     mutationFn: async (id: string) => {
       const { data, error } = await client.api.chats[id].delete();
-      if (error) throw new Error(error.value as string);
+      if (error) throw new Error(error.value as unknown as string);
       return data;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: chatKeys.lists() });
+      void queryClient.invalidateQueries({ queryKey: chatKeys.lists() });
     },
   });
 }

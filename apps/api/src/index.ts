@@ -23,13 +23,14 @@ const PORT = Number(process.env.API_PORT) || 3001;
 const FRONTEND_DIR = getDefaultFrontendDir();
 
 // Check if frontend directory exists
-let frontendExists = false;
-try {
-  frontendExists = existsSync(FRONTEND_DIR) && existsSync(join(FRONTEND_DIR, 'index.html'));
-} catch (error) {
-  frontendExists = false;
-  console.warn('[frontend] Failed to inspect frontend directory:', error);
-}
+const frontendExists = (() => {
+  try {
+    return existsSync(FRONTEND_DIR) && existsSync(join(FRONTEND_DIR, 'index.html'));
+  } catch (error) {
+    console.warn('[frontend] Failed to inspect frontend directory:', error);
+    return false;
+  }
+})();
 
 console.log(
   frontendExists
@@ -107,7 +108,7 @@ if (frontendExists) {
           });
         }
       } catch {
-         // Proceed to 404
+        // Proceed to 404
       }
       return new Response('Not Found', { status: 404 });
     });

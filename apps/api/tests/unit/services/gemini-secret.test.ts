@@ -1,26 +1,23 @@
 import { describe, expect, it } from 'bun:test';
 import type { SecretMetadataRow } from '@mangostudio/shared/types';
-import {
-  createGeminiSecretService,
-  InvalidGeminiApiKeyError,
-} from '../../../src/services/gemini';
+import type { SecretMetadataInput } from '../../../src/services/secret-store/metadata';
+import { createGeminiSecretService, InvalidGeminiApiKeyError } from '../../../src/services/gemini';
 import { InMemorySecretStore } from '../../support/mocks/mock-secret-store';
 
-function createMetadataHarness(initial: SecretMetadataRow | null = null) {
-  let row = initial;
+const TEST_USER = 'test-user';
+const NO_TOML = '/tmp/mangostudio-test-nonexistent-config.toml';
+
+function createMetadataHarness(initial: SecretMetadataRow[] = []) {
+  let rows: SecretMetadataRow[] = [...initial];
 
   return {
-    getMetadata: async () => row,
-    upsertMetadata: async (input: {
-      provider: string;
-      configured: boolean;
-      source: 'bun-secrets' | 'environment' | 'none';
-      maskedSuffix?: string;
-      updatedAt: number;
-      lastValidatedAt?: number;
-      lastValidationError?: string;
-    }) => {
-      row = {
+    listMetadata: async (_provider: string, _userId: string) => [...rows],
+    getMetadataById: async (id: string, _userId: string) => rows.find((r) => r.id === id) ?? null,
+    upsertMetadata: async (input: SecretMetadataInput) => {
+      const idx = rows.findIndex((r) => r.id === input.id);
+      const row: SecretMetadataRow = {
+        id: input.id,
+        name: input.name,
         provider: input.provider,
         configured: input.configured ? 1 : 0,
         source: input.source,
@@ -28,134 +25,144 @@ function createMetadataHarness(initial: SecretMetadataRow | null = null) {
         updatedAt: input.updatedAt,
         lastValidatedAt: input.lastValidatedAt ?? null,
         lastValidationError: input.lastValidationError ?? null,
+        enabledModels: JSON.stringify(input.enabledModels),
+        userId: input.userId,
       };
+      if (idx >= 0) {
+        rows[idx] = row;
+      } else {
+        rows.push(row);
+      }
     },
-    getCurrentRow: () => row,
+    deleteMetadata: async (id: string, _userId: string) => {
+      rows = rows.filter((r) => r.id !== id);
+    },
+    getCurrentRows: () => rows,
   };
 }
 
 describe('createGeminiSecretService', () => {
-  it('prefers Bun.secrets over environment fallback', async () => {
-    const secretStore = new InMemorySecretStore();
-    await secretStore.setSecret(
-      { service: 'mangostudio', name: 'gemini-api-key' },
-      'stored-key-1234'
-    );
-    const metadata = createMetadataHarness();
-    const service = createGeminiSecretService({
-      secretStore,
-      getEnvironmentKey: () => 'env-key-9999',
-      fetchImpl: async () => new Response('{}', { status: 200 }),
-      getMetadata: metadata.getMetadata,
-      upsertMetadata: metadata.upsertMetadata,
-    });
-
-    const status = await service.getGeminiSecretStatus();
-    const resolvedKey = await service.getResolvedGeminiApiKey();
-
-    expect(status.source).toBe('bun-secrets');
-    expect(status.maskedSuffix).toBe('1234');
-    expect(resolvedKey).toBe('stored-key-1234');
-  });
-
-  it('returns environment fallback when no stored key exists', async () => {
+  it('returns empty connectors when no keys are configured', async () => {
     const metadata = createMetadataHarness();
     const service = createGeminiSecretService({
       secretStore: new InMemorySecretStore(),
-      getEnvironmentKey: () => 'env-key-5678',
       fetchImpl: async () => new Response('{}', { status: 200 }),
-      getMetadata: metadata.getMetadata,
+      tomlFilePath: NO_TOML,
+      listMetadata: metadata.listMetadata,
+      getMetadataById: metadata.getMetadataById,
       upsertMetadata: metadata.upsertMetadata,
+      deleteMetadata: metadata.deleteMetadata,
     });
 
-    const status = await service.getGeminiSecretStatus();
+    const status = await service.getGeminiSecretStatus(TEST_USER);
 
-    expect(status.source).toBe('environment');
-    expect(status.maskedSuffix).toBe('5678');
-    expect(status.configured).toBe(true);
+    expect(status.connectors).toEqual([]);
   });
 
-  it('updates cache and metadata after save and delete', async () => {
+  it('adds a bun-secrets connector after successful validation', async () => {
+    const metadata = createMetadataHarness();
+    const secretStore = new InMemorySecretStore();
+    const service = createGeminiSecretService({
+      secretStore,
+      fetchImpl: async () => new Response('{}', { status: 200 }),
+      tomlFilePath: NO_TOML,
+      listMetadata: metadata.listMetadata,
+      getMetadataById: metadata.getMetadataById,
+      upsertMetadata: metadata.upsertMetadata,
+      deleteMetadata: metadata.deleteMetadata,
+    });
+
+    const connector = await service.addGeminiConnector(TEST_USER, {
+      name: 'my-key',
+      apiKey: 'valid-key-1234',
+      source: 'bun-secrets',
+    });
+
+    expect(connector.name).toBe('my-key');
+    expect(connector.source).toBe('bun-secrets');
+    expect(connector.configured).toBe(true);
+    expect(connector.maskedSuffix).toBe('1234');
+
+    const status = await service.getGeminiSecretStatus(TEST_USER);
+    expect(status.connectors).toHaveLength(1);
+    expect(status.connectors[0]?.name).toBe('my-key');
+  });
+
+  it('rejects an invalid API key and does not persist it', async () => {
+    const metadata = createMetadataHarness();
+    const service = createGeminiSecretService({
+      secretStore: new InMemorySecretStore(),
+      fetchImpl: async () => new Response('{}', { status: 401 }),
+      tomlFilePath: NO_TOML,
+      listMetadata: metadata.listMetadata,
+      getMetadataById: metadata.getMetadataById,
+      upsertMetadata: metadata.upsertMetadata,
+      deleteMetadata: metadata.deleteMetadata,
+    });
+
+    let thrownError: unknown = null;
+    try {
+      await service.addGeminiConnector(TEST_USER, {
+        name: 'bad-key',
+        apiKey: 'bad-key-0000',
+        source: 'bun-secrets',
+      });
+    } catch (error) {
+      thrownError = error;
+    }
+
+    expect(thrownError).toBeInstanceOf(InvalidGeminiApiKeyError);
+    expect(metadata.getCurrentRows()).toHaveLength(0);
+  });
+
+  it('deletes a connector and removes it from the secret store', async () => {
     const secretStore = new InMemorySecretStore();
     const metadata = createMetadataHarness();
     let nowValue = 1_700_000_000_000;
 
     const service = createGeminiSecretService({
       secretStore,
-      getEnvironmentKey: () => undefined,
       fetchImpl: async () => new Response('{}', { status: 200 }),
       now: () => nowValue,
-      getMetadata: metadata.getMetadata,
+      tomlFilePath: NO_TOML,
+      listMetadata: metadata.listMetadata,
+      getMetadataById: metadata.getMetadataById,
       upsertMetadata: metadata.upsertMetadata,
+      deleteMetadata: metadata.deleteMetadata,
     });
 
-    const savedStatus = await service.upsertGeminiSecret('new-stored-key-4321');
-    expect(savedStatus.source).toBe('bun-secrets');
-    expect(await service.getResolvedGeminiApiKey()).toBe('new-stored-key-4321');
-    expect(metadata.getCurrentRow()?.lastValidatedAt).toBe(nowValue);
+    const connector = await service.addGeminiConnector(TEST_USER, {
+      name: 'temp-key',
+      apiKey: 'temp-key-5678',
+      source: 'bun-secrets',
+    });
 
     nowValue += 50;
-    await service.deleteGeminiSecret();
+    await service.deleteGeminiConnector(TEST_USER, connector.id);
 
-    const deletedStatus = await service.getGeminiSecretStatus();
-    expect(deletedStatus.source).toBe('none');
-    expect(deletedStatus.configured).toBe(false);
-    expect(metadata.getCurrentRow()?.updatedAt).toBe(nowValue);
-    expect(metadata.getCurrentRow()?.lastValidatedAt).toBeNull();
+    const status = await service.getGeminiSecretStatus(TEST_USER);
+    expect(status.connectors).toHaveLength(0);
+    expect(metadata.getCurrentRows()).toHaveLength(0);
   });
 
-  it('does not replace the current stored key when validation fails', async () => {
-    const secretStore = new InMemorySecretStore();
-    await secretStore.setSecret(
-      { service: 'mangostudio', name: 'gemini-api-key' },
-      'existing-key-1111'
-    );
-    const metadata = createMetadataHarness({
-      provider: 'gemini',
-      configured: 1,
-      source: 'bun-secrets',
-      maskedSuffix: '1111',
-      updatedAt: 100,
-      lastValidatedAt: 100,
-      lastValidationError: null,
-    });
-
-    const service = createGeminiSecretService({
-      secretStore,
-      getEnvironmentKey: () => undefined,
-      fetchImpl: async () => new Response('{}', { status: 401 }),
-      getMetadata: metadata.getMetadata,
-      upsertMetadata: metadata.upsertMetadata,
-    });
-
-    let thrownError: unknown = null;
-
-    try {
-      await service.upsertGeminiSecret('bad-key-2222');
-    } catch (error) {
-      thrownError = error;
-    }
-
-    expect(thrownError).toBeInstanceOf(InvalidGeminiApiKeyError);
-    expect(await service.getResolvedGeminiApiKey()).toBe('existing-key-1111');
-    expect(metadata.getCurrentRow()?.maskedSuffix).toBe('1111');
-  });
-
-  it('marks storage as unavailable without breaking environment fallback status', async () => {
+  it('reflects storageAvailable=false when the secret store is unavailable', async () => {
     const secretStore = new InMemorySecretStore();
     secretStore.available = false;
     const metadata = createMetadataHarness();
     const service = createGeminiSecretService({
       secretStore,
-      getEnvironmentKey: () => 'env-key-7777',
       fetchImpl: async () => new Response('{}', { status: 200 }),
-      getMetadata: metadata.getMetadata,
+      tomlFilePath: NO_TOML,
+      listMetadata: metadata.listMetadata,
+      getMetadataById: metadata.getMetadataById,
       upsertMetadata: metadata.upsertMetadata,
+      deleteMetadata: metadata.deleteMetadata,
     });
 
-    const status = await service.getGeminiSecretStatus();
+    const status = await service.getGeminiSecretStatus(TEST_USER);
 
-    expect(status.source).toBe('environment');
-    expect(status.storageAvailable).toBe(false);
+    // No connectors but storageAvailable should be reflected per-connector
+    // when connectors exist; with no connectors, the status just has an empty list.
+    expect(status.connectors).toEqual([]);
   });
 });

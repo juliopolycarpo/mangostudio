@@ -1,4 +1,4 @@
-import { useQuery, useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { client } from '../lib/api-client';
 import type { Message } from '@mangostudio/shared';
 
@@ -14,7 +14,7 @@ export function useMessagesQuery(chatId: string | null) {
     queryFn: async ({ pageParam }) => {
       const query = pageParam ? { cursor: pageParam, limit: '50' } : { limit: '50' };
       const { data, error } = await client.api.chats[chatId!].messages.get({ query });
-      if (error) throw new Error(error.value as string);
+      if (error) throw new Error(error.value as unknown as string);
       return data as { messages: Message[]; nextCursor: string | null };
     },
     initialPageParam: null as string | null,
@@ -28,13 +28,13 @@ export function useCreateMessageMutation() {
   return useMutation({
     mutationFn: async (newMessage: Message) => {
       const { data, error } = await client.api.messages.post(newMessage);
-      if (error) throw new Error(error.value as string);
+      if (error) throw new Error(error.value as unknown as string);
       return data;
     },
     onSuccess: (_, variables) => {
-      queryClient.invalidateQueries({ queryKey: messageKeys.list(variables.chatId) });
+      void queryClient.invalidateQueries({ queryKey: messageKeys.list(variables.chatId) });
       // Also invalidate chats to update the 'updatedAt' field
-      queryClient.invalidateQueries({ queryKey: ['chats'] });
+      void queryClient.invalidateQueries({ queryKey: ['chats'] });
     },
   });
 }
@@ -42,13 +42,21 @@ export function useCreateMessageMutation() {
 export function useUpdateMessageMutation() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async ({ id, chatId, updates }: { id: string; chatId: string; updates: Partial<Message> }) => {
+    mutationFn: async ({
+      id,
+      chatId: _chatId,
+      updates,
+    }: {
+      id: string;
+      chatId: string;
+      updates: Partial<Message>;
+    }) => {
       const { data, error } = await client.api.messages[id].put(updates);
-      if (error) throw new Error(error.value as string);
+      if (error) throw new Error(error.value as unknown as string);
       return data;
     },
     onSuccess: (_, variables) => {
-      queryClient.invalidateQueries({ queryKey: messageKeys.list(variables.chatId) });
+      void queryClient.invalidateQueries({ queryKey: messageKeys.list(variables.chatId) });
     },
   });
 }

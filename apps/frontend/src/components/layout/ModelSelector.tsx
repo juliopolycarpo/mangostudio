@@ -58,18 +58,21 @@ export function ModelSelector({
   const displayedModels = activeModels;
 
   // Group models by major family
-  const families = displayedModels.reduce((acc, model) => {
-    let family = 'Other';
-    if (model.displayName.toLowerCase().includes('gemini 3.1')) family = 'Gemini 3.1';
-    else if (model.displayName.toLowerCase().includes('gemini 3')) family = 'Gemini 3';
-    else if (model.displayName.toLowerCase().includes('gemini 2.5')) family = 'Gemini 2.5';
-    else if (model.displayName.toLowerCase().includes('gemini 2.0')) family = 'Gemini 2.0';
-    else if (model.displayName.toLowerCase().includes('gemini')) family = 'Gemini';
+  const families = displayedModels.reduce(
+    (acc, model) => {
+      let family = 'Other';
+      if (model.displayName.toLowerCase().includes('gemini 3.1')) family = 'Gemini 3.1';
+      else if (model.displayName.toLowerCase().includes('gemini 3')) family = 'Gemini 3';
+      else if (model.displayName.toLowerCase().includes('gemini 2.5')) family = 'Gemini 2.5';
+      else if (model.displayName.toLowerCase().includes('gemini 2.0')) family = 'Gemini 2.0';
+      else if (model.displayName.toLowerCase().includes('gemini')) family = 'Gemini';
 
-    if (!acc[family]) acc[family] = [];
-    acc[family].push(model);
-    return acc;
-  }, {} as Record<string, GeminiModelOption[]>);
+      if (!acc[family]) acc[family] = [];
+      acc[family].push(model);
+      return acc;
+    },
+    {} as Record<string, GeminiModelOption[]>
+  );
 
   const getModelIcon = (name: string) => {
     const low = name.toLowerCase();
@@ -138,10 +141,14 @@ export function ModelSelector({
                             {getModelIcon(model.displayName)}
                           </div>
                           <div>
-                            <div className={cn(
-                              'text-sm font-medium transition-colors',
-                              activeModel === model.modelId ? 'text-primary' : 'text-on-surface group-hover/item:text-on-surface'
-                            )}>
+                            <div
+                              className={cn(
+                                'text-sm font-medium transition-colors',
+                                activeModel === model.modelId
+                                  ? 'text-primary'
+                                  : 'text-on-surface group-hover/item:text-on-surface'
+                              )}
+                            >
                               {model.displayName}
                             </div>
                             {model.modelId.includes('preview') && (

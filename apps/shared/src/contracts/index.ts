@@ -81,7 +81,10 @@ export interface GenerateTextResponse {
 }
 
 /** Represents a validated and configured API connector. */
-export interface Connector extends Omit<SecretMetadataRow, 'configured' | 'enabledModels' | 'provider'> {
+export interface Connector extends Omit<
+  SecretMetadataRow,
+  'configured' | 'enabledModels' | 'provider'
+> {
   provider: 'gemini';
   configured: boolean;
   enabledModels: string[];
@@ -180,4 +183,3 @@ export interface AuthErrorResponse {
   code?: string;
   message: string;
 }
-

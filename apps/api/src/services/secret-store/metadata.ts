@@ -30,7 +30,10 @@ export interface SecretMetadataInput {
  * @param userId - User ID to filter by.
  * @returns List of stored connector metadata rows.
  */
-export async function listSecretMetadata(provider: string, userId: string): Promise<SecretMetadataRow[]> {
+export async function listSecretMetadata(
+  provider: string,
+  userId: string
+): Promise<SecretMetadataRow[]> {
   const db = getDb();
   return db
     .selectFrom('secret_metadata')
@@ -47,7 +50,10 @@ export async function listSecretMetadata(provider: string, userId: string): Prom
  * @param userId - User ID.
  * @returns The stored metadata row or null.
  */
-export async function getSecretMetadataById(id: string, userId: string): Promise<SecretMetadataRow | null> {
+export async function getSecretMetadataById(
+  id: string,
+  userId: string
+): Promise<SecretMetadataRow | null> {
   const db = getDb();
   const row = await db
     .selectFrom('secret_metadata')
@@ -104,5 +110,9 @@ export async function upsertSecretMetadata(input: SecretMetadataInput): Promise<
  */
 export async function deleteSecretMetadata(id: string, userId: string): Promise<void> {
   const db = getDb();
-  await db.deleteFrom('secret_metadata').where('id', '=', id).where('userId', '=', userId).execute();
+  await db
+    .deleteFrom('secret_metadata')
+    .where('id', '=', id)
+    .where('userId', '=', userId)
+    .execute();
 }

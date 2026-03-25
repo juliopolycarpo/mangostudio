@@ -52,7 +52,8 @@ export const messages = {
       textPromptLabel: 'System Prompt de Texto Padrão',
       textPromptPlaceholder: 'ex. Você é um parceiro criativo útil. Seja conciso e perspicaz...',
       imagePromptLabel: 'System Prompt de Imagem Padrão',
-      imagePromptPlaceholder: 'ex. Sempre gere imagens em estilo cinemático com iluminação dramática...',
+      imagePromptPlaceholder:
+        'ex. Sempre gere imagens em estilo cinemático com iluminação dramática...',
       imageQualityLabel: 'Qualidade de Imagem Padrão',
     },
     connectors: {

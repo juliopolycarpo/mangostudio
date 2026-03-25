@@ -62,7 +62,13 @@ function AuthenticatedLayout() {
         />
 
         <div className="flex-1 overflow-y-auto">
-          <Suspense fallback={<div className="flex items-center justify-center h-full"><Spinner size="lg" /></div>}>
+          <Suspense
+            fallback={
+              <div className="flex items-center justify-center h-full">
+                <Spinner size="lg" />
+              </div>
+            }
+          >
             <Outlet />
           </Suspense>
         </div>

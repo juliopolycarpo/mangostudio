@@ -1,11 +1,15 @@
-/* global console */
 import { useState, useCallback, useEffect } from 'react';
 import type { Chat } from '@mangostudio/shared';
-import { useChatsQuery, useCreateChatMutation, useUpdateChatMutation, useDeleteChatMutation } from './use-chats-query';
+import {
+  useChatsQuery,
+  useCreateChatMutation,
+  useUpdateChatMutation,
+  useDeleteChatMutation,
+} from './use-chats-query';
 
 export function useChats() {
   const [currentChatId, setCurrentChatId] = useState<string | null>(null);
-  
+
   const { data: chatsData, isLoading, error: queryError, refetch } = useChatsQuery();
   const createMutation = useCreateChatMutation();
   const updateMutation = useUpdateChatMutation();
@@ -25,17 +29,20 @@ export function useChats() {
     await refetch();
   }, [refetch]);
 
-  const createChat = useCallback(async (title?: string) => {
-    const newChat: Chat = {
-      id: Date.now().toString(),
-      title: title || `New Chat`,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    };
-    await createMutation.mutateAsync(newChat);
-    setCurrentChatId(newChat.id);
-    return newChat;
-  }, [createMutation]);
+  const createChat = useCallback(
+    async (title?: string) => {
+      const newChat: Chat = {
+        id: Date.now().toString(),
+        title: title || `New Chat`,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      };
+      await createMutation.mutateAsync(newChat);
+      setCurrentChatId(newChat.id);
+      return newChat;
+    },
+    [createMutation]
+  );
 
   const updateChatModel = useCallback(
     async (chatId: string, field: 'textModel' | 'imageModel', model: string) => {
@@ -47,12 +54,15 @@ export function useChats() {
     [updateMutation]
   );
 
-  const updateChatTitle = useCallback(async (chatId: string, title: string) => {
-    await updateMutation.mutateAsync({
-      id: chatId,
-      updates: { title },
-    });
-  }, [updateMutation]);
+  const updateChatTitle = useCallback(
+    async (chatId: string, title: string) => {
+      await updateMutation.mutateAsync({
+        id: chatId,
+        updates: { title },
+      });
+    },
+    [updateMutation]
+  );
 
   const deleteChat = useCallback(
     async (chatId: string) => {

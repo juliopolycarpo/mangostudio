@@ -11,11 +11,11 @@ vi.mock('../../../src/lib/api-client', () => ({
         models: {
           gemini: {
             get: vi.fn(),
-          }
-        }
-      }
-    }
-  }
+          },
+        },
+      },
+    },
+  },
 }));
 
 const mockGet = vi.mocked(client.api.settings.models.gemini.get);

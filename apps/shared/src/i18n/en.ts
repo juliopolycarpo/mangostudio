@@ -52,9 +52,11 @@ export const messages: Messages = {
       languageLabel: 'Language',
       languageDescription: 'User interface language',
       textPromptLabel: 'Default Text System Prompt',
-      textPromptPlaceholder: 'e.g. You are a helpful creative partner. Be concise and insightful...',
+      textPromptPlaceholder:
+        'e.g. You are a helpful creative partner. Be concise and insightful...',
       imagePromptLabel: 'Default Image System Prompt',
-      imagePromptPlaceholder: 'e.g. Always generate images in a cinematic style with dramatic lighting...',
+      imagePromptPlaceholder:
+        'e.g. Always generate images in a cinematic style with dramatic lighting...',
       imageQualityLabel: 'Default Image Quality',
     },
     connectors: {

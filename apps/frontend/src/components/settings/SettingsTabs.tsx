@@ -14,14 +14,18 @@ export function SettingsTabs() {
   ];
 
   return (
-    <nav className="flex gap-1 border-b border-outline-variant/20 pb-0" aria-label="Settings navigation">
+    <nav
+      className="flex gap-1 border-b border-outline-variant/20 pb-0"
+      aria-label="Settings navigation"
+    >
       {tabs.map(({ to, label }) => (
         <Link
           key={to}
           to={to}
           className="px-4 py-2.5 text-sm font-semibold rounded-t-lg transition-all duration-200 text-on-surface-variant/60 hover:text-on-surface hover:bg-surface-container-high"
           activeProps={{
-            className: 'px-4 py-2.5 text-sm font-semibold rounded-t-lg transition-all duration-200 text-primary border-b-2 border-primary -mb-px bg-primary/5',
+            className:
+              'px-4 py-2.5 text-sm font-semibold rounded-t-lg transition-all duration-200 text-primary border-b-2 border-primary -mb-px bg-primary/5',
           }}
         >
           {label}

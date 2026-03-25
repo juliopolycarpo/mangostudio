@@ -8,15 +8,17 @@ import { auth } from '../auth';
 // O Better Auth Elysia adapter precisa tratar chamadas em /api/auth
 export const authRoutes = (app: Elysia) =>
   app.group('/auth', (app) =>
-    app.all('/*', (context) => {
-      // Debug logging
-      console.log(`[auth-plugin] ${context.request.method} ${context.path}`);
-      
-      const BETTER_AUTH_ACCEPT_METHODS = ['POST', 'GET'];
-      if (BETTER_AUTH_ACCEPT_METHODS.includes(context.request.method)) {
-        return auth.handler(context.request);
-      }
-      context.set.status = 405;
-      return new Response('Method not allowed', { status: 405 });
-    })
+    app
+      .get('/ok', () => ({ ok: true }))
+      .all('/*', (context) => {
+        // Debug logging
+        console.log(`[auth-plugin] ${context.request.method} ${context.path}`);
+
+        const BETTER_AUTH_ACCEPT_METHODS = ['POST', 'GET'];
+        if (BETTER_AUTH_ACCEPT_METHODS.includes(context.request.method)) {
+          return auth.handler(context.request);
+        }
+        context.set.status = 405;
+        return new Response('Method not allowed', { status: 405 });
+      })
   );

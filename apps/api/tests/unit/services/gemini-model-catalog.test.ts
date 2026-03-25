@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'bun:test';
-import { createGeminiModelCatalogService } from '../../../src/services/gemini';
+import {
+  createGeminiModelCatalogService,
+  GeminiApiKeyMissingError,
+} from '../../../src/services/gemini';
 import { createMockModel } from '../../support/mocks/mock-gemini-client';
+
+const TEST_USER = 'test-user';
 
 describe('createGeminiModelCatalogService', () => {
   it('normalizes discovered Gemini models into UI-safe options', async () => {
@@ -14,9 +19,9 @@ describe('createGeminiModelCatalogService', () => {
       ],
     });
 
-    await service.refreshGeminiModelCatalog('manual');
+    await service.refreshGeminiModelCatalog(TEST_USER, 'manual');
 
-    const snapshot = service.getGeminiModelCatalog();
+    const snapshot = await service.getGeminiModelCatalog(TEST_USER);
     expect(snapshot.status).toBe('ready');
     expect(snapshot.allModels).toHaveLength(1);
     expect(snapshot.allModels[0]?.modelId).toBe('gemini-2.5-flash');
@@ -46,10 +51,10 @@ describe('createGeminiModelCatalogService', () => {
       ],
     });
 
-    await service.refreshGeminiModelCatalog('manual');
+    await service.refreshGeminiModelCatalog(TEST_USER, 'manual');
 
-    const snapshot = service.getGeminiModelCatalog();
-    expect(snapshot.textModels.map((model) => model.modelId)).toEqual(['gemini-2.5-pro']);
+    const snapshot = await service.getGeminiModelCatalog(TEST_USER);
+    expect(snapshot.discoveredTextModels.map((model) => model.modelId)).toEqual(['gemini-2.5-pro']);
   });
 
   it('filters image models conservatively by modelId family', async () => {
@@ -74,10 +79,10 @@ describe('createGeminiModelCatalogService', () => {
       ],
     });
 
-    await service.refreshGeminiModelCatalog('manual');
+    await service.refreshGeminiModelCatalog(TEST_USER, 'manual');
 
-    const snapshot = service.getGeminiModelCatalog();
-    expect(snapshot.imageModels.map((model) => model.modelId)).toEqual([
+    const snapshot = await service.getGeminiModelCatalog(TEST_USER);
+    expect(snapshot.discoveredImageModels.map((model) => model.modelId)).toEqual([
       'gemini-2.5-flash-image',
       'imagen-4.0-generate-001',
     ]);
@@ -85,13 +90,15 @@ describe('createGeminiModelCatalogService', () => {
 
   it('returns idle and empty arrays when no API key is configured', async () => {
     const service = createGeminiModelCatalogService({
-      getApiKey: async () => '',
+      getApiKey: async () => {
+        throw new GeminiApiKeyMissingError();
+      },
       listModels: async () => {
         throw new Error('should not list models');
       },
     });
 
-    const snapshot = await service.refreshGeminiModelCatalog('manual');
+    const snapshot = await service.refreshGeminiModelCatalog(TEST_USER, 'manual');
 
     expect(snapshot.configured).toBe(false);
     expect(snapshot.status).toBe('idle');
@@ -106,8 +113,8 @@ describe('createGeminiModelCatalogService', () => {
       listModels: async () => [createMockModel({})],
     });
 
-    await service.refreshGeminiModelCatalog('manual');
-    const clearedSnapshot = service.clearGeminiModelCatalog();
+    await service.refreshGeminiModelCatalog(TEST_USER, 'manual');
+    const clearedSnapshot = service.clearGeminiModelCatalog(TEST_USER);
 
     expect(clearedSnapshot.configured).toBe(false);
     expect(clearedSnapshot.status).toBe('idle');

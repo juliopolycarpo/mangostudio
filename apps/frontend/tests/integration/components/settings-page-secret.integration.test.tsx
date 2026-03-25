@@ -1,28 +1,18 @@
 import userEvent from '@testing-library/user-event';
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
-import { SettingsPage } from '../../../src/components/SettingsPage';
+import { ConnectorsSettings } from '../../../src/components/settings/ConnectorsSettings';
 import { EMPTY_GEMINI_MODEL_CATALOG } from '../../../src/utils/gemini-models';
 import { render, screen, waitFor } from '../../support/harness/render';
 import { createFetchScenario } from '../../support/mocks/create-fetch-scenario';
 
 function createDefaultProps() {
   return {
-    textSystemPrompt: '',
-    setTextSystemPrompt: vi.fn(),
-    imageSystemPrompt: '',
-    setImageSystemPrompt: vi.fn(),
-    imageQuality: 'balanced',
-    setImageQuality: vi.fn(),
-    textModel: '',
-    setTextModel: vi.fn(),
-    imageModel: '',
-    setImageModel: vi.fn(),
-    geminiModelCatalog: EMPTY_GEMINI_MODEL_CATALOG,
-    reloadGeminiModelCatalog: vi.fn().mockResolvedValue(undefined),
+    modelCatalog: EMPTY_GEMINI_MODEL_CATALOG,
+    reloadModelCatalog: vi.fn().mockResolvedValue(undefined),
   };
 }
 
-describe('SettingsPage', () => {
+describe('ConnectorsSettings', () => {
   const fetchScenario = createFetchScenario();
 
   beforeEach(() => {
@@ -33,42 +23,97 @@ describe('SettingsPage', () => {
     fetchScenario.restore();
   });
 
-  it('loads the Gemini secret status and saves a new API key', async () => {
+  it('shows empty state when no connectors are configured', async () => {
+    const props = createDefaultProps();
+
+    fetchScenario.respondWithJson('GET', '/api/settings/secrets/gemini', {
+      body: { connectors: [] },
+    });
+
+    render(<ConnectorsSettings {...props} />);
+
+    await screen.findByText(/no connectors found/i);
+  });
+
+  it('shows connector list after loading status with existing connectors', async () => {
+    const props = createDefaultProps();
+
+    fetchScenario.respondWithJson('GET', '/api/settings/secrets/gemini', {
+      body: {
+        connectors: [
+          {
+            id: 'conn-1',
+            name: 'My Key',
+            provider: 'gemini',
+            configured: true,
+            source: 'bun-secrets',
+            storageAvailable: true,
+            maskedSuffix: '1234',
+            updatedAt: 1700000000000,
+            lastValidatedAt: 1700000000000,
+            lastValidationError: null,
+            enabledModels: [],
+            userId: 'user-1',
+          },
+        ],
+      },
+    });
+
+    render(<ConnectorsSettings {...props} />);
+
+    await screen.findByText('My Key');
+    expect(screen.getByText('****1234')).toBeInTheDocument();
+
+    expect(fetchScenario.fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('adds a connector when form is submitted', async () => {
     const props = createDefaultProps();
     const user = userEvent.setup();
 
+    // Note: createFetchScenario uses a Map, so the same key can only have one response.
+    // Register GET to return empty connectors; it will also be used for the reload after POST.
     fetchScenario
       .respondWithJson('GET', '/api/settings/secrets/gemini', {
-        body: {
-          provider: 'gemini',
-          configured: false,
-          source: 'none',
-          storageAvailable: true,
-        },
+        body: { connectors: [] },
       })
-      .respondWithJson('PUT', '/api/settings/secrets/gemini', {
+      .respondWithJson('POST', '/api/settings/connectors/gemini', {
         body: {
+          id: 'conn-new',
+          name: 'test-connector',
           provider: 'gemini',
           configured: true,
           source: 'bun-secrets',
           storageAvailable: true,
-          maskedSuffix: '1234',
+          maskedSuffix: '5678',
+          updatedAt: Date.now(),
+          lastValidatedAt: Date.now(),
+          lastValidationError: null,
+          enabledModels: [],
+          userId: 'user-1',
         },
       });
 
-    render(<SettingsPage {...props} />);
+    render(<ConnectorsSettings {...props} />);
 
-    await screen.findByText('Not Configured');
+    // Wait for the initial empty state to load
+    await screen.findByText(/no connectors found/i);
 
-    await user.type(screen.getByPlaceholderText('Paste a Gemini API key'), 'test-key-1234');
-    await user.click(screen.getByRole('button', { name: /save key/i }));
+    // Open the add modal — pick the first "Add Connector" button (header button)
+    const addButtons = screen.getAllByRole('button', { name: /add connector/i });
+    await user.click(addButtons[0]!);
 
-    await screen.findByText('Gemini API key saved securely.');
-    await waitFor(() => expect(props.reloadGeminiModelCatalog).toHaveBeenCalledTimes(1));
+    // Fill in the form
+    const nameInput = screen.getByLabelText(/^name$/i);
+    await user.type(nameInput, 'test-connector');
 
-    expect(screen.getByText('Stored Securely')).toBeInTheDocument();
-    expect(screen.getByText('****1234')).toBeInTheDocument();
-    expect(screen.getByPlaceholderText('Paste a Gemini API key')).toHaveValue('');
-    expect(fetchScenario.fetchMock).toHaveBeenCalledTimes(2);
+    const apiKeyInput = screen.getByLabelText(/api key/i);
+    await user.type(apiKeyInput, 'new-key-5678');
+
+    // Submit — the modal's submit button is the last "Add Connector" button in the DOM
+    const allAddButtons = screen.getAllByRole('button', { name: /add connector/i });
+    await user.click(allAddButtons[allAddButtons.length - 1]!);
+
+    await waitFor(() => expect(props.reloadModelCatalog).toHaveBeenCalledTimes(1));
   });
 });

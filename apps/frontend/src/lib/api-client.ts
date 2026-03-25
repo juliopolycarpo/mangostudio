@@ -1,6 +1,5 @@
 import { edenTreaty } from '@elysiajs/eden';
 import type { App } from '@mangostudio/api';
-import type { Elysia } from 'elysia';
 
 const url = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 

@@ -35,10 +35,7 @@ interface ConnectorsSettingsProps {
  * Connectors settings tab: add, delete, and configure Gemini API connectors.
  * Uses design system components; replaces window.confirm with toast feedback.
  */
-export function ConnectorsSettings({
-  modelCatalog,
-  reloadModelCatalog,
-}: ConnectorsSettingsProps) {
+export function ConnectorsSettings({ modelCatalog, reloadModelCatalog }: ConnectorsSettingsProps) {
   const { t } = useI18n();
   const { toast } = useToast();
   const s = t.settings.connectors;
@@ -207,7 +204,9 @@ export function ConnectorsSettings({
                 className="bg-surface-container-lowest border border-outline-variant/10 rounded-2xl p-4 flex items-center justify-between gap-4"
               >
                 <div className="flex items-center gap-4">
-                  <div className={`p-2.5 rounded-xl ${c.configured ? 'bg-primary/10 text-primary' : 'bg-red-500/10 text-red-300'}`}>
+                  <div
+                    className={`p-2.5 rounded-xl ${c.configured ? 'bg-primary/10 text-primary' : 'bg-red-500/10 text-red-300'}`}
+                  >
                     {c.configured ? <CheckCircle2 size={20} /> : <XCircle size={20} />}
                   </div>
                   <div className="space-y-0.5">
@@ -220,7 +219,9 @@ export function ConnectorsSettings({
                         {c.source.replace('-', ' ')}
                       </span>
                       <span className="text-outline-variant">•</span>
-                      <span className="font-mono text-on-surface-variant/60">****{c.maskedSuffix}</span>
+                      <span className="font-mono text-on-surface-variant/60">
+                        ****{c.maskedSuffix}
+                      </span>
                     </div>
                   </div>
                 </div>
@@ -295,7 +296,10 @@ export function ConnectorsSettings({
               />
 
               <div className="flex flex-col gap-1.5">
-                <label htmlFor="connector-apikey" className="text-sm font-medium text-on-surface-variant">
+                <label
+                  htmlFor="connector-apikey"
+                  className="text-sm font-medium text-on-surface-variant"
+                >
                   {s.apiKeyLabel}
                 </label>
                 <div className="flex gap-2">
@@ -345,7 +349,9 @@ export function ConnectorsSettings({
                       <div className="mt-1">{src.icon}</div>
                       <div className="space-y-0.5">
                         <div className="text-sm font-bold">{src.label}</div>
-                        <div className={`text-[10px] ${newConnector.source === src.id ? 'text-primary/70' : 'text-on-surface-variant/60'}`}>
+                        <div
+                          className={`text-[10px] ${newConnector.source === src.id ? 'text-primary/70' : 'text-on-surface-variant/60'}`}
+                        >
                           {src.desc}
                         </div>
                       </div>
@@ -435,10 +441,14 @@ export function ConnectorsSettings({
                           className="w-5 h-5 rounded border-outline-variant text-primary focus:ring-primary bg-surface-container-lowest"
                         />
                         <div className="space-y-0.5">
-                          <div className={`text-sm font-bold ${isEnabled ? 'text-primary' : 'text-on-surface'}`}>
+                          <div
+                            className={`text-sm font-bold ${isEnabled ? 'text-primary' : 'text-on-surface'}`}
+                          >
                             {m.displayName}
                           </div>
-                          <div className="text-[10px] font-mono text-on-surface-variant/60">{m.modelId}</div>
+                          <div className="text-[10px] font-mono text-on-surface-variant/60">
+                            {m.modelId}
+                          </div>
                         </div>
                       </label>
                     );
@@ -476,10 +486,14 @@ export function ConnectorsSettings({
                           className="w-5 h-5 rounded border-outline-variant text-primary focus:ring-primary bg-surface-container-lowest"
                         />
                         <div className="space-y-0.5">
-                          <div className={`text-sm font-bold ${isEnabled ? 'text-primary' : 'text-on-surface'}`}>
+                          <div
+                            className={`text-sm font-bold ${isEnabled ? 'text-primary' : 'text-on-surface'}`}
+                          >
                             {m.displayName}
                           </div>
-                          <div className="text-[10px] font-mono text-on-surface-variant/60">{m.modelId}</div>
+                          <div className="text-[10px] font-mono text-on-surface-variant/60">
+                            {m.modelId}
+                          </div>
                         </div>
                       </label>
                     );
