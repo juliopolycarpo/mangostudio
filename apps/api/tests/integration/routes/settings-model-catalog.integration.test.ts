@@ -1,9 +1,18 @@
-import { describe, expect, it } from 'bun:test';
+import { describe, expect, it, afterEach } from 'bun:test';
 import { Value } from '@sinclair/typebox/value';
 import { Type } from '@sinclair/typebox';
 import { settingsRoutes } from '../../../src/routes/settings';
 import { clearGeminiModelCatalog } from '../../../src/services/gemini';
-import { createApiTestApp } from '../../support/harness/create-api-test-app';
+import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
+
+const TEST_USER = { id: 'test-user-integration', name: 'Test User', email: 'test@mangostudio.test' };
+
+let restoreAuth: (() => void) | null = null;
+
+afterEach(() => {
+  restoreAuth?.();
+  restoreAuth = null;
+});
 
 const GeminiModelCatalogSchema = Type.Object({
   configured: Type.Boolean(),
@@ -20,9 +29,11 @@ const GeminiModelCatalogSchema = Type.Object({
 
 describe('settingsRoutes', () => {
   it('retorna o snapshot do catálogo de modelos Gemini', async () => {
-    clearGeminiModelCatalog();
+    clearGeminiModelCatalog(TEST_USER.id);
 
-    const app = createApiTestApp(settingsRoutes);
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, settingsRoutes);
+    restoreAuth = restore;
+
     const response = await app.handle(new Request('http://localhost/settings/models/gemini'));
 
     expect(response.status).toBe(200);
