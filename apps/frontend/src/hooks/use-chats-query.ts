@@ -39,7 +39,9 @@ export function useUpdateChatMutation() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async ({ id, updates }: { id: string; updates: Partial<Chat> }) => {
-      const { data, error } = await client.api.chats[id].put(updates);
+      // Eden 1.4.x creates a union type for dynamic segments that have both direct handlers
+      // (put/delete) and sub-resources (messages). Cast to `any` to resolve the union.
+      const { data, error } = await (client.api.chats[id] as any).put(updates);
       if (error) throw new Error(error.value as unknown as string);
       return data;
     },
@@ -54,7 +56,7 @@ export function useDeleteChatMutation() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (id: string) => {
-      const { data, error } = await client.api.chats[id].delete();
+      const { data, error } = await (client.api.chats[id] as any).delete();
       if (error) throw new Error(error.value as unknown as string);
       return data;
     },

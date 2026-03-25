@@ -13,7 +13,9 @@ export function useMessagesQuery(chatId: string | null) {
     queryKey: messageKeys.list(chatId!),
     queryFn: async ({ pageParam }) => {
       const query = pageParam ? { cursor: pageParam, limit: '50' } : { limit: '50' };
-      const { data, error } = await client.api.chats[chatId!].messages.get({ query });
+      // Eden 1.4.x creates a union type for dynamic segments with both direct handlers and
+      // sub-resources. Cast to `any` to access the messages sub-resource.
+      const { data, error } = await (client.api.chats[chatId!] as any).messages.get({ query });
       if (error) throw new Error(error.value as unknown as string);
       return data as { messages: Message[]; nextCursor: string | null };
     },
@@ -27,7 +29,11 @@ export function useCreateMessageMutation() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (newMessage: Message) => {
-      const { data, error } = await client.api.messages.post(newMessage);
+      // The API expects timestamp as a Unix epoch number; Message.timestamp is a Date object.
+      const { data, error } = await client.api.messages.post({
+        ...newMessage,
+        timestamp: newMessage.timestamp.getTime(),
+      });
       if (error) throw new Error(error.value as unknown as string);
       return data;
     },

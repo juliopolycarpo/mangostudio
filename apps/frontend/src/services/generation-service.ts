@@ -35,7 +35,7 @@ export async function uploadReferenceImage(file: File): Promise<string | null> {
       console.error('Failed to upload reference image', error);
       return null;
     }
-    return data?.imageUrl || null;
+    return (data as { imageUrl?: string } | null | undefined)?.imageUrl ?? null;
   } catch (error) {
     console.error('Failed to upload reference image', error);
     return null;
@@ -49,7 +49,7 @@ export async function generateImage(request: GenerateImageRequest): Promise<Gene
     throw new Error((error.value as any)?.error || 'Image generation failed');
   }
 
-  return data as GenerateImageResponse;
+  return data as unknown as GenerateImageResponse;
 }
 
 export async function respondText(request: RespondTextRequest): Promise<RespondTextResponse> {
@@ -59,5 +59,5 @@ export async function respondText(request: RespondTextRequest): Promise<RespondT
     throw new Error((error.value as any)?.error || 'Text generation failed');
   }
 
-  return data as RespondTextResponse;
+  return data as unknown as RespondTextResponse;
 }
