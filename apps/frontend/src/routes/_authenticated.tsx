@@ -1,4 +1,10 @@
-import { createFileRoute, redirect, Outlet, useRouterState, useNavigate } from '@tanstack/react-router';
+import {
+  createFileRoute,
+  redirect,
+  Outlet,
+  useRouterState,
+  useNavigate,
+} from '@tanstack/react-router';
 import { useEffect, Suspense } from 'react';
 import { Spinner } from '@/components/ui/Spinner';
 import { Layout } from '@/components/layout/Layout';
