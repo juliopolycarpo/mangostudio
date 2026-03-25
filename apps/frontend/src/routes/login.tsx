@@ -1,6 +1,7 @@
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router';
 import { useState } from 'react';
 import { authClient } from '@/lib/auth-client';
+import { router } from '@/router';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Card } from '@/components/ui/Card';
@@ -28,6 +29,7 @@ function LoginPage() {
       {
         onSuccess: async () => {
           await authClient.getSession();
+          await router.invalidate();
           const redirect = new URLSearchParams(window.location.search).get('redirect');
           void navigate({ to: redirect || '/' });
         },
