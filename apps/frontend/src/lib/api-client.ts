@@ -4,7 +4,7 @@ import type { App } from '@mangostudio/api';
 const url = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 
 export const client = edenTreaty<App>(url, {
-  fetcher: async (url, init) => {
+  fetcher: (async (url, init) => {
     const response = await fetch(url, { ...init, credentials: 'include' });
 
     if (response.status === 401) {
@@ -13,5 +13,5 @@ export const client = edenTreaty<App>(url, {
     }
 
     return response;
-  },
+  }) as typeof fetch,
 });
