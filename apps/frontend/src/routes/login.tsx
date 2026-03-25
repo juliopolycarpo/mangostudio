@@ -26,7 +26,8 @@ function LoginPage() {
     await authClient.signIn.email(
       { email, password },
       {
-        onSuccess: () => {
+        onSuccess: async () => {
+          await authClient.getSession();
           const redirect = new URLSearchParams(window.location.search).get('redirect');
           void navigate({ to: redirect || '/' });
         },
