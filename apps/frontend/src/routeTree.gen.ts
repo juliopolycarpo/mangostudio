@@ -8,95 +8,98 @@
 // You should NOT make any changes in this file as it will be overwritten.
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
-import { Route as rootRouteImport } from './routes/__root';
-import { Route as SignupRouteImport } from './routes/signup';
-import { Route as LoginRouteImport } from './routes/login';
-import { Route as AuthenticatedRouteImport } from './routes/_authenticated';
-import { Route as AuthenticatedIndexRouteImport } from './routes/_authenticated/index';
-import { Route as AuthenticatedSettingsRouteImport } from './routes/_authenticated/settings';
-import { Route as AuthenticatedGalleryRouteImport } from './routes/_authenticated/gallery';
-import { Route as AuthenticatedSettingsIndexRouteImport } from './routes/_authenticated/settings/index';
-import { Route as AuthenticatedSettingsGeneralRouteImport } from './routes/_authenticated/settings/general';
-import { Route as AuthenticatedSettingsConnectorsRouteImport } from './routes/_authenticated/settings/connectors';
+import { Route as rootRouteImport } from './routes/__root'
+import { Route as SignupRouteImport } from './routes/signup'
+import { Route as LoginRouteImport } from './routes/login'
+import { Route as AuthenticatedRouteImport } from './routes/_authenticated'
+import { Route as AuthenticatedIndexRouteImport } from './routes/_authenticated/index'
+import { Route as AuthenticatedSettingsRouteImport } from './routes/_authenticated/settings'
+import { Route as AuthenticatedGalleryRouteImport } from './routes/_authenticated/gallery'
+import { Route as AuthenticatedSettingsIndexRouteImport } from './routes/_authenticated/settings/index'
+import { Route as AuthenticatedSettingsGeneralRouteImport } from './routes/_authenticated/settings/general'
+import { Route as AuthenticatedSettingsConnectorsRouteImport } from './routes/_authenticated/settings/connectors'
 
 const SignupRoute = SignupRouteImport.update({
   id: '/signup',
   path: '/signup',
   getParentRoute: () => rootRouteImport,
-} as any);
+} as any)
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
   path: '/login',
   getParentRoute: () => rootRouteImport,
-} as any);
+} as any)
 const AuthenticatedRoute = AuthenticatedRouteImport.update({
   id: '/_authenticated',
   getParentRoute: () => rootRouteImport,
-} as any);
+} as any)
 const AuthenticatedIndexRoute = AuthenticatedIndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => AuthenticatedRoute,
-} as any);
+} as any)
 const AuthenticatedSettingsRoute = AuthenticatedSettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
   getParentRoute: () => AuthenticatedRoute,
-} as any);
+} as any)
 const AuthenticatedGalleryRoute = AuthenticatedGalleryRouteImport.update({
   id: '/gallery',
   path: '/gallery',
   getParentRoute: () => AuthenticatedRoute,
-} as any);
-const AuthenticatedSettingsIndexRoute = AuthenticatedSettingsIndexRouteImport.update({
-  id: '/',
-  path: '/',
-  getParentRoute: () => AuthenticatedSettingsRoute,
-} as any);
-const AuthenticatedSettingsGeneralRoute = AuthenticatedSettingsGeneralRouteImport.update({
-  id: '/general',
-  path: '/general',
-  getParentRoute: () => AuthenticatedSettingsRoute,
-} as any);
-const AuthenticatedSettingsConnectorsRoute = AuthenticatedSettingsConnectorsRouteImport.update({
-  id: '/connectors',
-  path: '/connectors',
-  getParentRoute: () => AuthenticatedSettingsRoute,
-} as any);
+} as any)
+const AuthenticatedSettingsIndexRoute =
+  AuthenticatedSettingsIndexRouteImport.update({
+    id: '/',
+    path: '/',
+    getParentRoute: () => AuthenticatedSettingsRoute,
+  } as any)
+const AuthenticatedSettingsGeneralRoute =
+  AuthenticatedSettingsGeneralRouteImport.update({
+    id: '/general',
+    path: '/general',
+    getParentRoute: () => AuthenticatedSettingsRoute,
+  } as any)
+const AuthenticatedSettingsConnectorsRoute =
+  AuthenticatedSettingsConnectorsRouteImport.update({
+    id: '/connectors',
+    path: '/connectors',
+    getParentRoute: () => AuthenticatedSettingsRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
-  '/': typeof AuthenticatedIndexRoute;
-  '/login': typeof LoginRoute;
-  '/signup': typeof SignupRoute;
-  '/gallery': typeof AuthenticatedGalleryRoute;
-  '/settings': typeof AuthenticatedSettingsRouteWithChildren;
-  '/settings/connectors': typeof AuthenticatedSettingsConnectorsRoute;
-  '/settings/general': typeof AuthenticatedSettingsGeneralRoute;
-  '/settings/': typeof AuthenticatedSettingsIndexRoute;
+  '/': typeof AuthenticatedIndexRoute
+  '/login': typeof LoginRoute
+  '/signup': typeof SignupRoute
+  '/gallery': typeof AuthenticatedGalleryRoute
+  '/settings': typeof AuthenticatedSettingsRouteWithChildren
+  '/settings/connectors': typeof AuthenticatedSettingsConnectorsRoute
+  '/settings/general': typeof AuthenticatedSettingsGeneralRoute
+  '/settings/': typeof AuthenticatedSettingsIndexRoute
 }
 export interface FileRoutesByTo {
-  '/login': typeof LoginRoute;
-  '/signup': typeof SignupRoute;
-  '/gallery': typeof AuthenticatedGalleryRoute;
-  '/': typeof AuthenticatedIndexRoute;
-  '/settings/connectors': typeof AuthenticatedSettingsConnectorsRoute;
-  '/settings/general': typeof AuthenticatedSettingsGeneralRoute;
-  '/settings': typeof AuthenticatedSettingsIndexRoute;
+  '/login': typeof LoginRoute
+  '/signup': typeof SignupRoute
+  '/gallery': typeof AuthenticatedGalleryRoute
+  '/': typeof AuthenticatedIndexRoute
+  '/settings/connectors': typeof AuthenticatedSettingsConnectorsRoute
+  '/settings/general': typeof AuthenticatedSettingsGeneralRoute
+  '/settings': typeof AuthenticatedSettingsIndexRoute
 }
 export interface FileRoutesById {
-  __root__: typeof rootRouteImport;
-  '/_authenticated': typeof AuthenticatedRouteWithChildren;
-  '/login': typeof LoginRoute;
-  '/signup': typeof SignupRoute;
-  '/_authenticated/gallery': typeof AuthenticatedGalleryRoute;
-  '/_authenticated/settings': typeof AuthenticatedSettingsRouteWithChildren;
-  '/_authenticated/': typeof AuthenticatedIndexRoute;
-  '/_authenticated/settings/connectors': typeof AuthenticatedSettingsConnectorsRoute;
-  '/_authenticated/settings/general': typeof AuthenticatedSettingsGeneralRoute;
-  '/_authenticated/settings/': typeof AuthenticatedSettingsIndexRoute;
+  __root__: typeof rootRouteImport
+  '/_authenticated': typeof AuthenticatedRouteWithChildren
+  '/login': typeof LoginRoute
+  '/signup': typeof SignupRoute
+  '/_authenticated/gallery': typeof AuthenticatedGalleryRoute
+  '/_authenticated/settings': typeof AuthenticatedSettingsRouteWithChildren
+  '/_authenticated/': typeof AuthenticatedIndexRoute
+  '/_authenticated/settings/connectors': typeof AuthenticatedSettingsConnectorsRoute
+  '/_authenticated/settings/general': typeof AuthenticatedSettingsGeneralRoute
+  '/_authenticated/settings/': typeof AuthenticatedSettingsIndexRoute
 }
 export interface FileRouteTypes {
-  fileRoutesByFullPath: FileRoutesByFullPath;
+  fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
     | '/login'
@@ -105,8 +108,8 @@ export interface FileRouteTypes {
     | '/settings'
     | '/settings/connectors'
     | '/settings/general'
-    | '/settings/';
-  fileRoutesByTo: FileRoutesByTo;
+    | '/settings/'
+  fileRoutesByTo: FileRoutesByTo
   to:
     | '/login'
     | '/signup'
@@ -114,7 +117,7 @@ export interface FileRouteTypes {
     | '/'
     | '/settings/connectors'
     | '/settings/general'
-    | '/settings';
+    | '/settings'
   id:
     | '__root__'
     | '/_authenticated'
@@ -125,120 +128,121 @@ export interface FileRouteTypes {
     | '/_authenticated/'
     | '/_authenticated/settings/connectors'
     | '/_authenticated/settings/general'
-    | '/_authenticated/settings/';
-  fileRoutesById: FileRoutesById;
+    | '/_authenticated/settings/'
+  fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
-  AuthenticatedRoute: typeof AuthenticatedRouteWithChildren;
-  LoginRoute: typeof LoginRoute;
-  SignupRoute: typeof SignupRoute;
+  AuthenticatedRoute: typeof AuthenticatedRouteWithChildren
+  LoginRoute: typeof LoginRoute
+  SignupRoute: typeof SignupRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
     '/signup': {
-      id: '/signup';
-      path: '/signup';
-      fullPath: '/signup';
-      preLoaderRoute: typeof SignupRouteImport;
-      parentRoute: typeof rootRouteImport;
-    };
+      id: '/signup'
+      path: '/signup'
+      fullPath: '/signup'
+      preLoaderRoute: typeof SignupRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/login': {
-      id: '/login';
-      path: '/login';
-      fullPath: '/login';
-      preLoaderRoute: typeof LoginRouteImport;
-      parentRoute: typeof rootRouteImport;
-    };
+      id: '/login'
+      path: '/login'
+      fullPath: '/login'
+      preLoaderRoute: typeof LoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/_authenticated': {
-      id: '/_authenticated';
-      path: '';
-      fullPath: '/';
-      preLoaderRoute: typeof AuthenticatedRouteImport;
-      parentRoute: typeof rootRouteImport;
-    };
+      id: '/_authenticated'
+      path: ''
+      fullPath: '/'
+      preLoaderRoute: typeof AuthenticatedRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/_authenticated/': {
-      id: '/_authenticated/';
-      path: '/';
-      fullPath: '/';
-      preLoaderRoute: typeof AuthenticatedIndexRouteImport;
-      parentRoute: typeof AuthenticatedRoute;
-    };
+      id: '/_authenticated/'
+      path: '/'
+      fullPath: '/'
+      preLoaderRoute: typeof AuthenticatedIndexRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
     '/_authenticated/settings': {
-      id: '/_authenticated/settings';
-      path: '/settings';
-      fullPath: '/settings';
-      preLoaderRoute: typeof AuthenticatedSettingsRouteImport;
-      parentRoute: typeof AuthenticatedRoute;
-    };
+      id: '/_authenticated/settings'
+      path: '/settings'
+      fullPath: '/settings'
+      preLoaderRoute: typeof AuthenticatedSettingsRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
     '/_authenticated/gallery': {
-      id: '/_authenticated/gallery';
-      path: '/gallery';
-      fullPath: '/gallery';
-      preLoaderRoute: typeof AuthenticatedGalleryRouteImport;
-      parentRoute: typeof AuthenticatedRoute;
-    };
+      id: '/_authenticated/gallery'
+      path: '/gallery'
+      fullPath: '/gallery'
+      preLoaderRoute: typeof AuthenticatedGalleryRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
     '/_authenticated/settings/': {
-      id: '/_authenticated/settings/';
-      path: '/';
-      fullPath: '/settings/';
-      preLoaderRoute: typeof AuthenticatedSettingsIndexRouteImport;
-      parentRoute: typeof AuthenticatedSettingsRoute;
-    };
+      id: '/_authenticated/settings/'
+      path: '/'
+      fullPath: '/settings/'
+      preLoaderRoute: typeof AuthenticatedSettingsIndexRouteImport
+      parentRoute: typeof AuthenticatedSettingsRoute
+    }
     '/_authenticated/settings/general': {
-      id: '/_authenticated/settings/general';
-      path: '/general';
-      fullPath: '/settings/general';
-      preLoaderRoute: typeof AuthenticatedSettingsGeneralRouteImport;
-      parentRoute: typeof AuthenticatedSettingsRoute;
-    };
+      id: '/_authenticated/settings/general'
+      path: '/general'
+      fullPath: '/settings/general'
+      preLoaderRoute: typeof AuthenticatedSettingsGeneralRouteImport
+      parentRoute: typeof AuthenticatedSettingsRoute
+    }
     '/_authenticated/settings/connectors': {
-      id: '/_authenticated/settings/connectors';
-      path: '/connectors';
-      fullPath: '/settings/connectors';
-      preLoaderRoute: typeof AuthenticatedSettingsConnectorsRouteImport;
-      parentRoute: typeof AuthenticatedSettingsRoute;
-    };
+      id: '/_authenticated/settings/connectors'
+      path: '/connectors'
+      fullPath: '/settings/connectors'
+      preLoaderRoute: typeof AuthenticatedSettingsConnectorsRouteImport
+      parentRoute: typeof AuthenticatedSettingsRoute
+    }
   }
 }
 
 interface AuthenticatedSettingsRouteChildren {
-  AuthenticatedSettingsConnectorsRoute: typeof AuthenticatedSettingsConnectorsRoute;
-  AuthenticatedSettingsGeneralRoute: typeof AuthenticatedSettingsGeneralRoute;
-  AuthenticatedSettingsIndexRoute: typeof AuthenticatedSettingsIndexRoute;
+  AuthenticatedSettingsConnectorsRoute: typeof AuthenticatedSettingsConnectorsRoute
+  AuthenticatedSettingsGeneralRoute: typeof AuthenticatedSettingsGeneralRoute
+  AuthenticatedSettingsIndexRoute: typeof AuthenticatedSettingsIndexRoute
 }
 
 const AuthenticatedSettingsRouteChildren: AuthenticatedSettingsRouteChildren = {
   AuthenticatedSettingsConnectorsRoute: AuthenticatedSettingsConnectorsRoute,
   AuthenticatedSettingsGeneralRoute: AuthenticatedSettingsGeneralRoute,
   AuthenticatedSettingsIndexRoute: AuthenticatedSettingsIndexRoute,
-};
+}
 
-const AuthenticatedSettingsRouteWithChildren = AuthenticatedSettingsRoute._addFileChildren(
-  AuthenticatedSettingsRouteChildren
-);
+const AuthenticatedSettingsRouteWithChildren =
+  AuthenticatedSettingsRoute._addFileChildren(
+    AuthenticatedSettingsRouteChildren,
+  )
 
 interface AuthenticatedRouteChildren {
-  AuthenticatedGalleryRoute: typeof AuthenticatedGalleryRoute;
-  AuthenticatedSettingsRoute: typeof AuthenticatedSettingsRouteWithChildren;
-  AuthenticatedIndexRoute: typeof AuthenticatedIndexRoute;
+  AuthenticatedGalleryRoute: typeof AuthenticatedGalleryRoute
+  AuthenticatedSettingsRoute: typeof AuthenticatedSettingsRouteWithChildren
+  AuthenticatedIndexRoute: typeof AuthenticatedIndexRoute
 }
 
 const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
   AuthenticatedGalleryRoute: AuthenticatedGalleryRoute,
   AuthenticatedSettingsRoute: AuthenticatedSettingsRouteWithChildren,
   AuthenticatedIndexRoute: AuthenticatedIndexRoute,
-};
+}
 
 const AuthenticatedRouteWithChildren = AuthenticatedRoute._addFileChildren(
-  AuthenticatedRouteChildren
-);
+  AuthenticatedRouteChildren,
+)
 
 const rootRouteChildren: RootRouteChildren = {
   AuthenticatedRoute: AuthenticatedRouteWithChildren,
   LoginRoute: LoginRoute,
   SignupRoute: SignupRoute,
-};
+}
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
-  ._addFileTypes<FileRouteTypes>();
+  ._addFileTypes<FileRouteTypes>()
