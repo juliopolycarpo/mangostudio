@@ -27,13 +27,13 @@
     "dist-clean": "bun run clean && rm -rf node_modules apps/*/node_modules bun.lock"
   },
   "devDependencies": {
-    "@eslint/js": "^10.0.1",
-    "@fast-check/vitest": "^0.0.9",
+    "@eslint/js": "^9.39.4",
+    "@fast-check/vitest": "^0.3.0",
     "@typescript-eslint/eslint-plugin": "^8.57.2",
     "@typescript-eslint/parser": "^8.57.2",
     "@vitest/coverage-v8": "^4.1.1",
     "@vitest/ui": "^4.1.1",
-    "eslint": "^10.1.0",
+    "eslint": "^9.39.4",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-prettier": "^5.5.5",
     "eslint-plugin-react": "^7.37.5",
