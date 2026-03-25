@@ -1,7 +1,6 @@
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { authClient } from '@/lib/auth-client';
-import { router } from '@/router';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Card } from '@/components/ui/Card';
@@ -14,10 +13,18 @@ export const Route = createFileRoute('/login')({
 function LoginPage() {
   const navigate = useNavigate();
   const { t } = useI18n();
+  const { data: session } = authClient.useSession();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (session?.user) {
+      const redirect = new URLSearchParams(window.location.search).get('redirect');
+      void navigate({ to: redirect || '/' });
+    }
+  }, [session?.user?.id, navigate]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -27,12 +34,6 @@ function LoginPage() {
     await authClient.signIn.email(
       { email, password },
       {
-        onSuccess: async () => {
-          await authClient.getSession();
-          await router.invalidate();
-          const redirect = new URLSearchParams(window.location.search).get('redirect');
-          void navigate({ to: redirect || '/' });
-        },
         onError: (ctx) => {
           setError(ctx.error.message || t.auth.loginError);
         },
