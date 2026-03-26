@@ -7,9 +7,9 @@ import { GoogleGenAI } from '@google/genai';
 import { join } from 'path';
 import { readFileSync, existsSync, mkdirSync } from 'fs';
 import { getResolvedGeminiApiKey } from './secret';
-import { getDefaultUploadsDir } from '../../lib/runtime-paths';
+import { getConfig } from '../../lib/config';
 
-const UPLOADS_DIR = process.env.UPLOADS_DIR || getDefaultUploadsDir();
+const UPLOADS_DIR = getConfig().uploads.dir;
 
 /**
  * Generates an image using the Gemini API.

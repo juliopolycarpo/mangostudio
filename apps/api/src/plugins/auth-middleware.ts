@@ -1,5 +1,5 @@
 import { Elysia } from 'elysia';
-import { auth } from '../auth';
+import { getAuth } from '../auth';
 import { ptBR } from '@mangostudio/shared/i18n';
 
 /**
@@ -8,7 +8,7 @@ import { ptBR } from '@mangostudio/shared/i18n';
  */
 export const authMiddleware = (app: Elysia) =>
   app.derive(async ({ request }) => {
-    const session = await auth.api.getSession({
+    const session = await getAuth().api.getSession({
       headers: request.headers,
     });
 

@@ -14,11 +14,11 @@ import {
   type SecretMetadataInput,
 } from '../secret-store/metadata';
 import { bunSecretStore, type SecretStore } from '../secret-store/store';
-import { join } from 'path';
-import { homedir } from 'os';
+import { join, dirname } from 'path';
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { parse as parseToml, stringify as stringifyToml } from 'smol-toml';
 import { randomUUID } from 'crypto';
+import { getConfig } from '../../lib/config';
 
 const GEMINI_VALIDATION_URL =
   'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash';
@@ -71,11 +71,11 @@ function maskSecret(apiKey: string | null | undefined): string | undefined {
 }
 
 function getEnvFilePath(): string {
-  return join(process.cwd(), '../../.env');
+  return join(process.cwd(), '.mango', '.env');
 }
 
 function getTomlFilePath(): string {
-  return join(homedir(), '.mango', 'config.toml');
+  return getConfig().configFilePath;
 }
 
 /**
@@ -284,7 +284,7 @@ export function createGeminiSecretService(dependencies: GeminiSecretServiceDepen
 
         case 'config-file': {
           const configPath = resolvedTomlFilePath;
-          mkdirSync(join(homedir(), '.mango'), { recursive: true });
+          mkdirSync(dirname(configPath), { recursive: true });
           let config: any = {};
           if (existsSync(configPath)) {
             config = parseToml(readFileSync(configPath, 'utf8'));

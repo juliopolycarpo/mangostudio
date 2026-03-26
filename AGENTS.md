@@ -62,6 +62,18 @@ A `.gitmessage` template is available at the repo root as the canonical format r
 git config commit.template .gitmessage
 ```
 
-## Security & Configuration Tips
+## Configuration
 
-Copy `.env.example` to `.env.local` and set `GEMINI_API_KEY`; never commit populated env files. The API key is only accessed server-side. Validate uploaded files and request payloads, and log errors with enough context for debugging instead of swallowing them silently.
+All configuration lives under `.mango/`. Copy the example files to get started:
+
+```bash
+cp .mango/config.toml.example .mango/config.toml
+cp .mango/.env.example .mango/.env
+```
+
+Resolution hierarchy (highest priority wins):
+1. `.mango/.env` — overrides matching keys from config.toml (best for secrets)
+2. `config.toml` — dev: `./.mango/config.toml` | build: `~/.mango/config.toml`
+3. Built-in defaults in the application code
+
+Set `GEMINI_API_KEY` in `.mango/.env` or add named keys under `[gemini_api_keys]` in `config.toml`. The API key is only accessed server-side. Never commit populated config files. Validate uploaded files and request payloads, and log errors with enough context for debugging instead of swallowing them silently.

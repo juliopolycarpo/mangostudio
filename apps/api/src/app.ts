@@ -17,9 +17,9 @@ import { respondRoutes } from './routes/respond';
 import { settingsRoutes } from './routes/settings';
 import { authRoutes } from './routes/auth';
 import { rateLimit } from './plugins/rate-limit';
-import { getDefaultUploadsDir } from './lib/runtime-paths';
+import { getConfig } from './lib/config';
 
-const UPLOADS_DIR = process.env.UPLOADS_DIR || getDefaultUploadsDir();
+const UPLOADS_DIR = getConfig().uploads.dir;
 
 /**
  * Base API instance with /api prefix.
@@ -59,12 +59,7 @@ export const app = new Elysia()
   // Enable CORS for frontend requests
   .use(
     cors({
-      origin: [
-        'http://localhost:5173',
-        'http://127.0.0.1:5173',
-        'http://localhost:5174',
-        'http://127.0.0.1:5174',
-      ],
+      origin: getConfig().corsOrigins,
       credentials: true,
       methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
       allowedHeaders: ['Content-Type', 'Authorization'],
