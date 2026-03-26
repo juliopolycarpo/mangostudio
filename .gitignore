@@ -4,10 +4,11 @@ dist/
 coverage/
 .DS_Store
 *.log
-.env*
-!.env.example
 uploads/
 *.sqlite
 bun.lock
-.mango/*.toml
+
+# Config — keep only examples
+.mango/*
 !.mango/config.toml.example
+!.mango/.env.example

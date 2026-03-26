@@ -6,12 +6,12 @@
   "main": "./src/app.ts",
   "types": "./src/app.ts",
   "scripts": {
-    "dev": "bun --env-file=../../.env --env-file=../../.env.local run --watch src/index.ts",
-    "start": "bun --env-file=../../.env --env-file=../../.env.local run src/index.ts",
+    "dev": "bun run --watch src/index.ts",
+    "start": "bun run src/index.ts",
     "build": "bun build src/index.ts --target=bun --outdir=dist",
     "lint": "eslint src --ext .ts --max-warnings 0 && tsc --noEmit",
     "format": "prettier --write 'src/**/*.{ts,json}'",
-    "migrate": "bun --env-file=../../.env --env-file=../../.env.local run src/db/migrate.ts",
+    "migrate": "bun run src/db/migrate.ts",
     "test": "bun run test:unit && bun run test:integration",
     "test:unit": "bun test tests/unit",
     "test:integration": "bun test tests/integration"

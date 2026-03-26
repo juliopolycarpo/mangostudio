@@ -1,16 +1,38 @@
-# MangoStudio Configuration Example
-# Copy this file to ~/.mango/config.toml to manage your connectors.
-
-# Connectors defined here will automatically appear in the Settings UI.
-# You can enable/disable specific models for each connector in the UI.
-[gemini_api_keys]
-personal = "AIzaSy..."
-work = "AIzaSy..."
-experiment = "AIzaSy..."
-
-# The resolution hierarchy for a requested model is:
-# 1. OS Secret Store (Secure Storage)
-# 2. Environment Variables (.env / process.env)
-# 3. This config file (~/.mango/config.toml)
+# MangoStudio Configuration
+# Copy this file to .mango/config.toml (dev) or ~/.mango/config.toml (build).
 #
-# MangoStudio will use the first valid key that has the requested model enabled.
+# Resolution hierarchy (highest priority wins):
+# 1. .mango/.env       — overrides matching keys from config.toml
+# 2. config.toml       — dev: ./.mango/config.toml | build: ~/.mango/config.toml
+# 3. Built-in defaults — hardcoded in the application
+
+[server]
+host = "localhost"
+port = 3001
+
+[frontend]
+host = "localhost"
+port = 5173
+
+[database]
+# Empty = auto-detect:
+#   dev:   ./.mango/database.sqlite
+#   build: ~/.mango/database.sqlite
+path = ""
+
+[uploads]
+# Empty = auto-detect: ./uploads (dev) or <exe_dir>/uploads (build)
+dir = ""
+
+[auth]
+# Required — minimum 32 characters
+secret = "your-secret-key-here-min-32-chars"
+# Empty = derived from server host:port
+url = ""
+
+# Gemini API key connectors.
+# Keys defined here appear automatically in the Settings UI.
+# You can enable/disable specific models per connector in the UI.
+[gemini_api_keys]
+# personal = "AIzaSy..."
+# work = "AIzaSy..."
