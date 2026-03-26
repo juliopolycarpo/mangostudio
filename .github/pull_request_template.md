@@ -28,6 +28,5 @@
 
 ## Commits
 
-<!-- List the commits included in this PR. Example:
-- `abc1234` feat(scope): short summary
--->
+<!-- COMMITS_START -->
+<!-- COMMITS_END -->
