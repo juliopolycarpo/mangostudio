@@ -1,0 +1,56 @@
+name: Auto-populate PR commits
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  pull-requests: write
+
+jobs:
+  update-commits:
+    name: Inject commit list into PR body
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate and inject commit list
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          # List only the commits introduced by this PR branch
+          commits=$(git log "${BASE_SHA}..HEAD" \
+            --reverse \
+            --pretty=format:"- \`%h\` %s" \
+            --no-merges)
+
+          if [ -z "$commits" ]; then
+            commits="_No commits yet._"
+          fi
+
+          # Fetch current PR body
+          body=$(gh pr view "$PR_NUMBER" --json body -q '.body')
+
+          # Replace content between markers idempotently
+          new_body=$(printf '%s\n' "$body" | awk \
+            -v commits="$commits" '
+            /<!-- COMMITS_START -->/ {
+              print
+              print commits
+              skip = 1
+              next
+            }
+            /<!-- COMMITS_END -->/ {
+              skip = 0
+              print
+              next
+            }
+            { if (!skip) print }
+          ')
+
+          # Update the PR
+          gh pr edit "$PR_NUMBER" --body "$new_body"
