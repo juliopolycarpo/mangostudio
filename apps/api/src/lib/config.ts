@@ -71,8 +71,14 @@ const ENV_KEY_MAP: Record<string, (cfg: MangoConfig, value: string) => void> = {
   },
 };
 
+/**
+ * Returns the .mango directory at the monorepo root.
+ * Uses import.meta.dir (this file's directory) to navigate reliably
+ * regardless of the process CWD when workspace scripts run.
+ * config.ts lives at apps/api/src/lib/ → 4 levels up is the repo root.
+ */
 function getMangoDir(): string {
-  return join(process.cwd(), '.mango');
+  return join(import.meta.dir, '../../../../.mango');
 }
 
 function getHomeMangoDir(): string {
