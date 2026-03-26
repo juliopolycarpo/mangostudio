@@ -1,40 +1,52 @@
 import { betterAuth } from 'better-auth';
+import type { Auth } from 'better-auth';
 import { getDb } from './db/database';
+import { getConfig } from './lib/config';
 
-export const auth = betterAuth({
-  // Usar a instância Kysely existente do projeto
-  database: {
-    db: getDb(),
-    type: 'sqlite',
-  },
+let authInstance: Auth | null = null;
 
-  // Base path alinhado com o mount point do Elysia
-  basePath: '/api/auth',
+/**
+ * Returns the cached Better Auth instance.
+ * Lazy-initialized on first call to avoid module-level config reads.
+ */
+export function getAuth(): Auth {
+  if (!authInstance) {
+    const config = getConfig();
 
-  emailAndPassword: {
-    enabled: true,
-    minPasswordLength: 8,
-    maxPasswordLength: 128,
-    autoSignIn: true, // após signup, já cria sessão
-  },
+    authInstance = betterAuth({
+      database: {
+        db: getDb(),
+        type: 'sqlite',
+      },
 
-  // Permitir requests do frontend em dev
-  trustedOrigins: [
-    'http://localhost:5173',
-    'http://localhost:5174',
-    'http://127.0.0.1:5173',
-    'http://127.0.0.1:5174',
-    // Em produção, adicionar o domínio real
-  ],
+      basePath: '/api/auth',
 
-  session: {
-    // Cookie-based sessions (padrão do Better Auth)
-    cookieCache: {
-      enabled: true,
-      maxAge: 60 * 5, // cache de 5 minutos para evitar DB hits
-    },
-  },
+      emailAndPassword: {
+        enabled: true,
+        minPasswordLength: 8,
+        maxPasswordLength: 128,
+        autoSignIn: true,
+      },
 
-  secret: process.env.BETTER_AUTH_SECRET,
-  baseURL: process.env.BETTER_AUTH_URL || 'http://localhost:3001',
-});
+      trustedOrigins: config.corsOrigins,
+
+      session: {
+        cookieCache: {
+          enabled: true,
+          maxAge: 60 * 5,
+        },
+      },
+
+      secret: config.auth.secret,
+      baseURL: config.auth.url,
+    }) as Auth;
+  }
+  return authInstance;
+}
+
+/**
+ * Resets the auth singleton (for tests).
+ */
+export function resetAuth(): void {
+  authInstance = null;
+}

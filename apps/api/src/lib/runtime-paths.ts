@@ -59,7 +59,8 @@ export function getDefaultFrontendDir(): string {
 
 /**
  * Returns the filesystem fallback location for the SQLite database.
+ * @deprecated Use getConfig().database.path from lib/config instead.
  */
 export function getDefaultDatabaseFallbackPath(): string {
-  return join(getRuntimeBaseDir(), 'database.sqlite');
+  return join(getRuntimeBaseDir(), '.mango', 'database.sqlite');
 }

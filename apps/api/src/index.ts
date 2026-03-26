@@ -17,9 +17,10 @@ import { multiConnectors } from './db/migrations/005_multi_connectors';
 import { authTables } from './db/migrations/006_auth_tables';
 import { addUserOwnership } from './db/migrations/007_add_user_ownership';
 import { getDefaultFrontendDir } from './lib/runtime-paths';
+import { getConfig } from './lib/config';
 import { app } from './app';
 
-const PORT = Number(process.env.API_PORT) || 3001;
+const PORT = getConfig().server.port;
 const FRONTEND_DIR = getDefaultFrontendDir();
 
 // Check if frontend directory exists

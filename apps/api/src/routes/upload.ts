@@ -7,10 +7,10 @@ import { Elysia, t } from 'elysia';
 import { join, extname } from 'path';
 import { mkdirSync } from 'fs';
 import { fileTypeFromBuffer } from 'file-type';
-import { getDefaultUploadsDir } from '../lib/runtime-paths';
+import { getConfig } from '../lib/config';
 import { requireAuth } from '../plugins/auth-middleware';
 
-const UPLOADS_DIR = process.env.UPLOADS_DIR || getDefaultUploadsDir();
+const UPLOADS_DIR = getConfig().uploads.dir;
 
 // Ensure uploads directory exists at module load
 mkdirSync(UPLOADS_DIR, { recursive: true });

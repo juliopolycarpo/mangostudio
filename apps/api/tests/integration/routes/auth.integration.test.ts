@@ -1,14 +1,10 @@
-import { describe, test, expect, beforeAll } from 'bun:test';
+import { describe, test, expect } from 'bun:test';
 import { createApiTestApp } from '../../support/harness/create-api-test-app';
 import { authRoutes } from '../../../src/routes/auth';
 
 const app = createApiTestApp(authRoutes);
 
 describe('Auth routes', () => {
-  beforeAll(() => {
-    process.env.BETTER_AUTH_SECRET = 'test-secret-at-least-32-characters-long';
-    process.env.BETTER_AUTH_URL = 'http://localhost:3001';
-  });
 
   test('GET /auth/ok — deve retornar ok', async () => {
     const res = await app.handle(new Request('http://localhost/auth/ok'));

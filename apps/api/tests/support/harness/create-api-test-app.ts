@@ -1,5 +1,5 @@
 import { Elysia } from 'elysia';
-import { auth } from '../../../src/auth';
+import { getAuth } from '../../../src/auth';
 
 type ApiTestPlugin = Parameters<Elysia['use']>[0];
 
@@ -33,6 +33,7 @@ export function createAuthenticatedApiTestApp(
   mockUser: { id: string; name: string; email: string },
   ...plugins: ApiTestPlugin[]
 ) {
+  const auth = getAuth();
   const originalGetSession = auth.api.getSession.bind(auth.api);
 
   (auth.api as any).getSession = async () => ({

@@ -45,6 +45,7 @@
     "autoprefixer": "^10.4.21",
     "elysia": "^1.4.28",
     "jsdom": "^29.0.1",
+    "smol-toml": "^1.6.1",
     "tailwindcss": "^4.1.14",
     "typescript": "~5.8.2",
     "vite": "^8.0.0",

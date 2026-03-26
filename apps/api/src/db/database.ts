@@ -5,34 +5,10 @@
 import { Kysely } from 'kysely';
 import { BunSqliteDialect } from 'kysely-bun-sqlite';
 import { Database as SQLiteDatabase } from 'bun:sqlite';
-import { join, dirname } from 'path';
-import { homedir } from 'os';
+import { dirname } from 'path';
 import { mkdirSync } from 'fs';
 import type { Database } from './types';
-import { getDefaultDatabaseFallbackPath } from '../lib/runtime-paths';
-
-function getDatabasePath(): string {
-  // 1. Environment variable
-  if (process.env.DATABASE_PATH) {
-    return process.env.DATABASE_PATH;
-  }
-
-  // 2. User data directory (~/.mangostudio/database.sqlite)
-  const userDataPath = join(homedir(), '.mangostudio', 'database.sqlite');
-
-  // Try to use user data directory, fall back to current directory
-  try {
-    const userDataDir = dirname(userDataPath);
-    // Create directory if it doesn't exist
-    mkdirSync(userDataDir, { recursive: true });
-    return userDataPath;
-  } catch {
-    // 3. Runtime-aware filesystem fallback
-    return getDefaultDatabaseFallbackPath();
-  }
-}
-
-const DB_PATH = getDatabasePath();
+import { getConfig } from '../lib/config';
 
 let dbInstance: Kysely<Database> | null = null;
 
@@ -42,7 +18,16 @@ let dbInstance: Kysely<Database> | null = null;
  */
 export function getDb(): Kysely<Database> {
   if (!dbInstance) {
-    const sqlite = new SQLiteDatabase(DB_PATH);
+    const dbPath = getConfig().database.path;
+
+    // Ensure parent directory exists
+    try {
+      mkdirSync(dirname(dbPath), { recursive: true });
+    } catch {
+      // Directory already exists or permission issue — proceed and let SQLite handle it
+    }
+
+    const sqlite = new SQLiteDatabase(dbPath);
     sqlite.exec('PRAGMA journal_mode = WAL;');
     sqlite.exec('PRAGMA foreign_keys = ON;');
 
@@ -50,7 +35,7 @@ export function getDb(): Kysely<Database> {
       dialect: new BunSqliteDialect({ database: sqlite }),
     });
 
-    console.log(`[db] Connected to SQLite at ${DB_PATH}`);
+    console.log(`[db] Connected to SQLite at ${dbPath}`);
   }
   return dbInstance;
 }
