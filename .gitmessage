@@ -1,0 +1,34 @@
+# 📝 Commit message template — Conventional Commits
+# -------------------------------------------------------
+# Format: type(scope): short imperative summary
+#
+# 🏷️  Types:
+#   feat      → new feature
+#   fix       → bug fix
+#   chore     → tooling, deps, config (no production code)
+#   test      → tests only
+#   docs      → documentation only
+#   refactor  → code restructure without behavior change
+#   ci        → CI/CD workflows
+#   migration → database schema changes
+#   perf      → performance improvements
+#
+# 📦 Scope examples: api, frontend, shared, github, db, auth
+#
+# -------------------------------------------------------
+# Body (optional — explain WHY, not WHAT):
+#
+# Description:
+# -
+#
+# What's changed:
+# -
+#
+# How it improves the app:
+# -
+# -------------------------------------------------------
+# ⚠️  Rules:
+#   - Subject line ≤ 72 characters
+#   - All commit messages must be in English
+#   - Sign every commit: git commit -S -s
+# -------------------------------------------------------
