@@ -1,0 +1,10 @@
+blank_issues_enabled: false
+
+contact_links:
+  - name: 💬 General Questions & Discussions
+    url: https://github.com/juliopolycarpo/mangostudio/discussions
+    about: Ask usage questions or start a discussion with the community.
+
+  - name: 🛡️ Security Vulnerability Report
+    url: https://github.com/juliopolycarpo/mangostudio/security/advisories/new
+    about: Report a security vulnerability privately via GitHub Security Advisory. Do not open a public issue for security concerns — see SECURITY.md for details.
