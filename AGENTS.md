@@ -56,6 +56,12 @@ Place new tests in the appropriate workspace under `tests/unit/` or `tests/integ
 
 Use short imperative commit subjects such as `Add gallery empty state`. Keep each commit scoped to one concern. PRs should summarize the user-visible change, list verification steps, mention any new environment variables or schema changes, and include screenshots or GIFs for UI updates.
 
+A `.gitmessage` template is available at the repo root as the canonical format reference for commit subjects and bodies (type, scope, description, what's changed, how it improves the app). Configure it locally once with:
+
+```bash
+git config commit.template .gitmessage
+```
+
 ## Security & Configuration Tips
 
 Copy `.env.example` to `.env.local` and set `GEMINI_API_KEY`; never commit populated env files. The API key is only accessed server-side. Validate uploaded files and request payloads, and log errors with enough context for debugging instead of swallowing them silently.

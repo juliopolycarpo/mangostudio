@@ -93,6 +93,16 @@ Keep each commit scoped to one concern. Prefer multiple small commits over one l
 
 **All commit messages must be written in English.**
 
+## Commit Message Template
+
+Configure Git to pre-fill the commit editor with the project template:
+
+```bash
+git config commit.template .gitmessage
+```
+
+This is a one-time local setup. The template is at `.gitmessage` in the repo root.
+
 ## Pull Request Process
 
 1. Create a branch from `main` using a descriptive name (e.g., `feat/add-gallery-empty-state`).
