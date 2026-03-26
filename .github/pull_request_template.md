@@ -25,3 +25,9 @@
 ## Notes
 
 <!-- Mention any new environment variables, schema changes, breaking changes, or open questions. -->
+
+## Commits
+
+<!-- List the commits included in this PR. Example:
+- `abc1234` feat(scope): short summary
+-->
