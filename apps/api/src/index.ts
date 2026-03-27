@@ -87,16 +87,23 @@ if (frontendExists) {
     new Response(Bun.file(indexPath), { headers: { 'Content-Type': 'text/html' } });
 
   app
-    // Register GET / and /index.html explicitly before staticPlugin so these
-    // routes always take precedence, regardless of the plugin's internal HTML
-    // handling behaviour (which varies between Bun compiled binaries and dev).
+    // Register GET / explicitly before staticPlugin. The static plugin may
+    // register GET / with an undefined handler when running inside a compiled
+    // Bun binary (htmlBundle.default is undefined for Vite-generated HTML),
+    // so this explicit route guarantees that GET / always returns index.html.
     .get('/', serveIndex)
-    .get('/index.html', serveIndex)
     .use(
       staticPlugin({
         assets: FRONTEND_DIR,
         prefix: '/',
-        ignorePatterns: ['/api/*', '/uploads/*', '/scalar'],
+        // ignorePatterns in @elysiajs/static v1.4.7 has an inverted comparison
+        // (pattern.includes(file) instead of file.includes(pattern)), so string
+        // patterns never match. Only regex patterns work: pattern.test(file).
+        // Exclude index.html so the plugin does not register a GET /index.html
+        // handler that fails in compiled Bun binaries (import() of Vite HTML
+        // triggers Bun's HTML bundler, which can't resolve hashed asset paths).
+        // GET /index.html is handled by the SPA catch-all below instead.
+        ignorePatterns: [/index\.html$/, '/api/*', '/uploads/*', '/scalar'],
       })
     )
     .get('/*', async (context) => {
