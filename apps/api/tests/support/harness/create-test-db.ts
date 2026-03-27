@@ -14,7 +14,6 @@ import type { Database } from '../../../src/db/types';
  */
 export function createTestDb(): Kysely<Database> {
   const sqlite = new SQLiteDatabase(':memory:');
-  sqlite.exec('PRAGMA journal_mode = WAL;');
   sqlite.exec('PRAGMA foreign_keys = ON;');
 
   return new Kysely<Database>({
