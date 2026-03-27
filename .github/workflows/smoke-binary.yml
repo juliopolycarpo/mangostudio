@@ -1,0 +1,35 @@
+name: Smoke — Binary
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    name: ${{ matrix.platform }}
+    runs-on: ${{ matrix.runner }}
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux-x64
+            runner: ubuntu-latest
+          - platform: windows-x64
+            runner: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.3.11'
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Run smoke test
+        run: bun run scripts/test-build.ts
+        env:
+          PLATFORM: ${{ matrix.platform }}
+          API_PORT: '13001'
