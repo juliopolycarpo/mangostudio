@@ -27,8 +27,8 @@ jobs:
 
       - name: Start binary in background
         run: |
-          HOME=$(mktemp -d) DATABASE_PATH=/tmp/smoke-test.sqlite \
-            .mango/out/linux-x64/mangostudio &
+          cd .mango/out/linux-x64
+          HOME=$(mktemp -d) DATABASE_PATH=/tmp/smoke-test.sqlite ./mangostudio &
           echo "BINARY_PID=$!" >> "$GITHUB_ENV"
 
       - name: Wait for startup
