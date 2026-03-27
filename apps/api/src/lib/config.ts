@@ -9,9 +9,27 @@
 
 import { parse as parseToml } from 'smol-toml';
 import { readFileSync, existsSync } from 'fs';
-import { join } from 'path';
+import { join, isAbsolute, dirname } from 'path';
 import { homedir } from 'os';
-import { isStandaloneExecutable, getDefaultUploadsDir } from './runtime-paths';
+import { isStandaloneExecutable } from './runtime-paths';
+
+/**
+ * Absolute path to the monorepo root, derived from this file's location.
+ * config.ts lives at apps/api/src/lib/ → 4 levels up is the repo root.
+ */
+const MONOREPO_ROOT = join(import.meta.dir, '../../../..');
+
+/**
+ * Resolves a user-supplied path to an absolute path.
+ * Relative paths (starting with ./ or ../) are resolved against the
+ * monorepo root so that config.toml values behave consistently
+ * regardless of the process CWD when workspace scripts run.
+ * Absolute paths are returned unchanged.
+ */
+function resolveUserPath(userPath: string): string {
+  if (isAbsolute(userPath)) return userPath;
+  return join(MONOREPO_ROOT, userPath);
+}
 
 export interface MangoConfig {
   server: {
@@ -190,18 +208,24 @@ function computeDerived(cfg: MangoConfig, tomlPath: string): void {
     cfg.auth.url = `http://${cfg.server.host}:${cfg.server.port}`;
   }
 
-  // database.path defaults based on runtime mode
+  // database.path: auto-detect when empty, resolve relative paths against monorepo root
   if (!cfg.database.path) {
     if (isStandaloneExecutable()) {
       cfg.database.path = join(getHomeMangoDir(), 'database.sqlite');
     } else {
       cfg.database.path = join(getMangoDir(), 'database.sqlite');
     }
+  } else {
+    cfg.database.path = resolveUserPath(cfg.database.path);
   }
 
-  // uploads.dir defaults via runtime-paths
+  // uploads.dir: auto-detect when empty, resolve relative paths against monorepo root
   if (!cfg.uploads.dir) {
-    cfg.uploads.dir = getDefaultUploadsDir();
+    cfg.uploads.dir = isStandaloneExecutable()
+      ? join(dirname(process.execPath), 'uploads') // next to the binary in standalone mode
+      : join(MONOREPO_ROOT, 'uploads'); // repo root in dev mode
+  } else {
+    cfg.uploads.dir = resolveUserPath(cfg.uploads.dir);
   }
 
   // CORS origins from frontend host/port (include +1 for Vite port bumping)
