@@ -2,6 +2,7 @@
   "name": "@mangostudio/api",
   "version": "0.0.1",
   "private": true,
+  "license": "MIT",
   "type": "module",
   "main": "./src/app.ts",
   "types": "./src/app.ts",

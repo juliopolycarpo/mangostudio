@@ -154,3 +154,7 @@ The `Messages` type is inferred directly from the `pt-BR.ts` dictionary (`as con
 The `bun run build:binary` command compiles the API into platform-specific binaries under `out/<platform>/`.
 - The database is persisted at `~/.mangostudio/database.sqlite` by default.
 - Frontend assets are served from the `public/` directory next to the executable.
+
+## License
+
+This project is licensed under the [MIT License](LICENSE).
