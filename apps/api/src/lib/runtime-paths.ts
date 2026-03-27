@@ -49,4 +49,3 @@ export function getDefaultFrontendDir(): string {
   // Fallback to local public dir
   return join(getRuntimeBaseDir(), 'public');
 }
-
