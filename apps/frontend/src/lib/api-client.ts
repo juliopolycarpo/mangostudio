@@ -1,9 +1,8 @@
 import { edenTreaty } from '@elysiajs/eden';
 import type { App } from '@mangostudio/api';
+import { getApiBaseUrl } from './api-base-url';
 
-const url = import.meta.env.VITE_API_URL || 'http://localhost:3001';
-
-export const client = edenTreaty<App>(url, {
+export const client = edenTreaty<App>(getApiBaseUrl(), {
   fetcher: (async (url, init) => {
     const response = await fetch(url, { ...init, credentials: 'include' });
 
