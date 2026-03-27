@@ -1,0 +1,83 @@
+name: Smoke (binary)
+
+on:
+  workflow_call:
+
+jobs:
+  smoke-linux-x64:
+    name: Runtime smoke (linux-x64)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.3.11'
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build frontend
+        run: bun run build
+
+      - name: Build linux-x64 binary
+        run: ONLY_PLATFORM=linux-x64 bun run build:binary
+
+      - name: Start binary in background
+        run: |
+          HOME=$(mktemp -d) DATABASE_PATH=/tmp/smoke-test.sqlite \
+            .mango/out/linux-x64/mangostudio &
+          echo "BINARY_PID=$!" >> "$GITHUB_ENV"
+
+      - name: Wait for startup
+        run: sleep 3
+
+      - name: Health check
+        run: curl -sf http://localhost:3001/api/health
+
+      - name: Frontend root returns HTML
+        run: |
+          response=$(curl -sf http://localhost:3001/)
+          echo "$response" | grep -q '<html' || (echo "Expected HTML, got: $response" && exit 1)
+
+      - name: Assets route is not intercepted by SPA fallback
+        run: |
+          status=$(curl -o /dev/null -sw "%{http_code}" http://localhost:3001/assets/fake.js)
+          [ "$status" = "404" ] || (echo "Expected 404, got $status" && exit 1)
+
+      - name: Stop binary
+        if: always()
+        run: kill "$BINARY_PID" 2>/dev/null || true
+
+  smoke-windows-x64:
+    name: Packaging validation (windows-x64)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.3.11'
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build frontend
+        run: bun run build
+
+      - name: Build windows-x64 binary
+        run: ONLY_PLATFORM=windows-x64 bun run build:binary
+
+      - name: Validate artifact layout
+        run: |
+          [ -f .mango/out/windows-x64/mangostudio.exe ] \
+            || (echo "Missing mangostudio.exe" && exit 1)
+          [ -f .mango/out/windows-x64/public/index.html ] \
+            || (echo "Missing public/index.html" && exit 1)
+          ls .mango/out/windows-x64/public/assets/*.js > /dev/null 2>&1 \
+            || (echo "Missing JS assets" && exit 1)
+          ls .mango/out/windows-x64/public/assets/*.css > /dev/null 2>&1 \
+            || (echo "Missing CSS assets" && exit 1)
+          echo "Artifact layout OK"

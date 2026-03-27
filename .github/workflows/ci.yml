@@ -33,3 +33,8 @@ jobs:
     name: Build
     if: github.ref == 'refs/heads/main' || github.event_name == 'pull_request'
     uses: ./.github/workflows/build.yml
+
+  smoke-binary:
+    name: Smoke (binary)
+    if: github.ref == 'refs/heads/main' || github.event_name == 'pull_request'
+    uses: ./.github/workflows/smoke-binary.yml
