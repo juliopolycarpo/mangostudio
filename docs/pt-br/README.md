@@ -154,3 +154,7 @@ O tipo `Messages` é inferido diretamente do dicionário `pt-BR.ts` (`as const`)
 O comando `bun run build:binary` compila a API em binários específicos por plataforma em `out/<platform>/`.
 - O banco de dados é persistido em `~/.mangostudio/database.sqlite` por padrão.
 - Os assets do frontend são servidos a partir do diretório `public/` vizinho ao executável.
+
+## Licença
+
+Este projeto está licenciado sob a [Licença MIT](../../LICENSE).
