@@ -342,7 +342,9 @@ exec "\$(basename "\$EXECUTABLE")"
 `;
 
   await Bun.write(join(OUT_DIR, 'run.sh'), runScript);
-  await Bun.$`chmod +x ${join(OUT_DIR, 'run.sh')}`;
+  if (process.platform !== 'win32') {
+    await Bun.$`chmod +x ${join(OUT_DIR, 'run.sh')}`;
+  }
   console.log(`🚀 Runner script created: ${join(OUT_DIR, 'run.sh')}`);
 
   // Create a Windows batch file
