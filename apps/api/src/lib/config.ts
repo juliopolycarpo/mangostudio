@@ -243,6 +243,27 @@ function computeDerived(cfg: MangoConfig, tomlPath: string): void {
     cfg.corsOrigins.push(`http://${fHost}:${fPort}`);
     cfg.corsOrigins.push(`http://${fHost}:${fPort + 1}`);
   }
+
+  // Include the server's own origin for same-origin deployments (standalone binary).
+  //
+  // In standalone mode the runner scripts (run.sh / run.bat) launch the binary with
+  // API_PORT set to whatever port the user chose. The binary reads that value via
+  // process.env, applies it as cfg.server.port (step 3 of loadConfig), and then
+  // computeDerived() runs — so sPort below is already the final resolved port,
+  // regardless of whether it came from config.toml, .env, or API_PORT.
+  //
+  // The frontend is served by the API process itself at that same origin.
+  // The browser therefore sends Origin: http://<host>:<sPort> on CORS preflight
+  // requests (e.g. POST with JSON body). Both the Elysia CORS middleware and
+  // Better Auth trustedOrigins validate against corsOrigins, so this origin must
+  // be present or same-origin requests from the binary-served frontend are rejected.
+  const sHost = cfg.server.host;
+  const sPort = cfg.server.port;
+  cfg.corsOrigins.push(`http://localhost:${sPort}`);
+  cfg.corsOrigins.push(`http://127.0.0.1:${sPort}`);
+  if (sHost !== 'localhost' && sHost !== '127.0.0.1') {
+    cfg.corsOrigins.push(`http://${sHost}:${sPort}`);
+  }
 }
 
 /**
