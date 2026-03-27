@@ -24,6 +24,9 @@
     "test:coverage": "bun run --filter @mangostudio/frontend test:coverage",
     "test:ci": "bun run lint && bun run test && bun run test:coverage",
     "migrate": "bun run --filter @mangostudio/api migrate",
+    "test:build:linux-x64": "PLATFORM=linux-x64 bun run scripts/test-build.ts",
+    "test:build:windows-x64": "PLATFORM=windows-x64 bun run scripts/test-build.ts",
+    "test:build:binaries": "bun run test:build:linux-x64 && bun run test:build:windows-x64",
     "clean": "rm -rf apps/*/dist apps/*/coverage .mango/out",
     "dist-clean": "bun run clean && rm -rf node_modules apps/*/node_modules bun.lock"
   },
