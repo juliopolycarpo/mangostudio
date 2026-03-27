@@ -9,7 +9,7 @@
 
 import { parse as parseToml } from 'smol-toml';
 import { readFileSync, existsSync } from 'fs';
-import { join, isAbsolute, dirname } from 'path';
+import { join, isAbsolute } from 'path';
 import { homedir } from 'os';
 import { isStandaloneExecutable } from './runtime-paths';
 
@@ -222,8 +222,8 @@ function computeDerived(cfg: MangoConfig, tomlPath: string): void {
   // uploads.dir: auto-detect when empty, resolve relative paths against monorepo root
   if (!cfg.uploads.dir) {
     cfg.uploads.dir = isStandaloneExecutable()
-      ? join(dirname(process.execPath), 'uploads') // next to the binary in standalone mode
-      : join(MONOREPO_ROOT, 'uploads'); // repo root in dev mode
+      ? join(getHomeMangoDir(), 'uploads') // ~/.mango/uploads in standalone mode
+      : join(getMangoDir(), 'uploads'); // .mango/uploads in dev mode
   } else {
     cfg.uploads.dir = resolveUserPath(cfg.uploads.dir);
   }
