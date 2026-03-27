@@ -91,11 +91,12 @@ if (frontendExists) {
       })
     )
     .get('/*', async (context) => {
-      // Don't intercept API/uploads/scalar routes
+      // Don't intercept API/uploads/scalar/assets routes
       if (
         context.path.startsWith('/api/') ||
         context.path.startsWith('/uploads/') ||
-        context.path.startsWith('/scalar')
+        context.path.startsWith('/scalar') ||
+        context.path.startsWith('/assets/')
       ) {
         return new Response('Not Found', { status: 404 });
       }

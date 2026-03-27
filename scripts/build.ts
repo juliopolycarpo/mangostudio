@@ -17,7 +17,7 @@ const DRY_RUN = process.env.DRY_RUN === '1';
 
 // Directory paths
 const ROOT_DIR = join(import.meta.dir, '..');
-const OUT_DIR = join(ROOT_DIR, 'out');
+const OUT_DIR = join(ROOT_DIR, '.mango', 'out');
 const API_SRC = join(ROOT_DIR, 'apps/api/src/index.ts');
 const FRONTEND_DIR = join(ROOT_DIR, 'apps/frontend');
 const FRONTEND_DIST = join(FRONTEND_DIR, 'dist');
@@ -208,9 +208,9 @@ ${TARGETS.map(({ arch, target }) => `- \`${arch}\` (${target})`).join('\n')}
 
 ## Structure
 
-Each platform has its own directory under \`out/\`:
+Each platform has its own directory under \`.mango/out/\`:
 \`\`\`
-out/
+.mango/out/
 ├── linux-x64/
 │   ├── mangostudio           # Executable
 │   └── public/              # Frontend static files
@@ -241,11 +241,11 @@ out/
 3. **Running**:
    \`\`\`bash
    # Linux/macOS
-   cd out/linux-x64
+   cd .mango/out/linux-x64
    ./mangostudio
-   
+
    # Windows
-   cd out\\windows-x64
+   cd .mango\\out\\windows-x64
    mangostudio.exe
    \`\`\`
 
@@ -308,7 +308,7 @@ if [[ "\$PLATFORM" == "auto" ]]; then
   esac
 fi
 
-EXECUTABLE_DIR="\${PWD}/out/\${PLATFORM}"
+EXECUTABLE_DIR="\${PWD}/.mango/out/\${PLATFORM}"
 EXECUTABLE="\${EXECUTABLE_DIR}/mangostudio"
 
 # Windows adjustment
@@ -319,7 +319,7 @@ fi
 if [[ ! -d "\$EXECUTABLE_DIR" ]]; then
   echo "Platform directory not found: \$EXECUTABLE_DIR"
   echo "Available platforms:"
-  ls -d out/*/ 2>/dev/null | sed 's|out/||' | sed 's|/||' || echo "  (none built yet)"
+  ls -d .mango/out/*/ 2>/dev/null | sed 's|.mango/out/||' | sed 's|/||' || echo "  (none built yet)"
   exit 1
 fi
 
@@ -357,13 +357,13 @@ if "%PLATFORM%"=="" (
   set PLATFORM=windows-x64
 )
 
-set EXECUTABLE_DIR=%~dp0out\\%PLATFORM%
+set EXECUTABLE_DIR=%~dp0.mango\out\%PLATFORM%
 set EXECUTABLE=%EXECUTABLE_DIR%\\mangostudio.exe
 
 if not exist "%EXECUTABLE_DIR%" (
   echo Platform directory not found: %EXECUTABLE_DIR%
   echo Available platforms:
-  dir /b "%~dp0out" 2>nul || echo   (none built yet)
+  dir /b "%~dp0.mango\out" 2>nul || echo   (none built yet)
   exit /b 1
 )
 
@@ -387,8 +387,8 @@ cd /d "%EXECUTABLE_DIR%"
   console.log('🎉 Build completed successfully!');
   console.log(`📁 Output structure: ${OUT_DIR}/`);
   console.log('📋 To run:');
-  console.log('  Linux/macOS: ./out/run.sh');
-  console.log('  Windows:     out\\run.bat');
+  console.log('  Linux/macOS: ./.mango/out/run.sh');
+  console.log('  Windows:     .mango\\out\\run.bat');
 }
 
 // Run the build

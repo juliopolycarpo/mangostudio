@@ -11,7 +11,7 @@ apps/
       unit/
       integration/
       support/
-        harness/   # create-api-test-app.ts, create-test-db.ts
+        harness/   # create-api-test-app.ts
         mocks/     # fake collaborators
 
   frontend/
@@ -67,7 +67,6 @@ bun run --filter @mangostudio/api test:integration
 API support lives in `apps/api/tests/support/`:
 
 - `harness/create-api-test-app.ts` — wraps route plugins in a minimal Elysia app for `app.handle()` testing
-- `harness/create-test-db.ts` — in-memory SQLite with migrations for service tests
 - `mocks/` — fake collaborators (secret store, etc.)
 
 ### Frontend

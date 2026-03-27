@@ -28,7 +28,7 @@ export function getDb(): Kysely<Database> {
     }
 
     const sqlite = new SQLiteDatabase(dbPath);
-    sqlite.exec('PRAGMA journal_mode = WAL;');
+    if (dbPath !== ':memory:') sqlite.exec('PRAGMA journal_mode = WAL;');
     sqlite.exec('PRAGMA foreign_keys = ON;');
 
     dbInstance = new Kysely<Database>({
