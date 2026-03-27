@@ -82,7 +82,16 @@ await runMigrations();
 
 // Add Frontend and SPA fallback if it exists
 if (frontendExists) {
+  const indexPath = join(FRONTEND_DIR, 'index.html');
+  const serveIndex = () =>
+    new Response(Bun.file(indexPath), { headers: { 'Content-Type': 'text/html' } });
+
   app
+    // Register GET / and /index.html explicitly before staticPlugin so these
+    // routes always take precedence, regardless of the plugin's internal HTML
+    // handling behaviour (which varies between Bun compiled binaries and dev).
+    .get('/', serveIndex)
+    .get('/index.html', serveIndex)
     .use(
       staticPlugin({
         assets: FRONTEND_DIR,
@@ -100,19 +109,7 @@ if (frontendExists) {
       ) {
         return new Response('Not Found', { status: 404 });
       }
-
-      try {
-        const indexPath = join(FRONTEND_DIR, 'index.html');
-        if (existsSync(indexPath)) {
-          const content = await Bun.file(indexPath).text();
-          return new Response(content, {
-            headers: { 'Content-Type': 'text/html' },
-          });
-        }
-      } catch {
-        // Proceed to 404
-      }
-      return new Response('Not Found', { status: 404 });
+      return serveIndex();
     });
 } else {
   // If no frontend, at least return 404 for non-matched routes
