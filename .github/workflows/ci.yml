@@ -15,12 +15,14 @@ on:
       - 'perf/**'
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  # Lint and test run on every push for fast feedback on any branch.
   lint:
     name: Lint
     uses: ./.github/workflows/lint.yml
@@ -29,7 +31,14 @@ jobs:
     name: Test
     uses: ./.github/workflows/test.yml
 
+  # Build and smoke only run on PRs and main to avoid spending CI minutes
+  # on branches that haven't been reviewed yet.
   build:
     name: Build
     if: github.ref == 'refs/heads/main' || github.event_name == 'pull_request'
     uses: ./.github/workflows/build.yml
+
+  smoke:
+    name: Smoke — Binary
+    if: github.ref == 'refs/heads/main' || github.event_name == 'pull_request'
+    uses: ./.github/workflows/smoke-binary.yml
