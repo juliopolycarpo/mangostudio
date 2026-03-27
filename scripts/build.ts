@@ -132,6 +132,8 @@ async function buildForPlatform(
       `process.env.BUILD_TYPE=${JSON.stringify(BUILD_TYPE)}`,
       '--define',
       `process.env.VERSION=${JSON.stringify(VERSION)}`,
+      '--define',
+      'process.env.NODE_ENV="production"',
     ];
 
     if (BUILD_TYPE === 'production') {

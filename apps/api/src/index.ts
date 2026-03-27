@@ -82,12 +82,28 @@ await runMigrations();
 
 // Add Frontend and SPA fallback if it exists
 if (frontendExists) {
+  const indexPath = join(FRONTEND_DIR, 'index.html');
+  const serveIndex = () =>
+    new Response(Bun.file(indexPath), { headers: { 'Content-Type': 'text/html' } });
+
   app
+    // Register GET / explicitly before staticPlugin. The static plugin may
+    // register GET / with an undefined handler when running inside a compiled
+    // Bun binary (htmlBundle.default is undefined for Vite-generated HTML),
+    // so this explicit route guarantees that GET / always returns index.html.
+    .get('/', serveIndex)
     .use(
       staticPlugin({
         assets: FRONTEND_DIR,
         prefix: '/',
-        ignorePatterns: ['/api/*', '/uploads/*', '/scalar'],
+        // ignorePatterns in @elysiajs/static v1.4.7 has an inverted comparison
+        // (pattern.includes(file) instead of file.includes(pattern)), so string
+        // patterns never match. Only regex patterns work: pattern.test(file).
+        // Exclude index.html so the plugin does not register a GET /index.html
+        // handler that fails in compiled Bun binaries (import() of Vite HTML
+        // triggers Bun's HTML bundler, which can't resolve hashed asset paths).
+        // GET /index.html is handled by the SPA catch-all below instead.
+        ignorePatterns: [/index\.html$/, '/api/*', '/uploads/*', '/scalar'],
       })
     )
     .get('/*', async (context) => {
@@ -100,19 +116,7 @@ if (frontendExists) {
       ) {
         return new Response('Not Found', { status: 404 });
       }
-
-      try {
-        const indexPath = join(FRONTEND_DIR, 'index.html');
-        if (existsSync(indexPath)) {
-          const content = await Bun.file(indexPath).text();
-          return new Response(content, {
-            headers: { 'Content-Type': 'text/html' },
-          });
-        }
-      } catch {
-        // Proceed to 404
-      }
-      return new Response('Not Found', { status: 404 });
+      return serveIndex();
     });
 } else {
   // If no frontend, at least return 404 for non-matched routes
