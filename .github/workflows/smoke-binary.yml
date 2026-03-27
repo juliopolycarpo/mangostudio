@@ -2,6 +2,7 @@ name: Smoke (binary)
 
 on:
   workflow_call:
+  workflow_dispatch:
 
 jobs:
   smoke-linux-x64:
