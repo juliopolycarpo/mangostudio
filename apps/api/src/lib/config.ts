@@ -2,9 +2,10 @@
  * Centralized configuration loader for MangoStudio.
  *
  * Resolution hierarchy (highest priority wins):
- * 1. ./.mango/.env  (if it exists, overrides matching config.toml keys)
- * 2. config.toml    (dev: ./.mango/config.toml | build: ~/.mango/config.toml)
- * 3. Hardcoded defaults
+ * 1. process.env           (shell environment — works in both dev and standalone binary)
+ * 2. ./.mango/.env         (if it exists, overrides matching config.toml keys)
+ * 3. config.toml           (dev: ./.mango/config.toml | build: ~/.mango/config.toml)
+ * 4. Hardcoded defaults
  */
 
 import { parse as parseToml } from 'smol-toml';
@@ -95,7 +96,7 @@ const ENV_KEY_MAP: Record<string, (cfg: MangoConfig, value: string) => void> = {
  * regardless of the process CWD when workspace scripts run.
  * config.ts lives at apps/api/src/lib/ → 4 levels up is the repo root.
  */
-function getMangoDir(): string {
+export function getMangoDir(): string {
   return join(import.meta.dir, '../../../../.mango');
 }
 
@@ -263,12 +264,15 @@ export function loadConfig(overridePath?: string): MangoConfig {
     }
   }
 
-  // 2. Read ./.mango/.env (highest priority override)
+  // 2. Read ./.mango/.env (overrides config.toml)
   const envPath = join(getMangoDir(), '.env');
   const envOverrides = parseEnvFile(envPath);
   applyEnvOverrides(cfg, envOverrides);
 
-  // 3. Compute derived values
+  // 3. Apply process.env (highest priority — works in dev and standalone binary)
+  applyEnvOverrides(cfg, process.env as Record<string, string>);
+
+  // 4. Compute derived values
   computeDerived(cfg, tomlPath);
 
   return cfg;

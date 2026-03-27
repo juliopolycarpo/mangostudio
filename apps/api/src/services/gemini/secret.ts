@@ -15,6 +15,7 @@ import {
 } from '../secret-store/metadata';
 import { bunSecretStore, type SecretStore } from '../secret-store/store';
 import { join, dirname } from 'path';
+import { getMangoDir } from '../../lib/config';
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { parse as parseToml, stringify as stringifyToml } from 'smol-toml';
 import { randomUUID } from 'crypto';
@@ -71,7 +72,7 @@ function maskSecret(apiKey: string | null | undefined): string | undefined {
 }
 
 function getEnvFilePath(): string {
-  return join(process.cwd(), '.mango', '.env');
+  return join(getMangoDir(), '.env');
 }
 
 function getTomlFilePath(): string {
