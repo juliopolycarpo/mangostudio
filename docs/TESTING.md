@@ -184,6 +184,27 @@ Frontend coverage is written to `apps/frontend/coverage/`:
 bun run --filter @mangostudio/frontend test:coverage
 ```
 
+## Binary Smoke Tests
+
+The `scripts/test-build.ts` script validates the compiled standalone binary. It builds the frontend, compiles the binary for the requested platform, checks the artifact layout, and — when the binary can run on the current host — starts it and asserts HTTP behaviour.
+
+```bash
+bun run test:build:linux-x64    # build + runtime assertions (Linux host)
+bun run test:build:windows-x64  # build + packaging validation (cross-compile)
+bun run test:build:binaries     # both in sequence
+```
+
+Flags:
+- `SKIP_BUILD=1` — skip the build steps (use an already-built binary).
+- `API_PORT=<n>` — override the port used during the smoke run (default: 13001).
+
+Assertions performed on a Linux host:
+- `GET /api/health` → 200 JSON
+- `GET /` and `GET /index.html` → 200 HTML
+- `GET /assets/fake.js` → 404 (SPA fallback must not intercept asset routes)
+
+CI note: the `smoke-binary` job in `.github/workflows/smoke-binary.yml` runs the same checks automatically on every PR and push to main. Both jobs use `continue-on-error: true` — failures appear in the Actions dashboard but do not block lint, test, or build.
+
 ## Verification Checklist
 
 Before merging, run:
