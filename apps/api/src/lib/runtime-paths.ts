@@ -33,13 +33,6 @@ export function getRuntimeBaseDir(): string {
 }
 
 /**
- * Returns the default uploads directory for the current runtime mode.
- */
-export function getDefaultUploadsDir(): string {
-  return join(getRuntimeBaseDir(), 'uploads');
-}
-
-/**
  * Returns the default frontend public directory for the current runtime mode.
  */
 export function getDefaultFrontendDir(): string {
@@ -57,10 +50,3 @@ export function getDefaultFrontendDir(): string {
   return join(getRuntimeBaseDir(), 'public');
 }
 
-/**
- * Returns the filesystem fallback location for the SQLite database.
- * @deprecated Use getConfig().database.path from lib/config instead.
- */
-export function getDefaultDatabaseFallbackPath(): string {
-  return join(getRuntimeBaseDir(), '.mango', 'database.sqlite');
-}
