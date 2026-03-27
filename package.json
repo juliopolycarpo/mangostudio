@@ -24,7 +24,7 @@
     "test:coverage": "bun run --filter @mangostudio/frontend test:coverage",
     "test:ci": "bun run lint && bun run test && bun run test:coverage",
     "migrate": "bun run --filter @mangostudio/api migrate",
-    "clean": "rm -rf apps/*/dist apps/*/coverage out",
+    "clean": "rm -rf apps/*/dist apps/*/coverage .mango/out",
     "dist-clean": "bun run clean && rm -rf node_modules apps/*/node_modules bun.lock"
   },
   "devDependencies": {
