@@ -1,59 +1,51 @@
 /**
- * Regression tests for SPA catch-all fallback routing behaviour.
+ * Regression tests for SPA onError NOT_FOUND fallback routing behaviour.
  *
- * Verifies that the /assets/ guard added in apps/api/src/index.ts prevents
- * the SPA catch-all from intercepting static asset requests.
+ * Verifies that isSpaRoute() correctly identifies which paths should be
+ * served as index.html and which should pass through as 404.
  *
  * The guard function is tested in isolation — no HTTP server needed.
- * If someone removes or narrows the /assets/ check, these tests fail.
+ * If someone narrows or removes checks inside isSpaRoute(), these tests fail.
  */
 import { describe, test, expect } from 'bun:test';
 import { isStandaloneExecutable } from '../../../src/lib/runtime-paths';
+import { isSpaRoute } from '../../../src/lib/spa-guard';
 
-/**
- * Replicates the guard condition from the SPA fallback handler in
- * apps/api/src/index.ts. Returns true when the path should be served
- * as the SPA index.html, false when it should pass through (404).
- */
-function shouldServeSpa(path: string): boolean {
-  return (
-    !path.startsWith('/api/') &&
-    !path.startsWith('/uploads/') &&
-    !path.startsWith('/scalar') &&
-    !path.startsWith('/assets/')
-  );
-}
-
-describe('SPA catch-all fallback guard', () => {
+describe('SPA onError NOT_FOUND guard', () => {
   test('/assets/*.js paths are NOT served as SPA', () => {
-    expect(shouldServeSpa('/assets/app.js')).toBe(false);
-    expect(shouldServeSpa('/assets/vendor.js')).toBe(false);
-    expect(shouldServeSpa('/assets/index-AbCd1234.js')).toBe(false);
+    expect(isSpaRoute('/assets/app.js')).toBe(false);
+    expect(isSpaRoute('/assets/vendor.js')).toBe(false);
+    expect(isSpaRoute('/assets/index-AbCd1234.js')).toBe(false);
   });
 
   test('/assets/*.css paths are NOT served as SPA', () => {
-    expect(shouldServeSpa('/assets/style.css')).toBe(false);
-    expect(shouldServeSpa('/assets/main-XyZ789.css')).toBe(false);
+    expect(isSpaRoute('/assets/style.css')).toBe(false);
+    expect(isSpaRoute('/assets/main-XyZ789.css')).toBe(false);
   });
 
   test('/api/* paths are NOT served as SPA', () => {
-    expect(shouldServeSpa('/api/health')).toBe(false);
-    expect(shouldServeSpa('/api/chats')).toBe(false);
+    expect(isSpaRoute('/api/health')).toBe(false);
+    expect(isSpaRoute('/api/chats')).toBe(false);
+  });
+
+  test('/api/auth/* paths are NOT served as SPA', () => {
+    expect(isSpaRoute('/api/auth/get-session')).toBe(false);
+    expect(isSpaRoute('/api/auth/sign-in/email')).toBe(false);
   });
 
   test('/uploads/* paths are NOT served as SPA', () => {
-    expect(shouldServeSpa('/uploads/image.png')).toBe(false);
+    expect(isSpaRoute('/uploads/image.png')).toBe(false);
   });
 
   test('/scalar is NOT served as SPA', () => {
-    expect(shouldServeSpa('/scalar')).toBe(false);
-    expect(shouldServeSpa('/scalar/something')).toBe(false);
+    expect(isSpaRoute('/scalar')).toBe(false);
+    expect(isSpaRoute('/scalar/something')).toBe(false);
   });
 
   test('generic SPA routes ARE served as SPA', () => {
-    expect(shouldServeSpa('/')).toBe(true);
-    expect(shouldServeSpa('/some-page')).toBe(true);
-    expect(shouldServeSpa('/settings')).toBe(true);
-    expect(shouldServeSpa('/index.html')).toBe(true);
+    expect(isSpaRoute('/')).toBe(true);
+    expect(isSpaRoute('/some-page')).toBe(true);
+    expect(isSpaRoute('/settings')).toBe(true);
+    expect(isSpaRoute('/index.html')).toBe(true);
   });
 });

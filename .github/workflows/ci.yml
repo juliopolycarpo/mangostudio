@@ -31,14 +31,10 @@ jobs:
     name: Test
     uses: ./.github/workflows/test.yml
 
-  # Build and smoke only run on PRs and main to avoid spending CI minutes
-  # on branches that haven't been reviewed yet.
   build:
     name: Build
-    if: github.ref == 'refs/heads/main' || github.event_name == 'pull_request'
     uses: ./.github/workflows/build.yml
 
   smoke:
     name: Smoke — Binary
-    if: github.ref == 'refs/heads/main' || github.event_name == 'pull_request'
     uses: ./.github/workflows/smoke-binary.yml
