@@ -202,6 +202,16 @@ async function smokeTest(): Promise<void> {
       if (res.status !== 404) fail(`/assets/fake.js should return 404, got ${res.status}`);
       pass('/assets/fake.js → 404 (SPA fallback bypassed)');
     }
+
+    // /api/auth/get-session → NOT 404, content-type JSON
+    // Verifies that the SPA onError handler does NOT intercept auth GET routes.
+    {
+      const res = await fetch(`http://localhost:${PORT}/api/auth/get-session`);
+      if (res.status === 404) fail('/api/auth/get-session returned 404 — SPA fallback is intercepting auth routes');
+      const ct = res.headers.get('content-type') ?? '';
+      if (!ct.includes('application/json')) fail(`/api/auth/get-session content-type is not JSON: ${ct}`);
+      pass('/api/auth/get-session → handled by Better Auth (not intercepted by SPA fallback)');
+    }
   } finally {
     proc.kill();
     await proc.exited.catch(() => {});
