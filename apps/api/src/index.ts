@@ -18,6 +18,7 @@ import { authTables } from './db/migrations/006_auth_tables';
 import { addUserOwnership } from './db/migrations/007_add_user_ownership';
 import { getDefaultFrontendDir } from './lib/runtime-paths';
 import { getConfig } from './lib/config';
+import { isSpaRoute } from './lib/spa-guard';
 import { app } from './app';
 
 const PORT = getConfig().server.port;
@@ -102,27 +103,26 @@ if (frontendExists) {
         // Exclude index.html so the plugin does not register a GET /index.html
         // handler that fails in compiled Bun binaries (import() of Vite HTML
         // triggers Bun's HTML bundler, which can't resolve hashed asset paths).
-        // GET /index.html is handled by the SPA catch-all below instead.
+        // GET /index.html is handled by the onError NOT_FOUND handler below.
         ignorePatterns: [/index\.html$/, '/api/*', '/uploads/*', '/scalar'],
       })
     )
-    .get('/*', async (context) => {
-      // Don't intercept API/uploads/scalar/assets routes
-      if (
-        context.path.startsWith('/api/') ||
-        context.path.startsWith('/uploads/') ||
-        context.path.startsWith('/scalar') ||
-        context.path.startsWith('/assets/')
-      ) {
-        return new Response('Not Found', { status: 404 });
+    .onError(({ code, request }) => {
+      if (code === 'NOT_FOUND' && request.method === 'GET') {
+        const { pathname } = new URL(request.url);
+        if (isSpaRoute(pathname)) {
+          return new Response(Bun.file(indexPath), {
+            headers: { 'Content-Type': 'text/html' },
+          });
+        }
       }
-      return serveIndex();
     });
 } else {
-  // If no frontend, at least return 404 for non-matched routes
-  app.all('/*', (context) => {
-    if (context.path.startsWith('/api/')) return new Response('Not Found', { status: 404 });
-    return new Response('Frontend not found. API is running.', { status: 404 });
+  // If no frontend, return a clear 404 for all unmatched routes
+  app.onError(({ code }) => {
+    if (code === 'NOT_FOUND') {
+      return new Response('Frontend not found. API is running.', { status: 404 });
+    }
   });
 }
 
