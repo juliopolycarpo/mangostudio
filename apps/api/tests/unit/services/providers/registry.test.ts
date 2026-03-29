@@ -1,0 +1,41 @@
+import { describe, expect, it, beforeEach } from 'bun:test';
+import { registerProvider, getProvider } from '../../../../src/services/providers/registry';
+import type { AIProvider } from '../../../../src/services/providers/types';
+
+function makeStubProvider(type: 'gemini' | 'openai-compatible' | 'anthropic'): AIProvider {
+  return {
+    providerType: type,
+    async generateText() {
+      return { text: 'stub' };
+    },
+    async listModels() {
+      return [];
+    },
+    async validateApiKey() {},
+    async resolveApiKey() {
+      return 'stub-key';
+    },
+  };
+}
+
+describe('provider registry', () => {
+  it('registers and retrieves a provider by type', () => {
+    const stub = makeStubProvider('gemini');
+    registerProvider(stub);
+    expect(getProvider('gemini')).toBe(stub);
+  });
+
+  it('throws when a provider has not been registered', () => {
+    expect(() => getProvider('anthropic')).toThrow(
+      "AI provider 'anthropic' is not registered."
+    );
+  });
+
+  it('replaces an existing registration when the same type is re-registered', () => {
+    const first = makeStubProvider('gemini');
+    const second = makeStubProvider('gemini');
+    registerProvider(first);
+    registerProvider(second);
+    expect(getProvider('gemini')).toBe(second);
+  });
+});
