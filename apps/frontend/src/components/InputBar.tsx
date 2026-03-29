@@ -11,7 +11,14 @@ interface Props {
   onStop?: () => void;
 }
 
-export function InputBar({ composerMode, onModeChange, onSubmit, disabled, isGenerating, onStop }: Props) {
+export function InputBar({
+  composerMode,
+  onModeChange,
+  onSubmit,
+  disabled,
+  isGenerating,
+  onStop,
+}: Props) {
   const [prompt, setPrompt] = useState('');
   const [referenceImage, setReferenceImage] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
