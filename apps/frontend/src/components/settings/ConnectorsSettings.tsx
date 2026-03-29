@@ -113,13 +113,14 @@ export function ConnectorsSettings({ modelCatalog, reloadModelCatalog }: Connect
 
       if (!response.ok) throw new Error('Failed to delete connector');
 
-      await loadStatus();
       await reloadModelCatalog();
-      setConfirmDeleteId(null);
       toast(s.deleteSuccess, 'success');
     } catch (err) {
       console.error(err);
       toast('Failed to delete connector', 'error');
+    } finally {
+      await loadStatus();
+      setConfirmDeleteId(null);
     }
   };
 
