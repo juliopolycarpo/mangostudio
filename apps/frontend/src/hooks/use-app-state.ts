@@ -1,5 +1,5 @@
 /* global console */
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, useRef } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import type { InteractionMode, Message } from '@mangostudio/shared';
 import { useChats } from './use-chats';
@@ -9,12 +9,17 @@ import { useQueryClient } from '@tanstack/react-query';
 import { messageKeys } from './use-messages-query';
 import { galleryKeys } from './use-gallery-query';
 import { resolveActiveModeModel } from '../utils/gemini-models';
-import { generateImage, respondText, uploadReferenceImage } from '../services/generation-service';
+import {
+  generateImage,
+  respondTextStream,
+  uploadReferenceImage,
+} from '../services/generation-service';
 
 export function useAppState() {
   // Core state
   const [composerMode, setComposerMode] = useState<InteractionMode>('chat');
   const [isGenerating, setIsGenerating] = useState(false);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   // Sub-hooks
   const chats = useChats();
@@ -160,6 +165,10 @@ export function useAppState() {
     [queryClient]
   );
 
+  const handleStop = useCallback(() => {
+    abortControllerRef.current?.abort();
+  }, []);
+
   // Generation handlers
   const handleRespond = useCallback(
     async (prompt: string) => {
@@ -201,48 +210,57 @@ export function useAppState() {
 
       appendOptimisticMessages(activeChatId!, [optimisticUserMsg, optimisticAiMsg]);
 
-      try {
-        const { userMessage, aiMessage } = await respondText({
-          chatId: activeChatId!,
-          prompt,
-          model,
-          systemPrompt: settings.globalTextSystemPrompt || undefined,
-        });
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
+      let accumulatedText = '';
 
-        replaceOptimisticMessages(
-          activeChatId!,
-          [optimisticUserMsgId, optimisticAiMsgId],
-          [
-            {
-              id: userMessage.id,
-              chatId: userMessage.chatId,
-              role: userMessage.role,
-              text: userMessage.text,
-              timestamp: new Date(userMessage.timestamp),
-              interactionMode: 'chat',
-            },
-            {
-              id: aiMessage.id,
-              chatId: aiMessage.chatId,
-              role: aiMessage.role,
-              text: aiMessage.text,
-              timestamp: new Date(aiMessage.timestamp),
-              isGenerating: false,
-              generationTime: aiMessage.generationTime,
-              modelName: aiMessage.modelName,
-              interactionMode: 'chat',
-            },
-          ]
+      try {
+        await respondTextStream(
+          {
+            chatId: activeChatId!,
+            prompt,
+            model,
+            systemPrompt: settings.globalTextSystemPrompt || undefined,
+          },
+          (chunk) => {
+            if (chunk.error) {
+              updateOptimisticMessage(activeChatId!, optimisticAiMsgId, {
+                isGenerating: false,
+                text: chunk.error,
+              });
+              return;
+            }
+            if (!chunk.done) {
+              accumulatedText += chunk.text ?? '';
+              updateOptimisticMessage(activeChatId!, optimisticAiMsgId, {
+                text: accumulatedText,
+              });
+            } else {
+              updateOptimisticMessage(activeChatId!, optimisticAiMsgId, {
+                isGenerating: false,
+                text: accumulatedText,
+                generationTime: chunk.generationTime,
+              });
+            }
+          },
+          controller.signal
         );
       } catch (error: unknown) {
-        console.error('[respond]', error);
-        const errorText =
-          error instanceof Error ? error.message : 'Failed to get a response. Please try again.';
-        updateOptimisticMessage(activeChatId!, optimisticAiMsgId, {
-          isGenerating: false,
-          text: errorText,
-        });
+        const isAbort = error instanceof Error && error.name === 'AbortError';
+        if (isAbort) {
+          // User stopped generation — keep partial text visible
+          updateOptimisticMessage(activeChatId!, optimisticAiMsgId, { isGenerating: false });
+        } else {
+          console.error('[respond]', error);
+          const errorText =
+            error instanceof Error ? error.message : 'Failed to get a response. Please try again.';
+          updateOptimisticMessage(activeChatId!, optimisticAiMsgId, {
+            isGenerating: false,
+            text: errorText,
+          });
+        }
       } finally {
+        abortControllerRef.current = null;
         setIsGenerating(false);
         void chats.loadChats();
         void queryClient.invalidateQueries({ queryKey: messageKeys.list(activeChatId!) });
@@ -253,7 +271,6 @@ export function useAppState() {
       getActiveModel,
       settings.globalTextSystemPrompt,
       appendOptimisticMessages,
-      replaceOptimisticMessages,
       updateOptimisticMessage,
       queryClient,
     ]
@@ -412,6 +429,7 @@ export function useAppState() {
     handleSelectChat,
     handleNavigate,
     handleSubmit,
+    handleStop,
     initialize,
     refreshCatalog: catalog.refreshCatalog,
   };

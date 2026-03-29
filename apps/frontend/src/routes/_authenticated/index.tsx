@@ -16,6 +16,8 @@ function ChatRoute() {
       onModeChange={app.setComposerMode}
       onSubmit={app.handleSubmit}
       disabled={app.isGenerating}
+      isGenerating={app.isGenerating}
+      onStop={app.handleStop}
     />
   );
 }

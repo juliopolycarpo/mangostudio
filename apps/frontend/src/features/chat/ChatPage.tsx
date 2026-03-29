@@ -11,6 +11,8 @@ interface ChatPageProps {
   onModeChange: (mode: InteractionMode) => void;
   onSubmit: (prompt: string, referenceImage?: File | null) => void;
   disabled: boolean;
+  isGenerating: boolean;
+  onStop: () => void;
 }
 
 export function ChatPage({
@@ -19,6 +21,8 @@ export function ChatPage({
   onModeChange,
   onSubmit,
   disabled,
+  isGenerating,
+  onStop,
 }: ChatPageProps) {
   const { data, status } = useMessagesQuery(chatId);
   const { t } = useI18n();
@@ -44,6 +48,8 @@ export function ChatPage({
         onModeChange={onModeChange}
         onSubmit={onSubmit}
         disabled={disabled}
+        isGenerating={isGenerating}
+        onStop={onStop}
       />
     </>
   );

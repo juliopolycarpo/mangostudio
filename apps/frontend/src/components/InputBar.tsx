@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { MessageSquare, ImagePlus, PlusCircle, Mic, Zap, Send, X } from 'lucide-react';
+import { MessageSquare, ImagePlus, PlusCircle, Mic, Zap, Send, Square, X } from 'lucide-react';
 import type { InteractionMode } from '@mangostudio/shared';
 
 interface Props {
@@ -7,9 +7,11 @@ interface Props {
   onModeChange: (mode: InteractionMode) => void;
   onSubmit: (prompt: string, referenceImage?: File | null) => void;
   disabled?: boolean;
+  isGenerating?: boolean;
+  onStop?: () => void;
 }
 
-export function InputBar({ composerMode, onModeChange, onSubmit, disabled }: Props) {
+export function InputBar({ composerMode, onModeChange, onSubmit, disabled, isGenerating, onStop }: Props) {
   const [prompt, setPrompt] = useState('');
   const [referenceImage, setReferenceImage] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -128,28 +130,40 @@ export function InputBar({ composerMode, onModeChange, onSubmit, disabled }: Pro
           />
 
           <div className="flex items-center gap-1 pr-1">
-            <button
-              type="button"
-              className="w-10 h-10 flex items-center justify-center rounded-xl text-on-surface-variant hover:bg-surface-container-high transition-all"
-            >
-              <Mic size={20} />
-            </button>
-            <button
-              type="submit"
-              disabled={disabled || !prompt.trim()}
-              className="h-10 px-4 rounded-xl text-on-primary font-bold text-xs flex items-center gap-2 hover:brightness-110 transition-all active:scale-95 shadow-lg shadow-primary-container/20 disabled:opacity-50"
-              style={{ background: 'linear-gradient(135deg, #c0c1ff 0%, #4b4dd8 100%)' }}
-            >
-              {isImageMode ? (
-                <>
-                  Generate <Zap size={16} />
-                </>
-              ) : (
-                <>
-                  Send <Send size={16} />
-                </>
-              )}
-            </button>
+            {!isGenerating && (
+              <button
+                type="button"
+                className="w-10 h-10 flex items-center justify-center rounded-xl text-on-surface-variant hover:bg-surface-container-high transition-all"
+              >
+                <Mic size={20} />
+              </button>
+            )}
+            {isGenerating && !isImageMode ? (
+              <button
+                type="button"
+                onClick={onStop}
+                className="h-10 px-4 rounded-xl font-bold text-xs flex items-center gap-2 transition-all active:scale-95 bg-surface-container-high text-on-surface hover:bg-error/20 hover:text-error"
+              >
+                Stop <Square size={14} />
+              </button>
+            ) : (
+              <button
+                type="submit"
+                disabled={disabled || !prompt.trim()}
+                className="h-10 px-4 rounded-xl text-on-primary font-bold text-xs flex items-center gap-2 hover:brightness-110 transition-all active:scale-95 shadow-lg shadow-primary-container/20 disabled:opacity-50"
+                style={{ background: 'linear-gradient(135deg, #c0c1ff 0%, #4b4dd8 100%)' }}
+              >
+                {isImageMode ? (
+                  <>
+                    Generate <Zap size={16} />
+                  </>
+                ) : (
+                  <>
+                    Send <Send size={16} />
+                  </>
+                )}
+              </button>
+            )}
           </div>
         </form>
         <p className="text-center text-[10px] text-on-surface-variant/40 mt-3 font-label">
