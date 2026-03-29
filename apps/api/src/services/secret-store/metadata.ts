@@ -45,6 +45,18 @@ export async function listSecretMetadata(
 }
 
 /**
+ * Loads all metadata records across all providers for a user.
+ */
+export async function listAllSecretMetadata(userId: string): Promise<SecretMetadataRow[]> {
+  const db = getDb();
+  return db
+    .selectFrom('secret_metadata')
+    .selectAll()
+    .where((eb) => eb.or([eb('userId', '=', userId), eb('userId', 'is', null)]))
+    .execute();
+}
+
+/**
  * Loads metadata for a specific connector ID.
  *
  * @param id - Connector unique identifier.
