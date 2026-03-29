@@ -5,6 +5,12 @@
 /** Represents the current input composer mode. */
 export type InteractionMode = 'chat' | 'image';
 
+/** Supported AI provider types. */
+export type ProviderType = 'gemini' | 'openai-compatible' | 'anthropic';
+
+/** Sub-provider identifiers for the OpenAI-compatible adapter. */
+export type OpenAICompatibleSubProvider = 'openai' | 'deepseek' | 'openrouter';
+
 /** Represents the source of a configured provider secret. */
 export type SecretSource = 'bun-secrets' | 'environment' | 'config-file' | 'none';
 
@@ -79,6 +85,7 @@ export interface SecretMetadataRow {
   lastValidationError: string | null;
   enabledModels: string; // JSON string array
   userId: string | null;
+  baseUrl: string | null;
 }
 
 /** Gallery item used for displaying images across chats. */

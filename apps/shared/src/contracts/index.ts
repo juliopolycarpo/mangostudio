@@ -3,7 +3,7 @@
  * These define the shape of data exchanged between frontend and API.
  */
 
-import type { InteractionMode, SecretSource, SecretMetadataRow } from '../types/index';
+import type { InteractionMode, SecretSource, SecretMetadataRow, ProviderType } from '../types/index';
 
 /** Body for POST /api/chats */
 export interface CreateChatBody {
@@ -85,22 +85,27 @@ export interface Connector extends Omit<
   SecretMetadataRow,
   'configured' | 'enabledModels' | 'provider'
 > {
-  provider: 'gemini';
+  provider: ProviderType;
   configured: boolean;
   enabledModels: string[];
   userId: string | null;
 }
 
-/** Current runtime-safe status for the stored Gemini API key. */
-export interface GeminiSecretStatus {
+/** Current runtime-safe status for configured connectors. */
+export interface ConnectorStatus {
   connectors: Connector[];
 }
+
+/** @deprecated Use ConnectorStatus instead. */
+export type GeminiSecretStatus = ConnectorStatus;
 
 /** Body for POST /api/settings/connectors/gemini */
 export interface AddConnectorBody {
   name: string;
   apiKey: string;
   source: SecretSource;
+  provider?: ProviderType;
+  baseUrl?: string;
 }
 
 /** Body for PUT /api/settings/connectors/gemini/:id/models */
@@ -113,31 +118,49 @@ export interface DeleteGeminiSecretResponse {
   success: true;
 }
 
-/** Runtime state of the cached Gemini model catalog. */
-export type GeminiModelCatalogStatus = 'idle' | 'loading' | 'ready' | 'error';
+/** Runtime state of the cached model catalog. */
+export type ModelCatalogStatus = 'idle' | 'loading' | 'ready' | 'error';
 
-/** A UI-safe Gemini model option discovered from the provider. */
-export interface GeminiModelOption {
+/** @deprecated Use ModelCatalogStatus instead. */
+export type GeminiModelCatalogStatus = ModelCatalogStatus;
+
+/** Provider capabilities for a model. */
+export interface ModelCapabilities {
+  text: boolean;
+  image: boolean;
+  streaming: boolean;
+}
+
+/** A UI-safe model option discovered from a provider. */
+export interface ModelOption {
   modelId: string;
   resourceName: string;
   displayName: string;
   description?: string;
   version?: string;
   supportedActions: string[];
+  provider?: ProviderType;
+  capabilities?: ModelCapabilities;
 }
 
-/** Cached Gemini model catalog returned by the API settings route. */
-export interface GeminiModelCatalogResponse {
+/** @deprecated Use ModelOption instead. */
+export type GeminiModelOption = ModelOption;
+
+/** Cached model catalog returned by the API settings route. */
+export interface ModelCatalogResponse {
   configured: boolean;
-  status: GeminiModelCatalogStatus;
+  status: ModelCatalogStatus;
   lastSyncedAt?: number;
   error?: string;
-  allModels: GeminiModelOption[];
-  textModels: GeminiModelOption[];
-  imageModels: GeminiModelOption[];
-  discoveredTextModels: GeminiModelOption[];
-  discoveredImageModels: GeminiModelOption[];
+  allModels: ModelOption[];
+  textModels: ModelOption[];
+  imageModels: ModelOption[];
+  discoveredTextModels: ModelOption[];
+  discoveredImageModels: ModelOption[];
 }
+
+/** @deprecated Use ModelCatalogResponse instead. */
+export type GeminiModelCatalogResponse = ModelCatalogResponse;
 
 /** A persisted message returned by the generate or respond endpoint. */
 export interface GeneratedMessage {
