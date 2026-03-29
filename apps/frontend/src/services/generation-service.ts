@@ -1,6 +1,7 @@
 /* global console */
 import type { Message } from '@mangostudio/shared';
 import { client } from '../lib/api-client';
+import { getApiBaseUrl } from '../lib/api-base-url';
 
 export interface GenerateImageRequest {
   chatId: string;
@@ -60,4 +61,74 @@ export async function respondText(request: RespondTextRequest): Promise<RespondT
   }
 
   return data as unknown as RespondTextResponse;
+}
+
+/** A single event received from the SSE streaming endpoint. */
+export interface StreamChunk {
+  text?: string;
+  done: boolean;
+  messageId?: string;
+  generationTime?: string;
+  error?: string;
+}
+
+/**
+ * Calls POST /api/respond/stream and invokes onChunk for each SSE event.
+ * Throws if the request fails or the stream sends an error event.
+ *
+ * @param request - Same body as respondText.
+ * @param onChunk - Called for every parsed SSE data event.
+ * @param signal - Optional AbortSignal to cancel the stream.
+ */
+export async function respondTextStream(
+  request: RespondTextRequest,
+  onChunk: (chunk: StreamChunk) => void,
+  signal?: AbortSignal
+): Promise<void> {
+  const response = await fetch(`${getApiBaseUrl()}/api/respond/stream`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(request),
+    credentials: 'include',
+    signal,
+  });
+
+  if (!response.ok) {
+    let message = 'Stream request failed';
+    try {
+      const body = await response.json();
+      message = (body as any).error ?? message;
+    } catch {
+      // ignore parse errors
+    }
+    throw new Error(message);
+  }
+
+  const reader = response.body!.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() ?? '';
+
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          try {
+            const chunk = JSON.parse(line.slice(6)) as StreamChunk;
+            onChunk(chunk);
+          } catch {
+            // Ignore malformed SSE lines
+          }
+        }
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
 }
