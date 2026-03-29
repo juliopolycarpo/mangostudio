@@ -18,6 +18,7 @@
     "test:integration": "bun test tests/integration"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.80.0",
     "@elysiajs/cors": "^1.4.1",
     "@elysiajs/openapi": "^1.4.14",
     "@elysiajs/static": "^1.4.7",
