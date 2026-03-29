@@ -30,6 +30,13 @@ export function getProvider(type: ProviderType): AIProvider {
 }
 
 /**
+ * Returns the list of all currently registered provider types.
+ */
+export function listRegisteredProviderTypes(): ProviderType[] {
+  return Array.from(registry.keys());
+}
+
+/**
  * Resolves the provider responsible for a given model by looking up the
  * connector that has the model enabled in secret_metadata.
  * Falls back to 'gemini' when no connector row is found.
