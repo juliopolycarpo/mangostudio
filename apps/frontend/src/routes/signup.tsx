@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Card } from '@/components/ui/Card';
 import { useI18n } from '@/hooks/use-i18n';
+import { Logo } from '@/components/ui/Logo';
 
 export const Route = createFileRoute('/signup')({
   component: SignupPage,
@@ -48,9 +49,12 @@ function SignupPage() {
           action="#"
           className="space-y-5"
         >
-          <h1 className="font-headline text-2xl font-semibold text-center text-on-surface">
-            {t.auth.signupTitle}
-          </h1>
+          <div className="flex flex-col items-center gap-2 mb-4">
+            <Logo className="w-24 h-24" />
+            <h1 className="font-headline text-2xl font-semibold text-center text-on-surface">
+              {t.auth.signupTitle}
+            </h1>
+          </div>
 
           {error && (
             <p className="text-xs text-red-400 text-center bg-red-500/10 rounded-lg px-3 py-2">
