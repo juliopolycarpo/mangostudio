@@ -1,12 +1,13 @@
 /**
  * Streaming respond route: text chat endpoint using SSE.
  * Streams the AI response incrementally via Server-Sent Events.
+ * Resolves the AI provider dynamically from the requested model.
  */
 
 import { Elysia, t } from 'elysia';
-import { getDefaultTextModel, getGeminiModelCatalog, hasTextModel } from '../services/gemini';
-import '../services/providers'; // ensure GeminiProvider is registered
-import { getProvider } from '../services/providers/registry';
+import '../services/providers'; // ensure all providers are registered
+import { getProviderForModel } from '../services/providers/registry';
+import { getUnifiedModelCatalog } from '../services/providers/catalog';
 import { getDb } from '../db/database';
 import { requireAuth } from '../plugins/auth-middleware';
 
@@ -39,6 +40,7 @@ export const respondStreamRoutes = (app: Elysia) =>
         '/respond/stream',
         async ({ body, set, user }) => {
           const db = getDb();
+          const userId = user?.id ?? '';
 
           // Verify chat ownership
           const chat = await db
@@ -47,32 +49,24 @@ export const respondStreamRoutes = (app: Elysia) =>
             .where('id', '=', body.chatId)
             .executeTakeFirst();
 
-          if (!chat || chat.userId !== (user?.id ?? '')) {
+          if (!chat || chat.userId !== userId) {
             set.status = 404;
             return { error: 'Chat not found' };
           }
 
-          const now = Date.now();
-          const modelCatalog = await getGeminiModelCatalog(user?.id ?? '');
-          const model = body.model?.trim() || getDefaultTextModel(user?.id ?? '');
+          // Resolve model: explicit or first available from unified catalog
+          let model = body.model?.trim() || '';
+          if (!model) {
+            const catalog = await getUnifiedModelCatalog(userId);
+            model = catalog.textModels[0]?.modelId ?? '';
+          }
 
           if (!model) {
             set.status = 503;
-            return { error: 'No Gemini text model is currently available for this API key.' };
+            return { error: 'No text model available. Configure a connector in Settings.' };
           }
 
-          if (modelCatalog.status !== 'ready') {
-            set.status = 503;
-            return {
-              error:
-                'Gemini model catalog is unavailable right now. Refresh Settings and try again.',
-            };
-          }
-
-          if (!hasTextModel(user?.id ?? '', model)) {
-            set.status = 422;
-            return { error: 'Selected Gemini model is no longer available for this API key.' };
-          }
+          const now = Date.now();
 
           // 1. Persist the user text message
           const userMsgId = generateId();
@@ -118,10 +112,9 @@ export const respondStreamRoutes = (app: Elysia) =>
           // 3. Stream AI response as SSE
           const aiMsgId = generateId();
           const startTime = Date.now();
-          const provider = getProvider('gemini');
+          const provider = await getProviderForModel(model, userId);
 
           // Capture context before the async boundary inside ReadableStream
-          const userId = user?.id ?? '';
           const chatId = body.chatId;
           const prompt = body.prompt;
           const systemPrompt = body.systemPrompt;

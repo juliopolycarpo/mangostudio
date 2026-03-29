@@ -1,11 +1,12 @@
 /**
  * Generate route: unified image generation endpoint.
+ * Resolves the AI provider dynamically from the requested model.
  */
 
 import { Elysia, t } from 'elysia';
-import { getDefaultImageModel, getGeminiModelCatalog, hasImageModel } from '../services/gemini';
-import '../services/providers'; // ensure GeminiProvider is registered
-import { getProvider } from '../services/providers/registry';
+import '../services/providers'; // ensure all providers are registered
+import { getProviderForModel } from '../services/providers/registry';
+import { getUnifiedModelCatalog } from '../services/providers/catalog';
 import { getDb } from '../db/database';
 import { requireAuth } from '../plugins/auth-middleware';
 
@@ -20,13 +21,14 @@ export const generateRoutes = (app: Elysia) =>
       .use(requireAuth)
       /**
        * POST /api/generate
-       * Unified endpoint: persists user message, generates image via Gemini,
-       * persists AI message, and returns both.
+       * Unified endpoint: persists user message, generates image via the resolved
+       * provider, persists AI message, and returns both.
        */
       .post(
         '/generate',
         async ({ body, set, user }) => {
           const db = getDb();
+          const userId = user?.id ?? '';
 
           // Verify chat ownership
           const chat = await db
@@ -35,32 +37,24 @@ export const generateRoutes = (app: Elysia) =>
             .where('id', '=', body.chatId)
             .executeTakeFirst();
 
-          if (!chat || chat.userId !== (user?.id ?? '')) {
+          if (!chat || chat.userId !== userId) {
             set.status = 404;
             return { error: 'Chat not found' };
           }
 
-          const now = Date.now();
-          const modelCatalog = await getGeminiModelCatalog(user?.id ?? '');
-          const model = body.model?.trim() || getDefaultImageModel(user?.id ?? '');
+          // Resolve model: explicit or first available image model
+          let model = body.model?.trim() || '';
+          if (!model) {
+            const catalog = await getUnifiedModelCatalog(userId);
+            model = catalog.imageModels[0]?.modelId ?? '';
+          }
 
           if (!model) {
             set.status = 503;
-            return { error: 'No Gemini image model is currently available for this API key.' };
+            return { error: 'No image model available. Configure a connector in Settings.' };
           }
 
-          if (modelCatalog.status !== 'ready') {
-            set.status = 503;
-            return {
-              error:
-                'Gemini model catalog is unavailable right now. Refresh Settings and try again.',
-            };
-          }
-
-          if (!hasImageModel(user?.id ?? '', model)) {
-            set.status = 422;
-            return { error: 'Selected Gemini model is no longer available for this API key.' };
-          }
+          const now = Date.now();
 
           // 1. Persist the user message
           const userMsgId = generateId();
@@ -99,18 +93,18 @@ export const generateRoutes = (app: Elysia) =>
             .where('id', '=', body.chatId)
             .execute();
 
-          // 2. Generate image via provider
+          // 2. Generate image via dynamic provider
           const aiMsgId = generateId();
           const startTime = Date.now();
 
           try {
-            const provider = getProvider('gemini');
+            const provider = await getProviderForModel(model, userId);
             if (!provider.generateImage) {
               set.status = 422;
               return { error: 'This provider does not support image generation.' };
             }
             const { imageUrl } = await provider.generateImage({
-              userId: user?.id ?? '',
+              userId,
               prompt: body.prompt,
               systemPrompt: body.systemPrompt,
               referenceImageUrl: body.referenceImageUrl,
@@ -119,11 +113,7 @@ export const generateRoutes = (app: Elysia) =>
             });
 
             const generationTime = `${((Date.now() - startTime) / 1000).toFixed(1)}s`;
-            const styleParams = [
-              'Cinematic',
-              `${body.imageQuality ?? '1K'} Detail`,
-              model === 'gemini-3-pro-image-preview' ? 'Pro' : 'Vivid',
-            ];
+            const styleParams = [body.imageQuality ?? '1K'];
 
             // 3. Persist the AI message with the generated image
             const aiMessage = {
