@@ -3,6 +3,7 @@ import { MessageSquare, LayoutGrid, Settings, Plus, Pencil, Trash2 } from 'lucid
 import type { Chat } from '@mangostudio/shared';
 import { useToast } from '@/components/ui';
 import { useI18n } from '@/hooks/use-i18n';
+import { Logo } from '@/components/ui/Logo';
 
 interface Props {
   currentPage: 'chat' | 'gallery' | 'settings';
@@ -78,8 +79,9 @@ export function Sidebar({
 
   return (
     <aside className="bg-surface-container-low hidden md:flex flex-col h-full border-r border-outline-variant/20 w-64 fixed left-0 top-0 z-50">
-      <div className="px-6 py-8 border-b-2 mb-8 border-indigo-500">
-        <h1 className="font-headline text-lg font-semibold text-on-background tracking-tight">
+      <div className="px-6 py-6 mb-4 flex items-center gap-3">
+        <Logo className="w-10 h-10 shrink-0" />
+        <h1 className="font-headline text-lg font-semibold text-on-background tracking-tight truncate">
           Mango Studio
         </h1>
       </div>
