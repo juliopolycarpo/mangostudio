@@ -27,6 +27,7 @@ function createMetadataHarness(initial: SecretMetadataRow[] = []) {
         lastValidationError: input.lastValidationError ?? null,
         enabledModels: JSON.stringify(input.enabledModels),
         userId: input.userId,
+        baseUrl: input.baseUrl ?? null,
       };
       if (idx >= 0) {
         rows[idx] = row;
@@ -145,7 +146,7 @@ describe('createGeminiSecretService', () => {
     expect(metadata.getCurrentRows()).toHaveLength(0);
   });
 
-  it('reflects storageAvailable=false when the secret store is unavailable', async () => {
+  it('returns empty connectors when secret store is unavailable and no keys are configured', async () => {
     const secretStore = new InMemorySecretStore();
     secretStore.available = false;
     const metadata = createMetadataHarness();
@@ -161,8 +162,6 @@ describe('createGeminiSecretService', () => {
 
     const status = await service.getGeminiSecretStatus(TEST_USER);
 
-    // No connectors but storageAvailable should be reflected per-connector
-    // when connectors exist; with no connectors, the status just has an empty list.
     expect(status.connectors).toEqual([]);
   });
 });

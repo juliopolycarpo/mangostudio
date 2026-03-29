@@ -83,6 +83,10 @@ export const settingsRoutes = (app: Elysia) =>
               t.Literal('config-file'),
               t.Literal('none'),
             ]),
+            provider: t.Optional(
+              t.Union([t.Literal('gemini'), t.Literal('openai-compatible'), t.Literal('anthropic')])
+            ),
+            baseUrl: t.Optional(t.String()),
           }),
         }
       )
@@ -94,6 +98,7 @@ export const settingsRoutes = (app: Elysia) =>
           try {
             await deleteGeminiConnector(user?.id ?? '', params.id);
             await refreshGeminiModelCatalog(user?.id ?? '', 'secret-updated');
+            console.log(`[settings] DEL connector ${params.id}`);
             return { success: true };
           } catch (error) {
             return handleSecretRouteError(error, set);

@@ -3,12 +3,9 @@
  */
 
 import { Elysia, t } from 'elysia';
-import {
-  generateText,
-  getDefaultTextModel,
-  getGeminiModelCatalog,
-  hasTextModel,
-} from '../services/gemini';
+import { getDefaultTextModel, getGeminiModelCatalog, hasTextModel } from '../services/gemini';
+import '../services/providers'; // ensure GeminiProvider is registered
+import { getProvider } from '../services/providers/registry';
 import { getDb } from '../db/database';
 import { requireAuth } from '../plugins/auth-middleware';
 
@@ -112,13 +109,15 @@ export const respondRoutes = (app: Elysia) =>
           const startTime = Date.now();
 
           try {
-            const responseText = await generateText(
-              user?.id ?? '',
+            const provider = getProvider('gemini');
+            const result = await provider.generateText({
+              userId: user?.id ?? '',
               history,
-              body.prompt,
-              body.systemPrompt,
-              model
-            );
+              prompt: body.prompt,
+              systemPrompt: body.systemPrompt,
+              modelName: model,
+            });
+            const responseText = result.text;
 
             const generationTime = `${((Date.now() - startTime) / 1000).toFixed(1)}s`;
             const aiTimestamp = Date.now();

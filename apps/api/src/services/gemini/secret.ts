@@ -200,21 +200,20 @@ export function createGeminiSecretService(dependencies: GeminiSecretServiceDepen
       await syncConfigFileConnectors(userId);
 
       const metadataRows = await listMetadata(GEMINI_PROVIDER, userId);
-      const storageAvailable = await secretStore.isAvailable();
 
       const connectors: Connector[] = metadataRows.map((row) => ({
         id: row.id,
         name: row.name,
-        provider: 'gemini',
+        provider: 'gemini' as const,
         configured: Boolean(row.configured),
         source: row.source,
-        storageAvailable,
         maskedSuffix: row.maskedSuffix ?? null,
         updatedAt: row.updatedAt,
         lastValidatedAt: row.lastValidatedAt ?? null,
         lastValidationError: row.lastValidationError ?? null,
         enabledModels: JSON.parse(row.enabledModels),
         userId: row.userId,
+        baseUrl: row.baseUrl ?? null,
       }));
 
       return { connectors };
@@ -321,6 +320,7 @@ ${envVar}="${apiKey}"
         lastValidatedAt: timestamp,
         enabledModels: [], // Initially empty
         userId: ['bun-secrets'].includes(body.source) ? userId : null, // keep env config global
+        baseUrl: body.baseUrl ?? null,
       };
 
       await upsertMetadata(input);

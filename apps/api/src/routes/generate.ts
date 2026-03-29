@@ -3,12 +3,9 @@
  */
 
 import { Elysia, t } from 'elysia';
-import {
-  generateImage,
-  getDefaultImageModel,
-  getGeminiModelCatalog,
-  hasImageModel,
-} from '../services/gemini';
+import { getDefaultImageModel, getGeminiModelCatalog, hasImageModel } from '../services/gemini';
+import '../services/providers'; // ensure GeminiProvider is registered
+import { getProvider } from '../services/providers/registry';
 import { getDb } from '../db/database';
 import { requireAuth } from '../plugins/auth-middleware';
 
@@ -102,19 +99,24 @@ export const generateRoutes = (app: Elysia) =>
             .where('id', '=', body.chatId)
             .execute();
 
-          // 2. Generate image via Gemini
+          // 2. Generate image via provider
           const aiMsgId = generateId();
           const startTime = Date.now();
 
           try {
-            const imageUrl = await generateImage(
-              user?.id ?? '',
-              body.prompt,
-              body.systemPrompt,
-              body.referenceImageUrl,
-              body.imageQuality ?? '1K',
-              model
-            );
+            const provider = getProvider('gemini');
+            if (!provider.generateImage) {
+              set.status = 422;
+              return { error: 'This provider does not support image generation.' };
+            }
+            const { imageUrl } = await provider.generateImage({
+              userId: user?.id ?? '',
+              prompt: body.prompt,
+              systemPrompt: body.systemPrompt,
+              referenceImageUrl: body.referenceImageUrl,
+              imageSize: body.imageQuality ?? '1K',
+              modelName: model,
+            });
 
             const generationTime = `${((Date.now() - startTime) / 1000).toFixed(1)}s`;
             const styleParams = [

@@ -21,6 +21,7 @@ export interface SecretMetadataInput {
   lastValidationError?: string | null;
   enabledModels: string[];
   userId: string | null;
+  baseUrl?: string | null;
 }
 
 /**
@@ -85,6 +86,7 @@ export async function upsertSecretMetadata(input: SecretMetadataInput): Promise<
       lastValidationError: input.lastValidationError ?? null,
       enabledModels: JSON.stringify(input.enabledModels),
       userId: input.userId,
+      baseUrl: input.baseUrl ?? null,
     })
     .onConflict((oc) =>
       oc.column('id').doUpdateSet({
@@ -97,6 +99,7 @@ export async function upsertSecretMetadata(input: SecretMetadataInput): Promise<
         lastValidationError: input.lastValidationError ?? null,
         enabledModels: JSON.stringify(input.enabledModels),
         userId: input.userId,
+        baseUrl: input.baseUrl ?? null,
       })
     )
     .execute();
@@ -113,6 +116,6 @@ export async function deleteSecretMetadata(id: string, userId: string): Promise<
   await db
     .deleteFrom('secret_metadata')
     .where('id', '=', id)
-    .where('userId', '=', userId)
+    .where((eb) => eb.or([eb('userId', '=', userId), eb('userId', 'is', null)]))
     .execute();
 }

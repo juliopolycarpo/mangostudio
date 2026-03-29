@@ -16,6 +16,7 @@ import { addIndexes } from './db/migrations/004_add_indexes';
 import { multiConnectors } from './db/migrations/005_multi_connectors';
 import { authTables } from './db/migrations/006_auth_tables';
 import { addUserOwnership } from './db/migrations/007_add_user_ownership';
+import { providerFields } from './db/migrations/008_provider_fields';
 import { getDefaultFrontendDir } from './lib/runtime-paths';
 import { getConfig } from './lib/config';
 import { isSpaRoute } from './lib/spa-guard';
@@ -57,6 +58,7 @@ async function runMigrations(): Promise<void> {
           '005_multi_connectors': multiConnectors,
           '006_auth_tables': authTables,
           '007_add_user_ownership': addUserOwnership,
+          '008_provider_fields': providerFields,
         };
       },
     },
