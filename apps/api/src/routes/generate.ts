@@ -3,11 +3,7 @@
  */
 
 import { Elysia, t } from 'elysia';
-import {
-  getDefaultImageModel,
-  getGeminiModelCatalog,
-  hasImageModel,
-} from '../services/gemini';
+import { getDefaultImageModel, getGeminiModelCatalog, hasImageModel } from '../services/gemini';
 import '../services/providers'; // ensure GeminiProvider is registered
 import { getProvider } from '../services/providers/registry';
 import { getDb } from '../db/database';

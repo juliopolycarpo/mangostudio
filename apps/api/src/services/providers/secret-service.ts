@@ -4,9 +4,7 @@
  * so other providers can reuse it with minimal configuration.
  */
 
-import type { ProviderType } from '@mangostudio/shared/types';
-import type { SecretSource } from '@mangostudio/shared/types';
-import type { SecretMetadataRow } from '@mangostudio/shared/types';
+import type { ProviderType, SecretMetadataRow } from '@mangostudio/shared/types';
 import {
   listSecretMetadata,
   getSecretMetadataById,
@@ -15,8 +13,7 @@ import {
   type SecretMetadataInput,
 } from '../secret-store/metadata';
 import { bunSecretStore, type SecretStore } from '../secret-store/store';
-import { getConfig, getMangoDir } from '../../lib/config';
-import { join } from 'path';
+import { getConfig } from '../../lib/config';
 import { existsSync, readFileSync } from 'fs';
 import { parse as parseToml } from 'smol-toml';
 
@@ -49,9 +46,7 @@ export interface ProviderSecretServiceDeps {
 /** Error thrown when no active key can be resolved for a provider. */
 export class ProviderApiKeyMissingError extends Error {
   constructor(provider: ProviderType) {
-    super(
-      `No ${provider} API key is configured or enabled. Check your Connectors in Settings.`
-    );
+    super(`No ${provider} API key is configured or enabled. Check your Connectors in Settings.`);
     this.name = 'ProviderApiKeyMissingError';
   }
 }

@@ -3,7 +3,12 @@
  * These define the shape of data exchanged between frontend and API.
  */
 
-import type { InteractionMode, SecretSource, SecretMetadataRow, ProviderType } from '../types/index';
+import type {
+  InteractionMode,
+  SecretSource,
+  SecretMetadataRow,
+  ProviderType,
+} from '../types/index';
 
 /** Body for POST /api/chats */
 export interface CreateChatBody {

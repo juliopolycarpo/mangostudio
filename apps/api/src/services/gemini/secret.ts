@@ -205,7 +205,7 @@ export function createGeminiSecretService(dependencies: GeminiSecretServiceDepen
       const connectors: Connector[] = metadataRows.map((row) => ({
         id: row.id,
         name: row.name,
-        provider: 'gemini',
+        provider: 'gemini' as const,
         configured: Boolean(row.configured),
         source: row.source,
         storageAvailable,
@@ -215,6 +215,7 @@ export function createGeminiSecretService(dependencies: GeminiSecretServiceDepen
         lastValidationError: row.lastValidationError ?? null,
         enabledModels: JSON.parse(row.enabledModels),
         userId: row.userId,
+        baseUrl: row.baseUrl ?? null,
       }));
 
       return { connectors };
