@@ -67,13 +67,9 @@ function createClient(apiKey: string, baseUrl: string): OpenAI {
   return new OpenAI({ apiKey, baseURL: baseUrl });
 }
 
-function buildMessages(
-  req: TextGenerationRequest
-): OpenAI.ChatCompletionMessageParam[] {
+function buildMessages(req: TextGenerationRequest): OpenAI.ChatCompletionMessageParam[] {
   return [
-    ...(req.systemPrompt?.trim()
-      ? [{ role: 'system' as const, content: req.systemPrompt }]
-      : []),
+    ...(req.systemPrompt?.trim() ? [{ role: 'system' as const, content: req.systemPrompt }] : []),
     ...req.history.map(
       (msg): OpenAI.ChatCompletionMessageParam => ({
         role: msg.role === 'ai' ? 'assistant' : 'user',
@@ -102,9 +98,7 @@ const openAICompatibleProvider: AIProvider = {
     return { text };
   },
 
-  async *generateTextStream(
-    req: TextGenerationRequest
-  ): AsyncIterable<StreamingTextChunk> {
+  async *generateTextStream(req: TextGenerationRequest): AsyncIterable<StreamingTextChunk> {
     const { apiKey, baseUrl } = await resolveClientConfig(req.userId, req.modelName);
     const client = createClient(apiKey, baseUrl);
 

@@ -114,7 +114,13 @@ export function ConnectorsSettings({ modelCatalog, reloadModelCatalog }: Connect
       await loadStatus();
       await reloadModelCatalog();
       setIsAddModalOpen(false);
-      setNewConnector({ name: '', apiKey: '', provider: 'gemini', baseUrl: '', source: 'bun-secrets' });
+      setNewConnector({
+        name: '',
+        apiKey: '',
+        provider: 'gemini',
+        baseUrl: '',
+        source: 'bun-secrets',
+      });
       toast(s.addSuccess, 'success');
     } catch (err) {
       setFormError(err instanceof Error ? err.message : 'Unknown error');
@@ -467,127 +473,133 @@ export function ConnectorsSettings({ modelCatalog, reloadModelCatalog }: Connect
       )}
 
       {/* ── Models Selection Modal ── */}
-      {isModelsModalOpen && selectedConnector && (() => {
-        const { textModels, imageModels } = getDiscoveredModels(selectedConnector);
-        return (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-sm animate-in fade-in duration-200">
-            <div className="bg-surface-container-high w-full max-w-lg rounded-3xl p-8 shadow-2xl border border-outline-variant/20 flex flex-col max-h-[80vh]">
-              <div className="space-y-2 mb-6">
-                <h3 className="text-xl font-bold text-on-surface">{s.modelsModalTitle}</h3>
-                <p className="text-sm text-on-surface-variant/70">
-                  {s.modelsModalDescription}{' '}
-                  <span className="text-primary font-bold">{selectedConnector.name}</span>{' '}
-                  {s.modelsModalDescriptionSuffix}
-                </p>
-              </div>
+      {isModelsModalOpen &&
+        selectedConnector &&
+        (() => {
+          const { textModels, imageModels } = getDiscoveredModels(selectedConnector);
+          return (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-sm animate-in fade-in duration-200">
+              <div className="bg-surface-container-high w-full max-w-lg rounded-3xl p-8 shadow-2xl border border-outline-variant/20 flex flex-col max-h-[80vh]">
+                <div className="space-y-2 mb-6">
+                  <h3 className="text-xl font-bold text-on-surface">{s.modelsModalTitle}</h3>
+                  <p className="text-sm text-on-surface-variant/70">
+                    {s.modelsModalDescription}{' '}
+                    <span className="text-primary font-bold">{selectedConnector.name}</span>{' '}
+                    {s.modelsModalDescriptionSuffix}
+                  </p>
+                </div>
 
-              <div className="flex-1 overflow-y-auto pr-2 space-y-6 hide-scrollbar">
-                {textModels.length > 0 && (
-                  <div className="space-y-3">
-                    <h4 className="text-[10px] uppercase tracking-widest font-bold text-on-surface-variant/60">
-                      {s.textModelsLabel}
-                    </h4>
-                    <div className="grid grid-cols-1 gap-2">
-                      {textModels.map((m) => {
-                        const isEnabled = selectedConnector.enabledModels.includes(m.modelId);
-                        return (
-                          <label
-                            key={m.modelId}
-                            className={`flex items-center gap-4 p-4 rounded-xl border cursor-pointer transition-all ${
-                              isEnabled
-                                ? 'bg-primary/10 border-primary/30'
-                                : 'bg-surface-container-lowest border-outline-variant/10 hover:border-outline-variant/30'
-                            }`}
-                          >
-                            <input
-                              type="checkbox"
-                              checked={isEnabled}
-                              onChange={(e) => {
-                                const next = e.target.checked
-                                  ? [...selectedConnector.enabledModels, m.modelId]
-                                  : selectedConnector.enabledModels.filter((id) => id !== m.modelId);
-                                const updated = { ...selectedConnector, enabledModels: next };
-                                setSelectedConnector(updated);
-                                void handleUpdateModels(selectedConnector.id, next);
-                              }}
-                              className="w-5 h-5 rounded border-outline-variant text-primary focus:ring-primary bg-surface-container-lowest"
-                            />
-                            <div className="space-y-0.5">
-                              <div
-                                className={`text-sm font-bold ${isEnabled ? 'text-primary' : 'text-on-surface'}`}
-                              >
-                                {m.displayName}
+                <div className="flex-1 overflow-y-auto pr-2 space-y-6 hide-scrollbar">
+                  {textModels.length > 0 && (
+                    <div className="space-y-3">
+                      <h4 className="text-[10px] uppercase tracking-widest font-bold text-on-surface-variant/60">
+                        {s.textModelsLabel}
+                      </h4>
+                      <div className="grid grid-cols-1 gap-2">
+                        {textModels.map((m) => {
+                          const isEnabled = selectedConnector.enabledModels.includes(m.modelId);
+                          return (
+                            <label
+                              key={m.modelId}
+                              className={`flex items-center gap-4 p-4 rounded-xl border cursor-pointer transition-all ${
+                                isEnabled
+                                  ? 'bg-primary/10 border-primary/30'
+                                  : 'bg-surface-container-lowest border-outline-variant/10 hover:border-outline-variant/30'
+                              }`}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={isEnabled}
+                                onChange={(e) => {
+                                  const next = e.target.checked
+                                    ? [...selectedConnector.enabledModels, m.modelId]
+                                    : selectedConnector.enabledModels.filter(
+                                        (id) => id !== m.modelId
+                                      );
+                                  const updated = { ...selectedConnector, enabledModels: next };
+                                  setSelectedConnector(updated);
+                                  void handleUpdateModels(selectedConnector.id, next);
+                                }}
+                                className="w-5 h-5 rounded border-outline-variant text-primary focus:ring-primary bg-surface-container-lowest"
+                              />
+                              <div className="space-y-0.5">
+                                <div
+                                  className={`text-sm font-bold ${isEnabled ? 'text-primary' : 'text-on-surface'}`}
+                                >
+                                  {m.displayName}
+                                </div>
+                                <div className="text-[10px] font-mono text-on-surface-variant/60">
+                                  {m.modelId}
+                                </div>
                               </div>
-                              <div className="text-[10px] font-mono text-on-surface-variant/60">
-                                {m.modelId}
-                              </div>
-                            </div>
-                          </label>
-                        );
-                      })}
+                            </label>
+                          );
+                        })}
+                      </div>
                     </div>
-                  </div>
-                )}
+                  )}
 
-                {imageModels.length > 0 && (
-                  <div className="space-y-3">
-                    <h4 className="text-[10px] uppercase tracking-widest font-bold text-on-surface-variant/60">
-                      {s.imageModelsLabel}
-                    </h4>
-                    <div className="grid grid-cols-1 gap-2">
-                      {imageModels.map((m) => {
-                        const isEnabled = selectedConnector.enabledModels.includes(m.modelId);
-                        return (
-                          <label
-                            key={m.modelId}
-                            className={`flex items-center gap-4 p-4 rounded-xl border cursor-pointer transition-all ${
-                              isEnabled
-                                ? 'bg-primary/10 border-primary/30'
-                                : 'bg-surface-container-lowest border-outline-variant/10 hover:border-outline-variant/30'
-                            }`}
-                          >
-                            <input
-                              type="checkbox"
-                              checked={isEnabled}
-                              onChange={(e) => {
-                                const next = e.target.checked
-                                  ? [...selectedConnector.enabledModels, m.modelId]
-                                  : selectedConnector.enabledModels.filter((id) => id !== m.modelId);
-                                const updated = { ...selectedConnector, enabledModels: next };
-                                setSelectedConnector(updated);
-                                void handleUpdateModels(selectedConnector.id, next);
-                              }}
-                              className="w-5 h-5 rounded border-outline-variant text-primary focus:ring-primary bg-surface-container-lowest"
-                            />
-                            <div className="space-y-0.5">
-                              <div
-                                className={`text-sm font-bold ${isEnabled ? 'text-primary' : 'text-on-surface'}`}
-                              >
-                                {m.displayName}
+                  {imageModels.length > 0 && (
+                    <div className="space-y-3">
+                      <h4 className="text-[10px] uppercase tracking-widest font-bold text-on-surface-variant/60">
+                        {s.imageModelsLabel}
+                      </h4>
+                      <div className="grid grid-cols-1 gap-2">
+                        {imageModels.map((m) => {
+                          const isEnabled = selectedConnector.enabledModels.includes(m.modelId);
+                          return (
+                            <label
+                              key={m.modelId}
+                              className={`flex items-center gap-4 p-4 rounded-xl border cursor-pointer transition-all ${
+                                isEnabled
+                                  ? 'bg-primary/10 border-primary/30'
+                                  : 'bg-surface-container-lowest border-outline-variant/10 hover:border-outline-variant/30'
+                              }`}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={isEnabled}
+                                onChange={(e) => {
+                                  const next = e.target.checked
+                                    ? [...selectedConnector.enabledModels, m.modelId]
+                                    : selectedConnector.enabledModels.filter(
+                                        (id) => id !== m.modelId
+                                      );
+                                  const updated = { ...selectedConnector, enabledModels: next };
+                                  setSelectedConnector(updated);
+                                  void handleUpdateModels(selectedConnector.id, next);
+                                }}
+                                className="w-5 h-5 rounded border-outline-variant text-primary focus:ring-primary bg-surface-container-lowest"
+                              />
+                              <div className="space-y-0.5">
+                                <div
+                                  className={`text-sm font-bold ${isEnabled ? 'text-primary' : 'text-on-surface'}`}
+                                >
+                                  {m.displayName}
+                                </div>
+                                <div className="text-[10px] font-mono text-on-surface-variant/60">
+                                  {m.modelId}
+                                </div>
                               </div>
-                              <div className="text-[10px] font-mono text-on-surface-variant/60">
-                                {m.modelId}
-                              </div>
-                            </div>
-                          </label>
-                        );
-                      })}
+                            </label>
+                          );
+                        })}
+                      </div>
                     </div>
-                  </div>
-                )}
-              </div>
+                  )}
+                </div>
 
-              <Button
-                variant="primary"
-                onClick={() => setIsModelsModalOpen(false)}
-                className="mt-8 w-full py-4"
-              >
-                {s.doneButton}
-              </Button>
+                <Button
+                  variant="primary"
+                  onClick={() => setIsModelsModalOpen(false)}
+                  className="mt-8 w-full py-4"
+                >
+                  {s.doneButton}
+                </Button>
+              </div>
             </div>
-          </div>
-        );
-      })()}
+          );
+        })()}
     </div>
   );
 }

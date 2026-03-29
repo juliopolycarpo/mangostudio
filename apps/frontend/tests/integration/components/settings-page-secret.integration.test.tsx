@@ -1,13 +1,13 @@
 import userEvent from '@testing-library/user-event';
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { ConnectorsSettings } from '../../../src/components/settings/ConnectorsSettings';
-import { EMPTY_GEMINI_MODEL_CATALOG } from '../../../src/utils/gemini-models';
+import { EMPTY_MODEL_CATALOG } from '../../../src/utils/model-utils';
 import { render, screen, waitFor } from '../../support/harness/render';
 import { createFetchScenario } from '../../support/mocks/create-fetch-scenario';
 
 function createDefaultProps() {
   return {
-    modelCatalog: EMPTY_GEMINI_MODEL_CATALOG,
+    modelCatalog: EMPTY_MODEL_CATALOG,
     reloadModelCatalog: vi.fn().mockResolvedValue(undefined),
   };
 }
@@ -26,7 +26,7 @@ describe('ConnectorsSettings', () => {
   it('shows empty state when no connectors are configured', async () => {
     const props = createDefaultProps();
 
-    fetchScenario.respondWithJson('GET', '/api/settings/secrets/gemini', {
+    fetchScenario.respondWithJson('GET', '/api/settings/connectors', {
       body: { connectors: [] },
     });
 
@@ -38,7 +38,7 @@ describe('ConnectorsSettings', () => {
   it('shows connector list after loading status with existing connectors', async () => {
     const props = createDefaultProps();
 
-    fetchScenario.respondWithJson('GET', '/api/settings/secrets/gemini', {
+    fetchScenario.respondWithJson('GET', '/api/settings/connectors', {
       body: {
         connectors: [
           {
@@ -73,10 +73,10 @@ describe('ConnectorsSettings', () => {
     // Note: createFetchScenario uses a Map, so the same key can only have one response.
     // Register GET to return empty connectors; it will also be used for the reload after POST.
     fetchScenario
-      .respondWithJson('GET', '/api/settings/secrets/gemini', {
+      .respondWithJson('GET', '/api/settings/connectors', {
         body: { connectors: [] },
       })
-      .respondWithJson('POST', '/api/settings/connectors/gemini', {
+      .respondWithJson('POST', '/api/settings/connectors', {
         body: {
           id: 'conn-new',
           name: 'test-connector',

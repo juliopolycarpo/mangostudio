@@ -5,11 +5,7 @@
  */
 
 import { Elysia, t } from 'elysia';
-import type {
-  Connector,
-  ConnectorStatus,
-  ModelCatalogResponse,
-} from '@mangostudio/shared';
+import type { Connector, ConnectorStatus, ModelCatalogResponse } from '@mangostudio/shared';
 import type { ProviderType, SecretSource } from '@mangostudio/shared/types';
 import {
   listAllSecretMetadata,

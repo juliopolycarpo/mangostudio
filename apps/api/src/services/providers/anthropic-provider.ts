@@ -56,9 +56,7 @@ function createClient(apiKey: string): Anthropic {
   return new Anthropic({ apiKey });
 }
 
-function buildMessages(
-  req: TextGenerationRequest
-): Anthropic.MessageCreateParams['messages'] {
+function buildMessages(req: TextGenerationRequest): Anthropic.MessageCreateParams['messages'] {
   return [
     ...req.history.map(
       (msg): Anthropic.MessageParam => ({
@@ -93,9 +91,7 @@ const anthropicProvider: AIProvider = {
     return { text };
   },
 
-  async *generateTextStream(
-    req: TextGenerationRequest
-  ): AsyncIterable<StreamingTextChunk> {
+  async *generateTextStream(req: TextGenerationRequest): AsyncIterable<StreamingTextChunk> {
     const apiKey = await secretService.resolveApiKey(req.userId, req.modelName);
     const client = createClient(apiKey);
 
@@ -107,10 +103,7 @@ const anthropicProvider: AIProvider = {
     });
 
     for await (const event of stream) {
-      if (
-        event.type === 'content_block_delta' &&
-        event.delta.type === 'text_delta'
-      ) {
+      if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
         yield { text: event.delta.text, done: false };
       }
     }

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { EMPTY_GEMINI_MODEL_CATALOG } from '../../../src/utils/gemini-models';
+import { EMPTY_MODEL_CATALOG } from '../../../src/utils/model-utils';
 import { useGeminiCatalog } from '../../../src/hooks/use-gemini-catalog';
 import { client } from '../../../src/lib/api-client';
 import { act, renderHook, waitFor } from '../../support/harness/render';
@@ -9,16 +9,14 @@ vi.mock('../../../src/lib/api-client', () => ({
     api: {
       settings: {
         models: {
-          gemini: {
-            get: vi.fn(),
-          },
+          get: vi.fn(),
         },
       },
     },
   },
 }));
 
-const mockGet = vi.mocked(client.api.settings.models.gemini.get);
+const mockGet = vi.mocked(client.api.settings.models.get);
 
 describe('useGeminiCatalog', () => {
   beforeEach(() => {
@@ -26,11 +24,11 @@ describe('useGeminiCatalog', () => {
   });
 
   it('returns the initial empty catalog state', () => {
-    mockGet.mockResolvedValue({ data: EMPTY_GEMINI_MODEL_CATALOG, error: null } as any);
+    mockGet.mockResolvedValue({ data: EMPTY_MODEL_CATALOG, error: null } as any);
 
     const { result } = renderHook(() => useGeminiCatalog());
 
-    expect(result.current.catalog).toEqual(EMPTY_GEMINI_MODEL_CATALOG);
+    expect(result.current.catalog).toEqual(EMPTY_MODEL_CATALOG);
     expect(result.current.isLoading).toBe(true);
     expect(result.current.error).toBeNull();
   });
@@ -50,6 +48,8 @@ describe('useGeminiCatalog', () => {
       ],
       textModels: [],
       imageModels: [],
+      discoveredTextModels: [],
+      discoveredImageModels: [],
     };
 
     mockGet.mockResolvedValue({ data: mockCatalog, error: null } as any);
@@ -70,7 +70,7 @@ describe('useGeminiCatalog', () => {
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
     expect(result.current.error).toBe('Network error');
-    expect(result.current.catalog).toEqual(EMPTY_GEMINI_MODEL_CATALOG);
+    expect(result.current.catalog).toEqual(EMPTY_MODEL_CATALOG);
   });
 
   it('allows manual refresh', async () => {
@@ -80,6 +80,8 @@ describe('useGeminiCatalog', () => {
       allModels: [],
       textModels: [],
       imageModels: [],
+      discoveredTextModels: [],
+      discoveredImageModels: [],
     };
     const updatedCatalog = { ...initialCatalog, configured: false };
 

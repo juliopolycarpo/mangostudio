@@ -136,8 +136,7 @@ export function createUnifiedModelCatalogService(deps: UnifiedModelCatalogDeps =
 
           return snap;
         } catch (error) {
-          const message =
-            error instanceof Error ? error.message : 'Unknown catalog refresh error.';
+          const message = error instanceof Error ? error.message : 'Unknown catalog refresh error.';
           const snap: ModelCatalogResponse = {
             ...createEmptySnapshot(),
             status: 'error',
