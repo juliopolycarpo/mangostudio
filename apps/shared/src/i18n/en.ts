@@ -62,17 +62,21 @@ export const messages: Messages = {
       imageQualityLabel: 'Default Image Quality',
     },
     connectors: {
-      title: 'Gemini Connectors',
+      title: 'AI Connectors',
       addButton: 'Add Connector',
       emptyTitle: 'No Connectors Found',
-      emptyDescription: 'Add your first Gemini API key to start generating.',
+      emptyDescription: 'Add your first API key to start generating.',
       deleteConfirm: 'Are you sure you want to delete this connector?',
-      addModalTitle: 'Add Gemini Connector',
-      addModalDescription: 'Configure a new API key and choose where to store it.',
+      addModalTitle: 'Add Connector',
+      addModalDescription: 'Choose the provider, configure the API key and storage.',
+      providerLabel: 'Provider',
+      selectProvider: 'Select Provider',
+      baseUrlLabel: 'Base URL (optional)',
+      baseUrlPlaceholder: 'https://api.example.com/v1',
       nameLabel: 'Name',
       namePlaceholder: 'e.g. Personal Project',
       apiKeyLabel: 'API Key',
-      apiKeyPlaceholder: 'AIzaSy...',
+      apiKeyPlaceholder: 'sk-...',
       saveToLabel: 'Save To',
       sources: {
         bunSecrets: 'OS Secret Store',
@@ -103,6 +107,19 @@ export const messages: Messages = {
 
   common: {
     loading: 'Loading...',
+  },
+
+  providers: {
+    gemini: 'Google Gemini',
+    'openai-compatible': 'OpenAI',
+    anthropic: 'Anthropic',
+    openai: 'OpenAI',
+    deepseek: 'DeepSeek',
+    openrouter: 'OpenRouter',
+  },
+
+  errors: {
+    imageNotSupported: 'This provider does not support image generation.',
   },
 
   api: {
