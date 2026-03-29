@@ -30,13 +30,13 @@ export function ChatPage({
   const messages = data?.pages.flatMap((page) => page.messages) || [];
 
   return (
-    <>
+    <div className="flex flex-col h-full min-h-0">
       {status === 'pending' && chatId ? (
-        <div className="flex-1 flex justify-center items-center h-full">
+        <div className="flex-1 flex justify-center items-center">
           <Loader2 className="w-8 h-8 animate-spin text-primary" />
         </div>
       ) : messages.length === 0 ? (
-        <div className="flex-1 flex flex-col items-center justify-center h-full gap-3 text-on-surface/25 select-none">
+        <div className="flex-1 flex flex-col items-center justify-center gap-3 text-on-surface/25 select-none">
           <MessageSquare size={48} strokeWidth={1} />
           <p className="text-sm font-body">{t.chat.empty}</p>
         </div>
@@ -51,6 +51,6 @@ export function ChatPage({
         isGenerating={isGenerating}
         onStop={onStop}
       />
-    </>
+    </div>
   );
 }

@@ -33,7 +33,7 @@ export function ChatFeed({ messages }: { messages: Message[] }) {
   return (
     <section
       ref={parentRef}
-      className="flex-1 overflow-y-auto px-6 py-8 hide-scrollbar max-w-5xl mx-auto w-full"
+      className="flex-1 min-h-0 overflow-y-auto px-6 py-8 hide-scrollbar max-w-5xl mx-auto w-full"
     >
       {messages.length === 0 && (
         <div className="flex flex-col items-center justify-center h-full text-on-surface-variant/50">
