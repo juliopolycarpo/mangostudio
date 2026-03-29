@@ -200,7 +200,6 @@ export function createGeminiSecretService(dependencies: GeminiSecretServiceDepen
       await syncConfigFileConnectors(userId);
 
       const metadataRows = await listMetadata(GEMINI_PROVIDER, userId);
-      const storageAvailable = await secretStore.isAvailable();
 
       const connectors: Connector[] = metadataRows.map((row) => ({
         id: row.id,
@@ -208,7 +207,6 @@ export function createGeminiSecretService(dependencies: GeminiSecretServiceDepen
         provider: 'gemini' as const,
         configured: Boolean(row.configured),
         source: row.source,
-        storageAvailable,
         maskedSuffix: row.maskedSuffix ?? null,
         updatedAt: row.updatedAt,
         lastValidatedAt: row.lastValidatedAt ?? null,
