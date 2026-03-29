@@ -35,10 +35,8 @@ function createMetadataHarness(initial: SecretMetadataRow[] = []) {
         rows.push(row);
       }
     },
-    deleteMetadata: async (id: string, _userId: string): Promise<boolean> => {
-      const before = rows.length;
+    deleteMetadata: async (id: string, _userId: string) => {
       rows = rows.filter((r) => r.id !== id);
-      return rows.length < before;
     },
     getCurrentRows: () => rows,
   };

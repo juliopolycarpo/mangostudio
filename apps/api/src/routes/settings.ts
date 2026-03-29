@@ -83,7 +83,9 @@ export const settingsRoutes = (app: Elysia) =>
               t.Literal('config-file'),
               t.Literal('none'),
             ]),
-            provider: t.Optional(t.String()),
+            provider: t.Optional(
+              t.Union([t.Literal('gemini'), t.Literal('openai-compatible'), t.Literal('anthropic')])
+            ),
             baseUrl: t.Optional(t.String()),
           }),
         }
