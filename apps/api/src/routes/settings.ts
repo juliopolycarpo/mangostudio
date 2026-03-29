@@ -98,6 +98,7 @@ export const settingsRoutes = (app: Elysia) =>
           try {
             await deleteGeminiConnector(user?.id ?? '', params.id);
             await refreshGeminiModelCatalog(user?.id ?? '', 'secret-updated');
+            console.log(`[settings] DEL connector ${params.id}`);
             return { success: true };
           } catch (error) {
             return handleSecretRouteError(error, set);
