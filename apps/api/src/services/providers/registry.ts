@@ -1,0 +1,58 @@
+/**
+ * In-memory provider registry.
+ * Providers register themselves at startup; routes resolve them by type or model.
+ */
+
+import type { ProviderType } from '@mangostudio/shared/types';
+import { getDb } from '../../db/database';
+import type { AIProvider } from './types';
+
+const registry = new Map<ProviderType, AIProvider>();
+
+/**
+ * Registers an AI provider. Calling this again with the same type replaces
+ * the existing registration (useful in tests).
+ */
+export function registerProvider(provider: AIProvider): void {
+  registry.set(provider.providerType, provider);
+}
+
+/**
+ * Returns the registered provider for the given type.
+ * Throws if the provider has not been registered.
+ */
+export function getProvider(type: ProviderType): AIProvider {
+  const provider = registry.get(type);
+  if (!provider) {
+    throw new Error(`AI provider '${type}' is not registered.`);
+  }
+  return provider;
+}
+
+/**
+ * Resolves the provider responsible for a given model by looking up the
+ * connector that has the model enabled in secret_metadata.
+ * Falls back to 'gemini' when no connector row is found.
+ */
+export async function getProviderForModel(modelName: string, userId: string): Promise<AIProvider> {
+  const db = getDb();
+  const rows = await db
+    .selectFrom('secret_metadata')
+    .select(['provider', 'enabledModels'])
+    .where((eb) => eb.or([eb('userId', '=', userId), eb('userId', 'is', null)]))
+    .execute();
+
+  for (const row of rows) {
+    try {
+      const enabled: string[] = JSON.parse(row.enabledModels);
+      if (enabled.includes(modelName)) {
+        return getProvider(row.provider as ProviderType);
+      }
+    } catch {
+      // Skip rows with malformed enabledModels JSON
+    }
+  }
+
+  // Default to gemini when model is not assigned to any connector
+  return getProvider('gemini');
+}
