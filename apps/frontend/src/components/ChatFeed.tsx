@@ -129,14 +129,25 @@ export function ChatFeed({ messages }: { messages: Message[] }) {
                       </div>
 
                       {msg.isGenerating ? (
-                        /* Loading state */
+                        /* Loading / streaming state */
                         <div className="flex flex-col gap-3 py-4 pl-9">
-                          <span className="text-sm font-medium text-on-surface animate-pulse">
-                            {isImageTurn ? 'Generating image...' : 'Thinking...'}
-                          </span>
-                          <div className="h-1 w-24 bg-surface-container-highest rounded-full overflow-hidden">
-                            <div className="h-full bg-primary w-1/2 animate-[slide_1s_ease-in-out_infinite_alternate]"></div>
-                          </div>
+                          {isImageTurn || !msg.text ? (
+                            /* Image generation or waiting for first text chunk */
+                            <>
+                              <span className="text-sm font-medium text-on-surface animate-pulse">
+                                {isImageTurn ? 'Generating image...' : 'Thinking...'}
+                              </span>
+                              <div className="h-1 w-24 bg-surface-container-highest rounded-full overflow-hidden">
+                                <div className="h-full bg-primary w-1/2 animate-[slide_1s_ease-in-out_infinite_alternate]"></div>
+                              </div>
+                            </>
+                          ) : (
+                            /* Text is streaming — show partial response with cursor */
+                            <div className="bg-surface-container-low p-5 rounded-2xl border border-outline-variant/10 font-body text-sm leading-relaxed text-on-surface whitespace-pre-wrap max-w-2xl">
+                              {msg.text}
+                              <span className="inline-block w-0.5 h-[1em] bg-primary ml-0.5 align-middle animate-blink" />
+                            </div>
+                          )}
                         </div>
                       ) : isImageTurn ? (
                         /* ── Image turn result ── */

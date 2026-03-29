@@ -14,6 +14,7 @@ import { messageRoutes } from './routes/messages';
 import { uploadRoutes } from './routes/upload';
 import { generateRoutes } from './routes/generate';
 import { respondRoutes } from './routes/respond';
+import { respondStreamRoutes } from './routes/respond-stream';
 import { settingsRoutes } from './routes/settings';
 import { authRoutes } from './routes/auth';
 import { rateLimit } from './plugins/rate-limit';
@@ -43,6 +44,7 @@ const api = new Elysia({ prefix: '/api' })
   .use(uploadRoutes)
   .use(generateRoutes)
   .use(respondRoutes)
+  .use(respondStreamRoutes)
   .use(settingsRoutes);
 
 /**

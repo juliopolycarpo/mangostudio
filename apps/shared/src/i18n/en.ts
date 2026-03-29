@@ -33,6 +33,8 @@ export const messages: Messages = {
     editTitle: 'Edit title',
     deleteTitle: 'Delete chat',
     sectionLabel: 'Chats',
+    stopGenerating: 'Stop',
+    streaming: 'Generating...',
   },
 
   gallery: {

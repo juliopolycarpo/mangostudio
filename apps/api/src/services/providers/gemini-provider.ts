@@ -5,6 +5,7 @@
 
 import {
   generateText as geminiGenerateText,
+  generateTextStream as geminiGenerateTextStream,
   generateImage as geminiGenerateImage,
   getResolvedGeminiApiKey,
   validateGeminiApiKey,
@@ -15,6 +16,7 @@ import type {
   AIProvider,
   TextGenerationRequest,
   TextGenerationResult,
+  StreamingTextChunk,
   ImageGenerationRequest,
   ImageGenerationResult,
   ModelInfo,
@@ -32,6 +34,16 @@ const geminiProvider: AIProvider = {
       req.modelName
     );
     return { text };
+  },
+
+  generateTextStream(req: TextGenerationRequest): AsyncIterable<StreamingTextChunk> {
+    return geminiGenerateTextStream(
+      req.userId,
+      req.history,
+      req.prompt,
+      req.systemPrompt,
+      req.modelName
+    );
   },
 
   async generateImage(req: ImageGenerationRequest): Promise<ImageGenerationResult> {

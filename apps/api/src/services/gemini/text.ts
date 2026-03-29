@@ -7,6 +7,12 @@ import { GoogleGenAI } from '@google/genai';
 import type { Content } from '@google/genai';
 import { getResolvedGeminiApiKey } from './secret';
 
+/** A single streaming text chunk yielded during incremental generation. */
+export interface TextStreamChunk {
+  text: string;
+  done: boolean;
+}
+
 /** A minimal message shape for context reconstruction. */
 export interface TextContextMessage {
   role: 'user' | 'ai';
@@ -75,4 +81,65 @@ export async function generateText(
   }
 
   return text;
+}
+
+/**
+ * Streams a text response using the Gemini API.
+ * Yields incremental chunks and a final sentinel with done:true.
+ *
+ * @param history - Prior chat messages used as context (only text turns).
+ * @param prompt - The current user prompt.
+ * @param systemPrompt - Optional system instruction.
+ * @param modelName - Gemini text model to use.
+ * @yields Incremental text chunks; the last chunk has done:true and text:''.
+ */
+export async function* generateTextStream(
+  userId: string,
+  history: TextContextMessage[],
+  prompt: string,
+  systemPrompt?: string,
+  modelName?: string
+): AsyncGenerator<TextStreamChunk> {
+  if (!modelName) {
+    throw new Error('No Gemini text model was provided.');
+  }
+
+  const apiKey = await getResolvedGeminiApiKey(userId, modelName);
+  const ai = new GoogleGenAI({ apiKey });
+
+  const historyContents: Content[] = history.map((msg) => ({
+    role: msg.role === 'ai' ? 'model' : 'user',
+    parts: [{ text: msg.text }],
+  }));
+
+  const contents: Content[] = [...historyContents, { role: 'user', parts: [{ text: prompt }] }];
+
+  const config: Record<string, unknown> = {};
+  if (systemPrompt?.trim()) {
+    config.systemInstruction = systemPrompt;
+  }
+
+  const stream = await ai.models.generateContentStream({
+    model: modelName,
+    contents,
+    config,
+  });
+
+  for await (const chunk of stream) {
+    if (chunk.promptFeedback?.blockReason) {
+      throw new Error(`Prompt blocked: ${chunk.promptFeedback.blockReason}`);
+    }
+
+    const candidate = chunk.candidates?.[0];
+    if (candidate?.finishReason && candidate.finishReason !== 'STOP') {
+      throw new Error(`Generation stopped: ${candidate.finishReason}`);
+    }
+
+    const chunkText = chunk.text ?? '';
+    if (chunkText) {
+      yield { text: chunkText, done: false };
+    }
+  }
+
+  yield { text: '', done: true };
 }
