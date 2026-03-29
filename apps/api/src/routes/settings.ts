@@ -83,6 +83,8 @@ export const settingsRoutes = (app: Elysia) =>
               t.Literal('config-file'),
               t.Literal('none'),
             ]),
+            provider: t.Optional(t.String()),
+            baseUrl: t.Optional(t.String()),
           }),
         }
       )

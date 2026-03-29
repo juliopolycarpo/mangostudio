@@ -111,11 +111,12 @@ export async function upsertSecretMetadata(input: SecretMetadataInput): Promise<
  * @param id - Connector unique identifier.
  * @param userId - User ID.
  */
-export async function deleteSecretMetadata(id: string, userId: string): Promise<void> {
+export async function deleteSecretMetadata(id: string, userId: string): Promise<boolean> {
   const db = getDb();
-  await db
+  const result = await db
     .deleteFrom('secret_metadata')
     .where('id', '=', id)
     .where((eb) => eb.or([eb('userId', '=', userId), eb('userId', 'is', null)]))
-    .execute();
+    .executeTakeFirst();
+  return (result?.numAffectedRows ?? 0n) > 0n;
 }

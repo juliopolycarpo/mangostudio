@@ -33,7 +33,7 @@ interface GeminiSecretServiceDependencies {
   listMetadata?: (provider: string, userId: string) => Promise<SecretMetadataRow[]>;
   getMetadataById?: (id: string, userId: string) => Promise<SecretMetadataRow | null>;
   upsertMetadata?: (input: SecretMetadataInput) => Promise<void>;
-  deleteMetadata?: (id: string, userId: string) => Promise<void>;
+  deleteMetadata?: (id: string, userId: string) => Promise<boolean>;
   /** Override the TOML config file path (useful in tests to prevent real file reads). */
   tomlFilePath?: string;
 }

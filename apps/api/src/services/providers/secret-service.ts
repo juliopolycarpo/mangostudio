@@ -39,7 +39,7 @@ export interface ProviderSecretServiceDeps {
   listMetadata?: (provider: string, userId: string) => Promise<SecretMetadataRow[]>;
   getMetadataById?: (id: string, userId: string) => Promise<SecretMetadataRow | null>;
   upsertMetadata?: (input: SecretMetadataInput) => Promise<void>;
-  deleteMetadata?: (id: string, userId: string) => Promise<void>;
+  deleteMetadata?: (id: string, userId: string) => Promise<boolean>;
   tomlFilePath?: string;
 }
 
