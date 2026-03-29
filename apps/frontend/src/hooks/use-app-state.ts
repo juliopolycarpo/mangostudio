@@ -3,12 +3,12 @@ import { useState, useCallback, useMemo, useRef } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import type { InteractionMode, Message } from '@mangostudio/shared';
 import { useChats } from './use-chats';
-import { useGeminiCatalog } from './use-gemini-catalog';
+import { useModelCatalog } from './use-model-catalog';
 import { useGlobalSettings } from './use-global-settings';
 import { useQueryClient } from '@tanstack/react-query';
 import { messageKeys } from './use-messages-query';
 import { galleryKeys } from './use-gallery-query';
-import { resolveActiveModeModel } from '../utils/gemini-models';
+import { resolveActiveModeModel } from '../utils/model-utils';
 import {
   generateImage,
   respondTextStream,
@@ -23,7 +23,7 @@ export function useAppState() {
 
   // Sub-hooks
   const chats = useChats();
-  const catalog = useGeminiCatalog();
+  const catalog = useModelCatalog();
   const settings = useGlobalSettings();
   const queryClient = useQueryClient();
 

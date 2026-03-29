@@ -71,7 +71,7 @@ function AuthenticatedLayout() {
           }}
           onNewChat={app.handleNewChat}
           onNavigateToSettings={() => app.handleNavigate('settings')}
-          geminiModelCatalog={app.catalog}
+          modelCatalog={app.catalog}
         />
 
         <div className="flex-1 overflow-y-auto">

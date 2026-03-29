@@ -1,8 +1,9 @@
-import React, { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { ChevronDown, Check, Sparkles, Cpu, Zap, Activity } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import type { GeminiModelOption, GeminiModelCatalogResponse } from '@mangostudio/shared';
-import { getModelSelectorPlaceholder } from '../../utils/gemini-models';
+import type { ModelOption, ModelCatalogResponse, ProviderType } from '@mangostudio/shared';
+import { getModelSelectorPlaceholder } from '../../utils/model-utils';
+import { useI18n } from '@/hooks/use-i18n';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
@@ -12,10 +13,10 @@ function cn(...inputs: ClassValue[]) {
 
 interface ModelSelectorProps {
   activeModel: string;
-  activeModels: GeminiModelOption[];
+  activeModels: ModelOption[];
   isDisabled: boolean;
   onSelect: (modelId: string) => void;
-  geminiModelCatalog: GeminiModelCatalogResponse;
+  modelCatalog: ModelCatalogResponse;
 }
 
 export function ModelSelector({
@@ -23,13 +24,14 @@ export function ModelSelector({
   activeModels,
   isDisabled,
   onSelect,
-  geminiModelCatalog,
+  modelCatalog,
 }: ModelSelectorProps) {
   const [isOpen, setIsOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const { t } = useI18n();
 
   const selectedModel = activeModels.find((m) => m.modelId === activeModel);
-  const placeholder = getModelSelectorPlaceholder(geminiModelCatalog);
+  const placeholder = getModelSelectorPlaceholder(modelCatalog);
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -55,24 +57,21 @@ export function ModelSelector({
     setIsOpen(false);
   };
 
-  const displayedModels = activeModels;
-
-  // Group models by major family
-  const families = displayedModels.reduce(
+  // Group models by provider
+  const groups = activeModels.reduce(
     (acc, model) => {
-      let family = 'Other';
-      if (model.displayName.toLowerCase().includes('gemini 3.1')) family = 'Gemini 3.1';
-      else if (model.displayName.toLowerCase().includes('gemini 3')) family = 'Gemini 3';
-      else if (model.displayName.toLowerCase().includes('gemini 2.5')) family = 'Gemini 2.5';
-      else if (model.displayName.toLowerCase().includes('gemini 2.0')) family = 'Gemini 2.0';
-      else if (model.displayName.toLowerCase().includes('gemini')) family = 'Gemini';
-
-      if (!acc[family]) acc[family] = [];
-      acc[family].push(model);
+      const key: string = model.provider ?? 'other';
+      if (!acc[key]) acc[key] = [];
+      acc[key].push(model);
       return acc;
     },
-    {} as Record<string, GeminiModelOption[]>
+    {} as Record<string, ModelOption[]>
   );
+
+  const getProviderLabel = (key: string): string => {
+    if (key in t.providers) return t.providers[key as ProviderType];
+    return key;
+  };
 
   const getModelIcon = (name: string) => {
     const low = name.toLowerCase();
@@ -116,15 +115,15 @@ export function ModelSelector({
             className="absolute left-0 top-full mt-2 w-72 max-h-[70vh] glass-panel border border-outline-variant/20 rounded-xl shadow-2xl overflow-hidden z-[100] hide-scrollbar overflow-y-auto"
           >
             <div className="py-2">
-              {Object.keys(families).length === 0 ? (
+              {Object.keys(groups).length === 0 ? (
                 <div className="px-4 py-3 text-sm text-on-surface-variant italic">
                   No models available
                 </div>
               ) : (
-                Object.entries(families).map(([family, models]) => (
-                  <div key={family} className="mb-2 last:mb-0">
+                Object.entries(groups).map(([providerKey, models]) => (
+                  <div key={providerKey} className="mb-2 last:mb-0">
                     <div className="px-4 py-1.5 text-[10px] font-bold uppercase tracking-wider text-on-surface-variant/50">
-                      {family}
+                      {getProviderLabel(providerKey)}
                     </div>
                     {models.map((model) => (
                       <button
