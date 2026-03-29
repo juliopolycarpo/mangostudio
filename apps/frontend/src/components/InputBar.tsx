@@ -52,8 +52,8 @@ export function InputBar({
   };
 
   return (
-    <footer className="absolute bottom-0 left-0 right-0 p-6 pointer-events-none z-30">
-      <div className="max-w-4xl mx-auto w-full pointer-events-auto">
+    <footer className="shrink-0 p-6">
+      <div className="max-w-4xl mx-auto w-full">
         {/* Mode Switch Toggle */}
         <div className="flex justify-center mb-3">
           <div className="inline-flex bg-surface-container-low border border-outline-variant/10 rounded-full p-1 gap-1 shadow-sm">
