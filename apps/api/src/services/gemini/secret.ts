@@ -320,6 +320,7 @@ ${envVar}="${apiKey}"
         lastValidatedAt: timestamp,
         enabledModels: [], // Initially empty
         userId: ['bun-secrets'].includes(body.source) ? userId : null, // keep env config global
+        baseUrl: body.baseUrl ?? null,
       };
 
       await upsertMetadata(input);
