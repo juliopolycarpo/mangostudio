@@ -12,6 +12,7 @@ import { addIndexes } from './migrations/004_add_indexes';
 import { multiConnectors } from './migrations/005_multi_connectors';
 import { authTables } from './migrations/006_auth_tables';
 import { addUserOwnership } from './migrations/007_add_user_ownership';
+import { providerFields } from './migrations/008_provider_fields';
 
 async function migrateToLatest(): Promise<void> {
   const db = getDb();
@@ -28,6 +29,7 @@ async function migrateToLatest(): Promise<void> {
           '005_multi_connectors': multiConnectors,
           '006_auth_tables': authTables,
           '007_add_user_ownership': addUserOwnership,
+          '008_provider_fields': providerFields,
         };
       },
     },

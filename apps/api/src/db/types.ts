@@ -43,6 +43,7 @@ export interface SecretMetadataTable {
   lastValidationError: string | null;
   enabledModels: string;
   userId: string | null;
+  baseUrl: string | null;
 }
 
 export interface UserTable {
