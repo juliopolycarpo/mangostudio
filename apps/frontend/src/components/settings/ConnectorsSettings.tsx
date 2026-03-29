@@ -50,7 +50,7 @@ export function ConnectorsSettings({ modelCatalog, reloadModelCatalog }: Connect
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isModelsModalOpen, setIsModelsModalOpen] = useState(false);
   const [selectedConnector, setSelectedConnector] = useState<Connector | null>(null);
-  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [connectorToDelete, setConnectorToDelete] = useState<Connector | null>(null);
 
   const [newConnector, setNewConnector] = useState({
     name: '',
@@ -144,7 +144,7 @@ export function ConnectorsSettings({ modelCatalog, reloadModelCatalog }: Connect
       toast('Failed to delete connector', 'error');
     } finally {
       await loadStatus();
-      setConfirmDeleteId(null);
+      setConnectorToDelete(null);
     }
   };
 
@@ -281,35 +281,15 @@ export function ConnectorsSettings({ modelCatalog, reloadModelCatalog }: Connect
                     <Settings size={18} />
                   </Button>
 
-                  {confirmDeleteId === c.id ? (
-                    <div className="flex items-center gap-1">
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        onClick={() => setConfirmDeleteId(null)}
-                      >
-                        {s.cancelButton}
-                      </Button>
-                      <Button
-                        variant="primary"
-                        size="sm"
-                        onClick={() => handleDeleteConnector(c.id)}
-                        className="bg-red-500 hover:bg-red-400 shadow-red-500/20"
-                      >
-                        <Trash2 size={14} />
-                      </Button>
-                    </div>
-                  ) : (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setConfirmDeleteId(c.id)}
-                      title={s.deleteConnector}
-                      className="p-2 text-red-300 hover:text-red-400 hover:bg-red-500/10"
-                    >
-                      <Trash2 size={18} />
-                    </Button>
-                  )}
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setConnectorToDelete(c)}
+                    title={s.deleteConnector}
+                    className="p-2 text-red-300 hover:text-red-400 hover:bg-red-500/10"
+                  >
+                    <Trash2 size={18} />
+                  </Button>
                 </div>
               </div>
             ))}
@@ -600,6 +580,41 @@ export function ConnectorsSettings({ modelCatalog, reloadModelCatalog }: Connect
             </div>
           );
         })()}
+
+      {/* ── Confirm Delete Modal ── */}
+      {connectorToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-surface-container-high w-full max-w-sm rounded-3xl p-8 shadow-2xl border border-outline-variant/20 space-y-6">
+            <div className="space-y-2 text-center">
+              <div className="p-4 bg-red-500/10 rounded-full w-fit mx-auto text-red-400 mb-2">
+                <Trash2 size={32} />
+              </div>
+              <h3 className="text-xl font-bold text-on-surface">{s.deleteConnector}</h3>
+              <p className="text-sm text-on-surface-variant/70">
+                {s.deleteConfirm} <br />
+                <span className="text-on-surface font-bold">"{connectorToDelete.name}"</span>
+              </p>
+            </div>
+
+            <div className="flex gap-3">
+              <Button
+                variant="secondary"
+                onClick={() => setConnectorToDelete(null)}
+                className="flex-1"
+              >
+                {s.cancelButton}
+              </Button>
+              <Button
+                variant="primary"
+                onClick={() => handleDeleteConnector(connectorToDelete.id)}
+                className="flex-1 bg-red-500 hover:bg-red-400 shadow-red-500/20"
+              >
+                {s.deleteConnector}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
