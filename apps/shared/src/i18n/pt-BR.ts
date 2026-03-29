@@ -31,6 +31,8 @@ export const messages = {
     editTitle: 'Editar título',
     deleteTitle: 'Excluir chat',
     sectionLabel: 'Chats',
+    stopGenerating: 'Parar',
+    streaming: 'Gerando...',
   },
 
   gallery: {
