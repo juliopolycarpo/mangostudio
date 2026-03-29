@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { EMPTY_MODEL_CATALOG } from '../../../src/utils/model-utils';
-import { useGeminiCatalog } from '../../../src/hooks/use-gemini-catalog';
+import { useModelCatalog } from '../../../src/hooks/use-model-catalog';
 import { client } from '../../../src/lib/api-client';
 import { act, renderHook, waitFor } from '../../support/harness/render';
 
@@ -18,7 +18,7 @@ vi.mock('../../../src/lib/api-client', () => ({
 
 const mockGet = vi.mocked(client.api.settings.models.get);
 
-describe('useGeminiCatalog', () => {
+describe('useModelCatalog', () => {
   beforeEach(() => {
     mockGet.mockReset();
   });
@@ -26,24 +26,24 @@ describe('useGeminiCatalog', () => {
   it('returns the initial empty catalog state', () => {
     mockGet.mockResolvedValue({ data: EMPTY_MODEL_CATALOG, error: null } as any);
 
-    const { result } = renderHook(() => useGeminiCatalog());
+    const { result } = renderHook(() => useModelCatalog());
 
     expect(result.current.catalog).toEqual(EMPTY_MODEL_CATALOG);
     expect(result.current.isLoading).toBe(true);
     expect(result.current.error).toBeNull();
   });
 
-  it('updates catalog after a successful refresh', async () => {
+  it('updates catalog after a successful fetch', async () => {
     const mockCatalog = {
       configured: true,
       status: 'ready' as const,
       allModels: [
         {
-          modelId: 'gemini-2.5-flash',
-          resourceName: 'models/gemini-2.5-flash',
-          displayName: 'Gemini 2.5 Flash',
-          description: 'Fast model',
+          modelId: 'gpt-4o',
+          displayName: 'GPT-4o',
+          description: '',
           supportedActions: ['generateContent'],
+          provider: 'openai-compatible' as const,
         },
       ],
       textModels: [],
@@ -54,7 +54,7 @@ describe('useGeminiCatalog', () => {
 
     mockGet.mockResolvedValue({ data: mockCatalog, error: null } as any);
 
-    const { result } = renderHook(() => useGeminiCatalog());
+    const { result } = renderHook(() => useModelCatalog());
 
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
@@ -62,10 +62,10 @@ describe('useGeminiCatalog', () => {
     expect(result.current.error).toBeNull();
   });
 
-  it('handles API errors', async () => {
+  it('handles API errors gracefully', async () => {
     mockGet.mockResolvedValue({ data: null, error: { value: 'Network error' } } as any);
 
-    const { result } = renderHook(() => useGeminiCatalog());
+    const { result } = renderHook(() => useModelCatalog());
 
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
@@ -73,7 +73,7 @@ describe('useGeminiCatalog', () => {
     expect(result.current.catalog).toEqual(EMPTY_MODEL_CATALOG);
   });
 
-  it('allows manual refresh', async () => {
+  it('supports manual refresh', async () => {
     const initialCatalog = {
       configured: true,
       status: 'ready' as const,
@@ -87,7 +87,7 @@ describe('useGeminiCatalog', () => {
 
     mockGet.mockResolvedValue({ data: initialCatalog, error: null } as any);
 
-    const { result } = renderHook(() => useGeminiCatalog());
+    const { result } = renderHook(() => useModelCatalog());
 
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 

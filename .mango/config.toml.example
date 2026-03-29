@@ -36,3 +36,15 @@ url = ""
 [gemini_api_keys]
 # personal = "AIzaSy..."
 # work = "AIzaSy..."
+
+# OpenAI-compatible API key connectors.
+# Works with OpenAI, DeepSeek, OpenRouter, and other compatible APIs.
+# Base URLs for non-OpenAI services are configured in the Settings UI.
+[openai_compatible_api_keys]
+# openai = "sk-..."
+# deepseek = "sk-..."
+# openrouter = "sk-or-..."
+
+# Anthropic API key connectors.
+[anthropic_api_keys]
+# default = "sk-ant-..."

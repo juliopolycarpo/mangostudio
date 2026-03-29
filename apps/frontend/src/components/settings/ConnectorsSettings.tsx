@@ -3,8 +3,9 @@ import { useState, useEffect } from 'react';
 import type {
   ApiErrorResponse,
   Connector,
-  GeminiSecretStatus,
-  GeminiModelCatalogResponse,
+  ConnectorStatus,
+  ModelCatalogResponse,
+  ProviderType,
 } from '@mangostudio/shared';
 import {
   Plus,
@@ -27,20 +28,25 @@ import { useToast } from '@/components/ui/Toast';
 import { useI18n } from '@/hooks/use-i18n';
 
 interface ConnectorsSettingsProps {
-  modelCatalog: GeminiModelCatalogResponse;
+  modelCatalog: ModelCatalogResponse;
   reloadModelCatalog: () => Promise<void>;
 }
 
+const PROVIDER_OPTIONS: { id: ProviderType }[] = [
+  { id: 'gemini' },
+  { id: 'openai-compatible' },
+  { id: 'anthropic' },
+];
+
 /**
- * Connectors settings tab: add, delete, and configure Gemini API connectors.
- * Uses design system components; replaces window.confirm with toast feedback.
+ * Connectors settings tab: add, delete, and configure AI connectors for any provider.
  */
 export function ConnectorsSettings({ modelCatalog, reloadModelCatalog }: ConnectorsSettingsProps) {
   const { t } = useI18n();
   const { toast } = useToast();
   const s = t.settings.connectors;
 
-  const [geminiStatus, setGeminiStatus] = useState<GeminiSecretStatus | null>(null);
+  const [connectorStatus, setConnectorStatus] = useState<ConnectorStatus | null>(null);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isModelsModalOpen, setIsModelsModalOpen] = useState(false);
   const [selectedConnector, setSelectedConnector] = useState<Connector | null>(null);
@@ -49,6 +55,8 @@ export function ConnectorsSettings({ modelCatalog, reloadModelCatalog }: Connect
   const [newConnector, setNewConnector] = useState({
     name: '',
     apiKey: '',
+    provider: 'gemini' as ProviderType,
+    baseUrl: '',
     source: 'bun-secrets' as Connector['source'],
   });
   const [isSaving, setIsSaving] = useState(false);
@@ -57,14 +65,14 @@ export function ConnectorsSettings({ modelCatalog, reloadModelCatalog }: Connect
 
   const loadStatus = async () => {
     try {
-      const response = await fetch('/api/settings/secrets/gemini');
+      const response = await fetch('/api/settings/connectors');
       const data = await response.json();
       if (!response.ok) {
         throw new Error((data as ApiErrorResponse).error || 'Failed to load status.');
       }
-      setGeminiStatus(data);
+      setConnectorStatus(data as ConnectorStatus);
     } catch (error) {
-      console.error('[connectors] Failed to load Gemini secret status', error);
+      console.error('[connectors] Failed to load connector status', error);
     }
   };
 
@@ -82,10 +90,20 @@ export function ConnectorsSettings({ modelCatalog, reloadModelCatalog }: Connect
     setFormError(null);
 
     try {
-      const response = await fetch('/api/settings/connectors/gemini', {
+      const body: Record<string, unknown> = {
+        name: newConnector.name,
+        apiKey: newConnector.apiKey,
+        source: newConnector.source,
+        provider: newConnector.provider,
+      };
+      if (newConnector.provider === 'openai-compatible' && newConnector.baseUrl.trim()) {
+        body.baseUrl = newConnector.baseUrl.trim();
+      }
+
+      const response = await fetch('/api/settings/connectors', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newConnector),
+        body: JSON.stringify(body),
       });
 
       const data = await response.json();
@@ -96,7 +114,13 @@ export function ConnectorsSettings({ modelCatalog, reloadModelCatalog }: Connect
       await loadStatus();
       await reloadModelCatalog();
       setIsAddModalOpen(false);
-      setNewConnector({ name: '', apiKey: '', source: 'bun-secrets' });
+      setNewConnector({
+        name: '',
+        apiKey: '',
+        provider: 'gemini',
+        baseUrl: '',
+        source: 'bun-secrets',
+      });
       toast(s.addSuccess, 'success');
     } catch (err) {
       setFormError(err instanceof Error ? err.message : 'Unknown error');
@@ -107,7 +131,7 @@ export function ConnectorsSettings({ modelCatalog, reloadModelCatalog }: Connect
 
   const handleDeleteConnector = async (id: string) => {
     try {
-      const response = await fetch(`/api/settings/connectors/gemini/${id}`, {
+      const response = await fetch(`/api/settings/connectors/${id}`, {
         method: 'DELETE',
       });
 
@@ -126,7 +150,7 @@ export function ConnectorsSettings({ modelCatalog, reloadModelCatalog }: Connect
 
   const handleUpdateModels = async (connectorId: string, enabledModels: string[]) => {
     try {
-      const response = await fetch(`/api/settings/connectors/gemini/${connectorId}/models`, {
+      const response = await fetch(`/api/settings/connectors/${connectorId}/models`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ enabledModels }),
@@ -143,7 +167,18 @@ export function ConnectorsSettings({ modelCatalog, reloadModelCatalog }: Connect
     }
   };
 
-  const connectors = geminiStatus?.connectors || [];
+  const connectors = connectorStatus?.connectors || [];
+
+  // Models for the selected connector's modal: filter catalog by connector provider
+  const getDiscoveredModels = (connector: Connector) => {
+    const textModels = modelCatalog.discoveredTextModels.filter(
+      (m) => !m.provider || m.provider === connector.provider
+    );
+    const imageModels = modelCatalog.discoveredImageModels.filter(
+      (m) => !m.provider || m.provider === connector.provider
+    );
+    return { textModels, imageModels };
+  };
 
   const SOURCE_OPTIONS = [
     {
@@ -211,7 +246,12 @@ export function ConnectorsSettings({ modelCatalog, reloadModelCatalog }: Connect
                     {c.configured ? <CheckCircle2 size={20} /> : <XCircle size={20} />}
                   </div>
                   <div className="space-y-0.5">
-                    <h3 className="font-bold text-on-surface">{c.name}</h3>
+                    <div className="flex items-center gap-2">
+                      <h3 className="font-bold text-on-surface">{c.name}</h3>
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-surface-container-high text-on-surface-variant border border-outline-variant/20">
+                        {t.providers[c.provider]}
+                      </span>
+                    </div>
                     <div className="flex items-center gap-2 text-xs">
                       <span className="flex items-center gap-1 text-on-surface-variant/60">
                         {c.source === 'bun-secrets' && <ShieldCheck size={12} />}
@@ -287,6 +327,29 @@ export function ConnectorsSettings({ modelCatalog, reloadModelCatalog }: Connect
             </div>
 
             <div className="space-y-4">
+              {/* Provider selector */}
+              <div className="flex flex-col gap-1.5">
+                <label className="text-sm font-medium text-on-surface-variant">
+                  {s.providerLabel}
+                </label>
+                <div className="grid grid-cols-3 gap-2">
+                  {PROVIDER_OPTIONS.map(({ id }) => (
+                    <button
+                      key={id}
+                      type="button"
+                      onClick={() => setNewConnector({ ...newConnector, provider: id })}
+                      className={`py-2 px-3 rounded-xl border text-xs font-bold text-center transition-all ${
+                        newConnector.provider === id
+                          ? 'bg-primary/10 border-primary text-primary'
+                          : 'bg-surface-container-lowest border-outline-variant/10 text-on-surface hover:border-outline-variant/30'
+                      }`}
+                    >
+                      {t.providers[id]}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               <Input
                 id="connector-name"
                 label={s.nameLabel}
@@ -295,6 +358,17 @@ export function ConnectorsSettings({ modelCatalog, reloadModelCatalog }: Connect
                 onChange={(e) => setNewConnector({ ...newConnector, name: e.target.value })}
                 placeholder={s.namePlaceholder}
               />
+
+              {newConnector.provider === 'openai-compatible' && (
+                <Input
+                  id="connector-baseurl"
+                  label={s.baseUrlLabel}
+                  type="text"
+                  value={newConnector.baseUrl}
+                  onChange={(e) => setNewConnector({ ...newConnector, baseUrl: e.target.value })}
+                  placeholder={s.baseUrlPlaceholder}
+                />
+              )}
 
               <div className="flex flex-col gap-1.5">
                 <label
@@ -399,120 +473,133 @@ export function ConnectorsSettings({ modelCatalog, reloadModelCatalog }: Connect
       )}
 
       {/* ── Models Selection Modal ── */}
-      {isModelsModalOpen && selectedConnector && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="bg-surface-container-high w-full max-w-lg rounded-3xl p-8 shadow-2xl border border-outline-variant/20 flex flex-col max-h-[80vh]">
-            <div className="space-y-2 mb-6">
-              <h3 className="text-xl font-bold text-on-surface">{s.modelsModalTitle}</h3>
-              <p className="text-sm text-on-surface-variant/70">
-                {s.modelsModalDescription}{' '}
-                <span className="text-primary font-bold">{selectedConnector.name}</span>{' '}
-                {s.modelsModalDescriptionSuffix}
-              </p>
-            </div>
-
-            <div className="flex-1 overflow-y-auto pr-2 space-y-6 hide-scrollbar">
-              <div className="space-y-3">
-                <h4 className="text-[10px] uppercase tracking-widest font-bold text-on-surface-variant/60">
-                  {s.textModelsLabel}
-                </h4>
-                <div className="grid grid-cols-1 gap-2">
-                  {modelCatalog.discoveredTextModels.map((m) => {
-                    const isEnabled = selectedConnector.enabledModels.includes(m.modelId);
-                    return (
-                      <label
-                        key={m.modelId}
-                        className={`flex items-center gap-4 p-4 rounded-xl border cursor-pointer transition-all ${
-                          isEnabled
-                            ? 'bg-primary/10 border-primary/30'
-                            : 'bg-surface-container-lowest border-outline-variant/10 hover:border-outline-variant/30'
-                        }`}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={isEnabled}
-                          onChange={(e) => {
-                            const next = e.target.checked
-                              ? [...selectedConnector.enabledModels, m.modelId]
-                              : selectedConnector.enabledModels.filter((id) => id !== m.modelId);
-                            const updated = { ...selectedConnector, enabledModels: next };
-                            setSelectedConnector(updated);
-                            void handleUpdateModels(selectedConnector.id, next);
-                          }}
-                          className="w-5 h-5 rounded border-outline-variant text-primary focus:ring-primary bg-surface-container-lowest"
-                        />
-                        <div className="space-y-0.5">
-                          <div
-                            className={`text-sm font-bold ${isEnabled ? 'text-primary' : 'text-on-surface'}`}
-                          >
-                            {m.displayName}
-                          </div>
-                          <div className="text-[10px] font-mono text-on-surface-variant/60">
-                            {m.modelId}
-                          </div>
-                        </div>
-                      </label>
-                    );
-                  })}
+      {isModelsModalOpen &&
+        selectedConnector &&
+        (() => {
+          const { textModels, imageModels } = getDiscoveredModels(selectedConnector);
+          return (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-sm animate-in fade-in duration-200">
+              <div className="bg-surface-container-high w-full max-w-lg rounded-3xl p-8 shadow-2xl border border-outline-variant/20 flex flex-col max-h-[80vh]">
+                <div className="space-y-2 mb-6">
+                  <h3 className="text-xl font-bold text-on-surface">{s.modelsModalTitle}</h3>
+                  <p className="text-sm text-on-surface-variant/70">
+                    {s.modelsModalDescription}{' '}
+                    <span className="text-primary font-bold">{selectedConnector.name}</span>{' '}
+                    {s.modelsModalDescriptionSuffix}
+                  </p>
                 </div>
-              </div>
 
-              <div className="space-y-3">
-                <h4 className="text-[10px] uppercase tracking-widest font-bold text-on-surface-variant/60">
-                  {s.imageModelsLabel}
-                </h4>
-                <div className="grid grid-cols-1 gap-2">
-                  {modelCatalog.discoveredImageModels.map((m) => {
-                    const isEnabled = selectedConnector.enabledModels.includes(m.modelId);
-                    return (
-                      <label
-                        key={m.modelId}
-                        className={`flex items-center gap-4 p-4 rounded-xl border cursor-pointer transition-all ${
-                          isEnabled
-                            ? 'bg-primary/10 border-primary/30'
-                            : 'bg-surface-container-lowest border-outline-variant/10 hover:border-outline-variant/30'
-                        }`}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={isEnabled}
-                          onChange={(e) => {
-                            const next = e.target.checked
-                              ? [...selectedConnector.enabledModels, m.modelId]
-                              : selectedConnector.enabledModels.filter((id) => id !== m.modelId);
-                            const updated = { ...selectedConnector, enabledModels: next };
-                            setSelectedConnector(updated);
-                            void handleUpdateModels(selectedConnector.id, next);
-                          }}
-                          className="w-5 h-5 rounded border-outline-variant text-primary focus:ring-primary bg-surface-container-lowest"
-                        />
-                        <div className="space-y-0.5">
-                          <div
-                            className={`text-sm font-bold ${isEnabled ? 'text-primary' : 'text-on-surface'}`}
-                          >
-                            {m.displayName}
-                          </div>
-                          <div className="text-[10px] font-mono text-on-surface-variant/60">
-                            {m.modelId}
-                          </div>
-                        </div>
-                      </label>
-                    );
-                  })}
+                <div className="flex-1 overflow-y-auto pr-2 space-y-6 hide-scrollbar">
+                  {textModels.length > 0 && (
+                    <div className="space-y-3">
+                      <h4 className="text-[10px] uppercase tracking-widest font-bold text-on-surface-variant/60">
+                        {s.textModelsLabel}
+                      </h4>
+                      <div className="grid grid-cols-1 gap-2">
+                        {textModels.map((m) => {
+                          const isEnabled = selectedConnector.enabledModels.includes(m.modelId);
+                          return (
+                            <label
+                              key={m.modelId}
+                              className={`flex items-center gap-4 p-4 rounded-xl border cursor-pointer transition-all ${
+                                isEnabled
+                                  ? 'bg-primary/10 border-primary/30'
+                                  : 'bg-surface-container-lowest border-outline-variant/10 hover:border-outline-variant/30'
+                              }`}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={isEnabled}
+                                onChange={(e) => {
+                                  const next = e.target.checked
+                                    ? [...selectedConnector.enabledModels, m.modelId]
+                                    : selectedConnector.enabledModels.filter(
+                                        (id) => id !== m.modelId
+                                      );
+                                  const updated = { ...selectedConnector, enabledModels: next };
+                                  setSelectedConnector(updated);
+                                  void handleUpdateModels(selectedConnector.id, next);
+                                }}
+                                className="w-5 h-5 rounded border-outline-variant text-primary focus:ring-primary bg-surface-container-lowest"
+                              />
+                              <div className="space-y-0.5">
+                                <div
+                                  className={`text-sm font-bold ${isEnabled ? 'text-primary' : 'text-on-surface'}`}
+                                >
+                                  {m.displayName}
+                                </div>
+                                <div className="text-[10px] font-mono text-on-surface-variant/60">
+                                  {m.modelId}
+                                </div>
+                              </div>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {imageModels.length > 0 && (
+                    <div className="space-y-3">
+                      <h4 className="text-[10px] uppercase tracking-widest font-bold text-on-surface-variant/60">
+                        {s.imageModelsLabel}
+                      </h4>
+                      <div className="grid grid-cols-1 gap-2">
+                        {imageModels.map((m) => {
+                          const isEnabled = selectedConnector.enabledModels.includes(m.modelId);
+                          return (
+                            <label
+                              key={m.modelId}
+                              className={`flex items-center gap-4 p-4 rounded-xl border cursor-pointer transition-all ${
+                                isEnabled
+                                  ? 'bg-primary/10 border-primary/30'
+                                  : 'bg-surface-container-lowest border-outline-variant/10 hover:border-outline-variant/30'
+                              }`}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={isEnabled}
+                                onChange={(e) => {
+                                  const next = e.target.checked
+                                    ? [...selectedConnector.enabledModels, m.modelId]
+                                    : selectedConnector.enabledModels.filter(
+                                        (id) => id !== m.modelId
+                                      );
+                                  const updated = { ...selectedConnector, enabledModels: next };
+                                  setSelectedConnector(updated);
+                                  void handleUpdateModels(selectedConnector.id, next);
+                                }}
+                                className="w-5 h-5 rounded border-outline-variant text-primary focus:ring-primary bg-surface-container-lowest"
+                              />
+                              <div className="space-y-0.5">
+                                <div
+                                  className={`text-sm font-bold ${isEnabled ? 'text-primary' : 'text-on-surface'}`}
+                                >
+                                  {m.displayName}
+                                </div>
+                                <div className="text-[10px] font-mono text-on-surface-variant/60">
+                                  {m.modelId}
+                                </div>
+                              </div>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
                 </div>
+
+                <Button
+                  variant="primary"
+                  onClick={() => setIsModelsModalOpen(false)}
+                  className="mt-8 w-full py-4"
+                >
+                  {s.doneButton}
+                </Button>
               </div>
             </div>
-
-            <Button
-              variant="primary"
-              onClick={() => setIsModelsModalOpen(false)}
-              className="mt-8 w-full py-4"
-            >
-              {s.doneButton}
-            </Button>
-          </div>
-        </div>
-      )}
+          );
+        })()}
     </div>
   );
 }

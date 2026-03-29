@@ -59,17 +59,21 @@ export const messages = {
       imageQualityLabel: 'Qualidade de Imagem Padrão',
     },
     connectors: {
-      title: 'Conectores Gemini',
+      title: 'Conectores de IA',
       addButton: 'Adicionar Conector',
       emptyTitle: 'Nenhum Conector Encontrado',
-      emptyDescription: 'Adicione sua primeira chave de API Gemini para começar a gerar.',
+      emptyDescription: 'Adicione sua primeira chave de API para começar a gerar.',
       deleteConfirm: 'Tem certeza que deseja excluir este conector?',
-      addModalTitle: 'Adicionar Conector Gemini',
-      addModalDescription: 'Configure uma nova chave de API e escolha onde armazená-la.',
+      addModalTitle: 'Adicionar Conector',
+      addModalDescription: 'Escolha o provider, configure a chave de API e o armazenamento.',
+      providerLabel: 'Provider',
+      selectProvider: 'Selecione o Provider',
+      baseUrlLabel: 'URL Base (opcional)',
+      baseUrlPlaceholder: 'https://api.example.com/v1',
       nameLabel: 'Nome',
       namePlaceholder: 'ex. Projeto Pessoal',
       apiKeyLabel: 'Chave de API',
-      apiKeyPlaceholder: 'AIzaSy...',
+      apiKeyPlaceholder: 'sk-...',
       saveToLabel: 'Salvar em',
       sources: {
         bunSecrets: 'Armazenamento Seguro do SO',
@@ -100,6 +104,19 @@ export const messages = {
 
   common: {
     loading: 'Carregando...',
+  },
+
+  providers: {
+    gemini: 'Google Gemini',
+    'openai-compatible': 'OpenAI',
+    anthropic: 'Anthropic',
+    openai: 'OpenAI',
+    deepseek: 'DeepSeek',
+    openrouter: 'OpenRouter',
+  },
+
+  errors: {
+    imageNotSupported: 'Este provider não suporta geração de imagens.',
   },
 
   api: {

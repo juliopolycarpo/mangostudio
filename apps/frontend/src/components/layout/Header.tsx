@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Plus, Settings } from 'lucide-react';
-import type { GeminiModelCatalogResponse, GeminiModelOption } from '@mangostudio/shared';
+import type { ModelCatalogResponse, ModelOption } from '@mangostudio/shared';
 import { ModelSelector } from './ModelSelector';
 import { authClient } from '@/lib/auth-client';
 import { useNavigate } from '@tanstack/react-router';
@@ -9,7 +9,7 @@ import { useI18n } from '@/hooks/use-i18n';
 
 export interface HeaderProps {
   activeModel: string;
-  activeModels: GeminiModelOption[];
+  activeModels: ModelOption[];
   isModelSelectorDisabled: boolean;
   composerMode: 'chat' | 'image';
   currentChatId: string | null;
@@ -18,7 +18,7 @@ export interface HeaderProps {
   onSetPageModel: (model: string) => void;
   onNewChat: () => void;
   onNavigateToSettings: () => void;
-  geminiModelCatalog: GeminiModelCatalogResponse;
+  modelCatalog: ModelCatalogResponse;
 }
 
 export function Header({
@@ -31,7 +31,7 @@ export function Header({
   onSetPageModel,
   onNewChat,
   onNavigateToSettings,
-  geminiModelCatalog,
+  modelCatalog,
 }: HeaderProps) {
   const { data: session } = authClient.useSession();
   const navigate = useNavigate();
@@ -62,7 +62,7 @@ export function Header({
           onSelect={(modelId) =>
             currentChatId ? onUpdateChatModel(currentChatId, modelId) : onSetPageModel(modelId)
           }
-          geminiModelCatalog={geminiModelCatalog}
+          modelCatalog={modelCatalog}
         />
       </div>
       <div className="flex items-center gap-3">
