@@ -43,35 +43,6 @@ export interface Message {
   modelName?: string;
 }
 
-/** Database row shape for the chats table. */
-export interface ChatRow {
-  id: string;
-  title: string;
-  createdAt: number;
-  updatedAt: number;
-  model: string | null;
-  textModel: string | null;
-  imageModel: string | null;
-  lastUsedMode: string | null;
-  userId: string | null;
-}
-
-/** Database row shape for the messages table. */
-export interface MessageRow {
-  id: string;
-  chatId: string;
-  role: string;
-  text: string;
-  imageUrl: string | null;
-  referenceImage: string | null;
-  timestamp: number;
-  isGenerating: number;
-  generationTime: string | null;
-  modelName: string | null;
-  styleParams: string | null;
-  interactionMode: string;
-}
-
 /** Database row shape for secret metadata tracked in SQLite. */
 export interface SecretMetadataRow {
   id: string;
