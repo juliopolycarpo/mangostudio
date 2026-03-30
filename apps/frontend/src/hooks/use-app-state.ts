@@ -172,6 +172,7 @@ export function useAppState() {
   // Generation handlers
   const handleRespond = useCallback(
     async (prompt: string) => {
+      if (abortControllerRef.current) return;
       setIsGenerating(true);
 
       let activeChatId = chats.currentChatId;
@@ -278,6 +279,7 @@ export function useAppState() {
 
   const handleGenerate = useCallback(
     async (prompt: string, referenceImage?: File | null) => {
+      if (isGenerating) return;
       setIsGenerating(true);
 
       let activeChatId = chats.currentChatId;
