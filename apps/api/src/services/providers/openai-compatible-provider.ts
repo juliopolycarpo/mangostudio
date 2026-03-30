@@ -8,6 +8,7 @@ import OpenAI from 'openai';
 import { join } from 'path';
 import { mkdirSync } from 'fs';
 import { createProviderSecretService } from './secret-service';
+import { withModelCache } from './model-cache';
 import { registerProvider } from './registry';
 import { getConfig } from '../../lib/config';
 import type {
@@ -66,6 +67,62 @@ async function resolveClientConfig(
 function createClient(apiKey: string, baseUrl: string): OpenAI {
   return new OpenAI({ apiKey, baseURL: baseUrl });
 }
+
+const listModelsWithCache = withModelCache(
+  async (userId: string): Promise<ModelInfo[]> => {
+    await secretService.syncConfigFileConnectors(userId);
+    const rows = await secretService.listMeta('openai-compatible', userId);
+
+    // Group connectors by base URL to avoid duplicate API calls
+    const seenBaseUrls = new Map<string, string>();
+
+    for (const row of rows) {
+      if (!row.configured) continue;
+      const baseUrl = row.baseUrl || DEFAULT_BASE_URL;
+      if (seenBaseUrls.has(baseUrl)) continue;
+
+      const apiKey = await secretService.resolveSecretValue(row);
+      if (apiKey) {
+        seenBaseUrls.set(baseUrl, apiKey);
+      }
+    }
+
+    const allModels: ModelInfo[] = [];
+
+    for (const [baseUrl, apiKey] of seenBaseUrls) {
+      try {
+        const client = createClient(apiKey, baseUrl);
+
+        for await (const model of await client.models.list()) {
+          if (
+            model.id.includes('embedding') ||
+            model.id.includes('tts') ||
+            model.id.includes('whisper') ||
+            model.id.includes('moderation')
+          ) {
+            continue;
+          }
+
+          allModels.push({
+            modelId: model.id,
+            displayName: model.id,
+            provider: 'openai-compatible',
+            capabilities: {
+              text: !model.id.startsWith('dall-e'),
+              image: model.id.startsWith('dall-e'),
+              streaming: !model.id.startsWith('dall-e'),
+            },
+          });
+        }
+      } catch (err) {
+        console.warn(`[openai-compatible] Failed to list models for ${baseUrl}:`, err);
+      }
+    }
+
+    return allModels.sort((a, b) => a.displayName.localeCompare(b.displayName));
+  },
+  { ttl: 3_600_000, fallback: [] }
+);
 
 function buildMessages(req: TextGenerationRequest): OpenAI.ChatCompletionMessageParam[] {
   return [
@@ -154,57 +211,7 @@ const openAICompatibleProvider: AIProvider = {
   },
 
   async listModels(userId: string): Promise<ModelInfo[]> {
-    await secretService.syncConfigFileConnectors(userId);
-    const rows = await secretService.listMeta('openai-compatible', userId);
-
-    // Group connectors by base URL to avoid duplicate API calls
-    const seenBaseUrls = new Map<string, string>();
-
-    for (const row of rows) {
-      if (!row.configured) continue;
-      const baseUrl = row.baseUrl || DEFAULT_BASE_URL;
-      if (seenBaseUrls.has(baseUrl)) continue;
-
-      const apiKey = await secretService.resolveSecretValue(row);
-      if (apiKey) {
-        seenBaseUrls.set(baseUrl, apiKey);
-      }
-    }
-
-    const allModels: ModelInfo[] = [];
-
-    for (const [baseUrl, apiKey] of seenBaseUrls) {
-      try {
-        const client = createClient(apiKey, baseUrl);
-
-        for await (const model of await client.models.list()) {
-          // Skip non-generation models
-          if (
-            model.id.includes('embedding') ||
-            model.id.includes('tts') ||
-            model.id.includes('whisper') ||
-            model.id.includes('moderation')
-          ) {
-            continue;
-          }
-
-          allModels.push({
-            modelId: model.id,
-            displayName: model.id,
-            provider: 'openai-compatible',
-            capabilities: {
-              text: !model.id.startsWith('dall-e'),
-              image: model.id.startsWith('dall-e'),
-              streaming: !model.id.startsWith('dall-e'),
-            },
-          });
-        }
-      } catch (err) {
-        console.warn(`[openai-compatible] Failed to list models for ${baseUrl}:`, err);
-      }
-    }
-
-    return allModels.sort((a, b) => a.displayName.localeCompare(b.displayName));
+    return listModelsWithCache(userId);
   },
 
   async validateApiKey(apiKey: string): Promise<void> {

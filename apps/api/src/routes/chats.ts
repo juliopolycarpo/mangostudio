@@ -5,6 +5,9 @@
 import { Elysia, t } from 'elysia';
 import { getDb } from '../db/database';
 import { requireAuth } from '../plugins/auth-middleware';
+import { verifyChatOwnership } from '../services/chat-service';
+import { mapMessageRow } from '../services/message-service';
+import { parseQueryInt } from '../utils/query';
 import { ptBR } from '@mangostudio/shared/i18n';
 
 export const chatRoutes = (app: Elysia) =>
@@ -69,7 +72,13 @@ export const chatRoutes = (app: Elysia) =>
             return { error: ptBR.api.unauthorized };
           }
           const db = getDb();
-          const updates: Record<string, any> = {};
+          const updates: {
+            title?: string;
+            model?: string;
+            textModel?: string;
+            imageModel?: string;
+            lastUsedMode?: string;
+          } = {};
           if (body.title !== undefined) updates.title = body.title;
           if (body.model !== undefined) updates.model = body.model;
           if (body.textModel !== undefined) updates.textModel = body.textModel;
@@ -130,19 +139,12 @@ export const chatRoutes = (app: Elysia) =>
 
           const db = getDb();
 
-          // Verify chat ownership
-          const chat = await db
-            .selectFrom('chats')
-            .select(['id', 'userId'])
-            .where('id', '=', params.chatId)
-            .executeTakeFirst();
-
-          if (!chat || chat.userId !== user.id) {
+          if (!(await verifyChatOwnership(params.chatId, user.id, db))) {
             set.status = 404;
             return { error: 'Chat not found' };
           }
 
-          const limit = query.limit ? parseInt(query.limit, 10) : 50;
+          const limit = parseQueryInt(query.limit, 50);
 
           let q = db
             .selectFrom('messages')
@@ -151,7 +153,7 @@ export const chatRoutes = (app: Elysia) =>
             .orderBy('timestamp', 'asc');
 
           if (query.cursor) {
-            q = q.where('timestamp', '>', parseInt(query.cursor, 10));
+            q = q.where('timestamp', '>', parseQueryInt(query.cursor, 0));
           }
 
           const messages = await q.limit(limit + 1).execute();
@@ -162,11 +164,7 @@ export const chatRoutes = (app: Elysia) =>
             nextCursor = nextItem?.timestamp.toString();
           }
 
-          const mappedMessages = messages.map((msg) => ({
-            ...msg,
-            isGenerating: msg.isGenerating === 1,
-            styleParams: msg.styleParams ? JSON.parse(msg.styleParams) : undefined,
-          }));
+          const mappedMessages = messages.map(mapMessageRow);
 
           return {
             messages: mappedMessages,

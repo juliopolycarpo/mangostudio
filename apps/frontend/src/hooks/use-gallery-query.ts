@@ -1,5 +1,6 @@
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { client } from '../lib/api-client';
+import { extractApiError } from '../lib/utils';
 import type { GalleryItem } from '@mangostudio/shared';
 
 export const galleryKeys = {
@@ -13,7 +14,7 @@ export function useGalleryQuery() {
     queryFn: async ({ pageParam }) => {
       const $query = pageParam ? { cursor: pageParam, limit: '20' } : { limit: '20' };
       const { data, error } = await client.api.messages.images.get({ $query });
-      if (error) throw new Error(error.value as unknown as string);
+      if (error) throw new Error(extractApiError(error.value));
       return data as { items: GalleryItem[]; nextCursor: string | null };
     },
     initialPageParam: null as string | null,

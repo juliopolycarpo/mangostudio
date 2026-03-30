@@ -1,5 +1,6 @@
 import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { client } from '../lib/api-client';
+import { extractApiError } from '../lib/utils';
 import type { Message } from '@mangostudio/shared';
 
 export const messageKeys = {
@@ -16,7 +17,7 @@ export function useMessagesQuery(chatId: string | null) {
       // Eden 1.4.x creates a union type for dynamic segments with both direct handlers and
       // sub-resources. Cast to `any` to access the messages sub-resource.
       const { data, error } = await (client.api.chats[chatId!] as any).messages.get({ query });
-      if (error) throw new Error(error.value as unknown as string);
+      if (error) throw new Error(extractApiError(error.value));
       return data as { messages: Message[]; nextCursor: string | null };
     },
     initialPageParam: null as string | null,
@@ -34,7 +35,7 @@ export function useCreateMessageMutation() {
         ...newMessage,
         timestamp: newMessage.timestamp.getTime(),
       });
-      if (error) throw new Error(error.value as unknown as string);
+      if (error) throw new Error(extractApiError(error.value));
       return data;
     },
     onSuccess: (_, variables) => {
@@ -58,7 +59,7 @@ export function useUpdateMessageMutation() {
       updates: Partial<Message>;
     }) => {
       const { data, error } = await client.api.messages[id].put(updates);
-      if (error) throw new Error(error.value as unknown as string);
+      if (error) throw new Error(extractApiError(error.value));
       return data;
     },
     onSuccess: (_, variables) => {

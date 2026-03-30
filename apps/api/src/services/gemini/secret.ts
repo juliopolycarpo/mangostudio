@@ -14,6 +14,7 @@ import {
   type SecretMetadataInput,
 } from '../secret-store/metadata';
 import { bunSecretStore, type SecretStore } from '../secret-store/store';
+import { createProviderSecretService } from '../providers/secret-service';
 import { join, dirname } from 'path';
 import { getMangoDir } from '../../lib/config';
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
@@ -63,6 +64,33 @@ export class GeminiValidationUnavailableError extends Error {
     this.name = 'GeminiValidationUnavailableError';
   }
 }
+
+/**
+ * Unified secret service for Gemini key resolution.
+ * Delegates key resolution to createProviderSecretService, replacing the bespoke
+ * implementation in createGeminiSecretService.
+ */
+const geminiProviderSecret = createProviderSecretService({
+  provider: 'gemini',
+  tomlSection: 'gemini_api_keys',
+  envVarPrefix: 'GEMINI_API_KEY',
+  validateFn: async (apiKey, fetchImpl) => {
+    let response: Response;
+    try {
+      response = await fetchImpl(GEMINI_VALIDATION_URL, {
+        method: 'GET',
+        headers: { 'x-goog-api-key': apiKey },
+      });
+    } catch (error) {
+      throw new GeminiValidationUnavailableError(
+        error instanceof Error ? error.message : undefined
+      );
+    }
+    if (response.ok) return;
+    if ([400, 401, 403].includes(response.status)) throw new InvalidGeminiApiKeyError();
+    throw new GeminiValidationUnavailableError();
+  },
+});
 
 function maskSecret(apiKey: string | null | undefined): string | undefined {
   if (!apiKey) {
@@ -153,45 +181,6 @@ export function createGeminiSecretService(dependencies: GeminiSecretServiceDepen
     }
   };
 
-  /**
-   * Reads a secret value based on connector metadata.
-   */
-  const resolveSecretValue = async (connector: SecretMetadataRow): Promise<string | null> => {
-    switch (connector.source) {
-      case 'bun-secrets':
-        try {
-          return await secretStore.getSecret({
-            service: 'mangostudio',
-            name: `gemini-api-key:${connector.id}`,
-          });
-        } catch {
-          return null;
-        }
-
-      case 'environment': {
-        const envVar = `GEMINI_API_KEY_${connector.name.toUpperCase().replace(/[^A-Z0-9]/g, '_')}`;
-        return process.env[envVar] || process.env.GEMINI_API_KEY || null;
-      }
-
-      case 'config-file': {
-        try {
-          const configPath = resolvedTomlFilePath;
-          if (existsSync(configPath)) {
-            const content = readFileSync(configPath, 'utf8');
-            const parsed = parseToml(content) as any;
-            return parsed.gemini_api_keys?.[connector.name] || null;
-          }
-        } catch {
-          return null;
-        }
-        return null;
-      }
-
-      default:
-        return null;
-    }
-  };
-
   return {
     /**
      * Returns all connectors and their UI-safe status.
@@ -221,23 +210,15 @@ export function createGeminiSecretService(dependencies: GeminiSecretServiceDepen
 
     /**
      * Resolves the first available API key that has the requested model enabled.
+     * Delegates to the unified createProviderSecretService instance.
      */
     async getResolvedGeminiApiKey(userId: string, requestedModel?: string): Promise<string> {
-      await syncConfigFileConnectors(userId);
-
-      const metadataRows = await listMetadata(GEMINI_PROVIDER, userId);
-
-      for (const row of metadataRows) {
-        if (!row.configured) continue;
-
-        const enabledModels: string[] = JSON.parse(row.enabledModels);
-        if (requestedModel && !enabledModels.includes(requestedModel)) continue;
-
-        const value = await resolveSecretValue(row);
-        if (value) return value;
+      try {
+        return await geminiProviderSecret.resolveApiKey(userId, requestedModel);
+      } catch {
+        // Re-throw as the Gemini-specific error for backward compat
+        throw new GeminiApiKeyMissingError();
       }
-
-      throw new GeminiApiKeyMissingError();
     },
 
     /**

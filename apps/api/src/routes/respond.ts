@@ -9,12 +9,10 @@ import { getProviderForModel } from '../services/providers/registry';
 import { getUnifiedModelCatalog } from '../services/providers/catalog';
 import { getDb } from '../db/database';
 import { requireAuth } from '../plugins/auth-middleware';
+import { generateId } from '../utils/id';
+import { verifyChatOwnership } from '../services/chat-service';
+import { createMessage, loadChatHistory } from '../services/message-service';
 import { ptBR } from '@mangostudio/shared/i18n';
-
-/** Generates a stable unique ID based on the current time + random suffix. */
-function generateId(): string {
-  return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-}
 
 export const respondRoutes = (app: Elysia) =>
   app.group('', (app) =>
@@ -35,14 +33,7 @@ export const respondRoutes = (app: Elysia) =>
           const userId = user.id;
           const db = getDb();
 
-          // Verify chat ownership
-          const chat = await db
-            .selectFrom('chats')
-            .select('userId')
-            .where('id', '=', body.chatId)
-            .executeTakeFirst();
-
-          if (!chat || chat.userId !== userId) {
+          if (!(await verifyChatOwnership(body.chatId, userId, db))) {
             set.status = 404;
             return { error: 'Chat not found' };
           }
@@ -63,38 +54,21 @@ export const respondRoutes = (app: Elysia) =>
 
           // 1. Persist the user text message
           const userMsgId = generateId();
-          await db
-            .insertInto('messages')
-            .values({
+          await createMessage(
+            {
               id: userMsgId,
               chatId: body.chatId,
               role: 'user',
               text: body.prompt,
-              imageUrl: null,
-              referenceImage: null,
               timestamp: now,
-              isGenerating: 0,
-              generationTime: null,
-              modelName: null,
-              styleParams: null,
+              isGenerating: false,
               interactionMode: 'chat',
-            })
-            .execute();
+            },
+            db
+          );
 
           // 2. Load prior chat-mode messages for context reconstruction (exclude the one just saved)
-          const historyRows = await db
-            .selectFrom('messages')
-            .select(['id', 'role', 'text'])
-            .where('chatId', '=', body.chatId)
-            .where('interactionMode', '=', 'chat')
-            .where('id', '!=', userMsgId)
-            .orderBy('timestamp', 'asc')
-            .execute();
-
-          const history = historyRows.map((row) => ({
-            role: row.role as 'user' | 'ai',
-            text: row.text,
-          }));
+          const history = await loadChatHistory(body.chatId, { excludeId: userMsgId }, db);
 
           // 3. Generate text response via dynamic provider
           const aiMsgId = generateId();
@@ -115,23 +89,20 @@ export const respondRoutes = (app: Elysia) =>
             const aiTimestamp = Date.now();
 
             // 4. Persist the AI text reply
-            await db
-              .insertInto('messages')
-              .values({
+            await createMessage(
+              {
                 id: aiMsgId,
                 chatId: body.chatId,
                 role: 'ai',
                 text: responseText,
-                imageUrl: null,
-                referenceImage: null,
                 timestamp: aiTimestamp,
-                isGenerating: 0,
+                isGenerating: false,
                 generationTime,
                 modelName: model,
-                styleParams: null,
                 interactionMode: 'chat',
-              })
-              .execute();
+              },
+              db
+            );
 
             // Single chat update at the end to avoid updatedAt regression on concurrent requests
             await db

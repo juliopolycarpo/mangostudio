@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { client } from '../lib/api-client';
+import { extractApiError } from '../lib/utils';
 import type { Chat } from '@mangostudio/shared';
 
 export const chatKeys = {
@@ -15,7 +16,7 @@ export function useChatsQuery() {
     queryKey: chatKeys.lists(),
     queryFn: async () => {
       const { data, error } = await client.api.chats.get();
-      if (error) throw new Error(error.value as unknown as string);
+      if (error) throw new Error(extractApiError(error.value));
       return data as Chat[];
     },
   });
@@ -26,7 +27,7 @@ export function useCreateChatMutation() {
   return useMutation({
     mutationFn: async (newChat: Chat) => {
       const { data, error } = await client.api.chats.post(newChat);
-      if (error) throw new Error(error.value as unknown as string);
+      if (error) throw new Error(extractApiError(error.value));
       return data;
     },
     onSuccess: () => {
@@ -42,7 +43,7 @@ export function useUpdateChatMutation() {
       // Eden 1.4.x creates a union type for dynamic segments that have both direct handlers
       // (put/delete) and sub-resources (messages). Cast to `any` to resolve the union.
       const { data, error } = await (client.api.chats[id] as any).put(updates);
-      if (error) throw new Error(error.value as unknown as string);
+      if (error) throw new Error(extractApiError(error.value));
       return data;
     },
     onSuccess: (_, variables) => {
@@ -57,7 +58,7 @@ export function useDeleteChatMutation() {
   return useMutation({
     mutationFn: async (id: string) => {
       const { data, error } = await (client.api.chats[id] as any).delete();
-      if (error) throw new Error(error.value as unknown as string);
+      if (error) throw new Error(extractApiError(error.value));
       return data;
     },
     onSuccess: () => {
