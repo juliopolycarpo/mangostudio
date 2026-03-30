@@ -6,6 +6,7 @@
 
 import Anthropic from '@anthropic-ai/sdk';
 import { createProviderSecretService } from './secret-service';
+import { withModelCache } from './model-cache';
 import { registerProvider } from './registry';
 import type {
   AIProvider,
@@ -55,6 +56,34 @@ const secretService = createProviderSecretService({
 function createClient(apiKey: string): Anthropic {
   return new Anthropic({ apiKey });
 }
+
+const listModelsWithCache = withModelCache(
+  async (userId: string): Promise<ModelInfo[]> => {
+    const apiKey = await secretService.resolveApiKey(userId);
+    const client = createClient(apiKey);
+
+    try {
+      const models: ModelInfo[] = [];
+
+      for await (const model of client.models.list({ limit: 100 })) {
+        models.push({
+          modelId: model.id,
+          displayName: model.display_name || model.id,
+          provider: 'anthropic',
+          capabilities: { text: true, image: false, streaming: true },
+        });
+      }
+
+      return models.length > 0
+        ? models.sort((a, b) => a.displayName.localeCompare(b.displayName))
+        : FALLBACK_MODELS;
+    } catch (err) {
+      console.warn('[anthropic] Failed to list models dynamically, using fallback:', err);
+      return FALLBACK_MODELS;
+    }
+  },
+  { ttl: 3_600_000, fallback: FALLBACK_MODELS }
+);
 
 function buildMessages(req: TextGenerationRequest): Anthropic.MessageCreateParams['messages'] {
   return [
@@ -116,28 +145,7 @@ const anthropicProvider: AIProvider = {
   },
 
   async listModels(userId: string): Promise<ModelInfo[]> {
-    const apiKey = await secretService.resolveApiKey(userId);
-    const client = createClient(apiKey);
-
-    try {
-      const models: ModelInfo[] = [];
-
-      for await (const model of client.models.list({ limit: 100 })) {
-        models.push({
-          modelId: model.id,
-          displayName: model.display_name || model.id,
-          provider: 'anthropic',
-          capabilities: { text: true, image: false, streaming: true },
-        });
-      }
-
-      return models.length > 0
-        ? models.sort((a, b) => a.displayName.localeCompare(b.displayName))
-        : FALLBACK_MODELS;
-    } catch (err) {
-      console.warn('[anthropic] Failed to list models dynamically, using fallback:', err);
-      return FALLBACK_MODELS;
-    }
+    return listModelsWithCache(userId);
   },
 
   async validateApiKey(apiKey: string): Promise<void> {
