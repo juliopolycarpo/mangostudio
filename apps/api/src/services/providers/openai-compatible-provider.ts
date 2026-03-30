@@ -144,11 +144,14 @@ const openAICompatibleProvider: AIProvider = {
     const { apiKey, baseUrl } = await resolveClientConfig(req.userId, req.modelName);
     const client = createClient(apiKey, baseUrl);
 
-    const completion = await client.chat.completions.create({
-      model: req.modelName,
-      messages: buildMessages(req),
-      stream: false,
-    });
+    const completion = await client.chat.completions.create(
+      {
+        model: req.modelName,
+        messages: buildMessages(req),
+        stream: false,
+      },
+      { signal: req.signal }
+    );
 
     const text = completion.choices[0]?.message?.content ?? '';
     if (!text) throw new Error('No text returned from OpenAI-compatible API.');
@@ -159,13 +162,17 @@ const openAICompatibleProvider: AIProvider = {
     const { apiKey, baseUrl } = await resolveClientConfig(req.userId, req.modelName);
     const client = createClient(apiKey, baseUrl);
 
-    const stream = await client.chat.completions.create({
-      model: req.modelName,
-      messages: buildMessages(req),
-      stream: true,
-    });
+    const stream = await client.chat.completions.create(
+      {
+        model: req.modelName,
+        messages: buildMessages(req),
+        stream: true,
+      },
+      { signal: req.signal }
+    );
 
     for await (const chunk of stream) {
+      if (req.signal?.aborted) break;
       const delta = chunk.choices[0]?.delta?.content;
       if (delta) {
         yield { text: delta, done: false };

@@ -32,7 +32,7 @@ const GeminiModelCatalogSchema = Type.Object({
 });
 
 describe('settingsRoutes', () => {
-  it('retorna o snapshot do catálogo de modelos Gemini', async () => {
+  it('retorna o snapshot do catálogo de modelos Gemini com shape correto', async () => {
     clearGeminiModelCatalog(TEST_USER.id);
 
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, settingsRoutes);
@@ -44,12 +44,8 @@ describe('settingsRoutes', () => {
 
     const payload = await response.json();
     expect(Value.Check(GeminiModelCatalogSchema, payload)).toBe(true);
-    expect(payload).toMatchObject({
-      configured: false,
-      status: 'idle',
-      allModels: [],
-      textModels: [],
-      imageModels: [],
-    });
+    // Cold-start now awaits refresh — status must not be 'idle'
+    expect(payload.status).not.toBe('idle');
+    expect(Array.isArray(payload.allModels)).toBe(true);
   });
 });

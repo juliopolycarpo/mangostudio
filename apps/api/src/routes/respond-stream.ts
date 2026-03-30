@@ -93,9 +93,13 @@ export const respondStreamRoutes = (app: Elysia) =>
           const prompt = body.prompt;
           const systemPrompt = body.systemPrompt;
 
+          const abortController = new AbortController();
+          const { signal } = abortController;
+
           const stream = new ReadableStream({
             async start(controller) {
               let fullText = '';
+              let aborted = false;
 
               try {
                 if (provider.generateTextStream) {
@@ -105,7 +109,12 @@ export const respondStreamRoutes = (app: Elysia) =>
                     prompt,
                     systemPrompt,
                     modelName: model,
+                    signal,
                   })) {
+                    if (signal.aborted) {
+                      aborted = true;
+                      break;
+                    }
                     if (!chunk.done && chunk.text) {
                       fullText += chunk.text;
                       controller.enqueue(sseEvent({ text: chunk.text, done: false }));
@@ -119,40 +128,51 @@ export const respondStreamRoutes = (app: Elysia) =>
                     prompt,
                     systemPrompt,
                     modelName: model,
+                    signal,
                   });
-                  fullText = result.text;
-                  controller.enqueue(sseEvent({ text: fullText, done: false }));
+                  if (signal.aborted) {
+                    aborted = true;
+                  } else {
+                    fullText = result.text;
+                    controller.enqueue(sseEvent({ text: fullText, done: false }));
+                  }
                 }
 
-                const generationTime = `${((Date.now() - startTime) / 1000).toFixed(1)}s`;
-                const aiTimestamp = Date.now();
+                if (!aborted) {
+                  const generationTime = `${((Date.now() - startTime) / 1000).toFixed(1)}s`;
+                  const aiTimestamp = Date.now();
 
-                // Persist the completed AI message
-                await createMessage(
-                  {
-                    id: aiMsgId,
-                    chatId,
-                    role: 'ai',
-                    text: fullText,
-                    timestamp: aiTimestamp,
-                    isGenerating: false,
-                    generationTime,
-                    modelName: model,
-                    interactionMode: 'chat',
-                  },
-                  db
-                );
+                  // Persist the completed AI message
+                  await createMessage(
+                    {
+                      id: aiMsgId,
+                      chatId,
+                      role: 'ai',
+                      text: fullText,
+                      timestamp: aiTimestamp,
+                      isGenerating: false,
+                      generationTime,
+                      modelName: model,
+                      interactionMode: 'chat',
+                    },
+                    db
+                  );
 
-                // Single update with WHERE guard to prevent updatedAt from regressing
-                await db
-                  .updateTable('chats')
-                  .set({ updatedAt: aiTimestamp, lastUsedMode: 'chat' })
-                  .where('id', '=', chatId)
-                  .where('updatedAt', '<=', aiTimestamp)
-                  .execute();
+                  // Single update with WHERE guard to prevent updatedAt from regressing
+                  await db
+                    .updateTable('chats')
+                    .set({ updatedAt: aiTimestamp, lastUsedMode: 'chat' })
+                    .where('id', '=', chatId)
+                    .where('updatedAt', '<=', aiTimestamp)
+                    .execute();
 
-                controller.enqueue(sseEvent({ done: true, messageId: aiMsgId, generationTime }));
+                  controller.enqueue(sseEvent({ done: true, messageId: aiMsgId, generationTime }));
+                }
               } catch (error: unknown) {
+                if (signal.aborted) {
+                  // Client disconnected — generation cancelled, nothing to persist
+                  return;
+                }
                 const message = error instanceof Error ? error.message : 'Stream generation failed';
                 console.error('[respond-stream] Error:', message);
                 const errorEvent: SSEErrorEvent = { error: message, done: true };
@@ -160,6 +180,9 @@ export const respondStreamRoutes = (app: Elysia) =>
               } finally {
                 controller.close();
               }
+            },
+            cancel() {
+              abortController.abort();
             },
           });
 
