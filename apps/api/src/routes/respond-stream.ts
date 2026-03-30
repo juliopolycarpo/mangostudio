@@ -13,6 +13,7 @@ import { requireAuth } from '../plugins/auth-middleware';
 import { generateId } from '../utils/id';
 import { verifyChatOwnership } from '../services/chat-service';
 import { createMessage, loadChatHistory } from '../services/message-service';
+import type { SSEErrorEvent } from '@mangostudio/shared';
 import { ptBR } from '@mangostudio/shared/i18n';
 
 /** Serialises an SSE data line. */
@@ -155,7 +156,8 @@ export const respondStreamRoutes = (app: Elysia) =>
               } catch (error: unknown) {
                 const message = error instanceof Error ? error.message : 'Stream generation failed';
                 console.error('[respond-stream] Error:', message);
-                controller.enqueue(sseEvent({ error: message, done: true }));
+                const errorEvent: SSEErrorEvent = { error: message, done: true };
+                controller.enqueue(sseEvent(errorEvent));
               } finally {
                 controller.close();
               }

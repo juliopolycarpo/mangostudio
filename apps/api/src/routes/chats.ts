@@ -72,7 +72,13 @@ export const chatRoutes = (app: Elysia) =>
             return { error: ptBR.api.unauthorized };
           }
           const db = getDb();
-          const updates: Record<string, any> = {};
+          const updates: {
+            title?: string;
+            model?: string;
+            textModel?: string;
+            imageModel?: string;
+            lastUsedMode?: string;
+          } = {};
           if (body.title !== undefined) updates.title = body.title;
           if (body.model !== undefined) updates.model = body.model;
           if (body.textModel !== undefined) updates.textModel = body.textModel;

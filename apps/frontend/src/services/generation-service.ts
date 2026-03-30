@@ -47,9 +47,11 @@ export async function generateImage(request: GenerateImageRequest): Promise<Gene
   const { data, error } = await client.api.generate.post(request);
 
   if (error) {
-    throw new Error((error.value as any)?.error || 'Image generation failed');
+    throw new Error((error.value as { error?: string } | null)?.error || 'Image generation failed');
   }
 
+  // Eden Treaty infers a union that includes the error shape even after the guard above.
+  // The double cast is intentional and safe here.
   return data as unknown as GenerateImageResponse;
 }
 
@@ -57,9 +59,11 @@ export async function respondText(request: RespondTextRequest): Promise<RespondT
   const { data, error } = await client.api.respond.post(request);
 
   if (error) {
-    throw new Error((error.value as any)?.error || 'Text generation failed');
+    throw new Error((error.value as { error?: string } | null)?.error || 'Text generation failed');
   }
 
+  // Eden Treaty infers a union that includes the error shape even after the guard above.
+  // The double cast is intentional and safe here.
   return data as unknown as RespondTextResponse;
 }
 

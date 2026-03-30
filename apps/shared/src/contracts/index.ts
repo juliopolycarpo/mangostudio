@@ -3,6 +3,8 @@
  * These define the shape of data exchanged between frontend and API.
  */
 
+export type { SSEErrorEvent } from './errors';
+
 import type {
   InteractionMode,
   SecretSource,

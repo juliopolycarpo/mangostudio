@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { ModelCatalogResponse } from '@mangostudio/shared';
 import { EMPTY_MODEL_CATALOG } from '../utils/model-utils';
 import { client } from '../lib/api-client';
+import { extractApiError } from '../lib/utils';
 
 export const catalogKeys = {
   all: ['model-catalog'] as const,
@@ -15,7 +16,7 @@ export function useModelCatalog() {
     queryKey: catalogKeys.all,
     queryFn: async () => {
       const { data, error } = await client.api.settings.models.get();
-      if (error) throw new Error(error.value as unknown as string);
+      if (error) throw new Error(extractApiError(error.value));
       return data as ModelCatalogResponse;
     },
     staleTime: 1000 * 60 * 55, // 55 minutes
