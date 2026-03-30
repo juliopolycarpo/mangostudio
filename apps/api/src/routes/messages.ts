@@ -6,6 +6,7 @@
 import { Elysia, t } from 'elysia';
 import { getDb } from '../db/database';
 import { requireAuth } from '../plugins/auth-middleware';
+import { ptBR } from '@mangostudio/shared/i18n';
 
 export const messageRoutes = (app: Elysia) =>
   app.group('/messages', (app) =>
@@ -17,7 +18,11 @@ export const messageRoutes = (app: Elysia) =>
        */
       .get(
         '/images',
-        async ({ query, user }) => {
+        async ({ query, user, set }) => {
+          if (!user?.id) {
+            set.status = 401;
+            return { error: ptBR.api.unauthorized };
+          }
           const db = getDb();
           const limit = query.limit ? parseInt(query.limit, 10) : 50;
 
@@ -40,7 +45,7 @@ export const messageRoutes = (app: Elysia) =>
                   .limit(1)
                   .as('prompt'),
             ])
-            .where('chats.userId', '=', user?.id ?? '')
+            .where('chats.userId', '=', user.id)
             .where('ai.role', '=', 'ai')
             .where('ai.imageUrl', 'is not', null)
             .orderBy('ai.timestamp', 'desc');
@@ -81,6 +86,11 @@ export const messageRoutes = (app: Elysia) =>
       .post(
         '/',
         async ({ body, user, set }) => {
+          if (!user?.id) {
+            set.status = 401;
+            return { error: ptBR.api.unauthorized };
+          }
+
           const db = getDb();
 
           // Verify chat ownership
@@ -90,7 +100,7 @@ export const messageRoutes = (app: Elysia) =>
             .where('id', '=', body.chatId)
             .executeTakeFirst();
 
-          if (!chat || chat.userId !== (user?.id ?? '')) {
+          if (!chat || chat.userId !== user.id) {
             set.status = 404;
             return { error: 'Chat not found' };
           }
@@ -144,6 +154,11 @@ export const messageRoutes = (app: Elysia) =>
       .put(
         '/:id',
         async ({ params, body, user, set }) => {
+          if (!user?.id) {
+            set.status = 401;
+            return { error: ptBR.api.unauthorized };
+          }
+
           const db = getDb();
 
           // Verify message and chat ownership
@@ -154,7 +169,7 @@ export const messageRoutes = (app: Elysia) =>
             .where('messages.id', '=', params.id)
             .executeTakeFirst();
 
-          if (!msg || msg.userId !== (user?.id ?? '')) {
+          if (!msg || msg.userId !== user.id) {
             set.status = 404;
             return { error: 'Message not found' };
           }

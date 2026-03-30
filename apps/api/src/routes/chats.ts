@@ -5,18 +5,23 @@
 import { Elysia, t } from 'elysia';
 import { getDb } from '../db/database';
 import { requireAuth } from '../plugins/auth-middleware';
+import { ptBR } from '@mangostudio/shared/i18n';
 
 export const chatRoutes = (app: Elysia) =>
   app.group('/chats', (app) =>
     app
       .use(requireAuth)
       /** List all chats for the authenticated user ordered by most recently updated. */
-      .get('/', async ({ user }) => {
+      .get('/', async ({ user, set }) => {
+        if (!user?.id) {
+          set.status = 401;
+          return { error: ptBR.api.unauthorized };
+        }
         const db = getDb();
         const chats = await db
           .selectFrom('chats')
           .selectAll()
-          .where('userId', '=', user?.id ?? '')
+          .where('userId', '=', user.id)
           .orderBy('updatedAt', 'desc')
           .execute();
         return chats;
@@ -25,7 +30,11 @@ export const chatRoutes = (app: Elysia) =>
       /** Create a new chat for the authenticated user. */
       .post(
         '/',
-        async ({ body, user }) => {
+        async ({ body, user, set }) => {
+          if (!user?.id) {
+            set.status = 401;
+            return { error: ptBR.api.unauthorized };
+          }
           const db = getDb();
           await db
             .insertInto('chats')
@@ -35,7 +44,7 @@ export const chatRoutes = (app: Elysia) =>
               createdAt: body.createdAt,
               updatedAt: body.updatedAt,
               model: body.model ?? null,
-              userId: user?.id ?? null,
+              userId: user.id,
             })
             .execute();
           return { success: true };
@@ -54,7 +63,11 @@ export const chatRoutes = (app: Elysia) =>
       /** Update a chat owned by the authenticated user. */
       .put(
         '/:id',
-        async ({ params, body, user }) => {
+        async ({ params, body, user, set }) => {
+          if (!user?.id) {
+            set.status = 401;
+            return { error: ptBR.api.unauthorized };
+          }
           const db = getDb();
           const updates: Record<string, any> = {};
           if (body.title !== undefined) updates.title = body.title;
@@ -68,7 +81,7 @@ export const chatRoutes = (app: Elysia) =>
               .updateTable('chats')
               .set(updates)
               .where('id', '=', params.id)
-              .where('userId', '=', user?.id ?? '')
+              .where('userId', '=', user.id)
               .execute();
           }
           return { success: true };
@@ -88,12 +101,16 @@ export const chatRoutes = (app: Elysia) =>
       /** Delete a chat and its messages (cascades) if owned by the user. */
       .delete(
         '/:id',
-        async ({ params, user }) => {
+        async ({ params, user, set }) => {
+          if (!user?.id) {
+            set.status = 401;
+            return { error: ptBR.api.unauthorized };
+          }
           const db = getDb();
           await db
             .deleteFrom('chats')
             .where('id', '=', params.id)
-            .where('userId', '=', user?.id ?? '')
+            .where('userId', '=', user.id)
             .execute();
           return { success: true };
         },
@@ -106,6 +123,11 @@ export const chatRoutes = (app: Elysia) =>
       .get(
         '/:chatId/messages',
         async ({ params, query, user, set }) => {
+          if (!user?.id) {
+            set.status = 401;
+            return { error: ptBR.api.unauthorized };
+          }
+
           const db = getDb();
 
           // Verify chat ownership
@@ -115,7 +137,7 @@ export const chatRoutes = (app: Elysia) =>
             .where('id', '=', params.chatId)
             .executeTakeFirst();
 
-          if (!chat || chat.userId !== (user?.id ?? '')) {
+          if (!chat || chat.userId !== user.id) {
             set.status = 404;
             return { error: 'Chat not found' };
           }

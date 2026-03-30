@@ -9,6 +9,7 @@ import { getProviderForModel } from '../services/providers/registry';
 import { getUnifiedModelCatalog } from '../services/providers/catalog';
 import { getDb } from '../db/database';
 import { requireAuth } from '../plugins/auth-middleware';
+import { ptBR } from '@mangostudio/shared/i18n';
 
 /** Generates a stable unique ID based on the current time + random suffix. */
 function generateId(): string {
@@ -27,8 +28,12 @@ export const generateRoutes = (app: Elysia) =>
       .post(
         '/generate',
         async ({ body, set, user }) => {
+          if (!user?.id) {
+            set.status = 401;
+            return { error: ptBR.api.unauthorized };
+          }
+          const userId = user.id;
           const db = getDb();
-          const userId = user?.id ?? '';
 
           // Verify chat ownership
           const chat = await db
@@ -86,13 +91,6 @@ export const generateRoutes = (app: Elysia) =>
             })
             .execute();
 
-          // Update chat's updatedAt and lastUsedMode
-          await db
-            .updateTable('chats')
-            .set({ updatedAt: now, lastUsedMode: 'image' })
-            .where('id', '=', body.chatId)
-            .execute();
-
           // 2. Generate image via dynamic provider
           const aiMsgId = generateId();
           const startTime = Date.now();
@@ -114,6 +112,7 @@ export const generateRoutes = (app: Elysia) =>
 
             const generationTime = `${((Date.now() - startTime) / 1000).toFixed(1)}s`;
             const styleParams = [body.imageQuality ?? '1K'];
+            const aiTimestamp = Date.now();
 
             // 3. Persist the AI message with the generated image
             const aiMessage = {
@@ -122,7 +121,7 @@ export const generateRoutes = (app: Elysia) =>
               role: 'ai' as const,
               text: '',
               imageUrl,
-              timestamp: Date.now(),
+              timestamp: aiTimestamp,
               isGenerating: false,
               generationTime,
               modelName: model,
@@ -147,11 +146,12 @@ export const generateRoutes = (app: Elysia) =>
               })
               .execute();
 
-            // Update chat's updatedAt again with the final timestamp
+            // Single chat update at the end to avoid updatedAt regression on concurrent requests
             await db
               .updateTable('chats')
-              .set({ updatedAt: aiMessage.timestamp })
+              .set({ updatedAt: aiTimestamp, lastUsedMode: 'image' })
               .where('id', '=', body.chatId)
+              .where('updatedAt', '<=', aiTimestamp)
               .execute();
 
             return {
