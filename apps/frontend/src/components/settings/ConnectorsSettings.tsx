@@ -245,7 +245,7 @@ export function ConnectorsSettings({ modelCatalog, reloadModelCatalog }: Connect
                       </span>
                       <span className="text-outline-variant">•</span>
                       <span className="font-mono text-on-surface-variant/60">
-                        ****{c.maskedSuffix}
+                        {c.maskedSuffix ?? '****'}
                       </span>
                     </div>
                   </div>
