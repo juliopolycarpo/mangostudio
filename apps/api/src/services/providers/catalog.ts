@@ -7,13 +7,20 @@
 import type { ModelCatalogResponse, ModelOption } from '@mangostudio/shared';
 import { listRegisteredProviderTypes, getProvider } from './registry';
 import { listSecretMetadata } from '../secret-store/metadata';
-import type { ModelInfo } from './types';
+import type { ModelInfo, AIProvider } from './types';
+import type { ProviderType } from '@mangostudio/shared/types';
 
 const TTL_MS = 60 * 60 * 1000; // 1 hour
 const MAX_CATALOG_ENTRIES = 1000;
 
 interface UnifiedModelCatalogDeps {
   now?: () => number;
+  /** Overrides listRegisteredProviderTypes (useful in tests). */
+  listProviders?: () => ProviderType[];
+  /** Overrides getProvider (useful in tests). */
+  getProviderFn?: (type: ProviderType) => AIProvider;
+  /** Overrides listSecretMetadata (useful in tests). */
+  listSecretMetadataFn?: typeof listSecretMetadata;
 }
 
 function modelInfoToOption(m: ModelInfo): ModelOption {
@@ -53,6 +60,9 @@ function evictOldest<V>(map: Map<string, V>): void {
 
 export function createUnifiedModelCatalogService(deps: UnifiedModelCatalogDeps = {}) {
   const now = deps.now ?? (() => Date.now());
+  const listProviders = deps.listProviders ?? listRegisteredProviderTypes;
+  const getProviderFn = deps.getProviderFn ?? getProvider;
+  const listSecretMetadataFn = deps.listSecretMetadataFn ?? listSecretMetadata;
 
   // Per-user cache: full discovered models (before filtering by enabled)
   const fullCatalogs = new Map<string, ModelOption[]>();
@@ -75,10 +85,10 @@ export function createUnifiedModelCatalogService(deps: UnifiedModelCatalogDeps =
   /** Collects the set of model IDs enabled across all connectors for a user. */
   async function getEnabledModelIds(userId: string): Promise<Set<string>> {
     const enabled = new Set<string>();
-    const providerTypes = listRegisteredProviderTypes();
+    const providerTypes = listProviders();
 
     for (const pt of providerTypes) {
-      const connectors = await listSecretMetadata(pt, userId);
+      const connectors = await listSecretMetadataFn(pt, userId);
       for (const c of connectors) {
         try {
           const models: string[] = JSON.parse(c.enabledModels);
@@ -122,12 +132,12 @@ export function createUnifiedModelCatalogService(deps: UnifiedModelCatalogDeps =
 
       const promise = (async () => {
         try {
-          const providerTypes = listRegisteredProviderTypes();
+          const providerTypes = listProviders();
           const PROVIDER_TIMEOUT_MS = 5_000;
 
           const results = await Promise.allSettled(
             providerTypes.map(async (pt) => {
-              const provider = getProvider(pt);
+              const provider = getProviderFn(pt);
               const timeoutPromise = new Promise<never>((_, reject) =>
                 setTimeout(() => reject(new Error(`Provider ${pt} timed out`)), PROVIDER_TIMEOUT_MS)
               );

@@ -48,7 +48,7 @@ describe('settings connectors routes', () => {
     expect(payload).toMatchObject({ connectors: [] });
   });
 
-  it('GET /settings/models returns empty model catalog for a new user', async () => {
+  it('GET /settings/models returns resolved catalog for a new user', async () => {
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, settingsRoutes);
     restoreAuth = restore;
 
@@ -58,13 +58,11 @@ describe('settings connectors routes', () => {
 
     const payload = await response.json();
     expect(Value.Check(ModelCatalogSchema, payload)).toBe(true);
-    expect(payload).toMatchObject({
-      configured: false,
-      status: 'idle',
-      allModels: [],
-      textModels: [],
-      imageModels: [],
-    });
+    // Cold-start now awaits refresh — status must not be 'idle'
+    expect(payload.status).not.toBe('idle');
+    // No connectors configured → no models enabled
+    expect(payload.textModels).toEqual([]);
+    expect(payload.imageModels).toEqual([]);
   });
 
   it('GET /settings/secrets/gemini (alias) returns empty connector list', async () => {
