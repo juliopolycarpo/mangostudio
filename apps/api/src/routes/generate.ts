@@ -9,12 +9,9 @@ import { getProviderForModel } from '../services/providers/registry';
 import { getUnifiedModelCatalog } from '../services/providers/catalog';
 import { getDb } from '../db/database';
 import { requireAuth } from '../plugins/auth-middleware';
+import { generateId } from '../utils/id';
+import { verifyChatOwnership } from '../services/chat-service';
 import { ptBR } from '@mangostudio/shared/i18n';
-
-/** Generates a stable unique ID based on the current time + random suffix. */
-function generateId(): string {
-  return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-}
 
 export const generateRoutes = (app: Elysia) =>
   app.group('', (app) =>
@@ -35,14 +32,7 @@ export const generateRoutes = (app: Elysia) =>
           const userId = user.id;
           const db = getDb();
 
-          // Verify chat ownership
-          const chat = await db
-            .selectFrom('chats')
-            .select('userId')
-            .where('id', '=', body.chatId)
-            .executeTakeFirst();
-
-          if (!chat || chat.userId !== userId) {
+          if (!(await verifyChatOwnership(body.chatId, userId, db))) {
             set.status = 404;
             return { error: 'Chat not found' };
           }

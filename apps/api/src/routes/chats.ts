@@ -5,6 +5,8 @@
 import { Elysia, t } from 'elysia';
 import { getDb } from '../db/database';
 import { requireAuth } from '../plugins/auth-middleware';
+import { verifyChatOwnership } from '../services/chat-service';
+import { parseQueryInt } from '../utils/query';
 import { ptBR } from '@mangostudio/shared/i18n';
 
 export const chatRoutes = (app: Elysia) =>
@@ -130,19 +132,12 @@ export const chatRoutes = (app: Elysia) =>
 
           const db = getDb();
 
-          // Verify chat ownership
-          const chat = await db
-            .selectFrom('chats')
-            .select(['id', 'userId'])
-            .where('id', '=', params.chatId)
-            .executeTakeFirst();
-
-          if (!chat || chat.userId !== user.id) {
+          if (!(await verifyChatOwnership(params.chatId, user.id, db))) {
             set.status = 404;
             return { error: 'Chat not found' };
           }
 
-          const limit = query.limit ? parseInt(query.limit, 10) : 50;
+          const limit = parseQueryInt(query.limit, 50);
 
           let q = db
             .selectFrom('messages')
@@ -151,7 +146,7 @@ export const chatRoutes = (app: Elysia) =>
             .orderBy('timestamp', 'asc');
 
           if (query.cursor) {
-            q = q.where('timestamp', '>', parseInt(query.cursor, 10));
+            q = q.where('timestamp', '>', parseQueryInt(query.cursor, 0));
           }
 
           const messages = await q.limit(limit + 1).execute();

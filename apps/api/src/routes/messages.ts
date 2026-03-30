@@ -6,6 +6,8 @@
 import { Elysia, t } from 'elysia';
 import { getDb } from '../db/database';
 import { requireAuth } from '../plugins/auth-middleware';
+import { verifyChatOwnership } from '../services/chat-service';
+import { parseQueryInt } from '../utils/query';
 import { ptBR } from '@mangostudio/shared/i18n';
 
 export const messageRoutes = (app: Elysia) =>
@@ -24,7 +26,7 @@ export const messageRoutes = (app: Elysia) =>
             return { error: ptBR.api.unauthorized };
           }
           const db = getDb();
-          const limit = query.limit ? parseInt(query.limit, 10) : 50;
+          const limit = parseQueryInt(query.limit, 50);
 
           let q = db
             .selectFrom('messages as ai')
@@ -51,7 +53,7 @@ export const messageRoutes = (app: Elysia) =>
             .orderBy('ai.timestamp', 'desc');
 
           if (query.cursor) {
-            q = q.where('ai.timestamp', '<', parseInt(query.cursor, 10));
+            q = q.where('ai.timestamp', '<', parseQueryInt(query.cursor, 0));
           }
 
           const rows = await q.limit(limit + 1).execute();
@@ -93,14 +95,7 @@ export const messageRoutes = (app: Elysia) =>
 
           const db = getDb();
 
-          // Verify chat ownership
-          const chat = await db
-            .selectFrom('chats')
-            .select(['id', 'userId'])
-            .where('id', '=', body.chatId)
-            .executeTakeFirst();
-
-          if (!chat || chat.userId !== user.id) {
+          if (!(await verifyChatOwnership(body.chatId, user.id, db))) {
             set.status = 404;
             return { error: 'Chat not found' };
           }
