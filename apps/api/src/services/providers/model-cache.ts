@@ -11,6 +11,8 @@ export interface ModelCacheOptions<T> {
   fallback: T[];
   /** Injected clock (useful in tests). */
   now?: () => number;
+  /** Maximum number of user entries to keep. Oldest entry is evicted when exceeded. Default: 1000. */
+  maxEntries?: number;
 }
 
 /**
@@ -28,6 +30,7 @@ export function withModelCache<T>(
   opts: ModelCacheOptions<T>
 ): (userId: string) => Promise<T[]> {
   const now = opts.now ?? (() => Date.now());
+  const maxEntries = opts.maxEntries ?? 1000;
 
   const cache = new Map<string, { value: T[]; expiresAt: number }>();
   const inflight = new Map<string, Promise<T[]>>();
@@ -47,6 +50,10 @@ export function withModelCache<T>(
       try {
         const models = await fetchFn(userId);
         cache.set(userId, { value: models, expiresAt: now() + opts.ttl });
+        if (cache.size > maxEntries) {
+          const firstKey = cache.keys().next().value;
+          if (firstKey !== undefined) cache.delete(firstKey);
+        }
         return models;
       } catch {
         // On error, return stale cache if available, otherwise fallback
