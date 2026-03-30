@@ -36,14 +36,17 @@ const geminiProvider: AIProvider = {
     return { text };
   },
 
-  generateTextStream(req: TextGenerationRequest): AsyncIterable<StreamingTextChunk> {
-    return geminiGenerateTextStream(
+  async *generateTextStream(req: TextGenerationRequest): AsyncIterable<StreamingTextChunk> {
+    for await (const chunk of geminiGenerateTextStream(
       req.userId,
       req.history,
       req.prompt,
       req.systemPrompt,
       req.modelName
-    );
+    )) {
+      if (req.signal?.aborted) break;
+      yield chunk;
+    }
   },
 
   async generateImage(req: ImageGenerationRequest): Promise<ImageGenerationResult> {

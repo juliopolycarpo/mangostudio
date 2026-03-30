@@ -104,12 +104,15 @@ const anthropicProvider: AIProvider = {
     const apiKey = await secretService.resolveApiKey(req.userId, req.modelName);
     const client = createClient(apiKey);
 
-    const response = await client.messages.create({
-      model: req.modelName,
-      max_tokens: 8192,
-      ...(req.systemPrompt?.trim() ? { system: req.systemPrompt } : {}),
-      messages: buildMessages(req),
-    });
+    const response = await client.messages.create(
+      {
+        model: req.modelName,
+        max_tokens: 8192,
+        ...(req.systemPrompt?.trim() ? { system: req.systemPrompt } : {}),
+        messages: buildMessages(req),
+      },
+      { signal: req.signal }
+    );
 
     const text = response.content
       .filter((block): block is Anthropic.TextBlock => block.type === 'text')
@@ -124,14 +127,18 @@ const anthropicProvider: AIProvider = {
     const apiKey = await secretService.resolveApiKey(req.userId, req.modelName);
     const client = createClient(apiKey);
 
-    const stream = client.messages.stream({
-      model: req.modelName,
-      max_tokens: 8192,
-      ...(req.systemPrompt?.trim() ? { system: req.systemPrompt } : {}),
-      messages: buildMessages(req),
-    });
+    const stream = client.messages.stream(
+      {
+        model: req.modelName,
+        max_tokens: 8192,
+        ...(req.systemPrompt?.trim() ? { system: req.systemPrompt } : {}),
+        messages: buildMessages(req),
+      },
+      { signal: req.signal }
+    );
 
     for await (const event of stream) {
+      if (req.signal?.aborted) break;
       if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
         yield { text: event.delta.text, done: false };
       }

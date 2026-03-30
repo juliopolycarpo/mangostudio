@@ -17,6 +17,8 @@ export interface TextGenerationRequest {
   prompt: string;
   systemPrompt?: string;
   modelName: string;
+  /** Optional signal to cancel the generation mid-stream. */
+  signal?: AbortSignal;
 }
 
 /** Output from text generation. */
