@@ -216,7 +216,7 @@ function computeDerived(cfg: MangoConfig, tomlPath: string): void {
     } else {
       cfg.database.path = join(getMangoDir(), 'database.sqlite');
     }
-  } else {
+  } else if (cfg.database.path !== ':memory:') {
     cfg.database.path = resolveUserPath(cfg.database.path);
   }
 
