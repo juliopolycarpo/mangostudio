@@ -9,14 +9,7 @@ import { existsSync } from 'fs';
 import { Migrator } from 'kysely';
 
 import { getDb, closeDb } from './db/database';
-import { initialSchema } from './db/migrations/001_initial_schema';
-import { addInteractionMode } from './db/migrations/002_add_interaction_mode';
-import { addSecretMetadata } from './db/migrations/003_add_secret_metadata';
-import { addIndexes } from './db/migrations/004_add_indexes';
-import { multiConnectors } from './db/migrations/005_multi_connectors';
-import { authTables } from './db/migrations/006_auth_tables';
-import { addUserOwnership } from './db/migrations/007_add_user_ownership';
-import { providerFields } from './db/migrations/008_provider_fields';
+import { allMigrations } from './db/migrations';
 import { getDefaultFrontendDir } from './lib/runtime-paths';
 import { getConfig } from './lib/config';
 import { isSpaRoute } from './lib/spa-guard';
@@ -50,16 +43,7 @@ async function runMigrations(): Promise<void> {
     db,
     provider: {
       async getMigrations() {
-        return {
-          '001_initial_schema': initialSchema,
-          '002_add_interaction_mode': addInteractionMode,
-          '003_add_secret_metadata': addSecretMetadata,
-          '004_add_indexes': addIndexes,
-          '005_multi_connectors': multiConnectors,
-          '006_auth_tables': authTables,
-          '007_add_user_ownership': addUserOwnership,
-          '008_provider_fields': providerFields,
-        };
+        return allMigrations;
       },
     },
   });

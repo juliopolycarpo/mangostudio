@@ -7,13 +7,7 @@
 import { loadConfigForTest } from '../../../src/lib/config';
 import { getDb } from '../../../src/db/database';
 import { Migrator } from 'kysely';
-import { initialSchema } from '../../../src/db/migrations/001_initial_schema';
-import { addInteractionMode } from '../../../src/db/migrations/002_add_interaction_mode';
-import { addSecretMetadata } from '../../../src/db/migrations/003_add_secret_metadata';
-import { addIndexes } from '../../../src/db/migrations/004_add_indexes';
-import { multiConnectors } from '../../../src/db/migrations/005_multi_connectors';
-import { authTables } from '../../../src/db/migrations/006_auth_tables';
-import { addUserOwnership } from '../../../src/db/migrations/007_add_user_ownership';
+import { allMigrations } from '../../../src/db/migrations';
 
 // 1. Set test config BEFORE any lazy singleton initializes
 loadConfigForTest({
@@ -32,15 +26,7 @@ const migrator = new Migrator({
   db,
   provider: {
     async getMigrations() {
-      return {
-        '001_initial_schema': initialSchema,
-        '002_add_interaction_mode': addInteractionMode,
-        '003_add_secret_metadata': addSecretMetadata,
-        '004_add_indexes': addIndexes,
-        '005_multi_connectors': multiConnectors,
-        '006_auth_tables': authTables,
-        '007_add_user_ownership': addUserOwnership,
-      };
+      return allMigrations;
     },
   },
 });
