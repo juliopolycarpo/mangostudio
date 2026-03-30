@@ -12,6 +12,7 @@ import { getDb } from '../db/database';
 import { requireAuth } from '../plugins/auth-middleware';
 import { generateId } from '../utils/id';
 import { verifyChatOwnership } from '../services/chat-service';
+import { createMessage, loadChatHistory } from '../services/message-service';
 import { ptBR } from '@mangostudio/shared/i18n';
 
 /** Serialises an SSE data line. */
@@ -65,40 +66,22 @@ export const respondStreamRoutes = (app: Elysia) =>
 
           // 1. Persist the user text message
           const userMsgId = generateId();
-          await db
-            .insertInto('messages')
-            .values({
+          await createMessage(
+            {
               id: userMsgId,
               chatId: body.chatId,
               role: 'user',
               text: body.prompt,
-              imageUrl: null,
-              referenceImage: null,
               timestamp: now,
-              isGenerating: 0,
-              generationTime: null,
-              modelName: null,
-              styleParams: null,
+              isGenerating: false,
               interactionMode: 'chat',
-            })
-            .execute();
-
-          // updatedAt will be written once after AI response to avoid regression on concurrent requests
+            },
+            db
+          );
 
           // 2. Load prior chat-mode messages for context reconstruction
-          const historyRows = await db
-            .selectFrom('messages')
-            .select(['id', 'role', 'text'])
-            .where('chatId', '=', body.chatId)
-            .where('interactionMode', '=', 'chat')
-            .where('id', '!=', userMsgId)
-            .orderBy('timestamp', 'asc')
-            .execute();
-
-          const history = historyRows.map((row) => ({
-            role: row.role as 'user' | 'ai',
-            text: row.text,
-          }));
+          // updatedAt will be written once after AI response to avoid regression on concurrent requests
+          const history = await loadChatHistory(body.chatId, { excludeId: userMsgId }, db);
 
           // 3. Stream AI response as SSE
           const aiMsgId = generateId();
@@ -145,23 +128,20 @@ export const respondStreamRoutes = (app: Elysia) =>
                 const aiTimestamp = Date.now();
 
                 // Persist the completed AI message
-                await db
-                  .insertInto('messages')
-                  .values({
+                await createMessage(
+                  {
                     id: aiMsgId,
                     chatId,
                     role: 'ai',
                     text: fullText,
-                    imageUrl: null,
-                    referenceImage: null,
                     timestamp: aiTimestamp,
-                    isGenerating: 0,
+                    isGenerating: false,
                     generationTime,
                     modelName: model,
-                    styleParams: null,
                     interactionMode: 'chat',
-                  })
-                  .execute();
+                  },
+                  db
+                );
 
                 // Single update with WHERE guard to prevent updatedAt from regressing
                 await db

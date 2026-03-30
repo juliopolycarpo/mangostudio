@@ -7,6 +7,7 @@ import { Elysia, t } from 'elysia';
 import { getDb } from '../db/database';
 import { requireAuth } from '../plugins/auth-middleware';
 import { verifyChatOwnership } from '../services/chat-service';
+import { createMessage, serializeStyleParams, boolToInt } from '../services/message-service';
 import { parseQueryInt } from '../utils/query';
 import { ptBR } from '@mangostudio/shared/i18n';
 
@@ -100,23 +101,23 @@ export const messageRoutes = (app: Elysia) =>
             return { error: 'Chat not found' };
           }
 
-          await db
-            .insertInto('messages')
-            .values({
+          await createMessage(
+            {
               id: body.id,
               chatId: body.chatId,
-              role: body.role,
+              role: body.role as 'user' | 'ai',
               text: body.text,
-              imageUrl: body.imageUrl ?? null,
-              referenceImage: body.referenceImage ?? null,
+              imageUrl: body.imageUrl,
+              referenceImage: body.referenceImage,
               timestamp: body.timestamp,
-              isGenerating: body.isGenerating ? 1 : 0,
-              generationTime: body.generationTime ?? null,
-              modelName: body.modelName ?? null,
-              styleParams: body.styleParams ? JSON.stringify(body.styleParams) : null,
+              isGenerating: body.isGenerating ?? false,
+              generationTime: body.generationTime,
+              modelName: body.modelName,
+              styleParams: body.styleParams,
               interactionMode: body.interactionMode ?? 'image',
-            })
-            .execute();
+            },
+            db
+          );
 
           // Update the chat's updatedAt timestamp
           await db
@@ -169,14 +170,21 @@ export const messageRoutes = (app: Elysia) =>
             return { error: 'Message not found' };
           }
 
-          const updates: Record<string, any> = {};
+          const updates: {
+            text?: string;
+            imageUrl?: string;
+            isGenerating?: 0 | 1;
+            generationTime?: string;
+            modelName?: string;
+            styleParams?: string | null;
+          } = {};
           if (body.text !== undefined) updates.text = body.text;
           if (body.imageUrl !== undefined) updates.imageUrl = body.imageUrl;
-          if (body.isGenerating !== undefined) updates.isGenerating = body.isGenerating ? 1 : 0;
+          if (body.isGenerating !== undefined) updates.isGenerating = boolToInt(body.isGenerating);
           if (body.generationTime !== undefined) updates.generationTime = body.generationTime;
           if (body.modelName !== undefined) updates.modelName = body.modelName;
           if (body.styleParams !== undefined)
-            updates.styleParams = JSON.stringify(body.styleParams);
+            updates.styleParams = serializeStyleParams(body.styleParams);
 
           if (Object.keys(updates).length > 0) {
             await db.updateTable('messages').set(updates).where('id', '=', params.id).execute();

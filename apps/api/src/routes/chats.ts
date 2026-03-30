@@ -6,6 +6,7 @@ import { Elysia, t } from 'elysia';
 import { getDb } from '../db/database';
 import { requireAuth } from '../plugins/auth-middleware';
 import { verifyChatOwnership } from '../services/chat-service';
+import { mapMessageRow } from '../services/message-service';
 import { parseQueryInt } from '../utils/query';
 import { ptBR } from '@mangostudio/shared/i18n';
 
@@ -157,11 +158,7 @@ export const chatRoutes = (app: Elysia) =>
             nextCursor = nextItem?.timestamp.toString();
           }
 
-          const mappedMessages = messages.map((msg) => ({
-            ...msg,
-            isGenerating: msg.isGenerating === 1,
-            styleParams: msg.styleParams ? JSON.parse(msg.styleParams) : undefined,
-          }));
+          const mappedMessages = messages.map(mapMessageRow);
 
           return {
             messages: mappedMessages,
