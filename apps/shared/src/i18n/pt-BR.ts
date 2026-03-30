@@ -117,6 +117,7 @@ export const messages = {
 
   errors: {
     imageNotSupported: 'Este provider não suporta geração de imagens.',
+    referenceImageUploadFailed: 'Falha ao enviar a imagem de referência. Tente novamente.',
   },
 
   api: {

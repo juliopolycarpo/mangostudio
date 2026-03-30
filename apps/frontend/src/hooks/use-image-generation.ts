@@ -5,6 +5,7 @@ import type { Message } from '@mangostudio/shared';
 import { messageKeys } from './use-messages-query';
 import { galleryKeys } from './use-gallery-query';
 import { generateImage, uploadReferenceImage } from '../services/generation-service';
+import { useI18n } from './use-i18n';
 import type { useOptimisticMessages } from './use-optimistic-messages';
 import type { useChats } from './use-chats';
 import type { useGlobalSettings } from './use-global-settings';
@@ -23,6 +24,7 @@ export function useImageGeneration({
   settings,
   optimistic,
 }: UseImageGenerationOptions) {
+  const { t } = useI18n();
   const queryClient = useQueryClient();
   const [isGenerating, setIsGenerating] = useState(false);
 
@@ -44,13 +46,8 @@ export function useImageGeneration({
 
       const model = getActiveModel();
 
-      let refImageUrl: string | null = null;
-      let previewUrl: string | null = null;
-
-      if (referenceImage) {
-        previewUrl = URL.createObjectURL(referenceImage);
-        refImageUrl = await uploadReferenceImage(referenceImage);
-      }
+      // Create the preview URL synchronously before showing optimistic messages
+      const previewUrl = referenceImage ? URL.createObjectURL(referenceImage) : null;
 
       const optimisticUserMsgId = `optimistic-user-${Date.now()}`;
       const optimisticAiMsgId = `optimistic-ai-${Date.now() + 1}`;
@@ -77,6 +74,21 @@ export function useImageGeneration({
       };
 
       appendOptimisticMessages(activeChatId!, [optimisticUserMsg, optimisticAiMsg]);
+
+      // Upload reference image after showing optimistic messages so failures are visible
+      let refImageUrl: string | null = null;
+      if (referenceImage) {
+        refImageUrl = await uploadReferenceImage(referenceImage);
+        if (!refImageUrl) {
+          updateOptimisticMessage(activeChatId!, optimisticAiMsgId, {
+            isGenerating: false,
+            text: t.errors.referenceImageUploadFailed,
+          });
+          setIsGenerating(false);
+          if (previewUrl) URL.revokeObjectURL(previewUrl);
+          return;
+        }
+      }
 
       try {
         const { userMessage, aiMessage } = await generateImage({
@@ -133,6 +145,7 @@ export function useImageGeneration({
       }
     },
     [
+      t,
       isGenerating,
       chats,
       getActiveModel,

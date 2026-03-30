@@ -120,6 +120,7 @@ export const messages: Messages = {
 
   errors: {
     imageNotSupported: 'This provider does not support image generation.',
+    referenceImageUploadFailed: 'Failed to upload reference image. Please try again.',
   },
 
   api: {
