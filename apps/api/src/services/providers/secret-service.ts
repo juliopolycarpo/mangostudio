@@ -53,7 +53,7 @@ export class ProviderApiKeyMissingError extends Error {
 
 function maskSecret(apiKey: string | null | undefined): string | undefined {
   if (!apiKey) return undefined;
-  return apiKey.slice(-4);
+  return `****...${apiKey.slice(-4)}`;
 }
 
 /**

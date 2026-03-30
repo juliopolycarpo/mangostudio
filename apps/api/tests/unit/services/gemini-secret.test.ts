@@ -82,7 +82,7 @@ describe('createGeminiSecretService', () => {
     expect(connector.name).toBe('my-key');
     expect(connector.source).toBe('bun-secrets');
     expect(connector.configured).toBe(true);
-    expect(connector.maskedSuffix).toBe('1234');
+    expect(connector.maskedSuffix).toBe('****...1234');
 
     const status = await service.getGeminiSecretStatus(TEST_USER);
     expect(status.connectors).toHaveLength(1);

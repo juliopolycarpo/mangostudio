@@ -47,7 +47,7 @@ const PROVIDER_SECRET_CONFIG: Record<ProviderType, { tomlSection: string; envPre
 
 function maskSecret(apiKey: string | null | undefined): string | undefined {
   if (!apiKey) return undefined;
-  return apiKey.slice(-4);
+  return `****...${apiKey.slice(-4)}`;
 }
 
 function handleSecretRouteError(

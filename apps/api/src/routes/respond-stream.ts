@@ -14,7 +14,6 @@ import { generateId } from '../utils/id';
 import { verifyChatOwnership } from '../services/chat-service';
 import { createMessage, loadChatHistory } from '../services/message-service';
 import type { SSEErrorEvent } from '@mangostudio/shared';
-import { ptBR } from '@mangostudio/shared/i18n';
 
 /** Serialises an SSE data line. */
 function sseEvent(data: object): Uint8Array {
@@ -41,7 +40,7 @@ export const respondStreamRoutes = (app: Elysia) =>
         async ({ body, set, user }) => {
           if (!user?.id) {
             set.status = 401;
-            return { error: ptBR.api.unauthorized };
+            return { error: 'Unauthorized' };
           }
           const userId = user.id;
           const db = getDb();

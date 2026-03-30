@@ -1,12 +1,13 @@
-/* global fetch, console */
+/* global console */
 import { useState, useEffect } from 'react';
 import type {
-  ApiErrorResponse,
   Connector,
   ConnectorStatus,
   ModelCatalogResponse,
   ProviderType,
 } from '@mangostudio/shared';
+import { client } from '@/lib/api-client';
+import { extractApiError } from '@/lib/utils';
 import {
   Plus,
   Trash2,
@@ -65,11 +66,8 @@ export function ConnectorsSettings({ modelCatalog, reloadModelCatalog }: Connect
 
   const loadStatus = async () => {
     try {
-      const response = await fetch('/api/settings/connectors');
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error((data as ApiErrorResponse).error || 'Failed to load status.');
-      }
+      const { data, error } = await client.api.settings.connectors.get();
+      if (error) throw new Error(extractApiError(error.value, 'Failed to load status.'));
       setConnectorStatus(data as ConnectorStatus);
     } catch (error) {
       console.error('[connectors] Failed to load connector status', error);
@@ -90,7 +88,7 @@ export function ConnectorsSettings({ modelCatalog, reloadModelCatalog }: Connect
     setFormError(null);
 
     try {
-      const body: Record<string, unknown> = {
+      const body: Parameters<typeof client.api.settings.connectors.post>[0] = {
         name: newConnector.name,
         apiKey: newConnector.apiKey,
         source: newConnector.source,
@@ -100,16 +98,8 @@ export function ConnectorsSettings({ modelCatalog, reloadModelCatalog }: Connect
         body.baseUrl = newConnector.baseUrl.trim();
       }
 
-      const response = await fetch('/api/settings/connectors', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error((data as ApiErrorResponse).error || 'Failed to add connector');
-      }
+      const { error } = await client.api.settings.connectors.post(body);
+      if (error) throw new Error(extractApiError(error.value, 'Failed to add connector'));
 
       await loadStatus();
       await reloadModelCatalog();
@@ -131,11 +121,8 @@ export function ConnectorsSettings({ modelCatalog, reloadModelCatalog }: Connect
 
   const handleDeleteConnector = async (id: string) => {
     try {
-      const response = await fetch(`/api/settings/connectors/${id}`, {
-        method: 'DELETE',
-      });
-
-      if (!response.ok) throw new Error('Failed to delete connector');
+      const { error } = await (client.api.settings.connectors[id] as any).delete();
+      if (error) throw new Error(extractApiError(error.value, 'Failed to delete connector'));
 
       await reloadModelCatalog();
       toast(s.deleteSuccess, 'success');
@@ -150,13 +137,10 @@ export function ConnectorsSettings({ modelCatalog, reloadModelCatalog }: Connect
 
   const handleUpdateModels = async (connectorId: string, enabledModels: string[]) => {
     try {
-      const response = await fetch(`/api/settings/connectors/${connectorId}/models`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ enabledModels }),
+      const { error } = await (client.api.settings.connectors[connectorId] as any).models.put({
+        enabledModels,
       });
-
-      if (!response.ok) throw new Error('Failed to update models');
+      if (error) throw new Error(extractApiError(error.value, 'Failed to update models'));
 
       await loadStatus();
       await reloadModelCatalog();
@@ -261,7 +245,7 @@ export function ConnectorsSettings({ modelCatalog, reloadModelCatalog }: Connect
                       </span>
                       <span className="text-outline-variant">•</span>
                       <span className="font-mono text-on-surface-variant/60">
-                        ****{c.maskedSuffix}
+                        {c.maskedSuffix ?? '****'}
                       </span>
                     </div>
                   </div>

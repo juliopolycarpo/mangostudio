@@ -47,7 +47,7 @@ describe('ConnectorsSettings', () => {
             provider: 'gemini',
             configured: true,
             source: 'bun-secrets',
-            maskedSuffix: '1234',
+            maskedSuffix: '****...1234',
             updatedAt: 1700000000000,
             lastValidatedAt: 1700000000000,
             lastValidationError: null,
@@ -61,7 +61,7 @@ describe('ConnectorsSettings', () => {
     render(<ConnectorsSettings {...props} />);
 
     await screen.findByText('My Key');
-    expect(screen.getByText('****1234')).toBeInTheDocument();
+    expect(screen.getByText('****...1234')).toBeInTheDocument();
 
     expect(fetchScenario.fetchMock).toHaveBeenCalledTimes(1);
   });

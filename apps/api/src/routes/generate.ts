@@ -12,7 +12,6 @@ import { requireAuth } from '../plugins/auth-middleware';
 import { generateId } from '../utils/id';
 import { verifyChatOwnership } from '../services/chat-service';
 import { createMessage } from '../services/message-service';
-import { ptBR } from '@mangostudio/shared/i18n';
 
 export const generateRoutes = (app: Elysia) =>
   app.group('', (app) =>
@@ -28,7 +27,7 @@ export const generateRoutes = (app: Elysia) =>
         async ({ body, set, user }) => {
           if (!user?.id) {
             set.status = 401;
-            return { error: ptBR.api.unauthorized };
+            return { error: 'Unauthorized' };
           }
           const userId = user.id;
           const db = getDb();
