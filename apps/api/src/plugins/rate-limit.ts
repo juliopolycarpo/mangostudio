@@ -21,6 +21,8 @@ interface RateLimitConfig {
   cleanupIntervalMs: number;
   /** Skip rate limiting for certain paths (e.g., health checks) */
   skip?: (path: string) => boolean;
+  /** Trust proxy headers (X-Forwarded-For, etc.) for client IP extraction (default: false) */
+  trustProxy?: boolean;
 }
 
 interface RateLimitEntry {
@@ -87,18 +89,23 @@ export function rateLimit(config: Partial<RateLimitConfig> = {}) {
           return { clientIp: 'skipped' };
         }
 
-        // Get client IP (prioritize X-Forwarded-For header for proxy support)
-        const xForwardedFor = context.request.headers.get('x-forwarded-for');
-        const clientIp = xForwardedFor
-          ? xForwardedFor.split(',')[0].trim()
-          : context.request.headers.get('cf-connecting-ip') ||
-            context.request.headers.get('x-real-ip') ||
-            (context as any).ip ||
-            'unknown';
+        // Extract client IP; only trust proxy headers when explicitly enabled
+        let clientIp: string;
+        if (mergedConfig.trustProxy) {
+          const xForwardedFor = context.request.headers.get('x-forwarded-for');
+          clientIp = xForwardedFor
+            ? xForwardedFor.split(',')[0].trim()
+            : context.request.headers.get('cf-connecting-ip') ||
+              context.request.headers.get('x-real-ip') ||
+              (context as any).ip ||
+              'unknown';
+        } else {
+          clientIp = (context as any).ip || 'unknown';
+        }
 
         return { clientIp };
       })
-      .onRequest((context) => {
+      .onBeforeHandle((context) => {
         const { clientIp } = context as any;
 
         // Skip if no IP or skip function matches
