@@ -9,7 +9,6 @@ import { requireAuth } from '../plugins/auth-middleware';
 import { verifyChatOwnership } from '../services/chat-service';
 import { createMessage, serializeStyleParams, boolToInt } from '../services/message-service';
 import { parseQueryInt } from '../utils/query';
-import { ptBR } from '@mangostudio/shared/i18n';
 
 export const messageRoutes = (app: Elysia) =>
   app.group('/messages', (app) =>
@@ -24,7 +23,7 @@ export const messageRoutes = (app: Elysia) =>
         async ({ query, user, set }) => {
           if (!user?.id) {
             set.status = 401;
-            return { error: ptBR.api.unauthorized };
+            return { error: 'Unauthorized' };
           }
           const db = getDb();
           const limit = parseQueryInt(query.limit, 50);
@@ -91,7 +90,7 @@ export const messageRoutes = (app: Elysia) =>
         async ({ body, user, set }) => {
           if (!user?.id) {
             set.status = 401;
-            return { error: ptBR.api.unauthorized };
+            return { error: 'Unauthorized' };
           }
 
           const db = getDb();
@@ -152,7 +151,7 @@ export const messageRoutes = (app: Elysia) =>
         async ({ params, body, user, set }) => {
           if (!user?.id) {
             set.status = 401;
-            return { error: ptBR.api.unauthorized };
+            return { error: 'Unauthorized' };
           }
 
           const db = getDb();

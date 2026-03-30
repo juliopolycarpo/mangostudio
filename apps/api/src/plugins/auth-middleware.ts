@@ -1,6 +1,5 @@
 import { Elysia } from 'elysia';
 import { getAuth } from '../auth';
-import { ptBR } from '@mangostudio/shared/i18n';
 
 /**
  * Plugin Elysia que resolve a sessão do usuário a partir dos cookies.
@@ -26,6 +25,6 @@ export const requireAuth = (app: Elysia) =>
   app.use(authMiddleware).onBeforeHandle(({ user, set }) => {
     if (!user) {
       set.status = 401;
-      return { error: ptBR.api.unauthorized };
+      return { error: 'Unauthorized' };
     }
   });

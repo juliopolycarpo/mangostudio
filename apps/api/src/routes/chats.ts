@@ -8,7 +8,6 @@ import { requireAuth } from '../plugins/auth-middleware';
 import { verifyChatOwnership } from '../services/chat-service';
 import { mapMessageRow } from '../services/message-service';
 import { parseQueryInt } from '../utils/query';
-import { ptBR } from '@mangostudio/shared/i18n';
 
 export const chatRoutes = (app: Elysia) =>
   app.group('/chats', (app) =>
@@ -18,7 +17,7 @@ export const chatRoutes = (app: Elysia) =>
       .get('/', async ({ user, set }) => {
         if (!user?.id) {
           set.status = 401;
-          return { error: ptBR.api.unauthorized };
+          return { error: 'Unauthorized' };
         }
         const db = getDb();
         const chats = await db
@@ -36,7 +35,7 @@ export const chatRoutes = (app: Elysia) =>
         async ({ body, user, set }) => {
           if (!user?.id) {
             set.status = 401;
-            return { error: ptBR.api.unauthorized };
+            return { error: 'Unauthorized' };
           }
           const db = getDb();
           await db
@@ -69,7 +68,7 @@ export const chatRoutes = (app: Elysia) =>
         async ({ params, body, user, set }) => {
           if (!user?.id) {
             set.status = 401;
-            return { error: ptBR.api.unauthorized };
+            return { error: 'Unauthorized' };
           }
           const db = getDb();
           const updates: {
@@ -113,7 +112,7 @@ export const chatRoutes = (app: Elysia) =>
         async ({ params, user, set }) => {
           if (!user?.id) {
             set.status = 401;
-            return { error: ptBR.api.unauthorized };
+            return { error: 'Unauthorized' };
           }
           const db = getDb();
           await db
@@ -134,7 +133,7 @@ export const chatRoutes = (app: Elysia) =>
         async ({ params, query, user, set }) => {
           if (!user?.id) {
             set.status = 401;
-            return { error: ptBR.api.unauthorized };
+            return { error: 'Unauthorized' };
           }
 
           const db = getDb();
