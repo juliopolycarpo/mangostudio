@@ -37,6 +37,13 @@ export function listRegisteredProviderTypes(): ProviderType[] {
 }
 
 /**
+ * Removes all registered providers. Intended for test isolation only.
+ */
+export function clearRegistry(): void {
+  registry.clear();
+}
+
+/**
  * Resolves the provider responsible for a given model by looking up the
  * connector that has the model enabled in secret_metadata.
  * Falls back to 'gemini' when no connector row is found.

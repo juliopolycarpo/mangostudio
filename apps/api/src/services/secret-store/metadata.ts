@@ -128,6 +128,6 @@ export async function deleteSecretMetadata(id: string, userId: string): Promise<
   await db
     .deleteFrom('secret_metadata')
     .where('id', '=', id)
-    .where((eb) => eb.or([eb('userId', '=', userId), eb('userId', 'is', null)]))
+    .where('userId', '=', userId)
     .execute();
 }

@@ -34,6 +34,7 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { parse as parseToml, stringify as stringifyToml } from 'smol-toml';
 import { join, dirname } from 'path';
 import { randomUUID } from 'crypto';
+import { validateBaseUrl, UnsafeBaseUrlError } from '../services/providers/base-url-policy';
 
 /** Per-provider configuration for secret storage paths. */
 const PROVIDER_SECRET_CONFIG: Record<ProviderType, { tomlSection: string; envPrefix: string }> = {
@@ -54,6 +55,11 @@ function handleSecretRouteError(
   error: unknown,
   set: { status?: number | string }
 ): { error: string } {
+  if (error instanceof UnsafeBaseUrlError) {
+    set.status = 422;
+    return { error: error.message };
+  }
+
   if (error instanceof InvalidGeminiApiKeyError) {
     set.status = 422;
     return { error: error.message };
@@ -208,7 +214,7 @@ async function validateProviderKey(
   baseUrl?: string
 ): Promise<void> {
   if (provider === 'openai-compatible' && baseUrl) {
-    // For openai-compatible with custom baseUrl, validate directly against that URL
+    await validateBaseUrl(baseUrl);
     const response = await fetch(`${baseUrl}/models`, {
       headers: { Authorization: `Bearer ${apiKey}` },
     });
@@ -281,7 +287,7 @@ export const settingsRoutes = (app: Elysia) =>
               updatedAt: timestamp,
               lastValidatedAt: timestamp,
               enabledModels: [],
-              userId: body.source === 'bun-secrets' ? userId : null,
+              userId,
               baseUrl: body.baseUrl ?? null,
             };
             await upsertSecretMetadata(input);
@@ -310,6 +316,11 @@ export const settingsRoutes = (app: Elysia) =>
               return { error: 'Connector not found.' };
             }
 
+            if (meta.userId !== userId) {
+              set.status = 403;
+              return { error: 'Cannot delete a shared connector.' };
+            }
+
             await removeSecret(
               meta.id,
               meta.name,
@@ -333,8 +344,18 @@ export const settingsRoutes = (app: Elysia) =>
         '/connectors/:id/models',
         async ({ params, body, set, user }): Promise<{ success: true } | { error: string }> => {
           try {
-            await updateConnectorModels(user?.id ?? '', params.id, body.enabledModels);
-            invalidateUnifiedCatalog(user?.id ?? '');
+            const userId = user?.id ?? '';
+            const meta = await getSecretMetadataById(params.id, userId);
+            if (!meta) {
+              set.status = 404;
+              return { error: 'Connector not found.' };
+            }
+            if (meta.userId !== userId) {
+              set.status = 403;
+              return { error: 'Cannot update models on a shared connector.' };
+            }
+            await updateConnectorModels(userId, params.id, body.enabledModels);
+            invalidateUnifiedCatalog(userId);
             return { success: true };
           } catch (error) {
             return handleSecretRouteError(error, set);
