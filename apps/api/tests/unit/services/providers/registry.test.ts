@@ -1,5 +1,10 @@
-import { describe, expect, it, beforeEach } from 'bun:test';
-import { registerProvider, getProvider } from '../../../../src/services/providers/registry';
+import { describe, expect, it, beforeEach, afterEach } from 'bun:test';
+import {
+  registerProvider,
+  getProvider,
+  clearRegistry,
+  listRegisteredProviderTypes,
+} from '../../../../src/services/providers/registry';
 import type { AIProvider } from '../../../../src/services/providers/types';
 
 function makeStubProvider(type: 'gemini' | 'openai-compatible' | 'anthropic'): AIProvider {
@@ -19,6 +24,18 @@ function makeStubProvider(type: 'gemini' | 'openai-compatible' | 'anthropic'): A
 }
 
 describe('provider registry', () => {
+  let snapshot: AIProvider[];
+
+  beforeEach(() => {
+    snapshot = listRegisteredProviderTypes().map((type) => getProvider(type));
+    clearRegistry();
+  });
+
+  afterEach(() => {
+    clearRegistry();
+    snapshot.forEach((p) => registerProvider(p));
+  });
+
   it('registers and retrieves a provider by type', () => {
     const stub = makeStubProvider('gemini');
     registerProvider(stub);
