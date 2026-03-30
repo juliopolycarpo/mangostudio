@@ -10,6 +10,7 @@ import { listSecretMetadata } from '../secret-store/metadata';
 import type { ModelInfo } from './types';
 
 const TTL_MS = 60 * 60 * 1000; // 1 hour
+const MAX_CATALOG_ENTRIES = 1000;
 
 interface UnifiedModelCatalogDeps {
   now?: () => number;
@@ -43,6 +44,13 @@ function createEmptySnapshot(): ModelCatalogResponse {
  * Creates a unified model catalog service that aggregates models from all
  * registered AI providers.
  */
+function evictOldest<V>(map: Map<string, V>): void {
+  if (map.size > MAX_CATALOG_ENTRIES) {
+    const firstKey = map.keys().next().value;
+    if (firstKey !== undefined) map.delete(firstKey);
+  }
+}
+
 export function createUnifiedModelCatalogService(deps: UnifiedModelCatalogDeps = {}) {
   const now = deps.now ?? (() => Date.now());
 
@@ -136,11 +144,13 @@ export function createUnifiedModelCatalogService(deps: UnifiedModelCatalogDeps =
           }
 
           fullCatalogs.set(userId, allModels);
+          evictOldest(fullCatalogs);
           await recalculateSnapshot(userId);
 
           const snap = getSnapshot(userId);
           snap.lastSyncedAt = now();
           snapshots.set(userId, snap);
+          evictOldest(snapshots);
 
           return snap;
         } catch (error) {
@@ -162,14 +172,15 @@ export function createUnifiedModelCatalogService(deps: UnifiedModelCatalogDeps =
     },
 
     /**
-     * Returns the cached catalog, refreshing in the background when stale.
+     * Returns the catalog, awaiting the first refresh when the cache is cold.
+     * Subsequent calls with a warm cache recalculate the snapshot synchronously.
      */
     async getUnifiedModelCatalog(userId: string): Promise<ModelCatalogResponse> {
       const full = fullCatalogs.get(userId);
       if (full && full.length > 0) {
         await recalculateSnapshot(userId);
-      } else if (isStale(userId) && !refreshPromises.has(userId)) {
-        this.refresh(userId).catch(() => {});
+      } else if (isStale(userId)) {
+        return this.refresh(userId);
       }
       return getSnapshot(userId);
     },
