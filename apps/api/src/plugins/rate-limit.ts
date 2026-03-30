@@ -1,7 +1,7 @@
 /**
  * Basic rate limiting plugin for Elysia.
  * Limits requests per IP address with configurable window and max requests.
- * Uses in-memory storage (suitable for single-instance deployment).
+ * Uses in-memory storage with LRU eviction (suitable for single-instance deployment).
  */
 
 import { Elysia } from 'elysia';
@@ -15,15 +15,17 @@ interface RateLimitConfig {
   message: string;
   /** Whether to include rate limit headers (default: true) */
   headers: boolean;
+  /** Maximum number of IP entries to keep in memory (default: 10000) */
+  maxStoreSize: number;
+  /** How often to run lazy cleanup in milliseconds (default: 300000 = 5 minutes) */
+  cleanupIntervalMs: number;
   /** Skip rate limiting for certain paths (e.g., health checks) */
   skip?: (path: string) => boolean;
 }
 
-interface RateLimitStore {
-  [key: string]: {
-    count: number;
-    resetTime: number;
-  };
+interface RateLimitEntry {
+  count: number;
+  resetTime: number;
 }
 
 const defaultConfig: RateLimitConfig = {
@@ -31,40 +33,52 @@ const defaultConfig: RateLimitConfig = {
   windowMs: 60000, // 1 minute
   message: 'Too many requests, please try again later.',
   headers: true,
+  maxStoreSize: 10000,
+  cleanupIntervalMs: 5 * 60 * 1000, // 5 minutes
 };
 
 /**
  * Creates a rate limiting plugin for Elysia.
+ * Cleanup runs lazily on requests instead of via setInterval to avoid
+ * dangling timers that prevent process exit or leak memory in tests.
  *
  * @param config - Configuration options
- * @returns Elysia plugin
+ * @returns Elysia plugin with an optional `teardown()` export for tests
  */
 export function rateLimit(config: Partial<RateLimitConfig> = {}) {
   const mergedConfig: RateLimitConfig = { ...defaultConfig, ...config };
 
-  // In-memory store (cleaned periodically)
-  const store: RateLimitStore = {};
+  // In-memory store: IP key → entry
+  const store = new Map<string, RateLimitEntry>();
+  let lastCleanup = Date.now();
 
-  // Clean up old entries periodically (every 5 minutes)
-  const cleanupInterval = setInterval(
-    () => {
-      const now = Date.now();
-      for (const key in store) {
-        if (store[key].resetTime < now) {
-          delete store[key];
-        }
+  /** Remove expired entries; evict oldest when store exceeds maxStoreSize. */
+  function cleanup() {
+    const now = Date.now();
+    for (const [key, entry] of store) {
+      if (entry.resetTime < now) {
+        store.delete(key);
       }
-    },
-    5 * 60 * 1000
-  );
-
-  // Clean up interval on process exit (if possible)
-  if (typeof process !== 'undefined') {
-    process.on('SIGINT', () => clearInterval(cleanupInterval));
-    process.on('SIGTERM', () => clearInterval(cleanupInterval));
+    }
+    // If still over limit after expiry cleanup, evict oldest entries
+    if (store.size > mergedConfig.maxStoreSize) {
+      const overflow = store.size - mergedConfig.maxStoreSize;
+      let evicted = 0;
+      for (const key of store.keys()) {
+        store.delete(key);
+        evicted++;
+        if (evicted >= overflow) break;
+      }
+    }
+    lastCleanup = now;
   }
 
-  return (app: Elysia) => {
+  /** Call in tests or on graceful shutdown to free resources. */
+  function teardown() {
+    store.clear();
+  }
+
+  const plugin = (app: Elysia) => {
     return app
       .derive((context: any) => {
         // Skip rate limiting for certain paths
@@ -98,35 +112,40 @@ export function rateLimit(config: Partial<RateLimitConfig> = {}) {
         }
 
         const now = Date.now();
-        const key = `rate-limit:${clientIp}`;
 
-        // Initialize or get existing entry
-        if (!store[key] || store[key].resetTime < now) {
-          store[key] = {
-            count: 0,
-            resetTime: now + mergedConfig.windowMs,
-          };
+        // Lazy cleanup: run only when the interval has elapsed
+        if (now - lastCleanup >= mergedConfig.cleanupIntervalMs) {
+          cleanup();
         }
 
-        // Increment counter
-        store[key].count++;
+        const key = `rate-limit:${clientIp}`;
+        const existing = store.get(key);
+
+        // Initialize or reset expired entry
+        if (!existing || existing.resetTime < now) {
+          store.set(key, { count: 1, resetTime: now + mergedConfig.windowMs });
+        } else {
+          existing.count++;
+        }
+
+        const entry = store.get(key)!;
 
         // Set rate limit headers
         if (mergedConfig.headers) {
-          const remaining = Math.max(0, mergedConfig.max - store[key].count);
-          const resetTime = store[key].resetTime;
-
+          const remaining = Math.max(0, mergedConfig.max - entry.count);
           if (!context.set.headers) context.set.headers = {};
           context.set.headers['X-RateLimit-Limit'] = mergedConfig.max.toString();
           context.set.headers['X-RateLimit-Remaining'] = remaining.toString();
-          context.set.headers['X-RateLimit-Reset'] = Math.ceil(resetTime / 1000).toString();
+          context.set.headers['X-RateLimit-Reset'] = Math.ceil(entry.resetTime / 1000).toString();
         }
 
         // Check if rate limited
-        if (store[key].count > mergedConfig.max) {
+        if (entry.count > mergedConfig.max) {
           context.set.status = 429;
           throw new Error(mergedConfig.message);
         }
       });
   };
+
+  return Object.assign(plugin, { teardown });
 }

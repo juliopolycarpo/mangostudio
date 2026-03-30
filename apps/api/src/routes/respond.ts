@@ -9,6 +9,7 @@ import { getProviderForModel } from '../services/providers/registry';
 import { getUnifiedModelCatalog } from '../services/providers/catalog';
 import { getDb } from '../db/database';
 import { requireAuth } from '../plugins/auth-middleware';
+import { ptBR } from '@mangostudio/shared/i18n';
 
 /** Generates a stable unique ID based on the current time + random suffix. */
 function generateId(): string {
@@ -27,8 +28,12 @@ export const respondRoutes = (app: Elysia) =>
       .post(
         '/respond',
         async ({ body, set, user }) => {
+          if (!user?.id) {
+            set.status = 401;
+            return { error: ptBR.api.unauthorized };
+          }
+          const userId = user.id;
           const db = getDb();
-          const userId = user?.id ?? '';
 
           // Verify chat ownership
           const chat = await db
@@ -74,13 +79,6 @@ export const respondRoutes = (app: Elysia) =>
               styleParams: null,
               interactionMode: 'chat',
             })
-            .execute();
-
-          // Update chat's updatedAt and lastUsedMode
-          await db
-            .updateTable('chats')
-            .set({ updatedAt: now, lastUsedMode: 'chat' })
-            .where('id', '=', body.chatId)
             .execute();
 
           // 2. Load prior chat-mode messages for context reconstruction (exclude the one just saved)
@@ -135,11 +133,12 @@ export const respondRoutes = (app: Elysia) =>
               })
               .execute();
 
-            // Update chat's updatedAt
+            // Single chat update at the end to avoid updatedAt regression on concurrent requests
             await db
               .updateTable('chats')
-              .set({ updatedAt: aiTimestamp })
+              .set({ updatedAt: aiTimestamp, lastUsedMode: 'chat' })
               .where('id', '=', body.chatId)
+              .where('updatedAt', '<=', aiTimestamp)
               .execute();
 
             return {

@@ -10,6 +10,7 @@ import { getProviderForModel } from '../services/providers/registry';
 import { getUnifiedModelCatalog } from '../services/providers/catalog';
 import { getDb } from '../db/database';
 import { requireAuth } from '../plugins/auth-middleware';
+import { ptBR } from '@mangostudio/shared/i18n';
 
 /** Generates a stable unique ID based on the current time + random suffix. */
 function generateId(): string {
@@ -39,8 +40,12 @@ export const respondStreamRoutes = (app: Elysia) =>
       .post(
         '/respond/stream',
         async ({ body, set, user }) => {
+          if (!user?.id) {
+            set.status = 401;
+            return { error: ptBR.api.unauthorized };
+          }
+          const userId = user.id;
           const db = getDb();
-          const userId = user?.id ?? '';
 
           // Verify chat ownership
           const chat = await db
@@ -88,11 +93,7 @@ export const respondStreamRoutes = (app: Elysia) =>
             })
             .execute();
 
-          await db
-            .updateTable('chats')
-            .set({ updatedAt: now, lastUsedMode: 'chat' })
-            .where('id', '=', body.chatId)
-            .execute();
+          // updatedAt will be written once after AI response to avoid regression on concurrent requests
 
           // 2. Load prior chat-mode messages for context reconstruction
           const historyRows = await db
@@ -172,18 +173,19 @@ export const respondStreamRoutes = (app: Elysia) =>
                   })
                   .execute();
 
+                // Single update with WHERE guard to prevent updatedAt from regressing
                 await db
                   .updateTable('chats')
-                  .set({ updatedAt: aiTimestamp })
+                  .set({ updatedAt: aiTimestamp, lastUsedMode: 'chat' })
                   .where('id', '=', chatId)
+                  .where('updatedAt', '<=', aiTimestamp)
                   .execute();
 
                 controller.enqueue(sseEvent({ done: true, messageId: aiMsgId, generationTime }));
-              } catch (error: any) {
-                console.error('[respond-stream] Error:', error.message);
-                controller.enqueue(
-                  sseEvent({ error: error?.message ?? 'Stream generation failed', done: true })
-                );
+              } catch (error: unknown) {
+                const message = error instanceof Error ? error.message : 'Stream generation failed';
+                console.error('[respond-stream] Error:', message);
+                controller.enqueue(sseEvent({ error: message, done: true }));
               } finally {
                 controller.close();
               }
