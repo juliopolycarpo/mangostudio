@@ -56,7 +56,7 @@ export async function getProviderForModel(modelName: string, userId: string): Pr
         return getProvider(row.provider as ProviderType);
       }
     } catch {
-      // Skip rows with malformed enabledModels JSON
+      console.warn(`[registry] Skipping connector '${row.provider}': malformed enabledModels JSON`);
     }
   }
 

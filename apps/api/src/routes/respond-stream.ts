@@ -182,11 +182,10 @@ export const respondStreamRoutes = (app: Elysia) =>
                   .execute();
 
                 controller.enqueue(sseEvent({ done: true, messageId: aiMsgId, generationTime }));
-              } catch (error: any) {
-                console.error('[respond-stream] Error:', error.message);
-                controller.enqueue(
-                  sseEvent({ error: error?.message ?? 'Stream generation failed', done: true })
-                );
+              } catch (error: unknown) {
+                const message = error instanceof Error ? error.message : 'Stream generation failed';
+                console.error('[respond-stream] Error:', message);
+                controller.enqueue(sseEvent({ error: message, done: true }));
               } finally {
                 controller.close();
               }
