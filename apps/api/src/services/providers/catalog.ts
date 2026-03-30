@@ -115,16 +115,24 @@ export function createUnifiedModelCatalogService(deps: UnifiedModelCatalogDeps =
       const promise = (async () => {
         try {
           const providerTypes = listRegisteredProviderTypes();
-          const allModels: ModelOption[] = [];
+          const PROVIDER_TIMEOUT_MS = 5_000;
 
-          for (const pt of providerTypes) {
-            try {
+          const results = await Promise.allSettled(
+            providerTypes.map(async (pt) => {
               const provider = getProvider(pt);
-              const models = await provider.listModels(userId);
-              allModels.push(...models.map(modelInfoToOption));
-            } catch {
-              // Provider has no connector configured — skip silently
+              const timeoutPromise = new Promise<never>((_, reject) =>
+                setTimeout(() => reject(new Error(`Provider ${pt} timed out`)), PROVIDER_TIMEOUT_MS)
+              );
+              return Promise.race([provider.listModels(userId), timeoutPromise]);
+            })
+          );
+
+          const allModels: ModelOption[] = [];
+          for (const result of results) {
+            if (result.status === 'fulfilled') {
+              allModels.push(...result.value.map(modelInfoToOption));
             }
+            // rejected providers (no connector or timeout) are silently skipped
           }
 
           fullCatalogs.set(userId, allModels);
