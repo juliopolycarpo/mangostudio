@@ -47,7 +47,7 @@ describe('GeminiProvider.generateTextStream', () => {
 
     const { generateTextStream } = await import('../../../../src/services/gemini/text');
 
-    const chunks: Array<{ text: string; done: boolean }> = [];
+    const chunks: Array<{ type?: string; text?: string; done: boolean }> = [];
     for await (const chunk of generateTextStream('user-1', [], 'Hi', undefined, 'gemini-2.0-flash')) {
       chunks.push(chunk);
     }
@@ -58,7 +58,7 @@ describe('GeminiProvider.generateTextStream', () => {
 
     expect(textChunks.length).toBe(3);
     expect(textChunks.map((c) => c.text).join('')).toBe('Hello world!');
-    expect(doneChunk).toEqual({ text: '', done: true });
+    expect(doneChunk).toEqual({ type: 'text', text: '', done: true });
   });
 
   it('throws when prompt is blocked', async () => {
@@ -94,6 +94,122 @@ describe('GeminiProvider.generateTextStream', () => {
         // consume
       }
     }).toThrow('No Gemini text model was provided.');
+  });
+
+  it('emits thinking chunks when thinkingVisibility is summary', async () => {
+    mock.module('@google/genai', () => ({
+      GoogleGenAI: class {
+        models = {
+          generateContentStream: async () =>
+            (async function* () {
+              yield {
+                candidates: [
+                  {
+                    content: {
+                      parts: [
+                        { thought: true, text: 'Let me think...' },
+                        { text: 'Here is my answer.' },
+                      ],
+                    },
+                  },
+                ],
+              };
+            })(),
+        };
+      },
+    }));
+
+    mock.module('../../../../src/services/gemini/secret', () => ({
+      getResolvedGeminiApiKey: async () => 'mock-api-key',
+    }));
+
+    const { generateTextStream } = await import('../../../../src/services/gemini/text');
+
+    const chunks = [];
+    for await (const chunk of generateTextStream(
+      'user-1',
+      [],
+      'Hi',
+      undefined,
+      'gemini-2.0-flash-thinking-exp',
+      { thinkingVisibility: 'summary' }
+    )) {
+      chunks.push(chunk);
+    }
+
+    expect(chunks[0]).toEqual({ type: 'thinking', text: 'Let me think...', done: false });
+    expect(chunks[1]).toEqual({ type: 'text', text: 'Here is my answer.', done: false });
+    expect(chunks[2]).toEqual({ type: 'text', text: '', done: true });
+  });
+
+  it('does not add thinkingConfig when thinkingVisibility is off', async () => {
+    let capturedConfig: Record<string, unknown> | undefined;
+
+    mock.module('@google/genai', () => ({
+      GoogleGenAI: class {
+        models = {
+          generateContentStream: async (opts: { config?: Record<string, unknown> }) => {
+            capturedConfig = opts.config;
+            return (async function* () {
+              yield { candidates: [{ content: { parts: [{ text: 'text' }] } }] };
+            })();
+          },
+        };
+      },
+    }));
+
+    mock.module('../../../../src/services/gemini/secret', () => ({
+      getResolvedGeminiApiKey: async () => 'mock-api-key',
+    }));
+
+    const { generateTextStream } = await import('../../../../src/services/gemini/text');
+
+    for await (const _ of generateTextStream(
+      'user-1',
+      [],
+      'Hi',
+      undefined,
+      'gemini-2.0-flash',
+      { thinkingVisibility: 'off' }
+    )) {
+      // consume
+    }
+
+    expect(capturedConfig?.thinkingConfig).toBeUndefined();
+  });
+
+  it('falls back to chunk.text when candidate has no parts', async () => {
+    mock.module('@google/genai', () => ({
+      GoogleGenAI: class {
+        models = {
+          generateContentStream: async () =>
+            (async function* () {
+              yield { text: 'Fallback text', candidates: [{}] };
+            })(),
+        };
+      },
+    }));
+
+    mock.module('../../../../src/services/gemini/secret', () => ({
+      getResolvedGeminiApiKey: async () => 'mock-api-key',
+    }));
+
+    const { generateTextStream } = await import('../../../../src/services/gemini/text');
+
+    const chunks = [];
+    for await (const chunk of generateTextStream(
+      'user-1',
+      [],
+      'Hi',
+      undefined,
+      'gemini-2.0-flash',
+      { thinkingVisibility: 'summary' }
+    )) {
+      chunks.push(chunk);
+    }
+
+    expect(chunks[0]).toEqual({ type: 'text', text: 'Fallback text', done: false });
+    expect(chunks[1]).toEqual({ type: 'text', text: '', done: true });
   });
 });
 

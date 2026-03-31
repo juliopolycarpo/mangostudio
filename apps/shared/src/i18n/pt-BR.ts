@@ -129,6 +129,12 @@ export const messages = {
     openrouter: 'OpenRouter',
   },
 
+  thinking: {
+    label: 'Processo de raciocínio',
+    streaming: 'Pensando...',
+    toggle: 'Ver raciocínio',
+  },
+
   errors: {
     imageNotSupported: 'Este provider não suporta geração de imagens.',
     referenceImageUploadFailed: 'Falha ao enviar a imagem de referência. Tente novamente.',

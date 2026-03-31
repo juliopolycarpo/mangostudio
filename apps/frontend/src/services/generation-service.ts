@@ -22,6 +22,7 @@ export interface RespondTextRequest {
   prompt: string;
   model?: string;
   systemPrompt?: string;
+  thinkingVisibility?: string;
 }
 
 export interface RespondTextResponse {
@@ -69,6 +70,7 @@ export async function respondText(request: RespondTextRequest): Promise<RespondT
 
 /** A single event received from the SSE streaming endpoint. */
 export interface StreamChunk {
+  type?: 'text' | 'thinking' | 'done' | 'error';
   text?: string;
   done: boolean;
   messageId?: string;

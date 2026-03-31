@@ -34,6 +34,42 @@ describe('POST /respond/stream', () => {
     expect(body).toHaveProperty('error');
   });
 
+  it('accepts thinkingVisibility in request body without error', async () => {
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
+    restoreAuth = restore;
+
+    const response = await app.handle(
+      new Request('http://localhost/respond/stream', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chatId: 'nonexistent-chat',
+          prompt: 'Hello',
+          thinkingVisibility: 'summary',
+        }),
+      })
+    );
+
+    // Should reach the chat ownership check (404), not a schema validation error (422)
+    expect(response.status).toBe(404);
+  });
+
+  it('accepts legacy requests without thinkingVisibility', async () => {
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
+    restoreAuth = restore;
+
+    const response = await app.handle(
+      new Request('http://localhost/respond/stream', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chatId: 'nonexistent-chat', prompt: 'Hello' }),
+      })
+    );
+
+    // Should reach the chat ownership check (404), not a schema validation error
+    expect(response.status).toBe(404);
+  });
+
   it('returns 503 when model catalog is not configured', async () => {
     // Mock getGeminiModelCatalog to return unconfigured state
     mock.module('../../../src/services/gemini/catalog', () => ({
