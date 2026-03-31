@@ -8,6 +8,7 @@ describe('isImageModelId', () => {
     'gpt-image-1',
     'gpt-image-2-hd',
     'imagen-4.0-generate-001',
+    'gemini-2.5-flash-image',
     'gemini-2.0-flash-image-generation',
     'stable-diffusion-xl-1024-v1-0',
     'sdxl-turbo',
