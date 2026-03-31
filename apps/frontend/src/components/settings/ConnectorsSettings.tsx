@@ -66,6 +66,7 @@ export function ConnectorsSettings({ modelCatalog, reloadModelCatalog }: Connect
   const [isSaving, setIsSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [showKey, setShowKey] = useState(false);
+  const [modelSearchQuery, setModelSearchQuery] = useState('');
 
   const loadStatus = async () => {
     try {
@@ -303,6 +304,7 @@ export function ConnectorsSettings({ modelCatalog, reloadModelCatalog }: Connect
                       size="sm"
                       onClick={() => {
                         setSelectedConnector(c);
+                        setModelSearchQuery('');
                         setIsModelsModalOpen(true);
                       }}
                       title={s.configureModels}
@@ -536,6 +538,17 @@ export function ConnectorsSettings({ modelCatalog, reloadModelCatalog }: Connect
         selectedConnector &&
         (() => {
           const { textModels, imageModels } = getDiscoveredModels(selectedConnector);
+          const query = modelSearchQuery.toLowerCase().trim();
+          const filterByQuery = (models: typeof textModels) =>
+            query
+              ? models.filter(
+                  (m) =>
+                    m.displayName.toLowerCase().includes(query) ||
+                    m.modelId.toLowerCase().includes(query)
+                )
+              : models;
+          const filteredTextModels = filterByQuery(textModels);
+          const filteredImageModels = filterByQuery(imageModels);
           return (
             <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-sm animate-in fade-in duration-200">
               <div className="bg-surface-container-high w-full max-w-lg rounded-3xl p-8 shadow-2xl border border-outline-variant/20 flex flex-col max-h-[80vh]">
@@ -548,14 +561,24 @@ export function ConnectorsSettings({ modelCatalog, reloadModelCatalog }: Connect
                   </p>
                 </div>
 
+                <div className="relative mb-4">
+                  <input
+                    type="text"
+                    value={modelSearchQuery}
+                    onChange={(e) => setModelSearchQuery(e.target.value)}
+                    placeholder={s.searchModelsPlaceholder}
+                    className="w-full rounded-xl border border-outline-variant/20 bg-surface-container-lowest px-4 py-3 text-sm text-on-surface placeholder:text-on-surface-variant/50 focus:border-primary/50 focus:outline-none focus:ring-1 focus:ring-primary/30"
+                  />
+                </div>
+
                 <div className="flex-1 overflow-y-auto pr-2 space-y-6 hide-scrollbar">
-                  {textModels.length > 0 && (
+                  {filteredTextModels.length > 0 && (
                     <div className="space-y-3">
                       <h4 className="text-[10px] uppercase tracking-widest font-bold text-on-surface-variant/60">
                         {s.textModelsLabel}
                       </h4>
                       <div className="grid grid-cols-1 gap-2">
-                        {textModels.map((m) => {
+                        {filteredTextModels.map((m) => {
                           const isEnabled = selectedConnector.enabledModels.includes(m.modelId);
                           return (
                             <label
@@ -598,13 +621,13 @@ export function ConnectorsSettings({ modelCatalog, reloadModelCatalog }: Connect
                     </div>
                   )}
 
-                  {imageModels.length > 0 && (
+                  {filteredImageModels.length > 0 && (
                     <div className="space-y-3">
                       <h4 className="text-[10px] uppercase tracking-widest font-bold text-on-surface-variant/60">
                         {s.imageModelsLabel}
                       </h4>
                       <div className="grid grid-cols-1 gap-2">
-                        {imageModels.map((m) => {
+                        {filteredImageModels.map((m) => {
                           const isEnabled = selectedConnector.enabledModels.includes(m.modelId);
                           return (
                             <label
@@ -652,6 +675,13 @@ export function ConnectorsSettings({ modelCatalog, reloadModelCatalog }: Connect
                       {s.noModelsDiscovered}
                     </div>
                   )}
+                  {(textModels.length > 0 || imageModels.length > 0) &&
+                    filteredTextModels.length === 0 &&
+                    filteredImageModels.length === 0 && (
+                      <div className="rounded-2xl border border-dashed border-outline-variant/20 bg-surface-container-lowest px-4 py-8 text-center text-sm text-on-surface-variant/70">
+                        No results for &quot;{modelSearchQuery}&quot;
+                      </div>
+                    )}
                 </div>
 
                 <Button
