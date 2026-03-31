@@ -21,6 +21,11 @@ import {
 import { SecretStorageUnavailableError } from '../../services/secret-store';
 import { invalidateUnifiedCatalog } from '../../services/providers/catalog';
 import { getProvider } from '../../services/providers/registry';
+import {
+  validateOpenAIAuthContext,
+  OpenAIAuthError,
+  OpenAIConfigError,
+} from '../../services/providers/openai-provider';
 import { getConfig, getMangoDir } from '../../lib/config';
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { parse as parseToml, stringify as stringifyToml } from 'smol-toml';
@@ -66,6 +71,16 @@ export function handleSecretRouteError(
 
   if (error instanceof GeminiValidationUnavailableError) {
     set.status = 502;
+    return { error: error.message };
+  }
+
+  if (error instanceof OpenAIAuthError) {
+    set.status = error.status;
+    return { error: error.message };
+  }
+
+  if (error instanceof OpenAIConfigError) {
+    set.status = 422;
     return { error: error.message };
   }
 
@@ -201,30 +216,35 @@ export async function removeSecret(
   }
 }
 
-/** Validates an API key for the given provider, with optional baseUrl for openai-compatible. */
+/** Validates an API key for the given provider, with optional fields for openai and openai-compatible. */
 export async function validateProviderKey(
   provider: ProviderType,
   apiKey: string,
-  baseUrl?: string
+  options?: { baseUrl?: string; organizationId?: string; projectId?: string }
 ): Promise<void> {
   if (provider === 'openai') {
-    const p = getProvider('openai');
-    await p.validateApiKey(apiKey);
+    await validateOpenAIAuthContext({
+      apiKey,
+      organizationId: options?.organizationId,
+      projectId: options?.projectId,
+    });
     return;
   }
 
-  if (provider === 'openai-compatible' && baseUrl) {
-    await validateBaseUrl(baseUrl);
-    const response = await fetch(`${baseUrl}/models`, {
+  if (provider === 'openai-compatible' && options?.baseUrl) {
+    await validateBaseUrl(options.baseUrl);
+    const response = await fetch(`${options.baseUrl}/models`, {
       headers: { Authorization: `Bearer ${apiKey}` },
     });
     if (!response.ok) {
-      throw new Error(`API key validation failed for ${baseUrl} (HTTP ${response.status}).`);
+      throw new Error(
+        `API key validation failed for ${options.baseUrl} (HTTP ${response.status}).`
+      );
     }
     return;
   }
 
-  if (provider === 'openai-compatible' && !baseUrl) {
+  if (provider === 'openai-compatible' && !options?.baseUrl) {
     throw new Error('baseUrl is required for openai-compatible connectors.');
   }
 
@@ -250,6 +270,10 @@ export const connectorBodySchema = t.Object({
     ])
   ),
   baseUrl: t.Optional(t.String()),
+  /** Optional OpenAI Organization ID — only meaningful for provider === 'openai'. */
+  organizationId: t.Optional(t.String()),
+  /** Optional OpenAI Project ID — only meaningful for provider === 'openai'. */
+  projectId: t.Optional(t.String()),
 });
 
 export const connectorRoutes = new Elysia()
@@ -275,7 +299,11 @@ export const connectorRoutes = new Elysia()
           return { error: 'baseUrl is required for openai-compatible connectors.' };
         }
 
-        await validateProviderKey(provider, apiKey, body.baseUrl);
+        await validateProviderKey(provider, apiKey, {
+          baseUrl: body.baseUrl,
+          organizationId: provider === 'openai' ? body.organizationId : undefined,
+          projectId: provider === 'openai' ? body.projectId : undefined,
+        });
 
         const id = randomUUID();
         const timestamp = Date.now();
@@ -295,6 +323,8 @@ export const connectorRoutes = new Elysia()
           enabledModels: [],
           userId,
           baseUrl: body.baseUrl ?? null,
+          organizationId: provider === 'openai' ? (body.organizationId ?? null) : null,
+          projectId: provider === 'openai' ? (body.projectId ?? null) : null,
         };
         await upsertSecretMetadata(input);
 

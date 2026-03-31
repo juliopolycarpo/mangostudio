@@ -3,10 +3,14 @@ import type { SecretMetadataRow } from '@mangostudio/shared/types';
 import type { SecretMetadataInput } from '../../../../src/services/secret-store/metadata';
 import { createProviderSecretService } from '../../../../src/services/providers/secret-service';
 import { InMemorySecretStore } from '../../../support/mocks/mock-secret-store';
+import {
+  validateOpenAIAuthContext,
+  OpenAIAuthError,
+  OpenAIConfigError,
+} from '../../../../src/services/providers/openai-provider';
 
 const TEST_USER = 'test-user-openai';
 const NO_TOML = '/tmp/mangostudio-test-nonexistent-config.toml';
-const BASE_URL = 'https://api.openai.com/v1';
 
 /**
  * Creates an in-memory metadata harness for test isolation.
@@ -17,8 +21,7 @@ function createMetadataHarness(initial: SecretMetadataRow[] = []) {
 
   return {
     listMetadata: async (_provider: string, _userId: string) => [...rows],
-    getMetadataById: async (id: string, _userId: string) =>
-      rows.find((r) => r.id === id) ?? null,
+    getMetadataById: async (id: string, _userId: string) => rows.find((r) => r.id === id) ?? null,
     upsertMetadata: async (input: SecretMetadataInput) => {
       const idx = rows.findIndex((r) => r.id === input.id);
       const row: SecretMetadataRow = {
@@ -34,6 +37,8 @@ function createMetadataHarness(initial: SecretMetadataRow[] = []) {
         enabledModels: JSON.stringify(input.enabledModels),
         userId: input.userId,
         baseUrl: input.baseUrl ?? null,
+        organizationId: input.organizationId ?? null,
+        projectId: input.projectId ?? null,
       };
       if (idx >= 0) {
         rows[idx] = row;
@@ -63,31 +68,27 @@ function makeOpenAIRow(overrides: Partial<SecretMetadataRow> = {}): SecretMetada
     enabledModels: JSON.stringify([]),
     userId: TEST_USER,
     baseUrl: null,
+    organizationId: null,
+    projectId: null,
     ...overrides,
   };
 }
 
 describe('openai-provider', () => {
   it('providerType is openai', async () => {
-    const { openAIProvider } = await import(
-      '../../../../src/services/providers/openai-provider'
-    );
+    const { openAIProvider } = await import('../../../../src/services/providers/openai-provider');
     expect(openAIProvider.providerType).toBe('openai');
   });
 
   it('is registered in the provider registry after import', async () => {
     await import('../../../../src/services/providers/openai-provider');
-    const { getProvider } = await import(
-      '../../../../src/services/providers/registry'
-    );
+    const { getProvider } = await import('../../../../src/services/providers/registry');
     const provider = getProvider('openai');
     expect(provider.providerType).toBe('openai');
   });
 
   it('implements the required AIProvider methods', async () => {
-    const { openAIProvider } = await import(
-      '../../../../src/services/providers/openai-provider'
-    );
+    const { openAIProvider } = await import('../../../../src/services/providers/openai-provider');
     expect(typeof openAIProvider.generateText).toBe('function');
     expect(typeof openAIProvider.listModels).toBe('function');
     expect(typeof openAIProvider.validateApiKey).toBe('function');
@@ -226,72 +227,162 @@ describe('openai-provider resolveClientConfig (via secretService)', () => {
   });
 });
 
-describe('openai-provider validateApiKey', () => {
-  it('calls BASE_URL/models with Authorization header', async () => {
-    const capturedRequests: { url: string; headers: Record<string, string> }[] = [];
-    const TEST_KEY = 'sk-validate-1234';
+// ---------------------------------------------------------------------------
+// validateOpenAIAuthContext — the shared validation path for connectors
+// ---------------------------------------------------------------------------
 
-    const service = createProviderSecretService(
-      {
-        provider: 'openai',
-        tomlSection: 'openai_api_keys',
-        envVarPrefix: 'OPENAI_API_KEY',
-        validateFn: async (apiKey, fetchImpl) => {
-          const response = await fetchImpl(`${BASE_URL}/models`, {
-            headers: { Authorization: `Bearer ${apiKey}` },
-          });
-          if (!response.ok) {
-            throw new Error(`OpenAI API key validation failed (HTTP ${response.status}).`);
-          }
-        },
-      },
-      {
-        secretStore: new InMemorySecretStore(),
-        fetchImpl: async (input, init) => {
-          capturedRequests.push({
-            url: String(input),
-            headers: Object.fromEntries(
-              Object.entries(init?.headers ?? {})
-            ),
-          });
-          return new Response('{}', { status: 200 });
-        },
-        tomlFilePath: NO_TOML,
+describe('validateOpenAIAuthContext', () => {
+  it('succeeds when SDK receives a 200 response from model listing', async () => {
+    // Patch the OpenAI SDK client's models.list to return success.
+    // We do this by intercepting via global fetch since the SDK uses fetch internally.
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (input: RequestInfo | URL, _init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('/models')) {
+        return new Response(
+          JSON.stringify({
+            object: 'list',
+            data: [{ id: 'gpt-4o', object: 'model', created: 0, owned_by: 'openai' }],
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        );
       }
-    );
+      return originalFetch(input, _init);
+    }) as typeof fetch;
 
-    await service.validateApiKey(TEST_KEY);
-
-    expect(capturedRequests).toHaveLength(1);
-    expect(capturedRequests[0]!.url).toBe(`${BASE_URL}/models`);
-    expect(capturedRequests[0]!.headers['Authorization']).toBe(`Bearer ${TEST_KEY}`);
+    try {
+      // Should not throw
+      await expect(
+        validateOpenAIAuthContext({ apiKey: 'sk-valid-key-1234' })
+      ).resolves.toBeUndefined();
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 
-  it('throws on non-2xx response', async () => {
-    const service = createProviderSecretService(
-      {
-        provider: 'openai',
-        tomlSection: 'openai_api_keys',
-        envVarPrefix: 'OPENAI_API_KEY',
-        validateFn: async (apiKey, fetchImpl) => {
-          const response = await fetchImpl(`${BASE_URL}/models`, {
-            headers: { Authorization: `Bearer ${apiKey}` },
-          });
-          if (!response.ok) {
-            throw new Error(`OpenAI API key validation failed (HTTP ${response.status}).`);
-          }
-        },
-      },
-      {
-        secretStore: new InMemorySecretStore(),
-        fetchImpl: async () => new Response('Unauthorized', { status: 401 }),
-        tomlFilePath: NO_TOML,
+  it('succeeds when auth context includes organizationId and projectId', async () => {
+    const capturedHeaders: Record<string, string>[] = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('/models')) {
+        const headers = init?.headers
+          ? Object.fromEntries(
+              init.headers instanceof Headers
+                ? init.headers.entries()
+                : Object.entries(init.headers as Record<string, string>)
+            )
+          : {};
+        capturedHeaders.push(headers);
+        return new Response(JSON.stringify({ object: 'list', data: [] }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
       }
-    );
+      return originalFetch(input, init);
+    }) as typeof fetch;
 
-    await expect(service.validateApiKey('bad-key')).rejects.toThrow(
-      'OpenAI API key validation failed (HTTP 401)'
-    );
+    try {
+      await validateOpenAIAuthContext({
+        apiKey: 'sk-proj-scoped-key',
+        organizationId: 'org-testorg123',
+        projectId: 'proj_testproject456',
+      });
+      // The SDK should have sent OpenAI-Organization and OpenAI-Project headers
+      expect(capturedHeaders.length).toBeGreaterThan(0);
+      const h = capturedHeaders[0]!;
+      expect(h['openai-organization']).toBe('org-testorg123');
+      expect(h['openai-project']).toBe('proj_testproject456');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('throws OpenAIAuthError for 401 response', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (input: RequestInfo | URL, _init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('/models')) {
+        return new Response(
+          JSON.stringify({
+            error: {
+              message: 'Incorrect API key',
+              type: 'invalid_request_error',
+              code: 'invalid_api_key',
+            },
+          }),
+          { status: 401, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+      return globalThis.fetch(input, _init);
+    }) as typeof fetch;
+
+    try {
+      await expect(validateOpenAIAuthContext({ apiKey: 'sk-invalid-key' })).rejects.toThrow(
+        OpenAIAuthError
+      );
+
+      await expect(validateOpenAIAuthContext({ apiKey: 'sk-invalid-key' })).rejects.toThrow(
+        'invalid or expired'
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('throws OpenAIAuthError with status 403 for permission denied', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (input: RequestInfo | URL, _init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('/models')) {
+        return new Response(
+          JSON.stringify({
+            error: { message: 'Permission denied', type: 'invalid_request_error' },
+          }),
+          { status: 403, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+      return globalThis.fetch(input, _init);
+    }) as typeof fetch;
+
+    try {
+      let caughtError: unknown;
+      try {
+        await validateOpenAIAuthContext({
+          apiKey: 'sk-restricted-key',
+          organizationId: 'org-wrong',
+        });
+      } catch (err) {
+        caughtError = err;
+      }
+      expect(caughtError).toBeInstanceOf(OpenAIAuthError);
+      expect((caughtError as OpenAIAuthError).status).toBe(403);
+      expect((caughtError as OpenAIAuthError).message).toContain('organization ID');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('throws OpenAIConfigError for unexpected non-auth HTTP errors', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (input: RequestInfo | URL, _init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('/models')) {
+        return new Response('Service Unavailable', {
+          status: 503,
+          headers: { 'Content-Type': 'text/plain' },
+        });
+      }
+      return globalThis.fetch(input, _init);
+    }) as typeof fetch;
+
+    try {
+      await expect(validateOpenAIAuthContext({ apiKey: 'sk-any-key' })).rejects.toThrow(
+        OpenAIConfigError
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 });
 
@@ -327,9 +418,7 @@ describe('openai-provider listModels filtering', () => {
 
   it('returns empty array when no key is configured', async () => {
     // When no connectors exist, listModels returns [] (the fallback)
-    const { openAIProvider } = await import(
-      '../../../../src/services/providers/openai-provider'
-    );
+    const { openAIProvider } = await import('../../../../src/services/providers/openai-provider');
     // The provider uses the real secretService which hits the real DB.
     // With no connectors for this user, it should return the empty fallback.
     const models = await openAIProvider.listModels('nonexistent-user-no-keys');

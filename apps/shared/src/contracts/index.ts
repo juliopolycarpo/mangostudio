@@ -113,6 +113,10 @@ export interface AddConnectorBody {
   source: SecretSource;
   provider?: ProviderType;
   baseUrl?: string;
+  /** Optional OpenAI Organization ID — only sent for provider === 'openai'. */
+  organizationId?: string;
+  /** Optional OpenAI Project ID — only sent for provider === 'openai'. */
+  projectId?: string;
 }
 
 /** Body for PUT /api/settings/connectors/gemini/:id/models */

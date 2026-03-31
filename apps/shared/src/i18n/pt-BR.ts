@@ -71,6 +71,13 @@ export const messages = {
       baseUrlLabel: 'URL Base',
       baseUrlRequired: 'URL Base é obrigatória para conectores OpenAI Compatível.',
       baseUrlPlaceholder: 'https://api.example.com/v1',
+      organizationIdLabel: 'Organization ID (opcional)',
+      organizationIdPlaceholder: 'org-...',
+      organizationIdHelper:
+        'Necessário apenas para chaves associadas a uma organização específica.',
+      projectIdLabel: 'Project ID (opcional)',
+      projectIdPlaceholder: 'proj_...',
+      projectIdHelper: 'Necessário para chaves de projeto restrito no OpenAI.',
       nameLabel: 'Nome',
       namePlaceholder: 'ex. Projeto Pessoal',
       apiKeyLabel: 'Chave de API',

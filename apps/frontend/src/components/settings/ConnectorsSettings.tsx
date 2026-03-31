@@ -59,6 +59,8 @@ export function ConnectorsSettings({ modelCatalog, reloadModelCatalog }: Connect
     apiKey: '',
     provider: 'gemini' as ProviderType,
     baseUrl: '',
+    organizationId: '',
+    projectId: '',
     source: 'bun-secrets' as Connector['source'],
   });
   const [isSaving, setIsSaving] = useState(false);
@@ -103,6 +105,14 @@ export function ConnectorsSettings({ modelCatalog, reloadModelCatalog }: Connect
       if (newConnector.provider === 'openai-compatible' && newConnector.baseUrl.trim()) {
         body.baseUrl = newConnector.baseUrl.trim();
       }
+      if (newConnector.provider === 'openai') {
+        if (newConnector.organizationId.trim()) {
+          body.organizationId = newConnector.organizationId.trim();
+        }
+        if (newConnector.projectId.trim()) {
+          body.projectId = newConnector.projectId.trim();
+        }
+      }
 
       const { error } = await client.api.settings.connectors.post(body);
       if (error) throw new Error(extractApiError(error.value, 'Failed to add connector'));
@@ -115,6 +125,8 @@ export function ConnectorsSettings({ modelCatalog, reloadModelCatalog }: Connect
         apiKey: '',
         provider: 'gemini',
         baseUrl: '',
+        organizationId: '',
+        projectId: '',
         source: 'bun-secrets',
       });
       toast(s.addSuccess, 'success');
@@ -344,6 +356,41 @@ export function ConnectorsSettings({ modelCatalog, reloadModelCatalog }: Connect
                   onChange={(e) => setNewConnector({ ...newConnector, baseUrl: e.target.value })}
                   placeholder={s.baseUrlPlaceholder}
                 />
+              )}
+
+              {newConnector.provider === 'openai' && (
+                <>
+                  <div className="flex flex-col gap-1">
+                    <Input
+                      id="connector-organization-id"
+                      label={s.organizationIdLabel}
+                      type="text"
+                      value={newConnector.organizationId}
+                      onChange={(e) =>
+                        setNewConnector({ ...newConnector, organizationId: e.target.value })
+                      }
+                      placeholder={s.organizationIdPlaceholder}
+                    />
+                    <p className="text-[10px] text-on-surface-variant/50 ml-1">
+                      {s.organizationIdHelper}
+                    </p>
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <Input
+                      id="connector-project-id"
+                      label={s.projectIdLabel}
+                      type="text"
+                      value={newConnector.projectId}
+                      onChange={(e) =>
+                        setNewConnector({ ...newConnector, projectId: e.target.value })
+                      }
+                      placeholder={s.projectIdPlaceholder}
+                    />
+                    <p className="text-[10px] text-on-surface-variant/50 ml-1">
+                      {s.projectIdHelper}
+                    </p>
+                  </div>
+                </>
               )}
 
               <div className="flex flex-col gap-1.5">

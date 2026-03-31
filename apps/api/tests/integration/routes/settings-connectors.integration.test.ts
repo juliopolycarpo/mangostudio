@@ -6,6 +6,10 @@ import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-
 import { getDb } from '../../../src/db/database';
 import { getProvider, registerProvider } from '../../../src/services/providers/registry';
 import type { AIProvider } from '../../../src/services/providers/types';
+import {
+  OpenAIAuthError,
+  OpenAIConfigError,
+} from '../../../src/services/providers/openai-provider';
 
 const TEST_USER = {
   id: 'test-user-connectors',
@@ -104,6 +108,20 @@ const COMPAT_LIST_USER = {
   email: 'test-compat-list@mangostudio.test',
 };
 
+/** Dedicated user for project/org scoped OpenAI tests. */
+const OPENAI_PROJ_USER = {
+  id: 'test-user-openai-proj',
+  name: 'OpenAI Proj User',
+  email: 'test-openai-proj@mangostudio.test',
+};
+
+/** Dedicated user for OpenAI auth-failure path tests. */
+const OPENAI_FAIL_USER = {
+  id: 'test-user-openai-fail',
+  name: 'OpenAI Fail User',
+  email: 'test-openai-fail@mangostudio.test',
+};
+
 const ConnectorResponseSchema = Type.Object({
   id: Type.String(),
   name: Type.String(),
@@ -113,11 +131,38 @@ const ConnectorResponseSchema = Type.Object({
   baseUrl: Type.Union([Type.String(), Type.Null()]),
 });
 
+/**
+ * Returns a fetch mock that intercepts any URL containing '/models' and
+ * responds with a minimal OpenAI-compatible model list (HTTP 200).
+ * All other requests are forwarded to the real fetch.
+ */
+function makeOpenAISuccessFetch(originalFetch: typeof globalThis.fetch): typeof globalThis.fetch {
+  return (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.includes('api.openai.com') && url.includes('/models')) {
+      return new Response(
+        JSON.stringify({
+          object: 'list',
+          data: [{ id: 'gpt-4o', object: 'model', created: 0, owned_by: 'openai' }],
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+    return originalFetch(input, init);
+  }) as typeof fetch;
+}
+
 describe('openai connector routes', () => {
   beforeAll(async () => {
     const db = getDb();
     const now = Date.now();
-    for (const u of [OPENAI_CONNECTOR_USER, OPENAI_LIST_USER, COMPAT_LIST_USER]) {
+    for (const u of [
+      OPENAI_CONNECTOR_USER,
+      OPENAI_LIST_USER,
+      COMPAT_LIST_USER,
+      OPENAI_PROJ_USER,
+      OPENAI_FAIL_USER,
+    ]) {
       await db
         .insertInto('user')
         .values({
@@ -136,7 +181,7 @@ describe('openai connector routes', () => {
   let originalOpenAIProvider: AIProvider;
 
   beforeEach(() => {
-    // Save the real openai provider and replace with one that skips real API calls
+    // Save the real openai provider for restoration
     originalOpenAIProvider = getProvider('openai');
   });
 
@@ -149,45 +194,42 @@ describe('openai connector routes', () => {
   });
 
   it('POST /settings/connectors with provider openai and no baseUrl returns 201', async () => {
-    // Replace the openai provider's validateApiKey to avoid real API calls
-    registerProvider({
-      ...originalOpenAIProvider,
-      async validateApiKey() {},
-    });
+    // The route calls validateOpenAIAuthContext which uses the OpenAI SDK internally.
+    // Mock global fetch so the SDK model listing call returns 200.
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = makeOpenAISuccessFetch(originalFetch);
 
-    const { app, restore } = createAuthenticatedApiTestApp(
-      OPENAI_CONNECTOR_USER,
-      settingsRoutes
-    );
-    restoreAuth = restore;
+    try {
+      const { app, restore } = createAuthenticatedApiTestApp(OPENAI_CONNECTOR_USER, settingsRoutes);
+      restoreAuth = restore;
 
-    const response = await app.handle(
-      new Request('http://localhost/settings/connectors', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: 'my-openai-key',
-          apiKey: 'sk-test-openai-key-1234',
-          source: 'config-file',
-          provider: 'openai',
-        }),
-      })
-    );
+      const response = await app.handle(
+        new Request('http://localhost/settings/connectors', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: 'my-openai-key',
+            apiKey: 'sk-test-openai-key-1234',
+            source: 'config-file',
+            provider: 'openai',
+          }),
+        })
+      );
 
-    expect(response.status).toBe(200);
+      expect(response.status).toBe(200);
 
-    const payload = await response.json();
-    expect(Value.Check(ConnectorResponseSchema, payload)).toBe(true);
-    expect(payload.provider).toBe('openai');
-    expect(payload.baseUrl).toBeNull();
-    expect(payload.configured).toBe(true);
+      const payload = await response.json();
+      expect(Value.Check(ConnectorResponseSchema, payload)).toBe(true);
+      expect(payload.provider).toBe('openai');
+      expect(payload.baseUrl).toBeNull();
+      expect(payload.configured).toBe(true);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 
   it('POST /settings/connectors with provider openai-compatible and no baseUrl returns 400', async () => {
-    const { app, restore } = createAuthenticatedApiTestApp(
-      OPENAI_CONNECTOR_USER,
-      settingsRoutes
-    );
+    const { app, restore } = createAuthenticatedApiTestApp(OPENAI_CONNECTOR_USER, settingsRoutes);
     restoreAuth = restore;
 
     const response = await app.handle(
@@ -213,7 +255,7 @@ describe('openai connector routes', () => {
     const COMPAT_BASE_URL = 'https://openrouter.ai/api/v1';
 
     // Mock validateBaseUrl to avoid DNS lookups in test
-    mock.module('../../../src/services/providers/base-url-policy', () => ({
+    await mock.module('../../../src/services/providers/base-url-policy', () => ({
       validateBaseUrl: async () => {},
       UnsafeBaseUrlError: class UnsafeBaseUrlError extends Error {
         constructor(message: string) {
@@ -234,10 +276,7 @@ describe('openai connector routes', () => {
     }) as unknown as typeof fetch;
 
     try {
-      const { app, restore } = createAuthenticatedApiTestApp(
-        OPENAI_CONNECTOR_USER,
-        settingsRoutes
-      );
+      const { app, restore } = createAuthenticatedApiTestApp(OPENAI_CONNECTOR_USER, settingsRoutes);
       restoreAuth = restore;
 
       const response = await app.handle(
@@ -267,55 +306,51 @@ describe('openai connector routes', () => {
   });
 
   it('GET /settings/connectors returns openai connector with baseUrl null', async () => {
-    // Replace the openai provider's validateApiKey to avoid real API calls
-    registerProvider({
-      ...originalOpenAIProvider,
-      async validateApiKey() {},
-    });
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = makeOpenAISuccessFetch(originalFetch);
 
-    const { app, restore } = createAuthenticatedApiTestApp(
-      OPENAI_LIST_USER,
-      settingsRoutes
-    );
-    restoreAuth = restore;
+    try {
+      const { app, restore } = createAuthenticatedApiTestApp(OPENAI_LIST_USER, settingsRoutes);
+      restoreAuth = restore;
 
-    // Create connector
-    await app.handle(
-      new Request('http://localhost/settings/connectors', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: 'openai-for-list',
-          apiKey: 'sk-list-test-key-aaaa',
-          source: 'config-file',
-          provider: 'openai',
-        }),
-      })
-    );
+      // Create connector
+      await app.handle(
+        new Request('http://localhost/settings/connectors', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: 'openai-for-list',
+            apiKey: 'sk-list-test-key-aaaa',
+            source: 'config-file',
+            provider: 'openai',
+          }),
+        })
+      );
 
-    // List connectors
-    const listResponse = await app.handle(
-      new Request('http://localhost/settings/connectors')
-    );
+      // List connectors
+      const listResponse = await app.handle(new Request('http://localhost/settings/connectors'));
 
-    expect(listResponse.status).toBe(200);
+      expect(listResponse.status).toBe(200);
 
-    const listPayload = await listResponse.json();
-    expect(Value.Check(ConnectorStatusSchema, listPayload)).toBe(true);
+      const listPayload = await listResponse.json();
+      expect(Value.Check(ConnectorStatusSchema, listPayload)).toBe(true);
 
-    const openaiConnector = listPayload.connectors.find(
-      (c: any) => c.provider === 'openai' && c.name === 'openai-for-list'
-    );
+      const openaiConnector = listPayload.connectors.find(
+        (c: any) => c.provider === 'openai' && c.name === 'openai-for-list'
+      );
 
-    expect(openaiConnector).toBeDefined();
-    expect(openaiConnector.baseUrl).toBeNull();
+      expect(openaiConnector).toBeDefined();
+      expect(openaiConnector.baseUrl).toBeNull();
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 
   it('GET /settings/connectors returns openai-compatible connector with correct baseUrl', async () => {
     const COMPAT_BASE_URL = 'https://api.deepseek.com/v1';
 
     // Mock validateBaseUrl
-    mock.module('../../../src/services/providers/base-url-policy', () => ({
+    await mock.module('../../../src/services/providers/base-url-policy', () => ({
       validateBaseUrl: async () => {},
       UnsafeBaseUrlError: class UnsafeBaseUrlError extends Error {
         constructor(message: string) {
@@ -335,10 +370,7 @@ describe('openai connector routes', () => {
     }) as unknown as typeof fetch;
 
     try {
-      const { app, restore } = createAuthenticatedApiTestApp(
-        COMPAT_LIST_USER,
-        settingsRoutes
-      );
+      const { app, restore } = createAuthenticatedApiTestApp(COMPAT_LIST_USER, settingsRoutes);
       restoreAuth = restore;
 
       // Create connector
@@ -357,9 +389,7 @@ describe('openai connector routes', () => {
       );
 
       // List connectors
-      const listResponse = await app.handle(
-        new Request('http://localhost/settings/connectors')
-      );
+      const listResponse = await app.handle(new Request('http://localhost/settings/connectors'));
 
       expect(listResponse.status).toBe(200);
 
@@ -375,5 +405,182 @@ describe('openai connector routes', () => {
     } finally {
       globalThis.fetch = originalFetch;
     }
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/*  OpenAI project/org-scoped auth context integration tests           */
+/* ------------------------------------------------------------------ */
+
+describe('openai project-scoped connector routes', () => {
+  let originalOpenAIProvider: AIProvider;
+
+  beforeEach(() => {
+    originalOpenAIProvider = getProvider('openai');
+  });
+
+  afterEach(() => {
+    restoreAuth?.();
+    restoreAuth = null;
+    mock.restore();
+    registerProvider(originalOpenAIProvider);
+  });
+
+  it('POST /settings/connectors stores organizationId and projectId nullably', async () => {
+    // The route calls validateOpenAIAuthContext directly via the SDK.
+    // Mock fetch to return a 200 so validation passes without real API calls.
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = makeOpenAISuccessFetch(originalFetch);
+
+    try {
+      const { app, restore } = createAuthenticatedApiTestApp(OPENAI_PROJ_USER, settingsRoutes);
+      restoreAuth = restore;
+
+      const response = await app.handle(
+        new Request('http://localhost/settings/connectors', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: 'openai-proj-key',
+            apiKey: 'sk-proj-test-key-aaaa',
+            source: 'config-file',
+            provider: 'openai',
+            organizationId: 'org-testorg999',
+            projectId: 'proj_testproj888',
+          }),
+        })
+      );
+
+      expect(response.status).toBe(200);
+
+      const payload = await response.json();
+      expect(Value.Check(ConnectorResponseSchema, payload)).toBe(true);
+      expect(payload.provider).toBe('openai');
+      expect(payload.configured).toBe(true);
+      expect(payload.baseUrl).toBeNull();
+
+      // Verify the org/project fields were persisted in the DB
+      const db = getDb();
+      const row = await db
+        .selectFrom('secret_metadata')
+        .selectAll()
+        .where('id', '=', payload.id)
+        .executeTakeFirst();
+
+      expect(row).toBeDefined();
+      expect(row!.organizationId).toBe('org-testorg999');
+      expect(row!.projectId).toBe('proj_testproj888');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('POST /settings/connectors with omitted org/project stores null', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = makeOpenAISuccessFetch(originalFetch);
+
+    try {
+      const { app, restore } = createAuthenticatedApiTestApp(OPENAI_PROJ_USER, settingsRoutes);
+      restoreAuth = restore;
+
+      const response = await app.handle(
+        new Request('http://localhost/settings/connectors', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: 'openai-key-no-org',
+            apiKey: 'sk-no-org-test-key-bbbb',
+            source: 'config-file',
+            provider: 'openai',
+          }),
+        })
+      );
+
+      expect(response.status).toBe(200);
+
+      const payload = await response.json();
+      const db = getDb();
+      const row = await db
+        .selectFrom('secret_metadata')
+        .selectAll()
+        .where('id', '=', payload.id)
+        .executeTakeFirst();
+
+      expect(row).toBeDefined();
+      expect(row!.organizationId).toBeNull();
+      expect(row!.projectId).toBeNull();
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('POST /settings/connectors returns 401 when OpenAI rejects credentials', async () => {
+    // Stub validateOpenAIAuthContext at the module level so the route sees it.
+    await mock.module('../../../src/services/providers/openai-provider', () => ({
+      validateOpenAIAuthContext: async () => {
+        throw new OpenAIAuthError(
+          'OpenAI API key is invalid or expired. Verify your key and try again.',
+          401
+        );
+      },
+      OpenAIAuthError,
+      OpenAIConfigError,
+    }));
+
+    const { app, restore } = createAuthenticatedApiTestApp(OPENAI_FAIL_USER, settingsRoutes);
+    restoreAuth = restore;
+
+    const response = await app.handle(
+      new Request('http://localhost/settings/connectors', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: 'bad-openai-key',
+          apiKey: 'sk-bad-key-cccc',
+          source: 'config-file',
+          provider: 'openai',
+        }),
+      })
+    );
+
+    expect(response.status).toBe(401);
+
+    const payload = await response.json();
+    expect(payload.error).toContain('invalid or expired');
+  });
+
+  it('POST /settings/connectors returns 403 when OpenAI denies org/project access', async () => {
+    await mock.module('../../../src/services/providers/openai-provider', () => ({
+      validateOpenAIAuthContext: async () => {
+        throw new OpenAIAuthError(
+          'OpenAI access denied. Check that your organization ID, project ID, and key permissions are correct.',
+          403
+        );
+      },
+      OpenAIAuthError,
+      OpenAIConfigError,
+    }));
+
+    const { app, restore } = createAuthenticatedApiTestApp(OPENAI_FAIL_USER, settingsRoutes);
+    restoreAuth = restore;
+
+    const response = await app.handle(
+      new Request('http://localhost/settings/connectors', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: 'forbidden-openai-key',
+          apiKey: 'sk-forbidden-key-dddd',
+          source: 'config-file',
+          provider: 'openai',
+          organizationId: 'org-wrongorg',
+        }),
+      })
+    );
+
+    expect(response.status).toBe(403);
+
+    const payload = await response.json();
+    expect(payload.error).toContain('organization ID');
   });
 });
