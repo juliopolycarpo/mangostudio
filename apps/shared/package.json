@@ -16,6 +16,7 @@
     "./types": "./src/types/index.ts",
     "./contracts": "./src/contracts/index.ts",
     "./test-utils": "./src/test-utils/index.ts",
-    "./i18n": "./src/i18n/index.ts"
+    "./i18n": "./src/i18n/index.ts",
+    "./utils/model-detection": "./src/utils/model-detection.ts"
   }
 }
