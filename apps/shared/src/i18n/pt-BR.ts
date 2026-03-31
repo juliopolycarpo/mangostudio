@@ -107,6 +107,7 @@ export const messages = {
       managedExternally: 'Gerenciado externamente via configuração do ambiente.',
       sharedDeleteBlocked:
         'Este conector compartilhado precisa ser removido do arquivo de configuração.',
+      searchModelsPlaceholder: 'Buscar modelos por nome ou ID...',
       noModelsDiscovered: 'Nenhum modelo foi descoberto para este conector ainda.',
       addSuccess: 'Conector adicionado com sucesso!',
       deleteSuccess: 'Conector excluído com sucesso!',

@@ -108,6 +108,7 @@ export const messages: Messages = {
       sharedConnector: 'Shared',
       managedExternally: 'Managed externally via environment configuration.',
       sharedDeleteBlocked: 'This shared connector must be removed from the configuration file.',
+      searchModelsPlaceholder: 'Search models by name or ID...',
       noModelsDiscovered: 'No models have been discovered for this connector yet.',
       addSuccess: 'Connector added successfully!',
       deleteSuccess: 'Connector deleted successfully!',
