@@ -7,6 +7,7 @@ export type { SSEErrorEvent } from './errors';
 
 import type {
   InteractionMode,
+  MessagePart,
   SecretSource,
   SecretMetadataRow,
   ProviderType,
@@ -187,6 +188,8 @@ export interface GeneratedMessage {
   modelName?: string;
   styleParams?: string[];
   interactionMode?: InteractionMode;
+  parts?: MessagePart[];
+  providerState?: string;
 }
 
 /** Generic API success response. */
