@@ -293,7 +293,13 @@ const openAIProvider: AIProvider = {
     // Build model-appropriate params: gpt-image doesn't support `n` or `url` format
     const params: OpenAI.Images.ImageGenerateParamsNonStreaming = isGptImage
       ? { model: req.modelName, prompt: req.prompt, size: '1024x1024', response_format: 'b64_json' }
-      : { model: req.modelName, prompt: req.prompt, size: '1024x1024', n: 1, response_format: 'url' };
+      : {
+          model: req.modelName,
+          prompt: req.prompt,
+          size: '1024x1024',
+          n: 1,
+          response_format: 'url',
+        };
 
     const response = await client.images.generate(params);
 
