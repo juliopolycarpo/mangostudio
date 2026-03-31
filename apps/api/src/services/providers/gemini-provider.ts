@@ -44,10 +44,11 @@ const geminiProvider: AIProvider = {
       req.history,
       req.prompt,
       req.systemPrompt,
-      req.modelName
+      req.modelName,
+      req.generationConfig,
     )) {
       if (req.signal?.aborted) break;
-      yield { type: 'text' as const, text: chunk.text, done: chunk.done };
+      yield chunk;
     }
   },
 
