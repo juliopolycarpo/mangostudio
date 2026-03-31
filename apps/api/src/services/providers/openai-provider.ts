@@ -288,28 +288,42 @@ const openAIProvider: AIProvider = {
     const ctx = await resolveAuthContext(req.userId, req.modelName);
     const client = createClient(ctx);
 
-    const response = await client.images.generate({
-      model: req.modelName,
-      prompt: req.prompt,
-      n: 1,
-      size: '1024x1024',
-      response_format: 'url',
-    });
+    const isGptImage = req.modelName.startsWith('gpt-image');
 
-    const remoteUrl = response.data?.[0]?.url;
-    if (!remoteUrl) throw new Error('No image returned from OpenAI DALL-E.');
+    // Build model-appropriate params: gpt-image doesn't support `response_format` or `n`
+    const params: OpenAI.Images.ImageGenerateParamsNonStreaming = isGptImage
+      ? { model: req.modelName, prompt: req.prompt, size: '1024x1024' }
+      : {
+          model: req.modelName,
+          prompt: req.prompt,
+          size: '1024x1024',
+          n: 1,
+          response_format: 'url',
+        };
+
+    const response = await client.images.generate(params);
 
     const uploadsDir = getConfig().uploads.dir;
     mkdirSync(uploadsDir, { recursive: true });
 
-    const imageResponse = await fetch(remoteUrl);
-    if (!imageResponse.ok) {
-      throw new Error('Failed to download generated image from OpenAI CDN.');
-    }
-
-    const imageBuffer = Buffer.from(await imageResponse.arrayBuffer());
     const filename = `generated-${Date.now()}-${Math.round(Math.random() * 1e9)}.png`;
-    await Bun.write(join(uploadsDir, filename), imageBuffer);
+    const outputPath = join(uploadsDir, filename);
+
+    const data = response.data?.[0];
+
+    if (data?.b64_json) {
+      const imageBuffer = Buffer.from(data.b64_json, 'base64');
+      await Bun.write(outputPath, imageBuffer);
+    } else if (data?.url) {
+      const imageResponse = await fetch(data.url);
+      if (!imageResponse.ok) {
+        throw new Error('Failed to download generated image from OpenAI CDN.');
+      }
+      const imageBuffer = Buffer.from(await imageResponse.arrayBuffer());
+      await Bun.write(outputPath, imageBuffer);
+    } else {
+      throw new Error(`No image data returned from OpenAI API for model "${req.modelName}".`);
+    }
 
     return { imageUrl: `/uploads/${filename}` };
   },
