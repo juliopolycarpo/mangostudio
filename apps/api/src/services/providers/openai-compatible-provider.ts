@@ -16,7 +16,7 @@ import type {
   AIProvider,
   TextGenerationRequest,
   TextGenerationResult,
-  StreamingTextChunk,
+  StreamingChunk,
   ImageGenerationRequest,
   ImageGenerationResult,
   ModelInfo,
@@ -158,7 +158,7 @@ const openAICompatibleProvider: AIProvider = {
     return { text };
   },
 
-  async *generateTextStream(req: TextGenerationRequest): AsyncIterable<StreamingTextChunk> {
+  async *generateTextStream(req: TextGenerationRequest): AsyncIterable<StreamingChunk> {
     const { apiKey, baseUrl } = await resolveClientConfig(req.userId, req.modelName);
     const client = createClient(apiKey, baseUrl);
 
@@ -175,11 +175,11 @@ const openAICompatibleProvider: AIProvider = {
       if (req.signal?.aborted) break;
       const delta = chunk.choices[0]?.delta?.content;
       if (delta) {
-        yield { text: delta, done: false };
+        yield { type: 'text', text: delta, done: false };
       }
     }
 
-    yield { text: '', done: true };
+    yield { type: 'text', text: '', done: true };
   },
 
   async generateImage(req: ImageGenerationRequest): Promise<ImageGenerationResult> {

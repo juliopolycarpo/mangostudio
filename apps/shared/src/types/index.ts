@@ -29,7 +29,7 @@ export interface Message {
   id: string;
   chatId: string;
   role: 'user' | 'ai';
-  text: string;                  // kept for backward compat — derived from text parts
+  text: string; // kept for backward compat — derived from text parts
   interactionMode?: InteractionMode;
   imageUrl?: string;
   referenceImage?: string;
@@ -38,8 +38,8 @@ export interface Message {
   generationTime?: string;
   isGenerating?: boolean;
   modelName?: string;
-  parts?: MessagePart[];         // source of truth for structured messages
-  providerState?: string;        // opaque JSON for provider continuity
+  parts?: MessagePart[]; // source of truth for structured messages
+  providerState?: string; // opaque JSON for provider continuity
 }
 
 /** Thinking display mode — configurable per provider in settings. */

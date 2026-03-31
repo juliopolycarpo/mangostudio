@@ -12,7 +12,7 @@ import type {
   AIProvider,
   TextGenerationRequest,
   TextGenerationResult,
-  StreamingTextChunk,
+  StreamingChunk,
   ImageGenerationResult,
   ModelInfo,
 } from './types';
@@ -123,7 +123,7 @@ const anthropicProvider: AIProvider = {
     return { text };
   },
 
-  async *generateTextStream(req: TextGenerationRequest): AsyncIterable<StreamingTextChunk> {
+  async *generateTextStream(req: TextGenerationRequest): AsyncIterable<StreamingChunk> {
     const apiKey = await secretService.resolveApiKey(req.userId, req.modelName);
     const client = createClient(apiKey);
 
@@ -140,11 +140,11 @@ const anthropicProvider: AIProvider = {
     for await (const event of stream) {
       if (req.signal?.aborted) break;
       if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
-        yield { text: event.delta.text, done: false };
+        yield { type: 'text', text: event.delta.text, done: false };
       }
     }
 
-    yield { text: '', done: true };
+    yield { type: 'text', text: '', done: true };
   },
 
   async generateImage(): Promise<ImageGenerationResult> {

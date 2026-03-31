@@ -20,8 +20,8 @@ export interface CreateMessageInput {
   modelName?: string | null;
   styleParams?: string[] | null;
   interactionMode: string;
-  parts?: string | null;          // pre-serialized JSON string
-  providerState?: string | null;  // opaque provider blob
+  parts?: string | null; // pre-serialized JSON string
+  providerState?: string | null; // opaque provider blob
 }
 
 export interface LoadHistoryOptions {

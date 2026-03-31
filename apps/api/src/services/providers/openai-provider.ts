@@ -19,7 +19,7 @@ import type {
   AIProvider,
   TextGenerationRequest,
   TextGenerationResult,
-  StreamingTextChunk,
+  StreamingChunk,
   ImageGenerationRequest,
   ImageGenerationResult,
   ModelInfo,
@@ -263,7 +263,7 @@ const openAIProvider: AIProvider = {
     return { text };
   },
 
-  async *generateTextStream(req: TextGenerationRequest): AsyncIterable<StreamingTextChunk> {
+  async *generateTextStream(req: TextGenerationRequest): AsyncIterable<StreamingChunk> {
     const ctx = await resolveAuthContext(req.userId, req.modelName);
     const client = createClient(ctx);
 
@@ -275,9 +275,9 @@ const openAIProvider: AIProvider = {
     for await (const chunk of stream) {
       if (req.signal?.aborted) break;
       const delta = chunk.choices[0]?.delta?.content;
-      if (delta) yield { text: delta, done: false };
+      if (delta) yield { type: 'text', text: delta, done: false };
     }
-    yield { text: '', done: true };
+    yield { type: 'text', text: '', done: true };
   },
 
   async generateImage(req: ImageGenerationRequest): Promise<ImageGenerationResult> {

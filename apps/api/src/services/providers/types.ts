@@ -14,7 +14,7 @@ export interface TextContextMessage {
 export interface ToolDefinition {
   name: string;
   description: string;
-  parameters: Record<string, unknown>;  // JSON Schema object
+  parameters: Record<string, unknown>; // JSON Schema object
 }
 
 /** Generation configuration passed through to provider adapters. */
@@ -34,7 +34,7 @@ export interface TextGenerationRequest {
   /** Optional signal to cancel the generation mid-stream. */
   signal?: AbortSignal;
   generationConfig?: GenerationConfig;
-  providerState?: string;                // for cross-turn continuity
+  providerState?: string; // for cross-turn continuity
 }
 
 /** Output from text generation. */

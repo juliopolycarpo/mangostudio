@@ -29,8 +29,8 @@ export interface MessagesTable {
   modelName: string | null;
   styleParams: string | null;
   interactionMode: string;
-  parts: string | null;           // JSON-serialized MessagePart[]
-  providerState: string | null;   // opaque provider continuity JSON
+  parts: string | null; // JSON-serialized MessagePart[]
+  providerState: string | null; // opaque provider continuity JSON
 }
 
 export interface SecretMetadataTable {
