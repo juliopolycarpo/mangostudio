@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { EMPTY_MODEL_CATALOG } from '../../../src/utils/model-utils';
-import { useGeminiCatalog } from '../../../src/hooks/use-gemini-catalog';
+import { useModelCatalog as useGeminiCatalog } from '../../../src/hooks/use-model-catalog';
 import { client } from '../../../src/lib/api-client';
 import { act, renderHook, waitFor } from '../../support/harness/render';
 
