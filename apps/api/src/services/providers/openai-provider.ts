@@ -14,6 +14,7 @@ import { createProviderSecretService } from './secret-service';
 import { withModelCache } from './model-cache';
 import { registerProvider } from './registry';
 import { getConfig } from '../../lib/config';
+import { isImageModelId } from '@mangostudio/shared/utils/model-detection';
 import type {
   AIProvider,
   TextGenerationRequest,
@@ -209,9 +210,9 @@ const listModelsWithCache = withModelCache(
           displayName: model.id,
           provider: 'openai',
           capabilities: {
-            text: !model.id.startsWith('dall-e'),
-            image: model.id.startsWith('dall-e'),
-            streaming: !model.id.startsWith('dall-e'),
+            text: !isImageModelId(model.id),
+            image: isImageModelId(model.id),
+            streaming: !isImageModelId(model.id),
           },
         });
       }
@@ -280,8 +281,8 @@ const openAIProvider: AIProvider = {
   },
 
   async generateImage(req: ImageGenerationRequest): Promise<ImageGenerationResult> {
-    if (!req.modelName.startsWith('dall-e')) {
-      throw new Error('Image generation is only supported by DALL-E models.');
+    if (!isImageModelId(req.modelName)) {
+      throw new Error(`Image generation is not supported by model "${req.modelName}".`);
     }
 
     const ctx = await resolveAuthContext(req.userId, req.modelName);
