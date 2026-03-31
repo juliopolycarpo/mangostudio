@@ -182,7 +182,9 @@ export function createGeminiModelCatalogService(
       reason: GeminiModelCatalogRefreshReason
     ): GeminiModelCatalogResponse {
       if (isStale(userId) && !refreshPromises.has(userId)) {
-        this.refreshGeminiModelCatalog(userId, reason).catch(() => {});
+        this.refreshGeminiModelCatalog(userId, reason).catch((err) => {
+          console.warn('[gemini] Catalog refresh failed:', err.message);
+        });
       }
       return getSnapshot(userId);
     },
@@ -197,8 +199,15 @@ export function createGeminiModelCatalogService(
     async getGeminiModelCatalog(userId: string): Promise<GeminiModelCatalogResponse> {
       if (getFullCatalog(userId).length > 0) {
         await recalculateSnapshot(userId);
+        // Background refresh if stale — user sees current data while it updates
+        if (isStale(userId) && !refreshPromises.has(userId)) {
+          this.refreshGeminiModelCatalog(userId, 'ttl').catch((err) => {
+            console.warn('[gemini] Background catalog refresh failed:', err.message);
+          });
+        }
       } else {
-        this.refreshIfStale(userId, 'ttl');
+        // Cold start: await the first refresh — nothing to show without it
+        return this.refreshGeminiModelCatalog(userId, 'ttl');
       }
       return getSnapshot(userId);
     },
