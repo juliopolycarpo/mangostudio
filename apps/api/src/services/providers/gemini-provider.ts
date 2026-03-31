@@ -45,7 +45,7 @@ const geminiProvider: AIProvider = {
       req.prompt,
       req.systemPrompt,
       req.modelName,
-      req.generationConfig,
+      req.generationConfig
     )) {
       if (req.signal?.aborted) break;
       yield chunk;

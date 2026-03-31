@@ -103,14 +103,17 @@ export function useTextChat({
             if (chunkType === 'thinking' && chunk.text) {
               accumulatedThinking += chunk.text;
               const thinkingPart: MessagePart = { type: 'thinking', text: accumulatedThinking };
-              accumulatedParts = [thinkingPart, ...accumulatedParts.filter(p => p.type !== 'thinking')];
+              accumulatedParts = [
+                thinkingPart,
+                ...accumulatedParts.filter((p) => p.type !== 'thinking'),
+              ];
               updateOptimisticMessage(activeChatId!, optimisticAiMsgId, {
                 parts: [...accumulatedParts],
               });
             } else if (chunkType === 'text' && !chunk.done && chunk.text) {
               accumulatedText += chunk.text;
               const textPart: MessagePart = { type: 'text', text: accumulatedText };
-              accumulatedParts = [...accumulatedParts.filter(p => p.type !== 'text'), textPart];
+              accumulatedParts = [...accumulatedParts.filter((p) => p.type !== 'text'), textPart];
               updateOptimisticMessage(activeChatId!, optimisticAiMsgId, {
                 text: accumulatedText,
                 parts: [...accumulatedParts],

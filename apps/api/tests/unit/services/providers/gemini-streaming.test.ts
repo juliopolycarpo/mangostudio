@@ -47,7 +47,7 @@ describe('GeminiProvider.generateTextStream', () => {
 
     const { generateTextStream } = await import('../../../../src/services/gemini/text');
 
-    const chunks: Array<{ text: string; done: boolean }> = [];
+    const chunks: Array<{ type?: string; text?: string; done: boolean }> = [];
     for await (const chunk of generateTextStream('user-1', [], 'Hi', undefined, 'gemini-2.0-flash')) {
       chunks.push(chunk);
     }
@@ -58,7 +58,7 @@ describe('GeminiProvider.generateTextStream', () => {
 
     expect(textChunks.length).toBe(3);
     expect(textChunks.map((c) => c.text).join('')).toBe('Hello world!');
-    expect(doneChunk).toEqual({ text: '', done: true });
+    expect(doneChunk).toEqual({ type: 'text', text: '', done: true });
   });
 
   it('throws when prompt is blocked', async () => {

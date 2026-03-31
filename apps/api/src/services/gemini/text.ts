@@ -100,7 +100,7 @@ export async function* generateTextStream(
   prompt: string,
   systemPrompt?: string,
   modelName?: string,
-  generationConfig?: GenerationConfig,
+  generationConfig?: GenerationConfig
 ): AsyncGenerator<StreamingChunk> {
   if (!modelName) {
     throw new Error('No Gemini text model was provided.');
@@ -125,8 +125,7 @@ export async function* generateTextStream(
   if (generationConfig?.thinkingVisibility !== 'off') {
     config.thinkingConfig = {
       includeThoughts: true,
-      thinkingLevel:
-        generationConfig?.thinkingVisibility === 'full' ? 'HIGH' : 'MEDIUM',
+      thinkingLevel: generationConfig?.thinkingVisibility === 'full' ? 'HIGH' : 'MEDIUM',
     };
   }
 

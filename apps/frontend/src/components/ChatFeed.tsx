@@ -166,10 +166,13 @@ export function ChatFeed({ messages }: { messages: Message[] }) {
                         /* Loading / streaming state */
                         <div className="flex flex-col gap-3 py-4 pl-9">
                           {(() => {
-                            const parts: MessagePart[] = msg.parts ?? (msg.text ? [{ type: 'text', text: msg.text }] : []);
-                            const thinkingPart = parts.find(p => p.type === 'thinking');
-                            const textParts = parts.filter(p => p.type === 'text');
-                            const combinedText = textParts.map(p => (p as { type: 'text'; text: string }).text).join('');
+                            const parts: MessagePart[] =
+                              msg.parts ?? (msg.text ? [{ type: 'text', text: msg.text }] : []);
+                            const thinkingPart = parts.find((p) => p.type === 'thinking');
+                            const textParts = parts.filter((p) => p.type === 'text');
+                            const combinedText = textParts
+                              .map((p) => (p as { type: 'text'; text: string }).text)
+                              .join('');
                             const isThinkingOnly = !!thinkingPart && !combinedText;
 
                             if (isImageTurn || (!msg.text && !thinkingPart)) {
@@ -308,10 +311,13 @@ export function ChatFeed({ messages }: { messages: Message[] }) {
                             </div>
                           )}
                           {(() => {
-                            const parts: MessagePart[] = msg.parts ?? (msg.text ? [{ type: 'text', text: msg.text }] : []);
-                            const thinkingPart = parts.find(p => p.type === 'thinking');
-                            const textParts = parts.filter(p => p.type === 'text');
-                            const combinedText = textParts.map(p => (p as { type: 'text'; text: string }).text).join('');
+                            const parts: MessagePart[] =
+                              msg.parts ?? (msg.text ? [{ type: 'text', text: msg.text }] : []);
+                            const thinkingPart = parts.find((p) => p.type === 'thinking');
+                            const textParts = parts.filter((p) => p.type === 'text');
+                            const combinedText = textParts
+                              .map((p) => (p as { type: 'text'; text: string }).text)
+                              .join('');
 
                             return (
                               <>
@@ -323,7 +329,9 @@ export function ChatFeed({ messages }: { messages: Message[] }) {
                                 )}
                                 <div className="bg-surface-container-low p-5 rounded-2xl border border-outline-variant/10 font-body text-sm leading-relaxed text-on-surface whitespace-pre-wrap max-w-2xl">
                                   {combinedText || (
-                                    <span className="text-on-surface-variant/50 italic">No response</span>
+                                    <span className="text-on-surface-variant/50 italic">
+                                      No response
+                                    </span>
                                   )}
                                 </div>
                               </>

@@ -122,7 +122,9 @@ export const respondStreamRoutes = (app: Elysia) =>
 
                     if (chunk.type === 'thinking' && chunk.text) {
                       allParts.push({ type: 'thinking', text: chunk.text });
-                      controller.enqueue(sseEvent({ type: 'thinking', text: chunk.text, done: false }));
+                      controller.enqueue(
+                        sseEvent({ type: 'thinking', text: chunk.text, done: false })
+                      );
                     } else if (chunk.type === 'text' && chunk.text && !chunk.done) {
                       fullText += chunk.text;
                       allParts.push({ type: 'text', text: chunk.text });
@@ -157,7 +159,7 @@ export const respondStreamRoutes = (app: Elysia) =>
 
                   // Consolidate text parts into a single part
                   const consolidatedParts: MessagePart[] = [
-                    ...allParts.filter(p => p.type !== 'text'),
+                    ...allParts.filter((p) => p.type !== 'text'),
                     ...(fullText ? [{ type: 'text' as const, text: fullText }] : []),
                   ];
 
@@ -168,7 +170,8 @@ export const respondStreamRoutes = (app: Elysia) =>
                       chatId,
                       role: 'ai',
                       text: fullText,
-                      parts: consolidatedParts.length > 0 ? JSON.stringify(consolidatedParts) : null,
+                      parts:
+                        consolidatedParts.length > 0 ? JSON.stringify(consolidatedParts) : null,
                       timestamp: aiTimestamp,
                       isGenerating: false,
                       generationTime,
