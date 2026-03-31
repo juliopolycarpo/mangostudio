@@ -13,7 +13,7 @@ import { requireAuth } from '../plugins/auth-middleware';
 import { generateId } from '../utils/id';
 import { verifyChatOwnership } from '../services/chat-service';
 import { createMessage, loadChatHistory } from '../services/message-service';
-import type { SSEErrorEvent } from '@mangostudio/shared';
+import type { SSEErrorEvent, MessagePart, ThinkingVisibility } from '@mangostudio/shared';
 
 /** Serialises an SSE data line. */
 function sseEvent(data: object): Uint8Array {
@@ -96,9 +96,12 @@ export const respondStreamRoutes = (app: Elysia) =>
           const abortController = new AbortController();
           const { signal } = abortController;
 
+          const thinkingVisibility = (body.thinkingVisibility ?? 'summary') as ThinkingVisibility;
+
           const stream = new ReadableStream({
             async start(controller) {
               let fullText = '';
+              let allParts: MessagePart[] = [];
               let aborted = false;
 
               try {
@@ -110,12 +113,22 @@ export const respondStreamRoutes = (app: Elysia) =>
                     systemPrompt,
                     modelName: model,
                     signal,
+                    generationConfig: { thinkingVisibility },
                   })) {
                     if (signal.aborted) {
                       aborted = true;
                       break;
                     }
-                    if (!chunk.done && chunk.text) {
+
+                    if (chunk.type === 'thinking' && chunk.text) {
+                      allParts.push({ type: 'thinking', text: chunk.text });
+                      controller.enqueue(sseEvent({ type: 'thinking', text: chunk.text, done: false }));
+                    } else if (chunk.type === 'text' && chunk.text && !chunk.done) {
+                      fullText += chunk.text;
+                      allParts.push({ type: 'text', text: chunk.text });
+                      controller.enqueue(sseEvent({ type: 'text', text: chunk.text, done: false }));
+                    } else if (!chunk.type && chunk.text && !chunk.done) {
+                      // Backward compat: providers not yet migrated emit no type field
                       fullText += chunk.text;
                       controller.enqueue(sseEvent({ text: chunk.text, done: false }));
                     }
@@ -142,6 +155,12 @@ export const respondStreamRoutes = (app: Elysia) =>
                   const generationTime = `${((Date.now() - startTime) / 1000).toFixed(1)}s`;
                   const aiTimestamp = Date.now();
 
+                  // Consolidate text parts into a single part
+                  const consolidatedParts: MessagePart[] = [
+                    ...allParts.filter(p => p.type !== 'text'),
+                    ...(fullText ? [{ type: 'text' as const, text: fullText }] : []),
+                  ];
+
                   // Persist the completed AI message
                   await createMessage(
                     {
@@ -149,6 +168,7 @@ export const respondStreamRoutes = (app: Elysia) =>
                       chatId,
                       role: 'ai',
                       text: fullText,
+                      parts: consolidatedParts.length > 0 ? JSON.stringify(consolidatedParts) : null,
                       timestamp: aiTimestamp,
                       isGenerating: false,
                       generationTime,
@@ -200,6 +220,7 @@ export const respondStreamRoutes = (app: Elysia) =>
             prompt: t.String(),
             model: t.Optional(t.String()),
             systemPrompt: t.Optional(t.String()),
+            thinkingVisibility: t.Optional(t.String()),
           }),
         }
       )
