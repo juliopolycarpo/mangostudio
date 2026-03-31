@@ -1,7 +1,10 @@
 import { describe, expect, it, afterEach, beforeAll } from 'bun:test';
 import { settingsRoutes } from '../../../src/routes/settings';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
-import { upsertSecretMetadata } from '../../../src/services/secret-store/metadata';
+import {
+  getSecretMetadataById,
+  upsertSecretMetadata,
+} from '../../../src/services/secret-store/metadata';
 import { getDb } from '../../../src/db/database';
 
 const USER_A = { id: 'user-a-own', name: 'User A', email: 'a-own@test.dev' };
@@ -64,7 +67,7 @@ describe('connector ownership security', () => {
     expect(body.error).toContain('shared connector');
   });
 
-  it('non-owner cannot update models on a shared connector', async () => {
+  it('shared connectors allow updating enabled models without changing ownership', async () => {
     await seedConnector('shared-conn-2', null);
 
     const { app, restore } = createAuthenticatedApiTestApp(USER_B, settingsRoutes);
@@ -78,9 +81,14 @@ describe('connector ownership security', () => {
       })
     );
 
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.error).toContain('shared connector');
+    expect(body.success).toBe(true);
+
+    const updated = await getSecretMetadataById('shared-conn-2', USER_B.id);
+    expect(updated).toBeDefined();
+    expect(updated?.userId).toBeNull();
+    expect(updated?.enabledModels).toBe(JSON.stringify(['gemini-pro']));
   });
 
   it('non-owner cannot delete another user\'s connector', async () => {

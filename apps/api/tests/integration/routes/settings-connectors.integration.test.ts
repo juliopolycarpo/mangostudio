@@ -4,6 +4,7 @@ import { Type } from '@sinclair/typebox';
 import { settingsRoutes } from '../../../src/routes/settings';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
 import { getDb } from '../../../src/db/database';
+import { upsertSecretMetadata } from '../../../src/services/secret-store/metadata';
 import { getProvider, registerProvider } from '../../../src/services/providers/registry';
 import type { AIProvider } from '../../../src/services/providers/types';
 import {
@@ -406,6 +407,51 @@ describe('openai connector routes', () => {
       globalThis.fetch = originalFetch;
     }
   });
+
+  it('PUT /settings/connectors/:id/models updates a shared OpenAI connector loaded from config-file', async () => {
+    const connectorId = 'shared-openai-config-connector';
+
+    await upsertSecretMetadata({
+      id: connectorId,
+      name: 'shared-openai-config',
+      provider: 'openai',
+      configured: true,
+      source: 'config-file',
+      maskedSuffix: '****...1234',
+      updatedAt: Date.now(),
+      enabledModels: [],
+      userId: null,
+      organizationId: null,
+      projectId: null,
+    });
+
+    const { app, restore } = createAuthenticatedApiTestApp(OPENAI_LIST_USER, settingsRoutes);
+    restoreAuth = restore;
+
+    const response = await app.handle(
+      new Request(`http://localhost/settings/connectors/${connectorId}/models`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabledModels: ['gpt-4o'] }),
+      })
+    );
+
+    expect(response.status).toBe(200);
+
+    const payload = await response.json();
+    expect(payload).toEqual({ success: true });
+
+    const db = getDb();
+    const row = await db
+      .selectFrom('secret_metadata')
+      .selectAll()
+      .where('id', '=', connectorId)
+      .executeTakeFirst();
+
+    expect(row).toBeDefined();
+    expect(row!.userId).toBeNull();
+    expect(row!.enabledModels).toBe(JSON.stringify(['gpt-4o']));
+  });
 });
 
 /* ------------------------------------------------------------------ */
@@ -509,6 +555,59 @@ describe('openai project-scoped connector routes', () => {
       expect(row).toBeDefined();
       expect(row!.organizationId).toBeNull();
       expect(row!.projectId).toBeNull();
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('PUT /settings/connectors/:id/models preserves organizationId and projectId for OpenAI connectors', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = makeOpenAISuccessFetch(originalFetch);
+
+    try {
+      const { app, restore } = createAuthenticatedApiTestApp(OPENAI_PROJ_USER, settingsRoutes);
+      restoreAuth = restore;
+
+      const createResponse = await app.handle(
+        new Request('http://localhost/settings/connectors', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: 'openai-proj-model-update',
+            apiKey: 'sk-proj-model-update-key',
+            source: 'config-file',
+            provider: 'openai',
+            organizationId: 'org-testorg999',
+            projectId: 'proj_testproj888',
+          }),
+        })
+      );
+
+      expect(createResponse.status).toBe(200);
+
+      const created = await createResponse.json();
+
+      const updateResponse = await app.handle(
+        new Request(`http://localhost/settings/connectors/${created.id}/models`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ enabledModels: ['gpt-4o'] }),
+        })
+      );
+
+      expect(updateResponse.status).toBe(200);
+
+      const db = getDb();
+      const row = await db
+        .selectFrom('secret_metadata')
+        .selectAll()
+        .where('id', '=', created.id)
+        .executeTakeFirst();
+
+      expect(row).toBeDefined();
+      expect(row!.organizationId).toBe('org-testorg999');
+      expect(row!.projectId).toBe('proj_testproj888');
+      expect(row!.enabledModels).toBe(JSON.stringify(['gpt-4o']));
     } finally {
       globalThis.fetch = originalFetch;
     }

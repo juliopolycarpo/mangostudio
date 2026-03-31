@@ -4,7 +4,7 @@
 
 import { Elysia, t } from 'elysia';
 import type { Connector, ConnectorStatus } from '@mangostudio/shared';
-import type { ProviderType, SecretSource } from '@mangostudio/shared/types';
+import type { ProviderType, SecretMetadataRow, SecretSource } from '@mangostudio/shared/types';
 import {
   listAllSecretMetadata,
   getSecretMetadataById,
@@ -13,11 +13,7 @@ import {
   type SecretMetadataInput,
 } from '../../services/secret-store/metadata';
 import { bunSecretStore } from '../../services/secret-store/store';
-import {
-  updateConnectorModels,
-  InvalidGeminiApiKeyError,
-  GeminiValidationUnavailableError,
-} from '../../services/gemini';
+import { InvalidGeminiApiKeyError, GeminiValidationUnavailableError } from '../../services/gemini';
 import { SecretStorageUnavailableError } from '../../services/secret-store';
 import { invalidateUnifiedCatalog } from '../../services/providers/catalog';
 import { getProvider } from '../../services/providers/registry';
@@ -117,6 +113,28 @@ export function toConnector(row: {
     userId: row.userId,
     baseUrl: row.baseUrl ?? null,
   };
+}
+
+async function updateConnectorEnabledModels(
+  row: SecretMetadataRow,
+  enabledModels: string[]
+): Promise<void> {
+  await upsertSecretMetadata({
+    id: row.id,
+    name: row.name,
+    provider: row.provider,
+    configured: Boolean(row.configured),
+    source: row.source,
+    maskedSuffix: row.maskedSuffix ?? null,
+    updatedAt: Date.now(),
+    lastValidatedAt: row.lastValidatedAt ?? null,
+    lastValidationError: row.lastValidationError ?? null,
+    enabledModels,
+    userId: row.userId,
+    baseUrl: row.baseUrl ?? null,
+    organizationId: row.organizationId ?? null,
+    projectId: row.projectId ?? null,
+  });
 }
 
 /** Persists an API key in the storage backend selected by `source`. */
@@ -386,11 +404,7 @@ export const connectorRoutes = new Elysia()
           set.status = 404;
           return { error: 'Connector not found.' };
         }
-        if (meta.userId !== userId) {
-          set.status = 403;
-          return { error: 'Cannot update models on a shared connector.' };
-        }
-        await updateConnectorModels(userId, params.id, body.enabledModels);
+        await updateConnectorEnabledModels(meta, body.enabledModels);
         invalidateUnifiedCatalog(userId);
         return { success: true };
       } catch (error) {
