@@ -6,6 +6,7 @@
 import { GoogleGenAI } from '@google/genai';
 import type { Content } from '@google/genai';
 import { getResolvedGeminiApiKey } from './secret';
+import type { StreamingChunk, GenerationConfig } from '../providers/types';
 
 /** A single streaming text chunk yielded during incremental generation. */
 export interface TextStreamChunk {
@@ -98,8 +99,9 @@ export async function* generateTextStream(
   history: TextContextMessage[],
   prompt: string,
   systemPrompt?: string,
-  modelName?: string
-): AsyncGenerator<TextStreamChunk> {
+  modelName?: string,
+  generationConfig?: GenerationConfig,
+): AsyncGenerator<StreamingChunk> {
   if (!modelName) {
     throw new Error('No Gemini text model was provided.');
   }
@@ -119,6 +121,15 @@ export async function* generateTextStream(
     config.systemInstruction = systemPrompt;
   }
 
+  // Add thinking config based on visibility setting
+  if (generationConfig?.thinkingVisibility !== 'off') {
+    config.thinkingConfig = {
+      includeThoughts: true,
+      thinkingLevel:
+        generationConfig?.thinkingVisibility === 'full' ? 'HIGH' : 'MEDIUM',
+    };
+  }
+
   const stream = await ai.models.generateContentStream({
     model: modelName,
     contents,
@@ -135,11 +146,19 @@ export async function* generateTextStream(
       throw new Error(`Generation stopped: ${candidate.finishReason}`);
     }
 
-    const chunkText = chunk.text ?? '';
-    if (chunkText) {
-      yield { text: chunkText, done: false };
+    if (candidate?.content?.parts) {
+      for (const part of candidate.content.parts) {
+        if ((part as { thought?: boolean }).thought && part.text) {
+          yield { type: 'thinking', text: part.text, done: false };
+        } else if (part.text) {
+          yield { type: 'text', text: part.text, done: false };
+        }
+      }
+    } else if (chunk.text) {
+      // Fallback for non-parts response shape
+      yield { type: 'text', text: chunk.text, done: false };
     }
   }
 
-  yield { text: '', done: true };
+  yield { type: 'text', text: '', done: true };
 }
