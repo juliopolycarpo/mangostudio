@@ -6,7 +6,7 @@
 
 import type { ModelCatalogResponse, ModelOption } from '@mangostudio/shared';
 import { listRegisteredProviderTypes, getProvider } from './registry';
-import { listSecretMetadata } from '../secret-store/metadata';
+import { listAllSecretMetadata } from '../secret-store/metadata';
 import type { ModelInfo, AIProvider } from './types';
 import type { ProviderType } from '@mangostudio/shared/types';
 
@@ -19,8 +19,12 @@ interface UnifiedModelCatalogDeps {
   listProviders?: () => ProviderType[];
   /** Overrides getProvider (useful in tests). */
   getProviderFn?: (type: ProviderType) => AIProvider;
-  /** Overrides listSecretMetadata (useful in tests). */
-  listSecretMetadataFn?: typeof listSecretMetadata;
+  /**
+   * Overrides listAllSecretMetadata (useful in tests).
+   * Returns all connector rows across every provider for a user — used to
+   * build the set of enabled model IDs in a single round-trip.
+   */
+  listAllSecretMetadataFn?: typeof listAllSecretMetadata;
 }
 
 function modelInfoToOption(m: ModelInfo): ModelOption {
@@ -62,7 +66,7 @@ export function createUnifiedModelCatalogService(deps: UnifiedModelCatalogDeps =
   const now = deps.now ?? (() => Date.now());
   const listProviders = deps.listProviders ?? listRegisteredProviderTypes;
   const getProviderFn = deps.getProviderFn ?? getProvider;
-  const listSecretMetadataFn = deps.listSecretMetadataFn ?? listSecretMetadata;
+  const listAllSecretMetadataFn = deps.listAllSecretMetadataFn ?? listAllSecretMetadata;
 
   // Per-user cache: full discovered models (before filtering by enabled)
   const fullCatalogs = new Map<string, ModelOption[]>();
@@ -82,23 +86,22 @@ export function createUnifiedModelCatalogService(deps: UnifiedModelCatalogDeps =
     return now() - snap.lastSyncedAt > TTL_MS;
   }
 
-  /** Collects the set of model IDs enabled across all connectors for a user. */
+  /**
+   * Collects the set of model IDs enabled across all connectors for a user.
+   * Uses a single DB round-trip across all providers so that image-only
+   * providers (e.g. DALL-E via OpenAI) are included alongside text providers.
+   */
   async function getEnabledModelIds(userId: string): Promise<Set<string>> {
     const enabled = new Set<string>();
-    const providerTypes = listProviders();
-
-    for (const pt of providerTypes) {
-      const connectors = await listSecretMetadataFn(pt, userId);
-      for (const c of connectors) {
-        try {
-          const models: string[] = JSON.parse(c.enabledModels);
-          models.forEach((m) => enabled.add(m));
-        } catch {
-          // Ignore parse errors
-        }
+    const connectors = await listAllSecretMetadataFn(userId);
+    for (const c of connectors) {
+      try {
+        const models: string[] = JSON.parse(c.enabledModels);
+        models.forEach((m) => enabled.add(m));
+      } catch {
+        // Ignore parse errors
       }
     }
-
     return enabled;
   }
 
