@@ -34,8 +34,7 @@ apps/
 
 - `unit`: isolates a single hook, component, service, route module, or utility.
 - `integration`: covers a flow that crosses module boundaries inside the same workspace.
-
-This project does not use `e2e`, `component`, `contract`, or `smoke` suites.
+- `browser-smoke`: minimal Playwright Chromium suite covering end-to-end auth flows (signup, login, authenticated landing, logout, re-login).
 
 ## Workspace Runners
 
@@ -48,12 +47,35 @@ This project does not use `e2e`, `component`, `contract`, or `smoke` suites.
 ## Root Scripts
 
 ```bash
-bun run test             # unit + integration across all workspaces
-bun run test:unit        # API, shared, and frontend unit suites
-bun run test:integration # API and frontend integration suites
-bun run test:coverage    # frontend coverage (Vitest/v8)
-bun run test:ci          # lint + test + coverage
+bun run test                # unit + integration across all workspaces
+bun run test:unit           # API, shared, and frontend unit suites
+bun run test:integration    # API and frontend integration suites
+bun run test:coverage       # frontend coverage (Vitest/v8)
+bun run test:browser:smoke  # Playwright Chromium auth smoke suite
+bun run test:ci             # lint + test + coverage
 ```
+
+## Browser Smoke
+
+Playwright Chromium suite under `tests/browser-smoke/`. Covers the full auth flow against a live dev stack (API on `:3001`, frontend on `:5173`).
+
+```bash
+bun run test:browser:smoke
+```
+
+`playwright.config.ts` at the repo root starts both servers via `webServer` before running tests. In CI it enforces `workers: 1` and uploads traces/screenshots on failure.
+
+Test scenarios (`tests/browser-smoke/auth-flow.spec.ts`):
+
+1. `/login` page renders
+2. `/signup` page renders
+3. Sign up with a unique random email → lands in authenticated area
+4. Logout → redirected to login
+5. Log back in with same credentials → lands in authenticated area
+
+| Lane            | Runner                  | Environment        |
+|-----------------|-------------------------|--------------------|
+| `browser-smoke` | `playwright` (Chromium) | real browser + stack |
 
 ## Workspace Scripts
 
