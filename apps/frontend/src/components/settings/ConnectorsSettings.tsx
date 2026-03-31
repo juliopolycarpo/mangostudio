@@ -35,6 +35,7 @@ interface ConnectorsSettingsProps {
 
 const PROVIDER_OPTIONS: { id: ProviderType }[] = [
   { id: 'gemini' },
+  { id: 'openai' },
   { id: 'openai-compatible' },
   { id: 'anthropic' },
 ];
@@ -81,6 +82,11 @@ export function ConnectorsSettings({ modelCatalog, reloadModelCatalog }: Connect
   const handleAddConnector = async () => {
     if (!newConnector.name.trim() || !newConnector.apiKey.trim()) {
       setFormError(s.errorRequired);
+      return;
+    }
+
+    if (newConnector.provider === 'openai-compatible' && !newConnector.baseUrl.trim()) {
+      setFormError(s.baseUrlRequired);
       return;
     }
 
@@ -296,12 +302,18 @@ export function ConnectorsSettings({ modelCatalog, reloadModelCatalog }: Connect
                 <label className="text-sm font-medium text-on-surface-variant">
                   {s.providerLabel}
                 </label>
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-4 gap-2">
                   {PROVIDER_OPTIONS.map(({ id }) => (
                     <button
                       key={id}
                       type="button"
-                      onClick={() => setNewConnector({ ...newConnector, provider: id })}
+                      onClick={() =>
+                        setNewConnector({
+                          ...newConnector,
+                          provider: id,
+                          baseUrl: id === 'openai-compatible' ? newConnector.baseUrl : '',
+                        })
+                      }
                       className={`py-2 px-3 rounded-xl border text-xs font-bold text-center transition-all ${
                         newConnector.provider === id
                           ? 'bg-primary/10 border-primary text-primary'
