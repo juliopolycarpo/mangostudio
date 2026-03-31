@@ -54,9 +54,7 @@ async function resolveClientConfig(
     }
   }
 
-  throw new Error(
-    'No OpenAI API key is configured or enabled. Check your Connectors in Settings.'
-  );
+  throw new Error('No OpenAI API key is configured or enabled. Check your Connectors in Settings.');
 }
 
 function createClient(apiKey: string): OpenAI {
