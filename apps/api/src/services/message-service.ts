@@ -88,12 +88,14 @@ export async function loadChatHistory(
 export function mapMessageRow(msg: {
   isGenerating: number;
   styleParams: string | null;
+  parts?: string | null;
   [key: string]: unknown;
 }) {
   return {
     ...msg,
     isGenerating: msg.isGenerating === 1,
     styleParams: parseStyleParams(msg.styleParams),
+    parts: msg.parts ? (JSON.parse(msg.parts) as unknown[]) : undefined,
   };
 }
 
