@@ -130,6 +130,12 @@ export const messages: Messages = {
     openrouter: 'OpenRouter',
   },
 
+  thinking: {
+    label: 'Thought process',
+    streaming: 'Thinking...',
+    toggle: 'View reasoning',
+  },
+
   errors: {
     imageNotSupported: 'This provider does not support image generation.',
     referenceImageUploadFailed: 'Failed to upload reference image. Please try again.',
