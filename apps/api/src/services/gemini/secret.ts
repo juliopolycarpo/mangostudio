@@ -15,6 +15,7 @@ import {
 } from '../secret-store/metadata';
 import { bunSecretStore, type SecretStore } from '../secret-store/store';
 import { createProviderSecretService } from '../providers/secret-service';
+import { isPlaceholderConfigSecretValue } from '../providers/secret-service';
 import { join, dirname } from 'path';
 import { getMangoDir } from '../../lib/config';
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
@@ -134,10 +135,14 @@ export function createGeminiSecretService(dependencies: GeminiSecretServiceDepen
 
       const currentMetadata = await listMetadata(GEMINI_PROVIDER, userId);
       const configConnectors = currentMetadata.filter((m) => m.source === 'config-file');
+      const syncableConnectorNames = new Set<string>();
 
       // 1. Add missing connectors from TOML to DB
       for (const [name, key] of Object.entries(tomlKeys)) {
         if (typeof key !== 'string') continue;
+        if (isPlaceholderConfigSecretValue(key)) continue;
+
+        syncableConnectorNames.add(name);
 
         const exists = configConnectors.find((c) => c.name === name);
         if (!exists) {
@@ -164,7 +169,8 @@ export function createGeminiSecretService(dependencies: GeminiSecretServiceDepen
               maskedSuffix: currentSuffix,
               updatedAt: now(),
               enabledModels: JSON.parse(exists.enabledModels),
-              userId: null,
+              userId: exists.userId,
+              baseUrl: exists.baseUrl ?? null,
             });
           }
         }
@@ -172,7 +178,7 @@ export function createGeminiSecretService(dependencies: GeminiSecretServiceDepen
 
       // 2. Remove connectors from DB that are no longer in TOML
       for (const connector of configConnectors) {
-        if (!tomlKeys[connector.name]) {
+        if (!syncableConnectorNames.has(connector.name)) {
           await deleteMetadata(connector.id, userId);
         }
       }
@@ -182,6 +188,10 @@ export function createGeminiSecretService(dependencies: GeminiSecretServiceDepen
   };
 
   return {
+    async syncConfigFileConnectors(userId: string): Promise<void> {
+      await syncConfigFileConnectors(userId);
+    },
+
     /**
      * Returns all connectors and their UI-safe status.
      */
@@ -391,6 +401,8 @@ export const getResolvedGeminiApiKey =
   geminiSecretService.getResolvedGeminiApiKey.bind(geminiSecretService);
 export const validateGeminiApiKey =
   geminiSecretService.validateGeminiApiKey.bind(geminiSecretService);
+export const syncGeminiConfigFileConnectors =
+  geminiSecretService.syncConfigFileConnectors.bind(geminiSecretService);
 export const addGeminiConnector = geminiSecretService.addGeminiConnector.bind(geminiSecretService);
 export const updateConnectorModels =
   geminiSecretService.updateConnectorModels.bind(geminiSecretService);

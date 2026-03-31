@@ -155,6 +155,14 @@ const anthropicProvider: AIProvider = {
     return listModelsWithCache(userId);
   },
 
+  invalidateModelCache(userId?: string): void {
+    listModelsWithCache.invalidate(userId);
+  },
+
+  async syncConfigFileConnectors(userId: string): Promise<void> {
+    await secretService.syncConfigFileConnectors(userId);
+  },
+
   async validateApiKey(apiKey: string): Promise<void> {
     await secretService.validateApiKey(apiKey);
   },

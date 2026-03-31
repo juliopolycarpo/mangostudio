@@ -4,7 +4,7 @@
 
 import { Elysia, t } from 'elysia';
 import type { Connector, ConnectorStatus } from '@mangostudio/shared';
-import type { ProviderType, SecretSource } from '@mangostudio/shared/types';
+import type { ProviderType, SecretMetadataRow, SecretSource } from '@mangostudio/shared/types';
 import {
   listAllSecretMetadata,
   getSecretMetadataById,
@@ -13,14 +13,19 @@ import {
   type SecretMetadataInput,
 } from '../../services/secret-store/metadata';
 import { bunSecretStore } from '../../services/secret-store/store';
-import {
-  updateConnectorModels,
-  InvalidGeminiApiKeyError,
-  GeminiValidationUnavailableError,
-} from '../../services/gemini';
+import { InvalidGeminiApiKeyError, GeminiValidationUnavailableError } from '../../services/gemini';
 import { SecretStorageUnavailableError } from '../../services/secret-store';
 import { invalidateUnifiedCatalog } from '../../services/providers/catalog';
-import { getProvider } from '../../services/providers/registry';
+import {
+  getProvider,
+  invalidateProviderModelCache,
+  listRegisteredProviderTypes,
+} from '../../services/providers/registry';
+import {
+  validateOpenAIAuthContext,
+  OpenAIAuthError,
+  OpenAIConfigError,
+} from '../../services/providers/openai-provider';
 import { getConfig, getMangoDir } from '../../lib/config';
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { parse as parseToml, stringify as stringifyToml } from 'smol-toml';
@@ -32,6 +37,7 @@ import { requireAuth } from '../../plugins/auth-middleware';
 /** Per-provider configuration for secret storage paths. */
 const PROVIDER_SECRET_CONFIG: Record<ProviderType, { tomlSection: string; envPrefix: string }> = {
   gemini: { tomlSection: 'gemini_api_keys', envPrefix: 'GEMINI_API_KEY' },
+  openai: { tomlSection: 'openai_api_keys', envPrefix: 'OPENAI_API_KEY' },
   'openai-compatible': {
     tomlSection: 'openai_compatible_api_keys',
     envPrefix: 'OPENAI_API_KEY',
@@ -68,6 +74,16 @@ export function handleSecretRouteError(
     return { error: error.message };
   }
 
+  if (error instanceof OpenAIAuthError) {
+    set.status = error.status;
+    return { error: error.message };
+  }
+
+  if (error instanceof OpenAIConfigError) {
+    set.status = 422;
+    return { error: error.message };
+  }
+
   console.error('[settings] Unexpected secret route error:', error);
   set.status = 500;
   return { error: error instanceof Error ? error.message : 'Unexpected secret settings error.' };
@@ -101,6 +117,45 @@ export function toConnector(row: {
     userId: row.userId,
     baseUrl: row.baseUrl ?? null,
   };
+}
+
+function isReadOnlySharedConnector(row: { userId: string | null; source: string }): boolean {
+  return row.userId === null && row.source !== 'config-file' && row.source !== 'environment';
+}
+
+function isVisibleConnector(row: SecretMetadataRow): boolean {
+  if (
+    row.provider === 'openai-compatible' &&
+    row.source === 'config-file' &&
+    row.userId === null &&
+    !row.baseUrl
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
+async function updateConnectorEnabledModels(
+  row: SecretMetadataRow,
+  enabledModels: string[]
+): Promise<void> {
+  await upsertSecretMetadata({
+    id: row.id,
+    name: row.name,
+    provider: row.provider,
+    configured: Boolean(row.configured),
+    source: row.source,
+    maskedSuffix: row.maskedSuffix ?? null,
+    updatedAt: Date.now(),
+    lastValidatedAt: row.lastValidatedAt ?? null,
+    lastValidationError: row.lastValidationError ?? null,
+    enabledModels,
+    userId: row.userId,
+    baseUrl: row.baseUrl ?? null,
+    organizationId: row.organizationId ?? null,
+    projectId: row.projectId ?? null,
+  });
 }
 
 /** Persists an API key in the storage backend selected by `source`. */
@@ -200,22 +255,38 @@ export async function removeSecret(
   }
 }
 
-/** Validates an API key for the given provider, with optional baseUrl for openai-compatible. */
+/** Validates an API key for the given provider, with optional fields for openai and openai-compatible. */
 export async function validateProviderKey(
   provider: ProviderType,
   apiKey: string,
-  baseUrl?: string
+  options?: { baseUrl?: string; organizationId?: string; projectId?: string }
 ): Promise<void> {
-  if (provider === 'openai-compatible' && baseUrl) {
-    await validateBaseUrl(baseUrl);
-    const response = await fetch(`${baseUrl}/models`, {
+  if (provider === 'openai') {
+    await validateOpenAIAuthContext({
+      apiKey,
+      organizationId: options?.organizationId,
+      projectId: options?.projectId,
+    });
+    return;
+  }
+
+  if (provider === 'openai-compatible' && options?.baseUrl) {
+    await validateBaseUrl(options.baseUrl);
+    const response = await fetch(`${options.baseUrl}/models`, {
       headers: { Authorization: `Bearer ${apiKey}` },
     });
     if (!response.ok) {
-      throw new Error(`API key validation failed for ${baseUrl} (HTTP ${response.status}).`);
+      throw new Error(
+        `API key validation failed for ${options.baseUrl} (HTTP ${response.status}).`
+      );
     }
     return;
   }
+
+  if (provider === 'openai-compatible' && !options?.baseUrl) {
+    throw new Error('baseUrl is required for openai-compatible connectors.');
+  }
+
   const p = getProvider(provider);
   await p.validateApiKey(apiKey);
 }
@@ -230,9 +301,18 @@ export const connectorBodySchema = t.Object({
     t.Literal('none'),
   ]),
   provider: t.Optional(
-    t.Union([t.Literal('gemini'), t.Literal('openai-compatible'), t.Literal('anthropic')])
+    t.Union([
+      t.Literal('gemini'),
+      t.Literal('openai'),
+      t.Literal('openai-compatible'),
+      t.Literal('anthropic'),
+    ])
   ),
   baseUrl: t.Optional(t.String()),
+  /** Optional OpenAI Organization ID — only meaningful for provider === 'openai'. */
+  organizationId: t.Optional(t.String()),
+  /** Optional OpenAI Project ID — only meaningful for provider === 'openai'. */
+  projectId: t.Optional(t.String()),
 });
 
 export const connectorRoutes = new Elysia()
@@ -240,8 +320,16 @@ export const connectorRoutes = new Elysia()
 
   /** Returns all connectors across all providers. */
   .get('/connectors', async ({ user }): Promise<ConnectorStatus> => {
-    const rows = await listAllSecretMetadata(user?.id ?? '');
-    return { connectors: rows.map(toConnector) };
+    const userId = user?.id ?? '';
+
+    await Promise.allSettled(
+      listRegisteredProviderTypes().map(async (providerType) => {
+        await getProvider(providerType).syncConfigFileConnectors?.(userId);
+      })
+    );
+
+    const rows = await listAllSecretMetadata(userId);
+    return { connectors: rows.filter(isVisibleConnector).map(toConnector) };
   })
 
   /** Adds a new connector for any provider. */
@@ -253,7 +341,16 @@ export const connectorRoutes = new Elysia()
         const apiKey = body.apiKey.trim();
         if (!apiKey) throw new Error('API Key cannot be empty.');
 
-        await validateProviderKey(provider, apiKey, body.baseUrl);
+        if (provider === 'openai-compatible' && !body.baseUrl?.trim()) {
+          set.status = 400;
+          return { error: 'baseUrl is required for openai-compatible connectors.' };
+        }
+
+        await validateProviderKey(provider, apiKey, {
+          baseUrl: body.baseUrl,
+          organizationId: provider === 'openai' ? body.organizationId : undefined,
+          projectId: provider === 'openai' ? body.projectId : undefined,
+        });
 
         const id = randomUUID();
         const timestamp = Date.now();
@@ -273,9 +370,12 @@ export const connectorRoutes = new Elysia()
           enabledModels: [],
           userId,
           baseUrl: body.baseUrl ?? null,
+          organizationId: provider === 'openai' ? (body.organizationId ?? null) : null,
+          projectId: provider === 'openai' ? (body.projectId ?? null) : null,
         };
         await upsertSecretMetadata(input);
 
+        invalidateProviderModelCache(provider, userId);
         invalidateUnifiedCatalog(userId);
 
         // Reload and return the new connector
@@ -300,7 +400,7 @@ export const connectorRoutes = new Elysia()
           return { error: 'Connector not found.' };
         }
 
-        if (meta.userId !== userId) {
+        if (isReadOnlySharedConnector(meta)) {
           set.status = 403;
           return { error: 'Cannot delete a shared connector.' };
         }
@@ -312,6 +412,7 @@ export const connectorRoutes = new Elysia()
           meta.source as SecretSource
         );
         await deleteSecretMetadata(meta.id, userId);
+        invalidateProviderModelCache(meta.provider as ProviderType, userId);
         invalidateUnifiedCatalog(userId);
 
         console.log(`[settings] DEL connector ${params.id}`);
@@ -334,11 +435,7 @@ export const connectorRoutes = new Elysia()
           set.status = 404;
           return { error: 'Connector not found.' };
         }
-        if (meta.userId !== userId) {
-          set.status = 403;
-          return { error: 'Cannot update models on a shared connector.' };
-        }
-        await updateConnectorModels(userId, params.id, body.enabledModels);
+        await updateConnectorEnabledModels(meta, body.enabledModels);
         invalidateUnifiedCatalog(userId);
         return { success: true };
       } catch (error) {

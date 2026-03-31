@@ -21,19 +21,16 @@ import type {
   ModelInfo,
 } from './types';
 
-const DEFAULT_BASE_URL = 'https://api.openai.com/v1';
-
 const secretService = createProviderSecretService({
   provider: 'openai-compatible',
   tomlSection: 'openai_compatible_api_keys',
   envVarPrefix: 'OPENAI_API_KEY',
-  validateFn: async (apiKey, fetchImpl) => {
-    const response = await fetchImpl(`${DEFAULT_BASE_URL}/models`, {
-      headers: { Authorization: `Bearer ${apiKey}` },
-    });
-    if (!response.ok) {
-      throw new Error(`OpenAI API key validation failed (HTTP ${response.status}).`);
-    }
+  shouldSyncConfigEntry: ({ existing }) => Boolean(existing?.baseUrl?.trim()),
+  validateFn: async (_apiKey, _fetchImpl) => {
+    // validateFn is not called for openai-compatible without a baseUrl.
+    // Key validation for this provider always goes through validateProviderKey()
+    // in the connector route, which requires a baseUrl.
+    throw new Error('Cannot validate an openai-compatible key without a baseUrl.');
   },
 });
 
@@ -50,17 +47,18 @@ async function resolveClientConfig(
 
   for (const row of rows) {
     if (!row.configured) continue;
+    if (!row.baseUrl) continue; // skip connectors without a custom endpoint
     const enabled: string[] = JSON.parse(row.enabledModels);
     if (modelName && enabled.length > 0 && !enabled.includes(modelName)) continue;
 
     const apiKey = await secretService.resolveSecretValue(row);
     if (apiKey) {
-      return { apiKey, baseUrl: row.baseUrl || DEFAULT_BASE_URL };
+      return { apiKey, baseUrl: row.baseUrl };
     }
   }
 
   throw new Error(
-    'No OpenAI-compatible API key is configured or enabled. Check your Connectors in Settings.'
+    'No openai-compatible connector with a valid baseUrl is configured for this model.'
   );
 }
 
@@ -78,7 +76,8 @@ const listModelsWithCache = withModelCache(
 
     for (const row of rows) {
       if (!row.configured) continue;
-      const baseUrl = row.baseUrl || DEFAULT_BASE_URL;
+      if (!row.baseUrl) continue;
+      const baseUrl = row.baseUrl;
       if (seenBaseUrls.has(baseUrl)) continue;
 
       const apiKey = await secretService.resolveSecretValue(row);
@@ -219,6 +218,14 @@ const openAICompatibleProvider: AIProvider = {
 
   async listModels(userId: string): Promise<ModelInfo[]> {
     return listModelsWithCache(userId);
+  },
+
+  invalidateModelCache(userId?: string): void {
+    listModelsWithCache.invalidate(userId);
+  },
+
+  async syncConfigFileConnectors(userId: string): Promise<void> {
+    await secretService.syncConfigFileConnectors(userId);
   },
 
   async validateApiKey(apiKey: string): Promise<void> {

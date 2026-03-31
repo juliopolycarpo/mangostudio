@@ -4,10 +4,12 @@
  */
 
 import {
+  clearGeminiModelCatalog,
   generateText as geminiGenerateText,
   generateTextStream as geminiGenerateTextStream,
   generateImage as geminiGenerateImage,
   getResolvedGeminiApiKey,
+  syncGeminiConfigFileConnectors,
   validateGeminiApiKey,
   getGeminiModelCatalog,
 } from '../gemini';
@@ -74,6 +76,16 @@ const geminiProvider: AIProvider = {
         streaming: true,
       },
     }));
+  },
+
+  invalidateModelCache(userId?: string): void {
+    if (userId) {
+      clearGeminiModelCatalog(userId);
+    }
+  },
+
+  async syncConfigFileConnectors(userId: string): Promise<void> {
+    await syncGeminiConfigFileConnectors(userId);
   },
 
   async validateApiKey(apiKey: string): Promise<void> {

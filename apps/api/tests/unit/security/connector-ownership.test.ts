@@ -1,8 +1,12 @@
 import { describe, expect, it, afterEach, beforeAll } from 'bun:test';
 import { settingsRoutes } from '../../../src/routes/settings';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
-import { upsertSecretMetadata } from '../../../src/services/secret-store/metadata';
+import {
+  getSecretMetadataById,
+  upsertSecretMetadata,
+} from '../../../src/services/secret-store/metadata';
 import { getDb } from '../../../src/db/database';
+import type { SecretSource } from '@mangostudio/shared/types';
 
 const USER_A = { id: 'user-a-own', name: 'User A', email: 'a-own@test.dev' };
 const USER_B = { id: 'user-b-own', name: 'User B', email: 'b-own@test.dev' };
@@ -34,13 +38,13 @@ afterEach(() => {
 });
 
 /** Inserts a connector owned by a specific user (or shared when userId is null). */
-async function seedConnector(id: string, userId: string | null) {
+async function seedConnector(id: string, userId: string | null, source: SecretSource = 'config-file') {
   await upsertSecretMetadata({
     id,
     name: `connector-${id}`,
     provider: 'gemini',
     configured: true,
-    source: 'config-file',
+    source,
     maskedSuffix: '**1234',
     updatedAt: Date.now(),
     enabledModels: [],
@@ -49,8 +53,8 @@ async function seedConnector(id: string, userId: string | null) {
 }
 
 describe('connector ownership security', () => {
-  it('non-owner cannot delete a shared connector (userId IS NULL)', async () => {
-    await seedConnector('shared-conn-1', null);
+  it('non-owner cannot delete a read-only shared connector', async () => {
+    await seedConnector('shared-conn-1', null, 'bun-secrets');
 
     const { app, restore } = createAuthenticatedApiTestApp(USER_B, settingsRoutes);
     restoreAuth = restore;
@@ -64,7 +68,22 @@ describe('connector ownership security', () => {
     expect(body.error).toContain('shared connector');
   });
 
-  it('non-owner cannot update models on a shared connector', async () => {
+  it('shared config-file connectors can be deleted from settings', async () => {
+    await seedConnector('shared-config-conn', null, 'config-file');
+
+    const { app, restore } = createAuthenticatedApiTestApp(USER_B, settingsRoutes);
+    restoreAuth = restore;
+
+    const res = await app.handle(
+      new Request('http://localhost/settings/connectors/shared-config-conn', { method: 'DELETE' })
+    );
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.success).toBe(true);
+  });
+
+  it('shared connectors allow updating enabled models without changing ownership', async () => {
     await seedConnector('shared-conn-2', null);
 
     const { app, restore } = createAuthenticatedApiTestApp(USER_B, settingsRoutes);
@@ -78,9 +97,14 @@ describe('connector ownership security', () => {
       })
     );
 
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.error).toContain('shared connector');
+    expect(body.success).toBe(true);
+
+    const updated = await getSecretMetadataById('shared-conn-2', USER_B.id);
+    expect(updated).toBeDefined();
+    expect(updated?.userId).toBeNull();
+    expect(updated?.enabledModels).toBe(JSON.stringify(['gemini-pro']));
   });
 
   it('non-owner cannot delete another user\'s connector', async () => {

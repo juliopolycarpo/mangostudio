@@ -6,6 +6,8 @@ import { multiConnectors } from './005_multi_connectors';
 import { authTables } from './006_auth_tables';
 import { addUserOwnership } from './007_add_user_ownership';
 import { providerFields } from './008_provider_fields';
+import { openaiProviderSplit } from './009_openai_provider_split';
+import { openaiAuthContext } from './010_openai_auth_context';
 
 export const allMigrations = {
   '001_initial_schema': initialSchema,
@@ -16,4 +18,6 @@ export const allMigrations = {
   '006_auth_tables': authTables,
   '007_add_user_ownership': addUserOwnership,
   '008_provider_fields': providerFields,
+  '009_openai_provider_split': openaiProviderSplit,
+  '010_openai_auth_context': openaiAuthContext,
 };

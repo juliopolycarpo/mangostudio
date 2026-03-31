@@ -44,6 +44,10 @@ export interface SecretMetadataTable {
   enabledModels: string;
   userId: string | null;
   baseUrl: string | null;
+  /** Optional OpenAI Organization ID (only meaningful for provider === 'openai'). */
+  organizationId: string | null;
+  /** Optional OpenAI Project ID (only meaningful for provider === 'openai'). */
+  projectId: string | null;
 }
 
 export interface UserTable {

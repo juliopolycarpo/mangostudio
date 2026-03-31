@@ -22,6 +22,10 @@ export interface SecretMetadataInput {
   enabledModels: string[];
   userId: string | null;
   baseUrl?: string | null;
+  /** Optional OpenAI Organization ID. */
+  organizationId?: string | null;
+  /** Optional OpenAI Project ID. */
+  projectId?: string | null;
 }
 
 /**
@@ -99,6 +103,8 @@ export async function upsertSecretMetadata(input: SecretMetadataInput): Promise<
       enabledModels: JSON.stringify(input.enabledModels),
       userId: input.userId,
       baseUrl: input.baseUrl ?? null,
+      organizationId: input.organizationId ?? null,
+      projectId: input.projectId ?? null,
     })
     .onConflict((oc) =>
       oc.column('id').doUpdateSet({
@@ -112,6 +118,8 @@ export async function upsertSecretMetadata(input: SecretMetadataInput): Promise<
         enabledModels: JSON.stringify(input.enabledModels),
         userId: input.userId,
         baseUrl: input.baseUrl ?? null,
+        organizationId: input.organizationId ?? null,
+        projectId: input.projectId ?? null,
       })
     )
     .execute();
@@ -128,6 +136,6 @@ export async function deleteSecretMetadata(id: string, userId: string): Promise<
   await db
     .deleteFrom('secret_metadata')
     .where('id', '=', id)
-    .where('userId', '=', userId)
+    .where((eb) => eb.or([eb('userId', '=', userId), eb('userId', 'is', null)]))
     .execute();
 }
