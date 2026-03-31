@@ -15,7 +15,10 @@ import {
 import { bunSecretStore } from '../../services/secret-store/store';
 import { InvalidGeminiApiKeyError, GeminiValidationUnavailableError } from '../../services/gemini';
 import { SecretStorageUnavailableError } from '../../services/secret-store';
-import { invalidateUnifiedCatalog, recalculateUnifiedCatalog } from '../../services/providers/catalog';
+import {
+  invalidateUnifiedCatalog,
+  recalculateUnifiedCatalog,
+} from '../../services/providers/catalog';
 import {
   getProvider,
   invalidateProviderModelCache,
