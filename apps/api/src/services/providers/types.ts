@@ -2,12 +2,26 @@
  * Core types for the AI provider abstraction layer.
  */
 
-import type { ProviderType } from '@mangostudio/shared/types';
+import type { MessagePart, ThinkingVisibility, ProviderType } from '@mangostudio/shared/types';
 
 /** Minimal message shape for text generation context. */
 export interface TextContextMessage {
   role: 'user' | 'ai';
   text: string;
+}
+
+/** Provider-agnostic tool definition (passed to providers that support function calling). */
+export interface ToolDefinition {
+  name: string;
+  description: string;
+  parameters: Record<string, unknown>;  // JSON Schema object
+}
+
+/** Generation configuration passed through to provider adapters. */
+export interface GenerationConfig {
+  thinkingVisibility: ThinkingVisibility;
+  tools?: ToolDefinition[];
+  maxToolIterations?: number;
 }
 
 /** Input for text generation. */
@@ -19,18 +33,31 @@ export interface TextGenerationRequest {
   modelName: string;
   /** Optional signal to cancel the generation mid-stream. */
   signal?: AbortSignal;
+  generationConfig?: GenerationConfig;
+  providerState?: string;                // for cross-turn continuity
 }
 
 /** Output from text generation. */
 export interface TextGenerationResult {
   text: string;
+  parts?: MessagePart[];
+  providerState?: string;
 }
 
-/** A single chunk yielded during streaming text generation. */
-export interface StreamingTextChunk {
-  text: string;
+/** A single chunk yielded during streaming — now type-discriminated. */
+export interface StreamingChunk {
+  type: 'text' | 'thinking' | 'tool_call' | 'tool_result' | 'error';
+  text?: string;
+  toolCallId?: string;
+  name?: string;
+  args?: Record<string, unknown>;
+  content?: string;
+  isError?: boolean;
   done: boolean;
 }
+
+/** @deprecated Use StreamingChunk instead. */
+export type StreamingTextChunk = StreamingChunk;
 
 /** Input for image generation. */
 export interface ImageGenerationRequest {
@@ -68,7 +95,7 @@ export interface ModelInfo {
 export interface AIProvider {
   readonly providerType: ProviderType;
   generateText(req: TextGenerationRequest): Promise<TextGenerationResult>;
-  generateTextStream?(req: TextGenerationRequest): AsyncIterable<StreamingTextChunk>;
+  generateTextStream?(req: TextGenerationRequest): AsyncIterable<StreamingChunk>;
   generateImage?(req: ImageGenerationRequest): Promise<ImageGenerationResult>;
   listModels(userId: string): Promise<ModelInfo[]>;
   invalidateModelCache?(userId?: string): void;
