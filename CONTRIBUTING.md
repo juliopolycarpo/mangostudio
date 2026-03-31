@@ -17,9 +17,10 @@ cd mangostudio
 # Install all workspace dependencies
 bun install
 
-# Copy and configure environment variables
-cp apps/api/.env.example apps/api/.env.local
-# Edit apps/api/.env.local and set GEMINI_API_KEY
+# Copy and configure
+cp .mango/config.toml.example .mango/config.toml
+cp .mango/.env.example .mango/.env
+# Edit .mango/.env and add your API keys
 ```
 
 ## Development Workflow

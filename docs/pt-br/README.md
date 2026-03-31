@@ -4,14 +4,14 @@
 
 # MangoStudio
 
-Estúdio de geração de imagens e chat alimentado por IA utilizando modelos Gemini da Google.
+Estúdio de geração de imagens e chat alimentado por IA com suporte a modelos Gemini, compatíveis com OpenAI e Anthropic.
 
 > 🇺🇸 [Read in English](../../README.md)
 
 ## Pré-requisitos
 
 - [Bun](https://bun.sh/) (v1.3.11+)
-- Uma ou mais chaves de API do Gemini
+- Uma ou mais chaves de API para os provedores suportados (Gemini, compatíveis com OpenAI, Anthropic)
 
 ## Instalação
 
@@ -46,7 +46,7 @@ O MangoStudio possui um sistema flexível de múltiplos conectores que permite g
 
 1. **OS Secret Store** — Armazenamento nativo seguro do sistema operacional (via `Bun.secrets`). Recomendado para maior segurança.
 2. **config.toml** — Armazena chaves em `~/.mango/config.toml`. Ideal para compartilhar chaves entre instâncias ou ferramentas CLI.
-3. **Arquivo .env** — Adiciona variáveis ao arquivo `.env` na raiz do projeto.
+3. **Arquivo .env** — Adiciona variáveis ao arquivo `.mango/.env`.
 
 ### Como Configurar
 
@@ -120,7 +120,7 @@ mangostudio/
 | **Frontend** | React 19, Vite 8, Tailwind CSS v4, TanStack Router/Query       |
 | **API**      | Elysia, Better Auth, rate limiting nativo                      |
 | **Banco**    | SQLite via Kysely (query builder type-safe)                    |
-| **IA**       | Google Gemini API — texto e geração de imagens                 |
+| **IA**       | Multi-provedor (Gemini, compatível com OpenAI, Anthropic)      |
 | **Runtime**  | Bun — sem dependência de Node.js                               |
 | **i18n**     | Dicionário TypeScript puro em `@mangostudio/shared/i18n`       |
 

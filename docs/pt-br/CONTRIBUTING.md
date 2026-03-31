@@ -19,9 +19,10 @@ cd mangostudio
 # Instale todas as dependências do workspace
 bun install
 
-# Copie e configure as variáveis de ambiente
-cp apps/api/.env.example apps/api/.env.local
-# Edite apps/api/.env.local e defina GEMINI_API_KEY
+# Copie e configure
+cp .mango/config.toml.example .mango/config.toml
+cp .mango/.env.example .mango/.env
+# Edite .mango/.env e adicione suas chaves de API
 ```
 
 ## Fluxo de Desenvolvimento
