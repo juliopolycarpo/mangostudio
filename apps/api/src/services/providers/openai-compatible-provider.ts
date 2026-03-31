@@ -192,9 +192,9 @@ const openAICompatibleProvider: AIProvider = {
 
     const isGptImage = req.modelName.startsWith('gpt-image');
 
-    // Build model-appropriate params: gpt-image doesn't support `n` or `url` format
+    // Build model-appropriate params: gpt-image doesn't support `response_format` or `n`
     const params: OpenAI.Images.ImageGenerateParamsNonStreaming = isGptImage
-      ? { model: req.modelName, prompt: req.prompt, size: '1024x1024', response_format: 'b64_json' }
+      ? { model: req.modelName, prompt: req.prompt, size: '1024x1024' }
       : {
           model: req.modelName,
           prompt: req.prompt,
