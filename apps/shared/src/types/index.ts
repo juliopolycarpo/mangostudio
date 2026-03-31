@@ -29,7 +29,7 @@ export interface Message {
   id: string;
   chatId: string;
   role: 'user' | 'ai';
-  text: string;
+  text: string; // kept for backward compat — derived from text parts
   interactionMode?: InteractionMode;
   imageUrl?: string;
   referenceImage?: string;
@@ -38,7 +38,20 @@ export interface Message {
   generationTime?: string;
   isGenerating?: boolean;
   modelName?: string;
+  parts?: MessagePart[]; // source of truth for structured messages
+  providerState?: string; // opaque JSON for provider continuity
 }
+
+/** Thinking display mode — configurable per provider in settings. */
+export type ThinkingVisibility = 'summary' | 'full' | 'off';
+
+/** Discriminated union of all content block types in an assistant message. */
+export type MessagePart =
+  | { type: 'text'; text: string }
+  | { type: 'thinking'; text: string; redacted?: boolean }
+  | { type: 'tool_call'; toolCallId: string; name: string; args: Record<string, unknown> }
+  | { type: 'tool_result'; toolCallId: string; content: string; isError?: boolean }
+  | { type: 'error'; text: string };
 
 /** Database row shape for secret metadata tracked in SQLite. */
 export interface SecretMetadataRow {

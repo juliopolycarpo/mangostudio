@@ -18,7 +18,7 @@ import type {
   AIProvider,
   TextGenerationRequest,
   TextGenerationResult,
-  StreamingTextChunk,
+  StreamingChunk,
   ImageGenerationRequest,
   ImageGenerationResult,
   ModelInfo,
@@ -38,7 +38,7 @@ const geminiProvider: AIProvider = {
     return { text };
   },
 
-  async *generateTextStream(req: TextGenerationRequest): AsyncIterable<StreamingTextChunk> {
+  async *generateTextStream(req: TextGenerationRequest): AsyncIterable<StreamingChunk> {
     for await (const chunk of geminiGenerateTextStream(
       req.userId,
       req.history,
@@ -47,7 +47,7 @@ const geminiProvider: AIProvider = {
       req.modelName
     )) {
       if (req.signal?.aborted) break;
-      yield chunk;
+      yield { type: 'text' as const, text: chunk.text, done: chunk.done };
     }
   },
 

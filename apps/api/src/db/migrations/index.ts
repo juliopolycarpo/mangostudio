@@ -8,6 +8,7 @@ import { addUserOwnership } from './007_add_user_ownership';
 import { providerFields } from './008_provider_fields';
 import { openaiProviderSplit } from './009_openai_provider_split';
 import { openaiAuthContext } from './010_openai_auth_context';
+import { messageParts } from './011_message_parts';
 
 export const allMigrations = {
   '001_initial_schema': initialSchema,
@@ -20,4 +21,5 @@ export const allMigrations = {
   '008_provider_fields': providerFields,
   '009_openai_provider_split': openaiProviderSplit,
   '010_openai_auth_context': openaiAuthContext,
+  '011_message_parts': messageParts,
 };
