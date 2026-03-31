@@ -32,6 +32,7 @@ import { requireAuth } from '../../plugins/auth-middleware';
 /** Per-provider configuration for secret storage paths. */
 const PROVIDER_SECRET_CONFIG: Record<ProviderType, { tomlSection: string; envPrefix: string }> = {
   gemini: { tomlSection: 'gemini_api_keys', envPrefix: 'GEMINI_API_KEY' },
+  openai: { tomlSection: 'openai_api_keys', envPrefix: 'OPENAI_API_KEY' },
   'openai-compatible': {
     tomlSection: 'openai_compatible_api_keys',
     envPrefix: 'OPENAI_API_KEY',
@@ -206,6 +207,12 @@ export async function validateProviderKey(
   apiKey: string,
   baseUrl?: string
 ): Promise<void> {
+  if (provider === 'openai') {
+    const p = getProvider('openai');
+    await p.validateApiKey(apiKey);
+    return;
+  }
+
   if (provider === 'openai-compatible' && baseUrl) {
     await validateBaseUrl(baseUrl);
     const response = await fetch(`${baseUrl}/models`, {
@@ -216,6 +223,11 @@ export async function validateProviderKey(
     }
     return;
   }
+
+  if (provider === 'openai-compatible' && !baseUrl) {
+    throw new Error('baseUrl is required for openai-compatible connectors.');
+  }
+
   const p = getProvider(provider);
   await p.validateApiKey(apiKey);
 }
@@ -230,7 +242,12 @@ export const connectorBodySchema = t.Object({
     t.Literal('none'),
   ]),
   provider: t.Optional(
-    t.Union([t.Literal('gemini'), t.Literal('openai-compatible'), t.Literal('anthropic')])
+    t.Union([
+      t.Literal('gemini'),
+      t.Literal('openai'),
+      t.Literal('openai-compatible'),
+      t.Literal('anthropic'),
+    ])
   ),
   baseUrl: t.Optional(t.String()),
 });
@@ -252,6 +269,11 @@ export const connectorRoutes = new Elysia()
         const provider = (body.provider ?? 'gemini') as ProviderType;
         const apiKey = body.apiKey.trim();
         if (!apiKey) throw new Error('API Key cannot be empty.');
+
+        if (provider === 'openai-compatible' && !body.baseUrl?.trim()) {
+          set.status = 400;
+          return { error: 'baseUrl is required for openai-compatible connectors.' };
+        }
 
         await validateProviderKey(provider, apiKey, body.baseUrl);
 
