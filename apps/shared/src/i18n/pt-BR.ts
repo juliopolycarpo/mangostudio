@@ -103,6 +103,11 @@ export const messages = {
       doneButton: 'Concluído',
       configureModels: 'Configurar Modelos',
       deleteConnector: 'Excluir Conector',
+      sharedConnector: 'Compartilhado',
+      managedExternally: 'Gerenciado externamente via configuração do ambiente.',
+      sharedDeleteBlocked:
+        'Este conector compartilhado precisa ser removido do arquivo de configuração.',
+      noModelsDiscovered: 'Nenhum modelo foi descoberto para este conector ainda.',
       addSuccess: 'Conector adicionado com sucesso!',
       deleteSuccess: 'Conector excluído com sucesso!',
       updateModelsSuccess: 'Modelos atualizados com sucesso!',

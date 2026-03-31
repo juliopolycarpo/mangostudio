@@ -71,6 +71,8 @@ export interface AIProvider {
   generateTextStream?(req: TextGenerationRequest): AsyncIterable<StreamingTextChunk>;
   generateImage?(req: ImageGenerationRequest): Promise<ImageGenerationResult>;
   listModels(userId: string): Promise<ModelInfo[]>;
+  invalidateModelCache?(userId?: string): void;
+  syncConfigFileConnectors?(userId: string): Promise<void>;
   validateApiKey(apiKey: string): Promise<void>;
   resolveApiKey(userId: string, modelName?: string): Promise<string>;
 }

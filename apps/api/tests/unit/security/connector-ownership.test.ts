@@ -6,6 +6,7 @@ import {
   upsertSecretMetadata,
 } from '../../../src/services/secret-store/metadata';
 import { getDb } from '../../../src/db/database';
+import type { SecretSource } from '@mangostudio/shared/types';
 
 const USER_A = { id: 'user-a-own', name: 'User A', email: 'a-own@test.dev' };
 const USER_B = { id: 'user-b-own', name: 'User B', email: 'b-own@test.dev' };
@@ -37,13 +38,13 @@ afterEach(() => {
 });
 
 /** Inserts a connector owned by a specific user (or shared when userId is null). */
-async function seedConnector(id: string, userId: string | null) {
+async function seedConnector(id: string, userId: string | null, source: SecretSource = 'config-file') {
   await upsertSecretMetadata({
     id,
     name: `connector-${id}`,
     provider: 'gemini',
     configured: true,
-    source: 'config-file',
+    source,
     maskedSuffix: '**1234',
     updatedAt: Date.now(),
     enabledModels: [],
@@ -52,8 +53,8 @@ async function seedConnector(id: string, userId: string | null) {
 }
 
 describe('connector ownership security', () => {
-  it('non-owner cannot delete a shared connector (userId IS NULL)', async () => {
-    await seedConnector('shared-conn-1', null);
+  it('non-owner cannot delete a read-only shared connector', async () => {
+    await seedConnector('shared-conn-1', null, 'bun-secrets');
 
     const { app, restore } = createAuthenticatedApiTestApp(USER_B, settingsRoutes);
     restoreAuth = restore;
@@ -65,6 +66,21 @@ describe('connector ownership security', () => {
     expect(res.status).toBe(403);
     const body = await res.json();
     expect(body.error).toContain('shared connector');
+  });
+
+  it('shared config-file connectors can be deleted from settings', async () => {
+    await seedConnector('shared-config-conn', null, 'config-file');
+
+    const { app, restore } = createAuthenticatedApiTestApp(USER_B, settingsRoutes);
+    restoreAuth = restore;
+
+    const res = await app.handle(
+      new Request('http://localhost/settings/connectors/shared-config-conn', { method: 'DELETE' })
+    );
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.success).toBe(true);
   });
 
   it('shared connectors allow updating enabled models without changing ownership', async () => {

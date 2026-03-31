@@ -53,7 +53,9 @@ describe('settings connectors routes', () => {
 
     const payload = await response.json();
     expect(Value.Check(ConnectorStatusSchema, payload)).toBe(true);
-    expect(payload).toMatchObject({ connectors: [] });
+    expect(
+      payload.connectors.filter((connector: { userId: string | null }) => connector.userId === TEST_USER.id)
+    ).toEqual([]);
   });
 
   it('GET /settings/models returns resolved catalog for a new user', async () => {
@@ -84,6 +86,51 @@ describe('settings connectors routes', () => {
     const payload = await response.json();
     expect(Value.Check(ConnectorStatusSchema, payload)).toBe(true);
     expect(payload).toMatchObject({ connectors: [] });
+  });
+
+  it('GET /settings/connectors hides shared openai-compatible config-file connectors without baseUrl', async () => {
+    await upsertSecretMetadata({
+      id: 'shared-compat-without-base-url',
+      name: 'shared-compat-without-base-url',
+      provider: 'openai-compatible',
+      configured: true,
+      source: 'config-file',
+      maskedSuffix: '****...9999',
+      updatedAt: Date.now(),
+      enabledModels: [],
+      userId: null,
+      baseUrl: null,
+    });
+
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, settingsRoutes);
+    restoreAuth = restore;
+
+    const response = await app.handle(new Request('http://localhost/settings/connectors'));
+
+    expect(response.status).toBe(200);
+
+    const payload = await response.json();
+    expect(Value.Check(ConnectorStatusSchema, payload)).toBe(true);
+    expect(
+      payload.connectors.some((connector: { id: string }) => connector.id === 'shared-compat-without-base-url')
+    ).toBe(false);
+  });
+
+  it('GET /settings/connectors does not return placeholder config-file connectors from local dev config', async () => {
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, settingsRoutes);
+    restoreAuth = restore;
+
+    const response = await app.handle(new Request('http://localhost/settings/connectors'));
+
+    expect(response.status).toBe(200);
+
+    const payload = await response.json();
+    expect(Value.Check(ConnectorStatusSchema, payload)).toBe(true);
+
+    const connectorNames = payload.connectors.map((connector: { name: string }) => connector.name);
+    expect(connectorNames).not.toContain('openai-for-list');
+    expect(connectorNames).not.toContain('deepseek-for-list');
+    expect(connectorNames).not.toContain('openai-proj-model-update');
   });
 });
 
@@ -321,7 +368,7 @@ describe('openai connector routes', () => {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             name: 'openai-for-list',
-            apiKey: 'sk-list-test-key-aaaa',
+            apiKey: 'sk-live-openai-list-aaaa',
             source: 'config-file',
             provider: 'openai',
           }),
@@ -381,7 +428,7 @@ describe('openai connector routes', () => {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             name: 'deepseek-for-list',
-            apiKey: 'sk-ds-list-test-key-bbbb',
+            apiKey: 'sk-live-compat-list-bbbb',
             source: 'config-file',
             provider: 'openai-compatible',
             baseUrl: COMPAT_BASE_URL,

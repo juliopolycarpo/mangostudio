@@ -37,6 +37,13 @@ export function listRegisteredProviderTypes(): ProviderType[] {
 }
 
 /**
+ * Clears the cached model listing for a single provider.
+ */
+export function invalidateProviderModelCache(type: ProviderType, userId?: string): void {
+  registry.get(type)?.invalidateModelCache?.(userId);
+}
+
+/**
  * Removes all registered providers. Intended for test isolation only.
  */
 export function clearRegistry(): void {

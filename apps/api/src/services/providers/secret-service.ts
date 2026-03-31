@@ -29,6 +29,12 @@ export interface ProviderSecretServiceConfig {
   envVarPrefix: string;
   /** Called to validate a candidate API key against the real provider. */
   validateFn: (apiKey: string, fetchImpl: FetchLike) => Promise<void>;
+  /** Optional gate used to decide whether a config-file entry should become connector metadata. */
+  shouldSyncConfigEntry?: (entry: {
+    name: string;
+    apiKey: string;
+    existing?: SecretMetadataRow;
+  }) => boolean;
 }
 
 /** Injectable dependencies (primarily for testing). */
@@ -54,6 +60,42 @@ export class ProviderApiKeyMissingError extends Error {
 function maskSecret(apiKey: string | null | undefined): string | undefined {
   if (!apiKey) return undefined;
   return `****...${apiKey.slice(-4)}`;
+}
+
+/**
+ * Filters obvious fixture / placeholder values so local dev config samples do
+ * not leak into the runtime connector list.
+ */
+export function isPlaceholderConfigSecretValue(value: string): boolean {
+  const normalized = value.trim().toLowerCase();
+
+  if (!normalized) return true;
+
+  return (
+    [
+      'your-secret-key-here',
+      'placeholder',
+      'changeme',
+      'replace-me',
+      'replace_with_real_key',
+      'replace-with-real-key',
+      'example-key',
+      'dummy-key',
+      'fake-key',
+      'mock-key',
+    ].some((pattern) => normalized.includes(pattern)) ||
+    normalized.startsWith('sk-test-') ||
+    normalized.includes('-test-key-') ||
+    normalized.includes('-model-update-key') ||
+    normalized.includes('-dummy-') ||
+    normalized.includes('-fake-') ||
+    normalized.includes('-mock-') ||
+    normalized.includes('-sample-') ||
+    normalized.includes('-demo-') ||
+    normalized.includes('...') ||
+    normalized.startsWith('<') ||
+    normalized.endsWith('>')
+  );
 }
 
 /**
@@ -94,7 +136,10 @@ export function createProviderSecretService(
         try {
           if (existsSync(tomlFilePath)) {
             const parsed = parseToml(readFileSync(tomlFilePath, 'utf8')) as any;
-            return parsed[config.tomlSection]?.[connector.name] || null;
+            const value = parsed[config.tomlSection]?.[connector.name];
+            if (typeof value !== 'string') return null;
+            if (isPlaceholderConfigSecretValue(value)) return null;
+            return value;
           }
         } catch {
           return null;
@@ -114,11 +159,19 @@ export function createProviderSecretService(
       const tomlKeys = parsed[config.tomlSection] || {};
       const currentMeta = await listMeta(config.provider, userId);
       const configConnectors = currentMeta.filter((m) => m.source === 'config-file');
+      const syncableEntries = new Map<string, { apiKey: string; existing?: SecretMetadataRow }>();
 
       for (const [name, key] of Object.entries(tomlKeys)) {
         if (typeof key !== 'string') continue;
-        const exists = configConnectors.find((c) => c.name === name);
-        if (!exists) {
+        if (isPlaceholderConfigSecretValue(key)) continue;
+
+        const existing = configConnectors.find((connector) => connector.name === name);
+        const shouldSync = config.shouldSyncConfigEntry?.({ name, apiKey: key, existing }) ?? true;
+        if (!shouldSync) continue;
+
+        syncableEntries.set(name, { apiKey: key, existing });
+
+        if (!existing) {
           const { randomUUID } = await import('crypto');
           await upsertMeta({
             id: randomUUID(),
@@ -133,22 +186,25 @@ export function createProviderSecretService(
           });
         } else {
           const currentSuffix = maskSecret(key);
-          if (exists.maskedSuffix !== currentSuffix) {
+          if (existing.maskedSuffix !== currentSuffix) {
             await upsertMeta({
-              ...exists,
+              ...existing,
               source: 'config-file',
               configured: true,
               maskedSuffix: currentSuffix,
               updatedAt: now(),
-              enabledModels: JSON.parse(exists.enabledModels),
-              userId: null,
+              enabledModels: JSON.parse(existing.enabledModels),
+              userId: existing.userId,
+              baseUrl: existing.baseUrl ?? null,
+              organizationId: existing.organizationId ?? null,
+              projectId: existing.projectId ?? null,
             });
           }
         }
       }
 
       for (const connector of configConnectors) {
-        if (!tomlKeys[connector.name]) {
+        if (!syncableEntries.has(connector.name)) {
           await deleteMeta(connector.id, userId);
         }
       }

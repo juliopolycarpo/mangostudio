@@ -25,6 +25,7 @@ const secretService = createProviderSecretService({
   provider: 'openai-compatible',
   tomlSection: 'openai_compatible_api_keys',
   envVarPrefix: 'OPENAI_API_KEY',
+  shouldSyncConfigEntry: ({ existing }) => Boolean(existing?.baseUrl?.trim()),
   validateFn: async (_apiKey, _fetchImpl) => {
     // validateFn is not called for openai-compatible without a baseUrl.
     // Key validation for this provider always goes through validateProviderKey()
@@ -217,6 +218,14 @@ const openAICompatibleProvider: AIProvider = {
 
   async listModels(userId: string): Promise<ModelInfo[]> {
     return listModelsWithCache(userId);
+  },
+
+  invalidateModelCache(userId?: string): void {
+    listModelsWithCache.invalidate(userId);
+  },
+
+  async syncConfigFileConnectors(userId: string): Promise<void> {
+    await secretService.syncConfigFileConnectors(userId);
   },
 
   async validateApiKey(apiKey: string): Promise<void> {

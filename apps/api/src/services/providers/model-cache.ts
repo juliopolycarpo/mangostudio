@@ -15,6 +15,11 @@ export interface ModelCacheOptions<T> {
   maxEntries?: number;
 }
 
+export interface CachedModelFetcher<T> {
+  (userId: string): Promise<T[]>;
+  invalidate(userId?: string): void;
+}
+
 /**
  * Returns a cached-fetch function with TTL and concurrent-request deduplication.
  *
@@ -28,14 +33,14 @@ export interface ModelCacheOptions<T> {
 export function withModelCache<T>(
   fetchFn: (userId: string) => Promise<T[]>,
   opts: ModelCacheOptions<T>
-): (userId: string) => Promise<T[]> {
+): CachedModelFetcher<T> {
   const now = opts.now ?? (() => Date.now());
   const maxEntries = opts.maxEntries ?? 1000;
 
   const cache = new Map<string, { value: T[]; expiresAt: number }>();
   const inflight = new Map<string, Promise<T[]>>();
 
-  return async function cachedFetch(userId: string): Promise<T[]> {
+  const cachedFetch = async function cachedFetch(userId: string): Promise<T[]> {
     // Return cached value if still fresh
     const entry = cache.get(userId);
     if (entry && now() < entry.expiresAt) {
@@ -67,4 +72,17 @@ export function withModelCache<T>(
     inflight.set(userId, promise);
     return promise;
   };
+
+  cachedFetch.invalidate = (userId?: string): void => {
+    if (userId) {
+      cache.delete(userId);
+      inflight.delete(userId);
+      return;
+    }
+
+    cache.clear();
+    inflight.clear();
+  };
+
+  return cachedFetch;
 }

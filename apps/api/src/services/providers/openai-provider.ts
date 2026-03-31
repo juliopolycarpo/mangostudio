@@ -317,6 +317,14 @@ const openAIProvider: AIProvider = {
     return listModelsWithCache(userId);
   },
 
+  invalidateModelCache(userId?: string): void {
+    listModelsWithCache.invalidate(userId);
+  },
+
+  async syncConfigFileConnectors(userId: string): Promise<void> {
+    await secretService.syncConfigFileConnectors(userId);
+  },
+
   /**
    * Validates an API key using SDK-backed model listing.
    * Delegates to validateOpenAIAuthContext so that validation and runtime

@@ -16,7 +16,11 @@ import { bunSecretStore } from '../../services/secret-store/store';
 import { InvalidGeminiApiKeyError, GeminiValidationUnavailableError } from '../../services/gemini';
 import { SecretStorageUnavailableError } from '../../services/secret-store';
 import { invalidateUnifiedCatalog } from '../../services/providers/catalog';
-import { getProvider } from '../../services/providers/registry';
+import {
+  getProvider,
+  invalidateProviderModelCache,
+  listRegisteredProviderTypes,
+} from '../../services/providers/registry';
 import {
   validateOpenAIAuthContext,
   OpenAIAuthError,
@@ -113,6 +117,23 @@ export function toConnector(row: {
     userId: row.userId,
     baseUrl: row.baseUrl ?? null,
   };
+}
+
+function isReadOnlySharedConnector(row: { userId: string | null; source: string }): boolean {
+  return row.userId === null && row.source !== 'config-file' && row.source !== 'environment';
+}
+
+function isVisibleConnector(row: SecretMetadataRow): boolean {
+  if (
+    row.provider === 'openai-compatible' &&
+    row.source === 'config-file' &&
+    row.userId === null &&
+    !row.baseUrl
+  ) {
+    return false;
+  }
+
+  return true;
 }
 
 async function updateConnectorEnabledModels(
@@ -299,8 +320,16 @@ export const connectorRoutes = new Elysia()
 
   /** Returns all connectors across all providers. */
   .get('/connectors', async ({ user }): Promise<ConnectorStatus> => {
-    const rows = await listAllSecretMetadata(user?.id ?? '');
-    return { connectors: rows.map(toConnector) };
+    const userId = user?.id ?? '';
+
+    await Promise.allSettled(
+      listRegisteredProviderTypes().map(async (providerType) => {
+        await getProvider(providerType).syncConfigFileConnectors?.(userId);
+      })
+    );
+
+    const rows = await listAllSecretMetadata(userId);
+    return { connectors: rows.filter(isVisibleConnector).map(toConnector) };
   })
 
   /** Adds a new connector for any provider. */
@@ -346,6 +375,7 @@ export const connectorRoutes = new Elysia()
         };
         await upsertSecretMetadata(input);
 
+        invalidateProviderModelCache(provider, userId);
         invalidateUnifiedCatalog(userId);
 
         // Reload and return the new connector
@@ -370,7 +400,7 @@ export const connectorRoutes = new Elysia()
           return { error: 'Connector not found.' };
         }
 
-        if (meta.userId !== userId) {
+        if (isReadOnlySharedConnector(meta)) {
           set.status = 403;
           return { error: 'Cannot delete a shared connector.' };
         }
@@ -382,6 +412,7 @@ export const connectorRoutes = new Elysia()
           meta.source as SecretSource
         );
         await deleteSecretMetadata(meta.id, userId);
+        invalidateProviderModelCache(meta.provider as ProviderType, userId);
         invalidateUnifiedCatalog(userId);
 
         console.log(`[settings] DEL connector ${params.id}`);

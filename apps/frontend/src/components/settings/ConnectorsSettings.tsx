@@ -81,6 +81,14 @@ export function ConnectorsSettings({ modelCatalog, reloadModelCatalog }: Connect
     void loadStatus();
   }, []);
 
+  function isReadOnlySharedConnector(connector: Connector): boolean {
+    return (
+      connector.userId === null &&
+      connector.source !== 'config-file' &&
+      connector.source !== 'environment'
+    );
+  }
+
   const handleAddConnector = async () => {
     if (!newConnector.name.trim() || !newConnector.apiKey.trim()) {
       setFormError(s.errorRequired);
@@ -138,6 +146,13 @@ export function ConnectorsSettings({ modelCatalog, reloadModelCatalog }: Connect
   };
 
   const handleDeleteConnector = async (id: string) => {
+    const connector = connectors.find((item) => item.id === id);
+    if (connector && isReadOnlySharedConnector(connector)) {
+      toast(s.sharedDeleteBlocked, 'error');
+      setConnectorToDelete(null);
+      return;
+    }
+
     try {
       const { error } = await (client.api.settings.connectors[id] as any).delete();
       if (error) throw new Error(extractApiError(error.value, 'Failed to delete connector'));
@@ -236,65 +251,86 @@ export function ConnectorsSettings({ modelCatalog, reloadModelCatalog }: Connect
           </div>
         ) : (
           <div className="grid grid-cols-1 gap-3">
-            {connectors.map((c) => (
-              <div
-                key={c.id}
-                className="bg-surface-container-lowest border border-outline-variant/10 rounded-2xl p-4 flex items-center justify-between gap-4"
-              >
-                <div className="flex items-center gap-4">
-                  <div
-                    className={`p-2.5 rounded-xl ${c.configured ? 'bg-primary/10 text-primary' : 'bg-red-500/10 text-red-300'}`}
-                  >
-                    {c.configured ? <CheckCircle2 size={20} /> : <XCircle size={20} />}
+            {connectors.map((c) => {
+              const isReadOnlyShared = isReadOnlySharedConnector(c);
+
+              return (
+                <div
+                  key={c.id}
+                  className="bg-surface-container-lowest border border-outline-variant/10 rounded-2xl p-4 flex items-center justify-between gap-4"
+                >
+                  <div className="flex items-center gap-4">
+                    <div
+                      className={`p-2.5 rounded-xl ${c.configured ? 'bg-primary/10 text-primary' : 'bg-red-500/10 text-red-300'}`}
+                    >
+                      {c.configured ? <CheckCircle2 size={20} /> : <XCircle size={20} />}
+                    </div>
+                    <div className="space-y-0.5">
+                      <div className="flex items-center gap-2">
+                        <h3 className="font-bold text-on-surface">{c.name}</h3>
+                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-surface-container-high text-on-surface-variant border border-outline-variant/20">
+                          {t.providers[c.provider]}
+                        </span>
+                        {isReadOnlyShared && (
+                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-200 border border-amber-500/20">
+                            {s.sharedConnector}
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2 text-xs">
+                        <span className="flex items-center gap-1 text-on-surface-variant/60">
+                          {c.source === 'bun-secrets' && <ShieldCheck size={12} />}
+                          {c.source === 'config-file' && <FileCode size={12} />}
+                          {c.source === 'environment' && <Database size={12} />}
+                          {c.source.replace('-', ' ')}
+                        </span>
+                        <span className="text-outline-variant">•</span>
+                        <span className="font-mono text-on-surface-variant/60">
+                          {c.maskedSuffix ?? '****'}
+                        </span>
+                      </div>
+                      {isReadOnlyShared && (
+                        <p className="text-[10px] text-on-surface-variant/50">
+                          {s.managedExternally}
+                        </p>
+                      )}
+                    </div>
                   </div>
-                  <div className="space-y-0.5">
-                    <div className="flex items-center gap-2">
-                      <h3 className="font-bold text-on-surface">{c.name}</h3>
-                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-surface-container-high text-on-surface-variant border border-outline-variant/20">
-                        {t.providers[c.provider]}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2 text-xs">
-                      <span className="flex items-center gap-1 text-on-surface-variant/60">
-                        {c.source === 'bun-secrets' && <ShieldCheck size={12} />}
-                        {c.source === 'config-file' && <FileCode size={12} />}
-                        {c.source === 'environment' && <Database size={12} />}
-                        {c.source.replace('-', ' ')}
-                      </span>
-                      <span className="text-outline-variant">•</span>
-                      <span className="font-mono text-on-surface-variant/60">
-                        {c.maskedSuffix ?? '****'}
-                      </span>
-                    </div>
+
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        setSelectedConnector(c);
+                        setIsModelsModalOpen(true);
+                      }}
+                      title={s.configureModels}
+                      className="p-2"
+                    >
+                      <Settings size={18} />
+                    </Button>
+
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        if (isReadOnlyShared) {
+                          toast(s.sharedDeleteBlocked, 'error');
+                          return;
+                        }
+                        setConnectorToDelete(c);
+                      }}
+                      title={isReadOnlyShared ? s.sharedDeleteBlocked : s.deleteConnector}
+                      className="p-2 text-red-300 hover:text-red-400 hover:bg-red-500/10 disabled:opacity-40 disabled:hover:bg-transparent"
+                      disabled={isReadOnlyShared}
+                    >
+                      <Trash2 size={18} />
+                    </Button>
                   </div>
                 </div>
-
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => {
-                      setSelectedConnector(c);
-                      setIsModelsModalOpen(true);
-                    }}
-                    title={s.configureModels}
-                    className="p-2"
-                  >
-                    <Settings size={18} />
-                  </Button>
-
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setConnectorToDelete(c)}
-                    title={s.deleteConnector}
-                    className="p-2 text-red-300 hover:text-red-400 hover:bg-red-500/10"
-                  >
-                    <Trash2 size={18} />
-                  </Button>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </Card>
@@ -608,6 +644,12 @@ export function ConnectorsSettings({ modelCatalog, reloadModelCatalog }: Connect
                           );
                         })}
                       </div>
+                    </div>
+                  )}
+
+                  {textModels.length === 0 && imageModels.length === 0 && (
+                    <div className="rounded-2xl border border-dashed border-outline-variant/20 bg-surface-container-lowest px-4 py-8 text-center text-sm text-on-surface-variant/70">
+                      {s.noModelsDiscovered}
                     </div>
                   )}
                 </div>
