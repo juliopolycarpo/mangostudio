@@ -195,10 +195,28 @@ export function createUnifiedModelCatalogService(deps: UnifiedModelCatalogDeps =
       return getSnapshot(userId);
     },
 
-    /** Invalidates the cached catalog for a user, forcing a refresh on next access. */
+    /**
+     * Invalidates the cached catalog for a user, forcing a full provider refresh
+     * on next access. Use this when a connector is added or removed so that the
+     * provider model list is re-fetched. Also cancels any in-flight refresh so
+     * the very next getUnifiedModelCatalog call starts a fresh one that sees the
+     * new connector.
+     */
     invalidate(userId: string): void {
       fullCatalogs.delete(userId);
       snapshots.delete(userId);
+      refreshPromises.delete(userId);
+    },
+
+    /**
+     * Recalculates the snapshot for a user without discarding the cached provider
+     * model list. Use this when only enabled models have changed (connector model
+     * enable/disable) so the snapshot is recomputed from the DB without an
+     * expensive full provider re-fetch.
+     */
+    recalculate(userId: string): void {
+      snapshots.delete(userId);
+      refreshPromises.delete(userId);
     },
   };
 }
@@ -210,3 +228,5 @@ export const getUnifiedModelCatalog =
   unifiedCatalogService.getUnifiedModelCatalog.bind(unifiedCatalogService);
 export const invalidateUnifiedCatalog =
   unifiedCatalogService.invalidate.bind(unifiedCatalogService);
+export const recalculateUnifiedCatalog =
+  unifiedCatalogService.recalculate.bind(unifiedCatalogService);

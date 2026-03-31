@@ -15,7 +15,7 @@ import {
 import { bunSecretStore } from '../../services/secret-store/store';
 import { InvalidGeminiApiKeyError, GeminiValidationUnavailableError } from '../../services/gemini';
 import { SecretStorageUnavailableError } from '../../services/secret-store';
-import { invalidateUnifiedCatalog } from '../../services/providers/catalog';
+import { invalidateUnifiedCatalog, recalculateUnifiedCatalog } from '../../services/providers/catalog';
 import {
   getProvider,
   invalidateProviderModelCache,
@@ -436,7 +436,7 @@ export const connectorRoutes = new Elysia()
           return { error: 'Connector not found.' };
         }
         await updateConnectorEnabledModels(meta, body.enabledModels);
-        invalidateUnifiedCatalog(userId);
+        recalculateUnifiedCatalog(userId);
         return { success: true };
       } catch (error) {
         return handleSecretRouteError(error, set);
