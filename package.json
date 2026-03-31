@@ -22,6 +22,7 @@
     "test:unit": "bun run --filter @mangostudio/api test:unit && bun run --filter @mangostudio/shared test:unit && bun run --filter @mangostudio/frontend test:unit",
     "test:integration": "bun run --filter @mangostudio/api test:integration && bun run --filter @mangostudio/frontend test:integration",
     "test:coverage": "bun run --filter @mangostudio/frontend test:coverage",
+    "test:browser:smoke": "bunx playwright test",
     "test:ci": "bun run lint && bun run test && bun run test:coverage",
     "migrate": "bun run --filter @mangostudio/api migrate",
     "clean": "rm -rf apps/*/dist apps/*/coverage .mango/out",
@@ -30,6 +31,7 @@
   "devDependencies": {
     "@eslint/js": "^9.39.4",
     "@fast-check/vitest": "^0.3.0",
+    "@playwright/test": "^1.58.2",
     "@typescript-eslint/eslint-plugin": "^8.57.2",
     "@typescript-eslint/parser": "^8.57.2",
     "@vitest/coverage-v8": "^4.1.1",
