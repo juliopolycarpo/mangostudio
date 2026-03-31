@@ -20,6 +20,8 @@ export interface CreateMessageInput {
   modelName?: string | null;
   styleParams?: string[] | null;
   interactionMode: string;
+  parts?: string | null;          // pre-serialized JSON string
+  providerState?: string | null;  // opaque provider blob
 }
 
 export interface LoadHistoryOptions {
@@ -49,6 +51,8 @@ export async function createMessage(
       modelName: input.modelName ?? null,
       styleParams: serializeStyleParams(input.styleParams),
       interactionMode: input.interactionMode,
+      parts: input.parts ?? null,
+      providerState: input.providerState ?? null,
     })
     .execute();
 }
