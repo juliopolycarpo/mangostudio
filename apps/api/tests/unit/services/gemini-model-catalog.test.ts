@@ -107,6 +107,54 @@ describe('createGeminiModelCatalogService', () => {
     expect(snapshot.imageModels).toEqual([]);
   });
 
+  it('awaits first refresh on cold start and returns discovered models', async () => {
+    const service = createGeminiModelCatalogService({
+      getApiKey: async () => 'test-key',
+      listModels: async () => [
+        createMockModel({
+          name: 'models/gemini-2.5-flash',
+          displayName: 'Gemini 2.5 Flash',
+          supportedActions: ['generateContent'],
+        }),
+        createMockModel({
+          name: 'models/gemini-2.5-flash-image',
+          displayName: 'Gemini 2.5 Flash Image',
+          supportedActions: ['generateContent'],
+        }),
+      ],
+    });
+
+    // First call should await refresh, NOT return empty
+    const snapshot = await service.getGeminiModelCatalog(TEST_USER);
+
+    expect(snapshot.status).toBe('ready');
+    expect(snapshot.allModels.length).toBeGreaterThan(0);
+    expect(snapshot.discoveredTextModels.map((m) => m.modelId)).toContain('gemini-2.5-flash');
+    expect(snapshot.discoveredImageModels.map((m) => m.modelId)).toContain('gemini-2.5-flash-image');
+  });
+
+  it('returns cached models on subsequent calls without re-fetching', async () => {
+    let fetchCount = 0;
+    const service = createGeminiModelCatalogService({
+      getApiKey: async () => 'test-key',
+      listModels: async () => {
+        fetchCount++;
+        return [
+          createMockModel({
+            name: 'models/gemini-2.5-pro',
+            supportedActions: ['generateContent'],
+          }),
+        ];
+      },
+    });
+
+    await service.getGeminiModelCatalog(TEST_USER);
+    await service.getGeminiModelCatalog(TEST_USER);
+
+    // Only one API call should have been made
+    expect(fetchCount).toBe(1);
+  });
+
   it('clears the cache after clearGeminiModelCatalog()', async () => {
     const service = createGeminiModelCatalogService({
       getApiKey: async () => 'test-key',
