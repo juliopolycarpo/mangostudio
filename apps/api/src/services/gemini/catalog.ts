@@ -6,6 +6,7 @@
 import { GoogleGenAI } from '@google/genai';
 import type { Model } from '@google/genai';
 import type { GeminiModelCatalogResponse, GeminiModelOption } from '@mangostudio/shared';
+import { isImageModelId } from '@mangostudio/shared/utils/model-detection';
 import { GeminiApiKeyMissingError, getResolvedGeminiApiKey } from './secret';
 import { listSecretMetadata, GEMINI_PROVIDER } from '../secret-store/metadata';
 
@@ -36,12 +37,8 @@ function normalizeModelOption(model: Model): GeminiModelOption {
   };
 }
 
-function isImageModel(model: GeminiModelOption): boolean {
-  return model.modelId.includes('-image') || model.modelId.startsWith('imagen-');
-}
-
 function isTextModel(model: GeminiModelOption): boolean {
-  return model.supportedActions.includes('generateContent') && !isImageModel(model);
+  return model.supportedActions.includes('generateContent') && !isImageModelId(model.modelId);
 }
 
 function createEmptySnapshot(): GeminiModelCatalogResponse {
@@ -125,9 +122,11 @@ export function createGeminiModelCatalogService(
       status: 'ready',
       allModels: fullCatalog,
       discoveredTextModels: fullCatalog.filter(isTextModel),
-      discoveredImageModels: fullCatalog.filter(isImageModel),
+      discoveredImageModels: fullCatalog.filter((m) => isImageModelId(m.modelId)),
       textModels: fullCatalog.filter((m) => isTextModel(m) && enabledIds.has(m.modelId)),
-      imageModels: fullCatalog.filter((m) => isImageModel(m) && enabledIds.has(m.modelId)),
+      imageModels: fullCatalog.filter(
+        (m) => isImageModelId(m.modelId) && enabledIds.has(m.modelId)
+      ),
     });
   };
 
