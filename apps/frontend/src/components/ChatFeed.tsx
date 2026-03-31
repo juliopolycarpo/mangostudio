@@ -1,10 +1,44 @@
 /* global document */
-import type { Message } from '@mangostudio/shared';
-import { Sparkles, Download, Bookmark, ImageOff, Image } from 'lucide-react';
+import type { Message, MessagePart } from '@mangostudio/shared';
+import { Sparkles, Download, Bookmark, ImageOff, Image, Brain, ChevronDown } from 'lucide-react';
 import { format } from 'date-fns';
 import { motion } from 'motion/react';
 import { useState, useRef } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
+import { useI18n } from '@/hooks/use-i18n';
+
+function ThinkingBlock({ text, isStreaming }: { text: string; isStreaming: boolean }) {
+  const { t } = useI18n();
+  const [expanded, setExpanded] = useState(false);
+
+  return (
+    <div className="mb-3">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="flex items-center gap-2 text-xs text-on-surface-variant bg-surface-container-lowest
+                   py-2 px-3 rounded-lg w-fit border border-outline-variant/10 hover:bg-surface-container-low
+                   transition-colors cursor-pointer"
+      >
+        <Brain size={12} className="text-primary" />
+        <span>{isStreaming ? t.thinking.streaming : t.thinking.label}</span>
+        <ChevronDown size={12} className={`transition-transform ${expanded ? 'rotate-180' : ''}`} />
+      </button>
+      {expanded && (
+        <motion.div
+          initial={{ opacity: 0, height: 0 }}
+          animate={{ opacity: 1, height: 'auto' }}
+          className="mt-2 bg-surface-container-lowest p-4 rounded-xl border border-outline-variant/10
+                     text-xs text-on-surface-variant font-mono leading-relaxed whitespace-pre-wrap max-h-64 overflow-y-auto"
+        >
+          {text}
+          {isStreaming && (
+            <span className="inline-block w-0.5 h-[1em] bg-primary/50 ml-0.5 align-middle animate-blink" />
+          )}
+        </motion.div>
+      )}
+    </div>
+  );
+}
 
 export function ChatFeed({ messages }: { messages: Message[] }) {
   const [imageErrors, setImageErrors] = useState<Record<string, boolean>>({});
@@ -131,23 +165,43 @@ export function ChatFeed({ messages }: { messages: Message[] }) {
                       {msg.isGenerating ? (
                         /* Loading / streaming state */
                         <div className="flex flex-col gap-3 py-4 pl-9">
-                          {isImageTurn || !msg.text ? (
-                            /* Image generation or waiting for first text chunk */
-                            <>
-                              <span className="text-sm font-medium text-on-surface animate-pulse">
-                                {isImageTurn ? 'Generating image...' : 'Thinking...'}
-                              </span>
-                              <div className="h-1 w-24 bg-surface-container-highest rounded-full overflow-hidden">
-                                <div className="h-full bg-primary w-1/2 animate-[slide_1s_ease-in-out_infinite_alternate]"></div>
+                          {(() => {
+                            const parts: MessagePart[] = msg.parts ?? (msg.text ? [{ type: 'text', text: msg.text }] : []);
+                            const thinkingPart = parts.find(p => p.type === 'thinking');
+                            const textParts = parts.filter(p => p.type === 'text');
+                            const combinedText = textParts.map(p => (p as { type: 'text'; text: string }).text).join('');
+                            const isThinkingOnly = !!thinkingPart && !combinedText;
+
+                            if (isImageTurn || (!msg.text && !thinkingPart)) {
+                              return (
+                                <>
+                                  <span className="text-sm font-medium text-on-surface animate-pulse">
+                                    {isImageTurn ? 'Generating image...' : 'Thinking...'}
+                                  </span>
+                                  <div className="h-1 w-24 bg-surface-container-highest rounded-full overflow-hidden">
+                                    <div className="h-full bg-primary w-1/2 animate-[slide_1s_ease-in-out_infinite_alternate]"></div>
+                                  </div>
+                                </>
+                              );
+                            }
+
+                            return (
+                              <div className="flex flex-col gap-3">
+                                {thinkingPart && (
+                                  <ThinkingBlock
+                                    text={(thinkingPart as { type: 'thinking'; text: string }).text}
+                                    isStreaming={isThinkingOnly}
+                                  />
+                                )}
+                                {combinedText && (
+                                  <div className="bg-surface-container-low p-5 rounded-2xl border border-outline-variant/10 font-body text-sm leading-relaxed text-on-surface whitespace-pre-wrap max-w-2xl">
+                                    {combinedText}
+                                    <span className="inline-block w-0.5 h-[1em] bg-primary ml-0.5 align-middle animate-blink" />
+                                  </div>
+                                )}
                               </div>
-                            </>
-                          ) : (
-                            /* Text is streaming — show partial response with cursor */
-                            <div className="bg-surface-container-low p-5 rounded-2xl border border-outline-variant/10 font-body text-sm leading-relaxed text-on-surface whitespace-pre-wrap max-w-2xl">
-                              {msg.text}
-                              <span className="inline-block w-0.5 h-[1em] bg-primary ml-0.5 align-middle animate-blink" />
-                            </div>
-                          )}
+                            );
+                          })()}
                         </div>
                       ) : isImageTurn ? (
                         /* ── Image turn result ── */
@@ -253,12 +307,28 @@ export function ChatFeed({ messages }: { messages: Message[] }) {
                               <span>Responded in {msg.generationTime}</span>
                             </div>
                           )}
-                          <div className="bg-surface-container-low p-5 rounded-2xl border border-outline-variant/10 font-body text-sm leading-relaxed text-on-surface whitespace-pre-wrap max-w-2xl">
-                            {msg.text || (
-                              /* No text and no image — likely a persistent error */
-                              <span className="text-on-surface-variant/50 italic">No response</span>
-                            )}
-                          </div>
+                          {(() => {
+                            const parts: MessagePart[] = msg.parts ?? (msg.text ? [{ type: 'text', text: msg.text }] : []);
+                            const thinkingPart = parts.find(p => p.type === 'thinking');
+                            const textParts = parts.filter(p => p.type === 'text');
+                            const combinedText = textParts.map(p => (p as { type: 'text'; text: string }).text).join('');
+
+                            return (
+                              <>
+                                {thinkingPart && (
+                                  <ThinkingBlock
+                                    text={(thinkingPart as { type: 'thinking'; text: string }).text}
+                                    isStreaming={false}
+                                  />
+                                )}
+                                <div className="bg-surface-container-low p-5 rounded-2xl border border-outline-variant/10 font-body text-sm leading-relaxed text-on-surface whitespace-pre-wrap max-w-2xl">
+                                  {combinedText || (
+                                    <span className="text-on-surface-variant/50 italic">No response</span>
+                                  )}
+                                </div>
+                              </>
+                            );
+                          })()}
                         </div>
                       )}
                     </div>
