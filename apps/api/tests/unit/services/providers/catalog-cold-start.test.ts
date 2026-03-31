@@ -14,7 +14,7 @@ function makeService(modelList: typeof MOCK_MODEL[] = [MOCK_MODEL], enabledIds: 
   return createUnifiedModelCatalogService({
     listProviders: () => ['gemini' as ProviderType],
     getProviderFn: () => ({ listModels: async () => modelList } as any),
-    listSecretMetadataFn: async () =>
+    listAllSecretMetadataFn: async () =>
       [{ enabledModels: JSON.stringify(enabledIds) }] as any,
   });
 }
@@ -40,7 +40,7 @@ describe('createUnifiedModelCatalogService.getUnifiedModelCatalog', () => {
           return [MOCK_MODEL];
         },
       } as any),
-      listSecretMetadataFn: async () =>
+      listAllSecretMetadataFn: async () =>
         [{ enabledModels: JSON.stringify([MOCK_MODEL.modelId]) }] as any,
     });
 
@@ -61,7 +61,7 @@ describe('createUnifiedModelCatalogService.getUnifiedModelCatalog', () => {
       getProviderFn: () => ({
         listModels: async () => { throw new Error('provider unavailable'); },
       } as any),
-      listSecretMetadataFn: async () => [] as any,
+      listAllSecretMetadataFn: async () => [] as any,
     });
 
     const result = await service.getUnifiedModelCatalog('user-error');

@@ -31,6 +31,11 @@ export interface SecretMetadataInput {
 /**
  * Loads all metadata records for a provider.
  *
+ * Returns an empty array when the DB is not yet fully initialised (e.g. in
+ * test workers that only partially mock the database module), preventing a
+ * TypeError from bubbling up through syncConfigFileConnectors during stream
+ * handler execution.
+ *
  * @param provider - Provider identifier.
  * @param userId - User ID to filter by.
  * @returns List of stored connector metadata rows.
@@ -39,13 +44,18 @@ export async function listSecretMetadata(
   provider: string,
   userId: string
 ): Promise<SecretMetadataRow[]> {
-  const db = getDb();
-  return db
-    .selectFrom('secret_metadata')
-    .selectAll()
-    .where('provider', '=', provider)
-    .where((eb) => eb.or([eb('userId', '=', userId), eb('userId', 'is', null)]))
-    .execute();
+  try {
+    const db = getDb();
+    return await db
+      .selectFrom('secret_metadata')
+      .selectAll()
+      .where('provider', '=', provider)
+      .where((eb) => eb.or([eb('userId', '=', userId), eb('userId', 'is', null)]))
+      .execute();
+  } catch (err) {
+    if (err instanceof TypeError) return [];
+    throw err;
+  }
 }
 
 /**

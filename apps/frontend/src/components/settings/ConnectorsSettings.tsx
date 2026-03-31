@@ -125,8 +125,6 @@ export function ConnectorsSettings({ modelCatalog, reloadModelCatalog }: Connect
       const { error } = await client.api.settings.connectors.post(body);
       if (error) throw new Error(extractApiError(error.value, 'Failed to add connector'));
 
-      await loadStatus();
-      await reloadModelCatalog();
       setIsAddModalOpen(false);
       setNewConnector({
         name: '',
@@ -138,6 +136,8 @@ export function ConnectorsSettings({ modelCatalog, reloadModelCatalog }: Connect
         source: 'bun-secrets',
       });
       toast(s.addSuccess, 'success');
+      await loadStatus();
+      await reloadModelCatalog();
     } catch (err) {
       setFormError(err instanceof Error ? err.message : 'Unknown error');
     } finally {
