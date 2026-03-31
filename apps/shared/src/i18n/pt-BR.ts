@@ -68,7 +68,8 @@ export const messages = {
       addModalDescription: 'Escolha o provider, configure a chave de API e o armazenamento.',
       providerLabel: 'Provider',
       selectProvider: 'Selecione o Provider',
-      baseUrlLabel: 'URL Base (opcional)',
+      baseUrlLabel: 'URL Base',
+      baseUrlRequired: 'URL Base é obrigatória para conectores OpenAI Compatível.',
       baseUrlPlaceholder: 'https://api.example.com/v1',
       nameLabel: 'Nome',
       namePlaceholder: 'ex. Projeto Pessoal',
@@ -108,9 +109,9 @@ export const messages = {
 
   providers: {
     gemini: 'Google Gemini',
-    'openai-compatible': 'OpenAI',
     anthropic: 'Anthropic',
     openai: 'OpenAI',
+    'openai-compatible': 'OpenAI Compatível',
     deepseek: 'DeepSeek',
     openrouter: 'OpenRouter',
   },
