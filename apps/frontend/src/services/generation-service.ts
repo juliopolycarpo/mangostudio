@@ -22,7 +22,8 @@ export interface RespondTextRequest {
   prompt: string;
   model?: string;
   systemPrompt?: string;
-  thinkingVisibility?: string;
+  thinkingEnabled?: boolean;
+  reasoningEffort?: string;
 }
 
 export interface RespondTextResponse {

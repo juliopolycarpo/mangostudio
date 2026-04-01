@@ -46,6 +46,8 @@ export function useAppState() {
     getActiveModel,
     systemPrompt: settings.globalTextSystemPrompt,
     optimistic,
+    thinkingEnabled: settings.thinkingEnabled,
+    reasoningEffort: settings.reasoningEffort,
   });
 
   const imageGen = useImageGeneration({

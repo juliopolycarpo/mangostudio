@@ -42,7 +42,10 @@ export interface Message {
   providerState?: string; // opaque JSON for provider continuity
 }
 
-/** Thinking display mode — configurable per provider in settings. */
+/** Effort level for reasoning models. */
+export type ReasoningEffort = 'low' | 'medium' | 'high';
+
+/** @deprecated Use ThinkingEnabled (boolean) + ReasoningEffort instead. */
 export type ThinkingVisibility = 'summary' | 'full' | 'off';
 
 /** Discriminated union of all content block types in an assistant message. */

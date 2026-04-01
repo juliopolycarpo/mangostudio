@@ -96,7 +96,7 @@ describe('GeminiProvider.generateTextStream', () => {
     }).toThrow('No Gemini text model was provided.');
   });
 
-  it('emits thinking chunks when thinkingVisibility is summary', async () => {
+  it('emits thinking chunks when thinkingEnabled is true', async () => {
     mock.module('@google/genai', () => ({
       GoogleGenAI: class {
         models = {
@@ -132,7 +132,7 @@ describe('GeminiProvider.generateTextStream', () => {
       'Hi',
       undefined,
       'gemini-2.0-flash-thinking-exp',
-      { thinkingVisibility: 'summary' }
+      { thinkingEnabled: true, reasoningEffort: 'medium' }
     )) {
       chunks.push(chunk);
     }
@@ -142,7 +142,7 @@ describe('GeminiProvider.generateTextStream', () => {
     expect(chunks[2]).toEqual({ type: 'text', text: '', done: true });
   });
 
-  it('does not add thinkingConfig when thinkingVisibility is off', async () => {
+  it('does not add thinkingConfig when thinkingEnabled is false', async () => {
     let capturedConfig: Record<string, unknown> | undefined;
 
     mock.module('@google/genai', () => ({
@@ -170,7 +170,7 @@ describe('GeminiProvider.generateTextStream', () => {
       'Hi',
       undefined,
       'gemini-2.0-flash',
-      { thinkingVisibility: 'off' }
+      { thinkingEnabled: false, reasoningEffort: 'medium' }
     )) {
       // consume
     }
@@ -203,7 +203,7 @@ describe('GeminiProvider.generateTextStream', () => {
       'Hi',
       undefined,
       'gemini-2.0-flash',
-      { thinkingVisibility: 'summary' }
+      { thinkingEnabled: true, reasoningEffort: 'medium' }
     )) {
       chunks.push(chunk);
     }

@@ -141,6 +141,7 @@ export interface ModelCapabilities {
   text: boolean;
   image: boolean;
   streaming: boolean;
+  reasoning?: boolean;
 }
 
 /** A UI-safe model option discovered from a provider. */

@@ -2,7 +2,7 @@
  * Core types for the AI provider abstraction layer.
  */
 
-import type { MessagePart, ThinkingVisibility, ProviderType } from '@mangostudio/shared/types';
+import type { MessagePart, ReasoningEffort, ProviderType } from '@mangostudio/shared/types';
 
 /** Minimal message shape for text generation context. */
 export interface TextContextMessage {
@@ -19,7 +19,8 @@ export interface ToolDefinition {
 
 /** Generation configuration passed through to provider adapters. */
 export interface GenerationConfig {
-  thinkingVisibility: ThinkingVisibility;
+  thinkingEnabled: boolean;
+  reasoningEffort: ReasoningEffort;
   tools?: ToolDefinition[];
   maxToolIterations?: number;
 }
@@ -84,6 +85,7 @@ export interface ModelInfo {
     text: boolean;
     image: boolean;
     streaming: boolean;
+    reasoning?: boolean;
   };
 }
 

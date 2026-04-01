@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { Plus, Settings } from 'lucide-react';
-import type { ModelCatalogResponse, ModelOption } from '@mangostudio/shared';
+import type { ModelCatalogResponse, ModelOption, ReasoningEffort } from '@mangostudio/shared';
 import { ModelSelector } from './ModelSelector';
+import { ThinkingToggle } from './ThinkingToggle';
 import { authClient } from '@/lib/auth-client';
 import { useNavigate } from '@tanstack/react-router';
 import { useToast } from '@/components/ui/Toast';
@@ -19,6 +20,10 @@ export interface HeaderProps {
   onNewChat: () => void;
   onNavigateToSettings: () => void;
   modelCatalog: ModelCatalogResponse;
+  thinkingEnabled: boolean;
+  reasoningEffort: ReasoningEffort;
+  onThinkingToggle: (enabled: boolean) => void;
+  onReasoningEffortChange: (effort: ReasoningEffort) => void;
 }
 
 export function Header({
@@ -32,12 +37,18 @@ export function Header({
   onNewChat,
   onNavigateToSettings,
   modelCatalog,
+  thinkingEnabled,
+  reasoningEffort,
+  onThinkingToggle,
+  onReasoningEffortChange,
 }: HeaderProps) {
   const { data: session } = authClient.useSession();
   const navigate = useNavigate();
   const { toast } = useToast();
   const { t } = useI18n();
   const [loggingOut, setLoggingOut] = useState(false);
+  const selectedModel = activeModels.find((m) => m.modelId === activeModel);
+  const selectedModelSupportsReasoning = selectedModel?.capabilities?.reasoning === true;
 
   const handleLogout = async () => {
     setLoggingOut(true);
@@ -63,6 +74,13 @@ export function Header({
             currentChatId ? onUpdateChatModel(currentChatId, modelId) : onSetPageModel(modelId)
           }
           modelCatalog={modelCatalog}
+        />
+        <ThinkingToggle
+          enabled={thinkingEnabled}
+          effort={reasoningEffort}
+          visible={selectedModelSupportsReasoning}
+          onToggle={onThinkingToggle}
+          onEffortChange={onReasoningEffortChange}
         />
       </div>
       <div className="flex items-center gap-3">

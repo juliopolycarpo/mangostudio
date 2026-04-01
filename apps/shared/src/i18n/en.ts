@@ -134,6 +134,14 @@ export const messages: Messages = {
     label: 'Thought process',
     streaming: 'Thinking...',
     toggle: 'View reasoning',
+    enable: 'Thinking',
+    enabled: 'Thinking enabled',
+    disabled: 'Thinking disabled',
+    effort: 'Effort',
+    effortLow: 'Low',
+    effortMedium: 'Medium',
+    effortHigh: 'High',
+    reasoningBadge: 'Reasoning',
   },
 
   errors: {

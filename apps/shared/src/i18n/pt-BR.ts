@@ -133,6 +133,14 @@ export const messages = {
     label: 'Processo de raciocínio',
     streaming: 'Pensando...',
     toggle: 'Ver raciocínio',
+    enable: 'Raciocinar',
+    enabled: 'Raciocínio ativo',
+    disabled: 'Raciocínio desativado',
+    effort: 'Esforço',
+    effortLow: 'Baixo',
+    effortMedium: 'Médio',
+    effortHigh: 'Alto',
+    reasoningBadge: 'Reasoning',
   },
 
   errors: {

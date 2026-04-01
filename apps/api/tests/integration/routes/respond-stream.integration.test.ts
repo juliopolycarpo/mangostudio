@@ -54,6 +54,27 @@ describe('POST /respond/stream', () => {
     expect(response.status).toBe(404);
   });
 
+  it('accepts thinkingEnabled and reasoningEffort in request body', async () => {
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
+    restoreAuth = restore;
+
+    const response = await app.handle(
+      new Request('http://localhost/respond/stream', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chatId: 'nonexistent-chat',
+          prompt: 'Hello',
+          thinkingEnabled: true,
+          reasoningEffort: 'high',
+        }),
+      })
+    );
+
+    // Should reach the chat ownership check (404), not a schema validation error (422)
+    expect(response.status).toBe(404);
+  });
+
   it('accepts legacy requests without thinkingVisibility', async () => {
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
     restoreAuth = restore;

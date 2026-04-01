@@ -14,7 +14,7 @@ import { createProviderSecretService } from './secret-service';
 import { withModelCache } from './model-cache';
 import { registerProvider } from './registry';
 import { getConfig } from '../../lib/config';
-import { isImageModelId } from '@mangostudio/shared/utils/model-detection';
+import { isImageModelId, isReasoningModel } from '@mangostudio/shared/utils/model-detection';
 import type {
   AIProvider,
   TextGenerationRequest,
@@ -213,6 +213,7 @@ const listModelsWithCache = withModelCache(
             text: !isImageModelId(model.id),
             image: isImageModelId(model.id),
             streaming: !isImageModelId(model.id),
+            reasoning: isReasoningModel(model.id),
           },
         });
       }
@@ -243,6 +244,183 @@ function buildMessages(req: TextGenerationRequest): OpenAI.ChatCompletionMessage
 }
 
 // ---------------------------------------------------------------------------
+// Responses API helpers for reasoning models
+// ---------------------------------------------------------------------------
+
+/**
+ * Builds the `input` array for the Responses API from a TextGenerationRequest.
+ * Maps history + current prompt into the shape expected by responses.create().
+ */
+function buildResponsesInput(req: TextGenerationRequest): Array<{ role: string; content: string }> {
+  const messages: Array<{ role: string; content: string }> = [];
+
+  for (const msg of req.history) {
+    messages.push({
+      role: msg.role === 'ai' ? 'assistant' : 'user',
+      content: msg.text,
+    });
+  }
+
+  messages.push({ role: 'user', content: req.prompt });
+  return messages;
+}
+
+/**
+ * Extracts reasoning text from a completed response payload.
+ * Tries summary array first, then falls back to reasoning content array.
+ */
+export function extractReasoningFromCompleted(response: Record<string, unknown>): string | null {
+  const output = response?.output;
+  if (!Array.isArray(output)) return null;
+
+  for (const item of output) {
+    if (item.type !== 'reasoning') continue;
+
+    // Try summary array first
+    if (Array.isArray(item.summary)) {
+      const texts = item.summary
+        .filter((s: Record<string, unknown>) => s.type === 'summary_text' && s.text)
+        .map((s: Record<string, unknown>) => s.text as string);
+      if (texts.length > 0) return texts.join('\n\n');
+    }
+
+    // Fallback: reasoning content array
+    if (Array.isArray(item.content)) {
+      const texts = item.content
+        .filter((c: Record<string, unknown>) => c.type === 'reasoning_text' && c.text)
+        .map((c: Record<string, unknown>) => c.text as string);
+      if (texts.length > 0) return texts.join('\n\n');
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Streams a reasoning model response using the OpenAI Responses API.
+ * Handles all reasoning event families with proper deduplication.
+ */
+export async function* streamWithResponsesAPI(
+  client: OpenAI,
+  req: TextGenerationRequest
+): AsyncIterable<StreamingChunk> {
+  const effort = req.generationConfig?.reasoningEffort ?? 'medium';
+  const input = buildResponsesInput(req);
+
+  const stream = await (client as any).responses.create({
+    model: req.modelName,
+    input,
+    ...(req.systemPrompt?.trim() ? { instructions: req.systemPrompt } : {}),
+    stream: true,
+    reasoning: {
+      effort,
+      summary: 'auto',
+    },
+  });
+
+  // Deduplication state
+  const seenSummaryDeltas = new Set<string>();
+  let thinkingWasEmitted = false;
+  let summaryEventsWereSeen = false;
+
+  for await (const event of stream) {
+    if (req.signal?.aborted) break;
+
+    const ev = event as Record<string, any>;
+    const type = ev.type as string;
+
+    switch (type) {
+      // --- Reasoning summary (preferred path) ---
+      case 'response.reasoning_summary_text.delta': {
+        const key = `${ev.item_id}:${ev.summary_index}`;
+        seenSummaryDeltas.add(key);
+        summaryEventsWereSeen = true;
+        thinkingWasEmitted = true;
+        if (ev.delta) yield { type: 'thinking', text: ev.delta, done: false };
+        break;
+      }
+
+      // --- Raw reasoning text (fallback when no summary) ---
+      case 'response.reasoning_text.delta': {
+        if (!summaryEventsWereSeen) {
+          thinkingWasEmitted = true;
+          if (ev.delta) yield { type: 'thinking', text: ev.delta, done: false };
+        }
+        break;
+      }
+
+      // --- Summary done events (fallback if no delta was streamed) ---
+      case 'response.reasoning_summary_text.done': {
+        const key = `${ev.item_id}:${ev.summary_index}`;
+        if (!seenSummaryDeltas.has(key) && ev.text) {
+          thinkingWasEmitted = true;
+          yield { type: 'thinking', text: ev.text, done: false };
+        }
+        break;
+      }
+
+      case 'response.reasoning_summary_part.done': {
+        if (ev.part?.type === 'summary_text' && ev.part.text) {
+          const key = `${ev.item_id}:${ev.summary_index}`;
+          if (!seenSummaryDeltas.has(key)) {
+            thinkingWasEmitted = true;
+            yield { type: 'thinking', text: ev.part.text, done: false };
+          }
+        }
+        break;
+      }
+
+      case 'response.reasoning_text.done': {
+        if (!summaryEventsWereSeen && !thinkingWasEmitted && ev.text) {
+          yield { type: 'thinking', text: ev.text, done: false };
+          thinkingWasEmitted = true;
+        }
+        break;
+      }
+
+      // --- Assistant text ---
+      case 'response.output_text.delta': {
+        if (ev.delta) yield { type: 'text', text: ev.delta, done: false };
+        break;
+      }
+
+      // --- Final response fallback ---
+      case 'response.completed': {
+        if (!thinkingWasEmitted && ev.response) {
+          const reasoning = extractReasoningFromCompleted(ev.response);
+          if (reasoning) {
+            yield { type: 'thinking', text: reasoning, done: false };
+          }
+        }
+        break;
+      }
+    }
+  }
+
+  yield { type: 'text', text: '', done: true };
+}
+
+/**
+ * Streams a non-reasoning model response using the Chat Completions API.
+ */
+async function* streamWithChatCompletions(
+  client: OpenAI,
+  req: TextGenerationRequest
+): AsyncIterable<StreamingChunk> {
+  const stream = await client.chat.completions.create(
+    { model: req.modelName, messages: buildMessages(req), stream: true },
+    { signal: req.signal }
+  );
+
+  for await (const chunk of stream) {
+    if (req.signal?.aborted) break;
+    const delta = chunk.choices[0]?.delta?.content;
+    if (delta) yield { type: 'text', text: delta, done: false };
+  }
+  yield { type: 'text', text: '', done: true };
+}
+
+// ---------------------------------------------------------------------------
 // Provider implementation
 // ---------------------------------------------------------------------------
 
@@ -267,17 +445,11 @@ const openAIProvider: AIProvider = {
     const ctx = await resolveAuthContext(req.userId, req.modelName);
     const client = createClient(ctx);
 
-    const stream = await client.chat.completions.create(
-      { model: req.modelName, messages: buildMessages(req), stream: true },
-      { signal: req.signal }
-    );
-
-    for await (const chunk of stream) {
-      if (req.signal?.aborted) break;
-      const delta = chunk.choices[0]?.delta?.content;
-      if (delta) yield { type: 'text', text: delta, done: false };
+    if (isReasoningModel(req.modelName) && req.generationConfig?.thinkingEnabled) {
+      yield* streamWithResponsesAPI(client, req);
+    } else {
+      yield* streamWithChatCompletions(client, req);
     }
-    yield { type: 'text', text: '', done: true };
   },
 
   async generateImage(req: ImageGenerationRequest): Promise<ImageGenerationResult> {
