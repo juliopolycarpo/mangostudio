@@ -43,43 +43,46 @@ export function ThinkingToggle({
 
   return (
     <div className="relative" ref={ref}>
-      <div className="flex items-center gap-1">
+      <div className="flex items-center gap-1.5">
+        {/* Reasoning toggle button — pill style matching the rest of the app */}
         <button
           type="button"
           onClick={() => onToggle(!enabled)}
-          className={`flex items-center gap-2 px-3 py-1.5 rounded-lg transition-all duration-200 text-sm font-medium ${
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all duration-200 ${
             enabled
-              ? 'bg-amber-500/15 text-amber-400 border border-amber-500/30'
-              : 'bg-surface-container-high text-on-surface-variant hover:bg-surface-container-highest border border-transparent'
+              ? 'bg-amber-500/15 text-amber-400 border border-amber-500/30 hover:bg-amber-500/20'
+              : 'bg-surface-container-high text-on-surface-variant hover:bg-surface-container-highest border border-outline-variant/20 hover:text-on-surface'
           }`}
         >
-          <Brain size={14} />
+          <Brain size={13} />
           <span>{t.thinking.enable}</span>
         </button>
 
+        {/* Effort selector — only visible when reasoning is on */}
         {enabled && (
           <button
             type="button"
             onClick={() => setIsOpen(!isOpen)}
-            className="flex items-center gap-1 px-2 py-1.5 rounded-lg bg-surface-container-high text-on-surface-variant hover:bg-surface-container-highest transition-all duration-200 text-xs font-medium border border-transparent"
+            className="flex items-center gap-1 px-3 py-1.5 rounded-full bg-surface-container-high text-on-surface-variant hover:bg-surface-container-highest hover:text-on-surface transition-all duration-200 text-xs font-medium border border-outline-variant/20"
           >
             <span>{effortLabels[effort]}</span>
             <ChevronDown
-              size={12}
+              size={11}
               className={`transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`}
             />
           </button>
         )}
       </div>
 
+      {/* Dropdown — opens upward since it's above the input */}
       <AnimatePresence>
         {isOpen && (
           <motion.div
-            initial={{ opacity: 0, y: 8, scale: 0.95 }}
+            initial={{ opacity: 0, y: 6, scale: 0.95 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 8, scale: 0.95 }}
+            exit={{ opacity: 0, y: 6, scale: 0.95 }}
             transition={{ duration: 0.15, ease: 'easeOut' }}
-            className="absolute left-0 top-full mt-2 w-40 glass-panel border border-outline-variant/20 rounded-xl shadow-2xl overflow-hidden z-[100]"
+            className="absolute left-0 bottom-full mb-2 w-36 glass-panel border border-outline-variant/20 rounded-xl shadow-2xl overflow-hidden z-[100]"
           >
             <div className="py-1">
               {efforts.map((e) => (
@@ -90,12 +93,12 @@ export function ThinkingToggle({
                     onEffortChange(e);
                     setIsOpen(false);
                   }}
-                  className="w-full flex items-center justify-between px-4 py-2 text-sm hover:bg-primary/10 transition-colors"
+                  className="w-full flex items-center justify-between px-4 py-2 text-xs hover:bg-primary/10 transition-colors"
                 >
                   <span className={effort === e ? 'text-amber-400 font-medium' : 'text-on-surface'}>
                     {effortLabels[e]}
                   </span>
-                  {effort === e && <Check size={14} className="text-amber-400" />}
+                  {effort === e && <Check size={13} className="text-amber-400" />}
                 </button>
               ))}
             </div>

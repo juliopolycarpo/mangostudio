@@ -3,7 +3,7 @@ import { ChatFeed } from '../../components/ChatFeed';
 import { InputBar } from '../../components/InputBar';
 import { useMessagesQuery } from '../../hooks/use-messages-query';
 import { useI18n } from '../../hooks/use-i18n';
-import type { InteractionMode } from '@mangostudio/shared';
+import type { InteractionMode, ReasoningEffort } from '@mangostudio/shared';
 
 interface ChatPageProps {
   chatId: string | null;
@@ -13,7 +13,12 @@ interface ChatPageProps {
   disabled: boolean;
   isGenerating: boolean;
   onStop: () => void;
-  streamingThinking?: string;
+  // Reasoning controls
+  thinkingEnabled: boolean;
+  reasoningEffort: ReasoningEffort;
+  onThinkingToggle: (enabled: boolean) => void;
+  onReasoningEffortChange: (effort: ReasoningEffort) => void;
+  reasoningVisible: boolean;
 }
 
 export function ChatPage({
@@ -24,7 +29,11 @@ export function ChatPage({
   disabled,
   isGenerating,
   onStop,
-  streamingThinking,
+  thinkingEnabled,
+  reasoningEffort,
+  onThinkingToggle,
+  onReasoningEffortChange,
+  reasoningVisible,
 }: ChatPageProps) {
   const { data, status } = useMessagesQuery(chatId);
   const { t } = useI18n();
@@ -43,7 +52,7 @@ export function ChatPage({
           <p className="text-sm font-body">{t.chat.empty}</p>
         </div>
       ) : (
-        <ChatFeed messages={messages} />
+        <ChatFeed chatId={chatId} messages={messages} />
       )}
       <InputBar
         composerMode={composerMode}
@@ -52,7 +61,11 @@ export function ChatPage({
         disabled={disabled}
         isGenerating={isGenerating}
         onStop={onStop}
-        streamingThinking={streamingThinking}
+        thinkingEnabled={thinkingEnabled}
+        reasoningEffort={reasoningEffort}
+        onThinkingToggle={onThinkingToggle}
+        onReasoningEffortChange={onReasoningEffortChange}
+        reasoningVisible={reasoningVisible}
       />
     </div>
   );

@@ -1,19 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
-import {
-  MessageSquare,
-  ImagePlus,
-  PlusCircle,
-  Mic,
-  Zap,
-  Send,
-  Square,
-  X,
-  Brain,
-  ChevronDown,
-} from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
-import { useI18n } from '@/hooks/use-i18n';
-import type { InteractionMode } from '@mangostudio/shared';
+import { MessageSquare, ImagePlus, PlusCircle, Mic, Zap, Send, Square, X } from 'lucide-react';
+import type { InteractionMode, ReasoningEffort } from '@mangostudio/shared';
+import { ThinkingToggle } from '@/components/layout/ThinkingToggle';
 
 interface Props {
   composerMode: InteractionMode;
@@ -22,7 +10,12 @@ interface Props {
   disabled?: boolean;
   isGenerating?: boolean;
   onStop?: () => void;
-  streamingThinking?: string;
+  // Thinking / reasoning controls
+  thinkingEnabled?: boolean;
+  reasoningEffort?: ReasoningEffort;
+  onThinkingToggle?: (enabled: boolean) => void;
+  onReasoningEffortChange?: (effort: ReasoningEffort) => void;
+  reasoningVisible?: boolean;
 }
 
 export function InputBar({
@@ -32,10 +25,12 @@ export function InputBar({
   disabled,
   isGenerating,
   onStop,
-  streamingThinking,
+  thinkingEnabled = false,
+  reasoningEffort = 'medium',
+  onThinkingToggle,
+  onReasoningEffortChange,
+  reasoningVisible = false,
 }: Props) {
-  const { t } = useI18n();
-  const [thinkingExpanded, setThinkingExpanded] = useState(true);
   const [prompt, setPrompt] = useState('');
   const [referenceImage, setReferenceImage] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -71,58 +66,22 @@ export function InputBar({
   return (
     <footer className="shrink-0 p-6">
       <div className="max-w-4xl mx-auto w-full">
-        {/* Streaming thinking panel — above input, aligned left */}
-        <AnimatePresence>
-          {streamingThinking && isGenerating && (
-            <motion.div
-              key="thinking-panel"
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: 4 }}
-              transition={{ duration: 0.2, ease: 'easeOut' }}
-              className="mb-3"
-            >
-              <button
-                onClick={() => setThinkingExpanded(!thinkingExpanded)}
-                className="flex items-center gap-2 text-xs text-on-surface-variant/70
-                           py-1.5 px-3 rounded-full w-fit border border-outline-variant/20
-                           hover:border-outline-variant/40 hover:text-on-surface-variant
-                           transition-all duration-200 cursor-pointer mb-1.5"
-                style={{ background: 'rgba(14,14,14,0.6)', backdropFilter: 'blur(8px)' }}
-              >
-                <Brain size={11} className="text-primary/70" />
-                <span className="tracking-wide">{t.thinking.streaming}</span>
-                <ChevronDown
-                  size={11}
-                  className={`transition-transform duration-300 text-primary/50 ${
-                    thinkingExpanded ? 'rotate-180' : ''
-                  }`}
-                />
-              </button>
-              <AnimatePresence>
-                {thinkingExpanded && (
-                  <motion.div
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: 'auto' }}
-                    exit={{ opacity: 0, height: 0 }}
-                    transition={{ duration: 0.2, ease: 'easeOut' }}
-                    className="rounded-xl border border-outline-variant/15 overflow-hidden"
-                    style={{ background: 'rgba(14,14,14,0.5)', backdropFilter: 'blur(12px)' }}
-                  >
-                    <div className="p-4 max-h-40 overflow-y-auto app-scrollbar">
-                      <p className="text-xs text-on-surface-variant/60 font-mono leading-relaxed whitespace-pre-wrap">
-                        {streamingThinking}
-                        <span className="inline-block w-0.5 h-[1em] bg-primary/40 ml-0.5 align-middle animate-blink" />
-                      </p>
-                    </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </motion.div>
+        {/* Bottom toolbar: reasoning controls (left) + mode switch (right) */}
+        <div className="flex items-center justify-between mb-3">
+          {/* Reasoning controls — left-aligned, shown only for capable models */}
+          {onThinkingToggle && onReasoningEffortChange ? (
+            <ThinkingToggle
+              enabled={thinkingEnabled}
+              effort={reasoningEffort}
+              visible={reasoningVisible}
+              onToggle={onThinkingToggle}
+              onEffortChange={onReasoningEffortChange}
+            />
+          ) : (
+            <div />
           )}
-        </AnimatePresence>
-        {/* Mode Switch Toggle */}
-        <div className="flex justify-center mb-3">
+
+          {/* Mode Switch Toggle */}
           <div className="inline-flex bg-surface-container-low border border-outline-variant/10 rounded-full p-1 gap-1 shadow-sm">
             <button
               type="button"

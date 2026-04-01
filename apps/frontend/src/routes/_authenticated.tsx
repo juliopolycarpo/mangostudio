@@ -72,10 +72,6 @@ function AuthenticatedLayout() {
           onNewChat={app.handleNewChat}
           onNavigateToSettings={() => app.handleNavigate('settings')}
           modelCatalog={app.catalog}
-          thinkingEnabled={app.settings.thinkingEnabled}
-          reasoningEffort={app.settings.reasoningEffort}
-          onThinkingToggle={app.settings.setThinkingEnabled}
-          onReasoningEffortChange={app.settings.setReasoningEffort}
         />
 
         <div className="flex-1 min-h-0 overflow-hidden flex flex-col">

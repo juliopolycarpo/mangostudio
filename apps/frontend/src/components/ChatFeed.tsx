@@ -2,19 +2,99 @@
 import type { Message, MessagePart } from '@mangostudio/shared';
 import { Sparkles, Download, Bookmark, ImageOff, Image, Brain, ChevronDown } from 'lucide-react';
 import { format } from 'date-fns';
-import { motion } from 'motion/react';
-import { useState, useRef } from 'react';
+import { AnimatePresence, motion } from 'motion/react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { useI18n } from '@/hooks/use-i18n';
 
-function ThinkingBlock({ text, isStreaming }: { text: string; isStreaming: boolean }) {
+interface ThinkingBlockProps {
+  messageId: string;
+  text: string;
+  isStreaming: boolean;
+}
+
+interface ThinkingUiState {
+  expanded: boolean;
+  scrollTop: number;
+  shouldAutoFollow: boolean;
+}
+
+const thinkingUiStateByMessage = new Map<string, ThinkingUiState>();
+
+function isNearBottom(element: HTMLElement): boolean {
+  return element.scrollHeight - element.scrollTop - element.clientHeight <= 24;
+}
+
+function ThinkingBlock({ messageId, text, isStreaming }: ThinkingBlockProps) {
   const { t } = useI18n();
-  const [expanded, setExpanded] = useState(true);
+  const initialUiState = useRef<ThinkingUiState>(
+    thinkingUiStateByMessage.get(messageId) ?? {
+      expanded: isStreaming,
+      scrollTop: 0,
+      shouldAutoFollow: isStreaming,
+    }
+  );
+  const [expanded, setExpanded] = useState(initialUiState.current.expanded);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const uiStateRef = useRef(initialUiState.current);
+  const previousStreamingRef = useRef(isStreaming);
+
+  const updateUiState = (partial: Partial<ThinkingUiState>) => {
+    uiStateRef.current = {
+      ...uiStateRef.current,
+      ...partial,
+    };
+    thinkingUiStateByMessage.set(messageId, uiStateRef.current);
+  };
+
+  useEffect(() => {
+    if (!previousStreamingRef.current && isStreaming) {
+      setExpanded(true);
+      updateUiState({ expanded: true, shouldAutoFollow: true });
+    }
+
+    if (previousStreamingRef.current && !isStreaming) {
+      setExpanded(false);
+      updateUiState({ expanded: false, shouldAutoFollow: false });
+    }
+
+    previousStreamingRef.current = isStreaming;
+  }, [isStreaming]);
+
+  useLayoutEffect(() => {
+    if (!expanded || !scrollRef.current) return;
+
+    const element = scrollRef.current;
+    const maxScrollTop = Math.max(0, element.scrollHeight - element.clientHeight);
+
+    if (isStreaming && uiStateRef.current.shouldAutoFollow) {
+      element.scrollTop = maxScrollTop;
+      updateUiState({ scrollTop: element.scrollTop });
+      return;
+    }
+
+    element.scrollTop = Math.min(uiStateRef.current.scrollTop, maxScrollTop);
+  }, [expanded, isStreaming, text]);
+
+  const handleToggle = () => {
+    const nextExpanded = !expanded;
+    setExpanded(nextExpanded);
+    updateUiState({ expanded: nextExpanded });
+  };
+
+  const handleScroll = (event: React.UIEvent<HTMLDivElement>) => {
+    const element = event.currentTarget;
+    updateUiState({
+      scrollTop: element.scrollTop,
+      shouldAutoFollow: isStreaming ? isNearBottom(element) : uiStateRef.current.shouldAutoFollow,
+    });
+  };
 
   return (
     <div className="mb-3">
       <button
-        onClick={() => setExpanded(!expanded)}
+        type="button"
+        onClick={handleToggle}
         className="flex items-center gap-2 text-xs text-on-surface-variant/70
                    py-1.5 px-3 rounded-full w-fit border border-outline-variant/20
                    hover:border-outline-variant/40 hover:text-on-surface-variant
@@ -30,31 +110,43 @@ function ThinkingBlock({ text, isStreaming }: { text: string; isStreaming: boole
           className={`transition-transform duration-300 text-primary/50 ${expanded ? 'rotate-180' : ''}`}
         />
       </button>
-      {expanded && (
-        <motion.div
-          initial={{ opacity: 0, height: 0 }}
-          animate={{ opacity: 1, height: 'auto' }}
-          transition={{ duration: 0.25, ease: 'easeOut' }}
-          className="mt-1.5 rounded-xl border border-outline-variant/15 overflow-hidden"
-          style={{ background: 'rgba(14,14,14,0.5)', backdropFilter: 'blur(12px)' }}
-        >
-          <div className="p-4 max-h-48 overflow-y-auto app-scrollbar">
-            <p className="text-xs text-on-surface-variant/60 font-mono leading-relaxed whitespace-pre-wrap">
-              {text}
-              {isStreaming && (
-                <span className="inline-block w-0.5 h-[1em] bg-primary/40 ml-0.5 align-middle animate-blink" />
-              )}
-            </p>
-          </div>
-        </motion.div>
-      )}
+      <AnimatePresence initial={false}>
+        {expanded && (
+          <motion.div
+            key="thinking-body"
+            initial={{ opacity: 0, height: 0, y: -4 }}
+            animate={{ opacity: 1, height: 'auto', y: 0 }}
+            exit={{ opacity: 0, height: 0, y: -6 }}
+            transition={{ duration: 0.22, ease: 'easeOut' }}
+            className="mt-1.5 rounded-xl border border-outline-variant/15 overflow-hidden"
+            style={{ background: 'rgba(14,14,14,0.5)', backdropFilter: 'blur(12px)' }}
+          >
+            <div
+              ref={scrollRef}
+              onScroll={handleScroll}
+              className="p-4 max-h-48 overflow-y-auto app-scrollbar"
+            >
+              <p className="text-xs text-on-surface-variant/60 font-mono leading-relaxed whitespace-pre-wrap">
+                {text}
+                {isStreaming && (
+                  <span className="inline-block w-0.5 h-[1em] bg-primary/40 ml-0.5 align-middle animate-blink" />
+                )}
+              </p>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
 
-export function ChatFeed({ messages }: { messages: Message[] }) {
+export function ChatFeed({ chatId, messages }: { chatId: string | null; messages: Message[] }) {
   const [imageErrors, setImageErrors] = useState<Record<string, boolean>>({});
   const parentRef = useRef<HTMLDivElement>(null);
+  const feedShouldAutoFollowRef = useRef(true);
+  const previousGeneratingMessageIdRef = useRef<string | null>(null);
+  const pendingScrollToBottomRef = useRef(true);
+  const previousChatIdRef = useRef<string | null>(chatId);
 
   const rowVirtualizer = useVirtualizer({
     count: messages.length,
@@ -62,6 +154,52 @@ export function ChatFeed({ messages }: { messages: Message[] }) {
     estimateSize: () => 150,
     overscan: 5,
   });
+  const latestMessage = messages.at(-1);
+
+  useEffect(() => {
+    if (previousChatIdRef.current !== chatId) {
+      previousChatIdRef.current = chatId;
+      feedShouldAutoFollowRef.current = true;
+      pendingScrollToBottomRef.current = true;
+    }
+  }, [chatId]);
+
+  useLayoutEffect(() => {
+    if (!pendingScrollToBottomRef.current || !parentRef.current || messages.length === 0) return;
+
+    const animationFrameId = requestAnimationFrame(() => {
+      const element = parentRef.current;
+      if (!element) return;
+
+      element.scrollTop = element.scrollHeight;
+      pendingScrollToBottomRef.current = false;
+    });
+
+    return () => cancelAnimationFrame(animationFrameId);
+  }, [chatId, messages.length, rowVirtualizer]);
+
+  useLayoutEffect(() => {
+    const isNewGeneratingMessage =
+      latestMessage?.isGenerating && previousGeneratingMessageIdRef.current !== latestMessage.id;
+
+    if (isNewGeneratingMessage) {
+      feedShouldAutoFollowRef.current = true;
+    }
+
+    if (!latestMessage?.isGenerating || !parentRef.current) return;
+
+    if (feedShouldAutoFollowRef.current) {
+      parentRef.current.scrollTop = parentRef.current.scrollHeight;
+    }
+  }, [latestMessage?.id, latestMessage?.isGenerating, latestMessage?.parts, latestMessage?.text]);
+
+  useEffect(() => {
+    previousGeneratingMessageIdRef.current = latestMessage?.isGenerating ? latestMessage.id : null;
+  }, [latestMessage?.id, latestMessage?.isGenerating, latestMessage?.parts, latestMessage?.text]);
+
+  const handleFeedScroll = (event: React.UIEvent<HTMLElement>) => {
+    feedShouldAutoFollowRef.current = isNearBottom(event.currentTarget);
+  };
 
   const handleImageError = (id: string) => {
     setImageErrors((prev) => ({ ...prev, [id]: true }));
@@ -79,6 +217,7 @@ export function ChatFeed({ messages }: { messages: Message[] }) {
   return (
     <section
       ref={parentRef}
+      onScroll={handleFeedScroll}
       className="flex-1 min-h-0 overflow-y-auto px-6 py-8 hide-scrollbar max-w-5xl mx-auto w-full"
     >
       {messages.length === 0 && (
@@ -175,17 +314,18 @@ export function ChatFeed({ messages }: { messages: Message[] }) {
                       </div>
 
                       {msg.isGenerating ? (
-                        /* Loading / streaming state — thinking panel lives in InputBar above input */
+                        /* Loading / streaming state */
                         <div className="flex flex-col gap-3 py-4 pl-9">
                           {(() => {
                             const parts: MessagePart[] =
                               msg.parts ?? (msg.text ? [{ type: 'text', text: msg.text }] : []);
+                            const thinkingPart = parts.find((p) => p.type === 'thinking');
                             const textParts = parts.filter((p) => p.type === 'text');
                             const combinedText = textParts
                               .map((p) => (p as { type: 'text'; text: string }).text)
                               .join('');
 
-                            if (isImageTurn || (!msg.text && !combinedText)) {
+                            if (isImageTurn || (!msg.text && !combinedText && !thinkingPart)) {
                               return (
                                 <>
                                   <span className="text-sm font-medium text-on-surface animate-pulse">
@@ -199,10 +339,22 @@ export function ChatFeed({ messages }: { messages: Message[] }) {
                             }
 
                             return (
-                              <div className="bg-surface-container-low p-5 rounded-2xl border border-outline-variant/10 font-body text-sm leading-relaxed text-on-surface whitespace-pre-wrap max-w-2xl">
-                                {combinedText}
-                                <span className="inline-block w-0.5 h-[1em] bg-primary ml-0.5 align-middle animate-blink" />
-                              </div>
+                              <>
+                                {/* Thinking block always above the response text */}
+                                {thinkingPart && (
+                                  <ThinkingBlock
+                                    messageId={msg.id}
+                                    text={(thinkingPart as { type: 'thinking'; text: string }).text}
+                                    isStreaming={true}
+                                  />
+                                )}
+                                {combinedText && (
+                                  <div className="bg-surface-container-low p-5 rounded-2xl border border-outline-variant/10 font-body text-sm leading-relaxed text-on-surface whitespace-pre-wrap max-w-2xl">
+                                    {combinedText}
+                                    <span className="inline-block w-0.5 h-[1em] bg-primary ml-0.5 align-middle animate-blink" />
+                                  </div>
+                                )}
+                              </>
                             );
                           })()}
                         </div>
@@ -323,6 +475,7 @@ export function ChatFeed({ messages }: { messages: Message[] }) {
                               <>
                                 {thinkingPart && (
                                   <ThinkingBlock
+                                    messageId={msg.id}
                                     text={(thinkingPart as { type: 'thinking'; text: string }).text}
                                     isStreaming={false}
                                   />

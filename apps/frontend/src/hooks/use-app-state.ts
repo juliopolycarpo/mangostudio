@@ -136,7 +136,6 @@ export function useAppState() {
     handleNavigate,
     handleSubmit,
     handleStop: textChat.handleStop,
-    streamingThinking: textChat.streamingThinking,
     initialize,
     refreshCatalog: catalog.refreshCatalog,
   };
