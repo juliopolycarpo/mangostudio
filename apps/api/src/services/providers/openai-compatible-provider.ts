@@ -20,6 +20,9 @@ import type {
   ImageGenerationRequest,
   ImageGenerationResult,
   ModelInfo,
+  AgentTurnRequest,
+  AgentEvent,
+  ToolDefinition,
 } from './types';
 
 const secretService = createProviderSecretService({
@@ -138,6 +141,209 @@ function buildMessages(req: TextGenerationRequest): OpenAI.ChatCompletionMessage
   ];
 }
 
+// ---------------------------------------------------------------------------
+// OpenAI-compatible stateless agentic tool loop
+// ---------------------------------------------------------------------------
+
+/** Opaque loop-state stored in providerState during the tool-call loop. */
+interface OAICompatLoopState {
+  provider: 'openai-compatible';
+  /** Accumulated messages within the current agent turn. */
+  loopMessages: Array<OpenAI.ChatCompletionMessageParam>;
+}
+
+function parseOAICompatLoopState(
+  providerState: string | null | undefined
+): OAICompatLoopState | null {
+  if (!providerState) return null;
+  try {
+    const parsed = JSON.parse(providerState) as Record<string, unknown>;
+    if (parsed.provider === 'openai-compatible' && Array.isArray(parsed.loopMessages)) {
+      return parsed as unknown as OAICompatLoopState;
+    }
+  } catch {
+    // Ignore malformed state
+  }
+  return null;
+}
+
+function toolDefsToOAIChat(defs: ToolDefinition[]): OpenAI.ChatCompletionTool[] {
+  return defs.map((def) => ({
+    type: 'function' as const,
+    function: {
+      name: def.name,
+      description: def.description,
+      parameters: def.parameters,
+    },
+  }));
+}
+
+/**
+ * Streams a single agentic turn for OpenAI-compatible endpoints.
+ * Stateless — history replayed from DB. In-loop accumulation via providerState.
+ * DeepSeek-r1: reasoning_content is automatically included in tool call loop
+ * since we replay the full assistant message including any reasoning_content field.
+ */
+async function* streamOAICompatAgentTurn(req: AgentTurnRequest): AsyncIterable<AgentEvent> {
+  const { apiKey, baseUrl } = await resolveClientConfig(req.userId, req.modelName);
+  const client = createClient(apiKey, baseUrl);
+
+  const loopState = parseOAICompatLoopState(req.providerState);
+  const tools =
+    (req.toolDefinitions ?? []).length > 0
+      ? toolDefsToOAIChat(req.toolDefinitions!)
+      : undefined;
+
+  // Build messages: system + DB history + accumulated loop messages + current input
+  const messages: OpenAI.ChatCompletionMessageParam[] = [
+    ...(req.systemPrompt?.trim()
+      ? [{ role: 'system' as const, content: req.systemPrompt }]
+      : []),
+    ...req.history.map(
+      (turn): OpenAI.ChatCompletionMessageParam => ({
+        role: turn.role === 'ai' ? 'assistant' : 'user',
+        content: turn.text,
+      })
+    ),
+    ...(loopState?.loopMessages ?? []),
+  ];
+
+  // Add current input: tool results or user prompt
+  if (req.toolResults && req.toolResults.length > 0) {
+    for (const tr of req.toolResults) {
+      messages.push({
+        role: 'tool',
+        tool_call_id: tr.callId,
+        content: tr.result,
+      });
+    }
+  } else if (req.prompt) {
+    messages.push({ role: 'user', content: req.prompt });
+  }
+
+  try {
+    const stream = await client.chat.completions.create(
+      {
+        model: req.modelName,
+        messages,
+        ...(tools ? { tools, tool_choice: 'auto' } : {}),
+        stream: true,
+      },
+      { signal: req.signal }
+    );
+
+    // Accumulate the full assistant message for loop-state
+    let assistantText = '';
+    let assistantReasoning = '';
+    const pendingToolCalls = new Map<number, { callId: string; name: string; argsStr: string }>();
+
+    for await (const chunk of stream) {
+      if (req.signal?.aborted) break;
+
+      const choice = chunk.choices[0];
+      if (!choice) continue;
+
+      const delta = choice.delta as Record<string, any>;
+
+      // DeepSeek reasoning_content passback
+      if (typeof delta.reasoning_content === 'string' && delta.reasoning_content) {
+        assistantReasoning += delta.reasoning_content;
+        yield { type: 'reasoning_delta', text: delta.reasoning_content };
+      }
+
+      if (typeof delta.content === 'string' && delta.content) {
+        assistantText += delta.content;
+        yield { type: 'assistant_text_delta', text: delta.content };
+      }
+
+      // Tool call streaming
+      if (Array.isArray(delta.tool_calls)) {
+        for (const tcDelta of delta.tool_calls as Array<Record<string, any>>) {
+          const idx: number = tcDelta.index ?? 0;
+
+          if (tcDelta.id) {
+            // New tool call
+            pendingToolCalls.set(idx, {
+              callId: tcDelta.id as string,
+              name: (tcDelta.function?.name as string) ?? '',
+              argsStr: (tcDelta.function?.arguments as string) ?? '',
+            });
+            yield {
+              type: 'tool_call_started',
+              callId: tcDelta.id as string,
+              name: (tcDelta.function?.name as string) ?? undefined,
+            };
+          } else {
+            const tc = pendingToolCalls.get(idx);
+            if (tc) {
+              const argsDelta = (tcDelta.function?.arguments as string) ?? '';
+              tc.argsStr += argsDelta;
+              if (argsDelta) {
+                yield { type: 'tool_call_arguments_delta', callId: tc.callId, delta: argsDelta };
+              }
+            }
+          }
+        }
+      }
+
+      if (choice.finish_reason) {
+        // Finalize all pending tool calls
+        for (const tc of pendingToolCalls.values()) {
+          yield {
+            type: 'tool_call_completed',
+            callId: tc.callId,
+            name: tc.name,
+            arguments: tc.argsStr,
+          };
+        }
+      }
+    }
+
+    // Build updated loop messages
+    const assistantMsg: OpenAI.ChatCompletionMessageParam = pendingToolCalls.size > 0
+      ? {
+          role: 'assistant',
+          content: assistantText || null,
+          tool_calls: Array.from(pendingToolCalls.values()).map((tc) => ({
+            id: tc.callId,
+            type: 'function' as const,
+            function: { name: tc.name, arguments: tc.argsStr },
+          })),
+          // Include reasoning_content for DeepSeek passback
+          ...(assistantReasoning ? { reasoning_content: assistantReasoning } : {}),
+        }
+      : { role: 'assistant', content: assistantText };
+
+    const newLoopMessages: OpenAI.ChatCompletionMessageParam[] = [
+      ...(loopState?.loopMessages ?? []),
+      ...(req.toolResults && req.toolResults.length > 0
+        ? req.toolResults.map(
+            (tr): OpenAI.ChatCompletionMessageParam => ({
+              role: 'tool',
+              tool_call_id: tr.callId,
+              content: tr.result,
+            })
+          )
+        : req.prompt
+          ? [{ role: 'user' as const, content: req.prompt }]
+          : []),
+      assistantMsg,
+    ];
+
+    const newProviderState: OAICompatLoopState = {
+      provider: 'openai-compatible',
+      loopMessages: newLoopMessages,
+    };
+
+    yield { type: 'turn_completed', providerState: JSON.stringify(newProviderState) };
+  } catch (err: unknown) {
+    yield {
+      type: 'turn_error',
+      error: err instanceof Error ? err.message : 'OpenAI-compatible request failed',
+    };
+  }
+}
+
 const openAICompatibleProvider: AIProvider = {
   providerType: 'openai-compatible',
 
@@ -157,6 +363,10 @@ const openAICompatibleProvider: AIProvider = {
     const text = completion.choices[0]?.message?.content ?? '';
     if (!text) throw new Error('No text returned from OpenAI-compatible API.');
     return { text };
+  },
+
+  async *generateAgentTurnStream(req: AgentTurnRequest): AsyncIterable<AgentEvent> {
+    yield* streamOAICompatAgentTurn(req);
   },
 
   async *generateTextStream(req: TextGenerationRequest): AsyncIterable<StreamingChunk> {
