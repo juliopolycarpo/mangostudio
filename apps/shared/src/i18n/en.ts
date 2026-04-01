@@ -144,6 +144,13 @@ export const messages: Messages = {
     reasoningBadge: 'Reasoning',
   },
 
+  tools: {
+    calling: 'Calling...',
+    running: 'Running tool',
+    done: 'Done',
+    error: 'Tool error',
+  },
+
   errors: {
     imageNotSupported: 'This provider does not support image generation.',
     referenceImageUploadFailed: 'Failed to upload reference image. Please try again.',
