@@ -31,7 +31,7 @@ const REASONING_MODEL_PATTERNS: RegExp[] = [
   /^claude-3-5-sonnet/, // Anthropic Claude 3.5 Sonnet (extended thinking)
   /^claude-sonnet-4/, // Anthropic Claude Sonnet 4+
   /^claude-opus-4/, // Anthropic Claude Opus 4+
-  /^gemini-2\.5/, // Google Gemini 2.5 (thinking models)
+  /^gemini-(?:2\.[5-9]|[3-9]\.)/, // Google Gemini 2.5+ (thinking models)
   /^deepseek-r1/, // DeepSeek R1
   /^deepseek-reasoner/, // DeepSeek Reasoner
 ];
