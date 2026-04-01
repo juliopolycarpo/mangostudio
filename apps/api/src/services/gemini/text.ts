@@ -121,11 +121,12 @@ export async function* generateTextStream(
     config.systemInstruction = systemPrompt;
   }
 
-  // Add thinking config based on visibility setting
-  if (generationConfig?.thinkingVisibility !== 'off') {
+  // Add thinking config based on enabled flag and effort level
+  if (generationConfig?.thinkingEnabled) {
+    const levelMap = { low: 'LOW', medium: 'MEDIUM', high: 'HIGH' } as const;
     config.thinkingConfig = {
       includeThoughts: true,
-      thinkingLevel: generationConfig?.thinkingVisibility === 'full' ? 'HIGH' : 'MEDIUM',
+      thinkingLevel: levelMap[generationConfig.reasoningEffort] ?? 'MEDIUM',
     };
   }
 

@@ -13,7 +13,7 @@ import { requireAuth } from '../plugins/auth-middleware';
 import { generateId } from '../utils/id';
 import { verifyChatOwnership } from '../services/chat-service';
 import { createMessage, loadChatHistory } from '../services/message-service';
-import type { SSEErrorEvent, MessagePart, ThinkingVisibility } from '@mangostudio/shared';
+import type { SSEErrorEvent, MessagePart, ReasoningEffort } from '@mangostudio/shared';
 
 /** Serialises an SSE data line. */
 function sseEvent(data: object): Uint8Array {
@@ -96,7 +96,8 @@ export const respondStreamRoutes = (app: Elysia) =>
           const abortController = new AbortController();
           const { signal } = abortController;
 
-          const thinkingVisibility = (body.thinkingVisibility ?? 'summary') as ThinkingVisibility;
+          const thinkingEnabled = body.thinkingEnabled ?? (body.thinkingVisibility !== 'off');
+          const reasoningEffort = (body.reasoningEffort ?? 'medium') as ReasoningEffort;
 
           const stream = new ReadableStream({
             async start(controller) {
@@ -113,7 +114,7 @@ export const respondStreamRoutes = (app: Elysia) =>
                     systemPrompt,
                     modelName: model,
                     signal,
-                    generationConfig: { thinkingVisibility },
+                    generationConfig: { thinkingEnabled, reasoningEffort },
                   })) {
                     if (signal.aborted) {
                       aborted = true;
@@ -223,7 +224,9 @@ export const respondStreamRoutes = (app: Elysia) =>
             prompt: t.String(),
             model: t.Optional(t.String()),
             systemPrompt: t.Optional(t.String()),
-            thinkingVisibility: t.Optional(t.String()),
+            thinkingEnabled: t.Optional(t.Boolean()),
+            reasoningEffort: t.Optional(t.String()),
+            thinkingVisibility: t.Optional(t.String()), // deprecated, backward compat
           }),
         }
       )
