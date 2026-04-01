@@ -112,7 +112,7 @@ export function ModelSelector({
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 8, scale: 0.95 }}
             transition={{ duration: 0.15, ease: 'easeOut' }}
-            className="absolute left-0 top-full mt-2 w-72 max-h-[70vh] glass-panel border border-outline-variant/20 rounded-xl shadow-2xl overflow-hidden z-[100] hide-scrollbar overflow-y-auto"
+            className="absolute left-0 top-full mt-3 w-[19rem] max-h-[70vh] bg-surface/60 backdrop-blur-xl backdrop-saturate-150 border border-white/10 rounded-2xl shadow-[0_8px_32px_rgba(0,0,0,0.5)] overflow-hidden z-[100] hide-scrollbar overflow-y-auto ring-1 ring-white/5"
           >
             <div className="py-2">
               {Object.keys(groups).length === 0 ? (
