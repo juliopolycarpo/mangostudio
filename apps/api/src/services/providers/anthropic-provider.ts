@@ -8,6 +8,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { createProviderSecretService } from './secret-service';
 import { withModelCache } from './model-cache';
 import { registerProvider } from './registry';
+import { isReasoningModel } from '@mangostudio/shared/utils/model-detection';
 import type {
   AIProvider,
   TextGenerationRequest,
@@ -23,13 +24,13 @@ const FALLBACK_MODELS: ModelInfo[] = [
     modelId: 'claude-sonnet-4-5-20250514',
     displayName: 'Claude Sonnet 4.5',
     provider: 'anthropic',
-    capabilities: { text: true, image: false, streaming: true },
+    capabilities: { text: true, image: false, streaming: true, reasoning: true },
   },
   {
     modelId: 'claude-haiku-3-5-20241022',
     displayName: 'Claude Haiku 3.5',
     provider: 'anthropic',
-    capabilities: { text: true, image: false, streaming: true },
+    capabilities: { text: true, image: false, streaming: true, reasoning: false },
   },
 ];
 
@@ -70,7 +71,12 @@ const listModelsWithCache = withModelCache(
           modelId: model.id,
           displayName: model.display_name || model.id,
           provider: 'anthropic',
-          capabilities: { text: true, image: false, streaming: true },
+          capabilities: {
+            text: true,
+            image: false,
+            streaming: true,
+            reasoning: isReasoningModel(model.id),
+          },
         });
       }
 
@@ -127,20 +133,40 @@ const anthropicProvider: AIProvider = {
     const apiKey = await secretService.resolveApiKey(req.userId, req.modelName);
     const client = createClient(apiKey);
 
+    const thinkingEnabled = req.generationConfig?.thinkingEnabled ?? false;
+    const effort = req.generationConfig?.reasoningEffort ?? 'medium';
+    const budgetMap = { low: 1024, medium: 2048, high: 8192 } as const;
+
+    const params: Record<string, unknown> = {
+      model: req.modelName,
+      max_tokens: thinkingEnabled ? 16000 : 8192,
+      ...(req.systemPrompt?.trim() ? { system: req.systemPrompt } : {}),
+      messages: buildMessages(req),
+    };
+
+    if (thinkingEnabled) {
+      params.thinking = {
+        type: 'enabled',
+        budget_tokens: budgetMap[effort] ?? 2048,
+      };
+    }
+
     const stream = client.messages.stream(
-      {
-        model: req.modelName,
-        max_tokens: 8192,
-        ...(req.systemPrompt?.trim() ? { system: req.systemPrompt } : {}),
-        messages: buildMessages(req),
-      },
+      params as unknown as Anthropic.MessageCreateParams,
       { signal: req.signal }
     );
 
     for await (const event of stream) {
       if (req.signal?.aborted) break;
-      if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
-        yield { type: 'text', text: event.delta.text, done: false };
+
+      if (event.type === 'content_block_delta') {
+        // The SDK types don't include thinking_delta yet — use a safe cast
+        const delta = event.delta as unknown as Record<string, unknown>;
+        if (delta.type === 'thinking_delta' && typeof delta.thinking === 'string') {
+          yield { type: 'thinking', text: delta.thinking, done: false };
+        } else if (delta.type === 'text_delta' && typeof delta.text === 'string') {
+          yield { type: 'text', text: delta.text, done: false };
+        }
       }
     }
 

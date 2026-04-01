@@ -85,6 +85,7 @@ export interface ModelInfo {
     text: boolean;
     image: boolean;
     streaming: boolean;
+    reasoning?: boolean;
   };
 }
 
