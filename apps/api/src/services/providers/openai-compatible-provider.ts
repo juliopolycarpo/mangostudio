@@ -190,15 +190,11 @@ async function* streamOAICompatAgentTurn(req: AgentTurnRequest): AsyncIterable<A
 
   const loopState = parseOAICompatLoopState(req.providerState);
   const tools =
-    (req.toolDefinitions ?? []).length > 0
-      ? toolDefsToOAIChat(req.toolDefinitions!)
-      : undefined;
+    (req.toolDefinitions ?? []).length > 0 ? toolDefsToOAIChat(req.toolDefinitions!) : undefined;
 
   // Build messages: system + DB history + accumulated loop messages + current input
   const messages: OpenAI.ChatCompletionMessageParam[] = [
-    ...(req.systemPrompt?.trim()
-      ? [{ role: 'system' as const, content: req.systemPrompt }]
-      : []),
+    ...(req.systemPrompt?.trim() ? [{ role: 'system' as const, content: req.systemPrompt }] : []),
     ...req.history.map(
       (turn): OpenAI.ChatCompletionMessageParam => ({
         role: turn.role === 'ai' ? 'assistant' : 'user',
@@ -300,19 +296,20 @@ async function* streamOAICompatAgentTurn(req: AgentTurnRequest): AsyncIterable<A
     }
 
     // Build updated loop messages
-    const assistantMsg: OpenAI.ChatCompletionMessageParam = pendingToolCalls.size > 0
-      ? {
-          role: 'assistant',
-          content: assistantText || null,
-          tool_calls: Array.from(pendingToolCalls.values()).map((tc) => ({
-            id: tc.callId,
-            type: 'function' as const,
-            function: { name: tc.name, arguments: tc.argsStr },
-          })),
-          // Include reasoning_content for DeepSeek passback
-          ...(assistantReasoning ? { reasoning_content: assistantReasoning } : {}),
-        }
-      : { role: 'assistant', content: assistantText };
+    const assistantMsg: OpenAI.ChatCompletionMessageParam =
+      pendingToolCalls.size > 0
+        ? {
+            role: 'assistant',
+            content: assistantText || null,
+            tool_calls: Array.from(pendingToolCalls.values()).map((tc) => ({
+              id: tc.callId,
+              type: 'function' as const,
+              function: { name: tc.name, arguments: tc.argsStr },
+            })),
+            // Include reasoning_content for DeepSeek passback
+            ...(assistantReasoning ? { reasoning_content: assistantReasoning } : {}),
+          }
+        : { role: 'assistant', content: assistantText };
 
     const newLoopMessages: OpenAI.ChatCompletionMessageParam[] = [
       ...(loopState?.loopMessages ?? []),

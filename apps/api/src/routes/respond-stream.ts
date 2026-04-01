@@ -238,59 +238,64 @@ export const respondStreamRoutes = (app: Elysia) =>
                     const nextToolResults: NonNullable<AgentTurnRequest['toolResults']> = [];
 
                     await Promise.all(
-                      Array.from(pendingCalls.entries()).map(async ([callId, { name, argsStr }]) => {
-                        let args: Record<string, unknown> = {};
-                        try {
-                          args = JSON.parse(argsStr) as Record<string, unknown>;
-                        } catch {
-                          // Malformed args — use empty object
-                        }
+                      Array.from(pendingCalls.entries()).map(
+                        async ([callId, { name, argsStr }]) => {
+                          let args: Record<string, unknown> = {};
+                          try {
+                            args = JSON.parse(argsStr) as Record<string, unknown>;
+                          } catch {
+                            // Malformed args — use empty object
+                          }
 
-                        let result: unknown;
-                        let isError = false;
+                          let result: unknown;
+                          let isError = false;
 
-                        try {
-                          const timeoutPromise = new Promise<never>((_, reject) =>
-                            setTimeout(
-                              () => reject(new Error(`Tool "${name}" timed out after ${TOOL_TIMEOUT_MS}ms`)),
-                              TOOL_TIMEOUT_MS
-                            )
-                          );
-                          result = await Promise.race([
-                            executeTool(name, args, { userId, chatId }),
-                            timeoutPromise,
-                          ]);
-                        } catch (err) {
-                          result = {
-                            error: err instanceof Error ? err.message : 'Tool execution failed',
-                          };
-                          isError = true;
-                        }
+                          try {
+                            const timeoutPromise = new Promise<never>((_, reject) =>
+                              setTimeout(
+                                () =>
+                                  reject(
+                                    new Error(`Tool "${name}" timed out after ${TOOL_TIMEOUT_MS}ms`)
+                                  ),
+                                TOOL_TIMEOUT_MS
+                              )
+                            );
+                            result = await Promise.race([
+                              executeTool(name, args, { userId, chatId }),
+                              timeoutPromise,
+                            ]);
+                          } catch (err) {
+                            result = {
+                              error: err instanceof Error ? err.message : 'Tool execution failed',
+                            };
+                            isError = true;
+                          }
 
-                        const resultStr = JSON.stringify(result);
+                          const resultStr = JSON.stringify(result);
 
-                        // Accumulate tool_call + tool_result parts
-                        allParts.push({ type: 'tool_call', toolCallId: callId, name, args });
-                        allParts.push({
-                          type: 'tool_result',
-                          toolCallId: callId,
-                          content: resultStr,
-                          isError,
-                        });
-
-                        controller.enqueue(
-                          sseEvent({
+                          // Accumulate tool_call + tool_result parts
+                          allParts.push({ type: 'tool_call', toolCallId: callId, name, args });
+                          allParts.push({
                             type: 'tool_result',
-                            callId,
-                            name,
-                            result,
+                            toolCallId: callId,
+                            content: resultStr,
                             isError,
-                            done: false,
-                          })
-                        );
+                          });
 
-                        nextToolResults.push({ callId, name, result: resultStr, isError });
-                      })
+                          controller.enqueue(
+                            sseEvent({
+                              type: 'tool_result',
+                              callId,
+                              name,
+                              result,
+                              isError,
+                              done: false,
+                            })
+                          );
+
+                          nextToolResults.push({ callId, name, result: resultStr, isError });
+                        }
+                      )
                     );
 
                     pendingToolResults = nextToolResults;
@@ -354,7 +359,9 @@ export const respondStreamRoutes = (app: Elysia) =>
 
                   // Consolidate thinking chunks into a single part each
                   const thinkingText = allParts
-                    .filter((p): p is Extract<MessagePart, { type: 'thinking' }> => p.type === 'thinking')
+                    .filter(
+                      (p): p is Extract<MessagePart, { type: 'thinking' }> => p.type === 'thinking'
+                    )
                     .map((p) => p.text)
                     .join('');
 

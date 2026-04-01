@@ -489,8 +489,7 @@ async function* streamAgentTurnWithResponsesAPI(
     stream = await makeRequest(previousResponseId);
   } catch (err: unknown) {
     // 404 or similar → cursor expired; fall back to full replay
-    const isExpired =
-      err instanceof OpenAI.APIError && (err.status === 404 || err.status === 400);
+    const isExpired = err instanceof OpenAI.APIError && (err.status === 404 || err.status === 400);
     if (isExpired && previousResponseId) {
       console.warn('[openai] Cursor expired or invalid, falling back to full replay.');
       // Rebuild input from full history

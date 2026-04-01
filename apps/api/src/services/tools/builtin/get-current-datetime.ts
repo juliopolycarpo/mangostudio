@@ -31,11 +31,13 @@ const definition = {
     properties: {
       timezone: {
         type: 'string',
-        description: 'IANA timezone name (e.g. "America/Sao_Paulo", "Europe/London"). Defaults to "UTC".',
+        description:
+          'IANA timezone name (e.g. "America/Sao_Paulo", "Europe/London"). Defaults to "UTC".',
       },
       locale: {
         type: 'string',
-        description: 'BCP 47 locale tag for output formatting (e.g. "pt-BR", "en-US"). Defaults to "en-US".',
+        description:
+          'BCP 47 locale tag for output formatting (e.g. "pt-BR", "en-US"). Defaults to "en-US".',
       },
     },
     additionalProperties: false,

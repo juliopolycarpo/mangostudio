@@ -2,7 +2,12 @@
  * Core types for the AI provider abstraction layer.
  */
 
-import type { MessagePart, ReasoningEffort, ProviderType, AgentEvent } from '@mangostudio/shared/types';
+import type {
+  MessagePart,
+  ReasoningEffort,
+  ProviderType,
+  AgentEvent,
+} from '@mangostudio/shared/types';
 
 export type { AgentEvent };
 

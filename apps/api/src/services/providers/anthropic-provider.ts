@@ -180,9 +180,7 @@ async function* streamAnthropicAgentTurn(req: AgentTurnRequest): AsyncIterable<A
   }
 
   const tools =
-    (req.toolDefinitions ?? []).length > 0
-      ? toolDefsToAnthropic(req.toolDefinitions!)
-      : undefined;
+    (req.toolDefinitions ?? []).length > 0 ? toolDefsToAnthropic(req.toolDefinitions!) : undefined;
 
   const params: Record<string, unknown> = {
     model: req.modelName,
@@ -200,10 +198,9 @@ async function* streamAnthropicAgentTurn(req: AgentTurnRequest): AsyncIterable<A
   }
 
   try {
-    const stream = client.messages.stream(
-      params as unknown as Anthropic.MessageCreateParams,
-      { signal: req.signal }
-    );
+    const stream = client.messages.stream(params as unknown as Anthropic.MessageCreateParams, {
+      signal: req.signal,
+    });
 
     // Collect the full content blocks for loop-state accumulation
     const assistantContent: Anthropic.ContentBlock[] = [];
@@ -231,7 +228,11 @@ async function* streamAnthropicAgentTurn(req: AgentTurnRequest): AsyncIterable<A
           const block = blockByIndex.get(event.index);
           if (block) {
             block.inputStr += delta.partial_json;
-            yield { type: 'tool_call_arguments_delta', callId: block.callId, delta: delta.partial_json };
+            yield {
+              type: 'tool_call_arguments_delta',
+              callId: block.callId,
+              delta: delta.partial_json,
+            };
           }
         }
       } else if (event.type === 'content_block_stop') {

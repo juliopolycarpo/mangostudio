@@ -78,9 +78,8 @@ async function* streamGeminiAgentTurn(req: AgentTurnRequest): AsyncIterable<Agen
   const ai = new GoogleGenAI({ apiKey });
 
   const loopState = parseGeminiLoopState(req.providerState);
-  const tools = (req.toolDefinitions ?? []).length > 0
-    ? [toolDefsToGemini(req.toolDefinitions!)]
-    : undefined;
+  const tools =
+    (req.toolDefinitions ?? []).length > 0 ? [toolDefsToGemini(req.toolDefinitions!)] : undefined;
 
   // Build full contents:
   //   1. DB history (text-only for now)
@@ -110,7 +109,8 @@ async function* streamGeminiAgentTurn(req: AgentTurnRequest): AsyncIterable<Agen
         let parsed: Record<string, unknown>;
         try {
           const v = JSON.parse(tr.result);
-          parsed = typeof v === 'object' && v !== null ? (v as Record<string, unknown>) : { value: v };
+          parsed =
+            typeof v === 'object' && v !== null ? (v as Record<string, unknown>) : { value: v };
         } catch {
           parsed = { raw: tr.result };
         }
@@ -165,7 +165,8 @@ async function* streamGeminiAgentTurn(req: AgentTurnRequest): AsyncIterable<Agen
         // without thought_signature in Gemini 2.5+; for safety we omit them)
       } else if (p.functionCall) {
         const callId: string =
-          (p.functionCall.id as string | undefined) ?? `call_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+          (p.functionCall.id as string | undefined) ??
+          `call_${Date.now()}_${Math.random().toString(36).slice(2)}`;
         const name: string = (p.functionCall.name as string) ?? '';
         const argsStr = JSON.stringify(p.functionCall.args ?? {});
         modelParts.push({ functionCall: { id: callId, name, args: p.functionCall.args ?? {} } });
@@ -189,7 +190,11 @@ async function* streamGeminiAgentTurn(req: AgentTurnRequest): AsyncIterable<Agen
                   id: tr.callId,
                   name: tr.name,
                   response: (() => {
-                    try { return JSON.parse(tr.result) as unknown; } catch { return { raw: tr.result }; }
+                    try {
+                      return JSON.parse(tr.result) as unknown;
+                    } catch {
+                      return { raw: tr.result };
+                    }
                   })(),
                 },
               })),
