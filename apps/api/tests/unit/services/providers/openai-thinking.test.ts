@@ -1,14 +1,23 @@
-import { describe, expect, it, mock, afterEach } from 'bun:test';
+import { describe, expect, it } from 'bun:test';
 import { isReasoningModel } from '@mangostudio/shared/utils/model-detection';
+import {
+  extractReasoningFromCompleted,
+  streamWithResponsesAPI,
+} from '../../../../src/services/providers/openai-provider';
+import type { StreamingChunk } from '../../../../src/services/providers/types';
 
 /**
- * Unit tests for OpenAI provider reasoning support via the Responses API.
- * Tests model detection, API bifurcation, and reasoning event parsing.
+ * Unit tests for OpenAI provider reasoning support.
+ * Tests model detection, Responses API streaming, and reasoning extraction.
+ *
+ * streamWithResponsesAPI and extractReasoningFromCompleted are tested directly
+ * to avoid Bun module-cache contamination from other test files that import the
+ * provider with the real secretService.
  */
 
-afterEach(() => {
-  mock.restore();
-});
+// ---------------------------------------------------------------------------
+// isReasoningModel detection
+// ---------------------------------------------------------------------------
 
 describe('isReasoningModel detection', () => {
   it('detects o-series models', () => {
@@ -45,153 +54,121 @@ describe('isReasoningModel detection', () => {
   });
 });
 
-describe('openai-provider Responses API streaming', () => {
-  /**
-   * Sets up mocks for both OpenAI SDK and secret-service, then imports the provider.
-   * Returns helpers to capture which API path was used and what params were sent.
-   */
-  async function setupOpenAIMock(streamEvents: Array<Record<string, unknown>>) {
-    let capturedResponsesParams: Record<string, unknown> | undefined;
-    let capturedCompletionsParams: Record<string, unknown> | undefined;
+// ---------------------------------------------------------------------------
+// extractReasoningFromCompleted
+// ---------------------------------------------------------------------------
 
-    // Mock secret-service BEFORE importing the provider
-    mock.module('../../../../src/services/providers/secret-service', () => ({
-      createProviderSecretService: () => ({
-        resolveApiKey: async () => 'mock-key',
-        syncConfigFileConnectors: async () => {},
-        listMeta: async () => [
-          {
-            id: 'mock-row',
-            configured: 1,
-            enabledModels: '[]',
-            organizationId: null,
-            projectId: null,
-          },
-        ],
-        resolveSecretValue: async () => 'mock-key',
-        validateApiKey: async () => {},
-      }),
-    }));
-
-    mock.module('openai', () => ({
-      default: class {
-        responses = {
-          create: async (params: Record<string, unknown>) => {
-            capturedResponsesParams = params;
-            return (async function* () {
-              for (const event of streamEvents) {
-                yield event;
-              }
-            })();
-          },
-        };
-        chat = {
-          completions: {
-            create: async (params: Record<string, unknown>) => {
-              capturedCompletionsParams = params;
-              return (async function* () {
-                yield { choices: [{ delta: { content: 'Hello' } }] };
-              })();
-            },
-          },
-        };
-        models = {
-          list: async () => ({ data: [] }),
-        };
-      },
-    }));
-
-    const { openAIProvider } = await import('../../../../src/services/providers/openai-provider');
-
-    return {
-      provider: openAIProvider,
-      getCapturedResponsesParams: () => capturedResponsesParams,
-      getCapturedCompletionsParams: () => capturedCompletionsParams,
-    };
-  }
-
-  it('uses Responses API for reasoning models with thinking enabled', async () => {
-    const { provider, getCapturedResponsesParams, getCapturedCompletionsParams } =
-      await setupOpenAIMock([{ type: 'response.output_text.delta', delta: 'Hi' }]);
-
-    for await (const _ of provider.generateTextStream!({
-      userId: 'u1',
-      history: [],
-      prompt: 'Hello',
-      modelName: 'o4-mini',
-      generationConfig: { thinkingEnabled: true, reasoningEffort: 'high' },
-    })) {
-      // consume
-    }
-
-    expect(getCapturedResponsesParams()).toBeDefined();
-    expect(getCapturedResponsesParams()!.reasoning).toEqual({
-      effort: 'high',
-      summary: 'auto',
+describe('extractReasoningFromCompleted', () => {
+  it('extracts reasoning from summary array', () => {
+    const result = extractReasoningFromCompleted({
+      output: [
+        {
+          type: 'reasoning',
+          summary: [
+            { type: 'summary_text', text: 'First block.' },
+            { type: 'summary_text', text: 'Second block.' },
+          ],
+        },
+      ],
     });
-    expect(getCapturedCompletionsParams()).toBeUndefined();
+
+    expect(result).toBe('First block.\n\nSecond block.');
   });
 
-  it('uses Chat Completions for non-reasoning models', async () => {
-    const { provider, getCapturedResponsesParams, getCapturedCompletionsParams } =
-      await setupOpenAIMock([]);
+  it('falls back to reasoning content array when no summary', () => {
+    const result = extractReasoningFromCompleted({
+      output: [
+        {
+          type: 'reasoning',
+          content: [{ type: 'reasoning_text', text: 'Raw reasoning.' }],
+        },
+      ],
+    });
 
-    for await (const _ of provider.generateTextStream!({
-      userId: 'u1',
-      history: [],
-      prompt: 'Hello',
-      modelName: 'gpt-4o',
-      generationConfig: { thinkingEnabled: true, reasoningEffort: 'high' },
-    })) {
-      // consume
-    }
-
-    expect(getCapturedCompletionsParams()).toBeDefined();
-    expect(getCapturedResponsesParams()).toBeUndefined();
+    expect(result).toBe('Raw reasoning.');
   });
 
-  it('uses Chat Completions when thinking is disabled for reasoning models', async () => {
-    const { provider, getCapturedResponsesParams, getCapturedCompletionsParams } =
-      await setupOpenAIMock([]);
+  it('returns null when no reasoning output', () => {
+    const result = extractReasoningFromCompleted({
+      output: [{ type: 'message', content: [{ type: 'output_text', text: 'Hello' }] }],
+    });
 
-    for await (const _ of provider.generateTextStream!({
-      userId: 'u1',
-      history: [],
-      prompt: 'Hello',
-      modelName: 'o4-mini',
-      generationConfig: { thinkingEnabled: false, reasoningEffort: 'medium' },
-    })) {
-      // consume
-    }
+    expect(result).toBeNull();
+  });
 
-    expect(getCapturedCompletionsParams()).toBeDefined();
-    expect(getCapturedResponsesParams()).toBeUndefined();
+  it('returns null for empty response', () => {
+    expect(extractReasoningFromCompleted({})).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// streamWithResponsesAPI — tested with a mock OpenAI client
+// ---------------------------------------------------------------------------
+
+/** Creates a fake OpenAI client whose responses.create() yields `events`. */
+function createMockClient(events: Array<Record<string, unknown>>): any {
+  return {
+    responses: {
+      create: async () =>
+        (async function* () {
+          for (const ev of events) {
+            yield ev;
+          }
+        })(),
+    },
+  };
+}
+
+/** Collects all chunks from a streaming call. */
+async function collectChunks(
+  client: any,
+  modelName: string,
+  effort: 'low' | 'medium' | 'high' = 'medium'
+): Promise<StreamingChunk[]> {
+  const chunks: StreamingChunk[] = [];
+  for await (const chunk of streamWithResponsesAPI(client, {
+    userId: 'u1',
+    history: [],
+    prompt: 'Hello',
+    modelName,
+    generationConfig: { thinkingEnabled: true, reasoningEffort: effort },
+  })) {
+    chunks.push(chunk);
+  }
+  return chunks;
+}
+
+describe('streamWithResponsesAPI', () => {
+  it('sends reasoning effort and summary=auto to the Responses API', async () => {
+    let capturedParams: Record<string, unknown> | undefined;
+    const client = {
+      responses: {
+        create: async (params: Record<string, unknown>) => {
+          capturedParams = params;
+          return (async function* () {})();
+        },
+      },
+    };
+
+    await collectChunks(client, 'o4-mini', 'high');
+
+    expect(capturedParams).toBeDefined();
+    expect(capturedParams!.reasoning).toEqual({ effort: 'high', summary: 'auto' });
+    expect(capturedParams!.model).toBe('o4-mini');
   });
 
   it('yields thinking from reasoning_summary_text.delta', async () => {
-    const { provider } = await setupOpenAIMock([
+    const client = createMockClient([
       {
         type: 'response.reasoning_summary_text.delta',
         item_id: 'item1',
         summary_index: 0,
         delta: 'Thinking about this...',
       },
-      {
-        type: 'response.output_text.delta',
-        delta: 'The answer is 42.',
-      },
+      { type: 'response.output_text.delta', delta: 'The answer is 42.' },
     ]);
 
-    const chunks = [];
-    for await (const chunk of provider.generateTextStream!({
-      userId: 'u1',
-      history: [],
-      prompt: 'Hello',
-      modelName: 'o4-mini',
-      generationConfig: { thinkingEnabled: true, reasoningEffort: 'medium' },
-    })) {
-      chunks.push(chunk);
-    }
+    const chunks = await collectChunks(client, 'o4-mini');
 
     expect(chunks[0]).toEqual({ type: 'thinking', text: 'Thinking about this...', done: false });
     expect(chunks[1]).toEqual({ type: 'text', text: 'The answer is 42.', done: false });
@@ -199,36 +176,24 @@ describe('openai-provider Responses API streaming', () => {
   });
 
   it('falls back to reasoning_text.delta when no summary events', async () => {
-    const { provider } = await setupOpenAIMock([
+    const client = createMockClient([
       {
         type: 'response.reasoning_text.delta',
         item_id: 'item1',
         content_index: 0,
         delta: 'Raw reasoning...',
       },
-      {
-        type: 'response.output_text.delta',
-        delta: 'Result.',
-      },
+      { type: 'response.output_text.delta', delta: 'Result.' },
     ]);
 
-    const chunks = [];
-    for await (const chunk of provider.generateTextStream!({
-      userId: 'u1',
-      history: [],
-      prompt: 'Hello',
-      modelName: 'gpt-5',
-      generationConfig: { thinkingEnabled: true, reasoningEffort: 'low' },
-    })) {
-      chunks.push(chunk);
-    }
+    const chunks = await collectChunks(client, 'gpt-5', 'low');
 
     expect(chunks[0]).toEqual({ type: 'thinking', text: 'Raw reasoning...', done: false });
     expect(chunks[1]).toEqual({ type: 'text', text: 'Result.', done: false });
   });
 
   it('deduplicates summary events already seen via delta', async () => {
-    const { provider } = await setupOpenAIMock([
+    const client = createMockClient([
       {
         type: 'response.reasoning_summary_text.delta',
         item_id: 'item1',
@@ -241,61 +206,84 @@ describe('openai-provider Responses API streaming', () => {
         summary_index: 0,
         text: 'Streamed thinking.',
       },
-      {
-        type: 'response.output_text.delta',
-        delta: 'Answer.',
-      },
+      { type: 'response.output_text.delta', delta: 'Answer.' },
     ]);
 
-    const chunks = [];
-    for await (const chunk of provider.generateTextStream!({
-      userId: 'u1',
-      history: [],
-      prompt: 'Hello',
-      modelName: 'o4-mini',
-      generationConfig: { thinkingEnabled: true, reasoningEffort: 'medium' },
-    })) {
-      chunks.push(chunk);
-    }
+    const chunks = await collectChunks(client, 'o4-mini');
 
-    // Should only see one thinking chunk (from delta), not two
     const thinkingChunks = chunks.filter((c) => c.type === 'thinking');
     expect(thinkingChunks.length).toBe(1);
     expect(thinkingChunks[0]!.text).toBe('Streamed thinking.');
   });
 
   it('falls back to response.completed reasoning extraction', async () => {
-    const { provider } = await setupOpenAIMock([
+    const client = createMockClient([
       {
         type: 'response.completed',
         response: {
           output: [
             {
               type: 'reasoning',
-              summary: [{ type: 'summary_text', text: 'Fallback reasoning from completed.' }],
-            },
-            {
-              type: 'message',
-              content: [{ type: 'output_text', text: 'Final answer.' }],
+              summary: [{ type: 'summary_text', text: 'Fallback reasoning.' }],
             },
           ],
         },
       },
     ]);
 
-    const chunks = [];
-    for await (const chunk of provider.generateTextStream!({
-      userId: 'u1',
-      history: [],
-      prompt: 'Hello',
-      modelName: 'o4-mini',
-      generationConfig: { thinkingEnabled: true, reasoningEffort: 'medium' },
-    })) {
-      chunks.push(chunk);
-    }
+    const chunks = await collectChunks(client, 'o4-mini');
 
     const thinkingChunks = chunks.filter((c) => c.type === 'thinking');
     expect(thinkingChunks.length).toBe(1);
-    expect(thinkingChunks[0]!.text).toBe('Fallback reasoning from completed.');
+    expect(thinkingChunks[0]!.text).toBe('Fallback reasoning.');
+  });
+
+  it('ignores reasoning_text.delta when summary events were already seen', async () => {
+    const client = createMockClient([
+      {
+        type: 'response.reasoning_summary_text.delta',
+        item_id: 'item1',
+        summary_index: 0,
+        delta: 'Summary thinking.',
+      },
+      {
+        type: 'response.reasoning_text.delta',
+        item_id: 'item1',
+        content_index: 0,
+        delta: 'Raw duplicate.',
+      },
+      { type: 'response.output_text.delta', delta: 'Answer.' },
+    ]);
+
+    const chunks = await collectChunks(client, 'o4-mini');
+
+    const thinkingChunks = chunks.filter((c) => c.type === 'thinking');
+    expect(thinkingChunks.length).toBe(1);
+    expect(thinkingChunks[0]!.text).toBe('Summary thinking.');
+  });
+
+  it('handles multiple summary blocks', async () => {
+    const client = createMockClient([
+      {
+        type: 'response.reasoning_summary_text.delta',
+        item_id: 'item1',
+        summary_index: 0,
+        delta: 'First block.',
+      },
+      {
+        type: 'response.reasoning_summary_text.delta',
+        item_id: 'item1',
+        summary_index: 1,
+        delta: 'Second block.',
+      },
+      { type: 'response.output_text.delta', delta: 'Answer.' },
+    ]);
+
+    const chunks = await collectChunks(client, 'o4-mini');
+
+    const thinkingChunks = chunks.filter((c) => c.type === 'thinking');
+    expect(thinkingChunks.length).toBe(2);
+    expect(thinkingChunks[0]!.text).toBe('First block.');
+    expect(thinkingChunks[1]!.text).toBe('Second block.');
   });
 });

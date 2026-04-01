@@ -269,7 +269,7 @@ function buildResponsesInput(req: TextGenerationRequest): Array<{ role: string; 
  * Extracts reasoning text from a completed response payload.
  * Tries summary array first, then falls back to reasoning content array.
  */
-function extractReasoningFromCompleted(response: Record<string, unknown>): string | null {
+export function extractReasoningFromCompleted(response: Record<string, unknown>): string | null {
   const output = response?.output;
   if (!Array.isArray(output)) return null;
 
@@ -300,7 +300,7 @@ function extractReasoningFromCompleted(response: Record<string, unknown>): strin
  * Streams a reasoning model response using the OpenAI Responses API.
  * Handles all reasoning event families with proper deduplication.
  */
-async function* streamWithResponsesAPI(
+export async function* streamWithResponsesAPI(
   client: OpenAI,
   req: TextGenerationRequest
 ): AsyncIterable<StreamingChunk> {
