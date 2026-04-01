@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { MessageSquare, ImagePlus, PlusCircle, Mic, Zap, Send, Square, X } from 'lucide-react';
-import type { InteractionMode } from '@mangostudio/shared';
+import type { InteractionMode, ReasoningEffort } from '@mangostudio/shared';
+import { ThinkingToggle } from '@/components/layout/ThinkingToggle';
 
 interface Props {
   composerMode: InteractionMode;
@@ -9,6 +10,12 @@ interface Props {
   disabled?: boolean;
   isGenerating?: boolean;
   onStop?: () => void;
+  // Thinking / reasoning controls
+  thinkingEnabled?: boolean;
+  reasoningEffort?: ReasoningEffort;
+  onThinkingToggle?: (enabled: boolean) => void;
+  onReasoningEffortChange?: (effort: ReasoningEffort) => void;
+  reasoningVisible?: boolean;
 }
 
 export function InputBar({
@@ -18,6 +25,11 @@ export function InputBar({
   disabled,
   isGenerating,
   onStop,
+  thinkingEnabled = false,
+  reasoningEffort = 'medium',
+  onThinkingToggle,
+  onReasoningEffortChange,
+  reasoningVisible = false,
 }: Props) {
   const [prompt, setPrompt] = useState('');
   const [referenceImage, setReferenceImage] = useState<File | null>(null);
@@ -54,8 +66,22 @@ export function InputBar({
   return (
     <footer className="shrink-0 p-6">
       <div className="max-w-4xl mx-auto w-full">
-        {/* Mode Switch Toggle */}
-        <div className="flex justify-center mb-3">
+        {/* Bottom toolbar: reasoning controls (left) + mode switch (right) */}
+        <div className="flex items-center justify-between mb-3">
+          {/* Reasoning controls — left-aligned, shown only for capable models */}
+          {onThinkingToggle && onReasoningEffortChange ? (
+            <ThinkingToggle
+              enabled={thinkingEnabled}
+              effort={reasoningEffort}
+              visible={reasoningVisible}
+              onToggle={onThinkingToggle}
+              onEffortChange={onReasoningEffortChange}
+            />
+          ) : (
+            <div />
+          )}
+
+          {/* Mode Switch Toggle */}
           <div className="inline-flex bg-surface-container-low border border-outline-variant/10 rounded-full p-1 gap-1 shadow-sm">
             <button
               type="button"

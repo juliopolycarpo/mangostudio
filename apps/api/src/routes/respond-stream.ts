@@ -158,9 +158,16 @@ export const respondStreamRoutes = (app: Elysia) =>
                   const generationTime = `${((Date.now() - startTime) / 1000).toFixed(1)}s`;
                   const aiTimestamp = Date.now();
 
-                  // Consolidate text parts into a single part
+                  // Consolidate thinking + text chunks into single parts each
+                  const fullThinking = allParts
+                    .filter(
+                      (p): p is Extract<MessagePart, { type: 'thinking' }> => p.type === 'thinking'
+                    )
+                    .map((p) => p.text)
+                    .join('');
+
                   const consolidatedParts: MessagePart[] = [
-                    ...allParts.filter((p) => p.type !== 'text'),
+                    ...(fullThinking ? [{ type: 'thinking' as const, text: fullThinking }] : []),
                     ...(fullText ? [{ type: 'text' as const, text: fullText }] : []),
                   ];
 

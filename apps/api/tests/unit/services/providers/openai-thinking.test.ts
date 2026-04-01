@@ -44,9 +44,11 @@ describe('isReasoningModel detection', () => {
     expect(isReasoningModel('claude-opus-4-20250514')).toBe(true);
   });
 
-  it('detects Gemini 2.5 reasoning models', () => {
+  it('detects Gemini reasoning models (2.5+)', () => {
     expect(isReasoningModel('gemini-2.5-pro')).toBe(true);
     expect(isReasoningModel('gemini-2.5-flash')).toBe(true);
+    expect(isReasoningModel('gemini-3.0-pro')).toBe(true);
+    expect(isReasoningModel('gemini-3.1-flash-lite-preview')).toBe(true);
   });
 
   it('does not match Gemini 2.0', () => {
