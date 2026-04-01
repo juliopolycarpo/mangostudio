@@ -50,8 +50,8 @@ export function ThinkingToggle({
           onClick={() => onToggle(!enabled)}
           className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all duration-200 ${
             enabled
-              ? 'bg-amber-500/15 text-amber-400 border border-amber-500/30 hover:bg-amber-500/20'
-              : 'bg-surface-container-high text-on-surface-variant hover:bg-surface-container-highest border border-outline-variant/20 hover:text-on-surface'
+              ? 'bg-primary/15 text-primary border border-primary/30'
+              : 'bg-surface-container-high text-on-surface-variant hover:bg-surface-container-highest border border-transparent'
           }`}
         >
           <Brain size={13} />
@@ -82,7 +82,7 @@ export function ThinkingToggle({
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 6, scale: 0.95 }}
             transition={{ duration: 0.15, ease: 'easeOut' }}
-            className="absolute left-0 bottom-full mb-2 w-36 glass-panel border border-outline-variant/20 rounded-xl shadow-2xl overflow-hidden z-[100]"
+            className="absolute left-0 top-full mt-3 w-40 bg-surface/60 backdrop-blur-xl backdrop-saturate-150 border border-white/10 rounded-2xl shadow-[0_8px_32px_rgba(0,0,0,0.5)] overflow-hidden z-[100] ring-1 ring-white/5"
           >
             <div className="py-1">
               {efforts.map((e) => (
@@ -93,12 +93,18 @@ export function ThinkingToggle({
                     onEffortChange(e);
                     setIsOpen(false);
                   }}
-                  className="w-full flex items-center justify-between px-4 py-2 text-xs hover:bg-primary/10 transition-colors"
+                  className="w-full flex items-center justify-between px-4 py-2 text-sm hover:bg-primary/10 transition-colors group/item"
                 >
-                  <span className={effort === e ? 'text-amber-400 font-medium' : 'text-on-surface'}>
+                  <span
+                    className={
+                      effort === e
+                        ? 'text-primary font-medium'
+                        : 'text-on-surface group-hover/item:text-primary/90'
+                    }
+                  >
                     {effortLabels[e]}
                   </span>
-                  {effort === e && <Check size={13} className="text-amber-400" />}
+                  {effort === e && <Check size={14} className="text-primary" />}
                 </button>
               ))}
             </div>
