@@ -12,6 +12,8 @@ interface UseTextChatOptions {
   getActiveModel: () => string;
   systemPrompt: string;
   optimistic: ReturnType<typeof useOptimisticMessages>;
+  thinkingEnabled: boolean;
+  reasoningEffort: string;
 }
 
 /** Handles text chat streaming — send prompt, manage SSE stream, optimistic UI. */
@@ -20,6 +22,8 @@ export function useTextChat({
   getActiveModel,
   systemPrompt,
   optimistic,
+  thinkingEnabled,
+  reasoningEffort,
 }: UseTextChatOptions) {
   const queryClient = useQueryClient();
   const [isGenerating, setIsGenerating] = useState(false);
@@ -77,8 +81,6 @@ export function useTextChat({
       let accumulatedThinking = '';
       let accumulatedParts: MessagePart[] = [];
 
-      const thinkingVisibility = localStorage.getItem('thinkingVisibility') ?? 'summary';
-
       try {
         await respondTextStream(
           {
@@ -86,7 +88,8 @@ export function useTextChat({
             prompt,
             model,
             systemPrompt: systemPrompt || undefined,
-            thinkingVisibility,
+            thinkingEnabled,
+            reasoningEffort,
           },
           (chunk) => {
             if (chunk.error) {
@@ -156,6 +159,8 @@ export function useTextChat({
       appendOptimisticMessages,
       updateOptimisticMessage,
       queryClient,
+      thinkingEnabled,
+      reasoningEffort,
     ]
   );
 

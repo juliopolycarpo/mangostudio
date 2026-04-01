@@ -11,7 +11,7 @@ import { createProviderSecretService } from './secret-service';
 import { withModelCache } from './model-cache';
 import { registerProvider } from './registry';
 import { getConfig } from '../../lib/config';
-import { isImageModelId } from '@mangostudio/shared/utils/model-detection';
+import { isImageModelId, isReasoningModel } from '@mangostudio/shared/utils/model-detection';
 import type {
   AIProvider,
   TextGenerationRequest,
@@ -111,6 +111,7 @@ const listModelsWithCache = withModelCache(
               text: !isImageModelId(model.id),
               image: isImageModelId(model.id),
               streaming: !isImageModelId(model.id),
+              reasoning: isReasoningModel(model.id),
             },
           });
         }

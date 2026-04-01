@@ -150,11 +150,18 @@ export function ModelSelector({
                             >
                               {model.displayName}
                             </div>
-                            {model.modelId.includes('preview') && (
-                              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-surface-container-highest text-on-surface-variant border border-outline-variant/30">
-                                Preview
-                              </span>
-                            )}
+                            <div className="flex items-center gap-1.5">
+                              {model.modelId.includes('preview') && (
+                                <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-surface-container-highest text-on-surface-variant border border-outline-variant/30">
+                                  Preview
+                                </span>
+                              )}
+                              {model.capabilities?.reasoning && (
+                                <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-500/15 text-amber-400 border border-amber-500/30">
+                                  {t.thinking.reasoningBadge}
+                                </span>
+                              )}
+                            </div>
                           </div>
                         </div>
                         {activeModel === model.modelId && (

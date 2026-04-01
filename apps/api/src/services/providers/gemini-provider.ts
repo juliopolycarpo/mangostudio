@@ -13,6 +13,7 @@ import {
   validateGeminiApiKey,
   getGeminiModelCatalog,
 } from '../gemini';
+import { isReasoningModel } from '@mangostudio/shared/utils/model-detection';
 import { registerProvider } from './registry';
 import type {
   AIProvider,
@@ -75,6 +76,7 @@ const geminiProvider: AIProvider = {
         text: catalog.discoveredTextModels.some((t) => t.modelId === m.modelId),
         image: catalog.discoveredImageModels.some((i) => i.modelId === m.modelId),
         streaming: true,
+        reasoning: isReasoningModel(m.modelId),
       },
     }));
   },

@@ -1,5 +1,6 @@
 /* global localStorage, console */
 import { useState, useCallback, useEffect } from 'react';
+import type { ReasoningEffort } from '@mangostudio/shared';
 
 export function useGlobalSettings() {
   // Load from localStorage on init
@@ -29,6 +30,12 @@ export function useGlobalSettings() {
   const [globalImageQuality, setGlobalImageQuality] = useState(() =>
     loadFromStorage('globalImageQuality', '1K')
   );
+  const [thinkingEnabled, setThinkingEnabled] = useState(() =>
+    loadFromStorage('thinkingEnabled', false)
+  );
+  const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>(() =>
+    loadFromStorage<ReasoningEffort>('reasoningEffort', 'medium')
+  );
 
   // Persist changes to localStorage
   useEffect(() => {
@@ -43,10 +50,20 @@ export function useGlobalSettings() {
     saveToStorage('globalImageQuality', globalImageQuality);
   }, [globalImageQuality]);
 
+  useEffect(() => {
+    saveToStorage('thinkingEnabled', thinkingEnabled);
+  }, [thinkingEnabled]);
+
+  useEffect(() => {
+    saveToStorage('reasoningEffort', reasoningEffort);
+  }, [reasoningEffort]);
+
   const resetSettings = useCallback(() => {
     setGlobalTextSystemPrompt('');
     setGlobalImageSystemPrompt('');
     setGlobalImageQuality('1K');
+    setThinkingEnabled(false);
+    setReasoningEffort('medium');
   }, []);
 
   return {
@@ -56,6 +73,10 @@ export function useGlobalSettings() {
     setGlobalImageSystemPrompt,
     globalImageQuality,
     setGlobalImageQuality,
+    thinkingEnabled,
+    setThinkingEnabled,
+    reasoningEffort,
+    setReasoningEffort,
     resetSettings,
   };
 }
