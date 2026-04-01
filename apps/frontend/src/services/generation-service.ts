@@ -71,8 +71,23 @@ export async function respondText(request: RespondTextRequest): Promise<RespondT
 
 /** A single event received from the SSE streaming endpoint. */
 export interface StreamChunk {
-  type?: 'text' | 'thinking' | 'done' | 'error';
+  type?:
+    | 'text'
+    | 'thinking'
+    | 'tool_call_started'
+    | 'tool_call_completed'
+    | 'tool_result'
+    | 'done'
+    | 'error';
+  // text / thinking
   text?: string;
+  // tool call events
+  callId?: string;
+  name?: string;
+  arguments?: string;
+  result?: unknown;
+  isError?: boolean;
+  // terminal fields
   done: boolean;
   messageId?: string;
   generationTime?: string;

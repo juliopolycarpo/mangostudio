@@ -121,6 +121,45 @@ export function useTextChat({
                 text: accumulatedText,
                 parts: [...accumulatedParts],
               });
+            } else if (chunkType === 'tool_call_started' && chunk.callId) {
+              // Add a pending tool_call part for optimistic UI
+              const toolCallPart: MessagePart = {
+                type: 'tool_call',
+                toolCallId: chunk.callId,
+                name: chunk.name ?? '',
+                args: {},
+              };
+              accumulatedParts = [...accumulatedParts, toolCallPart];
+              updateOptimisticMessage(activeChatId!, optimisticAiMsgId, {
+                parts: [...accumulatedParts],
+              });
+            } else if (chunkType === 'tool_call_completed' && chunk.callId) {
+              // Update the args on the existing tool_call part
+              let parsedArgs: Record<string, unknown> = {};
+              try {
+                parsedArgs = JSON.parse(chunk.arguments ?? '{}') as Record<string, unknown>;
+              } catch {
+                // Keep empty args
+              }
+              accumulatedParts = accumulatedParts.map((p) =>
+                p.type === 'tool_call' && p.toolCallId === chunk.callId
+                  ? { ...p, args: parsedArgs }
+                  : p
+              );
+              updateOptimisticMessage(activeChatId!, optimisticAiMsgId, {
+                parts: [...accumulatedParts],
+              });
+            } else if (chunkType === 'tool_result' && chunk.callId) {
+              const resultPart: MessagePart = {
+                type: 'tool_result',
+                toolCallId: chunk.callId,
+                content: JSON.stringify(chunk.result),
+                isError: chunk.isError,
+              };
+              accumulatedParts = [...accumulatedParts, resultPart];
+              updateOptimisticMessage(activeChatId!, optimisticAiMsgId, {
+                parts: [...accumulatedParts],
+              });
             } else if (chunk.done) {
               updateOptimisticMessage(activeChatId!, optimisticAiMsgId, {
                 isGenerating: false,
