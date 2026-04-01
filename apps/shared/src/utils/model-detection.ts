@@ -26,14 +26,14 @@ export function isImageModelId(modelId: string): boolean {
  * Covers: o1/o3/o4-series, gpt-5.x, Claude 3.5 Sonnet+, Gemini 2.5, DeepSeek R1/Reasoner.
  */
 const REASONING_MODEL_PATTERNS: RegExp[] = [
-  /^o[1-9]/,               // OpenAI o-series
-  /^gpt-5/,                // OpenAI GPT-5 family
-  /^claude-3-5-sonnet/,    // Anthropic Claude 3.5 Sonnet (extended thinking)
-  /^claude-sonnet-4/,      // Anthropic Claude Sonnet 4+
-  /^claude-opus-4/,        // Anthropic Claude Opus 4+
-  /^gemini-2\.5/,          // Google Gemini 2.5 (thinking models)
-  /^deepseek-r1/,          // DeepSeek R1
-  /^deepseek-reasoner/,    // DeepSeek Reasoner
+  /^o[1-9]/, // OpenAI o-series
+  /^gpt-5/, // OpenAI GPT-5 family
+  /^claude-3-5-sonnet/, // Anthropic Claude 3.5 Sonnet (extended thinking)
+  /^claude-sonnet-4/, // Anthropic Claude Sonnet 4+
+  /^claude-opus-4/, // Anthropic Claude Opus 4+
+  /^gemini-2\.5/, // Google Gemini 2.5 (thinking models)
+  /^deepseek-r1/, // DeepSeek R1
+  /^deepseek-reasoner/, // DeepSeek Reasoner
 ];
 
 /** Returns true when `modelId` matches a known reasoning-capable model family. */

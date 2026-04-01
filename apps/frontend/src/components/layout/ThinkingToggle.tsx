@@ -92,13 +92,7 @@ export function ThinkingToggle({
                   }}
                   className="w-full flex items-center justify-between px-4 py-2 text-sm hover:bg-primary/10 transition-colors"
                 >
-                  <span
-                    className={
-                      effort === e
-                        ? 'text-amber-400 font-medium'
-                        : 'text-on-surface'
-                    }
-                  >
+                  <span className={effort === e ? 'text-amber-400 font-medium' : 'text-on-surface'}>
                     {effortLabels[e]}
                   </span>
                   {effort === e && <Check size={14} className="text-amber-400" />}

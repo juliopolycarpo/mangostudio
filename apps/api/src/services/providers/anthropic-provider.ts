@@ -151,10 +151,9 @@ const anthropicProvider: AIProvider = {
       };
     }
 
-    const stream = client.messages.stream(
-      params as unknown as Anthropic.MessageCreateParams,
-      { signal: req.signal }
-    );
+    const stream = client.messages.stream(params as unknown as Anthropic.MessageCreateParams, {
+      signal: req.signal,
+    });
 
     for await (const event of stream) {
       if (req.signal?.aborted) break;

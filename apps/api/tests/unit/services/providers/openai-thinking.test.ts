@@ -47,52 +47,14 @@ describe('isReasoningModel detection', () => {
 
 describe('openai-provider Responses API streaming', () => {
   /**
-   * Helper: creates a mock OpenAI SDK client class that captures calls
-   * and returns a mock stream from responses.create().
+   * Sets up mocks for both OpenAI SDK and secret-service, then imports the provider.
+   * Returns helpers to capture which API path was used and what params were sent.
    */
-  function createMockOpenAI(streamEvents: Array<Record<string, unknown>>) {
+  async function setupOpenAIMock(streamEvents: Array<Record<string, unknown>>) {
     let capturedResponsesParams: Record<string, unknown> | undefined;
     let capturedCompletionsParams: Record<string, unknown> | undefined;
 
-    const MockOpenAI = class {
-      responses = {
-        create: async (params: Record<string, unknown>) => {
-          capturedResponsesParams = params;
-          return (async function* () {
-            for (const event of streamEvents) {
-              yield event;
-            }
-          })();
-        },
-      };
-      chat = {
-        completions: {
-          create: async (params: Record<string, unknown>) => {
-            capturedCompletionsParams = params;
-            return (async function* () {
-              yield { choices: [{ delta: { content: 'Hello' } }] };
-            })();
-          },
-        },
-      };
-      models = {
-        list: async () => ({ data: [] }),
-      };
-    };
-
-    return {
-      MockOpenAI,
-      getCapturedResponsesParams: () => capturedResponsesParams,
-      getCapturedCompletionsParams: () => capturedCompletionsParams,
-    };
-  }
-
-  function setupMocks(streamEvents: Array<Record<string, unknown>>) {
-    const { MockOpenAI, getCapturedResponsesParams, getCapturedCompletionsParams } =
-      createMockOpenAI(streamEvents);
-
-    mock.module('openai', () => ({ default: MockOpenAI }));
-
+    // Mock secret-service BEFORE importing the provider
     mock.module('../../../../src/services/providers/secret-service', () => ({
       createProviderSecretService: () => ({
         resolveApiKey: async () => 'mock-key',
@@ -111,17 +73,48 @@ describe('openai-provider Responses API streaming', () => {
       }),
     }));
 
-    return { getCapturedResponsesParams, getCapturedCompletionsParams };
-  }
-
-  it('uses Responses API for reasoning models with thinking enabled', async () => {
-    const { getCapturedResponsesParams, getCapturedCompletionsParams } = setupMocks([
-      { type: 'response.output_text.delta', delta: 'Hi' },
-    ]);
+    mock.module('openai', () => ({
+      default: class {
+        responses = {
+          create: async (params: Record<string, unknown>) => {
+            capturedResponsesParams = params;
+            return (async function* () {
+              for (const event of streamEvents) {
+                yield event;
+              }
+            })();
+          },
+        };
+        chat = {
+          completions: {
+            create: async (params: Record<string, unknown>) => {
+              capturedCompletionsParams = params;
+              return (async function* () {
+                yield { choices: [{ delta: { content: 'Hello' } }] };
+              })();
+            },
+          },
+        };
+        models = {
+          list: async () => ({ data: [] }),
+        };
+      },
+    }));
 
     const { openAIProvider } = await import('../../../../src/services/providers/openai-provider');
 
-    for await (const _ of openAIProvider.generateTextStream!({
+    return {
+      provider: openAIProvider,
+      getCapturedResponsesParams: () => capturedResponsesParams,
+      getCapturedCompletionsParams: () => capturedCompletionsParams,
+    };
+  }
+
+  it('uses Responses API for reasoning models with thinking enabled', async () => {
+    const { provider, getCapturedResponsesParams, getCapturedCompletionsParams } =
+      await setupOpenAIMock([{ type: 'response.output_text.delta', delta: 'Hi' }]);
+
+    for await (const _ of provider.generateTextStream!({
       userId: 'u1',
       history: [],
       prompt: 'Hello',
@@ -132,16 +125,18 @@ describe('openai-provider Responses API streaming', () => {
     }
 
     expect(getCapturedResponsesParams()).toBeDefined();
-    expect(getCapturedResponsesParams()!.reasoning).toEqual({ effort: 'high', summary: 'auto' });
+    expect(getCapturedResponsesParams()!.reasoning).toEqual({
+      effort: 'high',
+      summary: 'auto',
+    });
     expect(getCapturedCompletionsParams()).toBeUndefined();
   });
 
   it('uses Chat Completions for non-reasoning models', async () => {
-    const { getCapturedResponsesParams, getCapturedCompletionsParams } = setupMocks([]);
+    const { provider, getCapturedResponsesParams, getCapturedCompletionsParams } =
+      await setupOpenAIMock([]);
 
-    const { openAIProvider } = await import('../../../../src/services/providers/openai-provider');
-
-    for await (const _ of openAIProvider.generateTextStream!({
+    for await (const _ of provider.generateTextStream!({
       userId: 'u1',
       history: [],
       prompt: 'Hello',
@@ -156,11 +151,10 @@ describe('openai-provider Responses API streaming', () => {
   });
 
   it('uses Chat Completions when thinking is disabled for reasoning models', async () => {
-    const { getCapturedResponsesParams, getCapturedCompletionsParams } = setupMocks([]);
+    const { provider, getCapturedResponsesParams, getCapturedCompletionsParams } =
+      await setupOpenAIMock([]);
 
-    const { openAIProvider } = await import('../../../../src/services/providers/openai-provider');
-
-    for await (const _ of openAIProvider.generateTextStream!({
+    for await (const _ of provider.generateTextStream!({
       userId: 'u1',
       history: [],
       prompt: 'Hello',
@@ -175,7 +169,7 @@ describe('openai-provider Responses API streaming', () => {
   });
 
   it('yields thinking from reasoning_summary_text.delta', async () => {
-    setupMocks([
+    const { provider } = await setupOpenAIMock([
       {
         type: 'response.reasoning_summary_text.delta',
         item_id: 'item1',
@@ -188,10 +182,8 @@ describe('openai-provider Responses API streaming', () => {
       },
     ]);
 
-    const { openAIProvider } = await import('../../../../src/services/providers/openai-provider');
     const chunks = [];
-
-    for await (const chunk of openAIProvider.generateTextStream!({
+    for await (const chunk of provider.generateTextStream!({
       userId: 'u1',
       history: [],
       prompt: 'Hello',
@@ -207,7 +199,7 @@ describe('openai-provider Responses API streaming', () => {
   });
 
   it('falls back to reasoning_text.delta when no summary events', async () => {
-    setupMocks([
+    const { provider } = await setupOpenAIMock([
       {
         type: 'response.reasoning_text.delta',
         item_id: 'item1',
@@ -220,10 +212,8 @@ describe('openai-provider Responses API streaming', () => {
       },
     ]);
 
-    const { openAIProvider } = await import('../../../../src/services/providers/openai-provider');
     const chunks = [];
-
-    for await (const chunk of openAIProvider.generateTextStream!({
+    for await (const chunk of provider.generateTextStream!({
       userId: 'u1',
       history: [],
       prompt: 'Hello',
@@ -238,7 +228,7 @@ describe('openai-provider Responses API streaming', () => {
   });
 
   it('deduplicates summary events already seen via delta', async () => {
-    setupMocks([
+    const { provider } = await setupOpenAIMock([
       {
         type: 'response.reasoning_summary_text.delta',
         item_id: 'item1',
@@ -257,10 +247,8 @@ describe('openai-provider Responses API streaming', () => {
       },
     ]);
 
-    const { openAIProvider } = await import('../../../../src/services/providers/openai-provider');
     const chunks = [];
-
-    for await (const chunk of openAIProvider.generateTextStream!({
+    for await (const chunk of provider.generateTextStream!({
       userId: 'u1',
       history: [],
       prompt: 'Hello',
@@ -277,16 +265,14 @@ describe('openai-provider Responses API streaming', () => {
   });
 
   it('falls back to response.completed reasoning extraction', async () => {
-    setupMocks([
+    const { provider } = await setupOpenAIMock([
       {
         type: 'response.completed',
         response: {
           output: [
             {
               type: 'reasoning',
-              summary: [
-                { type: 'summary_text', text: 'Fallback reasoning from completed.' },
-              ],
+              summary: [{ type: 'summary_text', text: 'Fallback reasoning from completed.' }],
             },
             {
               type: 'message',
@@ -297,10 +283,8 @@ describe('openai-provider Responses API streaming', () => {
       },
     ]);
 
-    const { openAIProvider } = await import('../../../../src/services/providers/openai-provider');
     const chunks = [];
-
-    for await (const chunk of openAIProvider.generateTextStream!({
+    for await (const chunk of provider.generateTextStream!({
       userId: 'u1',
       history: [],
       prompt: 'Hello',

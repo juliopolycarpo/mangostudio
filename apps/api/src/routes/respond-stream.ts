@@ -96,7 +96,7 @@ export const respondStreamRoutes = (app: Elysia) =>
           const abortController = new AbortController();
           const { signal } = abortController;
 
-          const thinkingEnabled = body.thinkingEnabled ?? (body.thinkingVisibility !== 'off');
+          const thinkingEnabled = body.thinkingEnabled ?? body.thinkingVisibility !== 'off';
           const reasoningEffort = (body.reasoningEffort ?? 'medium') as ReasoningEffort;
 
           const stream = new ReadableStream({

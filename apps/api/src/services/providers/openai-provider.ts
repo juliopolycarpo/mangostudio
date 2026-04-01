@@ -251,9 +251,7 @@ function buildMessages(req: TextGenerationRequest): OpenAI.ChatCompletionMessage
  * Builds the `input` array for the Responses API from a TextGenerationRequest.
  * Maps history + current prompt into the shape expected by responses.create().
  */
-function buildResponsesInput(
-  req: TextGenerationRequest
-): Array<{ role: string; content: string }> {
+function buildResponsesInput(req: TextGenerationRequest): Array<{ role: string; content: string }> {
   const messages: Array<{ role: string; content: string }> = [];
 
   for (const msg of req.history) {
@@ -304,7 +302,7 @@ function extractReasoningFromCompleted(response: Record<string, unknown>): strin
  */
 async function* streamWithResponsesAPI(
   client: OpenAI,
-  req: TextGenerationRequest,
+  req: TextGenerationRequest
 ): AsyncIterable<StreamingChunk> {
   const effort = req.generationConfig?.reasoningEffort ?? 'medium';
   const input = buildResponsesInput(req);
@@ -407,7 +405,7 @@ async function* streamWithResponsesAPI(
  */
 async function* streamWithChatCompletions(
   client: OpenAI,
-  req: TextGenerationRequest,
+  req: TextGenerationRequest
 ): AsyncIterable<StreamingChunk> {
   const stream = await client.chat.completions.create(
     { model: req.modelName, messages: buildMessages(req), stream: true },

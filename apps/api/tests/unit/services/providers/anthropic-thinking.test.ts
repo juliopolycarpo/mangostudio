@@ -9,35 +9,46 @@ afterEach(() => {
   mock.restore();
 });
 
+/**
+ * Sets up mocks for both the Anthropic SDK and the secret-service layer,
+ * then dynamically imports the provider. The mock stream yields `streamEvents`.
+ */
+async function setupAnthropicMock(streamEvents: Array<Record<string, unknown>>) {
+  let capturedParams: Record<string, unknown> | undefined;
+
+  // Mock secret-service BEFORE importing the provider
+  mock.module('../../../../src/services/providers/secret-service', () => ({
+    createProviderSecretService: () => ({
+      resolveApiKey: async () => 'mock-key',
+      syncConfigFileConnectors: async () => {},
+      listMeta: async () => [],
+      validateApiKey: async () => {},
+    }),
+  }));
+
+  mock.module('@anthropic-ai/sdk', () => ({
+    default: class {
+      models = { list: async function* () {} };
+      messages = {
+        stream: (params: Record<string, unknown>) => {
+          capturedParams = params;
+          return (async function* () {
+            for (const event of streamEvents) {
+              yield event;
+            }
+          })();
+        },
+      };
+    },
+  }));
+
+  const mod = await import('../../../../src/services/providers/anthropic-provider');
+  return { provider: mod.anthropicProvider, getCapturedParams: () => capturedParams };
+}
+
 describe('anthropic-provider thinking', () => {
   it('sends thinking config when thinkingEnabled is true', async () => {
-    let capturedParams: Record<string, unknown> | undefined;
-
-    mock.module('@anthropic-ai/sdk', () => ({
-      default: class {
-        models = { list: async function* () {} };
-        messages = {
-          stream: (params: Record<string, unknown>) => {
-            capturedParams = params;
-            return (async function* () {
-              // empty stream
-            })();
-          },
-        };
-      },
-    }));
-
-    mock.module('../../../../src/services/providers/secret-service', () => ({
-      createProviderSecretService: () => ({
-        resolveApiKey: async () => 'mock-key',
-        syncConfigFileConnectors: async () => {},
-        listMeta: async () => [],
-        validateApiKey: async () => {},
-      }),
-    }));
-
-    const mod = await import('../../../../src/services/providers/anthropic-provider');
-    const provider = mod.anthropicProvider;
+    const { provider, getCapturedParams } = await setupAnthropicMock([]);
 
     for await (const _ of provider.generateTextStream!({
       userId: 'u1',
@@ -49,38 +60,18 @@ describe('anthropic-provider thinking', () => {
       // consume
     }
 
-    expect(capturedParams).toBeDefined();
-    expect(capturedParams!.thinking).toEqual({ type: 'enabled', budget_tokens: 2048 });
-    expect(capturedParams!.max_tokens).toBe(16000);
+    expect(getCapturedParams()).toBeDefined();
+    expect(getCapturedParams()!.thinking).toEqual({
+      type: 'enabled',
+      budget_tokens: 2048,
+    });
+    expect(getCapturedParams()!.max_tokens).toBe(16000);
   });
 
   it('does not send thinking config when thinkingEnabled is false', async () => {
-    let capturedParams: Record<string, unknown> | undefined;
+    const { provider, getCapturedParams } = await setupAnthropicMock([]);
 
-    mock.module('@anthropic-ai/sdk', () => ({
-      default: class {
-        models = { list: async function* () {} };
-        messages = {
-          stream: (params: Record<string, unknown>) => {
-            capturedParams = params;
-            return (async function* () {})();
-          },
-        };
-      },
-    }));
-
-    mock.module('../../../../src/services/providers/secret-service', () => ({
-      createProviderSecretService: () => ({
-        resolveApiKey: async () => 'mock-key',
-        syncConfigFileConnectors: async () => {},
-        listMeta: async () => [],
-        validateApiKey: async () => {},
-      }),
-    }));
-
-    const mod = await import('../../../../src/services/providers/anthropic-provider');
-
-    for await (const _ of mod.anthropicProvider.generateTextStream!({
+    for await (const _ of provider.generateTextStream!({
       userId: 'u1',
       history: [],
       prompt: 'Hi',
@@ -90,27 +81,18 @@ describe('anthropic-provider thinking', () => {
       // consume
     }
 
-    expect(capturedParams).toBeDefined();
-    expect(capturedParams!.thinking).toBeUndefined();
-    expect(capturedParams!.max_tokens).toBe(8192);
+    expect(getCapturedParams()).toBeDefined();
+    expect(getCapturedParams()!.thinking).toBeUndefined();
+    expect(getCapturedParams()!.max_tokens).toBe(8192);
   });
 
   it('maps effort levels to correct budget_tokens', async () => {
     const budgets: Record<string, number> = {};
 
     for (const effort of ['low', 'medium', 'high'] as const) {
-      mock.module('@anthropic-ai/sdk', () => ({
-        default: class {
-          models = { list: async function* () {} };
-          messages = {
-            stream: (params: Record<string, unknown>) => {
-              const thinking = params.thinking as { budget_tokens: number } | undefined;
-              budgets[effort] = thinking?.budget_tokens ?? 0;
-              return (async function* () {})();
-            },
-          };
-        },
-      }));
+      mock.restore();
+
+      let params: Record<string, unknown> | undefined;
 
       mock.module('../../../../src/services/providers/secret-service', () => ({
         createProviderSecretService: () => ({
@@ -119,6 +101,18 @@ describe('anthropic-provider thinking', () => {
           listMeta: async () => [],
           validateApiKey: async () => {},
         }),
+      }));
+
+      mock.module('@anthropic-ai/sdk', () => ({
+        default: class {
+          models = { list: async function* () {} };
+          messages = {
+            stream: (p: Record<string, unknown>) => {
+              params = p;
+              return (async function* () {})();
+            },
+          };
+        },
       }));
 
       const mod = await import('../../../../src/services/providers/anthropic-provider');
@@ -133,7 +127,8 @@ describe('anthropic-provider thinking', () => {
         // consume
       }
 
-      mock.restore();
+      const thinking = params?.thinking as { budget_tokens: number } | undefined;
+      budgets[effort] = thinking?.budget_tokens ?? 0;
     }
 
     expect(budgets.low).toBe(1024);
@@ -142,38 +137,19 @@ describe('anthropic-provider thinking', () => {
   });
 
   it('yields thinking chunks from thinking_delta events', async () => {
-    mock.module('@anthropic-ai/sdk', () => ({
-      default: class {
-        models = { list: async function* () {} };
-        messages = {
-          stream: () =>
-            (async function* () {
-              yield {
-                type: 'content_block_delta',
-                delta: { type: 'thinking_delta', thinking: 'Let me think...' },
-              };
-              yield {
-                type: 'content_block_delta',
-                delta: { type: 'text_delta', text: 'Here is my answer.' },
-              };
-            })(),
-        };
+    const { provider } = await setupAnthropicMock([
+      {
+        type: 'content_block_delta',
+        delta: { type: 'thinking_delta', thinking: 'Let me think...' },
       },
-    }));
+      {
+        type: 'content_block_delta',
+        delta: { type: 'text_delta', text: 'Here is my answer.' },
+      },
+    ]);
 
-    mock.module('../../../../src/services/providers/secret-service', () => ({
-      createProviderSecretService: () => ({
-        resolveApiKey: async () => 'mock-key',
-        syncConfigFileConnectors: async () => {},
-        listMeta: async () => [],
-        validateApiKey: async () => {},
-      }),
-    }));
-
-    const mod = await import('../../../../src/services/providers/anthropic-provider');
     const chunks = [];
-
-    for await (const chunk of mod.anthropicProvider.generateTextStream!({
+    for await (const chunk of provider.generateTextStream!({
       userId: 'u1',
       history: [],
       prompt: 'Hi',
