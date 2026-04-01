@@ -13,6 +13,7 @@ interface ChatPageProps {
   disabled: boolean;
   isGenerating: boolean;
   onStop: () => void;
+  streamingThinking?: string;
 }
 
 export function ChatPage({
@@ -23,6 +24,7 @@ export function ChatPage({
   disabled,
   isGenerating,
   onStop,
+  streamingThinking,
 }: ChatPageProps) {
   const { data, status } = useMessagesQuery(chatId);
   const { t } = useI18n();
@@ -50,6 +52,7 @@ export function ChatPage({
         disabled={disabled}
         isGenerating={isGenerating}
         onStop={onStop}
+        streamingThinking={streamingThinking}
       />
     </div>
   );

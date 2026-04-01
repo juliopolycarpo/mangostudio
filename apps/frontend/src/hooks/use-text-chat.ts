@@ -27,6 +27,7 @@ export function useTextChat({
 }: UseTextChatOptions) {
   const queryClient = useQueryClient();
   const [isGenerating, setIsGenerating] = useState(false);
+  const [streamingThinking, setStreamingThinking] = useState('');
   const abortControllerRef = useRef<AbortController | null>(null);
 
   const { appendOptimisticMessages, updateOptimisticMessage } = optimistic;
@@ -80,6 +81,7 @@ export function useTextChat({
       let accumulatedText = '';
       let accumulatedThinking = '';
       let accumulatedParts: MessagePart[] = [];
+      setStreamingThinking('');
 
       try {
         await respondTextStream(
@@ -105,6 +107,7 @@ export function useTextChat({
 
             if (chunkType === 'thinking' && chunk.text) {
               accumulatedThinking += chunk.text;
+              setStreamingThinking(accumulatedThinking);
               const thinkingPart: MessagePart = { type: 'thinking', text: accumulatedThinking };
               accumulatedParts = [
                 thinkingPart,
@@ -148,6 +151,7 @@ export function useTextChat({
       } finally {
         abortControllerRef.current = null;
         setIsGenerating(false);
+        setStreamingThinking('');
         void chats.loadChats();
         void queryClient.invalidateQueries({ queryKey: messageKeys.list(activeChatId!) });
       }
@@ -164,5 +168,5 @@ export function useTextChat({
     ]
   );
 
-  return { isGenerating, handleRespond, handleStop };
+  return { isGenerating, streamingThinking, handleRespond, handleStop };
 }

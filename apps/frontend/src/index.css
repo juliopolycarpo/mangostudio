@@ -61,3 +61,22 @@ body {
   -ms-overflow-style: none;
   scrollbar-width: none;
 }
+
+/* App-styled thin scrollbar for panels (thinking block, settings, etc.) */
+.app-scrollbar::-webkit-scrollbar {
+  width: 4px;
+}
+.app-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.app-scrollbar::-webkit-scrollbar-thumb {
+  background: var(--color-outline-variant);
+  border-radius: 9999px;
+}
+.app-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: var(--color-on-surface-variant);
+}
+.app-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-outline-variant) transparent;
+}

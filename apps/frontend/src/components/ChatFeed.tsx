@@ -9,31 +9,43 @@ import { useI18n } from '@/hooks/use-i18n';
 
 function ThinkingBlock({ text, isStreaming }: { text: string; isStreaming: boolean }) {
   const { t } = useI18n();
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(true);
 
   return (
     <div className="mb-3">
       <button
         onClick={() => setExpanded(!expanded)}
-        className="flex items-center gap-2 text-xs text-on-surface-variant bg-surface-container-lowest
-                   py-2 px-3 rounded-lg w-fit border border-outline-variant/10 hover:bg-surface-container-low
-                   transition-colors cursor-pointer"
+        className="flex items-center gap-2 text-xs text-on-surface-variant/70
+                   py-1.5 px-3 rounded-full w-fit border border-outline-variant/20
+                   hover:border-outline-variant/40 hover:text-on-surface-variant
+                   transition-all duration-200 cursor-pointer"
+        style={{ background: 'rgba(14,14,14,0.6)', backdropFilter: 'blur(8px)' }}
       >
-        <Brain size={12} className="text-primary" />
-        <span>{isStreaming ? t.thinking.streaming : t.thinking.label}</span>
-        <ChevronDown size={12} className={`transition-transform ${expanded ? 'rotate-180' : ''}`} />
+        <Brain size={11} className="text-primary/70" />
+        <span className="tracking-wide">
+          {isStreaming ? t.thinking.streaming : t.thinking.label}
+        </span>
+        <ChevronDown
+          size={11}
+          className={`transition-transform duration-300 text-primary/50 ${expanded ? 'rotate-180' : ''}`}
+        />
       </button>
       {expanded && (
         <motion.div
           initial={{ opacity: 0, height: 0 }}
           animate={{ opacity: 1, height: 'auto' }}
-          className="mt-2 bg-surface-container-lowest p-4 rounded-xl border border-outline-variant/10
-                     text-xs text-on-surface-variant font-mono leading-relaxed whitespace-pre-wrap max-h-64 overflow-y-auto"
+          transition={{ duration: 0.25, ease: 'easeOut' }}
+          className="mt-1.5 rounded-xl border border-outline-variant/15 overflow-hidden"
+          style={{ background: 'rgba(14,14,14,0.5)', backdropFilter: 'blur(12px)' }}
         >
-          {text}
-          {isStreaming && (
-            <span className="inline-block w-0.5 h-[1em] bg-primary/50 ml-0.5 align-middle animate-blink" />
-          )}
+          <div className="p-4 max-h-48 overflow-y-auto app-scrollbar">
+            <p className="text-xs text-on-surface-variant/60 font-mono leading-relaxed whitespace-pre-wrap">
+              {text}
+              {isStreaming && (
+                <span className="inline-block w-0.5 h-[1em] bg-primary/40 ml-0.5 align-middle animate-blink" />
+              )}
+            </p>
+          </div>
         </motion.div>
       )}
     </div>
@@ -163,19 +175,17 @@ export function ChatFeed({ messages }: { messages: Message[] }) {
                       </div>
 
                       {msg.isGenerating ? (
-                        /* Loading / streaming state */
+                        /* Loading / streaming state — thinking panel lives in InputBar above input */
                         <div className="flex flex-col gap-3 py-4 pl-9">
                           {(() => {
                             const parts: MessagePart[] =
                               msg.parts ?? (msg.text ? [{ type: 'text', text: msg.text }] : []);
-                            const thinkingPart = parts.find((p) => p.type === 'thinking');
                             const textParts = parts.filter((p) => p.type === 'text');
                             const combinedText = textParts
                               .map((p) => (p as { type: 'text'; text: string }).text)
                               .join('');
-                            const isThinkingOnly = !!thinkingPart && !combinedText;
 
-                            if (isImageTurn || (!msg.text && !thinkingPart)) {
+                            if (isImageTurn || (!msg.text && !combinedText)) {
                               return (
                                 <>
                                   <span className="text-sm font-medium text-on-surface animate-pulse">
@@ -189,19 +199,9 @@ export function ChatFeed({ messages }: { messages: Message[] }) {
                             }
 
                             return (
-                              <div className="flex flex-col gap-3">
-                                {thinkingPart && (
-                                  <ThinkingBlock
-                                    text={(thinkingPart as { type: 'thinking'; text: string }).text}
-                                    isStreaming={isThinkingOnly}
-                                  />
-                                )}
-                                {combinedText && (
-                                  <div className="bg-surface-container-low p-5 rounded-2xl border border-outline-variant/10 font-body text-sm leading-relaxed text-on-surface whitespace-pre-wrap max-w-2xl">
-                                    {combinedText}
-                                    <span className="inline-block w-0.5 h-[1em] bg-primary ml-0.5 align-middle animate-blink" />
-                                  </div>
-                                )}
+                              <div className="bg-surface-container-low p-5 rounded-2xl border border-outline-variant/10 font-body text-sm leading-relaxed text-on-surface whitespace-pre-wrap max-w-2xl">
+                                {combinedText}
+                                <span className="inline-block w-0.5 h-[1em] bg-primary ml-0.5 align-middle animate-blink" />
                               </div>
                             );
                           })()}

@@ -18,6 +18,7 @@ function ChatRoute() {
       disabled={app.isGenerating}
       isGenerating={app.isGenerating}
       onStop={app.handleStop}
+      streamingThinking={app.streamingThinking}
     />
   );
 }
