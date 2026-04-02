@@ -7,6 +7,7 @@ jobs:
   eslint:
     name: ESLint
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
 
@@ -23,6 +24,7 @@ jobs:
   typecheck:
     name: TypeScript Typecheck
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
 

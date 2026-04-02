@@ -11,6 +11,7 @@ jobs:
   update-commits:
     name: Inject commit list into PR body
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Generate and inject commit list
         uses: actions/github-script@v8
