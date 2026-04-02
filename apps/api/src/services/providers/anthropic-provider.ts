@@ -31,13 +31,21 @@ const FALLBACK_MODELS: ModelInfo[] = [
     modelId: 'claude-sonnet-4-5-20250514',
     displayName: 'Claude Sonnet 4.5',
     provider: 'anthropic',
-    capabilities: { text: true, image: false, streaming: true, reasoning: true },
+    capabilities: {
+      text: true, image: false, streaming: true, reasoning: true,
+      tools: true, statefulContinuation: false, promptCaching: true,
+      parallelToolCalls: false, reasoningWithTools: true,
+    },
   },
   {
     modelId: 'claude-haiku-3-5-20241022',
     displayName: 'Claude Haiku 3.5',
     provider: 'anthropic',
-    capabilities: { text: true, image: false, streaming: true, reasoning: false },
+    capabilities: {
+      text: true, image: false, streaming: true, reasoning: false,
+      tools: true, statefulContinuation: false, promptCaching: true,
+      parallelToolCalls: false, reasoningWithTools: false,
+    },
   },
 ];
 
@@ -83,6 +91,11 @@ const listModelsWithCache = withModelCache(
             image: false,
             streaming: true,
             reasoning: isReasoningModel(model.id),
+            tools: true,
+            statefulContinuation: false,
+            promptCaching: true,
+            parallelToolCalls: false,
+            reasoningWithTools: isReasoningModel(model.id),
           },
         });
       }

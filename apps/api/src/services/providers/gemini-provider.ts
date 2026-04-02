@@ -367,6 +367,11 @@ const geminiProvider: AIProvider = {
         image: catalog.discoveredImageModels.some((i) => i.modelId === m.modelId),
         streaming: true,
         reasoning: isReasoningModel(m.modelId),
+        tools: catalog.discoveredTextModels.some((t) => t.modelId === m.modelId),
+        statefulContinuation: catalog.discoveredTextModels.some((t) => t.modelId === m.modelId),
+        promptCaching: true,
+        parallelToolCalls: false,
+        reasoningWithTools: isReasoningModel(m.modelId),
       },
     }));
   },

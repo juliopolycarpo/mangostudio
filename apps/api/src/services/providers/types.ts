@@ -132,6 +132,7 @@ export interface ModelInfo {
     reasoning?: boolean;
     tools?: boolean;
     statefulContinuation?: boolean;
+    promptCaching?: boolean;
     parallelToolCalls?: boolean;
     reasoningWithTools?: boolean;
   };

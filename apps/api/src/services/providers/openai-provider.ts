@@ -224,6 +224,11 @@ const listModelsWithCache = withModelCache(
             image: isImageModelId(model.id),
             streaming: !isImageModelId(model.id),
             reasoning: isReasoningModel(model.id),
+            tools: !isImageModelId(model.id),
+            statefulContinuation: !isImageModelId(model.id),
+            promptCaching: true,
+            parallelToolCalls: !isImageModelId(model.id),
+            reasoningWithTools: isReasoningModel(model.id),
           },
         });
       }
