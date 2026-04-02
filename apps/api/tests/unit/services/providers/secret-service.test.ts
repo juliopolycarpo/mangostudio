@@ -15,7 +15,8 @@ function createMetadataHarness(initial: SecretMetadataRow[] = []) {
 
   return {
     listMetadata: async (_provider: string, _userId: string) => [...rows],
-    getMetadataById: async (id: string, _userId: string) => rows.find((row) => row.id === id) ?? null,
+    getMetadataById: async (id: string, _userId: string) =>
+      rows.find((row) => row.id === id) ?? null,
     upsertMetadata: async (input: SecretMetadataInput) => {
       const nextRow: SecretMetadataRow = {
         id: input.id,
@@ -108,7 +109,9 @@ describe('createProviderSecretService syncConfigFileConnectors', () => {
       },
       {
         secretStore: new InMemorySecretStore(),
-        tomlFilePath: writeTempToml('[openai_api_keys]\nopenai-for-list = "sk-list-test-key-aaaa"\n'),
+        tomlFilePath: writeTempToml(
+          '[openai_api_keys]\nopenai-for-list = "sk-list-test-key-aaaa"\n'
+        ),
         listMetadata: metadata.listMetadata,
         getMetadataById: metadata.getMetadataById,
         upsertMetadata: metadata.upsertMetadata,

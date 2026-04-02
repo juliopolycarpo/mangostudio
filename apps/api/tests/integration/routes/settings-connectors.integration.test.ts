@@ -54,7 +54,9 @@ describe('settings connectors routes', () => {
     const payload = (await response.json()) as any;
     expect(Value.Check(ConnectorStatusSchema, payload)).toBe(true);
     expect(
-      payload.connectors.filter((connector: { userId: string | null }) => connector.userId === TEST_USER.id)
+      payload.connectors.filter(
+        (connector: { userId: string | null }) => connector.userId === TEST_USER.id
+      )
     ).toEqual([]);
   });
 
@@ -112,7 +114,9 @@ describe('settings connectors routes', () => {
     const payload = (await response.json()) as any;
     expect(Value.Check(ConnectorStatusSchema, payload)).toBe(true);
     expect(
-      payload.connectors.some((connector: { id: string }) => connector.id === 'shared-compat-without-base-url')
+      payload.connectors.some(
+        (connector: { id: string }) => connector.id === 'shared-compat-without-base-url'
+      )
     ).toBe(false);
   });
 

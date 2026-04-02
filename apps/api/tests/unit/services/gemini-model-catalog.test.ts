@@ -130,7 +130,9 @@ describe('createGeminiModelCatalogService', () => {
     expect(snapshot.status).toBe('ready');
     expect(snapshot.allModels.length).toBeGreaterThan(0);
     expect(snapshot.discoveredTextModels.map((m) => m.modelId)).toContain('gemini-2.5-flash');
-    expect(snapshot.discoveredImageModels.map((m) => m.modelId)).toContain('gemini-2.5-flash-image');
+    expect(snapshot.discoveredImageModels.map((m) => m.modelId)).toContain(
+      'gemini-2.5-flash-image'
+    );
   });
 
   it('returns cached models on subsequent calls without re-fetching', async () => {

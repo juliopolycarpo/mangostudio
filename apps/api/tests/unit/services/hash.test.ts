@@ -30,10 +30,7 @@ describe('computeToolsetHash', () => {
   });
 
   it('changes when a tool definition changes', () => {
-    const modified = [
-      ...tools.slice(0, 1),
-      { ...tools[1], description: 'Modified' },
-    ];
+    const modified = [...tools.slice(0, 1), { ...tools[1], description: 'Modified' }];
     expect(computeToolsetHash(tools)).not.toBe(computeToolsetHash(modified));
   });
 

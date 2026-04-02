@@ -17,8 +17,7 @@ function createMetadataHarness(initial: SecretMetadataRow[] = []) {
 
   return {
     listMetadata: async (_provider: string, _userId: string) => [...rows],
-    getMetadataById: async (id: string, _userId: string) =>
-      rows.find((r) => r.id === id) ?? null,
+    getMetadataById: async (id: string, _userId: string) => rows.find((r) => r.id === id) ?? null,
     upsertMetadata: async (input: SecretMetadataInput) => {
       const idx = rows.findIndex((r) => r.id === input.id);
       const row: SecretMetadataRow = {
@@ -97,25 +96,21 @@ function createTestService(
 
 describe('openai-compatible-provider', () => {
   it('providerType is openai-compatible', async () => {
-    const { openAICompatibleProvider } = await import(
-      '../../../../src/services/providers/openai-compatible-provider'
-    );
+    const { openAICompatibleProvider } =
+      await import('../../../../src/services/providers/openai-compatible-provider');
     expect(openAICompatibleProvider.providerType).toBe('openai-compatible');
   });
 
   it('is registered in the provider registry after import', async () => {
     await import('../../../../src/services/providers/openai-compatible-provider');
-    const { getProvider } = await import(
-      '../../../../src/services/providers/registry'
-    );
+    const { getProvider } = await import('../../../../src/services/providers/registry');
     const provider = getProvider('openai-compatible');
     expect(provider.providerType).toBe('openai-compatible');
   });
 
   it('implements the required AIProvider methods', async () => {
-    const { openAICompatibleProvider } = await import(
-      '../../../../src/services/providers/openai-compatible-provider'
-    );
+    const { openAICompatibleProvider } =
+      await import('../../../../src/services/providers/openai-compatible-provider');
     expect(typeof openAICompatibleProvider.generateText).toBe('function');
     expect(typeof openAICompatibleProvider.listModels).toBe('function');
     expect(typeof openAICompatibleProvider.validateApiKey).toBe('function');
@@ -160,9 +155,8 @@ describe('openai-compatible resolveClientConfig (via secretService)', () => {
   });
 
   it('throws with the correct error message when no connector has a valid baseUrl', async () => {
-    const { openAICompatibleProvider } = await import(
-      '../../../../src/services/providers/openai-compatible-provider'
-    );
+    const { openAICompatibleProvider } =
+      await import('../../../../src/services/providers/openai-compatible-provider');
 
     // The real provider throws this specific error when no eligible connector is found.
     // 'user-with-no-valid-connectors' has no connectors in the test DB.
@@ -207,9 +201,8 @@ describe('openai-compatible resolveClientConfig (via secretService)', () => {
   it('does NOT fall back to https://api.openai.com/v1', async () => {
     // The openai-compatible provider must never use the OpenAI base URL.
     // When no connector has a baseUrl, it should throw rather than fall back.
-    const { openAICompatibleProvider } = await import(
-      '../../../../src/services/providers/openai-compatible-provider'
-    );
+    const { openAICompatibleProvider } =
+      await import('../../../../src/services/providers/openai-compatible-provider');
 
     let thrownError: unknown = null;
     try {
@@ -263,9 +256,8 @@ describe('openai-compatible listModels filtering', () => {
   });
 
   it('returns empty array when no connectors are configured', async () => {
-    const { openAICompatibleProvider } = await import(
-      '../../../../src/services/providers/openai-compatible-provider'
-    );
+    const { openAICompatibleProvider } =
+      await import('../../../../src/services/providers/openai-compatible-provider');
     const models = await openAICompatibleProvider.listModels('nonexistent-user-no-compat-keys');
     expect(models).toEqual([]);
   });

@@ -19,11 +19,8 @@ async function* mockStream() {
 }
 
 describe('GeminiProvider.generateTextStream', () => {
-  let originalModule: any;
-
   beforeEach(() => {
-    // Stash the real module reference so we can restore after tests
-    originalModule = null;
+    // Reset module mocks between tests
   });
 
   afterEach(() => {
@@ -48,7 +45,13 @@ describe('GeminiProvider.generateTextStream', () => {
     const { generateTextStream } = await import('../../../../src/services/gemini/text');
 
     const chunks: Array<{ type?: string; text?: string; done: boolean }> = [];
-    for await (const chunk of generateTextStream('user-1', [], 'Hi', undefined, 'gemini-2.0-flash')) {
+    for await (const chunk of generateTextStream(
+      'user-1',
+      [],
+      'Hi',
+      undefined,
+      'gemini-2.0-flash'
+    )) {
       chunks.push(chunk);
     }
 
@@ -80,7 +83,13 @@ describe('GeminiProvider.generateTextStream', () => {
     const { generateTextStream } = await import('../../../../src/services/gemini/text');
 
     await expect(async () => {
-      for await (const _ of generateTextStream('user-1', [], 'bad prompt', undefined, 'gemini-2.0-flash')) {
+      for await (const _chunk of generateTextStream(
+        'user-1',
+        [],
+        'bad prompt',
+        undefined,
+        'gemini-2.0-flash'
+      )) {
         // consume
       }
     }).toThrow('Prompt blocked: SAFETY');
@@ -90,7 +99,7 @@ describe('GeminiProvider.generateTextStream', () => {
     const { generateTextStream } = await import('../../../../src/services/gemini/text');
 
     await expect(async () => {
-      for await (const _ of generateTextStream('user-1', [], 'Hi', undefined, undefined)) {
+      for await (const _chunk of generateTextStream('user-1', [], 'Hi', undefined, undefined)) {
         // consume
       }
     }).toThrow('No Gemini text model was provided.');
@@ -164,13 +173,16 @@ describe('GeminiProvider.generateTextStream', () => {
 
     const { generateTextStream } = await import('../../../../src/services/gemini/text');
 
-    for await (const _ of generateTextStream(
+    for await (const _chunk of generateTextStream(
       'user-1',
       [],
       'Hi',
       undefined,
       'gemini-2.0-flash',
-      { thinkingEnabled: false, reasoningEffort: 'medium' }
+      {
+        thinkingEnabled: false,
+        reasoningEffort: 'medium',
+      }
     )) {
       // consume
     }

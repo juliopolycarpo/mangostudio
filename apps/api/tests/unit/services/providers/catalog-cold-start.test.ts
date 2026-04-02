@@ -10,12 +10,14 @@ const MOCK_MODEL = {
 };
 
 /** Builds a service instance with injected test doubles — no module mocking needed. */
-function makeService(modelList: typeof MOCK_MODEL[] = [MOCK_MODEL], enabledIds: string[] = [MOCK_MODEL.modelId]) {
+function makeService(
+  modelList: (typeof MOCK_MODEL)[] = [MOCK_MODEL],
+  enabledIds: string[] = [MOCK_MODEL.modelId]
+) {
   return createUnifiedModelCatalogService({
     listProviders: () => ['gemini' as ProviderType],
-    getProviderFn: () => ({ listModels: async () => modelList } as any),
-    listAllSecretMetadataFn: async () =>
-      [{ enabledModels: JSON.stringify(enabledIds) }] as any,
+    getProviderFn: () => ({ listModels: async () => modelList }) as any,
+    listAllSecretMetadataFn: async () => [{ enabledModels: JSON.stringify(enabledIds) }] as any,
   });
 }
 
@@ -34,12 +36,13 @@ describe('createUnifiedModelCatalogService.getUnifiedModelCatalog', () => {
 
     const service = createUnifiedModelCatalogService({
       listProviders: () => ['gemini' as ProviderType],
-      getProviderFn: () => ({
-        listModels: async () => {
-          callCount++;
-          return [MOCK_MODEL];
-        },
-      } as any),
+      getProviderFn: () =>
+        ({
+          listModels: async () => {
+            callCount++;
+            return [MOCK_MODEL];
+          },
+        }) as any,
       listAllSecretMetadataFn: async () =>
         [{ enabledModels: JSON.stringify([MOCK_MODEL.modelId]) }] as any,
     });
@@ -58,9 +61,12 @@ describe('createUnifiedModelCatalogService.getUnifiedModelCatalog', () => {
   it('resolves even when all providers fail', async () => {
     const service = createUnifiedModelCatalogService({
       listProviders: () => ['gemini' as ProviderType],
-      getProviderFn: () => ({
-        listModels: async () => { throw new Error('provider unavailable'); },
-      } as any),
+      getProviderFn: () =>
+        ({
+          listModels: async () => {
+            throw new Error('provider unavailable');
+          },
+        }) as any,
       listAllSecretMetadataFn: async () => [] as any,
     });
 

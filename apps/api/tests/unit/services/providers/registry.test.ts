@@ -43,9 +43,7 @@ describe('provider registry', () => {
   });
 
   it('throws when a provider has not been registered', () => {
-    expect(() => getProvider('anthropic')).toThrow(
-      "AI provider 'anthropic' is not registered."
-    );
+    expect(() => getProvider('anthropic')).toThrow("AI provider 'anthropic' is not registered.");
   });
 
   it('replaces an existing registration when the same type is re-registered', () => {

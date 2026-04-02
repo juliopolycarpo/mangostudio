@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'bun:test';
-import { validateBaseUrl, UnsafeBaseUrlError } from '../../../src/services/providers/base-url-policy';
+import {
+  validateBaseUrl,
+  UnsafeBaseUrlError,
+} from '../../../src/services/providers/base-url-policy';
 
 describe('base-url-policy', () => {
   it('allows a valid public HTTPS URL', async () => {
