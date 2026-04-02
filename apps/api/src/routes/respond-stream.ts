@@ -1,19 +1,25 @@
 /**
  * Streaming respond route: text chat endpoint using SSE.
- * Streams the AI response incrementally via Server-Sent Events.
+ * Supports the legacy text/thinking stream AND the new agentic tool loop.
  * Resolves the AI provider dynamically from the requested model.
  */
 
 import { Elysia, t } from 'elysia';
 import '../services/providers'; // ensure all providers are registered
+import '../services/tools'; // ensure all builtins are registered
 import { getProviderForModel } from '../services/providers/registry';
 import { getUnifiedModelCatalog } from '../services/providers/catalog';
 import { getDb } from '../db/database';
 import { requireAuth } from '../plugins/auth-middleware';
 import { generateId } from '../utils/id';
 import { verifyChatOwnership } from '../services/chat-service';
-import { createMessage, loadChatHistory } from '../services/message-service';
+import { createMessage, loadChatHistory, loadRichChatHistory } from '../services/message-service';
+import { getAllToolDefinitions, executeTool } from '../services/tools';
 import type { SSEErrorEvent, MessagePart, ReasoningEffort } from '@mangostudio/shared';
+import type { AgentTurnRequest } from '../services/providers/types';
+
+const MAX_TOOL_ITERATIONS = 10;
+const TOOL_TIMEOUT_MS = 30_000;
 
 /** Serialises an SSE data line. */
 function sseEvent(data: object): Uint8Array {
@@ -28,12 +34,19 @@ export const respondStreamRoutes = (app: Elysia) =>
        * POST /api/respond/stream
        * Streaming text-chat endpoint: persists user message, reconstructs context,
        * calls the AI provider stream, and pushes SSE events until done.
-       * Falls back to single-event response when the provider lacks streaming support.
+       *
+       * When the provider supports generateAgentTurnStream, the route runs the
+       * full agentic tool loop (tool calling + continuation cursors).
+       * Falls back to the legacy generateTextStream path otherwise.
        *
        * SSE event shapes:
-       *   chunk:  { text: string; done: false }
-       *   done:   { done: true; messageId: string; generationTime: string }
-       *   error:  { error: string; done: true }
+       *   thinking:           { type: 'thinking', text: string, done: false }
+       *   text chunk:         { type: 'text', text: string, done: false }
+       *   tool call started:  { type: 'tool_call_started', callId, name, done: false }
+       *   tool call done:     { type: 'tool_call_completed', callId, name, arguments, done: false }
+       *   tool result:        { type: 'tool_result', callId, name, result, isError, done: false }
+       *   done:               { done: true, messageId, generationTime }
+       *   error:              { error: string, done: true }
        */
       .post(
         '/respond/stream',
@@ -79,11 +92,6 @@ export const respondStreamRoutes = (app: Elysia) =>
             db
           );
 
-          // 2. Load prior chat-mode messages for context reconstruction
-          // updatedAt will be written once after AI response to avoid regression on concurrent requests
-          const history = await loadChatHistory(body.chatId, { excludeId: userMsgId }, db);
-
-          // 3. Stream AI response as SSE
           const aiMsgId = generateId();
           const startTime = Date.now();
           const provider = await getProviderForModel(model, userId);
@@ -104,9 +112,199 @@ export const respondStreamRoutes = (app: Elysia) =>
               let fullText = '';
               let allParts: MessagePart[] = [];
               let aborted = false;
+              let finalProviderState: string | null = null;
 
               try {
-                if (provider.generateTextStream) {
+                if (provider.generateAgentTurnStream) {
+                  // ── Agentic tool loop path ──────────────────────────────────
+                  const richHistory = await loadRichChatHistory(
+                    chatId,
+                    { excludeId: userMsgId },
+                    db
+                  );
+                  const toolDefs = getAllToolDefinitions();
+
+                  // Discover last AI message's providerState for potential cursor reuse
+                  let currentProviderState: string | null = null;
+                  for (let i = richHistory.length - 1; i >= 0; i--) {
+                    if (richHistory[i].role === 'ai' && richHistory[i].providerState) {
+                      currentProviderState = richHistory[i].providerState!;
+                      break;
+                    }
+                  }
+
+                  let pendingToolResults: AgentTurnRequest['toolResults'];
+                  let isFirstIteration = true;
+
+                  for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration++) {
+                    if (signal.aborted) {
+                      aborted = true;
+                      break;
+                    }
+
+                    const req: AgentTurnRequest = {
+                      userId,
+                      modelName: model,
+                      systemPrompt,
+                      history: richHistory,
+                      prompt: isFirstIteration ? prompt : undefined,
+                      toolResults: pendingToolResults,
+                      toolDefinitions: toolDefs,
+                      providerState: currentProviderState,
+                      signal,
+                      generationConfig: { thinkingEnabled, reasoningEffort },
+                    };
+
+                    // Pending calls collected from this iteration
+                    const pendingCalls = new Map<string, { name: string; argsStr: string }>();
+                    let turnCompleted = false;
+
+                    for await (const event of provider.generateAgentTurnStream!(req)) {
+                      if (signal.aborted) {
+                        aborted = true;
+                        break;
+                      }
+
+                      switch (event.type) {
+                        case 'reasoning_delta':
+                          allParts.push({ type: 'thinking', text: event.text });
+                          controller.enqueue(
+                            sseEvent({ type: 'thinking', text: event.text, done: false })
+                          );
+                          break;
+
+                        case 'tool_call_started':
+                          pendingCalls.set(event.callId, {
+                            name: event.name ?? '',
+                            argsStr: '',
+                          });
+                          controller.enqueue(
+                            sseEvent({
+                              type: 'tool_call_started',
+                              callId: event.callId,
+                              name: event.name,
+                              done: false,
+                            })
+                          );
+                          break;
+
+                        case 'tool_call_arguments_delta': {
+                          const call = pendingCalls.get(event.callId);
+                          if (call) call.argsStr += event.delta;
+                          break;
+                        }
+
+                        case 'tool_call_completed': {
+                          // Authoritative args come from this event
+                          pendingCalls.set(event.callId, {
+                            name: event.name,
+                            argsStr: event.arguments,
+                          });
+                          controller.enqueue(
+                            sseEvent({
+                              type: 'tool_call_completed',
+                              callId: event.callId,
+                              name: event.name,
+                              arguments: event.arguments,
+                              done: false,
+                            })
+                          );
+                          break;
+                        }
+
+                        case 'assistant_text_delta':
+                          fullText += event.text;
+                          allParts.push({ type: 'text', text: event.text });
+                          controller.enqueue(
+                            sseEvent({ type: 'text', text: event.text, done: false })
+                          );
+                          break;
+
+                        case 'turn_completed':
+                          currentProviderState = event.providerState ?? null;
+                          finalProviderState = currentProviderState;
+                          turnCompleted = true;
+                          break;
+
+                        case 'turn_error':
+                          throw new Error(event.error);
+                      }
+                    }
+
+                    if (aborted || !turnCompleted) break;
+                    if (pendingCalls.size === 0) break; // no tool calls → turn is done
+
+                    // Execute tool calls (in parallel, with timeout per call)
+                    const nextToolResults: NonNullable<AgentTurnRequest['toolResults']> = [];
+
+                    await Promise.all(
+                      Array.from(pendingCalls.entries()).map(
+                        async ([callId, { name, argsStr }]) => {
+                          let args: Record<string, unknown> = {};
+                          try {
+                            args = JSON.parse(argsStr) as Record<string, unknown>;
+                          } catch {
+                            // Malformed args — use empty object
+                          }
+
+                          let result: unknown;
+                          let isError = false;
+
+                          try {
+                            const timeoutPromise = new Promise<never>((_, reject) =>
+                              setTimeout(
+                                () =>
+                                  reject(
+                                    new Error(`Tool "${name}" timed out after ${TOOL_TIMEOUT_MS}ms`)
+                                  ),
+                                TOOL_TIMEOUT_MS
+                              )
+                            );
+                            result = await Promise.race([
+                              executeTool(name, args, { userId, chatId }),
+                              timeoutPromise,
+                            ]);
+                          } catch (err) {
+                            result = {
+                              error: err instanceof Error ? err.message : 'Tool execution failed',
+                            };
+                            isError = true;
+                          }
+
+                          const resultStr = JSON.stringify(result);
+
+                          // Accumulate tool_call + tool_result parts
+                          allParts.push({ type: 'tool_call', toolCallId: callId, name, args });
+                          allParts.push({
+                            type: 'tool_result',
+                            toolCallId: callId,
+                            content: resultStr,
+                            isError,
+                          });
+
+                          controller.enqueue(
+                            sseEvent({
+                              type: 'tool_result',
+                              callId,
+                              name,
+                              result,
+                              isError,
+                              done: false,
+                            })
+                          );
+
+                          nextToolResults.push({ callId, name, result: resultStr, isError });
+                        }
+                      )
+                    );
+
+                    pendingToolResults = nextToolResults;
+                    isFirstIteration = false;
+                  }
+                } else if (provider.generateTextStream) {
+                  // ── Legacy streaming path ───────────────────────────────────
+                  const history = await loadChatHistory(chatId, { excludeId: userMsgId }, db);
+
                   for await (const chunk of provider.generateTextStream({
                     userId,
                     history,
@@ -137,7 +335,8 @@ export const respondStreamRoutes = (app: Elysia) =>
                     }
                   }
                 } else {
-                  // Fallback: generate all at once, emit as single chunk
+                  // ── Fallback: single-shot non-streaming ─────────────────────
+                  const history = await loadChatHistory(chatId, { excludeId: userMsgId }, db);
                   const result = await provider.generateText({
                     userId,
                     history,
@@ -158,28 +357,41 @@ export const respondStreamRoutes = (app: Elysia) =>
                   const generationTime = `${((Date.now() - startTime) / 1000).toFixed(1)}s`;
                   const aiTimestamp = Date.now();
 
-                  // Consolidate thinking + text chunks into single parts each
-                  const fullThinking = allParts
+                  // Consolidate thinking chunks into a single part each
+                  const thinkingText = allParts
                     .filter(
                       (p): p is Extract<MessagePart, { type: 'thinking' }> => p.type === 'thinking'
                     )
                     .map((p) => p.text)
                     .join('');
 
+                  const nonThinkingParts = allParts.filter((p) => p.type !== 'thinking');
+
                   const consolidatedParts: MessagePart[] = [
-                    ...(fullThinking ? [{ type: 'thinking' as const, text: fullThinking }] : []),
-                    ...(fullText ? [{ type: 'text' as const, text: fullText }] : []),
+                    ...(thinkingText ? [{ type: 'thinking' as const, text: thinkingText }] : []),
+                    ...nonThinkingParts,
                   ];
 
-                  // Persist the completed AI message
+                  // Collapse consecutive text parts into one
+                  const mergedText = consolidatedParts
+                    .filter((p): p is Extract<MessagePart, { type: 'text' }> => p.type === 'text')
+                    .map((p) => p.text)
+                    .join('');
+
+                  const finalParts: MessagePart[] = [
+                    ...(thinkingText ? [{ type: 'thinking' as const, text: thinkingText }] : []),
+                    ...consolidatedParts.filter((p) => p.type !== 'thinking' && p.type !== 'text'),
+                    ...(mergedText ? [{ type: 'text' as const, text: mergedText }] : []),
+                  ];
+
                   await createMessage(
                     {
                       id: aiMsgId,
                       chatId,
                       role: 'ai',
                       text: fullText,
-                      parts:
-                        consolidatedParts.length > 0 ? JSON.stringify(consolidatedParts) : null,
+                      parts: finalParts.length > 0 ? JSON.stringify(finalParts) : null,
+                      providerState: finalProviderState,
                       timestamp: aiTimestamp,
                       isGenerating: false,
                       generationTime,
@@ -189,7 +401,6 @@ export const respondStreamRoutes = (app: Elysia) =>
                     db
                   );
 
-                  // Single update with WHERE guard to prevent updatedAt from regressing
                   await db
                     .updateTable('chats')
                     .set({ updatedAt: aiTimestamp, lastUsedMode: 'chat' })
@@ -201,11 +412,35 @@ export const respondStreamRoutes = (app: Elysia) =>
                 }
               } catch (error: unknown) {
                 if (signal.aborted) {
-                  // Client disconnected — generation cancelled, nothing to persist
                   return;
                 }
                 const message = error instanceof Error ? error.message : 'Stream generation failed';
                 console.error('[respond-stream] Error:', message);
+
+                // Persist partial AI message with accumulated parts so it survives
+                // the frontend query invalidation and the user sees thinking/tool context
+                try {
+                  const generationTime = `${((Date.now() - startTime) / 1000).toFixed(1)}s`;
+                  const errorParts: MessagePart[] = [...allParts, { type: 'error', text: message }];
+                  await createMessage(
+                    {
+                      id: aiMsgId,
+                      chatId,
+                      role: 'ai',
+                      text: fullText || message,
+                      parts: JSON.stringify(errorParts),
+                      timestamp: Date.now(),
+                      isGenerating: false,
+                      generationTime,
+                      modelName: model,
+                      interactionMode: 'chat',
+                    },
+                    db
+                  );
+                } catch {
+                  // Best-effort persistence; don't mask the original error
+                }
+
                 const errorEvent: SSEErrorEvent = { error: message, done: true };
                 controller.enqueue(sseEvent(errorEvent));
               } finally {

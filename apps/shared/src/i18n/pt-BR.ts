@@ -143,6 +143,13 @@ export const messages = {
     reasoningBadge: 'Reasoning',
   },
 
+  tools: {
+    calling: 'Chamando...',
+    running: 'Executando ferramenta',
+    done: 'Concluído',
+    error: 'Erro na ferramenta',
+  },
+
   errors: {
     imageNotSupported: 'Este provider não suporta geração de imagens.',
     referenceImageUploadFailed: 'Falha ao enviar a imagem de referência. Tente novamente.',

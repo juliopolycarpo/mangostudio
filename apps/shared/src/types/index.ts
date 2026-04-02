@@ -45,6 +45,17 @@ export interface Message {
 /** Effort level for reasoning models. */
 export type ReasoningEffort = 'low' | 'medium' | 'high';
 
+/** A single event emitted during an agentic turn (streaming tool loop). */
+export type AgentEvent =
+  | { type: 'reasoning_delta'; text: string }
+  | { type: 'tool_call_started'; callId: string; name?: string }
+  | { type: 'tool_call_arguments_delta'; callId: string; delta: string }
+  | { type: 'tool_call_completed'; callId: string; name: string; arguments: string }
+  | { type: 'tool_result'; callId: string; name: string; result: unknown; isError?: boolean }
+  | { type: 'assistant_text_delta'; text: string }
+  | { type: 'turn_completed'; providerState?: string; finishReason?: string }
+  | { type: 'turn_error'; error: string };
+
 /** @deprecated Use ThinkingEnabled (boolean) + ReasoningEffort instead. */
 export type ThinkingVisibility = 'summary' | 'full' | 'off';
 

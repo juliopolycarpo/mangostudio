@@ -6,6 +6,8 @@
 import type { Kysely } from 'kysely';
 import type { Database } from '../db/types';
 import { boolToInt, serializeStyleParams, parseStyleParams } from '../db/serializers';
+import type { ChatTurnContext } from './providers/types';
+import type { MessagePart } from '@mangostudio/shared/types';
 
 export interface CreateMessageInput {
   id: string;
@@ -81,6 +83,36 @@ export async function loadChatHistory(
   return rows.reverse().map((row) => ({
     role: row.role as 'user' | 'ai',
     text: row.text,
+  }));
+}
+
+/** Loads the rich chat history for agentic requests (with parts + providerState). */
+export async function loadRichChatHistory(
+  chatId: string,
+  opts: LoadHistoryOptions,
+  db: Kysely<Database>
+): Promise<ChatTurnContext[]> {
+  let q = db
+    .selectFrom('messages')
+    .select(['id', 'role', 'text', 'parts', 'providerState', 'modelName'])
+    .where('chatId', '=', chatId)
+    .where('interactionMode', '=', 'chat')
+    .orderBy('timestamp', 'desc')
+    .limit(opts.limit ?? 200);
+
+  if (opts.excludeId) {
+    q = q.where('id', '!=', opts.excludeId);
+  }
+
+  const rows = await q.execute();
+
+  return rows.reverse().map((row) => ({
+    id: row.id,
+    role: row.role as 'user' | 'ai',
+    text: row.text,
+    parts: row.parts ? (JSON.parse(row.parts) as MessagePart[]) : undefined,
+    providerState: row.providerState ?? null,
+    modelName: row.modelName ?? null,
   }));
 }
 

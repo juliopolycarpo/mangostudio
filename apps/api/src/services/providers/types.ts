@@ -2,12 +2,29 @@
  * Core types for the AI provider abstraction layer.
  */
 
-import type { MessagePart, ReasoningEffort, ProviderType } from '@mangostudio/shared/types';
+import type {
+  MessagePart,
+  ReasoningEffort,
+  ProviderType,
+  AgentEvent,
+} from '@mangostudio/shared/types';
+
+export type { AgentEvent };
 
 /** Minimal message shape for text generation context. */
 export interface TextContextMessage {
   role: 'user' | 'ai';
   text: string;
+}
+
+/** Rich turn context used in agentic requests — includes parts and providerState. */
+export interface ChatTurnContext {
+  id: string;
+  role: 'user' | 'ai';
+  text: string;
+  parts?: MessagePart[];
+  providerState?: string | null;
+  modelName?: string | null;
 }
 
 /** Provider-agnostic tool definition (passed to providers that support function calling). */
@@ -23,6 +40,33 @@ export interface GenerationConfig {
   reasoningEffort: ReasoningEffort;
   tools?: ToolDefinition[];
   maxToolIterations?: number;
+}
+
+/** Request for a single agentic turn — supports tool calling and provider-side continuation. */
+export interface AgentTurnRequest {
+  userId: string;
+  modelName: string;
+  systemPrompt?: string;
+  /** Full persisted chat history (used when no valid cursor is available). */
+  history: ChatTurnContext[];
+  /** New user prompt — present only on the first iteration of a turn. */
+  prompt?: string;
+  /** Tool results to feed back — present on subsequent iterations (after tool execution). */
+  toolResults?: Array<{
+    callId: string;
+    name: string;
+    result: string;
+    isError?: boolean;
+  }>;
+  toolDefinitions?: ToolDefinition[];
+  /**
+   * Opaque provider state from the previous turn (or previous loop iteration).
+   * Stateful providers use this as a cursor; stateless providers use it to carry
+   * the accumulated in-memory loop messages.
+   */
+  providerState?: string | null;
+  signal?: AbortSignal;
+  generationConfig?: GenerationConfig;
 }
 
 /** Input for text generation. */
@@ -86,12 +130,16 @@ export interface ModelInfo {
     image: boolean;
     streaming: boolean;
     reasoning?: boolean;
+    tools?: boolean;
+    statefulContinuation?: boolean;
+    parallelToolCalls?: boolean;
+    reasoningWithTools?: boolean;
   };
 }
 
 /**
  * Contract that all AI provider adapters must implement.
- * Optional methods (generateTextStream, generateImage) may be absent
+ * Optional methods (generateTextStream, generateImage, generateAgentTurnStream) may be absent
  * when the underlying provider does not support the capability.
  */
 export interface AIProvider {
@@ -99,6 +147,11 @@ export interface AIProvider {
   generateText(req: TextGenerationRequest): Promise<TextGenerationResult>;
   generateTextStream?(req: TextGenerationRequest): AsyncIterable<StreamingChunk>;
   generateImage?(req: ImageGenerationRequest): Promise<ImageGenerationResult>;
+  /**
+   * Streams a single agentic turn, emitting AgentEvent items.
+   * The orchestrator calls this in a loop until turn_completed with no pending tool calls.
+   */
+  generateAgentTurnStream?(req: AgentTurnRequest): AsyncIterable<AgentEvent>;
   listModels(userId: string): Promise<ModelInfo[]>;
   invalidateModelCache?(userId?: string): void;
   syncConfigFileConnectors?(userId: string): Promise<void>;

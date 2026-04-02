@@ -1,6 +1,17 @@
 /* global document */
 import type { Message, MessagePart } from '@mangostudio/shared';
-import { Sparkles, Download, Bookmark, ImageOff, Image, Brain, ChevronDown } from 'lucide-react';
+import {
+  Sparkles,
+  Download,
+  Bookmark,
+  ImageOff,
+  Image,
+  Brain,
+  ChevronDown,
+  Wrench,
+  CheckCircle,
+  AlertCircle,
+} from 'lucide-react';
 import { format } from 'date-fns';
 import { AnimatePresence, motion } from 'motion/react';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
@@ -132,6 +143,116 @@ function ThinkingBlock({ messageId, text, isStreaming }: ThinkingBlockProps) {
                   <span className="inline-block w-0.5 h-[1em] bg-primary/40 ml-0.5 align-middle animate-blink" />
                 )}
               </p>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// ToolCallBlock
+// ---------------------------------------------------------------------------
+
+interface ToolCallBlockProps {
+  name: string;
+  args: Record<string, unknown>;
+  result?: string | null;
+  isError?: boolean;
+  isPending?: boolean;
+}
+
+function ToolCallBlock({ name, args, result, isError, isPending }: ToolCallBlockProps) {
+  const { t } = useI18n();
+  const [expanded, setExpanded] = useState(false);
+
+  let parsedResult: unknown = null;
+  if (result) {
+    try {
+      parsedResult = JSON.parse(result);
+    } catch {
+      parsedResult = result;
+    }
+  }
+
+  return (
+    <div className="mb-2">
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        className="flex items-center gap-2 text-xs py-1.5 px-3 rounded-full w-fit border
+                   transition-all duration-200 cursor-pointer"
+        style={{
+          background: 'rgba(14,14,14,0.6)',
+          backdropFilter: 'blur(8px)',
+          borderColor: isError
+            ? 'rgba(239,68,68,0.3)'
+            : isPending
+              ? 'rgba(99,102,241,0.3)'
+              : 'rgba(34,197,94,0.25)',
+          color: isError
+            ? 'rgba(239,68,68,0.9)'
+            : isPending
+              ? 'rgba(165,180,252,0.8)'
+              : 'rgba(134,239,172,0.8)',
+        }}
+      >
+        {isPending ? (
+          <Wrench size={11} className="animate-pulse" />
+        ) : isError ? (
+          <AlertCircle size={11} />
+        ) : (
+          <CheckCircle size={11} />
+        )}
+        <span className="font-mono tracking-wide">
+          {isPending ? t.tools.calling : isError ? t.tools.error : t.tools.done}{' '}
+          <span className="opacity-70">{name}()</span>
+        </span>
+        <ChevronDown
+          size={11}
+          className={`transition-transform duration-300 opacity-50 ${expanded ? 'rotate-180' : ''}`}
+        />
+      </button>
+
+      <AnimatePresence initial={false}>
+        {expanded && (
+          <motion.div
+            key="tool-body"
+            initial={{ opacity: 0, height: 0, y: -4 }}
+            animate={{ opacity: 1, height: 'auto', y: 0 }}
+            exit={{ opacity: 0, height: 0, y: -6 }}
+            transition={{ duration: 0.2, ease: 'easeOut' }}
+            className="mt-1.5 rounded-xl border border-outline-variant/15 overflow-hidden"
+            style={{ background: 'rgba(14,14,14,0.5)', backdropFilter: 'blur(12px)' }}
+          >
+            <div className="p-4 space-y-3 text-xs font-mono">
+              {Object.keys(args).length > 0 && (
+                <div>
+                  <p className="text-on-surface-variant/50 uppercase tracking-wider text-[10px] mb-1">
+                    args
+                  </p>
+                  <pre className="text-on-surface-variant/70 whitespace-pre-wrap leading-relaxed">
+                    {JSON.stringify(args, null, 2)}
+                  </pre>
+                </div>
+              )}
+              {parsedResult !== null && (
+                <div>
+                  <p
+                    className={`uppercase tracking-wider text-[10px] mb-1 ${isError ? 'text-red-400/50' : 'text-on-surface-variant/50'}`}
+                  >
+                    {isError ? 'error' : 'result'}
+                  </p>
+                  <pre
+                    className={`whitespace-pre-wrap leading-relaxed ${isError ? 'text-red-400/80' : 'text-on-surface-variant/70'}`}
+                  >
+                    {typeof parsedResult === 'string'
+                      ? parsedResult
+                      : JSON.stringify(parsedResult, null, 2)}
+                  </pre>
+                </div>
+              )}
             </div>
           </motion.div>
         )}
@@ -324,8 +445,20 @@ export function ChatFeed({ chatId, messages }: { chatId: string | null; messages
                             const combinedText = textParts
                               .map((p) => (p as { type: 'text'; text: string }).text)
                               .join('');
+                            const toolCallParts = parts.filter(
+                              (p) => p.type === 'tool_call'
+                            ) as Extract<MessagePart, { type: 'tool_call' }>[];
+                            const toolResultParts = parts.filter(
+                              (p) => p.type === 'tool_result'
+                            ) as Extract<MessagePart, { type: 'tool_result' }>[];
 
-                            if (isImageTurn || (!msg.text && !combinedText && !thinkingPart)) {
+                            if (
+                              isImageTurn ||
+                              (!msg.text &&
+                                !combinedText &&
+                                !thinkingPart &&
+                                toolCallParts.length === 0)
+                            ) {
                               return (
                                 <>
                                   <span className="text-sm font-medium text-on-surface animate-pulse">
@@ -340,7 +473,6 @@ export function ChatFeed({ chatId, messages }: { chatId: string | null; messages
 
                             return (
                               <>
-                                {/* Thinking block always above the response text */}
                                 {thinkingPart && (
                                   <ThinkingBlock
                                     messageId={msg.id}
@@ -348,6 +480,21 @@ export function ChatFeed({ chatId, messages }: { chatId: string | null; messages
                                     isStreaming={true}
                                   />
                                 )}
+                                {toolCallParts.map((tc) => {
+                                  const res = toolResultParts.find(
+                                    (r) => r.toolCallId === tc.toolCallId
+                                  );
+                                  return (
+                                    <ToolCallBlock
+                                      key={tc.toolCallId}
+                                      name={tc.name}
+                                      args={tc.args}
+                                      result={res?.content ?? null}
+                                      isError={res?.isError}
+                                      isPending={!res}
+                                    />
+                                  );
+                                })}
                                 {combinedText && (
                                   <div className="bg-surface-container-low p-5 rounded-2xl border border-outline-variant/10 font-body text-sm leading-relaxed text-on-surface whitespace-pre-wrap max-w-2xl">
                                     {combinedText}
@@ -470,6 +617,12 @@ export function ChatFeed({ chatId, messages }: { chatId: string | null; messages
                             const combinedText = textParts
                               .map((p) => (p as { type: 'text'; text: string }).text)
                               .join('');
+                            const toolCallParts = parts.filter(
+                              (p) => p.type === 'tool_call'
+                            ) as Extract<MessagePart, { type: 'tool_call' }>[];
+                            const toolResultParts = parts.filter(
+                              (p) => p.type === 'tool_result'
+                            ) as Extract<MessagePart, { type: 'tool_result' }>[];
 
                             return (
                               <>
@@ -480,13 +633,30 @@ export function ChatFeed({ chatId, messages }: { chatId: string | null; messages
                                     isStreaming={false}
                                   />
                                 )}
-                                <div className="bg-surface-container-low p-5 rounded-2xl border border-outline-variant/10 font-body text-sm leading-relaxed text-on-surface whitespace-pre-wrap max-w-2xl">
-                                  {combinedText || (
-                                    <span className="text-on-surface-variant/50 italic">
-                                      No response
-                                    </span>
-                                  )}
-                                </div>
+                                {toolCallParts.map((tc) => {
+                                  const res = toolResultParts.find(
+                                    (r) => r.toolCallId === tc.toolCallId
+                                  );
+                                  return (
+                                    <ToolCallBlock
+                                      key={tc.toolCallId}
+                                      name={tc.name}
+                                      args={tc.args}
+                                      result={res?.content ?? null}
+                                      isError={res?.isError}
+                                      isPending={false}
+                                    />
+                                  );
+                                })}
+                                {(combinedText || toolCallParts.length === 0) && (
+                                  <div className="bg-surface-container-low p-5 rounded-2xl border border-outline-variant/10 font-body text-sm leading-relaxed text-on-surface whitespace-pre-wrap max-w-2xl">
+                                    {combinedText || (
+                                      <span className="text-on-surface-variant/50 italic">
+                                        No response
+                                      </span>
+                                    )}
+                                  </div>
+                                )}
                               </>
                             );
                           })()}

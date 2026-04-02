@@ -23,6 +23,9 @@ import type {
   ImageGenerationRequest,
   ImageGenerationResult,
   ModelInfo,
+  AgentTurnRequest,
+  AgentEvent,
+  ToolDefinition,
 } from './types';
 import type { SecretMetadataRow } from '@mangostudio/shared/types';
 
@@ -400,6 +403,235 @@ export async function* streamWithResponsesAPI(
   yield { type: 'text', text: '', done: true };
 }
 
+// ---------------------------------------------------------------------------
+// Responses API tool format
+// ---------------------------------------------------------------------------
+
+/** Converts a provider-agnostic ToolDefinition into the Responses API tool format. */
+function toResponsesTool(def: ToolDefinition): Record<string, unknown> {
+  return {
+    type: 'function',
+    name: def.name,
+    description: def.description,
+    parameters: def.parameters,
+    strict: false,
+  };
+}
+
+/** Parses the OpenAI providerState JSON, returning the responseId or null. */
+function parseResponseId(providerState: string | null | undefined): string | null {
+  if (!providerState) return null;
+  try {
+    const parsed = JSON.parse(providerState) as Record<string, unknown>;
+    if (parsed.provider === 'openai' && typeof parsed.responseId === 'string') {
+      return parsed.responseId;
+    }
+  } catch {
+    // Ignore malformed state
+  }
+  return null;
+}
+
+/**
+ * Streams a single agentic turn using the OpenAI Responses API.
+ * Supports tool calling with server-side continuation via previous_response_id.
+ *
+ * Fallback: if the cursor is invalid/expired (404), retries without previous_response_id
+ * (full history replay) and logs a warning.
+ */
+async function* streamAgentTurnWithResponsesAPI(
+  client: OpenAI,
+  req: AgentTurnRequest
+): AsyncIterable<AgentEvent> {
+  const tools = (req.toolDefinitions ?? []).map(toResponsesTool);
+  const previousResponseId = parseResponseId(req.providerState);
+  const effort = req.generationConfig?.reasoningEffort ?? 'medium';
+  const useReasoning = isReasoningModel(req.modelName) && req.generationConfig?.thinkingEnabled;
+
+  // Build the input array for this request
+  let input: Array<Record<string, unknown>>;
+
+  if (req.toolResults && req.toolResults.length > 0) {
+    // Tool-result continuation — send function_call_output items
+    input = req.toolResults.map((tr) => ({
+      type: 'function_call_output',
+      call_id: tr.callId,
+      output: tr.result,
+    }));
+  } else if (previousResponseId) {
+    // Stateful continuation — send only the new user message
+    input = req.prompt ? [{ role: 'user', content: req.prompt }] : [];
+  } else {
+    // Full history replay (first call or cursor invalidated)
+    const messages: Array<Record<string, unknown>> = [];
+    for (const turn of req.history) {
+      messages.push({ role: turn.role === 'ai' ? 'assistant' : 'user', content: turn.text });
+    }
+    if (req.prompt) messages.push({ role: 'user', content: req.prompt });
+    input = messages;
+  }
+
+  const makeRequest = async (prevId: string | null) => {
+    return (client as any).responses.create({
+      model: req.modelName,
+      input,
+      ...(req.systemPrompt?.trim() ? { instructions: req.systemPrompt } : {}),
+      ...(prevId ? { previous_response_id: prevId } : {}),
+      ...(tools.length > 0 ? { tools } : {}),
+      store: true,
+      stream: true,
+      ...(useReasoning ? { reasoning: { effort, summary: 'concise' } } : {}),
+    });
+  };
+
+  let stream: AsyncIterable<Record<string, any>>;
+  try {
+    stream = await makeRequest(previousResponseId);
+  } catch (err: unknown) {
+    // Only 404 means expired cursor; 400 may indicate a different error (e.g. wrong call_id)
+    const isExpiredCursor = err instanceof OpenAI.APIError && err.status === 404;
+    const canFallback = isExpiredCursor && previousResponseId && !req.toolResults;
+    if (canFallback) {
+      console.warn('[openai] Cursor expired or invalid, falling back to full replay.');
+      // Rebuild input from full history
+      const messages: Array<Record<string, unknown>> = [];
+      for (const turn of req.history) {
+        messages.push({ role: turn.role === 'ai' ? 'assistant' : 'user', content: turn.text });
+      }
+      if (req.prompt) messages.push({ role: 'user', content: req.prompt });
+      input = messages;
+      stream = await makeRequest(null);
+    } else {
+      throw err;
+    }
+  }
+
+  // Deduplication state for reasoning events
+  const seenSummaryDeltas = new Set<string>();
+  let summaryEventsWereSeen = false;
+  let thinkingWasEmitted = false;
+  let newResponseId: string | null = null;
+
+  // Map output item IDs (fc_xxx) → function call IDs (call_xxx) for consistent callId
+  const itemIdToCallId = new Map<string, { callId: string; name: string }>();
+
+  for await (const event of stream) {
+    if (req.signal?.aborted) break;
+
+    const ev = event as Record<string, any>;
+    const type = ev.type as string;
+
+    switch (type) {
+      case 'response.reasoning_summary_text.delta': {
+        const key = `${ev.item_id}:${ev.summary_index}`;
+        seenSummaryDeltas.add(key);
+        summaryEventsWereSeen = true;
+        thinkingWasEmitted = true;
+        if (ev.delta) yield { type: 'reasoning_delta', text: ev.delta };
+        break;
+      }
+
+      case 'response.reasoning_text.delta': {
+        if (!summaryEventsWereSeen && ev.delta) {
+          thinkingWasEmitted = true;
+          yield { type: 'reasoning_delta', text: ev.delta };
+        }
+        break;
+      }
+
+      case 'response.reasoning_summary_text.done': {
+        const key = `${ev.item_id}:${ev.summary_index}`;
+        if (!seenSummaryDeltas.has(key) && ev.text) {
+          thinkingWasEmitted = true;
+          yield { type: 'reasoning_delta', text: ev.text };
+        }
+        break;
+      }
+
+      case 'response.reasoning_summary_part.done': {
+        if (ev.part?.type === 'summary_text' && ev.part.text) {
+          const key = `${ev.item_id}:${ev.summary_index}`;
+          if (!seenSummaryDeltas.has(key)) {
+            thinkingWasEmitted = true;
+            yield { type: 'reasoning_delta', text: ev.part.text };
+          }
+        }
+        break;
+      }
+
+      case 'response.reasoning_text.done': {
+        if (!summaryEventsWereSeen && !thinkingWasEmitted && ev.text) {
+          yield { type: 'reasoning_delta', text: ev.text };
+          thinkingWasEmitted = true;
+        }
+        break;
+      }
+
+      case 'response.output_item.added': {
+        const item = ev.item as Record<string, any> | undefined;
+        if (item?.type === 'function_call') {
+          const callId: string = item.call_id ?? item.id;
+          itemIdToCallId.set(item.id, { callId, name: item.name ?? '' });
+          yield { type: 'tool_call_started', callId, name: item.name };
+        }
+        break;
+      }
+
+      case 'response.function_call_arguments.delta': {
+        const mapped = itemIdToCallId.get(ev.item_id);
+        if (ev.delta && mapped) {
+          yield {
+            type: 'tool_call_arguments_delta',
+            callId: mapped.callId,
+            delta: ev.delta,
+          };
+        }
+        break;
+      }
+
+      case 'response.function_call_arguments.done': {
+        const mapped = itemIdToCallId.get(ev.item_id);
+        if (mapped) {
+          yield {
+            type: 'tool_call_completed',
+            callId: mapped.callId,
+            name: mapped.name,
+            arguments: ev.arguments ?? '',
+          };
+        }
+        break;
+      }
+
+      case 'response.output_text.delta': {
+        if (ev.delta) yield { type: 'assistant_text_delta', text: ev.delta };
+        break;
+      }
+
+      case 'response.completed': {
+        newResponseId = ev.response?.id ?? null;
+        if (!thinkingWasEmitted && ev.response) {
+          const reasoning = extractReasoningFromCompleted(ev.response);
+          if (reasoning) {
+            yield { type: 'reasoning_delta', text: reasoning };
+          }
+        }
+        break;
+      }
+    }
+  }
+
+  const newProviderState = newResponseId
+    ? JSON.stringify({
+        provider: 'openai',
+        mode: 'responses',
+        responseId: newResponseId,
+        modelName: req.modelName,
+      })
+    : null;
+
+  yield { type: 'turn_completed', providerState: newProviderState ?? undefined };
+}
+
 /**
  * Streams a non-reasoning model response using the Chat Completions API.
  */
@@ -450,6 +682,12 @@ const openAIProvider: AIProvider = {
     } else {
       yield* streamWithChatCompletions(client, req);
     }
+  },
+
+  async *generateAgentTurnStream(req: AgentTurnRequest): AsyncIterable<AgentEvent> {
+    const ctx = await resolveAuthContext(req.userId, req.modelName);
+    const client = createClient(ctx);
+    yield* streamAgentTurnWithResponsesAPI(client, req);
   },
 
   async generateImage(req: ImageGenerationRequest): Promise<ImageGenerationResult> {

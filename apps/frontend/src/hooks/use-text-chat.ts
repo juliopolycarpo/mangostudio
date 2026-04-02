@@ -95,8 +95,8 @@ export function useTextChat({
             if (chunk.error) {
               updateOptimisticMessage(activeChatId!, optimisticAiMsgId, {
                 isGenerating: false,
-                text: chunk.error,
-                parts: [{ type: 'error', text: chunk.error }],
+                text: accumulatedText || chunk.error,
+                parts: [...accumulatedParts, { type: 'error', text: chunk.error }],
               });
               return;
             }
@@ -119,6 +119,45 @@ export function useTextChat({
               accumulatedParts = [...accumulatedParts.filter((p) => p.type !== 'text'), textPart];
               updateOptimisticMessage(activeChatId!, optimisticAiMsgId, {
                 text: accumulatedText,
+                parts: [...accumulatedParts],
+              });
+            } else if (chunkType === 'tool_call_started' && chunk.callId) {
+              // Add a pending tool_call part for optimistic UI
+              const toolCallPart: MessagePart = {
+                type: 'tool_call',
+                toolCallId: chunk.callId,
+                name: chunk.name ?? '',
+                args: {},
+              };
+              accumulatedParts = [...accumulatedParts, toolCallPart];
+              updateOptimisticMessage(activeChatId!, optimisticAiMsgId, {
+                parts: [...accumulatedParts],
+              });
+            } else if (chunkType === 'tool_call_completed' && chunk.callId) {
+              // Update the args on the existing tool_call part
+              let parsedArgs: Record<string, unknown> = {};
+              try {
+                parsedArgs = JSON.parse(chunk.arguments ?? '{}') as Record<string, unknown>;
+              } catch {
+                // Keep empty args
+              }
+              accumulatedParts = accumulatedParts.map((p) =>
+                p.type === 'tool_call' && p.toolCallId === chunk.callId
+                  ? { ...p, args: parsedArgs }
+                  : p
+              );
+              updateOptimisticMessage(activeChatId!, optimisticAiMsgId, {
+                parts: [...accumulatedParts],
+              });
+            } else if (chunkType === 'tool_result' && chunk.callId) {
+              const resultPart: MessagePart = {
+                type: 'tool_result',
+                toolCallId: chunk.callId,
+                content: JSON.stringify(chunk.result),
+                isError: chunk.isError,
+              };
+              accumulatedParts = [...accumulatedParts, resultPart];
+              updateOptimisticMessage(activeChatId!, optimisticAiMsgId, {
                 parts: [...accumulatedParts],
               });
             } else if (chunk.done) {
