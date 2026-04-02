@@ -1,79 +1,210 @@
 # Repository Guidelines
 
-`AGENTS.md` is the single source of truth for repository-level agent instructions. Any agent-specific instruction file must reference this file instead of duplicating guidance.
+`AGENTS.md` is the canonical root instruction file for this repository.
+Workspace-level `AGENTS.md` files may add local guidance, but they must only contain the delta for that workspace and must not duplicate or contradict this file.
 
-## Project Structure & Module Organization
+## Fast Context
 
-This is a Bun monorepo with `apps/*` workspaces:
+MangoStudio is a Bun monorepo for authenticated AI chat and image generation.
 
-- `apps/frontend/` — React + Vite UI. Components in `src/components/` (design system in `src/components/ui/`), features in `src/features/`, hooks in `src/hooks/`, routes in `src/routes/`, and tests in `tests/unit/`, `tests/integration/`, `tests/support/`.
-- `apps/api/` — Elysia server with Kysely/SQLite persistence. Routes in `src/routes/`, services in `src/services/`, plugins in `src/plugins/`, database layer in `src/db/`, and tests in `tests/unit/`, `tests/integration/`, `tests/support/`.
-- `apps/shared/` — Framework-agnostic shared types in `src/types/`, API contracts in `src/contracts/`, i18n dictionaries in `src/i18n/`, shared test helpers in `src/test-utils/`, and workspace tests in `tests/unit/`.
+- `apps/frontend/` — React 19 + Vite 8 UI with TanStack Router, TanStack Query, Better Auth client integration, and a local design system.
+- `apps/api/` — Elysia API with Better Auth, Kysely + SQLite persistence, connector management, and provider integrations for Gemini, OpenAI-compatible APIs, and Anthropic.
+- `apps/shared/` — framework-agnostic contracts, domain types, and i18n dictionaries shared by frontend and API.
+- `tests/browser-smoke/` — Playwright Chromium smoke coverage for the auth flow against the live stack.
+- `.mango/` — example config, env overrides, local runtime artifacts, and standalone build output.
 
-Runtime artifacts (`dist/`, `uploads/`, `*.sqlite`, `bun.lock`) are gitignored and should not be committed.
+Before making changes, read this file, then the workspace-level `AGENTS.md` for the area you are touching, then only the targeted docs or entrypoints linked below.
 
-## Build, Test, and Development Commands
+## Read Order
 
-- `bun install`: install all workspace dependencies.
-- `bun run dev`: start all dev servers concurrently.
-- `bun run dev:api`: start API server on `http://localhost:3001`.
-- `bun run dev:frontend`: start frontend dev server on `http://localhost:5173`.
-- `bun run build`: build the frontend with Vite.
-- `bun run lint`: run TypeScript type-checking + ESLint across all workspaces.
-- `bun run test`: run all unit and integration suites from the monorepo root.
-- `bun run test:unit`: run API, shared, and frontend unit suites.
-- `bun run test:integration`: run API and frontend integration suites.
-- `bun run test:coverage`: run frontend coverage with Vitest.
-- `bun run migrate`: run database migrations in the API workspace.
-- `bun run clean`: remove all `dist/` directories.
+Open files on demand instead of scanning the whole repository:
 
-## Coding Style & Naming Conventions
+1. Root overview: `README.md`
+2. Workspace scripts and filters: `package.json`
+3. Testing conventions: `docs/TESTING.md`
+4. Frontend work: `apps/frontend/AGENTS.md`
+5. API work: `apps/api/AGENTS.md`
+6. Shared contract or i18n work: `apps/shared/AGENTS.md`
+7. Configuration or runtime changes: `apps/api/src/lib/config.ts`, `.mango/config.toml.example`, `.mango/.env.example`
+8. Standalone build changes: `scripts/build.ts`
 
-Use TypeScript throughout and follow the existing style: 2-space indentation, single quotes, and semicolons. Use `PascalCase` for React components and exported types, `camelCase` for variables and functions, and `UPPER_SNAKE_CASE` for constants. Prefer descriptive names over abbreviations, keep functions focused, and add JSDoc to exported utilities or other public APIs. Use the `@/` alias for root-relative imports in the frontend workspace.
+## Hard Invariants
 
-Any hook file that contains JSX (e.g., a Provider component) must use the `.tsx` extension. The OXC parser in Vite 8 rejects JSX in `.ts` files.
+- Use Bun commands from the monorepo root. Do not introduce `npm`, `pnpm`, or `yarn` as the default workflow.
+- Keep changes scoped. Do not rewrite or reformat unrelated parts of the repository.
+- Never commit secrets, populated config files, databases, uploads, or build artifacts.
+- All user-visible frontend strings must come from `@mangostudio/shared/i18n`.
+- Any file that contains JSX must use the `.tsx` extension, including hooks or providers.
+- Prefer existing frontend API patterns first: Eden Treaty client, TanStack Query hooks, and service modules. Direct `fetch` is acceptable in service-layer code for streaming, uploads, or other browser-native flows.
+- Prefer Kysely query builder for application data access. Migrations may use `kysely/sql` when SQLite requires SQL that is awkward or impossible to express otherwise.
+- The API namespace prefix is `/api`. Better Auth is mounted at `/api/auth`.
+- If an API shape changes, update the shared contract, the API route or service, the frontend consumer, and the relevant tests in the same task.
+- Do not silently swallow errors. Return explicit errors and log enough context for debugging.
+- API error responses must use `ApiErrorResponse` (`{ error: string }`) from `@mangostudio/shared/contracts`. Streaming errors use `SSEErrorEvent` from `@mangostudio/shared/contracts/errors`. Do not invent ad-hoc error objects.
+- Cross-workspace imports use package names: `@mangostudio/shared`, `@mangostudio/shared/i18n`, `@mangostudio/shared/types`, `@mangostudio/shared/utils/model-detection`, `@mangostudio/api`. Never use relative paths to cross workspace boundaries.
 
-## i18n Conventions
+## Naming Conventions
 
-All UI strings must come from `@mangostudio/shared/i18n`. Never hardcode user-visible strings in components.
+- Files: `kebab-case.ts` for modules, `PascalCase.tsx` for React component files.
+- DB table names: `snake_case` (e.g. `secret_metadata`). DB column names: `camelCase` (e.g. `createdAt`, `userId`).
+- i18n keys: dot-separated hierarchy matching feature context (e.g. `settings.connectors.addButton`, `chat.newChat`).
+- Route file segments: TanStack Router conventions (`_layout.tsx`, `$param.tsx`, `__root.tsx`).
+- Exported types and interfaces: `PascalCase`. No `I` prefix for interfaces.
+- Kysely type aliases: `<Entity>Select`, `<Entity>Insert`, `<Entity>Update` (e.g. `ChatSelect`, `ChatInsert`).
+- Migration files: three-digit sequential prefix with snake_case description (e.g. `012_add_tool_results.ts`).
 
-- Source of truth: `apps/shared/src/i18n/pt-BR.ts` (uses `as const`)
-- English fallback: `apps/shared/src/i18n/en.ts` (annotated `: Messages` — compile error if a key is missing)
-- Frontend access: `const { t } = useI18n()` from `@/hooks/use-i18n`
-- API error messages: import `ptBR` from `@mangostudio/shared/i18n`
+## Anti-Patterns
 
-## Testing Guidelines
+- Do not create new `fetch` wrappers in the frontend. Use Eden Treaty + TanStack Query.
+- Do not add new environment variable parsing outside `apps/api/src/lib/config.ts`.
+- Do not add CSS frameworks, CSS-in-JS, or utility libraries. Styling uses vanilla CSS.
+- Do not create `index.ts` barrel files in directories that do not already have one.
+- Do not add dependencies without confirming the functionality does not already exist in the project.
+- Do not edit `apps/frontend/src/routeTree.gen.ts` — it is auto-generated by TanStack Router.
 
-The repository uses an automated workspace-first test suite under `apps/*/tests`. Before opening a PR, run `bun run lint`, `bun run test`, `bun run test:coverage`, `bun run build`, and smoke-test the main flows locally: login, chat creation, image generation.
+## Change Impact Map
 
-**API integration tests** — always use `createApiTestApp(routePlugin)` from `tests/support/harness/create-api-test-app.ts`. Route plugins use `.group('/path', ...)` without the `/api` prefix (that prefix lives in `app.ts`). Test URLs must match the route's group path directly (e.g., `/settings/models/gemini`, not `/api/settings/models/gemini`). Validate response shapes with `Value.Check(Schema, payload)` from `@sinclair/typebox/value`.
+Use this map to avoid blind repository-wide searches.
 
-**Frontend fetch mocks** — `create-fetch-scenario.ts` is for React hook tests in jsdom only (hooks that call `fetch` via Eden Treaty). For API contract tests, use `createApiTestApp` + `app.handle()` in the API workspace.
+### Auth
 
-Place new tests in the appropriate workspace under `tests/unit/` or `tests/integration/`, and keep reusable support code in `tests/support/` only when it removes real duplication.
+Open these first:
 
-## Commit & Pull Request Guidelines
+- `apps/api/src/auth.ts`
+- `apps/api/src/routes/auth.ts`
+- `apps/api/src/plugins/auth-middleware.ts`
+- `apps/frontend/src/lib/auth-client.ts`
+- `apps/frontend/src/routes/login.tsx`
+- `apps/frontend/src/routes/signup.tsx`
+- `tests/browser-smoke/auth-flow.spec.ts`
 
-Use short imperative commit subjects such as `Add gallery empty state`. Keep each commit scoped to one concern. PRs should summarize the user-visible change, list verification steps, mention any new environment variables or schema changes, and include screenshots or GIFs for UI updates.
+### API Routes And Contracts
 
-A `.gitmessage` template is available at the repo root as the canonical format reference for commit subjects and bodies (type, scope, description, what's changed, how it improves the app). Configure it locally once with:
+Open these first:
 
-```bash
-git config commit.template .gitmessage
-```
+- `apps/api/src/app.ts`
+- `apps/api/src/routes/*`
+- `apps/shared/src/contracts/index.ts`
+- `apps/frontend/src/lib/api-client.ts`
+- the frontend hooks, services, or routes that consume the changed endpoint
+- the relevant API and frontend tests
 
-## Configuration
+### Chat, Streaming, And Generation
 
-All configuration lives under `.mango/`. Copy the example files to get started:
+Open these first:
 
-```bash
-cp .mango/config.toml.example .mango/config.toml
-cp .mango/.env.example .mango/.env
-```
+- `apps/api/src/routes/respond-stream.ts`
+- `apps/api/src/routes/respond.ts`
+- `apps/api/src/routes/generate.ts`
+- `apps/api/src/routes/chats.ts`
+- `apps/api/src/routes/messages.ts`
+- `apps/api/src/routes/upload.ts`
+- `apps/api/src/services/message-service.ts`
+- `apps/api/src/services/chat-service.ts`
+- `apps/frontend/src/services/generation-service.ts`
+- `apps/frontend/src/hooks/use-text-chat.ts`
+- `apps/frontend/src/hooks/use-image-generation.ts`
+- `apps/frontend/src/features/chat/ChatPage.tsx`
+- `apps/shared/src/contracts/index.ts`
 
-Resolution hierarchy (highest priority wins):
-1. `.mango/.env` — overrides matching keys from config.toml (best for secrets)
-2. `config.toml` — dev: `./.mango/config.toml` | build: `~/.mango/config.toml`
-3. Built-in defaults in the application code
+### Connectors, Providers, And Model Catalog
 
-Set `GEMINI_API_KEY` in `.mango/.env` or add named keys under `[gemini_api_keys]` in `config.toml`. The API key is only accessed server-side. Never commit populated config files. Validate uploaded files and request payloads, and log errors with enough context for debugging instead of swallowing them silently.
+Open these first:
+
+- `apps/api/src/routes/settings/connectors.ts`
+- `apps/api/src/routes/settings/models.ts`
+- `apps/api/src/routes/settings/gemini-aliases.ts`
+- `apps/api/src/services/providers/registry.ts`
+- `apps/api/src/services/providers/*`
+- `apps/api/src/services/gemini/*`
+- `apps/frontend/src/components/settings/ConnectorsSettings.tsx`
+- `apps/shared/src/contracts/index.ts`
+
+### Tool Calling And Agentic Flows
+
+Open these first:
+
+- `apps/api/src/services/tools/*`
+- `apps/api/src/routes/respond-stream.ts`
+- `apps/shared/src/types/index.ts` (for `AgentEvent`, `MessagePart`)
+- `apps/frontend/src/hooks/use-text-chat.ts`
+
+### Configuration, Secrets, And Runtime Paths
+
+Open these first:
+
+- `apps/api/src/lib/config.ts`
+- `.mango/config.toml.example`
+- `.mango/.env.example`
+- `README.md`
+- `scripts/build.ts` when the change affects standalone binaries or runtime output layout
+
+### Persistence And Database
+
+Open these first:
+
+- `apps/api/src/db/database.ts`
+- `apps/api/src/db/types.ts`
+- `apps/api/src/db/row-types.ts`
+- `apps/api/src/db/migrations/*`
+- the service or route that owns the affected data flow
+
+### Frontend UX, Routing, And State
+
+Open these first:
+
+- `apps/frontend/src/routes/*`
+- `apps/frontend/src/features/*`
+- `apps/frontend/src/hooks/*`
+- `apps/frontend/src/components/*`
+- `apps/frontend/src/components/ui/*` for design-system reuse
+- `apps/frontend/src/hooks/use-i18n.tsx` when locale behavior changes
+
+## Migration Authoring
+
+- Place new migration files in `apps/api/src/db/migrations/`.
+- Name files with the next three-digit sequential prefix: `NNN_description.ts` (e.g. `012_add_tool_results.ts`).
+- Export an `up` function. Include a `down` function only when the migration is safely reversible.
+- Register the new migration in `apps/api/src/db/migrations/index.ts`.
+- After adding a migration, update `apps/api/src/db/types.ts` with the new table or column types.
+
+## Validation Matrix
+
+Run the smallest relevant checks while iterating, then the full suite before final handoff when the change is broad enough.
+
+### Minimum Relevant Checks
+
+- Any change: `bun run lint` (fast, catches import and formatting drift)
+- Frontend-only change: `bun run --filter @mangostudio/frontend test:unit`
+- API-only change: `bun run --filter @mangostudio/api test:unit`
+- Shared-only change: `bun run --filter @mangostudio/shared test:unit`
+- Route or integration flow change: `bun run --filter @mangostudio/api test:integration`
+- Auth flow change: `bun run test:browser:smoke`
+
+### Full Pre-Handoff Checks
+
+- `bun run lint`
+- `bun run test`
+- `bun run test:coverage`
+- `bun run build`
+
+Smoke-test the main product flows locally when applicable: login, chat creation, and image generation.
+
+## Root Scripts Quick Reference
+
+| Script | What it runs |
+|---|---|
+| `bun run dev` | Frontend + API dev servers concurrently |
+| `bun run lint` | ESLint across all workspaces |
+| `bun run test` | All unit + integration tests across workspaces |
+| `bun run test:coverage` | Frontend coverage report |
+| `bun run test:browser:smoke` | Playwright auth-flow smoke suite |
+| `bun run build` | Production frontend build |
+| `bun run build:binary` | Standalone binary via `scripts/build.ts` |
+| `bun run migrate` | Run pending DB migrations |
+
+## Local Docs
+
+- `README.md` — product overview, runtime setup, supported providers, and standalone build notes
+- `docs/TESTING.md` — test taxonomy, harness rules, and browser smoke coverage
+- `GEMINI.md`, `CLAUDE.md` — thin aliases that redirect to this file; do not read separately
