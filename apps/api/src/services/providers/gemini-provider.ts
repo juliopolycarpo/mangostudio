@@ -47,9 +47,7 @@ interface GeminiInteractionState {
   toolsetHash: string;
 }
 
-function parseGeminiState(
-  providerState: string | null | undefined
-): GeminiInteractionState | null {
+function parseGeminiState(providerState: string | null | undefined): GeminiInteractionState | null {
   if (!providerState) return null;
   try {
     const parsed = JSON.parse(providerState) as Record<string, unknown>;
@@ -62,7 +60,9 @@ function parseGeminiState(
   return null;
 }
 
-function toolDefsToInteractions(defs: ToolDefinition[]): Array<{ type: 'function'; name: string; description: string; parameters: unknown }> {
+function toolDefsToInteractions(
+  defs: ToolDefinition[]
+): Array<{ type: 'function'; name: string; description: string; parameters: unknown }> {
   return defs.map((def) => ({
     type: 'function' as const,
     name: def.name,
@@ -106,8 +106,11 @@ async function* streamGeminiAgentTurn(req: AgentTurnRequest): AsyncIterable<Agen
       call_id: tr.callId,
       name: tr.name,
       result: (() => {
-        try { return JSON.parse(tr.result); }
-        catch { return tr.result; }
+        try {
+          return JSON.parse(tr.result);
+        } catch {
+          return tr.result;
+        }
       })(),
       is_error: tr.isError ?? false,
     }));

@@ -52,9 +52,8 @@ export class GeminiCacheManager {
       model: opts.modelName,
       config: {
         systemInstruction: opts.systemPrompt,
-        tools: toolDeclarations.length > 0
-          ? [{ functionDeclarations: toolDeclarations }]
-          : undefined,
+        tools:
+          toolDeclarations.length > 0 ? [{ functionDeclarations: toolDeclarations }] : undefined,
         ttl: `${ttl}s`,
       },
     });
@@ -100,7 +99,9 @@ export class GeminiCacheManager {
     return this.cacheMap.size;
   }
 
-  private computeCacheKey(opts: Pick<GetOrCreateCacheOpts, 'modelName' | 'systemPrompt' | 'toolDefinitions'>): string {
+  private computeCacheKey(
+    opts: Pick<GetOrCreateCacheOpts, 'modelName' | 'systemPrompt' | 'toolDefinitions'>
+  ): string {
     return `${opts.modelName}:${computeHash(opts.systemPrompt)}:${computeToolsetHash(opts.toolDefinitions)}`;
   }
 }
