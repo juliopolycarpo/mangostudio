@@ -64,7 +64,7 @@ describe('connector ownership security', () => {
     );
 
     expect(res.status).toBe(403);
-    const body = await res.json();
+    const body = (await res.json()) as any;
     expect(body.error).toContain('shared connector');
   });
 
@@ -79,7 +79,7 @@ describe('connector ownership security', () => {
     );
 
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = (await res.json()) as any;
     expect(body.success).toBe(true);
   });
 
@@ -98,7 +98,7 @@ describe('connector ownership security', () => {
     );
 
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = (await res.json()) as { success: boolean };
     expect(body.success).toBe(true);
 
     const updated = await getSecretMetadataById('shared-conn-2', USER_B.id);
@@ -132,7 +132,7 @@ describe('connector ownership security', () => {
     );
 
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = (await res.json()) as { success: boolean };
     expect(body.success).toBe(true);
   });
 });

@@ -42,7 +42,7 @@ describe('settingsRoutes', () => {
 
     expect(response.status).toBe(200);
 
-    const payload = await response.json();
+    const payload = (await response.json()) as any;
     expect(Value.Check(GeminiModelCatalogSchema, payload)).toBe(true);
     // Cold-start now awaits refresh — status must not be 'idle'
     expect(payload.status).not.toBe('idle');

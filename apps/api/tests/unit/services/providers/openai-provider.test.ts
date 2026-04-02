@@ -236,7 +236,7 @@ describe('validateOpenAIAuthContext', () => {
     // Patch the OpenAI SDK client's models.list to return success.
     // We do this by intercepting via global fetch since the SDK uses fetch internally.
     const originalFetch = globalThis.fetch;
-    globalThis.fetch = (async (input: RequestInfo | URL, _init?: RequestInit) => {
+    globalThis.fetch = (async (input: string | URL | Request, _init?: RequestInit) => {
       const url = String(input);
       if (url.includes('/models')) {
         return new Response(
@@ -263,7 +263,7 @@ describe('validateOpenAIAuthContext', () => {
   it('succeeds when auth context includes organizationId and projectId', async () => {
     const capturedHeaders: Record<string, string>[] = [];
     const originalFetch = globalThis.fetch;
-    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
       const url = String(input);
       if (url.includes('/models')) {
         const headers = init?.headers
@@ -300,7 +300,7 @@ describe('validateOpenAIAuthContext', () => {
 
   it('throws OpenAIAuthError for 401 response', async () => {
     const originalFetch = globalThis.fetch;
-    globalThis.fetch = (async (input: RequestInfo | URL, _init?: RequestInit) => {
+    globalThis.fetch = (async (input: string | URL | Request, _init?: RequestInit) => {
       const url = String(input);
       if (url.includes('/models')) {
         return new Response(
@@ -332,7 +332,7 @@ describe('validateOpenAIAuthContext', () => {
 
   it('throws OpenAIAuthError with status 403 for permission denied', async () => {
     const originalFetch = globalThis.fetch;
-    globalThis.fetch = (async (input: RequestInfo | URL, _init?: RequestInit) => {
+    globalThis.fetch = (async (input: string | URL | Request, _init?: RequestInit) => {
       const url = String(input);
       if (url.includes('/models')) {
         return new Response(
@@ -365,7 +365,7 @@ describe('validateOpenAIAuthContext', () => {
 
   it('throws OpenAIConfigError for unexpected non-auth HTTP errors', async () => {
     const originalFetch = globalThis.fetch;
-    globalThis.fetch = (async (input: RequestInfo | URL, _init?: RequestInit) => {
+    globalThis.fetch = (async (input: string | URL | Request, _init?: RequestInit) => {
       const url = String(input);
       if (url.includes('/models')) {
         return new Response('Service Unavailable', {
