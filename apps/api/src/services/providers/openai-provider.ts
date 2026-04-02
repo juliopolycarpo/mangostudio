@@ -480,7 +480,7 @@ async function* streamAgentTurnWithResponsesAPI(
       ...(tools.length > 0 ? { tools } : {}),
       store: true,
       stream: true,
-      ...(useReasoning ? { reasoning: { effort, summary: 'auto' } } : {}),
+      ...(useReasoning ? { reasoning: { effort, summary: 'concise' } } : {}),
     });
   };
 
@@ -488,9 +488,10 @@ async function* streamAgentTurnWithResponsesAPI(
   try {
     stream = await makeRequest(previousResponseId);
   } catch (err: unknown) {
-    // 404 or similar → cursor expired; fall back to full replay
-    const isExpired = err instanceof OpenAI.APIError && (err.status === 404 || err.status === 400);
-    if (isExpired && previousResponseId) {
+    // Only 404 means expired cursor; 400 may indicate a different error (e.g. wrong call_id)
+    const isExpiredCursor = err instanceof OpenAI.APIError && err.status === 404;
+    const canFallback = isExpiredCursor && previousResponseId && !req.toolResults;
+    if (canFallback) {
       console.warn('[openai] Cursor expired or invalid, falling back to full replay.');
       // Rebuild input from full history
       const messages: Array<Record<string, unknown>> = [];
@@ -510,6 +511,9 @@ async function* streamAgentTurnWithResponsesAPI(
   let summaryEventsWereSeen = false;
   let thinkingWasEmitted = false;
   let newResponseId: string | null = null;
+
+  // Map output item IDs (fc_xxx) → function call IDs (call_xxx) for consistent callId
+  const itemIdToCallId = new Map<string, { callId: string; name: string }>();
 
   for await (const event of stream) {
     if (req.signal?.aborted) break;
@@ -566,16 +570,19 @@ async function* streamAgentTurnWithResponsesAPI(
       case 'response.output_item.added': {
         const item = ev.item as Record<string, any> | undefined;
         if (item?.type === 'function_call') {
-          yield { type: 'tool_call_started', callId: item.call_id ?? item.id, name: item.name };
+          const callId: string = item.call_id ?? item.id;
+          itemIdToCallId.set(item.id, { callId, name: item.name ?? '' });
+          yield { type: 'tool_call_started', callId, name: item.name };
         }
         break;
       }
 
       case 'response.function_call_arguments.delta': {
-        if (ev.delta) {
+        const mapped = itemIdToCallId.get(ev.item_id);
+        if (ev.delta && mapped) {
           yield {
             type: 'tool_call_arguments_delta',
-            callId: ev.item_id,
+            callId: mapped.callId,
             delta: ev.delta,
           };
         }
@@ -583,12 +590,15 @@ async function* streamAgentTurnWithResponsesAPI(
       }
 
       case 'response.function_call_arguments.done': {
-        yield {
-          type: 'tool_call_completed',
-          callId: ev.item_id,
-          name: ev.name ?? '',
-          arguments: ev.arguments ?? '',
-        };
+        const mapped = itemIdToCallId.get(ev.item_id);
+        if (mapped) {
+          yield {
+            type: 'tool_call_completed',
+            callId: mapped.callId,
+            name: mapped.name,
+            arguments: ev.arguments ?? '',
+          };
+        }
         break;
       }
 

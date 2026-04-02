@@ -153,27 +153,25 @@ async function* streamGeminiAgentTurn(req: AgentTurnRequest): AsyncIterable<Agen
       return;
     }
 
-    // Collect model-turn parts for loopContents accumulation
-    const modelParts: unknown[] = [];
+    // Yield agent events for the streaming UI and track callIds for tool execution.
+    // Preserve raw parts from the API response for loopContents — Gemini 2.5+
+    // requires thought parts with thoughtSignature to be replayed faithfully.
+    const rawModelParts: unknown[] = candidate.content.parts;
 
     for (const part of candidate.content.parts) {
       const p = part as Record<string, any>;
 
       if (p.thought && p.text) {
         yield { type: 'reasoning_delta', text: p.text as string };
-        // Thought parts are not included in loopContents (they must NOT be replayed
-        // without thought_signature in Gemini 2.5+; for safety we omit them)
       } else if (p.functionCall) {
         const callId: string =
           (p.functionCall.id as string | undefined) ??
           `call_${Date.now()}_${Math.random().toString(36).slice(2)}`;
         const name: string = (p.functionCall.name as string) ?? '';
         const argsStr = JSON.stringify(p.functionCall.args ?? {});
-        modelParts.push({ functionCall: { id: callId, name, args: p.functionCall.args ?? {} } });
         yield { type: 'tool_call_started', callId, name };
         yield { type: 'tool_call_completed', callId, name, arguments: argsStr };
       } else if (p.text) {
-        modelParts.push({ text: p.text as string });
         yield { type: 'assistant_text_delta', text: p.text as string };
       }
     }
@@ -203,7 +201,7 @@ async function* streamGeminiAgentTurn(req: AgentTurnRequest): AsyncIterable<Agen
         : req.prompt
           ? [{ role: 'user', parts: [{ text: req.prompt }] }]
           : []),
-      { role: 'model', parts: modelParts },
+      { role: 'model', parts: rawModelParts },
     ];
 
     const newProviderState: GeminiLoopState = {
