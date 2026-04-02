@@ -1,9 +1,8 @@
 # EditorConfig — https://editorconfig.org
-# Alinhado com .prettierrc: tabWidth=2, useTabs=false, endOfLine=lf
 
 root = true
 
-# ─── Defaults (all text files) ───────────────────────────────────────────────
+# ─── Defaults (all text files) ─── #
 [*]
 charset               = utf-8
 end_of_line           = lf
@@ -12,46 +11,46 @@ indent_size           = 2
 trim_trailing_whitespace = true
 insert_final_newline  = true
 
-# ─── TypeScript / TSX / JavaScript / JSX ─────────────────────────────────────
+# ─── TypeScript / TSX / JavaScript / JSX ─── #
 [*.{ts,tsx,js,jsx,mjs,cjs}]
 indent_size = 2
 
-# ─── CSS ──────────────────────────────────────────────────────────────────────
+# ─── CSS ─── #
 [*.css]
 indent_size = 2
 
-# ─── JSON / JSONC ─────────────────────────────────────────────────────────────
+# ─── JSON / JSONC ─── #
 [*.{json,jsonc}]
 indent_size = 2
 
-# ─── Markdown ─────────────────────────────────────────────────────────────────
+# ─── Markdown ─── #
 [*.{md,mdx}]
 # Prettier handles trailing whitespace in markdown; keep it untouched here.
 trim_trailing_whitespace = false
 indent_size              = 2
 
-# ─── TOML (bunfig.toml, config examples) ─────────────────────────────────────
+# ─── TOML (bunfig.toml, config examples) ─── #
 [*.toml]
 indent_size = 2
 
-# ─── YAML (GitHub Actions, Playwright) ───────────────────────────────────────
+# ─── YAML (GitHub Actions, Playwright) ─── #
 [*.{yml,yaml}]
 indent_size = 2
 
-# ─── HTML ─────────────────────────────────────────────────────────────────────
+# ─── HTML ─── #
 [*.html]
 indent_size = 2
 
-# ─── Shell scripts ────────────────────────────────────────────────────────────
+# ─── Shell scripts ─── #
 [*.sh]
 indent_size  = 2
 indent_style = space
 
-# ─── Bun lockfile (binary-like, leave untouched) ─────────────────────────────
+# ─── Bun lockfile (binary-like, leave untouched) ─── #
 [bun.lock]
 insert_final_newline     = unset
 trim_trailing_whitespace = unset
 
-# ─── Playwright config ────────────────────────────────────────────────────────
+# ─── Playwright config ─── #
 [playwright.config.ts]
 indent_size = 2
