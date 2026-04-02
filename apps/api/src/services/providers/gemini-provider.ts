@@ -158,61 +158,128 @@ async function* streamGeminiAgentTurn(req: AgentTurnRequest): AsyncIterable<Agen
 
   // Thinking / reasoning config
   if (req.generationConfig?.thinkingEnabled) {
-    const levelMap = { low: 'LOW', medium: 'MEDIUM', high: 'HIGH' } as const;
+    const levelMap = { low: 'low', medium: 'medium', high: 'high' } as const;
     interactionParams.generation_config = {
-      thinking_level: levelMap[req.generationConfig.reasoningEffort] ?? 'MEDIUM',
+      thinking_level: levelMap[req.generationConfig.reasoningEffort] ?? 'medium',
+      thinking_summaries: 'auto',
     };
   }
 
   try {
-    const interaction = await ai.interactions.create(interactionParams as any);
+    // Use streaming mode so thinking, tool calls, and text appear progressively
+    interactionParams.stream = true;
+    const stream = (await ai.interactions.create(
+      interactionParams as any
+    )) as unknown as AsyncIterable<Record<string, any>>;
 
-    if (!interaction.outputs || interaction.outputs.length === 0) {
-      yield { type: 'turn_error', error: 'No response from Gemini Interactions API' };
-      return;
-    }
+    // Track active function calls by content index
+    const activeCalls = new Map<
+      number,
+      { id: string; name: string; args: Record<string, unknown>; started: boolean }
+    >();
+    let interactionId: string | undefined;
 
-    // Process outputs and emit AgentEvents
-    for (const output of interaction.outputs) {
-      const o = output as Record<string, any>;
+    for await (const event of stream) {
+      const eventType: string = event.event_type ?? '';
 
-      if (o.type === 'function_call') {
-        const callId: string = o.id ?? `call_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-        const name: string = o.name ?? '';
-        const argsStr = JSON.stringify(o.arguments ?? {});
-        yield { type: 'tool_call_started', callId, name };
-        yield { type: 'tool_call_completed', callId, name, arguments: argsStr };
-      } else if (o.type === 'thought') {
-        // Thought summaries
-        if (o.summary) {
-          for (const s of o.summary) {
-            if (s.type === 'text' && s.text) {
-              yield { type: 'reasoning_delta', text: s.text };
-            }
+      if (eventType === 'content.start') {
+        const content = event.content as Record<string, any> | undefined;
+        if (!content) continue;
+
+        if (content.type === 'function_call') {
+          const callId: string =
+            content.id ?? `call_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+          const name: string = content.name ?? '';
+          activeCalls.set(event.index as number, {
+            id: callId,
+            name,
+            args: {},
+            started: false,
+          });
+          // Defer tool_call_started if name is empty — the delta will provide it
+          if (name) {
+            activeCalls.get(event.index as number)!.started = true;
+            yield { type: 'tool_call_started', callId, name };
           }
         }
-      } else if (o.type === 'text') {
-        yield { type: 'assistant_text_delta', text: o.text ?? '' };
+        // thought content.start — nothing to emit yet, deltas carry the summary text
+      } else if (eventType === 'content.delta') {
+        const delta = event.delta as Record<string, any> | undefined;
+        if (!delta) continue;
+
+        if (delta.type === 'thought_summary') {
+          // Streaming thought summary text
+          const text =
+            typeof delta.content === 'string'
+              ? delta.content
+              : ((delta.content as Record<string, any>)?.text ?? '');
+          if (text) {
+            yield { type: 'reasoning_delta', text };
+          }
+        } else if (delta.type === 'text') {
+          yield { type: 'assistant_text_delta', text: delta.text ?? '' };
+        } else if (delta.type === 'function_call') {
+          // Incremental arguments for an active tool call
+          const call = activeCalls.get(event.index as number);
+          if (call) {
+            // Capture name from delta if content.start didn't have it
+            if (delta.name && !call.name) call.name = delta.name as string;
+            if (!call.started && call.name) {
+              call.started = true;
+              yield { type: 'tool_call_started', callId: call.id, name: call.name };
+            }
+            const partialArgs = (delta.arguments ?? {}) as Record<string, unknown>;
+            Object.assign(call.args, partialArgs);
+            const argChunk = JSON.stringify(partialArgs);
+            yield { type: 'tool_call_arguments_delta', callId: call.id, delta: argChunk };
+          }
+        } else if (delta.type !== 'thought_signature') {
+          // Log unknown delta types for future diagnostics
+          console.log('[gemini-interactions] unknown delta type:', JSON.stringify(delta));
+        }
+      } else if (eventType === 'content.stop') {
+        // Finalize any active function call at this index
+        const call = activeCalls.get(event.index as number);
+        if (call) {
+          yield {
+            type: 'tool_call_completed',
+            callId: call.id,
+            name: call.name,
+            arguments: JSON.stringify(call.args),
+          };
+          activeCalls.delete(event.index as number);
+        }
+      } else if (eventType === 'interaction.complete') {
+        const interaction = event.interaction as Record<string, any> | undefined;
+        interactionId = interaction?.id;
+
+        // Log cache usage if available
+        const usage = interaction?.usage as Record<string, any> | undefined;
+        if (usage) {
+          const cached = usage.cached_content_token_count ?? usage.cachedContentTokenCount ?? 0;
+          const total = usage.prompt_token_count ?? usage.promptTokenCount ?? 0;
+          if (cached > 0 && total > 0) {
+            console.log(
+              `[prefix-cache][gemini] ${cached}/${total} input tokens from cache (${Math.round((cached / total) * 100)}%)`
+            );
+          }
+        }
+      } else if (eventType === 'interaction.start') {
+        const interaction = event.interaction as Record<string, any> | undefined;
+        if (interaction?.id) interactionId = interaction.id;
       }
     }
 
-    // Log cache usage if available
-    if (interaction.usage) {
-      const usage = interaction.usage as Record<string, any>;
-      const cached = usage.cached_content_token_count ?? usage.cachedContentTokenCount ?? 0;
-      const total = usage.prompt_token_count ?? usage.promptTokenCount ?? 0;
-      if (cached > 0 && total > 0) {
-        console.log(
-          `[prefix-cache][gemini] ${cached}/${total} input tokens from cache (${Math.round((cached / total) * 100)}%)`
-        );
-      }
+    if (!interactionId) {
+      yield { type: 'turn_error', error: 'No interaction ID returned from Gemini streaming' };
+      return;
     }
 
     // Persist interaction state for continuation
     const newState: GeminiInteractionState = {
       provider: 'gemini',
       mode: 'interactions',
-      interactionId: interaction.id,
+      interactionId,
       modelName: req.modelName,
       toolsetHash: currentToolsetHash,
     };
