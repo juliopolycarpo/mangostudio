@@ -35,6 +35,7 @@ import {
   computeToolsetHash,
   type ContinuationEnvelope,
 } from './continuation';
+import { getModelContextLimit } from './context-policy';
 
 const BASE_URL = 'https://api.openai.com/v1';
 
@@ -529,6 +530,7 @@ async function* streamAgentTurnWithResponsesAPI(
   let summaryEventsWereSeen = false;
   let thinkingWasEmitted = false;
   let newResponseId: string | null = null;
+  let usageInputTokens: number | undefined;
 
   // Map output item IDs (fc_xxx) → function call IDs (call_xxx) for consistent callId
   const itemIdToCallId = new Map<string, { callId: string; name: string }>();
@@ -627,6 +629,10 @@ async function* streamAgentTurnWithResponsesAPI(
 
       case 'response.completed': {
         newResponseId = ev.response?.id ?? null;
+        const usage = ev.response?.usage as Record<string, any> | undefined;
+        if (usage && typeof usage.input_tokens === 'number') {
+          usageInputTokens = usage.input_tokens;
+        }
         if (!thinkingWasEmitted && ev.response) {
           const reasoning = extractReasoningFromCompleted(ev.response);
           if (reasoning) {
@@ -646,6 +652,11 @@ async function* streamAgentTurnWithResponsesAPI(
     systemPromptHash: computeSystemPromptHash(req.systemPrompt),
     toolsetHash: computeToolsetHash(req.toolDefinitions ?? []),
     cursor: newResponseId ?? undefined,
+    context: {
+      providerReportedInputTokens: usageInputTokens,
+      contextLimit: getModelContextLimit(req.modelName),
+      lastUpdatedAt: Date.now(),
+    },
   };
 
   yield { type: 'turn_completed', providerState: serializeContinuationEnvelope(envelope) };

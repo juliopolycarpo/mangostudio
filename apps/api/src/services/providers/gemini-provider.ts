@@ -23,6 +23,7 @@ import {
   computeSystemPromptHash,
   type ContinuationEnvelope,
 } from './continuation';
+import { getModelContextLimit } from './context-policy';
 import type {
   AIProvider,
   TextGenerationRequest,
@@ -196,6 +197,7 @@ async function* streamGeminiAgentTurn(req: AgentTurnRequest): AsyncIterable<Agen
       { id: string; name: string; args: Record<string, unknown>; started: boolean }
     >();
     let interactionId: string | undefined;
+    let providerReportedInputTokens: number | undefined;
 
     for await (const event of stream) {
       const eventType: string = event.event_type ?? '';
@@ -271,11 +273,12 @@ async function* streamGeminiAgentTurn(req: AgentTurnRequest): AsyncIterable<Agen
         const interaction = event.interaction as Record<string, any> | undefined;
         interactionId = interaction?.id;
 
-        // Log cache usage if available
+        // Log cache usage if available and capture token count
         const usage = interaction?.usage as Record<string, any> | undefined;
         if (usage) {
           const cached = usage.cached_content_token_count ?? usage.cachedContentTokenCount ?? 0;
           const total = usage.prompt_token_count ?? usage.promptTokenCount ?? 0;
+          if (typeof total === 'number' && total > 0) providerReportedInputTokens = total;
           if (cached > 0 && total > 0) {
             console.log(
               `[prefix-cache][gemini] ${cached}/${total} input tokens from cache (${Math.round((cached / total) * 100)}%)`
@@ -302,6 +305,11 @@ async function* streamGeminiAgentTurn(req: AgentTurnRequest): AsyncIterable<Agen
       systemPromptHash: computeSystemPromptHash(req.systemPrompt),
       toolsetHash: currentToolsetHash,
       cursor: interactionId,
+      context: {
+        providerReportedInputTokens,
+        contextLimit: getModelContextLimit(req.modelName),
+        lastUpdatedAt: Date.now(),
+      },
     };
 
     yield { type: 'turn_completed', providerState: serializeContinuationEnvelope(envelope) };
