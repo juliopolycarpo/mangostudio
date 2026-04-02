@@ -12,10 +12,7 @@ import { withModelCache } from './model-cache';
 import { registerProvider } from './registry';
 import { getConfig } from '../../lib/config';
 import { isImageModelId, isReasoningModel } from '@mangostudio/shared/utils/model-detection';
-import {
-  computeSystemPromptHash,
-  computeToolsetHash,
-} from './continuation';
+import { computeSystemPromptHash, computeToolsetHash } from './continuation';
 import type {
   AIProvider,
   TextGenerationRequest,

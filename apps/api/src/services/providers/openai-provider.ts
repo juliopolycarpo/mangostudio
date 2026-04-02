@@ -444,7 +444,9 @@ function parseResponseId(providerState: string | null | undefined): string | nul
     if (parsed.provider === 'openai' && typeof parsed.responseId === 'string') {
       return parsed.responseId;
     }
-  } catch { }
+  } catch {
+    // Ignore malformed state
+  }
   return null;
 }
 

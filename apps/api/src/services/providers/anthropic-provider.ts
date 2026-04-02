@@ -10,10 +10,7 @@ import { withModelCache } from './model-cache';
 import { registerProvider } from './registry';
 import { buildCachedAnthropicRequest } from './anthropic-cache-builder';
 import { isReasoningModel } from '@mangostudio/shared/utils/model-detection';
-import {
-  computeSystemPromptHash,
-  computeToolsetHash,
-} from './continuation';
+import { computeSystemPromptHash, computeToolsetHash } from './continuation';
 import type {
   AIProvider,
   TextGenerationRequest,
@@ -32,9 +29,15 @@ const FALLBACK_MODELS: ModelInfo[] = [
     displayName: 'Claude Sonnet 4.5',
     provider: 'anthropic',
     capabilities: {
-      text: true, image: false, streaming: true, reasoning: true,
-      tools: true, statefulContinuation: false, promptCaching: true,
-      parallelToolCalls: false, reasoningWithTools: true,
+      text: true,
+      image: false,
+      streaming: true,
+      reasoning: true,
+      tools: true,
+      statefulContinuation: false,
+      promptCaching: true,
+      parallelToolCalls: false,
+      reasoningWithTools: true,
     },
   },
   {
@@ -42,9 +45,15 @@ const FALLBACK_MODELS: ModelInfo[] = [
     displayName: 'Claude Haiku 3.5',
     provider: 'anthropic',
     capabilities: {
-      text: true, image: false, streaming: true, reasoning: false,
-      tools: true, statefulContinuation: false, promptCaching: true,
-      parallelToolCalls: false, reasoningWithTools: false,
+      text: true,
+      image: false,
+      streaming: true,
+      reasoning: false,
+      tools: true,
+      statefulContinuation: false,
+      promptCaching: true,
+      parallelToolCalls: false,
+      reasoningWithTools: false,
     },
   },
 ];

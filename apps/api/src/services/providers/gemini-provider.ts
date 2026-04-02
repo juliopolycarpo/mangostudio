@@ -72,7 +72,9 @@ function parseGeminiState(providerState: string | null | undefined): GeminiInter
     if (parsed.provider === 'gemini' && parsed.mode === 'interactions') {
       return parsed as unknown as GeminiInteractionState;
     }
-  } catch { }
+  } catch {
+    // Ignore malformed state
+  }
   return null;
 }
 

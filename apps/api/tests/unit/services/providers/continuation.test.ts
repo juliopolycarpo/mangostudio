@@ -131,9 +131,7 @@ describe('computeSystemPromptHash', () => {
 
 describe('computeToolsetHash', () => {
   it('is deterministic for the same input', () => {
-    const tools = [
-      { name: 'tool_a', description: 'A tool', parameters: { type: 'object' } },
-    ];
+    const tools = [{ name: 'tool_a', description: 'A tool', parameters: { type: 'object' } }];
     expect(computeToolsetHash(tools)).toBe(computeToolsetHash(tools));
   });
 
