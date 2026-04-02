@@ -14,6 +14,7 @@ export interface ChatsTable {
   imageModel: string | null;
   lastUsedMode: string | null;
   userId: string | null;
+  lastProviderState: string | null;
 }
 
 export interface MessagesTable {

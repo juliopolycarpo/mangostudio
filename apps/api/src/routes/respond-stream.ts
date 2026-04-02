@@ -165,6 +165,17 @@ export const respondStreamRoutes = (app: Elysia) =>
                       break;
                     }
                   }
+                  // Fallback: check chat row (covers crash-recovery scenarios)
+                  if (!currentProviderState) {
+                    const chatRow = await db
+                      .selectFrom('chats')
+                      .select('lastProviderState')
+                      .where('id', '=', chatId)
+                      .executeTakeFirst();
+                    if (chatRow?.lastProviderState) {
+                      currentProviderState = chatRow.lastProviderState;
+                    }
+                  }
 
                   // Validate continuation envelope compatibility
                   const envelope = parseContinuationEnvelope(currentProviderState);
@@ -295,6 +306,19 @@ export const respondStreamRoutes = (app: Elysia) =>
                           currentProviderState = event.providerState ?? null;
                           finalProviderState = currentProviderState;
                           turnCompleted = true;
+
+                          // Persist state eagerly on the chat row (survives message save failures)
+                          if (finalProviderState) {
+                            await db
+                              .updateTable('chats')
+                              .set({ lastProviderState: finalProviderState })
+                              .where('id', '=', chatId)
+                              .execute()
+                              .catch((err) => {
+                                console.warn(`[continuation][persist] Failed to save state on chat row: ${err}`);
+                              });
+                          }
+
                           const resultEnvelope = parseContinuationEnvelope(currentProviderState);
                           if (resultEnvelope) {
                             console.log(
