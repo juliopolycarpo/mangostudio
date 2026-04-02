@@ -19,5 +19,8 @@
     "./test-utils": "./src/test-utils/index.ts",
     "./i18n": "./src/i18n/index.ts",
     "./utils/model-detection": "./src/utils/model-detection.ts"
+  },
+  "devDependencies": {
+    "typescript": "~5.8.2"
   }
 }

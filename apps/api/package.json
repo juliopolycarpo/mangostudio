@@ -36,8 +36,6 @@
   "devDependencies": {
     "@sinclair/typebox": "^0.34.0",
     "@types/bun": "^1.2.0",
-    "@vitest/ui": "^4.1.1",
-    "typescript": "~5.8.2",
-    "vitest": "^4.1.1"
+    "typescript": "~5.8.2"
   }
 }

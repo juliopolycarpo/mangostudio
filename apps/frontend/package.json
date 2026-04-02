@@ -44,8 +44,6 @@
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^5.0.4",
     "@vitest/ui": "^4.1.1",
-    "autoprefixer": "^10.4.21",
-    "elysia": "^1.4.28",
     "jsdom": "^29.0.1",
     "smol-toml": "^1.6.1",
     "tailwindcss": "^4.1.14",
