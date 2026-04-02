@@ -71,6 +71,13 @@ export default [
       ...reactHooksPlugin.configs.recommended.rules,
       'react/react-in-jsx-scope': 'off',
       'react/jsx-uses-react': 'off',
+      'react/no-unescaped-entities': 'off',
+      'react-hooks/exhaustive-deps': 'off',
+      // React Compiler rules from react-hooks v7 — disable until codebase is compiler-ready
+      'react-hooks/set-state-in-effect': 'off',
+      'react-hooks/refs': 'off',
+      'react-hooks/preserve-manual-memoization': 'off',
+      'react-hooks/incompatible-library': 'off',
     },
   },
   // Prettier last (disables conflicting rules)

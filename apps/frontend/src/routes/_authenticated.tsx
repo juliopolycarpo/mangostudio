@@ -31,6 +31,10 @@ function AuthenticatedLayout() {
   const routerState = useRouterState();
   const currentPath = routerState.location.pathname;
 
+  useEffect(() => {
+    void app.initialize();
+  }, [app.initialize]);
+
   if (!auth.isAuthenticated) {
     void navigate({ to: '/login' });
     return null;
@@ -39,10 +43,6 @@ function AuthenticatedLayout() {
   let activePage: 'chat' | 'gallery' | 'settings' = 'chat';
   if (currentPath.includes('/gallery')) activePage = 'gallery';
   if (currentPath.includes('/settings')) activePage = 'settings';
-
-  useEffect(() => {
-    void app.initialize();
-  }, [app.initialize]);
 
   return (
     <AppContext.Provider value={app}>
