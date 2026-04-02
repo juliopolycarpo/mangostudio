@@ -119,6 +119,7 @@ export const messages: Messages = {
 
   common: {
     loading: 'Loading...',
+    disclaimer: 'Artificial Intelligence can make mistakes. Please double-check the results.',
   },
 
   providers: {

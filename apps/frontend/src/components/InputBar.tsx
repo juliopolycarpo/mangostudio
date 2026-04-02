@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { MessageSquare, ImagePlus, PlusCircle, Mic, Zap, Send, Square, X } from 'lucide-react';
 import type { InteractionMode, ReasoningEffort } from '@mangostudio/shared';
 import { ThinkingToggle } from '@/components/layout/ThinkingToggle';
+import { useI18n } from '@/hooks/use-i18n';
 
 interface Props {
   composerMode: InteractionMode;
@@ -31,6 +32,7 @@ export function InputBar({
   onReasoningEffortChange,
   reasoningVisible = false,
 }: Props) {
+  const { t } = useI18n();
   const [prompt, setPrompt] = useState('');
   const [referenceImage, setReferenceImage] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -200,9 +202,7 @@ export function InputBar({
           </div>
         </form>
         <p className="text-center text-[10px] text-on-surface-variant/40 mt-3 font-label">
-          {isImageMode
-            ? 'MangoStudio may produce unexpected results. Review images before sharing.'
-            : 'Gemini can make mistakes. Double-check important information.'}
+          {t.common.disclaimer}
         </p>
       </div>
     </footer>
