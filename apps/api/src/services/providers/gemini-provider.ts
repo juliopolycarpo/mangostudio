@@ -4,7 +4,6 @@
  */
 
 import { GoogleGenAI } from '@google/genai';
-import type { Content, Part } from '@google/genai';
 import {
   clearGeminiModelCatalog,
   generateText as geminiGenerateText,
@@ -17,6 +16,7 @@ import {
 } from '../gemini';
 import { isReasoningModel } from '@mangostudio/shared/utils/model-detection';
 import { registerProvider } from './registry';
+import { computeToolsetHash } from '../../utils/hash';
 import type {
   AIProvider,
   TextGenerationRequest,
@@ -31,22 +31,30 @@ import type {
 } from './types';
 
 // ---------------------------------------------------------------------------
-// Gemini stateless agentic tool loop
+// Gemini stateful agentic turn via Interactions API
 // ---------------------------------------------------------------------------
 
-/** Opaque loop-state stored in providerState during the tool-call loop. */
-interface GeminiLoopState {
+/**
+ * Opaque state persisted across turns for Gemini.
+ * - interactionId: server-side cursor for stateful continuation
+ * - toolsetHash: detects when tools change (requires new interaction chain)
+ */
+interface GeminiInteractionState {
   provider: 'gemini';
-  /** In-memory Gemini content turns accumulated within the current agent turn. */
-  loopContents: Array<{ role: string; parts: unknown[] }>;
+  mode: 'interactions';
+  interactionId: string;
+  modelName: string;
+  toolsetHash: string;
 }
 
-function parseGeminiLoopState(providerState: string | null | undefined): GeminiLoopState | null {
+function parseGeminiState(
+  providerState: string | null | undefined
+): GeminiInteractionState | null {
   if (!providerState) return null;
   try {
     const parsed = JSON.parse(providerState) as Record<string, unknown>;
-    if (parsed.provider === 'gemini' && Array.isArray(parsed.loopContents)) {
-      return parsed as unknown as GeminiLoopState;
+    if (parsed.provider === 'gemini' && parsed.mode === 'interactions') {
+      return parsed as unknown as GeminiInteractionState;
     }
   } catch {
     // Ignore malformed state
@@ -54,166 +62,146 @@ function parseGeminiLoopState(providerState: string | null | undefined): GeminiL
   return null;
 }
 
-function toolDefsToGemini(defs: ToolDefinition[]): Record<string, unknown> {
-  return {
-    functionDeclarations: defs.map((def) => ({
-      name: def.name,
-      description: def.description,
-      parameters: def.parameters,
-    })),
-  };
+function toolDefsToInteractions(defs: ToolDefinition[]): Array<{ type: 'function'; name: string; description: string; parameters: unknown }> {
+  return defs.map((def) => ({
+    type: 'function' as const,
+    name: def.name,
+    description: def.description,
+    parameters: def.parameters,
+  }));
 }
 
 /**
- * Streams a single agentic turn using the Gemini generateContent API.
- * Stateless — history is replayed from DB on each turn.
- * Within a turn, accumulated model responses (function calls) are carried
- * in providerState so subsequent tool-result iterations work correctly.
+ * Streams a single agentic turn using the Gemini Interactions API.
  *
- * Note: Interactions API (previous_interaction_id) is not yet available in
- * @google/genai v1.x — full stateful continuation will be added when it ships.
+ * Stateful — uses `previous_interaction_id` for server-side continuation.
+ * On the first turn of a chat, sends system_instruction + tools + full input.
+ * On subsequent turns, only sends the new delta input; the server retains
+ * the full context window via the interaction chain.
+ *
+ * When tools or model change between turns, the interaction chain is broken
+ * and a new chain starts with full context replay.
  */
 async function* streamGeminiAgentTurn(req: AgentTurnRequest): AsyncIterable<AgentEvent> {
   const apiKey = await getResolvedGeminiApiKey(req.userId, req.modelName);
   const ai = new GoogleGenAI({ apiKey });
 
-  const loopState = parseGeminiLoopState(req.providerState);
-  const tools =
-    (req.toolDefinitions ?? []).length > 0 ? [toolDefsToGemini(req.toolDefinitions!)] : undefined;
+  const prevState = parseGeminiState(req.providerState);
+  const toolDefs = req.toolDefinitions ?? [];
+  const currentToolsetHash = computeToolsetHash(toolDefs);
 
-  // Build full contents:
-  //   1. DB history (text-only for now)
-  //   2. In-memory loop turns from this agent turn (if any)
-  //   3. Current user prompt OR tool results
-  const contents: Content[] = [];
+  // Determine if we can continue the existing interaction chain.
+  // Chain is valid when: same model + same toolset + previous interaction exists.
+  const canContinue =
+    prevState !== null &&
+    prevState.modelName === req.modelName &&
+    prevState.toolsetHash === currentToolsetHash;
 
-  for (const turn of req.history) {
-    contents.push({
-      role: turn.role === 'ai' ? 'model' : 'user',
-      parts: [{ text: turn.text }],
-    });
+  // Build the input for this iteration
+  let input: unknown;
+  if (req.toolResults && req.toolResults.length > 0) {
+    // Feed tool results back to the model
+    input = req.toolResults.map((tr) => ({
+      type: 'function_result' as const,
+      call_id: tr.callId,
+      name: tr.name,
+      result: (() => {
+        try { return JSON.parse(tr.result); }
+        catch { return tr.result; }
+      })(),
+      is_error: tr.isError ?? false,
+    }));
+  } else if (req.prompt) {
+    input = req.prompt;
+  } else {
+    yield { type: 'turn_error', error: 'No input for Gemini interaction' };
+    return;
   }
 
-  // Append accumulated in-loop turns (model function calls + previous tool results)
-  if (loopState?.loopContents) {
-    for (const lc of loopState.loopContents) {
-      contents.push({ role: lc.role as string, parts: lc.parts as Part[] });
+  const interactionParams: Record<string, unknown> = {
+    model: req.modelName,
+    input,
+  };
+
+  if (canContinue) {
+    // Continue the chain — server already has system_instruction, tools, and history
+    interactionParams.previous_interaction_id = prevState.interactionId;
+  } else {
+    // New chain: send system_instruction and tools
+    if (req.systemPrompt?.trim()) {
+      interactionParams.system_instruction = req.systemPrompt;
+    }
+    if (toolDefs.length > 0) {
+      interactionParams.tools = toolDefsToInteractions(toolDefs);
     }
   }
 
-  // Add the current turn input
-  if (req.toolResults && req.toolResults.length > 0) {
-    contents.push({
-      role: 'user',
-      parts: req.toolResults.map((tr) => {
-        let parsed: Record<string, unknown>;
-        try {
-          const v = JSON.parse(tr.result);
-          parsed =
-            typeof v === 'object' && v !== null ? (v as Record<string, unknown>) : { value: v };
-        } catch {
-          parsed = { raw: tr.result };
-        }
-        return {
-          functionResponse: {
-            id: tr.callId,
-            name: tr.name,
-            response: parsed,
-          },
-        } as Part;
-      }),
-    });
-  } else if (req.prompt) {
-    contents.push({ role: 'user', parts: [{ text: req.prompt }] });
-  }
-
-  const config: Record<string, unknown> = {};
-  if (req.systemPrompt?.trim()) config.systemInstruction = req.systemPrompt;
-  if (tools) config.tools = tools;
-
+  // Thinking / reasoning config
   if (req.generationConfig?.thinkingEnabled) {
     const levelMap = { low: 'LOW', medium: 'MEDIUM', high: 'HIGH' } as const;
-    config.thinkingConfig = {
-      includeThoughts: true,
-      thinkingLevel: levelMap[req.generationConfig.reasoningEffort] ?? 'MEDIUM',
+    interactionParams.generation_config = {
+      thinking_level: levelMap[req.generationConfig.reasoningEffort] ?? 'MEDIUM',
     };
   }
 
   try {
-    const response = await ai.models.generateContent({
-      model: req.modelName,
-      contents,
-      config,
-    });
+    const interaction = await ai.interactions.create(interactionParams as any);
 
-    const candidate = response.candidates?.[0];
-
-    if (!candidate?.content?.parts) {
-      yield { type: 'turn_error', error: 'No response from Gemini' };
+    if (!interaction.outputs || interaction.outputs.length === 0) {
+      yield { type: 'turn_error', error: 'No response from Gemini Interactions API' };
       return;
     }
 
-    // Yield agent events for the streaming UI and track callIds for tool execution.
-    // Preserve raw parts from the API response for loopContents — Gemini 2.5+
-    // requires thought parts with thoughtSignature to be replayed faithfully.
-    const rawModelParts: unknown[] = candidate.content.parts;
+    // Process outputs and emit AgentEvents
+    for (const output of interaction.outputs) {
+      const o = output as Record<string, any>;
 
-    for (const part of candidate.content.parts) {
-      const p = part as Record<string, any>;
-
-      if (p.thought && p.text) {
-        yield { type: 'reasoning_delta', text: p.text as string };
-      } else if (p.functionCall) {
-        const callId: string =
-          (p.functionCall.id as string | undefined) ??
-          `call_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-        const name: string = (p.functionCall.name as string) ?? '';
-        const argsStr = JSON.stringify(p.functionCall.args ?? {});
+      if (o.type === 'function_call') {
+        const callId: string = o.id ?? `call_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+        const name: string = o.name ?? '';
+        const argsStr = JSON.stringify(o.arguments ?? {});
         yield { type: 'tool_call_started', callId, name };
         yield { type: 'tool_call_completed', callId, name, arguments: argsStr };
-      } else if (p.text) {
-        yield { type: 'assistant_text_delta', text: p.text as string };
+      } else if (o.type === 'thought') {
+        // Thought summaries
+        if (o.summary) {
+          for (const s of o.summary) {
+            if (s.type === 'text' && s.text) {
+              yield { type: 'reasoning_delta', text: s.text };
+            }
+          }
+        }
+      } else if (o.type === 'text') {
+        yield { type: 'assistant_text_delta', text: o.text ?? '' };
       }
     }
 
-    // Build the updated loop state to return in providerState
-    const newLoopContents = [
-      ...(loopState?.loopContents ?? []),
-      ...(req.toolResults && req.toolResults.length > 0
-        ? [
-            {
-              role: 'user',
-              parts: req.toolResults.map((tr) => ({
-                functionResponse: {
-                  id: tr.callId,
-                  name: tr.name,
-                  response: (() => {
-                    try {
-                      return JSON.parse(tr.result) as unknown;
-                    } catch {
-                      return { raw: tr.result };
-                    }
-                  })(),
-                },
-              })),
-            },
-          ]
-        : req.prompt
-          ? [{ role: 'user', parts: [{ text: req.prompt }] }]
-          : []),
-      { role: 'model', parts: rawModelParts },
-    ];
+    // Log cache usage if available
+    if (interaction.usage) {
+      const usage = interaction.usage as Record<string, any>;
+      const cached = usage.cached_content_token_count ?? usage.cachedContentTokenCount ?? 0;
+      const total = usage.prompt_token_count ?? usage.promptTokenCount ?? 0;
+      if (cached > 0 && total > 0) {
+        console.log(
+          `[prefix-cache][gemini] ${cached}/${total} input tokens from cache (${Math.round((cached / total) * 100)}%)`
+        );
+      }
+    }
 
-    const newProviderState: GeminiLoopState = {
+    // Persist interaction state for continuation
+    const newState: GeminiInteractionState = {
       provider: 'gemini',
-      loopContents: newLoopContents,
+      mode: 'interactions',
+      interactionId: interaction.id,
+      modelName: req.modelName,
+      toolsetHash: currentToolsetHash,
     };
 
-    yield { type: 'turn_completed', providerState: JSON.stringify(newProviderState) };
+    yield { type: 'turn_completed', providerState: JSON.stringify(newState) };
   } catch (err: unknown) {
     yield {
       type: 'turn_error',
-      error: err instanceof Error ? err.message : 'Gemini request failed',
+      error: err instanceof Error ? err.message : 'Gemini interaction failed',
     };
   }
 }
