@@ -256,11 +256,18 @@ export const respondStreamRoutes = (app: Elysia) =>
                           );
                           break;
 
-                        case 'turn_completed':
+                        case 'turn_completed': {
                           currentProviderState = event.providerState ?? null;
                           finalProviderState = currentProviderState;
                           turnCompleted = true;
+                          const resultEnvelope = parseContinuationEnvelope(currentProviderState);
+                          if (resultEnvelope) {
+                            console.log(
+                              `[continuation][updated] chatId=${chatId} provider=${resultEnvelope.provider} mode=${resultEnvelope.mode} cursor=${resultEnvelope.cursor ? 'present' : 'none'}`
+                            );
+                          }
                           break;
+                        }
 
                         case 'turn_error':
                           throw new Error(event.error);
