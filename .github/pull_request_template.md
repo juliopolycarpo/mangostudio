@@ -1,14 +1,10 @@
 ## Summary
 
-<!-- Describe the user-visible change this PR introduces. 1–3 bullet points. -->
-
--
+<!-- Describe the user-visible change this PR introduces. -->
 
 ## Changes
 
 <!-- List the concrete changes made. -->
-
--
 
 ## Test Plan
 
@@ -20,7 +16,7 @@
 
 ## Screenshots / GIFs
 
-<!-- For UI changes, attach before/after screenshots or a short GIF. -->
+<!-- Insert your screenshots or GIFs here if applicable -->
 
 ## Notes
 

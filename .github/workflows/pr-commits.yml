@@ -1,7 +1,7 @@
 name: Auto-populate PR commits
 
 on:
-  pull_request:
+  pull_request_target:
     types: [opened, synchronize, reopened]
 
 permissions:
@@ -12,45 +12,68 @@ jobs:
     name: Inject commit list into PR body
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
       - name: Generate and inject commit list
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        run: |
-          # List only the commits introduced by this PR branch
-          commits=$(git log "${BASE_SHA}..HEAD" \
-            --reverse \
-            --pretty=format:"- \`%h\` %s" \
-            --no-merges)
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const pullNumber = context.payload.pull_request?.number;
 
-          if [ -z "$commits" ]; then
-            commits="_No commits yet._"
-          fi
-
-          # Fetch current PR body
-          body=$(gh pr view "$PR_NUMBER" --json body -q '.body')
-
-          # Replace content between markers idempotently
-          new_body=$(printf '%s\n' "$body" | awk \
-            -v commits="$commits" '
-            /<!-- COMMITS_START -->/ {
-              print
-              print commits
-              skip = 1
-              next
+            if (!pullNumber) {
+              core.setFailed('Missing pull request number in workflow context.');
+              return;
             }
-            /<!-- COMMITS_END -->/ {
-              skip = 0
-              print
-              next
-            }
-            { if (!skip) print }
-          ')
 
-          # Update the PR
-          gh pr edit "$PR_NUMBER" --body "$new_body"
+            const startMarker = '<!-- COMMITS_START -->';
+            const endMarker = '<!-- COMMITS_END -->';
+
+            const escapeRegExp = (value) =>
+              value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+            const commits = await github.paginate(github.rest.pulls.listCommits, {
+              owner,
+              repo,
+              pull_number: pullNumber,
+              per_page: 100,
+            });
+
+            const commitLines = commits.map(({ sha, commit }) => {
+              const shortSha = sha.slice(0, 7);
+              const subjectLine = commit.message.split('\n')[0]?.trim() || 'No commit subject';
+
+              return `- \`${shortSha}\` ${subjectLine}`;
+            });
+
+            const commitsBlock =
+              commitLines.length > 0 ? commitLines.join('\n') : '_No commits yet._';
+
+            const { data: pullRequest } = await github.rest.pulls.get({
+              owner,
+              repo,
+              pull_number: pullNumber,
+            });
+
+            const currentBody = pullRequest.body ?? '';
+            const commitSection = `${startMarker}\n${commitsBlock}\n${endMarker}`;
+            const commitSectionPattern = new RegExp(
+              `${escapeRegExp(startMarker)}[\\s\\S]*?${escapeRegExp(endMarker)}`,
+            );
+
+            const nextBody = commitSectionPattern.test(currentBody)
+              ? currentBody.replace(commitSectionPattern, commitSection)
+              : `${currentBody.trimEnd()}\n\n## Commits\n\n${commitSection}`.trim();
+
+            if (nextBody === currentBody) {
+              core.info('PR body already has the expected commit section.');
+              return;
+            }
+
+            await github.rest.pulls.update({
+              owner,
+              repo,
+              pull_number: pullNumber,
+              body: nextBody,
+            });
+
+            core.info(`Updated commit section for PR #${pullNumber}.`);
