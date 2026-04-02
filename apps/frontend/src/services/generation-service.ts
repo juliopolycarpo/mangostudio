@@ -77,6 +77,8 @@ export interface StreamChunk {
     | 'tool_call_started'
     | 'tool_call_completed'
     | 'tool_result'
+    | 'context_info'
+    | 'fallback_notice'
     | 'done'
     | 'error';
   // text / thinking
@@ -87,6 +89,16 @@ export interface StreamChunk {
   arguments?: string;
   result?: unknown;
   isError?: boolean;
+  // context_info event fields
+  estimatedInputTokens?: number;
+  contextLimit?: number;
+  estimatedUsageRatio?: number;
+  mode?: 'stateful' | 'replay' | 'compacted' | 'degraded';
+  severity?: 'normal' | 'info' | 'warning' | 'danger' | 'critical';
+  // fallback_notice event fields
+  from?: string;
+  to?: string;
+  reason?: string;
   // terminal fields
   done: boolean;
   messageId?: string;
