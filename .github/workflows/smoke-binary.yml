@@ -8,6 +8,7 @@ jobs:
   smoke:
     name: ${{ matrix.platform }}
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 10
     continue-on-error: true
     strategy:
       fail-fast: false

@@ -30,7 +30,7 @@ describe('POST /respond/stream', () => {
     );
 
     expect(response.status).toBe(404);
-    const body = await response.json();
+    const body = (await response.json()) as any;
     expect(body).toHaveProperty('error');
   });
 

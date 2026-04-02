@@ -1,15 +1,49 @@
+# ─── Dependencies and build artifacts ─── #
 node_modules/
 build/
 dist/
 coverage/
+playwright-report/
+test-results/
+
+# ─── OS and logs ─── #
 .DS_Store
 *.log
+
+# ─── Local runtime data ─── #
 uploads/
 *.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.db
+*.db-shm
+*.db-wal
 :memory:*
-bun.lock
 
-# Config — keep only examples
+# ─── Local env and secrets ─── #
+.env
+.env.local
+.env.*.local
+config.toml
+
+# ─── Mango local config/runtime — keep only examples ─── #
+.mango/out/
+.mango/config.toml
 .mango/*
 !.mango/config.toml.example
 !.mango/.env.example
+
+# ─── Agent-local state ─── #
+.codex
+.codex/
+.continue/
+.roo/
+.aider*
+.claude/
+.gemini/
+.agent/
+.agents/
+
+# ─── Local scratch space ─── #
+.local/
+.scratch/

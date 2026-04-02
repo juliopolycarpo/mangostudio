@@ -16,7 +16,7 @@ Read `../../AGENTS.md` first. This file adds frontend-specific guidance only.
 - Eden Treaty setup lives in `src/lib/api-client.ts`.
 - Model-specific utility helpers live in `src/utils/`.
 - Static assets (icons, images) live in `src/assets/`.
-- Styling uses vanilla CSS with CSS custom properties in `src/index.css`. Do not introduce Tailwind, CSS-in-JS, or styled-components.
+- Styling uses Tailwind CSS v4 via `@tailwindcss/vite` plugin, with CSS custom properties in `src/index.css` for theming. Do not introduce CSS-in-JS or styled-components.
 
 ## Frontend Invariants
 

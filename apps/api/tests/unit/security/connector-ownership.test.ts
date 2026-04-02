@@ -38,7 +38,11 @@ afterEach(() => {
 });
 
 /** Inserts a connector owned by a specific user (or shared when userId is null). */
-async function seedConnector(id: string, userId: string | null, source: SecretSource = 'config-file') {
+async function seedConnector(
+  id: string,
+  userId: string | null,
+  source: SecretSource = 'config-file'
+) {
   await upsertSecretMetadata({
     id,
     name: `connector-${id}`,
@@ -64,7 +68,7 @@ describe('connector ownership security', () => {
     );
 
     expect(res.status).toBe(403);
-    const body = await res.json();
+    const body = (await res.json()) as any;
     expect(body.error).toContain('shared connector');
   });
 
@@ -79,7 +83,7 @@ describe('connector ownership security', () => {
     );
 
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = (await res.json()) as any;
     expect(body.success).toBe(true);
   });
 
@@ -98,7 +102,7 @@ describe('connector ownership security', () => {
     );
 
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = (await res.json()) as { success: boolean };
     expect(body.success).toBe(true);
 
     const updated = await getSecretMetadataById('shared-conn-2', USER_B.id);
@@ -107,7 +111,7 @@ describe('connector ownership security', () => {
     expect(updated?.enabledModels).toBe(JSON.stringify(['gemini-pro']));
   });
 
-  it('non-owner cannot delete another user\'s connector', async () => {
+  it("non-owner cannot delete another user's connector", async () => {
     await seedConnector('user-a-conn-own', USER_A.id);
 
     const { app, restore } = createAuthenticatedApiTestApp(USER_B, settingsRoutes);
@@ -132,7 +136,7 @@ describe('connector ownership security', () => {
     );
 
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = (await res.json()) as { success: boolean };
     expect(body.success).toBe(true);
   });
 });

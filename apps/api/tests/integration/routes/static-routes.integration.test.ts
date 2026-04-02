@@ -8,7 +8,6 @@
  * If someone narrows or removes checks inside isSpaRoute(), these tests fail.
  */
 import { describe, test, expect } from 'bun:test';
-import { isStandaloneExecutable } from '../../../src/lib/runtime-paths';
 import { isSpaRoute } from '../../../src/lib/spa-guard';
 
 describe('SPA onError NOT_FOUND guard', () => {

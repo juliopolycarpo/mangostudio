@@ -4,9 +4,7 @@ import { rateLimit } from '../../../src/plugins/rate-limit';
 
 function createTestApp(trustProxy?: boolean) {
   const limiter = rateLimit({ max: 2, windowMs: 60_000, trustProxy });
-  const app = new Elysia()
-    .use(limiter)
-    .get('/test', (ctx: any) => ({ ip: ctx.clientIp }));
+  const app = new Elysia().use(limiter).get('/test', (ctx: any) => ({ ip: ctx.clientIp }));
   return { app, teardown: limiter.teardown };
 }
 
@@ -21,14 +19,14 @@ describe('rate-limit trustProxy', () => {
         headers: { 'x-forwarded-for': '1.2.3.4' },
       })
     );
-    const body1 = await res1.json();
+    const body1 = (await res1.json()) as { ip: string };
 
     const res2 = await app.handle(
       new Request('http://localhost/test', {
         headers: { 'x-forwarded-for': '5.6.7.8' },
       })
     );
-    const body2 = await res2.json();
+    const body2 = (await res2.json()) as { ip: string };
 
     // Both requests should resolve to the same IP (not the forwarded header value)
     expect(body1.ip).not.toBe('1.2.3.4');
@@ -46,14 +44,14 @@ describe('rate-limit trustProxy', () => {
         headers: { 'x-forwarded-for': '10.0.0.1' },
       })
     );
-    const body1 = await res1.json();
+    const body1 = (await res1.json()) as { ip: string };
 
     const res2 = await app.handle(
       new Request('http://localhost/test', {
         headers: { 'x-forwarded-for': '10.0.0.2' },
       })
     );
-    const body2 = await res2.json();
+    const body2 = (await res2.json()) as { ip: string };
 
     // Each request should have the forwarded IP
     expect(body1.ip).toBe('10.0.0.1');

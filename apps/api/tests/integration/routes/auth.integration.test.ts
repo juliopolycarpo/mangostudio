@@ -5,7 +5,6 @@ import { authRoutes } from '../../../src/routes/auth';
 const app = createApiTestApp(authRoutes);
 
 describe('Auth routes', () => {
-
   test('GET /auth/ok — deve retornar ok', async () => {
     const res = await app.handle(new Request('http://localhost/auth/ok'));
     expect(res.status).toBe(200);

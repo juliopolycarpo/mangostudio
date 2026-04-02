@@ -7,7 +7,8 @@
   "main": "src/index.ts",
   "types": "src/index.ts",
   "scripts": {
-    "lint": "eslint src tests --ext .ts --max-warnings 0 && bunx tsc --noEmit",
+    "lint": "eslint src tests --max-warnings 0",
+    "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:unit": "vitest run tests/unit"
   },
@@ -18,5 +19,8 @@
     "./test-utils": "./src/test-utils/index.ts",
     "./i18n": "./src/i18n/index.ts",
     "./utils/model-detection": "./src/utils/model-detection.ts"
+  },
+  "devDependencies": {
+    "typescript": "~5.8.2"
   }
 }
