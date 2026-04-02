@@ -142,6 +142,11 @@ export interface ModelCapabilities {
   image: boolean;
   streaming: boolean;
   reasoning?: boolean;
+  tools?: boolean;
+  statefulContinuation?: boolean;
+  promptCaching?: boolean;
+  parallelToolCalls?: boolean;
+  reasoningWithTools?: boolean;
 }
 
 /** A UI-safe model option discovered from a provider. */

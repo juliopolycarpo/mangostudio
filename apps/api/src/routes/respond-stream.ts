@@ -17,6 +17,12 @@ import { createMessage, loadChatHistory, loadRichChatHistory } from '../services
 import { getAllToolDefinitions, executeTool } from '../services/tools';
 import type { SSEErrorEvent, MessagePart, ReasoningEffort } from '@mangostudio/shared';
 import type { AgentTurnRequest } from '../services/providers/types';
+import {
+  parseContinuationEnvelope,
+  validateContinuationEnvelope,
+  computeSystemPromptHash,
+  computeToolsetHash,
+} from '../services/providers/continuation';
 
 const MAX_TOOL_ITERATIONS = 10;
 const TOOL_TIMEOUT_MS = 30_000;
@@ -94,7 +100,14 @@ export const respondStreamRoutes = (app: Elysia) =>
 
           const aiMsgId = generateId();
           const startTime = Date.now();
-          const provider = await getProviderForModel(model, userId);
+
+          let provider;
+          try {
+            provider = await getProviderForModel(model, userId);
+          } catch (err) {
+            set.status = 400;
+            return { error: err instanceof Error ? err.message : 'No provider found for model' };
+          }
 
           // Capture context before the async boundary inside ReadableStream
           const chatId = body.chatId;
@@ -130,6 +143,29 @@ export const respondStreamRoutes = (app: Elysia) =>
                     if (richHistory[i].role === 'ai' && richHistory[i].providerState) {
                       currentProviderState = richHistory[i].providerState!;
                       break;
+                    }
+                  }
+
+                  // Validate continuation envelope compatibility
+                  const envelope = parseContinuationEnvelope(currentProviderState);
+                  if (envelope) {
+                    const currentSystemPromptHash = computeSystemPromptHash(systemPrompt);
+                    const currentToolsetHash = computeToolsetHash(toolDefs);
+                    const validation = validateContinuationEnvelope(envelope, {
+                      provider: provider.providerType,
+                      modelName: model,
+                      systemPromptHash: currentSystemPromptHash,
+                      toolsetHash: currentToolsetHash,
+                    });
+                    if (!validation.valid) {
+                      console.warn(
+                        `[continuation][invalid] chatId=${chatId} reason="${validation.reason}" provider=${provider.providerType} model=${model}`
+                      );
+                      currentProviderState = null; // Force full replay
+                    } else {
+                      console.log(
+                        `[continuation][valid] chatId=${chatId} provider=${provider.providerType} model=${model} mode=${envelope.mode}`
+                      );
                     }
                   }
 
@@ -220,11 +256,18 @@ export const respondStreamRoutes = (app: Elysia) =>
                           );
                           break;
 
-                        case 'turn_completed':
+                        case 'turn_completed': {
                           currentProviderState = event.providerState ?? null;
                           finalProviderState = currentProviderState;
                           turnCompleted = true;
+                          const resultEnvelope = parseContinuationEnvelope(currentProviderState);
+                          if (resultEnvelope) {
+                            console.log(
+                              `[continuation][updated] chatId=${chatId} provider=${resultEnvelope.provider} mode=${resultEnvelope.mode} cursor=${resultEnvelope.cursor ? 'present' : 'none'}`
+                            );
+                          }
                           break;
+                        }
 
                         case 'turn_error':
                           throw new Error(event.error);
