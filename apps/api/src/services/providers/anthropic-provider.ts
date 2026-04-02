@@ -10,6 +10,10 @@ import { withModelCache } from './model-cache';
 import { registerProvider } from './registry';
 import { buildCachedAnthropicRequest } from './anthropic-cache-builder';
 import { isReasoningModel } from '@mangostudio/shared/utils/model-detection';
+import {
+  computeSystemPromptHash,
+  computeToolsetHash,
+} from './continuation';
 import type {
   AIProvider,
   TextGenerationRequest,
@@ -284,12 +288,20 @@ async function* streamAnthropicAgentTurn(req: AgentTurnRequest): AsyncIterable<A
         : []),
     ];
 
-    const newProviderState: AnthropicLoopState = {
-      provider: 'anthropic',
+    // Emit an envelope-compatible state that also carries the loop messages.
+    // parseContinuationEnvelope reads the envelope fields for route-level validation;
+    // parseAnthropicLoopState reads provider + loopMessages for the in-turn loop.
+    const envelopeWithLoop = {
+      schemaVersion: 1 as const,
+      provider: 'anthropic' as const,
+      mode: 'stateless-loop' as const,
+      modelName: req.modelName,
+      systemPromptHash: computeSystemPromptHash(req.systemPrompt),
+      toolsetHash: computeToolsetHash(req.toolDefinitions ?? []),
       loopMessages: newLoopMessages,
     };
 
-    yield { type: 'turn_completed', providerState: JSON.stringify(newProviderState) };
+    yield { type: 'turn_completed', providerState: JSON.stringify(envelopeWithLoop) };
   } catch (err: unknown) {
     yield {
       type: 'turn_error',

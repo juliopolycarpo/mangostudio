@@ -12,6 +12,10 @@ import { withModelCache } from './model-cache';
 import { registerProvider } from './registry';
 import { getConfig } from '../../lib/config';
 import { isImageModelId, isReasoningModel } from '@mangostudio/shared/utils/model-detection';
+import {
+  computeSystemPromptHash,
+  computeToolsetHash,
+} from './continuation';
 import type {
   AIProvider,
   TextGenerationRequest,
@@ -327,12 +331,18 @@ async function* streamOAICompatAgentTurn(req: AgentTurnRequest): AsyncIterable<A
       assistantMsg,
     ];
 
-    const newProviderState: OAICompatLoopState = {
-      provider: 'openai-compatible',
+    // Emit an envelope-compatible state that also carries the loop messages.
+    const envelopeWithLoop = {
+      schemaVersion: 1 as const,
+      provider: 'openai-compatible' as const,
+      mode: 'stateless-loop' as const,
+      modelName: req.modelName,
+      systemPromptHash: computeSystemPromptHash(req.systemPrompt),
+      toolsetHash: computeToolsetHash(req.toolDefinitions ?? []),
       loopMessages: newLoopMessages,
     };
 
-    yield { type: 'turn_completed', providerState: JSON.stringify(newProviderState) };
+    yield { type: 'turn_completed', providerState: JSON.stringify(envelopeWithLoop) };
   } catch (err: unknown) {
     yield {
       type: 'turn_error',

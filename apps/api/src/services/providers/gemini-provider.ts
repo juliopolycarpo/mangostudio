@@ -17,6 +17,12 @@ import {
 import { isReasoningModel } from '@mangostudio/shared/utils/model-detection';
 import { registerProvider } from './registry';
 import { computeToolsetHash } from '../../utils/hash';
+import {
+  parseContinuationEnvelope,
+  serializeContinuationEnvelope,
+  computeSystemPromptHash,
+  type ContinuationEnvelope,
+} from './continuation';
 import type {
   AIProvider,
   TextGenerationRequest,
@@ -48,15 +54,25 @@ interface GeminiInteractionState {
 }
 
 function parseGeminiState(providerState: string | null | undefined): GeminiInteractionState | null {
+  // Try new envelope format first
+  const envelope = parseContinuationEnvelope(providerState);
+  if (envelope?.provider === 'gemini' && envelope.cursor) {
+    return {
+      provider: 'gemini',
+      mode: 'interactions',
+      interactionId: envelope.cursor,
+      modelName: envelope.modelName,
+      toolsetHash: envelope.toolsetHash,
+    };
+  }
+  // Legacy fallback
   if (!providerState) return null;
   try {
     const parsed = JSON.parse(providerState) as Record<string, unknown>;
     if (parsed.provider === 'gemini' && parsed.mode === 'interactions') {
       return parsed as unknown as GeminiInteractionState;
     }
-  } catch {
-    // Ignore malformed state
-  }
+  } catch { }
   return null;
 }
 
@@ -275,16 +291,18 @@ async function* streamGeminiAgentTurn(req: AgentTurnRequest): AsyncIterable<Agen
       return;
     }
 
-    // Persist interaction state for continuation
-    const newState: GeminiInteractionState = {
+    // Persist interaction state as continuation envelope
+    const envelope: ContinuationEnvelope = {
+      schemaVersion: 1,
       provider: 'gemini',
       mode: 'interactions',
-      interactionId,
       modelName: req.modelName,
+      systemPromptHash: computeSystemPromptHash(req.systemPrompt),
       toolsetHash: currentToolsetHash,
+      cursor: interactionId,
     };
 
-    yield { type: 'turn_completed', providerState: JSON.stringify(newState) };
+    yield { type: 'turn_completed', providerState: serializeContinuationEnvelope(envelope) };
   } catch (err: unknown) {
     yield {
       type: 'turn_error',

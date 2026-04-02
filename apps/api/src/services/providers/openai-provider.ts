@@ -28,6 +28,13 @@ import type {
   ToolDefinition,
 } from './types';
 import type { SecretMetadataRow } from '@mangostudio/shared/types';
+import {
+  parseContinuationEnvelope,
+  serializeContinuationEnvelope,
+  computeSystemPromptHash,
+  computeToolsetHash,
+  type ContinuationEnvelope,
+} from './continuation';
 
 const BASE_URL = 'https://api.openai.com/v1';
 
@@ -420,15 +427,19 @@ function toResponsesTool(def: ToolDefinition): Record<string, unknown> {
 
 /** Parses the OpenAI providerState JSON, returning the responseId or null. */
 function parseResponseId(providerState: string | null | undefined): string | null {
+  // Try new envelope format first
+  const envelope = parseContinuationEnvelope(providerState);
+  if (envelope?.provider === 'openai' && envelope.cursor) {
+    return envelope.cursor;
+  }
+  // Legacy fallback: try old format
   if (!providerState) return null;
   try {
     const parsed = JSON.parse(providerState) as Record<string, unknown>;
     if (parsed.provider === 'openai' && typeof parsed.responseId === 'string') {
       return parsed.responseId;
     }
-  } catch {
-    // Ignore malformed state
-  }
+  } catch { }
   return null;
 }
 
@@ -620,16 +631,17 @@ async function* streamAgentTurnWithResponsesAPI(
     }
   }
 
-  const newProviderState = newResponseId
-    ? JSON.stringify({
-        provider: 'openai',
-        mode: 'responses',
-        responseId: newResponseId,
-        modelName: req.modelName,
-      })
-    : null;
+  const envelope: ContinuationEnvelope = {
+    schemaVersion: 1,
+    provider: 'openai',
+    mode: 'responses',
+    modelName: req.modelName,
+    systemPromptHash: computeSystemPromptHash(req.systemPrompt),
+    toolsetHash: computeToolsetHash(req.toolDefinitions ?? []),
+    cursor: newResponseId ?? undefined,
+  };
 
-  yield { type: 'turn_completed', providerState: newProviderState ?? undefined };
+  yield { type: 'turn_completed', providerState: serializeContinuationEnvelope(envelope) };
 }
 
 /**
