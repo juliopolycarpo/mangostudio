@@ -118,6 +118,7 @@ export const messages = {
 
   common: {
     loading: 'Carregando...',
+    disclaimer: 'A Inteligencia Artificial pode cometer erros, verifique os resultados com cautela',
   },
 
   providers: {
