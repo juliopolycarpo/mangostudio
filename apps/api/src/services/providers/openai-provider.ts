@@ -517,7 +517,7 @@ async function* streamAgentTurnWithResponsesAPI(
       const status = err instanceof OpenAI.APIError ? err.status : 'unknown';
       console.warn(
         `[fallback][degrade] provider=openai reason=cursor_error status=${status}` +
-        ` falling back to full replay`
+          ` falling back to full replay`
       );
       // Note: err instanceof OpenAI.APIError was already checked above via isCursorError
       // Rebuild input from full history

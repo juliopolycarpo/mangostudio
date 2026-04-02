@@ -136,14 +136,16 @@ export const respondStreamRoutes = (app: Elysia) =>
 
               // Emit pending fallback notice as first SSE event
               if (continuationFallback) {
-                controller.enqueue(sseEvent({
-                  type: 'fallback_notice',
-                  ...continuationFallback,
-                }));
+                controller.enqueue(
+                  sseEvent({
+                    type: 'fallback_notice',
+                    ...continuationFallback,
+                  })
+                );
                 console.warn(
                   `[fallback][degrade] chatId=${chatId} from=${continuationFallback.from}` +
-                  ` to=${continuationFallback.to} reason="${continuationFallback.reason}"` +
-                  ` provider=${provider.providerType} model=${model}`
+                    ` to=${continuationFallback.to} reason="${continuationFallback.reason}"` +
+                    ` provider=${provider.providerType} model=${model}`
                 );
               }
 
@@ -198,14 +200,16 @@ export const respondStreamRoutes = (app: Elysia) =>
                         reason: validation.reason ?? 'unknown',
                       };
                       // Emit the fallback notice now (we're inside the stream)
-                      controller.enqueue(sseEvent({
-                        type: 'fallback_notice',
-                        ...continuationFallback,
-                      }));
+                      controller.enqueue(
+                        sseEvent({
+                          type: 'fallback_notice',
+                          ...continuationFallback,
+                        })
+                      );
                       console.warn(
                         `[fallback][degrade] chatId=${chatId} from=${continuationFallback.from}` +
-                        ` to=${continuationFallback.to} reason="${continuationFallback.reason}"` +
-                        ` provider=${provider.providerType} model=${model}`
+                          ` to=${continuationFallback.to} reason="${continuationFallback.reason}"` +
+                          ` provider=${provider.providerType} model=${model}`
                       );
                       currentProviderState = null; // Force full replay
                     } else {
@@ -315,7 +319,9 @@ export const respondStreamRoutes = (app: Elysia) =>
                               .where('id', '=', chatId)
                               .execute()
                               .catch((err) => {
-                                console.warn(`[continuation][persist] Failed to save state on chat row: ${err}`);
+                                console.warn(
+                                  `[continuation][persist] Failed to save state on chat row: ${err}`
+                                );
                               });
                           }
 
@@ -327,31 +333,35 @@ export const respondStreamRoutes = (app: Elysia) =>
                           }
 
                           // Compute context snapshot and emit SSE event
-                          const displayMode: ContinuationDisplayMode =
-                            resultEnvelope?.cursor ? 'stateful' : 'replay';
+                          const displayMode: ContinuationDisplayMode = resultEnvelope?.cursor
+                            ? 'stateful'
+                            : 'replay';
                           const snapshot = computeContextSnapshot({
                             modelName: model,
                             history: richHistory,
                             systemPrompt,
                             toolDefinitions: toolDefs,
-                            providerReportedTokens: resultEnvelope?.context?.providerReportedInputTokens,
+                            providerReportedTokens:
+                              resultEnvelope?.context?.providerReportedInputTokens,
                             mode: displayMode,
                           });
 
                           console.log(
                             `[context][info] chatId=${chatId} provider=${provider.providerType} model=${model}` +
-                            ` inputTokens=${snapshot.estimatedInputTokens} limit=${snapshot.contextLimit}` +
-                            ` ratio=${snapshot.estimatedUsageRatio.toFixed(2)} mode=${displayMode}`
+                              ` inputTokens=${snapshot.estimatedInputTokens} limit=${snapshot.contextLimit}` +
+                              ` ratio=${snapshot.estimatedUsageRatio.toFixed(2)} mode=${displayMode}`
                           );
 
-                          controller.enqueue(sseEvent({
-                            type: 'context_info',
-                            estimatedInputTokens: snapshot.estimatedInputTokens,
-                            contextLimit: snapshot.contextLimit,
-                            estimatedUsageRatio: snapshot.estimatedUsageRatio,
-                            mode: displayMode,
-                            severity: getContextSeverity(snapshot.estimatedUsageRatio),
-                          }));
+                          controller.enqueue(
+                            sseEvent({
+                              type: 'context_info',
+                              estimatedInputTokens: snapshot.estimatedInputTokens,
+                              contextLimit: snapshot.contextLimit,
+                              estimatedUsageRatio: snapshot.estimatedUsageRatio,
+                              mode: displayMode,
+                              severity: getContextSeverity(snapshot.estimatedUsageRatio),
+                            })
+                          );
 
                           break;
                         }

@@ -134,7 +134,10 @@ describe('computeContextSnapshot', () => {
 });
 
 describe('recommendContextAction', () => {
-  const makeSnapshot = (ratio: number, mode: 'stateful' | 'replay' = 'stateful'): ContextSnapshot => ({
+  const makeSnapshot = (
+    ratio: number,
+    mode: 'stateful' | 'replay' = 'stateful'
+  ): ContextSnapshot => ({
     estimatedInputTokens: Math.round(ratio * 1_000_000),
     contextLimit: 1_000_000,
     estimatedUsageRatio: ratio,
@@ -170,7 +173,7 @@ describe('getContextSeverity', () => {
   });
 
   it('returns info between 70% and 84%', () => {
-    expect(getContextSeverity(0.70)).toBe('info');
+    expect(getContextSeverity(0.7)).toBe('info');
     expect(getContextSeverity(0.84)).toBe('info');
   });
 

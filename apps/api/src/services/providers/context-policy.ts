@@ -43,11 +43,7 @@ export function getModelContextLimit(modelName: string): number {
   const lower = modelName.toLowerCase();
 
   // OpenAI GPT-4o, GPT-4.1, GPT-5 → 1M
-  if (
-    lower.startsWith('gpt-4o') ||
-    lower.startsWith('gpt-4.1') ||
-    lower.startsWith('gpt-5')
-  ) {
+  if (lower.startsWith('gpt-4o') || lower.startsWith('gpt-4.1') || lower.startsWith('gpt-5')) {
     return 1_048_576;
   }
 
@@ -153,7 +149,7 @@ export function recommendContextAction(snapshot: ContextSnapshot): ContextAction
 export type ContextSeverity = 'normal' | 'info' | 'warning' | 'danger' | 'critical';
 
 export function getContextSeverity(ratio: number): ContextSeverity {
-  if (ratio < 0.70) return 'normal';
+  if (ratio < 0.7) return 'normal';
   if (ratio < 0.85) return 'info';
   if (ratio < 0.92) return 'warning';
   if (ratio < 0.97) return 'danger';

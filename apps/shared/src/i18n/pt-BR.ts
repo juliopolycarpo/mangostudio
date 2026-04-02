@@ -45,7 +45,8 @@ export const messages = {
       critical: 'Esta conversa não pode mais permanecer stateful no provedor atual.',
     },
     fallback: {
-      toReplay: 'Continuação stateful não está mais disponível. Continuando com replay do transcript.',
+      toReplay:
+        'Continuação stateful não está mais disponível. Continuando com replay do transcript.',
       generic: 'Modo da conversa alterado de {from} para {to}.',
     },
   },
