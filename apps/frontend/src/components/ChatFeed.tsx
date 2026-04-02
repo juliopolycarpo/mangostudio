@@ -1,6 +1,17 @@
 /* global document */
 import type { Message, MessagePart } from '@mangostudio/shared';
-import { Sparkles, Download, Bookmark, ImageOff, Image, Brain, ChevronDown, Wrench, CheckCircle, AlertCircle } from 'lucide-react';
+import {
+  Sparkles,
+  Download,
+  Bookmark,
+  ImageOff,
+  Image,
+  Brain,
+  ChevronDown,
+  Wrench,
+  CheckCircle,
+  AlertCircle,
+} from 'lucide-react';
 import { format } from 'date-fns';
 import { AnimatePresence, motion } from 'motion/react';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
@@ -195,8 +206,7 @@ function ToolCallBlock({ name, args, result, isError, isPending }: ToolCallBlock
           <CheckCircle size={11} />
         )}
         <span className="font-mono tracking-wide">
-          {isPending ? t.tools.calling : isError ? t.tools.error : t.tools.done}
-          {' '}
+          {isPending ? t.tools.calling : isError ? t.tools.error : t.tools.done}{' '}
           <span className="opacity-70">{name}()</span>
         </span>
         <ChevronDown
@@ -435,10 +445,20 @@ export function ChatFeed({ chatId, messages }: { chatId: string | null; messages
                             const combinedText = textParts
                               .map((p) => (p as { type: 'text'; text: string }).text)
                               .join('');
-                            const toolCallParts = parts.filter((p) => p.type === 'tool_call') as Extract<MessagePart, { type: 'tool_call' }>[];
-                            const toolResultParts = parts.filter((p) => p.type === 'tool_result') as Extract<MessagePart, { type: 'tool_result' }>[];
+                            const toolCallParts = parts.filter(
+                              (p) => p.type === 'tool_call'
+                            ) as Extract<MessagePart, { type: 'tool_call' }>[];
+                            const toolResultParts = parts.filter(
+                              (p) => p.type === 'tool_result'
+                            ) as Extract<MessagePart, { type: 'tool_result' }>[];
 
-                            if (isImageTurn || (!msg.text && !combinedText && !thinkingPart && toolCallParts.length === 0)) {
+                            if (
+                              isImageTurn ||
+                              (!msg.text &&
+                                !combinedText &&
+                                !thinkingPart &&
+                                toolCallParts.length === 0)
+                            ) {
                               return (
                                 <>
                                   <span className="text-sm font-medium text-on-surface animate-pulse">
@@ -597,8 +617,12 @@ export function ChatFeed({ chatId, messages }: { chatId: string | null; messages
                             const combinedText = textParts
                               .map((p) => (p as { type: 'text'; text: string }).text)
                               .join('');
-                            const toolCallParts = parts.filter((p) => p.type === 'tool_call') as Extract<MessagePart, { type: 'tool_call' }>[];
-                            const toolResultParts = parts.filter((p) => p.type === 'tool_result') as Extract<MessagePart, { type: 'tool_result' }>[];
+                            const toolCallParts = parts.filter(
+                              (p) => p.type === 'tool_call'
+                            ) as Extract<MessagePart, { type: 'tool_call' }>[];
+                            const toolResultParts = parts.filter(
+                              (p) => p.type === 'tool_result'
+                            ) as Extract<MessagePart, { type: 'tool_result' }>[];
 
                             return (
                               <>

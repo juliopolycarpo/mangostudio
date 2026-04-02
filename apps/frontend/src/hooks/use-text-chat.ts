@@ -95,8 +95,8 @@ export function useTextChat({
             if (chunk.error) {
               updateOptimisticMessage(activeChatId!, optimisticAiMsgId, {
                 isGenerating: false,
-                text: chunk.error,
-                parts: [{ type: 'error', text: chunk.error }],
+                text: accumulatedText || chunk.error,
+                parts: [...accumulatedParts, { type: 'error', text: chunk.error }],
               });
               return;
             }

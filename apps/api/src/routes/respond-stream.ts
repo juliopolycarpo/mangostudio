@@ -416,6 +416,31 @@ export const respondStreamRoutes = (app: Elysia) =>
                 }
                 const message = error instanceof Error ? error.message : 'Stream generation failed';
                 console.error('[respond-stream] Error:', message);
+
+                // Persist partial AI message with accumulated parts so it survives
+                // the frontend query invalidation and the user sees thinking/tool context
+                try {
+                  const generationTime = `${((Date.now() - startTime) / 1000).toFixed(1)}s`;
+                  const errorParts: MessagePart[] = [...allParts, { type: 'error', text: message }];
+                  await createMessage(
+                    {
+                      id: aiMsgId,
+                      chatId,
+                      role: 'ai',
+                      text: fullText || message,
+                      parts: JSON.stringify(errorParts),
+                      timestamp: Date.now(),
+                      isGenerating: false,
+                      generationTime,
+                      modelName: model,
+                      interactionMode: 'chat',
+                    },
+                    db
+                  );
+                } catch {
+                  // Best-effort persistence; don't mask the original error
+                }
+
                 const errorEvent: SSEErrorEvent = { error: message, done: true };
                 controller.enqueue(sseEvent(errorEvent));
               } finally {
