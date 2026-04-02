@@ -108,7 +108,10 @@ mangostudio/
 | `bun run dev`            | Start all dev servers concurrently                  |
 | `bun run build`          | Build the frontend for production                   |
 | `bun run build:binary`   | Generate standalone binaries with embedded frontend |
-| `bun run lint`           | TypeScript type-check + ESLint                      |
+| `bun run lint`           | ESLint across all workspaces                        |
+| `bun run typecheck`      | TypeScript type-check across all workspaces         |
+| `bun run check`          | Lint + typecheck + tests                            |
+| `bun run verify`         | Check + coverage + build                            |
 | `bun run test`           | Run all unit and integration tests                  |
 | `bun run test:coverage`  | Frontend coverage via Vitest/v8                     |
 | `bun run migrate`        | Run SQLite database migrations                      |
@@ -151,7 +154,7 @@ The `Messages` type is inferred directly from the `pt-BR.ts` dictionary (`as con
 
 ## Standalone Build Notes
 
-The `bun run build:binary` command compiles the API into platform-specific binaries under `out/<platform>/`.
+The `bun run build:binary` command compiles the API into platform-specific binaries under `.mango/out/<platform>/`.
 - The database is persisted at `~/.mangostudio/database.sqlite` by default.
 - Frontend assets are served from the `public/` directory next to the executable.
 

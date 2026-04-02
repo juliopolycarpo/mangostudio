@@ -196,6 +196,9 @@ Smoke-test the main product flows locally when applicable: login, chat creation,
 |---|---|
 | `bun run dev` | Frontend + API dev servers concurrently |
 | `bun run lint` | ESLint across all workspaces |
+| `bun run typecheck` | TypeScript type-check across all workspaces |
+| `bun run check` | Lint + typecheck + tests |
+| `bun run verify` | Check + coverage + build |
 | `bun run test` | All unit + integration tests across workspaces |
 | `bun run test:coverage` | Frontend coverage report |
 | `bun run test:browser:smoke` | Playwright auth-flow smoke suite |
