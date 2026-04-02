@@ -507,11 +507,17 @@ async function* streamAgentTurnWithResponsesAPI(
   try {
     stream = await makeRequest(previousResponseId);
   } catch (err: unknown) {
-    // Only 404 means expired cursor; 400 may indicate a different error (e.g. wrong call_id)
-    const isExpiredCursor = err instanceof OpenAI.APIError && err.status === 404;
-    const canFallback = isExpiredCursor && previousResponseId && !req.toolResults;
+    const isCursorError =
+      err instanceof OpenAI.APIError &&
+      (err.status === 404 ||
+        err.status === 409 ||
+        (err.status === 400 && /previous_response_id/i.test(err.message)));
+    const canFallback = isCursorError && previousResponseId && !req.toolResults;
     if (canFallback) {
-      console.warn('[openai] Cursor expired or invalid, falling back to full replay.');
+      console.warn(
+        `[fallback][degrade] provider=openai reason=cursor_error status=${(err as OpenAI.APIError).status}` +
+        ` falling back to full replay`
+      );
       // Rebuild input from full history
       const messages: Array<Record<string, unknown>> = [];
       for (const turn of req.history) {
