@@ -7,7 +7,6 @@ coverage/
 uploads/
 *.sqlite
 :memory:*
-bun.lock
 
 # Config — keep only examples
 .mango/*

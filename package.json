@@ -18,7 +18,6 @@
     "build:binary:dev": "BUILD_TYPE=development bun run scripts/build.ts",
     "lint": "bun run --filter '*' lint",
     "test": "bun run test:unit && bun run test:integration",
-    "test:all": "bun run test",
     "test:unit": "bun run --filter @mangostudio/api test:unit && bun run --filter @mangostudio/shared test:unit && bun run --filter @mangostudio/frontend test:unit",
     "test:integration": "bun run --filter @mangostudio/api test:integration && bun run --filter @mangostudio/frontend test:integration",
     "test:coverage": "bun run --filter @mangostudio/frontend test:coverage",
@@ -26,7 +25,7 @@
     "test:ci": "bun run lint && bun run test && bun run test:coverage",
     "migrate": "bun run --filter @mangostudio/api migrate",
     "clean": "rm -rf apps/*/dist apps/*/coverage .mango/out",
-    "dist-clean": "bun run clean && rm -rf node_modules apps/*/node_modules bun.lock"
+    "dist-clean": "bun run clean && rm -rf node_modules apps/*/node_modules"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.4",
