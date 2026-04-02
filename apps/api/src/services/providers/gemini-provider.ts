@@ -4,7 +4,6 @@
  */
 
 import { GoogleGenAI } from '@google/genai';
-import type { Content, Part } from '@google/genai';
 import {
   clearGeminiModelCatalog,
   generateText as geminiGenerateText,
@@ -17,6 +16,7 @@ import {
 } from '../gemini';
 import { isReasoningModel } from '@mangostudio/shared/utils/model-detection';
 import { registerProvider } from './registry';
+import { computeToolsetHash } from '../../utils/hash';
 import type {
   AIProvider,
   TextGenerationRequest,
@@ -31,22 +31,28 @@ import type {
 } from './types';
 
 // ---------------------------------------------------------------------------
-// Gemini stateless agentic tool loop
+// Gemini stateful agentic turn via Interactions API
 // ---------------------------------------------------------------------------
 
-/** Opaque loop-state stored in providerState during the tool-call loop. */
-interface GeminiLoopState {
+/**
+ * Opaque state persisted across turns for Gemini.
+ * - interactionId: server-side cursor for stateful continuation
+ * - toolsetHash: detects when tools change (requires new interaction chain)
+ */
+interface GeminiInteractionState {
   provider: 'gemini';
-  /** In-memory Gemini content turns accumulated within the current agent turn. */
-  loopContents: Array<{ role: string; parts: unknown[] }>;
+  mode: 'interactions';
+  interactionId: string;
+  modelName: string;
+  toolsetHash: string;
 }
 
-function parseGeminiLoopState(providerState: string | null | undefined): GeminiLoopState | null {
+function parseGeminiState(providerState: string | null | undefined): GeminiInteractionState | null {
   if (!providerState) return null;
   try {
     const parsed = JSON.parse(providerState) as Record<string, unknown>;
-    if (parsed.provider === 'gemini' && Array.isArray(parsed.loopContents)) {
-      return parsed as unknown as GeminiLoopState;
+    if (parsed.provider === 'gemini' && parsed.mode === 'interactions') {
+      return parsed as unknown as GeminiInteractionState;
     }
   } catch {
     // Ignore malformed state
@@ -54,166 +60,235 @@ function parseGeminiLoopState(providerState: string | null | undefined): GeminiL
   return null;
 }
 
-function toolDefsToGemini(defs: ToolDefinition[]): Record<string, unknown> {
-  return {
-    functionDeclarations: defs.map((def) => ({
-      name: def.name,
-      description: def.description,
-      parameters: def.parameters,
-    })),
-  };
+function toolDefsToInteractions(
+  defs: ToolDefinition[]
+): Array<{ type: 'function'; name: string; description: string; parameters: unknown }> {
+  return defs.map((def) => ({
+    type: 'function' as const,
+    name: def.name,
+    description: def.description,
+    parameters: def.parameters,
+  }));
 }
 
 /**
- * Streams a single agentic turn using the Gemini generateContent API.
- * Stateless — history is replayed from DB on each turn.
- * Within a turn, accumulated model responses (function calls) are carried
- * in providerState so subsequent tool-result iterations work correctly.
+ * Streams a single agentic turn using the Gemini Interactions API.
  *
- * Note: Interactions API (previous_interaction_id) is not yet available in
- * @google/genai v1.x — full stateful continuation will be added when it ships.
+ * Stateful — uses `previous_interaction_id` for server-side continuation.
+ * On the first turn of a chat, sends system_instruction + tools + full input.
+ * On subsequent turns, only sends the new delta input; the server retains
+ * the full context window via the interaction chain.
+ *
+ * When tools or model change between turns, the interaction chain is broken
+ * and a new chain starts with full context replay.
  */
 async function* streamGeminiAgentTurn(req: AgentTurnRequest): AsyncIterable<AgentEvent> {
   const apiKey = await getResolvedGeminiApiKey(req.userId, req.modelName);
   const ai = new GoogleGenAI({ apiKey });
 
-  const loopState = parseGeminiLoopState(req.providerState);
-  const tools =
-    (req.toolDefinitions ?? []).length > 0 ? [toolDefsToGemini(req.toolDefinitions!)] : undefined;
+  const prevState = parseGeminiState(req.providerState);
+  const toolDefs = req.toolDefinitions ?? [];
+  const currentToolsetHash = computeToolsetHash(toolDefs);
 
-  // Build full contents:
-  //   1. DB history (text-only for now)
-  //   2. In-memory loop turns from this agent turn (if any)
-  //   3. Current user prompt OR tool results
-  const contents: Content[] = [];
+  // Determine if we can continue the existing interaction chain.
+  // Chain is valid when: same model + same toolset + previous interaction exists.
+  const canContinue =
+    prevState !== null &&
+    prevState.modelName === req.modelName &&
+    prevState.toolsetHash === currentToolsetHash;
 
-  for (const turn of req.history) {
-    contents.push({
-      role: turn.role === 'ai' ? 'model' : 'user',
-      parts: [{ text: turn.text }],
-    });
+  // Build the input for this iteration
+  let input: unknown;
+  if (req.toolResults && req.toolResults.length > 0) {
+    // Feed tool results back to the model
+    input = req.toolResults.map((tr) => ({
+      type: 'function_result' as const,
+      call_id: tr.callId,
+      name: tr.name,
+      result: (() => {
+        try {
+          return JSON.parse(tr.result);
+        } catch {
+          return tr.result;
+        }
+      })(),
+      is_error: tr.isError ?? false,
+    }));
+  } else if (req.prompt) {
+    input = req.prompt;
+  } else {
+    yield { type: 'turn_error', error: 'No input for Gemini interaction' };
+    return;
   }
 
-  // Append accumulated in-loop turns (model function calls + previous tool results)
-  if (loopState?.loopContents) {
-    for (const lc of loopState.loopContents) {
-      contents.push({ role: lc.role as string, parts: lc.parts as Part[] });
+  const interactionParams: Record<string, unknown> = {
+    model: req.modelName,
+    input,
+  };
+
+  if (canContinue) {
+    // Continue the chain — server already has system_instruction, tools, and history
+    interactionParams.previous_interaction_id = prevState.interactionId;
+  } else {
+    // New chain (first turn or model/tool change).
+    // Prepend DB history as Turn array so the new model has full context.
+    if (req.history.length > 0) {
+      const historyTurns = req.history
+        .filter((t) => t.text?.trim())
+        .map((t) => ({
+          role: t.role === 'ai' ? 'model' : 'user',
+          content: t.text,
+        }));
+      // Wrap: history turns + current input as the last user turn
+      const currentContent =
+        typeof input === 'string' ? input : (input as unknown[]).length > 0 ? input : undefined;
+      interactionParams.input = [
+        ...historyTurns,
+        ...(currentContent !== undefined ? [{ role: 'user', content: currentContent }] : []),
+      ];
+    }
+
+    if (req.systemPrompt?.trim()) {
+      interactionParams.system_instruction = req.systemPrompt;
+    }
+    if (toolDefs.length > 0) {
+      interactionParams.tools = toolDefsToInteractions(toolDefs);
     }
   }
 
-  // Add the current turn input
-  if (req.toolResults && req.toolResults.length > 0) {
-    contents.push({
-      role: 'user',
-      parts: req.toolResults.map((tr) => {
-        let parsed: Record<string, unknown>;
-        try {
-          const v = JSON.parse(tr.result);
-          parsed =
-            typeof v === 'object' && v !== null ? (v as Record<string, unknown>) : { value: v };
-        } catch {
-          parsed = { raw: tr.result };
-        }
-        return {
-          functionResponse: {
-            id: tr.callId,
-            name: tr.name,
-            response: parsed,
-          },
-        } as Part;
-      }),
-    });
-  } else if (req.prompt) {
-    contents.push({ role: 'user', parts: [{ text: req.prompt }] });
-  }
-
-  const config: Record<string, unknown> = {};
-  if (req.systemPrompt?.trim()) config.systemInstruction = req.systemPrompt;
-  if (tools) config.tools = tools;
-
+  // Thinking / reasoning config
   if (req.generationConfig?.thinkingEnabled) {
-    const levelMap = { low: 'LOW', medium: 'MEDIUM', high: 'HIGH' } as const;
-    config.thinkingConfig = {
-      includeThoughts: true,
-      thinkingLevel: levelMap[req.generationConfig.reasoningEffort] ?? 'MEDIUM',
+    const levelMap = { low: 'low', medium: 'medium', high: 'high' } as const;
+    interactionParams.generation_config = {
+      thinking_level: levelMap[req.generationConfig.reasoningEffort] ?? 'medium',
+      thinking_summaries: 'auto',
     };
   }
 
   try {
-    const response = await ai.models.generateContent({
-      model: req.modelName,
-      contents,
-      config,
-    });
+    // Use streaming mode so thinking, tool calls, and text appear progressively
+    interactionParams.stream = true;
+    const stream = (await ai.interactions.create(
+      interactionParams as any
+    )) as unknown as AsyncIterable<Record<string, any>>;
 
-    const candidate = response.candidates?.[0];
+    // Track active function calls by content index
+    const activeCalls = new Map<
+      number,
+      { id: string; name: string; args: Record<string, unknown>; started: boolean }
+    >();
+    let interactionId: string | undefined;
 
-    if (!candidate?.content?.parts) {
-      yield { type: 'turn_error', error: 'No response from Gemini' };
-      return;
-    }
+    for await (const event of stream) {
+      const eventType: string = event.event_type ?? '';
 
-    // Yield agent events for the streaming UI and track callIds for tool execution.
-    // Preserve raw parts from the API response for loopContents — Gemini 2.5+
-    // requires thought parts with thoughtSignature to be replayed faithfully.
-    const rawModelParts: unknown[] = candidate.content.parts;
+      if (eventType === 'content.start') {
+        const content = event.content as Record<string, any> | undefined;
+        if (!content) continue;
 
-    for (const part of candidate.content.parts) {
-      const p = part as Record<string, any>;
+        if (content.type === 'function_call') {
+          const callId: string =
+            content.id ?? `call_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+          const name: string = content.name ?? '';
+          activeCalls.set(event.index as number, {
+            id: callId,
+            name,
+            args: {},
+            started: false,
+          });
+          // Defer tool_call_started if name is empty — the delta will provide it
+          if (name) {
+            activeCalls.get(event.index as number)!.started = true;
+            yield { type: 'tool_call_started', callId, name };
+          }
+        }
+        // thought content.start — nothing to emit yet, deltas carry the summary text
+      } else if (eventType === 'content.delta') {
+        const delta = event.delta as Record<string, any> | undefined;
+        if (!delta) continue;
 
-      if (p.thought && p.text) {
-        yield { type: 'reasoning_delta', text: p.text as string };
-      } else if (p.functionCall) {
-        const callId: string =
-          (p.functionCall.id as string | undefined) ??
-          `call_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-        const name: string = (p.functionCall.name as string) ?? '';
-        const argsStr = JSON.stringify(p.functionCall.args ?? {});
-        yield { type: 'tool_call_started', callId, name };
-        yield { type: 'tool_call_completed', callId, name, arguments: argsStr };
-      } else if (p.text) {
-        yield { type: 'assistant_text_delta', text: p.text as string };
+        if (delta.type === 'thought_summary') {
+          // Streaming thought summary text
+          const text =
+            typeof delta.content === 'string'
+              ? delta.content
+              : ((delta.content as Record<string, any>)?.text ?? '');
+          if (text) {
+            yield { type: 'reasoning_delta', text };
+          }
+        } else if (delta.type === 'text') {
+          yield { type: 'assistant_text_delta', text: delta.text ?? '' };
+        } else if (delta.type === 'function_call') {
+          // Incremental arguments for an active tool call
+          const call = activeCalls.get(event.index as number);
+          if (call) {
+            // Capture name from delta if content.start didn't have it
+            if (delta.name && !call.name) call.name = delta.name as string;
+            if (!call.started && call.name) {
+              call.started = true;
+              yield { type: 'tool_call_started', callId: call.id, name: call.name };
+            }
+            const partialArgs = (delta.arguments ?? {}) as Record<string, unknown>;
+            Object.assign(call.args, partialArgs);
+            const argChunk = JSON.stringify(partialArgs);
+            yield { type: 'tool_call_arguments_delta', callId: call.id, delta: argChunk };
+          }
+        } else if (delta.type !== 'thought_signature') {
+          // Log unknown delta types for future diagnostics
+          console.log('[gemini-interactions] unknown delta type:', JSON.stringify(delta));
+        }
+      } else if (eventType === 'content.stop') {
+        // Finalize any active function call at this index
+        const call = activeCalls.get(event.index as number);
+        if (call) {
+          yield {
+            type: 'tool_call_completed',
+            callId: call.id,
+            name: call.name,
+            arguments: JSON.stringify(call.args),
+          };
+          activeCalls.delete(event.index as number);
+        }
+      } else if (eventType === 'interaction.complete') {
+        const interaction = event.interaction as Record<string, any> | undefined;
+        interactionId = interaction?.id;
+
+        // Log cache usage if available
+        const usage = interaction?.usage as Record<string, any> | undefined;
+        if (usage) {
+          const cached = usage.cached_content_token_count ?? usage.cachedContentTokenCount ?? 0;
+          const total = usage.prompt_token_count ?? usage.promptTokenCount ?? 0;
+          if (cached > 0 && total > 0) {
+            console.log(
+              `[prefix-cache][gemini] ${cached}/${total} input tokens from cache (${Math.round((cached / total) * 100)}%)`
+            );
+          }
+        }
+      } else if (eventType === 'interaction.start') {
+        const interaction = event.interaction as Record<string, any> | undefined;
+        if (interaction?.id) interactionId = interaction.id;
       }
     }
 
-    // Build the updated loop state to return in providerState
-    const newLoopContents = [
-      ...(loopState?.loopContents ?? []),
-      ...(req.toolResults && req.toolResults.length > 0
-        ? [
-            {
-              role: 'user',
-              parts: req.toolResults.map((tr) => ({
-                functionResponse: {
-                  id: tr.callId,
-                  name: tr.name,
-                  response: (() => {
-                    try {
-                      return JSON.parse(tr.result) as unknown;
-                    } catch {
-                      return { raw: tr.result };
-                    }
-                  })(),
-                },
-              })),
-            },
-          ]
-        : req.prompt
-          ? [{ role: 'user', parts: [{ text: req.prompt }] }]
-          : []),
-      { role: 'model', parts: rawModelParts },
-    ];
+    if (!interactionId) {
+      yield { type: 'turn_error', error: 'No interaction ID returned from Gemini streaming' };
+      return;
+    }
 
-    const newProviderState: GeminiLoopState = {
+    // Persist interaction state for continuation
+    const newState: GeminiInteractionState = {
       provider: 'gemini',
-      loopContents: newLoopContents,
+      mode: 'interactions',
+      interactionId,
+      modelName: req.modelName,
+      toolsetHash: currentToolsetHash,
     };
 
-    yield { type: 'turn_completed', providerState: JSON.stringify(newProviderState) };
+    yield { type: 'turn_completed', providerState: JSON.stringify(newState) };
   } catch (err: unknown) {
     yield {
       type: 'turn_error',
-      error: err instanceof Error ? err.message : 'Gemini request failed',
+      error: err instanceof Error ? err.message : 'Gemini interaction failed',
     };
   }
 }

@@ -8,6 +8,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { createProviderSecretService } from './secret-service';
 import { withModelCache } from './model-cache';
 import { registerProvider } from './registry';
+import { buildCachedAnthropicRequest } from './anthropic-cache-builder';
 import { isReasoningModel } from '@mangostudio/shared/utils/model-detection';
 import type {
   AIProvider,
@@ -18,7 +19,6 @@ import type {
   ModelInfo,
   AgentTurnRequest,
   AgentEvent,
-  ToolDefinition,
 } from './types';
 
 /** Hardcoded fallback when client.models.list() is unavailable or returns empty. */
@@ -132,14 +132,6 @@ function parseAnthropicLoopState(
   return null;
 }
 
-function toolDefsToAnthropic(defs: ToolDefinition[]): Anthropic.Tool[] {
-  return defs.map((def) => ({
-    name: def.name,
-    description: def.description,
-    input_schema: def.parameters as Anthropic.Tool['input_schema'],
-  }));
-}
-
 /**
  * Streams a single agentic turn for Anthropic.
  * Stateless — DB history is replayed on each turn; in-loop accumulation via providerState.
@@ -179,23 +171,20 @@ async function* streamAnthropicAgentTurn(req: AgentTurnRequest): AsyncIterable<A
     messages.push({ role: 'user', content: req.prompt });
   }
 
-  const tools =
-    (req.toolDefinitions ?? []).length > 0 ? toolDefsToAnthropic(req.toolDefinitions!) : undefined;
-
-  const params: Record<string, unknown> = {
-    model: req.modelName,
-    max_tokens: thinkingEnabled ? 16000 : 8192,
+  // Build request with prompt caching (cache_control: ephemeral on system + last tool)
+  const cachedReq = buildCachedAnthropicRequest({
+    systemPrompt: req.systemPrompt ?? '',
+    toolDefinitions: req.toolDefinitions ?? [],
     messages,
-    ...(req.systemPrompt?.trim() ? { system: req.systemPrompt } : {}),
-    ...(tools ? { tools } : {}),
-  };
+    thinkingConfig: thinkingEnabled
+      ? { type: 'enabled', budget_tokens: budgetMap[effort] ?? 2048 }
+      : undefined,
+  });
 
-  if (thinkingEnabled) {
-    params.thinking = {
-      type: 'enabled',
-      budget_tokens: budgetMap[effort] ?? 2048,
-    };
-  }
+  const params = {
+    model: req.modelName,
+    ...cachedReq,
+  };
 
   try {
     const stream = client.messages.stream(params as unknown as Anthropic.MessageCreateParams, {
@@ -253,6 +242,23 @@ async function* streamAnthropicAgentTurn(req: AgentTurnRequest): AsyncIterable<A
           assistantContent.push(block);
         }
       }
+    }
+
+    // Log prompt cache usage for monitoring
+    try {
+      const finalMsg = await stream.finalMessage();
+      const usage = finalMsg.usage as Record<string, any>;
+      const cached = usage.cache_read_input_tokens ?? 0;
+      const cacheCreation = usage.cache_creation_input_tokens ?? 0;
+      const total = usage.input_tokens ?? 0;
+      if (cached > 0 || cacheCreation > 0) {
+        console.log(
+          `[prefix-cache][anthropic] read=${cached} creation=${cacheCreation} total=${total} tokens` +
+            (total > 0 ? ` (${Math.round((cached / total) * 100)}% cache hit)` : '')
+        );
+      }
+    } catch {
+      // Non-critical — don't block the response for cache logging
     }
 
     // Build updated loop messages
