@@ -130,7 +130,24 @@ async function* streamGeminiAgentTurn(req: AgentTurnRequest): AsyncIterable<Agen
     // Continue the chain — server already has system_instruction, tools, and history
     interactionParams.previous_interaction_id = prevState.interactionId;
   } else {
-    // New chain: send system_instruction and tools
+    // New chain (first turn or model/tool change).
+    // Prepend DB history as Turn array so the new model has full context.
+    if (req.history.length > 0) {
+      const historyTurns = req.history
+        .filter((t) => t.text?.trim())
+        .map((t) => ({
+          role: t.role === 'ai' ? 'model' : 'user',
+          content: t.text,
+        }));
+      // Wrap: history turns + current input as the last user turn
+      const currentContent =
+        typeof input === 'string' ? input : (input as unknown[]).length > 0 ? input : undefined;
+      interactionParams.input = [
+        ...historyTurns,
+        ...(currentContent !== undefined ? [{ role: 'user', content: currentContent }] : []),
+      ];
+    }
+
     if (req.systemPrompt?.trim()) {
       interactionParams.system_instruction = req.systemPrompt;
     }
