@@ -74,6 +74,7 @@ export async function getProviderForModel(modelName: string, userId: string): Pr
     }
   }
 
-  // Default to gemini when model is not assigned to any connector
-  return getProvider('gemini');
+  throw new Error(
+    `[registry] No connector found for model "${modelName}". Configure a connector that includes this model.`
+  );
 }

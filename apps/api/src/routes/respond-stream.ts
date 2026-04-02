@@ -94,7 +94,14 @@ export const respondStreamRoutes = (app: Elysia) =>
 
           const aiMsgId = generateId();
           const startTime = Date.now();
-          const provider = await getProviderForModel(model, userId);
+
+          let provider;
+          try {
+            provider = await getProviderForModel(model, userId);
+          } catch (err) {
+            set.status = 400;
+            return { error: err instanceof Error ? err.message : 'No provider found for model' };
+          }
 
           // Capture context before the async boundary inside ReadableStream
           const chatId = body.chatId;
