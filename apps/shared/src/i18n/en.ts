@@ -35,6 +35,21 @@ export const messages: Messages = {
     sectionLabel: 'Chats',
     stopGenerating: 'Stop',
     streaming: 'Generating...',
+    context: {
+      label: 'Context',
+      tokens: '~{used} / {limit} tokens',
+      modeStateful: 'Stateful',
+      modeReplay: 'Replay',
+      modeCompacted: 'Compacted',
+      modeDegraded: 'Degraded',
+      warning: 'This conversation is approaching the model context limit.',
+      danger: 'MangoStudio may need to compact or leave stateful mode.',
+      critical: 'This conversation can no longer remain stateful on the current provider.',
+    },
+    fallback: {
+      toReplay: 'Stateful continuation is no longer available. Continuing with transcript replay.',
+      generic: 'Conversation mode changed from {from} to {to}.',
+    },
   },
 
   gallery: {

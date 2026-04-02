@@ -1,9 +1,11 @@
 import { Loader2, MessageSquare } from 'lucide-react';
 import { ChatFeed } from '../../components/ChatFeed';
 import { InputBar } from '../../components/InputBar';
+import { ContextIndicator, ContextWarning } from '../../components/ContextIndicator';
 import { useMessagesQuery } from '../../hooks/use-messages-query';
 import { useI18n } from '../../hooks/use-i18n';
 import type { InteractionMode, ReasoningEffort } from '@mangostudio/shared';
+import type { ContextInfo, FallbackNotice } from '../../hooks/use-text-chat';
 
 interface ChatPageProps {
   chatId: string | null;
@@ -19,6 +21,9 @@ interface ChatPageProps {
   onThinkingToggle: (enabled: boolean) => void;
   onReasoningEffortChange: (effort: ReasoningEffort) => void;
   reasoningVisible: boolean;
+  // Context awareness
+  contextInfo?: ContextInfo | null;
+  fallbackNotice?: FallbackNotice | null;
 }
 
 export function ChatPage({
@@ -34,6 +39,8 @@ export function ChatPage({
   onThinkingToggle,
   onReasoningEffortChange,
   reasoningVisible,
+  contextInfo,
+  fallbackNotice,
 }: ChatPageProps) {
   const { data, status } = useMessagesQuery(chatId);
   const { t } = useI18n();
@@ -54,19 +61,32 @@ export function ChatPage({
       ) : (
         <ChatFeed chatId={chatId} messages={messages} />
       )}
-      <InputBar
-        composerMode={composerMode}
-        onModeChange={onModeChange}
-        onSubmit={onSubmit}
-        disabled={disabled}
-        isGenerating={isGenerating}
-        onStop={onStop}
-        thinkingEnabled={thinkingEnabled}
-        reasoningEffort={reasoningEffort}
-        onThinkingToggle={onThinkingToggle}
-        onReasoningEffortChange={onReasoningEffortChange}
-        reasoningVisible={reasoningVisible}
-      />
+      {fallbackNotice && (
+        <div className="fallback-notice">
+          {fallbackNotice.to === 'replay'
+            ? t.chat.fallback.toReplay
+            : t.chat.fallback.generic
+                .replace('{from}', fallbackNotice.from)
+                .replace('{to}', fallbackNotice.to)}
+        </div>
+      )}
+      <ContextWarning contextInfo={contextInfo ?? null} />
+      <div className="input-area">
+        <ContextIndicator contextInfo={contextInfo ?? null} />
+        <InputBar
+          composerMode={composerMode}
+          onModeChange={onModeChange}
+          onSubmit={onSubmit}
+          disabled={disabled}
+          isGenerating={isGenerating}
+          onStop={onStop}
+          thinkingEnabled={thinkingEnabled}
+          reasoningEffort={reasoningEffort}
+          onThinkingToggle={onThinkingToggle}
+          onReasoningEffortChange={onReasoningEffortChange}
+          reasoningVisible={reasoningVisible}
+        />
+      </div>
     </div>
   );
 }

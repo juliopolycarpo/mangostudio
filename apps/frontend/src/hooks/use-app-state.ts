@@ -126,6 +126,8 @@ export function useAppState() {
     activeModels,
     activeModel,
     isModelSelectorDisabled,
+    contextInfo: textChat.contextInfo,
+    fallbackNotice: textChat.fallbackNotice,
 
     setComposerMode,
     handleNewChat,

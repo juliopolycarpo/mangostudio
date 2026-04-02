@@ -28,6 +28,8 @@ function ChatRoute() {
       onThinkingToggle={app.settings.setThinkingEnabled}
       onReasoningEffortChange={app.settings.setReasoningEffort}
       reasoningVisible={reasoningVisible}
+      contextInfo={app.contextInfo}
+      fallbackNotice={app.fallbackNotice}
     />
   );
 }
