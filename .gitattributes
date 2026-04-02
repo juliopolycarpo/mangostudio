@@ -1,0 +1,80 @@
+# .gitattributes — MangoStudio monorepo
+# Normalizes line endings: LF everywhere (consistent with endOfLine=lf in .prettierrc).
+# Always use LF on commit; checkout as-is (no CRLF on Windows).
+
+# ─── Global default: normalize to LF ─────────────────────────────────────────
+*                          text=auto eol=lf
+
+# ─── Source code ──────────────────────────────────────────────────────────────
+*.ts                       text eol=lf
+*.tsx                      text eol=lf
+*.js                       text eol=lf
+*.jsx                      text eol=lf
+*.mjs                      text eol=lf
+*.cjs                      text eol=lf
+
+# ─── Styles ───────────────────────────────────────────────────────────────────
+*.css                      text eol=lf
+
+# ─── Config / Data ────────────────────────────────────────────────────────────
+*.json                     text eol=lf
+*.jsonc                    text eol=lf
+*.toml                     text eol=lf
+*.yml                      text eol=lf
+*.yaml                     text eol=lf
+*.env                      text eol=lf
+*.env.*                    text eol=lf
+
+# ─── Docs and text ────────────────────────────────────────────────────────────
+*.md                       text eol=lf
+*.mdx                      text eol=lf
+*.txt                      text eol=lf
+*.sh                       text eol=lf
+
+# ─── HTML ─────────────────────────────────────────────────────────────────────
+*.html                     text eol=lf
+
+# ─── Bun lockfile ─────────────────────────────────────────────────────────────
+# Treat as binary to avoid spurious merge conflicts and line-ending churn.
+bun.lock                   binary
+
+# ─── SQLite databases (never committed, but guard anyway) ─────────────────────
+*.sqlite                   binary
+*.sqlite3                  binary
+*.db                       binary
+
+# ─── Image / video assets ─────────────────────────────────────────────────────
+*.png                      binary
+*.jpg                      binary
+*.jpeg                     binary
+*.gif                      binary
+*.webp                     binary
+*.avif                     binary
+*.ico                       binary
+*.svg                      text eol=lf
+*.mp4                      binary
+*.webm                     binary
+
+# ─── Font files ───────────────────────────────────────────────────────────────
+*.woff                     binary
+*.woff2                    binary
+*.ttf                      binary
+*.otf                      binary
+*.eot                      binary
+
+# ─── Generated files — excluded from language stats and diffs ─────────────────
+# TanStack Router auto-generated route tree
+apps/frontend/src/routeTree.gen.ts linguist-generated=true
+
+# Bun lockfile — exclude from language stats
+bun.lock                   linguist-generated=true
+
+# Build output (should not be committed, but guard)
+apps/*/dist/**             linguist-generated=true
+
+# ─── Vendor / third-party — not our code ─────────────────────────────────────
+node_modules/**            linguist-vendored=true
+
+# ─── Docs folder — counted as documentation ──────────────────────────────────
+docs/**                    linguist-documentation=true
+*.md                       linguist-documentation=true
