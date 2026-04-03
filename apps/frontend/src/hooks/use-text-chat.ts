@@ -1,11 +1,18 @@
 /* global console */
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import type { Message, MessagePart } from '@mangostudio/shared';
+import type { Message, MessagePart, SSEContextEvent, SSEFallbackEvent } from '@mangostudio/shared';
 import { messageKeys } from './use-messages-query';
 import { respondTextStream } from '../services/generation-service';
 import type { useOptimisticMessages } from './use-optimistic-messages';
 import type { useChats } from './use-chats';
+
+export type ContextInfo = Pick<
+  SSEContextEvent,
+  'estimatedInputTokens' | 'contextLimit' | 'estimatedUsageRatio' | 'mode' | 'severity'
+>;
+
+export type FallbackNotice = Pick<SSEFallbackEvent, 'from' | 'to' | 'reason'>;
 
 interface UseTextChatOptions {
   chats: ReturnType<typeof useChats>;
@@ -14,6 +21,7 @@ interface UseTextChatOptions {
   optimistic: ReturnType<typeof useOptimisticMessages>;
   thinkingEnabled: boolean;
   reasoningEffort: string;
+  currentChatId: string | null;
 }
 
 /** Handles text chat streaming — send prompt, manage SSE stream, optimistic UI. */
@@ -24,10 +32,27 @@ export function useTextChat({
   optimistic,
   thinkingEnabled,
   reasoningEffort,
+  currentChatId,
 }: UseTextChatOptions) {
   const queryClient = useQueryClient();
   const [isGenerating, setIsGenerating] = useState(false);
+  const [contextInfo, setContextInfo] = useState<ContextInfo | null>(null);
+  const [fallbackNotice, setFallbackNotice] = useState<FallbackNotice | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+
+  // Per-chat context info cache — survives chat switches
+  const contextCacheRef = useRef<Map<string, ContextInfo>>(new Map());
+
+  // Restore cached context when the active chat changes (or clear if none)
+  useEffect(() => {
+    if (currentChatId) {
+      const cached = contextCacheRef.current.get(currentChatId);
+      setContextInfo(cached ?? null);
+    } else {
+      setContextInfo(null);
+    }
+    setFallbackNotice(null);
+  }, [currentChatId]);
 
   const { appendOptimisticMessages, updateOptimisticMessage } = optimistic;
 
@@ -160,6 +185,34 @@ export function useTextChat({
               updateOptimisticMessage(activeChatId!, optimisticAiMsgId, {
                 parts: [...accumulatedParts],
               });
+            } else if (chunkType === 'context_info') {
+              if (
+                chunk.estimatedInputTokens != null &&
+                chunk.contextLimit != null &&
+                chunk.estimatedUsageRatio != null &&
+                chunk.mode != null &&
+                chunk.severity != null
+              ) {
+                const info: ContextInfo = {
+                  estimatedInputTokens: chunk.estimatedInputTokens,
+                  contextLimit: chunk.contextLimit,
+                  estimatedUsageRatio: chunk.estimatedUsageRatio,
+                  mode: chunk.mode,
+                  severity: chunk.severity,
+                };
+                setContextInfo(info);
+                if (activeChatId) {
+                  contextCacheRef.current.set(activeChatId, info);
+                }
+              }
+            } else if (chunkType === 'fallback_notice') {
+              if (chunk.from != null && chunk.to != null && chunk.reason != null) {
+                setFallbackNotice({
+                  from: chunk.from,
+                  to: chunk.to,
+                  reason: chunk.reason,
+                });
+              }
             } else if (chunk.done) {
               updateOptimisticMessage(activeChatId!, optimisticAiMsgId, {
                 isGenerating: false,
@@ -203,5 +256,13 @@ export function useTextChat({
     ]
   );
 
-  return { isGenerating, handleRespond, handleStop };
+  return {
+    isGenerating,
+    handleRespond,
+    handleStop,
+    contextInfo,
+    fallbackNotice,
+    /** Per-chat context cache — readable by sidebar for progress indicators. */
+    contextCache: contextCacheRef.current,
+  };
 }

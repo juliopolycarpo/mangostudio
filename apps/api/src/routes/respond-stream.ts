@@ -23,6 +23,11 @@ import {
   computeSystemPromptHash,
   computeToolsetHash,
 } from '../services/providers/continuation';
+import {
+  computeContextSnapshot,
+  getContextSeverity,
+  type ContinuationDisplayMode,
+} from '../services/providers/context-policy';
 
 const MAX_TOOL_ITERATIONS = 10;
 const TOOL_TIMEOUT_MS = 30_000;
@@ -120,12 +125,29 @@ export const respondStreamRoutes = (app: Elysia) =>
           const thinkingEnabled = body.thinkingEnabled ?? body.thinkingVisibility !== 'off';
           const reasoningEffort = (body.reasoningEffort ?? 'medium') as ReasoningEffort;
 
+          let continuationFallback: { from: string; to: string; reason: string } | null = null;
+
           const stream = new ReadableStream({
             async start(controller) {
               let fullText = '';
               let allParts: MessagePart[] = [];
               let aborted = false;
               let finalProviderState: string | null = null;
+
+              // Emit pending fallback notice as first SSE event
+              if (continuationFallback) {
+                controller.enqueue(
+                  sseEvent({
+                    type: 'fallback_notice',
+                    ...continuationFallback,
+                  })
+                );
+                console.warn(
+                  `[fallback][degrade] chatId=${chatId} from=${continuationFallback.from}` +
+                    ` to=${continuationFallback.to} reason="${continuationFallback.reason}"` +
+                    ` provider=${provider.providerType} model=${model}`
+                );
+              }
 
               try {
                 if (provider.generateAgentTurnStream) {
@@ -145,6 +167,17 @@ export const respondStreamRoutes = (app: Elysia) =>
                       break;
                     }
                   }
+                  // Fallback: check chat row (covers crash-recovery scenarios)
+                  if (!currentProviderState) {
+                    const chatRow = await db
+                      .selectFrom('chats')
+                      .select('lastProviderState')
+                      .where('id', '=', chatId)
+                      .executeTakeFirst();
+                    if (chatRow?.lastProviderState) {
+                      currentProviderState = chatRow.lastProviderState;
+                    }
+                  }
 
                   // Validate continuation envelope compatibility
                   const envelope = parseContinuationEnvelope(currentProviderState);
@@ -160,6 +193,23 @@ export const respondStreamRoutes = (app: Elysia) =>
                     if (!validation.valid) {
                       console.warn(
                         `[continuation][invalid] chatId=${chatId} reason="${validation.reason}" provider=${provider.providerType} model=${model}`
+                      );
+                      continuationFallback = {
+                        from: envelope.mode,
+                        to: 'replay',
+                        reason: validation.reason ?? 'unknown',
+                      };
+                      // Emit the fallback notice now (we're inside the stream)
+                      controller.enqueue(
+                        sseEvent({
+                          type: 'fallback_notice',
+                          ...continuationFallback,
+                        })
+                      );
+                      console.warn(
+                        `[fallback][degrade] chatId=${chatId} from=${continuationFallback.from}` +
+                          ` to=${continuationFallback.to} reason="${continuationFallback.reason}"` +
+                          ` provider=${provider.providerType} model=${model}`
                       );
                       currentProviderState = null; // Force full replay
                     } else {
@@ -260,12 +310,60 @@ export const respondStreamRoutes = (app: Elysia) =>
                           currentProviderState = event.providerState ?? null;
                           finalProviderState = currentProviderState;
                           turnCompleted = true;
+
+                          // Persist state eagerly on the chat row (survives message save failures)
+                          if (finalProviderState) {
+                            await db
+                              .updateTable('chats')
+                              .set({ lastProviderState: finalProviderState })
+                              .where('id', '=', chatId)
+                              .execute()
+                              .catch((err) => {
+                                console.warn(
+                                  `[continuation][persist] Failed to save state on chat row: ${err}`
+                                );
+                              });
+                          }
+
                           const resultEnvelope = parseContinuationEnvelope(currentProviderState);
                           if (resultEnvelope) {
                             console.log(
                               `[continuation][updated] chatId=${chatId} provider=${resultEnvelope.provider} mode=${resultEnvelope.mode} cursor=${resultEnvelope.cursor ? 'present' : 'none'}`
                             );
                           }
+
+                          // Compute context snapshot and emit SSE event
+                          const displayMode: ContinuationDisplayMode = resultEnvelope?.cursor
+                            ? 'stateful'
+                            : 'replay';
+                          const snapshot = computeContextSnapshot({
+                            modelName: model,
+                            history: richHistory,
+                            systemPrompt,
+                            toolDefinitions: toolDefs,
+                            providerReportedTokens:
+                              resultEnvelope?.context?.providerReportedInputTokens,
+                            mode: displayMode,
+                            contextLimitOverride: resultEnvelope?.context?.contextLimit,
+                          });
+
+                          console.log(
+                            `[context][info] chatId=${chatId} provider=${provider.providerType} model=${model}` +
+                              ` inputTokens=${snapshot.estimatedInputTokens} limit=${snapshot.contextLimit}` +
+                              ` ratio=${snapshot.estimatedUsageRatio.toFixed(2)} mode=${displayMode}`
+                          );
+
+                          controller.enqueue(
+                            sseEvent({
+                              type: 'context_info',
+                              estimatedInputTokens: snapshot.estimatedInputTokens,
+                              contextLimit: snapshot.contextLimit,
+                              estimatedUsageRatio: snapshot.estimatedUsageRatio,
+                              mode: displayMode,
+                              severity: getContextSeverity(snapshot.estimatedUsageRatio),
+                            })
+                          );
+
                           break;
                         }
 

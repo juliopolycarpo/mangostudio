@@ -33,6 +33,22 @@ export const messages = {
     sectionLabel: 'Chats',
     stopGenerating: 'Parar',
     streaming: 'Gerando...',
+    context: {
+      label: 'Contexto',
+      tokens: '~{used} / {limit} tokens',
+      modeStateful: 'Stateful',
+      modeReplay: 'Replay',
+      modeCompacted: 'Compactado',
+      modeDegraded: 'Degradado',
+      warning: 'Esta conversa está se aproximando do limite de contexto do modelo.',
+      danger: 'O MangoStudio pode precisar compactar ou sair do modo stateful.',
+      critical: 'Esta conversa não pode mais permanecer stateful no provedor atual.',
+    },
+    fallback: {
+      toReplay:
+        'Continuação stateful não está mais disponível. Continuando com replay do transcript.',
+      generic: 'Modo da conversa alterado de {from} para {to}.',
+    },
   },
 
   gallery: {

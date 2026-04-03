@@ -11,6 +11,7 @@ import { registerProvider } from './registry';
 import { buildCachedAnthropicRequest } from './anthropic-cache-builder';
 import { isReasoningModel } from '@mangostudio/shared/utils/model-detection';
 import { computeSystemPromptHash, computeToolsetHash } from './continuation';
+import { getModelContextLimit } from './context-policy';
 import type {
   AIProvider,
   TextGenerationRequest,
@@ -95,6 +96,7 @@ const listModelsWithCache = withModelCache(
           modelId: model.id,
           displayName: model.display_name || model.id,
           provider: 'anthropic',
+          inputTokenLimit: getModelContextLimit(model.id),
           capabilities: {
             text: true,
             image: false,
@@ -270,13 +272,15 @@ async function* streamAnthropicAgentTurn(req: AgentTurnRequest): AsyncIterable<A
       }
     }
 
-    // Log prompt cache usage for monitoring
+    // Log prompt cache usage for monitoring and capture input token count
+    let providerReportedInputTokens: number | undefined;
     try {
       const finalMsg = await stream.finalMessage();
       const usage = finalMsg.usage as Record<string, any>;
       const cached = usage.cache_read_input_tokens ?? 0;
       const cacheCreation = usage.cache_creation_input_tokens ?? 0;
       const total = usage.input_tokens ?? 0;
+      if (total > 0) providerReportedInputTokens = total;
       if (cached > 0 || cacheCreation > 0) {
         console.log(
           `[prefix-cache][anthropic] read=${cached} creation=${cacheCreation} total=${total} tokens` +
@@ -321,6 +325,11 @@ async function* streamAnthropicAgentTurn(req: AgentTurnRequest): AsyncIterable<A
       systemPromptHash: computeSystemPromptHash(req.systemPrompt),
       toolsetHash: computeToolsetHash(req.toolDefinitions ?? []),
       loopMessages: newLoopMessages,
+      context: {
+        providerReportedInputTokens,
+        contextLimit: getModelContextLimit(req.modelName),
+        lastUpdatedAt: Date.now(),
+      },
     };
 
     yield { type: 'turn_completed', providerState: JSON.stringify(envelopeWithLoop) };

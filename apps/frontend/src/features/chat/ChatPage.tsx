@@ -4,6 +4,7 @@ import { InputBar } from '../../components/InputBar';
 import { useMessagesQuery } from '../../hooks/use-messages-query';
 import { useI18n } from '../../hooks/use-i18n';
 import type { InteractionMode, ReasoningEffort } from '@mangostudio/shared';
+import type { ContextInfo, FallbackNotice } from '../../hooks/use-text-chat';
 
 interface ChatPageProps {
   chatId: string | null;
@@ -19,6 +20,9 @@ interface ChatPageProps {
   onThinkingToggle: (enabled: boolean) => void;
   onReasoningEffortChange: (effort: ReasoningEffort) => void;
   reasoningVisible: boolean;
+  // Context awareness
+  contextInfo?: ContextInfo | null;
+  fallbackNotice?: FallbackNotice | null;
 }
 
 export function ChatPage({
@@ -34,6 +38,8 @@ export function ChatPage({
   onThinkingToggle,
   onReasoningEffortChange,
   reasoningVisible,
+  contextInfo,
+  fallbackNotice,
 }: ChatPageProps) {
   const { data, status } = useMessagesQuery(chatId);
   const { t } = useI18n();
@@ -54,6 +60,15 @@ export function ChatPage({
       ) : (
         <ChatFeed chatId={chatId} messages={messages} />
       )}
+      {fallbackNotice && (
+        <div className="px-6 py-2 text-xs text-on-surface-variant bg-surface-container-low border-t border-outline-variant/10">
+          {fallbackNotice.to === 'replay'
+            ? t.chat.fallback.toReplay
+            : t.chat.fallback.generic
+                .replace('{from}', fallbackNotice.from)
+                .replace('{to}', fallbackNotice.to)}
+        </div>
+      )}
       <InputBar
         composerMode={composerMode}
         onModeChange={onModeChange}
@@ -66,6 +81,7 @@ export function ChatPage({
         onThinkingToggle={onThinkingToggle}
         onReasoningEffortChange={onReasoningEffortChange}
         reasoningVisible={reasoningVisible}
+        contextInfo={contextInfo}
       />
     </div>
   );

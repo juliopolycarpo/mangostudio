@@ -159,6 +159,8 @@ export interface ModelOption {
   supportedActions: string[];
   provider?: ProviderType;
   capabilities?: ModelCapabilities;
+  /** Maximum input tokens accepted by the model (from provider API). */
+  inputTokenLimit?: number;
 }
 
 /** @deprecated Use ModelOption instead. */
@@ -206,6 +208,24 @@ export interface ApiSuccessResponse {
 /** Generic API error response. */
 export interface ApiErrorResponse {
   error: string;
+}
+
+/** SSE event: context window usage info, emitted after each turn. */
+export interface SSEContextEvent {
+  type: 'context_info';
+  estimatedInputTokens: number;
+  contextLimit: number;
+  estimatedUsageRatio: number;
+  mode: 'stateful' | 'replay' | 'compacted' | 'degraded';
+  severity: 'normal' | 'info' | 'warning' | 'danger' | 'critical';
+}
+
+/** SSE event: fallback/degradation notice, emitted when continuation mode changes. */
+export interface SSEFallbackEvent {
+  type: 'fallback_notice';
+  from: string;
+  to: string;
+  reason: string;
 }
 
 /** Body for POST /api/auth/sign-up/email */

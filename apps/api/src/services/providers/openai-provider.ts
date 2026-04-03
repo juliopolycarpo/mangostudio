@@ -35,6 +35,7 @@ import {
   computeToolsetHash,
   type ContinuationEnvelope,
 } from './continuation';
+import { getModelContextLimit } from './context-policy';
 
 const BASE_URL = 'https://api.openai.com/v1';
 
@@ -219,6 +220,7 @@ const listModelsWithCache = withModelCache(
           modelId: model.id,
           displayName: model.id,
           provider: 'openai',
+          inputTokenLimit: getModelContextLimit(model.id),
           capabilities: {
             text: !isImageModelId(model.id),
             image: isImageModelId(model.id),
@@ -506,11 +508,19 @@ async function* streamAgentTurnWithResponsesAPI(
   try {
     stream = await makeRequest(previousResponseId);
   } catch (err: unknown) {
-    // Only 404 means expired cursor; 400 may indicate a different error (e.g. wrong call_id)
-    const isExpiredCursor = err instanceof OpenAI.APIError && err.status === 404;
-    const canFallback = isExpiredCursor && previousResponseId && !req.toolResults;
+    const isCursorError =
+      err instanceof OpenAI.APIError &&
+      (err.status === 404 ||
+        err.status === 409 ||
+        (err.status === 400 && /previous_response_id/i.test(err.message)));
+    const canFallback = isCursorError && previousResponseId && !req.toolResults;
     if (canFallback) {
-      console.warn('[openai] Cursor expired or invalid, falling back to full replay.');
+      const status = err instanceof OpenAI.APIError ? err.status : 'unknown';
+      console.warn(
+        `[fallback][degrade] provider=openai reason=cursor_error status=${status}` +
+          ` falling back to full replay`
+      );
+      // Note: err instanceof OpenAI.APIError was already checked above via isCursorError
       // Rebuild input from full history
       const messages: Array<Record<string, unknown>> = [];
       for (const turn of req.history) {
@@ -529,6 +539,7 @@ async function* streamAgentTurnWithResponsesAPI(
   let summaryEventsWereSeen = false;
   let thinkingWasEmitted = false;
   let newResponseId: string | null = null;
+  let usageInputTokens: number | undefined;
 
   // Map output item IDs (fc_xxx) → function call IDs (call_xxx) for consistent callId
   const itemIdToCallId = new Map<string, { callId: string; name: string }>();
@@ -627,6 +638,10 @@ async function* streamAgentTurnWithResponsesAPI(
 
       case 'response.completed': {
         newResponseId = ev.response?.id ?? null;
+        const usage = ev.response?.usage as Record<string, any> | undefined;
+        if (usage && typeof usage.input_tokens === 'number') {
+          usageInputTokens = usage.input_tokens;
+        }
         if (!thinkingWasEmitted && ev.response) {
           const reasoning = extractReasoningFromCompleted(ev.response);
           if (reasoning) {
@@ -646,6 +661,11 @@ async function* streamAgentTurnWithResponsesAPI(
     systemPromptHash: computeSystemPromptHash(req.systemPrompt),
     toolsetHash: computeToolsetHash(req.toolDefinitions ?? []),
     cursor: newResponseId ?? undefined,
+    context: {
+      providerReportedInputTokens: usageInputTokens,
+      contextLimit: getModelContextLimit(req.modelName),
+      lastUpdatedAt: Date.now(),
+    },
   };
 
   yield { type: 'turn_completed', providerState: serializeContinuationEnvelope(envelope) };

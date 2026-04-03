@@ -1,4 +1,5 @@
 import { useState, useCallback, useMemo } from 'react';
+import type { ProviderType } from '@mangostudio/shared';
 import { useNavigate } from '@tanstack/react-router';
 import type { InteractionMode } from '@mangostudio/shared';
 import { useChats } from './use-chats';
@@ -48,6 +49,7 @@ export function useAppState() {
     optimistic,
     thinkingEnabled: settings.thinkingEnabled,
     reasoningEffort: settings.reasoningEffort,
+    currentChatId: chats.currentChatId,
   });
 
   const imageGen = useImageGeneration({
@@ -58,6 +60,14 @@ export function useAppState() {
   });
 
   const isGenerating = textChat.isGenerating || imageGen.isGenerating;
+
+  // Derive the provider used in this chat from its textModel — locks model selector
+  const lockedProvider = useMemo((): ProviderType | null => {
+    const currentChat = chats.chats.find((c) => c.id === chats.currentChatId);
+    if (!currentChat?.textModel) return null;
+    const modelOption = catalog.catalog.textModels.find((m) => m.modelId === currentChat.textModel);
+    return modelOption?.provider ?? null;
+  }, [chats.chats, chats.currentChatId, catalog.catalog.textModels]);
 
   const handleNewChat = useCallback(async () => {
     await chats.createChat();
@@ -126,6 +136,10 @@ export function useAppState() {
     activeModels,
     activeModel,
     isModelSelectorDisabled,
+    contextInfo: textChat.contextInfo,
+    fallbackNotice: textChat.fallbackNotice,
+    contextCache: textChat.contextCache,
+    lockedProvider,
 
     setComposerMode,
     handleNewChat,

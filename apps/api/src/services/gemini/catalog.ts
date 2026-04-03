@@ -34,6 +34,7 @@ function normalizeModelOption(model: Model): GeminiModelOption {
     description: model.description ?? undefined,
     version: model.version ?? undefined,
     supportedActions: model.supportedActions ?? [],
+    inputTokenLimit: model.inputTokenLimit ?? undefined,
   };
 }
 
