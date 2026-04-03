@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { ChevronDown, Check, Sparkles, Cpu, Zap, Activity } from 'lucide-react';
+import { ChevronDown, Check, Sparkles, Cpu, Zap, Activity, Lock } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import type { ModelOption, ModelCatalogResponse, ProviderType } from '@mangostudio/shared';
 import { getModelSelectorPlaceholder } from '../../utils/model-utils';
@@ -17,6 +17,7 @@ interface ModelSelectorProps {
   isDisabled: boolean;
   onSelect: (modelId: string) => void;
   modelCatalog: ModelCatalogResponse;
+  lockedProvider?: ProviderType | null;
 }
 
 export function ModelSelector({
@@ -25,6 +26,7 @@ export function ModelSelector({
   isDisabled,
   onSelect,
   modelCatalog,
+  lockedProvider,
 }: ModelSelectorProps) {
   const [isOpen, setIsOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -125,50 +127,59 @@ export function ModelSelector({
                     <div className="px-4 py-1.5 text-[10px] font-bold uppercase tracking-wider text-on-surface-variant/50">
                       {getProviderLabel(providerKey)}
                     </div>
-                    {models.map((model) => (
-                      <button
-                        key={model.modelId}
-                        onClick={() => handleSelect(model.modelId)}
-                        className={cn(
-                          'w-full flex items-center justify-between px-4 py-2.5 text-left transition-all duration-150',
-                          'hover:bg-primary/10 active:bg-primary/20 group/item',
-                          activeModel === model.modelId && 'bg-primary/5'
-                        )}
-                      >
-                        <div className="flex items-center gap-3">
-                          <div className="flex-shrink-0 w-5 h-5 flex items-center justify-center">
-                            {getModelIcon(model.displayName)}
-                          </div>
-                          <div>
-                            <div
-                              className={cn(
-                                'text-sm font-medium transition-colors',
-                                activeModel === model.modelId
-                                  ? 'text-primary'
-                                  : 'text-on-surface group-hover/item:text-on-surface'
-                              )}
-                            >
-                              {model.displayName}
-                            </div>
-                            <div className="flex items-center gap-1.5">
-                              {model.modelId.includes('preview') && (
-                                <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-surface-container-highest text-on-surface-variant border border-outline-variant/30">
-                                  Preview
-                                </span>
-                              )}
-                              {model.capabilities?.reasoning && (
-                                <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-primary/15 text-primary border border-primary/30">
-                                  {t.thinking.reasoningBadge}
-                                </span>
+                    {models.map((model) => {
+                      const isLocked = lockedProvider != null && model.provider !== lockedProvider;
+                      return (
+                        <button
+                          key={model.modelId}
+                          onClick={() => !isLocked && handleSelect(model.modelId)}
+                          disabled={isLocked}
+                          className={cn(
+                            'w-full flex items-center justify-between px-4 py-2.5 text-left transition-all duration-150',
+                            !isLocked && 'hover:bg-primary/10 active:bg-primary/20 group/item',
+                            activeModel === model.modelId && !isLocked && 'bg-primary/5',
+                            isLocked && 'opacity-40 cursor-not-allowed'
+                          )}
+                        >
+                          <div className="flex items-center gap-3">
+                            <div className="flex-shrink-0 w-5 h-5 flex items-center justify-center">
+                              {isLocked ? (
+                                <Lock className="w-3.5 h-3.5 text-on-surface-variant" />
+                              ) : (
+                                getModelIcon(model.displayName)
                               )}
                             </div>
+                            <div>
+                              <div
+                                className={cn(
+                                  'text-sm font-medium transition-colors',
+                                  activeModel === model.modelId && !isLocked
+                                    ? 'text-primary'
+                                    : 'text-on-surface group-hover/item:text-on-surface'
+                                )}
+                              >
+                                {model.displayName}
+                              </div>
+                              <div className="flex items-center gap-1.5">
+                                {model.modelId.includes('preview') && (
+                                  <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-surface-container-highest text-on-surface-variant border border-outline-variant/30">
+                                    Preview
+                                  </span>
+                                )}
+                                {model.capabilities?.reasoning && !isLocked && (
+                                  <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-primary/15 text-primary border border-primary/30">
+                                    {t.thinking.reasoningBadge}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
                           </div>
-                        </div>
-                        {activeModel === model.modelId && (
-                          <Check className="w-4 h-4 text-primary" />
-                        )}
-                      </button>
-                    ))}
+                          {activeModel === model.modelId && !isLocked && (
+                            <Check className="w-4 h-4 text-primary" />
+                          )}
+                        </button>
+                      );
+                    })}
                   </div>
                 ))
               )}

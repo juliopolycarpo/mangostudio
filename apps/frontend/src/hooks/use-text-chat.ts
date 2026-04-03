@@ -1,5 +1,5 @@
 /* global console */
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import type { Message, MessagePart, SSEContextEvent, SSEFallbackEvent } from '@mangostudio/shared';
 import { messageKeys } from './use-messages-query';
@@ -21,6 +21,7 @@ interface UseTextChatOptions {
   optimistic: ReturnType<typeof useOptimisticMessages>;
   thinkingEnabled: boolean;
   reasoningEffort: string;
+  currentChatId: string | null;
 }
 
 /** Handles text chat streaming — send prompt, manage SSE stream, optimistic UI. */
@@ -31,12 +32,19 @@ export function useTextChat({
   optimistic,
   thinkingEnabled,
   reasoningEffort,
+  currentChatId,
 }: UseTextChatOptions) {
   const queryClient = useQueryClient();
   const [isGenerating, setIsGenerating] = useState(false);
   const [contextInfo, setContextInfo] = useState<ContextInfo | null>(null);
   const [fallbackNotice, setFallbackNotice] = useState<FallbackNotice | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+
+  // Reset context state when the active chat changes
+  useEffect(() => {
+    setContextInfo(null);
+    setFallbackNotice(null);
+  }, [currentChatId]);
 
   const { appendOptimisticMessages, updateOptimisticMessage } = optimistic;
 

@@ -1,7 +1,6 @@
 import { Loader2, MessageSquare } from 'lucide-react';
 import { ChatFeed } from '../../components/ChatFeed';
 import { InputBar } from '../../components/InputBar';
-import { ContextIndicator, ContextWarning } from '../../components/ContextIndicator';
 import { useMessagesQuery } from '../../hooks/use-messages-query';
 import { useI18n } from '../../hooks/use-i18n';
 import type { InteractionMode, ReasoningEffort } from '@mangostudio/shared';
@@ -62,7 +61,7 @@ export function ChatPage({
         <ChatFeed chatId={chatId} messages={messages} />
       )}
       {fallbackNotice && (
-        <div className="fallback-notice">
+        <div className="px-6 py-2 text-xs text-on-surface-variant bg-surface-container-low border-t border-outline-variant/10">
           {fallbackNotice.to === 'replay'
             ? t.chat.fallback.toReplay
             : t.chat.fallback.generic
@@ -70,23 +69,20 @@ export function ChatPage({
                 .replace('{to}', fallbackNotice.to)}
         </div>
       )}
-      <ContextWarning contextInfo={contextInfo ?? null} />
-      <div className="input-area">
-        <ContextIndicator contextInfo={contextInfo ?? null} />
-        <InputBar
-          composerMode={composerMode}
-          onModeChange={onModeChange}
-          onSubmit={onSubmit}
-          disabled={disabled}
-          isGenerating={isGenerating}
-          onStop={onStop}
-          thinkingEnabled={thinkingEnabled}
-          reasoningEffort={reasoningEffort}
-          onThinkingToggle={onThinkingToggle}
-          onReasoningEffortChange={onReasoningEffortChange}
-          reasoningVisible={reasoningVisible}
-        />
-      </div>
+      <InputBar
+        composerMode={composerMode}
+        onModeChange={onModeChange}
+        onSubmit={onSubmit}
+        disabled={disabled}
+        isGenerating={isGenerating}
+        onStop={onStop}
+        thinkingEnabled={thinkingEnabled}
+        reasoningEffort={reasoningEffort}
+        onThinkingToggle={onThinkingToggle}
+        onReasoningEffortChange={onReasoningEffortChange}
+        reasoningVisible={reasoningVisible}
+        contextInfo={contextInfo}
+      />
     </div>
   );
 }

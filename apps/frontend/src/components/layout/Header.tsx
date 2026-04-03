@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Plus, Settings } from 'lucide-react';
-import type { ModelCatalogResponse, ModelOption } from '@mangostudio/shared';
+import type { ModelCatalogResponse, ModelOption, ProviderType } from '@mangostudio/shared';
 import { ModelSelector } from './ModelSelector';
 import { authClient } from '@/lib/auth-client';
 import { useNavigate } from '@tanstack/react-router';
@@ -19,6 +19,7 @@ export interface HeaderProps {
   onNewChat: () => void;
   onNavigateToSettings: () => void;
   modelCatalog: ModelCatalogResponse;
+  lockedProvider?: ProviderType | null;
 }
 
 export function Header({
@@ -32,6 +33,7 @@ export function Header({
   onNewChat,
   onNavigateToSettings,
   modelCatalog,
+  lockedProvider,
 }: HeaderProps) {
   const { data: session } = authClient.useSession();
   const navigate = useNavigate();
@@ -63,6 +65,7 @@ export function Header({
             currentChatId ? onUpdateChatModel(currentChatId, modelId) : onSetPageModel(modelId)
           }
           modelCatalog={modelCatalog}
+          lockedProvider={lockedProvider}
         />
       </div>
       <div className="flex items-center gap-3">

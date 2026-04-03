@@ -3,6 +3,13 @@ import { MessageSquare, ImagePlus, PlusCircle, Mic, Zap, Send, Square, X } from 
 import type { InteractionMode, ReasoningEffort } from '@mangostudio/shared';
 import { ThinkingToggle } from '@/components/layout/ThinkingToggle';
 import { useI18n } from '@/hooks/use-i18n';
+import type { ContextInfo } from '@/hooks/use-text-chat';
+
+function formatTokensCompact(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(n >= 10_000 ? 0 : 1)}k`;
+  return String(n);
+}
 
 interface Props {
   composerMode: InteractionMode;
@@ -17,6 +24,8 @@ interface Props {
   onThinkingToggle?: (enabled: boolean) => void;
   onReasoningEffortChange?: (effort: ReasoningEffort) => void;
   reasoningVisible?: boolean;
+  // Context window info
+  contextInfo?: ContextInfo | null;
 }
 
 export function InputBar({
@@ -31,6 +40,7 @@ export function InputBar({
   onThinkingToggle,
   onReasoningEffortChange,
   reasoningVisible = false,
+  contextInfo,
 }: Props) {
   const { t } = useI18n();
   const [prompt, setPrompt] = useState('');
@@ -70,18 +80,36 @@ export function InputBar({
       <div className="max-w-4xl mx-auto w-full">
         {/* Bottom toolbar: reasoning controls (left) + mode switch (right) */}
         <div className="flex items-center justify-between mb-3">
-          {/* Reasoning controls — left-aligned, shown only for capable models */}
-          {onThinkingToggle && onReasoningEffortChange ? (
-            <ThinkingToggle
-              enabled={thinkingEnabled}
-              effort={reasoningEffort}
-              visible={reasoningVisible}
-              onToggle={onThinkingToggle}
-              onEffortChange={onReasoningEffortChange}
-            />
-          ) : (
-            <div />
-          )}
+          {/* Left side: thinking toggle + context chip */}
+          <div className="flex items-center gap-2">
+            {onThinkingToggle && onReasoningEffortChange ? (
+              <ThinkingToggle
+                enabled={thinkingEnabled}
+                effort={reasoningEffort}
+                visible={reasoningVisible}
+                onToggle={onThinkingToggle}
+                onEffortChange={onReasoningEffortChange}
+              />
+            ) : null}
+
+            {/* Context chip — shown when context info is available */}
+            {contextInfo && composerMode === 'chat' && (
+              <span
+                className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-medium tabular-nums border transition-colors ${
+                  contextInfo.severity === 'critical'
+                    ? 'bg-error/15 text-error border-error/30'
+                    : contextInfo.severity === 'danger'
+                      ? 'bg-warning/15 text-warning border-warning/30'
+                      : contextInfo.severity === 'warning'
+                        ? 'bg-warning/10 text-warning/80 border-warning/20'
+                        : 'bg-surface-container-high text-on-surface-variant border-transparent'
+                }`}
+                title={`~${contextInfo.estimatedInputTokens.toLocaleString()} / ${contextInfo.contextLimit.toLocaleString()} tokens · ${contextInfo.mode}`}
+              >
+                {`Context: ${formatTokensCompact(contextInfo.estimatedInputTokens)} / ${formatTokensCompact(contextInfo.contextLimit)}`}
+              </span>
+            )}
+          </div>
 
           {/* Mode Switch Toggle */}
           <div className="inline-flex bg-surface-container-low border border-outline-variant/10 rounded-full p-1 gap-1 shadow-sm">
