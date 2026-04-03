@@ -138,6 +138,7 @@ export function useAppState() {
     isModelSelectorDisabled,
     contextInfo: textChat.contextInfo,
     fallbackNotice: textChat.fallbackNotice,
+    contextCache: textChat.contextCache,
     lockedProvider,
 
     setComposerMode,

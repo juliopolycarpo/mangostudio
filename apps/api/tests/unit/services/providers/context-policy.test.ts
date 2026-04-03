@@ -66,6 +66,11 @@ describe('getModelContextLimit', () => {
     expect(getModelContextLimit('claude-haiku-4-5')).toBe(200_000);
   });
 
+  it('returns 1M for legacy gemini-pro (catch-all)', () => {
+    expect(getModelContextLimit('gemini-pro')).toBe(1_048_576);
+    expect(getModelContextLimit('gemini-pro-vision')).toBe(1_048_576);
+  });
+
   it('returns 128k fallback for unknown models', () => {
     expect(getModelContextLimit('unknown-model-xyz')).toBe(128_000);
     expect(getModelContextLimit('')).toBe(128_000);
@@ -130,6 +135,25 @@ describe('computeContextSnapshot', () => {
   it('preserves the mode field', () => {
     const snapshot = computeContextSnapshot({ ...baseParams, mode: 'replay' });
     expect(snapshot.mode).toBe('replay');
+  });
+
+  it('uses contextLimitOverride when provided', () => {
+    const snapshot = computeContextSnapshot({
+      ...baseParams,
+      providerReportedTokens: 50_000,
+      contextLimitOverride: 1_000_000,
+    });
+    expect(snapshot.contextLimit).toBe(1_000_000);
+    expect(snapshot.estimatedUsageRatio).toBeCloseTo(50_000 / 1_000_000, 5);
+  });
+
+  it('falls back to getModelContextLimit when no override', () => {
+    const snapshot = computeContextSnapshot({
+      ...baseParams,
+      providerReportedTokens: 50_000,
+    });
+    // gpt-4o → 1_048_576
+    expect(snapshot.contextLimit).toBe(1_048_576);
   });
 });
 

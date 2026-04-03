@@ -125,6 +125,8 @@ export interface ModelInfo {
   displayName: string;
   description?: string;
   provider: ProviderType;
+  /** Maximum input tokens accepted by the model (from provider API). */
+  inputTokenLimit?: number;
   capabilities: {
     text: boolean;
     image: boolean;

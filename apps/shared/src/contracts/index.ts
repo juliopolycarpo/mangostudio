@@ -159,6 +159,8 @@ export interface ModelOption {
   supportedActions: string[];
   provider?: ProviderType;
   capabilities?: ModelCapabilities;
+  /** Maximum input tokens accepted by the model (from provider API). */
+  inputTokenLimit?: number;
 }
 
 /** @deprecated Use ModelOption instead. */

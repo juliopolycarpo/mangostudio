@@ -344,6 +344,7 @@ export const respondStreamRoutes = (app: Elysia) =>
                             providerReportedTokens:
                               resultEnvelope?.context?.providerReportedInputTokens,
                             mode: displayMode,
+                            contextLimitOverride: resultEnvelope?.context?.contextLimit,
                           });
 
                           console.log(

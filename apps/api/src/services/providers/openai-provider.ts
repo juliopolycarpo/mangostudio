@@ -220,6 +220,7 @@ const listModelsWithCache = withModelCache(
           modelId: model.id,
           displayName: model.id,
           provider: 'openai',
+          inputTokenLimit: getModelContextLimit(model.id),
           capabilities: {
             text: !isImageModelId(model.id),
             image: isImageModelId(model.id),

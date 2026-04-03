@@ -40,9 +40,17 @@ export function useTextChat({
   const [fallbackNotice, setFallbackNotice] = useState<FallbackNotice | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
 
-  // Reset context state when the active chat changes
+  // Per-chat context info cache — survives chat switches
+  const contextCacheRef = useRef<Map<string, ContextInfo>>(new Map());
+
+  // Restore cached context when the active chat changes (or clear if none)
   useEffect(() => {
-    setContextInfo(null);
+    if (currentChatId) {
+      const cached = contextCacheRef.current.get(currentChatId);
+      setContextInfo(cached ?? null);
+    } else {
+      setContextInfo(null);
+    }
     setFallbackNotice(null);
   }, [currentChatId]);
 
@@ -185,13 +193,17 @@ export function useTextChat({
                 chunk.mode != null &&
                 chunk.severity != null
               ) {
-                setContextInfo({
+                const info: ContextInfo = {
                   estimatedInputTokens: chunk.estimatedInputTokens,
                   contextLimit: chunk.contextLimit,
                   estimatedUsageRatio: chunk.estimatedUsageRatio,
                   mode: chunk.mode,
                   severity: chunk.severity,
-                });
+                };
+                setContextInfo(info);
+                if (activeChatId) {
+                  contextCacheRef.current.set(activeChatId, info);
+                }
               }
             } else if (chunkType === 'fallback_notice') {
               if (chunk.from != null && chunk.to != null && chunk.reason != null) {
@@ -244,5 +256,13 @@ export function useTextChat({
     ]
   );
 
-  return { isGenerating, handleRespond, handleStop, contextInfo, fallbackNotice };
+  return {
+    isGenerating,
+    handleRespond,
+    handleStop,
+    contextInfo,
+    fallbackNotice,
+    /** Per-chat context cache — readable by sidebar for progress indicators. */
+    contextCache: contextCacheRef.current,
+  };
 }

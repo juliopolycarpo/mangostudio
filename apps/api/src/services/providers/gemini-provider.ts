@@ -372,6 +372,7 @@ const geminiProvider: AIProvider = {
       displayName: m.displayName,
       description: m.description,
       provider: 'gemini' as const,
+      inputTokenLimit: m.inputTokenLimit,
       capabilities: {
         text: catalog.discoveredTextModels.some((t) => t.modelId === m.modelId),
         image: catalog.discoveredImageModels.some((i) => i.modelId === m.modelId),

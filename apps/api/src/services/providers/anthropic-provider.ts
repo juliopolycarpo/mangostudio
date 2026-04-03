@@ -96,6 +96,7 @@ const listModelsWithCache = withModelCache(
           modelId: model.id,
           displayName: model.display_name || model.id,
           provider: 'anthropic',
+          inputTokenLimit: getModelContextLimit(model.id),
           capabilities: {
             text: true,
             image: false,

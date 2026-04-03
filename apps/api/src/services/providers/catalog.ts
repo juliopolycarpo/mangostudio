@@ -36,6 +36,7 @@ function modelInfoToOption(m: ModelInfo): ModelOption {
     supportedActions: [],
     provider: m.provider,
     capabilities: m.capabilities,
+    inputTokenLimit: m.inputTokenLimit,
   };
 }
 

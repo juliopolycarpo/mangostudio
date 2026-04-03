@@ -55,6 +55,7 @@ function AuthenticatedLayout() {
         onUpdateChatTitle={app.handleUpdateChatTitle}
         onDeleteChat={app.handleDeleteChat}
         onNewChat={app.handleNewChat}
+        contextCache={app.contextCache}
       >
         <Header
           activeModel={app.activeModel}

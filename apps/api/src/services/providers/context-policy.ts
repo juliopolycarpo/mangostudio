@@ -67,6 +67,11 @@ export function getModelContextLimit(modelName: string): number {
     return 1_048_576;
   }
 
+  // Catch-all for any other Gemini model (e.g. legacy gemini-pro) → 1M
+  if (lower.startsWith('gemini')) {
+    return 1_048_576;
+  }
+
   // Claude 3+ models → 200k
   if (
     lower.startsWith('claude-3') ||
@@ -89,8 +94,10 @@ export function computeContextSnapshot(params: {
   toolDefinitions?: ToolDefinition[];
   providerReportedTokens?: number;
   mode: ContinuationDisplayMode;
+  /** When provided, overrides the hardcoded limit from getModelContextLimit. */
+  contextLimitOverride?: number;
 }): ContextSnapshot {
-  const contextLimit = getModelContextLimit(params.modelName);
+  const contextLimit = params.contextLimitOverride ?? getModelContextLimit(params.modelName);
 
   // If the provider reported tokens, prefer that
   if (params.providerReportedTokens != null) {
