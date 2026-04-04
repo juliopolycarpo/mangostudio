@@ -36,6 +36,7 @@ import {
   type ContinuationEnvelope,
 } from './continuation';
 import { getModelContextLimit } from './context-policy';
+import { buildOpenAIResponsesReplay } from './replay-builder';
 
 const BASE_URL = 'https://api.openai.com/v1';
 
@@ -482,13 +483,12 @@ async function* streamAgentTurnWithResponsesAPI(
     // Stateful continuation — send only the new user message
     input = req.prompt ? [{ role: 'user', content: req.prompt }] : [];
   } else {
-    // Full history replay (first call or cursor invalidated)
-    const messages: Array<Record<string, unknown>> = [];
-    for (const turn of req.history) {
-      messages.push({ role: turn.role === 'ai' ? 'assistant' : 'user', content: turn.text });
-    }
-    if (req.prompt) messages.push({ role: 'user', content: req.prompt });
-    input = messages;
+    // Full history replay (first call or cursor invalidated).
+    // Structured replay: preserves tool-call/tool-result history from persisted parts.
+    input = [
+      ...buildOpenAIResponsesReplay(req.history),
+      ...(req.prompt ? [{ role: 'user', content: req.prompt }] : []),
+    ];
   }
 
   const makeRequest = async (prevId: string | null) => {
@@ -521,13 +521,11 @@ async function* streamAgentTurnWithResponsesAPI(
           ` falling back to full replay`
       );
       // Note: err instanceof OpenAIAPIError was already checked above via isCursorError
-      // Rebuild input from full history
-      const messages: Array<Record<string, unknown>> = [];
-      for (const turn of req.history) {
-        messages.push({ role: turn.role === 'ai' ? 'assistant' : 'user', content: turn.text });
-      }
-      if (req.prompt) messages.push({ role: 'user', content: req.prompt });
-      input = messages;
+      // Rebuild input from full history using structured replay.
+      input = [
+        ...buildOpenAIResponsesReplay(req.history),
+        ...(req.prompt ? [{ role: 'user', content: req.prompt }] : []),
+      ];
       stream = await makeRequest(null);
     } else {
       throw err;
