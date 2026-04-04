@@ -66,7 +66,8 @@ export type MessagePart =
   | { type: 'thinking'; text: string; redacted?: boolean }
   | { type: 'tool_call'; toolCallId: string; name: string; args: Record<string, unknown> }
   | { type: 'tool_result'; toolCallId: string; content: string; isError?: boolean }
-  | { type: 'error'; text: string };
+  | { type: 'error'; text: string }
+  | { type: 'system_event'; event: string; detail?: string };
 
 /** Database row shape for secret metadata tracked in SQLite. */
 export interface SecretMetadataRow {
