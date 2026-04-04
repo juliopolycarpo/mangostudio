@@ -42,6 +42,12 @@ export function useTextChat({
 
   // Per-chat context info cache — survives chat switches
   const contextCacheRef = useRef<Map<string, ContextInfo>>(new Map());
+  // Version counter makes contextCache reactive: incrementing it triggers re-renders
+  // in consumers (e.g. Sidebar) that read from the mutable Map.
+  const [, setCacheVersion] = useState(0);
+  // Ref to current chatId to avoid stale closures in seedContextInfo.
+  const currentChatIdRef = useRef(currentChatId);
+  currentChatIdRef.current = currentChatId;
 
   // Restore cached context when the active chat changes (or clear if none)
   useEffect(() => {
@@ -203,6 +209,7 @@ export function useTextChat({
                 setContextInfo(info);
                 if (activeChatId) {
                   contextCacheRef.current.set(activeChatId, info);
+                  setCacheVersion((v) => v + 1);
                 }
               }
             } else if (chunkType === 'fallback_notice') {
@@ -268,11 +275,14 @@ export function useTextChat({
   const seedContextInfo = useCallback(
     (chatId: string, info: ContextInfo) => {
       contextCacheRef.current.set(chatId, info);
-      if (chatId === currentChatId) {
+      setCacheVersion((v) => v + 1);
+      // Use ref instead of closure to always read the current chatId,
+      // avoiding the stale-closure race on cold start.
+      if (chatId === currentChatIdRef.current) {
         setContextInfo(info);
       }
     },
-    [currentChatId]
+    [] // stable — reads currentChatId via ref
   );
 
   return {
