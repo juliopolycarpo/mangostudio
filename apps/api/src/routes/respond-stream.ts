@@ -373,6 +373,22 @@ export const respondStreamRoutes = (app: Elysia) =>
                           break;
                         }
 
+                        case 'continuation_degraded':
+                          controller.enqueue(
+                            sseEvent({
+                              type: 'fallback_notice',
+                              from: event.from,
+                              to: event.to,
+                              reason: event.reason,
+                            })
+                          );
+                          console.warn(
+                            `[fallback][degrade] chatId=${chatId} from=${event.from}` +
+                              ` to=${event.to} reason="${event.reason}"` +
+                              ` provider=${provider.providerType} model=${model}`
+                          );
+                          break;
+
                         case 'turn_error':
                           throw new Error(event.error);
                       }
