@@ -404,3 +404,43 @@ pre:hover .copy-code-btn {
     opacity: 0;
   }
 }
+
+/* ── Theme appearance defaults ── */
+:root {
+  --chat-font-size: 0.875rem; /* 14px — matches 'default' */
+  --chat-message-gap: 3rem; /* matches 'default' density */
+  --chat-padding: 1.25rem;
+}
+
+/* ── Font size presets ── */
+[data-font-size='small'] {
+  --chat-font-size: 0.8125rem; /* 13px */
+}
+[data-font-size='default'] {
+  --chat-font-size: 0.875rem; /* 14px */
+}
+[data-font-size='large'] {
+  --chat-font-size: 1rem; /* 16px */
+}
+
+/* ── Chat density presets ── */
+[data-chat-density='compact'] {
+  --chat-message-gap: 1.5rem;
+  --chat-padding: 0.75rem;
+}
+[data-chat-density='default'] {
+  --chat-message-gap: 3rem;
+  --chat-padding: 1.25rem;
+}
+[data-chat-density='comfortable'] {
+  --chat-message-gap: 4rem;
+  --chat-padding: 1.5rem;
+}
+
+/* ── Chat message body text uses the font size CSS variable ── */
+.chat-message-body {
+  font-size: var(--chat-font-size);
+}
+.markdown-content {
+  font-size: var(--chat-font-size);
+}
