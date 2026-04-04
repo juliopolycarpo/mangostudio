@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { AuthContext } from '@/lib/auth-context';
 import { ToastProvider } from '@/components/ui/Toast';
 import { I18nProvider } from '@/hooks/use-i18n';
+import { ThemeProvider } from '@/hooks/use-theme';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -18,11 +19,13 @@ const queryClient = new QueryClient({
 export const Route = createRootRouteWithContext<{ auth: AuthContext }>()({
   component: () => (
     <QueryClientProvider client={queryClient}>
-      <I18nProvider>
-        <ToastProvider>
-          <Outlet />
-        </ToastProvider>
-      </I18nProvider>
+      <ThemeProvider>
+        <I18nProvider>
+          <ToastProvider>
+            <Outlet />
+          </ToastProvider>
+        </I18nProvider>
+      </ThemeProvider>
     </QueryClientProvider>
   ),
 });
