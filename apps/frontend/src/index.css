@@ -156,6 +156,7 @@ body {
 }
 
 .markdown-content pre {
+  position: relative;
   margin-top: 0.75em;
   margin-bottom: 0.75em;
   background: var(--color-surface-container-highest);
@@ -163,6 +164,25 @@ body {
   border-radius: 0.5rem;
   overflow-x: auto;
 }
+
+/* Let Shiki control its own background and color */
+.markdown-content pre.shiki {
+  background: unset;
+}
+
+.markdown-content pre[data-lang]::before {
+  content: attr(data-lang);
+  position: absolute;
+  top: 0.5em;
+  right: 0.75em;
+  font-size: 0.7em;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-on-surface-variant);
+  opacity: 0.4;
+  font-family: var(--font-label);
+}
+
 .markdown-content pre code {
   background: transparent;
   padding: 0;
@@ -243,4 +263,7 @@ body {
 }
 .markdown-content--thinking .markdown-content pre {
   background: color-mix(in srgb, var(--color-surface-container-highest) 60%, transparent);
+}
+.markdown-content--thinking .markdown-content pre.shiki {
+  background: unset;
 }
