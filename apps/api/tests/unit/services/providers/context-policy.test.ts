@@ -27,9 +27,10 @@ describe('estimateTokenCount', () => {
 });
 
 describe('getModelContextLimit', () => {
-  it('returns 1M for gpt-4o models', () => {
-    expect(getModelContextLimit('gpt-4o')).toBe(1_048_576);
-    expect(getModelContextLimit('gpt-4o-mini')).toBe(1_048_576);
+  it('returns 128k for gpt-4o models (curated exact limit, not 1M from legacy prefix)', () => {
+    // The curated table has the accurate limit for gpt-4o (128k input).
+    expect(getModelContextLimit('gpt-4o')).toBe(128_000);
+    expect(getModelContextLimit('gpt-4o-mini')).toBe(128_000);
   });
 
   it('returns 1M for gpt-4.1 models', () => {
@@ -75,6 +76,84 @@ describe('getModelContextLimit', () => {
     expect(getModelContextLimit('unknown-model-xyz')).toBe(128_000);
     expect(getModelContextLimit('')).toBe(128_000);
   });
+
+  // Curated exact-match tests (Tier 1)
+  it('returns 64k for deepseek-chat (exact curated match)', () => {
+    expect(getModelContextLimit('deepseek-chat')).toBe(65_536);
+  });
+
+  it('returns 64k for deepseek-reasoner (exact curated match)', () => {
+    expect(getModelContextLimit('deepseek-reasoner')).toBe(65_536);
+  });
+
+  it('returns 64k for deepseek-r1 (exact curated match)', () => {
+    expect(getModelContextLimit('deepseek-r1')).toBe(65_536);
+  });
+
+  it('returns 128k for gpt-4o (exact curated match, not 1M from prefix heuristic)', () => {
+    // gpt-4o has 128k actual limit; the curated table overrides the legacy prefix heuristic
+    expect(getModelContextLimit('gpt-4o')).toBe(128_000);
+  });
+
+  it('returns 128k for gpt-4o-mini (exact curated match)', () => {
+    expect(getModelContextLimit('gpt-4o-mini')).toBe(128_000);
+  });
+
+  it('returns 1M for gpt-4.1 (exact curated match)', () => {
+    expect(getModelContextLimit('gpt-4.1')).toBe(1_048_576);
+  });
+
+  it('returns 1M for gpt-4.1-mini (exact curated match)', () => {
+    expect(getModelContextLimit('gpt-4.1-mini')).toBe(1_048_576);
+  });
+
+  it('returns 128k for o1-mini (exact curated match, not 200k from prefix heuristic)', () => {
+    // o1-mini differs from o1; the curated table captures this distinction
+    expect(getModelContextLimit('o1-mini')).toBe(128_000);
+  });
+
+  it('returns 128k for o1-preview (exact curated match)', () => {
+    expect(getModelContextLimit('o1-preview')).toBe(128_000);
+  });
+
+  it('returns 2M for gemini-1.5-pro (curated, overrides generic gemini-1.5 heuristic)', () => {
+    expect(getModelContextLimit('gemini-1.5-pro')).toBe(2_097_152);
+  });
+
+  it('returns 1M for gemini-1.5-flash (curated exact match)', () => {
+    expect(getModelContextLimit('gemini-1.5-flash')).toBe(1_048_576);
+  });
+
+  // Prefix match within curated table (Tier 2)
+  it('falls back to longest prefix in curated table for dated model variants', () => {
+    // gemini-1.5-pro-001 is in the curated table; an unknown variant should use prefix match
+    // against gemini-1.5-pro → 2M
+    expect(getModelContextLimit('gemini-1.5-pro-001')).toBe(2_097_152);
+  });
+
+  it('matches curated deepseek prefix for r1 distill variants', () => {
+    expect(getModelContextLimit('deepseek-r1-distill-qwen-32b')).toBe(65_536);
+    expect(getModelContextLimit('deepseek-r1-distill-llama-70b')).toBe(65_536);
+  });
+
+  // Legacy heuristic fallback (Tier 3) for models not in curated table
+  it('falls back to legacy heuristic for gpt-5 variants not in curated table', () => {
+    expect(getModelContextLimit('gpt-5-new-variant-xyz')).toBe(1_048_576);
+  });
+
+  it('falls back to legacy heuristic for future gemini-2.5 variants not in curated table', () => {
+    expect(getModelContextLimit('gemini-2.5-ultra-future')).toBe(1_048_576);
+  });
+
+  it('falls back to legacy heuristic for future o3 series not in curated table', () => {
+    expect(getModelContextLimit('o3-large')).toBe(200_000);
+  });
+
+  it('case-insensitive lookup works correctly', () => {
+    expect(getModelContextLimit('DEEPSEEK-CHAT')).toBe(65_536);
+    expect(getModelContextLimit('GPT-4O')).toBe(128_000);
+    expect(getModelContextLimit('Gemini-1.5-Pro')).toBe(2_097_152);
+  });
 });
 
 describe('computeContextSnapshot', () => {
@@ -91,7 +170,8 @@ describe('computeContextSnapshot', () => {
     });
     expect(snapshot.estimatedInputTokens).toBe(50_000);
     expect(snapshot.providerReportedInputTokens).toBe(50_000);
-    expect(snapshot.estimatedUsageRatio).toBeCloseTo(50_000 / 1_048_576, 5);
+    // gpt-4o → 128k in curated table
+    expect(snapshot.estimatedUsageRatio).toBeCloseTo(50_000 / 128_000, 5);
   });
 
   it('computes local estimate when no provider data', () => {
@@ -102,7 +182,8 @@ describe('computeContextSnapshot', () => {
     });
     expect(snapshot.estimatedInputTokens).toBeGreaterThan(0);
     expect(snapshot.providerReportedInputTokens).toBeUndefined();
-    expect(snapshot.contextLimit).toBe(1_048_576);
+    // gpt-4o → 128k in curated table
+    expect(snapshot.contextLimit).toBe(128_000);
     expect(snapshot.estimatedUsageRatio).toBeGreaterThan(0);
     expect(snapshot.estimatedUsageRatio).toBeLessThanOrEqual(1);
   });
@@ -152,8 +233,8 @@ describe('computeContextSnapshot', () => {
       ...baseParams,
       providerReportedTokens: 50_000,
     });
-    // gpt-4o → 1_048_576
-    expect(snapshot.contextLimit).toBe(1_048_576);
+    // gpt-4o → 128k from curated table (not 1M from the old prefix heuristic)
+    expect(snapshot.contextLimit).toBe(128_000);
   });
 });
 
