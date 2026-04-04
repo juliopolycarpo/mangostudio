@@ -11,6 +11,25 @@ import { parseQueryInt } from '../utils/query';
 import { parseContinuationEnvelope } from '../services/providers/continuation';
 import { getContextSeverity } from '../services/providers/context-policy';
 
+/** Extract context info from a raw ContinuationEnvelope JSON string. */
+function extractContextInfo(providerState: string | null | undefined) {
+  if (!providerState) return null;
+  const envelope = parseContinuationEnvelope(providerState);
+  if (!envelope?.context) return null;
+  const tokens =
+    envelope.context.providerReportedInputTokens ?? envelope.context.estimatedInputTokens;
+  const limit = envelope.context.contextLimit;
+  if (tokens == null || limit == null) return null;
+  const ratio = Math.min(tokens / limit, 1);
+  return {
+    estimatedInputTokens: tokens,
+    contextLimit: limit,
+    estimatedUsageRatio: ratio,
+    mode: envelope.cursor ? ('stateful' as const) : ('replay' as const),
+    severity: getContextSeverity(ratio),
+  };
+}
+
 export const chatRoutes = (app: Elysia) =>
   app.group('/chats', (app) =>
     app
@@ -22,13 +41,16 @@ export const chatRoutes = (app: Elysia) =>
           return { error: 'Unauthorized' };
         }
         const db = getDb();
-        const chats = await db
+        const rows = await db
           .selectFrom('chats')
           .selectAll()
           .where('userId', '=', user.id)
           .orderBy('updatedAt', 'desc')
           .execute();
-        return chats;
+        return rows.map((row) => {
+          const { lastProviderState, ...chat } = row;
+          return { ...chat, contextInfo: extractContextInfo(lastProviderState) };
+        });
       })
 
       /** Create a new chat for the authenticated user. */
@@ -168,13 +190,7 @@ export const chatRoutes = (app: Elysia) =>
           const mappedMessages = messages.map(mapMessageRow);
 
           // Recover last context snapshot on initial page load (no cursor)
-          let contextInfo: {
-            estimatedInputTokens: number;
-            contextLimit: number;
-            estimatedUsageRatio: number;
-            mode: string;
-            severity: string;
-          } | null = null;
+          let contextInfo: ReturnType<typeof extractContextInfo> = null;
 
           if (!query.cursor) {
             const lastAiRow = await db
@@ -187,25 +203,7 @@ export const chatRoutes = (app: Elysia) =>
               .limit(1)
               .executeTakeFirst();
 
-            if (lastAiRow?.providerState) {
-              const envelope = parseContinuationEnvelope(lastAiRow.providerState as string);
-              if (envelope?.context) {
-                const tokens =
-                  envelope.context.providerReportedInputTokens ??
-                  envelope.context.estimatedInputTokens;
-                const limit = envelope.context.contextLimit;
-                if (tokens != null && limit != null) {
-                  const ratio = Math.min(tokens / limit, 1);
-                  contextInfo = {
-                    estimatedInputTokens: tokens,
-                    contextLimit: limit,
-                    estimatedUsageRatio: ratio,
-                    mode: envelope.cursor ? 'stateful' : 'replay',
-                    severity: getContextSeverity(ratio),
-                  };
-                }
-              }
-            }
+            contextInfo = extractContextInfo(lastAiRow?.providerState as string | null);
           }
 
           return {
