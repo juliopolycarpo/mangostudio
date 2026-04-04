@@ -168,17 +168,17 @@ describe('MarkdownContent — copy code button', () => {
     });
   });
 
-  it('injects a copy button into each code block', () => {
+  it('renders a copy button in each code block', () => {
     const { container } = render(<MarkdownContent content={'```js\nconst x = 1;\n```'} />);
     const btn = container.querySelector('.copy-code-btn');
     expect(btn).toBeInTheDocument();
   });
 
-  it('does not inject a copy button during streaming', () => {
+  it('renders copy button even during streaming', () => {
     const { container } = render(
       <MarkdownContent content={'```js\nconst x = 1;\n```'} isStreaming />
     );
-    expect(container.querySelector('.copy-code-btn')).not.toBeInTheDocument();
+    expect(container.querySelector('.copy-code-btn')).toBeInTheDocument();
   });
 
   it('does not inject copy button for inline code', () => {
