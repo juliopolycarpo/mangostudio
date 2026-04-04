@@ -25,6 +25,7 @@ import type {
   AgentEvent,
   ToolDefinition,
 } from './types';
+import { buildChatCompletionsReplay } from './replay-builder';
 
 const secretService = createProviderSecretService({
   provider: 'openai-compatible',
@@ -198,15 +199,10 @@ async function* streamOAICompatAgentTurn(req: AgentTurnRequest): AsyncIterable<A
   const tools =
     (req.toolDefinitions ?? []).length > 0 ? toolDefsToOAIChat(req.toolDefinitions!) : undefined;
 
-  // Build messages: system + DB history + accumulated loop messages + current input
+  // Build messages: system + structured DB history + accumulated loop messages + current input
   const messages: OpenAI.ChatCompletionMessageParam[] = [
     ...(req.systemPrompt?.trim() ? [{ role: 'system' as const, content: req.systemPrompt }] : []),
-    ...req.history.map(
-      (turn): OpenAI.ChatCompletionMessageParam => ({
-        role: turn.role === 'ai' ? 'assistant' : 'user',
-        content: turn.text,
-      })
-    ),
+    ...buildChatCompletionsReplay(req.history),
     ...(loopState?.loopMessages ?? []),
   ];
 
