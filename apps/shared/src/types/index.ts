@@ -54,7 +54,8 @@ export type AgentEvent =
   | { type: 'tool_result'; callId: string; name: string; result: unknown; isError?: boolean }
   | { type: 'assistant_text_delta'; text: string }
   | { type: 'turn_completed'; providerState?: string; finishReason?: string }
-  | { type: 'turn_error'; error: string };
+  | { type: 'turn_error'; error: string }
+  | { type: 'continuation_degraded'; from: string; to: string; reason: string };
 
 /** @deprecated Use ThinkingEnabled (boolean) + ReasoningEffort instead. */
 export type ThinkingVisibility = 'summary' | 'full' | 'off';
