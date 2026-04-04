@@ -72,6 +72,17 @@ function createClient(apiKey: string, baseUrl: string): OpenAI {
   return new OpenAI({ apiKey, baseURL: baseUrl });
 }
 
+/**
+ * Classifies the endpoint type from its base URL.
+ * Used to apply endpoint-specific reasoning extraction logic and capability flags.
+ */
+export function classifyEndpoint(baseUrl: string): 'deepseek' | 'openrouter' | 'generic' {
+  const lower = baseUrl.toLowerCase();
+  if (lower.includes('deepseek.com')) return 'deepseek';
+  if (lower.includes('openrouter.ai')) return 'openrouter';
+  return 'generic';
+}
+
 const listModelsWithCache = withModelCache(
   async (userId: string): Promise<ModelInfo[]> => {
     await secretService.syncConfigFileConnectors(userId);
@@ -108,20 +119,24 @@ const listModelsWithCache = withModelCache(
             continue;
           }
 
+          const isImage = isImageModelId(model.id);
           allModels.push({
             modelId: model.id,
             displayName: model.id,
             provider: 'openai-compatible',
             capabilities: {
-              text: !isImageModelId(model.id),
-              image: isImageModelId(model.id),
-              streaming: !isImageModelId(model.id),
+              text: !isImage,
+              image: isImage,
+              streaming: !isImage,
               reasoning: isReasoningModel(model.id),
-              tools: !isImageModelId(model.id),
+              tools: !isImage,
               statefulContinuation: false,
               promptCaching: false,
-              parallelToolCalls: false,
-              reasoningWithTools: false,
+              // Non-image models on openai-compatible endpoints accept parallel tool calls
+              // in the streaming loop (multiple tool_calls in one assistant message).
+              parallelToolCalls: !isImage,
+              // Reasoning models that are not image-only support reasoning alongside tools.
+              reasoningWithTools: isReasoningModel(model.id) && !isImage,
             },
           });
         }
@@ -186,6 +201,38 @@ function toolDefsToOAIChat(defs: ToolDefinition[]): OpenAI.ChatCompletionTool[] 
 }
 
 /**
+ * Extracts reasoning text from a streaming delta object.
+ * Handles three field shapes used across compatible endpoints:
+ *   - reasoning_content: DeepSeek native / OpenRouter alias
+ *   - reasoning: OpenRouter normalized string
+ *   - reasoning_details: OpenRouter structured array (reasoning.text / reasoning.summary)
+ *
+ * Returns an array of text chunks so callers can emit one event per chunk.
+ */
+export function extractReasoningChunks(delta: Record<string, unknown>): string[] {
+  const chunks: string[] = [];
+
+  const simple =
+    (typeof delta.reasoning_content === 'string' ? delta.reasoning_content : '') ||
+    (typeof delta.reasoning === 'string' ? delta.reasoning : '');
+  if (simple) chunks.push(simple);
+
+  if (Array.isArray(delta.reasoning_details)) {
+    for (const d of delta.reasoning_details as Array<Record<string, unknown>>) {
+      if (
+        (d.type === 'reasoning.text' || d.type === 'reasoning.summary') &&
+        typeof d.text === 'string' &&
+        d.text
+      ) {
+        chunks.push(d.text);
+      }
+    }
+  }
+
+  return chunks;
+}
+
+/**
  * Streams a single agentic turn for OpenAI-compatible endpoints.
  * Stateless — history replayed from DB. In-loop accumulation via providerState.
  * DeepSeek-r1: reasoning_content is automatically included in tool call loop
@@ -243,10 +290,11 @@ async function* streamOAICompatAgentTurn(req: AgentTurnRequest): AsyncIterable<A
 
       const delta = choice.delta as Record<string, any>;
 
-      // DeepSeek reasoning_content passback
-      if (typeof delta.reasoning_content === 'string' && delta.reasoning_content) {
-        assistantReasoning += delta.reasoning_content;
-        yield { type: 'reasoning_delta', text: delta.reasoning_content };
+      // Multi-field reasoning extraction — see extractReasoningChunks for details.
+      // Reasoning is accumulated intra-turn only; cross-turn reset is enforced below.
+      for (const reasoningChunk of extractReasoningChunks(delta)) {
+        assistantReasoning += reasoningChunk;
+        yield { type: 'reasoning_delta', text: reasoningChunk };
       }
 
       if (typeof delta.content === 'string' && delta.content) {
@@ -297,7 +345,13 @@ async function* streamOAICompatAgentTurn(req: AgentTurnRequest): AsyncIterable<A
       }
     }
 
-    // Build updated loop messages
+    // Build the assistant message for loop-state accumulation.
+    // reasoning_content is only included on intra-turn loop messages (when tool calls are
+    // still pending) to satisfy DeepSeek's requirement that reasoning context is available
+    // during continuation. It is intentionally OMITTED from the final message (no pending
+    // tool calls) so reasoning is never persisted cross-turn — defense-in-depth beyond the
+    // route-level turn boundary reset in PR 001.
+    // See: https://api-docs.deepseek.com/guides/thinking_mode
     const assistantMsg: OpenAI.ChatCompletionMessageParam =
       pendingToolCalls.size > 0
         ? {
@@ -308,7 +362,7 @@ async function* streamOAICompatAgentTurn(req: AgentTurnRequest): AsyncIterable<A
               type: 'function' as const,
               function: { name: tc.name, arguments: tc.argsStr },
             })),
-            // Include reasoning_content for DeepSeek passback
+            // Intra-turn only: reasoning passback for DeepSeek/OpenRouter tool continuations.
             ...(assistantReasoning ? { reasoning_content: assistantReasoning } : {}),
           }
         : { role: 'assistant', content: assistantText };
