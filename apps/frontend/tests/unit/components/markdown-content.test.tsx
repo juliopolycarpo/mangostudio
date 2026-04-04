@@ -1,6 +1,12 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen } from '../../support/harness/render';
 import { MarkdownContent } from '../../../src/components/MarkdownContent';
+import * as shikiLib from '@/lib/shiki';
+
+vi.mock('@/lib/shiki', () => ({
+  highlightCode: vi.fn(() => null),
+  initHighlighter: vi.fn().mockResolvedValue(undefined),
+}));
 
 describe('MarkdownContent', () => {
   it('renders bold and italic text', () => {
@@ -92,5 +98,58 @@ describe('MarkdownContent', () => {
   it('renders blockquotes', () => {
     const { container } = render(<MarkdownContent content="> a quote" />);
     expect(container.querySelector('blockquote')).toBeInTheDocument();
+  });
+});
+
+describe('MarkdownContent — syntax highlighting', () => {
+  const SHIKI_HTML =
+    '<pre class="shiki one-dark-pro" style="background-color:#282c34;color:#abb2bf"><code><span style="color:#c678dd">const</span><span style="color:#e5c07b"> x</span><span style="color:#56b6c2"> =</span><span style="color:#d19a66"> 1</span><span style="color:#abb2bf">;</span></code></pre>';
+
+  beforeEach(() => {
+    vi.mocked(shikiLib.highlightCode).mockReset();
+    vi.mocked(shikiLib.highlightCode).mockReturnValue(null);
+  });
+
+  it('renders Shiki output when highlighter is loaded and language is known', () => {
+    vi.mocked(shikiLib.highlightCode).mockReturnValueOnce(SHIKI_HTML);
+    const { container } = render(<MarkdownContent content={'```typescript\nconst x = 1;\n```'} />);
+    const pre = container.querySelector('pre');
+    expect(pre).toBeInTheDocument();
+    expect(container.querySelector('span[style]')).toBeInTheDocument();
+  });
+
+  it('adds data-lang attribute to Shiki pre element', () => {
+    vi.mocked(shikiLib.highlightCode).mockReturnValueOnce(SHIKI_HTML);
+    const { container } = render(<MarkdownContent content={'```typescript\nconst x = 1;\n```'} />);
+    const pre = container.querySelector('pre');
+    expect(pre?.getAttribute('data-lang')).toBe('typescript');
+  });
+
+  it('falls back to plain code block when language is unknown', () => {
+    vi.mocked(shikiLib.highlightCode).mockReturnValueOnce(null);
+    const { container } = render(<MarkdownContent content={'```unknownlang\nfoo()\n```'} />);
+    expect(container.querySelector('pre')).toBeInTheDocument();
+    expect(container.querySelector('pre > code')).toBeInTheDocument();
+    expect(container.querySelector('span[style]')).not.toBeInTheDocument();
+  });
+
+  it('renders plain code block when no language is specified', () => {
+    const { container } = render(<MarkdownContent content={'```\nplain code\n```'} />);
+    expect(container.querySelector('pre')).toBeInTheDocument();
+    expect(container.querySelector('pre > code')).toBeInTheDocument();
+    expect(container.querySelector('span[style]')).not.toBeInTheDocument();
+  });
+
+  it('falls back gracefully when Shiki highlighter is not yet loaded', () => {
+    vi.mocked(shikiLib.highlightCode).mockReturnValueOnce(null);
+    const { container } = render(<MarkdownContent content={'```typescript\nconst x = 1;\n```'} />);
+    expect(container.querySelector('pre')).toBeInTheDocument();
+    expect(container.querySelector('code')).toHaveTextContent('const x = 1;');
+  });
+
+  it('adds data-lang attribute to fallback pre for language badge', () => {
+    const { container } = render(<MarkdownContent content={'```python\nprint("hello")\n```'} />);
+    const pre = container.querySelector('pre');
+    expect(pre?.getAttribute('data-lang')).toBe('python');
   });
 });
