@@ -23,6 +23,7 @@ interface ThinkingBlockProps {
   messageId: string;
   text: string;
   isStreaming: boolean;
+  segmentIndex?: number;
 }
 
 interface ThinkingUiState {
@@ -37,7 +38,7 @@ function isNearBottom(element: HTMLElement): boolean {
   return element.scrollHeight - element.scrollTop - element.clientHeight <= 24;
 }
 
-function ThinkingBlock({ messageId, text, isStreaming }: ThinkingBlockProps) {
+function ThinkingBlock({ messageId, text, isStreaming, segmentIndex = 0 }: ThinkingBlockProps) {
   const { t } = useI18n();
   const initialUiState = useRef<ThinkingUiState>(
     thinkingUiStateByMessage.get(messageId) ?? {
@@ -115,7 +116,13 @@ function ThinkingBlock({ messageId, text, isStreaming }: ThinkingBlockProps) {
       >
         <Brain size={11} className="text-primary/70" />
         <span className="tracking-wide">
-          {isStreaming ? t.thinking.streaming : t.thinking.label}
+          {isStreaming
+            ? segmentIndex > 0
+              ? t.thinking.streamingContinued
+              : t.thinking.streaming
+            : segmentIndex > 0
+              ? t.thinking.labelContinued
+              : t.thinking.label}
         </span>
         <ChevronDown
           size={11}
@@ -282,6 +289,89 @@ function SystemEventMarker({ event, detail }: { event: string; detail?: string }
       <span className="font-medium whitespace-nowrap">{label}</span>
       <div className="flex-1 h-px bg-outline-variant/20" />
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// MessageParts — renders all parts in interleaved chronological order
+// ---------------------------------------------------------------------------
+
+function MessageParts({
+  parts,
+  messageId,
+  isStreaming,
+}: {
+  parts: MessagePart[];
+  messageId: string;
+  isStreaming: boolean;
+}) {
+  let thinkingIdx = 0;
+
+  return (
+    <>
+      {parts.map((part, idx) => {
+        switch (part.type) {
+          case 'thinking': {
+            const segIdx = thinkingIdx++;
+            const blockId = `${messageId}-thinking-${segIdx}`;
+            const isLastThinking =
+              isStreaming && !parts.slice(idx + 1).some((p) => p.type === 'thinking');
+            return (
+              <ThinkingBlock
+                key={blockId}
+                messageId={blockId}
+                text={part.text}
+                isStreaming={isLastThinking}
+                segmentIndex={segIdx}
+              />
+            );
+          }
+          case 'tool_call': {
+            const result = parts.find(
+              (p) => p.type === 'tool_result' && p.toolCallId === part.toolCallId
+            ) as Extract<MessagePart, { type: 'tool_result' }> | undefined;
+            return (
+              <ToolCallBlock
+                key={part.toolCallId}
+                name={part.name}
+                args={part.args}
+                result={result?.content ?? null}
+                isError={result?.isError}
+                isPending={isStreaming && !result}
+              />
+            );
+          }
+          case 'tool_result':
+            // Rendered inline with tool_call above — skip
+            return null;
+          case 'text':
+            return (
+              <div
+                key={`text-${idx}`}
+                className="bg-surface-container-low p-5 rounded-2xl border border-outline-variant/10 font-body text-sm leading-relaxed text-on-surface max-w-2xl"
+              >
+                <MarkdownContent content={part.text} isStreaming={isStreaming} />
+                {isStreaming && idx === parts.length - 1 && (
+                  <span className="inline-block w-0.5 h-[1em] bg-primary ml-0.5 align-middle animate-blink" />
+                )}
+              </div>
+            );
+          case 'system_event':
+            return <SystemEventMarker key={`se-${idx}`} event={part.event} detail={part.detail} />;
+          case 'error':
+            return (
+              <div
+                key={`error-${idx}`}
+                className="bg-error/10 border border-error/20 p-4 rounded-xl text-error text-sm font-body"
+              >
+                {part.text}
+              </div>
+            );
+          default:
+            return null;
+        }
+      })}
+    </>
   );
 }
 
@@ -464,28 +554,12 @@ export function ChatFeed({ chatId, messages }: { chatId: string | null; messages
                           {(() => {
                             const parts: MessagePart[] =
                               msg.parts ?? (msg.text ? [{ type: 'text', text: msg.text }] : []);
-                            const thinkingPart = parts.find((p) => p.type === 'thinking');
-                            const textParts = parts.filter((p) => p.type === 'text');
-                            const combinedText = textParts
-                              .map((p) => (p as { type: 'text'; text: string }).text)
-                              .join('');
-                            const toolCallParts = parts.filter(
-                              (p) => p.type === 'tool_call'
-                            ) as Extract<MessagePart, { type: 'tool_call' }>[];
-                            const toolResultParts = parts.filter(
-                              (p) => p.type === 'tool_result'
-                            ) as Extract<MessagePart, { type: 'tool_result' }>[];
-                            const systemEventParts = parts.filter(
-                              (p) => p.type === 'system_event'
-                            ) as Extract<MessagePart, { type: 'system_event' }>[];
+                            const hasContent =
+                              parts.some((p) => p.type === 'thinking') ||
+                              parts.some((p) => p.type === 'text') ||
+                              parts.some((p) => p.type === 'tool_call');
 
-                            if (
-                              isImageTurn ||
-                              (!msg.text &&
-                                !combinedText &&
-                                !thinkingPart &&
-                                toolCallParts.length === 0)
-                            ) {
+                            if (isImageTurn || !hasContent) {
                               return (
                                 <>
                                   <span className="text-sm font-medium text-on-surface animate-pulse">
@@ -498,45 +572,7 @@ export function ChatFeed({ chatId, messages }: { chatId: string | null; messages
                               );
                             }
 
-                            return (
-                              <>
-                                {thinkingPart && (
-                                  <ThinkingBlock
-                                    messageId={msg.id}
-                                    text={(thinkingPart as { type: 'thinking'; text: string }).text}
-                                    isStreaming={true}
-                                  />
-                                )}
-                                {systemEventParts.map((se, idx) => (
-                                  <SystemEventMarker
-                                    key={`se-${idx}`}
-                                    event={se.event}
-                                    detail={se.detail}
-                                  />
-                                ))}
-                                {toolCallParts.map((tc) => {
-                                  const res = toolResultParts.find(
-                                    (r) => r.toolCallId === tc.toolCallId
-                                  );
-                                  return (
-                                    <ToolCallBlock
-                                      key={tc.toolCallId}
-                                      name={tc.name}
-                                      args={tc.args}
-                                      result={res?.content ?? null}
-                                      isError={res?.isError}
-                                      isPending={!res}
-                                    />
-                                  );
-                                })}
-                                {combinedText && (
-                                  <div className="bg-surface-container-low p-5 rounded-2xl border border-outline-variant/10 font-body text-sm leading-relaxed text-on-surface max-w-2xl">
-                                    <MarkdownContent content={combinedText} isStreaming />
-                                    <span className="inline-block w-0.5 h-[1em] bg-primary ml-0.5 align-middle animate-blink" />
-                                  </div>
-                                )}
-                              </>
-                            );
+                            return <MessageParts parts={parts} messageId={msg.id} isStreaming />;
                           })()}
                         </div>
                       ) : isImageTurn ? (
@@ -646,61 +682,22 @@ export function ChatFeed({ chatId, messages }: { chatId: string | null; messages
                           {(() => {
                             const parts: MessagePart[] =
                               msg.parts ?? (msg.text ? [{ type: 'text', text: msg.text }] : []);
-                            const thinkingPart = parts.find((p) => p.type === 'thinking');
-                            const textParts = parts.filter((p) => p.type === 'text');
-                            const combinedText = textParts
-                              .map((p) => (p as { type: 'text'; text: string }).text)
-                              .join('');
-                            const toolCallParts = parts.filter(
-                              (p) => p.type === 'tool_call'
-                            ) as Extract<MessagePart, { type: 'tool_call' }>[];
-                            const toolResultParts = parts.filter(
-                              (p) => p.type === 'tool_result'
-                            ) as Extract<MessagePart, { type: 'tool_result' }>[];
-                            const systemEventParts = parts.filter(
-                              (p) => p.type === 'system_event'
-                            ) as Extract<MessagePart, { type: 'system_event' }>[];
+                            const hasTextOrTools =
+                              parts.some((p) => p.type === 'text') ||
+                              parts.some((p) => p.type === 'tool_call');
 
                             return (
                               <>
-                                {thinkingPart && (
-                                  <ThinkingBlock
-                                    messageId={msg.id}
-                                    text={(thinkingPart as { type: 'thinking'; text: string }).text}
-                                    isStreaming={false}
-                                  />
-                                )}
-                                {systemEventParts.map((se, idx) => (
-                                  <SystemEventMarker
-                                    key={`se-${idx}`}
-                                    event={se.event}
-                                    detail={se.detail}
-                                  />
-                                ))}
-                                {toolCallParts.map((tc) => {
-                                  const res = toolResultParts.find(
-                                    (r) => r.toolCallId === tc.toolCallId
-                                  );
-                                  return (
-                                    <ToolCallBlock
-                                      key={tc.toolCallId}
-                                      name={tc.name}
-                                      args={tc.args}
-                                      result={res?.content ?? null}
-                                      isError={res?.isError}
-                                      isPending={false}
-                                    />
-                                  );
-                                })}
-                                {(combinedText || toolCallParts.length === 0) && (
+                                <MessageParts
+                                  parts={parts}
+                                  messageId={msg.id}
+                                  isStreaming={false}
+                                />
+                                {!hasTextOrTools && (
                                   <div className="bg-surface-container-low p-5 rounded-2xl border border-outline-variant/10 font-body text-sm leading-relaxed text-on-surface max-w-2xl">
-                                    {combinedText ? (
-                                      <MarkdownContent content={combinedText} />
-                                    ) : (
-                                      <span className="text-on-surface-variant/50 italic">
-                                        No response
-                                      </span>
-                                    )}
+                                    <span className="text-on-surface-variant/50 italic">
+                                      No response
+                                    </span>
                                   </div>
                                 )}
                               </>

@@ -74,6 +74,7 @@ export interface StreamChunk {
   type?:
     | 'text'
     | 'thinking'
+    | 'thinking_start'
     | 'tool_call_started'
     | 'tool_call_completed'
     | 'tool_result'

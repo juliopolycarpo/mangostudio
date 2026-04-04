@@ -220,6 +220,13 @@ export interface SSEContextEvent {
   severity: 'normal' | 'info' | 'warning' | 'danger' | 'critical';
 }
 
+/** SSE event: signals the start of a new thinking segment, emitted before the first
+ *  thinking delta of each distinct reasoning block. */
+export interface SSEThinkingStartEvent {
+  type: 'thinking_start';
+  done: false;
+}
+
 /** SSE event: fallback/degradation notice, emitted when continuation mode changes. */
 export interface SSEFallbackEvent {
   type: 'fallback_notice';

@@ -52,6 +52,7 @@ export const respondStreamRoutes = (app: Elysia) =>
        * Falls back to the legacy generateTextStream path otherwise.
        *
        * SSE event shapes:
+       *   thinking_start:     { type: 'thinking_start', done: false }
        *   thinking:           { type: 'thinking', text: string, done: false }
        *   text chunk:         { type: 'text', text: string, done: false }
        *   tool call started:  { type: 'tool_call_started', callId, name, done: false }
@@ -235,6 +236,7 @@ export const respondStreamRoutes = (app: Elysia) =>
 
                   let pendingToolResults: AgentTurnRequest['toolResults'];
                   let isFirstIteration = true;
+                  let inThinkingSegment = false;
 
                   for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration++) {
                     if (signal.aborted) {
@@ -267,6 +269,10 @@ export const respondStreamRoutes = (app: Elysia) =>
 
                       switch (event.type) {
                         case 'reasoning_delta':
+                          if (!inThinkingSegment) {
+                            inThinkingSegment = true;
+                            controller.enqueue(sseEvent({ type: 'thinking_start', done: false }));
+                          }
                           allParts.push({ type: 'thinking', text: event.text });
                           controller.enqueue(
                             sseEvent({ type: 'thinking', text: event.text, done: false })
@@ -274,6 +280,7 @@ export const respondStreamRoutes = (app: Elysia) =>
                           break;
 
                         case 'tool_call_started':
+                          inThinkingSegment = false;
                           pendingCalls.set(event.callId, {
                             name: event.name ?? '',
                             argsStr: '',
@@ -313,6 +320,7 @@ export const respondStreamRoutes = (app: Elysia) =>
                         }
 
                         case 'assistant_text_delta':
+                          inThinkingSegment = false;
                           fullText += event.text;
                           allParts.push({ type: 'text', text: event.text });
                           controller.enqueue(
@@ -321,6 +329,7 @@ export const respondStreamRoutes = (app: Elysia) =>
                           break;
 
                         case 'turn_completed': {
+                          inThinkingSegment = false;
                           currentProviderState = event.providerState ?? null;
                           turnCompleted = true;
 
@@ -506,6 +515,7 @@ export const respondStreamRoutes = (app: Elysia) =>
                 } else if (provider.generateTextStream) {
                   // ── Legacy streaming path ───────────────────────────────────
                   const history = await loadChatHistory(chatId, { excludeId: userMsgId }, db);
+                  let legacyInThinkingSegment = false;
 
                   for await (const chunk of provider.generateTextStream({
                     userId,
@@ -522,16 +532,22 @@ export const respondStreamRoutes = (app: Elysia) =>
                     }
 
                     if (chunk.type === 'thinking' && chunk.text) {
+                      if (!legacyInThinkingSegment) {
+                        legacyInThinkingSegment = true;
+                        controller.enqueue(sseEvent({ type: 'thinking_start', done: false }));
+                      }
                       allParts.push({ type: 'thinking', text: chunk.text });
                       controller.enqueue(
                         sseEvent({ type: 'thinking', text: chunk.text, done: false })
                       );
                     } else if (chunk.type === 'text' && chunk.text && !chunk.done) {
+                      legacyInThinkingSegment = false;
                       fullText += chunk.text;
                       allParts.push({ type: 'text', text: chunk.text });
                       controller.enqueue(sseEvent({ type: 'text', text: chunk.text, done: false }));
                     } else if (!chunk.type && chunk.text && !chunk.done) {
                       // Backward compat: providers not yet migrated emit no type field
+                      legacyInThinkingSegment = false;
                       fullText += chunk.text;
                       controller.enqueue(sseEvent({ text: chunk.text, done: false }));
                     }
@@ -559,32 +575,44 @@ export const respondStreamRoutes = (app: Elysia) =>
                   const generationTime = `${((Date.now() - startTime) / 1000).toFixed(1)}s`;
                   const aiTimestamp = Date.now();
 
-                  // Consolidate thinking chunks into a single part each
-                  const thinkingText = allParts
-                    .filter(
-                      (p): p is Extract<MessagePart, { type: 'thinking' }> => p.type === 'thinking'
-                    )
-                    .map((p) => p.text)
-                    .join('');
+                  // Merge consecutive thinking chunks into segments, preserving interleaved order.
+                  // This keeps the temporal relationship between thinking blocks, tool calls, and text.
+                  const orderedSegments: MessagePart[] = [];
+                  let currentThinkingSegment = '';
 
-                  const nonThinkingParts = allParts.filter((p) => p.type !== 'thinking');
+                  for (const part of allParts) {
+                    if (part.type === 'thinking') {
+                      currentThinkingSegment += part.text;
+                    } else {
+                      if (currentThinkingSegment) {
+                        orderedSegments.push({ type: 'thinking', text: currentThinkingSegment });
+                        currentThinkingSegment = '';
+                      }
+                      orderedSegments.push(part);
+                    }
+                  }
+                  if (currentThinkingSegment) {
+                    orderedSegments.push({ type: 'thinking', text: currentThinkingSegment });
+                  }
 
-                  const consolidatedParts: MessagePart[] = [
-                    ...(thinkingText ? [{ type: 'thinking' as const, text: thinkingText }] : []),
-                    ...nonThinkingParts,
-                  ];
+                  // Collapse consecutive text parts into one while preserving order.
+                  const finalParts: MessagePart[] = [];
+                  let currentTextRun = '';
 
-                  // Collapse consecutive text parts into one
-                  const mergedText = consolidatedParts
-                    .filter((p): p is Extract<MessagePart, { type: 'text' }> => p.type === 'text')
-                    .map((p) => p.text)
-                    .join('');
-
-                  const finalParts: MessagePart[] = [
-                    ...(thinkingText ? [{ type: 'thinking' as const, text: thinkingText }] : []),
-                    ...consolidatedParts.filter((p) => p.type !== 'thinking' && p.type !== 'text'),
-                    ...(mergedText ? [{ type: 'text' as const, text: mergedText }] : []),
-                  ];
+                  for (const part of orderedSegments) {
+                    if (part.type === 'text') {
+                      currentTextRun += part.text;
+                    } else {
+                      if (currentTextRun) {
+                        finalParts.push({ type: 'text', text: currentTextRun });
+                        currentTextRun = '';
+                      }
+                      finalParts.push(part);
+                    }
+                  }
+                  if (currentTextRun) {
+                    finalParts.push({ type: 'text', text: currentTextRun });
+                  }
 
                   await createMessage(
                     {

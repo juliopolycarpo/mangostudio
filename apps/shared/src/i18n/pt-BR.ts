@@ -149,7 +149,9 @@ export const messages = {
 
   thinking: {
     label: 'Processo de raciocínio',
+    labelContinued: 'Continuação do raciocínio',
     streaming: 'Pensando...',
+    streamingContinued: 'Pensando novamente...',
     toggle: 'Ver raciocínio',
     enable: 'Raciocinar',
     enabled: 'Raciocínio ativo',

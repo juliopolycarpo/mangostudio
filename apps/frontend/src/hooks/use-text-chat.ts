@@ -109,7 +109,8 @@ export function useTextChat({
       const controller = new AbortController();
       abortControllerRef.current = controller;
       let accumulatedText = '';
-      let accumulatedThinking = '';
+      let thinkingSegments: string[] = [];
+      let currentThinkingIdx = -1;
       let accumulatedParts: MessagePart[] = [];
 
       try {
@@ -134,17 +135,44 @@ export function useTextChat({
 
             const chunkType = chunk.type ?? 'text';
 
-            if (chunkType === 'thinking' && chunk.text) {
-              accumulatedThinking += chunk.text;
-              const thinkingPart: MessagePart = { type: 'thinking', text: accumulatedThinking };
-              accumulatedParts = [
-                thinkingPart,
-                ...accumulatedParts.filter((p) => p.type !== 'thinking'),
-              ];
+            if (chunkType === 'thinking_start') {
+              // Start a new thinking segment — push placeholder into parts
+              thinkingSegments.push('');
+              currentThinkingIdx = thinkingSegments.length - 1;
+              const thinkingPart: MessagePart = { type: 'thinking', text: '' };
+              accumulatedParts = [...accumulatedParts, thinkingPart];
+              updateOptimisticMessage(activeChatId!, optimisticAiMsgId, {
+                parts: [...accumulatedParts],
+              });
+            } else if (chunkType === 'thinking' && chunk.text) {
+              if (currentThinkingIdx < 0) {
+                // Fallback: no thinking_start received (legacy API) — create segment implicitly
+                thinkingSegments.push('');
+                currentThinkingIdx = thinkingSegments.length - 1;
+                accumulatedParts = [...accumulatedParts, { type: 'thinking', text: '' }];
+              }
+              thinkingSegments[currentThinkingIdx] += chunk.text;
+              // Update the last thinking part in accumulatedParts (current segment)
+              let foundLast = false;
+              accumulatedParts = accumulatedParts
+                .slice()
+                .reverse()
+                .map((p) => {
+                  if (!foundLast && p.type === 'thinking') {
+                    foundLast = true;
+                    return {
+                      type: 'thinking' as const,
+                      text: thinkingSegments[currentThinkingIdx],
+                    };
+                  }
+                  return p;
+                })
+                .reverse();
               updateOptimisticMessage(activeChatId!, optimisticAiMsgId, {
                 parts: [...accumulatedParts],
               });
             } else if (chunkType === 'text' && !chunk.done && chunk.text) {
+              currentThinkingIdx = -1;
               accumulatedText += chunk.text;
               const textPart: MessagePart = { type: 'text', text: accumulatedText };
               accumulatedParts = [...accumulatedParts.filter((p) => p.type !== 'text'), textPart];
@@ -153,6 +181,7 @@ export function useTextChat({
                 parts: [...accumulatedParts],
               });
             } else if (chunkType === 'tool_call_started' && chunk.callId) {
+              currentThinkingIdx = -1;
               // Add a pending tool_call part for optimistic UI
               const toolCallPart: MessagePart = {
                 type: 'tool_call',
