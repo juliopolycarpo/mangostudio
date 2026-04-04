@@ -7,7 +7,7 @@
  * rejected during connector setup.
  */
 
-import OpenAI from 'openai';
+import OpenAI, { APIError as OpenAIAPIError } from 'openai';
 import { join } from 'path';
 import { mkdirSync } from 'fs';
 import { createProviderSecretService } from './secret-service';
@@ -109,7 +109,7 @@ export async function validateOpenAIAuthContext(ctx: OpenAIAuthContext): Promise
     // credentials are accepted.
     await client.models.list();
   } catch (err) {
-    if (err instanceof OpenAI.APIError) {
+    if (err instanceof OpenAIAPIError) {
       if (err.status === 401) {
         throw new OpenAIAuthError(
           'OpenAI API key is invalid or expired. Verify your key and try again.',
@@ -509,18 +509,18 @@ async function* streamAgentTurnWithResponsesAPI(
     stream = await makeRequest(previousResponseId);
   } catch (err: unknown) {
     const isCursorError =
-      err instanceof OpenAI.APIError &&
+      err instanceof OpenAIAPIError &&
       (err.status === 404 ||
         err.status === 409 ||
         (err.status === 400 && /previous_response_id/i.test(err.message)));
     const canFallback = isCursorError && previousResponseId && !req.toolResults;
     if (canFallback) {
-      const status = err instanceof OpenAI.APIError ? err.status : 'unknown';
+      const status = err instanceof OpenAIAPIError ? err.status : 'unknown';
       console.warn(
         `[fallback][degrade] provider=openai reason=cursor_error status=${status}` +
           ` falling back to full replay`
       );
-      // Note: err instanceof OpenAI.APIError was already checked above via isCursorError
+      // Note: err instanceof OpenAIAPIError was already checked above via isCursorError
       // Rebuild input from full history
       const messages: Array<Record<string, unknown>> = [];
       for (const turn of req.history) {

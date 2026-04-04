@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test';
+import { afterEach, describe, expect, it, mock } from 'bun:test';
 import type { SecretMetadataRow } from '@mangostudio/shared/types';
 import type { SecretMetadataInput } from '../../../../src/services/secret-store/metadata';
 import { createProviderSecretService } from '../../../../src/services/providers/secret-service';
@@ -387,6 +387,10 @@ describe('validateOpenAIAuthContext', () => {
 });
 
 describe('openai-provider listModels filtering', () => {
+  afterEach(() => {
+    mock.restore();
+  });
+
   it('filters out embedding/tts/whisper/moderation model ids', () => {
     // Direct unit test of the filter logic used in listModelsWithCache
     const RAW_MODEL_IDS = [
@@ -417,10 +421,16 @@ describe('openai-provider listModels filtering', () => {
   });
 
   it('returns empty array when no key is configured', async () => {
-    // When no connectors exist, listModels returns [] (the fallback)
+    // Mock the database so syncConfigFileConnectors produces no rows.
+    // listSecretMetadata catches TypeError and returns [], giving resolvedCtx = null.
+    mock.module('../../../../src/db/database', () => ({
+      getDb: () => ({}),
+    }));
+
     const { openAIProvider } = await import('../../../../src/services/providers/openai-provider');
-    // The provider uses the real secretService which hits the real DB.
-    // With no connectors for this user, it should return the empty fallback.
+    // Evict any stale cache entry so the mocked DB path is actually exercised.
+    (openAIProvider as any).invalidateModelCache?.('nonexistent-user-no-keys');
+
     const models = await openAIProvider.listModels('nonexistent-user-no-keys');
     expect(models).toEqual([]);
   });
