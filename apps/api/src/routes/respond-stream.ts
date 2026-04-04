@@ -448,6 +448,19 @@ export const respondStreamRoutes = (app: Elysia) =>
                     pendingToolResults = nextToolResults;
                     isFirstIteration = false;
                   }
+
+                  // If the turn ended with non-durable state, clear any stale cross-turn cursor
+                  // (e.g. user switched from a durable provider to a stateless one).
+                  if (!aborted && !durableProviderState) {
+                    await db
+                      .updateTable('chats')
+                      .set({ lastProviderState: null })
+                      .where('id', '=', chatId)
+                      .execute()
+                      .catch((err) => {
+                        console.warn(`[continuation][clear] Failed to clear stale state: ${err}`);
+                      });
+                  }
                 } else if (provider.generateTextStream) {
                   // ── Legacy streaming path ───────────────────────────────────
                   const history = await loadChatHistory(chatId, { excludeId: userMsgId }, db);
