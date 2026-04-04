@@ -75,6 +75,7 @@ export const messages = {
     tabs: {
       general: 'Geral',
       connectors: 'Conectores',
+      appearance: 'Aparência',
     },
     general: {
       languageLabel: 'Idioma',
@@ -141,6 +142,31 @@ export const messages = {
       deleteSuccess: 'Conector excluído com sucesso!',
       updateModelsSuccess: 'Modelos atualizados com sucesso!',
       errorRequired: 'Nome e Chave de API são obrigatórios.',
+    },
+    appearance: {
+      title: 'Aparência',
+      appTheme: {
+        label: 'Tema do Aplicativo',
+        description: 'Escolha o tema visual para o aplicativo',
+        dark: 'Escuro',
+        light: 'Claro',
+        system: 'Sistema',
+        comingSoon: 'Em breve',
+      },
+      fontSize: {
+        label: 'Tamanho de Fonte',
+        description: 'Ajuste o tamanho do texto nas mensagens do chat',
+        small: 'Pequeno',
+        default: 'Padrão',
+        large: 'Grande',
+      },
+      chatDensity: {
+        label: 'Densidade do Chat',
+        description: 'Controle o espaçamento entre as mensagens',
+        compact: 'Compacto',
+        default: 'Padrão',
+        comfortable: 'Confortável',
+      },
     },
   },
 

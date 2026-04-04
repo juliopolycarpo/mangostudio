@@ -8,6 +8,7 @@ import {
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ToastProvider } from '../../../src/components/ui/Toast';
 import { I18nProvider } from '../../../src/hooks/use-i18n';
+import { ThemeProvider } from '../../../src/hooks/use-theme';
 
 const createTestQueryClient = () =>
   new QueryClient({
@@ -22,9 +23,11 @@ function render(ui: React.ReactElement, options?: Omit<RenderOptions, 'wrapper'>
   const testQueryClient = createTestQueryClient();
   return tlRender(
     <QueryClientProvider client={testQueryClient}>
-      <I18nProvider>
-        <ToastProvider>{ui}</ToastProvider>
-      </I18nProvider>
+      <ThemeProvider>
+        <I18nProvider>
+          <ToastProvider>{ui}</ToastProvider>
+        </I18nProvider>
+      </ThemeProvider>
     </QueryClientProvider>,
     options
   );
@@ -39,9 +42,11 @@ function renderHook<Result, Props>(
     ...options,
     wrapper: ({ children }) => (
       <QueryClientProvider client={testQueryClient}>
-        <I18nProvider>
-          <ToastProvider>{children}</ToastProvider>
-        </I18nProvider>
+        <ThemeProvider>
+          <I18nProvider>
+            <ToastProvider>{children}</ToastProvider>
+          </I18nProvider>
+        </ThemeProvider>
       </QueryClientProvider>
     ),
   });

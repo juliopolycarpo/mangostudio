@@ -560,7 +560,7 @@ export function ChatFeed({ chatId, messages }: { chatId: string | null; messages
                   left: 0,
                   width: '100%',
                   transform: `translateY(${virtualRow.start}px)`,
-                  paddingBottom: '3rem', // spacing between messages
+                  paddingBottom: 'var(--chat-message-gap)',
                 }}
               >
                 <motion.div
@@ -590,7 +590,7 @@ export function ChatFeed({ chatId, messages }: { chatId: string | null; messages
                         </div>
                       )}
                       <div className="flex flex-col items-end gap-1.5">
-                        <div className="px-5 py-3 rounded-2xl bg-surface-container-low text-on-surface border border-outline-variant/10 font-body text-sm leading-relaxed">
+                        <div className="px-5 py-3 rounded-2xl bg-surface-container-low text-on-surface border border-outline-variant/10 font-body chat-message-body leading-relaxed">
                           <MarkdownContent
                             content={msg.text}
                             copyCodeLabel={t.chat.copyCode}

@@ -18,6 +18,7 @@ import { Route as AuthenticatedGalleryRouteImport } from './routes/_authenticate
 import { Route as AuthenticatedSettingsIndexRouteImport } from './routes/_authenticated/settings/index'
 import { Route as AuthenticatedSettingsGeneralRouteImport } from './routes/_authenticated/settings/general'
 import { Route as AuthenticatedSettingsConnectorsRouteImport } from './routes/_authenticated/settings/connectors'
+import { Route as AuthenticatedSettingsAppearanceRouteImport } from './routes/_authenticated/settings/appearance'
 
 const SignupRoute = SignupRouteImport.update({
   id: '/signup',
@@ -66,6 +67,12 @@ const AuthenticatedSettingsConnectorsRoute =
     path: '/connectors',
     getParentRoute: () => AuthenticatedSettingsRoute,
   } as any)
+const AuthenticatedSettingsAppearanceRoute =
+  AuthenticatedSettingsAppearanceRouteImport.update({
+    id: '/appearance',
+    path: '/appearance',
+    getParentRoute: () => AuthenticatedSettingsRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof AuthenticatedIndexRoute
@@ -73,6 +80,7 @@ export interface FileRoutesByFullPath {
   '/signup': typeof SignupRoute
   '/gallery': typeof AuthenticatedGalleryRoute
   '/settings': typeof AuthenticatedSettingsRouteWithChildren
+  '/settings/appearance': typeof AuthenticatedSettingsAppearanceRoute
   '/settings/connectors': typeof AuthenticatedSettingsConnectorsRoute
   '/settings/general': typeof AuthenticatedSettingsGeneralRoute
   '/settings/': typeof AuthenticatedSettingsIndexRoute
@@ -82,6 +90,7 @@ export interface FileRoutesByTo {
   '/signup': typeof SignupRoute
   '/gallery': typeof AuthenticatedGalleryRoute
   '/': typeof AuthenticatedIndexRoute
+  '/settings/appearance': typeof AuthenticatedSettingsAppearanceRoute
   '/settings/connectors': typeof AuthenticatedSettingsConnectorsRoute
   '/settings/general': typeof AuthenticatedSettingsGeneralRoute
   '/settings': typeof AuthenticatedSettingsIndexRoute
@@ -94,6 +103,7 @@ export interface FileRoutesById {
   '/_authenticated/gallery': typeof AuthenticatedGalleryRoute
   '/_authenticated/settings': typeof AuthenticatedSettingsRouteWithChildren
   '/_authenticated/': typeof AuthenticatedIndexRoute
+  '/_authenticated/settings/appearance': typeof AuthenticatedSettingsAppearanceRoute
   '/_authenticated/settings/connectors': typeof AuthenticatedSettingsConnectorsRoute
   '/_authenticated/settings/general': typeof AuthenticatedSettingsGeneralRoute
   '/_authenticated/settings/': typeof AuthenticatedSettingsIndexRoute
@@ -106,6 +116,7 @@ export interface FileRouteTypes {
     | '/signup'
     | '/gallery'
     | '/settings'
+    | '/settings/appearance'
     | '/settings/connectors'
     | '/settings/general'
     | '/settings/'
@@ -115,6 +126,7 @@ export interface FileRouteTypes {
     | '/signup'
     | '/gallery'
     | '/'
+    | '/settings/appearance'
     | '/settings/connectors'
     | '/settings/general'
     | '/settings'
@@ -126,6 +138,7 @@ export interface FileRouteTypes {
     | '/_authenticated/gallery'
     | '/_authenticated/settings'
     | '/_authenticated/'
+    | '/_authenticated/settings/appearance'
     | '/_authenticated/settings/connectors'
     | '/_authenticated/settings/general'
     | '/_authenticated/settings/'
@@ -202,16 +215,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedSettingsConnectorsRouteImport
       parentRoute: typeof AuthenticatedSettingsRoute
     }
+    '/_authenticated/settings/appearance': {
+      id: '/_authenticated/settings/appearance'
+      path: '/appearance'
+      fullPath: '/settings/appearance'
+      preLoaderRoute: typeof AuthenticatedSettingsAppearanceRouteImport
+      parentRoute: typeof AuthenticatedSettingsRoute
+    }
   }
 }
 
 interface AuthenticatedSettingsRouteChildren {
+  AuthenticatedSettingsAppearanceRoute: typeof AuthenticatedSettingsAppearanceRoute
   AuthenticatedSettingsConnectorsRoute: typeof AuthenticatedSettingsConnectorsRoute
   AuthenticatedSettingsGeneralRoute: typeof AuthenticatedSettingsGeneralRoute
   AuthenticatedSettingsIndexRoute: typeof AuthenticatedSettingsIndexRoute
 }
 
 const AuthenticatedSettingsRouteChildren: AuthenticatedSettingsRouteChildren = {
+  AuthenticatedSettingsAppearanceRoute: AuthenticatedSettingsAppearanceRoute,
   AuthenticatedSettingsConnectorsRoute: AuthenticatedSettingsConnectorsRoute,
   AuthenticatedSettingsGeneralRoute: AuthenticatedSettingsGeneralRoute,
   AuthenticatedSettingsIndexRoute: AuthenticatedSettingsIndexRoute,
