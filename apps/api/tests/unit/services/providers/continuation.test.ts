@@ -5,6 +5,7 @@ import {
   validateContinuationEnvelope,
   computeSystemPromptHash,
   computeToolsetHash,
+  isDurableMode,
   type ContinuationEnvelope,
 } from '../../../../src/services/providers/continuation';
 
@@ -126,6 +127,20 @@ describe('computeSystemPromptHash', () => {
 
   it('returns "none" for whitespace-only string', () => {
     expect(computeSystemPromptHash('   ')).toBe('none');
+  });
+});
+
+describe('isDurableMode', () => {
+  it('returns true for responses', () => {
+    expect(isDurableMode('responses')).toBe(true);
+  });
+
+  it('returns true for interactions', () => {
+    expect(isDurableMode('interactions')).toBe(true);
+  });
+
+  it('returns false for stateless-loop', () => {
+    expect(isDurableMode('stateless-loop')).toBe(false);
   });
 });
 

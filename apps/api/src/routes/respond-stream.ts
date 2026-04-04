@@ -22,6 +22,7 @@ import {
   validateContinuationEnvelope,
   computeSystemPromptHash,
   computeToolsetHash,
+  isDurableMode,
 } from '../services/providers/continuation';
 import {
   computeContextSnapshot,
@@ -132,7 +133,7 @@ export const respondStreamRoutes = (app: Elysia) =>
               let fullText = '';
               let allParts: MessagePart[] = [];
               let aborted = false;
-              let finalProviderState: string | null = null;
+              let durableProviderState: string | null = null;
 
               // Emit pending fallback notice as first SSE event
               if (continuationFallback) {
@@ -308,14 +309,21 @@ export const respondStreamRoutes = (app: Elysia) =>
 
                         case 'turn_completed': {
                           currentProviderState = event.providerState ?? null;
-                          finalProviderState = currentProviderState;
                           turnCompleted = true;
 
-                          // Persist state eagerly on the chat row (survives message save failures)
-                          if (finalProviderState) {
+                          // Only persist durable continuation state (responses/interactions) across
+                          // turns. Turn-local state (stateless-loop) is valid only within the
+                          // current agentic loop and must NOT be reused as cross-turn state.
+                          const resultEnvelope = parseContinuationEnvelope(currentProviderState);
+                          durableProviderState =
+                            resultEnvelope && isDurableMode(resultEnvelope.mode)
+                              ? currentProviderState
+                              : null;
+
+                          if (durableProviderState) {
                             await db
                               .updateTable('chats')
-                              .set({ lastProviderState: finalProviderState })
+                              .set({ lastProviderState: durableProviderState })
                               .where('id', '=', chatId)
                               .execute()
                               .catch((err) => {
@@ -324,8 +332,6 @@ export const respondStreamRoutes = (app: Elysia) =>
                                 );
                               });
                           }
-
-                          const resultEnvelope = parseContinuationEnvelope(currentProviderState);
                           if (resultEnvelope) {
                             console.log(
                               `[continuation][updated] chatId=${chatId} provider=${resultEnvelope.provider} mode=${resultEnvelope.mode} cursor=${resultEnvelope.cursor ? 'present' : 'none'}`
@@ -442,6 +448,19 @@ export const respondStreamRoutes = (app: Elysia) =>
                     pendingToolResults = nextToolResults;
                     isFirstIteration = false;
                   }
+
+                  // If the turn ended with non-durable state, clear any stale cross-turn cursor
+                  // (e.g. user switched from a durable provider to a stateless one).
+                  if (!aborted && !durableProviderState) {
+                    await db
+                      .updateTable('chats')
+                      .set({ lastProviderState: null })
+                      .where('id', '=', chatId)
+                      .execute()
+                      .catch((err) => {
+                        console.warn(`[continuation][clear] Failed to clear stale state: ${err}`);
+                      });
+                  }
                 } else if (provider.generateTextStream) {
                   // ── Legacy streaming path ───────────────────────────────────
                   const history = await loadChatHistory(chatId, { excludeId: userMsgId }, db);
@@ -532,7 +551,7 @@ export const respondStreamRoutes = (app: Elysia) =>
                       role: 'ai',
                       text: fullText,
                       parts: finalParts.length > 0 ? JSON.stringify(finalParts) : null,
-                      providerState: finalProviderState,
+                      providerState: durableProviderState,
                       timestamp: aiTimestamp,
                       isGenerating: false,
                       generationTime,
