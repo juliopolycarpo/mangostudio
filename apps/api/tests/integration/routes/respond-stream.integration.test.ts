@@ -235,4 +235,109 @@ describe('POST /respond/stream', () => {
 
     expect(response.status).toBe(503);
   });
+
+  it('emits fallback_notice and context_info with mode=replay when provider yields continuation_degraded then turn_completed without cursor', async () => {
+    const createdMessages: Array<Record<string, unknown>> = [];
+
+    // A stateless-loop state has no cursor → mode becomes 'replay' in context_info
+    const STATELESS_STATE = JSON.stringify({
+      schemaVersion: 1,
+      provider: 'openai-compatible',
+      mode: 'stateless-loop',
+      modelName: 'deepseek-chat',
+      systemPromptHash: 'none',
+      toolsetHash: 'none',
+      loopMessages: [],
+    });
+
+    mock.module('../../../src/services/chat-service', () => ({
+      verifyChatOwnership: async () => true,
+    }));
+
+    mock.module('../../../src/services/providers/registry', () => ({
+      getProviderForModel: async () => ({
+        providerType: 'openai-compatible',
+        generateText: async () => ({ text: '' }),
+        generateAgentTurnStream: async function* (_req: any) {
+          yield {
+            type: 'continuation_degraded',
+            from: 'stateful',
+            to: 'replay',
+            reason: 'cursor_expired',
+          };
+          yield { type: 'assistant_text_delta', text: 'Hello' };
+          yield { type: 'turn_completed', providerState: STATELESS_STATE };
+        },
+      }),
+    }));
+
+    mock.module('../../../src/services/message-service', () => ({
+      createMessage: async (msg: Record<string, unknown>) => {
+        createdMessages.push({ ...msg });
+      },
+      loadRichChatHistory: async () => [],
+      loadChatHistory: async () => [],
+    }));
+
+    mock.module('../../../src/services/tools', () => ({
+      getAllToolDefinitions: () => [],
+      executeTool: async () => ({}),
+    }));
+
+    const makeWhere = (): any => ({
+      execute: async () => {},
+      executeTakeFirst: async () => null,
+      where: () => makeWhere(),
+    });
+
+    mock.module('../../../src/db/database', () => ({
+      getDb: () => ({
+        selectFrom: () => ({ select: () => makeWhere() }),
+        insertInto: () => ({ values: () => ({ execute: async () => {} }) }),
+        updateTable: () => ({ set: () => makeWhere() }),
+      }),
+    }));
+
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
+    restoreAuth = restore;
+
+    const response = await app.handle(
+      new Request('http://localhost/respond/stream', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chatId: 'test-chat', prompt: 'Hi', model: 'deepseek-chat' }),
+      })
+    );
+
+    expect(response.status).toBe(200);
+
+    const rawText = await response.text();
+
+    // Parse SSE lines
+    const sseEvents = rawText
+      .split('\n\n')
+      .filter((block) => block.startsWith('data: '))
+      .map((block) => {
+        try {
+          return JSON.parse(block.replace(/^data: /, ''));
+        } catch {
+          return null;
+        }
+      })
+      .filter(Boolean);
+
+    // Assert fallback_notice is emitted
+    const fallbackNotice = sseEvents.find((e: any) => e.type === 'fallback_notice');
+    expect(fallbackNotice).toBeDefined();
+    expect(fallbackNotice).toMatchObject({
+      type: 'fallback_notice',
+      from: 'stateful',
+      to: 'replay',
+    });
+
+    // Assert context_info is emitted with mode=replay (no cursor in stateless-loop)
+    const contextInfo = sseEvents.find((e: any) => e.type === 'context_info');
+    expect(contextInfo).toBeDefined();
+    expect(contextInfo).toMatchObject({ type: 'context_info', mode: 'replay' });
+  });
 });

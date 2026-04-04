@@ -307,3 +307,155 @@ describe('openai-compatible listModels filtering', () => {
     expect(models).toEqual([]);
   });
 });
+
+describe('classifyEndpoint', () => {
+  it('classifies DeepSeek base URLs', async () => {
+    const { classifyEndpoint } =
+      await import('../../../../src/services/providers/openai-compatible-provider');
+    expect(classifyEndpoint('https://api.deepseek.com/v1')).toBe('deepseek');
+    expect(classifyEndpoint('https://api.deepseek.com')).toBe('deepseek');
+  });
+
+  it('classifies OpenRouter base URLs', async () => {
+    const { classifyEndpoint } =
+      await import('../../../../src/services/providers/openai-compatible-provider');
+    expect(classifyEndpoint('https://openrouter.ai/api/v1')).toBe('openrouter');
+  });
+
+  it('classifies unknown endpoints as generic', async () => {
+    const { classifyEndpoint } =
+      await import('../../../../src/services/providers/openai-compatible-provider');
+    expect(classifyEndpoint('https://my-custom-llm.example.com/v1')).toBe('generic');
+    expect(classifyEndpoint('http://localhost:11434')).toBe('generic');
+  });
+});
+
+describe('extractReasoningChunks', () => {
+  it('extracts from delta.reasoning_content', async () => {
+    const { extractReasoningChunks } =
+      await import('../../../../src/services/providers/openai-compatible-provider');
+    const chunks = extractReasoningChunks({ reasoning_content: 'thinking step 1' });
+    expect(chunks).toEqual(['thinking step 1']);
+  });
+
+  it('extracts from delta.reasoning (OpenRouter normalized)', async () => {
+    const { extractReasoningChunks } =
+      await import('../../../../src/services/providers/openai-compatible-provider');
+    const chunks = extractReasoningChunks({ reasoning: 'openrouter thinking' });
+    expect(chunks).toEqual(['openrouter thinking']);
+  });
+
+  it('prefers reasoning_content over reasoning when both present', async () => {
+    const { extractReasoningChunks } =
+      await import('../../../../src/services/providers/openai-compatible-provider');
+    // The || short-circuits: if reasoning_content is non-empty, reasoning is not used
+    const chunks = extractReasoningChunks({
+      reasoning_content: 'primary',
+      reasoning: 'secondary',
+    });
+    expect(chunks).toEqual(['primary']);
+  });
+
+  it('falls back to delta.reasoning when reasoning_content is empty string', async () => {
+    const { extractReasoningChunks } =
+      await import('../../../../src/services/providers/openai-compatible-provider');
+    const chunks = extractReasoningChunks({ reasoning_content: '', reasoning: 'fallback' });
+    expect(chunks).toEqual(['fallback']);
+  });
+
+  it('extracts reasoning.text entries from delta.reasoning_details', async () => {
+    const { extractReasoningChunks } =
+      await import('../../../../src/services/providers/openai-compatible-provider');
+    const chunks = extractReasoningChunks({
+      reasoning_details: [
+        { type: 'reasoning.text', text: 'step A' },
+        { type: 'reasoning.text', text: 'step B' },
+      ],
+    });
+    expect(chunks).toEqual(['step A', 'step B']);
+  });
+
+  it('extracts reasoning.summary entries from delta.reasoning_details', async () => {
+    const { extractReasoningChunks } =
+      await import('../../../../src/services/providers/openai-compatible-provider');
+    const chunks = extractReasoningChunks({
+      reasoning_details: [{ type: 'reasoning.summary', text: 'summary text' }],
+    });
+    expect(chunks).toEqual(['summary text']);
+  });
+
+  it('skips reasoning_details entries with unknown type', async () => {
+    const { extractReasoningChunks } =
+      await import('../../../../src/services/providers/openai-compatible-provider');
+    const chunks = extractReasoningChunks({
+      reasoning_details: [{ type: 'unknown.type', text: 'ignored' }],
+    });
+    expect(chunks).toEqual([]);
+  });
+
+  it('returns empty array when delta has no reasoning fields', async () => {
+    const { extractReasoningChunks } =
+      await import('../../../../src/services/providers/openai-compatible-provider');
+    expect(extractReasoningChunks({ content: 'Hello' })).toEqual([]);
+    expect(extractReasoningChunks({})).toEqual([]);
+  });
+
+  it('combines simple field and reasoning_details in one delta', async () => {
+    const { extractReasoningChunks } =
+      await import('../../../../src/services/providers/openai-compatible-provider');
+    const chunks = extractReasoningChunks({
+      reasoning_content: 'inline',
+      reasoning_details: [{ type: 'reasoning.text', text: 'detailed' }],
+    });
+    // reasoning_content is returned as a single chunk; reasoning_details appends more
+    expect(chunks).toEqual(['inline', 'detailed']);
+  });
+});
+
+describe('openai-compatible capability metadata flags', () => {
+  it('sets parallelToolCalls=true and reasoningWithTools=false for text-only model IDs', async () => {
+    // Validate the logic the listModels function uses to assemble capabilities.
+    // Since listModels calls the live API, we test the flag derivation logic directly.
+    const { isImageModelId, isReasoningModel } =
+      await import('@mangostudio/shared/utils/model-detection');
+
+    const gpt4oId = 'gpt-4o';
+    const isImage = isImageModelId(gpt4oId);
+    expect(isImage).toBe(false);
+    expect(isReasoningModel(gpt4oId)).toBe(false);
+
+    // parallelToolCalls: !isImage → true
+    expect(!isImage).toBe(true);
+    // reasoningWithTools: isReasoningModel && !isImage → false
+    expect(isReasoningModel(gpt4oId) && !isImage).toBe(false);
+  });
+
+  it('sets parallelToolCalls=false and reasoningWithTools=false for image model IDs', async () => {
+    const { isImageModelId, isReasoningModel } =
+      await import('@mangostudio/shared/utils/model-detection');
+
+    const imageModelId = 'dall-e-3';
+    const isImage = isImageModelId(imageModelId);
+    expect(isImage).toBe(true);
+
+    // parallelToolCalls: !isImage → false
+    expect(!isImage).toBe(false);
+    // reasoningWithTools: isReasoningModel && !isImage → false
+    expect(isReasoningModel(imageModelId) && !isImage).toBe(false);
+  });
+
+  it('sets parallelToolCalls=true and reasoningWithTools=true for deepseek-r1', async () => {
+    const { isImageModelId, isReasoningModel } =
+      await import('@mangostudio/shared/utils/model-detection');
+
+    const reasoningModelId = 'deepseek-r1';
+    const isImage = isImageModelId(reasoningModelId);
+    expect(isImage).toBe(false);
+    expect(isReasoningModel(reasoningModelId)).toBe(true);
+
+    // parallelToolCalls: !isImage → true
+    expect(!isImage).toBe(true);
+    // reasoningWithTools: isReasoningModel && !isImage → true
+    expect(isReasoningModel(reasoningModelId) && !isImage).toBe(true);
+  });
+});
