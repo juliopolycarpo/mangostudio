@@ -8,6 +8,8 @@ import { requireAuth } from '../plugins/auth-middleware';
 import { verifyChatOwnership } from '../services/chat-service';
 import { mapMessageRow } from '../services/message-service';
 import { parseQueryInt } from '../utils/query';
+import { parseContinuationEnvelope } from '../services/providers/continuation';
+import { getContextSeverity } from '../services/providers/context-policy';
 
 export const chatRoutes = (app: Elysia) =>
   app.group('/chats', (app) =>
@@ -165,9 +167,51 @@ export const chatRoutes = (app: Elysia) =>
 
           const mappedMessages = messages.map(mapMessageRow);
 
+          // Recover last context snapshot on initial page load (no cursor)
+          let contextInfo: {
+            estimatedInputTokens: number;
+            contextLimit: number;
+            estimatedUsageRatio: number;
+            mode: string;
+            severity: string;
+          } | null = null;
+
+          if (!query.cursor) {
+            const lastAiRow = await db
+              .selectFrom('messages')
+              .select('providerState')
+              .where('chatId', '=', params.chatId)
+              .where('role', '=', 'ai')
+              .where('providerState', 'is not', null)
+              .orderBy('timestamp', 'desc')
+              .limit(1)
+              .executeTakeFirst();
+
+            if (lastAiRow?.providerState) {
+              const envelope = parseContinuationEnvelope(lastAiRow.providerState as string);
+              if (envelope?.context) {
+                const tokens =
+                  envelope.context.providerReportedInputTokens ??
+                  envelope.context.estimatedInputTokens;
+                const limit = envelope.context.contextLimit;
+                if (tokens != null && limit != null) {
+                  const ratio = Math.min(tokens / limit, 1);
+                  contextInfo = {
+                    estimatedInputTokens: tokens,
+                    contextLimit: limit,
+                    estimatedUsageRatio: ratio,
+                    mode: envelope.cursor ? 'stateful' : 'replay',
+                    severity: getContextSeverity(ratio),
+                  };
+                }
+              }
+            }
+          }
+
           return {
             messages: mappedMessages,
             nextCursor,
+            contextInfo,
           };
         },
         {
