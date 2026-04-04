@@ -212,6 +212,19 @@ export const respondStreamRoutes = (app: Elysia) =>
                           ` to=${continuationFallback.to} reason="${continuationFallback.reason}"` +
                           ` provider=${provider.providerType} model=${model}`
                       );
+                      allParts.push({
+                        type: 'system_event',
+                        event: 'cursor_lost',
+                        detail: `${continuationFallback.from} → ${continuationFallback.to}`,
+                      });
+                      controller.enqueue(
+                        sseEvent({
+                          type: 'system_event',
+                          event: 'cursor_lost',
+                          detail: `${continuationFallback.from} → ${continuationFallback.to}`,
+                          done: false,
+                        })
+                      );
                       currentProviderState = null; // Force full replay
                     } else {
                       console.log(
@@ -386,6 +399,19 @@ export const respondStreamRoutes = (app: Elysia) =>
                             `[fallback][degrade] chatId=${chatId} from=${event.from}` +
                               ` to=${event.to} reason="${event.reason}"` +
                               ` provider=${provider.providerType} model=${model}`
+                          );
+                          allParts.push({
+                            type: 'system_event',
+                            event: 'cursor_lost',
+                            detail: `${event.from} → ${event.to}`,
+                          });
+                          controller.enqueue(
+                            sseEvent({
+                              type: 'system_event',
+                              event: 'cursor_lost',
+                              detail: `${event.from} → ${event.to}`,
+                              done: false,
+                            })
                           );
                           break;
 
