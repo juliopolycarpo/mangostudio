@@ -17,6 +17,7 @@ import { AnimatePresence, motion } from 'motion/react';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { useI18n } from '@/hooks/use-i18n';
+import { MarkdownContent } from '@/components/MarkdownContent';
 
 interface ThinkingBlockProps {
   messageId: string;
@@ -137,12 +138,12 @@ function ThinkingBlock({ messageId, text, isStreaming }: ThinkingBlockProps) {
               onScroll={handleScroll}
               className="p-4 max-h-48 overflow-y-auto app-scrollbar"
             >
-              <p className="text-xs text-on-surface-variant/60 font-mono leading-relaxed whitespace-pre-wrap">
-                {text}
+              <div className="text-xs text-on-surface-variant/60 leading-relaxed markdown-content--thinking">
+                <MarkdownContent content={text} isStreaming={isStreaming} />
                 {isStreaming && (
                   <span className="inline-block w-0.5 h-[1em] bg-primary/40 ml-0.5 align-middle animate-blink" />
                 )}
-              </p>
+              </div>
             </div>
           </motion.div>
         )}
@@ -429,7 +430,7 @@ export function ChatFeed({ chatId, messages }: { chatId: string | null; messages
                       )}
                       <div className="flex flex-col items-end gap-1.5">
                         <div className="px-5 py-3 rounded-2xl bg-surface-container-low text-on-surface border border-outline-variant/10 font-body text-sm leading-relaxed">
-                          {msg.text}
+                          <MarkdownContent content={msg.text} />
                         </div>
                         {/* Badge for image prompts */}
                         {isImageTurn && (
@@ -529,8 +530,8 @@ export function ChatFeed({ chatId, messages }: { chatId: string | null; messages
                                   );
                                 })}
                                 {combinedText && (
-                                  <div className="bg-surface-container-low p-5 rounded-2xl border border-outline-variant/10 font-body text-sm leading-relaxed text-on-surface whitespace-pre-wrap max-w-2xl">
-                                    {combinedText}
+                                  <div className="bg-surface-container-low p-5 rounded-2xl border border-outline-variant/10 font-body text-sm leading-relaxed text-on-surface max-w-2xl">
+                                    <MarkdownContent content={combinedText} isStreaming />
                                     <span className="inline-block w-0.5 h-[1em] bg-primary ml-0.5 align-middle animate-blink" />
                                   </div>
                                 )}
@@ -692,8 +693,10 @@ export function ChatFeed({ chatId, messages }: { chatId: string | null; messages
                                   );
                                 })}
                                 {(combinedText || toolCallParts.length === 0) && (
-                                  <div className="bg-surface-container-low p-5 rounded-2xl border border-outline-variant/10 font-body text-sm leading-relaxed text-on-surface whitespace-pre-wrap max-w-2xl">
-                                    {combinedText || (
+                                  <div className="bg-surface-container-low p-5 rounded-2xl border border-outline-variant/10 font-body text-sm leading-relaxed text-on-surface max-w-2xl">
+                                    {combinedText ? (
+                                      <MarkdownContent content={combinedText} />
+                                    ) : (
                                       <span className="text-on-surface-variant/50 italic">
                                         No response
                                       </span>
