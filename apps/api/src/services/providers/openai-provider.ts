@@ -513,14 +513,40 @@ async function* streamAgentTurnWithResponsesAPI(
       (err.status === 404 ||
         err.status === 409 ||
         (err.status === 400 && /previous_response_id/i.test(err.message)));
-    const canFallback = isCursorError && previousResponseId && !req.toolResults;
+    const canFallback = isCursorError && previousResponseId;
     if (canFallback) {
       const status = err instanceof OpenAIAPIError ? err.status : 'unknown';
+
+      if (req.toolResults) {
+        // Tool-result cursor loss is not recoverable without the original function_call
+        // context. Emit degradation signal and error out gracefully.
+        console.warn(
+          `[fallback][degrade] provider=openai reason=cursor_error status=${status}` +
+            ` toolResults=true cannot recover — yielding turn_error`
+        );
+        yield {
+          type: 'continuation_degraded',
+          from: 'responses',
+          to: 'error',
+          reason: `cursor_error during tool-result continuation (status=${status})`,
+        };
+        yield {
+          type: 'turn_error',
+          error: `Server-side continuation cursor expired during tool execution. The response may be incomplete.`,
+        };
+        return;
+      }
+
       console.warn(
         `[fallback][degrade] provider=openai reason=cursor_error status=${status}` +
           ` falling back to full replay`
       );
-      // Note: err instanceof OpenAIAPIError was already checked above via isCursorError
+      yield {
+        type: 'continuation_degraded',
+        from: 'responses',
+        to: 'replay',
+        reason: `cursor_error (status=${status})`,
+      };
       // Rebuild input from full history using structured replay.
       input = [
         ...buildOpenAIResponsesReplay(req.history),
