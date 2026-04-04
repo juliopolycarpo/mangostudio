@@ -316,7 +316,7 @@ function CopyMessageButton({
     <button
       type="button"
       onClick={handleCopy}
-      className="opacity-0 group-hover/ai:opacity-70 hover:!opacity-100 transition-opacity duration-200 text-on-surface-variant/60 hover:text-on-surface-variant cursor-pointer"
+      className="opacity-0 group-hover:opacity-70 hover:!opacity-100 transition-opacity duration-200 text-on-surface-variant/60 hover:text-on-surface-variant cursor-pointer"
       title={copied ? copiedLabel : label}
     >
       {copied ? <Check size={14} className="text-green-400" /> : <Copy size={14} />}
@@ -611,7 +611,7 @@ export function ChatFeed({ chatId, messages }: { chatId: string | null; messages
                     </>
                   ) : (
                     /* ── AI message ── */
-                    <div className="group/ai flex flex-col gap-4 w-full">
+                    <div className="group flex flex-col gap-4 w-full">
                       <div className="flex items-center gap-3">
                         <div className="w-6 h-6 rounded-full bg-primary-container flex items-center justify-center">
                           <Sparkles size={14} className="text-on-primary" />
@@ -629,7 +629,7 @@ export function ChatFeed({ chatId, messages }: { chatId: string | null; messages
                           />
                         )}
                         {!msg.isGenerating && (
-                          <span className="opacity-0 group-hover/ai:opacity-100 transition-opacity duration-200 text-[10px] text-on-surface-variant/50 font-label ml-auto">
+                          <span className="opacity-0 group-hover:opacity-100 transition-opacity duration-200 text-[10px] text-on-surface-variant/50 font-label ml-auto">
                             {format(msg.timestamp, 'h:mm a')}
                           </span>
                         )}
