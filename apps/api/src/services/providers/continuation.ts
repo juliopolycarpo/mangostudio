@@ -102,6 +102,17 @@ export function validateContinuationEnvelope(
 }
 
 /**
+ * Returns true when the continuation mode represents a durable server-side
+ * cursor that is valid across separate user turns.
+ *
+ * Turn-local modes (e.g. stateless-loop) accumulate state within a single
+ * agentic turn but must NOT be reused as cross-turn continuation state.
+ */
+export function isDurableMode(mode: ContinuationMode): boolean {
+  return mode === 'responses' || mode === 'interactions';
+}
+
+/**
  * Computes a deterministic hash for a system prompt string.
  * Returns a fixed constant for undefined/empty prompts.
  */
