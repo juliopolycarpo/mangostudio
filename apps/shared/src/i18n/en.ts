@@ -56,6 +56,12 @@ export const messages: Messages = {
     copyMessage: 'Copy message',
     messageCopied: 'Message copied!',
     scrollToBottom: 'Scroll to bottom',
+    emptyGreeting: 'Hello, {name}!',
+    emptySubtitle: 'How can I help you today?',
+    suggestion1: 'Explain a complex concept simply',
+    suggestion2: 'Write a Python script to...',
+    suggestion3: 'Help me debug a problem',
+    suggestion4: 'Create an image',
   },
 
   gallery: {
