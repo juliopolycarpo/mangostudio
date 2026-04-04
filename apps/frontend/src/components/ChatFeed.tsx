@@ -146,7 +146,12 @@ function ThinkingBlock({ messageId, text, isStreaming, segmentIndex = 0 }: Think
               className="p-4 max-h-48 overflow-y-auto app-scrollbar"
             >
               <div className="text-xs text-on-surface-variant/60 leading-relaxed markdown-content--thinking">
-                <MarkdownContent content={text} isStreaming={isStreaming} />
+                <MarkdownContent
+                  content={text}
+                  isStreaming={isStreaming}
+                  copyCodeLabel={t.chat.copyCode}
+                  codeCopiedLabel={t.chat.codeCopied}
+                />
                 {isStreaming && (
                   <span className="inline-block w-0.5 h-[1em] bg-primary/40 ml-0.5 align-middle animate-blink" />
                 )}
@@ -305,6 +310,7 @@ function MessageParts({
   messageId: string;
   isStreaming: boolean;
 }) {
+  const { t } = useI18n();
   let thinkingIdx = 0;
 
   return (
@@ -350,7 +356,12 @@ function MessageParts({
                 key={`text-${idx}`}
                 className="bg-surface-container-low p-5 rounded-2xl border border-outline-variant/10 font-body text-sm leading-relaxed text-on-surface max-w-2xl"
               >
-                <MarkdownContent content={part.text} isStreaming={isStreaming} />
+                <MarkdownContent
+                  content={part.text}
+                  isStreaming={isStreaming}
+                  copyCodeLabel={t.chat.copyCode}
+                  codeCopiedLabel={t.chat.codeCopied}
+                />
                 {isStreaming && idx === parts.length - 1 && (
                   <span className="inline-block w-0.5 h-[1em] bg-primary ml-0.5 align-middle animate-blink" />
                 )}
@@ -376,6 +387,7 @@ function MessageParts({
 }
 
 export function ChatFeed({ chatId, messages }: { chatId: string | null; messages: Message[] }) {
+  const { t } = useI18n();
   const [imageErrors, setImageErrors] = useState<Record<string, boolean>>({});
   const parentRef = useRef<HTMLDivElement>(null);
   const feedShouldAutoFollowRef = useRef(true);
@@ -520,7 +532,11 @@ export function ChatFeed({ chatId, messages }: { chatId: string | null; messages
                       )}
                       <div className="flex flex-col items-end gap-1.5">
                         <div className="px-5 py-3 rounded-2xl bg-surface-container-low text-on-surface border border-outline-variant/10 font-body text-sm leading-relaxed">
-                          <MarkdownContent content={msg.text} />
+                          <MarkdownContent
+                            content={msg.text}
+                            copyCodeLabel={t.chat.copyCode}
+                            codeCopiedLabel={t.chat.codeCopied}
+                          />
                         </div>
                         {/* Badge for image prompts */}
                         {isImageTurn && (

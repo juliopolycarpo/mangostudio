@@ -50,6 +50,8 @@ export const messages = {
       generic: 'Modo da conversa alterado de {from} para {to}.',
     },
     cursorLost: 'Cursor perdido — fallback para {detail}',
+    copyCode: 'Copiar código',
+    codeCopied: 'Copiado!',
   },
 
   gallery: {

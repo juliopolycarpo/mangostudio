@@ -51,6 +51,8 @@ export const messages: Messages = {
       generic: 'Conversation mode changed from {from} to {to}.',
     },
     cursorLost: 'Cursor lost — fallback to {detail}',
+    copyCode: 'Copy code',
+    codeCopied: 'Copied!',
   },
 
   gallery: {

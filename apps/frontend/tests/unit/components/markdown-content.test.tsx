@@ -153,3 +153,74 @@ describe('MarkdownContent — syntax highlighting', () => {
     expect(pre?.getAttribute('data-lang')).toBe('python');
   });
 });
+
+describe('MarkdownContent — copy code button', () => {
+  beforeEach(() => {
+    vi.mocked(shikiLib.highlightCode).mockReset();
+    vi.mocked(shikiLib.highlightCode).mockReturnValue(null);
+
+    Object.defineProperty(navigator, 'clipboard', {
+      value: {
+        writeText: vi.fn().mockResolvedValue(undefined),
+      },
+      configurable: true,
+      writable: true,
+    });
+  });
+
+  it('renders a copy button in each code block', () => {
+    const { container } = render(<MarkdownContent content={'```js\nconst x = 1;\n```'} />);
+    const btn = container.querySelector('.copy-code-btn');
+    expect(btn).toBeInTheDocument();
+  });
+
+  it('renders copy button even during streaming', () => {
+    const { container } = render(
+      <MarkdownContent content={'```js\nconst x = 1;\n```'} isStreaming />
+    );
+    expect(container.querySelector('.copy-code-btn')).toBeInTheDocument();
+  });
+
+  it('does not inject copy button for inline code', () => {
+    const { container } = render(<MarkdownContent content={'use `inline` code here'} />);
+    expect(container.querySelector('code')).toBeInTheDocument();
+    expect(container.querySelector('.copy-code-btn')).not.toBeInTheDocument();
+  });
+
+  it('injects one copy button per code block', () => {
+    const md = '```js\nfoo()\n```\n\n```ts\nbar()\n```';
+    const { container } = render(<MarkdownContent content={md} />);
+    const pres = container.querySelectorAll('pre');
+    const btns = container.querySelectorAll('.copy-code-btn');
+    expect(btns).toHaveLength(pres.length);
+  });
+
+  it('calls clipboard.writeText with code text on click', async () => {
+    const { container } = render(<MarkdownContent content={'```js\nconst x = 1;\n```'} />);
+    const btn = container.querySelector('.copy-code-btn') as HTMLButtonElement;
+    btn.click();
+    await vi.waitFor(() => {
+      expect(navigator.clipboard.writeText).toHaveBeenCalledWith('const x = 1;');
+    });
+  });
+
+  it('adds copied class to button after successful copy', async () => {
+    const { container } = render(<MarkdownContent content={'```js\nconst x = 1;\n```'} />);
+    const btn = container.querySelector('.copy-code-btn') as HTMLButtonElement;
+    btn.click();
+    await vi.waitFor(() => {
+      expect(btn.classList.contains('copy-code-btn--copied')).toBe(true);
+    });
+  });
+
+  it('reverts button state after 2 seconds', async () => {
+    vi.useFakeTimers();
+    const { container } = render(<MarkdownContent content={'```js\nconst x = 1;\n```'} />);
+    const btn = container.querySelector('.copy-code-btn') as HTMLButtonElement;
+    btn.click();
+    await vi.waitFor(() => expect(btn.classList.contains('copy-code-btn--copied')).toBe(true));
+    vi.advanceTimersByTime(2000);
+    expect(btn.classList.contains('copy-code-btn--copied')).toBe(false);
+    vi.useRealTimers();
+  });
+});
