@@ -55,6 +55,7 @@ export const messages: Messages = {
     codeCopied: 'Copied!',
     copyMessage: 'Copy message',
     messageCopied: 'Message copied!',
+    scrollToBottom: 'Scroll to bottom',
   },
 
   gallery: {

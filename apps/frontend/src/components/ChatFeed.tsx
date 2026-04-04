@@ -13,6 +13,7 @@ import {
   AlertCircle,
   Copy,
   Check,
+  ArrowDown,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { AnimatePresence, motion } from 'motion/react';
@@ -438,6 +439,7 @@ function MessageParts({
 export function ChatFeed({ chatId, messages }: { chatId: string | null; messages: Message[] }) {
   const { t } = useI18n();
   const [imageErrors, setImageErrors] = useState<Record<string, boolean>>({});
+  const [showScrollButton, setShowScrollButton] = useState(false);
   const parentRef = useRef<HTMLDivElement>(null);
   const feedShouldAutoFollowRef = useRef(true);
   const previousGeneratingMessageIdRef = useRef<string | null>(null);
@@ -494,7 +496,15 @@ export function ChatFeed({ chatId, messages }: { chatId: string | null; messages
   }, [latestMessage?.id, latestMessage?.isGenerating, latestMessage?.parts, latestMessage?.text]);
 
   const handleFeedScroll = (event: React.UIEvent<HTMLElement>) => {
-    feedShouldAutoFollowRef.current = isNearBottom(event.currentTarget);
+    const nearBottom = isNearBottom(event.currentTarget);
+    feedShouldAutoFollowRef.current = nearBottom;
+    setShowScrollButton(!nearBottom);
+  };
+
+  const handleScrollToBottom = () => {
+    if (!parentRef.current) return;
+    feedShouldAutoFollowRef.current = true;
+    parentRef.current.scrollTo({ top: parentRef.current.scrollHeight, behavior: 'smooth' });
   };
 
   const handleImageError = (id: string) => {
@@ -785,6 +795,27 @@ export function ChatFeed({ chatId, messages }: { chatId: string | null; messages
           })}
         </div>
       )}
+
+      {/* Scroll-to-bottom floating button */}
+      <AnimatePresence>
+        {showScrollButton && messages.length > 0 && (
+          <motion.button
+            key="scroll-to-bottom"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 10 }}
+            transition={{ duration: 0.2 }}
+            type="button"
+            onClick={handleScrollToBottom}
+            className="sticky bottom-4 left-1/2 -translate-x-1/2 z-10 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium text-on-surface-variant border border-outline-variant/30 cursor-pointer hover:border-outline-variant/50 hover:text-on-surface transition-colors duration-200"
+            style={{ background: 'rgba(28,27,27,0.85)', backdropFilter: 'blur(12px)' }}
+            title={t.chat.scrollToBottom}
+          >
+            <ArrowDown size={13} />
+            {t.chat.scrollToBottom}
+          </motion.button>
+        )}
+      </AnimatePresence>
     </section>
   );
 }

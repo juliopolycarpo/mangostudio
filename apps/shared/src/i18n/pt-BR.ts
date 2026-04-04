@@ -54,6 +54,7 @@ export const messages = {
     codeCopied: 'Copiado!',
     copyMessage: 'Copiar mensagem',
     messageCopied: 'Mensagem copiada!',
+    scrollToBottom: 'Ir para o final',
   },
 
   gallery: {
