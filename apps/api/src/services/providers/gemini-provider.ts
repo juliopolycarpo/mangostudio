@@ -190,10 +190,82 @@ async function* streamGeminiAgentTurn(req: AgentTurnRequest): AsyncIterable<Agen
 
     yield* processGeminiInteractionStream(stream, req, currentToolsetHash);
   } catch (err: unknown) {
-    yield {
-      type: 'turn_error',
-      error: err instanceof Error ? err.message : 'Gemini interaction failed',
-    };
+    const errMsg = err instanceof Error ? err.message : String(err);
+
+    // Detect server-side cursor rejection: interaction not found, expired, or invalid
+    const isCursorError =
+      canContinue &&
+      prevState !== null &&
+      (/not found/i.test(errMsg) ||
+        /expired/i.test(errMsg) ||
+        /invalid.*interaction/i.test(errMsg) ||
+        /INVALID_ARGUMENT/.test(errMsg) ||
+        /NOT_FOUND/.test(errMsg));
+
+    if (isCursorError) {
+      console.warn(
+        `[fallback][degrade] provider=gemini reason=cursor_error` +
+          ` model=${req.modelName} falling back to stateless replay`
+      );
+
+      yield {
+        type: 'continuation_degraded',
+        from: 'interactions',
+        to: 'replay',
+        reason: `interaction_expired: ${errMsg}`,
+      };
+
+      // Retry without previous_interaction_id: full stateless replay
+      try {
+        const historyTurns = buildGeminiInteractionsReplay(req.history);
+        const currentContent =
+          typeof input === 'string'
+            ? input
+            : Array.isArray(input) && (input as unknown[]).length > 0
+              ? input
+              : undefined;
+
+        const retryParams: Record<string, unknown> = {
+          model: req.modelName,
+          input: [
+            ...historyTurns,
+            ...(currentContent !== undefined ? [{ role: 'user', content: currentContent }] : []),
+          ],
+          stream: true,
+        };
+
+        if (req.systemPrompt?.trim()) {
+          retryParams.system_instruction = req.systemPrompt;
+        }
+        if (toolDefs.length > 0) {
+          retryParams.tools = toolDefsToInteractions(toolDefs);
+        }
+        if (req.generationConfig?.thinkingEnabled) {
+          const levelMap = { low: 'low', medium: 'medium', high: 'high' } as const;
+          retryParams.generation_config = {
+            thinking_level: levelMap[req.generationConfig.reasoningEffort] ?? 'medium',
+            thinking_summaries: 'auto',
+          };
+        }
+
+        const retryStream = (await ai.interactions.create(
+          retryParams as any
+        )) as unknown as AsyncIterable<Record<string, any>>;
+
+        yield* processGeminiInteractionStream(retryStream, req, currentToolsetHash);
+      } catch (retryErr: unknown) {
+        yield {
+          type: 'turn_error',
+          error:
+            retryErr instanceof Error ? retryErr.message : 'Gemini retry after cursor loss failed',
+        };
+      }
+    } else {
+      yield {
+        type: 'turn_error',
+        error: errMsg,
+      };
+    }
   }
 }
 
