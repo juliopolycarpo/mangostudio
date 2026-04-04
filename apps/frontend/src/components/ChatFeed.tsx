@@ -628,6 +628,11 @@ export function ChatFeed({ chatId, messages }: { chatId: string | null; messages
                             copiedLabel={t.chat.messageCopied}
                           />
                         )}
+                        {!msg.isGenerating && (
+                          <span className="opacity-0 group-hover/ai:opacity-100 transition-opacity duration-200 text-[10px] text-on-surface-variant/50 font-label ml-auto">
+                            {format(msg.timestamp, 'h:mm a')}
+                          </span>
+                        )}
                       </div>
 
                       {msg.isGenerating ? (
