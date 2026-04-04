@@ -2,6 +2,7 @@ import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-q
 import { client } from '../lib/api-client';
 import { extractApiError } from '../lib/utils';
 import type { Message } from '@mangostudio/shared';
+import type { ContextInfo } from './use-text-chat';
 
 export const messageKeys = {
   all: ['messages'] as const,
@@ -18,7 +19,11 @@ export function useMessagesQuery(chatId: string | null) {
       // sub-resources. Cast to `any` to access the messages sub-resource.
       const { data, error } = await (client.api.chats[chatId!] as any).messages.get({ query });
       if (error) throw new Error(extractApiError(error.value));
-      return data as { messages: Message[]; nextCursor: string | null };
+      return data as {
+        messages: Message[];
+        nextCursor: string | null;
+        contextInfo?: ContextInfo | null;
+      };
     },
     initialPageParam: null as string | null,
     getNextPageParam: (lastPage) => lastPage.nextCursor,

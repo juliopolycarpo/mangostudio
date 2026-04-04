@@ -79,6 +79,7 @@ export interface StreamChunk {
     | 'tool_result'
     | 'context_info'
     | 'fallback_notice'
+    | 'system_event'
     | 'done'
     | 'error';
   // text / thinking
@@ -99,6 +100,9 @@ export interface StreamChunk {
   from?: string;
   to?: string;
   reason?: string;
+  // system_event fields
+  event?: string;
+  detail?: string;
   // terminal fields
   done: boolean;
   messageId?: string;

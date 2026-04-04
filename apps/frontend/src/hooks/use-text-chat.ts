@@ -213,6 +213,15 @@ export function useTextChat({
                   reason: chunk.reason,
                 });
               }
+            } else if (chunkType === 'system_event' && chunk.event) {
+              accumulatedParts.push({
+                type: 'system_event',
+                event: chunk.event,
+                detail: chunk.detail,
+              });
+              updateOptimisticMessage(activeChatId!, optimisticAiMsgId, {
+                parts: [...accumulatedParts],
+              });
             } else if (chunk.done) {
               updateOptimisticMessage(activeChatId!, optimisticAiMsgId, {
                 isGenerating: false,
@@ -256,12 +265,23 @@ export function useTextChat({
     ]
   );
 
+  const seedContextInfo = useCallback(
+    (chatId: string, info: ContextInfo) => {
+      contextCacheRef.current.set(chatId, info);
+      if (chatId === currentChatId) {
+        setContextInfo(info);
+      }
+    },
+    [currentChatId]
+  );
+
   return {
     isGenerating,
     handleRespond,
     handleStop,
     contextInfo,
     fallbackNotice,
+    seedContextInfo,
     /** Per-chat context cache — readable by sidebar for progress indicators. */
     contextCache: contextCacheRef.current,
   };
