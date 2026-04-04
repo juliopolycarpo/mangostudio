@@ -105,6 +105,47 @@ export function MarkdownContent({
     return () => container.removeEventListener('click', handleClick);
   }, [copyCodeLabel, codeCopiedLabel]);
 
+  // Image lightbox — click to zoom inline markdown images
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const handleImageClick = (e: MouseEvent) => {
+      const img = e.target as HTMLElement;
+      if (img.tagName !== 'IMG') return;
+
+      // Don't intercept images inside links
+      if (img.closest('a')) return;
+
+      const src = img.getAttribute('src');
+      if (!src) return;
+
+      const overlay = document.createElement('div');
+      overlay.className = 'markdown-lightbox';
+      overlay.innerHTML = `<img src="${src}" alt="${img.getAttribute('alt') ?? ''}" />`;
+
+      const close = () => {
+        overlay.classList.add('markdown-lightbox--closing');
+        overlay.addEventListener('animationend', () => overlay.remove(), { once: true });
+      };
+
+      overlay.addEventListener('click', close);
+
+      const handleKey = (ev: KeyboardEvent) => {
+        if (ev.key === 'Escape') {
+          close();
+          document.removeEventListener('keydown', handleKey);
+        }
+      };
+      document.addEventListener('keydown', handleKey);
+
+      document.body.appendChild(overlay);
+    };
+
+    container.addEventListener('click', handleImageClick);
+    return () => container.removeEventListener('click', handleImageClick);
+  }, []);
+
   return (
     <div
       ref={containerRef}

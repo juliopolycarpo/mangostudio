@@ -52,6 +52,15 @@ export const messages = {
     cursorLost: 'Cursor perdido — fallback para {detail}',
     copyCode: 'Copiar código',
     codeCopied: 'Copiado!',
+    copyMessage: 'Copiar mensagem',
+    messageCopied: 'Mensagem copiada!',
+    scrollToBottom: 'Ir para o final',
+    emptyGreeting: 'Olá, {name}!',
+    emptySubtitle: 'Como posso te ajudar hoje?',
+    suggestion1: 'Explique um conceito complexo de forma simples',
+    suggestion2: 'Escreva um script em Python para...',
+    suggestion3: 'Me ajude a depurar um problema',
+    suggestion4: 'Crie uma imagem',
   },
 
   gallery: {

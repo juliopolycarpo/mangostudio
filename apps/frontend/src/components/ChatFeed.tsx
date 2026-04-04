@@ -11,6 +11,9 @@ import {
   Wrench,
   CheckCircle,
   AlertCircle,
+  Copy,
+  Check,
+  ArrowDown,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { AnimatePresence, motion } from 'motion/react';
@@ -275,6 +278,53 @@ function ToolCallBlock({ name, args, result, isError, isPending }: ToolCallBlock
 }
 
 // ---------------------------------------------------------------------------
+// CopyMessageButton — copies full message raw markdown to clipboard
+// ---------------------------------------------------------------------------
+
+function extractRawMarkdown(msg: Message): string {
+  const parts: MessagePart[] = msg.parts ?? (msg.text ? [{ type: 'text', text: msg.text }] : []);
+  return parts
+    .filter((p): p is Extract<MessagePart, { type: 'text' }> => p.type === 'text')
+    .map((p) => p.text)
+    .join('\n\n');
+}
+
+function CopyMessageButton({
+  msg,
+  label,
+  copiedLabel,
+}: {
+  msg: Message;
+  label: string;
+  copiedLabel: string;
+}) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async () => {
+    const text = extractRawMarkdown(msg);
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Clipboard API not available
+    }
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={handleCopy}
+      className="opacity-0 group-hover:opacity-70 hover:!opacity-100 transition-opacity duration-200 text-on-surface-variant/60 hover:text-on-surface-variant cursor-pointer"
+      title={copied ? copiedLabel : label}
+    >
+      {copied ? <Check size={14} className="text-green-400" /> : <Copy size={14} />}
+    </button>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // SystemEventMarker — inline timeline marker for recoverable events
 // ---------------------------------------------------------------------------
 
@@ -389,6 +439,7 @@ function MessageParts({
 export function ChatFeed({ chatId, messages }: { chatId: string | null; messages: Message[] }) {
   const { t } = useI18n();
   const [imageErrors, setImageErrors] = useState<Record<string, boolean>>({});
+  const [showScrollButton, setShowScrollButton] = useState(false);
   const parentRef = useRef<HTMLDivElement>(null);
   const feedShouldAutoFollowRef = useRef(true);
   const previousGeneratingMessageIdRef = useRef<string | null>(null);
@@ -445,7 +496,15 @@ export function ChatFeed({ chatId, messages }: { chatId: string | null; messages
   }, [latestMessage?.id, latestMessage?.isGenerating, latestMessage?.parts, latestMessage?.text]);
 
   const handleFeedScroll = (event: React.UIEvent<HTMLElement>) => {
-    feedShouldAutoFollowRef.current = isNearBottom(event.currentTarget);
+    const nearBottom = isNearBottom(event.currentTarget);
+    feedShouldAutoFollowRef.current = nearBottom;
+    setShowScrollButton(!nearBottom);
+  };
+
+  const handleScrollToBottom = () => {
+    if (!parentRef.current) return;
+    feedShouldAutoFollowRef.current = true;
+    parentRef.current.scrollTo({ top: parentRef.current.scrollHeight, behavior: 'smooth' });
   };
 
   const handleImageError = (id: string) => {
@@ -552,7 +611,7 @@ export function ChatFeed({ chatId, messages }: { chatId: string | null; messages
                     </>
                   ) : (
                     /* ── AI message ── */
-                    <div className="flex flex-col gap-4 w-full">
+                    <div className="group flex flex-col gap-4 w-full">
                       <div className="flex items-center gap-3">
                         <div className="w-6 h-6 rounded-full bg-primary-container flex items-center justify-center">
                           <Sparkles size={14} className="text-on-primary" />
@@ -562,6 +621,18 @@ export function ChatFeed({ chatId, messages }: { chatId: string | null; messages
                             ? `${msg.isGenerating ? (isImageTurn ? 'Generating' : 'Thinking') : isImageTurn ? 'Generated' : 'Replied'} with: ${msg.modelName}`
                             : 'Gemini'}
                         </span>
+                        {!msg.isGenerating && !isImageTurn && (
+                          <CopyMessageButton
+                            msg={msg}
+                            label={t.chat.copyMessage}
+                            copiedLabel={t.chat.messageCopied}
+                          />
+                        )}
+                        {!msg.isGenerating && (
+                          <span className="opacity-0 group-hover:opacity-100 transition-opacity duration-200 text-[10px] text-on-surface-variant/50 font-label ml-auto">
+                            {format(msg.timestamp, 'h:mm a')}
+                          </span>
+                        )}
                       </div>
 
                       {msg.isGenerating ? (
@@ -581,9 +652,17 @@ export function ChatFeed({ chatId, messages }: { chatId: string | null; messages
                                   <span className="text-sm font-medium text-on-surface animate-pulse">
                                     {isImageTurn ? 'Generating image...' : 'Thinking...'}
                                   </span>
-                                  <div className="h-1 w-24 bg-surface-container-highest rounded-full overflow-hidden">
-                                    <div className="h-full bg-primary w-1/2 animate-[slide_1s_ease-in-out_infinite_alternate]"></div>
-                                  </div>
+                                  {isImageTurn ? (
+                                    <div className="h-1 w-24 bg-surface-container-highest rounded-full overflow-hidden">
+                                      <div className="h-full bg-primary w-1/2 animate-[slide_1s_ease-in-out_infinite_alternate]"></div>
+                                    </div>
+                                  ) : (
+                                    <div className="skeleton-pulse mt-1">
+                                      <div className="skeleton-line" />
+                                      <div className="skeleton-line" />
+                                      <div className="skeleton-line" />
+                                    </div>
+                                  )}
                                 </>
                               );
                             }
@@ -729,6 +808,27 @@ export function ChatFeed({ chatId, messages }: { chatId: string | null; messages
           })}
         </div>
       )}
+
+      {/* Scroll-to-bottom floating button */}
+      <AnimatePresence>
+        {showScrollButton && messages.length > 0 && (
+          <motion.button
+            key="scroll-to-bottom"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 10 }}
+            transition={{ duration: 0.2 }}
+            type="button"
+            onClick={handleScrollToBottom}
+            className="sticky bottom-4 left-1/2 -translate-x-1/2 z-10 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium text-on-surface-variant border border-outline-variant/30 cursor-pointer hover:border-outline-variant/50 hover:text-on-surface transition-colors duration-200"
+            style={{ background: 'rgba(28,27,27,0.85)', backdropFilter: 'blur(12px)' }}
+            title={t.chat.scrollToBottom}
+          >
+            <ArrowDown size={13} />
+            {t.chat.scrollToBottom}
+          </motion.button>
+        )}
+      </AnimatePresence>
     </section>
   );
 }
