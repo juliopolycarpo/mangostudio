@@ -24,6 +24,7 @@ import {
   type ContinuationEnvelope,
 } from './continuation';
 import { getModelContextLimit } from './context-policy';
+import { buildGeminiInteractionsReplay } from './replay-builder';
 import type {
   AIProvider,
   TextGenerationRequest,
@@ -99,7 +100,8 @@ function toolDefsToInteractions(
  * the full context window via the interaction chain.
  *
  * When tools or model change between turns, the interaction chain is broken
- * and a new chain starts with full context replay.
+ * and a new chain starts with full structured history replay (preserving
+ * tool-call/tool-result turns from persisted parts).
  */
 async function* streamGeminiAgentTurn(req: AgentTurnRequest): AsyncIterable<AgentEvent> {
   const apiKey = await getResolvedGeminiApiKey(req.userId, req.modelName);
@@ -150,14 +152,9 @@ async function* streamGeminiAgentTurn(req: AgentTurnRequest): AsyncIterable<Agen
     interactionParams.previous_interaction_id = prevState.interactionId;
   } else {
     // New chain (first turn or model/tool change).
-    // Prepend DB history as Turn array so the new model has full context.
+    // Replay full structured history including tool interactions from persisted parts.
     if (req.history.length > 0) {
-      const historyTurns = req.history
-        .filter((t) => t.text?.trim())
-        .map((t) => ({
-          role: t.role === 'ai' ? 'model' : 'user',
-          content: t.text,
-        }));
+      const historyTurns = buildGeminiInteractionsReplay(req.history);
       // Wrap: history turns + current input as the last user turn
       const currentContent =
         typeof input === 'string' ? input : (input as unknown[]).length > 0 ? input : undefined;
