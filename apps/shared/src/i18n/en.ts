@@ -50,6 +50,7 @@ export const messages: Messages = {
       toReplay: 'Stateful continuation is no longer available. Continuing with transcript replay.',
       generic: 'Conversation mode changed from {from} to {to}.',
     },
+    cursorLost: 'Cursor lost — fallback to {detail}',
   },
 
   gallery: {
