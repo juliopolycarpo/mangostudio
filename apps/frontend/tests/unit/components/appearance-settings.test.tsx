@@ -1,7 +1,7 @@
 /**
  * Unit tests for AppearanceSettings component and useTheme hook.
  */
-import { describe, expect, it, beforeEach, afterEach } from 'vitest';
+import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 import { screen, fireEvent, act } from '@testing-library/react';
 import { render, renderHook } from '../../support/harness/render';
 import { AppearanceSettings } from '../../../src/components/settings/AppearanceSettings';
