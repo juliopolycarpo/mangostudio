@@ -52,6 +52,8 @@ export const messages = {
     cursorLost: 'Cursor perdido — fallback para {detail}',
     copyCode: 'Copiar código',
     codeCopied: 'Copiado!',
+    copyMessage: 'Copiar mensagem',
+    messageCopied: 'Mensagem copiada!',
   },
 
   gallery: {

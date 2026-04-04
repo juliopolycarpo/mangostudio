@@ -53,6 +53,8 @@ export const messages: Messages = {
     cursorLost: 'Cursor lost — fallback to {detail}',
     copyCode: 'Copy code',
     codeCopied: 'Copied!',
+    copyMessage: 'Copy message',
+    messageCopied: 'Message copied!',
   },
 
   gallery: {

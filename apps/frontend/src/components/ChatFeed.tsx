@@ -11,6 +11,8 @@ import {
   Wrench,
   CheckCircle,
   AlertCircle,
+  Copy,
+  Check,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { AnimatePresence, motion } from 'motion/react';
@@ -271,6 +273,53 @@ function ToolCallBlock({ name, args, result, isError, isPending }: ToolCallBlock
         )}
       </AnimatePresence>
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// CopyMessageButton — copies full message raw markdown to clipboard
+// ---------------------------------------------------------------------------
+
+function extractRawMarkdown(msg: Message): string {
+  const parts: MessagePart[] = msg.parts ?? (msg.text ? [{ type: 'text', text: msg.text }] : []);
+  return parts
+    .filter((p): p is Extract<MessagePart, { type: 'text' }> => p.type === 'text')
+    .map((p) => p.text)
+    .join('\n\n');
+}
+
+function CopyMessageButton({
+  msg,
+  label,
+  copiedLabel,
+}: {
+  msg: Message;
+  label: string;
+  copiedLabel: string;
+}) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async () => {
+    const text = extractRawMarkdown(msg);
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Clipboard API not available
+    }
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={handleCopy}
+      className="opacity-0 group-hover/ai:opacity-70 hover:!opacity-100 transition-opacity duration-200 text-on-surface-variant/60 hover:text-on-surface-variant cursor-pointer"
+      title={copied ? copiedLabel : label}
+    >
+      {copied ? <Check size={14} className="text-green-400" /> : <Copy size={14} />}
+    </button>
   );
 }
 
@@ -552,7 +601,7 @@ export function ChatFeed({ chatId, messages }: { chatId: string | null; messages
                     </>
                   ) : (
                     /* ── AI message ── */
-                    <div className="flex flex-col gap-4 w-full">
+                    <div className="group/ai flex flex-col gap-4 w-full">
                       <div className="flex items-center gap-3">
                         <div className="w-6 h-6 rounded-full bg-primary-container flex items-center justify-center">
                           <Sparkles size={14} className="text-on-primary" />
@@ -562,6 +611,13 @@ export function ChatFeed({ chatId, messages }: { chatId: string | null; messages
                             ? `${msg.isGenerating ? (isImageTurn ? 'Generating' : 'Thinking') : isImageTurn ? 'Generated' : 'Replied'} with: ${msg.modelName}`
                             : 'Gemini'}
                         </span>
+                        {!msg.isGenerating && !isImageTurn && (
+                          <CopyMessageButton
+                            msg={msg}
+                            label={t.chat.copyMessage}
+                            copiedLabel={t.chat.messageCopied}
+                          />
+                        )}
                       </div>
 
                       {msg.isGenerating ? (
