@@ -22,6 +22,7 @@ import {
   validateContinuationEnvelope,
   computeSystemPromptHash,
   computeToolsetHash,
+  isDurableMode,
 } from '../services/providers/continuation';
 import {
   computeContextSnapshot,
@@ -132,7 +133,7 @@ export const respondStreamRoutes = (app: Elysia) =>
               let fullText = '';
               let allParts: MessagePart[] = [];
               let aborted = false;
-              let finalProviderState: string | null = null;
+              let durableProviderState: string | null = null;
 
               // Emit pending fallback notice as first SSE event
               if (continuationFallback) {
@@ -308,14 +309,21 @@ export const respondStreamRoutes = (app: Elysia) =>
 
                         case 'turn_completed': {
                           currentProviderState = event.providerState ?? null;
-                          finalProviderState = currentProviderState;
                           turnCompleted = true;
 
-                          // Persist state eagerly on the chat row (survives message save failures)
-                          if (finalProviderState) {
+                          // Only persist durable continuation state (responses/interactions) across
+                          // turns. Turn-local state (stateless-loop) is valid only within the
+                          // current agentic loop and must NOT be reused as cross-turn state.
+                          const resultEnvelope = parseContinuationEnvelope(currentProviderState);
+                          durableProviderState =
+                            resultEnvelope && isDurableMode(resultEnvelope.mode)
+                              ? currentProviderState
+                              : null;
+
+                          if (durableProviderState) {
                             await db
                               .updateTable('chats')
-                              .set({ lastProviderState: finalProviderState })
+                              .set({ lastProviderState: durableProviderState })
                               .where('id', '=', chatId)
                               .execute()
                               .catch((err) => {
@@ -324,8 +332,6 @@ export const respondStreamRoutes = (app: Elysia) =>
                                 );
                               });
                           }
-
-                          const resultEnvelope = parseContinuationEnvelope(currentProviderState);
                           if (resultEnvelope) {
                             console.log(
                               `[continuation][updated] chatId=${chatId} provider=${resultEnvelope.provider} mode=${resultEnvelope.mode} cursor=${resultEnvelope.cursor ? 'present' : 'none'}`
@@ -532,7 +538,7 @@ export const respondStreamRoutes = (app: Elysia) =>
                       role: 'ai',
                       text: fullText,
                       parts: finalParts.length > 0 ? JSON.stringify(finalParts) : null,
-                      providerState: finalProviderState,
+                      providerState: durableProviderState,
                       timestamp: aiTimestamp,
                       isGenerating: false,
                       generationTime,
