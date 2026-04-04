@@ -228,6 +228,14 @@ export interface SSEFallbackEvent {
   reason: string;
 }
 
+/** SSE event: system event timeline marker, persisted in message parts. */
+export interface SSESystemEvent {
+  type: 'system_event';
+  event: string;
+  detail?: string;
+  done: boolean;
+}
+
 /** Body for POST /api/auth/sign-up/email */
 export interface SignUpBody {
   name: string;

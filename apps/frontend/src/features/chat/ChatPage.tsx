@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { Loader2, MessageSquare } from 'lucide-react';
 import { ChatFeed } from '../../components/ChatFeed';
 import { InputBar } from '../../components/InputBar';
@@ -23,6 +24,7 @@ interface ChatPageProps {
   // Context awareness
   contextInfo?: ContextInfo | null;
   fallbackNotice?: FallbackNotice | null;
+  seedContextInfo?: (chatId: string, info: ContextInfo) => void;
 }
 
 export function ChatPage({
@@ -40,9 +42,18 @@ export function ChatPage({
   reasoningVisible,
   contextInfo,
   fallbackNotice,
+  seedContextInfo,
 }: ChatPageProps) {
   const { data, status } = useMessagesQuery(chatId);
   const { t } = useI18n();
+
+  // Seed context info from persisted providerState on chat load
+  const firstPageContextInfo = data?.pages[0]?.contextInfo;
+  useEffect(() => {
+    if (chatId && firstPageContextInfo && seedContextInfo) {
+      seedContextInfo(chatId, firstPageContextInfo);
+    }
+  }, [chatId, firstPageContextInfo, seedContextInfo]);
 
   const messages = data?.pages.flatMap((page) => page.messages) || [];
 

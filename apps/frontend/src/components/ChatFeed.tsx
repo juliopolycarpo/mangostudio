@@ -261,6 +261,29 @@ function ToolCallBlock({ name, args, result, isError, isPending }: ToolCallBlock
   );
 }
 
+// ---------------------------------------------------------------------------
+// SystemEventMarker — inline timeline marker for recoverable events
+// ---------------------------------------------------------------------------
+
+function SystemEventMarker({ event, detail }: { event: string; detail?: string }) {
+  const { t } = useI18n();
+
+  let label: string;
+  if (event === 'cursor_lost') {
+    label = t.chat.cursorLost.replace('{detail}', detail ?? '');
+  } else {
+    label = detail ?? event;
+  }
+
+  return (
+    <div className="flex items-center gap-2 py-2 text-xs text-on-surface-variant/60 my-1">
+      <div className="flex-1 h-px bg-outline-variant/20" />
+      <span className="font-medium whitespace-nowrap">{label}</span>
+      <div className="flex-1 h-px bg-outline-variant/20" />
+    </div>
+  );
+}
+
 export function ChatFeed({ chatId, messages }: { chatId: string | null; messages: Message[] }) {
   const [imageErrors, setImageErrors] = useState<Record<string, boolean>>({});
   const parentRef = useRef<HTMLDivElement>(null);
@@ -451,6 +474,9 @@ export function ChatFeed({ chatId, messages }: { chatId: string | null; messages
                             const toolResultParts = parts.filter(
                               (p) => p.type === 'tool_result'
                             ) as Extract<MessagePart, { type: 'tool_result' }>[];
+                            const systemEventParts = parts.filter(
+                              (p) => p.type === 'system_event'
+                            ) as Extract<MessagePart, { type: 'system_event' }>[];
 
                             if (
                               isImageTurn ||
@@ -480,6 +506,13 @@ export function ChatFeed({ chatId, messages }: { chatId: string | null; messages
                                     isStreaming={true}
                                   />
                                 )}
+                                {systemEventParts.map((se, idx) => (
+                                  <SystemEventMarker
+                                    key={`se-${idx}`}
+                                    event={se.event}
+                                    detail={se.detail}
+                                  />
+                                ))}
                                 {toolCallParts.map((tc) => {
                                   const res = toolResultParts.find(
                                     (r) => r.toolCallId === tc.toolCallId
@@ -623,6 +656,9 @@ export function ChatFeed({ chatId, messages }: { chatId: string | null; messages
                             const toolResultParts = parts.filter(
                               (p) => p.type === 'tool_result'
                             ) as Extract<MessagePart, { type: 'tool_result' }>[];
+                            const systemEventParts = parts.filter(
+                              (p) => p.type === 'system_event'
+                            ) as Extract<MessagePart, { type: 'system_event' }>[];
 
                             return (
                               <>
@@ -633,6 +669,13 @@ export function ChatFeed({ chatId, messages }: { chatId: string | null; messages
                                     isStreaming={false}
                                   />
                                 )}
+                                {systemEventParts.map((se, idx) => (
+                                  <SystemEventMarker
+                                    key={`se-${idx}`}
+                                    event={se.event}
+                                    detail={se.detail}
+                                  />
+                                ))}
                                 {toolCallParts.map((tc) => {
                                   const res = toolResultParts.find(
                                     (r) => r.toolCallId === tc.toolCallId

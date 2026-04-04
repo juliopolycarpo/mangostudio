@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, useEffect } from 'react';
 import type { ProviderType } from '@mangostudio/shared';
 import { useNavigate } from '@tanstack/react-router';
 import type { InteractionMode } from '@mangostudio/shared';
@@ -51,6 +51,18 @@ export function useAppState() {
     reasoningEffort: settings.reasoningEffort,
     currentChatId: chats.currentChatId,
   });
+
+  // Seed context cache for all chats when the chat list loads (cold start recovery).
+  // This populates the Sidebar's context rings from persisted lastProviderState.
+  const chatsList = chats.chats;
+  const { seedContextInfo } = textChat;
+  useEffect(() => {
+    for (const chat of chatsList) {
+      if ('contextInfo' in chat && chat.contextInfo) {
+        seedContextInfo(chat.id, chat.contextInfo);
+      }
+    }
+  }, [chatsList, seedContextInfo]);
 
   const imageGen = useImageGeneration({
     chats,
@@ -138,6 +150,7 @@ export function useAppState() {
     isModelSelectorDisabled,
     contextInfo: textChat.contextInfo,
     fallbackNotice: textChat.fallbackNotice,
+    seedContextInfo: textChat.seedContextInfo,
     contextCache: textChat.contextCache,
     lockedProvider,
 

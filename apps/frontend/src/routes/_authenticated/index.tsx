@@ -30,6 +30,7 @@ function ChatRoute() {
       reasoningVisible={reasoningVisible}
       contextInfo={app.contextInfo}
       fallbackNotice={app.fallbackNotice}
+      seedContextInfo={app.seedContextInfo}
     />
   );
 }
