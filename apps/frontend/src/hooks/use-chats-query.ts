@@ -2,6 +2,10 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { client } from '../lib/api-client';
 import { extractApiError } from '../lib/utils';
 import type { Chat } from '@mangostudio/shared';
+import type { ContextInfo } from './use-text-chat';
+
+/** Chat with optional context snapshot from persisted provider state. */
+export type ChatWithContext = Chat & { contextInfo?: ContextInfo | null };
 
 export const chatKeys = {
   all: ['chats'] as const,
@@ -17,7 +21,7 @@ export function useChatsQuery() {
     queryFn: async () => {
       const { data, error } = await client.api.chats.get();
       if (error) throw new Error(extractApiError(error.value));
-      return data as Chat[];
+      return data as ChatWithContext[];
     },
   });
 }
