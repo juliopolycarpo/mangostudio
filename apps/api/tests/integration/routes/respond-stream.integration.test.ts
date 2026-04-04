@@ -91,6 +91,92 @@ describe('POST /respond/stream', () => {
     expect(response.status).toBe(404);
   });
 
+  it('does not persist stateless-loop providerState to the database', async () => {
+    const chatSetCalls: Array<Record<string, unknown>> = [];
+    const createdMessages: Array<Record<string, unknown>> = [];
+
+    const STATELESS_LOOP_STATE = JSON.stringify({
+      schemaVersion: 1,
+      provider: 'openai-compatible',
+      mode: 'stateless-loop',
+      modelName: 'test-model',
+      systemPromptHash: 'none',
+      toolsetHash: 'abc123',
+      loopMessages: [{ role: 'user', content: 'Hello' }],
+    });
+
+    mock.module('../../../src/services/chat-service', () => ({
+      verifyChatOwnership: async () => true,
+    }));
+
+    mock.module('../../../src/services/providers/registry', () => ({
+      getProviderForModel: async () => ({
+        providerType: 'openai-compatible',
+        generateText: async () => ({ text: '' }),
+        generateAgentTurnStream: async function* (_req: any) {
+          yield { type: 'assistant_text_delta', text: 'Hi' };
+          yield { type: 'turn_completed', providerState: STATELESS_LOOP_STATE };
+        },
+      }),
+    }));
+
+    mock.module('../../../src/services/message-service', () => ({
+      createMessage: async (msg: Record<string, unknown>) => {
+        createdMessages.push({ ...msg });
+      },
+      loadRichChatHistory: async () => [],
+      loadChatHistory: async () => [],
+    }));
+
+    mock.module('../../../src/services/tools', () => ({
+      getAllToolDefinitions: () => [],
+      executeTool: async () => ({}),
+    }));
+
+    const makeWhere = (): any => ({
+      execute: async () => {},
+      executeTakeFirst: async () => null,
+      where: () => makeWhere(),
+    });
+
+    mock.module('../../../src/db/database', () => ({
+      getDb: () => ({
+        selectFrom: () => ({ select: () => makeWhere() }),
+        insertInto: () => ({ values: () => ({ execute: async () => {} }) }),
+        updateTable: () => ({
+          set: (values: Record<string, unknown>) => {
+            chatSetCalls.push({ ...values });
+            return makeWhere();
+          },
+        }),
+      }),
+    }));
+
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
+    restoreAuth = restore;
+
+    const response = await app.handle(
+      new Request('http://localhost/respond/stream', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chatId: 'test-chat', prompt: 'Hello', model: 'test-model' }),
+      })
+    );
+
+    await response.text();
+
+    // The AI message row must have providerState = null (not the stateless-loop state)
+    const aiMessage = createdMessages.find((m) => m.role === 'ai');
+    expect(aiMessage).toBeDefined();
+    expect(aiMessage?.providerState).toBeNull();
+
+    // chats.lastProviderState must never be set to a non-null value
+    const durableUpdate = chatSetCalls.find(
+      (u) => 'lastProviderState' in u && u.lastProviderState !== null
+    );
+    expect(durableUpdate).toBeUndefined();
+  });
+
   it('returns 503 when model catalog is not configured', async () => {
     // Mock getGeminiModelCatalog to return unconfigured state
     mock.module('../../../src/services/gemini/catalog', () => ({
