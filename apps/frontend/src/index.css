@@ -315,3 +315,43 @@ pre:hover .copy-code-btn {
 .markdown-content--thinking .markdown-content pre.shiki {
   background: unset;
 }
+
+/* ── Skeleton pulse for streaming start ── */
+
+.skeleton-pulse {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.skeleton-pulse .skeleton-line {
+  height: 0.75rem;
+  border-radius: 0.375rem;
+  background: linear-gradient(
+    90deg,
+    var(--color-surface-container-high) 25%,
+    var(--color-surface-container-highest) 50%,
+    var(--color-surface-container-high) 75%
+  );
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.5s ease-in-out infinite;
+}
+
+.skeleton-pulse .skeleton-line:nth-child(1) {
+  width: 70%;
+}
+.skeleton-pulse .skeleton-line:nth-child(2) {
+  width: 90%;
+}
+.skeleton-pulse .skeleton-line:nth-child(3) {
+  width: 55%;
+}
+
+@keyframes skeleton-shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}

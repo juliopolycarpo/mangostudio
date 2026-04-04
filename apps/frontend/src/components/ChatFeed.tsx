@@ -652,9 +652,17 @@ export function ChatFeed({ chatId, messages }: { chatId: string | null; messages
                                   <span className="text-sm font-medium text-on-surface animate-pulse">
                                     {isImageTurn ? 'Generating image...' : 'Thinking...'}
                                   </span>
-                                  <div className="h-1 w-24 bg-surface-container-highest rounded-full overflow-hidden">
-                                    <div className="h-full bg-primary w-1/2 animate-[slide_1s_ease-in-out_infinite_alternate]"></div>
-                                  </div>
+                                  {isImageTurn ? (
+                                    <div className="h-1 w-24 bg-surface-container-highest rounded-full overflow-hidden">
+                                      <div className="h-full bg-primary w-1/2 animate-[slide_1s_ease-in-out_infinite_alternate]"></div>
+                                    </div>
+                                  ) : (
+                                    <div className="skeleton-pulse mt-1">
+                                      <div className="skeleton-line" />
+                                      <div className="skeleton-line" />
+                                      <div className="skeleton-line" />
+                                    </div>
+                                  )}
                                 </>
                               );
                             }
