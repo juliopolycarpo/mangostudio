@@ -6,6 +6,7 @@ import * as shikiLib from '@/lib/shiki';
 vi.mock('@/lib/shiki', () => ({
   highlightCode: vi.fn(() => null),
   initHighlighter: vi.fn().mockResolvedValue(undefined),
+  isThemeAvailable: vi.fn(() => true),
   CODE_THEMES: ['one-dark-pro', 'github-dark-dimmed', 'github-light', 'one-light'],
 }));
 

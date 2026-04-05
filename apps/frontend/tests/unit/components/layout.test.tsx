@@ -7,6 +7,7 @@ describe('Layout', () => {
   const defaultProps = {
     currentPage: 'chat' as const,
     onNavigate: vi.fn(),
+    onNavigateToMarketplace: vi.fn(),
     chats: mockChats,
     currentChatId: 'chat-1',
     onSelectChat: vi.fn(),

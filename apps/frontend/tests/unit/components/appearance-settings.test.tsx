@@ -134,15 +134,16 @@ describe('useTheme hook', () => {
     expect(result.current.resolvedCodeTheme).toBe('one-dark-pro');
   });
 
-  it('auto mode resolves to light theme when app is light', async () => {
+  it('auto mode resolves to light fallback when preferred light theme is unavailable', async () => {
     const { result } = renderHook(() => useTheme());
     await act(async () => {
       result.current.setConfig({ appTheme: 'light' });
     });
-    expect(result.current.resolvedCodeTheme).toBe('github-light');
+    // github-light is not installed, so falls back to one-light
+    expect(result.current.resolvedCodeTheme).toBe('one-light');
   });
 
-  it('manual mode uses darkTheme regardless of app theme', async () => {
+  it('manual mode falls back to built-in when chosen theme is unavailable', async () => {
     const { result } = renderHook(() => useTheme());
     await act(async () => {
       result.current.setConfig({
@@ -150,7 +151,8 @@ describe('useTheme hook', () => {
         codeTheme: { mode: 'manual', darkTheme: 'github-dark-dimmed', lightTheme: 'github-light' },
       });
     });
-    expect(result.current.resolvedCodeTheme).toBe('github-dark-dimmed');
+    // github-dark-dimmed is not installed, falls back to one-light (resolved is light)
+    expect(result.current.resolvedCodeTheme).toBe('one-light');
   });
 
   it('code theme preference persists in localStorage', async () => {
@@ -269,14 +271,17 @@ describe('AppearanceSettings — code theme selector', () => {
     expect(screen.getByRole('button', { name: /manual/i })).toBeTruthy();
   });
 
-  it('shows 4 theme cards in manual mode', () => {
+  it('shows built-in theme cards in manual mode', () => {
     render(<AppearanceSettings />);
     const manualBtn = screen.getByRole('button', { name: /manual/i });
     fireEvent.click(manualBtn);
     expect(screen.getByText('One Dark Pro')).toBeTruthy();
-    expect(screen.getByText('GitHub Dark Dimmed')).toBeTruthy();
-    expect(screen.getByText('GitHub Light')).toBeTruthy();
     expect(screen.getByText('One Light')).toBeTruthy();
+  });
+
+  it('shows suggested themes section with not-installed suggestions', () => {
+    render(<AppearanceSettings />);
+    expect(screen.getByText('Suggested')).toBeTruthy();
   });
 
   it('shows dark and light preference sections in auto mode', () => {
@@ -295,5 +300,6 @@ describe('AppearanceSettings — code theme selector', () => {
     fireEvent.click(screen.getByRole('button', { name: /manual/i }));
     expect(screen.queryByText('Dark preference')).toBeNull();
     expect(screen.getByText('One Dark Pro')).toBeTruthy();
+    expect(screen.getByText('One Light')).toBeTruthy();
   });
 });
