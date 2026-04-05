@@ -6,7 +6,10 @@
   "type": "module",
   "scripts": {
     "lint": "eslint src tests --max-warnings 0",
+    "lint:fix": "eslint src tests --fix --max-warnings 0",
     "typecheck": "tsc --noEmit",
+    "fix": "bun run lint:fix && bun run format",
+    "fix:check": "bun run lint && bun run format:check",
     "format": "prettier --ignore-path ../../.prettierignore --write 'src/**/*.{ts,json}'",
     "format:check": "prettier --ignore-path ../../.prettierignore --check 'src/**/*.{ts,json}'",
     "test": "vitest run",

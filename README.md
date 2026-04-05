@@ -108,9 +108,13 @@ mangostudio/
 | `bun run dev`            | Start all dev servers concurrently                  |
 | `bun run build`          | Build the frontend for production                   |
 | `bun run build:binary`   | Generate standalone binaries with embedded frontend |
+| `bun run format`         | Apply Prettier across all workspaces                |
+| `bun run format:check`   | Check formatting across all workspaces              |
 | `bun run lint`           | ESLint across all workspaces                        |
+| `bun run lint:fix`       | ESLint autofix across all workspaces                |
 | `bun run typecheck`      | TypeScript type-check across all workspaces         |
-| `bun run check`          | Lint + typecheck + tests                            |
+| `bun run fix`            | Apply lint autofix and Prettier across workspaces   |
+| `bun run check`          | Format check + lint + typecheck + tests             |
 | `bun run verify`         | Check + coverage + build                            |
 | `bun run test`           | Run all unit and integration tests                  |
 | `bun run test:coverage`  | Frontend coverage via Vitest/v8                     |

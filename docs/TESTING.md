@@ -47,12 +47,14 @@ apps/
 ## Root Scripts
 
 ```bash
+bun run format:check       # formatting checks across all workspaces
+bun run check              # format + lint + typecheck + tests
 bun run test                # unit + integration across all workspaces
 bun run test:unit           # API, shared, and frontend unit suites
 bun run test:integration    # API and frontend integration suites
 bun run test:coverage       # frontend coverage (Vitest/v8)
 bun run test:browser:smoke  # Playwright Chromium auth smoke suite
-bun run verify              # lint + typecheck + tests + coverage + build
+bun run verify              # check + coverage + build
 ```
 
 ## Browser Smoke
@@ -211,12 +213,6 @@ bun run --filter @mangostudio/frontend test:coverage
 Before merging, run:
 
 ```bash
-bun run --filter @mangostudio/api test:unit
-bun run --filter @mangostudio/api test:integration
-bun run --filter @mangostudio/frontend test:unit
-bun run --filter @mangostudio/frontend test:integration
-bun run --filter @mangostudio/shared test:unit
-bun run lint
-bun run test
+bun run check
 bun run test:coverage
 ```

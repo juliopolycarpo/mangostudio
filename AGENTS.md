@@ -59,7 +59,7 @@ Useful docs:
 
 ## Validation
 
-- Any change: `bun run lint`
+- Any change: `bun run fix:check`
 - Frontend-local change: `bun run --filter @mangostudio/frontend test:unit`
 - API-local change: `bun run --filter @mangostudio/api test:unit`
 - Shared-local change: `bun run --filter @mangostudio/shared test:unit`
