@@ -1,12 +1,10 @@
-import { defineConfig } from 'eslint/config';
 import eslint from '@eslint/js';
-import tseslint from '@typescript-eslint/eslint-plugin';
-import tsparser from '@typescript-eslint/parser';
 import prettierConfig from 'eslint-config-prettier/flat';
 import reactPlugin from 'eslint-plugin-react';
 import reactHooksPlugin from 'eslint-plugin-react-hooks';
+import tseslint from 'typescript-eslint';
 
-export default defineConfig([
+export default tseslint.config(
   // Global ignores
   {
     ignores: [
@@ -19,22 +17,19 @@ export default defineConfig([
   },
   // Base JavaScript recommendations
   eslint.configs.recommended,
+  ...tseslint.configs.recommended,
   // TypeScript for all .ts/.tsx
   {
     files: ['**/*.{ts,tsx}'],
-    plugins: {
-      '@typescript-eslint': tseslint,
-    },
     languageOptions: {
-      parser: tsparser,
       ecmaVersion: 'latest',
       sourceType: 'module',
       parserOptions: {
         projectService: true,
+        tsconfigRootDir: import.meta.dirname,
       },
     },
     rules: {
-      ...tseslint.configs.recommended.rules,
       'no-undef': 'off',
       '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
       '@typescript-eslint/no-explicit-any': 'off',
@@ -80,4 +75,4 @@ export default defineConfig([
   },
   // Prettier last (disables conflicting stylistic rules; formatting is handled by Prettier itself)
   prettierConfig,
-]);
+);

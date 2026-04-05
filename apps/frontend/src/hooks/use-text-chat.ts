@@ -109,7 +109,7 @@ export function useTextChat({
       const controller = new AbortController();
       abortControllerRef.current = controller;
       let accumulatedText = '';
-      let thinkingSegments: string[] = [];
+      const thinkingSegments: string[] = [];
       let currentThinkingIdx = -1;
       let accumulatedParts: MessagePart[] = [];
 

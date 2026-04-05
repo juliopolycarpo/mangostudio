@@ -132,7 +132,7 @@ export const respondStreamRoutes = (app: Elysia) =>
           const stream = new ReadableStream({
             async start(controller) {
               let fullText = '';
-              let allParts: MessagePart[] = [];
+              const allParts: MessagePart[] = [];
               let aborted = false;
               let durableProviderState: string | null = null;
 
