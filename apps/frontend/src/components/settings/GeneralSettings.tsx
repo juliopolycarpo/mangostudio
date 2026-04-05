@@ -14,11 +14,6 @@ interface GeneralSettingsProps {
 
 const IMAGE_QUALITY_OPTIONS = ['512px', '1K', '2K', '4K'] as const;
 
-const LOCALE_OPTIONS: { value: Locale; label: string }[] = [
-  { value: 'en', label: 'English' },
-  { value: 'pt-BR', label: 'Português (BR)' },
-];
-
 /**
  * General settings tab: language selector, system prompts, image quality grid.
  */
@@ -32,6 +27,11 @@ export function GeneralSettings({
 }: GeneralSettingsProps) {
   const { t, locale, setLocale } = useI18n();
   const s = t.settings.general;
+
+  const localeOptions: { value: Locale; label: string }[] = [
+    { value: 'en', label: s.localeEnglish },
+    { value: 'pt-BR', label: s.localePortuguese },
+  ];
 
   return (
     <div className="space-y-4">
@@ -53,7 +53,7 @@ export function GeneralSettings({
             transition-colors cursor-pointer
           "
         >
-          {LOCALE_OPTIONS.map(({ value, label }) => (
+          {localeOptions.map(({ value, label }) => (
             <option key={value} value={value}>
               {label}
             </option>

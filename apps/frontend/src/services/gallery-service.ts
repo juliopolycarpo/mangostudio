@@ -1,10 +1,8 @@
-/* global fetch */
 import type { GalleryItem } from '@mangostudio/shared';
+import { client } from '@/lib/api-client';
 
 export async function fetchGalleryItems(): Promise<GalleryItem[]> {
-  const res = await fetch('/api/messages/images');
-  if (!res.ok) {
-    throw new Error('Failed to fetch gallery items');
-  }
-  return res.json();
+  const { data, error } = await (client as any).api.messages.images.get();
+  if (error) throw new Error('Gallery fetch failed');
+  return data as GalleryItem[];
 }

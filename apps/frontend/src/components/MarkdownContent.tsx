@@ -10,7 +10,7 @@ function copyButton(ariaLabel: string): string {
   return `<button class="copy-code-btn" type="button" aria-label="${ariaLabel}">${CLIPBOARD_ICON}</button>`;
 }
 
-function createRenderer(theme: CodeThemeId): Renderer {
+function createRenderer(theme: CodeThemeId, copyCodeLabel: string): Renderer {
   const renderer = new Renderer();
 
   renderer.link = ({ href, title, tokens }) => {
@@ -31,20 +31,20 @@ function createRenderer(theme: CodeThemeId): Renderer {
     if (highlighted) {
       return highlighted
         .replace('<pre ', `<pre data-lang="${safeLang}" `)
-        .replace('</pre>', `${copyButton('Copy code')}</pre>`);
+        .replace('</pre>', `${copyButton(copyCodeLabel)}</pre>`);
     }
 
     const escaped = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     const langClass = safeLang ? ` class="language-${safeLang}"` : '';
     const langAttr = safeLang ? ` data-lang="${safeLang}"` : '';
-    return `<pre${langAttr}><code${langClass}>${escaped}</code>${copyButton('Copy code')}</pre>`;
+    return `<pre${langAttr}><code${langClass}>${escaped}</code>${copyButton(copyCodeLabel)}</pre>`;
   };
 
   return renderer;
 }
 
-function createParser(theme: CodeThemeId): Marked {
-  return new Marked({ gfm: true, breaks: true, renderer: createRenderer(theme) });
+function createParser(theme: CodeThemeId, copyCodeLabel: string): Marked {
+  return new Marked({ gfm: true, breaks: true, renderer: createRenderer(theme, copyCodeLabel) });
 }
 
 interface MarkdownContentProps {
@@ -65,7 +65,10 @@ export function MarkdownContent({
   const containerRef = useRef<HTMLDivElement>(null);
   const { resolvedCodeTheme } = useTheme();
 
-  const parser = useMemo(() => createParser(resolvedCodeTheme), [resolvedCodeTheme]);
+  const parser = useMemo(
+    () => createParser(resolvedCodeTheme, copyCodeLabel),
+    [resolvedCodeTheme, copyCodeLabel]
+  );
 
   const html = useMemo(() => {
     if (!content) return '';

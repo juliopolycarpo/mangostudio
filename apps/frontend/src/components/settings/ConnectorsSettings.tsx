@@ -162,7 +162,7 @@ export function ConnectorsSettings({ modelCatalog, reloadModelCatalog }: Connect
       toast(s.deleteSuccess, 'success');
     } catch (err) {
       console.error(err);
-      toast('Failed to delete connector', 'error');
+      toast(s.deleteError, 'error');
     } finally {
       await loadStatus();
       setConnectorToDelete(null);
@@ -181,7 +181,7 @@ export function ConnectorsSettings({ modelCatalog, reloadModelCatalog }: Connect
       toast(s.updateModelsSuccess, 'success');
     } catch (err) {
       console.error(err);
-      toast('Failed to update models', 'error');
+      toast(s.updateModelsError, 'error');
     }
   };
 
@@ -677,7 +677,7 @@ export function ConnectorsSettings({ modelCatalog, reloadModelCatalog }: Connect
                     filteredTextModels.length === 0 &&
                     filteredImageModels.length === 0 && (
                       <div className="rounded-2xl border border-dashed border-outline-variant/20 bg-surface-container-lowest px-4 py-8 text-center text-sm text-on-surface-variant/70">
-                        No results for &quot;{modelSearchQuery}&quot;
+                        {s.noSearchResults.replace('{query}', modelSearchQuery)}
                       </div>
                     )}
                 </div>

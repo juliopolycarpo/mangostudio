@@ -4,6 +4,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import type { Message, MessagePart, SSEContextEvent, SSEFallbackEvent } from '@mangostudio/shared';
 import { messageKeys } from './use-messages-query';
 import { respondTextStream } from '../services/generation-service';
+import { useI18n } from './use-i18n';
 import type { useOptimisticMessages } from './use-optimistic-messages';
 import type { useChats } from './use-chats';
 
@@ -35,6 +36,7 @@ export function useTextChat({
   currentChatId,
 }: UseTextChatOptions) {
   const queryClient = useQueryClient();
+  const { t } = useI18n();
   const [isGenerating, setIsGenerating] = useState(false);
   const [contextInfo, setContextInfo] = useState<ContextInfo | null>(null);
   const [fallbackNotice, setFallbackNotice] = useState<FallbackNotice | null>(null);
@@ -275,8 +277,7 @@ export function useTextChat({
           updateOptimisticMessage(activeChatId!, optimisticAiMsgId, { isGenerating: false });
         } else {
           console.error('[respond]', error);
-          const errorText =
-            error instanceof Error ? error.message : 'Failed to get a response. Please try again.';
+          const errorText = error instanceof Error ? error.message : t.errors.textGenerationFailed;
           updateOptimisticMessage(activeChatId!, optimisticAiMsgId, {
             isGenerating: false,
             text: errorText,
