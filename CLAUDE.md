@@ -1,3 +1,5 @@
-@AGENTS.md
+# CLAUDE.md
 
-**IMPORTANT**: Read and follow all instructions in `AGENTS.md` before starting any task.
+**IMPORTANT**: Treat `AGENTS.md` as the source of truth for repository structure and content.
+
+@AGENTS.md
