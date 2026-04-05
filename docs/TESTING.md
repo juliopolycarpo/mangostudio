@@ -52,7 +52,7 @@ bun run test:unit           # API, shared, and frontend unit suites
 bun run test:integration    # API and frontend integration suites
 bun run test:coverage       # frontend coverage (Vitest/v8)
 bun run test:browser:smoke  # Playwright Chromium auth smoke suite
-bun run test:ci             # lint + test + coverage
+bun run verify              # lint + typecheck + tests + coverage + build
 ```
 
 ## Browser Smoke

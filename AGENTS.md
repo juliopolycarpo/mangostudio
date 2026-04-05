@@ -1,213 +1,68 @@
 # Repository Guidelines
 
 `AGENTS.md` is the canonical root instruction file for this repository.
-Workspace-level `AGENTS.md` files may add local guidance, but they must only contain the delta for that workspace and must not duplicate or contradict this file.
+Workspace-level `AGENTS.md` files must stay short and contain only workspace-specific deltas.
 
-## Fast Context
+## Repo Map
 
-MangoStudio is a Bun monorepo for authenticated AI chat and image generation.
-
-- `apps/frontend/` — React 19 + Vite 8 UI with TanStack Router, TanStack Query, Better Auth client integration, and a local design system.
-- `apps/api/` — Elysia API with Better Auth, Kysely + SQLite persistence, connector management, and provider integrations for Gemini, OpenAI-compatible APIs, and Anthropic.
-- `apps/shared/` — framework-agnostic contracts, domain types, and i18n dictionaries shared by frontend and API.
-- `tests/browser-smoke/` — Playwright Chromium smoke coverage for the auth flow against the live stack.
+- `apps/frontend/` — React 19 + Vite 8 UI with TanStack Router, TanStack Query, Better Auth client integration, and the local UI system.
+- `apps/api/` — Elysia API with Better Auth, Kysely + SQLite persistence, connector management, and provider integrations.
+- `apps/shared/` — shared contracts, domain types, i18n dictionaries, and framework-agnostic helpers.
+- `tests/browser-smoke/` — Playwright smoke coverage for the auth flow.
 - `.mango/` — example config, env overrides, local runtime artifacts, and standalone build output.
 
-Before making changes, read this file, then the workspace-level `AGENTS.md` for the area you are touching, then only the targeted docs or entrypoints linked below.
+## Working Loop
 
-## Read Order
+1. Read this file, then only the relevant workspace `AGENTS.md`.
+2. Start from the closest entrypoint to the task: route, component, hook, service, contract, or test.
+3. Trace one layer outward at a time instead of scanning the whole repository.
+4. Run the smallest relevant validation first, then expand only if the change is broad.
+5. Open `docs/AGENT_PLAYBOOKS.md` only when a task needs deeper feature-by-feature navigation.
 
-Open files on demand instead of scanning the whole repository:
+Useful docs:
 
-1. Root overview: `README.md`
-2. Workspace scripts and filters: `package.json`
-3. Testing conventions: `docs/TESTING.md`
-4. Frontend work: `apps/frontend/AGENTS.md`
-5. API work: `apps/api/AGENTS.md`
-6. Shared contract or i18n work: `apps/shared/AGENTS.md`
-7. Configuration or runtime changes: `apps/api/src/lib/config.ts`, `.mango/config.toml.example`, `.mango/.env.example`
-8. Standalone build changes: `scripts/build.ts`
+- `README.md` — product and runtime overview
+- `package.json` — root scripts
+- `docs/TESTING.md` — test taxonomy and harness rules
+- `docs/AGENT_PLAYBOOKS.md` — detailed file maps by feature area
 
-## Hard Invariants
+## Global Rules
 
-- Use Bun commands from the monorepo root. Do not introduce `npm`, `pnpm`, or `yarn` as the default workflow.
-- Keep changes scoped. Do not rewrite or reformat unrelated parts of the repository.
+- Use Bun commands from the monorepo root.
+- Keep changes scoped. Do not rewrite or reformat unrelated files.
 - Never commit secrets, populated config files, databases, uploads, or build artifacts.
+- Any frontend file that contains JSX must use the `.tsx` extension.
 - All user-visible frontend strings must come from `@mangostudio/shared/i18n`.
-- Any file that contains JSX must use the `.tsx` extension, including hooks or providers.
-- Prefer existing frontend API patterns first: Eden Treaty client, TanStack Query hooks, and service modules. Direct `fetch` is acceptable in service-layer code for streaming, uploads, or other browser-native flows.
-- Prefer Kysely query builder for application data access. Migrations may use `kysely/sql` when SQLite requires SQL that is awkward or impossible to express otherwise.
-- The API namespace prefix is `/api`. Better Auth is mounted at `/api/auth`.
-- If an API shape changes, update the shared contract, the API route or service, the frontend consumer, and the relevant tests in the same task.
-- Do not silently swallow errors. Return explicit errors and log enough context for debugging.
-- API error responses must use `ApiErrorResponse` (`{ error: string }`) from `@mangostudio/shared/contracts`. Streaming errors use `SSEErrorEvent` from `@mangostudio/shared/contracts/errors`. Do not invent ad-hoc error objects.
-- Cross-workspace imports use package names: `@mangostudio/shared`, `@mangostudio/shared/i18n`, `@mangostudio/shared/types`, `@mangostudio/shared/utils/model-detection`, `@mangostudio/api`. Never use relative paths to cross workspace boundaries.
+- Public API shape changes must update the API code, shared contract, frontend consumer, and relevant tests in the same task.
+- API error responses must use `ApiErrorResponse` from `@mangostudio/shared/contracts` or `SSEErrorEvent` from `@mangostudio/shared/contracts/errors`.
+- Add new environment parsing only in `apps/api/src/lib/config.ts`.
+- Shared code must remain framework-agnostic.
+- Cross-workspace imports must use package names, never relative paths.
+- Do not edit `apps/frontend/src/routeTree.gen.ts`; it is generated.
 
-## Naming Conventions
+## Naming Shortcuts
 
-- Files: `kebab-case.ts` for modules, `PascalCase.tsx` for React component files.
-- DB table names: `snake_case` (e.g. `secret_metadata`). DB column names: `camelCase` (e.g. `createdAt`, `userId`).
-- i18n keys: dot-separated hierarchy matching feature context (e.g. `settings.connectors.addButton`, `chat.newChat`).
-- Route file segments: TanStack Router conventions (`_layout.tsx`, `$param.tsx`, `__root.tsx`).
-- Exported types and interfaces: `PascalCase`. No `I` prefix for interfaces.
-- Kysely type aliases: `<Entity>Select`, `<Entity>Insert`, `<Entity>Update` (e.g. `ChatSelect`, `ChatInsert`).
-- Migration files: three-digit sequential prefix with snake_case description (e.g. `012_add_tool_results.ts`).
+- Migration files: `NNN_description.ts`
+- i18n keys: dot-separated by feature scope
+- DB tables: `snake_case`; DB columns: `camelCase`
+- Kysely aliases: `<Entity>Select`, `<Entity>Insert`, `<Entity>Update`
 
-## Anti-Patterns
+## Task Routing
 
-- Do not create new `fetch` wrappers in the frontend. Use Eden Treaty + TanStack Query.
-- Do not add new environment variable parsing outside `apps/api/src/lib/config.ts`.
-- Do not add CSS frameworks, CSS-in-JS, or utility libraries. Styling uses vanilla CSS.
-- Do not create `index.ts` barrel files in directories that do not already have one.
-- Do not add dependencies without confirming the functionality does not already exist in the project.
-- Do not edit `apps/frontend/src/routeTree.gen.ts` — it is auto-generated by TanStack Router.
+- Auth: `apps/api/src/auth.ts`, `apps/api/src/routes/auth.ts`, `apps/frontend/src/lib/auth-client.ts`, `apps/frontend/src/routes/login.tsx`, `apps/frontend/src/routes/signup.tsx`, `tests/browser-smoke/auth-flow.spec.ts`
+- API route or contract: `apps/api/src/app.ts`, the target file under `apps/api/src/routes/`, `apps/shared/src/contracts/index.ts`, the matching frontend consumer, and relevant tests
+- Chat, streaming, or generation: `apps/api/src/routes/respond.ts`, `apps/api/src/routes/respond-stream.ts`, `apps/api/src/routes/chats.ts`, `apps/api/src/routes/messages.ts`, `apps/frontend/src/hooks/use-text-chat.ts`, `apps/frontend/src/hooks/use-image-generation.ts`, `apps/frontend/src/services/generation-service.ts`
+- Settings, connectors, or providers: `apps/api/src/routes/settings/`, `apps/api/src/services/providers/`, `apps/frontend/src/components/settings/`, `apps/frontend/src/hooks/use-model-catalog.ts`
+- Persistence or migrations: `apps/api/src/db/database.ts`, `apps/api/src/db/types.ts`, `apps/api/src/db/migrations/`, and the owning service or route
+- Shared i18n or types: `apps/shared/src/i18n/`, `apps/shared/src/contracts/`, `apps/shared/src/types/`, and the affected API/frontend consumers
+- Config or standalone build: `apps/api/src/lib/config.ts`, `.mango/config.toml.example`, `.mango/.env.example`, `scripts/build.ts`
 
-## Change Impact Map
+## Validation
 
-Use this map to avoid blind repository-wide searches.
-
-### Auth
-
-Open these first:
-
-- `apps/api/src/auth.ts`
-- `apps/api/src/routes/auth.ts`
-- `apps/api/src/plugins/auth-middleware.ts`
-- `apps/frontend/src/lib/auth-client.ts`
-- `apps/frontend/src/routes/login.tsx`
-- `apps/frontend/src/routes/signup.tsx`
-- `tests/browser-smoke/auth-flow.spec.ts`
-
-### API Routes And Contracts
-
-Open these first:
-
-- `apps/api/src/app.ts`
-- `apps/api/src/routes/*`
-- `apps/shared/src/contracts/index.ts`
-- `apps/frontend/src/lib/api-client.ts`
-- the frontend hooks, services, or routes that consume the changed endpoint
-- the relevant API and frontend tests
-
-### Chat, Streaming, And Generation
-
-Open these first:
-
-- `apps/api/src/routes/respond-stream.ts`
-- `apps/api/src/routes/respond.ts`
-- `apps/api/src/routes/generate.ts`
-- `apps/api/src/routes/chats.ts`
-- `apps/api/src/routes/messages.ts`
-- `apps/api/src/routes/upload.ts`
-- `apps/api/src/services/message-service.ts`
-- `apps/api/src/services/chat-service.ts`
-- `apps/frontend/src/services/generation-service.ts`
-- `apps/frontend/src/hooks/use-text-chat.ts`
-- `apps/frontend/src/hooks/use-image-generation.ts`
-- `apps/frontend/src/features/chat/ChatPage.tsx`
-- `apps/shared/src/contracts/index.ts`
-
-### Connectors, Providers, And Model Catalog
-
-Open these first:
-
-- `apps/api/src/routes/settings/connectors.ts`
-- `apps/api/src/routes/settings/models.ts`
-- `apps/api/src/routes/settings/gemini-aliases.ts`
-- `apps/api/src/services/providers/registry.ts`
-- `apps/api/src/services/providers/*`
-- `apps/api/src/services/gemini/*`
-- `apps/frontend/src/components/settings/ConnectorsSettings.tsx`
-- `apps/shared/src/contracts/index.ts`
-
-### Tool Calling And Agentic Flows
-
-Open these first:
-
-- `apps/api/src/services/tools/*`
-- `apps/api/src/routes/respond-stream.ts`
-- `apps/shared/src/types/index.ts` (for `AgentEvent`, `MessagePart`)
-- `apps/frontend/src/hooks/use-text-chat.ts`
-
-### Configuration, Secrets, And Runtime Paths
-
-Open these first:
-
-- `apps/api/src/lib/config.ts`
-- `.mango/config.toml.example`
-- `.mango/.env.example`
-- `README.md`
-- `scripts/build.ts` when the change affects standalone binaries or runtime output layout
-
-### Persistence And Database
-
-Open these first:
-
-- `apps/api/src/db/database.ts`
-- `apps/api/src/db/types.ts`
-- `apps/api/src/db/row-types.ts`
-- `apps/api/src/db/migrations/*`
-- the service or route that owns the affected data flow
-
-### Frontend UX, Routing, And State
-
-Open these first:
-
-- `apps/frontend/src/routes/*`
-- `apps/frontend/src/features/*`
-- `apps/frontend/src/hooks/*`
-- `apps/frontend/src/components/*`
-- `apps/frontend/src/components/ui/*` for design-system reuse
-- `apps/frontend/src/hooks/use-i18n.tsx` when locale behavior changes
-
-## Migration Authoring
-
-- Place new migration files in `apps/api/src/db/migrations/`.
-- Name files with the next three-digit sequential prefix: `NNN_description.ts` (e.g. `012_add_tool_results.ts`).
-- Export an `up` function. Include a `down` function only when the migration is safely reversible.
-- Register the new migration in `apps/api/src/db/migrations/index.ts`.
-- After adding a migration, update `apps/api/src/db/types.ts` with the new table or column types.
-
-## Validation Matrix
-
-Run the smallest relevant checks while iterating, then the full suite before final handoff when the change is broad enough.
-
-### Minimum Relevant Checks
-
-- Any change: `bun run lint` (fast, catches import and formatting drift)
-- Frontend-only change: `bun run --filter @mangostudio/frontend test:unit`
-- API-only change: `bun run --filter @mangostudio/api test:unit`
-- Shared-only change: `bun run --filter @mangostudio/shared test:unit`
-- Route or integration flow change: `bun run --filter @mangostudio/api test:integration`
+- Any change: `bun run lint`
+- Frontend-local change: `bun run --filter @mangostudio/frontend test:unit`
+- API-local change: `bun run --filter @mangostudio/api test:unit`
+- Shared-local change: `bun run --filter @mangostudio/shared test:unit`
+- Route or integration flow change: run the relevant `test:integration`
 - Auth flow change: `bun run test:browser:smoke`
-
-### Full Pre-Handoff Checks
-
-- `bun run lint`
-- `bun run test`
-- `bun run test:coverage`
-- `bun run build`
-
-Smoke-test the main product flows locally when applicable: login, chat creation, and image generation.
-
-## Root Scripts Quick Reference
-
-| Script | What it runs |
-|---|---|
-| `bun run dev` | Frontend + API dev servers concurrently |
-| `bun run lint` | ESLint across all workspaces |
-| `bun run typecheck` | TypeScript type-check across all workspaces |
-| `bun run check` | Lint + typecheck + tests |
-| `bun run verify` | Check + coverage + build |
-| `bun run test` | All unit + integration tests across workspaces |
-| `bun run test:coverage` | Frontend coverage report |
-| `bun run test:browser:smoke` | Playwright auth-flow smoke suite |
-| `bun run build` | Production frontend build |
-| `bun run build:binary` | Standalone binary via `scripts/build.ts` |
-| `bun run migrate` | Run pending DB migrations |
-
-## Local Docs
-
-- `README.md` — product overview, runtime setup, supported providers, and standalone build notes
-- `docs/TESTING.md` — test taxonomy, harness rules, and browser smoke coverage
-- `GEMINI.md`, `CLAUDE.md` — thin aliases that redirect to this file; do not read separately
+- Broad or cross-workspace change: `bun run verify`
