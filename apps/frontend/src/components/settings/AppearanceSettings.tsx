@@ -1,8 +1,21 @@
+import { useState, useEffect, useCallback } from 'react';
+import { Download, Trash2, Check, ShoppingBag } from 'lucide-react';
 import { Card } from '@/components/ui/Card';
 import { useI18n } from '@/hooks/use-i18n';
 import { useTheme } from '@/hooks/use-theme';
 import type { ThemeConfig, CodeThemeConfig } from '@/hooks/use-theme';
-import { CODE_THEMES, type CodeThemeId } from '@/lib/shiki';
+import {
+  BUILTIN_THEMES,
+  SUGGESTED_THEMES,
+  type CodeThemeId,
+  isThemeBuiltIn,
+  isThemeAvailable,
+  getInstalledThemeIds,
+  loadThemeOnDemand,
+  uninstallTheme,
+} from '@/lib/shiki';
+import { getThemePreview, getCachedPreview } from '@/services/theme-preview-service';
+import { useNavigate } from '@tanstack/react-router';
 
 type FontSize = ThemeConfig['fontSize'];
 type ChatDensity = ThemeConfig['chatDensity'];
@@ -68,69 +81,116 @@ function SettingsSection({
   );
 }
 
-/** Pre-rendered code snippet previews for each Shiki theme (static HTML). */
-const THEME_PREVIEWS: Record<CodeThemeId, { bg: string; html: string }> = {
-  'one-dark-pro': {
-    bg: '#282c34',
-    html: '<code><span style="color:#c678dd">const</span> <span style="color:#e5c07b">greeting</span> <span style="color:#56b6c2">=</span> <span style="color:#98c379">"hello"</span><span style="color:#abb2bf">;</span>\n<span style="color:#c678dd">function</span> <span style="color:#61afef">greet</span><span style="color:#abb2bf">(</span><span style="color:#e06c75">name</span><span style="color:#abb2bf">)</span> <span style="color:#abb2bf">{</span>\n  <span style="color:#c678dd">return</span> <span style="color:#98c379">`${greeting}, ${name}`</span><span style="color:#abb2bf">;</span>\n<span style="color:#abb2bf">}</span></code>',
-  },
-  'github-dark-dimmed': {
-    bg: '#22272e',
-    html: '<code><span style="color:#f47067">const</span> <span style="color:#f69d50">greeting</span> <span style="color:#adbac7">=</span> <span style="color:#96d0ff">"hello"</span><span style="color:#adbac7">;</span>\n<span style="color:#f47067">function</span> <span style="color:#dcbdfb">greet</span><span style="color:#adbac7">(</span><span style="color:#f69d50">name</span><span style="color:#adbac7">)</span> <span style="color:#adbac7">{</span>\n  <span style="color:#f47067">return</span> <span style="color:#96d0ff">`${greeting}, ${name}`</span><span style="color:#adbac7">;</span>\n<span style="color:#adbac7">}</span></code>',
-  },
-  'github-light': {
-    bg: '#ffffff',
-    html: '<code><span style="color:#cf222e">const</span> <span style="color:#953800">greeting</span> <span style="color:#24292f">=</span> <span style="color:#0a3069">"hello"</span><span style="color:#24292f">;</span>\n<span style="color:#cf222e">function</span> <span style="color:#8250df">greet</span><span style="color:#24292f">(</span><span style="color:#953800">name</span><span style="color:#24292f">)</span> <span style="color:#24292f">{</span>\n  <span style="color:#cf222e">return</span> <span style="color:#0a3069">`${greeting}, ${name}`</span><span style="color:#24292f">;</span>\n<span style="color:#24292f">}</span></code>',
-  },
-  'one-light': {
-    bg: '#fafafa',
-    html: '<code><span style="color:#a626a4">const</span> <span style="color:#c18401">greeting</span> <span style="color:#0184bc">=</span> <span style="color:#50a14f">"hello"</span><span style="color:#383a42">;</span>\n<span style="color:#a626a4">function</span> <span style="color:#4078f2">greet</span><span style="color:#383a42">(</span><span style="color:#e45649">name</span><span style="color:#383a42">)</span> <span style="color:#383a42">{</span>\n  <span style="color:#a626a4">return</span> <span style="color:#50a14f">`${greeting}, ${name}`</span><span style="color:#383a42">;</span>\n<span style="color:#383a42">}</span></code>',
-  },
-};
-
-const THEME_I18N_KEYS = {
-  'one-dark-pro': 'oneDarkPro',
-  'github-dark-dimmed': 'githubDarkDimmed',
-  'github-light': 'githubLight',
-  'one-light': 'oneLight',
-} as const satisfies Record<CodeThemeId, string>;
+/** Prettify a Shiki theme ID into a human-readable display name. */
+function formatThemeName(id: string): string {
+  return id
+    .split('-')
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ');
+}
 
 function ThemeCard({
   themeId,
   selected,
   onClick,
   label,
+  installed,
+  builtIn,
+  onInstall,
+  onUninstall,
+  loading,
 }: {
   themeId: CodeThemeId;
   selected: boolean;
   onClick: () => void;
   label: string;
+  installed: boolean;
+  builtIn: boolean;
+  onInstall?: () => void;
+  onUninstall?: () => void;
+  loading?: boolean;
 }) {
-  const preview = THEME_PREVIEWS[themeId];
+  const { t } = useI18n();
+  const [previewHtml, setPreviewHtml] = useState<string | null>(() => getCachedPreview(themeId));
+
+  useEffect(() => {
+    if (!previewHtml) {
+      void getThemePreview(themeId).then((html) => {
+        if (html) setPreviewHtml(html);
+      });
+    }
+  }, [themeId, previewHtml]);
+
+  const mp = t.marketplace;
+
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={selected}
+    <div
       className={`
-        rounded-xl border-2 transition-all duration-200 overflow-hidden text-left
-        focus:outline-none focus:ring-2 focus:ring-primary/40
-        ${selected ? 'border-primary ring-1 ring-primary/30' : 'border-outline-variant/20 hover:border-outline-variant/50 cursor-pointer'}
+        group relative rounded-xl border-2 transition-all duration-200 overflow-hidden text-left
+        focus-within:ring-2 focus-within:ring-primary/40
+        ${selected ? 'border-primary ring-1 ring-primary/30' : 'border-outline-variant/20 hover:border-outline-variant/50'}
       `}
     >
-      <pre
-        className="p-3 text-[11px] leading-normal font-mono overflow-hidden"
-        style={{ background: preview.bg }}
-        dangerouslySetInnerHTML={{ __html: preview.html }}
-      />
-      <div className="px-3 py-2 text-xs font-semibold text-on-surface-variant bg-surface-container-high">
-        {label}
-      </div>
-    </button>
+      <button
+        type="button"
+        onClick={onClick}
+        aria-pressed={selected}
+        className="w-full text-left cursor-pointer"
+      >
+        {previewHtml ? (
+          <div
+            className="p-3 text-[11px] leading-normal font-mono overflow-hidden [&_pre]:!m-0 [&_pre]:!p-0 [&_pre]:!bg-transparent [&_pre]:overflow-hidden"
+            dangerouslySetInnerHTML={{ __html: previewHtml }}
+          />
+        ) : (
+          <div className="p-3 h-20 bg-surface-container-lowest animate-pulse rounded-t-lg" />
+        )}
+        <div className="px-3 py-2 text-xs font-semibold text-on-surface-variant bg-surface-container-high flex items-center justify-between">
+          <span>{label}</span>
+          {installed && <Check size={12} className="text-primary" />}
+        </div>
+      </button>
+
+      {/* Hover overlay with actions */}
+      {!builtIn && (
+        <div className="absolute inset-0 bg-background/60 backdrop-blur-sm opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-center justify-center gap-2">
+          {!installed ? (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onInstall?.();
+              }}
+              disabled={loading}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-on-primary text-xs font-bold transition-all active:scale-95 disabled:opacity-50"
+              title={mp.download}
+            >
+              {loading ? (
+                <span className="w-3 h-3 rounded-full border-2 border-current border-t-transparent animate-spin" />
+              ) : (
+                <Download size={12} />
+              )}
+              {mp.install}
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onUninstall?.();
+              }}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-error/10 text-error text-xs font-bold transition-all active:scale-95"
+              title={mp.uninstall}
+            >
+              <Trash2 size={12} />
+              {mp.uninstall}
+            </button>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
-
-const PREVIEW_SENTENCE_KEY = 'The quick brown fox jumps over the lazy dog.';
 
 /**
  * Appearance settings tab: app theme, code theme, font size, chat density.
@@ -138,7 +198,16 @@ const PREVIEW_SENTENCE_KEY = 'The quick brown fox jumps over the lazy dog.';
 export function AppearanceSettings() {
   const { t } = useI18n();
   const { config, setConfig } = useTheme();
+  const navigate = useNavigate();
   const s = t.settings.appearance;
+  const mp = t.marketplace;
+
+  const [installedIds, setInstalledIds] = useState<CodeThemeId[]>(() => getInstalledThemeIds());
+  const [loadingTheme, setLoadingTheme] = useState<CodeThemeId | null>(null);
+
+  const refreshInstalled = useCallback(() => {
+    setInstalledIds(getInstalledThemeIds());
+  }, []);
 
   const setFontSize = (fontSize: FontSize) => setConfig({ fontSize });
   const setDensity = (chatDensity: ChatDensity) => setConfig({ chatDensity });
@@ -151,10 +220,75 @@ export function AppearanceSettings() {
   const setLightTheme = (lightTheme: CodeThemeId) =>
     setConfig({ codeTheme: { ...codeTheme, lightTheme } });
 
-  const darkThemes = CODE_THEMES.filter(
-    (id) => id === 'one-dark-pro' || id === 'github-dark-dimmed'
+  const handleInstall = useCallback(
+    async (id: CodeThemeId) => {
+      setLoadingTheme(id);
+      const ok = await loadThemeOnDemand(id);
+      if (ok) refreshInstalled();
+      setLoadingTheme(null);
+    },
+    [refreshInstalled]
   );
-  const lightThemes = CODE_THEMES.filter((id) => id === 'github-light' || id === 'one-light');
+
+  const handleUninstall = useCallback(
+    (id: CodeThemeId) => {
+      uninstallTheme(id);
+      refreshInstalled();
+    },
+    [refreshInstalled]
+  );
+
+  const selectTheme = useCallback(
+    (id: CodeThemeId) => {
+      if (isThemeAvailable(id)) {
+        setDarkTheme(id);
+      } else {
+        void handleInstall(id).then(() => setDarkTheme(id));
+      }
+    },
+    [handleInstall, setDarkTheme]
+  );
+
+  /** All available theme IDs: built-in + installed (deduped). */
+  const allAvailable: CodeThemeId[] = [
+    ...BUILTIN_THEMES,
+    ...installedIds.filter((id) => !isThemeBuiltIn(id)),
+  ];
+
+  const builtInDark = BUILTIN_THEMES.filter((id) => id === 'one-dark-pro');
+  const builtInLight = BUILTIN_THEMES.filter((id) => id === 'one-light');
+
+  const suggestedNotInstalled = SUGGESTED_THEMES.filter((id) => !isThemeAvailable(id));
+  const suggestedInstalled = SUGGESTED_THEMES.filter(
+    (id) => isThemeAvailable(id) && !isThemeBuiltIn(id)
+  );
+
+  const extraInstalled = installedIds.filter(
+    (id) => !isThemeBuiltIn(id) && !(SUGGESTED_THEMES as readonly string[]).includes(id)
+  );
+
+  const getLabel = (id: CodeThemeId) => formatThemeName(id);
+
+  const renderThemeCard = (id: CodeThemeId, { isDarkSlot }: { isDarkSlot?: boolean } = {}) => (
+    <ThemeCard
+      key={id}
+      themeId={id}
+      selected={
+        isDarkSlot === undefined
+          ? codeTheme.darkTheme === id
+          : isDarkSlot
+            ? codeTheme.darkTheme === id
+            : codeTheme.lightTheme === id
+      }
+      onClick={() => (isDarkSlot === false ? setLightTheme(id) : selectTheme(id))}
+      label={getLabel(id)}
+      installed={isThemeAvailable(id)}
+      builtIn={isThemeBuiltIn(id)}
+      onInstall={() => void handleInstall(id)}
+      onUninstall={() => handleUninstall(id)}
+      loading={loadingTheme === id}
+    />
+  );
 
   return (
     <div className="space-y-4">
@@ -196,52 +330,72 @@ export function AppearanceSettings() {
 
         {codeTheme.mode === 'auto' ? (
           <div className="space-y-3 mt-2">
+            {/* Dark preference */}
             <div>
               <p className="text-xs font-semibold text-on-surface-variant/70 mb-2">
                 {s.codeTheme.darkPreference}
               </p>
               <div className="grid grid-cols-2 gap-3">
-                {darkThemes.map((id) => (
-                  <ThemeCard
-                    key={id}
-                    themeId={id}
-                    selected={codeTheme.darkTheme === id}
-                    onClick={() => setDarkTheme(id)}
-                    label={s.codeTheme[THEME_I18N_KEYS[id]]}
-                  />
-                ))}
+                {builtInDark.map((id) => renderThemeCard(id, { isDarkSlot: true }))}
+                {[...suggestedInstalled, ...extraInstalled]
+                  .filter(
+                    (id) => id.includes('dark') || id.includes('night') || id.includes('monokai')
+                  )
+                  .map((id) => renderThemeCard(id, { isDarkSlot: true }))}
               </div>
             </div>
+            {/* Light preference */}
             <div>
               <p className="text-xs font-semibold text-on-surface-variant/70 mb-2">
                 {s.codeTheme.lightPreference}
               </p>
               <div className="grid grid-cols-2 gap-3">
-                {lightThemes.map((id) => (
-                  <ThemeCard
-                    key={id}
-                    themeId={id}
-                    selected={codeTheme.lightTheme === id}
-                    onClick={() => setLightTheme(id)}
-                    label={s.codeTheme[THEME_I18N_KEYS[id]]}
-                  />
-                ))}
+                {builtInLight.map((id) => renderThemeCard(id, { isDarkSlot: false }))}
+                {[...suggestedInstalled, ...extraInstalled]
+                  .filter((id) => id.includes('light') || id.includes('dawn'))
+                  .map((id) => renderThemeCard(id, { isDarkSlot: false }))}
               </div>
             </div>
           </div>
         ) : (
           <div className="grid grid-cols-2 gap-3 mt-2">
-            {CODE_THEMES.map((id) => (
-              <ThemeCard
-                key={id}
-                themeId={id}
-                selected={codeTheme.darkTheme === id}
-                onClick={() => setDarkTheme(id)}
-                label={s.codeTheme[THEME_I18N_KEYS[id]]}
-              />
-            ))}
+            {allAvailable.map((id) => renderThemeCard(id))}
           </div>
         )}
+
+        {/* Suggested themes */}
+        {suggestedNotInstalled.length > 0 && (
+          <div className="mt-4">
+            <p className="text-xs font-semibold text-on-surface-variant/70 mb-2">
+              {s.codeTheme.suggestedThemes}
+            </p>
+            <div className="grid grid-cols-2 gap-3">
+              {suggestedNotInstalled.map((id) => renderThemeCard(id))}
+            </div>
+          </div>
+        )}
+
+        {/* Extra installed themes */}
+        {extraInstalled.length > 0 && (
+          <div className="mt-4">
+            <p className="text-xs font-semibold text-on-surface-variant/70 mb-2">
+              {s.codeTheme.installedThemes}
+            </p>
+            <div className="grid grid-cols-2 gap-3">
+              {extraInstalled.map((id) => renderThemeCard(id))}
+            </div>
+          </div>
+        )}
+
+        {/* Marketplace link */}
+        <button
+          type="button"
+          onClick={() => void navigate({ to: '/marketplace' })}
+          className="mt-3 flex items-center gap-2 text-sm font-semibold text-primary hover:text-primary/80 transition-colors cursor-pointer"
+        >
+          <ShoppingBag size={16} />
+          {mp.addFromMarketplace}
+        </button>
       </SettingsSection>
 
       {/* ── Font Size ── */}
@@ -261,7 +415,7 @@ export function AppearanceSettings() {
           className="mt-2 text-on-surface-variant/70 font-body leading-relaxed transition-all duration-200"
           style={{ fontSize: 'var(--chat-font-size)' }}
         >
-          {PREVIEW_SENTENCE_KEY}
+          {t.settings.appearance.fontPreview}
         </p>
       </SettingsSection>
 
