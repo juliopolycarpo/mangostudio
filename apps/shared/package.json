@@ -7,6 +7,8 @@
   "scripts": {
     "lint": "eslint src tests --max-warnings 0",
     "typecheck": "tsc --noEmit",
+    "format": "prettier --ignore-path ../../.prettierignore --write 'src/**/*.{ts,json}'",
+    "format:check": "prettier --ignore-path ../../.prettierignore --check 'src/**/*.{ts,json}'",
     "test": "vitest run",
     "test:unit": "vitest run tests/unit"
   },

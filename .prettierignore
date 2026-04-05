@@ -1,0 +1,4 @@
+apps/*/dist/
+apps/*/coverage/
+.mango/out/
+apps/frontend/src/routeTree.gen.ts
