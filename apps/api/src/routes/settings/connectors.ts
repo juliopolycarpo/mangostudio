@@ -31,11 +31,13 @@ import {
 } from '../../services/providers/openai-provider';
 import { getConfig, getMangoDir } from '../../lib/config';
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
-import { parse as parseToml, stringify as stringifyToml } from 'smol-toml';
+import { stringify as stringifyToml } from 'smol-toml';
 import { join, dirname } from 'path';
 import { randomUUID } from 'crypto';
 import { validateBaseUrl, UnsafeBaseUrlError } from '../../services/providers/base-url-policy';
 import { requireAuth } from '../../plugins/auth-middleware';
+import { readTomlStringSections } from '../../lib/toml';
+import { parseStringArray } from '../../utils/json';
 
 /** Per-provider configuration for secret storage paths. */
 const PROVIDER_SECRET_CONFIG: Record<ProviderType, { tomlSection: string; envPrefix: string }> = {
@@ -116,7 +118,7 @@ export function toConnector(row: {
     updatedAt: row.updatedAt,
     lastValidatedAt: row.lastValidatedAt ?? null,
     lastValidationError: row.lastValidationError ?? null,
-    enabledModels: JSON.parse(row.enabledModels),
+    enabledModels: parseStringArray(row.enabledModels),
     userId: row.userId,
     baseUrl: row.baseUrl ?? null,
   };
@@ -182,11 +184,8 @@ export async function persistSecret(
     case 'config-file': {
       const configPath = getConfig().configFilePath;
       mkdirSync(dirname(configPath), { recursive: true });
-      let config: any = {};
-      if (existsSync(configPath)) {
-        config = parseToml(readFileSync(configPath, 'utf8'));
-      }
-      config[cfg.tomlSection] = config[cfg.tomlSection] || {};
+      const config = readTomlStringSections(configPath);
+      config[cfg.tomlSection] ??= {};
       config[cfg.tomlSection][name] = apiKey;
       writeFileSync(configPath, stringifyToml(config));
       break;
@@ -228,7 +227,7 @@ export async function removeSecret(
       try {
         const configPath = getConfig().configFilePath;
         if (existsSync(configPath)) {
-          const config: any = parseToml(readFileSync(configPath, 'utf8'));
+          const config = readTomlStringSections(configPath);
           if (config[cfg.tomlSection]) {
             delete config[cfg.tomlSection][name];
             writeFileSync(configPath, stringifyToml(config));
@@ -408,12 +407,7 @@ export const connectorRoutes = new Elysia()
           return { error: 'Cannot delete a shared connector.' };
         }
 
-        await removeSecret(
-          meta.id,
-          meta.name,
-          meta.provider as ProviderType,
-          meta.source as SecretSource
-        );
+        await removeSecret(meta.id, meta.name, meta.provider as ProviderType, meta.source);
         await deleteSecretMetadata(meta.id, userId);
         invalidateProviderModelCache(meta.provider as ProviderType, userId);
         invalidateUnifiedCatalog(userId);

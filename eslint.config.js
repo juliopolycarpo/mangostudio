@@ -17,7 +17,7 @@ export default tseslint.config(
   },
   // Base JavaScript recommendations
   eslint.configs.recommended,
-  ...tseslint.configs.recommended,
+  ...tseslint.configs.recommendedTypeChecked,
   // TypeScript for all .ts/.tsx
   {
     files: ['**/*.{ts,tsx}'],
@@ -34,8 +34,6 @@ export default tseslint.config(
       '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
       '@typescript-eslint/no-explicit-any': 'off',
       '@typescript-eslint/explicit-function-return-type': 'off',
-      '@typescript-eslint/no-floating-promises': 'error',
-      '@typescript-eslint/await-thenable': 'error',
       '@typescript-eslint/no-empty-function': 'off',
       '@typescript-eslint/no-non-null-assertion': 'off',
     },
@@ -45,8 +43,17 @@ export default tseslint.config(
   {
     files: ['**/tests/**/*.{ts,tsx}'],
     rules: {
+      '@typescript-eslint/require-await': 'off',
       '@typescript-eslint/await-thenable': 'off',
       '@typescript-eslint/no-floating-promises': 'off',
+      '@typescript-eslint/no-unsafe-assignment': 'off',
+      '@typescript-eslint/no-unsafe-member-access': 'off',
+      '@typescript-eslint/no-unsafe-return': 'off',
+      '@typescript-eslint/no-unsafe-call': 'off',
+      '@typescript-eslint/no-unsafe-argument': 'off',
+      '@typescript-eslint/no-unnecessary-type-assertion': 'off',
+      '@typescript-eslint/no-base-to-string': 'off',
+      '@typescript-eslint/unbound-method': 'off',
     },
   },
   // React rules — frontend only
@@ -66,11 +73,80 @@ export default tseslint.config(
       'react/jsx-uses-react': 'off',
       'react/no-unescaped-entities': 'off',
       'react-hooks/exhaustive-deps': 'off',
+      '@typescript-eslint/no-misused-promises': [
+        'error',
+        {
+          checksVoidReturn: {
+            attributes: false,
+          },
+        },
+      ],
       // React Compiler rules from react-hooks v7 — disable until codebase is compiler-ready
       'react-hooks/set-state-in-effect': 'off',
       'react-hooks/refs': 'off',
       'react-hooks/preserve-manual-memoization': 'off',
       'react-hooks/incompatible-library': 'off',
+    },
+  },
+  {
+    files: ['apps/frontend/src/routes/**/*.{ts,tsx}'],
+    rules: {
+      '@typescript-eslint/only-throw-error': 'off',
+    },
+  },
+  {
+    files: [
+      'apps/frontend/src/components/MarkdownContent.tsx',
+      'apps/frontend/src/components/settings/ConnectorsSettings.tsx',
+      'apps/frontend/src/hooks/use-chats-query.ts',
+      'apps/frontend/src/hooks/use-global-settings.ts',
+      'apps/frontend/src/hooks/use-messages-query.ts',
+      'apps/frontend/src/hooks/use-optimistic-messages.ts',
+      'apps/frontend/src/services/gallery-service.ts',
+      'apps/frontend/src/services/generation-service.ts',
+    ],
+    rules: {
+      '@typescript-eslint/no-unsafe-assignment': 'off',
+      '@typescript-eslint/no-unsafe-member-access': 'off',
+      '@typescript-eslint/no-unsafe-call': 'off',
+      '@typescript-eslint/no-unsafe-return': 'off',
+    },
+  },
+  {
+    files: [
+      'apps/frontend/src/components/MarkdownContent.tsx',
+      'apps/frontend/src/hooks/use-image-generation.ts',
+      'apps/frontend/src/hooks/use-text-chat.ts',
+      'apps/frontend/src/services/generation-service.ts',
+    ],
+    rules: {
+      '@typescript-eslint/no-unnecessary-type-assertion': 'off',
+    },
+  },
+  // SDK adapter boundaries: current provider/client typings still leak `any`
+  // into parsing code. Keep typed lint for the repo, but relax unsafe rules
+  // in the narrow files that sit directly on third-party response shapes.
+  {
+    files: [
+      'apps/api/src/services/providers/anthropic-provider.ts',
+      'apps/api/src/services/providers/gemini-provider.ts',
+      'apps/api/src/services/providers/openai-compatible-provider.ts',
+      'apps/api/src/services/providers/openai-provider.ts',
+      'apps/api/src/services/providers/replay-builder.ts',
+    ],
+    rules: {
+      '@typescript-eslint/no-unsafe-assignment': 'off',
+      '@typescript-eslint/no-unsafe-member-access': 'off',
+      '@typescript-eslint/no-unsafe-call': 'off',
+      '@typescript-eslint/no-unsafe-return': 'off',
+      '@typescript-eslint/no-unsafe-argument': 'off',
+    },
+  },
+  {
+    files: ['apps/api/src/services/providers/openai-provider.ts'],
+    rules: {
+      '@typescript-eslint/no-unnecessary-type-assertion': 'off',
+      '@typescript-eslint/require-await': 'off',
     },
   },
   // Prettier last (disables conflicting stylistic rules; formatting is handled by Prettier itself)

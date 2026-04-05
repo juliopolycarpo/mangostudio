@@ -81,28 +81,30 @@ export function MarkdownContent({
     const container = containerRef.current;
     if (!container) return;
 
-    const handleClick = async (e: MouseEvent) => {
-      const btn = (e.target as HTMLElement).closest('.copy-code-btn') as HTMLButtonElement | null;
-      if (!btn) return;
+    const handleClick = (e: MouseEvent) => {
+      void (async () => {
+        const btn = (e.target as HTMLElement).closest('.copy-code-btn') as HTMLButtonElement | null;
+        if (!btn) return;
 
-      const pre = btn.closest('pre');
-      if (!pre) return;
+        const pre = btn.closest('pre');
+        if (!pre) return;
 
-      const code = pre.querySelector('code');
-      const text = code?.textContent ?? pre.textContent ?? '';
-      try {
-        await navigator.clipboard.writeText(text);
-        btn.innerHTML = CHECK_ICON;
-        btn.setAttribute('aria-label', codeCopiedLabel);
-        btn.classList.add('copy-code-btn--copied');
-        setTimeout(() => {
-          btn.innerHTML = CLIPBOARD_ICON;
-          btn.setAttribute('aria-label', copyCodeLabel);
-          btn.classList.remove('copy-code-btn--copied');
-        }, 2000);
-      } catch {
-        // Clipboard API not available — silently fail
-      }
+        const code = pre.querySelector('code');
+        const text = code?.textContent ?? pre.textContent ?? '';
+        try {
+          await navigator.clipboard.writeText(text);
+          btn.innerHTML = CHECK_ICON;
+          btn.setAttribute('aria-label', codeCopiedLabel);
+          btn.classList.add('copy-code-btn--copied');
+          setTimeout(() => {
+            btn.innerHTML = CLIPBOARD_ICON;
+            btn.setAttribute('aria-label', copyCodeLabel);
+            btn.classList.remove('copy-code-btn--copied');
+          }, 2000);
+        } catch {
+          // Clipboard API not available — silently fail
+        }
+      })();
     };
 
     container.addEventListener('click', handleClick);

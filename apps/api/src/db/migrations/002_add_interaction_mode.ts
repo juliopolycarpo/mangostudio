@@ -23,11 +23,12 @@ export const addInteractionMode = {
     await sql`UPDATE chats SET imageModel = model WHERE model IS NOT NULL`.execute(db);
   },
 
-  async down(_db: Kysely<any>): Promise<void> {
+  down(_db: Kysely<any>): Promise<void> {
     // SQLite does not support DROP COLUMN before version 3.35; recreate tables as workaround.
     // For simplicity in development, we skip the full recreation here.
     console.warn(
       '[migrate] 002 down: SQLite does not support DROP COLUMN — manual rollback required.'
     );
+    return Promise.resolve();
   },
 };

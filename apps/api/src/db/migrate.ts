@@ -13,8 +13,8 @@ async function migrateToLatest(): Promise<void> {
   const migrator = new Migrator({
     db,
     provider: {
-      async getMigrations() {
-        return allMigrations;
+      getMigrations() {
+        return Promise.resolve(allMigrations);
       },
     },
   });

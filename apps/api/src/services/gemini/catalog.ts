@@ -9,6 +9,7 @@ import type { GeminiModelCatalogResponse, GeminiModelOption } from '@mangostudio
 import { isImageModelId } from '@mangostudio/shared/utils/model-detection';
 import { GeminiApiKeyMissingError, getResolvedGeminiApiKey } from './secret';
 import { listSecretMetadata, GEMINI_PROVIDER } from '../secret-store/metadata';
+import { parseStringArray } from '../../utils/json';
 
 export type GeminiModelCatalogRefreshReason = 'startup' | 'secret-updated' | 'manual' | 'ttl';
 
@@ -103,7 +104,7 @@ export function createGeminiModelCatalogService(
     const enabled = new Set<string>();
     for (const c of connectors) {
       try {
-        const models: string[] = JSON.parse(c.enabledModels);
+        const models = parseStringArray(c.enabledModels);
         models.forEach((m) => enabled.add(m));
       } catch {
         // Ignore parse errors
@@ -183,8 +184,9 @@ export function createGeminiModelCatalogService(
       reason: GeminiModelCatalogRefreshReason
     ): GeminiModelCatalogResponse {
       if (isStale(userId) && !refreshPromises.has(userId)) {
-        this.refreshGeminiModelCatalog(userId, reason).catch((err) => {
-          console.warn('[gemini] Catalog refresh failed:', err.message);
+        this.refreshGeminiModelCatalog(userId, reason).catch((err: unknown) => {
+          const message = err instanceof Error ? err.message : String(err);
+          console.warn('[gemini] Catalog refresh failed:', message);
         });
       }
       return getSnapshot(userId);
@@ -202,8 +204,9 @@ export function createGeminiModelCatalogService(
         await recalculateSnapshot(userId);
         // Background refresh if stale — user sees current data while it updates
         if (isStale(userId) && !refreshPromises.has(userId)) {
-          this.refreshGeminiModelCatalog(userId, 'ttl').catch((err) => {
-            console.warn('[gemini] Background catalog refresh failed:', err.message);
+          this.refreshGeminiModelCatalog(userId, 'ttl').catch((err: unknown) => {
+            const message = err instanceof Error ? err.message : String(err);
+            console.warn('[gemini] Background catalog refresh failed:', message);
           });
         }
       } else {

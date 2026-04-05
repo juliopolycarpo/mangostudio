@@ -128,7 +128,7 @@ export function getModelContextLimit(modelName: string): number {
 
   // Tier 1: exact match in curated table
   if (Object.prototype.hasOwnProperty.call(MODEL_CONTEXT_LIMITS, lower)) {
-    return MODEL_CONTEXT_LIMITS[lower]!;
+    return MODEL_CONTEXT_LIMITS[lower];
   }
 
   // Tier 2: longest prefix match in curated table

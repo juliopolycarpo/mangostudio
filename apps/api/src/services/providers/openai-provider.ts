@@ -37,6 +37,7 @@ import {
 } from './continuation';
 import { getModelContextLimit } from './context-policy';
 import { buildOpenAIResponsesReplay } from './replay-builder';
+import { parseStringArray } from '../../utils/json';
 
 const BASE_URL = 'https://api.openai.com/v1';
 
@@ -164,7 +165,7 @@ async function resolveAuthContext(userId: string, modelName?: string): Promise<O
 
   for (const row of rows) {
     if (!row.configured) continue;
-    const enabled: string[] = JSON.parse(row.enabledModels);
+    const enabled = parseStringArray(row.enabledModels);
     if (modelName && enabled.length > 0 && !enabled.includes(modelName)) continue;
 
     const apiKey = await secretService.resolveSecretValue(row);

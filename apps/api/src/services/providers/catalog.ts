@@ -9,6 +9,7 @@ import { listRegisteredProviderTypes, getProvider } from './registry';
 import { listAllSecretMetadata } from '../secret-store/metadata';
 import type { ModelInfo, AIProvider } from './types';
 import type { ProviderType } from '@mangostudio/shared/types';
+import { parseStringArray } from '../../utils/json';
 
 const TTL_MS = 60 * 60 * 1000; // 1 hour
 const MAX_CATALOG_ENTRIES = 1000;
@@ -97,7 +98,7 @@ export function createUnifiedModelCatalogService(deps: UnifiedModelCatalogDeps =
     const connectors = await listAllSecretMetadataFn(userId);
     for (const c of connectors) {
       try {
-        const models: string[] = JSON.parse(c.enabledModels);
+        const models = parseStringArray(c.enabledModels);
         models.forEach((m) => enabled.add(m));
       } catch {
         // Ignore parse errors

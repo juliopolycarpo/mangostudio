@@ -133,9 +133,9 @@ export const respondRoutes = (app: Elysia) =>
                 interactionMode: 'chat' as const,
               },
             };
-          } catch (error: any) {
-            console.error('[respond] Error:', error.message);
-            const errorText = error?.message ?? 'Text generation failed';
+          } catch (error: unknown) {
+            const errorText = error instanceof Error ? error.message : 'Text generation failed';
+            console.error('[respond] Error:', errorText);
             set.status = 500;
             return { error: errorText };
           }
