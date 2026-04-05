@@ -1,4 +1,4 @@
-import { createHighlighter, type Highlighter } from 'shiki';
+import { createHighlighter, type Highlighter, bundledThemes } from 'shiki';
 
 const PRELOADED_LANGS = [
   'typescript',
@@ -26,25 +26,78 @@ const PRELOADED_LANGS = [
   'powershell',
 ] as const;
 
-export const CODE_THEMES = [
-  'one-dark-pro',
-  'github-dark-dimmed',
-  'github-light',
-  'one-light',
-] as const;
+/** Themes shipped in the initial bundle — always available, not uninstallable. */
+export const BUILTIN_THEMES = ['one-dark-pro', 'one-light'] as const;
 
-export type CodeThemeId = (typeof CODE_THEMES)[number];
+/** Themes shown in Settings as recommended for quick install. */
+export const SUGGESTED_THEMES = ['github-dark-dimmed', 'github-light'] as const;
+
+/** Full Shiki catalog for the marketplace. */
+export type ShikiBundledTheme = keyof typeof bundledThemes;
+export const SHIKI_THEME_CATALOG = Object.keys(bundledThemes) as ShikiBundledTheme[];
+
+export type CodeThemeId = ShikiBundledTheme;
+
+const INSTALLED_THEMES_KEY = 'mango-studio-installed-themes';
 
 let highlighterPromise: Promise<Highlighter> | null = null;
 let highlighterInstance: Highlighter | null = null;
 
+export function getInstalledThemeIds(): CodeThemeId[] {
+  try {
+    const raw = localStorage.getItem(INSTALLED_THEMES_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+function persistInstalledThemeIds(ids: CodeThemeId[]) {
+  localStorage.setItem(INSTALLED_THEMES_KEY, JSON.stringify(ids));
+}
+
+export function isThemeBuiltIn(id: string): boolean {
+  return (BUILTIN_THEMES as readonly string[]).includes(id);
+}
+
+export function isThemeAvailable(id: CodeThemeId): boolean {
+  return isThemeBuiltIn(id) || getInstalledThemeIds().includes(id);
+}
+
+/** Load a theme on demand. Returns true if loaded successfully. */
+export async function loadThemeOnDemand(id: CodeThemeId): Promise<boolean> {
+  if (!highlighterInstance) return false;
+  if (highlighterInstance.getLoadedThemes().includes(id)) return true;
+  try {
+    await highlighterInstance.loadTheme(id);
+    const installed = getInstalledThemeIds();
+    if (!installed.includes(id) && !isThemeBuiltIn(id)) {
+      persistInstalledThemeIds([...installed, id]);
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Remove a theme from installed list (uninstall). Built-in themes cannot be removed. */
+export function uninstallTheme(id: CodeThemeId): boolean {
+  if (isThemeBuiltIn(id)) return false;
+  const installed = getInstalledThemeIds().filter((t) => t !== id);
+  persistInstalledThemeIds(installed);
+  return true;
+}
+
 export function initHighlighter(): Promise<Highlighter> {
   if (!highlighterPromise) {
     highlighterPromise = createHighlighter({
-      themes: [...CODE_THEMES],
+      themes: [...BUILTIN_THEMES],
       langs: [...PRELOADED_LANGS],
-    }).then((h) => {
+    }).then(async (h) => {
       highlighterInstance = h;
+      // Restore previously installed themes
+      const installed = getInstalledThemeIds();
+      await Promise.allSettled(installed.map((id) => h.loadTheme(id)));
       return h;
     });
   }
@@ -59,6 +112,11 @@ export function highlightCode(code: string, lang: string, theme: CodeThemeId): s
     // Unknown language — return null to fall back to plain rendering
     return null;
   }
+}
+
+/** Get the highlighter instance (if already initialized). */
+export function getHighlighterInstance(): Highlighter | null {
+  return highlighterInstance;
 }
 
 // Start loading immediately on module import

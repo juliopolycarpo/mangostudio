@@ -1,6 +1,16 @@
-import { useState, useEffect, useCallback, createContext, useContext, useMemo } from 'react';
+import {
+  useState,
+  useEffect,
+  useCallback,
+  createContext,
+  useContext,
+  useMemo,
+  useRef,
+} from 'react';
 import type { ReactNode } from 'react';
 import type { CodeThemeId } from '@/lib/shiki';
+import { isThemeAvailable } from '@/lib/shiki';
+import { client } from '@/lib/api-client';
 
 const STORAGE_KEY = 'mango-studio-theme';
 
@@ -81,8 +91,17 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   );
 
   const resolvedCodeTheme = useMemo<CodeThemeId>(() => {
-    if (config.codeTheme.mode === 'manual') return config.codeTheme.darkTheme;
-    return resolvedTheme === 'dark' ? config.codeTheme.darkTheme : config.codeTheme.lightTheme;
+    const preferred =
+      config.codeTheme.mode === 'manual'
+        ? config.codeTheme.darkTheme
+        : resolvedTheme === 'dark'
+          ? config.codeTheme.darkTheme
+          : config.codeTheme.lightTheme;
+    return isThemeAvailable(preferred)
+      ? preferred
+      : resolvedTheme === 'dark'
+        ? 'one-dark-pro'
+        : 'one-light';
   }, [config.codeTheme, resolvedTheme]);
 
   // Persist config & apply data attributes whenever config or resolved theme changes.
@@ -109,6 +128,47 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
   const setConfig = useCallback((patch: Partial<ThemeConfig>) => {
     setConfigState((prev) => ({ ...prev, ...patch }));
+  }, []);
+
+  // Background-sync theme config to server (debounced, fire-and-forget).
+  const syncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const initializedRef = useRef(false);
+
+  useEffect(() => {
+    // Skip the very first render (initial load from localStorage).
+    if (!initializedRef.current) {
+      initializedRef.current = true;
+      return;
+    }
+
+    if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
+    syncTimerRef.current = setTimeout(() => {
+      void (client as any).api.settings.preferences
+        .put({ key: 'theme', value: config })
+        .catch(() => {
+          // Silent fail — localStorage is authoritative
+        });
+    }, 1500);
+  }, [config]);
+
+  // On first mount, fetch server preferences if localStorage is empty.
+  useEffect(() => {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) return; // Already have local data
+
+    void (async () => {
+      try {
+        const { data } = await (client as any).api.settings.preferences.get();
+        if (!Array.isArray(data)) return;
+        const pref = data.find((p: { key: string }) => p.key === 'theme');
+        if (pref?.value) {
+          const merged = { ...DEFAULT_CONFIG, ...(pref.value as Partial<ThemeConfig>) };
+          setConfigState(merged);
+        }
+      } catch {
+        // Server unavailable — use defaults
+      }
+    })();
   }, []);
 
   const value = useMemo(
