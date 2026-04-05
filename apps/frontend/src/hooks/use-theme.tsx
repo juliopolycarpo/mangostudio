@@ -1,22 +1,37 @@
 import { useState, useEffect, useCallback, createContext, useContext, useMemo } from 'react';
 import type { ReactNode } from 'react';
+import type { CodeThemeId } from '@/lib/shiki';
 
 const STORAGE_KEY = 'mango-studio-theme';
+
+export interface CodeThemeConfig {
+  mode: 'manual' | 'auto';
+  /** Theme used in manual mode, or dark preference in auto mode. */
+  darkTheme: CodeThemeId;
+  /** Light preference in auto mode. */
+  lightTheme: CodeThemeId;
+}
 
 export interface ThemeConfig {
   /** Visual theme: dark, light, or follow OS preference. */
   appTheme: 'dark' | 'light' | 'system';
-  /** Code highlighting theme. More options added in a future PR. */
-  codeTheme: string;
+  /** Code highlighting theme config. */
+  codeTheme: CodeThemeConfig;
   /** Chat message font size. */
   fontSize: 'small' | 'default' | 'large';
   /** Spacing between chat messages. */
   chatDensity: 'compact' | 'default' | 'comfortable';
 }
 
+const DEFAULT_CODE_THEME: CodeThemeConfig = {
+  mode: 'auto',
+  darkTheme: 'one-dark-pro',
+  lightTheme: 'github-light',
+};
+
 const DEFAULT_CONFIG: ThemeConfig = {
   appTheme: 'dark',
-  codeTheme: 'one-dark-pro',
+  codeTheme: DEFAULT_CODE_THEME,
   fontSize: 'default',
   chatDensity: 'default',
 };
@@ -27,6 +42,8 @@ interface ThemeContextValue {
   config: ThemeConfig;
   /** The resolved visual theme (never 'system'). */
   resolvedTheme: ResolvedTheme;
+  /** The resolved code theme based on config mode and current app theme. */
+  resolvedCodeTheme: CodeThemeId;
   setConfig: (patch: Partial<ThemeConfig>) => void;
 }
 
@@ -36,7 +53,12 @@ function readStoredConfig(): ThemeConfig {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
-      return { ...DEFAULT_CONFIG, ...(JSON.parse(raw) as Partial<ThemeConfig>) };
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      // Migrate legacy string codeTheme to CodeThemeConfig
+      if (typeof parsed.codeTheme === 'string') {
+        parsed.codeTheme = { ...DEFAULT_CODE_THEME, darkTheme: parsed.codeTheme };
+      }
+      return { ...DEFAULT_CONFIG, ...(parsed as Partial<ThemeConfig>) };
     }
   } catch {
     // localStorage unavailable or corrupted — use defaults
@@ -57,6 +79,11 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     () => (config.appTheme === 'system' ? (systemIsDark ? 'dark' : 'light') : config.appTheme),
     [config.appTheme, systemIsDark]
   );
+
+  const resolvedCodeTheme = useMemo<CodeThemeId>(() => {
+    if (config.codeTheme.mode === 'manual') return config.codeTheme.darkTheme;
+    return resolvedTheme === 'dark' ? config.codeTheme.darkTheme : config.codeTheme.lightTheme;
+  }, [config.codeTheme, resolvedTheme]);
 
   // Persist config & apply data attributes whenever config or resolved theme changes.
   useEffect(() => {
@@ -85,8 +112,8 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const value = useMemo(
-    () => ({ config, resolvedTheme, setConfig }),
-    [config, resolvedTheme, setConfig]
+    () => ({ config, resolvedTheme, resolvedCodeTheme, setConfig }),
+    [config, resolvedTheme, resolvedCodeTheme, setConfig]
   );
 
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
