@@ -99,6 +99,14 @@ export interface VerificationTable {
   updatedAt: number;
 }
 
+export interface UserPreferencesTable {
+  id: string;
+  userId: string;
+  key: string;
+  value: string;
+  updatedAt: string;
+}
+
 /** Root Kysely Database interface. */
 export interface Database {
   chats: ChatsTable;
@@ -108,6 +116,7 @@ export interface Database {
   session: SessionTable;
   account: AccountTable;
   verification: VerificationTable;
+  user_preferences: UserPreferencesTable;
 }
 
 export type ChatSelect = Selectable<ChatsTable>;
@@ -137,3 +146,7 @@ export type AccountUpdate = Updateable<AccountTable>;
 export type VerificationSelect = Selectable<VerificationTable>;
 export type VerificationInsert = Insertable<VerificationTable>;
 export type VerificationUpdate = Updateable<VerificationTable>;
+
+export type UserPreferencesSelect = Selectable<UserPreferencesTable>;
+export type UserPreferencesInsert = Insertable<UserPreferencesTable>;
+export type UserPreferencesUpdate = Updateable<UserPreferencesTable>;

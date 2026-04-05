@@ -261,3 +261,14 @@ export interface AuthErrorResponse {
   code?: string;
   message: string;
 }
+
+/** A single user preference key-value pair. */
+export interface UserPreference {
+  key: string;
+  value: unknown;
+}
+
+/** Body for PUT /api/settings/preferences/bulk */
+export interface BulkPreferencesBody {
+  preferences: UserPreference[];
+}
