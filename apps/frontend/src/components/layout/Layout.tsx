@@ -7,6 +7,7 @@ interface LayoutProps {
   children: ReactNode;
   currentPage: 'chat' | 'gallery' | 'settings';
   onNavigate: (page: 'chat' | 'gallery' | 'settings') => void;
+  onNavigateToMarketplace: () => void;
   chats: Chat[];
   currentChatId: string | null;
   onSelectChat: (chatId: string) => void;
@@ -20,6 +21,7 @@ export function Layout({
   children,
   currentPage,
   onNavigate,
+  onNavigateToMarketplace,
   chats,
   currentChatId,
   onSelectChat,
@@ -33,6 +35,7 @@ export function Layout({
       <Sidebar
         currentPage={currentPage}
         onNavigate={onNavigate}
+        onNavigateToMarketplace={onNavigateToMarketplace}
         chats={chats}
         currentChatId={currentChatId}
         onSelectChat={onSelectChat}

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Plus, Settings } from 'lucide-react';
+import { Plus, Settings, ShoppingBag } from 'lucide-react';
 import type { ModelCatalogResponse, ModelOption, ProviderType } from '@mangostudio/shared';
 import { ModelSelector } from './ModelSelector';
 import { authClient } from '@/lib/auth-client';
@@ -18,6 +18,7 @@ export interface HeaderProps {
   onSetPageModel: (model: string) => void;
   onNewChat: () => void;
   onNavigateToSettings: () => void;
+  onNavigateToMarketplace: () => void;
   modelCatalog: ModelCatalogResponse;
   lockedProvider?: ProviderType | null;
 }
@@ -32,6 +33,7 @@ export function Header({
   onSetPageModel,
   onNewChat,
   onNavigateToSettings,
+  onNavigateToMarketplace,
   modelCatalog,
   lockedProvider,
 }: HeaderProps) {
@@ -78,6 +80,13 @@ export function Header({
             <span className="hidden sm:inline">{t.chat.newChat}</span>
           </button>
         )}
+        <button
+          onClick={onNavigateToMarketplace}
+          className="p-2 rounded-full transition-all duration-200 active:scale-95 bg-surface-container-high text-on-surface hover:bg-surface-container-highest cursor-pointer"
+          title={t.marketplace.title}
+        >
+          <ShoppingBag size={18} />
+        </button>
         <button
           onClick={onNavigateToSettings}
           className={`p-2 rounded-full transition-all duration-200 active:scale-95 ${currentPage === 'settings' ? 'bg-primary/10 text-primary' : 'bg-surface-container-high text-on-surface hover:bg-surface-container-highest cursor-pointer'}`}

@@ -1,5 +1,13 @@
 import { useState, useRef, useEffect } from 'react';
-import { MessageSquare, LayoutGrid, Settings, Plus, Pencil, Trash2 } from 'lucide-react';
+import {
+  MessageSquare,
+  LayoutGrid,
+  Settings,
+  ShoppingBag,
+  Plus,
+  Pencil,
+  Trash2,
+} from 'lucide-react';
 import type { Chat } from '@mangostudio/shared';
 import { useToast } from '@/components/ui';
 import { useI18n } from '@/hooks/use-i18n';
@@ -58,6 +66,7 @@ function ContextRing({ ratio, severity }: { ratio: number; severity: string }) {
 interface Props {
   currentPage: 'chat' | 'gallery' | 'settings';
   onNavigate: (page: 'chat' | 'gallery' | 'settings') => void;
+  onNavigateToMarketplace: () => void;
   chats: Chat[];
   currentChatId: string | null;
   onSelectChat: (chatId: string) => void;
@@ -77,6 +86,7 @@ export function Sidebar({
   onDeleteChat,
   onNewChat,
   contextCache,
+  onNavigateToMarketplace,
 }: Props) {
   const [editingChatId, setEditingChatId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState('');
@@ -214,6 +224,13 @@ export function Sidebar({
         <button onClick={() => onNavigate('gallery')} className={navItemClass('gallery')}>
           <LayoutGrid size={18} />
           <span className="font-label font-medium text-sm">{t.gallery.title}</span>
+        </button>
+        <button
+          onClick={onNavigateToMarketplace}
+          className="flex items-center gap-3 px-4 py-3 rounded-lg transition-all duration-300 w-full text-left text-on-surface/70 hover:bg-surface-container-high hover:text-on-surface"
+        >
+          <ShoppingBag size={18} />
+          <span className="font-label font-medium text-sm">{t.marketplace.title}</span>
         </button>
         <button onClick={() => onNavigate('settings')} className={navItemClass('settings')}>
           <Settings size={18} />

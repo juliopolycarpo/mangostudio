@@ -14,6 +14,7 @@ import { Route as LoginRouteImport } from './routes/login'
 import { Route as AuthenticatedRouteImport } from './routes/_authenticated'
 import { Route as AuthenticatedIndexRouteImport } from './routes/_authenticated/index'
 import { Route as AuthenticatedSettingsRouteImport } from './routes/_authenticated/settings'
+import { Route as AuthenticatedMarketplaceRouteImport } from './routes/_authenticated/marketplace'
 import { Route as AuthenticatedGalleryRouteImport } from './routes/_authenticated/gallery'
 import { Route as AuthenticatedSettingsIndexRouteImport } from './routes/_authenticated/settings/index'
 import { Route as AuthenticatedSettingsGeneralRouteImport } from './routes/_authenticated/settings/general'
@@ -44,6 +45,12 @@ const AuthenticatedSettingsRoute = AuthenticatedSettingsRouteImport.update({
   path: '/settings',
   getParentRoute: () => AuthenticatedRoute,
 } as any)
+const AuthenticatedMarketplaceRoute =
+  AuthenticatedMarketplaceRouteImport.update({
+    id: '/marketplace',
+    path: '/marketplace',
+    getParentRoute: () => AuthenticatedRoute,
+  } as any)
 const AuthenticatedGalleryRoute = AuthenticatedGalleryRouteImport.update({
   id: '/gallery',
   path: '/gallery',
@@ -79,6 +86,7 @@ export interface FileRoutesByFullPath {
   '/login': typeof LoginRoute
   '/signup': typeof SignupRoute
   '/gallery': typeof AuthenticatedGalleryRoute
+  '/marketplace': typeof AuthenticatedMarketplaceRoute
   '/settings': typeof AuthenticatedSettingsRouteWithChildren
   '/settings/appearance': typeof AuthenticatedSettingsAppearanceRoute
   '/settings/connectors': typeof AuthenticatedSettingsConnectorsRoute
@@ -89,6 +97,7 @@ export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/signup': typeof SignupRoute
   '/gallery': typeof AuthenticatedGalleryRoute
+  '/marketplace': typeof AuthenticatedMarketplaceRoute
   '/': typeof AuthenticatedIndexRoute
   '/settings/appearance': typeof AuthenticatedSettingsAppearanceRoute
   '/settings/connectors': typeof AuthenticatedSettingsConnectorsRoute
@@ -101,6 +110,7 @@ export interface FileRoutesById {
   '/login': typeof LoginRoute
   '/signup': typeof SignupRoute
   '/_authenticated/gallery': typeof AuthenticatedGalleryRoute
+  '/_authenticated/marketplace': typeof AuthenticatedMarketplaceRoute
   '/_authenticated/settings': typeof AuthenticatedSettingsRouteWithChildren
   '/_authenticated/': typeof AuthenticatedIndexRoute
   '/_authenticated/settings/appearance': typeof AuthenticatedSettingsAppearanceRoute
@@ -115,6 +125,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/signup'
     | '/gallery'
+    | '/marketplace'
     | '/settings'
     | '/settings/appearance'
     | '/settings/connectors'
@@ -125,6 +136,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/signup'
     | '/gallery'
+    | '/marketplace'
     | '/'
     | '/settings/appearance'
     | '/settings/connectors'
@@ -136,6 +148,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/signup'
     | '/_authenticated/gallery'
+    | '/_authenticated/marketplace'
     | '/_authenticated/settings'
     | '/_authenticated/'
     | '/_authenticated/settings/appearance'
@@ -185,6 +198,13 @@ declare module '@tanstack/react-router' {
       path: '/settings'
       fullPath: '/settings'
       preLoaderRoute: typeof AuthenticatedSettingsRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
+    '/_authenticated/marketplace': {
+      id: '/_authenticated/marketplace'
+      path: '/marketplace'
+      fullPath: '/marketplace'
+      preLoaderRoute: typeof AuthenticatedMarketplaceRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
     '/_authenticated/gallery': {
@@ -246,12 +266,14 @@ const AuthenticatedSettingsRouteWithChildren =
 
 interface AuthenticatedRouteChildren {
   AuthenticatedGalleryRoute: typeof AuthenticatedGalleryRoute
+  AuthenticatedMarketplaceRoute: typeof AuthenticatedMarketplaceRoute
   AuthenticatedSettingsRoute: typeof AuthenticatedSettingsRouteWithChildren
   AuthenticatedIndexRoute: typeof AuthenticatedIndexRoute
 }
 
 const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
   AuthenticatedGalleryRoute: AuthenticatedGalleryRoute,
+  AuthenticatedMarketplaceRoute: AuthenticatedMarketplaceRoute,
   AuthenticatedSettingsRoute: AuthenticatedSettingsRouteWithChildren,
   AuthenticatedIndexRoute: AuthenticatedIndexRoute,
 }

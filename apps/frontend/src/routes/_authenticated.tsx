@@ -49,6 +49,7 @@ function AuthenticatedLayout() {
       <Layout
         currentPage={activePage}
         onNavigate={(page) => app.handleNavigate(page)}
+        onNavigateToMarketplace={() => void navigate({ to: '/marketplace' })}
         chats={app.chats}
         currentChatId={app.currentChatId}
         onSelectChat={app.handleSelectChat}
@@ -72,6 +73,7 @@ function AuthenticatedLayout() {
           }}
           onNewChat={app.handleNewChat}
           onNavigateToSettings={() => app.handleNavigate('settings')}
+          onNavigateToMarketplace={() => void navigate({ to: '/marketplace' })}
           modelCatalog={app.catalog}
           lockedProvider={app.lockedProvider}
         />
