@@ -88,9 +88,9 @@ export function MarketplaceThemeCard({
         {installed && !builtIn && <Check size={12} className="text-primary shrink-0" />}
       </div>
 
-      {/* Hover overlay */}
+      {/* Hover overlay — pointer-events-none keeps card clickable; auto on hover */}
       {!builtIn && (
-        <div className="absolute inset-0 bg-background/60 backdrop-blur-sm opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-center justify-center gap-2">
+        <div className="absolute inset-0 bg-background/60 backdrop-blur-sm pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100 transition-opacity duration-200 flex items-center justify-center gap-2">
           {!installed ? (
             <>
               <button
@@ -117,14 +117,24 @@ export function MarketplaceThemeCard({
               </button>
             </>
           ) : (
-            <button
-              type="button"
-              onClick={onUninstall}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-error/10 text-error text-xs font-bold transition-all active:scale-95"
-            >
-              <Trash2 size={12} />
-              {mp.uninstall}
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={onApply}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-on-primary text-xs font-bold transition-all active:scale-95"
+              >
+                <Play size={12} />
+                {mp.apply}
+              </button>
+              <button
+                type="button"
+                onClick={onUninstall}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-error/10 text-error text-xs font-bold transition-all active:scale-95"
+              >
+                <Trash2 size={12} />
+                {mp.uninstall}
+              </button>
+            </div>
           )}
         </div>
       )}

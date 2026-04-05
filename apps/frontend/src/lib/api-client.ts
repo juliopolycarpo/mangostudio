@@ -7,8 +7,11 @@ export const client = edenTreaty<App>(getApiBaseUrl(), {
     const response = await fetch(url, { ...init, credentials: 'include' });
 
     if (response.status === 401) {
-      // Sessão expirou — redirecionar para login
-      window.location.href = '/login';
+      // Only redirect when NOT already on an auth page to avoid infinite loops.
+      const path = window.location.pathname;
+      if (path !== '/login' && path !== '/signup') {
+        window.location.href = '/login';
+      }
     }
 
     return response;
