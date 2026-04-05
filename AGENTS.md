@@ -3,6 +3,11 @@
 `AGENTS.md` is the canonical root instruction file for this repository.
 Workspace-level `AGENTS.md` files must stay short and contain only workspace-specific deltas.
 
+## Command Guidelines
+
+1 - **Always assume/use**: `bun` or `bunx`
+2 - **Never use**: `npm`, `npx`, `pnpm` or `yarn`
+
 ## Repo Map
 
 - `apps/frontend/` — React 19 + Vite 8 UI with TanStack Router, TanStack Query, Better Auth client integration, and the local UI system.
