@@ -139,7 +139,7 @@ function ThemeCard({
       >
         {previewHtml ? (
           <div
-            className="p-3 text-[11px] leading-normal font-mono overflow-hidden [&_pre]:!m-0 [&_pre]:!p-0 [&_pre]:!bg-transparent [&_pre]:overflow-hidden"
+            className="text-[11px] leading-normal font-mono overflow-hidden [&_pre]:!m-0 [&_pre]:!p-3 [&_pre]:overflow-hidden"
             dangerouslySetInnerHTML={{ __html: previewHtml }}
           />
         ) : (
@@ -151,11 +151,10 @@ function ThemeCard({
         </div>
       </button>
 
-      {/* Hover overlay with actions:
-           pointer-events-none keeps clicks on the select button when not hovered;
-           pointer-events-auto re-enables on hover so install/uninstall work. */}
+      {/* Hover overlay: always pointer-events-none so the card's select button stays
+           reachable anywhere. Only the action buttons themselves get pointer-events-auto. */}
       {!builtIn && (
-        <div className="absolute inset-0 bg-background/60 backdrop-blur-sm pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100 transition-opacity duration-200 flex items-center justify-center gap-2">
+        <div className="absolute inset-0 bg-background/60 backdrop-blur-sm pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-center justify-center gap-2">
           {!installed ? (
             <button
               type="button"
@@ -164,7 +163,7 @@ function ThemeCard({
                 onInstall?.();
               }}
               disabled={loading}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-on-primary text-xs font-bold transition-all active:scale-95 disabled:opacity-50"
+              className="pointer-events-auto flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-on-primary text-xs font-bold transition-all active:scale-95 disabled:opacity-50"
               title={mp.download}
             >
               {loading ? (
@@ -181,7 +180,7 @@ function ThemeCard({
                 e.stopPropagation();
                 onUninstall?.();
               }}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-error/10 text-error text-xs font-bold transition-all active:scale-95"
+              className="pointer-events-auto flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-error/10 text-error text-xs font-bold transition-all active:scale-95"
               title={mp.uninstall}
             >
               <Trash2 size={12} />

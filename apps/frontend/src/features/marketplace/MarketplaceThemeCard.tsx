@@ -59,7 +59,7 @@ export function MarketplaceThemeCard({
       {/* Preview */}
       {previewHtml ? (
         <div
-          className="p-3 text-[10px] leading-normal font-mono overflow-hidden h-24 [&_pre]:!m-0 [&_pre]:!p-0 [&_pre]:!bg-transparent [&_pre]:overflow-hidden"
+          className="text-[10px] leading-normal font-mono overflow-hidden h-24 [&_pre]:!m-0 [&_pre]:!p-3 [&_pre]:h-24 [&_pre]:overflow-hidden"
           dangerouslySetInnerHTML={{ __html: previewHtml }}
         />
       ) : (
@@ -88,16 +88,17 @@ export function MarketplaceThemeCard({
         {installed && !builtIn && <Check size={12} className="text-primary shrink-0" />}
       </div>
 
-      {/* Hover overlay — pointer-events-none keeps card clickable; auto on hover */}
+      {/* Hover overlay — overlay div stays pointer-events-none always so the card
+           label bar remains clickable; only the action buttons get pointer-events-auto. */}
       {!builtIn && (
-        <div className="absolute inset-0 bg-background/60 backdrop-blur-sm pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100 transition-opacity duration-200 flex items-center justify-center gap-2">
+        <div className="absolute inset-0 bg-background/60 backdrop-blur-sm pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-center justify-center gap-2">
           {!installed ? (
             <>
               <button
                 type="button"
                 onClick={onInstall}
                 disabled={loading}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-on-primary text-xs font-bold transition-all active:scale-95 disabled:opacity-50"
+                className="pointer-events-auto flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-on-primary text-xs font-bold transition-all active:scale-95 disabled:opacity-50"
               >
                 {loading ? (
                   <span className="w-3 h-3 rounded-full border-2 border-current border-t-transparent animate-spin" />
@@ -110,18 +111,18 @@ export function MarketplaceThemeCard({
                 type="button"
                 onClick={onApply}
                 disabled={loading}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-surface-container-highest text-on-surface text-xs font-bold transition-all active:scale-95 disabled:opacity-50"
+                className="pointer-events-auto flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-surface-container-highest text-on-surface text-xs font-bold transition-all active:scale-95 disabled:opacity-50"
               >
                 <Play size={12} />
                 {mp.apply}
               </button>
             </>
           ) : (
-            <div className="flex items-center gap-2">
+            <div className="pointer-events-none flex items-center gap-2">
               <button
                 type="button"
                 onClick={onApply}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-on-primary text-xs font-bold transition-all active:scale-95"
+                className="pointer-events-auto flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-on-primary text-xs font-bold transition-all active:scale-95"
               >
                 <Play size={12} />
                 {mp.apply}
@@ -129,7 +130,7 @@ export function MarketplaceThemeCard({
               <button
                 type="button"
                 onClick={onUninstall}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-error/10 text-error text-xs font-bold transition-all active:scale-95"
+                className="pointer-events-auto flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-error/10 text-error text-xs font-bold transition-all active:scale-95"
               >
                 <Trash2 size={12} />
                 {mp.uninstall}
