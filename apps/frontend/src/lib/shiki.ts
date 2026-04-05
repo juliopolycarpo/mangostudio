@@ -75,20 +75,27 @@ export async function loadThemeOnDemand(
 ): Promise<boolean> {
   // Always await init so this works even if called before the highlighter is ready.
   const h = await initHighlighter();
-  if (h.getLoadedThemes().includes(id)) return true;
   if (isThemeBuiltIn(id)) return true;
-  try {
-    await h.loadTheme(id);
-    if (persist) {
-      const installed = getInstalledThemeIds();
-      if (!installed.includes(id)) {
-        persistInstalledThemeIds([...installed, id]);
-      }
+
+  // Load into the highlighter only if not already present in memory.
+  // NOTE: a preview load (persist:false) may have already put the theme in the
+  // highlighter without saving it to localStorage. We must NOT early-return here
+  // based on getLoadedThemes() alone — we still need to run the persist step.
+  if (!h.getLoadedThemes().includes(id)) {
+    try {
+      await h.loadTheme(id);
+    } catch {
+      return false;
     }
-    return true;
-  } catch {
-    return false;
   }
+
+  if (persist) {
+    const installed = getInstalledThemeIds();
+    if (!installed.includes(id)) {
+      persistInstalledThemeIds([...installed, id]);
+    }
+  }
+  return true;
 }
 
 /** Remove a theme from installed list (uninstall). Built-in themes cannot be removed. */
