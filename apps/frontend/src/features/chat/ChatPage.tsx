@@ -95,8 +95,7 @@ export function ChatPage({
                   chip.action?.();
                   if (!chip.action) onSubmit(chip.text);
                 }}
-                className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-body text-on-surface-variant border border-outline-variant/20 hover:border-outline-variant/40 hover:text-on-surface transition-colors duration-200 cursor-pointer"
-                style={{ background: 'rgba(28,27,27,0.6)', backdropFilter: 'blur(8px)' }}
+                className="glass-surface flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-body text-on-surface-variant border border-outline-variant/20 hover:border-outline-variant/40 hover:text-on-surface transition-colors duration-200 cursor-pointer"
               >
                 {chip.icon}
                 {chip.text}

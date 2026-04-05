@@ -43,6 +43,18 @@
   }
 }
 
+/* ── Theme-aware glass & overlay tokens ── */
+:root {
+  --glass-bg: rgba(53, 53, 52, 0.6);
+  --glass-surface: rgba(14, 14, 14, 0.6);
+  --glass-surface-subtle: rgba(14, 14, 14, 0.5);
+  --glass-elevated: rgba(28, 27, 27, 0.85);
+  --glass-border: rgba(255, 255, 255, 0.1);
+  --glass-ring: rgba(255, 255, 255, 0.05);
+  --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  --gradient-primary: linear-gradient(135deg, #c0c1ff 0%, #4b4dd8 100%);
+}
+
 body {
   background-color: var(--color-background);
   color: var(--color-on-background);
@@ -50,8 +62,35 @@ body {
 }
 
 .glass-panel {
-  background: rgba(53, 53, 52, 0.6);
+  background: var(--glass-bg);
   backdrop-filter: blur(20px);
+}
+
+.glass-surface {
+  background: var(--glass-surface);
+  backdrop-filter: blur(8px);
+}
+
+.glass-surface-subtle {
+  background: var(--glass-surface-subtle);
+  backdrop-filter: blur(12px);
+}
+
+.glass-elevated {
+  background: var(--glass-elevated);
+  backdrop-filter: blur(12px);
+}
+
+/* ── Reusable dropdown panel (ModelSelector, ThinkingToggle, etc.) ── */
+.dropdown-panel {
+  background: color-mix(in srgb, var(--color-surface) 60%, transparent);
+  backdrop-filter: blur(24px) saturate(1.5);
+  border: 1px solid var(--glass-border);
+  border-radius: 1rem;
+  box-shadow: var(--glass-shadow);
+  outline: 1px solid var(--glass-ring);
+  overflow: hidden;
+  z-index: 100;
 }
 
 .hide-scrollbar::-webkit-scrollbar {
