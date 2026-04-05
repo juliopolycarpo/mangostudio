@@ -82,7 +82,7 @@ export function ThinkingToggle({
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 6, scale: 0.95 }}
             transition={{ duration: 0.15, ease: 'easeOut' }}
-            className="absolute left-0 top-full mt-3 w-40 bg-surface/60 backdrop-blur-xl backdrop-saturate-150 border border-white/10 rounded-2xl shadow-[0_8px_32px_rgba(0,0,0,0.5)] overflow-hidden z-[100] ring-1 ring-white/5"
+            className="dropdown-panel absolute left-0 top-full mt-3 w-40"
           >
             <div className="py-1">
               {efforts.map((e) => (

@@ -111,11 +111,10 @@ function ThinkingBlock({ messageId, text, isStreaming, segmentIndex = 0 }: Think
       <button
         type="button"
         onClick={handleToggle}
-        className="flex items-center gap-2 text-xs text-on-surface-variant/70
+        className="glass-surface flex items-center gap-2 text-xs text-on-surface-variant/70
                    py-1.5 px-3 rounded-full w-fit border border-outline-variant/20
                    hover:border-outline-variant/40 hover:text-on-surface-variant
                    transition-all duration-200 cursor-pointer"
-        style={{ background: 'rgba(14,14,14,0.6)', backdropFilter: 'blur(8px)' }}
       >
         <Brain size={11} className="text-primary/70" />
         <span className="tracking-wide">
@@ -140,8 +139,7 @@ function ThinkingBlock({ messageId, text, isStreaming, segmentIndex = 0 }: Think
             animate={{ opacity: 1, height: 'auto', y: 0 }}
             exit={{ opacity: 0, height: 0, y: -6 }}
             transition={{ duration: 0.22, ease: 'easeOut' }}
-            className="mt-1.5 rounded-xl border border-outline-variant/15 overflow-hidden"
-            style={{ background: 'rgba(14,14,14,0.5)', backdropFilter: 'blur(12px)' }}
+            className="glass-surface-subtle mt-1.5 rounded-xl border border-outline-variant/15 overflow-hidden"
           >
             <div
               ref={scrollRef}
@@ -197,22 +195,14 @@ function ToolCallBlock({ name, args, result, isError, isPending }: ToolCallBlock
       <button
         type="button"
         onClick={() => setExpanded((v) => !v)}
-        className="flex items-center gap-2 text-xs py-1.5 px-3 rounded-full w-fit border
-                   transition-all duration-200 cursor-pointer"
-        style={{
-          background: 'rgba(14,14,14,0.6)',
-          backdropFilter: 'blur(8px)',
-          borderColor: isError
-            ? 'rgba(239,68,68,0.3)'
-            : isPending
-              ? 'rgba(99,102,241,0.3)'
-              : 'rgba(34,197,94,0.25)',
-          color: isError
-            ? 'rgba(239,68,68,0.9)'
-            : isPending
-              ? 'rgba(165,180,252,0.8)'
-              : 'rgba(134,239,172,0.8)',
-        }}
+        className={`glass-surface flex items-center gap-2 text-xs py-1.5 px-3 rounded-full w-fit border
+                   transition-all duration-200 cursor-pointer ${
+                     isError
+                       ? 'border-error/30 text-error'
+                       : isPending
+                         ? 'border-primary/30 text-primary'
+                         : 'border-success/25 text-success'
+                   }`}
       >
         {isPending ? (
           <Wrench size={11} className="animate-pulse" />
@@ -239,8 +229,7 @@ function ToolCallBlock({ name, args, result, isError, isPending }: ToolCallBlock
             animate={{ opacity: 1, height: 'auto', y: 0 }}
             exit={{ opacity: 0, height: 0, y: -6 }}
             transition={{ duration: 0.2, ease: 'easeOut' }}
-            className="mt-1.5 rounded-xl border border-outline-variant/15 overflow-hidden"
-            style={{ background: 'rgba(14,14,14,0.5)', backdropFilter: 'blur(12px)' }}
+            className="glass-surface-subtle mt-1.5 rounded-xl border border-outline-variant/15 overflow-hidden"
           >
             <div className="p-4 space-y-3 text-xs font-mono">
               {Object.keys(args).length > 0 && (
@@ -256,12 +245,12 @@ function ToolCallBlock({ name, args, result, isError, isPending }: ToolCallBlock
               {parsedResult !== null && (
                 <div>
                   <p
-                    className={`uppercase tracking-wider text-[10px] mb-1 ${isError ? 'text-red-400/50' : 'text-on-surface-variant/50'}`}
+                    className={`uppercase tracking-wider text-[10px] mb-1 ${isError ? 'text-error/50' : 'text-on-surface-variant/50'}`}
                   >
                     {isError ? 'error' : 'result'}
                   </p>
                   <pre
-                    className={`whitespace-pre-wrap leading-relaxed ${isError ? 'text-red-400/80' : 'text-on-surface-variant/70'}`}
+                    className={`whitespace-pre-wrap leading-relaxed ${isError ? 'text-error/80' : 'text-on-surface-variant/70'}`}
                   >
                     {typeof parsedResult === 'string'
                       ? parsedResult
@@ -319,7 +308,7 @@ function CopyMessageButton({
       className="opacity-0 group-hover:opacity-70 hover:!opacity-100 transition-opacity duration-200 text-on-surface-variant/60 hover:text-on-surface-variant cursor-pointer"
       title={copied ? copiedLabel : label}
     >
-      {copied ? <Check size={14} className="text-green-400" /> : <Copy size={14} />}
+      {copied ? <Check size={14} className="text-success" /> : <Copy size={14} />}
     </button>
   );
 }
@@ -820,8 +809,7 @@ export function ChatFeed({ chatId, messages }: { chatId: string | null; messages
             transition={{ duration: 0.2 }}
             type="button"
             onClick={handleScrollToBottom}
-            className="sticky bottom-4 left-1/2 -translate-x-1/2 z-10 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium text-on-surface-variant border border-outline-variant/30 cursor-pointer hover:border-outline-variant/50 hover:text-on-surface transition-colors duration-200"
-            style={{ background: 'rgba(28,27,27,0.85)', backdropFilter: 'blur(12px)' }}
+            className="glass-elevated sticky bottom-4 left-1/2 -translate-x-1/2 z-10 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium text-on-surface-variant border border-outline-variant/30 cursor-pointer hover:border-outline-variant/50 hover:text-on-surface transition-colors duration-200"
             title={t.chat.scrollToBottom}
           >
             <ArrowDown size={13} />

@@ -214,7 +214,7 @@ export function InputBar({
                 type="submit"
                 disabled={disabled || !prompt.trim()}
                 className="h-10 px-4 rounded-xl text-on-primary font-bold text-xs flex items-center gap-2 hover:brightness-110 transition-all active:scale-95 shadow-lg shadow-primary-container/20 disabled:opacity-50"
-                style={{ background: 'linear-gradient(135deg, #c0c1ff 0%, #4b4dd8 100%)' }}
+                style={{ background: 'var(--gradient-primary)' }}
               >
                 {isImageMode ? (
                   <>

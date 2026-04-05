@@ -262,7 +262,7 @@ export function ConnectorsSettings({ modelCatalog, reloadModelCatalog }: Connect
                 >
                   <div className="flex items-center gap-4">
                     <div
-                      className={`p-2.5 rounded-xl ${c.configured ? 'bg-primary/10 text-primary' : 'bg-red-500/10 text-red-300'}`}
+                      className={`p-2.5 rounded-xl ${c.configured ? 'bg-primary/10 text-primary' : 'bg-error/10 text-error/80'}`}
                     >
                       {c.configured ? <CheckCircle2 size={20} /> : <XCircle size={20} />}
                     </div>
@@ -324,7 +324,7 @@ export function ConnectorsSettings({ modelCatalog, reloadModelCatalog }: Connect
                         setConnectorToDelete(c);
                       }}
                       title={isReadOnlyShared ? s.sharedDeleteBlocked : s.deleteConnector}
-                      className="p-2 text-red-300 hover:text-red-400 hover:bg-red-500/10 disabled:opacity-40 disabled:hover:bg-transparent"
+                      className="p-2 text-error/70 hover:text-error hover:bg-error/10 disabled:opacity-40 disabled:hover:bg-transparent"
                       disabled={isReadOnlyShared}
                     >
                       <Trash2 size={18} />
@@ -497,9 +497,7 @@ export function ConnectorsSettings({ modelCatalog, reloadModelCatalog }: Connect
               </div>
             </div>
 
-            {formError && (
-              <p className="text-xs text-red-400 font-medium text-center">{formError}</p>
-            )}
+            {formError && <p className="text-xs text-error font-medium text-center">{formError}</p>}
 
             <div className="flex gap-3">
               <Button
@@ -701,7 +699,7 @@ export function ConnectorsSettings({ modelCatalog, reloadModelCatalog }: Connect
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-surface-container-high w-full max-w-sm rounded-3xl p-8 shadow-2xl border border-outline-variant/20 space-y-6">
             <div className="space-y-2 text-center">
-              <div className="p-4 bg-red-500/10 rounded-full w-fit mx-auto text-red-400 mb-2">
+              <div className="p-4 bg-error/10 rounded-full w-fit mx-auto text-error mb-2">
                 <Trash2 size={32} />
               </div>
               <h3 className="text-xl font-bold text-on-surface">{s.deleteConnector}</h3>
@@ -722,7 +720,7 @@ export function ConnectorsSettings({ modelCatalog, reloadModelCatalog }: Connect
               <Button
                 variant="primary"
                 onClick={() => handleDeleteConnector(connectorToDelete.id)}
-                className="flex-1 bg-red-500 hover:bg-red-400 shadow-red-500/20"
+                className="flex-1 bg-error hover:bg-error/80 shadow-error/20"
               >
                 {s.deleteConnector}
               </Button>

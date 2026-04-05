@@ -76,15 +76,13 @@ export function AppearanceSettings() {
           />
           <OptionButton
             selected={config.appTheme === 'light'}
-            disabled
+            onClick={() => setConfig({ appTheme: 'light' })}
             label={s.appTheme.light}
-            badge={s.appTheme.comingSoon}
           />
           <OptionButton
             selected={config.appTheme === 'system'}
-            disabled
+            onClick={() => setConfig({ appTheme: 'system' })}
             label={s.appTheme.system}
-            badge={s.appTheme.comingSoon}
           />
         </div>
       </Card>

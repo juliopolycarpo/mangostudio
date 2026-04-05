@@ -80,12 +80,21 @@ describe('AppearanceSettings', () => {
     expect(compactBtn.getAttribute('aria-pressed')).toBe('true');
   });
 
-  it('Light and System theme buttons are disabled', () => {
+  it('all three theme options are enabled', () => {
     render(<AppearanceSettings />);
+    const darkBtn = screen.getByRole('button', { name: /dark/i });
     const lightBtn = screen.getByRole('button', { name: /light/i });
     const systemBtn = screen.getByRole('button', { name: /system/i });
-    expect(lightBtn).toBeDisabled();
-    expect(systemBtn).toBeDisabled();
+    expect(darkBtn).not.toBeDisabled();
+    expect(lightBtn).not.toBeDisabled();
+    expect(systemBtn).not.toBeDisabled();
+  });
+
+  it('switching to light updates aria-pressed', () => {
+    render(<AppearanceSettings />);
+    const lightBtn = screen.getByRole('button', { name: /light/i });
+    fireEvent.click(lightBtn);
+    expect(lightBtn.getAttribute('aria-pressed')).toBe('true');
   });
 });
 
@@ -106,6 +115,7 @@ describe('useTheme hook', () => {
     expect(result.current.config.appTheme).toBe('dark');
     expect(result.current.config.fontSize).toBe('default');
     expect(result.current.config.chatDensity).toBe('default');
+    expect(result.current.resolvedTheme).toBe('dark');
   });
 
   it('setConfig updates fontSize in config', async () => {
@@ -125,18 +135,51 @@ describe('useTheme hook', () => {
     expect(stored.chatDensity).toBe('compact');
   });
 
-  it('reads persisted settings from localStorage on init', async () => {
+  it('reads persisted settings from localStorage on init', () => {
     localStorage.setItem(
       'mango-studio-theme',
       JSON.stringify({ fontSize: 'small', chatDensity: 'comfortable' })
     );
+    // Config is now initialized synchronously via useState lazy initializer.
     const { result } = renderHook(() => useTheme());
-    // useEffect reads localStorage on mount
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 10));
-    });
     expect(result.current.config.fontSize).toBe('small');
     expect(result.current.config.chatDensity).toBe('comfortable');
+  });
+
+  it('reads persisted appTheme from localStorage on init', () => {
+    localStorage.setItem('mango-studio-theme', JSON.stringify({ appTheme: 'light' }));
+    const { result } = renderHook(() => useTheme());
+    expect(result.current.config.appTheme).toBe('light');
+    expect(result.current.resolvedTheme).toBe('light');
+  });
+
+  it('switching to light sets resolvedTheme and data-theme attribute', async () => {
+    const { result } = renderHook(() => useTheme());
+    await act(async () => {
+      result.current.setConfig({ appTheme: 'light' });
+    });
+    expect(result.current.config.appTheme).toBe('light');
+    expect(result.current.resolvedTheme).toBe('light');
+    expect(document.documentElement.dataset.theme).toBe('light');
+  });
+
+  it('system theme resolves based on OS preference', async () => {
+    // jsdom matchMedia defaults to not matching (prefers-color-scheme: dark = false → light)
+    const { result } = renderHook(() => useTheme());
+    await act(async () => {
+      result.current.setConfig({ appTheme: 'system' });
+    });
+    expect(result.current.config.appTheme).toBe('system');
+    expect(result.current.resolvedTheme).toBe('light');
+  });
+
+  it('theme persists across page loads via localStorage', async () => {
+    const { result } = renderHook(() => useTheme());
+    await act(async () => {
+      result.current.setConfig({ appTheme: 'light' });
+    });
+    const stored = JSON.parse(localStorage.getItem('mango-studio-theme') ?? '{}');
+    expect(stored.appTheme).toBe('light');
   });
 });
 
