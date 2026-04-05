@@ -151,9 +151,11 @@ function ThemeCard({
         </div>
       </button>
 
-      {/* Hover overlay with actions */}
+      {/* Hover overlay with actions:
+           pointer-events-none keeps clicks on the select button when not hovered;
+           pointer-events-auto re-enables on hover so install/uninstall work. */}
       {!builtIn && (
-        <div className="absolute inset-0 bg-background/60 backdrop-blur-sm opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-center justify-center gap-2">
+        <div className="absolute inset-0 bg-background/60 backdrop-blur-sm pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100 transition-opacity duration-200 flex items-center justify-center gap-2">
           {!installed ? (
             <button
               type="button"

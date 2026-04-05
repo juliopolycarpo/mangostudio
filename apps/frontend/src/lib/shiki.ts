@@ -64,15 +64,26 @@ export function isThemeAvailable(id: CodeThemeId): boolean {
   return isThemeBuiltIn(id) || getInstalledThemeIds().includes(id);
 }
 
-/** Load a theme on demand. Returns true if loaded successfully. */
-export async function loadThemeOnDemand(id: CodeThemeId): Promise<boolean> {
-  if (!highlighterInstance) return false;
-  if (highlighterInstance.getLoadedThemes().includes(id)) return true;
+/**
+ * Load a theme on demand. Returns true if loaded successfully.
+ * Pass `{ persist: false }` when loading only to generate a preview —
+ * this avoids writing the theme to the installed list in localStorage.
+ */
+export async function loadThemeOnDemand(
+  id: CodeThemeId,
+  { persist = true }: { persist?: boolean } = {}
+): Promise<boolean> {
+  // Always await init so this works even if called before the highlighter is ready.
+  const h = await initHighlighter();
+  if (h.getLoadedThemes().includes(id)) return true;
+  if (isThemeBuiltIn(id)) return true;
   try {
-    await highlighterInstance.loadTheme(id);
-    const installed = getInstalledThemeIds();
-    if (!installed.includes(id) && !isThemeBuiltIn(id)) {
-      persistInstalledThemeIds([...installed, id]);
+    await h.loadTheme(id);
+    if (persist) {
+      const installed = getInstalledThemeIds();
+      if (!installed.includes(id)) {
+        persistInstalledThemeIds([...installed, id]);
+      }
     }
     return true;
   } catch {

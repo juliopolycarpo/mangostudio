@@ -11,15 +11,19 @@ function SettingsLayout() {
   const { t } = useI18n();
 
   return (
-    <div className="p-8 max-w-2xl mx-auto space-y-6">
-      <div className="flex items-center gap-4">
-        <div className="p-3 bg-primary-container text-on-primary-container rounded-2xl">
-          <Settings size={24} />
+    <div className="h-full overflow-y-auto">
+      <div className="p-8 max-w-2xl mx-auto space-y-6">
+        <div className="flex items-center gap-4">
+          <div className="p-3 bg-primary-container text-on-primary-container rounded-2xl">
+            <Settings size={24} />
+          </div>
+          <h1 className="text-3xl font-bold font-headline text-on-background">
+            {t.settings.title}
+          </h1>
         </div>
-        <h1 className="text-3xl font-bold font-headline text-on-background">{t.settings.title}</h1>
+        <SettingsTabs />
+        <Outlet />
       </div>
-      <SettingsTabs />
-      <Outlet />
     </div>
   );
 }

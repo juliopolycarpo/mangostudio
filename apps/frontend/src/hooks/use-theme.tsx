@@ -36,7 +36,7 @@ export interface ThemeConfig {
 const DEFAULT_CODE_THEME: CodeThemeConfig = {
   mode: 'auto',
   darkTheme: 'one-dark-pro',
-  lightTheme: 'github-light',
+  lightTheme: 'one-light',
 };
 
 const DEFAULT_CONFIG: ThemeConfig = {

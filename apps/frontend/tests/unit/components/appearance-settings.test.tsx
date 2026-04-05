@@ -123,7 +123,7 @@ describe('useTheme hook', () => {
     expect(result.current.config.codeTheme).toEqual({
       mode: 'auto',
       darkTheme: 'one-dark-pro',
-      lightTheme: 'github-light',
+      lightTheme: 'one-light',
     });
     expect(result.current.resolvedCodeTheme).toBe('one-dark-pro');
   });
@@ -134,12 +134,12 @@ describe('useTheme hook', () => {
     expect(result.current.resolvedCodeTheme).toBe('one-dark-pro');
   });
 
-  it('auto mode resolves to light fallback when preferred light theme is unavailable', async () => {
+  it('auto mode resolves to light theme in light mode', async () => {
     const { result } = renderHook(() => useTheme());
     await act(async () => {
       result.current.setConfig({ appTheme: 'light' });
     });
-    // github-light is not installed, so falls back to one-light
+    // Default lightTheme is one-light (built-in), resolves directly
     expect(result.current.resolvedCodeTheme).toBe('one-light');
   });
 

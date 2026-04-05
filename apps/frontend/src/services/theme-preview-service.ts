@@ -10,7 +10,8 @@ const previewCache = new Map<CodeThemeId, string>();
 export async function getThemePreview(themeId: CodeThemeId): Promise<string | null> {
   if (previewCache.has(themeId)) return previewCache.get(themeId)!;
 
-  const loaded = await loadThemeOnDemand(themeId);
+  // Load without persisting — previews should not mark a theme as installed.
+  const loaded = await loadThemeOnDemand(themeId, { persist: false });
   if (!loaded) return null;
 
   const html = highlightCode(PREVIEW_CODE, 'typescript', themeId);
