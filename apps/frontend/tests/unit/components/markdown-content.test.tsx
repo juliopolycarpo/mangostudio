@@ -6,6 +6,7 @@ import * as shikiLib from '@/lib/shiki';
 vi.mock('@/lib/shiki', () => ({
   highlightCode: vi.fn(() => null),
   initHighlighter: vi.fn().mockResolvedValue(undefined),
+  CODE_THEMES: ['one-dark-pro', 'github-dark-dimmed', 'github-light', 'one-light'],
 }));
 
 describe('MarkdownContent', () => {
@@ -69,11 +70,13 @@ describe('MarkdownContent', () => {
   });
 
   it('memoizes parsed output for same content', () => {
-    const { rerender, container } = render(<MarkdownContent content="**hello**" />);
+    const { container } = render(<MarkdownContent content="**hello**" />);
     const firstHtml = container.querySelector('.markdown-content')!.innerHTML;
 
-    rerender(<MarkdownContent content="**hello**" />);
-    const secondHtml = container.querySelector('.markdown-content')!.innerHTML;
+    // Re-render the same content — memoized output should be identical.
+    // Use a second render instead of rerender to stay inside the ThemeProvider wrapper.
+    const { container: container2 } = render(<MarkdownContent content="**hello**" />);
+    const secondHtml = container2.querySelector('.markdown-content')!.innerHTML;
 
     expect(firstHtml).toBe(secondHtml);
   });
@@ -116,6 +119,11 @@ describe('MarkdownContent — syntax highlighting', () => {
     const pre = container.querySelector('pre');
     expect(pre).toBeInTheDocument();
     expect(container.querySelector('span[style]')).toBeInTheDocument();
+    expect(shikiLib.highlightCode).toHaveBeenCalledWith(
+      'const x = 1;',
+      'typescript',
+      'one-dark-pro'
+    );
   });
 
   it('adds data-lang attribute to Shiki pre element', () => {
