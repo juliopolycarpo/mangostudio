@@ -4,8 +4,9 @@
   "private": true,
   "license": "MIT",
   "type": "module",
-  "main": "./src/app.ts",
-  "types": "./src/app.ts",
+  "exports": {
+    ".": "./src/app.ts"
+  },
   "scripts": {
     "dev": "bun run --watch src/index.ts",
     "start": "bun run src/index.ts",
