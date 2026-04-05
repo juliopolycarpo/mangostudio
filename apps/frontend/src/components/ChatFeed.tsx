@@ -198,10 +198,10 @@ function ToolCallBlock({ name, args, result, isError, isPending }: ToolCallBlock
         className={`glass-surface flex items-center gap-2 text-xs py-1.5 px-3 rounded-full w-fit border
                    transition-all duration-200 cursor-pointer ${
                      isError
-                       ? 'border-red-500/30 text-red-400'
+                       ? 'border-error/30 text-error'
                        : isPending
-                         ? 'border-indigo-400/30 text-indigo-300'
-                         : 'border-green-500/25 text-green-400'
+                         ? 'border-primary/30 text-primary'
+                         : 'border-success/25 text-success'
                    }`}
       >
         {isPending ? (
@@ -245,12 +245,12 @@ function ToolCallBlock({ name, args, result, isError, isPending }: ToolCallBlock
               {parsedResult !== null && (
                 <div>
                   <p
-                    className={`uppercase tracking-wider text-[10px] mb-1 ${isError ? 'text-red-400/50' : 'text-on-surface-variant/50'}`}
+                    className={`uppercase tracking-wider text-[10px] mb-1 ${isError ? 'text-error/50' : 'text-on-surface-variant/50'}`}
                   >
                     {isError ? 'error' : 'result'}
                   </p>
                   <pre
-                    className={`whitespace-pre-wrap leading-relaxed ${isError ? 'text-red-400/80' : 'text-on-surface-variant/70'}`}
+                    className={`whitespace-pre-wrap leading-relaxed ${isError ? 'text-error/80' : 'text-on-surface-variant/70'}`}
                   >
                     {typeof parsedResult === 'string'
                       ? parsedResult
@@ -308,7 +308,7 @@ function CopyMessageButton({
       className="opacity-0 group-hover:opacity-70 hover:!opacity-100 transition-opacity duration-200 text-on-surface-variant/60 hover:text-on-surface-variant cursor-pointer"
       title={copied ? copiedLabel : label}
     >
-      {copied ? <Check size={14} className="text-green-400" /> : <Copy size={14} />}
+      {copied ? <Check size={14} className="text-success" /> : <Copy size={14} />}
     </button>
   );
 }

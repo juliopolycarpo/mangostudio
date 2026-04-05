@@ -29,8 +29,8 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const typeStyles: Record<Toast['type'], string> = {
-    success: 'border-green-500/30 text-green-400',
-    error: 'border-red-500/30 text-red-400',
+    success: 'border-success/30 text-success',
+    error: 'border-error/30 text-error',
     info: 'border-outline-variant/30 text-on-surface',
   };
 

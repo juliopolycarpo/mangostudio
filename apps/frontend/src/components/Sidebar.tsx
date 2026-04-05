@@ -198,7 +198,7 @@ export function Sidebar({
                   </button>
                   <button
                     onClick={(e) => handleDelete(chat.id, e)}
-                    className="p-1 hover:text-red-400 transition-colors"
+                    className="p-1 hover:text-error transition-colors"
                     title={t.chat.deleteTitle}
                   >
                     <Trash2 size={14} />

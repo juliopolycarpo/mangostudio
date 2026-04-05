@@ -22,12 +22,12 @@ export function Input({ label, error, id, className = '', ...props }: InputProps
           placeholder:text-on-surface/30
           focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/20
           transition-colors
-          ${error ? 'border-red-500/60' : ''}
+          ${error ? 'border-error/60' : ''}
           ${className}
         `.trim()}
         {...props}
       />
-      {error && <p className="text-xs text-red-400">{error}</p>}
+      {error && <p className="text-xs text-error">{error}</p>}
     </div>
   );
 }

@@ -16,6 +16,11 @@
   --color-background: #131313;
   --color-on-background: #e5e2e1;
 
+  --color-error: #f87171;
+  --color-on-error: #ffffff;
+  --color-warning: #fbbf24;
+  --color-success: #4ade80;
+
   --font-headline: 'Manrope', sans-serif;
   --font-body: 'Inter', sans-serif;
   --font-label: 'Inter', sans-serif;
@@ -72,6 +77,11 @@
   --color-surface: #faf9f9;
   --color-background: #faf9f9;
   --color-on-background: #1c1b1b;
+
+  --color-error: #dc2626;
+  --color-on-error: #ffffff;
+  --color-warning: #d97706;
+  --color-success: #16a34a;
 
   /* Glass & overlay overrides */
   --glass-bg: rgba(255, 255, 255, 0.7);
@@ -297,7 +307,7 @@ pre:hover .copy-code-btn {
 
 .copy-code-btn--copied {
   opacity: 1 !important;
-  color: #4ade80;
+  color: var(--color-success);
 }
 
 @media (hover: none) {
