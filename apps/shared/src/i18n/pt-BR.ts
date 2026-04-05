@@ -167,6 +167,18 @@ export const messages = {
         default: 'Padrão',
         comfortable: 'Confortável',
       },
+      codeTheme: {
+        label: 'Tema de Código',
+        description: 'Escolha o tema de destaque de sintaxe para blocos de código',
+        auto: 'Automático (seguir tema do app)',
+        manual: 'Manual',
+        darkPreference: 'Preferência escura',
+        lightPreference: 'Preferência clara',
+        oneDarkPro: 'One Dark Pro',
+        githubDarkDimmed: 'GitHub Dark Dimmed',
+        githubLight: 'GitHub Light',
+        oneLight: 'One Light',
+      },
     },
   },
 
