@@ -10,46 +10,42 @@ function copyButton(ariaLabel: string): string {
   return `<button class="copy-code-btn" type="button" aria-label="${ariaLabel}">${CLIPBOARD_ICON}</button>`;
 }
 
-const renderer = new Renderer();
+function createRenderer(theme: CodeThemeId): Renderer {
+  const renderer = new Renderer();
 
-// Module-level ref updated by the component before each render.
-// Safe because React renders are synchronous — no race conditions.
-let currentCodeTheme: CodeThemeId = 'one-dark-pro';
+  renderer.link = ({ href, title, tokens }) => {
+    const text = tokens?.map((t) => ('text' in t ? t.text : t.raw)).join('') ?? '';
+    const safeHref = href?.startsWith('javascript:') ? '#' : href;
+    const titleAttr = title ? ` title="${title}"` : '';
+    return `<a href="${safeHref}" target="_blank" rel="noopener noreferrer"${titleAttr}>${text}</a>`;
+  };
 
-renderer.link = ({ href, title, tokens }) => {
-  const text = tokens?.map((t) => ('text' in t ? t.text : t.raw)).join('') ?? '';
-  const safeHref = href?.startsWith('javascript:') ? '#' : href;
-  const titleAttr = title ? ` title="${title}"` : '';
-  return `<a href="${safeHref}" target="_blank" rel="noopener noreferrer"${titleAttr}>${text}</a>`;
-};
+  renderer.image = ({ href, title, text }) => {
+    const titleAttr = title ? ` title="${title}"` : '';
+    return `<img src="${href}" alt="${text}"${titleAttr} loading="lazy" />`;
+  };
 
-renderer.image = ({ href, title, text }) => {
-  const titleAttr = title ? ` title="${title}"` : '';
-  return `<img src="${href}" alt="${text}"${titleAttr} loading="lazy" />`;
-};
+  renderer.code = ({ text, lang }) => {
+    const safeLang = lang ?? '';
+    const highlighted = safeLang ? highlightCode(text, safeLang, theme) : null;
+    if (highlighted) {
+      return highlighted
+        .replace('<pre ', `<pre data-lang="${safeLang}" `)
+        .replace('</pre>', `${copyButton('Copy code')}</pre>`);
+    }
 
-renderer.code = ({ text, lang }) => {
-  const safeLang = lang ?? '';
-  const highlighted = safeLang ? highlightCode(text, safeLang, currentCodeTheme) : null;
-  if (highlighted) {
-    // Inject data-lang and copy button into Shiki's <pre>
-    return highlighted
-      .replace('<pre ', `<pre data-lang="${safeLang}" `)
-      .replace('</pre>', `${copyButton('Copy code')}</pre>`);
-  }
+    const escaped = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const langClass = safeLang ? ` class="language-${safeLang}"` : '';
+    const langAttr = safeLang ? ` data-lang="${safeLang}"` : '';
+    return `<pre${langAttr}><code${langClass}>${escaped}</code>${copyButton('Copy code')}</pre>`;
+  };
 
-  // Fallback: plain code block
-  const escaped = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  const langClass = safeLang ? ` class="language-${safeLang}"` : '';
-  const langAttr = safeLang ? ` data-lang="${safeLang}"` : '';
-  return `<pre${langAttr}><code${langClass}>${escaped}</code>${copyButton('Copy code')}</pre>`;
-};
+  return renderer;
+}
 
-const marked = new Marked({
-  gfm: true,
-  breaks: true,
-  renderer,
-});
+function createParser(theme: CodeThemeId): Marked {
+  return new Marked({ gfm: true, breaks: true, renderer: createRenderer(theme) });
+}
 
 interface MarkdownContentProps {
   content: string;
@@ -69,16 +65,15 @@ export function MarkdownContent({
   const containerRef = useRef<HTMLDivElement>(null);
   const { resolvedCodeTheme } = useTheme();
 
-  // Update module-level ref so the marked renderer uses the current theme.
-  currentCodeTheme = resolvedCodeTheme;
+  const parser = useMemo(() => createParser(resolvedCodeTheme), [resolvedCodeTheme]);
 
   const html = useMemo(() => {
     if (!content) return '';
-    return marked.parse(content, { async: false }) as string;
-  }, [content]);
+    return parser.parse(content, { async: false }) as string;
+  }, [content, parser]);
 
   const renderedHtml = isStreaming
-    ? (marked.parse(content || '', { async: false }) as string)
+    ? (parser.parse(content || '', { async: false }) as string)
     : html;
 
   // Event delegation for copy buttons — survives dangerouslySetInnerHTML re-renders
