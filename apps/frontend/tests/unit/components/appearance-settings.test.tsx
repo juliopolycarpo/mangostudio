@@ -135,18 +135,22 @@ describe('useTheme hook', () => {
     expect(stored.chatDensity).toBe('compact');
   });
 
-  it('reads persisted settings from localStorage on init', async () => {
+  it('reads persisted settings from localStorage on init', () => {
     localStorage.setItem(
       'mango-studio-theme',
       JSON.stringify({ fontSize: 'small', chatDensity: 'comfortable' })
     );
+    // Config is now initialized synchronously via useState lazy initializer.
     const { result } = renderHook(() => useTheme());
-    // useEffect reads localStorage on mount
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 10));
-    });
     expect(result.current.config.fontSize).toBe('small');
     expect(result.current.config.chatDensity).toBe('comfortable');
+  });
+
+  it('reads persisted appTheme from localStorage on init', () => {
+    localStorage.setItem('mango-studio-theme', JSON.stringify({ appTheme: 'light' }));
+    const { result } = renderHook(() => useTheme());
+    expect(result.current.config.appTheme).toBe('light');
+    expect(result.current.resolvedTheme).toBe('light');
   });
 
   it('switching to light sets resolvedTheme and data-theme attribute', async () => {

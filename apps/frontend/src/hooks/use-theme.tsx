@@ -21,7 +21,7 @@ const DEFAULT_CONFIG: ThemeConfig = {
   chatDensity: 'default',
 };
 
-type ResolvedTheme = 'dark' | 'light';
+export type ResolvedTheme = 'dark' | 'light';
 
 interface ThemeContextValue {
   config: ThemeConfig;
@@ -44,56 +44,38 @@ function readStoredConfig(): ThemeConfig {
   return DEFAULT_CONFIG;
 }
 
-function getSystemTheme(): ResolvedTheme {
-  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-}
-
-function resolveTheme(appTheme: ThemeConfig['appTheme']): ResolvedTheme {
-  return appTheme === 'system' ? getSystemTheme() : appTheme;
-}
-
-function applyTheme(resolved: ResolvedTheme) {
-  document.documentElement.dataset.theme = resolved;
-}
-
 export function ThemeProvider({ children }: { children: ReactNode }) {
-  const [config, setConfigState] = useState<ThemeConfig>(DEFAULT_CONFIG);
-  const [resolvedTheme, setResolvedTheme] = useState<ResolvedTheme>(() =>
-    resolveTheme(DEFAULT_CONFIG.appTheme)
+  // Initialize synchronously from localStorage to avoid a flash on mount.
+  const [config, setConfigState] = useState<ThemeConfig>(readStoredConfig);
+  // Track OS preference separately so system theme reacts to OS changes.
+  const [systemIsDark, setSystemIsDark] = useState<boolean>(
+    () => window.matchMedia('(prefers-color-scheme: dark)').matches
   );
 
-  useEffect(() => {
-    const stored = readStoredConfig();
-    setConfigState(stored);
-    const resolved = resolveTheme(stored.appTheme);
-    setResolvedTheme(resolved);
-    applyTheme(resolved);
-  }, []);
+  // resolvedTheme is purely derived — never stored as independent state.
+  const resolvedTheme = useMemo<ResolvedTheme>(
+    () => (config.appTheme === 'system' ? (systemIsDark ? 'dark' : 'light') : config.appTheme),
+    [config.appTheme, systemIsDark]
+  );
 
-  // Persist config & apply data attributes when config changes
+  // Persist config & apply data attributes whenever config or resolved theme changes.
   useEffect(() => {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
     } catch {
       // ignore write failures (private browsing, quota exceeded, etc.)
     }
-    const resolved = resolveTheme(config.appTheme);
-    setResolvedTheme(resolved);
-    applyTheme(resolved);
+    document.documentElement.dataset.theme = resolvedTheme;
     document.documentElement.dataset.fontSize = config.fontSize;
     document.documentElement.dataset.chatDensity = config.chatDensity;
-  }, [config]);
+  }, [config, resolvedTheme]);
 
-  // Listen for OS preference changes when using 'system' theme
+  // Listen for OS preference changes when using 'system' theme.
   useEffect(() => {
     if (config.appTheme !== 'system') return;
 
     const mql = window.matchMedia('(prefers-color-scheme: dark)');
-    const handler = () => {
-      const resolved = getSystemTheme();
-      setResolvedTheme(resolved);
-      applyTheme(resolved);
-    };
+    const handler = () => setSystemIsDark(mql.matches);
     mql.addEventListener('change', handler);
     return () => mql.removeEventListener('change', handler);
   }, [config.appTheme]);
