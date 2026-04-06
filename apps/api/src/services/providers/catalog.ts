@@ -53,6 +53,13 @@ function createEmptySnapshot(): ModelCatalogResponse {
   };
 }
 
+interface UnifiedModelCatalogService {
+  refresh(userId: string): Promise<ModelCatalogResponse>;
+  getUnifiedModelCatalog(userId: string): Promise<ModelCatalogResponse>;
+  invalidate(userId: string): void;
+  recalculate(userId: string): void;
+}
+
 /**
  * Creates a unified model catalog service that aggregates models from all
  * registered AI providers.
@@ -64,7 +71,9 @@ function evictOldest<V>(map: Map<string, V>): void {
   }
 }
 
-export function createUnifiedModelCatalogService(deps: UnifiedModelCatalogDeps = {}) {
+export function createUnifiedModelCatalogService(
+  deps: UnifiedModelCatalogDeps = {}
+): UnifiedModelCatalogService {
   const now = deps.now ?? (() => Date.now());
   const listProviders = deps.listProviders ?? listRegisteredProviderTypes;
   const getProviderFn = deps.getProviderFn ?? getProvider;

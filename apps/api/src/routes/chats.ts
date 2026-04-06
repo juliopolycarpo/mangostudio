@@ -12,7 +12,13 @@ import { parseContinuationEnvelope } from '../services/providers/continuation';
 import { getContextSeverity } from '../services/providers/context-policy';
 
 /** Extract context info from a raw ContinuationEnvelope JSON string. */
-function extractContextInfo(providerState: string | null | undefined) {
+function extractContextInfo(providerState: string | null | undefined): {
+  estimatedInputTokens: number;
+  contextLimit: number;
+  estimatedUsageRatio: number;
+  mode: 'stateful' | 'replay';
+  severity: ReturnType<typeof getContextSeverity>;
+} | null {
   if (!providerState) return null;
   const envelope = parseContinuationEnvelope(providerState);
   if (!envelope?.context) return null;

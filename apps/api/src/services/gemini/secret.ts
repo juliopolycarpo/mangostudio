@@ -110,10 +110,22 @@ function getTomlFilePath(): string {
   return getConfig().configFilePath;
 }
 
+interface GeminiSecretService {
+  syncConfigFileConnectors(userId: string): Promise<void>;
+  getGeminiSecretStatus(userId: string): Promise<GeminiSecretStatus>;
+  getResolvedGeminiApiKey(userId: string, requestedModel?: string): Promise<string>;
+  validateGeminiApiKey(apiKey: string): Promise<void>;
+  addGeminiConnector(userId: string, body: AddConnectorBody): Promise<Connector>;
+  updateConnectorModels(userId: string, id: string, enabledModels: string[]): Promise<void>;
+  deleteGeminiConnector(userId: string, id: string): Promise<void>;
+}
+
 /**
  * Creates the Gemini secret service with injectable dependencies for tests.
  */
-export function createGeminiSecretService(dependencies: GeminiSecretServiceDependencies = {}) {
+export function createGeminiSecretService(
+  dependencies: GeminiSecretServiceDependencies = {}
+): GeminiSecretService {
   const secretStore = dependencies.secretStore ?? bunSecretStore;
   const fetchImpl = dependencies.fetchImpl ?? fetch;
   const now = dependencies.now ?? (() => Date.now());

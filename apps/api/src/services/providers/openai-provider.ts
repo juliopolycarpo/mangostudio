@@ -7,7 +7,8 @@
  * rejected during connector setup.
  */
 
-import OpenAI, { APIError as OpenAIAPIError } from 'openai';
+import OpenAI, { APIError as OpenAIAPIError, APIPromise } from 'openai';
+import type { Stream } from 'openai/streaming';
 import { join } from 'path';
 import { mkdirSync } from 'fs';
 import { createProviderSecretService } from './secret-service';
@@ -437,7 +438,7 @@ function parseResponseId(providerState: string | null | undefined): string | nul
 async function* streamAgentTurnWithResponsesAPI(
   client: OpenAI,
   req: AgentTurnRequest
-): AsyncIterable<AgentEvent> {
+): AsyncGenerator<AgentEvent> {
   const tools = (req.toolDefinitions ?? []).map(toResponsesTool);
   const previousResponseId = parseResponseId(req.providerState);
   const effort = req.generationConfig?.reasoningEffort ?? 'medium';
@@ -465,7 +466,7 @@ async function* streamAgentTurnWithResponsesAPI(
     ];
   }
 
-  const makeRequest = (prevId: string | null) => {
+  const makeRequest = (prevId: string | null): APIPromise<Stream<ResponseStreamEvent>> => {
     return client.responses.create({
       model: req.modelName,
       input: input as unknown as OpenAI.Responses.ResponseInput,

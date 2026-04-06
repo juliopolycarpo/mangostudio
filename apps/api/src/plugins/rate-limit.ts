@@ -58,7 +58,10 @@ const defaultConfig: RateLimitConfig = {
  * @param config - Configuration options
  * @returns Elysia plugin with an optional `teardown()` export for tests
  */
-export function rateLimit(config: Partial<RateLimitConfig> = {}) {
+export function rateLimit(config: Partial<RateLimitConfig> = {}): {
+  (app: Elysia): Elysia;
+  teardown: () => void;
+} {
   const mergedConfig: RateLimitConfig = { ...defaultConfig, ...config };
 
   // In-memory store: IP key → entry
@@ -66,7 +69,7 @@ export function rateLimit(config: Partial<RateLimitConfig> = {}) {
   let lastCleanup = Date.now();
 
   /** Remove expired entries; evict oldest when store exceeds maxStoreSize. */
-  function cleanup() {
+  function cleanup(): void {
     const now = Date.now();
     for (const [key, entry] of store) {
       if (entry.resetTime < now) {
@@ -87,7 +90,7 @@ export function rateLimit(config: Partial<RateLimitConfig> = {}) {
   }
 
   /** Call in tests or on graceful shutdown to free resources. */
-  function teardown() {
+  function teardown(): void {
     store.clear();
   }
 

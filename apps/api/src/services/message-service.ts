@@ -122,7 +122,11 @@ export function mapMessageRow(msg: {
   styleParams: string | null;
   parts?: string | null;
   [key: string]: unknown;
-}) {
+}): Record<string, unknown> & {
+  isGenerating: boolean;
+  styleParams: string[] | undefined;
+  parts: unknown[] | undefined;
+} {
   return {
     ...msg,
     isGenerating: msg.isGenerating === 1,

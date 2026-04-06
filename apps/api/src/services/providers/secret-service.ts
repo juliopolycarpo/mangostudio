@@ -99,6 +99,25 @@ export function isPlaceholderConfigSecretValue(value: string): boolean {
   );
 }
 
+/** Return type for createProviderSecretService. */
+export interface ProviderSecretServiceInstance {
+  resolveApiKey(userId: string, requestedModel?: string): Promise<string>;
+  validateApiKey(apiKey: string): Promise<void>;
+  syncConfigFileConnectors(userId: string): Promise<void>;
+  listMeta: (provider: string, userId: string) => Promise<SecretMetadataRow[]>;
+  getMetaById: (id: string, userId: string) => Promise<SecretMetadataRow | null>;
+  upsertMeta: (input: SecretMetadataInput) => Promise<void>;
+  deleteMeta: (id: string, userId: string) => Promise<void>;
+  now: () => number;
+  secretStore: SecretStore;
+  provider: ProviderType;
+  tomlFilePath: string;
+  tomlSection: string;
+  envVarPrefix: string;
+  resolveSecretValue: (connector: SecretMetadataRow) => Promise<string | null>;
+  maskSecret: (apiKey: string | null | undefined) => string | undefined;
+}
+
 /**
  * Creates a provider-agnostic secret service.
  * Shared logic: config-file sync, env-var resolution, key resolution by model.
@@ -106,7 +125,7 @@ export function isPlaceholderConfigSecretValue(value: string): boolean {
 export function createProviderSecretService(
   config: ProviderSecretServiceConfig,
   deps: ProviderSecretServiceDeps = {}
-) {
+): ProviderSecretServiceInstance {
   const secretStore = deps.secretStore ?? bunSecretStore;
   const fetchImpl = deps.fetchImpl ?? fetch;
   const now = deps.now ?? (() => Date.now());

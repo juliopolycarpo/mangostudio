@@ -41,6 +41,32 @@ export default tseslint.config(
       '@typescript-eslint/no-non-null-assertion': 'error',
     },
   },
+  // Require explicit return types in API services, utilities, and shared code.
+  // Elysia route/plugin files are excluded — their return types must be inferred
+  // for Eden Treaty type propagation. Frontend is excluded — React component and
+  // hook return types are either trivially JSX.Element or complex TanStack Query
+  // generics that add noise without safety.
+  {
+    files: [
+      'apps/api/src/services/**/*.ts',
+      'apps/api/src/utils/**/*.ts',
+      'apps/api/src/lib/**/*.ts',
+      'apps/api/src/db/**/*.ts',
+      'apps/shared/src/**/*.ts',
+    ],
+    rules: {
+      '@typescript-eslint/explicit-function-return-type': [
+        'error',
+        {
+          allowExpressions: true,
+          allowTypedFunctionExpressions: true,
+          allowHigherOrderFunctions: true,
+          allowDirectConstAssertionInArrowFunctions: true,
+          allowIIFEs: true,
+        },
+      ],
+    },
+  },
   // React rules — frontend only
   {
     files: ['apps/frontend/**/*.{ts,tsx}'],
