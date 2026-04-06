@@ -4,7 +4,9 @@ import { rateLimit } from '../../../src/plugins/rate-limit';
 
 function createTestApp(trustProxy?: boolean) {
   const limiter = rateLimit({ max: 2, windowMs: 60_000, trustProxy });
-  const app = new Elysia().use(limiter).get('/test', (ctx: Record<string, unknown>) => ({ ip: ctx.clientIp as string }));
+  const app = new Elysia()
+    .use(limiter)
+    .get('/test', (ctx: Record<string, unknown>) => ({ ip: ctx.clientIp as string }));
   return { app, teardown: limiter.teardown };
 }
 

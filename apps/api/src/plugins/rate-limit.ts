@@ -58,10 +58,7 @@ const defaultConfig: RateLimitConfig = {
  * @param config - Configuration options
  * @returns Elysia plugin with an optional `teardown()` export for tests
  */
-export function rateLimit(config: Partial<RateLimitConfig> = {}): {
-  (app: Elysia): Elysia;
-  teardown: () => void;
-} {
+export function rateLimit(config: Partial<RateLimitConfig> = {}) {
   const mergedConfig: RateLimitConfig = { ...defaultConfig, ...config };
 
   // In-memory store: IP key → entry

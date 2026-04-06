@@ -38,11 +38,11 @@ apps/
 
 ## Workspace Runners
 
-| Workspace         | Runner             | Environment |
-|-------------------|--------------------|-------------|
-| `apps/api`        | `bun test`         | Bun native  |
-| `apps/frontend`   | `vitest`           | jsdom       |
-| `apps/shared`     | `vitest`           | node        |
+| Workspace       | Runner     | Environment |
+| --------------- | ---------- | ----------- |
+| `apps/api`      | `bun test` | Bun native  |
+| `apps/frontend` | `vitest`   | jsdom       |
+| `apps/shared`   | `vitest`   | node        |
 
 ## Root Scripts
 
@@ -75,8 +75,8 @@ Test scenarios (`tests/browser-smoke/auth-flow.spec.ts`):
 4. Logout → redirected to login
 5. Log back in with same credentials → lands in authenticated area
 
-| Lane            | Runner                  | Environment        |
-|-----------------|-------------------------|--------------------|
+| Lane            | Runner                  | Environment          |
+| --------------- | ----------------------- | -------------------- |
 | `browser-smoke` | `playwright` (Chromium) | real browser + stack |
 
 ## Workspace Scripts
@@ -137,9 +137,7 @@ const ResponseSchema = Type.Object({
 
 describe('settingsRoutes', () => {
   it('validates response shape with Typebox', async () => {
-    const response = await app.handle(
-      new Request('http://localhost/settings/models/gemini')
-    );
+    const response = await app.handle(new Request('http://localhost/settings/models/gemini'));
     expect(response.status).toBe(200);
 
     const payload = await response.json();
@@ -180,11 +178,9 @@ import { createFetchScenario } from '../../support/mocks/create-fetch-scenario';
 
 const fetchScenario = createFetchScenario();
 
-fetchScenario
-  .install()
-  .respondWithJson('GET', '/api/settings/secrets/gemini', {
-    body: { configured: false, source: 'none' },
-  });
+fetchScenario.install().respondWithJson('GET', '/api/settings/secrets/gemini', {
+  body: { configured: false, source: 'none' },
+});
 
 render(<SettingsPage {...props} />);
 await screen.findByText('Not Configured');

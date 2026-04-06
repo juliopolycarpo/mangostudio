@@ -14,7 +14,10 @@ function loadMangoConfig() {
   const tomlPath = path.resolve(__dirname, '../../.mango/config.toml');
   if (existsSync(tomlPath)) {
     try {
-      const parsed = parseToml(readFileSync(tomlPath, 'utf8')) as Record<string, any>;
+      const parsed = parseToml(readFileSync(tomlPath, 'utf8')) as {
+        server?: { host?: string; port?: number };
+        frontend?: { port?: number };
+      };
       if (parsed.server?.host) defaults.serverHost = parsed.server.host;
       if (parsed.server?.port) defaults.serverPort = parsed.server.port;
       if (parsed.frontend?.port) defaults.frontendPort = parsed.frontend.port;
@@ -35,8 +38,10 @@ function loadMangoConfig() {
         if (eqIndex === -1) continue;
         const key = trimmed.slice(0, eqIndex).trim();
         let value = trimmed.slice(eqIndex + 1).trim();
-        if ((value.startsWith('"') && value.endsWith('"')) ||
-            (value.startsWith("'") && value.endsWith("'"))) {
+        if (
+          (value.startsWith('"') && value.endsWith('"')) ||
+          (value.startsWith("'") && value.endsWith("'"))
+        ) {
           value = value.slice(1, -1);
         }
         if (key === 'API_PORT') defaults.serverPort = Number(value) || defaults.serverPort;

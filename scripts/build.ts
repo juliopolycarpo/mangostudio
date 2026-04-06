@@ -66,17 +66,17 @@ async function buildFrontend(): Promise<void> {
 
   try {
     // Run vite build
-    const process = Bun.spawn({
+    const proc = Bun.spawn({
       cmd: ['bun', 'run', 'build'],
       cwd: FRONTEND_DIR,
       stdout: 'pipe',
       stderr: 'pipe',
     });
 
-    const output = await new Response(process.stdout).text();
-    const error = await new Response(process.stderr).text();
+    const output = await new Response(proc.stdout).text();
+    const error = await new Response(proc.stderr).text();
 
-    const exitCode = await process.exited;
+    const exitCode = await proc.exited;
 
     if (exitCode === 0) {
       console.log('✅ Frontend built successfully');
@@ -142,16 +142,16 @@ async function buildForPlatform(
 
     args.push('--sourcemap=external');
 
-    const process = Bun.spawn({
+    const proc = Bun.spawn({
       cmd: ['bun', ...args],
       stdout: 'pipe',
       stderr: 'pipe',
       cwd: ROOT_DIR,
     });
 
-    const output = await new Response(process.stdout).text();
-    const error = await new Response(process.stderr).text();
-    const exitCode = await process.exited;
+    const output = await new Response(proc.stdout).text();
+    const error = await new Response(proc.stderr).text();
+    const exitCode = await proc.exited;
 
     if (exitCode === 0) {
       console.log(`✅ Successfully built ${outputName} for ${arch}`);
@@ -159,7 +159,7 @@ async function buildForPlatform(
 
       // Copy frontend dist to platform output directory
       const frontendDest = join(platformOutDir, 'public');
-      if (Bun.file(FRONTEND_DIST).exists()) {
+      if (await Bun.file(FRONTEND_DIST).exists()) {
         cpSync(FRONTEND_DIST, frontendDest, { recursive: true });
         console.log(`📁 Copied frontend dist to ${frontendDest}`);
       }
@@ -277,33 +277,33 @@ PORT=\${1:-3001}
 PLATFORM=\${2:-auto}
 
 # Auto-detect platform if not specified
-if [[ "\$PLATFORM" == "auto" ]]; then
-  OS="\$(uname -s)"
-  ARCH="\$(uname -m)"
-  
-  case "\$OS" in
+if [[ "$PLATFORM" == "auto" ]]; then
+  OS="$(uname -s)"
+  ARCH="$(uname -m)"
+
+  case "$OS" in
     Linux)
-      if [[ "\$ARCH" == "x86_64" ]]; then
+      if [[ "$ARCH" == "x86_64" ]]; then
         PLATFORM="linux-x64"
-      elif [[ "\$ARCH" == "aarch64" ]]; then
+      elif [[ "$ARCH" == "aarch64" ]]; then
         PLATFORM="linux-arm64"
       else
-        echo "Unsupported architecture: \$ARCH"
+        echo "Unsupported architecture: $ARCH"
         exit 1
       fi
       ;;
     Darwin)
-      if [[ "\$ARCH" == "x86_64" ]]; then
+      if [[ "$ARCH" == "x86_64" ]]; then
         PLATFORM="darwin-x64"
-      elif [[ "\$ARCH" == "arm64" ]]; then
+      elif [[ "$ARCH" == "arm64" ]]; then
         PLATFORM="darwin-arm64"
       else
-        echo "Unsupported architecture: \$ARCH"
+        echo "Unsupported architecture: $ARCH"
         exit 1
       fi
       ;;
     *)
-      echo "Unsupported OS: \$OS"
+      echo "Unsupported OS: $OS"
       echo "Please specify platform manually: linux-x64, linux-arm64, darwin-x64, darwin-arm64, windows-x64, windows-arm64"
       exit 1
       ;;
@@ -314,31 +314,31 @@ EXECUTABLE_DIR="\${PWD}/.mango/out/\${PLATFORM}"
 EXECUTABLE="\${EXECUTABLE_DIR}/mangostudio"
 
 # Windows adjustment
-if [[ "\$PLATFORM" == windows* ]]; then
+if [[ "$PLATFORM" == windows* ]]; then
   EXECUTABLE="\${EXECUTABLE}.exe"
 fi
 
-if [[ ! -d "\$EXECUTABLE_DIR" ]]; then
-  echo "Platform directory not found: \$EXECUTABLE_DIR"
+if [[ ! -d "$EXECUTABLE_DIR" ]]; then
+  echo "Platform directory not found: $EXECUTABLE_DIR"
   echo "Available platforms:"
   ls -d .mango/out/*/ 2>/dev/null | sed 's|.mango/out/||' | sed 's|/||' || echo "  (none built yet)"
   exit 1
 fi
 
-if [[ ! -f "\$EXECUTABLE" ]]; then
-  echo "Executable not found: \$EXECUTABLE"
+if [[ ! -f "$EXECUTABLE" ]]; then
+  echo "Executable not found: $EXECUTABLE"
   exit 1
 fi
 
-echo "Starting MangoStudio on port \$PORT"
-echo "Platform: \$PLATFORM"
-echo "Executable: \$EXECUTABLE"
+echo "Starting MangoStudio on port $PORT"
+echo "Platform: $PLATFORM"
+echo "Executable: $EXECUTABLE"
 
-cd "\$EXECUTABLE_DIR"
-chmod +x "\$(basename "\$EXECUTABLE")" 2>/dev/null || true
+cd "$EXECUTABLE_DIR"
+chmod +x "$(basename "$EXECUTABLE")" 2>/dev/null || true
 
-export API_PORT=\$PORT
-exec "\$(basename "\$EXECUTABLE")"
+export API_PORT=$PORT
+exec "$(basename "$EXECUTABLE")"
 `;
 
   await Bun.write(join(OUT_DIR, 'run.sh'), runScript);
@@ -361,13 +361,13 @@ if "%PLATFORM%"=="" (
   set PLATFORM=windows-x64
 )
 
-set EXECUTABLE_DIR=%~dp0.mango\out\%PLATFORM%
+set EXECUTABLE_DIR=%~dp0.mango\\out\\%PLATFORM%
 set EXECUTABLE=%EXECUTABLE_DIR%\\mangostudio.exe
 
 if not exist "%EXECUTABLE_DIR%" (
   echo Platform directory not found: %EXECUTABLE_DIR%
   echo Available platforms:
-  dir /b "%~dp0.mango\out" 2>nul || echo   (none built yet)
+  dir /b "%~dp0.mango\\out" 2>nul || echo   (none built yet)
   exit /b 1
 )
 

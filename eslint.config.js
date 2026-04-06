@@ -15,12 +15,13 @@ export default tseslint.config(
       'apps/frontend/src/routeTree.gen.ts',
     ],
   },
-  // Base JavaScript recommendations
+  // Base JavaScript recommendations (applied to all files, no type-checking)
   eslint.configs.recommended,
-  ...tseslint.configs.recommendedTypeChecked,
-  // TypeScript for all .ts/.tsx
+  // TypeScript with type-checked rules — scoped to .ts/.tsx only so that plain
+  // .js tooling files (e.g. eslint.config.js) are not subjected to typed parsing.
   {
     files: ['**/*.{ts,tsx}'],
+    extends: [...tseslint.configs.recommendedTypeChecked],
     languageOptions: {
       ecmaVersion: 'latest',
       sourceType: 'module',

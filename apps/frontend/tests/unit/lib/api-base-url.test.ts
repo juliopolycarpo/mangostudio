@@ -29,13 +29,22 @@ describe('getApiBaseUrl', () => {
 
   it('returns localhost:3001 fallback when window is undefined', async () => {
     const originalWindow = globalThis.window;
-    // @ts-expect-error — simulating non-browser environment
-    delete globalThis.window;
+    // Temporarily hide the window global to simulate a non-browser environment.
+    // Object.defineProperty avoids a TypeScript error from deleting a required property.
+    Object.defineProperty(globalThis, 'window', {
+      value: undefined,
+      configurable: true,
+      writable: true,
+    });
 
     const { getApiBaseUrl } = await import('@/lib/api-base-url');
     const result = getApiBaseUrl();
 
-    globalThis.window = originalWindow;
+    Object.defineProperty(globalThis, 'window', {
+      value: originalWindow,
+      configurable: true,
+      writable: true,
+    });
 
     expect(result).toBe('http://localhost:3001');
   });
