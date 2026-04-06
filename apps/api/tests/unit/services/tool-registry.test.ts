@@ -23,7 +23,7 @@ describe('registerTool / getTool', () => {
         description: 'Does something',
         parameters: { type: 'object', properties: {} },
       },
-      execute: async () => 'result',
+      execute: () => Promise.resolve('result'),
     });
 
     const t = getTool('my_tool');
@@ -36,8 +36,8 @@ describe('registerTool / getTool', () => {
   });
 
   it('overwrites an existing tool registration', () => {
-    const exec1 = async () => 'v1';
-    const exec2 = async () => 'v2';
+    const exec1 = () => Promise.resolve('v1');
+    const exec2 = () => Promise.resolve('v2');
 
     registerTool({
       definition: { name: 'dup', description: '', parameters: {} },
@@ -56,11 +56,11 @@ describe('getAllTools / getAllToolDefinitions', () => {
   it('returns all registered tools', () => {
     registerTool({
       definition: { name: 'a', description: '', parameters: {} },
-      execute: async () => null,
+      execute: () => Promise.resolve(null),
     });
     registerTool({
       definition: { name: 'b', description: '', parameters: {} },
-      execute: async () => null,
+      execute: () => Promise.resolve(null),
     });
     expect(getAllTools()).toHaveLength(2);
   });
@@ -68,7 +68,7 @@ describe('getAllTools / getAllToolDefinitions', () => {
   it('returns only definitions via getAllToolDefinitions', () => {
     registerTool({
       definition: { name: 'x', description: 'desc', parameters: { type: 'object' } },
-      execute: async () => null,
+      execute: () => Promise.resolve(null),
     });
     const defs = getAllToolDefinitions();
     expect(defs).toHaveLength(1);
@@ -81,7 +81,7 @@ describe('executeTool', () => {
   it('executes a registered tool and returns its result', async () => {
     registerTool({
       definition: { name: 'add', description: '', parameters: {} },
-      execute: async (args) => (args.a as number) + (args.b as number),
+      execute: (args) => Promise.resolve((args.a as number) + (args.b as number)),
     });
 
     const result = await executeTool('add', { a: 3, b: 4 }, ctx);
@@ -93,10 +93,10 @@ describe('executeTool', () => {
     let capturedChatId = '';
     registerTool({
       definition: { name: 'capture_ctx', description: '', parameters: {} },
-      execute: async (_args, c) => {
+      execute: (_args, c) => {
         capturedUserId = c.userId;
         capturedChatId = c.chatId;
-        return null;
+        return Promise.resolve(null);
       },
     });
 
@@ -121,7 +121,7 @@ describe('clearRegistry', () => {
   it('removes all registrations', () => {
     registerTool({
       definition: { name: 'z', description: '', parameters: {} },
-      execute: async () => null,
+      execute: () => Promise.resolve(null),
     });
     clearRegistry();
     expect(getAllTools()).toHaveLength(0);

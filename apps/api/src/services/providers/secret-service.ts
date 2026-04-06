@@ -14,8 +14,9 @@ import {
 } from '../secret-store/metadata';
 import { bunSecretStore, type SecretStore } from '../secret-store/store';
 import { getConfig } from '../../lib/config';
-import { existsSync, readFileSync } from 'fs';
-import { parse as parseToml } from 'smol-toml';
+import { existsSync } from 'fs';
+import { readTomlStringSections } from '../../lib/toml';
+import { parseStringArray } from '../../utils/json';
 
 type FetchLike = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 
@@ -135,7 +136,7 @@ export function createProviderSecretService(
       case 'config-file': {
         try {
           if (existsSync(tomlFilePath)) {
-            const parsed = parseToml(readFileSync(tomlFilePath, 'utf8')) as any;
+            const parsed = readTomlStringSections(tomlFilePath);
             const value = parsed[config.tomlSection]?.[connector.name];
             if (typeof value !== 'string') return null;
             if (isPlaceholderConfigSecretValue(value)) return null;
@@ -155,8 +156,8 @@ export function createProviderSecretService(
   const syncConfigFileConnectors = async (userId: string): Promise<void> => {
     try {
       if (!existsSync(tomlFilePath)) return;
-      const parsed = parseToml(readFileSync(tomlFilePath, 'utf8')) as any;
-      const tomlKeys = parsed[config.tomlSection] || {};
+      const parsed = readTomlStringSections(tomlFilePath);
+      const tomlKeys = parsed[config.tomlSection] ?? {};
       const currentMeta = await listMeta(config.provider, userId);
       const configConnectors = currentMeta.filter((m) => m.source === 'config-file');
       const syncableEntries = new Map<string, { apiKey: string; existing?: SecretMetadataRow }>();
@@ -193,7 +194,7 @@ export function createProviderSecretService(
               configured: true,
               maskedSuffix: currentSuffix,
               updatedAt: now(),
-              enabledModels: JSON.parse(existing.enabledModels),
+              enabledModels: parseStringArray(existing.enabledModels),
               userId: existing.userId,
               baseUrl: existing.baseUrl ?? null,
               organizationId: existing.organizationId ?? null,
@@ -220,7 +221,7 @@ export function createProviderSecretService(
 
       for (const row of rows) {
         if (!row.configured) continue;
-        const enabled: string[] = JSON.parse(row.enabledModels);
+        const enabled = parseStringArray(row.enabledModels);
         if (requestedModel && !enabled.includes(requestedModel)) continue;
         const value = await resolveSecretValue(row);
         if (value) return value;

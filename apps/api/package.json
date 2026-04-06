@@ -4,15 +4,20 @@
   "private": true,
   "license": "MIT",
   "type": "module",
-  "main": "./src/app.ts",
-  "types": "./src/app.ts",
+  "exports": {
+    ".": "./src/app.ts"
+  },
   "scripts": {
     "dev": "bun run --watch src/index.ts",
     "start": "bun run src/index.ts",
     "build": "bun build src/index.ts --target=bun --outdir=dist",
     "lint": "eslint src tests --max-warnings 0",
+    "lint:fix": "eslint src tests --fix --max-warnings 0",
     "typecheck": "tsc --noEmit",
-    "format": "prettier --write 'src/**/*.{ts,json}'",
+    "fix": "bun run lint:fix && bun run format",
+    "fix:check": "bun run format:check && bun run lint",
+    "format": "prettier --ignore-path ../../.prettierignore --write 'src/**/*.{ts,json}'",
+    "format:check": "prettier --ignore-path ../../.prettierignore --check 'src/**/*.{ts,json}'",
     "migrate": "bun run src/db/migrate.ts",
     "test": "bun run test:unit && bun run test:integration",
     "test:unit": "bun test tests/unit",

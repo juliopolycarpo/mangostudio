@@ -132,7 +132,7 @@ export const respondStreamRoutes = (app: Elysia) =>
           const stream = new ReadableStream({
             async start(controller) {
               let fullText = '';
-              let allParts: MessagePart[] = [];
+              const allParts: MessagePart[] = [];
               let aborted = false;
               let durableProviderState: string | null = null;
 
@@ -164,8 +164,9 @@ export const respondStreamRoutes = (app: Elysia) =>
                   // Discover last AI message's providerState for potential cursor reuse
                   let currentProviderState: string | null = null;
                   for (let i = richHistory.length - 1; i >= 0; i--) {
-                    if (richHistory[i].role === 'ai' && richHistory[i].providerState) {
-                      currentProviderState = richHistory[i].providerState!;
+                    const providerState = richHistory[i].providerState;
+                    if (richHistory[i].role === 'ai' && providerState) {
+                      currentProviderState = providerState;
                       break;
                     }
                   }
@@ -234,6 +235,7 @@ export const respondStreamRoutes = (app: Elysia) =>
                     }
                   }
 
+                  const generateAgentTurnStream = provider.generateAgentTurnStream.bind(provider);
                   let pendingToolResults: AgentTurnRequest['toolResults'];
                   let isFirstIteration = true;
                   let inThinkingSegment = false;
@@ -261,7 +263,7 @@ export const respondStreamRoutes = (app: Elysia) =>
                     const pendingCalls = new Map<string, { name: string; argsStr: string }>();
                     let turnCompleted = false;
 
-                    for await (const event of provider.generateAgentTurnStream!(req)) {
+                    for await (const event of generateAgentTurnStream(req)) {
                       if (signal.aborted) {
                         aborted = true;
                         break;

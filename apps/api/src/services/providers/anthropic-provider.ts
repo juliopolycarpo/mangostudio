@@ -414,8 +414,8 @@ const anthropicProvider: AIProvider = {
     yield { type: 'text', text: '', done: true };
   },
 
-  async generateImage(): Promise<ImageGenerationResult> {
-    throw new Error('Anthropic does not support image generation.');
+  generateImage(): Promise<ImageGenerationResult> {
+    return Promise.reject(new Error('Anthropic does not support image generation.'));
   },
 
   async listModels(userId: string): Promise<ModelInfo[]> {

@@ -12,6 +12,36 @@ import {
   OpenAIConfigError,
 } from '../../../src/services/providers/openai-provider';
 
+/** Typed response shapes for test assertions. */
+interface ConnectorEntry {
+  id: string;
+  userId: string | null;
+  provider: string;
+  name: string;
+  baseUrl: string | null;
+  configured: boolean;
+}
+interface ConnectorListPayload {
+  connectors: ConnectorEntry[];
+}
+interface ConnectorPayload {
+  id: string;
+  provider: string;
+  baseUrl: string | null;
+  configured: boolean;
+}
+interface ErrorPayload {
+  error: string;
+}
+interface SuccessPayload {
+  success: boolean;
+}
+interface ModelCatalogPayload {
+  status: string;
+  textModels: unknown[];
+  imageModels: unknown[];
+}
+
 const TEST_USER = {
   id: 'test-user-connectors',
   name: 'Test User',
@@ -51,11 +81,11 @@ describe('settings connectors routes', () => {
 
     expect(response.status).toBe(200);
 
-    const payload = (await response.json()) as any;
+    const payload = (await response.json()) as ConnectorListPayload;
     expect(Value.Check(ConnectorStatusSchema, payload)).toBe(true);
     expect(
       payload.connectors.filter(
-        (connector: { userId: string | null }) => connector.userId === TEST_USER.id
+        (connector) => connector.userId === TEST_USER.id
       )
     ).toEqual([]);
   });
@@ -68,7 +98,7 @@ describe('settings connectors routes', () => {
 
     expect(response.status).toBe(200);
 
-    const payload = (await response.json()) as any;
+    const payload = (await response.json()) as ModelCatalogPayload;
     expect(Value.Check(ModelCatalogSchema, payload)).toBe(true);
     // Cold-start now awaits refresh — status must not be 'idle'
     expect(payload.status).not.toBe('idle');
@@ -85,7 +115,7 @@ describe('settings connectors routes', () => {
 
     expect(response.status).toBe(200);
 
-    const payload = (await response.json()) as any;
+    const payload = (await response.json()) as ConnectorListPayload;
     expect(Value.Check(ConnectorStatusSchema, payload)).toBe(true);
     expect(payload).toMatchObject({ connectors: [] });
   });
@@ -111,11 +141,11 @@ describe('settings connectors routes', () => {
 
     expect(response.status).toBe(200);
 
-    const payload = (await response.json()) as any;
+    const payload = (await response.json()) as ConnectorListPayload;
     expect(Value.Check(ConnectorStatusSchema, payload)).toBe(true);
     expect(
       payload.connectors.some(
-        (connector: { id: string }) => connector.id === 'shared-compat-without-base-url'
+        (connector) => connector.id === 'shared-compat-without-base-url'
       )
     ).toBe(false);
   });
@@ -128,10 +158,10 @@ describe('settings connectors routes', () => {
 
     expect(response.status).toBe(200);
 
-    const payload = (await response.json()) as any;
+    const payload = (await response.json()) as ConnectorListPayload;
     expect(Value.Check(ConnectorStatusSchema, payload)).toBe(true);
 
-    const connectorNames = payload.connectors.map((connector: { name: string }) => connector.name);
+    const connectorNames = payload.connectors.map((connector) => connector.name);
     expect(connectorNames).not.toContain('openai-for-list');
     expect(connectorNames).not.toContain('deepseek-for-list');
     expect(connectorNames).not.toContain('openai-proj-model-update');
@@ -190,7 +220,7 @@ const ConnectorResponseSchema = Type.Object({
  */
 function makeOpenAISuccessFetch(originalFetch: typeof globalThis.fetch): typeof globalThis.fetch {
   return (async (input: string | URL | Request, init?: RequestInit) => {
-    const url = String(input);
+    const url = input instanceof Request ? input.url : String(input);
     if (url.includes('api.openai.com') && url.includes('/models')) {
       return new Response(
         JSON.stringify({
@@ -270,7 +300,7 @@ describe('openai connector routes', () => {
 
       expect(response.status).toBe(200);
 
-      const payload = (await response.json()) as any;
+      const payload = (await response.json()) as ConnectorPayload;
       expect(Value.Check(ConnectorResponseSchema, payload)).toBe(true);
       expect(payload.provider).toBe('openai');
       expect(payload.baseUrl).toBeNull();
@@ -299,7 +329,7 @@ describe('openai connector routes', () => {
 
     expect(response.status).toBe(400);
 
-    const payload = (await response.json()) as any;
+    const payload = (await response.json()) as ErrorPayload;
     expect(payload.error).toContain('baseUrl');
   });
 
@@ -320,7 +350,7 @@ describe('openai connector routes', () => {
     // Mock fetch for the /models validation call
     const originalFetch = globalThis.fetch;
     globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
-      const url = String(input);
+      const url = input instanceof Request ? input.url : String(input);
       if (url === `${COMPAT_BASE_URL}/models`) {
         return new Response(JSON.stringify({ data: [] }), { status: 200 });
       }
@@ -347,7 +377,7 @@ describe('openai connector routes', () => {
 
       expect(response.status).toBe(200);
 
-      const payload = (await response.json()) as any;
+      const payload = (await response.json()) as ConnectorPayload;
       expect(Value.Check(ConnectorResponseSchema, payload)).toBe(true);
       expect(payload.provider).toBe('openai-compatible');
       expect(payload.baseUrl).toBe(COMPAT_BASE_URL);
@@ -384,15 +414,15 @@ describe('openai connector routes', () => {
 
       expect(listResponse.status).toBe(200);
 
-      const listPayload = (await listResponse.json()) as any;
+      const listPayload = (await listResponse.json()) as ConnectorListPayload;
       expect(Value.Check(ConnectorStatusSchema, listPayload)).toBe(true);
 
       const openaiConnector = listPayload.connectors.find(
-        (c: any) => c.provider === 'openai' && c.name === 'openai-for-list'
+        (c) => c.provider === 'openai' && c.name === 'openai-for-list'
       );
 
       expect(openaiConnector).toBeDefined();
-      expect(openaiConnector.baseUrl).toBeNull();
+      expect(openaiConnector!.baseUrl).toBeNull();
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -414,7 +444,7 @@ describe('openai connector routes', () => {
 
     const originalFetch = globalThis.fetch;
     globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
-      const url = String(input);
+      const url = input instanceof Request ? input.url : String(input);
       if (url === `${COMPAT_BASE_URL}/models`) {
         return new Response(JSON.stringify({ data: [] }), { status: 200 });
       }
@@ -445,15 +475,15 @@ describe('openai connector routes', () => {
 
       expect(listResponse.status).toBe(200);
 
-      const listPayload = (await listResponse.json()) as any;
+      const listPayload = (await listResponse.json()) as ConnectorListPayload;
       expect(Value.Check(ConnectorStatusSchema, listPayload)).toBe(true);
 
       const compatConnector = listPayload.connectors.find(
-        (c: any) => c.provider === 'openai-compatible' && c.name === 'deepseek-for-list'
+        (c) => c.provider === 'openai-compatible' && c.name === 'deepseek-for-list'
       );
 
       expect(compatConnector).toBeDefined();
-      expect(compatConnector.baseUrl).toBe(COMPAT_BASE_URL);
+      expect(compatConnector!.baseUrl).toBe(COMPAT_BASE_URL);
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -489,7 +519,7 @@ describe('openai connector routes', () => {
 
     expect(response.status).toBe(200);
 
-    const payload = (await response.json()) as any;
+    const payload = (await response.json()) as SuccessPayload;
     expect(payload).toEqual({ success: true });
 
     const db = getDb();
@@ -550,7 +580,7 @@ describe('openai project-scoped connector routes', () => {
 
       expect(response.status).toBe(200);
 
-      const payload = (await response.json()) as any;
+      const payload = (await response.json()) as ConnectorPayload;
       expect(Value.Check(ConnectorResponseSchema, payload)).toBe(true);
       expect(payload.provider).toBe('openai');
       expect(payload.configured).toBe(true);
@@ -595,7 +625,7 @@ describe('openai project-scoped connector routes', () => {
 
       expect(response.status).toBe(200);
 
-      const payload = (await response.json()) as any;
+      const payload = (await response.json()) as ConnectorPayload;
       const db = getDb();
       const row = await db
         .selectFrom('secret_metadata')
@@ -636,7 +666,7 @@ describe('openai project-scoped connector routes', () => {
 
       expect(createResponse.status).toBe(200);
 
-      const created = (await createResponse.json()) as any;
+      const created = (await createResponse.json()) as ConnectorPayload;
 
       const updateResponse = await app.handle(
         new Request(`http://localhost/settings/connectors/${created.id}/models`, {
@@ -667,12 +697,13 @@ describe('openai project-scoped connector routes', () => {
   it('POST /settings/connectors returns 401 when OpenAI rejects credentials', async () => {
     // Stub validateOpenAIAuthContext at the module level so the route sees it.
     await mock.module('../../../src/services/providers/openai-provider', () => ({
-      validateOpenAIAuthContext: async () => {
-        throw new OpenAIAuthError(
-          'OpenAI API key is invalid or expired. Verify your key and try again.',
-          401
-        );
-      },
+      validateOpenAIAuthContext: () =>
+        Promise.reject(
+          new OpenAIAuthError(
+            'OpenAI API key is invalid or expired. Verify your key and try again.',
+            401
+          )
+        ),
       OpenAIAuthError,
       OpenAIConfigError,
     }));
@@ -695,18 +726,19 @@ describe('openai project-scoped connector routes', () => {
 
     expect(response.status).toBe(401);
 
-    const payload = (await response.json()) as any;
+    const payload = (await response.json()) as ErrorPayload;
     expect(payload.error).toContain('invalid or expired');
   });
 
   it('POST /settings/connectors returns 403 when OpenAI denies org/project access', async () => {
     await mock.module('../../../src/services/providers/openai-provider', () => ({
-      validateOpenAIAuthContext: async () => {
-        throw new OpenAIAuthError(
-          'OpenAI access denied. Check that your organization ID, project ID, and key permissions are correct.',
-          403
-        );
-      },
+      validateOpenAIAuthContext: () =>
+        Promise.reject(
+          new OpenAIAuthError(
+            'OpenAI access denied. Check that your organization ID, project ID, and key permissions are correct.',
+            403
+          )
+        ),
       OpenAIAuthError,
       OpenAIConfigError,
     }));
@@ -730,7 +762,7 @@ describe('openai project-scoped connector routes', () => {
 
     expect(response.status).toBe(403);
 
-    const payload = (await response.json()) as any;
+    const payload = (await response.json()) as ErrorPayload;
     expect(payload.error).toContain('organization ID');
   });
 });

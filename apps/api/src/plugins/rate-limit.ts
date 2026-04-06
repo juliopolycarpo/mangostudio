@@ -30,6 +30,17 @@ interface RateLimitEntry {
   resetTime: number;
 }
 
+interface RateLimitContext {
+  path?: string;
+  request: Request;
+  set: {
+    headers?: Record<string, string>;
+    status?: number;
+  };
+  ip?: string;
+  clientIp?: string;
+}
+
 const defaultConfig: RateLimitConfig = {
   max: 100,
   windowMs: 60000, // 1 minute
@@ -82,9 +93,10 @@ export function rateLimit(config: Partial<RateLimitConfig> = {}) {
 
   const plugin = (app: Elysia) => {
     return app
-      .derive((context: any) => {
+      .derive((context) => {
+        const requestContext = context as RateLimitContext;
         // Skip rate limiting for certain paths
-        const path = context.path || new URL(context.request.url).pathname;
+        const path = requestContext.path ?? new URL(requestContext.request.url).pathname;
         if (mergedConfig.skip && mergedConfig.skip(path)) {
           return { clientIp: 'skipped' };
         }
@@ -92,28 +104,29 @@ export function rateLimit(config: Partial<RateLimitConfig> = {}) {
         // Extract client IP; only trust proxy headers when explicitly enabled
         let clientIp: string;
         if (mergedConfig.trustProxy) {
-          const xForwardedFor = context.request.headers.get('x-forwarded-for');
+          const xForwardedFor = requestContext.request.headers.get('x-forwarded-for');
           clientIp = xForwardedFor
             ? xForwardedFor.split(',')[0].trim()
-            : context.request.headers.get('cf-connecting-ip') ||
-              context.request.headers.get('x-real-ip') ||
-              (context as any).ip ||
+            : requestContext.request.headers.get('cf-connecting-ip') ||
+              requestContext.request.headers.get('x-real-ip') ||
+              requestContext.ip ||
               'unknown';
         } else {
-          clientIp = (context as any).ip || 'unknown';
+          clientIp = requestContext.ip ?? 'unknown';
         }
 
         return { clientIp };
       })
       .onBeforeHandle((context) => {
-        const { clientIp } = context as any;
+        const requestContext = context as RateLimitContext;
+        const { clientIp } = requestContext;
 
         // Skip if no IP or skip function matches
         if (!clientIp || clientIp === 'unknown') {
           return;
         }
 
-        const path = new URL(context.request.url).pathname;
+        const path = new URL(requestContext.request.url).pathname;
         if (mergedConfig.skip && mergedConfig.skip(path)) {
           return;
         }
@@ -140,15 +153,17 @@ export function rateLimit(config: Partial<RateLimitConfig> = {}) {
         // Set rate limit headers
         if (mergedConfig.headers) {
           const remaining = Math.max(0, mergedConfig.max - entry.count);
-          if (!context.set.headers) context.set.headers = {};
-          context.set.headers['X-RateLimit-Limit'] = mergedConfig.max.toString();
-          context.set.headers['X-RateLimit-Remaining'] = remaining.toString();
-          context.set.headers['X-RateLimit-Reset'] = Math.ceil(entry.resetTime / 1000).toString();
+          requestContext.set.headers ??= {};
+          requestContext.set.headers['X-RateLimit-Limit'] = mergedConfig.max.toString();
+          requestContext.set.headers['X-RateLimit-Remaining'] = remaining.toString();
+          requestContext.set.headers['X-RateLimit-Reset'] = Math.ceil(
+            entry.resetTime / 1000
+          ).toString();
         }
 
         // Check if rate limited
         if (entry.count > mergedConfig.max) {
-          context.set.status = 429;
+          requestContext.set.status = 429;
           throw new Error(mergedConfig.message);
         }
       });

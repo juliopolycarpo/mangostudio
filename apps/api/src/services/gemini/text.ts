@@ -71,8 +71,9 @@ export async function generateText(
   }
 
   const candidate = response.candidates?.[0];
-  if (candidate?.finishReason && candidate.finishReason !== 'STOP') {
-    throw new Error(`Generation stopped: ${candidate.finishReason}`);
+  const finishReason = candidate?.finishReason;
+  if (finishReason && String(finishReason) !== 'STOP') {
+    throw new Error(`Generation stopped: ${finishReason}`);
   }
 
   const text = response.text;
@@ -142,8 +143,9 @@ export async function* generateTextStream(
     }
 
     const candidate = chunk.candidates?.[0];
-    if (candidate?.finishReason && candidate.finishReason !== 'STOP') {
-      throw new Error(`Generation stopped: ${candidate.finishReason}`);
+    const finishReason = candidate?.finishReason;
+    if (finishReason && String(finishReason) !== 'STOP') {
+      throw new Error(`Generation stopped: ${finishReason}`);
     }
 
     if (candidate?.content?.parts) {

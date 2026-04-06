@@ -108,7 +108,14 @@ mangostudio/
 | `bun run dev`            | Inicia todos os servidores de dev simultaneamente      |
 | `bun run build`          | Build do frontend para produção                        |
 | `bun run build:binary`   | Gera binários standalone com frontend embutido         |
-| `bun run lint`           | Verificação de tipos TypeScript + ESLint               |
+| `bun run format`         | Aplica o Prettier em todos os workspaces               |
+| `bun run format:check`   | Verifica formatação em todos os workspaces             |
+| `bun run lint`           | Executa o ESLint em todos os workspaces                |
+| `bun run lint:fix`       | Executa autofix do ESLint em todos os workspaces       |
+| `bun run typecheck`      | Executa verificação de tipos em todos os workspaces    |
+| `bun run fix`            | Aplica autofix do lint e Prettier em todos os workspaces |
+| `bun run check`          | Formatação + lint + typecheck + testes                 |
+| `bun run verify`         | Check + cobertura + build                              |
 | `bun run test`           | Executa todos os testes unitários e de integração      |
 | `bun run test:coverage`  | Cobertura do frontend via Vitest/v8                    |
 | `bun run migrate`        | Executa migrações do banco de dados SQLite             |

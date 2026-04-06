@@ -14,10 +14,10 @@ function createMetadataHarness(initial: SecretMetadataRow[] = []) {
   let rows: SecretMetadataRow[] = [...initial];
 
   return {
-    listMetadata: async (_provider: string, _userId: string) => [...rows],
-    getMetadataById: async (id: string, _userId: string) =>
-      rows.find((row) => row.id === id) ?? null,
-    upsertMetadata: async (input: SecretMetadataInput) => {
+    listMetadata: (_provider: string, _userId: string) => Promise.resolve([...rows]),
+    getMetadataById: (id: string, _userId: string) =>
+      Promise.resolve(rows.find((row) => row.id === id) ?? null),
+    upsertMetadata: (input: SecretMetadataInput) => {
       const nextRow: SecretMetadataRow = {
         id: input.id,
         name: input.name,
@@ -36,9 +36,11 @@ function createMetadataHarness(initial: SecretMetadataRow[] = []) {
       };
 
       rows = [...rows.filter((row) => row.id !== input.id), nextRow];
+      return Promise.resolve();
     },
-    deleteMetadata: async (id: string, _userId: string) => {
+    deleteMetadata: (id: string, _userId: string) => {
       rows = rows.filter((row) => row.id !== id);
+      return Promise.resolve();
     },
     getRows: () => rows,
   };
@@ -105,7 +107,7 @@ describe('createProviderSecretService syncConfigFileConnectors', () => {
         provider: 'openai',
         tomlSection: 'openai_api_keys',
         envVarPrefix: 'OPENAI_API_KEY',
-        validateFn: async () => {},
+        validateFn: () => Promise.resolve(),
       },
       {
         secretStore: new InMemorySecretStore(),
@@ -140,7 +142,7 @@ describe('createProviderSecretService syncConfigFileConnectors', () => {
         provider: 'openai',
         tomlSection: 'openai_api_keys',
         envVarPrefix: 'OPENAI_API_KEY',
-        validateFn: async () => {},
+        validateFn: () => Promise.resolve(),
       },
       {
         secretStore: new InMemorySecretStore(),
@@ -156,14 +158,14 @@ describe('createProviderSecretService syncConfigFileConnectors', () => {
 
     await service.syncConfigFileConnectors('user-123');
 
-    expect(metadata.getRows()).toEqual([
-      expect.objectContaining({
-        id: 'owned-openai',
-        userId: 'user-123',
-        organizationId: 'org_123',
-        projectId: 'proj_123',
-      }),
-    ]);
+    const rows = metadata.getRows();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      id: 'owned-openai',
+      userId: 'user-123',
+      organizationId: 'org_123',
+      projectId: 'proj_123',
+    });
   });
 
   it('skips openai-compatible config-file entries that do not have persisted baseUrl metadata', async () => {
@@ -183,7 +185,7 @@ describe('createProviderSecretService syncConfigFileConnectors', () => {
         tomlSection: 'openai_compatible_api_keys',
         envVarPrefix: 'OPENAI_API_KEY',
         shouldSyncConfigEntry: ({ existing }) => Boolean(existing?.baseUrl?.trim()),
-        validateFn: async () => {},
+        validateFn: () => Promise.resolve(),
       },
       {
         secretStore: new InMemorySecretStore(),

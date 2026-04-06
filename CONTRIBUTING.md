@@ -48,6 +48,11 @@ Refer to [`AGENTS.md`](./AGENTS.md) for the full coding style, naming convention
 ## Running Tests
 
 ```bash
+# Code quality
+bun run format:check
+bun run lint
+bun run typecheck
+
 # All suites
 bun run test
 
@@ -60,17 +65,17 @@ bun run test:integration
 # Frontend coverage
 bun run test:coverage
 
-# Full CI pipeline (lint + test + coverage)
-bun run test:ci
+# Full validation pipeline
+bun run verify
 ```
 
 ## Linting and Type Checking
 
 ```bash
-bun run lint
+bun run check
 ```
 
-This runs TypeScript type-checking and ESLint across all workspaces.
+This runs formatting checks, ESLint, TypeScript type-checking, and tests across all workspaces.
 
 ## Building
 
@@ -109,7 +114,7 @@ This is a one-time local setup. The template is at `.gitmessage` in the repo roo
 1. Create a branch from `main` using a descriptive name (e.g., `feat/add-gallery-empty-state`).
 2. Run the full validation suite locally before pushing:
    ```bash
-   bun run lint && bun run test && bun run build
+   bun run verify
    ```
 3. Open a PR against `main` and fill out the PR template.
 4. PRs require all CI checks to pass before merging.

@@ -44,7 +44,7 @@ const definition = {
   },
 };
 
-async function execute(
+function execute(
   args: Record<string, unknown>,
   _context: ToolContext
 ): Promise<GetCurrentDatetimeResult> {
@@ -83,7 +83,7 @@ async function execute(
   const parts = offsetFormatter.formatToParts(now);
   const offset = parts.find((p) => p.type === 'timeZoneName')?.value ?? 'UTC';
 
-  return { isoUtc, unixMs, timezone, locale, localDateTime, offset };
+  return Promise.resolve({ isoUtc, unixMs, timezone, locale, localDateTime, offset });
 }
 
 // Self-register on import

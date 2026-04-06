@@ -136,7 +136,7 @@ describe('useTheme hook', () => {
 
   it('auto mode resolves to light theme when app is light', async () => {
     const { result } = renderHook(() => useTheme());
-    await act(async () => {
+    await act(() => {
       result.current.setConfig({ appTheme: 'light' });
     });
     expect(result.current.resolvedCodeTheme).toBe('github-light');
@@ -144,7 +144,7 @@ describe('useTheme hook', () => {
 
   it('manual mode uses darkTheme regardless of app theme', async () => {
     const { result } = renderHook(() => useTheme());
-    await act(async () => {
+    await act(() => {
       result.current.setConfig({
         appTheme: 'light',
         codeTheme: { mode: 'manual', darkTheme: 'github-dark-dimmed', lightTheme: 'github-light' },
@@ -155,12 +155,12 @@ describe('useTheme hook', () => {
 
   it('code theme preference persists in localStorage', async () => {
     const { result } = renderHook(() => useTheme());
-    await act(async () => {
+    await act(() => {
       result.current.setConfig({
         codeTheme: { mode: 'manual', darkTheme: 'github-dark-dimmed', lightTheme: 'one-light' },
       });
     });
-    const stored = JSON.parse(localStorage.getItem('mango-studio-theme') ?? '{}');
+    const stored = JSON.parse(localStorage.getItem('mango-studio-theme') ?? '{}') as Record<string, Record<string, string>>;
     expect(stored.codeTheme.mode).toBe('manual');
     expect(stored.codeTheme.darkTheme).toBe('github-dark-dimmed');
   });
@@ -174,7 +174,7 @@ describe('useTheme hook', () => {
 
   it('setConfig updates fontSize in config', async () => {
     const { result } = renderHook(() => useTheme());
-    await act(async () => {
+    await act(() => {
       result.current.setConfig({ fontSize: 'large' });
     });
     expect(result.current.config.fontSize).toBe('large');
@@ -182,10 +182,10 @@ describe('useTheme hook', () => {
 
   it('setConfig persists settings to localStorage', async () => {
     const { result } = renderHook(() => useTheme());
-    await act(async () => {
+    await act(() => {
       result.current.setConfig({ chatDensity: 'compact' });
     });
-    const stored = JSON.parse(localStorage.getItem('mango-studio-theme') ?? '{}');
+    const stored = JSON.parse(localStorage.getItem('mango-studio-theme') ?? '{}') as Record<string, string>;
     expect(stored.chatDensity).toBe('compact');
   });
 
@@ -209,7 +209,7 @@ describe('useTheme hook', () => {
 
   it('switching to light sets resolvedTheme and data-theme attribute', async () => {
     const { result } = renderHook(() => useTheme());
-    await act(async () => {
+    await act(() => {
       result.current.setConfig({ appTheme: 'light' });
     });
     expect(result.current.config.appTheme).toBe('light');
@@ -220,7 +220,7 @@ describe('useTheme hook', () => {
   it('system theme resolves based on OS preference', async () => {
     // jsdom matchMedia defaults to not matching (prefers-color-scheme: dark = false → light)
     const { result } = renderHook(() => useTheme());
-    await act(async () => {
+    await act(() => {
       result.current.setConfig({ appTheme: 'system' });
     });
     expect(result.current.config.appTheme).toBe('system');
@@ -229,10 +229,10 @@ describe('useTheme hook', () => {
 
   it('theme persists across page loads via localStorage', async () => {
     const { result } = renderHook(() => useTheme());
-    await act(async () => {
+    await act(() => {
       result.current.setConfig({ appTheme: 'light' });
     });
-    const stored = JSON.parse(localStorage.getItem('mango-studio-theme') ?? '{}');
+    const stored = JSON.parse(localStorage.getItem('mango-studio-theme') ?? '{}') as Record<string, string>;
     expect(stored.appTheme).toBe('light');
   });
 });

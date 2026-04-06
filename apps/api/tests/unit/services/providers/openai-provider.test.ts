@@ -20,9 +20,10 @@ function createMetadataHarness(initial: SecretMetadataRow[] = []) {
   let rows: SecretMetadataRow[] = [...initial];
 
   return {
-    listMetadata: async (_provider: string, _userId: string) => [...rows],
-    getMetadataById: async (id: string, _userId: string) => rows.find((r) => r.id === id) ?? null,
-    upsertMetadata: async (input: SecretMetadataInput) => {
+    listMetadata: (_provider: string, _userId: string) => Promise.resolve([...rows]),
+    getMetadataById: (id: string, _userId: string) =>
+      Promise.resolve(rows.find((r) => r.id === id) ?? null),
+    upsertMetadata: (input: SecretMetadataInput) => {
       const idx = rows.findIndex((r) => r.id === input.id);
       const row: SecretMetadataRow = {
         id: input.id,
@@ -45,9 +46,11 @@ function createMetadataHarness(initial: SecretMetadataRow[] = []) {
       } else {
         rows.push(row);
       }
+      return Promise.resolve();
     },
-    deleteMetadata: async (id: string, _userId: string) => {
+    deleteMetadata: (id: string, _userId: string) => {
       rows = rows.filter((r) => r.id !== id);
+      return Promise.resolve();
     },
     getCurrentRows: () => rows,
   };
@@ -113,7 +116,7 @@ describe('openai-provider resolveClientConfig (via secretService)', () => {
         provider: 'openai',
         tomlSection: 'openai_api_keys',
         envVarPrefix: 'OPENAI_API_KEY',
-        validateFn: async () => {},
+        validateFn: () => Promise.resolve(),
       },
       {
         secretStore,
@@ -136,7 +139,7 @@ describe('openai-provider resolveClientConfig (via secretService)', () => {
         provider: 'openai',
         tomlSection: 'openai_api_keys',
         envVarPrefix: 'OPENAI_API_KEY',
-        validateFn: async () => {},
+        validateFn: () => Promise.resolve(),
       },
       {
         secretStore: new InMemorySecretStore(),
@@ -162,7 +165,7 @@ describe('openai-provider resolveClientConfig (via secretService)', () => {
         provider: 'openai',
         tomlSection: 'openai_api_keys',
         envVarPrefix: 'OPENAI_API_KEY',
-        validateFn: async () => {},
+        validateFn: () => Promise.resolve(),
       },
       {
         secretStore: new InMemorySecretStore(),
@@ -209,7 +212,7 @@ describe('openai-provider resolveClientConfig (via secretService)', () => {
         provider: 'openai',
         tomlSection: 'openai_api_keys',
         envVarPrefix: 'OPENAI_API_KEY',
-        validateFn: async () => {},
+        validateFn: () => Promise.resolve(),
       },
       {
         secretStore,
@@ -237,7 +240,7 @@ describe('validateOpenAIAuthContext', () => {
     // We do this by intercepting via global fetch since the SDK uses fetch internally.
     const originalFetch = globalThis.fetch;
     globalThis.fetch = (async (input: string | URL | Request, _init?: RequestInit) => {
-      const url = String(input);
+      const url = input instanceof Request ? input.url : String(input);
       if (url.includes('/models')) {
         return new Response(
           JSON.stringify({
@@ -264,7 +267,7 @@ describe('validateOpenAIAuthContext', () => {
     const capturedHeaders: Record<string, string>[] = [];
     const originalFetch = globalThis.fetch;
     globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
-      const url = String(input);
+      const url = input instanceof Request ? input.url : String(input);
       if (url.includes('/models')) {
         const headers = init?.headers
           ? Object.fromEntries(
@@ -290,7 +293,7 @@ describe('validateOpenAIAuthContext', () => {
       });
       // The SDK should have sent OpenAI-Organization and OpenAI-Project headers
       expect(capturedHeaders.length).toBeGreaterThan(0);
-      const h = capturedHeaders[0]!;
+      const h = capturedHeaders[0];
       expect(h['openai-organization']).toBe('org-testorg123');
       expect(h['openai-project']).toBe('proj_testproject456');
     } finally {
@@ -301,7 +304,7 @@ describe('validateOpenAIAuthContext', () => {
   it('throws OpenAIAuthError for 401 response', async () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = (async (input: string | URL | Request, _init?: RequestInit) => {
-      const url = String(input);
+      const url = input instanceof Request ? input.url : String(input);
       if (url.includes('/models')) {
         return new Response(
           JSON.stringify({
@@ -333,7 +336,7 @@ describe('validateOpenAIAuthContext', () => {
   it('throws OpenAIAuthError with status 403 for permission denied', async () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = (async (input: string | URL | Request, _init?: RequestInit) => {
-      const url = String(input);
+      const url = input instanceof Request ? input.url : String(input);
       if (url.includes('/models')) {
         return new Response(
           JSON.stringify({
@@ -366,7 +369,7 @@ describe('validateOpenAIAuthContext', () => {
   it('throws OpenAIConfigError for unexpected non-auth HTTP errors', async () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = (async (input: string | URL | Request, _init?: RequestInit) => {
-      const url = String(input);
+      const url = input instanceof Request ? input.url : String(input);
       if (url.includes('/models')) {
         return new Response('Service Unavailable', {
           status: 503,
@@ -429,7 +432,7 @@ describe('openai-provider listModels filtering', () => {
 
     const { openAIProvider } = await import('../../../../src/services/providers/openai-provider');
     // Evict any stale cache entry so the mocked DB path is actually exercised.
-    (openAIProvider as any).invalidateModelCache?.('nonexistent-user-no-keys');
+    (openAIProvider as unknown as Record<string, ((userId: string) => void) | undefined>).invalidateModelCache?.('nonexistent-user-no-keys');
 
     const models = await openAIProvider.listModels('nonexistent-user-no-keys');
     expect(models).toEqual([]);

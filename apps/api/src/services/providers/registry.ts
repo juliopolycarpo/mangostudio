@@ -6,6 +6,7 @@
 import type { ProviderType } from '@mangostudio/shared/types';
 import { getDb } from '../../db/database';
 import type { AIProvider } from './types';
+import { parseStringArray } from '../../utils/json';
 
 const registry = new Map<ProviderType, AIProvider>();
 
@@ -65,7 +66,7 @@ export async function getProviderForModel(modelName: string, userId: string): Pr
 
   for (const row of rows) {
     try {
-      const enabled: string[] = JSON.parse(row.enabledModels);
+      const enabled = parseStringArray(row.enabledModels);
       if (enabled.includes(modelName)) {
         return getProvider(row.provider as ProviderType);
       }

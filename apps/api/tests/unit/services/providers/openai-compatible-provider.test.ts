@@ -16,9 +16,10 @@ function createMetadataHarness(initial: SecretMetadataRow[] = []) {
   let rows: SecretMetadataRow[] = [...initial];
 
   return {
-    listMetadata: async (_provider: string, _userId: string) => [...rows],
-    getMetadataById: async (id: string, _userId: string) => rows.find((r) => r.id === id) ?? null,
-    upsertMetadata: async (input: SecretMetadataInput) => {
+    listMetadata: (_provider: string, _userId: string) => Promise.resolve([...rows]),
+    getMetadataById: (id: string, _userId: string) =>
+      Promise.resolve(rows.find((r) => r.id === id) ?? null),
+    upsertMetadata: (input: SecretMetadataInput) => {
       const idx = rows.findIndex((r) => r.id === input.id);
       const row: SecretMetadataRow = {
         id: input.id,
@@ -39,9 +40,11 @@ function createMetadataHarness(initial: SecretMetadataRow[] = []) {
       } else {
         rows.push(row);
       }
+      return Promise.resolve();
     },
-    deleteMetadata: async (id: string, _userId: string) => {
+    deleteMetadata: (id: string, _userId: string) => {
       rows = rows.filter((r) => r.id !== id);
+      return Promise.resolve();
     },
     getCurrentRows: () => rows,
   };
@@ -77,9 +80,8 @@ function createTestService(
         provider: 'openai-compatible',
         tomlSection: 'openai_compatible_api_keys',
         envVarPrefix: 'OPENAI_API_KEY',
-        validateFn: async () => {
-          throw new Error('Cannot validate an openai-compatible key without a baseUrl.');
-        },
+        validateFn: () =>
+          Promise.reject(new Error('Cannot validate an openai-compatible key without a baseUrl.')),
       },
       {
         secretStore,
@@ -142,7 +144,7 @@ describe('openai-compatible resolveClientConfig (via secretService)', () => {
     const rows = [rowWithoutUrl, rowWithUrl];
     const rowsWithBaseUrl = rows.filter((r) => r.baseUrl);
     expect(rowsWithBaseUrl).toHaveLength(1);
-    expect(rowsWithBaseUrl[0]!.id).toBe('has-url');
+    expect(rowsWithBaseUrl[0].id).toBe('has-url');
   });
 
   it('skips rows where baseUrl is empty string', () => {
@@ -167,7 +169,7 @@ describe('openai-compatible resolveClientConfig (via secretService)', () => {
     );
   });
 
-  it('picks the connector with the matching enabledModel when two connectors exist', async () => {
+  it('picks the connector with the matching enabledModel when two connectors exist', () => {
     const rowA = makeCompatRow({
       id: 'compat-a',
       name: 'openrouter',
@@ -188,14 +190,14 @@ describe('openai-compatible resolveClientConfig (via secretService)', () => {
     const matching = rows.filter((row) => {
       if (!row.configured) return false;
       if (!row.baseUrl) return false;
-      const enabled: string[] = JSON.parse(row.enabledModels);
+      const enabled = JSON.parse(row.enabledModels) as string[];
       if (MODEL_NAME && enabled.length > 0 && !enabled.includes(MODEL_NAME)) return false;
       return true;
     });
 
     expect(matching).toHaveLength(1);
-    expect(matching[0]!.id).toBe('compat-b');
-    expect(matching[0]!.baseUrl).toBe(DEEPSEEK_BASE_URL);
+    expect(matching[0].id).toBe('compat-b');
+    expect(matching[0].baseUrl).toBe(DEEPSEEK_BASE_URL);
   });
 
   it('does NOT fall back to https://api.openai.com/v1', async () => {
@@ -245,7 +247,7 @@ describe('openai-compatible generateAgentTurnStream turn_completed contract', ()
         signal: new AbortController().signal,
         generationConfig: { thinkingEnabled: false, reasoningEffort: 'medium' },
       })) {
-        events.push(event as any);
+        events.push(event as { type: string; providerState?: string });
       }
     } catch {
       // resolveClientConfig throws when no connectors are configured — that is
@@ -273,7 +275,7 @@ describe('openai-compatible listModels filtering', () => {
 
     const validRows = rows.filter((r) => r.configured && r.baseUrl);
     expect(validRows).toHaveLength(1);
-    expect(validRows[0]!.id).toBe('has-url-list');
+    expect(validRows[0].id).toBe('has-url-list');
   });
 
   it('deduplicates by baseUrl (single API call per unique endpoint)', () => {

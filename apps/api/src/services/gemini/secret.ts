@@ -4,7 +4,7 @@
  */
 
 import type { AddConnectorBody, Connector, GeminiSecretStatus } from '@mangostudio/shared';
-import type { SecretMetadataRow, SecretSource } from '@mangostudio/shared/types';
+import type { SecretMetadataRow } from '@mangostudio/shared/types';
 import {
   GEMINI_PROVIDER,
   listSecretMetadata,
@@ -19,9 +19,11 @@ import { isPlaceholderConfigSecretValue } from '../providers/secret-service';
 import { join, dirname } from 'path';
 import { getMangoDir } from '../../lib/config';
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
-import { parse as parseToml, stringify as stringifyToml } from 'smol-toml';
+import { stringify as stringifyToml } from 'smol-toml';
 import { randomUUID } from 'crypto';
 import { getConfig } from '../../lib/config';
+import { readTomlStringSections } from '../../lib/toml';
+import { parseStringArray } from '../../utils/json';
 
 const GEMINI_VALIDATION_URL =
   'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash';
@@ -129,9 +131,8 @@ export function createGeminiSecretService(dependencies: GeminiSecretServiceDepen
       const configPath = resolvedTomlFilePath;
       if (!existsSync(configPath)) return;
 
-      const content = readFileSync(configPath, 'utf8');
-      const parsed = parseToml(content) as any;
-      const tomlKeys = parsed.gemini_api_keys || {};
+      const parsed = readTomlStringSections(configPath);
+      const tomlKeys = parsed.gemini_api_keys ?? {};
 
       const currentMetadata = await listMetadata(GEMINI_PROVIDER, userId);
       const configConnectors = currentMetadata.filter((m) => m.source === 'config-file');
@@ -168,7 +169,7 @@ export function createGeminiSecretService(dependencies: GeminiSecretServiceDepen
               configured: true,
               maskedSuffix: currentSuffix,
               updatedAt: now(),
-              enabledModels: JSON.parse(exists.enabledModels),
+              enabledModels: parseStringArray(exists.enabledModels),
               userId: exists.userId,
               baseUrl: exists.baseUrl ?? null,
             });
@@ -210,7 +211,7 @@ export function createGeminiSecretService(dependencies: GeminiSecretServiceDepen
         updatedAt: row.updatedAt,
         lastValidatedAt: row.lastValidatedAt ?? null,
         lastValidationError: row.lastValidationError ?? null,
-        enabledModels: JSON.parse(row.enabledModels),
+        enabledModels: parseStringArray(row.enabledModels),
         userId: row.userId,
         baseUrl: row.baseUrl ?? null,
       }));
@@ -276,11 +277,8 @@ export function createGeminiSecretService(dependencies: GeminiSecretServiceDepen
         case 'config-file': {
           const configPath = resolvedTomlFilePath;
           mkdirSync(dirname(configPath), { recursive: true });
-          let config: any = {};
-          if (existsSync(configPath)) {
-            config = parseToml(readFileSync(configPath, 'utf8'));
-          }
-          config.gemini_api_keys = config.gemini_api_keys || {};
+          const config = readTomlStringSections(configPath);
+          config.gemini_api_keys ??= {};
           config.gemini_api_keys[body.name] = apiKey;
           writeFileSync(configPath, stringifyToml(config));
           break;
@@ -336,7 +334,7 @@ ${envVar}="${apiKey}"
         name: metadata.name,
         provider: metadata.provider,
         configured: Boolean(metadata.configured),
-        source: metadata.source as SecretSource,
+        source: metadata.source,
         maskedSuffix: metadata.maskedSuffix ?? null,
         updatedAt: now(),
         lastValidatedAt: metadata.lastValidatedAt ?? null,
@@ -361,7 +359,7 @@ ${envVar}="${apiKey}"
         try {
           const configPath = resolvedTomlFilePath;
           if (existsSync(configPath)) {
-            const config: any = parseToml(readFileSync(configPath, 'utf8'));
+            const config = readTomlStringSections(configPath);
             if (config.gemini_api_keys) {
               delete config.gemini_api_keys[metadata.name];
               writeFileSync(configPath, stringifyToml(config));

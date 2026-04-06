@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'bun:test';
-import type { AIProvider } from '../../../../src/services/providers/types';
 
 describe('gemini-provider adapter', () => {
   it('providerType is gemini', async () => {
@@ -10,7 +9,7 @@ describe('gemini-provider adapter', () => {
 
   it('implements the required AIProvider methods', async () => {
     const { geminiProvider } = await import('../../../../src/services/providers/gemini-provider');
-    const provider = geminiProvider as AIProvider;
+    const provider = geminiProvider;
 
     expect(typeof provider.generateText).toBe('function');
     expect(typeof provider.listModels).toBe('function');

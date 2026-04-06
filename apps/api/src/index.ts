@@ -42,8 +42,8 @@ async function runMigrations(): Promise<void> {
   const migrator = new Migrator({
     db,
     provider: {
-      async getMigrations() {
-        return allMigrations;
+      getMigrations() {
+        return Promise.resolve(allMigrations);
       },
     },
   });
@@ -117,14 +117,20 @@ app.listen(PORT);
 console.log(`[api] MangoStudio API running on http://localhost:${PORT}`);
 console.log(`[api] Scalar UI available at http://localhost:${PORT}/scalar`);
 
-// Graceful shutdown
-process.on('SIGINT', async () => {
-  console.log('\n[api] Shutting down...');
+async function shutdown(signal: 'SIGINT' | 'SIGTERM'): Promise<void> {
+  if (signal === 'SIGINT') {
+    console.log('\n[api] Shutting down...');
+  }
+
   await closeDb();
   process.exit(0);
+}
+
+// Graceful shutdown
+process.on('SIGINT', () => {
+  void shutdown('SIGINT');
 });
 
-process.on('SIGTERM', async () => {
-  await closeDb();
-  process.exit(0);
+process.on('SIGTERM', () => {
+  void shutdown('SIGTERM');
 });

@@ -123,8 +123,9 @@ export async function generateImage(
   }
 
   const candidate = response.candidates?.[0];
-  if (candidate?.finishReason && candidate.finishReason !== 'STOP') {
-    throw new Error(`Generation stopped: ${candidate.finishReason}`);
+  const finishReason = candidate?.finishReason;
+  if (finishReason && String(finishReason) !== 'STOP') {
+    throw new Error(`Generation stopped: ${finishReason}`);
   }
 
   // Extract image from response and save to disk

@@ -34,8 +34,8 @@ const db = getDb();
 const migrator = new Migrator({
   db,
   provider: {
-    async getMigrations() {
-      return allMigrations;
+    getMigrations() {
+      return Promise.resolve(allMigrations);
     },
   },
 });

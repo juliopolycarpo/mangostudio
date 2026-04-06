@@ -136,7 +136,7 @@ export async function respondTextStream(
     let message = 'Stream request failed';
     try {
       const body = await response.json();
-      message = (body as any).error ?? message;
+      message = body.error ?? message;
     } catch {
       // ignore parse errors
     }

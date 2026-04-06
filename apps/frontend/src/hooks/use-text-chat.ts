@@ -86,7 +86,7 @@ export function useTextChat({
 
       const optimisticUserMsg: Message = {
         id: optimisticUserMsgId,
-        chatId: activeChatId!,
+        chatId: activeChatId,
         role: 'user',
         text: prompt,
         timestamp: new Date(),
@@ -95,7 +95,7 @@ export function useTextChat({
 
       const optimisticAiMsg: Message = {
         id: optimisticAiMsgId,
-        chatId: activeChatId!,
+        chatId: activeChatId,
         role: 'ai',
         text: '',
         timestamp: new Date(),
@@ -104,19 +104,19 @@ export function useTextChat({
         interactionMode: 'chat',
       };
 
-      appendOptimisticMessages(activeChatId!, [optimisticUserMsg, optimisticAiMsg]);
+      appendOptimisticMessages(activeChatId, [optimisticUserMsg, optimisticAiMsg]);
 
       const controller = new AbortController();
       abortControllerRef.current = controller;
       let accumulatedText = '';
-      let thinkingSegments: string[] = [];
+      const thinkingSegments: string[] = [];
       let currentThinkingIdx = -1;
       let accumulatedParts: MessagePart[] = [];
 
       try {
         await respondTextStream(
           {
-            chatId: activeChatId!,
+            chatId: activeChatId,
             prompt,
             model,
             systemPrompt: systemPrompt || undefined,
@@ -125,7 +125,7 @@ export function useTextChat({
           },
           (chunk) => {
             if (chunk.error) {
-              updateOptimisticMessage(activeChatId!, optimisticAiMsgId, {
+              updateOptimisticMessage(activeChatId, optimisticAiMsgId, {
                 isGenerating: false,
                 text: accumulatedText || chunk.error,
                 parts: [...accumulatedParts, { type: 'error', text: chunk.error }],
@@ -141,7 +141,7 @@ export function useTextChat({
               currentThinkingIdx = thinkingSegments.length - 1;
               const thinkingPart: MessagePart = { type: 'thinking', text: '' };
               accumulatedParts = [...accumulatedParts, thinkingPart];
-              updateOptimisticMessage(activeChatId!, optimisticAiMsgId, {
+              updateOptimisticMessage(activeChatId, optimisticAiMsgId, {
                 parts: [...accumulatedParts],
               });
             } else if (chunkType === 'thinking' && chunk.text) {
@@ -168,7 +168,7 @@ export function useTextChat({
                   return p;
                 })
                 .reverse();
-              updateOptimisticMessage(activeChatId!, optimisticAiMsgId, {
+              updateOptimisticMessage(activeChatId, optimisticAiMsgId, {
                 parts: [...accumulatedParts],
               });
             } else if (chunkType === 'text' && !chunk.done && chunk.text) {
@@ -176,7 +176,7 @@ export function useTextChat({
               accumulatedText += chunk.text;
               const textPart: MessagePart = { type: 'text', text: accumulatedText };
               accumulatedParts = [...accumulatedParts.filter((p) => p.type !== 'text'), textPart];
-              updateOptimisticMessage(activeChatId!, optimisticAiMsgId, {
+              updateOptimisticMessage(activeChatId, optimisticAiMsgId, {
                 text: accumulatedText,
                 parts: [...accumulatedParts],
               });
@@ -190,7 +190,7 @@ export function useTextChat({
                 args: {},
               };
               accumulatedParts = [...accumulatedParts, toolCallPart];
-              updateOptimisticMessage(activeChatId!, optimisticAiMsgId, {
+              updateOptimisticMessage(activeChatId, optimisticAiMsgId, {
                 parts: [...accumulatedParts],
               });
             } else if (chunkType === 'tool_call_completed' && chunk.callId) {
@@ -206,7 +206,7 @@ export function useTextChat({
                   ? { ...p, args: parsedArgs }
                   : p
               );
-              updateOptimisticMessage(activeChatId!, optimisticAiMsgId, {
+              updateOptimisticMessage(activeChatId, optimisticAiMsgId, {
                 parts: [...accumulatedParts],
               });
             } else if (chunkType === 'tool_result' && chunk.callId) {
@@ -217,7 +217,7 @@ export function useTextChat({
                 isError: chunk.isError,
               };
               accumulatedParts = [...accumulatedParts, resultPart];
-              updateOptimisticMessage(activeChatId!, optimisticAiMsgId, {
+              updateOptimisticMessage(activeChatId, optimisticAiMsgId, {
                 parts: [...accumulatedParts],
               });
             } else if (chunkType === 'context_info') {
@@ -255,11 +255,11 @@ export function useTextChat({
                 event: chunk.event,
                 detail: chunk.detail,
               });
-              updateOptimisticMessage(activeChatId!, optimisticAiMsgId, {
+              updateOptimisticMessage(activeChatId, optimisticAiMsgId, {
                 parts: [...accumulatedParts],
               });
             } else if (chunk.done) {
-              updateOptimisticMessage(activeChatId!, optimisticAiMsgId, {
+              updateOptimisticMessage(activeChatId, optimisticAiMsgId, {
                 isGenerating: false,
                 text: accumulatedText,
                 parts: [...accumulatedParts],
@@ -272,12 +272,12 @@ export function useTextChat({
       } catch (error: unknown) {
         const isAbort = error instanceof Error && error.name === 'AbortError';
         if (isAbort) {
-          updateOptimisticMessage(activeChatId!, optimisticAiMsgId, { isGenerating: false });
+          updateOptimisticMessage(activeChatId, optimisticAiMsgId, { isGenerating: false });
         } else {
           console.error('[respond]', error);
           const errorText =
             error instanceof Error ? error.message : 'Failed to get a response. Please try again.';
-          updateOptimisticMessage(activeChatId!, optimisticAiMsgId, {
+          updateOptimisticMessage(activeChatId, optimisticAiMsgId, {
             isGenerating: false,
             text: errorText,
           });
@@ -286,7 +286,7 @@ export function useTextChat({
         abortControllerRef.current = null;
         setIsGenerating(false);
         void chats.loadChats();
-        void queryClient.invalidateQueries({ queryKey: messageKeys.list(activeChatId!) });
+        void queryClient.invalidateQueries({ queryKey: messageKeys.list(activeChatId) });
       }
     },
     [

@@ -21,7 +21,9 @@ import { uploadReferenceImage, generateImage } from '../../../src/services/gener
 const mockUpload = vi.mocked(uploadReferenceImage);
 const mockGenerate = vi.mocked(generateImage);
 
-function makeProps(overrides: Partial<Parameters<typeof useImageGeneration>[0]> = {}) {
+type ImageGenProps = Parameters<typeof useImageGeneration>[0];
+
+function makeProps(overrides: Partial<ImageGenProps> = {}) {
   const appendOptimisticMessages = vi.fn();
   const replaceOptimisticMessages = vi.fn();
   const updateOptimisticMessage = vi.fn();
@@ -31,17 +33,17 @@ function makeProps(overrides: Partial<Parameters<typeof useImageGeneration>[0]> 
       currentChatId: 'chat-1',
       createChat: vi.fn().mockResolvedValue({ id: 'chat-new' }),
       loadChats: vi.fn().mockResolvedValue(undefined),
-    } as any,
+    } as unknown as ImageGenProps['chats'],
     getActiveModel: () => 'test-model',
     settings: {
       globalImageSystemPrompt: '',
       globalImageQuality: 'standard',
-    } as any,
+    } as unknown as ImageGenProps['settings'],
     optimistic: {
       appendOptimisticMessages,
       replaceOptimisticMessages,
       updateOptimisticMessage,
-    } as any,
+    } as unknown as ImageGenProps['optimistic'],
     ...overrides,
   };
 }
@@ -76,9 +78,9 @@ describe('useImageGeneration — reference image upload failure', () => {
       expect.objectContaining({ isGenerating: false })
     );
 
-    const [, , update] = (props.optimistic.updateOptimisticMessage as any).mock.calls[0];
+    const [, , update] = vi.mocked(props.optimistic.updateOptimisticMessage).mock.calls[0];
     expect(typeof update.text).toBe('string');
-    expect(update.text.length).toBeGreaterThan(0);
+    expect(update.text!.length).toBeGreaterThan(0);
 
     // generateImage must NOT have been called
     expect(mockGenerate).not.toHaveBeenCalled();
@@ -105,7 +107,7 @@ describe('useImageGeneration — reference image upload failure', () => {
         isGenerating: false,
         interactionMode: 'image',
       },
-    } as any);
+    } as unknown as Awaited<ReturnType<typeof generateImage>>);
 
     const props = makeProps();
     const { result } = renderHook(() => useImageGeneration(props));

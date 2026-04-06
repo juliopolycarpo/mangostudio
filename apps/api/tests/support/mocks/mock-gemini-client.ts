@@ -9,7 +9,7 @@ import { MOCK_MODELS } from '@mangostudio/shared/test-utils';
  */
 export function createMockGeminiClient(models: Model[] = []) {
   return {
-    listModels: async (): Promise<Model[]> => models,
+    listModels: (): Promise<Model[]> => Promise.resolve(models),
   };
 }
 

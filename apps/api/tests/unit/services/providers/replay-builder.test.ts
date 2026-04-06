@@ -169,9 +169,7 @@ describe('buildGeminiInteractionsReplay', () => {
       ]),
     ];
     const result = buildGeminiInteractionsReplay(history);
-    const resultTurn = result.find((t) => t.role === 'user' && Array.isArray(t.content)) as
-      | Record<string, unknown>
-      | undefined;
+    const resultTurn = result.find((t) => t.role === 'user' && Array.isArray(t.content));
     expect(resultTurn).toBeDefined();
     const contents = resultTurn!.content as Array<Record<string, unknown>>;
     expect(contents[0].result).toEqual({ ok: true });
@@ -185,9 +183,7 @@ describe('buildGeminiInteractionsReplay', () => {
       ]),
     ];
     const result = buildGeminiInteractionsReplay(history);
-    const resultTurn = result.find((t) => t.role === 'user' && Array.isArray(t.content)) as
-      | Record<string, unknown>
-      | undefined;
+    const resultTurn = result.find((t) => t.role === 'user' && Array.isArray(t.content));
     const contents = resultTurn!.content as Array<Record<string, unknown>>;
     expect(contents[0].result).toBe('plain text output');
   });

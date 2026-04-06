@@ -27,7 +27,6 @@ import type {
   AgentEvent,
   ToolDefinition,
 } from './types';
-import type { SecretMetadataRow } from '@mangostudio/shared/types';
 import {
   parseContinuationEnvelope,
   serializeContinuationEnvelope,
@@ -37,6 +36,7 @@ import {
 } from './continuation';
 import { getModelContextLimit } from './context-policy';
 import { buildOpenAIResponsesReplay } from './replay-builder';
+import { parseStringArray } from '../../utils/json';
 
 const BASE_URL = 'https://api.openai.com/v1';
 
@@ -164,15 +164,15 @@ async function resolveAuthContext(userId: string, modelName?: string): Promise<O
 
   for (const row of rows) {
     if (!row.configured) continue;
-    const enabled: string[] = JSON.parse(row.enabledModels);
+    const enabled = parseStringArray(row.enabledModels);
     if (modelName && enabled.length > 0 && !enabled.includes(modelName)) continue;
 
     const apiKey = await secretService.resolveSecretValue(row);
     if (apiKey) {
       return {
         apiKey,
-        organizationId: (row as SecretMetadataRow).organizationId ?? null,
-        projectId: (row as SecretMetadataRow).projectId ?? null,
+        organizationId: row.organizationId ?? null,
+        projectId: row.projectId ?? null,
       };
     }
   }
@@ -196,8 +196,8 @@ const listModelsWithCache = withModelCache(
       if (apiKey) {
         resolvedCtx = {
           apiKey,
-          organizationId: (row as SecretMetadataRow).organizationId ?? null,
-          projectId: (row as SecretMetadataRow).projectId ?? null,
+          organizationId: row.organizationId ?? null,
+          projectId: row.projectId ?? null,
         };
         break;
       }
@@ -491,7 +491,7 @@ async function* streamAgentTurnWithResponsesAPI(
     ];
   }
 
-  const makeRequest = async (prevId: string | null) => {
+  const makeRequest = (prevId: string | null) => {
     return (client as any).responses.create({
       model: req.modelName,
       input,
@@ -571,7 +571,7 @@ async function* streamAgentTurnWithResponsesAPI(
   for await (const event of stream) {
     if (req.signal?.aborted) break;
 
-    const ev = event as Record<string, any>;
+    const ev = event;
     const type = ev.type as string;
 
     switch (type) {

@@ -18,20 +18,20 @@ describe('respond-stream abort signal', () => {
     let signalAbortedDuringStream = false;
 
     mock.module('../../../../src/services/providers/registry', () => ({
-      getProviderForModel: async () => ({
-        generateTextStream: async function* (req: any) {
-          receivedSignal = req.signal;
-          signalAbortedDuringStream = req.signal?.aborted ?? false;
-          yield { text: 'hello', done: false };
-          yield { text: '', done: true };
-        },
-      }),
+      getProviderForModel: () =>
+        Promise.resolve({
+          generateTextStream: async function* (req: { signal?: AbortSignal }) {
+            await Promise.resolve();
+            receivedSignal = req.signal;
+            signalAbortedDuringStream = req.signal?.aborted ?? false;
+            yield { text: 'hello', done: false };
+            yield { text: '', done: true };
+          },
+        }),
     }));
 
     mock.module('../../../../src/services/providers/catalog', () => ({
-      getUnifiedModelCatalog: async () => ({
-        textModels: [{ modelId: 'test-model' }],
-      }),
+      getUnifiedModelCatalog: () => Promise.resolve({ textModels: [{ modelId: 'test-model' }] }),
     }));
 
     mock.module('../../../../src/db/database', () => ({
@@ -39,15 +39,15 @@ describe('respond-stream abort signal', () => {
         selectFrom: () => ({
           select: () => ({
             where: () => ({
-              executeTakeFirst: async () => ({ userId: TEST_USER.id }),
+              executeTakeFirst: () => Promise.resolve({ userId: TEST_USER.id }),
             }),
           }),
         }),
-        insertInto: () => ({ values: () => ({ execute: async () => {} }) }),
+        insertInto: () => ({ values: () => ({ execute: () => Promise.resolve() }) }),
         updateTable: () => ({
           set: () => ({
             where: () => ({
-              where: () => ({ execute: async () => {} }),
+              where: () => ({ execute: () => Promise.resolve() }),
             }),
           }),
         }),
@@ -55,12 +55,12 @@ describe('respond-stream abort signal', () => {
     }));
 
     mock.module('../../../../src/services/chat-service', () => ({
-      verifyChatOwnership: async () => true,
+      verifyChatOwnership: () => Promise.resolve(true),
     }));
 
     mock.module('../../../../src/services/message-service', () => ({
-      createMessage: async () => {},
-      loadChatHistory: async () => [],
+      createMessage: () => Promise.resolve(),
+      loadChatHistory: () => Promise.resolve([]),
     }));
 
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
@@ -85,23 +85,23 @@ describe('respond-stream abort signal', () => {
     const aborted: boolean[] = [];
 
     mock.module('../../../../src/services/providers/registry', () => ({
-      getProviderForModel: async () => ({
-        generateTextStream: async function* (req: any) {
-          // Yield slowly so there's time to cancel
-          for (let i = 0; i < 10; i++) {
-            aborted.push(req.signal?.aborted ?? false);
-            if (req.signal?.aborted) break;
-            yield { text: `chunk-${i}`, done: false };
-          }
-          yield { text: '', done: true };
-        },
-      }),
+      getProviderForModel: () =>
+        Promise.resolve({
+          generateTextStream: async function* (req: { signal?: AbortSignal }) {
+            await Promise.resolve();
+            // Yield slowly so there's time to cancel
+            for (let i = 0; i < 10; i++) {
+              aborted.push(req.signal?.aborted ?? false);
+              if (req.signal?.aborted) break;
+              yield { text: `chunk-${i}`, done: false };
+            }
+            yield { text: '', done: true };
+          },
+        }),
     }));
 
     mock.module('../../../../src/services/providers/catalog', () => ({
-      getUnifiedModelCatalog: async () => ({
-        textModels: [{ modelId: 'test-model' }],
-      }),
+      getUnifiedModelCatalog: () => Promise.resolve({ textModels: [{ modelId: 'test-model' }] }),
     }));
 
     mock.module('../../../../src/db/database', () => ({
@@ -109,15 +109,15 @@ describe('respond-stream abort signal', () => {
         selectFrom: () => ({
           select: () => ({
             where: () => ({
-              executeTakeFirst: async () => ({ userId: TEST_USER.id }),
+              executeTakeFirst: () => Promise.resolve({ userId: TEST_USER.id }),
             }),
           }),
         }),
-        insertInto: () => ({ values: () => ({ execute: async () => {} }) }),
+        insertInto: () => ({ values: () => ({ execute: () => Promise.resolve() }) }),
         updateTable: () => ({
           set: () => ({
             where: () => ({
-              where: () => ({ execute: async () => {} }),
+              where: () => ({ execute: () => Promise.resolve() }),
             }),
           }),
         }),
@@ -125,12 +125,12 @@ describe('respond-stream abort signal', () => {
     }));
 
     mock.module('../../../../src/services/chat-service', () => ({
-      verifyChatOwnership: async () => true,
+      verifyChatOwnership: () => Promise.resolve(true),
     }));
 
     mock.module('../../../../src/services/message-service', () => ({
-      createMessage: async () => {},
-      loadChatHistory: async () => [],
+      createMessage: () => Promise.resolve(),
+      loadChatHistory: () => Promise.resolve([]),
     }));
 
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);

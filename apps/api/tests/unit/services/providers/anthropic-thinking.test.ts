@@ -73,6 +73,7 @@ describe('anthropic-provider thinking chunk yielding', () => {
   async function* processAnthropicStreamEvents(
     events: Array<Record<string, unknown>>
   ): AsyncIterable<{ type: string; text: string; done: boolean }> {
+    await Promise.resolve();
     for (const event of events) {
       if (event.type === 'content_block_delta') {
         const delta = event.delta as Record<string, unknown>;
@@ -147,9 +148,9 @@ describe('anthropic-provider thinking chunk yielding', () => {
     }
 
     expect(chunks.length).toBe(4); // 2 thinking + 1 text + 1 done
-    expect(chunks[0]!.type).toBe('thinking');
-    expect(chunks[1]!.type).toBe('thinking');
-    expect(chunks[2]!.type).toBe('text');
-    expect(chunks[3]!.done).toBe(true);
+    expect(chunks[0].type).toBe('thinking');
+    expect(chunks[1].type).toBe('thinking');
+    expect(chunks[2].type).toBe('text');
+    expect(chunks[3].done).toBe(true);
   });
 });

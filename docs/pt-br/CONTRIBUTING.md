@@ -50,6 +50,11 @@ Consulte [`AGENTS.md`](../../AGENTS.md) para o guia completo de estilo, convenç
 ## Executando os Testes
 
 ```bash
+# Qualidade de código
+bun run format:check
+bun run lint
+bun run typecheck
+
 # Todas as suítes
 bun run test
 
@@ -62,17 +67,17 @@ bun run test:integration
 # Cobertura do frontend
 bun run test:coverage
 
-# Pipeline CI completo (lint + test + coverage)
-bun run test:ci
+# Pipeline completo de validação
+bun run verify
 ```
 
 ## Linting e Verificação de Tipos
 
 ```bash
-bun run lint
+bun run check
 ```
 
-Executa a verificação de tipos TypeScript e ESLint em todos os workspaces.
+Executa verificação de formatação, ESLint, verificação de tipos TypeScript e testes em todos os workspaces.
 
 ## Build
 
@@ -111,7 +116,7 @@ Esta é uma configuração local única. O template está em `.gitmessage` na ra
 1. Crie um branch a partir de `main` com um nome descritivo (ex: `feat/add-gallery-empty-state`).
 2. Execute a suíte de validação completa localmente antes de fazer push:
    ```bash
-   bun run lint && bun run test && bun run build
+   bun run verify
    ```
 3. Abra um PR contra `main` e preencha o template de PR.
 4. PRs exigem que todas as verificações de CI passem antes do merge.

@@ -121,9 +121,9 @@ export const generateRoutes = (app: Elysia) =>
                 ...aiMessage,
               },
             };
-          } catch (error: any) {
-            console.error('[generate] Error:', error.message);
-            const errorText = error?.message || 'Image generation failed';
+          } catch (error: unknown) {
+            const errorText = error instanceof Error ? error.message : 'Image generation failed';
+            console.error('[generate] Error:', errorText);
             set.status = 500;
             return { error: errorText };
           }

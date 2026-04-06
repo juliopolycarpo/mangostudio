@@ -10,15 +10,17 @@ import type { AIProvider } from '../../../../src/services/providers/types';
 function makeStubProvider(type: 'gemini' | 'openai-compatible' | 'anthropic'): AIProvider {
   return {
     providerType: type,
-    async generateText() {
-      return { text: 'stub' };
+    generateText() {
+      return Promise.resolve({ text: 'stub' });
     },
-    async listModels() {
-      return [];
+    listModels() {
+      return Promise.resolve([]);
     },
-    async validateApiKey() {},
-    async resolveApiKey() {
-      return 'stub-key';
+    validateApiKey() {
+      return Promise.resolve();
+    },
+    resolveApiKey() {
+      return Promise.resolve('stub-key');
     },
   };
 }

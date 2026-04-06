@@ -26,17 +26,18 @@ import type {
   ToolDefinition,
 } from './types';
 import { buildChatCompletionsReplay } from './replay-builder';
+import { parseStringArray } from '../../utils/json';
 
 const secretService = createProviderSecretService({
   provider: 'openai-compatible',
   tomlSection: 'openai_compatible_api_keys',
   envVarPrefix: 'OPENAI_API_KEY',
   shouldSyncConfigEntry: ({ existing }) => Boolean(existing?.baseUrl?.trim()),
-  validateFn: async (_apiKey, _fetchImpl) => {
+  validateFn: (_apiKey, _fetchImpl) => {
     // validateFn is not called for openai-compatible without a baseUrl.
     // Key validation for this provider always goes through validateProviderKey()
     // in the connector route, which requires a baseUrl.
-    throw new Error('Cannot validate an openai-compatible key without a baseUrl.');
+    return Promise.reject(new Error('Cannot validate an openai-compatible key without a baseUrl.'));
   },
 });
 
@@ -54,7 +55,7 @@ async function resolveClientConfig(
   for (const row of rows) {
     if (!row.configured) continue;
     if (!row.baseUrl) continue; // skip connectors without a custom endpoint
-    const enabled: string[] = JSON.parse(row.enabledModels);
+    const enabled = parseStringArray(row.enabledModels);
     if (modelName && enabled.length > 0 && !enabled.includes(modelName)) continue;
 
     const apiKey = await secretService.resolveSecretValue(row);

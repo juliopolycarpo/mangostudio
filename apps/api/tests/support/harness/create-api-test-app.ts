@@ -34,34 +34,36 @@ export function createAuthenticatedApiTestApp(
   ...plugins: ApiTestPlugin[]
 ) {
   const auth = getAuth();
+  const api = auth.api as Record<string, unknown>;
   const originalGetSession = auth.api.getSession.bind(auth.api);
 
-  (auth.api as any).getSession = async () => ({
-    user: {
-      id: mockUser.id,
-      name: mockUser.name,
-      email: mockUser.email,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-      image: null,
-      emailVerified: false,
-    },
-    session: {
-      id: 'test-session-id',
-      userId: mockUser.id,
-      token: 'test-token',
-      expiresAt: new Date(Date.now() + 86_400_000),
-      createdAt: new Date(),
-      updatedAt: new Date(),
-      ipAddress: null,
-      userAgent: null,
-    },
-  });
+  api.getSession = () =>
+    Promise.resolve({
+      user: {
+        id: mockUser.id,
+        name: mockUser.name,
+        email: mockUser.email,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        image: null,
+        emailVerified: false,
+      },
+      session: {
+        id: 'test-session-id',
+        userId: mockUser.id,
+        token: 'test-token',
+        expiresAt: new Date(Date.now() + 86_400_000),
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        ipAddress: null,
+        userAgent: null,
+      },
+    });
 
   const app = createApiTestApp(...plugins);
 
   const restore = () => {
-    (auth.api as any).getSession = originalGetSession;
+    api.getSession = originalGetSession;
   };
 
   return { app, restore };

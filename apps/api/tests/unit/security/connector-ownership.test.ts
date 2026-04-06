@@ -68,7 +68,7 @@ describe('connector ownership security', () => {
     );
 
     expect(res.status).toBe(403);
-    const body = (await res.json()) as any;
+    const body = (await res.json()) as { error: string };
     expect(body.error).toContain('shared connector');
   });
 
@@ -83,7 +83,7 @@ describe('connector ownership security', () => {
     );
 
     expect(res.status).toBe(200);
-    const body = (await res.json()) as any;
+    const body = (await res.json()) as { success: boolean };
     expect(body.success).toBe(true);
   });
 

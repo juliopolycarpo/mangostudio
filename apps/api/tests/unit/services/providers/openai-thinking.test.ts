@@ -108,27 +108,30 @@ describe('extractReasoningFromCompleted', () => {
 // ---------------------------------------------------------------------------
 
 /** Creates a fake OpenAI client whose responses.create() yields `events`. */
-function createMockClient(events: Array<Record<string, unknown>>): any {
+function createMockClient(events: Array<Record<string, unknown>>) {
   return {
     responses: {
-      create: async () =>
-        (async function* () {
-          for (const ev of events) {
-            yield ev;
-          }
-        })(),
+      create: () =>
+        Promise.resolve(
+          (async function* () {
+            await Promise.resolve();
+            for (const ev of events) {
+              yield ev;
+            }
+          })()
+        ),
     },
   };
 }
 
 /** Collects all chunks from a streaming call. */
 async function collectChunks(
-  client: any,
+  client: unknown,
   modelName: string,
   effort: 'low' | 'medium' | 'high' = 'medium'
 ): Promise<StreamingChunk[]> {
   const chunks: StreamingChunk[] = [];
-  for await (const chunk of streamWithResponsesAPI(client, {
+  for await (const chunk of streamWithResponsesAPI(client as Parameters<typeof streamWithResponsesAPI>[0], {
     userId: 'u1',
     history: [],
     prompt: 'Hello',
@@ -145,9 +148,15 @@ describe('streamWithResponsesAPI', () => {
     let capturedParams: Record<string, unknown> | undefined;
     const client = {
       responses: {
-        create: async (params: Record<string, unknown>) => {
+        create: (params: Record<string, unknown>) => {
           capturedParams = params;
-          return (async function* () {})();
+          const empty: Record<string, unknown>[] = [];
+          return Promise.resolve(
+            (async function* () {
+              await Promise.resolve();
+              yield* empty;
+            })()
+          );
         },
       },
     };
@@ -215,7 +224,7 @@ describe('streamWithResponsesAPI', () => {
 
     const thinkingChunks = chunks.filter((c) => c.type === 'thinking');
     expect(thinkingChunks.length).toBe(1);
-    expect(thinkingChunks[0]!.text).toBe('Streamed thinking.');
+    expect(thinkingChunks[0].text).toBe('Streamed thinking.');
   });
 
   it('falls back to response.completed reasoning extraction', async () => {
@@ -237,7 +246,7 @@ describe('streamWithResponsesAPI', () => {
 
     const thinkingChunks = chunks.filter((c) => c.type === 'thinking');
     expect(thinkingChunks.length).toBe(1);
-    expect(thinkingChunks[0]!.text).toBe('Fallback reasoning.');
+    expect(thinkingChunks[0].text).toBe('Fallback reasoning.');
   });
 
   it('ignores reasoning_text.delta when summary events were already seen', async () => {
@@ -261,7 +270,7 @@ describe('streamWithResponsesAPI', () => {
 
     const thinkingChunks = chunks.filter((c) => c.type === 'thinking');
     expect(thinkingChunks.length).toBe(1);
-    expect(thinkingChunks[0]!.text).toBe('Summary thinking.');
+    expect(thinkingChunks[0].text).toBe('Summary thinking.');
   });
 
   it('handles multiple summary blocks', async () => {
@@ -285,7 +294,7 @@ describe('streamWithResponsesAPI', () => {
 
     const thinkingChunks = chunks.filter((c) => c.type === 'thinking');
     expect(thinkingChunks.length).toBe(2);
-    expect(thinkingChunks[0]!.text).toBe('First block.');
-    expect(thinkingChunks[1]!.text).toBe('Second block.');
+    expect(thinkingChunks[0].text).toBe('First block.');
+    expect(thinkingChunks[1].text).toBe('Second block.');
   });
 });

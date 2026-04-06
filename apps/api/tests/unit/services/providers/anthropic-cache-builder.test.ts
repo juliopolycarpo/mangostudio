@@ -2,6 +2,8 @@ import { describe, expect, it } from 'bun:test';
 import { buildCachedAnthropicRequest } from '../../../../src/services/providers/anthropic-cache-builder';
 import type { ToolDefinition } from '../../../../src/services/providers/types';
 
+type CacheableBlock = { text?: string; cache_control?: { type: string }; name?: string; input_schema?: unknown };
+
 const TOOL_DEFS: ToolDefinition[] = [
   {
     name: 'get_current_datetime',
@@ -24,8 +26,8 @@ describe('buildCachedAnthropicRequest', () => {
     });
 
     expect(result.system).toHaveLength(1);
-    expect((result.system as any)[0].cache_control).toEqual({ type: 'ephemeral' });
-    expect((result.system as any)[0].text).toBe('You are a helpful assistant.');
+    expect((result.system as CacheableBlock[])[0].cache_control).toEqual({ type: 'ephemeral' });
+    expect((result.system as CacheableBlock[])[0].text).toBe('You are a helpful assistant.');
   });
 
   it('sets cache_control only on the last tool definition', () => {
@@ -36,8 +38,8 @@ describe('buildCachedAnthropicRequest', () => {
     });
 
     expect(result.tools).toHaveLength(2);
-    expect((result.tools as any)[0].cache_control).toBeUndefined();
-    expect((result.tools as any)[1].cache_control).toEqual({ type: 'ephemeral' });
+    expect((result.tools as CacheableBlock[])[0].cache_control).toBeUndefined();
+    expect((result.tools as CacheableBlock[])[1].cache_control).toEqual({ type: 'ephemeral' });
   });
 
   it('omits system when prompt is empty', () => {
@@ -105,7 +107,7 @@ describe('buildCachedAnthropicRequest', () => {
       messages: [{ role: 'user', content: 'Hi' }],
     });
 
-    const searchTool = (result.tools as any).find((t: any) => t.name === 'search');
-    expect(searchTool.input_schema).toEqual(TOOL_DEFS[1].parameters);
+    const searchTool = (result.tools as CacheableBlock[]).find((t) => t.name === 'search');
+    expect(searchTool!.input_schema).toEqual(TOOL_DEFS[1].parameters);
   });
 });

@@ -10,13 +10,14 @@ const TEST_USER = 'test-user';
 describe('createGeminiModelCatalogService', () => {
   it('normalizes discovered Gemini models into UI-safe options', async () => {
     const service = createGeminiModelCatalogService({
-      getApiKey: async () => 'test-key',
-      listModels: async () => [
-        createMockModel({
-          name: 'models/gemini-2.5-flash',
-          displayName: 'Gemini 2.5 Flash',
-        }),
-      ],
+      getApiKey: () => Promise.resolve('test-key'),
+      listModels: () =>
+        Promise.resolve([
+          createMockModel({
+            name: 'models/gemini-2.5-flash',
+            displayName: 'Gemini 2.5 Flash',
+          }),
+        ]),
     });
 
     await service.refreshGeminiModelCatalog(TEST_USER, 'manual');
@@ -31,24 +32,25 @@ describe('createGeminiModelCatalogService', () => {
 
   it('filters text models by generateContent support', async () => {
     const service = createGeminiModelCatalogService({
-      getApiKey: async () => 'test-key',
-      listModels: async () => [
-        createMockModel({
-          name: 'models/gemini-2.5-pro',
-          displayName: 'Gemini 2.5 Pro',
-          supportedActions: ['generateContent'],
-        }),
-        createMockModel({
-          name: 'models/gemini-embedding-001',
-          displayName: 'Gemini Embedding',
-          supportedActions: ['embedContent'],
-        }),
-        createMockModel({
-          name: 'models/gemini-2.5-flash-image',
-          displayName: 'Gemini 2.5 Flash Image',
-          supportedActions: ['generateContent'],
-        }),
-      ],
+      getApiKey: () => Promise.resolve('test-key'),
+      listModels: () =>
+        Promise.resolve([
+          createMockModel({
+            name: 'models/gemini-2.5-pro',
+            displayName: 'Gemini 2.5 Pro',
+            supportedActions: ['generateContent'],
+          }),
+          createMockModel({
+            name: 'models/gemini-embedding-001',
+            displayName: 'Gemini Embedding',
+            supportedActions: ['embedContent'],
+          }),
+          createMockModel({
+            name: 'models/gemini-2.5-flash-image',
+            displayName: 'Gemini 2.5 Flash Image',
+            supportedActions: ['generateContent'],
+          }),
+        ]),
     });
 
     await service.refreshGeminiModelCatalog(TEST_USER, 'manual');
@@ -59,24 +61,25 @@ describe('createGeminiModelCatalogService', () => {
 
   it('filters image models conservatively by modelId family', async () => {
     const service = createGeminiModelCatalogService({
-      getApiKey: async () => 'test-key',
-      listModels: async () => [
-        createMockModel({
-          name: 'models/gemini-2.5-flash-image',
-          displayName: 'Gemini 2.5 Flash Image',
-          supportedActions: ['generateContent'],
-        }),
-        createMockModel({
-          name: 'models/imagen-4.0-generate-001',
-          displayName: 'Imagen 4',
-          supportedActions: ['predict'],
-        }),
-        createMockModel({
-          name: 'models/gemini-2.5-pro',
-          displayName: 'Gemini 2.5 Pro',
-          supportedActions: ['generateContent'],
-        }),
-      ],
+      getApiKey: () => Promise.resolve('test-key'),
+      listModels: () =>
+        Promise.resolve([
+          createMockModel({
+            name: 'models/gemini-2.5-flash-image',
+            displayName: 'Gemini 2.5 Flash Image',
+            supportedActions: ['generateContent'],
+          }),
+          createMockModel({
+            name: 'models/imagen-4.0-generate-001',
+            displayName: 'Imagen 4',
+            supportedActions: ['predict'],
+          }),
+          createMockModel({
+            name: 'models/gemini-2.5-pro',
+            displayName: 'Gemini 2.5 Pro',
+            supportedActions: ['generateContent'],
+          }),
+        ]),
     });
 
     await service.refreshGeminiModelCatalog(TEST_USER, 'manual');
@@ -90,12 +93,8 @@ describe('createGeminiModelCatalogService', () => {
 
   it('returns idle and empty arrays when no API key is configured', async () => {
     const service = createGeminiModelCatalogService({
-      getApiKey: async () => {
-        throw new GeminiApiKeyMissingError();
-      },
-      listModels: async () => {
-        throw new Error('should not list models');
-      },
+      getApiKey: () => Promise.reject(new GeminiApiKeyMissingError()),
+      listModels: () => Promise.reject(new Error('should not list models')),
     });
 
     const snapshot = await service.refreshGeminiModelCatalog(TEST_USER, 'manual');
@@ -109,19 +108,20 @@ describe('createGeminiModelCatalogService', () => {
 
   it('awaits first refresh on cold start and returns discovered models', async () => {
     const service = createGeminiModelCatalogService({
-      getApiKey: async () => 'test-key',
-      listModels: async () => [
-        createMockModel({
-          name: 'models/gemini-2.5-flash',
-          displayName: 'Gemini 2.5 Flash',
-          supportedActions: ['generateContent'],
-        }),
-        createMockModel({
-          name: 'models/gemini-2.5-flash-image',
-          displayName: 'Gemini 2.5 Flash Image',
-          supportedActions: ['generateContent'],
-        }),
-      ],
+      getApiKey: () => Promise.resolve('test-key'),
+      listModels: () =>
+        Promise.resolve([
+          createMockModel({
+            name: 'models/gemini-2.5-flash',
+            displayName: 'Gemini 2.5 Flash',
+            supportedActions: ['generateContent'],
+          }),
+          createMockModel({
+            name: 'models/gemini-2.5-flash-image',
+            displayName: 'Gemini 2.5 Flash Image',
+            supportedActions: ['generateContent'],
+          }),
+        ]),
     });
 
     // First call should await refresh, NOT return empty
@@ -138,15 +138,15 @@ describe('createGeminiModelCatalogService', () => {
   it('returns cached models on subsequent calls without re-fetching', async () => {
     let fetchCount = 0;
     const service = createGeminiModelCatalogService({
-      getApiKey: async () => 'test-key',
-      listModels: async () => {
+      getApiKey: () => Promise.resolve('test-key'),
+      listModels: () => {
         fetchCount++;
-        return [
+        return Promise.resolve([
           createMockModel({
             name: 'models/gemini-2.5-pro',
             supportedActions: ['generateContent'],
           }),
-        ];
+        ]);
       },
     });
 
@@ -159,8 +159,8 @@ describe('createGeminiModelCatalogService', () => {
 
   it('clears the cache after clearGeminiModelCatalog()', async () => {
     const service = createGeminiModelCatalogService({
-      getApiKey: async () => 'test-key',
-      listModels: async () => [createMockModel({})],
+      getApiKey: () => Promise.resolve('test-key'),
+      listModels: () => Promise.resolve([createMockModel({})]),
     });
 
     await service.refreshGeminiModelCatalog(TEST_USER, 'manual');
