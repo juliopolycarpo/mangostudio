@@ -12,7 +12,8 @@ vi.mock('@/lib/shiki', () => ({
 describe('MarkdownContent', () => {
   it('renders bold and italic text', () => {
     render(<MarkdownContent content="**bold** and *italic*" />);
-    const container = screen.getByText('bold').closest('.markdown-content')!;
+    const container = screen.getByText('bold').closest('.markdown-content');
+    if (!container) throw new Error('expected .markdown-content ancestor element');
     expect(container.querySelector('strong')).toHaveTextContent('bold');
     expect(container.querySelector('em')).toHaveTextContent('italic');
   });
@@ -54,7 +55,8 @@ describe('MarkdownContent', () => {
 
   it('renders empty content as empty div', () => {
     const { container } = render(<MarkdownContent content="" />);
-    const div = container.querySelector('.markdown-content')!;
+    const div = container.querySelector('.markdown-content');
+    if (!div) throw new Error('expected .markdown-content element');
     expect(div).toBeInTheDocument();
     expect(div.innerHTML).toBe('');
   });
@@ -71,12 +73,16 @@ describe('MarkdownContent', () => {
 
   it('memoizes parsed output for same content', () => {
     const { container } = render(<MarkdownContent content="**hello**" />);
-    const firstHtml = container.querySelector('.markdown-content')!.innerHTML;
+    const el1 = container.querySelector('.markdown-content');
+    if (!el1) throw new Error('expected .markdown-content element');
+    const firstHtml = el1.innerHTML;
 
     // Re-render the same content — memoized output should be identical.
     // Use a second render instead of rerender to stay inside the ThemeProvider wrapper.
     const { container: container2 } = render(<MarkdownContent content="**hello**" />);
-    const secondHtml = container2.querySelector('.markdown-content')!.innerHTML;
+    const el2 = container2.querySelector('.markdown-content');
+    if (!el2) throw new Error('expected .markdown-content element in second render');
+    const secondHtml = el2.innerHTML;
 
     expect(firstHtml).toBe(secondHtml);
   });

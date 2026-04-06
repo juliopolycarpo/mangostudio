@@ -29,12 +29,13 @@ export const messageKeys = {
 
 export function useMessagesQuery(chatId: string | null) {
   return useInfiniteQuery({
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- enabled: !!chatId guarantees chatId is defined when queryFn and queryKey are used
     queryKey: messageKeys.list(chatId!),
     queryFn: async ({ pageParam }) => {
       const query = pageParam ? { cursor: pageParam, limit: '50' } : { limit: '50' };
-      const { data, error } = await (
-        client.api.chats[chatId!] as unknown as ChatMessagesRoute
-      ).messages.get({ query });
+      const { data, error } =
+        await // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- enabled: !!chatId guarantees chatId is defined when queryFn runs
+        (client.api.chats[chatId!] as unknown as ChatMessagesRoute).messages.get({ query });
       if (error) throw new Error(extractApiError(error.value));
       return data as MessagesPage;
     },

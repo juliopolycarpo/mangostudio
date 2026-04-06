@@ -299,14 +299,10 @@ async function* processGeminiInteractionStream(
         const callId =
           event.content.id || `call_${Date.now()}_${Math.random().toString(36).slice(2)}`;
         const name = event.content.name;
-        activeCalls.set(event.index, {
-          id: callId,
-          name,
-          args: {},
-          started: false,
-        });
+        const callEntry = { id: callId, name, args: {}, started: false };
+        activeCalls.set(event.index, callEntry);
         if (name) {
-          activeCalls.get(event.index)!.started = true;
+          callEntry.started = true;
           yield { type: 'tool_call_started', callId, name };
         }
       }

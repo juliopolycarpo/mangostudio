@@ -28,7 +28,7 @@ describe('registerTool / getTool', () => {
 
     const t = getTool('my_tool');
     expect(t).toBeDefined();
-    expect(t!.definition.name).toBe('my_tool');
+    expect(t?.definition.name).toBe('my_tool');
   });
 
   it('returns undefined for an unknown tool', () => {
@@ -48,7 +48,7 @@ describe('registerTool / getTool', () => {
       execute: exec2,
     });
 
-    expect(getTool('dup')!.execute).toBe(exec2);
+    expect(getTool('dup')?.execute).toBe(exec2);
   });
 });
 

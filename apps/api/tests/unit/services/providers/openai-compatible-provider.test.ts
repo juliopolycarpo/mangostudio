@@ -236,6 +236,7 @@ describe('openai-compatible generateAgentTurnStream turn_completed contract', ()
     const events: Array<{ type: string; providerState?: string }> = [];
 
     try {
+      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- openai-compatible always implements generateAgentTurnStream; method is optional in the interface only for providers lacking agent support
       for await (const event of openAICompatibleProvider.generateAgentTurnStream!({
         userId: 'test-user-no-connectors',
         modelName: 'test-model',
@@ -259,7 +260,7 @@ describe('openai-compatible generateAgentTurnStream turn_completed contract', ()
     if (turnCompleted) {
       const envelope = parseContinuationEnvelope(turnCompleted.providerState ?? null);
       expect(envelope).not.toBeNull();
-      expect(envelope!.mode).toBe('stateless-loop');
+      expect(envelope?.mode).toBe('stateless-loop');
     }
   });
 });

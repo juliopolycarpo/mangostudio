@@ -147,7 +147,8 @@ describe('respond-stream abort signal', () => {
     expect(response.status).toBe(200);
 
     // Cancel the stream immediately
-    const reader = response.body!.getReader();
+    if (!response.body) throw new Error('expected response body for stream-abort test');
+    const reader = response.body.getReader();
     await reader.cancel();
 
     // After cancel, signal should eventually be aborted on next iteration

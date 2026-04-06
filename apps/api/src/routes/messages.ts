@@ -64,12 +64,14 @@ export const messageRoutes = (app: Elysia) =>
             nextCursor = nextItem?.timestamp.toString();
           }
 
-          const galleryItems = rows.map((row) => ({
-            id: row.id,
-            imageUrl: row.imageUrl!,
-            prompt: row.prompt ?? 'Generated Image',
-            chatId: row.chatId,
-          }));
+          const galleryItems = rows
+            .filter((row): row is typeof row & { imageUrl: string } => row.imageUrl !== null)
+            .map((row) => ({
+              id: row.id,
+              imageUrl: row.imageUrl,
+              prompt: row.prompt ?? 'Generated Image',
+              chatId: row.chatId,
+            }));
 
           return {
             items: galleryItems,

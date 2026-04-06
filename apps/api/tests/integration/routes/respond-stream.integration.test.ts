@@ -1,6 +1,7 @@
 import { describe, expect, it, mock, afterEach } from 'bun:test';
 import { respondStreamRoutes } from '../../../src/routes/respond-stream';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
+import type { AgentTurnRequest } from '../../../src/services/providers/types';
 
 const TEST_USER = {
   id: 'test-user-stream',
@@ -114,7 +115,7 @@ describe('POST /respond/stream', () => {
         Promise.resolve({
           providerType: 'openai-compatible',
           generateText: () => Promise.resolve({ text: '' }),
-          generateAgentTurnStream: async function* (_req: any) {
+          generateAgentTurnStream: async function* (_req: AgentTurnRequest) {
             await Promise.resolve();
             yield { type: 'assistant_text_delta', text: 'Hi' };
             yield { type: 'turn_completed', providerState: STATELESS_LOOP_STATE };
@@ -223,7 +224,9 @@ describe('POST /respond/stream', () => {
           }),
         }),
         insertInto: () => ({ values: () => ({ execute: () => Promise.resolve() }) }),
-        updateTable: () => ({ set: () => ({ where: () => ({ execute: () => Promise.resolve() }) }) }),
+        updateTable: () => ({
+          set: () => ({ where: () => ({ execute: () => Promise.resolve() }) }),
+        }),
       }),
     }));
 
@@ -264,7 +267,7 @@ describe('POST /respond/stream', () => {
         Promise.resolve({
           providerType: 'openai-compatible',
           generateText: () => Promise.resolve({ text: '' }),
-          generateAgentTurnStream: async function* (_req: any) {
+          generateAgentTurnStream: async function* (_req: AgentTurnRequest) {
             await Promise.resolve();
             yield {
               type: 'continuation_degraded',

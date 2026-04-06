@@ -143,7 +143,8 @@ export async function respondTextStream(
     throw new Error(message);
   }
 
-  const reader = response.body!.getReader();
+  if (!response.body) throw new Error('Stream response has no body');
+  const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
 

@@ -142,13 +142,16 @@ async function collectChunks(
   effort: 'low' | 'medium' | 'high' = 'medium'
 ): Promise<StreamingChunk[]> {
   const chunks: StreamingChunk[] = [];
-  for await (const chunk of streamWithResponsesAPI(client as Parameters<typeof streamWithResponsesAPI>[0], {
-    userId: 'u1',
-    history: [],
-    prompt: 'Hello',
-    modelName,
-    generationConfig: { thinkingEnabled: true, reasoningEffort: effort },
-  })) {
+  for await (const chunk of streamWithResponsesAPI(
+    client as Parameters<typeof streamWithResponsesAPI>[0],
+    {
+      userId: 'u1',
+      history: [],
+      prompt: 'Hello',
+      modelName,
+      generationConfig: { thinkingEnabled: true, reasoningEffort: effort },
+    }
+  )) {
     chunks.push(chunk);
   }
   return chunks;
@@ -175,8 +178,8 @@ describe('streamWithResponsesAPI', () => {
     await collectChunks(client, 'o4-mini', 'high');
 
     expect(capturedParams).toBeDefined();
-    expect(capturedParams!.reasoning).toEqual({ effort: 'high', summary: 'auto' });
-    expect(capturedParams!.model).toBe('o4-mini');
+    expect(capturedParams?.reasoning).toEqual({ effort: 'high', summary: 'auto' });
+    expect(capturedParams?.model).toBe('o4-mini');
   });
 
   it('yields thinking from reasoning_summary_text.delta', async () => {

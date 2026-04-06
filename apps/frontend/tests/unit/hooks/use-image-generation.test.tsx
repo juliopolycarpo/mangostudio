@@ -80,7 +80,7 @@ describe('useImageGeneration — reference image upload failure', () => {
 
     const [, , update] = vi.mocked(props.optimistic.updateOptimisticMessage).mock.calls[0];
     expect(typeof update.text).toBe('string');
-    expect(update.text!.length).toBeGreaterThan(0);
+    expect(update.text?.length ?? 0).toBeGreaterThan(0);
 
     // generateImage must NOT have been called
     expect(mockGenerate).not.toHaveBeenCalled();

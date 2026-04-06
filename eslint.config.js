@@ -31,11 +31,14 @@ export default tseslint.config(
     },
     rules: {
       'no-undef': 'off',
-      '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        { argsIgnorePattern: '^_', varsIgnorePattern: '^_' },
+      ],
       '@typescript-eslint/no-explicit-any': 'off',
       '@typescript-eslint/explicit-function-return-type': 'off',
       '@typescript-eslint/no-empty-function': 'off',
-      '@typescript-eslint/no-non-null-assertion': 'off',
+      '@typescript-eslint/no-non-null-assertion': 'error',
     },
   },
   // React rules — frontend only
@@ -63,5 +66,5 @@ export default tseslint.config(
     },
   },
   // Prettier last (disables conflicting stylistic rules; formatting is handled by Prettier itself)
-  prettierConfig,
+  prettierConfig
 );
