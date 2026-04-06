@@ -20,7 +20,7 @@ export type ResponseCreateParamsStreaming = Responses.ResponseCreateParamsStream
  * Tries summary array first, then falls back to reasoning content array.
  */
 export function extractReasoningFromCompleted(response: Responses.Response): string | null {
-  const output = response.output;
+  const output = response.output ?? [];
 
   for (const item of output) {
     if (item.type !== 'reasoning') continue;
