@@ -111,12 +111,15 @@ describe('extractReasoningFromCompleted', () => {
 function createMockClient(events: Array<Record<string, unknown>>): any {
   return {
     responses: {
-      create: async () =>
-        (async function* () {
-          for (const ev of events) {
-            yield ev;
-          }
-        })(),
+      create: () =>
+        Promise.resolve(
+          (async function* () {
+            await Promise.resolve();
+            for (const ev of events) {
+              yield ev;
+            }
+          })()
+        ),
     },
   };
 }
@@ -145,9 +148,15 @@ describe('streamWithResponsesAPI', () => {
     let capturedParams: Record<string, unknown> | undefined;
     const client = {
       responses: {
-        create: async (params: Record<string, unknown>) => {
+        create: (params: Record<string, unknown>) => {
           capturedParams = params;
-          return (async function* () {})();
+          const empty: Record<string, unknown>[] = [];
+          return Promise.resolve(
+            (async function* () {
+              await Promise.resolve();
+              yield* empty;
+            })()
+          );
         },
       },
     };

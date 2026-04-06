@@ -23,7 +23,7 @@ const mockStream = vi.mocked(respondTextStream);
  * StreamChunk objects and then resolves.
  */
 function makeStreamFn(chunks: Parameters<Parameters<typeof respondTextStream>[1]>[0][]) {
-  return async (
+  return (
     _req: unknown,
     onChunk: (chunk: (typeof chunks)[0]) => void,
     _signal?: AbortSignal
@@ -31,6 +31,7 @@ function makeStreamFn(chunks: Parameters<Parameters<typeof respondTextStream>[1]
     for (const chunk of chunks) {
       onChunk(chunk);
     }
+    return Promise.resolve();
   };
 }
 

@@ -15,32 +15,33 @@ export class InMemorySecretStore implements SecretStore {
     return `${secret.service}:${secret.name}`;
   }
 
-  async isAvailable(): Promise<boolean> {
-    return this.available;
+  isAvailable(): Promise<boolean> {
+    return Promise.resolve(this.available);
   }
 
-  async getSecret(secret: SecretDescriptor): Promise<string | null> {
+  getSecret(secret: SecretDescriptor): Promise<string | null> {
     if (!this.available) {
-      throw new SecretStorageUnavailableError('unavailable');
+      return Promise.reject(new SecretStorageUnavailableError('unavailable'));
     }
 
-    return this.store.get(this.getKey(secret)) ?? null;
+    return Promise.resolve(this.store.get(this.getKey(secret)) ?? null);
   }
 
-  async setSecret(secret: SecretDescriptor, value: string): Promise<void> {
+  setSecret(secret: SecretDescriptor, value: string): Promise<void> {
     if (!this.available) {
-      throw new SecretStorageUnavailableError('unavailable');
+      return Promise.reject(new SecretStorageUnavailableError('unavailable'));
     }
 
     this.store.set(this.getKey(secret), value);
+    return Promise.resolve();
   }
 
-  async deleteSecret(secret: SecretDescriptor): Promise<boolean> {
+  deleteSecret(secret: SecretDescriptor): Promise<boolean> {
     if (!this.available) {
-      throw new SecretStorageUnavailableError('unavailable');
+      return Promise.reject(new SecretStorageUnavailableError('unavailable'));
     }
 
-    return this.store.delete(this.getKey(secret));
+    return Promise.resolve(this.store.delete(this.getKey(secret)));
   }
 }
 

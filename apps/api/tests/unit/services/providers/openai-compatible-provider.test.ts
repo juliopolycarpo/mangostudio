@@ -16,9 +16,10 @@ function createMetadataHarness(initial: SecretMetadataRow[] = []) {
   let rows: SecretMetadataRow[] = [...initial];
 
   return {
-    listMetadata: async (_provider: string, _userId: string) => [...rows],
-    getMetadataById: async (id: string, _userId: string) => rows.find((r) => r.id === id) ?? null,
-    upsertMetadata: async (input: SecretMetadataInput) => {
+    listMetadata: (_provider: string, _userId: string) => Promise.resolve([...rows]),
+    getMetadataById: (id: string, _userId: string) =>
+      Promise.resolve(rows.find((r) => r.id === id) ?? null),
+    upsertMetadata: (input: SecretMetadataInput) => {
       const idx = rows.findIndex((r) => r.id === input.id);
       const row: SecretMetadataRow = {
         id: input.id,
@@ -39,9 +40,11 @@ function createMetadataHarness(initial: SecretMetadataRow[] = []) {
       } else {
         rows.push(row);
       }
+      return Promise.resolve();
     },
-    deleteMetadata: async (id: string, _userId: string) => {
+    deleteMetadata: (id: string, _userId: string) => {
       rows = rows.filter((r) => r.id !== id);
+      return Promise.resolve();
     },
     getCurrentRows: () => rows,
   };
@@ -77,9 +80,8 @@ function createTestService(
         provider: 'openai-compatible',
         tomlSection: 'openai_compatible_api_keys',
         envVarPrefix: 'OPENAI_API_KEY',
-        validateFn: async () => {
-          throw new Error('Cannot validate an openai-compatible key without a baseUrl.');
-        },
+        validateFn: () =>
+          Promise.reject(new Error('Cannot validate an openai-compatible key without a baseUrl.')),
       },
       {
         secretStore,
@@ -167,7 +169,7 @@ describe('openai-compatible resolveClientConfig (via secretService)', () => {
     );
   });
 
-  it('picks the connector with the matching enabledModel when two connectors exist', async () => {
+  it('picks the connector with the matching enabledModel when two connectors exist', () => {
     const rowA = makeCompatRow({
       id: 'compat-a',
       name: 'openrouter',

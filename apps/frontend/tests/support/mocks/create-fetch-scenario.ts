@@ -47,23 +47,25 @@ function getRequestMethod(input: RequestInfo | URL, init?: RequestInit): string 
 export function createFetchScenario() {
   const originalFetch = globalThis.fetch;
   const responses = new Map<FetchScenarioKey, FetchScenarioResponse>();
-  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+  const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const method = getRequestMethod(input, init);
     const url = getRequestUrl(input);
     const key = `${method} ${url.pathname}${url.search}` as FetchScenarioKey;
     const response = responses.get(key);
 
     if (!response) {
-      throw new Error(`[fetch-scenario] Unhandled request: ${key}`);
+      return Promise.reject(new Error(`[fetch-scenario] Unhandled request: ${key}`));
     }
 
-    return new Response(response.body === undefined ? null : JSON.stringify(response.body), {
-      status: response.status ?? 200,
-      headers: {
-        'Content-Type': 'application/json',
-        ...response.headers,
-      },
-    });
+    return Promise.resolve(
+      new Response(response.body === undefined ? null : JSON.stringify(response.body), {
+        status: response.status ?? 200,
+        headers: {
+          'Content-Type': 'application/json',
+          ...response.headers,
+        },
+      })
+    );
   });
 
   return {

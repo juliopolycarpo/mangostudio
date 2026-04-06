@@ -43,7 +43,6 @@ export default tseslint.config(
   {
     files: ['**/tests/**/*.{ts,tsx}'],
     rules: {
-      '@typescript-eslint/require-await': 'off',
       '@typescript-eslint/await-thenable': 'off',
       '@typescript-eslint/no-floating-promises': 'off',
       '@typescript-eslint/no-unsafe-assignment': 'off',
@@ -146,7 +145,6 @@ export default tseslint.config(
     files: ['apps/api/src/services/providers/openai-provider.ts'],
     rules: {
       '@typescript-eslint/no-unnecessary-type-assertion': 'off',
-      '@typescript-eslint/require-await': 'off',
     },
   },
   // Prettier last (disables conflicting stylistic rules; formatting is handled by Prettier itself)

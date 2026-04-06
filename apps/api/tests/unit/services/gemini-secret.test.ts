@@ -11,9 +11,10 @@ function createMetadataHarness(initial: SecretMetadataRow[] = []) {
   let rows: SecretMetadataRow[] = [...initial];
 
   return {
-    listMetadata: async (_provider: string, _userId: string) => [...rows],
-    getMetadataById: async (id: string, _userId: string) => rows.find((r) => r.id === id) ?? null,
-    upsertMetadata: async (input: SecretMetadataInput) => {
+    listMetadata: (_provider: string, _userId: string) => Promise.resolve([...rows]),
+    getMetadataById: (id: string, _userId: string) =>
+      Promise.resolve(rows.find((r) => r.id === id) ?? null),
+    upsertMetadata: (input: SecretMetadataInput) => {
       const idx = rows.findIndex((r) => r.id === input.id);
       const row: SecretMetadataRow = {
         id: input.id,
@@ -34,9 +35,11 @@ function createMetadataHarness(initial: SecretMetadataRow[] = []) {
       } else {
         rows.push(row);
       }
+      return Promise.resolve();
     },
-    deleteMetadata: async (id: string, _userId: string) => {
+    deleteMetadata: (id: string, _userId: string) => {
       rows = rows.filter((r) => r.id !== id);
+      return Promise.resolve();
     },
     getCurrentRows: () => rows,
   };
@@ -47,7 +50,7 @@ describe('createGeminiSecretService', () => {
     const metadata = createMetadataHarness();
     const service = createGeminiSecretService({
       secretStore: new InMemorySecretStore(),
-      fetchImpl: async () => new Response('{}', { status: 200 }),
+      fetchImpl: () => Promise.resolve(new Response('{}', { status: 200 })),
       tomlFilePath: NO_TOML,
       listMetadata: metadata.listMetadata,
       getMetadataById: metadata.getMetadataById,
@@ -65,7 +68,7 @@ describe('createGeminiSecretService', () => {
     const secretStore = new InMemorySecretStore();
     const service = createGeminiSecretService({
       secretStore,
-      fetchImpl: async () => new Response('{}', { status: 200 }),
+      fetchImpl: () => Promise.resolve(new Response('{}', { status: 200 })),
       tomlFilePath: NO_TOML,
       listMetadata: metadata.listMetadata,
       getMetadataById: metadata.getMetadataById,
@@ -93,7 +96,7 @@ describe('createGeminiSecretService', () => {
     const metadata = createMetadataHarness();
     const service = createGeminiSecretService({
       secretStore: new InMemorySecretStore(),
-      fetchImpl: async () => new Response('{}', { status: 401 }),
+      fetchImpl: () => Promise.resolve(new Response('{}', { status: 401 })),
       tomlFilePath: NO_TOML,
       listMetadata: metadata.listMetadata,
       getMetadataById: metadata.getMetadataById,
@@ -123,7 +126,7 @@ describe('createGeminiSecretService', () => {
 
     const service = createGeminiSecretService({
       secretStore,
-      fetchImpl: async () => new Response('{}', { status: 200 }),
+      fetchImpl: () => Promise.resolve(new Response('{}', { status: 200 })),
       now: () => nowValue,
       tomlFilePath: NO_TOML,
       listMetadata: metadata.listMetadata,
@@ -152,7 +155,7 @@ describe('createGeminiSecretService', () => {
     const metadata = createMetadataHarness();
     const service = createGeminiSecretService({
       secretStore,
-      fetchImpl: async () => new Response('{}', { status: 200 }),
+      fetchImpl: () => Promise.resolve(new Response('{}', { status: 200 })),
       tomlFilePath: NO_TOML,
       listMetadata: metadata.listMetadata,
       getMetadataById: metadata.getMetadataById,

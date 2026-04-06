@@ -6,9 +6,9 @@ describe('withModelCache', () => {
     let calls = 0;
 
     const cachedFetch = withModelCache(
-      async (userId: string) => {
+      (userId: string) => {
         calls += 1;
-        return [{ modelId: `${userId}-${calls}` }];
+        return Promise.resolve([{ modelId: `${userId}-${calls}` }]);
       },
       { ttl: 60_000, fallback: [] }
     );

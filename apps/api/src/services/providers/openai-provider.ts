@@ -492,7 +492,7 @@ async function* streamAgentTurnWithResponsesAPI(
     ];
   }
 
-  const makeRequest = async (prevId: string | null) => {
+  const makeRequest = (prevId: string | null) => {
     return (client as any).responses.create({
       model: req.modelName,
       input,

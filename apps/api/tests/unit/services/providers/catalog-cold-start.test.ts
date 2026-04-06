@@ -16,8 +16,9 @@ function makeService(
 ) {
   return createUnifiedModelCatalogService({
     listProviders: () => ['gemini' as ProviderType],
-    getProviderFn: () => ({ listModels: async () => modelList }) as any,
-    listAllSecretMetadataFn: async () => [{ enabledModels: JSON.stringify(enabledIds) }] as any,
+    getProviderFn: () => ({ listModels: () => Promise.resolve(modelList) }) as any,
+    listAllSecretMetadataFn: () =>
+      Promise.resolve([{ enabledModels: JSON.stringify(enabledIds) }] as any),
   });
 }
 
@@ -38,13 +39,13 @@ describe('createUnifiedModelCatalogService.getUnifiedModelCatalog', () => {
       listProviders: () => ['gemini' as ProviderType],
       getProviderFn: () =>
         ({
-          listModels: async () => {
+          listModels: () => {
             callCount++;
-            return [MOCK_MODEL];
+            return Promise.resolve([MOCK_MODEL]);
           },
         }) as any,
-      listAllSecretMetadataFn: async () =>
-        [{ enabledModels: JSON.stringify([MOCK_MODEL.modelId]) }] as any,
+      listAllSecretMetadataFn: () =>
+        Promise.resolve([{ enabledModels: JSON.stringify([MOCK_MODEL.modelId]) }] as any),
     });
 
     // First call — cold cache, triggers refresh (listModels called once)
@@ -63,11 +64,9 @@ describe('createUnifiedModelCatalogService.getUnifiedModelCatalog', () => {
       listProviders: () => ['gemini' as ProviderType],
       getProviderFn: () =>
         ({
-          listModels: async () => {
-            throw new Error('provider unavailable');
-          },
+          listModels: () => Promise.reject(new Error('provider unavailable')),
         }) as any,
-      listAllSecretMetadataFn: async () => [] as any,
+      listAllSecretMetadataFn: () => Promise.resolve([] as any),
     });
 
     const result = await service.getUnifiedModelCatalog('user-error');

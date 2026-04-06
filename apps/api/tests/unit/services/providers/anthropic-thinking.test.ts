@@ -73,6 +73,7 @@ describe('anthropic-provider thinking chunk yielding', () => {
   async function* processAnthropicStreamEvents(
     events: Array<Record<string, unknown>>
   ): AsyncIterable<{ type: string; text: string; done: boolean }> {
+    await Promise.resolve();
     for (const event of events) {
       if (event.type === 'content_block_delta') {
         const delta = event.delta as Record<string, unknown>;

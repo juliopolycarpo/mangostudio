@@ -106,43 +106,46 @@ describe('POST /respond/stream', () => {
     });
 
     mock.module('../../../src/services/chat-service', () => ({
-      verifyChatOwnership: async () => true,
+      verifyChatOwnership: () => Promise.resolve(true),
     }));
 
     mock.module('../../../src/services/providers/registry', () => ({
-      getProviderForModel: async () => ({
-        providerType: 'openai-compatible',
-        generateText: async () => ({ text: '' }),
-        generateAgentTurnStream: async function* (_req: any) {
-          yield { type: 'assistant_text_delta', text: 'Hi' };
-          yield { type: 'turn_completed', providerState: STATELESS_LOOP_STATE };
-        },
-      }),
+      getProviderForModel: () =>
+        Promise.resolve({
+          providerType: 'openai-compatible',
+          generateText: () => Promise.resolve({ text: '' }),
+          generateAgentTurnStream: async function* (_req: any) {
+            await Promise.resolve();
+            yield { type: 'assistant_text_delta', text: 'Hi' };
+            yield { type: 'turn_completed', providerState: STATELESS_LOOP_STATE };
+          },
+        }),
     }));
 
     mock.module('../../../src/services/message-service', () => ({
-      createMessage: async (msg: Record<string, unknown>) => {
+      createMessage: (msg: Record<string, unknown>) => {
         createdMessages.push({ ...msg });
+        return Promise.resolve();
       },
-      loadRichChatHistory: async () => [],
-      loadChatHistory: async () => [],
+      loadRichChatHistory: () => Promise.resolve([]),
+      loadChatHistory: () => Promise.resolve([]),
     }));
 
     mock.module('../../../src/services/tools', () => ({
       getAllToolDefinitions: () => [],
-      executeTool: async () => ({}),
+      executeTool: () => Promise.resolve({}),
     }));
 
     const makeWhere = (): any => ({
-      execute: async () => {},
-      executeTakeFirst: async () => null,
+      execute: () => Promise.resolve(),
+      executeTakeFirst: () => Promise.resolve(null),
       where: () => makeWhere(),
     });
 
     mock.module('../../../src/db/database', () => ({
       getDb: () => ({
         selectFrom: () => ({ select: () => makeWhere() }),
-        insertInto: () => ({ values: () => ({ execute: async () => {} }) }),
+        insertInto: () => ({ values: () => ({ execute: () => Promise.resolve() }) }),
         updateTable: () => ({
           set: (values: Record<string, unknown>) => {
             chatSetCalls.push({ ...values });
@@ -180,28 +183,30 @@ describe('POST /respond/stream', () => {
   it('returns 503 when model catalog is not configured', async () => {
     // Mock getGeminiModelCatalog to return unconfigured state
     mock.module('../../../src/services/gemini/catalog', () => ({
-      getGeminiModelCatalog: async () => ({
-        configured: false,
-        status: 'idle',
-        allModels: [],
-        textModels: [],
-        imageModels: [],
-        discoveredTextModels: [],
-        discoveredImageModels: [],
-      }),
+      getGeminiModelCatalog: () =>
+        Promise.resolve({
+          configured: false,
+          status: 'idle',
+          allModels: [],
+          textModels: [],
+          imageModels: [],
+          discoveredTextModels: [],
+          discoveredImageModels: [],
+        }),
       clearGeminiModelCatalog: () => {},
     }));
 
     mock.module('../../../src/services/gemini', () => ({
-      getGeminiModelCatalog: async () => ({
-        configured: false,
-        status: 'idle',
-        allModels: [],
-        textModels: [],
-        imageModels: [],
-        discoveredTextModels: [],
-        discoveredImageModels: [],
-      }),
+      getGeminiModelCatalog: () =>
+        Promise.resolve({
+          configured: false,
+          status: 'idle',
+          allModels: [],
+          textModels: [],
+          imageModels: [],
+          discoveredTextModels: [],
+          discoveredImageModels: [],
+        }),
       getDefaultTextModel: () => null,
       hasTextModel: () => false,
       clearGeminiModelCatalog: () => {},
@@ -213,12 +218,12 @@ describe('POST /respond/stream', () => {
         selectFrom: () => ({
           select: () => ({
             where: () => ({
-              executeTakeFirst: async () => ({ userId: TEST_USER.id }),
+              executeTakeFirst: () => Promise.resolve({ userId: TEST_USER.id }),
             }),
           }),
         }),
-        insertInto: () => ({ values: () => ({ execute: async () => {} }) }),
-        updateTable: () => ({ set: () => ({ where: () => ({ execute: async () => {} }) }) }),
+        insertInto: () => ({ values: () => ({ execute: () => Promise.resolve() }) }),
+        updateTable: () => ({ set: () => ({ where: () => ({ execute: () => Promise.resolve() }) }) }),
       }),
     }));
 
@@ -251,49 +256,52 @@ describe('POST /respond/stream', () => {
     });
 
     mock.module('../../../src/services/chat-service', () => ({
-      verifyChatOwnership: async () => true,
+      verifyChatOwnership: () => Promise.resolve(true),
     }));
 
     mock.module('../../../src/services/providers/registry', () => ({
-      getProviderForModel: async () => ({
-        providerType: 'openai-compatible',
-        generateText: async () => ({ text: '' }),
-        generateAgentTurnStream: async function* (_req: any) {
-          yield {
-            type: 'continuation_degraded',
-            from: 'stateful',
-            to: 'replay',
-            reason: 'cursor_expired',
-          };
-          yield { type: 'assistant_text_delta', text: 'Hello' };
-          yield { type: 'turn_completed', providerState: STATELESS_STATE };
-        },
-      }),
+      getProviderForModel: () =>
+        Promise.resolve({
+          providerType: 'openai-compatible',
+          generateText: () => Promise.resolve({ text: '' }),
+          generateAgentTurnStream: async function* (_req: any) {
+            await Promise.resolve();
+            yield {
+              type: 'continuation_degraded',
+              from: 'stateful',
+              to: 'replay',
+              reason: 'cursor_expired',
+            };
+            yield { type: 'assistant_text_delta', text: 'Hello' };
+            yield { type: 'turn_completed', providerState: STATELESS_STATE };
+          },
+        }),
     }));
 
     mock.module('../../../src/services/message-service', () => ({
-      createMessage: async (msg: Record<string, unknown>) => {
+      createMessage: (msg: Record<string, unknown>) => {
         createdMessages.push({ ...msg });
+        return Promise.resolve();
       },
-      loadRichChatHistory: async () => [],
-      loadChatHistory: async () => [],
+      loadRichChatHistory: () => Promise.resolve([]),
+      loadChatHistory: () => Promise.resolve([]),
     }));
 
     mock.module('../../../src/services/tools', () => ({
       getAllToolDefinitions: () => [],
-      executeTool: async () => ({}),
+      executeTool: () => Promise.resolve({}),
     }));
 
     const makeWhere = (): any => ({
-      execute: async () => {},
-      executeTakeFirst: async () => null,
+      execute: () => Promise.resolve(),
+      executeTakeFirst: () => Promise.resolve(null),
       where: () => makeWhere(),
     });
 
     mock.module('../../../src/db/database', () => ({
       getDb: () => ({
         selectFrom: () => ({ select: () => makeWhere() }),
-        insertInto: () => ({ values: () => ({ execute: async () => {} }) }),
+        insertInto: () => ({ values: () => ({ execute: () => Promise.resolve() }) }),
         updateTable: () => ({ set: () => makeWhere() }),
       }),
     }));

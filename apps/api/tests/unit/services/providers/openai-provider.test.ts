@@ -20,9 +20,10 @@ function createMetadataHarness(initial: SecretMetadataRow[] = []) {
   let rows: SecretMetadataRow[] = [...initial];
 
   return {
-    listMetadata: async (_provider: string, _userId: string) => [...rows],
-    getMetadataById: async (id: string, _userId: string) => rows.find((r) => r.id === id) ?? null,
-    upsertMetadata: async (input: SecretMetadataInput) => {
+    listMetadata: (_provider: string, _userId: string) => Promise.resolve([...rows]),
+    getMetadataById: (id: string, _userId: string) =>
+      Promise.resolve(rows.find((r) => r.id === id) ?? null),
+    upsertMetadata: (input: SecretMetadataInput) => {
       const idx = rows.findIndex((r) => r.id === input.id);
       const row: SecretMetadataRow = {
         id: input.id,
@@ -45,9 +46,11 @@ function createMetadataHarness(initial: SecretMetadataRow[] = []) {
       } else {
         rows.push(row);
       }
+      return Promise.resolve();
     },
-    deleteMetadata: async (id: string, _userId: string) => {
+    deleteMetadata: (id: string, _userId: string) => {
       rows = rows.filter((r) => r.id !== id);
+      return Promise.resolve();
     },
     getCurrentRows: () => rows,
   };
@@ -113,7 +116,7 @@ describe('openai-provider resolveClientConfig (via secretService)', () => {
         provider: 'openai',
         tomlSection: 'openai_api_keys',
         envVarPrefix: 'OPENAI_API_KEY',
-        validateFn: async () => {},
+        validateFn: () => Promise.resolve(),
       },
       {
         secretStore,
@@ -136,7 +139,7 @@ describe('openai-provider resolveClientConfig (via secretService)', () => {
         provider: 'openai',
         tomlSection: 'openai_api_keys',
         envVarPrefix: 'OPENAI_API_KEY',
-        validateFn: async () => {},
+        validateFn: () => Promise.resolve(),
       },
       {
         secretStore: new InMemorySecretStore(),
@@ -162,7 +165,7 @@ describe('openai-provider resolveClientConfig (via secretService)', () => {
         provider: 'openai',
         tomlSection: 'openai_api_keys',
         envVarPrefix: 'OPENAI_API_KEY',
-        validateFn: async () => {},
+        validateFn: () => Promise.resolve(),
       },
       {
         secretStore: new InMemorySecretStore(),
@@ -209,7 +212,7 @@ describe('openai-provider resolveClientConfig (via secretService)', () => {
         provider: 'openai',
         tomlSection: 'openai_api_keys',
         envVarPrefix: 'OPENAI_API_KEY',
-        validateFn: async () => {},
+        validateFn: () => Promise.resolve(),
       },
       {
         secretStore,

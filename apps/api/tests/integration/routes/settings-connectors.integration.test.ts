@@ -667,12 +667,13 @@ describe('openai project-scoped connector routes', () => {
   it('POST /settings/connectors returns 401 when OpenAI rejects credentials', async () => {
     // Stub validateOpenAIAuthContext at the module level so the route sees it.
     await mock.module('../../../src/services/providers/openai-provider', () => ({
-      validateOpenAIAuthContext: async () => {
-        throw new OpenAIAuthError(
-          'OpenAI API key is invalid or expired. Verify your key and try again.',
-          401
-        );
-      },
+      validateOpenAIAuthContext: () =>
+        Promise.reject(
+          new OpenAIAuthError(
+            'OpenAI API key is invalid or expired. Verify your key and try again.',
+            401
+          )
+        ),
       OpenAIAuthError,
       OpenAIConfigError,
     }));
@@ -701,12 +702,13 @@ describe('openai project-scoped connector routes', () => {
 
   it('POST /settings/connectors returns 403 when OpenAI denies org/project access', async () => {
     await mock.module('../../../src/services/providers/openai-provider', () => ({
-      validateOpenAIAuthContext: async () => {
-        throw new OpenAIAuthError(
-          'OpenAI access denied. Check that your organization ID, project ID, and key permissions are correct.',
-          403
-        );
-      },
+      validateOpenAIAuthContext: () =>
+        Promise.reject(
+          new OpenAIAuthError(
+            'OpenAI access denied. Check that your organization ID, project ID, and key permissions are correct.',
+            403
+          )
+        ),
       OpenAIAuthError,
       OpenAIConfigError,
     }));
