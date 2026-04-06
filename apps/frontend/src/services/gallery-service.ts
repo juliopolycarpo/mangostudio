@@ -6,5 +6,5 @@ export async function fetchGalleryItems(): Promise<GalleryItem[]> {
   if (!res.ok) {
     throw new Error('Failed to fetch gallery items');
   }
-  return res.json();
+  return (await res.json()) as unknown as GalleryItem[];
 }

@@ -71,24 +71,6 @@ export default tseslint.config(
       'react-hooks/incompatible-library': 'off',
     },
   },
-  {
-    files: [
-      'apps/frontend/src/components/MarkdownContent.tsx',
-      'apps/frontend/src/components/settings/ConnectorsSettings.tsx',
-      'apps/frontend/src/hooks/use-chats-query.ts',
-      'apps/frontend/src/hooks/use-global-settings.ts',
-      'apps/frontend/src/hooks/use-messages-query.ts',
-      'apps/frontend/src/hooks/use-optimistic-messages.ts',
-      'apps/frontend/src/services/gallery-service.ts',
-      'apps/frontend/src/services/generation-service.ts',
-    ],
-    rules: {
-      '@typescript-eslint/no-unsafe-assignment': 'off',
-      '@typescript-eslint/no-unsafe-member-access': 'off',
-      '@typescript-eslint/no-unsafe-call': 'off',
-      '@typescript-eslint/no-unsafe-return': 'off',
-    },
-  },
   // SDK adapter boundaries: current provider/client typings still leak `any`
   // into parsing code. Keep typed lint for the repo, but relax unsafe rules
   // in the narrow files that sit directly on third-party response shapes.

@@ -1,5 +1,14 @@
 /* global console */
 import { useState, useEffect } from 'react';
+
+/** Eden 1.4.x creates a union type for dynamic connector segments. Casting through `unknown`
+ * to this interface resolves the union without propagating `any`. */
+type ConnectorByIdRoute = {
+  delete: () => Promise<{ data: null; error: { value: unknown } | null }>;
+  models: {
+    put: (body: { enabledModels: string[] }) => Promise<{ data: null; error: { value: unknown } | null }>;
+  };
+};
 import type {
   Connector,
   ConnectorStatus,
@@ -155,7 +164,7 @@ export function ConnectorsSettings({ modelCatalog, reloadModelCatalog }: Connect
     }
 
     try {
-      const { error } = await (client.api.settings.connectors[id] as any).delete();
+      const { error } = await (client.api.settings.connectors[id] as unknown as ConnectorByIdRoute).delete();
       if (error) throw new Error(extractApiError(error.value, 'Failed to delete connector'));
 
       await reloadModelCatalog();
@@ -171,7 +180,7 @@ export function ConnectorsSettings({ modelCatalog, reloadModelCatalog }: Connect
 
   const handleUpdateModels = async (connectorId: string, enabledModels: string[]) => {
     try {
-      const { error } = await (client.api.settings.connectors[connectorId] as any).models.put({
+      const { error } = await (client.api.settings.connectors[connectorId] as unknown as ConnectorByIdRoute).models.put({
         enabledModels,
       });
       if (error) throw new Error(extractApiError(error.value, 'Failed to update models'));

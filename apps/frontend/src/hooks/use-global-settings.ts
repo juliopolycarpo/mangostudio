@@ -7,7 +7,7 @@ export function useGlobalSettings() {
   const loadFromStorage = <T>(key: string, defaultValue: T): T => {
     try {
       const item = localStorage.getItem(`mangostudio:${key}`);
-      return item ? JSON.parse(item) : defaultValue;
+      return item ? (JSON.parse(item) as unknown as T) : defaultValue;
     } catch {
       return defaultValue;
     }
