@@ -6,10 +6,10 @@
  * type so they continue to work without any user action.
  */
 
-import type { Kysely } from 'kysely';
+import { type Migration } from 'kysely';
 
-export const openaiProviderSplit = {
-  async up(db: Kysely<any>): Promise<void> {
+export const openaiProviderSplit: Migration = {
+  async up(db) {
     await db
       .updateTable('secret_metadata')
       .set({ provider: 'openai' })
@@ -18,7 +18,7 @@ export const openaiProviderSplit = {
       .execute();
   },
 
-  async down(db: Kysely<any>): Promise<void> {
+  async down(db) {
     await db
       .updateTable('secret_metadata')
       .set({ provider: 'openai-compatible' })

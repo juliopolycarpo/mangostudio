@@ -1,4 +1,4 @@
-import type { Kysely } from 'kysely';
+import { type Migration } from 'kysely';
 
 /**
  * Migration 011 — add parts and providerState columns to messages.
@@ -7,8 +7,8 @@ import type { Kysely } from 'kysely';
  * providerState stores opaque provider continuity blobs (e.g. previous_response_id,
  * thinking signatures).
  */
-export const messageParts = {
-  async up(db: Kysely<any>): Promise<void> {
+export const messageParts: Migration = {
+  async up(db) {
     await db.schema
       .alterTable('messages')
       .addColumn('parts', 'text', (col) => col.defaultTo(null))
@@ -20,7 +20,7 @@ export const messageParts = {
       .execute();
   },
 
-  async down(_db: Kysely<any>): Promise<void> {
+  async down(_db) {
     // SQLite does not support DROP COLUMN before version 3.35.0.
     // Dropping these columns is a no-op; the schema is append-only.
   },

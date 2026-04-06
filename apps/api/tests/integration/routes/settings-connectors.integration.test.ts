@@ -332,7 +332,7 @@ describe('openai connector routes', () => {
 
     // Mock validateBaseUrl to avoid DNS lookups in test
     await mock.module('../../../src/services/providers/base-url-policy', () => ({
-      validateBaseUrl: async () => {},
+      validateBaseUrl: () => Promise.resolve(),
       UnsafeBaseUrlError: class UnsafeBaseUrlError extends Error {
         constructor(message: string) {
           super(message);
@@ -427,7 +427,7 @@ describe('openai connector routes', () => {
 
     // Mock validateBaseUrl
     await mock.module('../../../src/services/providers/base-url-policy', () => ({
-      validateBaseUrl: async () => {},
+      validateBaseUrl: () => Promise.resolve(),
       UnsafeBaseUrlError: class UnsafeBaseUrlError extends Error {
         constructor(message: string) {
           super(message);

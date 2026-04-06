@@ -25,7 +25,7 @@ function LoginPage() {
       const redirect = new URLSearchParams(window.location.search).get('redirect');
       void navigate({ to: redirect || '/' });
     }
-  }, [session?.user?.id, navigate]);
+  }, [session?.user, navigate]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

@@ -2,10 +2,10 @@
  * Migration 004: adds performance indexes for common queries.
  */
 
-import type { Kysely } from 'kysely';
+import { type Migration } from 'kysely';
 
-export const addIndexes = {
-  async up(db: Kysely<any>): Promise<void> {
+export const addIndexes: Migration = {
+  async up(db) {
     // Index for gallery query: role='ai', imageUrl not null, ordered by timestamp
     await db.schema
       .createIndex('idx_messages_role_image_url_timestamp')
@@ -39,7 +39,7 @@ export const addIndexes = {
       .execute();
   },
 
-  async down(db: Kysely<any>): Promise<void> {
+  async down(db) {
     await db.schema.dropIndex('idx_messages_role_image_url_timestamp').ifExists().execute();
     await db.schema.dropIndex('idx_messages_chat_id_role_timestamp').ifExists().execute();
     await db.schema.dropIndex('idx_messages_chat_id').ifExists().execute();

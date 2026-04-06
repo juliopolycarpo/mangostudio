@@ -3,14 +3,14 @@
  * Adds nullable baseUrl column for custom provider endpoints.
  */
 
-import type { Kysely } from 'kysely';
+import { type Migration } from 'kysely';
 
-export const providerFields = {
-  async up(db: Kysely<any>): Promise<void> {
+export const providerFields: Migration = {
+  async up(db) {
     await db.schema.alterTable('secret_metadata').addColumn('baseUrl', 'text').execute();
   },
 
-  async down(db: Kysely<any>): Promise<void> {
+  async down(db) {
     await db.schema.alterTable('secret_metadata').dropColumn('baseUrl').execute();
   },
 };

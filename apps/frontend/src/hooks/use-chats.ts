@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
 import type { Chat } from '@mangostudio/shared';
 import {
   useChatsQuery,
@@ -15,7 +15,7 @@ export function useChats() {
   const updateMutation = useUpdateChatMutation();
   const deleteMutation = useDeleteChatMutation();
 
-  const chats = chatsData || [];
+  const chats = useMemo(() => chatsData || [], [chatsData]);
   const error = queryError ? queryError.message : null;
 
   // Auto-select first chat if none selected

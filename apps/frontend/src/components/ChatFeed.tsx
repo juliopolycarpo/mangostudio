@@ -17,7 +17,7 @@ import {
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { AnimatePresence, motion } from 'motion/react';
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { useI18n } from '@/hooks/use-i18n';
 import { MarkdownContent } from '@/components/MarkdownContent';
@@ -55,13 +55,16 @@ function ThinkingBlock({ messageId, text, isStreaming, segmentIndex = 0 }: Think
   const uiStateRef = useRef(initialUiState.current);
   const previousStreamingRef = useRef(isStreaming);
 
-  const updateUiState = (partial: Partial<ThinkingUiState>) => {
-    uiStateRef.current = {
-      ...uiStateRef.current,
-      ...partial,
-    };
-    thinkingUiStateByMessage.set(messageId, uiStateRef.current);
-  };
+  const updateUiState = useCallback(
+    (partial: Partial<ThinkingUiState>) => {
+      uiStateRef.current = {
+        ...uiStateRef.current,
+        ...partial,
+      };
+      thinkingUiStateByMessage.set(messageId, uiStateRef.current);
+    },
+    [messageId]
+  );
 
   useEffect(() => {
     if (!previousStreamingRef.current && isStreaming) {
@@ -75,7 +78,7 @@ function ThinkingBlock({ messageId, text, isStreaming, segmentIndex = 0 }: Think
     }
 
     previousStreamingRef.current = isStreaming;
-  }, [isStreaming]);
+  }, [isStreaming, updateUiState]);
 
   useLayoutEffect(() => {
     if (!expanded || !scrollRef.current) return;
@@ -90,7 +93,7 @@ function ThinkingBlock({ messageId, text, isStreaming, segmentIndex = 0 }: Think
     }
 
     element.scrollTop = Math.min(uiStateRef.current.scrollTop, maxScrollTop);
-  }, [expanded, isStreaming, text]);
+  }, [expanded, isStreaming, text, updateUiState]);
 
   const handleToggle = () => {
     const nextExpanded = !expanded;

@@ -1,5 +1,5 @@
 /* global console */
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 
 /** Eden 1.4.x creates a union type for dynamic connector segments. Casting through `unknown`
  * to this interface resolves the union without propagating `any`. */
@@ -79,7 +79,7 @@ export function ConnectorsSettings({ modelCatalog, reloadModelCatalog }: Connect
   const [showKey, setShowKey] = useState(false);
   const [modelSearchQuery, setModelSearchQuery] = useState('');
 
-  const loadStatus = async () => {
+  const loadStatus = useCallback(async () => {
     try {
       const { data, error } = await client.api.settings.connectors.get();
       if (error) throw new Error(extractApiError(error.value, 'Failed to load status.'));
@@ -87,11 +87,11 @@ export function ConnectorsSettings({ modelCatalog, reloadModelCatalog }: Connect
     } catch (error) {
       console.error('[connectors] Failed to load connector status', error);
     }
-  };
+  }, []);
 
   useEffect(() => {
     void loadStatus();
-  }, []);
+  }, [loadStatus]);
 
   function isReadOnlySharedConnector(connector: Connector): boolean {
     return (

@@ -29,12 +29,13 @@ function AuthenticatedLayout() {
   const { auth } = Route.useRouteContext();
   const navigate = useNavigate();
   const app = useAppState();
+  const { initialize } = app;
   const routerState = useRouterState();
   const currentPath = routerState.location.pathname;
 
   useEffect(() => {
-    void app.initialize();
-  }, [app.initialize]);
+    void initialize();
+  }, [initialize]);
 
   if (!auth.isAuthenticated) {
     void navigate({ to: '/login' });

@@ -1,11 +1,11 @@
-import type { Kysely } from 'kysely';
+import { type Migration } from 'kysely';
 
-export async function up(db: Kysely<any>): Promise<void> {
-  await db.schema.alterTable('chats').addColumn('lastProviderState', 'text').execute();
-}
+export const chatProviderState: Migration = {
+  async up(db) {
+    await db.schema.alterTable('chats').addColumn('lastProviderState', 'text').execute();
+  },
 
-export async function down(db: Kysely<any>): Promise<void> {
-  await db.schema.alterTable('chats').dropColumn('lastProviderState').execute();
-}
-
-export const chatProviderState = { up, down };
+  async down(db) {
+    await db.schema.alterTable('chats').dropColumn('lastProviderState').execute();
+  },
+};

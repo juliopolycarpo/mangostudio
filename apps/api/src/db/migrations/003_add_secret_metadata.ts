@@ -3,10 +3,10 @@
  * Raw secrets stay in Bun.secrets; SQLite stores only UI-safe metadata.
  */
 
-import type { Kysely } from 'kysely';
+import { type Migration } from 'kysely';
 
-export const addSecretMetadata = {
-  async up(db: Kysely<any>): Promise<void> {
+export const addSecretMetadata: Migration = {
+  async up(db) {
     await db.schema
       .createTable('secret_metadata')
       .ifNotExists()
@@ -20,7 +20,7 @@ export const addSecretMetadata = {
       .execute();
   },
 
-  async down(db: Kysely<any>): Promise<void> {
+  async down(db) {
     await db.schema.dropTable('secret_metadata').ifExists().execute();
   },
 };
