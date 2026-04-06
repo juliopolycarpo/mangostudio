@@ -1,8 +1,10 @@
 <div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
+<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/b9f25ec1-2619-44a6-af6a-00e8f6fb2731" />
 </div>
 
+
 # MangoStudio
+
 
 AI-powered image generation and chat studio supporting Gemini, OpenAI-compatible, and Anthropic models.
 
