@@ -165,7 +165,6 @@ const secretService = createProviderSecretService({
  * first configured connector that matches the optional model filter.
  */
 async function resolveAuthContext(userId: string, modelName?: string): Promise<OpenAIAuthContext> {
-  await secretService.syncConfigFileConnectors(userId);
   const rows = await secretService.listMeta('openai', userId);
 
   for (const row of rows) {

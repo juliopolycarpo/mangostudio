@@ -37,7 +37,7 @@ export function useChatsQuery() {
 export function useCreateChatMutation() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (newChat: Chat) => {
+    mutationFn: async (newChat: { title: string; model?: string }) => {
       const { data, error } = await client.api.chats.post(newChat);
       if (error) throw new Error(extractApiError(error.value));
       return data;
@@ -52,7 +52,9 @@ export function useUpdateChatMutation() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async ({ id, updates }: { id: string; updates: Partial<Chat> }) => {
-      const { data, error } = await (client.api.chats[id] as unknown as ChatByIdRoute).put(updates);
+      const { data, error } = await (
+        (client.api.chats as unknown as Record<string, unknown>)[id] as ChatByIdRoute
+      ).put(updates);
       if (error) throw new Error(extractApiError(error.value));
       return data;
     },
@@ -67,7 +69,9 @@ export function useDeleteChatMutation() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (id: string) => {
-      const { data, error } = await (client.api.chats[id] as unknown as ChatByIdRoute).delete();
+      const { data, error } = await (
+        (client.api.chats as unknown as Record<string, unknown>)[id] as ChatByIdRoute
+      ).delete();
       if (error) throw new Error(extractApiError(error.value));
       return data;
     },

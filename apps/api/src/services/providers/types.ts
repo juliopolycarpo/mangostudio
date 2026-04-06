@@ -101,9 +101,6 @@ export interface StreamingChunk {
   done: boolean;
 }
 
-/** @deprecated Use StreamingChunk instead. */
-export type StreamingTextChunk = StreamingChunk;
-
 /** Input for image generation. */
 export interface ImageGenerationRequest {
   userId: string;

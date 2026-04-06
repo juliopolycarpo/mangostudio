@@ -57,9 +57,6 @@ export type AgentEvent =
   | { type: 'turn_error'; error: string }
   | { type: 'continuation_degraded'; from: string; to: string; reason: string };
 
-/** @deprecated Use ThinkingEnabled (boolean) + ReasoningEffort instead. */
-export type ThinkingVisibility = 'summary' | 'full' | 'off';
-
 /** Discriminated union of all content block types in an assistant message. */
 export type MessagePart =
   | { type: 'text'; text: string }

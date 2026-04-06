@@ -167,7 +167,9 @@ export function ConnectorsSettings({ modelCatalog, reloadModelCatalog }: Connect
 
     try {
       const { error } = await (
-        client.api.settings.connectors[id] as unknown as ConnectorByIdRoute
+        (client.api.settings.connectors as unknown as Record<string, unknown>)[
+          id
+        ] as ConnectorByIdRoute
       ).delete();
       if (error) throw new Error(extractApiError(error.value, 'Failed to delete connector'));
 
@@ -185,7 +187,9 @@ export function ConnectorsSettings({ modelCatalog, reloadModelCatalog }: Connect
   const handleUpdateModels = async (connectorId: string, enabledModels: string[]) => {
     try {
       const { error } = await (
-        client.api.settings.connectors[connectorId] as unknown as ConnectorByIdRoute
+        (client.api.settings.connectors as unknown as Record<string, unknown>)[
+          connectorId
+        ] as ConnectorByIdRoute
       ).models.put({
         enabledModels,
       });

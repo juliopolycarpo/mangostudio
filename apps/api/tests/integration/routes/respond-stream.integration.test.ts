@@ -1,6 +1,7 @@
 import { describe, expect, it, mock, afterEach } from 'bun:test';
 import { respondStreamRoutes } from '../../../src/routes/respond-stream';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
+import { getDb } from '../../../src/db/database';
 import type { AgentTurnRequest } from '../../../src/services/providers/types';
 
 const TEST_USER = {
@@ -9,12 +10,17 @@ const TEST_USER = {
   email: 'stream@mangostudio.test',
 };
 
+// Capture the real getDb before any test mocks it, so we can restore after each test.
+// Bun's mock.restore() does not restore mock.module() overrides across test files.
+const realGetDb = getDb;
+
 let restoreAuth: (() => void) | null = null;
 
-afterEach(() => {
+afterEach(async () => {
   restoreAuth?.();
   restoreAuth = null;
-  mock.restore();
+  // Restore the real database module to prevent mock leakage into later test files.
+  await mock.module('../../../src/db/database', () => ({ getDb: realGetDb }));
 });
 
 describe('POST /respond/stream', () => {

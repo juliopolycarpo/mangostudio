@@ -7,7 +7,7 @@ import type { Kysely } from 'kysely';
 import type { Database } from '../db/types';
 import { boolToInt, serializeStyleParams, parseStyleParams } from '../db/serializers';
 import type { ChatTurnContext } from './providers/types';
-import type { MessagePart } from '@mangostudio/shared/types';
+import type { MessagePart, InteractionMode } from '@mangostudio/shared/types';
 
 export interface CreateMessageInput {
   id: string;
@@ -21,7 +21,7 @@ export interface CreateMessageInput {
   generationTime?: string | null;
   modelName?: string | null;
   styleParams?: string[] | null;
-  interactionMode: string;
+  interactionMode: InteractionMode;
   parts?: string | null; // pre-serialized JSON string
   providerState?: string | null; // opaque provider blob
 }
@@ -81,7 +81,7 @@ export async function loadChatHistory(
 
   // Reverse to restore chronological order after DESC fetch
   return rows.reverse().map((row) => ({
-    role: row.role as 'user' | 'ai',
+    role: row.role,
     text: row.text,
   }));
 }
@@ -108,7 +108,7 @@ export async function loadRichChatHistory(
 
   return rows.reverse().map((row) => ({
     id: row.id,
-    role: row.role as 'user' | 'ai',
+    role: row.role,
     text: row.text,
     parts: row.parts ? (JSON.parse(row.parts) as MessagePart[]) : undefined,
     providerState: row.providerState ?? null,

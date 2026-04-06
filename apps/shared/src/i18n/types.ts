@@ -3,13 +3,13 @@ type DeepStringRecord<T> = {
 };
 
 /**
- * Tipo Messages derivado do dicionário pt-BR (source of truth).
- * Verifica que todas as chaves existem, mas aceita qualquer valor string.
- * Todos os locales devem satisfazer este tipo.
+ * Messages type derived from the pt-BR dictionary (source of truth).
+ * Verifies all keys exist but accepts any string value.
+ * All locales must satisfy this type.
  */
 export type Messages = DeepStringRecord<typeof import('./pt-BR').messages>;
 
 /**
- * Locale disponível no projeto.
+ * Locale available in the project.
  */
 export type Locale = 'pt-BR' | 'en';

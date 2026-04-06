@@ -21,7 +21,8 @@
     "migrate": "bun run src/db/migrate.ts",
     "test": "bun run test:unit && bun run test:integration",
     "test:unit": "bun test tests/unit",
-    "test:integration": "bun test tests/integration"
+    "test:integration": "bun test tests/integration",
+    "test:coverage": "bun test --coverage tests/unit tests/integration"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.80.0",

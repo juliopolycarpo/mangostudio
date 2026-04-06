@@ -106,7 +106,7 @@ export const messageRoutes = (app: Elysia) =>
             {
               id: body.id,
               chatId: body.chatId,
-              role: body.role as 'user' | 'ai',
+              role: body.role,
               text: body.text,
               imageUrl: body.imageUrl,
               referenceImage: body.referenceImage,
@@ -133,7 +133,7 @@ export const messageRoutes = (app: Elysia) =>
           body: t.Object({
             id: t.String(),
             chatId: t.String(),
-            role: t.String(),
+            role: t.Union([t.Literal('user'), t.Literal('ai')]),
             text: t.String(),
             imageUrl: t.Optional(t.String()),
             referenceImage: t.Optional(t.String()),
@@ -142,7 +142,7 @@ export const messageRoutes = (app: Elysia) =>
             generationTime: t.Optional(t.String()),
             modelName: t.Optional(t.String()),
             styleParams: t.Optional(t.Array(t.String())),
-            interactionMode: t.Optional(t.String()),
+            interactionMode: t.Optional(t.Union([t.Literal('chat'), t.Literal('image')])),
           }),
         }
       )

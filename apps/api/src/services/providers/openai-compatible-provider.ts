@@ -50,7 +50,6 @@ async function resolveClientConfig(
   userId: string,
   modelName?: string
 ): Promise<{ apiKey: string; baseUrl: string }> {
-  await secretService.syncConfigFileConnectors(userId);
   const rows = await secretService.listMeta('openai-compatible', userId);
 
   for (const row of rows) {

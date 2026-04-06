@@ -15,10 +15,7 @@ import type {
 
 /** Body for POST /api/chats */
 export interface CreateChatBody {
-  id: string;
   title: string;
-  createdAt: number;
-  updatedAt: number;
   model?: string;
 }
 
@@ -104,9 +101,6 @@ export interface ConnectorStatus {
   connectors: Connector[];
 }
 
-/** @deprecated Use ConnectorStatus instead. */
-export type GeminiSecretStatus = ConnectorStatus;
-
 /** Body for POST /api/settings/connectors/gemini */
 export interface AddConnectorBody {
   name: string;
@@ -132,9 +126,6 @@ export interface DeleteGeminiSecretResponse {
 
 /** Runtime state of the cached model catalog. */
 export type ModelCatalogStatus = 'idle' | 'loading' | 'ready' | 'error';
-
-/** @deprecated Use ModelCatalogStatus instead. */
-export type GeminiModelCatalogStatus = ModelCatalogStatus;
 
 /** Provider capabilities for a model. */
 export interface ModelCapabilities {
@@ -163,9 +154,6 @@ export interface ModelOption {
   inputTokenLimit?: number;
 }
 
-/** @deprecated Use ModelOption instead. */
-export type GeminiModelOption = ModelOption;
-
 /** Cached model catalog returned by the API settings route. */
 export interface ModelCatalogResponse {
   configured: boolean;
@@ -178,9 +166,6 @@ export interface ModelCatalogResponse {
   discoveredTextModels: ModelOption[];
   discoveredImageModels: ModelOption[];
 }
-
-/** @deprecated Use ModelCatalogResponse instead. */
-export type GeminiModelCatalogResponse = ModelCatalogResponse;
 
 /** A persisted message returned by the generate or respond endpoint. */
 export interface GeneratedMessage {
@@ -198,11 +183,6 @@ export interface GeneratedMessage {
   interactionMode?: InteractionMode;
   parts?: MessagePart[];
   providerState?: string;
-}
-
-/** Generic API success response. */
-export interface ApiSuccessResponse {
-  success: true;
 }
 
 /** Generic API error response. */
@@ -254,10 +234,4 @@ export interface SignUpBody {
 export interface SignInBody {
   email: string;
   password: string;
-}
-
-/** Standard auth error response */
-export interface AuthErrorResponse {
-  code?: string;
-  message: string;
 }

@@ -34,7 +34,7 @@ export function useMessagesQuery(chatId: string | null) {
     queryFn: async ({ pageParam }) => {
       const query = pageParam ? { cursor: pageParam, limit: '50' } : { limit: '50' };
       const { data, error } = await (
-        client.api.chats[id] as unknown as ChatMessagesRoute
+        (client.api.chats as unknown as Record<string, unknown>)[id] as ChatMessagesRoute
       ).messages.get({ query });
       if (error) throw new Error(extractApiError(error.value));
       return data as MessagesPage;
@@ -77,7 +77,13 @@ export function useUpdateMessageMutation() {
       chatId: string;
       updates: Partial<Message>;
     }) => {
-      const { data, error } = await client.api.messages[id].put(updates);
+      const { data, error } = await (
+        (client.api.messages as unknown as Record<string, unknown>)[id] as {
+          put: (
+            body: Partial<Message>
+          ) => Promise<{ data: unknown; error: { value: unknown } | null }>;
+        }
+      ).put(updates);
       if (error) throw new Error(extractApiError(error.value));
       return data;
     },

@@ -3,7 +3,7 @@
  * Now supports multiple connectors and flexible storage backends.
  */
 
-import type { AddConnectorBody, Connector, GeminiSecretStatus } from '@mangostudio/shared';
+import type { AddConnectorBody, Connector, ConnectorStatus } from '@mangostudio/shared';
 import type { SecretMetadataRow } from '@mangostudio/shared/types';
 import {
   GEMINI_PROVIDER,
@@ -112,7 +112,7 @@ function getTomlFilePath(): string {
 
 interface GeminiSecretService {
   syncConfigFileConnectors(userId: string): Promise<void>;
-  getGeminiSecretStatus(userId: string): Promise<GeminiSecretStatus>;
+  getGeminiSecretStatus(userId: string): Promise<ConnectorStatus>;
   getResolvedGeminiApiKey(userId: string, requestedModel?: string): Promise<string>;
   validateGeminiApiKey(apiKey: string): Promise<void>;
   addGeminiConnector(userId: string, body: AddConnectorBody): Promise<Connector>;
@@ -208,7 +208,7 @@ export function createGeminiSecretService(
     /**
      * Returns all connectors and their UI-safe status.
      */
-    async getGeminiSecretStatus(userId: string): Promise<GeminiSecretStatus> {
+    async getGeminiSecretStatus(userId: string): Promise<ConnectorStatus> {
       await syncConfigFileConnectors(userId);
 
       const metadataRows = await listMetadata(GEMINI_PROVIDER, userId);

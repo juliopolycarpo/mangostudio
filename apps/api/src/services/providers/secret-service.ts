@@ -135,6 +135,13 @@ export function createProviderSecretService(
   const deleteMeta = deps.deleteMetadata ?? deleteSecretMetadata;
   const tomlFilePath = deps.tomlFilePath ?? getConfig().configFilePath;
 
+  // TTL debounce: avoid re-syncing the config file on every request.
+  // The TOML config file rarely changes during runtime, so a 30-second
+  // debounce is safe and eliminates redundant disk I/O and DB queries
+  // on hot paths like /respond/stream.
+  const SYNC_TTL_MS = 30_000;
+  const lastSyncByUser = new Map<string, number>();
+
   const resolveSecretValue = async (connector: SecretMetadataRow): Promise<string | null> => {
     switch (connector.source) {
       case 'bun-secrets':
@@ -173,6 +180,8 @@ export function createProviderSecretService(
   };
 
   const syncConfigFileConnectors = async (userId: string): Promise<void> => {
+    const lastSync = lastSyncByUser.get(userId);
+    if (lastSync && now() - lastSync < SYNC_TTL_MS) return;
     try {
       if (!existsSync(tomlFilePath)) return;
       const parsed = readTomlStringSections(tomlFilePath);
@@ -228,6 +237,8 @@ export function createProviderSecretService(
           await deleteMeta(connector.id, userId);
         }
       }
+
+      lastSyncByUser.set(userId, now());
     } catch (err) {
       console.warn(`[${config.provider}] Failed to sync config.toml:`, err);
     }

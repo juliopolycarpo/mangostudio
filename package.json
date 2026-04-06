@@ -32,6 +32,7 @@
     "test:unit": "bun run --parallel --filter '*' test:unit",
     "test:integration": "bun run --if-present --parallel --filter '*' test:integration",
     "test:coverage": "bun run --filter @mangostudio/frontend test:coverage",
+    "test:coverage:api": "bun run --filter @mangostudio/api test:coverage",
     "test:browser:smoke": "bunx playwright test",
     "migrate": "bun run --filter @mangostudio/api migrate",
     "clean": "rm -rf apps/*/dist apps/*/coverage .mango/out",

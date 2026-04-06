@@ -2,6 +2,11 @@
  * Basic rate limiting plugin for Elysia.
  * Limits requests per IP address with configurable window and max requests.
  * Uses in-memory storage with LRU eviction (suitable for single-instance deployment).
+ *
+ * NOTE: This implementation uses process-local in-memory storage. It will NOT
+ * correctly enforce rate limits across multiple processes or instances (e.g., in a
+ * load-balanced deployment). For multi-process deployments, replace the `store` Map
+ * with a shared backend such as Redis.
  */
 
 import { Elysia } from 'elysia';
@@ -121,13 +126,9 @@ export function rateLimit(config: Partial<RateLimitConfig> = {}) {
         const requestContext = context as RateLimitContext;
         const { clientIp } = requestContext;
 
-        // Skip if no IP or skip function matches
-        if (!clientIp || clientIp === 'unknown') {
-          return;
-        }
-
-        const path = new URL(requestContext.request.url).pathname;
-        if (mergedConfig.skip && mergedConfig.skip(path)) {
+        // 'skipped' sentinel is set by derive() when the skip predicate matched;
+        // avoid re-evaluating the predicate with a potentially different path.
+        if (!clientIp || clientIp === 'unknown' || clientIp === 'skipped') {
           return;
         }
 
