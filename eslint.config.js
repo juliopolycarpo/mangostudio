@@ -72,12 +72,6 @@ export default tseslint.config(
     },
   },
   {
-    files: ['apps/frontend/src/routes/**/*.{ts,tsx}'],
-    rules: {
-      '@typescript-eslint/only-throw-error': 'off',
-    },
-  },
-  {
     files: [
       'apps/frontend/src/components/MarkdownContent.tsx',
       'apps/frontend/src/components/settings/ConnectorsSettings.tsx',

@@ -15,9 +15,10 @@ import { AppContext } from '@/lib/app-context';
 export const Route = createFileRoute('/_authenticated')({
   beforeLoad: ({ context, location }) => {
     if (!context.auth.isAuthenticated) {
-      throw redirect({
+      redirect({
         to: '/login',
         search: { redirect: location.href },
+        throw: true,
       });
     }
   },
