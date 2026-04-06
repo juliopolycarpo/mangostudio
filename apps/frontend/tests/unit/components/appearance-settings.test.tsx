@@ -134,19 +134,17 @@ describe('useTheme hook', () => {
     expect(result.current.resolvedCodeTheme).toBe('one-dark-pro');
   });
 
-  it('auto mode resolves to light theme when app is light', async () => {
+  it('auto mode resolves to light theme when app is light', () => {
     const { result } = renderHook(() => useTheme());
-    // eslint-disable-next-line @typescript-eslint/await-thenable
-    await act(() => {
+    act(() => {
       result.current.setConfig({ appTheme: 'light' });
     });
     expect(result.current.resolvedCodeTheme).toBe('github-light');
   });
 
-  it('manual mode uses darkTheme regardless of app theme', async () => {
+  it('manual mode uses darkTheme regardless of app theme', () => {
     const { result } = renderHook(() => useTheme());
-    // eslint-disable-next-line @typescript-eslint/await-thenable
-    await act(() => {
+    act(() => {
       result.current.setConfig({
         appTheme: 'light',
         codeTheme: { mode: 'manual', darkTheme: 'github-dark-dimmed', lightTheme: 'github-light' },
@@ -155,15 +153,17 @@ describe('useTheme hook', () => {
     expect(result.current.resolvedCodeTheme).toBe('github-dark-dimmed');
   });
 
-  it('code theme preference persists in localStorage', async () => {
+  it('code theme preference persists in localStorage', () => {
     const { result } = renderHook(() => useTheme());
-    // eslint-disable-next-line @typescript-eslint/await-thenable
-    await act(() => {
+    act(() => {
       result.current.setConfig({
         codeTheme: { mode: 'manual', darkTheme: 'github-dark-dimmed', lightTheme: 'one-light' },
       });
     });
-    const stored = JSON.parse(localStorage.getItem('mango-studio-theme') ?? '{}') as Record<string, Record<string, string>>;
+    const stored = JSON.parse(localStorage.getItem('mango-studio-theme') ?? '{}') as Record<
+      string,
+      Record<string, string>
+    >;
     expect(stored.codeTheme.mode).toBe('manual');
     expect(stored.codeTheme.darkTheme).toBe('github-dark-dimmed');
   });
@@ -175,22 +175,23 @@ describe('useTheme hook', () => {
     expect(result.current.config.codeTheme.darkTheme).toBe('one-dark-pro');
   });
 
-  it('setConfig updates fontSize in config', async () => {
+  it('setConfig updates fontSize in config', () => {
     const { result } = renderHook(() => useTheme());
-    // eslint-disable-next-line @typescript-eslint/await-thenable
-    await act(() => {
+    act(() => {
       result.current.setConfig({ fontSize: 'large' });
     });
     expect(result.current.config.fontSize).toBe('large');
   });
 
-  it('setConfig persists settings to localStorage', async () => {
+  it('setConfig persists settings to localStorage', () => {
     const { result } = renderHook(() => useTheme());
-    // eslint-disable-next-line @typescript-eslint/await-thenable
-    await act(() => {
+    act(() => {
       result.current.setConfig({ chatDensity: 'compact' });
     });
-    const stored = JSON.parse(localStorage.getItem('mango-studio-theme') ?? '{}') as Record<string, string>;
+    const stored = JSON.parse(localStorage.getItem('mango-studio-theme') ?? '{}') as Record<
+      string,
+      string
+    >;
     expect(stored.chatDensity).toBe('compact');
   });
 
@@ -212,10 +213,9 @@ describe('useTheme hook', () => {
     expect(result.current.resolvedTheme).toBe('light');
   });
 
-  it('switching to light sets resolvedTheme and data-theme attribute', async () => {
+  it('switching to light sets resolvedTheme and data-theme attribute', () => {
     const { result } = renderHook(() => useTheme());
-    // eslint-disable-next-line @typescript-eslint/await-thenable
-    await act(() => {
+    act(() => {
       result.current.setConfig({ appTheme: 'light' });
     });
     expect(result.current.config.appTheme).toBe('light');
@@ -223,24 +223,25 @@ describe('useTheme hook', () => {
     expect(document.documentElement.dataset.theme).toBe('light');
   });
 
-  it('system theme resolves based on OS preference', async () => {
+  it('system theme resolves based on OS preference', () => {
     // jsdom matchMedia defaults to not matching (prefers-color-scheme: dark = false → light)
     const { result } = renderHook(() => useTheme());
-    // eslint-disable-next-line @typescript-eslint/await-thenable
-    await act(() => {
+    act(() => {
       result.current.setConfig({ appTheme: 'system' });
     });
     expect(result.current.config.appTheme).toBe('system');
     expect(result.current.resolvedTheme).toBe('light');
   });
 
-  it('theme persists across page loads via localStorage', async () => {
+  it('theme persists across page loads via localStorage', () => {
     const { result } = renderHook(() => useTheme());
-    // eslint-disable-next-line @typescript-eslint/await-thenable
-    await act(() => {
+    act(() => {
       result.current.setConfig({ appTheme: 'light' });
     });
-    const stored = JSON.parse(localStorage.getItem('mango-studio-theme') ?? '{}') as Record<string, string>;
+    const stored = JSON.parse(localStorage.getItem('mango-studio-theme') ?? '{}') as Record<
+      string,
+      string
+    >;
     expect(stored.appTheme).toBe('light');
   });
 });

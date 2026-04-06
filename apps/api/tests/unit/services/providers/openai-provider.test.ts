@@ -151,10 +151,9 @@ describe('openai-provider resolveClientConfig (via secretService)', () => {
       }
     );
 
-    // eslint-disable-next-line @typescript-eslint/await-thenable
-    await expect(service.resolveApiKey(TEST_USER)).rejects.toThrow(
+    await (expect(service.resolveApiKey(TEST_USER)).rejects.toThrow(
       'No openai API key is configured or enabled'
-    );
+    ) as unknown as Promise<void>);
   });
 
   it('skips unconfigured rows', async () => {
@@ -178,10 +177,9 @@ describe('openai-provider resolveClientConfig (via secretService)', () => {
       }
     );
 
-    // eslint-disable-next-line @typescript-eslint/await-thenable
-    await expect(service.resolveApiKey(TEST_USER)).rejects.toThrow(
+    await (expect(service.resolveApiKey(TEST_USER)).rejects.toThrow(
       'No openai API key is configured or enabled'
-    );
+    ) as unknown as Promise<void>);
   });
 
   it('respects enabledModels filter when modelName is given', async () => {
@@ -257,10 +255,7 @@ describe('validateOpenAIAuthContext', () => {
 
     try {
       // Should not throw
-      // eslint-disable-next-line @typescript-eslint/await-thenable
-      await expect(
-        validateOpenAIAuthContext({ apiKey: 'sk-valid-key-1234' })
-      ).resolves.toBeUndefined();
+      expect(await validateOpenAIAuthContext({ apiKey: 'sk-valid-key-1234' })).toBeUndefined();
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -324,15 +319,13 @@ describe('validateOpenAIAuthContext', () => {
     }) as typeof fetch;
 
     try {
-      // eslint-disable-next-line @typescript-eslint/await-thenable
-      await expect(validateOpenAIAuthContext({ apiKey: 'sk-invalid-key' })).rejects.toThrow(
+      await (expect(validateOpenAIAuthContext({ apiKey: 'sk-invalid-key' })).rejects.toThrow(
         OpenAIAuthError
-      );
+      ) as unknown as Promise<void>);
 
-      // eslint-disable-next-line @typescript-eslint/await-thenable
-      await expect(validateOpenAIAuthContext({ apiKey: 'sk-invalid-key' })).rejects.toThrow(
+      await (expect(validateOpenAIAuthContext({ apiKey: 'sk-invalid-key' })).rejects.toThrow(
         'invalid or expired'
-      );
+      ) as unknown as Promise<void>);
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -385,10 +378,9 @@ describe('validateOpenAIAuthContext', () => {
     }) as typeof fetch;
 
     try {
-      // eslint-disable-next-line @typescript-eslint/await-thenable
-      await expect(validateOpenAIAuthContext({ apiKey: 'sk-any-key' })).rejects.toThrow(
+      await (expect(validateOpenAIAuthContext({ apiKey: 'sk-any-key' })).rejects.toThrow(
         OpenAIConfigError
-      );
+      ) as unknown as Promise<void>);
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -438,7 +430,9 @@ describe('openai-provider listModels filtering', () => {
 
     const { openAIProvider } = await import('../../../../src/services/providers/openai-provider');
     // Evict any stale cache entry so the mocked DB path is actually exercised.
-    (openAIProvider as unknown as Record<string, ((userId: string) => void) | undefined>).invalidateModelCache?.('nonexistent-user-no-keys');
+    (
+      openAIProvider as unknown as Record<string, ((userId: string) => void) | undefined>
+    ).invalidateModelCache?.('nonexistent-user-no-keys');
 
     const models = await openAIProvider.listModels('nonexistent-user-no-keys');
     expect(models).toEqual([]);

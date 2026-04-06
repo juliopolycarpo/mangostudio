@@ -162,12 +162,11 @@ describe('openai-compatible resolveClientConfig (via secretService)', () => {
 
     // The real provider throws this specific error when no eligible connector is found.
     // 'user-with-no-valid-connectors' has no connectors in the test DB.
-    // eslint-disable-next-line @typescript-eslint/await-thenable
-    await expect(
+    await (expect(
       openAICompatibleProvider.resolveApiKey('user-with-no-valid-connectors')
     ).rejects.toThrow(
       'No openai-compatible connector with a valid baseUrl is configured for this model.'
-    );
+    ) as unknown as Promise<void>);
   });
 
   it('picks the connector with the matching enabledModel when two connectors exist', () => {

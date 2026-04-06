@@ -73,7 +73,11 @@ describe('GeminiProvider.generateTextStream', () => {
             Promise.resolve(
               (async function* () {
                 await Promise.resolve();
-                yield { text: '', promptFeedback: { blockReason: 'SAFETY' }, candidates: undefined };
+                yield {
+                  text: '',
+                  promptFeedback: { blockReason: 'SAFETY' },
+                  candidates: undefined,
+                };
               })()
             ),
         };
@@ -86,8 +90,7 @@ describe('GeminiProvider.generateTextStream', () => {
 
     const { generateTextStream } = await import('../../../../src/services/gemini/text');
 
-    // eslint-disable-next-line @typescript-eslint/await-thenable
-    await expect(async () => {
+    await (expect(async () => {
       for await (const _chunk of generateTextStream(
         'user-1',
         [],
@@ -97,18 +100,17 @@ describe('GeminiProvider.generateTextStream', () => {
       )) {
         // consume
       }
-    }).toThrow('Prompt blocked: SAFETY');
+    }).toThrow('Prompt blocked: SAFETY') as unknown as Promise<void>);
   });
 
   it('throws when no modelName is provided', async () => {
     const { generateTextStream } = await import('../../../../src/services/gemini/text');
 
-    // eslint-disable-next-line @typescript-eslint/await-thenable
-    await expect(async () => {
+    await (expect(async () => {
       for await (const _chunk of generateTextStream('user-1', [], 'Hi', undefined, undefined)) {
         // consume
       }
-    }).toThrow('No Gemini text model was provided.');
+    }).toThrow('No Gemini text model was provided.') as unknown as Promise<void>);
   });
 
   it('emits thinking chunks when thinkingEnabled is true', async () => {
