@@ -382,7 +382,8 @@ export const connectorRoutes = new Elysia()
 
         // Reload and return the new connector
         const meta = await getSecretMetadataById(id, userId);
-        return toConnector(meta!);
+        if (!meta) throw new Error(`Connector ${id} not found after upsert`);
+        return toConnector(meta);
       } catch (error) {
         return handleSecretRouteError(error, set);
       }

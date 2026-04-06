@@ -141,14 +141,15 @@ export function rateLimit(config: Partial<RateLimitConfig> = {}) {
         const key = `rate-limit:${clientIp}`;
         const existing = store.get(key);
 
-        // Initialize or reset expired entry
+        // Initialize or reset expired entry; capture in `entry` to avoid a second Map lookup
+        let entry: RateLimitEntry;
         if (!existing || existing.resetTime < now) {
-          store.set(key, { count: 1, resetTime: now + mergedConfig.windowMs });
+          entry = { count: 1, resetTime: now + mergedConfig.windowMs };
+          store.set(key, entry);
         } else {
           existing.count++;
+          entry = existing;
         }
-
-        const entry = store.get(key)!;
 
         // Set rate limit headers
         if (mergedConfig.headers) {

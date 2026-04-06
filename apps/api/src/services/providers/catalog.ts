@@ -76,8 +76,11 @@ export function createUnifiedModelCatalogService(deps: UnifiedModelCatalogDeps =
   const refreshPromises = new Map<string, Promise<ModelCatalogResponse>>();
 
   function getSnapshot(userId: string): ModelCatalogResponse {
-    if (!snapshots.has(userId)) snapshots.set(userId, createEmptySnapshot());
-    return snapshots.get(userId)!;
+    const existing = snapshots.get(userId);
+    if (existing) return existing;
+    const fresh = createEmptySnapshot();
+    snapshots.set(userId, fresh);
+    return fresh;
   }
 
   function isStale(userId: string): boolean {
@@ -133,7 +136,8 @@ export function createUnifiedModelCatalogService(deps: UnifiedModelCatalogDeps =
      * Providers that fail (e.g. no connector configured) are silently skipped.
      */
     async refresh(userId: string): Promise<ModelCatalogResponse> {
-      if (refreshPromises.has(userId)) return refreshPromises.get(userId)!;
+      const inflight = refreshPromises.get(userId);
+      if (inflight) return inflight;
 
       const promise = (async () => {
         try {

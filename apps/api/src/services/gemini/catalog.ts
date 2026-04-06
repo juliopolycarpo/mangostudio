@@ -82,9 +82,12 @@ export function createGeminiModelCatalogService(
   const refreshPromises = new Map<string, Promise<GeminiModelCatalogResponse>>();
   const TTL_MS = 60 * 60 * 1000; // 1 hour
 
-  function getSnapshot(userId: string) {
-    if (!snapshots.has(userId)) snapshots.set(userId, createEmptySnapshot());
-    return snapshots.get(userId)!;
+  function getSnapshot(userId: string): GeminiModelCatalogResponse {
+    const existing = snapshots.get(userId);
+    if (existing) return existing;
+    const fresh = createEmptySnapshot();
+    snapshots.set(userId, fresh);
+    return fresh;
   }
 
   function getFullCatalog(userId: string) {
@@ -137,7 +140,8 @@ export function createGeminiModelCatalogService(
       userId: string,
       _reason: GeminiModelCatalogRefreshReason
     ): Promise<GeminiModelCatalogResponse> {
-      if (refreshPromises.has(userId)) return refreshPromises.get(userId)!;
+      const inflight = refreshPromises.get(userId);
+      if (inflight) return inflight;
 
       const refreshPromise = (async () => {
         try {

@@ -315,7 +315,9 @@ ${envVar}="${apiKey}"
       await upsertMetadata(input);
 
       const status = await this.getGeminiSecretStatus(userId);
-      return status.connectors.find((c) => c.id === id)!;
+      const connector = status.connectors.find((c) => c.id === id);
+      if (!connector) throw new Error(`Connector ${id} not found after creation`);
+      return connector;
     },
 
     /**

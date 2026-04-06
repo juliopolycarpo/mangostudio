@@ -217,7 +217,9 @@ async function* streamOAICompatAgentTurn(req: AgentTurnRequest): AsyncIterable<A
 
   const loopState = parseOAICompatLoopState(req.providerState);
   const tools =
-    (req.toolDefinitions ?? []).length > 0 ? toolDefsToOAIChat(req.toolDefinitions!) : undefined;
+    req.toolDefinitions && req.toolDefinitions.length > 0
+      ? toolDefsToOAIChat(req.toolDefinitions)
+      : undefined;
 
   // Build messages: system + structured DB history + accumulated loop messages + current input
   const messages: OpenAI.ChatCompletionMessageParam[] = [
