@@ -54,7 +54,7 @@ export function useImageGeneration({
 
       const optimisticUserMsg: Message = {
         id: optimisticUserMsgId,
-        chatId: activeChatId!,
+        chatId: activeChatId,
         role: 'user',
         text: prompt,
         referenceImage: previewUrl || undefined,
@@ -64,7 +64,7 @@ export function useImageGeneration({
 
       const optimisticAiMsg: Message = {
         id: optimisticAiMsgId,
-        chatId: activeChatId!,
+        chatId: activeChatId,
         role: 'ai',
         text: '',
         timestamp: new Date(),
@@ -73,14 +73,14 @@ export function useImageGeneration({
         interactionMode: 'image',
       };
 
-      appendOptimisticMessages(activeChatId!, [optimisticUserMsg, optimisticAiMsg]);
+      appendOptimisticMessages(activeChatId, [optimisticUserMsg, optimisticAiMsg]);
 
       // Upload reference image after showing optimistic messages so failures are visible
       let refImageUrl: string | null = null;
       if (referenceImage) {
         refImageUrl = await uploadReferenceImage(referenceImage);
         if (!refImageUrl) {
-          updateOptimisticMessage(activeChatId!, optimisticAiMsgId, {
+          updateOptimisticMessage(activeChatId, optimisticAiMsgId, {
             isGenerating: false,
             text: t.errors.referenceImageUploadFailed,
           });
@@ -92,7 +92,7 @@ export function useImageGeneration({
 
       try {
         const { userMessage, aiMessage } = await generateImage({
-          chatId: activeChatId!,
+          chatId: activeChatId,
           prompt,
           systemPrompt: settings.globalImageSystemPrompt || undefined,
           referenceImageUrl: refImageUrl || undefined,
@@ -101,7 +101,7 @@ export function useImageGeneration({
         });
 
         replaceOptimisticMessages(
-          activeChatId!,
+          activeChatId,
           [optimisticUserMsgId, optimisticAiMsgId],
           [
             {
@@ -132,7 +132,7 @@ export function useImageGeneration({
         console.error('[generate]', error);
         const errorText =
           error instanceof Error ? error.message : 'Failed to generate image. Please try again.';
-        updateOptimisticMessage(activeChatId!, optimisticAiMsgId, {
+        updateOptimisticMessage(activeChatId, optimisticAiMsgId, {
           isGenerating: false,
           text: errorText,
         });
@@ -140,7 +140,7 @@ export function useImageGeneration({
         setIsGenerating(false);
         if (previewUrl) URL.revokeObjectURL(previewUrl);
         void chats.loadChats();
-        void queryClient.invalidateQueries({ queryKey: messageKeys.list(activeChatId!) });
+        void queryClient.invalidateQueries({ queryKey: messageKeys.list(activeChatId) });
         void queryClient.invalidateQueries({ queryKey: galleryKeys.lists() });
       }
     },

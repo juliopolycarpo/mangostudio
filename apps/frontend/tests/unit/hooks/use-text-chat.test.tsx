@@ -122,7 +122,7 @@ describe('useTextChat — thinking segment tracking', () => {
     expect(lastPartsCall).toBeDefined();
     const thinkingParts = lastPartsCall![2].parts!.filter((p) => p.type === 'thinking');
     expect(thinkingParts).toHaveLength(1);
-    expect((thinkingParts[0] as Extract<MessagePart, { type: 'thinking' }>).text).toBe(
+    expect((thinkingParts[0]).text).toBe(
       'part1 part2'
     );
   });
@@ -172,7 +172,7 @@ describe('useTextChat — thinking segment tracking', () => {
     expect(twoThinkingCall).toBeDefined();
     const twoThinkingParts = twoThinkingCall![2].parts!.filter(
       (p) => p.type === 'thinking'
-    ) as Extract<MessagePart, { type: 'thinking' }>[];
+    );
     expect(twoThinkingParts[0].text).toBe('before tool');
     expect(twoThinkingParts[1].text).toBe('after tool');
   });

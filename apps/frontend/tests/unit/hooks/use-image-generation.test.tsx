@@ -76,7 +76,7 @@ describe('useImageGeneration — reference image upload failure', () => {
       expect.objectContaining({ isGenerating: false })
     );
 
-    const [, , update] = (props.optimistic.updateOptimisticMessage as any).mock.calls[0];
+    const [, , update] = (props.optimistic.updateOptimisticMessage).mock.calls[0];
     expect(typeof update.text).toBe('string');
     expect(update.text.length).toBeGreaterThan(0);
 

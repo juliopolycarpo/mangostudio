@@ -293,7 +293,7 @@ describe('validateOpenAIAuthContext', () => {
       });
       // The SDK should have sent OpenAI-Organization and OpenAI-Project headers
       expect(capturedHeaders.length).toBeGreaterThan(0);
-      const h = capturedHeaders[0]!;
+      const h = capturedHeaders[0];
       expect(h['openai-organization']).toBe('org-testorg123');
       expect(h['openai-project']).toBe('proj_testproject456');
     } finally {

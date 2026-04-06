@@ -224,7 +224,7 @@ describe('streamWithResponsesAPI', () => {
 
     const thinkingChunks = chunks.filter((c) => c.type === 'thinking');
     expect(thinkingChunks.length).toBe(1);
-    expect(thinkingChunks[0]!.text).toBe('Streamed thinking.');
+    expect(thinkingChunks[0].text).toBe('Streamed thinking.');
   });
 
   it('falls back to response.completed reasoning extraction', async () => {
@@ -246,7 +246,7 @@ describe('streamWithResponsesAPI', () => {
 
     const thinkingChunks = chunks.filter((c) => c.type === 'thinking');
     expect(thinkingChunks.length).toBe(1);
-    expect(thinkingChunks[0]!.text).toBe('Fallback reasoning.');
+    expect(thinkingChunks[0].text).toBe('Fallback reasoning.');
   });
 
   it('ignores reasoning_text.delta when summary events were already seen', async () => {
@@ -270,7 +270,7 @@ describe('streamWithResponsesAPI', () => {
 
     const thinkingChunks = chunks.filter((c) => c.type === 'thinking');
     expect(thinkingChunks.length).toBe(1);
-    expect(thinkingChunks[0]!.text).toBe('Summary thinking.');
+    expect(thinkingChunks[0].text).toBe('Summary thinking.');
   });
 
   it('handles multiple summary blocks', async () => {
@@ -294,7 +294,7 @@ describe('streamWithResponsesAPI', () => {
 
     const thinkingChunks = chunks.filter((c) => c.type === 'thinking');
     expect(thinkingChunks.length).toBe(2);
-    expect(thinkingChunks[0]!.text).toBe('First block.');
-    expect(thinkingChunks[1]!.text).toBe('Second block.');
+    expect(thinkingChunks[0].text).toBe('First block.');
+    expect(thinkingChunks[1].text).toBe('Second block.');
   });
 });

@@ -99,7 +99,7 @@ describe('ConnectorsSettings', () => {
 
     // Open the add modal — pick the first "Add Connector" button (header button)
     const addButtons = screen.getAllByRole('button', { name: /add connector/i });
-    await user.click(addButtons[0]!);
+    await user.click(addButtons[0]);
 
     // Fill in the form
     const nameInput = screen.getByLabelText(/^name$/i);
@@ -110,7 +110,7 @@ describe('ConnectorsSettings', () => {
 
     // Submit — the modal's submit button is the last "Add Connector" button in the DOM
     const allAddButtons = screen.getAllByRole('button', { name: /add connector/i });
-    await user.click(allAddButtons[allAddButtons.length - 1]!);
+    await user.click(allAddButtons[allAddButtons.length - 1]);
 
     await waitFor(() => expect(props.reloadModelCatalog).toHaveBeenCalledTimes(1));
   });

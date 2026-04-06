@@ -148,9 +148,9 @@ describe('anthropic-provider thinking chunk yielding', () => {
     }
 
     expect(chunks.length).toBe(4); // 2 thinking + 1 text + 1 done
-    expect(chunks[0]!.type).toBe('thinking');
-    expect(chunks[1]!.type).toBe('thinking');
-    expect(chunks[2]!.type).toBe('text');
-    expect(chunks[3]!.done).toBe(true);
+    expect(chunks[0].type).toBe('thinking');
+    expect(chunks[1].type).toBe('thinking');
+    expect(chunks[2].type).toBe('text');
+    expect(chunks[3].done).toBe(true);
   });
 });

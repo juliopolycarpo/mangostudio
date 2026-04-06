@@ -50,7 +50,6 @@ export default tseslint.config(
       '@typescript-eslint/no-unsafe-return': 'off',
       '@typescript-eslint/no-unsafe-call': 'off',
       '@typescript-eslint/no-unsafe-argument': 'off',
-      '@typescript-eslint/no-unnecessary-type-assertion': 'off',
       '@typescript-eslint/no-base-to-string': 'off',
       '@typescript-eslint/unbound-method': 'off',
     },
@@ -111,17 +110,6 @@ export default tseslint.config(
       '@typescript-eslint/no-unsafe-return': 'off',
     },
   },
-  {
-    files: [
-      'apps/frontend/src/components/MarkdownContent.tsx',
-      'apps/frontend/src/hooks/use-image-generation.ts',
-      'apps/frontend/src/hooks/use-text-chat.ts',
-      'apps/frontend/src/services/generation-service.ts',
-    ],
-    rules: {
-      '@typescript-eslint/no-unnecessary-type-assertion': 'off',
-    },
-  },
   // SDK adapter boundaries: current provider/client typings still leak `any`
   // into parsing code. Keep typed lint for the repo, but relax unsafe rules
   // in the narrow files that sit directly on third-party response shapes.
@@ -139,12 +127,6 @@ export default tseslint.config(
       '@typescript-eslint/no-unsafe-call': 'off',
       '@typescript-eslint/no-unsafe-return': 'off',
       '@typescript-eslint/no-unsafe-argument': 'off',
-    },
-  },
-  {
-    files: ['apps/api/src/services/providers/openai-provider.ts'],
-    rules: {
-      '@typescript-eslint/no-unnecessary-type-assertion': 'off',
     },
   },
   // Prettier last (disables conflicting stylistic rules; formatting is handled by Prettier itself)

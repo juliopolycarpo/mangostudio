@@ -27,7 +27,6 @@ import type {
   AgentEvent,
   ToolDefinition,
 } from './types';
-import type { SecretMetadataRow } from '@mangostudio/shared/types';
 import {
   parseContinuationEnvelope,
   serializeContinuationEnvelope,
@@ -172,8 +171,8 @@ async function resolveAuthContext(userId: string, modelName?: string): Promise<O
     if (apiKey) {
       return {
         apiKey,
-        organizationId: (row as SecretMetadataRow).organizationId ?? null,
-        projectId: (row as SecretMetadataRow).projectId ?? null,
+        organizationId: (row).organizationId ?? null,
+        projectId: (row).projectId ?? null,
       };
     }
   }
@@ -197,8 +196,8 @@ const listModelsWithCache = withModelCache(
       if (apiKey) {
         resolvedCtx = {
           apiKey,
-          organizationId: (row as SecretMetadataRow).organizationId ?? null,
-          projectId: (row as SecretMetadataRow).projectId ?? null,
+          organizationId: row.organizationId ?? null,
+          projectId: row.projectId ?? null,
         };
         break;
       }
@@ -572,7 +571,7 @@ async function* streamAgentTurnWithResponsesAPI(
   for await (const event of stream) {
     if (req.signal?.aborted) break;
 
-    const ev = event as Record<string, any>;
+    const ev = event;
     const type = ev.type as string;
 
     switch (type) {

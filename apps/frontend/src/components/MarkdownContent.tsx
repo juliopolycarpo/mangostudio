@@ -69,11 +69,11 @@ export function MarkdownContent({
 
   const html = useMemo(() => {
     if (!content) return '';
-    return parser.parse(content, { async: false }) as string;
+    return parser.parse(content, { async: false });
   }, [content, parser]);
 
   const renderedHtml = isStreaming
-    ? (parser.parse(content || '', { async: false }) as string)
+    ? (parser.parse(content || '', { async: false }))
     : html;
 
   // Event delegation for copy buttons — survives dangerouslySetInnerHTML re-renders
@@ -83,7 +83,7 @@ export function MarkdownContent({
 
     const handleClick = (e: MouseEvent) => {
       void (async () => {
-        const btn = (e.target as HTMLElement).closest('.copy-code-btn') as HTMLButtonElement | null;
+        const btn = (e.target as HTMLElement).closest('.copy-code-btn');
         if (!btn) return;
 
         const pre = btn.closest('pre');

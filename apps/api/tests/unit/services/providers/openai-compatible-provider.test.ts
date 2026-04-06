@@ -144,7 +144,7 @@ describe('openai-compatible resolveClientConfig (via secretService)', () => {
     const rows = [rowWithoutUrl, rowWithUrl];
     const rowsWithBaseUrl = rows.filter((r) => r.baseUrl);
     expect(rowsWithBaseUrl).toHaveLength(1);
-    expect(rowsWithBaseUrl[0]!.id).toBe('has-url');
+    expect(rowsWithBaseUrl[0].id).toBe('has-url');
   });
 
   it('skips rows where baseUrl is empty string', () => {
@@ -196,8 +196,8 @@ describe('openai-compatible resolveClientConfig (via secretService)', () => {
     });
 
     expect(matching).toHaveLength(1);
-    expect(matching[0]!.id).toBe('compat-b');
-    expect(matching[0]!.baseUrl).toBe(DEEPSEEK_BASE_URL);
+    expect(matching[0].id).toBe('compat-b');
+    expect(matching[0].baseUrl).toBe(DEEPSEEK_BASE_URL);
   });
 
   it('does NOT fall back to https://api.openai.com/v1', async () => {
@@ -275,7 +275,7 @@ describe('openai-compatible listModels filtering', () => {
 
     const validRows = rows.filter((r) => r.configured && r.baseUrl);
     expect(validRows).toHaveLength(1);
-    expect(validRows[0]!.id).toBe('has-url-list');
+    expect(validRows[0].id).toBe('has-url-list');
   });
 
   it('deduplicates by baseUrl (single API call per unique endpoint)', () => {

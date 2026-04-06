@@ -19,7 +19,7 @@ describe('MarkdownContent', () => {
 
   it('renders links with target="_blank" and rel="noopener noreferrer"', () => {
     render(<MarkdownContent content="[example](https://example.com)" />);
-    const link = screen.getByText('example') as HTMLAnchorElement;
+    const link = screen.getByText('example');
     expect(link.tagName).toBe('A');
     expect(link.getAttribute('target')).toBe('_blank');
     expect(link.getAttribute('rel')).toBe('noopener noreferrer');
@@ -28,7 +28,7 @@ describe('MarkdownContent', () => {
 
   it('neutralizes javascript: URLs', () => {
     render(<MarkdownContent content="[click](javascript:alert(1))" />);
-    const link = screen.getByText('click') as HTMLAnchorElement;
+    const link = screen.getByText('click');
     expect(link.getAttribute('href')).toBe('#');
   });
 

@@ -79,7 +79,7 @@ export function createFetchScenario() {
      * @param response - Mock response details.
      */
     respondWithJson(method: string, path: string, response: FetchScenarioResponse = {}) {
-      responses.set(`${method.toUpperCase()} ${path}` as FetchScenarioKey, response);
+      responses.set(`${method.toUpperCase()} ${path}`, response);
       return this;
     },
 
