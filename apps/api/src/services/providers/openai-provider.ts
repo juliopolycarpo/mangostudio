@@ -37,6 +37,11 @@ import {
 import { getModelContextLimit } from './context-policy';
 import { buildOpenAIResponsesReplay } from './replay-builder';
 import { parseStringArray } from '../../utils/json';
+import {
+  extractReasoningFromCompleted,
+  extractResponsesUsage,
+  type ResponseStreamEvent,
+} from './openai-normalizers';
 
 const BASE_URL = 'https://api.openai.com/v1';
 
@@ -283,36 +288,8 @@ function buildResponsesInput(req: TextGenerationRequest): Array<{ role: string; 
   return messages;
 }
 
-/**
- * Extracts reasoning text from a completed response payload.
- * Tries summary array first, then falls back to reasoning content array.
- */
-export function extractReasoningFromCompleted(response: Record<string, unknown>): string | null {
-  const output = response?.output;
-  if (!Array.isArray(output)) return null;
-
-  for (const item of output) {
-    if (item.type !== 'reasoning') continue;
-
-    // Try summary array first
-    if (Array.isArray(item.summary)) {
-      const texts = item.summary
-        .filter((s: Record<string, unknown>) => s.type === 'summary_text' && s.text)
-        .map((s: Record<string, unknown>) => s.text as string);
-      if (texts.length > 0) return texts.join('\n\n');
-    }
-
-    // Fallback: reasoning content array
-    if (Array.isArray(item.content)) {
-      const texts = item.content
-        .filter((c: Record<string, unknown>) => c.type === 'reasoning_text' && c.text)
-        .map((c: Record<string, unknown>) => c.text as string);
-      if (texts.length > 0) return texts.join('\n\n');
-    }
-  }
-
-  return null;
-}
+// Re-export from normalizers for backward compatibility with test imports
+export { extractReasoningFromCompleted, extractReasoningChunks } from './openai-normalizers';
 
 /**
  * Streams a reasoning model response using the OpenAI Responses API.
@@ -325,9 +302,9 @@ export async function* streamWithResponsesAPI(
   const effort = req.generationConfig?.reasoningEffort ?? 'medium';
   const input = buildResponsesInput(req);
 
-  const stream = await (client as any).responses.create({
+  const stream = await client.responses.create({
     model: req.modelName,
-    input,
+    input: input as unknown as OpenAI.Responses.ResponseInput,
     ...(req.systemPrompt?.trim() ? { instructions: req.systemPrompt } : {}),
     stream: true,
     reasoning: {
@@ -341,13 +318,10 @@ export async function* streamWithResponsesAPI(
   let thinkingWasEmitted = false;
   let summaryEventsWereSeen = false;
 
-  for await (const event of stream) {
+  for await (const ev of stream) {
     if (req.signal?.aborted) break;
 
-    const ev = event as Record<string, any>;
-    const type = ev.type as string;
-
-    switch (type) {
+    switch (ev.type) {
       // --- Reasoning summary (preferred path) ---
       case 'response.reasoning_summary_text.delta': {
         const key = `${ev.item_id}:${ev.summary_index}`;
@@ -378,7 +352,7 @@ export async function* streamWithResponsesAPI(
       }
 
       case 'response.reasoning_summary_part.done': {
-        if (ev.part?.type === 'summary_text' && ev.part.text) {
+        if (ev.part.type === 'summary_text' && ev.part.text) {
           const key = `${ev.item_id}:${ev.summary_index}`;
           if (!seenSummaryDeltas.has(key)) {
             thinkingWasEmitted = true;
@@ -404,7 +378,7 @@ export async function* streamWithResponsesAPI(
 
       // --- Final response fallback ---
       case 'response.completed': {
-        if (!thinkingWasEmitted && ev.response) {
+        if (!thinkingWasEmitted) {
           const reasoning = extractReasoningFromCompleted(ev.response);
           if (reasoning) {
             yield { type: 'thinking', text: reasoning, done: false };
@@ -492,19 +466,19 @@ async function* streamAgentTurnWithResponsesAPI(
   }
 
   const makeRequest = (prevId: string | null) => {
-    return (client as any).responses.create({
+    return client.responses.create({
       model: req.modelName,
-      input,
+      input: input as unknown as OpenAI.Responses.ResponseInput,
       ...(req.systemPrompt?.trim() ? { instructions: req.systemPrompt } : {}),
       ...(prevId ? { previous_response_id: prevId } : {}),
-      ...(tools.length > 0 ? { tools } : {}),
+      ...(tools.length > 0 ? { tools: tools as unknown as OpenAI.Responses.Tool[] } : {}),
       store: true,
       stream: true,
       ...(useReasoning ? { reasoning: { effort, summary: 'concise' } } : {}),
     });
   };
 
-  let stream: AsyncIterable<Record<string, any>>;
+  let stream: AsyncIterable<ResponseStreamEvent>;
   try {
     stream = await makeRequest(previousResponseId);
   } catch (err: unknown) {
@@ -515,7 +489,7 @@ async function* streamAgentTurnWithResponsesAPI(
         (err.status === 400 && /previous_response_id/i.test(err.message)));
     const canFallback = isCursorError && previousResponseId;
     if (canFallback) {
-      const status = err instanceof OpenAIAPIError ? err.status : 'unknown';
+      const status = err instanceof OpenAIAPIError ? (err.status as number) : 'unknown';
 
       if (req.toolResults) {
         // Tool-result cursor loss is not recoverable without the original function_call
@@ -568,13 +542,10 @@ async function* streamAgentTurnWithResponsesAPI(
   // Map output item IDs (fc_xxx) → function call IDs (call_xxx) for consistent callId
   const itemIdToCallId = new Map<string, { callId: string; name: string }>();
 
-  for await (const event of stream) {
+  for await (const ev of stream) {
     if (req.signal?.aborted) break;
 
-    const ev = event;
-    const type = ev.type as string;
-
-    switch (type) {
+    switch (ev.type) {
       case 'response.reasoning_summary_text.delta': {
         const key = `${ev.item_id}:${ev.summary_index}`;
         seenSummaryDeltas.add(key);
@@ -602,7 +573,7 @@ async function* streamAgentTurnWithResponsesAPI(
       }
 
       case 'response.reasoning_summary_part.done': {
-        if (ev.part?.type === 'summary_text' && ev.part.text) {
+        if (ev.part.type === 'summary_text' && ev.part.text) {
           const key = `${ev.item_id}:${ev.summary_index}`;
           if (!seenSummaryDeltas.has(key)) {
             thinkingWasEmitted = true;
@@ -621,11 +592,11 @@ async function* streamAgentTurnWithResponsesAPI(
       }
 
       case 'response.output_item.added': {
-        const item = ev.item as Record<string, any> | undefined;
-        if (item?.type === 'function_call') {
-          const callId: string = item.call_id ?? item.id;
-          itemIdToCallId.set(item.id, { callId, name: item.name ?? '' });
-          yield { type: 'tool_call_started', callId, name: item.name };
+        if (ev.item.type === 'function_call') {
+          const callId = ev.item.call_id;
+          const itemId = ev.item.id ?? callId;
+          itemIdToCallId.set(itemId, { callId, name: ev.item.name });
+          yield { type: 'tool_call_started', callId, name: ev.item.name };
         }
         break;
       }
@@ -661,12 +632,10 @@ async function* streamAgentTurnWithResponsesAPI(
       }
 
       case 'response.completed': {
-        newResponseId = ev.response?.id ?? null;
-        const usage = ev.response?.usage as Record<string, any> | undefined;
-        if (usage && typeof usage.input_tokens === 'number') {
-          usageInputTokens = usage.input_tokens;
-        }
-        if (!thinkingWasEmitted && ev.response) {
+        newResponseId = ev.response.id;
+        const ru = extractResponsesUsage(ev.response);
+        if (ru.inputTokens) usageInputTokens = ru.inputTokens;
+        if (!thinkingWasEmitted) {
           const reasoning = extractReasoningFromCompleted(ev.response);
           if (reasoning) {
             yield { type: 'reasoning_delta', text: reasoning };

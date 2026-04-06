@@ -105,11 +105,11 @@ describe('POST /respond/stream', () => {
       loopMessages: [{ role: 'user', content: 'Hello' }],
     });
 
-    mock.module('../../../src/services/chat-service', () => ({
+    await mock.module('../../../src/services/chat-service', () => ({
       verifyChatOwnership: () => Promise.resolve(true),
     }));
 
-    mock.module('../../../src/services/providers/registry', () => ({
+    await mock.module('../../../src/services/providers/registry', () => ({
       getProviderForModel: () =>
         Promise.resolve({
           providerType: 'openai-compatible',
@@ -122,7 +122,7 @@ describe('POST /respond/stream', () => {
         }),
     }));
 
-    mock.module('../../../src/services/message-service', () => ({
+    await mock.module('../../../src/services/message-service', () => ({
       createMessage: (msg: Record<string, unknown>) => {
         createdMessages.push({ ...msg });
         return Promise.resolve();
@@ -131,7 +131,7 @@ describe('POST /respond/stream', () => {
       loadChatHistory: () => Promise.resolve([]),
     }));
 
-    mock.module('../../../src/services/tools', () => ({
+    await mock.module('../../../src/services/tools', () => ({
       getAllToolDefinitions: () => [],
       executeTool: () => Promise.resolve({}),
     }));
@@ -142,7 +142,7 @@ describe('POST /respond/stream', () => {
       where: () => makeWhere(),
     });
 
-    mock.module('../../../src/db/database', () => ({
+    await mock.module('../../../src/db/database', () => ({
       getDb: () => ({
         selectFrom: () => ({ select: () => makeWhere() }),
         insertInto: () => ({ values: () => ({ execute: () => Promise.resolve() }) }),
@@ -182,7 +182,7 @@ describe('POST /respond/stream', () => {
 
   it('returns 503 when model catalog is not configured', async () => {
     // Mock getGeminiModelCatalog to return unconfigured state
-    mock.module('../../../src/services/gemini/catalog', () => ({
+    await mock.module('../../../src/services/gemini/catalog', () => ({
       getGeminiModelCatalog: () =>
         Promise.resolve({
           configured: false,
@@ -196,7 +196,7 @@ describe('POST /respond/stream', () => {
       clearGeminiModelCatalog: () => {},
     }));
 
-    mock.module('../../../src/services/gemini', () => ({
+    await mock.module('../../../src/services/gemini', () => ({
       getGeminiModelCatalog: () =>
         Promise.resolve({
           configured: false,
@@ -213,7 +213,7 @@ describe('POST /respond/stream', () => {
     }));
 
     // Mock DB to return a valid chat owned by our test user
-    mock.module('../../../src/db/database', () => ({
+    await mock.module('../../../src/db/database', () => ({
       getDb: () => ({
         selectFrom: () => ({
           select: () => ({
@@ -255,11 +255,11 @@ describe('POST /respond/stream', () => {
       loopMessages: [],
     });
 
-    mock.module('../../../src/services/chat-service', () => ({
+    await mock.module('../../../src/services/chat-service', () => ({
       verifyChatOwnership: () => Promise.resolve(true),
     }));
 
-    mock.module('../../../src/services/providers/registry', () => ({
+    await mock.module('../../../src/services/providers/registry', () => ({
       getProviderForModel: () =>
         Promise.resolve({
           providerType: 'openai-compatible',
@@ -278,7 +278,7 @@ describe('POST /respond/stream', () => {
         }),
     }));
 
-    mock.module('../../../src/services/message-service', () => ({
+    await mock.module('../../../src/services/message-service', () => ({
       createMessage: (msg: Record<string, unknown>) => {
         createdMessages.push({ ...msg });
         return Promise.resolve();
@@ -287,7 +287,7 @@ describe('POST /respond/stream', () => {
       loadChatHistory: () => Promise.resolve([]),
     }));
 
-    mock.module('../../../src/services/tools', () => ({
+    await mock.module('../../../src/services/tools', () => ({
       getAllToolDefinitions: () => [],
       executeTool: () => Promise.resolve({}),
     }));
@@ -298,7 +298,7 @@ describe('POST /respond/stream', () => {
       where: () => makeWhere(),
     });
 
-    mock.module('../../../src/db/database', () => ({
+    await mock.module('../../../src/db/database', () => ({
       getDb: () => ({
         selectFrom: () => ({ select: () => makeWhere() }),
         insertInto: () => ({ values: () => ({ execute: () => Promise.resolve() }) }),

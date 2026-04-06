@@ -16,6 +16,13 @@ import {
 } from '../gemini';
 import { isReasoningModel } from '@mangostudio/shared/utils/model-detection';
 import { registerProvider } from './registry';
+import {
+  type InteractionSSEEvent,
+  type CreateModelInteractionParamsStreaming,
+  isFunctionCallStart,
+  narrowGeminiDelta,
+  extractGeminiUsage,
+} from './gemini-normalizers';
 import { computeToolsetHash } from '../../utils/hash';
 import {
   parseContinuationEnvelope,
@@ -128,7 +135,7 @@ async function* streamGeminiAgentTurn(req: AgentTurnRequest): AsyncIterable<Agen
       name: tr.name,
       result: (() => {
         try {
-          return JSON.parse(tr.result);
+          return JSON.parse(tr.result) as unknown;
         } catch {
           return tr.result;
         }
@@ -184,9 +191,9 @@ async function* streamGeminiAgentTurn(req: AgentTurnRequest): AsyncIterable<Agen
   try {
     // Use streaming mode so thinking, tool calls, and text appear progressively
     interactionParams.stream = true;
-    const stream = (await ai.interactions.create(
-      interactionParams as any
-    )) as unknown as AsyncIterable<Record<string, any>>;
+    const stream = await ai.interactions.create(
+      interactionParams as unknown as CreateModelInteractionParamsStreaming
+    );
 
     yield* processGeminiInteractionStream(stream, req, currentToolsetHash);
   } catch (err: unknown) {
@@ -248,9 +255,9 @@ async function* streamGeminiAgentTurn(req: AgentTurnRequest): AsyncIterable<Agen
           };
         }
 
-        const retryStream = (await ai.interactions.create(
-          retryParams as any
-        )) as unknown as AsyncIterable<Record<string, any>>;
+        const retryStream = await ai.interactions.create(
+          retryParams as unknown as CreateModelInteractionParamsStreaming
+        );
 
         yield* processGeminiInteractionStream(retryStream, req, currentToolsetHash);
       } catch (retryErr: unknown) {
@@ -274,7 +281,7 @@ async function* streamGeminiAgentTurn(req: AgentTurnRequest): AsyncIterable<Agen
  * Used by both the primary path and the cursor-loss retry path.
  */
 async function* processGeminiInteractionStream(
-  stream: AsyncIterable<Record<string, any>>,
+  stream: AsyncIterable<InteractionSSEEvent>,
   req: AgentTurnRequest,
   currentToolsetHash: string
 ): AsyncIterable<AgentEvent> {
@@ -287,66 +294,47 @@ async function* processGeminiInteractionStream(
   let providerReportedInputTokens: number | undefined;
 
   for await (const event of stream) {
-    const eventType: string = event.event_type ?? '';
-
-    if (eventType === 'content.start') {
-      const content = event.content as Record<string, any> | undefined;
-      if (!content) continue;
-
-      if (content.type === 'function_call') {
-        const callId: string =
-          content.id ?? `call_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-        const name: string = content.name ?? '';
-        activeCalls.set(event.index as number, {
+    if (event.event_type === 'content.start') {
+      if (isFunctionCallStart(event.content)) {
+        const callId =
+          event.content.id || `call_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+        const name = event.content.name;
+        activeCalls.set(event.index, {
           id: callId,
           name,
           args: {},
           started: false,
         });
-        // Defer tool_call_started if name is empty — the delta will provide it
         if (name) {
-          activeCalls.get(event.index as number)!.started = true;
+          activeCalls.get(event.index)!.started = true;
           yield { type: 'tool_call_started', callId, name };
         }
       }
-      // thought content.start — nothing to emit yet, deltas carry the summary text
-    } else if (eventType === 'content.delta') {
-      const delta = event.delta as Record<string, any> | undefined;
-      if (!delta) continue;
-
-      if (delta.type === 'thought_summary') {
-        // Streaming thought summary text
-        const text =
-          typeof delta.content === 'string'
-            ? delta.content
-            : ((delta.content as Record<string, any>)?.text ?? '');
-        if (text) {
-          yield { type: 'reasoning_delta', text };
+    } else if (event.event_type === 'content.delta') {
+      const nd = narrowGeminiDelta(event.delta);
+      if (nd.kind === 'thought_summary') {
+        if (nd.text) {
+          yield { type: 'reasoning_delta', text: nd.text };
         }
-      } else if (delta.type === 'text') {
-        yield { type: 'assistant_text_delta', text: delta.text ?? '' };
-      } else if (delta.type === 'function_call') {
-        // Incremental arguments for an active tool call
-        const call = activeCalls.get(event.index as number);
+      } else if (nd.kind === 'text') {
+        yield { type: 'assistant_text_delta', text: nd.text };
+      } else if (nd.kind === 'function_call') {
+        const call = activeCalls.get(event.index);
         if (call) {
-          // Capture name from delta if content.start didn't have it
-          if (delta.name && !call.name) call.name = delta.name as string;
+          if (nd.name && !call.name) call.name = nd.name;
           if (!call.started && call.name) {
             call.started = true;
             yield { type: 'tool_call_started', callId: call.id, name: call.name };
           }
-          const partialArgs = (delta.arguments ?? {}) as Record<string, unknown>;
-          Object.assign(call.args, partialArgs);
-          const argChunk = JSON.stringify(partialArgs);
+          Object.assign(call.args, nd.args);
+          const argChunk = JSON.stringify(nd.args);
           yield { type: 'tool_call_arguments_delta', callId: call.id, delta: argChunk };
         }
-      } else if (delta.type !== 'thought_signature') {
-        // Log unknown delta types for future diagnostics
-        console.log('[gemini-interactions] unknown delta type:', JSON.stringify(delta));
+      } else if (nd.kind !== 'thought_signature') {
+        console.log('[gemini-interactions] unknown delta type:', JSON.stringify(event.delta));
       }
-    } else if (eventType === 'content.stop') {
-      // Finalize any active function call at this index
-      const call = activeCalls.get(event.index as number);
+    } else if (event.event_type === 'content.stop') {
+      const call = activeCalls.get(event.index);
       if (call) {
         yield {
           type: 'tool_call_completed',
@@ -354,27 +342,20 @@ async function* processGeminiInteractionStream(
           name: call.name,
           arguments: JSON.stringify(call.args),
         };
-        activeCalls.delete(event.index as number);
+        activeCalls.delete(event.index);
       }
-    } else if (eventType === 'interaction.complete') {
-      const interaction = event.interaction as Record<string, any> | undefined;
-      interactionId = interaction?.id;
+    } else if (event.event_type === 'interaction.complete') {
+      interactionId = event.interaction.id;
 
-      // Log cache usage if available and capture token count
-      const usage = interaction?.usage as Record<string, any> | undefined;
-      if (usage) {
-        const cached = usage.cached_content_token_count ?? usage.cachedContentTokenCount ?? 0;
-        const total = usage.prompt_token_count ?? usage.promptTokenCount ?? 0;
-        if (typeof total === 'number' && total > 0) providerReportedInputTokens = total;
-        if (cached > 0 && total > 0) {
-          console.log(
-            `[prefix-cache][gemini] ${cached}/${total} input tokens from cache (${Math.round((cached / total) * 100)}%)`
-          );
-        }
+      const gu = extractGeminiUsage(event.interaction.usage);
+      if (gu.totalInputTokens > 0) providerReportedInputTokens = gu.totalInputTokens;
+      if (gu.cachedTokens > 0 && gu.totalInputTokens > 0) {
+        console.log(
+          `[prefix-cache][gemini] ${gu.cachedTokens}/${gu.totalInputTokens} input tokens from cache (${Math.round((gu.cachedTokens / gu.totalInputTokens) * 100)}%)`
+        );
       }
-    } else if (eventType === 'interaction.start') {
-      const interaction = event.interaction as Record<string, any> | undefined;
-      if (interaction?.id) interactionId = interaction.id;
+    } else if (event.event_type === 'interaction.start') {
+      interactionId = event.interaction.id;
     }
   }
 

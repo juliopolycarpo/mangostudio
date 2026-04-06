@@ -4,7 +4,12 @@ import {
   extractReasoningFromCompleted,
   streamWithResponsesAPI,
 } from '../../../../src/services/providers/openai-provider';
+import type { Responses } from 'openai/resources/responses/responses';
 import type { StreamingChunk } from '../../../../src/services/providers/types';
+
+/** Cast partial mock data to the full SDK type for test purposes. */
+const mockResponse = (data: Record<string, unknown>): Responses.Response =>
+  data as unknown as Responses.Response;
 
 /**
  * Unit tests for OpenAI provider reasoning support.
@@ -62,44 +67,50 @@ describe('isReasoningModel detection', () => {
 
 describe('extractReasoningFromCompleted', () => {
   it('extracts reasoning from summary array', () => {
-    const result = extractReasoningFromCompleted({
-      output: [
-        {
-          type: 'reasoning',
-          summary: [
-            { type: 'summary_text', text: 'First block.' },
-            { type: 'summary_text', text: 'Second block.' },
-          ],
-        },
-      ],
-    });
+    const result = extractReasoningFromCompleted(
+      mockResponse({
+        output: [
+          {
+            type: 'reasoning',
+            summary: [
+              { type: 'summary_text', text: 'First block.' },
+              { type: 'summary_text', text: 'Second block.' },
+            ],
+          },
+        ],
+      })
+    );
 
     expect(result).toBe('First block.\n\nSecond block.');
   });
 
   it('falls back to reasoning content array when no summary', () => {
-    const result = extractReasoningFromCompleted({
-      output: [
-        {
-          type: 'reasoning',
-          content: [{ type: 'reasoning_text', text: 'Raw reasoning.' }],
-        },
-      ],
-    });
+    const result = extractReasoningFromCompleted(
+      mockResponse({
+        output: [
+          {
+            type: 'reasoning',
+            content: [{ type: 'reasoning_text', text: 'Raw reasoning.' }],
+          },
+        ],
+      })
+    );
 
     expect(result).toBe('Raw reasoning.');
   });
 
   it('returns null when no reasoning output', () => {
-    const result = extractReasoningFromCompleted({
-      output: [{ type: 'message', content: [{ type: 'output_text', text: 'Hello' }] }],
-    });
+    const result = extractReasoningFromCompleted(
+      mockResponse({
+        output: [{ type: 'message', content: [{ type: 'output_text', text: 'Hello' }] }],
+      })
+    );
 
     expect(result).toBeNull();
   });
 
   it('returns null for empty response', () => {
-    expect(extractReasoningFromCompleted({})).toBeNull();
+    expect(extractReasoningFromCompleted(mockResponse({}))).toBeNull();
   });
 });
 

@@ -136,6 +136,7 @@ describe('useTheme hook', () => {
 
   it('auto mode resolves to light theme when app is light', async () => {
     const { result } = renderHook(() => useTheme());
+    // eslint-disable-next-line @typescript-eslint/await-thenable
     await act(() => {
       result.current.setConfig({ appTheme: 'light' });
     });
@@ -144,6 +145,7 @@ describe('useTheme hook', () => {
 
   it('manual mode uses darkTheme regardless of app theme', async () => {
     const { result } = renderHook(() => useTheme());
+    // eslint-disable-next-line @typescript-eslint/await-thenable
     await act(() => {
       result.current.setConfig({
         appTheme: 'light',
@@ -155,6 +157,7 @@ describe('useTheme hook', () => {
 
   it('code theme preference persists in localStorage', async () => {
     const { result } = renderHook(() => useTheme());
+    // eslint-disable-next-line @typescript-eslint/await-thenable
     await act(() => {
       result.current.setConfig({
         codeTheme: { mode: 'manual', darkTheme: 'github-dark-dimmed', lightTheme: 'one-light' },
@@ -174,6 +177,7 @@ describe('useTheme hook', () => {
 
   it('setConfig updates fontSize in config', async () => {
     const { result } = renderHook(() => useTheme());
+    // eslint-disable-next-line @typescript-eslint/await-thenable
     await act(() => {
       result.current.setConfig({ fontSize: 'large' });
     });
@@ -182,6 +186,7 @@ describe('useTheme hook', () => {
 
   it('setConfig persists settings to localStorage', async () => {
     const { result } = renderHook(() => useTheme());
+    // eslint-disable-next-line @typescript-eslint/await-thenable
     await act(() => {
       result.current.setConfig({ chatDensity: 'compact' });
     });
@@ -209,6 +214,7 @@ describe('useTheme hook', () => {
 
   it('switching to light sets resolvedTheme and data-theme attribute', async () => {
     const { result } = renderHook(() => useTheme());
+    // eslint-disable-next-line @typescript-eslint/await-thenable
     await act(() => {
       result.current.setConfig({ appTheme: 'light' });
     });
@@ -220,6 +226,7 @@ describe('useTheme hook', () => {
   it('system theme resolves based on OS preference', async () => {
     // jsdom matchMedia defaults to not matching (prefers-color-scheme: dark = false → light)
     const { result } = renderHook(() => useTheme());
+    // eslint-disable-next-line @typescript-eslint/await-thenable
     await act(() => {
       result.current.setConfig({ appTheme: 'system' });
     });
@@ -229,6 +236,7 @@ describe('useTheme hook', () => {
 
   it('theme persists across page loads via localStorage', async () => {
     const { result } = renderHook(() => useTheme());
+    // eslint-disable-next-line @typescript-eslint/await-thenable
     await act(() => {
       result.current.setConfig({ appTheme: 'light' });
     });

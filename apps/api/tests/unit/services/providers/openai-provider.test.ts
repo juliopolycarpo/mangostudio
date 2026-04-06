@@ -151,6 +151,7 @@ describe('openai-provider resolveClientConfig (via secretService)', () => {
       }
     );
 
+    // eslint-disable-next-line @typescript-eslint/await-thenable
     await expect(service.resolveApiKey(TEST_USER)).rejects.toThrow(
       'No openai API key is configured or enabled'
     );
@@ -177,6 +178,7 @@ describe('openai-provider resolveClientConfig (via secretService)', () => {
       }
     );
 
+    // eslint-disable-next-line @typescript-eslint/await-thenable
     await expect(service.resolveApiKey(TEST_USER)).rejects.toThrow(
       'No openai API key is configured or enabled'
     );
@@ -255,6 +257,7 @@ describe('validateOpenAIAuthContext', () => {
 
     try {
       // Should not throw
+      // eslint-disable-next-line @typescript-eslint/await-thenable
       await expect(
         validateOpenAIAuthContext({ apiKey: 'sk-valid-key-1234' })
       ).resolves.toBeUndefined();
@@ -321,10 +324,12 @@ describe('validateOpenAIAuthContext', () => {
     }) as typeof fetch;
 
     try {
+      // eslint-disable-next-line @typescript-eslint/await-thenable
       await expect(validateOpenAIAuthContext({ apiKey: 'sk-invalid-key' })).rejects.toThrow(
         OpenAIAuthError
       );
 
+      // eslint-disable-next-line @typescript-eslint/await-thenable
       await expect(validateOpenAIAuthContext({ apiKey: 'sk-invalid-key' })).rejects.toThrow(
         'invalid or expired'
       );
@@ -380,6 +385,7 @@ describe('validateOpenAIAuthContext', () => {
     }) as typeof fetch;
 
     try {
+      // eslint-disable-next-line @typescript-eslint/await-thenable
       await expect(validateOpenAIAuthContext({ apiKey: 'sk-any-key' })).rejects.toThrow(
         OpenAIConfigError
       );
@@ -426,7 +432,7 @@ describe('openai-provider listModels filtering', () => {
   it('returns empty array when no key is configured', async () => {
     // Mock the database so syncConfigFileConnectors produces no rows.
     // listSecretMetadata catches TypeError and returns [], giving resolvedCtx = null.
-    mock.module('../../../../src/db/database', () => ({
+    await mock.module('../../../../src/db/database', () => ({
       getDb: () => ({}),
     }));
 

@@ -32,7 +32,9 @@ export function useMessagesQuery(chatId: string | null) {
     queryKey: messageKeys.list(chatId!),
     queryFn: async ({ pageParam }) => {
       const query = pageParam ? { cursor: pageParam, limit: '50' } : { limit: '50' };
-      const { data, error } = await (client.api.chats[chatId!] as unknown as ChatMessagesRoute).messages.get({ query });
+      const { data, error } = await (
+        client.api.chats[chatId!] as unknown as ChatMessagesRoute
+      ).messages.get({ query });
       if (error) throw new Error(extractApiError(error.value));
       return data as MessagesPage;
     },

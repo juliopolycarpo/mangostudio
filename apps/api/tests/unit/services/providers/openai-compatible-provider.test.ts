@@ -162,6 +162,7 @@ describe('openai-compatible resolveClientConfig (via secretService)', () => {
 
     // The real provider throws this specific error when no eligible connector is found.
     // 'user-with-no-valid-connectors' has no connectors in the test DB.
+    // eslint-disable-next-line @typescript-eslint/await-thenable
     await expect(
       openAICompatibleProvider.resolveApiKey('user-with-no-valid-connectors')
     ).rejects.toThrow(

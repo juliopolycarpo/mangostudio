@@ -6,7 +6,9 @@ import { useState, useEffect } from 'react';
 type ConnectorByIdRoute = {
   delete: () => Promise<{ data: null; error: { value: unknown } | null }>;
   models: {
-    put: (body: { enabledModels: string[] }) => Promise<{ data: null; error: { value: unknown } | null }>;
+    put: (body: {
+      enabledModels: string[];
+    }) => Promise<{ data: null; error: { value: unknown } | null }>;
   };
 };
 import type {
@@ -164,7 +166,9 @@ export function ConnectorsSettings({ modelCatalog, reloadModelCatalog }: Connect
     }
 
     try {
-      const { error } = await (client.api.settings.connectors[id] as unknown as ConnectorByIdRoute).delete();
+      const { error } = await (
+        client.api.settings.connectors[id] as unknown as ConnectorByIdRoute
+      ).delete();
       if (error) throw new Error(extractApiError(error.value, 'Failed to delete connector'));
 
       await reloadModelCatalog();
@@ -180,7 +184,9 @@ export function ConnectorsSettings({ modelCatalog, reloadModelCatalog }: Connect
 
   const handleUpdateModels = async (connectorId: string, enabledModels: string[]) => {
     try {
-      const { error } = await (client.api.settings.connectors[connectorId] as unknown as ConnectorByIdRoute).models.put({
+      const { error } = await (
+        client.api.settings.connectors[connectorId] as unknown as ConnectorByIdRoute
+      ).models.put({
         enabledModels,
       });
       if (error) throw new Error(extractApiError(error.value, 'Failed to update models'));

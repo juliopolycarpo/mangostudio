@@ -38,15 +38,6 @@ export default tseslint.config(
       '@typescript-eslint/no-non-null-assertion': 'off',
     },
   },
-  // Relax type-aware rules in test files — Bun test types are incomplete
-  // (e.g. expect().rejects is not typed as Thenable)
-  {
-    files: ['**/tests/**/*.{ts,tsx}'],
-    rules: {
-      '@typescript-eslint/await-thenable': 'off',
-      '@typescript-eslint/no-floating-promises': 'off',
-    },
-  },
   // React rules — frontend only
   {
     files: ['apps/frontend/**/*.{ts,tsx}'],
@@ -69,25 +60,6 @@ export default tseslint.config(
       'react-hooks/refs': 'off',
       'react-hooks/preserve-manual-memoization': 'off',
       'react-hooks/incompatible-library': 'off',
-    },
-  },
-  // SDK adapter boundaries: current provider/client typings still leak `any`
-  // into parsing code. Keep typed lint for the repo, but relax unsafe rules
-  // in the narrow files that sit directly on third-party response shapes.
-  {
-    files: [
-      'apps/api/src/services/providers/anthropic-provider.ts',
-      'apps/api/src/services/providers/gemini-provider.ts',
-      'apps/api/src/services/providers/openai-compatible-provider.ts',
-      'apps/api/src/services/providers/openai-provider.ts',
-      'apps/api/src/services/providers/replay-builder.ts',
-    ],
-    rules: {
-      '@typescript-eslint/no-unsafe-assignment': 'off',
-      '@typescript-eslint/no-unsafe-member-access': 'off',
-      '@typescript-eslint/no-unsafe-call': 'off',
-      '@typescript-eslint/no-unsafe-return': 'off',
-      '@typescript-eslint/no-unsafe-argument': 'off',
     },
   },
   // Prettier last (disables conflicting stylistic rules; formatting is handled by Prettier itself)

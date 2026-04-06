@@ -17,7 +17,7 @@ describe('respond-stream abort signal', () => {
     let receivedSignal: AbortSignal | undefined;
     let signalAbortedDuringStream = false;
 
-    mock.module('../../../../src/services/providers/registry', () => ({
+    await mock.module('../../../../src/services/providers/registry', () => ({
       getProviderForModel: () =>
         Promise.resolve({
           generateTextStream: async function* (req: { signal?: AbortSignal }) {
@@ -30,11 +30,11 @@ describe('respond-stream abort signal', () => {
         }),
     }));
 
-    mock.module('../../../../src/services/providers/catalog', () => ({
+    await mock.module('../../../../src/services/providers/catalog', () => ({
       getUnifiedModelCatalog: () => Promise.resolve({ textModels: [{ modelId: 'test-model' }] }),
     }));
 
-    mock.module('../../../../src/db/database', () => ({
+    await mock.module('../../../../src/db/database', () => ({
       getDb: () => ({
         selectFrom: () => ({
           select: () => ({
@@ -54,11 +54,11 @@ describe('respond-stream abort signal', () => {
       }),
     }));
 
-    mock.module('../../../../src/services/chat-service', () => ({
+    await mock.module('../../../../src/services/chat-service', () => ({
       verifyChatOwnership: () => Promise.resolve(true),
     }));
 
-    mock.module('../../../../src/services/message-service', () => ({
+    await mock.module('../../../../src/services/message-service', () => ({
       createMessage: () => Promise.resolve(),
       loadChatHistory: () => Promise.resolve([]),
     }));
@@ -84,7 +84,7 @@ describe('respond-stream abort signal', () => {
   it('stream cancel callback aborts the signal', async () => {
     const aborted: boolean[] = [];
 
-    mock.module('../../../../src/services/providers/registry', () => ({
+    await mock.module('../../../../src/services/providers/registry', () => ({
       getProviderForModel: () =>
         Promise.resolve({
           generateTextStream: async function* (req: { signal?: AbortSignal }) {
@@ -100,11 +100,11 @@ describe('respond-stream abort signal', () => {
         }),
     }));
 
-    mock.module('../../../../src/services/providers/catalog', () => ({
+    await mock.module('../../../../src/services/providers/catalog', () => ({
       getUnifiedModelCatalog: () => Promise.resolve({ textModels: [{ modelId: 'test-model' }] }),
     }));
 
-    mock.module('../../../../src/db/database', () => ({
+    await mock.module('../../../../src/db/database', () => ({
       getDb: () => ({
         selectFrom: () => ({
           select: () => ({
@@ -124,11 +124,11 @@ describe('respond-stream abort signal', () => {
       }),
     }));
 
-    mock.module('../../../../src/services/chat-service', () => ({
+    await mock.module('../../../../src/services/chat-service', () => ({
       verifyChatOwnership: () => Promise.resolve(true),
     }));
 
-    mock.module('../../../../src/services/message-service', () => ({
+    await mock.module('../../../../src/services/message-service', () => ({
       createMessage: () => Promise.resolve(),
       loadChatHistory: () => Promise.resolve([]),
     }));
@@ -148,7 +148,7 @@ describe('respond-stream abort signal', () => {
 
     // Cancel the stream immediately
     const reader = response.body!.getReader();
-    reader.cancel();
+    await reader.cancel();
 
     // After cancel, signal should eventually be aborted on next iteration
     // (the provider checks signal.aborted before each yield)
