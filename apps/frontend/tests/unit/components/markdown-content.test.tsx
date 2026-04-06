@@ -163,14 +163,15 @@ describe('MarkdownContent — syntax highlighting', () => {
 });
 
 describe('MarkdownContent — copy code button', () => {
+  let clipboardWriteText: ReturnType<typeof vi.fn>;
+
   beforeEach(() => {
     vi.mocked(shikiLib.highlightCode).mockReset();
     vi.mocked(shikiLib.highlightCode).mockReturnValue(null);
 
+    clipboardWriteText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, 'clipboard', {
-      value: {
-        writeText: vi.fn().mockResolvedValue(undefined),
-      },
+      value: { writeText: clipboardWriteText },
       configurable: true,
       writable: true,
     });
@@ -208,7 +209,7 @@ describe('MarkdownContent — copy code button', () => {
     const btn = container.querySelector('.copy-code-btn') as HTMLButtonElement;
     btn.click();
     await vi.waitFor(() => {
-      expect(navigator.clipboard.writeText).toHaveBeenCalledWith('const x = 1;');
+      expect(clipboardWriteText).toHaveBeenCalledWith('const x = 1;');
     });
   });
 
