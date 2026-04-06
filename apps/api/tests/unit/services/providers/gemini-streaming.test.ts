@@ -263,8 +263,11 @@ describe('GeminiProvider generateTextStream delegation', () => {
 
     const { geminiProvider } = await import('../../../../src/services/providers/gemini-provider');
 
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- geminiProvider always implements generateTextStream; optional in the interface for non-gemini providers only
-    const iterable = geminiProvider.generateTextStream!({
+    if (!geminiProvider.generateTextStream) {
+      throw new Error('geminiProvider.generateTextStream must be implemented');
+    }
+
+    const iterable = geminiProvider.generateTextStream({
       userId: 'user-1',
       history: [],
       prompt: 'Hi',

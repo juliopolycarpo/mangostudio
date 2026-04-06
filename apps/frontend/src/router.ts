@@ -1,14 +1,13 @@
 import { createRouter } from '@tanstack/react-router';
 import { routeTree } from './routeTree.gen';
+import type { AuthContext } from './lib/auth-context';
+
+/** Placeholder until RouterProvider injects the real context on each render. */
+const defaultAuth: AuthContext = { isAuthenticated: false, user: null, isPending: true };
 
 export const router = createRouter({
   routeTree,
-  context: {
-    // TanStack Router pattern: context is provided by RouterProvider on each render;
-    // `undefined!` satisfies the type-checker without making the whole context optional.
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- TanStack Router context initialisation pattern
-    auth: undefined!,
-  },
+  context: { auth: defaultAuth },
 });
 
 declare module '@tanstack/react-router' {

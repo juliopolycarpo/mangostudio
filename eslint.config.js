@@ -57,7 +57,7 @@ export default tseslint.config(
       'react/react-in-jsx-scope': 'off',
       'react/jsx-uses-react': 'off',
       'react/no-unescaped-entities': 'off',
-      'react-hooks/exhaustive-deps': 'warn',
+      'react-hooks/exhaustive-deps': 'error',
       // React Compiler rules from react-hooks v7 — disable until codebase is compiler-ready
       'react-hooks/set-state-in-effect': 'off',
       'react-hooks/refs': 'off',
