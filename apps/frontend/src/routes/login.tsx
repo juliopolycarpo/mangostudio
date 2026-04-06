@@ -48,7 +48,7 @@ function LoginPage() {
       <Card variant="glass" className="w-full max-w-sm">
         <form
           id="login-form"
-          onSubmit={handleSubmit}
+          onSubmit={(e) => void handleSubmit(e)}
           method="post"
           action="#"
           className="space-y-5"

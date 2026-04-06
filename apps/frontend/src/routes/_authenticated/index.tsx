@@ -19,7 +19,7 @@ function ChatRoute() {
       chatId={app.currentChatId}
       composerMode={app.composerMode}
       onModeChange={app.setComposerMode}
-      onSubmit={app.handleSubmit}
+      onSubmit={(prompt, referenceImage) => void app.handleSubmit(prompt, referenceImage)}
       disabled={app.isGenerating}
       isGenerating={app.isGenerating}
       onStop={app.handleStop}

@@ -52,9 +52,9 @@ function AuthenticatedLayout() {
         chats={app.chats}
         currentChatId={app.currentChatId}
         onSelectChat={app.handleSelectChat}
-        onUpdateChatTitle={app.handleUpdateChatTitle}
-        onDeleteChat={app.handleDeleteChat}
-        onNewChat={app.handleNewChat}
+        onUpdateChatTitle={(chatId, title) => void app.handleUpdateChatTitle(chatId, title)}
+        onDeleteChat={(chatId) => void app.handleDeleteChat(chatId)}
+        onNewChat={() => void app.handleNewChat()}
         contextCache={app.contextCache}
       >
         <Header
@@ -64,13 +64,13 @@ function AuthenticatedLayout() {
           composerMode={app.composerMode}
           currentChatId={app.currentChatId}
           currentPage={activePage}
-          onUpdateChatModel={app.handleUpdateChatModel}
+          onUpdateChatModel={(chatId, model) => void app.handleUpdateChatModel(chatId, model)}
           onSetPageModel={(model) => {
             if (app.currentChatId) {
               void app.handleUpdateChatModel(app.currentChatId, model);
             }
           }}
-          onNewChat={app.handleNewChat}
+          onNewChat={() => void app.handleNewChat()}
           onNavigateToSettings={() => app.handleNavigate('settings')}
           modelCatalog={app.catalog}
           lockedProvider={app.lockedProvider}

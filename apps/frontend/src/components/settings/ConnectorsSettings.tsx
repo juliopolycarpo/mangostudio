@@ -512,7 +512,7 @@ export function ConnectorsSettings({ modelCatalog, reloadModelCatalog }: Connect
               </Button>
               <Button
                 variant="primary"
-                onClick={handleAddConnector}
+                onClick={() => void handleAddConnector()}
                 loading={isSaving}
                 disabled={isSaving}
                 className="flex-1"
@@ -719,7 +719,7 @@ export function ConnectorsSettings({ modelCatalog, reloadModelCatalog }: Connect
               </Button>
               <Button
                 variant="primary"
-                onClick={() => handleDeleteConnector(connectorToDelete.id)}
+                onClick={() => void handleDeleteConnector(connectorToDelete.id)}
                 className="flex-1 bg-error hover:bg-error/80 shadow-error/20"
               >
                 {s.deleteConnector}
