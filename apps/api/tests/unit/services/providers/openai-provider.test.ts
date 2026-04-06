@@ -240,7 +240,7 @@ describe('validateOpenAIAuthContext', () => {
     // We do this by intercepting via global fetch since the SDK uses fetch internally.
     const originalFetch = globalThis.fetch;
     globalThis.fetch = (async (input: string | URL | Request, _init?: RequestInit) => {
-      const url = String(input);
+      const url = input instanceof Request ? input.url : String(input);
       if (url.includes('/models')) {
         return new Response(
           JSON.stringify({
@@ -267,7 +267,7 @@ describe('validateOpenAIAuthContext', () => {
     const capturedHeaders: Record<string, string>[] = [];
     const originalFetch = globalThis.fetch;
     globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
-      const url = String(input);
+      const url = input instanceof Request ? input.url : String(input);
       if (url.includes('/models')) {
         const headers = init?.headers
           ? Object.fromEntries(
@@ -304,7 +304,7 @@ describe('validateOpenAIAuthContext', () => {
   it('throws OpenAIAuthError for 401 response', async () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = (async (input: string | URL | Request, _init?: RequestInit) => {
-      const url = String(input);
+      const url = input instanceof Request ? input.url : String(input);
       if (url.includes('/models')) {
         return new Response(
           JSON.stringify({
@@ -336,7 +336,7 @@ describe('validateOpenAIAuthContext', () => {
   it('throws OpenAIAuthError with status 403 for permission denied', async () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = (async (input: string | URL | Request, _init?: RequestInit) => {
-      const url = String(input);
+      const url = input instanceof Request ? input.url : String(input);
       if (url.includes('/models')) {
         return new Response(
           JSON.stringify({
@@ -369,7 +369,7 @@ describe('validateOpenAIAuthContext', () => {
   it('throws OpenAIConfigError for unexpected non-auth HTTP errors', async () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = (async (input: string | URL | Request, _init?: RequestInit) => {
-      const url = String(input);
+      const url = input instanceof Request ? input.url : String(input);
       if (url.includes('/models')) {
         return new Response('Service Unavailable', {
           status: 503,

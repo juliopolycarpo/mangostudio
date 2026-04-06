@@ -190,7 +190,7 @@ const ConnectorResponseSchema = Type.Object({
  */
 function makeOpenAISuccessFetch(originalFetch: typeof globalThis.fetch): typeof globalThis.fetch {
   return (async (input: string | URL | Request, init?: RequestInit) => {
-    const url = String(input);
+    const url = input instanceof Request ? input.url : String(input);
     if (url.includes('api.openai.com') && url.includes('/models')) {
       return new Response(
         JSON.stringify({
@@ -320,7 +320,7 @@ describe('openai connector routes', () => {
     // Mock fetch for the /models validation call
     const originalFetch = globalThis.fetch;
     globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
-      const url = String(input);
+      const url = input instanceof Request ? input.url : String(input);
       if (url === `${COMPAT_BASE_URL}/models`) {
         return new Response(JSON.stringify({ data: [] }), { status: 200 });
       }
@@ -414,7 +414,7 @@ describe('openai connector routes', () => {
 
     const originalFetch = globalThis.fetch;
     globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
-      const url = String(input);
+      const url = input instanceof Request ? input.url : String(input);
       if (url === `${COMPAT_BASE_URL}/models`) {
         return new Response(JSON.stringify({ data: [] }), { status: 200 });
       }
