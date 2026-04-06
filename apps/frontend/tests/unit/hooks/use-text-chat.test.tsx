@@ -35,6 +35,8 @@ function makeStreamFn(chunks: Parameters<Parameters<typeof respondTextStream>[1]
   };
 }
 
+type TextChatProps = Parameters<typeof useTextChat>[0];
+
 function makeProps(overrides: Record<string, unknown> = {}) {
   const updateOptimisticMessage = vi.fn();
   const appendOptimisticMessages = vi.fn();
@@ -43,13 +45,13 @@ function makeProps(overrides: Record<string, unknown> = {}) {
       currentChatId: 'chat-1',
       createChat: vi.fn().mockResolvedValue({ id: 'chat-new' }),
       loadChats: vi.fn().mockResolvedValue(undefined),
-    } as any,
+    } as unknown as TextChatProps['chats'],
     getActiveModel: () => 'test-model',
     systemPrompt: '',
     optimistic: {
       appendOptimisticMessages,
       updateOptimisticMessage,
-    } as any,
+    } as unknown as TextChatProps['optimistic'],
     thinkingEnabled: true,
     reasoningEffort: 'medium',
     currentChatId: 'chat-1',
@@ -68,8 +70,8 @@ describe('useTextChat — thinking segment tracking', () => {
       makeStreamFn([
         { type: 'thinking_start', done: false },
         { type: 'thinking', text: 'initial thought', done: false },
-        { done: true, generationTime: '1.0s' } as any,
-      ]) as any
+        { done: true, generationTime: '1.0s' },
+      ]) as unknown as typeof respondTextStream
     );
 
     const { result } = renderHook(() => useTextChat(props));
@@ -82,7 +84,7 @@ describe('useTextChat — thinking segment tracking', () => {
 
     // Find the call where a thinking part was added (thinking_start + first thinking delta)
     const calls: Array<[string, string, Partial<{ parts: MessagePart[] }>]> =
-      props.optimistic.updateOptimisticMessage.mock.calls;
+      vi.mocked(props.optimistic.updateOptimisticMessage).mock.calls;
 
     const thinkingCall = calls.find(([, , update]) =>
       update.parts?.some((p: MessagePart) => p.type === 'thinking' && p.text === 'initial thought')
@@ -99,8 +101,8 @@ describe('useTextChat — thinking segment tracking', () => {
       makeStreamFn([
         { type: 'thinking', text: 'part1 ', done: false },
         { type: 'thinking', text: 'part2', done: false },
-        { done: true, generationTime: '1.0s' } as any,
-      ]) as any
+        { done: true, generationTime: '1.0s' },
+      ]) as unknown as typeof respondTextStream
     );
 
     const { result } = renderHook(() => useTextChat(props));
@@ -112,7 +114,7 @@ describe('useTextChat — thinking segment tracking', () => {
     await waitFor(() => expect(result.current.isGenerating).toBe(false));
 
     const calls: Array<[string, string, Partial<{ parts: MessagePart[] }>]> =
-      props.optimistic.updateOptimisticMessage.mock.calls;
+      vi.mocked(props.optimistic.updateOptimisticMessage).mock.calls;
 
     // The last substantive parts update before done should have one thinking segment
     const lastPartsCall = [...calls]
@@ -146,8 +148,8 @@ describe('useTextChat — thinking segment tracking', () => {
         { type: 'thinking_start', done: false },
         { type: 'thinking', text: 'after tool', done: false },
         { type: 'text', text: 'answer', done: false },
-        { done: true, generationTime: '2.0s' } as any,
-      ]) as any
+        { done: true, generationTime: '2.0s' },
+      ]) as unknown as typeof respondTextStream
     );
 
     const { result } = renderHook(() => useTextChat(props));
@@ -159,7 +161,7 @@ describe('useTextChat — thinking segment tracking', () => {
     await waitFor(() => expect(result.current.isGenerating).toBe(false));
 
     const calls: Array<[string, string, Partial<{ parts: MessagePart[] }>]> =
-      props.optimistic.updateOptimisticMessage.mock.calls;
+      vi.mocked(props.optimistic.updateOptimisticMessage).mock.calls;
 
     // Find the LAST call that has two thinking parts (captures the final state of both segments)
     const twoThinkingCall = [...calls]

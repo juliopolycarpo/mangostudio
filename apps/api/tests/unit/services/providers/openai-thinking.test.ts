@@ -108,7 +108,7 @@ describe('extractReasoningFromCompleted', () => {
 // ---------------------------------------------------------------------------
 
 /** Creates a fake OpenAI client whose responses.create() yields `events`. */
-function createMockClient(events: Array<Record<string, unknown>>): any {
+function createMockClient(events: Array<Record<string, unknown>>) {
   return {
     responses: {
       create: () =>
@@ -126,12 +126,12 @@ function createMockClient(events: Array<Record<string, unknown>>): any {
 
 /** Collects all chunks from a streaming call. */
 async function collectChunks(
-  client: any,
+  client: unknown,
   modelName: string,
   effort: 'low' | 'medium' | 'high' = 'medium'
 ): Promise<StreamingChunk[]> {
   const chunks: StreamingChunk[] = [];
-  for await (const chunk of streamWithResponsesAPI(client, {
+  for await (const chunk of streamWithResponsesAPI(client as Parameters<typeof streamWithResponsesAPI>[0], {
     userId: 'u1',
     history: [],
     prompt: 'Hello',

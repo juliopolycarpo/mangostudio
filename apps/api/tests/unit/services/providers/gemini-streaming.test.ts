@@ -267,6 +267,6 @@ describe('GeminiProvider generateTextStream delegation', () => {
     });
 
     expect(iterable).toBeDefined();
-    expect(typeof (iterable as any)[Symbol.asyncIterator]).toBe('function');
+    expect(typeof (iterable as AsyncIterable<unknown>)[Symbol.asyncIterator]).toBe('function');
   });
 });

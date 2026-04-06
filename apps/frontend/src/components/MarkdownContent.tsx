@@ -72,9 +72,7 @@ export function MarkdownContent({
     return parser.parse(content, { async: false });
   }, [content, parser]);
 
-  const renderedHtml = isStreaming
-    ? (parser.parse(content || '', { async: false }))
-    : html;
+  const renderedHtml = isStreaming ? parser.parse(content || '', { async: false }) : html;
 
   // Event delegation for copy buttons — survives dangerouslySetInnerHTML re-renders
   useEffect(() => {

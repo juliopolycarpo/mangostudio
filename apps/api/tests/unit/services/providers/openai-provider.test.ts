@@ -432,7 +432,7 @@ describe('openai-provider listModels filtering', () => {
 
     const { openAIProvider } = await import('../../../../src/services/providers/openai-provider');
     // Evict any stale cache entry so the mocked DB path is actually exercised.
-    (openAIProvider as any).invalidateModelCache?.('nonexistent-user-no-keys');
+    (openAIProvider as unknown as Record<string, ((userId: string) => void) | undefined>).invalidateModelCache?.('nonexistent-user-no-keys');
 
     const models = await openAIProvider.listModels('nonexistent-user-no-keys');
     expect(models).toEqual([]);

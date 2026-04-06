@@ -30,7 +30,7 @@ describe('POST /respond/stream', () => {
     );
 
     expect(response.status).toBe(404);
-    const body = (await response.json()) as any;
+    const body = (await response.json()) as { error: string };
     expect(body).toHaveProperty('error');
   });
 
@@ -136,7 +136,7 @@ describe('POST /respond/stream', () => {
       executeTool: () => Promise.resolve({}),
     }));
 
-    const makeWhere = (): any => ({
+    const makeWhere = (): Record<string, unknown> => ({
       execute: () => Promise.resolve(),
       executeTakeFirst: () => Promise.resolve(null),
       where: () => makeWhere(),
@@ -292,7 +292,7 @@ describe('POST /respond/stream', () => {
       executeTool: () => Promise.resolve({}),
     }));
 
-    const makeWhere = (): any => ({
+    const makeWhere = (): Record<string, unknown> => ({
       execute: () => Promise.resolve(),
       executeTakeFirst: () => Promise.resolve(null),
       where: () => makeWhere(),
@@ -327,15 +327,15 @@ describe('POST /respond/stream', () => {
       .filter((block) => block.startsWith('data: '))
       .map((block) => {
         try {
-          return JSON.parse(block.replace(/^data: /, ''));
+          return JSON.parse(block.replace(/^data: /, '')) as Record<string, unknown>;
         } catch {
           return null;
         }
       })
-      .filter(Boolean);
+      .filter((e): e is Record<string, unknown> => e !== null);
 
     // Assert fallback_notice is emitted
-    const fallbackNotice = sseEvents.find((e: any) => e.type === 'fallback_notice');
+    const fallbackNotice = sseEvents.find((e) => e.type === 'fallback_notice');
     expect(fallbackNotice).toBeDefined();
     expect(fallbackNotice).toMatchObject({
       type: 'fallback_notice',
@@ -344,7 +344,7 @@ describe('POST /respond/stream', () => {
     });
 
     // Assert context_info is emitted with mode=replay (no cursor in stateless-loop)
-    const contextInfo = sseEvents.find((e: any) => e.type === 'context_info');
+    const contextInfo = sseEvents.find((e) => e.type === 'context_info');
     expect(contextInfo).toBeDefined();
     expect(contextInfo).toMatchObject({ type: 'context_info', mode: 'replay' });
   });

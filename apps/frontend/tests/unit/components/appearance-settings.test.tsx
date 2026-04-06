@@ -160,7 +160,7 @@ describe('useTheme hook', () => {
         codeTheme: { mode: 'manual', darkTheme: 'github-dark-dimmed', lightTheme: 'one-light' },
       });
     });
-    const stored = JSON.parse(localStorage.getItem('mango-studio-theme') ?? '{}');
+    const stored = JSON.parse(localStorage.getItem('mango-studio-theme') ?? '{}') as Record<string, Record<string, string>>;
     expect(stored.codeTheme.mode).toBe('manual');
     expect(stored.codeTheme.darkTheme).toBe('github-dark-dimmed');
   });
@@ -185,7 +185,7 @@ describe('useTheme hook', () => {
     await act(() => {
       result.current.setConfig({ chatDensity: 'compact' });
     });
-    const stored = JSON.parse(localStorage.getItem('mango-studio-theme') ?? '{}');
+    const stored = JSON.parse(localStorage.getItem('mango-studio-theme') ?? '{}') as Record<string, string>;
     expect(stored.chatDensity).toBe('compact');
   });
 
@@ -232,7 +232,7 @@ describe('useTheme hook', () => {
     await act(() => {
       result.current.setConfig({ appTheme: 'light' });
     });
-    const stored = JSON.parse(localStorage.getItem('mango-studio-theme') ?? '{}');
+    const stored = JSON.parse(localStorage.getItem('mango-studio-theme') ?? '{}') as Record<string, string>;
     expect(stored.appTheme).toBe('light');
   });
 });

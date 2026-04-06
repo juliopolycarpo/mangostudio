@@ -190,7 +190,7 @@ describe('openai-compatible resolveClientConfig (via secretService)', () => {
     const matching = rows.filter((row) => {
       if (!row.configured) return false;
       if (!row.baseUrl) return false;
-      const enabled: string[] = JSON.parse(row.enabledModels);
+      const enabled = JSON.parse(row.enabledModels) as string[];
       if (MODEL_NAME && enabled.length > 0 && !enabled.includes(MODEL_NAME)) return false;
       return true;
     });
@@ -247,7 +247,7 @@ describe('openai-compatible generateAgentTurnStream turn_completed contract', ()
         signal: new AbortController().signal,
         generationConfig: { thinkingEnabled: false, reasoningEffort: 'medium' },
       })) {
-        events.push(event as any);
+        events.push(event as { type: string; providerState?: string });
       }
     } catch {
       // resolveClientConfig throws when no connectors are configured — that is

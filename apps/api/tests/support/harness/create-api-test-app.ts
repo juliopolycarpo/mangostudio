@@ -34,9 +34,10 @@ export function createAuthenticatedApiTestApp(
   ...plugins: ApiTestPlugin[]
 ) {
   const auth = getAuth();
+  const api = auth.api as Record<string, unknown>;
   const originalGetSession = auth.api.getSession.bind(auth.api);
 
-  (auth.api as any).getSession = () =>
+  api.getSession = () =>
     Promise.resolve({
       user: {
         id: mockUser.id,
@@ -62,7 +63,7 @@ export function createAuthenticatedApiTestApp(
   const app = createApiTestApp(...plugins);
 
   const restore = () => {
-    (auth.api as any).getSession = originalGetSession;
+    api.getSession = originalGetSession;
   };
 
   return { app, restore };

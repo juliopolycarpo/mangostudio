@@ -20,7 +20,7 @@ describe('respond-stream abort signal', () => {
     mock.module('../../../../src/services/providers/registry', () => ({
       getProviderForModel: () =>
         Promise.resolve({
-          generateTextStream: async function* (req: any) {
+          generateTextStream: async function* (req: { signal?: AbortSignal }) {
             await Promise.resolve();
             receivedSignal = req.signal;
             signalAbortedDuringStream = req.signal?.aborted ?? false;
@@ -87,7 +87,7 @@ describe('respond-stream abort signal', () => {
     mock.module('../../../../src/services/providers/registry', () => ({
       getProviderForModel: () =>
         Promise.resolve({
-          generateTextStream: async function* (req: any) {
+          generateTextStream: async function* (req: { signal?: AbortSignal }) {
             await Promise.resolve();
             // Yield slowly so there's time to cancel
             for (let i = 0; i < 10; i++) {

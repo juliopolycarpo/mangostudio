@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import { createUnifiedModelCatalogService } from '../../../../src/services/providers/catalog';
-import type { ProviderType } from '@mangostudio/shared/types';
+import type { AIProvider } from '../../../../src/services/providers/types';
+import type { SecretMetadataRow, ProviderType } from '@mangostudio/shared/types';
 
 const MOCK_MODEL = {
   modelId: 'gemini-2.0-flash',
@@ -16,9 +17,9 @@ function makeService(
 ) {
   return createUnifiedModelCatalogService({
     listProviders: () => ['gemini' as ProviderType],
-    getProviderFn: () => ({ listModels: () => Promise.resolve(modelList) }) as any,
+    getProviderFn: () => ({ listModels: () => Promise.resolve(modelList) }) as unknown as AIProvider,
     listAllSecretMetadataFn: () =>
-      Promise.resolve([{ enabledModels: JSON.stringify(enabledIds) }] as any),
+      Promise.resolve([{ enabledModels: JSON.stringify(enabledIds) }] as unknown as SecretMetadataRow[]),
   });
 }
 
@@ -43,9 +44,9 @@ describe('createUnifiedModelCatalogService.getUnifiedModelCatalog', () => {
             callCount++;
             return Promise.resolve([MOCK_MODEL]);
           },
-        }) as any,
+        }) as unknown as AIProvider,
       listAllSecretMetadataFn: () =>
-        Promise.resolve([{ enabledModels: JSON.stringify([MOCK_MODEL.modelId]) }] as any),
+        Promise.resolve([{ enabledModels: JSON.stringify([MOCK_MODEL.modelId]) }] as unknown as SecretMetadataRow[]),
     });
 
     // First call — cold cache, triggers refresh (listModels called once)
@@ -65,8 +66,8 @@ describe('createUnifiedModelCatalogService.getUnifiedModelCatalog', () => {
       getProviderFn: () =>
         ({
           listModels: () => Promise.reject(new Error('provider unavailable')),
-        }) as any,
-      listAllSecretMetadataFn: () => Promise.resolve([] as any),
+        }) as unknown as AIProvider,
+      listAllSecretMetadataFn: () => Promise.resolve([] as SecretMetadataRow[]),
     });
 
     const result = await service.getUnifiedModelCatalog('user-error');

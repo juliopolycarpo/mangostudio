@@ -158,14 +158,14 @@ describe('createProviderSecretService syncConfigFileConnectors', () => {
 
     await service.syncConfigFileConnectors('user-123');
 
-    expect(metadata.getRows()).toEqual([
-      expect.objectContaining({
-        id: 'owned-openai',
-        userId: 'user-123',
-        organizationId: 'org_123',
-        projectId: 'proj_123',
-      }),
-    ]);
+    const rows = metadata.getRows();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      id: 'owned-openai',
+      userId: 'user-123',
+      organizationId: 'org_123',
+      projectId: 'proj_123',
+    });
   });
 
   it('skips openai-compatible config-file entries that do not have persisted baseUrl metadata', async () => {

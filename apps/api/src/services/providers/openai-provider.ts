@@ -171,8 +171,8 @@ async function resolveAuthContext(userId: string, modelName?: string): Promise<O
     if (apiKey) {
       return {
         apiKey,
-        organizationId: (row).organizationId ?? null,
-        projectId: (row).projectId ?? null,
+        organizationId: row.organizationId ?? null,
+        projectId: row.projectId ?? null,
       };
     }
   }

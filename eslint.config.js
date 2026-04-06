@@ -39,17 +39,12 @@ export default tseslint.config(
     },
   },
   // Relax type-aware rules in test files — Bun test types are incomplete
-  // (e.g. expect().rejects is not typed as Thenable, Response.json() is unknown)
+  // (e.g. expect().rejects is not typed as Thenable)
   {
     files: ['**/tests/**/*.{ts,tsx}'],
     rules: {
       '@typescript-eslint/await-thenable': 'off',
       '@typescript-eslint/no-floating-promises': 'off',
-      '@typescript-eslint/no-unsafe-assignment': 'off',
-      '@typescript-eslint/no-unsafe-member-access': 'off',
-      '@typescript-eslint/no-unsafe-return': 'off',
-      '@typescript-eslint/no-unsafe-call': 'off',
-      '@typescript-eslint/no-unsafe-argument': 'off',
     },
   },
   // React rules — frontend only

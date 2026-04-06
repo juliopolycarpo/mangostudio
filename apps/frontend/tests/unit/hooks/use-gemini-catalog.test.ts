@@ -18,13 +18,18 @@ vi.mock('../../../src/lib/api-client', () => ({
 
 const mockGet = vi.mocked(client.api.settings.models.get);
 
+type MockGetResult = Awaited<ReturnType<typeof mockGet>>;
+function mockResult(data: unknown, error: unknown = null) {
+  return { data, error } as unknown as MockGetResult;
+}
+
 describe('useGeminiCatalog', () => {
   beforeEach(() => {
     mockGet.mockReset();
   });
 
   it('returns the initial empty catalog state', () => {
-    mockGet.mockResolvedValue({ data: EMPTY_MODEL_CATALOG, error: null } as any);
+    mockGet.mockResolvedValue(mockResult(EMPTY_MODEL_CATALOG));
 
     const { result } = renderHook(() => useGeminiCatalog());
 
@@ -52,7 +57,7 @@ describe('useGeminiCatalog', () => {
       discoveredImageModels: [],
     };
 
-    mockGet.mockResolvedValue({ data: mockCatalog, error: null } as any);
+    mockGet.mockResolvedValue(mockResult(mockCatalog));
 
     const { result } = renderHook(() => useGeminiCatalog());
 
@@ -63,7 +68,7 @@ describe('useGeminiCatalog', () => {
   });
 
   it('handles API errors', async () => {
-    mockGet.mockResolvedValue({ data: null, error: { value: 'Network error' } } as any);
+    mockGet.mockResolvedValue(mockResult(null, { value: 'Network error' }));
 
     const { result } = renderHook(() => useGeminiCatalog());
 
@@ -85,13 +90,13 @@ describe('useGeminiCatalog', () => {
     };
     const updatedCatalog = { ...initialCatalog, configured: false };
 
-    mockGet.mockResolvedValue({ data: initialCatalog, error: null } as any);
+    mockGet.mockResolvedValue(mockResult(initialCatalog));
 
     const { result } = renderHook(() => useGeminiCatalog());
 
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
-    mockGet.mockResolvedValue({ data: updatedCatalog, error: null } as any);
+    mockGet.mockResolvedValue(mockResult(updatedCatalog));
 
     await act(async () => {
       await result.current.refreshCatalog();
