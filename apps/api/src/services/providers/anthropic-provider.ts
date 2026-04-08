@@ -29,10 +29,19 @@ import type {
   AgentEvent,
 } from './types';
 
+/**
+ * Canonical fallback model IDs confirmed against the installed @anthropic-ai/sdk types.
+ * Update here when Anthropic releases newer stable snapshots.
+ */
+const ANTHROPIC_FALLBACK_MODELS = {
+  primaryText: 'claude-sonnet-4-5-20250929',
+  fastText: 'claude-haiku-4-5-20251001',
+} as const;
+
 /** Hardcoded fallback when client.models.list() is unavailable or returns empty. */
 const FALLBACK_MODELS: ModelInfo[] = [
   {
-    modelId: 'claude-sonnet-4-5-20250514',
+    modelId: ANTHROPIC_FALLBACK_MODELS.primaryText,
     displayName: 'Claude Sonnet 4.5',
     provider: 'anthropic',
     capabilities: {
@@ -48,8 +57,8 @@ const FALLBACK_MODELS: ModelInfo[] = [
     },
   },
   {
-    modelId: 'claude-haiku-3-5-20241022',
-    displayName: 'Claude Haiku 3.5',
+    modelId: ANTHROPIC_FALLBACK_MODELS.fastText,
+    displayName: 'Claude Haiku 4.5',
     provider: 'anthropic',
     capabilities: {
       text: true,

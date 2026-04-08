@@ -68,6 +68,28 @@ describe('getModelContextLimit', () => {
     expect(getModelContextLimit('claude-haiku-4-5')).toBe(200_000);
   });
 
+  // Claude 4.x exact snapshot IDs (Tier 1)
+  it('returns 200k for Claude 4 exact snapshot IDs', () => {
+    expect(getModelContextLimit('claude-sonnet-4-20250514')).toBe(200_000);
+    expect(getModelContextLimit('claude-opus-4-20250514')).toBe(200_000);
+    expect(getModelContextLimit('claude-sonnet-4-5-20250929')).toBe(200_000);
+    expect(getModelContextLimit('claude-opus-4-5-20251101')).toBe(200_000);
+    expect(getModelContextLimit('claude-haiku-4-5-20251001')).toBe(200_000);
+    expect(getModelContextLimit('claude-opus-4-1-20250805')).toBe(200_000);
+  });
+
+  // Claude 4.x prefix matching (Tier 2)
+  it('returns 200k for unknown Claude 4 snapshot variants via prefix match', () => {
+    expect(getModelContextLimit('claude-sonnet-4-future-variant')).toBe(200_000);
+    expect(getModelContextLimit('claude-opus-4-future-variant')).toBe(200_000);
+    expect(getModelContextLimit('claude-haiku-4-future-variant')).toBe(200_000);
+  });
+
+  // Claude 4.x legacy heuristic (Tier 3)
+  it('returns 200k for generic claude-4 prefix via tier-3 heuristic', () => {
+    expect(getModelContextLimit('claude-4-something-new')).toBe(200_000);
+  });
+
   it('returns 1M for legacy gemini-pro (catch-all)', () => {
     expect(getModelContextLimit('gemini-pro')).toBe(1_048_576);
     expect(getModelContextLimit('gemini-pro-vision')).toBe(1_048_576);

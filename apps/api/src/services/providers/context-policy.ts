@@ -111,7 +111,7 @@ const MODEL_CONTEXT_LIMITS: Record<string, number> = {
   'deepseek-r1-distill-qwen-32b': 65_536,
   'deepseek-r1-distill-llama-70b': 65_536,
   'deepseek-reasoner': 65_536,
-  // Anthropic Claude 3+
+  // Anthropic Claude 3.x
   'claude-3-opus-20240229': 200_000,
   'claude-3-sonnet-20240229': 200_000,
   'claude-3-haiku-20240307': 200_000,
@@ -119,6 +119,17 @@ const MODEL_CONTEXT_LIMITS: Record<string, number> = {
   'claude-3-5-sonnet-20241022': 200_000,
   'claude-3-5-haiku-20241022': 200_000,
   'claude-3-7-sonnet-20250219': 200_000,
+  // Anthropic Claude 4.x snapshots — all 200k context
+  'claude-opus-4-20250514': 200_000,
+  'claude-sonnet-4-20250514': 200_000,
+  'claude-opus-4-1-20250805': 200_000,
+  'claude-sonnet-4-5-20250929': 200_000,
+  'claude-opus-4-5-20251101': 200_000,
+  'claude-haiku-4-5-20251001': 200_000,
+  // Anthropic Claude 4.x prefix keys — tier-2 catch for future snapshots
+  'claude-opus-4': 200_000,
+  'claude-sonnet-4': 200_000,
+  'claude-haiku-4': 200_000,
 };
 
 /**
@@ -176,9 +187,10 @@ export function getModelContextLimit(modelName: string): number {
     return 1_048_576;
   }
 
-  // Claude 3+ models → 200k
+  // Claude 3+ and Claude 4 models → 200k
   if (
     lower.startsWith('claude-3') ||
+    lower.startsWith('claude-4') ||
     lower.startsWith('claude-sonnet') ||
     lower.startsWith('claude-opus') ||
     lower.startsWith('claude-haiku')
