@@ -13,6 +13,7 @@ import {
   type SecretMetadataInput,
 } from '../../services/secret-store/metadata';
 import { bunSecretStore } from '../../services/secret-store/store';
+import { maskSecret } from '../../utils/secrets';
 import { InvalidGeminiApiKeyError, GeminiValidationUnavailableError } from '../../services/gemini';
 import { SecretStorageUnavailableError } from '../../services/secret-store';
 import {
@@ -49,11 +50,6 @@ const PROVIDER_SECRET_CONFIG: Record<ProviderType, { tomlSection: string; envPre
   },
   anthropic: { tomlSection: 'anthropic_api_keys', envPrefix: 'ANTHROPIC_API_KEY' },
 };
-
-export function maskSecret(apiKey: string | null | undefined): string | undefined {
-  if (!apiKey) return undefined;
-  return `****...${apiKey.slice(-4)}`;
-}
 
 export function handleSecretRouteError(
   error: unknown,
