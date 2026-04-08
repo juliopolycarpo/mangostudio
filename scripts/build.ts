@@ -7,7 +7,7 @@
  */
 
 import { join } from 'path';
-import { mkdirSync, cpSync } from 'fs';
+import { mkdirSync, cpSync, existsSync } from 'fs';
 
 // Build configuration
 const BUILD_TIME = new Date().toISOString();
@@ -159,7 +159,7 @@ async function buildForPlatform(
 
       // Copy frontend dist to platform output directory
       const frontendDest = join(platformOutDir, 'public');
-      if (await Bun.file(FRONTEND_DIST).exists()) {
+      if (existsSync(FRONTEND_DIST)) {
         cpSync(FRONTEND_DIST, frontendDest, { recursive: true });
         console.log(`📁 Copied frontend dist to ${frontendDest}`);
       }
