@@ -70,7 +70,7 @@ await runMigrations();
 // Add Frontend and SPA fallback if it exists
 if (frontendExists) {
   const indexPath = join(FRONTEND_DIR, 'index.html');
-  const serveIndex = () =>
+  const serveIndex = (): Response =>
     new Response(Bun.file(indexPath), { headers: { 'Content-Type': 'text/html' } });
 
   app

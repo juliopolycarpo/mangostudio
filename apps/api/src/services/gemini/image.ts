@@ -131,7 +131,8 @@ export async function generateImage(
   // Extract image from response and save to disk
   for (const part of candidate?.content?.parts || []) {
     if (part.inlineData) {
-      const imageBuffer = Buffer.from(part.inlineData.data!, 'base64');
+      if (!part.inlineData.data) continue;
+      const imageBuffer = Buffer.from(part.inlineData.data, 'base64');
       const filename = `generated-${Date.now()}-${Math.round(Math.random() * 1e9)}.png`;
       const filePath = join(UPLOADS_DIR, filename);
 

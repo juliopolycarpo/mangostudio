@@ -165,7 +165,7 @@ export function buildGeminiInteractionsReplay(
           name: '',
           result: (() => {
             try {
-              return JSON.parse(tr.content);
+              return JSON.parse(tr.content) as unknown;
             } catch {
               return tr.content;
             }

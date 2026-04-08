@@ -1,9 +1,15 @@
 import '@testing-library/jest-dom';
 
 class ResizeObserverMock {
-  observe() {}
-  unobserve() {}
-  disconnect() {}
+  observe() {
+    // noop – mock for jsdom
+  }
+  unobserve() {
+    // noop – mock for jsdom
+  }
+  disconnect() {
+    // noop – mock for jsdom
+  }
 }
 
 class IntersectionObserverMock {
@@ -11,9 +17,15 @@ class IntersectionObserverMock {
   readonly rootMargin = '';
   readonly thresholds: readonly number[] = [];
 
-  observe() {}
-  unobserve() {}
-  disconnect() {}
+  observe() {
+    // noop – mock for jsdom
+  }
+  unobserve() {
+    // noop – mock for jsdom
+  }
+  disconnect() {
+    // noop – mock for jsdom
+  }
   takeRecords(): IntersectionObserverEntry[] {
     return [];
   }
@@ -25,10 +37,10 @@ globalThis.matchMedia =
     matches: false,
     media: '',
     onchange: null,
-    addListener: () => {},
-    removeListener: () => {},
-    addEventListener: () => {},
-    removeEventListener: () => {},
+    addListener: () => undefined as void,
+    removeListener: () => undefined as void,
+    addEventListener: () => undefined as void,
+    removeEventListener: () => undefined as void,
     dispatchEvent: () => false,
   }));
 

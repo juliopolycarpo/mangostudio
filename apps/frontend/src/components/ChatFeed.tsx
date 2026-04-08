@@ -17,7 +17,7 @@ import {
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { AnimatePresence, motion } from 'motion/react';
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { useI18n } from '@/hooks/use-i18n';
 import { MarkdownContent } from '@/components/MarkdownContent';
@@ -55,13 +55,16 @@ function ThinkingBlock({ messageId, text, isStreaming, segmentIndex = 0 }: Think
   const uiStateRef = useRef(initialUiState.current);
   const previousStreamingRef = useRef(isStreaming);
 
-  const updateUiState = (partial: Partial<ThinkingUiState>) => {
-    uiStateRef.current = {
-      ...uiStateRef.current,
-      ...partial,
-    };
-    thinkingUiStateByMessage.set(messageId, uiStateRef.current);
-  };
+  const updateUiState = useCallback(
+    (partial: Partial<ThinkingUiState>) => {
+      uiStateRef.current = {
+        ...uiStateRef.current,
+        ...partial,
+      };
+      thinkingUiStateByMessage.set(messageId, uiStateRef.current);
+    },
+    [messageId]
+  );
 
   useEffect(() => {
     if (!previousStreamingRef.current && isStreaming) {
@@ -75,7 +78,7 @@ function ThinkingBlock({ messageId, text, isStreaming, segmentIndex = 0 }: Think
     }
 
     previousStreamingRef.current = isStreaming;
-  }, [isStreaming]);
+  }, [isStreaming, updateUiState]);
 
   useLayoutEffect(() => {
     if (!expanded || !scrollRef.current) return;
@@ -90,7 +93,7 @@ function ThinkingBlock({ messageId, text, isStreaming, segmentIndex = 0 }: Think
     }
 
     element.scrollTop = Math.min(uiStateRef.current.scrollTop, maxScrollTop);
-  }, [expanded, isStreaming, text]);
+  }, [expanded, isStreaming, text, updateUiState]);
 
   const handleToggle = () => {
     const nextExpanded = !expanded;
@@ -304,7 +307,7 @@ function CopyMessageButton({
   return (
     <button
       type="button"
-      onClick={handleCopy}
+      onClick={() => void handleCopy()}
       className="opacity-0 group-hover:opacity-70 hover:!opacity-100 transition-opacity duration-200 text-on-surface-variant/60 hover:text-on-surface-variant cursor-pointer"
       title={copied ? copiedLabel : label}
     >
@@ -693,7 +696,9 @@ export function ChatFeed({ chatId, messages }: { chatId: string | null; messages
                                     <div className="absolute bottom-4 left-4 right-4 glass-panel rounded-xl p-3 flex justify-between items-center translate-y-12 opacity-0 group-hover:translate-y-0 group-hover:opacity-100 transition-all duration-300">
                                       <div className="flex gap-2">
                                         <button
-                                          onClick={() => handleDownload(msg.imageUrl!)}
+                                          onClick={() => {
+                                            if (msg.imageUrl) handleDownload(msg.imageUrl);
+                                          }}
                                           className="w-9 h-9 rounded-lg flex items-center justify-center bg-surface-container-highest/40 hover:bg-primary/20 text-on-surface transition-colors"
                                           title="Download"
                                         >

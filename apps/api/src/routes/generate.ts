@@ -122,10 +122,9 @@ export const generateRoutes = (app: Elysia) =>
               },
             };
           } catch (error: unknown) {
-            const errorText = error instanceof Error ? error.message : 'Image generation failed';
-            console.error('[generate] Error:', errorText);
+            console.error('[generate] Error:', error);
             set.status = 500;
-            return { error: errorText };
+            return { error: 'Image generation failed. Please try again.' };
           }
         },
         {

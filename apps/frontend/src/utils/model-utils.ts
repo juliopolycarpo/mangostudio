@@ -18,8 +18,8 @@ export function resolveSelectedModel(
   selectedModel: string | undefined,
   options: ModelOption[]
 ): string {
-  if (hasModelOption(selectedModel, options)) {
-    return selectedModel!;
+  if (selectedModel && hasModelOption(selectedModel, options)) {
+    return selectedModel;
   }
 
   return options[0]?.modelId ?? '';
@@ -30,8 +30,8 @@ export function resolveActiveModeModel(
   globalModel: string | undefined,
   options: ModelOption[]
 ): string {
-  if (hasModelOption(chatModel, options)) {
-    return chatModel!;
+  if (chatModel && hasModelOption(chatModel, options)) {
+    return chatModel;
   }
 
   return resolveSelectedModel(globalModel, options);

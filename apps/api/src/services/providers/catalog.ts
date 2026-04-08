@@ -53,6 +53,13 @@ function createEmptySnapshot(): ModelCatalogResponse {
   };
 }
 
+interface UnifiedModelCatalogService {
+  refresh(userId: string): Promise<ModelCatalogResponse>;
+  getUnifiedModelCatalog(userId: string): Promise<ModelCatalogResponse>;
+  invalidate(userId: string): void;
+  recalculate(userId: string): void;
+}
+
 /**
  * Creates a unified model catalog service that aggregates models from all
  * registered AI providers.
@@ -64,7 +71,9 @@ function evictOldest<V>(map: Map<string, V>): void {
   }
 }
 
-export function createUnifiedModelCatalogService(deps: UnifiedModelCatalogDeps = {}) {
+export function createUnifiedModelCatalogService(
+  deps: UnifiedModelCatalogDeps = {}
+): UnifiedModelCatalogService {
   const now = deps.now ?? (() => Date.now());
   const listProviders = deps.listProviders ?? listRegisteredProviderTypes;
   const getProviderFn = deps.getProviderFn ?? getProvider;
@@ -76,8 +85,11 @@ export function createUnifiedModelCatalogService(deps: UnifiedModelCatalogDeps =
   const refreshPromises = new Map<string, Promise<ModelCatalogResponse>>();
 
   function getSnapshot(userId: string): ModelCatalogResponse {
-    if (!snapshots.has(userId)) snapshots.set(userId, createEmptySnapshot());
-    return snapshots.get(userId)!;
+    const existing = snapshots.get(userId);
+    if (existing) return existing;
+    const fresh = createEmptySnapshot();
+    snapshots.set(userId, fresh);
+    return fresh;
   }
 
   function isStale(userId: string): boolean {
@@ -133,7 +145,8 @@ export function createUnifiedModelCatalogService(deps: UnifiedModelCatalogDeps =
      * Providers that fail (e.g. no connector configured) are silently skipped.
      */
     async refresh(userId: string): Promise<ModelCatalogResponse> {
-      if (refreshPromises.has(userId)) return refreshPromises.get(userId)!;
+      const inflight = refreshPromises.get(userId);
+      if (inflight) return inflight;
 
       const promise = (async () => {
         try {

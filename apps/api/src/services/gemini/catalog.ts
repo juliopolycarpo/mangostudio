@@ -5,7 +5,7 @@
 
 import { GoogleGenAI } from '@google/genai';
 import type { Model } from '@google/genai';
-import type { GeminiModelCatalogResponse, GeminiModelOption } from '@mangostudio/shared';
+import type { ModelCatalogResponse, ModelOption } from '@mangostudio/shared';
 import { isImageModelId } from '@mangostudio/shared/utils/model-detection';
 import { GeminiApiKeyMissingError, getResolvedGeminiApiKey } from './secret';
 import { listSecretMetadata, GEMINI_PROVIDER } from '../secret-store/metadata';
@@ -23,7 +23,7 @@ function extractModelId(resourceName: string): string {
   return resourceName.split('/').pop() ?? resourceName;
 }
 
-function normalizeModelOption(model: Model): GeminiModelOption {
+function normalizeModelOption(model: Model): ModelOption {
   const resourceName = model.name ?? '';
   const modelWithBaseId = model as Model & { baseModelId?: string };
   const modelId = modelWithBaseId.baseModelId?.trim() || extractModelId(resourceName);
@@ -39,11 +39,11 @@ function normalizeModelOption(model: Model): GeminiModelOption {
   };
 }
 
-function isTextModel(model: GeminiModelOption): boolean {
+function isTextModel(model: ModelOption): boolean {
   return model.supportedActions.includes('generateContent') && !isImageModelId(model.modelId);
 }
 
-function createEmptySnapshot(): GeminiModelCatalogResponse {
+function createEmptySnapshot(): ModelCatalogResponse {
   return {
     configured: false,
     status: 'idle',
@@ -55,12 +55,26 @@ function createEmptySnapshot(): GeminiModelCatalogResponse {
   };
 }
 
+interface GeminiModelCatalogService {
+  refreshGeminiModelCatalog(
+    userId: string,
+    reason: GeminiModelCatalogRefreshReason
+  ): Promise<ModelCatalogResponse>;
+  refreshIfStale(userId: string, reason: GeminiModelCatalogRefreshReason): ModelCatalogResponse;
+  clearGeminiModelCatalog(userId: string): ModelCatalogResponse;
+  getGeminiModelCatalog(userId: string): Promise<ModelCatalogResponse>;
+  getDefaultTextModel(userId: string): string;
+  getDefaultImageModel(userId: string): string;
+  hasTextModel(userId: string, modelId: string): boolean;
+  hasImageModel(userId: string, modelId: string): boolean;
+}
+
 /**
  * Creates the Gemini model catalog service with injectable dependencies for tests.
  */
 export function createGeminiModelCatalogService(
   dependencies: GeminiModelCatalogServiceDependencies = {}
-) {
+): GeminiModelCatalogService {
   const getApiKey = dependencies.getApiKey ?? (async (userId) => getResolvedGeminiApiKey(userId));
   const now = dependencies.now ?? (() => Date.now());
   const listModels =
@@ -77,17 +91,20 @@ export function createGeminiModelCatalogService(
       return models;
     });
 
-  const fullCatalogs = new Map<string, GeminiModelOption[]>();
-  const snapshots = new Map<string, GeminiModelCatalogResponse>();
-  const refreshPromises = new Map<string, Promise<GeminiModelCatalogResponse>>();
+  const fullCatalogs = new Map<string, ModelOption[]>();
+  const snapshots = new Map<string, ModelCatalogResponse>();
+  const refreshPromises = new Map<string, Promise<ModelCatalogResponse>>();
   const TTL_MS = 60 * 60 * 1000; // 1 hour
 
-  function getSnapshot(userId: string) {
-    if (!snapshots.has(userId)) snapshots.set(userId, createEmptySnapshot());
-    return snapshots.get(userId)!;
+  function getSnapshot(userId: string): ModelCatalogResponse {
+    const existing = snapshots.get(userId);
+    if (existing) return existing;
+    const fresh = createEmptySnapshot();
+    snapshots.set(userId, fresh);
+    return fresh;
   }
 
-  function getFullCatalog(userId: string) {
+  function getFullCatalog(userId: string): ModelOption[] {
     return fullCatalogs.get(userId) || [];
   }
 
@@ -113,7 +130,7 @@ export function createGeminiModelCatalogService(
     return enabled;
   }
 
-  const recalculateSnapshot = async (userId: string) => {
+  const recalculateSnapshot = async (userId: string): Promise<void> => {
     const enabledIds = await getEnabledModelIds(userId);
     const fullCatalog = getFullCatalog(userId);
     const snap = getSnapshot(userId);
@@ -136,8 +153,9 @@ export function createGeminiModelCatalogService(
     async refreshGeminiModelCatalog(
       userId: string,
       _reason: GeminiModelCatalogRefreshReason
-    ): Promise<GeminiModelCatalogResponse> {
-      if (refreshPromises.has(userId)) return refreshPromises.get(userId)!;
+    ): Promise<ModelCatalogResponse> {
+      const inflight = refreshPromises.get(userId);
+      if (inflight) return inflight;
 
       const refreshPromise = (async () => {
         try {
@@ -179,10 +197,7 @@ export function createGeminiModelCatalogService(
       return refreshPromise;
     },
 
-    refreshIfStale(
-      userId: string,
-      reason: GeminiModelCatalogRefreshReason
-    ): GeminiModelCatalogResponse {
+    refreshIfStale(userId: string, reason: GeminiModelCatalogRefreshReason): ModelCatalogResponse {
       if (isStale(userId) && !refreshPromises.has(userId)) {
         this.refreshGeminiModelCatalog(userId, reason).catch((err: unknown) => {
           const message = err instanceof Error ? err.message : String(err);
@@ -192,14 +207,14 @@ export function createGeminiModelCatalogService(
       return getSnapshot(userId);
     },
 
-    clearGeminiModelCatalog(userId: string): GeminiModelCatalogResponse {
+    clearGeminiModelCatalog(userId: string): ModelCatalogResponse {
       fullCatalogs.set(userId, []);
       const snap = createEmptySnapshot();
       snapshots.set(userId, snap);
       return snap;
     },
 
-    async getGeminiModelCatalog(userId: string): Promise<GeminiModelCatalogResponse> {
+    async getGeminiModelCatalog(userId: string): Promise<ModelCatalogResponse> {
       if (getFullCatalog(userId).length > 0) {
         await recalculateSnapshot(userId);
         // Background refresh if stale — user sees current data while it updates

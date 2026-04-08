@@ -162,11 +162,11 @@ describe('openai-compatible resolveClientConfig (via secretService)', () => {
 
     // The real provider throws this specific error when no eligible connector is found.
     // 'user-with-no-valid-connectors' has no connectors in the test DB.
-    await expect(
+    await (expect(
       openAICompatibleProvider.resolveApiKey('user-with-no-valid-connectors')
     ).rejects.toThrow(
       'No openai-compatible connector with a valid baseUrl is configured for this model.'
-    );
+    ) as unknown as Promise<void>);
   });
 
   it('picks the connector with the matching enabledModel when two connectors exist', () => {
@@ -236,7 +236,11 @@ describe('openai-compatible generateAgentTurnStream turn_completed contract', ()
     const events: Array<{ type: string; providerState?: string }> = [];
 
     try {
-      for await (const event of openAICompatibleProvider.generateAgentTurnStream!({
+      if (!openAICompatibleProvider.generateAgentTurnStream) {
+        throw new Error('openAICompatibleProvider.generateAgentTurnStream must be implemented');
+      }
+
+      for await (const event of openAICompatibleProvider.generateAgentTurnStream({
         userId: 'test-user-no-connectors',
         modelName: 'test-model',
         systemPrompt: undefined,
@@ -259,7 +263,7 @@ describe('openai-compatible generateAgentTurnStream turn_completed contract', ()
     if (turnCompleted) {
       const envelope = parseContinuationEnvelope(turnCompleted.providerState ?? null);
       expect(envelope).not.toBeNull();
-      expect(envelope!.mode).toBe('stateless-loop');
+      expect(envelope?.mode).toBe('stateless-loop');
     }
   });
 });

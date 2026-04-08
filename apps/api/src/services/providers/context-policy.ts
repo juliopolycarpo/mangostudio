@@ -30,6 +30,12 @@ export type ContextAction =
 /**
  * Rough token estimate. ~4 chars per token for English.
  * Providers report exact counts after the call; this is a pre-call estimate.
+ *
+ * Known limitations:
+ *   - Undercounts CJK (Chinese/Japanese/Korean) text, where 1 character ≈ 1-2 tokens.
+ *   - Overcounts for code, where tokens often map to whole keywords or symbols.
+ *   - Does not account for special tokens (BOS, EOS, role separators).
+ * For accuracy, use tiktoken or a provider-specific tokenizer.
  */
 export function estimateTokenCount(text: string): number {
   return Math.ceil(text.length / 4);

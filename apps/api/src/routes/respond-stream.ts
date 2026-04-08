@@ -112,8 +112,9 @@ export const respondStreamRoutes = (app: Elysia) =>
           try {
             provider = await getProviderForModel(model, userId);
           } catch (err) {
+            console.error('[respond-stream] Provider lookup error:', err);
             set.status = 400;
-            return { error: err instanceof Error ? err.message : 'No provider found for model' };
+            return { error: 'No provider available for the requested model.' };
           }
 
           // Capture context before the async boundary inside ReadableStream

@@ -10,8 +10,8 @@
     "typecheck": "tsc --noEmit",
     "fix": "bun run lint:fix && bun run format",
     "fix:check": "bun run lint && bun run format:check",
-    "format": "prettier --ignore-path ../../.prettierignore --write 'src/**/*.{ts,json}'",
-    "format:check": "prettier --ignore-path ../../.prettierignore --check 'src/**/*.{ts,json}'",
+    "format": "prettier --ignore-path ../../.prettierignore --write 'src/**/*.{ts,json}' 'tests/**/*.ts'",
+    "format:check": "prettier --ignore-path ../../.prettierignore --check 'src/**/*.{ts,json}' 'tests/**/*.ts'",
     "test": "vitest run",
     "test:unit": "vitest run tests/unit"
   },

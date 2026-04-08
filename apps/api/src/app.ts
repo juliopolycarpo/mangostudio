@@ -18,6 +18,7 @@ import { respondStreamRoutes } from './routes/respond-stream';
 import { settingsRoutes } from './routes/settings';
 import { authRoutes } from './routes/auth';
 import { rateLimit } from './plugins/rate-limit';
+import { errorHandler } from './plugins/error-handler';
 import { getConfig } from './lib/config';
 
 const UPLOADS_DIR = getConfig().uploads.dir;
@@ -29,6 +30,8 @@ const UPLOADS_DIR = getConfig().uploads.dir;
 const api = new Elysia({ prefix: '/api' })
   // Health check
   .get('/health', () => ({ status: 'ok', timestamp: Date.now() }))
+  // Centralized error handling
+  .use(errorHandler)
   // Rate limiting for API routes
   .use(
     rateLimit({

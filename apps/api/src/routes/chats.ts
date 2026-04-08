@@ -10,9 +10,16 @@ import { mapMessageRow } from '../services/message-service';
 import { parseQueryInt } from '../utils/query';
 import { parseContinuationEnvelope } from '../services/providers/continuation';
 import { getContextSeverity } from '../services/providers/context-policy';
+import { generateId } from '../utils/id';
 
 /** Extract context info from a raw ContinuationEnvelope JSON string. */
-function extractContextInfo(providerState: string | null | undefined) {
+function extractContextInfo(providerState: string | null | undefined): {
+  estimatedInputTokens: number;
+  contextLimit: number;
+  estimatedUsageRatio: number;
+  mode: 'stateful' | 'replay';
+  severity: ReturnType<typeof getContextSeverity>;
+} | null {
   if (!providerState) return null;
   const envelope = parseContinuationEnvelope(providerState);
   if (!envelope?.context) return null;
@@ -62,25 +69,24 @@ export const chatRoutes = (app: Elysia) =>
             return { error: 'Unauthorized' };
           }
           const db = getDb();
+          const id = generateId();
+          const now = Date.now();
           await db
             .insertInto('chats')
             .values({
-              id: body.id,
+              id,
               title: body.title,
-              createdAt: body.createdAt,
-              updatedAt: body.updatedAt,
+              createdAt: now,
+              updatedAt: now,
               model: body.model ?? null,
               userId: user.id,
             })
             .execute();
-          return { success: true };
+          return { id };
         },
         {
           body: t.Object({
-            id: t.String(),
             title: t.String(),
-            createdAt: t.Number(),
-            updatedAt: t.Number(),
             model: t.Optional(t.String()),
           }),
         }

@@ -4,6 +4,23 @@ import { extractApiError } from '../lib/utils';
 import type { Message } from '@mangostudio/shared';
 import type { ContextInfo } from './use-text-chat';
 
+export type MessagesPage = {
+  messages: Message[];
+  nextCursor: string | null;
+  contextInfo?: ContextInfo | null;
+};
+
+/** Eden 1.4.x creates a union type for dynamic chat segments that have both direct handlers
+ * and sub-resources (messages). Casting through `unknown` to this interface resolves the union. */
+type ChatMessagesRoute = {
+  messages: {
+    get: (opts: { query: { cursor?: string; limit: string } }) => Promise<{
+      data: MessagesPage | null;
+      error: { value: unknown } | null;
+    }>;
+  };
+};
+
 export const messageKeys = {
   all: ['messages'] as const,
   lists: () => [...messageKeys.all, 'list'] as const,
@@ -11,19 +28,16 @@ export const messageKeys = {
 };
 
 export function useMessagesQuery(chatId: string | null) {
+  const id = chatId ?? '';
   return useInfiniteQuery({
-    queryKey: messageKeys.list(chatId!),
+    queryKey: messageKeys.list(id),
     queryFn: async ({ pageParam }) => {
       const query = pageParam ? { cursor: pageParam, limit: '50' } : { limit: '50' };
-      // Eden 1.4.x creates a union type for dynamic segments with both direct handlers and
-      // sub-resources. Cast to `any` to access the messages sub-resource.
-      const { data, error } = await (client.api.chats[chatId!] as any).messages.get({ query });
+      const { data, error } = await (
+        (client.api.chats as unknown as Record<string, unknown>)[id] as ChatMessagesRoute
+      ).messages.get({ query });
       if (error) throw new Error(extractApiError(error.value));
-      return data as {
-        messages: Message[];
-        nextCursor: string | null;
-        contextInfo?: ContextInfo | null;
-      };
+      return data as MessagesPage;
     },
     initialPageParam: null as string | null,
     getNextPageParam: (lastPage) => lastPage.nextCursor,
@@ -63,7 +77,13 @@ export function useUpdateMessageMutation() {
       chatId: string;
       updates: Partial<Message>;
     }) => {
-      const { data, error } = await client.api.messages[id].put(updates);
+      const { data, error } = await (
+        (client.api.messages as unknown as Record<string, unknown>)[id] as {
+          put: (
+            body: Partial<Message>
+          ) => Promise<{ data: unknown; error: { value: unknown } | null }>;
+        }
+      ).put(updates);
       if (error) throw new Error(extractApiError(error.value));
       return data;
     },

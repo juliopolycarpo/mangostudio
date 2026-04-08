@@ -23,11 +23,7 @@ const mockStream = vi.mocked(respondTextStream);
  * StreamChunk objects and then resolves.
  */
 function makeStreamFn(chunks: Parameters<Parameters<typeof respondTextStream>[1]>[0][]) {
-  return (
-    _req: unknown,
-    onChunk: (chunk: (typeof chunks)[0]) => void,
-    _signal?: AbortSignal
-  ) => {
+  return (_req: unknown, onChunk: (chunk: (typeof chunks)[0]) => void, _signal?: AbortSignal) => {
     for (const chunk of chunks) {
       onChunk(chunk);
     }
@@ -83,15 +79,17 @@ describe('useTextChat — thinking segment tracking', () => {
     await waitFor(() => expect(result.current.isGenerating).toBe(false));
 
     // Find the call where a thinking part was added (thinking_start + first thinking delta)
-    const calls: Array<[string, string, Partial<{ parts: MessagePart[] }>]> =
-      vi.mocked(props.optimistic.updateOptimisticMessage).mock.calls;
+    const calls: Array<[string, string, Partial<{ parts: MessagePart[] }>]> = vi.mocked(
+      props.optimistic.updateOptimisticMessage
+    ).mock.calls;
 
     const thinkingCall = calls.find(([, , update]) =>
       update.parts?.some((p: MessagePart) => p.type === 'thinking' && p.text === 'initial thought')
     );
 
     expect(thinkingCall).toBeDefined();
-    const thinkingParts = thinkingCall![2].parts!.filter((p) => p.type === 'thinking');
+    if (!thinkingCall) throw new Error('expected a thinking call update');
+    const thinkingParts = (thinkingCall[2].parts ?? []).filter((p) => p.type === 'thinking');
     expect(thinkingParts).toHaveLength(1);
   });
 
@@ -113,8 +111,9 @@ describe('useTextChat — thinking segment tracking', () => {
 
     await waitFor(() => expect(result.current.isGenerating).toBe(false));
 
-    const calls: Array<[string, string, Partial<{ parts: MessagePart[] }>]> =
-      vi.mocked(props.optimistic.updateOptimisticMessage).mock.calls;
+    const calls: Array<[string, string, Partial<{ parts: MessagePart[] }>]> = vi.mocked(
+      props.optimistic.updateOptimisticMessage
+    ).mock.calls;
 
     // The last substantive parts update before done should have one thinking segment
     const lastPartsCall = [...calls]
@@ -122,11 +121,10 @@ describe('useTextChat — thinking segment tracking', () => {
       .find(([, , update]) => update.parts !== undefined && !('generationTime' in update));
 
     expect(lastPartsCall).toBeDefined();
-    const thinkingParts = lastPartsCall![2].parts!.filter((p) => p.type === 'thinking');
+    if (!lastPartsCall) throw new Error('expected a parts update call');
+    const thinkingParts = (lastPartsCall[2].parts ?? []).filter((p) => p.type === 'thinking');
     expect(thinkingParts).toHaveLength(1);
-    expect((thinkingParts[0]).text).toBe(
-      'part1 part2'
-    );
+    expect(thinkingParts[0].text).toBe('part1 part2');
   });
 
   it('tool_call_started resets segment so next thinking_start creates a second ThinkingBlock', async () => {
@@ -160,8 +158,9 @@ describe('useTextChat — thinking segment tracking', () => {
 
     await waitFor(() => expect(result.current.isGenerating).toBe(false));
 
-    const calls: Array<[string, string, Partial<{ parts: MessagePart[] }>]> =
-      vi.mocked(props.optimistic.updateOptimisticMessage).mock.calls;
+    const calls: Array<[string, string, Partial<{ parts: MessagePart[] }>]> = vi.mocked(
+      props.optimistic.updateOptimisticMessage
+    ).mock.calls;
 
     // Find the LAST call that has two thinking parts (captures the final state of both segments)
     const twoThinkingCall = [...calls]
@@ -172,9 +171,8 @@ describe('useTextChat — thinking segment tracking', () => {
       );
 
     expect(twoThinkingCall).toBeDefined();
-    const twoThinkingParts = twoThinkingCall![2].parts!.filter(
-      (p) => p.type === 'thinking'
-    );
+    if (!twoThinkingCall) throw new Error('expected a two-thinking update call');
+    const twoThinkingParts = (twoThinkingCall[2].parts ?? []).filter((p) => p.type === 'thinking');
     expect(twoThinkingParts[0].text).toBe('before tool');
     expect(twoThinkingParts[1].text).toBe('after tool');
   });

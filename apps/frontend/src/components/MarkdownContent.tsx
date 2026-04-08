@@ -14,7 +14,8 @@ function createRenderer(theme: CodeThemeId): Renderer {
   const renderer = new Renderer();
 
   renderer.link = ({ href, title, tokens }) => {
-    const text = tokens?.map((t) => ('text' in t ? t.text : t.raw)).join('') ?? '';
+    const text =
+      tokens?.map((t): string => ('text' in t ? (t.text as string) : t.raw)).join('') ?? '';
     const safeHref = href?.startsWith('javascript:') ? '#' : href;
     const titleAttr = title ? ` title="${title}"` : '';
     return `<a href="${safeHref}" target="_blank" rel="noopener noreferrer"${titleAttr}>${text}</a>`;

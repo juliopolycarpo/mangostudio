@@ -64,12 +64,14 @@ export const messageRoutes = (app: Elysia) =>
             nextCursor = nextItem?.timestamp.toString();
           }
 
-          const galleryItems = rows.map((row) => ({
-            id: row.id,
-            imageUrl: row.imageUrl!,
-            prompt: row.prompt ?? 'Generated Image',
-            chatId: row.chatId,
-          }));
+          const galleryItems = rows
+            .filter((row): row is typeof row & { imageUrl: string } => row.imageUrl !== null)
+            .map((row) => ({
+              id: row.id,
+              imageUrl: row.imageUrl,
+              prompt: row.prompt ?? 'Generated Image',
+              chatId: row.chatId,
+            }));
 
           return {
             items: galleryItems,
@@ -104,7 +106,7 @@ export const messageRoutes = (app: Elysia) =>
             {
               id: body.id,
               chatId: body.chatId,
-              role: body.role as 'user' | 'ai',
+              role: body.role,
               text: body.text,
               imageUrl: body.imageUrl,
               referenceImage: body.referenceImage,
@@ -131,7 +133,7 @@ export const messageRoutes = (app: Elysia) =>
           body: t.Object({
             id: t.String(),
             chatId: t.String(),
-            role: t.String(),
+            role: t.Union([t.Literal('user'), t.Literal('ai')]),
             text: t.String(),
             imageUrl: t.Optional(t.String()),
             referenceImage: t.Optional(t.String()),
@@ -140,7 +142,7 @@ export const messageRoutes = (app: Elysia) =>
             generationTime: t.Optional(t.String()),
             modelName: t.Optional(t.String()),
             styleParams: t.Optional(t.Array(t.String())),
-            interactionMode: t.Optional(t.String()),
+            interactionMode: t.Optional(t.Union([t.Literal('chat'), t.Literal('image')])),
           }),
         }
       )

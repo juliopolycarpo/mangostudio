@@ -99,6 +99,25 @@ export function isPlaceholderConfigSecretValue(value: string): boolean {
   );
 }
 
+/** Return type for createProviderSecretService. */
+export interface ProviderSecretServiceInstance {
+  resolveApiKey(userId: string, requestedModel?: string): Promise<string>;
+  validateApiKey(apiKey: string): Promise<void>;
+  syncConfigFileConnectors(userId: string): Promise<void>;
+  listMeta: (provider: string, userId: string) => Promise<SecretMetadataRow[]>;
+  getMetaById: (id: string, userId: string) => Promise<SecretMetadataRow | null>;
+  upsertMeta: (input: SecretMetadataInput) => Promise<void>;
+  deleteMeta: (id: string, userId: string) => Promise<void>;
+  now: () => number;
+  secretStore: SecretStore;
+  provider: ProviderType;
+  tomlFilePath: string;
+  tomlSection: string;
+  envVarPrefix: string;
+  resolveSecretValue: (connector: SecretMetadataRow) => Promise<string | null>;
+  maskSecret: (apiKey: string | null | undefined) => string | undefined;
+}
+
 /**
  * Creates a provider-agnostic secret service.
  * Shared logic: config-file sync, env-var resolution, key resolution by model.
@@ -106,7 +125,7 @@ export function isPlaceholderConfigSecretValue(value: string): boolean {
 export function createProviderSecretService(
   config: ProviderSecretServiceConfig,
   deps: ProviderSecretServiceDeps = {}
-) {
+): ProviderSecretServiceInstance {
   const secretStore = deps.secretStore ?? bunSecretStore;
   const fetchImpl = deps.fetchImpl ?? fetch;
   const now = deps.now ?? (() => Date.now());
@@ -115,6 +134,13 @@ export function createProviderSecretService(
   const upsertMeta = deps.upsertMetadata ?? upsertSecretMetadata;
   const deleteMeta = deps.deleteMetadata ?? deleteSecretMetadata;
   const tomlFilePath = deps.tomlFilePath ?? getConfig().configFilePath;
+
+  // TTL debounce: avoid re-syncing the config file on every request.
+  // The TOML config file rarely changes during runtime, so a 30-second
+  // debounce is safe and eliminates redundant disk I/O and DB queries
+  // on hot paths like /respond/stream.
+  const SYNC_TTL_MS = 30_000;
+  const lastSyncByUser = new Map<string, number>();
 
   const resolveSecretValue = async (connector: SecretMetadataRow): Promise<string | null> => {
     switch (connector.source) {
@@ -154,6 +180,8 @@ export function createProviderSecretService(
   };
 
   const syncConfigFileConnectors = async (userId: string): Promise<void> => {
+    const lastSync = lastSyncByUser.get(userId);
+    if (lastSync && now() - lastSync < SYNC_TTL_MS) return;
     try {
       if (!existsSync(tomlFilePath)) return;
       const parsed = readTomlStringSections(tomlFilePath);
@@ -209,6 +237,8 @@ export function createProviderSecretService(
           await deleteMeta(connector.id, userId);
         }
       }
+
+      lastSyncByUser.set(userId, now());
     } catch (err) {
       console.warn(`[${config.provider}] Failed to sync config.toml:`, err);
     }

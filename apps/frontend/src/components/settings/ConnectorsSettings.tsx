@@ -1,5 +1,16 @@
 /* global console */
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
+
+/** Eden 1.4.x creates a union type for dynamic connector segments. Casting through `unknown`
+ * to this interface resolves the union without propagating `any`. */
+type ConnectorByIdRoute = {
+  delete: () => Promise<{ data: null; error: { value: unknown } | null }>;
+  models: {
+    put: (body: {
+      enabledModels: string[];
+    }) => Promise<{ data: null; error: { value: unknown } | null }>;
+  };
+};
 import type {
   Connector,
   ConnectorStatus,
@@ -68,7 +79,7 @@ export function ConnectorsSettings({ modelCatalog, reloadModelCatalog }: Connect
   const [showKey, setShowKey] = useState(false);
   const [modelSearchQuery, setModelSearchQuery] = useState('');
 
-  const loadStatus = async () => {
+  const loadStatus = useCallback(async () => {
     try {
       const { data, error } = await client.api.settings.connectors.get();
       if (error) throw new Error(extractApiError(error.value, 'Failed to load status.'));
@@ -76,11 +87,11 @@ export function ConnectorsSettings({ modelCatalog, reloadModelCatalog }: Connect
     } catch (error) {
       console.error('[connectors] Failed to load connector status', error);
     }
-  };
+  }, []);
 
   useEffect(() => {
     void loadStatus();
-  }, []);
+  }, [loadStatus]);
 
   function isReadOnlySharedConnector(connector: Connector): boolean {
     return (
@@ -155,7 +166,11 @@ export function ConnectorsSettings({ modelCatalog, reloadModelCatalog }: Connect
     }
 
     try {
-      const { error } = await (client.api.settings.connectors[id] as any).delete();
+      const { error } = await (
+        (client.api.settings.connectors as unknown as Record<string, unknown>)[
+          id
+        ] as ConnectorByIdRoute
+      ).delete();
       if (error) throw new Error(extractApiError(error.value, 'Failed to delete connector'));
 
       await reloadModelCatalog();
@@ -171,7 +186,11 @@ export function ConnectorsSettings({ modelCatalog, reloadModelCatalog }: Connect
 
   const handleUpdateModels = async (connectorId: string, enabledModels: string[]) => {
     try {
-      const { error } = await (client.api.settings.connectors[connectorId] as any).models.put({
+      const { error } = await (
+        (client.api.settings.connectors as unknown as Record<string, unknown>)[
+          connectorId
+        ] as ConnectorByIdRoute
+      ).models.put({
         enabledModels,
       });
       if (error) throw new Error(extractApiError(error.value, 'Failed to update models'));
@@ -512,7 +531,7 @@ export function ConnectorsSettings({ modelCatalog, reloadModelCatalog }: Connect
               </Button>
               <Button
                 variant="primary"
-                onClick={handleAddConnector}
+                onClick={() => void handleAddConnector()}
                 loading={isSaving}
                 disabled={isSaving}
                 className="flex-1"
@@ -719,7 +738,7 @@ export function ConnectorsSettings({ modelCatalog, reloadModelCatalog }: Connect
               </Button>
               <Button
                 variant="primary"
-                onClick={() => handleDeleteConnector(connectorToDelete.id)}
+                onClick={() => void handleDeleteConnector(connectorToDelete.id)}
                 className="flex-1 bg-error hover:bg-error/80 shadow-error/20"
               >
                 {s.deleteConnector}

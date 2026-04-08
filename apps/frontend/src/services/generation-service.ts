@@ -1,5 +1,5 @@
 /* global console */
-import type { Message } from '@mangostudio/shared';
+import type { GenerateImageResponse, GenerateTextResponse } from '@mangostudio/shared';
 import { client } from '../lib/api-client';
 import { getApiBaseUrl } from '../lib/api-base-url';
 
@@ -12,11 +12,6 @@ export interface GenerateImageRequest {
   model: string;
 }
 
-export interface GenerateImageResponse {
-  userMessage: Message;
-  aiMessage: Message;
-}
-
 export interface RespondTextRequest {
   chatId: string;
   prompt: string;
@@ -24,11 +19,6 @@ export interface RespondTextRequest {
   systemPrompt?: string;
   thinkingEnabled?: boolean;
   reasoningEffort?: string;
-}
-
-export interface RespondTextResponse {
-  userMessage: Message;
-  aiMessage: Message;
 }
 
 export async function uploadReferenceImage(file: File): Promise<string | null> {
@@ -57,7 +47,7 @@ export async function generateImage(request: GenerateImageRequest): Promise<Gene
   return data as unknown as GenerateImageResponse;
 }
 
-export async function respondText(request: RespondTextRequest): Promise<RespondTextResponse> {
+export async function respondText(request: RespondTextRequest): Promise<GenerateTextResponse> {
   const { data, error } = await client.api.respond.post(request);
 
   if (error) {
@@ -66,7 +56,7 @@ export async function respondText(request: RespondTextRequest): Promise<RespondT
 
   // Eden Treaty infers a union that includes the error shape even after the guard above.
   // The double cast is intentional and safe here.
-  return data as unknown as RespondTextResponse;
+  return data as unknown as GenerateTextResponse;
 }
 
 /** A single event received from the SSE streaming endpoint. */
@@ -135,7 +125,7 @@ export async function respondTextStream(
   if (!response.ok) {
     let message = 'Stream request failed';
     try {
-      const body = await response.json();
+      const body = (await response.json()) as unknown as { error?: string };
       message = body.error ?? message;
     } catch {
       // ignore parse errors
@@ -143,7 +133,8 @@ export async function respondTextStream(
     throw new Error(message);
   }
 
-  const reader = response.body!.getReader();
+  if (!response.body) throw new Error('Stream response has no body');
+  const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
 

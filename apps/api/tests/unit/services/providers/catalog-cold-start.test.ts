@@ -17,9 +17,12 @@ function makeService(
 ) {
   return createUnifiedModelCatalogService({
     listProviders: () => ['gemini' as ProviderType],
-    getProviderFn: () => ({ listModels: () => Promise.resolve(modelList) }) as unknown as AIProvider,
+    getProviderFn: () =>
+      ({ listModels: () => Promise.resolve(modelList) }) as unknown as AIProvider,
     listAllSecretMetadataFn: () =>
-      Promise.resolve([{ enabledModels: JSON.stringify(enabledIds) }] as unknown as SecretMetadataRow[]),
+      Promise.resolve([
+        { enabledModels: JSON.stringify(enabledIds) },
+      ] as unknown as SecretMetadataRow[]),
   });
 }
 
@@ -46,7 +49,9 @@ describe('createUnifiedModelCatalogService.getUnifiedModelCatalog', () => {
           },
         }) as unknown as AIProvider,
       listAllSecretMetadataFn: () =>
-        Promise.resolve([{ enabledModels: JSON.stringify([MOCK_MODEL.modelId]) }] as unknown as SecretMetadataRow[]),
+        Promise.resolve([
+          { enabledModels: JSON.stringify([MOCK_MODEL.modelId]) },
+        ] as unknown as SecretMetadataRow[]),
     });
 
     // First call — cold cache, triggers refresh (listModels called once)

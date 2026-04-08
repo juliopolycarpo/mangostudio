@@ -15,8 +15,8 @@ describe('get_current_datetime builtin', () => {
   it('is registered in the tool registry', () => {
     const tool = getTool('get_current_datetime');
     expect(tool).toBeDefined();
-    expect(tool!.definition.name).toBe('get_current_datetime');
-    expect(tool!.definition.description.length).toBeGreaterThan(0);
+    expect(tool?.definition.name).toBe('get_current_datetime');
+    expect(tool?.definition.description.length).toBeGreaterThan(0);
   });
 
   it('returns a valid result for UTC defaults', async () => {
@@ -65,7 +65,8 @@ describe('get_current_datetime builtin', () => {
   });
 
   it('has a parameters schema with timezone and locale properties', () => {
-    const tool = getTool('get_current_datetime')!;
+    const tool = getTool('get_current_datetime');
+    if (!tool) throw new Error('expected get_current_datetime to be registered');
     const schema = tool.definition.parameters as {
       properties: Record<string, unknown>;
     };

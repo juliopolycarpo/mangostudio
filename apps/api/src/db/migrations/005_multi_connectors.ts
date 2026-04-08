@@ -2,10 +2,10 @@
  * Migration 005: adds support for multiple connectors and enabled models list.
  */
 
-import type { Kysely } from 'kysely';
+import { type Migration } from 'kysely';
 
-export const multiConnectors = {
-  async up(db: Kysely<any>): Promise<void> {
+export const multiConnectors: Migration = {
+  async up(db) {
     // 1. Drop old table
     await db.schema.dropTable('secret_metadata').ifExists().execute();
 
@@ -26,7 +26,7 @@ export const multiConnectors = {
       .execute();
   },
 
-  async down(db: Kysely<any>): Promise<void> {
+  async down(db) {
     // Reverting to the old schema if necessary (provider as PK)
     await db.schema.dropTable('secret_metadata').ifExists().execute();
     await db.schema

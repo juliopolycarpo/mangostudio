@@ -15,9 +15,10 @@ import { AppContext } from '@/lib/app-context';
 export const Route = createFileRoute('/_authenticated')({
   beforeLoad: ({ context, location }) => {
     if (!context.auth.isAuthenticated) {
-      throw redirect({
+      redirect({
         to: '/login',
         search: { redirect: location.href },
+        throw: true,
       });
     }
   },
@@ -28,12 +29,13 @@ function AuthenticatedLayout() {
   const { auth } = Route.useRouteContext();
   const navigate = useNavigate();
   const app = useAppState();
+  const { initialize } = app;
   const routerState = useRouterState();
   const currentPath = routerState.location.pathname;
 
   useEffect(() => {
-    void app.initialize();
-  }, [app.initialize]);
+    void initialize();
+  }, [initialize]);
 
   if (!auth.isAuthenticated) {
     void navigate({ to: '/login' });
@@ -52,9 +54,9 @@ function AuthenticatedLayout() {
         chats={app.chats}
         currentChatId={app.currentChatId}
         onSelectChat={app.handleSelectChat}
-        onUpdateChatTitle={app.handleUpdateChatTitle}
-        onDeleteChat={app.handleDeleteChat}
-        onNewChat={app.handleNewChat}
+        onUpdateChatTitle={(chatId, title) => void app.handleUpdateChatTitle(chatId, title)}
+        onDeleteChat={(chatId) => void app.handleDeleteChat(chatId)}
+        onNewChat={() => void app.handleNewChat()}
         contextCache={app.contextCache}
       >
         <Header
@@ -64,13 +66,13 @@ function AuthenticatedLayout() {
           composerMode={app.composerMode}
           currentChatId={app.currentChatId}
           currentPage={activePage}
-          onUpdateChatModel={app.handleUpdateChatModel}
+          onUpdateChatModel={(chatId, model) => void app.handleUpdateChatModel(chatId, model)}
           onSetPageModel={(model) => {
             if (app.currentChatId) {
               void app.handleUpdateChatModel(app.currentChatId, model);
             }
           }}
-          onNewChat={app.handleNewChat}
+          onNewChat={() => void app.handleNewChat()}
           onNavigateToSettings={() => app.handleNavigate('settings')}
           modelCatalog={app.catalog}
           lockedProvider={app.lockedProvider}

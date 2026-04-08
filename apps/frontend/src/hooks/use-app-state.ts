@@ -125,12 +125,15 @@ export function useAppState() {
     [navigate]
   );
 
+  const { handleRespond } = textChat;
+  const { handleGenerate } = imageGen;
+
   const handleSubmit = useCallback(
     (prompt: string, referenceImage?: File | null) => {
-      if (composerMode === 'chat') return textChat.handleRespond(prompt);
-      return imageGen.handleGenerate(prompt, referenceImage);
+      if (composerMode === 'chat') return handleRespond(prompt);
+      return handleGenerate(prompt, referenceImage);
     },
-    [composerMode, textChat.handleRespond, imageGen.handleGenerate]
+    [composerMode, handleRespond, handleGenerate]
   );
 
   const initialize = useCallback(async () => {

@@ -7,6 +7,7 @@ import {
   getContextSeverity,
   type ContextSnapshot,
 } from '../../../../src/services/providers/context-policy';
+import type { ChatTurnContext } from '../../../../src/services/providers/types';
 
 describe('estimateTokenCount', () => {
   it('returns 0 for empty string', () => {
@@ -159,7 +160,7 @@ describe('getModelContextLimit', () => {
 describe('computeContextSnapshot', () => {
   const baseParams = {
     modelName: 'gpt-4o',
-    history: [] as any[],
+    history: [] as ChatTurnContext[],
     mode: 'stateful' as const,
   };
 

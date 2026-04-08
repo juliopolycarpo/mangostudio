@@ -3,6 +3,7 @@
  */
 
 import type { Insertable, Selectable, Updateable } from 'kysely';
+import type { InteractionMode } from '@mangostudio/shared';
 
 export interface ChatsTable {
   id: string;
@@ -20,7 +21,7 @@ export interface ChatsTable {
 export interface MessagesTable {
   id: string;
   chatId: string;
-  role: string;
+  role: 'user' | 'ai';
   text: string;
   imageUrl: string | null;
   referenceImage: string | null;
@@ -29,7 +30,7 @@ export interface MessagesTable {
   generationTime: string | null;
   modelName: string | null;
   styleParams: string | null;
-  interactionMode: string;
+  interactionMode: InteractionMode;
   parts: string | null; // JSON-serialized MessagePart[]
   providerState: string | null; // opaque provider continuity JSON
 }

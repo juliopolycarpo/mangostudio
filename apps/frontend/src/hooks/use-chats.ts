@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
 import type { Chat } from '@mangostudio/shared';
 import {
   useChatsQuery,
@@ -15,7 +15,7 @@ export function useChats() {
   const updateMutation = useUpdateChatMutation();
   const deleteMutation = useDeleteChatMutation();
 
-  const chats = chatsData || [];
+  const chats = useMemo(() => chatsData || [], [chatsData]);
   const error = queryError ? queryError.message : null;
 
   // Auto-select first chat if none selected
@@ -31,15 +31,15 @@ export function useChats() {
 
   const createChat = useCallback(
     async (title?: string) => {
-      const newChat: Chat = {
-        id: Date.now().toString(),
-        title: title || `New Chat`,
+      const result = await createMutation.mutateAsync({ title: title || 'New Chat' });
+      const newId = (result as { id?: string } | null)?.id ?? String(Date.now());
+      setCurrentChatId(newId);
+      return {
+        id: newId,
+        title: title || 'New Chat',
         createdAt: Date.now(),
         updatedAt: Date.now(),
-      };
-      await createMutation.mutateAsync(newChat);
-      setCurrentChatId(newChat.id);
-      return newChat;
+      } as Chat;
     },
     [createMutation]
   );

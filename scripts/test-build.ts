@@ -35,7 +35,9 @@ const PLATFORM_META: Record<string, { binary: string; canExecute: boolean }> = {
 
 if (!PLATFORM || !(PLATFORM in PLATFORM_META)) {
   console.error(`❌ PLATFORM must be one of: ${Object.keys(PLATFORM_META).join(', ')}`);
-  console.error('   Set it via environment variable: PLATFORM=linux-x64 bun run scripts/test-build.ts');
+  console.error(
+    '   Set it via environment variable: PLATFORM=linux-x64 bun run scripts/test-build.ts'
+  );
   process.exit(1);
 }
 
@@ -209,14 +211,16 @@ async function smokeTest(): Promise<void> {
     // state — the key assertion is that the response is NOT the SPA index.html.
     {
       const res = await fetch(`http://localhost:${PORT}/api/auth/get-session`);
-      if (res.status === 404) fail('/api/auth/get-session returned 404 — SPA fallback is intercepting auth routes');
+      if (res.status === 404)
+        fail('/api/auth/get-session returned 404 — SPA fallback is intercepting auth routes');
       const ct = res.headers.get('content-type') ?? '';
-      if (ct.includes('text/html')) fail(`/api/auth/get-session returned text/html — SPA fallback is intercepting auth routes`);
+      if (ct.includes('text/html'))
+        fail(`/api/auth/get-session returned text/html — SPA fallback is intercepting auth routes`);
       pass('/api/auth/get-session → handled by Better Auth (not intercepted by SPA fallback)');
     }
   } finally {
     proc.kill();
-    await proc.exited.catch(() => {});
+    await proc.exited.catch(() => undefined as void);
     await Bun.$`rm -rf ${tmpHome}`.quiet();
   }
 }

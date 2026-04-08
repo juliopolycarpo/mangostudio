@@ -3,7 +3,7 @@
  * Now supports multiple connectors and flexible storage backends.
  */
 
-import type { AddConnectorBody, Connector, GeminiSecretStatus } from '@mangostudio/shared';
+import type { AddConnectorBody, Connector, ConnectorStatus } from '@mangostudio/shared';
 import type { SecretMetadataRow } from '@mangostudio/shared/types';
 import {
   GEMINI_PROVIDER,
@@ -110,10 +110,22 @@ function getTomlFilePath(): string {
   return getConfig().configFilePath;
 }
 
+interface GeminiSecretService {
+  syncConfigFileConnectors(userId: string): Promise<void>;
+  getGeminiSecretStatus(userId: string): Promise<ConnectorStatus>;
+  getResolvedGeminiApiKey(userId: string, requestedModel?: string): Promise<string>;
+  validateGeminiApiKey(apiKey: string): Promise<void>;
+  addGeminiConnector(userId: string, body: AddConnectorBody): Promise<Connector>;
+  updateConnectorModels(userId: string, id: string, enabledModels: string[]): Promise<void>;
+  deleteGeminiConnector(userId: string, id: string): Promise<void>;
+}
+
 /**
  * Creates the Gemini secret service with injectable dependencies for tests.
  */
-export function createGeminiSecretService(dependencies: GeminiSecretServiceDependencies = {}) {
+export function createGeminiSecretService(
+  dependencies: GeminiSecretServiceDependencies = {}
+): GeminiSecretService {
   const secretStore = dependencies.secretStore ?? bunSecretStore;
   const fetchImpl = dependencies.fetchImpl ?? fetch;
   const now = dependencies.now ?? (() => Date.now());
@@ -196,7 +208,7 @@ export function createGeminiSecretService(dependencies: GeminiSecretServiceDepen
     /**
      * Returns all connectors and their UI-safe status.
      */
-    async getGeminiSecretStatus(userId: string): Promise<GeminiSecretStatus> {
+    async getGeminiSecretStatus(userId: string): Promise<ConnectorStatus> {
       await syncConfigFileConnectors(userId);
 
       const metadataRows = await listMetadata(GEMINI_PROVIDER, userId);
@@ -315,7 +327,9 @@ ${envVar}="${apiKey}"
       await upsertMetadata(input);
 
       const status = await this.getGeminiSecretStatus(userId);
-      return status.connectors.find((c) => c.id === id)!;
+      const connector = status.connectors.find((c) => c.id === id);
+      if (!connector) throw new Error(`Connector ${id} not found after creation`);
+      return connector;
     },
 
     /**

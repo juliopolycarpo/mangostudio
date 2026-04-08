@@ -134,10 +134,9 @@ export const respondRoutes = (app: Elysia) =>
               },
             };
           } catch (error: unknown) {
-            const errorText = error instanceof Error ? error.message : 'Text generation failed';
-            console.error('[respond] Error:', errorText);
+            console.error('[respond] Error:', error);
             set.status = 500;
-            return { error: errorText };
+            return { error: 'Text generation failed. Please try again.' };
           }
         },
         {

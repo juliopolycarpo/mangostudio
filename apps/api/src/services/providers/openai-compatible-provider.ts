@@ -27,6 +27,7 @@ import type {
 } from './types';
 import { buildChatCompletionsReplay } from './replay-builder';
 import { parseStringArray } from '../../utils/json';
+import { extractReasoningChunks } from './openai-normalizers';
 
 const secretService = createProviderSecretService({
   provider: 'openai-compatible',
@@ -49,7 +50,6 @@ async function resolveClientConfig(
   userId: string,
   modelName?: string
 ): Promise<{ apiKey: string; baseUrl: string }> {
-  await secretService.syncConfigFileConnectors(userId);
   const rows = await secretService.listMeta('openai-compatible', userId);
 
   for (const row of rows) {
@@ -201,37 +201,8 @@ function toolDefsToOAIChat(defs: ToolDefinition[]): OpenAI.ChatCompletionTool[] 
   }));
 }
 
-/**
- * Extracts reasoning text from a streaming delta object.
- * Handles three field shapes used across compatible endpoints:
- *   - reasoning_content: DeepSeek native / OpenRouter alias
- *   - reasoning: OpenRouter normalized string
- *   - reasoning_details: OpenRouter structured array (reasoning.text / reasoning.summary)
- *
- * Returns an array of text chunks so callers can emit one event per chunk.
- */
-export function extractReasoningChunks(delta: Record<string, unknown>): string[] {
-  const chunks: string[] = [];
-
-  const simple =
-    (typeof delta.reasoning_content === 'string' ? delta.reasoning_content : '') ||
-    (typeof delta.reasoning === 'string' ? delta.reasoning : '');
-  if (simple) chunks.push(simple);
-
-  if (Array.isArray(delta.reasoning_details)) {
-    for (const d of delta.reasoning_details as Array<Record<string, unknown>>) {
-      if (
-        (d.type === 'reasoning.text' || d.type === 'reasoning.summary') &&
-        typeof d.text === 'string' &&
-        d.text
-      ) {
-        chunks.push(d.text);
-      }
-    }
-  }
-
-  return chunks;
-}
+// Re-export for backward compatibility with test imports
+export { extractReasoningChunks };
 
 /**
  * Streams a single agentic turn for OpenAI-compatible endpoints.
@@ -245,7 +216,9 @@ async function* streamOAICompatAgentTurn(req: AgentTurnRequest): AsyncIterable<A
 
   const loopState = parseOAICompatLoopState(req.providerState);
   const tools =
-    (req.toolDefinitions ?? []).length > 0 ? toolDefsToOAIChat(req.toolDefinitions!) : undefined;
+    req.toolDefinitions && req.toolDefinitions.length > 0
+      ? toolDefsToOAIChat(req.toolDefinitions)
+      : undefined;
 
   // Build messages: system + structured DB history + accumulated loop messages + current input
   const messages: OpenAI.ChatCompletionMessageParam[] = [
@@ -289,7 +262,7 @@ async function* streamOAICompatAgentTurn(req: AgentTurnRequest): AsyncIterable<A
       const choice = chunk.choices[0];
       if (!choice) continue;
 
-      const delta = choice.delta as Record<string, any>;
+      const delta = choice.delta as unknown as Record<string, unknown>;
 
       // Multi-field reasoning extraction — see extractReasoningChunks for details.
       // Reasoning is accumulated intra-turn only; cross-turn reset is enforced below.
@@ -304,26 +277,27 @@ async function* streamOAICompatAgentTurn(req: AgentTurnRequest): AsyncIterable<A
       }
 
       // Tool call streaming
-      if (Array.isArray(delta.tool_calls)) {
-        for (const tcDelta of delta.tool_calls as Array<Record<string, any>>) {
-          const idx: number = tcDelta.index ?? 0;
+      const toolCalls = delta.tool_calls as Array<Record<string, unknown>> | undefined;
+      if (Array.isArray(toolCalls)) {
+        for (const tcDelta of toolCalls) {
+          const idx = typeof tcDelta.index === 'number' ? tcDelta.index : 0;
+          const fn = tcDelta.function as Record<string, unknown> | undefined;
 
-          if (tcDelta.id) {
+          if (typeof tcDelta.id === 'string') {
             // New tool call
-            pendingToolCalls.set(idx, {
-              callId: tcDelta.id as string,
-              name: (tcDelta.function?.name as string) ?? '',
-              argsStr: (tcDelta.function?.arguments as string) ?? '',
-            });
+            const callId = tcDelta.id;
+            const name = typeof fn?.name === 'string' ? fn.name : '';
+            const args = typeof fn?.arguments === 'string' ? fn.arguments : '';
+            pendingToolCalls.set(idx, { callId, name, argsStr: args });
             yield {
               type: 'tool_call_started',
-              callId: tcDelta.id as string,
-              name: (tcDelta.function?.name as string) ?? undefined,
+              callId,
+              name: name || undefined,
             };
           } else {
             const tc = pendingToolCalls.get(idx);
             if (tc) {
-              const argsDelta = (tcDelta.function?.arguments as string) ?? '';
+              const argsDelta = typeof fn?.arguments === 'string' ? fn.arguments : '';
               tc.argsStr += argsDelta;
               if (argsDelta) {
                 yield { type: 'tool_call_arguments_delta', callId: tc.callId, delta: argsDelta };

@@ -2,7 +2,12 @@ import { describe, expect, it } from 'bun:test';
 import { buildCachedAnthropicRequest } from '../../../../src/services/providers/anthropic-cache-builder';
 import type { ToolDefinition } from '../../../../src/services/providers/types';
 
-type CacheableBlock = { text?: string; cache_control?: { type: string }; name?: string; input_schema?: unknown };
+type CacheableBlock = {
+  text?: string;
+  cache_control?: { type: string };
+  name?: string;
+  input_schema?: unknown;
+};
 
 const TOOL_DEFS: ToolDefinition[] = [
   {
@@ -108,6 +113,6 @@ describe('buildCachedAnthropicRequest', () => {
     });
 
     const searchTool = (result.tools as CacheableBlock[]).find((t) => t.name === 'search');
-    expect(searchTool!.input_schema).toEqual(TOOL_DEFS[1].parameters);
+    expect(searchTool?.input_schema).toEqual(TOOL_DEFS[1].parameters);
   });
 });

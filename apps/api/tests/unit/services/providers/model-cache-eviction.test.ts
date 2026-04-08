@@ -9,7 +9,7 @@ describe('withModelCache eviction', () => {
     const cachedFetch = withModelCache(
       (userId: string) => {
         fetchCounts.set(userId, (fetchCounts.get(userId) ?? 0) + 1);
-        return Promise.resolve([{ userId }] as any[]);
+        return Promise.resolve([{ userId }]);
       },
       { ttl: 60_000, fallback: [], maxEntries }
     );
@@ -36,9 +36,9 @@ describe('withModelCache eviction', () => {
     const fetchCounts = new Map<string, number>();
 
     const cachedFetch = withModelCache(
-      (userId: string) => {
+      (userId: string): Promise<{ userId: string }[]> => {
         fetchCounts.set(userId, (fetchCounts.get(userId) ?? 0) + 1);
-        return Promise.resolve([] as any[]);
+        return Promise.resolve([]);
       },
       { ttl: 60_000, fallback: [], maxEntries: 10 }
     );

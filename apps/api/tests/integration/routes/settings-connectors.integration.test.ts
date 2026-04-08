@@ -83,11 +83,7 @@ describe('settings connectors routes', () => {
 
     const payload = (await response.json()) as ConnectorListPayload;
     expect(Value.Check(ConnectorStatusSchema, payload)).toBe(true);
-    expect(
-      payload.connectors.filter(
-        (connector) => connector.userId === TEST_USER.id
-      )
-    ).toEqual([]);
+    expect(payload.connectors.filter((connector) => connector.userId === TEST_USER.id)).toEqual([]);
   });
 
   it('GET /settings/models returns resolved catalog for a new user', async () => {
@@ -144,9 +140,7 @@ describe('settings connectors routes', () => {
     const payload = (await response.json()) as ConnectorListPayload;
     expect(Value.Check(ConnectorStatusSchema, payload)).toBe(true);
     expect(
-      payload.connectors.some(
-        (connector) => connector.id === 'shared-compat-without-base-url'
-      )
+      payload.connectors.some((connector) => connector.id === 'shared-compat-without-base-url')
     ).toBe(false);
   });
 
@@ -338,7 +332,7 @@ describe('openai connector routes', () => {
 
     // Mock validateBaseUrl to avoid DNS lookups in test
     await mock.module('../../../src/services/providers/base-url-policy', () => ({
-      validateBaseUrl: async () => {},
+      validateBaseUrl: () => Promise.resolve(),
       UnsafeBaseUrlError: class UnsafeBaseUrlError extends Error {
         constructor(message: string) {
           super(message);
@@ -422,7 +416,7 @@ describe('openai connector routes', () => {
       );
 
       expect(openaiConnector).toBeDefined();
-      expect(openaiConnector!.baseUrl).toBeNull();
+      expect(openaiConnector?.baseUrl).toBeNull();
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -433,7 +427,7 @@ describe('openai connector routes', () => {
 
     // Mock validateBaseUrl
     await mock.module('../../../src/services/providers/base-url-policy', () => ({
-      validateBaseUrl: async () => {},
+      validateBaseUrl: () => Promise.resolve(),
       UnsafeBaseUrlError: class UnsafeBaseUrlError extends Error {
         constructor(message: string) {
           super(message);
@@ -483,7 +477,7 @@ describe('openai connector routes', () => {
       );
 
       expect(compatConnector).toBeDefined();
-      expect(compatConnector!.baseUrl).toBe(COMPAT_BASE_URL);
+      expect(compatConnector?.baseUrl).toBe(COMPAT_BASE_URL);
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -530,8 +524,8 @@ describe('openai connector routes', () => {
       .executeTakeFirst();
 
     expect(row).toBeDefined();
-    expect(row!.userId).toBeNull();
-    expect(row!.enabledModels).toBe(JSON.stringify(['gpt-4o']));
+    expect(row?.userId).toBeNull();
+    expect(row?.enabledModels).toBe(JSON.stringify(['gpt-4o']));
   });
 });
 
@@ -595,8 +589,8 @@ describe('openai project-scoped connector routes', () => {
         .executeTakeFirst();
 
       expect(row).toBeDefined();
-      expect(row!.organizationId).toBe('org-testorg999');
-      expect(row!.projectId).toBe('proj_testproj888');
+      expect(row?.organizationId).toBe('org-testorg999');
+      expect(row?.projectId).toBe('proj_testproj888');
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -634,8 +628,8 @@ describe('openai project-scoped connector routes', () => {
         .executeTakeFirst();
 
       expect(row).toBeDefined();
-      expect(row!.organizationId).toBeNull();
-      expect(row!.projectId).toBeNull();
+      expect(row?.organizationId).toBeNull();
+      expect(row?.projectId).toBeNull();
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -686,9 +680,9 @@ describe('openai project-scoped connector routes', () => {
         .executeTakeFirst();
 
       expect(row).toBeDefined();
-      expect(row!.organizationId).toBe('org-testorg999');
-      expect(row!.projectId).toBe('proj_testproj888');
-      expect(row!.enabledModels).toBe(JSON.stringify(['gpt-4o']));
+      expect(row?.organizationId).toBe('org-testorg999');
+      expect(row?.projectId).toBe('proj_testproj888');
+      expect(row?.enabledModels).toBe(JSON.stringify(['gpt-4o']));
     } finally {
       globalThis.fetch = originalFetch;
     }

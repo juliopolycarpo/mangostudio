@@ -9,6 +9,12 @@ import { createProviderSecretService } from './secret-service';
 import { withModelCache } from './model-cache';
 import { registerProvider } from './registry';
 import { buildCachedAnthropicRequest } from './anthropic-cache-builder';
+import {
+  narrowSdkError,
+  isToolUseBlock,
+  narrowDelta,
+  extractCacheUsage,
+} from './anthropic-normalizers';
 import { isReasoningModel } from '@mangostudio/shared/utils/model-detection';
 import { computeSystemPromptHash, computeToolsetHash } from './continuation';
 import { getModelContextLimit } from './context-policy';
@@ -68,13 +74,12 @@ const secretService = createProviderSecretService({
     // Light validation: list first page of models
     try {
       await client.models.list({ limit: 1 });
-    } catch (err: any) {
-      if (err?.status === 401 || err?.status === 403) {
+    } catch (err: unknown) {
+      const sdkErr = narrowSdkError(err);
+      if (sdkErr.status === 401 || sdkErr.status === 403) {
         throw new Error('Anthropic rejected the API key. Verify that it is valid and enabled.');
       }
-      throw new Error(
-        `Anthropic API validation failed: ${err instanceof Error ? err.message : 'Unknown error'}`
-      );
+      throw new Error(`Anthropic API validation failed: ${sdkErr.message}`);
     }
   },
 });
@@ -228,27 +233,26 @@ async function* streamAnthropicAgentTurn(req: AgentTurnRequest): AsyncIterable<A
       if (req.signal?.aborted) break;
 
       if (event.type === 'content_block_start') {
-        const block = event.content_block as unknown as Record<string, any>;
-        if (block.type === 'tool_use') {
-          const callId: string = block.id ?? `tu_${Date.now()}_${event.index}`;
-          const name: string = block.name ?? '';
+        if (isToolUseBlock(event.content_block)) {
+          const callId = event.content_block.id || `tu_${Date.now()}_${event.index}`;
+          const name = event.content_block.name;
           blockByIndex.set(event.index, { callId, name, inputStr: '' });
           yield { type: 'tool_call_started', callId, name };
         }
       } else if (event.type === 'content_block_delta') {
-        const delta = event.delta as unknown as Record<string, unknown>;
-        if (delta.type === 'thinking_delta' && typeof delta.thinking === 'string') {
-          yield { type: 'reasoning_delta', text: delta.thinking };
-        } else if (delta.type === 'text_delta' && typeof delta.text === 'string') {
-          yield { type: 'assistant_text_delta', text: delta.text };
-        } else if (delta.type === 'input_json_delta' && typeof delta.partial_json === 'string') {
+        const nd = narrowDelta(event.delta);
+        if (nd.kind === 'thinking') {
+          yield { type: 'reasoning_delta', text: nd.thinking };
+        } else if (nd.kind === 'text') {
+          yield { type: 'assistant_text_delta', text: nd.text };
+        } else if (nd.kind === 'input_json') {
           const block = blockByIndex.get(event.index);
           if (block) {
-            block.inputStr += delta.partial_json;
+            block.inputStr += nd.partial_json;
             yield {
               type: 'tool_call_arguments_delta',
               callId: block.callId,
-              delta: delta.partial_json,
+              delta: nd.partial_json,
             };
           }
         }
@@ -276,15 +280,14 @@ async function* streamAnthropicAgentTurn(req: AgentTurnRequest): AsyncIterable<A
     let providerReportedInputTokens: number | undefined;
     try {
       const finalMsg = await stream.finalMessage();
-      const usage = finalMsg.usage as Record<string, any>;
-      const cached = usage.cache_read_input_tokens ?? 0;
-      const cacheCreation = usage.cache_creation_input_tokens ?? 0;
-      const total = usage.input_tokens ?? 0;
-      if (total > 0) providerReportedInputTokens = total;
-      if (cached > 0 || cacheCreation > 0) {
+      const cu = extractCacheUsage(finalMsg.usage);
+      if (cu.inputTokens > 0) providerReportedInputTokens = cu.inputTokens;
+      if (cu.cachedTokens > 0 || cu.cacheCreationTokens > 0) {
         console.log(
-          `[prefix-cache][anthropic] read=${cached} creation=${cacheCreation} total=${total} tokens` +
-            (total > 0 ? ` (${Math.round((cached / total) * 100)}% cache hit)` : '')
+          `[prefix-cache][anthropic] read=${cu.cachedTokens} creation=${cu.cacheCreationTokens} total=${cu.inputTokens} tokens` +
+            (cu.inputTokens > 0
+              ? ` (${Math.round((cu.cachedTokens / cu.inputTokens) * 100)}% cache hit)`
+              : '')
         );
       }
     } catch {
@@ -401,12 +404,11 @@ const anthropicProvider: AIProvider = {
       if (req.signal?.aborted) break;
 
       if (event.type === 'content_block_delta') {
-        // The SDK types don't include thinking_delta yet — use a safe cast
-        const delta = event.delta as unknown as Record<string, unknown>;
-        if (delta.type === 'thinking_delta' && typeof delta.thinking === 'string') {
-          yield { type: 'thinking', text: delta.thinking, done: false };
-        } else if (delta.type === 'text_delta' && typeof delta.text === 'string') {
-          yield { type: 'text', text: delta.text, done: false };
+        const nd = narrowDelta(event.delta);
+        if (nd.kind === 'thinking') {
+          yield { type: 'thinking', text: nd.thinking, done: false };
+        } else if (nd.kind === 'text') {
+          yield { type: 'text', text: nd.text, done: false };
         }
       }
     }

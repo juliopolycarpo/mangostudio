@@ -30,7 +30,7 @@ describe('GeminiProvider.generateTextStream', () => {
   });
 
   it('yields text chunks and a final done:true sentinel', async () => {
-    mock.module('@google/genai', () => ({
+    await mock.module('@google/genai', () => ({
       GoogleGenAI: class {
         models = {
           generateContentStream: () => Promise.resolve(mockStream()),
@@ -39,7 +39,7 @@ describe('GeminiProvider.generateTextStream', () => {
     }));
 
     // Also mock the secret resolution so we don't need real API keys
-    mock.module('../../../../src/services/gemini/secret', () => ({
+    await mock.module('../../../../src/services/gemini/secret', () => ({
       getResolvedGeminiApiKey: () => Promise.resolve('mock-api-key'),
     }));
 
@@ -66,27 +66,31 @@ describe('GeminiProvider.generateTextStream', () => {
   });
 
   it('throws when prompt is blocked', async () => {
-    mock.module('@google/genai', () => ({
+    await mock.module('@google/genai', () => ({
       GoogleGenAI: class {
         models = {
           generateContentStream: () =>
             Promise.resolve(
               (async function* () {
                 await Promise.resolve();
-                yield { text: '', promptFeedback: { blockReason: 'SAFETY' }, candidates: undefined };
+                yield {
+                  text: '',
+                  promptFeedback: { blockReason: 'SAFETY' },
+                  candidates: undefined,
+                };
               })()
             ),
         };
       },
     }));
 
-    mock.module('../../../../src/services/gemini/secret', () => ({
+    await mock.module('../../../../src/services/gemini/secret', () => ({
       getResolvedGeminiApiKey: () => Promise.resolve('mock-api-key'),
     }));
 
     const { generateTextStream } = await import('../../../../src/services/gemini/text');
 
-    await expect(async () => {
+    await (expect(async () => {
       for await (const _chunk of generateTextStream(
         'user-1',
         [],
@@ -96,21 +100,21 @@ describe('GeminiProvider.generateTextStream', () => {
       )) {
         // consume
       }
-    }).toThrow('Prompt blocked: SAFETY');
+    }).toThrow('Prompt blocked: SAFETY') as unknown as Promise<void>);
   });
 
   it('throws when no modelName is provided', async () => {
     const { generateTextStream } = await import('../../../../src/services/gemini/text');
 
-    await expect(async () => {
+    await (expect(async () => {
       for await (const _chunk of generateTextStream('user-1', [], 'Hi', undefined, undefined)) {
         // consume
       }
-    }).toThrow('No Gemini text model was provided.');
+    }).toThrow('No Gemini text model was provided.') as unknown as Promise<void>);
   });
 
   it('emits thinking chunks when thinkingEnabled is true', async () => {
-    mock.module('@google/genai', () => ({
+    await mock.module('@google/genai', () => ({
       GoogleGenAI: class {
         models = {
           generateContentStream: () =>
@@ -135,7 +139,7 @@ describe('GeminiProvider.generateTextStream', () => {
       },
     }));
 
-    mock.module('../../../../src/services/gemini/secret', () => ({
+    await mock.module('../../../../src/services/gemini/secret', () => ({
       getResolvedGeminiApiKey: () => Promise.resolve('mock-api-key'),
     }));
 
@@ -161,7 +165,7 @@ describe('GeminiProvider.generateTextStream', () => {
   it('does not add thinkingConfig when thinkingEnabled is false', async () => {
     let capturedConfig: Record<string, unknown> | undefined;
 
-    mock.module('@google/genai', () => ({
+    await mock.module('@google/genai', () => ({
       GoogleGenAI: class {
         models = {
           generateContentStream: (opts: { config?: Record<string, unknown> }) => {
@@ -177,7 +181,7 @@ describe('GeminiProvider.generateTextStream', () => {
       },
     }));
 
-    mock.module('../../../../src/services/gemini/secret', () => ({
+    await mock.module('../../../../src/services/gemini/secret', () => ({
       getResolvedGeminiApiKey: () => Promise.resolve('mock-api-key'),
     }));
 
@@ -201,7 +205,7 @@ describe('GeminiProvider.generateTextStream', () => {
   });
 
   it('falls back to chunk.text when candidate has no parts', async () => {
-    mock.module('@google/genai', () => ({
+    await mock.module('@google/genai', () => ({
       GoogleGenAI: class {
         models = {
           generateContentStream: () =>
@@ -215,7 +219,7 @@ describe('GeminiProvider.generateTextStream', () => {
       },
     }));
 
-    mock.module('../../../../src/services/gemini/secret', () => ({
+    await mock.module('../../../../src/services/gemini/secret', () => ({
       getResolvedGeminiApiKey: () => Promise.resolve('mock-api-key'),
     }));
 
@@ -245,7 +249,7 @@ describe('GeminiProvider generateTextStream delegation', () => {
   });
 
   it('generateTextStream returns an AsyncIterable', async () => {
-    mock.module('@google/genai', () => ({
+    await mock.module('@google/genai', () => ({
       GoogleGenAI: class {
         models = {
           generateContentStream: () => Promise.resolve(mockStream()),
@@ -253,13 +257,17 @@ describe('GeminiProvider generateTextStream delegation', () => {
       },
     }));
 
-    mock.module('../../../../src/services/gemini/secret', () => ({
+    await mock.module('../../../../src/services/gemini/secret', () => ({
       getResolvedGeminiApiKey: () => Promise.resolve('mock-api-key'),
     }));
 
     const { geminiProvider } = await import('../../../../src/services/providers/gemini-provider');
 
-    const iterable = geminiProvider.generateTextStream!({
+    if (!geminiProvider.generateTextStream) {
+      throw new Error('geminiProvider.generateTextStream must be implemented');
+    }
+
+    const iterable = geminiProvider.generateTextStream({
       userId: 'user-1',
       history: [],
       prompt: 'Hi',

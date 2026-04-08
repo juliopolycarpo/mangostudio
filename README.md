@@ -2,9 +2,7 @@
 <img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/b9f25ec1-2619-44a6-af6a-00e8f6fb2731" />
 </div>
 
-
 # MangoStudio
-
 
 AI-powered image generation and chat studio supporting Gemini, OpenAI-compatible, and Anthropic models.
 
@@ -104,34 +102,34 @@ mangostudio/
 
 ## Main Scripts
 
-| Command                  | Description                                         |
-|--------------------------|-----------------------------------------------------|
-| `bun install`            | Install all workspace dependencies                  |
-| `bun run dev`            | Start all dev servers concurrently                  |
-| `bun run build`          | Build the frontend for production                   |
-| `bun run build:binary`   | Generate standalone binaries with embedded frontend |
-| `bun run format`         | Apply Prettier across all workspaces                |
-| `bun run format:check`   | Check formatting across all workspaces              |
-| `bun run lint`           | ESLint across all workspaces                        |
-| `bun run lint:fix`       | ESLint autofix across all workspaces                |
-| `bun run typecheck`      | TypeScript type-check across all workspaces         |
-| `bun run fix`            | Apply lint autofix and Prettier across workspaces   |
-| `bun run check`          | Format check + lint + typecheck + tests             |
-| `bun run verify`         | Check + coverage + build                            |
-| `bun run test`           | Run all unit and integration tests                  |
-| `bun run test:coverage`  | Frontend coverage via Vitest/v8                     |
-| `bun run migrate`        | Run SQLite database migrations                      |
+| Command                 | Description                                         |
+| ----------------------- | --------------------------------------------------- |
+| `bun install`           | Install all workspace dependencies                  |
+| `bun run dev`           | Start all dev servers concurrently                  |
+| `bun run build`         | Build the frontend for production                   |
+| `bun run build:binary`  | Generate standalone binaries with embedded frontend |
+| `bun run format`        | Apply Prettier across all workspaces                |
+| `bun run format:check`  | Check formatting across all workspaces              |
+| `bun run lint`          | ESLint across all workspaces                        |
+| `bun run lint:fix`      | ESLint autofix across all workspaces                |
+| `bun run typecheck`     | TypeScript type-check across all workspaces         |
+| `bun run fix`           | Apply lint autofix and Prettier across workspaces   |
+| `bun run check`         | Format check + lint + typecheck + tests             |
+| `bun run verify`        | Check + coverage + build                            |
+| `bun run test`          | Run all unit and integration tests                  |
+| `bun run test:coverage` | Frontend coverage via Vitest/v8                     |
+| `bun run migrate`       | Run SQLite database migrations                      |
 
 ## Architecture
 
-| Layer        | Technologies                                                   |
-|--------------|----------------------------------------------------------------|
-| **Frontend** | React 19, Vite 8, Tailwind CSS v4, TanStack Router/Query       |
-| **API**      | Elysia, Better Auth, native rate limiting                      |
-| **Database** | SQLite via Kysely (type-safe query builder)                    |
-| **AI**       | Multi-provider (Gemini, OpenAI-compatible, Anthropic)          |
-| **Runtime**  | Bun — no Node.js dependency                                    |
-| **i18n**     | Pure TypeScript dictionary in `@mangostudio/shared/i18n`       |
+| Layer        | Technologies                                             |
+| ------------ | -------------------------------------------------------- |
+| **Frontend** | React 19, Vite 8, Tailwind CSS v4, TanStack Router/Query |
+| **API**      | Elysia, Better Auth, native rate limiting                |
+| **Database** | SQLite via Kysely (type-safe query builder)              |
+| **AI**       | Multi-provider (Gemini, OpenAI-compatible, Anthropic)    |
+| **Runtime**  | Bun — no Node.js dependency                              |
+| **i18n**     | Pure TypeScript dictionary in `@mangostudio/shared/i18n` |
 
 ## Design System
 
@@ -161,6 +159,7 @@ The `Messages` type is inferred directly from the `pt-BR.ts` dictionary (`as con
 ## Standalone Build Notes
 
 The `bun run build:binary` command compiles the API into platform-specific binaries under `.mango/out/<platform>/`.
+
 - The database is persisted at `~/.mangostudio/database.sqlite` by default.
 - Frontend assets are served from the `public/` directory next to the executable.
 

@@ -2,6 +2,11 @@
  * Basic rate limiting plugin for Elysia.
  * Limits requests per IP address with configurable window and max requests.
  * Uses in-memory storage with LRU eviction (suitable for single-instance deployment).
+ *
+ * NOTE: This implementation uses process-local in-memory storage. It will NOT
+ * correctly enforce rate limits across multiple processes or instances (e.g., in a
+ * load-balanced deployment). For multi-process deployments, replace the `store` Map
+ * with a shared backend such as Redis.
  */
 
 import { Elysia } from 'elysia';
@@ -66,7 +71,7 @@ export function rateLimit(config: Partial<RateLimitConfig> = {}) {
   let lastCleanup = Date.now();
 
   /** Remove expired entries; evict oldest when store exceeds maxStoreSize. */
-  function cleanup() {
+  function cleanup(): void {
     const now = Date.now();
     for (const [key, entry] of store) {
       if (entry.resetTime < now) {
@@ -87,7 +92,7 @@ export function rateLimit(config: Partial<RateLimitConfig> = {}) {
   }
 
   /** Call in tests or on graceful shutdown to free resources. */
-  function teardown() {
+  function teardown(): void {
     store.clear();
   }
 
@@ -121,13 +126,9 @@ export function rateLimit(config: Partial<RateLimitConfig> = {}) {
         const requestContext = context as RateLimitContext;
         const { clientIp } = requestContext;
 
-        // Skip if no IP or skip function matches
-        if (!clientIp || clientIp === 'unknown') {
-          return;
-        }
-
-        const path = new URL(requestContext.request.url).pathname;
-        if (mergedConfig.skip && mergedConfig.skip(path)) {
+        // 'skipped' sentinel is set by derive() when the skip predicate matched;
+        // avoid re-evaluating the predicate with a potentially different path.
+        if (!clientIp || clientIp === 'unknown' || clientIp === 'skipped') {
           return;
         }
 
@@ -141,14 +142,15 @@ export function rateLimit(config: Partial<RateLimitConfig> = {}) {
         const key = `rate-limit:${clientIp}`;
         const existing = store.get(key);
 
-        // Initialize or reset expired entry
+        // Initialize or reset expired entry; capture in `entry` to avoid a second Map lookup
+        let entry: RateLimitEntry;
         if (!existing || existing.resetTime < now) {
-          store.set(key, { count: 1, resetTime: now + mergedConfig.windowMs });
+          entry = { count: 1, resetTime: now + mergedConfig.windowMs };
+          store.set(key, entry);
         } else {
           existing.count++;
+          entry = existing;
         }
-
-        const entry = store.get(key)!;
 
         // Set rate limit headers
         if (mergedConfig.headers) {

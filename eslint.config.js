@@ -15,12 +15,13 @@ export default tseslint.config(
       'apps/frontend/src/routeTree.gen.ts',
     ],
   },
-  // Base JavaScript recommendations
+  // Base JavaScript recommendations (applied to all files, no type-checking)
   eslint.configs.recommended,
-  ...tseslint.configs.recommendedTypeChecked,
-  // TypeScript for all .ts/.tsx
+  // TypeScript with type-checked rules — scoped to .ts/.tsx only so that plain
+  // .js tooling files (e.g. eslint.config.js) are not subjected to typed parsing.
   {
     files: ['**/*.{ts,tsx}'],
+    extends: [...tseslint.configs.recommendedTypeChecked],
     languageOptions: {
       ecmaVersion: 'latest',
       sourceType: 'module',
@@ -31,20 +32,40 @@ export default tseslint.config(
     },
     rules: {
       'no-undef': 'off',
-      '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
-      '@typescript-eslint/no-explicit-any': 'off',
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        { argsIgnorePattern: '^_', varsIgnorePattern: '^_' },
+      ],
+      '@typescript-eslint/no-explicit-any': 'error',
       '@typescript-eslint/explicit-function-return-type': 'off',
-      '@typescript-eslint/no-empty-function': 'off',
-      '@typescript-eslint/no-non-null-assertion': 'off',
+      '@typescript-eslint/no-empty-function': 'error',
+      '@typescript-eslint/no-non-null-assertion': 'error',
     },
   },
-  // Relax type-aware rules in test files — Bun test types are incomplete
-  // (e.g. expect().rejects is not typed as Thenable)
+  // Require explicit return types in API services, utilities, and shared code.
+  // Elysia route/plugin files are excluded — their return types must be inferred
+  // for Eden Treaty type propagation. Frontend is excluded — React component and
+  // hook return types are either trivially JSX.Element or complex TanStack Query
+  // generics that add noise without safety.
   {
-    files: ['**/tests/**/*.{ts,tsx}'],
+    files: [
+      'apps/api/src/services/**/*.ts',
+      'apps/api/src/utils/**/*.ts',
+      'apps/api/src/lib/**/*.ts',
+      'apps/api/src/db/**/*.ts',
+      'apps/shared/src/**/*.ts',
+    ],
     rules: {
-      '@typescript-eslint/await-thenable': 'off',
-      '@typescript-eslint/no-floating-promises': 'off',
+      '@typescript-eslint/explicit-function-return-type': [
+        'error',
+        {
+          allowExpressions: true,
+          allowTypedFunctionExpressions: true,
+          allowHigherOrderFunctions: true,
+          allowDirectConstAssertionInArrowFunctions: true,
+          allowIIFEs: true,
+        },
+      ],
     },
   },
   // React rules — frontend only
@@ -63,15 +84,7 @@ export default tseslint.config(
       'react/react-in-jsx-scope': 'off',
       'react/jsx-uses-react': 'off',
       'react/no-unescaped-entities': 'off',
-      'react-hooks/exhaustive-deps': 'off',
-      '@typescript-eslint/no-misused-promises': [
-        'error',
-        {
-          checksVoidReturn: {
-            attributes: false,
-          },
-        },
-      ],
+      'react-hooks/exhaustive-deps': 'error',
       // React Compiler rules from react-hooks v7 — disable until codebase is compiler-ready
       'react-hooks/set-state-in-effect': 'off',
       'react-hooks/refs': 'off',
@@ -79,49 +92,6 @@ export default tseslint.config(
       'react-hooks/incompatible-library': 'off',
     },
   },
-  {
-    files: ['apps/frontend/src/routes/**/*.{ts,tsx}'],
-    rules: {
-      '@typescript-eslint/only-throw-error': 'off',
-    },
-  },
-  {
-    files: [
-      'apps/frontend/src/components/MarkdownContent.tsx',
-      'apps/frontend/src/components/settings/ConnectorsSettings.tsx',
-      'apps/frontend/src/hooks/use-chats-query.ts',
-      'apps/frontend/src/hooks/use-global-settings.ts',
-      'apps/frontend/src/hooks/use-messages-query.ts',
-      'apps/frontend/src/hooks/use-optimistic-messages.ts',
-      'apps/frontend/src/services/gallery-service.ts',
-      'apps/frontend/src/services/generation-service.ts',
-    ],
-    rules: {
-      '@typescript-eslint/no-unsafe-assignment': 'off',
-      '@typescript-eslint/no-unsafe-member-access': 'off',
-      '@typescript-eslint/no-unsafe-call': 'off',
-      '@typescript-eslint/no-unsafe-return': 'off',
-    },
-  },
-  // SDK adapter boundaries: current provider/client typings still leak `any`
-  // into parsing code. Keep typed lint for the repo, but relax unsafe rules
-  // in the narrow files that sit directly on third-party response shapes.
-  {
-    files: [
-      'apps/api/src/services/providers/anthropic-provider.ts',
-      'apps/api/src/services/providers/gemini-provider.ts',
-      'apps/api/src/services/providers/openai-compatible-provider.ts',
-      'apps/api/src/services/providers/openai-provider.ts',
-      'apps/api/src/services/providers/replay-builder.ts',
-    ],
-    rules: {
-      '@typescript-eslint/no-unsafe-assignment': 'off',
-      '@typescript-eslint/no-unsafe-member-access': 'off',
-      '@typescript-eslint/no-unsafe-call': 'off',
-      '@typescript-eslint/no-unsafe-return': 'off',
-      '@typescript-eslint/no-unsafe-argument': 'off',
-    },
-  },
   // Prettier last (disables conflicting stylistic rules; formatting is handled by Prettier itself)
-  prettierConfig,
+  prettierConfig
 );

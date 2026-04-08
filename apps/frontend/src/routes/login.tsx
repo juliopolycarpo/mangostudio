@@ -25,7 +25,7 @@ function LoginPage() {
       const redirect = new URLSearchParams(window.location.search).get('redirect');
       void navigate({ to: redirect || '/' });
     }
-  }, [session?.user?.id, navigate]);
+  }, [session?.user, navigate]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -48,7 +48,7 @@ function LoginPage() {
       <Card variant="glass" className="w-full max-w-sm">
         <form
           id="login-form"
-          onSubmit={handleSubmit}
+          onSubmit={(e) => void handleSubmit(e)}
           method="post"
           action="#"
           className="space-y-5"

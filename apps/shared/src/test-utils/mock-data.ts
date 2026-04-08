@@ -48,14 +48,14 @@ export function createMockMessage(overrides: Partial<Message> = {}): Message {
  * Converts internal models to API-compatible JSON structures (e.g., Date to string).
  */
 export const toApiResponse = {
+  /** Chat timestamps are already epoch ms numbers — no conversion needed. */
   chat: (chat: Chat) => ({
     ...chat,
-    createdAt: new Date(chat.createdAt).toISOString(),
-    updatedAt: new Date(chat.updatedAt).toISOString(),
   }),
+  /** Convert Date timestamp to epoch ms number to match the API contract. */
   message: (msg: Message) => ({
     ...msg,
-    timestamp: msg.timestamp.toISOString(),
+    timestamp: msg.timestamp.getTime(),
   }),
 };
 

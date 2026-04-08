@@ -46,14 +46,16 @@ describe('mock-data test utils', () => {
       timestamp: new Date('2026-03-24T12:34:56.000Z'),
     });
 
+    // Chat timestamps are already epoch ms numbers — the API stores and returns them as numbers.
     expect(toApiResponse.chat(chat)).toEqual({
       ...chat,
-      createdAt: new Date(chat.createdAt).toISOString(),
-      updatedAt: new Date(chat.updatedAt).toISOString(),
+      createdAt: 1_711_280_000_000,
+      updatedAt: 1_711_280_123_000,
     });
+    // Message timestamp is converted from Date to epoch ms number to match GeneratedMessage contract.
     expect(toApiResponse.message(message)).toEqual({
       ...message,
-      timestamp: '2026-03-24T12:34:56.000Z',
+      timestamp: new Date('2026-03-24T12:34:56.000Z').getTime(),
     });
   });
 });
