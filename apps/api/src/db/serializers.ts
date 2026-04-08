@@ -11,9 +11,15 @@ export function boolToInt(value: boolean): 0 | 1 {
 /** Parses the JSON-encoded styleParams column into a string array. */
 export function parseStyleParams(raw: string | null | undefined): string[] | undefined {
   if (!raw) return undefined;
+
   try {
-    return JSON.parse(raw) as string[];
-  } catch {
+    const parsed: unknown = JSON.parse(raw);
+
+    if (!Array.isArray(parsed)) return undefined;
+
+    return parsed.filter((value): value is string => typeof value === 'string');
+  } catch (error) {
+    console.warn('[serializers] Invalid styleParams JSON', error);
     return undefined;
   }
 }

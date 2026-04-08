@@ -59,12 +59,19 @@ export async function createMessage(
     .execute();
 }
 
+/** A simple history turn carrying the message id, role, and text. */
+export type SimpleChatHistoryTurn = {
+  id: string;
+  role: 'user' | 'ai';
+  text: string;
+};
+
 /** Loads the chat history for context reconstruction (chat-mode messages only). */
 export async function loadChatHistory(
   chatId: string,
   opts: LoadHistoryOptions,
   db: Kysely<Database>
-): Promise<Array<{ role: 'user' | 'ai'; text: string }>> {
+): Promise<SimpleChatHistoryTurn[]> {
   let q = db
     .selectFrom('messages')
     .select(['id', 'role', 'text'])
@@ -81,6 +88,7 @@ export async function loadChatHistory(
 
   // Reverse to restore chronological order after DESC fetch
   return rows.reverse().map((row) => ({
+    id: row.id,
     role: row.role,
     text: row.text,
   }));
