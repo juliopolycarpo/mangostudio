@@ -47,14 +47,12 @@ apps/
 ## Root Scripts
 
 ```bash
-bun run format:check       # formatting checks across all workspaces
-bun run check              # format + lint + typecheck + tests
-bun run test                # unit + integration across all workspaces
-bun run test:unit           # API, shared, and frontend unit suites
-bun run test:integration    # API and frontend integration suites
-bun run test:coverage       # frontend coverage (Vitest/v8)
-bun run test:browser:smoke  # Playwright Chromium auth smoke suite
-bun run verify              # check + coverage + build
+bun run check               # format + lint + typecheck across all workspaces
+bun run test                # unit + integration (e2e is opt-in)
+bun run test --unit         # API, shared, and frontend unit suites
+bun run test --integration  # API and frontend integration suites
+bun run test --e2e          # Playwright Chromium auth smoke suite (opt-in)
+bun run test --all          # all lanes including e2e
 ```
 
 ## Browser Smoke
@@ -62,7 +60,7 @@ bun run verify              # check + coverage + build
 Playwright Chromium suite under `tests/browser-smoke/`. Covers the full auth flow against a live dev stack (API on `:3001`, frontend on `:5173`).
 
 ```bash
-bun run test:browser:smoke
+bun run test --e2e
 ```
 
 `playwright.config.ts` at the repo root starts both servers via `webServer` before running tests. In CI it enforces `workers: 1` and uploads traces/screenshots on failure.
@@ -210,5 +208,5 @@ Before merging, run:
 
 ```bash
 bun run check
-bun run test:coverage
+bun run test
 ```

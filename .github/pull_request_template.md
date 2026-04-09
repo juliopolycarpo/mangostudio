@@ -8,7 +8,7 @@
 
 ## Test Plan
 
-- [ ] `bun run lint` passes
+- [ ] `bun run check` passes
 - [ ] `bun run test` passes
 - [ ] `bun run build` passes
 - [ ] New UI strings use `@mangostudio/shared/i18n` (no hardcoded strings)

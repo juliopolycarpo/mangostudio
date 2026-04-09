@@ -64,10 +64,10 @@ Useful docs:
 
 ## Validation
 
-- Any change: `bun run fix:check`
+- Any change: `bun run check`
 - Frontend-local change: `bun run --filter @mangostudio/frontend test:unit`
 - API-local change: `bun run --filter @mangostudio/api test:unit`
 - Shared-local change: `bun run --filter @mangostudio/shared test:unit`
 - Route or integration flow change: run the relevant `test:integration`
-- Auth flow change: `bun run test:browser:smoke`
-- Broad or cross-workspace change: `bun run verify`
+- Auth flow change: `bun run test --e2e`
+- Broad or cross-workspace change: `bun run check && bun run test` (note: e2e is opt-in, use `--e2e` explicitly)
