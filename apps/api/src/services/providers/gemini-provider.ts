@@ -327,7 +327,7 @@ async function* processGeminiInteractionStream(
           yield { type: 'tool_call_arguments_delta', callId: call.id, delta: argChunk };
         }
       } else if (nd.kind !== 'thought_signature') {
-        console.log('[gemini-interactions] unknown delta type:', JSON.stringify(event.delta));
+        console.warn('[gemini-interactions] unknown delta type:', JSON.stringify(event.delta));
       }
     } else if (event.event_type === 'content.stop') {
       const call = activeCalls.get(event.index);
@@ -346,7 +346,7 @@ async function* processGeminiInteractionStream(
       const gu = extractGeminiUsage(event.interaction.usage);
       if (gu.totalInputTokens > 0) providerReportedInputTokens = gu.totalInputTokens;
       if (gu.cachedTokens > 0 && gu.totalInputTokens > 0) {
-        console.log(
+        console.warn(
           `[prefix-cache][gemini] ${gu.cachedTokens}/${gu.totalInputTokens} input tokens from cache (${Math.round((gu.cachedTokens / gu.totalInputTokens) * 100)}%)`
         );
       }

@@ -3,7 +3,7 @@
  * Includes robust file validation using magic bytes detection.
  */
 
-import { Elysia, t } from 'elysia';
+import { type Elysia, t } from 'elysia';
 import { join, extname } from 'path';
 import { mkdirSync } from 'fs';
 import { fileTypeFromBuffer } from 'file-type';

@@ -28,7 +28,7 @@ const frontendExists = (() => {
   }
 })();
 
-console.log(
+console.warn(
   frontendExists
     ? `[frontend] Serving from: ${FRONTEND_DIR}`
     : `[frontend] No frontend found at: ${FRONTEND_DIR}`
@@ -52,7 +52,7 @@ async function runMigrations(): Promise<void> {
 
   results?.forEach((it) => {
     if (it.status === 'Success') {
-      console.log(`[migrate] ✓ "${it.migrationName}"`);
+      console.warn(`[migrate] ✓ "${it.migrationName}"`);
     } else if (it.status === 'Error') {
       console.error(`[migrate] ✗ "${it.migrationName}" failed`);
     }
@@ -114,12 +114,12 @@ if (frontendExists) {
 
 app.listen(PORT);
 
-console.log(`[api] MangoStudio API running on http://localhost:${PORT}`);
-console.log(`[api] Scalar UI available at http://localhost:${PORT}/scalar`);
+console.warn(`[api] MangoStudio API running on http://localhost:${PORT}`);
+console.warn(`[api] Scalar UI available at http://localhost:${PORT}/scalar`);
 
 async function shutdown(signal: 'SIGINT' | 'SIGTERM'): Promise<void> {
   if (signal === 'SIGINT') {
-    console.log('\n[api] Shutting down...');
+    console.warn('\n[api] Shutting down...');
   }
 
   await closeDb();

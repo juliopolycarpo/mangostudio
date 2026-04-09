@@ -409,7 +409,7 @@ export const connectorRoutes = new Elysia()
         invalidateProviderModelCache(meta.provider as ProviderType, userId);
         invalidateUnifiedCatalog(userId);
 
-        console.log(`[settings] DEL connector ${params.id}`);
+        console.warn(`[settings] DEL connector ${params.id}`);
         return { success: true };
       } catch (error) {
         return handleSecretRouteError(error, set);

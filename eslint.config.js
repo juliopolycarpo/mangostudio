@@ -32,6 +32,7 @@ export default tseslint.config(
     },
     rules: {
       'no-undef': 'off',
+      'no-console': ['warn', { allow: ['warn', 'error'] }],
       '@typescript-eslint/no-unused-vars': [
         'error',
         { argsIgnorePattern: '^_', varsIgnorePattern: '^_' },
@@ -40,6 +41,10 @@ export default tseslint.config(
       '@typescript-eslint/explicit-function-return-type': 'off',
       '@typescript-eslint/no-empty-function': 'error',
       '@typescript-eslint/no-non-null-assertion': 'error',
+      '@typescript-eslint/consistent-type-imports': [
+        'error',
+        { prefer: 'type-imports', fixStyle: 'inline-type-imports' },
+      ],
     },
   },
   // Require explicit return types in API services, utilities, and shared code.
@@ -66,6 +71,13 @@ export default tseslint.config(
           allowIIFEs: true,
         },
       ],
+    },
+  },
+  // Build scripts — console is the intended output mechanism
+  {
+    files: ['scripts/**/*.ts'],
+    rules: {
+      'no-console': 'off',
     },
   },
   // React rules — frontend only

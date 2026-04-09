@@ -2,7 +2,7 @@
  * Chat routes: CRUD operations for chat sessions.
  */
 
-import { Elysia, t } from 'elysia';
+import { type Elysia, t } from 'elysia';
 import { getDb } from '../db/database';
 import { requireAuth } from '../plugins/auth-middleware';
 import { verifyChatOwnership } from '../services/chat-service';

@@ -1,3 +1,5 @@
+import type { messages } from './pt-BR';
+
 type DeepStringRecord<T> = {
   [K in keyof T]: T[K] extends string ? string : DeepStringRecord<T[K]>;
 };
@@ -7,7 +9,7 @@ type DeepStringRecord<T> = {
  * Verifies all keys exist but accepts any string value.
  * All locales must satisfy this type.
  */
-export type Messages = DeepStringRecord<typeof import('./pt-BR').messages>;
+export type Messages = DeepStringRecord<typeof messages>;
 
 /**
  * Locale available in the project.

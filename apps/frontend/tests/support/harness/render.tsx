@@ -2,8 +2,8 @@ import React from 'react';
 import {
   render as tlRender,
   renderHook as tlRenderHook,
-  RenderOptions,
-  RenderHookOptions,
+  type RenderOptions,
+  type RenderHookOptions,
 } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ToastProvider } from '../../../src/components/ui/Toast';

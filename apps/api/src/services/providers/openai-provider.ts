@@ -7,7 +7,7 @@
  * rejected during connector setup.
  */
 
-import OpenAI, { APIError as OpenAIAPIError, APIPromise } from 'openai';
+import OpenAI, { APIError as OpenAIAPIError, type APIPromise } from 'openai';
 import type { Stream } from 'openai/streaming';
 import { join } from 'path';
 import { mkdirSync } from 'fs';

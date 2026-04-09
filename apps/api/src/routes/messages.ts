@@ -3,7 +3,7 @@
  * Includes a global images endpoint for the Gallery feature.
  */
 
-import { Elysia, t } from 'elysia';
+import { type Elysia, t } from 'elysia';
 import { getDb } from '../db/database';
 import { requireAuth } from '../plugins/auth-middleware';
 import { verifyChatOwnership } from '../services/chat-service';

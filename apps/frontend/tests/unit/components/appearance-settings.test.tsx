@@ -7,10 +7,11 @@ import { render, renderHook } from '../../support/harness/render';
 import { AppearanceSettings } from '../../../src/components/settings/AppearanceSettings';
 import { SettingsTabs } from '../../../src/components/settings/SettingsTabs';
 import { useTheme } from '../../../src/hooks/use-theme';
+import type * as TanstackRouter from '@tanstack/react-router';
 
 // SettingsTabs uses TanStack Router Link — mock it to a simple anchor
 vi.mock('@tanstack/react-router', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@tanstack/react-router')>();
+  const actual = await importOriginal<typeof TanstackRouter>();
   return {
     ...actual,
     Link: ({
