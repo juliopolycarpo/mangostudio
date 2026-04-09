@@ -10,7 +10,17 @@ import type { AIProvider } from '../../../src/services/providers/types';
 import {
   OpenAIAuthError,
   OpenAIConfigError,
+  validateOpenAIAuthContext,
 } from '../../../src/services/providers/openai-provider';
+import {
+  validateBaseUrl,
+  UnsafeBaseUrlError,
+} from '../../../src/services/providers/base-url-policy';
+
+// Capture real implementations before any test can override mock.module.
+// mock.restore() does NOT revert mock.module() overrides; explicit re-registration is required.
+const realValidateOpenAIAuthContext = validateOpenAIAuthContext;
+const realValidateBaseUrl = validateBaseUrl;
 
 /** Typed response shapes for test assertions. */
 interface ConnectorEntry {
@@ -50,9 +60,19 @@ const TEST_USER = {
 
 let restoreAuth: (() => void) | null = null;
 
-afterEach(() => {
+afterEach(async () => {
   restoreAuth?.();
   restoreAuth = null;
+  // Restore real module bindings to prevent mock leakage into later test files.
+  await mock.module('../../../src/services/providers/openai-provider', () => ({
+    validateOpenAIAuthContext: realValidateOpenAIAuthContext,
+    OpenAIAuthError,
+    OpenAIConfigError,
+  }));
+  await mock.module('../../../src/services/providers/base-url-policy', () => ({
+    validateBaseUrl: realValidateBaseUrl,
+    UnsafeBaseUrlError,
+  }));
 });
 
 const ConnectorStatusSchema = Type.Object({

@@ -5,6 +5,11 @@ import {
   createAuthenticatedApiTestApp,
 } from '../../support/harness/create-api-test-app';
 import { getDb } from '../../../src/db/database';
+import { verifyChatOwnership } from '../../../src/services/chat-service';
+
+// Capture real implementation before any test can override mock.module.
+// mock.restore() does NOT revert mock.module() overrides; explicit re-registration is required.
+const realVerifyChatOwnership = verifyChatOwnership;
 
 const TEST_USER = {
   id: 'test-user-messages',
@@ -43,10 +48,13 @@ beforeAll(async () => {
 
 let restoreAuth: (() => void) | null = null;
 
-afterEach(() => {
+afterEach(async () => {
   restoreAuth?.();
   restoreAuth = null;
-  mock.restore();
+  // Restore the real chat-service module to prevent mock leakage into later test files.
+  await mock.module('../../../src/services/chat-service', () => ({
+    verifyChatOwnership: realVerifyChatOwnership,
+  }));
 });
 
 describe('POST /messages', () => {
