@@ -79,6 +79,9 @@ export default defineConfig({
       '/api': {
         target: apiTarget,
         changeOrigin: true,
+        // Safety-net timeout for the proxy socket. The backend sends SSE
+        // keepalive comments every 15s, so this should never fire in practice.
+        timeout: 120_000,
       },
       '/uploads': {
         target: apiTarget,

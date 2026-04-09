@@ -38,6 +38,10 @@ function sseEvent(data: object): Uint8Array {
   return new TextEncoder().encode(`data: ${JSON.stringify(data)}\n\n`);
 }
 
+/** SSE comment used as a keepalive heartbeat — ignored by clients. */
+const KEEPALIVE_BYTES = new TextEncoder().encode(': keepalive\n\n');
+const KEEPALIVE_INTERVAL_MS = 15_000;
+
 export const respondStreamRoutes = (app: Elysia) =>
   app.group('', (app) =>
     app
@@ -136,6 +140,16 @@ export const respondStreamRoutes = (app: Elysia) =>
               const allParts: MessagePart[] = [];
               let aborted = false;
               let durableProviderState: string | null = null;
+
+              // Heartbeat: send SSE comments to keep the proxy socket alive
+              // during slow provider responses (e.g. Gemini cold starts).
+              const heartbeat = setInterval(() => {
+                try {
+                  controller.enqueue(KEEPALIVE_BYTES);
+                } catch {
+                  // Controller may already be closed — ignore
+                }
+              }, KEEPALIVE_INTERVAL_MS);
 
               // Emit pending fallback notice as first SSE event
               if (continuationFallback) {
@@ -679,6 +693,7 @@ export const respondStreamRoutes = (app: Elysia) =>
                 const errorEvent: SSEErrorEvent = { type: 'error', error: message, done: true };
                 controller.enqueue(sseEvent(errorEvent));
               } finally {
+                clearInterval(heartbeat);
                 controller.close();
               }
             },
