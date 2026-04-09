@@ -159,6 +159,7 @@ export function createProviderSecretService(
         try {
           if (existsSync(tomlFilePath)) {
             const parsed = readTomlStringSections(tomlFilePath);
+            // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
             const value = parsed[config.tomlSection]?.[connector.name];
             if (typeof value !== 'string') return null;
             if (isPlaceholderConfigSecretValue(value)) return null;

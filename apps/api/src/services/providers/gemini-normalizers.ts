@@ -47,6 +47,7 @@ export function narrowGeminiDelta(delta: ContentDelta['delta']): NarrowedGeminiD
   switch (delta.type) {
     case 'thought_summary': {
       // content can be TextContent | ImageContent; extract text when present
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
       const text = delta.content && 'text' in delta.content ? (delta.content.text ?? '') : '';
       return { kind: 'thought_summary', text };
     }
@@ -57,6 +58,7 @@ export function narrowGeminiDelta(delta: ContentDelta['delta']): NarrowedGeminiD
         kind: 'function_call',
         id: delta.id,
         name: delta.name,
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
         args: delta.arguments ?? {},
       };
     case 'thought_signature':

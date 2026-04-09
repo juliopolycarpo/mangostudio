@@ -279,6 +279,7 @@ export const respondStreamRoutes = (app: Elysia) =>
                     let turnCompleted = false;
 
                     for await (const event of generateAgentTurnStream(req)) {
+                      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
                       if (signal.aborted) {
                         aborted = true;
                         break;
@@ -562,6 +563,7 @@ export const respondStreamRoutes = (app: Elysia) =>
                       fullText += chunk.text;
                       allParts.push({ type: 'text', text: chunk.text });
                       controller.enqueue(sseEvent({ type: 'text', text: chunk.text, done: false }));
+                      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
                     } else if (!chunk.type && chunk.text && !chunk.done) {
                       // Backward compat: providers not yet migrated emit no type field
                       legacyInThinkingSegment = false;

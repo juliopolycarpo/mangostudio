@@ -260,6 +260,7 @@ async function* streamOAICompatAgentTurn(req: AgentTurnRequest): AsyncIterable<A
       if (req.signal?.aborted) break;
 
       const choice = chunk.choices[0];
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
       if (!choice) continue;
 
       const delta = choice.delta as unknown as Record<string, unknown>;

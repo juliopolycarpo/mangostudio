@@ -183,6 +183,7 @@ async function* streamGeminiAgentTurn(req: AgentTurnRequest): AsyncIterable<Agen
   if (req.generationConfig?.thinkingEnabled) {
     const levelMap = { low: 'low', medium: 'medium', high: 'high' } as const;
     interactionParams.generation_config = {
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
       thinking_level: levelMap[req.generationConfig.reasoningEffort] ?? 'medium',
       thinking_summaries: 'auto',
     };
@@ -202,6 +203,7 @@ async function* streamGeminiAgentTurn(req: AgentTurnRequest): AsyncIterable<Agen
     // Detect server-side cursor rejection: interaction not found, expired, or invalid
     const isCursorError =
       canContinue &&
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
       prevState !== null &&
       (/not found/i.test(errMsg) ||
         /expired/i.test(errMsg) ||
@@ -250,6 +252,7 @@ async function* streamGeminiAgentTurn(req: AgentTurnRequest): AsyncIterable<Agen
         if (req.generationConfig?.thinkingEnabled) {
           const levelMap = { low: 'low', medium: 'medium', high: 'high' } as const;
           retryParams.generation_config = {
+            // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
             thinking_level: levelMap[req.generationConfig.reasoningEffort] ?? 'medium',
             thinking_summaries: 'auto',
           };

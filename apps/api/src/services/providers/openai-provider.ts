@@ -352,7 +352,7 @@ export async function* streamWithResponsesAPI(
       }
 
       case 'response.reasoning_summary_part.done': {
-        if (ev.part.type === 'summary_text' && ev.part.text) {
+        if (ev.part.text) {
           const key = `${ev.item_id}:${ev.summary_index}`;
           if (!seenSummaryDeltas.has(key)) {
             thinkingWasEmitted = true;
@@ -573,7 +573,7 @@ async function* streamAgentTurnWithResponsesAPI(
       }
 
       case 'response.reasoning_summary_part.done': {
-        if (ev.part.type === 'summary_text' && ev.part.text) {
+        if (ev.part.text) {
           const key = `${ev.item_id}:${ev.summary_index}`;
           if (!seenSummaryDeltas.has(key)) {
             thinkingWasEmitted = true;
@@ -620,6 +620,7 @@ async function* streamAgentTurnWithResponsesAPI(
             type: 'tool_call_completed',
             callId: mapped.callId,
             name: mapped.name,
+            // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
             arguments: ev.arguments ?? '',
           };
         }

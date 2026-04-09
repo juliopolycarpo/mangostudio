@@ -127,6 +127,7 @@ export async function* generateTextStream(
     const levelMap = { low: 'LOW', medium: 'MEDIUM', high: 'HIGH' } as const;
     config.thinkingConfig = {
       includeThoughts: true,
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
       thinkingLevel: levelMap[generationConfig.reasoningEffort] ?? 'MEDIUM',
     };
   }

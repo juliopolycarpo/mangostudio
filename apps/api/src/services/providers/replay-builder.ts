@@ -113,6 +113,7 @@ export function buildGeminiInteractionsReplay(
 
   for (const turn of history) {
     if (!turn.parts || turn.parts.length === 0) {
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
       if (!turn.text?.trim()) continue;
       turns.push({
         role: turn.role === 'ai' ? 'model' : 'user',
@@ -123,6 +124,7 @@ export function buildGeminiInteractionsReplay(
 
     // User turns always emit plain text
     if (turn.role === 'user') {
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
       if (!turn.text?.trim()) continue;
       turns.push({ role: 'user', content: turn.text });
       continue;

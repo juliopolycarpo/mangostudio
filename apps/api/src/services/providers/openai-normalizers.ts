@@ -20,6 +20,7 @@ export type ResponseCreateParamsStreaming = Responses.ResponseCreateParamsStream
  * Tries summary array first, then falls back to reasoning content array.
  */
 export function extractReasoningFromCompleted(response: Responses.Response): string | null {
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
   const output = response.output ?? [];
 
   for (const item of output) {
@@ -27,9 +28,7 @@ export function extractReasoningFromCompleted(response: Responses.Response): str
 
     // Try summary array first
     if (Array.isArray(item.summary)) {
-      const texts = item.summary
-        .filter((s) => s.type === 'summary_text' && s.text)
-        .map((s) => s.text);
+      const texts = item.summary.filter((s) => s.text).map((s) => s.text);
       if (texts.length > 0) return texts.join('\n\n');
     }
 

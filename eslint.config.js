@@ -47,6 +47,14 @@ export default tseslint.config(
       ],
     },
   },
+  // Semantic strictness pilot — API workspace only.
+  // Flags conditions that TypeScript can prove are always true/false.
+  {
+    files: ['apps/api/src/**/*.ts'],
+    rules: {
+      '@typescript-eslint/no-unnecessary-condition': 'error',
+    },
+  },
   // Require explicit return types in API services, utilities, and shared code.
   // Elysia route/plugin files are excluded — their return types must be inferred
   // for Eden Treaty type propagation. Frontend is excluded — React component and

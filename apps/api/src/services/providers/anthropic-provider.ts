@@ -219,7 +219,11 @@ async function* streamAnthropicAgentTurn(req: AgentTurnRequest): AsyncIterable<A
     toolDefinitions: req.toolDefinitions ?? [],
     messages,
     thinkingConfig: thinkingEnabled
-      ? { type: 'enabled', budget_tokens: budgetMap[effort] ?? 2048 }
+      ? {
+          type: 'enabled',
+          // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+          budget_tokens: budgetMap[effort] ?? 2048,
+        }
       : undefined,
   });
 
@@ -401,6 +405,7 @@ const anthropicProvider: AIProvider = {
     if (thinkingEnabled) {
       params.thinking = {
         type: 'enabled',
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
         budget_tokens: budgetMap[effort] ?? 2048,
       };
     }

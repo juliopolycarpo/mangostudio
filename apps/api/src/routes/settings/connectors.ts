@@ -224,6 +224,7 @@ export async function removeSecret(
         const configPath = getConfig().configFilePath;
         if (existsSync(configPath)) {
           const config = readTomlStringSections(configPath);
+          // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
           if (config[cfg.tomlSection]) {
             delete config[cfg.tomlSection][name];
             writeFileSync(configPath, stringifyToml(config));

@@ -194,6 +194,7 @@ function applyToml(cfg: MangoConfig, parsed: Record<string, unknown>): void {
 function applyEnvOverrides(cfg: MangoConfig, env: Record<string, string>): void {
   for (const [key, value] of Object.entries(env)) {
     const applier = ENV_KEY_MAP[key];
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
     if (applier && value) {
       applier(cfg, value);
     }
