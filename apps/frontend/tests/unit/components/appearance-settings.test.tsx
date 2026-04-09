@@ -16,10 +16,16 @@ vi.mock('@tanstack/react-router', async (importOriginal) => {
     Link: ({
       to,
       children,
+      activeProps: _activeProps,
+      inactiveProps: _inactiveProps,
+      activeOptions: _activeOptions,
       ...props
     }: {
       to: string;
       children: React.ReactNode;
+      activeProps?: unknown;
+      inactiveProps?: unknown;
+      activeOptions?: unknown;
       [k: string]: unknown;
     }) => (
       <a href={to} {...props}>
