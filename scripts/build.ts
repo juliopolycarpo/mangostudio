@@ -1,29 +1,36 @@
 #!/usr/bin/env bun
-/**
- * Build script for MangoStudio executable.
- * Compiles the API server into standalone binaries for multiple platforms.
- * Copies the frontend dist beside each executable as a public sidecar directory.
- * Defines build-time constants and optimizes for production.
- */
 
+import { cpSync, existsSync, mkdirSync } from 'fs';
 import { join } from 'path';
-import { mkdirSync, cpSync, existsSync } from 'fs';
 
-// Build configuration
-const BUILD_TIME = new Date().toISOString();
-const BUILD_TYPE = process.env.BUILD_TYPE || 'production';
-const VERSION = process.env.VERSION || '0.0.1';
-const DRY_RUN = process.env.DRY_RUN === '1';
+import { ROOT_DIR, type WorkspaceName } from './lib/config';
+import {
+  assertNoUnexpectedArguments,
+  exitWithResults,
+  fatal,
+  header,
+  parseArgs,
+  runParallel,
+  runWorkspaceScript,
+  warn,
+  type RunResult,
+} from './lib/runner';
 
-// Directory paths
-const ROOT_DIR = join(import.meta.dir, '..');
-const OUT_DIR = join(ROOT_DIR, '.mango', 'out');
-const API_SRC = join(ROOT_DIR, 'apps/api/src/index.ts');
-const FRONTEND_DIR = join(ROOT_DIR, 'apps/frontend');
-const FRONTEND_DIST = join(FRONTEND_DIR, 'dist');
+interface BinaryTarget {
+  target: string;
+  arch: string;
+  name: string;
+}
 
-// Target platforms for compilation
-const ALL_TARGETS = [
+interface BinaryBuildOptions {
+  buildType: 'production' | 'development';
+  dryRun: boolean;
+  onlyPlatform?: string;
+  version: string;
+}
+
+const BUILDABLE_WORKSPACES: WorkspaceName[] = ['frontend', 'api'];
+const ALL_BINARY_TARGETS: BinaryTarget[] = [
   { target: 'bun-linux-x64', arch: 'linux-x64', name: 'mangostudio' },
   { target: 'bun-linux-arm64', arch: 'linux-arm64', name: 'mangostudio' },
   { target: 'bun-windows-x64', arch: 'windows-x64', name: 'mangostudio.exe' },
@@ -34,179 +41,145 @@ const ALL_TARGETS = [
   { target: 'bun-linux-arm64-musl', arch: 'linux-arm64-musl', name: 'mangostudio' },
 ];
 
-// Filter targets if ONLY_PLATFORM is set
-const ONLY_PLATFORM = process.env.ONLY_PLATFORM;
-const TARGETS = ONLY_PLATFORM
-  ? ALL_TARGETS.filter((t) => t.arch === ONLY_PLATFORM || t.target === ONLY_PLATFORM)
-  : ALL_TARGETS;
+function printHelp(): never {
+  console.log(`Usage: bun run build [workspace flags]
+       bun run build --binary [--platform <target>] [--production | --development]
 
-if (TARGETS.length === 0) {
-  console.error(`❌ No platforms match filter: ${ONLY_PLATFORM}`);
-  console.error(`   Available platforms: ${ALL_TARGETS.map((t) => t.arch).join(', ')}`);
-  process.exit(1);
+Default:
+  Builds the frontend workspace.
+
+Workspace flags:
+  --frontend   Build the frontend workspace
+  --api        Build the API workspace
+  --all        Build every build-capable workspace
+
+Binary flags:
+  --binary         Build standalone binaries into .mango/out
+  --platform <id>  Limit binary output to one target (example: linux-x64)
+  --production     Use production binary settings (default)
+  --development    Use development binary settings
+  --help           Show this help message`);
+  process.exit(0);
 }
 
-// Ensure output directory exists
-mkdirSync(OUT_DIR, { recursive: true });
+function resolveBinaryTargets(onlyPlatform?: string): BinaryTarget[] {
+  if (!onlyPlatform) {
+    return ALL_BINARY_TARGETS;
+  }
 
-console.log(`📦 Building MangoStudio v${VERSION}`);
-console.log(`📅 Build time: ${BUILD_TIME}`);
-console.log(`🎯 Build type: ${BUILD_TYPE}`);
-console.log(`📁 Output directory: ${OUT_DIR}`);
-console.log('---');
+  return ALL_BINARY_TARGETS.filter(
+    (target) => target.arch === onlyPlatform || target.target === onlyPlatform
+  );
+}
 
-async function buildFrontend(): Promise<void> {
-  console.log('🏗️  Building frontend...');
+async function buildFrontendSidecar(dryRun: boolean): Promise<void> {
+  console.log('🏗️  Building frontend sidecar...');
 
-  if (DRY_RUN) {
-    console.log('   (dry run) Would run: bun run build in', FRONTEND_DIR);
+  if (dryRun) {
+    console.log('   (dry run) Would build @mangostudio/frontend');
     console.log('✅ Frontend built successfully (dry run)');
     return;
   }
 
-  try {
-    // Run vite build
-    const proc = Bun.spawn({
-      cmd: ['bun', 'run', 'build'],
-      cwd: FRONTEND_DIR,
-      stdout: 'pipe',
-      stderr: 'pipe',
-    });
-
-    const output = await new Response(proc.stdout).text();
-    const error = await new Response(proc.stderr).text();
-
-    const exitCode = await proc.exited;
-
-    if (exitCode === 0) {
-      console.log('✅ Frontend built successfully');
-      if (output.trim()) console.log(output.trim());
-    } else {
-      console.error('❌ Frontend build failed:');
-      if (error.trim()) console.error(error.trim());
-      process.exit(1);
-    }
-  } catch (error) {
-    console.error('❌ Error building frontend:', error);
-    process.exit(1);
+  const result = await runWorkspaceScript('frontend', 'build');
+  if (result.exitCode !== 0) {
+    fatal('Frontend build failed during standalone binary packaging.');
   }
 }
 
-async function buildForPlatform(
-  platform: string,
-  arch: string,
-  outputName: string
+async function buildStandaloneTarget(
+  target: BinaryTarget,
+  options: BinaryBuildOptions,
+  context: { apiSource: string; buildTime: string; frontendDist: string; outDir: string }
 ): Promise<boolean> {
-  const platformOutDir = join(OUT_DIR, arch);
+  const platformOutDir = join(context.outDir, target.arch);
   mkdirSync(platformOutDir, { recursive: true });
 
-  const binaryPath = join(platformOutDir, outputName);
+  const binaryPath = join(platformOutDir, target.name);
 
-  console.log(`🔨 Building for ${arch} (${platform}) → ${binaryPath}`);
+  console.log(`🔨 Building for ${target.arch} (${target.target}) → ${binaryPath}`);
+
+  if (options.dryRun) {
+    console.log(`   (dry run) Would compile for ${target.target}`);
+    console.log(`✅ Successfully built ${target.name} for ${target.arch} (dry run)`);
+    console.log(`📁 Would copy frontend dist to ${join(platformOutDir, 'public')}`);
+    return true;
+  }
 
   try {
-    // Dry run mode - skip actual compilation
-    if (DRY_RUN) {
-      console.log(`   (dry run) Would compile for ${platform}`);
-      // Simulate success
-      console.log(`✅ Successfully built ${outputName} for ${arch} (dry run)`);
-
-      // Simulate copying frontend
-      const frontendDest = join(platformOutDir, 'public');
-      console.log(`📁 Would copy frontend dist to ${frontendDest}`);
-      return true;
-    }
-
-    // Use bun build --compile to create standalone executable
     const args = [
       'build',
-      API_SRC,
+      context.apiSource,
       '--compile',
       '--target',
-      platform,
+      target.target,
       '--outfile',
       binaryPath,
       '--define',
-      `process.env.BUILD_TIME=${JSON.stringify(BUILD_TIME)}`,
+      `process.env.BUILD_TIME=${JSON.stringify(context.buildTime)}`,
       '--define',
-      `process.env.BUILD_TYPE=${JSON.stringify(BUILD_TYPE)}`,
+      `process.env.BUILD_TYPE=${JSON.stringify(options.buildType)}`,
       '--define',
-      `process.env.VERSION=${JSON.stringify(VERSION)}`,
+      `process.env.VERSION=${JSON.stringify(options.version)}`,
       '--define',
       'process.env.NODE_ENV="production"',
+      '--sourcemap=external',
     ];
 
-    if (BUILD_TYPE === 'production') {
+    if (options.buildType === 'production') {
       args.push('--minify');
     }
 
-    args.push('--sourcemap=external');
-
     const proc = Bun.spawn({
       cmd: ['bun', ...args],
+      cwd: ROOT_DIR,
       stdout: 'pipe',
       stderr: 'pipe',
-      cwd: ROOT_DIR,
     });
 
-    const output = await new Response(proc.stdout).text();
-    const error = await new Response(proc.stderr).text();
-    const exitCode = await proc.exited;
+    const [stdout, stderr, exitCode] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+      proc.exited,
+    ]);
 
-    if (exitCode === 0) {
-      console.log(`✅ Successfully built ${outputName} for ${arch}`);
-      if (output.trim()) console.log(output.trim());
-
-      // Copy frontend dist to platform output directory
-      const frontendDest = join(platformOutDir, 'public');
-      if (existsSync(FRONTEND_DIST)) {
-        cpSync(FRONTEND_DIST, frontendDest, { recursive: true });
-        console.log(`📁 Copied frontend dist to ${frontendDest}`);
-      }
-
-      return true;
-    } else {
-      console.error(`❌ Failed to build ${arch}:`);
-      if (error.trim()) console.error(error.trim());
+    if (exitCode !== 0) {
+      console.error(`❌ Failed to build ${target.arch}:`);
+      if (stderr.trim()) console.error(stderr.trim());
       return false;
     }
-  } catch (error) {
-    console.error(`❌ Error building ${arch}:`, error);
+
+    console.log(`✅ Successfully built ${target.name} for ${target.arch}`);
+    if (stdout.trim()) console.log(stdout.trim());
+
+    const frontendDestination = join(platformOutDir, 'public');
+    if (existsSync(context.frontendDist)) {
+      cpSync(context.frontendDist, frontendDestination, { recursive: true });
+      console.log(`📁 Copied frontend dist to ${frontendDestination}`);
+    }
+
+    return true;
+  } catch (caughtError) {
+    console.error(`❌ Error building ${target.arch}:`, caughtError);
     return false;
   }
 }
 
-async function buildAll(): Promise<void> {
-  // First build the frontend
-  await buildFrontend();
-
-  console.log(`🎯 Building executables for ${TARGETS.length} platforms`);
-
-  const results = await Promise.all(
-    TARGETS.map(({ target, arch, name }) => buildForPlatform(target, arch, name))
-  );
-
-  const successCount = results.filter(Boolean).length;
-  const failedCount = results.length - successCount;
-
-  console.log('---');
-  console.log(`📊 Build summary:`);
-  console.log(`✅ ${successCount} platforms built successfully`);
-  if (failedCount > 0) {
-    console.log(`❌ ${failedCount} platforms failed`);
-    process.exit(1);
-  }
-
-  // Create a global README with usage instructions
+async function writeStandaloneArtifacts(
+  options: BinaryBuildOptions,
+  targets: BinaryTarget[],
+  buildTime: string,
+  outDir: string
+): Promise<void> {
   const readmeContent = `# MangoStudio Executables
 
-## Version ${VERSION}
-- Build time: ${BUILD_TIME}
-- Build type: ${BUILD_TYPE}
+## Version ${options.version}
+- Build time: ${buildTime}
+- Build type: ${options.buildType}
 
 ## Available Platforms
 
-${TARGETS.map(({ arch, target }) => `- \`${arch}\` (${target})`).join('\n')}
+${targets.map(({ arch, target }) => `- \`${arch}\` (${target})`).join('\n')}
 
 ## Structure
 
@@ -215,10 +188,10 @@ Each platform has its own directory under \`.mango/out/\`:
 .mango/out/
 ├── linux-x64/
 │   ├── mangostudio           # Executable
-│   └── public/              # Frontend static files
+│   └── public/               # Frontend static files
 ├── windows-x64/
-│   ├── mangostudio.exe      # Executable
-│   └── public/              # Frontend static files
+│   ├── mangostudio.exe       # Executable
+│   └── public/               # Frontend static files
 └── ... (other platforms)
 \`\`\`
 
@@ -265,10 +238,9 @@ Each platform has its own directory under \`.mango/out/\`:
 - Frontend assets are copied beside the executable in \`public/\`
 `;
 
-  await Bun.write(join(OUT_DIR, 'README.md'), readmeContent);
-  console.log(`📖 README generated: ${join(OUT_DIR, 'README.md')}`);
+  await Bun.write(join(outDir, 'README.md'), readmeContent);
+  console.log(`📖 README generated: ${join(outDir, 'README.md')}`);
 
-  // Create a simple cross-platform runner script
   const runScript = `#!/bin/bash
 # MangoStudio Runner
 # Usage: ./run.sh [port] [platform]
@@ -276,7 +248,6 @@ Each platform has its own directory under \`.mango/out/\`:
 PORT=\${1:-3001}
 PLATFORM=\${2:-auto}
 
-# Auto-detect platform if not specified
 if [[ "$PLATFORM" == "auto" ]]; then
   OS="$(uname -s)"
   ARCH="$(uname -m)"
@@ -313,7 +284,6 @@ fi
 EXECUTABLE_DIR="\${PWD}/.mango/out/\${PLATFORM}"
 EXECUTABLE="\${EXECUTABLE_DIR}/mangostudio"
 
-# Windows adjustment
 if [[ "$PLATFORM" == windows* ]]; then
   EXECUTABLE="\${EXECUTABLE}.exe"
 fi
@@ -341,13 +311,12 @@ export API_PORT=$PORT
 exec "$(basename "$EXECUTABLE")"
 `;
 
-  await Bun.write(join(OUT_DIR, 'run.sh'), runScript);
+  await Bun.write(join(outDir, 'run.sh'), runScript);
   if (process.platform !== 'win32') {
-    await Bun.$`chmod +x ${join(OUT_DIR, 'run.sh')}`;
+    await Bun.$`chmod +x ${join(outDir, 'run.sh')}`;
   }
-  console.log(`🚀 Runner script created: ${join(OUT_DIR, 'run.sh')}`);
+  console.log(`🚀 Runner script created: ${join(outDir, 'run.sh')}`);
 
-  // Create a Windows batch file
   const batchScript = `@echo off
 REM MangoStudio Runner for Windows
 REM Usage: run.bat [port] [platform]
@@ -385,15 +354,122 @@ cd /d "%EXECUTABLE_DIR%"
 "%EXECUTABLE%"
 `;
 
-  await Bun.write(join(OUT_DIR, 'run.bat'), batchScript);
-  console.log(`🚀 Windows runner script created: ${join(OUT_DIR, 'run.bat')}`);
+  await Bun.write(join(outDir, 'run.bat'), batchScript);
+  console.log(`🚀 Windows runner script created: ${join(outDir, 'run.bat')}`);
+}
+
+async function buildStandaloneBinary(options: BinaryBuildOptions): Promise<void> {
+  header('Build (binary)');
+
+  const targets = resolveBinaryTargets(options.onlyPlatform);
+  if (targets.length === 0) {
+    fatal(
+      `No platforms match filter: ${options.onlyPlatform}. Available platforms: ${ALL_BINARY_TARGETS.map((target) => target.arch).join(', ')}`
+    );
+  }
+
+  const buildTime = new Date().toISOString();
+  const outDir = join(ROOT_DIR, '.mango', 'out');
+  const apiSource = join(ROOT_DIR, 'apps/api/src/index.ts');
+  const frontendDist = join(ROOT_DIR, 'apps/frontend/dist');
+
+  mkdirSync(outDir, { recursive: true });
+
+  console.log(`📦 Building MangoStudio v${options.version}`);
+  console.log(`📅 Build time: ${buildTime}`);
+  console.log(`🎯 Build type: ${options.buildType}`);
+  console.log(`📁 Output directory: ${outDir}`);
+  console.log('---');
+
+  await buildFrontendSidecar(options.dryRun);
+
+  console.log(`🎯 Building executables for ${targets.length} platform(s)`);
+
+  const results = await Promise.all(
+    targets.map((target) =>
+      buildStandaloneTarget(target, options, { apiSource, buildTime, frontendDist, outDir })
+    )
+  );
+
+  const successCount = results.filter(Boolean).length;
+  const failedCount = results.length - successCount;
+
+  console.log('---');
+  console.log('📊 Build summary:');
+  console.log(`✅ ${successCount} platform(s) built successfully`);
+
+  if (failedCount > 0) {
+    console.log(`❌ ${failedCount} platform(s) failed`);
+    process.exit(1);
+  }
+
+  await writeStandaloneArtifacts(options, targets, buildTime, outDir);
 
   console.log('🎉 Build completed successfully!');
-  console.log(`📁 Output structure: ${OUT_DIR}/`);
+  console.log(`📁 Output structure: ${outDir}/`);
   console.log('📋 To run:');
   console.log('  Linux/macOS: ./.mango/out/run.sh');
   console.log('  Windows:     .mango\\out\\run.bat');
 }
 
-// Run the build
-await buildAll();
+const { workspaces, includeRoot, flags, values, positional, usedDefaultSelection } = parseArgs({
+  booleanFlags: ['--binary', '--production', '--development'],
+  valueFlags: ['--platform'],
+});
+
+assertNoUnexpectedArguments(positional);
+
+if (flags['--help']) {
+  printHelp();
+}
+
+const isBinaryBuild = flags['--binary'] ?? false;
+const isProductionBuild = flags['--production'] ?? false;
+const isDevelopmentBuild = flags['--development'] ?? false;
+const defaultBuildWorkspaces: WorkspaceName[] = ['frontend'];
+
+if (isProductionBuild && isDevelopmentBuild) {
+  fatal('Choose either `--production` or `--development`, not both.');
+}
+
+if (!isBinaryBuild && (isProductionBuild || isDevelopmentBuild || values['--platform'])) {
+  fatal('`--platform`, `--production`, and `--development` require `--binary`.');
+}
+
+if (isBinaryBuild) {
+  await buildStandaloneBinary({
+    buildType: isDevelopmentBuild ? 'development' : 'production',
+    dryRun: process.env.DRY_RUN === '1',
+    onlyPlatform: values['--platform'] ?? process.env.ONLY_PLATFORM,
+    version: process.env.VERSION || '0.0.1',
+  });
+  process.exit(0);
+}
+
+if (includeRoot) {
+  warn('Ignoring `--root` for workspace builds.');
+}
+
+const requestedWorkspaces = usedDefaultSelection ? defaultBuildWorkspaces : workspaces;
+const buildTargets = requestedWorkspaces.filter((workspace) =>
+  BUILDABLE_WORKSPACES.includes(workspace)
+);
+const skippedWorkspaces = requestedWorkspaces.filter(
+  (workspace) => !BUILDABLE_WORKSPACES.includes(workspace)
+);
+
+if (skippedWorkspaces.length > 0) {
+  warn(`Skipping workspaces without a build entrypoint: ${skippedWorkspaces.join(', ')}`);
+}
+
+if (buildTargets.length === 0) {
+  fatal('No build-capable workspace selected. Use `--frontend`, `--api`, or `--binary`.');
+}
+
+header('Build');
+
+const results: RunResult[] = await runParallel(
+  buildTargets.map((workspace) => () => runWorkspaceScript(workspace, 'build', { ifPresent: true }))
+);
+
+exitWithResults(results);
