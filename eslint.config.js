@@ -105,8 +105,10 @@ export default tseslint.config(
       'react/jsx-uses-react': 'off',
       'react/no-unescaped-entities': 'off',
       'react-hooks/exhaustive-deps': 'error',
-      // React Compiler rules from react-hooks v7 — disable until codebase is compiler-ready
-      'react-hooks/set-state-in-effect': 'off',
+      // React Compiler-adjacent rules from react-hooks v7.
+      // set-state-in-effect: warn — flags setState inside effects (prefer derived state or useMemo).
+      // refs/preserve-manual-memoization: kept off until codebase is compiler-ready.
+      'react-hooks/set-state-in-effect': 'warn',
       'react-hooks/refs': 'off',
       'react-hooks/preserve-manual-memoization': 'off',
       'react-hooks/incompatible-library': 'off',

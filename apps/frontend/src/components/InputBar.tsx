@@ -53,6 +53,8 @@ export function InputBar({
   useEffect(() => {
     if (referenceImage) {
       const url = URL.createObjectURL(referenceImage);
+      // TODO(react-compiler): URL lifecycle (createObjectURL/revokeObjectURL) requires useEffect.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setPreviewUrl(url);
       return () => URL.revokeObjectURL(url);
     } else {

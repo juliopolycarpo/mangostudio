@@ -17,9 +17,12 @@ export function useChats() {
   const chats = useMemo(() => chatsData || [], [chatsData]);
   const error = queryError ? queryError.message : null;
 
-  // Auto-select first chat if none selected
+  // Auto-select first chat if none selected.
+  // TODO(react-compiler): currentChatId is also mutated by createChat/delete, so it cannot be
+  // pure derived state. This useEffect+setState is intentional.
   useEffect(() => {
     if (chats.length > 0 && !currentChatId) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setCurrentChatId(chats[0].id);
     }
   }, [chats, currentChatId]);
