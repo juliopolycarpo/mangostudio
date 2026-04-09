@@ -3,7 +3,7 @@
  * Resolves the AI provider dynamically from the requested model.
  */
 
-import { Elysia, t } from 'elysia';
+import { type Elysia, t } from 'elysia';
 import '../services/providers'; // ensure all providers are registered
 import { getProviderForModel } from '../services/providers/registry';
 import { getUnifiedModelCatalog } from '../services/providers/catalog';

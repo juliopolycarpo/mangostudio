@@ -12,6 +12,7 @@ import {
 } from '../../../src/hooks/use-chats-query';
 import { useQueryClient } from '@tanstack/react-query';
 import type { Chat } from '@mangostudio/shared';
+import type * as ApiClient from '../../../src/lib/api-client';
 
 // vi.mock is hoisted to the top of the file by Vitest, so mock variables must
 // be declared with vi.hoisted() to avoid temporal dead zone errors.
@@ -33,7 +34,7 @@ const { mockPost, mockPut, mockDelete, mockChatsFn } = vi.hoisted(() => {
 vi.mock('../../../src/lib/api-client', () => ({
   client: {
     api: { chats: mockChatsFn },
-  } as unknown as typeof import('../../../src/lib/api-client'),
+  } as unknown as typeof ApiClient,
 }));
 
 function ok<T>(data: T) {

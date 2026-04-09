@@ -58,7 +58,7 @@ export const app = new Elysia()
     // Only log API and auth requests to avoid spamming frontend assets logs
     const url = new URL(request.url);
     if (url.pathname.startsWith('/api')) {
-      console.log(`[request] ${request.method} ${url.pathname}`);
+      console.warn(`[request] ${request.method} ${url.pathname}`);
     }
   })
   // Enable CORS for frontend requests

@@ -23,7 +23,7 @@ async function migrateToLatest(): Promise<void> {
 
   results?.forEach((it) => {
     if (it.status === 'Success') {
-      console.log(`[migrate] ✓ "${it.migrationName}" executed successfully`);
+      console.warn(`[migrate] ✓ "${it.migrationName}" executed successfully`);
     } else if (it.status === 'Error') {
       console.error(`[migrate] ✗ Failed to execute "${it.migrationName}"`);
     }
@@ -35,7 +35,7 @@ async function migrateToLatest(): Promise<void> {
     process.exit(1);
   }
 
-  console.log('[migrate] All migrations applied successfully');
+  console.warn('[migrate] All migrations applied successfully');
   await closeDb();
 }
 

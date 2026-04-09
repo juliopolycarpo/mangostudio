@@ -32,6 +32,7 @@ export default tseslint.config(
     },
     rules: {
       'no-undef': 'off',
+      'no-console': ['warn', { allow: ['warn', 'error'] }],
       '@typescript-eslint/no-unused-vars': [
         'error',
         { argsIgnorePattern: '^_', varsIgnorePattern: '^_' },
@@ -40,6 +41,18 @@ export default tseslint.config(
       '@typescript-eslint/explicit-function-return-type': 'off',
       '@typescript-eslint/no-empty-function': 'error',
       '@typescript-eslint/no-non-null-assertion': 'error',
+      '@typescript-eslint/consistent-type-imports': [
+        'error',
+        { prefer: 'type-imports', fixStyle: 'inline-type-imports' },
+      ],
+    },
+  },
+  // Semantic strictness pilot — API workspace only.
+  // Flags conditions that TypeScript can prove are always true/false.
+  {
+    files: ['apps/api/src/**/*.ts'],
+    rules: {
+      '@typescript-eslint/no-unnecessary-condition': 'warn',
     },
   },
   // Require explicit return types in API services, utilities, and shared code.
@@ -68,6 +81,13 @@ export default tseslint.config(
       ],
     },
   },
+  // Build scripts — console is the intended output mechanism
+  {
+    files: ['scripts/**/*.ts'],
+    rules: {
+      'no-console': 'off',
+    },
+  },
   // React rules — frontend only
   {
     files: ['apps/frontend/**/*.{ts,tsx}'],
@@ -85,8 +105,10 @@ export default tseslint.config(
       'react/jsx-uses-react': 'off',
       'react/no-unescaped-entities': 'off',
       'react-hooks/exhaustive-deps': 'error',
-      // React Compiler rules from react-hooks v7 — disable until codebase is compiler-ready
-      'react-hooks/set-state-in-effect': 'off',
+      // React Compiler-adjacent rules from react-hooks v7.
+      // set-state-in-effect: warn — flags setState inside effects (prefer derived state or useMemo).
+      // refs/preserve-manual-memoization: kept off until codebase is compiler-ready.
+      'react-hooks/set-state-in-effect': 'warn',
       'react-hooks/refs': 'off',
       'react-hooks/preserve-manual-memoization': 'off',
       'react-hooks/incompatible-library': 'off',

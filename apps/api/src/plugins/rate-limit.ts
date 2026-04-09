@@ -9,7 +9,7 @@
  * with a shared backend such as Redis.
  */
 
-import { Elysia } from 'elysia';
+import { type Elysia } from 'elysia';
 
 interface RateLimitConfig {
   /** Maximum number of requests per window (default: 100) */

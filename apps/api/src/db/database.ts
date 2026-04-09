@@ -35,7 +35,7 @@ export function getDb(): Kysely<Database> {
       dialect: new BunSqliteDialect({ database: sqlite }),
     });
 
-    console.log(`[db] Connected to SQLite at ${dbPath}`);
+    console.warn(`[db] Connected to SQLite at ${dbPath}`);
   }
   return dbInstance;
 }
@@ -47,6 +47,6 @@ export async function closeDb(): Promise<void> {
   if (dbInstance) {
     await dbInstance.destroy();
     dbInstance = null;
-    console.log('[db] Connection closed');
+    console.warn('[db] Connection closed');
   }
 }

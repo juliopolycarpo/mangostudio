@@ -52,7 +52,7 @@ export const geminiAliasRoutes = new Elysia()
         await deleteGeminiConnector(user?.id ?? '', params.id);
         await refreshGeminiModelCatalog(user?.id ?? '', 'secret-updated');
         invalidateUnifiedCatalog(user?.id ?? '');
-        console.log(`[settings] DEL connector ${params.id}`);
+        console.warn(`[settings] DEL connector ${params.id}`);
         return { success: true };
       } catch (error) {
         return handleSecretRouteError(error, set);

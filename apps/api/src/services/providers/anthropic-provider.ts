@@ -219,7 +219,10 @@ async function* streamAnthropicAgentTurn(req: AgentTurnRequest): AsyncIterable<A
     toolDefinitions: req.toolDefinitions ?? [],
     messages,
     thinkingConfig: thinkingEnabled
-      ? { type: 'enabled', budget_tokens: budgetMap[effort] ?? 2048 }
+      ? {
+          type: 'enabled',
+          budget_tokens: budgetMap[effort] ?? 2048,
+        }
       : undefined,
   });
 
@@ -292,7 +295,7 @@ async function* streamAnthropicAgentTurn(req: AgentTurnRequest): AsyncIterable<A
       const cu = extractCacheUsage(finalMsg.usage);
       if (cu.inputTokens > 0) providerReportedInputTokens = cu.inputTokens;
       if (cu.cachedTokens > 0 || cu.cacheCreationTokens > 0) {
-        console.log(
+        console.warn(
           `[prefix-cache][anthropic] read=${cu.cachedTokens} creation=${cu.cacheCreationTokens} total=${cu.inputTokens} tokens` +
             (cu.inputTokens > 0
               ? ` (${Math.round((cu.cachedTokens / cu.inputTokens) * 100)}% cache hit)`

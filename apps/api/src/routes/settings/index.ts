@@ -4,7 +4,7 @@
  * under the /settings group.
  */
 
-import { Elysia } from 'elysia';
+import { type Elysia } from 'elysia';
 import '../../services/providers'; // ensure all providers are registered
 import { connectorRoutes } from './connectors';
 import { modelRoutes } from './models';

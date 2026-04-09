@@ -53,6 +53,7 @@ export function InputBar({
   useEffect(() => {
     if (referenceImage) {
       const url = URL.createObjectURL(referenceImage);
+      // TODO(react-compiler): URL lifecycle (createObjectURL/revokeObjectURL) requires useEffect.
       setPreviewUrl(url);
       return () => URL.revokeObjectURL(url);
     } else {

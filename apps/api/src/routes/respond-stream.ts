@@ -4,7 +4,7 @@
  * Resolves the AI provider dynamically from the requested model.
  */
 
-import { Elysia, t } from 'elysia';
+import { type Elysia, t } from 'elysia';
 import '../services/providers'; // ensure all providers are registered
 import '../services/tools'; // ensure all builtins are registered
 import { getProviderForModel } from '../services/providers/registry';
@@ -244,7 +244,7 @@ export const respondStreamRoutes = (app: Elysia) =>
                       );
                       currentProviderState = null; // Force full replay
                     } else {
-                      console.log(
+                      console.warn(
                         `[continuation][valid] chatId=${chatId} provider=${provider.providerType} model=${model} mode=${envelope.mode}`
                       );
                     }
@@ -372,7 +372,7 @@ export const respondStreamRoutes = (app: Elysia) =>
                               });
                           }
                           if (resultEnvelope) {
-                            console.log(
+                            console.warn(
                               `[continuation][updated] chatId=${chatId} provider=${resultEnvelope.provider} mode=${resultEnvelope.mode} cursor=${resultEnvelope.cursor ? 'present' : 'none'}`
                             );
                           }
@@ -392,7 +392,7 @@ export const respondStreamRoutes = (app: Elysia) =>
                             contextLimitOverride: resultEnvelope?.context?.contextLimit,
                           });
 
-                          console.log(
+                          console.warn(
                             `[context][info] chatId=${chatId} provider=${provider.providerType} model=${model}` +
                               ` inputTokens=${snapshot.estimatedInputTokens} limit=${snapshot.contextLimit}` +
                               ` ratio=${snapshot.estimatedUsageRatio.toFixed(2)} mode=${displayMode}`
