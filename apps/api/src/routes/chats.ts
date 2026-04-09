@@ -69,20 +69,16 @@ export const chatRoutes = (app: Elysia) =>
             return { error: 'Unauthorized' };
           }
           const db = getDb();
-          const id = generateId();
-          const now = Date.now();
-          await db
-            .insertInto('chats')
-            .values({
-              id,
-              title: body.title,
-              createdAt: now,
-              updatedAt: now,
-              model: body.model ?? null,
-              userId: user.id,
-            })
-            .execute();
-          return { id };
+          const chat = {
+            id: generateId(),
+            title: body.title,
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+            model: body.model ?? null,
+            userId: user.id,
+          };
+          await db.insertInto('chats').values(chat).execute();
+          return chat;
         },
         {
           body: t.Object({

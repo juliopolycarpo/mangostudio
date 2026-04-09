@@ -40,9 +40,10 @@ export function useCreateChatMutation() {
     mutationFn: async (newChat: { title: string; model?: string }) => {
       const { data, error } = await client.api.chats.post(newChat);
       if (error) throw new Error(extractApiError(error.value));
-      return data;
+      return data as Chat;
     },
-    onSuccess: () => {
+    onSuccess: (chat) => {
+      queryClient.setQueryData(chatKeys.detail(chat.id), chat);
       void queryClient.invalidateQueries({ queryKey: chatKeys.lists() });
     },
   });
