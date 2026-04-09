@@ -17,6 +17,7 @@ import { getConfig } from '../../lib/config';
 import { existsSync } from 'fs';
 import { readTomlStringSections } from '../../lib/toml';
 import { parseStringArray } from '../../utils/json';
+import { maskSecret } from '../../utils/secrets';
 
 type FetchLike = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 
@@ -56,11 +57,6 @@ export class ProviderApiKeyMissingError extends Error {
     super(`No ${provider} API key is configured or enabled. Check your Connectors in Settings.`);
     this.name = 'ProviderApiKeyMissingError';
   }
-}
-
-function maskSecret(apiKey: string | null | undefined): string | undefined {
-  if (!apiKey) return undefined;
-  return `****...${apiKey.slice(-4)}`;
 }
 
 /**

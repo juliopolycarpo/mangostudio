@@ -16,6 +16,7 @@ import {
 import { bunSecretStore, type SecretStore } from '../secret-store/store';
 import { createProviderSecretService } from '../providers/secret-service';
 import { isPlaceholderConfigSecretValue } from '../providers/secret-service';
+import { maskSecret } from '../../utils/secrets';
 import { join, dirname } from 'path';
 import { getMangoDir } from '../../lib/config';
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
@@ -94,13 +95,6 @@ const geminiProviderSecret = createProviderSecretService({
     throw new GeminiValidationUnavailableError();
   },
 });
-
-function maskSecret(apiKey: string | null | undefined): string | undefined {
-  if (!apiKey) {
-    return undefined;
-  }
-  return `****...${apiKey.slice(-4)}`;
-}
 
 function getEnvFilePath(): string {
   return join(getMangoDir(), '.env');
