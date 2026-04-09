@@ -64,10 +64,5 @@ Useful docs:
 
 ## Validation
 
-- Any change: `bun run check`
-- Frontend-local change: `bun run --filter @mangostudio/frontend test:unit`
-- API-local change: `bun run --filter @mangostudio/api test:unit`
-- Shared-local change: `bun run --filter @mangostudio/shared test:unit`
-- Route or integration flow change: run the relevant `test:integration`
-- Auth flow change: `bun run test --e2e`
-- Broad or cross-workspace change: `bun run check && bun run test` (note: e2e is opt-in, use `--e2e` explicitly)
+After **every** change, run `bun run check`. If it fails, run `bun run fix` and re-check.
+Before final handoff, run `bun run check && bun run test` to validate all workspaces.
