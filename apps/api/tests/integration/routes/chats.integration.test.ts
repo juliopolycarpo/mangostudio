@@ -156,7 +156,11 @@ describe('DELETE /chats/:id', () => {
     const body = (await response.json()) as Record<string, unknown>;
     expect(body).toEqual({ success: true });
 
-    const row = await db.selectFrom('chats').selectAll().where('id', '=', chatId).executeTakeFirst();
+    const row = await db
+      .selectFrom('chats')
+      .selectAll()
+      .where('id', '=', chatId)
+      .executeTakeFirst();
     expect(row).toBeUndefined();
   });
 
@@ -217,7 +221,11 @@ describe('PUT /chats/:id', () => {
     const body = (await response.json()) as Record<string, unknown>;
     expect(body).toEqual({ success: true });
 
-    const row = await db.selectFrom('chats').selectAll().where('id', '=', chatId).executeTakeFirst();
+    const row = await db
+      .selectFrom('chats')
+      .selectAll()
+      .where('id', '=', chatId)
+      .executeTakeFirst();
     expect(row?.title).toBe('Updated Title');
   });
 
