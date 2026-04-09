@@ -14,7 +14,7 @@ function printHelp(): never {
   console.log(`Usage: bun run test [lane flags]
 
 Runs the selected test lanes across the repository.
-Default lane selection: --all
+Default: unit + integration (e2e is opt-in via --e2e or --all)
 
 Lane flags:
   --unit
@@ -55,7 +55,8 @@ if (unexpectedArgs.length > 0) {
 const hasExplicitLaneSelection = runUnitLane || runIntegrationLane || runE2ELane || runAllLanes;
 const shouldRunUnit = runAllLanes || !hasExplicitLaneSelection || runUnitLane;
 const shouldRunIntegration = runAllLanes || !hasExplicitLaneSelection || runIntegrationLane;
-const shouldRunE2E = runAllLanes || !hasExplicitLaneSelection || runE2ELane;
+// e2e is opt-in only (--e2e or --all); excluded from the implicit default run
+const shouldRunE2E = runAllLanes || runE2ELane;
 
 header('Test');
 
