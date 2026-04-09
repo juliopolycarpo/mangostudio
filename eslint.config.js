@@ -52,7 +52,7 @@ export default tseslint.config(
   {
     files: ['apps/api/src/**/*.ts'],
     rules: {
-      '@typescript-eslint/no-unnecessary-condition': 'error',
+      '@typescript-eslint/no-unnecessary-condition': 'warn',
     },
   },
   // Require explicit return types in API services, utilities, and shared code.

@@ -22,7 +22,6 @@ export function useChats() {
   // pure derived state. This useEffect+setState is intentional.
   useEffect(() => {
     if (chats.length > 0 && !currentChatId) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       setCurrentChatId(chats[0].id);
     }
   }, [chats, currentChatId]);

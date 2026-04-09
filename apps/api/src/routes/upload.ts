@@ -67,7 +67,6 @@ export const uploadRoutes = (app: Elysia) =>
             'image/heif': ['.heic', '.heif'],
           };
 
-          // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
           const expectedExts = expectedExtensions[fileType.mime] || [];
           if (expectedExts.length > 0 && !expectedExts.includes(ext.toLowerCase())) {
             console.warn(

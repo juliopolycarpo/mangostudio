@@ -138,7 +138,7 @@ export function createGeminiSecretService(
       if (!existsSync(configPath)) return;
 
       const parsed = readTomlStringSections(configPath);
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+
       const tomlKeys = parsed.gemini_api_keys ?? {};
 
       const currentMetadata = await listMetadata(GEMINI_PROVIDER, userId);
@@ -285,7 +285,7 @@ export function createGeminiSecretService(
           const configPath = resolvedTomlFilePath;
           mkdirSync(dirname(configPath), { recursive: true });
           const config = readTomlStringSections(configPath);
-          // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+
           config.gemini_api_keys ??= {};
           config.gemini_api_keys[body.name] = apiKey;
           writeFileSync(configPath, stringifyToml(config));
@@ -370,7 +370,7 @@ ${envVar}="${apiKey}"
           const configPath = resolvedTomlFilePath;
           if (existsSync(configPath)) {
             const config = readTomlStringSections(configPath);
-            // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+
             if (config.gemini_api_keys) {
               delete config.gemini_api_keys[metadata.name];
               writeFileSync(configPath, stringifyToml(config));

@@ -620,7 +620,6 @@ async function* streamAgentTurnWithResponsesAPI(
             type: 'tool_call_completed',
             callId: mapped.callId,
             name: mapped.name,
-            // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
             arguments: ev.arguments ?? '',
           };
         }

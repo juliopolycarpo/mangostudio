@@ -36,7 +36,6 @@ export interface AnthropicCacheUsage {
 /** Extract prompt-cache stats from an Anthropic Message.usage object. */
 export function extractCacheUsage(usage: Anthropic.Usage): AnthropicCacheUsage {
   return {
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
     inputTokens: usage.input_tokens ?? 0,
     cachedTokens: usage.cache_read_input_tokens ?? 0,
     cacheCreationTokens: usage.cache_creation_input_tokens ?? 0,
