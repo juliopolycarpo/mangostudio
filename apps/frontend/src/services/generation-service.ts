@@ -59,47 +59,27 @@ export async function respondText(request: RespondTextRequest): Promise<Generate
   return data as unknown as GenerateTextResponse;
 }
 
-/** A single event received from the SSE streaming endpoint. */
-export interface StreamChunk {
-  type?:
-    | 'text'
-    | 'thinking'
-    | 'thinking_start'
-    | 'tool_call_started'
-    | 'tool_call_completed'
-    | 'tool_result'
-    | 'context_info'
-    | 'fallback_notice'
-    | 'system_event'
-    | 'done'
-    | 'error';
-  // text / thinking
-  text?: string;
-  // tool call events
-  callId?: string;
-  name?: string;
-  arguments?: string;
-  result?: unknown;
-  isError?: boolean;
-  // context_info event fields
-  estimatedInputTokens?: number;
-  contextLimit?: number;
-  estimatedUsageRatio?: number;
-  mode?: 'stateful' | 'replay' | 'compacted' | 'degraded';
-  severity?: 'normal' | 'info' | 'warning' | 'danger' | 'critical';
-  // fallback_notice event fields
-  from?: string;
-  to?: string;
-  reason?: string;
-  // system_event fields
-  event?: string;
-  detail?: string;
-  // terminal fields
-  done: boolean;
-  messageId?: string;
-  generationTime?: string;
-  error?: string;
-}
+/** A single event received from the SSE streaming endpoint — tagged discriminated union. */
+export type StreamChunk =
+  | { type: 'thinking_start'; done: false }
+  | { type: 'thinking'; text: string; done: false }
+  | { type: 'text'; text: string; done: false }
+  | { type: 'tool_call_started'; callId: string; name: string; done: false }
+  | { type: 'tool_call_completed'; callId: string; name: string; arguments: string; done: false }
+  | { type: 'tool_result'; callId: string; result: unknown; isError?: boolean; done: false }
+  | {
+      type: 'context_info';
+      estimatedInputTokens: number;
+      contextLimit: number;
+      estimatedUsageRatio: number;
+      mode: 'stateful' | 'replay' | 'compacted' | 'degraded';
+      severity: 'normal' | 'info' | 'warning' | 'danger' | 'critical';
+      done: false;
+    }
+  | { type: 'fallback_notice'; from: string; to: string; reason: string; done: false }
+  | { type: 'system_event'; event: string; detail?: string; done: false }
+  | { type: 'done'; done: true; messageId?: string; generationTime?: string }
+  | { type: 'error'; error: string; done: true };
 
 /**
  * Calls POST /api/respond/stream and invokes onChunk for each SSE event.

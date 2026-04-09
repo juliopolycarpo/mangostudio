@@ -552,7 +552,7 @@ export const respondStreamRoutes = (app: Elysia) =>
                       // Backward compat: providers not yet migrated emit no type field
                       legacyInThinkingSegment = false;
                       fullText += chunk.text;
-                      controller.enqueue(sseEvent({ text: chunk.text, done: false }));
+                      controller.enqueue(sseEvent({ type: 'text', text: chunk.text, done: false }));
                     }
                   }
                 } else {
@@ -570,7 +570,7 @@ export const respondStreamRoutes = (app: Elysia) =>
                     aborted = true;
                   } else {
                     fullText = result.text;
-                    controller.enqueue(sseEvent({ text: fullText, done: false }));
+                    controller.enqueue(sseEvent({ type: 'text', text: fullText, done: false }));
                   }
                 }
 
@@ -641,7 +641,9 @@ export const respondStreamRoutes = (app: Elysia) =>
                     .where('updatedAt', '<=', aiTimestamp)
                     .execute();
 
-                  controller.enqueue(sseEvent({ done: true, messageId: aiMsgId, generationTime }));
+                  controller.enqueue(
+                    sseEvent({ type: 'done', done: true, messageId: aiMsgId, generationTime })
+                  );
                 }
               } catch (error: unknown) {
                 if (signal.aborted) {
@@ -674,7 +676,7 @@ export const respondStreamRoutes = (app: Elysia) =>
                   // Best-effort persistence; don't mask the original error
                 }
 
-                const errorEvent: SSEErrorEvent = { error: message, done: true };
+                const errorEvent: SSEErrorEvent = { type: 'error', error: message, done: true };
                 controller.enqueue(sseEvent(errorEvent));
               } finally {
                 controller.close();

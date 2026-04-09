@@ -1,14 +1,14 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { client } from '../lib/api-client';
 import { extractApiError } from '../lib/utils';
-import type { Chat } from '@mangostudio/shared';
+import type { Chat, UpdateChatBody } from '@mangostudio/shared';
 import type { ContextInfo } from './use-text-chat';
 
 /** Eden 1.4.x creates a union type for dynamic chat segments that have both direct handlers
  * (put/delete) and sub-resources (messages). Casting through `unknown` to this interface
  * resolves the union without propagating `any`. */
 type ChatByIdRoute = {
-  put: (body: Partial<Chat>) => Promise<{ data: Chat | null; error: { value: unknown } | null }>;
+  put: (body: UpdateChatBody) => Promise<{ data: Chat | null; error: { value: unknown } | null }>;
   delete: () => Promise<{ data: null; error: { value: unknown } | null }>;
 };
 
@@ -51,7 +51,7 @@ export function useCreateChatMutation() {
 export function useUpdateChatMutation() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async ({ id, updates }: { id: string; updates: Partial<Chat> }) => {
+    mutationFn: async ({ id, updates }: { id: string; updates: UpdateChatBody }) => {
       const { data, error } = await (
         (client.api.chats as unknown as Record<string, unknown>)[id] as ChatByIdRoute
       ).put(updates);
