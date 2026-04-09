@@ -15,7 +15,7 @@
     "lint:fix": "eslint src tests --fix --max-warnings 0",
     "typecheck": "tsc --noEmit",
     "fix": "bun run lint:fix && bun run format",
-    "fix:check": "bun run lint && bun run format:check",
+    "fix:check": "bun run lint && bun run format:check && bun run typecheck",
     "format": "prettier --ignore-path ../../.prettierignore --write 'src/**/*.{ts,json}' 'tests/**/*.ts'",
     "format:check": "prettier --ignore-path ../../.prettierignore --check 'src/**/*.{ts,json}' 'tests/**/*.ts'",
     "migrate": "bun run src/db/migrate.ts",

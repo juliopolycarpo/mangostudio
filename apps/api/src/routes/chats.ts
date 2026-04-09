@@ -69,20 +69,16 @@ export const chatRoutes = (app: Elysia) =>
             return { error: 'Unauthorized' };
           }
           const db = getDb();
-          const id = generateId();
-          const now = Date.now();
-          await db
-            .insertInto('chats')
-            .values({
-              id,
-              title: body.title,
-              createdAt: now,
-              updatedAt: now,
-              model: body.model ?? null,
-              userId: user.id,
-            })
-            .execute();
-          return { id };
+          const chat = {
+            id: generateId(),
+            title: body.title,
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+            model: body.model ?? null,
+            userId: user.id,
+          };
+          await db.insertInto('chats').values(chat).execute();
+          return chat;
         },
         {
           body: t.Object({
@@ -159,7 +155,7 @@ export const chatRoutes = (app: Elysia) =>
 
       /** Get messages for a specific chat with ownership verification and cursor pagination. */
       .get(
-        '/:chatId/messages',
+        '/:id/messages',
         async ({ params, query, user, set }) => {
           if (!user?.id) {
             set.status = 401;
@@ -168,7 +164,7 @@ export const chatRoutes = (app: Elysia) =>
 
           const db = getDb();
 
-          if (!(await verifyChatOwnership(params.chatId, user.id, db))) {
+          if (!(await verifyChatOwnership(params.id, user.id, db))) {
             set.status = 404;
             return { error: 'Chat not found' };
           }
@@ -178,7 +174,7 @@ export const chatRoutes = (app: Elysia) =>
           let q = db
             .selectFrom('messages')
             .selectAll()
-            .where('chatId', '=', params.chatId)
+            .where('chatId', '=', params.id)
             .orderBy('timestamp', 'asc');
 
           if (query.cursor) {
@@ -202,7 +198,7 @@ export const chatRoutes = (app: Elysia) =>
             const lastAiRow = await db
               .selectFrom('messages')
               .select('providerState')
-              .where('chatId', '=', params.chatId)
+              .where('chatId', '=', params.id)
               .where('role', '=', 'ai')
               .where('providerState', 'is not', null)
               .orderBy('timestamp', 'desc')
@@ -219,7 +215,7 @@ export const chatRoutes = (app: Elysia) =>
           };
         },
         {
-          params: t.Object({ chatId: t.String() }),
+          params: t.Object({ id: t.String() }),
           query: t.Object({
             limit: t.Optional(t.String()),
             cursor: t.Optional(t.String()),

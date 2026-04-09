@@ -1,16 +1,8 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { client } from '../lib/api-client';
 import { extractApiError } from '../lib/utils';
-import type { Chat } from '@mangostudio/shared';
+import type { Chat, UpdateChatBody } from '@mangostudio/shared';
 import type { ContextInfo } from './use-text-chat';
-
-/** Eden 1.4.x creates a union type for dynamic chat segments that have both direct handlers
- * (put/delete) and sub-resources (messages). Casting through `unknown` to this interface
- * resolves the union without propagating `any`. */
-type ChatByIdRoute = {
-  put: (body: Partial<Chat>) => Promise<{ data: Chat | null; error: { value: unknown } | null }>;
-  delete: () => Promise<{ data: null; error: { value: unknown } | null }>;
-};
 
 /** Chat with optional context snapshot from persisted provider state. */
 export type ChatWithContext = Chat & { contextInfo?: ContextInfo | null };
@@ -40,9 +32,10 @@ export function useCreateChatMutation() {
     mutationFn: async (newChat: { title: string; model?: string }) => {
       const { data, error } = await client.api.chats.post(newChat);
       if (error) throw new Error(extractApiError(error.value));
-      return data;
+      return data as Chat;
     },
-    onSuccess: () => {
+    onSuccess: (chat) => {
+      queryClient.setQueryData(chatKeys.detail(chat.id), chat);
       void queryClient.invalidateQueries({ queryKey: chatKeys.lists() });
     },
   });
@@ -51,10 +44,8 @@ export function useCreateChatMutation() {
 export function useUpdateChatMutation() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async ({ id, updates }: { id: string; updates: Partial<Chat> }) => {
-      const { data, error } = await (
-        (client.api.chats as unknown as Record<string, unknown>)[id] as ChatByIdRoute
-      ).put(updates);
+    mutationFn: async ({ id, updates }: { id: string; updates: UpdateChatBody }) => {
+      const { data, error } = await client.api.chats({ id }).put(updates);
       if (error) throw new Error(extractApiError(error.value));
       return data;
     },
@@ -69,9 +60,7 @@ export function useDeleteChatMutation() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (id: string) => {
-      const { data, error } = await (
-        (client.api.chats as unknown as Record<string, unknown>)[id] as ChatByIdRoute
-      ).delete();
+      const { data, error } = await client.api.chats({ id }).delete();
       if (error) throw new Error(extractApiError(error.value));
       return data;
     },

@@ -124,110 +124,107 @@ export function useTextChat({
             reasoningEffort,
           },
           (chunk) => {
-            if (chunk.error) {
-              updateOptimisticMessage(activeChatId, optimisticAiMsgId, {
-                isGenerating: false,
-                text: accumulatedText || chunk.error,
-                parts: [...accumulatedParts, { type: 'error', text: chunk.error }],
-              });
-              return;
-            }
-
-            const chunkType = chunk.type ?? 'text';
-
-            if (chunkType === 'thinking_start') {
-              // Start a new thinking segment — push placeholder into parts
-              thinkingSegments.push('');
-              currentThinkingIdx = thinkingSegments.length - 1;
-              const thinkingPart: MessagePart = { type: 'thinking', text: '' };
-              accumulatedParts = [...accumulatedParts, thinkingPart];
-              updateOptimisticMessage(activeChatId, optimisticAiMsgId, {
-                parts: [...accumulatedParts],
-              });
-            } else if (chunkType === 'thinking' && chunk.text) {
-              if (currentThinkingIdx < 0) {
-                // Fallback: no thinking_start received (legacy API) — create segment implicitly
+            switch (chunk.type) {
+              case 'error':
+                updateOptimisticMessage(activeChatId, optimisticAiMsgId, {
+                  isGenerating: false,
+                  text: accumulatedText || chunk.error,
+                  parts: [...accumulatedParts, { type: 'error', text: chunk.error }],
+                });
+                break;
+              case 'thinking_start':
                 thinkingSegments.push('');
                 currentThinkingIdx = thinkingSegments.length - 1;
                 accumulatedParts = [...accumulatedParts, { type: 'thinking', text: '' }];
+                updateOptimisticMessage(activeChatId, optimisticAiMsgId, {
+                  parts: accumulatedParts,
+                });
+                break;
+              case 'thinking': {
+                if (currentThinkingIdx < 0) {
+                  // Fallback: no thinking_start received (legacy API) — create segment implicitly
+                  thinkingSegments.push('');
+                  currentThinkingIdx = thinkingSegments.length - 1;
+                  accumulatedParts = [...accumulatedParts, { type: 'thinking', text: '' }];
+                }
+                thinkingSegments[currentThinkingIdx] += chunk.text;
+                let foundLast = false;
+                accumulatedParts = accumulatedParts
+                  .slice()
+                  .reverse()
+                  .map((p) => {
+                    if (!foundLast && p.type === 'thinking') {
+                      foundLast = true;
+                      return {
+                        type: 'thinking' as const,
+                        text: thinkingSegments[currentThinkingIdx],
+                      };
+                    }
+                    return p;
+                  })
+                  .reverse();
+                updateOptimisticMessage(activeChatId, optimisticAiMsgId, {
+                  parts: accumulatedParts,
+                });
+                break;
               }
-              thinkingSegments[currentThinkingIdx] += chunk.text;
-              // Update the last thinking part in accumulatedParts (current segment)
-              let foundLast = false;
-              accumulatedParts = accumulatedParts
-                .slice()
-                .reverse()
-                .map((p) => {
-                  if (!foundLast && p.type === 'thinking') {
-                    foundLast = true;
-                    return {
-                      type: 'thinking' as const,
-                      text: thinkingSegments[currentThinkingIdx],
-                    };
-                  }
-                  return p;
-                })
-                .reverse();
-              updateOptimisticMessage(activeChatId, optimisticAiMsgId, {
-                parts: [...accumulatedParts],
-              });
-            } else if (chunkType === 'text' && !chunk.done && chunk.text) {
-              currentThinkingIdx = -1;
-              accumulatedText += chunk.text;
-              const textPart: MessagePart = { type: 'text', text: accumulatedText };
-              accumulatedParts = [...accumulatedParts.filter((p) => p.type !== 'text'), textPart];
-              updateOptimisticMessage(activeChatId, optimisticAiMsgId, {
-                text: accumulatedText,
-                parts: [...accumulatedParts],
-              });
-            } else if (chunkType === 'tool_call_started' && chunk.callId) {
-              currentThinkingIdx = -1;
-              // Add a pending tool_call part for optimistic UI
-              const toolCallPart: MessagePart = {
-                type: 'tool_call',
-                toolCallId: chunk.callId,
-                name: chunk.name ?? '',
-                args: {},
-              };
-              accumulatedParts = [...accumulatedParts, toolCallPart];
-              updateOptimisticMessage(activeChatId, optimisticAiMsgId, {
-                parts: [...accumulatedParts],
-              });
-            } else if (chunkType === 'tool_call_completed' && chunk.callId) {
-              // Update the args on the existing tool_call part
-              let parsedArgs: Record<string, unknown> = {};
-              try {
-                parsedArgs = JSON.parse(chunk.arguments ?? '{}') as Record<string, unknown>;
-              } catch {
-                // Keep empty args
+              case 'text':
+                currentThinkingIdx = -1;
+                accumulatedText += chunk.text;
+                accumulatedParts = [
+                  ...accumulatedParts.filter((p) => p.type !== 'text'),
+                  { type: 'text', text: accumulatedText },
+                ];
+                updateOptimisticMessage(activeChatId, optimisticAiMsgId, {
+                  text: accumulatedText,
+                  parts: accumulatedParts,
+                });
+                break;
+              case 'tool_call_started': {
+                currentThinkingIdx = -1;
+                const toolCallPart: MessagePart = {
+                  type: 'tool_call',
+                  toolCallId: chunk.callId,
+                  name: chunk.name,
+                  args: {},
+                };
+                accumulatedParts = [...accumulatedParts, toolCallPart];
+                updateOptimisticMessage(activeChatId, optimisticAiMsgId, {
+                  parts: accumulatedParts,
+                });
+                break;
               }
-              accumulatedParts = accumulatedParts.map((p) =>
-                p.type === 'tool_call' && p.toolCallId === chunk.callId
-                  ? { ...p, args: parsedArgs }
-                  : p
-              );
-              updateOptimisticMessage(activeChatId, optimisticAiMsgId, {
-                parts: [...accumulatedParts],
-              });
-            } else if (chunkType === 'tool_result' && chunk.callId) {
-              const resultPart: MessagePart = {
-                type: 'tool_result',
-                toolCallId: chunk.callId,
-                content: JSON.stringify(chunk.result),
-                isError: chunk.isError,
-              };
-              accumulatedParts = [...accumulatedParts, resultPart];
-              updateOptimisticMessage(activeChatId, optimisticAiMsgId, {
-                parts: [...accumulatedParts],
-              });
-            } else if (chunkType === 'context_info') {
-              if (
-                chunk.estimatedInputTokens != null &&
-                chunk.contextLimit != null &&
-                chunk.estimatedUsageRatio != null &&
-                chunk.mode != null &&
-                chunk.severity != null
-              ) {
+              case 'tool_call_completed': {
+                let parsedArgs: Record<string, unknown> = {};
+                try {
+                  parsedArgs = JSON.parse(chunk.arguments) as Record<string, unknown>;
+                } catch {
+                  // Keep empty args
+                }
+                accumulatedParts = accumulatedParts.map((p) =>
+                  p.type === 'tool_call' && p.toolCallId === chunk.callId
+                    ? { ...p, args: parsedArgs }
+                    : p
+                );
+                updateOptimisticMessage(activeChatId, optimisticAiMsgId, {
+                  parts: accumulatedParts,
+                });
+                break;
+              }
+              case 'tool_result': {
+                const resultPart: MessagePart = {
+                  type: 'tool_result',
+                  toolCallId: chunk.callId,
+                  content: JSON.stringify(chunk.result),
+                  isError: chunk.isError,
+                };
+                accumulatedParts = [...accumulatedParts, resultPart];
+                updateOptimisticMessage(activeChatId, optimisticAiMsgId, {
+                  parts: accumulatedParts,
+                });
+                break;
+              }
+              case 'context_info': {
                 const info: ContextInfo = {
                   estimatedInputTokens: chunk.estimatedInputTokens,
                   contextLimit: chunk.contextLimit,
@@ -236,35 +233,35 @@ export function useTextChat({
                   severity: chunk.severity,
                 };
                 setContextInfo(info);
-                if (activeChatId) {
-                  contextCacheRef.current.set(activeChatId, info);
-                  setCacheVersion((v) => v + 1);
-                }
+                contextCacheRef.current.set(activeChatId, info);
+                setCacheVersion((v) => v + 1);
+                break;
               }
-            } else if (chunkType === 'fallback_notice') {
-              if (chunk.from != null && chunk.to != null && chunk.reason != null) {
-                setFallbackNotice({
-                  from: chunk.from,
-                  to: chunk.to,
-                  reason: chunk.reason,
+              case 'fallback_notice':
+                setFallbackNotice({ from: chunk.from, to: chunk.to, reason: chunk.reason });
+                break;
+              case 'system_event': {
+                accumulatedParts = [
+                  ...accumulatedParts,
+                  { type: 'system_event', event: chunk.event, detail: chunk.detail },
+                ];
+                updateOptimisticMessage(activeChatId, optimisticAiMsgId, {
+                  parts: accumulatedParts,
                 });
+                break;
               }
-            } else if (chunkType === 'system_event' && chunk.event) {
-              accumulatedParts.push({
-                type: 'system_event',
-                event: chunk.event,
-                detail: chunk.detail,
-              });
-              updateOptimisticMessage(activeChatId, optimisticAiMsgId, {
-                parts: [...accumulatedParts],
-              });
-            } else if (chunk.done) {
-              updateOptimisticMessage(activeChatId, optimisticAiMsgId, {
-                isGenerating: false,
-                text: accumulatedText,
-                parts: [...accumulatedParts],
-                generationTime: chunk.generationTime,
-              });
+              case 'done':
+                updateOptimisticMessage(activeChatId, optimisticAiMsgId, {
+                  isGenerating: false,
+                  text: accumulatedText,
+                  parts: [...accumulatedParts],
+                  generationTime: chunk.generationTime,
+                });
+                break;
+              default: {
+                const _exhaustive: never = chunk;
+                return _exhaustive;
+              }
             }
           },
           controller.signal
