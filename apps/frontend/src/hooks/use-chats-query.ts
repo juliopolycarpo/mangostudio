@@ -4,14 +4,6 @@ import { extractApiError } from '../lib/utils';
 import type { Chat, UpdateChatBody } from '@mangostudio/shared';
 import type { ContextInfo } from './use-text-chat';
 
-/** Eden 1.4.x creates a union type for dynamic chat segments that have both direct handlers
- * (put/delete) and sub-resources (messages). Casting through `unknown` to this interface
- * resolves the union without propagating `any`. */
-type ChatByIdRoute = {
-  put: (body: UpdateChatBody) => Promise<{ data: Chat | null; error: { value: unknown } | null }>;
-  delete: () => Promise<{ data: null; error: { value: unknown } | null }>;
-};
-
 /** Chat with optional context snapshot from persisted provider state. */
 export type ChatWithContext = Chat & { contextInfo?: ContextInfo | null };
 
@@ -53,9 +45,7 @@ export function useUpdateChatMutation() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async ({ id, updates }: { id: string; updates: UpdateChatBody }) => {
-      const { data, error } = await (
-        (client.api.chats as unknown as Record<string, unknown>)[id] as ChatByIdRoute
-      ).put(updates);
+      const { data, error } = await client.api.chats({ id }).put(updates);
       if (error) throw new Error(extractApiError(error.value));
       return data;
     },
@@ -70,9 +60,7 @@ export function useDeleteChatMutation() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (id: string) => {
-      const { data, error } = await (
-        (client.api.chats as unknown as Record<string, unknown>)[id] as ChatByIdRoute
-      ).delete();
+      const { data, error } = await client.api.chats({ id }).delete();
       if (error) throw new Error(extractApiError(error.value));
       return data;
     },
