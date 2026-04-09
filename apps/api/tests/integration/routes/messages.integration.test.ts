@@ -179,4 +179,116 @@ describe('GET /messages/images', () => {
     const response = await app.handle(new Request('http://localhost/messages/images'));
     expect(response.status).toBe(401);
   });
+
+  it('returns gallery items and nextCursor for authenticated user', async () => {
+    const db = getDb();
+    const chatId = 'gallery-chat-1';
+    await db
+      .insertInto('chats')
+      .values({
+        id: chatId,
+        title: 'Gallery Chat',
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        model: null,
+        userId: TEST_USER.id,
+      })
+      .onConflict((oc) => oc.doNothing())
+      .execute();
+
+    const now = Date.now();
+    await db
+      .insertInto('messages')
+      .values({
+        id: 'gallery-msg-1',
+        chatId,
+        role: 'ai',
+        text: '',
+        imageUrl: '/uploads/sample.png',
+        timestamp: now,
+        isGenerating: 0,
+        interactionMode: 'image',
+      })
+      .onConflict((oc) => oc.doNothing())
+      .execute();
+
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, messageRoutes);
+    restoreAuth = restore;
+
+    const response = await app.handle(new Request('http://localhost/messages/images?limit=50'));
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { items: unknown[]; nextCursor: string | null };
+    expect(Array.isArray(body.items)).toBe(true);
+    expect(body).toHaveProperty('nextCursor');
+  });
+});
+
+describe('PUT /messages/:id', () => {
+  it('returns 401 when not authenticated', async () => {
+    const app = createApiTestApp(messageRoutes);
+    const response = await app.handle(
+      new Request('http://localhost/messages/some-id', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: 'Updated' }),
+      })
+    );
+    expect(response.status).toBe(401);
+  });
+
+  it('returns 404 when message does not exist or belong to user', async () => {
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, messageRoutes);
+    restoreAuth = restore;
+
+    const response = await app.handle(
+      new Request('http://localhost/messages/nonexistent-msg', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: 'Updated' }),
+      })
+    );
+
+    expect(response.status).toBe(404);
+  });
+
+  it('updates a message and returns success', async () => {
+    const db = getDb();
+    const msgId = `update-msg-${Date.now()}`;
+
+    await db
+      .insertInto('messages')
+      .values({
+        id: msgId,
+        chatId: 'chat-1',
+        role: 'user',
+        text: 'Original text',
+        timestamp: Date.now(),
+        isGenerating: 0,
+        interactionMode: 'chat',
+      })
+      .execute();
+
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, messageRoutes);
+    restoreAuth = restore;
+
+    const response = await app.handle(
+      new Request(`http://localhost/messages/${msgId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: 'Updated text' }),
+      })
+    );
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as Record<string, unknown>;
+    expect(body).toEqual({ success: true });
+
+    const row = await db
+      .selectFrom('messages')
+      .selectAll()
+      .where('id', '=', msgId)
+      .executeTakeFirst();
+    expect(row?.text).toBe('Updated text');
+  });
 });
