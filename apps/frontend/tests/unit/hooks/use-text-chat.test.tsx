@@ -66,7 +66,7 @@ describe('useTextChat — thinking segment tracking', () => {
       makeStreamFn([
         { type: 'thinking_start', done: false },
         { type: 'thinking', text: 'initial thought', done: false },
-        { done: true, generationTime: '1.0s' },
+        { type: 'done', done: true, generationTime: '1.0s' },
       ]) as unknown as typeof respondTextStream
     );
 
@@ -99,7 +99,7 @@ describe('useTextChat — thinking segment tracking', () => {
       makeStreamFn([
         { type: 'thinking', text: 'part1 ', done: false },
         { type: 'thinking', text: 'part2', done: false },
-        { done: true, generationTime: '1.0s' },
+        { type: 'done', done: true, generationTime: '1.0s' },
       ]) as unknown as typeof respondTextStream
     );
 
@@ -138,7 +138,6 @@ describe('useTextChat — thinking segment tracking', () => {
         {
           type: 'tool_result',
           callId: 'c1',
-          name: 'search',
           result: {},
           isError: false,
           done: false,
@@ -146,7 +145,7 @@ describe('useTextChat — thinking segment tracking', () => {
         { type: 'thinking_start', done: false },
         { type: 'thinking', text: 'after tool', done: false },
         { type: 'text', text: 'answer', done: false },
-        { done: true, generationTime: '2.0s' },
+        { type: 'done', done: true, generationTime: '2.0s' },
       ]) as unknown as typeof respondTextStream
     );
 
