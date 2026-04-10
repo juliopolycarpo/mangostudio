@@ -1,5 +1,7 @@
 import { type WorkspaceName, ALL_WORKSPACE_NAMES, WORKSPACES, ROOT_DIR } from './config';
 
+const SCRIPT_START = performance.now();
+
 // ── ANSI colors ──
 
 const RESET = '\x1b[0m';
@@ -180,6 +182,8 @@ export function printSummary(results: RunResult[]): void {
     const time = `${DIM}${r.duration}ms${RESET}`;
     console.log(`  ${icon}  ${r.label}  ${time}`);
   }
+  const total = Math.round(performance.now() - SCRIPT_START);
+  console.log(`\n  ${DIM}Total: ${total}ms${RESET}`);
 }
 
 export function exitWithResults(results: RunResult[]): never {
