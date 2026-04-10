@@ -58,6 +58,7 @@ Binary flags:
   --platform <id>  Limit binary output to one target (example: linux-x64)
   --production     Use production binary settings (default)
   --development    Use development binary settings
+  --dry-run        Preview the build without writing artifacts
   --help           Show this help message`);
   process.exit(0);
 }
@@ -413,7 +414,7 @@ async function buildStandaloneBinary(options: BinaryBuildOptions): Promise<void>
 }
 
 const { workspaces, includeRoot, flags, values, positional, usedDefaultSelection } = parseArgs({
-  booleanFlags: ['--binary', '--production', '--development'],
+  booleanFlags: ['--binary', '--production', '--development', '--dry-run'],
   valueFlags: ['--platform'],
 });
 
@@ -439,7 +440,7 @@ if (!isBinaryBuild && (isProductionBuild || isDevelopmentBuild || values['--plat
 if (isBinaryBuild) {
   await buildStandaloneBinary({
     buildType: isDevelopmentBuild ? 'development' : 'production',
-    dryRun: process.env.DRY_RUN === '1',
+    dryRun: flags['--dry-run'] ?? process.env.DRY_RUN === '1',
     onlyPlatform: values['--platform'] ?? process.env.ONLY_PLATFORM,
     version: process.env.VERSION || '0.0.1',
   });
