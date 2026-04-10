@@ -32,8 +32,8 @@ cp .mango/.env.example .mango/.env
 bun run dev
 
 # Ou inicie cada workspace individualmente
-bun run dev:api
-bun run dev:frontend
+bun run dev --api
+bun run dev --frontend
 ```
 
 ## Padrões de Código
@@ -51,24 +51,19 @@ Consulte [`AGENTS.md`](../../AGENTS.md) para o guia completo de estilo, convenç
 
 ```bash
 # Qualidade de código
-bun run format:check
-bun run lint
-bun run typecheck
+bun run check
 
 # Todas as suítes
 bun run test
 
 # Apenas unitários
-bun run test:unit
+bun run test --unit
 
 # Apenas integração
-bun run test:integration
+bun run test --integration
 
-# Cobertura do frontend
-bun run test:coverage
-
-# Pipeline completo de validação
-bun run verify
+# End-to-end
+bun run test --e2e
 ```
 
 ## Linting e Verificação de Tipos
@@ -77,7 +72,7 @@ bun run verify
 bun run check
 ```
 
-Executa verificação de formatação, ESLint, verificação de tipos TypeScript e testes em todos os workspaces.
+Executa verificação de formatação, ESLint e verificação de tipos TypeScript em todos os workspaces.
 
 ## Build
 
@@ -85,7 +80,7 @@ Executa verificação de formatação, ESLint, verificação de tipos TypeScript
 bun run build
 ```
 
-Gera o build do frontend com Vite. Verifique se não há erros de TypeScript antes de abrir um PR.
+Gera o build do frontend com Vite por padrão. Use `bun run build --binary` para binários standalone.
 
 ## Diretrizes de Commit
 
@@ -116,7 +111,7 @@ Esta é uma configuração local única. O template está em `.gitmessage` na ra
 1. Crie um branch a partir de `main` com um nome descritivo (ex: `feat/add-gallery-empty-state`).
 2. Execute a suíte de validação completa localmente antes de fazer push:
    ```bash
-   bun run verify
+   bun run check && bun run test
    ```
 3. Abra um PR contra `main` e preencha o template de PR.
 4. PRs exigem que todas as verificações de CI passem antes do merge.
@@ -125,7 +120,7 @@ Esta é uma configuração local única. O template está em `.gitmessage` na ra
 ## Migrações de Banco de Dados
 
 ```bash
-bun run migrate
+bun run --filter @mangostudio/api migrate
 ```
 
 Se sua mudança exigir uma migração de schema, adicione o arquivo de migração em `apps/api/src/db/migrations/` e execute o comando acima localmente para verificar que ele é aplicado corretamente.

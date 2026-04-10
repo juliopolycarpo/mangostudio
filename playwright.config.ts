@@ -13,12 +13,12 @@ export default defineConfig({
   },
   webServer: [
     {
-      command: 'bun run dev:api',
+      command: 'bun run dev --api',
       port: 3001,
       reuseExistingServer: !process.env.CI,
     },
     {
-      command: 'bun run dev:frontend',
+      command: 'bun run dev --frontend',
       port: 5173,
       reuseExistingServer: !process.env.CI,
     },

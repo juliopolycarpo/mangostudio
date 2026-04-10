@@ -102,23 +102,21 @@ mangostudio/
 
 ## Main Scripts
 
-| Command                 | Description                                         |
-| ----------------------- | --------------------------------------------------- |
-| `bun install`           | Install all workspace dependencies                  |
-| `bun run dev`           | Start all dev servers concurrently                  |
-| `bun run build`         | Build the frontend for production                   |
-| `bun run build:binary`  | Generate standalone binaries with embedded frontend |
-| `bun run format`        | Apply Prettier across all workspaces                |
-| `bun run format:check`  | Check formatting across all workspaces              |
-| `bun run lint`          | ESLint across all workspaces                        |
-| `bun run lint:fix`      | ESLint autofix across all workspaces                |
-| `bun run typecheck`     | TypeScript type-check across all workspaces         |
-| `bun run fix`           | Apply lint autofix and Prettier across workspaces   |
-| `bun run check`         | Format check + lint + typecheck + tests             |
-| `bun run verify`        | Check + coverage + build                            |
-| `bun run test`          | Run all unit and integration tests                  |
-| `bun run test:coverage` | Frontend coverage via Vitest/v8                     |
-| `bun run migrate`       | Run SQLite database migrations                      |
+| Command                   | Description                                          |
+| ------------------------- | ---------------------------------------------------- |
+| `bun install`             | Install all workspace dependencies                   |
+| `bun run dev`             | Start all dev servers concurrently                   |
+| `bun run dev --api`       | Start only the API dev server                        |
+| `bun run build`           | Build the frontend for production                    |
+| `bun run build --binary`  | Generate standalone binaries with embedded frontend  |
+| `bun run check`           | Run ESLint, Prettier check, and typecheck            |
+| `bun run test`            | Run unit and integration lanes                       |
+| `bun run test --unit`     | Run unit suites only                                 |
+| `bun run test --e2e`      | Run the Playwright end-to-end suite (opt-in)         |
+| `bun run test --coverage` | Run coverage collection across applicable workspaces |
+| `bun run fix`             | Apply ESLint --fix, then Prettier --write            |
+| `bun run verify`          | Full CI gate: check, test, build (stops on failure)  |
+| `bun run clean`           | Remove dist, coverage, and build artifacts           |
 
 ## Architecture
 
@@ -158,7 +156,7 @@ The `Messages` type is inferred directly from the `pt-BR.ts` dictionary (`as con
 
 ## Standalone Build Notes
 
-The `bun run build:binary` command compiles the API into platform-specific binaries under `.mango/out/<platform>/`.
+The `bun run build --binary` command compiles the API into platform-specific binaries under `.mango/out/<platform>/`.
 
 - The database is persisted at `~/.mangostudio/database.sqlite` by default.
 - Frontend assets are served from the `public/` directory next to the executable.

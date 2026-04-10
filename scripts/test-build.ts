@@ -103,7 +103,7 @@ async function buildBinary(): Promise<void> {
   console.log(`\n🔨 Building binary for ${PLATFORM}...`);
   const env = { ...process.env, ONLY_PLATFORM: PLATFORM };
   const proc = Bun.spawn({
-    cmd: ['bun', 'run', 'build:binary'],
+    cmd: ['bun', 'run', 'build', '--binary'],
     cwd: ROOT_DIR,
     env,
     stdout: 'pipe',

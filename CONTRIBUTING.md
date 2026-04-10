@@ -30,8 +30,8 @@ cp .mango/.env.example .mango/.env
 bun run dev
 
 # Or start each workspace individually
-bun run dev:api
-bun run dev:frontend
+bun run dev --api
+bun run dev --frontend
 ```
 
 ## Code Standards
@@ -49,24 +49,19 @@ Refer to [`AGENTS.md`](./AGENTS.md) for the full coding style, naming convention
 
 ```bash
 # Code quality
-bun run format:check
-bun run lint
-bun run typecheck
+bun run check
 
 # All suites
 bun run test
 
 # Unit only
-bun run test:unit
+bun run test --unit
 
 # Integration only
-bun run test:integration
+bun run test --integration
 
-# Frontend coverage
-bun run test:coverage
-
-# Full validation pipeline
-bun run verify
+# End-to-end
+bun run test --e2e
 ```
 
 ## Linting and Type Checking
@@ -75,7 +70,7 @@ bun run verify
 bun run check
 ```
 
-This runs formatting checks, ESLint, TypeScript type-checking, and tests across all workspaces.
+This runs formatting checks, ESLint, and TypeScript type-checking across all workspaces.
 
 ## Building
 
@@ -83,7 +78,7 @@ This runs formatting checks, ESLint, TypeScript type-checking, and tests across 
 bun run build
 ```
 
-This builds the frontend with Vite. Verify there are no TypeScript errors before opening a PR.
+This builds the frontend with Vite by default. Use `bun run build --binary` for standalone binaries.
 
 ## Commit Guidelines
 
@@ -114,6 +109,8 @@ This is a one-time local setup. The template is at `.gitmessage` in the repo roo
 1. Create a branch from `main` using a descriptive name (e.g., `feat/add-gallery-empty-state`).
 2. Run the full validation suite locally before pushing:
    ```bash
+   bun run check && bun run test
+   # or use the full CI gate shortcut:
    bun run verify
    ```
 3. Open a PR against `main` and fill out the PR template.
@@ -123,7 +120,7 @@ This is a one-time local setup. The template is at `.gitmessage` in the repo roo
 ## Database Migrations
 
 ```bash
-bun run migrate
+bun run --filter @mangostudio/api migrate
 ```
 
 If your change requires a schema migration, add the migration file under `apps/api/src/db/migrations/` and run the command above locally to verify it applies cleanly.

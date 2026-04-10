@@ -1,15 +1,27 @@
 name: Auto-populate PR commits
 
 on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited, ready_for_review]
   pull_request_target:
-    types: [opened, synchronize, reopened]
+    types: [opened, synchronize, reopened, edited, ready_for_review]
 
 permissions:
+  contents: read
   pull-requests: write
+
+concurrency:
+  group: pr-commits-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 
 jobs:
   update-commits:
     name: Inject commit list into PR body
+    if: >
+      (github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository) ||
+      (github.event_name == 'pull_request_target' &&
+      github.event.pull_request.head.repo.full_name != github.repository)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -20,6 +32,7 @@ jobs:
             const owner = context.repo.owner;
             const repo = context.repo.repo;
             const pullNumber = context.payload.pull_request?.number;
+            const maxAttempts = 4;
 
             if (!pullNumber) {
               core.setFailed('Missing pull request number in workflow context.');
@@ -28,32 +41,66 @@ jobs:
 
             const startMarker = '<!-- COMMITS_START -->';
             const endMarker = '<!-- COMMITS_END -->';
+            const sleep = (milliseconds) =>
+              new Promise((resolve) => setTimeout(resolve, milliseconds));
 
             const escapeRegExp = (value) =>
               value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-            const commits = await github.paginate(github.rest.pulls.listCommits, {
-              owner,
-              repo,
-              pull_number: pullNumber,
-              per_page: 100,
-            });
-
-            const commitLines = commits.map(({ sha, commit }) => {
+            const buildCommitLines = (commits) => commits.map(({ sha, commit }) => {
               const shortSha = sha.slice(0, 7);
               const subjectLine = commit.message.split('\n')[0]?.trim() || 'No commit subject';
 
               return `- \`${shortSha}\` ${subjectLine}`;
             });
 
+            const getPullRequest = async () => {
+              const { data: pullRequest } = await github.rest.pulls.get({
+                owner,
+                repo,
+                pull_number: pullNumber,
+              });
+
+              return pullRequest;
+            };
+
+            let pullRequest = await getPullRequest();
+            let commitLines = [];
+
+            for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+              const commits = await github.paginate(github.rest.pulls.listCommits, {
+                owner,
+                repo,
+                pull_number: pullNumber,
+                per_page: 100,
+              });
+
+              commitLines = buildCommitLines(commits);
+
+              if (commitLines.length > 0 || pullRequest.commits === 0) {
+                break;
+              }
+
+              if (attempt < maxAttempts) {
+                core.info(
+                  `Commit list is still empty for PR #${pullNumber} ` +
+                    `(attempt ${attempt}/${maxAttempts}). Retrying...`,
+                );
+                await sleep(attempt * 1500);
+                pullRequest = await getPullRequest();
+              }
+            }
+
+            if (pullRequest.commits > 0 && commitLines.length === 0) {
+              core.setFailed(
+                `GitHub returned zero commits for PR #${pullNumber}, ` +
+                  `but the PR reports ${pullRequest.commits} commit(s).`,
+              );
+              return;
+            }
+
             const commitsBlock =
               commitLines.length > 0 ? commitLines.join('\n') : '_No commits yet._';
-
-            const { data: pullRequest } = await github.rest.pulls.get({
-              owner,
-              repo,
-              pull_number: pullNumber,
-            });
 
             const currentBody = pullRequest.body ?? '';
             const commitSection = `${startMarker}\n${commitsBlock}\n${endMarker}`;
@@ -77,4 +124,6 @@ jobs:
               body: nextBody,
             });
 
-            core.info(`Updated commit section for PR #${pullNumber}.`);
+            core.info(
+              `Updated commit section for PR #${pullNumber} with ${commitLines.length} commit(s).`,
+            );
