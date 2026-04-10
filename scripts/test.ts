@@ -20,7 +20,8 @@ Lane flags:
   --unit
   --integration
   --e2e
-  --all
+  --coverage     Run coverage collection across applicable workspaces
+  --all          Run all lanes (unit + integration + e2e)
   --help`);
   process.exit(0);
 }
@@ -29,6 +30,7 @@ const args = process.argv.slice(2);
 let runUnitLane = false;
 let runIntegrationLane = false;
 let runE2ELane = false;
+let runCoverage = false;
 let runAllLanes = false;
 const unexpectedArgs: string[] = [];
 
@@ -41,6 +43,8 @@ for (const arg of args) {
     runIntegrationLane = true;
   } else if (arg === '--e2e') {
     runE2ELane = true;
+  } else if (arg === '--coverage') {
+    runCoverage = true;
   } else if (arg === '--all') {
     runAllLanes = true;
   } else {
@@ -52,7 +56,8 @@ if (unexpectedArgs.length > 0) {
   fatal(`Unknown argument(s): ${unexpectedArgs.join(' ')}`);
 }
 
-const hasExplicitLaneSelection = runUnitLane || runIntegrationLane || runE2ELane || runAllLanes;
+const hasExplicitLaneSelection =
+  runUnitLane || runIntegrationLane || runE2ELane || runCoverage || runAllLanes;
 const shouldRunUnit = runAllLanes || !hasExplicitLaneSelection || runUnitLane;
 const shouldRunIntegration = runAllLanes || !hasExplicitLaneSelection || runIntegrationLane;
 // e2e is opt-in only (--e2e or --all); excluded from the implicit default run
@@ -98,6 +103,26 @@ if (shouldRunE2E) {
   info('\nPhase: e2e');
   const e2eResult = await runCommand('e2e', ['bunx', 'playwright', 'test'], { cwd: ROOT_DIR });
   results.push(e2eResult);
+}
+
+if (results.some((result) => result.exitCode !== 0)) {
+  exitWithResults(results);
+}
+
+if (runCoverage) {
+  info('\nPhase: coverage');
+  const coverageWorkspaces = ALL_WORKSPACE_NAMES.filter(
+    (workspace) => WORKSPACES[workspace].hasCoverage
+  );
+
+  if (coverageWorkspaces.length > 0) {
+    const coverageResults = await runParallel(
+      coverageWorkspaces.map(
+        (workspace) => () => runWorkspaceScript(workspace, 'test:coverage', { ifPresent: true })
+      )
+    );
+    results.push(...coverageResults);
+  }
 }
 
 exitWithResults(results);
