@@ -21,6 +21,7 @@ Workspace flags:
   --frontend
   --api
   --shared
+  --root     Run root-level fixes only (tooling lint + doc format)
   --all
   --help`);
   process.exit(0);
