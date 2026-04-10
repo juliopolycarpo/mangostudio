@@ -7,7 +7,22 @@ import {
   runCommand,
 } from './lib/runner';
 
+function printHelp(): never {
+  console.log(`Usage: bun run clean [flags]
+
+Removes dist, coverage, and build artifacts.
+
+Flags:
+  --dist-clean   Also remove all node_modules directories
+  --help         Show this help message`);
+  process.exit(0);
+}
+
 const { flags, positional } = parseArgs({ booleanFlags: ['--dist-clean'] });
+
+if (flags['--help']) {
+  printHelp();
+}
 
 assertNoUnexpectedArguments(positional);
 

@@ -13,7 +13,9 @@
     "build": "bun ./scripts/build.ts",
     "check": "bun ./scripts/check.ts",
     "test": "bun ./scripts/test.ts",
-    "fix": "bun ./scripts/fix.ts"
+    "fix": "bun ./scripts/fix.ts",
+    "verify": "bun ./scripts/verify.ts",
+    "clean": "bun ./scripts/clean.ts"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.4",
