@@ -8,7 +8,6 @@ export interface WorkspaceConfig {
   name: WorkspaceName;
   packageName: string;
   path: string;
-  maxWarnings: number;
   hasIntegrationTests: boolean;
   hasCoverage: boolean;
 }
@@ -18,7 +17,6 @@ export const WORKSPACES: Record<WorkspaceName, WorkspaceConfig> = {
     name: 'frontend',
     packageName: '@mangostudio/frontend',
     path: join(ROOT_DIR, 'apps/frontend'),
-    maxWarnings: 2,
     hasIntegrationTests: true,
     hasCoverage: true,
   },
@@ -26,7 +24,6 @@ export const WORKSPACES: Record<WorkspaceName, WorkspaceConfig> = {
     name: 'api',
     packageName: '@mangostudio/api',
     path: join(ROOT_DIR, 'apps/api'),
-    maxWarnings: 23,
     hasIntegrationTests: true,
     hasCoverage: true,
   },
@@ -34,7 +31,6 @@ export const WORKSPACES: Record<WorkspaceName, WorkspaceConfig> = {
     name: 'shared',
     packageName: '@mangostudio/shared',
     path: join(ROOT_DIR, 'apps/shared'),
-    maxWarnings: 0,
     hasIntegrationTests: false,
     hasCoverage: false,
   },
