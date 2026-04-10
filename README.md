@@ -102,18 +102,21 @@ mangostudio/
 
 ## Main Scripts
 
-| Command                  | Description                                         |
-| ------------------------ | --------------------------------------------------- |
-| `bun install`            | Install all workspace dependencies                  |
-| `bun run dev`            | Start all dev servers concurrently                  |
-| `bun run dev --api`      | Start only the API dev server                       |
-| `bun run build`          | Build the frontend for production                   |
-| `bun run build --binary` | Generate standalone binaries with embedded frontend |
-| `bun run check`          | Run ESLint, Prettier check, and typecheck           |
-| `bun run test`           | Run unit and integration lanes                      |
-| `bun run test --unit`    | Run unit suites only                                |
-| `bun run test --e2e`     | Run the Playwright end-to-end suite (opt-in)        |
-| `bun run fix`            | Apply ESLint --fix, then Prettier --write           |
+| Command                   | Description                                          |
+| ------------------------- | ---------------------------------------------------- |
+| `bun install`             | Install all workspace dependencies                   |
+| `bun run dev`             | Start all dev servers concurrently                   |
+| `bun run dev --api`       | Start only the API dev server                        |
+| `bun run build`           | Build the frontend for production                    |
+| `bun run build --binary`  | Generate standalone binaries with embedded frontend  |
+| `bun run check`           | Run ESLint, Prettier check, and typecheck            |
+| `bun run test`            | Run unit and integration lanes                       |
+| `bun run test --unit`     | Run unit suites only                                 |
+| `bun run test --e2e`      | Run the Playwright end-to-end suite (opt-in)         |
+| `bun run test --coverage` | Run coverage collection across applicable workspaces |
+| `bun run fix`             | Apply ESLint --fix, then Prettier --write            |
+| `bun run verify`          | Full CI gate: check, test, build (stops on failure)  |
+| `bun run clean`           | Remove dist, coverage, and build artifacts           |
 
 ## Architecture
 

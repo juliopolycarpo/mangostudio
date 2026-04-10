@@ -52,6 +52,7 @@ bun run test                # unit + integration (e2e is opt-in)
 bun run test --unit         # API, shared, and frontend unit suites
 bun run test --integration  # API and frontend integration suites
 bun run test --e2e          # Playwright Chromium auth smoke suite (opt-in)
+bun run test --coverage     # coverage collection across applicable workspaces
 bun run test --all          # all lanes including e2e
 ```
 
@@ -209,4 +210,6 @@ Before merging, run:
 ```bash
 bun run check
 bun run test
+# or use the full CI gate shortcut:
+bun run verify
 ```

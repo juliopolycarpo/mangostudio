@@ -110,6 +110,8 @@ This is a one-time local setup. The template is at `.gitmessage` in the repo roo
 2. Run the full validation suite locally before pushing:
    ```bash
    bun run check && bun run test
+   # or use the full CI gate shortcut:
+   bun run verify
    ```
 3. Open a PR against `main` and fill out the PR template.
 4. PRs require all CI checks to pass before merging.
