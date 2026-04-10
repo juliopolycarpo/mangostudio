@@ -417,11 +417,11 @@ const { workspaces, includeRoot, flags, values, positional, usedDefaultSelection
   valueFlags: ['--platform'],
 });
 
-assertNoUnexpectedArguments(positional);
-
 if (flags['--help']) {
   printHelp();
 }
+
+assertNoUnexpectedArguments(positional);
 
 const isBinaryBuild = flags['--binary'] ?? false;
 const isProductionBuild = flags['--production'] ?? false;

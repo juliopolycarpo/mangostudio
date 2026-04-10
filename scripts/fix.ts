@@ -28,11 +28,11 @@ Workspace flags:
 
 const { workspaces, includeRoot, flags, positional } = parseArgs();
 
-assertNoUnexpectedArguments(positional);
-
 if (flags['--help']) {
   printHelp();
 }
+
+assertNoUnexpectedArguments(positional);
 
 header('Fix');
 

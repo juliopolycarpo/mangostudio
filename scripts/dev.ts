@@ -27,11 +27,11 @@ Workspace flags:
 
 const { workspaces, includeRoot, flags, positional, usedDefaultSelection } = parseArgs();
 
-assertNoUnexpectedArguments(positional);
-
 if (flags['--help']) {
   printHelp();
 }
+
+assertNoUnexpectedArguments(positional);
 
 if (includeRoot) {
   warn('Ignoring `--root` for `dev`.');
