@@ -4,6 +4,7 @@
  */
 
 import { type Elysia, t } from 'elysia';
+import { ERROR_CODES } from '@mangostudio/shared/errors';
 import { join, extname } from 'path';
 import { mkdirSync } from 'fs';
 import { fileTypeFromBuffer } from 'file-type';
@@ -35,7 +36,10 @@ export const uploadRoutes = (app: Elysia) =>
           const fileType = await fileTypeFromBuffer(buffer);
           if (!fileType) {
             set.status = 400;
-            return { error: 'Invalid file: cannot determine file type' };
+            return {
+              error: 'Invalid file: cannot determine file type',
+              code: ERROR_CODES.VALIDATION,
+            };
           }
 
           // Allow only specific image MIME types
@@ -53,6 +57,7 @@ export const uploadRoutes = (app: Elysia) =>
             set.status = 400;
             return {
               error: `Invalid file type: ${fileType.mime}. Allowed types: ${allowedMimeTypes.join(', ')}`,
+              code: ERROR_CODES.VALIDATION,
             };
           }
 

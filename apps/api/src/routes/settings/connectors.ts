@@ -3,6 +3,11 @@
  */
 
 import { Elysia, t } from 'elysia';
+import {
+  AddConnectorBodySchema,
+  UpdateConnectorModelsBodySchema,
+} from '@mangostudio/shared/connectors';
+import { ERROR_CODES, type ApiErrorResponse } from '@mangostudio/shared/errors';
 import type { Connector, ConnectorStatus } from '@mangostudio/shared';
 import type { ProviderType, SecretMetadataRow, SecretSource } from '@mangostudio/shared/types';
 import {
@@ -54,40 +59,46 @@ const PROVIDER_SECRET_CONFIG: Record<ProviderType, { tomlSection: string; envPre
 export function handleSecretRouteError(
   error: unknown,
   set: { status?: number | string }
-): { error: string } {
+): ApiErrorResponse {
   if (error instanceof UnsafeBaseUrlError) {
     set.status = 422;
-    return { error: error.message };
+    return { error: error.message, code: ERROR_CODES.VALIDATION };
   }
 
   if (error instanceof InvalidGeminiApiKeyError) {
     set.status = 422;
-    return { error: error.message };
+    return { error: error.message, code: ERROR_CODES.VALIDATION };
   }
 
   if (error instanceof SecretStorageUnavailableError) {
     set.status = 503;
-    return { error: 'OS secret storage is unavailable on this machine.' };
+    return {
+      error: 'OS secret storage is unavailable on this machine.',
+      code: ERROR_CODES.PROVIDER_ERROR,
+    };
   }
 
   if (error instanceof GeminiValidationUnavailableError) {
     set.status = 502;
-    return { error: error.message };
+    return { error: error.message, code: ERROR_CODES.PROVIDER_ERROR };
   }
 
   if (error instanceof OpenAIAuthError) {
     set.status = error.status;
-    return { error: error.message };
+    return { error: error.message, code: ERROR_CODES.VALIDATION };
   }
 
   if (error instanceof OpenAIConfigError) {
     set.status = 422;
-    return { error: error.message };
+    return { error: error.message, code: ERROR_CODES.VALIDATION };
   }
 
   console.error('[settings] Unexpected secret route error:', error);
   set.status = 500;
-  return { error: error instanceof Error ? error.message : 'Unexpected secret settings error.' };
+  return {
+    error: error instanceof Error ? error.message : 'Unexpected secret settings error.',
+    code: ERROR_CODES.INTERNAL,
+  };
 }
 
 export function toConnector(row: {
@@ -289,29 +300,7 @@ export async function validateProviderKey(
   await p.validateApiKey(apiKey);
 }
 
-export const connectorBodySchema = t.Object({
-  name: t.String(),
-  apiKey: t.String(),
-  source: t.Union([
-    t.Literal('bun-secrets'),
-    t.Literal('environment'),
-    t.Literal('config-file'),
-    t.Literal('none'),
-  ]),
-  provider: t.Optional(
-    t.Union([
-      t.Literal('gemini'),
-      t.Literal('openai'),
-      t.Literal('openai-compatible'),
-      t.Literal('anthropic'),
-    ])
-  ),
-  baseUrl: t.Optional(t.String()),
-  /** Optional OpenAI Organization ID — only meaningful for provider === 'openai'. */
-  organizationId: t.Optional(t.String()),
-  /** Optional OpenAI Project ID — only meaningful for provider === 'openai'. */
-  projectId: t.Optional(t.String()),
-});
+export const connectorBodySchema = AddConnectorBodySchema;
 
 export const connectorRoutes = new Elysia()
   .use(requireAuth)
@@ -333,7 +322,7 @@ export const connectorRoutes = new Elysia()
   /** Adds a new connector for any provider. */
   .post(
     '/connectors',
-    async ({ body, set, user }): Promise<Connector | { error: string }> => {
+    async ({ body, set, user }): Promise<Connector | ApiErrorResponse> => {
       try {
         const provider = (body.provider ?? 'gemini') as ProviderType;
         const apiKey = body.apiKey.trim();
@@ -341,7 +330,10 @@ export const connectorRoutes = new Elysia()
 
         if (provider === 'openai-compatible' && !body.baseUrl?.trim()) {
           set.status = 400;
-          return { error: 'baseUrl is required for openai-compatible connectors.' };
+          return {
+            error: 'baseUrl is required for openai-compatible connectors.',
+            code: ERROR_CODES.VALIDATION,
+          };
         }
 
         await validateProviderKey(provider, apiKey, {
@@ -390,18 +382,18 @@ export const connectorRoutes = new Elysia()
   /** Deletes a connector (provider-agnostic). */
   .delete(
     '/connectors/:id',
-    async ({ params, set, user }): Promise<{ success: true } | { error: string }> => {
+    async ({ params, set, user }): Promise<{ success: true } | ApiErrorResponse> => {
       try {
         const userId = user?.id ?? '';
         const meta = await getSecretMetadataById(params.id, userId);
         if (!meta) {
           set.status = 404;
-          return { error: 'Connector not found.' };
+          return { error: 'Connector not found.', code: ERROR_CODES.NOT_FOUND };
         }
 
         if (isReadOnlySharedConnector(meta)) {
           set.status = 403;
-          return { error: 'Cannot delete a shared connector.' };
+          return { error: 'Cannot delete a shared connector.', code: ERROR_CODES.OWNERSHIP };
         }
 
         await removeSecret(meta.id, meta.name, meta.provider as ProviderType, meta.source);
@@ -421,13 +413,13 @@ export const connectorRoutes = new Elysia()
   /** Updates enabled models for a connector (provider-agnostic). */
   .put(
     '/connectors/:id/models',
-    async ({ params, body, set, user }): Promise<{ success: true } | { error: string }> => {
+    async ({ params, body, set, user }): Promise<{ success: true } | ApiErrorResponse> => {
       try {
         const userId = user?.id ?? '';
         const meta = await getSecretMetadataById(params.id, userId);
         if (!meta) {
           set.status = 404;
-          return { error: 'Connector not found.' };
+          return { error: 'Connector not found.', code: ERROR_CODES.NOT_FOUND };
         }
         await updateConnectorEnabledModels(meta, body.enabledModels);
         recalculateUnifiedCatalog(userId);
@@ -438,6 +430,6 @@ export const connectorRoutes = new Elysia()
     },
     {
       params: t.Object({ id: t.String() }),
-      body: t.Object({ enabledModels: t.Array(t.String()) }),
+      body: UpdateConnectorModelsBodySchema,
     }
   );
