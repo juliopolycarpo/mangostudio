@@ -6,7 +6,12 @@ import type Anthropic from '@anthropic-ai/sdk';
 import { computeSystemPromptHash, computeToolsetHash } from '../core/continuation-envelope';
 import { getModelContextLimit } from '../core/context-policy';
 import { buildCachedAnthropicRequest } from './cached-request';
-import { isToolUseBlock, narrowDelta, extractCacheUsage } from './normalizers';
+import {
+  isToolUseBlock,
+  narrowDelta,
+  extractCacheUsage,
+  toMessageCreateParams,
+} from './normalizers';
 import type { AgentTurnRequest, AgentEvent } from '../types';
 import { parseJsonWith } from '../../../lib/safe-parse';
 
@@ -77,7 +82,7 @@ export async function* streamAnthropicAgentTurn(
   const params = { model: req.modelName, ...cachedReq };
 
   try {
-    const stream = client.messages.stream(params as unknown as Anthropic.MessageCreateParams, {
+    const stream = client.messages.stream(toMessageCreateParams(params), {
       signal: req.signal,
     });
 

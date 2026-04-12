@@ -19,8 +19,8 @@ import {
   isFunctionCallStart,
   narrowGeminiDelta,
   extractGeminiUsage,
+  toInteractionParams,
   type InteractionSSEEvent,
-  type CreateModelInteractionParamsStreaming,
 } from './normalizers';
 import { getResolvedGeminiApiKey } from './secret';
 import { createGeminiClient } from './client';
@@ -126,9 +126,7 @@ export async function* streamGeminiAgentTurn(req: AgentTurnRequest): AsyncIterab
 
   try {
     interactionParams.stream = true;
-    const stream = await ai.interactions.create(
-      interactionParams as unknown as CreateModelInteractionParamsStreaming
-    );
+    const stream = await ai.interactions.create(toInteractionParams(interactionParams));
 
     yield* processGeminiInteractionStream(stream, req, currentToolsetHash);
   } catch (err: unknown) {
@@ -188,9 +186,7 @@ export async function* streamGeminiAgentTurn(req: AgentTurnRequest): AsyncIterab
           };
         }
 
-        const retryStream = await ai.interactions.create(
-          retryParams as unknown as CreateModelInteractionParamsStreaming
-        );
+        const retryStream = await ai.interactions.create(toInteractionParams(retryParams));
 
         yield* processGeminiInteractionStream(retryStream, req, currentToolsetHash);
       } catch (retryErr: unknown) {
