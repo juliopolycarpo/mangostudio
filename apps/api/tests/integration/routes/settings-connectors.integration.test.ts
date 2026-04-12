@@ -1,6 +1,8 @@
 import { describe, expect, it, afterEach, beforeAll, beforeEach, mock } from 'bun:test';
 import { Value } from '@sinclair/typebox/value';
 import { Type } from '@sinclair/typebox';
+import { ConnectorStatusSchema } from '@mangostudio/shared/connectors';
+import { ModelCatalogResponseSchema } from '@mangostudio/shared/catalog';
 import { settingsRoutes } from '../../../src/routes/settings';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
 import { getDb } from '../../../src/db/database';
@@ -75,23 +77,6 @@ afterEach(async () => {
   }));
 });
 
-const ConnectorStatusSchema = Type.Object({
-  connectors: Type.Array(Type.Any()),
-});
-
-const ModelCatalogSchema = Type.Object({
-  configured: Type.Boolean(),
-  status: Type.Union([
-    Type.Literal('idle'),
-    Type.Literal('loading'),
-    Type.Literal('ready'),
-    Type.Literal('error'),
-  ]),
-  allModels: Type.Array(Type.Any()),
-  textModels: Type.Array(Type.Any()),
-  imageModels: Type.Array(Type.Any()),
-});
-
 describe('settings connectors routes', () => {
   it('GET /settings/connectors returns empty connector list for a new user', async () => {
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, settingsRoutes);
@@ -115,7 +100,7 @@ describe('settings connectors routes', () => {
     expect(response.status).toBe(200);
 
     const payload = (await response.json()) as ModelCatalogPayload;
-    expect(Value.Check(ModelCatalogSchema, payload)).toBe(true);
+    expect(Value.Check(ModelCatalogResponseSchema, payload)).toBe(true);
     // Cold-start now awaits refresh — status must not be 'idle'
     expect(payload.status).not.toBe('idle');
     // No connectors configured → no models enabled
