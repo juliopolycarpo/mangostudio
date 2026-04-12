@@ -1,22 +1,12 @@
 import { createRootRouteWithContext, Outlet } from '@tanstack/react-router';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClientProvider, type QueryClient } from '@tanstack/react-query';
+import { queryClient } from '@/lib/query-client';
 import type { AuthContext } from '@/lib/auth-context';
 import { ToastProvider } from '@/components/ui/Toast';
 import { I18nProvider } from '@/hooks/use-i18n';
 import { ThemeProvider } from '@/hooks/use-theme';
 
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      retry: 1,
-      refetchOnWindowFocus: false,
-      refetchOnReconnect: true,
-      staleTime: 1000 * 30,
-    },
-  },
-});
-
-export const Route = createRootRouteWithContext<{ auth: AuthContext }>()({
+export const Route = createRootRouteWithContext<{ auth: AuthContext; queryClient: QueryClient }>()({
   component: () => (
     <QueryClientProvider client={queryClient}>
       <ThemeProvider>

@@ -132,11 +132,6 @@ export function useAppState() {
     [composerMode, handleRespond, handleGenerate]
   );
 
-  const initialize = useCallback(async () => {
-    await chats.loadChats();
-    await catalog.refreshCatalog();
-  }, [chats, catalog]);
-
   return {
     composerMode,
     isGenerating,
@@ -162,7 +157,6 @@ export function useAppState() {
     handleNavigate,
     handleSubmit,
     handleStop: textGen.handleStop,
-    initialize,
     refreshCatalog: catalog.refreshCatalog,
   };
 }

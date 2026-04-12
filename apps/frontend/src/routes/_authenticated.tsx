@@ -5,12 +5,14 @@ import {
   useRouterState,
   useNavigate,
 } from '@tanstack/react-router';
-import { useEffect, Suspense } from 'react';
+import { Suspense } from 'react';
 import { Spinner } from '@/components/ui/Spinner';
 import { Layout } from '@/components/layout/Layout';
 import { Header } from '@/components/layout/Header';
 import { useAppState } from '@/hooks/use-app-state';
 import { AppContext } from '@/lib/app-context';
+import { chatListQueryOptions } from '@/features/chat/queries';
+import { catalogQueryOptions } from '@/hooks/use-model-catalog';
 
 export const Route = createFileRoute('/_authenticated')({
   beforeLoad: ({ context, location }) => {
@@ -22,6 +24,12 @@ export const Route = createFileRoute('/_authenticated')({
       });
     }
   },
+  loader: async ({ context: { queryClient } }) => {
+    await Promise.all([
+      queryClient.ensureQueryData(chatListQueryOptions()),
+      queryClient.ensureQueryData(catalogQueryOptions()),
+    ]);
+  },
   component: AuthenticatedLayout,
 });
 
@@ -29,13 +37,8 @@ function AuthenticatedLayout() {
   const { auth } = Route.useRouteContext();
   const navigate = useNavigate();
   const app = useAppState();
-  const { initialize } = app;
   const routerState = useRouterState();
   const currentPath = routerState.location.pathname;
-
-  useEffect(() => {
-    void initialize();
-  }, [initialize]);
 
   if (!auth.isAuthenticated) {
     void navigate({ to: '/login' });

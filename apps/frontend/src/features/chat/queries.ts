@@ -1,4 +1,10 @@
-import { useQuery, useMutation, useQueryClient, useInfiniteQuery } from '@tanstack/react-query';
+import {
+  useQuery,
+  useMutation,
+  useQueryClient,
+  useInfiniteQuery,
+  queryOptions,
+} from '@tanstack/react-query';
 import { client } from '@/lib/api-client';
 import { extractApiError } from '@/lib/utils';
 import type { Chat, UpdateChatBody, Message, UpdateMessageBody } from '@mangostudio/shared';
@@ -19,8 +25,8 @@ export const chatKeys = {
 /** Chat with optional context snapshot from persisted provider state. */
 export type ChatWithContext = Chat & { contextInfo?: ContextInfo | null };
 
-export function useChatsQuery() {
-  return useQuery({
+export const chatListQueryOptions = () =>
+  queryOptions({
     queryKey: chatKeys.lists(),
     queryFn: async () => {
       const { data, error } = await client.api.chats.get();
@@ -28,6 +34,9 @@ export function useChatsQuery() {
       return data as ChatWithContext[];
     },
   });
+
+export function useChatsQuery() {
+  return useQuery(chatListQueryOptions());
 }
 
 export function useCreateChatMutation() {

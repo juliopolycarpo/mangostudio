@@ -1,4 +1,4 @@
-import { useInfiniteQuery } from '@tanstack/react-query';
+import { useInfiniteQuery, infiniteQueryOptions } from '@tanstack/react-query';
 import { client } from '@/lib/api-client';
 import { extractApiError } from '@/lib/utils';
 import type { GalleryItem } from '@mangostudio/shared';
@@ -8,10 +8,10 @@ export const galleryKeys = {
   lists: () => [...galleryKeys.all, 'list'] as const,
 };
 
-export function useGalleryQuery() {
-  return useInfiniteQuery({
+export const galleryListQueryOptions = () =>
+  infiniteQueryOptions({
     queryKey: galleryKeys.lists(),
-    queryFn: async ({ pageParam }) => {
+    queryFn: async ({ pageParam }: { pageParam: string | null }) => {
       const query = pageParam ? { cursor: pageParam, limit: '20' } : { limit: '20' };
       const { data, error } = await client.api.messages.images.get({ query });
       if (error) throw new Error(extractApiError(error.value));
@@ -20,4 +20,7 @@ export function useGalleryQuery() {
     initialPageParam: null as string | null,
     getNextPageParam: (lastPage) => lastPage.nextCursor,
   });
+
+export function useGalleryQuery() {
+  return useInfiniteQuery(galleryListQueryOptions());
 }
