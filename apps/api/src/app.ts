@@ -9,12 +9,12 @@ import { staticPlugin } from '@elysiajs/static';
 import { openapi } from '@elysiajs/openapi';
 import { cors } from '@elysiajs/cors';
 
-import { chatRoutes } from './routes/chats';
-import { messageRoutes } from './routes/messages';
+import { chatRoutes } from './modules/chats/http/chat-routes';
+import { messageRoutes } from './modules/messages/http/message-routes';
 import { uploadRoutes } from './routes/upload';
-import { generateRoutes } from './routes/generate';
-import { respondRoutes } from './routes/respond';
-import { respondStreamRoutes } from './routes/respond-stream';
+import { generateRoutes } from './modules/generation/http/generate-routes';
+import { respondRoutes } from './modules/generation/http/respond-routes';
+import { respondStreamRoutes } from './modules/generation/http/respond-stream-routes';
 import { settingsRoutes } from './routes/settings';
 import { authRoutes } from './routes/auth';
 import { rateLimit } from './plugins/rate-limit';

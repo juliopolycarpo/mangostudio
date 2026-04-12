@@ -1,5 +1,5 @@
 import { describe, expect, it, mock, afterEach } from 'bun:test';
-import { respondStreamRoutes } from '../../../src/routes/respond-stream';
+import { respondStreamRoutes } from '../../../src/modules/generation/http/respond-stream-routes';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
 import { getDb } from '../../../src/db/database';
 import type { AgentTurnRequest } from '../../../src/services/providers/types';
@@ -22,6 +22,25 @@ afterEach(async () => {
   // Restore the real database module to prevent mock leakage into later test files.
   await mock.module('../../../src/db/database', () => ({ getDb: realGetDb }));
 });
+
+/**
+ * Creates a fully chainable Kysely-mock using a Proxy.
+ * - executeTakeFirst() → firstValue  (ownership checks, single-row lookups)
+ * - execute()          → []          (list queries like loadHistory)
+ */
+function makeChain(firstValue: unknown): Record<string, unknown> {
+  const terminal = {
+    execute: () => Promise.resolve([]),
+    executeTakeFirst: () => Promise.resolve(firstValue),
+  };
+  const proxy: Record<string, unknown> = new Proxy(terminal as Record<string, unknown>, {
+    get(target, prop) {
+      if (prop in target) return target[prop as string];
+      return () => proxy;
+    },
+  });
+  return proxy;
+}
 
 describe('POST /respond/stream', () => {
   it('returns 404 when chat is not found', async () => {
@@ -100,7 +119,7 @@ describe('POST /respond/stream', () => {
 
   it('does not persist stateless-loop providerState to the database', async () => {
     const chatSetCalls: Array<Record<string, unknown>> = [];
-    const createdMessages: Array<Record<string, unknown>> = [];
+    const insertedMessages: Array<Record<string, unknown>> = [];
 
     const STATELESS_LOOP_STATE = JSON.stringify({
       schemaVersion: 1,
@@ -112,7 +131,7 @@ describe('POST /respond/stream', () => {
       loopMessages: [{ role: 'user', content: 'Hello' }],
     });
 
-    await mock.module('../../../src/services/chat-service', () => ({
+    await mock.module('../../../src/modules/chats/infrastructure/chat-repository', () => ({
       verifyChatOwnership: () => Promise.resolve(true),
     }));
 
@@ -129,34 +148,24 @@ describe('POST /respond/stream', () => {
         }),
     }));
 
-    await mock.module('../../../src/services/message-service', () => ({
-      createMessage: (msg: Record<string, unknown>) => {
-        createdMessages.push({ ...msg });
-        return Promise.resolve();
-      },
-      loadRichChatHistory: () => Promise.resolve([]),
-      loadChatHistory: () => Promise.resolve([]),
-    }));
-
     await mock.module('../../../src/services/tools', () => ({
       getAllToolDefinitions: () => [],
       executeTool: () => Promise.resolve({}),
     }));
 
-    const makeWhere = (): Record<string, unknown> => ({
-      execute: () => Promise.resolve(),
-      executeTakeFirst: () => Promise.resolve(null),
-      where: () => makeWhere(),
-    });
-
     await mock.module('../../../src/db/database', () => ({
       getDb: () => ({
-        selectFrom: () => ({ select: () => makeWhere() }),
-        insertInto: () => ({ values: () => ({ execute: () => Promise.resolve() }) }),
+        selectFrom: () => makeChain({ userId: TEST_USER.id }),
+        insertInto: (_table: string) => ({
+          values: (values: Record<string, unknown>) => {
+            if (_table === 'messages') insertedMessages.push({ ...values });
+            return { execute: () => Promise.resolve() };
+          },
+        }),
         updateTable: () => ({
           set: (values: Record<string, unknown>) => {
             chatSetCalls.push({ ...values });
-            return makeWhere();
+            return makeChain(undefined);
           },
         }),
       }),
@@ -176,7 +185,7 @@ describe('POST /respond/stream', () => {
     await response.text();
 
     // The AI message row must have providerState = null (not the stateless-loop state)
-    const aiMessage = createdMessages.find((m) => m.role === 'ai');
+    const aiMessage = insertedMessages.find((m) => m.role === 'ai');
     expect(aiMessage).toBeDefined();
     expect(aiMessage?.providerState).toBeNull();
 
@@ -222,17 +231,9 @@ describe('POST /respond/stream', () => {
     // Mock DB to return a valid chat owned by our test user
     await mock.module('../../../src/db/database', () => ({
       getDb: () => ({
-        selectFrom: () => ({
-          select: () => ({
-            where: () => ({
-              executeTakeFirst: () => Promise.resolve({ userId: TEST_USER.id }),
-            }),
-          }),
-        }),
+        selectFrom: () => makeChain({ userId: TEST_USER.id }),
         insertInto: () => ({ values: () => ({ execute: () => Promise.resolve() }) }),
-        updateTable: () => ({
-          set: () => ({ where: () => ({ execute: () => Promise.resolve() }) }),
-        }),
+        updateTable: () => makeChain(undefined),
       }),
     }));
 
@@ -251,7 +252,7 @@ describe('POST /respond/stream', () => {
   });
 
   it('emits fallback_notice and context_info with mode=replay when provider yields continuation_degraded then turn_completed without cursor', async () => {
-    const createdMessages: Array<Record<string, unknown>> = [];
+    const insertedMessages: Array<Record<string, unknown>> = [];
 
     // A stateless-loop state has no cursor → mode becomes 'replay' in context_info
     const STATELESS_STATE = JSON.stringify({
@@ -264,7 +265,7 @@ describe('POST /respond/stream', () => {
       loopMessages: [],
     });
 
-    await mock.module('../../../src/services/chat-service', () => ({
+    await mock.module('../../../src/modules/chats/infrastructure/chat-repository', () => ({
       verifyChatOwnership: () => Promise.resolve(true),
     }));
 
@@ -287,31 +288,21 @@ describe('POST /respond/stream', () => {
         }),
     }));
 
-    await mock.module('../../../src/services/message-service', () => ({
-      createMessage: (msg: Record<string, unknown>) => {
-        createdMessages.push({ ...msg });
-        return Promise.resolve();
-      },
-      loadRichChatHistory: () => Promise.resolve([]),
-      loadChatHistory: () => Promise.resolve([]),
-    }));
-
     await mock.module('../../../src/services/tools', () => ({
       getAllToolDefinitions: () => [],
       executeTool: () => Promise.resolve({}),
     }));
 
-    const makeWhere = (): Record<string, unknown> => ({
-      execute: () => Promise.resolve(),
-      executeTakeFirst: () => Promise.resolve(null),
-      where: () => makeWhere(),
-    });
-
     await mock.module('../../../src/db/database', () => ({
       getDb: () => ({
-        selectFrom: () => ({ select: () => makeWhere() }),
-        insertInto: () => ({ values: () => ({ execute: () => Promise.resolve() }) }),
-        updateTable: () => ({ set: () => makeWhere() }),
+        selectFrom: () => makeChain({ userId: TEST_USER.id }),
+        insertInto: (_table: string) => ({
+          values: (values: Record<string, unknown>) => {
+            if (_table === 'messages') insertedMessages.push({ ...values });
+            return { execute: () => Promise.resolve() };
+          },
+        }),
+        updateTable: () => makeChain(undefined),
       }),
     }));
 

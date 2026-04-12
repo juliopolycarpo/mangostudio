@@ -1,6 +1,9 @@
 import { describe, expect, it, beforeAll } from 'bun:test';
 import { getDb } from '../../../src/db/database';
-import { loadChatHistory, createMessage } from '../../../src/services/message-service';
+import {
+  insertMessage,
+  loadHistory,
+} from '../../../src/modules/messages/infrastructure/message-repository';
 
 const USER_ID = 'user-ms-test';
 const CHAT_ID = 'chat-ms-test';
@@ -43,7 +46,7 @@ beforeAll(async () => {
   ];
 
   for (const msg of messages) {
-    await createMessage(
+    await insertMessage(
       {
         id: msg.id,
         chatId: CHAT_ID,
@@ -58,10 +61,10 @@ beforeAll(async () => {
   }
 });
 
-describe('loadChatHistory', () => {
+describe('loadHistory', () => {
   it('returns all messages in chronological order including id field', async () => {
     const db = getDb();
-    const history = await loadChatHistory(CHAT_ID, {}, db);
+    const history = await loadHistory(CHAT_ID, {}, db);
 
     expect(history.length).toBe(3);
     expect(history[0]).toMatchObject({ id: 'ms-msg-1', role: 'user', text: 'Hello' });
@@ -71,7 +74,7 @@ describe('loadChatHistory', () => {
 
   it('excludes the specified message when excludeId is provided', async () => {
     const db = getDb();
-    const history = await loadChatHistory(CHAT_ID, { excludeId: 'ms-msg-1' }, db);
+    const history = await loadHistory(CHAT_ID, { excludeId: 'ms-msg-1' }, db);
 
     expect(history.length).toBe(2);
     expect(history.find((m) => m.id === 'ms-msg-1')).toBeUndefined();
@@ -80,7 +83,7 @@ describe('loadChatHistory', () => {
 
   it('each turn includes the id field', async () => {
     const db = getDb();
-    const history = await loadChatHistory(CHAT_ID, {}, db);
+    const history = await loadHistory(CHAT_ID, {}, db);
 
     for (const turn of history) {
       expect(typeof turn.id).toBe('string');
