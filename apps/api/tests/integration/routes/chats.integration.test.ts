@@ -1,5 +1,5 @@
 import { describe, expect, it, afterEach, beforeAll } from 'bun:test';
-import { chatRoutes } from '../../../src/routes/chats';
+import { chatRoutes } from '../../../src/modules/chats/http/chat-routes';
 import {
   createApiTestApp,
   createAuthenticatedApiTestApp,

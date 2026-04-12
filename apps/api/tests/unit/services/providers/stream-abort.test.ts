@@ -1,5 +1,5 @@
 import { describe, expect, it, mock, afterEach } from 'bun:test';
-import { respondStreamRoutes } from '../../../../src/routes/respond-stream';
+import { respondStreamRoutes } from '../../../../src/modules/generation/http/respond-stream-routes';
 import { createAuthenticatedApiTestApp } from '../../../support/harness/create-api-test-app';
 
 const TEST_USER = { id: 'abort-test-user', name: 'Abort User', email: 'abort@test.test' };
@@ -11,6 +11,25 @@ afterEach(() => {
   restoreAuth = null;
   mock.restore();
 });
+
+/**
+ * Creates a chainable Kysely-mock.
+ * - executeTakeFirst() → firstValue (for ownership/single-row lookups)
+ * - execute()          → [] (for list queries like loadHistory)
+ */
+function makeChain(firstValue: unknown): Record<string, unknown> {
+  const terminal = {
+    execute: () => Promise.resolve([]),
+    executeTakeFirst: () => Promise.resolve(firstValue),
+  };
+  const proxy: Record<string, unknown> = new Proxy(terminal as Record<string, unknown>, {
+    get(target, prop) {
+      if (prop in target) return target[prop as string];
+      return () => proxy;
+    },
+  });
+  return proxy;
+}
 
 describe('respond-stream abort signal', () => {
   it('provider receives the signal and it is not aborted during normal generation', async () => {
@@ -36,31 +55,10 @@ describe('respond-stream abort signal', () => {
 
     await mock.module('../../../../src/db/database', () => ({
       getDb: () => ({
-        selectFrom: () => ({
-          select: () => ({
-            where: () => ({
-              executeTakeFirst: () => Promise.resolve({ userId: TEST_USER.id }),
-            }),
-          }),
-        }),
+        selectFrom: () => makeChain({ userId: TEST_USER.id }),
         insertInto: () => ({ values: () => ({ execute: () => Promise.resolve() }) }),
-        updateTable: () => ({
-          set: () => ({
-            where: () => ({
-              where: () => ({ execute: () => Promise.resolve() }),
-            }),
-          }),
-        }),
+        updateTable: () => makeChain(undefined),
       }),
-    }));
-
-    await mock.module('../../../../src/services/chat-service', () => ({
-      verifyChatOwnership: () => Promise.resolve(true),
-    }));
-
-    await mock.module('../../../../src/services/message-service', () => ({
-      createMessage: () => Promise.resolve(),
-      loadChatHistory: () => Promise.resolve([]),
     }));
 
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
@@ -106,31 +104,10 @@ describe('respond-stream abort signal', () => {
 
     await mock.module('../../../../src/db/database', () => ({
       getDb: () => ({
-        selectFrom: () => ({
-          select: () => ({
-            where: () => ({
-              executeTakeFirst: () => Promise.resolve({ userId: TEST_USER.id }),
-            }),
-          }),
-        }),
+        selectFrom: () => makeChain({ userId: TEST_USER.id }),
         insertInto: () => ({ values: () => ({ execute: () => Promise.resolve() }) }),
-        updateTable: () => ({
-          set: () => ({
-            where: () => ({
-              where: () => ({ execute: () => Promise.resolve() }),
-            }),
-          }),
-        }),
+        updateTable: () => makeChain(undefined),
       }),
-    }));
-
-    await mock.module('../../../../src/services/chat-service', () => ({
-      verifyChatOwnership: () => Promise.resolve(true),
-    }));
-
-    await mock.module('../../../../src/services/message-service', () => ({
-      createMessage: () => Promise.resolve(),
-      loadChatHistory: () => Promise.resolve([]),
     }));
 
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);

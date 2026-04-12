@@ -1,11 +1,11 @@
 import { describe, expect, it, mock, afterEach, beforeAll } from 'bun:test';
-import { messageRoutes } from '../../../src/routes/messages';
+import { messageRoutes } from '../../../src/modules/messages/http/message-routes';
 import {
   createApiTestApp,
   createAuthenticatedApiTestApp,
 } from '../../support/harness/create-api-test-app';
 import { getDb } from '../../../src/db/database';
-import { verifyChatOwnership } from '../../../src/services/chat-service';
+import { verifyChatOwnership } from '../../../src/modules/chats/infrastructure/chat-repository';
 
 // Capture real implementation before any test can override mock.module.
 // mock.restore() does NOT revert mock.module() overrides; explicit re-registration is required.
@@ -51,8 +51,8 @@ let restoreAuth: (() => void) | null = null;
 afterEach(async () => {
   restoreAuth?.();
   restoreAuth = null;
-  // Restore the real chat-service module to prevent mock leakage into later test files.
-  await mock.module('../../../src/services/chat-service', () => ({
+  // Restore the real chat-repository module to prevent mock leakage into later test files.
+  await mock.module('../../../src/modules/chats/infrastructure/chat-repository', () => ({
     verifyChatOwnership: realVerifyChatOwnership,
   }));
 });
@@ -98,7 +98,7 @@ describe('POST /messages', () => {
   });
 
   it('accepts user role', async () => {
-    await mock.module('../../../src/services/chat-service', () => ({
+    await mock.module('../../../src/modules/chats/infrastructure/chat-repository', () => ({
       verifyChatOwnership: () => Promise.resolve(true),
     }));
 
@@ -123,7 +123,7 @@ describe('POST /messages', () => {
   });
 
   it('accepts ai role', async () => {
-    await mock.module('../../../src/services/chat-service', () => ({
+    await mock.module('../../../src/modules/chats/infrastructure/chat-repository', () => ({
       verifyChatOwnership: () => Promise.resolve(true),
     }));
 
@@ -148,7 +148,7 @@ describe('POST /messages', () => {
   });
 
   it('returns 404 when chat is not found for the user', async () => {
-    await mock.module('../../../src/services/chat-service', () => ({
+    await mock.module('../../../src/modules/chats/infrastructure/chat-repository', () => ({
       verifyChatOwnership: () => Promise.resolve(false),
     }));
 
