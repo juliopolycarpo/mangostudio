@@ -54,7 +54,7 @@ export function useTextGeneration({
         chatId: activeChatId,
         role: 'user',
         text: prompt,
-        timestamp: new Date(),
+        timestamp: Date.now(),
         interactionMode: 'chat',
       };
 
@@ -63,7 +63,7 @@ export function useTextGeneration({
         chatId: activeChatId,
         role: 'ai',
         text: '',
-        timestamp: new Date(),
+        timestamp: Date.now(),
         isGenerating: true,
         modelName: model,
         interactionMode: 'chat',

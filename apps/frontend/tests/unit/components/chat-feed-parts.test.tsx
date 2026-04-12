@@ -31,7 +31,7 @@ function makeMessage(overrides: Partial<Message> = {}): Message {
     chatId: 'chat-1',
     role: 'ai',
     text: '',
-    timestamp: new Date('2024-01-01'),
+    timestamp: new Date('2024-01-01').getTime(),
     isGenerating: false,
     interactionMode: 'chat',
     ...overrides,

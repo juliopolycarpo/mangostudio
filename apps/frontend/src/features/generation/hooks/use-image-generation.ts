@@ -56,7 +56,7 @@ export function useImageGeneration({
         role: 'user',
         text: prompt,
         referenceImage: previewUrl || undefined,
-        timestamp: new Date(),
+        timestamp: Date.now(),
         interactionMode: 'image',
       };
 
@@ -65,7 +65,7 @@ export function useImageGeneration({
         chatId: activeChatId,
         role: 'ai',
         text: '',
-        timestamp: new Date(),
+        timestamp: Date.now(),
         isGenerating: true,
         modelName: model,
         interactionMode: 'image',
@@ -107,7 +107,7 @@ export function useImageGeneration({
               role: userMessage.role,
               text: userMessage.text,
               referenceImage: userMessage.referenceImage,
-              timestamp: new Date(userMessage.timestamp),
+              timestamp: userMessage.timestamp,
               interactionMode: 'image',
             },
             {
@@ -116,7 +116,7 @@ export function useImageGeneration({
               role: aiMessage.role,
               text: aiMessage.text,
               imageUrl: aiMessage.imageUrl,
-              timestamp: new Date(aiMessage.timestamp),
+              timestamp: aiMessage.timestamp,
               isGenerating: false,
               generationTime: aiMessage.generationTime,
               modelName: aiMessage.modelName,

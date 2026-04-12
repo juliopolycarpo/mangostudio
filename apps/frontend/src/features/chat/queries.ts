@@ -121,7 +121,7 @@ export function useCreateMessageMutation() {
     mutationFn: async (newMessage: Message) => {
       const { data, error } = await client.api.messages.post({
         ...newMessage,
-        timestamp: newMessage.timestamp.getTime(),
+        timestamp: newMessage.timestamp,
       });
       if (error) throw new Error(extractApiError(error.value));
       return data;

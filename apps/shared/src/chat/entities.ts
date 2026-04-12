@@ -23,7 +23,7 @@ export interface Message {
   interactionMode?: InteractionMode;
   imageUrl?: string;
   referenceImage?: string;
-  timestamp: Date;
+  timestamp: number;
   styleParams?: string[];
   generationTime?: string;
   isGenerating?: boolean;

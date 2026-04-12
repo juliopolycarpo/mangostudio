@@ -94,7 +94,7 @@ describe('useImageGeneration — reference image upload failure', () => {
         chatId: 'chat-1',
         role: 'user',
         text: 'a cat',
-        timestamp: new Date(),
+        timestamp: Date.now(),
         interactionMode: 'image',
       },
       aiMessage: {
@@ -103,7 +103,7 @@ describe('useImageGeneration — reference image upload failure', () => {
         role: 'ai',
         text: '',
         imageUrl: 'https://cdn.example.com/gen.png',
-        timestamp: new Date(),
+        timestamp: Date.now(),
         isGenerating: false,
         interactionMode: 'image',
       },

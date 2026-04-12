@@ -32,9 +32,9 @@ export function createMockChat(overrides: Partial<Chat> = {}): Chat {
 }
 
 export function createMockMessage(overrides: Partial<Message> = {}): Message {
-  const timestamp = new Date();
+  const timestamp = Date.now();
   return {
-    id: `msg-${timestamp.getTime()}`,
+    id: `msg-${timestamp}`,
     chatId: 'chat-1',
     role: 'user',
     text: 'Hello, world!',
@@ -45,18 +45,12 @@ export function createMockMessage(overrides: Partial<Message> = {}): Message {
 }
 
 /**
- * Converts internal models to API-compatible JSON structures (e.g., Date to string).
+ * Converts internal models to API-compatible JSON structures.
+ * Timestamps are already epoch ms numbers — no conversion needed.
  */
 export const toApiResponse = {
-  /** Chat timestamps are already epoch ms numbers — no conversion needed. */
-  chat: (chat: Chat) => ({
-    ...chat,
-  }),
-  /** Convert Date timestamp to epoch ms number to match the API contract. */
-  message: (msg: Message) => ({
-    ...msg,
-    timestamp: msg.timestamp.getTime(),
-  }),
+  chat: (chat: Chat) => ({ ...chat }),
+  message: (msg: Message) => ({ ...msg }),
 };
 
 export function createMockGalleryItem(overrides: Partial<GalleryItem> = {}): GalleryItem {

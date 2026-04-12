@@ -18,7 +18,7 @@ function makeMessage(id: string, text: string): Message {
     chatId: 'test-chat',
     role: 'user',
     text,
-    timestamp: new Date(Date.now()),
+    timestamp: Date.now(),
     isGenerating: false,
     interactionMode: 'chat',
   };
