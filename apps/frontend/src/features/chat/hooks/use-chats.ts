@@ -4,7 +4,7 @@ import {
   useCreateChatMutation,
   useUpdateChatMutation,
   useDeleteChatMutation,
-} from './use-chats-query';
+} from '@/features/chat/queries';
 
 export function useChats() {
   const [currentChatId, setCurrentChatId] = useState<string | null>(null);
@@ -18,8 +18,6 @@ export function useChats() {
   const error = queryError ? queryError.message : null;
 
   // Auto-select first chat if none selected.
-  // TODO(react-compiler): currentChatId is also mutated by createChat/delete, so it cannot be
-  // pure derived state. This useEffect+setState is intentional.
   useEffect(() => {
     if (chats.length > 0 && !currentChatId) {
       setCurrentChatId(chats[0].id);

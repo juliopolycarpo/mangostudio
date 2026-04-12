@@ -1,7 +1,7 @@
 import { type ReactNode } from 'react';
-import { Sidebar } from '../Sidebar';
+import { Sidebar } from '@/features/sidebar/components/Sidebar';
 import type { Chat } from '@mangostudio/shared';
-import type { ContextInfo } from '@/hooks/use-text-chat';
+import type { ContextInfo } from '@/features/generation/types';
 
 interface LayoutProps {
   children: ReactNode;

@@ -1,6 +1,6 @@
 import { useInfiniteQuery } from '@tanstack/react-query';
-import { client } from '../lib/api-client';
-import { extractApiError } from '../lib/utils';
+import { client } from '@/lib/api-client';
+import { extractApiError } from '@/lib/utils';
 import type { GalleryItem } from '@mangostudio/shared';
 
 export const galleryKeys = {

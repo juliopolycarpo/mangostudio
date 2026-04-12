@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, renderHook, waitFor } from '../../support/harness/render';
-import { useImageGeneration } from '../../../src/hooks/use-image-generation';
+import { useImageGeneration } from '../../../src/features/generation/hooks/use-image-generation';
 
 vi.mock('../../../src/services/generation-service', () => ({
   uploadReferenceImage: vi.fn(),
@@ -8,11 +8,11 @@ vi.mock('../../../src/services/generation-service', () => ({
 }));
 
 // Suppress React Query retries and console noise in tests
-vi.mock('../../../src/hooks/use-messages-query', () => ({
+vi.mock('../../../src/features/chat/queries', () => ({
   messageKeys: { list: (id: string) => ['messages', id] },
 }));
 
-vi.mock('../../../src/hooks/use-gallery-query', () => ({
+vi.mock('../../../src/features/gallery/queries', () => ({
   galleryKeys: { lists: () => ['gallery'] },
 }));
 

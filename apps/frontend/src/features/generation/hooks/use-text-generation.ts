@@ -1,20 +1,14 @@
 /* global console */
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useCallback } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import type { Message, MessagePart, SSEContextEvent, SSEFallbackEvent } from '@mangostudio/shared';
-import { messageKeys } from './use-messages-query';
-import { respondTextStream } from '../services/generation-service';
-import type { useOptimisticMessages } from './use-optimistic-messages';
-import type { useChats } from './use-chats';
+import type { Message, MessagePart } from '@mangostudio/shared';
+import { messageKeys } from '@/features/chat/queries';
+import { respondTextStream } from '@/services/generation-service';
+import { useChatStream } from '@/features/chat/hooks/use-chat-stream';
+import type { useOptimisticMessages } from '@/features/generation/hooks/use-optimistic-messages';
+import type { useChats } from '@/features/chat/hooks/use-chats';
 
-export type ContextInfo = Pick<
-  SSEContextEvent,
-  'estimatedInputTokens' | 'contextLimit' | 'estimatedUsageRatio' | 'mode' | 'severity'
->;
-
-export type FallbackNotice = Pick<SSEFallbackEvent, 'from' | 'to' | 'reason'>;
-
-interface UseTextChatOptions {
+interface UseTextGenerationOptions {
   chats: ReturnType<typeof useChats>;
   getActiveModel: () => string;
   systemPrompt: string;
@@ -24,8 +18,8 @@ interface UseTextChatOptions {
   currentChatId: string | null;
 }
 
-/** Handles text chat streaming — send prompt, manage SSE stream, optimistic UI. */
-export function useTextChat({
+/** Handles text generation: creates messages, drives SSE stream, updates optimistic UI. */
+export function useTextGeneration({
   chats,
   getActiveModel,
   systemPrompt,
@@ -33,43 +27,15 @@ export function useTextChat({
   thinkingEnabled,
   reasoningEffort,
   currentChatId,
-}: UseTextChatOptions) {
+}: UseTextGenerationOptions) {
   const queryClient = useQueryClient();
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [contextInfo, setContextInfo] = useState<ContextInfo | null>(null);
-  const [fallbackNotice, setFallbackNotice] = useState<FallbackNotice | null>(null);
-  const abortControllerRef = useRef<AbortController | null>(null);
-
-  // Per-chat context info cache — survives chat switches
-  const contextCacheRef = useRef<Map<string, ContextInfo>>(new Map());
-  // Version counter makes contextCache reactive: incrementing it triggers re-renders
-  // in consumers (e.g. Sidebar) that read from the mutable Map.
-  const [, setCacheVersion] = useState(0);
-  // Ref to current chatId to avoid stale closures in seedContextInfo.
-  const currentChatIdRef = useRef(currentChatId);
-  currentChatIdRef.current = currentChatId;
-
-  // Restore cached context when the active chat changes (or clear if none)
-  useEffect(() => {
-    if (currentChatId) {
-      const cached = contextCacheRef.current.get(currentChatId);
-      setContextInfo(cached ?? null);
-    } else {
-      setContextInfo(null);
-    }
-    setFallbackNotice(null);
-  }, [currentChatId]);
-
+  const stream = useChatStream({ currentChatId });
   const { appendOptimisticMessages, updateOptimisticMessage } = optimistic;
-
-  const handleStop = useCallback(() => {
-    abortControllerRef.current?.abort();
-  }, []);
 
   const handleRespond = useCallback(
     async (prompt: string) => {
-      if (abortControllerRef.current) return;
-      setIsGenerating(true);
+      if (stream.abortControllerRef.current) return;
+      stream.setIsGenerating(true);
 
       let activeChatId = chats.currentChatId;
       if (!activeChatId) {
@@ -80,7 +46,6 @@ export function useTextChat({
       }
 
       const model = getActiveModel();
-
       const optimisticUserMsgId = `optimistic-user-${Date.now()}`;
       const optimisticAiMsgId = `optimistic-ai-${Date.now() + 1}`;
 
@@ -107,7 +72,7 @@ export function useTextChat({
       appendOptimisticMessages(activeChatId, [optimisticUserMsg, optimisticAiMsg]);
 
       const controller = new AbortController();
-      abortControllerRef.current = controller;
+      stream.abortControllerRef.current = controller;
       let accumulatedText = '';
       const thinkingSegments: string[] = [];
       let currentThinkingIdx = -1;
@@ -142,7 +107,6 @@ export function useTextChat({
                 break;
               case 'thinking': {
                 if (currentThinkingIdx < 0) {
-                  // Fallback: no thinking_start received (legacy API) — create segment implicitly
                   thinkingSegments.push('');
                   currentThinkingIdx = thinkingSegments.length - 1;
                   accumulatedParts = [...accumulatedParts, { type: 'thinking', text: '' }];
@@ -224,21 +188,17 @@ export function useTextChat({
                 });
                 break;
               }
-              case 'context_info': {
-                const info: ContextInfo = {
+              case 'context_info':
+                stream.updateContextInfo(activeChatId, {
                   estimatedInputTokens: chunk.estimatedInputTokens,
                   contextLimit: chunk.contextLimit,
                   estimatedUsageRatio: chunk.estimatedUsageRatio,
                   mode: chunk.mode,
                   severity: chunk.severity,
-                };
-                setContextInfo(info);
-                contextCacheRef.current.set(activeChatId, info);
-                setCacheVersion((v) => v + 1);
+                });
                 break;
-              }
               case 'fallback_notice':
-                setFallbackNotice({ from: chunk.from, to: chunk.to, reason: chunk.reason });
+                stream.setFallbackNotice({ from: chunk.from, to: chunk.to, reason: chunk.reason });
                 break;
               case 'system_event': {
                 accumulatedParts = [
@@ -280,8 +240,8 @@ export function useTextChat({
           });
         }
       } finally {
-        abortControllerRef.current = null;
-        setIsGenerating(false);
+        stream.abortControllerRef.current = null;
+        stream.setIsGenerating(false);
         void chats.loadChats();
         void queryClient.invalidateQueries({ queryKey: messageKeys.list(activeChatId) });
       }
@@ -295,30 +255,17 @@ export function useTextChat({
       queryClient,
       thinkingEnabled,
       reasoningEffort,
+      stream,
     ]
   );
 
-  const seedContextInfo = useCallback(
-    (chatId: string, info: ContextInfo) => {
-      contextCacheRef.current.set(chatId, info);
-      setCacheVersion((v) => v + 1);
-      // Use ref instead of closure to always read the current chatId,
-      // avoiding the stale-closure race on cold start.
-      if (chatId === currentChatIdRef.current) {
-        setContextInfo(info);
-      }
-    },
-    [] // stable — reads currentChatId via ref
-  );
-
   return {
-    isGenerating,
+    isGenerating: stream.isGenerating,
     handleRespond,
-    handleStop,
-    contextInfo,
-    fallbackNotice,
-    seedContextInfo,
-    /** Per-chat context cache — readable by sidebar for progress indicators. */
-    contextCache: contextCacheRef.current,
+    handleStop: stream.handleStop,
+    contextInfo: stream.contextInfo,
+    fallbackNotice: stream.fallbackNotice,
+    seedContextInfo: stream.seedContextInfo,
+    contextCache: stream.contextCache,
   };
 }

@@ -9,7 +9,7 @@ import {
   useUpdateChatMutation,
   useDeleteChatMutation,
   chatKeys,
-} from '../../../src/hooks/use-chats-query';
+} from '../../../src/features/chat/queries';
 import { useQueryClient } from '@tanstack/react-query';
 import type { Chat } from '@mangostudio/shared';
 import type * as ApiClient from '../../../src/lib/api-client';

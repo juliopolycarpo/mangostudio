@@ -8,7 +8,7 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { screen } from '@testing-library/react';
 import type { Message, MessagePart } from '@mangostudio/shared';
 import { render } from '../../support/harness/render';
-import { ChatFeed } from '../../../src/components/ChatFeed';
+import { ChatFeed } from '../../../src/features/chat/components/ChatFeed';
 
 // The virtualizer depends on DOM layout measurements not available in jsdom.
 // We mock it so every item in the messages array is rendered directly.

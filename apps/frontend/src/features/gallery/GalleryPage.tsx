@@ -2,13 +2,9 @@ import { LayoutGrid, Download, Maximize2, X, Loader2 } from 'lucide-react';
 import type { GalleryItem } from '@mangostudio/shared';
 import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { useGalleryQuery } from '../hooks/use-gallery-query';
-import { useI18n } from '../hooks/use-i18n';
+import { useGalleryQuery } from './queries';
+import { useI18n } from '@/hooks/use-i18n';
 
-/**
- * Gallery page that displays images from ALL chats (global).
- * Uses TanStack Query for infinite loading.
- */
 export function GalleryPage() {
   const [selectedImage, setSelectedImage] = useState<GalleryItem | null>(null);
   const loadMoreRef = useRef<HTMLDivElement>(null);
@@ -69,7 +65,6 @@ export function GalleryPage() {
                 decoding="async"
               />
 
-              {/* Overlay */}
               <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex flex-col justify-end p-4">
                 <p className="text-white text-sm line-clamp-3 font-medium mb-3 drop-shadow-md">
                   {item.prompt}
@@ -104,7 +99,6 @@ export function GalleryPage() {
         </div>
       )}
 
-      {/* Lightbox */}
       <AnimatePresence>
         {selectedImage && (
           <motion.div
