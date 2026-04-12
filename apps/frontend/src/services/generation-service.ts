@@ -1,25 +1,12 @@
 /* global console */
 import type { GenerateImageResponse, GenerateTextResponse } from '@mangostudio/shared';
+import type { StreamChunk } from '@mangostudio/shared/streaming';
+import type { GenerateImageBody, RespondStreamBody } from '@mangostudio/shared/generation';
 import { client } from '../lib/api-client';
 import { getApiBaseUrl } from '../lib/api-base-url';
 
-export interface GenerateImageRequest {
-  chatId: string;
-  prompt: string;
-  systemPrompt?: string;
-  referenceImageUrl?: string;
-  imageQuality?: string;
-  model: string;
-}
-
-export interface RespondTextRequest {
-  chatId: string;
-  prompt: string;
-  model?: string;
-  systemPrompt?: string;
-  thinkingEnabled?: boolean;
-  reasoningEffort?: string;
-}
+export type GenerateImageRequest = Omit<GenerateImageBody, 'model'> & { model: string };
+export type RespondTextRequest = RespondStreamBody;
 
 export async function uploadReferenceImage(file: File): Promise<string | null> {
   try {
@@ -59,27 +46,7 @@ export async function respondText(request: RespondTextRequest): Promise<Generate
   return data as unknown as GenerateTextResponse;
 }
 
-/** A single event received from the SSE streaming endpoint — tagged discriminated union. */
-export type StreamChunk =
-  | { type: 'thinking_start'; done: false }
-  | { type: 'thinking'; text: string; done: false }
-  | { type: 'text'; text: string; done: false }
-  | { type: 'tool_call_started'; callId: string; name: string; done: false }
-  | { type: 'tool_call_completed'; callId: string; name: string; arguments: string; done: false }
-  | { type: 'tool_result'; callId: string; result: unknown; isError?: boolean; done: false }
-  | {
-      type: 'context_info';
-      estimatedInputTokens: number;
-      contextLimit: number;
-      estimatedUsageRatio: number;
-      mode: 'stateful' | 'replay' | 'compacted' | 'degraded';
-      severity: 'normal' | 'info' | 'warning' | 'danger' | 'critical';
-      done: false;
-    }
-  | { type: 'fallback_notice'; from: string; to: string; reason: string; done: false }
-  | { type: 'system_event'; event: string; detail?: string; done: false }
-  | { type: 'done'; done: true; messageId?: string; generationTime?: string }
-  | { type: 'error'; error: string; done: true };
+export type { StreamChunk };
 
 /**
  * Calls POST /api/respond/stream and invokes onChunk for each SSE event.
