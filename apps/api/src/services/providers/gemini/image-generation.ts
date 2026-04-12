@@ -1,19 +1,17 @@
 /**
- * Server-side Gemini image generation service.
- * Moved from client-side src/services/ai.ts with systemInstruction fix.
+ * Gemini image generation service.
  */
 
-import { GoogleGenAI } from '@google/genai';
 import { join } from 'path';
 import { readFileSync, existsSync, mkdirSync } from 'fs';
 import { getResolvedGeminiApiKey } from './secret';
-import { getConfig } from '../../lib/config';
-
-const UPLOADS_DIR = getConfig().uploads.dir;
+import { getConfig } from '../../../lib/config';
+import { createGeminiClient } from './client';
 
 /**
  * Generates an image using the Gemini API.
  *
+ * @param userId - The user ID for key resolution.
  * @param prompt - The user's text prompt.
  * @param systemPrompt - Optional system instruction for the model.
  * @param referenceImageUrl - Optional local URL to a reference image (e.g., /uploads/...).
@@ -21,7 +19,7 @@ const UPLOADS_DIR = getConfig().uploads.dir;
  * @param modelName - Gemini model to use.
  * @returns The saved image URL path (e.g., /uploads/generated-xxx.png).
  */
-export async function generateImage(
+export async function generateGeminiImage(
   userId: string,
   prompt: string,
   systemPrompt?: string,
@@ -34,26 +32,20 @@ export async function generateImage(
   }
 
   const apiKey = await getResolvedGeminiApiKey(userId, modelName);
+  const ai = createGeminiClient(apiKey);
 
-  const ai = new GoogleGenAI({ apiKey });
+  const uploadsDir = getConfig().uploads.dir;
 
-  const parts: Array<
-    | { text: string }
-    | {
-        inlineData: {
-          data: string;
-          mimeType: string;
-        };
-      }
-  > = [{ text: prompt }];
+  const parts: Array<{ text: string } | { inlineData: { data: string; mimeType: string } }> = [
+    { text: prompt },
+  ];
 
-  // If a reference image URL is provided, read it from disk and add as inline data
   if (referenceImageUrl) {
     let base64Data: string;
     let mimeType: string = 'image/png';
 
     if (referenceImageUrl.startsWith('/uploads/')) {
-      const filePath = join(UPLOADS_DIR, referenceImageUrl.replace('/uploads/', ''));
+      const filePath = join(uploadsDir, referenceImageUrl.replace('/uploads/', ''));
       if (existsSync(filePath)) {
         const buffer = readFileSync(filePath);
         base64Data = buffer.toString('base64');
@@ -77,19 +69,12 @@ export async function generateImage(
     }
 
     if (base64Data) {
-      parts.unshift({
-        inlineData: {
-          data: base64Data,
-          mimeType,
-        },
-      });
+      parts.unshift({ inlineData: { data: base64Data, mimeType } });
     }
   }
 
-  // Build generation config
   const config: Record<string, unknown> = {};
 
-  // FIX: systemPrompt is now actually applied as systemInstruction
   if (systemPrompt && systemPrompt.trim()) {
     config.systemInstruction = systemPrompt;
   }
@@ -102,14 +87,9 @@ export async function generateImage(
     if (modelName === 'gemini-3-pro-image-preview' && imageSize === '512px') {
       finalImageSize = '1K';
     }
-    config.imageConfig = {
-      aspectRatio: '1:1',
-      imageSize: finalImageSize,
-    };
+    config.imageConfig = { aspectRatio: '1:1', imageSize: finalImageSize };
   } else if (modelName === 'gemini-2.5-flash-image') {
-    config.imageConfig = {
-      aspectRatio: '1:1',
-    };
+    config.imageConfig = { aspectRatio: '1:1' };
   }
 
   const response = await ai.models.generateContent({
@@ -128,17 +108,14 @@ export async function generateImage(
     throw new Error(`Generation stopped: ${finishReason}`);
   }
 
-  // Extract image from response and save to disk
   for (const part of candidate?.content?.parts || []) {
     if (part.inlineData) {
       if (!part.inlineData.data) continue;
       const imageBuffer = Buffer.from(part.inlineData.data, 'base64');
       const filename = `generated-${Date.now()}-${Math.round(Math.random() * 1e9)}.png`;
-      const filePath = join(UPLOADS_DIR, filename);
+      const filePath = join(uploadsDir, filename);
 
-      // Ensure uploads directory exists
-      mkdirSync(UPLOADS_DIR, { recursive: true });
-
+      mkdirSync(uploadsDir, { recursive: true });
       await Bun.write(filePath, imageBuffer);
 
       return `/uploads/${filename}`;

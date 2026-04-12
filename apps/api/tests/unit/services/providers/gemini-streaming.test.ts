@@ -39,7 +39,7 @@ describe('GeminiProvider.generateTextStream', () => {
     }));
 
     // Also mock the secret resolution so we don't need real API keys
-    await mock.module('../../../../src/services/gemini/secret', () => ({
+    await mock.module('../../../../src/services/providers/gemini/secret', () => ({
       getResolvedGeminiApiKey: () => Promise.resolve('mock-api-key'),
     }));
 
@@ -84,7 +84,7 @@ describe('GeminiProvider.generateTextStream', () => {
       },
     }));
 
-    await mock.module('../../../../src/services/gemini/secret', () => ({
+    await mock.module('../../../../src/services/providers/gemini/secret', () => ({
       getResolvedGeminiApiKey: () => Promise.resolve('mock-api-key'),
     }));
 
@@ -139,7 +139,7 @@ describe('GeminiProvider.generateTextStream', () => {
       },
     }));
 
-    await mock.module('../../../../src/services/gemini/secret', () => ({
+    await mock.module('../../../../src/services/providers/gemini/secret', () => ({
       getResolvedGeminiApiKey: () => Promise.resolve('mock-api-key'),
     }));
 
@@ -181,7 +181,7 @@ describe('GeminiProvider.generateTextStream', () => {
       },
     }));
 
-    await mock.module('../../../../src/services/gemini/secret', () => ({
+    await mock.module('../../../../src/services/providers/gemini/secret', () => ({
       getResolvedGeminiApiKey: () => Promise.resolve('mock-api-key'),
     }));
 
@@ -219,7 +219,7 @@ describe('GeminiProvider.generateTextStream', () => {
       },
     }));
 
-    await mock.module('../../../../src/services/gemini/secret', () => ({
+    await mock.module('../../../../src/services/providers/gemini/secret', () => ({
       getResolvedGeminiApiKey: () => Promise.resolve('mock-api-key'),
     }));
 
@@ -257,7 +257,7 @@ describe('GeminiProvider generateTextStream delegation', () => {
       },
     }));
 
-    await mock.module('../../../../src/services/gemini/secret', () => ({
+    await mock.module('../../../../src/services/providers/gemini/secret', () => ({
       getResolvedGeminiApiKey: () => Promise.resolve('mock-api-key'),
     }));
 

@@ -1,15 +1,15 @@
 /**
  * Runtime Gemini model catalog discovery and in-memory caching per user.
- * Now integrated with multi-connector metadata for model filtering.
+ * Integrated with multi-connector metadata for model filtering.
  */
 
-import { GoogleGenAI } from '@google/genai';
 import type { Model } from '@google/genai';
 import type { ModelCatalogResponse, ModelOption } from '@mangostudio/shared';
-import { isImageModelId } from '@mangostudio/shared/utils/model-detection';
-import { GeminiApiKeyMissingError, getResolvedGeminiApiKey } from './secret';
-import { listSecretMetadata, GEMINI_PROVIDER } from '../secret-store/metadata';
-import { parseStringArray } from '../../utils/json';
+import { isImageModelId } from '../core/capability-detector';
+import { GeminiApiKeyMissingError } from './secret';
+import { listSecretMetadata, GEMINI_PROVIDER } from '../../secret-store/metadata';
+import { parseStringArray } from '../../../utils/json';
+import { createGeminiClient } from './client';
 
 export type GeminiModelCatalogRefreshReason = 'startup' | 'secret-updated' | 'manual' | 'ttl';
 
@@ -75,21 +75,9 @@ interface GeminiModelCatalogService {
 export function createGeminiModelCatalogService(
   dependencies: GeminiModelCatalogServiceDependencies = {}
 ): GeminiModelCatalogService {
-  const getApiKey = dependencies.getApiKey ?? (async (userId) => getResolvedGeminiApiKey(userId));
-  const now = dependencies.now ?? (() => Date.now());
-  const listModels =
-    dependencies.listModels ??
-    (async (apiKey: string): Promise<Model[]> => {
-      const ai = new GoogleGenAI({ apiKey });
-      const pager = await ai.models.list();
-      const models: Model[] = [];
+  const { getApiKey: getApiKeyDep, now: nowDep, listModels: listModelsDep } = dependencies;
 
-      for await (const model of pager) {
-        models.push(model);
-      }
-
-      return models;
-    });
+  const now = nowDep ?? (() => Date.now());
 
   const fullCatalogs = new Map<string, ModelOption[]>();
   const snapshots = new Map<string, ModelCatalogResponse>();
@@ -149,6 +137,24 @@ export function createGeminiModelCatalogService(
     });
   };
 
+  // Resolve lazily to avoid circular dependency at module load time
+  const resolveApiKey = async (userId: string): Promise<string> => {
+    if (getApiKeyDep) return getApiKeyDep(userId);
+    const { getResolvedGeminiApiKey } = await import('./secret');
+    return getResolvedGeminiApiKey(userId);
+  };
+
+  const fetchModels = async (apiKey: string): Promise<Model[]> => {
+    if (listModelsDep) return listModelsDep(apiKey);
+    const ai = createGeminiClient(apiKey);
+    const pager = await ai.models.list();
+    const models: Model[] = [];
+    for await (const model of pager) {
+      models.push(model);
+    }
+    return models;
+  };
+
   return {
     async refreshGeminiModelCatalog(
       userId: string,
@@ -159,8 +165,8 @@ export function createGeminiModelCatalogService(
 
       const refreshPromise = (async () => {
         try {
-          const apiKey = await getApiKey(userId);
-          const discovered = (await listModels(apiKey))
+          const apiKey = await resolveApiKey(userId);
+          const discovered = (await fetchModels(apiKey))
             .map(normalizeModelOption)
             .sort((left, right) => left.displayName.localeCompare(right.displayName));
 
@@ -217,7 +223,6 @@ export function createGeminiModelCatalogService(
     async getGeminiModelCatalog(userId: string): Promise<ModelCatalogResponse> {
       if (getFullCatalog(userId).length > 0) {
         await recalculateSnapshot(userId);
-        // Background refresh if stale — user sees current data while it updates
         if (isStale(userId) && !refreshPromises.has(userId)) {
           this.refreshGeminiModelCatalog(userId, 'ttl').catch((err: unknown) => {
             const message = err instanceof Error ? err.message : String(err);
@@ -225,7 +230,6 @@ export function createGeminiModelCatalogService(
           });
         }
       } else {
-        // Cold start: await the first refresh — nothing to show without it
         return this.refreshGeminiModelCatalog(userId, 'ttl');
       }
       return getSnapshot(userId);
