@@ -1,5 +1,6 @@
 /**
  * Gemini-specific backward-compatible alias routes.
+ * Delegates to existing Gemini service for legacy API consumers.
  */
 
 import { Elysia, t } from 'elysia';
@@ -12,25 +13,26 @@ import {
   deleteGeminiConnector,
   updateConnectorModels,
   refreshGeminiModelCatalog,
-} from '../../services/gemini';
-import { getUnifiedModelCatalog, invalidateUnifiedCatalog } from '../../services/providers/catalog';
-import { connectorBodySchema, handleSecretRouteError } from './connectors';
-import { requireAuth } from '../../plugins/auth-middleware';
+} from '../../../services/gemini';
+import {
+  getUnifiedModelCatalog,
+  invalidateUnifiedCatalog,
+} from '../../../services/providers/catalog';
+import { AddConnectorBodySchema } from '@mangostudio/shared/connectors';
+import { requireAuth } from '../../../plugins/auth-middleware';
+import { handleConnectorError } from './connectors-routes';
 
 export const geminiAliasRoutes = new Elysia()
   .use(requireAuth)
 
-  /** Returns Gemini connectors only. */
   .get('/secrets/gemini', async ({ user }): Promise<ConnectorStatus> => {
     return getGeminiSecretStatus(user?.id ?? '');
   })
 
-  /** Returns the Gemini model catalog (also available via unified /models). */
   .get('/models/gemini', async ({ user }): Promise<ModelCatalogResponse> => {
     return getUnifiedModelCatalog(user?.id ?? '');
   })
 
-  /** Adds a new Gemini connector (alias). */
   .post(
     '/connectors/gemini',
     async ({ body, set, user }): Promise<Connector | ApiErrorResponse> => {
@@ -40,13 +42,12 @@ export const geminiAliasRoutes = new Elysia()
         invalidateUnifiedCatalog(user?.id ?? '');
         return connector;
       } catch (error) {
-        return handleSecretRouteError(error, set);
+        return handleConnectorError(error, set);
       }
     },
-    { body: connectorBodySchema }
+    { body: AddConnectorBodySchema }
   )
 
-  /** Deletes a Gemini connector (alias). */
   .delete(
     '/connectors/gemini/:id',
     async ({ params, set, user }): Promise<{ success: true } | ApiErrorResponse> => {
@@ -54,16 +55,15 @@ export const geminiAliasRoutes = new Elysia()
         await deleteGeminiConnector(user?.id ?? '', params.id);
         await refreshGeminiModelCatalog(user?.id ?? '', 'secret-updated');
         invalidateUnifiedCatalog(user?.id ?? '');
-        console.warn(`[settings] DEL connector ${params.id}`);
+        console.warn(`[connectors] DEL connector ${params.id}`);
         return { success: true };
       } catch (error) {
-        return handleSecretRouteError(error, set);
+        return handleConnectorError(error, set);
       }
     },
     { params: t.Object({ id: t.String() }) }
   )
 
-  /** Updates enabled models for a Gemini connector (alias). */
   .put(
     '/connectors/gemini/:id/models',
     async ({ params, body, set, user }): Promise<{ success: true } | ApiErrorResponse> => {
@@ -72,7 +72,7 @@ export const geminiAliasRoutes = new Elysia()
         invalidateUnifiedCatalog(user?.id ?? '');
         return { success: true };
       } catch (error) {
-        return handleSecretRouteError(error, set);
+        return handleConnectorError(error, set);
       }
     },
     {

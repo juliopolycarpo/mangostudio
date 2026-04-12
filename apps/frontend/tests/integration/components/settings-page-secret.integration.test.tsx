@@ -1,6 +1,6 @@
 import userEvent from '@testing-library/user-event';
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
-import { ConnectorsSettings } from '../../../src/components/settings/ConnectorsSettings';
+import { ConnectorsSettings } from '../../../src/features/settings/connectors';
 import { EMPTY_MODEL_CATALOG } from '../../../src/utils/model-utils';
 import { render, screen, waitFor } from '../../support/harness/render';
 import { createFetchScenario } from '../../support/mocks/create-fetch-scenario';
