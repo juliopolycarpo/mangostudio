@@ -363,7 +363,7 @@ export async function* streamAgentTurnWithResponsesAPI(
             type: 'tool_call_completed',
             callId: mapped.callId,
             name: mapped.name,
-            arguments: ev.arguments ?? '',
+            arguments: ev.arguments,
           };
         }
         break;

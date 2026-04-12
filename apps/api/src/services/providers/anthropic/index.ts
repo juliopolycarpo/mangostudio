@@ -190,7 +190,7 @@ const anthropicProvider: AIProvider = {
     if (thinkingEnabled) {
       params.thinking = {
         type: 'enabled',
-        budget_tokens: budgetMap[effort] ?? 2048,
+        budget_tokens: budgetMap[effort],
       };
     }
 

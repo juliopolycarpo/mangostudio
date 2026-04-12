@@ -94,7 +94,7 @@ export async function* generateGeminiTextStream(
     const levelMap = { low: 'LOW', medium: 'MEDIUM', high: 'HIGH' } as const;
     config.thinkingConfig = {
       includeThoughts: true,
-      thinkingLevel: levelMap[generationConfig.reasoningEffort] ?? 'MEDIUM',
+      thinkingLevel: levelMap[generationConfig.reasoningEffort],
     };
   }
 

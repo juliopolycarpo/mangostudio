@@ -113,7 +113,7 @@ export function buildGeminiInteractionsReplay(
 
   for (const turn of history) {
     if (!turn.parts || turn.parts.length === 0) {
-      if (!turn.text?.trim()) continue;
+      if (!turn.text.trim()) continue;
       turns.push({
         role: turn.role === 'ai' ? 'model' : 'user',
         content: turn.text,
@@ -123,7 +123,7 @@ export function buildGeminiInteractionsReplay(
 
     // User turns always emit plain text
     if (turn.role === 'user') {
-      if (!turn.text?.trim()) continue;
+      if (!turn.text.trim()) continue;
       turns.push({ role: 'user', content: turn.text });
       continue;
     }

@@ -103,6 +103,7 @@ export async function* streamOAICompatAgentTurn(
       if (req.signal?.aborted) break;
 
       const choice = chunk.choices[0];
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- choices array may be empty at runtime
       if (!choice) continue;
 
       // Cast to ExtendedChatDelta — the SDK type doesn't model DeepSeek/OpenRouter reasoning fields

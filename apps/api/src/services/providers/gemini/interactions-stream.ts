@@ -119,7 +119,7 @@ export async function* streamGeminiAgentTurn(req: AgentTurnRequest): AsyncIterab
   if (req.generationConfig?.thinkingEnabled) {
     const levelMap = { low: 'low', medium: 'medium', high: 'high' } as const;
     interactionParams.generation_config = {
-      thinking_level: levelMap[req.generationConfig.reasoningEffort] ?? 'medium',
+      thinking_level: levelMap[req.generationConfig.reasoningEffort],
       thinking_summaries: 'auto',
     };
   }
@@ -134,7 +134,6 @@ export async function* streamGeminiAgentTurn(req: AgentTurnRequest): AsyncIterab
 
     const isCursorError =
       canContinue &&
-      prevState !== null &&
       (/not found/i.test(errMsg) ||
         /expired/i.test(errMsg) ||
         /invalid.*interaction/i.test(errMsg) ||
@@ -181,7 +180,7 @@ export async function* streamGeminiAgentTurn(req: AgentTurnRequest): AsyncIterab
         if (req.generationConfig?.thinkingEnabled) {
           const levelMap = { low: 'low', medium: 'medium', high: 'high' } as const;
           retryParams.generation_config = {
-            thinking_level: levelMap[req.generationConfig.reasoningEffort] ?? 'medium',
+            thinking_level: levelMap[req.generationConfig.reasoningEffort],
             thinking_summaries: 'auto',
           };
         }

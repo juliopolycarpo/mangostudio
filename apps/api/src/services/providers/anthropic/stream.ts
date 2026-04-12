@@ -75,7 +75,7 @@ export async function* streamAnthropicAgentTurn(
     toolDefinitions: req.toolDefinitions ?? [],
     messages,
     thinkingConfig: thinkingEnabled
-      ? { type: 'enabled', budget_tokens: budgetMap[effort] ?? 2048 }
+      ? { type: 'enabled', budget_tokens: budgetMap[effort] }
       : undefined,
   });
 
