@@ -1,6 +1,6 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { useApp } from '@/lib/app-context';
-import { ConnectorsSettings } from '@/components/settings/ConnectorsSettings';
+import { ConnectorsSettings } from '@/features/settings/connectors';
 
 export const Route = createFileRoute('/_authenticated/settings/connectors')({
   component: ConnectorsSettingsRoute,

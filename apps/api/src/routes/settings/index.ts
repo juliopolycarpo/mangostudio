@@ -6,9 +6,9 @@
 
 import { type Elysia } from 'elysia';
 import '../../services/providers'; // ensure all providers are registered
-import { connectorRoutes } from './connectors';
+import { connectorRoutes } from '../../modules/connectors/http/connectors-routes';
+import { geminiAliasRoutes } from '../../modules/connectors/http/gemini-aliases-routes';
 import { modelRoutes } from './models';
-import { geminiAliasRoutes } from './gemini-aliases';
 
 export const settingsRoutes = (app: Elysia) =>
   app.group('/settings', (app) => app.use(connectorRoutes).use(modelRoutes).use(geminiAliasRoutes));
