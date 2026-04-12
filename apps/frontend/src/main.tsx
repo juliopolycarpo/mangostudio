@@ -3,6 +3,7 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { RouterProvider } from '@tanstack/react-router';
 import { router } from './router';
+import { queryClient } from './lib/query-client';
 import { authClient } from './lib/auth-client';
 import './index.css';
 
@@ -26,6 +27,7 @@ function App() {
           user: session?.user ?? null,
           isPending: false,
         },
+        queryClient,
       }}
     />
   );

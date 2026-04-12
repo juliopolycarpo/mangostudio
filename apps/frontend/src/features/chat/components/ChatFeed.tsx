@@ -6,11 +6,6 @@ import {
   Bookmark,
   ImageOff,
   Image,
-  Brain,
-  ChevronDown,
-  Wrench,
-  CheckCircle,
-  AlertCircle,
   Copy,
   Check,
   ArrowDown,
@@ -21,257 +16,11 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { useI18n } from '@/hooks/use-i18n';
 import { MarkdownContent } from '@/components/MarkdownContent';
-
-interface ThinkingBlockProps {
-  messageId: string;
-  text: string;
-  isStreaming: boolean;
-  segmentIndex?: number;
-}
-
-interface ThinkingUiState {
-  expanded: boolean;
-  scrollTop: number;
-  shouldAutoFollow: boolean;
-}
-
-const thinkingUiStateByMessage = new Map<string, ThinkingUiState>();
+import { MessageParts } from './MessageParts';
 
 function isNearBottom(element: HTMLElement): boolean {
   return element.scrollHeight - element.scrollTop - element.clientHeight <= 24;
 }
-
-function ThinkingBlock({ messageId, text, isStreaming, segmentIndex = 0 }: ThinkingBlockProps) {
-  const { t } = useI18n();
-  const initialUiState = useRef<ThinkingUiState>(
-    thinkingUiStateByMessage.get(messageId) ?? {
-      expanded: isStreaming,
-      scrollTop: 0,
-      shouldAutoFollow: isStreaming,
-    }
-  );
-  const [expanded, setExpanded] = useState(initialUiState.current.expanded);
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const uiStateRef = useRef(initialUiState.current);
-  const previousStreamingRef = useRef(isStreaming);
-
-  const updateUiState = useCallback(
-    (partial: Partial<ThinkingUiState>) => {
-      uiStateRef.current = {
-        ...uiStateRef.current,
-        ...partial,
-      };
-      thinkingUiStateByMessage.set(messageId, uiStateRef.current);
-    },
-    [messageId]
-  );
-
-  useEffect(() => {
-    if (!previousStreamingRef.current && isStreaming) {
-      setExpanded(true);
-      updateUiState({ expanded: true, shouldAutoFollow: true });
-    }
-
-    if (previousStreamingRef.current && !isStreaming) {
-      setExpanded(false);
-      updateUiState({ expanded: false, shouldAutoFollow: false });
-    }
-
-    previousStreamingRef.current = isStreaming;
-  }, [isStreaming, updateUiState]);
-
-  useLayoutEffect(() => {
-    if (!expanded || !scrollRef.current) return;
-
-    const element = scrollRef.current;
-    const maxScrollTop = Math.max(0, element.scrollHeight - element.clientHeight);
-
-    if (isStreaming && uiStateRef.current.shouldAutoFollow) {
-      element.scrollTop = maxScrollTop;
-      updateUiState({ scrollTop: element.scrollTop });
-      return;
-    }
-
-    element.scrollTop = Math.min(uiStateRef.current.scrollTop, maxScrollTop);
-  }, [expanded, isStreaming, text, updateUiState]);
-
-  const handleToggle = () => {
-    const nextExpanded = !expanded;
-    setExpanded(nextExpanded);
-    updateUiState({ expanded: nextExpanded });
-  };
-
-  const handleScroll = (event: React.UIEvent<HTMLDivElement>) => {
-    const element = event.currentTarget;
-    updateUiState({
-      scrollTop: element.scrollTop,
-      shouldAutoFollow: isStreaming ? isNearBottom(element) : uiStateRef.current.shouldAutoFollow,
-    });
-  };
-
-  return (
-    <div className="mb-3">
-      <button
-        type="button"
-        onClick={handleToggle}
-        className="glass-surface flex items-center gap-2 text-xs text-on-surface-variant/70
-                   py-1.5 px-3 rounded-full w-fit border border-outline-variant/20
-                   hover:border-outline-variant/40 hover:text-on-surface-variant
-                   transition-all duration-200 cursor-pointer"
-      >
-        <Brain size={11} className="text-primary/70" />
-        <span className="tracking-wide">
-          {isStreaming
-            ? segmentIndex > 0
-              ? t.thinking.streamingContinued
-              : t.thinking.streaming
-            : segmentIndex > 0
-              ? t.thinking.labelContinued
-              : t.thinking.label}
-        </span>
-        <ChevronDown
-          size={11}
-          className={`transition-transform duration-300 text-primary/50 ${expanded ? 'rotate-180' : ''}`}
-        />
-      </button>
-      <AnimatePresence initial={false}>
-        {expanded && (
-          <motion.div
-            key="thinking-body"
-            initial={{ opacity: 0, height: 0, y: -4 }}
-            animate={{ opacity: 1, height: 'auto', y: 0 }}
-            exit={{ opacity: 0, height: 0, y: -6 }}
-            transition={{ duration: 0.22, ease: 'easeOut' }}
-            className="glass-surface-subtle mt-1.5 rounded-xl border border-outline-variant/15 overflow-hidden"
-          >
-            <div
-              ref={scrollRef}
-              onScroll={handleScroll}
-              className="p-4 max-h-48 overflow-y-auto app-scrollbar"
-            >
-              <div className="text-xs text-on-surface-variant/60 leading-relaxed markdown-content--thinking">
-                <MarkdownContent
-                  content={text}
-                  isStreaming={isStreaming}
-                  copyCodeLabel={t.chat.copyCode}
-                  codeCopiedLabel={t.chat.codeCopied}
-                />
-                {isStreaming && (
-                  <span className="inline-block w-0.5 h-[1em] bg-primary/40 ml-0.5 align-middle animate-blink" />
-                )}
-              </div>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// ToolCallBlock
-// ---------------------------------------------------------------------------
-
-interface ToolCallBlockProps {
-  name: string;
-  args: Record<string, unknown>;
-  result?: string | null;
-  isError?: boolean;
-  isPending?: boolean;
-}
-
-function ToolCallBlock({ name, args, result, isError, isPending }: ToolCallBlockProps) {
-  const { t } = useI18n();
-  const [expanded, setExpanded] = useState(false);
-
-  let parsedResult: unknown = null;
-  if (result) {
-    try {
-      parsedResult = JSON.parse(result);
-    } catch {
-      parsedResult = result;
-    }
-  }
-
-  return (
-    <div className="mb-2">
-      <button
-        type="button"
-        onClick={() => setExpanded((v) => !v)}
-        className={`glass-surface flex items-center gap-2 text-xs py-1.5 px-3 rounded-full w-fit border
-                   transition-all duration-200 cursor-pointer ${
-                     isError
-                       ? 'border-error/30 text-error'
-                       : isPending
-                         ? 'border-primary/30 text-primary'
-                         : 'border-success/25 text-success'
-                   }`}
-      >
-        {isPending ? (
-          <Wrench size={11} className="animate-pulse" />
-        ) : isError ? (
-          <AlertCircle size={11} />
-        ) : (
-          <CheckCircle size={11} />
-        )}
-        <span className="font-mono tracking-wide">
-          {isPending ? t.tools.calling : isError ? t.tools.error : t.tools.done}{' '}
-          <span className="opacity-70">{name}()</span>
-        </span>
-        <ChevronDown
-          size={11}
-          className={`transition-transform duration-300 opacity-50 ${expanded ? 'rotate-180' : ''}`}
-        />
-      </button>
-
-      <AnimatePresence initial={false}>
-        {expanded && (
-          <motion.div
-            key="tool-body"
-            initial={{ opacity: 0, height: 0, y: -4 }}
-            animate={{ opacity: 1, height: 'auto', y: 0 }}
-            exit={{ opacity: 0, height: 0, y: -6 }}
-            transition={{ duration: 0.2, ease: 'easeOut' }}
-            className="glass-surface-subtle mt-1.5 rounded-xl border border-outline-variant/15 overflow-hidden"
-          >
-            <div className="p-4 space-y-3 text-xs font-mono">
-              {Object.keys(args).length > 0 && (
-                <div>
-                  <p className="text-on-surface-variant/50 uppercase tracking-wider text-[10px] mb-1">
-                    args
-                  </p>
-                  <pre className="text-on-surface-variant/70 whitespace-pre-wrap leading-relaxed">
-                    {JSON.stringify(args, null, 2)}
-                  </pre>
-                </div>
-              )}
-              {parsedResult !== null && (
-                <div>
-                  <p
-                    className={`uppercase tracking-wider text-[10px] mb-1 ${isError ? 'text-error/50' : 'text-on-surface-variant/50'}`}
-                  >
-                    {isError ? 'error' : 'result'}
-                  </p>
-                  <pre
-                    className={`whitespace-pre-wrap leading-relaxed ${isError ? 'text-error/80' : 'text-on-surface-variant/70'}`}
-                  >
-                    {typeof parsedResult === 'string'
-                      ? parsedResult
-                      : JSON.stringify(parsedResult, null, 2)}
-                  </pre>
-                </div>
-              )}
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// CopyMessageButton — copies full message raw markdown to clipboard
-// ---------------------------------------------------------------------------
 
 function extractRawMarkdown(msg: Message): string {
   const parts: MessagePart[] = msg.parts ?? (msg.text ? [{ type: 'text', text: msg.text }] : []);
@@ -316,118 +65,6 @@ function CopyMessageButton({
   );
 }
 
-// ---------------------------------------------------------------------------
-// SystemEventMarker — inline timeline marker for recoverable events
-// ---------------------------------------------------------------------------
-
-function SystemEventMarker({ event, detail }: { event: string; detail?: string }) {
-  const { t } = useI18n();
-
-  let label: string;
-  if (event === 'cursor_lost') {
-    label = t.chat.cursorLost.replace('{detail}', detail ?? '');
-  } else {
-    label = detail ?? event;
-  }
-
-  return (
-    <div className="flex items-center gap-2 py-2 text-xs text-on-surface-variant/60 my-1">
-      <div className="flex-1 h-px bg-outline-variant/20" />
-      <span className="font-medium whitespace-nowrap">{label}</span>
-      <div className="flex-1 h-px bg-outline-variant/20" />
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// MessageParts — renders all parts in interleaved chronological order
-// ---------------------------------------------------------------------------
-
-function MessageParts({
-  parts,
-  messageId,
-  isStreaming,
-}: {
-  parts: MessagePart[];
-  messageId: string;
-  isStreaming: boolean;
-}) {
-  const { t } = useI18n();
-  let thinkingIdx = 0;
-
-  return (
-    <>
-      {parts.map((part, idx) => {
-        switch (part.type) {
-          case 'thinking': {
-            const segIdx = thinkingIdx++;
-            const blockId = `${messageId}-thinking-${segIdx}`;
-            const isLastThinking =
-              isStreaming && !parts.slice(idx + 1).some((p) => p.type === 'thinking');
-            return (
-              <ThinkingBlock
-                key={blockId}
-                messageId={blockId}
-                text={part.text}
-                isStreaming={isLastThinking}
-                segmentIndex={segIdx}
-              />
-            );
-          }
-          case 'tool_call': {
-            const result = parts.find(
-              (p) => p.type === 'tool_result' && p.toolCallId === part.toolCallId
-            ) as Extract<MessagePart, { type: 'tool_result' }> | undefined;
-            return (
-              <ToolCallBlock
-                key={part.toolCallId}
-                name={part.name}
-                args={part.args}
-                result={result?.content ?? null}
-                isError={result?.isError}
-                isPending={isStreaming && !result}
-              />
-            );
-          }
-          case 'tool_result':
-            // Rendered inline with tool_call above — skip
-            return null;
-          case 'text':
-            return (
-              <div
-                key={`text-${idx}`}
-                className="bg-surface-container-low p-5 rounded-2xl border border-outline-variant/10 font-body text-sm leading-relaxed text-on-surface max-w-2xl"
-              >
-                <MarkdownContent
-                  content={part.text}
-                  isStreaming={isStreaming}
-                  copyCodeLabel={t.chat.copyCode}
-                  codeCopiedLabel={t.chat.codeCopied}
-                />
-                {isStreaming && idx === parts.length - 1 && (
-                  <span className="inline-block w-0.5 h-[1em] bg-primary ml-0.5 align-middle animate-blink" />
-                )}
-              </div>
-            );
-          case 'system_event':
-            return <SystemEventMarker key={`se-${idx}`} event={part.event} detail={part.detail} />;
-          case 'error':
-            return (
-              <div
-                key={`error-${idx}`}
-                className="bg-error/10 border border-error/20 p-4 rounded-xl text-error text-sm font-body"
-              >
-                {part.text}
-              </div>
-            );
-          default:
-            return null;
-        }
-      })}
-    </>
-  );
-}
-
 export function ChatFeed({ chatId, messages }: { chatId: string | null; messages: Message[] }) {
   const { t } = useI18n();
   const [imageErrors, setImageErrors] = useState<Record<string, boolean>>({});
@@ -456,28 +93,22 @@ export function ChatFeed({ chatId, messages }: { chatId: string | null; messages
 
   useLayoutEffect(() => {
     if (!pendingScrollToBottomRef.current || !parentRef.current || messages.length === 0) return;
-
     const animationFrameId = requestAnimationFrame(() => {
       const element = parentRef.current;
       if (!element) return;
-
       element.scrollTop = element.scrollHeight;
       pendingScrollToBottomRef.current = false;
     });
-
     return () => cancelAnimationFrame(animationFrameId);
   }, [chatId, messages.length, rowVirtualizer]);
 
   useLayoutEffect(() => {
     const isNewGeneratingMessage =
       latestMessage?.isGenerating && previousGeneratingMessageIdRef.current !== latestMessage.id;
-
     if (isNewGeneratingMessage) {
       feedShouldAutoFollowRef.current = true;
     }
-
     if (!latestMessage?.isGenerating || !parentRef.current) return;
-
     if (feedShouldAutoFollowRef.current) {
       parentRef.current.scrollTop = parentRef.current.scrollHeight;
     }
@@ -503,14 +134,14 @@ export function ChatFeed({ chatId, messages }: { chatId: string | null; messages
     setImageErrors((prev) => ({ ...prev, [id]: true }));
   };
 
-  const handleDownload = (imageUrl: string) => {
+  const handleDownload = useCallback((imageUrl: string) => {
     const link = document.createElement('a');
     link.href = imageUrl;
     link.download = `gemini-art-${Date.now()}.png`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-  };
+  }, []);
 
   return (
     <section
@@ -521,10 +152,8 @@ export function ChatFeed({ chatId, messages }: { chatId: string | null; messages
       {messages.length === 0 && (
         <div className="flex flex-col items-center justify-center h-full text-on-surface-variant/50">
           <Sparkles size={48} className="mb-4 opacity-50" />
-          <p className="text-lg font-headline">Start a conversation or create an image</p>
-          <p className="text-xs mt-2 text-on-surface-variant/40">
-            Switch to Create Image mode to generate art
-          </p>
+          <p className="text-lg font-headline">{t.chat.feed.emptyTitle}</p>
+          <p className="text-xs mt-2 text-on-surface-variant/40">{t.chat.feed.emptySubtitle}</p>
         </div>
       )}
 
@@ -568,7 +197,7 @@ export function ChatFeed({ chatId, messages }: { chatId: string | null; messages
                             <div className="w-full aspect-square bg-surface-container-high flex flex-col items-center justify-center text-on-surface-variant/50 p-4 text-center">
                               <ImageOff size={24} className="mb-2" />
                               <span className="text-[10px] font-label">
-                                Image no longer available
+                                {t.chat.feed.imageUnavailable}
                               </span>
                             </div>
                           ) : (
@@ -589,11 +218,10 @@ export function ChatFeed({ chatId, messages }: { chatId: string | null; messages
                             codeCopiedLabel={t.chat.codeCopied}
                           />
                         </div>
-                        {/* Badge for image prompts */}
                         {isImageTurn && (
                           <span className="flex items-center gap-1 text-[10px] font-bold text-primary/70 font-label px-1">
                             <Image size={11} />
-                            Create Image
+                            {t.chat.feed.createImageBadge}
                           </span>
                         )}
                       </div>
@@ -602,7 +230,6 @@ export function ChatFeed({ chatId, messages }: { chatId: string | null; messages
                       </span>
                     </>
                   ) : (
-                    /* ── AI message ── */
                     <div className="group flex flex-col gap-4 w-full">
                       <div className="flex items-center gap-3">
                         <div className="w-6 h-6 rounded-full bg-primary-container flex items-center justify-center">
@@ -610,7 +237,15 @@ export function ChatFeed({ chatId, messages }: { chatId: string | null; messages
                         </div>
                         <span className="text-xs font-bold font-headline tracking-wide uppercase text-primary">
                           {msg.modelName
-                            ? `${msg.isGenerating ? (isImageTurn ? 'Generating' : 'Thinking') : isImageTurn ? 'Generated' : 'Replied'} with: ${msg.modelName}`
+                            ? `${
+                                msg.isGenerating
+                                  ? isImageTurn
+                                    ? t.chat.feed.statusGenerating
+                                    : t.chat.feed.statusThinking
+                                  : isImageTurn
+                                    ? t.chat.feed.statusGenerated
+                                    : t.chat.feed.statusReplied
+                              } with: ${msg.modelName}`
                             : 'Gemini'}
                         </span>
                         {!msg.isGenerating && !isImageTurn && (
@@ -628,7 +263,6 @@ export function ChatFeed({ chatId, messages }: { chatId: string | null; messages
                       </div>
 
                       {msg.isGenerating ? (
-                        /* Loading / streaming state */
                         <div className="flex flex-col gap-3 py-4 pl-9">
                           {(() => {
                             const parts: MessagePart[] =
@@ -642,7 +276,9 @@ export function ChatFeed({ chatId, messages }: { chatId: string | null; messages
                               return (
                                 <>
                                   <span className="text-sm font-medium text-on-surface animate-pulse">
-                                    {isImageTurn ? 'Generating image...' : 'Thinking...'}
+                                    {isImageTurn
+                                      ? t.chat.feed.generatingImage
+                                      : t.thinking.streaming}
                                   </span>
                                   {isImageTurn ? (
                                     <div className="h-1 w-24 bg-surface-container-highest rounded-full overflow-hidden">
@@ -663,12 +299,13 @@ export function ChatFeed({ chatId, messages }: { chatId: string | null; messages
                           })()}
                         </div>
                       ) : isImageTurn ? (
-                        /* ── Image turn result ── */
                         <div className="flex flex-col gap-4 w-full">
                           {msg.generationTime && (
                             <div className="flex items-center gap-2 text-xs text-on-surface-variant bg-surface-container-lowest py-2 px-3 rounded-lg w-fit border border-outline-variant/10">
                               <Sparkles size={12} className="text-primary" />
-                              <span>Thought for {msg.generationTime}</span>
+                              <span>
+                                {t.chat.feed.thoughtFor.replace('{time}', msg.generationTime)}
+                              </span>
                             </div>
                           )}
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-start w-full">
@@ -678,7 +315,7 @@ export function ChatFeed({ chatId, messages }: { chatId: string | null; messages
                                   <div className="w-full h-full flex flex-col items-center justify-center text-on-surface-variant/50 p-6 text-center bg-surface-container-high">
                                     <ImageOff size={48} className="mb-4 opacity-50" />
                                     <p className="font-headline font-bold mb-2">
-                                      Image no longer available
+                                      {t.chat.feed.imageUnavailable}
                                     </p>
                                     <p className="text-xs font-body">
                                       (Have you deleted or moved the image?)
@@ -691,7 +328,7 @@ export function ChatFeed({ chatId, messages }: { chatId: string | null; messages
                                       alt="Generated"
                                       className="w-full h-full object-cover grayscale-[20%] group-hover:grayscale-0 transition-all duration-700"
                                       onError={() => handleImageError(`gen-${msg.id}`)}
-                                      onLoad={() => rowVirtualizer.measureElement(null)} // re-measure after load
+                                      onLoad={() => rowVirtualizer.measureElement(null)}
                                     />
                                     <div className="absolute bottom-4 left-4 right-4 glass-panel rounded-xl p-3 flex justify-between items-center translate-y-12 opacity-0 group-hover:translate-y-0 group-hover:opacity-100 transition-all duration-300">
                                       <div className="flex gap-2">
@@ -700,32 +337,31 @@ export function ChatFeed({ chatId, messages }: { chatId: string | null; messages
                                             if (msg.imageUrl) handleDownload(msg.imageUrl);
                                           }}
                                           className="w-9 h-9 rounded-lg flex items-center justify-center bg-surface-container-highest/40 hover:bg-primary/20 text-on-surface transition-colors"
-                                          title="Download"
+                                          title={t.chat.feed.download}
                                         >
                                           <Download size={16} />
                                         </button>
                                         <button
                                           className="w-9 h-9 rounded-lg flex items-center justify-center bg-surface-container-highest/40 hover:bg-primary/20 text-on-surface transition-colors"
-                                          title="Save to Gallery"
+                                          title={t.chat.feed.saveToGallery}
                                         >
                                           <Bookmark size={16} />
                                         </button>
                                       </div>
                                       <button className="px-4 py-1.5 rounded-lg bg-primary/10 hover:bg-primary/20 text-primary text-xs font-bold transition-colors">
-                                        Regenerate
+                                        {t.chat.feed.regenerate}
                                       </button>
                                     </div>
                                   </>
                                 )}
                               </div>
                             )}
-                            {/* Style params panel */}
                             <div className="space-y-6">
                               {msg.styleParams && msg.styleParams.length > 0 && (
                                 <div className="bg-surface-container-low p-6 rounded-xl border border-outline-variant/5">
                                   <h3 className="font-headline text-sm font-bold mb-4 flex items-center gap-2 text-on-surface">
                                     <Sparkles className="text-primary" size={16} />
-                                    Style Parameters
+                                    {t.chat.feed.styleParams}
                                   </h3>
                                   <div className="flex flex-wrap gap-2">
                                     {msg.styleParams.map((param, i) => (
@@ -740,7 +376,6 @@ export function ChatFeed({ chatId, messages }: { chatId: string | null; messages
                                 </div>
                               )}
                               {msg.text && !msg.imageUrl && (
-                                /* Error message when generation fails */
                                 <div className="bg-error/10 border border-error/20 p-4 rounded-xl text-error text-sm font-body">
                                   {msg.text}
                                 </div>
@@ -760,12 +395,13 @@ export function ChatFeed({ chatId, messages }: { chatId: string | null; messages
                           </div>
                         </div>
                       ) : (
-                        /* ── Text turn result ── */
                         <div className="flex flex-col gap-3">
                           {msg.generationTime && (
                             <div className="flex items-center gap-2 text-xs text-on-surface-variant bg-surface-container-lowest py-2 px-3 rounded-lg w-fit border border-outline-variant/10">
                               <Sparkles size={12} className="text-primary" />
-                              <span>Responded in {msg.generationTime}</span>
+                              <span>
+                                {t.chat.feed.respondedIn.replace('{time}', msg.generationTime)}
+                              </span>
                             </div>
                           )}
                           {(() => {
@@ -785,7 +421,7 @@ export function ChatFeed({ chatId, messages }: { chatId: string | null; messages
                                 {!hasTextOrTools && (
                                   <div className="bg-surface-container-low p-5 rounded-2xl border border-outline-variant/10 font-body text-sm leading-relaxed text-on-surface max-w-2xl">
                                     <span className="text-on-surface-variant/50 italic">
-                                      No response
+                                      {t.chat.feed.noResponse}
                                     </span>
                                   </div>
                                 )}
@@ -803,7 +439,6 @@ export function ChatFeed({ chatId, messages }: { chatId: string | null; messages
         </div>
       )}
 
-      {/* Scroll-to-bottom floating button */}
       <AnimatePresence>
         {showScrollButton && messages.length > 0 && (
           <motion.button

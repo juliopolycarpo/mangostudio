@@ -3,12 +3,12 @@
  */
 import { describe, expect, it } from 'vitest';
 import { act, renderHook } from '../../support/harness/render';
-import { useOptimisticMessages } from '../../../src/hooks/use-optimistic-messages';
+import { useOptimisticMessages } from '../../../src/features/generation/hooks/use-optimistic-messages';
 import { useQueryClient } from '@tanstack/react-query';
-import { messageKeys } from '../../../src/hooks/use-messages-query';
+import { messageKeys } from '../../../src/features/chat/queries';
 import type { InfiniteData } from '@tanstack/react-query';
 import type { Message } from '@mangostudio/shared';
-import type { MessagesPage } from '../../../src/hooks/use-messages-query';
+import type { MessagesPage } from '../../../src/features/chat/queries';
 
 type MessagesCache = InfiniteData<MessagesPage, string | null>;
 

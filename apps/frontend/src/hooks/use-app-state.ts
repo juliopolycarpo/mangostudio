@@ -2,13 +2,13 @@ import { useState, useCallback, useMemo, useEffect } from 'react';
 import type { ProviderType } from '@mangostudio/shared';
 import { useNavigate } from '@tanstack/react-router';
 import type { InteractionMode } from '@mangostudio/shared';
-import { useChats } from './use-chats';
+import { useChats } from '@/features/chat/hooks/use-chats';
 import { useModelCatalog } from './use-model-catalog';
 import { useGlobalSettings } from './use-global-settings';
-import { useOptimisticMessages } from './use-optimistic-messages';
-import { useTextChat } from './use-text-chat';
-import { useImageGeneration } from './use-image-generation';
-import { resolveActiveModeModel } from '../utils/model-utils';
+import { useOptimisticMessages } from '@/features/generation/hooks/use-optimistic-messages';
+import { useTextGeneration } from '@/features/generation/hooks/use-text-generation';
+import { useImageGeneration } from '@/features/generation/hooks/use-image-generation';
+import { resolveActiveModeModel } from '@/utils/model-utils';
 
 export function useAppState() {
   const [composerMode, setComposerMode] = useState<InteractionMode>('chat');
@@ -17,6 +17,7 @@ export function useAppState() {
   const catalog = useModelCatalog();
   const settings = useGlobalSettings();
   const navigate = useNavigate();
+  const optimistic = useOptimisticMessages();
 
   const activeModels = useMemo(
     () => (composerMode === 'chat' ? catalog.catalog.textModels : catalog.catalog.imageModels),
@@ -40,9 +41,7 @@ export function useAppState() {
   const activeModel = getActiveModel();
   const isModelSelectorDisabled = catalog.catalog.status !== 'ready' || activeModels.length === 0;
 
-  const optimistic = useOptimisticMessages();
-
-  const textChat = useTextChat({
+  const textGen = useTextGeneration({
     chats,
     getActiveModel,
     systemPrompt: settings.globalTextSystemPrompt,
@@ -52,10 +51,8 @@ export function useAppState() {
     currentChatId: chats.currentChatId,
   });
 
-  // Seed context cache for all chats when the chat list loads (cold start recovery).
-  // This populates the Sidebar's context rings from persisted lastProviderState.
   const chatsList = chats.chats;
-  const { seedContextInfo } = textChat;
+  const { seedContextInfo } = textGen;
   useEffect(() => {
     for (const chat of chatsList) {
       if ('contextInfo' in chat && chat.contextInfo) {
@@ -71,9 +68,8 @@ export function useAppState() {
     optimistic,
   });
 
-  const isGenerating = textChat.isGenerating || imageGen.isGenerating;
+  const isGenerating = textGen.isGenerating || imageGen.isGenerating;
 
-  // Derive the provider used in this chat from its textModel — locks model selector
   const lockedProvider = useMemo((): ProviderType | null => {
     const currentChat = chats.chats.find((c) => c.id === chats.currentChatId);
     if (!currentChat?.textModel) return null;
@@ -125,7 +121,7 @@ export function useAppState() {
     [navigate]
   );
 
-  const { handleRespond } = textChat;
+  const { handleRespond } = textGen;
   const { handleGenerate } = imageGen;
 
   const handleSubmit = useCallback(
@@ -135,11 +131,6 @@ export function useAppState() {
     },
     [composerMode, handleRespond, handleGenerate]
   );
-
-  const initialize = useCallback(async () => {
-    await chats.loadChats();
-    await catalog.refreshCatalog();
-  }, [chats, catalog]);
 
   return {
     composerMode,
@@ -151,10 +142,10 @@ export function useAppState() {
     activeModels,
     activeModel,
     isModelSelectorDisabled,
-    contextInfo: textChat.contextInfo,
-    fallbackNotice: textChat.fallbackNotice,
-    seedContextInfo: textChat.seedContextInfo,
-    contextCache: textChat.contextCache,
+    contextInfo: textGen.contextInfo,
+    fallbackNotice: textGen.fallbackNotice,
+    seedContextInfo: textGen.seedContextInfo,
+    contextCache: textGen.contextCache,
     lockedProvider,
 
     setComposerMode,
@@ -165,8 +156,7 @@ export function useAppState() {
     handleSelectChat,
     handleNavigate,
     handleSubmit,
-    handleStop: textChat.handleStop,
-    initialize,
+    handleStop: textGen.handleStop,
     refreshCatalog: catalog.refreshCatalog,
   };
 }

@@ -1,12 +1,12 @@
 import { useEffect } from 'react';
 import { Loader2, Sparkles, MessageSquare, Code, Bug, Image } from 'lucide-react';
-import { ChatFeed } from '../../components/ChatFeed';
-import { InputBar } from '../../components/InputBar';
-import { useMessagesQuery } from '../../hooks/use-messages-query';
-import { useI18n } from '../../hooks/use-i18n';
-import { authClient } from '../../lib/auth-client';
+import { ChatFeed } from './components/ChatFeed';
+import { InputBar } from './components/InputBar';
+import { useMessagesQuery } from '@/features/chat/queries';
+import { useI18n } from '@/hooks/use-i18n';
+import { authClient } from '@/lib/auth-client';
 import type { InteractionMode, ReasoningEffort } from '@mangostudio/shared';
-import type { ContextInfo, FallbackNotice } from '../../hooks/use-text-chat';
+import type { ContextInfo, FallbackNotice } from '@/features/generation/types';
 
 interface ChatPageProps {
   chatId: string | null;
@@ -16,13 +16,11 @@ interface ChatPageProps {
   disabled: boolean;
   isGenerating: boolean;
   onStop: () => void;
-  // Reasoning controls
   thinkingEnabled: boolean;
   reasoningEffort: ReasoningEffort;
   onThinkingToggle: (enabled: boolean) => void;
   onReasoningEffortChange: (effort: ReasoningEffort) => void;
   reasoningVisible: boolean;
-  // Context awareness
   contextInfo?: ContextInfo | null;
   fallbackNotice?: FallbackNotice | null;
   seedContextInfo?: (chatId: string, info: ContextInfo) => void;
@@ -50,7 +48,6 @@ export function ChatPage({
   const { data: session } = authClient.useSession();
   const userName = session?.user?.name?.split(' ')[0] ?? '';
 
-  // Seed context info from persisted providerState on chat load
   const firstPageContextInfo = data?.pages[0]?.contextInfo;
   useEffect(() => {
     if (chatId && firstPageContextInfo && seedContextInfo) {

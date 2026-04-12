@@ -2,13 +2,13 @@
 import { useState, useCallback } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import type { Message } from '@mangostudio/shared';
-import { messageKeys } from './use-messages-query';
-import { galleryKeys } from './use-gallery-query';
-import { generateImage, uploadReferenceImage } from '../services/generation-service';
-import { useI18n } from './use-i18n';
-import type { useOptimisticMessages } from './use-optimistic-messages';
-import type { useChats } from './use-chats';
-import type { useGlobalSettings } from './use-global-settings';
+import { messageKeys } from '@/features/chat/queries';
+import { galleryKeys } from '@/features/gallery/queries';
+import { generateImage, uploadReferenceImage } from '@/services/generation-service';
+import { useI18n } from '@/hooks/use-i18n';
+import type { useOptimisticMessages } from '@/features/generation/hooks/use-optimistic-messages';
+import type { useChats } from '@/features/chat/hooks/use-chats';
+import type { useGlobalSettings } from '@/hooks/use-global-settings';
 
 interface UseImageGenerationOptions {
   chats: ReturnType<typeof useChats>;
@@ -45,8 +45,6 @@ export function useImageGeneration({
       }
 
       const model = getActiveModel();
-
-      // Create the preview URL synchronously before showing optimistic messages
       const previewUrl = referenceImage ? URL.createObjectURL(referenceImage) : null;
 
       const optimisticUserMsgId = `optimistic-user-${Date.now()}`;
@@ -75,7 +73,6 @@ export function useImageGeneration({
 
       appendOptimisticMessages(activeChatId, [optimisticUserMsg, optimisticAiMsg]);
 
-      // Upload reference image after showing optimistic messages so failures are visible
       let refImageUrl: string | null = null;
       if (referenceImage) {
         refImageUrl = await uploadReferenceImage(referenceImage);

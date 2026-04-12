@@ -2,8 +2,8 @@ import { useCallback } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import type { InfiniteData } from '@tanstack/react-query';
 import type { Message } from '@mangostudio/shared';
-import { messageKeys } from './use-messages-query';
-import type { MessagesPage } from './use-messages-query';
+import { messageKeys } from '@/features/chat/queries';
+import type { MessagesPage } from '@/features/chat/queries';
 
 type MessagesCache = InfiniteData<MessagesPage, string | null>;
 
@@ -14,8 +14,6 @@ export function useOptimisticMessages() {
   const appendOptimisticMessages = useCallback(
     (chatId: string, newMessages: Message[]) => {
       queryClient.setQueryData<MessagesCache>(messageKeys.list(chatId), (oldData) => {
-        // When the cache is cold (new chat), seed it with an empty page so
-        // the optimistic messages are visible immediately instead of being silently dropped.
         const base: MessagesCache = oldData ?? {
           pages: [{ messages: [], nextCursor: null }],
           pageParams: [null],

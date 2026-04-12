@@ -4,14 +4,14 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, renderHook, waitFor } from '../../support/harness/render';
-import { useTextChat } from '../../../src/hooks/use-text-chat';
+import { useTextGeneration } from '../../../src/features/generation/hooks/use-text-generation';
 import type { MessagePart } from '@mangostudio/shared';
 
 vi.mock('../../../src/services/generation-service', () => ({
   respondTextStream: vi.fn(),
 }));
 
-vi.mock('../../../src/hooks/use-messages-query', () => ({
+vi.mock('../../../src/features/chat/queries', () => ({
   messageKeys: { list: (id: string) => ['messages', id] },
 }));
 
@@ -31,7 +31,7 @@ function makeStreamFn(chunks: Parameters<Parameters<typeof respondTextStream>[1]
   };
 }
 
-type TextChatProps = Parameters<typeof useTextChat>[0];
+type TextChatProps = Parameters<typeof useTextGeneration>[0];
 
 function makeProps(overrides: Record<string, unknown> = {}) {
   const updateOptimisticMessage = vi.fn();
@@ -70,7 +70,7 @@ describe('useTextChat — thinking segment tracking', () => {
       ]) as unknown as typeof respondTextStream
     );
 
-    const { result } = renderHook(() => useTextChat(props));
+    const { result } = renderHook(() => useTextGeneration(props));
 
     await act(async () => {
       await result.current.handleRespond('test prompt');
@@ -103,7 +103,7 @@ describe('useTextChat — thinking segment tracking', () => {
       ]) as unknown as typeof respondTextStream
     );
 
-    const { result } = renderHook(() => useTextChat(props));
+    const { result } = renderHook(() => useTextGeneration(props));
 
     await act(async () => {
       await result.current.handleRespond('test prompt');
@@ -149,7 +149,7 @@ describe('useTextChat — thinking segment tracking', () => {
       ]) as unknown as typeof respondTextStream
     );
 
-    const { result } = renderHook(() => useTextChat(props));
+    const { result } = renderHook(() => useTextGeneration(props));
 
     await act(async () => {
       await result.current.handleRespond('test prompt');

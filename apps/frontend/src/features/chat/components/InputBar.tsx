@@ -3,7 +3,7 @@ import { MessageSquare, ImagePlus, PlusCircle, Mic, Zap, Send, Square, X } from 
 import type { InteractionMode, ReasoningEffort } from '@mangostudio/shared';
 import { ThinkingToggle } from '@/components/layout/ThinkingToggle';
 import { useI18n } from '@/hooks/use-i18n';
-import type { ContextInfo } from '@/hooks/use-text-chat';
+import type { ContextInfo } from '@/features/generation/types';
 
 function formatTokensCompact(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
@@ -18,13 +18,11 @@ interface Props {
   disabled?: boolean;
   isGenerating?: boolean;
   onStop?: () => void;
-  // Thinking / reasoning controls
   thinkingEnabled?: boolean;
   reasoningEffort?: ReasoningEffort;
   onThinkingToggle?: (enabled: boolean) => void;
   onReasoningEffortChange?: (effort: ReasoningEffort) => void;
   reasoningVisible?: boolean;
-  // Context window info
   contextInfo?: ContextInfo | null;
 }
 
@@ -53,7 +51,6 @@ export function InputBar({
   useEffect(() => {
     if (referenceImage) {
       const url = URL.createObjectURL(referenceImage);
-      // TODO(react-compiler): URL lifecycle (createObjectURL/revokeObjectURL) requires useEffect.
       setPreviewUrl(url);
       return () => URL.revokeObjectURL(url);
     } else {
@@ -68,7 +65,7 @@ export function InputBar({
     }
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = (e: { preventDefault: () => void }) => {
     e.preventDefault();
     if (!prompt.trim() || disabled) return;
     onSubmit(prompt, referenceImage);
@@ -79,9 +76,7 @@ export function InputBar({
   return (
     <footer className="shrink-0 p-6">
       <div className="max-w-4xl mx-auto w-full">
-        {/* Bottom toolbar: reasoning controls (left) + mode switch (right) */}
         <div className="flex items-center justify-between mb-3">
-          {/* Left side: thinking toggle + context chip */}
           <div className="flex items-center gap-2">
             {onThinkingToggle && onReasoningEffortChange ? (
               <ThinkingToggle
@@ -93,7 +88,6 @@ export function InputBar({
               />
             ) : null}
 
-            {/* Context chip — shown when context info is available */}
             {contextInfo && composerMode === 'chat' && (
               <span
                 className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-medium tabular-nums border transition-colors ${
@@ -107,12 +101,11 @@ export function InputBar({
                 }`}
                 title={`~${contextInfo.estimatedInputTokens.toLocaleString()} / ${contextInfo.contextLimit.toLocaleString()} tokens · ${contextInfo.mode}`}
               >
-                {`Context: ${formatTokensCompact(contextInfo.estimatedInputTokens)} / ${formatTokensCompact(contextInfo.contextLimit)}`}
+                {`${t.chat.context.label}: ${formatTokensCompact(contextInfo.estimatedInputTokens)} / ${formatTokensCompact(contextInfo.contextLimit)}`}
               </span>
             )}
           </div>
 
-          {/* Mode Switch Toggle */}
           <div className="inline-flex bg-surface-container-low border border-outline-variant/10 rounded-full p-1 gap-1 shadow-sm">
             <button
               type="button"
@@ -124,7 +117,7 @@ export function InputBar({
               }`}
             >
               <MessageSquare size={13} />
-              Chat
+              {t.chat.input.modeChat}
             </button>
             <button
               type="button"
@@ -136,12 +129,11 @@ export function InputBar({
               }`}
             >
               <ImagePlus size={13} />
-              Create Image
+              {t.chat.input.modeImage}
             </button>
           </div>
         </div>
 
-        {/* Reference image preview (image mode only) */}
         {isImageMode && previewUrl && (
           <div className="mb-2 relative inline-block">
             <img
@@ -172,13 +164,12 @@ export function InputBar({
             className="hidden"
           />
 
-          {/* Upload button — only visible in image mode */}
           {isImageMode && (
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
               className="w-10 h-10 flex items-center justify-center rounded-xl text-on-surface-variant hover:bg-surface-container-high hover:text-primary transition-all active:scale-95"
-              title="Add reference image"
+              title={t.chat.input.addReferenceImage}
             >
               <PlusCircle size={24} />
             </button>
@@ -190,7 +181,7 @@ export function InputBar({
             onChange={(e) => setPrompt(e.target.value)}
             disabled={disabled}
             className="flex-1 bg-transparent border-none focus:ring-0 text-sm font-body text-on-surface placeholder:text-on-surface-variant/40 py-2 outline-none"
-            placeholder={isImageMode ? 'Describe your image...' : 'Ask Gemini anything...'}
+            placeholder={isImageMode ? t.chat.input.imagePlaceholder : t.chat.input.placeholder}
           />
 
           <div className="flex items-center gap-1 pr-1">
@@ -208,7 +199,7 @@ export function InputBar({
                 onClick={onStop}
                 className="h-10 px-4 rounded-xl font-bold text-xs flex items-center gap-2 transition-all active:scale-95 bg-surface-container-high text-on-surface hover:bg-error/20 hover:text-error"
               >
-                Stop <Square size={14} />
+                {t.chat.input.stop} <Square size={14} />
               </button>
             ) : (
               <button
@@ -219,11 +210,11 @@ export function InputBar({
               >
                 {isImageMode ? (
                   <>
-                    Generate <Zap size={16} />
+                    {t.chat.input.generate} <Zap size={16} />
                   </>
                 ) : (
                   <>
-                    Send <Send size={16} />
+                    {t.chat.input.send} <Send size={16} />
                   </>
                 )}
               </button>

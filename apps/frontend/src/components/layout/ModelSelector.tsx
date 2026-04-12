@@ -4,12 +4,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import type { ModelOption, ModelCatalogResponse, ProviderType } from '@mangostudio/shared';
 import { getModelSelectorPlaceholder } from '../../utils/model-utils';
 import { useI18n } from '@/hooks/use-i18n';
-import { clsx, type ClassValue } from 'clsx';
-import { twMerge } from 'tailwind-merge';
-
-function cn(...inputs: ClassValue[]) {
-  return twMerge(clsx(inputs));
-}
+import { cn } from '@/lib/utils';
 
 interface ModelSelectorProps {
   activeModel: string;
