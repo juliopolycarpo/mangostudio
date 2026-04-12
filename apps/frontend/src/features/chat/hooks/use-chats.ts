@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useMemo } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import {
   useChatsQuery,
   useCreateChatMutation,
@@ -17,12 +17,8 @@ export function useChats() {
   const chats = useMemo(() => chatsData || [], [chatsData]);
   const error = queryError ? queryError.message : null;
 
-  // Auto-select first chat if none selected.
-  useEffect(() => {
-    if (chats.length > 0 && !currentChatId) {
-      setCurrentChatId(chats[0].id);
-    }
-  }, [chats, currentChatId]);
+  // Derive effective chat ID: explicit selection takes precedence, otherwise auto-select first.
+  const effectiveChatId = currentChatId ?? (chats.length > 0 ? chats[0].id : null);
 
   const loadChats = useCallback(async () => {
     await refetch();
@@ -72,11 +68,11 @@ export function useChats() {
     setCurrentChatId(chatId);
   }, []);
 
-  const currentChat = chats.find((c) => c.id === currentChatId) || null;
+  const currentChat = chats.find((c) => c.id === effectiveChatId) || null;
 
   return {
     chats,
-    currentChatId,
+    currentChatId: effectiveChatId,
     currentChat,
     isLoading,
     error,

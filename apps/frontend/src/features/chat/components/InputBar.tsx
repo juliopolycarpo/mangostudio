@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { MessageSquare, ImagePlus, PlusCircle, Mic, Zap, Send, Square, X } from 'lucide-react';
 import type { InteractionMode, ReasoningEffort } from '@mangostudio/shared';
 import { ThinkingToggle } from '@/components/layout/ThinkingToggle';
@@ -43,20 +43,20 @@ export function InputBar({
   const { t } = useI18n();
   const [prompt, setPrompt] = useState('');
   const [referenceImage, setReferenceImage] = useState<File | null>(null);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const isImageMode = composerMode === 'image';
 
+  const previewUrl = useMemo(
+    () => (referenceImage ? URL.createObjectURL(referenceImage) : null),
+    [referenceImage]
+  );
+
   useEffect(() => {
-    if (referenceImage) {
-      const url = URL.createObjectURL(referenceImage);
-      setPreviewUrl(url);
-      return () => URL.revokeObjectURL(url);
-    } else {
-      setPreviewUrl(null);
-    }
-  }, [referenceImage]);
+    return () => {
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+    };
+  }, [previewUrl]);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
