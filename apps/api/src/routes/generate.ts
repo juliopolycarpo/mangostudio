@@ -3,7 +3,9 @@
  * Resolves the AI provider dynamically from the requested model.
  */
 
-import { type Elysia, t } from 'elysia';
+import { type Elysia } from 'elysia';
+import { GenerateImageBodySchema } from '@mangostudio/shared/generation';
+import { ERROR_CODES } from '@mangostudio/shared/errors';
 import '../services/providers'; // ensure all providers are registered
 import { getProviderForModel } from '../services/providers/registry';
 import { getUnifiedModelCatalog } from '../services/providers/catalog';
@@ -27,14 +29,14 @@ export const generateRoutes = (app: Elysia) =>
         async ({ body, set, user }) => {
           if (!user?.id) {
             set.status = 401;
-            return { error: 'Unauthorized' };
+            return { error: 'Unauthorized', code: ERROR_CODES.UNAUTHORIZED };
           }
           const userId = user.id;
           const db = getDb();
 
           if (!(await verifyChatOwnership(body.chatId, userId, db))) {
             set.status = 404;
-            return { error: 'Chat not found' };
+            return { error: 'Chat not found', code: ERROR_CODES.NOT_FOUND };
           }
 
           // Resolve model: explicit or first available image model
@@ -46,7 +48,10 @@ export const generateRoutes = (app: Elysia) =>
 
           if (!model) {
             set.status = 503;
-            return { error: 'No image model available. Configure a connector in Settings.' };
+            return {
+              error: 'No image model available. Configure a connector in Settings.',
+              code: ERROR_CODES.PROVIDER_ERROR,
+            };
           }
 
           const now = Date.now();
@@ -73,7 +78,10 @@ export const generateRoutes = (app: Elysia) =>
             const provider = await getProviderForModel(model, userId);
             if (!provider.generateImage) {
               set.status = 422;
-              return { error: 'This provider does not support image generation.' };
+              return {
+                error: 'This provider does not support image generation.',
+                code: ERROR_CODES.PROVIDER_ERROR,
+              };
             }
             const { imageUrl } = await provider.generateImage({
               userId,
@@ -124,18 +132,14 @@ export const generateRoutes = (app: Elysia) =>
           } catch (error: unknown) {
             console.error('[generate] Error:', error);
             set.status = 500;
-            return { error: 'Image generation failed. Please try again.' };
+            return {
+              error: 'Image generation failed. Please try again.',
+              code: ERROR_CODES.PROVIDER_ERROR,
+            };
           }
         },
         {
-          body: t.Object({
-            chatId: t.String(),
-            prompt: t.String(),
-            systemPrompt: t.Optional(t.String()),
-            referenceImageUrl: t.Optional(t.String()),
-            imageQuality: t.Optional(t.String()),
-            model: t.Optional(t.String()),
-          }),
+          body: GenerateImageBodySchema,
         }
       )
   );

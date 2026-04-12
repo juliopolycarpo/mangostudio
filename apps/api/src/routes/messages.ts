@@ -4,6 +4,8 @@
  */
 
 import { type Elysia, t } from 'elysia';
+import { CreateMessageBodySchema, UpdateMessageBodySchema } from '@mangostudio/shared/chat';
+import { ERROR_CODES } from '@mangostudio/shared/errors';
 import { getDb } from '../db/database';
 import { requireAuth } from '../plugins/auth-middleware';
 import { verifyChatOwnership } from '../services/chat-service';
@@ -23,7 +25,7 @@ export const messageRoutes = (app: Elysia) =>
         async ({ query, user, set }) => {
           if (!user?.id) {
             set.status = 401;
-            return { error: 'Unauthorized' };
+            return { error: 'Unauthorized', code: ERROR_CODES.UNAUTHORIZED };
           }
           const db = getDb();
           const limit = parseQueryInt(query.limit, 50);
@@ -92,14 +94,14 @@ export const messageRoutes = (app: Elysia) =>
         async ({ body, user, set }) => {
           if (!user?.id) {
             set.status = 401;
-            return { error: 'Unauthorized' };
+            return { error: 'Unauthorized', code: ERROR_CODES.UNAUTHORIZED };
           }
 
           const db = getDb();
 
           if (!(await verifyChatOwnership(body.chatId, user.id, db))) {
             set.status = 404;
-            return { error: 'Chat not found' };
+            return { error: 'Chat not found', code: ERROR_CODES.NOT_FOUND };
           }
 
           await createMessage(
@@ -130,20 +132,7 @@ export const messageRoutes = (app: Elysia) =>
           return { success: true };
         },
         {
-          body: t.Object({
-            id: t.String(),
-            chatId: t.String(),
-            role: t.Union([t.Literal('user'), t.Literal('ai')]),
-            text: t.String(),
-            imageUrl: t.Optional(t.String()),
-            referenceImage: t.Optional(t.String()),
-            timestamp: t.Number(),
-            isGenerating: t.Optional(t.Boolean()),
-            generationTime: t.Optional(t.String()),
-            modelName: t.Optional(t.String()),
-            styleParams: t.Optional(t.Array(t.String())),
-            interactionMode: t.Optional(t.Union([t.Literal('chat'), t.Literal('image')])),
-          }),
+          body: CreateMessageBodySchema,
         }
       )
 
@@ -153,7 +142,7 @@ export const messageRoutes = (app: Elysia) =>
         async ({ params, body, user, set }) => {
           if (!user?.id) {
             set.status = 401;
-            return { error: 'Unauthorized' };
+            return { error: 'Unauthorized', code: ERROR_CODES.UNAUTHORIZED };
           }
 
           const db = getDb();
@@ -168,7 +157,7 @@ export const messageRoutes = (app: Elysia) =>
 
           if (!msg || msg.userId !== user.id) {
             set.status = 404;
-            return { error: 'Message not found' };
+            return { error: 'Message not found', code: ERROR_CODES.NOT_FOUND };
           }
 
           const updates: {
@@ -195,14 +184,7 @@ export const messageRoutes = (app: Elysia) =>
         },
         {
           params: t.Object({ id: t.String() }),
-          body: t.Object({
-            text: t.Optional(t.String()),
-            imageUrl: t.Optional(t.String()),
-            isGenerating: t.Optional(t.Boolean()),
-            generationTime: t.Optional(t.String()),
-            modelName: t.Optional(t.String()),
-            styleParams: t.Optional(t.Array(t.String())),
-          }),
+          body: UpdateMessageBodySchema,
         }
       )
   );

@@ -3,6 +3,8 @@
  */
 
 import { Elysia, t } from 'elysia';
+import { UpdateConnectorModelsBodySchema } from '@mangostudio/shared/connectors';
+import type { ApiErrorResponse } from '@mangostudio/shared/errors';
 import type { Connector, ConnectorStatus, ModelCatalogResponse } from '@mangostudio/shared';
 import {
   getGeminiSecretStatus,
@@ -31,7 +33,7 @@ export const geminiAliasRoutes = new Elysia()
   /** Adds a new Gemini connector (alias). */
   .post(
     '/connectors/gemini',
-    async ({ body, set, user }): Promise<Connector | { error: string }> => {
+    async ({ body, set, user }): Promise<Connector | ApiErrorResponse> => {
       try {
         const connector = await addGeminiConnector(user?.id ?? '', body);
         await refreshGeminiModelCatalog(user?.id ?? '', 'secret-updated');
@@ -47,7 +49,7 @@ export const geminiAliasRoutes = new Elysia()
   /** Deletes a Gemini connector (alias). */
   .delete(
     '/connectors/gemini/:id',
-    async ({ params, set, user }): Promise<{ success: true } | { error: string }> => {
+    async ({ params, set, user }): Promise<{ success: true } | ApiErrorResponse> => {
       try {
         await deleteGeminiConnector(user?.id ?? '', params.id);
         await refreshGeminiModelCatalog(user?.id ?? '', 'secret-updated');
@@ -64,7 +66,7 @@ export const geminiAliasRoutes = new Elysia()
   /** Updates enabled models for a Gemini connector (alias). */
   .put(
     '/connectors/gemini/:id/models',
-    async ({ params, body, set, user }): Promise<{ success: true } | { error: string }> => {
+    async ({ params, body, set, user }): Promise<{ success: true } | ApiErrorResponse> => {
       try {
         await updateConnectorModels(user?.id ?? '', params.id, body.enabledModels);
         invalidateUnifiedCatalog(user?.id ?? '');
@@ -75,6 +77,6 @@ export const geminiAliasRoutes = new Elysia()
     },
     {
       params: t.Object({ id: t.String() }),
-      body: t.Object({ enabledModels: t.Array(t.String()) }),
+      body: UpdateConnectorModelsBodySchema,
     }
   );

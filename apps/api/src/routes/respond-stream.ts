@@ -4,7 +4,9 @@
  * Resolves the AI provider dynamically from the requested model.
  */
 
-import { type Elysia, t } from 'elysia';
+import { type Elysia } from 'elysia';
+import { RespondStreamBodySchema } from '@mangostudio/shared/generation';
+import { ERROR_CODES } from '@mangostudio/shared/errors';
 import '../services/providers'; // ensure all providers are registered
 import '../services/tools'; // ensure all builtins are registered
 import { getProviderForModel } from '../services/providers/registry';
@@ -15,7 +17,8 @@ import { generateId } from '../utils/id';
 import { verifyChatOwnership } from '../services/chat-service';
 import { createMessage, loadChatHistory, loadRichChatHistory } from '../services/message-service';
 import { getAllToolDefinitions, executeTool } from '../services/tools';
-import type { SSEErrorEvent, MessagePart, ReasoningEffort } from '@mangostudio/shared';
+import type { MessagePart, ReasoningEffort } from '@mangostudio/shared';
+import type { SSEErrorEvent } from '@mangostudio/shared/streaming';
 import type { AgentTurnRequest } from '../services/providers/types';
 import {
   parseContinuationEnvelope,
@@ -70,14 +73,14 @@ export const respondStreamRoutes = (app: Elysia) =>
         async ({ body, set, user }) => {
           if (!user?.id) {
             set.status = 401;
-            return { error: 'Unauthorized' };
+            return { error: 'Unauthorized', code: ERROR_CODES.UNAUTHORIZED };
           }
           const userId = user.id;
           const db = getDb();
 
           if (!(await verifyChatOwnership(body.chatId, userId, db))) {
             set.status = 404;
-            return { error: 'Chat not found' };
+            return { error: 'Chat not found', code: ERROR_CODES.NOT_FOUND };
           }
 
           // Resolve model: explicit or first available from unified catalog
@@ -89,7 +92,10 @@ export const respondStreamRoutes = (app: Elysia) =>
 
           if (!model) {
             set.status = 503;
-            return { error: 'No text model available. Configure a connector in Settings.' };
+            return {
+              error: 'No text model available. Configure a connector in Settings.',
+              code: ERROR_CODES.PROVIDER_ERROR,
+            };
           }
 
           const now = Date.now();
@@ -118,7 +124,10 @@ export const respondStreamRoutes = (app: Elysia) =>
           } catch (err) {
             console.error('[respond-stream] Provider lookup error:', err);
             set.status = 400;
-            return { error: 'No provider available for the requested model.' };
+            return {
+              error: 'No provider available for the requested model.',
+              code: ERROR_CODES.PROVIDER_ERROR,
+            };
           }
 
           // Capture context before the async boundary inside ReadableStream
@@ -711,15 +720,7 @@ export const respondStreamRoutes = (app: Elysia) =>
           });
         },
         {
-          body: t.Object({
-            chatId: t.String(),
-            prompt: t.String(),
-            model: t.Optional(t.String()),
-            systemPrompt: t.Optional(t.String()),
-            thinkingEnabled: t.Optional(t.Boolean()),
-            reasoningEffort: t.Optional(t.String()),
-            thinkingVisibility: t.Optional(t.String()), // deprecated, backward compat
-          }),
+          body: RespondStreamBodySchema,
         }
       )
   );
