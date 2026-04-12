@@ -1,0 +1,389 @@
+/**
+ * Gemini API key orchestration: validation, persistence, status, and connector CRUD.
+ * Uses the shared createProviderSecretService factory for key resolution.
+ */
+
+import type { AddConnectorBody, Connector, ConnectorStatus } from '@mangostudio/shared';
+import type { SecretMetadataRow } from '@mangostudio/shared/types';
+import {
+  GEMINI_PROVIDER,
+  listSecretMetadata,
+  getSecretMetadataById,
+  upsertSecretMetadata,
+  deleteSecretMetadata,
+  type SecretMetadataInput,
+} from '../../secret-store/metadata';
+import { bunSecretStore, type SecretStore } from '../../secret-store/store';
+import {
+  createProviderSecretService,
+  isPlaceholderConfigSecretValue,
+} from '../core/secret-service';
+import { maskSecret } from '../../../utils/secrets';
+import { join, dirname } from 'path';
+import { getMangoDir } from '../../../lib/config';
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
+import { stringify as stringifyToml } from 'smol-toml';
+import { randomUUID } from 'crypto';
+import { getConfig } from '../../../lib/config';
+import { readTomlStringSections } from '../../../lib/toml';
+import { parseStringArray } from '../../../utils/json';
+
+const GEMINI_VALIDATION_URL =
+  'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash';
+
+type FetchLike = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
+
+interface GeminiSecretServiceDependencies {
+  secretStore?: SecretStore;
+  fetchImpl?: FetchLike;
+  now?: () => number;
+  listMetadata?: (provider: string, userId: string) => Promise<SecretMetadataRow[]>;
+  getMetadataById?: (id: string, userId: string) => Promise<SecretMetadataRow | null>;
+  upsertMetadata?: (input: SecretMetadataInput) => Promise<void>;
+  deleteMetadata?: (id: string, userId: string) => Promise<void>;
+  /** Override the TOML config file path (useful in tests to prevent real file reads). */
+  tomlFilePath?: string;
+}
+
+/** Error thrown when no active Gemini API key can be resolved. */
+export class GeminiApiKeyMissingError extends Error {
+  constructor() {
+    super('No Gemini API key is configured or enabled. Check your Connectors in Settings.');
+    this.name = 'GeminiApiKeyMissingError';
+  }
+}
+
+/** Error thrown when Gemini rejects a candidate API key. */
+export class InvalidGeminiApiKeyError extends Error {
+  constructor(
+    message: string = 'Gemini rejected the API key. Verify that it is valid and enabled.'
+  ) {
+    super(message);
+    this.name = 'InvalidGeminiApiKeyError';
+  }
+}
+
+/** Error thrown when Gemini cannot be reached for validation. */
+export class GeminiValidationUnavailableError extends Error {
+  constructor(message: string = 'Unable to validate the Gemini API key right now. Try again.') {
+    super(message);
+    this.name = 'GeminiValidationUnavailableError';
+  }
+}
+
+/**
+ * Unified secret service for Gemini key resolution.
+ * Delegates key resolution to createProviderSecretService.
+ */
+const geminiProviderSecret = createProviderSecretService({
+  provider: 'gemini',
+  tomlSection: 'gemini_api_keys',
+  envVarPrefix: 'GEMINI_API_KEY',
+  validateFn: async (apiKey, fetchImpl) => {
+    let response: Response;
+    try {
+      response = await fetchImpl(GEMINI_VALIDATION_URL, {
+        method: 'GET',
+        headers: { 'x-goog-api-key': apiKey },
+      });
+    } catch (error) {
+      throw new GeminiValidationUnavailableError(
+        error instanceof Error ? error.message : undefined
+      );
+    }
+    if (response.ok) return;
+    if ([400, 401, 403].includes(response.status)) throw new InvalidGeminiApiKeyError();
+    throw new GeminiValidationUnavailableError();
+  },
+});
+
+function getEnvFilePath(): string {
+  return join(getMangoDir(), '.env');
+}
+
+function getTomlFilePath(): string {
+  return getConfig().configFilePath;
+}
+
+interface GeminiSecretService {
+  syncConfigFileConnectors(userId: string): Promise<void>;
+  getGeminiSecretStatus(userId: string): Promise<ConnectorStatus>;
+  getResolvedGeminiApiKey(userId: string, requestedModel?: string): Promise<string>;
+  validateGeminiApiKey(apiKey: string): Promise<void>;
+  addGeminiConnector(userId: string, body: AddConnectorBody): Promise<Connector>;
+  updateConnectorModels(userId: string, id: string, enabledModels: string[]): Promise<void>;
+  deleteGeminiConnector(userId: string, id: string): Promise<void>;
+}
+
+/**
+ * Creates the Gemini secret service with injectable dependencies for tests.
+ */
+export function createGeminiSecretService(
+  dependencies: GeminiSecretServiceDependencies = {}
+): GeminiSecretService {
+  const secretStore = dependencies.secretStore ?? bunSecretStore;
+  const fetchImpl = dependencies.fetchImpl ?? fetch;
+  const now = dependencies.now ?? (() => Date.now());
+  const listMetadata = dependencies.listMetadata ?? listSecretMetadata;
+  const getMetadataById = dependencies.getMetadataById ?? getSecretMetadataById;
+  const upsertMetadata = dependencies.upsertMetadata ?? upsertSecretMetadata;
+  const deleteMetadata = dependencies.deleteMetadata ?? deleteSecretMetadata;
+  const resolvedTomlFilePath = dependencies.tomlFilePath ?? getTomlFilePath();
+
+  const syncConfigFileConnectors = async (userId: string): Promise<void> => {
+    try {
+      const configPath = resolvedTomlFilePath;
+      if (!existsSync(configPath)) return;
+
+      const parsed = readTomlStringSections(configPath);
+      const tomlKeys = parsed.gemini_api_keys ?? {};
+
+      const currentMetadata = await listMetadata(GEMINI_PROVIDER, userId);
+      const configConnectors = currentMetadata.filter((m) => m.source === 'config-file');
+      const syncableConnectorNames = new Set<string>();
+
+      for (const [name, key] of Object.entries(tomlKeys)) {
+        if (typeof key !== 'string') continue;
+        if (isPlaceholderConfigSecretValue(key)) continue;
+
+        syncableConnectorNames.add(name);
+
+        const exists = configConnectors.find((c) => c.name === name);
+        if (!exists) {
+          const id = randomUUID();
+          await upsertMetadata({
+            id,
+            name,
+            provider: GEMINI_PROVIDER,
+            configured: true,
+            source: 'config-file',
+            maskedSuffix: maskSecret(key),
+            updatedAt: now(),
+            enabledModels: [],
+            userId: null,
+          });
+        } else {
+          const currentSuffix = maskSecret(key);
+          if (exists.maskedSuffix !== currentSuffix) {
+            await upsertMetadata({
+              ...exists,
+              source: 'config-file',
+              configured: true,
+              maskedSuffix: currentSuffix,
+              updatedAt: now(),
+              enabledModels: parseStringArray(exists.enabledModels),
+              userId: exists.userId,
+              baseUrl: exists.baseUrl ?? null,
+            });
+          }
+        }
+      }
+
+      for (const connector of configConnectors) {
+        if (!syncableConnectorNames.has(connector.name)) {
+          await deleteMetadata(connector.id, userId);
+        }
+      }
+    } catch (err) {
+      console.warn('[config] Failed to sync config.toml:', err);
+    }
+  };
+
+  return {
+    async syncConfigFileConnectors(userId: string): Promise<void> {
+      await syncConfigFileConnectors(userId);
+    },
+
+    async getGeminiSecretStatus(userId: string): Promise<ConnectorStatus> {
+      await syncConfigFileConnectors(userId);
+
+      const metadataRows = await listMetadata(GEMINI_PROVIDER, userId);
+
+      const connectors: Connector[] = metadataRows.map((row) => ({
+        id: row.id,
+        name: row.name,
+        provider: 'gemini' as const,
+        configured: Boolean(row.configured),
+        source: row.source,
+        maskedSuffix: row.maskedSuffix ?? null,
+        updatedAt: row.updatedAt,
+        lastValidatedAt: row.lastValidatedAt ?? null,
+        lastValidationError: row.lastValidationError ?? null,
+        enabledModels: parseStringArray(row.enabledModels),
+        userId: row.userId,
+        baseUrl: row.baseUrl ?? null,
+      }));
+
+      return { connectors };
+    },
+
+    async getResolvedGeminiApiKey(userId: string, requestedModel?: string): Promise<string> {
+      try {
+        return await geminiProviderSecret.resolveApiKey(userId, requestedModel);
+      } catch {
+        throw new GeminiApiKeyMissingError();
+      }
+    },
+
+    async validateGeminiApiKey(apiKey: string): Promise<void> {
+      let response: Response;
+      try {
+        response = await fetchImpl(GEMINI_VALIDATION_URL, {
+          method: 'GET',
+          headers: { 'x-goog-api-key': apiKey },
+        });
+      } catch (error) {
+        throw new GeminiValidationUnavailableError(
+          error instanceof Error ? error.message : undefined
+        );
+      }
+
+      if (response.ok) return;
+      if ([400, 401, 403].includes(response.status)) throw new InvalidGeminiApiKeyError();
+      throw new GeminiValidationUnavailableError();
+    },
+
+    async addGeminiConnector(userId: string, body: AddConnectorBody): Promise<Connector> {
+      const apiKey = body.apiKey.trim();
+      if (!apiKey) throw new Error('API Key cannot be empty');
+
+      await this.validateGeminiApiKey(apiKey);
+
+      const id = randomUUID();
+      const timestamp = now();
+
+      switch (body.source) {
+        case 'bun-secrets':
+          await secretStore.setSecret(
+            { service: 'mangostudio', name: `gemini-api-key:${id}` },
+            apiKey
+          );
+          break;
+
+        case 'config-file': {
+          const configPath = resolvedTomlFilePath;
+          mkdirSync(dirname(configPath), { recursive: true });
+          const config = readTomlStringSections(configPath);
+
+          config.gemini_api_keys ??= {};
+          config.gemini_api_keys[body.name] = apiKey;
+          writeFileSync(configPath, stringifyToml(config));
+          break;
+        }
+
+        case 'environment': {
+          const envPath = getEnvFilePath();
+          const envVar = `GEMINI_API_KEY_${body.name.toUpperCase().replace(/[^A-Z0-9]/g, '_')}`;
+          const envEntry = `\n${envVar}="${apiKey}"\n`;
+          const currentContent = existsSync(envPath) ? readFileSync(envPath, 'utf8') : '';
+          writeFileSync(envPath, currentContent + envEntry);
+          process.env[envVar] = apiKey;
+          break;
+        }
+      }
+
+      const input: SecretMetadataInput = {
+        id,
+        name: body.name,
+        provider: GEMINI_PROVIDER,
+        configured: true,
+        source: body.source,
+        maskedSuffix: maskSecret(apiKey),
+        updatedAt: timestamp,
+        lastValidatedAt: timestamp,
+        enabledModels: [],
+        userId: ['bun-secrets'].includes(body.source) ? userId : null,
+        baseUrl: body.baseUrl ?? null,
+      };
+
+      await upsertMetadata(input);
+
+      const status = await this.getGeminiSecretStatus(userId);
+      const connector = status.connectors.find((c) => c.id === id);
+      if (!connector) throw new Error(`Connector ${id} not found after creation`);
+      return connector;
+    },
+
+    async updateConnectorModels(
+      userId: string,
+      id: string,
+      enabledModels: string[]
+    ): Promise<void> {
+      const metadata = await getMetadataById(id, userId);
+      if (!metadata) throw new Error('Connector not found');
+
+      await upsertMetadata({
+        id: metadata.id,
+        name: metadata.name,
+        provider: metadata.provider,
+        configured: Boolean(metadata.configured),
+        source: metadata.source,
+        maskedSuffix: metadata.maskedSuffix ?? null,
+        updatedAt: now(),
+        lastValidatedAt: metadata.lastValidatedAt ?? null,
+        lastValidationError: metadata.lastValidationError ?? null,
+        enabledModels,
+        userId: metadata.userId,
+      });
+    },
+
+    async deleteGeminiConnector(userId: string, id: string): Promise<void> {
+      const metadata = await getMetadataById(id, userId);
+      if (!metadata) return;
+
+      if (metadata.source === 'bun-secrets') {
+        await secretStore.deleteSecret({ service: 'mangostudio', name: `gemini-api-key:${id}` });
+      }
+
+      if (metadata.source === 'config-file') {
+        try {
+          const configPath = resolvedTomlFilePath;
+          if (existsSync(configPath)) {
+            const config = readTomlStringSections(configPath);
+
+            if (config.gemini_api_keys) {
+              delete config.gemini_api_keys[metadata.name];
+              writeFileSync(configPath, stringifyToml(config));
+            }
+          }
+        } catch (err) {
+          console.error('[config] Failed to remove key from config.toml:', err);
+        }
+      }
+
+      if (metadata.source === 'environment') {
+        try {
+          const envPath = getEnvFilePath();
+          if (existsSync(envPath)) {
+            const envVar = `GEMINI_API_KEY_${metadata.name.toUpperCase().replace(/[^A-Z0-9]/g, '_')}`;
+            const content = readFileSync(envPath, 'utf8');
+            const lines = content.split('\n');
+            const filteredLines = lines.filter((line) => !line.trim().startsWith(`${envVar}=`));
+            writeFileSync(envPath, filteredLines.join('\n'));
+            delete process.env[envVar];
+          }
+        } catch (err) {
+          console.error('[env] Failed to remove key from .env:', err);
+        }
+      }
+
+      await deleteMetadata(id, userId);
+    },
+  };
+}
+
+const geminiSecretService = createGeminiSecretService();
+
+export const getGeminiSecretStatus =
+  geminiSecretService.getGeminiSecretStatus.bind(geminiSecretService);
+export const getResolvedGeminiApiKey =
+  geminiSecretService.getResolvedGeminiApiKey.bind(geminiSecretService);
+export const validateGeminiApiKey =
+  geminiSecretService.validateGeminiApiKey.bind(geminiSecretService);
+export const syncGeminiConfigFileConnectors =
+  geminiSecretService.syncConfigFileConnectors.bind(geminiSecretService);
+export const addGeminiConnector = geminiSecretService.addGeminiConnector.bind(geminiSecretService);
+export const updateConnectorModels =
+  geminiSecretService.updateConnectorModels.bind(geminiSecretService);
+export const deleteGeminiConnector =
+  geminiSecretService.deleteGeminiConnector.bind(geminiSecretService);
