@@ -84,6 +84,9 @@
     "apps/shared": {
       "name": "@mangostudio/shared",
       "version": "0.0.1",
+      "dependencies": {
+        "@sinclair/typebox": "^0.34.49",
+      },
       "devDependencies": {
         "typescript": "~5.8.2",
       },
