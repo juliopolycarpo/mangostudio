@@ -72,8 +72,10 @@ export async function respondTextStream(
   if (!response.ok) {
     let message = 'Stream request failed';
     try {
-      const body = (await response.json()) as unknown as { error?: string };
-      message = body.error ?? message;
+      const body: unknown = await response.json();
+      if (body && typeof body === 'object' && 'error' in body && typeof body.error === 'string') {
+        message = body.error;
+      }
     } catch {
       // ignore parse errors
     }
