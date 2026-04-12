@@ -36,11 +36,11 @@ import { parseJsonWith } from '../../../lib/safe-parse';
 // ---------------------------------------------------------------------------
 
 function toResponseInput(input: Array<Record<string, unknown>>): OpenAI.Responses.ResponseInput {
-  return toResponseInput(input);
+  return input as unknown as OpenAI.Responses.ResponseInput;
 }
 
 function toResponseTools(tools: Array<Record<string, unknown>>): OpenAI.Responses.Tool[] {
-  return toResponseTools(tools);
+  return tools as unknown as OpenAI.Responses.Tool[];
 }
 
 // ---------------------------------------------------------------------------
