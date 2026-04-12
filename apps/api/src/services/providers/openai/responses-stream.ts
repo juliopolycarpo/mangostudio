@@ -25,6 +25,7 @@ import {
   type ResponseStreamEvent,
 } from './normalizers';
 import type { TextGenerationRequest, StreamingChunk, AgentTurnRequest, AgentEvent } from '../types';
+import { parseJsonWith } from '../../../lib/safe-parse';
 
 // ---------------------------------------------------------------------------
 // Text streaming (reasoning models via Responses API)
@@ -149,16 +150,12 @@ function parseResponseId(providerState: string | null | undefined): string | nul
     return envelope.cursor;
   }
   // Legacy fallback: try old format
-  if (!providerState) return null;
-  try {
-    const parsed = JSON.parse(providerState) as Record<string, unknown>;
+  return parseJsonWith(providerState, (parsed) => {
     if (parsed.provider === 'openai' && typeof parsed.responseId === 'string') {
       return parsed.responseId;
     }
-  } catch {
-    // Ignore malformed state
-  }
-  return null;
+    return null;
+  });
 }
 
 /**

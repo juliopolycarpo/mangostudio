@@ -12,6 +12,7 @@ import { toolDefsToChatCompletions } from '../core/tool-mapper';
 import { computeSystemPromptHash, computeToolsetHash } from '../core/continuation-envelope';
 import { extractReasoningChunks } from '../openai/normalizers';
 import type { AgentTurnRequest, AgentEvent } from '../types';
+import { parseJsonWith } from '../../../lib/safe-parse';
 
 /** Opaque loop-state stored in providerState during the tool-call loop. */
 interface OAICompatLoopState {
@@ -23,16 +24,10 @@ interface OAICompatLoopState {
 export function parseOAICompatLoopState(
   providerState: string | null | undefined
 ): OAICompatLoopState | null {
-  if (!providerState) return null;
-  try {
-    const parsed = JSON.parse(providerState) as Record<string, unknown>;
-    if (parsed.provider === 'openai-compatible' && Array.isArray(parsed.loopMessages)) {
-      return parsed as unknown as OAICompatLoopState;
-    }
-  } catch {
-    // Ignore malformed state
-  }
-  return null;
+  return parseJsonWith(providerState, (parsed) => {
+    if (parsed.provider !== 'openai-compatible' || !Array.isArray(parsed.loopMessages)) return null;
+    return parsed as unknown as OAICompatLoopState;
+  });
 }
 
 /**

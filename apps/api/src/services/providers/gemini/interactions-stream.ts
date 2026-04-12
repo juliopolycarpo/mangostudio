@@ -25,6 +25,7 @@ import {
 import { getResolvedGeminiApiKey } from './secret';
 import { createGeminiClient } from './client';
 import type { AgentTurnRequest, AgentEvent } from '../types';
+import { parseJsonWith } from '../../../lib/safe-parse';
 
 /**
  * Opaque state persisted across turns for Gemini.
@@ -48,16 +49,10 @@ function parseGeminiState(providerState: string | null | undefined): GeminiInter
       toolsetHash: envelope.toolsetHash,
     };
   }
-  if (!providerState) return null;
-  try {
-    const parsed = JSON.parse(providerState) as Record<string, unknown>;
-    if (parsed.provider === 'gemini' && parsed.mode === 'interactions') {
-      return parsed as unknown as GeminiInteractionState;
-    }
-  } catch {
-    // Ignore malformed state
-  }
-  return null;
+  return parseJsonWith(providerState, (parsed) => {
+    if (parsed.provider !== 'gemini' || parsed.mode !== 'interactions') return null;
+    return parsed as unknown as GeminiInteractionState;
+  });
 }
 
 /**
