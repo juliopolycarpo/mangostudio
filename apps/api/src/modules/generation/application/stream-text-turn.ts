@@ -102,25 +102,16 @@ export async function* streamTextTurn(
       const richHistory = await loadRichHistory(chatId, { excludeId: userMsgId }, db);
       const toolDefs = getAllToolDefinitions();
 
-      let currentProviderState: string | null = null;
-      for (let i = richHistory.length - 1; i >= 0; i--) {
-        const ps = richHistory[i].providerState;
-        if (richHistory[i].role === 'ai' && ps) {
-          currentProviderState = ps;
-          break;
-        }
-      }
-
-      if (!currentProviderState) {
-        const chatRow = await db
-          .selectFrom('chats')
-          .select('lastProviderState')
-          .where('id', '=', chatId)
-          .executeTakeFirst();
-        if (chatRow?.lastProviderState) {
-          currentProviderState = chatRow.lastProviderState;
-        }
-      }
+      // Cross-turn continuation state is sourced exclusively from the chat row.
+      // Message-level providerState is kept only as an audit trail and must not
+      // be used for continuation — doing so can resurrect stale cursors from
+      // older turns that have since been superseded.
+      const chatRow = await db
+        .selectFrom('chats')
+        .select('lastProviderState')
+        .where('id', '=', chatId)
+        .executeTakeFirst();
+      let currentProviderState: string | null = chatRow?.lastProviderState ?? null;
 
       const envelope = parseContinuationEnvelope(currentProviderState);
       if (envelope) {
@@ -187,6 +178,9 @@ export async function* streamTextTurn(
 
         const pendingCalls = new Map<string, { name: string; argsStr: string }>();
         let turnCompleted = false;
+        // Track whether a continuation_degraded event was received in this iteration
+        // so turn_completed can derive the correct display mode.
+        let degradedThisTurn = false;
 
         for await (const event of generateAgentTurnStream(req)) {
           if (signal?.aborted) break;
@@ -261,7 +255,9 @@ export async function* streamTextTurn(
 
               const displayMode: ContinuationDisplayMode = resultEnvelope?.cursor
                 ? 'stateful'
-                : 'replay';
+                : resultEnvelope?.mode === 'stateless-loop' && !degradedThisTurn
+                  ? 'stateless-loop'
+                  : 'replay';
               const snapshot = computeContextSnapshot({
                 modelName: modelId,
                 history: richHistory,
@@ -290,6 +286,7 @@ export async function* streamTextTurn(
             }
 
             case 'continuation_degraded':
+              degradedThisTurn = true;
               yield {
                 type: 'fallback_notice',
                 from: event.from,
@@ -449,6 +446,19 @@ export async function* streamTextTurn(
 
     const message = error instanceof Error ? error.message : 'Stream generation failed';
     console.error('[stream-text-turn] Error:', message);
+
+    // Clear stale durable state so a failed turn does not leave an invalid cursor
+    // that would cause every subsequent turn to fail the same way.
+    if (!durableProviderState) {
+      await db
+        .updateTable('chats')
+        .set({ lastProviderState: null })
+        .where('id', '=', chatId)
+        .execute()
+        .catch((err) => {
+          console.warn(`[continuation][clear] Failed to clear stale state on error: ${err}`);
+        });
+    }
 
     try {
       const generationTime = `${((Date.now() - startTime) / 1000).toFixed(1)}s`;

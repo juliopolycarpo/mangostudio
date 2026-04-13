@@ -7,6 +7,7 @@ export const SSEContextEventSchema = Type.Object({
   estimatedUsageRatio: Type.Number(),
   mode: Type.Union([
     Type.Literal('stateful'),
+    Type.Literal('stateless-loop'),
     Type.Literal('replay'),
     Type.Literal('compacted'),
     Type.Literal('degraded'),
@@ -18,6 +19,7 @@ export const SSEContextEventSchema = Type.Object({
     Type.Literal('danger'),
     Type.Literal('critical'),
   ]),
+  done: Type.Literal(false),
 });
 
 export type SSEContextEvent = Static<typeof SSEContextEventSchema>;
@@ -34,6 +36,7 @@ export const SSEFallbackEventSchema = Type.Object({
   from: Type.String(),
   to: Type.String(),
   reason: Type.String(),
+  done: Type.Literal(false),
 });
 
 export type SSEFallbackEvent = Static<typeof SSEFallbackEventSchema>;

@@ -348,4 +348,88 @@ describe('POST /respond/stream', () => {
     expect(contextInfo).toBeDefined();
     expect(contextInfo).toMatchObject({ type: 'context_info', mode: 'replay' });
   });
+
+  it('emits fallback_notice with done:false and context_info with done:false in SSE output', async () => {
+    const STATELESS_STATE = JSON.stringify({
+      schemaVersion: 1,
+      provider: 'openai-compatible',
+      mode: 'stateless-loop',
+      modelName: 'deepseek-chat',
+      systemPromptHash: 'none',
+      toolsetHash: 'none',
+      loopMessages: [],
+    });
+
+    await mock.module('../../../src/modules/chats/infrastructure/chat-repository', () => ({
+      verifyChatOwnership: () => Promise.resolve(true),
+    }));
+
+    await mock.module('../../../src/services/providers/registry', () => ({
+      getProviderForModel: () =>
+        Promise.resolve({
+          providerType: 'openai-compatible',
+          generateText: () => Promise.resolve({ text: '' }),
+          generateAgentTurnStream: async function* (_req: AgentTurnRequest) {
+            await Promise.resolve();
+            yield {
+              type: 'continuation_degraded',
+              from: 'responses',
+              to: 'replay',
+              reason: 'cursor_expired',
+            };
+            yield { type: 'assistant_text_delta', text: 'OK' };
+            yield { type: 'turn_completed', providerState: STATELESS_STATE };
+          },
+        }),
+    }));
+
+    await mock.module('../../../src/services/tools', () => ({
+      getAllToolDefinitions: () => [],
+      executeTool: () => Promise.resolve({}),
+    }));
+
+    await mock.module('../../../src/db/database', () => ({
+      getDb: () => ({
+        selectFrom: () => makeChain({ userId: TEST_USER.id }),
+        insertInto: (_table: string) => ({
+          values: () => ({ execute: () => Promise.resolve() }),
+        }),
+        updateTable: () => makeChain(undefined),
+      }),
+    }));
+
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
+    restoreAuth = restore;
+
+    const response = await app.handle(
+      new Request('http://localhost/respond/stream', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chatId: 'test-chat', prompt: 'Hi', model: 'deepseek-chat' }),
+      })
+    );
+
+    expect(response.status).toBe(200);
+    const rawText = await response.text();
+
+    const sseEvents = rawText
+      .split('\n\n')
+      .filter((block) => block.startsWith('data: '))
+      .map((block) => {
+        try {
+          return JSON.parse(block.replace(/^data: /, '')) as Record<string, unknown>;
+        } catch {
+          return null;
+        }
+      })
+      .filter((e): e is Record<string, unknown> => e !== null);
+
+    const fallbackNotice = sseEvents.find((e) => e.type === 'fallback_notice');
+    expect(fallbackNotice).toBeDefined();
+    expect(fallbackNotice?.done).toBe(false);
+
+    const contextInfo = sseEvents.find((e) => e.type === 'context_info');
+    expect(contextInfo).toBeDefined();
+    expect(contextInfo?.done).toBe(false);
+  });
 });

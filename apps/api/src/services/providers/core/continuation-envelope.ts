@@ -5,6 +5,15 @@
  * All providers emit this envelope on `turn_completed`. The route-level
  * validation in respond-stream uses it as a safety gate before forwarding
  * state to the provider.
+ *
+ * Design notes:
+ * - Durable modes (`responses`, `interactions`) require a `cursor` field.
+ *   An envelope with a durable mode but no cursor is structurally invalid
+ *   and will be rejected by `parseContinuationEnvelope`.
+ * - Turn-local mode (`stateless-loop`) must NOT be persisted as cross-turn
+ *   state. `isDurableMode` returns false for it.
+ * - Unknown mode strings are rejected at parse time so legacy or malformed
+ *   state cannot bypass current validation rules.
  */
 
 import type { ProviderType } from '@mangostudio/shared/types';
@@ -14,6 +23,8 @@ import { parseJsonWith } from '../../../lib/safe-parse';
 export { computeToolsetHash };
 
 export type ContinuationMode = 'responses' | 'interactions' | 'stateless-loop';
+
+const VALID_CONTINUATION_MODES = new Set<string>(['responses', 'interactions', 'stateless-loop']);
 
 export interface ContinuationEnvelope {
   schemaVersion: 1;
@@ -34,7 +45,8 @@ export interface ContinuationEnvelope {
 
 /**
  * Safely parses a raw JSON string into a ContinuationEnvelope.
- * Returns null on any failure (bad JSON, missing fields, wrong schema version).
+ * Returns null on any failure (bad JSON, missing fields, wrong schema version,
+ * unrecognised mode, or missing cursor for durable modes).
  */
 export function parseContinuationEnvelope(
   raw: string | null | undefined
@@ -43,9 +55,14 @@ export function parseContinuationEnvelope(
     if (parsed.schemaVersion !== 1) return null;
     if (typeof parsed.provider !== 'string') return null;
     if (typeof parsed.mode !== 'string') return null;
+    if (!VALID_CONTINUATION_MODES.has(parsed.mode)) return null;
     if (typeof parsed.modelName !== 'string') return null;
     if (typeof parsed.systemPromptHash !== 'string') return null;
     if (typeof parsed.toolsetHash !== 'string') return null;
+    // Durable modes must carry a cursor; reject silently so callers degrade to replay.
+    if (isDurableMode(parsed.mode as ContinuationMode) && typeof parsed.cursor !== 'string') {
+      return null;
+    }
     return parsed as unknown as ContinuationEnvelope;
   });
 }

@@ -238,14 +238,18 @@ export async function* streamAgentTurnWithResponsesAPI(
       const status = err instanceof OpenAIAPIError ? (err.status as number) : 'unknown';
 
       if (req.toolResults) {
+        // Tool-result continuation cannot be replayed safely: replaying from history
+        // would silently drop the in-flight tool results. Use a distinct 'to' value
+        // rather than the generic 'error' so callers can distinguish this case.
+        // Stale durable state must be cleared by the orchestrator after this failure.
         console.warn(
           `[fallback][degrade] provider=openai reason=cursor_error status=${status}` +
-            ` toolResults=true cannot recover — yielding turn_error`
+            ` toolResults=true tool loop aborted`
         );
         yield {
           type: 'continuation_degraded',
           from: 'responses',
-          to: 'error',
+          to: 'tool_loop_aborted',
           reason: `cursor_error during tool-result continuation (status=${status})`,
         };
         yield {

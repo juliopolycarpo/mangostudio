@@ -55,7 +55,13 @@ function toSsePayload(event: StreamEvent): object {
         done: false,
       };
     case 'fallback_notice':
-      return { type: 'fallback_notice', from: event.from, to: event.to, reason: event.reason };
+      return {
+        type: 'fallback_notice',
+        from: event.from,
+        to: event.to,
+        reason: event.reason,
+        done: false,
+      };
     case 'system_event':
       return { type: 'system_event', event: event.event, detail: event.detail, done: false };
     case 'context_info':
@@ -66,6 +72,7 @@ function toSsePayload(event: StreamEvent): object {
         estimatedUsageRatio: event.estimatedUsageRatio,
         mode: event.mode,
         severity: event.severity,
+        done: false,
       };
     case 'done':
       return {
