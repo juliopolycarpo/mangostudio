@@ -72,6 +72,7 @@ export const uploadRoutes = (app: Elysia) =>
             'image/heif': ['.heic', '.heif'],
           };
 
+          // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- mime may not be a key in the map at runtime
           const expectedExts = expectedExtensions[fileType.mime] || [];
           if (expectedExts.length > 0 && !expectedExts.includes(ext.toLowerCase())) {
             console.warn(

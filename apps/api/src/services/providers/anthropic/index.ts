@@ -10,7 +10,7 @@ import { withModelCache } from '../core/model-cache';
 import { createProviderSecretService } from '../core/secret-service';
 import { isReasoningModel } from '../core/capability-detector';
 import { getModelContextLimit } from '../core/context-policy';
-import { narrowDelta, narrowSdkError } from './normalizers';
+import { narrowDelta, narrowSdkError, toMessageCreateParams } from './normalizers';
 import { streamAnthropicAgentTurn } from './stream';
 import type {
   AIProvider,
@@ -190,11 +190,11 @@ const anthropicProvider: AIProvider = {
     if (thinkingEnabled) {
       params.thinking = {
         type: 'enabled',
-        budget_tokens: budgetMap[effort] ?? 2048,
+        budget_tokens: budgetMap[effort],
       };
     }
 
-    const stream = client.messages.stream(params as unknown as Anthropic.MessageCreateParams, {
+    const stream = client.messages.stream(toMessageCreateParams(params), {
       signal: req.signal,
     });
 

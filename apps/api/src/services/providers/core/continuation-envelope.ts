@@ -9,6 +9,7 @@
 
 import type { ProviderType } from '@mangostudio/shared/types';
 import { computeHash, computeToolsetHash } from '../../../utils/hash';
+import { parseJsonWith } from '../../../lib/safe-parse';
 
 export { computeToolsetHash };
 
@@ -38,9 +39,7 @@ export interface ContinuationEnvelope {
 export function parseContinuationEnvelope(
   raw: string | null | undefined
 ): ContinuationEnvelope | null {
-  if (!raw) return null;
-  try {
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
+  return parseJsonWith(raw, (parsed) => {
     if (parsed.schemaVersion !== 1) return null;
     if (typeof parsed.provider !== 'string') return null;
     if (typeof parsed.mode !== 'string') return null;
@@ -48,9 +47,7 @@ export function parseContinuationEnvelope(
     if (typeof parsed.systemPromptHash !== 'string') return null;
     if (typeof parsed.toolsetHash !== 'string') return null;
     return parsed as unknown as ContinuationEnvelope;
-  } catch {
-    return null;
-  }
+  });
 }
 
 /** Serializes a ContinuationEnvelope to a JSON string. */

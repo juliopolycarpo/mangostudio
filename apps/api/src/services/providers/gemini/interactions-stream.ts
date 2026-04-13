@@ -19,12 +19,13 @@ import {
   isFunctionCallStart,
   narrowGeminiDelta,
   extractGeminiUsage,
+  toInteractionParams,
   type InteractionSSEEvent,
-  type CreateModelInteractionParamsStreaming,
 } from './normalizers';
 import { getResolvedGeminiApiKey } from './secret';
 import { createGeminiClient } from './client';
 import type { AgentTurnRequest, AgentEvent } from '../types';
+import { parseJsonWith } from '../../../lib/safe-parse';
 
 /**
  * Opaque state persisted across turns for Gemini.
@@ -48,16 +49,10 @@ function parseGeminiState(providerState: string | null | undefined): GeminiInter
       toolsetHash: envelope.toolsetHash,
     };
   }
-  if (!providerState) return null;
-  try {
-    const parsed = JSON.parse(providerState) as Record<string, unknown>;
-    if (parsed.provider === 'gemini' && parsed.mode === 'interactions') {
-      return parsed as unknown as GeminiInteractionState;
-    }
-  } catch {
-    // Ignore malformed state
-  }
-  return null;
+  return parseJsonWith(providerState, (parsed) => {
+    if (parsed.provider !== 'gemini' || parsed.mode !== 'interactions') return null;
+    return parsed as unknown as GeminiInteractionState;
+  });
 }
 
 /**
@@ -124,16 +119,14 @@ export async function* streamGeminiAgentTurn(req: AgentTurnRequest): AsyncIterab
   if (req.generationConfig?.thinkingEnabled) {
     const levelMap = { low: 'low', medium: 'medium', high: 'high' } as const;
     interactionParams.generation_config = {
-      thinking_level: levelMap[req.generationConfig.reasoningEffort] ?? 'medium',
+      thinking_level: levelMap[req.generationConfig.reasoningEffort],
       thinking_summaries: 'auto',
     };
   }
 
   try {
     interactionParams.stream = true;
-    const stream = await ai.interactions.create(
-      interactionParams as unknown as CreateModelInteractionParamsStreaming
-    );
+    const stream = await ai.interactions.create(toInteractionParams(interactionParams));
 
     yield* processGeminiInteractionStream(stream, req, currentToolsetHash);
   } catch (err: unknown) {
@@ -141,7 +134,6 @@ export async function* streamGeminiAgentTurn(req: AgentTurnRequest): AsyncIterab
 
     const isCursorError =
       canContinue &&
-      prevState !== null &&
       (/not found/i.test(errMsg) ||
         /expired/i.test(errMsg) ||
         /invalid.*interaction/i.test(errMsg) ||
@@ -188,14 +180,12 @@ export async function* streamGeminiAgentTurn(req: AgentTurnRequest): AsyncIterab
         if (req.generationConfig?.thinkingEnabled) {
           const levelMap = { low: 'low', medium: 'medium', high: 'high' } as const;
           retryParams.generation_config = {
-            thinking_level: levelMap[req.generationConfig.reasoningEffort] ?? 'medium',
+            thinking_level: levelMap[req.generationConfig.reasoningEffort],
             thinking_summaries: 'auto',
           };
         }
 
-        const retryStream = await ai.interactions.create(
-          retryParams as unknown as CreateModelInteractionParamsStreaming
-        );
+        const retryStream = await ai.interactions.create(toInteractionParams(retryParams));
 
         yield* processGeminiInteractionStream(retryStream, req, currentToolsetHash);
       } catch (retryErr: unknown) {

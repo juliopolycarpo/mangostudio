@@ -12,6 +12,27 @@ import { toolDefsToChatCompletions } from '../core/tool-mapper';
 import { computeSystemPromptHash, computeToolsetHash } from '../core/continuation-envelope';
 import { extractReasoningChunks } from '../openai/normalizers';
 import type { AgentTurnRequest, AgentEvent } from '../types';
+import { parseJsonWith } from '../../../lib/safe-parse';
+
+/**
+ * Extended delta shape for OpenAI-compatible endpoints.
+ *
+ * The OpenAI SDK's `ChatCompletionChunk.Choice.Delta` type only covers
+ * standard fields. DeepSeek and OpenRouter add reasoning-related fields
+ * that the SDK doesn't model. This interface covers the superset.
+ */
+interface ExtendedChatDelta extends Record<string, unknown> {
+  content?: string | null;
+  role?: string;
+  tool_calls?: Array<{
+    index?: number;
+    id?: string;
+    function?: { name?: string; arguments?: string };
+  }>;
+  reasoning_content?: string;
+  reasoning?: string;
+  reasoning_details?: Array<{ type?: string; text?: string }>;
+}
 
 /** Opaque loop-state stored in providerState during the tool-call loop. */
 interface OAICompatLoopState {
@@ -23,16 +44,10 @@ interface OAICompatLoopState {
 export function parseOAICompatLoopState(
   providerState: string | null | undefined
 ): OAICompatLoopState | null {
-  if (!providerState) return null;
-  try {
-    const parsed = JSON.parse(providerState) as Record<string, unknown>;
-    if (parsed.provider === 'openai-compatible' && Array.isArray(parsed.loopMessages)) {
-      return parsed as unknown as OAICompatLoopState;
-    }
-  } catch {
-    // Ignore malformed state
-  }
-  return null;
+  return parseJsonWith(providerState, (parsed) => {
+    if (parsed.provider !== 'openai-compatible' || !Array.isArray(parsed.loopMessages)) return null;
+    return parsed as unknown as OAICompatLoopState;
+  });
 }
 
 /**
@@ -88,11 +103,12 @@ export async function* streamOAICompatAgentTurn(
       if (req.signal?.aborted) break;
 
       const choice = chunk.choices[0];
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- choices array may be empty at runtime
       if (!choice) continue;
 
-      const delta = choice.delta as unknown as Record<string, unknown>;
+      // Cast to ExtendedChatDelta — the SDK type doesn't model DeepSeek/OpenRouter reasoning fields
+      const delta = choice.delta as ExtendedChatDelta;
 
-      // Multi-field reasoning extraction — see extractReasoningChunks for details.
       for (const reasoningChunk of extractReasoningChunks(delta)) {
         assistantReasoning += reasoningChunk;
         yield { type: 'reasoning_delta', text: reasoningChunk };
@@ -104,11 +120,11 @@ export async function* streamOAICompatAgentTurn(
       }
 
       // Tool call streaming
-      const toolCalls = delta.tool_calls as Array<Record<string, unknown>> | undefined;
+      const toolCalls = delta.tool_calls;
       if (Array.isArray(toolCalls)) {
         for (const tcDelta of toolCalls) {
           const idx = typeof tcDelta.index === 'number' ? tcDelta.index : 0;
-          const fn = tcDelta.function as Record<string, unknown> | undefined;
+          const fn = tcDelta.function;
 
           if (typeof tcDelta.id === 'string') {
             const callId = tcDelta.id;

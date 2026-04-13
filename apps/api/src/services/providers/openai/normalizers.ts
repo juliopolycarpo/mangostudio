@@ -12,6 +12,20 @@ export type ResponseStreamEvent = Responses.ResponseStreamEvent;
 export type ResponseCreateParamsStreaming = Responses.ResponseCreateParamsStreaming;
 
 // ---------------------------------------------------------------------------
+// SDK type gaps
+//
+// The OpenAI SDK sometimes omits fields that appear on the wire.
+// These interfaces cover the gaps so the casts have documented targets.
+// ---------------------------------------------------------------------------
+
+/** Reasoning output item with the `content` array that the SDK type omits. */
+interface ReasoningItemWithContent {
+  type: 'reasoning';
+  summary?: Array<{ text: string }>;
+  content?: Array<{ type: string; text?: string }>;
+}
+
+// ---------------------------------------------------------------------------
 // Reasoning extraction — Responses API (response.completed fallback)
 // ---------------------------------------------------------------------------
 
@@ -20,6 +34,7 @@ export type ResponseCreateParamsStreaming = Responses.ResponseCreateParamsStream
  * Tries summary array first, then falls back to reasoning content array.
  */
 export function extractReasoningFromCompleted(response: Responses.Response): string | null {
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- tests pass mock data where output may be undefined
   const output = response.output ?? [];
 
   for (const item of output) {
@@ -31,12 +46,15 @@ export function extractReasoningFromCompleted(response: Responses.Response): str
       if (texts.length > 0) return texts.join('\n\n');
     }
 
-    // Fallback: reasoning content array (not always present in SDK types)
-    const rec = item as unknown as Record<string, unknown>;
-    if (Array.isArray(rec.content)) {
-      const texts = (rec.content as Array<Record<string, unknown>>)
-        .filter((c) => c.type === 'reasoning_text' && typeof c.text === 'string')
-        .map((c) => c.text as string);
+    // Fallback: reasoning content array (not modeled by SDK types)
+    const extended = item as ReasoningItemWithContent;
+    if (Array.isArray(extended.content)) {
+      const texts = extended.content
+        .filter(
+          (c): c is { type: string; text: string } =>
+            c.type === 'reasoning_text' && typeof c.text === 'string'
+        )
+        .map((c) => c.text);
       if (texts.length > 0) return texts.join('\n\n');
     }
   }

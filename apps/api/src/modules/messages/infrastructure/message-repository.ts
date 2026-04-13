@@ -60,7 +60,7 @@ export interface MappedMessage {
   modelName: string | null;
   styleParams: string[] | undefined;
   interactionMode: InteractionMode;
-  parts: unknown[] | undefined;
+  parts: MessagePart[] | undefined;
   providerState: string | null;
 }
 
@@ -106,7 +106,7 @@ export function mapMessage(row: MessageRow): MappedMessage {
     ...row,
     isGenerating: row.isGenerating === 1,
     styleParams: parseStyleParams(row.styleParams),
-    parts: row.parts ? (JSON.parse(row.parts) as unknown[]) : undefined,
+    parts: row.parts ? (JSON.parse(row.parts) as MessagePart[]) : undefined,
   };
 }
 

@@ -402,10 +402,6 @@ export async function* streamTextTurn(
           fullText += chunk.text;
           allParts.push({ type: 'text', text: chunk.text });
           yield { type: 'text', text: chunk.text };
-        } else if (!chunk.type && chunk.text && !chunk.done) {
-          legacyInThinking = false;
-          fullText += chunk.text;
-          yield { type: 'text', text: chunk.text };
         }
       }
     } else {

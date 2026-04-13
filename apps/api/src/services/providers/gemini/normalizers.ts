@@ -21,6 +21,21 @@ export type CreateModelInteractionParamsStreaming =
   Interactions.CreateModelInteractionParamsStreaming;
 
 // ---------------------------------------------------------------------------
+// SDK boundary cast — Gemini Interactions API
+//
+// The Interactions SDK's CreateModelInteractionParamsStreaming type is strict
+// about its property shapes, but our builder constructs params dynamically
+// (optional tools, thinking config, history replay). This wrapper contains
+// the single cast.
+// ---------------------------------------------------------------------------
+
+export function toInteractionParams(
+  params: Record<string, unknown>
+): CreateModelInteractionParamsStreaming {
+  return params as unknown as CreateModelInteractionParamsStreaming;
+}
+
+// ---------------------------------------------------------------------------
 // Content-start narrowing
 // ---------------------------------------------------------------------------
 
@@ -46,7 +61,7 @@ export type NarrowedGeminiDelta =
 export function narrowGeminiDelta(delta: ContentDelta['delta']): NarrowedGeminiDelta {
   switch (delta.type) {
     case 'thought_summary': {
-      const text = delta.content && 'text' in delta.content ? (delta.content.text ?? '') : '';
+      const text = delta.content && 'text' in delta.content ? delta.content.text : '';
       return { kind: 'thought_summary', text };
     }
     case 'text':
@@ -56,7 +71,7 @@ export function narrowGeminiDelta(delta: ContentDelta['delta']): NarrowedGeminiD
         kind: 'function_call',
         id: delta.id,
         name: delta.name,
-        args: delta.arguments ?? {},
+        args: delta.arguments,
       };
     case 'thought_signature':
       return { kind: 'thought_signature' };

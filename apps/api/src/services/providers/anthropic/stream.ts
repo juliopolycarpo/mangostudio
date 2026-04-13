@@ -6,8 +6,14 @@ import type Anthropic from '@anthropic-ai/sdk';
 import { computeSystemPromptHash, computeToolsetHash } from '../core/continuation-envelope';
 import { getModelContextLimit } from '../core/context-policy';
 import { buildCachedAnthropicRequest } from './cached-request';
-import { isToolUseBlock, narrowDelta, extractCacheUsage } from './normalizers';
+import {
+  isToolUseBlock,
+  narrowDelta,
+  extractCacheUsage,
+  toMessageCreateParams,
+} from './normalizers';
 import type { AgentTurnRequest, AgentEvent } from '../types';
+import { parseJsonWith } from '../../../lib/safe-parse';
 
 /** Opaque loop-state stored in providerState during the tool-call loop. */
 interface AnthropicLoopState {
@@ -18,16 +24,10 @@ interface AnthropicLoopState {
 export function parseAnthropicLoopState(
   providerState: string | null | undefined
 ): AnthropicLoopState | null {
-  if (!providerState) return null;
-  try {
-    const parsed = JSON.parse(providerState) as Record<string, unknown>;
-    if (parsed.provider === 'anthropic' && Array.isArray(parsed.loopMessages)) {
-      return parsed as unknown as AnthropicLoopState;
-    }
-  } catch {
-    // Ignore malformed state
-  }
-  return null;
+  return parseJsonWith(providerState, (parsed) => {
+    if (parsed.provider !== 'anthropic' || !Array.isArray(parsed.loopMessages)) return null;
+    return parsed as unknown as AnthropicLoopState;
+  });
 }
 
 /**
@@ -75,14 +75,14 @@ export async function* streamAnthropicAgentTurn(
     toolDefinitions: req.toolDefinitions ?? [],
     messages,
     thinkingConfig: thinkingEnabled
-      ? { type: 'enabled', budget_tokens: budgetMap[effort] ?? 2048 }
+      ? { type: 'enabled', budget_tokens: budgetMap[effort] }
       : undefined,
   });
 
   const params = { model: req.modelName, ...cachedReq };
 
   try {
-    const stream = client.messages.stream(params as unknown as Anthropic.MessageCreateParams, {
+    const stream = client.messages.stream(toMessageCreateParams(params), {
       signal: req.signal,
     });
 

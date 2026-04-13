@@ -25,6 +25,23 @@ import {
   type ResponseStreamEvent,
 } from './normalizers';
 import type { TextGenerationRequest, StreamingChunk, AgentTurnRequest, AgentEvent } from '../types';
+import { parseJsonWith } from '../../../lib/safe-parse';
+
+// ---------------------------------------------------------------------------
+// SDK boundary casts — OpenAI Responses API
+//
+// The SDK's ResponseInput and Tool types are complex unions that don't
+// accept plain {role, content} objects or our tool definition shapes.
+// These wrappers contain the single cast per pattern.
+// ---------------------------------------------------------------------------
+
+function toResponseInput(input: Array<Record<string, unknown>>): OpenAI.Responses.ResponseInput {
+  return input as unknown as OpenAI.Responses.ResponseInput;
+}
+
+function toResponseTools(tools: Array<Record<string, unknown>>): OpenAI.Responses.Tool[] {
+  return tools as unknown as OpenAI.Responses.Tool[];
+}
 
 // ---------------------------------------------------------------------------
 // Text streaming (reasoning models via Responses API)
@@ -49,7 +66,7 @@ export async function* streamWithResponsesAPI(
 
   const stream = await client.responses.create({
     model: req.modelName,
-    input: input as unknown as OpenAI.Responses.ResponseInput,
+    input: toResponseInput(input),
     ...(req.systemPrompt?.trim() ? { instructions: req.systemPrompt } : {}),
     stream: true,
     reasoning: {
@@ -149,16 +166,12 @@ function parseResponseId(providerState: string | null | undefined): string | nul
     return envelope.cursor;
   }
   // Legacy fallback: try old format
-  if (!providerState) return null;
-  try {
-    const parsed = JSON.parse(providerState) as Record<string, unknown>;
+  return parseJsonWith(providerState, (parsed) => {
     if (parsed.provider === 'openai' && typeof parsed.responseId === 'string') {
       return parsed.responseId;
     }
-  } catch {
-    // Ignore malformed state
-  }
-  return null;
+    return null;
+  });
 }
 
 /**
@@ -201,10 +214,10 @@ export async function* streamAgentTurnWithResponsesAPI(
   const makeRequest = (prevId: string | null): APIPromise<Stream<ResponseStreamEvent>> => {
     return client.responses.create({
       model: req.modelName,
-      input: input as unknown as OpenAI.Responses.ResponseInput,
+      input: toResponseInput(input),
       ...(req.systemPrompt?.trim() ? { instructions: req.systemPrompt } : {}),
       ...(prevId ? { previous_response_id: prevId } : {}),
-      ...(tools.length > 0 ? { tools: tools as unknown as OpenAI.Responses.Tool[] } : {}),
+      ...(tools.length > 0 ? { tools: toResponseTools(tools) } : {}),
       store: true,
       stream: true,
       ...(useReasoning ? { reasoning: { effort, summary: 'concise' } } : {}),
@@ -350,7 +363,7 @@ export async function* streamAgentTurnWithResponsesAPI(
             type: 'tool_call_completed',
             callId: mapped.callId,
             name: mapped.name,
-            arguments: ev.arguments ?? '',
+            arguments: ev.arguments,
           };
         }
         break;

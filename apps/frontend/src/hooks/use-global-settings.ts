@@ -1,61 +1,43 @@
-/* global localStorage, console */
 import { useState, useCallback, useEffect } from 'react';
 import type { ReasoningEffort } from '@mangostudio/shared';
+import { readStorage, writeStorage } from '@/lib/storage';
 
 export function useGlobalSettings() {
-  // Load from localStorage on init
-  const loadFromStorage = <T>(key: string, defaultValue: T): T => {
-    try {
-      const item = localStorage.getItem(`mangostudio:${key}`);
-      return item ? (JSON.parse(item) as unknown as T) : defaultValue;
-    } catch {
-      return defaultValue;
-    }
-  };
-
-  const saveToStorage = (key: string, value: unknown) => {
-    try {
-      localStorage.setItem(`mangostudio:${key}`, JSON.stringify(value));
-    } catch (error) {
-      console.error(`Failed to save ${key} to localStorage`, error);
-    }
-  };
-
   const [globalTextSystemPrompt, setGlobalTextSystemPrompt] = useState(() =>
-    loadFromStorage('globalTextSystemPrompt', '')
+    readStorage('globalTextSystemPrompt', '')
   );
   const [globalImageSystemPrompt, setGlobalImageSystemPrompt] = useState(() =>
-    loadFromStorage('globalImageSystemPrompt', '')
+    readStorage('globalImageSystemPrompt', '')
   );
   const [globalImageQuality, setGlobalImageQuality] = useState(() =>
-    loadFromStorage('globalImageQuality', '1K')
+    readStorage('globalImageQuality', '1K')
   );
   const [thinkingEnabled, setThinkingEnabled] = useState(() =>
-    loadFromStorage('thinkingEnabled', false)
+    readStorage('thinkingEnabled', false)
   );
-  const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>(() =>
-    loadFromStorage<ReasoningEffort>('reasoningEffort', 'medium')
+  const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>(
+    () => readStorage('reasoningEffort', 'medium') as ReasoningEffort
   );
 
   // Persist changes to localStorage
   useEffect(() => {
-    saveToStorage('globalTextSystemPrompt', globalTextSystemPrompt);
+    writeStorage('globalTextSystemPrompt', globalTextSystemPrompt);
   }, [globalTextSystemPrompt]);
 
   useEffect(() => {
-    saveToStorage('globalImageSystemPrompt', globalImageSystemPrompt);
+    writeStorage('globalImageSystemPrompt', globalImageSystemPrompt);
   }, [globalImageSystemPrompt]);
 
   useEffect(() => {
-    saveToStorage('globalImageQuality', globalImageQuality);
+    writeStorage('globalImageQuality', globalImageQuality);
   }, [globalImageQuality]);
 
   useEffect(() => {
-    saveToStorage('thinkingEnabled', thinkingEnabled);
+    writeStorage('thinkingEnabled', thinkingEnabled);
   }, [thinkingEnabled]);
 
   useEffect(() => {
-    saveToStorage('reasoningEffort', reasoningEffort);
+    writeStorage('reasoningEffort', reasoningEffort);
   }, [reasoningEffort]);
 
   const resetSettings = useCallback(() => {

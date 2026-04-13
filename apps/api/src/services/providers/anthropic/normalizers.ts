@@ -9,6 +9,20 @@ import { APIError as AnthropicAPIError } from '@anthropic-ai/sdk';
 import type Anthropic from '@anthropic-ai/sdk';
 
 // ---------------------------------------------------------------------------
+// SDK boundary cast — Anthropic Messages API
+//
+// The SDK's MessageCreateParams is a union with a stream discriminant.
+// Our builder constructs the params dynamically (optional thinking config),
+// so TypeScript can't verify the exact shape. This wrapper contains the cast.
+// ---------------------------------------------------------------------------
+
+export function toMessageCreateParams(
+  params: Record<string, unknown>
+): Anthropic.MessageCreateParams {
+  return params as unknown as Anthropic.MessageCreateParams;
+}
+
+// ---------------------------------------------------------------------------
 // Error narrowing
 // ---------------------------------------------------------------------------
 
@@ -36,7 +50,7 @@ export interface AnthropicCacheUsage {
 /** Extract prompt-cache stats from an Anthropic Message.usage object. */
 export function extractCacheUsage(usage: Anthropic.Usage): AnthropicCacheUsage {
   return {
-    inputTokens: usage.input_tokens ?? 0,
+    inputTokens: usage.input_tokens,
     cachedTokens: usage.cache_read_input_tokens ?? 0,
     cacheCreationTokens: usage.cache_creation_input_tokens ?? 0,
   };
