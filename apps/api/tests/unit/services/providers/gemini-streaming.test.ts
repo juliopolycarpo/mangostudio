@@ -201,7 +201,11 @@ describe('GeminiProvider.generateTextStream', () => {
       // consume
     }
 
-    expect(capturedConfig?.thinkingConfig).toBeUndefined();
+    // Gemini 3 Flash models cannot fully disable thinking — minimum is MINIMAL
+    expect(capturedConfig?.thinkingConfig).toEqual({
+      includeThoughts: false,
+      thinkingLevel: 'MINIMAL',
+    });
   });
 
   it('falls back to chunk.text when candidate has no parts', async () => {
