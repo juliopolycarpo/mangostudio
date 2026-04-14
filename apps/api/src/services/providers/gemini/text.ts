@@ -97,7 +97,9 @@ export async function* generateGeminiTextStream(
       generationConfig.thinkingEnabled,
       generationConfig.reasoningEffort
     );
-    config.thinkingConfig = thinkingConfig;
+    if (thinkingConfig) {
+      config.thinkingConfig = thinkingConfig;
+    }
   }
 
   const stream = await ai.models.generateContentStream({ model: modelName, contents, config });

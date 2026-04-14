@@ -30,8 +30,20 @@ describe('getGeminiFamily', () => {
     expect(getGeminiFamily('gemini-3.1-pro')).toBe('gemini-3');
   });
 
-  it('defaults unknown models to gemini-3', () => {
+  it('detects gemini-4-ultra as gemini-3 (forward-compatible)', () => {
     expect(getGeminiFamily('gemini-4-ultra')).toBe('gemini-3');
+  });
+
+  it('detects gemini-2.0-flash as gemini-legacy', () => {
+    expect(getGeminiFamily('gemini-2.0-flash')).toBe('gemini-legacy');
+  });
+
+  it('detects gemini-1.5-pro as gemini-legacy', () => {
+    expect(getGeminiFamily('gemini-1.5-pro')).toBe('gemini-legacy');
+  });
+
+  it('defaults completely unknown models to gemini-legacy', () => {
+    expect(getGeminiFamily('some-unknown-model')).toBe('gemini-legacy');
   });
 });
 
@@ -99,6 +111,16 @@ describe('buildTextThinkingConfig', () => {
       expect(config).toEqual({ includeThoughts: false, thinkingBudget: 128 });
     });
   });
+
+  describe('Legacy models (Gemini 2.0 and older)', () => {
+    it('returns undefined for gemini-2.0-flash', () => {
+      expect(buildTextThinkingConfig('gemini-2.0-flash', true, 'high')).toBeUndefined();
+    });
+
+    it('returns undefined for gemini-1.5-pro', () => {
+      expect(buildTextThinkingConfig('gemini-1.5-pro', false, 'medium')).toBeUndefined();
+    });
+  });
 });
 
 describe('buildInteractionsThinkingConfig', () => {
@@ -124,30 +146,29 @@ describe('buildInteractionsThinkingConfig', () => {
     });
   });
 
-  describe('Gemini 2.5 models', () => {
-    it('maps high effort to thinking_budget 32768 for Pro', () => {
-      const config = buildInteractionsThinkingConfig('gemini-2.5-pro-preview', true, 'high');
-      expect(config).toEqual({ thinking_budget: 32768, thinking_summaries: 'auto' });
+  describe('Gemini 2.5 models (no Interactions API thinking support)', () => {
+    it('returns undefined for 2.5 Pro with thinking enabled', () => {
+      expect(
+        buildInteractionsThinkingConfig('gemini-2.5-pro-preview', true, 'high')
+      ).toBeUndefined();
     });
 
-    it('maps high effort to thinking_budget 24576 for Flash', () => {
-      const config = buildInteractionsThinkingConfig('gemini-2.5-flash', true, 'high');
-      expect(config).toEqual({ thinking_budget: 24576, thinking_summaries: 'auto' });
+    it('returns undefined for 2.5 Flash with thinking enabled', () => {
+      expect(buildInteractionsThinkingConfig('gemini-2.5-flash', true, 'medium')).toBeUndefined();
     });
 
-    it('maps medium effort to thinking_budget 8192', () => {
-      const config = buildInteractionsThinkingConfig('gemini-2.5-flash', true, 'medium');
-      expect(config).toEqual({ thinking_budget: 8192, thinking_summaries: 'auto' });
+    it('returns undefined for 2.5 Flash with thinking disabled', () => {
+      expect(buildInteractionsThinkingConfig('gemini-2.5-flash', false, 'medium')).toBeUndefined();
+    });
+  });
+
+  describe('Legacy models (Gemini 2.0 and older)', () => {
+    it('returns undefined for gemini-2.0-flash', () => {
+      expect(buildInteractionsThinkingConfig('gemini-2.0-flash', true, 'high')).toBeUndefined();
     });
 
-    it('uses budget 0 when thinking disabled on Flash', () => {
-      const config = buildInteractionsThinkingConfig('gemini-2.5-flash', false, 'medium');
-      expect(config).toEqual({ thinking_budget: 0, thinking_summaries: 'auto' });
-    });
-
-    it('uses budget 128 when thinking disabled on Pro', () => {
-      const config = buildInteractionsThinkingConfig('gemini-2.5-pro-preview', false, 'medium');
-      expect(config).toEqual({ thinking_budget: 128, thinking_summaries: 'auto' });
+    it('returns undefined for gemini-1.5-pro', () => {
+      expect(buildInteractionsThinkingConfig('gemini-1.5-pro', false, 'medium')).toBeUndefined();
     });
   });
 });

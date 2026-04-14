@@ -2,8 +2,10 @@
  * Model-family-aware reasoning configuration for Gemini.
  *
  * Gemini 3+ uses `thinkingLevel` (enum: LOW/MEDIUM/HIGH/MINIMAL).
- * Gemini 2.5 uses `thinkingBudget` (integer token count).
- * Sending the wrong parameter shape to a model family causes an API error.
+ * Gemini 2.5 uses `thinkingBudget` (integer token count) — but only via the
+ * generateContent SDK; the Interactions API GenerationConfig schema does not
+ * have a `thinking_budget` field, so 2.5 thinking config is skipped there.
+ * Gemini 2.0 and older do not support thinking at all.
  */
 
 import type { ReasoningEffort } from '@mangostudio/shared';
@@ -12,11 +14,12 @@ import type { ReasoningEffort } from '@mangostudio/shared';
 // Model-family detection
 // ---------------------------------------------------------------------------
 
-type GeminiFamily = 'gemini-2.5' | 'gemini-3';
+type GeminiFamily = 'gemini-2.5' | 'gemini-3' | 'gemini-legacy';
 
 export function getGeminiFamily(modelName: string): GeminiFamily {
   if (/gemini-2\.5/i.test(modelName)) return 'gemini-2.5';
-  return 'gemini-3';
+  if (/gemini-[3-9]/i.test(modelName)) return 'gemini-3';
+  return 'gemini-legacy';
 }
 
 // ---------------------------------------------------------------------------
@@ -53,8 +56,11 @@ export function buildTextThinkingConfig(
   modelName: string,
   thinkingEnabled: boolean,
   reasoningEffort: ReasoningEffort
-): GeminiTextThinkingConfig {
+): GeminiTextThinkingConfig | undefined {
   const family = getGeminiFamily(modelName);
+
+  // Gemini 2.0 and older have no thinking support
+  if (family === 'gemini-legacy') return undefined;
 
   if (family === 'gemini-2.5') {
     if (!thinkingEnabled) {
@@ -82,11 +88,15 @@ export function buildTextThinkingConfig(
 
 // ---------------------------------------------------------------------------
 // Interactions API config (generation_config for interactions.create)
+//
+// The Interactions API GenerationConfig schema only supports `thinking_level`
+// and `thinking_summaries`. It does NOT have a `thinking_budget` field.
+// Gemini 2.5 models don't support `thinking_level`, so thinking config is
+// skipped entirely for 2.5 in the Interactions path (model uses defaults).
 // ---------------------------------------------------------------------------
 
 export interface GeminiInteractionsThinkingConfig {
   thinking_level?: string;
-  thinking_budget?: number;
   thinking_summaries?: string;
 }
 
@@ -96,12 +106,6 @@ const INTERACTIONS_LEVEL_MAP: Record<ReasoningEffort, string> = {
   high: 'high',
 };
 
-const INTERACTIONS_BUDGET_MAP: Record<ReasoningEffort, number> = {
-  low: 1024,
-  medium: 8192,
-  high: 24576,
-};
-
 export function buildInteractionsThinkingConfig(
   modelName: string,
   thinkingEnabled: boolean,
@@ -109,17 +113,10 @@ export function buildInteractionsThinkingConfig(
 ): GeminiInteractionsThinkingConfig | undefined {
   const family = getGeminiFamily(modelName);
 
-  if (family === 'gemini-2.5') {
-    if (!thinkingEnabled) {
-      const budget = isGemini25Pro(modelName) ? 128 : 0;
-      return { thinking_budget: budget, thinking_summaries: 'auto' };
-    }
-    const budget =
-      reasoningEffort === 'high' && isGemini25Pro(modelName)
-        ? 32768
-        : INTERACTIONS_BUDGET_MAP[reasoningEffort];
-    return { thinking_budget: budget, thinking_summaries: 'auto' };
-  }
+  // Gemini 2.0 and older — no thinking support
+  // Gemini 2.5 — uses thinkingBudget which the Interactions API schema
+  //   does not support; skip and let the model use its defaults
+  if (family !== 'gemini-3') return undefined;
 
   // Gemini 3+
   if (!thinkingEnabled) {
