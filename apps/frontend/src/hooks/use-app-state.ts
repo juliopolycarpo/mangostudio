@@ -48,6 +48,7 @@ export function useAppState() {
     optimistic,
     thinkingEnabled: settings.thinkingEnabled,
     reasoningEffort: settings.reasoningEffort,
+    maxToolIterations: settings.maxToolIterations,
     currentChatId: chats.currentChatId,
   });
 
