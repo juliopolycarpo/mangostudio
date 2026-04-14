@@ -483,6 +483,182 @@ describe('POST /respond/stream', () => {
     expect(contextInfo?.done).toBe(false);
   });
 
+  it('emits context_info with mode=stateful when provider returns a cursor in the envelope', async () => {
+    const STATEFUL_STATE = JSON.stringify({
+      schemaVersion: 1,
+      provider: 'openai',
+      mode: 'responses',
+      modelName: 'gpt-4o',
+      systemPromptHash: 'none',
+      toolsetHash: 'none',
+      cursor: 'resp_abc123',
+      context: {
+        providerReportedInputTokens: 2048,
+        lastUpdatedAt: Date.now(),
+      },
+    });
+
+    await mock.module('../../../src/modules/chats/infrastructure/chat-repository', () => ({
+      verifyChatOwnership: () => Promise.resolve(true),
+    }));
+
+    await mock.module('../../../src/services/providers/registry', () => ({
+      getProviderForModel: () =>
+        Promise.resolve({
+          providerType: 'openai',
+          generateText: () => Promise.resolve({ text: '' }),
+          generateAgentTurnStream: async function* (_req: AgentTurnRequest) {
+            await Promise.resolve();
+            yield { type: 'assistant_text_delta', text: 'OK' };
+            yield { type: 'turn_completed', providerState: STATEFUL_STATE };
+          },
+        }),
+    }));
+
+    await mock.module('../../../src/services/tools', () => ({
+      getAllToolDefinitions: () => [],
+      executeTool: () => Promise.resolve({}),
+    }));
+
+    await mock.module('../../../src/db/database', () => ({
+      getDb: () => ({
+        selectFrom: () => makeChain({ userId: TEST_USER.id }),
+        insertInto: () => ({ values: () => ({ execute: () => Promise.resolve() }) }),
+        updateTable: () => makeChain(undefined),
+      }),
+    }));
+
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
+    restoreAuth = restore;
+
+    const response = await app.handle(
+      new Request('http://localhost/respond/stream', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chatId: 'test-chat', prompt: 'Hi', model: 'gpt-4o' }),
+      })
+    );
+
+    expect(response.status).toBe(200);
+    const rawText = await response.text();
+
+    const sseEvents = rawText
+      .split('\n\n')
+      .filter((block) => block.startsWith('data: '))
+      .map((block) => {
+        try {
+          return JSON.parse(block.replace(/^data: /, '')) as Record<string, unknown>;
+        } catch {
+          return null;
+        }
+      })
+      .filter((e): e is Record<string, unknown> => e !== null);
+
+    const contextInfo = sseEvents.find((e) => e.type === 'context_info');
+    expect(contextInfo).toBeDefined();
+    expect(contextInfo).toMatchObject({
+      type: 'context_info',
+      mode: 'stateful',
+      estimatedInputTokens: 2048,
+    });
+  });
+
+  it('emits terminal error when provider errors on tool-result continuation', async () => {
+    const insertedMessages: Array<Record<string, unknown>> = [];
+
+    await mock.module('../../../src/modules/chats/infrastructure/chat-repository', () => ({
+      verifyChatOwnership: () => Promise.resolve(true),
+    }));
+
+    // First iteration emits a tool call that the orchestrator will execute;
+    // the second iteration (carrying tool results) fails with a turn_error.
+    let iteration = 0;
+    await mock.module('../../../src/services/providers/registry', () => ({
+      getProviderForModel: () =>
+        Promise.resolve({
+          providerType: 'openai-compatible',
+          generateText: () => Promise.resolve({ text: '' }),
+          generateAgentTurnStream: async function* (_req: AgentTurnRequest) {
+            await Promise.resolve();
+            iteration += 1;
+            if (iteration === 1) {
+              yield { type: 'tool_call_started', callId: 'c1', name: 'noop' };
+              yield { type: 'tool_call_completed', callId: 'c1', name: 'noop', arguments: '{}' };
+              yield { type: 'turn_completed', providerState: null };
+            } else {
+              yield { type: 'turn_error', error: 'tool-result continuation failed' };
+            }
+          },
+        }),
+    }));
+
+    await mock.module('../../../src/services/tools', () => ({
+      getAllToolDefinitions: () => [{ name: 'noop', description: 'no-op', parameters: {} }],
+      executeTool: () => Promise.resolve({ ok: true }),
+    }));
+
+    const chatSetCalls: Array<Record<string, unknown>> = [];
+    await mock.module('../../../src/db/database', () => ({
+      getDb: () => ({
+        selectFrom: () => makeChain({ userId: TEST_USER.id }),
+        insertInto: (_table: string) => ({
+          values: (values: Record<string, unknown>) => {
+            if (_table === 'messages') insertedMessages.push({ ...values });
+            return { execute: () => Promise.resolve() };
+          },
+        }),
+        updateTable: () => ({
+          set: (values: Record<string, unknown>) => {
+            chatSetCalls.push({ ...values });
+            return makeChain(undefined);
+          },
+        }),
+      }),
+    }));
+
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
+    restoreAuth = restore;
+
+    const response = await app.handle(
+      new Request('http://localhost/respond/stream', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chatId: 'test-chat', prompt: 'use tool', model: 'test-model' }),
+      })
+    );
+
+    expect(response.status).toBe(200);
+    const rawText = await response.text();
+
+    const sseEvents = rawText
+      .split('\n\n')
+      .filter((block) => block.startsWith('data: '))
+      .map((block) => {
+        try {
+          return JSON.parse(block.replace(/^data: /, '')) as Record<string, unknown>;
+        } catch {
+          return null;
+        }
+      })
+      .filter((e): e is Record<string, unknown> => e !== null);
+
+    // Must emit a terminal error event and no done event
+    const errorEvent = sseEvents.find((e) => e.type === 'error');
+    expect(errorEvent).toBeDefined();
+    expect(errorEvent?.error).toBe('tool-result continuation failed');
+    const doneEvent = sseEvents.find((e) => e.type === 'done');
+    expect(doneEvent).toBeUndefined();
+
+    // The error-path AI message must be persisted (as an ai row for audit)
+    const aiMessage = insertedMessages.find((m) => m.role === 'ai');
+    expect(aiMessage).toBeDefined();
+    // Durable cursor must be cleared to prevent stale-state replay on next turn
+    const clearedDurable = chatSetCalls.find(
+      (u) => 'lastProviderState' in u && u.lastProviderState === null
+    );
+    expect(clearedDurable).toBeDefined();
+  });
+
   it('emits system_event(tool_loop_exhausted) and terminal error when loop ceiling is reached with pending tool calls', async () => {
     const insertedMessages: Array<Record<string, unknown>> = [];
 

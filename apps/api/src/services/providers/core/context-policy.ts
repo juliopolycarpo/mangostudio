@@ -226,6 +226,13 @@ export function computeContextSnapshot(params: {
   mode: ContinuationDisplayMode;
   /** When provided, overrides the hardcoded limit from getModelContextLimit. */
   contextLimitOverride?: number;
+  /**
+   * Extra characters that belong to the current outbound request payload but are
+   * not part of `history` (e.g. the live user prompt, accumulated loop messages,
+   * or serialized tool results). Folded into the local estimate only; ignored
+   * when `providerReportedTokens` is present.
+   */
+  turnLocalCharCount?: number;
 }): ContextSnapshot {
   const contextLimit = params.contextLimitOverride ?? getModelContextLimit(params.modelName);
 
@@ -249,6 +256,9 @@ export function computeContextSnapshot(params: {
   }
   if (params.toolDefinitions) {
     totalChars += JSON.stringify(params.toolDefinitions).length;
+  }
+  if (params.turnLocalCharCount && params.turnLocalCharCount > 0) {
+    totalChars += params.turnLocalCharCount;
   }
   const estimated = Math.ceil(totalChars / 4);
   const ratio = estimated / contextLimit;

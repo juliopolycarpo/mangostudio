@@ -90,6 +90,7 @@ export async function* streamOAICompatAgentTurn(
         messages,
         ...(tools ? { tools, tool_choice: 'auto' } : {}),
         stream: true,
+        stream_options: { include_usage: true },
       },
       { signal: req.signal }
     );
@@ -97,10 +98,19 @@ export async function* streamOAICompatAgentTurn(
     // Accumulate the full assistant message for loop-state
     let assistantText = '';
     let assistantReasoning = '';
+    let providerReportedInputTokens: number | undefined;
     const pendingToolCalls = new Map<number, { callId: string; name: string; argsStr: string }>();
 
     for await (const chunk of stream) {
       if (req.signal?.aborted) break;
+
+      // Usage chunks arrive in the terminal frame (when stream_options.include_usage is set)
+      // and typically have an empty choices array. Capture prompt_tokens for context accounting
+      // before the continue-on-empty-choices guard below.
+      const usage = (chunk as { usage?: { prompt_tokens?: number } }).usage;
+      if (usage && typeof usage.prompt_tokens === 'number') {
+        providerReportedInputTokens = usage.prompt_tokens;
+      }
 
       const choice = chunk.choices[0];
       // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- choices array may be empty at runtime
@@ -202,6 +212,14 @@ export async function* streamOAICompatAgentTurn(
       systemPromptHash: computeSystemPromptHash(req.systemPrompt),
       toolsetHash: computeToolsetHash(req.toolDefinitions ?? []),
       loopMessages: newLoopMessages,
+      ...(providerReportedInputTokens !== undefined
+        ? {
+            context: {
+              providerReportedInputTokens,
+              lastUpdatedAt: Date.now(),
+            },
+          }
+        : {}),
     };
 
     yield { type: 'turn_completed', providerState: JSON.stringify(envelopeWithLoop) };

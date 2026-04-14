@@ -268,6 +268,142 @@ describe('openai-compatible generateAgentTurnStream turn_completed contract', ()
   });
 });
 
+describe('openai-compatible chat-completions-stream token accounting', () => {
+  interface CaptureCall {
+    args?: Record<string, unknown>;
+  }
+
+  function makeFakeClient(chunks: Array<Record<string, unknown>>, capture: CaptureCall): unknown {
+    return {
+      chat: {
+        completions: {
+          create: (args: Record<string, unknown>) => {
+            capture.args = args;
+            async function* iter(): AsyncIterable<unknown> {
+              for (const c of chunks) {
+                await Promise.resolve();
+                yield c;
+              }
+            }
+            return Promise.resolve(iter());
+          },
+        },
+      },
+    };
+  }
+
+  it('sets stream_options.include_usage on chat.completions.create', async () => {
+    const { streamOAICompatAgentTurn } =
+      await import('../../../../src/services/providers/openai-compatible/chat-completions-stream');
+    const capture: CaptureCall = {};
+    const fakeClient = makeFakeClient(
+      [
+        { choices: [{ delta: { content: 'Hi' }, finish_reason: null }] },
+        { choices: [{ delta: {}, finish_reason: 'stop' }] },
+      ],
+      capture
+    );
+
+    const events = [];
+    for await (const event of streamOAICompatAgentTurn(
+      fakeClient as Parameters<typeof streamOAICompatAgentTurn>[0],
+      {
+        userId: 'u',
+        modelName: 'gpt-4o',
+        systemPrompt: undefined,
+        history: [],
+        prompt: 'Hello',
+        toolDefinitions: [],
+        providerState: null,
+        signal: new AbortController().signal,
+        generationConfig: { thinkingEnabled: false, reasoningEffort: 'medium' },
+      }
+    )) {
+      events.push(event);
+    }
+
+    expect(capture.args).toBeDefined();
+    expect(capture.args?.stream).toBe(true);
+    expect(capture.args?.stream_options).toEqual({ include_usage: true });
+  });
+
+  it('populates context.providerReportedInputTokens in the envelope when usage is reported', async () => {
+    const { streamOAICompatAgentTurn } =
+      await import('../../../../src/services/providers/openai-compatible/chat-completions-stream');
+    const capture: CaptureCall = {};
+    const fakeClient = makeFakeClient(
+      [
+        { choices: [{ delta: { content: 'Hi' }, finish_reason: null }] },
+        { choices: [{ delta: {}, finish_reason: 'stop' }] },
+        { choices: [], usage: { prompt_tokens: 1234, completion_tokens: 5 } },
+      ],
+      capture
+    );
+
+    const events: Array<{ type: string; providerState?: string }> = [];
+    for await (const event of streamOAICompatAgentTurn(
+      fakeClient as Parameters<typeof streamOAICompatAgentTurn>[0],
+      {
+        userId: 'u',
+        modelName: 'gpt-4o',
+        systemPrompt: undefined,
+        history: [],
+        prompt: 'Hello',
+        toolDefinitions: [],
+        providerState: null,
+        signal: new AbortController().signal,
+        generationConfig: { thinkingEnabled: false, reasoningEffort: 'medium' },
+      }
+    )) {
+      events.push(event as { type: string; providerState?: string });
+    }
+
+    const turnCompleted = events.find((e) => e.type === 'turn_completed');
+    expect(turnCompleted).toBeDefined();
+    const parsed = JSON.parse(turnCompleted?.providerState ?? '{}') as {
+      context?: { providerReportedInputTokens?: number };
+    };
+    expect(parsed.context?.providerReportedInputTokens).toBe(1234);
+  });
+
+  it('omits context when usage is not reported by the endpoint', async () => {
+    const { streamOAICompatAgentTurn } =
+      await import('../../../../src/services/providers/openai-compatible/chat-completions-stream');
+    const capture: CaptureCall = {};
+    const fakeClient = makeFakeClient(
+      [
+        { choices: [{ delta: { content: 'Hi' }, finish_reason: null }] },
+        { choices: [{ delta: {}, finish_reason: 'stop' }] },
+      ],
+      capture
+    );
+
+    const events: Array<{ type: string; providerState?: string }> = [];
+    for await (const event of streamOAICompatAgentTurn(
+      fakeClient as Parameters<typeof streamOAICompatAgentTurn>[0],
+      {
+        userId: 'u',
+        modelName: 'gpt-4o',
+        systemPrompt: undefined,
+        history: [],
+        prompt: 'Hello',
+        toolDefinitions: [],
+        providerState: null,
+        signal: new AbortController().signal,
+        generationConfig: { thinkingEnabled: false, reasoningEffort: 'medium' },
+      }
+    )) {
+      events.push(event as { type: string; providerState?: string });
+    }
+
+    const turnCompleted = events.find((e) => e.type === 'turn_completed');
+    const parsed = JSON.parse(turnCompleted?.providerState ?? '{}') as {
+      context?: unknown;
+    };
+    expect(parsed.context).toBeUndefined();
+  });
+});
+
 describe('openai-compatible listModels filtering', () => {
   it('skips connectors without baseUrl', () => {
     // Verify the filtering logic that listModelsWithCache uses

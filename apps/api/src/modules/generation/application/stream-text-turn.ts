@@ -265,14 +265,21 @@ export async function* streamTextTurn(
                 : resultEnvelope?.mode === 'stateless-loop' && !degradedThisTurn
                   ? 'stateless-loop'
                   : 'replay';
+              const providerReportedInputTokens =
+                resultEnvelope?.context?.providerReportedInputTokens;
+              const turnLocalCharCount =
+                providerReportedInputTokens === undefined && displayMode === 'stateless-loop'
+                  ? computeStatelessLoopCharCount(input.prompt, currentProviderState)
+                  : undefined;
               const snapshot = computeContextSnapshot({
                 modelName: modelId,
                 history: richHistory,
                 systemPrompt,
                 toolDefinitions: toolDefs,
-                providerReportedTokens: resultEnvelope?.context?.providerReportedInputTokens,
+                providerReportedTokens: providerReportedInputTokens,
                 mode: displayMode,
                 contextLimitOverride: resultEnvelope?.context?.contextLimit,
+                turnLocalCharCount,
               });
 
               console.warn(
@@ -532,6 +539,31 @@ export async function* streamTextTurn(
 
     yield { type: 'error', error: message };
   }
+}
+
+/**
+ * Approximate the character count of the turn-local payload that accompanies
+ * a stateless-loop request (user prompt + accumulated loop messages), for use
+ * by the local token estimator when the provider did not report usage.
+ */
+function computeStatelessLoopCharCount(
+  prompt: string,
+  providerState: string | null
+): number | undefined {
+  let total = prompt.length;
+  if (providerState) {
+    try {
+      const parsed = JSON.parse(providerState) as { loopMessages?: unknown };
+      if (Array.isArray(parsed.loopMessages)) {
+        for (const msg of parsed.loopMessages) {
+          total += JSON.stringify(msg).length;
+        }
+      }
+    } catch {
+      // Malformed state is not fatal — fall back to prompt-only accounting.
+    }
+  }
+  return total > 0 ? total : undefined;
 }
 
 function mergeMessageParts(allParts: MessagePart[]): MessagePart[] {
