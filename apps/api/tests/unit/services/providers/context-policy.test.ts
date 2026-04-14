@@ -259,6 +259,30 @@ describe('computeContextSnapshot', () => {
     // gpt-4o → 128k from curated table (not 1M from the old prefix heuristic)
     expect(snapshot.contextLimit).toBe(128_000);
   });
+
+  it('folds turnLocalCharCount into the local estimate when no provider-reported tokens', () => {
+    const withoutTurnLocal = computeContextSnapshot({
+      ...baseParams,
+      systemPrompt: 'You are helpful.',
+    });
+    const withTurnLocal = computeContextSnapshot({
+      ...baseParams,
+      systemPrompt: 'You are helpful.',
+      turnLocalCharCount: 4000,
+    });
+    // 4000 extra characters at ~4 chars/token ≈ 1000 more tokens
+    expect(withTurnLocal.estimatedInputTokens).toBe(withoutTurnLocal.estimatedInputTokens + 1000);
+  });
+
+  it('ignores turnLocalCharCount when providerReportedTokens is present', () => {
+    const snapshot = computeContextSnapshot({
+      ...baseParams,
+      providerReportedTokens: 10_000,
+      turnLocalCharCount: 999_999,
+    });
+    expect(snapshot.estimatedInputTokens).toBe(10_000);
+    expect(snapshot.providerReportedInputTokens).toBe(10_000);
+  });
 });
 
 describe('recommendContextAction', () => {
