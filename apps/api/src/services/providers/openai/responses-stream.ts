@@ -211,7 +211,17 @@ export async function* streamAgentTurnWithResponsesAPI(
     ];
   }
 
+  const contextLimit = getModelContextLimit(req.modelName);
+  const compactThreshold = Math.floor(contextLimit * 0.85);
+
   const makeRequest = (prevId: string | null): APIPromise<Stream<ResponseStreamEvent>> => {
+    // Server-side compaction only kicks in for durable stateful chains.
+    // Without a cursor the server has no prior state to compact, and adding
+    // the option would either be a no-op or trigger a validation error on
+    // models that don't support it.
+    const contextManagement = prevId
+      ? { context_management: [{ type: 'compaction', compact_threshold: compactThreshold }] }
+      : {};
     return client.responses.create({
       model: req.modelName,
       input: toResponseInput(input),
@@ -221,6 +231,7 @@ export async function* streamAgentTurnWithResponsesAPI(
       store: true,
       stream: true,
       ...(useReasoning ? { reasoning: { effort, summary: 'concise' } } : {}),
+      ...contextManagement,
     });
   };
 
