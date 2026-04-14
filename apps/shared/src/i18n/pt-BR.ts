@@ -261,4 +261,8 @@ export const messages = {
   api: {
     unauthorized: 'Unauthorized',
   },
+
+  generation: {
+    toolLoopExhausted: 'O modelo excedeu o número máximo de interações com ferramentas.',
+  },
 } as const;

@@ -159,6 +159,7 @@ export const respondStreamRoutes = (app: Elysia) =>
                     systemPrompt: body.systemPrompt,
                     thinkingEnabled: body.thinkingEnabled ?? body.thinkingVisibility !== 'off',
                     reasoningEffort: body.reasoningEffort,
+                    maxToolIterations: body.maxToolIterations,
                     signal: abortController.signal,
                   },
                   db

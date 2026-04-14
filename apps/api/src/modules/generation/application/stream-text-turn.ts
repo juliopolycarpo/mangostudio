@@ -27,8 +27,9 @@ import {
   type ContinuationDisplayMode,
 } from '../../../services/providers/context-policy';
 
-const MAX_TOOL_ITERATIONS = 10;
 const TOOL_TIMEOUT_MS = 30_000;
+const DEFAULT_MAX_TOOL_ITERATIONS = 10;
+const TOOL_LOOP_EXHAUSTED_MESSAGE = 'The model exceeded the maximum number of tool interactions.';
 
 export interface StreamTextTurnInput {
   chatId: string;
@@ -38,6 +39,7 @@ export interface StreamTextTurnInput {
   systemPrompt?: string;
   thinkingEnabled?: boolean;
   reasoningEffort?: string;
+  maxToolIterations?: number;
   signal?: AbortSignal;
 }
 
@@ -155,12 +157,17 @@ export async function* streamTextTurn(
         }
       }
 
+      const maxIter = Math.max(
+        1,
+        Math.min(25, input.maxToolIterations ?? DEFAULT_MAX_TOOL_ITERATIONS)
+      );
       const generateAgentTurnStream = provider.generateAgentTurnStream.bind(provider);
       let pendingToolResults: AgentTurnRequest['toolResults'];
       let isFirstIteration = true;
       let inThinkingSegment = false;
+      let pendingCalls = new Map<string, { name: string; argsStr: string }>();
 
-      for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration++) {
+      for (let iteration = 0; iteration < maxIter; iteration++) {
         if (signal?.aborted) break;
 
         const req: AgentTurnRequest = {
@@ -176,7 +183,7 @@ export async function* streamTextTurn(
           generationConfig: { thinkingEnabled, reasoningEffort },
         };
 
-        const pendingCalls = new Map<string, { name: string; argsStr: string }>();
+        pendingCalls = new Map<string, { name: string; argsStr: string }>();
         let turnCompleted = false;
         // Track whether a continuation_degraded event was received in this iteration
         // so turn_completed can derive the correct display mode.
@@ -360,6 +367,50 @@ export async function* streamTextTurn(
 
         pendingToolResults = nextToolResults;
         isFirstIteration = false;
+      }
+
+      if (pendingCalls.size > 0 && !signal?.aborted) {
+        const detail = `Reached ${maxIter} iterations with ${pendingCalls.size} pending tool calls`;
+        allParts.push({ type: 'system_event', event: 'tool_loop_exhausted', detail });
+        yield { type: 'system_event', event: 'tool_loop_exhausted', detail };
+        yield { type: 'error', error: TOOL_LOOP_EXHAUSTED_MESSAGE };
+
+        if (!durableProviderState) {
+          await db
+            .updateTable('chats')
+            .set({ lastProviderState: null })
+            .where('id', '=', chatId)
+            .execute()
+            .catch((err) => {
+              console.warn(
+                `[continuation][clear] Failed to clear stale state on loop exhaustion: ${err}`
+              );
+            });
+        }
+
+        const generationTime = `${((Date.now() - startTime) / 1000).toFixed(1)}s`;
+        const errorParts: MessagePart[] = [
+          ...allParts,
+          { type: 'error', text: TOOL_LOOP_EXHAUSTED_MESSAGE },
+        ];
+        try {
+          await persistErrorResponse(
+            {
+              id: aiMsgId,
+              chatId,
+              text: fullText || TOOL_LOOP_EXHAUSTED_MESSAGE,
+              parts: errorParts,
+              timestamp: Date.now(),
+              generationTime,
+              modelName: modelId,
+            },
+            db
+          );
+          await updateChatAfterTurn(chatId, Date.now(), db);
+        } catch {
+          // best-effort
+        }
+        return;
       }
 
       if (!signal?.aborted && !durableProviderState) {
