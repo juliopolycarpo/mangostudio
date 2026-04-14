@@ -1,0 +1,38 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: cron
+      cron: "0 6 * * *"
+      timezone: UTC
+    commit-message:
+      prefix: chore(ci)
+
+  - package-ecosystem: bun
+    directory: /
+    schedule:
+      interval: cron
+      cron: "15 6 * * *"
+      timezone: UTC
+    commit-message:
+      prefix: chore(deps)
+    cooldown:
+      semver-major-days: 7
+    groups:
+      eslint:
+        patterns:
+          - eslint*
+          - '@eslint/*'
+          - typescript-eslint
+      typescript:
+        patterns:
+          - typescript
+          - '@types/*'
+      vitest:
+        patterns:
+          - vitest
+          - '@vitest/*'
+      playwright:
+        patterns:
+          - '@playwright/*'
