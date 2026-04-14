@@ -47,6 +47,42 @@ describe('parseContinuationEnvelope', () => {
     const { provider: _, ...incomplete } = BASE_ENVELOPE;
     expect(parseContinuationEnvelope(JSON.stringify(incomplete))).toBeNull();
   });
+
+  it('returns null for unknown mode strings', () => {
+    const raw = JSON.stringify({ ...BASE_ENVELOPE, mode: 'legacy-mode' });
+    expect(parseContinuationEnvelope(raw)).toBeNull();
+  });
+
+  it('returns null for durable mode without cursor', () => {
+    const { cursor: _, ...withoutCursor } = BASE_ENVELOPE;
+    expect(parseContinuationEnvelope(JSON.stringify(withoutCursor))).toBeNull();
+  });
+
+  it('returns null for responses mode without cursor', () => {
+    const envelopeWithoutCursor = {
+      schemaVersion: 1,
+      provider: 'openai',
+      mode: 'responses',
+      modelName: 'gpt-4o',
+      systemPromptHash: 'abc',
+      toolsetHash: 'def',
+    };
+    expect(parseContinuationEnvelope(JSON.stringify(envelopeWithoutCursor))).toBeNull();
+  });
+
+  it('accepts stateless-loop without cursor', () => {
+    const envelope = {
+      schemaVersion: 1,
+      provider: 'openai-compatible',
+      mode: 'stateless-loop',
+      modelName: 'deepseek-chat',
+      systemPromptHash: 'none',
+      toolsetHash: 'abc123',
+    };
+    const result = parseContinuationEnvelope(JSON.stringify(envelope));
+    expect(result).not.toBeNull();
+    expect(result?.mode).toBe('stateless-loop');
+  });
 });
 
 describe('serializeContinuationEnvelope + parseContinuationEnvelope', () => {

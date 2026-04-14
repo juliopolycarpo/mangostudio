@@ -28,16 +28,23 @@ Open these first:
 
 Open these first:
 
-- `apps/api/src/routes/respond.ts`
-- `apps/api/src/routes/respond-stream.ts`
+- `apps/api/src/modules/generation/http/respond-stream-routes.ts`
+- `apps/api/src/modules/generation/application/stream-text-turn.ts`
+- `apps/api/src/modules/generation/application/resolve-model.ts`
+- `apps/api/src/modules/chats/` (ownership, chat repository)
+- `apps/api/src/modules/messages/` (message repository, persistence)
+- `apps/api/src/services/providers/core/continuation-envelope.ts`
+- `apps/api/src/services/providers/core/context-policy.ts`
+- `apps/api/src/services/providers/gemini/interactions-stream.ts`
+- `apps/api/src/services/providers/openai/responses-stream.ts`
+- `apps/api/src/routes/respond.ts` (non-streaming fallback)
 - `apps/api/src/routes/chats.ts`
 - `apps/api/src/routes/messages.ts`
-- `apps/api/src/routes/upload.ts`
-- `apps/api/src/services/chat-service.ts`
-- `apps/api/src/services/message-service.ts`
+- `apps/shared/src/streaming/events.ts`
+- `apps/shared/src/streaming/schemas.ts`
 - `apps/frontend/src/features/chat/ChatPage.tsx`
-- `apps/frontend/src/hooks/use-text-chat.ts`
-- `apps/frontend/src/hooks/use-image-generation.ts`
+- `apps/frontend/src/features/generation/hooks/use-text-generation.ts`
+- `apps/frontend/src/features/chat/hooks/use-chat-stream.ts`
 - `apps/frontend/src/services/generation-service.ts`
 - `apps/shared/src/contracts/index.ts`
 
@@ -60,9 +67,10 @@ Open these first:
 Open these first:
 
 - `apps/api/src/services/tools/`
-- `apps/api/src/routes/respond-stream.ts`
+- `apps/api/src/modules/generation/application/stream-text-turn.ts`
+- `apps/api/src/services/providers/core/continuation-envelope.ts`
 - `apps/shared/src/types/index.ts`
-- `apps/frontend/src/hooks/use-text-chat.ts`
+- `apps/frontend/src/features/generation/hooks/use-text-generation.ts`
 
 ## Persistence And Database
 

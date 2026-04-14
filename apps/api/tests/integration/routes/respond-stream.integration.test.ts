@@ -2,6 +2,21 @@ import { describe, expect, it, mock, afterEach } from 'bun:test';
 import { respondStreamRoutes } from '../../../src/modules/generation/http/respond-stream-routes';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
 import { getDb } from '../../../src/db/database';
+import {
+  verifyChatOwnership,
+  listByUserId,
+  getById,
+  createChat,
+  updateChat,
+  deleteChat,
+} from '../../../src/modules/chats/infrastructure/chat-repository';
+import {
+  getProviderForModel,
+  getProvider,
+  registerProvider,
+} from '../../../src/services/providers/registry';
+import { getAllToolDefinitions, executeTool } from '../../../src/services/tools';
+import * as realGeminiNs from '../../../src/services/gemini';
 import type { AgentTurnRequest } from '../../../src/services/providers/types';
 
 const TEST_USER = {
@@ -10,17 +25,52 @@ const TEST_USER = {
   email: 'stream@mangostudio.test',
 };
 
-// Capture the real getDb before any test mocks it, so we can restore after each test.
-// Bun's mock.restore() does not restore mock.module() overrides across test files.
+// Snapshot real implementations as plain values at module-load time, before any
+// test can call mock.module(). Bun's mock.module() updates live namespace bindings,
+// so spreading a namespace object in afterEach would spread the already-mocked values.
+// Capturing individual named exports as constants avoids that trap.
 const realGetDb = getDb;
+const realVerifyChatOwnership = verifyChatOwnership;
+const realListByUserId = listByUserId;
+const realGetById = getById;
+const realCreateChat = createChat;
+const realUpdateChat = updateChat;
+const realDeleteChat = deleteChat;
+const realGetProviderForModel = getProviderForModel;
+const realGetProvider = getProvider;
+const realRegisterProvider = registerProvider;
+const realGetAllToolDefinitions = getAllToolDefinitions;
+const realExecuteTool = executeTool;
+// For the gemini barrel we snapshot the whole object immediately.
+const realGemini = { ...realGeminiNs };
 
 let restoreAuth: (() => void) | null = null;
 
 afterEach(async () => {
   restoreAuth?.();
   restoreAuth = null;
-  // Restore the real database module to prevent mock leakage into later test files.
+  // Restore all mocked modules to prevent leakage into later test files.
+  // Bun's mock.restore() does NOT revert mock.module() overrides; explicit
+  // re-registration with the original values is required.
   await mock.module('../../../src/db/database', () => ({ getDb: realGetDb }));
+  await mock.module('../../../src/modules/chats/infrastructure/chat-repository', () => ({
+    verifyChatOwnership: realVerifyChatOwnership,
+    listByUserId: realListByUserId,
+    getById: realGetById,
+    createChat: realCreateChat,
+    updateChat: realUpdateChat,
+    deleteChat: realDeleteChat,
+  }));
+  await mock.module('../../../src/services/providers/registry', () => ({
+    getProviderForModel: realGetProviderForModel,
+    getProvider: realGetProvider,
+    registerProvider: realRegisterProvider,
+  }));
+  await mock.module('../../../src/services/tools', () => ({
+    getAllToolDefinitions: realGetAllToolDefinitions,
+    executeTool: realExecuteTool,
+  }));
+  await mock.module('../../../src/services/gemini', () => realGemini);
 });
 
 /**
@@ -347,5 +397,89 @@ describe('POST /respond/stream', () => {
     const contextInfo = sseEvents.find((e) => e.type === 'context_info');
     expect(contextInfo).toBeDefined();
     expect(contextInfo).toMatchObject({ type: 'context_info', mode: 'replay' });
+  });
+
+  it('emits fallback_notice with done:false and context_info with done:false in SSE output', async () => {
+    const STATELESS_STATE = JSON.stringify({
+      schemaVersion: 1,
+      provider: 'openai-compatible',
+      mode: 'stateless-loop',
+      modelName: 'deepseek-chat',
+      systemPromptHash: 'none',
+      toolsetHash: 'none',
+      loopMessages: [],
+    });
+
+    await mock.module('../../../src/modules/chats/infrastructure/chat-repository', () => ({
+      verifyChatOwnership: () => Promise.resolve(true),
+    }));
+
+    await mock.module('../../../src/services/providers/registry', () => ({
+      getProviderForModel: () =>
+        Promise.resolve({
+          providerType: 'openai-compatible',
+          generateText: () => Promise.resolve({ text: '' }),
+          generateAgentTurnStream: async function* (_req: AgentTurnRequest) {
+            await Promise.resolve();
+            yield {
+              type: 'continuation_degraded',
+              from: 'responses',
+              to: 'replay',
+              reason: 'cursor_expired',
+            };
+            yield { type: 'assistant_text_delta', text: 'OK' };
+            yield { type: 'turn_completed', providerState: STATELESS_STATE };
+          },
+        }),
+    }));
+
+    await mock.module('../../../src/services/tools', () => ({
+      getAllToolDefinitions: () => [],
+      executeTool: () => Promise.resolve({}),
+    }));
+
+    await mock.module('../../../src/db/database', () => ({
+      getDb: () => ({
+        selectFrom: () => makeChain({ userId: TEST_USER.id }),
+        insertInto: (_table: string) => ({
+          values: () => ({ execute: () => Promise.resolve() }),
+        }),
+        updateTable: () => makeChain(undefined),
+      }),
+    }));
+
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
+    restoreAuth = restore;
+
+    const response = await app.handle(
+      new Request('http://localhost/respond/stream', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chatId: 'test-chat', prompt: 'Hi', model: 'deepseek-chat' }),
+      })
+    );
+
+    expect(response.status).toBe(200);
+    const rawText = await response.text();
+
+    const sseEvents = rawText
+      .split('\n\n')
+      .filter((block) => block.startsWith('data: '))
+      .map((block) => {
+        try {
+          return JSON.parse(block.replace(/^data: /, '')) as Record<string, unknown>;
+        } catch {
+          return null;
+        }
+      })
+      .filter((e): e is Record<string, unknown> => e !== null);
+
+    const fallbackNotice = sseEvents.find((e) => e.type === 'fallback_notice');
+    expect(fallbackNotice).toBeDefined();
+    expect(fallbackNotice?.done).toBe(false);
+
+    const contextInfo = sseEvents.find((e) => e.type === 'context_info');
+    expect(contextInfo).toBeDefined();
+    expect(contextInfo?.done).toBe(false);
   });
 });

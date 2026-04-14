@@ -4,8 +4,9 @@ export interface SSEContextEvent {
   estimatedInputTokens: number;
   contextLimit: number;
   estimatedUsageRatio: number;
-  mode: 'stateful' | 'replay' | 'compacted' | 'degraded';
+  mode: 'stateful' | 'stateless-loop' | 'replay' | 'compacted' | 'degraded';
   severity: 'normal' | 'info' | 'warning' | 'danger' | 'critical';
+  done: false;
 }
 
 /** SSE event: signals the start of a new thinking segment. */
@@ -20,6 +21,7 @@ export interface SSEFallbackEvent {
   from: string;
   to: string;
   reason: string;
+  done: false;
 }
 
 /** SSE event: system event timeline marker, persisted in message parts. */
@@ -53,7 +55,7 @@ export type StreamChunk =
       estimatedInputTokens: number;
       contextLimit: number;
       estimatedUsageRatio: number;
-      mode: 'stateful' | 'replay' | 'compacted' | 'degraded';
+      mode: 'stateful' | 'stateless-loop' | 'replay' | 'compacted' | 'degraded';
       severity: 'normal' | 'info' | 'warning' | 'danger' | 'critical';
       done: false;
     }

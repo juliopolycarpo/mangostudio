@@ -7,8 +7,22 @@
 
 import type { ChatTurnContext, ToolDefinition } from '../types';
 
-/** Continuation modes visible to the user. */
-export type ContinuationDisplayMode = 'stateful' | 'replay' | 'compacted' | 'degraded';
+/**
+ * Continuation modes visible to the user.
+ *
+ * - `stateful`      — server-side cursor active; no history replay needed
+ * - `stateless-loop`— provider accumulates within the turn but no cross-turn cursor
+ * - `replay`        — full history replayed (cursor lost or never existed); may be
+ *                     a normal initial state or a degraded fallback
+ * - `compacted`     — history was compacted before sending
+ * - `degraded`      — legacy placeholder, kept for backward-compat display
+ */
+export type ContinuationDisplayMode =
+  | 'stateful'
+  | 'stateless-loop'
+  | 'replay'
+  | 'compacted'
+  | 'degraded';
 
 /** Snapshot of context window usage for a single turn. */
 export interface ContextSnapshot {

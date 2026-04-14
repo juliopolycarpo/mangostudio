@@ -25,10 +25,10 @@ import {
 import { getResolvedGeminiApiKey } from './secret';
 import { createGeminiClient } from './client';
 import type { AgentTurnRequest, AgentEvent } from '../types';
-import { parseJsonWith } from '../../../lib/safe-parse';
 
 /**
  * Opaque state persisted across turns for Gemini.
+ * Only populated when the canonical continuation envelope is present and valid.
  */
 interface GeminiInteractionState {
   provider: 'gemini';
@@ -36,8 +36,15 @@ interface GeminiInteractionState {
   interactionId: string;
   modelName: string;
   toolsetHash: string;
+  systemPromptHash: string;
 }
 
+/**
+ * Parses provider state strictly through the canonical continuation envelope.
+ * Legacy state formats are not accepted — they bypass current safety validation
+ * (cursor requirement, mode validation, system prompt hash checks) and are
+ * treated as absent so the turn degrades to full replay instead.
+ */
 function parseGeminiState(providerState: string | null | undefined): GeminiInteractionState | null {
   const envelope = parseContinuationEnvelope(providerState);
   if (envelope?.provider === 'gemini' && envelope.cursor) {
@@ -47,12 +54,10 @@ function parseGeminiState(providerState: string | null | undefined): GeminiInter
       interactionId: envelope.cursor,
       modelName: envelope.modelName,
       toolsetHash: envelope.toolsetHash,
+      systemPromptHash: envelope.systemPromptHash,
     };
   }
-  return parseJsonWith(providerState, (parsed) => {
-    if (parsed.provider !== 'gemini' || parsed.mode !== 'interactions') return null;
-    return parsed as unknown as GeminiInteractionState;
-  });
+  return null;
 }
 
 /**
@@ -65,11 +70,13 @@ export async function* streamGeminiAgentTurn(req: AgentTurnRequest): AsyncIterab
   const prevState = parseGeminiState(req.providerState);
   const toolDefs = req.toolDefinitions ?? [];
   const currentToolsetHash = computeToolsetHash(toolDefs);
+  const currentSystemPromptHash = computeSystemPromptHash(req.systemPrompt);
 
   const canContinue =
     prevState !== null &&
     prevState.modelName === req.modelName &&
-    prevState.toolsetHash === currentToolsetHash;
+    prevState.toolsetHash === currentToolsetHash &&
+    prevState.systemPromptHash === currentSystemPromptHash;
 
   let input: unknown;
   if (req.toolResults && req.toolResults.length > 0) {
