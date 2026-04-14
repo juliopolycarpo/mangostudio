@@ -30,7 +30,7 @@
     "elysia": "^1.4.28",
     "file-type": "^21.3.4",
     "kysely": "^0.27.6",
-    "kysely-bun-sqlite": "^0.3.2",
+    "kysely-bun-sqlite": "^0.4.0",
     "openai": "^6.33.0",
     "smol-toml": "^1.6.1"
   },
