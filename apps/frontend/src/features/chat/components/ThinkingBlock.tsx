@@ -30,16 +30,16 @@ export function ThinkingBlock({
   segmentIndex = 0,
 }: ThinkingBlockProps) {
   const { t } = useI18n();
-  const initialUiState = useRef<ThinkingUiState>(
+  const initialUiStateRef = useRef<ThinkingUiState>(
     thinkingUiStateByMessage.get(messageId) ?? {
       expanded: isStreaming,
       scrollTop: 0,
       shouldAutoFollow: isStreaming,
     }
   );
-  const [expanded, setExpanded] = useState(initialUiState.current.expanded);
+  const [expanded, setExpanded] = useState(initialUiStateRef.current.expanded);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const uiStateRef = useRef(initialUiState.current);
+  const uiStateRef = useRef(initialUiStateRef.current);
   const previousStreamingRef = useRef(isStreaming);
 
   const updateUiState = useCallback(
@@ -51,11 +51,16 @@ export function ThinkingBlock({
   );
 
   useEffect(() => {
+    // Sync expansion with streaming lifecycle: auto-expand on stream start,
+    // collapse on end. Not derivable from props because the initial state also
+    // honors a session-scoped Map of user toggles.
     if (!previousStreamingRef.current && isStreaming) {
+      // eslint-disable-next-line @eslint-react/set-state-in-effect
       setExpanded(true);
       updateUiState({ expanded: true, shouldAutoFollow: true });
     }
     if (previousStreamingRef.current && !isStreaming) {
+      // eslint-disable-next-line @eslint-react/set-state-in-effect
       setExpanded(false);
       updateUiState({ expanded: false, shouldAutoFollow: false });
     }
