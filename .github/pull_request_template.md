@@ -21,8 +21,3 @@
 ## Notes
 
 <!-- Mention any new environment variables, schema changes, breaking changes, or open questions. -->
-
-## Commits
-
-<!-- COMMITS_START -->
-<!-- COMMITS_END -->
