@@ -50,6 +50,7 @@ function makeProps(overrides: Record<string, unknown> = {}) {
     } as unknown as TextChatProps['optimistic'],
     thinkingEnabled: true,
     reasoningEffort: 'medium',
+    maxToolIterations: 10,
     currentChatId: 'chat-1',
     ...overrides,
   };
@@ -174,5 +175,87 @@ describe('useTextChat — thinking segment tracking', () => {
     const twoThinkingParts = (twoThinkingCall[2].parts ?? []).filter((p) => p.type === 'thinking');
     expect(twoThinkingParts[0].text).toBe('before tool');
     expect(twoThinkingParts[1].text).toBe('after tool');
+  });
+});
+
+describe('useTextChat — maxToolIterations forwarding', () => {
+  beforeEach(() => {
+    mockStream.mockReset();
+  });
+
+  it('forwards maxToolIterations from props into the stream request body', async () => {
+    const props = makeProps({ maxToolIterations: 7 });
+    mockStream.mockImplementation(
+      makeStreamFn([
+        { type: 'done', done: true, generationTime: '0.5s' },
+      ]) as unknown as typeof respondTextStream
+    );
+
+    const { result } = renderHook(() => useTextGeneration(props));
+
+    await act(async () => {
+      await result.current.handleRespond('ping');
+    });
+
+    await waitFor(() => expect(result.current.isGenerating).toBe(false));
+
+    expect(mockStream).toHaveBeenCalled();
+    const firstCall = mockStream.mock.calls[0];
+    const request = firstCall[0] as { maxToolIterations?: number };
+    expect(request.maxToolIterations).toBe(7);
+  });
+});
+
+describe('useTextChat — failure surfaced as timeline item', () => {
+  beforeEach(() => {
+    mockStream.mockReset();
+  });
+
+  it('appends an error message part when the stream throws', async () => {
+    const props = makeProps();
+    mockStream.mockImplementation(() => Promise.reject(new Error('network boom')));
+
+    const { result } = renderHook(() => useTextGeneration(props));
+
+    await act(async () => {
+      await result.current.handleRespond('test prompt');
+    });
+
+    await waitFor(() => expect(result.current.isGenerating).toBe(false));
+
+    const calls: Array<[string, string, Partial<{ parts: MessagePart[]; isGenerating: boolean }>]> =
+      vi.mocked(props.optimistic.updateOptimisticMessage).mock.calls;
+
+    const finalCall = [...calls].reverse().find(([, , update]) => update.isGenerating === false);
+    expect(finalCall).toBeDefined();
+    if (!finalCall) throw new Error('expected a terminal update');
+    const errorParts = (finalCall[2].parts ?? []).filter((p) => p.type === 'error');
+    expect(errorParts).toHaveLength(1);
+    expect(errorParts[0].type === 'error' && errorParts[0].text).toBe('network boom');
+  });
+
+  it('does not duplicate error parts when stream yielded an error chunk before throwing', async () => {
+    const props = makeProps();
+    mockStream.mockImplementation((_req, onChunk) => {
+      onChunk({ type: 'error', error: 'upstream error', done: true });
+      return Promise.reject(new Error('trailing throw'));
+    });
+
+    const { result } = renderHook(() => useTextGeneration(props));
+
+    await act(async () => {
+      await result.current.handleRespond('test prompt');
+    });
+
+    await waitFor(() => expect(result.current.isGenerating).toBe(false));
+
+    const calls: Array<[string, string, Partial<{ parts: MessagePart[]; isGenerating: boolean }>]> =
+      vi.mocked(props.optimistic.updateOptimisticMessage).mock.calls;
+
+    const finalCall = [...calls].reverse().find(([, , update]) => update.isGenerating === false);
+    expect(finalCall).toBeDefined();
+    if (!finalCall) throw new Error('expected a terminal update');
+    const errorParts = (finalCall[2].parts ?? []).filter((p) => p.type === 'error');
+    expect(errorParts).toHaveLength(1);
   });
 });

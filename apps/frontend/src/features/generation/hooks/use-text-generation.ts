@@ -15,6 +15,7 @@ interface UseTextGenerationOptions {
   optimistic: ReturnType<typeof useOptimisticMessages>;
   thinkingEnabled: boolean;
   reasoningEffort: string;
+  maxToolIterations: number;
   currentChatId: string | null;
 }
 
@@ -26,6 +27,7 @@ export function useTextGeneration({
   optimistic,
   thinkingEnabled,
   reasoningEffort,
+  maxToolIterations,
   currentChatId,
 }: UseTextGenerationOptions) {
   const queryClient = useQueryClient();
@@ -87,6 +89,7 @@ export function useTextGeneration({
             systemPrompt: systemPrompt || undefined,
             thinkingEnabled,
             reasoningEffort,
+            maxToolIterations,
           },
           (chunk) => {
             switch (chunk.type) {
@@ -234,9 +237,14 @@ export function useTextGeneration({
           console.error('[respond]', error);
           const errorText =
             error instanceof Error ? error.message : 'Failed to get a response. Please try again.';
+          const alreadyHasError = accumulatedParts.some((p) => p.type === 'error');
+          const nextParts: MessagePart[] = alreadyHasError
+            ? accumulatedParts
+            : [...accumulatedParts, { type: 'error', text: errorText }];
           updateOptimisticMessage(activeChatId, optimisticAiMsgId, {
             isGenerating: false,
-            text: errorText,
+            text: accumulatedText || errorText,
+            parts: nextParts,
           });
         }
       } finally {
@@ -255,6 +263,7 @@ export function useTextGeneration({
       queryClient,
       thinkingEnabled,
       reasoningEffort,
+      maxToolIterations,
       stream,
     ]
   );

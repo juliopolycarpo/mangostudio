@@ -17,6 +17,8 @@ function GeneralSettingsRoute() {
       setImageSystemPrompt={app.settings.setGlobalImageSystemPrompt}
       imageQuality={app.settings.globalImageQuality}
       setImageQuality={app.settings.setGlobalImageQuality}
+      maxToolIterations={app.settings.maxToolIterations}
+      setMaxToolIterations={app.settings.setMaxToolIterations}
     />
   );
 }

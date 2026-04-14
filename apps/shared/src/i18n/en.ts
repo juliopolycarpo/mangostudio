@@ -79,6 +79,8 @@ export const messages: Messages = {
       generic: 'Conversation mode changed from {from} to {to}.',
     },
     cursorLost: 'Cursor lost — fallback to {detail}',
+    toolLoopExhausted: 'Tool loop limit reached',
+    genericFailure: 'Generation failed',
     copyCode: 'Copy code',
     codeCopied: 'Copied!',
     copyMessage: 'Copy message',
@@ -116,6 +118,10 @@ export const messages: Messages = {
       imagePromptPlaceholder:
         'e.g. Always generate images in a cinematic style with dramatic lighting...',
       imageQualityLabel: 'Default Image Quality',
+      maxToolIterationsLabel: 'Max Tool Iterations',
+      maxToolIterationsDescription:
+        'Upper bound on how many tool-calling rounds the model may take in a single turn.',
+      maxToolIterationsHint: '{value} of 25',
     },
     connectors: {
       title: 'AI Connectors',
@@ -260,5 +266,9 @@ export const messages: Messages = {
 
   api: {
     unauthorized: 'Unauthorized',
+  },
+
+  generation: {
+    toolLoopExhausted: 'The model exceeded the maximum number of tool interactions.',
   },
 };

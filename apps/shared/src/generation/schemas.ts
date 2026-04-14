@@ -28,6 +28,7 @@ export const RespondStreamBodySchema = Type.Object({
   thinkingEnabled: Type.Optional(Type.Boolean()),
   reasoningEffort: Type.Optional(Type.String()),
   thinkingVisibility: Type.Optional(Type.String()),
+  maxToolIterations: Type.Optional(Type.Integer({ minimum: 1, maximum: 25 })),
 });
 
 export type RespondStreamBody = Static<typeof RespondStreamBodySchema>;

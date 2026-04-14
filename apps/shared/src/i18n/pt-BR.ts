@@ -78,6 +78,8 @@ export const messages = {
       generic: 'Modo da conversa alterado de {from} para {to}.',
     },
     cursorLost: 'Cursor perdido — fallback para {detail}',
+    toolLoopExhausted: 'Limite de iterações de ferramentas atingido',
+    genericFailure: 'Falha na geração',
     copyCode: 'Copiar código',
     codeCopied: 'Copiado!',
     copyMessage: 'Copiar mensagem',
@@ -114,6 +116,10 @@ export const messages = {
       imagePromptPlaceholder:
         'ex. Sempre gere imagens em estilo cinemático com iluminação dramática...',
       imageQualityLabel: 'Qualidade de Imagem Padrão',
+      maxToolIterationsLabel: 'Iterações Máximas de Ferramentas',
+      maxToolIterationsDescription:
+        'Limite máximo de rodadas de chamada de ferramentas que o modelo pode executar em um turno.',
+      maxToolIterationsHint: '{value} de 25',
     },
     connectors: {
       title: 'Conectores de IA',
@@ -260,5 +266,9 @@ export const messages = {
 
   api: {
     unauthorized: 'Unauthorized',
+  },
+
+  generation: {
+    toolLoopExhausted: 'O modelo excedeu o número máximo de interações com ferramentas.',
   },
 } as const;

@@ -2,6 +2,18 @@ import { useState, useCallback, useEffect } from 'react';
 import type { ReasoningEffort } from '@mangostudio/shared';
 import { readStorage, writeStorage } from '@/lib/storage';
 
+export const MAX_TOOL_ITERATIONS_MIN = 1;
+export const MAX_TOOL_ITERATIONS_MAX = 25;
+export const MAX_TOOL_ITERATIONS_DEFAULT = 10;
+
+function clampMaxToolIterations(value: number): number {
+  if (!Number.isFinite(value)) return MAX_TOOL_ITERATIONS_DEFAULT;
+  const rounded = Math.round(value);
+  if (rounded < MAX_TOOL_ITERATIONS_MIN) return MAX_TOOL_ITERATIONS_MIN;
+  if (rounded > MAX_TOOL_ITERATIONS_MAX) return MAX_TOOL_ITERATIONS_MAX;
+  return rounded;
+}
+
 export function useGlobalSettings() {
   const [globalTextSystemPrompt, setGlobalTextSystemPrompt] = useState(() =>
     readStorage('globalTextSystemPrompt', '')
@@ -18,8 +30,14 @@ export function useGlobalSettings() {
   const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>(
     () => readStorage('reasoningEffort', 'medium') as ReasoningEffort
   );
+  const [maxToolIterations, setMaxToolIterationsState] = useState<number>(() =>
+    clampMaxToolIterations(readStorage('maxToolIterations', MAX_TOOL_ITERATIONS_DEFAULT))
+  );
 
-  // Persist changes to localStorage
+  const setMaxToolIterations = useCallback((value: number) => {
+    setMaxToolIterationsState(clampMaxToolIterations(value));
+  }, []);
+
   useEffect(() => {
     writeStorage('globalTextSystemPrompt', globalTextSystemPrompt);
   }, [globalTextSystemPrompt]);
@@ -40,12 +58,17 @@ export function useGlobalSettings() {
     writeStorage('reasoningEffort', reasoningEffort);
   }, [reasoningEffort]);
 
+  useEffect(() => {
+    writeStorage('maxToolIterations', maxToolIterations);
+  }, [maxToolIterations]);
+
   const resetSettings = useCallback(() => {
     setGlobalTextSystemPrompt('');
     setGlobalImageSystemPrompt('');
     setGlobalImageQuality('1K');
     setThinkingEnabled(false);
     setReasoningEffort('medium');
+    setMaxToolIterationsState(MAX_TOOL_ITERATIONS_DEFAULT);
   }, []);
 
   return {
@@ -59,6 +82,8 @@ export function useGlobalSettings() {
     setThinkingEnabled,
     reasoningEffort,
     setReasoningEffort,
+    maxToolIterations,
+    setMaxToolIterations,
     resetSettings,
   };
 }

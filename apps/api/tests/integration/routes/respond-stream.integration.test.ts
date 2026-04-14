@@ -482,4 +482,103 @@ describe('POST /respond/stream', () => {
     expect(contextInfo).toBeDefined();
     expect(contextInfo?.done).toBe(false);
   });
+
+  it('emits system_event(tool_loop_exhausted) and terminal error when loop ceiling is reached with pending tool calls', async () => {
+    const insertedMessages: Array<Record<string, unknown>> = [];
+
+    await mock.module('../../../src/modules/chats/infrastructure/chat-repository', () => ({
+      verifyChatOwnership: () => Promise.resolve(true),
+    }));
+
+    // Provider always yields a tool_call_completed without turn_completed, forcing
+    // the orchestrator to exhaust the iteration ceiling on every call.
+    await mock.module('../../../src/services/providers/registry', () => ({
+      getProviderForModel: () =>
+        Promise.resolve({
+          providerType: 'openai-compatible',
+          generateText: () => Promise.resolve({ text: '' }),
+          generateAgentTurnStream: async function* (_req: AgentTurnRequest) {
+            await Promise.resolve();
+            yield { type: 'tool_call_started', callId: 'c1', name: 'noop' };
+            yield { type: 'tool_call_completed', callId: 'c1', name: 'noop', arguments: '{}' };
+            yield { type: 'turn_completed', providerState: null };
+          },
+        }),
+    }));
+
+    await mock.module('../../../src/services/tools', () => ({
+      getAllToolDefinitions: () => [{ name: 'noop', description: 'no-op', parameters: {} }],
+      executeTool: () => Promise.resolve({ ok: true }),
+    }));
+
+    await mock.module('../../../src/db/database', () => ({
+      getDb: () => ({
+        selectFrom: () => makeChain({ userId: TEST_USER.id }),
+        insertInto: (_table: string) => ({
+          values: (values: Record<string, unknown>) => {
+            if (_table === 'messages') insertedMessages.push({ ...values });
+            return { execute: () => Promise.resolve() };
+          },
+        }),
+        updateTable: () => makeChain(undefined),
+      }),
+    }));
+
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
+    restoreAuth = restore;
+
+    const response = await app.handle(
+      new Request('http://localhost/respond/stream', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chatId: 'test-chat',
+          prompt: 'loop forever',
+          model: 'test-model',
+          maxToolIterations: 2,
+        }),
+      })
+    );
+
+    expect(response.status).toBe(200);
+    const rawText = await response.text();
+
+    const sseEvents = rawText
+      .split('\n\n')
+      .filter((block) => block.startsWith('data: '))
+      .map((block) => {
+        try {
+          return JSON.parse(block.replace(/^data: /, '')) as Record<string, unknown>;
+        } catch {
+          return null;
+        }
+      })
+      .filter((e): e is Record<string, unknown> => e !== null);
+
+    // Must emit system_event with event=tool_loop_exhausted
+    const exhaustedEvent = sseEvents.find(
+      (e) => e.type === 'system_event' && e.event === 'tool_loop_exhausted'
+    );
+    expect(exhaustedEvent).toBeDefined();
+    expect(exhaustedEvent?.done).toBe(false);
+    expect(typeof exhaustedEvent?.detail).toBe('string');
+
+    // Must emit terminal error event (not done)
+    const errorEvent = sseEvents.find((e) => e.type === 'error');
+    expect(errorEvent).toBeDefined();
+    expect(errorEvent?.done).toBe(true);
+
+    // Must NOT emit a done event
+    const doneEvent = sseEvents.find((e) => e.type === 'done');
+    expect(doneEvent).toBeUndefined();
+
+    // Persisted AI message must include the system_event part
+    const aiMessage = insertedMessages.find((m) => m.role === 'ai');
+    expect(aiMessage).toBeDefined();
+    const parts = JSON.parse(aiMessage?.parts as string) as Array<Record<string, unknown>>;
+    const exhaustedPart = parts.find(
+      (p) => p.type === 'system_event' && p.event === 'tool_loop_exhausted'
+    );
+    expect(exhaustedPart).toBeDefined();
+  });
 });
