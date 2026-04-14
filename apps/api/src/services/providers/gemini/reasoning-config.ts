@@ -2,10 +2,10 @@
  * Model-family-aware reasoning configuration for Gemini.
  *
  * Gemini 3+ uses `thinkingLevel` (enum: LOW/MEDIUM/HIGH/MINIMAL).
- * Gemini 2.5 uses `thinkingBudget` (integer token count) — but only via the
- * generateContent SDK; the Interactions API GenerationConfig schema does not
- * have a `thinking_budget` field, so 2.5 thinking config is skipped there.
- * Gemini 2.0 and older do not support thinking at all.
+ * Gemini 2.5 uses `thinkingBudget` (integer token count) via the generateContent
+ * SDK. The Interactions API has no `thinking_budget` field, but does support
+ * `thinking_summaries: 'auto'` to stream thought content at the model's default
+ * budget. Gemini 2.0 and older do not support thinking at all.
  */
 
 import type { ReasoningEffort } from '@mangostudio/shared';
@@ -89,10 +89,11 @@ export function buildTextThinkingConfig(
 // ---------------------------------------------------------------------------
 // Interactions API config (generation_config for interactions.create)
 //
-// The Interactions API GenerationConfig schema only supports `thinking_level`
-// and `thinking_summaries`. It does NOT have a `thinking_budget` field.
-// Gemini 2.5 models don't support `thinking_level`, so thinking config is
-// skipped entirely for 2.5 in the Interactions path (model uses defaults).
+// The Interactions API GenerationConfig schema supports `thinking_level` and
+// `thinking_summaries`. It does NOT have a `thinking_budget` field.
+// Gemini 2.5 models don't support `thinking_level`, but they do support
+// `thinking_summaries: 'auto'` to stream thought content at the model's
+// default budget.
 // ---------------------------------------------------------------------------
 
 export interface GeminiInteractionsThinkingConfig {
@@ -114,9 +115,16 @@ export function buildInteractionsThinkingConfig(
   const family = getGeminiFamily(modelName);
 
   // Gemini 2.0 and older — no thinking support
-  // Gemini 2.5 — uses thinkingBudget which the Interactions API schema
-  //   does not support; skip and let the model use its defaults
-  if (family !== 'gemini-3') return undefined;
+  if (family === 'gemini-legacy') return undefined;
+
+  if (family === 'gemini-2.5') {
+    // The Interactions API schema has no thinking_budget or thinking_level for
+    // Gemini 2.5. thinking_summaries is the only knob: set it to 'auto' so
+    // the model returns thought content at its default budget. When thinking
+    // is disabled, omit the config entirely to avoid unexpected API errors.
+    if (!thinkingEnabled) return undefined;
+    return { thinking_summaries: 'auto' };
+  }
 
   // Gemini 3+
   if (!thinkingEnabled) {

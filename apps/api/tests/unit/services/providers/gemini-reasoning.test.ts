@@ -146,19 +146,27 @@ describe('buildInteractionsThinkingConfig', () => {
     });
   });
 
-  describe('Gemini 2.5 models (no Interactions API thinking support)', () => {
-    it('returns undefined for 2.5 Pro with thinking enabled', () => {
-      expect(
-        buildInteractionsThinkingConfig('gemini-2.5-pro-preview', true, 'high')
-      ).toBeUndefined();
+  describe('Gemini 2.5 models (thinking_summaries only, no thinking_level)', () => {
+    it('returns thinking_summaries auto for 2.5 Pro with thinking enabled', () => {
+      expect(buildInteractionsThinkingConfig('gemini-2.5-pro-preview', true, 'high')).toEqual({
+        thinking_summaries: 'auto',
+      });
     });
 
-    it('returns undefined for 2.5 Flash with thinking enabled', () => {
-      expect(buildInteractionsThinkingConfig('gemini-2.5-flash', true, 'medium')).toBeUndefined();
+    it('returns thinking_summaries auto for 2.5 Flash with thinking enabled', () => {
+      expect(buildInteractionsThinkingConfig('gemini-2.5-flash', true, 'medium')).toEqual({
+        thinking_summaries: 'auto',
+      });
     });
 
     it('returns undefined for 2.5 Flash with thinking disabled', () => {
       expect(buildInteractionsThinkingConfig('gemini-2.5-flash', false, 'medium')).toBeUndefined();
+    });
+
+    it('returns undefined for 2.5 Pro with thinking disabled', () => {
+      expect(
+        buildInteractionsThinkingConfig('gemini-2.5-pro-preview', false, 'low')
+      ).toBeUndefined();
     });
   });
 
