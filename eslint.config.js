@@ -1,6 +1,6 @@
 import eslint from '@eslint/js';
+import reactPlugin from '@eslint-react/eslint-plugin';
 import prettierConfig from 'eslint-config-prettier/flat';
-import reactPlugin from 'eslint-plugin-react';
 import reactHooksPlugin from 'eslint-plugin-react-hooks';
 import tseslint from 'typescript-eslint';
 
@@ -91,19 +91,14 @@ export default tseslint.config(
   // React rules — frontend only
   {
     files: ['apps/frontend/**/*.{ts,tsx}'],
+    ...reactPlugin.configs['recommended-type-checked'],
     plugins: {
-      react: reactPlugin,
+      ...reactPlugin.configs['recommended-type-checked'].plugins,
       'react-hooks': reactHooksPlugin,
     },
-    settings: {
-      react: { version: 'detect' },
-    },
     rules: {
-      ...reactPlugin.configs.recommended.rules,
+      ...reactPlugin.configs['recommended-type-checked'].rules,
       ...reactHooksPlugin.configs.recommended.rules,
-      'react/react-in-jsx-scope': 'off',
-      'react/jsx-uses-react': 'off',
-      'react/no-unescaped-entities': 'off',
       'react-hooks/exhaustive-deps': 'error',
       // React Compiler-adjacent rules from react-hooks v7.
       // set-state-in-effect: warn — flags setState inside effects (prefer derived state or useMemo).
