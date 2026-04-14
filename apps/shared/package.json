@@ -26,7 +26,7 @@
     "./utils/model-detection": "./src/utils/model-detection.ts"
   },
   "devDependencies": {
-    "typescript": "~5.8.2"
+    "typescript": "~6.0.2"
   },
   "dependencies": {
     "@sinclair/typebox": "^0.34.49"
