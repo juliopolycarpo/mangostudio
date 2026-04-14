@@ -18,16 +18,16 @@
     "clean": "bun ./scripts/clean.ts"
   },
   "devDependencies": {
-    "@eslint/js": "^9.39.4",
-    "typescript": "~6.0.2",
+    "@eslint-react/eslint-plugin": "^4.2.3",
+    "@eslint/js": "^10.0.1",
     "@playwright/test": "^1.58.2",
     "@vitest/coverage-v8": "^4.1.4",
-    "eslint": "^9.39.4",
+    "eslint": "^10.2.0",
     "eslint-config-prettier": "^10.1.8",
-    "eslint-plugin-react": "^7.37.5",
     "eslint-plugin-react-hooks": "^7.0.1",
     "prettier": "^3.8.1",
-    "typescript-eslint": "^8.57.2",
+    "typescript": "~6.0.2",
+    "typescript-eslint": "^8.58.2",
     "vitest": "^4.1.4"
   }
 }

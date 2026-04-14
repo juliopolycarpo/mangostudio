@@ -78,9 +78,11 @@ const secretService = createProviderSecretService({
     } catch (err: unknown) {
       const sdkErr = narrowSdkError(err);
       if (sdkErr.status === 401 || sdkErr.status === 403) {
-        throw new Error('Anthropic rejected the API key. Verify that it is valid and enabled.');
+        throw new Error('Anthropic rejected the API key. Verify that it is valid and enabled.', {
+          cause: err,
+        });
       }
-      throw new Error(`Anthropic API validation failed: ${sdkErr.message}`);
+      throw new Error(`Anthropic API validation failed: ${sdkErr.message}`, { cause: err });
     }
   },
 });

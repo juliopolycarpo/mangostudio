@@ -50,7 +50,7 @@ function AuthenticatedLayout() {
   if (currentPath.includes('/settings')) activePage = 'settings';
 
   return (
-    <AppContext.Provider value={app}>
+    <AppContext value={app}>
       <Layout
         currentPage={activePage}
         onNavigate={(page) => app.handleNavigate(page)}
@@ -93,6 +93,6 @@ function AuthenticatedLayout() {
           </Suspense>
         </div>
       </Layout>
-    </AppContext.Provider>
+    </AppContext>
   );
 }

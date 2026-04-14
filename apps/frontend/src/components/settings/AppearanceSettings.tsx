@@ -121,6 +121,9 @@ function ThemeCard({
       <pre
         className="p-3 text-[11px] leading-normal font-mono overflow-hidden"
         style={{ background: preview.bg }}
+        // Preview HTML is produced by Shiki's syntax highlighter from a static
+        // sentence, not user input; HTML rendering is required to show tokens.
+        // eslint-disable-next-line @eslint-react/dom-no-dangerously-set-innerhtml
         dangerouslySetInnerHTML={{ __html: preview.html }}
       />
       <div className="px-3 py-2 text-xs font-semibold text-on-surface-variant bg-surface-container-high">

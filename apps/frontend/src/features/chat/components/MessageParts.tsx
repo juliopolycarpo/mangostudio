@@ -54,7 +54,10 @@ export function MessageParts({ parts, messageId, isStreaming }: MessagePartsProp
           case 'text':
             return (
               <div
-                key={`text-${idx}`}
+                // Parts within a message are append-only and position-stable, so
+                // the ordinal index is a valid identity. No part-level ID exists.
+                // eslint-disable-next-line @eslint-react/no-array-index-key
+                key={`${messageId}-text-${idx}`}
                 className="bg-surface-container-low p-5 rounded-2xl border border-outline-variant/10 font-body text-sm leading-relaxed text-on-surface max-w-2xl"
               >
                 <MarkdownContent
@@ -69,11 +72,19 @@ export function MessageParts({ parts, messageId, isStreaming }: MessagePartsProp
               </div>
             );
           case 'system_event':
-            return <SystemEventMarker key={`se-${idx}`} event={part.event} detail={part.detail} />;
+            return (
+              <SystemEventMarker
+                // eslint-disable-next-line @eslint-react/no-array-index-key
+                key={`${messageId}-se-${idx}`}
+                event={part.event}
+                detail={part.detail}
+              />
+            );
           case 'error':
             return (
               <div
-                key={`error-${idx}`}
+                // eslint-disable-next-line @eslint-react/no-array-index-key
+                key={`${messageId}-error-${idx}`}
                 className="bg-error/10 border border-error/20 p-4 rounded-xl text-error text-sm font-body"
               >
                 {part.text}

@@ -30,12 +30,12 @@ export function useGlobalSettings() {
   const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>(
     () => readStorage('reasoningEffort', 'medium') as ReasoningEffort
   );
-  const [maxToolIterations, setMaxToolIterationsState] = useState<number>(() =>
+  const [maxToolIterations, setMaxToolIterations] = useState<number>(() =>
     clampMaxToolIterations(readStorage('maxToolIterations', MAX_TOOL_ITERATIONS_DEFAULT))
   );
 
-  const setMaxToolIterations = useCallback((value: number) => {
-    setMaxToolIterationsState(clampMaxToolIterations(value));
+  const updateMaxToolIterations = useCallback((value: number) => {
+    setMaxToolIterations(clampMaxToolIterations(value));
   }, []);
 
   useEffect(() => {
@@ -68,7 +68,7 @@ export function useGlobalSettings() {
     setGlobalImageQuality('1K');
     setThinkingEnabled(false);
     setReasoningEffort('medium');
-    setMaxToolIterationsState(MAX_TOOL_ITERATIONS_DEFAULT);
+    setMaxToolIterations(MAX_TOOL_ITERATIONS_DEFAULT);
   }, []);
 
   return {
@@ -83,7 +83,7 @@ export function useGlobalSettings() {
     reasoningEffort,
     setReasoningEffort,
     maxToolIterations,
-    setMaxToolIterations,
+    setMaxToolIterations: updateMaxToolIterations,
     resetSettings,
   };
 }

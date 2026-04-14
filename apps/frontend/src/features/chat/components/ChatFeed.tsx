@@ -30,6 +30,66 @@ function extractRawMarkdown(msg: Message): string {
     .join('\n\n');
 }
 
+function messagePartsFromMessage(msg: Message): MessagePart[] {
+  return msg.parts ?? (msg.text ? [{ type: 'text', text: msg.text }] : []);
+}
+
+function StreamingMessageBody({
+  msg,
+  isImageTurn,
+  generatingImageLabel,
+  streamingLabel,
+}: {
+  msg: Message;
+  isImageTurn: boolean;
+  generatingImageLabel: string;
+  streamingLabel: string;
+}) {
+  const parts = messagePartsFromMessage(msg);
+  const hasContent = parts.some(
+    (p) => p.type === 'thinking' || p.type === 'text' || p.type === 'tool_call'
+  );
+
+  if (isImageTurn || !hasContent) {
+    return (
+      <>
+        <span className="text-sm font-medium text-on-surface animate-pulse">
+          {isImageTurn ? generatingImageLabel : streamingLabel}
+        </span>
+        {isImageTurn ? (
+          <div className="h-1 w-24 bg-surface-container-highest rounded-full overflow-hidden">
+            <div className="h-full bg-primary w-1/2 animate-[slide_1s_ease-in-out_infinite_alternate]"></div>
+          </div>
+        ) : (
+          <div className="skeleton-pulse mt-1">
+            <div className="skeleton-line" />
+            <div className="skeleton-line" />
+            <div className="skeleton-line" />
+          </div>
+        )}
+      </>
+    );
+  }
+
+  return <MessageParts parts={parts} messageId={msg.id} isStreaming />;
+}
+
+function CompletedMessageBody({ msg, noResponseLabel }: { msg: Message; noResponseLabel: string }) {
+  const parts = messagePartsFromMessage(msg);
+  const hasTextOrTools = parts.some((p) => p.type === 'text' || p.type === 'tool_call');
+
+  return (
+    <>
+      <MessageParts parts={parts} messageId={msg.id} isStreaming={false} />
+      {!hasTextOrTools && (
+        <div className="bg-surface-container-low p-5 rounded-2xl border border-outline-variant/10 font-body text-sm leading-relaxed text-on-surface max-w-2xl">
+          <span className="text-on-surface-variant/50 italic">{noResponseLabel}</span>
+        </div>
+      )}
+    </>
+  );
+}
+
 function CopyMessageButton({
   msg,
   label,
@@ -264,39 +324,12 @@ export function ChatFeed({ chatId, messages }: { chatId: string | null; messages
 
                       {msg.isGenerating ? (
                         <div className="flex flex-col gap-3 py-4 pl-9">
-                          {(() => {
-                            const parts: MessagePart[] =
-                              msg.parts ?? (msg.text ? [{ type: 'text', text: msg.text }] : []);
-                            const hasContent =
-                              parts.some((p) => p.type === 'thinking') ||
-                              parts.some((p) => p.type === 'text') ||
-                              parts.some((p) => p.type === 'tool_call');
-
-                            if (isImageTurn || !hasContent) {
-                              return (
-                                <>
-                                  <span className="text-sm font-medium text-on-surface animate-pulse">
-                                    {isImageTurn
-                                      ? t.chat.feed.generatingImage
-                                      : t.thinking.streaming}
-                                  </span>
-                                  {isImageTurn ? (
-                                    <div className="h-1 w-24 bg-surface-container-highest rounded-full overflow-hidden">
-                                      <div className="h-full bg-primary w-1/2 animate-[slide_1s_ease-in-out_infinite_alternate]"></div>
-                                    </div>
-                                  ) : (
-                                    <div className="skeleton-pulse mt-1">
-                                      <div className="skeleton-line" />
-                                      <div className="skeleton-line" />
-                                      <div className="skeleton-line" />
-                                    </div>
-                                  )}
-                                </>
-                              );
-                            }
-
-                            return <MessageParts parts={parts} messageId={msg.id} isStreaming />;
-                          })()}
+                          <StreamingMessageBody
+                            msg={msg}
+                            isImageTurn={isImageTurn}
+                            generatingImageLabel={t.chat.feed.generatingImage}
+                            streamingLabel={t.thinking.streaming}
+                          />
                         </div>
                       ) : isImageTurn ? (
                         <div className="flex flex-col gap-4 w-full">
@@ -364,9 +397,9 @@ export function ChatFeed({ chatId, messages }: { chatId: string | null; messages
                                     {t.chat.feed.styleParams}
                                   </h3>
                                   <div className="flex flex-wrap gap-2">
-                                    {msg.styleParams.map((param, i) => (
+                                    {msg.styleParams.map((param) => (
                                       <span
-                                        key={i}
+                                        key={param}
                                         className="px-3 py-1 bg-surface-container-high text-on-surface-variant text-[10px] font-bold rounded-sm uppercase tracking-wider"
                                       >
                                         {param}
@@ -404,30 +437,10 @@ export function ChatFeed({ chatId, messages }: { chatId: string | null; messages
                               </span>
                             </div>
                           )}
-                          {(() => {
-                            const parts: MessagePart[] =
-                              msg.parts ?? (msg.text ? [{ type: 'text', text: msg.text }] : []);
-                            const hasTextOrTools =
-                              parts.some((p) => p.type === 'text') ||
-                              parts.some((p) => p.type === 'tool_call');
-
-                            return (
-                              <>
-                                <MessageParts
-                                  parts={parts}
-                                  messageId={msg.id}
-                                  isStreaming={false}
-                                />
-                                {!hasTextOrTools && (
-                                  <div className="bg-surface-container-low p-5 rounded-2xl border border-outline-variant/10 font-body text-sm leading-relaxed text-on-surface max-w-2xl">
-                                    <span className="text-on-surface-variant/50 italic">
-                                      {t.chat.feed.noResponse}
-                                    </span>
-                                  </div>
-                                )}
-                              </>
-                            );
-                          })()}
+                          <CompletedMessageBody
+                            msg={msg}
+                            noResponseLabel={t.chat.feed.noResponse}
+                          />
                         </div>
                       )}
                     </div>

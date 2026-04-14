@@ -80,6 +80,8 @@ export function MarkdownContent({
     const container = containerRef.current;
     if (!container) return;
 
+    const pendingResetTimers = new Set<ReturnType<typeof setTimeout>>();
+
     const handleClick = (e: MouseEvent) => {
       void (async () => {
         const btn = (e.target as HTMLElement).closest('.copy-code-btn');
@@ -95,11 +97,17 @@ export function MarkdownContent({
           btn.innerHTML = CHECK_ICON;
           btn.setAttribute('aria-label', codeCopiedLabel);
           btn.classList.add('copy-code-btn--copied');
-          setTimeout(() => {
+          // Timer is tracked in pendingResetTimers and cleared on unmount
+          // (see effect cleanup below), the rule cannot trace through the
+          // async click callback.
+          // eslint-disable-next-line @eslint-react/web-api-no-leaked-timeout
+          const resetTimer = setTimeout(() => {
+            pendingResetTimers.delete(resetTimer);
             btn.innerHTML = CLIPBOARD_ICON;
             btn.setAttribute('aria-label', copyCodeLabel);
             btn.classList.remove('copy-code-btn--copied');
           }, 2000);
+          pendingResetTimers.add(resetTimer);
         } catch {
           // Clipboard API not available — silently fail
         }
@@ -107,13 +115,19 @@ export function MarkdownContent({
     };
 
     container.addEventListener('click', handleClick);
-    return () => container.removeEventListener('click', handleClick);
+    return () => {
+      container.removeEventListener('click', handleClick);
+      for (const timer of pendingResetTimers) clearTimeout(timer);
+      pendingResetTimers.clear();
+    };
   }, [copyCodeLabel, codeCopiedLabel]);
 
   // Image lightbox — click to zoom inline markdown images
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
+
+    let activeClose: (() => void) | null = null;
 
     const handleImageClick = (e: MouseEvent) => {
       const img = e.target as HTMLElement;
@@ -129,32 +143,46 @@ export function MarkdownContent({
       overlay.className = 'markdown-lightbox';
       overlay.innerHTML = `<img src="${src}" alt="${img.getAttribute('alt') ?? ''}" />`;
 
-      const close = () => {
+      const handleAnimationEnd = () => overlay.remove();
+      const handleKey = (ev: KeyboardEvent): void => {
+        if (ev.key === 'Escape') close();
+      };
+      const handleOverlayClick = (): void => close();
+      function close(): void {
         overlay.classList.add('markdown-lightbox--closing');
-        overlay.addEventListener('animationend', () => overlay.remove(), { once: true });
-      };
+        // eslint-disable-next-line @eslint-react/web-api-no-leaked-event-listener
+        overlay.addEventListener('animationend', handleAnimationEnd, { once: true });
+        overlay.removeEventListener('click', handleOverlayClick);
+        document.removeEventListener('keydown', handleKey);
+        if (activeClose === close) activeClose = null;
+      }
 
-      overlay.addEventListener('click', close);
-
-      const handleKey = (ev: KeyboardEvent) => {
-        if (ev.key === 'Escape') {
-          close();
-          document.removeEventListener('keydown', handleKey);
-        }
-      };
+      activeClose = close;
+      // eslint-disable-next-line @eslint-react/web-api-no-leaked-event-listener
+      overlay.addEventListener('click', handleOverlayClick);
+      // eslint-disable-next-line @eslint-react/web-api-no-leaked-event-listener
       document.addEventListener('keydown', handleKey);
 
       document.body.appendChild(overlay);
     };
 
     container.addEventListener('click', handleImageClick);
-    return () => container.removeEventListener('click', handleImageClick);
+    return () => {
+      container.removeEventListener('click', handleImageClick);
+      // Close any open lightbox when the component unmounts to prevent
+      // dangling document-level listeners.
+      activeClose?.();
+    };
   }, []);
 
   return (
     <div
       ref={containerRef}
       className={`markdown-content ${className ?? ''}`}
+      // HTML is produced by `marked` with a custom renderer that only emits
+      // a fixed tag set and escapes user input; rendering as HTML is required
+      // to surface Shiki-highlighted code blocks and link/image elements.
+      // eslint-disable-next-line @eslint-react/dom-no-dangerously-set-innerhtml
       dangerouslySetInnerHTML={{ __html: renderedHtml }}
     />
   );

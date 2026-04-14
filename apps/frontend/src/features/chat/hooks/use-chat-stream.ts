@@ -15,19 +15,25 @@ export function useChatStream({ currentChatId }: UseChatStreamOptions) {
   // Per-chat context info cache — survives chat switches
   const contextCacheRef = useRef<Map<string, ContextInfo>>(new Map());
   // Version counter makes contextCache reactive
-  const [, setCacheVersion] = useState(0);
+  const [_cacheVersion, setCacheVersion] = useState(0);
+  void _cacheVersion;
   // Ref to current chatId to avoid stale closures in seedContextInfo
   const currentChatIdRef = useRef(currentChatId);
   currentChatIdRef.current = currentChatId;
 
-  // Restore cached context when the active chat changes
+  // Restore cached context when the active chat changes. setState-in-effect is
+  // intentional here: the per-chat cache is external state that must be hydrated
+  // into React state when the active chat identity changes.
   useEffect(() => {
     if (currentChatId) {
       const cached = contextCacheRef.current.get(currentChatId);
+      // eslint-disable-next-line @eslint-react/set-state-in-effect
       setContextInfo(cached ?? null);
     } else {
+      // eslint-disable-next-line @eslint-react/set-state-in-effect
       setContextInfo(null);
     }
+    // eslint-disable-next-line @eslint-react/set-state-in-effect
     setFallbackNotice(null);
   }, [currentChatId]);
 

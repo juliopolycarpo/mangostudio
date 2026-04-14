@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, createContext, useContext, useMemo } from 'react';
+import { useState, useEffect, useCallback, createContext, use, useMemo } from 'react';
 import type { ReactNode } from 'react';
 import type { CodeThemeId } from '@/lib/shiki';
 
@@ -68,7 +68,7 @@ function readStoredConfig(): ThemeConfig {
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
   // Initialize synchronously from localStorage to avoid a flash on mount.
-  const [config, setConfigState] = useState<ThemeConfig>(readStoredConfig);
+  const [config, setConfig] = useState<ThemeConfig>(readStoredConfig);
   // Track OS preference separately so system theme reacts to OS changes.
   const [systemIsDark, setSystemIsDark] = useState<boolean>(
     () => window.matchMedia('(prefers-color-scheme: dark)').matches
@@ -107,20 +107,20 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     return () => mql.removeEventListener('change', handler);
   }, [config.appTheme]);
 
-  const setConfig = useCallback((patch: Partial<ThemeConfig>) => {
-    setConfigState((prev) => ({ ...prev, ...patch }));
+  const applyPatch = useCallback((patch: Partial<ThemeConfig>) => {
+    setConfig((prev) => ({ ...prev, ...patch }));
   }, []);
 
   const value = useMemo(
-    () => ({ config, resolvedTheme, resolvedCodeTheme, setConfig }),
-    [config, resolvedTheme, resolvedCodeTheme, setConfig]
+    () => ({ config, resolvedTheme, resolvedCodeTheme, setConfig: applyPatch }),
+    [config, resolvedTheme, resolvedCodeTheme, applyPatch]
   );
 
-  return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
+  return <ThemeContext value={value}>{children}</ThemeContext>;
 }
 
 export function useTheme(): ThemeContextValue {
-  const ctx = useContext(ThemeContext);
+  const ctx = use(ThemeContext);
   if (!ctx) throw new Error('useTheme must be used inside ThemeProvider');
   return ctx;
 }
