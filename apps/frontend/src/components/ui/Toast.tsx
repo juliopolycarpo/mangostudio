@@ -1,4 +1,4 @@
-import { useState, useCallback, createContext, useContext, type ReactNode } from 'react';
+import { useState, useCallback, createContext, use, type ReactNode } from 'react';
 import { X } from 'lucide-react';
 
 interface Toast {
@@ -35,7 +35,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <ToastContext.Provider value={{ toast }}>
+    <ToastContext value={{ toast }}>
       {children}
       <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-2 pointer-events-none">
         {toasts.map((t) => (
@@ -53,12 +53,12 @@ export function ToastProvider({ children }: { children: ReactNode }) {
           </div>
         ))}
       </div>
-    </ToastContext.Provider>
+    </ToastContext>
   );
 }
 
 export function useToast() {
-  const ctx = useContext(ToastContext);
+  const ctx = use(ToastContext);
   if (!ctx) throw new Error('useToast deve ser usado dentro de ToastProvider');
   return ctx;
 }
