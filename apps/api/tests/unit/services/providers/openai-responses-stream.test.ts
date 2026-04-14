@@ -1,0 +1,326 @@
+import { describe, expect, it } from 'bun:test';
+import { APIError } from 'openai';
+import { streamAgentTurnWithResponsesAPI } from '../../../../src/services/providers/openai/responses-stream';
+import {
+  isStrictCompatible,
+  toolDefsToResponsesAPI,
+} from '../../../../src/services/providers/core/tool-mapper';
+import {
+  parseContinuationEnvelope,
+  serializeContinuationEnvelope,
+  computeSystemPromptHash,
+  computeToolsetHash,
+} from '../../../../src/services/providers/core/continuation-envelope';
+import type { AgentEvent, AgentTurnRequest } from '../../../../src/services/providers/types';
+
+type CreateFn = (params: Record<string, unknown>) => Promise<AsyncIterable<unknown>>;
+
+function streamOf(events: Array<Record<string, unknown>>): AsyncIterable<unknown> {
+  return (async function* () {
+    await Promise.resolve();
+    for (const ev of events) yield ev;
+  })();
+}
+
+function mockClient(create: CreateFn): Parameters<typeof streamAgentTurnWithResponsesAPI>[0] {
+  return { responses: { create } } as unknown as Parameters<
+    typeof streamAgentTurnWithResponsesAPI
+  >[0];
+}
+
+async function collect(req: AgentTurnRequest, create: CreateFn): Promise<AgentEvent[]> {
+  const events: AgentEvent[] = [];
+  for await (const ev of streamAgentTurnWithResponsesAPI(mockClient(create), req)) {
+    events.push(ev);
+  }
+  return events;
+}
+
+function baseRequest(overrides: Partial<AgentTurnRequest> = {}): AgentTurnRequest {
+  return {
+    userId: 'u1',
+    modelName: 'gpt-4o',
+    history: [],
+    prompt: 'Hello',
+    generationConfig: { thinkingEnabled: false, reasoningEffort: 'medium' },
+    ...overrides,
+  };
+}
+
+function buildEnvelope(cursor: string, modelName = 'gpt-4o'): string {
+  return serializeContinuationEnvelope({
+    schemaVersion: 1,
+    provider: 'openai',
+    mode: 'responses',
+    modelName,
+    systemPromptHash: computeSystemPromptHash(undefined),
+    toolsetHash: computeToolsetHash([]),
+    cursor,
+  });
+}
+
+const COMPLETED_EVENT = (id = 'resp_new', inputTokens = 42) => ({
+  type: 'response.completed',
+  response: {
+    id,
+    usage: { input_tokens: inputTokens, output_tokens: 10 },
+  },
+});
+
+// ---------------------------------------------------------------------------
+// isStrictCompatible
+// ---------------------------------------------------------------------------
+
+describe('isStrictCompatible', () => {
+  it('accepts a schema with all properties required and no additionalProperties', () => {
+    expect(
+      isStrictCompatible({
+        type: 'object',
+        properties: { a: { type: 'string' }, b: { type: 'number' } },
+        required: ['a', 'b'],
+        additionalProperties: false,
+      })
+    ).toBe(true);
+  });
+
+  it('rejects when a property is missing from required', () => {
+    expect(
+      isStrictCompatible({
+        type: 'object',
+        properties: { a: { type: 'string' }, b: { type: 'number' } },
+        required: ['a'],
+        additionalProperties: false,
+      })
+    ).toBe(false);
+  });
+
+  it('rejects when additionalProperties is not false', () => {
+    expect(
+      isStrictCompatible({
+        type: 'object',
+        properties: { a: { type: 'string' } },
+        required: ['a'],
+      })
+    ).toBe(false);
+  });
+
+  it('rejects schemas using oneOf/anyOf/allOf/$ref anywhere in the tree', () => {
+    expect(
+      isStrictCompatible({
+        type: 'object',
+        properties: { a: { oneOf: [{ type: 'string' }, { type: 'number' }] } },
+        required: ['a'],
+        additionalProperties: false,
+      })
+    ).toBe(false);
+  });
+
+  it('accepts an empty object schema (no properties)', () => {
+    expect(
+      isStrictCompatible({
+        type: 'object',
+        properties: {},
+        required: [],
+        additionalProperties: false,
+      })
+    ).toBe(true);
+  });
+
+  it('rejects non-object root schemas', () => {
+    expect(isStrictCompatible({ type: 'string' })).toBe(false);
+    expect(isStrictCompatible(null)).toBe(false);
+    expect(isStrictCompatible(undefined)).toBe(false);
+  });
+});
+
+describe('toolDefsToResponsesAPI strict flag', () => {
+  it('sets strict=true for compatible schemas, strict=false otherwise', () => {
+    const mapped = toolDefsToResponsesAPI([
+      {
+        name: 'strict_ok',
+        description: 'ok',
+        parameters: {
+          type: 'object',
+          properties: { query: { type: 'string' } },
+          required: ['query'],
+          additionalProperties: false,
+        },
+      },
+      {
+        name: 'loose',
+        description: 'loose',
+        parameters: {
+          type: 'object',
+          properties: { query: { type: 'string' } },
+          required: [],
+        },
+      },
+    ]);
+    expect(mapped[0].strict).toBe(true);
+    expect(mapped[1].strict).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// streamAgentTurnWithResponsesAPI request shape
+// ---------------------------------------------------------------------------
+
+describe('streamAgentTurnWithResponsesAPI — request shape', () => {
+  it('first request uses full replay and no previous_response_id', async () => {
+    let captured: Record<string, unknown> | undefined;
+    await collect(
+      baseRequest({
+        history: [
+          { id: 'h1', role: 'user', text: 'prior question' },
+          { id: 'h2', role: 'ai', text: 'prior answer' },
+        ],
+        prompt: 'follow up',
+      }),
+      (params) => {
+        captured = params;
+        return Promise.resolve(streamOf([COMPLETED_EVENT()]));
+      }
+    );
+
+    expect(captured).toBeDefined();
+    expect(captured?.previous_response_id).toBeUndefined();
+    expect(captured?.context_management).toBeUndefined();
+    const input = captured?.input as Array<Record<string, unknown>>;
+    expect(input.length).toBeGreaterThan(1);
+    expect(input[input.length - 1]).toEqual({ role: 'user', content: 'follow up' });
+  });
+
+  it('follow-up with valid cursor sends previous_response_id and only the new message', async () => {
+    let captured: Record<string, unknown> | undefined;
+    await collect(
+      baseRequest({
+        providerState: buildEnvelope('resp_prev_123'),
+        prompt: 'next',
+      }),
+      (params) => {
+        captured = params;
+        return Promise.resolve(streamOf([COMPLETED_EVENT()]));
+      }
+    );
+
+    expect(captured?.previous_response_id).toBe('resp_prev_123');
+    const input = captured?.input as Array<Record<string, unknown>>;
+    expect(input).toEqual([{ role: 'user', content: 'next' }]);
+  });
+
+  it('adds context_management compaction only when chaining with previous_response_id', async () => {
+    let captured: Record<string, unknown> | undefined;
+    await collect(
+      baseRequest({ providerState: buildEnvelope('resp_prev_abc'), prompt: 'again' }),
+      (params) => {
+        captured = params;
+        return Promise.resolve(streamOf([COMPLETED_EVENT()]));
+      }
+    );
+
+    const cm = captured?.context_management as Array<Record<string, unknown>> | undefined;
+    expect(Array.isArray(cm)).toBe(true);
+    expect(cm?.[0]?.type).toBe('compaction');
+    expect(typeof cm?.[0]?.compact_threshold).toBe('number');
+    expect(cm?.[0]?.compact_threshold as number).toBeGreaterThan(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Cursor expiry handling
+// ---------------------------------------------------------------------------
+
+function cursorError(): Error {
+  return new APIError(
+    404,
+    { error: { message: 'previous_response_id not found' } },
+    'Not Found',
+    new Headers({ 'content-type': 'application/json' })
+  );
+}
+
+describe('streamAgentTurnWithResponsesAPI — cursor expiry', () => {
+  it('degrades to replay when cursor is expired and no tool results are pending', async () => {
+    let callCount = 0;
+    const events = await collect(
+      baseRequest({
+        providerState: buildEnvelope('resp_stale'),
+        prompt: 'ask again',
+        history: [{ id: 'h1', role: 'user', text: 'original' }],
+      }),
+      (params) => {
+        callCount++;
+        if (callCount === 1) return Promise.reject(cursorError());
+        // Second call (after fallback) must NOT include previous_response_id.
+        expect(params.previous_response_id).toBeUndefined();
+        return Promise.resolve(streamOf([COMPLETED_EVENT('resp_new')]));
+      }
+    );
+
+    expect(callCount).toBe(2);
+    const degraded = events.find((e) => e.type === 'continuation_degraded');
+    expect(degraded).toBeDefined();
+    if (degraded?.type === 'continuation_degraded') {
+      expect(degraded.from).toBe('responses');
+      expect(degraded.to).toBe('replay');
+    }
+    expect(events.at(-1)?.type).toBe('turn_completed');
+  });
+
+  it('aborts without retry when cursor is expired during tool-result continuation', async () => {
+    let callCount = 0;
+    const events = await collect(
+      baseRequest({
+        providerState: buildEnvelope('resp_stale'),
+        prompt: undefined,
+        toolResults: [{ callId: 'call_1', name: 'search', result: '{"hits":[]}' }],
+      }),
+      () => {
+        callCount++;
+        return Promise.reject(cursorError());
+      }
+    );
+
+    expect(callCount).toBe(1);
+    const degraded = events.find((e) => e.type === 'continuation_degraded');
+    expect(degraded).toBeDefined();
+    if (degraded?.type === 'continuation_degraded') {
+      expect(degraded.to).toBe('tool_loop_aborted');
+    }
+    expect(events.some((e) => e.type === 'turn_error')).toBe(true);
+    expect(events.some((e) => e.type === 'turn_completed')).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Usage reporting
+// ---------------------------------------------------------------------------
+
+describe('streamAgentTurnWithResponsesAPI — usage reporting', () => {
+  it('populates providerReportedInputTokens from completed usage', async () => {
+    const events = await collect(baseRequest({ providerState: buildEnvelope('resp_prev') }), () =>
+      Promise.resolve(streamOf([COMPLETED_EVENT('resp_new', 321)]))
+    );
+
+    const completed = events.find((e) => e.type === 'turn_completed');
+    expect(completed).toBeDefined();
+    if (completed?.type === 'turn_completed') {
+      const envelope = parseContinuationEnvelope(completed.providerState);
+      expect(envelope?.cursor).toBe('resp_new');
+      expect(envelope?.context?.providerReportedInputTokens).toBe(321);
+    }
+  });
+
+  it('skips providerReportedInputTokens when usage reports zero (compaction zero-usage bug)', async () => {
+    const events = await collect(baseRequest({ providerState: buildEnvelope('resp_prev') }), () =>
+      Promise.resolve(streamOf([COMPLETED_EVENT('resp_new', 0)]))
+    );
+
+    const completed = events.find((e) => e.type === 'turn_completed');
+    expect(completed).toBeDefined();
+    if (completed?.type === 'turn_completed') {
+      const envelope = parseContinuationEnvelope(completed.providerState);
+      expect(envelope?.context?.providerReportedInputTokens).toBeUndefined();
+    }
+  });
+});
