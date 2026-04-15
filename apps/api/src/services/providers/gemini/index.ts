@@ -88,6 +88,7 @@ const geminiProvider: AIProvider = {
         promptCaching: true,
         parallelToolCalls: false,
         reasoningWithTools: isReasoningModel(m.modelId),
+        structuredOutput: catalog.discoveredTextModels.some((t) => t.modelId === m.modelId),
       },
     }));
   },

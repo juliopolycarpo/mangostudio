@@ -100,6 +100,11 @@ export async function* generateGeminiTextStream(
     if (thinkingConfig) {
       config.thinkingConfig = thinkingConfig;
     }
+
+    if (generationConfig.structuredOutput) {
+      config.responseMimeType = 'application/json';
+      config.responseSchema = generationConfig.structuredOutput.schema;
+    }
   }
 
   const stream = await ai.models.generateContentStream({ model: modelName, contents, config });
