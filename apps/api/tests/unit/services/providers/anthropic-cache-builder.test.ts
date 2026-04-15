@@ -115,4 +115,64 @@ describe('buildCachedAnthropicRequest', () => {
     const searchTool = (result.tools as CacheableBlock[]).find((t) => t.name === 'search');
     expect(searchTool?.input_schema).toEqual(TOOL_DEFS[1].parameters);
   });
+
+  it('includes top-level cache_control for automatic message history caching', () => {
+    const result = buildCachedAnthropicRequest({
+      systemPrompt: 'You are helpful.',
+      toolDefinitions: TOOL_DEFS,
+      messages: [{ role: 'user', content: 'Hi' }],
+    });
+
+    expect(result.cache_control).toEqual({ type: 'ephemeral' });
+  });
+
+  it('coexists: top-level + system block + last tool all have cache_control', () => {
+    const result = buildCachedAnthropicRequest({
+      systemPrompt: 'You are helpful.',
+      toolDefinitions: TOOL_DEFS,
+      messages: [{ role: 'user', content: 'Hi' }],
+    });
+
+    // Top-level automatic caching (1 slot)
+    expect(result.cache_control).toEqual({ type: 'ephemeral' });
+    // System block explicit caching (1 slot)
+    expect((result.system as CacheableBlock[])[0].cache_control).toEqual({ type: 'ephemeral' });
+    // Last tool explicit caching (1 slot) — total 3 of 4 slots used
+    expect((result.tools as CacheableBlock[])[1].cache_control).toEqual({ type: 'ephemeral' });
+    expect((result.tools as CacheableBlock[])[0].cache_control).toBeUndefined();
+  });
+
+  it('top-level cache_control present when system prompt is empty', () => {
+    const result = buildCachedAnthropicRequest({
+      systemPrompt: '',
+      toolDefinitions: TOOL_DEFS,
+      messages: [{ role: 'user', content: 'Hi' }],
+    });
+
+    expect(result.cache_control).toEqual({ type: 'ephemeral' });
+    expect(result.system).toBeUndefined();
+  });
+
+  it('top-level cache_control present when tool definitions are empty', () => {
+    const result = buildCachedAnthropicRequest({
+      systemPrompt: 'You are helpful.',
+      toolDefinitions: [],
+      messages: [{ role: 'user', content: 'Hi' }],
+    });
+
+    expect(result.cache_control).toEqual({ type: 'ephemeral' });
+    expect(result.tools).toBeUndefined();
+  });
+
+  it('top-level cache_control present with neither system nor tools', () => {
+    const result = buildCachedAnthropicRequest({
+      systemPrompt: '',
+      toolDefinitions: [],
+      messages: [{ role: 'user', content: 'Hi' }],
+    });
+
+    expect(result.cache_control).toEqual({ type: 'ephemeral' });
+    expect(result.system).toBeUndefined();
+    expect(result.tools).toBeUndefined();
+  });
 });
