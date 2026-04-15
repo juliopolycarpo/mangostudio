@@ -64,6 +64,20 @@ export async function* streamWithResponsesAPI(
     { role: 'user', content: req.prompt },
   ];
 
+  const structured = req.generationConfig?.structuredOutput;
+  const textFormat = structured
+    ? {
+        text: {
+          format: {
+            type: 'json_schema' as const,
+            name: structured.name,
+            schema: structured.schema,
+            strict: structured.strict ?? true,
+          },
+        },
+      }
+    : {};
+
   const stream = await client.responses.create({
     model: req.modelName,
     input: toResponseInput(input),
@@ -73,6 +87,7 @@ export async function* streamWithResponsesAPI(
       effort,
       summary: 'auto',
     },
+    ...textFormat,
   });
 
   // Deduplication state
@@ -214,6 +229,20 @@ export async function* streamAgentTurnWithResponsesAPI(
   const contextLimit = getModelContextLimit(req.modelName);
   const compactThreshold = Math.floor(contextLimit * 0.85);
 
+  const structured = req.generationConfig?.structuredOutput;
+  const textFormat = structured
+    ? {
+        text: {
+          format: {
+            type: 'json_schema' as const,
+            name: structured.name,
+            schema: structured.schema,
+            strict: structured.strict ?? true,
+          },
+        },
+      }
+    : {};
+
   const makeRequest = (prevId: string | null): APIPromise<Stream<ResponseStreamEvent>> => {
     // Server-side compaction only kicks in for durable stateful chains.
     // Without a cursor the server has no prior state to compact, and adding
@@ -232,6 +261,7 @@ export async function* streamAgentTurnWithResponsesAPI(
       stream: true,
       ...(useReasoning ? { reasoning: { effort, summary: 'concise' } } : {}),
       ...contextManagement,
+      ...textFormat,
     });
   };
 
