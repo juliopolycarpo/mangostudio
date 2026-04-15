@@ -34,12 +34,32 @@ export interface ToolDefinition {
   parameters: Record<string, unknown>; // JSON Schema object
 }
 
+/**
+ * Request for schema-constrained model output.
+ *
+ * Providers that support native JSON Schema constraints (OpenAI Responses,
+ * OpenAI-compatible Chat Completions with `response_format`, Gemini with
+ * `response_schema`) map this config to their vendor-specific wire format.
+ * Providers without native support log a warning and continue unconstrained —
+ * see each adapter for its degrade path.
+ */
+export interface StructuredOutputConfig {
+  /** JSON Schema the model output must conform to. */
+  schema: Record<string, unknown>;
+  /** Schema name — required by OpenAI Responses and Chat Completions. */
+  name: string;
+  /** When true, enforce strict JSON Schema adherence. Defaults to true at the adapter. */
+  strict?: boolean;
+}
+
 /** Generation configuration passed through to provider adapters. */
 export interface GenerationConfig {
   thinkingEnabled: boolean;
   reasoningEffort: ReasoningEffort;
   tools?: ToolDefinition[];
   maxToolIterations?: number;
+  /** Optional schema constraint for model output. Honored by supporting providers; others warn + continue. */
+  structuredOutput?: StructuredOutputConfig;
 }
 
 /** Request for a single agentic turn — supports tool calling and provider-side continuation. */
@@ -134,6 +154,7 @@ export interface ModelInfo {
     promptCaching?: boolean;
     parallelToolCalls?: boolean;
     reasoningWithTools?: boolean;
+    structuredOutput?: boolean;
   };
 }
 

@@ -133,6 +133,17 @@ export async function* streamGeminiAgentTurn(req: AgentTurnRequest): AsyncIterab
     if (thinkingGenConfig) {
       interactionParams.generation_config = thinkingGenConfig;
     }
+
+    const structured = req.generationConfig.structuredOutput;
+    if (structured) {
+      const existing =
+        (interactionParams.generation_config as Record<string, unknown> | undefined) ?? {};
+      interactionParams.generation_config = {
+        ...existing,
+        response_mime_type: 'application/json',
+        response_schema: structured.schema,
+      };
+    }
   }
 
   try {
@@ -196,6 +207,17 @@ export async function* streamGeminiAgentTurn(req: AgentTurnRequest): AsyncIterab
           );
           if (retryThinkingConfig) {
             retryParams.generation_config = retryThinkingConfig;
+          }
+
+          const structured = req.generationConfig.structuredOutput;
+          if (structured) {
+            const existing =
+              (retryParams.generation_config as Record<string, unknown> | undefined) ?? {};
+            retryParams.generation_config = {
+              ...existing,
+              response_mime_type: 'application/json',
+              response_schema: structured.schema,
+            };
           }
         }
 

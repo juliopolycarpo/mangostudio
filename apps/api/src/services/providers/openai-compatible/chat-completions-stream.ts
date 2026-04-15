@@ -9,6 +9,7 @@
 import type OpenAI from 'openai';
 import { buildChatCompletionsReplay } from '../core/replay-builder';
 import { toolDefsToChatCompletions } from '../core/tool-mapper';
+import type { StructuredOutputConfig } from '../types';
 import { computeSystemPromptHash, computeToolsetHash } from '../core/continuation-envelope';
 import { extractReasoningChunks } from '../openai/normalizers';
 import type { AgentTurnRequest, AgentEvent } from '../types';
@@ -32,6 +33,24 @@ interface ExtendedChatDelta extends Record<string, unknown> {
   reasoning_content?: string;
   reasoning?: string;
   reasoning_details?: Array<{ type?: string; text?: string }>;
+}
+
+/**
+ * Maps a StructuredOutputConfig to the Chat Completions response_format shape.
+ * Returns undefined when no structured output is requested.
+ */
+function buildResponseFormat(
+  config: StructuredOutputConfig | undefined
+): OpenAI.ResponseFormatJSONSchema | undefined {
+  if (!config) return undefined;
+  return {
+    type: 'json_schema',
+    json_schema: {
+      name: config.name,
+      schema: config.schema,
+      strict: config.strict ?? true,
+    },
+  };
 }
 
 /** Opaque loop-state stored in providerState during the tool-call loop. */
@@ -83,12 +102,15 @@ export async function* streamOAICompatAgentTurn(
     messages.push({ role: 'user', content: req.prompt });
   }
 
+  const responseFormat = buildResponseFormat(req.generationConfig?.structuredOutput);
+
   try {
     const stream = await client.chat.completions.create(
       {
         model: req.modelName,
         messages,
         ...(tools ? { tools, tool_choice: 'auto' } : {}),
+        ...(responseFormat ? { response_format: responseFormat } : {}),
         stream: true,
         stream_options: { include_usage: true },
       },

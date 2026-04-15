@@ -92,6 +92,11 @@ const listModelsWithCache = withModelCache(
     for (const [baseUrl, apiKey] of seenBaseUrls) {
       try {
         const client = createCompatibleClient(apiKey, baseUrl);
+        const endpoint = classifyEndpoint(baseUrl);
+        // OpenRouter and DeepSeek advertise Chat Completions response_format JSON
+        // Schema support. Generic endpoints are unknown territory — report false
+        // so callers make no assumptions until verified.
+        const supportsStructuredOutput = endpoint === 'openrouter' || endpoint === 'deepseek';
 
         for await (const model of await client.models.list()) {
           if (
@@ -118,6 +123,7 @@ const listModelsWithCache = withModelCache(
               promptCaching: false,
               parallelToolCalls: !isImage,
               reasoningWithTools: isReasoningModel(model.id) && !isImage,
+              structuredOutput: supportsStructuredOutput && !isImage,
             },
           });
         }

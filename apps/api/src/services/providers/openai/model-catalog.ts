@@ -95,6 +95,7 @@ export const listModelsWithCache = withModelCache(
             promptCaching: true,
             parallelToolCalls: !isImageModelId(model.id),
             reasoningWithTools: isReasoningModel(model.id),
+            structuredOutput: !isImageModelId(model.id),
           },
         });
       }

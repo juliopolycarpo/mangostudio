@@ -43,6 +43,17 @@ export async function* streamAnthropicAgentTurn(
   const effort = req.generationConfig?.reasoningEffort ?? 'medium';
   const budgetMap = { low: 1024, medium: 2048, high: 8192 } as const;
 
+  // Anthropic Messages API has no native JSON Schema constraint. Structured
+  // output for Claude is achieved through prompt engineering and must be
+  // opted into by the caller — surface the mismatch loudly so callers can see
+  // their request was dropped instead of silently ignored.
+  if (req.generationConfig?.structuredOutput) {
+    console.warn(
+      `[anthropic][structured-output] ignoring structuredOutput request for model=${req.modelName}` +
+        `: Anthropic Messages API does not expose a native JSON Schema constraint`
+    );
+  }
+
   // Build messages: DB history + accumulated loop messages + current input
   const messages: Anthropic.MessageParam[] = [
     ...req.history.map(
