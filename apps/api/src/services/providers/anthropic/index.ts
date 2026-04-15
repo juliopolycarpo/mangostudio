@@ -47,6 +47,7 @@ const FALLBACK_MODELS: ModelInfo[] = [
       promptCaching: true,
       parallelToolCalls: false,
       reasoningWithTools: true,
+      structuredOutput: false,
     },
   },
   {
@@ -63,6 +64,7 @@ const FALLBACK_MODELS: ModelInfo[] = [
       promptCaching: true,
       parallelToolCalls: false,
       reasoningWithTools: false,
+      structuredOutput: false,
     },
   },
 ];
@@ -127,6 +129,7 @@ const listModelsWithCache = withModelCache(
             promptCaching: true,
             parallelToolCalls: false,
             reasoningWithTools: isReasoningModel(model.id),
+            structuredOutput: false,
           },
         });
       }
