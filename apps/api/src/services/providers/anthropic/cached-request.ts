@@ -31,6 +31,7 @@ export function buildCachedAnthropicRequest(opts: BuildCachedRequestOpts): {
   messages: Anthropic.MessageParam[];
   max_tokens: number;
   thinking?: { type: 'enabled'; budget_tokens: number };
+  cache_control: CacheControl;
 } {
   // System prompt with cache_control on the block
   const system: Anthropic.MessageCreateParams['system'] = opts.systemPrompt.trim()
@@ -61,6 +62,7 @@ export function buildCachedAnthropicRequest(opts: BuildCachedRequestOpts): {
     tools,
     messages: opts.messages,
     max_tokens: maxTokens,
+    cache_control: EPHEMERAL,
     ...(opts.thinkingConfig ? { thinking: opts.thinkingConfig } : {}),
   };
 }
