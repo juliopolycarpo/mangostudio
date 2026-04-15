@@ -7,6 +7,7 @@ import type { Content } from '@google/genai';
 import { getResolvedGeminiApiKey } from './secret';
 import { createGeminiClient } from './client';
 import type { StreamingChunk, GenerationConfig, TextContextMessage } from '../types';
+import { buildTextThinkingConfig } from './reasoning-config';
 
 /**
  * Generates a text response using the Gemini API.
@@ -90,12 +91,15 @@ export async function* generateGeminiTextStream(
     config.systemInstruction = systemPrompt;
   }
 
-  if (generationConfig?.thinkingEnabled) {
-    const levelMap = { low: 'LOW', medium: 'MEDIUM', high: 'HIGH' } as const;
-    config.thinkingConfig = {
-      includeThoughts: true,
-      thinkingLevel: levelMap[generationConfig.reasoningEffort],
-    };
+  if (modelName && generationConfig) {
+    const thinkingConfig = buildTextThinkingConfig(
+      modelName,
+      generationConfig.thinkingEnabled,
+      generationConfig.reasoningEffort
+    );
+    if (thinkingConfig) {
+      config.thinkingConfig = thinkingConfig;
+    }
   }
 
   const stream = await ai.models.generateContentStream({ model: modelName, contents, config });

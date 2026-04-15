@@ -25,6 +25,7 @@ import {
 import { getResolvedGeminiApiKey } from './secret';
 import { createGeminiClient } from './client';
 import type { AgentTurnRequest, AgentEvent } from '../types';
+import { buildInteractionsThinkingConfig } from './reasoning-config';
 
 /**
  * Opaque state persisted across turns for Gemini.
@@ -123,12 +124,15 @@ export async function* streamGeminiAgentTurn(req: AgentTurnRequest): AsyncIterab
     }
   }
 
-  if (req.generationConfig?.thinkingEnabled) {
-    const levelMap = { low: 'low', medium: 'medium', high: 'high' } as const;
-    interactionParams.generation_config = {
-      thinking_level: levelMap[req.generationConfig.reasoningEffort],
-      thinking_summaries: 'auto',
-    };
+  if (req.generationConfig) {
+    const thinkingGenConfig = buildInteractionsThinkingConfig(
+      req.modelName,
+      req.generationConfig.thinkingEnabled,
+      req.generationConfig.reasoningEffort
+    );
+    if (thinkingGenConfig) {
+      interactionParams.generation_config = thinkingGenConfig;
+    }
   }
 
   try {
@@ -184,12 +188,15 @@ export async function* streamGeminiAgentTurn(req: AgentTurnRequest): AsyncIterab
         if (toolDefs.length > 0) {
           retryParams.tools = toolDefsToGeminiInteractions(toolDefs);
         }
-        if (req.generationConfig?.thinkingEnabled) {
-          const levelMap = { low: 'low', medium: 'medium', high: 'high' } as const;
-          retryParams.generation_config = {
-            thinking_level: levelMap[req.generationConfig.reasoningEffort],
-            thinking_summaries: 'auto',
-          };
+        if (req.generationConfig) {
+          const retryThinkingConfig = buildInteractionsThinkingConfig(
+            req.modelName,
+            req.generationConfig.thinkingEnabled,
+            req.generationConfig.reasoningEffort
+          );
+          if (retryThinkingConfig) {
+            retryParams.generation_config = retryThinkingConfig;
+          }
         }
 
         const retryStream = await ai.interactions.create(toInteractionParams(retryParams));

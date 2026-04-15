@@ -201,6 +201,7 @@ describe('GeminiProvider.generateTextStream', () => {
       // consume
     }
 
+    // Gemini 2.0 is a legacy model — no thinking support, config stays absent
     expect(capturedConfig?.thinkingConfig).toBeUndefined();
   });
 
