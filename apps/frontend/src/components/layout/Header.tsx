@@ -3,7 +3,6 @@ import { Plus, Settings } from 'lucide-react';
 import type { ModelCatalogResponse, ModelOption, ProviderType } from '@mangostudio/shared';
 import { ModelSelector } from './ModelSelector';
 import { authClient } from '@/lib/auth-client';
-import { useNavigate } from '@tanstack/react-router';
 import { useToast } from '@/components/ui/Toast';
 import { useI18n } from '@/hooks/use-i18n';
 
@@ -36,7 +35,6 @@ export function Header({
   lockedProvider,
 }: HeaderProps) {
   const { data: session } = authClient.useSession();
-  const navigate = useNavigate();
   const { toast } = useToast();
   const { t } = useI18n();
   const [loggingOut, setLoggingOut] = useState(false);
@@ -45,7 +43,9 @@ export function Header({
     setLoggingOut(true);
     await authClient.signOut({
       fetchOptions: {
-        onSuccess: () => void navigate({ to: '/login' }),
+        // Full page replace avoids stale-session race: SPA navigate fires before
+        // Better Auth clears its session atom, causing login.tsx to redirect back.
+        onSuccess: () => window.location.replace('/login'),
         onError: () => {
           setLoggingOut(false);
           toast(t.auth.logoutError, 'error');
