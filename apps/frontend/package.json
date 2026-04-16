@@ -9,6 +9,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "check": "eslint src tests --max-warnings 0 --cache --cache-location ../../node_modules/.cache/eslint/.eslintcache.frontend && prettier --ignore-path ../../.prettierignore --check 'src/**/*.{ts,tsx,json}' 'tests/**/*.{ts,tsx}' --cache --cache-location ../../node_modules/.cache/prettier/.prettiercache.frontend && tsc --noEmit",
+    "check:quick": "eslint src tests --max-warnings 0 --cache --cache-location ../../node_modules/.cache/eslint/.eslintcache.frontend && prettier --ignore-path ../../.prettierignore --check 'src/**/*.{ts,tsx,json}' 'tests/**/*.{ts,tsx}' --cache --cache-location ../../node_modules/.cache/prettier/.prettiercache.frontend",
     "fix": "eslint src tests --fix --max-warnings 0 --cache --cache-location ../../node_modules/.cache/eslint/.eslintcache.frontend && prettier --ignore-path ../../.prettierignore --write 'src/**/*.{ts,tsx,json}' 'tests/**/*.{ts,tsx}' --cache --cache-location ../../node_modules/.cache/prettier/.prettiercache.frontend",
     "test": "vitest run",
     "test:unit": "vitest run tests/unit",
