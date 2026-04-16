@@ -35,8 +35,8 @@ test('signup → authenticated landing → logout → login', async ({ page }) =
   await expect(page).not.toHaveURL(/\/login/, { timeout: 10_000 });
   await expect(page).not.toHaveURL(/\/signup/);
 
-  // Logout — button text is "Sair"
-  await page.getByRole('button', { name: 'Sair' }).click();
+  // Logout
+  await page.getByTestId('logout-button').click();
 
   // After logout redirected to login
   await expect(page).toHaveURL(/\/login/, { timeout: 10_000 });

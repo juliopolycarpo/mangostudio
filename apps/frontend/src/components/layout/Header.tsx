@@ -92,6 +92,7 @@ export function Header({
             <button
               onClick={() => void handleLogout()}
               disabled={loggingOut}
+              data-testid="logout-button"
               className="text-xs px-3 py-1.5 rounded-full bg-surface-container-high hover:bg-surface-container-highest transition-colors cursor-pointer text-on-surface disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
             >
               {loggingOut && (
