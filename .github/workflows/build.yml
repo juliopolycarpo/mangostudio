@@ -11,15 +11,18 @@ jobs:
     name: Build (frontend + API)
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    env:
+      CACHE_VERSION: v1
     steps:
-      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-mango
 
-      - uses: oven-sh/setup-bun@v2
+      - name: Restore Vite cache
+        uses: actions/cache@v4
         with:
-          bun-version-file: package.json
-
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
+          path: apps/frontend/node_modules/.vite
+          key: ${{ runner.os }}-${{ env.CACHE_VERSION }}-vite-${{ hashFiles('bun.lock', 'apps/frontend/vite.config.ts') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ env.CACHE_VERSION }}-vite-
 
       - name: Build frontend and API
         run: bun run build --all

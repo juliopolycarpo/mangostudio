@@ -11,15 +11,31 @@ jobs:
     name: Check (lint + format + typecheck)
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    env:
+      CACHE_VERSION: v1
     steps:
-      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-mango
 
-      - uses: oven-sh/setup-bun@v2
+      - name: Restore ESLint / Prettier cache
+        uses: actions/cache@v4
         with:
-          bun-version-file: package.json
+          path: |
+            node_modules/.cache/eslint
+            node_modules/.cache/prettier
+          # Key covers lockfile + all lint-config files. CACHE_VERSION is a
+          # manual rollback lever if a corrupted cache must be force-expired.
+          key: ${{ runner.os }}-${{ env.CACHE_VERSION }}-lint-${{ hashFiles('bun.lock', 'eslint.config.js', 'tsconfig.json', 'apps/*/tsconfig.json') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ env.CACHE_VERSION }}-lint-
 
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
+      - name: Restore TS build info
+        uses: actions/cache@v4
+        with:
+          path: apps/*/.tsbuildinfo
+          # Key covers every TS source file so a source change always misses.
+          key: ${{ runner.os }}-${{ env.CACHE_VERSION }}-tsbuildinfo-${{ hashFiles('apps/**/*.ts', 'apps/**/*.tsx', 'apps/*/tsconfig.json', 'tsconfig.json') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ env.CACHE_VERSION }}-tsbuildinfo-
 
       - name: Run check
         run: bun run check
