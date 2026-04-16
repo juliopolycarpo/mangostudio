@@ -4,7 +4,23 @@ on:
   pull_request:
     branches: [main]
   push:
-    branches: [main, "ci/**"]
+    branches:
+      - main
+      - 'ci/**'
+      - 'feat/**'
+      - 'fix/**'
+      - 'chore/**'
+      - 'test/**'
+      - 'docs/**'
+      - 'refactor/**'
+      - 'migration/**'
+      - 'perf/**'
+      - 'security/**'
+      - 'release/**'
+      - 'hotfix/**'
+      - 'bugfix/**'
+      - 'build/**'
+      - 'style/**'
   workflow_dispatch:
 
 permissions:
