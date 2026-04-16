@@ -1,0 +1,48 @@
+name: Setup Mango (Bun + cache + install)
+description: >
+  Checkout, install Bun pinned to package.json, restore Bun install cache,
+  and run frozen install. Bump cache-version to roll all Bun caches immediately
+  (cache-poisoning rollback).
+inputs:
+  cache-key-suffix:
+    description: Optional extra suffix appended to the cache key for partitioning.
+    required: false
+    default: ''
+  cache-version:
+    description: >
+      Cache version string. Increment to immediately invalidate all Bun install
+      caches across every job (use as a cache-poisoning rollback lever).
+    required: false
+    default: 'v1'
+outputs:
+  cache-hit:
+    description: "'true' if the Bun install cache was a full hit"
+    value: ${{ steps.bun-cache.outputs.cache-hit }}
+runs:
+  using: composite
+  steps:
+    - uses: actions/checkout@v6
+
+    - uses: oven-sh/setup-bun@v2
+      with:
+        bun-version-file: package.json
+
+    - id: bun-cache
+      uses: actions/cache@v4
+      with:
+        path: ~/.bun/install/cache
+        # Key includes cache-version so a single input bump rolls all caches.
+        key: ${{ runner.os }}-${{ inputs.cache-version }}-bun-${{ hashFiles('bun.lock') }}${{ inputs.cache-key-suffix }}
+        restore-keys: |
+          ${{ runner.os }}-${{ inputs.cache-version }}-bun-
+
+    - name: Install dependencies
+      shell: bash
+      run: |
+        echo "::group::bun install"
+        bun install --frozen-lockfile
+        echo "::endgroup::"
+        {
+          echo '### Setup'
+          echo "- Bun cache hit: \`${{ steps.bun-cache.outputs.cache-hit }}\`"
+        } >> "$GITHUB_STEP_SUMMARY"
