@@ -29,7 +29,7 @@
     "lucide-react": "^0.546.0",
     "marked": "^18.0.0",
     "motion": "^12.23.24",
-    "react": "^19.0.0",
+    "react": "^19.2.5",
     "react-dom": "^19.2.5",
     "shiki": "^4.0.2",
     "tailwind-merge": "^3.5.0"
