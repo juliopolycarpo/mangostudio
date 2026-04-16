@@ -32,7 +32,7 @@ export const WORKSPACES: Record<WorkspaceName, WorkspaceConfig> = {
     packageName: '@mangostudio/shared',
     path: join(ROOT_DIR, 'apps/shared'),
     hasIntegrationTests: false,
-    hasCoverage: false,
+    hasCoverage: true,
   },
 };
 

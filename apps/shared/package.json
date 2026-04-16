@@ -9,7 +9,8 @@
     "check:quick": "eslint src tests --max-warnings 0 --cache --cache-location ../../node_modules/.cache/eslint/.eslintcache.shared && prettier --ignore-path ../../.prettierignore --check 'src/**/*.{ts,json}' 'tests/**/*.ts' --cache --cache-location ../../node_modules/.cache/prettier/.prettiercache.shared",
     "fix": "eslint src tests --fix --max-warnings 0 --cache --cache-location ../../node_modules/.cache/eslint/.eslintcache.shared && prettier --ignore-path ../../.prettierignore --write 'src/**/*.{ts,json}' 'tests/**/*.ts' --cache --cache-location ../../node_modules/.cache/prettier/.prettiercache.shared",
     "test": "vitest run",
-    "test:unit": "vitest run tests/unit"
+    "test:unit": "vitest run tests/unit",
+    "test:coverage": "vitest run --coverage"
   },
   "exports": {
     ".": "./src/index.ts",
