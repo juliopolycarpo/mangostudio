@@ -86,5 +86,10 @@ function execute(
   return Promise.resolve({ isoUtc, unixMs, timezone, locale, localDateTime, offset });
 }
 
+/** Registers this tool. Called once at import time; can be re-called after clearRegistry(). */
+export function register(): void {
+  registerTool({ definition, execute });
+}
+
 // Self-register on import
-registerTool({ definition, execute });
+register();

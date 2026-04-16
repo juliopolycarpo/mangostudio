@@ -1,3 +1,4 @@
+import { execSync } from 'child_process';
 import { type WorkspaceName, ALL_WORKSPACE_NAMES, WORKSPACES, ROOT_DIR } from './config';
 
 const SCRIPT_START = performance.now();
@@ -122,6 +123,43 @@ export function fatal(msg: string): never {
 export function assertNoUnexpectedArguments(positional: string[]): void {
   if (positional.length > 0) {
     fatal(`Unknown argument(s): ${positional.join(' ')}`);
+  }
+}
+
+// ── Git diff helpers ──
+
+export function getStagedFiles(): string[] {
+  const out = execSync('git diff --name-only --cached --diff-filter=ACMR', {
+    encoding: 'utf8',
+  });
+  return out.split('\n').filter(Boolean);
+}
+
+export function getChangedFiles(baseRef: string): string[] {
+  const out = execSync(`git diff --name-only ${baseRef}...HEAD`, { encoding: 'utf8' });
+  return out.split('\n').filter(Boolean);
+}
+
+export function mapFilesToWorkspaces(files: string[]): {
+  workspaces: WorkspaceName[];
+  includeRoot: boolean;
+} {
+  const set = new Set<WorkspaceName>();
+  let includeRoot = false;
+  for (const f of files) {
+    if (f.startsWith('apps/frontend/')) set.add('frontend');
+    else if (f.startsWith('apps/api/')) set.add('api');
+    else if (f.startsWith('apps/shared/')) set.add('shared');
+    else includeRoot = true;
+  }
+  return { workspaces: [...set], includeRoot };
+}
+
+export function resolveDefaultBase(): string {
+  try {
+    return execSync('git merge-base HEAD origin/main', { encoding: 'utf8' }).trim();
+  } catch {
+    return 'HEAD~1';
   }
 }
 

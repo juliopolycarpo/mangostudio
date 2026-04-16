@@ -33,7 +33,7 @@ config.toml
 !.mango/config.toml.example
 !.mango/.env.example
 
-# ─── Agent-local state ─── #
+# ─── Agent-local state / Every user must have their own ─── #
 .codex
 .codex/
 .continue/
@@ -49,5 +49,6 @@ config.toml
 .scratch/
 
 # ─── Build and lint caches (generated, never committed) ─── #
+**/.eslintcache
 **/.tsbuildinfo
 **/node_modules/.cache/

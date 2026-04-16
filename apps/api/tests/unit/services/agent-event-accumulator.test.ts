@@ -2,14 +2,19 @@
  * Tests for the get_current_datetime builtin tool and agent event accumulation patterns.
  */
 
-import { describe, expect, it } from 'bun:test';
+import { beforeEach, describe, expect, it } from 'bun:test';
 
-// Import the builtin so it self-registers
-import '../../../src/services/tools/builtin/get-current-datetime';
+import { register as registerGetCurrentDatetime } from '../../../src/services/tools/builtin/get-current-datetime';
 import { getTool, executeTool } from '../../../src/services/tools/registry';
 import type { GetCurrentDatetimeResult } from '../../../src/services/tools/builtin/get-current-datetime';
 
 const ctx = { userId: 'u1', chatId: 'c1' };
+
+// Re-register before each test — tool-registry.test.ts uses a global beforeEach(clearRegistry)
+// which empties the registry when tests run in a shared process (bun test --coverage).
+beforeEach(() => {
+  registerGetCurrentDatetime();
+});
 
 describe('get_current_datetime builtin', () => {
   it('is registered in the tool registry', () => {

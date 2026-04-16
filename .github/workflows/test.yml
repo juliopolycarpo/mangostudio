@@ -23,3 +23,35 @@ jobs:
 
       - name: Run tests
         run: bun run test --unit --integration
+
+      - name: Run coverage
+        if: always()
+        run: bun run test --coverage
+
+      - name: Upload coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: |
+            apps/frontend/coverage/
+            apps/shared/coverage/
+          retention-days: 7
+
+      - name: Coverage summary
+        if: always()
+        shell: bash
+        run: |
+          for f in apps/frontend/coverage/coverage-summary.json apps/shared/coverage/coverage-summary.json; do
+            [ -f "$f" ] || continue
+            ws=$(echo "$f" | sed 's|apps/\(.*\)/coverage/.*|\1|')
+            echo "## Coverage: $ws" >> "$GITHUB_STEP_SUMMARY"
+            bun -e '
+              const s = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).total;
+              console.log("| metric | pct | covered/total |");
+              console.log("|---|---|---|");
+              for (const k of ["lines","statements","branches","functions"]) {
+                console.log(`| ${k} | ${s[k].pct}% | ${s[k].covered}/${s[k].total} |`);
+              }
+            ' "$f" >> "$GITHUB_STEP_SUMMARY"
+          done

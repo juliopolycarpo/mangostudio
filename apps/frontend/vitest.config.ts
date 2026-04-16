@@ -19,8 +19,14 @@ export default defineConfig({
     reporters: process.env.GITHUB_ACTIONS === 'true' ? ['default', 'github-actions'] : ['default'],
     coverage: {
       provider: 'v8',
-      reporter: ['text', 'json', 'html'],
+      reporter: ['text', 'json', 'json-summary', 'lcov', 'html'],
       exclude: ['node_modules/', 'tests/support/**', '**/*.d.ts', '**/*.config.*'],
+      thresholds: {
+        statements: 63,
+        branches: 46,
+        functions: 54,
+        lines: 65,
+      },
     },
   },
 });

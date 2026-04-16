@@ -15,7 +15,8 @@
     "test": "bun ./scripts/test.ts",
     "fix": "bun ./scripts/fix.ts",
     "verify": "bun ./scripts/verify.ts",
-    "clean": "bun ./scripts/clean.ts"
+    "clean": "bun ./scripts/clean.ts",
+    "prepare": "lefthook install"
   },
   "devDependencies": {
     "@eslint-react/eslint-plugin": "^4.2.3",
@@ -24,6 +25,8 @@
     "@vitest/coverage-v8": "^4.1.4",
     "eslint": "^10.2.0",
     "eslint-config-prettier": "^10.1.8",
+    "lefthook": "^2.1.5",
+    "madge": "^8.0.0",
     "eslint-plugin-react-hooks": "^7.0.1",
     "prettier": "^3.8.3",
     "typescript": "~6.0.2",
