@@ -1,0 +1,16 @@
+pre-commit:
+  parallel: true
+  commands:
+    eslint:
+      glob: '*.{ts,tsx,js,jsx}'
+      run: bunx eslint --cache --max-warnings 0 --fix {staged_files}
+      stage_fixed: true
+    prettier:
+      glob: '*.{ts,tsx,js,json,md,yml,yaml}'
+      run: bunx prettier --cache --write {staged_files}
+      stage_fixed: true
+    typecheck-affected:
+      run: bun run check --staged --skip-lint --skip-format
+      skip:
+        - merge
+        - rebase
