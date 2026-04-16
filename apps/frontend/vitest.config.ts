@@ -16,6 +16,7 @@ export default defineConfig({
     globals: true,
     include: ['tests/**/*.test.ts', 'tests/**/*.test.tsx'],
     exclude: ['tests/support/**', '**/node_modules/**', '**/dist/**', '**/*.config.*'],
+    reporters: process.env.GITHUB_ACTIONS === 'true' ? ['default', 'github-actions'] : ['default'],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html'],

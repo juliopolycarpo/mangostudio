@@ -1,29 +1,20 @@
 name: CI
 
 on:
-  push:
-    branches:
-      - main
-      - 'feat/**'
-      - 'fix/**'
-      - 'chore/**'
-      - 'test/**'
-      - 'docs/**'
-      - 'refactor/**'
-      - 'ci/**'
-      - 'migration/**'
-      - 'perf/**'
-      - 'security/**'
   pull_request:
     branches: [main]
+  push:
+    branches: [main, "ci/**"]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
-  # Lint and test run on every push for fast feedback on any branch.
   lint:
     name: Lint
     uses: ./.github/workflows/lint.yml
@@ -35,6 +26,10 @@ jobs:
   build:
     name: Build
     uses: ./.github/workflows/build.yml
+
+  browser-smoke:
+    name: Smoke — Browser
+    uses: ./.github/workflows/browser-smoke.yml
 
   smoke:
     name: Smoke — Binary

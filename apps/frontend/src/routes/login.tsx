@@ -14,18 +14,18 @@ export const Route = createFileRoute('/login')({
 function LoginPage() {
   const navigate = useNavigate();
   const { t } = useI18n();
-  const { data: session } = authClient.useSession();
+  const { data: session, isPending } = authClient.useSession();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    if (session?.user) {
+    if (!isPending && session?.user) {
       const redirect = new URLSearchParams(window.location.search).get('redirect');
       void navigate({ to: redirect || '/' });
     }
-  }, [session?.user, navigate]);
+  }, [session?.user, isPending, navigate]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
