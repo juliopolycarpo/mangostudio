@@ -105,6 +105,13 @@ if (effectiveIncludeRoot) {
       })
     );
   }
+  rootTasks.push(() =>
+    runCommand(
+      'root:madge:circular',
+      ['bunx', 'madge', '--circular', '--extensions', 'ts,tsx', 'apps'],
+      { cwd: ROOT_DIR }
+    )
+  );
   if (rootTasks.length > 0) {
     const rootResults = await runParallel(rootTasks);
     results.push(...rootResults);
