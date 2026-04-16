@@ -6,5 +6,6 @@ export default defineConfig({
     globals: true,
     include: ['tests/**/*.test.ts'],
     exclude: ['tests/support/**', '**/node_modules/**', '**/dist/**', '**/*.config.*'],
+    reporters: process.env.GITHUB_ACTIONS === 'true' ? ['default', 'github-actions'] : ['default'],
   },
 });

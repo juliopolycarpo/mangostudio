@@ -5,6 +5,7 @@ export default defineConfig({
   timeout: 30_000,
   retries: process.env.CI ? 1 : 0,
   workers: process.env.CI ? 1 : undefined,
+  reporter: process.env.CI ? [['github'], ['html', { open: 'never' }]] : 'list',
   projects: [{ name: 'chromium', use: { browserName: 'chromium' } }],
   use: {
     baseURL: 'http://localhost:5173',
