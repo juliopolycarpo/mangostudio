@@ -23,7 +23,7 @@
     "@anthropic-ai/sdk": "^0.88.0",
     "@elysiajs/cors": "^1.4.1",
     "@elysiajs/openapi": "^1.4.14",
-    "@elysiajs/static": "^1.4.7",
+    "@elysiajs/static": "^1.4.9",
     "@google/genai": "^1.50.1",
     "@mangostudio/shared": "workspace:*",
     "better-auth": "^1.6.4",
