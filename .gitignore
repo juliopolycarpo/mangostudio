@@ -47,3 +47,7 @@ config.toml
 # ─── Local scratch space ─── #
 .local/
 .scratch/
+
+# ─── Build and lint caches (generated, never committed) ─── #
+**/.tsbuildinfo
+**/node_modules/.cache/
