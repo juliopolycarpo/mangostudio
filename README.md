@@ -118,6 +118,16 @@ mangostudio/
 | `bun run verify`          | Full CI gate: check, test, build (stops on failure)  |
 | `bun run clean`           | Remove dist, coverage, and build artifacts           |
 
+## Local Validation
+
+A [lefthook](https://github.com/evilmartians/lefthook) pre-commit hook runs ESLint + Prettier on staged files automatically and typechecks only the affected workspaces.
+
+- `bun run check` — full check (lint, format, typecheck, circular deps).
+- `bun run check --staged` — only the workspaces touched by staged files (used by the pre-commit hook).
+- `bun run check --changed` — only the workspaces changed vs `origin/main`.
+- `bun run check --quick` — lint + format only, skip typecheck.
+- `bun run fix --staged` — auto-fix only the affected workspaces.
+
 ## Architecture
 
 | Layer        | Technologies                                             |
