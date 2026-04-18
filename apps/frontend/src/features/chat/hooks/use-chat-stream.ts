@@ -41,6 +41,10 @@ export function useChatStream({ currentChatId }: UseChatStreamOptions) {
     abortControllerRef.current?.abort();
   }, []);
 
+  const setAbortController = useCallback((controller: AbortController | null) => {
+    abortControllerRef.current = controller;
+  }, []);
+
   const updateContextInfo = useCallback((chatId: string, info: ContextInfo) => {
     setContextInfo(info);
     contextCacheRef.current.set(chatId, info);
@@ -63,6 +67,7 @@ export function useChatStream({ currentChatId }: UseChatStreamOptions) {
     setFallbackNotice,
     handleStop,
     abortControllerRef,
+    setAbortController,
     updateContextInfo,
     seedContextInfo,
     contextCache: contextCacheRef.current,
