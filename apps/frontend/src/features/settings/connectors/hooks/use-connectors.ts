@@ -2,27 +2,32 @@
  * Hook: connector list state and refresh.
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useCallback } from 'react';
+import { useQuery, queryOptions } from '@tanstack/react-query';
 import type { ConnectorStatus } from '@mangostudio/shared';
 import { client } from '@/lib/api-client';
 import { extractApiError } from '@/lib/utils';
 
-export function useConnectors() {
-  const [connectorStatus, setConnectorStatus] = useState<ConnectorStatus | null>(null);
+export const connectorKeys = {
+  status: ['connector-status'] as const,
+};
 
-  const reload = useCallback(async () => {
-    try {
+export const connectorQueryOptions = () =>
+  queryOptions({
+    queryKey: connectorKeys.status,
+    queryFn: async () => {
       const { data, error } = await client.api.settings.connectors.get();
       if (error) throw new Error(extractApiError(error.value, 'Failed to load connectors'));
-      setConnectorStatus(data as ConnectorStatus);
-    } catch (error) {
-      console.error('[connectors] Failed to load connector status', error);
-    }
-  }, []);
+      return data as ConnectorStatus;
+    },
+  });
 
-  useEffect(() => {
-    void reload();
-  }, [reload]);
+export function useConnectors() {
+  const { data: connectorStatus, refetch } = useQuery(connectorQueryOptions());
+
+  const reload = useCallback(async () => {
+    await refetch();
+  }, [refetch]);
 
   return { connectorStatus, connectors: connectorStatus?.connectors ?? [], reload };
 }

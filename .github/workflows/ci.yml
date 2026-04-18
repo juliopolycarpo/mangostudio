@@ -21,6 +21,8 @@ on:
       - 'bugfix/**'
       - 'build/**'
       - 'style/**'
+      - 'copilot/**'
+      - 'claude/**'
   workflow_dispatch:
 
 permissions:
