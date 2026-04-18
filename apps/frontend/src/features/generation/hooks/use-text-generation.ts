@@ -74,7 +74,7 @@ export function useTextGeneration({
       appendOptimisticMessages(activeChatId, [optimisticUserMsg, optimisticAiMsg]);
 
       const controller = new AbortController();
-      stream.abortControllerRef.current = controller;
+      stream.setAbortController(controller);
       let accumulatedText = '';
       const thinkingSegments: string[] = [];
       let currentThinkingIdx = -1;
@@ -248,7 +248,7 @@ export function useTextGeneration({
           });
         }
       } finally {
-        stream.abortControllerRef.current = null;
+        stream.setAbortController(null);
         stream.setIsGenerating(false);
         void chats.loadChats();
         void queryClient.invalidateQueries({ queryKey: messageKeys.list(activeChatId) });
