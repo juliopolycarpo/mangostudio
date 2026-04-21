@@ -32,7 +32,7 @@
         "@mangostudio/shared": "workspace:*",
         "better-auth": "^1.6.5",
         "elysia": "^1.4.28",
-        "file-type": "^21.3.4",
+        "file-type": "^22.0.1",
         "kysely": "^0.28.16",
         "kysely-bun-sqlite": "^0.4.0",
         "openai": "^6.34.0",
@@ -796,7 +796,7 @@
 
     "file-entry-cache": ["file-entry-cache@8.0.0", "", { "dependencies": { "flat-cache": "^4.0.0" } }, "sha512-XXTUwCvisa5oacNGRP9SfNtYBNAMi+RPwBFmblZEF7N7swHYQS6/Zfk7SRwx4D5j3CH211YNRco1DEMNVfZCnQ=="],
 
-    "file-type": ["file-type@21.3.4", "", { "dependencies": { "@tokenizer/inflate": "^0.4.1", "strtok3": "^10.3.4", "token-types": "^6.1.1", "uint8array-extras": "^1.4.0" } }, "sha512-Ievi/yy8DS3ygGvT47PjSfdFoX+2isQueoYP1cntFW1JLYAuS4GD7NUPGg4zv2iZfV52uDyk5w5Z0TdpRS6Q1g=="],
+    "file-type": ["file-type@22.0.1", "", { "dependencies": { "@tokenizer/inflate": "^0.4.1", "strtok3": "^10.3.5", "token-types": "^6.1.2", "uint8array-extras": "^1.5.0" } }, "sha512-ww5Mhre0EE+jmBvOXTmXAbEMuZE7uX4a3+oRCQFNj8w++g3ev913N6tXQz0XTXbueQ5TWQfm6BdaViEHHn8bhA=="],
 
     "filing-cabinet": ["filing-cabinet@5.3.0", "", { "dependencies": { "app-module-path": "^2.2.0", "commander": "^12.1.0", "enhanced-resolve": "^5.20.1", "module-definition": "^6.0.1", "module-lookup-amd": "^9.1.1", "resolve": "^1.22.12", "resolve-dependency-path": "^4.0.1", "sass-lookup": "^6.1.1", "stylus-lookup": "^6.1.1", "tsconfig-paths": "^4.2.0", "typescript": "^5.9.3" }, "bin": { "filing-cabinet": "bin/cli.js" } }, "sha512-2EwtzdQkC37FJxDOrKuEOplTFzzaToCqzT008DrIWW27RQ6psxitfUi6hct5mUhMHO7C6xopOhxubyjyPCapbQ=="],
 
