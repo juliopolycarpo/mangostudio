@@ -50,7 +50,7 @@
     "smol-toml": "^1.6.1",
     "tailwindcss": "^4.1.14",
     "typescript": "~6.0.3",
-    "vite": "^8.0.8",
+    "vite": "^8.0.9",
     "vitest": "^4.1.4"
   }
 }
