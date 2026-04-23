@@ -195,7 +195,7 @@ describe('streamAnthropicAgentTurn — structured output degrade', () => {
   it('logs a warning and continues when structuredOutput is requested', async () => {
     const warn = mock((..._args: unknown[]) => undefined);
     const original = console.warn;
-    console.warn = warn as unknown as typeof console.warn;
+    console.warn = warn;
     try {
       const events = await drain(
         streamAnthropicAgentTurn(

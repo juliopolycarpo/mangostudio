@@ -68,7 +68,7 @@ describe('useTextChat — thinking segment tracking', () => {
         { type: 'thinking_start', done: false },
         { type: 'thinking', text: 'initial thought', done: false },
         { type: 'done', done: true, generationTime: '1.0s' },
-      ]) as unknown as typeof respondTextStream
+      ])
     );
 
     const { result } = renderHook(() => useTextGeneration(props));
@@ -101,7 +101,7 @@ describe('useTextChat — thinking segment tracking', () => {
         { type: 'thinking', text: 'part1 ', done: false },
         { type: 'thinking', text: 'part2', done: false },
         { type: 'done', done: true, generationTime: '1.0s' },
-      ]) as unknown as typeof respondTextStream
+      ])
     );
 
     const { result } = renderHook(() => useTextGeneration(props));
@@ -147,7 +147,7 @@ describe('useTextChat — thinking segment tracking', () => {
         { type: 'thinking', text: 'after tool', done: false },
         { type: 'text', text: 'answer', done: false },
         { type: 'done', done: true, generationTime: '2.0s' },
-      ]) as unknown as typeof respondTextStream
+      ])
     );
 
     const { result } = renderHook(() => useTextGeneration(props));
@@ -186,9 +186,7 @@ describe('useTextChat — maxToolIterations forwarding', () => {
   it('forwards maxToolIterations from props into the stream request body', async () => {
     const props = makeProps({ maxToolIterations: 7 });
     mockStream.mockImplementation(
-      makeStreamFn([
-        { type: 'done', done: true, generationTime: '0.5s' },
-      ]) as unknown as typeof respondTextStream
+      makeStreamFn([{ type: 'done', done: true, generationTime: '0.5s' }])
     );
 
     const { result } = renderHook(() => useTextGeneration(props));

@@ -37,13 +37,13 @@ globalThis.matchMedia =
     matches: false,
     media: '',
     onchange: null,
-    addListener: () => undefined as void,
-    removeListener: () => undefined as void,
+    addListener: () => undefined,
+    removeListener: () => undefined,
     addEventListener: () => undefined as void,
     removeEventListener: () => undefined as void,
     dispatchEvent: () => false,
   }));
 
-globalThis.ResizeObserver = ResizeObserverMock as unknown as typeof ResizeObserver;
+globalThis.ResizeObserver = ResizeObserverMock;
 globalThis.IntersectionObserver =
   IntersectionObserverMock as unknown as typeof IntersectionObserver;

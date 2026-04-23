@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import { createUnifiedModelCatalogService } from '../../../../src/services/providers/catalog';
 import type { AIProvider } from '../../../../src/services/providers/types';
-import type { SecretMetadataRow, ProviderType } from '@mangostudio/shared/types';
+import type { SecretMetadataRow } from '@mangostudio/shared/types';
 
 const MOCK_MODEL = {
   modelId: 'gemini-2.0-flash',
@@ -16,7 +16,7 @@ function makeService(
   enabledIds: string[] = [MOCK_MODEL.modelId]
 ) {
   return createUnifiedModelCatalogService({
-    listProviders: () => ['gemini' as ProviderType],
+    listProviders: () => ['gemini'],
     getProviderFn: () =>
       ({ listModels: () => Promise.resolve(modelList) }) as unknown as AIProvider,
     listAllSecretMetadataFn: () =>
@@ -40,7 +40,7 @@ describe('createUnifiedModelCatalogService.getUnifiedModelCatalog', () => {
     let callCount = 0;
 
     const service = createUnifiedModelCatalogService({
-      listProviders: () => ['gemini' as ProviderType],
+      listProviders: () => ['gemini'],
       getProviderFn: () =>
         ({
           listModels: () => {
@@ -67,7 +67,7 @@ describe('createUnifiedModelCatalogService.getUnifiedModelCatalog', () => {
 
   it('resolves even when all providers fail', async () => {
     const service = createUnifiedModelCatalogService({
-      listProviders: () => ['gemini' as ProviderType],
+      listProviders: () => ['gemini'],
       getProviderFn: () =>
         ({
           listModels: () => Promise.reject(new Error('provider unavailable')),
