@@ -5,7 +5,7 @@
 import { randomUUID } from 'crypto';
 import type { Connector } from '@mangostudio/shared';
 import type { AddConnectorBody } from '@mangostudio/shared';
-import type { ProviderType, SecretSource } from '@mangostudio/shared/types';
+
 import { maskSecret } from '../../../utils/secrets';
 import { toConnector } from '../domain/connector';
 import { persistSecret } from '../infrastructure/secret-persistence';
@@ -30,7 +30,7 @@ export class ConnectorValidationError extends Error {
 }
 
 export async function addConnector(userId: string, body: AddConnectorBody): Promise<Connector> {
-  const provider = (body.provider ?? 'gemini') as ProviderType;
+  const provider = body.provider ?? 'gemini';
   const apiKey = body.apiKey.trim();
 
   if (!apiKey) throw new ConnectorValidationError('API Key cannot be empty.');
@@ -52,14 +52,14 @@ export async function addConnector(userId: string, body: AddConnectorBody): Prom
   const id = randomUUID();
   const timestamp = Date.now();
 
-  await persistSecret(id, body.name, provider, body.source as SecretSource, apiKey);
+  await persistSecret(id, body.name, provider, body.source, apiKey);
 
   await upsertSecretMetadata({
     id,
     name: body.name,
     provider,
     configured: true,
-    source: body.source as SecretSource,
+    source: body.source,
     maskedSuffix: maskSecret(apiKey),
     updatedAt: timestamp,
     lastValidatedAt: timestamp,
