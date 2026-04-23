@@ -33,7 +33,7 @@ export async function getChatMessagesUseCase(input: GetChatMessagesInput, db: Ky
       .limit(1)
       .executeTakeFirst();
 
-    contextInfo = extractContextInfo(lastAiRow?.providerState as string | null);
+    contextInfo = extractContextInfo(lastAiRow?.providerState);
   }
 
   return { messages, nextCursor, contextInfo };

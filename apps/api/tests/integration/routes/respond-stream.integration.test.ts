@@ -83,9 +83,9 @@ function makeChain(firstValue: unknown): Record<string, unknown> {
     execute: () => Promise.resolve([]),
     executeTakeFirst: () => Promise.resolve(firstValue),
   };
-  const proxy: Record<string, unknown> = new Proxy(terminal as Record<string, unknown>, {
+  const proxy: Record<string, unknown> = new Proxy(terminal, {
     get(target, prop) {
-      if (prop in target) return target[prop as string];
+      if (prop in target) return (target as Record<string, unknown>)[prop as string];
       return () => proxy;
     },
   });

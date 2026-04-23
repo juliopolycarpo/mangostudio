@@ -87,7 +87,7 @@ export function createFetchScenario() {
      * Installs the scenario fetch mock on globalThis.
      */
     install() {
-      vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+      vi.stubGlobal('fetch', fetchMock);
       return this;
     },
 

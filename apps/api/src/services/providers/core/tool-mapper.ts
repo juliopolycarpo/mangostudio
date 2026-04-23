@@ -44,10 +44,7 @@ export function isStrictCompatible(schema: Record<string, unknown> | undefined |
   if (properties !== undefined && (typeof properties !== 'object' || properties === null)) {
     return false;
   }
-  const propertyKeys =
-    properties && typeof properties === 'object'
-      ? Object.keys(properties as Record<string, unknown>)
-      : [];
+  const propertyKeys = properties && typeof properties === 'object' ? Object.keys(properties) : [];
   const required = Array.isArray(schema.required) ? (schema.required as unknown[]) : [];
   const requiredSet = new Set(required.filter((k): k is string => typeof k === 'string'));
   for (const key of propertyKeys) {

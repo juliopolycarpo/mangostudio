@@ -368,7 +368,7 @@ export async function* streamTextTurn(
         for (const { callId, name, args, result, resultStr, isError } of toolExecutions) {
           allParts.push({ type: 'tool_call', toolCallId: callId, name, args });
           allParts.push({ type: 'tool_result', toolCallId: callId, content: resultStr, isError });
-          yield { type: 'tool_result', callId, name, result, isError } as StreamEvent;
+          yield { type: 'tool_result', callId, name, result, isError };
           nextToolResults.push({ callId, name, result: resultStr, isError });
         }
 

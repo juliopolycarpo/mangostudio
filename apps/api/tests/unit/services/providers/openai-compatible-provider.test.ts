@@ -251,7 +251,7 @@ describe('openai-compatible generateAgentTurnStream turn_completed contract', ()
         signal: new AbortController().signal,
         generationConfig: { thinkingEnabled: false, reasoningEffort: 'medium' },
       })) {
-        events.push(event as { type: string; providerState?: string });
+        events.push(event);
       }
     } catch {
       // resolveClientConfig throws when no connectors are configured — that is
@@ -355,7 +355,7 @@ describe('openai-compatible chat-completions-stream token accounting', () => {
         generationConfig: { thinkingEnabled: false, reasoningEffort: 'medium' },
       }
     )) {
-      events.push(event as { type: string; providerState?: string });
+      events.push(event);
     }
 
     const turnCompleted = events.find((e) => e.type === 'turn_completed');
@@ -393,7 +393,7 @@ describe('openai-compatible chat-completions-stream token accounting', () => {
         generationConfig: { thinkingEnabled: false, reasoningEffort: 'medium' },
       }
     )) {
-      events.push(event as { type: string; providerState?: string });
+      events.push(event);
     }
 
     const turnCompleted = events.find((e) => e.type === 'turn_completed');
