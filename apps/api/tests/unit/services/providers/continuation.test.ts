@@ -6,6 +6,10 @@ import {
   computeSystemPromptHash,
   computeToolsetHash,
   isDurableMode,
+  decideContinuation,
+  isDurableCursorForProvider,
+  getContinuationStrategy,
+  CONTINUATION_STRATEGIES,
   type ContinuationEnvelope,
 } from '../../../../src/services/providers/continuation';
 
@@ -190,5 +194,271 @@ describe('computeToolsetHash', () => {
     const toolA = { name: 'a', description: 'A', parameters: {} };
     const toolB = { name: 'b', description: 'B', parameters: {} };
     expect(computeToolsetHash([toolA, toolB])).toBe(computeToolsetHash([toolB, toolA]));
+  });
+});
+
+describe('getContinuationStrategy', () => {
+  it('returns strategy for openai', () => {
+    const s = getContinuationStrategy('openai');
+    expect(s.provider).toBe('openai');
+    expect(s.durableMode).toBe('responses');
+    expect(s.supportsDurableCursor).toBe(true);
+  });
+
+  it('returns strategy for gemini', () => {
+    const s = getContinuationStrategy('gemini');
+    expect(s.provider).toBe('gemini');
+    expect(s.durableMode).toBe('interactions');
+    expect(s.supportsDurableCursor).toBe(true);
+  });
+
+  it('returns strategy for openai-compatible', () => {
+    const s = getContinuationStrategy('openai-compatible');
+    expect(s.provider).toBe('openai-compatible');
+    expect(s.durableMode).toBeNull();
+    expect(s.supportsDurableCursor).toBe(false);
+  });
+
+  it('returns strategy for anthropic', () => {
+    const s = getContinuationStrategy('anthropic');
+    expect(s.provider).toBe('anthropic');
+    expect(s.durableMode).toBeNull();
+    expect(s.supportsDurableCursor).toBe(false);
+  });
+});
+
+describe('CONTINUATION_STRATEGIES', () => {
+  it('covers all known provider types', () => {
+    const keys = Object.keys(CONTINUATION_STRATEGIES);
+    expect(keys).toContain('openai');
+    expect(keys).toContain('gemini');
+    expect(keys).toContain('openai-compatible');
+    expect(keys).toContain('anthropic');
+  });
+});
+
+describe('decideContinuation', () => {
+  const baseContext = {
+    modelName: 'gpt-4o',
+    systemPromptHash: 'abc123',
+    toolsetHash: 'def456',
+  };
+
+  it('returns start_replay when lastProviderState is null', () => {
+    const decision = decideContinuation({
+      lastProviderState: null,
+      provider: 'openai',
+      ...baseContext,
+    });
+    expect(decision.type).toBe('start_replay');
+  });
+
+  it('returns continue_with_cursor for valid openai envelope', () => {
+    const envelope: ContinuationEnvelope = {
+      schemaVersion: 1,
+      provider: 'openai',
+      mode: 'responses',
+      modelName: 'gpt-4o',
+      systemPromptHash: 'abc123',
+      toolsetHash: 'def456',
+      cursor: 'resp_123',
+    };
+    const decision = decideContinuation({
+      lastProviderState: JSON.stringify(envelope),
+      provider: 'openai',
+      ...baseContext,
+    });
+    expect(decision.type).toBe('continue_with_cursor');
+    if (decision.type === 'continue_with_cursor') {
+      expect(decision.envelope.cursor).toBe('resp_123');
+    }
+  });
+
+  it('returns degrade_to_replay on provider mismatch', () => {
+    const envelope: ContinuationEnvelope = {
+      schemaVersion: 1,
+      provider: 'openai',
+      mode: 'responses',
+      modelName: 'gpt-4o',
+      systemPromptHash: 'abc123',
+      toolsetHash: 'def456',
+      cursor: 'resp_123',
+    };
+    const decision = decideContinuation({
+      lastProviderState: JSON.stringify(envelope),
+      provider: 'gemini',
+      ...baseContext,
+    });
+    expect(decision.type).toBe('degrade_to_replay');
+    if (decision.type === 'degrade_to_replay') {
+      expect(decision.previousMode).toBe('responses');
+      expect(decision.reason).toContain('provider');
+    }
+  });
+
+  it('returns degrade_to_replay on model mismatch', () => {
+    const envelope: ContinuationEnvelope = {
+      schemaVersion: 1,
+      provider: 'openai',
+      mode: 'responses',
+      modelName: 'gpt-4o',
+      systemPromptHash: 'abc123',
+      toolsetHash: 'def456',
+      cursor: 'resp_123',
+    };
+    const decision = decideContinuation({
+      lastProviderState: JSON.stringify(envelope),
+      provider: 'openai',
+      modelName: 'gpt-3.5-turbo',
+      systemPromptHash: 'abc123',
+      toolsetHash: 'def456',
+    });
+    expect(decision.type).toBe('degrade_to_replay');
+    if (decision.type === 'degrade_to_replay') {
+      expect(decision.reason).toContain('model');
+    }
+  });
+
+  it('returns degrade_to_replay for malformed envelope', () => {
+    const decision = decideContinuation({
+      lastProviderState: 'not-json',
+      provider: 'openai',
+      ...baseContext,
+    });
+    expect(decision.type).toBe('degrade_to_replay');
+  });
+
+  it('returns start_replay for stateless-loop envelope', () => {
+    const envelope: ContinuationEnvelope = {
+      schemaVersion: 1,
+      provider: 'openai-compatible',
+      mode: 'stateless-loop',
+      modelName: 'deepseek-chat',
+      systemPromptHash: 'abc123',
+      toolsetHash: 'def456',
+    };
+    const decision = decideContinuation({
+      lastProviderState: JSON.stringify(envelope),
+      provider: 'openai-compatible',
+      modelName: 'deepseek-chat',
+      systemPromptHash: 'abc123',
+      toolsetHash: 'def456',
+    });
+    expect(decision.type).toBe('start_replay');
+  });
+
+  it('returns continue_with_cursor for valid gemini envelope', () => {
+    const envelope: ContinuationEnvelope = {
+      schemaVersion: 1,
+      provider: 'gemini',
+      mode: 'interactions',
+      modelName: 'gemini-2.0-flash',
+      systemPromptHash: 'abc123',
+      toolsetHash: 'def456',
+      cursor: 'interaction_xyz',
+    };
+    const decision = decideContinuation({
+      lastProviderState: JSON.stringify(envelope),
+      provider: 'gemini',
+      modelName: 'gemini-2.0-flash',
+      systemPromptHash: 'abc123',
+      toolsetHash: 'def456',
+    });
+    expect(decision.type).toBe('continue_with_cursor');
+    if (decision.type === 'continue_with_cursor') {
+      expect(decision.envelope.cursor).toBe('interaction_xyz');
+    }
+  });
+
+  it('returns degrade_to_replay when gemini system prompt changes', () => {
+    const envelope: ContinuationEnvelope = {
+      schemaVersion: 1,
+      provider: 'gemini',
+      mode: 'interactions',
+      modelName: 'gemini-2.0-flash',
+      systemPromptHash: 'old_hash',
+      toolsetHash: 'def456',
+      cursor: 'interaction_xyz',
+    };
+    const decision = decideContinuation({
+      lastProviderState: JSON.stringify(envelope),
+      provider: 'gemini',
+      modelName: 'gemini-2.0-flash',
+      systemPromptHash: 'new_hash',
+      toolsetHash: 'def456',
+    });
+    expect(decision.type).toBe('degrade_to_replay');
+    if (decision.type === 'degrade_to_replay') {
+      expect(decision.reason).toContain('system prompt');
+    }
+  });
+});
+
+describe('isDurableCursorForProvider', () => {
+  it('returns true for valid openai responses cursor', () => {
+    const envelope: ContinuationEnvelope = {
+      schemaVersion: 1,
+      provider: 'openai',
+      mode: 'responses',
+      modelName: 'gpt-4o',
+      systemPromptHash: 'abc',
+      toolsetHash: 'def',
+      cursor: 'resp_123',
+    };
+    expect(isDurableCursorForProvider(JSON.stringify(envelope), 'openai')).toBe(true);
+  });
+
+  it('returns true for valid gemini interactions cursor', () => {
+    const envelope: ContinuationEnvelope = {
+      schemaVersion: 1,
+      provider: 'gemini',
+      mode: 'interactions',
+      modelName: 'gemini-2.0-flash',
+      systemPromptHash: 'abc',
+      toolsetHash: 'def',
+      cursor: 'interaction_xyz',
+    };
+    expect(isDurableCursorForProvider(JSON.stringify(envelope), 'gemini')).toBe(true);
+  });
+
+  it('returns false for stateless-loop', () => {
+    const envelope: ContinuationEnvelope = {
+      schemaVersion: 1,
+      provider: 'openai-compatible',
+      mode: 'stateless-loop',
+      modelName: 'deepseek-chat',
+      systemPromptHash: 'abc',
+      toolsetHash: 'def',
+    };
+    expect(isDurableCursorForProvider(JSON.stringify(envelope), 'openai-compatible')).toBe(false);
+  });
+
+  it('returns false when provider does not match envelope', () => {
+    const envelope: ContinuationEnvelope = {
+      schemaVersion: 1,
+      provider: 'openai',
+      mode: 'responses',
+      modelName: 'gpt-4o',
+      systemPromptHash: 'abc',
+      toolsetHash: 'def',
+      cursor: 'resp_123',
+    };
+    expect(isDurableCursorForProvider(JSON.stringify(envelope), 'gemini')).toBe(false);
+  });
+
+  it('returns false for null', () => {
+    expect(isDurableCursorForProvider(null, 'openai')).toBe(false);
+  });
+
+  it('returns false for missing cursor', () => {
+    const envelope: ContinuationEnvelope = {
+      schemaVersion: 1,
+      provider: 'openai',
+      mode: 'responses',
+      modelName: 'gpt-4o',
+      systemPromptHash: 'abc',
+      toolsetHash: 'def',
+    };
+    expect(isDurableCursorForProvider(JSON.stringify(envelope), 'openai')).toBe(false);
   });
 });
