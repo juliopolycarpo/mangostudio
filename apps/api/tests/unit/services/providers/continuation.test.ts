@@ -7,7 +7,7 @@ import {
   computeToolsetHash,
   isDurableMode,
   decideContinuation,
-  isDurableCursorForProvider,
+  isDurableEnvelope,
   getContinuationStrategy,
   CONTINUATION_STRATEGIES,
   type ContinuationEnvelope,
@@ -202,28 +202,24 @@ describe('getContinuationStrategy', () => {
     const s = getContinuationStrategy('openai');
     expect(s.provider).toBe('openai');
     expect(s.durableMode).toBe('responses');
-    expect(s.supportsDurableCursor).toBe(true);
   });
 
   it('returns strategy for gemini', () => {
     const s = getContinuationStrategy('gemini');
     expect(s.provider).toBe('gemini');
     expect(s.durableMode).toBe('interactions');
-    expect(s.supportsDurableCursor).toBe(true);
   });
 
   it('returns strategy for openai-compatible', () => {
     const s = getContinuationStrategy('openai-compatible');
     expect(s.provider).toBe('openai-compatible');
     expect(s.durableMode).toBeNull();
-    expect(s.supportsDurableCursor).toBe(false);
   });
 
   it('returns strategy for anthropic', () => {
     const s = getContinuationStrategy('anthropic');
     expect(s.provider).toBe('anthropic');
     expect(s.durableMode).toBeNull();
-    expect(s.supportsDurableCursor).toBe(false);
   });
 });
 
@@ -394,7 +390,7 @@ describe('decideContinuation', () => {
   });
 });
 
-describe('isDurableCursorForProvider', () => {
+describe('isDurableEnvelope', () => {
   it('returns true for valid openai responses cursor', () => {
     const envelope: ContinuationEnvelope = {
       schemaVersion: 1,
@@ -405,7 +401,7 @@ describe('isDurableCursorForProvider', () => {
       toolsetHash: 'def',
       cursor: 'resp_123',
     };
-    expect(isDurableCursorForProvider(JSON.stringify(envelope), 'openai')).toBe(true);
+    expect(isDurableEnvelope(envelope, 'openai')).toBe(true);
   });
 
   it('returns true for valid gemini interactions cursor', () => {
@@ -418,7 +414,7 @@ describe('isDurableCursorForProvider', () => {
       toolsetHash: 'def',
       cursor: 'interaction_xyz',
     };
-    expect(isDurableCursorForProvider(JSON.stringify(envelope), 'gemini')).toBe(true);
+    expect(isDurableEnvelope(envelope, 'gemini')).toBe(true);
   });
 
   it('returns false for stateless-loop', () => {
@@ -430,7 +426,7 @@ describe('isDurableCursorForProvider', () => {
       systemPromptHash: 'abc',
       toolsetHash: 'def',
     };
-    expect(isDurableCursorForProvider(JSON.stringify(envelope), 'openai-compatible')).toBe(false);
+    expect(isDurableEnvelope(envelope, 'openai-compatible')).toBe(false);
   });
 
   it('returns false when provider does not match envelope', () => {
@@ -443,22 +439,22 @@ describe('isDurableCursorForProvider', () => {
       toolsetHash: 'def',
       cursor: 'resp_123',
     };
-    expect(isDurableCursorForProvider(JSON.stringify(envelope), 'gemini')).toBe(false);
+    expect(isDurableEnvelope(envelope, 'gemini')).toBe(false);
   });
 
-  it('returns false for null', () => {
-    expect(isDurableCursorForProvider(null, 'openai')).toBe(false);
+  it('returns false for null envelope', () => {
+    expect(isDurableEnvelope(null, 'openai')).toBe(false);
   });
 
   it('returns false for missing cursor', () => {
-    const envelope: ContinuationEnvelope = {
-      schemaVersion: 1,
-      provider: 'openai',
-      mode: 'responses',
+    const envelope = {
+      schemaVersion: 1 as const,
+      provider: 'openai' as const,
+      mode: 'responses' as const,
       modelName: 'gpt-4o',
       systemPromptHash: 'abc',
       toolsetHash: 'def',
     };
-    expect(isDurableCursorForProvider(JSON.stringify(envelope), 'openai')).toBe(false);
+    expect(isDurableEnvelope(envelope, 'openai')).toBe(false);
   });
 });

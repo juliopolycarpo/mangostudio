@@ -26,46 +26,18 @@ import {
 export type ContinuationDecision =
   | { type: 'continue_with_cursor'; providerState: string; envelope: ContinuationEnvelope }
   | { type: 'degrade_to_replay'; reason: string; previousMode: ContinuationMode }
-  | { type: 'start_replay' }
-  | { type: 'abort_unsafe_tool_replay'; reason: string };
+  | { type: 'start_replay' };
 
 export interface ContinuationStrategy {
   provider: ProviderType;
   durableMode: ContinuationMode | null;
-  replayMode: 'replay' | 'stateless-loop';
-  supportsDurableCursor: boolean;
-  supportsProviderCompaction: boolean;
 }
 
 export const CONTINUATION_STRATEGIES: Record<ProviderType, ContinuationStrategy> = {
-  openai: {
-    provider: 'openai',
-    durableMode: 'responses',
-    replayMode: 'replay',
-    supportsDurableCursor: true,
-    supportsProviderCompaction: true,
-  },
-  gemini: {
-    provider: 'gemini',
-    durableMode: 'interactions',
-    replayMode: 'replay',
-    supportsDurableCursor: true,
-    supportsProviderCompaction: false,
-  },
-  'openai-compatible': {
-    provider: 'openai-compatible',
-    durableMode: null,
-    replayMode: 'stateless-loop',
-    supportsDurableCursor: false,
-    supportsProviderCompaction: false,
-  },
-  anthropic: {
-    provider: 'anthropic',
-    durableMode: null,
-    replayMode: 'stateless-loop',
-    supportsDurableCursor: false,
-    supportsProviderCompaction: false,
-  },
+  openai: { provider: 'openai', durableMode: 'responses' },
+  gemini: { provider: 'gemini', durableMode: 'interactions' },
+  'openai-compatible': { provider: 'openai-compatible', durableMode: null },
+  anthropic: { provider: 'anthropic', durableMode: null },
 };
 
 export function getContinuationStrategy(provider: ProviderType): ContinuationStrategy {
@@ -126,17 +98,14 @@ export function decideContinuation(input: DecideContinuationInput): Continuation
 }
 
 /**
- * Returns true when the given providerState is a durable cursor that matches
- * the expected mode for the current provider.
- *
- * This is stricter than `isDurableMode` alone because it also checks the
- * provider field, preventing a mismatched durable envelope from being persisted.
+ * Returns true when the parsed envelope is a durable cursor whose provider
+ * matches the current call. The provider check guards against persisting a
+ * cursor minted by a different provider after a mid-conversation switch.
  */
-export function isDurableCursorForProvider(
-  providerState: string | null,
+export function isDurableEnvelope(
+  envelope: ContinuationEnvelope | null,
   provider: ProviderType
 ): boolean {
-  const envelope = parseContinuationEnvelope(providerState);
   if (!envelope) return false;
 
   const strategy = getContinuationStrategy(provider);

@@ -19,7 +19,7 @@ import {
   computeSystemPromptHash,
   computeToolsetHash,
   decideContinuation,
-  isDurableCursorForProvider,
+  isDurableEnvelope,
 } from '../../../services/providers/continuation';
 import {
   computeContextSnapshot,
@@ -161,9 +161,6 @@ export async function* streamTextTurn(
         case 'start_replay':
           currentProviderState = null;
           break;
-        case 'abort_unsafe_tool_replay':
-          yield { type: 'error', error: decision.reason };
-          return;
       }
 
       const maxIter = Math.max(
@@ -246,14 +243,10 @@ export async function* streamTextTurn(
               currentProviderState = event.providerState ?? null;
               turnCompleted = true;
 
-              durableProviderState = isDurableCursorForProvider(
-                currentProviderState,
-                provider.providerType
-              )
+              const resultEnvelope = parseContinuationEnvelope(currentProviderState);
+              durableProviderState = isDurableEnvelope(resultEnvelope, provider.providerType)
                 ? currentProviderState
                 : null;
-
-              const resultEnvelope = parseContinuationEnvelope(currentProviderState);
 
               if (durableProviderState) {
                 await db
