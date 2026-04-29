@@ -16,6 +16,7 @@ export interface ChatsTable {
   lastUsedMode: string | null;
   userId: string | null;
   lastProviderState: string | null;
+  lastContextState: string | null;
 }
 
 export interface MessagesTable {

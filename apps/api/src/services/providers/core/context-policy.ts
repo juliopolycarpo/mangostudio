@@ -5,6 +5,7 @@
  * severity bands for UI display, and action recommendations.
  */
 
+import { parseJsonWith } from '../../../lib/safe-parse';
 import type { ChatTurnContext, ToolDefinition } from '../types';
 
 /**
@@ -24,6 +25,19 @@ export type ContinuationDisplayMode =
   | 'compacted'
   | 'degraded';
 
+/** Threshold category for UI display. */
+export type ContextSeverity = 'normal' | 'info' | 'warning' | 'danger' | 'critical';
+
+const CONTINUATION_DISPLAY_MODES = new Set<string>([
+  'stateful',
+  'stateless-loop',
+  'replay',
+  'compacted',
+  'degraded',
+]);
+
+const CONTEXT_SEVERITIES = new Set<string>(['normal', 'info', 'warning', 'danger', 'critical']);
+
 /** Snapshot of context window usage for a single turn. */
 export interface ContextSnapshot {
   estimatedInputTokens: number;
@@ -31,6 +45,60 @@ export interface ContextSnapshot {
   contextLimit: number;
   estimatedUsageRatio: number;
   mode: ContinuationDisplayMode;
+}
+
+/** Provider-neutral context state persisted independently from cursors. */
+export interface PersistedContextSnapshot extends ContextSnapshot {
+  severity: ContextSeverity;
+  lastUpdatedAt: number;
+}
+
+export function buildPersistedContextSnapshot(
+  snapshot: ContextSnapshot,
+  lastUpdatedAt: number = Date.now()
+): PersistedContextSnapshot {
+  return {
+    ...snapshot,
+    severity: getContextSeverity(snapshot.estimatedUsageRatio),
+    lastUpdatedAt,
+  };
+}
+
+export function parsePersistedContextSnapshot(
+  raw: string | null | undefined
+): PersistedContextSnapshot | null {
+  return parseJsonWith(raw, (parsed) => {
+    if (!isFiniteNumber(parsed.estimatedInputTokens)) return null;
+    if (!isFiniteNumber(parsed.contextLimit)) return null;
+    if (!isFiniteNumber(parsed.estimatedUsageRatio)) return null;
+    if (!isContinuationDisplayMode(parsed.mode)) return null;
+    if (!isContextSeverity(parsed.severity)) return null;
+    if (!isFiniteNumber(parsed.lastUpdatedAt)) return null;
+
+    return {
+      estimatedInputTokens: parsed.estimatedInputTokens,
+      contextLimit: parsed.contextLimit,
+      estimatedUsageRatio: parsed.estimatedUsageRatio,
+      mode: parsed.mode,
+      severity: parsed.severity,
+      lastUpdatedAt: parsed.lastUpdatedAt,
+      ...(isFiniteNumber(parsed.providerReportedInputTokens)
+        ? { providerReportedInputTokens: parsed.providerReportedInputTokens }
+        : {}),
+    };
+  });
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
+function isContinuationDisplayMode(value: unknown): value is ContinuationDisplayMode {
+  return typeof value === 'string' && CONTINUATION_DISPLAY_MODES.has(value);
+}
+
+function isContextSeverity(value: unknown): value is ContextSeverity {
+  return typeof value === 'string' && CONTEXT_SEVERITIES.has(value);
 }
 
 /** Policy action recommended by the context engine. */
@@ -291,9 +359,6 @@ export function recommendContextAction(snapshot: ContextSnapshot): ContextAction
   }
   return 'hard_stop';
 }
-
-/** Threshold category for UI display. */
-export type ContextSeverity = 'normal' | 'info' | 'warning' | 'danger' | 'critical';
 
 export function getContextSeverity(ratio: number): ContextSeverity {
   if (ratio < 0.7) return 'normal';

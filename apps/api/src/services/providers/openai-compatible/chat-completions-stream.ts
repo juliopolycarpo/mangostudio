@@ -1,9 +1,8 @@
 /**
  * OpenAI-compatible Chat Completions stateless agentic tool loop.
  *
- * Stateless — history replayed from DB. In-loop accumulation via providerState.
- * DeepSeek-r1: reasoning_content is automatically included in tool call loop
- * since we replay the full assistant message including any reasoning_content field.
+ * Stateless — history is replayed from DB every turn. In-loop accumulation uses
+ * turn-local state only, never a durable cross-turn cursor.
  */
 
 import type OpenAI from 'openai';
@@ -11,6 +10,7 @@ import { buildChatCompletionsReplay } from '../core/replay-builder';
 import { toolDefsToChatCompletions } from '../core/tool-mapper';
 import type { StructuredOutputConfig } from '../types';
 import { computeSystemPromptHash, computeToolsetHash } from '../core/continuation-envelope';
+import { getModelContextLimit } from '../core/context-policy';
 import { extractReasoningChunks } from '../openai/normalizers';
 import type { AgentTurnRequest, AgentEvent } from '../types';
 import { parseJsonWith } from '../../../lib/safe-parse';
@@ -53,19 +53,19 @@ function buildResponseFormat(
   };
 }
 
-/** Opaque loop-state stored in providerState during the tool-call loop. */
-interface OAICompatLoopState {
+/** Opaque loop state carried only between iterations of the current turn. */
+interface OAICompatTurnLocalLoopState {
   provider: 'openai-compatible';
   /** Accumulated messages within the current agent turn. */
   loopMessages: Array<OpenAI.ChatCompletionMessageParam>;
 }
 
-export function parseOAICompatLoopState(
-  providerState: string | null | undefined
-): OAICompatLoopState | null {
-  return parseJsonWith(providerState, (parsed) => {
+export function parseOAICompatTurnLocalLoopState(
+  turnLocalLoopState: string | null | undefined
+): OAICompatTurnLocalLoopState | null {
+  return parseJsonWith(turnLocalLoopState, (parsed) => {
     if (parsed.provider !== 'openai-compatible' || !Array.isArray(parsed.loopMessages)) return null;
-    return parsed as unknown as OAICompatLoopState;
+    return parsed as unknown as OAICompatTurnLocalLoopState;
   });
 }
 
@@ -76,7 +76,7 @@ export async function* streamOAICompatAgentTurn(
   client: OpenAI,
   req: AgentTurnRequest
 ): AsyncIterable<AgentEvent> {
-  const loopState = parseOAICompatLoopState(req.providerState);
+  const turnLocalLoopState = parseOAICompatTurnLocalLoopState(req.providerState);
   const tools =
     req.toolDefinitions && req.toolDefinitions.length > 0
       ? toolDefsToChatCompletions(req.toolDefinitions)
@@ -86,7 +86,7 @@ export async function* streamOAICompatAgentTurn(
   const messages: OpenAI.ChatCompletionMessageParam[] = [
     ...(req.systemPrompt?.trim() ? [{ role: 'system' as const, content: req.systemPrompt }] : []),
     ...buildChatCompletionsReplay(req.history),
-    ...(loopState?.loopMessages ?? []),
+    ...(turnLocalLoopState?.loopMessages ?? []),
   ];
 
   // Add current input: tool results or user prompt
@@ -210,7 +210,7 @@ export async function* streamOAICompatAgentTurn(
         : { role: 'assistant', content: assistantText };
 
     const newLoopMessages: OpenAI.ChatCompletionMessageParam[] = [
-      ...(loopState?.loopMessages ?? []),
+      ...(turnLocalLoopState?.loopMessages ?? []),
       ...(req.toolResults && req.toolResults.length > 0
         ? req.toolResults.map(
             (tr): OpenAI.ChatCompletionMessageParam => ({
@@ -238,6 +238,7 @@ export async function* streamOAICompatAgentTurn(
         ? {
             context: {
               providerReportedInputTokens,
+              contextLimit: getModelContextLimit(req.modelName),
               lastUpdatedAt: Date.now(),
             },
           }

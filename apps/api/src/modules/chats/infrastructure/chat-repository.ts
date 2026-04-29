@@ -27,6 +27,7 @@ export interface ChatRecord {
   lastUsedMode: string | null;
   userId: string | null;
   lastProviderState: string | null;
+  lastContextState: string | null;
 }
 
 export async function listByUserId(userId: string, db: Kysely<Database>): Promise<ChatRecord[]> {
@@ -55,6 +56,7 @@ export async function createChat(data: CreateChatData, db: Kysely<Database>): Pr
     lastUsedMode: null,
     userId: data.userId,
     lastProviderState: null,
+    lastContextState: null,
   };
   await db.insertInto('chats').values(chat).execute();
   return chat;

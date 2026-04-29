@@ -202,24 +202,32 @@ describe('getContinuationStrategy', () => {
   it('returns strategy for openai', () => {
     const s = getContinuationStrategy('openai');
     expect(s.provider).toBe('openai');
+    expect(s.strategy).toBe('durable-cursor');
+    expect(s.supportsDurableCursor).toBe(true);
     expect(s.durableMode).toBe('responses');
   });
 
   it('returns strategy for gemini', () => {
     const s = getContinuationStrategy('gemini');
     expect(s.provider).toBe('gemini');
+    expect(s.strategy).toBe('durable-cursor');
+    expect(s.supportsDurableCursor).toBe(true);
     expect(s.durableMode).toBe('interactions');
   });
 
-  it('returns strategy for openai-compatible', () => {
+  it('returns replay strategy for openai-compatible', () => {
     const s = getContinuationStrategy('openai-compatible');
     expect(s.provider).toBe('openai-compatible');
+    expect(s.strategy).toBe('replay');
+    expect(s.supportsDurableCursor).toBe(false);
     expect(s.durableMode).toBeNull();
   });
 
   it('returns strategy for anthropic', () => {
     const s = getContinuationStrategy('anthropic');
     expect(s.provider).toBe('anthropic');
+    expect(s.strategy).toBe('turn-local');
+    expect(s.supportsDurableCursor).toBe(false);
     expect(s.durableMode).toBeNull();
   });
 });

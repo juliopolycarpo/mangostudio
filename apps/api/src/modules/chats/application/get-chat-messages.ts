@@ -23,17 +23,13 @@ export async function getChatMessagesUseCase(input: GetChatMessagesInput, db: Ky
   let contextInfo: ContextInfo | null = null;
 
   if (!input.cursor) {
-    const lastAiRow = await db
-      .selectFrom('messages')
-      .select('providerState')
-      .where('chatId', '=', input.chatId)
-      .where('role', '=', 'ai')
-      .where('providerState', 'is not', null)
-      .orderBy('timestamp', 'desc')
-      .limit(1)
+    const chatRow = await db
+      .selectFrom('chats')
+      .select(['lastContextState', 'lastProviderState'])
+      .where('id', '=', input.chatId)
       .executeTakeFirst();
 
-    contextInfo = extractContextInfo(lastAiRow?.providerState);
+    contextInfo = extractContextInfo(chatRow?.lastContextState, chatRow?.lastProviderState);
   }
 
   return { messages, nextCursor, contextInfo };

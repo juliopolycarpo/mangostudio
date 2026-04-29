@@ -248,7 +248,19 @@ describe('POST /respond/stream', () => {
       })
     );
 
-    await response.text();
+    const rawText = await response.text();
+
+    const sseEvents = rawText
+      .split('\n\n')
+      .filter((block) => block.startsWith('data: '))
+      .map((block) => {
+        try {
+          return JSON.parse(block.replace(/^data: /, '')) as Record<string, unknown>;
+        } catch {
+          return null;
+        }
+      })
+      .filter((e): e is Record<string, unknown> => e !== null);
 
     // The AI message row must have providerState = null (not the stateless-loop state)
     const aiMessage = insertedMessages.find((m) => m.role === 'ai');
@@ -260,6 +272,20 @@ describe('POST /respond/stream', () => {
       (u) => 'lastProviderState' in u && u.lastProviderState !== null
     );
     expect(durableUpdate).toBeUndefined();
+
+    const contextInfo = sseEvents.find((e) => e.type === 'context_info');
+    expect(contextInfo).toMatchObject({ type: 'context_info', mode: 'replay' });
+    expect(typeof contextInfo?.estimatedInputTokens).toBe('number');
+
+    const contextUpdate = chatSetCalls.find((u) => typeof u.lastContextState === 'string');
+    expect(contextUpdate?.lastProviderState).toBeNull();
+
+    const persistedContext = JSON.parse(contextUpdate?.lastContextState as string) as Record<
+      string,
+      unknown
+    >;
+    expect(persistedContext).toMatchObject({ mode: 'replay', severity: 'normal' });
+    expect(typeof persistedContext.estimatedInputTokens).toBe('number');
   });
 
   it('returns 503 when model catalog is not configured', async () => {
