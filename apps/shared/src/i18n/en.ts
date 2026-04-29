@@ -78,6 +78,24 @@ export const messages: Messages = {
       toReplay: 'Stateful continuation is no longer available. Continuing with transcript replay.',
       generic: 'Conversation mode changed from {from} to {to}.',
     },
+    continuation: {
+      title: {
+        providerChanged:
+          '{fromProvider} {fromMode} state cannot be reused by {provider}. Replayed transcript and started {provider} {toMode} continuation.',
+        modelChanged: 'Model changed to {model}. Replayed transcript on {provider} {toMode}.',
+        systemPromptChanged: 'System prompt changed. Replayed transcript on {provider} {toMode}.',
+        toolsetChanged: 'Toolset changed. Replayed transcript on {provider} {toMode}.',
+        cursorExpired: '{provider} {fromMode} cursor expired. Falling back to transcript replay.',
+        cursorInvalid:
+          '{provider} {fromMode} cursor was invalidated. Falling back to transcript replay.',
+        toolResultCursorLoss:
+          '{provider} {fromMode} cursor was lost during tool execution. Response may be incomplete.',
+        envelopeMalformed:
+          'Stored continuation state was unreadable. Restarting with transcript replay.',
+      },
+      recovered: '(recovered)',
+      notRecovered: '(not recovered)',
+    },
     cursorLost: 'Cursor lost — fallback to {detail}',
     toolLoopExhausted: 'Tool loop limit reached',
     genericFailure: 'Generation failed',

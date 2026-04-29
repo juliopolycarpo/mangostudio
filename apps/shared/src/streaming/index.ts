@@ -3,6 +3,7 @@ export type {
   SSEThinkingStartEvent,
   SSEFallbackEvent,
   SSESystemEvent,
+  SSEContinuationTransitionEvent,
   SSEErrorEvent,
   StreamChunk,
 } from './events';
@@ -11,5 +12,6 @@ export {
   SSEThinkingStartEventSchema,
   SSEFallbackEventSchema,
   SSESystemEventSchema,
+  SSEContinuationTransitionEventSchema,
   SSEErrorEventSchema,
 } from './schemas';
