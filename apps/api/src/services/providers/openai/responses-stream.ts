@@ -44,6 +44,82 @@ function toResponseTools(tools: Array<Record<string, unknown>>): OpenAI.Response
 }
 
 // ---------------------------------------------------------------------------
+// Responses create params builder
+//
+// Centralised construction so first call, cursor continuation, and replay
+// retry all produce the same request shape.
+// ---------------------------------------------------------------------------
+
+interface BuildResponsesCreateParamsOptions {
+  model: string;
+  input: Array<Record<string, unknown>>;
+  instructions?: string;
+  tools?: Array<Record<string, unknown>>;
+  previousResponseId?: string | null;
+  useReasoning?: boolean;
+  reasoningEffort?: string;
+  textFormat?: Record<string, unknown>;
+  enableCompaction?: boolean;
+  contextLimit: number;
+}
+
+function buildResponsesCreateParams(
+  options: BuildResponsesCreateParamsOptions
+): Record<string, unknown> {
+  const {
+    model,
+    input,
+    instructions,
+    tools,
+    previousResponseId,
+    useReasoning,
+    reasoningEffort = 'medium',
+    textFormat,
+    enableCompaction = true,
+    contextLimit,
+  } = options;
+
+  const compactThreshold = Math.floor(contextLimit * 0.85);
+  const canCompact = previousResponseId && enableCompaction;
+  const contextManagement = canCompact
+    ? { context_management: [{ type: 'compaction', compact_threshold: compactThreshold }] }
+    : {};
+
+  return {
+    model,
+    input: toResponseInput(input),
+    ...(instructions?.trim() ? { instructions } : {}),
+    ...(previousResponseId ? { previous_response_id: previousResponseId } : {}),
+    ...(tools && tools.length > 0 ? { tools: toResponseTools(tools) } : {}),
+    store: true,
+    stream: true,
+    ...(useReasoning ? { reasoning: { effort: reasoningEffort, summary: 'concise' } } : {}),
+    ...contextManagement,
+    ...(textFormat ?? {}),
+  };
+}
+
+/**
+ * Builds the `text.format` segment for structured output (JSON Schema) mode.
+ * Returns an empty object when no structured output is requested.
+ */
+function buildStructuredTextFormat(
+  structured: { name: string; schema: Record<string, unknown>; strict?: boolean } | undefined
+): Record<string, unknown> {
+  if (!structured) return {};
+  return {
+    text: {
+      format: {
+        type: 'json_schema' as const,
+        name: structured.name,
+        schema: structured.schema,
+        strict: structured.strict ?? true,
+      },
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Text streaming (reasoning models via Responses API)
 // ---------------------------------------------------------------------------
 
@@ -64,31 +140,20 @@ export async function* streamWithResponsesAPI(
     { role: 'user', content: req.prompt },
   ];
 
-  const structured = req.generationConfig?.structuredOutput;
-  const textFormat = structured
-    ? {
-        text: {
-          format: {
-            type: 'json_schema' as const,
-            name: structured.name,
-            schema: structured.schema,
-            strict: structured.strict ?? true,
-          },
-        },
-      }
-    : {};
-
-  const stream = await client.responses.create({
-    model: req.modelName,
-    input: toResponseInput(input),
-    ...(req.systemPrompt?.trim() ? { instructions: req.systemPrompt } : {}),
-    stream: true,
-    reasoning: {
-      effort,
-      summary: 'auto',
+  const stream = await client.responses.create(
+    {
+      model: req.modelName,
+      input: toResponseInput(input),
+      ...(req.systemPrompt?.trim() ? { instructions: req.systemPrompt } : {}),
+      stream: true,
+      reasoning: {
+        effort,
+        summary: 'auto',
+      },
+      ...buildStructuredTextFormat(req.generationConfig?.structuredOutput),
     },
-    ...textFormat,
-  });
+    { signal: req.signal }
+  );
 
   // Deduplication state
   const seenSummaryDeltas = new Set<string>();
@@ -227,42 +292,22 @@ export async function* streamAgentTurnWithResponsesAPI(
   }
 
   const contextLimit = getModelContextLimit(req.modelName);
-  const compactThreshold = Math.floor(contextLimit * 0.85);
-
-  const structured = req.generationConfig?.structuredOutput;
-  const textFormat = structured
-    ? {
-        text: {
-          format: {
-            type: 'json_schema' as const,
-            name: structured.name,
-            schema: structured.schema,
-            strict: structured.strict ?? true,
-          },
-        },
-      }
-    : {};
+  const textFormat = buildStructuredTextFormat(req.generationConfig?.structuredOutput);
 
   const makeRequest = (prevId: string | null): APIPromise<Stream<ResponseStreamEvent>> => {
-    // Server-side compaction only kicks in for durable stateful chains.
-    // Without a cursor the server has no prior state to compact, and adding
-    // the option would either be a no-op or trigger a validation error on
-    // models that don't support it.
-    const contextManagement = prevId
-      ? { context_management: [{ type: 'compaction', compact_threshold: compactThreshold }] }
-      : {};
-    return client.responses.create({
+    const params = buildResponsesCreateParams({
       model: req.modelName,
-      input: toResponseInput(input),
-      ...(req.systemPrompt?.trim() ? { instructions: req.systemPrompt } : {}),
-      ...(prevId ? { previous_response_id: prevId } : {}),
-      ...(tools.length > 0 ? { tools: toResponseTools(tools) } : {}),
-      store: true,
-      stream: true,
-      ...(useReasoning ? { reasoning: { effort, summary: 'concise' } } : {}),
-      ...contextManagement,
-      ...textFormat,
-    });
+      input,
+      instructions: req.systemPrompt,
+      tools,
+      previousResponseId: prevId,
+      useReasoning,
+      reasoningEffort: effort,
+      textFormat,
+      enableCompaction: req.generationConfig?.enableProviderCompaction ?? true,
+      contextLimit,
+    }) as unknown as OpenAI.Responses.ResponseCreateParamsStreaming;
+    return client.responses.create(params, { signal: req.signal });
   };
 
   let stream: AsyncIterable<ResponseStreamEvent>;
