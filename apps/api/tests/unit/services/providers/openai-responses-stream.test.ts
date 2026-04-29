@@ -13,7 +13,10 @@ import {
 } from '../../../../src/services/providers/core/continuation-envelope';
 import type { AgentEvent, AgentTurnRequest } from '../../../../src/services/providers/types';
 
-type CreateFn = (params: Record<string, unknown>) => Promise<AsyncIterable<unknown>>;
+type CreateFn = (
+  params: Record<string, unknown>,
+  options?: { signal?: AbortSignal }
+) => Promise<AsyncIterable<unknown>>;
 
 function streamOf(events: Array<Record<string, unknown>>): AsyncIterable<unknown> {
   return (async function* () {
@@ -223,6 +226,124 @@ describe('streamAgentTurnWithResponsesAPI — request shape', () => {
     expect(cm?.[0]?.type).toBe('compaction');
     expect(typeof cm?.[0]?.compact_threshold).toBe('number');
     expect(cm?.[0]?.compact_threshold as number).toBeGreaterThan(0);
+  });
+
+  it('passes AbortSignal to responses.create', async () => {
+    const ac = new AbortController();
+    let capturedOptions: { signal?: AbortSignal } | undefined;
+    await collect(baseRequest({ prompt: 'test', signal: ac.signal }), (_params, opts) => {
+      capturedOptions = opts;
+      return Promise.resolve(streamOf([COMPLETED_EVENT()]));
+    });
+
+    expect(capturedOptions?.signal).toBe(ac.signal);
+  });
+
+  it('includes store: true on first, chained, and replay retry requests', async () => {
+    // First request
+    let captured1: Record<string, unknown> | undefined;
+    await collect(baseRequest(), (params) => {
+      captured1 = params;
+      return Promise.resolve(streamOf([COMPLETED_EVENT()]));
+    });
+    expect(captured1?.store).toBe(true);
+
+    // Chained request
+    let captured2: Record<string, unknown> | undefined;
+    await collect(
+      baseRequest({ providerState: buildEnvelope('resp_prev'), prompt: 'next' }),
+      (params) => {
+        captured2 = params;
+        return Promise.resolve(streamOf([COMPLETED_EVENT()]));
+      }
+    );
+    expect(captured2?.store).toBe(true);
+
+    // Replay retry (cursor expired → fallback)
+    let callCount = 0;
+    let captured3: Record<string, unknown> | undefined;
+    await collect(
+      baseRequest({
+        providerState: buildEnvelope('resp_stale'),
+        prompt: 'retry',
+        history: [{ id: 'h1', role: 'user', text: 'original' }],
+      }),
+      (params) => {
+        callCount++;
+        captured3 = params;
+        if (callCount === 1) return Promise.reject(cursorError());
+        return Promise.resolve(streamOf([COMPLETED_EVENT('resp_new')]));
+      }
+    );
+    expect(captured3?.store).toBe(true);
+  });
+
+  it('keeps instructions on chained requests', async () => {
+    let captured: Record<string, unknown> | undefined;
+    await collect(
+      baseRequest({
+        systemPrompt: 'You are a helpful assistant.',
+        providerState: buildEnvelope('resp_prev'),
+        prompt: 'hello',
+      }),
+      (params) => {
+        captured = params;
+        return Promise.resolve(streamOf([COMPLETED_EVENT()]));
+      }
+    );
+
+    expect(captured?.instructions).toBe('You are a helpful assistant.');
+  });
+
+  it('keeps tools on chained requests', async () => {
+    let captured: Record<string, unknown> | undefined;
+    await collect(
+      baseRequest({
+        providerState: buildEnvelope('resp_prev'),
+        prompt: 'search for something',
+        toolDefinitions: [
+          {
+            name: 'search',
+            description: 'Search the web',
+            parameters: {
+              type: 'object',
+              properties: { q: { type: 'string' } },
+              required: ['q'],
+              additionalProperties: false,
+            },
+          },
+        ],
+      }),
+      (params) => {
+        captured = params;
+        return Promise.resolve(streamOf([COMPLETED_EVENT()]));
+      }
+    );
+
+    const tools = captured?.tools as Array<Record<string, unknown>> | undefined;
+    expect(Array.isArray(tools)).toBe(true);
+    expect(tools?.[0]?.name).toBe('search');
+  });
+
+  it('omits context_management when enableProviderCompaction disables compaction', async () => {
+    let captured: Record<string, unknown> | undefined;
+    await collect(
+      baseRequest({
+        providerState: buildEnvelope('resp_prev'),
+        prompt: 'again',
+        generationConfig: {
+          thinkingEnabled: false,
+          reasoningEffort: 'medium',
+          enableProviderCompaction: false,
+        },
+      }),
+      (params) => {
+        captured = params;
+        return Promise.resolve(streamOf([COMPLETED_EVENT()]));
+      }
+    );
+
+    expect(captured?.context_management).toBeUndefined();
   });
 });
 

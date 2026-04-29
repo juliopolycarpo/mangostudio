@@ -60,6 +60,12 @@ export interface GenerationConfig {
   maxToolIterations?: number;
   /** Optional schema constraint for model output. Honored by supporting providers; others warn + continue. */
   structuredOutput?: StructuredOutputConfig;
+  /**
+   * When true (default), stateful providers may use server-side compaction
+   * to reduce context window pressure during long conversations.
+   * Set to false to disable provider-level compaction.
+   */
+  enableProviderCompaction?: boolean;
 }
 
 /** Request for a single agentic turn — supports tool calling and provider-side continuation. */
