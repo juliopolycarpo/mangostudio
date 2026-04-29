@@ -629,4 +629,29 @@ describe('decideContinuation provider switch + cursor recovery', () => {
 
     expect(persisted.durableProviderState).toBeNull();
   });
+
+  it('openai-compatible: stateless-loop with mismatched toolset degrades to replay', () => {
+    const envelope: ContinuationEnvelope = {
+      schemaVersion: 1,
+      provider: 'openai-compatible',
+      mode: 'stateless-loop',
+      modelName: 'deepseek-chat',
+      systemPromptHash: 'sys_none',
+      toolsetHash: 'old_tools',
+    };
+
+    const decision = decideContinuation({
+      lastProviderState: serializeContinuationEnvelope(envelope),
+      provider: 'openai-compatible',
+      modelName: 'deepseek-chat',
+      systemPromptHash: 'sys_none',
+      toolsetHash: 'new_tools',
+    });
+
+    expect(decision.type).toBe('degrade_to_replay');
+    if (decision.type === 'degrade_to_replay') {
+      expect(decision.previousMode).toBe('stateless-loop');
+      expect(decision.reason).toContain('toolset');
+    }
+  });
 });

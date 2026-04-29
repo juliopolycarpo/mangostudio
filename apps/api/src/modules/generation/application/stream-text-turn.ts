@@ -19,6 +19,7 @@ import {
   computeToolsetHash,
   decideContinuation,
   decideTurnPersistence,
+  type ContinuationEnvelope,
 } from '../../../services/providers/continuation';
 import {
   computeContextSnapshot,
@@ -263,11 +264,7 @@ export async function* streamTextTurn(
                 );
               }
 
-              const displayMode: ContinuationDisplayMode = resultEnvelope?.cursor
-                ? 'stateful'
-                : resultEnvelope?.mode === 'stateless-loop' && !degradedThisTurn
-                  ? 'stateless-loop'
-                  : 'replay';
+              const displayMode = resolveDisplayMode(resultEnvelope, degradedThisTurn);
               const providerReportedInputTokens =
                 resultEnvelope?.context?.providerReportedInputTokens;
               const turnLocalCharCount =
@@ -524,6 +521,21 @@ export async function* streamTextTurn(
 
     yield { type: 'error', error: message };
   }
+}
+
+/**
+ * Resolves the user-facing display mode from the parsed envelope and the
+ * degradation flag observed during the iteration. A cursor present means
+ * server-side continuation; a stateless-loop envelope without a degradation
+ * means the provider accumulated turn-local state; everything else is replay.
+ */
+function resolveDisplayMode(
+  envelope: ContinuationEnvelope | null,
+  degraded: boolean
+): ContinuationDisplayMode {
+  if (envelope?.cursor) return 'stateful';
+  if (envelope?.mode === 'stateless-loop' && !degraded) return 'stateless-loop';
+  return 'replay';
 }
 
 /**
