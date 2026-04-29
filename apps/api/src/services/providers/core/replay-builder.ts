@@ -17,6 +17,7 @@
 import type OpenAI from 'openai';
 import type { ChatTurnContext } from '../types';
 import type { MessagePart } from '@mangostudio/shared/types';
+import { parseJsonValueOrRawString } from '../../../lib/safe-parse';
 
 // ---------------------------------------------------------------------------
 // OpenAI Responses API replay
@@ -163,13 +164,7 @@ export function buildGeminiInteractionsReplay(
           type: 'function_result' as const,
           call_id: tr.toolCallId,
           name: '',
-          result: (() => {
-            try {
-              return JSON.parse(tr.content) as unknown;
-            } catch {
-              return tr.content;
-            }
-          })(),
+          result: parseJsonValueOrRawString(tr.content),
           is_error: tr.isError ?? false,
         })),
       });

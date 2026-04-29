@@ -32,3 +32,15 @@ export function parseJsonWith<T>(
   if (!parsed) return null;
   return guard(parsed);
 }
+
+/**
+ * Parses a JSON string into any JSON value.
+ * Returns the original string when parsing fails.
+ */
+export function parseJsonValueOrRawString(raw: string): unknown {
+  try {
+    return JSON.parse(raw) as unknown;
+  } catch {
+    return raw;
+  }
+}
