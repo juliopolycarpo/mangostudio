@@ -377,6 +377,7 @@ describe('POST /respond/stream', () => {
               from: 'stateful',
               to: 'replay',
               reason: 'cursor_expired',
+              reasonCode: 'cursor_expired',
             };
             yield { type: 'assistant_text_delta', text: 'Hello' };
             yield { type: 'turn_completed', providerState: STATELESS_STATE };
@@ -429,10 +430,37 @@ describe('POST /respond/stream', () => {
       to: 'replay',
     });
 
+    // Assert continuation_transition SSE event is also emitted (typed, structured)
+    const continuationTransition = sseEvents.find((e) => e.type === 'continuation_transition');
+    expect(continuationTransition).toBeDefined();
+    expect(continuationTransition).toMatchObject({
+      type: 'continuation_transition',
+      provider: 'openai-compatible',
+      fromMode: 'stateful',
+      toMode: 'replay',
+      reasonCode: 'cursor_expired',
+      done: false,
+    });
+
     // Assert context_info is emitted with mode=replay (no cursor in stateless-loop)
     const contextInfo = sseEvents.find((e) => e.type === 'context_info');
     expect(contextInfo).toBeDefined();
     expect(contextInfo).toMatchObject({ type: 'context_info', mode: 'replay' });
+
+    // Assert the persisted AI message contains a typed continuation_transition part
+    const aiMessage = insertedMessages.find((m) => m.role === 'ai');
+    expect(aiMessage).toBeDefined();
+    const parts = JSON.parse(aiMessage?.parts as string) as Array<Record<string, unknown>>;
+    const transitionPart = parts.find((p) => p.type === 'continuation_transition');
+    expect(transitionPart).toBeDefined();
+    expect(transitionPart).toMatchObject({
+      type: 'continuation_transition',
+      provider: 'openai-compatible',
+      fromMode: 'stateful',
+      toMode: 'replay',
+      reasonCode: 'cursor_expired',
+      recovered: true,
+    });
   });
 
   it('emits fallback_notice with done:false and context_info with done:false in SSE output', async () => {
@@ -462,6 +490,7 @@ describe('POST /respond/stream', () => {
               from: 'responses',
               to: 'replay',
               reason: 'cursor_expired',
+              reasonCode: 'cursor_expired',
             };
             yield { type: 'assistant_text_delta', text: 'OK' };
             yield { type: 'turn_completed', providerState: STATELESS_STATE };
@@ -503,6 +532,10 @@ describe('POST /respond/stream', () => {
     const fallbackNotice = sseEvents.find((e) => e.type === 'fallback_notice');
     expect(fallbackNotice).toBeDefined();
     expect(fallbackNotice?.done).toBe(false);
+
+    const continuationTransition = sseEvents.find((e) => e.type === 'continuation_transition');
+    expect(continuationTransition).toBeDefined();
+    expect(continuationTransition?.done).toBe(false);
 
     const contextInfo = sseEvents.find((e) => e.type === 'context_info');
     expect(contextInfo).toBeDefined();
@@ -756,6 +789,7 @@ describe('POST /respond/stream', () => {
 
   it('degrades from OpenAI cursor to replay on provider switch to Gemini and persists new cursor', async () => {
     const chatSetCalls: Array<Record<string, unknown>> = [];
+    const insertedMessages: Array<Record<string, unknown>> = [];
 
     const OPENAI_ENVELOPE = JSON.stringify({
       schemaVersion: 1,
@@ -806,7 +840,12 @@ describe('POST /respond/stream', () => {
     await mock.module('../../../src/db/database', () => ({
       getDb: () => ({
         selectFrom: () => makeChain({ userId: TEST_USER.id, lastProviderState: OPENAI_ENVELOPE }),
-        insertInto: () => ({ values: () => ({ execute: () => Promise.resolve() }) }),
+        insertInto: (_table: string) => ({
+          values: (values: Record<string, unknown>) => {
+            if (_table === 'messages') insertedMessages.push({ ...values });
+            return { execute: () => Promise.resolve() };
+          },
+        }),
         updateTable: () => ({
           set: (values: Record<string, unknown>) => {
             chatSetCalls.push({ ...values });
@@ -845,11 +884,40 @@ describe('POST /respond/stream', () => {
       to: 'replay',
     });
 
+    // Must emit a typed continuation_transition SSE event
+    const continuationTransition = sseEvents.find((e) => e.type === 'continuation_transition');
+    expect(continuationTransition).toBeDefined();
+    expect(continuationTransition).toMatchObject({
+      type: 'continuation_transition',
+      provider: 'gemini',
+      fromProvider: 'openai',
+      fromMode: 'responses',
+      toMode: 'replay',
+      reasonCode: 'provider_changed',
+      done: false,
+    });
+
     // Must persist the new Gemini cursor
     const geminiUpdate = chatSetCalls.find(
       (u) => 'lastProviderState' in u && u.lastProviderState === GEMINI_ENVELOPE
     );
     expect(geminiUpdate).toBeDefined();
+
+    // Persisted AI message must contain a continuation_transition part with recovered=true
+    const aiMessage = insertedMessages.find((m) => m.role === 'ai');
+    expect(aiMessage).toBeDefined();
+    const parts = JSON.parse(aiMessage?.parts as string) as Array<Record<string, unknown>>;
+    const transitionPart = parts.find((p) => p.type === 'continuation_transition');
+    expect(transitionPart).toBeDefined();
+    expect(transitionPart).toMatchObject({
+      type: 'continuation_transition',
+      provider: 'gemini',
+      fromProvider: 'openai',
+      fromMode: 'responses',
+      toMode: 'replay',
+      reasonCode: 'provider_changed',
+      recovered: true,
+    });
   });
 
   it('uses Gemini cursor on subsequent turn after provider switch', async () => {

@@ -183,6 +183,7 @@ describe('streamGeminiAgentTurn', () => {
     if (degraded?.type !== 'continuation_degraded') return;
     expect(degraded.from).toBe('interactions');
     expect(degraded.to).toBe('replay');
+    expect(degraded.reasonCode).toBe('cursor_expired');
     expect(events.at(-1)?.type).toBe('turn_completed');
   });
 
@@ -206,6 +207,7 @@ describe('streamGeminiAgentTurn', () => {
     if (degraded?.type !== 'continuation_degraded') return;
     expect(degraded.from).toBe('interactions');
     expect(degraded.to).toBe('tool_loop_aborted');
+    expect(degraded.reasonCode).toBe('tool_result_cursor_loss');
     expect(events.some((event) => event.type === 'turn_error')).toBe(true);
     expect(events.some((event) => event.type === 'turn_completed')).toBe(false);
   });
