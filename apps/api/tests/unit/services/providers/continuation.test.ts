@@ -7,6 +7,7 @@ import {
   computeToolsetHash,
   isDurableMode,
   decideContinuation,
+  decideTurnPersistence,
   isDurableEnvelope,
   getContinuationStrategy,
   CONTINUATION_STRATEGIES,
@@ -456,5 +457,176 @@ describe('isDurableEnvelope', () => {
       toolsetHash: 'def',
     };
     expect(isDurableEnvelope(envelope, 'openai')).toBe(false);
+  });
+});
+
+describe('decideTurnPersistence', () => {
+  it('returns null state for null providerState', () => {
+    const result = decideTurnPersistence(null, 'openai');
+    expect(result.envelope).toBeNull();
+    expect(result.durableProviderState).toBeNull();
+  });
+
+  it('persists durable openai responses cursor', () => {
+    const envelope: ContinuationEnvelope = {
+      schemaVersion: 1,
+      provider: 'openai',
+      mode: 'responses',
+      modelName: 'gpt-4o',
+      systemPromptHash: 'abc',
+      toolsetHash: 'def',
+      cursor: 'resp_123',
+    };
+    const raw = serializeContinuationEnvelope(envelope);
+
+    const result = decideTurnPersistence(raw, 'openai');
+    expect(result.envelope?.cursor).toBe('resp_123');
+    expect(result.durableProviderState).toBe(raw);
+  });
+
+  it('persists durable gemini interactions cursor', () => {
+    const envelope: ContinuationEnvelope = {
+      schemaVersion: 1,
+      provider: 'gemini',
+      mode: 'interactions',
+      modelName: 'gemini-2.0-flash',
+      systemPromptHash: 'abc',
+      toolsetHash: 'def',
+      cursor: 'interaction_xyz',
+    };
+    const raw = serializeContinuationEnvelope(envelope);
+
+    const result = decideTurnPersistence(raw, 'gemini');
+    expect(result.durableProviderState).toBe(raw);
+  });
+
+  it('does not persist stateless-loop envelope', () => {
+    const envelope: ContinuationEnvelope = {
+      schemaVersion: 1,
+      provider: 'openai-compatible',
+      mode: 'stateless-loop',
+      modelName: 'deepseek-chat',
+      systemPromptHash: 'abc',
+      toolsetHash: 'def',
+    };
+    const raw = serializeContinuationEnvelope(envelope);
+
+    const result = decideTurnPersistence(raw, 'openai-compatible');
+    expect(result.envelope?.mode).toBe('stateless-loop');
+    expect(result.durableProviderState).toBeNull();
+  });
+
+  it('does not persist when provider does not match envelope', () => {
+    const envelope: ContinuationEnvelope = {
+      schemaVersion: 1,
+      provider: 'openai',
+      mode: 'responses',
+      modelName: 'gpt-4o',
+      systemPromptHash: 'abc',
+      toolsetHash: 'def',
+      cursor: 'resp_123',
+    };
+    const raw = serializeContinuationEnvelope(envelope);
+
+    const result = decideTurnPersistence(raw, 'gemini');
+    expect(result.envelope?.provider).toBe('openai');
+    expect(result.durableProviderState).toBeNull();
+  });
+
+  it('returns null state for malformed providerState', () => {
+    const result = decideTurnPersistence('not-json', 'openai');
+    expect(result.envelope).toBeNull();
+    expect(result.durableProviderState).toBeNull();
+  });
+});
+
+describe('decideContinuation provider switch + cursor recovery', () => {
+  it('OpenAI -> Gemini: degrades to replay on first switch turn', () => {
+    const openaiEnvelope: ContinuationEnvelope = {
+      schemaVersion: 1,
+      provider: 'openai',
+      mode: 'responses',
+      modelName: 'gpt-4o',
+      systemPromptHash: 'sys_abc',
+      toolsetHash: 'tools_def',
+      cursor: 'resp_abc123',
+    };
+
+    const decision = decideContinuation({
+      lastProviderState: serializeContinuationEnvelope(openaiEnvelope),
+      provider: 'gemini',
+      modelName: 'gemini-2.0-flash',
+      systemPromptHash: 'sys_abc',
+      toolsetHash: 'tools_def',
+    });
+
+    expect(decision.type).toBe('degrade_to_replay');
+    if (decision.type === 'degrade_to_replay') {
+      expect(decision.previousMode).toBe('responses');
+    }
+  });
+
+  it('OpenAI -> Gemini: second turn after switch uses Gemini cursor', () => {
+    const geminiEnvelope: ContinuationEnvelope = {
+      schemaVersion: 1,
+      provider: 'gemini',
+      mode: 'interactions',
+      modelName: 'gemini-2.0-flash',
+      systemPromptHash: 'sys_abc',
+      toolsetHash: 'tools_def',
+      cursor: 'interaction_xyz',
+    };
+
+    const decision = decideContinuation({
+      lastProviderState: serializeContinuationEnvelope(geminiEnvelope),
+      provider: 'gemini',
+      modelName: 'gemini-2.0-flash',
+      systemPromptHash: 'sys_abc',
+      toolsetHash: 'tools_def',
+    });
+
+    expect(decision.type).toBe('continue_with_cursor');
+    if (decision.type === 'continue_with_cursor') {
+      expect(decision.envelope.cursor).toBe('interaction_xyz');
+    }
+  });
+
+  it('openai-compatible: stateless-loop envelope from prior turn never carries forward', () => {
+    const statelessEnvelope: ContinuationEnvelope = {
+      schemaVersion: 1,
+      provider: 'openai-compatible',
+      mode: 'stateless-loop',
+      modelName: 'deepseek-chat',
+      systemPromptHash: 'sys_none',
+      toolsetHash: 'tools_def',
+    };
+
+    const decision = decideContinuation({
+      lastProviderState: serializeContinuationEnvelope(statelessEnvelope),
+      provider: 'openai-compatible',
+      modelName: 'deepseek-chat',
+      systemPromptHash: 'sys_none',
+      toolsetHash: 'tools_def',
+    });
+
+    expect(decision.type).toBe('start_replay');
+  });
+
+  it('openai-compatible: turn-local stateless-loop state must never persist as durable', () => {
+    const envelope: ContinuationEnvelope = {
+      schemaVersion: 1,
+      provider: 'openai-compatible',
+      mode: 'stateless-loop',
+      modelName: 'deepseek-chat',
+      systemPromptHash: 'sys_none',
+      toolsetHash: 'tools_def',
+    };
+
+    const persisted = decideTurnPersistence(
+      serializeContinuationEnvelope(envelope),
+      'openai-compatible'
+    );
+
+    expect(persisted.durableProviderState).toBeNull();
   });
 });
