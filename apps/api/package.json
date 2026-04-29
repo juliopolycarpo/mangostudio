@@ -27,7 +27,7 @@
     "@elysiajs/static": "^1.4.10",
     "@google/genai": "^1.50.1",
     "@mangostudio/shared": "workspace:*",
-    "better-auth": "^1.6.7",
+    "better-auth": "^1.6.9",
     "elysia": "^1.4.28",
     "file-type": "^22.0.1",
     "kysely": "^0.28.16",
