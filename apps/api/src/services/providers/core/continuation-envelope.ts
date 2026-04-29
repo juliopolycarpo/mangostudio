@@ -16,7 +16,7 @@
  *   state cannot bypass current validation rules.
  */
 
-import type { ProviderType } from '@mangostudio/shared/types';
+import type { ProviderType, ContinuationReasonCode } from '@mangostudio/shared/types';
 import { computeHash, computeToolsetHash } from '../../../utils/hash';
 import { parseJsonWith } from '../../../lib/safe-parse';
 
@@ -72,6 +72,16 @@ export function serializeContinuationEnvelope(envelope: ContinuationEnvelope): s
   return JSON.stringify(envelope);
 }
 
+export interface ValidationResult {
+  valid: boolean;
+  /** Human-readable log message — do NOT surface in UI or API responses. */
+  reason?: string;
+  /** Normalized code for structured event persistence and rendering. */
+  reasonCode?: ContinuationReasonCode;
+  /** The provider recorded in the envelope (previous provider before a switch). */
+  previousProvider?: ProviderType;
+}
+
 /**
  * Validates that a parsed envelope is compatible with the current turn context.
  * Checks provider, modelName, systemPromptHash, and toolsetHash.
@@ -84,31 +94,40 @@ export function validateContinuationEnvelope(
     systemPromptHash: string;
     toolsetHash: string;
   }
-): { valid: boolean; reason?: string } {
-  if (!envelope) return { valid: false, reason: 'envelope is null' };
+): ValidationResult {
+  if (!envelope)
+    return { valid: false, reason: 'envelope is null', reasonCode: 'envelope_malformed' };
 
   if (envelope.provider !== current.provider) {
     return {
       valid: false,
       reason: `provider changed from "${envelope.provider}" to "${current.provider}"`,
+      reasonCode: 'provider_changed',
+      previousProvider: envelope.provider,
     };
   }
   if (envelope.modelName !== current.modelName) {
     return {
       valid: false,
       reason: `model changed from "${envelope.modelName}" to "${current.modelName}"`,
+      reasonCode: 'model_changed',
+      previousProvider: envelope.provider,
     };
   }
   if (envelope.systemPromptHash !== current.systemPromptHash) {
     return {
       valid: false,
       reason: `system prompt changed (hash mismatch)`,
+      reasonCode: 'system_prompt_changed',
+      previousProvider: envelope.provider,
     };
   }
   if (envelope.toolsetHash !== current.toolsetHash) {
     return {
       valid: false,
       reason: `toolset changed (hash mismatch)`,
+      reasonCode: 'toolset_changed',
+      previousProvider: envelope.provider,
     };
   }
 

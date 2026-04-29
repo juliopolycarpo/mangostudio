@@ -1,6 +1,11 @@
 import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';
-import type { MessagePart, ProviderType, ReasoningEffort } from '@mangostudio/shared';
+import type {
+  MessagePart,
+  ProviderType,
+  ReasoningEffort,
+  ContinuationReasonCode,
+} from '@mangostudio/shared';
 import type { AgentTurnRequest } from '../../../services/providers/types';
 import { assertChatOwnership } from '../../chats/domain/chat-ownership';
 import { resolveModel } from './resolve-model';
@@ -55,6 +60,16 @@ export type StreamEvent =
   | { type: 'tool_result'; callId: string; name: string; result: unknown; isError: boolean }
   | { type: 'fallback_notice'; from: string; to: string; reason: string }
   | { type: 'system_event'; event: string; detail: string }
+  | {
+      type: 'continuation_transition';
+      provider: ProviderType;
+      modelName: string;
+      fromProvider?: ProviderType;
+      fromMode: string;
+      toMode: string;
+      reasonCode: ContinuationReasonCode;
+      detail?: string;
+    }
   | {
       type: 'context_info';
       estimatedInputTokens: number;
@@ -130,18 +145,44 @@ export async function* streamTextTurn(
 
       let currentProviderState: string | null = null;
 
-      function* recordDegradation(
-        from: string,
-        to: string,
-        reason: string
-      ): Generator<StreamEvent> {
+      interface DegradationContext {
+        from: string;
+        to: string;
+        reason: string;
+        reasonCode: ContinuationReasonCode;
+        fromProvider?: ProviderType;
+      }
+
+      function* recordDegradation(ctx: DegradationContext): Generator<StreamEvent> {
         console.warn(
-          `[fallback][degrade] chatId=${chatId} from=${from} to=${to} reason="${reason}" provider=${provider.providerType} model=${modelId}`
+          `[fallback][degrade] chatId=${chatId} from=${ctx.from} to=${ctx.to}` +
+            ` reason="${ctx.reason}" reasonCode=${ctx.reasonCode}` +
+            ` provider=${provider.providerType} model=${modelId}`
         );
-        const detail = `${from} → ${to}`;
-        allParts.push({ type: 'system_event', event: 'cursor_lost', detail });
-        yield { type: 'fallback_notice', from, to, reason };
-        yield { type: 'system_event', event: 'cursor_lost', detail };
+        const detail = `${ctx.from} → ${ctx.to}`;
+        const transitionPart: Extract<MessagePart, { type: 'continuation_transition' }> = {
+          type: 'continuation_transition',
+          provider: provider.providerType,
+          modelName: modelId,
+          fromProvider: ctx.fromProvider,
+          fromMode: ctx.from,
+          toMode: ctx.to,
+          reasonCode: ctx.reasonCode,
+          detail,
+          recovered: false,
+        };
+        allParts.push(transitionPart);
+        yield { type: 'fallback_notice', from: ctx.from, to: ctx.to, reason: ctx.reason };
+        yield {
+          type: 'continuation_transition',
+          provider: provider.providerType,
+          modelName: modelId,
+          fromProvider: ctx.fromProvider,
+          fromMode: ctx.from,
+          toMode: ctx.to,
+          reasonCode: ctx.reasonCode,
+          detail,
+        };
       }
 
       switch (decision.type) {
@@ -152,7 +193,13 @@ export async function* streamTextTurn(
           );
           break;
         case 'degrade_to_replay':
-          yield* recordDegradation(decision.previousMode, 'replay', decision.reason);
+          yield* recordDegradation({
+            from: decision.previousMode,
+            to: 'replay',
+            reason: decision.reason,
+            reasonCode: decision.reasonCode,
+            fromProvider: decision.previousProvider,
+          });
           currentProviderState = null;
           break;
         case 'start_replay':
@@ -307,7 +354,12 @@ export async function* streamTextTurn(
 
             case 'continuation_degraded':
               degradedThisTurn = true;
-              yield* recordDegradation(event.from, event.to, event.reason);
+              yield* recordDegradation({
+                from: event.from,
+                to: event.to,
+                reason: event.reason,
+                reasonCode: event.reasonCode,
+              });
               break;
 
             case 'turn_error':
@@ -466,6 +518,13 @@ export async function* streamTextTurn(
     if (!signal?.aborted) {
       const generationTime = `${((Date.now() - startTime) / 1000).toFixed(1)}s`;
       const aiTimestamp = Date.now();
+
+      // Mark all continuation_transition parts as recovered=true since the turn completed.
+      for (const part of allParts) {
+        if (part.type === 'continuation_transition') {
+          part.recovered = true;
+        }
+      }
 
       const finalParts = mergeMessageParts(allParts);
 

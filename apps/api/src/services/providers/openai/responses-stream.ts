@@ -337,6 +337,7 @@ export async function* streamAgentTurnWithResponsesAPI(
           from: 'responses',
           to: 'tool_loop_aborted',
           reason: `cursor_error during tool-result continuation (status=${status})`,
+          reasonCode: 'tool_result_cursor_loss' as const,
         };
         yield {
           type: 'turn_error',
@@ -345,8 +346,13 @@ export async function* streamAgentTurnWithResponsesAPI(
         return;
       }
 
+      // 404 = expired; 400/409 = invalid request shape referencing the prior response.
+      const reasonCode =
+        err instanceof OpenAIAPIError && err.status === 404
+          ? ('cursor_expired' as const)
+          : ('cursor_invalid' as const);
       console.warn(
-        `[fallback][degrade] provider=openai reason=cursor_error status=${status}` +
+        `[fallback][degrade] provider=openai reason=${reasonCode} status=${status}` +
           ` falling back to full replay`
       );
       yield {
@@ -354,6 +360,7 @@ export async function* streamAgentTurnWithResponsesAPI(
         from: 'responses',
         to: 'replay',
         reason: `cursor_error (status=${status})`,
+        reasonCode,
       };
       input = [
         ...buildOpenAIResponsesReplay(req.history),
