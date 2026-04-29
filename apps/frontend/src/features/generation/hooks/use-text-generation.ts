@@ -203,6 +203,24 @@ export function useTextGeneration({
               case 'fallback_notice':
                 stream.setFallbackNotice({ from: chunk.from, to: chunk.to, reason: chunk.reason });
                 break;
+              case 'continuation_transition': {
+                const transitionPart: MessagePart = {
+                  type: 'continuation_transition',
+                  provider: chunk.provider,
+                  modelName: chunk.modelName,
+                  fromProvider: chunk.fromProvider,
+                  fromMode: chunk.fromMode,
+                  toMode: chunk.toMode,
+                  reasonCode: chunk.reasonCode,
+                  detail: chunk.detail,
+                  recovered: false,
+                };
+                accumulatedParts = [...accumulatedParts, transitionPart];
+                updateOptimisticMessage(activeChatId, optimisticAiMsgId, {
+                  parts: accumulatedParts,
+                });
+                break;
+              }
               case 'system_event': {
                 accumulatedParts = [
                   ...accumulatedParts,
