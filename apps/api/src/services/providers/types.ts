@@ -39,7 +39,7 @@ export interface ToolDefinition {
  *
  * Providers that support native JSON Schema constraints (OpenAI Responses,
  * OpenAI-compatible Chat Completions with `response_format`, Gemini with
- * `response_schema`) map this config to their vendor-specific wire format.
+ * `response_format`) map this config to their vendor-specific wire format.
  * Providers without native support log a warning and continue unconstrained —
  * see each adapter for its degrade path.
  */

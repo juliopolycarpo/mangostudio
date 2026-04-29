@@ -2,7 +2,7 @@
  * Gemini Interactions API agentic turn streaming.
  *
  * Stateful — uses `previous_interaction_id` for server-side continuation.
- * Degrades gracefully to full stateless replay on cursor loss.
+ * Degrades to full replay on safe cursor loss and aborts unsafe tool loops.
  */
 
 import { computeToolsetHash } from '../../../utils/hash';
@@ -40,6 +40,13 @@ interface GeminiInteractionState {
   systemPromptHash: string;
 }
 
+type GeminiInteractionInput = string | Array<Record<string, unknown>>;
+
+interface BuildGeminiInteractionParamsOptions {
+  input: GeminiInteractionInput;
+  previousInteractionId?: string;
+}
+
 /**
  * Parses provider state strictly through the canonical continuation envelope.
  * Legacy state formats are not accepted — they bypass current safety validation
@@ -61,6 +68,93 @@ function parseGeminiState(providerState: string | null | undefined): GeminiInter
   return null;
 }
 
+function parseGeminiToolResult(raw: string): unknown {
+  try {
+    return JSON.parse(raw) as unknown;
+  } catch {
+    return raw;
+  }
+}
+
+function buildGeminiReplayInput(
+  history: AgentTurnRequest['history'],
+  input: GeminiInteractionInput
+): GeminiInteractionInput | Array<Record<string, unknown>> {
+  if (history.length === 0) {
+    return input;
+  }
+
+  const historyTurns = buildGeminiInteractionsReplay(history);
+  const currentTurn =
+    typeof input === 'string' || input.length > 0 ? [{ role: 'user', content: input }] : [];
+
+  return [...historyTurns, ...currentTurn];
+}
+
+function buildGeminiInteractionParams(
+  req: AgentTurnRequest,
+  options: BuildGeminiInteractionParamsOptions
+): Record<string, unknown> {
+  const params: Record<string, unknown> = {
+    model: req.modelName,
+    input: options.previousInteractionId
+      ? options.input
+      : buildGeminiReplayInput(req.history, options.input),
+    store: true,
+    stream: true,
+  };
+
+  if (options.previousInteractionId) {
+    params.previous_interaction_id = options.previousInteractionId;
+  }
+  if (req.systemPrompt?.trim()) {
+    params.system_instruction = req.systemPrompt;
+  }
+
+  const toolDefs = req.toolDefinitions ?? [];
+  if (toolDefs.length > 0) {
+    params.tools = toolDefsToGeminiInteractions(toolDefs);
+  }
+
+  const thinkingConfig = req.generationConfig
+    ? buildInteractionsThinkingConfig(
+        req.modelName,
+        req.generationConfig.thinkingEnabled,
+        req.generationConfig.reasoningEffort
+      )
+    : undefined;
+  if (thinkingConfig) {
+    params.generation_config = thinkingConfig;
+  }
+
+  const structured = req.generationConfig?.structuredOutput;
+  if (structured) {
+    params.response_mime_type = 'application/json';
+    params.response_format = structured.schema;
+  }
+
+  return params;
+}
+
+async function createGeminiInteractionStream(
+  ai: ReturnType<typeof createGeminiClient>,
+  params: Record<string, unknown>,
+  signal: AbortSignal | undefined
+): Promise<AsyncIterable<InteractionSSEEvent>> {
+  const interactions = ai.interactions as {
+    create: (
+      request: ReturnType<typeof toInteractionParams>,
+      options?: { signal?: AbortSignal }
+    ) => Promise<AsyncIterable<InteractionSSEEvent>>;
+  };
+
+  if (!signal) {
+    return interactions.create(toInteractionParams(params));
+  }
+
+  return interactions.create(toInteractionParams(params), { signal });
+}
+
 /**
  * Streams a single agentic turn using the Gemini Interactions API.
  */
@@ -79,19 +173,13 @@ export async function* streamGeminiAgentTurn(req: AgentTurnRequest): AsyncIterab
     prevState.toolsetHash === currentToolsetHash &&
     prevState.systemPromptHash === currentSystemPromptHash;
 
-  let input: unknown;
+  let input: GeminiInteractionInput;
   if (req.toolResults && req.toolResults.length > 0) {
     input = req.toolResults.map((tr) => ({
       type: 'function_result' as const,
       call_id: tr.callId,
       name: tr.name,
-      result: (() => {
-        try {
-          return JSON.parse(tr.result) as unknown;
-        } catch {
-          return tr.result;
-        }
-      })(),
+      result: parseGeminiToolResult(tr.result),
       is_error: tr.isError ?? false,
     }));
   } else if (req.prompt) {
@@ -101,54 +189,13 @@ export async function* streamGeminiAgentTurn(req: AgentTurnRequest): AsyncIterab
     return;
   }
 
-  const interactionParams: Record<string, unknown> = { model: req.modelName, input };
-
-  if (canContinue) {
-    interactionParams.previous_interaction_id = prevState.interactionId;
-  } else {
-    if (req.history.length > 0) {
-      const historyTurns = buildGeminiInteractionsReplay(req.history);
-      const currentContent =
-        typeof input === 'string' ? input : (input as unknown[]).length > 0 ? input : undefined;
-      interactionParams.input = [
-        ...historyTurns,
-        ...(currentContent !== undefined ? [{ role: 'user', content: currentContent }] : []),
-      ];
-    }
-
-    if (req.systemPrompt?.trim()) {
-      interactionParams.system_instruction = req.systemPrompt;
-    }
-    if (toolDefs.length > 0) {
-      interactionParams.tools = toolDefsToGeminiInteractions(toolDefs);
-    }
-  }
-
-  if (req.generationConfig) {
-    const thinkingGenConfig = buildInteractionsThinkingConfig(
-      req.modelName,
-      req.generationConfig.thinkingEnabled,
-      req.generationConfig.reasoningEffort
-    );
-    if (thinkingGenConfig) {
-      interactionParams.generation_config = thinkingGenConfig;
-    }
-
-    const structured = req.generationConfig.structuredOutput;
-    if (structured) {
-      const existing =
-        (interactionParams.generation_config as Record<string, unknown> | undefined) ?? {};
-      interactionParams.generation_config = {
-        ...existing,
-        response_mime_type: 'application/json',
-        response_schema: structured.schema,
-      };
-    }
-  }
+  const interactionParams = buildGeminiInteractionParams(req, {
+    input,
+    previousInteractionId: canContinue ? prevState.interactionId : undefined,
+  });
 
   try {
-    interactionParams.stream = true;
-    const stream = await ai.interactions.create(toInteractionParams(interactionParams));
+    const stream = await createGeminiInteractionStream(ai, interactionParams, req.signal);
 
     yield* processGeminiInteractionStream(stream, req, currentToolsetHash);
   } catch (err: unknown) {
@@ -163,6 +210,25 @@ export async function* streamGeminiAgentTurn(req: AgentTurnRequest): AsyncIterab
         /NOT_FOUND/.test(errMsg));
 
     if (isCursorError) {
+      if (req.toolResults && req.toolResults.length > 0) {
+        console.warn(
+          `[fallback][degrade] provider=gemini reason=cursor_error` +
+            ` toolResults=true tool loop aborted`
+        );
+
+        yield {
+          type: 'continuation_degraded',
+          from: 'interactions',
+          to: 'tool_loop_aborted',
+          reason: 'cursor_error during tool-result continuation',
+        };
+        yield {
+          type: 'turn_error',
+          error: 'Server-side continuation cursor expired during tool execution.',
+        };
+        return;
+      }
+
       console.warn(
         `[fallback][degrade] provider=gemini reason=cursor_error` +
           ` model=${req.modelName} falling back to stateless replay`
@@ -176,52 +242,8 @@ export async function* streamGeminiAgentTurn(req: AgentTurnRequest): AsyncIterab
       };
 
       try {
-        const historyTurns = buildGeminiInteractionsReplay(req.history);
-        const currentContent =
-          typeof input === 'string'
-            ? input
-            : Array.isArray(input) && (input as unknown[]).length > 0
-              ? input
-              : undefined;
-
-        const retryParams: Record<string, unknown> = {
-          model: req.modelName,
-          input: [
-            ...historyTurns,
-            ...(currentContent !== undefined ? [{ role: 'user', content: currentContent }] : []),
-          ],
-          stream: true,
-        };
-
-        if (req.systemPrompt?.trim()) {
-          retryParams.system_instruction = req.systemPrompt;
-        }
-        if (toolDefs.length > 0) {
-          retryParams.tools = toolDefsToGeminiInteractions(toolDefs);
-        }
-        if (req.generationConfig) {
-          const retryThinkingConfig = buildInteractionsThinkingConfig(
-            req.modelName,
-            req.generationConfig.thinkingEnabled,
-            req.generationConfig.reasoningEffort
-          );
-          if (retryThinkingConfig) {
-            retryParams.generation_config = retryThinkingConfig;
-          }
-
-          const structured = req.generationConfig.structuredOutput;
-          if (structured) {
-            const existing =
-              (retryParams.generation_config as Record<string, unknown> | undefined) ?? {};
-            retryParams.generation_config = {
-              ...existing,
-              response_mime_type: 'application/json',
-              response_schema: structured.schema,
-            };
-          }
-        }
-
-        const retryStream = await ai.interactions.create(toInteractionParams(retryParams));
+        const retryParams = buildGeminiInteractionParams(req, { input });
+        const retryStream = await createGeminiInteractionStream(ai, retryParams, req.signal);
 
         yield* processGeminiInteractionStream(retryStream, req, currentToolsetHash);
       } catch (retryErr: unknown) {
