@@ -13,10 +13,10 @@ import { extractReasoningChunks } from '../openai/normalizers';
 import { createCompatibleClient } from './client';
 import { classifyEndpoint } from './endpoint-classifier';
 import { streamOAICompatAgentTurn } from './chat-completions-stream';
+import { resolveCompatibleClientConfig } from './resolve-client-config';
 import { getConfig } from '../../../lib/config';
 import { join } from 'path';
 import { mkdirSync } from 'fs';
-import { parseStringArray } from '../../../utils/json';
 import type {
   AIProvider,
   TextGenerationRequest,
@@ -50,22 +50,7 @@ async function resolveClientConfig(
   modelName?: string
 ): Promise<{ apiKey: string; baseUrl: string }> {
   const rows = await secretService.listMeta('openai-compatible', userId);
-
-  for (const row of rows) {
-    if (!row.configured) continue;
-    if (!row.baseUrl) continue;
-    const enabled = parseStringArray(row.enabledModels);
-    if (modelName && enabled.length > 0 && !enabled.includes(modelName)) continue;
-
-    const apiKey = await secretService.resolveSecretValue(row);
-    if (apiKey) {
-      return { apiKey, baseUrl: row.baseUrl };
-    }
-  }
-
-  throw new Error(
-    'No openai-compatible connector with a valid baseUrl is configured for this model.'
-  );
+  return resolveCompatibleClientConfig(rows, secretService.resolveSecretValue, modelName);
 }
 
 const listModelsWithCache = withModelCache(

@@ -5,6 +5,8 @@ import {
   computeContextSnapshot,
   recommendContextAction,
   getContextSeverity,
+  buildPersistedContextSnapshot,
+  parsePersistedContextSnapshot,
   type ContextSnapshot,
 } from '../../../../src/services/providers/context-policy';
 import type { ChatTurnContext } from '../../../../src/services/providers/types';
@@ -315,6 +317,41 @@ describe('recommendContextAction', () => {
   it('returns hard_stop at 97% and above', () => {
     expect(recommendContextAction(makeSnapshot(0.97))).toBe('hard_stop');
     expect(recommendContextAction(makeSnapshot(1.0))).toBe('hard_stop');
+  });
+});
+
+describe('persisted context snapshots', () => {
+  const snapshot: ContextSnapshot = {
+    estimatedInputTokens: 75_000,
+    providerReportedInputTokens: 75_000,
+    contextLimit: 100_000,
+    estimatedUsageRatio: 0.75,
+    mode: 'replay',
+  };
+
+  it('adds severity and timestamp for storage', () => {
+    const persisted = buildPersistedContextSnapshot(snapshot, 123456);
+
+    expect(persisted).toEqual({
+      ...snapshot,
+      severity: 'info',
+      lastUpdatedAt: 123456,
+    });
+  });
+
+  it('parses a valid persisted snapshot', () => {
+    const persisted = buildPersistedContextSnapshot(snapshot, 123456);
+    const parsed = parsePersistedContextSnapshot(JSON.stringify(persisted));
+
+    expect(parsed).toEqual(persisted);
+  });
+
+  it('returns null for malformed persisted snapshots', () => {
+    expect(parsePersistedContextSnapshot(null)).toBeNull();
+    expect(parsePersistedContextSnapshot('not-json')).toBeNull();
+    expect(
+      parsePersistedContextSnapshot(JSON.stringify({ ...snapshot, severity: 'loud' }))
+    ).toBeNull();
   });
 });
 

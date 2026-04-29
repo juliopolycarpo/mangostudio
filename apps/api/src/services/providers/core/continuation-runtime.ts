@@ -30,14 +30,36 @@ export type ContinuationDecision =
 
 export interface ContinuationStrategy {
   provider: ProviderType;
+  strategy: 'durable-cursor' | 'replay' | 'turn-local';
+  supportsDurableCursor: boolean;
   durableMode: ContinuationMode | null;
 }
 
 export const CONTINUATION_STRATEGIES: Record<ProviderType, ContinuationStrategy> = {
-  openai: { provider: 'openai', durableMode: 'responses' },
-  gemini: { provider: 'gemini', durableMode: 'interactions' },
-  'openai-compatible': { provider: 'openai-compatible', durableMode: null },
-  anthropic: { provider: 'anthropic', durableMode: null },
+  openai: {
+    provider: 'openai',
+    strategy: 'durable-cursor',
+    supportsDurableCursor: true,
+    durableMode: 'responses',
+  },
+  gemini: {
+    provider: 'gemini',
+    strategy: 'durable-cursor',
+    supportsDurableCursor: true,
+    durableMode: 'interactions',
+  },
+  'openai-compatible': {
+    provider: 'openai-compatible',
+    strategy: 'replay',
+    supportsDurableCursor: false,
+    durableMode: null,
+  },
+  anthropic: {
+    provider: 'anthropic',
+    strategy: 'turn-local',
+    supportsDurableCursor: false,
+    durableMode: null,
+  },
 };
 
 export function getContinuationStrategy(provider: ProviderType): ContinuationStrategy {

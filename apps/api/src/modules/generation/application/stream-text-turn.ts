@@ -1,6 +1,6 @@
 import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';
-import type { MessagePart, ReasoningEffort } from '@mangostudio/shared';
+import type { MessagePart, ProviderType, ReasoningEffort } from '@mangostudio/shared';
 import type { AgentTurnRequest } from '../../../services/providers/types';
 import { assertChatOwnership } from '../../chats/domain/chat-ownership';
 import { resolveModel } from './resolve-model';
@@ -19,11 +19,13 @@ import {
   computeToolsetHash,
   decideContinuation,
   decideTurnPersistence,
+  getContinuationStrategy,
   type ContinuationEnvelope,
 } from '../../../services/providers/continuation';
 import {
+  buildPersistedContextSnapshot,
   computeContextSnapshot,
-  getContextSeverity,
+  type ContextSeverity,
   type ContinuationDisplayMode,
 } from '../../../services/providers/context-policy';
 
@@ -59,7 +61,7 @@ export type StreamEvent =
       contextLimit: number;
       estimatedUsageRatio: number;
       mode: ContinuationDisplayMode;
-      severity: ReturnType<typeof getContextSeverity>;
+      severity: ContextSeverity;
     }
   | { type: 'done'; messageId: string; generationTime: string }
   | { type: 'error'; error: string };
@@ -245,31 +247,22 @@ export async function* streamTextTurn(
               const resultEnvelope = persistence.envelope;
               durableProviderState = persistence.durableProviderState;
 
-              if (durableProviderState) {
-                await db
-                  .updateTable('chats')
-                  .set({ lastProviderState: durableProviderState })
-                  .where('id', '=', chatId)
-                  .execute()
-                  .catch((err) => {
-                    console.warn(
-                      `[continuation][persist] Failed to save state on chat row: ${err}`
-                    );
-                  });
-              }
-
               if (resultEnvelope) {
                 console.warn(
                   `[continuation][updated] chatId=${chatId} provider=${resultEnvelope.provider} mode=${resultEnvelope.mode} cursor=${resultEnvelope.cursor ? 'present' : 'none'}`
                 );
               }
 
-              const displayMode = resolveDisplayMode(resultEnvelope, degradedThisTurn);
+              const displayMode = resolveDisplayMode(
+                resultEnvelope,
+                degradedThisTurn,
+                provider.providerType
+              );
               const providerReportedInputTokens =
                 resultEnvelope?.context?.providerReportedInputTokens;
               const turnLocalCharCount =
-                providerReportedInputTokens === undefined && displayMode === 'stateless-loop'
-                  ? computeStatelessLoopCharCount(input.prompt, currentProviderState)
+                providerReportedInputTokens === undefined && displayMode !== 'stateful'
+                  ? computeTurnLocalCharCount(input.prompt, currentProviderState)
                   : undefined;
               const snapshot = computeContextSnapshot({
                 modelName: modelId,
@@ -288,13 +281,26 @@ export async function* streamTextTurn(
                   ` ratio=${snapshot.estimatedUsageRatio.toFixed(2)} mode=${displayMode}`
               );
 
+              const contextState = buildPersistedContextSnapshot(snapshot);
+              await db
+                .updateTable('chats')
+                .set({
+                  lastProviderState: durableProviderState,
+                  lastContextState: JSON.stringify(contextState),
+                })
+                .where('id', '=', chatId)
+                .execute()
+                .catch((err) => {
+                  console.warn(`[continuation][persist] Failed to save turn state: ${err}`);
+                });
+
               yield {
                 type: 'context_info',
                 estimatedInputTokens: snapshot.estimatedInputTokens,
                 contextLimit: snapshot.contextLimit,
                 estimatedUsageRatio: snapshot.estimatedUsageRatio,
                 mode: displayMode,
-                severity: getContextSeverity(snapshot.estimatedUsageRatio),
+                severity: contextState.severity,
               };
               break;
             }
@@ -531,19 +537,20 @@ export async function* streamTextTurn(
  */
 function resolveDisplayMode(
   envelope: ContinuationEnvelope | null,
-  degraded: boolean
+  degraded: boolean,
+  providerType: ProviderType
 ): ContinuationDisplayMode {
+  if (getContinuationStrategy(providerType).strategy === 'replay') return 'replay';
   if (envelope?.cursor) return 'stateful';
   if (envelope?.mode === 'stateless-loop' && !degraded) return 'stateless-loop';
   return 'replay';
 }
 
 /**
- * Approximate the character count of the turn-local payload that accompanies
- * a stateless-loop request (user prompt + accumulated loop messages), for use
- * by the local token estimator when the provider did not report usage.
+ * Approximate the character count of live request payload that is not yet in
+ * persisted history, for use when the provider did not report token usage.
  */
-function computeStatelessLoopCharCount(
+function computeTurnLocalCharCount(
   prompt: string,
   providerState: string | null
 ): number | undefined {

@@ -16,6 +16,8 @@ export interface ChatRow {
   imageModel: string | null;
   lastUsedMode: string | null;
   userId: string | null;
+  lastProviderState: string | null;
+  lastContextState: string | null;
 }
 
 /** Raw row returned by SELECT * FROM messages. */

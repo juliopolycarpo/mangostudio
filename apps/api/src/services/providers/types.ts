@@ -86,9 +86,9 @@ export interface AgentTurnRequest {
   }>;
   toolDefinitions?: ToolDefinition[];
   /**
-   * Opaque provider state from the previous turn (or previous loop iteration).
-   * Stateful providers use this as a cursor; stateless providers use it to carry
-   * the accumulated in-memory loop messages.
+   * Opaque provider state for the current call.
+   * Stateful providers receive durable cursors; replay providers receive only
+   * turn-local loop state between tool iterations in the same request.
    */
   providerState?: string | null;
   signal?: AbortSignal;

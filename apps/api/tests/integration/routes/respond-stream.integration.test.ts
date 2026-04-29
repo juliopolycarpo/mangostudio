@@ -92,6 +92,20 @@ function makeChain(firstValue: unknown): Record<string, unknown> {
   return proxy;
 }
 
+function parseSseEvents(rawText: string): Array<Record<string, unknown>> {
+  return rawText
+    .split('\n\n')
+    .filter((block) => block.startsWith('data: '))
+    .map((block) => {
+      try {
+        return JSON.parse(block.replace(/^data: /, '')) as Record<string, unknown>;
+      } catch {
+        return null;
+      }
+    })
+    .filter((event): event is Record<string, unknown> => event !== null);
+}
+
 describe('POST /respond/stream', () => {
   it('returns 404 when chat is not found', async () => {
     await mock.module('../../../src/modules/chats/infrastructure/chat-repository', () => ({
@@ -248,7 +262,9 @@ describe('POST /respond/stream', () => {
       })
     );
 
-    await response.text();
+    const rawText = await response.text();
+
+    const sseEvents = parseSseEvents(rawText);
 
     // The AI message row must have providerState = null (not the stateless-loop state)
     const aiMessage = insertedMessages.find((m) => m.role === 'ai');
@@ -260,6 +276,20 @@ describe('POST /respond/stream', () => {
       (u) => 'lastProviderState' in u && u.lastProviderState !== null
     );
     expect(durableUpdate).toBeUndefined();
+
+    const contextInfo = sseEvents.find((e) => e.type === 'context_info');
+    expect(contextInfo).toMatchObject({ type: 'context_info', mode: 'replay' });
+    expect(typeof contextInfo?.estimatedInputTokens).toBe('number');
+
+    const contextUpdate = chatSetCalls.find((u) => typeof u.lastContextState === 'string');
+    expect(contextUpdate?.lastProviderState).toBeNull();
+
+    const persistedContext = JSON.parse(contextUpdate?.lastContextState as string) as Record<
+      string,
+      unknown
+    >;
+    expect(persistedContext).toMatchObject({ mode: 'replay', severity: 'normal' });
+    expect(typeof persistedContext.estimatedInputTokens).toBe('number');
   });
 
   it('returns 503 when model catalog is not configured', async () => {
@@ -388,17 +418,7 @@ describe('POST /respond/stream', () => {
     const rawText = await response.text();
 
     // Parse SSE lines
-    const sseEvents = rawText
-      .split('\n\n')
-      .filter((block) => block.startsWith('data: '))
-      .map((block) => {
-        try {
-          return JSON.parse(block.replace(/^data: /, '')) as Record<string, unknown>;
-        } catch {
-          return null;
-        }
-      })
-      .filter((e): e is Record<string, unknown> => e !== null);
+    const sseEvents = parseSseEvents(rawText);
 
     // Assert fallback_notice is emitted
     const fallbackNotice = sseEvents.find((e) => e.type === 'fallback_notice');
@@ -478,17 +498,7 @@ describe('POST /respond/stream', () => {
     expect(response.status).toBe(200);
     const rawText = await response.text();
 
-    const sseEvents = rawText
-      .split('\n\n')
-      .filter((block) => block.startsWith('data: '))
-      .map((block) => {
-        try {
-          return JSON.parse(block.replace(/^data: /, '')) as Record<string, unknown>;
-        } catch {
-          return null;
-        }
-      })
-      .filter((e): e is Record<string, unknown> => e !== null);
+    const sseEvents = parseSseEvents(rawText);
 
     const fallbackNotice = sseEvents.find((e) => e.type === 'fallback_notice');
     expect(fallbackNotice).toBeDefined();
@@ -558,17 +568,7 @@ describe('POST /respond/stream', () => {
     expect(response.status).toBe(200);
     const rawText = await response.text();
 
-    const sseEvents = rawText
-      .split('\n\n')
-      .filter((block) => block.startsWith('data: '))
-      .map((block) => {
-        try {
-          return JSON.parse(block.replace(/^data: /, '')) as Record<string, unknown>;
-        } catch {
-          return null;
-        }
-      })
-      .filter((e): e is Record<string, unknown> => e !== null);
+    const sseEvents = parseSseEvents(rawText);
 
     const contextInfo = sseEvents.find((e) => e.type === 'context_info');
     expect(contextInfo).toBeDefined();
@@ -646,17 +646,7 @@ describe('POST /respond/stream', () => {
     expect(response.status).toBe(200);
     const rawText = await response.text();
 
-    const sseEvents = rawText
-      .split('\n\n')
-      .filter((block) => block.startsWith('data: '))
-      .map((block) => {
-        try {
-          return JSON.parse(block.replace(/^data: /, '')) as Record<string, unknown>;
-        } catch {
-          return null;
-        }
-      })
-      .filter((e): e is Record<string, unknown> => e !== null);
+    const sseEvents = parseSseEvents(rawText);
 
     // Must emit a terminal error event and no done event
     const errorEvent = sseEvents.find((e) => e.type === 'error');
@@ -735,17 +725,7 @@ describe('POST /respond/stream', () => {
     expect(response.status).toBe(200);
     const rawText = await response.text();
 
-    const sseEvents = rawText
-      .split('\n\n')
-      .filter((block) => block.startsWith('data: '))
-      .map((block) => {
-        try {
-          return JSON.parse(block.replace(/^data: /, '')) as Record<string, unknown>;
-        } catch {
-          return null;
-        }
-      })
-      .filter((e): e is Record<string, unknown> => e !== null);
+    const sseEvents = parseSseEvents(rawText);
 
     // Must emit system_event with event=tool_loop_exhausted
     const exhaustedEvent = sseEvents.find(
@@ -854,17 +834,7 @@ describe('POST /respond/stream', () => {
     expect(response.status).toBe(200);
     const rawText = await response.text();
 
-    const sseEvents = rawText
-      .split('\n\n')
-      .filter((block) => block.startsWith('data: '))
-      .map((block) => {
-        try {
-          return JSON.parse(block.replace(/^data: /, '')) as Record<string, unknown>;
-        } catch {
-          return null;
-        }
-      })
-      .filter((e): e is Record<string, unknown> => e !== null);
+    const sseEvents = parseSseEvents(rawText);
 
     // Must emit fallback_notice because of provider switch
     const fallbackNotice = sseEvents.find((e) => e.type === 'fallback_notice');
@@ -945,17 +915,7 @@ describe('POST /respond/stream', () => {
     expect(response.status).toBe(200);
     const rawText = await response.text();
 
-    const sseEvents = rawText
-      .split('\n\n')
-      .filter((block) => block.startsWith('data: '))
-      .map((block) => {
-        try {
-          return JSON.parse(block.replace(/^data: /, '')) as Record<string, unknown>;
-        } catch {
-          return null;
-        }
-      })
-      .filter((e): e is Record<string, unknown> => e !== null);
+    const sseEvents = parseSseEvents(rawText);
 
     const textEvent = sseEvents.find((e) => e.type === 'text');
     expect(textEvent).toBeDefined();

@@ -10,6 +10,7 @@ import { openaiProviderSplit } from './009_openai_provider_split';
 import { openaiAuthContext } from './010_openai_auth_context';
 import { messageParts } from './011_message_parts';
 import { chatProviderState } from './012_chat_provider_state';
+import { chatContextState } from './013_chat_context_state';
 
 export const allMigrations = {
   '001_initial_schema': initialSchema,
@@ -24,4 +25,5 @@ export const allMigrations = {
   '010_openai_auth_context': openaiAuthContext,
   '011_message_parts': messageParts,
   '012_chat_provider_state': chatProviderState,
+  '013_chat_context_state': chatContextState,
 };

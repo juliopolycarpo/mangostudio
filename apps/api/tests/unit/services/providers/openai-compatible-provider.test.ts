@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import type { SecretMetadataRow } from '@mangostudio/shared/types';
 import type { SecretMetadataInput } from '../../../../src/services/secret-store/metadata';
 import { createProviderSecretService } from '../../../../src/services/providers/secret-service';
+import { resolveCompatibleClientConfig } from '../../../../src/services/providers/openai-compatible/resolve-client-config';
 import { InMemorySecretStore } from '../../../support/mocks/mock-secret-store';
 
 const TEST_USER = 'test-user-oai-compat';
@@ -96,6 +97,32 @@ function createTestService(
   };
 }
 
+interface CaptureCall {
+  args?: Record<string, unknown>;
+}
+
+function makeFakeClient(
+  chunks: Array<Record<string, unknown>>,
+  capture: CaptureCall = {}
+): unknown {
+  return {
+    chat: {
+      completions: {
+        create: (args: Record<string, unknown>) => {
+          capture.args = args;
+          async function* iter(): AsyncIterable<unknown> {
+            for (const c of chunks) {
+              await Promise.resolve();
+              yield c;
+            }
+          }
+          return Promise.resolve(iter());
+        },
+      },
+    },
+  };
+}
+
 describe('openai-compatible-provider', () => {
   it('providerType is openai-compatible', async () => {
     const { openAICompatibleProvider } =
@@ -157,19 +184,16 @@ describe('openai-compatible resolveClientConfig (via secretService)', () => {
   });
 
   it('throws with the correct error message when no connector has a valid baseUrl', async () => {
-    const { openAICompatibleProvider } =
-      await import('../../../../src/services/providers/openai-compatible-provider');
+    const rowWithoutUrl = makeCompatRow({ baseUrl: null });
 
-    // The real provider throws this specific error when no eligible connector is found.
-    // 'user-with-no-valid-connectors' has no connectors in the test DB.
     await (expect(
-      openAICompatibleProvider.resolveApiKey('user-with-no-valid-connectors')
+      resolveCompatibleClientConfig([rowWithoutUrl], () => Promise.resolve('sk-test'))
     ).rejects.toThrow(
       'No openai-compatible connector with a valid baseUrl is configured for this model.'
     ) as unknown as Promise<void>);
   });
 
-  it('picks the connector with the matching enabledModel when two connectors exist', () => {
+  it('picks the connector with the matching enabledModel when two connectors exist', async () => {
     const rowA = makeCompatRow({
       id: 'compat-a',
       name: 'openrouter',
@@ -183,32 +207,19 @@ describe('openai-compatible resolveClientConfig (via secretService)', () => {
       enabledModels: JSON.stringify(['deepseek-chat']),
     });
 
-    // Verify the filter logic: with modelName 'deepseek-chat', rowA is skipped
-    const rows = [rowA, rowB];
-    const MODEL_NAME = 'deepseek-chat';
+    const resolved = await resolveCompatibleClientConfig(
+      [rowA, rowB],
+      (row) => Promise.resolve(`key-for-${row.id}`),
+      'deepseek-chat'
+    );
 
-    const matching = rows.filter((row) => {
-      if (!row.configured) return false;
-      if (!row.baseUrl) return false;
-      const enabled = JSON.parse(row.enabledModels) as string[];
-      if (MODEL_NAME && enabled.length > 0 && !enabled.includes(MODEL_NAME)) return false;
-      return true;
-    });
-
-    expect(matching).toHaveLength(1);
-    expect(matching[0].id).toBe('compat-b');
-    expect(matching[0].baseUrl).toBe(DEEPSEEK_BASE_URL);
+    expect(resolved).toEqual({ apiKey: 'key-for-compat-b', baseUrl: DEEPSEEK_BASE_URL });
   });
 
   it('does NOT fall back to https://api.openai.com/v1', async () => {
-    // The openai-compatible provider must never use the OpenAI base URL.
-    // When no connector has a baseUrl, it should throw rather than fall back.
-    const { openAICompatibleProvider } =
-      await import('../../../../src/services/providers/openai-compatible-provider');
-
     let thrownError: unknown = null;
     try {
-      await openAICompatibleProvider.resolveApiKey('user-no-fallback-test');
+      await resolveCompatibleClientConfig([], () => Promise.resolve('sk-test'));
     } catch (error) {
       thrownError = error;
     }
@@ -220,27 +231,21 @@ describe('openai-compatible resolveClientConfig (via secretService)', () => {
 });
 
 describe('openai-compatible generateAgentTurnStream turn_completed contract', () => {
-  it('emits turn_completed with mode=stateless-loop when connectors are present', async () => {
-    // Confirms the provider surface contract: the route is responsible for
-    // non-persistence of turn-local state, not the provider itself.
-    //
-    // This test is intentionally environment-dependent: on CI or machines
-    // without an openai-compatible connector configured it passes vacuously.
-    // The definitive contract assertion is in the integration test
-    // (respond-stream.integration.test.ts).
+  it('emits turn_completed with mode=stateless-loop', async () => {
     const { parseContinuationEnvelope } =
       await import('../../../../src/services/providers/continuation');
-    const { openAICompatibleProvider } =
-      await import('../../../../src/services/providers/openai-compatible-provider');
+    const { streamOAICompatAgentTurn } =
+      await import('../../../../src/services/providers/openai-compatible/chat-completions-stream');
+    const fakeClient = makeFakeClient([
+      { choices: [{ delta: { content: 'Hi' }, finish_reason: null }] },
+      { choices: [{ delta: {}, finish_reason: 'stop' }] },
+    ]);
 
     const events: Array<{ type: string; providerState?: string }> = [];
 
-    try {
-      if (!openAICompatibleProvider.generateAgentTurnStream) {
-        throw new Error('openAICompatibleProvider.generateAgentTurnStream must be implemented');
-      }
-
-      for await (const event of openAICompatibleProvider.generateAgentTurnStream({
+    for await (const event of streamOAICompatAgentTurn(
+      fakeClient as Parameters<typeof streamOAICompatAgentTurn>[0],
+      {
         userId: 'test-user-no-connectors',
         modelName: 'test-model',
         systemPrompt: undefined,
@@ -250,48 +255,20 @@ describe('openai-compatible generateAgentTurnStream turn_completed contract', ()
         providerState: null,
         signal: new AbortController().signal,
         generationConfig: { thinkingEnabled: false, reasoningEffort: 'medium' },
-      })) {
-        events.push(event);
       }
-    } catch {
-      // resolveClientConfig throws when no connectors are configured — that is
-      // expected in CI. The turn_completed contract is covered by the
-      // integration test which mocks the full provider chain.
+    )) {
+      events.push(event);
     }
 
     const turnCompleted = events.find((e) => e.type === 'turn_completed');
-    if (turnCompleted) {
-      const envelope = parseContinuationEnvelope(turnCompleted.providerState ?? null);
-      expect(envelope).not.toBeNull();
-      expect(envelope?.mode).toBe('stateless-loop');
-    }
+    const envelope = parseContinuationEnvelope(turnCompleted?.providerState ?? null);
+
+    expect(envelope).not.toBeNull();
+    expect(envelope?.mode).toBe('stateless-loop');
   });
 });
 
 describe('openai-compatible chat-completions-stream token accounting', () => {
-  interface CaptureCall {
-    args?: Record<string, unknown>;
-  }
-
-  function makeFakeClient(chunks: Array<Record<string, unknown>>, capture: CaptureCall): unknown {
-    return {
-      chat: {
-        completions: {
-          create: (args: Record<string, unknown>) => {
-            capture.args = args;
-            async function* iter(): AsyncIterable<unknown> {
-              for (const c of chunks) {
-                await Promise.resolve();
-                yield c;
-              }
-            }
-            return Promise.resolve(iter());
-          },
-        },
-      },
-    };
-  }
-
   it('sets stream_options.include_usage on chat.completions.create', async () => {
     const { streamOAICompatAgentTurn } =
       await import('../../../../src/services/providers/openai-compatible/chat-completions-stream');
@@ -361,9 +338,10 @@ describe('openai-compatible chat-completions-stream token accounting', () => {
     const turnCompleted = events.find((e) => e.type === 'turn_completed');
     expect(turnCompleted).toBeDefined();
     const parsed = JSON.parse(turnCompleted?.providerState ?? '{}') as {
-      context?: { providerReportedInputTokens?: number };
+      context?: { providerReportedInputTokens?: number; contextLimit?: number };
     };
     expect(parsed.context?.providerReportedInputTokens).toBe(1234);
+    expect(parsed.context?.contextLimit).toBe(128_000);
   });
 
   it('omits context when usage is not reported by the endpoint', async () => {
@@ -442,11 +420,14 @@ describe('openai-compatible listModels filtering', () => {
     expect(seenBaseUrls.get(OPENROUTER_BASE_URL)).toBe('dup-1');
   });
 
-  it('returns empty array when no connectors are configured', async () => {
-    const { openAICompatibleProvider } =
-      await import('../../../../src/services/providers/openai-compatible-provider');
-    const models = await openAICompatibleProvider.listModels('nonexistent-user-no-compat-keys');
-    expect(models).toEqual([]);
+  it('does not resolve an unconfigured connector', async () => {
+    await (expect(
+      resolveCompatibleClientConfig([makeCompatRow({ configured: 0 })], () =>
+        Promise.resolve('sk-test')
+      )
+    ).rejects.toThrow(
+      'No openai-compatible connector with a valid baseUrl is configured for this model.'
+    ) as unknown as Promise<void>);
   });
 });
 

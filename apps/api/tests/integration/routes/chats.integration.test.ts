@@ -5,6 +5,7 @@ import {
   createAuthenticatedApiTestApp,
 } from '../../support/harness/create-api-test-app';
 import { getDb } from '../../../src/db/database';
+import { buildPersistedContextSnapshot } from '../../../src/services/providers/context-policy';
 
 const TEST_USER = {
   id: 'test-user-chats',
@@ -50,6 +51,54 @@ describe('GET /chats', () => {
     expect(response.status).toBe(200);
     const body = await response.json();
     expect(Array.isArray(body)).toBe(true);
+  });
+
+  it('returns persisted context info without provider internals', async () => {
+    const db = getDb();
+    const chatId = `context-list-${Date.now()}`;
+    const lastContextState = JSON.stringify(
+      buildPersistedContextSnapshot(
+        {
+          estimatedInputTokens: 90_000,
+          contextLimit: 100_000,
+          estimatedUsageRatio: 0.9,
+          mode: 'replay',
+        },
+        123456
+      )
+    );
+
+    await db
+      .insertInto('chats')
+      .values({
+        id: chatId,
+        title: 'Context Chat',
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        model: null,
+        userId: TEST_USER.id,
+        lastContextState,
+      })
+      .execute();
+
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, chatRoutes);
+    restoreAuth = restore;
+
+    const response = await app.handle(new Request('http://localhost/chats'));
+    expect(response.status).toBe(200);
+
+    const body = (await response.json()) as Array<Record<string, unknown>>;
+    const chat = body.find((item) => item.id === chatId);
+
+    expect(chat?.contextInfo).toMatchObject({
+      estimatedInputTokens: 90_000,
+      contextLimit: 100_000,
+      estimatedUsageRatio: 0.9,
+      mode: 'replay',
+      severity: 'warning',
+    });
+    expect(chat).not.toHaveProperty('lastProviderState');
+    expect(chat).not.toHaveProperty('lastContextState');
   });
 });
 
@@ -316,6 +365,64 @@ describe('GET /chats/:id/messages', () => {
     expect(Array.isArray(body.messages)).toBe(true);
     expect(body.messages.length).toBe(2);
     expect(body.nextCursor).toBeNull();
+  });
+
+  it('returns persisted context info on the first messages page', async () => {
+    const db = getDb();
+    const chatId = `messages-context-${Date.now()}`;
+    const lastContextState = JSON.stringify(
+      buildPersistedContextSnapshot(
+        {
+          estimatedInputTokens: 12_000,
+          contextLimit: 65_536,
+          estimatedUsageRatio: 12_000 / 65_536,
+          mode: 'replay',
+        },
+        123456
+      )
+    );
+
+    await db
+      .insertInto('chats')
+      .values({
+        id: chatId,
+        title: 'Messages Context Chat',
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        model: null,
+        userId: TEST_USER.id,
+        lastContextState,
+      })
+      .execute();
+
+    await db
+      .insertInto('messages')
+      .values({
+        id: `msg-context-${chatId}`,
+        chatId,
+        role: 'ai',
+        text: 'Context response',
+        timestamp: Date.now(),
+        isGenerating: 0,
+        interactionMode: 'chat',
+      })
+      .execute();
+
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, chatRoutes);
+    restoreAuth = restore;
+
+    const response = await app.handle(
+      new Request(`http://localhost/chats/${chatId}/messages?limit=50`)
+    );
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { contextInfo?: Record<string, unknown> | null };
+    expect(body.contextInfo).toMatchObject({
+      estimatedInputTokens: 12_000,
+      contextLimit: 65_536,
+      mode: 'replay',
+      severity: 'normal',
+    });
   });
 
   it('returns nextCursor when results exceed the limit', async () => {
