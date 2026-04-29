@@ -70,11 +70,13 @@ function buildEnvelope(req: AgentTurnRequest, cursor = 'int_prev'): string {
 }
 
 async function collect(req: AgentTurnRequest, create: CreateFn): Promise<AgentEvent[]> {
+  await mock.module('@google/genai', () => ({
+    GoogleGenAI: class {
+      interactions = { create };
+    },
+  }));
   await mock.module('../../../../src/services/providers/gemini/secret', () => ({
     getResolvedGeminiApiKey: () => Promise.resolve('gemini-key'),
-  }));
-  await mock.module('../../../../src/services/providers/gemini/client', () => ({
-    createGeminiClient: () => ({ interactions: { create } }),
   }));
 
   const { streamGeminiAgentTurn } =
