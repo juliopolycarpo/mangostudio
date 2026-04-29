@@ -16,10 +16,10 @@ import {
 } from '../infrastructure/conversation-persistence';
 import {
   parseContinuationEnvelope,
-  validateContinuationEnvelope,
   computeSystemPromptHash,
   computeToolsetHash,
-  isDurableMode,
+  decideContinuation,
+  isDurableEnvelope,
 } from '../../../services/providers/continuation';
 import {
   computeContextSnapshot,
@@ -113,27 +113,33 @@ export async function* streamTextTurn(
         .select('lastProviderState')
         .where('id', '=', chatId)
         .executeTakeFirst();
-      let currentProviderState: string | null = chatRow?.lastProviderState ?? null;
+      const lastProviderState = chatRow?.lastProviderState ?? null;
 
-      const envelope = parseContinuationEnvelope(currentProviderState);
-      if (envelope) {
-        const currentSystemPromptHash = computeSystemPromptHash(systemPrompt);
-        const currentToolsetHash = computeToolsetHash(toolDefs);
-        const validation = validateContinuationEnvelope(envelope, {
-          provider: provider.providerType,
-          modelName: modelId,
-          systemPromptHash: currentSystemPromptHash,
-          toolsetHash: currentToolsetHash,
-        });
+      const currentSystemPromptHash = computeSystemPromptHash(systemPrompt);
+      const currentToolsetHash = computeToolsetHash(toolDefs);
 
-        if (!validation.valid) {
+      const decision = decideContinuation({
+        lastProviderState,
+        provider: provider.providerType,
+        modelName: modelId,
+        systemPromptHash: currentSystemPromptHash,
+        toolsetHash: currentToolsetHash,
+      });
+
+      let currentProviderState: string | null = null;
+
+      switch (decision.type) {
+        case 'continue_with_cursor':
+          currentProviderState = decision.providerState;
           console.warn(
-            `[continuation][invalid] chatId=${chatId} reason="${validation.reason}" provider=${provider.providerType} model=${modelId}`
+            `[continuation][valid] chatId=${chatId} provider=${provider.providerType} model=${modelId} mode=${decision.envelope.mode}`
           );
+          break;
+        case 'degrade_to_replay': {
           const fallback = {
-            from: envelope.mode,
+            from: decision.previousMode,
             to: 'replay',
-            reason: validation.reason ?? 'unknown',
+            reason: decision.reason,
           };
           yield { type: 'fallback_notice', ...fallback };
           console.warn(
@@ -150,11 +156,11 @@ export async function* streamTextTurn(
             detail: `${fallback.from} → ${fallback.to}`,
           };
           currentProviderState = null;
-        } else {
-          console.warn(
-            `[continuation][valid] chatId=${chatId} provider=${provider.providerType} model=${modelId} mode=${envelope.mode}`
-          );
+          break;
         }
+        case 'start_replay':
+          currentProviderState = null;
+          break;
       }
 
       const maxIter = Math.max(
@@ -238,8 +244,9 @@ export async function* streamTextTurn(
               turnCompleted = true;
 
               const resultEnvelope = parseContinuationEnvelope(currentProviderState);
-              durableProviderState =
-                resultEnvelope && isDurableMode(resultEnvelope.mode) ? currentProviderState : null;
+              durableProviderState = isDurableEnvelope(resultEnvelope, provider.providerType)
+                ? currentProviderState
+                : null;
 
               if (durableProviderState) {
                 await db
@@ -567,43 +574,38 @@ function computeStatelessLoopCharCount(
 }
 
 function mergeMessageParts(allParts: MessagePart[]): MessagePart[] {
-  // Merge consecutive thinking chunks into segments, preserving interleaved order
-  const orderedSegments: MessagePart[] = [];
-  let currentThinkingSegment = '';
+  const finalParts: MessagePart[] = [];
+  let thinkingRun = '';
+  let textRun = '';
+
+  const flushThinking = () => {
+    if (thinkingRun) {
+      finalParts.push({ type: 'thinking', text: thinkingRun });
+      thinkingRun = '';
+    }
+  };
+  const flushText = () => {
+    if (textRun) {
+      finalParts.push({ type: 'text', text: textRun });
+      textRun = '';
+    }
+  };
 
   for (const part of allParts) {
     if (part.type === 'thinking') {
-      currentThinkingSegment += part.text;
+      flushText();
+      thinkingRun += part.text;
+    } else if (part.type === 'text') {
+      flushThinking();
+      textRun += part.text;
     } else {
-      if (currentThinkingSegment) {
-        orderedSegments.push({ type: 'thinking', text: currentThinkingSegment });
-        currentThinkingSegment = '';
-      }
-      orderedSegments.push(part);
-    }
-  }
-  if (currentThinkingSegment) {
-    orderedSegments.push({ type: 'thinking', text: currentThinkingSegment });
-  }
-
-  // Collapse consecutive text parts
-  const finalParts: MessagePart[] = [];
-  let currentTextRun = '';
-
-  for (const part of orderedSegments) {
-    if (part.type === 'text') {
-      currentTextRun += part.text;
-    } else {
-      if (currentTextRun) {
-        finalParts.push({ type: 'text', text: currentTextRun });
-        currentTextRun = '';
-      }
+      flushThinking();
+      flushText();
       finalParts.push(part);
     }
   }
-  if (currentTextRun) {
-    finalParts.push({ type: 'text', text: currentTextRun });
-  }
+  flushThinking();
+  flushText();
 
   return finalParts;
 }

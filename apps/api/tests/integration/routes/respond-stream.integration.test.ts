@@ -94,6 +94,10 @@ function makeChain(firstValue: unknown): Record<string, unknown> {
 
 describe('POST /respond/stream', () => {
   it('returns 404 when chat is not found', async () => {
+    await mock.module('../../../src/modules/chats/infrastructure/chat-repository', () => ({
+      verifyChatOwnership: () => Promise.resolve(false),
+    }));
+
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
     restoreAuth = restore;
 
@@ -111,6 +115,10 @@ describe('POST /respond/stream', () => {
   });
 
   it('accepts thinkingVisibility in request body without error', async () => {
+    await mock.module('../../../src/modules/chats/infrastructure/chat-repository', () => ({
+      verifyChatOwnership: () => Promise.resolve(false),
+    }));
+
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
     restoreAuth = restore;
 
@@ -131,6 +139,10 @@ describe('POST /respond/stream', () => {
   });
 
   it('accepts thinkingEnabled and reasoningEffort in request body', async () => {
+    await mock.module('../../../src/modules/chats/infrastructure/chat-repository', () => ({
+      verifyChatOwnership: () => Promise.resolve(false),
+    }));
+
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
     restoreAuth = restore;
 
@@ -152,6 +164,10 @@ describe('POST /respond/stream', () => {
   });
 
   it('accepts legacy requests without thinkingVisibility', async () => {
+    await mock.module('../../../src/modules/chats/infrastructure/chat-repository', () => ({
+      verifyChatOwnership: () => Promise.resolve(false),
+    }));
+
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
     restoreAuth = restore;
 
@@ -756,5 +772,273 @@ describe('POST /respond/stream', () => {
       (p) => p.type === 'system_event' && p.event === 'tool_loop_exhausted'
     );
     expect(exhaustedPart).toBeDefined();
+  });
+
+  it('degrades from OpenAI cursor to replay on provider switch to Gemini and persists new cursor', async () => {
+    const chatSetCalls: Array<Record<string, unknown>> = [];
+
+    const OPENAI_ENVELOPE = JSON.stringify({
+      schemaVersion: 1,
+      provider: 'openai',
+      mode: 'responses',
+      modelName: 'gpt-4o',
+      systemPromptHash: 'none',
+      toolsetHash: 'none',
+      cursor: 'resp_abc123',
+    });
+
+    const GEMINI_ENVELOPE = JSON.stringify({
+      schemaVersion: 1,
+      provider: 'gemini',
+      mode: 'interactions',
+      modelName: 'gemini-2.0-flash',
+      systemPromptHash: 'none',
+      toolsetHash: '4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945',
+      cursor: 'interaction_xyz',
+    });
+
+    await mock.module('../../../src/modules/chats/infrastructure/chat-repository', () => ({
+      verifyChatOwnership: () => Promise.resolve(true),
+    }));
+
+    await mock.module('../../../src/services/providers/registry', () => ({
+      getProviderForModel: () =>
+        Promise.resolve({
+          providerType: 'gemini',
+          generateText: () => Promise.resolve({ text: '' }),
+          generateAgentTurnStream: async function* (req: AgentTurnRequest) {
+            await Promise.resolve();
+            if (req.providerState) {
+              yield { type: 'turn_error', error: 'Expected null providerState on switch' };
+              return;
+            }
+            yield { type: 'assistant_text_delta', text: 'Hi from Gemini' };
+            yield { type: 'turn_completed', providerState: GEMINI_ENVELOPE };
+          },
+        }),
+    }));
+
+    await mock.module('../../../src/services/tools', () => ({
+      getAllToolDefinitions: () => [],
+      executeTool: () => Promise.resolve({}),
+    }));
+
+    await mock.module('../../../src/db/database', () => ({
+      getDb: () => ({
+        selectFrom: () => makeChain({ userId: TEST_USER.id, lastProviderState: OPENAI_ENVELOPE }),
+        insertInto: () => ({ values: () => ({ execute: () => Promise.resolve() }) }),
+        updateTable: () => ({
+          set: (values: Record<string, unknown>) => {
+            chatSetCalls.push({ ...values });
+            return makeChain(undefined);
+          },
+        }),
+      }),
+    }));
+
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
+    restoreAuth = restore;
+
+    const response = await app.handle(
+      new Request('http://localhost/respond/stream', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chatId: 'test-chat',
+          prompt: 'Hello',
+          model: 'gemini-2.0-flash',
+        }),
+      })
+    );
+
+    expect(response.status).toBe(200);
+    const rawText = await response.text();
+
+    const sseEvents = rawText
+      .split('\n\n')
+      .filter((block) => block.startsWith('data: '))
+      .map((block) => {
+        try {
+          return JSON.parse(block.replace(/^data: /, '')) as Record<string, unknown>;
+        } catch {
+          return null;
+        }
+      })
+      .filter((e): e is Record<string, unknown> => e !== null);
+
+    // Must emit fallback_notice because of provider switch
+    const fallbackNotice = sseEvents.find((e) => e.type === 'fallback_notice');
+    expect(fallbackNotice).toBeDefined();
+    expect(fallbackNotice).toMatchObject({
+      type: 'fallback_notice',
+      from: 'responses',
+      to: 'replay',
+    });
+
+    // Must persist the new Gemini cursor
+    const geminiUpdate = chatSetCalls.find(
+      (u) => 'lastProviderState' in u && u.lastProviderState === GEMINI_ENVELOPE
+    );
+    expect(geminiUpdate).toBeDefined();
+  });
+
+  it('uses Gemini cursor on subsequent turn after provider switch', async () => {
+    const GEMINI_ENVELOPE = JSON.stringify({
+      schemaVersion: 1,
+      provider: 'gemini',
+      mode: 'interactions',
+      modelName: 'gemini-2.0-flash',
+      systemPromptHash: 'none',
+      toolsetHash: '4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945',
+      cursor: 'interaction_xyz',
+    });
+
+    await mock.module('../../../src/modules/chats/infrastructure/chat-repository', () => ({
+      verifyChatOwnership: () => Promise.resolve(true),
+    }));
+
+    await mock.module('../../../src/services/providers/registry', () => ({
+      getProviderForModel: () =>
+        Promise.resolve({
+          providerType: 'gemini',
+          generateText: () => Promise.resolve({ text: '' }),
+          generateAgentTurnStream: async function* (req: AgentTurnRequest) {
+            await Promise.resolve();
+            if (req.providerState !== GEMINI_ENVELOPE) {
+              yield { type: 'turn_error', error: 'Expected Gemini cursor' };
+              return;
+            }
+            yield { type: 'assistant_text_delta', text: 'Continuing' };
+            yield { type: 'turn_completed', providerState: GEMINI_ENVELOPE };
+          },
+        }),
+    }));
+
+    await mock.module('../../../src/services/tools', () => ({
+      getAllToolDefinitions: () => [],
+      executeTool: () => Promise.resolve({}),
+    }));
+
+    await mock.module('../../../src/db/database', () => ({
+      getDb: () => ({
+        selectFrom: () => makeChain({ userId: TEST_USER.id, lastProviderState: GEMINI_ENVELOPE }),
+        insertInto: () => ({ values: () => ({ execute: () => Promise.resolve() }) }),
+        updateTable: () => makeChain(undefined),
+      }),
+    }));
+
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
+    restoreAuth = restore;
+
+    const response = await app.handle(
+      new Request('http://localhost/respond/stream', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chatId: 'test-chat',
+          prompt: 'Next message',
+          model: 'gemini-2.0-flash',
+        }),
+      })
+    );
+
+    expect(response.status).toBe(200);
+    const rawText = await response.text();
+
+    const sseEvents = rawText
+      .split('\n\n')
+      .filter((block) => block.startsWith('data: '))
+      .map((block) => {
+        try {
+          return JSON.parse(block.replace(/^data: /, '')) as Record<string, unknown>;
+        } catch {
+          return null;
+        }
+      })
+      .filter((e): e is Record<string, unknown> => e !== null);
+
+    const textEvent = sseEvents.find((e) => e.type === 'text');
+    expect(textEvent).toBeDefined();
+    expect(textEvent?.text).toBe('Continuing');
+
+    const doneEvent = sseEvents.find((e) => e.type === 'done');
+    expect(doneEvent).toBeDefined();
+  });
+
+  it('always replays for openai-compatible with no cross-turn cursor', async () => {
+    const chatSetCalls: Array<Record<string, unknown>> = [];
+
+    const STATELESS_STATE = JSON.stringify({
+      schemaVersion: 1,
+      provider: 'openai-compatible',
+      mode: 'stateless-loop',
+      modelName: 'deepseek-chat',
+      systemPromptHash: 'none',
+      toolsetHash: 'none',
+      loopMessages: [{ role: 'user', content: 'Hello' }],
+    });
+
+    await mock.module('../../../src/modules/chats/infrastructure/chat-repository', () => ({
+      verifyChatOwnership: () => Promise.resolve(true),
+    }));
+
+    await mock.module('../../../src/services/providers/registry', () => ({
+      getProviderForModel: () =>
+        Promise.resolve({
+          providerType: 'openai-compatible',
+          generateText: () => Promise.resolve({ text: '' }),
+          generateAgentTurnStream: async function* (req: AgentTurnRequest) {
+            await Promise.resolve();
+            if (req.providerState) {
+              yield { type: 'turn_error', error: 'Expected null providerState' };
+              return;
+            }
+            yield { type: 'assistant_text_delta', text: 'Hi' };
+            yield { type: 'turn_completed', providerState: STATELESS_STATE };
+          },
+        }),
+    }));
+
+    await mock.module('../../../src/services/tools', () => ({
+      getAllToolDefinitions: () => [],
+      executeTool: () => Promise.resolve({}),
+    }));
+
+    await mock.module('../../../src/db/database', () => ({
+      getDb: () => ({
+        selectFrom: () => makeChain({ userId: TEST_USER.id, lastProviderState: STATELESS_STATE }),
+        insertInto: () => ({ values: () => ({ execute: () => Promise.resolve() }) }),
+        updateTable: () => ({
+          set: (values: Record<string, unknown>) => {
+            chatSetCalls.push({ ...values });
+            return makeChain(undefined);
+          },
+        }),
+      }),
+    }));
+
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
+    restoreAuth = restore;
+
+    const response = await app.handle(
+      new Request('http://localhost/respond/stream', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chatId: 'test-chat',
+          prompt: 'Hello',
+          model: 'deepseek-chat',
+        }),
+      })
+    );
+
+    expect(response.status).toBe(200);
+    await response.text();
+
+    // chats.lastProviderState must never be set to a non-null value
+    const durableUpdate = chatSetCalls.find(
+      (u) => 'lastProviderState' in u && u.lastProviderState !== null
+    );
+    expect(durableUpdate).toBeUndefined();
   });
 });
