@@ -22,7 +22,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.91.1",
-    "@elysiajs/cors": "^1.4.1",
+    "@elysiajs/cors": "^1.4.2",
     "@elysiajs/openapi": "^1.4.15",
     "@elysiajs/static": "^1.4.10",
     "@google/genai": "^1.50.1",
