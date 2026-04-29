@@ -6,6 +6,7 @@
  */
 
 import { computeToolsetHash } from '../../../utils/hash';
+import { parseJsonValueOrRawString } from '../../../lib/safe-parse';
 import {
   parseContinuationEnvelope,
   serializeContinuationEnvelope,
@@ -66,14 +67,6 @@ function parseGeminiState(providerState: string | null | undefined): GeminiInter
     };
   }
   return null;
-}
-
-function parseGeminiToolResult(raw: string): unknown {
-  try {
-    return JSON.parse(raw) as unknown;
-  } catch {
-    return raw;
-  }
 }
 
 function buildGeminiReplayInput(
@@ -179,7 +172,7 @@ export async function* streamGeminiAgentTurn(req: AgentTurnRequest): AsyncIterab
       type: 'function_result' as const,
       call_id: tr.callId,
       name: tr.name,
-      result: parseGeminiToolResult(tr.result),
+      result: parseJsonValueOrRawString(tr.result),
       is_error: tr.isError ?? false,
     }));
   } else if (req.prompt) {
