@@ -15,11 +15,11 @@ import {
   updateChatAfterTurn,
 } from '../infrastructure/conversation-persistence';
 import {
-  parseContinuationEnvelope,
   computeSystemPromptHash,
   computeToolsetHash,
   decideContinuation,
-  isDurableEnvelope,
+  decideTurnPersistence,
+  type ContinuationEnvelope,
 } from '../../../services/providers/continuation';
 import {
   computeContextSnapshot,
@@ -128,6 +128,20 @@ export async function* streamTextTurn(
 
       let currentProviderState: string | null = null;
 
+      function* recordDegradation(
+        from: string,
+        to: string,
+        reason: string
+      ): Generator<StreamEvent> {
+        console.warn(
+          `[fallback][degrade] chatId=${chatId} from=${from} to=${to} reason="${reason}" provider=${provider.providerType} model=${modelId}`
+        );
+        const detail = `${from} → ${to}`;
+        allParts.push({ type: 'system_event', event: 'cursor_lost', detail });
+        yield { type: 'fallback_notice', from, to, reason };
+        yield { type: 'system_event', event: 'cursor_lost', detail };
+      }
+
       switch (decision.type) {
         case 'continue_with_cursor':
           currentProviderState = decision.providerState;
@@ -135,29 +149,10 @@ export async function* streamTextTurn(
             `[continuation][valid] chatId=${chatId} provider=${provider.providerType} model=${modelId} mode=${decision.envelope.mode}`
           );
           break;
-        case 'degrade_to_replay': {
-          const fallback = {
-            from: decision.previousMode,
-            to: 'replay',
-            reason: decision.reason,
-          };
-          yield { type: 'fallback_notice', ...fallback };
-          console.warn(
-            `[fallback][degrade] chatId=${chatId} from=${fallback.from} to=${fallback.to} reason="${fallback.reason}" provider=${provider.providerType} model=${modelId}`
-          );
-          allParts.push({
-            type: 'system_event',
-            event: 'cursor_lost',
-            detail: `${fallback.from} → ${fallback.to}`,
-          });
-          yield {
-            type: 'system_event',
-            event: 'cursor_lost',
-            detail: `${fallback.from} → ${fallback.to}`,
-          };
+        case 'degrade_to_replay':
+          yield* recordDegradation(decision.previousMode, 'replay', decision.reason);
           currentProviderState = null;
           break;
-        }
         case 'start_replay':
           currentProviderState = null;
           break;
@@ -243,10 +238,12 @@ export async function* streamTextTurn(
               currentProviderState = event.providerState ?? null;
               turnCompleted = true;
 
-              const resultEnvelope = parseContinuationEnvelope(currentProviderState);
-              durableProviderState = isDurableEnvelope(resultEnvelope, provider.providerType)
-                ? currentProviderState
-                : null;
+              const persistence = decideTurnPersistence(
+                currentProviderState,
+                provider.providerType
+              );
+              const resultEnvelope = persistence.envelope;
+              durableProviderState = persistence.durableProviderState;
 
               if (durableProviderState) {
                 await db
@@ -267,11 +264,7 @@ export async function* streamTextTurn(
                 );
               }
 
-              const displayMode: ContinuationDisplayMode = resultEnvelope?.cursor
-                ? 'stateful'
-                : resultEnvelope?.mode === 'stateless-loop' && !degradedThisTurn
-                  ? 'stateless-loop'
-                  : 'replay';
+              const displayMode = resolveDisplayMode(resultEnvelope, degradedThisTurn);
               const providerReportedInputTokens =
                 resultEnvelope?.context?.providerReportedInputTokens;
               const turnLocalCharCount =
@@ -308,25 +301,7 @@ export async function* streamTextTurn(
 
             case 'continuation_degraded':
               degradedThisTurn = true;
-              yield {
-                type: 'fallback_notice',
-                from: event.from,
-                to: event.to,
-                reason: event.reason,
-              };
-              console.warn(
-                `[fallback][degrade] chatId=${chatId} from=${event.from} to=${event.to} reason="${event.reason}" provider=${provider.providerType} model=${modelId}`
-              );
-              allParts.push({
-                type: 'system_event',
-                event: 'cursor_lost',
-                detail: `${event.from} → ${event.to}`,
-              });
-              yield {
-                type: 'system_event',
-                event: 'cursor_lost',
-                detail: `${event.from} → ${event.to}`,
-              };
+              yield* recordDegradation(event.from, event.to, event.reason);
               break;
 
             case 'turn_error':
@@ -546,6 +521,21 @@ export async function* streamTextTurn(
 
     yield { type: 'error', error: message };
   }
+}
+
+/**
+ * Resolves the user-facing display mode from the parsed envelope and the
+ * degradation flag observed during the iteration. A cursor present means
+ * server-side continuation; a stateless-loop envelope without a degradation
+ * means the provider accumulated turn-local state; everything else is replay.
+ */
+function resolveDisplayMode(
+  envelope: ContinuationEnvelope | null,
+  degraded: boolean
+): ContinuationDisplayMode {
+  if (envelope?.cursor) return 'stateful';
+  if (envelope?.mode === 'stateless-loop' && !degraded) return 'stateless-loop';
+  return 'replay';
 }
 
 /**

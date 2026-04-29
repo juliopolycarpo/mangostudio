@@ -115,3 +115,24 @@ export function isDurableEnvelope(
     envelope.provider === provider && envelope.mode === strategy.durableMode && !!envelope.cursor
   );
 }
+
+export interface TurnPersistenceDecision {
+  envelope: ContinuationEnvelope | null;
+  durableProviderState: string | null;
+}
+
+/**
+ * Resolves whether the provider state returned by `turn_completed` should be
+ * persisted as cross-turn durable state. Stateless-loop and provider-mismatched
+ * envelopes are filtered out so they never leak into `chats.lastProviderState`.
+ *
+ * Pure function — no side effects, no I/O.
+ */
+export function decideTurnPersistence(
+  providerState: string | null,
+  provider: ProviderType
+): TurnPersistenceDecision {
+  const envelope = parseContinuationEnvelope(providerState);
+  const durable = isDurableEnvelope(envelope, provider) ? providerState : null;
+  return { envelope, durableProviderState: durable };
+}
