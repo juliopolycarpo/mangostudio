@@ -195,6 +195,42 @@ fetchScenario.restore();
 - Keep mocks focused on real request or dependency seams.
 - For API contract validation, use `Value.Check` with an inline Typebox schema — this catches breaking response shape changes immediately.
 
+## Continuation / Provider Test Matrix
+
+Refer to `docs/CONTINUATION.md` and `docs/PROVIDER_DEVELOPMENT.md` for the
+architecture and development guide. The test matrix covers three layers:
+
+### Decision engine (`continuation.test.ts`)
+
+Pure-function tests in `apps/api/tests/unit/services/providers/continuation.test.ts`:
+
+| Test                     | What it validates                                                                                  |
+| ------------------------ | -------------------------------------------------------------------------------------------------- |
+| Envelope parse/serialise | Round-trip identity, null/undefined/malformed, schema version, mode validation, cursor requirement |
+| Envelope validation      | Provider/model/system prompt/toolset mismatch detection                                            |
+| `decideContinuation`     | `continue_with_cursor`, `degrade_to_replay`, `start_replay` decisions                              |
+| `decideTurnPersistence`  | Durable cursor persisted, stateless-loop filtered                                                  |
+| Provider switch          | OpenAI→Gemini first turn degrades, Gemini cursor on second                                         |
+
+### Replay builders (`replay-builder.test.ts`)
+
+Tests in `apps/api/tests/unit/services/providers/replay-builder.test.ts`:
+
+- Each provider's replay format (OpenAI, Gemini, OpenAI-compatible)
+- Text-only, tool-call-only, mixed content
+- Empty history and backward-compatible plain text
+
+### Provider-specific cursor-loss handling
+
+Each provider stream test must cover:
+
+- First turn with no cursor → full replay
+- Cursor continuation → minimal input
+- Cursor loss (no tool results) → retry with replay
+- Cursor loss (with tool results) → abort with `tool_result_cursor_loss`
+
+---
+
 ## Coverage
 
 Frontend coverage is written to `apps/frontend/coverage/`:

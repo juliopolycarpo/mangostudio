@@ -26,6 +26,9 @@ Open these first:
 
 ## Chat, Streaming, And Generation
 
+First read `docs/CONTINUATION.md` and `docs/PROVIDER_DEVELOPMENT.md` for
+context on the continuation architecture and provider integration patterns.
+
 Open these first:
 
 - `apps/api/src/modules/generation/http/respond-stream-routes.ts`
@@ -34,9 +37,13 @@ Open these first:
 - `apps/api/src/modules/chats/` (ownership, chat repository)
 - `apps/api/src/modules/messages/` (message repository, persistence)
 - `apps/api/src/services/providers/core/continuation-envelope.ts`
+- `apps/api/src/services/providers/core/continuation-runtime.ts`
 - `apps/api/src/services/providers/core/context-policy.ts`
+- `apps/api/src/services/providers/core/replay-builder.ts`
 - `apps/api/src/services/providers/gemini/interactions-stream.ts`
 - `apps/api/src/services/providers/openai/responses-stream.ts`
+- `apps/api/src/services/providers/openai-compatible/chat-completions-stream.ts`
+- `apps/api/src/services/providers/anthropic/stream.ts`
 - `apps/api/src/routes/respond.ts` (non-streaming fallback)
 - `apps/api/src/routes/chats.ts`
 - `apps/api/src/routes/messages.ts`
