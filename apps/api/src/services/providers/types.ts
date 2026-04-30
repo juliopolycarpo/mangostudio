@@ -66,6 +66,8 @@ export interface GenerationConfig {
    * Set to false to disable provider-level compaction.
    */
   enableProviderCompaction?: boolean;
+  /** Ratio used to derive provider-side compaction thresholds for cursor chains. */
+  providerCompactionThreshold?: number;
 }
 
 /** Request for a single agentic turn — supports tool calling and provider-side continuation. */

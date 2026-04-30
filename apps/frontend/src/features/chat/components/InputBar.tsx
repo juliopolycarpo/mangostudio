@@ -16,6 +16,7 @@ interface Props {
   onModeChange: (mode: InteractionMode) => void;
   onSubmit: (prompt: string, referenceImage?: File | null) => void;
   disabled?: boolean;
+  submitDisabled?: boolean;
   isGenerating?: boolean;
   onStop?: () => void;
   thinkingEnabled?: boolean;
@@ -31,6 +32,7 @@ export function InputBar({
   onModeChange,
   onSubmit,
   disabled,
+  submitDisabled = false,
   isGenerating,
   onStop,
   thinkingEnabled = false,
@@ -67,7 +69,7 @@ export function InputBar({
 
   const handleSubmit = (e: { preventDefault: () => void }) => {
     e.preventDefault();
-    if (!prompt.trim() || disabled) return;
+    if (!prompt.trim() || disabled || submitDisabled) return;
     onSubmit(prompt, referenceImage);
     setPrompt('');
     setReferenceImage(null);
@@ -204,7 +206,7 @@ export function InputBar({
             ) : (
               <button
                 type="submit"
-                disabled={disabled || !prompt.trim()}
+                disabled={disabled || submitDisabled || !prompt.trim()}
                 className="h-10 px-4 rounded-xl text-on-primary font-bold text-xs flex items-center gap-2 hover:brightness-110 transition-all active:scale-95 shadow-lg shadow-primary-container/20 disabled:opacity-50"
                 style={{ background: 'var(--gradient-primary)' }}
               >

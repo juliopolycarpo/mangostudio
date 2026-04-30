@@ -10,7 +10,13 @@ export type { SSEErrorEvent } from '../errors/contracts';
 
 // Chat
 export type {
+  CompactChatBody,
+  ContextCompactionBehavior,
+  ContextCompactionResponse,
+  ContextInfo,
+  ContextSettings,
   CreateChatBody,
+  SummarizeToNewChatBody,
   UpdateChatBody,
   CreateMessageBody,
   UpdateMessageBody,

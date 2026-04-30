@@ -228,6 +228,28 @@ describe('streamAgentTurnWithResponsesAPI — request shape', () => {
     expect(cm?.[0]?.compact_threshold as number).toBeGreaterThan(0);
   });
 
+  it('uses the configured provider compaction threshold when chaining responses', async () => {
+    let captured: Record<string, unknown> | undefined;
+    await collect(
+      baseRequest({
+        providerState: buildEnvelope('resp_prev_threshold'),
+        prompt: 'again',
+        generationConfig: {
+          thinkingEnabled: false,
+          reasoningEffort: 'medium',
+          providerCompactionThreshold: 0.9,
+        },
+      }),
+      (params) => {
+        captured = params;
+        return Promise.resolve(streamOf([COMPLETED_EVENT()]));
+      }
+    );
+
+    const cm = captured?.context_management as Array<Record<string, unknown>> | undefined;
+    expect(cm?.[0]?.compact_threshold).toBe(Math.floor(128_000 * 0.9));
+  });
+
   it('passes AbortSignal to responses.create', async () => {
     const ac = new AbortController();
     let capturedOptions: { signal?: AbortSignal } | undefined;

@@ -5,10 +5,16 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, renderHook, waitFor } from '../../support/harness/render';
 import { useTextGeneration } from '../../../src/features/generation/hooks/use-text-generation';
+import { DEFAULT_CONTEXT_SETTINGS } from '../../../src/hooks/use-global-settings';
 import type { MessagePart } from '@mangostudio/shared';
 
 vi.mock('../../../src/services/generation-service', () => ({
   respondTextStream: vi.fn(),
+}));
+
+vi.mock('../../../src/features/chat/services/context-compaction', () => ({
+  compactChat: vi.fn(),
+  summarizeToNewChat: vi.fn(),
 }));
 
 vi.mock('../../../src/features/chat/queries', () => ({
@@ -51,6 +57,7 @@ function makeProps(overrides: Record<string, unknown> = {}) {
     thinkingEnabled: true,
     reasoningEffort: 'medium',
     maxToolIterations: 10,
+    contextSettings: DEFAULT_CONTEXT_SETTINGS,
     currentChatId: 'chat-1',
     ...overrides,
   };
@@ -201,6 +208,32 @@ describe('useTextChat — maxToolIterations forwarding', () => {
     const firstCall = mockStream.mock.calls[0];
     const request = firstCall[0] as { maxToolIterations?: number };
     expect(request.maxToolIterations).toBe(7);
+  });
+
+  it('forwards contextSettings into the stream request body', async () => {
+    const props = makeProps({
+      contextSettings: {
+        ...DEFAULT_CONTEXT_SETTINGS,
+        warningThreshold: 0.88,
+        providerCompactionEnabled: false,
+      },
+    });
+    mockStream.mockImplementation(
+      makeStreamFn([{ type: 'done', done: true, generationTime: '0.5s' }])
+    );
+
+    const { result } = renderHook(() => useTextGeneration(props));
+
+    await act(async () => {
+      await result.current.handleRespond('ping');
+    });
+
+    await waitFor(() => expect(result.current.isGenerating).toBe(false));
+
+    expect(mockStream).toHaveBeenCalled();
+    const firstCall = mockStream.mock.calls[0];
+    const request = firstCall[0] as { contextSettings?: typeof props.contextSettings };
+    expect(request.contextSettings).toEqual(props.contextSettings);
   });
 });
 

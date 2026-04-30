@@ -6,12 +6,14 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { act, renderHook } from '../../support/harness/render';
 import {
   useGlobalSettings,
+  DEFAULT_CONTEXT_SETTINGS,
   MAX_TOOL_ITERATIONS_MAX,
   MAX_TOOL_ITERATIONS_MIN,
   MAX_TOOL_ITERATIONS_DEFAULT,
 } from '../../../src/hooks/use-global-settings';
 
 const STORAGE_KEY = 'mangostudio:maxToolIterations';
+const CONTEXT_SETTINGS_STORAGE_KEY = 'mangostudio:contextSettings';
 
 describe('useGlobalSettings — maxToolIterations guardrails', () => {
   beforeEach(() => {
@@ -84,5 +86,64 @@ describe('useGlobalSettings — maxToolIterations guardrails', () => {
       result.current.resetSettings();
     });
     expect(result.current.maxToolIterations).toBe(MAX_TOOL_ITERATIONS_DEFAULT);
+  });
+
+  it('defaults contextSettings when storage is empty', () => {
+    const { result } = renderHook(() => useGlobalSettings());
+
+    expect(result.current.contextSettings).toEqual(DEFAULT_CONTEXT_SETTINGS);
+  });
+
+  it('normalizes persisted context thresholds into ascending order', () => {
+    window.localStorage.setItem(
+      CONTEXT_SETTINGS_STORAGE_KEY,
+      JSON.stringify({
+        compactionBehavior: 'auto_compact_current_chat',
+        warningThreshold: 0.97,
+        dangerThreshold: 0.85,
+        hardStopThreshold: 0.92,
+        preferredSummaryModel: 'gpt-4o-mini',
+        providerCompactionEnabled: false,
+      })
+    );
+
+    const { result } = renderHook(() => useGlobalSettings());
+
+    expect(result.current.contextSettings).toEqual({
+      compactionBehavior: 'auto_compact_current_chat',
+      warningThreshold: 0.85,
+      dangerThreshold: 0.92,
+      hardStopThreshold: 0.97,
+      preferredSummaryModel: 'gpt-4o-mini',
+      providerCompactionEnabled: false,
+    });
+  });
+
+  it('persists context settings updates to localStorage', async () => {
+    const { result } = renderHook(() => useGlobalSettings());
+
+    act(() => {
+      result.current.setProviderCompactionEnabled(false);
+    });
+    await Promise.resolve();
+
+    const stored = JSON.parse(
+      window.localStorage.getItem(CONTEXT_SETTINGS_STORAGE_KEY) ?? 'null'
+    ) as { providerCompactionEnabled?: boolean };
+
+    expect(stored.providerCompactionEnabled).toBe(false);
+  });
+
+  it('resetSettings restores contextSettings defaults', () => {
+    const { result } = renderHook(() => useGlobalSettings());
+
+    act(() => {
+      result.current.setContextCompactionBehavior('off');
+    });
+    act(() => {
+      result.current.resetSettings();
+    });
+
+    expect(result.current.contextSettings).toEqual(DEFAULT_CONTEXT_SETTINGS);
   });
 });
