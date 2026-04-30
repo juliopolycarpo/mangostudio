@@ -5,12 +5,12 @@
  * Degrades to full replay on safe cursor loss and aborts unsafe tool loops.
  */
 
-import { computeToolsetHash } from '../../../utils/hash';
 import { parseJsonValueOrRawString } from '../../../lib/safe-parse';
 import {
   parseContinuationEnvelope,
   serializeContinuationEnvelope,
   computeSystemPromptHash,
+  computeToolsetHash,
   type ContinuationEnvelope,
 } from '../core/continuation-envelope';
 import { getModelContextLimit } from '../core/context-policy';

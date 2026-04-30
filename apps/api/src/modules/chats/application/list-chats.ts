@@ -2,7 +2,7 @@ import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';
 import type { ContextInfo } from '@mangostudio/shared/chat';
 import { listByUserId } from '../infrastructure/chat-repository';
-import { parseContinuationEnvelope } from '../../../services/providers/continuation';
+import { parseContinuationEnvelope } from '../../../services/providers/core/continuation-envelope';
 import {
   getContextSeverity,
   parsePersistedContextSnapshot,

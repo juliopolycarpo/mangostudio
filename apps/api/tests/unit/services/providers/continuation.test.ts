@@ -6,13 +6,15 @@ import {
   computeSystemPromptHash,
   computeToolsetHash,
   isDurableMode,
+  type ContinuationEnvelope,
+} from '../../../../src/services/providers/core/continuation-envelope';
+import {
   decideContinuation,
   decideTurnPersistence,
   isDurableEnvelope,
   getContinuationStrategy,
   CONTINUATION_STRATEGIES,
-  type ContinuationEnvelope,
-} from '../../../../src/services/providers/continuation';
+} from '../../../../src/services/providers/core/continuation-runtime';
 
 const BASE_ENVELOPE: ContinuationEnvelope = {
   schemaVersion: 1,
