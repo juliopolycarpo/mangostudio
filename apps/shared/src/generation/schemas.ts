@@ -1,4 +1,5 @@
 import { Type, type Static } from '@sinclair/typebox';
+import { ContextSettingsSchema } from '../chat/schemas';
 
 export const GenerateImageBodySchema = Type.Object({
   chatId: Type.String(),
@@ -29,6 +30,7 @@ export const RespondStreamBodySchema = Type.Object({
   reasoningEffort: Type.Optional(Type.String()),
   thinkingVisibility: Type.Optional(Type.String()),
   maxToolIterations: Type.Optional(Type.Integer({ minimum: 1, maximum: 25 })),
+  contextSettings: Type.Optional(ContextSettingsSchema),
 });
 
 export type RespondStreamBody = Static<typeof RespondStreamBodySchema>;

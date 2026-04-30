@@ -6,6 +6,7 @@ import type {
   ReasoningEffort,
   ContinuationReasonCode,
 } from '@mangostudio/shared';
+import type { ContextSettings } from '@mangostudio/shared/chat';
 import type { AgentTurnRequest } from '../../../services/providers/types';
 import { assertChatOwnership } from '../../chats/domain/chat-ownership';
 import { resolveModel } from './resolve-model';
@@ -47,6 +48,7 @@ export interface StreamTextTurnInput {
   thinkingEnabled?: boolean;
   reasoningEffort?: string;
   maxToolIterations?: number;
+  contextSettings?: ContextSettings;
   signal?: AbortSignal;
 }
 
@@ -230,7 +232,12 @@ export async function* streamTextTurn(
           toolDefinitions: toolDefs,
           providerState: currentProviderState,
           signal,
-          generationConfig: { thinkingEnabled, reasoningEffort },
+          generationConfig: {
+            thinkingEnabled,
+            reasoningEffort,
+            enableProviderCompaction: input.contextSettings?.providerCompactionEnabled,
+            providerCompactionThreshold: input.contextSettings?.warningThreshold,
+          },
         };
 
         pendingCalls = new Map<string, { name: string; argsStr: string }>();
@@ -481,7 +488,12 @@ export async function* streamTextTurn(
         systemPrompt,
         modelName: modelId,
         signal,
-        generationConfig: { thinkingEnabled, reasoningEffort },
+        generationConfig: {
+          thinkingEnabled,
+          reasoningEffort,
+          enableProviderCompaction: input.contextSettings?.providerCompactionEnabled,
+          providerCompactionThreshold: input.contextSettings?.warningThreshold,
+        },
       })) {
         if (signal?.aborted) break;
 

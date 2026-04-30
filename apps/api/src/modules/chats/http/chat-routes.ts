@@ -1,15 +1,26 @@
 import { type Elysia, t } from 'elysia';
-import { CreateChatBodySchema, UpdateChatBodySchema } from '@mangostudio/shared/chat';
+import {
+  CompactChatBodySchema,
+  CreateChatBodySchema,
+  SummarizeToNewChatBodySchema,
+  UpdateChatBodySchema,
+} from '@mangostudio/shared/chat';
 import { ERROR_CODES } from '@mangostudio/shared/errors';
 import { getDb } from '../../../db/database';
 import { requireAuth } from '../../../plugins/auth-middleware';
 import { parseQueryInt } from '../../../utils/query';
+import {
+  compactChatUseCase,
+  EmptyChatCompactionError,
+  summarizeToNewChatUseCase,
+} from '../application/context-compaction';
 import { createChatUseCase } from '../application/create-chat';
 import { updateChatUseCase } from '../application/update-chat';
 import { deleteChatUseCase } from '../application/delete-chat';
 import { listChatsUseCase } from '../application/list-chats';
 import { getChatMessagesUseCase } from '../application/get-chat-messages';
 import { ChatNotFoundError } from '../domain/chat-ownership';
+import { NoModelAvailableError } from '../../generation/application/resolve-model';
 
 export const chatRoutes = (app: Elysia) =>
   app.group('/chats', (app) =>
@@ -55,6 +66,66 @@ export const chatRoutes = (app: Elysia) =>
         {
           params: t.Object({ id: t.String() }),
           body: UpdateChatBodySchema,
+        }
+      )
+
+      .post(
+        '/:id/compact',
+        async ({ params, body, user, set }) => {
+          try {
+            return await compactChatUseCase(
+              { chatId: params.id, userId: user?.id ?? '', model: body.model },
+              getDb()
+            );
+          } catch (err) {
+            if (err instanceof ChatNotFoundError) {
+              set.status = 404;
+              return { error: 'Chat not found', code: ERROR_CODES.NOT_FOUND };
+            }
+            if (err instanceof EmptyChatCompactionError) {
+              set.status = 400;
+              return { error: err.message, code: ERROR_CODES.VALIDATION };
+            }
+            if (err instanceof NoModelAvailableError) {
+              set.status = 503;
+              return { error: err.message, code: ERROR_CODES.PROVIDER_ERROR };
+            }
+            throw err;
+          }
+        },
+        {
+          params: t.Object({ id: t.String() }),
+          body: CompactChatBodySchema,
+        }
+      )
+
+      .post(
+        '/:id/summarize-to-new-chat',
+        async ({ params, body, user, set }) => {
+          try {
+            return await summarizeToNewChatUseCase(
+              { chatId: params.id, userId: user?.id ?? '', model: body.model },
+              getDb()
+            );
+          } catch (err) {
+            if (err instanceof ChatNotFoundError) {
+              set.status = 404;
+              return { error: 'Chat not found', code: ERROR_CODES.NOT_FOUND };
+            }
+            if (err instanceof EmptyChatCompactionError) {
+              set.status = 400;
+              return { error: err.message, code: ERROR_CODES.VALIDATION };
+            }
+            if (err instanceof NoModelAvailableError) {
+              set.status = 503;
+              return { error: err.message, code: ERROR_CODES.PROVIDER_ERROR };
+            }
+            throw err;
+          }
+        },
+        {
+          params: t.Object({ id: t.String() }),
+          body: SummarizeToNewChatBodySchema,
         }
       )
 

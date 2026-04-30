@@ -60,7 +60,13 @@ interface BuildResponsesCreateParamsOptions {
   reasoningEffort?: string;
   textFormat?: Record<string, unknown>;
   enableCompaction?: boolean;
+  providerCompactionThreshold?: number;
   contextLimit: number;
+}
+
+function resolveProviderCompactionThreshold(value: number | undefined): number {
+  if (!Number.isFinite(value)) return 0.85;
+  return Math.min(0.99, Math.max(0.5, value as number));
 }
 
 function buildResponsesCreateParams(
@@ -76,10 +82,13 @@ function buildResponsesCreateParams(
     reasoningEffort = 'medium',
     textFormat,
     enableCompaction = true,
+    providerCompactionThreshold,
     contextLimit,
   } = options;
 
-  const compactThreshold = Math.floor(contextLimit * 0.85);
+  const compactThreshold = Math.floor(
+    contextLimit * resolveProviderCompactionThreshold(providerCompactionThreshold)
+  );
   const canCompact = previousResponseId && enableCompaction;
   const contextManagement = canCompact
     ? { context_management: [{ type: 'compaction', compact_threshold: compactThreshold }] }
@@ -305,6 +314,7 @@ export async function* streamAgentTurnWithResponsesAPI(
       reasoningEffort: effort,
       textFormat,
       enableCompaction: req.generationConfig?.enableProviderCompaction ?? true,
+      providerCompactionThreshold: req.generationConfig?.providerCompactionThreshold,
       contextLimit,
     }) as unknown as OpenAI.Responses.ResponseCreateParamsStreaming;
     return client.responses.create(params, { signal: req.signal });

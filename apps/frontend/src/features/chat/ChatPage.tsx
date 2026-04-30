@@ -1,11 +1,14 @@
-import { useEffect } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Loader2, Sparkles, MessageSquare, Code, Bug, Image } from 'lucide-react';
 import { ChatFeed } from './components/ChatFeed';
+import { ContextWarningCallout } from './components/ContextWarningCallout';
 import { InputBar } from './components/InputBar';
+import { useToast } from '@/components/ui/Toast';
 import { useMessagesQuery } from '@/features/chat/queries';
 import { useI18n } from '@/hooks/use-i18n';
 import { authClient } from '@/lib/auth-client';
 import type { InteractionMode, ReasoningEffort } from '@mangostudio/shared';
+import type { ContextSettings } from '@mangostudio/shared/chat';
 import type { ContextInfo, FallbackNotice } from '@/features/generation/types';
 
 interface ChatPageProps {
@@ -24,6 +27,10 @@ interface ChatPageProps {
   contextInfo?: ContextInfo | null;
   fallbackNotice?: FallbackNotice | null;
   seedContextInfo?: (chatId: string, info: ContextInfo) => void;
+  contextSettings: ContextSettings;
+  isContextActionPending: boolean;
+  onCompactCurrentChat: () => Promise<void>;
+  onStartSummarizedChat: () => Promise<void>;
 }
 
 export function ChatPage({
@@ -42,11 +49,18 @@ export function ChatPage({
   contextInfo,
   fallbackNotice,
   seedContextInfo,
+  contextSettings,
+  isContextActionPending,
+  onCompactCurrentChat,
+  onStartSummarizedChat,
 }: ChatPageProps) {
   const { data, status } = useMessagesQuery(chatId);
   const { t } = useI18n();
+  const { toast } = useToast();
   const { data: session } = authClient.useSession();
   const userName = session?.user?.name?.split(' ')[0] ?? '';
+  const [continuedWarningKey, setContinuedWarningKey] = useState<string | null>(null);
+  const handledAutoWarningKeyRef = useRef<string | null>(null);
 
   const firstPageContextInfo = data?.pages[0]?.contextInfo;
   useEffect(() => {
@@ -56,6 +70,90 @@ export function ChatPage({
   }, [chatId, firstPageContextInfo, seedContextInfo]);
 
   const messages = data?.pages.flatMap((page) => page.messages) || [];
+  const warningKey = useMemo(() => {
+    if (!chatId || !contextInfo) return null;
+    return `${chatId}:${contextInfo.mode}:${contextInfo.estimatedInputTokens}`;
+  }, [chatId, contextInfo]);
+  const hasContextWarning =
+    composerMode === 'chat' &&
+    !!contextInfo &&
+    contextInfo.estimatedUsageRatio >= contextSettings.warningThreshold;
+  const isDanger =
+    !!contextInfo && contextInfo.estimatedUsageRatio >= contextSettings.dangerThreshold;
+  const isCritical =
+    !!contextInfo && contextInfo.estimatedUsageRatio >= contextSettings.hardStopThreshold;
+  const requiresDecision =
+    hasContextWarning &&
+    contextSettings.compactionBehavior === 'ask' &&
+    warningKey !== null &&
+    warningKey !== continuedWarningKey;
+  const warningMessage = isCritical
+    ? t.chat.context.critical
+    : isDanger
+      ? t.chat.context.danger
+      : t.chat.context.warning;
+
+  useEffect(() => {
+    if (!hasContextWarning || !warningKey || isContextActionPending) return;
+    if (handledAutoWarningKeyRef.current === warningKey) return;
+
+    const runAutoAction = async () => {
+      try {
+        if (contextSettings.compactionBehavior === 'auto_compact_current_chat') {
+          await onCompactCurrentChat();
+          toast(t.chat.context.compactedSuccess, 'success');
+        }
+        if (contextSettings.compactionBehavior === 'continue_with_summary_new_chat') {
+          await onStartSummarizedChat();
+          toast(t.chat.context.summarizedChatSuccess, 'success');
+        }
+      } catch {
+        const message =
+          contextSettings.compactionBehavior === 'continue_with_summary_new_chat'
+            ? t.chat.context.summarizedChatFailed
+            : t.chat.context.compactFailed;
+        toast(message, 'error');
+      }
+    };
+
+    if (
+      contextSettings.compactionBehavior === 'auto_compact_current_chat' ||
+      contextSettings.compactionBehavior === 'continue_with_summary_new_chat'
+    ) {
+      handledAutoWarningKeyRef.current = warningKey;
+      void runAutoAction();
+    }
+  }, [
+    contextSettings.compactionBehavior,
+    hasContextWarning,
+    isContextActionPending,
+    onCompactCurrentChat,
+    onStartSummarizedChat,
+    t.chat.context.compactFailed,
+    t.chat.context.compactedSuccess,
+    t.chat.context.summarizedChatFailed,
+    t.chat.context.summarizedChatSuccess,
+    toast,
+    warningKey,
+  ]);
+
+  const handleCompactClick = async () => {
+    try {
+      await onCompactCurrentChat();
+      toast(t.chat.context.compactedSuccess, 'success');
+    } catch {
+      toast(t.chat.context.compactFailed, 'error');
+    }
+  };
+
+  const handleSummarizedChatClick = async () => {
+    try {
+      await onStartSummarizedChat();
+      toast(t.chat.context.summarizedChatSuccess, 'success');
+    } catch {
+      toast(t.chat.context.summarizedChatFailed, 'error');
+    }
+  };
 
   return (
     <div className="flex flex-col h-full min-h-0">
@@ -112,11 +210,31 @@ export function ChatPage({
                 .replace('{to}', fallbackNotice.to)}
         </div>
       )}
+      {requiresDecision && (
+        <div className="px-6 pt-4">
+          <div className="mx-auto max-w-4xl">
+            <ContextWarningCallout
+              title={t.chat.context.label}
+              detail={warningMessage}
+              keepHistoryNote={t.chat.context.keepHistory}
+              compactLabel={t.chat.context.compactAction}
+              newChatLabel={t.chat.context.newChatAction}
+              continueLabel={t.chat.context.continueAction}
+              pendingLabel={t.chat.context.compactPending}
+              isPending={isContextActionPending}
+              onCompact={() => void handleCompactClick()}
+              onStartSummarizedChat={() => void handleSummarizedChatClick()}
+              onContinue={() => setContinuedWarningKey(warningKey)}
+            />
+          </div>
+        </div>
+      )}
       <InputBar
         composerMode={composerMode}
         onModeChange={onModeChange}
         onSubmit={onSubmit}
         disabled={disabled}
+        submitDisabled={requiresDecision || isContextActionPending}
         isGenerating={isGenerating}
         onStop={onStop}
         thinkingEnabled={thinkingEnabled}

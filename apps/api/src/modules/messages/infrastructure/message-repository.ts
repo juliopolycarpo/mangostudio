@@ -101,6 +101,8 @@ export interface ListGalleryOptions {
   limit?: number;
 }
 
+const CONTEXT_BOUNDARY_EVENTS = new Set(['chat_compacted', 'summary_handoff']);
+
 export function mapMessage(row: MessageRow): MappedMessage {
   return {
     ...row,
@@ -108,6 +110,25 @@ export function mapMessage(row: MessageRow): MappedMessage {
     styleParams: parseStyleParams(row.styleParams),
     parts: row.parts ? (JSON.parse(row.parts) as MessagePart[]) : undefined,
   };
+}
+
+function sliceRowsAfterCompactionBoundary<T extends { parts: string | null }>(rows: T[]): T[] {
+  for (let index = rows.length - 1; index >= 0; index--) {
+    const rawParts = rows[index].parts;
+    if (!rawParts) continue;
+
+    try {
+      const parts = JSON.parse(rawParts) as MessagePart[];
+      const hasBoundary = parts.some(
+        (part) => part.type === 'system_event' && CONTEXT_BOUNDARY_EVENTS.has(part.event)
+      );
+      if (hasBoundary) return rows.slice(index);
+    } catch {
+      // Ignore malformed parts and fall back to the full history window.
+    }
+  }
+
+  return rows;
 }
 
 export async function insertMessage(data: CreateMessageData, db: Kysely<Database>): Promise<void> {
@@ -193,7 +214,7 @@ export async function loadHistory(
 ): Promise<SimpleTurn[]> {
   let q = db
     .selectFrom('messages')
-    .select(['id', 'role', 'text'])
+    .select(['id', 'role', 'text', 'parts'])
     .where('chatId', '=', chatId)
     .where('interactionMode', '=', 'chat')
     .orderBy('timestamp', 'desc')
@@ -203,8 +224,8 @@ export async function loadHistory(
     q = q.where('id', '!=', opts.excludeId);
   }
 
-  const rows = await q.execute();
-  return rows.reverse().map((row) => ({ id: row.id, role: row.role, text: row.text }));
+  const rows = sliceRowsAfterCompactionBoundary((await q.execute()).reverse());
+  return rows.map((row) => ({ id: row.id, role: row.role, text: row.text }));
 }
 
 export async function loadRichHistory(
@@ -224,9 +245,9 @@ export async function loadRichHistory(
     q = q.where('id', '!=', opts.excludeId);
   }
 
-  const rows = await q.execute();
+  const rows = sliceRowsAfterCompactionBoundary((await q.execute()).reverse());
 
-  return rows.reverse().map((row) => ({
+  return rows.map((row) => ({
     id: row.id,
     role: row.role,
     text: row.text,

@@ -31,6 +31,10 @@ function ChatRoute() {
       contextInfo={app.contextInfo}
       fallbackNotice={app.fallbackNotice}
       seedContextInfo={app.seedContextInfo}
+      contextSettings={app.settings.contextSettings}
+      isContextActionPending={app.isContextActionPending}
+      onCompactCurrentChat={app.handleCompactCurrentChat}
+      onStartSummarizedChat={app.handleStartSummarizedChat}
     />
   );
 }

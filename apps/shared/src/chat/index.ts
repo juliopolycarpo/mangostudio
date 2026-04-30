@@ -1,11 +1,23 @@
 export type { Chat, Message } from './entities';
 export {
+  CompactChatBodySchema,
+  ContextCompactionBehaviorSchema,
+  ContextCompactionResponseSchema,
+  ContextInfoSchema,
+  ContextSettingsSchema,
   CreateChatBodySchema,
   UpdateChatBodySchema,
   CreateMessageBodySchema,
+  SummarizeToNewChatBodySchema,
   UpdateMessageBodySchema,
+  type CompactChatBody,
+  type ContextCompactionBehavior,
+  type ContextCompactionResponse,
+  type ContextInfo,
+  type ContextSettings,
   type CreateChatBody,
   type UpdateChatBody,
   type CreateMessageBody,
+  type SummarizeToNewChatBody,
   type UpdateMessageBody,
 } from './schemas';

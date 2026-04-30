@@ -1,8 +1,10 @@
 /* global console */
-import { useCallback } from 'react';
+import { useCallback, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import type { Message, MessagePart } from '@mangostudio/shared';
+import type { ContextCompactionResponse, ContextSettings } from '@mangostudio/shared/chat';
 import { messageKeys } from '@/features/chat/queries';
+import { compactChat, summarizeToNewChat } from '@/features/chat/services/context-compaction';
 import { respondTextStream } from '@/services/generation-service';
 import { useChatStream } from '@/features/chat/hooks/use-chat-stream';
 import type { useOptimisticMessages } from '@/features/generation/hooks/use-optimistic-messages';
@@ -16,7 +18,14 @@ interface UseTextGenerationOptions {
   thinkingEnabled: boolean;
   reasoningEffort: string;
   maxToolIterations: number;
+  contextSettings: ContextSettings;
   currentChatId: string | null;
+}
+
+function resolveSummaryModelId(settings: ContextSettings, currentModel: string): string {
+  return settings.preferredSummaryModel === 'current_model'
+    ? currentModel
+    : settings.preferredSummaryModel;
 }
 
 /** Handles text generation: creates messages, drives SSE stream, updates optimistic UI. */
@@ -28,11 +37,34 @@ export function useTextGeneration({
   thinkingEnabled,
   reasoningEffort,
   maxToolIterations,
+  contextSettings,
   currentChatId,
 }: UseTextGenerationOptions) {
   const queryClient = useQueryClient();
   const stream = useChatStream({ currentChatId });
   const { appendOptimisticMessages, updateOptimisticMessage } = optimistic;
+  const [pendingContextAction, setPendingContextAction] = useState<'compact' | 'new-chat' | null>(
+    null
+  );
+
+  const syncContextInfo = useCallback(
+    (response: ContextCompactionResponse) => {
+      if (response.contextInfo) {
+        stream.seedContextInfo(response.chatId, response.contextInfo);
+      }
+    },
+    [stream]
+  );
+
+  const refreshChatState = useCallback(
+    async (chatId: string) => {
+      await Promise.all([
+        chats.loadChats(),
+        queryClient.invalidateQueries({ queryKey: messageKeys.list(chatId) }),
+      ]);
+    },
+    [chats, queryClient]
+  );
 
   const handleRespond = useCallback(
     async (prompt: string) => {
@@ -90,6 +122,7 @@ export function useTextGeneration({
             thinkingEnabled,
             reasoningEffort,
             maxToolIterations,
+            contextSettings,
           },
           (chunk) => {
             switch (chunk.type) {
@@ -282,17 +315,55 @@ export function useTextGeneration({
       thinkingEnabled,
       reasoningEffort,
       maxToolIterations,
+      contextSettings,
       stream,
     ]
   );
 
+  const handleCompactCurrentChat = useCallback(async () => {
+    const chatId = chats.currentChatId;
+    if (!chatId) throw new Error('No active chat available for compaction.');
+
+    setPendingContextAction('compact');
+    try {
+      const response = await compactChat(chatId, {
+        model: resolveSummaryModelId(contextSettings, getActiveModel()),
+      });
+      syncContextInfo(response);
+      await refreshChatState(chatId);
+    } finally {
+      setPendingContextAction(null);
+    }
+  }, [chats.currentChatId, contextSettings, getActiveModel, refreshChatState, syncContextInfo]);
+
+  const handleStartSummarizedChat = useCallback(async () => {
+    const chatId = chats.currentChatId;
+    if (!chatId) throw new Error('No active chat available for summary handoff.');
+
+    setPendingContextAction('new-chat');
+    try {
+      const response = await summarizeToNewChat(chatId, {
+        model: resolveSummaryModelId(contextSettings, getActiveModel()),
+      });
+      syncContextInfo(response);
+      await chats.loadChats();
+      chats.setCurrentChatId(response.chatId);
+      await queryClient.invalidateQueries({ queryKey: messageKeys.list(response.chatId) });
+    } finally {
+      setPendingContextAction(null);
+    }
+  }, [chats, contextSettings, getActiveModel, queryClient, syncContextInfo]);
+
   return {
     isGenerating: stream.isGenerating,
     handleRespond,
+    handleCompactCurrentChat,
+    handleStartSummarizedChat,
     handleStop: stream.handleStop,
     contextInfo: stream.contextInfo,
     fallbackNotice: stream.fallbackNotice,
     seedContextInfo: stream.seedContextInfo,
     contextCache: stream.contextCache,
+    isContextActionPending: pendingContextAction !== null,
   };
 }

@@ -1,6 +1,50 @@
 import { Type, type Static } from '@sinclair/typebox';
 
 const InteractionModeSchema = Type.Union([Type.Literal('chat'), Type.Literal('image')]);
+const ContextModeSchema = Type.Union([
+  Type.Literal('stateful'),
+  Type.Literal('stateless-loop'),
+  Type.Literal('replay'),
+  Type.Literal('compacted'),
+  Type.Literal('degraded'),
+]);
+const ContextSeveritySchema = Type.Union([
+  Type.Literal('normal'),
+  Type.Literal('info'),
+  Type.Literal('warning'),
+  Type.Literal('danger'),
+  Type.Literal('critical'),
+]);
+
+export const ContextCompactionBehaviorSchema = Type.Union([
+  Type.Literal('ask'),
+  Type.Literal('auto_compact_current_chat'),
+  Type.Literal('continue_with_summary_new_chat'),
+  Type.Literal('off'),
+]);
+
+export type ContextCompactionBehavior = Static<typeof ContextCompactionBehaviorSchema>;
+
+export const ContextInfoSchema = Type.Object({
+  estimatedInputTokens: Type.Number(),
+  contextLimit: Type.Number(),
+  estimatedUsageRatio: Type.Number(),
+  mode: ContextModeSchema,
+  severity: ContextSeveritySchema,
+});
+
+export type ContextInfo = Static<typeof ContextInfoSchema>;
+
+export const ContextSettingsSchema = Type.Object({
+  compactionBehavior: ContextCompactionBehaviorSchema,
+  warningThreshold: Type.Number({ minimum: 0.5, maximum: 0.99 }),
+  dangerThreshold: Type.Number({ minimum: 0.5, maximum: 0.99 }),
+  hardStopThreshold: Type.Number({ minimum: 0.5, maximum: 0.99 }),
+  preferredSummaryModel: Type.String(),
+  providerCompactionEnabled: Type.Boolean(),
+});
+
+export type ContextSettings = Static<typeof ContextSettingsSchema>;
 
 export const CreateChatBodySchema = Type.Object({
   title: Type.String(),
@@ -18,6 +62,26 @@ export const UpdateChatBodySchema = Type.Object({
 });
 
 export type UpdateChatBody = Static<typeof UpdateChatBodySchema>;
+
+export const CompactChatBodySchema = Type.Object({
+  model: Type.Optional(Type.String()),
+});
+
+export type CompactChatBody = Static<typeof CompactChatBodySchema>;
+
+export const SummarizeToNewChatBodySchema = Type.Object({
+  model: Type.Optional(Type.String()),
+});
+
+export type SummarizeToNewChatBody = Static<typeof SummarizeToNewChatBodySchema>;
+
+export const ContextCompactionResponseSchema = Type.Object({
+  chatId: Type.String(),
+  summaryMessageId: Type.String(),
+  contextInfo: Type.Union([ContextInfoSchema, Type.Null()]),
+});
+
+export type ContextCompactionResponse = Static<typeof ContextCompactionResponseSchema>;
 
 export const CreateMessageBodySchema = Type.Object({
   id: Type.String(),

@@ -73,6 +73,16 @@ export const messages: Messages = {
       warning: 'This conversation is approaching the model context limit.',
       danger: 'MangoStudio may need to compact or leave stateful mode.',
       critical: 'This conversation can no longer remain stateful on the current provider.',
+      keepHistory: 'Original messages stay in chat history by default.',
+      compactAction: 'Compact and continue',
+      newChatAction: 'Start summarized chat',
+      continueAction: 'Continue anyway',
+      compactPending: 'Compacting...',
+      newChatPending: 'Starting chat...',
+      compactedSuccess: 'Chat compacted',
+      summarizedChatSuccess: 'Summarized chat started',
+      compactFailed: 'Failed to compact chat',
+      summarizedChatFailed: 'Failed to start summarized chat',
     },
     fallback: {
       toReplay: 'Stateful continuation is no longer available. Continuing with transcript replay.',
@@ -110,6 +120,10 @@ export const messages: Messages = {
     suggestion2: 'Write a Python script to...',
     suggestion3: 'Help me debug a problem',
     suggestion4: 'Create an image',
+    systemEvents: {
+      chatCompacted: 'Context compacted into a summary',
+      summaryHandoff: 'This chat started from a summarized handoff',
+    },
   },
 
   gallery: {
@@ -125,6 +139,34 @@ export const messages: Messages = {
       general: 'General',
       connectors: 'Connectors',
       appearance: 'Appearance',
+      context: 'Context',
+    },
+    context: {
+      title: 'Context',
+      description: 'Control when MangoStudio warns, compacts, or starts a summarized handoff.',
+      keepHistory: 'Compaction keeps the original chat transcript unless you clean it up later.',
+      behaviorLabel: 'Compaction behavior',
+      behaviorDescription: 'Choose what happens when a chat reaches your warning threshold.',
+      behaviorOptions: {
+        ask: 'Ask every time',
+        autoCompact: 'Auto compact current chat',
+        newChat: 'Continue in summarized chat',
+        off: 'Turn prompts off',
+      },
+      providerCompactionLabel: 'Allow provider-side compaction',
+      providerCompactionDescription:
+        'When supported, let the provider compact cursor-based state near your warning threshold.',
+      warningThresholdLabel: 'Warning threshold',
+      warningThresholdDescription: 'Show compaction choices when context usage reaches this value.',
+      dangerThresholdLabel: 'Danger threshold',
+      dangerThresholdDescription: 'Escalate the warning tone before the hard stop threshold.',
+      hardStopThresholdLabel: 'Hard stop threshold',
+      hardStopThresholdDescription: 'Treat context pressure as critical at or above this value.',
+      summaryModelLabel: 'Preferred summary model',
+      summaryModelDescription:
+        'Use the current chat model or force a specific text model for summaries.',
+      summaryModelCurrent: 'Use current chat model',
+      thresholdHint: '{value}% of context',
     },
     general: {
       languageLabel: 'Language',

@@ -17,6 +17,7 @@ import { Route as AuthenticatedSettingsRouteImport } from './routes/_authenticat
 import { Route as AuthenticatedGalleryRouteImport } from './routes/_authenticated/gallery'
 import { Route as AuthenticatedSettingsIndexRouteImport } from './routes/_authenticated/settings/index'
 import { Route as AuthenticatedSettingsGeneralRouteImport } from './routes/_authenticated/settings/general'
+import { Route as AuthenticatedSettingsContextRouteImport } from './routes/_authenticated/settings/context'
 import { Route as AuthenticatedSettingsConnectorsRouteImport } from './routes/_authenticated/settings/connectors'
 import { Route as AuthenticatedSettingsAppearanceRouteImport } from './routes/_authenticated/settings/appearance'
 
@@ -61,6 +62,12 @@ const AuthenticatedSettingsGeneralRoute =
     path: '/general',
     getParentRoute: () => AuthenticatedSettingsRoute,
   } as any)
+const AuthenticatedSettingsContextRoute =
+  AuthenticatedSettingsContextRouteImport.update({
+    id: '/context',
+    path: '/context',
+    getParentRoute: () => AuthenticatedSettingsRoute,
+  } as any)
 const AuthenticatedSettingsConnectorsRoute =
   AuthenticatedSettingsConnectorsRouteImport.update({
     id: '/connectors',
@@ -82,6 +89,7 @@ export interface FileRoutesByFullPath {
   '/settings': typeof AuthenticatedSettingsRouteWithChildren
   '/settings/appearance': typeof AuthenticatedSettingsAppearanceRoute
   '/settings/connectors': typeof AuthenticatedSettingsConnectorsRoute
+  '/settings/context': typeof AuthenticatedSettingsContextRoute
   '/settings/general': typeof AuthenticatedSettingsGeneralRoute
   '/settings/': typeof AuthenticatedSettingsIndexRoute
 }
@@ -92,6 +100,7 @@ export interface FileRoutesByTo {
   '/': typeof AuthenticatedIndexRoute
   '/settings/appearance': typeof AuthenticatedSettingsAppearanceRoute
   '/settings/connectors': typeof AuthenticatedSettingsConnectorsRoute
+  '/settings/context': typeof AuthenticatedSettingsContextRoute
   '/settings/general': typeof AuthenticatedSettingsGeneralRoute
   '/settings': typeof AuthenticatedSettingsIndexRoute
 }
@@ -105,6 +114,7 @@ export interface FileRoutesById {
   '/_authenticated/': typeof AuthenticatedIndexRoute
   '/_authenticated/settings/appearance': typeof AuthenticatedSettingsAppearanceRoute
   '/_authenticated/settings/connectors': typeof AuthenticatedSettingsConnectorsRoute
+  '/_authenticated/settings/context': typeof AuthenticatedSettingsContextRoute
   '/_authenticated/settings/general': typeof AuthenticatedSettingsGeneralRoute
   '/_authenticated/settings/': typeof AuthenticatedSettingsIndexRoute
 }
@@ -118,6 +128,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/settings/appearance'
     | '/settings/connectors'
+    | '/settings/context'
     | '/settings/general'
     | '/settings/'
   fileRoutesByTo: FileRoutesByTo
@@ -128,6 +139,7 @@ export interface FileRouteTypes {
     | '/'
     | '/settings/appearance'
     | '/settings/connectors'
+    | '/settings/context'
     | '/settings/general'
     | '/settings'
   id:
@@ -140,6 +152,7 @@ export interface FileRouteTypes {
     | '/_authenticated/'
     | '/_authenticated/settings/appearance'
     | '/_authenticated/settings/connectors'
+    | '/_authenticated/settings/context'
     | '/_authenticated/settings/general'
     | '/_authenticated/settings/'
   fileRoutesById: FileRoutesById
@@ -208,6 +221,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedSettingsGeneralRouteImport
       parentRoute: typeof AuthenticatedSettingsRoute
     }
+    '/_authenticated/settings/context': {
+      id: '/_authenticated/settings/context'
+      path: '/context'
+      fullPath: '/settings/context'
+      preLoaderRoute: typeof AuthenticatedSettingsContextRouteImport
+      parentRoute: typeof AuthenticatedSettingsRoute
+    }
     '/_authenticated/settings/connectors': {
       id: '/_authenticated/settings/connectors'
       path: '/connectors'
@@ -228,6 +248,7 @@ declare module '@tanstack/react-router' {
 interface AuthenticatedSettingsRouteChildren {
   AuthenticatedSettingsAppearanceRoute: typeof AuthenticatedSettingsAppearanceRoute
   AuthenticatedSettingsConnectorsRoute: typeof AuthenticatedSettingsConnectorsRoute
+  AuthenticatedSettingsContextRoute: typeof AuthenticatedSettingsContextRoute
   AuthenticatedSettingsGeneralRoute: typeof AuthenticatedSettingsGeneralRoute
   AuthenticatedSettingsIndexRoute: typeof AuthenticatedSettingsIndexRoute
 }
@@ -235,6 +256,7 @@ interface AuthenticatedSettingsRouteChildren {
 const AuthenticatedSettingsRouteChildren: AuthenticatedSettingsRouteChildren = {
   AuthenticatedSettingsAppearanceRoute: AuthenticatedSettingsAppearanceRoute,
   AuthenticatedSettingsConnectorsRoute: AuthenticatedSettingsConnectorsRoute,
+  AuthenticatedSettingsContextRoute: AuthenticatedSettingsContextRoute,
   AuthenticatedSettingsGeneralRoute: AuthenticatedSettingsGeneralRoute,
   AuthenticatedSettingsIndexRoute: AuthenticatedSettingsIndexRoute,
 }

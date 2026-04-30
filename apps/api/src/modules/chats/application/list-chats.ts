@@ -1,21 +1,12 @@
 import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';
+import type { ContextInfo } from '@mangostudio/shared/chat';
 import { listByUserId } from '../infrastructure/chat-repository';
 import { parseContinuationEnvelope } from '../../../services/providers/continuation';
 import {
   getContextSeverity,
   parsePersistedContextSnapshot,
-  type ContextSeverity,
-  type ContinuationDisplayMode,
 } from '../../../services/providers/context-policy';
-
-export interface ContextInfo {
-  estimatedInputTokens: number;
-  contextLimit: number;
-  estimatedUsageRatio: number;
-  mode: ContinuationDisplayMode;
-  severity: ContextSeverity;
-}
 
 export function extractContextInfo(
   contextState: string | null | undefined,

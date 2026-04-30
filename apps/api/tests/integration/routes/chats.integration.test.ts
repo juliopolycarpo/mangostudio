@@ -6,6 +6,11 @@ import {
 } from '../../support/harness/create-api-test-app';
 import { getDb } from '../../../src/db/database';
 import { buildPersistedContextSnapshot } from '../../../src/services/providers/context-policy';
+import {
+  getProvider,
+  registerProvider,
+} from '../../../src/services/providers/core/provider-registry';
+import type { AIProvider } from '../../../src/services/providers/types';
 
 const TEST_USER = {
   id: 'test-user-chats',
@@ -30,11 +35,54 @@ beforeAll(async () => {
 });
 
 let restoreAuth: (() => void) | null = null;
+let previousOpenAICompatibleProvider: AIProvider | null = null;
 
 afterEach(() => {
   restoreAuth?.();
   restoreAuth = null;
+  if (previousOpenAICompatibleProvider) {
+    registerProvider(previousOpenAICompatibleProvider);
+  }
+  previousOpenAICompatibleProvider = null;
 });
+
+function registerSummaryProvider(summaryText: string) {
+  try {
+    previousOpenAICompatibleProvider = getProvider('openai-compatible');
+  } catch {
+    previousOpenAICompatibleProvider = null;
+  }
+
+  registerProvider({
+    providerType: 'openai-compatible',
+    generateText: () => Promise.resolve({ text: summaryText }),
+    listModels: () => Promise.resolve([]),
+    validateApiKey: () => Promise.resolve(),
+    resolveApiKey: () => Promise.resolve('test-key'),
+  });
+}
+
+async function insertSummaryConnector(modelId: string) {
+  await getDb()
+    .insertInto('secret_metadata')
+    .values({
+      id: `summary-connector-${modelId}-${Date.now()}`,
+      name: `Summary ${modelId}`,
+      provider: 'openai-compatible',
+      configured: 1,
+      source: 'config-file',
+      maskedSuffix: 'test',
+      updatedAt: Date.now(),
+      lastValidatedAt: Date.now(),
+      lastValidationError: null,
+      enabledModels: JSON.stringify([modelId]),
+      userId: TEST_USER.id,
+      baseUrl: null,
+      organizationId: null,
+      projectId: null,
+    })
+    .execute();
+}
 
 describe('GET /chats', () => {
   it('returns 401 when not authenticated', async () => {
@@ -292,6 +340,195 @@ describe('PUT /chats/:id', () => {
 
     // Elysia returns 400 on body parse errors, 422 on schema validation errors
     expect([400, 422]).toContain(response.status);
+  });
+});
+
+describe('POST /chats/:id/compact', () => {
+  it('compacts a chat into a summary message without removing original history', async () => {
+    registerSummaryProvider('Compact summary');
+    await insertSummaryConnector('summary-model');
+
+    const db = getDb();
+    const chatId = `compact-${Date.now()}`;
+    const base = Date.now();
+
+    await db
+      .insertInto('chats')
+      .values({
+        id: chatId,
+        title: 'Compact Me',
+        createdAt: base,
+        updatedAt: base,
+        model: null,
+        textModel: 'summary-model',
+        userId: TEST_USER.id,
+        lastProviderState: 'stale-cursor',
+      })
+      .execute();
+
+    await db
+      .insertInto('messages')
+      .values([
+        {
+          id: `compact-user-${chatId}`,
+          chatId,
+          role: 'user',
+          text: 'Summarize this discussion',
+          timestamp: base + 1,
+          isGenerating: 0,
+          interactionMode: 'chat',
+        },
+        {
+          id: `compact-ai-${chatId}`,
+          chatId,
+          role: 'ai',
+          text: 'Here is the long answer',
+          timestamp: base + 2,
+          isGenerating: 0,
+          interactionMode: 'chat',
+        },
+      ])
+      .execute();
+
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, chatRoutes);
+    restoreAuth = restore;
+
+    const response = await app.handle(
+      new Request(`http://localhost/chats/${chatId}/compact`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: 'summary-model' }),
+      })
+    );
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      chatId: string;
+      summaryMessageId: string;
+      contextInfo: Record<string, unknown> | null;
+    };
+    expect(body.chatId).toBe(chatId);
+    expect(body.contextInfo).toMatchObject({ mode: 'compacted' });
+
+    const messages = await db
+      .selectFrom('messages')
+      .select(['text', 'parts'])
+      .where('chatId', '=', chatId)
+      .orderBy('timestamp', 'asc')
+      .execute();
+
+    expect(messages).toHaveLength(3);
+    expect(messages[0]?.text).toBe('Summarize this discussion');
+    expect(messages[1]?.text).toBe('Here is the long answer');
+    expect(messages[2]?.text).toBe('Compact summary');
+    expect(messages[2]?.parts).toContain('chat_compacted');
+
+    const chat = await db
+      .selectFrom('chats')
+      .select(['lastProviderState', 'lastContextState'])
+      .where('id', '=', chatId)
+      .executeTakeFirst();
+
+    expect(chat?.lastProviderState).toBeNull();
+    expect(chat?.lastContextState).toContain('compacted');
+  });
+});
+
+describe('POST /chats/:id/summarize-to-new-chat', () => {
+  it('creates a new chat seeded with a summary and keeps the source chat intact', async () => {
+    registerSummaryProvider('Handoff summary');
+    await insertSummaryConnector('summary-model-2');
+
+    const db = getDb();
+    const sourceChatId = `handoff-${Date.now()}`;
+    const base = Date.now();
+
+    await db
+      .insertInto('chats')
+      .values({
+        id: sourceChatId,
+        title: 'Source Chat',
+        createdAt: base,
+        updatedAt: base,
+        model: null,
+        textModel: 'summary-model-2',
+        imageModel: 'image-model',
+        lastUsedMode: 'chat',
+        userId: TEST_USER.id,
+      })
+      .execute();
+
+    await db
+      .insertInto('messages')
+      .values([
+        {
+          id: `handoff-user-${sourceChatId}`,
+          chatId: sourceChatId,
+          role: 'user',
+          text: 'Move this chat forward',
+          timestamp: base + 1,
+          isGenerating: 0,
+          interactionMode: 'chat',
+        },
+        {
+          id: `handoff-ai-${sourceChatId}`,
+          chatId: sourceChatId,
+          role: 'ai',
+          text: 'Previous answer',
+          timestamp: base + 2,
+          isGenerating: 0,
+          interactionMode: 'chat',
+        },
+      ])
+      .execute();
+
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, chatRoutes);
+    restoreAuth = restore;
+
+    const response = await app.handle(
+      new Request(`http://localhost/chats/${sourceChatId}/summarize-to-new-chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: 'summary-model-2' }),
+      })
+    );
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      chatId: string;
+      summaryMessageId: string;
+      contextInfo: Record<string, unknown> | null;
+    };
+    expect(body.chatId).not.toBe(sourceChatId);
+    expect(body.contextInfo).toMatchObject({ mode: 'compacted' });
+
+    const sourceMessages = await db
+      .selectFrom('messages')
+      .select('id')
+      .where('chatId', '=', sourceChatId)
+      .execute();
+    expect(sourceMessages).toHaveLength(2);
+
+    const newChat = await db
+      .selectFrom('chats')
+      .select(['id', 'title', 'textModel', 'imageModel'])
+      .where('id', '=', body.chatId)
+      .executeTakeFirst();
+    expect(newChat).toMatchObject({
+      id: body.chatId,
+      title: 'Source Chat',
+      textModel: 'summary-model-2',
+      imageModel: 'image-model',
+    });
+
+    const newMessages = await db
+      .selectFrom('messages')
+      .select(['text', 'parts'])
+      .where('chatId', '=', body.chatId)
+      .execute();
+    expect(newMessages).toHaveLength(1);
+    expect(newMessages[0]?.text).toBe('Handoff summary');
+    expect(newMessages[0]?.parts).toContain('summary_handoff');
   });
 });
 

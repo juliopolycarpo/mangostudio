@@ -49,6 +49,7 @@ export function useAppState() {
     thinkingEnabled: settings.thinkingEnabled,
     reasoningEffort: settings.reasoningEffort,
     maxToolIterations: settings.maxToolIterations,
+    contextSettings: settings.contextSettings,
     currentChatId: chats.currentChatId,
   });
 
@@ -147,6 +148,7 @@ export function useAppState() {
     fallbackNotice: textGen.fallbackNotice,
     seedContextInfo: textGen.seedContextInfo,
     contextCache: textGen.contextCache,
+    isContextActionPending: textGen.isContextActionPending,
     lockedProvider,
 
     setComposerMode,
@@ -158,6 +160,8 @@ export function useAppState() {
     handleNavigate,
     handleSubmit,
     handleStop: textGen.handleStop,
+    handleCompactCurrentChat: textGen.handleCompactCurrentChat,
+    handleStartSummarizedChat: textGen.handleStartSummarizedChat,
     refreshCatalog: catalog.refreshCatalog,
   };
 }

@@ -18,6 +18,16 @@ function resolveLabel(
         label: detail ? `${t.chat.toolLoopExhausted} — ${detail}` : t.chat.toolLoopExhausted,
         severity: 'error',
       };
+    case 'chat_compacted':
+      return {
+        label: t.chat.systemEvents.chatCompacted,
+        severity: 'info',
+      };
+    case 'summary_handoff':
+      return {
+        label: t.chat.systemEvents.summaryHandoff,
+        severity: 'info',
+      };
     default:
       return { label: detail ?? event, severity: 'info' };
   }

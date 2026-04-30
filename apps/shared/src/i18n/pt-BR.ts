@@ -71,6 +71,16 @@ export const messages = {
       warning: 'Esta conversa está se aproximando do limite de contexto do modelo.',
       danger: 'O MangoStudio pode precisar compactar ou sair do modo stateful.',
       critical: 'Esta conversa não pode mais permanecer stateful no provedor atual.',
+      keepHistory: 'As mensagens originais continuam no histórico por padrão.',
+      compactAction: 'Compactar e continuar',
+      newChatAction: 'Iniciar chat resumido',
+      continueAction: 'Continuar assim mesmo',
+      compactPending: 'Compactando...',
+      newChatPending: 'Iniciando chat...',
+      compactedSuccess: 'Chat compactado',
+      summarizedChatSuccess: 'Chat resumido iniciado',
+      compactFailed: 'Falha ao compactar o chat',
+      summarizedChatFailed: 'Falha ao iniciar o chat resumido',
     },
     fallback: {
       toReplay:
@@ -111,6 +121,10 @@ export const messages = {
     suggestion2: 'Escreva um script em Python para...',
     suggestion3: 'Me ajude a depurar um problema',
     suggestion4: 'Crie uma imagem',
+    systemEvents: {
+      chatCompacted: 'Contexto compactado em um resumo',
+      summaryHandoff: 'Este chat começou a partir de um resumo anterior',
+    },
   },
 
   gallery: {
@@ -126,6 +140,36 @@ export const messages = {
       general: 'Geral',
       connectors: 'Conectores',
       appearance: 'Aparência',
+      context: 'Contexto',
+    },
+    context: {
+      title: 'Contexto',
+      description: 'Controle quando o MangoStudio avisa, compacta ou continua em um chat resumido.',
+      keepHistory: 'A compactação mantém o transcript original salvo até você limpá-lo depois.',
+      behaviorLabel: 'Comportamento de compactação',
+      behaviorDescription: 'Escolha o que acontece quando uma conversa atinge o limite de aviso.',
+      behaviorOptions: {
+        ask: 'Perguntar sempre',
+        autoCompact: 'Compactar o chat atual automaticamente',
+        newChat: 'Continuar em um chat resumido',
+        off: 'Desativar avisos',
+      },
+      providerCompactionLabel: 'Permitir compactação pelo provider',
+      providerCompactionDescription:
+        'Quando disponível, deixe o provider compactar o estado com cursor perto do limite de aviso.',
+      warningThresholdLabel: 'Limite de aviso',
+      warningThresholdDescription:
+        'Mostrar ações de compactação quando o uso de contexto atingir este valor.',
+      dangerThresholdLabel: 'Limite de perigo',
+      dangerThresholdDescription: 'Intensificar o aviso antes de atingir o limite crítico.',
+      hardStopThresholdLabel: 'Limite crítico',
+      hardStopThresholdDescription:
+        'Tratar a pressão de contexto como crítica neste valor ou acima dele.',
+      summaryModelLabel: 'Modelo preferido para resumo',
+      summaryModelDescription:
+        'Use o modelo atual do chat ou force um modelo de texto específico para os resumos.',
+      summaryModelCurrent: 'Usar o modelo atual do chat',
+      thresholdHint: '{value}% do contexto',
     },
     general: {
       languageLabel: 'Idioma',
