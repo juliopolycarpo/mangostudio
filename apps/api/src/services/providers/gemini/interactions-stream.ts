@@ -150,10 +150,16 @@ async function createGeminiInteractionStream(
 
 /**
  * Streams a single agentic turn using the Gemini Interactions API.
+ *
+ * @param req     - Turn request.
+ * @param client  - Optional injected client for tests. When absent, a real
+ *                  client is created from the resolved API key.
  */
-export async function* streamGeminiAgentTurn(req: AgentTurnRequest): AsyncIterable<AgentEvent> {
-  const apiKey = await getResolvedGeminiApiKey(req.userId, req.modelName);
-  const ai = createGeminiClient(apiKey);
+export async function* streamGeminiAgentTurn(
+  req: AgentTurnRequest,
+  client?: ReturnType<typeof createGeminiClient>
+): AsyncIterable<AgentEvent> {
+  const ai = client ?? createGeminiClient(await getResolvedGeminiApiKey(req.userId, req.modelName));
 
   const prevState = parseGeminiState(req.providerState);
   const toolDefs = req.toolDefinitions ?? [];
