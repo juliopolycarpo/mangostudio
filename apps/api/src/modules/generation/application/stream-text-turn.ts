@@ -23,11 +23,13 @@ import {
 import {
   computeSystemPromptHash,
   computeToolsetHash,
+  type ContinuationEnvelope,
+} from '../../../services/providers/core/continuation-envelope';
+import {
   decideContinuation,
   decideTurnPersistence,
   getContinuationStrategy,
-  type ContinuationEnvelope,
-} from '../../../services/providers/continuation';
+} from '../../../services/providers/core/continuation-runtime';
 import {
   buildPersistedContextSnapshot,
   computeContextSnapshot,

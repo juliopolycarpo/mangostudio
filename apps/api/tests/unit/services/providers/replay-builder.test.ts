@@ -3,7 +3,7 @@ import {
   buildOpenAIResponsesReplay,
   buildGeminiInteractionsReplay,
   buildChatCompletionsReplay,
-} from '../../../../src/services/providers/replay-builder';
+} from '../../../../src/services/providers/core/replay-builder';
 import type { ChatTurnContext } from '../../../../src/services/providers/types';
 
 // ---------------------------------------------------------------------------
