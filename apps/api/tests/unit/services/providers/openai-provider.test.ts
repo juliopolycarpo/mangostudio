@@ -3,6 +3,7 @@ import type { SecretMetadataRow } from '@mangostudio/shared/types';
 import type { SecretMetadataInput } from '../../../../src/services/secret-store/metadata';
 import { createProviderSecretService } from '../../../../src/services/providers/secret-service';
 import { InMemorySecretStore } from '../../../support/mocks/mock-secret-store';
+import { getDb } from '../../../../src/db/database';
 import {
   validateOpenAIAuthContext,
   OpenAIAuthError,
@@ -388,8 +389,9 @@ describe('validateOpenAIAuthContext', () => {
 });
 
 describe('openai-provider listModels filtering', () => {
-  afterEach(() => {
+  afterEach(async () => {
     mock.restore();
+    await mock.module('../../../../src/db/database', () => ({ getDb }));
   });
 
   it('filters out embedding/tts/whisper/moderation model ids', () => {
@@ -422,14 +424,36 @@ describe('openai-provider listModels filtering', () => {
   });
 
   it('returns empty array when no key is configured', async () => {
-    // Mock the database so syncConfigFileConnectors produces no rows.
-    // listSecretMetadata catches TypeError and returns [], giving resolvedCtx = null.
+    const makeChain = (firstValue: unknown): Record<string, unknown> => {
+      const terminal = {
+        execute: () => Promise.resolve([]),
+        executeTakeFirst: () => Promise.resolve(firstValue),
+      };
+      const proxy: Record<string, unknown> = new Proxy(terminal, {
+        get(target, prop) {
+          if (prop in target) return (target as Record<string, unknown>)[prop as string];
+          return () => proxy;
+        },
+      });
+      return proxy;
+    };
+
+    const insertChain = {
+      values: () => ({
+        onConflict: () => ({ execute: () => Promise.resolve() }),
+        execute: () => Promise.resolve(),
+      }),
+    };
+
     await mock.module('../../../../src/db/database', () => ({
-      getDb: () => ({}),
+      getDb: () => ({
+        selectFrom: () => makeChain(undefined),
+        insertInto: () => insertChain,
+        updateTable: () => makeChain(undefined),
+      }),
     }));
 
     const { openAIProvider } = await import('../../../../src/services/providers/openai-provider');
-    // Evict any stale cache entry so the mocked DB path is actually exercised.
     (
       openAIProvider as unknown as Record<string, ((userId: string) => void) | undefined>
     ).invalidateModelCache?.('nonexistent-user-no-keys');
