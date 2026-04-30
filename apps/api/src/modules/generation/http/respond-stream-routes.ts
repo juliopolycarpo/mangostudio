@@ -62,6 +62,18 @@ function toSsePayload(event: StreamEvent): object {
         reason: event.reason,
         done: false,
       };
+    case 'continuation_transition':
+      return {
+        type: 'continuation_transition',
+        provider: event.provider,
+        modelName: event.modelName,
+        fromProvider: event.fromProvider,
+        fromMode: event.fromMode,
+        toMode: event.toMode,
+        reasonCode: event.reasonCode,
+        detail: event.detail,
+        done: false,
+      };
     case 'system_event':
       return { type: 'system_event', event: event.event, detail: event.detail, done: false };
     case 'context_info':

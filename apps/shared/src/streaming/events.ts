@@ -1,3 +1,5 @@
+import type { ContinuationReasonCode, ProviderType } from '../types';
+
 /** SSE event: context window usage info, emitted after each turn. */
 export interface SSEContextEvent {
   type: 'context_info';
@@ -32,6 +34,19 @@ export interface SSESystemEvent {
   done: boolean;
 }
 
+/** SSE event: typed continuation degradation marker, emitted alongside fallback_notice. */
+export interface SSEContinuationTransitionEvent {
+  type: 'continuation_transition';
+  provider: ProviderType;
+  modelName: string;
+  fromProvider?: ProviderType;
+  fromMode: string;
+  toMode: string;
+  reasonCode: ContinuationReasonCode;
+  detail?: string;
+  done: false;
+}
+
 /** SSE error event emitted by streaming endpoints when generation fails. */
 export interface SSEErrorEvent {
   type: 'error';
@@ -61,5 +76,6 @@ export type StreamChunk =
     }
   | { type: 'fallback_notice'; from: string; to: string; reason: string; done: false }
   | { type: 'system_event'; event: string; detail?: string; done: false }
+  | SSEContinuationTransitionEvent
   | { type: 'done'; done: true; messageId?: string; generationTime?: string }
   | SSEErrorEvent;

@@ -1,3 +1,19 @@
+import type { ProviderType } from './provider';
+
+/**
+ * Normalized reason for a continuation degradation event.
+ * Used in both persisted MessageParts and live SSE events.
+ */
+export type ContinuationReasonCode =
+  | 'provider_changed'
+  | 'model_changed'
+  | 'system_prompt_changed'
+  | 'toolset_changed'
+  | 'cursor_expired'
+  | 'cursor_invalid'
+  | 'tool_result_cursor_loss'
+  | 'envelope_malformed';
+
 /** A single event emitted during an agentic turn (streaming tool loop). */
 export type AgentEvent =
   | { type: 'reasoning_delta'; text: string }
@@ -8,7 +24,13 @@ export type AgentEvent =
   | { type: 'assistant_text_delta'; text: string }
   | { type: 'turn_completed'; providerState?: string; finishReason?: string }
   | { type: 'turn_error'; error: string }
-  | { type: 'continuation_degraded'; from: string; to: string; reason: string };
+  | {
+      type: 'continuation_degraded';
+      from: string;
+      to: string;
+      reason: string;
+      reasonCode: ContinuationReasonCode;
+    };
 
 /** Discriminated union of all content block types in an assistant message. */
 export type MessagePart =
@@ -17,4 +39,15 @@ export type MessagePart =
   | { type: 'tool_call'; toolCallId: string; name: string; args: Record<string, unknown> }
   | { type: 'tool_result'; toolCallId: string; content: string; isError?: boolean }
   | { type: 'error'; text: string }
-  | { type: 'system_event'; event: string; detail?: string };
+  | { type: 'system_event'; event: string; detail?: string }
+  | {
+      type: 'continuation_transition';
+      provider: ProviderType;
+      modelName: string;
+      fromProvider?: ProviderType;
+      fromMode: string;
+      toMode: string;
+      reasonCode: ContinuationReasonCode;
+      detail?: string;
+      recovered: boolean;
+    };

@@ -14,7 +14,7 @@
  * into wire params, SSE events, and persistence actions.
  */
 
-import type { ProviderType } from '@mangostudio/shared/types';
+import type { ProviderType, ContinuationReasonCode } from '@mangostudio/shared/types';
 import {
   parseContinuationEnvelope,
   validateContinuationEnvelope,
@@ -25,7 +25,13 @@ import {
 
 export type ContinuationDecision =
   | { type: 'continue_with_cursor'; providerState: string; envelope: ContinuationEnvelope }
-  | { type: 'degrade_to_replay'; reason: string; previousMode: ContinuationMode }
+  | {
+      type: 'degrade_to_replay';
+      reason: string;
+      reasonCode: ContinuationReasonCode;
+      previousMode: ContinuationMode;
+      previousProvider?: ProviderType;
+    }
   | { type: 'start_replay' };
 
 export interface ContinuationStrategy {
@@ -93,6 +99,7 @@ export function decideContinuation(input: DecideContinuationInput): Continuation
     return {
       type: 'degrade_to_replay',
       reason: 'malformed or invalid envelope',
+      reasonCode: 'envelope_malformed',
       previousMode: strategy.durableMode ?? 'stateless-loop',
     };
   }
@@ -108,7 +115,9 @@ export function decideContinuation(input: DecideContinuationInput): Continuation
     return {
       type: 'degrade_to_replay',
       reason: validation.reason ?? 'unknown',
+      reasonCode: validation.reasonCode ?? 'envelope_malformed',
       previousMode: envelope.mode,
+      previousProvider: validation.previousProvider,
     };
   }
 

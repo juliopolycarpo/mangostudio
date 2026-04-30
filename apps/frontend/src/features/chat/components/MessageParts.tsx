@@ -4,6 +4,7 @@ import { MarkdownContent } from '@/components/MarkdownContent';
 import { ThinkingBlock } from './ThinkingBlock';
 import { ToolCallBlock } from './ToolCallBlock';
 import { SystemEventMarker } from './SystemEventMarker';
+import { ContinuationEventMarker } from './ContinuationEventMarker';
 
 interface MessagePartsProps {
   parts: MessagePart[];
@@ -78,6 +79,20 @@ export function MessageParts({ parts, messageId, isStreaming }: MessagePartsProp
                 key={`${messageId}-se-${idx}`}
                 event={part.event}
                 detail={part.detail}
+              />
+            );
+          case 'continuation_transition':
+            return (
+              <ContinuationEventMarker
+                // eslint-disable-next-line @eslint-react/no-array-index-key
+                key={`${messageId}-ct-${idx}`}
+                provider={part.provider}
+                modelName={part.modelName}
+                fromProvider={part.fromProvider}
+                fromMode={part.fromMode}
+                toMode={part.toMode}
+                reasonCode={part.reasonCode}
+                recovered={part.recovered}
               />
             );
           case 'error':

@@ -384,6 +384,7 @@ describe('streamAgentTurnWithResponsesAPI — cursor expiry', () => {
     if (degraded?.type === 'continuation_degraded') {
       expect(degraded.from).toBe('responses');
       expect(degraded.to).toBe('replay');
+      expect(degraded.reasonCode).toBe('cursor_expired');
     }
     expect(events.at(-1)?.type).toBe('turn_completed');
   });
@@ -407,6 +408,7 @@ describe('streamAgentTurnWithResponsesAPI — cursor expiry', () => {
     expect(degraded).toBeDefined();
     if (degraded?.type === 'continuation_degraded') {
       expect(degraded.to).toBe('tool_loop_aborted');
+      expect(degraded.reasonCode).toBe('tool_result_cursor_loss');
     }
     expect(events.some((e) => e.type === 'turn_error')).toBe(true);
     expect(events.some((e) => e.type === 'turn_completed')).toBe(false);

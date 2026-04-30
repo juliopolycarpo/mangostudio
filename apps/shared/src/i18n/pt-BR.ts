@@ -77,6 +77,26 @@ export const messages = {
         'Continuação stateful não está mais disponível. Continuando com replay do transcript.',
       generic: 'Modo da conversa alterado de {from} para {to}.',
     },
+    continuation: {
+      title: {
+        providerChanged:
+          'Estado {fromProvider} {fromMode} não pode ser reutilizado por {provider}. Transcript reproduzido e continuação {provider} {toMode} iniciada.',
+        modelChanged:
+          'Modelo alterado para {model}. Transcript reproduzido em {provider} {toMode}.',
+        systemPromptChanged:
+          'System prompt alterado. Transcript reproduzido em {provider} {toMode}.',
+        toolsetChanged:
+          'Conjunto de ferramentas alterado. Transcript reproduzido em {provider} {toMode}.',
+        cursorExpired: 'Cursor {provider} {fromMode} expirou. Usando replay do transcript.',
+        cursorInvalid: 'Cursor {provider} {fromMode} foi invalidado. Usando replay do transcript.',
+        toolResultCursorLoss:
+          'Cursor {provider} {fromMode} perdido durante execução de ferramenta. Resposta pode estar incompleta.',
+        envelopeMalformed:
+          'Estado de continuação armazenado era inválido. Reiniciando com replay do transcript.',
+      },
+      recovered: '(recuperado)',
+      notRecovered: '(não recuperado)',
+    },
     cursorLost: 'Cursor perdido — fallback para {detail}',
     toolLoopExhausted: 'Limite de iterações de ferramentas atingido',
     genericFailure: 'Falha na geração',

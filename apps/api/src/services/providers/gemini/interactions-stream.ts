@@ -214,6 +214,7 @@ export async function* streamGeminiAgentTurn(req: AgentTurnRequest): AsyncIterab
           from: 'interactions',
           to: 'tool_loop_aborted',
           reason: 'cursor_error during tool-result continuation',
+          reasonCode: 'tool_result_cursor_loss' as const,
         };
         yield {
           type: 'turn_error',
@@ -223,7 +224,7 @@ export async function* streamGeminiAgentTurn(req: AgentTurnRequest): AsyncIterab
       }
 
       console.warn(
-        `[fallback][degrade] provider=gemini reason=cursor_error` +
+        `[fallback][degrade] provider=gemini reason=cursor_expired` +
           ` model=${req.modelName} falling back to stateless replay`
       );
 
@@ -232,6 +233,7 @@ export async function* streamGeminiAgentTurn(req: AgentTurnRequest): AsyncIterab
         from: 'interactions',
         to: 'replay',
         reason: `interaction_expired: ${errMsg}`,
+        reasonCode: 'cursor_expired' as const,
       };
 
       try {
