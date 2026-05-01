@@ -8,6 +8,7 @@ import {
   getDeepSeekFallbackModels,
   toDeepSeekModelInfo,
 } from '../../../../src/services/providers/deepseek/model-catalog';
+import { buildDeepSeekSystemPrompt } from '../../../../src/services/providers/deepseek/normalizers';
 
 function createModelListFetch(
   status = 200
@@ -73,5 +74,32 @@ describe('DeepSeek provider foundation', () => {
       'deepseek-chat',
       'deepseek-reasoner',
     ]);
+  });
+
+  it('asks thinking mode to use the current user language', () => {
+    const systemPrompt = buildDeepSeekSystemPrompt({
+      userId: 'test-user',
+      history: [],
+      prompt: 'Explique com calma em português.',
+      systemPrompt: 'You are concise.',
+      modelName: 'deepseek-v4-flash',
+      generationConfig: { thinkingEnabled: true, reasoningEffort: 'medium' },
+    });
+
+    expect(systemPrompt).toContain('You are concise.');
+    expect(systemPrompt).toContain('same natural language as the current user message');
+  });
+
+  it('does not add the reasoning language hint when thinking is disabled', () => {
+    expect(
+      buildDeepSeekSystemPrompt({
+        userId: 'test-user',
+        history: [],
+        prompt: 'Hello',
+        systemPrompt: 'You are concise.',
+        modelName: 'deepseek-v4-flash',
+        generationConfig: { thinkingEnabled: false, reasoningEffort: 'medium' },
+      })
+    ).toBe('You are concise.');
   });
 });

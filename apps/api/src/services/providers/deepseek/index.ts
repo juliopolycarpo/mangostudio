@@ -7,7 +7,7 @@ import { createProviderSecretService } from '../core/secret-service';
 import { createDeepSeekClient, validateDeepSeekApiKey } from './client';
 import { fetchDeepSeekModels, getDeepSeekFallbackModels } from './model-catalog';
 import { buildDeepSeekProviderOptions, normalizeDeepSeekBaseUrl } from './options';
-import { buildDeepSeekMessages, toErrorMessage } from './normalizers';
+import { buildDeepSeekMessages, buildDeepSeekSystemPrompt, toErrorMessage } from './normalizers';
 import type {
   AIProvider,
   ModelInfo,
@@ -85,7 +85,7 @@ const deepSeekProvider: AIProvider = {
     const client = createDeepSeekClient({ apiKey, baseUrl });
     const result = await generateText({
       model: client(req.modelName),
-      system: req.systemPrompt,
+      system: buildDeepSeekSystemPrompt(req),
       messages: buildDeepSeekMessages(req),
       abortSignal: req.signal,
       timeout: { totalMs: GENERATION_TIMEOUT_MS },
@@ -104,7 +104,7 @@ const deepSeekProvider: AIProvider = {
     const client = createDeepSeekClient({ apiKey, baseUrl });
     const result = streamText({
       model: client(req.modelName),
-      system: req.systemPrompt,
+      system: buildDeepSeekSystemPrompt(req),
       messages: buildDeepSeekMessages(req),
       abortSignal: req.signal,
       timeout: { totalMs: GENERATION_TIMEOUT_MS },
