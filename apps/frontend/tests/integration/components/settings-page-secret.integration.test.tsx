@@ -153,15 +153,18 @@ describe('ConnectorsSettings', () => {
     await waitFor(() => expect(props.reloadModelCatalog).toHaveBeenCalledTimes(1));
 
     const postCall = fetchScenario.fetchMock.mock.calls.find((call) => {
-      const request = call[0] instanceof Request ? call[0] : null;
+      const input = call[0];
+      const method = input instanceof Request ? input.method : call[1]?.method;
+      const url = input instanceof Request ? input.url : String(input);
       return (
-        request?.method === 'POST' && new URL(request.url).pathname === '/api/settings/connectors'
+        method === 'POST' &&
+        new URL(url, 'http://localhost').pathname === '/api/settings/connectors'
       );
     });
-    const request = postCall?.[0] instanceof Request ? postCall[0] : null;
-    expect(await request?.json()).toMatchObject({
-      provider: 'deepseek',
-      baseUrl: 'https://api.deepseek.com',
-    });
+    const input = postCall?.[0];
+    const init = postCall?.[1];
+    const body = input instanceof Request ? await input.text() : init?.body;
+    expect(typeof body === 'string' ? body : '').toContain('"provider":"deepseek"');
+    expect(typeof body === 'string' ? body : '').toContain('"baseUrl":"https://api.deepseek.com"');
   });
 });
