@@ -18,6 +18,7 @@ export const PROVIDER_SECRET_CONFIG: Record<
     envPrefix: 'OPENAI_API_KEY',
   },
   anthropic: { tomlSection: 'anthropic_api_keys', envPrefix: 'ANTHROPIC_API_KEY' },
+  deepseek: { tomlSection: 'deepseek_api_keys', envPrefix: 'DEEPSEEK_API_KEY' },
 };
 
 /** Maps a raw DB row to the shared Connector shape. */

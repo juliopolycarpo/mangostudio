@@ -10,6 +10,7 @@ import {
   OpenAIConfigError,
 } from '../../../services/providers/openai-provider';
 import { validateBaseUrl, UnsafeBaseUrlError } from '../../../services/providers/base-url-policy';
+import { validateDeepSeekApiKey } from '../../../services/providers/deepseek/client';
 
 export { OpenAIAuthError, OpenAIConfigError, UnsafeBaseUrlError };
 
@@ -43,6 +44,11 @@ export async function validateProviderKey(
 
   if (provider === 'openai-compatible' && !options?.baseUrl) {
     throw new Error('baseUrl is required for openai-compatible connectors.');
+  }
+
+  if (provider === 'deepseek') {
+    await validateDeepSeekApiKey({ apiKey, baseUrl: options?.baseUrl });
+    return;
   }
 
   const p = getProvider(provider);

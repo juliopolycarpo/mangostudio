@@ -7,7 +7,9 @@ import {
 } from '../../../../src/services/providers/registry';
 import type { AIProvider } from '../../../../src/services/providers/types';
 
-function makeStubProvider(type: 'gemini' | 'openai-compatible' | 'anthropic'): AIProvider {
+function makeStubProvider(
+  type: 'gemini' | 'openai-compatible' | 'anthropic' | 'deepseek'
+): AIProvider {
   return {
     providerType: type,
     generateText() {

@@ -187,6 +187,8 @@ const MODEL_CONTEXT_LIMITS: Record<string, number> = {
   'gemini-1.5-flash-002': 1_048_576,
   'gemini-1.5-flash-8b': 1_048_576,
   // DeepSeek
+  'deepseek-v4-flash': 1_048_576,
+  'deepseek-v4-pro': 1_048_576,
   'deepseek-chat': 65_536,
   'deepseek-coder': 65_536,
   'deepseek-r1': 65_536,

@@ -12,10 +12,28 @@ const TEST_USER = {
 };
 
 let restoreAuth: (() => void) | null = null;
+let originalFetch: typeof globalThis.fetch = globalThis.fetch;
+
+function installProviderModelListFetch(): void {
+  originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = input instanceof Request ? input.url : String(input);
+    if (url.includes('api.openai.com') && url.includes('/models')) {
+      return new Response(JSON.stringify({ data: [{ id: 'gpt-4o' }] }), { status: 200 });
+    }
+    if (url === 'https://api.deepseek.com/models') {
+      return new Response(JSON.stringify({ data: [{ id: 'deepseek-v4-flash' }] }), {
+        status: 200,
+      });
+    }
+    return originalFetch(input, init);
+  }) as typeof fetch;
+}
 
 afterEach(() => {
   restoreAuth?.();
   restoreAuth = null;
+  globalThis.fetch = originalFetch;
 });
 
 const GeminiModelCatalogSchema = Type.Object({
@@ -33,6 +51,7 @@ const GeminiModelCatalogSchema = Type.Object({
 
 describe('settingsRoutes', () => {
   it('retorna o snapshot do catálogo de modelos Gemini com shape correto', async () => {
+    installProviderModelListFetch();
     clearGeminiModelCatalog(TEST_USER.id);
 
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, settingsRoutes);

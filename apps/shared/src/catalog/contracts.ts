@@ -14,6 +14,7 @@ export interface ModelCapabilities {
   promptCaching?: boolean;
   parallelToolCalls?: boolean;
   reasoningWithTools?: boolean;
+  structuredOutput?: boolean;
 }
 
 /** A UI-safe model option discovered from a provider. */

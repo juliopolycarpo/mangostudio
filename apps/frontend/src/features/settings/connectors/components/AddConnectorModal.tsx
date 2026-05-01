@@ -10,6 +10,7 @@ const PROVIDER_OPTIONS: { id: ProviderType }[] = [
   { id: 'openai' },
   { id: 'openai-compatible' },
   { id: 'anthropic' },
+  { id: 'deepseek' },
 ];
 
 type FormHook = ReturnType<typeof useConnectorForm>;
@@ -71,7 +72,7 @@ export function AddConnectorModal({
           {/* Provider selector */}
           <div className="flex flex-col gap-1.5">
             <label className="text-sm font-medium text-on-surface-variant">{s.providerLabel}</label>
-            <div className="grid grid-cols-4 gap-2">
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
               {PROVIDER_OPTIONS.map(({ id }) => (
                 <button
                   key={id}
@@ -80,7 +81,7 @@ export function AddConnectorModal({
                     setForm({
                       ...form,
                       provider: id,
-                      baseUrl: id === 'openai-compatible' ? form.baseUrl : '',
+                      baseUrl: id === 'openai-compatible' || id === 'deepseek' ? form.baseUrl : '',
                     })
                   }
                   className={`py-2 px-3 rounded-xl border text-xs font-bold text-center transition-all ${
@@ -104,14 +105,16 @@ export function AddConnectorModal({
             placeholder={s.namePlaceholder}
           />
 
-          {form.provider === 'openai-compatible' && (
+          {(form.provider === 'openai-compatible' || form.provider === 'deepseek') && (
             <Input
               id="connector-baseurl"
               label={s.baseUrlLabel}
               type="text"
               value={form.baseUrl}
               onChange={(e) => setForm({ ...form, baseUrl: e.target.value })}
-              placeholder={s.baseUrlPlaceholder}
+              placeholder={
+                form.provider === 'deepseek' ? s.deepseekBaseUrlPlaceholder : s.baseUrlPlaceholder
+              }
             />
           )}
 

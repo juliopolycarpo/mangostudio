@@ -196,6 +196,7 @@ export const messages: Messages = {
       baseUrlLabel: 'Base URL',
       baseUrlRequired: 'Base URL is required for OpenAI Compatible connectors.',
       baseUrlPlaceholder: 'https://api.example.com/v1',
+      deepseekBaseUrlPlaceholder: 'https://api.deepseek.com',
       organizationIdLabel: 'Organization ID (optional)',
       organizationIdPlaceholder: 'org-...',
       organizationIdHelper: 'Required only for keys scoped to a specific OpenAI organization.',

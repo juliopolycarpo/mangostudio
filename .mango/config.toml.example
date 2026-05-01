@@ -38,12 +38,17 @@ url = ""
 # work = "AIzaSy..."
 
 # OpenAI-compatible API key connectors.
-# Works with OpenAI, DeepSeek, OpenRouter, and other compatible APIs.
+# Works with OpenRouter and other compatible APIs.
 # Base URLs for non-OpenAI services are configured in the Settings UI.
 [openai_compatible_api_keys]
 # openai = "sk-..."
-# deepseek = "sk-..."
 # openrouter = "sk-or-..."
+
+# DeepSeek API key connectors.
+# Uses https://api.deepseek.com by default; advanced users can override
+# the base URL from the Settings UI.
+[deepseek_api_keys]
+# personal = "sk-..."
 
 # Anthropic API key connectors.
 [anthropic_api_keys]

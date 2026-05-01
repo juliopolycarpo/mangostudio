@@ -114,4 +114,57 @@ describe('ConnectorsSettings', () => {
 
     await waitFor(() => expect(props.reloadModelCatalog).toHaveBeenCalledTimes(1));
   });
+
+  it('submits DeepSeek connectors with an optional base URL', async () => {
+    const props = createDefaultProps();
+    const user = userEvent.setup();
+
+    fetchScenario
+      .respondWithJson('GET', '/api/settings/connectors', {
+        body: { connectors: [] },
+      })
+      .respondWithJson('POST', '/api/settings/connectors', {
+        body: {
+          id: 'conn-deepseek',
+          name: 'deepseek-connector',
+          provider: 'deepseek',
+          configured: true,
+          source: 'bun-secrets',
+          maskedSuffix: '1234',
+          updatedAt: Date.now(),
+          lastValidatedAt: Date.now(),
+          lastValidationError: null,
+          enabledModels: [],
+          userId: 'user-1',
+        },
+      });
+
+    render(<ConnectorsSettings {...props} />);
+
+    await screen.findByText(/no connectors found/i);
+    await user.click(screen.getAllByRole('button', { name: /add connector/i })[0]);
+    await user.click(screen.getByRole('button', { name: /deepseek/i }));
+    await user.type(screen.getByLabelText(/^name$/i), 'deepseek-connector');
+    await user.type(screen.getByLabelText(/base url/i), 'https://api.deepseek.com');
+    await user.type(screen.getByLabelText(/api key/i), 'sk-deepseek-test-key');
+    const allAddButtons = screen.getAllByRole('button', { name: /add connector/i });
+    await user.click(allAddButtons[allAddButtons.length - 1]);
+
+    await waitFor(() => expect(props.reloadModelCatalog).toHaveBeenCalledTimes(1));
+
+    const postCall = fetchScenario.fetchMock.mock.calls.find((call) => {
+      const input = call[0];
+      const method = input instanceof Request ? input.method : call[1]?.method;
+      const url = input instanceof Request ? input.url : String(input);
+      return (
+        method === 'POST' &&
+        new URL(url, 'http://localhost').pathname === '/api/settings/connectors'
+      );
+    });
+    const input = postCall?.[0];
+    const init = postCall?.[1];
+    const body = input instanceof Request ? await input.text() : init?.body;
+    expect(typeof body === 'string' ? body : '').toContain('"provider":"deepseek"');
+    expect(typeof body === 'string' ? body : '').toContain('"baseUrl":"https://api.deepseek.com"');
+  });
 });

@@ -4,3 +4,4 @@ export * from './gemini/index';
 export * from './openai/index';
 export * from './openai-compatible/index';
 export * from './anthropic/index';
+export * from './deepseek/index';

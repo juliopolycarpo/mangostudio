@@ -189,6 +189,12 @@ const COMPAT_LIST_USER = {
   email: 'test-compat-list@mangostudio.test',
 };
 
+const DEEPSEEK_CONNECTOR_USER = {
+  id: 'test-user-deepseek-connectors',
+  name: 'DeepSeek Test User',
+  email: 'test-deepseek-connectors@mangostudio.test',
+};
+
 /** Dedicated user for project/org scoped OpenAI tests. */
 const OPENAI_PROJ_USER = {
   id: 'test-user-openai-proj',
@@ -241,6 +247,7 @@ describe('openai connector routes', () => {
       OPENAI_CONNECTOR_USER,
       OPENAI_LIST_USER,
       COMPAT_LIST_USER,
+      DEEPSEEK_CONNECTOR_USER,
       OPENAI_PROJ_USER,
       OPENAI_FAIL_USER,
     ]) {
@@ -380,6 +387,52 @@ describe('openai connector routes', () => {
       expect(Value.Check(ConnectorResponseSchema, payload)).toBe(true);
       expect(payload.provider).toBe('openai-compatible');
       expect(payload.baseUrl).toBe(COMPAT_BASE_URL);
+      expect(payload.configured).toBe(true);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('POST /settings/connectors with provider deepseek stores default baseUrl metadata', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = input instanceof Request ? input.url : String(input);
+      if (url === 'https://api.deepseek.com/models') {
+        expect(init?.headers).toMatchObject({ Authorization: 'Bearer sk-deepseek-test-key' });
+        return new Response(JSON.stringify({ data: [{ id: 'deepseek-v4-flash' }] }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      return originalFetch(input, init);
+    }) as typeof fetch;
+
+    try {
+      const { app, restore } = createAuthenticatedApiTestApp(
+        DEEPSEEK_CONNECTOR_USER,
+        settingsRoutes
+      );
+      restoreAuth = restore;
+
+      const response = await app.handle(
+        new Request('http://localhost/settings/connectors', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: 'deepseek-key',
+            apiKey: 'sk-deepseek-test-key',
+            source: 'config-file',
+            provider: 'deepseek',
+          }),
+        })
+      );
+
+      expect(response.status).toBe(200);
+
+      const payload = (await response.json()) as ConnectorPayload;
+      expect(Value.Check(ConnectorResponseSchema, payload)).toBe(true);
+      expect(payload.provider).toBe('deepseek');
+      expect(payload.baseUrl).toBeNull();
       expect(payload.configured).toBe(true);
     } finally {
       globalThis.fetch = originalFetch;
