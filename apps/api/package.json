@@ -21,7 +21,7 @@
     "test:coverage": "bun test --coverage tests/unit tests/integration"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.91.1",
+    "@anthropic-ai/sdk": "^0.92.0",
     "@elysiajs/cors": "^1.4.2",
     "@elysiajs/openapi": "^1.4.15",
     "@elysiajs/static": "^1.4.10",
