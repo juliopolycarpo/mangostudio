@@ -8,6 +8,7 @@ import type {
 } from '@mangostudio/shared';
 import type { ContextSettings } from '@mangostudio/shared/chat';
 import type { AgentTurnRequest } from '../../../services/providers/types';
+import { safeJsonParse } from '../../../lib/safe-parse';
 import { assertChatOwnership } from '../../chats/domain/chat-ownership';
 import { resolveModel } from './resolve-model';
 import { loadHistory, loadRichHistory } from '../../messages/infrastructure/message-repository';
@@ -673,16 +674,10 @@ function computeTurnLocalCharCount(
   providerState: string | null
 ): number | undefined {
   let total = prompt.length;
-  if (providerState) {
-    try {
-      const parsed = JSON.parse(providerState) as { loopMessages?: unknown };
-      if (Array.isArray(parsed.loopMessages)) {
-        for (const msg of parsed.loopMessages) {
-          total += JSON.stringify(msg).length;
-        }
-      }
-    } catch {
-      // Malformed state is not fatal — fall back to prompt-only accounting.
+  const parsed = safeJsonParse(providerState);
+  if (parsed && Array.isArray(parsed.loopMessages)) {
+    for (const msg of parsed.loopMessages) {
+      total += JSON.stringify(msg).length;
     }
   }
   return total > 0 ? total : undefined;
