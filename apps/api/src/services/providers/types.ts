@@ -88,9 +88,17 @@ export interface AgentTurnRequest {
   }>;
   toolDefinitions?: ToolDefinition[];
   /**
-   * Opaque provider state for the current call.
-   * Stateful providers receive durable cursors; replay providers receive only
-   * turn-local loop state between tool iterations in the same request.
+   * Raw provider state for the current call. Carries one of:
+   *
+   * - `durableProviderState` (AgentTurnExecutionState): a continuation envelope
+   *   with a server-side cursor that survives across user turns (OpenAI
+   *   Responses, Gemini Interactions).
+   * - `turnLocalState` (AgentTurnExecutionState): accumulated in-memory
+   *   messages exchanged within a single agentic turn, never persisted across
+   *   turns (Anthropic, OpenAI-compatible).
+   *
+   * These two roles are documented in AgentTurnExecutionState
+   * (core/continuation-envelope).
    */
   providerState?: string | null;
   signal?: AbortSignal;

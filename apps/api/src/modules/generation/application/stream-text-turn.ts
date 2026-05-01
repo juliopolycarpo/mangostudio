@@ -24,6 +24,7 @@ import {
   computeSystemPromptHash,
   computeToolsetHash,
   type ContinuationEnvelope,
+  type AgentTurnExecutionState,
 } from '../../../services/providers/core/continuation-envelope';
 import {
   decideContinuation,
@@ -118,7 +119,10 @@ export async function* streamTextTurn(
 
   const allParts: MessagePart[] = [];
   let fullText = '';
-  let durableProviderState: string | null = null;
+  const executionState: AgentTurnExecutionState = {
+    durableProviderState: null,
+    turnLocalState: null,
+  };
 
   try {
     if (provider.generateAgentTurnStream) {
@@ -147,7 +151,11 @@ export async function* streamTextTurn(
         toolsetHash: currentToolsetHash,
       });
 
-      let currentProviderState: string | null = null;
+      // rawProviderState holds the combined state for the next provider call:
+      // durable cursor state (OpenAI/Gemini) or turn-local loop state
+      // (Anthropic/openai-compatible).  executionState is kept separate so
+      // the orchestrator persists only the durable subset across turns.
+      let rawProviderState: string | null = null;
 
       interface DegradationContext {
         from: string;
@@ -191,7 +199,7 @@ export async function* streamTextTurn(
 
       switch (decision.type) {
         case 'continue_with_cursor':
-          currentProviderState = decision.providerState;
+          rawProviderState = decision.providerState;
           console.warn(
             `[continuation][valid] chatId=${chatId} provider=${provider.providerType} model=${modelId} mode=${decision.envelope.mode}`
           );
@@ -204,10 +212,10 @@ export async function* streamTextTurn(
             reasonCode: decision.reasonCode,
             fromProvider: decision.previousProvider,
           });
-          currentProviderState = null;
+          rawProviderState = null;
           break;
         case 'start_replay':
-          currentProviderState = null;
+          rawProviderState = null;
           break;
       }
 
@@ -232,7 +240,7 @@ export async function* streamTextTurn(
           prompt: isFirstIteration ? input.prompt : undefined,
           toolResults: pendingToolResults,
           toolDefinitions: toolDefs,
-          providerState: currentProviderState,
+          providerState: rawProviderState,
           signal,
           generationConfig: {
             thinkingEnabled,
@@ -293,15 +301,15 @@ export async function* streamTextTurn(
 
             case 'turn_completed': {
               inThinkingSegment = false;
-              currentProviderState = event.providerState ?? null;
+              rawProviderState = event.providerState ?? null;
               turnCompleted = true;
 
-              const persistence = decideTurnPersistence(
-                currentProviderState,
-                provider.providerType
-              );
+              const persistence = decideTurnPersistence(rawProviderState, provider.providerType);
               const resultEnvelope = persistence.envelope;
-              durableProviderState = persistence.durableProviderState;
+              executionState.durableProviderState = persistence.durableProviderState;
+              executionState.turnLocalState = persistence.durableProviderState
+                ? null
+                : rawProviderState;
 
               if (resultEnvelope) {
                 console.warn(
@@ -318,7 +326,7 @@ export async function* streamTextTurn(
                 resultEnvelope?.context?.providerReportedInputTokens;
               const turnLocalCharCount =
                 providerReportedInputTokens === undefined && displayMode !== 'stateful'
-                  ? computeTurnLocalCharCount(input.prompt, currentProviderState)
+                  ? computeTurnLocalCharCount(input.prompt, rawProviderState)
                   : undefined;
               const snapshot = computeContextSnapshot({
                 modelName: modelId,
@@ -341,7 +349,7 @@ export async function* streamTextTurn(
               await db
                 .updateTable('chats')
                 .set({
-                  lastProviderState: durableProviderState,
+                  lastProviderState: executionState.durableProviderState,
                   lastContextState: JSON.stringify(contextState),
                 })
                 .where('id', '=', chatId)
@@ -431,7 +439,7 @@ export async function* streamTextTurn(
         yield { type: 'system_event', event: 'tool_loop_exhausted', detail };
         yield { type: 'error', error: TOOL_LOOP_EXHAUSTED_MESSAGE };
 
-        if (!durableProviderState) {
+        if (!executionState.durableProviderState) {
           await db
             .updateTable('chats')
             .set({ lastProviderState: null })
@@ -469,7 +477,7 @@ export async function* streamTextTurn(
         return;
       }
 
-      if (!signal?.aborted && !durableProviderState) {
+      if (!signal?.aborted && !executionState.durableProviderState) {
         await db
           .updateTable('chats')
           .set({ lastProviderState: null })
@@ -548,7 +556,7 @@ export async function* streamTextTurn(
           chatId,
           text: fullText,
           parts: finalParts.length > 0 ? finalParts : null,
-          providerState: durableProviderState,
+          providerState: executionState.durableProviderState,
           timestamp: aiTimestamp,
           generationTime,
           modelName: modelId,
@@ -568,7 +576,7 @@ export async function* streamTextTurn(
 
     // Clear stale durable state so a failed turn does not leave an invalid cursor
     // that would cause every subsequent turn to fail the same way.
-    if (!durableProviderState) {
+    if (!executionState.durableProviderState) {
       await db
         .updateTable('chats')
         .set({ lastProviderState: null })
