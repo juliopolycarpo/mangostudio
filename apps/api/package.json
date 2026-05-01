@@ -21,12 +21,14 @@
     "test:coverage": "bun test --coverage tests/unit tests/integration"
   },
   "dependencies": {
+    "@ai-sdk/deepseek": "^2.0.32",
     "@anthropic-ai/sdk": "^0.92.0",
     "@elysiajs/cors": "^1.4.2",
     "@elysiajs/openapi": "^1.4.15",
     "@elysiajs/static": "^1.4.10",
     "@google/genai": "^1.51.0",
     "@mangostudio/shared": "workspace:*",
+    "ai": "^6.0.174",
     "better-auth": "^1.6.9",
     "elysia": "^1.4.28",
     "file-type": "^22.0.1",

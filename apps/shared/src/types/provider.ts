@@ -2,7 +2,7 @@
 export type InteractionMode = 'chat' | 'image';
 
 /** Supported AI provider types. */
-export type ProviderType = 'gemini' | 'openai' | 'openai-compatible' | 'anthropic';
+export type ProviderType = 'gemini' | 'openai' | 'openai-compatible' | 'anthropic' | 'deepseek';
 
 /** Represents the source of a configured provider secret. */
 export type SecretSource = 'bun-secrets' | 'environment' | 'config-file' | 'none';

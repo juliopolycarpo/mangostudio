@@ -19,6 +19,7 @@ export const ModelCapabilitiesSchema = Type.Object({
   promptCaching: Type.Optional(Type.Boolean()),
   parallelToolCalls: Type.Optional(Type.Boolean()),
   reasoningWithTools: Type.Optional(Type.Boolean()),
+  structuredOutput: Type.Optional(Type.Boolean()),
 });
 
 export type ModelCapabilities = Static<typeof ModelCapabilitiesSchema>;

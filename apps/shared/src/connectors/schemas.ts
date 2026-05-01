@@ -12,6 +12,7 @@ const ProviderTypeSchema = Type.Union([
   Type.Literal('openai'),
   Type.Literal('openai-compatible'),
   Type.Literal('anthropic'),
+  Type.Literal('deepseek'),
 ]);
 
 export const AddConnectorBodySchema = Type.Object({

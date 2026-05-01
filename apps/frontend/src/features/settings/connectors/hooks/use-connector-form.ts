@@ -71,6 +71,9 @@ export function useConnectorForm({
       if (form.provider === 'openai-compatible' && form.baseUrl.trim()) {
         body.baseUrl = form.baseUrl.trim();
       }
+      if (form.provider === 'deepseek' && form.baseUrl.trim()) {
+        body.baseUrl = form.baseUrl.trim();
+      }
       if (form.provider === 'openai') {
         if (form.organizationId.trim()) body.organizationId = form.organizationId.trim();
         if (form.projectId.trim()) body.projectId = form.projectId.trim();

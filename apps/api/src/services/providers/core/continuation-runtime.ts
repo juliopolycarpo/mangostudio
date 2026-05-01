@@ -66,6 +66,12 @@ export const CONTINUATION_STRATEGIES: Record<ProviderType, ContinuationStrategy>
     supportsDurableCursor: false,
     durableMode: null,
   },
+  deepseek: {
+    provider: 'deepseek',
+    strategy: 'replay',
+    supportsDurableCursor: false,
+    durableMode: null,
+  },
 };
 
 export function getContinuationStrategy(provider: ProviderType): ContinuationStrategy {

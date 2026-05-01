@@ -97,6 +97,7 @@ The orchestrator reads exclusively from `chats.lastProviderState` (line
 | Gemini (Interactions) | yes            | `previous_interaction_id` | `buildGeminiInteractionsReplay`          | `ContinuationEnvelope` (mode `interactions`) | tool results in current request |
 | OpenAI-compatible     | no             | none                      | `buildChatCompletionsReplay`             | none (always starts fresh)                   | `loopMessages` only             |
 | Anthropic             | no             | none                      | direct Messages replay (history-derived) | none (always starts fresh)                   | `loopMessages` only             |
+| DeepSeek              | no             | none                      | AI SDK message replay                    | none (always starts fresh)                   | none                            |
 
 Source files:
 

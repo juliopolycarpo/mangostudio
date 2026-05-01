@@ -65,7 +65,7 @@ export async function addConnector(userId: string, body: AddConnectorBody): Prom
     lastValidatedAt: timestamp,
     enabledModels: [],
     userId,
-    baseUrl: body.baseUrl ?? null,
+    baseUrl: provider === 'deepseek' ? body.baseUrl?.trim() || null : (body.baseUrl ?? null),
     organizationId: provider === 'openai' ? (body.organizationId ?? null) : null,
     projectId: provider === 'openai' ? (body.projectId ?? null) : null,
   });

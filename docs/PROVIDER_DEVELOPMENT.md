@@ -44,6 +44,12 @@ capabilities: {
 }
 ```
 
+DeepSeek is modeled as a first-class provider rather than an
+OpenAI-compatible connector. It still uses the AI SDK runtime surface, but the
+separate provider type lets the catalog report DeepSeek-specific reasoning,
+tool, caching, and continuation capabilities without changing generic
+OpenAI-compatible behavior.
+
 ---
 
 ## How to Decide Continuation Mode
