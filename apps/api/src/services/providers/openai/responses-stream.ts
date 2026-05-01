@@ -17,6 +17,7 @@ import {
   serializeContinuationEnvelope,
   createContinuationEnvelope,
 } from '../core/continuation-envelope';
+import { logProviderDegrade } from '../core/continuation-logger';
 import {
   extractReasoningFromCompleted,
   extractResponsesUsage,
@@ -336,10 +337,13 @@ export async function* streamAgentTurnWithResponsesAPI(
         // would silently drop the in-flight tool results. Use a distinct 'to' value
         // rather than the generic 'error' so callers can distinguish this case.
         // Stale durable state must be cleared by the orchestrator after this failure.
-        console.warn(
-          `[fallback][degrade] provider=openai reason=cursor_error status=${status}` +
-            ` toolResults=true tool loop aborted`
-        );
+        logProviderDegrade({
+          provider: 'openai',
+          reason: 'cursor_error',
+          reasonCode: 'tool_result_cursor_loss',
+          status,
+          toolResults: true,
+        });
         yield {
           type: 'continuation_degraded',
           from: 'responses',
@@ -355,14 +359,14 @@ export async function* streamAgentTurnWithResponsesAPI(
       }
 
       // 404 = expired; 400/409 = invalid request shape referencing the prior response.
-      const reasonCode =
-        err instanceof OpenAIAPIError && err.status === 404
-          ? ('cursor_expired' as const)
-          : ('cursor_invalid' as const);
-      console.warn(
-        `[fallback][degrade] provider=openai reason=${reasonCode} status=${status}` +
-          ` falling back to full replay`
-      );
+      const reasonCode: 'cursor_expired' | 'cursor_invalid' =
+        err instanceof OpenAIAPIError && err.status === 404 ? 'cursor_expired' : 'cursor_invalid';
+      logProviderDegrade({
+        provider: 'openai',
+        reason: reasonCode,
+        reasonCode,
+        status,
+      });
       yield {
         type: 'continuation_degraded',
         from: 'responses',

@@ -13,6 +13,7 @@ import {
   computeSystemPromptHash,
   computeToolsetHash,
 } from '../core/continuation-envelope';
+import { logProviderDegrade } from '../core/continuation-logger';
 import { getModelContextLimit } from '../core/context-policy';
 import { buildGeminiInteractionsReplay } from '../core/replay-builder';
 import { toolDefsToGeminiInteractions } from '../core/tool-mapper';
@@ -210,10 +211,12 @@ export async function* streamGeminiAgentTurn(
 
     if (isCursorError) {
       if (req.toolResults && req.toolResults.length > 0) {
-        console.warn(
-          `[fallback][degrade] provider=gemini reason=cursor_error` +
-            ` toolResults=true tool loop aborted`
-        );
+        logProviderDegrade({
+          provider: 'gemini',
+          reason: 'cursor_error',
+          reasonCode: 'tool_result_cursor_loss',
+          toolResults: true,
+        });
 
         yield {
           type: 'continuation_degraded',
@@ -229,10 +232,12 @@ export async function* streamGeminiAgentTurn(
         return;
       }
 
-      console.warn(
-        `[fallback][degrade] provider=gemini reason=cursor_expired` +
-          ` model=${req.modelName} falling back to stateless replay`
-      );
+      logProviderDegrade({
+        provider: 'gemini',
+        model: req.modelName,
+        reason: 'cursor_expired',
+        reasonCode: 'cursor_expired',
+      });
 
       yield {
         type: 'continuation_degraded',
