@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'bun:test';
 import type { SecretMetadataRow } from '@mangostudio/shared/types';
 import type { SecretMetadataInput } from '../../../../src/services/secret-store/metadata';
+import type { AgentEvent } from '../../../../src/services/providers/types';
 import { createProviderSecretService } from '../../../../src/services/providers/secret-service';
 import { resolveCompatibleClientConfig } from '../../../../src/services/providers/openai-compatible/resolve-client-config';
 import { InMemorySecretStore } from '../../../support/mocks/mock-secret-store';
+import { expectTurnCompletedEnvelope } from '../../../support/providers/contract-assertions';
 
 const TEST_USER = 'test-user-oai-compat';
 const NO_TOML = '/tmp/mangostudio-test-nonexistent-config.toml';
@@ -232,8 +234,6 @@ describe('openai-compatible resolveClientConfig (via secretService)', () => {
 
 describe('openai-compatible generateAgentTurnStream turn_completed contract', () => {
   it('emits turn_completed with mode=stateless-loop', async () => {
-    const { parseContinuationEnvelope } =
-      await import('../../../../src/services/providers/continuation');
     const { streamOAICompatAgentTurn } =
       await import('../../../../src/services/providers/openai-compatible/chat-completions-stream');
     const fakeClient = makeFakeClient([
@@ -260,11 +260,10 @@ describe('openai-compatible generateAgentTurnStream turn_completed contract', ()
       events.push(event);
     }
 
-    const turnCompleted = events.find((e) => e.type === 'turn_completed');
-    const envelope = parseContinuationEnvelope(turnCompleted?.providerState ?? null);
-
-    expect(envelope).not.toBeNull();
-    expect(envelope?.mode).toBe('stateless-loop');
+    expectTurnCompletedEnvelope(events as unknown as AgentEvent[], {
+      provider: 'openai-compatible',
+      mode: 'stateless-loop',
+    });
   });
 });
 
@@ -335,13 +334,12 @@ describe('openai-compatible chat-completions-stream token accounting', () => {
       events.push(event);
     }
 
-    const turnCompleted = events.find((e) => e.type === 'turn_completed');
-    expect(turnCompleted).toBeDefined();
-    const parsed = JSON.parse(turnCompleted?.providerState ?? '{}') as {
-      context?: { providerReportedInputTokens?: number; contextLimit?: number };
-    };
-    expect(parsed.context?.providerReportedInputTokens).toBe(1234);
-    expect(parsed.context?.contextLimit).toBe(128_000);
+    const envelope = expectTurnCompletedEnvelope(events as unknown as AgentEvent[], {
+      provider: 'openai-compatible',
+      mode: 'stateless-loop',
+      providerReportedInputTokens: 1234,
+    });
+    expect(envelope?.context?.contextLimit).toBe(128_000);
   });
 
   it('omits context when usage is not reported by the endpoint', async () => {
@@ -374,11 +372,11 @@ describe('openai-compatible chat-completions-stream token accounting', () => {
       events.push(event);
     }
 
-    const turnCompleted = events.find((e) => e.type === 'turn_completed');
-    const parsed = JSON.parse(turnCompleted?.providerState ?? '{}') as {
-      context?: unknown;
-    };
-    expect(parsed.context).toBeUndefined();
+    const envelope = expectTurnCompletedEnvelope(events as unknown as AgentEvent[], {
+      provider: 'openai-compatible',
+      mode: 'stateless-loop',
+    });
+    expect(envelope?.context).toBeUndefined();
   });
 });
 

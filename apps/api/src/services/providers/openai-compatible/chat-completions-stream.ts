@@ -9,7 +9,7 @@ import type OpenAI from 'openai';
 import { buildChatCompletionsReplay } from '../core/replay-builder';
 import { toolDefsToChatCompletions } from '../core/tool-mapper';
 import type { StructuredOutputConfig } from '../types';
-import { computeSystemPromptHash, computeToolsetHash } from '../core/continuation-envelope';
+import { createContinuationEnvelope } from '../core/continuation-envelope';
 import { getModelContextLimit } from '../core/context-policy';
 import { extractReasoningChunks } from '../openai/normalizers';
 import type { AgentTurnRequest, AgentEvent } from '../types';
@@ -225,27 +225,23 @@ export async function* streamOAICompatAgentTurn(
       assistantMsg,
     ];
 
-    // Emit an envelope-compatible state that also carries the loop messages.
-    const envelopeWithLoop = {
-      schemaVersion: 1 as const,
-      provider: 'openai-compatible' as const,
-      mode: 'stateless-loop' as const,
-      modelName: req.modelName,
-      systemPromptHash: computeSystemPromptHash(req.systemPrompt),
-      toolsetHash: computeToolsetHash(req.toolDefinitions ?? []),
-      loopMessages: newLoopMessages,
-      ...(providerReportedInputTokens !== undefined
+    const envelope = createContinuationEnvelope(
+      'openai-compatible',
+      'stateless-loop',
+      req,
+      undefined,
+      providerReportedInputTokens !== undefined
         ? {
-            context: {
-              providerReportedInputTokens,
-              contextLimit: getModelContextLimit(req.modelName),
-              lastUpdatedAt: Date.now(),
-            },
+            providerReportedInputTokens,
+            contextLimit: getModelContextLimit(req.modelName),
           }
-        : {}),
-    };
+        : undefined
+    );
 
-    yield { type: 'turn_completed', providerState: JSON.stringify(envelopeWithLoop) };
+    yield {
+      type: 'turn_completed',
+      providerState: JSON.stringify({ ...envelope, loopMessages: newLoopMessages }),
+    };
   } catch (err: unknown) {
     yield {
       type: 'turn_error',

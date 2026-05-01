@@ -9,9 +9,9 @@ import { parseJsonValueOrRawString } from '../../../lib/safe-parse';
 import {
   parseContinuationEnvelope,
   serializeContinuationEnvelope,
+  createContinuationEnvelope,
   computeSystemPromptHash,
   computeToolsetHash,
-  type ContinuationEnvelope,
 } from '../core/continuation-envelope';
 import { getModelContextLimit } from '../core/context-policy';
 import { buildGeminiInteractionsReplay } from '../core/replay-builder';
@@ -196,7 +196,7 @@ export async function* streamGeminiAgentTurn(
   try {
     const stream = await createGeminiInteractionStream(ai, interactionParams, req.signal);
 
-    yield* processGeminiInteractionStream(stream, req, currentToolsetHash);
+    yield* processGeminiInteractionStream(stream, req);
   } catch (err: unknown) {
     const errMsg = err instanceof Error ? err.message : String(err);
 
@@ -246,7 +246,7 @@ export async function* streamGeminiAgentTurn(
         const retryParams = buildGeminiInteractionParams(req, { input });
         const retryStream = await createGeminiInteractionStream(ai, retryParams, req.signal);
 
-        yield* processGeminiInteractionStream(retryStream, req, currentToolsetHash);
+        yield* processGeminiInteractionStream(retryStream, req);
       } catch (retryErr: unknown) {
         yield {
           type: 'turn_error',
@@ -266,8 +266,7 @@ export async function* streamGeminiAgentTurn(
  */
 export async function* processGeminiInteractionStream(
   stream: AsyncIterable<InteractionSSEEvent>,
-  req: AgentTurnRequest,
-  currentToolsetHash: string
+  req: AgentTurnRequest
 ): AsyncIterable<AgentEvent> {
   const activeCalls = new Map<
     number,
@@ -342,20 +341,10 @@ export async function* processGeminiInteractionStream(
     return;
   }
 
-  const envelope: ContinuationEnvelope = {
-    schemaVersion: 1,
-    provider: 'gemini',
-    mode: 'interactions',
-    modelName: req.modelName,
-    systemPromptHash: computeSystemPromptHash(req.systemPrompt),
-    toolsetHash: currentToolsetHash,
-    cursor: interactionId,
-    context: {
-      providerReportedInputTokens,
-      contextLimit: getModelContextLimit(req.modelName),
-      lastUpdatedAt: Date.now(),
-    },
-  };
+  const envelope = createContinuationEnvelope('gemini', 'interactions', req, interactionId, {
+    providerReportedInputTokens,
+    contextLimit: getModelContextLimit(req.modelName),
+  });
 
   yield { type: 'turn_completed', providerState: serializeContinuationEnvelope(envelope) };
 }

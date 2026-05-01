@@ -17,6 +17,7 @@
  */
 
 import type { ProviderType, ContinuationReasonCode } from '@mangostudio/shared/types';
+import type { ToolDefinition } from '../types';
 import { computeHash, computeToolsetHash } from '../../../utils/hash';
 import { parseJsonWith } from '../../../lib/safe-parse';
 
@@ -152,4 +153,64 @@ export function isDurableMode(mode: ContinuationMode): boolean {
 export function computeSystemPromptHash(systemPrompt: string | undefined): string {
   if (!systemPrompt || systemPrompt.trim() === '') return 'none';
   return computeHash(systemPrompt);
+}
+
+/**
+ * Token usage and context information returned by a provider after a turn.
+ * Providers populate this from their SDK-specific usage shapes.
+ */
+export interface ProviderTurnResultContext {
+  providerReportedInputTokens?: number;
+  contextLimit?: number;
+}
+
+/**
+ * Separates cross-turn durable state from turn-local loop state within a
+ * single agentic request.
+ *
+ * - `durableProviderState` is the raw JSON string persisted in the chat row.
+ *   Durable modes (responses, interactions) carry a server-side cursor that
+ *   survives across separate user turns.
+ * - `turnLocalState` is the raw JSON string consumed by turn-local providers
+ *   (stateless-loop) within one request. It must NOT be persisted cross-turn.
+ */
+export interface AgentTurnExecutionState {
+  durableProviderState: string | null;
+  turnLocalState: string | null;
+}
+
+/**
+ * Builds a `ContinuationEnvelope` from common request metadata.
+ *
+ * Every provider adapter calls this on `turn_completed` so envelope
+ * construction is consistent across the codebase.
+ */
+export function createContinuationEnvelope(
+  provider: ProviderType,
+  mode: ContinuationMode,
+  options: {
+    modelName: string;
+    systemPrompt?: string;
+    toolDefinitions?: ToolDefinition[];
+  },
+  cursor?: string,
+  context?: { providerReportedInputTokens?: number; contextLimit?: number }
+): ContinuationEnvelope {
+  return {
+    schemaVersion: 1,
+    provider,
+    mode,
+    modelName: options.modelName,
+    systemPromptHash: computeSystemPromptHash(options.systemPrompt),
+    toolsetHash: computeToolsetHash(options.toolDefinitions ?? []),
+    ...(cursor ? { cursor } : {}),
+    ...(context
+      ? {
+          context: {
+            ...context,
+            lastUpdatedAt: Date.now(),
+          },
+        }
+      : {}),
+  };
 }

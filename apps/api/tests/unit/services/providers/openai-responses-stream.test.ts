@@ -6,11 +6,14 @@ import {
   toolDefsToResponsesAPI,
 } from '../../../../src/services/providers/core/tool-mapper';
 import {
-  parseContinuationEnvelope,
   serializeContinuationEnvelope,
   computeSystemPromptHash,
   computeToolsetHash,
 } from '../../../../src/services/providers/core/continuation-envelope';
+import {
+  expectTurnCompletedEnvelope,
+  expectContinuationDegraded,
+} from '../../../../tests/support/providers/contract-assertions';
 import type { AgentEvent, AgentTurnRequest } from '../../../../src/services/providers/types';
 
 type CreateFn = (
@@ -401,13 +404,11 @@ describe('streamAgentTurnWithResponsesAPI — cursor expiry', () => {
     );
 
     expect(callCount).toBe(2);
-    const degraded = events.find((e) => e.type === 'continuation_degraded');
-    expect(degraded).toBeDefined();
-    if (degraded?.type === 'continuation_degraded') {
-      expect(degraded.from).toBe('responses');
-      expect(degraded.to).toBe('replay');
-      expect(degraded.reasonCode).toBe('cursor_expired');
-    }
+    expectContinuationDegraded(events, {
+      from: 'responses',
+      to: 'replay',
+      reasonCode: 'cursor_expired',
+    });
     expect(events.at(-1)?.type).toBe('turn_completed');
   });
 
@@ -426,12 +427,11 @@ describe('streamAgentTurnWithResponsesAPI — cursor expiry', () => {
     );
 
     expect(callCount).toBe(1);
-    const degraded = events.find((e) => e.type === 'continuation_degraded');
-    expect(degraded).toBeDefined();
-    if (degraded?.type === 'continuation_degraded') {
-      expect(degraded.to).toBe('tool_loop_aborted');
-      expect(degraded.reasonCode).toBe('tool_result_cursor_loss');
-    }
+    expectContinuationDegraded(events, {
+      from: 'responses',
+      to: 'tool_loop_aborted',
+      reasonCode: 'tool_result_cursor_loss',
+    });
     expect(events.some((e) => e.type === 'turn_error')).toBe(true);
     expect(events.some((e) => e.type === 'turn_completed')).toBe(false);
   });
@@ -447,13 +447,12 @@ describe('streamAgentTurnWithResponsesAPI — usage reporting', () => {
       Promise.resolve(streamOf([COMPLETED_EVENT('resp_new', 321)]))
     );
 
-    const completed = events.find((e) => e.type === 'turn_completed');
-    expect(completed).toBeDefined();
-    if (completed?.type === 'turn_completed') {
-      const envelope = parseContinuationEnvelope(completed.providerState);
-      expect(envelope?.cursor).toBe('resp_new');
-      expect(envelope?.context?.providerReportedInputTokens).toBe(321);
-    }
+    expectTurnCompletedEnvelope(events, {
+      provider: 'openai',
+      mode: 'responses',
+      cursor: 'resp_new',
+      providerReportedInputTokens: 321,
+    });
   });
 
   it('skips providerReportedInputTokens when usage reports zero (compaction zero-usage bug)', async () => {
@@ -461,11 +460,11 @@ describe('streamAgentTurnWithResponsesAPI — usage reporting', () => {
       Promise.resolve(streamOf([COMPLETED_EVENT('resp_new', 0)]))
     );
 
-    const completed = events.find((e) => e.type === 'turn_completed');
-    expect(completed).toBeDefined();
-    if (completed?.type === 'turn_completed') {
-      const envelope = parseContinuationEnvelope(completed.providerState);
-      expect(envelope?.context?.providerReportedInputTokens).toBeUndefined();
-    }
+    const envelope = expectTurnCompletedEnvelope(events, {
+      provider: 'openai',
+      mode: 'responses',
+      cursor: 'resp_new',
+    });
+    expect(envelope?.context?.providerReportedInputTokens).toBeUndefined();
   });
 });
