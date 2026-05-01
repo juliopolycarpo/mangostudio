@@ -21,7 +21,7 @@
     "@elysiajs/eden": "^1.4.8",
     "@mangostudio/shared": "workspace:*",
     "@tanstack/react-query": "^5.100.6",
-    "@tanstack/react-router": "^1.168.26",
+    "@tanstack/react-router": "^1.169.1",
     "@tanstack/react-virtual": "^3.13.24",
     "better-auth": "^1.6.9",
     "clsx": "^2.1.1",
