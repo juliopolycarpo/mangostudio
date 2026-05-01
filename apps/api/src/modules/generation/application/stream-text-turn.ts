@@ -8,6 +8,7 @@ import type {
 } from '@mangostudio/shared';
 import type { ContextSettings } from '@mangostudio/shared/chat';
 import type { AgentTurnRequest } from '../../../services/providers/types';
+import { safeJsonParse } from '../../../lib/safe-parse';
 import { assertChatOwnership } from '../../chats/domain/chat-ownership';
 import { resolveModel } from './resolve-model';
 import { loadHistory, loadRichHistory } from '../../messages/infrastructure/message-repository';
@@ -31,6 +32,14 @@ import {
   decideTurnPersistence,
   getContinuationStrategy,
 } from '../../../services/providers/core/continuation-runtime';
+import {
+  logDegrade,
+  logValidContinuation,
+  logStateUpdate,
+  logContextInfo,
+  logPersistenceError,
+  logStateCleared,
+} from '../../../services/providers/core/continuation-logger';
 import {
   buildPersistedContextSnapshot,
   computeContextSnapshot,
@@ -166,11 +175,16 @@ export async function* streamTextTurn(
       }
 
       function* recordDegradation(ctx: DegradationContext): Generator<StreamEvent> {
-        console.warn(
-          `[fallback][degrade] chatId=${chatId} from=${ctx.from} to=${ctx.to}` +
-            ` reason="${ctx.reason}" reasonCode=${ctx.reasonCode}` +
-            ` provider=${provider.providerType} model=${modelId}`
-        );
+        logDegrade({
+          chatId,
+          provider: provider.providerType,
+          model: modelId,
+          from: ctx.from,
+          to: ctx.to,
+          reason: ctx.reason,
+          reasonCode: ctx.reasonCode,
+          fromProvider: ctx.fromProvider,
+        });
         const detail = `${ctx.from} → ${ctx.to}`;
         const transitionPart: Extract<MessagePart, { type: 'continuation_transition' }> = {
           type: 'continuation_transition',
@@ -200,9 +214,12 @@ export async function* streamTextTurn(
       switch (decision.type) {
         case 'continue_with_cursor':
           rawProviderState = decision.providerState;
-          console.warn(
-            `[continuation][valid] chatId=${chatId} provider=${provider.providerType} model=${modelId} mode=${decision.envelope.mode}`
-          );
+          logValidContinuation({
+            chatId,
+            provider: provider.providerType,
+            model: modelId,
+            mode: decision.envelope.mode,
+          });
           break;
         case 'degrade_to_replay':
           yield* recordDegradation({
@@ -312,9 +329,12 @@ export async function* streamTextTurn(
                 : rawProviderState;
 
               if (resultEnvelope) {
-                console.warn(
-                  `[continuation][updated] chatId=${chatId} provider=${resultEnvelope.provider} mode=${resultEnvelope.mode} cursor=${resultEnvelope.cursor ? 'present' : 'none'}`
-                );
+                logStateUpdate({
+                  chatId,
+                  provider: resultEnvelope.provider,
+                  mode: resultEnvelope.mode,
+                  hasCursor: !!resultEnvelope.cursor,
+                });
               }
 
               const displayMode = resolveDisplayMode(
@@ -339,11 +359,15 @@ export async function* streamTextTurn(
                 turnLocalCharCount,
               });
 
-              console.warn(
-                `[context][info] chatId=${chatId} provider=${provider.providerType} model=${modelId}` +
-                  ` inputTokens=${snapshot.estimatedInputTokens} limit=${snapshot.contextLimit}` +
-                  ` ratio=${snapshot.estimatedUsageRatio.toFixed(2)} mode=${displayMode}`
-              );
+              logContextInfo({
+                chatId,
+                provider: provider.providerType,
+                model: modelId,
+                inputTokens: snapshot.estimatedInputTokens,
+                limit: snapshot.contextLimit,
+                ratio: snapshot.estimatedUsageRatio,
+                mode: displayMode,
+              });
 
               const contextState = buildPersistedContextSnapshot(snapshot);
               await db
@@ -355,7 +379,11 @@ export async function* streamTextTurn(
                 .where('id', '=', chatId)
                 .execute()
                 .catch((err) => {
-                  console.warn(`[continuation][persist] Failed to save turn state: ${err}`);
+                  logPersistenceError({
+                    chatId,
+                    error: String(err),
+                    phase: 'turn_state',
+                  });
                 });
 
               yield {
@@ -446,9 +474,11 @@ export async function* streamTextTurn(
             .where('id', '=', chatId)
             .execute()
             .catch((err) => {
-              console.warn(
-                `[continuation][clear] Failed to clear stale state on loop exhaustion: ${err}`
-              );
+              logStateCleared({
+                chatId,
+                reason: 'loop_exhausted',
+                error: String(err),
+              });
             });
         }
 
@@ -484,7 +514,11 @@ export async function* streamTextTurn(
           .where('id', '=', chatId)
           .execute()
           .catch((err) => {
-            console.warn(`[continuation][clear] Failed to clear stale state: ${err}`);
+            logStateCleared({
+              chatId,
+              reason: 'no_durable_state',
+              error: String(err),
+            });
           });
       }
     } else if (provider.generateTextStream) {
@@ -583,7 +617,11 @@ export async function* streamTextTurn(
         .where('id', '=', chatId)
         .execute()
         .catch((err) => {
-          console.warn(`[continuation][clear] Failed to clear stale state on error: ${err}`);
+          logStateCleared({
+            chatId,
+            reason: 'turn_error',
+            error: String(err),
+          });
         });
     }
 
@@ -636,16 +674,10 @@ function computeTurnLocalCharCount(
   providerState: string | null
 ): number | undefined {
   let total = prompt.length;
-  if (providerState) {
-    try {
-      const parsed = JSON.parse(providerState) as { loopMessages?: unknown };
-      if (Array.isArray(parsed.loopMessages)) {
-        for (const msg of parsed.loopMessages) {
-          total += JSON.stringify(msg).length;
-        }
-      }
-    } catch {
-      // Malformed state is not fatal — fall back to prompt-only accounting.
+  const parsed = safeJsonParse(providerState);
+  if (parsed && Array.isArray(parsed.loopMessages)) {
+    for (const msg of parsed.loopMessages) {
+      total += JSON.stringify(msg).length;
     }
   }
   return total > 0 ? total : undefined;
