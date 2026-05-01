@@ -114,4 +114,54 @@ describe('ConnectorsSettings', () => {
 
     await waitFor(() => expect(props.reloadModelCatalog).toHaveBeenCalledTimes(1));
   });
+
+  it('submits DeepSeek connectors with an optional base URL', async () => {
+    const props = createDefaultProps();
+    const user = userEvent.setup();
+
+    fetchScenario
+      .respondWithJson('GET', '/api/settings/connectors', {
+        body: { connectors: [] },
+      })
+      .respondWithJson('POST', '/api/settings/connectors', {
+        body: {
+          id: 'conn-deepseek',
+          name: 'deepseek-connector',
+          provider: 'deepseek',
+          configured: true,
+          source: 'bun-secrets',
+          maskedSuffix: '1234',
+          updatedAt: Date.now(),
+          lastValidatedAt: Date.now(),
+          lastValidationError: null,
+          enabledModels: [],
+          userId: 'user-1',
+        },
+      });
+
+    render(<ConnectorsSettings {...props} />);
+
+    await screen.findByText(/no connectors found/i);
+    await user.click(screen.getAllByRole('button', { name: /add connector/i })[0]);
+    await user.click(screen.getByRole('button', { name: /deepseek/i }));
+    await user.type(screen.getByLabelText(/^name$/i), 'deepseek-connector');
+    await user.type(screen.getByLabelText(/base url/i), 'https://api.deepseek.com');
+    await user.type(screen.getByLabelText(/api key/i), 'sk-deepseek-test-key');
+    const allAddButtons = screen.getAllByRole('button', { name: /add connector/i });
+    await user.click(allAddButtons[allAddButtons.length - 1]);
+
+    await waitFor(() => expect(props.reloadModelCatalog).toHaveBeenCalledTimes(1));
+
+    const postCall = fetchScenario.fetchMock.mock.calls.find((call) => {
+      const request = call[0] instanceof Request ? call[0] : null;
+      return (
+        request?.method === 'POST' && new URL(request.url).pathname === '/api/settings/connectors'
+      );
+    });
+    const request = postCall?.[0] instanceof Request ? postCall[0] : null;
+    expect(await request?.json()).toMatchObject({
+      provider: 'deepseek',
+      baseUrl: 'https://api.deepseek.com',
+    });
+  });
 });

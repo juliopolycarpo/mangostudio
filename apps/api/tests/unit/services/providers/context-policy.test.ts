@@ -107,6 +107,11 @@ describe('getModelContextLimit', () => {
     expect(getModelContextLimit('deepseek-chat')).toBe(65_536);
   });
 
+  it('returns 1M for DeepSeek V4 models', () => {
+    expect(getModelContextLimit('deepseek-v4-flash')).toBe(1_048_576);
+    expect(getModelContextLimit('deepseek-v4-pro')).toBe(1_048_576);
+  });
+
   it('returns 64k for deepseek-reasoner (exact curated match)', () => {
     expect(getModelContextLimit('deepseek-reasoner')).toBe(65_536);
   });

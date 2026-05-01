@@ -5,6 +5,7 @@ import { listRegisteredProviderTypes } from '../../../../src/services/providers/
 import '../../../../src/services/providers/gemini-provider';
 import '../../../../src/services/providers/openai-compatible-provider';
 import '../../../../src/services/providers/anthropic-provider';
+import '../../../../src/services/providers/deepseek/index';
 
 describe('listRegisteredProviderTypes', () => {
   it('returns all registered provider types after imports', () => {
@@ -13,6 +14,7 @@ describe('listRegisteredProviderTypes', () => {
     expect(types).toContain('gemini');
     expect(types).toContain('openai-compatible');
     expect(types).toContain('anthropic');
+    expect(types).toContain('deepseek');
   });
 
   it('returns an array of unique provider types', () => {
