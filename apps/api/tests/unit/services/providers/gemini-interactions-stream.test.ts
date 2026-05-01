@@ -6,6 +6,7 @@ import {
   parseContinuationEnvelope,
   serializeContinuationEnvelope,
 } from '../../../../src/services/providers/core/continuation-envelope';
+import { expectTurnCompletedEnvelope } from '../../../support/providers/contract-assertions';
 import { streamGeminiAgentTurn } from '../../../../src/services/providers/gemini/interactions-stream';
 import { processGeminiInteractionStream } from '../../../../src/services/providers/gemini/interactions-stream';
 import {
@@ -447,12 +448,10 @@ describe('processGeminiInteractionStream', () => {
       events.push(event);
     }
 
-    const completed = events.find((e) => e.type === 'turn_completed');
-    expect(completed).toBeDefined();
-    if (completed?.type !== 'turn_completed') return;
-    const envelope = parseContinuationEnvelope(completed.providerState);
-    expect(envelope?.provider).toBe('gemini');
-    expect(envelope?.mode).toBe('interactions');
-    expect(envelope?.cursor).toBe('int_done');
+    expectTurnCompletedEnvelope(events, {
+      provider: 'gemini',
+      mode: 'interactions',
+      cursor: 'int_done',
+    });
   });
 });
