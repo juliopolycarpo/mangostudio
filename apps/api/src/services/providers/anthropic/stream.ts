@@ -3,7 +3,7 @@
  */
 
 import type Anthropic from '@anthropic-ai/sdk';
-import { computeSystemPromptHash, computeToolsetHash } from '../core/continuation-envelope';
+import { createContinuationEnvelope } from '../core/continuation-envelope';
 import { getModelContextLimit } from '../core/context-policy';
 import { buildCachedAnthropicRequest } from './cached-request';
 import {
@@ -185,22 +185,15 @@ export async function* streamAnthropicAgentTurn(
         : []),
     ];
 
-    const envelopeWithLoop = {
-      schemaVersion: 1 as const,
-      provider: 'anthropic' as const,
-      mode: 'stateless-loop' as const,
-      modelName: req.modelName,
-      systemPromptHash: computeSystemPromptHash(req.systemPrompt),
-      toolsetHash: computeToolsetHash(req.toolDefinitions ?? []),
-      loopMessages: newLoopMessages,
-      context: {
-        providerReportedInputTokens,
-        contextLimit: getModelContextLimit(req.modelName),
-        lastUpdatedAt: Date.now(),
-      },
-    };
+    const envelope = createContinuationEnvelope('anthropic', 'stateless-loop', req, undefined, {
+      providerReportedInputTokens,
+      contextLimit: getModelContextLimit(req.modelName),
+    });
 
-    yield { type: 'turn_completed', providerState: JSON.stringify(envelopeWithLoop) };
+    yield {
+      type: 'turn_completed',
+      providerState: JSON.stringify({ ...envelope, loopMessages: newLoopMessages }),
+    };
   } catch (err: unknown) {
     yield {
       type: 'turn_error',

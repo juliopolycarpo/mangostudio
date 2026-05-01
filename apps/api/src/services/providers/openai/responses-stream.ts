@@ -15,9 +15,7 @@ import { toolDefsToResponsesAPI } from '../core/tool-mapper';
 import {
   parseContinuationEnvelope,
   serializeContinuationEnvelope,
-  computeSystemPromptHash,
-  computeToolsetHash,
-  type ContinuationEnvelope,
+  createContinuationEnvelope,
 } from '../core/continuation-envelope';
 import {
   extractReasoningFromCompleted,
@@ -496,20 +494,16 @@ export async function* streamAgentTurnWithResponsesAPI(
     }
   }
 
-  const envelope: ContinuationEnvelope = {
-    schemaVersion: 1,
-    provider: 'openai',
-    mode: 'responses',
-    modelName: req.modelName,
-    systemPromptHash: computeSystemPromptHash(req.systemPrompt),
-    toolsetHash: computeToolsetHash(req.toolDefinitions ?? []),
-    cursor: newResponseId ?? undefined,
-    context: {
+  const envelope = createContinuationEnvelope(
+    'openai',
+    'responses',
+    req,
+    newResponseId ?? undefined,
+    {
       providerReportedInputTokens: usageInputTokens,
       contextLimit: getModelContextLimit(req.modelName),
-      lastUpdatedAt: Date.now(),
-    },
-  };
+    }
+  );
 
   yield { type: 'turn_completed', providerState: serializeContinuationEnvelope(envelope) };
 }

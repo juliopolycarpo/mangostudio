@@ -442,8 +442,7 @@ describe('processGeminiInteractionStream', () => {
 
     for await (const event of processGeminiInteractionStream(
       completedInteractionEvent('int_done'),
-      baseRequest(),
-      computeToolsetHash([SEARCH_TOOL])
+      baseRequest()
     )) {
       events.push(event);
     }
