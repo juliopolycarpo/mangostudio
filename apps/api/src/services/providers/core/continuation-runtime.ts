@@ -68,7 +68,7 @@ export const CONTINUATION_STRATEGIES: Record<ProviderType, ContinuationStrategy>
   },
   deepseek: {
     provider: 'deepseek',
-    strategy: 'replay',
+    strategy: 'turn-local',
     supportsDurableCursor: false,
     durableMode: null,
   },

@@ -8,7 +8,7 @@ export type ProviderType = 'gemini' | 'openai' | 'openai-compatible' | 'anthropi
 export type SecretSource = 'bun-secrets' | 'environment' | 'config-file' | 'none';
 
 /** Effort level for reasoning models. */
-export type ReasoningEffort = 'low' | 'medium' | 'high';
+export type ReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 
 /** Database row shape for secret metadata tracked in SQLite. */
 export interface SecretMetadataRow {

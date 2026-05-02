@@ -1,5 +1,6 @@
 import type { DeepSeekLanguageModelOptions } from '@ai-sdk/deepseek';
 import type { GenerationConfig } from '../types';
+import { normalizeDeepSeekReasoningEffort } from './normalizers';
 
 export const DEFAULT_DEEPSEEK_BASE_URL = 'https://api.deepseek.com';
 
@@ -9,12 +10,15 @@ export function normalizeDeepSeekBaseUrl(baseUrl: string | null | undefined): st
 
 export function buildDeepSeekProviderOptions(
   config: GenerationConfig | undefined
-): { deepseek: DeepSeekLanguageModelOptions } | undefined {
+): { deepseek: DeepSeekLanguageModelOptions & { reasoningEffort?: string } } | undefined {
   if (!config?.thinkingEnabled) return undefined;
+
+  const effort = normalizeDeepSeekReasoningEffort(config.reasoningEffort);
 
   return {
     deepseek: {
       thinking: { type: 'enabled' },
-    } satisfies DeepSeekLanguageModelOptions,
+      reasoningEffort: effort,
+    },
   };
 }
