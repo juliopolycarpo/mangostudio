@@ -36,12 +36,16 @@ const TEXT_LEVEL_MAP: Record<ReasoningEffort, string> = {
   low: 'LOW',
   medium: 'MEDIUM',
   high: 'HIGH',
+  xhigh: 'HIGH',
+  max: 'HIGH',
 };
 
 const TEXT_BUDGET_MAP: Record<ReasoningEffort, number> = {
   low: 1024,
   medium: 8192,
   high: 24576,
+  xhigh: 32768,
+  max: 32768,
 };
 
 function isGemini25Pro(modelName: string): boolean {
@@ -105,6 +109,8 @@ const INTERACTIONS_LEVEL_MAP: Record<ReasoningEffort, string> = {
   low: 'low',
   medium: 'medium',
   high: 'high',
+  xhigh: 'high',
+  max: 'high',
 };
 
 export function buildInteractionsThinkingConfig(

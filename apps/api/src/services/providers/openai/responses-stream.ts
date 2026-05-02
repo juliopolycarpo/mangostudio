@@ -139,7 +139,9 @@ export async function* streamWithResponsesAPI(
   client: OpenAI,
   req: TextGenerationRequest
 ): AsyncIterable<StreamingChunk> {
-  const effort = req.generationConfig?.reasoningEffort ?? 'medium';
+  const rawEffort = req.generationConfig?.reasoningEffort ?? 'medium';
+  const effort: 'low' | 'medium' | 'high' =
+    rawEffort === 'low' ? 'low' : rawEffort === 'medium' ? 'medium' : 'high';
   const input = [
     ...req.history.map((msg) => ({
       role: msg.role === 'ai' ? 'assistant' : 'user',
@@ -275,7 +277,9 @@ export async function* streamAgentTurnWithResponsesAPI(
 ): AsyncGenerator<AgentEvent> {
   const tools = toolDefsToResponsesAPI(req.toolDefinitions ?? []);
   const previousResponseId = parseResponseId(req.providerState);
-  const effort = req.generationConfig?.reasoningEffort ?? 'medium';
+  const rawEffort2 = req.generationConfig?.reasoningEffort ?? 'medium';
+  const effort: 'low' | 'medium' | 'high' =
+    rawEffort2 === 'low' ? 'low' : rawEffort2 === 'medium' ? 'medium' : 'high';
   const useReasoning = isReasoningModel(req.modelName) && req.generationConfig?.thinkingEnabled;
 
   // Build the input array for this request

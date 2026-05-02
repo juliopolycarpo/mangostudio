@@ -1,3 +1,4 @@
+import OpenAI from 'openai';
 import { generateText, streamText } from 'ai';
 import type { SecretMetadataRow } from '@mangostudio/shared/types';
 
@@ -8,12 +9,15 @@ import { createDeepSeekClient, validateDeepSeekApiKey } from './client';
 import { fetchDeepSeekModels, getDeepSeekFallbackModels } from './model-catalog';
 import { buildDeepSeekProviderOptions, normalizeDeepSeekBaseUrl } from './options';
 import { buildDeepSeekMessages, buildDeepSeekSystemPrompt, toErrorMessage } from './normalizers';
+import { streamDeepSeekAgentTurn } from './agent-stream';
 import type {
   AIProvider,
   ModelInfo,
   StreamingChunk,
   TextGenerationRequest,
   TextGenerationResult,
+  AgentTurnRequest,
+  AgentEvent,
 } from '../types';
 import { parseStringArray } from '../../../utils/json';
 
@@ -130,6 +134,15 @@ const deepSeekProvider: AIProvider = {
     }
 
     yield { type: 'text', text: '', done: true };
+  },
+
+  async *generateAgentTurnStream(req: AgentTurnRequest): AsyncIterable<AgentEvent> {
+    const { apiKey, baseUrl } = await resolveClientConfig(req.userId, req.modelName);
+    const client = new OpenAI({
+      apiKey,
+      baseURL: normalizeDeepSeekBaseUrl(baseUrl),
+    });
+    yield* streamDeepSeekAgentTurn(client, req);
   },
 
   async listModels(userId: string): Promise<ModelInfo[]> {
