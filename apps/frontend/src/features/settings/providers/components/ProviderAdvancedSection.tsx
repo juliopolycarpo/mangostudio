@@ -10,10 +10,10 @@ export function ProviderAdvancedSection() {
 
   return (
     <Card variant="solid" className="p-6">
-      <h3 className="text-xs uppercase tracking-widest font-bold text-muted-foreground">
+      <h3 className="text-xs uppercase tracking-widest font-bold text-on-surface-variant">
         {t.settings.providers.sectionAdvanced}
       </h3>
-      <p className="mt-2 text-xs text-muted-foreground">{/* Reserved for future settings */}</p>
+      <p className="mt-2 text-xs text-on-surface-variant">{/* Reserved for future settings */}</p>
     </Card>
   );
 }

@@ -35,20 +35,20 @@ export function CacheSettingsSection({
 
   return (
     <Card variant="solid" className="space-y-4 p-6">
-      <h3 className="text-xs uppercase tracking-widest font-bold text-muted-foreground">
+      <h3 className="text-xs uppercase tracking-widest font-bold text-on-surface-variant">
         {s.sectionCache}
       </h3>
 
       {cachingSupported && (
         <div className="space-y-2">
-          <label htmlFor="cache-preference" className="text-sm text-foreground">
+          <label htmlFor="cache-preference" className="text-sm text-on-surface">
             {s.cachePreference}
           </label>
           <select
             id="cache-preference"
             value={form.promptCachePreference ?? 'auto'}
             onChange={(e) => update('promptCachePreference', e.target.value)}
-            className="w-full rounded-xl px-4 py-2.5 text-sm bg-surface-container-high text-foreground border border-outline-variant/20 focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/20 transition-colors cursor-pointer"
+            className="w-full rounded-xl px-4 py-2.5 text-sm bg-surface-container-high text-on-surface border border-outline-variant/20 focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/20 transition-colors cursor-pointer"
           >
             {CACHE_OPTIONS.map(({ value, labelKey }) => (
               <option key={value} value={value}>
@@ -61,7 +61,7 @@ export function CacheSettingsSection({
 
       {/* Provider-side compaction */}
       <div className="flex items-center justify-between gap-4">
-        <label htmlFor="compaction-toggle" className="text-sm text-foreground">
+        <label htmlFor="compaction-toggle" className="text-sm text-on-surface">
           {s.compaction}
         </label>
         <input

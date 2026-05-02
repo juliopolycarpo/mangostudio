@@ -96,7 +96,7 @@ export function ProviderSettingsPage() {
   if (isLoading) {
     return (
       <div className="flex items-center justify-center py-16">
-        <p className="text-sm text-muted-foreground">{t.common.loading}</p>
+        <p className="text-sm text-on-surface-variant">{t.common.loading}</p>
       </div>
     );
   }
@@ -118,15 +118,15 @@ export function ProviderSettingsPage() {
     <div className="space-y-6">
       <Link
         to="/settings/providers"
-        className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+        className="inline-flex items-center gap-1.5 text-xs text-on-surface-variant hover:text-on-surface transition-colors"
       >
         <ArrowLeft size={14} />
         {s.backToMenu}
       </Link>
 
       <div>
-        <h2 className="text-lg font-bold text-foreground">{providerName}</h2>
-        <p className="mt-0.5 text-xs text-muted-foreground">{s.perProviderSettings}</p>
+        <h2 className="text-lg font-bold text-on-surface">{providerName}</h2>
+        <p className="mt-0.5 text-xs text-on-surface-variant">{s.perProviderSettings}</p>
       </div>
 
       <div className="space-y-4">

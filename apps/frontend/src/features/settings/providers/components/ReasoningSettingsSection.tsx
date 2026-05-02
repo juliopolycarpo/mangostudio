@@ -27,14 +27,14 @@ export function ReasoningSettingsSection({
 
   return (
     <Card variant="solid" className="space-y-4 p-6">
-      <h3 className="text-xs uppercase tracking-widest font-bold text-muted-foreground">
+      <h3 className="text-xs uppercase tracking-widest font-bold text-on-surface-variant">
         {s.sectionReasoning}
       </h3>
 
       {/* Thinking toggle */}
       {policy.thinkingToggleSupported && (
         <div className="flex items-center justify-between gap-4">
-          <label htmlFor="thinking-toggle" className="text-sm text-foreground">
+          <label htmlFor="thinking-toggle" className="text-sm text-on-surface">
             {s.thinkingEnabled}
           </label>
           <input
@@ -49,7 +49,7 @@ export function ReasoningSettingsSection({
 
       {/* Reasoning effort */}
       <div className="space-y-2">
-        <label className="text-sm text-foreground">{s.reasoningEffort}</label>
+        <label className="text-sm text-on-surface">{s.reasoningEffort}</label>
         <div className="flex flex-wrap gap-2">
           {EFFORT_DISPLAY_ORDER.filter((e) => supportedSet.has(e)).map((effort) => (
             <button

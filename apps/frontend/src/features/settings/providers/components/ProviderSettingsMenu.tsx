@@ -6,6 +6,7 @@ import { Link } from '@tanstack/react-router';
 import { useI18n } from '@/hooks/use-i18n';
 import { useProviderSettingsList } from '../hooks/use-provider-settings';
 import { ProviderSettingsCard } from './ProviderSettingsCard';
+import { Card } from '@/components/ui/Card';
 
 export function ProviderSettingsMenu() {
   const { t } = useI18n();
@@ -14,7 +15,7 @@ export function ProviderSettingsMenu() {
   if (isLoading) {
     return (
       <div className="flex items-center justify-center py-16">
-        <p className="text-sm text-muted-foreground">{t.common.loading}</p>
+        <p className="text-sm text-on-surface-variant">{t.common.loading}</p>
       </div>
     );
   }
@@ -36,14 +37,17 @@ export function ProviderSettingsMenu() {
   if (providers.length === 0) {
     return (
       <div className="flex items-center justify-center py-16">
-        <p className="text-sm text-muted-foreground">{t.settings.providers.noProviders}</p>
+        <p className="text-sm text-on-surface-variant">{t.settings.providers.noProviders}</p>
       </div>
     );
   }
 
   return (
-    <div className="space-y-4">
-      <p className="text-xs text-muted-foreground">{t.settings.providers.perProviderSettings}</p>
+    <Card variant="solid" className="p-6 space-y-4">
+      <h2 className="text-xs uppercase tracking-widest font-bold text-on-surface">
+        {t.settings.providers.title}
+      </h2>
+      <p className="text-xs text-on-surface-variant">{t.settings.providers.perProviderSettings}</p>
       <div className="grid grid-cols-1 gap-3">
         {providers.map((descriptor) => (
           <Link
@@ -56,6 +60,6 @@ export function ProviderSettingsMenu() {
           </Link>
         ))}
       </div>
-    </div>
+    </Card>
   );
 }

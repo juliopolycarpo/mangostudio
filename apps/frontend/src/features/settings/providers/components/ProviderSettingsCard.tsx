@@ -18,27 +18,27 @@ export function ProviderSettingsCard({ descriptor }: ProviderSettingsCardProps) 
     .join(', ');
 
   return (
-    <div className="rounded-lg border border-border bg-surface p-4 transition-colors hover:border-primary/40">
+    <div className="rounded-2xl border border-outline-variant/10 bg-surface-container-lowest p-4">
       <div className="flex items-start justify-between">
         <div>
-          <h3 className="text-sm font-medium text-foreground">{providerName}</h3>
+          <h3 className="text-sm font-medium text-on-surface">{providerName}</h3>
           {/* TODO: connectorCount / enabledModelCount when the API returns them */}
-          <p className="mt-0.5 text-xs text-muted-foreground">{reasoningLabel}</p>
+          <p className="mt-0.5 text-xs text-on-surface-variant">{reasoningLabel}</p>
         </div>
       </div>
       <div className="mt-2 flex flex-wrap gap-1.5">
         {descriptor.reasoning.thinkingToggleSupported && (
-          <span className="rounded-md bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary">
+          <span className="rounded-full bg-surface-container-high px-2 py-0.5 text-[10px] font-medium text-on-surface-variant">
             {t.settings.providers.capabilityThinking}
           </span>
         )}
         {descriptor.toolUseSupported && (
-          <span className="rounded-md bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary">
+          <span className="rounded-full bg-surface-container-high px-2 py-0.5 text-[10px] font-medium text-on-surface-variant">
             {t.settings.providers.capabilityTools}
           </span>
         )}
         {descriptor.promptCachingSupported && (
-          <span className="rounded-md bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary">
+          <span className="rounded-full bg-surface-container-high px-2 py-0.5 text-[10px] font-medium text-on-surface-variant">
             {t.settings.providers.capabilityCaching}
           </span>
         )}
