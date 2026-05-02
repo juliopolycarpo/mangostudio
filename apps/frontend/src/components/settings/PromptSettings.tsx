@@ -1,4 +1,5 @@
 import { useCallback } from 'react';
+import { Plus } from 'lucide-react';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { RuleFileCard } from '@/components/settings/RuleFileCard';
@@ -126,7 +127,13 @@ export function PromptSettings({
             </h3>
             <p className="text-sm text-on-surface-variant/60">{s.customRulesDescription}</p>
           </div>
-          <Button variant="secondary" size="sm" onClick={onAddCustomRule}>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={onAddCustomRule}
+            className="shrink-0 whitespace-nowrap"
+          >
+            <Plus className="w-3.5 h-3.5" />
             {s.addRule}
           </Button>
         </div>
