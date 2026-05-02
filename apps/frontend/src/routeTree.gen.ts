@@ -16,10 +16,13 @@ import { Route as AuthenticatedIndexRouteImport } from './routes/_authenticated/
 import { Route as AuthenticatedSettingsRouteImport } from './routes/_authenticated/settings'
 import { Route as AuthenticatedGalleryRouteImport } from './routes/_authenticated/gallery'
 import { Route as AuthenticatedSettingsIndexRouteImport } from './routes/_authenticated/settings/index'
+import { Route as AuthenticatedSettingsProvidersRouteImport } from './routes/_authenticated/settings/providers'
 import { Route as AuthenticatedSettingsGeneralRouteImport } from './routes/_authenticated/settings/general'
 import { Route as AuthenticatedSettingsContextRouteImport } from './routes/_authenticated/settings/context'
 import { Route as AuthenticatedSettingsConnectorsRouteImport } from './routes/_authenticated/settings/connectors'
 import { Route as AuthenticatedSettingsAppearanceRouteImport } from './routes/_authenticated/settings/appearance'
+import { Route as AuthenticatedSettingsProvidersIndexRouteImport } from './routes/_authenticated/settings/providers/index'
+import { Route as AuthenticatedSettingsProvidersProviderRouteImport } from './routes/_authenticated/settings/providers.$provider'
 
 const SignupRoute = SignupRouteImport.update({
   id: '/signup',
@@ -56,6 +59,12 @@ const AuthenticatedSettingsIndexRoute =
     path: '/',
     getParentRoute: () => AuthenticatedSettingsRoute,
   } as any)
+const AuthenticatedSettingsProvidersRoute =
+  AuthenticatedSettingsProvidersRouteImport.update({
+    id: '/providers',
+    path: '/providers',
+    getParentRoute: () => AuthenticatedSettingsRoute,
+  } as any)
 const AuthenticatedSettingsGeneralRoute =
   AuthenticatedSettingsGeneralRouteImport.update({
     id: '/general',
@@ -80,6 +89,18 @@ const AuthenticatedSettingsAppearanceRoute =
     path: '/appearance',
     getParentRoute: () => AuthenticatedSettingsRoute,
   } as any)
+const AuthenticatedSettingsProvidersIndexRoute =
+  AuthenticatedSettingsProvidersIndexRouteImport.update({
+    id: '/',
+    path: '/',
+    getParentRoute: () => AuthenticatedSettingsProvidersRoute,
+  } as any)
+const AuthenticatedSettingsProvidersProviderRoute =
+  AuthenticatedSettingsProvidersProviderRouteImport.update({
+    id: '/$provider',
+    path: '/$provider',
+    getParentRoute: () => AuthenticatedSettingsProvidersRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof AuthenticatedIndexRoute
@@ -91,7 +112,10 @@ export interface FileRoutesByFullPath {
   '/settings/connectors': typeof AuthenticatedSettingsConnectorsRoute
   '/settings/context': typeof AuthenticatedSettingsContextRoute
   '/settings/general': typeof AuthenticatedSettingsGeneralRoute
+  '/settings/providers': typeof AuthenticatedSettingsProvidersRouteWithChildren
   '/settings/': typeof AuthenticatedSettingsIndexRoute
+  '/settings/providers/$provider': typeof AuthenticatedSettingsProvidersProviderRoute
+  '/settings/providers/': typeof AuthenticatedSettingsProvidersIndexRoute
 }
 export interface FileRoutesByTo {
   '/login': typeof LoginRoute
@@ -103,6 +127,8 @@ export interface FileRoutesByTo {
   '/settings/context': typeof AuthenticatedSettingsContextRoute
   '/settings/general': typeof AuthenticatedSettingsGeneralRoute
   '/settings': typeof AuthenticatedSettingsIndexRoute
+  '/settings/providers/$provider': typeof AuthenticatedSettingsProvidersProviderRoute
+  '/settings/providers': typeof AuthenticatedSettingsProvidersIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -116,7 +142,10 @@ export interface FileRoutesById {
   '/_authenticated/settings/connectors': typeof AuthenticatedSettingsConnectorsRoute
   '/_authenticated/settings/context': typeof AuthenticatedSettingsContextRoute
   '/_authenticated/settings/general': typeof AuthenticatedSettingsGeneralRoute
+  '/_authenticated/settings/providers': typeof AuthenticatedSettingsProvidersRouteWithChildren
   '/_authenticated/settings/': typeof AuthenticatedSettingsIndexRoute
+  '/_authenticated/settings/providers/$provider': typeof AuthenticatedSettingsProvidersProviderRoute
+  '/_authenticated/settings/providers/': typeof AuthenticatedSettingsProvidersIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -130,7 +159,10 @@ export interface FileRouteTypes {
     | '/settings/connectors'
     | '/settings/context'
     | '/settings/general'
+    | '/settings/providers'
     | '/settings/'
+    | '/settings/providers/$provider'
+    | '/settings/providers/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/login'
@@ -142,6 +174,8 @@ export interface FileRouteTypes {
     | '/settings/context'
     | '/settings/general'
     | '/settings'
+    | '/settings/providers/$provider'
+    | '/settings/providers'
   id:
     | '__root__'
     | '/_authenticated'
@@ -154,7 +188,10 @@ export interface FileRouteTypes {
     | '/_authenticated/settings/connectors'
     | '/_authenticated/settings/context'
     | '/_authenticated/settings/general'
+    | '/_authenticated/settings/providers'
     | '/_authenticated/settings/'
+    | '/_authenticated/settings/providers/$provider'
+    | '/_authenticated/settings/providers/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -214,6 +251,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedSettingsIndexRouteImport
       parentRoute: typeof AuthenticatedSettingsRoute
     }
+    '/_authenticated/settings/providers': {
+      id: '/_authenticated/settings/providers'
+      path: '/providers'
+      fullPath: '/settings/providers'
+      preLoaderRoute: typeof AuthenticatedSettingsProvidersRouteImport
+      parentRoute: typeof AuthenticatedSettingsRoute
+    }
     '/_authenticated/settings/general': {
       id: '/_authenticated/settings/general'
       path: '/general'
@@ -242,14 +286,47 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedSettingsAppearanceRouteImport
       parentRoute: typeof AuthenticatedSettingsRoute
     }
+    '/_authenticated/settings/providers/': {
+      id: '/_authenticated/settings/providers/'
+      path: '/'
+      fullPath: '/settings/providers/'
+      preLoaderRoute: typeof AuthenticatedSettingsProvidersIndexRouteImport
+      parentRoute: typeof AuthenticatedSettingsProvidersRoute
+    }
+    '/_authenticated/settings/providers/$provider': {
+      id: '/_authenticated/settings/providers/$provider'
+      path: '/$provider'
+      fullPath: '/settings/providers/$provider'
+      preLoaderRoute: typeof AuthenticatedSettingsProvidersProviderRouteImport
+      parentRoute: typeof AuthenticatedSettingsProvidersRoute
+    }
   }
 }
+
+interface AuthenticatedSettingsProvidersRouteChildren {
+  AuthenticatedSettingsProvidersProviderRoute: typeof AuthenticatedSettingsProvidersProviderRoute
+  AuthenticatedSettingsProvidersIndexRoute: typeof AuthenticatedSettingsProvidersIndexRoute
+}
+
+const AuthenticatedSettingsProvidersRouteChildren: AuthenticatedSettingsProvidersRouteChildren =
+  {
+    AuthenticatedSettingsProvidersProviderRoute:
+      AuthenticatedSettingsProvidersProviderRoute,
+    AuthenticatedSettingsProvidersIndexRoute:
+      AuthenticatedSettingsProvidersIndexRoute,
+  }
+
+const AuthenticatedSettingsProvidersRouteWithChildren =
+  AuthenticatedSettingsProvidersRoute._addFileChildren(
+    AuthenticatedSettingsProvidersRouteChildren,
+  )
 
 interface AuthenticatedSettingsRouteChildren {
   AuthenticatedSettingsAppearanceRoute: typeof AuthenticatedSettingsAppearanceRoute
   AuthenticatedSettingsConnectorsRoute: typeof AuthenticatedSettingsConnectorsRoute
   AuthenticatedSettingsContextRoute: typeof AuthenticatedSettingsContextRoute
   AuthenticatedSettingsGeneralRoute: typeof AuthenticatedSettingsGeneralRoute
+  AuthenticatedSettingsProvidersRoute: typeof AuthenticatedSettingsProvidersRouteWithChildren
   AuthenticatedSettingsIndexRoute: typeof AuthenticatedSettingsIndexRoute
 }
 
@@ -258,6 +335,8 @@ const AuthenticatedSettingsRouteChildren: AuthenticatedSettingsRouteChildren = {
   AuthenticatedSettingsConnectorsRoute: AuthenticatedSettingsConnectorsRoute,
   AuthenticatedSettingsContextRoute: AuthenticatedSettingsContextRoute,
   AuthenticatedSettingsGeneralRoute: AuthenticatedSettingsGeneralRoute,
+  AuthenticatedSettingsProvidersRoute:
+    AuthenticatedSettingsProvidersRouteWithChildren,
   AuthenticatedSettingsIndexRoute: AuthenticatedSettingsIndexRoute,
 }
 
