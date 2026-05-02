@@ -5,10 +5,6 @@ import type { Locale } from '@mangostudio/shared/i18n';
 import { MAX_TOOL_ITERATIONS_MAX, MAX_TOOL_ITERATIONS_MIN } from '@/hooks/use-global-settings';
 
 interface GeneralSettingsProps {
-  textSystemPrompt: string;
-  setTextSystemPrompt: (val: string) => void;
-  imageSystemPrompt: string;
-  setImageSystemPrompt: (val: string) => void;
   imageQuality: string;
   setImageQuality: (val: string) => void;
   maxToolIterations: number;
@@ -26,10 +22,6 @@ const LOCALE_OPTIONS: { value: Locale; label: string }[] = [
  * General settings tab: language selector, system prompts, image quality grid.
  */
 export function GeneralSettings({
-  textSystemPrompt,
-  setTextSystemPrompt,
-  imageSystemPrompt,
-  setImageSystemPrompt,
   imageQuality,
   setImageQuality,
   maxToolIterations,
@@ -66,42 +58,6 @@ export function GeneralSettings({
             </option>
           ))}
         </select>
-      </Card>
-
-      {/* ── Default Text System Prompt ── */}
-      <Card variant="solid" className="space-y-3 p-6">
-        <h3 className="text-xs uppercase tracking-widest font-bold text-on-surface-variant/80 font-label">
-          {s.textPromptLabel}
-        </h3>
-        <textarea
-          value={textSystemPrompt}
-          onChange={(e) => setTextSystemPrompt(e.target.value)}
-          placeholder={s.textPromptPlaceholder}
-          className="
-            w-full bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-4
-            text-sm text-on-surface focus:ring-1 focus:ring-primary/40 focus:outline-none
-            focus:border-primary/60 placeholder:text-on-surface-variant/40
-            min-h-[120px] transition-all resize-none font-body
-          "
-        />
-      </Card>
-
-      {/* ── Default Image System Prompt ── */}
-      <Card variant="solid" className="space-y-3 p-6">
-        <h3 className="text-xs uppercase tracking-widest font-bold text-on-surface-variant/80 font-label">
-          {s.imagePromptLabel}
-        </h3>
-        <textarea
-          value={imageSystemPrompt}
-          onChange={(e) => setImageSystemPrompt(e.target.value)}
-          placeholder={s.imagePromptPlaceholder}
-          className="
-            w-full bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-4
-            text-sm text-on-surface focus:ring-1 focus:ring-primary/40 focus:outline-none
-            focus:border-primary/60 placeholder:text-on-surface-variant/40
-            min-h-[120px] transition-all resize-none font-body
-          "
-        />
       </Card>
 
       {/* ── Default Image Quality ── */}
