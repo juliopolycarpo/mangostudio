@@ -9,9 +9,15 @@ import '../../services/providers'; // ensure all providers are registered
 import { connectorRoutes } from '../../modules/connectors/http/connectors-routes';
 import { geminiAliasRoutes } from '../../modules/connectors/http/gemini-aliases-routes';
 import { providerSettingsRoutes } from '../../modules/provider-settings/http/provider-settings-routes';
+import { ruleFileRoutes } from '../../modules/prompt-rules/http/rule-file-routes';
 import { modelRoutes } from './models';
 
 export const settingsRoutes = (app: Elysia) =>
   app.group('/settings', (app) =>
-    app.use(connectorRoutes).use(modelRoutes).use(providerSettingsRoutes).use(geminiAliasRoutes)
+    app
+      .use(connectorRoutes)
+      .use(modelRoutes)
+      .use(providerSettingsRoutes)
+      .use(ruleFileRoutes)
+      .use(geminiAliasRoutes)
   );

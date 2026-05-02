@@ -63,5 +63,13 @@ export type {
   SSESystemEvent,
 } from '../streaming/events';
 
+// Prompt rules
+export type {
+  FixedRuleFileKind,
+  RuleFileDescriptor,
+  RuleFilePreviewBody,
+  RuleFilePreviewResponse,
+} from '../prompt-rules/contracts';
+
 // Legacy alias (was exported from this file before split)
 export type { DeleteConnectorResponse as DeleteGeminiSecretResponse } from '../connectors/contracts';
