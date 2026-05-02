@@ -39,6 +39,8 @@ describe('respond-stream abort signal', () => {
     await mock.module('../../../../src/services/providers/registry', () => ({
       getProviderForModel: () =>
         Promise.resolve({
+          providerType: 'openai-compatible',
+          generateText: () => Promise.resolve({ text: '' }),
           generateTextStream: async function* (req: { signal?: AbortSignal }) {
             await Promise.resolve();
             receivedSignal = req.signal;
@@ -85,6 +87,8 @@ describe('respond-stream abort signal', () => {
     await mock.module('../../../../src/services/providers/registry', () => ({
       getProviderForModel: () =>
         Promise.resolve({
+          providerType: 'openai-compatible',
+          generateText: () => Promise.resolve({ text: '' }),
           generateTextStream: async function* (req: { signal?: AbortSignal }) {
             await Promise.resolve();
             // Yield slowly so there's time to cancel

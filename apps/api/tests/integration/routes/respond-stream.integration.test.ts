@@ -17,6 +17,7 @@ import {
 } from '../../../src/services/providers/registry';
 import { getAllToolDefinitions, executeTool } from '../../../src/services/tools';
 import * as realGeminiNs from '../../../src/services/gemini';
+import * as realProviderSettingsRepoNs from '../../../src/modules/provider-settings/infrastructure/provider-settings-repository';
 import type { AgentTurnRequest } from '../../../src/services/providers/types';
 
 const TEST_USER = {
@@ -43,6 +44,7 @@ const realGetAllToolDefinitions = getAllToolDefinitions;
 const realExecuteTool = executeTool;
 // For the gemini barrel we snapshot the whole object immediately.
 const realGemini = { ...realGeminiNs };
+const realProviderSettingsRepo = { ...realProviderSettingsRepoNs };
 
 let restoreAuth: (() => void) | null = null;
 
@@ -71,6 +73,10 @@ afterEach(async () => {
     executeTool: realExecuteTool,
   }));
   await mock.module('../../../src/services/gemini', () => realGemini);
+  await mock.module(
+    '../../../src/modules/provider-settings/infrastructure/provider-settings-repository',
+    () => realProviderSettingsRepo
+  );
 });
 
 /**
@@ -290,6 +296,147 @@ describe('POST /respond/stream', () => {
     >;
     expect(persistedContext).toMatchObject({ mode: 'replay', severity: 'normal' });
     expect(typeof persistedContext.estimatedInputTokens).toBe('number');
+  });
+
+  it('uses saved provider settings when request fields are absent', async () => {
+    let capturedConfig: AgentTurnRequest['generationConfig'];
+
+    await mock.module('../../../src/modules/chats/infrastructure/chat-repository', () => ({
+      verifyChatOwnership: () => Promise.resolve(true),
+    }));
+
+    await mock.module(
+      '../../../src/modules/provider-settings/infrastructure/provider-settings-repository',
+      () => ({
+        getProviderSettings: () =>
+          Promise.resolve({
+            provider: 'deepseek',
+            thinkingEnabled: true,
+            reasoningEffort: 'max',
+            maxToolIterations: 3,
+          }),
+      })
+    );
+
+    await mock.module('../../../src/services/providers/registry', () => ({
+      getProviderForModel: () =>
+        Promise.resolve({
+          providerType: 'deepseek',
+          generateText: () => Promise.resolve({ text: '' }),
+          generateAgentTurnStream: async function* (req: AgentTurnRequest) {
+            await Promise.resolve();
+            capturedConfig = req.generationConfig;
+            yield { type: 'assistant_text_delta', text: 'Hi' };
+            yield { type: 'turn_completed', providerState: null };
+          },
+        }),
+    }));
+
+    await mock.module('../../../src/services/tools', () => ({
+      getAllToolDefinitions: () => [],
+      executeTool: () => Promise.resolve({}),
+    }));
+
+    await mock.module('../../../src/db/database', () => ({
+      getDb: () => ({
+        selectFrom: () => makeChain({ userId: TEST_USER.id }),
+        insertInto: () => ({ values: () => ({ execute: () => Promise.resolve() }) }),
+        updateTable: () => ({ set: () => makeChain(undefined) }),
+      }),
+    }));
+
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
+    restoreAuth = restore;
+
+    const response = await app.handle(
+      new Request('http://localhost/respond/stream', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chatId: 'test-chat', prompt: 'Hello', model: 'deepseek-chat' }),
+      })
+    );
+    await response.text();
+
+    expect(response.status).toBe(200);
+    expect(capturedConfig).toMatchObject({
+      thinkingEnabled: true,
+      reasoningEffort: 'max',
+      maxToolIterations: 3,
+    });
+  });
+
+  it('lets request provider settings override saved settings for one turn', async () => {
+    let capturedConfig: AgentTurnRequest['generationConfig'];
+
+    await mock.module('../../../src/modules/chats/infrastructure/chat-repository', () => ({
+      verifyChatOwnership: () => Promise.resolve(true),
+    }));
+
+    await mock.module(
+      '../../../src/modules/provider-settings/infrastructure/provider-settings-repository',
+      () => ({
+        getProviderSettings: () =>
+          Promise.resolve({
+            provider: 'deepseek',
+            thinkingEnabled: true,
+            reasoningEffort: 'max',
+            maxToolIterations: 7,
+          }),
+      })
+    );
+
+    await mock.module('../../../src/services/providers/registry', () => ({
+      getProviderForModel: () =>
+        Promise.resolve({
+          providerType: 'deepseek',
+          generateText: () => Promise.resolve({ text: '' }),
+          generateAgentTurnStream: async function* (req: AgentTurnRequest) {
+            await Promise.resolve();
+            capturedConfig = req.generationConfig;
+            yield { type: 'assistant_text_delta', text: 'Hi' };
+            yield { type: 'turn_completed', providerState: null };
+          },
+        }),
+    }));
+
+    await mock.module('../../../src/services/tools', () => ({
+      getAllToolDefinitions: () => [],
+      executeTool: () => Promise.resolve({}),
+    }));
+
+    await mock.module('../../../src/db/database', () => ({
+      getDb: () => ({
+        selectFrom: () => makeChain({ userId: TEST_USER.id }),
+        insertInto: () => ({ values: () => ({ execute: () => Promise.resolve() }) }),
+        updateTable: () => ({ set: () => makeChain(undefined) }),
+      }),
+    }));
+
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
+    restoreAuth = restore;
+
+    const response = await app.handle(
+      new Request('http://localhost/respond/stream', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chatId: 'test-chat',
+          prompt: 'Hello',
+          model: 'deepseek-chat',
+          thinkingEnabled: false,
+          reasoningEffort: 'high',
+          maxToolIterations: 2,
+        }),
+      })
+    );
+    await response.text();
+
+    expect(response.status).toBe(200);
+    expect(capturedConfig).toMatchObject({
+      thinkingEnabled: false,
+      reasoningEffort: 'high',
+      maxToolIterations: 2,
+    });
   });
 
   it('returns 503 when model catalog is not configured', async () => {
