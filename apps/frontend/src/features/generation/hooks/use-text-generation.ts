@@ -1,7 +1,7 @@
 /* global console */
 import { useCallback, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import type { Message, MessagePart } from '@mangostudio/shared';
+import type { Message, MessagePart, ReasoningEffort } from '@mangostudio/shared';
 import type { ContextCompactionResponse, ContextSettings } from '@mangostudio/shared/chat';
 import { messageKeys } from '@/features/chat/queries';
 import { compactChat, summarizeToNewChat } from '@/features/chat/services/context-compaction';
@@ -16,7 +16,7 @@ interface UseTextGenerationOptions {
   systemPrompt: string;
   optimistic: ReturnType<typeof useOptimisticMessages>;
   thinkingEnabled: boolean;
-  reasoningEffort: string;
+  reasoningEffort: ReasoningEffort;
   maxToolIterations: number;
   contextSettings: ContextSettings;
   currentChatId: string | null;

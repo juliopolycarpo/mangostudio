@@ -56,7 +56,7 @@ interface BuildResponsesCreateParamsOptions {
   tools?: Array<Record<string, unknown>>;
   previousResponseId?: string | null;
   useReasoning?: boolean;
-  reasoningEffort?: string;
+  reasoningEffort?: 'low' | 'medium' | 'high' | 'xhigh';
   textFormat?: Record<string, unknown>;
   enableCompaction?: boolean;
   providerCompactionThreshold?: number;
@@ -140,8 +140,7 @@ export async function* streamWithResponsesAPI(
   req: TextGenerationRequest
 ): AsyncIterable<StreamingChunk> {
   const rawEffort = req.generationConfig?.reasoningEffort ?? 'medium';
-  const effort: 'low' | 'medium' | 'high' =
-    rawEffort === 'low' ? 'low' : rawEffort === 'medium' ? 'medium' : 'high';
+  const effort = normalizeOpenAIReasoningEffort(rawEffort);
   const input = [
     ...req.history.map((msg) => ({
       role: msg.role === 'ai' ? 'assistant' : 'user',
@@ -156,10 +155,7 @@ export async function* streamWithResponsesAPI(
       input: toResponseInput(input),
       ...(req.systemPrompt?.trim() ? { instructions: req.systemPrompt } : {}),
       stream: true,
-      reasoning: {
-        effort,
-        summary: 'auto',
-      },
+      reasoning: { effort, summary: 'auto' },
       ...buildStructuredTextFormat(req.generationConfig?.structuredOutput),
     },
     { signal: req.signal }
@@ -278,8 +274,7 @@ export async function* streamAgentTurnWithResponsesAPI(
   const tools = toolDefsToResponsesAPI(req.toolDefinitions ?? []);
   const previousResponseId = parseResponseId(req.providerState);
   const rawEffort2 = req.generationConfig?.reasoningEffort ?? 'medium';
-  const effort: 'low' | 'medium' | 'high' =
-    rawEffort2 === 'low' ? 'low' : rawEffort2 === 'medium' ? 'medium' : 'high';
+  const effort = normalizeOpenAIReasoningEffort(rawEffort2);
   const useReasoning = isReasoningModel(req.modelName) && req.generationConfig?.thinkingEnabled;
 
   // Build the input array for this request
@@ -514,4 +509,11 @@ export async function* streamAgentTurnWithResponsesAPI(
   );
 
   yield { type: 'turn_completed', providerState: serializeContinuationEnvelope(envelope) };
+}
+
+function normalizeOpenAIReasoningEffort(effort: string): 'low' | 'medium' | 'high' | 'xhigh' {
+  if (effort === 'low' || effort === 'medium' || effort === 'high' || effort === 'xhigh') {
+    return effort;
+  }
+  return 'high';
 }

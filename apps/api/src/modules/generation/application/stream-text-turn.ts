@@ -7,12 +7,15 @@ import type {
   ContinuationReasonCode,
 } from '@mangostudio/shared';
 import type { ContextSettings } from '@mangostudio/shared/chat';
+import type { ProviderRuntimeSettings } from '@mangostudio/shared/provider-settings';
 import type { AgentTurnRequest } from '../../../services/providers/types';
 import { safeJsonParse } from '../../../lib/safe-parse';
 import { assertChatOwnership } from '../../chats/domain/chat-ownership';
 import { resolveModel } from './resolve-model';
 import { loadHistory, loadRichHistory } from '../../messages/infrastructure/message-repository';
 import { getProviderForModel } from '../../../services/providers/registry';
+import { mergeProviderRuntimeSettings } from '../../../services/providers/core/provider-settings-policy';
+import { getProviderSettings } from '../../provider-settings/infrastructure/provider-settings-repository';
 import { getAllToolDefinitions, executeTool } from '../../../services/tools';
 import { generateId } from '../../../utils/id';
 import {
@@ -58,7 +61,7 @@ export interface StreamTextTurnInput {
   model?: string;
   systemPrompt?: string;
   thinkingEnabled?: boolean;
-  reasoningEffort?: string;
+  reasoningEffort?: ReasoningEffort;
   maxToolIterations?: number;
   contextSettings?: ContextSettings;
   signal?: AbortSignal;
@@ -108,6 +111,12 @@ export async function* streamTextTurn(
   });
 
   const provider = await getProviderForModel(modelId, input.userId);
+  const savedProviderSettings = await getProviderSettings(db, input.userId, provider.providerType);
+  const runtimeSettings = mergeProviderRuntimeSettings(
+    provider.providerType,
+    savedProviderSettings,
+    getRequestRuntimeSettings(provider.providerType, input)
+  );
 
   const now = Date.now();
   const userMsgId = generateId();
@@ -123,8 +132,8 @@ export async function* streamTextTurn(
   const chatId = input.chatId;
   const userId = input.userId;
   const { systemPrompt, signal } = input;
-  const thinkingEnabled = input.thinkingEnabled ?? true;
-  const reasoningEffort = (input.reasoningEffort ?? 'medium') as ReasoningEffort;
+  const thinkingEnabled = runtimeSettings.thinkingEnabled ?? true;
+  const reasoningEffort = runtimeSettings.reasoningEffort ?? 'medium';
 
   const allParts: MessagePart[] = [];
   let fullText = '';
@@ -236,10 +245,7 @@ export async function* streamTextTurn(
           break;
       }
 
-      const maxIter = Math.max(
-        1,
-        Math.min(25, input.maxToolIterations ?? DEFAULT_MAX_TOOL_ITERATIONS)
-      );
+      const maxIter = runtimeSettings.maxToolIterations ?? DEFAULT_MAX_TOOL_ITERATIONS;
       const generateAgentTurnStream = provider.generateAgentTurnStream.bind(provider);
       let pendingToolResults: AgentTurnRequest['toolResults'];
       let isFirstIteration = true;
@@ -262,7 +268,11 @@ export async function* streamTextTurn(
           generationConfig: {
             thinkingEnabled,
             reasoningEffort,
-            enableProviderCompaction: input.contextSettings?.providerCompactionEnabled,
+            maxToolIterations: maxIter,
+            maxOutputTokens: runtimeSettings.maxOutputTokens,
+            promptCachePreference: runtimeSettings.promptCachePreference,
+            parallelToolCallsEnabled: runtimeSettings.parallelToolCallsEnabled,
+            enableProviderCompaction: runtimeSettings.providerCompactionEnabled,
             providerCompactionThreshold: input.contextSettings?.warningThreshold,
           },
         };
@@ -535,7 +545,10 @@ export async function* streamTextTurn(
         generationConfig: {
           thinkingEnabled,
           reasoningEffort,
-          enableProviderCompaction: input.contextSettings?.providerCompactionEnabled,
+          maxOutputTokens: runtimeSettings.maxOutputTokens,
+          promptCachePreference: runtimeSettings.promptCachePreference,
+          parallelToolCallsEnabled: runtimeSettings.parallelToolCallsEnabled,
+          enableProviderCompaction: runtimeSettings.providerCompactionEnabled,
           providerCompactionThreshold: input.contextSettings?.warningThreshold,
         },
       })) {
@@ -564,6 +577,15 @@ export async function* streamTextTurn(
         systemPrompt,
         modelName: modelId,
         signal,
+        generationConfig: {
+          thinkingEnabled,
+          reasoningEffort,
+          maxOutputTokens: runtimeSettings.maxOutputTokens,
+          promptCachePreference: runtimeSettings.promptCachePreference,
+          parallelToolCallsEnabled: runtimeSettings.parallelToolCallsEnabled,
+          enableProviderCompaction: runtimeSettings.providerCompactionEnabled,
+          providerCompactionThreshold: input.contextSettings?.warningThreshold,
+        },
       });
       if (!signal?.aborted) {
         fullText = result.text;
@@ -646,6 +668,23 @@ export async function* streamTextTurn(
 
     yield { type: 'error', error: message };
   }
+}
+
+function getRequestRuntimeSettings(
+  provider: ProviderType,
+  input: StreamTextTurnInput
+): Partial<ProviderRuntimeSettings> {
+  return {
+    provider,
+    ...(input.thinkingEnabled !== undefined ? { thinkingEnabled: input.thinkingEnabled } : {}),
+    ...(input.reasoningEffort ? { reasoningEffort: input.reasoningEffort } : {}),
+    ...(input.maxToolIterations !== undefined
+      ? { maxToolIterations: input.maxToolIterations }
+      : {}),
+    ...(input.contextSettings?.providerCompactionEnabled !== undefined
+      ? { providerCompactionEnabled: input.contextSettings.providerCompactionEnabled }
+      : {}),
+  };
 }
 
 /**
