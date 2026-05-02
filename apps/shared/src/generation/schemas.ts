@@ -1,5 +1,6 @@
 import { Type, type Static } from '@sinclair/typebox';
 import { ContextSettingsSchema } from '../chat/schemas';
+import { ReasoningEffortSchema } from '../provider-settings/schemas';
 
 export const GenerateImageBodySchema = Type.Object({
   chatId: Type.String(),
@@ -27,7 +28,7 @@ export const RespondStreamBodySchema = Type.Object({
   model: Type.Optional(Type.String()),
   systemPrompt: Type.Optional(Type.String()),
   thinkingEnabled: Type.Optional(Type.Boolean()),
-  reasoningEffort: Type.Optional(Type.String()),
+  reasoningEffort: Type.Optional(ReasoningEffortSchema),
   thinkingVisibility: Type.Optional(Type.String()),
   maxToolIterations: Type.Optional(Type.Integer({ minimum: 1, maximum: 25 })),
   contextSettings: Type.Optional(ContextSettingsSchema),

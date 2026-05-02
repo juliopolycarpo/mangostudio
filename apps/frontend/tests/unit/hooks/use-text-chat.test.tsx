@@ -39,7 +39,7 @@ function makeStreamFn(chunks: Parameters<Parameters<typeof respondTextStream>[1]
 
 type TextChatProps = Parameters<typeof useTextGeneration>[0];
 
-function makeProps(overrides: Record<string, unknown> = {}) {
+function makeProps(overrides: Partial<TextChatProps> = {}): TextChatProps {
   const updateOptimisticMessage = vi.fn();
   const appendOptimisticMessages = vi.fn();
   return {
@@ -55,7 +55,7 @@ function makeProps(overrides: Record<string, unknown> = {}) {
       updateOptimisticMessage,
     } as unknown as TextChatProps['optimistic'],
     thinkingEnabled: true,
-    reasoningEffort: 'medium',
+    reasoningEffort: 'medium' as const,
     maxToolIterations: 10,
     contextSettings: DEFAULT_CONTEXT_SETTINGS,
     currentChatId: 'chat-1',

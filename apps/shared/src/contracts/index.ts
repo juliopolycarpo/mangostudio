@@ -42,6 +42,16 @@ export type {
   ModelCatalogResponse,
 } from '../catalog/contracts';
 
+// Provider settings
+export type {
+  PromptCachePreference,
+  ProviderRuntimeSettings,
+  ProviderSettingsDescriptor,
+  ProviderSettingsListResponse,
+  ProviderSettingScope,
+  ReasoningPolicy,
+} from '../provider-settings/contracts';
+
 // Auth
 export type { SignUpBody, SignInBody } from '../auth/schemas';
 

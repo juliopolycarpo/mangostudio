@@ -8,6 +8,7 @@ import type {
   ProviderType,
   AgentEvent,
 } from '@mangostudio/shared/types';
+import type { PromptCachePreference } from '@mangostudio/shared/provider-settings';
 
 export type { AgentEvent };
 
@@ -58,6 +59,9 @@ export interface GenerationConfig {
   reasoningEffort: ReasoningEffort;
   tools?: ToolDefinition[];
   maxToolIterations?: number;
+  maxOutputTokens?: number;
+  promptCachePreference?: PromptCachePreference;
+  parallelToolCallsEnabled?: boolean;
   /** Optional schema constraint for model output. Honored by supporting providers; others warn + continue. */
   structuredOutput?: StructuredOutputConfig;
   /**
