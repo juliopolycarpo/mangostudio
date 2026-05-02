@@ -97,7 +97,7 @@ The orchestrator reads exclusively from `chats.lastProviderState` (line
 | Gemini (Interactions) | yes            | `previous_interaction_id` | `buildGeminiInteractionsReplay`          | `ContinuationEnvelope` (mode `interactions`) | tool results in current request |
 | OpenAI-compatible     | no             | none                      | `buildChatCompletionsReplay`             | none (always starts fresh)                   | `loopMessages` only             |
 | Anthropic             | no             | none                      | direct Messages replay (history-derived) | none (always starts fresh)                   | `loopMessages` only             |
-| DeepSeek              | no             | none                      | AI SDK message replay                    | none (always starts fresh)                   | none                            |
+| DeepSeek              | no             | none                      | `buildChatCompletionsReplay`             | none (always starts fresh)                   | `loopMessages` only             |
 
 Source files:
 
@@ -192,6 +192,26 @@ Stateful providers (OpenAI, Gemini) support server-side compaction via:
 
 Compaction is enabled by default and can be disabled per-request via
 `contextSettings.providerCompactionEnabled`.
+
+### DeepSeek-specific continuation
+
+DeepSeek uses `turn-local` continuation strategy. Key rules:
+
+1. **No durable cursor** — DeepSeek has no server-side cursor. Every user turn
+   starts fresh with full DB history replay.
+2. **`reasoning_content` in tool loops** — When DeepSeek emits tool calls during
+   a thinking-mode turn, the accumulated `reasoning_content` MUST be included
+   in the assistant loop message sent back to the provider on the next
+   iteration. Omitting it causes HTTP 400 errors.
+3. **No cross-turn reasoning** — `reasoning_content` is stripped from the final
+   message (no pending tool calls). It is never persisted across user turns,
+   which also preserves prompt prefix stability for cache hits.
+4. **Cache metrics** — `promptCacheHitTokens` and `promptCacheMissTokens` are
+   captured from the DeepSeek API usage response and stored in provider state
+   metadata for observability.
+5. **Stable prefix** — System prompt, tool definitions (in deterministic sorted
+   order), and persisted history maintain a stable request prefix across turns
+   to maximise DeepSeek context cache hit rates.
 
 ---
 

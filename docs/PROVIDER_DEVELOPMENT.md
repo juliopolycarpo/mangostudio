@@ -106,6 +106,7 @@ provider format lives in `replay-builder.ts`.
 | OpenAI Responses    | `buildOpenAIResponsesReplay`    | Array of `ResponseInputItem` (role-based + function_call / function_call_output) |
 | Gemini Interactions | `buildGeminiInteractionsReplay` | Array of turn objects (role + content, function_call, function_result)           |
 | OpenAI-compatible   | `buildChatCompletionsReplay`    | `ChatCompletionMessageParam[]` (with `tool_calls` array)                         |
+| DeepSeek            | `buildChatCompletionsReplay`    | `ChatCompletionMessageParam[]` (with `reasoning_content` in tool loop messages)  |
 | Anthropic           | direct in `stream.ts`           | `MessageParam[]` (history-derived, no replay builder)                            |
 
 ---
