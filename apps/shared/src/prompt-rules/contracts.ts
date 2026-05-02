@@ -1,5 +1,26 @@
 export type FixedRuleFileKind = 'agents' | 'claude';
 
+export type PromptInjectionRole = 'system' | 'user';
+
+export type PromptSendFrequency = 'first-turn' | 'every-turn';
+
+export interface RuleFileSetting {
+  id: string;
+  label: string;
+  path: string;
+  enabled: boolean;
+  injectionRole: PromptInjectionRole;
+  sendFrequency: PromptSendFrequency;
+}
+
+export interface PromptSettings {
+  textSystemPrompt: string;
+  imageSystemPrompt: string;
+  agentsMd: RuleFileSetting;
+  claudeMd: RuleFileSetting;
+  customRules: RuleFileSetting[];
+}
+
 export interface RuleFileDescriptor {
   kind?: FixedRuleFileKind;
   label: string;

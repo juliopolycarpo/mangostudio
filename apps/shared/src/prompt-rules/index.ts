@@ -1,5 +1,9 @@
 export type {
   FixedRuleFileKind,
+  PromptInjectionRole,
+  PromptSendFrequency,
+  RuleFileSetting,
+  PromptSettings,
   RuleFileDescriptor,
   RuleFilePreviewBody,
   RuleFilePreviewResponse,
@@ -7,6 +11,10 @@ export type {
 export {
   DefaultRuleFilesResponseSchema,
   FixedRuleFileKindSchema,
+  PromptInjectionRoleSchema,
+  PromptSendFrequencySchema,
+  RuleFileSettingSchema,
+  PromptSettingsSchema,
   RuleFileDescriptorSchema,
   RuleFilePreviewBodySchema,
   RuleFilePreviewResponseSchema,
