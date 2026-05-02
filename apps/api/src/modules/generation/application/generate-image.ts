@@ -1,10 +1,12 @@
 import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';
+import type { PromptSettings } from '@mangostudio/shared/prompt-rules';
 import { assertChatOwnership } from '../../chats/domain/chat-ownership';
 import { resolveModel } from './resolve-model';
 import { getProviderForModel } from '../../../services/providers/registry';
 import { generateId } from '../../../utils/id';
 import { persistImageTurn } from '../infrastructure/conversation-persistence';
+import { composePrompt } from '../../prompt-rules/application/prompt-composer';
 
 export interface GenerateImageInput {
   chatId: string;
@@ -12,6 +14,7 @@ export interface GenerateImageInput {
   prompt: string;
   model?: string;
   systemPrompt?: string;
+  promptSettings?: PromptSettings;
   referenceImageUrl?: string;
   imageQuality?: string;
 }
@@ -69,10 +72,26 @@ export async function generateImage(
   const aiMsgId = generateId();
   const startTime = Date.now();
 
+  const priorUserMsg = await db
+    .selectFrom('messages')
+    .select('id')
+    .where('chatId', '=', input.chatId)
+    .where('role', '=', 'user')
+    .limit(1)
+    .executeTakeFirst();
+  const isFirstTurn = !priorUserMsg;
+
+  const composition = composePrompt({
+    settings: input.promptSettings,
+    baseSystemPrompt: input.systemPrompt ?? '',
+    visiblePrompt: input.prompt,
+    isFirstTurn,
+  });
+
   const { imageUrl } = await provider.generateImage({
     userId: input.userId,
-    prompt: input.prompt,
-    systemPrompt: input.systemPrompt,
+    prompt: composition.effectivePrompt,
+    systemPrompt: composition.effectiveSystemPrompt || undefined,
     referenceImageUrl: input.referenceImageUrl,
     imageSize: input.imageQuality ?? '1K',
     modelName: modelId,
