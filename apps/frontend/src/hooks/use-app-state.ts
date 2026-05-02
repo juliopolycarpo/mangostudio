@@ -8,6 +8,7 @@ import { useGlobalSettings } from './use-global-settings';
 import { useOptimisticMessages } from '@/features/generation/hooks/use-optimistic-messages';
 import { useTextGeneration } from '@/features/generation/hooks/use-text-generation';
 import { useImageGeneration } from '@/features/generation/hooks/use-image-generation';
+import { useProviderSettings } from '@/features/settings/providers/hooks/use-provider-settings';
 import { resolveActiveModeModel } from '@/utils/model-utils';
 
 export function useAppState() {
@@ -41,14 +42,31 @@ export function useAppState() {
   const activeModel = getActiveModel();
   const isModelSelectorDisabled = catalog.catalog.status !== 'ready' || activeModels.length === 0;
 
+  const lockedProvider = useMemo((): ProviderType | null => {
+    const currentChat = chats.chats.find((c) => c.id === chats.currentChatId);
+    if (!currentChat?.textModel) return null;
+    const modelOption = catalog.catalog.textModels.find((m) => m.modelId === currentChat.textModel);
+    return modelOption?.provider ?? null;
+  }, [chats.chats, chats.currentChatId, catalog.catalog.textModels]);
+
+  // Load provider settings for the locked provider to override global defaults
+  const { descriptor: providerDescriptor } = useProviderSettings(lockedProvider);
+
+  const effectiveThinkingEnabled =
+    providerDescriptor?.settings.thinkingEnabled ?? settings.thinkingEnabled;
+  const effectiveReasoningEffort =
+    providerDescriptor?.settings.reasoningEffort ?? settings.reasoningEffort;
+  const effectiveMaxToolIterations =
+    providerDescriptor?.settings.maxToolIterations ?? settings.maxToolIterations;
+
   const textGen = useTextGeneration({
     chats,
     getActiveModel,
     systemPrompt: settings.globalTextSystemPrompt,
     optimistic,
-    thinkingEnabled: settings.thinkingEnabled,
-    reasoningEffort: settings.reasoningEffort,
-    maxToolIterations: settings.maxToolIterations,
+    thinkingEnabled: effectiveThinkingEnabled,
+    reasoningEffort: effectiveReasoningEffort,
+    maxToolIterations: effectiveMaxToolIterations,
     contextSettings: settings.contextSettings,
     currentChatId: chats.currentChatId,
   });
@@ -71,13 +89,6 @@ export function useAppState() {
   });
 
   const isGenerating = textGen.isGenerating || imageGen.isGenerating;
-
-  const lockedProvider = useMemo((): ProviderType | null => {
-    const currentChat = chats.chats.find((c) => c.id === chats.currentChatId);
-    if (!currentChat?.textModel) return null;
-    const modelOption = catalog.catalog.textModels.find((m) => m.modelId === currentChat.textModel);
-    return modelOption?.provider ?? null;
-  }, [chats.chats, chats.currentChatId, catalog.catalog.textModels]);
 
   const handleNewChat = useCallback(async () => {
     await chats.createChat();

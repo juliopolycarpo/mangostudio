@@ -11,6 +11,7 @@ export function SettingsTabs() {
   const tabs = [
     { to: '/settings/general' as const, label: t.settings.tabs.general },
     { to: '/settings/connectors' as const, label: t.settings.tabs.connectors },
+    { to: '/settings/providers' as const, label: t.settings.tabs.providers },
     { to: '/settings/appearance' as const, label: t.settings.tabs.appearance },
     { to: '/settings/context' as const, label: t.settings.tabs.context },
   ];
