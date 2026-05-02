@@ -311,24 +311,41 @@ describe('useGlobalSettings — prompt settings', () => {
   });
 
   it('removeCustomRule only removes the targeted rule', () => {
+    window.localStorage.setItem(
+      PROMPT_SETTINGS_KEY,
+      JSON.stringify({
+        ...DEFAULT_PROMPT_SETTINGS,
+        customRules: [
+          {
+            id: 'rule-1',
+            label: '',
+            path: '',
+            enabled: false,
+            injectionRole: 'system',
+            sendFrequency: 'first-turn',
+          },
+          {
+            id: 'rule-2',
+            label: '',
+            path: '',
+            enabled: false,
+            injectionRole: 'system',
+            sendFrequency: 'first-turn',
+          },
+        ],
+      })
+    );
+
     const { result } = renderHook(() => useGlobalSettings());
 
-    act(() => {
-      result.current.addCustomRule();
-    });
-    const firstId = result.current.promptSettings.customRules[0].id;
+    expect(result.current.promptSettings.customRules).toHaveLength(2);
 
     act(() => {
-      result.current.addCustomRule();
-    });
-    const secondId = result.current.promptSettings.customRules[1].id;
-
-    act(() => {
-      result.current.removeCustomRule(secondId);
+      result.current.removeCustomRule('rule-2');
     });
 
     expect(result.current.promptSettings.customRules).toHaveLength(1);
-    expect(result.current.promptSettings.customRules[0].id).toBe(firstId);
+    expect(result.current.promptSettings.customRules[0].id).toBe('rule-1');
   });
 
   it('resetSettings restores promptSettings to defaults', () => {
