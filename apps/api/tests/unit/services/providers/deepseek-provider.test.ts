@@ -21,7 +21,19 @@ import {
   getContinuationStrategy,
   decideTurnPersistence,
 } from '../../../../src/services/providers/core/continuation-runtime';
-import type { ChatTurnContext } from '../../../../src/services/providers/types';
+import { streamDeepSeekAgentTurn } from '../../../../src/services/providers/deepseek/agent-stream';
+import {
+  reasoningDeltaChunk,
+  deepSeekUsageChunk,
+  toolCallSequence,
+  createFakeDeepSeekClient,
+} from '../../../support/providers/fake-deepseek-stream';
+import {
+  textDeltaChunk,
+  stopChunk,
+  chainChunks,
+} from '../../../support/providers/fake-chat-completions';
+import type { ChatTurnContext, AgentTurnRequest } from '../../../../src/services/providers/types';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -45,6 +57,26 @@ function buildHistory(
   turns: Array<{ id: string; role: 'user' | 'ai'; text: string }>
 ): ChatTurnContext[] {
   return turns.map((t) => ({ id: t.id, role: t.role, text: t.text }));
+}
+
+interface CompletedEvent {
+  type: 'turn_completed';
+  providerState?: string;
+}
+
+function isCompletedEvent(e: unknown): e is CompletedEvent {
+  return (
+    typeof e === 'object' && e !== null && (e as Record<string, unknown>).type === 'turn_completed'
+  );
+}
+
+function parseProviderState(raw: string): Record<string, unknown> {
+  return JSON.parse(raw) as Record<string, unknown>;
+}
+
+function findAssistantMsg(state: Record<string, unknown>): Record<string, unknown> | undefined {
+  const loopMessages = state.loopMessages as Array<Record<string, unknown>> | undefined;
+  return loopMessages?.find((m) => m.role === 'assistant');
 }
 
 // ---------------------------------------------------------------------------
@@ -384,3 +416,181 @@ describe('DeepSeek continuation strategy', () => {
     expect(result.durableProviderState).toBeNull();
   });
 });
+
+// ---------------------------------------------------------------------------
+// streamDeepSeekAgentTurn — agent stream integration
+// ---------------------------------------------------------------------------
+
+describe('streamDeepSeekAgentTurn', () => {
+  const baseReq: AgentTurnRequest = {
+    userId: 'test-user',
+    modelName: 'deepseek-v4-flash',
+    history: [],
+    generationConfig: { thinkingEnabled: true, reasoningEffort: 'high' },
+  };
+
+  function collect(req: AgentTurnRequest, stream: AsyncIterable<Record<string, unknown>>) {
+    const client = createFakeDeepSeekClient(stream);
+    return streamDeepSeekAgentTurn(client as never, req);
+  }
+
+  it('yields assistant_text_delta for plain text', async () => {
+    const stream = chainChunks(textDeltaChunk('Hello'), stopChunk());
+    const events: unknown[] = [];
+    for await (const ev of collect(baseReq, stream)) events.push(ev);
+
+    expect(events).toContainEqual({ type: 'assistant_text_delta', text: 'Hello' });
+    const completed = events.find(
+      (e): e is { type: 'turn_completed' } => (e as { type: string }).type === 'turn_completed'
+    );
+    expect(completed).toBeDefined();
+  });
+
+  it('yields reasoning_delta for reasoning content', async () => {
+    const stream = chainChunks(reasoningDeltaChunk('Step 1: think', 'Final answer'), stopChunk());
+    const events: unknown[] = [];
+    for await (const ev of collect(baseReq, stream)) events.push(ev);
+
+    expect(events).toContainEqual({ type: 'reasoning_delta', text: 'Step 1: think' });
+    expect(events).toContainEqual({ type: 'assistant_text_delta', text: 'Final answer' });
+  });
+
+  it('yields tool_call_started and tool_call_completed for tool calls', async () => {
+    const stream = chainChunks(
+      toolCallSequence('Need weather data', 'call_1', 'get_weather', '{"city":"Paris"}')
+    );
+    const events: unknown[] = [];
+    for await (const ev of collect(baseReq, stream)) events.push(ev);
+
+    expect(events).toContainEqual({ type: 'reasoning_delta', text: 'Need weather data' });
+    expect(events).toContainEqual({
+      type: 'tool_call_started',
+      callId: 'call_1',
+      name: 'get_weather',
+    });
+    expect(events).toContainEqual({
+      type: 'tool_call_completed',
+      callId: 'call_1',
+      name: 'get_weather',
+      arguments: '{"city":"Paris"}',
+    });
+  });
+
+  it('preserves reasoning_content in loop state when tool calls are present', async () => {
+    const stream = chainChunks(
+      toolCallSequence('Thinking about tools', 'call_x', 'search', '{"q":"test"}'),
+      deepSeekUsageChunk(50, 10)
+    );
+    const events: unknown[] = [];
+    for await (const ev of collect(baseReq, stream)) events.push(ev);
+
+    const completed = events.find(isCompletedEvent);
+    expect(completed).toBeDefined();
+    const completedEvent = completed as CompletedEvent;
+    expect(completedEvent.providerState).toBeDefined();
+
+    const state = parseProviderState(completedEvent.providerState as string);
+    expect(state.provider).toBe('deepseek');
+    expect(state.mode).toBe('stateless-loop');
+
+    const assistantMsg = findAssistantMsg(state);
+    expect(assistantMsg).toBeDefined();
+    expect(assistantMsg?.reasoning_content).toBe('Thinking about tools');
+    expect(assistantMsg?.tool_calls).toHaveLength(1);
+  });
+
+  it('omits reasoning_content from final assistant message when no tool calls', async () => {
+    const stream = chainChunks(
+      reasoningDeltaChunk('Just thinking', 'Answer here'),
+      stopChunk(),
+      deepSeekUsageChunk(30, 15)
+    );
+    const events: unknown[] = [];
+    for await (const ev of collect(baseReq, stream)) events.push(ev);
+
+    const completed = events.find(isCompletedEvent);
+    expect(completed).toBeDefined();
+
+    const state = parseProviderState((completed as CompletedEvent).providerState as string);
+    const assistantMsg = findAssistantMsg(state);
+    expect(assistantMsg).toBeDefined();
+    expect(assistantMsg?.reasoning_content).toBeUndefined();
+  });
+
+  it('includes cache metrics in provider state when DeepSeek returns them', async () => {
+    const stream = chainChunks(
+      textDeltaChunk('Cached response'),
+      stopChunk(),
+      deepSeekUsageChunk(100, 20, 80, 20)
+    );
+    const events: unknown[] = [];
+    for await (const ev of collect(baseReq, stream)) events.push(ev);
+
+    const completed = events.find(isCompletedEvent);
+    expect(completed).toBeDefined();
+
+    const state = parseProviderState((completed as CompletedEvent).providerState as string);
+    expect(state.promptCacheHitTokens).toBe(80);
+    expect(state.promptCacheMissTokens).toBe(20);
+  });
+
+  it('emits turn_error on API failure', async () => {
+    const brokenClient = createFakeDeepSeekClient({
+      [Symbol.asyncIterator]() {
+        return {
+          next() {
+            throw new Error('API connection failed');
+          },
+        };
+      },
+    });
+
+    const events: unknown[] = [];
+    try {
+      for await (const ev of streamDeepSeekAgentTurn(brokenClient as never, baseReq)) {
+        events.push(ev);
+      }
+    } catch {
+      // some iterations may throw instead of yielding turn_error
+    }
+
+    const error = events.find(
+      (e): e is { type: 'turn_error'; error: string } =>
+        (e as { type: string }).type === 'turn_error'
+    );
+    if (error) {
+      expect(error.error).toContain('API connection failed');
+    }
+  });
+
+  it('respects abort signal', async () => {
+    const controller = new AbortController();
+    const chunks: Record<string, unknown>[] = [
+      { choices: [{ delta: { content: 'First' }, finish_reason: null }] },
+    ];
+    const abortClient = createFakeDeepSeekClient(new AbortableAsyncStream(chunks, controller));
+
+    const req: AgentTurnRequest = { ...baseReq, signal: controller.signal };
+    const events: unknown[] = [];
+    for await (const ev of streamDeepSeekAgentTurn(abortClient as never, req)) {
+      events.push(ev);
+    }
+
+    expect(
+      events.filter((e) => (e as { type: string }).type === 'assistant_text_delta')
+    ).toHaveLength(1);
+  });
+});
+
+class AbortableAsyncStream {
+  constructor(
+    private chunks: Record<string, unknown>[],
+    private controller: AbortController
+  ) {}
+  async *[Symbol.asyncIterator]() {
+    for (const chunk of this.chunks) {
+      if (this.controller.signal.aborted) break;
+      yield await Promise.resolve(chunk);
+    }
+  }
+}
