@@ -7,22 +7,13 @@ import type { UpdateProviderRuntimeSettingsBody } from '@mangostudio/shared/prov
 import type { ReasoningEffort } from '@mangostudio/shared';
 import { Card } from '@/components/ui/Card';
 import { useI18n } from '@/hooks/use-i18n';
+import { EFFORT_DISPLAY_ORDER, EFFORT_LABEL_KEYS } from '../constants';
 
 interface ReasoningSettingsSectionProps {
   policy: ReasoningPolicy;
   form: UpdateProviderRuntimeSettingsBody;
   onChange: (form: UpdateProviderRuntimeSettingsBody) => void;
 }
-
-const EFFORT_DISPLAY_ORDER: ReasoningEffort[] = ['low', 'medium', 'high', 'xhigh', 'max'];
-
-const EFFORT_LABEL_KEYS: Record<ReasoningEffort, string> = {
-  low: 'effortLow',
-  medium: 'effortMedium',
-  high: 'effortHigh',
-  xhigh: 'effortXHigh',
-  max: 'effortMax',
-};
 
 export function ReasoningSettingsSection({
   policy,

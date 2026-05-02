@@ -4,35 +4,17 @@
 
 import type { ProviderSettingsDescriptor } from '@mangostudio/shared/provider-settings';
 import { useI18n } from '@/hooks/use-i18n';
+import { EFFORT_LABEL_KEYS } from '../constants';
 
 interface ProviderSettingsCardProps {
   descriptor: ProviderSettingsDescriptor;
-}
-
-type EffortKey = 'effortLow' | 'effortMedium' | 'effortHigh' | 'effortXHigh' | 'effortMax';
-
-function effortKey(effort: string): EffortKey {
-  switch (effort) {
-    case 'low':
-      return 'effortLow';
-    case 'medium':
-      return 'effortMedium';
-    case 'high':
-      return 'effortHigh';
-    case 'xhigh':
-      return 'effortXHigh';
-    case 'max':
-      return 'effortMax';
-    default:
-      return 'effortMedium';
-  }
 }
 
 export function ProviderSettingsCard({ descriptor }: ProviderSettingsCardProps) {
   const { t } = useI18n();
   const providerName = t.providers[descriptor.provider] ?? descriptor.displayName;
   const reasoningLabel = descriptor.reasoning.supportedEfforts
-    .map((e) => t.thinking[effortKey(e)])
+    .map((e) => t.thinking[EFFORT_LABEL_KEYS[e] as keyof typeof t.thinking])
     .join(', ');
 
   return (

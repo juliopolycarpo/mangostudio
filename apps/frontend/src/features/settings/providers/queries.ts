@@ -19,6 +19,7 @@ export const providerSettingsKeys = {
 export function providerSettingsListQueryOptions() {
   return queryOptions({
     queryKey: providerSettingsKeys.list(),
+    staleTime: 30_000,
     queryFn: async () => {
       const { data, error } = await client.api.settings.providers.get();
       if (error) throw new Error(extractApiError(error.value, 'Failed to load providers'));
@@ -30,6 +31,7 @@ export function providerSettingsListQueryOptions() {
 export function providerSettingsDetailQueryOptions(provider: string) {
   return queryOptions({
     queryKey: providerSettingsKeys.detail(provider),
+    staleTime: 30_000,
     queryFn: async () => {
       const { data, error } = await client.api.settings.providers({ provider }).get();
       if (error) throw new Error(extractApiError(error.value, 'Failed to load provider settings'));
