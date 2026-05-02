@@ -11,10 +11,6 @@ function GeneralSettingsRoute() {
 
   return (
     <GeneralSettings
-      textSystemPrompt={app.settings.globalTextSystemPrompt}
-      setTextSystemPrompt={app.settings.setGlobalTextSystemPrompt}
-      imageSystemPrompt={app.settings.globalImageSystemPrompt}
-      setImageSystemPrompt={app.settings.setGlobalImageSystemPrompt}
       imageQuality={app.settings.globalImageQuality}
       setImageQuality={app.settings.setGlobalImageQuality}
       maxToolIterations={app.settings.maxToolIterations}

@@ -142,6 +142,7 @@ export const messages = {
       providers: 'Provedores',
       appearance: 'Aparência',
       context: 'Contexto',
+      prompts: 'Prompts',
     },
     context: {
       title: 'Contexto',
@@ -171,6 +172,35 @@ export const messages = {
         'Use o modelo atual do chat ou force um modelo de texto específico para os resumos.',
       summaryModelCurrent: 'Usar o modelo atual do chat',
       thresholdHint: '{value}% do contexto',
+    },
+    prompts: {
+      defaultPromptsLabel: 'Prompts Padrão',
+      ruleFilesLabel: 'Arquivos de Regras',
+      customRulesLabel: 'Regras Personalizadas',
+      customRulesDescription:
+        'Adicione caminhos para arquivos .md personalizados que serão incluídos nas requisições.',
+      textSystemPromptLabel: 'System Prompt de Texto Padrão',
+      textSystemPromptPlaceholder:
+        'ex. Você é um parceiro criativo útil. Seja conciso e perspicaz...',
+      imageSystemPromptLabel: 'System Prompt de Imagem Padrão',
+      imageSystemPromptPlaceholder:
+        'ex. Sempre gere imagens em estilo cinemático com iluminação dramática...',
+      agentsMdLabel: 'AGENTS.md',
+      agentsMdDescription: 'Regras do repositório definidas no arquivo AGENTS.md.',
+      claudeMdLabel: 'CLAUDE.md',
+      claudeMdDescription: 'Instruções globais definidas no arquivo CLAUDE.md.',
+      enabledLabel: 'Ativado',
+      injectionRoleLabel: 'Função de Injeção',
+      injectionRoleSystem: 'Enviar como System Prompt',
+      injectionRoleUser: 'Enviar como User Prompt',
+      frequencyLabel: 'Frequência',
+      frequencyFirstTurn: 'Enviar apenas no primeiro prompt',
+      frequencyFirstTurnHint: 'Recomendado',
+      frequencyEveryTurn: 'Enviar sempre',
+      addRule: 'Adicionar Regra',
+      removeRule: 'Remover',
+      rulePathLabel: 'Caminho',
+      rulePathPlaceholder: 'ex. ~/meus-projetos/regras.md',
     },
     general: {
       languageLabel: 'Idioma',
