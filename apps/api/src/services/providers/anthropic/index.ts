@@ -183,7 +183,13 @@ const anthropicProvider: AIProvider = {
 
     const thinkingEnabled = req.generationConfig?.thinkingEnabled ?? false;
     const effort = req.generationConfig?.reasoningEffort ?? 'medium';
-    const budgetMap = { low: 1024, medium: 2048, high: 8192 } as const;
+    const budgetMap: Record<string, number> = {
+      low: 1024,
+      medium: 2048,
+      high: 8192,
+      xhigh: 8192,
+      max: 8192,
+    };
 
     const params: Record<string, unknown> = {
       model: req.modelName,

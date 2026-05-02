@@ -41,7 +41,13 @@ export async function* streamAnthropicAgentTurn(
   const loopState = parseAnthropicLoopState(req.providerState);
   const thinkingEnabled = req.generationConfig?.thinkingEnabled ?? false;
   const effort = req.generationConfig?.reasoningEffort ?? 'medium';
-  const budgetMap = { low: 1024, medium: 2048, high: 8192 } as const;
+  const budgetMap: Record<string, number> = {
+    low: 1024,
+    medium: 2048,
+    high: 8192,
+    xhigh: 8192,
+    max: 8192,
+  };
 
   // Anthropic Messages API has no native JSON Schema constraint. Structured
   // output for Claude is achieved through prompt engineering and must be

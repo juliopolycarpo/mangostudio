@@ -39,6 +39,8 @@ export function ThinkingToggle({
     low: t.thinking.effortLow,
     medium: t.thinking.effortMedium,
     high: t.thinking.effortHigh,
+    xhigh: t.thinking.effortHigh,
+    max: t.thinking.effortHigh,
   };
 
   return (
