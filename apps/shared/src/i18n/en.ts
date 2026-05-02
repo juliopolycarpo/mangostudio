@@ -141,6 +141,7 @@ export const messages: Messages = {
       providers: 'Providers',
       appearance: 'Appearance',
       context: 'Context',
+      prompts: 'Prompts',
     },
     context: {
       title: 'Context',
@@ -168,6 +169,35 @@ export const messages: Messages = {
         'Use the current chat model or force a specific text model for summaries.',
       summaryModelCurrent: 'Use current chat model',
       thresholdHint: '{value}% of context',
+    },
+    prompts: {
+      defaultPromptsLabel: 'Default Prompts',
+      ruleFilesLabel: 'Rule Files',
+      customRulesLabel: 'Custom Rules',
+      customRulesDescription:
+        'Add paths to custom .md files to be included in generation requests.',
+      textSystemPromptLabel: 'Default Text System Prompt',
+      textSystemPromptPlaceholder:
+        'e.g. You are a helpful creative partner. Be concise and insightful...',
+      imageSystemPromptLabel: 'Default Image System Prompt',
+      imageSystemPromptPlaceholder:
+        'e.g. Always generate images in a cinematic style with dramatic lighting...',
+      agentsMdLabel: 'AGENTS.md',
+      agentsMdDescription: 'Repository rules defined in the AGENTS.md file.',
+      claudeMdLabel: 'CLAUDE.md',
+      claudeMdDescription: 'Global instructions defined in the CLAUDE.md file.',
+      enabledLabel: 'Enabled',
+      injectionRoleLabel: 'Injection Role',
+      injectionRoleSystem: 'Send as System Prompt',
+      injectionRoleUser: 'Send as User Prompt',
+      frequencyLabel: 'Frequency',
+      frequencyFirstTurn: 'Send only in first prompt',
+      frequencyFirstTurnHint: 'Recommended',
+      frequencyEveryTurn: 'Send every time',
+      addRule: 'Add Rule',
+      removeRule: 'Remove',
+      rulePathLabel: 'Path',
+      rulePathPlaceholder: 'e.g. ~/my-projects/rules.md',
     },
     general: {
       languageLabel: 'Language',
