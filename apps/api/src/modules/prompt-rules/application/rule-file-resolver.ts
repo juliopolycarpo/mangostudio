@@ -175,6 +175,23 @@ export function getDefaultRuleFileDescriptors(): RuleFileDescriptor[] {
   );
 }
 
+export function loadRuleFileContent(rawPath: string): string | null {
+  try {
+    const resolved = validateCustomPath(rawPath);
+    assertMarkdownExtension(resolved);
+
+    if (!existsSync(resolved)) return null;
+
+    assertRegularFile(resolved);
+
+    if (!isReadableRegularFile(resolved)) return null;
+
+    return readFileContent(resolved).content;
+  } catch {
+    return null;
+  }
+}
+
 export function previewRuleFile(rawPath: string): RuleFilePreviewResponse {
   const resolved = validateCustomPath(rawPath);
   assertMarkdownExtension(resolved);
