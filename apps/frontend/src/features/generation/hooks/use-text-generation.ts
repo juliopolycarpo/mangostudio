@@ -2,6 +2,7 @@
 import { useCallback, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import type { Message, MessagePart, ReasoningEffort } from '@mangostudio/shared';
+import type { PromptSettings } from '@mangostudio/shared/prompt-rules';
 import type { ContextCompactionResponse, ContextSettings } from '@mangostudio/shared/chat';
 import { messageKeys } from '@/features/chat/queries';
 import { compactChat, summarizeToNewChat } from '@/features/chat/services/context-compaction';
@@ -14,6 +15,7 @@ interface UseTextGenerationOptions {
   chats: ReturnType<typeof useChats>;
   getActiveModel: () => string;
   systemPrompt: string;
+  promptSettings?: PromptSettings;
   optimistic: ReturnType<typeof useOptimisticMessages>;
   thinkingEnabled: boolean;
   reasoningEffort: ReasoningEffort;
@@ -33,6 +35,7 @@ export function useTextGeneration({
   chats,
   getActiveModel,
   systemPrompt,
+  promptSettings,
   optimistic,
   thinkingEnabled,
   reasoningEffort,
@@ -119,6 +122,7 @@ export function useTextGeneration({
             prompt,
             model,
             systemPrompt: systemPrompt || undefined,
+            promptSettings,
             thinkingEnabled,
             reasoningEffort,
             maxToolIterations,
@@ -309,6 +313,7 @@ export function useTextGeneration({
       chats,
       getActiveModel,
       systemPrompt,
+      promptSettings,
       appendOptimisticMessages,
       updateOptimisticMessage,
       queryClient,
