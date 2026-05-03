@@ -10,6 +10,11 @@ import {
   saveGeneratedImage,
 } from '../../generated-images/generated-image-storage';
 
+function alwaysReturnsBase64(modelName: string): boolean {
+  const id = modelName.toLowerCase();
+  return id.startsWith('gpt-image') || id.startsWith('chatgpt-image');
+}
+
 export async function generateOpenAIImage(
   client: OpenAI,
   req: ImageGenerationRequest
@@ -18,10 +23,10 @@ export async function generateOpenAIImage(
     throw new Error(`Image generation is not supported by model "${req.modelName}".`);
   }
 
-  const isGptImage = req.modelName.startsWith('gpt-image');
+  const returnsBase64 = alwaysReturnsBase64(req.modelName);
 
-  // Build model-appropriate params: gpt-image doesn't support `response_format` or `n`
-  const params: OpenAI.Images.ImageGenerateParamsNonStreaming = isGptImage
+  // GPT image models always return base64 and reject response_format.
+  const params: OpenAI.Images.ImageGenerateParamsNonStreaming = returnsBase64
     ? { model: req.modelName, prompt: req.prompt, size: '1024x1024' }
     : {
         model: req.modelName,

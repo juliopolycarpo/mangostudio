@@ -9,15 +9,12 @@ import { withModelCache } from '../core/model-cache';
 import { createProviderSecretService } from '../core/secret-service';
 import { isImageModelId, isReasoningModel } from '../core/capability-detector';
 import { buildChatMessages } from '../openai/message-mapper';
+import { generateOpenAIImage } from '../openai/image-generation';
 import { extractReasoningChunks } from '../openai/normalizers';
 import { createCompatibleClient } from './client';
 import { classifyEndpoint } from './endpoint-classifier';
 import { streamOAICompatAgentTurn } from './chat-completions-stream';
 import { resolveCompatibleClientConfig } from './resolve-client-config';
-import {
-  normalizeGeneratedImageMimeType,
-  saveGeneratedImage,
-} from '../../generated-images/generated-image-storage';
 import type {
   AIProvider,
   TextGenerationRequest,
@@ -182,48 +179,7 @@ const openAICompatibleProvider: AIProvider = {
     const { apiKey, baseUrl } = await resolveClientConfig(req.userId, req.modelName);
     const client = createCompatibleClient(apiKey, baseUrl);
 
-    const isGptImage = req.modelName.startsWith('gpt-image');
-
-    const params = isGptImage
-      ? { model: req.modelName, prompt: req.prompt, size: '1024x1024' as const }
-      : {
-          model: req.modelName,
-          prompt: req.prompt,
-          size: '1024x1024' as const,
-          n: 1,
-          response_format: 'url' as const,
-        };
-
-    const response = await client.images.generate(params);
-
-    const data = response.data?.[0];
-
-    if (data?.b64_json) {
-      return {
-        imageUrl: await saveGeneratedImage({
-          data: data.b64_json,
-          encoding: 'base64',
-          mimeType: 'image/png',
-        }),
-      };
-    } else if (data?.url) {
-      const imageResponse = await fetch(data.url);
-      if (!imageResponse.ok) {
-        throw new Error('Failed to download generated image from OpenAI CDN.');
-      }
-      const mimeType = normalizeGeneratedImageMimeType(
-        imageResponse.headers.get('content-type')?.split(';')[0] ?? 'image/png'
-      );
-
-      return {
-        imageUrl: await saveGeneratedImage({
-          data: await imageResponse.arrayBuffer(),
-          mimeType,
-        }),
-      };
-    } else {
-      throw new Error(`No image data returned from OpenAI API for model "${req.modelName}".`);
-    }
+    return generateOpenAIImage(client, req);
   },
 
   async listModels(userId: string): Promise<ModelInfo[]> {

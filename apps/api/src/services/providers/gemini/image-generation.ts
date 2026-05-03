@@ -12,6 +12,69 @@ import {
   saveGeneratedImage,
 } from '../../generated-images/generated-image-storage';
 
+interface GeminiImagePart {
+  inlineData?: {
+    data?: string;
+    mimeType?: string;
+  };
+}
+
+interface GeminiImageResponse {
+  promptFeedback?: { blockReason?: string };
+  candidates?: ReadonlyArray<{
+    finishReason?: unknown;
+    content?: { parts?: ReadonlyArray<GeminiImagePart> };
+  }>;
+  text?: string;
+}
+
+function assertGeminiImageResponse(response: GeminiImageResponse): void {
+  if (response.promptFeedback?.blockReason) {
+    throw new Error(`Prompt blocked: ${response.promptFeedback.blockReason}`);
+  }
+
+  const finishReason = response.candidates?.[0]?.finishReason;
+  const finishReasonLabel = formatGeminiFinishReason(finishReason);
+  if (finishReasonLabel && finishReasonLabel !== 'STOP') {
+    throw new Error(`Generation stopped: ${finishReasonLabel}`);
+  }
+}
+
+function formatGeminiFinishReason(finishReason: unknown): string | null {
+  if (typeof finishReason === 'string') return finishReason;
+  if (typeof finishReason === 'number' || typeof finishReason === 'boolean') {
+    return `${finishReason}`;
+  }
+  return null;
+}
+
+function findGeminiInlineImage(
+  response: GeminiImageResponse
+): GeminiImagePart['inlineData'] | null {
+  const parts = response.candidates?.[0]?.content?.parts ?? [];
+  return parts.find((part) => part.inlineData?.data)?.inlineData ?? null;
+}
+
+export async function saveGeminiGeneratedImageFromResponse(
+  response: GeminiImageResponse
+): Promise<string> {
+  assertGeminiImageResponse(response);
+
+  const inlineImage = findGeminiInlineImage(response);
+  if (inlineImage?.data) {
+    return saveGeneratedImage({
+      data: inlineImage.data,
+      encoding: 'base64',
+      mimeType: inlineImage.mimeType
+        ? normalizeGeneratedImageMimeType(inlineImage.mimeType)
+        : 'image/png',
+    });
+  }
+
+  if (response.text) throw new Error(`Model returned text instead of image: ${response.text}`);
+  throw new Error('No image returned from Gemini');
+}
+
 /**
  * Generates an image using the Gemini API.
  *
@@ -102,33 +165,5 @@ export async function generateGeminiImage(
     config,
   });
 
-  if (response.promptFeedback?.blockReason) {
-    throw new Error(`Prompt blocked: ${response.promptFeedback.blockReason}`);
-  }
-
-  const candidate = response.candidates?.[0];
-  const finishReason = candidate?.finishReason;
-  if (finishReason && String(finishReason) !== 'STOP') {
-    throw new Error(`Generation stopped: ${finishReason}`);
-  }
-
-  for (const part of candidate?.content?.parts || []) {
-    if (part.inlineData) {
-      if (!part.inlineData.data) continue;
-      return saveGeneratedImage({
-        data: part.inlineData.data,
-        encoding: 'base64',
-        mimeType: part.inlineData.mimeType
-          ? normalizeGeneratedImageMimeType(part.inlineData.mimeType)
-          : 'image/png',
-      });
-    }
-  }
-
-  if (response.text) {
-    throw new Error(`Model returned text instead of image: ${response.text}`);
-  }
-
-  console.error('[gemini] Full response:', JSON.stringify(response, null, 2));
-  throw new Error('No image returned from Gemini');
+  return saveGeminiGeneratedImageFromResponse(response);
 }
