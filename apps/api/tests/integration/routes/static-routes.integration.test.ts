@@ -36,6 +36,10 @@ describe('SPA onError NOT_FOUND guard', () => {
     expect(isSpaRoute('/uploads/image.png')).toBe(false);
   });
 
+  test('/images/* paths are NOT served as SPA', () => {
+    expect(isSpaRoute('/images/generated.png')).toBe(false);
+  });
+
   test('/scalar is NOT served as SPA', () => {
     expect(isSpaRoute('/scalar')).toBe(false);
     expect(isSpaRoute('/scalar/something')).toBe(false);

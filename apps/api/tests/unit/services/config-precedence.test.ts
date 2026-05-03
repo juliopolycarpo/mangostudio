@@ -12,13 +12,13 @@
  */
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import { writeFileSync, mkdirSync, rmSync } from 'fs';
-import { join } from 'path';
+import { join, resolve } from 'path';
 import { loadConfig, resetConfig } from '../../../src/lib/config';
 
 const TMP_DIR = join('/tmp', `mango-config-test-${process.pid}`);
 const TMP_TOML = join(TMP_DIR, 'config.toml');
 
-const WATCHED_ENV_KEYS = ['API_PORT', 'API_HOST', 'DATABASE_PATH', 'UPLOADS_DIR'];
+const WATCHED_ENV_KEYS = ['API_PORT', 'API_HOST', 'DATABASE_PATH', 'UPLOADS_DIR', 'IMAGES_DIR'];
 
 function saveEnv(): Record<string, string | undefined> {
   return Object.fromEntries(WATCHED_ENV_KEYS.map((k) => [k, process.env[k]]));
@@ -99,6 +99,20 @@ describe('config precedence', () => {
 
     // applyEnvOverrides: Number('not-a-number') = NaN; NaN || existing = existing
     expect(cfg.server.port).toBe(4242);
+  });
+
+  test('defaults images.dir to ~/.mango/images', () => {
+    const cfg = loadConfig(join(TMP_DIR, 'nonexistent.toml'));
+
+    expect(cfg.images.dir).toBe(join(process.env.HOME ?? '', '.mango', 'images'));
+  });
+
+  test('process.env IMAGES_DIR overrides the default images directory', () => {
+    process.env.IMAGES_DIR = './tmp/generated-images';
+
+    const cfg = loadConfig(join(TMP_DIR, 'nonexistent.toml'));
+
+    expect(cfg.images.dir).toBe(resolve(import.meta.dir, '../../../../../tmp/generated-images'));
   });
 });
 
