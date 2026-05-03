@@ -55,6 +55,7 @@ export const messages = {
       saveToGallery: 'Salvar na Galeria',
       regenerate: 'Regenerar',
       imageUnavailable: 'Imagem não disponível',
+      imageUnavailableHint: 'A imagem foi excluída, movida ou ainda não está acessível.',
       styleParams: 'Parâmetros de Estilo',
       thoughtFor: 'Pensou por {time}',
       respondedIn: 'Respondeu em {time}',
@@ -135,8 +136,8 @@ export const messages = {
   gallery: {
     title: 'Galeria',
     empty: 'Suas criações aparecerão aqui.',
-    download: 'Download Full Image',
-    view: 'View',
+    download: 'Baixar imagem completa',
+    view: 'Ver',
   },
 
   settings: {

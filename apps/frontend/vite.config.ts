@@ -87,6 +87,10 @@ export default defineConfig({
         target: apiTarget,
         changeOrigin: true,
       },
+      '/images': {
+        target: apiTarget,
+        changeOrigin: true,
+      },
     },
   },
 });
