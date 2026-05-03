@@ -63,6 +63,7 @@ export function useAppState() {
     chats,
     getActiveModel,
     systemPrompt: settings.globalTextSystemPrompt,
+    promptSettings: settings.promptSettings,
     optimistic,
     thinkingEnabled: effectiveThinkingEnabled,
     reasoningEffort: effectiveReasoningEffort,

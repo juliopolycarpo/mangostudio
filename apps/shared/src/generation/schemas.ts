@@ -1,11 +1,13 @@
 import { Type, type Static } from '@sinclair/typebox';
 import { ContextSettingsSchema } from '../chat/schemas';
 import { ReasoningEffortSchema } from '../provider-settings/schemas';
+import { PromptSettingsSchema } from '../prompt-rules/schemas';
 
 export const GenerateImageBodySchema = Type.Object({
   chatId: Type.String(),
   prompt: Type.String(),
   systemPrompt: Type.Optional(Type.String()),
+  promptSettings: Type.Optional(PromptSettingsSchema),
   referenceImageUrl: Type.Optional(Type.String()),
   imageQuality: Type.Optional(Type.String()),
   model: Type.Optional(Type.String()),
@@ -27,6 +29,7 @@ export const RespondStreamBodySchema = Type.Object({
   prompt: Type.String(),
   model: Type.Optional(Type.String()),
   systemPrompt: Type.Optional(Type.String()),
+  promptSettings: Type.Optional(PromptSettingsSchema),
   thinkingEnabled: Type.Optional(Type.Boolean()),
   reasoningEffort: Type.Optional(ReasoningEffortSchema),
   thinkingVisibility: Type.Optional(Type.String()),

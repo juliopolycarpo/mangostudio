@@ -6,6 +6,7 @@ import type {
   ReasoningEffort,
   ContinuationReasonCode,
 } from '@mangostudio/shared';
+import type { PromptSettings } from '@mangostudio/shared/prompt-rules';
 import type { ContextSettings } from '@mangostudio/shared/chat';
 import type { ProviderRuntimeSettings } from '@mangostudio/shared/provider-settings';
 import type { AgentTurnRequest } from '../../../services/providers/types';
@@ -49,6 +50,7 @@ import {
   type ContextSeverity,
   type ContinuationDisplayMode,
 } from '../../../services/providers/context-policy';
+import { composePrompt } from '../../prompt-rules/application/prompt-composer';
 
 const TOOL_TIMEOUT_MS = 30_000;
 const DEFAULT_MAX_TOOL_ITERATIONS = 10;
@@ -60,6 +62,7 @@ export interface StreamTextTurnInput {
   prompt: string;
   model?: string;
   systemPrompt?: string;
+  promptSettings?: PromptSettings;
   thinkingEnabled?: boolean;
   reasoningEffort?: ReasoningEffort;
   maxToolIterations?: number;
@@ -131,7 +134,7 @@ export async function* streamTextTurn(
   const startTime = Date.now();
   const chatId = input.chatId;
   const userId = input.userId;
-  const { systemPrompt, signal } = input;
+  const { signal } = input;
   const thinkingEnabled = runtimeSettings.thinkingEnabled ?? true;
   const reasoningEffort = runtimeSettings.reasoningEffort ?? 'medium';
 
@@ -147,6 +150,16 @@ export async function* streamTextTurn(
       const richHistory = await loadRichHistory(chatId, { excludeId: userMsgId }, db);
       const toolDefs = getAllToolDefinitions();
 
+      const isFirstTurn = !richHistory.some((t) => t.role === 'user');
+      const composition = composePrompt({
+        settings: input.promptSettings,
+        baseSystemPrompt: input.systemPrompt ?? '',
+        visiblePrompt: input.prompt,
+        isFirstTurn,
+      });
+      const effectiveSystemPrompt = composition.effectiveSystemPrompt || undefined;
+      const effectivePrompt = composition.effectivePrompt;
+
       // Cross-turn continuation state is sourced exclusively from the chat row.
       // Message-level providerState is kept only as an audit trail and must not
       // be used for continuation — doing so can resurrect stale cursors from
@@ -158,7 +171,7 @@ export async function* streamTextTurn(
         .executeTakeFirst();
       const lastProviderState = chatRow?.lastProviderState ?? null;
 
-      const currentSystemPromptHash = computeSystemPromptHash(systemPrompt);
+      const currentSystemPromptHash = computeSystemPromptHash(effectiveSystemPrompt);
       const currentToolsetHash = computeToolsetHash(toolDefs);
 
       const decision = decideContinuation({
@@ -258,9 +271,9 @@ export async function* streamTextTurn(
         const req: AgentTurnRequest = {
           userId,
           modelName: modelId,
-          systemPrompt,
+          systemPrompt: effectiveSystemPrompt,
           history: richHistory,
-          prompt: isFirstIteration ? input.prompt : undefined,
+          prompt: isFirstIteration ? effectivePrompt : undefined,
           toolResults: pendingToolResults,
           toolDefinitions: toolDefs,
           providerState: rawProviderState,
@@ -361,7 +374,7 @@ export async function* streamTextTurn(
               const snapshot = computeContextSnapshot({
                 modelName: modelId,
                 history: richHistory,
-                systemPrompt,
+                systemPrompt: effectiveSystemPrompt,
                 toolDefinitions: toolDefs,
                 providerReportedTokens: providerReportedInputTokens,
                 mode: displayMode,
@@ -533,13 +546,24 @@ export async function* streamTextTurn(
       }
     } else if (provider.generateTextStream) {
       const history = await loadHistory(chatId, { excludeId: userMsgId }, db);
+
+      const isFirstTurn = !history.some((h) => h.role === 'user');
+      const composition = composePrompt({
+        settings: input.promptSettings,
+        baseSystemPrompt: input.systemPrompt ?? '',
+        visiblePrompt: input.prompt,
+        isFirstTurn,
+      });
+      const effectiveSystemPrompt = composition.effectiveSystemPrompt || undefined;
+      const effectivePrompt = composition.effectivePrompt;
+
       let legacyInThinking = false;
 
       for await (const chunk of provider.generateTextStream({
         userId,
         history,
-        prompt: input.prompt,
-        systemPrompt,
+        prompt: effectivePrompt,
+        systemPrompt: effectiveSystemPrompt,
         modelName: modelId,
         signal,
         generationConfig: {
@@ -570,11 +594,22 @@ export async function* streamTextTurn(
       }
     } else {
       const history = await loadHistory(chatId, { excludeId: userMsgId }, db);
+
+      const isFirstTurn = !history.some((h) => h.role === 'user');
+      const composition = composePrompt({
+        settings: input.promptSettings,
+        baseSystemPrompt: input.systemPrompt ?? '',
+        visiblePrompt: input.prompt,
+        isFirstTurn,
+      });
+      const effectiveSystemPrompt = composition.effectiveSystemPrompt || undefined;
+      const effectivePrompt = composition.effectivePrompt;
+
       const result = await provider.generateText({
         userId,
         history,
-        prompt: input.prompt,
-        systemPrompt,
+        prompt: effectivePrompt,
+        systemPrompt: effectiveSystemPrompt,
         modelName: modelId,
         signal,
         generationConfig: {

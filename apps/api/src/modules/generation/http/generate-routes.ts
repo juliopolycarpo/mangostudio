@@ -27,6 +27,7 @@ export const generateRoutes = (app: Elysia) =>
                 prompt: body.prompt,
                 model: body.model,
                 systemPrompt: body.systemPrompt,
+                promptSettings: body.promptSettings,
                 referenceImageUrl: body.referenceImageUrl,
                 imageQuality: body.imageQuality,
               },
