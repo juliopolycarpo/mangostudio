@@ -20,9 +20,11 @@ import { authRoutes } from './routes/auth';
 import { rateLimit } from './plugins/rate-limit';
 import { errorHandler } from './plugins/error-handler';
 import { getConfig } from './lib/config';
+import { mkdirSync } from 'fs';
 
 const UPLOADS_DIR = getConfig().uploads.dir;
 const IMAGES_DIR = getConfig().images.dir;
+mkdirSync(IMAGES_DIR, { recursive: true });
 
 /**
  * Base API instance with /api prefix.
