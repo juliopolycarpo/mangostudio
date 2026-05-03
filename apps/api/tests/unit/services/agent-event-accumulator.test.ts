@@ -8,7 +8,7 @@ import { register as registerGetCurrentDatetime } from '../../../src/services/to
 import { getTool, executeTool } from '../../../src/services/tools/registry';
 import type { GetCurrentDatetimeResult } from '../../../src/services/tools/builtin/get-current-datetime';
 
-const ctx = { userId: 'u1', chatId: 'c1' };
+const ctx = { userId: 'u1', chatId: 'c1', parameters: {} };
 
 // Re-register before each test — tool-registry.test.ts uses a global beforeEach(clearRegistry)
 // which empties the registry when tests run in a shared process (bun test --coverage).

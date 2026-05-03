@@ -17,6 +17,7 @@ import { loadHistory, loadRichHistory } from '../../messages/infrastructure/mess
 import { getProviderForModel } from '../../../services/providers/registry';
 import { mergeProviderRuntimeSettings } from '../../../services/providers/core/provider-settings-policy';
 import { getProviderSettings } from '../../provider-settings/infrastructure/provider-settings-repository';
+import { listSavedToolSettings } from '../../tool-settings/infrastructure/tool-settings-repository';
 import { getAllToolDefinitions, executeTool } from '../../../services/tools';
 import { generateId } from '../../../utils/id';
 import {
@@ -148,7 +149,8 @@ export async function* streamTextTurn(
   try {
     if (provider.generateAgentTurnStream) {
       const richHistory = await loadRichHistory(chatId, { excludeId: userMsgId }, db);
-      const toolDefs = getAllToolDefinitions();
+      const toolSettings = await listSavedToolSettings(db, userId);
+      const toolDefs = getAllToolDefinitions(toolSettings);
 
       const isFirstTurn = !richHistory.some((t) => t.role === 'user');
       const composition = composePrompt({
@@ -460,7 +462,7 @@ export async function* streamTextTurn(
                 )
               );
               result = await Promise.race([
-                executeTool(name, args, { userId, chatId }),
+                executeTool(name, args, { userId, chatId, parameters: {} }, toolSettings.get(name)),
                 timeoutPromise,
               ]);
             } catch (err) {

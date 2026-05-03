@@ -3,3 +3,4 @@ export * from './contracts/index';
 export * from './i18n';
 export * from './utils/model-detection';
 export * from './provider-settings';
+export * from './tool-settings';

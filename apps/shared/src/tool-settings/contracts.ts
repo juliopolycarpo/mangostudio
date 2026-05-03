@@ -1,0 +1,35 @@
+export type ToolParameterType = 'string' | 'number' | 'boolean' | 'select';
+
+export type ToolSettingsCategory = 'system' | 'image' | 'interaction';
+
+export interface ToolParameterOption {
+  value: string;
+  label: string;
+}
+
+export interface ToolParameterDescriptor {
+  name: string;
+  label: string;
+  description?: string;
+  type: ToolParameterType;
+  required: boolean;
+  defaultValue?: string | number | boolean;
+  min?: number;
+  max?: number;
+  options?: ReadonlyArray<ToolParameterOption>;
+}
+
+export interface ToolSettingsDescriptor {
+  name: string;
+  title: string;
+  description: string;
+  category: ToolSettingsCategory;
+  enabled: boolean;
+  canDisable: boolean;
+  parameters: Record<string, unknown>;
+  parameterDescriptors: ReadonlyArray<ToolParameterDescriptor>;
+}
+
+export interface ToolSettingsListResponse {
+  tools: ToolSettingsDescriptor[];
+}

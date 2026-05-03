@@ -46,10 +46,10 @@ const definition = {
 
 function execute(
   args: Record<string, unknown>,
-  _context: ToolContext
+  context: ToolContext
 ): Promise<GetCurrentDatetimeResult> {
-  const timezone = typeof args.timezone === 'string' ? args.timezone : 'UTC';
-  const locale = typeof args.locale === 'string' ? args.locale : 'en-US';
+  const timezone = getStringArg(args.timezone, context.parameters.timezone, 'UTC');
+  const locale = getStringArg(args.locale, context.parameters.locale, 'en-US');
 
   // Validate timezone by constructing a formatter — throws RangeError on invalid input
   try {
@@ -88,7 +88,43 @@ function execute(
 
 /** Registers this tool. Called once at import time; can be re-called after clearRegistry(). */
 export function register(): void {
-  registerTool({ definition, execute });
+  registerTool({
+    definition,
+    settings: {
+      title: 'Current date and time',
+      description: 'Returns the current date and time for a configured locale and timezone.',
+      category: 'system',
+      enabledByDefault: true,
+      canDisable: true,
+      defaultParameters: { timezone: 'UTC', locale: 'en-US' },
+      parameterDescriptors: [
+        {
+          name: 'timezone',
+          label: 'Default timezone',
+          description: 'IANA timezone used when the model does not provide one.',
+          type: 'string',
+          required: true,
+          defaultValue: 'UTC',
+        },
+        {
+          name: 'locale',
+          label: 'Default locale',
+          description: 'BCP 47 locale used when the model does not provide one.',
+          type: 'string',
+          required: true,
+          defaultValue: 'en-US',
+        },
+      ],
+    },
+    execute,
+  });
+}
+
+function getStringArg(...values: unknown[]): string {
+  for (const value of values) {
+    if (typeof value === 'string' && value.length > 0) return value;
+  }
+  return '';
 }
 
 // Self-register on import
