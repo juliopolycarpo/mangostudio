@@ -127,6 +127,11 @@ export const messages = {
     },
   },
 
+  studio: {
+    title: 'Studio',
+    empty: 'Espaço de criação de imagens — em breve.',
+  },
+
   gallery: {
     title: 'Galeria',
     empty: 'Suas criações aparecerão aqui.',

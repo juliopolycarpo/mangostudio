@@ -12,7 +12,7 @@ export interface HeaderProps {
   isModelSelectorDisabled: boolean;
   composerMode: 'chat' | 'image';
   currentChatId: string | null;
-  currentPage: 'chat' | 'gallery' | 'settings';
+  currentPage: 'chat' | 'gallery' | 'settings' | 'studio';
   onUpdateChatModel: (chatId: string, model: string) => void;
   onSetPageModel: (model: string) => void;
   onNewChat: () => void;
@@ -57,16 +57,18 @@ export function Header({
   return (
     <header className="bg-surface-dim flex justify-between items-center px-6 py-4 w-full sticky top-0 z-40 border-b border-outline-variant/10">
       <div className="flex items-center gap-4">
-        <ModelSelector
-          activeModel={activeModel}
-          activeModels={activeModels}
-          isDisabled={isModelSelectorDisabled}
-          onSelect={(modelId) =>
-            currentChatId ? onUpdateChatModel(currentChatId, modelId) : onSetPageModel(modelId)
-          }
-          modelCatalog={modelCatalog}
-          lockedProvider={lockedProvider}
-        />
+        {currentPage !== 'studio' && (
+          <ModelSelector
+            activeModel={activeModel}
+            activeModels={activeModels}
+            isDisabled={isModelSelectorDisabled}
+            onSelect={(modelId) =>
+              currentChatId ? onUpdateChatModel(currentChatId, modelId) : onSetPageModel(modelId)
+            }
+            modelCatalog={modelCatalog}
+            lockedProvider={lockedProvider}
+          />
+        )}
       </div>
       <div className="flex items-center gap-3">
         {currentPage === 'chat' && (

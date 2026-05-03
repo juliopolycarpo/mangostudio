@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { MessageSquare, LayoutGrid, Settings, Plus, Pencil, Trash2 } from 'lucide-react';
+import { Image, MessageSquare, LayoutGrid, Settings, Plus, Pencil, Trash2 } from 'lucide-react';
 import type { Chat } from '@mangostudio/shared';
 import { useToast } from '@/components/ui';
 import { useI18n } from '@/hooks/use-i18n';
@@ -8,8 +8,8 @@ import type { ContextInfo } from '@/features/generation/types';
 import { ContextRing } from './ContextRing';
 
 interface Props {
-  currentPage: 'chat' | 'gallery' | 'settings';
-  onNavigate: (page: 'chat' | 'gallery' | 'settings') => void;
+  currentPage: 'chat' | 'gallery' | 'settings' | 'studio';
+  onNavigate: (page: 'chat' | 'gallery' | 'settings' | 'studio') => void;
   chats: Chat[];
   currentChatId: string | null;
   onSelectChat: (chatId: string) => void;
@@ -74,7 +74,7 @@ export function Sidebar({
     }
   };
 
-  const navItemClass = (page: 'gallery' | 'settings') =>
+  const navItemClass = (page: 'gallery' | 'settings' | 'studio') =>
     `flex items-center gap-3 px-4 py-3 rounded-lg transition-all duration-300 w-full text-left ${
       currentPage === page
         ? 'text-primary bg-surface-container-high'
@@ -163,6 +163,10 @@ export function Sidebar({
       </nav>
 
       <div className="p-4 mt-auto border-t border-outline-variant/10 space-y-1">
+        <button onClick={() => onNavigate('studio')} className={navItemClass('studio')}>
+          <Image size={18} />
+          <span className="font-label font-medium text-sm">{t.studio.title}</span>
+        </button>
         <button onClick={() => onNavigate('gallery')} className={navItemClass('gallery')}>
           <LayoutGrid size={18} />
           <span className="font-label font-medium text-sm">{t.gallery.title}</span>

@@ -128,8 +128,13 @@ export function useAppState() {
   );
 
   const handleNavigate = useCallback(
-    (page: 'chat' | 'gallery' | 'settings') => {
-      const routes = { chat: '/', gallery: '/gallery', settings: '/settings' } as const;
+    (page: 'chat' | 'gallery' | 'settings' | 'studio') => {
+      const routes = {
+        chat: '/',
+        gallery: '/gallery',
+        settings: '/settings',
+        studio: '/studio',
+      } as const;
       void navigate({ to: routes[page] });
     },
     [navigate]

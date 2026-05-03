@@ -5,8 +5,8 @@ import type { ContextInfo } from '@/features/generation/types';
 
 interface LayoutProps {
   children: ReactNode;
-  currentPage: 'chat' | 'gallery' | 'settings';
-  onNavigate: (page: 'chat' | 'gallery' | 'settings') => void;
+  currentPage: 'chat' | 'gallery' | 'settings' | 'studio';
+  onNavigate: (page: 'chat' | 'gallery' | 'settings' | 'studio') => void;
   chats: Chat[];
   currentChatId: string | null;
   onSelectChat: (chatId: string) => void;
