@@ -21,7 +21,11 @@ port = 5173
 path = ""
 
 [uploads]
-# Empty = auto-detect: ./uploads (dev) or <exe_dir>/uploads (build)
+# Empty = auto-detect: ./.mango/uploads (dev) or ~/.mango/uploads (build)
+dir = ""
+
+[images]
+# Empty = auto-detect: ~/.mango/images in all runtimes
 dir = ""
 
 [auth]

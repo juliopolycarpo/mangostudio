@@ -22,6 +22,7 @@ import { errorHandler } from './plugins/error-handler';
 import { getConfig } from './lib/config';
 
 const UPLOADS_DIR = getConfig().uploads.dir;
+const IMAGES_DIR = getConfig().images.dir;
 
 /**
  * Base API instance with /api prefix.
@@ -75,6 +76,12 @@ export const app = new Elysia()
     staticPlugin({
       assets: UPLOADS_DIR,
       prefix: '/uploads',
+    })
+  )
+  .use(
+    staticPlugin({
+      assets: IMAGES_DIR,
+      prefix: '/images',
     })
   )
   // OpenAPI/Scalar documentation

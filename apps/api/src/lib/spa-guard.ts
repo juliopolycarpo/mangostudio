@@ -6,6 +6,7 @@ export function isSpaRoute(pathname: string): boolean {
   return (
     !pathname.startsWith('/api/') &&
     !pathname.startsWith('/uploads/') &&
+    !pathname.startsWith('/images/') &&
     !pathname.startsWith('/scalar') &&
     !pathname.startsWith('/assets/')
   );

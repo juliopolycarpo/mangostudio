@@ -3,10 +3,14 @@
  */
 
 import { join } from 'path';
-import { readFileSync, existsSync, mkdirSync } from 'fs';
+import { readFileSync, existsSync } from 'fs';
 import { getResolvedGeminiApiKey } from './secret';
 import { getConfig } from '../../../lib/config';
 import { createGeminiClient } from './client';
+import {
+  normalizeGeneratedImageMimeType,
+  saveGeneratedImage,
+} from '../../generated-images/generated-image-storage';
 
 /**
  * Generates an image using the Gemini API.
@@ -17,7 +21,7 @@ import { createGeminiClient } from './client';
  * @param referenceImageUrl - Optional local URL to a reference image (e.g., /uploads/...).
  * @param imageSize - Image quality/size setting (512px, 1K, 2K, 4K).
  * @param modelName - Gemini model to use.
- * @returns The saved image URL path (e.g., /uploads/generated-xxx.png).
+ * @returns The saved image URL path (e.g., /images/generated-xxx.png).
  */
 export async function generateGeminiImage(
   userId: string,
@@ -111,14 +115,13 @@ export async function generateGeminiImage(
   for (const part of candidate?.content?.parts || []) {
     if (part.inlineData) {
       if (!part.inlineData.data) continue;
-      const imageBuffer = Buffer.from(part.inlineData.data, 'base64');
-      const filename = `generated-${Date.now()}-${Math.round(Math.random() * 1e9)}.png`;
-      const filePath = join(uploadsDir, filename);
-
-      mkdirSync(uploadsDir, { recursive: true });
-      await Bun.write(filePath, imageBuffer);
-
-      return `/uploads/${filename}`;
+      return saveGeneratedImage({
+        data: part.inlineData.data,
+        encoding: 'base64',
+        mimeType: part.inlineData.mimeType
+          ? normalizeGeneratedImageMimeType(part.inlineData.mimeType)
+          : 'image/png',
+      });
     }
   }
 

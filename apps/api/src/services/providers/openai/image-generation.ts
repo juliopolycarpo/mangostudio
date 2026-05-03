@@ -3,11 +3,12 @@
  */
 
 import type OpenAI from 'openai';
-import { join } from 'path';
-import { mkdirSync } from 'fs';
-import { getConfig } from '../../../lib/config';
 import type { ImageGenerationRequest, ImageGenerationResult } from '../types';
 import { isImageModelId } from '../core/capability-detector';
+import {
+  normalizeGeneratedImageMimeType,
+  saveGeneratedImage,
+} from '../../generated-images/generated-image-storage';
 
 export async function generateOpenAIImage(
   client: OpenAI,
@@ -32,27 +33,32 @@ export async function generateOpenAIImage(
 
   const response = await client.images.generate(params);
 
-  const uploadsDir = getConfig().uploads.dir;
-  mkdirSync(uploadsDir, { recursive: true });
-
-  const filename = `generated-${Date.now()}-${Math.round(Math.random() * 1e9)}.png`;
-  const outputPath = join(uploadsDir, filename);
-
   const data = response.data?.[0];
 
   if (data?.b64_json) {
-    const imageBuffer = Buffer.from(data.b64_json, 'base64');
-    await Bun.write(outputPath, imageBuffer);
+    return {
+      imageUrl: await saveGeneratedImage({
+        data: data.b64_json,
+        encoding: 'base64',
+        mimeType: 'image/png',
+      }),
+    };
   } else if (data?.url) {
     const imageResponse = await fetch(data.url);
     if (!imageResponse.ok) {
       throw new Error('Failed to download generated image from OpenAI CDN.');
     }
-    const imageBuffer = Buffer.from(await imageResponse.arrayBuffer());
-    await Bun.write(outputPath, imageBuffer);
+    const mimeType = normalizeGeneratedImageMimeType(
+      imageResponse.headers.get('content-type')?.split(';')[0] ?? 'image/png'
+    );
+
+    return {
+      imageUrl: await saveGeneratedImage({
+        data: await imageResponse.arrayBuffer(),
+        mimeType,
+      }),
+    };
   } else {
     throw new Error(`No image data returned from OpenAI API for model "${req.modelName}".`);
   }
-
-  return { imageUrl: `/uploads/${filename}` };
 }
