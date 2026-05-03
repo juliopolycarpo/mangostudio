@@ -18,6 +18,7 @@ import {
 import { getAllToolDefinitions, executeTool } from '../../../src/services/tools';
 import * as realGeminiNs from '../../../src/services/gemini';
 import * as realProviderSettingsRepoNs from '../../../src/modules/provider-settings/infrastructure/provider-settings-repository';
+import * as realToolSettingsRepoNs from '../../../src/modules/tool-settings/infrastructure/tool-settings-repository';
 import type { AgentTurnRequest } from '../../../src/services/providers/types';
 
 const TEST_USER = {
@@ -45,6 +46,7 @@ const realExecuteTool = executeTool;
 // For the gemini barrel we snapshot the whole object immediately.
 const realGemini = { ...realGeminiNs };
 const realProviderSettingsRepo = { ...realProviderSettingsRepoNs };
+const realToolSettingsRepo = { ...realToolSettingsRepoNs };
 
 let restoreAuth: (() => void) | null = null;
 
@@ -76,6 +78,10 @@ afterEach(async () => {
   await mock.module(
     '../../../src/modules/provider-settings/infrastructure/provider-settings-repository',
     () => realProviderSettingsRepo
+  );
+  await mock.module(
+    '../../../src/modules/tool-settings/infrastructure/tool-settings-repository',
+    () => realToolSettingsRepo
   );
 });
 
@@ -1334,5 +1340,141 @@ describe('POST /respond/stream', () => {
       (u) => 'lastProviderState' in u && u.lastProviderState !== null
     );
     expect(durableUpdate).toBeUndefined();
+  });
+
+  it('omits disabled tools from provider requests', async () => {
+    let capturedToolDefinitions: AgentTurnRequest['toolDefinitions'];
+
+    await mock.module('../../../src/modules/chats/infrastructure/chat-repository', () => ({
+      verifyChatOwnership: () => Promise.resolve(true),
+    }));
+
+    await mock.module(
+      '../../../src/modules/tool-settings/infrastructure/tool-settings-repository',
+      () => ({
+        listSavedToolSettings: () =>
+          Promise.resolve(new Map([['get_current_datetime', { enabled: false, parameters: {} }]])),
+      })
+    );
+
+    await mock.module('../../../src/services/providers/registry', () => ({
+      getProviderForModel: () =>
+        Promise.resolve({
+          providerType: 'openai-compatible',
+          generateText: () => Promise.resolve({ text: '' }),
+          generateAgentTurnStream: async function* (req: AgentTurnRequest) {
+            await Promise.resolve();
+            capturedToolDefinitions = req.toolDefinitions;
+            yield { type: 'assistant_text_delta', text: 'Hi' };
+            yield { type: 'turn_completed', providerState: null };
+          },
+        }),
+    }));
+
+    await mock.module('../../../src/db/database', () => ({
+      getDb: () => ({
+        selectFrom: () => makeChain({ userId: TEST_USER.id }),
+        insertInto: () => ({ values: () => ({ execute: () => Promise.resolve() }) }),
+        updateTable: () => ({ set: () => makeChain(undefined) }),
+      }),
+    }));
+
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
+    restoreAuth = restore;
+
+    const response = await app.handle(
+      new Request('http://localhost/respond/stream', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chatId: 'test-chat', prompt: 'Hello', model: 'test-model' }),
+      })
+    );
+    await response.text();
+
+    expect(response.status).toBe(200);
+    expect(capturedToolDefinitions?.map((definition) => definition.name)).not.toContain(
+      'get_current_datetime'
+    );
+  });
+
+  it('passes saved tool parameters into execution context', async () => {
+    let iteration = 0;
+
+    await mock.module('../../../src/modules/chats/infrastructure/chat-repository', () => ({
+      verifyChatOwnership: () => Promise.resolve(true),
+    }));
+
+    await mock.module(
+      '../../../src/modules/tool-settings/infrastructure/tool-settings-repository',
+      () => ({
+        listSavedToolSettings: () =>
+          Promise.resolve(
+            new Map([
+              [
+                'get_current_datetime',
+                { enabled: true, parameters: { timezone: 'America/Sao_Paulo', locale: 'pt-BR' } },
+              ],
+            ])
+          ),
+      })
+    );
+
+    await mock.module('../../../src/services/providers/registry', () => ({
+      getProviderForModel: () =>
+        Promise.resolve({
+          providerType: 'openai-compatible',
+          generateText: () => Promise.resolve({ text: '' }),
+          generateAgentTurnStream: async function* (_req: AgentTurnRequest) {
+            await Promise.resolve();
+            iteration += 1;
+            if (iteration === 1) {
+              yield { type: 'tool_call_started', callId: 'time-1', name: 'get_current_datetime' };
+              yield {
+                type: 'tool_call_completed',
+                callId: 'time-1',
+                name: 'get_current_datetime',
+                arguments: '{}',
+              };
+              yield { type: 'turn_completed', providerState: null };
+              return;
+            }
+            yield { type: 'assistant_text_delta', text: 'Done' };
+            yield { type: 'turn_completed', providerState: null };
+          },
+        }),
+    }));
+
+    await mock.module('../../../src/services/tools', () => ({
+      getAllToolDefinitions: realGetAllToolDefinitions,
+      executeTool: realExecuteTool,
+    }));
+
+    await mock.module('../../../src/db/database', () => ({
+      getDb: () => ({
+        selectFrom: () => makeChain({ userId: TEST_USER.id }),
+        insertInto: () => ({ values: () => ({ execute: () => Promise.resolve() }) }),
+        updateTable: () => ({ set: () => makeChain(undefined) }),
+      }),
+    }));
+
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
+    restoreAuth = restore;
+
+    const response = await app.handle(
+      new Request('http://localhost/respond/stream', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chatId: 'test-chat',
+          prompt: 'What time is it?',
+          model: 'test-model',
+        }),
+      })
+    );
+    const rawText = await response.text();
+    const toolResult = parseSseEvents(rawText).find((event) => event.type === 'tool_result');
+
+    expect(response.status).toBe(200);
+    expect(toolResult?.result).toMatchObject({ timezone: 'America/Sao_Paulo', locale: 'pt-BR' });
   });
 });
