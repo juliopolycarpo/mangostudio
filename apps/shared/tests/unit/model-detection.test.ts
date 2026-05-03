@@ -5,7 +5,9 @@ describe('isImageModelId', () => {
   it.each([
     'dall-e-2',
     'dall-e-3',
+    'chatgpt-image-latest',
     'gpt-image-1',
+    'gpt-image-2',
     'gpt-image-2-hd',
     'imagen-4.0-generate-001',
     'gemini-2.5-flash-image',

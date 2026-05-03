@@ -10,6 +10,45 @@ import { parseStringArray } from '../../../utils/json';
 import { createOpenAIClient, validateOpenAIAuthContext, type OpenAIAuthContext } from './client';
 import type { ModelInfo } from '../types';
 
+const KNOWN_OPENAI_IMAGE_MODEL_IDS = [
+  'gpt-image-2',
+  'gpt-image-1.5',
+  'chatgpt-image-latest',
+  'gpt-image-1',
+  'gpt-image-1-mini',
+  'dall-e-3',
+  'dall-e-2',
+] as const;
+
+function createImageModelInfo(modelId: string): ModelInfo {
+  return {
+    modelId,
+    displayName: modelId,
+    provider: 'openai',
+    capabilities: {
+      text: false,
+      image: true,
+      streaming: false,
+      reasoning: false,
+      tools: false,
+      statefulContinuation: false,
+      promptCaching: false,
+      parallelToolCalls: false,
+      reasoningWithTools: false,
+      structuredOutput: false,
+    },
+  };
+}
+
+export function includeKnownOpenAIImageModels(models: ModelInfo[]): ModelInfo[] {
+  const seen = new Set(models.map((model) => model.modelId));
+  const imageModels = KNOWN_OPENAI_IMAGE_MODEL_IDS.filter((modelId) => !seen.has(modelId)).map(
+    createImageModelInfo
+  );
+
+  return [...models, ...imageModels];
+}
+
 export const secretService = createProviderSecretService({
   provider: 'openai',
   tomlSection: 'openai_api_keys',
@@ -80,22 +119,24 @@ export const listModelsWithCache = withModelCache(
         ) {
           continue;
         }
+        const isImage = isImageModelId(model.id);
+        const isReasoning = isReasoningModel(model.id);
         allModels.push({
           modelId: model.id,
           displayName: model.id,
           provider: 'openai',
           inputTokenLimit: getModelContextLimit(model.id),
           capabilities: {
-            text: !isImageModelId(model.id),
-            image: isImageModelId(model.id),
-            streaming: !isImageModelId(model.id),
-            reasoning: isReasoningModel(model.id),
-            tools: !isImageModelId(model.id),
-            statefulContinuation: !isImageModelId(model.id),
+            text: !isImage,
+            image: isImage,
+            streaming: !isImage,
+            reasoning: isReasoning,
+            tools: !isImage,
+            statefulContinuation: !isImage,
             promptCaching: true,
-            parallelToolCalls: !isImageModelId(model.id),
-            reasoningWithTools: isReasoningModel(model.id),
-            structuredOutput: !isImageModelId(model.id),
+            parallelToolCalls: !isImage,
+            reasoningWithTools: isReasoning && !isImage,
+            structuredOutput: !isImage,
           },
         });
       }
@@ -103,7 +144,9 @@ export const listModelsWithCache = withModelCache(
       console.warn(`[openai] Failed to list models:`, err);
     }
 
-    return allModels.sort((a, b) => a.displayName.localeCompare(b.displayName));
+    return includeKnownOpenAIImageModels(allModels).sort((a, b) =>
+      a.displayName.localeCompare(b.displayName)
+    );
   },
   { ttl: 3_600_000, fallback: [] }
 );
