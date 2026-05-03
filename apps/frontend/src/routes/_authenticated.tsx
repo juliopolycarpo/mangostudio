@@ -45,9 +45,10 @@ function AuthenticatedLayout() {
     return null;
   }
 
-  let activePage: 'chat' | 'gallery' | 'settings' = 'chat';
+  let activePage: 'chat' | 'gallery' | 'settings' | 'studio' = 'chat';
   if (currentPath.includes('/gallery')) activePage = 'gallery';
   if (currentPath.includes('/settings')) activePage = 'settings';
+  if (currentPath.includes('/studio')) activePage = 'studio';
 
   return (
     <AppContext value={app}>

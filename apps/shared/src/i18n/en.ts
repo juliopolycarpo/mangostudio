@@ -126,6 +126,11 @@ export const messages: Messages = {
     },
   },
 
+  studio: {
+    title: 'Studio',
+    empty: 'Image creation workspace — coming soon.',
+  },
+
   gallery: {
     title: 'Gallery',
     empty: 'Your creations will appear here.',
