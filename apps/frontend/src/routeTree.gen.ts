@@ -16,6 +16,7 @@ import { Route as AuthenticatedIndexRouteImport } from './routes/_authenticated/
 import { Route as AuthenticatedSettingsRouteImport } from './routes/_authenticated/settings'
 import { Route as AuthenticatedGalleryRouteImport } from './routes/_authenticated/gallery'
 import { Route as AuthenticatedSettingsIndexRouteImport } from './routes/_authenticated/settings/index'
+import { Route as AuthenticatedSettingsToolsRouteImport } from './routes/_authenticated/settings/tools'
 import { Route as AuthenticatedSettingsProvidersRouteImport } from './routes/_authenticated/settings/providers'
 import { Route as AuthenticatedSettingsPromptsRouteImport } from './routes/_authenticated/settings/prompts'
 import { Route as AuthenticatedSettingsGeneralRouteImport } from './routes/_authenticated/settings/general'
@@ -58,6 +59,12 @@ const AuthenticatedSettingsIndexRoute =
   AuthenticatedSettingsIndexRouteImport.update({
     id: '/',
     path: '/',
+    getParentRoute: () => AuthenticatedSettingsRoute,
+  } as any)
+const AuthenticatedSettingsToolsRoute =
+  AuthenticatedSettingsToolsRouteImport.update({
+    id: '/tools',
+    path: '/tools',
     getParentRoute: () => AuthenticatedSettingsRoute,
   } as any)
 const AuthenticatedSettingsProvidersRoute =
@@ -121,6 +128,7 @@ export interface FileRoutesByFullPath {
   '/settings/general': typeof AuthenticatedSettingsGeneralRoute
   '/settings/prompts': typeof AuthenticatedSettingsPromptsRoute
   '/settings/providers': typeof AuthenticatedSettingsProvidersRouteWithChildren
+  '/settings/tools': typeof AuthenticatedSettingsToolsRoute
   '/settings/': typeof AuthenticatedSettingsIndexRoute
   '/settings/providers/$provider': typeof AuthenticatedSettingsProvidersProviderRoute
   '/settings/providers/': typeof AuthenticatedSettingsProvidersIndexRoute
@@ -135,6 +143,7 @@ export interface FileRoutesByTo {
   '/settings/context': typeof AuthenticatedSettingsContextRoute
   '/settings/general': typeof AuthenticatedSettingsGeneralRoute
   '/settings/prompts': typeof AuthenticatedSettingsPromptsRoute
+  '/settings/tools': typeof AuthenticatedSettingsToolsRoute
   '/settings': typeof AuthenticatedSettingsIndexRoute
   '/settings/providers/$provider': typeof AuthenticatedSettingsProvidersProviderRoute
   '/settings/providers': typeof AuthenticatedSettingsProvidersIndexRoute
@@ -153,6 +162,7 @@ export interface FileRoutesById {
   '/_authenticated/settings/general': typeof AuthenticatedSettingsGeneralRoute
   '/_authenticated/settings/prompts': typeof AuthenticatedSettingsPromptsRoute
   '/_authenticated/settings/providers': typeof AuthenticatedSettingsProvidersRouteWithChildren
+  '/_authenticated/settings/tools': typeof AuthenticatedSettingsToolsRoute
   '/_authenticated/settings/': typeof AuthenticatedSettingsIndexRoute
   '/_authenticated/settings/providers/$provider': typeof AuthenticatedSettingsProvidersProviderRoute
   '/_authenticated/settings/providers/': typeof AuthenticatedSettingsProvidersIndexRoute
@@ -171,6 +181,7 @@ export interface FileRouteTypes {
     | '/settings/general'
     | '/settings/prompts'
     | '/settings/providers'
+    | '/settings/tools'
     | '/settings/'
     | '/settings/providers/$provider'
     | '/settings/providers/'
@@ -185,6 +196,7 @@ export interface FileRouteTypes {
     | '/settings/context'
     | '/settings/general'
     | '/settings/prompts'
+    | '/settings/tools'
     | '/settings'
     | '/settings/providers/$provider'
     | '/settings/providers'
@@ -202,6 +214,7 @@ export interface FileRouteTypes {
     | '/_authenticated/settings/general'
     | '/_authenticated/settings/prompts'
     | '/_authenticated/settings/providers'
+    | '/_authenticated/settings/tools'
     | '/_authenticated/settings/'
     | '/_authenticated/settings/providers/$provider'
     | '/_authenticated/settings/providers/'
@@ -262,6 +275,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/settings/'
       preLoaderRoute: typeof AuthenticatedSettingsIndexRouteImport
+      parentRoute: typeof AuthenticatedSettingsRoute
+    }
+    '/_authenticated/settings/tools': {
+      id: '/_authenticated/settings/tools'
+      path: '/tools'
+      fullPath: '/settings/tools'
+      preLoaderRoute: typeof AuthenticatedSettingsToolsRouteImport
       parentRoute: typeof AuthenticatedSettingsRoute
     }
     '/_authenticated/settings/providers': {
@@ -348,6 +368,7 @@ interface AuthenticatedSettingsRouteChildren {
   AuthenticatedSettingsGeneralRoute: typeof AuthenticatedSettingsGeneralRoute
   AuthenticatedSettingsPromptsRoute: typeof AuthenticatedSettingsPromptsRoute
   AuthenticatedSettingsProvidersRoute: typeof AuthenticatedSettingsProvidersRouteWithChildren
+  AuthenticatedSettingsToolsRoute: typeof AuthenticatedSettingsToolsRoute
   AuthenticatedSettingsIndexRoute: typeof AuthenticatedSettingsIndexRoute
 }
 
@@ -359,6 +380,7 @@ const AuthenticatedSettingsRouteChildren: AuthenticatedSettingsRouteChildren = {
   AuthenticatedSettingsPromptsRoute: AuthenticatedSettingsPromptsRoute,
   AuthenticatedSettingsProvidersRoute:
     AuthenticatedSettingsProvidersRouteWithChildren,
+  AuthenticatedSettingsToolsRoute: AuthenticatedSettingsToolsRoute,
   AuthenticatedSettingsIndexRoute: AuthenticatedSettingsIndexRoute,
 }
 

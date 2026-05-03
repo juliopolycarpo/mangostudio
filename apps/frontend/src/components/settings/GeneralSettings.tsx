@@ -2,13 +2,10 @@ import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { useI18n } from '@/hooks/use-i18n';
 import type { Locale } from '@mangostudio/shared/i18n';
-import { MAX_TOOL_ITERATIONS_MAX, MAX_TOOL_ITERATIONS_MIN } from '@/hooks/use-global-settings';
 
 interface GeneralSettingsProps {
   imageQuality: string;
   setImageQuality: (val: string) => void;
-  maxToolIterations: number;
-  setMaxToolIterations: (val: number) => void;
 }
 
 const IMAGE_QUALITY_OPTIONS = ['512px', '1K', '2K', '4K'] as const;
@@ -19,18 +16,11 @@ const LOCALE_OPTIONS: { value: Locale; label: string }[] = [
 ];
 
 /**
- * General settings tab: language selector, system prompts, image quality grid.
+ * General settings tab: language selector, image quality grid.
  */
-export function GeneralSettings({
-  imageQuality,
-  setImageQuality,
-  maxToolIterations,
-  setMaxToolIterations,
-}: GeneralSettingsProps) {
+export function GeneralSettings({ imageQuality, setImageQuality }: GeneralSettingsProps) {
   const { t, locale, setLocale } = useI18n();
   const s = t.settings.general;
-
-  const hintText = s.maxToolIterationsHint.replace('{value}', String(maxToolIterations));
 
   return (
     <div className="space-y-4">
@@ -76,46 +66,6 @@ export function GeneralSettings({
               {q}
             </Button>
           ))}
-        </div>
-      </Card>
-
-      {/* ── Max Tool Iterations ── */}
-      <Card variant="solid" className="space-y-3 p-6">
-        <div className="flex items-baseline justify-between gap-4">
-          <h3 className="text-xs uppercase tracking-widest font-bold text-on-surface-variant/80 font-label">
-            {s.maxToolIterationsLabel}
-          </h3>
-          <span className="text-sm font-medium text-on-surface">{hintText}</span>
-        </div>
-        <p className="text-sm text-on-surface-variant/60">{s.maxToolIterationsDescription}</p>
-        <div className="flex items-center gap-4">
-          <input
-            type="range"
-            min={MAX_TOOL_ITERATIONS_MIN}
-            max={MAX_TOOL_ITERATIONS_MAX}
-            step={1}
-            value={maxToolIterations}
-            onChange={(e) => setMaxToolIterations(Number(e.target.value))}
-            aria-label={s.maxToolIterationsLabel}
-            className="flex-1 h-2 bg-surface-container-lowest rounded-full appearance-none cursor-pointer accent-primary"
-          />
-          <input
-            type="number"
-            min={MAX_TOOL_ITERATIONS_MIN}
-            max={MAX_TOOL_ITERATIONS_MAX}
-            step={1}
-            value={maxToolIterations}
-            onChange={(e) => setMaxToolIterations(Number(e.target.value))}
-            onBlur={(e) => setMaxToolIterations(Number(e.target.value))}
-            aria-label={s.maxToolIterationsLabel}
-            className="
-              w-20 rounded-xl px-3 py-2 text-sm text-center
-              bg-surface-container-lowest text-on-surface
-              border border-outline-variant/20
-              focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/20
-              transition-colors
-            "
-          />
         </div>
       </Card>
     </div>
