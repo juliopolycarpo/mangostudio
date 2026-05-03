@@ -1,17 +1,10 @@
-import { afterEach, describe, expect, it, mock } from 'bun:test';
+import { afterEach, describe, expect, it } from 'bun:test';
 import type OpenAI from 'openai';
-import { existsSync, rmSync } from 'fs';
+import { existsSync, readdirSync, rmSync } from 'fs';
 import { join } from 'path';
 import { loadConfigForTest, resetConfig } from '../../../../src/lib/config';
 
 const TMP_DIR = join('/tmp', `mango-provider-image-test-${process.pid}`);
-
-const realGeminiClient = await import('../../../../src/services/providers/gemini/client');
-const realGeminiSecret = await import('../../../../src/services/providers/gemini/secret');
-const realCompatibleClient =
-  await import('../../../../src/services/providers/openai-compatible/client');
-const realCompatibleResolver =
-  await import('../../../../src/services/providers/openai-compatible/resolve-client-config');
 
 function configureImageDirs(): string {
   const imagesDir = join(TMP_DIR, crypto.randomUUID());
@@ -22,20 +15,9 @@ function configureImageDirs(): string {
   return imagesDir;
 }
 
-afterEach(async () => {
+afterEach(() => {
   resetConfig();
   rmSync(TMP_DIR, { recursive: true, force: true });
-  mock.restore();
-  await mock.module('../../../../src/services/providers/gemini/client', () => realGeminiClient);
-  await mock.module('../../../../src/services/providers/gemini/secret', () => realGeminiSecret);
-  await mock.module(
-    '../../../../src/services/providers/openai-compatible/client',
-    () => realCompatibleClient
-  );
-  await mock.module(
-    '../../../../src/services/providers/openai-compatible/resolve-client-config',
-    () => realCompatibleResolver
-  );
 });
 
 describe('generated image provider URLs', () => {
@@ -43,11 +25,16 @@ describe('generated image provider URLs', () => {
     const imagesDir = configureImageDirs();
     const { generateOpenAIImage } =
       await import('../../../../src/services/providers/openai/image-generation');
+    const capture: { params?: OpenAI.Images.ImageGenerateParamsNonStreaming } = {};
 
     const fakeClient = {
       images: {
-        generate: () =>
-          Promise.resolve({ data: [{ b64_json: Buffer.from('png-data').toString('base64') }] }),
+        generate: (params: OpenAI.Images.ImageGenerateParamsNonStreaming) => {
+          capture.params = params;
+          return Promise.resolve({
+            data: [{ b64_json: Buffer.from('png-data').toString('base64') }],
+          });
+        },
       },
     } as unknown as OpenAI;
 
@@ -59,35 +46,72 @@ describe('generated image provider URLs', () => {
 
     expect(result.imageUrl.startsWith('/images/')).toBe(true);
     expect(existsSync(join(imagesDir, result.imageUrl.replace('/images/', '')))).toBe(true);
+    expect(capture.params).toEqual({
+      model: 'gpt-image-1',
+      prompt: 'make an image',
+      size: '1024x1024',
+    });
   });
 
-  it('stores OpenAI-compatible images under /images', async () => {
+  it('downloads DALL-E image URLs into the images directory', async () => {
     const imagesDir = configureImageDirs();
-    await mock.module(
-      '../../../../src/services/providers/openai-compatible/resolve-client-config',
-      () => ({
-        resolveCompatibleClientConfig: () =>
-          Promise.resolve({ apiKey: 'test-key', baseUrl: 'https://example.test/v1' }),
-      })
-    );
-    await mock.module('../../../../src/services/providers/openai-compatible/client', () => ({
-      createCompatibleClient: () => ({
+    const { generateOpenAIImage } =
+      await import('../../../../src/services/providers/openai/image-generation');
+    const originalFetch = globalThis.fetch;
+    const capture: { params?: OpenAI.Images.ImageGenerateParamsNonStreaming } = {};
+
+    globalThis.fetch = ((input: string | URL | Request) => {
+      const url = input instanceof Request ? input.url : input.toString();
+      expect(url).toBe('https://cdn.openai.test/generated.jpg');
+      return Promise.resolve(
+        new Response('jpeg-data', { headers: { 'content-type': 'image/jpeg' } })
+      );
+    }) as typeof fetch;
+
+    try {
+      const fakeClient = {
         images: {
-          generate: () =>
-            Promise.resolve({
-              data: [{ b64_json: Buffer.from('compat-image').toString('base64') }],
-            }),
+          generate: (params: OpenAI.Images.ImageGenerateParamsNonStreaming) => {
+            capture.params = params;
+            return Promise.resolve({ data: [{ url: 'https://cdn.openai.test/generated.jpg' }] });
+          },
         },
-      }),
-    }));
+      } as unknown as OpenAI;
 
-    const { openAICompatibleProvider } =
-      await import('../../../../src/services/providers/openai-compatible/index');
-    if (!openAICompatibleProvider.generateImage) {
-      throw new Error('OpenAI-compatible provider does not implement generateImage.');
+      const result = await generateOpenAIImage(fakeClient, {
+        userId: 'user-openai',
+        prompt: 'make a DALL-E image',
+        modelName: 'dall-e-3',
+      });
+
+      expect(result.imageUrl.startsWith('/images/')).toBe(true);
+      expect(readdirSync(imagesDir)).toEqual([result.imageUrl.replace('/images/', '')]);
+      expect(result.imageUrl.endsWith('.jpg')).toBe(true);
+      expect(capture.params).toEqual({
+        model: 'dall-e-3',
+        prompt: 'make a DALL-E image',
+        size: '1024x1024',
+        n: 1,
+        response_format: 'url',
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
     }
+  });
 
-    const result = await openAICompatibleProvider.generateImage({
+  it('stores OpenAI-compatible client images under /images', async () => {
+    const imagesDir = configureImageDirs();
+    const { generateOpenAIImage } =
+      await import('../../../../src/services/providers/openai/image-generation');
+
+    const fakeCompatibleClient = {
+      images: {
+        generate: () =>
+          Promise.resolve({ data: [{ b64_json: Buffer.from('compat-image').toString('base64') }] }),
+      },
+    } as unknown as OpenAI;
+
+    const result = await generateOpenAIImage(fakeCompatibleClient, {
       userId: 'user-compat',
       prompt: 'draw a mango',
       modelName: 'gpt-image-1',
@@ -99,44 +123,26 @@ describe('generated image provider URLs', () => {
 
   it('stores Gemini images under /images', async () => {
     const imagesDir = configureImageDirs();
-    await mock.module('../../../../src/services/providers/gemini/secret', () => ({
-      getResolvedGeminiApiKey: () => Promise.resolve('gemini-test-key'),
-    }));
-    await mock.module('../../../../src/services/providers/gemini/client', () => ({
-      createGeminiClient: () => ({
-        models: {
-          generateContent: () =>
-            Promise.resolve({
-              candidates: [
-                {
-                  finishReason: 'STOP',
-                  content: {
-                    parts: [
-                      {
-                        inlineData: {
-                          data: Buffer.from('gemini-image').toString('base64'),
-                          mimeType: 'image/png',
-                        },
-                      },
-                    ],
-                  },
-                },
-              ],
-            }),
-        },
-      }),
-    }));
-
-    const { generateGeminiImage } =
+    const { saveGeminiGeneratedImageFromResponse } =
       await import('../../../../src/services/providers/gemini/image-generation');
-    const imageUrl = await generateGeminiImage(
-      'user-gemini',
-      'make a sunset over the ocean',
-      undefined,
-      undefined,
-      '1K',
-      'gemini-2.5-flash-image'
-    );
+
+    const imageUrl = await saveGeminiGeneratedImageFromResponse({
+      candidates: [
+        {
+          finishReason: 'STOP',
+          content: {
+            parts: [
+              {
+                inlineData: {
+                  data: Buffer.from('gemini-image').toString('base64'),
+                  mimeType: 'image/png',
+                },
+              },
+            ],
+          },
+        },
+      ],
+    });
 
     expect(imageUrl.startsWith('/images/')).toBe(true);
     expect(existsSync(join(imagesDir, imageUrl.replace('/images/', '')))).toBe(true);
