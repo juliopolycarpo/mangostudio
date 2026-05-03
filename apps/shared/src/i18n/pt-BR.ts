@@ -143,6 +143,7 @@ export const messages = {
       appearance: 'Aparência',
       context: 'Contexto',
       prompts: 'Prompts',
+      tools: 'Ferramentas',
     },
     context: {
       title: 'Contexto',
@@ -312,6 +313,29 @@ export const messages = {
       capabilityTools: 'Ferramentas',
       capabilityCaching: 'Cache',
       capabilityCompaction: 'Compactação',
+    },
+    tools: {
+      title: 'Ferramentas',
+      description: 'Ative ou desative ferramentas e configure seus parâmetros.',
+      categories: {
+        system: 'Sistema',
+        image: 'Imagem',
+        interaction: 'Interação',
+      },
+      enabled: 'Ativada',
+      disabled: 'Desativada',
+      cannotDisable: 'Esta ferramenta não pode ser desativada.',
+      save: 'Salvar',
+      saving: 'Salvando...',
+      saved: 'Configurações salvas',
+      saveError: 'Falha ao salvar configurações da ferramenta',
+      loadError: 'Falha ao carregar ferramentas',
+      noTools: 'Nenhuma ferramenta disponível.',
+      maxToolIterationsLabel: 'Iterações Máximas de Ferramentas',
+      maxToolIterationsDescription:
+        'Limite máximo de rodadas de chamada de ferramentas que o modelo pode executar em um turno.',
+      maxToolIterationsHint: '{value} de 25',
+      executionTitle: 'Execução',
     },
     appearance: {
       title: 'Aparência',

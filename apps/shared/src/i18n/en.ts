@@ -142,6 +142,7 @@ export const messages: Messages = {
       appearance: 'Appearance',
       context: 'Context',
       prompts: 'Prompts',
+      tools: 'Tools',
     },
     context: {
       title: 'Context',
@@ -308,6 +309,29 @@ export const messages: Messages = {
       capabilityTools: 'Tools',
       capabilityCaching: 'Caching',
       capabilityCompaction: 'Compaction',
+    },
+    tools: {
+      title: 'Tools',
+      description: 'Enable or disable tools and configure their parameters.',
+      categories: {
+        system: 'System',
+        image: 'Image',
+        interaction: 'Interaction',
+      },
+      enabled: 'Enabled',
+      disabled: 'Disabled',
+      cannotDisable: 'This tool cannot be disabled.',
+      save: 'Save',
+      saving: 'Saving...',
+      saved: 'Settings saved',
+      saveError: 'Failed to save tool settings',
+      loadError: 'Failed to load tools',
+      noTools: 'No tools available.',
+      maxToolIterationsLabel: 'Max Tool Iterations',
+      maxToolIterationsDescription:
+        'Upper bound on how many tool-calling rounds the model may take in a single turn.',
+      maxToolIterationsHint: '{value} of 25',
+      executionTitle: 'Execution',
     },
     appearance: {
       title: 'Appearance',
