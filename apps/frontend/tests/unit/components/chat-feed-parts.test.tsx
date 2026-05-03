@@ -5,7 +5,7 @@
  * and that the legacy single-thinking-part format still renders correctly.
  */
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { screen } from '@testing-library/react';
+import { fireEvent, screen } from '@testing-library/react';
 import type { Message, MessagePart } from '@mangostudio/shared';
 import { render } from '../../support/harness/render';
 import { ChatFeed } from '../../../src/features/chat/components/ChatFeed';
@@ -130,5 +130,31 @@ describe('ChatFeed — MessageParts interleaved rendering', () => {
     render(<ChatFeed chatId="chat-1" messages={[msg]} />);
 
     expect(screen.getByText('Plain text response.')).toBeInTheDocument();
+  });
+
+  it('renders generated images from the /images route', () => {
+    const msg = makeMessage({
+      interactionMode: 'image',
+      imageUrl: '/images/generated-123.png',
+      generationTime: '1.2s',
+      modelName: 'gpt-image-2',
+      styleParams: ['1K'],
+    });
+
+    render(<ChatFeed chatId="chat-1" messages={[msg]} />);
+
+    expect(screen.getByAltText('Generated')).toHaveAttribute('src', '/images/generated-123.png');
+  });
+
+  it('shows an unavailable state when a generated image fails to load', () => {
+    const msg = makeMessage({ interactionMode: 'image', imageUrl: '/images/missing.png' });
+
+    render(<ChatFeed chatId="chat-1" messages={[msg]} />);
+    fireEvent.error(screen.getByAltText('Generated'));
+
+    expect(screen.getByText('Image no longer available')).toBeInTheDocument();
+    expect(
+      screen.getByText('The image was deleted, moved, or is not accessible yet.')
+    ).toBeInTheDocument();
   });
 });
