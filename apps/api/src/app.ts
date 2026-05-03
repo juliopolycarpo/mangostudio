@@ -20,8 +20,10 @@ import { authRoutes } from './routes/auth';
 import { rateLimit } from './plugins/rate-limit';
 import { errorHandler } from './plugins/error-handler';
 import { getConfig } from './lib/config';
+import { createGeneratedImageRoutes } from './routes/generated-images';
 
 const UPLOADS_DIR = getConfig().uploads.dir;
+const IMAGES_DIR = getConfig().images.dir;
 
 /**
  * Base API instance with /api prefix.
@@ -77,6 +79,7 @@ export const app = new Elysia()
       prefix: '/uploads',
     })
   )
+  .use(createGeneratedImageRoutes(IMAGES_DIR))
   // OpenAPI/Scalar documentation
   .use(
     openapi({

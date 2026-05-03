@@ -57,6 +57,7 @@ export const messages: Messages = {
       saveToGallery: 'Save to Gallery',
       regenerate: 'Regenerate',
       imageUnavailable: 'Image no longer available',
+      imageUnavailableHint: 'The image was deleted, moved, or is not accessible yet.',
       styleParams: 'Style Parameters',
       thoughtFor: 'Thought for {time}',
       respondedIn: 'Responded in {time}',

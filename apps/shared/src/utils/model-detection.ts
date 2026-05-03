@@ -9,6 +9,7 @@
 const IMAGE_MODEL_PATTERNS: RegExp[] = [
   /^dall-e/, // OpenAI DALL-E 2 / 3
   /^gpt-image/, // OpenAI GPT-Image-1+
+  /^chatgpt-image/, // OpenAI ChatGPT image aliases
   /imagen-/, // Google Imagen family
   /-image/, // Generic convention (e.g. gemini-2.5-flash-image, gemini-2.0-flash-image-*)
   /^stable-diffusion/, // Stability AI (common in compatible providers)

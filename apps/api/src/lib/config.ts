@@ -47,6 +47,9 @@ export interface MangoConfig {
   uploads: {
     dir: string;
   };
+  images: {
+    dir: string;
+  };
   auth: {
     secret: string;
     url: string;
@@ -62,6 +65,7 @@ const DEFAULT_CONFIG: Omit<MangoConfig, 'corsOrigins' | 'configFilePath'> = {
   frontend: { host: 'localhost', port: 5173 },
   database: { path: '' },
   uploads: { dir: '' },
+  images: { dir: '' },
   auth: { secret: '', url: '' },
 };
 
@@ -81,6 +85,9 @@ const ENV_KEY_MAP: Record<string, (cfg: MangoConfig, value: string) => void> = {
   },
   UPLOADS_DIR: (cfg, v) => {
     cfg.uploads.dir = v;
+  },
+  IMAGES_DIR: (cfg, v) => {
+    cfg.images.dir = v;
   },
   BETTER_AUTH_SECRET: (cfg, v) => {
     cfg.auth.secret = v;
@@ -153,6 +160,7 @@ function cloneDefaults(): MangoConfig {
     frontend: { ...DEFAULT_CONFIG.frontend },
     database: { ...DEFAULT_CONFIG.database },
     uploads: { ...DEFAULT_CONFIG.uploads },
+    images: { ...DEFAULT_CONFIG.images },
     auth: { ...DEFAULT_CONFIG.auth },
     corsOrigins: [],
     configFilePath: '',
@@ -181,6 +189,11 @@ function applyToml(cfg: MangoConfig, parsed: Record<string, unknown>): void {
   const uploads = parsed.uploads as Record<string, unknown> | undefined;
   if (uploads) {
     if (typeof uploads.dir === 'string') cfg.uploads.dir = uploads.dir;
+  }
+
+  const images = parsed.images as Record<string, unknown> | undefined;
+  if (images) {
+    if (typeof images.dir === 'string') cfg.images.dir = images.dir;
   }
 
   const auth = parsed.auth as Record<string, unknown> | undefined;
@@ -228,6 +241,12 @@ function computeDerived(cfg: MangoConfig, tomlPath: string): void {
       : join(getMangoDir(), 'uploads'); // .mango/uploads in dev mode
   } else {
     cfg.uploads.dir = resolveUserPath(cfg.uploads.dir);
+  }
+
+  if (!cfg.images.dir) {
+    cfg.images.dir = join(getHomeMangoDir(), 'images');
+  } else {
+    cfg.images.dir = resolveUserPath(cfg.images.dir);
   }
 
   // CORS origins from frontend host/port (include +1 for Vite port bumping)
@@ -333,6 +352,7 @@ export function loadConfigForTest(partial: Partial<MangoConfig> = {}): MangoConf
   if (partial.frontend) Object.assign(cfg.frontend, partial.frontend);
   if (partial.database) Object.assign(cfg.database, partial.database);
   if (partial.uploads) Object.assign(cfg.uploads, partial.uploads);
+  if (partial.images) Object.assign(cfg.images, partial.images);
   if (partial.auth) Object.assign(cfg.auth, partial.auth);
   if (partial.corsOrigins) cfg.corsOrigins = partial.corsOrigins;
   if (partial.configFilePath) cfg.configFilePath = partial.configFilePath;

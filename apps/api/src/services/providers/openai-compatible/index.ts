@@ -9,14 +9,12 @@ import { withModelCache } from '../core/model-cache';
 import { createProviderSecretService } from '../core/secret-service';
 import { isImageModelId, isReasoningModel } from '../core/capability-detector';
 import { buildChatMessages } from '../openai/message-mapper';
+import { generateOpenAIImage } from '../openai/image-generation';
 import { extractReasoningChunks } from '../openai/normalizers';
 import { createCompatibleClient } from './client';
 import { classifyEndpoint } from './endpoint-classifier';
 import { streamOAICompatAgentTurn } from './chat-completions-stream';
 import { resolveCompatibleClientConfig } from './resolve-client-config';
-import { getConfig } from '../../../lib/config';
-import { join } from 'path';
-import { mkdirSync } from 'fs';
 import type {
   AIProvider,
   TextGenerationRequest,
@@ -181,43 +179,7 @@ const openAICompatibleProvider: AIProvider = {
     const { apiKey, baseUrl } = await resolveClientConfig(req.userId, req.modelName);
     const client = createCompatibleClient(apiKey, baseUrl);
 
-    const isGptImage = req.modelName.startsWith('gpt-image');
-
-    const params = isGptImage
-      ? { model: req.modelName, prompt: req.prompt, size: '1024x1024' as const }
-      : {
-          model: req.modelName,
-          prompt: req.prompt,
-          size: '1024x1024' as const,
-          n: 1,
-          response_format: 'url' as const,
-        };
-
-    const response = await client.images.generate(params);
-
-    const uploadsDir = getConfig().uploads.dir;
-    mkdirSync(uploadsDir, { recursive: true });
-
-    const filename = `generated-${Date.now()}-${Math.round(Math.random() * 1e9)}.png`;
-    const outputPath = join(uploadsDir, filename);
-
-    const data = response.data?.[0];
-
-    if (data?.b64_json) {
-      const imageBuffer = Buffer.from(data.b64_json, 'base64');
-      await Bun.write(outputPath, imageBuffer);
-    } else if (data?.url) {
-      const imageResponse = await fetch(data.url);
-      if (!imageResponse.ok) {
-        throw new Error('Failed to download generated image from OpenAI CDN.');
-      }
-      const imageBuffer = Buffer.from(await imageResponse.arrayBuffer());
-      await Bun.write(outputPath, imageBuffer);
-    } else {
-      throw new Error(`No image data returned from OpenAI API for model "${req.modelName}".`);
-    }
-
-    return { imageUrl: `/uploads/${filename}` };
+    return generateOpenAIImage(client, req);
   },
 
   async listModels(userId: string): Promise<ModelInfo[]> {

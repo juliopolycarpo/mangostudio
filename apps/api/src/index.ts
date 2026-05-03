@@ -90,7 +90,7 @@ if (frontendExists) {
         // handler that fails in compiled Bun binaries (import() of Vite HTML
         // triggers Bun's HTML bundler, which can't resolve hashed asset paths).
         // GET /index.html is handled by the onError NOT_FOUND handler below.
-        ignorePatterns: [/index\.html$/, '/api/*', '/uploads/*', '/scalar'],
+        ignorePatterns: [/index\.html$/, '/api/*', '/uploads/*', '/images/*', '/scalar'],
       })
     )
     .onError(({ code, request }) => {

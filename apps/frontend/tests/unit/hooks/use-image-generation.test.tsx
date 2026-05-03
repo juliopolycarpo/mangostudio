@@ -125,4 +125,45 @@ describe('useImageGeneration — reference image upload failure', () => {
     );
     expect(props.optimistic.updateOptimisticMessage).not.toHaveBeenCalled();
   });
+
+  it('replaces optimistic messages with the generated /images URL', async () => {
+    mockGenerate.mockResolvedValue({
+      userMessage: {
+        id: 'msg-u',
+        chatId: 'chat-1',
+        role: 'user',
+        text: 'a mango robot',
+        timestamp: Date.now(),
+        interactionMode: 'image',
+      },
+      aiMessage: {
+        id: 'msg-a',
+        chatId: 'chat-1',
+        role: 'ai',
+        text: '',
+        imageUrl: '/images/generated-mango.png',
+        timestamp: Date.now(),
+        isGenerating: false,
+        generationTime: '2.4s',
+        modelName: 'gpt-image-2',
+        styleParams: ['1K'],
+        interactionMode: 'image',
+      },
+    } as unknown as Awaited<ReturnType<typeof generateImage>>);
+
+    const props = makeProps({ getActiveModel: () => 'gpt-image-2' });
+    const { result } = renderHook(() => useImageGeneration(props));
+
+    await act(async () => {
+      await result.current.handleGenerate('a mango robot');
+    });
+
+    await waitFor(() => expect(result.current.isGenerating).toBe(false));
+
+    const [, , replacementMessages] = vi.mocked(props.optimistic.replaceOptimisticMessages).mock
+      .calls[0];
+    expect(replacementMessages[1]).toEqual(
+      expect.objectContaining({ imageUrl: '/images/generated-mango.png', modelName: 'gpt-image-2' })
+    );
+  });
 });

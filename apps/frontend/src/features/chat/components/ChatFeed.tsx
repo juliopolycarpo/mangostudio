@@ -351,7 +351,7 @@ export function ChatFeed({ chatId, messages }: { chatId: string | null; messages
                                       {t.chat.feed.imageUnavailable}
                                     </p>
                                     <p className="text-xs font-body">
-                                      (Have you deleted or moved the image?)
+                                      {t.chat.feed.imageUnavailableHint}
                                     </p>
                                   </div>
                                 ) : (
