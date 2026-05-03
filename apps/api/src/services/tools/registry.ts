@@ -3,7 +3,20 @@
  * Tools self-register at import time via registerTool().
  */
 
-import type { RegisteredTool, ToolContext, ToolDefinition } from './types';
+import type { ToolSettingsDescriptor } from '@mangostudio/shared/tool-settings';
+import type { EffectiveToolSettings, RegisteredTool, ToolContext, ToolDefinition } from './types';
+import {
+  getSafeEffectiveToolSettings,
+  getToolDefinitionsForTools,
+  getToolDescriptorsForTools,
+} from './settings-policy';
+export {
+  getDefaultToolSettings,
+  getToolDefinitionForSettings,
+  mergeToolSettings,
+  normalizeToolParameters,
+  ToolParameterError,
+} from './settings-policy';
 
 const registry = new Map<string, RegisteredTool>();
 
@@ -22,9 +35,23 @@ export function getAllTools(): RegisteredTool[] {
   return Array.from(registry.values());
 }
 
-/** Returns only the JSON Schema definitions (used when building provider requests). */
-export function getAllToolDefinitions(): ToolDefinition[] {
-  return getAllTools().map((t) => t.definition);
+/** Returns only enabled JSON Schema definitions for provider requests. */
+export function getAllToolDefinitions(
+  settingsByToolName: ReadonlyMap<string, EffectiveToolSettings> = new Map()
+): ToolDefinition[] {
+  return getToolDefinitionsForSettings(settingsByToolName);
+}
+
+export function getToolDescriptors(
+  settingsByToolName: ReadonlyMap<string, EffectiveToolSettings> = new Map()
+): ToolSettingsDescriptor[] {
+  return getToolDescriptorsForTools(getAllTools(), settingsByToolName);
+}
+
+export function getToolDefinitionsForSettings(
+  settingsByToolName: ReadonlyMap<string, EffectiveToolSettings> = new Map()
+): ToolDefinition[] {
+  return getToolDefinitionsForTools(getAllTools(), settingsByToolName);
 }
 
 /**
@@ -34,13 +61,21 @@ export function getAllToolDefinitions(): ToolDefinition[] {
 export async function executeTool(
   name: string,
   args: Record<string, unknown>,
-  context: ToolContext
+  context: ToolContext,
+  settings?: EffectiveToolSettings
 ): Promise<unknown> {
   const tool = getTool(name);
   if (!tool) {
     throw new Error(`Unknown tool: "${name}"`);
   }
-  return tool.execute(args, context);
+  const effectiveSettings = getSafeEffectiveToolSettings(tool, settings);
+  if (!effectiveSettings.enabled) {
+    throw new Error(`Tool "${name}" is disabled for this user.`);
+  }
+  return tool.execute(args, {
+    ...context,
+    parameters: { ...effectiveSettings.parameters, ...context.parameters },
+  });
 }
 
 /** Removes all registrations — for test isolation only. */

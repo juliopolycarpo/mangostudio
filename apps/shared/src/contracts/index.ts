@@ -52,6 +52,16 @@ export type {
   ReasoningPolicy,
 } from '../provider-settings/contracts';
 
+// Tool settings
+export type {
+  ToolParameterDescriptor,
+  ToolParameterOption,
+  ToolParameterType,
+  ToolSettingsCategory,
+  ToolSettingsDescriptor,
+  ToolSettingsListResponse,
+} from '../tool-settings/contracts';
+
 // Auth
 export type { SignUpBody, SignInBody } from '../auth/schemas';
 
