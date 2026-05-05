@@ -12,6 +12,7 @@ import {
 } from './settings-policy';
 export {
   getDefaultToolSettings,
+  getSafeEffectiveToolSettings,
   getToolDefinitionForSettings,
   mergeToolSettings,
   normalizeToolParameters,

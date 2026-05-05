@@ -36,6 +36,7 @@ export interface ToolSettingsMetadata {
 /** A fully registered tool: its schema definition + its executor. */
 export interface RegisteredTool {
   definition: ToolDefinition;
+  buildDefinition?: (settings: EffectiveToolSettings) => ToolDefinition;
   settings: ToolSettingsMetadata;
   execute: ToolExecutor;
 }

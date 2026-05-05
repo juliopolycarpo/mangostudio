@@ -7,3 +7,4 @@ export * from './registry';
 
 // Register all builtins on import
 import './builtin/get-current-datetime';
+import './builtin/generate-image';
