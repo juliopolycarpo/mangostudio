@@ -34,12 +34,19 @@ describe('settings tool settings routes', () => {
     restoreAuth = restore;
 
     const response = await app.handle(new Request('http://localhost/settings/tools'));
-    const payload = await response.json();
+    const payload = (await response.json()) as ToolSettingsListResponse;
+    const toolNames = payload.tools.map((tool) => tool.name);
 
     expect(response.status).toBe(200);
     expect(Value.Check(ToolSettingsListResponseSchema, payload)).toBe(true);
-    expect(payload).toMatchObject({
-      tools: [expect.objectContaining({ name: 'get_current_datetime', enabled: true })],
+    expect(toolNames).toContain('get_current_datetime');
+    expect(toolNames).toContain('generate_image');
+    expect(payload.tools.find((tool) => tool.name === 'get_current_datetime')).toMatchObject({
+      enabled: true,
+    });
+    expect(payload.tools.find((tool) => tool.name === 'generate_image')).toMatchObject({
+      enabled: true,
+      category: 'image',
     });
   });
 

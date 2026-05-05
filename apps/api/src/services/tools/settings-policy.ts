@@ -47,7 +47,7 @@ export function getToolDefinitionForSettings(
   tool: RegisteredTool,
   settings: EffectiveToolSettings
 ): ToolDefinition | null {
-  return settings.enabled ? tool.definition : null;
+  return settings.enabled ? (tool.buildDefinition?.(settings) ?? tool.definition) : null;
 }
 
 export function getToolDefinitionsForTools(

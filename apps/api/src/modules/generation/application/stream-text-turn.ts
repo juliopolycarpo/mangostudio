@@ -1,6 +1,7 @@
 import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';
 import type {
+  GeneratedImagePart,
   MessagePart,
   ProviderType,
   ReasoningEffort,
@@ -18,13 +19,27 @@ import { getProviderForModel } from '../../../services/providers/registry';
 import { mergeProviderRuntimeSettings } from '../../../services/providers/core/provider-settings-policy';
 import { getProviderSettings } from '../../provider-settings/infrastructure/provider-settings-repository';
 import { listSavedToolSettings } from '../../tool-settings/infrastructure/tool-settings-repository';
-import { getAllToolDefinitions, executeTool } from '../../../services/tools';
+import {
+  getAllToolDefinitions,
+  executeTool,
+  getTool,
+  getSafeEffectiveToolSettings,
+} from '../../../services/tools';
+import type { EffectiveToolSettings } from '../../../services/tools/types';
+import {
+  GENERATE_IMAGE_TOOL_NAME,
+  createGenerateImageToolPlan,
+  generateImagesForToolPlan,
+  summarizeGenerateImageToolResult,
+  type GenerateImageToolOutcome,
+} from '../../../services/tools/builtin/generate-image';
 import { generateId } from '../../../utils/id';
 import {
   persistUserMessage,
   persistAiResponse,
   persistErrorResponse,
   updateChatAfterTurn,
+  type PersistedGeneratedImageInput,
 } from '../infrastructure/conversation-persistence';
 import {
   computeSystemPromptHash,
@@ -79,6 +94,25 @@ export type StreamEvent =
   | { type: 'tool_call_started'; callId: string; name: string }
   | { type: 'tool_call_completed'; callId: string; name: string; arguments: string }
   | { type: 'tool_result'; callId: string; name: string; result: unknown; isError: boolean }
+  | { type: 'image_generation_started'; imageId: string; toolCallId: string; prompt: string }
+  | {
+      type: 'image_generation_completed';
+      imageId: string;
+      toolCallId: string;
+      prompt: string;
+      imageUrl: string;
+      modelName?: string;
+      generationTime?: string;
+    }
+  | {
+      type: 'image_generation_failed';
+      imageId: string;
+      toolCallId: string;
+      prompt: string;
+      error: string;
+      modelName?: string;
+      generationTime?: string;
+    }
   | { type: 'fallback_notice'; from: string; to: string; reason: string }
   | { type: 'system_event'; event: string; detail: string }
   | {
@@ -140,6 +174,7 @@ export async function* streamTextTurn(
   const reasoningEffort = runtimeSettings.reasoningEffort ?? 'medium';
 
   const allParts: MessagePart[] = [];
+  const generatedImageArtifacts: PersistedGeneratedImageInput[] = [];
   let fullText = '';
   const executionState: AgentTurnExecutionState = {
     durableProviderState: null,
@@ -441,45 +476,187 @@ export async function* streamTextTurn(
         if (pendingCalls.size === 0) break;
 
         const nextToolResults: NonNullable<AgentTurnRequest['toolResults']> = [];
+        const pendingCallEntries = Array.from(pendingCalls.entries());
+        const hasImageGenerationCall = pendingCallEntries.some(
+          ([, call]) => call.name === GENERATE_IMAGE_TOOL_NAME
+        );
 
-        const toolExecutions = await Promise.all(
-          Array.from(pendingCalls.entries()).map(async ([callId, { name, argsStr }]) => {
-            let args: Record<string, unknown> = {};
-            try {
-              args = JSON.parse(argsStr) as Record<string, unknown>;
-            } catch {
-              // malformed args — use empty object
+        if (!hasImageGenerationCall) {
+          const toolExecutions = await Promise.all(
+            pendingCallEntries.map(([callId, call]) =>
+              executeStandardToolCall(callId, call.name, call.argsStr, {
+                userId,
+                chatId,
+                settingsByToolName: toolSettings,
+              })
+            )
+          );
+
+          for (const execution of toolExecutions) {
+            allParts.push({
+              type: 'tool_call',
+              toolCallId: execution.callId,
+              name: execution.name,
+              args: execution.args,
+            });
+            allParts.push({
+              type: 'tool_result',
+              toolCallId: execution.callId,
+              content: execution.resultStr,
+              isError: execution.isError,
+            });
+            yield {
+              type: 'tool_result',
+              callId: execution.callId,
+              name: execution.name,
+              result: execution.result,
+              isError: execution.isError,
+            };
+            nextToolResults.push({
+              callId: execution.callId,
+              name: execution.name,
+              result: execution.resultStr,
+              isError: execution.isError,
+            });
+          }
+        } else {
+          for (const [callId, { name, argsStr }] of pendingCallEntries) {
+            if (name !== GENERATE_IMAGE_TOOL_NAME) {
+              const execution = await executeStandardToolCall(callId, name, argsStr, {
+                userId,
+                chatId,
+                settingsByToolName: toolSettings,
+              });
+              allParts.push({
+                type: 'tool_call',
+                toolCallId: execution.callId,
+                name: execution.name,
+                args: execution.args,
+              });
+              allParts.push({
+                type: 'tool_result',
+                toolCallId: execution.callId,
+                content: execution.resultStr,
+                isError: execution.isError,
+              });
+              yield {
+                type: 'tool_result',
+                callId: execution.callId,
+                name: execution.name,
+                result: execution.result,
+                isError: execution.isError,
+              };
+              nextToolResults.push({
+                callId: execution.callId,
+                name: execution.name,
+                result: execution.resultStr,
+                isError: execution.isError,
+              });
+              continue;
             }
 
+            const args = parseToolArgs(argsStr);
             let result: unknown;
             let isError = false;
 
+            allParts.push({ type: 'tool_call', toolCallId: callId, name, args });
+
             try {
-              const timeoutPromise = new Promise<never>((_, reject) =>
-                setTimeout(
-                  () => reject(new Error(`Tool "${name}" timed out after ${TOOL_TIMEOUT_MS}ms`)),
-                  TOOL_TIMEOUT_MS
-                )
+              const imageTool = getTool(name);
+              if (!imageTool) throw new Error(`Unknown tool: "${name}"`);
+              const effectiveSettings = getSafeEffectiveToolSettings(
+                imageTool,
+                toolSettings.get(name)
               );
-              result = await Promise.race([
-                executeTool(name, args, { userId, chatId, parameters: {} }, toolSettings.get(name)),
-                timeoutPromise,
-              ]);
-            } catch (err) {
-              result = { error: err instanceof Error ? err.message : 'Tool execution failed' };
+              if (!effectiveSettings.enabled) {
+                throw new Error(`Tool "${name}" is disabled for this user.`);
+              }
+
+              const plan = createGenerateImageToolPlan(args, {
+                toolCallId: callId,
+                parameters: effectiveSettings.parameters,
+              });
+              const imagePartsById = new Map<string, GeneratedImagePart>();
+              for (const imageId of plan.imageIds) {
+                const part: GeneratedImagePart = {
+                  type: 'generated_image',
+                  imageId,
+                  toolCallId: callId,
+                  status: 'generating',
+                  prompt: plan.prompt,
+                };
+                imagePartsById.set(imageId, part);
+                allParts.push(part);
+                yield {
+                  type: 'image_generation_started',
+                  imageId,
+                  toolCallId: callId,
+                  prompt: plan.prompt,
+                };
+              }
+
+              const outcomes: GenerateImageToolOutcome[] = [];
+              for await (const outcome of generateImagesForToolPlan(plan, { userId, signal })) {
+                outcomes.push(outcome);
+                const part = imagePartsById.get(outcome.imageId);
+                if (outcome.type === 'completed') {
+                  if (part) {
+                    part.status = 'completed';
+                    part.imageUrl = outcome.imageUrl;
+                    part.modelName = outcome.modelName;
+                    part.generationTime = outcome.generationTime;
+                  }
+                  generatedImageArtifacts.push({
+                    id: outcome.imageId,
+                    prompt: outcome.prompt,
+                    imageUrl: outcome.imageUrl,
+                    createdAt: outcome.createdAt,
+                    toolCallId: callId,
+                    modelName: outcome.modelName,
+                    generationTime: outcome.generationTime,
+                    metadata: { quality: plan.quality },
+                  });
+                  yield {
+                    type: 'image_generation_completed',
+                    imageId: outcome.imageId,
+                    toolCallId: callId,
+                    prompt: outcome.prompt,
+                    imageUrl: outcome.imageUrl,
+                    modelName: outcome.modelName,
+                    generationTime: outcome.generationTime,
+                  };
+                } else {
+                  if (part) {
+                    part.status = 'error';
+                    part.error = outcome.error;
+                    part.modelName = outcome.modelName;
+                    part.generationTime = outcome.generationTime;
+                  }
+                  yield {
+                    type: 'image_generation_failed',
+                    imageId: outcome.imageId,
+                    toolCallId: callId,
+                    prompt: outcome.prompt,
+                    error: outcome.error,
+                    modelName: outcome.modelName,
+                    generationTime: outcome.generationTime,
+                  };
+                }
+              }
+
+              const imageResult = summarizeGenerateImageToolResult(outcomes);
+              result = imageResult;
+              isError = imageResult.images.length === 0 && (imageResult.errors?.length ?? 0) > 0;
+            } catch (error) {
+              result = { error: errorToToolMessage(error) };
               isError = true;
             }
 
-            const resultStr = JSON.stringify(result);
-            return { callId, name, args, result, resultStr, isError };
-          })
-        );
-
-        for (const { callId, name, args, result, resultStr, isError } of toolExecutions) {
-          allParts.push({ type: 'tool_call', toolCallId: callId, name, args });
-          allParts.push({ type: 'tool_result', toolCallId: callId, content: resultStr, isError });
-          yield { type: 'tool_result', callId, name, result, isError };
-          nextToolResults.push({ callId, name, result: resultStr, isError });
+            const resultStr = stringifyToolResult(result);
+            allParts.push({ type: 'tool_result', toolCallId: callId, content: resultStr, isError });
+            yield { type: 'tool_result', callId, name, result, isError };
+            nextToolResults.push({ callId, name, result: resultStr, isError });
+          }
         }
 
         pendingToolResults = nextToolResults;
@@ -516,12 +693,14 @@ export async function* streamTextTurn(
           await persistErrorResponse(
             {
               id: aiMsgId,
+              userId,
               chatId,
               text: fullText || TOOL_LOOP_EXHAUSTED_MESSAGE,
               parts: errorParts,
               timestamp: Date.now(),
               generationTime,
               modelName: modelId,
+              generatedImages: generatedImageArtifacts,
             },
             db
           );
@@ -646,6 +825,7 @@ export async function* streamTextTurn(
       await persistAiResponse(
         {
           id: aiMsgId,
+          userId,
           chatId,
           text: fullText,
           parts: finalParts.length > 0 ? finalParts : null,
@@ -653,6 +833,7 @@ export async function* streamTextTurn(
           timestamp: aiTimestamp,
           generationTime,
           modelName: modelId,
+          generatedImages: generatedImageArtifacts,
         },
         db
       );
@@ -690,12 +871,14 @@ export async function* streamTextTurn(
       await persistErrorResponse(
         {
           id: aiMsgId,
+          userId,
           chatId,
           text: fullText || message,
           parts: errorParts,
           timestamp: Date.now(),
           generationTime,
           modelName: modelId,
+          generatedImages: generatedImageArtifacts,
         },
         db
       );
@@ -705,6 +888,81 @@ export async function* streamTextTurn(
 
     yield { type: 'error', error: message };
   }
+}
+
+interface StandardToolExecution {
+  callId: string;
+  name: string;
+  args: Record<string, unknown>;
+  result: unknown;
+  resultStr: string;
+  isError: boolean;
+}
+
+async function executeStandardToolCall(
+  callId: string,
+  name: string,
+  argsStr: string,
+  context: {
+    userId: string;
+    chatId: string;
+    settingsByToolName: ReadonlyMap<string, EffectiveToolSettings>;
+  }
+): Promise<StandardToolExecution> {
+  const args = parseToolArgs(argsStr);
+  let result: unknown;
+  let isError = false;
+
+  try {
+    result = await withToolTimeout(
+      executeTool(
+        name,
+        args,
+        { userId: context.userId, chatId: context.chatId, parameters: {} },
+        context.settingsByToolName.get(name)
+      ),
+      name
+    );
+  } catch (error) {
+    result = { error: errorToToolMessage(error) };
+    isError = true;
+  }
+
+  return {
+    callId,
+    name,
+    args,
+    result,
+    resultStr: stringifyToolResult(result),
+    isError,
+  };
+}
+
+function parseToolArgs(argsStr: string): Record<string, unknown> {
+  return safeJsonParse(argsStr) ?? {};
+}
+
+function withToolTimeout<T>(promise: Promise<T>, name: string): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(
+      () => reject(new Error(`Tool "${name}" timed out after ${TOOL_TIMEOUT_MS}ms`)),
+      TOOL_TIMEOUT_MS
+    );
+  });
+
+  return Promise.race([promise, timeoutPromise]).finally(() => {
+    if (timeoutId) clearTimeout(timeoutId);
+  });
+}
+
+function stringifyToolResult(result: unknown): string {
+  const serialized = JSON.stringify(result);
+  return typeof serialized === 'string' ? serialized : 'null';
+}
+
+function errorToToolMessage(error: unknown): string {
+  return error instanceof Error ? error.message : 'Tool execution failed';
 }
 
 function getRequestRuntimeSettings(

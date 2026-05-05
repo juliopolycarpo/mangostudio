@@ -9,11 +9,14 @@ import {
   executeTool,
   clearRegistry,
 } from '../../../src/services/tools/registry';
-import type { ToolContext, ToolExecutor } from '../../../src/services/tools/types';
+import type { RegisteredTool, ToolContext, ToolExecutor } from '../../../src/services/tools/types';
 
 const ctx: ToolContext = { userId: 'u1', chatId: 'c1', parameters: {} };
 
-function makeTool(name: string, execute: ToolExecutor = () => Promise.resolve(null)) {
+function makeTool(
+  name: string,
+  execute: ToolExecutor = () => Promise.resolve(null)
+): RegisteredTool {
   return {
     definition: { name, description: 'desc', parameters: { type: 'object' } },
     settings: {
@@ -95,6 +98,43 @@ describe('getAllTools / getAllToolDefinitions', () => {
     );
 
     expect(defs.map((definition) => definition.name)).toEqual(['enabled_tool']);
+  });
+
+  it('builds provider definitions from effective settings', () => {
+    const tool = makeTool('dynamic_schema_tool');
+
+    registerTool({
+      ...tool,
+      settings: {
+        ...tool.settings,
+        defaultParameters: { maxItems: 4 },
+        parameterDescriptors: [
+          {
+            name: 'maxItems',
+            label: 'Max items',
+            type: 'number',
+            required: true,
+            defaultValue: 4,
+            min: 1,
+            max: 8,
+          },
+        ],
+      },
+      buildDefinition: (settings) => ({
+        ...tool.definition,
+        parameters: {
+          ...tool.definition.parameters,
+          maxItems: settings.parameters.maxItems,
+        },
+      }),
+    });
+
+    const defs = getToolDefinitionsForSettings(
+      new Map([['dynamic_schema_tool', { enabled: true, parameters: { maxItems: 2 } }]])
+    );
+
+    expect(defs).toHaveLength(1);
+    expect(defs[0].parameters).toMatchObject({ maxItems: 2 });
   });
 });
 

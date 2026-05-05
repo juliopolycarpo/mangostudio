@@ -56,6 +56,7 @@ export const messages = {
       regenerate: 'Regenerar',
       imageUnavailable: 'Imagem não disponível',
       imageUnavailableHint: 'A imagem foi excluída, movida ou ainda não está acessível.',
+      generatedImageAlt: 'Imagem gerada',
       styleParams: 'Parâmetros de Estilo',
       thoughtFor: 'Pensou por {time}',
       respondedIn: 'Respondeu em {time}',
