@@ -47,6 +47,39 @@ export interface SSEContinuationTransitionEvent {
   done: false;
 }
 
+/** SSE event: an image placeholder was created for a tool-generated image. */
+export interface SSEImageGenerationStartedEvent {
+  type: 'image_generation_started';
+  imageId: string;
+  toolCallId: string;
+  prompt: string;
+  done: false;
+}
+
+/** SSE event: a tool-generated image completed and is available by URL. */
+export interface SSEImageGenerationCompletedEvent {
+  type: 'image_generation_completed';
+  imageId: string;
+  toolCallId: string;
+  prompt: string;
+  imageUrl: string;
+  modelName?: string;
+  generationTime?: string;
+  done: false;
+}
+
+/** SSE event: a tool-generated image failed while other turn work may continue. */
+export interface SSEImageGenerationFailedEvent {
+  type: 'image_generation_failed';
+  imageId: string;
+  toolCallId: string;
+  prompt: string;
+  error: string;
+  modelName?: string;
+  generationTime?: string;
+  done: false;
+}
+
 /** SSE error event emitted by streaming endpoints when generation fails. */
 export interface SSEErrorEvent {
   type: 'error';
@@ -65,6 +98,9 @@ export type StreamChunk =
   | { type: 'tool_call_started'; callId: string; name: string; done: false }
   | { type: 'tool_call_completed'; callId: string; name: string; arguments: string; done: false }
   | { type: 'tool_result'; callId: string; result: unknown; isError?: boolean; done: false }
+  | SSEImageGenerationStartedEvent
+  | SSEImageGenerationCompletedEvent
+  | SSEImageGenerationFailedEvent
   | {
       type: 'context_info';
       estimatedInputTokens: number;

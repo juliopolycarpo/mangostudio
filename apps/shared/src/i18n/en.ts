@@ -58,6 +58,7 @@ export const messages: Messages = {
       regenerate: 'Regenerate',
       imageUnavailable: 'Image no longer available',
       imageUnavailableHint: 'The image was deleted, moved, or is not accessible yet.',
+      generatedImageAlt: 'Generated image',
       styleParams: 'Style Parameters',
       thoughtFor: 'Thought for {time}',
       respondedIn: 'Responded in {time}',

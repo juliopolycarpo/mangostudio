@@ -1,7 +1,12 @@
 /* global console */
 import { useCallback, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import type { Message, MessagePart, ReasoningEffort } from '@mangostudio/shared';
+import type {
+  GeneratedImagePart,
+  Message,
+  MessagePart,
+  ReasoningEffort,
+} from '@mangostudio/shared';
 import type { PromptSettings } from '@mangostudio/shared/prompt-rules';
 import type { ContextCompactionResponse, ContextSettings } from '@mangostudio/shared/chat';
 import { messageKeys } from '@/features/chat/queries';
@@ -28,6 +33,24 @@ function resolveSummaryModelId(settings: ContextSettings, currentModel: string):
   return settings.preferredSummaryModel === 'current_model'
     ? currentModel
     : settings.preferredSummaryModel;
+}
+
+function upsertGeneratedImagePart(
+  parts: MessagePart[],
+  generatedImagePart: GeneratedImagePart
+): MessagePart[] {
+  const existingIndex = parts.findIndex(
+    (part) =>
+      part.type === 'generated_image' &&
+      part.imageId === generatedImagePart.imageId &&
+      part.toolCallId === generatedImagePart.toolCallId
+  );
+
+  if (existingIndex === -1) {
+    return [...parts, generatedImagePart];
+  }
+
+  return parts.map((part, index) => (index === existingIndex ? generatedImagePart : part));
 }
 
 /** Handles text generation: creates messages, drives SSE stream, updates optimistic UI. */
@@ -223,6 +246,52 @@ export function useTextGeneration({
                   isError: chunk.isError,
                 };
                 accumulatedParts = [...accumulatedParts, resultPart];
+                updateOptimisticMessage(activeChatId, optimisticAiMsgId, {
+                  parts: accumulatedParts,
+                });
+                break;
+              }
+              case 'image_generation_started': {
+                currentThinkingIdx = -1;
+                accumulatedParts = upsertGeneratedImagePart(accumulatedParts, {
+                  type: 'generated_image',
+                  imageId: chunk.imageId,
+                  toolCallId: chunk.toolCallId,
+                  status: 'generating',
+                  prompt: chunk.prompt,
+                });
+                updateOptimisticMessage(activeChatId, optimisticAiMsgId, {
+                  parts: accumulatedParts,
+                });
+                break;
+              }
+              case 'image_generation_completed': {
+                accumulatedParts = upsertGeneratedImagePart(accumulatedParts, {
+                  type: 'generated_image',
+                  imageId: chunk.imageId,
+                  toolCallId: chunk.toolCallId,
+                  status: 'completed',
+                  prompt: chunk.prompt,
+                  imageUrl: chunk.imageUrl,
+                  modelName: chunk.modelName,
+                  generationTime: chunk.generationTime,
+                });
+                updateOptimisticMessage(activeChatId, optimisticAiMsgId, {
+                  parts: accumulatedParts,
+                });
+                break;
+              }
+              case 'image_generation_failed': {
+                accumulatedParts = upsertGeneratedImagePart(accumulatedParts, {
+                  type: 'generated_image',
+                  imageId: chunk.imageId,
+                  toolCallId: chunk.toolCallId,
+                  status: 'error',
+                  prompt: chunk.prompt,
+                  error: chunk.error,
+                  modelName: chunk.modelName,
+                  generationTime: chunk.generationTime,
+                });
                 updateOptimisticMessage(activeChatId, optimisticAiMsgId, {
                   parts: accumulatedParts,
                 });

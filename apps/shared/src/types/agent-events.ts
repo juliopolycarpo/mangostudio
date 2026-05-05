@@ -32,12 +32,27 @@ export type AgentEvent =
       reasonCode: ContinuationReasonCode;
     };
 
+export type GeneratedImageStatus = 'generating' | 'completed' | 'error';
+
+export interface GeneratedImagePart {
+  type: 'generated_image';
+  imageId: string;
+  toolCallId: string;
+  status: GeneratedImageStatus;
+  prompt: string;
+  imageUrl?: string;
+  error?: string;
+  modelName?: string;
+  generationTime?: string;
+}
+
 /** Discriminated union of all content block types in an assistant message. */
 export type MessagePart =
   | { type: 'text'; text: string }
   | { type: 'thinking'; text: string; redacted?: boolean }
   | { type: 'tool_call'; toolCallId: string; name: string; args: Record<string, unknown> }
   | { type: 'tool_result'; toolCallId: string; content: string; isError?: boolean }
+  | GeneratedImagePart
   | { type: 'error'; text: string }
   | { type: 'system_event'; event: string; detail?: string }
   | {

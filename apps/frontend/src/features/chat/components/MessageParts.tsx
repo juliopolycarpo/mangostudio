@@ -52,6 +52,43 @@ export function MessageParts({ parts, messageId, isStreaming }: MessagePartsProp
           }
           case 'tool_result':
             return null;
+          case 'generated_image': {
+            if (part.status === 'completed' && part.imageUrl) {
+              return (
+                <div
+                  key={part.imageId}
+                  className="bg-surface-container-lowest rounded-2xl border border-outline-variant/10 overflow-hidden shadow-sm max-w-md"
+                >
+                  <img
+                    src={part.imageUrl}
+                    alt={t.chat.feed.generatedImageAlt}
+                    className="w-full h-auto object-cover"
+                    loading="lazy"
+                  />
+                </div>
+              );
+            }
+
+            if (part.status === 'error') {
+              return (
+                <div
+                  key={part.imageId}
+                  className="bg-error/10 border border-error/20 p-4 rounded-xl text-error text-sm font-body max-w-md"
+                >
+                  {part.error ?? t.chat.genericFailure}
+                </div>
+              );
+            }
+
+            return (
+              <div
+                key={part.imageId}
+                className="bg-surface-container-lowest border border-outline-variant/10 p-4 rounded-xl text-on-surface-variant text-sm font-body max-w-md animate-pulse"
+              >
+                {t.chat.feed.generatingImage}
+              </div>
+            );
+          }
           case 'text':
             return (
               <div

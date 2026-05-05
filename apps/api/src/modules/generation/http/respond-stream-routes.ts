@@ -54,6 +54,36 @@ function toSsePayload(event: StreamEvent): object {
         isError: event.isError,
         done: false,
       };
+    case 'image_generation_started':
+      return {
+        type: 'image_generation_started',
+        imageId: event.imageId,
+        toolCallId: event.toolCallId,
+        prompt: event.prompt,
+        done: false,
+      };
+    case 'image_generation_completed':
+      return {
+        type: 'image_generation_completed',
+        imageId: event.imageId,
+        toolCallId: event.toolCallId,
+        prompt: event.prompt,
+        imageUrl: event.imageUrl,
+        modelName: event.modelName,
+        generationTime: event.generationTime,
+        done: false,
+      };
+    case 'image_generation_failed':
+      return {
+        type: 'image_generation_failed',
+        imageId: event.imageId,
+        toolCallId: event.toolCallId,
+        prompt: event.prompt,
+        error: event.error,
+        modelName: event.modelName,
+        generationTime: event.generationTime,
+        done: false,
+      };
     case 'fallback_notice':
       return {
         type: 'fallback_notice',
