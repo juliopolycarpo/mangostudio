@@ -36,6 +36,20 @@ export interface MessagesTable {
   providerState: string | null; // opaque provider continuity JSON
 }
 
+export interface GeneratedImagesTable {
+  id: string;
+  userId: string;
+  chatId: string;
+  messageId: string;
+  toolCallId: string | null;
+  prompt: string;
+  imageUrl: string;
+  modelName: string | null;
+  generationTime: string | null;
+  createdAt: number;
+  metadataJson: string | null;
+}
+
 export interface SecretMetadataTable {
   id: string;
   name: string;
@@ -124,6 +138,7 @@ export interface UserToolSettingsTable {
 export interface Database {
   chats: ChatsTable;
   messages: MessagesTable;
+  generated_images: GeneratedImagesTable;
   secret_metadata: SecretMetadataTable;
   user: UserTable;
   session: SessionTable;
@@ -140,6 +155,10 @@ export type ChatUpdate = Updateable<ChatsTable>;
 export type MessageSelect = Selectable<MessagesTable>;
 export type MessageInsert = Insertable<MessagesTable>;
 export type MessageUpdate = Updateable<MessagesTable>;
+
+export type GeneratedImageSelect = Selectable<GeneratedImagesTable>;
+export type GeneratedImageInsert = Insertable<GeneratedImagesTable>;
+export type GeneratedImageUpdate = Updateable<GeneratedImagesTable>;
 
 export type SecretMetadataSelect = Selectable<SecretMetadataTable>;
 export type SecretMetadataInsert = Insertable<SecretMetadataTable>;

@@ -1,4 +1,4 @@
-import type { InteractionMode, MessagePart } from '../types/index';
+import type { GeneratedImageArtifact, InteractionMode, MessagePart } from '../types/index';
 
 /** A persisted message returned by the generate or respond endpoint. */
 export interface GeneratedMessage {
@@ -16,6 +16,7 @@ export interface GeneratedMessage {
   interactionMode?: InteractionMode;
   parts?: MessagePart[];
   providerState?: string;
+  generatedImages?: GeneratedImageArtifact[];
 }
 
 /** Response for POST /api/generate — returns both persisted messages. */

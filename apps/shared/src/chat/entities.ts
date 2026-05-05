@@ -1,5 +1,6 @@
 import type { InteractionMode } from '../types/provider';
 import type { MessagePart } from '../types/agent-events';
+import type { GeneratedImageArtifact } from '../types/gallery';
 
 /** Represents a chat session. */
 export interface Chat {
@@ -30,4 +31,5 @@ export interface Message {
   modelName?: string;
   parts?: MessagePart[];
   providerState?: string;
+  generatedImages?: GeneratedImageArtifact[];
 }

@@ -1,5 +1,6 @@
 import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';
+import type { GeneratedImageArtifact } from '@mangostudio/shared';
 import type { PromptSettings } from '@mangostudio/shared/prompt-rules';
 import { assertChatOwnership } from '../../chats/domain/chat-ownership';
 import { resolveModel } from './resolve-model';
@@ -35,6 +36,7 @@ export interface GenerateImageResult {
     role: 'ai';
     text: string;
     imageUrl: string;
+    generatedImages: GeneratedImageArtifact[];
     timestamp: number;
     isGenerating: boolean;
     generationTime: string;
@@ -100,17 +102,34 @@ export async function generateImage(
   const generationTime = `${((Date.now() - startTime) / 1000).toFixed(1)}s`;
   const styleParams = [input.imageQuality ?? '1K'];
   const aiTimestamp = Date.now();
+  const generatedImages: GeneratedImageArtifact[] = [
+    {
+      id: generateId(),
+      chatId: input.chatId,
+      messageId: aiMsgId,
+      prompt: input.prompt,
+      imageUrl,
+      createdAt: aiTimestamp,
+      modelName: modelId,
+      generationTime,
+    },
+  ];
 
   await persistImageTurn(
     {
+      userId: input.userId,
       userMsgId,
       aiMsgId,
       chatId: input.chatId,
       prompt: input.prompt,
       referenceImageUrl: input.referenceImageUrl,
-      imageUrl,
-      generationTime,
-      modelName: modelId,
+      generatedImages: generatedImages.map((generatedImage) => ({
+        id: generatedImage.id,
+        imageUrl: generatedImage.imageUrl,
+        generationTime: generatedImage.generationTime ?? generationTime,
+        modelName: generatedImage.modelName ?? modelId,
+        createdAt: generatedImage.createdAt,
+      })),
       styleParams,
       userTimestamp: now,
       aiTimestamp,
@@ -134,6 +153,7 @@ export async function generateImage(
       role: 'ai',
       text: '',
       imageUrl,
+      generatedImages,
       timestamp: aiTimestamp,
       isGenerating: false,
       generationTime,

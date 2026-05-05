@@ -37,3 +37,18 @@ export interface MessageRow {
   styleParams: string | null;
   interactionMode: string;
 }
+
+/** Raw row returned by SELECT * FROM generated_images. */
+export interface GeneratedImageRow {
+  id: string;
+  userId: string;
+  chatId: string;
+  messageId: string;
+  toolCallId: string | null;
+  prompt: string;
+  imageUrl: string;
+  modelName: string | null;
+  generationTime: string | null;
+  createdAt: number;
+  metadataJson: string | null;
+}

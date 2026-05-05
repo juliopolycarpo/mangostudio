@@ -11,7 +11,7 @@ export type {
   SecretMetadataRow,
 } from './provider';
 export type { AgentEvent, MessagePart, ContinuationReasonCode } from './agent-events';
-export type { GalleryItem } from './gallery';
+export type { GalleryItem, GeneratedImageArtifact } from './gallery';
 
 // Chat domain types — source of truth is chat/entities.ts
 export type { Chat, Message } from '../chat/entities';

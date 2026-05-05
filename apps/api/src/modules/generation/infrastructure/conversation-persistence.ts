@@ -2,6 +2,7 @@ import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';
 import type { MessagePart } from '@mangostudio/shared/types';
 import { insertMessage } from '../../messages/infrastructure/message-repository';
+import { insertGeneratedImageArtifact } from '../../generated-images/infrastructure/generated-image-repository';
 
 export interface PersistUserMessageInput {
   id: string;
@@ -106,14 +107,21 @@ export async function updateChatAfterTurn(
 }
 
 export interface PersistImageMessageInput {
+  userId: string;
   userMsgId: string;
   aiMsgId: string;
   chatId: string;
   prompt: string;
   referenceImageUrl?: string | null;
-  imageUrl: string;
-  generationTime: string;
-  modelName: string;
+  generatedImages: Array<{
+    id: string;
+    imageUrl: string;
+    generationTime: string;
+    modelName: string;
+    createdAt: number;
+    toolCallId?: string | null;
+    metadata?: Record<string, unknown> | null;
+  }>;
   styleParams?: string[];
   userTimestamp: number;
   aiTimestamp: number;
@@ -123,41 +131,62 @@ export async function persistImageTurn(
   input: PersistImageMessageInput,
   db: Kysely<Database>
 ): Promise<void> {
-  await insertMessage(
-    {
-      id: input.userMsgId,
-      chatId: input.chatId,
-      role: 'user',
-      text: input.prompt,
-      referenceImage: input.referenceImageUrl ?? null,
-      timestamp: input.userTimestamp,
-      isGenerating: false,
-      interactionMode: 'image',
-    },
-    db
-  );
+  await db.transaction().execute(async (trx) => {
+    await insertMessage(
+      {
+        id: input.userMsgId,
+        chatId: input.chatId,
+        role: 'user',
+        text: input.prompt,
+        referenceImage: input.referenceImageUrl ?? null,
+        timestamp: input.userTimestamp,
+        isGenerating: false,
+        interactionMode: 'image',
+      },
+      trx
+    );
 
-  await insertMessage(
-    {
-      id: input.aiMsgId,
-      chatId: input.chatId,
-      role: 'ai',
-      text: '',
-      imageUrl: input.imageUrl,
-      timestamp: input.aiTimestamp,
-      isGenerating: false,
-      generationTime: input.generationTime,
-      modelName: input.modelName,
-      styleParams: input.styleParams,
-      interactionMode: 'image',
-    },
-    db
-  );
+    await insertMessage(
+      {
+        id: input.aiMsgId,
+        chatId: input.chatId,
+        role: 'ai',
+        text: '',
+        imageUrl: input.generatedImages[0]?.imageUrl ?? null,
+        timestamp: input.aiTimestamp,
+        isGenerating: false,
+        generationTime: input.generatedImages[0]?.generationTime ?? null,
+        modelName: input.generatedImages[0]?.modelName ?? null,
+        styleParams: input.styleParams,
+        interactionMode: 'image',
+      },
+      trx
+    );
 
-  await db
-    .updateTable('chats')
-    .set({ updatedAt: input.aiTimestamp, lastUsedMode: 'image' })
-    .where('id', '=', input.chatId)
-    .where('updatedAt', '<=', input.aiTimestamp)
-    .execute();
+    for (const generatedImage of input.generatedImages) {
+      await insertGeneratedImageArtifact(
+        {
+          id: generatedImage.id,
+          userId: input.userId,
+          chatId: input.chatId,
+          messageId: input.aiMsgId,
+          prompt: input.prompt,
+          imageUrl: generatedImage.imageUrl,
+          createdAt: generatedImage.createdAt,
+          toolCallId: generatedImage.toolCallId ?? null,
+          modelName: generatedImage.modelName,
+          generationTime: generatedImage.generationTime,
+          metadata: generatedImage.metadata ?? null,
+        },
+        trx
+      );
+    }
+
+    await trx
+      .updateTable('chats')
+      .set({ updatedAt: input.aiTimestamp, lastUsedMode: 'image' })
+      .where('id', '=', input.chatId)
+      .where('updatedAt', '<=', input.aiTimestamp)
+      .execute();
+  });
 }
