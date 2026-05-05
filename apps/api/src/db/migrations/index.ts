@@ -13,6 +13,7 @@ import { chatProviderState } from './012_chat_provider_state';
 import { chatContextState } from './013_chat_context_state';
 import { userProviderSettings } from './014_user_provider_settings';
 import { userToolSettings } from './015_user_tool_settings';
+import { generatedImages } from './016_generated_images';
 
 export const allMigrations = {
   '001_initial_schema': initialSchema,
@@ -30,4 +31,5 @@ export const allMigrations = {
   '013_chat_context_state': chatContextState,
   '014_user_provider_settings': userProviderSettings,
   '015_user_tool_settings': userToolSettings,
+  '016_generated_images': generatedImages,
 };

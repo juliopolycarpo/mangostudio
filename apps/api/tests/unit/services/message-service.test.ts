@@ -2,6 +2,7 @@ import { describe, expect, it, beforeAll } from 'bun:test';
 import { getDb } from '../../../src/db/database';
 import {
   insertMessage,
+  listByChatId,
   loadHistory,
 } from '../../../src/modules/messages/infrastructure/message-repository';
 
@@ -89,5 +90,22 @@ describe('loadHistory', () => {
       expect(typeof turn.id).toBe('string');
       expect(turn.id.length).toBeGreaterThan(0);
     }
+  });
+
+  it('uses the last returned message as the next cursor when paginating chat messages', async () => {
+    const db = getDb();
+    const firstPage = await listByChatId(CHAT_ID, { limit: 2 }, db);
+
+    expect(firstPage.messages.map((message) => message.id)).toEqual(['ms-msg-1', 'ms-msg-2']);
+    expect(firstPage.nextCursor).toBe(String(firstPage.messages.at(-1)?.timestamp));
+
+    const secondPage = await listByChatId(
+      CHAT_ID,
+      { limit: 2, cursor: Number(firstPage.nextCursor) },
+      db
+    );
+
+    expect(secondPage.messages.map((message) => message.id)).toEqual(['ms-msg-3']);
+    expect(secondPage.nextCursor).toBeNull();
   });
 });

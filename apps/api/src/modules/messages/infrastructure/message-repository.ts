@@ -1,8 +1,13 @@
 import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';
-import type { InteractionMode } from '@mangostudio/shared/types';
-import type { MessagePart } from '@mangostudio/shared/types';
+import type {
+  GalleryItem,
+  GeneratedImageArtifact,
+  InteractionMode,
+  MessagePart,
+} from '@mangostudio/shared/types';
 import { boolToInt, serializeStyleParams, parseStyleParams } from '../../../db/serializers';
+import { listGeneratedImagesByMessageIds } from '../../generated-images/infrastructure/generated-image-repository';
 
 export interface CreateMessageData {
   id: string;
@@ -62,6 +67,7 @@ export interface MappedMessage {
   interactionMode: InteractionMode;
   parts: MessagePart[] | undefined;
   providerState: string | null;
+  generatedImages: GeneratedImageArtifact[] | undefined;
 }
 
 export interface SimpleTurn {
@@ -89,13 +95,6 @@ export interface ListHistoryOptions {
   limit?: number;
 }
 
-export interface GalleryItem {
-  id: string;
-  imageUrl: string;
-  prompt: string;
-  chatId: string;
-}
-
 export interface ListGalleryOptions {
   cursor?: number;
   limit?: number;
@@ -103,12 +102,16 @@ export interface ListGalleryOptions {
 
 const CONTEXT_BOUNDARY_EVENTS = new Set(['chat_compacted', 'summary_handoff']);
 
-export function mapMessage(row: MessageRow): MappedMessage {
+export function mapMessage(
+  row: MessageRow,
+  generatedImages?: GeneratedImageArtifact[]
+): MappedMessage {
   return {
     ...row,
     isGenerating: row.isGenerating === 1,
     styleParams: parseStyleParams(row.styleParams),
     parts: row.parts ? (JSON.parse(row.parts) as MessagePart[]) : undefined,
+    generatedImages,
   };
 }
 
@@ -200,11 +203,19 @@ export async function listByChatId(
 
   let nextCursor: string | null = null;
   if (rows.length > limit) {
-    const nextItem = rows.pop();
-    nextCursor = nextItem?.timestamp.toString() ?? null;
+    rows.pop();
+    nextCursor = rows.at(-1)?.timestamp.toString() ?? null;
   }
 
-  return { messages: rows.map(mapMessage), nextCursor };
+  const generatedImagesByMessageId = await listGeneratedImagesByMessageIds(
+    rows.map((row) => row.id),
+    db
+  );
+
+  return {
+    messages: rows.map((row) => mapMessage(row, generatedImagesByMessageId.get(row.id))),
+    nextCursor,
+  };
 }
 
 export async function loadHistory(
@@ -272,14 +283,14 @@ export async function verifyMessageOwnership(
   return !!msg && msg.userId === userId;
 }
 
-export async function listGalleryImages(
+export async function listLegacyGalleryImages(
   userId: string,
   opts: ListGalleryOptions,
   db: Kysely<Database>
-): Promise<{ items: GalleryItem[]; nextCursor: string | null }> {
+): Promise<GalleryItem[]> {
   const limit = opts.limit ?? 50;
 
-  let q = db
+  let query = db
     .selectFrom('messages as ai')
     .innerJoin('chats', 'ai.chatId', 'chats.id')
     .select([
@@ -287,6 +298,8 @@ export async function listGalleryImages(
       'ai.imageUrl',
       'ai.chatId',
       'ai.timestamp',
+      'ai.modelName',
+      'ai.generationTime',
       (eb) =>
         eb
           .selectFrom('messages as user_msg')
@@ -301,28 +314,35 @@ export async function listGalleryImages(
     .where('chats.userId', '=', userId)
     .where('ai.role', '=', 'ai')
     .where('ai.imageUrl', 'is not', null)
+    .where((eb) =>
+      eb.not(
+        eb.exists(
+          eb
+            .selectFrom('generated_images as artifact')
+            .select('artifact.id')
+            .whereRef('artifact.messageId', '=', 'ai.id')
+            .whereRef('artifact.imageUrl', '=', 'ai.imageUrl')
+        )
+      )
+    )
     .orderBy('ai.timestamp', 'desc');
 
   if (opts.cursor) {
-    q = q.where('ai.timestamp', '<', opts.cursor);
+    query = query.where('ai.timestamp', '<', opts.cursor);
   }
 
-  const rows = await q.limit(limit + 1).execute();
+  const rows = await query.limit(limit + 1).execute();
 
-  let nextCursor: string | null = null;
-  if (rows.length > limit) {
-    const nextItem = rows.pop();
-    nextCursor = nextItem?.timestamp.toString() ?? null;
-  }
-
-  const items = rows
+  return rows
     .filter((row): row is typeof row & { imageUrl: string } => row.imageUrl !== null)
     .map((row) => ({
       id: row.id,
+      messageId: row.id,
       imageUrl: row.imageUrl,
       prompt: row.prompt ?? 'Generated Image',
       chatId: row.chatId,
+      createdAt: row.timestamp,
+      modelName: row.modelName ?? undefined,
+      generationTime: row.generationTime ?? undefined,
     }));
-
-  return { items, nextCursor };
 }

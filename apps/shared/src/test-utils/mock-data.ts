@@ -1,4 +1,10 @@
-import type { Chat, Message, GalleryItem, SecretMetadataRow } from '../types';
+import type {
+  Chat,
+  Message,
+  GalleryItem,
+  GeneratedImageArtifact,
+  SecretMetadataRow,
+} from '../types';
 
 /**
  * Standard mock models for consistent testing across API and Frontend.
@@ -53,14 +59,26 @@ export const toApiResponse = {
   message: (msg: Message) => ({ ...msg }),
 };
 
-export function createMockGalleryItem(overrides: Partial<GalleryItem> = {}): GalleryItem {
+export function createMockGeneratedImageArtifact(
+  overrides: Partial<GeneratedImageArtifact> = {}
+): GeneratedImageArtifact {
+  const timestamp = Date.now();
   return {
-    id: `gallery-${Date.now()}`,
-    imageUrl: '/uploads/test-image.png',
-    prompt: 'A beautiful landscape',
+    id: `artifact-${timestamp}`,
     chatId: 'chat-1',
+    messageId: 'msg-1',
+    prompt: 'A beautiful landscape',
+    imageUrl: '/images/test-image.png',
+    createdAt: timestamp,
     ...overrides,
   };
+}
+
+export function createMockGalleryItem(overrides: Partial<GalleryItem> = {}): GalleryItem {
+  return createMockGeneratedImageArtifact({
+    id: `gallery-${Date.now()}`,
+    ...overrides,
+  });
 }
 
 export function createMockSecretMetadataRow(
