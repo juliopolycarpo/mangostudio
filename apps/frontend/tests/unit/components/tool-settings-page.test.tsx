@@ -197,4 +197,84 @@ describe('ToolSettingsPage', () => {
     // At least the parameter save button exists
     expect(saveButtons.length).toBeGreaterThanOrEqual(1);
   });
+
+  it('renders model selector when parameter has modelType image', async () => {
+    const TOOLS_WITH_MODEL_SELECTOR = {
+      tools: [
+        {
+          name: 'generate_image',
+          title: 'Image generation',
+          description: 'Generate images from text.',
+          category: 'image',
+          enabled: true,
+          canDisable: true,
+          parameters: { defaultModel: 'auto' },
+          parameterDescriptors: [
+            {
+              name: 'defaultModel',
+              label: 'Default image model',
+              description: 'Use "auto" to select the first available image model.',
+              type: 'string',
+              required: true,
+              defaultValue: 'auto',
+              modelType: 'image',
+            },
+          ],
+        },
+      ],
+    };
+
+    const CATALOG_RESPONSE = {
+      configured: true,
+      status: 'ready',
+      allModels: [],
+      textModels: [],
+      imageModels: [
+        {
+          modelId: 'imagen-3',
+          resourceName: 'imagen-3',
+          displayName: 'Imagen 3',
+          description: 'Google image model',
+          version: '1',
+          supportedActions: ['image_generation'],
+          provider: 'google',
+          capabilities: { text: false, image: true, streaming: false },
+          inputTokenLimit: 0,
+        },
+        {
+          modelId: 'dall-e-3',
+          resourceName: 'dall-e-3',
+          displayName: 'DALL-E 3',
+          description: 'OpenAI image model',
+          version: '1',
+          supportedActions: ['image_generation'],
+          provider: 'openai',
+          capabilities: { text: false, image: true, streaming: false },
+          inputTokenLimit: 0,
+        },
+      ],
+    };
+
+    fetchScenario.respondWithJson('GET', '/api/settings/tools', {
+      body: TOOLS_WITH_MODEL_SELECTOR,
+    });
+    fetchScenario.respondWithJson('GET', '/api/settings/models', {
+      body: CATALOG_RESPONSE,
+    });
+
+    render(<ToolSettingsPage maxToolIterations={10} setMaxToolIterations={setMaxToolIterations} />);
+
+    await screen.findByText('Image generation');
+
+    // The select should have "Auto (first available)" as first option
+    const select = screen.getByRole('combobox');
+    expect(select).toBeInTheDocument();
+
+    // "Auto" option text should be visible
+    expect(screen.getByText('Auto (first available)')).toBeInTheDocument();
+
+    // Image model options should be present (findByText waits for async catalog)
+    expect(await screen.findByText('Imagen 3')).toBeInTheDocument();
+    expect(screen.getByText('DALL-E 3')).toBeInTheDocument();
+  });
 });
