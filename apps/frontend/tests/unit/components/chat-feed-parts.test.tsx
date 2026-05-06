@@ -158,3 +158,114 @@ describe('ChatFeed — MessageParts interleaved rendering', () => {
     ).toBeInTheDocument();
   });
 });
+
+describe('ChatFeed — generated_image part rendering', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('renders a generating placeholder for status=generating', () => {
+    const parts: MessagePart[] = [
+      {
+        type: 'generated_image',
+        imageId: 'img-1',
+        toolCallId: 'tc-1',
+        status: 'generating',
+        prompt: 'a polar bear',
+      },
+    ];
+    const msg = makeMessage({ parts });
+
+    render(<ChatFeed chatId="chat-1" messages={[msg]} />);
+
+    expect(screen.getByText('Generating image...')).toBeInTheDocument();
+    expect(screen.getByText('a polar bear')).toBeInTheDocument();
+  });
+
+  it('renders an image for status=completed with imageUrl', () => {
+    const parts: MessagePart[] = [
+      {
+        type: 'generated_image',
+        imageId: 'img-1',
+        toolCallId: 'tc-1',
+        status: 'completed',
+        prompt: 'a polar bear',
+        imageUrl: '/images/gen-1.png',
+      },
+    ];
+    const msg = makeMessage({ parts });
+
+    render(<ChatFeed chatId="chat-1" messages={[msg]} />);
+
+    const img = screen.getByAltText('Generated image');
+    expect(img).toBeInTheDocument();
+    expect(img).toHaveAttribute('src', '/images/gen-1.png');
+  });
+
+  it('renders an error card for status=error', () => {
+    const parts: MessagePart[] = [
+      {
+        type: 'generated_image',
+        imageId: 'img-1',
+        toolCallId: 'tc-1',
+        status: 'error',
+        prompt: 'a polar bear',
+        error: 'Model not available',
+      },
+    ];
+    const msg = makeMessage({ parts });
+
+    render(<ChatFeed chatId="chat-1" messages={[msg]} />);
+
+    expect(screen.getByText('Image generation failed')).toBeInTheDocument();
+    expect(screen.getByText('Model not available')).toBeInTheDocument();
+  });
+
+  it('renders multiple generated_image parts in one message', () => {
+    const parts: MessagePart[] = [
+      {
+        type: 'generated_image',
+        imageId: 'img-1',
+        toolCallId: 'tc-1',
+        status: 'generating',
+        prompt: 'first image',
+      },
+      {
+        type: 'generated_image',
+        imageId: 'img-2',
+        toolCallId: 'tc-1',
+        status: 'completed',
+        prompt: 'second image',
+        imageUrl: '/images/gen-2.png',
+      },
+    ];
+    const msg = makeMessage({ parts });
+
+    render(<ChatFeed chatId="chat-1" messages={[msg]} />);
+
+    expect(screen.getByText('first image')).toBeInTheDocument();
+    expect(screen.getByAltText('Generated image')).toBeInTheDocument();
+  });
+
+  it('renders generated_image parts outside of thinking blocks', () => {
+    const parts: MessagePart[] = [
+      { type: 'thinking', text: 'I should generate an image' },
+      {
+        type: 'generated_image',
+        imageId: 'img-1',
+        toolCallId: 'tc-1',
+        status: 'completed',
+        prompt: 'a polar bear',
+        imageUrl: '/images/gen-1.png',
+      },
+      { type: 'text', text: 'Here is your image.' },
+    ];
+    const msg = makeMessage({ parts });
+
+    render(<ChatFeed chatId="chat-1" messages={[msg]} />);
+
+    // Image should appear in the document, not inside a collapsed thinking block
+    expect(screen.getByAltText('Generated image')).toBeInTheDocument();
+    expect(screen.getByText('Here is your image.')).toBeInTheDocument();
+  });
+});
