@@ -14,7 +14,7 @@ import {
   getProviderForModel,
   getProvider,
   registerProvider,
-} from '../../../src/services/providers/registry';
+} from '../../../src/services/providers/core/provider-registry';
 import {
   getAllToolDefinitions,
   executeTool,
@@ -72,7 +72,7 @@ afterEach(async () => {
     updateChat: realUpdateChat,
     deleteChat: realDeleteChat,
   }));
-  await mock.module('../../../src/services/providers/registry', () => ({
+  await mock.module('../../../src/services/providers/core/provider-registry', () => ({
     getProviderForModel: realGetProviderForModel,
     getProvider: realGetProvider,
     registerProvider: realRegisterProvider,
@@ -236,7 +236,7 @@ describe('POST /respond/stream', () => {
       verifyChatOwnership: () => Promise.resolve(true),
     }));
 
-    await mock.module('../../../src/services/providers/registry', () => ({
+    await mock.module('../../../src/services/providers/core/provider-registry', () => ({
       getProviderForModel: () =>
         Promise.resolve({
           providerType: 'openai-compatible',
@@ -333,7 +333,7 @@ describe('POST /respond/stream', () => {
       })
     );
 
-    await mock.module('../../../src/services/providers/registry', () => ({
+    await mock.module('../../../src/services/providers/core/provider-registry', () => ({
       getProviderForModel: () =>
         Promise.resolve({
           providerType: 'deepseek',
@@ -400,7 +400,7 @@ describe('POST /respond/stream', () => {
       })
     );
 
-    await mock.module('../../../src/services/providers/registry', () => ({
+    await mock.module('../../../src/services/providers/core/provider-registry', () => ({
       getProviderForModel: () =>
         Promise.resolve({
           providerType: 'deepseek',
@@ -527,7 +527,7 @@ describe('POST /respond/stream', () => {
       verifyChatOwnership: () => Promise.resolve(true),
     }));
 
-    await mock.module('../../../src/services/providers/registry', () => ({
+    await mock.module('../../../src/services/providers/core/provider-registry', () => ({
       getProviderForModel: () =>
         Promise.resolve({
           providerType: 'openai-compatible',
@@ -640,7 +640,7 @@ describe('POST /respond/stream', () => {
       verifyChatOwnership: () => Promise.resolve(true),
     }));
 
-    await mock.module('../../../src/services/providers/registry', () => ({
+    await mock.module('../../../src/services/providers/core/provider-registry', () => ({
       getProviderForModel: () =>
         Promise.resolve({
           providerType: 'openai-compatible',
@@ -723,7 +723,7 @@ describe('POST /respond/stream', () => {
       verifyChatOwnership: () => Promise.resolve(true),
     }));
 
-    await mock.module('../../../src/services/providers/registry', () => ({
+    await mock.module('../../../src/services/providers/core/provider-registry', () => ({
       getProviderForModel: () =>
         Promise.resolve({
           providerType: 'openai',
@@ -779,7 +779,7 @@ describe('POST /respond/stream', () => {
       verifyChatOwnership: () => Promise.resolve(true),
     }));
 
-    await mock.module('../../../src/services/providers/registry', () => ({
+    await mock.module('../../../src/services/providers/core/provider-registry', () => ({
       getProviderForModel: () =>
         Promise.resolve({
           providerType: 'openai-compatible',
@@ -903,7 +903,7 @@ describe('POST /respond/stream', () => {
     // First iteration emits a tool call that the orchestrator will execute;
     // the second iteration (carrying tool results) fails with a turn_error.
     let iteration = 0;
-    await mock.module('../../../src/services/providers/registry', () => ({
+    await mock.module('../../../src/services/providers/core/provider-registry', () => ({
       getProviderForModel: () =>
         Promise.resolve({
           providerType: 'openai-compatible',
@@ -988,7 +988,7 @@ describe('POST /respond/stream', () => {
 
     // Provider always yields a tool_call_completed without turn_completed, forcing
     // the orchestrator to exhaust the iteration ceiling on every call.
-    await mock.module('../../../src/services/providers/registry', () => ({
+    await mock.module('../../../src/services/providers/core/provider-registry', () => ({
       getProviderForModel: () =>
         Promise.resolve({
           providerType: 'openai-compatible',
@@ -1096,7 +1096,7 @@ describe('POST /respond/stream', () => {
       verifyChatOwnership: () => Promise.resolve(true),
     }));
 
-    await mock.module('../../../src/services/providers/registry', () => ({
+    await mock.module('../../../src/services/providers/core/provider-registry', () => ({
       getProviderForModel: () =>
         Promise.resolve({
           providerType: 'gemini',
@@ -1216,7 +1216,7 @@ describe('POST /respond/stream', () => {
       verifyChatOwnership: () => Promise.resolve(true),
     }));
 
-    await mock.module('../../../src/services/providers/registry', () => ({
+    await mock.module('../../../src/services/providers/core/provider-registry', () => ({
       getProviderForModel: () =>
         Promise.resolve({
           providerType: 'gemini',
@@ -1291,7 +1291,7 @@ describe('POST /respond/stream', () => {
       verifyChatOwnership: () => Promise.resolve(true),
     }));
 
-    await mock.module('../../../src/services/providers/registry', () => ({
+    await mock.module('../../../src/services/providers/core/provider-registry', () => ({
       getProviderForModel: () =>
         Promise.resolve({
           providerType: 'openai-compatible',
@@ -1369,7 +1369,7 @@ describe('POST /respond/stream', () => {
       getSafeEffectiveToolSettings: realGetSafeEffectiveToolSettings,
     }));
 
-    await mock.module('../../../src/services/providers/registry', () => ({
+    await mock.module('../../../src/services/providers/core/provider-registry', () => ({
       getProviderForModel: () =>
         Promise.resolve({
           providerType: 'openai-compatible',
@@ -1546,7 +1546,7 @@ describe('POST /respond/stream', () => {
       })
     );
 
-    await mock.module('../../../src/services/providers/registry', () => ({
+    await mock.module('../../../src/services/providers/core/provider-registry', () => ({
       getProviderForModel: () =>
         Promise.resolve({
           providerType: 'openai-compatible',
@@ -1611,7 +1611,7 @@ describe('POST /respond/stream', () => {
       })
     );
 
-    await mock.module('../../../src/services/providers/registry', () => ({
+    await mock.module('../../../src/services/providers/core/provider-registry', () => ({
       getProviderForModel: () =>
         Promise.resolve({
           providerType: 'openai-compatible',

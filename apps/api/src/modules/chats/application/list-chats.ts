@@ -6,7 +6,7 @@ import { parseContinuationEnvelope } from '../../../services/providers/core/cont
 import {
   getContextSeverity,
   parsePersistedContextSnapshot,
-} from '../../../services/providers/context-policy';
+} from '../../../services/providers/core/context-policy';
 
 export function extractContextInfo(
   contextState: string | null | undefined,

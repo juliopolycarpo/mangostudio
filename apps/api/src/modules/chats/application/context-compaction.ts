@@ -8,11 +8,11 @@ import {
   persistAiResponse,
   updateChatAfterTurn,
 } from '../../generation/infrastructure/conversation-persistence';
-import { getProviderForModel } from '../../../services/providers/registry';
+import { getProviderForModel } from '../../../services/providers/core/provider-registry';
 import {
   buildPersistedContextSnapshot,
   computeContextSnapshot,
-} from '../../../services/providers/context-policy';
+} from '../../../services/providers/core/context-policy';
 import { generateId } from '../../../utils/id';
 import { ChatNotFoundError } from '../domain/chat-ownership';
 import { createChat, getById, updateChat } from '../infrastructure/chat-repository';

@@ -10,7 +10,7 @@ import {
   deleteSecretMetadata,
 } from '../infrastructure/connector-repository';
 import { invalidateUnifiedCatalog } from '../../../services/providers/catalog';
-import { invalidateProviderModelCache } from '../../../services/providers/registry';
+import { invalidateProviderModelCache } from '../../../services/providers/core/provider-registry';
 import { ERROR_CODES } from '@mangostudio/shared/errors';
 
 export class ConnectorNotFoundError extends Error {

@@ -7,7 +7,7 @@ import type { SecretMetadataInput } from '../../../../src/services/secret-store/
 import {
   createProviderSecretService,
   isPlaceholderConfigSecretValue,
-} from '../../../../src/services/providers/secret-service';
+} from '../../../../src/services/providers/core/secret-service';
 import { InMemorySecretStore } from '../../../support/mocks/mock-secret-store';
 
 function createMetadataHarness(initial: SecretMetadataRow[] = []) {

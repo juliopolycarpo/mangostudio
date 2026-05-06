@@ -5,7 +5,7 @@
 
 import type { EffectiveToolSettings, ToolContext, ToolDefinition } from '../types';
 import type { ImageGenerationRequest, ImageGenerationResult } from '../../providers/types';
-import { getProviderForModel } from '../../providers/registry';
+import { getProviderForModel } from '../../providers/core/provider-registry';
 import { resolveModel } from '../../../modules/generation/application/resolve-model';
 import { generateId } from '../../../utils/id';
 import { registerTool } from '../registry';

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import type { SecretMetadataRow } from '@mangostudio/shared/types';
 import type { SecretMetadataInput } from '../../../../src/services/secret-store/metadata';
 import type { AgentEvent } from '../../../../src/services/providers/types';
-import { createProviderSecretService } from '../../../../src/services/providers/secret-service';
+import { createProviderSecretService } from '../../../../src/services/providers/core/secret-service';
 import { resolveCompatibleClientConfig } from '../../../../src/services/providers/openai-compatible/resolve-client-config';
 import { InMemorySecretStore } from '../../../support/mocks/mock-secret-store';
 import { expectTurnCompletedEnvelope } from '../../../support/providers/contract-assertions';
@@ -128,20 +128,21 @@ function makeFakeClient(
 describe('openai-compatible-provider', () => {
   it('providerType is openai-compatible', async () => {
     const { openAICompatibleProvider } =
-      await import('../../../../src/services/providers/openai-compatible-provider');
+      await import('../../../../src/services/providers/openai-compatible/index');
     expect(openAICompatibleProvider.providerType).toBe('openai-compatible');
   });
 
   it('is registered in the provider registry after import', async () => {
-    await import('../../../../src/services/providers/openai-compatible-provider');
-    const { getProvider } = await import('../../../../src/services/providers/registry');
+    await import('../../../../src/services/providers/openai-compatible/index');
+    const { getProvider } =
+      await import('../../../../src/services/providers/core/provider-registry');
     const provider = getProvider('openai-compatible');
     expect(provider.providerType).toBe('openai-compatible');
   });
 
   it('implements the required AIProvider methods', async () => {
     const { openAICompatibleProvider } =
-      await import('../../../../src/services/providers/openai-compatible-provider');
+      await import('../../../../src/services/providers/openai-compatible/index');
     expect(typeof openAICompatibleProvider.generateText).toBe('function');
     expect(typeof openAICompatibleProvider.listModels).toBe('function');
     expect(typeof openAICompatibleProvider.validateApiKey).toBe('function');
@@ -432,20 +433,20 @@ describe('openai-compatible listModels filtering', () => {
 describe('classifyEndpoint', () => {
   it('classifies DeepSeek base URLs', async () => {
     const { classifyEndpoint } =
-      await import('../../../../src/services/providers/openai-compatible-provider');
+      await import('../../../../src/services/providers/openai-compatible/index');
     expect(classifyEndpoint('https://api.deepseek.com/v1')).toBe('deepseek');
     expect(classifyEndpoint('https://api.deepseek.com')).toBe('deepseek');
   });
 
   it('classifies OpenRouter base URLs', async () => {
     const { classifyEndpoint } =
-      await import('../../../../src/services/providers/openai-compatible-provider');
+      await import('../../../../src/services/providers/openai-compatible/index');
     expect(classifyEndpoint('https://openrouter.ai/api/v1')).toBe('openrouter');
   });
 
   it('classifies unknown endpoints as generic', async () => {
     const { classifyEndpoint } =
-      await import('../../../../src/services/providers/openai-compatible-provider');
+      await import('../../../../src/services/providers/openai-compatible/index');
     expect(classifyEndpoint('https://my-custom-llm.example.com/v1')).toBe('generic');
     expect(classifyEndpoint('http://localhost:11434')).toBe('generic');
   });
@@ -454,21 +455,21 @@ describe('classifyEndpoint', () => {
 describe('extractReasoningChunks', () => {
   it('extracts from delta.reasoning_content', async () => {
     const { extractReasoningChunks } =
-      await import('../../../../src/services/providers/openai-compatible-provider');
+      await import('../../../../src/services/providers/openai-compatible/index');
     const chunks = extractReasoningChunks({ reasoning_content: 'thinking step 1' });
     expect(chunks).toEqual(['thinking step 1']);
   });
 
   it('extracts from delta.reasoning (OpenRouter normalized)', async () => {
     const { extractReasoningChunks } =
-      await import('../../../../src/services/providers/openai-compatible-provider');
+      await import('../../../../src/services/providers/openai-compatible/index');
     const chunks = extractReasoningChunks({ reasoning: 'openrouter thinking' });
     expect(chunks).toEqual(['openrouter thinking']);
   });
 
   it('prefers reasoning_content over reasoning when both present', async () => {
     const { extractReasoningChunks } =
-      await import('../../../../src/services/providers/openai-compatible-provider');
+      await import('../../../../src/services/providers/openai-compatible/index');
     // The || short-circuits: if reasoning_content is non-empty, reasoning is not used
     const chunks = extractReasoningChunks({
       reasoning_content: 'primary',
@@ -479,14 +480,14 @@ describe('extractReasoningChunks', () => {
 
   it('falls back to delta.reasoning when reasoning_content is empty string', async () => {
     const { extractReasoningChunks } =
-      await import('../../../../src/services/providers/openai-compatible-provider');
+      await import('../../../../src/services/providers/openai-compatible/index');
     const chunks = extractReasoningChunks({ reasoning_content: '', reasoning: 'fallback' });
     expect(chunks).toEqual(['fallback']);
   });
 
   it('extracts reasoning.text entries from delta.reasoning_details', async () => {
     const { extractReasoningChunks } =
-      await import('../../../../src/services/providers/openai-compatible-provider');
+      await import('../../../../src/services/providers/openai-compatible/index');
     const chunks = extractReasoningChunks({
       reasoning_details: [
         { type: 'reasoning.text', text: 'step A' },
@@ -498,7 +499,7 @@ describe('extractReasoningChunks', () => {
 
   it('extracts reasoning.summary entries from delta.reasoning_details', async () => {
     const { extractReasoningChunks } =
-      await import('../../../../src/services/providers/openai-compatible-provider');
+      await import('../../../../src/services/providers/openai-compatible/index');
     const chunks = extractReasoningChunks({
       reasoning_details: [{ type: 'reasoning.summary', text: 'summary text' }],
     });
@@ -507,7 +508,7 @@ describe('extractReasoningChunks', () => {
 
   it('skips reasoning_details entries with unknown type', async () => {
     const { extractReasoningChunks } =
-      await import('../../../../src/services/providers/openai-compatible-provider');
+      await import('../../../../src/services/providers/openai-compatible/index');
     const chunks = extractReasoningChunks({
       reasoning_details: [{ type: 'unknown.type', text: 'ignored' }],
     });
@@ -516,14 +517,14 @@ describe('extractReasoningChunks', () => {
 
   it('returns empty array when delta has no reasoning fields', async () => {
     const { extractReasoningChunks } =
-      await import('../../../../src/services/providers/openai-compatible-provider');
+      await import('../../../../src/services/providers/openai-compatible/index');
     expect(extractReasoningChunks({ content: 'Hello' })).toEqual([]);
     expect(extractReasoningChunks({})).toEqual([]);
   });
 
   it('combines simple field and reasoning_details in one delta', async () => {
     const { extractReasoningChunks } =
-      await import('../../../../src/services/providers/openai-compatible-provider');
+      await import('../../../../src/services/providers/openai-compatible/index');
     const chunks = extractReasoningChunks({
       reasoning_content: 'inline',
       reasoning_details: [{ type: 'reasoning.text', text: 'detailed' }],

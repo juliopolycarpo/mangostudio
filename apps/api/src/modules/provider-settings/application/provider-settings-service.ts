@@ -8,7 +8,7 @@ import type {
 import { ERROR_CODES } from '@mangostudio/shared/errors';
 import type { ProviderType } from '@mangostudio/shared/types';
 import type { Database } from '../../../db/types';
-import { listRegisteredProviderTypes } from '../../../services/providers/registry';
+import { listRegisteredProviderTypes } from '../../../services/providers/core/provider-registry';
 import {
   buildProviderSettingsDescriptor,
   isProviderType,

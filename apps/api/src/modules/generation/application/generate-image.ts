@@ -4,7 +4,7 @@ import type { GeneratedImageArtifact } from '@mangostudio/shared';
 import type { PromptSettings } from '@mangostudio/shared/prompt-rules';
 import { assertChatOwnership } from '../../chats/domain/chat-ownership';
 import { resolveModel } from './resolve-model';
-import { getProviderForModel } from '../../../services/providers/registry';
+import { getProviderForModel } from '../../../services/providers/core/provider-registry';
 import { generateId } from '../../../utils/id';
 import { persistImageTurn } from '../infrastructure/conversation-persistence';
 import { composePrompt } from '../../prompt-rules/application/prompt-composer';

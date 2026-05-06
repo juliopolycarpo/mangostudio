@@ -14,7 +14,7 @@ import { getDb } from '../../../db/database';
 import { requireAuth } from '../../../plugins/auth-middleware';
 import { verifyChatOwnership } from '../../chats/infrastructure/chat-repository';
 import { resolveModel, NoModelAvailableError } from '../application/resolve-model';
-import { getProviderForModel } from '../../../services/providers/registry';
+import { getProviderForModel } from '../../../services/providers/core/provider-registry';
 import { streamTextTurn, type StreamEvent } from '../application/stream-text-turn';
 
 const KEEPALIVE_INTERVAL_MS = 15_000;
