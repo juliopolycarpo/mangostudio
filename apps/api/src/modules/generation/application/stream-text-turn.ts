@@ -9,6 +9,7 @@ import type {
 } from '@mangostudio/shared';
 import type { PromptSettings } from '@mangostudio/shared/prompt-rules';
 import type { ContextSettings } from '@mangostudio/shared/chat';
+import type { ToolIntent } from '@mangostudio/shared/generation';
 import type { ProviderRuntimeSettings } from '@mangostudio/shared/provider-settings';
 import type { AgentTurnRequest } from '../../../services/providers/types';
 import { safeJsonParse } from '../../../lib/safe-parse';
@@ -83,6 +84,7 @@ export interface StreamTextTurnInput {
   reasoningEffort?: ReasoningEffort;
   maxToolIterations?: number;
   contextSettings?: ContextSettings;
+  toolIntent?: ToolIntent;
   signal?: AbortSignal;
 }
 
@@ -194,8 +196,16 @@ export async function* streamTextTurn(
         visiblePrompt: input.prompt,
         isFirstTurn,
       });
-      const effectiveSystemPrompt = composition.effectiveSystemPrompt || undefined;
+      let effectiveSystemPrompt = composition.effectiveSystemPrompt || undefined;
       const effectivePrompt = composition.effectivePrompt;
+
+      if (input.toolIntent === 'image_generation_requested') {
+        const hint =
+          'The user explicitly clicked Create images for this turn. Use the image generation tool when appropriate.';
+        effectiveSystemPrompt = effectiveSystemPrompt
+          ? `${effectiveSystemPrompt}\n\n${hint}`
+          : hint;
+      }
 
       // Cross-turn continuation state is sourced exclusively from the chat row.
       // Message-level providerState is kept only as an audit trail and must not
@@ -735,8 +745,16 @@ export async function* streamTextTurn(
         visiblePrompt: input.prompt,
         isFirstTurn,
       });
-      const effectiveSystemPrompt = composition.effectiveSystemPrompt || undefined;
+      let effectiveSystemPrompt = composition.effectiveSystemPrompt || undefined;
       const effectivePrompt = composition.effectivePrompt;
+
+      if (input.toolIntent === 'image_generation_requested') {
+        const hint =
+          'The user explicitly clicked Create images for this turn. Use the image generation tool when appropriate.';
+        effectiveSystemPrompt = effectiveSystemPrompt
+          ? `${effectiveSystemPrompt}\n\n${hint}`
+          : hint;
+      }
 
       let legacyInThinking = false;
 
@@ -783,8 +801,16 @@ export async function* streamTextTurn(
         visiblePrompt: input.prompt,
         isFirstTurn,
       });
-      const effectiveSystemPrompt = composition.effectiveSystemPrompt || undefined;
+      let effectiveSystemPrompt = composition.effectiveSystemPrompt || undefined;
       const effectivePrompt = composition.effectivePrompt;
+
+      if (input.toolIntent === 'image_generation_requested') {
+        const hint =
+          'The user explicitly clicked Create images for this turn. Use the image generation tool when appropriate.';
+        effectiveSystemPrompt = effectiveSystemPrompt
+          ? `${effectiveSystemPrompt}\n\n${hint}`
+          : hint;
+      }
 
       const result = await provider.generateText({
         userId,

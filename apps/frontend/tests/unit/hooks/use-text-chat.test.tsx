@@ -290,3 +290,49 @@ describe('useTextChat — failure surfaced as timeline item', () => {
     expect(errorParts).toHaveLength(1);
   });
 });
+
+describe('useTextChat — toolIntent forwarding', () => {
+  beforeEach(() => {
+    mockStream.mockReset();
+  });
+
+  it('forwards toolIntent in the stream request when provided', async () => {
+    const props = makeProps();
+    mockStream.mockImplementation(
+      makeStreamFn([{ type: 'done', done: true, generationTime: '0.5s' }])
+    );
+
+    const { result } = renderHook(() => useTextGeneration(props));
+
+    await act(async () => {
+      await result.current.handleRespond('generate an image', 'image_generation_requested');
+    });
+
+    await waitFor(() => expect(result.current.isGenerating).toBe(false));
+
+    expect(mockStream).toHaveBeenCalled();
+    const firstCall = mockStream.mock.calls[0];
+    const request = firstCall[0] as { toolIntent?: string };
+    expect(request.toolIntent).toBe('image_generation_requested');
+  });
+
+  it('omits toolIntent when not provided', async () => {
+    const props = makeProps();
+    mockStream.mockImplementation(
+      makeStreamFn([{ type: 'done', done: true, generationTime: '0.5s' }])
+    );
+
+    const { result } = renderHook(() => useTextGeneration(props));
+
+    await act(async () => {
+      await result.current.handleRespond('hello');
+    });
+
+    await waitFor(() => expect(result.current.isGenerating).toBe(false));
+
+    expect(mockStream).toHaveBeenCalled();
+    const firstCall = mockStream.mock.calls[0];
+    const request = firstCall[0] as { toolIntent?: string };
+    expect(request.toolIntent).toBeUndefined();
+  });
+});

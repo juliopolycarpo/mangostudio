@@ -42,6 +42,8 @@ export const messages = {
       placeholder: 'Pergunte ao Gemini...',
       imagePlaceholder: 'Descreva sua imagem...',
       addReferenceImage: 'Adicionar imagem de referência',
+      createImages: 'Criar imagens',
+      createImagesHint: 'Sugerir ao modelo que use a ferramenta de geração de imagens',
     },
     feed: {
       emptyTitle: 'Inicie uma conversa ou crie uma imagem',
@@ -57,6 +59,7 @@ export const messages = {
       imageUnavailable: 'Imagem não disponível',
       imageUnavailableHint: 'A imagem foi excluída, movida ou ainda não está acessível.',
       generatedImageAlt: 'Imagem gerada',
+      imageGenerationFailed: 'Falha ao gerar imagem',
       styleParams: 'Parâmetros de Estilo',
       thoughtFor: 'Pensou por {time}',
       respondedIn: 'Respondeu em {time}',

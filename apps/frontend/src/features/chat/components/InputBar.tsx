@@ -1,5 +1,15 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { MessageSquare, ImagePlus, PlusCircle, Mic, Zap, Send, Square, X } from 'lucide-react';
+import {
+  MessageSquare,
+  ImagePlus,
+  PlusCircle,
+  Mic,
+  Zap,
+  Send,
+  Square,
+  X,
+  Image,
+} from 'lucide-react';
 import type { InteractionMode, ReasoningEffort } from '@mangostudio/shared';
 import { ThinkingToggle } from '@/components/layout/ThinkingToggle';
 import { useI18n } from '@/hooks/use-i18n';
@@ -25,6 +35,8 @@ interface Props {
   onReasoningEffortChange?: (effort: ReasoningEffort) => void;
   reasoningVisible?: boolean;
   contextInfo?: ContextInfo | null;
+  imageToolIntent?: boolean;
+  onImageToolIntentChange?: (active: boolean) => void;
 }
 
 export function InputBar({
@@ -41,6 +53,8 @@ export function InputBar({
   onReasoningEffortChange,
   reasoningVisible = false,
   contextInfo,
+  imageToolIntent = false,
+  onImageToolIntentChange,
 }: Props) {
   const { t } = useI18n();
   const [prompt, setPrompt] = useState('');
@@ -89,6 +103,23 @@ export function InputBar({
                 onEffortChange={onReasoningEffortChange}
               />
             ) : null}
+
+            {onImageToolIntentChange && composerMode === 'chat' && (
+              <button
+                type="button"
+                onClick={() => onImageToolIntentChange(!imageToolIntent)}
+                disabled={disabled}
+                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium transition-all duration-200 ${
+                  imageToolIntent
+                    ? 'bg-primary text-on-primary shadow-sm'
+                    : 'text-on-surface-variant hover:text-on-surface border border-outline-variant/20 hover:border-outline-variant/40'
+                }`}
+                title={t.chat.input.createImagesHint}
+              >
+                <Image size={13} />
+                {t.chat.input.createImages}
+              </button>
+            )}
 
             {contextInfo && composerMode === 'chat' && (
               <span

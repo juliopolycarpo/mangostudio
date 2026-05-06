@@ -44,6 +44,8 @@ export const messages: Messages = {
       placeholder: 'Ask Gemini anything...',
       imagePlaceholder: 'Describe your image...',
       addReferenceImage: 'Add reference image',
+      createImages: 'Create images',
+      createImagesHint: 'Hint to the model to use the image generation tool',
     },
     feed: {
       emptyTitle: 'Start a conversation or create an image',
@@ -59,6 +61,7 @@ export const messages: Messages = {
       imageUnavailable: 'Image no longer available',
       imageUnavailableHint: 'The image was deleted, moved, or is not accessible yet.',
       generatedImageAlt: 'Generated image',
+      imageGenerationFailed: 'Image generation failed',
       styleParams: 'Style Parameters',
       thoughtFor: 'Thought for {time}',
       respondedIn: 'Responded in {time}',

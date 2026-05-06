@@ -31,6 +31,8 @@ interface ChatPageProps {
   isContextActionPending: boolean;
   onCompactCurrentChat: () => Promise<void>;
   onStartSummarizedChat: () => Promise<void>;
+  imageToolIntent: boolean;
+  onImageToolIntentChange: (active: boolean) => void;
 }
 
 export function ChatPage({
@@ -53,6 +55,8 @@ export function ChatPage({
   isContextActionPending,
   onCompactCurrentChat,
   onStartSummarizedChat,
+  imageToolIntent,
+  onImageToolIntentChange,
 }: ChatPageProps) {
   const { data, status } = useMessagesQuery(chatId);
   const { t } = useI18n();
@@ -243,6 +247,8 @@ export function ChatPage({
         onReasoningEffortChange={onReasoningEffortChange}
         reasoningVisible={reasoningVisible}
         contextInfo={contextInfo}
+        imageToolIntent={imageToolIntent}
+        onImageToolIntentChange={onImageToolIntentChange}
       />
     </div>
   );
