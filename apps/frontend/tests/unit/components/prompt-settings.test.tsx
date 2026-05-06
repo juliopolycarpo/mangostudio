@@ -6,7 +6,7 @@ import { DEFAULT_PROMPT_SETTINGS } from '../../../src/hooks/use-global-settings'
 import type {
   PromptSettings as PromptSettingsData,
   RuleFileSetting,
-} from '../../../src/hooks/use-global-settings';
+} from '@mangostudio/shared/prompt-rules';
 
 function createPromptSettings(overrides?: Partial<PromptSettingsData>): PromptSettingsData {
   return {

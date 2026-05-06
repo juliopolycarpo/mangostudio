@@ -7,7 +7,7 @@ import { useI18n } from '@/hooks/use-i18n';
 import type {
   PromptSettings as PromptSettingsData,
   RuleFileSetting,
-} from '@/hooks/use-global-settings';
+} from '@mangostudio/shared/prompt-rules';
 
 interface PromptSettingsProps {
   promptSettings: PromptSettingsData;

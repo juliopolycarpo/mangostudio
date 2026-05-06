@@ -5,7 +5,7 @@ import type {
   RuleFileSetting,
   PromptInjectionRole,
   PromptSendFrequency,
-} from '@/hooks/use-global-settings';
+} from '@mangostudio/shared/prompt-rules';
 
 interface RuleFileCardProps {
   setting: RuleFileSetting;
