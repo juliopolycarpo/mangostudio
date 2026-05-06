@@ -33,7 +33,7 @@
     "better-auth": "^1.6.9",
     "elysia": "^1.4.28",
     "file-type": "^22.0.1",
-    "kysely": "^0.28.16",
+    "kysely": "^0.28.17",
     "kysely-bun-sqlite": "^0.4.0",
     "openai": "^6.35.0",
     "smol-toml": "^1.6.1"
