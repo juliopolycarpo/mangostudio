@@ -165,8 +165,8 @@ export function GeneratedImagePart({ part }: Props) {
   return (
     <div className="bg-surface-container-lowest border border-outline-variant/10 rounded-2xl p-5 flex flex-col gap-3 max-w-md animate-pulse">
       <div className="flex items-center gap-3">
-        <div className="w-10 h-10 rounded-xl bg-surface-container-high flex items-center justify-center">
-          <Image size={20} className="text-primary/50" />
+        <div className="w-10 h-10 rounded-xl bg-surface-container-high flex items-center justify-center shrink-0">
+          <Image size={20} className="text-primary/50 shrink-0" />
         </div>
         <div className="flex flex-col gap-1">
           <span className="text-xs font-medium text-on-surface">
