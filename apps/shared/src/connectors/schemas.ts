@@ -1,18 +1,11 @@
 import { Type, type Static } from '@sinclair/typebox';
+import { ProviderTypeSchema } from '../provider-settings/schemas';
 
 const SecretSourceSchema = Type.Union([
   Type.Literal('bun-secrets'),
   Type.Literal('environment'),
   Type.Literal('config-file'),
   Type.Literal('none'),
-]);
-
-const ProviderTypeSchema = Type.Union([
-  Type.Literal('gemini'),
-  Type.Literal('openai'),
-  Type.Literal('openai-compatible'),
-  Type.Literal('anthropic'),
-  Type.Literal('deepseek'),
 ]);
 
 export const AddConnectorBodySchema = Type.Object({
