@@ -1,22 +1,8 @@
-import type { GeneratedImageArtifact, InteractionMode, MessagePart } from '../types/index';
+import type { Message } from '../chat/entities';
 
 /** A persisted message returned by the generate or respond endpoint. */
-export interface GeneratedMessage {
-  id: string;
-  chatId: string;
-  role: 'user' | 'ai';
-  text: string;
-  imageUrl?: string;
-  referenceImage?: string;
-  timestamp: number;
+export interface GeneratedMessage extends Message {
   isGenerating: boolean;
-  generationTime?: string;
-  modelName?: string;
-  styleParams?: string[];
-  interactionMode?: InteractionMode;
-  parts?: MessagePart[];
-  providerState?: string;
-  generatedImages?: GeneratedImageArtifact[];
 }
 
 /** Response for POST /api/generate — returns both persisted messages. */
