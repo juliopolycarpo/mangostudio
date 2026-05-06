@@ -1,16 +1,6 @@
-import React, { useState, useRef, useEffect, useMemo } from 'react';
-import {
-  MessageSquare,
-  ImagePlus,
-  PlusCircle,
-  Mic,
-  Zap,
-  Send,
-  Square,
-  X,
-  Image,
-} from 'lucide-react';
-import type { InteractionMode, ReasoningEffort } from '@mangostudio/shared';
+import { useState } from 'react';
+import { Mic, Send, Square, Image } from 'lucide-react';
+import type { ReasoningEffort } from '@mangostudio/shared';
 import { ThinkingToggle } from '@/components/layout/ThinkingToggle';
 import { useI18n } from '@/hooks/use-i18n';
 import type { ContextInfo } from '@/features/generation/types';
@@ -22,9 +12,7 @@ function formatTokensCompact(n: number): string {
 }
 
 interface Props {
-  composerMode: InteractionMode;
-  onModeChange: (mode: InteractionMode) => void;
-  onSubmit: (prompt: string, referenceImage?: File | null) => void;
+  onSubmit: (prompt: string) => void;
   disabled?: boolean;
   submitDisabled?: boolean;
   isGenerating?: boolean;
@@ -40,8 +28,6 @@ interface Props {
 }
 
 export function InputBar({
-  composerMode,
-  onModeChange,
   onSubmit,
   disabled,
   submitDisabled = false,
@@ -58,35 +44,12 @@ export function InputBar({
 }: Props) {
   const { t } = useI18n();
   const [prompt, setPrompt] = useState('');
-  const [referenceImage, setReferenceImage] = useState<File | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
-  const isImageMode = composerMode === 'image';
-
-  const previewUrl = useMemo(
-    () => (referenceImage ? URL.createObjectURL(referenceImage) : null),
-    [referenceImage]
-  );
-
-  useEffect(() => {
-    return () => {
-      if (previewUrl) URL.revokeObjectURL(previewUrl);
-    };
-  }, [previewUrl]);
-
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      setReferenceImage(file);
-    }
-  };
 
   const handleSubmit = (e: { preventDefault: () => void }) => {
     e.preventDefault();
     if (!prompt.trim() || disabled || submitDisabled) return;
-    onSubmit(prompt, referenceImage);
+    onSubmit(prompt);
     setPrompt('');
-    setReferenceImage(null);
   };
 
   return (
@@ -104,7 +67,7 @@ export function InputBar({
               />
             ) : null}
 
-            {onImageToolIntentChange && composerMode === 'chat' && (
+            {onImageToolIntentChange && (
               <button
                 type="button"
                 onClick={() => onImageToolIntentChange(!imageToolIntent)}
@@ -121,7 +84,7 @@ export function InputBar({
               </button>
             )}
 
-            {contextInfo && composerMode === 'chat' && (
+            {contextInfo && (
               <span
                 className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-medium tabular-nums border transition-colors ${
                   contextInfo.severity === 'critical'
@@ -138,83 +101,19 @@ export function InputBar({
               </span>
             )}
           </div>
-
-          <div className="inline-flex bg-surface-container-low border border-outline-variant/10 rounded-full p-1 gap-1 shadow-sm">
-            <button
-              type="button"
-              onClick={() => onModeChange('chat')}
-              className={`flex items-center gap-2 px-4 py-1.5 rounded-full text-xs font-bold transition-all duration-200 ${
-                !isImageMode
-                  ? 'bg-primary text-on-primary shadow-md'
-                  : 'text-on-surface-variant hover:text-on-surface'
-              }`}
-            >
-              <MessageSquare size={13} />
-              {t.chat.input.modeChat}
-            </button>
-            <button
-              type="button"
-              onClick={() => onModeChange('image')}
-              className={`flex items-center gap-2 px-4 py-1.5 rounded-full text-xs font-bold transition-all duration-200 ${
-                isImageMode
-                  ? 'bg-primary text-on-primary shadow-md'
-                  : 'text-on-surface-variant hover:text-on-surface'
-              }`}
-            >
-              <ImagePlus size={13} />
-              {t.chat.input.modeImage}
-            </button>
-          </div>
         </div>
-
-        {isImageMode && previewUrl && (
-          <div className="mb-2 relative inline-block">
-            <img
-              src={previewUrl}
-              alt="Reference"
-              className="h-20 w-20 object-cover rounded-xl border-2 border-primary/30 shadow-lg"
-              loading="lazy"
-              decoding="async"
-            />
-            <button
-              onClick={() => setReferenceImage(null)}
-              className="absolute -top-2 -right-2 w-6 h-6 bg-surface-container-highest text-on-surface rounded-full flex items-center justify-center hover:bg-error hover:text-on-error transition-colors shadow-md"
-            >
-              <X size={14} />
-            </button>
-          </div>
-        )}
 
         <form
           onSubmit={handleSubmit}
           className="bg-surface-container-lowest border border-outline-variant/10 rounded-2xl p-2 shadow-2xl flex items-center gap-2 group transition-all focus-within:ring-1 focus-within:ring-primary/30"
         >
           <input
-            type="file"
-            ref={fileInputRef}
-            onChange={handleFileChange}
-            accept="image/png, image/jpeg"
-            className="hidden"
-          />
-
-          {isImageMode && (
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              className="w-10 h-10 flex items-center justify-center rounded-xl text-on-surface-variant hover:bg-surface-container-high hover:text-primary transition-all active:scale-95"
-              title={t.chat.input.addReferenceImage}
-            >
-              <PlusCircle size={24} />
-            </button>
-          )}
-
-          <input
             type="text"
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
             disabled={disabled}
             className="flex-1 bg-transparent border-none focus:ring-0 text-sm font-body text-on-surface placeholder:text-on-surface-variant/40 py-2 outline-none"
-            placeholder={isImageMode ? t.chat.input.imagePlaceholder : t.chat.input.placeholder}
+            placeholder={t.chat.input.placeholder}
           />
 
           <div className="flex items-center gap-1 pr-1">
@@ -226,7 +125,7 @@ export function InputBar({
                 <Mic size={20} />
               </button>
             )}
-            {isGenerating && !isImageMode ? (
+            {isGenerating ? (
               <button
                 type="button"
                 onClick={onStop}
@@ -241,15 +140,7 @@ export function InputBar({
                 className="h-10 px-4 rounded-xl text-on-primary font-bold text-xs flex items-center gap-2 hover:brightness-110 transition-all active:scale-95 shadow-lg shadow-primary-container/20 disabled:opacity-50"
                 style={{ background: 'var(--gradient-primary)' }}
               >
-                {isImageMode ? (
-                  <>
-                    {t.chat.input.generate} <Zap size={16} />
-                  </>
-                ) : (
-                  <>
-                    {t.chat.input.send} <Send size={16} />
-                  </>
-                )}
+                {t.chat.input.send} <Send size={16} />
               </button>
             )}
           </div>

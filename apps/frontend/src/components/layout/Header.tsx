@@ -10,7 +10,6 @@ export interface HeaderProps {
   activeModel: string;
   activeModels: ModelOption[];
   isModelSelectorDisabled: boolean;
-  composerMode: 'chat' | 'image';
   currentChatId: string | null;
   currentPage: 'chat' | 'gallery' | 'settings' | 'studio';
   onUpdateChatModel: (chatId: string, model: string) => void;

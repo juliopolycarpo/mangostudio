@@ -7,15 +7,13 @@ import { useToast } from '@/components/ui/Toast';
 import { useMessagesQuery } from '@/features/chat/queries';
 import { useI18n } from '@/hooks/use-i18n';
 import { authClient } from '@/lib/auth-client';
-import type { InteractionMode, ReasoningEffort } from '@mangostudio/shared';
+import type { ReasoningEffort } from '@mangostudio/shared';
 import type { ContextSettings } from '@mangostudio/shared/chat';
 import type { ContextInfo, FallbackNotice } from '@/features/generation/types';
 
 interface ChatPageProps {
   chatId: string | null;
-  composerMode: InteractionMode;
-  onModeChange: (mode: InteractionMode) => void;
-  onSubmit: (prompt: string, referenceImage?: File | null) => void;
+  onSubmit: (prompt: string) => void;
   disabled: boolean;
   isGenerating: boolean;
   onStop: () => void;
@@ -37,8 +35,6 @@ interface ChatPageProps {
 
 export function ChatPage({
   chatId,
-  composerMode,
-  onModeChange,
   onSubmit,
   disabled,
   isGenerating,
@@ -79,9 +75,7 @@ export function ChatPage({
     return `${chatId}:${contextInfo.mode}:${contextInfo.estimatedInputTokens}`;
   }, [chatId, contextInfo]);
   const hasContextWarning =
-    composerMode === 'chat' &&
-    !!contextInfo &&
-    contextInfo.estimatedUsageRatio >= contextSettings.warningThreshold;
+    !!contextInfo && contextInfo.estimatedUsageRatio >= contextSettings.warningThreshold;
   const isDanger =
     !!contextInfo && contextInfo.estimatedUsageRatio >= contextSettings.dangerThreshold;
   const isCritical =
@@ -182,18 +176,12 @@ export function ChatPage({
               {
                 text: t.chat.suggestion4,
                 icon: <Image size={14} />,
-                action: () => {
-                  onModeChange('image');
-                },
               },
             ].map((chip) => (
               <button
                 key={chip.text}
                 type="button"
-                onClick={() => {
-                  chip.action?.();
-                  if (!chip.action) onSubmit(chip.text);
-                }}
+                onClick={() => onSubmit(chip.text)}
                 className="glass-surface flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-body text-on-surface-variant border border-outline-variant/20 hover:border-outline-variant/40 hover:text-on-surface transition-colors duration-200 cursor-pointer"
               >
                 {chip.icon}
@@ -234,8 +222,6 @@ export function ChatPage({
         </div>
       )}
       <InputBar
-        composerMode={composerMode}
-        onModeChange={onModeChange}
         onSubmit={onSubmit}
         disabled={disabled}
         submitDisabled={requiresDecision || isContextActionPending}

@@ -67,7 +67,6 @@ function AuthenticatedLayout() {
           activeModel={app.activeModel}
           activeModels={app.activeModels}
           isModelSelectorDisabled={app.isModelSelectorDisabled}
-          composerMode={app.composerMode}
           currentChatId={app.currentChatId}
           currentPage={activePage}
           onUpdateChatModel={(chatId, model) => void app.handleUpdateChatModel(chatId, model)}
