@@ -135,10 +135,13 @@ export function ChatFeed({ chatId, messages }: { chatId: string | null; messages
   const pendingScrollToBottomRef = useRef(true);
   const previousChatIdRef = useRef<string | null>(chatId);
 
+  const getScrollElement = useCallback(() => parentRef.current, []);
+  const estimateSize = useCallback(() => 150, []);
+
   const rowVirtualizer = useVirtualizer({
     count: messages.length,
-    getScrollElement: () => parentRef.current,
-    estimateSize: () => 150,
+    getScrollElement,
+    estimateSize,
     overscan: 5,
   });
   const latestMessage = messages.at(-1);
@@ -195,8 +198,14 @@ export function ChatFeed({ chatId, messages }: { chatId: string | null; messages
 
   const handleFeedScroll = (event: React.UIEvent<HTMLElement>) => {
     const nearBottom = isNearBottom(event.currentTarget);
-    feedShouldAutoFollowRef.current = nearBottom;
-    setShowScrollButton(!nearBottom);
+    if (!nearBottom) {
+      feedShouldAutoFollowRef.current = false;
+    } else {
+      feedShouldAutoFollowRef.current = true;
+    }
+    // Suppress the button while auto-following so transient position
+    // changes during content growth (e.g. image loads) don't flash it.
+    setShowScrollButton(!feedShouldAutoFollowRef.current && !nearBottom);
   };
 
   const handleScrollToBottom = () => {
