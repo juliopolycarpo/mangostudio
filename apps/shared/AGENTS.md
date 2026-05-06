@@ -4,7 +4,7 @@ Read `../../AGENTS.md` first. This file only adds shared-workspace entrypoints, 
 
 ## Start Here
 
-- Contracts: `src/contracts/index.ts`, `src/contracts/errors.ts`
+- Contracts: `src/contracts/index.ts`
 - Domain types: `src/types/index.ts`
 - i18n: `src/i18n/pt-BR.ts`, `src/i18n/en.ts`, `src/i18n/types.ts`
 - Utilities: `src/utils/model-detection.ts`

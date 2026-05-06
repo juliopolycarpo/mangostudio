@@ -39,7 +39,7 @@ Useful docs:
 - Any frontend file that contains JSX must use the `.tsx` extension.
 - All user-visible frontend strings must come from `@mangostudio/shared/i18n`.
 - Public API shape changes must update the API code, shared contract, frontend consumer, and relevant tests in the same task.
-- API error responses must use `ApiErrorResponse` from `@mangostudio/shared/contracts` or `SSEErrorEvent` from `@mangostudio/shared/contracts/errors`.
+- API error responses must use `ApiErrorResponse` from `@mangostudio/shared/contracts` or `SSEErrorEvent` from `@mangostudio/shared/streaming`.
 - Add new environment parsing only in `apps/api/src/lib/config.ts`.
 - Shared code must remain framework-agnostic.
 - Cross-workspace imports must use package names, never relative paths.
