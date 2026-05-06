@@ -132,6 +132,31 @@ describe('ChatFeed — MessageParts interleaved rendering', () => {
     expect(screen.getByText('Plain text response.')).toBeInTheDocument();
   });
 
+  it('renders the create-image badge on legacy user image messages', () => {
+    const msg = makeMessage({ role: 'user', interactionMode: 'image', text: 'a cat' });
+
+    render(<ChatFeed chatId="chat-1" messages={[msg]} />);
+
+    expect(screen.getByText('Create Image')).toBeInTheDocument();
+  });
+
+  it('renders legacy assistant image messages with imageUrl and style params', () => {
+    const msg = makeMessage({
+      interactionMode: 'image',
+      imageUrl: '/images/generated-123.png',
+      generationTime: '1.2s',
+      modelName: 'gpt-image-2',
+      styleParams: ['1K'],
+    });
+
+    render(<ChatFeed chatId="chat-1" messages={[msg]} />);
+
+    expect(screen.getByText(/Generated/)).toBeInTheDocument();
+    expect(screen.getByAltText('Generated')).toHaveAttribute('src', '/images/generated-123.png');
+    expect(screen.getByText(/Thought for/)).toBeInTheDocument();
+    expect(screen.getByText('1K')).toBeInTheDocument();
+  });
+
   it('renders generated images from the /images route', () => {
     const msg = makeMessage({
       interactionMode: 'image',
