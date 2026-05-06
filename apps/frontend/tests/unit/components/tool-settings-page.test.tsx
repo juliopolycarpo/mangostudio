@@ -277,4 +277,68 @@ describe('ToolSettingsPage', () => {
     expect(await screen.findByText('Imagen 3')).toBeInTheDocument();
     expect(screen.getByText('DALL-E 3')).toBeInTheDocument();
   });
+
+  it('disables quality dropdown when letAiDecideQuality is checked', async () => {
+    const user = userEvent.setup();
+
+    const TOOLS_WITH_LET_AI_DECIDE = {
+      tools: [
+        {
+          name: 'generate_image',
+          title: 'Image generation',
+          description: 'Generate images from text.',
+          category: 'image',
+          enabled: true,
+          canDisable: true,
+          parameters: {
+            defaultQuality: '1K',
+            letAiDecideQuality: false,
+          },
+          parameterDescriptors: [
+            {
+              name: 'letAiDecideQuality',
+              label: 'Let AI decide quality',
+              description: 'When enabled, the AI can choose different image sizes per request.',
+              type: 'boolean',
+              required: true,
+              defaultValue: false,
+            },
+            {
+              name: 'defaultQuality',
+              label: 'Default image quality',
+              description: 'Quality used when the model does not request one.',
+              type: 'select',
+              required: true,
+              defaultValue: '1K',
+              options: [
+                { value: '512px', label: '512px' },
+                { value: '1K', label: '1K' },
+                { value: '2K', label: '2K' },
+                { value: '4K', label: '4K' },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+
+    fetchScenario.respondWithJson('GET', '/api/settings/tools', {
+      body: TOOLS_WITH_LET_AI_DECIDE,
+    });
+
+    render(<ToolSettingsPage maxToolIterations={10} setMaxToolIterations={setMaxToolIterations} />);
+
+    await screen.findByText('Image generation');
+
+    // Quality select should be enabled initially (letAiDecideQuality is false)
+    const qualitySelect = screen.getByRole('combobox');
+    expect(qualitySelect).not.toBeDisabled();
+
+    // Check the "Let AI decide quality" checkbox
+    const letAiCheckbox = screen.getByLabelText('Let AI decide quality');
+    await user.click(letAiCheckbox);
+
+    // Quality select should now be disabled
+    expect(qualitySelect).toBeDisabled();
+  });
 });

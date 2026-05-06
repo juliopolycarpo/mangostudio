@@ -46,6 +46,20 @@ export function ToolParameterField({
     return { models, groups };
   }, [catalog.imageModels]);
 
+  const label = useMemo(() => {
+    if (descriptor.name === 'letAiDecideQuality') {
+      return t.settings.tools.letAiDecideQualityLabel;
+    }
+    return descriptor.label;
+  }, [descriptor.name, descriptor.label, t]);
+
+  const description = useMemo(() => {
+    if (descriptor.name === 'letAiDecideQuality') {
+      return t.settings.tools.letAiDecideQualityDescription;
+    }
+    return descriptor.description;
+  }, [descriptor.name, descriptor.description, t]);
+
   const baseInputClass =
     'w-full rounded-xl px-4 py-2.5 text-sm bg-surface-container-lowest text-on-surface border border-outline-variant/20 placeholder:text-on-surface/30 focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed';
 
@@ -55,9 +69,7 @@ export function ToolParameterField({
   if (descriptor.modelType === 'image') {
     return (
       <div className="space-y-1">
-        {descriptor.label && (
-          <label className="text-sm text-on-surface-variant">{descriptor.label}</label>
-        )}
+        {label && <label className="text-sm text-on-surface-variant">{label}</label>}
         <select
           value={toSafeString(descriptorValue)}
           onChange={(e) => onChange(e.target.value)}
@@ -90,7 +102,7 @@ export function ToolParameterField({
             disabled={disabled}
             className="h-4 w-4 rounded border-outline-variant/30 accent-primary disabled:opacity-50 disabled:cursor-not-allowed"
           />
-          {descriptor.label}
+          {label}
         </label>
       );
     }
@@ -98,9 +110,7 @@ export function ToolParameterField({
     case 'number': {
       return (
         <div className="space-y-1">
-          {descriptor.label && (
-            <label className="text-sm text-on-surface-variant">{descriptor.label}</label>
-          )}
+          {label && <label className="text-sm text-on-surface-variant">{label}</label>}
           <input
             type="number"
             min={descriptor.min}
@@ -109,7 +119,7 @@ export function ToolParameterField({
             value={descriptorValue === '' ? '' : Number(descriptorValue)}
             onChange={(e) => onChange(e.target.value ? Number(e.target.value) : undefined)}
             disabled={disabled}
-            placeholder={descriptor.description}
+            placeholder={description}
             className={baseInputClass}
           />
         </div>
@@ -119,9 +129,7 @@ export function ToolParameterField({
     case 'select': {
       return (
         <div className="space-y-1">
-          {descriptor.label && (
-            <label className="text-sm text-on-surface-variant">{descriptor.label}</label>
-          )}
+          {label && <label className="text-sm text-on-surface-variant">{label}</label>}
           <select
             value={toSafeString(descriptorValue)}
             onChange={(e) => onChange(e.target.value)}
@@ -141,15 +149,13 @@ export function ToolParameterField({
     default: {
       return (
         <div className="space-y-1">
-          {descriptor.label && (
-            <label className="text-sm text-on-surface-variant">{descriptor.label}</label>
-          )}
+          {label && <label className="text-sm text-on-surface-variant">{label}</label>}
           <input
             type="text"
             value={toSafeString(descriptorValue)}
             onChange={(e) => onChange(e.target.value)}
             disabled={disabled}
-            placeholder={descriptor.description}
+            placeholder={description}
             className={baseInputClass}
           />
         </div>

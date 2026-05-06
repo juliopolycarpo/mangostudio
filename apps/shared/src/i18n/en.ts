@@ -343,6 +343,9 @@ export const messages: Messages = {
       maxToolIterationsHint: '{value} of 25',
       executionTitle: 'Execution',
       autoModelOption: 'Auto (first available)',
+      letAiDecideQualityLabel: 'Let AI decide quality',
+      letAiDecideQualityDescription:
+        'When enabled, the AI can choose different image sizes per request.',
     },
     appearance: {
       title: 'Appearance',

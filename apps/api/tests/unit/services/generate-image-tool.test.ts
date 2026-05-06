@@ -47,7 +47,7 @@ describe('generate_image tool planning', () => {
     });
   });
 
-  it('lets call arguments override configured defaults', () => {
+  it('lets call arguments override configured defaults when letAiDecideQuality is enabled', () => {
     const plan = createGenerateImageToolPlan(
       { prompt: 'Render a studio', count: 3, quality: '4K', model: 'custom-image-model' },
       {
@@ -56,6 +56,7 @@ describe('generate_image tool planning', () => {
           defaultQuality: '512px',
           maxImagesPerCall: 4,
           defaultModel: GENERATE_IMAGE_AUTO_MODEL,
+          letAiDecideQuality: true,
         },
         imageIds: ['image-a', 'image-b', 'image-c'],
       }
@@ -66,6 +67,27 @@ describe('generate_image tool planning', () => {
       quality: '4K',
       requestedModel: 'custom-image-model',
       imageIds: ['image-a', 'image-b', 'image-c'],
+    });
+  });
+
+  it('ignores model quality argument when letAiDecideQuality is disabled', () => {
+    const plan = createGenerateImageToolPlan(
+      { prompt: 'Render a studio', count: 3, quality: '4K', model: 'custom-image-model' },
+      {
+        toolCallId: 'tool-3b',
+        parameters: {
+          defaultQuality: '2K',
+          maxImagesPerCall: 4,
+          defaultModel: GENERATE_IMAGE_AUTO_MODEL,
+          letAiDecideQuality: false,
+        },
+        imageIds: ['image-1'],
+      }
+    );
+
+    expect(plan).toMatchObject({
+      count: 3,
+      quality: '2K',
     });
   });
 
@@ -80,13 +102,30 @@ describe('generate_image tool planning', () => {
         { toolCallId: 'tool-4', parameters: {} }
       )
     ).toThrow('Image count must be at least 1.');
+  });
 
+  it('rejects invalid model quality when letAiDecideQuality is enabled', () => {
     expect(() =>
       createGenerateImageToolPlan(
         { prompt: 'Paint', quality: '8K' },
-        { toolCallId: 'tool-4', parameters: {} }
+        {
+          toolCallId: 'tool-5',
+          parameters: { letAiDecideQuality: true },
+        }
       )
     ).toThrow('Unsupported image quality: "8K".');
+  });
+
+  it('ignores invalid model quality when letAiDecideQuality is disabled', () => {
+    const plan = createGenerateImageToolPlan(
+      { prompt: 'Paint', quality: '8K' },
+      {
+        toolCallId: 'tool-6',
+        parameters: { letAiDecideQuality: false, defaultQuality: '2K' },
+      }
+    );
+
+    expect(plan).toMatchObject({ quality: '2K' });
   });
 });
 

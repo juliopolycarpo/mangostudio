@@ -78,6 +78,7 @@ interface GenerateImageToolSettings {
   defaultQuality: string;
   maxImagesPerCall: number;
   defaultModel: string;
+  letAiDecideQuality: boolean;
 }
 
 const definition = buildDefinitionFromMaxImages(GENERATE_IMAGE_DEFAULT_MAX_IMAGES);
@@ -94,7 +95,10 @@ export function createGenerateImageToolPlan(
   const settings = normalizeGenerateImageToolSettings(input.parameters);
   const prompt = getRequiredString(args.prompt, 'prompt');
   const count = getRequestedImageCount(args.count, settings.maxImagesPerCall);
-  const quality = getImageQuality(args.quality, settings.defaultQuality);
+  const quality = getImageQuality(
+    settings.letAiDecideQuality ? args.quality : undefined,
+    settings.defaultQuality
+  );
   const model = getOptionalString(args.model) ?? settings.defaultModel;
   const imageIds = buildImageIds(count, input.imageIds);
 
@@ -236,8 +240,17 @@ export function register(): void {
         defaultQuality: GENERATE_IMAGE_DEFAULT_QUALITY,
         maxImagesPerCall: GENERATE_IMAGE_DEFAULT_MAX_IMAGES,
         defaultModel: GENERATE_IMAGE_AUTO_MODEL,
+        letAiDecideQuality: false,
       },
       parameterDescriptors: [
+        {
+          name: 'letAiDecideQuality',
+          label: 'Let AI decide quality',
+          description: 'When enabled, the AI can choose different image sizes per request.',
+          type: 'boolean',
+          required: true,
+          defaultValue: false,
+        },
         {
           name: 'defaultQuality',
           label: 'Default image quality',
@@ -313,8 +326,9 @@ function normalizeGenerateImageToolSettings(
   const defaultQuality = getImageQuality(undefined, parameters.defaultQuality);
   const maxImagesPerCall = getSettingsMaxImages(parameters.maxImagesPerCall);
   const defaultModel = getOptionalString(parameters.defaultModel) ?? GENERATE_IMAGE_AUTO_MODEL;
+  const letAiDecideQuality = parameters.letAiDecideQuality === true;
 
-  return { defaultQuality, maxImagesPerCall, defaultModel };
+  return { defaultQuality, maxImagesPerCall, defaultModel, letAiDecideQuality };
 }
 
 function getRequestedImageCount(value: unknown, maxImagesPerCall: number): number {
