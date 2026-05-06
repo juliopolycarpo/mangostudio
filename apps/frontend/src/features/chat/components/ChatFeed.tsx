@@ -142,6 +142,12 @@ export function ChatFeed({ chatId, messages }: { chatId: string | null; messages
     overscan: 5,
   });
   const latestMessage = messages.at(-1);
+  const latestMessageId = latestMessage?.id ?? null;
+  const latestIsGenerating = latestMessage?.isGenerating ?? false;
+  // Track content length as a primitive to avoid the streaming scroll effect
+  // re-firing on every in-place part update (e.g. image completion events).
+  const latestPartsCount = latestMessage?.parts?.length ?? 0;
+  const latestTextLen = latestMessage?.text?.length ?? 0;
 
   useEffect(() => {
     if (previousChatIdRef.current !== chatId) {
@@ -160,23 +166,32 @@ export function ChatFeed({ chatId, messages }: { chatId: string | null; messages
       pendingScrollToBottomRef.current = false;
     });
     return () => cancelAnimationFrame(animationFrameId);
-  }, [chatId, messages.length, rowVirtualizer]);
+  }, [chatId, messages.length]);
 
+  // Keep auto-follow during streaming, but defer the scroll so the
+  // virtualizer can complete its layout pass before we adjust position.
+  // Using primitive deps avoids re-firing on in-place part replacements
+  // (e.g. when an image generation placeholder resolves to a real URL).
   useLayoutEffect(() => {
     const isNewGeneratingMessage =
-      latestMessage?.isGenerating && previousGeneratingMessageIdRef.current !== latestMessage.id;
+      latestIsGenerating && previousGeneratingMessageIdRef.current !== latestMessageId;
     if (isNewGeneratingMessage) {
       feedShouldAutoFollowRef.current = true;
     }
-    if (!latestMessage?.isGenerating || !parentRef.current) return;
+    if (!latestIsGenerating || !parentRef.current) return;
     if (feedShouldAutoFollowRef.current) {
-      parentRef.current.scrollTop = parentRef.current.scrollHeight;
+      const rafId = requestAnimationFrame(() => {
+        if (parentRef.current && feedShouldAutoFollowRef.current) {
+          parentRef.current.scrollTop = parentRef.current.scrollHeight;
+        }
+      });
+      return () => cancelAnimationFrame(rafId);
     }
-  }, [latestMessage?.id, latestMessage?.isGenerating, latestMessage?.parts, latestMessage?.text]);
+  }, [latestMessageId, latestIsGenerating, latestPartsCount, latestTextLen]);
 
   useEffect(() => {
-    previousGeneratingMessageIdRef.current = latestMessage?.isGenerating ? latestMessage.id : null;
-  }, [latestMessage?.id, latestMessage?.isGenerating, latestMessage?.parts, latestMessage?.text]);
+    previousGeneratingMessageIdRef.current = latestIsGenerating ? latestMessageId : null;
+  }, [latestMessageId, latestIsGenerating]);
 
   const handleFeedScroll = (event: React.UIEvent<HTMLElement>) => {
     const nearBottom = isNearBottom(event.currentTarget);
