@@ -13,6 +13,7 @@ import { resolveActiveModeModel } from '@/utils/model-utils';
 
 export function useAppState() {
   const [composerMode, setComposerMode] = useState<InteractionMode>('chat');
+  const [imageToolIntent, setImageToolIntent] = useState(false);
 
   const chats = useChats();
   const catalog = useModelCatalog();
@@ -145,14 +146,20 @@ export function useAppState() {
 
   const handleSubmit = useCallback(
     (prompt: string, referenceImage?: File | null) => {
-      if (composerMode === 'chat') return handleRespond(prompt);
+      if (composerMode === 'chat') {
+        const intent = imageToolIntent ? ('image_generation_requested' as const) : undefined;
+        void handleRespond(prompt, intent);
+        setImageToolIntent(false);
+        return;
+      }
       return handleGenerate(prompt, referenceImage);
     },
-    [composerMode, handleRespond, handleGenerate]
+    [composerMode, handleRespond, handleGenerate, imageToolIntent]
   );
 
   return {
     composerMode,
+    imageToolIntent,
     isGenerating,
     chats: chats.chats,
     currentChatId: chats.currentChatId,
@@ -169,6 +176,7 @@ export function useAppState() {
     lockedProvider,
 
     setComposerMode,
+    setImageToolIntent,
     handleNewChat,
     handleUpdateChatModel,
     handleUpdateChatTitle,
@@ -176,7 +184,10 @@ export function useAppState() {
     handleSelectChat,
     handleNavigate,
     handleSubmit,
-    handleStop: textGen.handleStop,
+    handleStop: () => {
+      textGen.handleStop();
+      setImageToolIntent(false);
+    },
     handleCompactCurrentChat: textGen.handleCompactCurrentChat,
     handleStartSummarizedChat: textGen.handleStartSummarizedChat,
     refreshCatalog: catalog.refreshCatalog,

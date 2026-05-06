@@ -35,6 +35,8 @@ function ChatRoute() {
       isContextActionPending={app.isContextActionPending}
       onCompactCurrentChat={app.handleCompactCurrentChat}
       onStartSummarizedChat={app.handleStartSummarizedChat}
+      imageToolIntent={app.imageToolIntent}
+      onImageToolIntentChange={app.setImageToolIntent}
     />
   );
 }

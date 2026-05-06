@@ -204,6 +204,7 @@ export const respondStreamRoutes = (app: Elysia) =>
                     reasoningEffort: body.reasoningEffort,
                     maxToolIterations: body.maxToolIterations,
                     contextSettings: body.contextSettings,
+                    toolIntent: body.toolIntent,
                     signal: abortController.signal,
                   },
                   db

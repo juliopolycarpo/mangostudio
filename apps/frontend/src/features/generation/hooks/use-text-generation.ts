@@ -7,6 +7,7 @@ import type {
   MessagePart,
   ReasoningEffort,
 } from '@mangostudio/shared';
+import type { ToolIntent } from '@mangostudio/shared/generation';
 import type { PromptSettings } from '@mangostudio/shared/prompt-rules';
 import type { ContextCompactionResponse, ContextSettings } from '@mangostudio/shared/chat';
 import { messageKeys } from '@/features/chat/queries';
@@ -93,7 +94,7 @@ export function useTextGeneration({
   );
 
   const handleRespond = useCallback(
-    async (prompt: string) => {
+    async (prompt: string, toolIntent?: ToolIntent) => {
       if (stream.abortControllerRef.current) return;
       stream.setIsGenerating(true);
 
@@ -150,6 +151,7 @@ export function useTextGeneration({
             reasoningEffort,
             maxToolIterations,
             contextSettings,
+            toolIntent,
           },
           (chunk) => {
             switch (chunk.type) {
