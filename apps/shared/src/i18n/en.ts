@@ -342,6 +342,10 @@ export const messages: Messages = {
         'Upper bound on how many tool-calling rounds the model may take in a single turn.',
       maxToolIterationsHint: '{value} of 25',
       executionTitle: 'Execution',
+      autoModelOption: 'Auto (first available)',
+      letAiDecideQualityLabel: 'Let AI decide quality',
+      letAiDecideQualityDescription:
+        'When enabled, the AI can choose different image sizes per request.',
     },
     appearance: {
       title: 'Appearance',

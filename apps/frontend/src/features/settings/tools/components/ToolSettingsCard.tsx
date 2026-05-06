@@ -78,15 +78,19 @@ export function ToolSettingsCard({ descriptor }: ToolSettingsCardProps) {
 
       {hasParamChanges && (
         <div className="space-y-3 pt-2 border-t border-outline-variant/10">
-          {descriptor.parameterDescriptors.map((pd) => (
-            <ToolParameterField
-              key={pd.name}
-              descriptor={pd}
-              value={params[pd.name]}
-              onChange={(v) => handleParamChange(pd.name, v)}
-              disabled={!enabled}
-            />
-          ))}
+          {descriptor.parameterDescriptors.map((pd) => {
+            const qualityDisabled =
+              pd.name === 'defaultQuality' && params.letAiDecideQuality === true;
+            return (
+              <ToolParameterField
+                key={pd.name}
+                descriptor={pd}
+                value={params[pd.name]}
+                onChange={(v) => handleParamChange(pd.name, v)}
+                disabled={!enabled || qualityDisabled}
+              />
+            );
+          })}
           <Button
             variant="secondary"
             size="sm"

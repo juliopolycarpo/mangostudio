@@ -346,6 +346,10 @@ export const messages = {
         'Limite máximo de rodadas de chamada de ferramentas que o modelo pode executar em um turno.',
       maxToolIterationsHint: '{value} de 25',
       executionTitle: 'Execução',
+      autoModelOption: 'Automático (primeiro disponível)',
+      letAiDecideQualityLabel: 'IA decide a qualidade',
+      letAiDecideQualityDescription:
+        'Quando ativado, a IA pode escolher diferentes tamanhos de imagem por solicitação.',
     },
     appearance: {
       title: 'Aparência',
