@@ -1,18 +1,15 @@
 import { useState, useCallback, useMemo, useEffect } from 'react';
 import type { ProviderType } from '@mangostudio/shared';
 import { useNavigate } from '@tanstack/react-router';
-import type { InteractionMode } from '@mangostudio/shared';
 import { useChats } from '@/features/chat/hooks/use-chats';
 import { useModelCatalog } from './use-model-catalog';
 import { useGlobalSettings } from './use-global-settings';
 import { useOptimisticMessages } from '@/features/generation/hooks/use-optimistic-messages';
 import { useTextGeneration } from '@/features/generation/hooks/use-text-generation';
-import { useImageGeneration } from '@/features/generation/hooks/use-image-generation';
 import { useProviderSettings } from '@/features/settings/providers/hooks/use-provider-settings';
 import { resolveActiveModeModel } from '@/utils/model-utils';
 
 export function useAppState() {
-  const [composerMode, setComposerMode] = useState<InteractionMode>('chat');
   const [imageToolIntent, setImageToolIntent] = useState(false);
 
   const chats = useChats();
@@ -21,24 +18,12 @@ export function useAppState() {
   const navigate = useNavigate();
   const optimistic = useOptimisticMessages();
 
-  const activeModels = useMemo(
-    () => (composerMode === 'chat' ? catalog.catalog.textModels : catalog.catalog.imageModels),
-    [composerMode, catalog.catalog.textModels, catalog.catalog.imageModels]
-  );
+  const activeModels = useMemo(() => catalog.catalog.textModels, [catalog.catalog.textModels]);
 
   const getActiveModel = useCallback(() => {
     const currentChat = chats.chats.find((c) => c.id === chats.currentChatId);
-    if (composerMode === 'chat') {
-      return resolveActiveModeModel(currentChat?.textModel, undefined, catalog.catalog.textModels);
-    }
-    return resolveActiveModeModel(currentChat?.imageModel, undefined, catalog.catalog.imageModels);
-  }, [
-    chats.chats,
-    chats.currentChatId,
-    composerMode,
-    catalog.catalog.textModels,
-    catalog.catalog.imageModels,
-  ]);
+    return resolveActiveModeModel(currentChat?.textModel, undefined, catalog.catalog.textModels);
+  }, [chats.chats, chats.currentChatId, catalog.catalog.textModels]);
 
   const activeModel = getActiveModel();
   const isModelSelectorDisabled = catalog.catalog.status !== 'ready' || activeModels.length === 0;
@@ -83,27 +68,18 @@ export function useAppState() {
     }
   }, [chatsList, seedContextInfo]);
 
-  const imageGen = useImageGeneration({
-    chats,
-    getActiveModel,
-    settings,
-    optimistic,
-  });
-
-  const isGenerating = textGen.isGenerating || imageGen.isGenerating;
+  const isGenerating = textGen.isGenerating;
 
   const handleNewChat = useCallback(async () => {
     await chats.createChat();
     await navigate({ to: '/' });
-    setComposerMode('chat');
   }, [chats, navigate]);
 
   const handleUpdateChatModel = useCallback(
     async (chatId: string, model: string) => {
-      const field = composerMode === 'chat' ? 'textModel' : 'imageModel';
-      await chats.updateChatModel(chatId, field, model);
+      await chats.updateChatModel(chatId, 'textModel', model);
     },
-    [chats, composerMode]
+    [chats]
   );
 
   const handleSelectChat = useCallback(
@@ -142,23 +118,17 @@ export function useAppState() {
   );
 
   const { handleRespond } = textGen;
-  const { handleGenerate } = imageGen;
 
   const handleSubmit = useCallback(
-    (prompt: string, referenceImage?: File | null) => {
-      if (composerMode === 'chat') {
-        const intent = imageToolIntent ? ('image_generation_requested' as const) : undefined;
-        void handleRespond(prompt, intent);
-        setImageToolIntent(false);
-        return;
-      }
-      return handleGenerate(prompt, referenceImage);
+    (prompt: string) => {
+      const intent = imageToolIntent ? ('image_generation_requested' as const) : undefined;
+      void handleRespond(prompt, intent);
+      setImageToolIntent(false);
     },
-    [composerMode, handleRespond, handleGenerate, imageToolIntent]
+    [handleRespond, imageToolIntent]
   );
 
   return {
-    composerMode,
     imageToolIntent,
     isGenerating,
     chats: chats.chats,
@@ -175,7 +145,6 @@ export function useAppState() {
     isContextActionPending: textGen.isContextActionPending,
     lockedProvider,
 
-    setComposerMode,
     setImageToolIntent,
     handleNewChat,
     handleUpdateChatModel,

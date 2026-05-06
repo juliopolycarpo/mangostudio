@@ -21,8 +21,6 @@ vi.mock('../../../src/lib/auth-client', () => ({
 function renderChatPage(overrides: Partial<React.ComponentProps<typeof ChatPage>> = {}) {
   const props: React.ComponentProps<typeof ChatPage> = {
     chatId: 'chat-1',
-    composerMode: 'chat',
-    onModeChange: vi.fn(),
     onSubmit: vi.fn(),
     disabled: false,
     isGenerating: false,
