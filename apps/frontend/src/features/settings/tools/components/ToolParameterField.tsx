@@ -2,7 +2,10 @@
  * Parameter input field generated from a descriptor.
  */
 
+import { useMemo } from 'react';
 import type { ToolParameterDescriptor } from '@mangostudio/shared/tool-settings';
+import { useI18n } from '@/hooks/use-i18n';
+import { useModelCatalog } from '@/hooks/use-model-catalog';
 
 interface ToolParameterFieldProps {
   descriptor: ToolParameterDescriptor;
@@ -24,10 +27,57 @@ export function ToolParameterField({
   onChange,
   disabled,
 }: ToolParameterFieldProps) {
+  const { t } = useI18n();
+  const { catalog } = useModelCatalog();
+
+  const imageModels = useMemo(() => {
+    const models = catalog.imageModels ?? [];
+    // Group by provider
+    const groups = new Map<string, typeof models>();
+    for (const m of models) {
+      const provider = m.provider ?? 'other';
+      const list = groups.get(provider);
+      if (list) {
+        list.push(m);
+      } else {
+        groups.set(provider, [m]);
+      }
+    }
+    return { models, groups };
+  }, [catalog.imageModels]);
+
   const baseInputClass =
     'w-full rounded-xl px-4 py-2.5 text-sm bg-surface-container-lowest text-on-surface border border-outline-variant/20 placeholder:text-on-surface/30 focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed';
 
   const descriptorValue = value ?? descriptor.defaultValue ?? '';
+
+  // Model selector: backed by the catalog, not static options
+  if (descriptor.modelType === 'image') {
+    return (
+      <div className="space-y-1">
+        {descriptor.label && (
+          <label className="text-sm text-on-surface-variant">{descriptor.label}</label>
+        )}
+        <select
+          value={toSafeString(descriptorValue)}
+          onChange={(e) => onChange(e.target.value)}
+          disabled={disabled}
+          className={baseInputClass}
+        >
+          <option value="auto">{t.settings.tools.autoModelOption}</option>
+          {[...imageModels.groups.entries()].map(([provider, models]) => (
+            <optgroup key={provider} label={provider}>
+              {models.map((m) => (
+                <option key={m.modelId} value={m.modelId}>
+                  {m.displayName}
+                </option>
+              ))}
+            </optgroup>
+          ))}
+        </select>
+      </div>
+    );
+  }
 
   switch (descriptor.type) {
     case 'boolean': {

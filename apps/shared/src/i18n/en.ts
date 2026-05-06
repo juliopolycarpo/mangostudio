@@ -342,6 +342,7 @@ export const messages: Messages = {
         'Upper bound on how many tool-calling rounds the model may take in a single turn.',
       maxToolIterationsHint: '{value} of 25',
       executionTitle: 'Execution',
+      autoModelOption: 'Auto (first available)',
     },
     appearance: {
       title: 'Appearance',

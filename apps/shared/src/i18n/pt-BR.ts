@@ -346,6 +346,7 @@ export const messages = {
         'Limite máximo de rodadas de chamada de ferramentas que o modelo pode executar em um turno.',
       maxToolIterationsHint: '{value} de 25',
       executionTitle: 'Execução',
+      autoModelOption: 'Automático (primeiro disponível)',
     },
     appearance: {
       title: 'Aparência',
