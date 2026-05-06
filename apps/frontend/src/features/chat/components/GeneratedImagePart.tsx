@@ -1,5 +1,6 @@
-import { Download, AlertCircle, Image, ImageOff } from 'lucide-react';
+import { Download, AlertCircle, Image, ImageOff, ChevronDown } from 'lucide-react';
 import { useState } from 'react';
+import { AnimatePresence, motion } from 'motion/react';
 import { useI18n } from '@/hooks/use-i18n';
 import type { GeneratedImagePart as GeneratedImagePartType } from '@mangostudio/shared';
 
@@ -10,35 +11,69 @@ interface Props {
 export function GeneratedImagePart({ part }: Props) {
   const { t } = useI18n();
   const [loadError, setLoadError] = useState(false);
+  const [collapsed, setCollapsed] = useState(false);
 
   if (part.status === 'completed' && part.imageUrl && !loadError) {
     const imageUrl = part.imageUrl;
+    const promptSnippet =
+      part.prompt && part.prompt.length > 80 ? `${part.prompt.slice(0, 80)}…` : part.prompt;
+
     return (
-      <div className="group relative bg-surface-container-lowest rounded-2xl overflow-hidden border border-outline-variant/10 shadow-sm max-w-md">
-        <img
-          src={imageUrl}
-          alt={t.chat.feed.generatedImageAlt}
-          className="w-full h-auto object-cover"
-          loading="lazy"
-          onError={() => setLoadError(true)}
-        />
-        <div className="absolute bottom-3 left-3 right-3 glass-panel rounded-xl p-2 flex justify-between items-center translate-y-12 opacity-0 group-hover:translate-y-0 group-hover:opacity-100 transition-all duration-300">
-          <button
-            type="button"
-            onClick={() => {
-              const link = document.createElement('a');
-              link.href = imageUrl;
-              link.download = `mango-art-${Date.now()}.png`;
-              document.body.appendChild(link);
-              link.click();
-              document.body.removeChild(link);
-            }}
-            className="w-8 h-8 rounded-lg flex items-center justify-center bg-surface-container-highest/40 hover:bg-primary/20 text-on-surface transition-colors"
-            title={t.chat.feed.download}
-          >
-            <Download size={14} />
-          </button>
-        </div>
+      <div className="bg-surface-container-lowest rounded-2xl overflow-hidden border border-outline-variant/10 shadow-sm max-w-md">
+        <button
+          type="button"
+          onClick={() => setCollapsed((v) => !v)}
+          className="w-full flex items-center gap-2.5 px-4 py-2.5 hover:bg-surface-container-high/50 transition-colors cursor-pointer"
+        >
+          <Image size={14} className="text-primary shrink-0" />
+          <span className="text-xs text-on-surface-variant/70 font-body truncate flex-1 text-left">
+            {promptSnippet || t.chat.feed.generatedImageAlt}
+          </span>
+          <ChevronDown
+            size={14}
+            className={`text-on-surface-variant/40 shrink-0 transition-transform duration-300 ${collapsed ? '' : 'rotate-180'}`}
+          />
+        </button>
+
+        <AnimatePresence initial={false}>
+          {!collapsed && (
+            <motion.div
+              key="image-content"
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              transition={{ duration: 0.2, ease: 'easeOut' }}
+            >
+              <div className="group relative">
+                <img
+                  src={imageUrl}
+                  alt={t.chat.feed.generatedImageAlt}
+                  className="w-full h-auto object-cover"
+                  loading="lazy"
+                  onError={() => setLoadError(true)}
+                />
+                <div className="absolute bottom-3 left-3 right-3 glass-panel rounded-xl p-2 flex justify-between items-center translate-y-12 opacity-0 group-hover:translate-y-0 group-hover:opacity-100 transition-all duration-300">
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      const link = document.createElement('a');
+                      link.href = imageUrl;
+                      link.download = `mango-art-${Date.now()}.png`;
+                      document.body.appendChild(link);
+                      link.click();
+                      document.body.removeChild(link);
+                    }}
+                    className="w-8 h-8 rounded-lg flex items-center justify-center bg-surface-container-highest/40 hover:bg-primary/20 text-on-surface transition-colors"
+                    title={t.chat.feed.download}
+                  >
+                    <Download size={14} />
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
     );
   }
