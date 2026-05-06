@@ -17,6 +17,8 @@ export interface ToolParameterDescriptor {
   min?: number;
   max?: number;
   options?: ReadonlyArray<ToolParameterOption>;
+  /** When set, the frontend renders a catalog-backed model selector. */
+  modelType?: 'image';
 }
 
 export interface ToolSettingsDescriptor {

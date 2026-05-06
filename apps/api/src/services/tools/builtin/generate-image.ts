@@ -264,6 +264,7 @@ export function register(): void {
           type: 'string',
           required: true,
           defaultValue: GENERATE_IMAGE_AUTO_MODEL,
+          modelType: 'image',
         },
       ],
     },

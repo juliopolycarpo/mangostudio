@@ -30,6 +30,7 @@ export const ToolParameterDescriptorSchema = Type.Object({
   min: Type.Optional(Type.Number()),
   max: Type.Optional(Type.Number()),
   options: Type.Optional(Type.Array(ToolParameterOptionSchema)),
+  modelType: Type.Optional(Type.Literal('image')),
 });
 
 export const ToolParametersSchema = Type.Record(Type.String(), Type.Unknown());
