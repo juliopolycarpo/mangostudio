@@ -1,4 +1,5 @@
 import { Type, type Static } from '@sinclair/typebox';
+import { ProviderTypeSchema } from '../provider-settings/schemas';
 
 const ContinuationReasonCodeSchema = Type.Union([
   Type.Literal('provider_changed'),
@@ -9,14 +10,6 @@ const ContinuationReasonCodeSchema = Type.Union([
   Type.Literal('cursor_invalid'),
   Type.Literal('tool_result_cursor_loss'),
   Type.Literal('envelope_malformed'),
-]);
-
-const ProviderTypeSchema = Type.Union([
-  Type.Literal('gemini'),
-  Type.Literal('openai'),
-  Type.Literal('openai-compatible'),
-  Type.Literal('anthropic'),
-  Type.Literal('deepseek'),
 ]);
 
 export const SSEContextEventSchema = Type.Object({

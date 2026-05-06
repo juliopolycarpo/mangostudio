@@ -5,7 +5,10 @@
 import type { ConnectorStatus } from '@mangostudio/shared';
 import { listAllSecretMetadata } from '../infrastructure/connector-repository';
 import { toConnector, isVisibleConnector } from '../domain/connector';
-import { getProvider, listRegisteredProviderTypes } from '../../../services/providers/registry';
+import {
+  getProvider,
+  listRegisteredProviderTypes,
+} from '../../../services/providers/core/provider-registry';
 
 export async function listConnectors(userId: string): Promise<ConnectorStatus> {
   await Promise.allSettled(

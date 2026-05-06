@@ -1,14 +1,14 @@
 import { afterEach, describe, expect, it, mock } from 'bun:test';
 import type { SecretMetadataRow } from '@mangostudio/shared/types';
 import type { SecretMetadataInput } from '../../../../src/services/secret-store/metadata';
-import { createProviderSecretService } from '../../../../src/services/providers/secret-service';
+import { createProviderSecretService } from '../../../../src/services/providers/core/secret-service';
 import { InMemorySecretStore } from '../../../support/mocks/mock-secret-store';
 import { getDb } from '../../../../src/db/database';
 import {
   validateOpenAIAuthContext,
   OpenAIAuthError,
   OpenAIConfigError,
-} from '../../../../src/services/providers/openai-provider';
+} from '../../../../src/services/providers/openai/index';
 
 const TEST_USER = 'test-user-openai';
 const NO_TOML = '/tmp/mangostudio-test-nonexistent-config.toml';
@@ -80,19 +80,20 @@ function makeOpenAIRow(overrides: Partial<SecretMetadataRow> = {}): SecretMetada
 
 describe('openai-provider', () => {
   it('providerType is openai', async () => {
-    const { openAIProvider } = await import('../../../../src/services/providers/openai-provider');
+    const { openAIProvider } = await import('../../../../src/services/providers/openai/index');
     expect(openAIProvider.providerType).toBe('openai');
   });
 
   it('is registered in the provider registry after import', async () => {
-    await import('../../../../src/services/providers/openai-provider');
-    const { getProvider } = await import('../../../../src/services/providers/registry');
+    await import('../../../../src/services/providers/openai/index');
+    const { getProvider } =
+      await import('../../../../src/services/providers/core/provider-registry');
     const provider = getProvider('openai');
     expect(provider.providerType).toBe('openai');
   });
 
   it('implements the required AIProvider methods', async () => {
-    const { openAIProvider } = await import('../../../../src/services/providers/openai-provider');
+    const { openAIProvider } = await import('../../../../src/services/providers/openai/index');
     expect(typeof openAIProvider.generateText).toBe('function');
     expect(typeof openAIProvider.listModels).toBe('function');
     expect(typeof openAIProvider.validateApiKey).toBe('function');
@@ -453,7 +454,7 @@ describe('openai-provider listModels filtering', () => {
       }),
     }));
 
-    const { openAIProvider } = await import('../../../../src/services/providers/openai-provider');
+    const { openAIProvider } = await import('../../../../src/services/providers/openai/index');
     (
       openAIProvider as unknown as Record<string, ((userId: string) => void) | undefined>
     ).invalidateModelCache?.('nonexistent-user-no-keys');

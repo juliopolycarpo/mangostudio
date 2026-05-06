@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'bun:test';
-import { listRegisteredProviderTypes } from '../../../../src/services/providers/registry';
+import { listRegisteredProviderTypes } from '../../../../src/services/providers/core/provider-registry';
 
 // Import providers to trigger their self-registration side effects
-import '../../../../src/services/providers/gemini-provider';
-import '../../../../src/services/providers/openai-compatible-provider';
-import '../../../../src/services/providers/anthropic-provider';
+import '../../../../src/services/providers/gemini/index';
+import '../../../../src/services/providers/openai-compatible/index';
+import '../../../../src/services/providers/anthropic/index';
 import '../../../../src/services/providers/deepseek/index';
 
 describe('listRegisteredProviderTypes', () => {

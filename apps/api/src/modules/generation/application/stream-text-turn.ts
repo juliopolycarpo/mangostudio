@@ -16,7 +16,7 @@ import { safeJsonParse } from '../../../lib/safe-parse';
 import { assertChatOwnership } from '../../chats/domain/chat-ownership';
 import { resolveModel } from './resolve-model';
 import { loadHistory, loadRichHistory } from '../../messages/infrastructure/message-repository';
-import { getProviderForModel } from '../../../services/providers/registry';
+import { getProviderForModel } from '../../../services/providers/core/provider-registry';
 import { mergeProviderRuntimeSettings } from '../../../services/providers/core/provider-settings-policy';
 import { getProviderSettings } from '../../provider-settings/infrastructure/provider-settings-repository';
 import { listSavedToolSettings } from '../../tool-settings/infrastructure/tool-settings-repository';
@@ -66,7 +66,7 @@ import {
   computeContextSnapshot,
   type ContextSeverity,
   type ContinuationDisplayMode,
-} from '../../../services/providers/context-policy';
+} from '../../../services/providers/core/context-policy';
 import { composePrompt } from '../../prompt-rules/application/prompt-composer';
 
 const TOOL_TIMEOUT_MS = 30_000;

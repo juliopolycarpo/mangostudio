@@ -3,7 +3,7 @@ import { isReasoningModel } from '@mangostudio/shared/utils/model-detection';
 import {
   extractReasoningFromCompleted,
   streamWithResponsesAPI,
-} from '../../../../src/services/providers/openai-provider';
+} from '../../../../src/services/providers/openai/index';
 import type { Responses } from 'openai/resources/responses/responses';
 import type { StreamingChunk } from '../../../../src/services/providers/types';
 

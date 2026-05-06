@@ -7,17 +7,20 @@ import { settingsRoutes } from '../../../src/routes/settings';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
 import { getDb } from '../../../src/db/database';
 import { upsertSecretMetadata } from '../../../src/services/secret-store/metadata';
-import { getProvider, registerProvider } from '../../../src/services/providers/registry';
+import {
+  getProvider,
+  registerProvider,
+} from '../../../src/services/providers/core/provider-registry';
 import type { AIProvider } from '../../../src/services/providers/types';
 import {
   OpenAIAuthError,
   OpenAIConfigError,
   validateOpenAIAuthContext,
-} from '../../../src/services/providers/openai-provider';
+} from '../../../src/services/providers/openai/index';
 import {
   validateBaseUrl,
   UnsafeBaseUrlError,
-} from '../../../src/services/providers/base-url-policy';
+} from '../../../src/services/providers/core/base-url-policy';
 
 // Capture real implementations before any test can override mock.module.
 // mock.restore() does NOT revert mock.module() overrides; explicit re-registration is required.
@@ -66,12 +69,12 @@ afterEach(async () => {
   restoreAuth?.();
   restoreAuth = null;
   // Restore real module bindings to prevent mock leakage into later test files.
-  await mock.module('../../../src/services/providers/openai-provider', () => ({
+  await mock.module('../../../src/services/providers/openai/index', () => ({
     validateOpenAIAuthContext: realValidateOpenAIAuthContext,
     OpenAIAuthError,
     OpenAIConfigError,
   }));
-  await mock.module('../../../src/services/providers/base-url-policy', () => ({
+  await mock.module('../../../src/services/providers/core/base-url-policy', () => ({
     validateBaseUrl: realValidateBaseUrl,
     UnsafeBaseUrlError,
   }));
@@ -343,7 +346,7 @@ describe('openai connector routes', () => {
     const COMPAT_BASE_URL = 'https://openrouter.ai/api/v1';
 
     // Mock validateBaseUrl to avoid DNS lookups in test
-    await mock.module('../../../src/services/providers/base-url-policy', () => ({
+    await mock.module('../../../src/services/providers/core/base-url-policy', () => ({
       validateBaseUrl: () => Promise.resolve(),
       UnsafeBaseUrlError: class UnsafeBaseUrlError extends Error {
         constructor(message: string) {
@@ -484,7 +487,7 @@ describe('openai connector routes', () => {
     const COMPAT_BASE_URL = 'https://api.deepseek.com/v1';
 
     // Mock validateBaseUrl
-    await mock.module('../../../src/services/providers/base-url-policy', () => ({
+    await mock.module('../../../src/services/providers/core/base-url-policy', () => ({
       validateBaseUrl: () => Promise.resolve(),
       UnsafeBaseUrlError: class UnsafeBaseUrlError extends Error {
         constructor(message: string) {
@@ -748,7 +751,7 @@ describe('openai project-scoped connector routes', () => {
 
   it('POST /settings/connectors returns 401 when OpenAI rejects credentials', async () => {
     // Stub validateOpenAIAuthContext at the module level so the route sees it.
-    await mock.module('../../../src/services/providers/openai-provider', () => ({
+    await mock.module('../../../src/services/providers/openai/index', () => ({
       validateOpenAIAuthContext: () =>
         Promise.reject(
           new OpenAIAuthError(
@@ -783,7 +786,7 @@ describe('openai project-scoped connector routes', () => {
   });
 
   it('POST /settings/connectors returns 403 when OpenAI denies org/project access', async () => {
-    await mock.module('../../../src/services/providers/openai-provider', () => ({
+    await mock.module('../../../src/services/providers/openai/index', () => ({
       validateOpenAIAuthContext: () =>
         Promise.reject(
           new OpenAIAuthError(

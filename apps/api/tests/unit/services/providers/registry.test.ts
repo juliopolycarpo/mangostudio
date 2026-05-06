@@ -4,7 +4,7 @@ import {
   getProvider,
   clearRegistry,
   listRegisteredProviderTypes,
-} from '../../../../src/services/providers/registry';
+} from '../../../../src/services/providers/core/provider-registry';
 import type { AIProvider } from '../../../../src/services/providers/types';
 
 function makeStubProvider(

@@ -5,7 +5,7 @@
  */
 
 import type { ModelCatalogResponse, ModelOption } from '@mangostudio/shared';
-import { listRegisteredProviderTypes, getProvider } from './registry';
+import { listRegisteredProviderTypes, getProvider } from './core/provider-registry';
 import { listAllSecretMetadata } from '../secret-store/metadata';
 import type { ModelInfo, AIProvider } from './types';
 import type { ProviderType } from '@mangostudio/shared/types';

@@ -3,13 +3,16 @@
  */
 
 import type { ProviderType } from '@mangostudio/shared/types';
-import { getProvider } from '../../../services/providers/registry';
+import { getProvider } from '../../../services/providers/core/provider-registry';
 import {
   validateOpenAIAuthContext,
   OpenAIAuthError,
   OpenAIConfigError,
-} from '../../../services/providers/openai-provider';
-import { validateBaseUrl, UnsafeBaseUrlError } from '../../../services/providers/base-url-policy';
+} from '../../../services/providers/openai/index';
+import {
+  validateBaseUrl,
+  UnsafeBaseUrlError,
+} from '../../../services/providers/core/base-url-policy';
 import { validateDeepSeekApiKey } from '../../../services/providers/deepseek/client';
 
 export { OpenAIAuthError, OpenAIConfigError, UnsafeBaseUrlError };

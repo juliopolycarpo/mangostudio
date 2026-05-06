@@ -2,7 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import {
   validateBaseUrl,
   UnsafeBaseUrlError,
-} from '../../../src/services/providers/base-url-policy';
+} from '../../../src/services/providers/core/base-url-policy';
 
 // Bun types Matchers methods as void, but .resolves/.rejects chains are Promises at runtime.
 // Cast to Promise<void> where needed to satisfy await-thenable without suppressions.

@@ -8,7 +8,7 @@ import {
   buildPersistedContextSnapshot,
   parsePersistedContextSnapshot,
   type ContextSnapshot,
-} from '../../../../src/services/providers/context-policy';
+} from '../../../../src/services/providers/core/context-policy';
 import type { ChatTurnContext } from '../../../../src/services/providers/types';
 
 describe('estimateTokenCount', () => {

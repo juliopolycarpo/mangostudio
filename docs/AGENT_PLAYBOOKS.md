@@ -107,7 +107,7 @@ Open these first:
 Open these first:
 
 - `apps/shared/src/contracts/index.ts`
-- `apps/shared/src/contracts/errors.ts`
+- `apps/shared/src/errors/contracts.ts`
 - `apps/shared/src/types/index.ts`
 - `apps/shared/src/i18n/pt-BR.ts`
 - `apps/shared/src/i18n/en.ts`

@@ -24,6 +24,7 @@ import {
   type ResponseStreamEvent,
 } from './normalizers';
 import type { TextGenerationRequest, StreamingChunk, AgentTurnRequest, AgentEvent } from '../types';
+import type { ReasoningEffort } from '@mangostudio/shared';
 import { parseJsonWith } from '../../../lib/safe-parse';
 
 // ---------------------------------------------------------------------------
@@ -511,7 +512,9 @@ export async function* streamAgentTurnWithResponsesAPI(
   yield { type: 'turn_completed', providerState: serializeContinuationEnvelope(envelope) };
 }
 
-function normalizeOpenAIReasoningEffort(effort: string): 'low' | 'medium' | 'high' | 'xhigh' {
+function normalizeOpenAIReasoningEffort(
+  effort: ReasoningEffort
+): 'low' | 'medium' | 'high' | 'xhigh' {
   if (effort === 'low' || effort === 'medium' || effort === 'high' || effort === 'xhigh') {
     return effort;
   }

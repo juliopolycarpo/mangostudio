@@ -245,7 +245,7 @@ describe('GeminiProvider.generateTextStream', () => {
 
 describe('GeminiProvider generateTextStream delegation', () => {
   it('generateTextStream is defined on the provider', async () => {
-    const { geminiProvider } = await import('../../../../src/services/providers/gemini-provider');
+    const { geminiProvider } = await import('../../../../src/services/providers/gemini/index');
     expect(typeof geminiProvider.generateTextStream).toBe('function');
   });
 
@@ -262,7 +262,7 @@ describe('GeminiProvider generateTextStream delegation', () => {
       getResolvedGeminiApiKey: () => Promise.resolve('mock-api-key'),
     }));
 
-    const { geminiProvider } = await import('../../../../src/services/providers/gemini-provider');
+    const { geminiProvider } = await import('../../../../src/services/providers/gemini/index');
 
     if (!geminiProvider.generateTextStream) {
       throw new Error('geminiProvider.generateTextStream must be implemented');

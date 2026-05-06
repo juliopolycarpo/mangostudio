@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { withModelCache } from '../../../../src/services/providers/model-cache';
+import { withModelCache } from '../../../../src/services/providers/core/model-cache';
 
 describe('withModelCache', () => {
   it('invalidates a cached user entry and refetches models', async () => {

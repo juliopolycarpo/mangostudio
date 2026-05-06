@@ -36,7 +36,7 @@ describe('respond-stream abort signal', () => {
     let receivedSignal: AbortSignal | undefined;
     let signalAbortedDuringStream = false;
 
-    await mock.module('../../../../src/services/providers/registry', () => ({
+    await mock.module('../../../../src/services/providers/core/provider-registry', () => ({
       getProviderForModel: () =>
         Promise.resolve({
           providerType: 'openai-compatible',
@@ -84,7 +84,7 @@ describe('respond-stream abort signal', () => {
   it('stream cancel callback aborts the signal', async () => {
     const aborted: boolean[] = [];
 
-    await mock.module('../../../../src/services/providers/registry', () => ({
+    await mock.module('../../../../src/services/providers/core/provider-registry', () => ({
       getProviderForModel: () =>
         Promise.resolve({
           providerType: 'openai-compatible',

@@ -3,7 +3,7 @@ import type { Database } from '../../../db/types';
 import { assertChatOwnership } from '../../chats/domain/chat-ownership';
 import { resolveModel } from './resolve-model';
 import { loadHistory } from '../../messages/infrastructure/message-repository';
-import { getProviderForModel } from '../../../services/providers/registry';
+import { getProviderForModel } from '../../../services/providers/core/provider-registry';
 import { generateId } from '../../../utils/id';
 import {
   persistUserMessage,

@@ -5,7 +5,7 @@ import {
   createAuthenticatedApiTestApp,
 } from '../../support/harness/create-api-test-app';
 import { getDb } from '../../../src/db/database';
-import { buildPersistedContextSnapshot } from '../../../src/services/providers/context-policy';
+import { buildPersistedContextSnapshot } from '../../../src/services/providers/core/context-policy';
 import {
   getProvider,
   registerProvider,

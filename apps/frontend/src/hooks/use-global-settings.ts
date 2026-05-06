@@ -1,27 +1,13 @@
 import { useState, useCallback, useEffect } from 'react';
 import type { ReasoningEffort } from '@mangostudio/shared';
 import type { ContextCompactionBehavior, ContextSettings } from '@mangostudio/shared/chat';
+import type {
+  PromptInjectionRole,
+  PromptSendFrequency,
+  RuleFileSetting,
+  PromptSettings,
+} from '@mangostudio/shared/prompt-rules';
 import { readStorage, writeStorage } from '@/lib/storage';
-
-export type PromptInjectionRole = 'system' | 'user';
-export type PromptSendFrequency = 'first-turn' | 'every-turn';
-
-export interface RuleFileSetting {
-  id: string;
-  label: string;
-  path: string;
-  enabled: boolean;
-  injectionRole: PromptInjectionRole;
-  sendFrequency: PromptSendFrequency;
-}
-
-export interface PromptSettings {
-  textSystemPrompt: string;
-  imageSystemPrompt: string;
-  agentsMd: RuleFileSetting;
-  claudeMd: RuleFileSetting;
-  customRules: RuleFileSetting[];
-}
 
 export const DEFAULT_PROMPT_SETTINGS: PromptSettings = {
   textSystemPrompt: '',
