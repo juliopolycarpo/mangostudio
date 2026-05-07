@@ -1,4 +1,5 @@
 import type { Kysely } from 'kysely';
+import type { ChatAttachment } from '@mangostudio/shared/chat';
 import type { Database } from '../../../db/types';
 import type {
   GalleryItem,
@@ -8,6 +9,7 @@ import type {
 } from '@mangostudio/shared/types';
 import { boolToInt, serializeStyleParams, parseStyleParams } from '../../../db/serializers';
 import { listGeneratedImagesByMessageIds } from '../../generated-images/infrastructure/generated-image-repository';
+import { listAttachmentsByMessageIds } from '../../attachments/infrastructure/attachment-repository';
 
 export interface CreateMessageData {
   id: string;
@@ -68,6 +70,7 @@ export interface MappedMessage {
   parts: MessagePart[] | undefined;
   providerState: string | null;
   generatedImages: GeneratedImageArtifact[] | undefined;
+  attachments: ChatAttachment[] | undefined;
 }
 
 export interface SimpleTurn {
@@ -104,7 +107,8 @@ const CONTEXT_BOUNDARY_EVENTS = new Set(['chat_compacted', 'summary_handoff']);
 
 export function mapMessage(
   row: MessageRow,
-  generatedImages?: GeneratedImageArtifact[]
+  generatedImages?: GeneratedImageArtifact[],
+  attachments?: ChatAttachment[]
 ): MappedMessage {
   return {
     ...row,
@@ -112,6 +116,7 @@ export function mapMessage(
     styleParams: parseStyleParams(row.styleParams),
     parts: row.parts ? (JSON.parse(row.parts) as MessagePart[]) : undefined,
     generatedImages,
+    attachments,
   };
 }
 
@@ -207,13 +212,16 @@ export async function listByChatId(
     nextCursor = rows.at(-1)?.timestamp.toString() ?? null;
   }
 
-  const generatedImagesByMessageId = await listGeneratedImagesByMessageIds(
-    rows.map((row) => row.id),
-    db
-  );
+  const messageIds = rows.map((row) => row.id);
+  const [generatedImagesByMessageId, attachmentsByMessageId] = await Promise.all([
+    listGeneratedImagesByMessageIds(messageIds, db),
+    listAttachmentsByMessageIds(messageIds, db),
+  ]);
 
   return {
-    messages: rows.map((row) => mapMessage(row, generatedImagesByMessageId.get(row.id))),
+    messages: rows.map((row) =>
+      mapMessage(row, generatedImagesByMessageId.get(row.id), attachmentsByMessageId.get(row.id))
+    ),
     nextCursor,
   };
 }

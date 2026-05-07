@@ -7,6 +7,8 @@ import { requireAuth } from '../../../plugins/auth-middleware';
 import { sendTextMessage } from '../application/send-text-message';
 import { ChatNotFoundError } from '../../chats/domain/chat-ownership';
 import { NoModelAvailableError } from '../application/resolve-model';
+import { ChatAttachmentNotFoundError } from '../../attachments/infrastructure/attachment-repository';
+import { EmptyTextTurnError } from '../application/text-turn-content';
 
 export const respondRoutes = (app: Elysia) =>
   app.group('', (app) =>
@@ -25,6 +27,7 @@ export const respondRoutes = (app: Elysia) =>
                 chatId: body.chatId,
                 userId: user?.id ?? '',
                 prompt: body.prompt,
+                attachmentIds: body.attachmentIds,
                 model: body.model,
                 systemPrompt: body.systemPrompt,
               },
@@ -38,6 +41,10 @@ export const respondRoutes = (app: Elysia) =>
             if (err instanceof NoModelAvailableError) {
               set.status = 503;
               return { error: err.message, code: ERROR_CODES.PROVIDER_ERROR };
+            }
+            if (err instanceof ChatAttachmentNotFoundError || err instanceof EmptyTextTurnError) {
+              set.status = 400;
+              return { error: err.message, code: ERROR_CODES.VALIDATION };
             }
             console.error('[respond] Error:', err);
             set.status = 500;

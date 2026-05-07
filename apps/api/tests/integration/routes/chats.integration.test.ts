@@ -662,6 +662,78 @@ describe('GET /chats/:id/messages', () => {
     });
   });
 
+  it('returns attachments linked to messages', async () => {
+    const db = getDb();
+    const now = Date.now();
+    const chatId = `messages-attachments-${now}`;
+    const messageId = `msg-attachments-${now}`;
+    await db
+      .insertInto('chats')
+      .values({
+        id: chatId,
+        title: 'Messages Attachments Chat',
+        createdAt: now,
+        updatedAt: now,
+        model: null,
+        userId: TEST_USER.id,
+      })
+      .execute();
+
+    await db
+      .insertInto('messages')
+      .values({
+        id: messageId,
+        chatId,
+        role: 'user',
+        text: 'Please inspect the reference.',
+        timestamp: now,
+        isGenerating: 0,
+        interactionMode: 'chat',
+      })
+      .execute();
+
+    await db
+      .insertInto('chat_attachments')
+      .values({
+        id: `attachment-${now}`,
+        userId: TEST_USER.id,
+        chatId,
+        messageId,
+        originalName: 'reference.png',
+        storedName: `attachment-${now}-reference.png`,
+        relativePath: `Messages-Attachments-Chat_${chatId}/${now}/attachment-${now}-reference.png`,
+        url: `/uploads/Messages-Attachments-Chat_${chatId}/${now}/attachment-${now}-reference.png`,
+        mimeType: 'image/png',
+        sizeBytes: 128,
+        kind: 'image',
+        createdAt: now,
+        updatedAt: now,
+      })
+      .execute();
+
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, chatRoutes);
+    restoreAuth = restore;
+
+    const response = await app.handle(
+      new Request(`http://localhost/chats/${chatId}/messages?limit=50`)
+    );
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      messages: Array<{ id: string; attachments?: Array<Record<string, unknown>> }>;
+    };
+    const message = body.messages.find((candidate) => candidate.id === messageId);
+    expect(message?.attachments).toEqual([
+      expect.objectContaining({
+        chatId,
+        messageId,
+        originalName: 'reference.png',
+        mimeType: 'image/png',
+        kind: 'image',
+      }),
+    ]);
+  });
+
   it('returns nextCursor when results exceed the limit', async () => {
     const db = getDb();
     const chatId = `paginated-${Date.now()}`;

@@ -4,12 +4,26 @@
  */
 
 import { type Elysia, t } from 'elysia';
-import { ERROR_CODES } from '@mangostudio/shared/errors';
+import { UploadChatAttachmentResponseSchema } from '@mangostudio/shared/chat';
+import { ApiErrorResponseSchema, ERROR_CODES } from '@mangostudio/shared/errors';
 import { join, extname } from 'path';
 import { mkdirSync } from 'fs';
 import { fileTypeFromBuffer } from 'file-type';
 import { getConfig } from '../lib/config';
 import { requireAuth } from '../plugins/auth-middleware';
+import { getDb } from '../db/database';
+import { getById } from '../modules/chats/infrastructure/chat-repository';
+import { generateId } from '../utils/id';
+import {
+  CHAT_ATTACHMENT_MAX_SIZE,
+  InvalidAttachmentError,
+  validateChatAttachmentFile,
+} from '../modules/attachments/application/attachment-validation';
+import {
+  buildAttachmentStoragePath,
+  writeAttachmentFile,
+} from '../modules/attachments/application/attachment-storage';
+import { insertChatAttachment } from '../modules/attachments/infrastructure/attachment-repository';
 
 const UPLOADS_DIR = getConfig().uploads.dir;
 
@@ -90,6 +104,73 @@ export const uploadRoutes = (app: Elysia) =>
           body: t.Object({
             image: t.File({ type: 'image/*', maxSize: '20m' }),
           }),
+        }
+      )
+
+      /** Upload a chat-scoped attachment file. */
+      .post(
+        '/chat',
+        async ({ body, set, user }) => {
+          const db = getDb();
+          const chat = await getById(body.chatId, db);
+          const userId = user?.id ?? '';
+
+          if (!chat || chat.userId !== userId) {
+            set.status = 404;
+            return { error: 'Chat not found', code: ERROR_CODES.NOT_FOUND };
+          }
+
+          try {
+            const attachmentId = generateId();
+            const uploadedAt = Date.now();
+            const validatedFile = await validateChatAttachmentFile(body.file);
+            const storagePath = buildAttachmentStoragePath({
+              chatId: chat.id,
+              chatTitle: chat.title,
+              attachmentId,
+              originalName: body.file.name,
+              extension: validatedFile.extension,
+              uploadedAt,
+            });
+
+            await writeAttachmentFile(storagePath.absolutePath, validatedFile.buffer);
+
+            const attachment = await insertChatAttachment(
+              {
+                id: attachmentId,
+                userId,
+                chatId: chat.id,
+                originalName: body.file.name,
+                storedName: storagePath.storedName,
+                relativePath: storagePath.relativePath,
+                url: storagePath.url,
+                mimeType: validatedFile.mimeType,
+                sizeBytes: validatedFile.sizeBytes,
+                kind: validatedFile.kind,
+                createdAt: uploadedAt,
+              },
+              db
+            );
+
+            return { attachment };
+          } catch (err) {
+            if (err instanceof InvalidAttachmentError) {
+              set.status = 400;
+              return { error: err.message, code: ERROR_CODES.VALIDATION };
+            }
+            throw err;
+          }
+        },
+        {
+          body: t.Object({
+            chatId: t.String(),
+            file: t.File({ maxSize: CHAT_ATTACHMENT_MAX_SIZE }),
+          }),
+          response: {
+            200: UploadChatAttachmentResponseSchema,
+            400: ApiErrorResponseSchema,
+            404: ApiErrorResponseSchema,
+          },
         }
       )
   );

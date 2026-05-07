@@ -1,20 +1,24 @@
 import type { Kysely } from 'kysely';
+import type { ChatAttachment } from '@mangostudio/shared/chat';
 import type { Database } from '../../../db/types';
 import { assertChatOwnership } from '../../chats/domain/chat-ownership';
 import { resolveModel } from './resolve-model';
 import { loadHistory } from '../../messages/infrastructure/message-repository';
 import { getProviderForModel } from '../../../services/providers/core/provider-registry';
 import { generateId } from '../../../utils/id';
+import { assertChatAttachmentIdsAvailable } from '../../attachments/infrastructure/attachment-repository';
 import {
   persistUserMessage,
   persistAiResponse,
   updateChatAfterTurn,
 } from '../infrastructure/conversation-persistence';
+import { assertTextTurnHasContent, normalizeTextTurnAttachmentIds } from './text-turn-content';
 
 export interface SendTextMessageInput {
   chatId: string;
   userId: string;
   prompt: string;
+  attachmentIds?: string[];
   model?: string;
   systemPrompt?: string;
 }
@@ -28,6 +32,7 @@ export interface SendTextMessageResult {
     timestamp: number;
     isGenerating: boolean;
     interactionMode: 'chat';
+    attachments?: ChatAttachment[];
   };
   aiMessage: {
     id: string;
@@ -47,6 +52,12 @@ export async function sendTextMessage(
   db: Kysely<Database>
 ): Promise<SendTextMessageResult> {
   await assertChatOwnership(input.chatId, input.userId, db);
+  const attachmentIds = normalizeTextTurnAttachmentIds(input.attachmentIds);
+  assertTextTurnHasContent(input.prompt, attachmentIds);
+  await assertChatAttachmentIdsAvailable(
+    { attachmentIds, userId: input.userId, chatId: input.chatId },
+    db
+  );
 
   const { modelId } = await resolveModel({
     requestedModel: input.model,
@@ -57,8 +68,15 @@ export async function sendTextMessage(
   const now = Date.now();
   const userMsgId = generateId();
 
-  await persistUserMessage(
-    { id: userMsgId, chatId: input.chatId, text: input.prompt, timestamp: now },
+  const attachments = await persistUserMessage(
+    {
+      id: userMsgId,
+      userId: input.userId,
+      chatId: input.chatId,
+      text: input.prompt,
+      attachmentIds,
+      timestamp: now,
+    },
     db
   );
 
@@ -101,6 +119,7 @@ export async function sendTextMessage(
       timestamp: now,
       isGenerating: false,
       interactionMode: 'chat',
+      attachments: attachments.length > 0 ? attachments : undefined,
     },
     aiMessage: {
       id: aiMsgId,

@@ -68,6 +68,7 @@ import {
   type ContinuationDisplayMode,
 } from '../../../services/providers/core/context-policy';
 import { composePrompt } from '../../prompt-rules/application/prompt-composer';
+import { assertTextTurnHasContent, normalizeTextTurnAttachmentIds } from './text-turn-content';
 
 const TOOL_TIMEOUT_MS = 30_000;
 const DEFAULT_MAX_TOOL_ITERATIONS = 10;
@@ -77,6 +78,7 @@ export interface StreamTextTurnInput {
   chatId: string;
   userId: string;
   prompt: string;
+  attachmentIds?: string[];
   model?: string;
   systemPrompt?: string;
   promptSettings?: PromptSettings;
@@ -143,6 +145,8 @@ export async function* streamTextTurn(
   db: Kysely<Database>
 ): AsyncGenerator<StreamEvent> {
   await assertChatOwnership(input.chatId, input.userId, db);
+  const attachmentIds = normalizeTextTurnAttachmentIds(input.attachmentIds);
+  assertTextTurnHasContent(input.prompt, attachmentIds);
 
   const { modelId } = await resolveModel({
     requestedModel: input.model,
@@ -161,7 +165,14 @@ export async function* streamTextTurn(
   const now = Date.now();
   const userMsgId = generateId();
   await persistUserMessage(
-    { id: userMsgId, chatId: input.chatId, text: input.prompt, timestamp: now },
+    {
+      id: userMsgId,
+      userId: input.userId,
+      chatId: input.chatId,
+      text: input.prompt,
+      attachmentIds,
+      timestamp: now,
+    },
     db
   );
 
