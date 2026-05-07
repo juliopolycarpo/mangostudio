@@ -15,6 +15,7 @@ import { userProviderSettings } from './014_user_provider_settings';
 import { userToolSettings } from './015_user_tool_settings';
 import { generatedImages } from './016_generated_images';
 import { chatAttachments } from './017_chat_attachments';
+import { userAppSettings } from './018_user_app_settings';
 
 export const allMigrations = {
   '001_initial_schema': initialSchema,
@@ -34,4 +35,5 @@ export const allMigrations = {
   '015_user_tool_settings': userToolSettings,
   '016_generated_images': generatedImages,
   '017_chat_attachments': chatAttachments,
+  '018_user_app_settings': userAppSettings,
 };
