@@ -34,6 +34,7 @@ describe('SPA onError NOT_FOUND guard', () => {
 
   test('/uploads/* paths are NOT served as SPA', () => {
     expect(isSpaRoute('/uploads/image.png')).toBe(false);
+    expect(isSpaRoute('/uploads/Chat_chat-id/1710000000000/file.png')).toBe(false);
   });
 
   test('/images/* paths are NOT served as SPA', () => {
