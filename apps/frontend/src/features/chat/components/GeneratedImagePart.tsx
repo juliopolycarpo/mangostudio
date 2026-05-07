@@ -11,6 +11,7 @@ import { useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { useI18n } from '@/hooks/use-i18n';
 import type { GeneratedImagePart as GeneratedImagePartType } from '@mangostudio/shared';
+import { ReservedAspectImage } from './ReservedAspectImage';
 
 interface Props {
   part: GeneratedImagePartType;
@@ -78,12 +79,11 @@ export function GeneratedImagePart({ part }: Props) {
               )}
 
               <div className="group relative">
-                <img
+                <ReservedAspectImage
                   src={imageUrl}
                   alt={t.chat.feed.generatedImageAlt}
-                  className="w-full h-auto object-cover"
-                  loading="lazy"
-                  onError={() => setLoadError(true)}
+                  className="bg-surface-container-high"
+                  onLoadError={() => setLoadError(true)}
                 />
                 <div className="absolute bottom-3 left-3 right-3 glass-panel rounded-xl p-2 flex justify-between items-center translate-y-12 opacity-0 group-hover:translate-y-0 group-hover:opacity-100 transition-all duration-300">
                   <div className="flex gap-2">

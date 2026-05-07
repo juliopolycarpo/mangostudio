@@ -23,7 +23,7 @@ function createRenderer(theme: CodeThemeId): Renderer {
 
   renderer.image = ({ href, title, text }) => {
     const titleAttr = title ? ` title="${title}"` : '';
-    return `<img src="${href}" alt="${text}"${titleAttr} loading="lazy" />`;
+    return `<img src="${href}" alt="${text}"${titleAttr} loading="lazy" decoding="async" />`;
   };
 
   renderer.code = ({ text, lang }) => {

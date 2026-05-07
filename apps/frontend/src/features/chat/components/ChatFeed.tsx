@@ -17,6 +17,7 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import { useI18n } from '@/hooks/use-i18n';
 import { MarkdownContent } from '@/components/MarkdownContent';
 import { MessageParts } from './MessageParts';
+import { ReservedAspectImage } from './ReservedAspectImage';
 
 function isNearBottom(element: HTMLElement): boolean {
   return element.scrollHeight - element.scrollTop - element.clientHeight <= 24;
@@ -285,11 +286,10 @@ export function ChatFeed({ chatId, messages }: { chatId: string | null; messages
                               </span>
                             </div>
                           ) : (
-                            <img
+                            <ReservedAspectImage
                               src={msg.referenceImage}
                               alt="Reference"
-                              className="w-full h-auto object-cover"
-                              onError={() => handleImageError(`ref-${msg.id}`)}
+                              onLoadError={() => handleImageError(`ref-${msg.id}`)}
                             />
                           )}
                         </div>
@@ -384,8 +384,8 @@ export function ChatFeed({ chatId, messages }: { chatId: string | null; messages
                                       src={msg.imageUrl}
                                       alt="Generated"
                                       className="w-full h-full object-cover grayscale-[20%] group-hover:grayscale-0 transition-all duration-700"
+                                      decoding="async"
                                       onError={() => handleImageError(`gen-${msg.id}`)}
-                                      onLoad={() => rowVirtualizer.measureElement(null)}
                                     />
                                     <div className="absolute bottom-4 left-4 right-4 glass-panel rounded-xl p-3 flex justify-between items-center translate-y-12 opacity-0 group-hover:translate-y-0 group-hover:opacity-100 transition-all duration-300">
                                       <div className="flex gap-2">
