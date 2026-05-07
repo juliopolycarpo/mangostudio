@@ -165,5 +165,6 @@ describe('useImageGeneration — reference image upload failure', () => {
     expect(replacementMessages[1]).toEqual(
       expect.objectContaining({ imageUrl: '/images/generated-mango.png', modelName: 'gpt-image-2' })
     );
+    expect(props.chats.loadChats).not.toHaveBeenCalled();
   });
 });

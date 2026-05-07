@@ -83,6 +83,7 @@ export function GeneratedImagePart({ part }: Props) {
                   src={imageUrl}
                   alt={t.chat.feed.generatedImageAlt}
                   className="bg-surface-container-high"
+                  objectFit="contain"
                   onLoadError={() => setLoadError(true)}
                 />
                 <div className="absolute bottom-3 left-3 right-3 glass-panel rounded-xl p-2 flex justify-between items-center translate-y-12 opacity-0 group-hover:translate-y-0 group-hover:opacity-100 transition-all duration-300">

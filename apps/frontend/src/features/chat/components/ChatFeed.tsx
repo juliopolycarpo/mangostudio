@@ -137,21 +137,15 @@ export function ChatFeed({ chatId, messages }: { chatId: string | null; messages
   const previousChatIdRef = useRef<string | null>(chatId);
 
   const getScrollElement = useCallback(() => parentRef.current, []);
+  const getItemKey = useCallback((index: number) => messages[index]?.id ?? index, [messages]);
   const estimateSize = useCallback(() => 150, []);
 
   const rowVirtualizer = useVirtualizer({
     count: messages.length,
     getScrollElement,
+    getItemKey,
     estimateSize,
     overscan: 5,
-    // When a ResizeObserver measurement changes any row size during
-    // auto-follow (e.g. ReservedAspectImage natural-aspect update after
-    // image load), keep the scroll pinned to the bottom immediately.
-    onChange: () => {
-      if (feedShouldAutoFollowRef.current && parentRef.current) {
-        parentRef.current.scrollTop = parentRef.current.scrollHeight;
-      }
-    },
   });
   const latestMessage = messages.at(-1);
   const latestMessageId = latestMessage?.id ?? null;
@@ -179,20 +173,12 @@ export function ChatFeed({ chatId, messages }: { chatId: string | null; messages
 
   useLayoutEffect(() => {
     if (!pendingScrollToBottomRef.current || !parentRef.current || messages.length === 0) return;
-    const animationFrameId = requestAnimationFrame(() => {
-      const element = parentRef.current;
-      if (!element) return;
-      element.scrollTop = element.scrollHeight;
-      pendingScrollToBottomRef.current = false;
-    });
-    return () => cancelAnimationFrame(animationFrameId);
+    parentRef.current.scrollTop = parentRef.current.scrollHeight;
+    pendingScrollToBottomRef.current = false;
   }, [chatId, messages.length]);
 
-  // Keep auto-follow during streaming, but defer the scroll so the
-  // virtualizer can complete its layout pass before we adjust position.
-  // Primitive deps avoid re-firing on in-place text/tool updates; the
-  // image completion signature fires only when generated-image parts
-  // transition status (the case that typically causes large row-size jumps).
+  // Keep auto-follow during streaming. The layout effect runs before paint,
+  // so users do not see the one-frame pre-scroll position.
   useLayoutEffect(() => {
     const isNewGeneratingMessage =
       latestIsGenerating && previousGeneratingMessageIdRef.current !== latestMessageId;
@@ -201,12 +187,7 @@ export function ChatFeed({ chatId, messages }: { chatId: string | null; messages
     }
     if (!latestIsGenerating || !parentRef.current) return;
     if (feedShouldAutoFollowRef.current) {
-      const rafId = requestAnimationFrame(() => {
-        if (parentRef.current && feedShouldAutoFollowRef.current) {
-          parentRef.current.scrollTop = parentRef.current.scrollHeight;
-        }
-      });
-      return () => cancelAnimationFrame(rafId);
+      parentRef.current.scrollTop = parentRef.current.scrollHeight;
     }
   }, [
     latestMessageId,
@@ -290,10 +271,12 @@ export function ChatFeed({ chatId, messages }: { chatId: string | null; messages
                   width: '100%',
                   transform: `translateY(${virtualRow.start}px)`,
                   paddingBottom: 'var(--chat-message-gap)',
+                  willChange: 'transform',
+                  contain: 'layout style paint',
                 }}
               >
                 <motion.div
-                  initial={{ opacity: 0, y: 10 }}
+                  initial={false}
                   animate={{ opacity: 1, y: 0 }}
                   className={`flex flex-col gap-2 max-w-[80%] ${msg.role === 'user' ? 'items-end ml-auto' : 'items-start mr-auto max-w-full'}`}
                 >
@@ -406,7 +389,7 @@ export function ChatFeed({ chatId, messages }: { chatId: string | null; messages
                                     <img
                                       src={msg.imageUrl}
                                       alt="Generated"
-                                      className="w-full h-full object-cover grayscale-[20%] group-hover:grayscale-0 transition-all duration-700"
+                                      className="w-full h-full object-cover grayscale-[20%] group-hover:grayscale-0 transition-[filter] duration-700"
                                       decoding="async"
                                       onError={() => handleImageError(`gen-${msg.id}`)}
                                     />

@@ -1,14 +1,12 @@
-import { useState, type SyntheticEvent } from 'react';
+import { useState } from 'react';
 
-// Default aspect ratio used while the image's natural dimensions are still
-// unknown. A square keeps the virtualized chat row height stable so that the
-// asynchronous image load cannot shift surrounding content — the original
-// source of the scroll-to-bottom flicker.
-const PLACEHOLDER_ASPECT_RATIO = '1 / 1';
+const DEFAULT_RESERVED_ASPECT_RATIO = '1 / 1';
 
 interface ReservedAspectImageProps {
   readonly src: string;
   readonly alt: string;
+  readonly aspectRatio?: string;
+  readonly objectFit?: 'contain' | 'cover';
   readonly className?: string;
   readonly imageClassName?: string;
   readonly onLoadError?: () => void;
@@ -16,46 +14,37 @@ interface ReservedAspectImageProps {
 
 /**
  * Renders an image inside a container whose aspect ratio is reserved from the
- * moment it mounts. While the image is still loading we paint a neutral
- * skeleton; once the image reports its natural dimensions we lock the
- * container to that ratio and fade the image in.
+ * moment it mounts. Image load only fades pixels in; it never changes row
+ * height, which keeps virtualized chat rows stable.
  *
- * This eliminates the single, asynchronous "row jump" that the chat
- * virtualizer previously measured whenever an image finished loading, which
- * was the root cause of the intermittent scroll-to-bottom flicker.
+ * This avoids the asynchronous resize that previously made the chat
+ * virtualizer recalculate row positions while scroll-to-bottom was active.
  */
 export function ReservedAspectImage({
   src,
   alt,
+  aspectRatio = DEFAULT_RESERVED_ASPECT_RATIO,
+  objectFit = 'cover',
   className,
   imageClassName,
   onLoadError,
 }: ReservedAspectImageProps) {
-  const [naturalAspectRatio, setNaturalAspectRatio] = useState<string | null>(null);
-
-  const handleLoad = (event: SyntheticEvent<HTMLImageElement>) => {
-    const { naturalWidth, naturalHeight } = event.currentTarget;
-    if (naturalWidth > 0 && naturalHeight > 0) {
-      setNaturalAspectRatio(`${naturalWidth} / ${naturalHeight}`);
-    }
-  };
+  const [isLoaded, setIsLoaded] = useState(false);
+  const fitClassName = objectFit === 'contain' ? 'object-contain' : 'object-cover';
 
   return (
-    <div
-      className={`relative overflow-hidden ${className ?? ''}`}
-      style={{ aspectRatio: naturalAspectRatio ?? PLACEHOLDER_ASPECT_RATIO }}
-    >
+    <div className={`relative overflow-hidden ${className ?? ''}`} style={{ aspectRatio }}>
       <img
         src={src}
         alt={alt}
-        className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-300 ${
-          naturalAspectRatio ? 'opacity-100' : 'opacity-0'
+        className={`absolute inset-0 w-full h-full ${fitClassName} transition-opacity duration-300 ${
+          isLoaded ? 'opacity-100' : 'opacity-0'
         } ${imageClassName ?? ''}`}
         decoding="async"
-        onLoad={handleLoad}
+        onLoad={() => setIsLoaded(true)}
         onError={onLoadError}
       />
-      {!naturalAspectRatio && (
+      {!isLoaded && (
         <div
           aria-hidden
           className="absolute inset-0 animate-pulse bg-surface-container-highest/40"

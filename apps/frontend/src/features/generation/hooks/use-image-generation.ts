@@ -2,7 +2,6 @@
 import { useState, useCallback } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import type { Message } from '@mangostudio/shared';
-import { messageKeys } from '@/features/chat/queries';
 import { galleryKeys } from '@/features/gallery/queries';
 import { generateImage, uploadReferenceImage } from '@/services/generation-service';
 import { useI18n } from '@/hooks/use-i18n';
@@ -37,18 +36,20 @@ export function useImageGeneration({
       setIsGenerating(true);
 
       let activeChatId = chats.currentChatId;
+      let createdChatDuringRequest = false;
       if (!activeChatId) {
         const newChat = await chats.createChat(
           prompt.slice(0, 30) + (prompt.length > 30 ? '...' : '')
         );
         activeChatId = newChat.id;
+        createdChatDuringRequest = true;
       }
 
       const model = getActiveModel();
       const previewUrl = referenceImage ? URL.createObjectURL(referenceImage) : null;
 
-      const optimisticUserMsgId = `optimistic-user-${Date.now()}`;
-      const optimisticAiMsgId = `optimistic-ai-${Date.now() + 1}`;
+      const optimisticUserMsgId = `optimistic-user-${crypto.randomUUID()}`;
+      const optimisticAiMsgId = `optimistic-ai-${crypto.randomUUID()}`;
 
       const optimisticUserMsg: Message = {
         id: optimisticUserMsgId,
@@ -74,6 +75,7 @@ export function useImageGeneration({
       appendOptimisticMessages(activeChatId, [optimisticUserMsg, optimisticAiMsg]);
 
       let refImageUrl: string | null = null;
+      let generatedImageSucceeded = false;
       if (referenceImage) {
         refImageUrl = await uploadReferenceImage(referenceImage);
         if (!refImageUrl) {
@@ -126,6 +128,7 @@ export function useImageGeneration({
             },
           ]
         );
+        generatedImageSucceeded = true;
       } catch (error: unknown) {
         console.error('[generate]', error);
         const errorText =
@@ -137,9 +140,12 @@ export function useImageGeneration({
       } finally {
         setIsGenerating(false);
         if (previewUrl) URL.revokeObjectURL(previewUrl);
-        void chats.loadChats();
-        void queryClient.invalidateQueries({ queryKey: messageKeys.list(activeChatId) });
-        void queryClient.invalidateQueries({ queryKey: galleryKeys.lists() });
+        if (createdChatDuringRequest) {
+          void chats.loadChats();
+        }
+        if (generatedImageSucceeded) {
+          void queryClient.invalidateQueries({ queryKey: galleryKeys.lists() });
+        }
       }
     },
     [

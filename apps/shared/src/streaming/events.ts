@@ -87,11 +87,19 @@ export interface SSEErrorEvent {
   done: true;
 }
 
+/** SSE event: persisted user message id for the current streamed turn. */
+export interface SSEUserMessageIdEvent {
+  type: 'user_message_id';
+  messageId: string;
+  done: false;
+}
+
 /**
  * Full discriminated union of all SSE chunks emitted by the streaming endpoint.
  * This is the canonical type — frontend and API both import from here.
  */
 export type StreamChunk =
+  | SSEUserMessageIdEvent
   | { type: 'thinking_start'; done: false }
   | { type: 'thinking'; text: string; done: false }
   | { type: 'text'; text: string; done: false }
