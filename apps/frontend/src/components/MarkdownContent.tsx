@@ -23,7 +23,10 @@ function createRenderer(theme: CodeThemeId): Renderer {
 
   renderer.image = ({ href, title, text }) => {
     const titleAttr = title ? ` title="${title}"` : '';
-    return `<img src="${href}" alt="${text}"${titleAttr} loading="lazy" decoding="async" />`;
+    // Inline `onerror` ensures that broken / hallucinated image URLs never
+    // collapse to zero height, which would trigger the chat virtualizer's
+    // ResizeObserver and cause visible content jumps.
+    return `<img src="${href}" alt="${text}"${titleAttr} loading="lazy" decoding="async" onerror="this.outerHTML='<span class=broken-image-fallback>Image unavailable</span>'" />`;
   };
 
   renderer.code = ({ text, lang }) => {

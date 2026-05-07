@@ -365,8 +365,22 @@ pre:hover .copy-code-btn {
 }
 
 .markdown-content img {
+  display: block;
   max-width: 100%;
+  height: auto;
   border-radius: 0.5rem;
+}
+
+.broken-image-fallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 40px;
+  background: var(--color-surface-container-highest);
+  border-radius: 0.5rem;
+  padding: 1rem;
+  font-size: 0.875rem;
+  color: var(--color-on-surface-variant);
 }
 
 /* ── Thinking block variant — subdued, smaller ── */
