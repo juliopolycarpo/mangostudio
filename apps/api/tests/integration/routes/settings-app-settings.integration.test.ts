@@ -1,0 +1,144 @@
+import { afterEach, describe, expect, it } from 'bun:test';
+import { Value } from '@sinclair/typebox/value';
+import {
+  AppSettingsSchema,
+  DEFAULT_APP_SETTINGS,
+  type AppSettings,
+} from '@mangostudio/shared/app-settings';
+import { settingsRoutes } from '../../../src/routes/settings';
+import { getDb } from '../../../src/db/database';
+import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
+
+const TEST_USER = {
+  id: 'app-settings-user',
+  name: 'App Settings User',
+  email: 'app-settings@mangostudio.test',
+};
+
+const OTHER_USER = {
+  id: 'app-settings-other-user',
+  name: 'Other App Settings User',
+  email: 'other-app-settings@mangostudio.test',
+};
+
+let restoreAuth: (() => void) | null = null;
+
+afterEach(() => {
+  restoreAuth?.();
+  restoreAuth = null;
+});
+
+describe('settings app settings routes', () => {
+  it('returns defaults for a new user', async () => {
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, settingsRoutes);
+    restoreAuth = restore;
+
+    const response = await app.handle(new Request('http://localhost/settings/app'));
+    const payload = (await response.json()) as AppSettings;
+
+    expect(response.status).toBe(200);
+    expect(Value.Check(AppSettingsSchema, payload)).toBe(true);
+    expect(payload).toEqual(DEFAULT_APP_SETTINGS);
+  });
+
+  it('persists app settings per user', async () => {
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, settingsRoutes);
+    restoreAuth = restore;
+
+    const response = await app.handle(
+      new Request('http://localhost/settings/app', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...DEFAULT_APP_SETTINGS,
+          globalImageQuality: '4K',
+          thinkingEnabled: true,
+          reasoningEffort: 'high',
+          maxToolIterations: 4,
+          contextSettings: {
+            ...DEFAULT_APP_SETTINGS.contextSettings,
+            compactionBehavior: 'off',
+            providerCompactionEnabled: false,
+          },
+          promptSettings: {
+            ...DEFAULT_APP_SETTINGS.promptSettings,
+            textSystemPrompt: 'Persisted text prompt',
+            customRules: [
+              {
+                id: 'custom-rule-1',
+                label: 'Team rules',
+                path: '~/rules/team.md',
+                enabled: true,
+                injectionRole: 'system',
+                sendFrequency: 'every-turn',
+              },
+            ],
+          },
+        } satisfies AppSettings),
+      })
+    );
+    const payload = (await response.json()) as AppSettings;
+
+    expect(response.status).toBe(200);
+    expect(Value.Check(AppSettingsSchema, payload)).toBe(true);
+    expect(payload).toMatchObject({
+      globalImageQuality: '4K',
+      thinkingEnabled: true,
+      reasoningEffort: 'high',
+      maxToolIterations: 4,
+      contextSettings: {
+        compactionBehavior: 'off',
+        providerCompactionEnabled: false,
+      },
+      promptSettings: {
+        textSystemPrompt: 'Persisted text prompt',
+        customRules: [
+          {
+            id: 'custom-rule-1',
+            enabled: true,
+            sendFrequency: 'every-turn',
+          },
+        ],
+      },
+    });
+
+    restoreAuth?.();
+    const other = createAuthenticatedApiTestApp(OTHER_USER, settingsRoutes);
+    restoreAuth = other.restore;
+
+    const otherResponse = await other.app.handle(new Request('http://localhost/settings/app'));
+    const otherPayload = (await otherResponse.json()) as AppSettings;
+
+    expect(otherResponse.status).toBe(200);
+    expect(otherPayload).toEqual(DEFAULT_APP_SETTINGS);
+  });
+
+  it('normalizes malformed persisted JSON to defaults', async () => {
+    await getDb()
+      .insertInto('user_app_settings')
+      .values({
+        id: 'malformed-app-settings-row',
+        userId: 'malformed-app-settings-user',
+        settingsJson: '{bad-json',
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      })
+      .execute();
+
+    const { app, restore } = createAuthenticatedApiTestApp(
+      {
+        id: 'malformed-app-settings-user',
+        name: 'Malformed App Settings User',
+        email: 'malformed-app-settings@mangostudio.test',
+      },
+      settingsRoutes
+    );
+    restoreAuth = restore;
+
+    const response = await app.handle(new Request('http://localhost/settings/app'));
+    const payload = (await response.json()) as AppSettings;
+
+    expect(response.status).toBe(200);
+    expect(payload).toEqual(DEFAULT_APP_SETTINGS);
+  });
+});
