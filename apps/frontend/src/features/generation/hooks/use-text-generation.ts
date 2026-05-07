@@ -99,16 +99,18 @@ export function useTextGeneration({
       stream.setIsGenerating(true);
 
       let activeChatId = chats.currentChatId;
+      let createdChatDuringRequest = false;
       if (!activeChatId) {
         const newChat = await chats.createChat(
           prompt.slice(0, 30) + (prompt.length > 30 ? '...' : '')
         );
         activeChatId = newChat.id;
+        createdChatDuringRequest = true;
       }
 
       const model = getActiveModel();
-      const optimisticUserMsgId = `optimistic-user-${Date.now()}`;
-      const optimisticAiMsgId = `optimistic-ai-${Date.now() + 1}`;
+      const optimisticUserMsgId = `optimistic-user-${crypto.randomUUID()}`;
+      const optimisticAiMsgId = `optimistic-ai-${crypto.randomUUID()}`;
 
       const optimisticUserMsg: Message = {
         id: optimisticUserMsgId,
@@ -138,6 +140,10 @@ export function useTextGeneration({
       const thinkingSegments: string[] = [];
       let currentThinkingIdx = -1;
       let accumulatedParts: MessagePart[] = [];
+      let currentUserMsgId = optimisticUserMsgId;
+      let currentAiMsgId = optimisticAiMsgId;
+      let receivedServerUserMsgId = false;
+      let receivedServerAiMsgId = false;
 
       try {
         await respondTextStream(
@@ -155,8 +161,13 @@ export function useTextGeneration({
           },
           (chunk) => {
             switch (chunk.type) {
+              case 'user_message_id':
+                updateOptimisticMessage(activeChatId, currentUserMsgId, { id: chunk.messageId });
+                currentUserMsgId = chunk.messageId;
+                receivedServerUserMsgId = true;
+                break;
               case 'error':
-                updateOptimisticMessage(activeChatId, optimisticAiMsgId, {
+                updateOptimisticMessage(activeChatId, currentAiMsgId, {
                   isGenerating: false,
                   text: accumulatedText || chunk.error,
                   parts: [...accumulatedParts, { type: 'error', text: chunk.error }],
@@ -166,7 +177,7 @@ export function useTextGeneration({
                 thinkingSegments.push('');
                 currentThinkingIdx = thinkingSegments.length - 1;
                 accumulatedParts = [...accumulatedParts, { type: 'thinking', text: '' }];
-                updateOptimisticMessage(activeChatId, optimisticAiMsgId, {
+                updateOptimisticMessage(activeChatId, currentAiMsgId, {
                   parts: accumulatedParts,
                 });
                 break;
@@ -192,7 +203,7 @@ export function useTextGeneration({
                     return p;
                   })
                   .reverse();
-                updateOptimisticMessage(activeChatId, optimisticAiMsgId, {
+                updateOptimisticMessage(activeChatId, currentAiMsgId, {
                   parts: accumulatedParts,
                 });
                 break;
@@ -204,7 +215,7 @@ export function useTextGeneration({
                   ...accumulatedParts.filter((p) => p.type !== 'text'),
                   { type: 'text', text: accumulatedText },
                 ];
-                updateOptimisticMessage(activeChatId, optimisticAiMsgId, {
+                updateOptimisticMessage(activeChatId, currentAiMsgId, {
                   text: accumulatedText,
                   parts: accumulatedParts,
                 });
@@ -218,7 +229,7 @@ export function useTextGeneration({
                   args: {},
                 };
                 accumulatedParts = [...accumulatedParts, toolCallPart];
-                updateOptimisticMessage(activeChatId, optimisticAiMsgId, {
+                updateOptimisticMessage(activeChatId, currentAiMsgId, {
                   parts: accumulatedParts,
                 });
                 break;
@@ -235,7 +246,7 @@ export function useTextGeneration({
                     ? { ...p, args: parsedArgs }
                     : p
                 );
-                updateOptimisticMessage(activeChatId, optimisticAiMsgId, {
+                updateOptimisticMessage(activeChatId, currentAiMsgId, {
                   parts: accumulatedParts,
                 });
                 break;
@@ -248,7 +259,7 @@ export function useTextGeneration({
                   isError: chunk.isError,
                 };
                 accumulatedParts = [...accumulatedParts, resultPart];
-                updateOptimisticMessage(activeChatId, optimisticAiMsgId, {
+                updateOptimisticMessage(activeChatId, currentAiMsgId, {
                   parts: accumulatedParts,
                 });
                 break;
@@ -262,7 +273,7 @@ export function useTextGeneration({
                   status: 'generating',
                   prompt: chunk.prompt,
                 });
-                updateOptimisticMessage(activeChatId, optimisticAiMsgId, {
+                updateOptimisticMessage(activeChatId, currentAiMsgId, {
                   parts: accumulatedParts,
                 });
                 break;
@@ -278,7 +289,7 @@ export function useTextGeneration({
                   modelName: chunk.modelName,
                   generationTime: chunk.generationTime,
                 });
-                updateOptimisticMessage(activeChatId, optimisticAiMsgId, {
+                updateOptimisticMessage(activeChatId, currentAiMsgId, {
                   parts: accumulatedParts,
                 });
                 break;
@@ -294,7 +305,7 @@ export function useTextGeneration({
                   modelName: chunk.modelName,
                   generationTime: chunk.generationTime,
                 });
-                updateOptimisticMessage(activeChatId, optimisticAiMsgId, {
+                updateOptimisticMessage(activeChatId, currentAiMsgId, {
                   parts: accumulatedParts,
                 });
                 break;
@@ -324,7 +335,7 @@ export function useTextGeneration({
                   recovered: false,
                 };
                 accumulatedParts = [...accumulatedParts, transitionPart];
-                updateOptimisticMessage(activeChatId, optimisticAiMsgId, {
+                updateOptimisticMessage(activeChatId, currentAiMsgId, {
                   parts: accumulatedParts,
                 });
                 break;
@@ -334,19 +345,28 @@ export function useTextGeneration({
                   ...accumulatedParts,
                   { type: 'system_event', event: chunk.event, detail: chunk.detail },
                 ];
-                updateOptimisticMessage(activeChatId, optimisticAiMsgId, {
+                updateOptimisticMessage(activeChatId, currentAiMsgId, {
                   parts: accumulatedParts,
                 });
                 break;
               }
-              case 'done':
-                updateOptimisticMessage(activeChatId, optimisticAiMsgId, {
+              case 'done': {
+                const finalUpdates: Partial<Message> = {
                   isGenerating: false,
                   text: accumulatedText,
                   parts: [...accumulatedParts],
                   generationTime: chunk.generationTime,
-                });
+                };
+                if (chunk.messageId) {
+                  finalUpdates.id = chunk.messageId;
+                }
+                updateOptimisticMessage(activeChatId, currentAiMsgId, finalUpdates);
+                if (chunk.messageId) {
+                  currentAiMsgId = chunk.messageId;
+                  receivedServerAiMsgId = true;
+                }
                 break;
+              }
               default: {
                 const _exhaustive: never = chunk;
                 return _exhaustive;
@@ -358,7 +378,7 @@ export function useTextGeneration({
       } catch (error: unknown) {
         const isAbort = error instanceof Error && error.name === 'AbortError';
         if (isAbort) {
-          updateOptimisticMessage(activeChatId, optimisticAiMsgId, { isGenerating: false });
+          updateOptimisticMessage(activeChatId, currentAiMsgId, { isGenerating: false });
         } else {
           console.error('[respond]', error);
           const errorText =
@@ -367,7 +387,7 @@ export function useTextGeneration({
           const nextParts: MessagePart[] = alreadyHasError
             ? accumulatedParts
             : [...accumulatedParts, { type: 'error', text: errorText }];
-          updateOptimisticMessage(activeChatId, optimisticAiMsgId, {
+          updateOptimisticMessage(activeChatId, currentAiMsgId, {
             isGenerating: false,
             text: accumulatedText || errorText,
             parts: nextParts,
@@ -376,8 +396,12 @@ export function useTextGeneration({
       } finally {
         stream.setAbortController(null);
         stream.setIsGenerating(false);
-        void chats.loadChats();
-        void queryClient.invalidateQueries({ queryKey: messageKeys.list(activeChatId) });
+        if (createdChatDuringRequest) {
+          void chats.loadChats();
+        }
+        if (!receivedServerUserMsgId || !receivedServerAiMsgId) {
+          void queryClient.invalidateQueries({ queryKey: messageKeys.list(activeChatId) });
+        }
       }
     },
     [

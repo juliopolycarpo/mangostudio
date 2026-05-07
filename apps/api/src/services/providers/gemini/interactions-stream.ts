@@ -28,6 +28,14 @@ import { getResolvedGeminiApiKey } from './secret';
 import { createGeminiClient } from './client';
 import type { AgentTurnRequest, AgentEvent } from '../types';
 import { buildInteractionsThinkingConfig } from './reasoning-config';
+import {
+  attachmentToBase64,
+  getAttachmentSupportKind,
+  isAttachmentSupportedByProvider,
+  unsupportedAttachmentNotes,
+} from '../core/attachment-content';
+
+const GEMINI_INTERACTIONS_ATTACHMENT_KINDS = ['image', 'pdf', 'text'] as const;
 
 /**
  * Opaque state persisted across turns for Gemini.
@@ -182,8 +190,8 @@ export async function* streamGeminiAgentTurn(
       result: parseJsonValueOrRawString(tr.result),
       is_error: tr.isError ?? false,
     }));
-  } else if (req.prompt) {
-    input = req.prompt;
+  } else if (req.prompt !== undefined || (req.attachments?.length ?? 0) > 0) {
+    input = buildGeminiInteractionInput(req);
   } else {
     yield { type: 'turn_error', error: 'No input for Gemini interaction' };
     return;
@@ -263,6 +271,52 @@ export async function* streamGeminiAgentTurn(
       yield { type: 'turn_error', error: errMsg };
     }
   }
+}
+
+function buildGeminiInteractionInput(req: AgentTurnRequest): GeminiInteractionInput {
+  const attachments = req.attachments ?? [];
+  if (attachments.length === 0) return req.prompt ?? '';
+
+  const input: Record<string, unknown>[] = [];
+  if (req.prompt?.trim()) input.push({ type: 'text', text: req.prompt });
+
+  for (const attachment of attachments) {
+    if (
+      !isAttachmentSupportedByProvider(
+        attachment,
+        req.modelCapabilities,
+        GEMINI_INTERACTIONS_ATTACHMENT_KINDS
+      )
+    ) {
+      continue;
+    }
+
+    const supportKind = getAttachmentSupportKind(attachment);
+    if (supportKind === 'image') {
+      input.push({
+        type: 'image',
+        data: attachmentToBase64(attachment),
+        mime_type: attachment.mimeType,
+      });
+    } else if (supportKind === 'pdf' || supportKind === 'text') {
+      input.push({
+        type: 'document',
+        data: attachmentToBase64(attachment),
+        mime_type: attachment.mimeType,
+        name: attachment.originalName,
+      });
+    }
+  }
+
+  for (const note of unsupportedAttachmentNotes(
+    attachments,
+    req.modelCapabilities,
+    GEMINI_INTERACTIONS_ATTACHMENT_KINDS
+  )) {
+    input.push({ type: 'text', text: note });
+  }
+
+  return input;
 }
 
 /**

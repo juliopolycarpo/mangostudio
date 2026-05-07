@@ -6,6 +6,7 @@ import type { AgentTurnRequest, AgentEvent } from '../types';
 import { parseJsonWith } from '../../../lib/safe-parse';
 import {
   buildDeepSeekMessages,
+  buildDeepSeekProviderPrompt,
   buildDeepSeekRequestBody,
   type DeepSeekTurNLoopState,
 } from './message-mapper';
@@ -26,6 +27,7 @@ export async function* streamDeepSeekAgentTurn(
   const loopState = parseDeepSeekLoopState(req.providerState);
   const thinkingEnabled = req.generationConfig?.thinkingEnabled ?? false;
   const reasoningEffort = req.generationConfig?.reasoningEffort;
+  const providerPrompt = buildDeepSeekProviderPrompt(req);
 
   const messages = buildDeepSeekMessages({
     systemPrompt: req.systemPrompt,
@@ -33,6 +35,8 @@ export async function* streamDeepSeekAgentTurn(
     loopMessages: loopState?.loopMessages,
     toolResults: req.toolResults,
     prompt: req.prompt,
+    attachments: req.attachments,
+    modelCapabilities: req.modelCapabilities,
   });
 
   const tools =
@@ -167,8 +171,8 @@ export async function* streamDeepSeekAgentTurn(
             tool_call_id: tr.callId,
             content: tr.result,
           }))
-        : req.prompt
-          ? [{ role: 'user', content: req.prompt }]
+        : providerPrompt !== undefined
+          ? [{ role: 'user', content: providerPrompt }]
           : []),
       assistantMsg,
     ];

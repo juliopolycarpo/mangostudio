@@ -227,6 +227,30 @@ describe('ChatFeed — generated_image part rendering', () => {
     expect(img).toHaveAttribute('src', '/images/gen-1.png');
   });
 
+  it('keeps generated image row aspect stable after the image loads', () => {
+    const parts: MessagePart[] = [
+      {
+        type: 'generated_image',
+        imageId: 'img-1',
+        toolCallId: 'tc-1',
+        status: 'completed',
+        prompt: 'a polar bear',
+        imageUrl: '/images/gen-1.png',
+      },
+    ];
+    const msg = makeMessage({ parts });
+
+    render(<ChatFeed chatId="chat-1" messages={[msg]} />);
+
+    const img = screen.getByAltText('Generated image');
+    const reservedContainer = img.parentElement;
+    expect(reservedContainer).toHaveStyle({ aspectRatio: '1 / 1' });
+
+    fireEvent.load(img);
+
+    expect(reservedContainer).toHaveStyle({ aspectRatio: '1 / 1' });
+  });
+
   it('renders an error card for status=error', () => {
     const parts: MessagePart[] = [
       {

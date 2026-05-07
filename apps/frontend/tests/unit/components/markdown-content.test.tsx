@@ -87,14 +87,26 @@ describe('MarkdownContent', () => {
     expect(firstHtml).toBe(secondHtml);
   });
 
-  it('renders images with lazy loading', () => {
+  it('renders markdown image syntax as a stable external link', () => {
     const { container } = render(
       <MarkdownContent content="![alt text](https://example.com/img.png)" />
     );
-    const img = container.querySelector('img') as HTMLImageElement;
-    expect(img).toBeInTheDocument();
-    expect(img.getAttribute('loading')).toBe('lazy');
-    expect(img.getAttribute('alt')).toBe('alt text');
+    const link = screen.getByText('alt text');
+    expect(link.tagName).toBe('A');
+    expect(link.getAttribute('href')).toBe('https://example.com/img.png');
+    expect(link).toHaveClass('markdown-image-link');
+    expect(container.querySelector('img')).not.toBeInTheDocument();
+  });
+
+  it('escapes raw html images instead of rendering them', () => {
+    const { container } = render(
+      <MarkdownContent content={'<img src="https://example.com/img.png" alt="unsafe">'} />
+    );
+
+    expect(container.querySelector('img')).not.toBeInTheDocument();
+    expect(container.querySelector('.markdown-content')).toHaveTextContent(
+      '<img src="https://example.com/img.png" alt="unsafe">'
+    );
   });
 
   it('renders nested lists', () => {

@@ -36,6 +36,10 @@ function createImageModelInfo(modelId: string): ModelInfo {
       parallelToolCalls: false,
       reasoningWithTools: false,
       structuredOutput: false,
+      fileAttachments: false,
+      imageInput: false,
+      pdfInput: false,
+      textFileInput: false,
     },
   };
 }
@@ -137,6 +141,10 @@ export const listModelsWithCache = withModelCache(
             parallelToolCalls: !isImage,
             reasoningWithTools: isReasoning && !isImage,
             structuredOutput: !isImage,
+            fileAttachments: !isImage,
+            imageInput: !isImage,
+            pdfInput: !isImage,
+            textFileInput: !isImage,
           },
         });
       }

@@ -56,6 +56,10 @@ function createEmptySnapshot(): ModelCatalogResponse {
 interface UnifiedModelCatalogService {
   refresh(userId: string): Promise<ModelCatalogResponse>;
   getUnifiedModelCatalog(userId: string): Promise<ModelCatalogResponse>;
+  getCachedModelCapabilities(
+    userId: string,
+    modelId: string
+  ): ModelInfo['capabilities'] | undefined;
   invalidate(userId: string): void;
   recalculate(userId: string): void;
 }
@@ -213,6 +217,16 @@ export function createUnifiedModelCatalogService(
       return getSnapshot(userId);
     },
 
+    getCachedModelCapabilities(
+      userId: string,
+      modelId: string
+    ): ModelInfo['capabilities'] | undefined {
+      const cachedModel =
+        fullCatalogs.get(userId)?.find((model) => model.modelId === modelId) ??
+        snapshots.get(userId)?.allModels.find((model) => model.modelId === modelId);
+      return cachedModel?.capabilities;
+    },
+
     /**
      * Invalidates the cached catalog for a user, forcing a full provider refresh
      * on next access. Use this when a connector is added or removed so that the
@@ -244,6 +258,8 @@ const unifiedCatalogService = createUnifiedModelCatalogService();
 export const refreshUnifiedCatalog = unifiedCatalogService.refresh.bind(unifiedCatalogService);
 export const getUnifiedModelCatalog =
   unifiedCatalogService.getUnifiedModelCatalog.bind(unifiedCatalogService);
+export const getCachedModelCapabilities =
+  unifiedCatalogService.getCachedModelCapabilities.bind(unifiedCatalogService);
 export const invalidateUnifiedCatalog =
   unifiedCatalogService.invalidate.bind(unifiedCatalogService);
 export const recalculateUnifiedCatalog =

@@ -65,6 +65,43 @@ describe('createUnifiedModelCatalogService.getUnifiedModelCatalog', () => {
     expect(callCount).toBe(countAfterFirst);
   });
 
+  it('returns cached capabilities without refreshing a cold cache', async () => {
+    let callCount = 0;
+
+    const service = createUnifiedModelCatalogService({
+      listProviders: () => ['gemini'],
+      getProviderFn: () =>
+        ({
+          listModels: () => {
+            callCount++;
+            return Promise.resolve([MOCK_MODEL]);
+          },
+        }) as unknown as AIProvider,
+      listAllSecretMetadataFn: () =>
+        Promise.resolve([
+          { enabledModels: JSON.stringify([MOCK_MODEL.modelId]) },
+        ] as unknown as SecretMetadataRow[]),
+    });
+
+    const coldCapabilities = service.getCachedModelCapabilities(
+      'user-cache-only',
+      MOCK_MODEL.modelId
+    );
+
+    expect(coldCapabilities).toBeUndefined();
+    expect(callCount).toBe(0);
+
+    await service.getUnifiedModelCatalog('user-cache-only');
+
+    const warmCapabilities = service.getCachedModelCapabilities(
+      'user-cache-only',
+      MOCK_MODEL.modelId
+    );
+
+    expect(warmCapabilities).toEqual(MOCK_MODEL.capabilities);
+    expect(callCount).toBe(1);
+  });
+
   it('resolves even when all providers fail', async () => {
     const service = createUnifiedModelCatalogService({
       listProviders: () => ['gemini'],

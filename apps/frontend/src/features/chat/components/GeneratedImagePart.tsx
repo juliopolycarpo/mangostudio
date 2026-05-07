@@ -11,6 +11,7 @@ import { useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { useI18n } from '@/hooks/use-i18n';
 import type { GeneratedImagePart as GeneratedImagePartType } from '@mangostudio/shared';
+import { ReservedAspectImage } from './ReservedAspectImage';
 
 interface Props {
   part: GeneratedImagePartType;
@@ -78,12 +79,12 @@ export function GeneratedImagePart({ part }: Props) {
               )}
 
               <div className="group relative">
-                <img
+                <ReservedAspectImage
                   src={imageUrl}
                   alt={t.chat.feed.generatedImageAlt}
-                  className="w-full h-auto object-cover"
-                  loading="lazy"
-                  onError={() => setLoadError(true)}
+                  className="bg-surface-container-high"
+                  objectFit="contain"
+                  onLoadError={() => setLoadError(true)}
                 />
                 <div className="absolute bottom-3 left-3 right-3 glass-panel rounded-xl p-2 flex justify-between items-center translate-y-12 opacity-0 group-hover:translate-y-0 group-hover:opacity-100 transition-all duration-300">
                   <div className="flex gap-2">
@@ -177,6 +178,10 @@ export function GeneratedImagePart({ part }: Props) {
           <span className="text-[10px] text-on-surface-variant/50 font-body">{part.prompt}</span>
         </div>
       </div>
+      {/* Reserve square aspect space so the skeleton is close in height to
+          the completed image. Prevents a large row-size jump in the virtual
+          feed when the status flips to completed. */}
+      <div className="aspect-square bg-surface-container-high rounded-xl" />
       <div className="h-1 w-full bg-surface-container-high rounded-full overflow-hidden">
         <div className="h-full bg-primary w-1/3 rounded-full animate-[slide_1s_ease-in-out_infinite_alternate]" />
       </div>

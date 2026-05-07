@@ -15,6 +15,10 @@ export interface ModelCapabilities {
   parallelToolCalls?: boolean;
   reasoningWithTools?: boolean;
   structuredOutput?: boolean;
+  fileAttachments?: boolean;
+  imageInput?: boolean;
+  pdfInput?: boolean;
+  textFileInput?: boolean;
 }
 
 /** A UI-safe model option discovered from a provider. */

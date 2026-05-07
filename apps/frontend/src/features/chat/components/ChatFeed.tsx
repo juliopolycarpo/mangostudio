@@ -1,5 +1,5 @@
 /* global document */
-import type { Message, MessagePart } from '@mangostudio/shared';
+import type { GeneratedImagePart, Message, MessagePart } from '@mangostudio/shared';
 import {
   Sparkles,
   Download,
@@ -17,6 +17,7 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import { useI18n } from '@/hooks/use-i18n';
 import { MarkdownContent } from '@/components/MarkdownContent';
 import { MessageParts } from './MessageParts';
+import { ReservedAspectImage } from './ReservedAspectImage';
 
 function isNearBottom(element: HTMLElement): boolean {
   return element.scrollHeight - element.scrollTop - element.clientHeight <= 24;
@@ -136,11 +137,13 @@ export function ChatFeed({ chatId, messages }: { chatId: string | null; messages
   const previousChatIdRef = useRef<string | null>(chatId);
 
   const getScrollElement = useCallback(() => parentRef.current, []);
+  const getItemKey = useCallback((index: number) => messages[index]?.id ?? index, [messages]);
   const estimateSize = useCallback(() => 150, []);
 
   const rowVirtualizer = useVirtualizer({
     count: messages.length,
     getScrollElement,
+    getItemKey,
     estimateSize,
     overscan: 5,
   });
@@ -151,6 +154,14 @@ export function ChatFeed({ chatId, messages }: { chatId: string | null; messages
   // re-firing on every in-place part update (e.g. image completion events).
   const latestPartsCount = latestMessage?.parts?.length ?? 0;
   const latestTextLen = latestMessage?.text?.length ?? 0;
+  // When a generated image part transitions status (generating → completed),
+  // the row height typically changes significantly. Capture that signal as a
+  // primitive so the auto-follow layout effect re-scrolls to bottom.
+  const latestImageCompletionSignature =
+    latestMessage?.parts
+      ?.filter((p): p is GeneratedImagePart => p.type === 'generated_image')
+      .map((p) => `${p.imageId}:${p.status}:${p.imageUrl ?? ''}`)
+      .join(',') ?? '';
 
   useEffect(() => {
     if (previousChatIdRef.current !== chatId) {
@@ -162,19 +173,12 @@ export function ChatFeed({ chatId, messages }: { chatId: string | null; messages
 
   useLayoutEffect(() => {
     if (!pendingScrollToBottomRef.current || !parentRef.current || messages.length === 0) return;
-    const animationFrameId = requestAnimationFrame(() => {
-      const element = parentRef.current;
-      if (!element) return;
-      element.scrollTop = element.scrollHeight;
-      pendingScrollToBottomRef.current = false;
-    });
-    return () => cancelAnimationFrame(animationFrameId);
+    parentRef.current.scrollTop = parentRef.current.scrollHeight;
+    pendingScrollToBottomRef.current = false;
   }, [chatId, messages.length]);
 
-  // Keep auto-follow during streaming, but defer the scroll so the
-  // virtualizer can complete its layout pass before we adjust position.
-  // Using primitive deps avoids re-firing on in-place part replacements
-  // (e.g. when an image generation placeholder resolves to a real URL).
+  // Keep auto-follow during streaming. The layout effect runs before paint,
+  // so users do not see the one-frame pre-scroll position.
   useLayoutEffect(() => {
     const isNewGeneratingMessage =
       latestIsGenerating && previousGeneratingMessageIdRef.current !== latestMessageId;
@@ -183,14 +187,15 @@ export function ChatFeed({ chatId, messages }: { chatId: string | null; messages
     }
     if (!latestIsGenerating || !parentRef.current) return;
     if (feedShouldAutoFollowRef.current) {
-      const rafId = requestAnimationFrame(() => {
-        if (parentRef.current && feedShouldAutoFollowRef.current) {
-          parentRef.current.scrollTop = parentRef.current.scrollHeight;
-        }
-      });
-      return () => cancelAnimationFrame(rafId);
+      parentRef.current.scrollTop = parentRef.current.scrollHeight;
     }
-  }, [latestMessageId, latestIsGenerating, latestPartsCount, latestTextLen]);
+  }, [
+    latestMessageId,
+    latestIsGenerating,
+    latestPartsCount,
+    latestTextLen,
+    latestImageCompletionSignature,
+  ]);
 
   useEffect(() => {
     previousGeneratingMessageIdRef.current = latestIsGenerating ? latestMessageId : null;
@@ -266,10 +271,12 @@ export function ChatFeed({ chatId, messages }: { chatId: string | null; messages
                   width: '100%',
                   transform: `translateY(${virtualRow.start}px)`,
                   paddingBottom: 'var(--chat-message-gap)',
+                  willChange: 'transform',
+                  contain: 'layout style paint',
                 }}
               >
                 <motion.div
-                  initial={{ opacity: 0, y: 10 }}
+                  initial={false}
                   animate={{ opacity: 1, y: 0 }}
                   className={`flex flex-col gap-2 max-w-[80%] ${msg.role === 'user' ? 'items-end ml-auto' : 'items-start mr-auto max-w-full'}`}
                 >
@@ -285,11 +292,10 @@ export function ChatFeed({ chatId, messages }: { chatId: string | null; messages
                               </span>
                             </div>
                           ) : (
-                            <img
+                            <ReservedAspectImage
                               src={msg.referenceImage}
                               alt="Reference"
-                              className="w-full h-auto object-cover"
-                              onError={() => handleImageError(`ref-${msg.id}`)}
+                              onLoadError={() => handleImageError(`ref-${msg.id}`)}
                             />
                           )}
                         </div>
@@ -383,9 +389,9 @@ export function ChatFeed({ chatId, messages }: { chatId: string | null; messages
                                     <img
                                       src={msg.imageUrl}
                                       alt="Generated"
-                                      className="w-full h-full object-cover grayscale-[20%] group-hover:grayscale-0 transition-all duration-700"
+                                      className="w-full h-full object-cover grayscale-[20%] group-hover:grayscale-0 transition-[filter] duration-700"
+                                      decoding="async"
                                       onError={() => handleImageError(`gen-${msg.id}`)}
-                                      onLoad={() => rowVirtualizer.measureElement(null)}
                                     />
                                     <div className="absolute bottom-4 left-4 right-4 glass-panel rounded-xl p-3 flex justify-between items-center translate-y-12 opacity-0 group-hover:translate-y-0 group-hover:opacity-100 transition-all duration-300">
                                       <div className="flex gap-2">

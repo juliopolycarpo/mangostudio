@@ -23,6 +23,7 @@ import { collectAgentEvents } from '../../../support/providers/agent-event-colle
 import type {
   AgentEvent,
   AgentTurnRequest,
+  ProviderRuntimeAttachment,
   ToolDefinition,
 } from '../../../../src/services/providers/types';
 
@@ -35,6 +36,30 @@ const SEARCH_TOOL: ToolDefinition = {
     required: ['query'],
   },
 };
+
+const ATTACHMENT_CAPABILITIES = {
+  text: true,
+  image: false,
+  streaming: true,
+  fileAttachments: true,
+  imageInput: true,
+  pdfInput: true,
+  textFileInput: true,
+};
+
+function runtimeAttachment(
+  overrides: Partial<ProviderRuntimeAttachment> = {}
+): ProviderRuntimeAttachment {
+  return {
+    id: 'attachment-a',
+    originalName: 'attachment.png',
+    mimeType: 'image/png',
+    sizeBytes: 2,
+    kind: 'image',
+    bytes: new Uint8Array([1, 2]),
+    ...overrides,
+  };
+}
 
 function baseRequest(overrides: Partial<AgentTurnRequest> = {}): AgentTurnRequest {
   return {
@@ -129,6 +154,66 @@ describe('streamGeminiAgentTurn — request shape', () => {
     ]);
   });
 
+  it('maps current-turn attachments into Interactions input content', async () => {
+    const req = baseRequest({
+      prompt: 'Describe these files.',
+      modelCapabilities: ATTACHMENT_CAPABILITIES,
+      attachments: [
+        runtimeAttachment({
+          id: 'image-a',
+          originalName: 'diagram.png',
+          mimeType: 'image/png',
+          kind: 'image',
+          sizeBytes: 2,
+          bytes: new Uint8Array([1, 2]),
+        }),
+        runtimeAttachment({
+          id: 'pdf-a',
+          originalName: 'report.pdf',
+          mimeType: 'application/pdf',
+          kind: 'pdf',
+          sizeBytes: 2,
+          bytes: new Uint8Array([3, 4]),
+        }),
+        runtimeAttachment({
+          id: 'text-a',
+          originalName: 'notes.txt',
+          mimeType: 'text/plain',
+          kind: 'text',
+          sizeBytes: 5,
+          bytes: new Uint8Array([104, 101, 108, 108, 111]),
+        }),
+        runtimeAttachment({
+          id: 'data-a',
+          originalName: 'archive.bin',
+          mimeType: 'application/octet-stream',
+          kind: 'data',
+          sizeBytes: 1,
+          bytes: new Uint8Array([9]),
+        }),
+      ],
+    });
+    let captured: Record<string, unknown> | undefined;
+
+    const fakeClient = createFakeGeminiInteractionsClient((params) => {
+      captured = params;
+      return Promise.resolve(completedInteractionEvent());
+    });
+
+    await collectAgentEvents(streamGeminiAgentTurn(req, fakeClient as never));
+
+    expect(captured?.input).toEqual([
+      { type: 'text', text: 'Describe these files.' },
+      { type: 'image', data: 'AQI=', mime_type: 'image/png' },
+      { type: 'document', data: 'AwQ=', mime_type: 'application/pdf', name: 'report.pdf' },
+      { type: 'document', data: 'aGVsbG8=', mime_type: 'text/plain', name: 'notes.txt' },
+      {
+        type: 'text',
+        text: '[Attachment "archive.bin" (application/octet-stream, 1 bytes) was not sent because this attachment type is not supported.]',
+      },
+    ]);
+  });
+
   it('maps structured output to top-level response_format', async () => {
     const req = baseRequest({
       modelName: 'gemini-3-flash-preview',
@@ -159,6 +244,8 @@ describe('streamGeminiAgentTurn — request shape', () => {
     const req = baseRequest({
       prompt: undefined,
       providerState: buildEnvelope(baseRequest()),
+      modelCapabilities: ATTACHMENT_CAPABILITIES,
+      attachments: [runtimeAttachment()],
       toolResults: [{ callId: 'call_1', name: 'search', result: '{"hits":[]}' }],
     });
     let captured: Record<string, unknown> | undefined;

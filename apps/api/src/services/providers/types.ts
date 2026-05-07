@@ -8,6 +8,7 @@ import type {
   ProviderType,
   AgentEvent,
 } from '@mangostudio/shared/types';
+import type { ChatAttachmentKind } from '@mangostudio/shared/chat';
 import type { PromptCachePreference } from '@mangostudio/shared/provider-settings';
 
 export type { AgentEvent };
@@ -26,6 +27,32 @@ export interface ChatTurnContext {
   parts?: MessagePart[];
   providerState?: string | null;
   modelName?: string | null;
+}
+
+export interface ProviderRuntimeAttachment {
+  id: string;
+  originalName: string;
+  mimeType: string;
+  sizeBytes: number;
+  kind: ChatAttachmentKind;
+  bytes: Uint8Array;
+}
+
+export interface ModelCapabilities {
+  text: boolean;
+  image: boolean;
+  streaming: boolean;
+  reasoning?: boolean;
+  tools?: boolean;
+  statefulContinuation?: boolean;
+  promptCaching?: boolean;
+  parallelToolCalls?: boolean;
+  reasoningWithTools?: boolean;
+  structuredOutput?: boolean;
+  fileAttachments?: boolean;
+  imageInput?: boolean;
+  pdfInput?: boolean;
+  textFileInput?: boolean;
 }
 
 /** Provider-agnostic tool definition (passed to providers that support function calling). */
@@ -107,6 +134,8 @@ export interface AgentTurnRequest {
   providerState?: string | null;
   signal?: AbortSignal;
   generationConfig?: GenerationConfig;
+  attachments?: ProviderRuntimeAttachment[];
+  modelCapabilities?: ModelCapabilities;
 }
 
 /** Input for text generation. */
@@ -120,6 +149,8 @@ export interface TextGenerationRequest {
   signal?: AbortSignal;
   generationConfig?: GenerationConfig;
   providerState?: string; // for cross-turn continuity
+  attachments?: ProviderRuntimeAttachment[];
+  modelCapabilities?: ModelCapabilities;
 }
 
 /** Output from text generation. */
@@ -164,18 +195,7 @@ export interface ModelInfo {
   provider: ProviderType;
   /** Maximum input tokens accepted by the model (from provider API). */
   inputTokenLimit?: number;
-  capabilities: {
-    text: boolean;
-    image: boolean;
-    streaming: boolean;
-    reasoning?: boolean;
-    tools?: boolean;
-    statefulContinuation?: boolean;
-    promptCaching?: boolean;
-    parallelToolCalls?: boolean;
-    reasoningWithTools?: boolean;
-    structuredOutput?: boolean;
-  };
+  capabilities: ModelCapabilities;
 }
 
 /**

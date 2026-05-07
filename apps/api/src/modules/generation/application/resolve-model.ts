@@ -1,4 +1,8 @@
-import { getUnifiedModelCatalog } from '../../../services/providers/catalog';
+import {
+  getCachedModelCapabilities,
+  getUnifiedModelCatalog,
+} from '../../../services/providers/catalog';
+import type { ModelCapabilities } from '../../../services/providers/types';
 
 export interface ResolveModelInput {
   requestedModel?: string;
@@ -8,6 +12,7 @@ export interface ResolveModelInput {
 
 export interface ResolvedModel {
   modelId: string;
+  capabilities?: ModelCapabilities;
 }
 
 export class NoModelAvailableError extends Error {
@@ -23,18 +28,25 @@ export class NoModelAvailableError extends Error {
 
 export async function resolveModel(input: ResolveModelInput): Promise<ResolvedModel> {
   let modelId = input.requestedModel?.trim() || '';
+  let capabilities: ModelCapabilities | undefined;
 
   if (!modelId) {
     const catalog = await getUnifiedModelCatalog(input.userId);
-    modelId =
-      input.type === 'text'
-        ? (catalog.textModels[0]?.modelId ?? '')
-        : (catalog.imageModels[0]?.modelId ?? '');
+    const availableModels = input.type === 'text' ? catalog.textModels : catalog.imageModels;
+    if (availableModels.length === 0) {
+      throw new NoModelAvailableError(input.type);
+    }
+
+    const selectedModel = availableModels[0];
+    modelId = selectedModel.modelId;
+    capabilities = selectedModel.capabilities;
+  } else {
+    capabilities = getCachedModelCapabilities(input.userId, modelId);
   }
 
   if (!modelId) {
     throw new NoModelAvailableError(input.type);
   }
 
-  return { modelId };
+  return capabilities ? { modelId, capabilities } : { modelId };
 }

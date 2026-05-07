@@ -35,7 +35,8 @@ const geminiProvider: AIProvider = {
       req.history,
       req.prompt,
       req.systemPrompt,
-      req.modelName
+      req.modelName,
+      { attachments: req.attachments, modelCapabilities: req.modelCapabilities }
     );
     return { text };
   },
@@ -47,7 +48,8 @@ const geminiProvider: AIProvider = {
       req.prompt,
       req.systemPrompt,
       req.modelName,
-      req.generationConfig
+      req.generationConfig,
+      { attachments: req.attachments, modelCapabilities: req.modelCapabilities }
     )) {
       if (req.signal?.aborted) break;
       yield chunk;
@@ -72,25 +74,34 @@ const geminiProvider: AIProvider = {
 
   async listModels(userId: string): Promise<ModelInfo[]> {
     const catalog = await getGeminiModelCatalog(userId);
-    return catalog.allModels.map((m) => ({
-      modelId: m.modelId,
-      displayName: m.displayName,
-      description: m.description,
-      provider: 'gemini' as const,
-      inputTokenLimit: m.inputTokenLimit,
-      capabilities: {
-        text: catalog.discoveredTextModels.some((t) => t.modelId === m.modelId),
-        image: catalog.discoveredImageModels.some((i) => i.modelId === m.modelId),
-        streaming: true,
-        reasoning: isReasoningModel(m.modelId),
-        tools: catalog.discoveredTextModels.some((t) => t.modelId === m.modelId),
-        statefulContinuation: catalog.discoveredTextModels.some((t) => t.modelId === m.modelId),
-        promptCaching: true,
-        parallelToolCalls: false,
-        reasoningWithTools: isReasoningModel(m.modelId),
-        structuredOutput: catalog.discoveredTextModels.some((t) => t.modelId === m.modelId),
-      },
-    }));
+    return catalog.allModels.map((m) => {
+      const isText = catalog.discoveredTextModels.some((t) => t.modelId === m.modelId);
+      const isImage = catalog.discoveredImageModels.some((i) => i.modelId === m.modelId);
+
+      return {
+        modelId: m.modelId,
+        displayName: m.displayName,
+        description: m.description,
+        provider: 'gemini' as const,
+        inputTokenLimit: m.inputTokenLimit,
+        capabilities: {
+          text: isText,
+          image: isImage,
+          streaming: true,
+          reasoning: isReasoningModel(m.modelId),
+          tools: isText,
+          statefulContinuation: isText,
+          promptCaching: true,
+          parallelToolCalls: false,
+          reasoningWithTools: isReasoningModel(m.modelId),
+          structuredOutput: isText,
+          fileAttachments: isText,
+          imageInput: isText,
+          pdfInput: isText,
+          textFileInput: isText,
+        },
+      };
+    });
   },
 
   invalidateModelCache(userId?: string): void {

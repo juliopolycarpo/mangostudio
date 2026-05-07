@@ -237,6 +237,43 @@ describe('useTextChat — maxToolIterations forwarding', () => {
   });
 });
 
+describe('useTextChat — server message id reconciliation', () => {
+  beforeEach(() => {
+    mockStream.mockReset();
+  });
+
+  it('replaces optimistic message ids from stream events without refreshing existing chats', async () => {
+    const props = makeProps();
+    mockStream.mockImplementation(
+      makeStreamFn([
+        { type: 'user_message_id', messageId: 'server-user-1', done: false },
+        { type: 'text', text: 'hello', done: false },
+        { type: 'done', done: true, messageId: 'server-ai-1', generationTime: '0.5s' },
+      ])
+    );
+
+    const { result } = renderHook(() => useTextGeneration(props));
+
+    await act(async () => {
+      await result.current.handleRespond('ping');
+    });
+
+    await waitFor(() => expect(result.current.isGenerating).toBe(false));
+
+    expect(props.optimistic.updateOptimisticMessage).toHaveBeenCalledWith(
+      'chat-1',
+      expect.stringContaining('optimistic-user'),
+      expect.objectContaining({ id: 'server-user-1' })
+    );
+    expect(props.optimistic.updateOptimisticMessage).toHaveBeenCalledWith(
+      'chat-1',
+      expect.stringContaining('optimistic-ai'),
+      expect.objectContaining({ id: 'server-ai-1', isGenerating: false })
+    );
+    expect(props.chats.loadChats).not.toHaveBeenCalled();
+  });
+});
+
 describe('useTextChat — failure surfaced as timeline item', () => {
   beforeEach(() => {
     mockStream.mockReset();

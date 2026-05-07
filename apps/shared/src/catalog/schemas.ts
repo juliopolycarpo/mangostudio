@@ -20,6 +20,10 @@ export const ModelCapabilitiesSchema = Type.Object({
   parallelToolCalls: Type.Optional(Type.Boolean()),
   reasoningWithTools: Type.Optional(Type.Boolean()),
   structuredOutput: Type.Optional(Type.Boolean()),
+  fileAttachments: Type.Optional(Type.Boolean()),
+  imageInput: Type.Optional(Type.Boolean()),
+  pdfInput: Type.Optional(Type.Boolean()),
+  textFileInput: Type.Optional(Type.Boolean()),
 });
 
 export type ModelCapabilities = Static<typeof ModelCapabilitiesSchema>;

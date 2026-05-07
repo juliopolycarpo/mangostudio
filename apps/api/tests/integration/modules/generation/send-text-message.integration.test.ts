@@ -1,5 +1,8 @@
 import { afterEach, beforeAll, describe, expect, it } from 'bun:test';
+import { mkdirSync, rmSync, writeFileSync } from 'fs';
+import { dirname, join } from 'path';
 import { getDb } from '../../../../src/db/database';
+import { getConfig } from '../../../../src/lib/config';
 import { sendTextMessage } from '../../../../src/modules/generation/application/send-text-message';
 import { EmptyTextTurnError } from '../../../../src/modules/generation/application/text-turn-content';
 import {
@@ -15,6 +18,7 @@ const TEST_USER = {
 };
 
 let previousOpenAICompatibleProvider: AIProvider | null = null;
+const createdUploadFiles: string[] = [];
 
 beforeAll(async () => {
   const now = Date.now();
@@ -33,6 +37,10 @@ beforeAll(async () => {
 });
 
 afterEach(() => {
+  for (const filePath of createdUploadFiles.splice(0)) {
+    rmSync(filePath, { force: true });
+  }
+
   if (previousOpenAICompatibleProvider) {
     registerProvider(previousOpenAICompatibleProvider);
   }
@@ -49,6 +57,8 @@ describe('sendTextMessage attachments', () => {
     const chatId = `send-text-attachment-chat-${now}`;
     const attachmentId = `send-text-attachment-${now}`;
     const modelId = `send-text-model-${now}`;
+    const relativePath = `Send-Text-Attachment-Chat_${chatId}/${now}/${attachmentId}-reference.png`;
+    writeStoredAttachment(relativePath, new Uint8Array([1, 2, 3, 4]));
     await seedConnector(modelId);
     await db
       .insertInto('chats')
@@ -82,10 +92,10 @@ describe('sendTextMessage attachments', () => {
         messageId: null,
         originalName: 'reference.png',
         storedName: `${attachmentId}-reference.png`,
-        relativePath: `Send-Text-Attachment-Chat_${chatId}/${now}/${attachmentId}-reference.png`,
-        url: `/uploads/Send-Text-Attachment-Chat_${chatId}/${now}/${attachmentId}-reference.png`,
+        relativePath,
+        url: `/uploads/${relativePath}`,
         mimeType: 'image/png',
-        sizeBytes: 128,
+        sizeBytes: 4,
         kind: 'image',
         createdAt: now,
         updatedAt: now,
@@ -118,6 +128,17 @@ describe('sendTextMessage attachments', () => {
     const firstRequest = capturedRequests[0];
     expect(firstRequest?.prompt).toBe('Review this reference.');
     expect('attachmentIds' in (firstRequest as unknown as Record<string, unknown>)).toBe(false);
+    expect(firstRequest?.attachments).toHaveLength(1);
+    expect(firstRequest?.attachments?.[0]).toMatchObject({
+      id: attachmentId,
+      originalName: 'reference.png',
+      mimeType: 'image/png',
+      sizeBytes: 4,
+      kind: 'image',
+    });
+    expect(Array.from(firstRequest?.attachments?.[0]?.bytes ?? [])).toEqual([1, 2, 3, 4]);
+    expect(firstRequest?.attachments?.[0]).not.toHaveProperty('relativePath');
+    expect(firstRequest?.attachments?.[0]).not.toHaveProperty('storedName');
     expect(firstRequest?.history).toHaveLength(1);
     expect(firstRequest?.history[0]?.role).toBe('user');
     expect(firstRequest?.history[0]?.text).toBe('Earlier request');
@@ -132,6 +153,8 @@ describe('sendTextMessage attachments', () => {
     const chatId = `send-text-attachment-only-chat-${now}`;
     const attachmentId = `send-text-attachment-only-${now}`;
     const modelId = `send-text-attachment-only-model-${now}`;
+    const relativePath = `Send-Text-Attachment-Only-Chat_${chatId}/${now}/${attachmentId}-brief.txt`;
+    writeStoredAttachment(relativePath, new Uint8Array([98, 114, 105, 101, 102]));
     await seedConnector(modelId);
     await db
       .insertInto('chats')
@@ -153,10 +176,10 @@ describe('sendTextMessage attachments', () => {
         messageId: null,
         originalName: 'brief.txt',
         storedName: `${attachmentId}-brief.txt`,
-        relativePath: `Send-Text-Attachment-Only-Chat_${chatId}/${now}/${attachmentId}-brief.txt`,
-        url: `/uploads/Send-Text-Attachment-Only-Chat_${chatId}/${now}/${attachmentId}-brief.txt`,
+        relativePath,
+        url: `/uploads/${relativePath}`,
         mimeType: 'text/plain',
-        sizeBytes: 16,
+        sizeBytes: 5,
         kind: 'text',
         createdAt: now,
         updatedAt: now,
@@ -178,6 +201,10 @@ describe('sendTextMessage attachments', () => {
     expect(result.userMessage.attachments?.[0]?.id).toBe(attachmentId);
     expect(result.userMessage.attachments?.[0]?.kind).toBe('text');
     expect(capturedRequests[0]?.prompt).toBe('   ');
+    expect(capturedRequests[0]?.attachments).toHaveLength(1);
+    expect(Array.from(capturedRequests[0]?.attachments?.[0]?.bytes ?? [])).toEqual([
+      98, 114, 105, 101, 102,
+    ]);
   });
 
   it('rejects turns without prompt text or attachments before persisting messages', async () => {
@@ -242,6 +269,13 @@ function registerTextProvider(
     validateApiKey: () => Promise.resolve(),
     resolveApiKey: () => Promise.resolve('test-key'),
   });
+}
+
+function writeStoredAttachment(relativePath: string, bytes: Uint8Array): void {
+  const filePath = join(getConfig().uploads.dir, relativePath);
+  mkdirSync(dirname(filePath), { recursive: true });
+  writeFileSync(filePath, bytes);
+  createdUploadFiles.push(filePath);
 }
 
 async function seedConnector(modelId: string): Promise<void> {

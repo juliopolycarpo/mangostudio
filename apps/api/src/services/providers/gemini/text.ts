@@ -3,11 +3,30 @@
  * Uses the generateContent / generateContentStream APIs via stateless context replay.
  */
 
-import type { Content } from '@google/genai';
+import type { Content, Part } from '@google/genai';
 import { getResolvedGeminiApiKey } from './secret';
 import { createGeminiClient } from './client';
-import type { StreamingChunk, GenerationConfig, TextContextMessage } from '../types';
+import type {
+  StreamingChunk,
+  GenerationConfig,
+  ModelCapabilities,
+  ProviderRuntimeAttachment,
+  TextContextMessage,
+} from '../types';
 import { buildTextThinkingConfig } from './reasoning-config';
+import {
+  attachmentToBase64,
+  getAttachmentSupportKind,
+  isAttachmentSupportedByProvider,
+  unsupportedAttachmentNotes,
+} from '../core/attachment-content';
+
+const GEMINI_CONTENT_ATTACHMENT_KINDS = ['image', 'pdf', 'text'] as const;
+
+interface GeminiTextAttachmentOptions {
+  attachments?: ProviderRuntimeAttachment[];
+  modelCapabilities?: ModelCapabilities;
+}
 
 /**
  * Generates a text response using the Gemini API.
@@ -18,7 +37,8 @@ export async function generateGeminiText(
   history: TextContextMessage[],
   prompt: string,
   systemPrompt?: string,
-  modelName?: string
+  modelName?: string,
+  attachmentOptions: GeminiTextAttachmentOptions = {}
 ): Promise<string> {
   if (!modelName) {
     throw new Error('No Gemini text model was provided.');
@@ -32,7 +52,10 @@ export async function generateGeminiText(
     parts: [{ text: msg.text }],
   }));
 
-  const contents: Content[] = [...historyContents, { role: 'user', parts: [{ text: prompt }] }];
+  const contents: Content[] = [
+    ...historyContents,
+    { role: 'user', parts: buildGeminiUserParts(prompt, attachmentOptions) },
+  ];
 
   const config: Record<string, unknown> = {};
   if (systemPrompt && systemPrompt.trim()) {
@@ -70,7 +93,8 @@ export async function* generateGeminiTextStream(
   prompt: string,
   systemPrompt?: string,
   modelName?: string,
-  generationConfig?: GenerationConfig
+  generationConfig?: GenerationConfig,
+  attachmentOptions: GeminiTextAttachmentOptions = {}
 ): AsyncGenerator<StreamingChunk> {
   if (!modelName) {
     throw new Error('No Gemini text model was provided.');
@@ -84,7 +108,10 @@ export async function* generateGeminiTextStream(
     parts: [{ text: msg.text }],
   }));
 
-  const contents: Content[] = [...historyContents, { role: 'user', parts: [{ text: prompt }] }];
+  const contents: Content[] = [
+    ...historyContents,
+    { role: 'user', parts: buildGeminiUserParts(prompt, attachmentOptions) },
+  ];
 
   const config: Record<string, unknown> = {};
   if (systemPrompt?.trim()) {
@@ -134,4 +161,45 @@ export async function* generateGeminiTextStream(
   }
 
   yield { type: 'text', text: '', done: true };
+}
+
+function buildGeminiUserParts(prompt: string, options: GeminiTextAttachmentOptions): Part[] {
+  const attachments = options.attachments ?? [];
+  if (attachments.length === 0) return [{ text: prompt }];
+
+  const parts: Part[] = [];
+  if (prompt.trim()) parts.push({ text: prompt });
+
+  for (const attachment of attachments) {
+    if (
+      !isAttachmentSupportedByProvider(
+        attachment,
+        options.modelCapabilities,
+        GEMINI_CONTENT_ATTACHMENT_KINDS
+      )
+    ) {
+      continue;
+    }
+
+    const supportKind = getAttachmentSupportKind(attachment);
+    if (supportKind === 'image' || supportKind === 'pdf' || supportKind === 'text') {
+      parts.push({
+        inlineData: {
+          data: attachmentToBase64(attachment),
+          displayName: attachment.originalName,
+          mimeType: attachment.mimeType,
+        },
+      });
+    }
+  }
+
+  for (const note of unsupportedAttachmentNotes(
+    attachments,
+    options.modelCapabilities,
+    GEMINI_CONTENT_ATTACHMENT_KINDS
+  )) {
+    parts.push({ text: note });
+  }
+
+  return parts.length > 0 ? parts : [{ text: prompt }];
 }
