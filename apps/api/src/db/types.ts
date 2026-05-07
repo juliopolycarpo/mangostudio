@@ -4,6 +4,7 @@
 
 import type { Insertable, Selectable, Updateable } from 'kysely';
 import type { InteractionMode } from '@mangostudio/shared';
+import type { ChatAttachmentKind } from '@mangostudio/shared/chat';
 
 export interface ChatsTable {
   id: string;
@@ -48,6 +49,22 @@ export interface GeneratedImagesTable {
   generationTime: string | null;
   createdAt: number;
   metadataJson: string | null;
+}
+
+export interface ChatAttachmentsTable {
+  id: string;
+  userId: string;
+  chatId: string;
+  messageId: string | null;
+  originalName: string;
+  storedName: string;
+  relativePath: string;
+  url: string;
+  mimeType: string;
+  sizeBytes: number;
+  kind: ChatAttachmentKind;
+  createdAt: number;
+  updatedAt: number;
 }
 
 export interface SecretMetadataTable {
@@ -139,6 +156,7 @@ export interface Database {
   chats: ChatsTable;
   messages: MessagesTable;
   generated_images: GeneratedImagesTable;
+  chat_attachments: ChatAttachmentsTable;
   secret_metadata: SecretMetadataTable;
   user: UserTable;
   session: SessionTable;
@@ -159,6 +177,10 @@ export type MessageUpdate = Updateable<MessagesTable>;
 export type GeneratedImageSelect = Selectable<GeneratedImagesTable>;
 export type GeneratedImageInsert = Insertable<GeneratedImagesTable>;
 export type GeneratedImageUpdate = Updateable<GeneratedImagesTable>;
+
+export type ChatAttachmentSelect = Selectable<ChatAttachmentsTable>;
+export type ChatAttachmentInsert = Insertable<ChatAttachmentsTable>;
+export type ChatAttachmentUpdate = Updateable<ChatAttachmentsTable>;
 
 export type SecretMetadataSelect = Selectable<SecretMetadataTable>;
 export type SecretMetadataInsert = Insertable<SecretMetadataTable>;

@@ -16,6 +16,15 @@ import { verifyChatOwnership } from '../../chats/infrastructure/chat-repository'
 import { resolveModel, NoModelAvailableError } from '../application/resolve-model';
 import { getProviderForModel } from '../../../services/providers/core/provider-registry';
 import { streamTextTurn, type StreamEvent } from '../application/stream-text-turn';
+import {
+  assertChatAttachmentIdsAvailable,
+  ChatAttachmentNotFoundError,
+} from '../../attachments/infrastructure/attachment-repository';
+import {
+  assertTextTurnHasContent,
+  EmptyTextTurnError,
+  normalizeTextTurnAttachmentIds,
+} from '../application/text-turn-content';
 
 const KEEPALIVE_INTERVAL_MS = 15_000;
 
@@ -151,6 +160,21 @@ export const respondStreamRoutes = (app: Elysia) =>
             return { error: 'Chat not found', code: ERROR_CODES.NOT_FOUND };
           }
 
+          const attachmentIds = normalizeTextTurnAttachmentIds(body.attachmentIds);
+          try {
+            assertTextTurnHasContent(body.prompt, attachmentIds);
+            await assertChatAttachmentIdsAvailable(
+              { attachmentIds, userId, chatId: body.chatId },
+              db
+            );
+          } catch (err) {
+            if (err instanceof ChatAttachmentNotFoundError || err instanceof EmptyTextTurnError) {
+              set.status = 400;
+              return { error: err.message, code: ERROR_CODES.VALIDATION };
+            }
+            throw err;
+          }
+
           // Model resolution must be pre-flight to return HTTP 503 before SSE headers flush.
           let resolvedModel: string;
           try {
@@ -197,6 +221,7 @@ export const respondStreamRoutes = (app: Elysia) =>
                     chatId: body.chatId,
                     userId,
                     prompt: body.prompt,
+                    attachmentIds,
                     model: resolvedModel,
                     systemPrompt: body.systemPrompt,
                     promptSettings: body.promptSettings,

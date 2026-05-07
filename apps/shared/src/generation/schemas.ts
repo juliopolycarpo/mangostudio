@@ -24,6 +24,7 @@ export type GenerateImageBody = Static<typeof GenerateImageBodySchema>;
 export const GenerateTextBodySchema = Type.Object({
   chatId: Type.String(),
   prompt: Type.String(),
+  attachmentIds: Type.Optional(Type.Array(Type.String())),
   model: Type.Optional(Type.String()),
   systemPrompt: Type.Optional(Type.String()),
 });
@@ -33,6 +34,7 @@ export type GenerateTextBody = Static<typeof GenerateTextBodySchema>;
 export const RespondStreamBodySchema = Type.Object({
   chatId: Type.String(),
   prompt: Type.String(),
+  attachmentIds: Type.Optional(Type.Array(Type.String())),
   model: Type.Optional(Type.String()),
   systemPrompt: Type.Optional(Type.String()),
   promptSettings: Type.Optional(PromptSettingsSchema),

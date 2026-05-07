@@ -2,6 +2,20 @@ import type { InteractionMode } from '../types/provider';
 import type { MessagePart } from '../types/agent-events';
 import type { GeneratedImageArtifact } from '../types/gallery';
 
+export type ChatAttachmentKind = 'image' | 'text' | 'pdf' | 'data' | 'unknown';
+
+export interface ChatAttachment {
+  id: string;
+  chatId: string;
+  messageId?: string | null;
+  originalName: string;
+  mimeType: string;
+  sizeBytes: number;
+  kind: ChatAttachmentKind;
+  url: string;
+  createdAt: number;
+}
+
 /** Represents a chat session. */
 export interface Chat {
   id: string;
@@ -32,4 +46,5 @@ export interface Message {
   parts?: MessagePart[];
   providerState?: string;
   generatedImages?: GeneratedImageArtifact[];
+  attachments?: ChatAttachment[];
 }

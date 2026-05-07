@@ -1,6 +1,13 @@
 import { Type, type Static } from '@sinclair/typebox';
 
 const InteractionModeSchema = Type.Union([Type.Literal('chat'), Type.Literal('image')]);
+export const ChatAttachmentKindSchema = Type.Union([
+  Type.Literal('image'),
+  Type.Literal('text'),
+  Type.Literal('pdf'),
+  Type.Literal('data'),
+  Type.Literal('unknown'),
+]);
 const ContextModeSchema = Type.Union([
   Type.Literal('stateful'),
   Type.Literal('stateless-loop'),
@@ -45,6 +52,26 @@ export const ContextSettingsSchema = Type.Object({
 });
 
 export type ContextSettings = Static<typeof ContextSettingsSchema>;
+
+export const ChatAttachmentSchema = Type.Object({
+  id: Type.String(),
+  chatId: Type.String(),
+  messageId: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+  originalName: Type.String(),
+  mimeType: Type.String(),
+  sizeBytes: Type.Number(),
+  kind: ChatAttachmentKindSchema,
+  url: Type.String(),
+  createdAt: Type.Number(),
+});
+
+export type ChatAttachment = Static<typeof ChatAttachmentSchema>;
+
+export const UploadChatAttachmentResponseSchema = Type.Object({
+  attachment: ChatAttachmentSchema,
+});
+
+export type UploadChatAttachmentResponse = Static<typeof UploadChatAttachmentResponseSchema>;
 
 export const CreateChatBodySchema = Type.Object({
   title: Type.String(),

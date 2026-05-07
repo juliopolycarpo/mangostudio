@@ -1,4 +1,5 @@
 import type { Kysely } from 'kysely';
+import type { ChatAttachment } from '@mangostudio/shared/chat';
 import type { Database } from '../../../db/types';
 import type { MessagePart } from '@mangostudio/shared/types';
 import {
@@ -6,30 +7,55 @@ import {
   type CreateMessageData,
 } from '../../messages/infrastructure/message-repository';
 import { insertGeneratedImageArtifact } from '../../generated-images/infrastructure/generated-image-repository';
+import { linkAttachmentsToMessage } from '../../attachments/infrastructure/attachment-repository';
 
 export interface PersistUserMessageInput {
   id: string;
+  userId?: string;
   chatId: string;
   text: string;
+  attachmentIds?: string[];
   timestamp: number;
 }
 
 export async function persistUserMessage(
   input: PersistUserMessageInput,
   db: Kysely<Database>
-): Promise<void> {
-  await insertMessage(
-    {
-      id: input.id,
-      chatId: input.chatId,
-      role: 'user',
-      text: input.text,
-      timestamp: input.timestamp,
-      isGenerating: false,
-      interactionMode: 'chat',
-    },
-    db
-  );
+): Promise<ChatAttachment[]> {
+  const message: CreateMessageData = {
+    id: input.id,
+    chatId: input.chatId,
+    role: 'user',
+    text: input.text,
+    timestamp: input.timestamp,
+    isGenerating: false,
+    interactionMode: 'chat',
+  };
+  const attachmentIds = input.attachmentIds ?? [];
+
+  if (attachmentIds.length === 0) {
+    await insertMessage(message, db);
+    return [];
+  }
+
+  if (!input.userId) {
+    throw new Error('userId is required to attach files to a user message.');
+  }
+  const attachmentUserId = input.userId;
+
+  return db.transaction().execute(async (trx) => {
+    await insertMessage(message, trx);
+    return linkAttachmentsToMessage(
+      {
+        attachmentIds,
+        userId: attachmentUserId,
+        chatId: input.chatId,
+        messageId: input.id,
+        updatedAt: input.timestamp,
+      },
+      trx
+    );
+  });
 }
 
 export interface PersistAiResponseInput {
