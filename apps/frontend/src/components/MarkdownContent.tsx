@@ -10,24 +10,37 @@ function copyButton(ariaLabel: string): string {
   return `<button class="copy-code-btn" type="button" aria-label="${ariaLabel}">${CLIPBOARD_ICON}</button>`;
 }
 
+function escapeHtml(value: string): string {
+  return value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
+
 function createRenderer(theme: CodeThemeId): Renderer {
   const renderer = new Renderer();
 
   renderer.link = ({ href, title, tokens }) => {
     const text =
       tokens?.map((t): string => ('text' in t ? (t.text as string) : t.raw)).join('') ?? '';
-    const safeHref = href?.startsWith('javascript:') ? '#' : href;
+    const safeHref = href?.startsWith('javascript:') ? '#' : (href ?? '#');
     const titleAttr = title ? ` title="${title}"` : '';
     return `<a href="${safeHref}" target="_blank" rel="noopener noreferrer"${titleAttr}>${text}</a>`;
   };
 
   renderer.image = ({ href, title, text }) => {
+    const safeHref = href?.startsWith('javascript:') ? '#' : (href ?? '#');
     const titleAttr = title ? ` title="${title}"` : '';
-    // Inline `onerror` ensures that broken / hallucinated image URLs never
-    // collapse to zero height, which would trigger the chat virtualizer's
-    // ResizeObserver and cause visible content jumps.
-    return `<img src="${href}" alt="${text}"${titleAttr} loading="lazy" decoding="async" onerror="this.outerHTML='<span class=broken-image-fallback>Image unavailable</span>'" />`;
+    // Structured `generated_image` parts are the supported image path in chat.
+    // Rendering arbitrary markdown images as real <img> tags lets external or
+    // hallucinated URLs thrash the virtualized feed while they resolve/fail.
+    // Keep the reference visible, but render it as a stable link instead.
+    return `<a href="${safeHref}" target="_blank" rel="noopener noreferrer" class="markdown-image-link"${titleAttr}>${text || safeHref}</a>`;
   };
+
+  renderer.html = (token) => escapeHtml('text' in token ? token.text : '');
 
   renderer.code = ({ text, lang }) => {
     const safeLang = lang ?? '';
@@ -125,66 +138,13 @@ export function MarkdownContent({
     };
   }, [copyCodeLabel, codeCopiedLabel]);
 
-  // Image lightbox — click to zoom inline markdown images
-  useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
-
-    let activeClose: (() => void) | null = null;
-
-    const handleImageClick = (e: MouseEvent) => {
-      const img = e.target as HTMLElement;
-      if (img.tagName !== 'IMG') return;
-
-      // Don't intercept images inside links
-      if (img.closest('a')) return;
-
-      const src = img.getAttribute('src');
-      if (!src) return;
-
-      const overlay = document.createElement('div');
-      overlay.className = 'markdown-lightbox';
-      overlay.innerHTML = `<img src="${src}" alt="${img.getAttribute('alt') ?? ''}" />`;
-
-      const handleAnimationEnd = () => overlay.remove();
-      const handleKey = (ev: KeyboardEvent): void => {
-        if (ev.key === 'Escape') close();
-      };
-      const handleOverlayClick = (): void => close();
-      function close(): void {
-        overlay.classList.add('markdown-lightbox--closing');
-        // eslint-disable-next-line @eslint-react/web-api-no-leaked-event-listener
-        overlay.addEventListener('animationend', handleAnimationEnd, { once: true });
-        overlay.removeEventListener('click', handleOverlayClick);
-        document.removeEventListener('keydown', handleKey);
-        if (activeClose === close) activeClose = null;
-      }
-
-      activeClose = close;
-      // eslint-disable-next-line @eslint-react/web-api-no-leaked-event-listener
-      overlay.addEventListener('click', handleOverlayClick);
-      // eslint-disable-next-line @eslint-react/web-api-no-leaked-event-listener
-      document.addEventListener('keydown', handleKey);
-
-      document.body.appendChild(overlay);
-    };
-
-    container.addEventListener('click', handleImageClick);
-    return () => {
-      container.removeEventListener('click', handleImageClick);
-      // Close any open lightbox when the component unmounts to prevent
-      // dangling document-level listeners.
-      activeClose?.();
-    };
-  }, []);
-
   return (
     <div
       ref={containerRef}
       className={`markdown-content ${className ?? ''}`}
       // HTML is produced by `marked` with a custom renderer that only emits
-      // a fixed tag set and escapes user input; rendering as HTML is required
-      // to surface Shiki-highlighted code blocks and link/image elements.
+      // a fixed tag set and escapes raw HTML; rendering as HTML is required
+      // to surface Shiki-highlighted code blocks and safe link elements.
       // eslint-disable-next-line @eslint-react/dom-no-dangerously-set-innerhtml
       dangerouslySetInnerHTML={{ __html: renderedHtml }}
     />
