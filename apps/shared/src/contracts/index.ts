@@ -42,6 +42,9 @@ export type {
   ModelCatalogResponse,
 } from '../catalog/contracts';
 
+// App settings
+export type { AppSettings, ImageQuality } from '../app-settings/contracts';
+
 // Provider settings
 export type {
   PromptCachePreference,

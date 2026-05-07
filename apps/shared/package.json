@@ -16,6 +16,7 @@
     ".": "./src/index.ts",
     "./chat": "./src/chat/index.ts",
     "./generation": "./src/generation/index.ts",
+    "./app-settings": "./src/app-settings/index.ts",
     "./connectors": "./src/connectors/index.ts",
     "./provider-settings": "./src/provider-settings/index.ts",
     "./tool-settings": "./src/tool-settings/index.ts",
