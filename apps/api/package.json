@@ -23,7 +23,7 @@
   "dependencies": {
     "@ai-sdk/deepseek": "^2.0.32",
     "@ai-sdk/openai-compatible": "^2.0.45",
-    "@anthropic-ai/sdk": "^0.92.0",
+    "@anthropic-ai/sdk": "^0.95.0",
     "@elysiajs/cors": "^1.4.2",
     "@elysiajs/openapi": "^1.4.15",
     "@elysiajs/static": "^1.4.10",
