@@ -14,7 +14,11 @@ import {
   expectTurnCompletedEnvelope,
   expectContinuationDegraded,
 } from '../../../../tests/support/providers/contract-assertions';
-import type { AgentEvent, AgentTurnRequest } from '../../../../src/services/providers/types';
+import type {
+  AgentEvent,
+  AgentTurnRequest,
+  ProviderRuntimeAttachment,
+} from '../../../../src/services/providers/types';
 
 type CreateFn = (
   params: Record<string, unknown>,
@@ -72,6 +76,30 @@ const COMPLETED_EVENT = (id = 'resp_new', inputTokens = 42) => ({
     usage: { input_tokens: inputTokens, output_tokens: 10 },
   },
 });
+
+const ATTACHMENT_CAPABILITIES = {
+  text: true,
+  image: false,
+  streaming: true,
+  fileAttachments: true,
+  imageInput: true,
+  pdfInput: true,
+  textFileInput: true,
+};
+
+function runtimeAttachment(
+  overrides: Partial<ProviderRuntimeAttachment> = {}
+): ProviderRuntimeAttachment {
+  return {
+    id: 'attachment-a',
+    originalName: 'attachment.png',
+    mimeType: 'image/png',
+    sizeBytes: 2,
+    kind: 'image',
+    bytes: new Uint8Array([1, 2]),
+    ...overrides,
+  };
+}
 
 // ---------------------------------------------------------------------------
 // isStrictCompatible
@@ -196,6 +224,77 @@ describe('streamAgentTurnWithResponsesAPI — request shape', () => {
     expect(input[input.length - 1]).toEqual({ role: 'user', content: 'follow up' });
   });
 
+  it('maps current-turn attachments into Responses input content', async () => {
+    let captured: Record<string, unknown> | undefined;
+    await collect(
+      baseRequest({
+        prompt: 'Review the attachments.',
+        modelCapabilities: ATTACHMENT_CAPABILITIES,
+        attachments: [
+          runtimeAttachment({
+            id: 'image-a',
+            originalName: 'diagram.png',
+            mimeType: 'image/png',
+            kind: 'image',
+            sizeBytes: 2,
+            bytes: new Uint8Array([1, 2]),
+          }),
+          runtimeAttachment({
+            id: 'pdf-a',
+            originalName: 'report.pdf',
+            mimeType: 'application/pdf',
+            kind: 'pdf',
+            sizeBytes: 2,
+            bytes: new Uint8Array([3, 4]),
+          }),
+          runtimeAttachment({
+            id: 'text-a',
+            originalName: 'notes.txt',
+            mimeType: 'text/plain',
+            kind: 'text',
+            sizeBytes: 5,
+            bytes: new Uint8Array([104, 101, 108, 108, 111]),
+          }),
+          runtimeAttachment({
+            id: 'data-a',
+            originalName: 'archive.bin',
+            mimeType: 'application/octet-stream',
+            kind: 'data',
+            sizeBytes: 1,
+            bytes: new Uint8Array([9]),
+          }),
+        ],
+      }),
+      (params) => {
+        captured = params;
+        return Promise.resolve(streamOf([COMPLETED_EVENT()]));
+      }
+    );
+
+    const input = captured?.input as Array<Record<string, unknown>>;
+    expect(input.at(-1)).toEqual({
+      role: 'user',
+      content: [
+        { type: 'input_text', text: 'Review the attachments.' },
+        { type: 'input_image', image_url: 'data:image/png;base64,AQI=' },
+        {
+          type: 'input_file',
+          filename: 'report.pdf',
+          file_data: 'data:application/pdf;base64,AwQ=',
+        },
+        {
+          type: 'input_file',
+          filename: 'notes.txt',
+          file_data: 'data:text/plain;base64,aGVsbG8=',
+        },
+        {
+          type: 'input_text',
+          text: '[Attachment "archive.bin" (application/octet-stream, 1 bytes) was not sent because this attachment type is not supported.]',
+        },
+      ],
+    });
+  });
+
   it('follow-up with valid cursor sends previous_response_id and only the new message', async () => {
     let captured: Record<string, unknown> | undefined;
     await collect(
@@ -212,6 +311,32 @@ describe('streamAgentTurnWithResponsesAPI — request shape', () => {
     expect(captured?.previous_response_id).toBe('resp_prev_123');
     const input = captured?.input as Array<Record<string, unknown>>;
     expect(input).toEqual([{ role: 'user', content: 'next' }]);
+  });
+
+  it('does not include attachments during tool-result continuation', async () => {
+    let captured: Record<string, unknown> | undefined;
+    await collect(
+      baseRequest({
+        providerState: buildEnvelope('resp_prev_456'),
+        prompt: undefined,
+        modelCapabilities: ATTACHMENT_CAPABILITIES,
+        attachments: [runtimeAttachment()],
+        toolResults: [{ callId: 'call_1', name: 'search', result: '{"hits":[]}' }],
+      }),
+      (params) => {
+        captured = params;
+        return Promise.resolve(streamOf([COMPLETED_EVENT()]));
+      }
+    );
+
+    expect(captured?.previous_response_id).toBe('resp_prev_456');
+    expect(captured?.input).toEqual([
+      {
+        type: 'function_call_output',
+        call_id: 'call_1',
+        output: '{"hits":[]}',
+      },
+    ]);
   });
 
   it('adds context_management compaction only when chaining with previous_response_id', async () => {
