@@ -151,6 +151,14 @@ export interface UserToolSettingsTable {
   updatedAt: number;
 }
 
+export interface UserAppSettingsTable {
+  id: string;
+  userId: string;
+  settingsJson: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
 /** Root Kysely Database interface. */
 export interface Database {
   chats: ChatsTable;
@@ -164,6 +172,7 @@ export interface Database {
   verification: VerificationTable;
   user_provider_settings: UserProviderSettingsTable;
   user_tool_settings: UserToolSettingsTable;
+  user_app_settings: UserAppSettingsTable;
 }
 
 export type ChatSelect = Selectable<ChatsTable>;
@@ -209,3 +218,7 @@ export type UserProviderSettingsUpdate = Updateable<UserProviderSettingsTable>;
 export type UserToolSettingsSelect = Selectable<UserToolSettingsTable>;
 export type UserToolSettingsInsert = Insertable<UserToolSettingsTable>;
 export type UserToolSettingsUpdate = Updateable<UserToolSettingsTable>;
+
+export type UserAppSettingsSelect = Selectable<UserAppSettingsTable>;
+export type UserAppSettingsInsert = Insertable<UserAppSettingsTable>;
+export type UserAppSettingsUpdate = Updateable<UserAppSettingsTable>;
