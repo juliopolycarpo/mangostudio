@@ -177,6 +177,10 @@ export function GeneratedImagePart({ part }: Props) {
           <span className="text-[10px] text-on-surface-variant/50 font-body">{part.prompt}</span>
         </div>
       </div>
+      {/* Reserve square aspect space so the skeleton is close in height to
+          the completed image. Prevents a large row-size jump in the virtual
+          feed when the status flips to completed. */}
+      <div className="aspect-square bg-surface-container-high rounded-xl" />
       <div className="h-1 w-full bg-surface-container-high rounded-full overflow-hidden">
         <div className="h-full bg-primary w-1/3 rounded-full animate-[slide_1s_ease-in-out_infinite_alternate]" />
       </div>

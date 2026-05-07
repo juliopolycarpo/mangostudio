@@ -1,5 +1,5 @@
 /* global document */
-import type { Message, MessagePart } from '@mangostudio/shared';
+import type { GeneratedImagePart, Message, MessagePart } from '@mangostudio/shared';
 import {
   Sparkles,
   Download,
@@ -144,6 +144,14 @@ export function ChatFeed({ chatId, messages }: { chatId: string | null; messages
     getScrollElement,
     estimateSize,
     overscan: 5,
+    // When a ResizeObserver measurement changes any row size during
+    // auto-follow (e.g. ReservedAspectImage natural-aspect update after
+    // image load), keep the scroll pinned to the bottom immediately.
+    onChange: () => {
+      if (feedShouldAutoFollowRef.current && parentRef.current) {
+        parentRef.current.scrollTop = parentRef.current.scrollHeight;
+      }
+    },
   });
   const latestMessage = messages.at(-1);
   const latestMessageId = latestMessage?.id ?? null;
@@ -152,6 +160,14 @@ export function ChatFeed({ chatId, messages }: { chatId: string | null; messages
   // re-firing on every in-place part update (e.g. image completion events).
   const latestPartsCount = latestMessage?.parts?.length ?? 0;
   const latestTextLen = latestMessage?.text?.length ?? 0;
+  // When a generated image part transitions status (generating → completed),
+  // the row height typically changes significantly. Capture that signal as a
+  // primitive so the auto-follow layout effect re-scrolls to bottom.
+  const latestImageCompletionSignature =
+    latestMessage?.parts
+      ?.filter((p): p is GeneratedImagePart => p.type === 'generated_image')
+      .map((p) => `${p.imageId}:${p.status}:${p.imageUrl ?? ''}`)
+      .join(',') ?? '';
 
   useEffect(() => {
     if (previousChatIdRef.current !== chatId) {
@@ -174,8 +190,9 @@ export function ChatFeed({ chatId, messages }: { chatId: string | null; messages
 
   // Keep auto-follow during streaming, but defer the scroll so the
   // virtualizer can complete its layout pass before we adjust position.
-  // Using primitive deps avoids re-firing on in-place part replacements
-  // (e.g. when an image generation placeholder resolves to a real URL).
+  // Primitive deps avoid re-firing on in-place text/tool updates; the
+  // image completion signature fires only when generated-image parts
+  // transition status (the case that typically causes large row-size jumps).
   useLayoutEffect(() => {
     const isNewGeneratingMessage =
       latestIsGenerating && previousGeneratingMessageIdRef.current !== latestMessageId;
@@ -191,7 +208,13 @@ export function ChatFeed({ chatId, messages }: { chatId: string | null; messages
       });
       return () => cancelAnimationFrame(rafId);
     }
-  }, [latestMessageId, latestIsGenerating, latestPartsCount, latestTextLen]);
+  }, [
+    latestMessageId,
+    latestIsGenerating,
+    latestPartsCount,
+    latestTextLen,
+    latestImageCompletionSignature,
+  ]);
 
   useEffect(() => {
     previousGeneratingMessageIdRef.current = latestIsGenerating ? latestMessageId : null;
