@@ -8,6 +8,7 @@
 import type OpenAI from 'openai';
 import { buildChatCompletionsReplay } from '../core/replay-builder';
 import { toolDefsToChatCompletions } from '../core/tool-mapper';
+import { appendAttachmentFallbackNotes } from '../core/attachment-content';
 import type { StructuredOutputConfig } from '../types';
 import { createContinuationEnvelope } from '../core/continuation-envelope';
 import { getModelContextLimit } from '../core/context-policy';
@@ -81,6 +82,7 @@ export async function* streamOAICompatAgentTurn(
     req.toolDefinitions && req.toolDefinitions.length > 0
       ? toolDefsToChatCompletions(req.toolDefinitions)
       : undefined;
+  const providerPrompt = buildOAICompatProviderPrompt(req);
 
   // Build messages: system + structured DB history + accumulated loop messages + current input
   const messages: OpenAI.ChatCompletionMessageParam[] = [
@@ -98,8 +100,8 @@ export async function* streamOAICompatAgentTurn(
         content: tr.result,
       });
     }
-  } else if (req.prompt) {
-    messages.push({ role: 'user', content: req.prompt });
+  } else if (providerPrompt !== undefined) {
+    messages.push({ role: 'user', content: providerPrompt });
   }
 
   const responseFormat = buildResponseFormat(req.generationConfig?.structuredOutput);
@@ -219,8 +221,8 @@ export async function* streamOAICompatAgentTurn(
               content: tr.result,
             })
           )
-        : req.prompt
-          ? [{ role: 'user' as const, content: req.prompt }]
+        : providerPrompt !== undefined
+          ? [{ role: 'user' as const, content: providerPrompt }]
           : []),
       assistantMsg,
     ];
@@ -248,4 +250,9 @@ export async function* streamOAICompatAgentTurn(
       error: err instanceof Error ? err.message : 'OpenAI-compatible request failed',
     };
   }
+}
+
+function buildOAICompatProviderPrompt(req: AgentTurnRequest): string | undefined {
+  if (req.prompt === undefined && (req.attachments?.length ?? 0) === 0) return undefined;
+  return appendAttachmentFallbackNotes(req.prompt ?? '', req.attachments, req.modelCapabilities);
 }

@@ -1,5 +1,11 @@
 import type OpenAI from 'openai';
-import type { ChatTurnContext, ToolDefinition } from '../types';
+import type {
+  ChatTurnContext,
+  ModelCapabilities,
+  ProviderRuntimeAttachment,
+  ToolDefinition,
+} from '../types';
+import { appendAttachmentFallbackNotes } from '../core/attachment-content';
 import { buildChatCompletionsReplay } from '../core/replay-builder';
 import { toolDefsToChatCompletions } from '../core/tool-mapper';
 import { normalizeDeepSeekReasoningEffort } from './normalizers';
@@ -15,6 +21,8 @@ export function buildDeepSeekMessages(params: {
   loopMessages?: unknown[];
   toolResults?: Array<{ callId: string; name: string; result: string; isError?: boolean }>;
   prompt?: string;
+  attachments?: ProviderRuntimeAttachment[];
+  modelCapabilities?: ModelCapabilities;
 }): OpenAI.ChatCompletionMessageParam[] {
   const messages: OpenAI.ChatCompletionMessageParam[] = [];
 
@@ -36,11 +44,27 @@ export function buildDeepSeekMessages(params: {
         content: tr.result,
       });
     }
-  } else if (params.prompt) {
-    messages.push({ role: 'user', content: params.prompt });
+  } else {
+    const providerPrompt = buildDeepSeekProviderPrompt(params);
+    if (providerPrompt !== undefined) {
+      messages.push({ role: 'user', content: providerPrompt });
+    }
   }
 
   return messages;
+}
+
+export function buildDeepSeekProviderPrompt(params: {
+  prompt?: string;
+  attachments?: ProviderRuntimeAttachment[];
+  modelCapabilities?: ModelCapabilities;
+}): string | undefined {
+  if (params.prompt === undefined && (params.attachments?.length ?? 0) === 0) return undefined;
+  return appendAttachmentFallbackNotes(
+    params.prompt ?? '',
+    params.attachments,
+    params.modelCapabilities
+  );
 }
 
 export function buildDeepSeekTools(

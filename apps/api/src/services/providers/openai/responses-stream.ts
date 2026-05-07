@@ -23,6 +23,7 @@ import {
   extractResponsesUsage,
   type ResponseStreamEvent,
 } from './normalizers';
+import { buildOpenAIResponsesUserMessage } from './message-mapper';
 import type { TextGenerationRequest, StreamingChunk, AgentTurnRequest, AgentEvent } from '../types';
 import type { ReasoningEffort } from '@mangostudio/shared';
 import { parseJsonWith } from '../../../lib/safe-parse';
@@ -147,7 +148,7 @@ export async function* streamWithResponsesAPI(
       role: msg.role === 'ai' ? 'assistant' : 'user',
       content: msg.text,
     })),
-    { role: 'user', content: req.prompt },
+    ...currentResponsesUserInput(req),
   ];
 
   const stream = await client.responses.create(
@@ -290,13 +291,10 @@ export async function* streamAgentTurnWithResponsesAPI(
     }));
   } else if (previousResponseId) {
     // Stateful continuation — send only the new user message
-    input = req.prompt ? [{ role: 'user', content: req.prompt }] : [];
+    input = currentResponsesUserInput(req);
   } else {
     // Full history replay (first call or cursor invalidated).
-    input = [
-      ...buildOpenAIResponsesReplay(req.history),
-      ...(req.prompt ? [{ role: 'user', content: req.prompt }] : []),
-    ];
+    input = [...buildOpenAIResponsesReplay(req.history), ...currentResponsesUserInput(req)];
   }
 
   const contextLimit = getModelContextLimit(req.modelName);
@@ -374,10 +372,7 @@ export async function* streamAgentTurnWithResponsesAPI(
         reason: `cursor_error (status=${status})`,
         reasonCode,
       };
-      input = [
-        ...buildOpenAIResponsesReplay(req.history),
-        ...(req.prompt ? [{ role: 'user', content: req.prompt }] : []),
-      ];
+      input = [...buildOpenAIResponsesReplay(req.history), ...currentResponsesUserInput(req)];
       stream = await makeRequest(null);
     } else {
       throw err;
@@ -510,6 +505,16 @@ export async function* streamAgentTurnWithResponsesAPI(
   );
 
   yield { type: 'turn_completed', providerState: serializeContinuationEnvelope(envelope) };
+}
+
+function currentResponsesUserInput(
+  req: Pick<
+    AgentTurnRequest | TextGenerationRequest,
+    'prompt' | 'attachments' | 'modelCapabilities'
+  >
+): Record<string, unknown>[] {
+  const userMessage = buildOpenAIResponsesUserMessage(req);
+  return userMessage ? [userMessage] : [];
 }
 
 function normalizeOpenAIReasoningEffort(

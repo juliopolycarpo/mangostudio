@@ -7,6 +7,7 @@ import { loadHistory } from '../../messages/infrastructure/message-repository';
 import { getProviderForModel } from '../../../services/providers/core/provider-registry';
 import { generateId } from '../../../utils/id';
 import { assertChatAttachmentIdsAvailable } from '../../attachments/infrastructure/attachment-repository';
+import { resolveProviderRuntimeAttachments } from '../../attachments/application/runtime-attachment-resolver';
 import {
   persistUserMessage,
   persistAiResponse,
@@ -59,7 +60,7 @@ export async function sendTextMessage(
     db
   );
 
-  const { modelId } = await resolveModel({
+  const { modelId, capabilities } = await resolveModel({
     requestedModel: input.model,
     userId: input.userId,
     type: 'text',
@@ -81,6 +82,15 @@ export async function sendTextMessage(
   );
 
   const history = await loadHistory(input.chatId, { excludeId: userMsgId }, db);
+  const runtimeAttachments = await resolveProviderRuntimeAttachments(
+    {
+      attachmentIds,
+      userId: input.userId,
+      chatId: input.chatId,
+      messageId: userMsgId,
+    },
+    db
+  );
 
   const provider = await getProviderForModel(modelId, input.userId);
   const startTime = Date.now();
@@ -90,6 +100,8 @@ export async function sendTextMessage(
     prompt: input.prompt,
     systemPrompt: input.systemPrompt,
     modelName: modelId,
+    attachments: runtimeAttachments,
+    modelCapabilities: capabilities,
   });
 
   const generationTime = `${((Date.now() - startTime) / 1000).toFixed(1)}s`;

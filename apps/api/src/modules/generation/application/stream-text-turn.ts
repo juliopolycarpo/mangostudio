@@ -69,6 +69,7 @@ import {
 } from '../../../services/providers/core/context-policy';
 import { composePrompt } from '../../prompt-rules/application/prompt-composer';
 import { assertTextTurnHasContent, normalizeTextTurnAttachmentIds } from './text-turn-content';
+import { resolveProviderRuntimeAttachments } from '../../attachments/application/runtime-attachment-resolver';
 
 const TOOL_TIMEOUT_MS = 30_000;
 const DEFAULT_MAX_TOOL_ITERATIONS = 10;
@@ -148,7 +149,7 @@ export async function* streamTextTurn(
   const attachmentIds = normalizeTextTurnAttachmentIds(input.attachmentIds);
   assertTextTurnHasContent(input.prompt, attachmentIds);
 
-  const { modelId } = await resolveModel({
+  const { modelId, capabilities } = await resolveModel({
     requestedModel: input.model,
     userId: input.userId,
     type: 'text',
@@ -195,6 +196,16 @@ export async function* streamTextTurn(
   };
 
   try {
+    const runtimeAttachments = await resolveProviderRuntimeAttachments(
+      {
+        attachmentIds,
+        userId,
+        chatId,
+        messageId: userMsgId,
+      },
+      db
+    );
+
     if (provider.generateAgentTurnStream) {
       const richHistory = await loadRichHistory(chatId, { excludeId: userMsgId }, db);
       const toolSettings = await listSavedToolSettings(db, userId);
@@ -336,6 +347,8 @@ export async function* streamTextTurn(
           toolDefinitions: toolDefs,
           providerState: rawProviderState,
           signal,
+          attachments: isFirstIteration ? runtimeAttachments : undefined,
+          modelCapabilities: capabilities,
           generationConfig: {
             thinkingEnabled,
             reasoningEffort,
@@ -785,6 +798,8 @@ export async function* streamTextTurn(
           enableProviderCompaction: runtimeSettings.providerCompactionEnabled,
           providerCompactionThreshold: input.contextSettings?.warningThreshold,
         },
+        attachments: runtimeAttachments,
+        modelCapabilities: capabilities,
       })) {
         if (signal?.aborted) break;
 
@@ -839,6 +854,8 @@ export async function* streamTextTurn(
           enableProviderCompaction: runtimeSettings.providerCompactionEnabled,
           providerCompactionThreshold: input.contextSettings?.warningThreshold,
         },
+        attachments: runtimeAttachments,
+        modelCapabilities: capabilities,
       });
       if (!signal?.aborted) {
         fullText = result.text;

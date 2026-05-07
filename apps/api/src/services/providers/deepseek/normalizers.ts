@@ -1,6 +1,7 @@
 import type { ModelMessage } from 'ai';
 import type { ReasoningEffort } from '@mangostudio/shared/types';
 import type { TextGenerationRequest } from '../types';
+import { appendAttachmentFallbackNotes } from '../core/attachment-content';
 
 /**
  * Maps Mango's `ReasoningEffort` to values accepted by the DeepSeek API.
@@ -38,6 +39,8 @@ export function buildDeepSeekSystemPrompt(req: TextGenerationRequest): string | 
 }
 
 export function buildDeepSeekMessages(req: TextGenerationRequest): ModelMessage[] {
+  const prompt = appendAttachmentFallbackNotes(req.prompt, req.attachments, req.modelCapabilities);
+
   return [
     ...req.history.map((message): ModelMessage => {
       if (message.role === 'ai') {
@@ -45,7 +48,7 @@ export function buildDeepSeekMessages(req: TextGenerationRequest): ModelMessage[
       }
       return { role: 'user', content: message.text };
     }),
-    { role: 'user', content: req.prompt },
+    { role: 'user', content: prompt },
   ];
 }
 

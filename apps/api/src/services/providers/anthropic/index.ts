@@ -10,6 +10,7 @@ import { withModelCache } from '../core/model-cache';
 import { createProviderSecretService } from '../core/secret-service';
 import { isReasoningModel } from '../core/capability-detector';
 import { getModelContextLimit } from '../core/context-policy';
+import { appendAttachmentFallbackNotes } from '../core/attachment-content';
 import { narrowDelta, narrowSdkError, toMessageCreateParams } from './normalizers';
 import { streamAnthropicAgentTurn } from './stream';
 import type {
@@ -94,6 +95,8 @@ function createClient(apiKey: string): Anthropic {
 }
 
 function buildMessages(req: TextGenerationRequest): Anthropic.MessageCreateParams['messages'] {
+  const prompt = appendAttachmentFallbackNotes(req.prompt, req.attachments, req.modelCapabilities);
+
   return [
     ...req.history.map(
       (msg): Anthropic.MessageParam => ({
@@ -101,7 +104,7 @@ function buildMessages(req: TextGenerationRequest): Anthropic.MessageCreateParam
         content: msg.text,
       })
     ),
-    { role: 'user' as const, content: req.prompt },
+    { role: 'user' as const, content: prompt },
   ];
 }
 

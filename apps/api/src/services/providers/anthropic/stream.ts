@@ -5,6 +5,7 @@
 import type Anthropic from '@anthropic-ai/sdk';
 import { createContinuationEnvelope } from '../core/continuation-envelope';
 import { getModelContextLimit } from '../core/context-policy';
+import { appendAttachmentFallbackNotes } from '../core/attachment-content';
 import { buildCachedAnthropicRequest } from './cached-request';
 import {
   isToolUseBlock,
@@ -60,6 +61,8 @@ export async function* streamAnthropicAgentTurn(
     );
   }
 
+  const providerPrompt = buildAnthropicProviderPrompt(req);
+
   // Build messages: DB history + accumulated loop messages + current input
   const messages: Anthropic.MessageParam[] = [
     ...req.history.map(
@@ -82,8 +85,8 @@ export async function* streamAnthropicAgentTurn(
         is_error: tr.isError ?? false,
       })),
     });
-  } else if (req.prompt) {
-    messages.push({ role: 'user', content: req.prompt });
+  } else if (providerPrompt !== undefined) {
+    messages.push({ role: 'user', content: providerPrompt });
   }
 
   // Build request with prompt caching
@@ -183,8 +186,8 @@ export async function* streamAnthropicAgentTurn(
               })),
             },
           ]
-        : req.prompt
-          ? [{ role: 'user' as const, content: req.prompt }]
+        : providerPrompt !== undefined
+          ? [{ role: 'user' as const, content: providerPrompt }]
           : []),
       ...(assistantContent.length > 0
         ? [{ role: 'assistant' as const, content: assistantContent }]
@@ -206,4 +209,9 @@ export async function* streamAnthropicAgentTurn(
       error: err instanceof Error ? err.message : 'Anthropic request failed',
     };
   }
+}
+
+function buildAnthropicProviderPrompt(req: AgentTurnRequest): string | undefined {
+  if (req.prompt === undefined && (req.attachments?.length ?? 0) === 0) return undefined;
+  return appendAttachmentFallbackNotes(req.prompt ?? '', req.attachments, req.modelCapabilities);
 }
