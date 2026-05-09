@@ -9,6 +9,8 @@ import type {
 import type { ReasoningEffort } from '../types';
 import type { AppSettings, ChatTitleSettings, ImageQuality } from './contracts';
 
+const CURRENT_MODEL_SETTING = 'current_model';
+
 export const IMAGE_QUALITY_OPTIONS = ['512px', '1K', '2K', '4K'] as const;
 
 export const MAX_TOOL_ITERATIONS_MIN = 1;
@@ -48,7 +50,9 @@ export const DEFAULT_CONTEXT_SETTINGS: ContextSettings = {
 
 export const DEFAULT_CHAT_TITLE_SETTINGS: ChatTitleSettings = {
   autoRenameEnabled: true,
+  strategy: 'prompt_prefix',
   promptPrefixLength: CHAT_TITLE_PROMPT_LENGTH_DEFAULT,
+  preferredModel: CURRENT_MODEL_SETTING,
 };
 
 export const DEFAULT_APP_SETTINGS: AppSettings = {
@@ -94,6 +98,10 @@ function isReasoningEffort(value: unknown): value is ReasoningEffort {
 
 function isImageQuality(value: unknown): value is ImageQuality {
   return typeof value === 'string' && IMAGE_QUALITY_OPTIONS.includes(value as ImageQuality);
+}
+
+function isChatTitleStrategy(value: unknown): value is ChatTitleSettings['strategy'] {
+  return value === 'prompt_prefix' || value === 'model';
 }
 
 function clampThreshold(value: number, fallback: number): number {
@@ -203,11 +211,18 @@ export function normalizeChatTitleSettings(value: unknown): ChatTitleSettings {
       typeof value.autoRenameEnabled === 'boolean'
         ? value.autoRenameEnabled
         : DEFAULT_CHAT_TITLE_SETTINGS.autoRenameEnabled,
+    strategy: isChatTitleStrategy(value.strategy)
+      ? value.strategy
+      : DEFAULT_CHAT_TITLE_SETTINGS.strategy,
     promptPrefixLength: clampChatTitlePromptLength(
       typeof value.promptPrefixLength === 'number'
         ? value.promptPrefixLength
         : DEFAULT_CHAT_TITLE_SETTINGS.promptPrefixLength
     ),
+    preferredModel:
+      typeof value.preferredModel === 'string' && value.preferredModel.length > 0
+        ? value.preferredModel
+        : DEFAULT_CHAT_TITLE_SETTINGS.preferredModel,
   };
 }
 

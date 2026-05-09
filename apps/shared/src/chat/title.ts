@@ -44,3 +44,15 @@ export function createPromptChatTitle(
 
   return `${normalizedPrompt.slice(0, normalizedMaxLength).trimEnd()}...`;
 }
+
+export function sanitizeGeneratedChatTitle(title: string, fallbackTitle: string): string {
+  const normalizedTitle = title
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/^title\s*:\s*/i, '')
+    .replace(/^["'`]+|["'`]+$/g, '')
+    .trim();
+
+  if (normalizedTitle.length === 0) return fallbackTitle;
+  return createPromptChatTitle(normalizedTitle, CHAT_TITLE_PROMPT_LENGTH_MAX) ?? fallbackTitle;
+}

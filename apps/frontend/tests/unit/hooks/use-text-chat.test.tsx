@@ -15,6 +15,10 @@ vi.mock('../../../src/services/generation-service', () => ({
   respondTextStream: vi.fn(),
 }));
 
+vi.mock('../../../src/features/chat/services/chat-title', () => ({
+  generateChatTitleSuggestion: vi.fn(),
+}));
+
 vi.mock('../../../src/features/chat/services/context-compaction', () => ({
   compactChat: vi.fn(),
   summarizeToNewChat: vi.fn(),
@@ -25,7 +29,9 @@ vi.mock('../../../src/features/chat/queries', () => ({
 }));
 
 import { respondTextStream } from '../../../src/services/generation-service';
+import { generateChatTitleSuggestion } from '../../../src/features/chat/services/chat-title';
 const mockStream = vi.mocked(respondTextStream);
+const mockGenerateChatTitle = vi.mocked(generateChatTitleSuggestion);
 
 /**
  * Builds a fake respondTextStream implementation that delivers a sequence of
@@ -72,6 +78,7 @@ function makeProps(overrides: Partial<TextChatProps> = {}): TextChatProps {
 describe('useTextChat — thinking segment tracking', () => {
   beforeEach(() => {
     mockStream.mockReset();
+    mockGenerateChatTitle.mockReset();
   });
 
   it('thinking_start creates a new thinking part in the parts array', async () => {
@@ -310,6 +317,83 @@ describe('useTextChat — prompt title auto rename', () => {
 
     await waitFor(() => expect(result.current.isGenerating).toBe(false));
     expect(props.chats.updateChatTitle).not.toHaveBeenCalled();
+  });
+
+  it('uses the configured model to generate a chat title when selected', async () => {
+    const props = makeProps({
+      chatTitleSettings: {
+        ...DEFAULT_CHAT_TITLE_SETTINGS,
+        strategy: 'model',
+        preferredModel: 'title-model',
+      },
+      chats: {
+        currentChatId: 'chat-1',
+        currentChat: {
+          id: 'chat-1',
+          title: 'New Chat [2026-05-09 07:05]',
+          createdAt: 1,
+          updatedAt: 1,
+        },
+        createChat: vi.fn().mockResolvedValue({ id: 'chat-new' }),
+        updateChatTitle: vi.fn().mockResolvedValue(undefined),
+        loadChats: vi.fn().mockResolvedValue(undefined),
+      } as unknown as TextChatProps['chats'],
+    });
+    mockGenerateChatTitle.mockResolvedValue({ title: 'Generated title' });
+    mockStream.mockImplementation(
+      makeStreamFn([{ type: 'done', done: true, generationTime: '0.5s' }])
+    );
+
+    const { result } = renderHook(() => useTextGeneration(props));
+
+    await act(async () => {
+      await result.current.handleRespond('Explain deterministic testing with Vitest');
+    });
+
+    await waitFor(() => expect(result.current.isGenerating).toBe(false));
+    expect(mockGenerateChatTitle).toHaveBeenCalledWith({
+      prompt: 'Explain deterministic testing with Vitest',
+      model: 'title-model',
+    });
+    expect(props.chats.updateChatTitle).toHaveBeenCalledWith('chat-1', 'Generated title');
+  });
+
+  it('falls back to the prompt title when model title generation fails', async () => {
+    const props = makeProps({
+      chatTitleSettings: { ...DEFAULT_CHAT_TITLE_SETTINGS, strategy: 'model' },
+      chats: {
+        currentChatId: 'chat-1',
+        currentChat: {
+          id: 'chat-1',
+          title: 'New Chat [2026-05-09 07:05]',
+          createdAt: 1,
+          updatedAt: 1,
+        },
+        createChat: vi.fn().mockResolvedValue({ id: 'chat-new' }),
+        updateChatTitle: vi.fn().mockResolvedValue(undefined),
+        loadChats: vi.fn().mockResolvedValue(undefined),
+      } as unknown as TextChatProps['chats'],
+    });
+    mockGenerateChatTitle.mockRejectedValue(new Error('provider unavailable'));
+    mockStream.mockImplementation(
+      makeStreamFn([{ type: 'done', done: true, generationTime: '0.5s' }])
+    );
+
+    const { result } = renderHook(() => useTextGeneration(props));
+
+    await act(async () => {
+      await result.current.handleRespond('Explain deterministic testing with Vitest');
+    });
+
+    await waitFor(() => expect(result.current.isGenerating).toBe(false));
+    expect(mockGenerateChatTitle).toHaveBeenCalledWith({
+      prompt: 'Explain deterministic testing with Vitest',
+      model: 'test-model',
+    });
+    expect(props.chats.updateChatTitle).toHaveBeenCalledWith(
+      'chat-1',
+      'Explain deterministic testing...'
+    );
   });
 });
 

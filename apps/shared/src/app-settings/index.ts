@@ -1,10 +1,11 @@
-export type { AppSettings, ChatTitleSettings, ImageQuality } from './contracts';
+export type { AppSettings, ChatTitleSettings, ChatTitleStrategy, ImageQuality } from './contracts';
 export {
   AppSettingsSchema,
   ChatTitleSettingsSchema,
   ImageQualitySchema,
   type AppSettings as AppSettingsType,
   type ChatTitleSettings as ChatTitleSettingsType,
+  type ChatTitleStrategy as ChatTitleStrategyType,
   type ImageQuality as ImageQualityType,
 } from './schemas';
 export {

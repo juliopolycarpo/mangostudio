@@ -13,10 +13,12 @@ export const ImageQualitySchema = Type.Union([
 
 export const ChatTitleSettingsSchema = Type.Object({
   autoRenameEnabled: Type.Boolean(),
+  strategy: Type.Union([Type.Literal('prompt_prefix'), Type.Literal('model')]),
   promptPrefixLength: Type.Integer({
     minimum: CHAT_TITLE_PROMPT_LENGTH_MIN,
     maximum: CHAT_TITLE_PROMPT_LENGTH_MAX,
   }),
+  preferredModel: Type.String(),
 });
 
 export const AppSettingsSchema = Type.Object({
@@ -31,4 +33,5 @@ export const AppSettingsSchema = Type.Object({
 
 export type ImageQuality = Static<typeof ImageQualitySchema>;
 export type ChatTitleSettings = Static<typeof ChatTitleSettingsSchema>;
+export type ChatTitleStrategy = ChatTitleSettings['strategy'];
 export type AppSettings = Static<typeof AppSettingsSchema>;

@@ -4,6 +4,7 @@ import {
   createPromptChatTitle,
   createTimestampChatTitle,
   isTimestampChatTitle,
+  sanitizeGeneratedChatTitle,
 } from '../../src/chat';
 
 describe('createTimestampChatTitle', () => {
@@ -41,5 +42,17 @@ describe('clampChatTitlePromptLength', () => {
     expect(clampChatTitlePromptLength(1)).toBe(10);
     expect(clampChatTitlePromptLength(120)).toBe(80);
     expect(clampChatTitlePromptLength(Number.NaN)).toBe(30);
+  });
+});
+
+describe('sanitizeGeneratedChatTitle', () => {
+  it('removes common model formatting from generated titles', () => {
+    expect(sanitizeGeneratedChatTitle('Title: "Deterministic Testing"', 'Fallback')).toBe(
+      'Deterministic Testing'
+    );
+  });
+
+  it('uses the prompt title fallback when the model returns no usable text', () => {
+    expect(sanitizeGeneratedChatTitle('   ', 'Fallback Title')).toBe('Fallback Title');
   });
 });

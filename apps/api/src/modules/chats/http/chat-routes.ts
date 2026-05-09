@@ -2,9 +2,11 @@ import { type Elysia, t } from 'elysia';
 import {
   CompactChatBodySchema,
   CreateChatBodySchema,
+  GenerateChatTitleBodySchema,
   SummarizeToNewChatBodySchema,
   UpdateChatBodySchema,
 } from '@mangostudio/shared/chat';
+import type { ApiErrorResponse } from '@mangostudio/shared/contracts';
 import { ERROR_CODES } from '@mangostudio/shared/errors';
 import { getDb } from '../../../db/database';
 import { requireAuth } from '../../../plugins/auth-middleware';
@@ -15,12 +17,20 @@ import {
   summarizeToNewChatUseCase,
 } from '../application/context-compaction';
 import { createChatUseCase } from '../application/create-chat';
+import {
+  EmptyChatTitlePromptError,
+  generateChatTitleUseCase,
+} from '../application/generate-chat-title';
 import { updateChatUseCase } from '../application/update-chat';
 import { deleteChatUseCase } from '../application/delete-chat';
 import { listChatsUseCase } from '../application/list-chats';
 import { getChatMessagesUseCase } from '../application/get-chat-messages';
 import { ChatNotFoundError } from '../domain/chat-ownership';
 import { NoModelAvailableError } from '../../generation/application/resolve-model';
+
+function apiError(error: string, code: string): ApiErrorResponse {
+  return { error, code };
+}
 
 export const chatRoutes = (app: Elysia) =>
   app.group('/chats', (app) =>
@@ -41,6 +51,31 @@ export const chatRoutes = (app: Elysia) =>
           );
         },
         { body: CreateChatBodySchema }
+      )
+
+      .post(
+        '/title-suggestion',
+        async ({ body, user, set }) => {
+          try {
+            return await generateChatTitleUseCase({
+              userId: user?.id ?? '',
+              prompt: body.prompt,
+              model: body.model,
+            });
+          } catch (err) {
+            if (err instanceof EmptyChatTitlePromptError) {
+              set.status = 400;
+              return apiError(err.message, ERROR_CODES.VALIDATION);
+            }
+            if (err instanceof NoModelAvailableError) {
+              set.status = 503;
+              return apiError(err.message, ERROR_CODES.PROVIDER_ERROR);
+            }
+            set.status = 500;
+            return apiError('Chat title generation failed.', ERROR_CODES.PROVIDER_ERROR);
+          }
+        },
+        { body: GenerateChatTitleBodySchema }
       )
 
       /** Update a chat owned by the authenticated user. */

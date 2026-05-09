@@ -14,8 +14,11 @@ function GeneralSettingsRoute() {
       imageQuality={app.settings.globalImageQuality}
       setImageQuality={app.settings.setGlobalImageQuality}
       chatTitleSettings={app.settings.chatTitleSettings}
+      availableTitleModels={app.catalog.textModels}
       setChatAutoRenameEnabled={app.settings.setChatAutoRenameEnabled}
+      setChatTitleStrategy={app.settings.setChatTitleStrategy}
       setChatTitlePromptPrefixLength={app.settings.setChatTitlePromptPrefixLength}
+      setPreferredChatTitleModel={app.settings.setPreferredChatTitleModel}
     />
   );
 }

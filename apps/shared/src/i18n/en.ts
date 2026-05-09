@@ -228,6 +228,13 @@ export const messages: Messages = {
       chatTitlesDescription:
         'Automatically rename timestamped new chats from the first user prompt.',
       chatTitlesToggleLabel: 'Auto rename new chats',
+      chatTitleSourceLabel: 'Title source',
+      chatTitleSourcePrompt: 'First prompt text',
+      chatTitleSourceModel: 'Generate with a model',
+      chatTitleModelLabel: 'Title model',
+      chatTitleModelDescription:
+        'Use the current chat model or force a specific text model for title generation.',
+      chatTitleModelCurrent: 'Use the current chat model',
       chatTitlePrefixLengthLabel: 'Prompt title length',
       chatTitlePrefixLengthDescription:
         'Use the first characters from the prompt when a timestamped chat gets its first message.',

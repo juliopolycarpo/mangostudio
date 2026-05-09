@@ -17,6 +17,7 @@ import {
 import type { ToolIntent } from '@mangostudio/shared/generation';
 import type { PromptSettings } from '@mangostudio/shared/prompt-rules';
 import { messageKeys } from '@/features/chat/queries';
+import { generateChatTitleSuggestion } from '@/features/chat/services/chat-title';
 import { compactChat, summarizeToNewChat } from '@/features/chat/services/context-compaction';
 import { respondTextStream } from '@/services/generation-service';
 import { useChatStream } from '@/features/chat/hooks/use-chat-stream';
@@ -51,6 +52,29 @@ function shouldRenameChatFromPrompt(
   if (!chatTitleSettings.autoRenameEnabled) return false;
   if (createdChatDuringRequest) return true;
   return currentTitle !== undefined && isTimestampChatTitle(currentTitle);
+}
+
+function resolveChatTitleModel(settings: ChatTitleSettings, currentModel: string): string {
+  return settings.preferredModel === 'current_model' ? currentModel : settings.preferredModel;
+}
+
+async function createAutoChatTitle(
+  prompt: string,
+  chatTitleSettings: ChatTitleSettings,
+  currentModel: string
+): Promise<string | null> {
+  const fallbackTitle = createPromptChatTitle(prompt, chatTitleSettings.promptPrefixLength);
+  if (!fallbackTitle || chatTitleSettings.strategy === 'prompt_prefix') return fallbackTitle;
+
+  try {
+    const response = await generateChatTitleSuggestion({
+      prompt,
+      model: resolveChatTitleModel(chatTitleSettings, currentModel),
+    });
+    return response.title;
+  } catch {
+    return fallbackTitle;
+  }
 }
 
 function upsertGeneratedImagePart(
@@ -126,16 +150,17 @@ export function useTextGeneration({
         createdChatDuringRequest = true;
       }
 
+      const model = getActiveModel();
+
       if (
         shouldRenameChatFromPrompt(chatTitleSettings, activeChatTitle, createdChatDuringRequest)
       ) {
-        const promptTitle = createPromptChatTitle(prompt, chatTitleSettings.promptPrefixLength);
+        const promptTitle = await createAutoChatTitle(prompt, chatTitleSettings, model);
         if (promptTitle) {
           await chats.updateChatTitle(activeChatId, promptTitle);
         }
       }
 
-      const model = getActiveModel();
       const optimisticUserMsgId = `optimistic-user-${crypto.randomUUID()}`;
       const optimisticAiMsgId = `optimistic-ai-${crypto.randomUUID()}`;
 

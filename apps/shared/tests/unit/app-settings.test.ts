@@ -13,10 +13,17 @@ describe('normalizeChatTitleSettings', () => {
 
   it('preserves user decisions and clamps the prompt prefix length', () => {
     expect(
-      normalizeChatTitleSettings({ autoRenameEnabled: false, promptPrefixLength: 120 })
+      normalizeChatTitleSettings({
+        autoRenameEnabled: false,
+        strategy: 'model',
+        promptPrefixLength: 120,
+        preferredModel: 'title-model',
+      })
     ).toEqual({
       autoRenameEnabled: false,
+      strategy: 'model',
       promptPrefixLength: 80,
+      preferredModel: 'title-model',
     });
   });
 });

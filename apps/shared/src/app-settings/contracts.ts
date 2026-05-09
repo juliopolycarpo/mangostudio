@@ -3,10 +3,13 @@ import type { ReasoningEffort } from '../types';
 import type { PromptSettings } from '../prompt-rules';
 
 export type ImageQuality = '512px' | '1K' | '2K' | '4K';
+export type ChatTitleStrategy = 'prompt_prefix' | 'model';
 
 export interface ChatTitleSettings {
   autoRenameEnabled: boolean;
+  strategy: ChatTitleStrategy;
   promptPrefixLength: number;
+  preferredModel: string;
 }
 
 export interface AppSettings {

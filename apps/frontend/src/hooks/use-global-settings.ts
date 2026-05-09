@@ -13,6 +13,7 @@ import {
   normalizeChatTitleSettings,
   type AppSettings,
   type ChatTitleSettings,
+  type ChatTitleStrategy,
   type ImageQuality,
 } from '@mangostudio/shared/app-settings';
 import type { ReasoningEffort } from '@mangostudio/shared';
@@ -219,8 +220,12 @@ export function useGlobalSettings() {
       updateContextSettings({ providerCompactionEnabled: value }),
     setChatAutoRenameEnabled: (value: boolean) =>
       updateChatTitleSettings({ autoRenameEnabled: value }),
+    setChatTitleStrategy: (value: ChatTitleStrategy) =>
+      updateChatTitleSettings({ strategy: value }),
     setChatTitlePromptPrefixLength: (value: number) =>
       updateChatTitleSettings({ promptPrefixLength: value }),
+    setPreferredChatTitleModel: (value: string) =>
+      updateChatTitleSettings({ preferredModel: value }),
     resetSettings,
   };
 }

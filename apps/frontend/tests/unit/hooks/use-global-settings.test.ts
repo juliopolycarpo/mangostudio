@@ -97,6 +97,34 @@ describe('useGlobalSettings', () => {
     });
   });
 
+  it('persists model-based chat title settings through the app settings mutation', async () => {
+    const { result } = renderHook(() => useGlobalSettings());
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    act(() => {
+      result.current.setChatTitleStrategy('model');
+    });
+
+    await waitFor(() => expect(result.current.chatTitleSettings.strategy).toBe('model'));
+    expect(mockPut.mock.calls[0]?.[0]).toMatchObject({
+      chatTitleSettings: { strategy: 'model', preferredModel: 'current_model' },
+    });
+
+    mockPut.mockClear();
+
+    act(() => {
+      result.current.setPreferredChatTitleModel('title-model');
+    });
+
+    await waitFor(() =>
+      expect(result.current.chatTitleSettings.preferredModel).toBe('title-model')
+    );
+    expect(mockPut.mock.calls[0]?.[0]).toMatchObject({
+      chatTitleSettings: { strategy: 'model', preferredModel: 'title-model' },
+    });
+  });
+
   it('clamps chat title prompt prefix length before persisting', async () => {
     const { result } = renderHook(() => useGlobalSettings());
 
