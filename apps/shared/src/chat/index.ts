@@ -1,5 +1,13 @@
 export type { Chat, ChatAttachmentKind, Message } from './entities';
-export { createTimestampChatTitle } from './title';
+export {
+  CHAT_TITLE_PROMPT_LENGTH_DEFAULT,
+  CHAT_TITLE_PROMPT_LENGTH_MAX,
+  CHAT_TITLE_PROMPT_LENGTH_MIN,
+  clampChatTitlePromptLength,
+  createPromptChatTitle,
+  createTimestampChatTitle,
+  isTimestampChatTitle,
+} from './title';
 export {
   ChatAttachmentKindSchema,
   ChatAttachmentSchema,

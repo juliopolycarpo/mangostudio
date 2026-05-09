@@ -34,6 +34,9 @@ function GeneralSettingsHarness() {
     <GeneralSettings
       imageQuality={settings.globalImageQuality}
       setImageQuality={settings.setGlobalImageQuality}
+      chatTitleSettings={settings.chatTitleSettings}
+      setChatAutoRenameEnabled={settings.setChatAutoRenameEnabled}
+      setChatTitlePromptPrefixLength={settings.setChatTitlePromptPrefixLength}
     />
   );
 }
@@ -175,6 +178,45 @@ describe('app settings pages integration', () => {
 
       expect(body.globalImageQuality).toBe('4K');
       expect(body.promptSettings).toEqual(DEFAULT_APP_SETTINGS.promptSettings);
+    });
+  });
+
+  it('persists chat title auto rename decisions from general settings', async () => {
+    const initialSettings: AppSettings = {
+      ...DEFAULT_APP_SETTINGS,
+      chatTitleSettings: {
+        ...DEFAULT_APP_SETTINGS.chatTitleSettings,
+        promptPrefixLength: 30,
+      },
+    };
+
+    fetchScenario.respondWithJson('GET', '/api/settings/app', {
+      body: initialSettings,
+    });
+    fetchScenario.respondWithJson('PUT', '/api/settings/app', {
+      body: {
+        ...initialSettings,
+        chatTitleSettings: {
+          autoRenameEnabled: false,
+          promptPrefixLength: 30,
+        },
+      },
+    });
+
+    render(<GeneralSettingsHarness />);
+
+    const autoRenameToggle = await screen.findByLabelText('Auto rename new chats');
+    fireEvent.click(autoRenameToggle);
+
+    await waitFor(() => {
+      const body = getLatestRequestBody(
+        fetchScenario.fetchMock.mock.calls,
+        '/api/settings/app',
+        'PUT'
+      );
+
+      expect(body.chatTitleSettings.autoRenameEnabled).toBe(false);
+      expect(body.chatTitleSettings.promptPrefixLength).toBe(30);
     });
   });
 });

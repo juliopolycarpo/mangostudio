@@ -1,11 +1,15 @@
+import type { ChatTitleSettings } from '@mangostudio/shared/app-settings';
+import type { Locale } from '@mangostudio/shared/i18n';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { useI18n } from '@/hooks/use-i18n';
-import type { Locale } from '@mangostudio/shared/i18n';
 
 interface GeneralSettingsProps {
   imageQuality: string;
   setImageQuality: (val: string) => void;
+  chatTitleSettings: ChatTitleSettings;
+  setChatAutoRenameEnabled: (value: boolean) => void;
+  setChatTitlePromptPrefixLength: (value: number) => void;
 }
 
 const IMAGE_QUALITY_OPTIONS = ['512px', '1K', '2K', '4K'] as const;
@@ -15,10 +19,19 @@ const LOCALE_OPTIONS: { value: Locale; label: string }[] = [
   { value: 'pt-BR', label: 'Português (BR)' },
 ];
 
+const PROMPT_PREFIX_LENGTH_MIN = 10;
+const PROMPT_PREFIX_LENGTH_MAX = 80;
+
 /**
  * General settings tab: language selector, image quality grid.
  */
-export function GeneralSettings({ imageQuality, setImageQuality }: GeneralSettingsProps) {
+export function GeneralSettings({
+  imageQuality,
+  setImageQuality,
+  chatTitleSettings,
+  setChatAutoRenameEnabled,
+  setChatTitlePromptPrefixLength,
+}: GeneralSettingsProps) {
   const { t, locale, setLocale } = useI18n();
   const s = t.settings.general;
 
@@ -66,6 +79,53 @@ export function GeneralSettings({ imageQuality, setImageQuality }: GeneralSettin
               {q}
             </Button>
           ))}
+        </div>
+      </Card>
+
+      <Card variant="solid" className="space-y-4 p-6">
+        <div className="flex items-start justify-between gap-4">
+          <div className="space-y-1">
+            <h3 className="text-xs uppercase tracking-widest font-bold text-on-surface-variant/80 font-label">
+              {s.chatTitlesLabel}
+            </h3>
+            <p className="text-sm text-on-surface-variant/60">{s.chatTitlesDescription}</p>
+          </div>
+          <input
+            type="checkbox"
+            checked={chatTitleSettings.autoRenameEnabled}
+            onChange={(event) => setChatAutoRenameEnabled(event.target.checked)}
+            aria-label={s.chatTitlesToggleLabel}
+            className="mt-1 h-4 w-4 rounded border-outline-variant/30 accent-primary"
+          />
+        </div>
+
+        <div className="space-y-3">
+          <div className="flex items-baseline justify-between gap-4">
+            <label
+              htmlFor="chat-title-prefix-length"
+              className="text-xs uppercase tracking-widest font-bold text-on-surface-variant/80 font-label"
+            >
+              {s.chatTitlePrefixLengthLabel}
+            </label>
+            <span className="text-sm font-medium text-on-surface">
+              {s.chatTitlePrefixLengthHint.replace(
+                '{value}',
+                String(chatTitleSettings.promptPrefixLength)
+              )}
+            </span>
+          </div>
+          <p className="text-sm text-on-surface-variant/60">{s.chatTitlePrefixLengthDescription}</p>
+          <input
+            id="chat-title-prefix-length"
+            type="range"
+            min={PROMPT_PREFIX_LENGTH_MIN}
+            max={PROMPT_PREFIX_LENGTH_MAX}
+            step={1}
+            value={chatTitleSettings.promptPrefixLength}
+            onChange={(event) => setChatTitlePromptPrefixLength(Number(event.target.value))}
+            disabled={!chatTitleSettings.autoRenameEnabled}
+            className="w-full h-2 bg-surface-container-lowest rounded-full appearance-none cursor-pointer accent-primary disabled:cursor-not-allowed disabled:opacity-50"
+          />
         </div>
       </Card>
     </div>

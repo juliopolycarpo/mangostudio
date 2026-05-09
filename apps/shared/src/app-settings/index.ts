@@ -1,12 +1,15 @@
-export type { AppSettings, ImageQuality } from './contracts';
+export type { AppSettings, ChatTitleSettings, ImageQuality } from './contracts';
 export {
   AppSettingsSchema,
+  ChatTitleSettingsSchema,
   ImageQualitySchema,
   type AppSettings as AppSettingsType,
+  type ChatTitleSettings as ChatTitleSettingsType,
   type ImageQuality as ImageQualityType,
 } from './schemas';
 export {
   DEFAULT_APP_SETTINGS,
+  DEFAULT_CHAT_TITLE_SETTINGS,
   DEFAULT_CONTEXT_SETTINGS,
   DEFAULT_PROMPT_SETTINGS,
   IMAGE_QUALITY_OPTIONS,
@@ -15,6 +18,7 @@ export {
   MAX_TOOL_ITERATIONS_MIN,
   clampMaxToolIterations,
   normalizeAppSettings,
+  normalizeChatTitleSettings,
   normalizeContextSettings,
   normalizePromptSettings,
 } from './defaults';

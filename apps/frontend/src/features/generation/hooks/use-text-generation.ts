@@ -7,9 +7,15 @@ import type {
   MessagePart,
   ReasoningEffort,
 } from '@mangostudio/shared';
+import type { ChatTitleSettings } from '@mangostudio/shared/app-settings';
+import {
+  createPromptChatTitle,
+  isTimestampChatTitle,
+  type ContextCompactionResponse,
+  type ContextSettings,
+} from '@mangostudio/shared/chat';
 import type { ToolIntent } from '@mangostudio/shared/generation';
 import type { PromptSettings } from '@mangostudio/shared/prompt-rules';
-import type { ContextCompactionResponse, ContextSettings } from '@mangostudio/shared/chat';
 import { messageKeys } from '@/features/chat/queries';
 import { compactChat, summarizeToNewChat } from '@/features/chat/services/context-compaction';
 import { respondTextStream } from '@/services/generation-service';
@@ -27,6 +33,7 @@ interface UseTextGenerationOptions {
   reasoningEffort: ReasoningEffort;
   maxToolIterations: number;
   contextSettings: ContextSettings;
+  chatTitleSettings: ChatTitleSettings;
   currentChatId: string | null;
 }
 
@@ -34,6 +41,16 @@ function resolveSummaryModelId(settings: ContextSettings, currentModel: string):
   return settings.preferredSummaryModel === 'current_model'
     ? currentModel
     : settings.preferredSummaryModel;
+}
+
+function shouldRenameChatFromPrompt(
+  chatTitleSettings: ChatTitleSettings,
+  currentTitle: string | undefined,
+  createdChatDuringRequest: boolean
+): boolean {
+  if (!chatTitleSettings.autoRenameEnabled) return false;
+  if (createdChatDuringRequest) return true;
+  return currentTitle !== undefined && isTimestampChatTitle(currentTitle);
 }
 
 function upsertGeneratedImagePart(
@@ -65,6 +82,7 @@ export function useTextGeneration({
   reasoningEffort,
   maxToolIterations,
   contextSettings,
+  chatTitleSettings,
   currentChatId,
 }: UseTextGenerationOptions) {
   const queryClient = useQueryClient();
@@ -100,12 +118,21 @@ export function useTextGeneration({
 
       let activeChatId = chats.currentChatId;
       let createdChatDuringRequest = false;
+      let activeChatTitle = chats.currentChat?.title;
       if (!activeChatId) {
-        const newChat = await chats.createChat(
-          prompt.slice(0, 30) + (prompt.length > 30 ? '...' : '')
-        );
+        const newChat = await chats.createChat();
         activeChatId = newChat.id;
+        activeChatTitle = newChat.title;
         createdChatDuringRequest = true;
+      }
+
+      if (
+        shouldRenameChatFromPrompt(chatTitleSettings, activeChatTitle, createdChatDuringRequest)
+      ) {
+        const promptTitle = createPromptChatTitle(prompt, chatTitleSettings.promptPrefixLength);
+        if (promptTitle) {
+          await chats.updateChatTitle(activeChatId, promptTitle);
+        }
       }
 
       const model = getActiveModel();
@@ -416,6 +443,7 @@ export function useTextGeneration({
       reasoningEffort,
       maxToolIterations,
       contextSettings,
+      chatTitleSettings,
       stream,
     ]
   );

@@ -80,6 +80,40 @@ describe('useGlobalSettings', () => {
     expect(mockPut.mock.calls[0]?.[0]).toMatchObject({ maxToolIterations: 25 });
   });
 
+  it('persists chat title auto rename settings through the app settings mutation', async () => {
+    const { result } = renderHook(() => useGlobalSettings());
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    act(() => {
+      result.current.setChatAutoRenameEnabled(false);
+    });
+
+    await waitFor(() => expect(result.current.chatTitleSettings.autoRenameEnabled).toBe(false));
+    await waitFor(() => expect(mockPut).toHaveBeenCalledTimes(1));
+
+    expect(mockPut.mock.calls[0]?.[0]).toMatchObject({
+      chatTitleSettings: { autoRenameEnabled: false, promptPrefixLength: 30 },
+    });
+  });
+
+  it('clamps chat title prompt prefix length before persisting', async () => {
+    const { result } = renderHook(() => useGlobalSettings());
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    act(() => {
+      result.current.setChatTitlePromptPrefixLength(120);
+    });
+
+    await waitFor(() => expect(result.current.chatTitleSettings.promptPrefixLength).toBe(80));
+    await waitFor(() => expect(mockPut).toHaveBeenCalledTimes(1));
+
+    expect(mockPut.mock.calls[0]?.[0]).toMatchObject({
+      chatTitleSettings: { autoRenameEnabled: true, promptPrefixLength: 80 },
+    });
+  });
+
   it('normalizes persisted context thresholds from the API', async () => {
     mockGet.mockResolvedValue(
       mockQueryResult({

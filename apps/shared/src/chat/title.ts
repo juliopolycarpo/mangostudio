@@ -1,4 +1,9 @@
 const DEFAULT_CHAT_TITLE_PREFIX = 'New Chat';
+const TIMESTAMP_CHAT_TITLE_PATTERN = /^New Chat \[[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}\]$/;
+
+export const CHAT_TITLE_PROMPT_LENGTH_MIN = 10;
+export const CHAT_TITLE_PROMPT_LENGTH_MAX = 80;
+export const CHAT_TITLE_PROMPT_LENGTH_DEFAULT = 30;
 
 function padDatePart(value: number): string {
   return String(value).padStart(2, '0');
@@ -12,4 +17,30 @@ export function createTimestampChatTitle(date = new Date()): string {
   const minute = padDatePart(date.getMinutes());
 
   return `${DEFAULT_CHAT_TITLE_PREFIX} [${year}-${month}-${day} ${hour}:${minute}]`;
+}
+
+export function isTimestampChatTitle(title: string): boolean {
+  return TIMESTAMP_CHAT_TITLE_PATTERN.test(title);
+}
+
+export function clampChatTitlePromptLength(value: number): number {
+  if (!Number.isFinite(value)) return CHAT_TITLE_PROMPT_LENGTH_DEFAULT;
+
+  const rounded = Math.round(value);
+  if (rounded < CHAT_TITLE_PROMPT_LENGTH_MIN) return CHAT_TITLE_PROMPT_LENGTH_MIN;
+  if (rounded > CHAT_TITLE_PROMPT_LENGTH_MAX) return CHAT_TITLE_PROMPT_LENGTH_MAX;
+  return rounded;
+}
+
+export function createPromptChatTitle(
+  prompt: string,
+  maxLength = CHAT_TITLE_PROMPT_LENGTH_DEFAULT
+): string | null {
+  const normalizedPrompt = prompt.replace(/\s+/g, ' ').trim();
+  if (normalizedPrompt.length === 0) return null;
+
+  const normalizedMaxLength = clampChatTitlePromptLength(maxLength);
+  if (normalizedPrompt.length <= normalizedMaxLength) return normalizedPrompt;
+
+  return `${normalizedPrompt.slice(0, normalizedMaxLength).trimEnd()}...`;
 }

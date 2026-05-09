@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { createTimestampChatTitle } from '../../src/chat';
+import {
+  clampChatTitlePromptLength,
+  createPromptChatTitle,
+  createTimestampChatTitle,
+  isTimestampChatTitle,
+} from '../../src/chat';
 
 describe('createTimestampChatTitle', () => {
   it('formats a new chat title with a readable local timestamp', () => {
@@ -8,5 +13,33 @@ describe('createTimestampChatTitle', () => {
     const title = createTimestampChatTitle(date);
 
     expect(title).toBe('New Chat [2026-05-09 07:05]');
+  });
+});
+
+describe('isTimestampChatTitle', () => {
+  it('matches only timestamp fallback titles', () => {
+    expect(isTimestampChatTitle('New Chat [2026-05-09 07:05]')).toBe(true);
+    expect(isTimestampChatTitle('New Chat')).toBe(false);
+    expect(isTimestampChatTitle('User supplied title')).toBe(false);
+  });
+});
+
+describe('createPromptChatTitle', () => {
+  it('normalizes whitespace and truncates to the configured length', () => {
+    const title = createPromptChatTitle('  Explain   deterministic testing with Vitest  ', 20);
+
+    expect(title).toBe('Explain deterministi...');
+  });
+
+  it('returns null for blank prompts', () => {
+    expect(createPromptChatTitle('   \n\t   ')).toBeNull();
+  });
+});
+
+describe('clampChatTitlePromptLength', () => {
+  it('keeps prompt title length inside the supported range', () => {
+    expect(clampChatTitlePromptLength(1)).toBe(10);
+    expect(clampChatTitlePromptLength(120)).toBe(80);
+    expect(clampChatTitlePromptLength(Number.NaN)).toBe(30);
   });
 });

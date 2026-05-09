@@ -13,6 +13,9 @@ function GeneralSettingsRoute() {
     <GeneralSettings
       imageQuality={app.settings.globalImageQuality}
       setImageQuality={app.settings.setGlobalImageQuality}
+      chatTitleSettings={app.settings.chatTitleSettings}
+      setChatAutoRenameEnabled={app.settings.setChatAutoRenameEnabled}
+      setChatTitlePromptPrefixLength={app.settings.setChatTitlePromptPrefixLength}
     />
   );
 }
