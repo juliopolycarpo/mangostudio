@@ -12,6 +12,7 @@ Workspace-level `AGENTS.md` files must stay short and contain only workspace-spe
 
 - `apps/frontend/` — React 19 + Vite 8 UI with TanStack Router, TanStack Query, Better Auth client integration, and the local UI system.
 - `apps/api/` — Elysia API with Better Auth, Kysely + SQLite persistence, connector management, and provider integrations.
+- `apps/api/src/modules/` — Domain modules organized as `application/domain/http/infrastructure` layers (DDD-inspired).
 - `apps/shared/` — shared contracts, domain types, i18n dictionaries, and framework-agnostic helpers.
 - `tests/browser-smoke/` — Playwright smoke coverage for the auth flow.
 - `.mango/` — example config, env overrides, local runtime artifacts, and standalone build output.
@@ -54,13 +55,17 @@ Useful docs:
 
 ## Task Routing
 
-- Auth: `apps/api/src/auth.ts`, `apps/api/src/routes/auth.ts`, `apps/frontend/src/lib/auth-client.ts`, `apps/frontend/src/routes/login.tsx`, `apps/frontend/src/routes/signup.tsx`, `tests/browser-smoke/auth-flow.spec.ts`
-- API route or contract: `apps/api/src/app.ts`, the target file under `apps/api/src/routes/`, `apps/shared/src/contracts/index.ts`, the matching frontend consumer, and relevant tests
-- Chat, streaming, or generation: `apps/api/src/routes/respond.ts`, `apps/api/src/routes/respond-stream.ts`, `apps/api/src/routes/chats.ts`, `apps/api/src/routes/messages.ts`, `apps/frontend/src/hooks/use-text-chat.ts`, `apps/frontend/src/hooks/use-image-generation.ts`, `apps/frontend/src/services/generation-service.ts`
-- Settings, connectors, or providers: `apps/api/src/routes/settings/`, `apps/api/src/services/providers/`, `apps/frontend/src/components/settings/`, `apps/frontend/src/hooks/use-model-catalog.ts`
+- Auth: `apps/api/src/auth.ts`, `apps/api/src/plugins/auth-middleware.ts`, `apps/frontend/src/lib/auth-client.ts`, `apps/frontend/src/routes/login.tsx`, `apps/frontend/src/routes/signup.tsx`, `tests/browser-smoke/auth-flow.spec.ts`
+- API route or contract: `apps/api/src/app.ts`, the target module under `apps/api/src/modules/*/http/`, `apps/shared/src/contracts/index.ts`, the matching frontend consumer, and relevant tests
+- Chat, streaming, or generation: `apps/api/src/modules/generation/http/respond-stream-routes.ts`, `apps/api/src/modules/generation/application/stream-text-turn.ts`, `apps/api/src/modules/generation/application/resolve-model.ts`, `apps/api/src/modules/chats/http/chat-routes.ts`, `apps/api/src/modules/messages/http/message-routes.ts`, `apps/frontend/src/features/chat/hooks/use-chat-stream.ts`, `apps/frontend/src/features/generation/hooks/use-text-generation.ts`, `apps/frontend/src/features/generation/hooks/use-image-generation.ts`, `apps/frontend/src/services/generation-service.ts`
+- Settings, connectors, or providers: `apps/api/src/modules/connectors/http/`, `apps/api/src/modules/provider-settings/http/`, `apps/api/src/modules/tool-settings/http/`, `apps/api/src/modules/app-settings/http/`, `apps/api/src/services/providers/`, `apps/frontend/src/features/settings/`, `apps/frontend/src/hooks/use-model-catalog.ts`
 - Persistence or migrations: `apps/api/src/db/database.ts`, `apps/api/src/db/types.ts`, `apps/api/src/db/migrations/`, and the owning service or route
 - Shared i18n or types: `apps/shared/src/i18n/`, `apps/shared/src/contracts/`, `apps/shared/src/types/`, and the affected API/frontend consumers
-- Config or standalone build: `apps/api/src/lib/config.ts`, `.mango/config.toml.example`, `.mango/.env.example`, `scripts/build.ts`
+- Config or standalone build: `apps/api/src/lib/config.ts`, `apps/api/src/lib/runtime-paths.ts`, `.mango/config.toml.example`, `.mango/.env.example`, `scripts/build.ts`
+- Attachments: `apps/api/src/modules/attachments/application/attachment-storage.ts`, `apps/api/src/modules/attachments/application/attachment-validation.ts`, `apps/frontend/src/features/chat/components/MessageParts.tsx`
+- Tools: `apps/api/src/services/tools/registry.ts`, `apps/api/src/services/tools/builtin/generate-image.ts`, `apps/api/src/modules/tool-settings/http/tool-settings-routes.ts`, `apps/frontend/src/features/settings/tools/index.tsx`
+- Prompt rules: `apps/api/src/modules/prompt-rules/application/prompt-composer.ts`, `apps/api/src/modules/prompt-rules/application/rule-file-resolver.ts`, `apps/api/src/modules/prompt-rules/http/rule-file-routes.ts`, `apps/frontend/src/features/settings/prompts/`
+- Image generation: `apps/api/src/modules/generation/application/generate-image.ts`, `apps/api/src/services/generated-images/generated-image-storage.ts`, `apps/frontend/src/features/gallery/GalleryPage.tsx`
 
 ## Validation
 

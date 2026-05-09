@@ -10,7 +10,9 @@
 # feat, fix, refactor, perf, docs, test, chore, ci, migration
 #
 # Suggested scopes:
-# api, frontend, shared, auth, db, settings, chat, build, docs, tests
+# api, frontend, shared, auth, db, settings, chat, build, docs, tests,
+# providers, tools, images, modules, continuation, deepseek, attachments,
+# prompts, studio, deps
 #
 # Rules:
 # - Write in English

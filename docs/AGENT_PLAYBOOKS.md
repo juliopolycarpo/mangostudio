@@ -19,7 +19,7 @@ Open these first:
 Open these first:
 
 - `apps/api/src/app.ts`
-- the target file under `apps/api/src/routes/`
+- the target file under `apps/api/src/modules/*/http/`
 - `apps/shared/src/contracts/index.ts`
 - the matching frontend hook, service, or route
 - the relevant API and frontend tests
@@ -44,9 +44,11 @@ Open these first:
 - `apps/api/src/services/providers/openai/responses-stream.ts`
 - `apps/api/src/services/providers/openai-compatible/chat-completions-stream.ts`
 - `apps/api/src/services/providers/anthropic/stream.ts`
-- `apps/api/src/routes/respond.ts` (non-streaming fallback)
-- `apps/api/src/routes/chats.ts`
-- `apps/api/src/routes/messages.ts`
+- `apps/api/src/services/providers/deepseek/agent-stream.ts`
+- `apps/api/src/services/providers/deepseek/client.ts`
+- `apps/api/src/modules/generation/http/respond-routes.ts` (non-streaming fallback)
+- `apps/api/src/modules/chats/http/chat-routes.ts`
+- `apps/api/src/modules/messages/http/message-routes.ts`
 - `apps/shared/src/streaming/events.ts`
 - `apps/shared/src/streaming/schemas.ts`
 - `apps/frontend/src/features/chat/ChatPage.tsx`
@@ -59,14 +61,15 @@ Open these first:
 
 Open these first:
 
-- `apps/api/src/routes/settings/connectors.ts`
-- `apps/api/src/routes/settings/models.ts`
-- `apps/api/src/routes/settings/gemini-aliases.ts`
+- `apps/api/src/modules/connectors/http/connectors-routes.ts`
+- `apps/api/src/modules/connectors/http/gemini-aliases-routes.ts`
+- `apps/api/src/modules/connectors/application/`
 - `apps/api/src/services/providers/`
 - `apps/api/src/services/secret-store/`
-- `apps/api/src/services/gemini/`
+- `apps/api/src/modules/provider-settings/http/provider-settings-routes.ts`
 - `apps/api/src/lib/config.ts`
-- `apps/frontend/src/components/settings/ConnectorsSettings.tsx`
+- `apps/frontend/src/features/settings/connectors/`
+- `apps/frontend/src/features/settings/providers/`
 - `apps/frontend/src/hooks/use-model-catalog.ts`
 
 ## Tool Calling And Agentic Flows
@@ -74,10 +77,60 @@ Open these first:
 Open these first:
 
 - `apps/api/src/services/tools/`
+- `apps/api/src/services/tools/builtin/generate-image.ts`
+- `apps/api/src/services/tools/builtin/get-current-datetime.ts`
+- `apps/api/src/modules/tool-settings/http/tool-settings-routes.ts`
 - `apps/api/src/modules/generation/application/stream-text-turn.ts`
 - `apps/api/src/services/providers/core/continuation-envelope.ts`
+- `apps/api/src/services/providers/core/tool-mapper.ts`
 - `apps/shared/src/types/index.ts`
 - `apps/frontend/src/features/generation/hooks/use-text-generation.ts`
+- `apps/frontend/src/features/settings/tools/`
+
+## Attachments
+
+Open these first:
+
+- `apps/api/src/modules/attachments/application/attachment-storage.ts`
+- `apps/api/src/modules/attachments/application/attachment-validation.ts`
+- `apps/api/src/modules/attachments/application/runtime-attachment-resolver.ts`
+- `apps/api/src/modules/attachments/infrastructure/attachment-repository.ts`
+- `apps/api/src/services/providers/core/attachment-content.ts`
+- `apps/frontend/src/features/chat/components/MessageParts.tsx`
+
+## Prompt Rules
+
+Open these first:
+
+- `apps/api/src/modules/prompt-rules/application/prompt-composer.ts`
+- `apps/api/src/modules/prompt-rules/application/rule-file-resolver.ts`
+- `apps/api/src/modules/prompt-rules/http/rule-file-routes.ts`
+- `apps/frontend/src/features/settings/prompts/`
+
+## Settings (App, Provider, Tool)
+
+Open these first:
+
+- `apps/api/src/modules/app-settings/http/app-settings-routes.ts`
+- `apps/api/src/modules/app-settings/infrastructure/app-settings-repository.ts`
+- `apps/api/src/modules/provider-settings/http/provider-settings-routes.ts`
+- `apps/api/src/modules/tool-settings/http/tool-settings-routes.ts`
+- `apps/api/src/services/tools/settings-policy.ts`
+- `apps/frontend/src/features/settings/app/`
+- `apps/frontend/src/features/settings/providers/`
+- `apps/frontend/src/features/settings/tools/`
+
+## Image Generation
+
+Open these first:
+
+- `apps/api/src/modules/generation/application/generate-image.ts`
+- `apps/api/src/services/generated-images/generated-image-storage.ts`
+- `apps/api/src/modules/generated-images/infrastructure/generated-image-repository.ts`
+- `apps/api/src/services/providers/gemini/image-generation.ts`
+- `apps/api/src/services/providers/openai/image-generation.ts`
+- `apps/frontend/src/features/gallery/GalleryPage.tsx`
+- `apps/frontend/src/features/generation/hooks/use-image-generation.ts`
 
 ## Persistence And Database
 

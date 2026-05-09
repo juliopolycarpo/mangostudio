@@ -195,6 +195,20 @@ fetchScenario.restore();
 - Keep mocks focused on real request or dependency seams.
 - For API contract validation, use `Value.Check` with an inline Typebox schema — this catches breaking response shape changes immediately.
 
+## Module Tests (API)
+
+API domain modules place tests under the workspace-level `tests/` directory:
+
+```
+apps/api/tests/
+  unit/modules/<module-name>/         # Unit tests for application services
+  integration/modules/<module-name>/  # Integration tests using createApiTestApp
+```
+
+Module integration tests use `createApiTestApp` with the module's HTTP route
+plugin (e.g., `createApiTestApp(chatRoutes)`). Test URLs must use the plugin's
+own group path (no `/api` prefix — that is added in `app.ts`).
+
 ## Continuation / Provider Test Matrix
 
 Refer to `docs/CONTINUATION.md` and `docs/PROVIDER_DEVELOPMENT.md` for the

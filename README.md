@@ -75,29 +75,47 @@ mangostudio/
 ├── apps/
 │   ├── api/
 │   │   └── src/
-│   │       ├── routes/        # Elysia endpoints (chats, messages, settings, auth…)
-│   │       ├── services/      # Business logic (gemini, secret-store)
-│   │       ├── plugins/       # Reusable middlewares (auth, rate-limit)
-│   │       └── db/            # Kysely + SQLite + migrations
+│   │       ├── lib/                # Config, runtime paths, SPA guard
+│   │       ├── modules/            # Domain modules (DDD-inspired)
+│   │       │   ├── chats/          # application/ domain/ http/ infrastructure/
+│   │       │   ├── messages/       # application/ domain/ http/ infrastructure/
+│   │       │   ├── generation/     # application/ domain/ http/ infrastructure/
+│   │       │   ├── connectors/     # application/ domain/ http/ infrastructure/
+│   │       │   ├── app-settings/   # application/ http/ infrastructure/
+│   │       │   ├── provider-settings/  # application/ http/ infrastructure/
+│   │       │   ├── tool-settings/  # application/ http/ infrastructure/
+│   │       │   ├── prompt-rules/   # application/ http/
+│   │       │   └── attachments/    # application/ infrastructure/
+│   │       ├── plugins/            # Auth guard, rate limiting, error handler
+│   │       ├── services/           # AI providers, tools, secrets, generated images
+│   │       │   ├── providers/      # Multi-provider implementations + core infrastructure
+│   │       │   ├── tools/          # Tool registry + built-in tools
+│   │       │   └── generated-images/  # Generated image file storage
+│   │       └── db/                 # Kysely + SQLite + migrations
 │   ├── frontend/
 │   │   └── src/
 │   │       ├── components/
-│   │       │   └── ui/        # Design system (Button, Input, Card, Spinner, Toast)
-│   │       ├── features/      # Feature modules (chat, gallery…)
-│   │       ├── hooks/         # React hooks (use-i18n, use-app-state…)
-│   │       └── routes/        # TanStack Router pages
+│   │       │   └── ui/             # Design system (Button, Input, Card, Spinner, Toast, Toggle)
+│   │       ├── features/           # Feature modules (chat, gallery, generation, settings, sidebar)
+│   │       ├── hooks/              # React hooks (use-i18n, use-app-state, use-model-catalog…)
+│   │       └── routes/             # TanStack Router pages
 │   └── shared/
 │       └── src/
-│           ├── contracts/     # Request/response DTOs
-│           ├── types/         # Domain types
-│           ├── i18n/          # pt-BR / en dictionaries + useI18n hook
-│           └── test-utils/    # Shared mock factories
+│           ├── contracts/          # Contract barrel export
+│           ├── <module>/           # Per-module contracts + schemas (auth, chat, connectors…)
+│           ├── streaming/          # SSE event types + schemas
+│           ├── types/              # Domain types (provider, agent-events, gallery)
+│           ├── i18n/               # pt-BR / en dictionaries + types
+│           └── test-utils/         # Shared mock factories
 ├── docs/
 │   ├── pt-br/
-│   │   └── README.md          # Portuguese documentation
-│   └── TESTING.md             # Testing strategy and guide
-├── package.json               # Bun workspace root
-└── tsconfig.json              # Base TypeScript configuration
+│   │   └── README.md               # Portuguese documentation
+│   ├── CONTINUATION.md             # Continuation architecture deep-dive
+│   ├── PROVIDER_DEVELOPMENT.md     # Provider integration guide
+│   ├── AGENT_PLAYBOOKS.md          # Feature-by-feature file maps
+│   └── TESTING.md                  # Testing strategy and guide
+├── package.json                    # Bun workspace root
+└── tsconfig.json                   # Base TypeScript configuration
 ```
 
 ## Main Scripts
@@ -130,14 +148,14 @@ A [lefthook](https://github.com/evilmartians/lefthook) pre-commit hook runs ESLi
 
 ## Architecture
 
-| Layer        | Technologies                                             |
-| ------------ | -------------------------------------------------------- |
-| **Frontend** | React 19, Vite 8, Tailwind CSS v4, TanStack Router/Query |
-| **API**      | Elysia, Better Auth, native rate limiting                |
-| **Database** | SQLite via Kysely (type-safe query builder)              |
-| **AI**       | Multi-provider (Gemini, OpenAI-compatible, Anthropic)    |
-| **Runtime**  | Bun — no Node.js dependency                              |
-| **i18n**     | Pure TypeScript dictionary in `@mangostudio/shared/i18n` |
+| Layer        | Technologies                                                                 |
+| ------------ | ---------------------------------------------------------------------------- |
+| **Frontend** | React 19, Vite 8, Tailwind CSS v4, TanStack Router/Query                     |
+| **API**      | Elysia, Better Auth, native rate limiting, DDD-inspired modular architecture |
+| **Database** | SQLite via Kysely (type-safe query builder)                                  |
+| **AI**       | Multi-provider (Gemini, OpenAI, Anthropic, DeepSeek, OpenAI-compatible)      |
+| **Runtime**  | Bun — no Node.js dependency                                                  |
+| **i18n**     | Pure TypeScript dictionary in `@mangostudio/shared/i18n`                     |
 
 ## Design System
 
@@ -148,6 +166,7 @@ The frontend ships with a built-in design system under `apps/frontend/src/compon
 - **`Card`** — variants `glass` (glassmorphism) and `solid`
 - **`Spinner`** — loading indicator with sizes `sm`, `md`, `lg`
 - **`Toast`** — non-blocking notifications via `useToast()` hook
+- **`Toggle`** — accessibility-first toggle switch
 
 ## Internationalization (i18n)
 
@@ -163,6 +182,14 @@ function MyComponent() {
 ```
 
 The `Messages` type is inferred directly from the `pt-BR.ts` dictionary (`as const`). Adding a key without translating it in `en.ts` is a compile-time error.
+
+## Documentation
+
+- [`docs/CONTINUATION.md`](docs/CONTINUATION.md) — Continuation architecture deep-dive
+- [`docs/PROVIDER_DEVELOPMENT.md`](docs/PROVIDER_DEVELOPMENT.md) — Provider integration guide
+- [`docs/TESTING.md`](docs/TESTING.md) — Testing strategy and harness rules
+- [`docs/AGENT_PLAYBOOKS.md`](docs/AGENT_PLAYBOOKS.md) — Feature-by-feature file maps
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) — Contribution guidelines
 
 ## Standalone Build Notes
 

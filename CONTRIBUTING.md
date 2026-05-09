@@ -45,6 +45,21 @@ Refer to [`AGENTS.md`](./AGENTS.md) for the full coding style, naming convention
 - `CLAUDE.md` and `GEMINI.md` files with `@imports`
 - AI related Agents: Use [`AGENTS.md`](./AGENTS.md) as a source of agentic stuff
 
+### Module Architecture
+
+The API follows a modular DDD-inspired pattern where each domain concern
+(chats, messages, generation, connectors, settings, etc.) is organized as:
+
+```
+application/   → Use-case services (orchestration logic)
+domain/        → Domain rules and entities (may be omitted for simple modules)
+http/          → Elysia route definitions
+infrastructure/ → Repository/persistence implementations
+```
+
+When adding a new feature, prefer creating a new module under
+`apps/api/src/modules/` rather than expanding files in a flat structure.
+
 ## Running Tests
 
 ```bash
