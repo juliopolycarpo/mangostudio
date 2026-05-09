@@ -1,4 +1,5 @@
 export type { Chat, ChatAttachmentKind, Message } from './entities';
+export { createTimestampChatTitle } from './title';
 export {
   ChatAttachmentKindSchema,
   ChatAttachmentSchema,
