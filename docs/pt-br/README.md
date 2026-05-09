@@ -177,22 +177,26 @@ O tipo `Messages` é inferido diretamente do dicionário `pt-BR.ts` (`as const`)
 
 ## Documentação
 
-- [`../README.md`](../README.md) — hub da documentação em inglês
-- [`../guides/contributor-quickstart.md`](../guides/contributor-quickstart.md) — onboarding rápido para contribuidores
-- [`../architecture/continuation.md`](../architecture/continuation.md) — arquitetura de continuação
-- [`../providers/development.md`](../providers/development.md) — guia de integração de provedores
-- [`../reference/testing.md`](../reference/testing.md) — estratégia e guia de testes
-- [`../reference/agent-playbooks.md`](../reference/agent-playbooks.md) — mapas de arquivos por feature
+- [`./README.md`](./README.md) — hub da documentação em Português
+- [`./guides/contributor-quickstart.md`](./guides/contributor-quickstart.md) — onboarding rápido para contribuidores
+- [`./architecture/continuation.md`](./architecture/continuation.md) — arquitetura de continuação
+- [`./providers/development.md`](./providers/development.md) — guia de integração de provedores
+- [`./reference/testing.md`](./reference/testing.md) — estratégia e guia de testes
+- [`./reference/agent-playbooks.md`](./reference/agent-playbooks.md) — mapas de arquivos por feature
 - [`./CONTRIBUTING.md`](./CONTRIBUTING.md) — diretrizes de contribuição em Português
 
-## Política de Tradução
+## Estrutura Espelhada
 
-`docs/pt-br/` é o ponto de entrada para a versão em Português e deve evoluir como um espelho curado da estrutura principal de `docs/`.
+`docs/pt-br/` agora espelha a mesma organização de `docs/` com subpastas por responsabilidade:
 
-Estado atual:
+- `architecture/`
+- `features/`
+- `providers/`
+- `reference/`
+- `guides/`
+- `operations/`
 
-- Traduzidos: `README.md`, `CONTRIBUTING.md`
-- Restante da árvore: usar os documentos canônicos em inglês até que as traduções sejam adicionadas
+Quando uma alteração relevante for feita em `docs/`, a versão correspondente em `docs/pt-br/` deve ser atualizada na mesma tarefa para manter o espelho consistente.
 
 ## Notas de Build Standalone
 

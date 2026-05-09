@@ -43,8 +43,6 @@ bun run dev --frontend
 - [`../reference/testing.md`](../reference/testing.md) — taxonomia de testes, runners e regras de suporte
 - [`../reference/agent-playbooks.md`](../reference/agent-playbooks.md) — mapa de arquivos por feature para trabalho direcionado
 
-Os documentos acima são canônicos em inglês até que a versão em Português seja adicionada em `docs/pt-br/`.
-
 ## Padrões de Código
 
 Consulte [`AGENTS.md`](../../AGENTS.md) para o guia completo de estilo, convenções de nomes, regras de i18n e diretrizes de testes. Pontos principais:

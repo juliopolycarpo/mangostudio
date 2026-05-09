@@ -13,7 +13,7 @@ right depth quickly instead of scanning a flat list of files.
 | `reference/`    | Contributors, agents         | API surface, testing rules, and file-map navigation               |
 | `guides/`       | New contributors             | Task-oriented onboarding and contributor workflows                |
 | `operations/`   | Deployers, operators         | Deployment and security guidance                                  |
-| `pt-br/`        | Portuguese readers           | Curated translations and the Portuguese docs index                |
+| `pt-br/`        | Portuguese readers           | Full Portuguese mirror of this documentation tree                 |
 
 ## Recommended Reading
 
@@ -46,5 +46,4 @@ right depth quickly instead of scanning a flat list of files.
 ## Notes
 
 - Root-level docs should stay limited to top-level entry points such as `README.md`, `CONTRIBUTING.md`, and `AGENTS.md`.
-- English docs are canonical.
-- `docs/pt-br/` is the home for curated Portuguese translations and should grow toward the same information architecture over time.
+- `docs/pt-br/` mirrors the same documentation structure in Brazilian Portuguese.
