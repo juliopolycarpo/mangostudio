@@ -218,6 +218,48 @@ describe('POST /chats', () => {
   });
 });
 
+describe('POST /chats/title-suggestion', () => {
+  it('generates a sanitized chat title from the selected model', async () => {
+    registerSummaryProvider('Title: "Deterministic Testing"');
+    await insertSummaryConnector('chat-title-model');
+
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, chatRoutes);
+    restoreAuth = restore;
+
+    const response = await app.handle(
+      new Request('http://localhost/chats/title-suggestion', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: 'Explain deterministic testing strategies for Vitest suites.',
+          model: 'chat-title-model',
+        }),
+      })
+    );
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as Record<string, unknown>;
+    expect(body).toEqual({ title: 'Deterministic Testing' });
+  });
+
+  it('returns 400 when the prompt is blank', async () => {
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, chatRoutes);
+    restoreAuth = restore;
+
+    const response = await app.handle(
+      new Request('http://localhost/chats/title-suggestion', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: '   ', model: 'chat-title-model' }),
+      })
+    );
+
+    expect(response.status).toBe(400);
+    const body = (await response.json()) as Record<string, unknown>;
+    expect(body).toMatchObject({ code: 'VALIDATION' });
+  });
+});
+
 describe('DELETE /chats/:id', () => {
   it('returns 401 when not authenticated', async () => {
     const app = createApiTestApp(chatRoutes);

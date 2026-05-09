@@ -1,5 +1,15 @@
 export type { Chat, ChatAttachmentKind, Message } from './entities';
 export {
+  CHAT_TITLE_PROMPT_LENGTH_DEFAULT,
+  CHAT_TITLE_PROMPT_LENGTH_MAX,
+  CHAT_TITLE_PROMPT_LENGTH_MIN,
+  clampChatTitlePromptLength,
+  createPromptChatTitle,
+  createTimestampChatTitle,
+  isTimestampChatTitle,
+  sanitizeGeneratedChatTitle,
+} from './title';
+export {
   ChatAttachmentKindSchema,
   ChatAttachmentSchema,
   CompactChatBodySchema,
@@ -7,6 +17,8 @@ export {
   ContextCompactionResponseSchema,
   ContextInfoSchema,
   ContextSettingsSchema,
+  GenerateChatTitleBodySchema,
+  GenerateChatTitleResponseSchema,
   CreateChatBodySchema,
   UpdateChatBodySchema,
   CreateMessageBodySchema,
@@ -19,6 +31,8 @@ export {
   type ContextCompactionResponse,
   type ContextInfo,
   type ContextSettings,
+  type GenerateChatTitleBody,
+  type GenerateChatTitleResponse,
   type CreateChatBody,
   type UpdateChatBody,
   type CreateMessageBody,

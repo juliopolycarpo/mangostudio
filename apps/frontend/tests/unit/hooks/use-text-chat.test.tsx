@@ -3,13 +3,20 @@
  * Verifies that multiple thinking blocks are built correctly during SSE streaming.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { MessagePart } from '@mangostudio/shared';
 import { act, renderHook, waitFor } from '../../support/harness/render';
 import { useTextGeneration } from '../../../src/features/generation/hooks/use-text-generation';
-import { DEFAULT_CONTEXT_SETTINGS } from '../../../src/hooks/use-global-settings';
-import type { MessagePart } from '@mangostudio/shared';
+import {
+  DEFAULT_CHAT_TITLE_SETTINGS,
+  DEFAULT_CONTEXT_SETTINGS,
+} from '../../../src/hooks/use-global-settings';
 
 vi.mock('../../../src/services/generation-service', () => ({
   respondTextStream: vi.fn(),
+}));
+
+vi.mock('../../../src/features/chat/services/chat-title', () => ({
+  generateChatTitleSuggestion: vi.fn(),
 }));
 
 vi.mock('../../../src/features/chat/services/context-compaction', () => ({
@@ -22,7 +29,9 @@ vi.mock('../../../src/features/chat/queries', () => ({
 }));
 
 import { respondTextStream } from '../../../src/services/generation-service';
+import { generateChatTitleSuggestion } from '../../../src/features/chat/services/chat-title';
 const mockStream = vi.mocked(respondTextStream);
+const mockGenerateChatTitle = vi.mocked(generateChatTitleSuggestion);
 
 /**
  * Builds a fake respondTextStream implementation that delivers a sequence of
@@ -37,6 +46,15 @@ function makeStreamFn(chunks: Parameters<Parameters<typeof respondTextStream>[1]
   };
 }
 
+function createDeferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((res) => {
+    resolve = res;
+  });
+
+  return { promise, resolve };
+}
+
 type TextChatProps = Parameters<typeof useTextGeneration>[0];
 
 function makeProps(overrides: Partial<TextChatProps> = {}): TextChatProps {
@@ -45,7 +63,9 @@ function makeProps(overrides: Partial<TextChatProps> = {}): TextChatProps {
   return {
     chats: {
       currentChatId: 'chat-1',
+      currentChat: { id: 'chat-1', title: 'Existing chat', createdAt: 1, updatedAt: 1 },
       createChat: vi.fn().mockResolvedValue({ id: 'chat-new' }),
+      updateChatTitle: vi.fn().mockResolvedValue(undefined),
       loadChats: vi.fn().mockResolvedValue(undefined),
     } as unknown as TextChatProps['chats'],
     getActiveModel: () => 'test-model',
@@ -58,6 +78,7 @@ function makeProps(overrides: Partial<TextChatProps> = {}): TextChatProps {
     reasoningEffort: 'medium' as const,
     maxToolIterations: 10,
     contextSettings: DEFAULT_CONTEXT_SETTINGS,
+    chatTitleSettings: DEFAULT_CHAT_TITLE_SETTINGS,
     currentChatId: 'chat-1',
     ...overrides,
   };
@@ -66,6 +87,7 @@ function makeProps(overrides: Partial<TextChatProps> = {}): TextChatProps {
 describe('useTextChat — thinking segment tracking', () => {
   beforeEach(() => {
     mockStream.mockReset();
+    mockGenerateChatTitle.mockReset();
   });
 
   it('thinking_start creates a new thinking part in the parts array', async () => {
@@ -234,6 +256,247 @@ describe('useTextChat — maxToolIterations forwarding', () => {
     const firstCall = mockStream.mock.calls[0];
     const request = firstCall[0] as { contextSettings?: typeof props.contextSettings };
     expect(request.contextSettings).toEqual(props.contextSettings);
+  });
+});
+
+describe('useTextChat — prompt title auto rename', () => {
+  beforeEach(() => {
+    mockStream.mockReset();
+    mockGenerateChatTitle.mockReset();
+  });
+
+  it('renames a newly created timestamp chat from the first prompt', async () => {
+    const props = makeProps({
+      currentChatId: null,
+      chats: {
+        currentChatId: null,
+        currentChat: null,
+        createChat: vi.fn().mockResolvedValue({
+          id: 'chat-new',
+          title: 'New Chat [2026-05-09 07:05]',
+          createdAt: 1,
+          updatedAt: 1,
+        }),
+        updateChatTitle: vi.fn().mockResolvedValue(undefined),
+        loadChats: vi.fn().mockResolvedValue(undefined),
+      } as unknown as TextChatProps['chats'],
+    });
+    mockStream.mockImplementation(
+      makeStreamFn([{ type: 'done', done: true, generationTime: '0.5s' }])
+    );
+
+    const { result } = renderHook(() => useTextGeneration(props));
+
+    await act(async () => {
+      await result.current.handleRespond('Explain deterministic testing with Vitest');
+    });
+
+    await waitFor(() => expect(result.current.isGenerating).toBe(false));
+    expect(props.chats.createChat).toHaveBeenCalledWith();
+    await waitFor(() =>
+      expect(props.chats.updateChatTitle).toHaveBeenCalledWith(
+        'chat-new',
+        'Explain deterministic testing...'
+      )
+    );
+  });
+
+  it('starts the prompt stream before model-generated title resolution', async () => {
+    const title = createDeferred<{ title: string }>();
+    const props = makeProps({
+      chatTitleSettings: {
+        ...DEFAULT_CHAT_TITLE_SETTINGS,
+        strategy: 'model',
+        preferredModel: 'title-model',
+      },
+      chats: {
+        currentChatId: 'chat-1',
+        currentChat: {
+          id: 'chat-1',
+          title: 'New Chat [2026-05-09 07:05]',
+          createdAt: 1,
+          updatedAt: 1,
+        },
+        createChat: vi.fn().mockResolvedValue({ id: 'chat-new' }),
+        updateChatTitle: vi.fn().mockResolvedValue(undefined),
+        loadChats: vi.fn().mockResolvedValue(undefined),
+      } as unknown as TextChatProps['chats'],
+    });
+    mockGenerateChatTitle.mockReturnValue(title.promise);
+    mockStream.mockImplementation(
+      makeStreamFn([{ type: 'done', done: true, generationTime: '0.5s' }])
+    );
+
+    const { result } = renderHook(() => useTextGeneration(props));
+
+    await act(async () => {
+      await result.current.handleRespond('Explain deterministic testing with Vitest');
+    });
+
+    expect(mockStream).toHaveBeenCalledWith(
+      expect.objectContaining({ prompt: 'Explain deterministic testing with Vitest' }),
+      expect.any(Function),
+      expect.any(AbortSignal)
+    );
+    expect(props.chats.updateChatTitle).not.toHaveBeenCalled();
+
+    await act(async () => {
+      title.resolve({ title: 'Generated title' });
+      await title.promise;
+    });
+
+    await waitFor(() =>
+      expect(props.chats.updateChatTitle).toHaveBeenCalledWith('chat-1', 'Generated title')
+    );
+  });
+
+  it('renames timestamp chats from prompt prefixes without blocking the prompt stream', async () => {
+    const titleUpdate = createDeferred<void>();
+    const props = makeProps({
+      chats: {
+        currentChatId: 'chat-1',
+        currentChat: {
+          id: 'chat-1',
+          title: 'New Chat [2026-05-09 07:05]',
+          createdAt: 1,
+          updatedAt: 1,
+        },
+        createChat: vi.fn().mockResolvedValue({ id: 'chat-new' }),
+        updateChatTitle: vi.fn().mockReturnValue(titleUpdate.promise),
+        loadChats: vi.fn().mockResolvedValue(undefined),
+      } as unknown as TextChatProps['chats'],
+    });
+    mockStream.mockImplementation(
+      makeStreamFn([{ type: 'done', done: true, generationTime: '0.5s' }])
+    );
+
+    const { result } = renderHook(() => useTextGeneration(props));
+
+    await act(async () => {
+      await result.current.handleRespond('Explain deterministic testing with Vitest');
+    });
+
+    expect(mockStream).toHaveBeenCalled();
+    expect(props.chats.updateChatTitle).toHaveBeenCalledWith(
+      'chat-1',
+      'Explain deterministic testing...'
+    );
+
+    await act(async () => {
+      titleUpdate.resolve(undefined);
+      await titleUpdate.promise;
+    });
+  });
+
+  it('keeps timestamp titles when prompt auto rename is disabled', async () => {
+    const props = makeProps({
+      chatTitleSettings: { ...DEFAULT_CHAT_TITLE_SETTINGS, autoRenameEnabled: false },
+      chats: {
+        currentChatId: 'chat-1',
+        currentChat: {
+          id: 'chat-1',
+          title: 'New Chat [2026-05-09 07:05]',
+          createdAt: 1,
+          updatedAt: 1,
+        },
+        createChat: vi.fn().mockResolvedValue({ id: 'chat-new' }),
+        updateChatTitle: vi.fn().mockResolvedValue(undefined),
+        loadChats: vi.fn().mockResolvedValue(undefined),
+      } as unknown as TextChatProps['chats'],
+    });
+    mockStream.mockImplementation(
+      makeStreamFn([{ type: 'done', done: true, generationTime: '0.5s' }])
+    );
+
+    const { result } = renderHook(() => useTextGeneration(props));
+
+    await act(async () => {
+      await result.current.handleRespond('Explain deterministic testing with Vitest');
+    });
+
+    await waitFor(() => expect(result.current.isGenerating).toBe(false));
+    expect(props.chats.updateChatTitle).not.toHaveBeenCalled();
+  });
+
+  it('uses the configured model to generate a chat title when selected', async () => {
+    const props = makeProps({
+      chatTitleSettings: {
+        ...DEFAULT_CHAT_TITLE_SETTINGS,
+        strategy: 'model',
+        preferredModel: 'title-model',
+      },
+      chats: {
+        currentChatId: 'chat-1',
+        currentChat: {
+          id: 'chat-1',
+          title: 'New Chat [2026-05-09 07:05]',
+          createdAt: 1,
+          updatedAt: 1,
+        },
+        createChat: vi.fn().mockResolvedValue({ id: 'chat-new' }),
+        updateChatTitle: vi.fn().mockResolvedValue(undefined),
+        loadChats: vi.fn().mockResolvedValue(undefined),
+      } as unknown as TextChatProps['chats'],
+    });
+    mockGenerateChatTitle.mockResolvedValue({ title: 'Generated title' });
+    mockStream.mockImplementation(
+      makeStreamFn([{ type: 'done', done: true, generationTime: '0.5s' }])
+    );
+
+    const { result } = renderHook(() => useTextGeneration(props));
+
+    await act(async () => {
+      await result.current.handleRespond('Explain deterministic testing with Vitest');
+    });
+
+    await waitFor(() => expect(result.current.isGenerating).toBe(false));
+    expect(mockGenerateChatTitle).toHaveBeenCalledWith({
+      prompt: 'Explain deterministic testing with Vitest',
+      model: 'title-model',
+    });
+    await waitFor(() =>
+      expect(props.chats.updateChatTitle).toHaveBeenCalledWith('chat-1', 'Generated title')
+    );
+  });
+
+  it('falls back to the prompt title when model title generation fails', async () => {
+    const props = makeProps({
+      chatTitleSettings: { ...DEFAULT_CHAT_TITLE_SETTINGS, strategy: 'model' },
+      chats: {
+        currentChatId: 'chat-1',
+        currentChat: {
+          id: 'chat-1',
+          title: 'New Chat [2026-05-09 07:05]',
+          createdAt: 1,
+          updatedAt: 1,
+        },
+        createChat: vi.fn().mockResolvedValue({ id: 'chat-new' }),
+        updateChatTitle: vi.fn().mockResolvedValue(undefined),
+        loadChats: vi.fn().mockResolvedValue(undefined),
+      } as unknown as TextChatProps['chats'],
+    });
+    mockGenerateChatTitle.mockRejectedValue(new Error('provider unavailable'));
+    mockStream.mockImplementation(
+      makeStreamFn([{ type: 'done', done: true, generationTime: '0.5s' }])
+    );
+
+    const { result } = renderHook(() => useTextGeneration(props));
+
+    await act(async () => {
+      await result.current.handleRespond('Explain deterministic testing with Vitest');
+    });
+
+    await waitFor(() => expect(result.current.isGenerating).toBe(false));
+    expect(mockGenerateChatTitle).toHaveBeenCalledWith({
+      prompt: 'Explain deterministic testing with Vitest',
+      model: 'test-model',
+    });
+    await waitFor(() =>
+      expect(props.chats.updateChatTitle).toHaveBeenCalledWith(
+        'chat-1',
+        'Explain deterministic testing...'
+      )
+    );
   });
 });
 

@@ -55,6 +55,7 @@ export function useAppState() {
     reasoningEffort: effectiveReasoningEffort,
     maxToolIterations: effectiveMaxToolIterations,
     contextSettings: settings.contextSettings,
+    chatTitleSettings: settings.chatTitleSettings,
     currentChatId: chats.currentChatId,
   });
 

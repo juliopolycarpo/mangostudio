@@ -1,4 +1,5 @@
 import { useState, useCallback, useMemo } from 'react';
+import { createTimestampChatTitle } from '@mangostudio/shared/chat';
 import {
   useChatsQuery,
   useCreateChatMutation,
@@ -26,7 +27,7 @@ export function useChats() {
 
   const createChat = useCallback(
     async (title?: string) => {
-      const chat = await createMutation.mutateAsync({ title: title || 'New Chat' });
+      const chat = await createMutation.mutateAsync({ title: title || createTimestampChatTitle() });
       setCurrentChatId(chat.id);
       return chat;
     },

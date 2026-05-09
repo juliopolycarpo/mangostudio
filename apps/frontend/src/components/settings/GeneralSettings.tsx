@@ -1,11 +1,19 @@
+import type { ChatTitleSettings, ChatTitleStrategy } from '@mangostudio/shared/app-settings';
+import type { ModelOption } from '@mangostudio/shared';
+import type { Locale } from '@mangostudio/shared/i18n';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { useI18n } from '@/hooks/use-i18n';
-import type { Locale } from '@mangostudio/shared/i18n';
 
 interface GeneralSettingsProps {
   imageQuality: string;
   setImageQuality: (val: string) => void;
+  chatTitleSettings: ChatTitleSettings;
+  availableTitleModels: ModelOption[];
+  setChatAutoRenameEnabled: (value: boolean) => void;
+  setChatTitleStrategy: (value: ChatTitleStrategy) => void;
+  setChatTitlePromptPrefixLength: (value: number) => void;
+  setPreferredChatTitleModel: (value: string) => void;
 }
 
 const IMAGE_QUALITY_OPTIONS = ['512px', '1K', '2K', '4K'] as const;
@@ -15,12 +23,34 @@ const LOCALE_OPTIONS: { value: Locale; label: string }[] = [
   { value: 'pt-BR', label: 'Português (BR)' },
 ];
 
+const PROMPT_PREFIX_LENGTH_MIN = 10;
+const PROMPT_PREFIX_LENGTH_MAX = 80;
+
 /**
  * General settings tab: language selector, image quality grid.
  */
-export function GeneralSettings({ imageQuality, setImageQuality }: GeneralSettingsProps) {
+export function GeneralSettings({
+  imageQuality,
+  setImageQuality,
+  chatTitleSettings,
+  availableTitleModels,
+  setChatAutoRenameEnabled,
+  setChatTitleStrategy,
+  setChatTitlePromptPrefixLength,
+  setPreferredChatTitleModel,
+}: GeneralSettingsProps) {
   const { t, locale, setLocale } = useI18n();
   const s = t.settings.general;
+  const missingTitleModelOption =
+    chatTitleSettings.preferredModel !== 'current_model' &&
+    !availableTitleModels.some((model) => model.modelId === chatTitleSettings.preferredModel)
+      ? [
+          {
+            modelId: chatTitleSettings.preferredModel,
+            displayName: chatTitleSettings.preferredModel,
+          },
+        ]
+      : [];
 
   return (
     <div className="space-y-4">
@@ -66,6 +96,103 @@ export function GeneralSettings({ imageQuality, setImageQuality }: GeneralSettin
               {q}
             </Button>
           ))}
+        </div>
+      </Card>
+
+      <Card variant="solid" className="space-y-4 p-6">
+        <div className="flex items-start justify-between gap-4">
+          <div className="space-y-1">
+            <h3 className="text-xs uppercase tracking-widest font-bold text-on-surface-variant/80 font-label">
+              {s.chatTitlesLabel}
+            </h3>
+            <p className="text-sm text-on-surface-variant/60">{s.chatTitlesDescription}</p>
+          </div>
+          <input
+            type="checkbox"
+            checked={chatTitleSettings.autoRenameEnabled}
+            onChange={(event) => setChatAutoRenameEnabled(event.target.checked)}
+            aria-label={s.chatTitlesToggleLabel}
+            className="mt-1 h-4 w-4 rounded border-outline-variant/30 accent-primary"
+          />
+        </div>
+
+        <div className="space-y-3">
+          <label
+            htmlFor="chat-title-strategy"
+            className="text-xs uppercase tracking-widest font-bold text-on-surface-variant/80 font-label"
+          >
+            {s.chatTitleSourceLabel}
+          </label>
+          <select
+            id="chat-title-strategy"
+            value={chatTitleSettings.strategy}
+            onChange={(event) => setChatTitleStrategy(event.target.value as ChatTitleStrategy)}
+            disabled={!chatTitleSettings.autoRenameEnabled}
+            className="w-full rounded-xl px-4 py-2.5 text-sm bg-surface-container-lowest text-on-surface border border-outline-variant/20 focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/20 transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <option value="prompt_prefix">{s.chatTitleSourcePrompt}</option>
+            <option value="model">{s.chatTitleSourceModel}</option>
+          </select>
+        </div>
+
+        {chatTitleSettings.strategy === 'model' ? (
+          <div className="space-y-3">
+            <label
+              htmlFor="chat-title-model"
+              className="text-xs uppercase tracking-widest font-bold text-on-surface-variant/80 font-label"
+            >
+              {s.chatTitleModelLabel}
+            </label>
+            <p className="text-sm text-on-surface-variant/60">{s.chatTitleModelDescription}</p>
+            <select
+              id="chat-title-model"
+              value={chatTitleSettings.preferredModel}
+              onChange={(event) => setPreferredChatTitleModel(event.target.value)}
+              disabled={!chatTitleSettings.autoRenameEnabled}
+              className="w-full rounded-xl px-4 py-2.5 text-sm bg-surface-container-lowest text-on-surface border border-outline-variant/20 focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/20 transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <option value="current_model">{s.chatTitleModelCurrent}</option>
+              {missingTitleModelOption.map((model) => (
+                <option key={model.modelId} value={model.modelId}>
+                  {model.displayName}
+                </option>
+              ))}
+              {availableTitleModels.map((model) => (
+                <option key={model.modelId} value={model.modelId}>
+                  {model.displayName}
+                </option>
+              ))}
+            </select>
+          </div>
+        ) : null}
+
+        <div className="space-y-3">
+          <div className="flex items-baseline justify-between gap-4">
+            <label
+              htmlFor="chat-title-prefix-length"
+              className="text-xs uppercase tracking-widest font-bold text-on-surface-variant/80 font-label"
+            >
+              {s.chatTitlePrefixLengthLabel}
+            </label>
+            <span className="text-sm font-medium text-on-surface">
+              {s.chatTitlePrefixLengthHint.replace(
+                '{value}',
+                String(chatTitleSettings.promptPrefixLength)
+              )}
+            </span>
+          </div>
+          <p className="text-sm text-on-surface-variant/60">{s.chatTitlePrefixLengthDescription}</p>
+          <input
+            id="chat-title-prefix-length"
+            type="range"
+            min={PROMPT_PREFIX_LENGTH_MIN}
+            max={PROMPT_PREFIX_LENGTH_MAX}
+            step={1}
+            value={chatTitleSettings.promptPrefixLength}
+            onChange={(event) => setChatTitlePromptPrefixLength(Number(event.target.value))}
+            disabled={!chatTitleSettings.autoRenameEnabled}
+            className="w-full h-2 bg-surface-container-lowest rounded-full appearance-none cursor-pointer accent-primary disabled:cursor-not-allowed disabled:opacity-50"
+          />
         </div>
       </Card>
     </div>

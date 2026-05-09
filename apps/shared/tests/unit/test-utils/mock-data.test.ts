@@ -2,7 +2,10 @@ import { describe, expect, it } from 'vitest';
 import {
   MOCK_MODELS,
   createMockChat,
+  createMockGalleryItem,
+  createMockGeneratedImageArtifact,
   createMockMessage,
+  createMockSecretMetadataRow,
   toApiResponse,
 } from '../../../src/test-utils/mock-data';
 
@@ -50,5 +53,59 @@ describe('mock-data test utils', () => {
       updatedAt: 1_711_280_123_000,
     });
     expect(toApiResponse.message(message)).toEqual({ ...message, timestamp: ts });
+  });
+
+  it('creates a valid mock generated image artifact shape', () => {
+    const artifact = createMockGeneratedImageArtifact({
+      id: 'artifact-123',
+      prompt: 'A red apple',
+    });
+
+    expect(artifact).toMatchObject({
+      id: 'artifact-123',
+      chatId: 'chat-1',
+      messageId: 'msg-1',
+      prompt: 'A red apple',
+      imageUrl: '/images/test-image.png',
+    });
+    expect(typeof artifact.createdAt).toBe('number');
+  });
+
+  it('creates a valid mock gallery item shape', () => {
+    const item = createMockGalleryItem({
+      id: 'gallery-123',
+      prompt: 'A blue ocean',
+    });
+
+    expect(item).toMatchObject({
+      id: 'gallery-123',
+      chatId: 'chat-1',
+      messageId: 'msg-1',
+      prompt: 'A blue ocean',
+      imageUrl: '/images/test-image.png',
+    });
+  });
+
+  it('creates a valid mock secret metadata row shape', () => {
+    const row = createMockSecretMetadataRow({
+      id: 'connector-123',
+      name: 'Test Connector',
+      provider: 'openai',
+    });
+
+    expect(row).toMatchObject({
+      id: 'connector-123',
+      name: 'Test Connector',
+      provider: 'openai',
+      configured: 1,
+      source: 'bun-secrets',
+      maskedSuffix: '1234',
+      userId: null,
+      baseUrl: null,
+      enabledModels: JSON.stringify(['gemini-pro', 'gemini-flash']),
+    });
+    expect(typeof row.updatedAt).toBe('number');
+    expect(typeof row.lastValidatedAt).toBe('number');
+    expect(row.lastValidationError).toBeNull();
   });
 });

@@ -2,6 +2,7 @@ import { useCallback, useMemo } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   DEFAULT_APP_SETTINGS,
+  DEFAULT_CHAT_TITLE_SETTINGS,
   DEFAULT_CONTEXT_SETTINGS,
   DEFAULT_PROMPT_SETTINGS,
   MAX_TOOL_ITERATIONS_DEFAULT,
@@ -9,7 +10,10 @@ import {
   MAX_TOOL_ITERATIONS_MIN,
   clampMaxToolIterations,
   normalizeAppSettings,
+  normalizeChatTitleSettings,
   type AppSettings,
+  type ChatTitleSettings,
+  type ChatTitleStrategy,
   type ImageQuality,
 } from '@mangostudio/shared/app-settings';
 import type { ReasoningEffort } from '@mangostudio/shared';
@@ -19,6 +23,7 @@ import { updateAppSettings } from '@/features/settings/app/api';
 import { appSettingsKeys, appSettingsQueryOptions } from '@/features/settings/app/queries';
 
 export {
+  DEFAULT_CHAT_TITLE_SETTINGS,
   DEFAULT_CONTEXT_SETTINGS,
   DEFAULT_PROMPT_SETTINGS,
   MAX_TOOL_ITERATIONS_DEFAULT,
@@ -88,6 +93,19 @@ export function useGlobalSettings() {
       saveSettings((current) => ({
         ...current,
         contextSettings: { ...current.contextSettings, ...updates },
+      }));
+    },
+    [saveSettings]
+  );
+
+  const updateChatTitleSettings = useCallback(
+    (updates: Partial<ChatTitleSettings>) => {
+      saveSettings((current) => ({
+        ...current,
+        chatTitleSettings: normalizeChatTitleSettings({
+          ...current.chatTitleSettings,
+          ...updates,
+        }),
       }));
     },
     [saveSettings]
@@ -188,6 +206,7 @@ export function useGlobalSettings() {
       }));
     },
     contextSettings: settings.contextSettings,
+    chatTitleSettings: settings.chatTitleSettings,
     setContextCompactionBehavior: (value: ContextCompactionBehavior) =>
       updateContextSettings({ compactionBehavior: value }),
     setContextWarningThreshold: (value: number) =>
@@ -199,6 +218,14 @@ export function useGlobalSettings() {
       updateContextSettings({ preferredSummaryModel: value }),
     setProviderCompactionEnabled: (value: boolean) =>
       updateContextSettings({ providerCompactionEnabled: value }),
+    setChatAutoRenameEnabled: (value: boolean) =>
+      updateChatTitleSettings({ autoRenameEnabled: value }),
+    setChatTitleStrategy: (value: ChatTitleStrategy) =>
+      updateChatTitleSettings({ strategy: value }),
+    setChatTitlePromptPrefixLength: (value: number) =>
+      updateChatTitleSettings({ promptPrefixLength: value }),
+    setPreferredChatTitleModel: (value: string) =>
+      updateChatTitleSettings({ preferredModel: value }),
     resetSettings,
   };
 }

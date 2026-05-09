@@ -80,6 +80,19 @@ export const CreateChatBodySchema = Type.Object({
 
 export type CreateChatBody = Static<typeof CreateChatBodySchema>;
 
+export const GenerateChatTitleBodySchema = Type.Object({
+  prompt: Type.String(),
+  model: Type.String(),
+});
+
+export type GenerateChatTitleBody = Static<typeof GenerateChatTitleBodySchema>;
+
+export const GenerateChatTitleResponseSchema = Type.Object({
+  title: Type.String(),
+});
+
+export type GenerateChatTitleResponse = Static<typeof GenerateChatTitleResponseSchema>;
+
 export const UpdateChatBodySchema = Type.Object({
   title: Type.Optional(Type.String()),
   model: Type.Optional(Type.String()),

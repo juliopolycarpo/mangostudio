@@ -226,6 +226,21 @@ export const messages = {
       maxToolIterationsDescription:
         'Limite máximo de rodadas de chamada de ferramentas que o modelo pode executar em um turno.',
       maxToolIterationsHint: '{value} de 25',
+      chatTitlesLabel: 'Títulos dos Chats',
+      chatTitlesDescription:
+        'Renomeie automaticamente novos chats com timestamp a partir do primeiro prompt do usuário.',
+      chatTitlesToggleLabel: 'Renomear novos chats automaticamente',
+      chatTitleSourceLabel: 'Origem do título',
+      chatTitleSourcePrompt: 'Texto inicial do prompt',
+      chatTitleSourceModel: 'Gerar com um modelo',
+      chatTitleModelLabel: 'Modelo para título',
+      chatTitleModelDescription:
+        'Use o modelo atual do chat ou force um modelo de texto específico para gerar títulos.',
+      chatTitleModelCurrent: 'Usar o modelo atual do chat',
+      chatTitlePrefixLengthLabel: 'Tamanho do título por prompt',
+      chatTitlePrefixLengthDescription:
+        'Use os primeiros caracteres do prompt quando um chat com timestamp receber a primeira mensagem.',
+      chatTitlePrefixLengthHint: '{value} caracteres',
     },
     connectors: {
       title: 'Conectores de IA',

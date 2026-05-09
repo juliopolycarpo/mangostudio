@@ -12,6 +12,15 @@ import { useGlobalSettings } from '../../../src/hooks/use-global-settings';
 import { render, screen, waitFor } from '../../support/harness/render';
 import { createFetchScenario } from '../../support/mocks/create-fetch-scenario';
 
+const TITLE_MODELS = [
+  {
+    modelId: 'title-model',
+    resourceName: 'title-model',
+    displayName: 'Title Model',
+    supportedActions: ['text'],
+  },
+];
+
 function PromptSettingsHarness() {
   const settings = useGlobalSettings();
 
@@ -34,6 +43,12 @@ function GeneralSettingsHarness() {
     <GeneralSettings
       imageQuality={settings.globalImageQuality}
       setImageQuality={settings.setGlobalImageQuality}
+      chatTitleSettings={settings.chatTitleSettings}
+      availableTitleModels={TITLE_MODELS}
+      setChatAutoRenameEnabled={settings.setChatAutoRenameEnabled}
+      setChatTitleStrategy={settings.setChatTitleStrategy}
+      setChatTitlePromptPrefixLength={settings.setChatTitlePromptPrefixLength}
+      setPreferredChatTitleModel={settings.setPreferredChatTitleModel}
     />
   );
 }
@@ -175,6 +190,111 @@ describe('app settings pages integration', () => {
 
       expect(body.globalImageQuality).toBe('4K');
       expect(body.promptSettings).toEqual(DEFAULT_APP_SETTINGS.promptSettings);
+    });
+  });
+
+  it('persists chat title auto rename decisions from general settings', async () => {
+    const initialSettings: AppSettings = {
+      ...DEFAULT_APP_SETTINGS,
+      chatTitleSettings: {
+        ...DEFAULT_APP_SETTINGS.chatTitleSettings,
+        promptPrefixLength: 30,
+      },
+    };
+
+    fetchScenario.respondWithJson('GET', '/api/settings/app', {
+      body: initialSettings,
+    });
+    fetchScenario.respondWithJson('PUT', '/api/settings/app', {
+      body: {
+        ...initialSettings,
+        chatTitleSettings: {
+          autoRenameEnabled: false,
+          strategy: 'prompt_prefix',
+          promptPrefixLength: 30,
+          preferredModel: 'current_model',
+        },
+      },
+    });
+
+    render(<GeneralSettingsHarness />);
+
+    const autoRenameToggle = await screen.findByLabelText('Auto rename new chats');
+    fireEvent.click(autoRenameToggle);
+
+    await waitFor(() => {
+      const body = getLatestRequestBody(
+        fetchScenario.fetchMock.mock.calls,
+        '/api/settings/app',
+        'PUT'
+      );
+
+      expect(body.chatTitleSettings.autoRenameEnabled).toBe(false);
+      expect(body.chatTitleSettings.promptPrefixLength).toBe(30);
+    });
+  });
+
+  it('persists model title source decisions from general settings', async () => {
+    const user = userEvent.setup();
+    const initialSettings: AppSettings = {
+      ...DEFAULT_APP_SETTINGS,
+      chatTitleSettings: {
+        ...DEFAULT_APP_SETTINGS.chatTitleSettings,
+        strategy: 'prompt_prefix',
+        preferredModel: 'current_model',
+      },
+    };
+
+    fetchScenario.respondWithJson('GET', '/api/settings/app', {
+      body: initialSettings,
+    });
+    fetchScenario.respondWithJson('PUT', '/api/settings/app', {
+      body: {
+        ...initialSettings,
+        chatTitleSettings: {
+          ...initialSettings.chatTitleSettings,
+          strategy: 'model',
+        },
+      },
+    });
+
+    render(<GeneralSettingsHarness />);
+
+    await user.selectOptions(await screen.findByLabelText('Title source'), 'model');
+
+    await waitFor(() => {
+      const body = getLatestRequestBody(
+        fetchScenario.fetchMock.mock.calls,
+        '/api/settings/app',
+        'PUT'
+      );
+
+      expect(body.chatTitleSettings.strategy).toBe('model');
+      expect(body.chatTitleSettings.preferredModel).toBe('current_model');
+    });
+
+    fetchScenario.respondWithJson('PUT', '/api/settings/app', {
+      body: {
+        ...initialSettings,
+        chatTitleSettings: {
+          ...initialSettings.chatTitleSettings,
+          strategy: 'model',
+          preferredModel: 'title-model',
+        },
+      },
+    });
+
+    await user.selectOptions(await screen.findByLabelText('Title model'), 'title-model');
+
+    await waitFor(() => {
+      const body = getLatestRequestBody(
+        fetchScenario.fetchMock.mock.calls,
+        '/api/settings/app',
+        'PUT'
+      );
+
+      expect(body.chatTitleSettings.strategy).toBe('model');
+      expect(body.chatTitleSettings.preferredModel).toBe('title-model');
     });
   });
 });

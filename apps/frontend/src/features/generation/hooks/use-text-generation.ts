@@ -7,10 +7,17 @@ import type {
   MessagePart,
   ReasoningEffort,
 } from '@mangostudio/shared';
+import type { ChatTitleSettings } from '@mangostudio/shared/app-settings';
+import {
+  createPromptChatTitle,
+  isTimestampChatTitle,
+  type ContextCompactionResponse,
+  type ContextSettings,
+} from '@mangostudio/shared/chat';
 import type { ToolIntent } from '@mangostudio/shared/generation';
 import type { PromptSettings } from '@mangostudio/shared/prompt-rules';
-import type { ContextCompactionResponse, ContextSettings } from '@mangostudio/shared/chat';
 import { messageKeys } from '@/features/chat/queries';
+import { generateChatTitleSuggestion } from '@/features/chat/services/chat-title';
 import { compactChat, summarizeToNewChat } from '@/features/chat/services/context-compaction';
 import { respondTextStream } from '@/services/generation-service';
 import { useChatStream } from '@/features/chat/hooks/use-chat-stream';
@@ -27,6 +34,7 @@ interface UseTextGenerationOptions {
   reasoningEffort: ReasoningEffort;
   maxToolIterations: number;
   contextSettings: ContextSettings;
+  chatTitleSettings: ChatTitleSettings;
   currentChatId: string | null;
 }
 
@@ -34,6 +42,64 @@ function resolveSummaryModelId(settings: ContextSettings, currentModel: string):
   return settings.preferredSummaryModel === 'current_model'
     ? currentModel
     : settings.preferredSummaryModel;
+}
+
+function shouldRenameChatFromPrompt(
+  chatTitleSettings: ChatTitleSettings,
+  currentTitle: string | undefined,
+  createdChatDuringRequest: boolean
+): boolean {
+  if (!chatTitleSettings.autoRenameEnabled) return false;
+  if (createdChatDuringRequest) return true;
+  return currentTitle !== undefined && isTimestampChatTitle(currentTitle);
+}
+
+function resolveChatTitleModel(settings: ChatTitleSettings, currentModel: string): string {
+  return settings.preferredModel === 'current_model' ? currentModel : settings.preferredModel;
+}
+
+async function createAutoChatTitle(
+  prompt: string,
+  chatTitleSettings: ChatTitleSettings,
+  currentModel: string
+): Promise<string | null> {
+  const fallbackTitle = createPromptChatTitle(prompt, chatTitleSettings.promptPrefixLength);
+  if (!fallbackTitle || chatTitleSettings.strategy === 'prompt_prefix') return fallbackTitle;
+
+  try {
+    const response = await generateChatTitleSuggestion({
+      prompt,
+      model: resolveChatTitleModel(chatTitleSettings, currentModel),
+    });
+    return response.title;
+  } catch {
+    return fallbackTitle;
+  }
+}
+
+async function renameChatFromPrompt({
+  chats,
+  chatId,
+  prompt,
+  chatTitleSettings,
+  currentModel,
+}: {
+  chats: ReturnType<typeof useChats>;
+  chatId: string;
+  prompt: string;
+  chatTitleSettings: ChatTitleSettings;
+  currentModel: string;
+}): Promise<void> {
+  const promptTitle = await createAutoChatTitle(prompt, chatTitleSettings, currentModel);
+  if (promptTitle) {
+    await chats.updateChatTitle(chatId, promptTitle);
+  }
+}
+
+function startChatAutoRename(input: Parameters<typeof renameChatFromPrompt>[0]): void {
+  void renameChatFromPrompt(input).catch((error: unknown) => {
+    console.warn('[chat-title] Failed to auto rename chat', error);
+  });
 }
 
 function upsertGeneratedImagePart(
@@ -65,6 +131,7 @@ export function useTextGeneration({
   reasoningEffort,
   maxToolIterations,
   contextSettings,
+  chatTitleSettings,
   currentChatId,
 }: UseTextGenerationOptions) {
   const queryClient = useQueryClient();
@@ -100,15 +167,28 @@ export function useTextGeneration({
 
       let activeChatId = chats.currentChatId;
       let createdChatDuringRequest = false;
+      let activeChatTitle = chats.currentChat?.title;
       if (!activeChatId) {
-        const newChat = await chats.createChat(
-          prompt.slice(0, 30) + (prompt.length > 30 ? '...' : '')
-        );
+        const newChat = await chats.createChat();
         activeChatId = newChat.id;
+        activeChatTitle = newChat.title;
         createdChatDuringRequest = true;
       }
 
       const model = getActiveModel();
+
+      if (
+        shouldRenameChatFromPrompt(chatTitleSettings, activeChatTitle, createdChatDuringRequest)
+      ) {
+        startChatAutoRename({
+          chats,
+          chatId: activeChatId,
+          prompt,
+          chatTitleSettings,
+          currentModel: model,
+        });
+      }
+
       const optimisticUserMsgId = `optimistic-user-${crypto.randomUUID()}`;
       const optimisticAiMsgId = `optimistic-ai-${crypto.randomUUID()}`;
 
@@ -416,6 +496,7 @@ export function useTextGeneration({
       reasoningEffort,
       maxToolIterations,
       contextSettings,
+      chatTitleSettings,
       stream,
     ]
   );
