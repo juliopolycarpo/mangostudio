@@ -1,4 +1,4 @@
-# Architecture
+# Architecture Overview
 
 MangoStudio follows a modular DDD-inspired architecture across three workspaces. This document explains the design decisions, layer responsibilities, and data flow.
 
@@ -147,7 +147,7 @@ Provider Implementation (e.g., gemini/interactions-stream.ts)
 Provider Wire Format (Gemini / OpenAI / Anthropic / DeepSeek)
 ```
 
-See [`CONTINUATION.md`](./CONTINUATION.md) for the full continuation architecture and [`PROVIDER_DEVELOPMENT.md`](./PROVIDER_DEVELOPMENT.md) for the provider integration guide.
+See [`continuation.md`](./continuation.md) for the full continuation architecture and [`../providers/development.md`](../providers/development.md) for the provider integration guide.
 
 ## Frontend Architecture
 

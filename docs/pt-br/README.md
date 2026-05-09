@@ -108,12 +108,14 @@ mangostudio/
 │           ├── i18n/               # Dicionários pt-BR / en + tipos
 │           └── test-utils/         # Mock factories compartilhadas
 ├── docs/
-│   ├── pt-br/
-│   │   └── README.md               # Esta documentação
-│   ├── CONTINUATION.md             # Arquitetura de continuação
-│   ├── PROVIDER_DEVELOPMENT.md     # Guia de integração de provedores
-│   ├── AGENT_PLAYBOOKS.md          # Mapas de arquivos por feature
-│   └── TESTING.md                  # Estratégia e guia de testes
+│   ├── README.md                   # Hub da documentação
+│   ├── architecture/              # Arquitetura e fluxos transversais
+│   ├── features/                  # Documentação por área do produto
+│   ├── providers/                 # Guias e notas por provedor
+│   ├── reference/                 # API, testes e mapas de arquivos
+│   ├── guides/                    # Guias práticos para contribuição
+│   ├── operations/                # Deploy e segurança
+│   └── pt-br/                     # Traduções curadas em Português
 ├── package.json                    # Raiz do Bun workspace
 └── tsconfig.json                   # Configuração base de TypeScript
 ```
@@ -175,11 +177,22 @@ O tipo `Messages` é inferido diretamente do dicionário `pt-BR.ts` (`as const`)
 
 ## Documentação
 
-- [`docs/CONTINUATION.md`](../CONTINUATION.md) — Arquitetura de continuação
-- [`docs/PROVIDER_DEVELOPMENT.md`](../PROVIDER_DEVELOPMENT.md) — Guia de integração de provedores
-- [`docs/TESTING.md`](../TESTING.md) — Estratégia e guia de testes
-- [`docs/AGENT_PLAYBOOKS.md`](../AGENT_PLAYBOOKS.md) — Mapas de arquivos por feature
-- [`CONTRIBUTING.md`](../../CONTRIBUTING.md) — Diretrizes de contribuição
+- [`../README.md`](../README.md) — hub da documentação em inglês
+- [`../guides/contributor-quickstart.md`](../guides/contributor-quickstart.md) — onboarding rápido para contribuidores
+- [`../architecture/continuation.md`](../architecture/continuation.md) — arquitetura de continuação
+- [`../providers/development.md`](../providers/development.md) — guia de integração de provedores
+- [`../reference/testing.md`](../reference/testing.md) — estratégia e guia de testes
+- [`../reference/agent-playbooks.md`](../reference/agent-playbooks.md) — mapas de arquivos por feature
+- [`./CONTRIBUTING.md`](./CONTRIBUTING.md) — diretrizes de contribuição em Português
+
+## Política de Tradução
+
+`docs/pt-br/` é o ponto de entrada para a versão em Português e deve evoluir como um espelho curado da estrutura principal de `docs/`.
+
+Estado atual:
+
+- Traduzidos: `README.md`, `CONTRIBUTING.md`
+- Restante da árvore: usar os documentos canônicos em inglês até que as traduções sejam adicionadas
 
 ## Notas de Build Standalone
 

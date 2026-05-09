@@ -34,6 +34,13 @@ bun run dev --api
 bun run dev --frontend
 ```
 
+## Documentation Map
+
+- [`docs/README.md`](./docs/README.md) — entry point to the documentation tree
+- [`docs/guides/contributor-quickstart.md`](./docs/guides/contributor-quickstart.md) — shortest contributor onboarding path
+- [`docs/reference/testing.md`](./docs/reference/testing.md) — testing taxonomy, runners, and support rules
+- [`docs/reference/agent-playbooks.md`](./docs/reference/agent-playbooks.md) — feature-by-feature file map for targeted work
+
 ## Code Standards
 
 Refer to [`AGENTS.md`](./AGENTS.md) for the full coding style, naming conventions, i18n rules, and testing guidelines. Key points:

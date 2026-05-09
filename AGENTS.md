@@ -23,14 +23,14 @@ Workspace-level `AGENTS.md` files must stay short and contain only workspace-spe
 2. Start from the closest entrypoint to the task: route, component, hook, service, contract, or test.
 3. Trace one layer outward at a time instead of scanning the whole repository.
 4. Run the smallest relevant validation first, then expand only if the change is broad.
-5. Open `docs/AGENT_PLAYBOOKS.md` only when a task needs deeper feature-by-feature navigation.
+5. Open `docs/reference/agent-playbooks.md` only when a task needs deeper feature-by-feature navigation.
 
 Useful docs:
 
 - `README.md` — product and runtime overview
 - `package.json` — root scripts
-- `docs/TESTING.md` — test taxonomy and harness rules
-- `docs/AGENT_PLAYBOOKS.md` — detailed file maps by feature area
+- `docs/reference/testing.md` — test taxonomy and harness rules
+- `docs/reference/agent-playbooks.md` — detailed file maps by feature area
 
 ## Global Rules
 

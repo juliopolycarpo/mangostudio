@@ -211,7 +211,7 @@ own group path (no `/api` prefix — that is added in `app.ts`).
 
 ## Continuation / Provider Test Matrix
 
-Refer to `docs/CONTINUATION.md` and `docs/PROVIDER_DEVELOPMENT.md` for the
+Refer to `docs/architecture/continuation.md` and `docs/providers/development.md` for the
 architecture and development guide. The test matrix covers three layers:
 
 ### Decision engine (`continuation.test.ts`)

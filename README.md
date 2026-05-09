@@ -108,12 +108,14 @@ mangostudio/
 │           ├── i18n/               # pt-BR / en dictionaries + types
 │           └── test-utils/         # Shared mock factories
 ├── docs/
-│   ├── pt-br/
-│   │   └── README.md               # Portuguese documentation
-│   ├── CONTINUATION.md             # Continuation architecture deep-dive
-│   ├── PROVIDER_DEVELOPMENT.md     # Provider integration guide
-│   ├── AGENT_PLAYBOOKS.md          # Feature-by-feature file maps
-│   └── TESTING.md                  # Testing strategy and guide
+│   ├── README.md                   # Docs hub and reading paths
+│   ├── architecture/              # System design and cross-cutting runtime flows
+│   ├── features/                  # Product-area implementation docs
+│   ├── providers/                 # Provider guides and provider-specific notes
+│   ├── reference/                 # API, testing, and feature maps
+│   ├── guides/                    # Contributor task-oriented guides
+│   ├── operations/                # Deployment and security
+│   └── pt-br/                     # Curated Portuguese translations
 ├── package.json                    # Bun workspace root
 └── tsconfig.json                   # Base TypeScript configuration
 ```
@@ -185,11 +187,13 @@ The `Messages` type is inferred directly from the `pt-BR.ts` dictionary (`as con
 
 ## Documentation
 
-- [`docs/CONTINUATION.md`](docs/CONTINUATION.md) — Continuation architecture deep-dive
-- [`docs/PROVIDER_DEVELOPMENT.md`](docs/PROVIDER_DEVELOPMENT.md) — Provider integration guide
-- [`docs/TESTING.md`](docs/TESTING.md) — Testing strategy and harness rules
-- [`docs/AGENT_PLAYBOOKS.md`](docs/AGENT_PLAYBOOKS.md) — Feature-by-feature file maps
-- [`CONTRIBUTING.md`](CONTRIBUTING.md) — Contribution guidelines
+- [`docs/README.md`](docs/README.md) — docs hub, audiences, and reading order
+- [`docs/guides/contributor-quickstart.md`](docs/guides/contributor-quickstart.md) — fastest contributor onboarding path
+- [`docs/architecture/continuation.md`](docs/architecture/continuation.md) — continuation architecture deep-dive
+- [`docs/providers/development.md`](docs/providers/development.md) — provider integration guide
+- [`docs/reference/testing.md`](docs/reference/testing.md) — testing strategy and harness rules
+- [`docs/reference/agent-playbooks.md`](docs/reference/agent-playbooks.md) — feature-by-feature file maps
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) — contribution guidelines
 
 ## Standalone Build Notes
 

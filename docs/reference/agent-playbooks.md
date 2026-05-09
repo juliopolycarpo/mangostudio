@@ -2,6 +2,9 @@
 
 Open only the section that matches the current task. This file is intentionally more detailed than `AGENTS.md` and should be used on demand, not by default.
 
+This page is a navigation aid for contributors and coding agents. Start from the
+closest entry point to the task, then fan out one layer at a time.
+
 ## Auth
 
 Open these first:
@@ -26,7 +29,7 @@ Open these first:
 
 ## Chat, Streaming, And Generation
 
-First read `docs/CONTINUATION.md` and `docs/PROVIDER_DEVELOPMENT.md` for
+First read `docs/architecture/continuation.md` and `docs/providers/development.md` for
 context on the continuation architecture and provider integration patterns.
 
 Open these first:

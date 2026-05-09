@@ -2,6 +2,10 @@
 
 MangoStudio exposes a REST API under `/api/` and an SSE streaming endpoint.
 
+`@mangostudio/shared` contracts are the source of truth for request and
+response types. This page is a contributor-facing map of the current surface,
+not a generated OpenAPI reference.
+
 ## Base URL
 
 ```
@@ -68,7 +72,7 @@ The frontend uses Eden Treaty which handles this automatically.
 
 ### Streaming Response
 
-SSE with `Content-Type: text/event-stream`. See [STREAMING.md](./STREAMING.md) for the event catalog.
+SSE with `Content-Type: text/event-stream`. See [../architecture/streaming.md](../architecture/streaming.md) for the event catalog.
 
 ## Settings Endpoints
 

@@ -159,7 +159,7 @@ React hook managing stream lifecycle:
 
 ## Continuation Events
 
-See [`CONTINUATION.md`](./CONTINUATION.md) for the full continuation architecture. Key streaming events:
+See [`continuation.md`](./continuation.md) for the full continuation architecture. Key streaming events:
 
 - **`fallback_notice`** — Emitted when continuation degrades (provider/model/prompt changed, cursor expired). The frontend shows a toast notification.
 - **`continuation_transition`** — Persisted in message parts. Carries `recovered: false` during the turn and is flipped to `recovered: true` on success.
