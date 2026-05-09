@@ -75,29 +75,49 @@ mangostudio/
 ├── apps/
 │   ├── api/
 │   │   └── src/
-│   │       ├── routes/        # Endpoints Elysia (chats, messages, settings, auth…)
-│   │       ├── services/      # Lógica de negócio (gemini, secret-store)
-│   │       ├── plugins/       # Middlewares reutilizáveis (auth, rate-limit)
-│   │       └── db/            # Kysely + SQLite + migrações
+│   │       ├── lib/                # Config, runtime paths, SPA guard
+│   │       ├── modules/            # Módulos de domínio (inspirados em DDD)
+│   │       │   ├── chats/          # application/ domain/ http/ infrastructure/
+│   │       │   ├── messages/       # application/ domain/ http/ infrastructure/
+│   │       │   ├── generation/     # application/ domain/ http/ infrastructure/
+│   │       │   ├── connectors/     # application/ domain/ http/ infrastructure/
+│   │       │   ├── app-settings/   # application/ http/ infrastructure/
+│   │       │   ├── provider-settings/  # application/ http/ infrastructure/
+│   │       │   ├── tool-settings/  # application/ http/ infrastructure/
+│   │       │   ├── prompt-rules/   # application/ http/
+│   │       │   └── attachments/    # application/ infrastructure/
+│   │       ├── plugins/            # Auth guard, rate limiting, error handler
+│   │       ├── services/           # Provedores de IA, tools, secrets, imagens geradas
+│   │       │   ├── providers/      # Implementações multi-provedor + infra core
+│   │       │   ├── tools/          # Registro de ferramentas + ferramentas built-in
+│   │       │   └── generated-images/  # Armazenamento de imagens geradas
+│   │       └── db/                 # Kysely + SQLite + migrações
 │   ├── frontend/
 │   │   └── src/
 │   │       ├── components/
-│   │       │   └── ui/        # Design system (Button, Input, Card, Spinner, Toast)
-│   │       ├── features/      # Módulos de feature (chat, gallery…)
-│   │       ├── hooks/         # React hooks (use-i18n, use-app-state…)
-│   │       └── routes/        # Páginas TanStack Router
+│   │       │   └── ui/             # Design system (Button, Input, Card, Spinner, Toast, Toggle)
+│   │       ├── features/           # Módulos de feature (chat, gallery, generation, settings, sidebar)
+│   │       ├── hooks/              # React hooks (use-i18n, use-app-state, use-model-catalog…)
+│   │       └── routes/             # Páginas TanStack Router
 │   └── shared/
 │       └── src/
-│           ├── contracts/     # DTOs de request/response
-│           ├── types/         # Tipos de domínio
-│           ├── i18n/          # Dicionários pt-BR / en + hook useI18n
-│           └── test-utils/    # Mock factories compartilhadas
+│           ├── contracts/          # Barrel de contratos
+│           ├── <module>/           # Contratos + schemas por módulo (auth, chat, connectors…)
+│           ├── streaming/          # Tipos e schemas de eventos SSE
+│           ├── types/              # Tipos de domínio (provider, agent-events, gallery)
+│           ├── i18n/               # Dicionários pt-BR / en + tipos
+│           └── test-utils/         # Mock factories compartilhadas
 ├── docs/
-│   ├── pt-br/
-│   │   └── README.md          # Esta documentação
-│   └── TESTING.md             # Estratégia e guia de testes
-├── package.json               # Raiz do Bun workspace
-└── tsconfig.json              # Configuração base de TypeScript
+│   ├── README.md                   # Hub da documentação
+│   ├── architecture/              # Arquitetura e fluxos transversais
+│   ├── features/                  # Documentação por área do produto
+│   ├── providers/                 # Guias e notas por provedor
+│   ├── reference/                 # API, testes e mapas de arquivos
+│   ├── guides/                    # Guias práticos para contribuição
+│   ├── operations/                # Deploy e segurança
+│   └── pt-br/                     # Traduções curadas em Português
+├── package.json                    # Raiz do Bun workspace
+└── tsconfig.json                   # Configuração base de TypeScript
 ```
 
 ## Scripts Principais
@@ -120,14 +140,14 @@ mangostudio/
 
 ## Arquitetura
 
-| Camada       | Tecnologias                                               |
-| ------------ | --------------------------------------------------------- |
-| **Frontend** | React 19, Vite 8, Tailwind CSS v4, TanStack Router/Query  |
-| **API**      | Elysia, Better Auth, rate limiting nativo                 |
-| **Banco**    | SQLite via Kysely (query builder type-safe)               |
-| **IA**       | Multi-provedor (Gemini, compatível com OpenAI, Anthropic) |
-| **Runtime**  | Bun — sem dependência de Node.js                          |
-| **i18n**     | Dicionário TypeScript puro em `@mangostudio/shared/i18n`  |
+| Camada       | Tecnologias                                                                     |
+| ------------ | ------------------------------------------------------------------------------- |
+| **Frontend** | React 19, Vite 8, Tailwind CSS v4, TanStack Router/Query                        |
+| **API**      | Elysia, Better Auth, rate limiting nativo, arquitetura modular inspirada em DDD |
+| **Banco**    | SQLite via Kysely (query builder type-safe)                                     |
+| **IA**       | Multi-provedor (Gemini, OpenAI, Anthropic, DeepSeek, OpenAI-compatible)         |
+| **Runtime**  | Bun — sem dependência de Node.js                                                |
+| **i18n**     | Dicionário TypeScript puro em `@mangostudio/shared/i18n`                        |
 
 ## Design System
 
@@ -138,6 +158,7 @@ O frontend usa um design system próprio em `apps/frontend/src/components/ui/`:
 - **`Card`** — variantes `glass` (glassmorphism) e `solid`
 - **`Spinner`** — indicador de carregamento com tamanhos `sm`, `md`, `lg`
 - **`Toast`** — notificações não-bloqueantes via hook `useToast()`
+- **`Toggle`** — interruptor com foco em acessibilidade
 
 ## Internacionalização (i18n)
 
@@ -153,6 +174,29 @@ function MyComponent() {
 ```
 
 O tipo `Messages` é inferido diretamente do dicionário `pt-BR.ts` (`as const`). Adicionar uma chave sem traduzir em `en.ts` gera erro de compilação imediatamente.
+
+## Documentação
+
+- [`./README.md`](./README.md) — hub da documentação em Português
+- [`./guides/contributor-quickstart.md`](./guides/contributor-quickstart.md) — onboarding rápido para contribuidores
+- [`./architecture/continuation.md`](./architecture/continuation.md) — arquitetura de continuação
+- [`./providers/development.md`](./providers/development.md) — guia de integração de provedores
+- [`./reference/testing.md`](./reference/testing.md) — estratégia e guia de testes
+- [`./reference/agent-playbooks.md`](./reference/agent-playbooks.md) — mapas de arquivos por feature
+- [`./CONTRIBUTING.md`](./CONTRIBUTING.md) — diretrizes de contribuição em Português
+
+## Estrutura Espelhada
+
+`docs/pt-br/` agora espelha a mesma organização de `docs/` com subpastas por responsabilidade:
+
+- `architecture/`
+- `features/`
+- `providers/`
+- `reference/`
+- `guides/`
+- `operations/`
+
+Quando uma alteração relevante for feita em `docs/`, a versão correspondente em `docs/pt-br/` deve ser atualizada na mesma tarefa para manter o espelho consistente.
 
 ## Notas de Build Standalone
 

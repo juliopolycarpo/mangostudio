@@ -36,6 +36,13 @@ bun run dev --api
 bun run dev --frontend
 ```
 
+## Mapa da Documentação
+
+- [`../README.md`](../README.md) — ponto de entrada da árvore de documentação
+- [`../guides/contributor-quickstart.md`](../guides/contributor-quickstart.md) — caminho mais curto para começar a contribuir
+- [`../reference/testing.md`](../reference/testing.md) — taxonomia de testes, runners e regras de suporte
+- [`../reference/agent-playbooks.md`](../reference/agent-playbooks.md) — mapa de arquivos por feature para trabalho direcionado
+
 ## Padrões de Código
 
 Consulte [`AGENTS.md`](../../AGENTS.md) para o guia completo de estilo, convenções de nomes, regras de i18n e diretrizes de testes. Pontos principais:

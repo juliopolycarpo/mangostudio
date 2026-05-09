@@ -34,6 +34,13 @@ bun run dev --api
 bun run dev --frontend
 ```
 
+## Documentation Map
+
+- [`docs/README.md`](./docs/README.md) — entry point to the documentation tree
+- [`docs/guides/contributor-quickstart.md`](./docs/guides/contributor-quickstart.md) — shortest contributor onboarding path
+- [`docs/reference/testing.md`](./docs/reference/testing.md) — testing taxonomy, runners, and support rules
+- [`docs/reference/agent-playbooks.md`](./docs/reference/agent-playbooks.md) — feature-by-feature file map for targeted work
+
 ## Code Standards
 
 Refer to [`AGENTS.md`](./AGENTS.md) for the full coding style, naming conventions, i18n rules, and testing guidelines. Key points:
@@ -44,6 +51,21 @@ Refer to [`AGENTS.md`](./AGENTS.md) for the full coding style, naming convention
 - Hooks that contain JSX must use `.tsx` extension
 - `CLAUDE.md` and `GEMINI.md` files with `@imports`
 - AI related Agents: Use [`AGENTS.md`](./AGENTS.md) as a source of agentic stuff
+
+### Module Architecture
+
+The API follows a modular DDD-inspired pattern where each domain concern
+(chats, messages, generation, connectors, settings, etc.) is organized as:
+
+```
+application/   → Use-case services (orchestration logic)
+domain/        → Domain rules and entities (may be omitted for simple modules)
+http/          → Elysia route definitions
+infrastructure/ → Repository/persistence implementations
+```
+
+When adding a new feature, prefer creating a new module under
+`apps/api/src/modules/` rather than expanding files in a flat structure.
 
 ## Running Tests
 

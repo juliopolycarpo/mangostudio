@@ -75,29 +75,49 @@ mangostudio/
 ├── apps/
 │   ├── api/
 │   │   └── src/
-│   │       ├── routes/        # Elysia endpoints (chats, messages, settings, auth…)
-│   │       ├── services/      # Business logic (gemini, secret-store)
-│   │       ├── plugins/       # Reusable middlewares (auth, rate-limit)
-│   │       └── db/            # Kysely + SQLite + migrations
+│   │       ├── lib/                # Config, runtime paths, SPA guard
+│   │       ├── modules/            # Domain modules (DDD-inspired)
+│   │       │   ├── chats/          # application/ domain/ http/ infrastructure/
+│   │       │   ├── messages/       # application/ domain/ http/ infrastructure/
+│   │       │   ├── generation/     # application/ domain/ http/ infrastructure/
+│   │       │   ├── connectors/     # application/ domain/ http/ infrastructure/
+│   │       │   ├── app-settings/   # application/ http/ infrastructure/
+│   │       │   ├── provider-settings/  # application/ http/ infrastructure/
+│   │       │   ├── tool-settings/  # application/ http/ infrastructure/
+│   │       │   ├── prompt-rules/   # application/ http/
+│   │       │   └── attachments/    # application/ infrastructure/
+│   │       ├── plugins/            # Auth guard, rate limiting, error handler
+│   │       ├── services/           # AI providers, tools, secrets, generated images
+│   │       │   ├── providers/      # Multi-provider implementations + core infrastructure
+│   │       │   ├── tools/          # Tool registry + built-in tools
+│   │       │   └── generated-images/  # Generated image file storage
+│   │       └── db/                 # Kysely + SQLite + migrations
 │   ├── frontend/
 │   │   └── src/
 │   │       ├── components/
-│   │       │   └── ui/        # Design system (Button, Input, Card, Spinner, Toast)
-│   │       ├── features/      # Feature modules (chat, gallery…)
-│   │       ├── hooks/         # React hooks (use-i18n, use-app-state…)
-│   │       └── routes/        # TanStack Router pages
+│   │       │   └── ui/             # Design system (Button, Input, Card, Spinner, Toast, Toggle)
+│   │       ├── features/           # Feature modules (chat, gallery, generation, settings, sidebar)
+│   │       ├── hooks/              # React hooks (use-i18n, use-app-state, use-model-catalog…)
+│   │       └── routes/             # TanStack Router pages
 │   └── shared/
 │       └── src/
-│           ├── contracts/     # Request/response DTOs
-│           ├── types/         # Domain types
-│           ├── i18n/          # pt-BR / en dictionaries + useI18n hook
-│           └── test-utils/    # Shared mock factories
+│           ├── contracts/          # Contract barrel export
+│           ├── <module>/           # Per-module contracts + schemas (auth, chat, connectors…)
+│           ├── streaming/          # SSE event types + schemas
+│           ├── types/              # Domain types (provider, agent-events, gallery)
+│           ├── i18n/               # pt-BR / en dictionaries + types
+│           └── test-utils/         # Shared mock factories
 ├── docs/
-│   ├── pt-br/
-│   │   └── README.md          # Portuguese documentation
-│   └── TESTING.md             # Testing strategy and guide
-├── package.json               # Bun workspace root
-└── tsconfig.json              # Base TypeScript configuration
+│   ├── README.md                   # Docs hub and reading paths
+│   ├── architecture/              # System design and cross-cutting runtime flows
+│   ├── features/                  # Product-area implementation docs
+│   ├── providers/                 # Provider guides and provider-specific notes
+│   ├── reference/                 # API, testing, and feature maps
+│   ├── guides/                    # Contributor task-oriented guides
+│   ├── operations/                # Deployment and security
+│   └── pt-br/                     # Curated Portuguese translations
+├── package.json                    # Bun workspace root
+└── tsconfig.json                   # Base TypeScript configuration
 ```
 
 ## Main Scripts
@@ -130,14 +150,14 @@ A [lefthook](https://github.com/evilmartians/lefthook) pre-commit hook runs ESLi
 
 ## Architecture
 
-| Layer        | Technologies                                             |
-| ------------ | -------------------------------------------------------- |
-| **Frontend** | React 19, Vite 8, Tailwind CSS v4, TanStack Router/Query |
-| **API**      | Elysia, Better Auth, native rate limiting                |
-| **Database** | SQLite via Kysely (type-safe query builder)              |
-| **AI**       | Multi-provider (Gemini, OpenAI-compatible, Anthropic)    |
-| **Runtime**  | Bun — no Node.js dependency                              |
-| **i18n**     | Pure TypeScript dictionary in `@mangostudio/shared/i18n` |
+| Layer        | Technologies                                                                 |
+| ------------ | ---------------------------------------------------------------------------- |
+| **Frontend** | React 19, Vite 8, Tailwind CSS v4, TanStack Router/Query                     |
+| **API**      | Elysia, Better Auth, native rate limiting, DDD-inspired modular architecture |
+| **Database** | SQLite via Kysely (type-safe query builder)                                  |
+| **AI**       | Multi-provider (Gemini, OpenAI, Anthropic, DeepSeek, OpenAI-compatible)      |
+| **Runtime**  | Bun — no Node.js dependency                                                  |
+| **i18n**     | Pure TypeScript dictionary in `@mangostudio/shared/i18n`                     |
 
 ## Design System
 
@@ -148,6 +168,7 @@ The frontend ships with a built-in design system under `apps/frontend/src/compon
 - **`Card`** — variants `glass` (glassmorphism) and `solid`
 - **`Spinner`** — loading indicator with sizes `sm`, `md`, `lg`
 - **`Toast`** — non-blocking notifications via `useToast()` hook
+- **`Toggle`** — accessibility-first toggle switch
 
 ## Internationalization (i18n)
 
@@ -163,6 +184,16 @@ function MyComponent() {
 ```
 
 The `Messages` type is inferred directly from the `pt-BR.ts` dictionary (`as const`). Adding a key without translating it in `en.ts` is a compile-time error.
+
+## Documentation
+
+- [`docs/README.md`](docs/README.md) — docs hub, audiences, and reading order
+- [`docs/guides/contributor-quickstart.md`](docs/guides/contributor-quickstart.md) — fastest contributor onboarding path
+- [`docs/architecture/continuation.md`](docs/architecture/continuation.md) — continuation architecture deep-dive
+- [`docs/providers/development.md`](docs/providers/development.md) — provider integration guide
+- [`docs/reference/testing.md`](docs/reference/testing.md) — testing strategy and harness rules
+- [`docs/reference/agent-playbooks.md`](docs/reference/agent-playbooks.md) — feature-by-feature file maps
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) — contribution guidelines
 
 ## Standalone Build Notes
 
