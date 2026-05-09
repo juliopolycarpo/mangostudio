@@ -46,6 +46,15 @@ function makeStreamFn(chunks: Parameters<Parameters<typeof respondTextStream>[1]
   };
 }
 
+function createDeferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((res) => {
+    resolve = res;
+  });
+
+  return { promise, resolve };
+}
+
 type TextChatProps = Parameters<typeof useTextGeneration>[0];
 
 function makeProps(overrides: Partial<TextChatProps> = {}): TextChatProps {
@@ -253,6 +262,7 @@ describe('useTextChat — maxToolIterations forwarding', () => {
 describe('useTextChat — prompt title auto rename', () => {
   beforeEach(() => {
     mockStream.mockReset();
+    mockGenerateChatTitle.mockReset();
   });
 
   it('renames a newly created timestamp chat from the first prompt', async () => {
@@ -283,10 +293,99 @@ describe('useTextChat — prompt title auto rename', () => {
 
     await waitFor(() => expect(result.current.isGenerating).toBe(false));
     expect(props.chats.createChat).toHaveBeenCalledWith();
+    await waitFor(() =>
+      expect(props.chats.updateChatTitle).toHaveBeenCalledWith(
+        'chat-new',
+        'Explain deterministic testing...'
+      )
+    );
+  });
+
+  it('starts the prompt stream before model-generated title resolution', async () => {
+    const title = createDeferred<{ title: string }>();
+    const props = makeProps({
+      chatTitleSettings: {
+        ...DEFAULT_CHAT_TITLE_SETTINGS,
+        strategy: 'model',
+        preferredModel: 'title-model',
+      },
+      chats: {
+        currentChatId: 'chat-1',
+        currentChat: {
+          id: 'chat-1',
+          title: 'New Chat [2026-05-09 07:05]',
+          createdAt: 1,
+          updatedAt: 1,
+        },
+        createChat: vi.fn().mockResolvedValue({ id: 'chat-new' }),
+        updateChatTitle: vi.fn().mockResolvedValue(undefined),
+        loadChats: vi.fn().mockResolvedValue(undefined),
+      } as unknown as TextChatProps['chats'],
+    });
+    mockGenerateChatTitle.mockReturnValue(title.promise);
+    mockStream.mockImplementation(
+      makeStreamFn([{ type: 'done', done: true, generationTime: '0.5s' }])
+    );
+
+    const { result } = renderHook(() => useTextGeneration(props));
+
+    await act(async () => {
+      await result.current.handleRespond('Explain deterministic testing with Vitest');
+    });
+
+    expect(mockStream).toHaveBeenCalledWith(
+      expect.objectContaining({ prompt: 'Explain deterministic testing with Vitest' }),
+      expect.any(Function),
+      expect.any(AbortSignal)
+    );
+    expect(props.chats.updateChatTitle).not.toHaveBeenCalled();
+
+    await act(async () => {
+      title.resolve({ title: 'Generated title' });
+      await title.promise;
+    });
+
+    await waitFor(() =>
+      expect(props.chats.updateChatTitle).toHaveBeenCalledWith('chat-1', 'Generated title')
+    );
+  });
+
+  it('renames timestamp chats from prompt prefixes without blocking the prompt stream', async () => {
+    const titleUpdate = createDeferred<void>();
+    const props = makeProps({
+      chats: {
+        currentChatId: 'chat-1',
+        currentChat: {
+          id: 'chat-1',
+          title: 'New Chat [2026-05-09 07:05]',
+          createdAt: 1,
+          updatedAt: 1,
+        },
+        createChat: vi.fn().mockResolvedValue({ id: 'chat-new' }),
+        updateChatTitle: vi.fn().mockReturnValue(titleUpdate.promise),
+        loadChats: vi.fn().mockResolvedValue(undefined),
+      } as unknown as TextChatProps['chats'],
+    });
+    mockStream.mockImplementation(
+      makeStreamFn([{ type: 'done', done: true, generationTime: '0.5s' }])
+    );
+
+    const { result } = renderHook(() => useTextGeneration(props));
+
+    await act(async () => {
+      await result.current.handleRespond('Explain deterministic testing with Vitest');
+    });
+
+    expect(mockStream).toHaveBeenCalled();
     expect(props.chats.updateChatTitle).toHaveBeenCalledWith(
-      'chat-new',
+      'chat-1',
       'Explain deterministic testing...'
     );
+
+    await act(async () => {
+      titleUpdate.resolve(undefined);
+      await titleUpdate.promise;
+    });
   });
 
   it('keeps timestamp titles when prompt auto rename is disabled', async () => {
@@ -355,7 +454,9 @@ describe('useTextChat — prompt title auto rename', () => {
       prompt: 'Explain deterministic testing with Vitest',
       model: 'title-model',
     });
-    expect(props.chats.updateChatTitle).toHaveBeenCalledWith('chat-1', 'Generated title');
+    await waitFor(() =>
+      expect(props.chats.updateChatTitle).toHaveBeenCalledWith('chat-1', 'Generated title')
+    );
   });
 
   it('falls back to the prompt title when model title generation fails', async () => {
@@ -390,9 +491,11 @@ describe('useTextChat — prompt title auto rename', () => {
       prompt: 'Explain deterministic testing with Vitest',
       model: 'test-model',
     });
-    expect(props.chats.updateChatTitle).toHaveBeenCalledWith(
-      'chat-1',
-      'Explain deterministic testing...'
+    await waitFor(() =>
+      expect(props.chats.updateChatTitle).toHaveBeenCalledWith(
+        'chat-1',
+        'Explain deterministic testing...'
+      )
     );
   });
 });

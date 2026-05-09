@@ -77,6 +77,31 @@ async function createAutoChatTitle(
   }
 }
 
+async function renameChatFromPrompt({
+  chats,
+  chatId,
+  prompt,
+  chatTitleSettings,
+  currentModel,
+}: {
+  chats: ReturnType<typeof useChats>;
+  chatId: string;
+  prompt: string;
+  chatTitleSettings: ChatTitleSettings;
+  currentModel: string;
+}): Promise<void> {
+  const promptTitle = await createAutoChatTitle(prompt, chatTitleSettings, currentModel);
+  if (promptTitle) {
+    await chats.updateChatTitle(chatId, promptTitle);
+  }
+}
+
+function startChatAutoRename(input: Parameters<typeof renameChatFromPrompt>[0]): void {
+  void renameChatFromPrompt(input).catch((error: unknown) => {
+    console.warn('[chat-title] Failed to auto rename chat', error);
+  });
+}
+
 function upsertGeneratedImagePart(
   parts: MessagePart[],
   generatedImagePart: GeneratedImagePart
@@ -155,10 +180,13 @@ export function useTextGeneration({
       if (
         shouldRenameChatFromPrompt(chatTitleSettings, activeChatTitle, createdChatDuringRequest)
       ) {
-        const promptTitle = await createAutoChatTitle(prompt, chatTitleSettings, model);
-        if (promptTitle) {
-          await chats.updateChatTitle(activeChatId, promptTitle);
-        }
+        startChatAutoRename({
+          chats,
+          chatId: activeChatId,
+          prompt,
+          chatTitleSettings,
+          currentModel: model,
+        });
       }
 
       const optimisticUserMsgId = `optimistic-user-${crypto.randomUUID()}`;
