@@ -102,8 +102,7 @@ export function Sidebar({
       )}
       <aside
         className={`bg-surface-container-low flex-col h-full border-r border-outline-variant/20 w-64 fixed left-0 top-0 z-50 transition-transform duration-300 ease-out
-          hidden md:flex
-          ${isMobileOpen ? 'flex translate-x-0 md:translate-x-0' : '-translate-x-full md:translate-x-0'}
+          ${isMobileOpen ? 'flex translate-x-0' : 'hidden -translate-x-full'} md:flex md:translate-x-0
         `}
       >
         <div className="px-6 py-6 mb-4 flex items-center gap-3">
@@ -128,6 +127,45 @@ export function Sidebar({
             <Plus size={18} />
             <span>{t.chat.newChat}</span>
           </button>
+        </div>
+
+        {/* Mobile quick shortcuts */}
+        <div className="px-4 mb-4 md:hidden" data-testid="mobile-shortcuts">
+          <div className="grid grid-cols-3 gap-2">
+            <button
+              onClick={() => handleMobileNav('studio')}
+              className={`flex flex-col items-center justify-center gap-1 p-2 rounded-lg transition-all duration-200 text-xs font-medium ${
+                currentPage === 'studio'
+                  ? 'text-primary bg-surface-container-high'
+                  : 'text-on-surface/70 hover:bg-surface-container-high hover:text-on-surface'
+              }`}
+            >
+              <Image size={20} />
+              <span>{t.studio.title}</span>
+            </button>
+            <button
+              onClick={() => handleMobileNav('gallery')}
+              className={`flex flex-col items-center justify-center gap-1 p-2 rounded-lg transition-all duration-200 text-xs font-medium ${
+                currentPage === 'gallery'
+                  ? 'text-primary bg-surface-container-high'
+                  : 'text-on-surface/70 hover:bg-surface-container-high hover:text-on-surface'
+              }`}
+            >
+              <LayoutGrid size={20} />
+              <span>{t.gallery.title}</span>
+            </button>
+            <button
+              onClick={() => handleMobileNav('settings')}
+              className={`flex flex-col items-center justify-center gap-1 p-2 rounded-lg transition-all duration-200 text-xs font-medium ${
+                currentPage === 'settings'
+                  ? 'text-primary bg-surface-container-high'
+                  : 'text-on-surface/70 hover:bg-surface-container-high hover:text-on-surface'
+              }`}
+            >
+              <Settings size={20} />
+              <span>{t.settings.title}</span>
+            </button>
+          </div>
         </div>
 
         <nav className="flex-1 px-4 overflow-y-auto hide-scrollbar space-y-1">
@@ -192,7 +230,7 @@ export function Sidebar({
           })}
         </nav>
 
-        <div className="p-4 mt-auto border-t border-outline-variant/10 space-y-1">
+        <div className="p-4 mt-auto border-t border-outline-variant/10 space-y-1 hidden md:block">
           <button onClick={() => handleMobileNav('studio')} className={navItemClass('studio')}>
             <Image size={18} />
             <span className="font-label font-medium text-sm">{t.studio.title}</span>
