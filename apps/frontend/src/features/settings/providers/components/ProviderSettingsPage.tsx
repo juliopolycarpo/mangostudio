@@ -3,19 +3,27 @@
  * Shows runtime controls for a single provider based on its descriptor.
  */
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { Link, useParams } from '@tanstack/react-router';
 import { ArrowLeft } from 'lucide-react';
 import type { UpdateProviderRuntimeSettingsBody } from '@mangostudio/shared/provider-settings';
 import { useI18n } from '@/hooks/use-i18n';
-import { useProviderSettings } from '../hooks/use-provider-settings';
-import { updateProviderSettings } from '../api';
+import { useProviderSettings, useUpdateProviderSettings } from '../hooks/use-provider-settings';
 import { useToast } from '@/components/ui/Toast';
 import { Button } from '@/components/ui/Button';
 import { ReasoningSettingsSection } from './ReasoningSettingsSection';
 import { ToolSettingsSection } from './ToolSettingsSection';
 import { CacheSettingsSection } from './CacheSettingsSection';
 import { ProviderAdvancedSection } from './ProviderAdvancedSection';
+
+const PROVIDER_SETTINGS_AUTOSAVE_MS = 300;
+
+function areProviderSettingsEqual(
+  left: UpdateProviderRuntimeSettingsBody | null,
+  right: UpdateProviderRuntimeSettingsBody | null
+): boolean {
+  return JSON.stringify(left ?? {}) === JSON.stringify(right ?? {});
+}
 
 function formFromDescriptor(
   settings: UpdateProviderRuntimeSettingsBody
@@ -34,64 +42,8 @@ function formFromDescriptor(
 export function ProviderSettingsPage() {
   const { provider } = useParams({ from: '/_authenticated/settings/providers/$provider' });
   const { t } = useI18n();
-  const { descriptor, isLoading, error, refetch, invalidate } = useProviderSettings(provider);
-  const { toast } = useToast();
+  const { descriptor, isLoading, error, refetch } = useProviderSettings(provider);
   const s = t.settings.providers;
-
-  const [isSaving, setIsSaving] = useState(false);
-
-  // Derive form from descriptor — reinitializes when provider changes
-  const [form, setForm] = useState<UpdateProviderRuntimeSettingsBody>({});
-  const [initialForm, setInitialForm] = useState<UpdateProviderRuntimeSettingsBody>({});
-  const [prevProvider, setPrevProvider] = useState(provider);
-
-  // When provider changes, reset form state
-  if (provider !== prevProvider) {
-    setPrevProvider(provider);
-    setForm({});
-    setInitialForm({});
-  }
-
-  // When descriptor loads, initialize form if not yet initialized
-  if (descriptor && initialForm && Object.keys(initialForm).length === 0) {
-    const init = formFromDescriptor(descriptor.settings);
-    setForm(init);
-    setInitialForm(init);
-  }
-
-  const dirty =
-    Object.keys(initialForm).length > 0 &&
-    Object.keys(form).length > 0 &&
-    (initialForm.thinkingEnabled !== form.thinkingEnabled ||
-      initialForm.reasoningEffort !== form.reasoningEffort ||
-      initialForm.maxOutputTokens !== form.maxOutputTokens ||
-      initialForm.maxToolIterations !== form.maxToolIterations ||
-      initialForm.providerCompactionEnabled !== form.providerCompactionEnabled ||
-      initialForm.promptCachePreference !== form.promptCachePreference ||
-      initialForm.parallelToolCallsEnabled !== form.parallelToolCallsEnabled);
-
-  const handleSave = useCallback(async () => {
-    if (!descriptor || !dirty) return;
-    setIsSaving(true);
-    try {
-      await updateProviderSettings(provider, form);
-      toast(s.saved, 'success');
-      await invalidate();
-      setInitialForm({ ...form });
-    } catch (err) {
-      toast(err instanceof Error ? err.message : s.saveError, 'error');
-    } finally {
-      setIsSaving(false);
-    }
-  }, [descriptor, dirty, provider, form, toast, s, invalidate]);
-
-  const handleCancel = useCallback(() => {
-    setForm({ ...initialForm });
-  }, [initialForm]);
-
-  const handleReset = useCallback(() => {
-    setForm({});
-  }, []);
 
   if (isLoading) {
     return (
@@ -115,6 +67,87 @@ export function ProviderSettingsPage() {
   const providerName = t.providers[descriptor.provider] ?? descriptor.displayName;
 
   return (
+    <ProviderSettingsEditor
+      key={provider}
+      provider={provider}
+      descriptor={descriptor}
+      providerName={providerName}
+    />
+  );
+}
+
+interface ProviderSettingsEditorProps {
+  provider: string;
+  descriptor: NonNullable<ReturnType<typeof useProviderSettings>['descriptor']>;
+  providerName: string;
+}
+
+function ProviderSettingsEditor({
+  provider,
+  descriptor,
+  providerName,
+}: ProviderSettingsEditorProps) {
+  const { t } = useI18n();
+  const { toast } = useToast();
+  const updateMutation = useUpdateProviderSettings(provider);
+  const s = t.settings.providers;
+  const initialForm = formFromDescriptor(descriptor.settings);
+  const [form, setForm] = useState<UpdateProviderRuntimeSettingsBody>(initialForm);
+  const [committedForm, setCommittedForm] =
+    useState<UpdateProviderRuntimeSettingsBody>(initialForm);
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const dirty = !areProviderSettingsEqual(form, committedForm);
+
+  const persistForm = useCallback(async () => {
+    if (!dirty) return;
+
+    const requestedForm = form;
+    try {
+      const nextDescriptor = await updateMutation.mutateAsync(requestedForm);
+      const nextCommittedForm = formFromDescriptor(nextDescriptor.settings);
+      setCommittedForm(nextCommittedForm);
+      setForm((currentForm) =>
+        areProviderSettingsEqual(currentForm, requestedForm) ? nextCommittedForm : currentForm
+      );
+    } catch (err) {
+      setForm((currentForm) =>
+        areProviderSettingsEqual(currentForm, requestedForm) ? committedForm : currentForm
+      );
+      toast(err instanceof Error ? err.message : s.saveError, 'error');
+    }
+  }, [committedForm, dirty, form, s.saveError, toast, updateMutation]);
+
+  useEffect(() => {
+    if (!dirty || updateMutation.isPending) return;
+
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+    }
+
+    saveTimerRef.current = setTimeout(() => {
+      void persistForm();
+    }, PROVIDER_SETTINGS_AUTOSAVE_MS);
+
+    return () => {
+      if (saveTimerRef.current) {
+        clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = null;
+      }
+    };
+  }, [dirty, persistForm, updateMutation.isPending]);
+
+  useEffect(
+    () => () => {
+      if (saveTimerRef.current) {
+        clearTimeout(saveTimerRef.current);
+      }
+      if (!dirty || updateMutation.isPending) return;
+      void persistForm();
+    },
+    [dirty, persistForm, updateMutation.isPending]
+  );
+
+  return (
     <div className="space-y-6">
       <Link
         to="/settings/providers"
@@ -127,6 +160,11 @@ export function ProviderSettingsPage() {
       <div>
         <h2 className="text-lg font-bold text-on-surface">{providerName}</h2>
         <p className="mt-0.5 text-xs text-on-surface-variant">{s.perProviderSettings}</p>
+        {updateMutation.isPending && (
+          <p className="mt-1 text-xs text-on-surface-variant" role="status" aria-live="polite">
+            {s.saving}
+          </p>
+        )}
       </div>
 
       <div className="space-y-4">
@@ -143,24 +181,6 @@ export function ProviderSettingsPage() {
           onChange={setForm}
         />
         <ProviderAdvancedSection />
-      </div>
-
-      <div className="flex items-center gap-3 pt-2">
-        <Button
-          variant="primary"
-          size="sm"
-          loading={isSaving}
-          disabled={!dirty}
-          onClick={() => void handleSave()}
-        >
-          {isSaving ? s.saving : s.save}
-        </Button>
-        <Button variant="secondary" size="sm" disabled={!dirty} onClick={handleCancel}>
-          {s.cancel}
-        </Button>
-        <Button variant="ghost" size="sm" onClick={handleReset}>
-          {s.reset}
-        </Button>
       </div>
     </div>
   );

@@ -66,7 +66,7 @@ describe('ToolSettingsPage integration', () => {
     expect(screen.getByText('Image Generation')).toBeInTheDocument();
   });
 
-  it('saves parameter changes via PUT endpoint', async () => {
+  it('autosaves parameter changes via PUT endpoint', async () => {
     const user = userEvent.setup();
 
     fetchScenario.respondWithJson('GET', '/api/settings/tools', {
@@ -82,17 +82,10 @@ describe('ToolSettingsPage integration', () => {
     await user.clear(timezoneInput);
     await user.type(timezoneInput, 'America/New_York');
 
-    // Register PUT and GET for the save flow
+    // Register PUT response for autosave
     fetchScenario.respondWithJson('PUT', '/api/settings/tools/get_current_datetime', {
       body: {},
     });
-    fetchScenario.respondWithJson('GET', '/api/settings/tools', {
-      body: TOOLS_RESPONSE,
-    });
-
-    // Click Save
-    const saveButton = screen.getByText('Save');
-    await user.click(saveButton);
 
     await waitFor(() => {
       const putCalls = fetchScenario.fetchMock.mock.calls.filter((call: unknown[]) => {

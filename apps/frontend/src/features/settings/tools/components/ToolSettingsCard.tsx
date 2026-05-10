@@ -2,13 +2,21 @@
  * A card displaying a single tool's settings.
  */
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import type { ToolSettingsDescriptor } from '@mangostudio/shared/tool-settings';
 import { useI18n } from '@/hooks/use-i18n';
 import { useUpdateToolSetting } from '../hooks/use-tool-settings';
 import { ToolParameterField } from './ToolParameterField';
 import { Card } from '@/components/ui/Card';
-import { Button } from '@/components/ui/Button';
+
+const TOOL_PARAMETERS_AUTOSAVE_MS = 300;
+
+function areToolParametersEqual(
+  left: Record<string, unknown>,
+  right: Record<string, unknown>
+): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
 
 interface ToolSettingsCardProps {
   descriptor: ToolSettingsDescriptor;
@@ -43,6 +51,7 @@ export function ToolSettingsCard({ descriptor }: ToolSettingsCardProps) {
   const s = t.settings.tools;
   const { mutateAsync, isPending } = useUpdateToolSetting();
   const translated = getTranslatedToolText(descriptor, t);
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [enabled, setEnabled] = useState(descriptor.enabled);
   const [params, setParams] = useState<Record<string, unknown>>({ ...descriptor.parameters });
@@ -51,7 +60,11 @@ export function ToolSettingsCard({ descriptor }: ToolSettingsCardProps) {
     const newEnabled = !enabled;
     setEnabled(newEnabled);
     try {
-      await mutateAsync({ toolName: descriptor.name, body: { enabled: newEnabled } });
+      const nextDescriptor = await mutateAsync({
+        toolName: descriptor.name,
+        body: { enabled: newEnabled },
+      });
+      setEnabled(typeof nextDescriptor.enabled === 'boolean' ? nextDescriptor.enabled : newEnabled);
     } catch {
       setEnabled(descriptor.enabled);
     }
@@ -61,15 +74,65 @@ export function ToolSettingsCard({ descriptor }: ToolSettingsCardProps) {
     setParams((prev) => ({ ...prev, [name]: value }));
   }, []);
 
-  const handleSave = useCallback(async () => {
+  const persistParameters = useCallback(async () => {
+    const requestedParams = params;
+
     try {
-      await mutateAsync({ toolName: descriptor.name, body: { parameters: params } });
+      const nextDescriptor = await mutateAsync({
+        toolName: descriptor.name,
+        body: { parameters: requestedParams },
+      });
+      const nextParameters =
+        nextDescriptor.parameters && typeof nextDescriptor.parameters === 'object'
+          ? { ...nextDescriptor.parameters }
+          : requestedParams;
+      setParams((currentParams) =>
+        areToolParametersEqual(currentParams, requestedParams) ? nextParameters : currentParams
+      );
     } catch {
-      setParams({ ...descriptor.parameters });
+      setParams((currentParams) =>
+        areToolParametersEqual(currentParams, requestedParams)
+          ? { ...descriptor.parameters }
+          : currentParams
+      );
     }
   }, [mutateAsync, descriptor.name, descriptor.parameters, params]);
 
-  const hasParamChanges = descriptor.parameterDescriptors.length > 0;
+  const hasParameters = descriptor.parameterDescriptors.length > 0;
+  const hasUnsavedParams = useMemo(
+    () => enabled && hasParameters && !areToolParametersEqual(params, descriptor.parameters),
+    [descriptor.parameters, enabled, hasParameters, params]
+  );
+
+  useEffect(() => {
+    if (!hasUnsavedParams || isPending) return;
+
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+    }
+
+    saveTimerRef.current = setTimeout(() => {
+      void persistParameters();
+    }, TOOL_PARAMETERS_AUTOSAVE_MS);
+
+    return () => {
+      if (saveTimerRef.current) {
+        clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = null;
+      }
+    };
+  }, [hasUnsavedParams, isPending, persistParameters]);
+
+  useEffect(
+    () => () => {
+      if (saveTimerRef.current) {
+        clearTimeout(saveTimerRef.current);
+      }
+      if (!hasUnsavedParams || isPending) return;
+      void persistParameters();
+    },
+    [hasUnsavedParams, isPending, persistParameters]
+  );
 
   return (
     <Card variant="solid" className="space-y-4 p-6">
@@ -101,7 +164,7 @@ export function ToolSettingsCard({ descriptor }: ToolSettingsCardProps) {
         )}
       </div>
 
-      {hasParamChanges && (
+      {hasParameters && (
         <div className="space-y-3 pt-2 border-t border-outline-variant/10">
           {descriptor.parameterDescriptors.map((pd) => {
             const qualityDisabled =
@@ -116,15 +179,11 @@ export function ToolSettingsCard({ descriptor }: ToolSettingsCardProps) {
               />
             );
           })}
-          <Button
-            variant="secondary"
-            size="sm"
-            loading={isPending}
-            disabled={!enabled}
-            onClick={() => void handleSave()}
-          >
-            {isPending ? s.saving : s.save}
-          </Button>
+          {isPending && (
+            <p className="text-xs text-on-surface-variant" role="status" aria-live="polite">
+              {s.saving}
+            </p>
+          )}
         </div>
       )}
     </Card>

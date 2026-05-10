@@ -153,6 +153,7 @@ function PathListField({
                     type="text"
                     value={editingPath}
                     onChange={(e) => setEditingPath(e.target.value)}
+                    onBlur={saveEdit}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') {
                         e.preventDefault();
@@ -165,17 +166,6 @@ function PathListField({
                     className="flex-1 rounded-lg px-3 py-1.5 text-sm bg-surface-container-lowest text-on-surface border border-outline-variant/20 focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/20"
                     autoFocus
                   />
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={saveEdit}
-                    disabled={!editingPath.trim()}
-                  >
-                    {s.save}
-                  </Button>
-                  <Button variant="ghost" size="sm" onClick={cancelEdit}>
-                    {s.cancel}
-                  </Button>
                 </>
               ) : (
                 <>

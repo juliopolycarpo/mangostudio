@@ -74,7 +74,7 @@ describe('ProviderSettingsPage integration', () => {
     expect(screen.getByText('Tool Configuration')).toBeInTheDocument();
   });
 
-  it('calls PUT endpoint on save with normalized body', async () => {
+  it('autosaves provider changes after editing', async () => {
     const user = userEvent.setup();
 
     fetchScenario.respondWithJson('GET', '/api/settings/providers/deepseek', {
@@ -97,11 +97,6 @@ describe('ProviderSettingsPage integration', () => {
     const maxButton = screen.getByText('Maximum');
     await user.click(maxButton);
 
-    // Click Save
-    const saveButton = screen.getByText('Save');
-    await user.click(saveButton);
-
-    // Verify the PUT call was made
     await waitFor(() => {
       const putCalls = fetchScenario.fetchMock.mock.calls.filter((call: unknown[]) => {
         const input = call[0];
@@ -117,9 +112,7 @@ describe('ProviderSettingsPage integration', () => {
     });
   });
 
-  it('shows success toast after saving', async () => {
-    const user = userEvent.setup();
-
+  it('removes explicit save actions from the provider page', async () => {
     fetchScenario.respondWithJson('GET', '/api/settings/providers/deepseek', {
       body: DEEPSEEK_DESCRIPTOR,
     });
@@ -128,26 +121,8 @@ describe('ProviderSettingsPage integration', () => {
 
     await screen.findByText('DeepSeek');
 
-    // Register GET and PUT for the save flow
-    fetchScenario.respondWithJson('PUT', '/api/settings/providers/deepseek', {
-      body: DEEPSEEK_DESCRIPTOR,
-    });
-    // Register GET again for the invalidation refetch
-    fetchScenario.respondWithJson('GET', '/api/settings/providers/deepseek', {
-      body: DEEPSEEK_DESCRIPTOR,
-    });
-
-    const maxButton = screen.getByText('Maximum');
-    await user.click(maxButton);
-
-    const saveButton = screen.getByText('Save');
-    await user.click(saveButton);
-
-    await waitFor(
-      () => {
-        expect(screen.getByText(/settings saved/i)).toBeInTheDocument();
-      },
-      { timeout: 3000 }
-    );
+    expect(screen.queryByText('Save')).not.toBeInTheDocument();
+    expect(screen.queryByText('Cancel')).not.toBeInTheDocument();
+    expect(screen.queryByText('Reset')).not.toBeInTheDocument();
   });
 });
