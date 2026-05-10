@@ -1,12 +1,18 @@
 import { Type, type Static } from '@sinclair/typebox';
 
-const ToolParameterValueSchema = Type.Union([Type.String(), Type.Number(), Type.Boolean()]);
+const ToolParameterValueSchema = Type.Union([
+  Type.String(),
+  Type.Number(),
+  Type.Boolean(),
+  Type.Array(Type.String()),
+]);
 
 export const ToolParameterTypeSchema = Type.Union([
   Type.Literal('string'),
   Type.Literal('number'),
   Type.Literal('boolean'),
   Type.Literal('select'),
+  Type.Literal('string_list'),
 ]);
 
 export const ToolSettingsCategorySchema = Type.Union([

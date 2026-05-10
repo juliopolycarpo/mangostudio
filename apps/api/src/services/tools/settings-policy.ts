@@ -131,11 +131,12 @@ function normalizeParameterValue(
   tool: RegisteredTool,
   descriptor: ToolParameterDescriptor,
   value: unknown
-): string | number | boolean {
+): string | number | boolean | string[] {
   if (descriptor.type === 'select') return normalizeSelectValue(tool, descriptor, value);
   if (descriptor.type === 'number') return normalizeNumberValue(tool, descriptor, value);
   if (descriptor.type === 'string' && typeof value === 'string') return value;
   if (descriptor.type === 'boolean' && typeof value === 'boolean') return value;
+  if (descriptor.type === 'string_list') return normalizeStringListValue(tool, descriptor, value);
 
   throw new ToolParameterError(
     `Parameter "${descriptor.name}" for tool "${tool.definition.name}" must be ${descriptor.type}.`
@@ -183,4 +184,29 @@ function normalizeNumberValue(
     );
   }
   return value;
+}
+
+function normalizeStringListValue(
+  tool: RegisteredTool,
+  descriptor: ToolParameterDescriptor,
+  value: unknown
+): string[] {
+  if (Array.isArray(value)) {
+    const strings = value.filter((item): item is string => typeof item === 'string');
+    if (strings.length !== value.length) {
+      throw new ToolParameterError(
+        `Parameter "${descriptor.name}" for tool "${tool.definition.name}" must be an array of strings.`
+      );
+    }
+    return strings.map((s) => s.trim()).filter((s) => s.length > 0);
+  }
+  if (typeof value === 'string') {
+    return value
+      .split('\n')
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
+  }
+  throw new ToolParameterError(
+    `Parameter "${descriptor.name}" for tool "${tool.definition.name}" must be a string list.`
+  );
 }

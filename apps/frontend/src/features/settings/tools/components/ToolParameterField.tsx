@@ -146,6 +146,31 @@ export function ToolParameterField({
       );
     }
 
+    case 'string_list': {
+      const listValue = Array.isArray(descriptorValue)
+        ? descriptorValue.join('\n')
+        : toSafeString(descriptorValue);
+      return (
+        <div className="space-y-1">
+          {label && <label className="text-sm text-on-surface-variant">{label}</label>}
+          <textarea
+            value={listValue}
+            onChange={(e) => {
+              const lines = e.target.value
+                .split('\n')
+                .map((s) => s.trim())
+                .filter((s) => s.length > 0);
+              onChange(lines);
+            }}
+            disabled={disabled}
+            placeholder={description}
+            rows={4}
+            className={`${baseInputClass} resize-y`}
+          />
+        </div>
+      );
+    }
+
     default: {
       return (
         <div className="space-y-1">

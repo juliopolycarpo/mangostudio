@@ -1,4 +1,4 @@
-export type ToolParameterType = 'string' | 'number' | 'boolean' | 'select';
+export type ToolParameterType = 'string' | 'number' | 'boolean' | 'select' | 'string_list';
 
 export type ToolSettingsCategory = 'system' | 'image' | 'interaction';
 
@@ -13,7 +13,7 @@ export interface ToolParameterDescriptor {
   description?: string;
   type: ToolParameterType;
   required: boolean;
-  defaultValue?: string | number | boolean;
+  defaultValue?: string | number | boolean | string[];
   min?: number;
   max?: number;
   options?: ReadonlyArray<ToolParameterOption>;
