@@ -85,7 +85,7 @@ export function ToolCallBlock({ name, args, result, isError, isPending }: ToolCa
   }
 
   return (
-    <div className="mb-2">
+    <div className="mb-3">
       <button
         type="button"
         onClick={() => setExpanded((v) => !v)}
@@ -130,7 +130,7 @@ export function ToolCallBlock({ name, args, result, isError, isPending }: ToolCa
             transition={{ duration: 0.2, ease: 'easeOut' }}
             className="glass-surface-subtle mt-1.5 rounded-xl border border-outline-variant/15 overflow-hidden"
           >
-            <div className="p-4 space-y-3 text-xs font-mono">
+            <div className="p-4 space-y-3 text-xs font-mono max-h-48 overflow-y-auto app-scrollbar">
               {Object.keys(args).length > 0 && (
                 <div>
                   <p className="text-on-surface-variant/50 uppercase tracking-wider text-[10px] mb-1">
