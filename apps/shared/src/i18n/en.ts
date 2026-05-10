@@ -361,6 +361,30 @@ export const messages: Messages = {
       letAiDecideQualityLabel: 'Let AI decide quality',
       letAiDecideQualityDescription:
         'When enabled, the AI can choose different image sizes per request.',
+      toolNames: {
+        readFile: 'Read file',
+        listDirectory: 'List directory',
+      },
+      toolDescriptions: {
+        readFile: 'Allows the AI to read text files from disk.',
+        listDirectory: 'Allows the AI to list files and directories on disk.',
+      },
+      parameters: {
+        allowedPathsLabel: 'Allowed paths',
+        allowedPathsDescription: 'Paths the tool is allowed to access. Leave empty to allow all.',
+        deniedPathsLabel: 'Denied paths',
+        deniedPathsDescription:
+          'Paths the tool is denied from accessing. Leave empty to deny none.',
+      },
+      pathList: {
+        add: 'Add',
+        edit: 'Edit',
+        delete: 'Delete',
+        save: 'Save',
+        cancel: 'Cancel',
+        pathPlaceholder: 'e.g. /home/user/projects',
+        noPaths: 'No paths configured.',
+      },
     },
     appearance: {
       title: 'Appearance',
