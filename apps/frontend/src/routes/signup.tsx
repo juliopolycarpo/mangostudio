@@ -40,7 +40,7 @@ function SignupPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-surface-dim">
+    <div className="min-h-screen flex items-center justify-center bg-surface-dim px-4">
       <Card variant="glass" className="w-full max-w-sm">
         <form
           id="signup-form"

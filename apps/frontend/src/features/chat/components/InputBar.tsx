@@ -53,10 +53,10 @@ export function InputBar({
   };
 
   return (
-    <footer className="shrink-0 p-6">
+    <footer className="shrink-0 p-3 sm:p-4 md:p-6">
       <div className="max-w-4xl mx-auto w-full">
-        <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center gap-2">
+        <div className="flex items-center justify-between mb-2 sm:mb-3">
+          <div className="flex items-center gap-2 flex-wrap">
             {onThinkingToggle && onReasoningEffortChange ? (
               <ThinkingToggle
                 enabled={thinkingEnabled}
@@ -72,21 +72,22 @@ export function InputBar({
                 type="button"
                 onClick={() => onImageToolIntentChange(!imageToolIntent)}
                 disabled={disabled}
-                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium transition-all duration-200 ${
+                className={`flex items-center gap-1.5 px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-full text-[10px] sm:text-[11px] font-medium transition-all duration-200 shrink-0 ${
                   imageToolIntent
                     ? 'bg-primary text-on-primary shadow-sm'
                     : 'text-on-surface-variant hover:text-on-surface border border-outline-variant/20 hover:border-outline-variant/40'
                 }`}
                 title={t.chat.input.createImagesHint}
               >
-                <Image size={13} />
-                {t.chat.input.createImages}
+                <Image size={12} className="sm:hidden" />
+                <Image size={13} className="hidden sm:block" />
+                <span className="hidden sm:inline">{t.chat.input.createImages}</span>
               </button>
             )}
 
             {contextInfo && (
               <span
-                className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-medium tabular-nums border transition-colors ${
+                className={`flex items-center gap-1 px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-full text-[10px] sm:text-[11px] font-medium tabular-nums border transition-colors shrink-0 ${
                   contextInfo.severity === 'critical'
                     ? 'bg-error/15 text-error border-error/30'
                     : contextInfo.severity === 'danger'
@@ -97,7 +98,12 @@ export function InputBar({
                 }`}
                 title={`~${contextInfo.estimatedInputTokens.toLocaleString()} / ${contextInfo.contextLimit.toLocaleString()} tokens · ${contextInfo.mode}`}
               >
-                {`${t.chat.context.label}: ${formatTokensCompact(contextInfo.estimatedInputTokens)} / ${formatTokensCompact(contextInfo.contextLimit)}`}
+                <span className="sm:hidden">
+                  {formatTokensCompact(contextInfo.estimatedInputTokens)}
+                </span>
+                <span className="hidden sm:inline">
+                  {`${t.chat.context.label}: ${formatTokensCompact(contextInfo.estimatedInputTokens)} / ${formatTokensCompact(contextInfo.contextLimit)}`}
+                </span>
               </span>
             )}
           </div>
@@ -105,47 +111,52 @@ export function InputBar({
 
         <form
           onSubmit={handleSubmit}
-          className="bg-surface-container-lowest border border-outline-variant/10 rounded-2xl p-2 shadow-2xl flex items-center gap-2 group transition-all focus-within:ring-1 focus-within:ring-primary/30"
+          className="bg-surface-container-lowest border border-outline-variant/10 rounded-2xl p-1.5 sm:p-2 shadow-2xl flex items-center gap-1.5 sm:gap-2 group transition-all focus-within:ring-1 focus-within:ring-primary/30"
         >
           <input
             type="text"
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
             disabled={disabled}
-            className="flex-1 bg-transparent border-none focus:ring-0 text-sm font-body text-on-surface placeholder:text-on-surface-variant/40 py-2 outline-none"
+            className="flex-1 bg-transparent border-none focus:ring-0 text-sm font-body text-on-surface placeholder:text-on-surface-variant/40 py-2 outline-none min-w-0"
             placeholder={t.chat.input.placeholder}
           />
 
-          <div className="flex items-center gap-1 pr-1">
+          <div className="flex items-center gap-1 pr-0.5 sm:pr-1 shrink-0">
             {!isGenerating && (
               <button
                 type="button"
-                className="w-10 h-10 flex items-center justify-center rounded-xl text-on-surface-variant hover:bg-surface-container-high transition-all"
+                className="w-9 h-9 sm:w-10 sm:h-10 flex items-center justify-center rounded-xl text-on-surface-variant hover:bg-surface-container-high transition-all"
               >
-                <Mic size={20} />
+                <Mic size={18} className="sm:hidden" />
+                <Mic size={20} className="hidden sm:block" />
               </button>
             )}
             {isGenerating ? (
               <button
                 type="button"
                 onClick={onStop}
-                className="h-10 px-4 rounded-xl font-bold text-xs flex items-center gap-2 transition-all active:scale-95 bg-surface-container-high text-on-surface hover:bg-error/20 hover:text-error"
+                className="h-9 sm:h-10 px-3 sm:px-4 rounded-xl font-bold text-xs flex items-center gap-1.5 sm:gap-2 transition-all active:scale-95 bg-surface-container-high text-on-surface hover:bg-error/20 hover:text-error shrink-0"
               >
-                {t.chat.input.stop} <Square size={14} />
+                <span className="hidden sm:inline">{t.chat.input.stop}</span>{' '}
+                <Square size={12} className="sm:hidden" />
+                <Square size={14} className="hidden sm:block" />
               </button>
             ) : (
               <button
                 type="submit"
                 disabled={disabled || submitDisabled || !prompt.trim()}
-                className="h-10 px-4 rounded-xl text-on-primary font-bold text-xs flex items-center gap-2 hover:brightness-110 transition-all active:scale-95 shadow-lg shadow-primary-container/20 disabled:opacity-50"
+                className="h-9 sm:h-10 px-3 sm:px-4 rounded-xl text-on-primary font-bold text-xs flex items-center gap-1.5 sm:gap-2 hover:brightness-110 transition-all active:scale-95 shadow-lg shadow-primary-container/20 disabled:opacity-50 shrink-0"
                 style={{ background: 'var(--gradient-primary)' }}
               >
-                {t.chat.input.send} <Send size={16} />
+                <span className="hidden sm:inline">{t.chat.input.send}</span>{' '}
+                <Send size={14} className="sm:hidden" />
+                <Send size={16} className="hidden sm:block" />
               </button>
             )}
           </div>
         </form>
-        <p className="text-center text-[10px] text-on-surface-variant/40 mt-3 font-label">
+        <p className="text-center text-[10px] text-on-surface-variant/40 mt-2 sm:mt-3 font-label">
           {t.common.disclaimer}
         </p>
       </div>

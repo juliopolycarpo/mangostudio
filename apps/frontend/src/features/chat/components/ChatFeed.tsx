@@ -236,13 +236,15 @@ export function ChatFeed({ chatId, messages }: { chatId: string | null; messages
     <section
       ref={parentRef}
       onScroll={handleFeedScroll}
-      className="flex-1 min-h-0 overflow-y-auto px-6 py-8 hide-scrollbar max-w-5xl mx-auto w-full"
+      className="flex-1 min-h-0 overflow-y-auto px-3 sm:px-4 md:px-6 py-4 sm:py-6 md:py-8 hide-scrollbar max-w-5xl mx-auto w-full"
     >
       {messages.length === 0 && (
-        <div className="flex flex-col items-center justify-center h-full text-on-surface-variant/50">
+        <div className="flex flex-col items-center justify-center h-full text-on-surface-variant/50 px-4">
           <Sparkles size={48} className="mb-4 opacity-50" />
-          <p className="text-lg font-headline">{t.chat.feed.emptyTitle}</p>
-          <p className="text-xs mt-2 text-on-surface-variant/40">{t.chat.feed.emptySubtitle}</p>
+          <p className="text-lg font-headline text-center">{t.chat.feed.emptyTitle}</p>
+          <p className="text-xs mt-2 text-on-surface-variant/40 text-center">
+            {t.chat.feed.emptySubtitle}
+          </p>
         </div>
       )}
 
@@ -278,7 +280,7 @@ export function ChatFeed({ chatId, messages }: { chatId: string | null; messages
                 <motion.div
                   initial={false}
                   animate={{ opacity: 1, y: 0 }}
-                  className={`flex flex-col gap-2 max-w-[80%] ${msg.role === 'user' ? 'items-end ml-auto' : 'items-start mr-auto max-w-full'}`}
+                  className={`flex flex-col gap-2 ${msg.role === 'user' ? 'items-end ml-auto max-w-[92%] sm:max-w-[85%] md:max-w-[80%]' : 'items-start mr-auto max-w-full'}`}
                 >
                   {msg.role === 'user' ? (
                     <>

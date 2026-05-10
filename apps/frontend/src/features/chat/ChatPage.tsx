@@ -160,15 +160,15 @@ export function ChatPage({
           <Loader2 className="w-8 h-8 animate-spin text-primary" />
         </div>
       ) : messages.length === 0 ? (
-        <div className="flex-1 flex flex-col items-center justify-center gap-6 select-none px-6">
+        <div className="flex-1 flex flex-col items-center justify-center gap-4 sm:gap-6 select-none px-3 sm:px-6">
           <div className="text-center">
             <Sparkles size={36} className="mx-auto mb-3 text-primary/40" />
-            <h2 className="text-lg font-headline font-bold text-on-surface/80">
+            <h2 className="text-base sm:text-lg font-headline font-bold text-on-surface/80 px-2">
               {t.chat.emptyGreeting.replace('{name}', userName)}
             </h2>
-            <p className="text-sm text-on-surface-variant/50 mt-1">{t.chat.emptySubtitle}</p>
+            <p className="text-sm text-on-surface-variant/50 mt-1 px-2">{t.chat.emptySubtitle}</p>
           </div>
-          <div className="flex flex-wrap justify-center gap-2 max-w-lg">
+          <div className="flex flex-wrap justify-center gap-2 max-w-lg px-2">
             {[
               { text: t.chat.suggestion1, icon: <MessageSquare size={14} /> },
               { text: t.chat.suggestion2, icon: <Code size={14} /> },

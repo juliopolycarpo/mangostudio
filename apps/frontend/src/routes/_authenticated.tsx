@@ -5,7 +5,7 @@ import {
   useRouterState,
   useNavigate,
 } from '@tanstack/react-router';
-import { Suspense } from 'react';
+import { Suspense, useState } from 'react';
 import { Spinner } from '@/components/ui/Spinner';
 import { Layout } from '@/components/layout/Layout';
 import { Header } from '@/components/layout/Header';
@@ -49,6 +49,7 @@ function AuthenticatedLayout() {
   const app = useAppState();
   const routerState = useRouterState();
   const currentPath = routerState.location.pathname;
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
 
   if (!auth.isAuthenticated) {
     void navigate({ to: '/login' });
@@ -72,6 +73,8 @@ function AuthenticatedLayout() {
         onDeleteChat={(chatId) => void app.handleDeleteChat(chatId)}
         onNewChat={() => void app.handleNewChat()}
         contextCache={app.contextCache}
+        isMobileSidebarOpen={isMobileSidebarOpen}
+        onMobileSidebarClose={() => setIsMobileSidebarOpen(false)}
       >
         <Header
           activeModel={app.activeModel}
@@ -89,6 +92,7 @@ function AuthenticatedLayout() {
           onNavigateToSettings={() => app.handleNavigate('settings')}
           modelCatalog={app.catalog}
           lockedProvider={app.lockedProvider}
+          onMobileMenuToggle={() => setIsMobileSidebarOpen((v) => !v)}
         />
 
         <div className="flex-1 min-h-0 overflow-hidden flex flex-col">

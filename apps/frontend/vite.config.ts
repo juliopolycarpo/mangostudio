@@ -73,6 +73,26 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
     },
   },
+  build: {
+    sourcemap: false,
+    cssMinify: true,
+    cssCodeSplit: true,
+    rollupOptions: {
+      output: {
+        manualChunks(id: string) {
+          if (id.includes('node_modules')) {
+            if (id.includes('react') || id.includes('react-dom')) return 'vendor';
+            if (id.includes('@tanstack/react-router') || id.includes('@tanstack/react-query'))
+              return 'router';
+            if (id.includes('motion') || id.includes('lucide-react')) return 'ui';
+            if (id.includes('marked') || id.includes('shiki')) return 'markdown';
+            if (id.includes('@tanstack/react-virtual')) return 'virtual';
+            return 'vendor-deps';
+          }
+        },
+      },
+    },
+  },
   server: {
     port: mangoConfig.frontendPort,
     proxy: {
