@@ -4,7 +4,14 @@
  */
 
 import OpenAI from 'openai';
+import { getOrCreateCachedClient } from '../core/client-cache';
+
+const clientCache = new Map<string, OpenAI>();
 
 export function createCompatibleClient(apiKey: string, baseUrl: string): OpenAI {
-  return new OpenAI({ apiKey, baseURL: baseUrl });
+  return getOrCreateCachedClient(
+    clientCache,
+    `${baseUrl}\u0000${apiKey}`,
+    () => new OpenAI({ apiKey, baseURL: baseUrl })
+  );
 }

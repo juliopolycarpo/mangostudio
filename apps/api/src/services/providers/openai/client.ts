@@ -3,8 +3,14 @@
  */
 
 import OpenAI, { APIError as OpenAIAPIError } from 'openai';
+import { getOrCreateCachedClient } from '../core/client-cache';
 
 const BASE_URL = 'https://api.openai.com/v1';
+const clientCache = new Map<string, OpenAI>();
+
+function createCacheKey(ctx: OpenAIAuthContext): string {
+  return [ctx.apiKey, ctx.organizationId ?? '', ctx.projectId ?? ''].join('\u0000');
+}
 
 /** All credentials needed to authenticate with the OpenAI API. */
 export interface OpenAIAuthContext {
@@ -36,12 +42,17 @@ export class OpenAIConfigError extends Error {
  * Passes organization and project so that project-scoped keys work correctly.
  */
 export function createOpenAIClient(ctx: OpenAIAuthContext): OpenAI {
-  return new OpenAI({
-    apiKey: ctx.apiKey,
-    baseURL: BASE_URL,
-    ...(ctx.organizationId ? { organization: ctx.organizationId } : {}),
-    ...(ctx.projectId ? { project: ctx.projectId } : {}),
-  });
+  return getOrCreateCachedClient(
+    clientCache,
+    createCacheKey(ctx),
+    () =>
+      new OpenAI({
+        apiKey: ctx.apiKey,
+        baseURL: BASE_URL,
+        ...(ctx.organizationId ? { organization: ctx.organizationId } : {}),
+        ...(ctx.projectId ? { project: ctx.projectId } : {}),
+      })
+  );
 }
 
 /**

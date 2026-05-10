@@ -4,6 +4,7 @@ import type { SecretMetadataInput } from '../../../../src/services/secret-store/
 import { createProviderSecretService } from '../../../../src/services/providers/core/secret-service';
 import { InMemorySecretStore } from '../../../support/mocks/mock-secret-store';
 import { getDb } from '../../../../src/db/database';
+import { createOpenAIClient } from '../../../../src/services/providers/openai/client';
 import {
   validateOpenAIAuthContext,
   OpenAIAuthError,
@@ -79,6 +80,36 @@ function makeOpenAIRow(overrides: Partial<SecretMetadataRow> = {}): SecretMetada
 }
 
 describe('openai-provider', () => {
+  it('reuses the same client for the same auth context', () => {
+    const clientA = createOpenAIClient({
+      apiKey: 'sk-test-openai-cache',
+      organizationId: 'org-1',
+      projectId: 'proj-1',
+    });
+    const clientB = createOpenAIClient({
+      apiKey: 'sk-test-openai-cache',
+      organizationId: 'org-1',
+      projectId: 'proj-1',
+    });
+
+    expect(clientA).toBe(clientB);
+  });
+
+  it('creates a different client when auth scoping changes', () => {
+    const projectScopedClient = createOpenAIClient({
+      apiKey: 'sk-test-openai-cache-scope',
+      organizationId: 'org-1',
+      projectId: 'proj-1',
+    });
+    const orgScopedClient = createOpenAIClient({
+      apiKey: 'sk-test-openai-cache-scope',
+      organizationId: 'org-1',
+      projectId: 'proj-2',
+    });
+
+    expect(projectScopedClient).not.toBe(orgScopedClient);
+  });
+
   it('providerType is openai', async () => {
     const { openAIProvider } = await import('../../../../src/services/providers/openai/index');
     expect(openAIProvider.providerType).toBe('openai');

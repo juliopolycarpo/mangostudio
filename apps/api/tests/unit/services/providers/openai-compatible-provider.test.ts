@@ -3,6 +3,7 @@ import type { SecretMetadataRow } from '@mangostudio/shared/types';
 import type { SecretMetadataInput } from '../../../../src/services/secret-store/metadata';
 import type { AgentEvent } from '../../../../src/services/providers/types';
 import { createProviderSecretService } from '../../../../src/services/providers/core/secret-service';
+import { createCompatibleClient } from '../../../../src/services/providers/openai-compatible/client';
 import { resolveCompatibleClientConfig } from '../../../../src/services/providers/openai-compatible/resolve-client-config';
 import { InMemorySecretStore } from '../../../support/mocks/mock-secret-store';
 import { expectTurnCompletedEnvelope } from '../../../support/providers/contract-assertions';
@@ -126,6 +127,23 @@ function makeFakeClient(
 }
 
 describe('openai-compatible-provider', () => {
+  it('reuses the same client for the same base URL and API key', () => {
+    const clientA = createCompatibleClient('sk-test-openrouter-cache', OPENROUTER_BASE_URL);
+    const clientB = createCompatibleClient('sk-test-openrouter-cache', OPENROUTER_BASE_URL);
+
+    expect(clientA).toBe(clientB);
+  });
+
+  it('creates a different client when the base URL changes', () => {
+    const openRouterClient = createCompatibleClient(
+      'sk-test-openrouter-cache-2',
+      OPENROUTER_BASE_URL
+    );
+    const deepSeekClient = createCompatibleClient('sk-test-openrouter-cache-2', DEEPSEEK_BASE_URL);
+
+    expect(openRouterClient).not.toBe(deepSeekClient);
+  });
+
   it('providerType is openai-compatible', async () => {
     const { openAICompatibleProvider } =
       await import('../../../../src/services/providers/openai-compatible/index');

@@ -11,6 +11,7 @@ import { createProviderSecretService } from '../core/secret-service';
 import { isReasoningModel } from '../core/capability-detector';
 import { getModelContextLimit } from '../core/context-policy';
 import { appendAttachmentFallbackNotes } from '../core/attachment-content';
+import { createAnthropicClient } from './client';
 import { narrowDelta, narrowSdkError, toMessageCreateParams } from './normalizers';
 import { streamAnthropicAgentTurn } from './stream';
 import type {
@@ -90,10 +91,6 @@ const secretService = createProviderSecretService({
   },
 });
 
-function createClient(apiKey: string): Anthropic {
-  return new Anthropic({ apiKey });
-}
-
 function buildMessages(req: TextGenerationRequest): Anthropic.MessageCreateParams['messages'] {
   const prompt = appendAttachmentFallbackNotes(req.prompt, req.attachments, req.modelCapabilities);
 
@@ -111,7 +108,7 @@ function buildMessages(req: TextGenerationRequest): Anthropic.MessageCreateParam
 const listModelsWithCache = withModelCache(
   async (userId: string): Promise<ModelInfo[]> => {
     const apiKey = await secretService.resolveApiKey(userId);
-    const client = createClient(apiKey);
+    const client = createAnthropicClient(apiKey);
 
     try {
       const models: ModelInfo[] = [];
@@ -153,7 +150,7 @@ const anthropicProvider: AIProvider = {
 
   async generateText(req: TextGenerationRequest): Promise<TextGenerationResult> {
     const apiKey = await secretService.resolveApiKey(req.userId, req.modelName);
-    const client = createClient(apiKey);
+    const client = createAnthropicClient(apiKey);
 
     const response = await client.messages.create(
       {
@@ -176,13 +173,13 @@ const anthropicProvider: AIProvider = {
 
   async *generateAgentTurnStream(req: AgentTurnRequest): AsyncIterable<AgentEvent> {
     const apiKey = await secretService.resolveApiKey(req.userId, req.modelName);
-    const client = createClient(apiKey);
+    const client = createAnthropicClient(apiKey);
     yield* streamAnthropicAgentTurn(client, req);
   },
 
   async *generateTextStream(req: TextGenerationRequest): AsyncIterable<StreamingChunk> {
     const apiKey = await secretService.resolveApiKey(req.userId, req.modelName);
-    const client = createClient(apiKey);
+    const client = createAnthropicClient(apiKey);
 
     const thinkingEnabled = req.generationConfig?.thinkingEnabled ?? false;
     const effort = req.generationConfig?.reasoningEffort ?? 'medium';

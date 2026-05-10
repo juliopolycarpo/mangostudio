@@ -19,12 +19,24 @@ async function* mockStream() {
   }
 }
 
+function mockGeminiSecretModule() {
+  return {
+    GeminiApiKeyMissingError: class GeminiApiKeyMissingError extends Error {},
+    getResolvedGeminiApiKey: () => Promise.resolve('mock-api-key'),
+    syncGeminiConfigFileConnectors: () => Promise.resolve(),
+    validateGeminiApiKey: () => Promise.resolve(),
+  };
+}
+
 describe('GeminiProvider.generateTextStream', () => {
   beforeEach(() => {
     // Reset module mocks between tests
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    const { resetGeminiClientCache } =
+      await import('../../../../src/services/providers/gemini/client');
+    resetGeminiClientCache();
     // Clear module cache between tests (Bun test isolation)
     mock.restore();
   });
@@ -39,9 +51,7 @@ describe('GeminiProvider.generateTextStream', () => {
     }));
 
     // Also mock the secret resolution so we don't need real API keys
-    await mock.module('../../../../src/services/providers/gemini/secret', () => ({
-      getResolvedGeminiApiKey: () => Promise.resolve('mock-api-key'),
-    }));
+    await mock.module('../../../../src/services/providers/gemini/secret', mockGeminiSecretModule);
 
     const { generateTextStream } = await import('../../../../src/services/gemini/text');
 
@@ -84,9 +94,7 @@ describe('GeminiProvider.generateTextStream', () => {
       },
     }));
 
-    await mock.module('../../../../src/services/providers/gemini/secret', () => ({
-      getResolvedGeminiApiKey: () => Promise.resolve('mock-api-key'),
-    }));
+    await mock.module('../../../../src/services/providers/gemini/secret', mockGeminiSecretModule);
 
     const { generateTextStream } = await import('../../../../src/services/gemini/text');
 
@@ -139,9 +147,7 @@ describe('GeminiProvider.generateTextStream', () => {
       },
     }));
 
-    await mock.module('../../../../src/services/providers/gemini/secret', () => ({
-      getResolvedGeminiApiKey: () => Promise.resolve('mock-api-key'),
-    }));
+    await mock.module('../../../../src/services/providers/gemini/secret', mockGeminiSecretModule);
 
     const { generateTextStream } = await import('../../../../src/services/gemini/text');
 
@@ -181,9 +187,7 @@ describe('GeminiProvider.generateTextStream', () => {
       },
     }));
 
-    await mock.module('../../../../src/services/providers/gemini/secret', () => ({
-      getResolvedGeminiApiKey: () => Promise.resolve('mock-api-key'),
-    }));
+    await mock.module('../../../../src/services/providers/gemini/secret', mockGeminiSecretModule);
 
     const { generateTextStream } = await import('../../../../src/services/gemini/text');
 
@@ -220,9 +224,7 @@ describe('GeminiProvider.generateTextStream', () => {
       },
     }));
 
-    await mock.module('../../../../src/services/providers/gemini/secret', () => ({
-      getResolvedGeminiApiKey: () => Promise.resolve('mock-api-key'),
-    }));
+    await mock.module('../../../../src/services/providers/gemini/secret', mockGeminiSecretModule);
 
     const { generateTextStream } = await import('../../../../src/services/gemini/text');
 
@@ -258,9 +260,7 @@ describe('GeminiProvider generateTextStream delegation', () => {
       },
     }));
 
-    await mock.module('../../../../src/services/providers/gemini/secret', () => ({
-      getResolvedGeminiApiKey: () => Promise.resolve('mock-api-key'),
-    }));
+    await mock.module('../../../../src/services/providers/gemini/secret', mockGeminiSecretModule);
 
     const { geminiProvider } = await import('../../../../src/services/providers/gemini/index');
 
