@@ -19,21 +19,23 @@ export function useAppState() {
   const optimistic = useOptimisticMessages();
 
   const activeModels = useMemo(() => catalog.catalog.textModels, [catalog.catalog.textModels]);
+  const currentChat = useMemo(
+    () => chats.chats.find((chat) => chat.id === chats.currentChatId) ?? null,
+    [chats.chats, chats.currentChatId]
+  );
 
-  const getActiveModel = useCallback(() => {
-    const currentChat = chats.chats.find((c) => c.id === chats.currentChatId);
-    return resolveActiveModeModel(currentChat?.textModel, undefined, catalog.catalog.textModels);
-  }, [chats.chats, chats.currentChatId, catalog.catalog.textModels]);
-
-  const activeModel = getActiveModel();
+  const activeModel = useMemo(
+    () => resolveActiveModeModel(currentChat?.textModel, undefined, activeModels),
+    [activeModels, currentChat?.textModel]
+  );
+  const getActiveModel = useCallback(() => activeModel, [activeModel]);
   const isModelSelectorDisabled = catalog.catalog.status !== 'ready' || activeModels.length === 0;
 
   const lockedProvider = useMemo((): ProviderType | null => {
-    const currentChat = chats.chats.find((c) => c.id === chats.currentChatId);
     if (!currentChat?.textModel) return null;
-    const modelOption = catalog.catalog.textModels.find((m) => m.modelId === currentChat.textModel);
+    const modelOption = activeModels.find((model) => model.modelId === currentChat.textModel);
     return modelOption?.provider ?? null;
-  }, [chats.chats, chats.currentChatId, catalog.catalog.textModels]);
+  }, [activeModels, currentChat?.textModel]);
 
   // Load provider settings for the locked provider to override global defaults
   const { descriptor: providerDescriptor } = useProviderSettings(lockedProvider);

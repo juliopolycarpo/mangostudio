@@ -1,9 +1,11 @@
 import {
+  infiniteQueryOptions,
   useQuery,
   useMutation,
   useQueryClient,
   useInfiniteQuery,
   queryOptions,
+  type QueryClient,
 } from '@tanstack/react-query';
 import { client } from '@/lib/api-client';
 import { extractApiError } from '@/lib/utils';
@@ -35,6 +37,23 @@ export const chatListQueryOptions = () =>
     },
   });
 
+function updateChatListCache(
+  queryClient: QueryClient,
+  updater: (current: ReadonlyArray<ChatWithContext>) => Array<ChatWithContext>
+) {
+  queryClient.setQueriesData<ReadonlyArray<ChatWithContext>>(
+    { queryKey: chatKeys.lists() },
+    (current) => updater(current ?? [])
+  );
+}
+
+function applyChatUpdates<T extends ChatWithContext>(chat: T, updates: UpdateChatBody): T {
+  return {
+    ...chat,
+    ...updates,
+  };
+}
+
 export function useChatsQuery() {
   return useQuery(chatListQueryOptions());
 }
@@ -49,7 +68,10 @@ export function useCreateChatMutation() {
     },
     onSuccess: (chat) => {
       queryClient.setQueryData(chatKeys.detail(chat.id), chat);
-      void queryClient.invalidateQueries({ queryKey: chatKeys.lists() });
+      updateChatListCache(queryClient, (current) => [
+        chat,
+        ...current.filter((item) => item.id !== chat.id),
+      ]);
     },
   });
 }
@@ -63,8 +85,15 @@ export function useUpdateChatMutation() {
       return data;
     },
     onSuccess: (_, variables) => {
-      void queryClient.invalidateQueries({ queryKey: chatKeys.lists() });
-      void queryClient.invalidateQueries({ queryKey: chatKeys.detail(variables.id) });
+      queryClient.setQueryData<ChatWithContext | undefined>(
+        chatKeys.detail(variables.id),
+        (current) => (current ? applyChatUpdates(current, variables.updates) : current)
+      );
+      updateChatListCache(queryClient, (current) =>
+        current.map((item) =>
+          item.id === variables.id ? applyChatUpdates(item, variables.updates) : item
+        )
+      );
     },
   });
 }
@@ -77,8 +106,9 @@ export function useDeleteChatMutation() {
       if (error) throw new Error(extractApiError(error.value));
       return data;
     },
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: chatKeys.lists() });
+    onSuccess: (_, chatId) => {
+      queryClient.removeQueries({ queryKey: chatKeys.detail(chatId), exact: true });
+      updateChatListCache(queryClient, (current) => current.filter((chat) => chat.id !== chatId));
     },
   });
 }
@@ -99,18 +129,23 @@ export const messageKeys = {
   list: (chatId: string) => [...messageKeys.lists(), chatId] as const,
 };
 
-export function useMessagesQuery(chatId: string | null) {
-  const id = chatId ?? '';
-  return useInfiniteQuery({
-    queryKey: messageKeys.list(id),
-    queryFn: async ({ pageParam }) => {
+export const messagesQueryOptions = (chatId: string) =>
+  infiniteQueryOptions({
+    queryKey: messageKeys.list(chatId),
+    queryFn: async ({ pageParam }: { pageParam: string | null }) => {
       const query = pageParam ? { cursor: pageParam, limit: '50' } : { limit: '50' };
-      const { data, error } = await client.api.chats({ id }).messages.get({ query });
+      const { data, error } = await client.api.chats({ id: chatId }).messages.get({ query });
       if (error) throw new Error(extractApiError(error.value));
       return data as unknown as MessagesPage;
     },
     initialPageParam: null as string | null,
     getNextPageParam: (lastPage) => lastPage.nextCursor,
+  });
+
+export function useMessagesQuery(chatId: string | null) {
+  const id = chatId ?? '';
+  return useInfiniteQuery({
+    ...messagesQueryOptions(id),
     enabled: !!chatId,
   });
 }

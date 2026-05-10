@@ -3,7 +3,7 @@
  * Each test gets an isolated QueryClient via the render harness.
  */
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { act, renderHook, waitFor } from '../../support/harness/render';
+import { act, renderHook } from '../../support/harness/render';
 import {
   useCreateChatMutation,
   useUpdateChatMutation,
@@ -13,6 +13,13 @@ import {
 import { useQueryClient } from '@tanstack/react-query';
 import type { Chat } from '@mangostudio/shared';
 import type * as ApiClient from '../../../src/lib/api-client';
+
+const EXISTING_CHAT: Chat = {
+  id: 'chat-existing',
+  title: 'Existing Chat',
+  createdAt: 1,
+  updatedAt: 1,
+};
 
 // vi.mock is hoisted to the top of the file by Vitest, so mock variables must
 // be declared with vi.hoisted() to avoid temporal dead zone errors.
@@ -64,6 +71,31 @@ describe('useCreateChatMutation', () => {
     expect(created).toEqual(newChat);
   });
 
+  it('updates the cached chat list and detail after success', async () => {
+    const newChat: Chat = { id: 'chat-new', title: 'My Chat', createdAt: 2, updatedAt: 2 };
+    mockPost.mockResolvedValue(ok(newChat));
+
+    const { result } = renderHook(() => {
+      const mutation = useCreateChatMutation();
+      const queryClient = useQueryClient();
+      return { mutation, queryClient };
+    });
+
+    act(() => {
+      result.current.queryClient.setQueryData(chatKeys.lists(), [EXISTING_CHAT]);
+    });
+
+    await act(async () => {
+      await result.current.mutation.mutateAsync({ title: 'My Chat' });
+    });
+
+    expect(result.current.queryClient.getQueryData(chatKeys.lists())).toEqual([
+      newChat,
+      EXISTING_CHAT,
+    ]);
+    expect(result.current.queryClient.getQueryData(chatKeys.detail(newChat.id))).toEqual(newChat);
+  });
+
   it('throws when the API returns an error', async () => {
     mockPost.mockResolvedValue(fail('Unauthorized'));
 
@@ -92,6 +124,33 @@ describe('useUpdateChatMutation', () => {
 
     expect(mockChatsFn).toHaveBeenCalledWith({ id: 'chat-1' });
     expect(mockPut).toHaveBeenCalledWith({ title: 'Renamed' });
+  });
+
+  it('updates the cached chat list and detail after success', async () => {
+    const updatedChat: Chat = { ...EXISTING_CHAT, title: 'Renamed' };
+
+    const { result } = renderHook(() => {
+      const mutation = useUpdateChatMutation();
+      const queryClient = useQueryClient();
+      return { mutation, queryClient };
+    });
+
+    act(() => {
+      result.current.queryClient.setQueryData(chatKeys.lists(), [EXISTING_CHAT]);
+      result.current.queryClient.setQueryData(chatKeys.detail(EXISTING_CHAT.id), EXISTING_CHAT);
+    });
+
+    await act(async () => {
+      await result.current.mutation.mutateAsync({
+        id: EXISTING_CHAT.id,
+        updates: { title: 'Renamed' },
+      });
+    });
+
+    expect(result.current.queryClient.getQueryData(chatKeys.lists())).toEqual([updatedChat]);
+    expect(result.current.queryClient.getQueryData(chatKeys.detail(EXISTING_CHAT.id))).toEqual(
+      updatedChat
+    );
   });
 
   it('throws when the API returns an error', async () => {
@@ -136,7 +195,7 @@ describe('useDeleteChatMutation', () => {
     ).rejects.toThrow();
   });
 
-  it('invalidates the chats list after successful delete', async () => {
+  it('removes the deleted chat from the cached chat list and detail', async () => {
     const { result } = renderHook(() => {
       const mutation = useDeleteChatMutation();
       const queryClient = useQueryClient();
@@ -144,16 +203,17 @@ describe('useDeleteChatMutation', () => {
     });
 
     act(() => {
-      result.current.queryClient.setQueryData(chatKeys.lists(), []);
+      result.current.queryClient.setQueryData(chatKeys.lists(), [EXISTING_CHAT]);
+      result.current.queryClient.setQueryData(chatKeys.detail(EXISTING_CHAT.id), EXISTING_CHAT);
     });
 
     await act(async () => {
-      await result.current.mutation.mutateAsync('chat-x');
+      await result.current.mutation.mutateAsync(EXISTING_CHAT.id);
     });
 
-    await waitFor(() => {
-      const state = result.current.queryClient.getQueryState(chatKeys.lists());
-      expect(state?.isInvalidated).toBe(true);
-    });
+    expect(result.current.queryClient.getQueryData(chatKeys.lists())).toEqual([]);
+    expect(
+      result.current.queryClient.getQueryData(chatKeys.detail(EXISTING_CHAT.id))
+    ).toBeUndefined();
   });
 });

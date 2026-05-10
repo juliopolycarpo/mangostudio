@@ -9,6 +9,7 @@ const defaultAuth: AuthContext = { isAuthenticated: false, user: null, isPending
 export const router = createRouter({
   routeTree,
   context: { auth: defaultAuth, queryClient },
+  defaultPreload: 'intent',
 });
 
 declare module '@tanstack/react-router' {

@@ -107,6 +107,7 @@ describe('useGlobalSettings', () => {
     });
 
     await waitFor(() => expect(result.current.chatTitleSettings.strategy).toBe('model'));
+    await waitFor(() => expect(mockPut).toHaveBeenCalledTimes(1));
     expect(mockPut.mock.calls[0]?.[0]).toMatchObject({
       chatTitleSettings: { strategy: 'model', preferredModel: 'current_model' },
     });
@@ -120,6 +121,7 @@ describe('useGlobalSettings', () => {
     await waitFor(() =>
       expect(result.current.chatTitleSettings.preferredModel).toBe('title-model')
     );
+    await waitFor(() => expect(mockPut).toHaveBeenCalledTimes(1));
     expect(mockPut.mock.calls[0]?.[0]).toMatchObject({
       chatTitleSettings: { strategy: 'model', preferredModel: 'title-model' },
     });
@@ -188,6 +190,27 @@ describe('useGlobalSettings', () => {
 
     expect(mockPut.mock.calls[0]?.[0]).toMatchObject({
       promptSettings: { textSystemPrompt: 'new text prompt' },
+    });
+  });
+
+  it('batches rapid prompt updates into a single persisted request', async () => {
+    const { result } = renderHook(() => useGlobalSettings());
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    act(() => {
+      result.current.setTextSystemPrompt('draft');
+      result.current.setTextSystemPrompt('draft v2');
+      result.current.setTextSystemPrompt('final prompt');
+    });
+
+    await waitFor(() =>
+      expect(result.current.promptSettings.textSystemPrompt).toBe('final prompt')
+    );
+    await waitFor(() => expect(mockPut).toHaveBeenCalledTimes(1));
+
+    expect(mockPut.mock.calls[0]?.[0]).toMatchObject({
+      promptSettings: { textSystemPrompt: 'final prompt' },
     });
   });
 

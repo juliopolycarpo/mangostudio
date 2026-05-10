@@ -11,8 +11,9 @@ import { Layout } from '@/components/layout/Layout';
 import { Header } from '@/components/layout/Header';
 import { useAppState } from '@/hooks/use-app-state';
 import { AppContext } from '@/lib/app-context';
-import { chatListQueryOptions } from '@/features/chat/queries';
+import { chatListQueryOptions, messagesQueryOptions } from '@/features/chat/queries';
 import { catalogQueryOptions } from '@/hooks/use-model-catalog';
+import { appSettingsQueryOptions } from '@/features/settings/app/queries';
 
 export const Route = createFileRoute('/_authenticated')({
   beforeLoad: ({ context, location }) => {
@@ -25,10 +26,19 @@ export const Route = createFileRoute('/_authenticated')({
     }
   },
   loader: async ({ context: { queryClient } }) => {
+    const chatsPromise = queryClient.ensureQueryData(chatListQueryOptions());
+
     await Promise.all([
-      queryClient.ensureQueryData(chatListQueryOptions()),
+      chatsPromise,
       queryClient.ensureQueryData(catalogQueryOptions()),
+      queryClient.ensureQueryData(appSettingsQueryOptions()),
     ]);
+
+    const chats = await chatsPromise;
+    const initialChatId = chats[0]?.id;
+    if (initialChatId) {
+      await queryClient.prefetchInfiniteQuery(messagesQueryOptions(initialChatId));
+    }
   },
   component: AuthenticatedLayout,
 });
