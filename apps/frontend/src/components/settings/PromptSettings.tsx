@@ -56,7 +56,7 @@ export function PromptSettings({
   return (
     <div className="space-y-4">
       {/* ── Default Prompts ── */}
-      <Card variant="solid" className="space-y-3 p-6">
+      <Card variant="solid" className="space-y-3 p-4 sm:p-6">
         <h3 className="text-xs uppercase tracking-widest font-bold text-on-surface-variant/80 font-label">
           {s.defaultPromptsLabel}
         </h3>
@@ -98,7 +98,7 @@ export function PromptSettings({
       </Card>
 
       {/* ── Rule Files ── */}
-      <Card variant="solid" className="space-y-4 p-6">
+      <Card variant="solid" className="space-y-4 p-4 sm:p-6">
         <h3 className="text-xs uppercase tracking-widest font-bold text-on-surface-variant/80 font-label">
           {s.ruleFilesLabel}
         </h3>
@@ -119,8 +119,8 @@ export function PromptSettings({
       </Card>
 
       {/* ── Custom Rules ── */}
-      <Card variant="solid" className="space-y-4 p-6">
-        <div className="flex items-center justify-between gap-4">
+      <Card variant="solid" className="space-y-4 p-4 sm:p-6">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4">
           <div className="space-y-1">
             <h3 className="text-xs uppercase tracking-widest font-bold text-on-surface-variant/80 font-label">
               {s.customRulesLabel}

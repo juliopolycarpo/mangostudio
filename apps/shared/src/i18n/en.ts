@@ -462,6 +462,12 @@ export const messages: Messages = {
     running: 'Running tool',
     done: 'Done',
     error: 'Tool error',
+    labels: {
+      list_directory: 'List',
+      read_file: 'Read',
+      generate_image: 'Generate Image',
+      get_current_datetime: 'Date',
+    },
   },
 
   errors: {

@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   DEFAULT_APP_SETTINGS,
@@ -31,6 +31,8 @@ export {
   MAX_TOOL_ITERATIONS_MIN,
 };
 
+const SETTINGS_SAVE_DEBOUNCE_MS = 300;
+
 function createCustomRule(): RuleFileSetting {
   return {
     id: `custom-${Date.now()}`,
@@ -44,6 +46,8 @@ function createCustomRule(): RuleFileSetting {
 
 export function useGlobalSettings() {
   const queryClient = useQueryClient();
+  const pendingSaveRef = useRef<AppSettings | null>(null);
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { data, isLoading, error } = useQuery({
     ...appSettingsQueryOptions(),
     placeholderData: DEFAULT_APP_SETTINGS,
@@ -68,14 +72,45 @@ export function useGlobalSettings() {
 
   const settings = useMemo(() => normalizeAppSettings(data ?? DEFAULT_APP_SETTINGS), [data]);
 
+  const flushPendingSave = useCallback(() => {
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+
+    const pendingSettings = pendingSaveRef.current;
+    if (!pendingSettings) return;
+
+    pendingSaveRef.current = null;
+    mutation.mutate(pendingSettings);
+  }, [mutation]);
+
+  useEffect(
+    () => () => {
+      flushPendingSave();
+    },
+    [flushPendingSave]
+  );
+
   const saveSettings = useCallback(
     (updater: (current: AppSettings) => AppSettings) => {
       const currentSettings = normalizeAppSettings(
         queryClient.getQueryData<AppSettings>(appSettingsKeys.current()) ?? DEFAULT_APP_SETTINGS
       );
-      mutation.mutate(normalizeAppSettings(updater(currentSettings)));
+
+      const nextSettings = normalizeAppSettings(updater(currentSettings));
+      queryClient.setQueryData(appSettingsKeys.current(), nextSettings);
+      pendingSaveRef.current = nextSettings;
+
+      if (saveTimerRef.current) {
+        clearTimeout(saveTimerRef.current);
+      }
+
+      saveTimerRef.current = setTimeout(() => {
+        flushPendingSave();
+      }, SETTINGS_SAVE_DEBOUNCE_MS);
     },
-    [mutation, queryClient]
+    [flushPendingSave, queryClient]
   );
 
   const updatePromptSettings = useCallback(
@@ -164,8 +199,8 @@ export function useGlobalSettings() {
   );
 
   const resetSettings = useCallback(() => {
-    mutation.mutate(DEFAULT_APP_SETTINGS);
-  }, [mutation]);
+    saveSettings(() => DEFAULT_APP_SETTINGS);
+  }, [saveSettings]);
 
   const globalTextSystemPrompt = settings.promptSettings.textSystemPrompt;
   const globalImageSystemPrompt = settings.promptSettings.imageSystemPrompt;

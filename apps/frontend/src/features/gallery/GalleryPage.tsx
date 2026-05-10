@@ -32,12 +32,14 @@ export function GalleryPage() {
   }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
 
   return (
-    <div className="p-8 space-y-8 h-full flex flex-col overflow-y-auto">
-      <div className="flex items-center gap-4 mb-8 shrink-0">
+    <div className="p-4 sm:p-6 md:p-8 space-y-6 sm:space-y-8 h-full flex flex-col overflow-y-auto">
+      <div className="flex items-center gap-3 sm:gap-4 mb-6 sm:mb-8 shrink-0">
         <div className="p-3 bg-primary-container text-on-primary-container rounded-2xl">
           <LayoutGrid size={24} />
         </div>
-        <h1 className="text-3xl font-bold font-headline text-on-background">{t.gallery.title}</h1>
+        <h1 className="text-2xl sm:text-3xl font-bold font-headline text-on-background">
+          {t.gallery.title}
+        </h1>
       </div>
 
       {status === 'pending' ? (

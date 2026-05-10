@@ -31,7 +31,7 @@ export function ConnectorCard({ connector: c, onConfigure, onDelete }: Connector
   const isReadOnlyShared = isReadOnlySharedConnector(c);
 
   return (
-    <div className="bg-surface-container-lowest border border-outline-variant/10 rounded-2xl p-4 flex items-center justify-between gap-4">
+    <div className="bg-surface-container-lowest border border-outline-variant/10 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4">
       <div className="flex items-center gap-4">
         <div
           className={`p-2.5 rounded-xl ${c.configured ? 'bg-primary/10 text-primary' : 'bg-error/10 text-error/80'}`}
@@ -39,7 +39,7 @@ export function ConnectorCard({ connector: c, onConfigure, onDelete }: Connector
           {c.configured ? <CheckCircle2 size={20} /> : <XCircle size={20} />}
         </div>
         <div className="space-y-0.5">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <h3 className="font-bold text-on-surface">{c.name}</h3>
             <span className="text-[10px] px-2 py-0.5 rounded-full bg-surface-container-high text-on-surface-variant border border-outline-variant/20">
               {t.providers[c.provider]}

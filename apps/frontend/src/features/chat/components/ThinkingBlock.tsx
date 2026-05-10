@@ -20,15 +20,9 @@ interface ThinkingBlockProps {
   messageId: string;
   text: string;
   isStreaming: boolean;
-  segmentIndex?: number;
 }
 
-export function ThinkingBlock({
-  messageId,
-  text,
-  isStreaming,
-  segmentIndex = 0,
-}: ThinkingBlockProps) {
+export function ThinkingBlock({ messageId, text, isStreaming }: ThinkingBlockProps) {
   const { t } = useI18n();
   const initialUiStateRef = useRef<ThinkingUiState>(
     thinkingUiStateByMessage.get(messageId) ?? {
@@ -105,13 +99,7 @@ export function ThinkingBlock({
       >
         <Brain size={11} className="text-primary/70" />
         <span className="tracking-wide">
-          {isStreaming
-            ? segmentIndex > 0
-              ? t.thinking.streamingContinued
-              : t.thinking.streaming
-            : segmentIndex > 0
-              ? t.thinking.labelContinued
-              : t.thinking.label}
+          {isStreaming ? t.thinking.streaming : t.thinking.label}
         </span>
         <ChevronDown
           size={11}
@@ -131,7 +119,7 @@ export function ThinkingBlock({
             <div
               ref={scrollRef}
               onScroll={handleScroll}
-              className="p-4 max-h-48 overflow-y-auto app-scrollbar"
+              className="p-4 max-h-48 sm:max-h-72 md:max-h-96 overflow-y-auto app-scrollbar"
             >
               <div className="text-xs text-on-surface-variant/60 leading-relaxed markdown-content--thinking">
                 <MarkdownContent

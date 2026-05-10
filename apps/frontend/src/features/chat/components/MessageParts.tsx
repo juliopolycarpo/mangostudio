@@ -15,15 +15,12 @@ interface MessagePartsProps {
 
 export function MessageParts({ parts, messageId, isStreaming }: MessagePartsProps) {
   const { t } = useI18n();
-  let thinkingIdx = 0;
-
   return (
     <>
       {parts.map((part, idx) => {
         switch (part.type) {
           case 'thinking': {
-            const segIdx = thinkingIdx++;
-            const blockId = `${messageId}-thinking-${segIdx}`;
+            const blockId = `${messageId}-thinking-${idx}`;
             const isLastThinking =
               isStreaming && !parts.slice(idx + 1).some((p) => p.type === 'thinking');
             return (
@@ -32,7 +29,6 @@ export function MessageParts({ parts, messageId, isStreaming }: MessagePartsProp
                 messageId={blockId}
                 text={part.text}
                 isStreaming={isLastThinking}
-                segmentIndex={segIdx}
               />
             );
           }

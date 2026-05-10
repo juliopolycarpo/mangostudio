@@ -26,7 +26,7 @@ export function ReasoningSettingsSection({
   const supportedSet = new Set<ReasoningEffort>(policy.supportedEfforts);
 
   return (
-    <Card variant="solid" className="space-y-4 p-6">
+    <Card variant="solid" className="space-y-4 p-4 sm:p-6">
       <h3 className="text-xs uppercase tracking-widest font-bold text-on-surface-variant">
         {s.sectionReasoning}
       </h3>

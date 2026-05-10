@@ -475,3 +475,49 @@ pre:hover .copy-code-btn {
 .markdown-content {
   font-size: var(--chat-font-size);
 }
+
+/* ── Performance & accessibility utilities ── */
+
+/* Ensure minimum touch target size on mobile */
+@media (pointer: coarse) {
+  button,
+  a,
+  input,
+  select,
+  textarea,
+  [role='button'] {
+    min-height: 44px;
+    min-width: 44px;
+  }
+}
+
+/* Reduce motion for users who prefer it */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Optimize paint containment for virtualized rows */
+[data-virtualized] {
+  contain: layout style paint;
+  content-visibility: auto;
+}
+
+/* Responsive image handling */
+img {
+  max-width: 100%;
+  height: auto;
+}
+
+/* Prevent text overflow on narrow screens */
+body {
+  overflow-wrap: break-word;
+  word-wrap: break-word;
+  hyphens: auto;
+}

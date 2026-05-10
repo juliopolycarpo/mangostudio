@@ -49,13 +49,13 @@ export function ContextSettings({
 
   return (
     <div className="space-y-4">
-      <Card variant="solid" className="space-y-3 p-6">
+      <Card variant="solid" className="space-y-3 p-4 sm:p-6">
         <h2 className="text-lg font-bold text-on-surface">{s.title}</h2>
         <p className="text-sm text-on-surface-variant/70">{s.description}</p>
         <p className="text-sm text-on-surface-variant/60">{s.keepHistory}</p>
       </Card>
 
-      <Card variant="solid" className="space-y-3 p-6">
+      <Card variant="solid" className="space-y-3 p-4 sm:p-6">
         <h3 className="text-xs uppercase tracking-widest font-bold text-on-surface-variant/80 font-label">
           {s.behaviorLabel}
         </h3>
@@ -75,7 +75,7 @@ export function ContextSettings({
         </select>
       </Card>
 
-      <Card variant="solid" className="space-y-3 p-6">
+      <Card variant="solid" className="space-y-3 p-4 sm:p-6">
         <div className="flex items-start justify-between gap-4">
           <div className="space-y-1">
             <h3 className="text-xs uppercase tracking-widest font-bold text-on-surface-variant/80 font-label">
@@ -93,7 +93,7 @@ export function ContextSettings({
         </div>
       </Card>
 
-      <Card variant="solid" className="space-y-5 p-6">
+      <Card variant="solid" className="space-y-5 p-4 sm:p-6">
         <ThresholdControl
           label={s.warningThresholdLabel}
           description={s.warningThresholdDescription}
@@ -117,7 +117,7 @@ export function ContextSettings({
         />
       </Card>
 
-      <Card variant="solid" className="space-y-3 p-6">
+      <Card variant="solid" className="space-y-3 p-4 sm:p-6">
         <h3 className="text-xs uppercase tracking-widest font-bold text-on-surface-variant/80 font-label">
           {s.summaryModelLabel}
         </h3>
@@ -160,7 +160,7 @@ function ThresholdControl({
 }) {
   return (
     <div className="space-y-3">
-      <div className="flex items-baseline justify-between gap-4">
+      <div className="flex flex-col sm:flex-row sm:items-baseline sm:justify-between gap-1 sm:gap-4">
         <h3 className="text-xs uppercase tracking-widest font-bold text-on-surface-variant/80 font-label">
           {label}
         </h3>

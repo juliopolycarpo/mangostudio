@@ -35,7 +35,7 @@ describe('Layout', () => {
 
     expect(screen.getByText('Mango Studio')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /new chat/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /gallery/i })).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: /gallery/i }).length).toBeGreaterThanOrEqual(1);
   });
 
   it('exposes the main landmark', () => {

@@ -5,14 +5,15 @@ import {
   useRouterState,
   useNavigate,
 } from '@tanstack/react-router';
-import { Suspense } from 'react';
+import { Suspense, useState } from 'react';
 import { Spinner } from '@/components/ui/Spinner';
 import { Layout } from '@/components/layout/Layout';
 import { Header } from '@/components/layout/Header';
 import { useAppState } from '@/hooks/use-app-state';
 import { AppContext } from '@/lib/app-context';
-import { chatListQueryOptions } from '@/features/chat/queries';
+import { chatListQueryOptions, messagesQueryOptions } from '@/features/chat/queries';
 import { catalogQueryOptions } from '@/hooks/use-model-catalog';
+import { appSettingsQueryOptions } from '@/features/settings/app/queries';
 
 export const Route = createFileRoute('/_authenticated')({
   beforeLoad: ({ context, location }) => {
@@ -25,10 +26,19 @@ export const Route = createFileRoute('/_authenticated')({
     }
   },
   loader: async ({ context: { queryClient } }) => {
+    const chatsPromise = queryClient.ensureQueryData(chatListQueryOptions());
+
     await Promise.all([
-      queryClient.ensureQueryData(chatListQueryOptions()),
+      chatsPromise,
       queryClient.ensureQueryData(catalogQueryOptions()),
+      queryClient.ensureQueryData(appSettingsQueryOptions()),
     ]);
+
+    const chats = await chatsPromise;
+    const initialChatId = chats[0]?.id;
+    if (initialChatId) {
+      await queryClient.prefetchInfiniteQuery(messagesQueryOptions(initialChatId));
+    }
   },
   component: AuthenticatedLayout,
 });
@@ -39,6 +49,7 @@ function AuthenticatedLayout() {
   const app = useAppState();
   const routerState = useRouterState();
   const currentPath = routerState.location.pathname;
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
 
   if (!auth.isAuthenticated) {
     void navigate({ to: '/login' });
@@ -62,6 +73,8 @@ function AuthenticatedLayout() {
         onDeleteChat={(chatId) => void app.handleDeleteChat(chatId)}
         onNewChat={() => void app.handleNewChat()}
         contextCache={app.contextCache}
+        isMobileSidebarOpen={isMobileSidebarOpen}
+        onMobileSidebarClose={() => setIsMobileSidebarOpen(false)}
       >
         <Header
           activeModel={app.activeModel}
@@ -79,6 +92,7 @@ function AuthenticatedLayout() {
           onNavigateToSettings={() => app.handleNavigate('settings')}
           modelCatalog={app.catalog}
           lockedProvider={app.lockedProvider}
+          onMobileMenuToggle={() => setIsMobileSidebarOpen((v) => !v)}
         />
 
         <div className="flex-1 min-h-0 overflow-hidden flex flex-col">

@@ -184,7 +184,7 @@ describe('ToolSettingsPage', () => {
     });
   });
 
-  it('renders save button for tools with parameters', async () => {
+  it('does not render a save button for tools with parameters', async () => {
     fetchScenario.respondWithJson('GET', '/api/settings/tools', {
       body: TOOLS_RESPONSE,
     });
@@ -193,9 +193,7 @@ describe('ToolSettingsPage', () => {
 
     await screen.findByText('Current date and time');
 
-    const saveButtons = screen.getAllByText('Save');
-    // At least the parameter save button exists
-    expect(saveButtons.length).toBeGreaterThanOrEqual(1);
+    expect(screen.queryByText('Save')).not.toBeInTheDocument();
   });
 
   it('renders model selector when parameter has modelType image', async () => {

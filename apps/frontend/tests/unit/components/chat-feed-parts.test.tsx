@@ -74,10 +74,8 @@ describe('ChatFeed — MessageParts interleaved rendering', () => {
     const { container } = render(<ChatFeed chatId="chat-1" messages={[msg]} />);
 
     const thinkingButtons = container.querySelectorAll('button');
-    const thoughtProcessButtons = Array.from(thinkingButtons).filter(
-      (btn) =>
-        btn.textContent?.includes('Thought process') ||
-        btn.textContent?.includes('Continued thinking')
+    const thoughtProcessButtons = Array.from(thinkingButtons).filter((btn) =>
+      btn.textContent?.includes('Thought process')
     );
     expect(thoughtProcessButtons).toHaveLength(2);
   });
@@ -93,7 +91,7 @@ describe('ChatFeed — MessageParts interleaved rendering', () => {
     // ToolCallBlock in pending state shows "Calling..." label
     const buttons = container.querySelectorAll('button');
     const toolButtons = Array.from(buttons).filter((btn) =>
-      btn.textContent?.includes('calculator()')
+      btn.textContent?.includes('calculator')
     );
     expect(toolButtons.length).toBeGreaterThan(0);
   });
@@ -110,7 +108,7 @@ describe('ChatFeed — MessageParts interleaved rendering', () => {
 
     // fn() should appear once (in the tool_call block), not twice
     const fnButtons = Array.from(container.querySelectorAll('button')).filter((btn) =>
-      btn.textContent?.includes('fn()')
+      btn.textContent?.includes('fn')
     );
     expect(fnButtons).toHaveLength(1);
     expect(screen.getByText('Used the tool.')).toBeInTheDocument();

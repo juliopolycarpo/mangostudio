@@ -43,7 +43,7 @@ export function ProviderSettingsMenu() {
   }
 
   return (
-    <Card variant="solid" className="p-6 space-y-4">
+    <Card variant="solid" className="p-4 sm:p-6 space-y-4">
       <h2 className="text-xs uppercase tracking-widest font-bold text-on-surface">
         {t.settings.providers.title}
       </h2>

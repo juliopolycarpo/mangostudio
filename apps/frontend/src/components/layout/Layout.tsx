@@ -14,6 +14,8 @@ interface LayoutProps {
   onDeleteChat: (chatId: string) => void;
   onNewChat: () => void;
   contextCache?: Map<string, ContextInfo>;
+  isMobileSidebarOpen?: boolean;
+  onMobileSidebarClose?: () => void;
 }
 
 export function Layout({
@@ -27,6 +29,8 @@ export function Layout({
   onDeleteChat,
   onNewChat,
   contextCache,
+  isMobileSidebarOpen = false,
+  onMobileSidebarClose,
 }: LayoutProps) {
   return (
     <div className="flex h-screen overflow-hidden bg-surface text-on-surface font-body selection:bg-primary/30">
@@ -40,8 +44,12 @@ export function Layout({
         onDeleteChat={onDeleteChat}
         onNewChat={onNewChat}
         contextCache={contextCache}
+        isMobileOpen={isMobileSidebarOpen}
+        onMobileClose={onMobileSidebarClose}
       />
-      <main className="flex-1 md:ml-64 flex flex-col h-full relative">{children}</main>
+      <main className="flex-1 md:ml-64 flex flex-col h-full relative w-full min-w-0">
+        {children}
+      </main>
     </div>
   );
 }

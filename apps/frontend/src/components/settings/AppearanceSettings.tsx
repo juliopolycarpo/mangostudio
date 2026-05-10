@@ -58,7 +58,7 @@ function SettingsSection({
   children: React.ReactNode;
 }) {
   return (
-    <Card variant="solid" className="space-y-3 p-6">
+    <Card variant="solid" className="space-y-3 p-4 sm:p-6">
       <h3 className="text-xs uppercase tracking-widest font-bold text-on-surface-variant/80 font-label">
         {title}
       </h3>
@@ -163,7 +163,7 @@ export function AppearanceSettings() {
     <div className="space-y-4">
       {/* ── App Theme ── */}
       <SettingsSection title={s.appTheme.label} description={s.appTheme.description}>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <OptionButton
             selected={config.appTheme === 'dark'}
             onClick={() => setConfig({ appTheme: 'dark' })}
@@ -184,7 +184,7 @@ export function AppearanceSettings() {
 
       {/* ── Code Theme ── */}
       <SettingsSection title={s.codeTheme.label} description={s.codeTheme.description}>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <OptionButton
             selected={codeTheme.mode === 'auto'}
             onClick={() => setCodeThemeMode('auto')}
@@ -203,7 +203,7 @@ export function AppearanceSettings() {
               <p className="text-xs font-semibold text-on-surface-variant/70 mb-2">
                 {s.codeTheme.darkPreference}
               </p>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {darkThemes.map((id) => (
                   <ThemeCard
                     key={id}
@@ -219,7 +219,7 @@ export function AppearanceSettings() {
               <p className="text-xs font-semibold text-on-surface-variant/70 mb-2">
                 {s.codeTheme.lightPreference}
               </p>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {lightThemes.map((id) => (
                   <ThemeCard
                     key={id}
@@ -233,7 +233,7 @@ export function AppearanceSettings() {
             </div>
           </div>
         ) : (
-          <div className="grid grid-cols-2 gap-3 mt-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-2">
             {CODE_THEMES.map((id) => (
               <ThemeCard
                 key={id}
@@ -249,7 +249,7 @@ export function AppearanceSettings() {
 
       {/* ── Font Size ── */}
       <SettingsSection title={s.fontSize.label} description={s.fontSize.description}>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           {(['small', 'default', 'large'] as const).map((size) => (
             <OptionButton
               key={size}
@@ -270,7 +270,7 @@ export function AppearanceSettings() {
 
       {/* ── Chat Density ── */}
       <SettingsSection title={s.chatDensity.label} description={s.chatDensity.description}>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           {(['compact', 'default', 'comfortable'] as const).map((density) => (
             <OptionButton
               key={density}

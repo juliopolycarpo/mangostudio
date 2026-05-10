@@ -141,7 +141,7 @@ describe('ProviderSettingsPage', () => {
     expect(iterInputs.length).toBeGreaterThanOrEqual(1);
   });
 
-  it('renders save, cancel, and reset buttons', async () => {
+  it('does not render explicit save actions', async () => {
     fetchScenario.respondWithJson('GET', '/api/settings/providers/deepseek', {
       body: DEEPSEEK_DESCRIPTOR,
     });
@@ -149,8 +149,8 @@ describe('ProviderSettingsPage', () => {
     render(<ProviderSettingsPage />);
 
     await screen.findByText('DeepSeek');
-    expect(screen.getByText('Save')).toBeInTheDocument();
-    expect(screen.getByText('Cancel')).toBeInTheDocument();
-    expect(screen.getByText(/reset/i)).toBeInTheDocument();
+    expect(screen.queryByText('Save')).not.toBeInTheDocument();
+    expect(screen.queryByText('Cancel')).not.toBeInTheDocument();
+    expect(screen.queryByText(/reset/i)).not.toBeInTheDocument();
   });
 });
