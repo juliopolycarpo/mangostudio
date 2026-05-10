@@ -131,11 +131,13 @@ function normalizeParameterValue(
   tool: RegisteredTool,
   descriptor: ToolParameterDescriptor,
   value: unknown
-): string | number | boolean {
+): string | number | boolean | string[] | Array<{ path: string; enabled: boolean }> {
   if (descriptor.type === 'select') return normalizeSelectValue(tool, descriptor, value);
   if (descriptor.type === 'number') return normalizeNumberValue(tool, descriptor, value);
   if (descriptor.type === 'string' && typeof value === 'string') return value;
   if (descriptor.type === 'boolean' && typeof value === 'boolean') return value;
+  if (descriptor.type === 'string_list') return normalizeStringListValue(tool, descriptor, value);
+  if (descriptor.type === 'path_list') return normalizePathListValue(tool, descriptor, value);
 
   throw new ToolParameterError(
     `Parameter "${descriptor.name}" for tool "${tool.definition.name}" must be ${descriptor.type}.`
@@ -183,4 +185,70 @@ function normalizeNumberValue(
     );
   }
   return value;
+}
+
+function normalizeStringListValue(
+  tool: RegisteredTool,
+  descriptor: ToolParameterDescriptor,
+  value: unknown
+): string[] {
+  if (Array.isArray(value)) {
+    const strings = value.filter((item): item is string => typeof item === 'string');
+    if (strings.length !== value.length) {
+      throw new ToolParameterError(
+        `Parameter "${descriptor.name}" for tool "${tool.definition.name}" must be an array of strings.`
+      );
+    }
+    return strings.map((s) => s.trim()).filter((s) => s.length > 0);
+  }
+  if (typeof value === 'string') {
+    return value
+      .split('\n')
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
+  }
+  throw new ToolParameterError(
+    `Parameter "${descriptor.name}" for tool "${tool.definition.name}" must be a string list.`
+  );
+}
+
+function normalizePathListValue(
+  tool: RegisteredTool,
+  descriptor: ToolParameterDescriptor,
+  value: unknown
+): Array<{ path: string; enabled: boolean }> {
+  if (Array.isArray(value)) {
+    const items: Array<{ path: string; enabled: boolean }> = [];
+    for (const raw of value) {
+      if (
+        typeof raw === 'object' &&
+        raw !== null &&
+        'path' in raw &&
+        typeof (raw as Record<string, unknown>).path === 'string' &&
+        'enabled' in raw &&
+        typeof (raw as Record<string, unknown>).enabled === 'boolean'
+      ) {
+        const entry = raw as { path: string; enabled: boolean };
+        const trimmed = entry.path.trim();
+        if (trimmed.length > 0) {
+          items.push({ path: trimmed, enabled: entry.enabled });
+        }
+      } else {
+        throw new ToolParameterError(
+          `Parameter "${descriptor.name}" for tool "${tool.definition.name}" must be an array of path items.`
+        );
+      }
+    }
+    return items;
+  }
+  if (typeof value === 'string') {
+    return value
+      .split('\n')
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0)
+      .map((path) => ({ path, enabled: true }));
+  }
+  throw new ToolParameterError(
+    `Parameter "${descriptor.name}" for tool "${tool.definition.name}" must be a path list.`
+  );
 }

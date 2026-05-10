@@ -1,0 +1,126 @@
+/**
+ * Built-in tool: read_file
+ * Reads the contents of a text file from disk.
+ */
+
+import type { ToolContext } from '../types';
+import { registerTool } from '../registry';
+import {
+  type PathValidationSettings,
+  normalizePathList,
+  PathAccessError,
+  resolveAndValidatePath,
+} from './_fs-utils';
+
+export const READ_FILE_TOOL_NAME = 'read_file';
+
+export interface ReadFileToolArgs {
+  path: string;
+}
+
+export interface ReadFileToolResult {
+  content: string;
+  path: string;
+  size: number;
+}
+
+export type ReadFileToolSettings = PathValidationSettings;
+
+const definition = {
+  name: READ_FILE_TOOL_NAME,
+  description:
+    'Reads the contents of a file from disk. Use this when the user asks to inspect, view, or read a file.',
+  parameters: {
+    type: 'object',
+    properties: {
+      path: {
+        type: 'string',
+        description: 'Absolute file path or path starting with ~ (home directory).',
+      },
+    },
+    required: ['path'],
+    additionalProperties: false,
+  },
+};
+
+export function normalizeReadFileToolSettings(
+  parameters: Record<string, unknown>
+): ReadFileToolSettings {
+  return {
+    allowedPaths: normalizePathList(parameters.allowedPaths),
+    deniedPaths: normalizePathList(parameters.deniedPaths),
+  };
+}
+
+export async function executeReadFile(
+  args: ReadFileToolArgs,
+  context: ToolContext
+): Promise<ReadFileToolResult> {
+  const settings = normalizeReadFileToolSettings(context.parameters);
+  const resolvedPath = resolveAndValidatePath(args.path, settings);
+
+  const file = Bun.file(resolvedPath);
+  const exists = await file.exists();
+  if (!exists) {
+    throw new PathAccessError(`File not found: "${args.path}"`);
+  }
+
+  const content = await file.text();
+  const size = file.size;
+
+  return { content, path: args.path, size };
+}
+
+async function execute(
+  args: Record<string, unknown>,
+  context: ToolContext
+): Promise<ReadFileToolResult> {
+  const path = getRequiredString(args.path, 'path');
+  return executeReadFile({ path }, context);
+}
+
+/** Registers this tool. Called once at import time; can be re-called after clearRegistry(). */
+export function register(): void {
+  registerTool({
+    definition,
+    settings: {
+      title: 'Read file',
+      description: 'Allows the AI to read text files from disk.',
+      category: 'system',
+      enabledByDefault: false,
+      canDisable: true,
+      defaultParameters: {
+        allowedPaths: [],
+        deniedPaths: [],
+      },
+      parameterDescriptors: [
+        {
+          name: 'allowedPaths',
+          label: 'Allowed paths',
+          description: 'List of paths the tool is allowed to access. Leave empty to allow all.',
+          type: 'path_list',
+          required: false,
+          defaultValue: [] as Array<{ path: string; enabled: boolean }>,
+        },
+        {
+          name: 'deniedPaths',
+          label: 'Denied paths',
+          description: 'List of paths the tool is denied from accessing. Leave empty to deny none.',
+          type: 'path_list',
+          required: false,
+          defaultValue: [] as Array<{ path: string; enabled: boolean }>,
+        },
+      ],
+    },
+    execute,
+  });
+}
+
+function getRequiredString(value: unknown, name: string): string {
+  const text = typeof value === 'string' ? value.trim() : '';
+  if (!text) throw new PathAccessError(`Missing required ${name}.`);
+  return text;
+}
+
+// Self-register on import
+register();

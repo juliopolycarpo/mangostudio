@@ -1,4 +1,15 @@
-export type ToolParameterType = 'string' | 'number' | 'boolean' | 'select';
+export type ToolParameterType =
+  | 'string'
+  | 'number'
+  | 'boolean'
+  | 'select'
+  | 'string_list'
+  | 'path_list';
+
+export interface PathListItem {
+  path: string;
+  enabled: boolean;
+}
 
 export type ToolSettingsCategory = 'system' | 'image' | 'interaction';
 
@@ -13,7 +24,7 @@ export interface ToolParameterDescriptor {
   description?: string;
   type: ToolParameterType;
   required: boolean;
-  defaultValue?: string | number | boolean;
+  defaultValue?: string | number | boolean | string[] | PathListItem[];
   min?: number;
   max?: number;
   options?: ReadonlyArray<ToolParameterOption>;

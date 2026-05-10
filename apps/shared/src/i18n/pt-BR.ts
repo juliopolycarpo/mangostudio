@@ -365,6 +365,31 @@ export const messages = {
       letAiDecideQualityLabel: 'IA decide a qualidade',
       letAiDecideQualityDescription:
         'Quando ativado, a IA pode escolher diferentes tamanhos de imagem por solicitação.',
+      toolNames: {
+        readFile: 'Ler arquivo',
+        listDirectory: 'Listar diretório',
+      },
+      toolDescriptions: {
+        readFile: 'Permite que a IA leia arquivos de texto do disco.',
+        listDirectory: 'Permite que a IA liste arquivos e diretórios no disco.',
+      },
+      parameters: {
+        allowedPathsLabel: 'Caminhos permitidos',
+        allowedPathsDescription:
+          'Caminhos que a ferramenta pode acessar. Deixe vazio para permitir todos.',
+        deniedPathsLabel: 'Caminhos negados',
+        deniedPathsDescription:
+          'Caminhos que a ferramenta não pode acessar. Deixe vazio para não negar nenhum.',
+      },
+      pathList: {
+        add: 'Adicionar',
+        edit: 'Editar',
+        delete: 'Excluir',
+        save: 'Salvar',
+        cancel: 'Cancelar',
+        pathPlaceholder: 'ex. /home/usuario/projetos',
+        noPaths: 'Nenhum caminho configurado.',
+      },
     },
     appearance: {
       title: 'Aparência',

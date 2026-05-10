@@ -14,10 +14,35 @@ interface ToolSettingsCardProps {
   descriptor: ToolSettingsDescriptor;
 }
 
+function getTranslatedToolText(
+  descriptor: ToolSettingsDescriptor,
+  t: ReturnType<typeof useI18n>['t']
+) {
+  const s = t.settings.tools;
+  switch (descriptor.name) {
+    case 'read_file':
+      return {
+        title: s.toolNames.readFile,
+        description: s.toolDescriptions.readFile,
+      };
+    case 'list_directory':
+      return {
+        title: s.toolNames.listDirectory,
+        description: s.toolDescriptions.listDirectory,
+      };
+    default:
+      return {
+        title: descriptor.title,
+        description: descriptor.description,
+      };
+  }
+}
+
 export function ToolSettingsCard({ descriptor }: ToolSettingsCardProps) {
   const { t } = useI18n();
   const s = t.settings.tools;
   const { mutateAsync, isPending } = useUpdateToolSetting();
+  const translated = getTranslatedToolText(descriptor, t);
 
   const [enabled, setEnabled] = useState(descriptor.enabled);
   const [params, setParams] = useState<Record<string, unknown>>({ ...descriptor.parameters });
@@ -50,10 +75,10 @@ export function ToolSettingsCard({ descriptor }: ToolSettingsCardProps) {
     <Card variant="solid" className="space-y-4 p-6">
       <div className="flex items-start justify-between gap-4">
         <div className="space-y-1 min-w-0">
-          <h4 className="text-sm font-bold text-on-surface">{descriptor.title}</h4>
-          {descriptor.description && (
+          <h4 className="text-sm font-bold text-on-surface">{translated.title}</h4>
+          {translated.description && (
             <p className="text-xs text-on-surface-variant/70 leading-relaxed">
-              {descriptor.description}
+              {translated.description}
             </p>
           )}
         </div>
