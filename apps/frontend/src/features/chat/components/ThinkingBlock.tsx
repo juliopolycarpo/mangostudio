@@ -119,7 +119,7 @@ export function ThinkingBlock({ messageId, text, isStreaming }: ThinkingBlockPro
             <div
               ref={scrollRef}
               onScroll={handleScroll}
-              className="p-4 max-h-48 overflow-y-auto app-scrollbar"
+              className="p-4 max-h-48 sm:max-h-72 md:max-h-96 overflow-y-auto app-scrollbar"
             >
               <div className="text-xs text-on-surface-variant/60 leading-relaxed markdown-content--thinking">
                 <MarkdownContent

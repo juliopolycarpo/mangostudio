@@ -89,7 +89,7 @@ export function ToolCallBlock({ name, args, result, isError, isPending }: ToolCa
       <button
         type="button"
         onClick={() => setExpanded((v) => !v)}
-        className={`glass-surface flex items-center gap-2 text-xs py-1.5 px-3 rounded-full w-fit border
+        className={`glass-surface flex items-center gap-2 text-xs py-1.5 px-3 rounded-full w-fit max-w-full border
                    transition-all duration-200 cursor-pointer ${
                      isError
                        ? 'border-error/30 text-error'
@@ -99,24 +99,24 @@ export function ToolCallBlock({ name, args, result, isError, isPending }: ToolCa
                    }`}
       >
         {isPending ? (
-          <ToolIcon toolName={name} className="animate-pulse" />
+          <ToolIcon toolName={name} className="animate-pulse shrink-0" />
         ) : isError ? (
-          <AlertCircle size={11} />
+          <AlertCircle size={11} className="shrink-0" />
         ) : (
-          <CheckCircle size={11} />
+          <CheckCircle size={11} className="shrink-0" />
         )}
-        <span className="tracking-wide">{label}</span>
+        <span className="tracking-wide shrink-0">{label}</span>
         {hint && (
           <>
-            <ArrowRight size={9} className="text-on-surface-variant/40" />
-            <span className="font-mono text-on-surface-variant/60 truncate max-w-[180px]">
+            <ArrowRight size={9} className="text-on-surface-variant/40 shrink-0" />
+            <span className="font-mono text-on-surface-variant/60 truncate max-w-[160px] sm:max-w-[260px] md:max-w-[380px]">
               {hint}
             </span>
           </>
         )}
         <ChevronDown
           size={11}
-          className={`transition-transform duration-300 opacity-50 ${expanded ? 'rotate-180' : ''}`}
+          className={`transition-transform duration-300 opacity-50 shrink-0 ${expanded ? 'rotate-180' : ''}`}
         />
       </button>
 
@@ -130,7 +130,7 @@ export function ToolCallBlock({ name, args, result, isError, isPending }: ToolCa
             transition={{ duration: 0.2, ease: 'easeOut' }}
             className="glass-surface-subtle mt-1.5 rounded-xl border border-outline-variant/15 overflow-hidden"
           >
-            <div className="p-4 space-y-3 text-xs font-mono max-h-48 overflow-y-auto app-scrollbar">
+            <div className="p-4 space-y-3 text-xs font-mono max-h-48 sm:max-h-72 md:max-h-96 overflow-y-auto app-scrollbar">
               {Object.keys(args).length > 0 && (
                 <div>
                   <p className="text-on-surface-variant/50 uppercase tracking-wider text-[10px] mb-1">
