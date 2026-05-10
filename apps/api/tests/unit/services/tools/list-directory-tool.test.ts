@@ -29,13 +29,40 @@ describe('normalizeListDirectoryToolSettings', () => {
     expect(settings.deniedPaths).toEqual([]);
   });
 
-  it('normalizes string list parameters', () => {
+  it('normalizes path list parameters', () => {
+    const settings = normalizeListDirectoryToolSettings({
+      allowedPaths: [
+        { path: '/home', enabled: true },
+        { path: '/tmp', enabled: false },
+      ],
+      deniedPaths: [
+        { path: '/etc', enabled: true },
+        { path: '/root', enabled: true },
+      ],
+    });
+    expect(settings.allowedPaths).toEqual([
+      { path: '/home', enabled: true },
+      { path: '/tmp', enabled: false },
+    ]);
+    expect(settings.deniedPaths).toEqual([
+      { path: '/etc', enabled: true },
+      { path: '/root', enabled: true },
+    ]);
+  });
+
+  it('normalizes legacy string list parameters for backward compatibility', () => {
     const settings = normalizeListDirectoryToolSettings({
       allowedPaths: ['/home', '/tmp'],
       deniedPaths: '/etc\n/root',
     });
-    expect(settings.allowedPaths).toEqual(['/home', '/tmp']);
-    expect(settings.deniedPaths).toEqual(['/etc', '/root']);
+    expect(settings.allowedPaths).toEqual([
+      { path: '/home', enabled: true },
+      { path: '/tmp', enabled: true },
+    ]);
+    expect(settings.deniedPaths).toEqual([
+      { path: '/etc', enabled: true },
+      { path: '/root', enabled: true },
+    ]);
   });
 });
 
@@ -117,5 +144,39 @@ describe('executeListDirectory', () => {
     } finally {
       Bun.env.HOME = originalHome;
     }
+  });
+
+  it('ignores disabled allowed paths', async () => {
+    let threw = false;
+    try {
+      await executeListDirectory(
+        { path: tempDir },
+        makeContext({
+          allowedPaths: [
+            { path: '/other', enabled: true },
+            { path: tempDir, enabled: false },
+          ],
+        })
+      );
+    } catch (err) {
+      threw = true;
+      expect((err as Error).message).toContain('not in the allowed paths');
+    }
+    expect(threw).toBe(true);
+  });
+
+  it('ignores disabled denied paths', async () => {
+    writeFileSync(join(tempDir, 'disabled-denied.txt'), 'content', 'utf-8');
+
+    const result = await executeListDirectory(
+      { path: tempDir },
+      makeContext({
+        deniedPaths: [
+          { path: '/other', enabled: true },
+          { path: tempDir, enabled: false },
+        ],
+      })
+    );
+    expect(result.entries.some((e) => e.name === 'disabled-denied.txt')).toBe(true);
   });
 });

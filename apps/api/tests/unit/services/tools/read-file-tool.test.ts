@@ -29,13 +29,40 @@ describe('normalizeReadFileToolSettings', () => {
     expect(settings.deniedPaths).toEqual([]);
   });
 
-  it('normalizes string list parameters', () => {
+  it('normalizes path list parameters', () => {
+    const settings = normalizeReadFileToolSettings({
+      allowedPaths: [
+        { path: '/home', enabled: true },
+        { path: '/tmp', enabled: false },
+      ],
+      deniedPaths: [
+        { path: '/etc', enabled: true },
+        { path: '/root', enabled: true },
+      ],
+    });
+    expect(settings.allowedPaths).toEqual([
+      { path: '/home', enabled: true },
+      { path: '/tmp', enabled: false },
+    ]);
+    expect(settings.deniedPaths).toEqual([
+      { path: '/etc', enabled: true },
+      { path: '/root', enabled: true },
+    ]);
+  });
+
+  it('normalizes legacy string list parameters for backward compatibility', () => {
     const settings = normalizeReadFileToolSettings({
       allowedPaths: ['/home', '/tmp'],
       deniedPaths: '/etc\n/root',
     });
-    expect(settings.allowedPaths).toEqual(['/home', '/tmp']);
-    expect(settings.deniedPaths).toEqual(['/etc', '/root']);
+    expect(settings.allowedPaths).toEqual([
+      { path: '/home', enabled: true },
+      { path: '/tmp', enabled: true },
+    ]);
+    expect(settings.deniedPaths).toEqual([
+      { path: '/etc', enabled: true },
+      { path: '/root', enabled: true },
+    ]);
   });
 });
 
@@ -119,5 +146,43 @@ describe('executeReadFile', () => {
       makeContext({ allowedPaths: [tempDir] })
     );
     expect(result.content).toBe('allowed content');
+  });
+
+  it('ignores disabled allowed paths', async () => {
+    const filePath = join(tempDir, 'disabled-allowed.txt');
+    writeFileSync(filePath, 'content', 'utf-8');
+
+    let threw = false;
+    try {
+      await executeReadFile(
+        { path: filePath },
+        makeContext({
+          allowedPaths: [
+            { path: '/other', enabled: true },
+            { path: tempDir, enabled: false },
+          ],
+        })
+      );
+    } catch (err) {
+      threw = true;
+      expect((err as Error).message).toContain('not in the allowed paths');
+    }
+    expect(threw).toBe(true);
+  });
+
+  it('ignores disabled denied paths', async () => {
+    const filePath = join(tempDir, 'disabled-denied.txt');
+    writeFileSync(filePath, 'content', 'utf-8');
+
+    const result = await executeReadFile(
+      { path: filePath },
+      makeContext({
+        deniedPaths: [
+          { path: '/other', enabled: true },
+          { path: tempDir, enabled: false },
+        ],
+      })
+    );
+    expect(result.content).toBe('content');
   });
 });

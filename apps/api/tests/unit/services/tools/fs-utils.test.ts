@@ -73,7 +73,7 @@ describe('resolveAndValidatePath', () => {
     const subDir = join(tempDir, 'sub');
     mkdirSync(subDir);
     const resolved = resolveAndValidatePath(subDir, {
-      allowedPaths: [tempDir],
+      allowedPaths: [{ path: tempDir, enabled: true }],
       deniedPaths: [],
     });
     expect(resolved).toBe(subDir);
@@ -81,19 +81,28 @@ describe('resolveAndValidatePath', () => {
 
   it('rejects paths outside the allowed list', () => {
     expect(() =>
-      resolveAndValidatePath('/etc', { allowedPaths: [tempDir], deniedPaths: [] })
+      resolveAndValidatePath('/etc', {
+        allowedPaths: [{ path: tempDir, enabled: true }],
+        deniedPaths: [],
+      })
     ).toThrow(PathAccessError);
   });
 
   it('rejects denied paths', () => {
     expect(() =>
-      resolveAndValidatePath('/etc/passwd', { allowedPaths: [], deniedPaths: ['/etc/passwd'] })
+      resolveAndValidatePath('/etc/passwd', {
+        allowedPaths: [],
+        deniedPaths: [{ path: '/etc/passwd', enabled: true }],
+      })
     ).toThrow(PathAccessError);
   });
 
   it('rejects paths inside a denied directory', () => {
     expect(() =>
-      resolveAndValidatePath('/etc/ssh', { allowedPaths: [], deniedPaths: ['/etc'] })
+      resolveAndValidatePath('/etc/ssh', {
+        allowedPaths: [],
+        deniedPaths: [{ path: '/etc', enabled: true }],
+      })
     ).toThrow(PathAccessError);
   });
 
@@ -101,8 +110,8 @@ describe('resolveAndValidatePath', () => {
     const subDir = join(tempDir, 'nested');
     mkdirSync(subDir);
     const resolved = resolveAndValidatePath(subDir, {
-      allowedPaths: [tempDir],
-      deniedPaths: ['/unrelated'],
+      allowedPaths: [{ path: tempDir, enabled: true }],
+      deniedPaths: [{ path: '/unrelated', enabled: true }],
     });
     expect(resolved).toBe(subDir);
   });
@@ -112,8 +121,8 @@ describe('resolveAndValidatePath', () => {
     mkdirSync(deniedSub);
     expect(() =>
       resolveAndValidatePath(deniedSub, {
-        allowedPaths: [tempDir],
-        deniedPaths: [deniedSub],
+        allowedPaths: [{ path: tempDir, enabled: true }],
+        deniedPaths: [{ path: deniedSub, enabled: true }],
       })
     ).toThrow(PathAccessError);
   });
@@ -122,7 +131,35 @@ describe('resolveAndValidatePath', () => {
     const home = Bun.env.HOME ?? '';
     if (!home) return;
     expect(() =>
-      resolveAndValidatePath(home, { allowedPaths: ['~'], deniedPaths: [] })
+      resolveAndValidatePath(home, {
+        allowedPaths: [{ path: '~', enabled: true }],
+        deniedPaths: [],
+      })
     ).not.toThrow();
+  });
+
+  it('ignores disabled allowed paths', () => {
+    expect(() =>
+      resolveAndValidatePath('/etc', {
+        allowedPaths: [
+          { path: tempDir, enabled: true },
+          { path: '/etc', enabled: false },
+        ],
+        deniedPaths: [],
+      })
+    ).toThrow(PathAccessError);
+  });
+
+  it('ignores disabled denied paths', () => {
+    const subDir = join(tempDir, 'allowed');
+    mkdirSync(subDir);
+    const resolved = resolveAndValidatePath(subDir, {
+      allowedPaths: [],
+      deniedPaths: [
+        { path: tempDir, enabled: false },
+        { path: '/other', enabled: true },
+      ],
+    });
+    expect(resolved).toBe(subDir);
   });
 });
