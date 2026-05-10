@@ -62,11 +62,11 @@ export function ToolSettingsPage({
   return (
     <div className="space-y-6">
       {/* ── Execution section ── */}
-      <Card variant="solid" className="space-y-3 p-6">
+      <Card variant="solid" className="space-y-3 p-4 sm:p-6">
         <h3 className="text-xs uppercase tracking-widest font-bold text-on-surface-variant/80 font-label">
           {s.executionTitle}
         </h3>
-        <div className="flex items-baseline justify-between gap-4">
+        <div className="flex flex-col sm:flex-row sm:items-baseline sm:justify-between gap-1 sm:gap-4">
           <h4 className="text-sm text-on-surface font-medium">{s.maxToolIterationsLabel}</h4>
           <span className="text-sm font-medium text-on-surface">{hintText}</span>
         </div>

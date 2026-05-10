@@ -34,7 +34,7 @@ export function CacheSettingsSection({
   };
 
   return (
-    <Card variant="solid" className="space-y-4 p-6">
+    <Card variant="solid" className="space-y-4 p-4 sm:p-6">
       <h3 className="text-xs uppercase tracking-widest font-bold text-on-surface-variant">
         {s.sectionCache}
       </h3>

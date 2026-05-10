@@ -135,7 +135,7 @@ export function ToolSettingsCard({ descriptor }: ToolSettingsCardProps) {
   );
 
   return (
-    <Card variant="solid" className="space-y-4 p-6">
+    <Card variant="solid" className="space-y-4 p-4 sm:p-6">
       <div className="flex items-start justify-between gap-4">
         <div className="space-y-1 min-w-0">
           <h4 className="text-sm font-bold text-on-surface">{translated.title}</h4>

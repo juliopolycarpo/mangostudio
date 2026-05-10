@@ -22,8 +22,8 @@ export function ConnectorList({
   const s = t.settings.connectors;
 
   return (
-    <Card variant="solid" className="p-6 space-y-4">
-      <div className="flex items-center justify-between">
+    <Card variant="solid" className="p-4 sm:p-6 space-y-4">
+      <div className="flex items-center justify-between gap-3">
         <h2 className="text-xs uppercase tracking-widest font-bold text-on-surface-variant/80 font-label">
           {s.title}
         </h2>

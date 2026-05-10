@@ -55,7 +55,7 @@ export function GeneralSettings({
   return (
     <div className="space-y-4">
       {/* ── Language ── */}
-      <Card variant="solid" className="space-y-3 p-6">
+      <Card variant="solid" className="space-y-3 p-4 sm:p-6">
         <h3 className="text-xs uppercase tracking-widest font-bold text-on-surface-variant/80 font-label">
           {s.languageLabel}
         </h3>
@@ -81,11 +81,11 @@ export function GeneralSettings({
       </Card>
 
       {/* ── Default Image Quality ── */}
-      <Card variant="solid" className="space-y-3 p-6">
+      <Card variant="solid" className="space-y-3 p-4 sm:p-6">
         <h3 className="text-xs uppercase tracking-widest font-bold text-on-surface-variant/80 font-label">
           {s.imageQualityLabel}
         </h3>
-        <div className="grid grid-cols-4 gap-2">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
           {IMAGE_QUALITY_OPTIONS.map((q) => (
             <Button
               key={q}
@@ -99,7 +99,7 @@ export function GeneralSettings({
         </div>
       </Card>
 
-      <Card variant="solid" className="space-y-4 p-6">
+      <Card variant="solid" className="space-y-4 p-4 sm:p-6">
         <div className="flex items-start justify-between gap-4">
           <div className="space-y-1">
             <h3 className="text-xs uppercase tracking-widest font-bold text-on-surface-variant/80 font-label">
@@ -167,7 +167,7 @@ export function GeneralSettings({
         ) : null}
 
         <div className="space-y-3">
-          <div className="flex items-baseline justify-between gap-4">
+          <div className="flex flex-col sm:flex-row sm:items-baseline sm:justify-between gap-1 sm:gap-4">
             <label
               htmlFor="chat-title-prefix-length"
               className="text-xs uppercase tracking-widest font-bold text-on-surface-variant/80 font-label"

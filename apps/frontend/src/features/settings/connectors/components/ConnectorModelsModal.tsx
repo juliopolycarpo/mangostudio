@@ -43,7 +43,7 @@ export function ConnectorModelsModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-sm animate-in fade-in duration-200">
-      <div className="bg-surface-container-high w-full max-w-lg rounded-3xl p-8 shadow-2xl border border-outline-variant/20 flex flex-col max-h-[80vh]">
+      <div className="bg-surface-container-high w-full max-w-lg rounded-3xl p-5 sm:p-8 shadow-2xl border border-outline-variant/20 flex flex-col max-h-[90vh] sm:max-h-[80vh]">
         <div className="space-y-2 mb-6">
           <h3 className="text-xl font-bold text-on-surface">{s.modelsModalTitle}</h3>
           <p className="text-sm text-on-surface-variant/70">

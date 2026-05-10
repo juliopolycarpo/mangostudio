@@ -45,7 +45,7 @@ export function RuleFileCard({
   labels,
 }: RuleFileCardProps) {
   return (
-    <div className="space-y-4 p-5 bg-surface-container-lowest rounded-xl border border-outline-variant/10">
+    <div className="space-y-4 p-4 sm:p-5 bg-surface-container-lowest rounded-xl border border-outline-variant/10">
       <div className="flex items-start justify-between gap-4">
         <div className="flex-1 space-y-1.5">
           {isFixed ? (
