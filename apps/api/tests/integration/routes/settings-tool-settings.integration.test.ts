@@ -41,6 +41,8 @@ describe('settings tool settings routes', () => {
     expect(Value.Check(ToolSettingsListResponseSchema, payload)).toBe(true);
     expect(toolNames).toContain('get_current_datetime');
     expect(toolNames).toContain('generate_image');
+    expect(toolNames).toContain('read_file');
+    expect(toolNames).toContain('list_directory');
     expect(payload.tools.find((tool) => tool.name === 'get_current_datetime')).toMatchObject({
       enabled: true,
     });
