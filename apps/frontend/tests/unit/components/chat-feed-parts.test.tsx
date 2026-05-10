@@ -74,10 +74,8 @@ describe('ChatFeed — MessageParts interleaved rendering', () => {
     const { container } = render(<ChatFeed chatId="chat-1" messages={[msg]} />);
 
     const thinkingButtons = container.querySelectorAll('button');
-    const thoughtProcessButtons = Array.from(thinkingButtons).filter(
-      (btn) =>
-        btn.textContent?.includes('Thought process') ||
-        btn.textContent?.includes('Continued thinking')
+    const thoughtProcessButtons = Array.from(thinkingButtons).filter((btn) =>
+      btn.textContent?.includes('Thought process')
     );
     expect(thoughtProcessButtons).toHaveLength(2);
   });
