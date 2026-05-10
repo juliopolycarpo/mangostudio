@@ -467,6 +467,12 @@ export const messages = {
     running: 'Executando ferramenta',
     done: 'Concluído',
     error: 'Erro na ferramenta',
+    labels: {
+      list_directory: 'Listar',
+      read_file: 'Leu',
+      generate_image: 'Gerar Imagem',
+      get_current_datetime: 'Data',
+    },
   },
 
   errors: {
