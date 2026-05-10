@@ -1,7 +1,6 @@
 import { Wrench, CheckCircle, AlertCircle, ChevronDown } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { useState } from 'react';
-import { useI18n } from '@/hooks/use-i18n';
 
 interface ToolCallBlockProps {
   name: string;
@@ -12,7 +11,6 @@ interface ToolCallBlockProps {
 }
 
 export function ToolCallBlock({ name, args, result, isError, isPending }: ToolCallBlockProps) {
-  const { t } = useI18n();
   const [expanded, setExpanded] = useState(false);
 
   let parsedResult: unknown = null;
@@ -45,10 +43,7 @@ export function ToolCallBlock({ name, args, result, isError, isPending }: ToolCa
         ) : (
           <CheckCircle size={11} />
         )}
-        <span className="font-mono tracking-wide">
-          {isPending ? t.tools.calling : isError ? t.tools.error : t.tools.done}{' '}
-          <span className="opacity-70">{name}()</span>
-        </span>
+        <span className="font-mono tracking-wide">{name}()</span>
         <ChevronDown
           size={11}
           className={`transition-transform duration-300 opacity-50 ${expanded ? 'rotate-180' : ''}`}
