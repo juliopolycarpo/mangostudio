@@ -20,6 +20,39 @@ export function normalizeStringList(value: unknown): string[] {
   return [];
 }
 
+export function normalizePathList(value: unknown): PathListItem[] {
+  if (Array.isArray(value)) {
+    // If the array contains only strings, treat it as a legacy string list
+    const allStrings = value.every((item) => typeof item === 'string');
+    if (allStrings) {
+      const strings = normalizeStringList(value);
+      return strings.map((path) => ({ path, enabled: true }));
+    }
+
+    const items: PathListItem[] = [];
+    for (const raw of value) {
+      if (
+        typeof raw === 'object' &&
+        raw !== null &&
+        'path' in raw &&
+        typeof (raw as Record<string, unknown>).path === 'string' &&
+        'enabled' in raw &&
+        typeof (raw as Record<string, unknown>).enabled === 'boolean'
+      ) {
+        const entry = raw as { path: string; enabled: boolean };
+        const trimmed = entry.path.trim();
+        if (trimmed.length > 0) {
+          items.push({ path: trimmed, enabled: entry.enabled });
+        }
+      }
+    }
+    return items;
+  }
+  // Backward compatibility: newline-separated string
+  const strings = normalizeStringList(value);
+  return strings.map((path) => ({ path, enabled: true }));
+}
+
 export function expandHome(path: string): string {
   if (path === '~' || path.startsWith('~/')) {
     const home = Bun.env.HOME ?? '';
@@ -30,9 +63,14 @@ export function expandHome(path: string): string {
   return path;
 }
 
+export interface PathListItem {
+  path: string;
+  enabled: boolean;
+}
+
 export interface PathValidationSettings {
-  allowedPaths: readonly string[];
-  deniedPaths: readonly string[];
+  allowedPaths: readonly PathListItem[];
+  deniedPaths: readonly PathListItem[];
 }
 
 export class PathAccessError extends Error {
@@ -49,9 +87,10 @@ export function resolveAndValidatePath(
   const expanded = expandHome(inputPath);
   const resolved = resolve(expanded);
 
-  if (settings.allowedPaths.length > 0) {
-    const isAllowed = settings.allowedPaths.some((allowed) => {
-      const allowedResolved = resolve(expandHome(allowed));
+  const enabledAllowed = settings.allowedPaths.filter((item) => item.enabled);
+  if (enabledAllowed.length > 0) {
+    const isAllowed = enabledAllowed.some((allowed) => {
+      const allowedResolved = resolve(expandHome(allowed.path));
       return resolved === allowedResolved || resolved.startsWith(`${allowedResolved}/`);
     });
     if (!isAllowed) {
@@ -59,9 +98,10 @@ export function resolveAndValidatePath(
     }
   }
 
-  if (settings.deniedPaths.length > 0) {
-    const isDenied = settings.deniedPaths.some((denied) => {
-      const deniedResolved = resolve(expandHome(denied));
+  const enabledDenied = settings.deniedPaths.filter((item) => item.enabled);
+  if (enabledDenied.length > 0) {
+    const isDenied = enabledDenied.some((denied) => {
+      const deniedResolved = resolve(expandHome(denied.path));
       return resolved === deniedResolved || resolved.startsWith(`${deniedResolved}/`);
     });
     if (isDenied) {

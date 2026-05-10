@@ -8,7 +8,7 @@ import type { ToolContext } from '../types';
 import { registerTool } from '../registry';
 import {
   type PathValidationSettings,
-  normalizeStringList,
+  normalizePathList,
   PathAccessError,
   resolveAndValidatePath,
 } from './_fs-utils';
@@ -52,8 +52,8 @@ export function normalizeListDirectoryToolSettings(
   parameters: Record<string, unknown>
 ): ListDirectoryToolSettings {
   return {
-    allowedPaths: normalizeStringList(parameters.allowedPaths),
-    deniedPaths: normalizeStringList(parameters.deniedPaths),
+    allowedPaths: normalizePathList(parameters.allowedPaths),
+    deniedPaths: normalizePathList(parameters.deniedPaths),
   };
 }
 
@@ -107,20 +107,18 @@ export function register(): void {
         {
           name: 'allowedPaths',
           label: 'Allowed paths',
-          description:
-            'List of paths the tool is allowed to access (one per line). Leave empty to allow all.',
-          type: 'string_list',
+          description: 'List of paths the tool is allowed to access. Leave empty to allow all.',
+          type: 'path_list',
           required: false,
-          defaultValue: [] as string[],
+          defaultValue: [] as Array<{ path: string; enabled: boolean }>,
         },
         {
           name: 'deniedPaths',
           label: 'Denied paths',
-          description:
-            'List of paths the tool is denied from accessing (one per line). Leave empty to deny none.',
-          type: 'string_list',
+          description: 'List of paths the tool is denied from accessing. Leave empty to deny none.',
+          type: 'path_list',
           required: false,
-          defaultValue: [] as string[],
+          defaultValue: [] as Array<{ path: string; enabled: boolean }>,
         },
       ],
     },
