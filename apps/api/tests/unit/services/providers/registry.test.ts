@@ -6,6 +6,7 @@ import {
   getProvider,
   invalidateProviderRoutingCache,
   listRegisteredProviderTypes,
+  setProviderRegistryDbForTests,
 } from '../../../../src/services/providers/core/provider-registry';
 import {
   getProviderObservabilityMetrics,
@@ -13,6 +14,16 @@ import {
 } from '../../../../src/services/providers/core/provider-observability';
 import type { AIProvider } from '../../../../src/services/providers/types';
 import { getDb } from '../../../../src/db/database';
+
+function createProviderRegistryDbStub(execute: () => Promise<unknown[]>) {
+  return () => ({
+    selectFrom: () => ({
+      select: () => ({
+        where: () => ({ execute }),
+      }),
+    }),
+  });
+}
 
 function makeStubProvider(
   type: 'gemini' | 'openai-compatible' | 'anthropic' | 'deepseek'
@@ -41,12 +52,14 @@ describe('provider registry', () => {
     resetProviderObservability();
     snapshot = listRegisteredProviderTypes().map((type) => getProvider(type));
     clearRegistry();
+    setProviderRegistryDbForTests();
   });
 
   afterEach(() => {
     clearRegistry();
     snapshot.forEach((p) => registerProvider(p));
     resetProviderObservability();
+    setProviderRegistryDbForTests();
   });
 
   afterEach(async () => {
@@ -75,25 +88,17 @@ describe('provider registry', () => {
   it('caches provider routing for repeated model lookups', async () => {
     let executeCount = 0;
 
-    await mock.module('../../../../src/db/database', () => ({
-      getDb: () => ({
-        selectFrom: () => ({
-          select: () => ({
-            where: () => ({
-              execute: () => {
-                executeCount++;
-                return Promise.resolve([
-                  {
-                    provider: 'gemini',
-                    enabledModels: JSON.stringify(['gemini-2.5-flash']),
-                  },
-                ]);
-              },
-            }),
-          }),
-        }),
-      }),
-    }));
+    setProviderRegistryDbForTests(
+      createProviderRegistryDbStub(() => {
+        executeCount++;
+        return Promise.resolve([
+          {
+            provider: 'gemini',
+            enabledModels: JSON.stringify(['gemini-2.5-flash']),
+          },
+        ]);
+      }) as unknown as typeof getDb
+    );
 
     const stub = makeStubProvider('gemini');
     registerProvider(stub);
@@ -114,25 +119,17 @@ describe('provider registry', () => {
   it('clears cached routes when provider routing cache is invalidated', async () => {
     let executeCount = 0;
 
-    await mock.module('../../../../src/db/database', () => ({
-      getDb: () => ({
-        selectFrom: () => ({
-          select: () => ({
-            where: () => ({
-              execute: () => {
-                executeCount++;
-                return Promise.resolve([
-                  {
-                    provider: 'gemini',
-                    enabledModels: JSON.stringify(['gemini-2.5-flash']),
-                  },
-                ]);
-              },
-            }),
-          }),
-        }),
-      }),
-    }));
+    setProviderRegistryDbForTests(
+      createProviderRegistryDbStub(() => {
+        executeCount++;
+        return Promise.resolve([
+          {
+            provider: 'gemini',
+            enabledModels: JSON.stringify(['gemini-2.5-flash']),
+          },
+        ]);
+      }) as unknown as typeof getDb
+    );
 
     registerProvider(makeStubProvider('gemini'));
 

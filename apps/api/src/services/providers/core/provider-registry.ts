@@ -19,6 +19,7 @@ interface CachedProviderRoute {
 }
 
 const providerRouteCache = new Map<string, CachedProviderRoute>();
+let getProviderRegistryDb = getDb;
 
 function createProviderRouteCacheKey(userId: string, modelName: string): string {
   return `${userId}\u0000${modelName}`;
@@ -76,6 +77,13 @@ export function invalidateProviderRoutingCache(userId?: string): void {
 }
 
 /**
+ * Overrides the DB accessor used by model routing. Intended for test isolation only.
+ */
+export function setProviderRegistryDbForTests(dbAccessor?: typeof getDb): void {
+  getProviderRegistryDb = dbAccessor ?? getDb;
+}
+
+/**
  * Registers an AI provider. Calling this again with the same type replaces
  * the existing registration (useful in tests).
  */
@@ -129,7 +137,7 @@ export async function getProviderForModel(modelName: string, userId: string): Pr
     return getProvider(cachedProviderType);
   }
 
-  const db = getDb();
+  const db = getProviderRegistryDb();
   const rows = await db
     .selectFrom('secret_metadata')
     .select(['provider', 'enabledModels'])
