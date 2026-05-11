@@ -13,8 +13,15 @@ import '../../../services/tools'; // ensure all builtins are registered
 import { getDb } from '../../../db/database';
 import { requireAuth } from '../../../plugins/auth-middleware';
 import { verifyChatOwnership } from '../../chats/infrastructure/chat-repository';
-import { resolveModel, NoModelAvailableError } from '../application/resolve-model';
-import { getProviderForModel } from '../../../services/providers/core/provider-registry';
+import {
+  resolveModel,
+  NoModelAvailableError,
+  type ResolvedModel,
+} from '../application/resolve-model';
+import {
+  getProvider,
+  getProviderForModel,
+} from '../../../services/providers/core/provider-registry';
 import { streamTextTurn, type StreamEvent } from '../application/stream-text-turn';
 import {
   assertChatAttachmentIdsAvailable,
@@ -176,14 +183,13 @@ export const respondStreamRoutes = (app: Elysia) =>
           }
 
           // Model resolution must be pre-flight to return HTTP 503 before SSE headers flush.
-          let resolvedModel: string;
+          let resolvedModel: ResolvedModel;
           try {
-            const { modelId } = await resolveModel({
+            resolvedModel = await resolveModel({
               requestedModel: body.model,
               userId,
               type: 'text',
             });
-            resolvedModel = modelId;
           } catch (err) {
             if (err instanceof NoModelAvailableError) {
               set.status = 503;
@@ -194,7 +200,11 @@ export const respondStreamRoutes = (app: Elysia) =>
 
           // Provider lookup must be pre-flight to return HTTP 400 before SSE headers flush.
           try {
-            await getProviderForModel(resolvedModel, userId);
+            if (resolvedModel.providerType) {
+              getProvider(resolvedModel.providerType);
+            } else {
+              await getProviderForModel(resolvedModel.modelId, userId);
+            }
           } catch {
             set.status = 400;
             return {
@@ -222,7 +232,7 @@ export const respondStreamRoutes = (app: Elysia) =>
                     userId,
                     prompt: body.prompt,
                     attachmentIds,
-                    model: resolvedModel,
+                    model: resolvedModel.modelId,
                     systemPrompt: body.systemPrompt,
                     promptSettings: body.promptSettings,
                     thinkingEnabled: body.thinkingEnabled ?? body.thinkingVisibility !== 'off',
@@ -231,6 +241,7 @@ export const respondStreamRoutes = (app: Elysia) =>
                     contextSettings: body.contextSettings,
                     toolIntent: body.toolIntent,
                     signal: abortController.signal,
+                    resolvedModel,
                   },
                   db
                 )) {

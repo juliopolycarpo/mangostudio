@@ -1,8 +1,9 @@
 import {
-  getCachedModelCapabilities,
+  getCachedModelMetadata,
   getUnifiedModelCatalog,
 } from '../../../services/providers/catalog';
 import type { ModelCapabilities } from '../../../services/providers/types';
+import type { ProviderType } from '@mangostudio/shared/types';
 
 export interface ResolveModelInput {
   requestedModel?: string;
@@ -13,6 +14,7 @@ export interface ResolveModelInput {
 export interface ResolvedModel {
   modelId: string;
   capabilities?: ModelCapabilities;
+  providerType?: ProviderType;
 }
 
 export class NoModelAvailableError extends Error {
@@ -29,6 +31,7 @@ export class NoModelAvailableError extends Error {
 export async function resolveModel(input: ResolveModelInput): Promise<ResolvedModel> {
   let modelId = input.requestedModel?.trim() || '';
   let capabilities: ModelCapabilities | undefined;
+  let providerType: ProviderType | undefined;
 
   if (!modelId) {
     const catalog = await getUnifiedModelCatalog(input.userId);
@@ -40,13 +43,20 @@ export async function resolveModel(input: ResolveModelInput): Promise<ResolvedMo
     const selectedModel = availableModels[0];
     modelId = selectedModel.modelId;
     capabilities = selectedModel.capabilities;
+    providerType = selectedModel.provider;
   } else {
-    capabilities = getCachedModelCapabilities(input.userId, modelId);
+    const cachedModel = getCachedModelMetadata(input.userId, modelId);
+    capabilities = cachedModel?.capabilities;
+    providerType = cachedModel?.providerType;
   }
 
   if (!modelId) {
     throw new NoModelAvailableError(input.type);
   }
 
-  return capabilities ? { modelId, capabilities } : { modelId };
+  return {
+    modelId,
+    ...(capabilities ? { capabilities } : {}),
+    ...(providerType ? { providerType } : {}),
+  };
 }

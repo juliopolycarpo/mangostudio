@@ -4,7 +4,10 @@ import type { GeneratedImageArtifact } from '@mangostudio/shared';
 import type { PromptSettings } from '@mangostudio/shared/prompt-rules';
 import { assertChatOwnership } from '../../chats/domain/chat-ownership';
 import { resolveModel } from './resolve-model';
-import { getProviderForModel } from '../../../services/providers/core/provider-registry';
+import {
+  getProvider,
+  getProviderForModel,
+} from '../../../services/providers/core/provider-registry';
 import { warmProviderForRequest } from '../../../services/providers/core/provider-readiness';
 import { generateId } from '../../../utils/id';
 import { persistImageTurn } from '../infrastructure/conversation-persistence';
@@ -59,13 +62,15 @@ export async function generateImage(
 ): Promise<GenerateImageResult> {
   await assertChatOwnership(input.chatId, input.userId, db);
 
-  const { modelId } = await resolveModel({
+  const { modelId, providerType } = await resolveModel({
     requestedModel: input.model,
     userId: input.userId,
     type: 'image',
   });
 
-  const provider = await getProviderForModel(modelId, input.userId);
+  const provider = providerType
+    ? getProvider(providerType)
+    : await getProviderForModel(modelId, input.userId);
   if (!provider.generateImage) {
     throw new ImageProviderNotSupportedError();
   }
