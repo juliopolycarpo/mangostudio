@@ -4,6 +4,7 @@ import {
   type GenerateChatTitleResponse,
 } from '@mangostudio/shared/chat';
 import { getProviderForModel } from '../../../services/providers/core/provider-registry';
+import { warmProviderForRequest } from '../../../services/providers/core/provider-readiness';
 import { resolveModel } from '../../generation/application/resolve-model';
 
 const CHAT_TITLE_SYSTEM_PROMPT =
@@ -36,6 +37,11 @@ export async function generateChatTitleUseCase(
     type: 'text',
   });
   const provider = await getProviderForModel(modelId, input.userId);
+  await warmProviderForRequest(provider.providerType, {
+    userId: input.userId,
+    modelName: modelId,
+    purpose: 'text',
+  });
   const result = await provider.generateText({
     userId: input.userId,
     history: [],

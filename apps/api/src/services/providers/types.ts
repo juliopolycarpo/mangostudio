@@ -198,6 +198,21 @@ export interface ModelInfo {
   capabilities: ModelCapabilities;
 }
 
+export type ProviderWarmupPurpose = 'text' | 'stream-text' | 'agent-turn' | 'image';
+
+export interface ProviderWarmupRequest {
+  userId: string;
+  modelName?: string;
+  purpose: ProviderWarmupPurpose;
+}
+
+export interface ProviderHealthcheckRequest {
+  apiKey?: string;
+  baseUrl?: string;
+  organizationId?: string;
+  projectId?: string;
+}
+
 /**
  * Contract that all AI provider adapters must implement.
  * Optional methods (generateTextStream, generateImage, generateAgentTurnStream) may be absent
@@ -216,6 +231,8 @@ export interface AIProvider {
   listModels(userId: string): Promise<ModelInfo[]>;
   invalidateModelCache?(userId?: string): void;
   syncConfigFileConnectors?(userId: string): Promise<void>;
+  warmup?(req: ProviderWarmupRequest): Promise<void>;
+  healthcheck?(req: ProviderHealthcheckRequest): Promise<void>;
   validateApiKey(apiKey: string): Promise<void>;
   resolveApiKey(userId: string, modelName?: string): Promise<string>;
 }

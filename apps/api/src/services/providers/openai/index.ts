@@ -8,6 +8,7 @@
  */
 
 import { registerProvider } from '../core/provider-registry';
+import { createReadinessCache } from '../core/readiness-cache';
 import { isReasoningModel } from '../core/capability-detector';
 import { createOpenAIClient, validateOpenAIAuthContext, type OpenAIAuthContext } from './client';
 import { secretService, listModelsWithCache, resolveAuthContext } from './model-catalog';
@@ -25,6 +26,8 @@ import type {
   ModelInfo,
   AgentTurnRequest,
   AgentEvent,
+  ProviderHealthcheckRequest,
+  ProviderWarmupRequest,
 } from '../types';
 
 // Re-export for backward compatibility with test imports and external consumers
@@ -33,12 +36,47 @@ export { OpenAIAuthError, OpenAIConfigError } from './client';
 export { extractReasoningFromCompleted, extractReasoningChunks };
 export { streamWithResponsesAPI } from './responses-stream';
 
+interface PreparedOpenAIRuntime {
+  readonly authContext: OpenAIAuthContext;
+  readonly client: ReturnType<typeof createOpenAIClient>;
+}
+
+const preparedRuntimeCache = createReadinessCache<PreparedOpenAIRuntime>();
+
+function createPreparedRuntimeKey(userId: string, modelName?: string): string {
+  return `${userId}\u0000${modelName ?? ''}`;
+}
+
+async function loadPreparedRuntime(
+  userId: string,
+  modelName?: string
+): Promise<PreparedOpenAIRuntime> {
+  const authContext = await resolveAuthContext(userId, modelName);
+  return {
+    authContext,
+    client: createOpenAIClient(authContext),
+  };
+}
+
+async function prepareRuntime(userId: string, modelName?: string): Promise<PreparedOpenAIRuntime> {
+  const cacheKey = createPreparedRuntimeKey(userId, modelName);
+  return preparedRuntimeCache.get(cacheKey, () => loadPreparedRuntime(userId, modelName));
+}
+
+function invalidatePreparedRuntime(userId?: string): void {
+  if (!userId) {
+    preparedRuntimeCache.clearWhere(() => true);
+    return;
+  }
+
+  preparedRuntimeCache.clearWhere((key) => key.startsWith(`${userId}\u0000`));
+}
+
 const openAIProvider: AIProvider = {
   providerType: 'openai',
 
   async generateText(req: TextGenerationRequest): Promise<TextGenerationResult> {
-    const ctx = await resolveAuthContext(req.userId, req.modelName);
-    const client = createOpenAIClient(ctx);
+    const { client } = await prepareRuntime(req.userId, req.modelName);
 
     const completion = await client.chat.completions.create(
       { model: req.modelName, messages: buildChatMessages(req), stream: false },
@@ -51,8 +89,7 @@ const openAIProvider: AIProvider = {
   },
 
   async *generateTextStream(req: TextGenerationRequest): AsyncIterable<StreamingChunk> {
-    const ctx = await resolveAuthContext(req.userId, req.modelName);
-    const client = createOpenAIClient(ctx);
+    const { client } = await prepareRuntime(req.userId, req.modelName);
 
     if (isReasoningModel(req.modelName) && req.generationConfig?.thinkingEnabled) {
       yield* streamWithResponsesAPI(client, req);
@@ -71,14 +108,12 @@ const openAIProvider: AIProvider = {
   },
 
   async *generateAgentTurnStream(req: AgentTurnRequest): AsyncIterable<AgentEvent> {
-    const ctx = await resolveAuthContext(req.userId, req.modelName);
-    const client = createOpenAIClient(ctx);
+    const { client } = await prepareRuntime(req.userId, req.modelName);
     yield* streamAgentTurnWithResponsesAPI(client, req);
   },
 
   async generateImage(req: ImageGenerationRequest): Promise<ImageGenerationResult> {
-    const ctx = await resolveAuthContext(req.userId, req.modelName);
-    const client = createOpenAIClient(ctx);
+    const { client } = await prepareRuntime(req.userId, req.modelName);
     return generateOpenAIImage(client, req);
   },
 
@@ -88,10 +123,29 @@ const openAIProvider: AIProvider = {
 
   invalidateModelCache(userId?: string): void {
     listModelsWithCache.invalidate(userId);
+    invalidatePreparedRuntime(userId);
   },
 
   async syncConfigFileConnectors(userId: string): Promise<void> {
     await secretService.syncConfigFileConnectors(userId);
+  },
+
+  async warmup(req: ProviderWarmupRequest): Promise<void> {
+    await preparedRuntimeCache.prime(createPreparedRuntimeKey(req.userId, req.modelName), () =>
+      loadPreparedRuntime(req.userId, req.modelName)
+    );
+  },
+
+  async healthcheck(req: ProviderHealthcheckRequest): Promise<void> {
+    if (!req.apiKey?.trim()) {
+      throw new Error('openai healthcheck requires an API key.');
+    }
+
+    await validateOpenAIAuthContext({
+      apiKey: req.apiKey.trim(),
+      organizationId: req.organizationId,
+      projectId: req.projectId,
+    });
   },
 
   async validateApiKey(apiKey: string): Promise<void> {

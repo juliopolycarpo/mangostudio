@@ -17,6 +17,7 @@ import { assertChatOwnership } from '../../chats/domain/chat-ownership';
 import { resolveModel } from './resolve-model';
 import { loadHistory, loadRichHistory } from '../../messages/infrastructure/message-repository';
 import { getProviderForModel } from '../../../services/providers/core/provider-registry';
+import { warmProviderForRequest } from '../../../services/providers/core/provider-readiness';
 import { mergeProviderRuntimeSettings } from '../../../services/providers/core/provider-settings-policy';
 import { getProviderSettings } from '../../provider-settings/infrastructure/provider-settings-repository';
 import { listSavedToolSettings } from '../../tool-settings/infrastructure/tool-settings-repository';
@@ -162,6 +163,11 @@ export async function* streamTextTurn(
     savedProviderSettings,
     getRequestRuntimeSettings(provider.providerType, input)
   );
+  const warmupPromise = warmProviderForRequest(provider.providerType, {
+    userId: input.userId,
+    modelName: modelId,
+    purpose: provider.generateAgentTurnStream ? 'agent-turn' : 'stream-text',
+  });
 
   const now = Date.now();
   const userMsgId = generateId();
@@ -205,6 +211,7 @@ export async function* streamTextTurn(
       },
       db
     );
+    await warmupPromise;
 
     if (provider.generateAgentTurnStream) {
       const richHistory = await loadRichHistory(chatId, { excludeId: userMsgId }, db);

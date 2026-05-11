@@ -7,6 +7,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { registerProvider } from '../core/provider-registry';
 import { withModelCache } from '../core/model-cache';
+import { createReadinessCache } from '../core/readiness-cache';
 import { createProviderSecretService } from '../core/secret-service';
 import { isReasoningModel } from '../core/capability-detector';
 import { getModelContextLimit } from '../core/context-policy';
@@ -23,6 +24,8 @@ import type {
   ModelInfo,
   AgentTurnRequest,
   AgentEvent,
+  ProviderHealthcheckRequest,
+  ProviderWarmupRequest,
 } from '../types';
 
 /**
@@ -145,12 +148,51 @@ const listModelsWithCache = withModelCache(
   { ttl: 3_600_000, fallback: FALLBACK_MODELS }
 );
 
+interface PreparedAnthropicRuntime {
+  readonly apiKey: string;
+  readonly client: ReturnType<typeof createAnthropicClient>;
+}
+
+const preparedRuntimeCache = createReadinessCache<PreparedAnthropicRuntime>();
+
+function createPreparedRuntimeKey(userId: string, modelName?: string): string {
+  return `${userId}\u0000${modelName ?? ''}`;
+}
+
+async function loadPreparedRuntime(
+  userId: string,
+  modelName?: string
+): Promise<PreparedAnthropicRuntime> {
+  const apiKey = await secretService.resolveApiKey(userId, modelName);
+  return {
+    apiKey,
+    client: createAnthropicClient(apiKey),
+  };
+}
+
+async function prepareRuntime(
+  userId: string,
+  modelName?: string
+): Promise<PreparedAnthropicRuntime> {
+  return preparedRuntimeCache.get(createPreparedRuntimeKey(userId, modelName), () =>
+    loadPreparedRuntime(userId, modelName)
+  );
+}
+
+function invalidatePreparedRuntime(userId?: string): void {
+  if (!userId) {
+    preparedRuntimeCache.clearWhere(() => true);
+    return;
+  }
+
+  preparedRuntimeCache.clearWhere((key) => key.startsWith(`${userId}\u0000`));
+}
+
 const anthropicProvider: AIProvider = {
   providerType: 'anthropic',
 
   async generateText(req: TextGenerationRequest): Promise<TextGenerationResult> {
-    const apiKey = await secretService.resolveApiKey(req.userId, req.modelName);
-    const client = createAnthropicClient(apiKey);
+    const { client } = await prepareRuntime(req.userId, req.modelName);
 
     const response = await client.messages.create(
       {
@@ -172,14 +214,12 @@ const anthropicProvider: AIProvider = {
   },
 
   async *generateAgentTurnStream(req: AgentTurnRequest): AsyncIterable<AgentEvent> {
-    const apiKey = await secretService.resolveApiKey(req.userId, req.modelName);
-    const client = createAnthropicClient(apiKey);
+    const { client } = await prepareRuntime(req.userId, req.modelName);
     yield* streamAnthropicAgentTurn(client, req);
   },
 
   async *generateTextStream(req: TextGenerationRequest): AsyncIterable<StreamingChunk> {
-    const apiKey = await secretService.resolveApiKey(req.userId, req.modelName);
-    const client = createAnthropicClient(apiKey);
+    const { client } = await prepareRuntime(req.userId, req.modelName);
 
     const thinkingEnabled = req.generationConfig?.thinkingEnabled ?? false;
     const effort = req.generationConfig?.reasoningEffort ?? 'medium';
@@ -235,10 +275,25 @@ const anthropicProvider: AIProvider = {
 
   invalidateModelCache(userId?: string): void {
     listModelsWithCache.invalidate(userId);
+    invalidatePreparedRuntime(userId);
   },
 
   async syncConfigFileConnectors(userId: string): Promise<void> {
     await secretService.syncConfigFileConnectors(userId);
+  },
+
+  async warmup(req: ProviderWarmupRequest): Promise<void> {
+    await preparedRuntimeCache.prime(createPreparedRuntimeKey(req.userId, req.modelName), () =>
+      loadPreparedRuntime(req.userId, req.modelName)
+    );
+  },
+
+  async healthcheck(req: ProviderHealthcheckRequest): Promise<void> {
+    if (!req.apiKey?.trim()) {
+      throw new Error('anthropic healthcheck requires an API key.');
+    }
+
+    await secretService.validateApiKey(req.apiKey.trim());
   },
 
   async validateApiKey(apiKey: string): Promise<void> {

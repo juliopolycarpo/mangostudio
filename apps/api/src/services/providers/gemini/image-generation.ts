@@ -92,14 +92,14 @@ export async function generateGeminiImage(
   systemPrompt?: string,
   referenceImageUrl?: string,
   imageSize: string = '1K',
-  modelName?: string
+  modelName?: string,
+  client?: ReturnType<typeof createGeminiClient>
 ): Promise<string> {
   if (!modelName) {
     throw new Error('No Gemini image model was provided.');
   }
 
-  const apiKey = await getResolvedGeminiApiKey(userId, modelName);
-  const ai = createGeminiClient(apiKey);
+  const ai = client ?? createGeminiClient(await getResolvedGeminiApiKey(userId, modelName));
 
   const uploadsDir = getConfig().uploads.dir;
 

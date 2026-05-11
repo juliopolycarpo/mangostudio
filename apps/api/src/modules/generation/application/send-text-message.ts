@@ -5,6 +5,7 @@ import { assertChatOwnership } from '../../chats/domain/chat-ownership';
 import { resolveModel } from './resolve-model';
 import { loadHistory } from '../../messages/infrastructure/message-repository';
 import { getProviderForModel } from '../../../services/providers/core/provider-registry';
+import { warmProviderForRequest } from '../../../services/providers/core/provider-readiness';
 import { generateId } from '../../../utils/id';
 import { assertChatAttachmentIdsAvailable } from '../../attachments/infrastructure/attachment-repository';
 import { resolveProviderRuntimeAttachments } from '../../attachments/application/runtime-attachment-resolver';
@@ -65,6 +66,12 @@ export async function sendTextMessage(
     userId: input.userId,
     type: 'text',
   });
+  const provider = await getProviderForModel(modelId, input.userId);
+  const warmupPromise = warmProviderForRequest(provider.providerType, {
+    userId: input.userId,
+    modelName: modelId,
+    purpose: 'text',
+  });
 
   const now = Date.now();
   const userMsgId = generateId();
@@ -92,8 +99,8 @@ export async function sendTextMessage(
     db
   );
 
-  const provider = await getProviderForModel(modelId, input.userId);
   const startTime = Date.now();
+  await warmupPromise;
   const result = await provider.generateText({
     userId: input.userId,
     history,

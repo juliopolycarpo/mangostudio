@@ -6,6 +6,7 @@
 import type { EffectiveToolSettings, ToolContext, ToolDefinition } from '../types';
 import type { ImageGenerationRequest, ImageGenerationResult } from '../../providers/types';
 import { getProviderForModel } from '../../providers/core/provider-registry';
+import { warmProviderForRequest } from '../../providers/core/provider-readiness';
 import { resolveModel } from '../../../modules/generation/application/resolve-model';
 import { generateId } from '../../../utils/id';
 import { registerTool } from '../registry';
@@ -132,6 +133,11 @@ export async function* generateImagesForToolPlan(
     if (!provider.generateImage) {
       throw new Error('The resolved provider does not support image generation.');
     }
+    await warmProviderForRequest(provider.providerType, {
+      userId: context.userId,
+      modelName,
+      purpose: 'image',
+    });
     providerGenerateImage = (request) => {
       if (!provider.generateImage) {
         return Promise.reject(
