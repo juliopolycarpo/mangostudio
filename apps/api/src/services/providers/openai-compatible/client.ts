@@ -8,10 +8,38 @@ import { getOrCreateCachedClient } from '../core/client-cache';
 
 const clientCache = new Map<string, OpenAI>();
 
-export function createCompatibleClient(apiKey: string, baseUrl: string): OpenAI {
+interface CompatibleClientOptions {
+  readonly timeoutMs?: number;
+  readonly maxRetries?: number;
+}
+
+function createCacheKey(
+  apiKey: string,
+  baseUrl: string,
+  options?: CompatibleClientOptions
+): string {
+  return [
+    baseUrl,
+    apiKey,
+    String(options?.timeoutMs ?? ''),
+    String(options?.maxRetries ?? ''),
+  ].join('\u0000');
+}
+
+export function createCompatibleClient(
+  apiKey: string,
+  baseUrl: string,
+  options: CompatibleClientOptions = {}
+): OpenAI {
   return getOrCreateCachedClient(
     clientCache,
-    `${baseUrl}\u0000${apiKey}`,
-    () => new OpenAI({ apiKey, baseURL: baseUrl })
+    createCacheKey(apiKey, baseUrl, options),
+    () =>
+      new OpenAI({
+        apiKey,
+        baseURL: baseUrl,
+        ...(options.timeoutMs ? { timeout: options.timeoutMs } : {}),
+        ...(options.maxRetries !== undefined ? { maxRetries: options.maxRetries } : {}),
+      })
   );
 }

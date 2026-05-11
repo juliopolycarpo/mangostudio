@@ -8,6 +8,7 @@ import { registerProvider } from '../core/provider-registry';
 import { validateBaseUrl } from '../core/base-url-policy';
 import { withModelCache } from '../core/model-cache';
 import { createReadinessCache } from '../core/readiness-cache';
+import { PROVIDER_PROBE_TIMEOUT_MS, withAbortTimeout } from '../core/probe-timeout';
 import { createProviderSecretService } from '../core/secret-service';
 import { isImageModelId, isReasoningModel } from '../core/capability-detector';
 import { buildChatMessages } from '../openai/message-mapper';
@@ -120,14 +121,21 @@ const listModelsWithCache = withModelCache(
 
     for (const [baseUrl, apiKey] of seenBaseUrls) {
       try {
-        const client = createCompatibleClient(apiKey, baseUrl);
+        const client = createCompatibleClient(apiKey, baseUrl, {
+          timeoutMs: PROVIDER_PROBE_TIMEOUT_MS,
+          maxRetries: 0,
+        });
         const endpoint = classifyEndpoint(baseUrl);
         // OpenRouter and DeepSeek advertise Chat Completions response_format JSON
         // Schema support. Generic endpoints are unknown territory — report false
         // so callers make no assumptions until verified.
         const supportsStructuredOutput = endpoint === 'openrouter' || endpoint === 'deepseek';
 
-        for await (const model of await client.models.list()) {
+        const modelsPage = await withAbortTimeout(
+          (signal) => client.models.list({ signal }),
+          `OpenAI-compatible model listing timed out for ${baseUrl}.`
+        );
+        for await (const model of modelsPage) {
           if (
             model.id.includes('embedding') ||
             model.id.includes('tts') ||
@@ -253,8 +261,14 @@ const openAICompatibleProvider: AIProvider = {
 
     const baseUrl = req.baseUrl.trim();
     await validateBaseUrl(baseUrl);
-    const client = createCompatibleClient(req.apiKey.trim(), baseUrl);
-    await client.models.list();
+    const client = createCompatibleClient(req.apiKey.trim(), baseUrl, {
+      timeoutMs: PROVIDER_PROBE_TIMEOUT_MS,
+      maxRetries: 0,
+    });
+    await withAbortTimeout(
+      (signal) => client.models.list({ signal }),
+      `OpenAI-compatible healthcheck timed out for ${baseUrl}.`
+    );
   },
 
   async validateApiKey(apiKey: string): Promise<void> {

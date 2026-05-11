@@ -9,6 +9,70 @@ import type { AIProvider } from '../types';
 import { parseStringArray } from '../../../utils/json';
 
 const registry = new Map<ProviderType, AIProvider>();
+const PROVIDER_ROUTE_CACHE_TTL_MS = 60_000;
+const MAX_PROVIDER_ROUTE_CACHE_ENTRIES = 1_000;
+
+interface CachedProviderRoute {
+  readonly providerType: ProviderType;
+  readonly expiresAt: number;
+}
+
+const providerRouteCache = new Map<string, CachedProviderRoute>();
+
+function createProviderRouteCacheKey(userId: string, modelName: string): string {
+  return `${userId}\u0000${modelName}`;
+}
+
+function evictOldestCachedRoute(): void {
+  if (providerRouteCache.size < MAX_PROVIDER_ROUTE_CACHE_ENTRIES) {
+    return;
+  }
+
+  const oldestKey = providerRouteCache.keys().next().value;
+  if (oldestKey !== undefined) {
+    providerRouteCache.delete(oldestKey);
+  }
+}
+
+function getCachedProviderRoute(userId: string, modelName: string): ProviderType | undefined {
+  const cacheKey = createProviderRouteCacheKey(userId, modelName);
+  const cachedRoute = providerRouteCache.get(cacheKey);
+  if (!cachedRoute) {
+    return undefined;
+  }
+
+  if (cachedRoute.expiresAt <= Date.now()) {
+    providerRouteCache.delete(cacheKey);
+    return undefined;
+  }
+
+  return cachedRoute.providerType;
+}
+
+function setCachedProviderRoute(
+  userId: string,
+  modelName: string,
+  providerType: ProviderType
+): void {
+  evictOldestCachedRoute();
+  providerRouteCache.set(createProviderRouteCacheKey(userId, modelName), {
+    providerType,
+    expiresAt: Date.now() + PROVIDER_ROUTE_CACHE_TTL_MS,
+  });
+}
+
+export function invalidateProviderRoutingCache(userId?: string): void {
+  if (!userId) {
+    providerRouteCache.clear();
+    return;
+  }
+
+  for (const cacheKey of providerRouteCache.keys()) {
+    if (cacheKey.startsWith(`${userId}\u0000`)) {
+      providerRouteCache.delete(cacheKey);
+    }
+  }
+}
 
 /**
  * Registers an AI provider. Calling this again with the same type replaces
@@ -42,6 +106,7 @@ export function listRegisteredProviderTypes(): ProviderType[] {
  */
 export function invalidateProviderModelCache(type: ProviderType, userId?: string): void {
   registry.get(type)?.invalidateModelCache?.(userId);
+  invalidateProviderRoutingCache(userId);
 }
 
 /**
@@ -49,14 +114,19 @@ export function invalidateProviderModelCache(type: ProviderType, userId?: string
  */
 export function clearRegistry(): void {
   registry.clear();
+  providerRouteCache.clear();
 }
 
 /**
  * Resolves the provider responsible for a given model by looking up the
  * connector that has the model enabled in secret_metadata.
- * Falls back to 'gemini' when no connector row is found.
  */
 export async function getProviderForModel(modelName: string, userId: string): Promise<AIProvider> {
+  const cachedProviderType = getCachedProviderRoute(userId, modelName);
+  if (cachedProviderType) {
+    return getProvider(cachedProviderType);
+  }
+
   const db = getDb();
   const rows = await db
     .selectFrom('secret_metadata')
@@ -68,7 +138,9 @@ export async function getProviderForModel(modelName: string, userId: string): Pr
     try {
       const enabled = parseStringArray(row.enabledModels);
       if (enabled.includes(modelName)) {
-        return getProvider(row.provider as ProviderType);
+        const providerType = row.provider as ProviderType;
+        setCachedProviderRoute(userId, modelName, providerType);
+        return getProvider(providerType);
       }
     } catch {
       console.warn(`[registry] Skipping connector '${row.provider}': malformed enabledModels JSON`);

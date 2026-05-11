@@ -8,6 +8,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { registerProvider } from '../core/provider-registry';
 import { withModelCache } from '../core/model-cache';
 import { createReadinessCache } from '../core/readiness-cache';
+import { withAbortTimeout } from '../core/probe-timeout';
 import { createProviderSecretService } from '../core/secret-service';
 import { isReasoningModel } from '../core/capability-detector';
 import { getModelContextLimit } from '../core/context-policy';
@@ -81,7 +82,10 @@ const secretService = createProviderSecretService({
   validateFn: async (apiKey) => {
     const client = new Anthropic({ apiKey });
     try {
-      await client.models.list({ limit: 1 });
+      await withAbortTimeout(
+        (signal) => client.models.list({ limit: 1 }, { signal }),
+        'Anthropic API validation timed out.'
+      );
     } catch (err: unknown) {
       const sdkErr = narrowSdkError(err);
       if (sdkErr.status === 401 || sdkErr.status === 403) {
@@ -116,7 +120,12 @@ const listModelsWithCache = withModelCache(
     try {
       const models: ModelInfo[] = [];
 
-      for await (const model of client.models.list({ limit: 100 })) {
+      const modelPage = await withAbortTimeout(
+        (signal) => client.models.list({ limit: 100 }, { signal }),
+        'Anthropic model listing timed out.'
+      );
+
+      for await (const model of modelPage) {
         models.push({
           modelId: model.id,
           displayName: model.display_name || model.id,

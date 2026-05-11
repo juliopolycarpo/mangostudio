@@ -18,6 +18,7 @@ import {
   getUnifiedModelCatalog,
   invalidateUnifiedCatalog,
 } from '../../../services/providers/catalog';
+import { invalidateProviderRoutingCache } from '../../../services/providers/core/provider-registry';
 import { AddConnectorBodySchema } from '@mangostudio/shared/connectors';
 import { requireAuth } from '../../../plugins/auth-middleware';
 import { handleConnectorError } from './connectors-routes';
@@ -40,6 +41,7 @@ export const geminiAliasRoutes = new Elysia()
         const connector = await addGeminiConnector(user?.id ?? '', body);
         await refreshGeminiModelCatalog(user?.id ?? '', 'secret-updated');
         invalidateUnifiedCatalog(user?.id ?? '');
+        invalidateProviderRoutingCache(user?.id ?? '');
         return connector;
       } catch (error) {
         return handleConnectorError(error, set);
@@ -55,6 +57,7 @@ export const geminiAliasRoutes = new Elysia()
         await deleteGeminiConnector(user?.id ?? '', params.id);
         await refreshGeminiModelCatalog(user?.id ?? '', 'secret-updated');
         invalidateUnifiedCatalog(user?.id ?? '');
+        invalidateProviderRoutingCache(user?.id ?? '');
         console.warn(`[connectors] DEL connector ${params.id}`);
         return { success: true };
       } catch (error) {
@@ -70,6 +73,7 @@ export const geminiAliasRoutes = new Elysia()
       try {
         await updateConnectorModels(user?.id ?? '', params.id, body.enabledModels);
         invalidateUnifiedCatalog(user?.id ?? '');
+        invalidateProviderRoutingCache(user?.id ?? '');
         return { success: true };
       } catch (error) {
         return handleConnectorError(error, set);

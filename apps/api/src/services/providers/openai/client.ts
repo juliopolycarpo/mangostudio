@@ -4,12 +4,24 @@
 
 import OpenAI, { APIError as OpenAIAPIError } from 'openai';
 import { getOrCreateCachedClient } from '../core/client-cache';
+import { PROVIDER_PROBE_TIMEOUT_MS, withAbortTimeout } from '../core/probe-timeout';
 
 const BASE_URL = 'https://api.openai.com/v1';
 const clientCache = new Map<string, OpenAI>();
 
-function createCacheKey(ctx: OpenAIAuthContext): string {
-  return [ctx.apiKey, ctx.organizationId ?? '', ctx.projectId ?? ''].join('\u0000');
+interface OpenAIClientOptions {
+  readonly timeoutMs?: number;
+  readonly maxRetries?: number;
+}
+
+function createCacheKey(ctx: OpenAIAuthContext, options?: OpenAIClientOptions): string {
+  return [
+    ctx.apiKey,
+    ctx.organizationId ?? '',
+    ctx.projectId ?? '',
+    String(options?.timeoutMs ?? ''),
+    String(options?.maxRetries ?? ''),
+  ].join('\u0000');
 }
 
 /** All credentials needed to authenticate with the OpenAI API. */
@@ -41,14 +53,19 @@ export class OpenAIConfigError extends Error {
  * Creates an OpenAI SDK client from a full auth context.
  * Passes organization and project so that project-scoped keys work correctly.
  */
-export function createOpenAIClient(ctx: OpenAIAuthContext): OpenAI {
+export function createOpenAIClient(
+  ctx: OpenAIAuthContext,
+  options: OpenAIClientOptions = {}
+): OpenAI {
   return getOrCreateCachedClient(
     clientCache,
-    createCacheKey(ctx),
+    createCacheKey(ctx, options),
     () =>
       new OpenAI({
         apiKey: ctx.apiKey,
         baseURL: BASE_URL,
+        ...(options.timeoutMs ? { timeout: options.timeoutMs } : {}),
+        ...(options.maxRetries !== undefined ? { maxRetries: options.maxRetries } : {}),
         ...(ctx.organizationId ? { organization: ctx.organizationId } : {}),
         ...(ctx.projectId ? { project: ctx.projectId } : {}),
       })
@@ -64,9 +81,15 @@ export function createOpenAIClient(ctx: OpenAIAuthContext): OpenAI {
  * @throws {OpenAIConfigError} for other API errors that indicate bad config.
  */
 export async function validateOpenAIAuthContext(ctx: OpenAIAuthContext): Promise<void> {
-  const client = createOpenAIClient(ctx);
+  const client = createOpenAIClient(ctx, {
+    timeoutMs: PROVIDER_PROBE_TIMEOUT_MS,
+    maxRetries: 0,
+  });
   try {
-    await client.models.list();
+    await withAbortTimeout(
+      (signal) => client.models.list({ signal }),
+      'OpenAI API validation timed out.'
+    );
   } catch (err) {
     if (err instanceof OpenAIAPIError) {
       if (err.status === 401) {
