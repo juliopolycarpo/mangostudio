@@ -23,19 +23,23 @@ function CacheMetricsTable(props: {
       <table className="w-full text-sm">
         <thead>
           <tr className="text-left text-on-surface-variant/70">
-            <th className="py-2 pr-4 font-medium">{props.cacheLabel}</th>
-            <th className="py-2 pr-4 font-medium">{props.hitsLabel}</th>
-            <th className="py-2 pr-4 font-medium">{props.missesLabel}</th>
-            <th className="py-2 font-medium">{props.hitRateLabel}</th>
+            <th className="whitespace-nowrap py-2 pr-4 font-medium">{props.cacheLabel}</th>
+            <th className="whitespace-nowrap py-2 pr-4 font-medium">{props.hitsLabel}</th>
+            <th className="whitespace-nowrap py-2 pr-4 font-medium">{props.missesLabel}</th>
+            <th className="whitespace-nowrap py-2 font-medium">{props.hitRateLabel}</th>
           </tr>
         </thead>
         <tbody>
           {props.entries.map((entry) => (
             <tr key={entry.cacheName} className="border-t border-outline-variant/10">
-              <td className="py-2 pr-4 text-on-surface">{props.cacheLabels[entry.cacheName]}</td>
-              <td className="py-2 pr-4 text-on-surface">{entry.hits}</td>
-              <td className="py-2 pr-4 text-on-surface">{entry.misses}</td>
-              <td className="py-2 text-on-surface">{formatPercent(entry.hitRate)}</td>
+              <td className="whitespace-nowrap py-2 pr-4 text-on-surface">
+                {props.cacheLabels[entry.cacheName]}
+              </td>
+              <td className="whitespace-nowrap py-2 pr-4 text-on-surface">{entry.hits}</td>
+              <td className="whitespace-nowrap py-2 pr-4 text-on-surface">{entry.misses}</td>
+              <td className="whitespace-nowrap py-2 text-on-surface">
+                {formatPercent(entry.hitRate)}
+              </td>
             </tr>
           ))}
         </tbody>
@@ -109,7 +113,7 @@ export function MetricsSettingsPage() {
               </span>
             </div>
 
-            <div className="grid gap-4 lg:grid-cols-2">
+            <div className="grid gap-4">
               <div className="space-y-3">
                 <h4 className="text-xs uppercase tracking-widest font-bold text-on-surface-variant/80 font-label">
                   {labels.cacheSectionTitle}
@@ -132,12 +136,12 @@ export function MetricsSettingsPage() {
                   {providerMetrics.probeTimeouts.map((entry) => (
                     <div
                       key={entry.operation}
-                      className="flex items-center justify-between rounded-xl bg-surface-container-lowest px-4 py-3"
+                      className="grid grid-cols-[1fr_auto] items-center gap-3 rounded-xl bg-surface-container-lowest px-4 py-3"
                     >
                       <span className="text-sm text-on-surface">
                         {operationLabels[entry.operation]}
                       </span>
-                      <span className="text-sm font-semibold text-on-surface">
+                      <span className="rounded-full bg-surface-container-high px-2.5 py-1 text-xs font-semibold text-on-surface tabular-nums">
                         {entry.timeoutCount}
                       </span>
                     </div>
