@@ -19,6 +19,7 @@ import {
   isPlaceholderConfigSecretValue,
 } from '../core/secret-service';
 import { maskSecret } from '../../../utils/secrets';
+import { recordProviderProbeTimeout } from '../core/provider-observability';
 import { withAbortTimeout } from '../core/probe-timeout';
 import { join, dirname } from 'path';
 import { getMangoDir } from '../../../lib/config';
@@ -237,7 +238,14 @@ export function createGeminiSecretService(
               headers: { 'x-goog-api-key': apiKey },
               signal,
             }),
-          'Gemini API validation timed out.'
+          'Gemini API validation timed out.',
+          undefined,
+          () =>
+            recordProviderProbeTimeout({
+              provider: 'gemini',
+              operation: 'healthcheck',
+              message: 'Gemini API validation timed out.',
+            })
         );
       } catch (error) {
         throw new GeminiValidationUnavailableError(

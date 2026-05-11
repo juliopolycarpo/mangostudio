@@ -5,6 +5,7 @@
 
 import OpenAI from 'openai';
 import { getOrCreateCachedClient } from '../core/client-cache';
+import { recordProviderCacheHit, recordProviderCacheMiss } from '../core/provider-observability';
 
 const clientCache = new Map<string, OpenAI>();
 
@@ -40,6 +41,10 @@ export function createCompatibleClient(
         baseURL: baseUrl,
         ...(options.timeoutMs ? { timeout: options.timeoutMs } : {}),
         ...(options.maxRetries !== undefined ? { maxRetries: options.maxRetries } : {}),
-      })
+      }),
+    {
+      onHit: () => recordProviderCacheHit('openai-compatible', 'sdk-client'),
+      onMiss: () => recordProviderCacheMiss('openai-compatible', 'sdk-client'),
+    }
   );
 }

@@ -1,7 +1,13 @@
 import { createDeepSeek, type DeepSeekProvider } from '@ai-sdk/deepseek';
 import OpenAI from 'openai';
 import { getOrCreateCachedClient } from '../core/client-cache';
+import {
+  recordProviderCacheHit,
+  recordProviderCacheMiss,
+  recordProviderProbeTimeout,
+} from '../core/provider-observability';
 import { validateBaseUrl } from '../core/base-url-policy';
+import { withPromiseTimeout } from '../core/probe-timeout';
 import { fetchDeepSeekModels } from './model-catalog';
 import { normalizeDeepSeekBaseUrl } from './options';
 
@@ -21,8 +27,14 @@ function createCacheKey(config: DeepSeekClientConfig): string {
 
 export function createDeepSeekClient(config: DeepSeekClientConfig): DeepSeekProvider {
   const baseUrl = normalizeDeepSeekBaseUrl(config.baseUrl);
-  return getOrCreateCachedClient(providerClientCache, createCacheKey(config), () =>
-    createDeepSeek({ apiKey: config.apiKey, baseURL: baseUrl })
+  return getOrCreateCachedClient(
+    providerClientCache,
+    createCacheKey(config),
+    () => createDeepSeek({ apiKey: config.apiKey, baseURL: baseUrl }),
+    {
+      onHit: () => recordProviderCacheHit('deepseek', 'sdk-client'),
+      onMiss: () => recordProviderCacheMiss('deepseek', 'sdk-client'),
+    }
   );
 }
 
@@ -35,7 +47,11 @@ export function createDeepSeekAgentClient(config: DeepSeekClientConfig): OpenAI 
       new OpenAI({
         apiKey: config.apiKey,
         baseURL: baseUrl,
-      })
+      }),
+    {
+      onHit: () => recordProviderCacheHit('deepseek', 'sdk-client'),
+      onMiss: () => recordProviderCacheMiss('deepseek', 'sdk-client'),
+    }
   );
 }
 
@@ -49,27 +65,30 @@ export async function validateDeepSeekApiKey(params: {
     await validateBaseUrl(baseUrl);
   }
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), VALIDATION_TIMEOUT_MS);
-
   try {
-    await fetchDeepSeekModels({
-      apiKey: params.apiKey,
-      baseUrl,
-      fetchImpl: params.fetchImpl,
-      signal: controller.signal,
-    });
+    await withPromiseTimeout(
+      () =>
+        fetchDeepSeekModels({
+          apiKey: params.apiKey,
+          baseUrl,
+          fetchImpl: params.fetchImpl,
+        }),
+      `DeepSeek API key validation timed out for ${baseUrl}.`,
+      VALIDATION_TIMEOUT_MS,
+      () =>
+        recordProviderProbeTimeout({
+          provider: 'deepseek',
+          operation: 'healthcheck',
+          message: `DeepSeek API key validation timed out for ${baseUrl}.`,
+        })
+    );
   } catch (error) {
-    if (controller.signal.aborted) {
-      throw new DeepSeekValidationError(`DeepSeek API key validation timed out for ${baseUrl}.`, {
-        cause: error,
-      });
-    }
-    throw new DeepSeekValidationError(`DeepSeek API key validation failed for ${baseUrl}.`, {
-      cause: error,
-    });
-  } finally {
-    clearTimeout(timeout);
+    throw new DeepSeekValidationError(
+      error instanceof Error && error.message.includes('timed out')
+        ? `DeepSeek API key validation timed out for ${baseUrl}.`
+        : `DeepSeek API key validation failed for ${baseUrl}.`,
+      { cause: error }
+    );
   }
 }
 

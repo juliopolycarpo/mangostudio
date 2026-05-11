@@ -7,6 +7,10 @@ import {
   invalidateProviderRoutingCache,
   listRegisteredProviderTypes,
 } from '../../../../src/services/providers/core/provider-registry';
+import {
+  getProviderObservabilityMetrics,
+  resetProviderObservability,
+} from '../../../../src/services/providers/core/provider-observability';
 import type { AIProvider } from '../../../../src/services/providers/types';
 import { getDb } from '../../../../src/db/database';
 
@@ -34,6 +38,7 @@ describe('provider registry', () => {
   let snapshot: AIProvider[];
 
   beforeEach(() => {
+    resetProviderObservability();
     snapshot = listRegisteredProviderTypes().map((type) => getProvider(type));
     clearRegistry();
   });
@@ -41,6 +46,7 @@ describe('provider registry', () => {
   afterEach(() => {
     clearRegistry();
     snapshot.forEach((p) => registerProvider(p));
+    resetProviderObservability();
   });
 
   afterEach(async () => {
@@ -98,6 +104,11 @@ describe('provider registry', () => {
     expect(first).toBe(stub);
     expect(second).toBe(stub);
     expect(executeCount).toBe(1);
+    expect(
+      getProviderObservabilityMetrics().providers[0]?.caches.find(
+        (entry) => entry.cacheName === 'provider-route'
+      )
+    ).toMatchObject({ hits: 1, misses: 1 });
   });
 
   it('clears cached routes when provider routing cache is invalidated', async () => {

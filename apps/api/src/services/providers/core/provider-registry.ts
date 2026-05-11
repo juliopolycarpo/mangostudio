@@ -7,6 +7,7 @@ import type { ProviderType } from '@mangostudio/shared/types';
 import { getDb } from '../../../db/database';
 import type { AIProvider } from '../types';
 import { parseStringArray } from '../../../utils/json';
+import { recordProviderCacheHit, recordProviderCacheMiss } from './provider-observability';
 
 const registry = new Map<ProviderType, AIProvider>();
 const PROVIDER_ROUTE_CACHE_TTL_MS = 60_000;
@@ -124,6 +125,7 @@ export function clearRegistry(): void {
 export async function getProviderForModel(modelName: string, userId: string): Promise<AIProvider> {
   const cachedProviderType = getCachedProviderRoute(userId, modelName);
   if (cachedProviderType) {
+    recordProviderCacheHit(cachedProviderType, 'provider-route');
     return getProvider(cachedProviderType);
   }
 
@@ -139,6 +141,7 @@ export async function getProviderForModel(modelName: string, userId: string): Pr
       const enabled = parseStringArray(row.enabledModels);
       if (enabled.includes(modelName)) {
         const providerType = row.provider as ProviderType;
+        recordProviderCacheMiss(providerType, 'provider-route');
         setCachedProviderRoute(userId, modelName, providerType);
         return getProvider(providerType);
       }

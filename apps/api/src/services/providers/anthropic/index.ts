@@ -7,7 +7,12 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { registerProvider } from '../core/provider-registry';
 import { withModelCache } from '../core/model-cache';
-import { createReadinessCache } from '../core/readiness-cache';
+import {
+  recordProviderCacheHit,
+  recordProviderCacheMiss,
+  recordProviderProbeTimeout,
+} from '../core/provider-observability';
+import { createReadinessCache, createReadinessCacheKey } from '../core/readiness-cache';
 import { withAbortTimeout } from '../core/probe-timeout';
 import { createProviderSecretService } from '../core/secret-service';
 import { isReasoningModel } from '../core/capability-detector';
@@ -84,7 +89,14 @@ const secretService = createProviderSecretService({
     try {
       await withAbortTimeout(
         (signal) => client.models.list({ limit: 1 }, { signal }),
-        'Anthropic API validation timed out.'
+        'Anthropic API validation timed out.',
+        undefined,
+        () =>
+          recordProviderProbeTimeout({
+            provider: 'anthropic',
+            operation: 'healthcheck',
+            message: 'Anthropic API validation timed out.',
+          })
       );
     } catch (err: unknown) {
       const sdkErr = narrowSdkError(err);
@@ -122,7 +134,14 @@ const listModelsWithCache = withModelCache(
 
       const modelPage = await withAbortTimeout(
         (signal) => client.models.list({ limit: 100 }, { signal }),
-        'Anthropic model listing timed out.'
+        'Anthropic model listing timed out.',
+        undefined,
+        () =>
+          recordProviderProbeTimeout({
+            provider: 'anthropic',
+            operation: 'model-list',
+            message: 'Anthropic model listing timed out.',
+          })
       );
 
       for await (const model of modelPage) {
@@ -162,11 +181,10 @@ interface PreparedAnthropicRuntime {
   readonly client: ReturnType<typeof createAnthropicClient>;
 }
 
-const preparedRuntimeCache = createReadinessCache<PreparedAnthropicRuntime>();
-
-function createPreparedRuntimeKey(userId: string, modelName?: string): string {
-  return `${userId}\u0000${modelName ?? ''}`;
-}
+const preparedRuntimeCache = createReadinessCache<PreparedAnthropicRuntime>({
+  onHit: () => recordProviderCacheHit('anthropic', 'prepared-runtime'),
+  onMiss: () => recordProviderCacheMiss('anthropic', 'prepared-runtime'),
+});
 
 async function loadPreparedRuntime(
   userId: string,
@@ -183,7 +201,7 @@ async function prepareRuntime(
   userId: string,
   modelName?: string
 ): Promise<PreparedAnthropicRuntime> {
-  return preparedRuntimeCache.get(createPreparedRuntimeKey(userId, modelName), () =>
+  return preparedRuntimeCache.get(createReadinessCacheKey(userId, modelName), () =>
     loadPreparedRuntime(userId, modelName)
   );
 }
@@ -194,7 +212,7 @@ function invalidatePreparedRuntime(userId?: string): void {
     return;
   }
 
-  preparedRuntimeCache.clearWhere((key) => key.startsWith(`${userId}\u0000`));
+  preparedRuntimeCache.clearByUserPrefix(userId);
 }
 
 const anthropicProvider: AIProvider = {
@@ -292,7 +310,7 @@ const anthropicProvider: AIProvider = {
   },
 
   async warmup(req: ProviderWarmupRequest): Promise<void> {
-    await preparedRuntimeCache.prime(createPreparedRuntimeKey(req.userId, req.modelName), () =>
+    await preparedRuntimeCache.prime(createReadinessCacheKey(req.userId, req.modelName), () =>
       loadPreparedRuntime(req.userId, req.modelName)
     );
   },

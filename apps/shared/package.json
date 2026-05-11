@@ -21,6 +21,7 @@
     "./provider-settings": "./src/provider-settings/index.ts",
     "./tool-settings": "./src/tool-settings/index.ts",
     "./catalog": "./src/catalog/index.ts",
+    "./observability": "./src/observability/index.ts",
     "./streaming": "./src/streaming/index.ts",
     "./auth": "./src/auth/index.ts",
     "./errors": "./src/errors/index.ts",

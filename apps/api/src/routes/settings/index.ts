@@ -10,6 +10,7 @@ import '../../services/tools'; // ensure all tools are registered
 import { appSettingsRoutes } from '../../modules/app-settings/http/app-settings-routes';
 import { connectorRoutes } from '../../modules/connectors/http/connectors-routes';
 import { geminiAliasRoutes } from '../../modules/connectors/http/gemini-aliases-routes';
+import { observabilityRoutes } from '../../modules/observability/http/observability-routes';
 import { providerSettingsRoutes } from '../../modules/provider-settings/http/provider-settings-routes';
 import { ruleFileRoutes } from '../../modules/prompt-rules/http/rule-file-routes';
 import { toolSettingsRoutes } from '../../modules/tool-settings/http/tool-settings-routes';
@@ -23,6 +24,7 @@ export const settingsRoutes = (app: Elysia) =>
       .use(modelRoutes)
       .use(providerSettingsRoutes)
       .use(toolSettingsRoutes)
+      .use(observabilityRoutes)
       .use(ruleFileRoutes)
       .use(geminiAliasRoutes)
   );

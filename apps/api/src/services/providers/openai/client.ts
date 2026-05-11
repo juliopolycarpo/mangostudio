@@ -4,6 +4,11 @@
 
 import OpenAI, { APIError as OpenAIAPIError } from 'openai';
 import { getOrCreateCachedClient } from '../core/client-cache';
+import {
+  recordProviderCacheHit,
+  recordProviderCacheMiss,
+  recordProviderProbeTimeout,
+} from '../core/provider-observability';
 import { PROVIDER_PROBE_TIMEOUT_MS, withAbortTimeout } from '../core/probe-timeout';
 
 const BASE_URL = 'https://api.openai.com/v1';
@@ -68,7 +73,11 @@ export function createOpenAIClient(
         ...(options.maxRetries !== undefined ? { maxRetries: options.maxRetries } : {}),
         ...(ctx.organizationId ? { organization: ctx.organizationId } : {}),
         ...(ctx.projectId ? { project: ctx.projectId } : {}),
-      })
+      }),
+    {
+      onHit: () => recordProviderCacheHit('openai', 'sdk-client'),
+      onMiss: () => recordProviderCacheMiss('openai', 'sdk-client'),
+    }
   );
 }
 
@@ -88,7 +97,14 @@ export async function validateOpenAIAuthContext(ctx: OpenAIAuthContext): Promise
   try {
     await withAbortTimeout(
       (signal) => client.models.list({ signal }),
-      'OpenAI API validation timed out.'
+      'OpenAI API validation timed out.',
+      PROVIDER_PROBE_TIMEOUT_MS,
+      () =>
+        recordProviderProbeTimeout({
+          provider: 'openai',
+          operation: 'healthcheck',
+          message: 'OpenAI API validation timed out.',
+        })
     );
   } catch (err) {
     if (err instanceof OpenAIAPIError) {

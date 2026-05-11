@@ -7,7 +7,12 @@
 import { registerProvider } from '../core/provider-registry';
 import { validateBaseUrl } from '../core/base-url-policy';
 import { withModelCache } from '../core/model-cache';
-import { createReadinessCache } from '../core/readiness-cache';
+import { createReadinessCache, createReadinessCacheKey } from '../core/readiness-cache';
+import {
+  recordProviderCacheHit,
+  recordProviderCacheMiss,
+  recordProviderProbeTimeout,
+} from '../core/provider-observability';
 import { PROVIDER_PROBE_TIMEOUT_MS, withAbortTimeout } from '../core/probe-timeout';
 import { createProviderSecretService } from '../core/secret-service';
 import { isImageModelId, isReasoningModel } from '../core/capability-detector';
@@ -62,11 +67,10 @@ interface PreparedCompatibleRuntime {
   readonly client: ReturnType<typeof createCompatibleClient>;
 }
 
-const preparedRuntimeCache = createReadinessCache<PreparedCompatibleRuntime>();
-
-function createPreparedRuntimeKey(userId: string, modelName?: string): string {
-  return `${userId}\u0000${modelName ?? ''}`;
-}
+const preparedRuntimeCache = createReadinessCache<PreparedCompatibleRuntime>({
+  onHit: () => recordProviderCacheHit('openai-compatible', 'prepared-runtime'),
+  onMiss: () => recordProviderCacheMiss('openai-compatible', 'prepared-runtime'),
+});
 
 async function loadPreparedRuntime(
   userId: string,
@@ -84,7 +88,7 @@ async function prepareRuntime(
   userId: string,
   modelName?: string
 ): Promise<PreparedCompatibleRuntime> {
-  return preparedRuntimeCache.get(createPreparedRuntimeKey(userId, modelName), () =>
+  return preparedRuntimeCache.get(createReadinessCacheKey(userId, modelName), () =>
     loadPreparedRuntime(userId, modelName)
   );
 }
@@ -95,7 +99,7 @@ function invalidatePreparedRuntime(userId?: string): void {
     return;
   }
 
-  preparedRuntimeCache.clearWhere((key) => key.startsWith(`${userId}\u0000`));
+  preparedRuntimeCache.clearByUserPrefix(userId);
 }
 
 const listModelsWithCache = withModelCache(
@@ -133,7 +137,14 @@ const listModelsWithCache = withModelCache(
 
         const modelsPage = await withAbortTimeout(
           (signal) => client.models.list({ signal }),
-          `OpenAI-compatible model listing timed out for ${baseUrl}.`
+          `OpenAI-compatible model listing timed out for ${baseUrl}.`,
+          PROVIDER_PROBE_TIMEOUT_MS,
+          () =>
+            recordProviderProbeTimeout({
+              provider: 'openai-compatible',
+              operation: 'model-list',
+              message: `OpenAI-compatible model listing timed out for ${baseUrl}.`,
+            })
         );
         for await (const model of modelsPage) {
           if (
@@ -246,7 +257,7 @@ const openAICompatibleProvider: AIProvider = {
   },
 
   async warmup(req: ProviderWarmupRequest): Promise<void> {
-    await preparedRuntimeCache.prime(createPreparedRuntimeKey(req.userId, req.modelName), () =>
+    await preparedRuntimeCache.prime(createReadinessCacheKey(req.userId, req.modelName), () =>
       loadPreparedRuntime(req.userId, req.modelName)
     );
   },
@@ -267,7 +278,14 @@ const openAICompatibleProvider: AIProvider = {
     });
     await withAbortTimeout(
       (signal) => client.models.list({ signal }),
-      `OpenAI-compatible healthcheck timed out for ${baseUrl}.`
+      `OpenAI-compatible healthcheck timed out for ${baseUrl}.`,
+      PROVIDER_PROBE_TIMEOUT_MS,
+      () =>
+        recordProviderProbeTimeout({
+          provider: 'openai-compatible',
+          operation: 'healthcheck',
+          message: `OpenAI-compatible healthcheck timed out for ${baseUrl}.`,
+        })
     );
   },
 

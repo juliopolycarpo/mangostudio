@@ -64,4 +64,19 @@ describe('createReadinessCache', () => {
     expect(refreshed).toBe('value-3');
     expect(untouched).toBe('value-2');
   });
+
+  it('reports hits and misses through optional callbacks', async () => {
+    const events: string[] = [];
+    const cache = createReadinessCache<string>({
+      onHit: (key) => events.push(`hit:${key}`),
+      onMiss: (key) => events.push(`miss:${key}`),
+    });
+
+    const load = () => Promise.resolve('ready');
+
+    await cache.get('user-1\u0000model-a', load);
+    await cache.get('user-1\u0000model-a', load);
+
+    expect(events).toEqual(['miss:user-1\u0000model-a', 'hit:user-1\u0000model-a']);
+  });
 });

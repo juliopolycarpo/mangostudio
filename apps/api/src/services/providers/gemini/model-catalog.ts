@@ -6,6 +6,7 @@
 import type { Model } from '@google/genai';
 import type { ModelCatalogResponse, ModelOption } from '@mangostudio/shared';
 import { isImageModelId } from '../core/capability-detector';
+import { recordProviderProbeTimeout } from '../core/provider-observability';
 import { withPromiseTimeout } from '../core/probe-timeout';
 import { GeminiApiKeyMissingError } from './secret';
 import { listSecretMetadata, GEMINI_PROVIDER } from '../../secret-store/metadata';
@@ -146,16 +147,26 @@ export function createGeminiModelCatalogService(
   };
 
   const fetchModels = async (apiKey: string): Promise<Model[]> => {
-    return withPromiseTimeout(async () => {
-      if (listModelsDep) return listModelsDep(apiKey);
-      const ai = createGeminiClient(apiKey);
-      const pager = await ai.models.list();
-      const models: Model[] = [];
-      for await (const model of pager) {
-        models.push(model);
-      }
-      return models;
-    }, 'Gemini model listing timed out.');
+    return withPromiseTimeout(
+      async () => {
+        if (listModelsDep) return listModelsDep(apiKey);
+        const ai = createGeminiClient(apiKey);
+        const pager = await ai.models.list();
+        const models: Model[] = [];
+        for await (const model of pager) {
+          models.push(model);
+        }
+        return models;
+      },
+      'Gemini model listing timed out.',
+      undefined,
+      () =>
+        recordProviderProbeTimeout({
+          provider: 'gemini',
+          operation: 'model-list',
+          message: 'Gemini model listing timed out.',
+        })
+    );
   };
 
   return {

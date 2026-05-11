@@ -3,7 +3,8 @@ import type { SecretMetadataRow } from '@mangostudio/shared/types';
 
 import { registerProvider } from '../core/provider-registry';
 import { withModelCache } from '../core/model-cache';
-import { createReadinessCache } from '../core/readiness-cache';
+import { createReadinessCache, createReadinessCacheKey } from '../core/readiness-cache';
+import { recordProviderCacheHit, recordProviderCacheMiss } from '../core/provider-observability';
 import { createProviderSecretService } from '../core/secret-service';
 import { createDeepSeekAgentClient, createDeepSeekClient, validateDeepSeekApiKey } from './client';
 import { fetchDeepSeekModels, getDeepSeekFallbackModels } from './model-catalog';
@@ -90,11 +91,10 @@ interface PreparedDeepSeekRuntime {
   readonly agentClient: ReturnType<typeof createDeepSeekAgentClient>;
 }
 
-const preparedRuntimeCache = createReadinessCache<PreparedDeepSeekRuntime>();
-
-function createPreparedRuntimeKey(userId: string, modelName?: string): string {
-  return `${userId}\u0000${modelName ?? ''}`;
-}
+const preparedRuntimeCache = createReadinessCache<PreparedDeepSeekRuntime>({
+  onHit: () => recordProviderCacheHit('deepseek', 'prepared-runtime'),
+  onMiss: () => recordProviderCacheMiss('deepseek', 'prepared-runtime'),
+});
 
 async function loadPreparedRuntime(
   userId: string,
@@ -113,7 +113,7 @@ async function prepareRuntime(
   userId: string,
   modelName?: string
 ): Promise<PreparedDeepSeekRuntime> {
-  return preparedRuntimeCache.get(createPreparedRuntimeKey(userId, modelName), () =>
+  return preparedRuntimeCache.get(createReadinessCacheKey(userId, modelName), () =>
     loadPreparedRuntime(userId, modelName)
   );
 }
@@ -124,7 +124,7 @@ function invalidatePreparedRuntime(userId?: string): void {
     return;
   }
 
-  preparedRuntimeCache.clearWhere((key) => key.startsWith(`${userId}\u0000`));
+  preparedRuntimeCache.clearByUserPrefix(userId);
 }
 
 const deepSeekProvider: AIProvider = {
@@ -199,7 +199,7 @@ const deepSeekProvider: AIProvider = {
   },
 
   async warmup(req: ProviderWarmupRequest): Promise<void> {
-    await preparedRuntimeCache.prime(createPreparedRuntimeKey(req.userId, req.modelName), () =>
+    await preparedRuntimeCache.prime(createReadinessCacheKey(req.userId, req.modelName), () =>
       loadPreparedRuntime(req.userId, req.modelName)
     );
   },

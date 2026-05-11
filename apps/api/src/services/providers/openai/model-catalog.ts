@@ -5,6 +5,7 @@
 import { withModelCache } from '../core/model-cache';
 import { getModelContextLimit } from '../core/context-policy';
 import { isImageModelId, isReasoningModel } from '../core/capability-detector';
+import { recordProviderProbeTimeout } from '../core/provider-observability';
 import { PROVIDER_PROBE_TIMEOUT_MS, withAbortTimeout } from '../core/probe-timeout';
 import { createProviderSecretService } from '../core/secret-service';
 import { parseStringArray } from '../../../utils/json';
@@ -120,7 +121,14 @@ export const listModelsWithCache = withModelCache(
       });
       const modelsPage = await withAbortTimeout(
         (signal) => client.models.list({ signal }),
-        'OpenAI model listing timed out.'
+        'OpenAI model listing timed out.',
+        PROVIDER_PROBE_TIMEOUT_MS,
+        () =>
+          recordProviderProbeTimeout({
+            provider: 'openai',
+            operation: 'model-list',
+            message: 'OpenAI model listing timed out.',
+          })
       );
       for await (const model of modelsPage) {
         if (
