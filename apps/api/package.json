@@ -30,7 +30,7 @@
     "@google/genai": "^1.52.0",
     "@mangostudio/shared": "workspace:*",
     "ai": "^6.0.177",
-    "better-auth": "^1.6.9",
+    "better-auth": "^1.6.10",
     "elysia": "^1.4.28",
     "file-type": "^22.0.1",
     "kysely": "^0.28.17",
