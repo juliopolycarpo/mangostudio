@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import {
   clearRegistry,
   getProviderForModel,
@@ -13,7 +13,7 @@ import {
   resetProviderObservability,
 } from '../../../../src/services/providers/core/provider-observability';
 import type { AIProvider } from '../../../../src/services/providers/types';
-import { getDb } from '../../../../src/db/database';
+import type { getDb } from '../../../../src/db/database';
 
 function createProviderRegistryDbStub(execute: () => Promise<unknown[]>) {
   return () => ({
@@ -60,11 +60,6 @@ describe('provider registry', () => {
     snapshot.forEach((p) => registerProvider(p));
     resetProviderObservability();
     setProviderRegistryDbForTests();
-  });
-
-  afterEach(async () => {
-    mock.restore();
-    await mock.module('../../../../src/db/database', () => ({ getDb }));
   });
 
   it('registers and retrieves a provider by type', () => {
