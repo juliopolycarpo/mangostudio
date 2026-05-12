@@ -9,7 +9,6 @@ import type { AIProvider } from '../types';
 import { parseStringArray } from '../../../utils/json';
 import { recordProviderCacheHit, recordProviderCacheMiss } from './provider-observability';
 
-const registry = new Map<ProviderType, AIProvider>();
 const PROVIDER_ROUTE_CACHE_TTL_MS = 60_000;
 const MAX_PROVIDER_ROUTE_CACHE_ENTRIES = 1_000;
 
@@ -18,14 +17,22 @@ interface CachedProviderRoute {
   readonly expiresAt: number;
 }
 
-const providerRouteCache = new Map<string, CachedProviderRoute>();
-let getProviderRegistryDb = getDb;
+interface ProviderRegistry {
+  invalidateProviderRoutingCache(userId?: string): void;
+  setProviderRegistryDbForTests(nextDbAccessor?: typeof getDb): void;
+  registerProvider(provider: AIProvider): void;
+  getProvider(type: ProviderType): AIProvider;
+  listRegisteredProviderTypes(): ProviderType[];
+  invalidateProviderModelCache(type: ProviderType, userId?: string): void;
+  clearRegistry(): void;
+  getProviderForModel(modelName: string, userId: string): Promise<AIProvider>;
+}
 
 function createProviderRouteCacheKey(userId: string, modelName: string): string {
   return `${userId}\u0000${modelName}`;
 }
 
-function evictOldestCachedRoute(): void {
+function evictOldestCachedRoute(providerRouteCache: Map<string, CachedProviderRoute>): void {
   if (providerRouteCache.size < MAX_PROVIDER_ROUTE_CACHE_ENTRIES) {
     return;
   }
@@ -36,7 +43,11 @@ function evictOldestCachedRoute(): void {
   }
 }
 
-function getCachedProviderRoute(userId: string, modelName: string): ProviderType | undefined {
+function getCachedProviderRoute(
+  providerRouteCache: Map<string, CachedProviderRoute>,
+  userId: string,
+  modelName: string
+): ProviderType | undefined {
   const cacheKey = createProviderRouteCacheKey(userId, modelName);
   const cachedRoute = providerRouteCache.get(cacheKey);
   if (!cachedRoute) {
@@ -52,35 +63,119 @@ function getCachedProviderRoute(userId: string, modelName: string): ProviderType
 }
 
 function setCachedProviderRoute(
+  providerRouteCache: Map<string, CachedProviderRoute>,
   userId: string,
   modelName: string,
   providerType: ProviderType
 ): void {
-  evictOldestCachedRoute();
+  evictOldestCachedRoute(providerRouteCache);
   providerRouteCache.set(createProviderRouteCacheKey(userId, modelName), {
     providerType,
     expiresAt: Date.now() + PROVIDER_ROUTE_CACHE_TTL_MS,
   });
 }
 
-export function invalidateProviderRoutingCache(userId?: string): void {
-  if (!userId) {
-    providerRouteCache.clear();
-    return;
-  }
+function createProviderRegistry(dbAccessor: typeof getDb = getDb): ProviderRegistry {
+  const registry = new Map<ProviderType, AIProvider>();
+  const providerRouteCache = new Map<string, CachedProviderRoute>();
+  let getProviderRegistryDb = dbAccessor;
 
-  for (const cacheKey of providerRouteCache.keys()) {
-    if (cacheKey.startsWith(`${userId}\u0000`)) {
-      providerRouteCache.delete(cacheKey);
-    }
-  }
+  return {
+    invalidateProviderRoutingCache(userId?: string): void {
+      if (!userId) {
+        providerRouteCache.clear();
+        return;
+      }
+
+      for (const cacheKey of providerRouteCache.keys()) {
+        if (cacheKey.startsWith(`${userId}\u0000`)) {
+          providerRouteCache.delete(cacheKey);
+        }
+      }
+    },
+
+    setProviderRegistryDbForTests(nextDbAccessor?: typeof getDb): void {
+      getProviderRegistryDb = nextDbAccessor ?? getDb;
+    },
+
+    registerProvider(provider: AIProvider): void {
+      registry.set(provider.providerType, provider);
+    },
+
+    getProvider(type: ProviderType): AIProvider {
+      const provider = registry.get(type);
+      if (!provider) {
+        throw new Error(`AI provider '${type}' is not registered.`);
+      }
+      return provider;
+    },
+
+    listRegisteredProviderTypes(): ProviderType[] {
+      return Array.from(registry.keys());
+    },
+
+    invalidateProviderModelCache(type: ProviderType, userId?: string): void {
+      registry.get(type)?.invalidateModelCache?.(userId);
+      this.invalidateProviderRoutingCache(userId);
+    },
+
+    clearRegistry(): void {
+      registry.clear();
+      providerRouteCache.clear();
+    },
+
+    async getProviderForModel(modelName: string, userId: string): Promise<AIProvider> {
+      const cachedProviderType = getCachedProviderRoute(providerRouteCache, userId, modelName);
+      if (cachedProviderType) {
+        recordProviderCacheHit(cachedProviderType, 'provider-route');
+        return this.getProvider(cachedProviderType);
+      }
+
+      const db = getProviderRegistryDb();
+      const rows = await db
+        .selectFrom('secret_metadata')
+        .select(['provider', 'enabledModels'])
+        .where((eb) => eb.or([eb('userId', '=', userId), eb('userId', 'is', null)]))
+        .execute();
+
+      for (const row of rows) {
+        try {
+          const enabled = parseStringArray(row.enabledModels);
+          if (enabled.includes(modelName)) {
+            const providerType = row.provider as ProviderType;
+            recordProviderCacheMiss(providerType, 'provider-route');
+            setCachedProviderRoute(providerRouteCache, userId, modelName, providerType);
+            return this.getProvider(providerType);
+          }
+        } catch {
+          console.warn(
+            `[registry] Skipping connector '${row.provider}': malformed enabledModels JSON`
+          );
+        }
+      }
+
+      throw new Error(
+        `[registry] No connector found for model "${modelName}". Configure a connector that includes this model.`
+      );
+    },
+  };
+}
+
+const providerRegistry = createProviderRegistry();
+
+export function createProviderRegistryForTests(dbAccessor?: typeof getDb): ProviderRegistry {
+  return createProviderRegistry(dbAccessor);
+}
+
+export function invalidateProviderRoutingCache(userId?: string): void {
+  providerRegistry.invalidateProviderRoutingCache(userId);
 }
 
 /**
  * Overrides the DB accessor used by model routing. Intended for test isolation only.
  */
 export function setProviderRegistryDbForTests(dbAccessor?: typeof getDb): void {
-  getProviderRegistryDb = dbAccessor ?? getDb;
+  providerRegistry.setProviderRegistryDbForTests(dbAccessor);
 }
 
 /**
@@ -88,7 +183,7 @@ export function setProviderRegistryDbForTests(dbAccessor?: typeof getDb): void {
  * the existing registration (useful in tests).
  */
 export function registerProvider(provider: AIProvider): void {
-  registry.set(provider.providerType, provider);
+  providerRegistry.registerProvider(provider);
 }
 
 /**
@@ -96,34 +191,28 @@ export function registerProvider(provider: AIProvider): void {
  * Throws if the provider has not been registered.
  */
 export function getProvider(type: ProviderType): AIProvider {
-  const provider = registry.get(type);
-  if (!provider) {
-    throw new Error(`AI provider '${type}' is not registered.`);
-  }
-  return provider;
+  return providerRegistry.getProvider(type);
 }
 
 /**
  * Returns the list of all currently registered provider types.
  */
 export function listRegisteredProviderTypes(): ProviderType[] {
-  return Array.from(registry.keys());
+  return providerRegistry.listRegisteredProviderTypes();
 }
 
 /**
  * Clears the cached model listing for a single provider.
  */
 export function invalidateProviderModelCache(type: ProviderType, userId?: string): void {
-  registry.get(type)?.invalidateModelCache?.(userId);
-  invalidateProviderRoutingCache(userId);
+  providerRegistry.invalidateProviderModelCache(type, userId);
 }
 
 /**
  * Removes all registered providers. Intended for test isolation only.
  */
 export function clearRegistry(): void {
-  registry.clear();
-  providerRouteCache.clear();
+  providerRegistry.clearRegistry();
 }
 
 /**
@@ -131,34 +220,5 @@ export function clearRegistry(): void {
  * connector that has the model enabled in secret_metadata.
  */
 export async function getProviderForModel(modelName: string, userId: string): Promise<AIProvider> {
-  const cachedProviderType = getCachedProviderRoute(userId, modelName);
-  if (cachedProviderType) {
-    recordProviderCacheHit(cachedProviderType, 'provider-route');
-    return getProvider(cachedProviderType);
-  }
-
-  const db = getProviderRegistryDb();
-  const rows = await db
-    .selectFrom('secret_metadata')
-    .select(['provider', 'enabledModels'])
-    .where((eb) => eb.or([eb('userId', '=', userId), eb('userId', 'is', null)]))
-    .execute();
-
-  for (const row of rows) {
-    try {
-      const enabled = parseStringArray(row.enabledModels);
-      if (enabled.includes(modelName)) {
-        const providerType = row.provider as ProviderType;
-        recordProviderCacheMiss(providerType, 'provider-route');
-        setCachedProviderRoute(userId, modelName, providerType);
-        return getProvider(providerType);
-      }
-    } catch {
-      console.warn(`[registry] Skipping connector '${row.provider}': malformed enabledModels JSON`);
-    }
-  }
-
-  throw new Error(
-    `[registry] No connector found for model "${modelName}". Configure a connector that includes this model.`
-  );
+  return providerRegistry.getProviderForModel(modelName, userId);
 }

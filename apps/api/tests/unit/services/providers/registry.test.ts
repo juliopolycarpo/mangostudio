@@ -1,12 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import type { ProviderType } from '@mangostudio/shared/types';
-import {
-  getProviderForModel,
-  registerProvider,
-  getProvider,
-  invalidateProviderRoutingCache,
-  setProviderRegistryDbForTests,
-} from '../../../../src/services/providers/core/provider-registry';
+import { createProviderRegistryForTests } from '../../../../src/services/providers/core/provider-registry';
 import {
   getProviderObservabilityMetrics,
   resetProviderObservability,
@@ -52,24 +46,24 @@ function makeStubProvider(type: ProviderType): AIProvider {
 describe('provider registry', () => {
   beforeEach(() => {
     resetProviderObservability();
-    setProviderRegistryDbForTests();
   });
 
   afterEach(() => {
     resetProviderObservability();
-    setProviderRegistryDbForTests();
   });
 
   it('registers and retrieves a provider by type', () => {
     const providerType = createTestProviderType('lookup');
     const stub = makeStubProvider(providerType);
-    registerProvider(stub);
-    expect(getProvider(providerType)).toBe(stub);
+    const registry = createProviderRegistryForTests();
+    registry.registerProvider(stub);
+    expect(registry.getProvider(providerType)).toBe(stub);
   });
 
   it('throws when a provider has not been registered', () => {
     const providerType = createTestProviderType('missing');
-    expect(() => getProvider(providerType)).toThrow(
+    const registry = createProviderRegistryForTests();
+    expect(() => registry.getProvider(providerType)).toThrow(
       `AI provider '${providerType}' is not registered.`
     );
   });
@@ -78,9 +72,10 @@ describe('provider registry', () => {
     const providerType = createTestProviderType('replace');
     const first = makeStubProvider(providerType);
     const second = makeStubProvider(providerType);
-    registerProvider(first);
-    registerProvider(second);
-    expect(getProvider(providerType)).toBe(second);
+    const registry = createProviderRegistryForTests();
+    registry.registerProvider(first);
+    registry.registerProvider(second);
+    expect(registry.getProvider(providerType)).toBe(second);
   });
 
   it('caches provider routing for repeated model lookups', async () => {
@@ -88,8 +83,7 @@ describe('provider registry', () => {
     const modelName = `model-${providerType}`;
     const userId = `user-${providerType}`;
     let executeCount = 0;
-
-    setProviderRegistryDbForTests(
+    const registry = createProviderRegistryForTests(
       createProviderRegistryDbStub(() => {
         executeCount++;
         return Promise.resolve([
@@ -102,10 +96,10 @@ describe('provider registry', () => {
     );
 
     const stub = makeStubProvider(providerType);
-    registerProvider(stub);
+    registry.registerProvider(stub);
 
-    const first = await getProviderForModel(modelName, userId);
-    const second = await getProviderForModel(modelName, userId);
+    const first = await registry.getProviderForModel(modelName, userId);
+    const second = await registry.getProviderForModel(modelName, userId);
 
     expect(first).toBe(stub);
     expect(second).toBe(stub);
@@ -122,8 +116,7 @@ describe('provider registry', () => {
     const modelName = `model-${providerType}`;
     const userId = `user-${providerType}`;
     let executeCount = 0;
-
-    setProviderRegistryDbForTests(
+    const registry = createProviderRegistryForTests(
       createProviderRegistryDbStub(() => {
         executeCount++;
         return Promise.resolve([
@@ -135,11 +128,11 @@ describe('provider registry', () => {
       }) as unknown as typeof getDb
     );
 
-    registerProvider(makeStubProvider(providerType));
+    registry.registerProvider(makeStubProvider(providerType));
 
-    await getProviderForModel(modelName, userId);
-    invalidateProviderRoutingCache(userId);
-    await getProviderForModel(modelName, userId);
+    await registry.getProviderForModel(modelName, userId);
+    registry.invalidateProviderRoutingCache(userId);
+    await registry.getProviderForModel(modelName, userId);
 
     expect(executeCount).toBe(2);
   });
