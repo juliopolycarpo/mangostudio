@@ -1,6 +1,8 @@
 import type { ModelInfo } from '../types';
 import { isReasoningModel } from '../core/capability-detector';
 import { getModelContextLimit } from '../core/context-policy';
+import { recordProviderProbeTimeout } from '../core/provider-observability';
+import { withAbortTimeout } from '../core/probe-timeout';
 import { normalizeDeepSeekBaseUrl } from './options';
 
 const MODEL_LIST_TIMEOUT_MS = 5_000;
@@ -57,31 +59,38 @@ export async function fetchDeepSeekModels(params: {
   signal?: AbortSignal;
 }): Promise<ModelInfo[]> {
   const fetchImpl = params.fetchImpl ?? fetch;
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), MODEL_LIST_TIMEOUT_MS);
-  const signal = params.signal ?? controller.signal;
 
-  try {
-    const response = await fetchImpl(`${normalizeDeepSeekBaseUrl(params.baseUrl)}/models`, {
-      headers: { Authorization: `Bearer ${params.apiKey}` },
-      signal,
-    });
+  return withAbortTimeout(
+    async (abortSignal) => {
+      const signal = params.signal ? AbortSignal.any([abortSignal, params.signal]) : abortSignal;
 
-    if (!response.ok) {
-      throw new DeepSeekApiError(`DeepSeek model listing failed (HTTP ${response.status}).`);
-    }
+      const response = await fetchImpl(`${normalizeDeepSeekBaseUrl(params.baseUrl)}/models`, {
+        headers: { Authorization: `Bearer ${params.apiKey}` },
+        signal,
+      });
 
-    const payload = (await response.json()) as DeepSeekModelListResponse;
-    const modelIds = (payload.data ?? [])
-      .map((model) => model.id)
-      .filter((modelId): modelId is string => Boolean(modelId));
+      if (!response.ok) {
+        throw new DeepSeekApiError(`DeepSeek model listing failed (HTTP ${response.status}).`);
+      }
 
-    return modelIds
-      .map(toDeepSeekModelInfo)
-      .sort((a, b) => a.displayName.localeCompare(b.displayName));
-  } finally {
-    clearTimeout(timeout);
-  }
+      const payload = (await response.json()) as DeepSeekModelListResponse;
+      const modelIds = (payload.data ?? [])
+        .map((model) => model.id)
+        .filter((modelId): modelId is string => Boolean(modelId));
+
+      return modelIds
+        .map(toDeepSeekModelInfo)
+        .sort((a, b) => a.displayName.localeCompare(b.displayName));
+    },
+    'DeepSeek model listing timed out.',
+    MODEL_LIST_TIMEOUT_MS,
+    () =>
+      recordProviderProbeTimeout({
+        provider: 'deepseek',
+        operation: 'model-list',
+        message: 'DeepSeek model listing timed out.',
+      })
+  );
 }
 
 export function getDeepSeekFallbackModels(): ModelInfo[] {

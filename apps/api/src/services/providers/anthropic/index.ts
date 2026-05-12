@@ -7,10 +7,18 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { registerProvider } from '../core/provider-registry';
 import { withModelCache } from '../core/model-cache';
+import {
+  recordProviderCacheHit,
+  recordProviderCacheMiss,
+  recordProviderProbeTimeout,
+} from '../core/provider-observability';
+import { createReadinessCache, createReadinessCacheKey } from '../core/readiness-cache';
+import { withAbortTimeout } from '../core/probe-timeout';
 import { createProviderSecretService } from '../core/secret-service';
 import { isReasoningModel } from '../core/capability-detector';
 import { getModelContextLimit } from '../core/context-policy';
 import { appendAttachmentFallbackNotes } from '../core/attachment-content';
+import { createAnthropicClient } from './client';
 import { narrowDelta, narrowSdkError, toMessageCreateParams } from './normalizers';
 import { streamAnthropicAgentTurn } from './stream';
 import type {
@@ -22,6 +30,8 @@ import type {
   ModelInfo,
   AgentTurnRequest,
   AgentEvent,
+  ProviderHealthcheckRequest,
+  ProviderWarmupRequest,
 } from '../types';
 
 /**
@@ -77,7 +87,17 @@ const secretService = createProviderSecretService({
   validateFn: async (apiKey) => {
     const client = new Anthropic({ apiKey });
     try {
-      await client.models.list({ limit: 1 });
+      await withAbortTimeout(
+        (signal) => client.models.list({ limit: 1 }, { signal }),
+        'Anthropic API validation timed out.',
+        undefined,
+        () =>
+          recordProviderProbeTimeout({
+            provider: 'anthropic',
+            operation: 'healthcheck',
+            message: 'Anthropic API validation timed out.',
+          })
+      );
     } catch (err: unknown) {
       const sdkErr = narrowSdkError(err);
       if (sdkErr.status === 401 || sdkErr.status === 403) {
@@ -89,10 +109,6 @@ const secretService = createProviderSecretService({
     }
   },
 });
-
-function createClient(apiKey: string): Anthropic {
-  return new Anthropic({ apiKey });
-}
 
 function buildMessages(req: TextGenerationRequest): Anthropic.MessageCreateParams['messages'] {
   const prompt = appendAttachmentFallbackNotes(req.prompt, req.attachments, req.modelCapabilities);
@@ -111,12 +127,24 @@ function buildMessages(req: TextGenerationRequest): Anthropic.MessageCreateParam
 const listModelsWithCache = withModelCache(
   async (userId: string): Promise<ModelInfo[]> => {
     const apiKey = await secretService.resolveApiKey(userId);
-    const client = createClient(apiKey);
+    const client = createAnthropicClient(apiKey);
 
     try {
       const models: ModelInfo[] = [];
 
-      for await (const model of client.models.list({ limit: 100 })) {
+      const modelPage = await withAbortTimeout(
+        (signal) => client.models.list({ limit: 100 }, { signal }),
+        'Anthropic model listing timed out.',
+        undefined,
+        () =>
+          recordProviderProbeTimeout({
+            provider: 'anthropic',
+            operation: 'model-list',
+            message: 'Anthropic model listing timed out.',
+          })
+      );
+
+      for await (const model of modelPage) {
         models.push({
           modelId: model.id,
           displayName: model.display_name || model.id,
@@ -148,12 +176,50 @@ const listModelsWithCache = withModelCache(
   { ttl: 3_600_000, fallback: FALLBACK_MODELS }
 );
 
+interface PreparedAnthropicRuntime {
+  readonly apiKey: string;
+  readonly client: ReturnType<typeof createAnthropicClient>;
+}
+
+const preparedRuntimeCache = createReadinessCache<PreparedAnthropicRuntime>({
+  onHit: () => recordProviderCacheHit('anthropic', 'prepared-runtime'),
+  onMiss: () => recordProviderCacheMiss('anthropic', 'prepared-runtime'),
+});
+
+async function loadPreparedRuntime(
+  userId: string,
+  modelName?: string
+): Promise<PreparedAnthropicRuntime> {
+  const apiKey = await secretService.resolveApiKey(userId, modelName);
+  return {
+    apiKey,
+    client: createAnthropicClient(apiKey),
+  };
+}
+
+async function prepareRuntime(
+  userId: string,
+  modelName?: string
+): Promise<PreparedAnthropicRuntime> {
+  return preparedRuntimeCache.get(createReadinessCacheKey(userId, modelName), () =>
+    loadPreparedRuntime(userId, modelName)
+  );
+}
+
+function invalidatePreparedRuntime(userId?: string): void {
+  if (!userId) {
+    preparedRuntimeCache.clearWhere(() => true);
+    return;
+  }
+
+  preparedRuntimeCache.clearByUserPrefix(userId);
+}
+
 const anthropicProvider: AIProvider = {
   providerType: 'anthropic',
 
   async generateText(req: TextGenerationRequest): Promise<TextGenerationResult> {
-    const apiKey = await secretService.resolveApiKey(req.userId, req.modelName);
-    const client = createClient(apiKey);
+    const { client } = await prepareRuntime(req.userId, req.modelName);
 
     const response = await client.messages.create(
       {
@@ -175,14 +241,12 @@ const anthropicProvider: AIProvider = {
   },
 
   async *generateAgentTurnStream(req: AgentTurnRequest): AsyncIterable<AgentEvent> {
-    const apiKey = await secretService.resolveApiKey(req.userId, req.modelName);
-    const client = createClient(apiKey);
+    const { client } = await prepareRuntime(req.userId, req.modelName);
     yield* streamAnthropicAgentTurn(client, req);
   },
 
   async *generateTextStream(req: TextGenerationRequest): AsyncIterable<StreamingChunk> {
-    const apiKey = await secretService.resolveApiKey(req.userId, req.modelName);
-    const client = createClient(apiKey);
+    const { client } = await prepareRuntime(req.userId, req.modelName);
 
     const thinkingEnabled = req.generationConfig?.thinkingEnabled ?? false;
     const effort = req.generationConfig?.reasoningEffort ?? 'medium';
@@ -238,10 +302,25 @@ const anthropicProvider: AIProvider = {
 
   invalidateModelCache(userId?: string): void {
     listModelsWithCache.invalidate(userId);
+    invalidatePreparedRuntime(userId);
   },
 
   async syncConfigFileConnectors(userId: string): Promise<void> {
     await secretService.syncConfigFileConnectors(userId);
+  },
+
+  async warmup(req: ProviderWarmupRequest): Promise<void> {
+    await preparedRuntimeCache.prime(createReadinessCacheKey(req.userId, req.modelName), () =>
+      loadPreparedRuntime(req.userId, req.modelName)
+    );
+  },
+
+  async healthcheck(req: ProviderHealthcheckRequest): Promise<void> {
+    if (!req.apiKey?.trim()) {
+      throw new Error('anthropic healthcheck requires an API key.');
+    }
+
+    await secretService.validateApiKey(req.apiKey.trim());
   },
 
   async validateApiKey(apiKey: string): Promise<void> {

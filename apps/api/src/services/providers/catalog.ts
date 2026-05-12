@@ -56,6 +56,12 @@ function createEmptySnapshot(): ModelCatalogResponse {
 interface UnifiedModelCatalogService {
   refresh(userId: string): Promise<ModelCatalogResponse>;
   getUnifiedModelCatalog(userId: string): Promise<ModelCatalogResponse>;
+  getCachedModelMetadata(
+    userId: string,
+    modelId: string
+  ):
+    | { providerType: ProviderType; capabilities: ModelInfo['capabilities'] | undefined }
+    | undefined;
   getCachedModelCapabilities(
     userId: string,
     modelId: string
@@ -87,6 +93,7 @@ export function createUnifiedModelCatalogService(
   const fullCatalogs = new Map<string, ModelOption[]>();
   const snapshots = new Map<string, ModelCatalogResponse>();
   const refreshPromises = new Map<string, Promise<ModelCatalogResponse>>();
+  const dirtySnapshots = new Set<string>();
 
   function getSnapshot(userId: string): ModelCatalogResponse {
     const existing = snapshots.get(userId);
@@ -135,11 +142,91 @@ export function createUnifiedModelCatalogService(
       ...snap,
       configured: true,
       status: 'ready',
+      lastSyncedAt: snap.lastSyncedAt,
       allModels: fullCatalog,
       discoveredTextModels: discoveredText,
       discoveredImageModels: discoveredImage,
       textModels: discoveredText.filter((m) => enabledIds.has(m.modelId)),
       imageModels: discoveredImage.filter((m) => enabledIds.has(m.modelId)),
+    });
+    dirtySnapshots.delete(userId);
+  }
+
+  function getCachedModel(userId: string, modelId: string): ModelOption | undefined {
+    return (
+      fullCatalogs.get(userId)?.find((model) => model.modelId === modelId) ??
+      snapshots.get(userId)?.allModels.find((model) => model.modelId === modelId)
+    );
+  }
+
+  async function refreshCatalog(userId: string): Promise<ModelCatalogResponse> {
+    const inflight = refreshPromises.get(userId);
+    if (inflight) return inflight;
+
+    const promise = (async () => {
+      try {
+        const providerTypes = listProviders();
+        const PROVIDER_TIMEOUT_MS = 5_000;
+
+        const results = await Promise.allSettled(
+          providerTypes.map(async (pt) => {
+            const provider = getProviderFn(pt);
+            const timeoutPromise = new Promise<never>((_, reject) =>
+              setTimeout(() => reject(new Error(`Provider ${pt} timed out`)), PROVIDER_TIMEOUT_MS)
+            );
+            return Promise.race([provider.listModels(userId), timeoutPromise]);
+          })
+        );
+
+        const allModels: ModelOption[] = [];
+        for (const result of results) {
+          if (result.status === 'fulfilled') {
+            allModels.push(...result.value.map(modelInfoToOption));
+          }
+          // rejected providers (no connector or timeout) are silently skipped
+        }
+
+        fullCatalogs.set(userId, allModels);
+        evictOldest(fullCatalogs);
+        await recalculateSnapshot(userId);
+
+        const snap = getSnapshot(userId);
+        snap.lastSyncedAt = now();
+        snapshots.set(userId, snap);
+        evictOldest(snapshots);
+
+        return snap;
+      } catch (error) {
+        const cachedSnapshot = snapshots.get(userId);
+        const cachedCatalog = fullCatalogs.get(userId);
+        if (cachedSnapshot && cachedCatalog && cachedCatalog.length > 0) {
+          return cachedSnapshot;
+        }
+
+        const message = error instanceof Error ? error.message : 'Unknown catalog refresh error.';
+        const snap: ModelCatalogResponse = {
+          ...createEmptySnapshot(),
+          status: 'error',
+          error: message,
+        };
+        snapshots.set(userId, snap);
+        return snap;
+      } finally {
+        refreshPromises.delete(userId);
+      }
+    })();
+
+    refreshPromises.set(userId, promise);
+    return promise;
+  }
+
+  function refreshInBackground(userId: string): void {
+    if (!isStale(userId) || refreshPromises.has(userId)) {
+      return;
+    }
+
+    void refreshCatalog(userId).catch(() => {
+      // Background refresh should never block callers that already have a warm snapshot.
     });
   }
 
@@ -149,82 +236,50 @@ export function createUnifiedModelCatalogService(
      * Providers that fail (e.g. no connector configured) are silently skipped.
      */
     async refresh(userId: string): Promise<ModelCatalogResponse> {
-      const inflight = refreshPromises.get(userId);
-      if (inflight) return inflight;
-
-      const promise = (async () => {
-        try {
-          const providerTypes = listProviders();
-          const PROVIDER_TIMEOUT_MS = 5_000;
-
-          const results = await Promise.allSettled(
-            providerTypes.map(async (pt) => {
-              const provider = getProviderFn(pt);
-              const timeoutPromise = new Promise<never>((_, reject) =>
-                setTimeout(() => reject(new Error(`Provider ${pt} timed out`)), PROVIDER_TIMEOUT_MS)
-              );
-              return Promise.race([provider.listModels(userId), timeoutPromise]);
-            })
-          );
-
-          const allModels: ModelOption[] = [];
-          for (const result of results) {
-            if (result.status === 'fulfilled') {
-              allModels.push(...result.value.map(modelInfoToOption));
-            }
-            // rejected providers (no connector or timeout) are silently skipped
-          }
-
-          fullCatalogs.set(userId, allModels);
-          evictOldest(fullCatalogs);
-          await recalculateSnapshot(userId);
-
-          const snap = getSnapshot(userId);
-          snap.lastSyncedAt = now();
-          snapshots.set(userId, snap);
-          evictOldest(snapshots);
-
-          return snap;
-        } catch (error) {
-          const message = error instanceof Error ? error.message : 'Unknown catalog refresh error.';
-          const snap: ModelCatalogResponse = {
-            ...createEmptySnapshot(),
-            status: 'error',
-            error: message,
-          };
-          snapshots.set(userId, snap);
-          return snap;
-        } finally {
-          refreshPromises.delete(userId);
-        }
-      })();
-
-      refreshPromises.set(userId, promise);
-      return promise;
+      return refreshCatalog(userId);
     },
 
     /**
      * Returns the catalog, awaiting the first refresh when the cache is cold.
-     * Subsequent calls with a warm cache recalculate the snapshot synchronously.
+     * Warm snapshots stay in memory until connector state changes; stale provider
+     * discovery refreshes in the background so request latency stays flat.
      */
     async getUnifiedModelCatalog(userId: string): Promise<ModelCatalogResponse> {
       const full = fullCatalogs.get(userId);
-      if (full && full.length > 0) {
-        await recalculateSnapshot(userId);
-      } else if (isStale(userId)) {
-        return this.refresh(userId);
+      if (!full || full.length === 0) {
+        return refreshCatalog(userId);
       }
+
+      if (!snapshots.has(userId) || dirtySnapshots.has(userId)) {
+        await recalculateSnapshot(userId);
+      }
+
+      refreshInBackground(userId);
       return getSnapshot(userId);
+    },
+
+    getCachedModelMetadata(
+      userId: string,
+      modelId: string
+    ):
+      | { providerType: ProviderType; capabilities: ModelInfo['capabilities'] | undefined }
+      | undefined {
+      const cachedModel = getCachedModel(userId, modelId);
+      if (!cachedModel?.provider) {
+        return undefined;
+      }
+
+      return {
+        providerType: cachedModel.provider,
+        capabilities: cachedModel.capabilities,
+      };
     },
 
     getCachedModelCapabilities(
       userId: string,
       modelId: string
     ): ModelInfo['capabilities'] | undefined {
-      const cachedModel =
-        fullCatalogs.get(userId)?.find((model) => model.modelId === modelId) ??
-        snapshots.get(userId)?.allModels.find((model) => model.modelId === modelId);
-      return cachedModel?.capabilities;
+      return getCachedModel(userId, modelId)?.capabilities;
     },
 
     /**
@@ -238,6 +293,7 @@ export function createUnifiedModelCatalogService(
       fullCatalogs.delete(userId);
       snapshots.delete(userId);
       refreshPromises.delete(userId);
+      dirtySnapshots.delete(userId);
     },
 
     /**
@@ -247,7 +303,7 @@ export function createUnifiedModelCatalogService(
      * expensive full provider re-fetch.
      */
     recalculate(userId: string): void {
-      snapshots.delete(userId);
+      dirtySnapshots.add(userId);
       refreshPromises.delete(userId);
     },
   };
@@ -258,6 +314,8 @@ const unifiedCatalogService = createUnifiedModelCatalogService();
 export const refreshUnifiedCatalog = unifiedCatalogService.refresh.bind(unifiedCatalogService);
 export const getUnifiedModelCatalog =
   unifiedCatalogService.getUnifiedModelCatalog.bind(unifiedCatalogService);
+export const getCachedModelMetadata =
+  unifiedCatalogService.getCachedModelMetadata.bind(unifiedCatalogService);
 export const getCachedModelCapabilities =
   unifiedCatalogService.getCachedModelCapabilities.bind(unifiedCatalogService);
 export const invalidateUnifiedCatalog =

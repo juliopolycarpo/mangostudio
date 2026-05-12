@@ -5,7 +5,15 @@
  */
 
 import { registerProvider } from '../core/provider-registry';
+import { validateBaseUrl } from '../core/base-url-policy';
 import { withModelCache } from '../core/model-cache';
+import { createReadinessCache, createReadinessCacheKey } from '../core/readiness-cache';
+import {
+  recordProviderCacheHit,
+  recordProviderCacheMiss,
+  recordProviderProbeTimeout,
+} from '../core/provider-observability';
+import { PROVIDER_PROBE_TIMEOUT_MS, withAbortTimeout } from '../core/probe-timeout';
 import { createProviderSecretService } from '../core/secret-service';
 import { isImageModelId, isReasoningModel } from '../core/capability-detector';
 import { buildChatMessages } from '../openai/message-mapper';
@@ -25,6 +33,8 @@ import type {
   ModelInfo,
   AgentTurnRequest,
   AgentEvent,
+  ProviderHealthcheckRequest,
+  ProviderWarmupRequest,
 } from '../types';
 
 // Re-export for consumers
@@ -51,6 +61,47 @@ async function resolveClientConfig(
   return resolveCompatibleClientConfig(rows, secretService.resolveSecretValue, modelName);
 }
 
+interface PreparedCompatibleRuntime {
+  readonly apiKey: string;
+  readonly baseUrl: string;
+  readonly client: ReturnType<typeof createCompatibleClient>;
+}
+
+const preparedRuntimeCache = createReadinessCache<PreparedCompatibleRuntime>({
+  onHit: () => recordProviderCacheHit('openai-compatible', 'prepared-runtime'),
+  onMiss: () => recordProviderCacheMiss('openai-compatible', 'prepared-runtime'),
+});
+
+async function loadPreparedRuntime(
+  userId: string,
+  modelName?: string
+): Promise<PreparedCompatibleRuntime> {
+  const { apiKey, baseUrl } = await resolveClientConfig(userId, modelName);
+  return {
+    apiKey,
+    baseUrl,
+    client: createCompatibleClient(apiKey, baseUrl),
+  };
+}
+
+async function prepareRuntime(
+  userId: string,
+  modelName?: string
+): Promise<PreparedCompatibleRuntime> {
+  return preparedRuntimeCache.get(createReadinessCacheKey(userId, modelName), () =>
+    loadPreparedRuntime(userId, modelName)
+  );
+}
+
+function invalidatePreparedRuntime(userId?: string): void {
+  if (!userId) {
+    preparedRuntimeCache.clearWhere(() => true);
+    return;
+  }
+
+  preparedRuntimeCache.clearByUserPrefix(userId);
+}
+
 const listModelsWithCache = withModelCache(
   async (userId: string): Promise<ModelInfo[]> => {
     await secretService.syncConfigFileConnectors(userId);
@@ -74,14 +125,28 @@ const listModelsWithCache = withModelCache(
 
     for (const [baseUrl, apiKey] of seenBaseUrls) {
       try {
-        const client = createCompatibleClient(apiKey, baseUrl);
+        const client = createCompatibleClient(apiKey, baseUrl, {
+          timeoutMs: PROVIDER_PROBE_TIMEOUT_MS,
+          maxRetries: 0,
+        });
         const endpoint = classifyEndpoint(baseUrl);
         // OpenRouter and DeepSeek advertise Chat Completions response_format JSON
         // Schema support. Generic endpoints are unknown territory — report false
         // so callers make no assumptions until verified.
         const supportsStructuredOutput = endpoint === 'openrouter' || endpoint === 'deepseek';
 
-        for await (const model of await client.models.list()) {
+        const modelsPage = await withAbortTimeout(
+          (signal) => client.models.list({ signal }),
+          `OpenAI-compatible model listing timed out for ${baseUrl}.`,
+          PROVIDER_PROBE_TIMEOUT_MS,
+          () =>
+            recordProviderProbeTimeout({
+              provider: 'openai-compatible',
+              operation: 'model-list',
+              message: `OpenAI-compatible model listing timed out for ${baseUrl}.`,
+            })
+        );
+        for await (const model of modelsPage) {
           if (
             model.id.includes('embedding') ||
             model.id.includes('tts') ||
@@ -124,8 +189,7 @@ const openAICompatibleProvider: AIProvider = {
   providerType: 'openai-compatible',
 
   async generateText(req: TextGenerationRequest): Promise<TextGenerationResult> {
-    const { apiKey, baseUrl } = await resolveClientConfig(req.userId, req.modelName);
-    const client = createCompatibleClient(apiKey, baseUrl);
+    const { client } = await prepareRuntime(req.userId, req.modelName);
 
     const completion = await client.chat.completions.create(
       {
@@ -142,14 +206,12 @@ const openAICompatibleProvider: AIProvider = {
   },
 
   async *generateAgentTurnStream(req: AgentTurnRequest): AsyncIterable<AgentEvent> {
-    const { apiKey, baseUrl } = await resolveClientConfig(req.userId, req.modelName);
-    const client = createCompatibleClient(apiKey, baseUrl);
+    const { client } = await prepareRuntime(req.userId, req.modelName);
     yield* streamOAICompatAgentTurn(client, req);
   },
 
   async *generateTextStream(req: TextGenerationRequest): AsyncIterable<StreamingChunk> {
-    const { apiKey, baseUrl } = await resolveClientConfig(req.userId, req.modelName);
-    const client = createCompatibleClient(apiKey, baseUrl);
+    const { client } = await prepareRuntime(req.userId, req.modelName);
 
     const stream = await client.chat.completions.create(
       {
@@ -176,8 +238,7 @@ const openAICompatibleProvider: AIProvider = {
       throw new Error(`Image generation is not supported by model "${req.modelName}".`);
     }
 
-    const { apiKey, baseUrl } = await resolveClientConfig(req.userId, req.modelName);
-    const client = createCompatibleClient(apiKey, baseUrl);
+    const { client } = await prepareRuntime(req.userId, req.modelName);
 
     return generateOpenAIImage(client, req);
   },
@@ -188,10 +249,44 @@ const openAICompatibleProvider: AIProvider = {
 
   invalidateModelCache(userId?: string): void {
     listModelsWithCache.invalidate(userId);
+    invalidatePreparedRuntime(userId);
   },
 
   async syncConfigFileConnectors(userId: string): Promise<void> {
     await secretService.syncConfigFileConnectors(userId);
+  },
+
+  async warmup(req: ProviderWarmupRequest): Promise<void> {
+    await preparedRuntimeCache.prime(createReadinessCacheKey(req.userId, req.modelName), () =>
+      loadPreparedRuntime(req.userId, req.modelName)
+    );
+  },
+
+  async healthcheck(req: ProviderHealthcheckRequest): Promise<void> {
+    if (!req.apiKey?.trim()) {
+      throw new Error('openai-compatible healthcheck requires an API key.');
+    }
+    if (!req.baseUrl?.trim()) {
+      throw new Error('openai-compatible healthcheck requires a baseUrl.');
+    }
+
+    const baseUrl = req.baseUrl.trim();
+    await validateBaseUrl(baseUrl);
+    const client = createCompatibleClient(req.apiKey.trim(), baseUrl, {
+      timeoutMs: PROVIDER_PROBE_TIMEOUT_MS,
+      maxRetries: 0,
+    });
+    await withAbortTimeout(
+      (signal) => client.models.list({ signal }),
+      `OpenAI-compatible healthcheck timed out for ${baseUrl}.`,
+      PROVIDER_PROBE_TIMEOUT_MS,
+      () =>
+        recordProviderProbeTimeout({
+          provider: 'openai-compatible',
+          operation: 'healthcheck',
+          message: `OpenAI-compatible healthcheck timed out for ${baseUrl}.`,
+        })
+    );
   },
 
   async validateApiKey(apiKey: string): Promise<void> {

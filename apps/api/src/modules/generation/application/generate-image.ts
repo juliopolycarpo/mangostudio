@@ -4,7 +4,11 @@ import type { GeneratedImageArtifact } from '@mangostudio/shared';
 import type { PromptSettings } from '@mangostudio/shared/prompt-rules';
 import { assertChatOwnership } from '../../chats/domain/chat-ownership';
 import { resolveModel } from './resolve-model';
-import { getProviderForModel } from '../../../services/providers/core/provider-registry';
+import {
+  getProvider,
+  getProviderForModel,
+} from '../../../services/providers/core/provider-registry';
+import { warmProviderForRequest } from '../../../services/providers/core/provider-readiness';
 import { generateId } from '../../../utils/id';
 import { persistImageTurn } from '../infrastructure/conversation-persistence';
 import { composePrompt } from '../../prompt-rules/application/prompt-composer';
@@ -58,16 +62,23 @@ export async function generateImage(
 ): Promise<GenerateImageResult> {
   await assertChatOwnership(input.chatId, input.userId, db);
 
-  const { modelId } = await resolveModel({
+  const { modelId, providerType } = await resolveModel({
     requestedModel: input.model,
     userId: input.userId,
     type: 'image',
   });
 
-  const provider = await getProviderForModel(modelId, input.userId);
+  const provider = providerType
+    ? getProvider(providerType)
+    : await getProviderForModel(modelId, input.userId);
   if (!provider.generateImage) {
     throw new ImageProviderNotSupportedError();
   }
+  const warmupPromise = warmProviderForRequest(provider.providerType, {
+    userId: input.userId,
+    modelName: modelId,
+    purpose: 'image',
+  });
 
   const now = Date.now();
   const userMsgId = generateId();
@@ -90,6 +101,7 @@ export async function generateImage(
     isFirstTurn,
   });
 
+  await warmupPromise;
   const { imageUrl } = await provider.generateImage({
     userId: input.userId,
     prompt: composition.effectivePrompt,

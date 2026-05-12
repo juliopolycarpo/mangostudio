@@ -38,14 +38,14 @@ export async function generateGeminiText(
   prompt: string,
   systemPrompt?: string,
   modelName?: string,
-  attachmentOptions: GeminiTextAttachmentOptions = {}
+  attachmentOptions: GeminiTextAttachmentOptions = {},
+  client?: ReturnType<typeof createGeminiClient>
 ): Promise<string> {
   if (!modelName) {
     throw new Error('No Gemini text model was provided.');
   }
 
-  const apiKey = await getResolvedGeminiApiKey(userId, modelName);
-  const ai = createGeminiClient(apiKey);
+  const ai = client ?? createGeminiClient(await getResolvedGeminiApiKey(userId, modelName));
 
   const historyContents: Content[] = history.map((msg) => ({
     role: msg.role === 'ai' ? 'model' : 'user',
@@ -94,14 +94,14 @@ export async function* generateGeminiTextStream(
   systemPrompt?: string,
   modelName?: string,
   generationConfig?: GenerationConfig,
-  attachmentOptions: GeminiTextAttachmentOptions = {}
+  attachmentOptions: GeminiTextAttachmentOptions = {},
+  client?: ReturnType<typeof createGeminiClient>
 ): AsyncGenerator<StreamingChunk> {
   if (!modelName) {
     throw new Error('No Gemini text model was provided.');
   }
 
-  const apiKey = await getResolvedGeminiApiKey(userId, modelName);
-  const ai = createGeminiClient(apiKey);
+  const ai = client ?? createGeminiClient(await getResolvedGeminiApiKey(userId, modelName));
 
   const historyContents: Content[] = history.map((msg) => ({
     role: msg.role === 'ai' ? 'model' : 'user',

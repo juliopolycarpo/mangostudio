@@ -20,6 +20,8 @@ import { Route as AuthenticatedSettingsIndexRouteImport } from './routes/_authen
 import { Route as AuthenticatedSettingsToolsRouteImport } from './routes/_authenticated/settings/tools'
 import { Route as AuthenticatedSettingsProvidersRouteImport } from './routes/_authenticated/settings/providers'
 import { Route as AuthenticatedSettingsPromptsRouteImport } from './routes/_authenticated/settings/prompts'
+import { Route as AuthenticatedSettingsMetricsRouteImport } from './routes/_authenticated/settings/metrics'
+import { Route as AuthenticatedSettingsLogsRouteImport } from './routes/_authenticated/settings/logs'
 import { Route as AuthenticatedSettingsGeneralRouteImport } from './routes/_authenticated/settings/general'
 import { Route as AuthenticatedSettingsContextRouteImport } from './routes/_authenticated/settings/context'
 import { Route as AuthenticatedSettingsConnectorsRouteImport } from './routes/_authenticated/settings/connectors'
@@ -85,6 +87,18 @@ const AuthenticatedSettingsPromptsRoute =
     path: '/prompts',
     getParentRoute: () => AuthenticatedSettingsRoute,
   } as any)
+const AuthenticatedSettingsMetricsRoute =
+  AuthenticatedSettingsMetricsRouteImport.update({
+    id: '/metrics',
+    path: '/metrics',
+    getParentRoute: () => AuthenticatedSettingsRoute,
+  } as any)
+const AuthenticatedSettingsLogsRoute =
+  AuthenticatedSettingsLogsRouteImport.update({
+    id: '/logs',
+    path: '/logs',
+    getParentRoute: () => AuthenticatedSettingsRoute,
+  } as any)
 const AuthenticatedSettingsGeneralRoute =
   AuthenticatedSettingsGeneralRouteImport.update({
     id: '/general',
@@ -133,6 +147,8 @@ export interface FileRoutesByFullPath {
   '/settings/connectors': typeof AuthenticatedSettingsConnectorsRoute
   '/settings/context': typeof AuthenticatedSettingsContextRoute
   '/settings/general': typeof AuthenticatedSettingsGeneralRoute
+  '/settings/logs': typeof AuthenticatedSettingsLogsRoute
+  '/settings/metrics': typeof AuthenticatedSettingsMetricsRoute
   '/settings/prompts': typeof AuthenticatedSettingsPromptsRoute
   '/settings/providers': typeof AuthenticatedSettingsProvidersRouteWithChildren
   '/settings/tools': typeof AuthenticatedSettingsToolsRoute
@@ -150,6 +166,8 @@ export interface FileRoutesByTo {
   '/settings/connectors': typeof AuthenticatedSettingsConnectorsRoute
   '/settings/context': typeof AuthenticatedSettingsContextRoute
   '/settings/general': typeof AuthenticatedSettingsGeneralRoute
+  '/settings/logs': typeof AuthenticatedSettingsLogsRoute
+  '/settings/metrics': typeof AuthenticatedSettingsMetricsRoute
   '/settings/prompts': typeof AuthenticatedSettingsPromptsRoute
   '/settings/tools': typeof AuthenticatedSettingsToolsRoute
   '/settings': typeof AuthenticatedSettingsIndexRoute
@@ -169,6 +187,8 @@ export interface FileRoutesById {
   '/_authenticated/settings/connectors': typeof AuthenticatedSettingsConnectorsRoute
   '/_authenticated/settings/context': typeof AuthenticatedSettingsContextRoute
   '/_authenticated/settings/general': typeof AuthenticatedSettingsGeneralRoute
+  '/_authenticated/settings/logs': typeof AuthenticatedSettingsLogsRoute
+  '/_authenticated/settings/metrics': typeof AuthenticatedSettingsMetricsRoute
   '/_authenticated/settings/prompts': typeof AuthenticatedSettingsPromptsRoute
   '/_authenticated/settings/providers': typeof AuthenticatedSettingsProvidersRouteWithChildren
   '/_authenticated/settings/tools': typeof AuthenticatedSettingsToolsRoute
@@ -189,6 +209,8 @@ export interface FileRouteTypes {
     | '/settings/connectors'
     | '/settings/context'
     | '/settings/general'
+    | '/settings/logs'
+    | '/settings/metrics'
     | '/settings/prompts'
     | '/settings/providers'
     | '/settings/tools'
@@ -206,6 +228,8 @@ export interface FileRouteTypes {
     | '/settings/connectors'
     | '/settings/context'
     | '/settings/general'
+    | '/settings/logs'
+    | '/settings/metrics'
     | '/settings/prompts'
     | '/settings/tools'
     | '/settings'
@@ -224,6 +248,8 @@ export interface FileRouteTypes {
     | '/_authenticated/settings/connectors'
     | '/_authenticated/settings/context'
     | '/_authenticated/settings/general'
+    | '/_authenticated/settings/logs'
+    | '/_authenticated/settings/metrics'
     | '/_authenticated/settings/prompts'
     | '/_authenticated/settings/providers'
     | '/_authenticated/settings/tools'
@@ -317,6 +343,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedSettingsPromptsRouteImport
       parentRoute: typeof AuthenticatedSettingsRoute
     }
+    '/_authenticated/settings/metrics': {
+      id: '/_authenticated/settings/metrics'
+      path: '/metrics'
+      fullPath: '/settings/metrics'
+      preLoaderRoute: typeof AuthenticatedSettingsMetricsRouteImport
+      parentRoute: typeof AuthenticatedSettingsRoute
+    }
+    '/_authenticated/settings/logs': {
+      id: '/_authenticated/settings/logs'
+      path: '/logs'
+      fullPath: '/settings/logs'
+      preLoaderRoute: typeof AuthenticatedSettingsLogsRouteImport
+      parentRoute: typeof AuthenticatedSettingsRoute
+    }
     '/_authenticated/settings/general': {
       id: '/_authenticated/settings/general'
       path: '/general'
@@ -385,6 +425,8 @@ interface AuthenticatedSettingsRouteChildren {
   AuthenticatedSettingsConnectorsRoute: typeof AuthenticatedSettingsConnectorsRoute
   AuthenticatedSettingsContextRoute: typeof AuthenticatedSettingsContextRoute
   AuthenticatedSettingsGeneralRoute: typeof AuthenticatedSettingsGeneralRoute
+  AuthenticatedSettingsLogsRoute: typeof AuthenticatedSettingsLogsRoute
+  AuthenticatedSettingsMetricsRoute: typeof AuthenticatedSettingsMetricsRoute
   AuthenticatedSettingsPromptsRoute: typeof AuthenticatedSettingsPromptsRoute
   AuthenticatedSettingsProvidersRoute: typeof AuthenticatedSettingsProvidersRouteWithChildren
   AuthenticatedSettingsToolsRoute: typeof AuthenticatedSettingsToolsRoute
@@ -396,6 +438,8 @@ const AuthenticatedSettingsRouteChildren: AuthenticatedSettingsRouteChildren = {
   AuthenticatedSettingsConnectorsRoute: AuthenticatedSettingsConnectorsRoute,
   AuthenticatedSettingsContextRoute: AuthenticatedSettingsContextRoute,
   AuthenticatedSettingsGeneralRoute: AuthenticatedSettingsGeneralRoute,
+  AuthenticatedSettingsLogsRoute: AuthenticatedSettingsLogsRoute,
+  AuthenticatedSettingsMetricsRoute: AuthenticatedSettingsMetricsRoute,
   AuthenticatedSettingsPromptsRoute: AuthenticatedSettingsPromptsRoute,
   AuthenticatedSettingsProvidersRoute:
     AuthenticatedSettingsProvidersRouteWithChildren,

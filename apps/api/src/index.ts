@@ -14,6 +14,10 @@ import { getDefaultFrontendDir } from './lib/runtime-paths';
 import { getConfig } from './lib/config';
 import { isSpaRoute } from './lib/spa-guard';
 import { app } from './app';
+import {
+  loadObservabilitySnapshot,
+  flushObservabilitySnapshot,
+} from './services/providers/core/provider-observability';
 
 const PORT = getConfig().server.port;
 const FRONTEND_DIR = getDefaultFrontendDir();
@@ -66,6 +70,9 @@ async function runMigrations(): Promise<void> {
 
 // Run migrations, then start server
 await runMigrations();
+
+// Restore observability counters and logs from the last persisted snapshot.
+await loadObservabilitySnapshot();
 
 // Add Frontend and SPA fallback if it exists
 if (frontendExists) {
@@ -122,6 +129,7 @@ async function shutdown(signal: 'SIGINT' | 'SIGTERM'): Promise<void> {
     console.warn('\n[api] Shutting down...');
   }
 
+  await flushObservabilitySnapshot();
   await closeDb();
   process.exit(0);
 }

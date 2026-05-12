@@ -154,6 +154,8 @@ export const messages = {
       context: 'Contexto',
       prompts: 'Prompts',
       tools: 'Ferramentas',
+      metrics: 'Métricas',
+      logs: 'Logs',
     },
     context: {
       title: 'Contexto',
@@ -389,6 +391,47 @@ export const messages = {
         cancel: 'Cancelar',
         pathPlaceholder: 'ex. /home/usuario/projetos',
         noPaths: 'Nenhum caminho configurado.',
+      },
+    },
+    metrics: {
+      title: 'Métricas',
+      description:
+        'Contadores em memória para taxa de acerto de cache dos providers e total de timeouts de probes.',
+      refresh: 'Atualizar',
+      failedToLoad: 'Falha ao carregar métricas',
+      empty: 'Nenhuma métrica de provider foi registrada ainda.',
+      generatedAtLabel: 'Última atualização: {value}',
+      totalProbeTimeoutsLabel: 'Timeouts de probe: {value}',
+      cacheSectionTitle: 'Taxa de Acerto de Cache',
+      probeSectionTitle: 'Timeouts de Probe por Operação',
+      cacheLabel: 'Cache',
+      hitsLabel: 'Acertos',
+      missesLabel: 'Falhas',
+      hitRateLabel: 'Taxa de acerto',
+      caches: {
+        sdkClient: 'Cliente SDK',
+        preparedRuntime: 'Runtime preparado',
+        providerRoute: 'Roteamento do provider',
+      },
+      operations: {
+        healthcheck: 'Healthcheck',
+        modelList: 'Listagem de modelos',
+      },
+    },
+    logs: {
+      title: 'Logs',
+      description: 'Timeouts recentes de probes de provider capturados pelo processo atual.',
+      refresh: 'Atualizar',
+      failedToLoad: 'Falha ao carregar logs',
+      empty: 'Nenhum evento recente de timeout de probe de provider.',
+      providerLabel: 'Provider',
+      operationLabel: 'Operação',
+      eventKinds: {
+        probeTimeout: 'Timeout de probe',
+      },
+      operations: {
+        healthcheck: 'Healthcheck',
+        modelList: 'Listagem de modelos',
       },
     },
     appearance: {

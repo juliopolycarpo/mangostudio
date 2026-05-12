@@ -5,6 +5,8 @@
 import { withModelCache } from '../core/model-cache';
 import { getModelContextLimit } from '../core/context-policy';
 import { isImageModelId, isReasoningModel } from '../core/capability-detector';
+import { recordProviderProbeTimeout } from '../core/provider-observability';
+import { PROVIDER_PROBE_TIMEOUT_MS, withAbortTimeout } from '../core/probe-timeout';
 import { createProviderSecretService } from '../core/secret-service';
 import { parseStringArray } from '../../../utils/json';
 import { createOpenAIClient, validateOpenAIAuthContext, type OpenAIAuthContext } from './client';
@@ -113,8 +115,22 @@ export const listModelsWithCache = withModelCache(
 
     const allModels: ModelInfo[] = [];
     try {
-      const client = createOpenAIClient(resolvedCtx);
-      for await (const model of await client.models.list()) {
+      const client = createOpenAIClient(resolvedCtx, {
+        timeoutMs: PROVIDER_PROBE_TIMEOUT_MS,
+        maxRetries: 0,
+      });
+      const modelsPage = await withAbortTimeout(
+        (signal) => client.models.list({ signal }),
+        'OpenAI model listing timed out.',
+        PROVIDER_PROBE_TIMEOUT_MS,
+        () =>
+          recordProviderProbeTimeout({
+            provider: 'openai',
+            operation: 'model-list',
+            message: 'OpenAI model listing timed out.',
+          })
+      );
+      for await (const model of modelsPage) {
         if (
           model.id.includes('embedding') ||
           model.id.includes('tts') ||

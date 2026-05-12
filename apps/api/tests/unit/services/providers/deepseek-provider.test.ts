@@ -6,7 +6,11 @@ import {
   normalizeDeepSeekReasoningEffort,
   buildDeepSeekSystemPrompt,
 } from '../../../../src/services/providers/deepseek/normalizers';
-import { validateDeepSeekApiKey } from '../../../../src/services/providers/deepseek/client';
+import {
+  createDeepSeekAgentClient,
+  createDeepSeekClient,
+  validateDeepSeekApiKey,
+} from '../../../../src/services/providers/deepseek/client';
 import {
   fetchDeepSeekModels,
   getDeepSeekFallbackModels,
@@ -84,6 +88,45 @@ function findAssistantMsg(state: Record<string, unknown>): Record<string, unknow
 // ---------------------------------------------------------------------------
 
 describe('DeepSeek provider foundation', () => {
+  it('reuses the same SDK client for the same connector config', () => {
+    const clientA = createDeepSeekClient({
+      apiKey: 'sk-test-deepseek-cache',
+      baseUrl: 'https://api.deepseek.com',
+    });
+    const clientB = createDeepSeekClient({
+      apiKey: 'sk-test-deepseek-cache',
+      baseUrl: 'https://api.deepseek.com/',
+    });
+
+    expect(clientA).toBe(clientB);
+  });
+
+  it('reuses the same agent client for the same connector config', () => {
+    const clientA = createDeepSeekAgentClient({
+      apiKey: 'sk-test-deepseek-agent-cache',
+      baseUrl: 'https://api.deepseek.com',
+    });
+    const clientB = createDeepSeekAgentClient({
+      apiKey: 'sk-test-deepseek-agent-cache',
+      baseUrl: 'https://api.deepseek.com/',
+    });
+
+    expect(clientA).toBe(clientB);
+  });
+
+  it('creates different clients when connector config changes', () => {
+    const flashClient = createDeepSeekAgentClient({
+      apiKey: 'sk-test-deepseek-agent-cache-a',
+      baseUrl: 'https://api.deepseek.com/v1',
+    });
+    const alternateClient = createDeepSeekAgentClient({
+      apiKey: 'sk-test-deepseek-agent-cache-b',
+      baseUrl: 'https://api.deepseek.com/v1',
+    });
+
+    expect(flashClient).not.toBe(alternateClient);
+  });
+
   it('accepts deepseek in connector contracts', () => {
     expect(
       Value.Check(AddConnectorBodySchema, {

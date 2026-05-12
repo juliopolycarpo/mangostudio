@@ -1,6 +1,6 @@
 import type { Kysely } from 'kysely';
 import type { ContextCompactionResponse, ContextInfo } from '@mangostudio/shared/chat';
-import type { MessagePart } from '@mangostudio/shared/types';
+import type { MessagePart, ProviderType } from '@mangostudio/shared/types';
 import type { Database } from '../../../db/types';
 import { resolveModel } from '../../generation/application/resolve-model';
 import { loadHistory } from '../../messages/infrastructure/message-repository';
@@ -8,7 +8,10 @@ import {
   persistAiResponse,
   updateChatAfterTurn,
 } from '../../generation/infrastructure/conversation-persistence';
-import { getProviderForModel } from '../../../services/providers/core/provider-registry';
+import {
+  getProvider,
+  getProviderForModel,
+} from '../../../services/providers/core/provider-registry';
 import {
   buildPersistedContextSnapshot,
   computeContextSnapshot,
@@ -84,22 +87,25 @@ function formatSummaryPrompt(history: Awaited<ReturnType<typeof loadHistory>>): 
     .join('\n\n');
 }
 
-async function generateSummary(
-  modelName: string,
-  userId: string,
-  chatId: string,
-  db: Kysely<Database>
-): Promise<string> {
-  const history = await loadHistory(chatId, {}, db);
-  if (history.length === 0) throw new EmptyChatCompactionError(chatId);
+async function generateSummary(params: {
+  modelName: string;
+  providerType?: ProviderType;
+  userId: string;
+  chatId: string;
+  db: Kysely<Database>;
+}): Promise<string> {
+  const history = await loadHistory(params.chatId, {}, params.db);
+  if (history.length === 0) throw new EmptyChatCompactionError(params.chatId);
 
-  const provider = await getProviderForModel(modelName, userId);
+  const provider = params.providerType
+    ? getProvider(params.providerType)
+    : await getProviderForModel(params.modelName, params.userId);
   const result = await provider.generateText({
-    userId,
+    userId: params.userId,
     history: [],
     prompt: formatSummaryPrompt(history),
     systemPrompt: SUMMARY_SYSTEM_PROMPT,
-    modelName,
+    modelName: params.modelName,
     generationConfig: {
       thinkingEnabled: false,
       reasoningEffort: 'medium',
@@ -161,15 +167,21 @@ export async function compactChatUseCase(
   db: Kysely<Database>
 ): Promise<ContextCompactionResponse> {
   await loadOwnedChat(input.chatId, input.userId, db);
-  const { modelId } = await resolveModel({
+  const resolvedModel = await resolveModel({
     requestedModel: input.model,
     userId: input.userId,
     type: 'text',
   });
-  const summary = await generateSummary(modelId, input.userId, input.chatId, db);
+  const summary = await generateSummary({
+    modelName: resolvedModel.modelId,
+    providerType: resolvedModel.providerType,
+    userId: input.userId,
+    chatId: input.chatId,
+    db,
+  });
   const result = await persistSummaryMessage({
     chatId: input.chatId,
-    modelName: modelId,
+    modelName: resolvedModel.modelId,
     summary,
     event: 'chat_compacted',
     db,
@@ -183,12 +195,18 @@ export async function summarizeToNewChatUseCase(
   db: Kysely<Database>
 ): Promise<ContextCompactionResponse> {
   const sourceChat = await loadOwnedChat(input.chatId, input.userId, db);
-  const { modelId } = await resolveModel({
+  const resolvedModel = await resolveModel({
     requestedModel: input.model,
     userId: input.userId,
     type: 'text',
   });
-  const summary = await generateSummary(modelId, input.userId, input.chatId, db);
+  const summary = await generateSummary({
+    modelName: resolvedModel.modelId,
+    providerType: resolvedModel.providerType,
+    userId: input.userId,
+    chatId: input.chatId,
+    db,
+  });
   const nextChat = await createChat(
     { title: sourceChat.title, model: sourceChat.model, userId: input.userId },
     db
@@ -207,7 +225,7 @@ export async function summarizeToNewChatUseCase(
 
   const result = await persistSummaryMessage({
     chatId: nextChat.id,
-    modelName: modelId,
+    modelName: resolvedModel.modelId,
     summary,
     event: 'summary_handoff',
     db,

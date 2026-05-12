@@ -1,11 +1,12 @@
-import OpenAI from 'openai';
 import { generateText, streamText } from 'ai';
 import type { SecretMetadataRow } from '@mangostudio/shared/types';
 
 import { registerProvider } from '../core/provider-registry';
 import { withModelCache } from '../core/model-cache';
+import { createReadinessCache, createReadinessCacheKey } from '../core/readiness-cache';
+import { recordProviderCacheHit, recordProviderCacheMiss } from '../core/provider-observability';
 import { createProviderSecretService } from '../core/secret-service';
-import { createDeepSeekClient, validateDeepSeekApiKey } from './client';
+import { createDeepSeekAgentClient, createDeepSeekClient, validateDeepSeekApiKey } from './client';
 import { fetchDeepSeekModels, getDeepSeekFallbackModels } from './model-catalog';
 import { buildDeepSeekProviderOptions, normalizeDeepSeekBaseUrl } from './options';
 import { buildDeepSeekMessages, buildDeepSeekSystemPrompt, toErrorMessage } from './normalizers';
@@ -18,6 +19,8 @@ import type {
   TextGenerationResult,
   AgentTurnRequest,
   AgentEvent,
+  ProviderHealthcheckRequest,
+  ProviderWarmupRequest,
 } from '../types';
 import { parseStringArray } from '../../../utils/json';
 
@@ -81,14 +84,56 @@ async function listConnectorModels(row: SecretMetadataRow, apiKey: string): Prom
   }
 }
 
+interface PreparedDeepSeekRuntime {
+  readonly apiKey: string;
+  readonly baseUrl: string;
+  readonly textClient: ReturnType<typeof createDeepSeekClient>;
+  readonly agentClient: ReturnType<typeof createDeepSeekAgentClient>;
+}
+
+const preparedRuntimeCache = createReadinessCache<PreparedDeepSeekRuntime>({
+  onHit: () => recordProviderCacheHit('deepseek', 'prepared-runtime'),
+  onMiss: () => recordProviderCacheMiss('deepseek', 'prepared-runtime'),
+});
+
+async function loadPreparedRuntime(
+  userId: string,
+  modelName?: string
+): Promise<PreparedDeepSeekRuntime> {
+  const { apiKey, baseUrl } = await resolveClientConfig(userId, modelName);
+  return {
+    apiKey,
+    baseUrl,
+    textClient: createDeepSeekClient({ apiKey, baseUrl }),
+    agentClient: createDeepSeekAgentClient({ apiKey, baseUrl }),
+  };
+}
+
+async function prepareRuntime(
+  userId: string,
+  modelName?: string
+): Promise<PreparedDeepSeekRuntime> {
+  return preparedRuntimeCache.get(createReadinessCacheKey(userId, modelName), () =>
+    loadPreparedRuntime(userId, modelName)
+  );
+}
+
+function invalidatePreparedRuntime(userId?: string): void {
+  if (!userId) {
+    preparedRuntimeCache.clearWhere(() => true);
+    return;
+  }
+
+  preparedRuntimeCache.clearByUserPrefix(userId);
+}
+
 const deepSeekProvider: AIProvider = {
   providerType: 'deepseek',
 
   async generateText(req: TextGenerationRequest): Promise<TextGenerationResult> {
-    const { apiKey, baseUrl } = await resolveClientConfig(req.userId, req.modelName);
-    const client = createDeepSeekClient({ apiKey, baseUrl });
+    const { textClient } = await prepareRuntime(req.userId, req.modelName);
     const result = await generateText({
-      model: client(req.modelName),
+      model: textClient(req.modelName),
       system: buildDeepSeekSystemPrompt(req),
       messages: buildDeepSeekMessages(req),
       abortSignal: req.signal,
@@ -104,10 +149,9 @@ const deepSeekProvider: AIProvider = {
   },
 
   async *generateTextStream(req: TextGenerationRequest): AsyncIterable<StreamingChunk> {
-    const { apiKey, baseUrl } = await resolveClientConfig(req.userId, req.modelName);
-    const client = createDeepSeekClient({ apiKey, baseUrl });
+    const { textClient } = await prepareRuntime(req.userId, req.modelName);
     const result = streamText({
-      model: client(req.modelName),
+      model: textClient(req.modelName),
       system: buildDeepSeekSystemPrompt(req),
       messages: buildDeepSeekMessages(req),
       abortSignal: req.signal,
@@ -137,12 +181,8 @@ const deepSeekProvider: AIProvider = {
   },
 
   async *generateAgentTurnStream(req: AgentTurnRequest): AsyncIterable<AgentEvent> {
-    const { apiKey, baseUrl } = await resolveClientConfig(req.userId, req.modelName);
-    const client = new OpenAI({
-      apiKey,
-      baseURL: normalizeDeepSeekBaseUrl(baseUrl),
-    });
-    yield* streamDeepSeekAgentTurn(client, req);
+    const { agentClient } = await prepareRuntime(req.userId, req.modelName);
+    yield* streamDeepSeekAgentTurn(agentClient, req);
   },
 
   async listModels(userId: string): Promise<ModelInfo[]> {
@@ -151,10 +191,28 @@ const deepSeekProvider: AIProvider = {
 
   invalidateModelCache(userId?: string): void {
     listModelsWithCache.invalidate(userId);
+    invalidatePreparedRuntime(userId);
   },
 
   async syncConfigFileConnectors(userId: string): Promise<void> {
     await secretService.syncConfigFileConnectors(userId);
+  },
+
+  async warmup(req: ProviderWarmupRequest): Promise<void> {
+    await preparedRuntimeCache.prime(createReadinessCacheKey(req.userId, req.modelName), () =>
+      loadPreparedRuntime(req.userId, req.modelName)
+    );
+  },
+
+  async healthcheck(req: ProviderHealthcheckRequest): Promise<void> {
+    if (!req.apiKey?.trim()) {
+      throw new Error('deepseek healthcheck requires an API key.');
+    }
+
+    await validateDeepSeekApiKey({
+      apiKey: req.apiKey.trim(),
+      baseUrl: req.baseUrl,
+    });
   },
 
   async validateApiKey(apiKey: string): Promise<void> {

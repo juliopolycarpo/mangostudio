@@ -14,9 +14,13 @@ import type { ProviderRuntimeSettings } from '@mangostudio/shared/provider-setti
 import type { AgentTurnRequest } from '../../../services/providers/types';
 import { safeJsonParse } from '../../../lib/safe-parse';
 import { assertChatOwnership } from '../../chats/domain/chat-ownership';
-import { resolveModel } from './resolve-model';
+import { resolveModel, type ResolvedModel } from './resolve-model';
 import { loadHistory, loadRichHistory } from '../../messages/infrastructure/message-repository';
-import { getProviderForModel } from '../../../services/providers/core/provider-registry';
+import {
+  getProvider,
+  getProviderForModel,
+} from '../../../services/providers/core/provider-registry';
+import { warmProviderForRequest } from '../../../services/providers/core/provider-readiness';
 import { mergeProviderRuntimeSettings } from '../../../services/providers/core/provider-settings-policy';
 import { getProviderSettings } from '../../provider-settings/infrastructure/provider-settings-repository';
 import { listSavedToolSettings } from '../../tool-settings/infrastructure/tool-settings-repository';
@@ -89,6 +93,7 @@ export interface StreamTextTurnInput {
   contextSettings?: ContextSettings;
   toolIntent?: ToolIntent;
   signal?: AbortSignal;
+  resolvedModel?: ResolvedModel;
 }
 
 export type StreamEvent =
@@ -149,19 +154,29 @@ export async function* streamTextTurn(
   const attachmentIds = normalizeTextTurnAttachmentIds(input.attachmentIds);
   assertTextTurnHasContent(input.prompt, attachmentIds);
 
-  const { modelId, capabilities } = await resolveModel({
-    requestedModel: input.model,
-    userId: input.userId,
-    type: 'text',
-  });
+  const resolvedModel =
+    input.resolvedModel ??
+    (await resolveModel({
+      requestedModel: input.model,
+      userId: input.userId,
+      type: 'text',
+    }));
+  const { modelId, capabilities, providerType } = resolvedModel;
 
-  const provider = await getProviderForModel(modelId, input.userId);
+  const provider = providerType
+    ? getProvider(providerType)
+    : await getProviderForModel(modelId, input.userId);
   const savedProviderSettings = await getProviderSettings(db, input.userId, provider.providerType);
   const runtimeSettings = mergeProviderRuntimeSettings(
     provider.providerType,
     savedProviderSettings,
     getRequestRuntimeSettings(provider.providerType, input)
   );
+  const warmupPromise = warmProviderForRequest(provider.providerType, {
+    userId: input.userId,
+    modelName: modelId,
+    purpose: provider.generateAgentTurnStream ? 'agent-turn' : 'stream-text',
+  });
 
   const now = Date.now();
   const userMsgId = generateId();
@@ -205,6 +220,7 @@ export async function* streamTextTurn(
       },
       db
     );
+    await warmupPromise;
 
     if (provider.generateAgentTurnStream) {
       const richHistory = await loadRichHistory(chatId, { excludeId: userMsgId }, db);

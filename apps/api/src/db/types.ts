@@ -159,6 +159,12 @@ export interface UserAppSettingsTable {
   updatedAt: number;
 }
 
+export interface ObservabilitySnapshotTable {
+  id: string;
+  snapshotJson: string;
+  updatedAt: number;
+}
+
 /** Root Kysely Database interface. */
 export interface Database {
   chats: ChatsTable;
@@ -173,6 +179,7 @@ export interface Database {
   user_provider_settings: UserProviderSettingsTable;
   user_tool_settings: UserToolSettingsTable;
   user_app_settings: UserAppSettingsTable;
+  observability_snapshot: ObservabilitySnapshotTable;
 }
 
 export type ChatSelect = Selectable<ChatsTable>;

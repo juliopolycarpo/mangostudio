@@ -65,6 +65,19 @@ export type {
   ToolSettingsListResponse,
 } from '../tool-settings/contracts';
 
+// Observability
+export type {
+  ObservabilityLogKind,
+  ProviderCacheMetrics,
+  ProviderCacheName,
+  ProviderObservabilityLogEntry,
+  ProviderObservabilityLogsResponse,
+  ProviderObservabilityMetrics,
+  ProviderObservabilityMetricsResponse,
+  ProviderProbeMetrics,
+  ProviderProbeOperation,
+} from '../observability/contracts';
+
 // Auth
 export type { SignUpBody, SignInBody } from '../auth/schemas';
 

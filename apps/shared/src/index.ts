@@ -5,3 +5,4 @@ export * from './utils/model-detection';
 export * from './app-settings';
 export * from './provider-settings';
 export * from './tool-settings';
+export * from './observability';
