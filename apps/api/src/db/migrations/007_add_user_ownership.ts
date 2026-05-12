@@ -1,4 +1,4 @@
-import { type Migration } from 'kysely';
+import { type Migration } from 'kysely/migration';
 
 export const addUserOwnership: Migration = {
   async up(db) {
