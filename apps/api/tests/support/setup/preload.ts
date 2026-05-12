@@ -6,7 +6,7 @@
  */
 import { loadConfigForTest } from '../../../src/lib/config';
 import { getDb } from '../../../src/db/database';
-import { Migrator } from 'kysely';
+import { Migrator } from 'kysely/migration';
 import { allMigrations } from '../../../src/db/migrations';
 import { existsSync, unlinkSync } from 'fs';
 import { join } from 'path';

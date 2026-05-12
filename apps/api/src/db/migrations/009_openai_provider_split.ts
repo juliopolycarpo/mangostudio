@@ -6,7 +6,7 @@
  * type so they continue to work without any user action.
  */
 
-import { type Migration } from 'kysely';
+import { type Migration } from 'kysely/migration';
 
 export const openaiProviderSplit: Migration = {
   async up(db) {

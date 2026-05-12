@@ -3,7 +3,7 @@
  * Run with: bun run src/db/migrate.ts
  */
 
-import { Migrator } from 'kysely';
+import { Migrator } from 'kysely/migration';
 import { getDb, closeDb } from './database';
 import { allMigrations } from './migrations';
 
