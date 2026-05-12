@@ -6,7 +6,7 @@
 import { staticPlugin } from '@elysiajs/static';
 import { join } from 'path';
 import { existsSync } from 'fs';
-import { Migrator } from 'kysely';
+import { Migrator } from 'kysely/migration';
 
 import { getDb, closeDb } from './db/database';
 import { allMigrations } from './db/migrations';
