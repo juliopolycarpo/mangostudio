@@ -78,6 +78,20 @@ export type {
   ProviderProbeOperation,
 } from '../observability/contracts';
 
+// Agents
+export type {
+  AgentExecutionMode,
+  AgentId,
+  AgentKind,
+  AgentMetadata,
+  AgentProfile,
+  AgentProfileListResponse,
+  AgentRole,
+  AgentSource,
+  BuiltInAgentId,
+  UserAgentId,
+} from '../agents/contracts';
+
 // Auth
 export type { SignUpBody, SignInBody } from '../auth/schemas';
 

@@ -22,6 +22,7 @@
     "./tool-settings": "./src/tool-settings/index.ts",
     "./catalog": "./src/catalog/index.ts",
     "./observability": "./src/observability/index.ts",
+    "./agents": "./src/agents/index.ts",
     "./streaming": "./src/streaming/index.ts",
     "./auth": "./src/auth/index.ts",
     "./errors": "./src/errors/index.ts",
