@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Mic, Send, Square, Image } from 'lucide-react';
 import type { ReasoningEffort } from '@mangostudio/shared';
+import type { AgentExecutionMode, AgentProfile } from '@mangostudio/shared/agents';
 import { ThinkingToggle } from '@/components/layout/ThinkingToggle';
 import { useI18n } from '@/hooks/use-i18n';
 import type { ContextInfo } from '@/features/generation/types';
@@ -25,6 +26,12 @@ interface Props {
   contextInfo?: ContextInfo | null;
   imageToolIntent?: boolean;
   onImageToolIntentChange?: (active: boolean) => void;
+  agentExecutionMode?: AgentExecutionMode;
+  selectedAgentId?: string;
+  agents?: ReadonlyArray<AgentProfile>;
+  isAgentListLoading?: boolean;
+  onAgentExecutionModeChange?: (mode: AgentExecutionMode) => void;
+  onSelectedAgentIdChange?: (agentId: string) => void;
 }
 
 export function InputBar({
@@ -41,9 +48,18 @@ export function InputBar({
   contextInfo,
   imageToolIntent = false,
   onImageToolIntentChange,
+  agentExecutionMode = 'chat',
+  selectedAgentId = 'default',
+  agents = [],
+  isAgentListLoading = false,
+  onAgentExecutionModeChange,
+  onSelectedAgentIdChange,
 }: Props) {
   const { t } = useI18n();
   const [prompt, setPrompt] = useState('');
+  const selectableAgents = agents.filter(
+    (agent) => agent.role === 'primary' || agent.role === 'both'
+  );
 
   const handleSubmit = (e: { preventDefault: () => void }) => {
     e.preventDefault();
@@ -57,6 +73,52 @@ export function InputBar({
       <div className="max-w-4xl mx-auto w-full">
         <div className="flex items-center justify-between mb-2 sm:mb-3">
           <div className="flex items-center gap-2 flex-wrap">
+            {onAgentExecutionModeChange ? (
+              <div className="flex items-center rounded-full border border-outline-variant/20 bg-surface-container-lowest p-0.5 text-[10px] sm:text-[11px] font-medium">
+                {(['chat', 'agent'] as const).map((mode) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    onClick={() => onAgentExecutionModeChange(mode)}
+                    disabled={disabled}
+                    className={`rounded-full px-2.5 py-1 transition-colors ${
+                      agentExecutionMode === mode
+                        ? 'bg-primary text-on-primary shadow-sm'
+                        : 'text-on-surface-variant hover:text-on-surface'
+                    }`}
+                    aria-pressed={agentExecutionMode === mode}
+                  >
+                    {mode === 'chat' ? t.chat.input.modeChat : t.chat.input.modeAgent}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+
+            {agentExecutionMode === 'agent' && onSelectedAgentIdChange ? (
+              <label className="sr-only" htmlFor="chat-agent-selector">
+                {t.chat.input.selectAgent}
+              </label>
+            ) : null}
+            {agentExecutionMode === 'agent' && onSelectedAgentIdChange ? (
+              <select
+                id="chat-agent-selector"
+                value={selectedAgentId}
+                onChange={(event) => onSelectedAgentIdChange(event.target.value)}
+                disabled={disabled || isAgentListLoading || selectableAgents.length === 0}
+                className="h-7 max-w-[11rem] rounded-full border border-outline-variant/20 bg-surface-container-lowest px-2 text-[10px] sm:text-[11px] font-medium text-on-surface-variant outline-none transition-colors hover:text-on-surface focus:border-primary/40"
+                aria-label={t.chat.input.selectAgent}
+              >
+                {isAgentListLoading ? (
+                  <option value={selectedAgentId}>{t.chat.input.agentsLoading}</option>
+                ) : null}
+                {selectableAgents.map((agent) => (
+                  <option key={agent.id} value={agent.id}>
+                    {agent.name}
+                  </option>
+                ))}
+              </select>
+            ) : null}
+
             {onThinkingToggle && onReasoningEffortChange ? (
               <ThinkingToggle
                 enabled={thinkingEnabled}

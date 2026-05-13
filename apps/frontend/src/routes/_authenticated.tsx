@@ -14,6 +14,7 @@ import { AppContext } from '@/lib/app-context';
 import { chatListQueryOptions, messagesQueryOptions } from '@/features/chat/queries';
 import { catalogQueryOptions } from '@/hooks/use-model-catalog';
 import { appSettingsQueryOptions } from '@/features/settings/app/queries';
+import { agentSettingsListQueryOptions } from '@/features/settings/agents/queries';
 
 export const Route = createFileRoute('/_authenticated')({
   beforeLoad: ({ context, location }) => {
@@ -32,6 +33,7 @@ export const Route = createFileRoute('/_authenticated')({
       chatsPromise,
       queryClient.ensureQueryData(catalogQueryOptions()),
       queryClient.ensureQueryData(appSettingsQueryOptions()),
+      queryClient.ensureQueryData(agentSettingsListQueryOptions()),
     ]);
 
     const chats = await chatsPromise;
