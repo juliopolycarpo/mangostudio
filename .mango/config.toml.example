@@ -28,6 +28,10 @@ dir = ""
 # Empty = auto-detect: ~/.mango/images in all runtimes
 dir = ""
 
+[agents]
+# Empty = auto-detect: ~/.mango/agents in all runtimes
+dir = ""
+
 [auth]
 # Required — minimum 32 characters
 secret = "your-secret-key-here-min-32-chars"

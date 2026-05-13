@@ -83,12 +83,17 @@ export type {
   AgentExecutionMode,
   AgentId,
   AgentKind,
+  AgentMarkdownPreviewBody,
+  AgentMarkdownPreviewResponse,
   AgentMetadata,
   AgentProfile,
   AgentProfileListResponse,
+  AgentProfileUpsertBody,
   AgentRole,
   AgentSource,
   BuiltInAgentId,
+  CreateAgentProfileBody,
+  DeleteAgentProfileResponse,
   UserAgentId,
 } from '../agents/contracts';
 

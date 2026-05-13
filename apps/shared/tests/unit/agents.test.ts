@@ -2,8 +2,11 @@ import { describe, expect, it } from 'vitest';
 import { Value } from '@sinclair/typebox/value';
 import {
   AgentProfileSchema,
+  AgentProfileUpsertBodySchema,
   AgentProfileValidationError,
+  AgentMarkdownPreviewResponseSchema,
   BUILT_IN_AGENT_PROFILES,
+  DeleteAgentProfileResponseSchema,
   parseAgentMarkdown,
 } from '../../src/agents';
 
@@ -127,5 +130,33 @@ Stay inside the allowed scope.
     expect(profile.systemPrompt).toBe('Use the whole file as instructions.');
     expect(profile.toolNames).toEqual([]);
     expect(profile.toolsEnabled).toBe(false);
+  });
+
+  it('validates agent settings request and response contract shapes', () => {
+    const body = {
+      name: 'Researcher',
+      description: 'Finds project context.',
+      role: 'both',
+      systemPrompt: 'Read first.',
+      reasoningEffort: 'high',
+      maxToolIterations: 3,
+      toolNames: ['read_file'],
+      toolsEnabled: true,
+      subagentIds: ['user:reviewer'],
+      metadata: { color: 'mango' },
+    };
+    const preview = {
+      markdown: '---\nname: Researcher\n---\nRead first.',
+      profile: {
+        id: 'user:researcher',
+        kind: 'user',
+        source: { type: 'markdown', path: '/tmp/researcher.md' },
+        ...body,
+      },
+    };
+
+    expect(Value.Check(AgentProfileUpsertBodySchema, body)).toBe(true);
+    expect(Value.Check(AgentMarkdownPreviewResponseSchema, preview)).toBe(true);
+    expect(Value.Check(DeleteAgentProfileResponseSchema, { success: true })).toBe(true);
   });
 });

@@ -159,6 +159,15 @@ export interface UserAppSettingsTable {
   updatedAt: number;
 }
 
+export interface UserAgentSettingsTable {
+  id: string;
+  userId: string;
+  agentId: string;
+  settingsJson: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface ObservabilitySnapshotTable {
   id: string;
   snapshotJson: string;
@@ -179,6 +188,7 @@ export interface Database {
   user_provider_settings: UserProviderSettingsTable;
   user_tool_settings: UserToolSettingsTable;
   user_app_settings: UserAppSettingsTable;
+  user_agent_settings: UserAgentSettingsTable;
   observability_snapshot: ObservabilitySnapshotTable;
 }
 
@@ -229,3 +239,7 @@ export type UserToolSettingsUpdate = Updateable<UserToolSettingsTable>;
 export type UserAppSettingsSelect = Selectable<UserAppSettingsTable>;
 export type UserAppSettingsInsert = Insertable<UserAppSettingsTable>;
 export type UserAppSettingsUpdate = Updateable<UserAppSettingsTable>;
+
+export type UserAgentSettingsSelect = Selectable<UserAgentSettingsTable>;
+export type UserAgentSettingsInsert = Insertable<UserAgentSettingsTable>;
+export type UserAgentSettingsUpdate = Updateable<UserAgentSettingsTable>;

@@ -50,6 +50,9 @@ export interface MangoConfig {
   images: {
     dir: string;
   };
+  agents: {
+    dir: string;
+  };
   auth: {
     secret: string;
     url: string;
@@ -66,6 +69,7 @@ const DEFAULT_CONFIG: Omit<MangoConfig, 'corsOrigins' | 'configFilePath'> = {
   database: { path: '' },
   uploads: { dir: '' },
   images: { dir: '' },
+  agents: { dir: '' },
   auth: { secret: '', url: '' },
 };
 
@@ -88,6 +92,9 @@ const ENV_KEY_MAP: Record<string, (cfg: MangoConfig, value: string) => void> = {
   },
   IMAGES_DIR: (cfg, v) => {
     cfg.images.dir = v;
+  },
+  AGENTS_DIR: (cfg, v) => {
+    cfg.agents.dir = v;
   },
   BETTER_AUTH_SECRET: (cfg, v) => {
     cfg.auth.secret = v;
@@ -161,6 +168,7 @@ function cloneDefaults(): MangoConfig {
     database: { ...DEFAULT_CONFIG.database },
     uploads: { ...DEFAULT_CONFIG.uploads },
     images: { ...DEFAULT_CONFIG.images },
+    agents: { ...DEFAULT_CONFIG.agents },
     auth: { ...DEFAULT_CONFIG.auth },
     corsOrigins: [],
     configFilePath: '',
@@ -194,6 +202,11 @@ function applyToml(cfg: MangoConfig, parsed: Record<string, unknown>): void {
   const images = parsed.images as Record<string, unknown> | undefined;
   if (images) {
     if (typeof images.dir === 'string') cfg.images.dir = images.dir;
+  }
+
+  const agents = parsed.agents as Record<string, unknown> | undefined;
+  if (agents) {
+    if (typeof agents.dir === 'string') cfg.agents.dir = agents.dir;
   }
 
   const auth = parsed.auth as Record<string, unknown> | undefined;
@@ -247,6 +260,12 @@ function computeDerived(cfg: MangoConfig, tomlPath: string): void {
     cfg.images.dir = join(getHomeMangoDir(), 'images');
   } else {
     cfg.images.dir = resolveUserPath(cfg.images.dir);
+  }
+
+  if (!cfg.agents.dir) {
+    cfg.agents.dir = join(getHomeMangoDir(), 'agents');
+  } else {
+    cfg.agents.dir = resolveUserPath(cfg.agents.dir);
   }
 
   // CORS origins from frontend host/port (include +1 for Vite port bumping)
@@ -353,6 +372,7 @@ export function loadConfigForTest(partial: Partial<MangoConfig> = {}): MangoConf
   if (partial.database) Object.assign(cfg.database, partial.database);
   if (partial.uploads) Object.assign(cfg.uploads, partial.uploads);
   if (partial.images) Object.assign(cfg.images, partial.images);
+  if (partial.agents) Object.assign(cfg.agents, partial.agents);
   if (partial.auth) Object.assign(cfg.auth, partial.auth);
   if (partial.corsOrigins) cfg.corsOrigins = partial.corsOrigins;
   if (partial.configFilePath) cfg.configFilePath = partial.configFilePath;

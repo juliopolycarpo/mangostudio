@@ -32,3 +32,36 @@ export interface AgentProfile {
 export interface AgentProfileListResponse {
   readonly agents: ReadonlyArray<AgentProfile>;
 }
+
+export interface AgentProfileUpsertBody {
+  readonly name: string;
+  readonly description: string;
+  readonly role: AgentRole;
+  readonly systemPrompt: string;
+  readonly model?: string;
+  readonly thinkingEnabled?: boolean;
+  readonly reasoningEffort?: AgentProfile['reasoningEffort'];
+  readonly maxToolIterations?: number;
+  readonly toolNames: ReadonlyArray<string>;
+  readonly toolsEnabled: boolean;
+  readonly subagentIds: ReadonlyArray<string>;
+  readonly metadata: AgentMetadata;
+}
+
+export interface CreateAgentProfileBody extends AgentProfileUpsertBody {
+  readonly slug?: string;
+}
+
+export interface AgentMarkdownPreviewBody {
+  readonly markdown: string;
+  readonly id?: UserAgentId;
+}
+
+export interface AgentMarkdownPreviewResponse {
+  readonly profile: AgentProfile;
+  readonly markdown: string;
+}
+
+export interface DeleteAgentProfileResponse {
+  readonly success: true;
+}

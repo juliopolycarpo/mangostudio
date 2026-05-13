@@ -105,6 +105,17 @@ SSE com `Content-Type: text/event-stream`. Veja [../architecture/streaming.md](.
 | `GET`  | `/api/settings/tools`           | Sim  | Listar descritores de tool |
 | `PUT`  | `/api/settings/tools/:toolName` | Sim  | Atualizar tool settings    |
 
+### Agent Settings
+
+| Método   | Path                            | Auth | Finalidade                        |
+| -------- | ------------------------------- | ---- | --------------------------------- |
+| `GET`    | `/api/settings/agents`          | Sim  | Listar perfis de agente           |
+| `GET`    | `/api/settings/agents/:agentId` | Sim  | Obter um perfil de agente         |
+| `PUT`    | `/api/settings/agents/:agentId` | Sim  | Atualizar um agente               |
+| `POST`   | `/api/settings/agents`          | Sim  | Criar um agente de usuário        |
+| `DELETE` | `/api/settings/agents/:agentId` | Sim  | Remover um agente de usuário      |
+| `POST`   | `/api/settings/agents/preview`  | Sim  | Pré-visualizar markdown de agente |
+
 ### Prompt Rules
 
 | Método | Path                          | Auth | Finalidade                       |
