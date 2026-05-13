@@ -1,7 +1,10 @@
 import { useState, useCallback, useMemo, useEffect } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import type { ProviderType } from '@mangostudio/shared';
+import type { AgentExecutionMode } from '@mangostudio/shared/agents';
 import { useNavigate } from '@tanstack/react-router';
 import { useChats } from '@/features/chat/hooks/use-chats';
+import { agentSettingsListQueryOptions } from '@/features/settings/agents/queries';
 import { useModelCatalog } from './use-model-catalog';
 import { useGlobalSettings } from './use-global-settings';
 import { useOptimisticMessages } from '@/features/generation/hooks/use-optimistic-messages';
@@ -9,12 +12,21 @@ import { useTextGeneration } from '@/features/generation/hooks/use-text-generati
 import { useProviderSettings } from '@/features/settings/providers/hooks/use-provider-settings';
 import { resolveActiveModeModel } from '@/utils/model-utils';
 
+interface AgentSelectionOverride {
+  readonly chatId: string | null;
+  readonly mode: AgentExecutionMode;
+  readonly agentId: string;
+}
+
 export function useAppState() {
   const [imageToolIntent, setImageToolIntent] = useState(false);
+  const [agentSelectionOverride, setAgentSelectionOverride] =
+    useState<AgentSelectionOverride | null>(null);
 
   const chats = useChats();
   const catalog = useModelCatalog();
   const settings = useGlobalSettings();
+  const agentsQuery = useQuery(agentSettingsListQueryOptions());
   const navigate = useNavigate();
   const optimistic = useOptimisticMessages();
 
@@ -22,6 +34,24 @@ export function useAppState() {
   const currentChat = useMemo(
     () => chats.chats.find((chat) => chat.id === chats.currentChatId) ?? null,
     [chats.chats, chats.currentChatId]
+  );
+  const agents = useMemo(() => agentsQuery.data?.agents ?? [], [agentsQuery.data?.agents]);
+  const persistedAgentSelection = useMemo(
+    () => ({
+      mode: currentChat?.lastUsedMode === 'agent' ? ('agent' as const) : ('chat' as const),
+      agentId: currentChat?.selectedAgentId ?? 'default',
+    }),
+    [currentChat?.lastUsedMode, currentChat?.selectedAgentId]
+  );
+  const activeAgentSelection =
+    agentSelectionOverride?.chatId === chats.currentChatId
+      ? agentSelectionOverride
+      : persistedAgentSelection;
+  const agentExecutionMode = activeAgentSelection.mode;
+  const selectedAgentId = activeAgentSelection.agentId;
+  const selectedAgent = useMemo(
+    () => agents.find((agent) => agent.id === selectedAgentId) ?? null,
+    [agents, selectedAgentId]
   );
 
   const activeModel = useMemo(
@@ -59,6 +89,11 @@ export function useAppState() {
     contextSettings: settings.contextSettings,
     chatTitleSettings: settings.chatTitleSettings,
     currentChatId: chats.currentChatId,
+    getAgentSelection: () => ({
+      mode: agentExecutionMode,
+      agentId: agentExecutionMode === 'agent' ? selectedAgentId : 'chat',
+      agentName: agentExecutionMode === 'agent' ? selectedAgent?.name : undefined,
+    }),
   });
 
   const chatsList = chats.chats;
@@ -100,6 +135,33 @@ export function useAppState() {
     [chats]
   );
 
+  const persistAgentSelection = useCallback(
+    (mode: AgentExecutionMode, agentId: string) => {
+      setAgentSelectionOverride({ chatId: chats.currentChatId, mode, agentId });
+      if (!chats.currentChatId) return;
+      void chats.updateChatAgentSelection(chats.currentChatId, {
+        lastUsedMode: mode,
+        selectedAgentId: mode === 'agent' ? agentId : 'chat',
+      });
+    },
+    [chats]
+  );
+
+  const setAgentExecutionMode = useCallback(
+    (mode: AgentExecutionMode) => {
+      const nextAgentId = mode === 'agent' ? selectedAgentId || 'default' : 'chat';
+      persistAgentSelection(mode, nextAgentId);
+    },
+    [persistAgentSelection, selectedAgentId]
+  );
+
+  const setSelectedAgentId = useCallback(
+    (agentId: string) => {
+      persistAgentSelection('agent', agentId);
+    },
+    [persistAgentSelection]
+  );
+
   const handleDeleteChat = useCallback(
     async (chatId: string) => {
       await chats.deleteChat(chatId);
@@ -133,6 +195,10 @@ export function useAppState() {
 
   return {
     imageToolIntent,
+    agentExecutionMode,
+    selectedAgentId,
+    agents,
+    isAgentListLoading: agentsQuery.isLoading,
     isGenerating,
     chats: chats.chats,
     currentChatId: chats.currentChatId,
@@ -149,6 +215,8 @@ export function useAppState() {
     lockedProvider,
 
     setImageToolIntent,
+    setAgentExecutionMode,
+    setSelectedAgentId,
     handleNewChat,
     handleUpdateChatModel,
     handleUpdateChatTitle,

@@ -1,6 +1,10 @@
 import { Type, type Static } from '@sinclair/typebox';
 
-const InteractionModeSchema = Type.Union([Type.Literal('chat'), Type.Literal('image')]);
+const InteractionModeSchema = Type.Union([
+  Type.Literal('chat'),
+  Type.Literal('agent'),
+  Type.Literal('image'),
+]);
 export const ChatAttachmentKindSchema = Type.Union([
   Type.Literal('image'),
   Type.Literal('text'),
@@ -99,6 +103,7 @@ export const UpdateChatBodySchema = Type.Object({
   textModel: Type.Optional(Type.String()),
   imageModel: Type.Optional(Type.String()),
   lastUsedMode: Type.Optional(InteractionModeSchema),
+  selectedAgentId: Type.Optional(Type.String()),
 });
 
 export type UpdateChatBody = Static<typeof UpdateChatBodySchema>;

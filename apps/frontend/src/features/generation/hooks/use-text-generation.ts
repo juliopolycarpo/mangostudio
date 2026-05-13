@@ -7,6 +7,7 @@ import type {
   MessagePart,
   ReasoningEffort,
 } from '@mangostudio/shared';
+import type { AgentExecutionMode } from '@mangostudio/shared/agents';
 import type { ChatTitleSettings } from '@mangostudio/shared/app-settings';
 import {
   createPromptChatTitle,
@@ -36,6 +37,11 @@ interface UseTextGenerationOptions {
   contextSettings: ContextSettings;
   chatTitleSettings: ChatTitleSettings;
   currentChatId: string | null;
+  getAgentSelection: () => {
+    readonly mode: AgentExecutionMode;
+    readonly agentId: string;
+    readonly agentName?: string;
+  };
 }
 
 function resolveSummaryModelId(settings: ContextSettings, currentModel: string): string {
@@ -133,6 +139,7 @@ export function useTextGeneration({
   contextSettings,
   chatTitleSettings,
   currentChatId,
+  getAgentSelection,
 }: UseTextGenerationOptions) {
   const queryClient = useQueryClient();
   const stream = useChatStream({ currentChatId });
@@ -176,6 +183,8 @@ export function useTextGeneration({
       }
 
       const model = getActiveModel();
+      const agentSelection = getAgentSelection();
+      const interactionMode = agentSelection.mode === 'agent' ? 'agent' : 'chat';
 
       if (
         shouldRenameChatFromPrompt(chatTitleSettings, activeChatTitle, createdChatDuringRequest)
@@ -198,7 +207,10 @@ export function useTextGeneration({
         role: 'user',
         text: prompt,
         timestamp: Date.now(),
-        interactionMode: 'chat',
+        interactionMode,
+        ...(interactionMode === 'agent'
+          ? { agentId: agentSelection.agentId, agentName: agentSelection.agentName }
+          : {}),
       };
 
       const optimisticAiMsg: Message = {
@@ -209,7 +221,10 @@ export function useTextGeneration({
         timestamp: Date.now(),
         isGenerating: true,
         modelName: model,
-        interactionMode: 'chat',
+        interactionMode,
+        ...(interactionMode === 'agent'
+          ? { agentId: agentSelection.agentId, agentName: agentSelection.agentName }
+          : {}),
       };
 
       appendOptimisticMessages(activeChatId, [optimisticUserMsg, optimisticAiMsg]);
@@ -238,6 +253,8 @@ export function useTextGeneration({
             maxToolIterations,
             contextSettings,
             toolIntent,
+            agentMode: agentSelection.mode,
+            agentId: agentSelection.agentId,
           },
           (chunk) => {
             switch (chunk.type) {
@@ -497,6 +514,7 @@ export function useTextGeneration({
       maxToolIterations,
       contextSettings,
       chatTitleSettings,
+      getAgentSelection,
       stream,
     ]
   );

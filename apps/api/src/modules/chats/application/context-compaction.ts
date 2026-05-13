@@ -157,7 +157,7 @@ async function persistSummaryMessage(params: {
     })
     .where('id', '=', params.chatId)
     .execute();
-  await updateChatAfterTurn(params.chatId, timestamp, params.db);
+  await updateChatAfterTurn(params.chatId, timestamp, 'chat', null, params.db);
 
   return { summaryMessageId, contextInfo: toContextInfo(snapshot) };
 }

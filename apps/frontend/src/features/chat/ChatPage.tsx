@@ -8,6 +8,7 @@ import { useMessagesQuery } from '@/features/chat/queries';
 import { useI18n } from '@/hooks/use-i18n';
 import { authClient } from '@/lib/auth-client';
 import type { ReasoningEffort } from '@mangostudio/shared';
+import type { AgentExecutionMode, AgentProfile } from '@mangostudio/shared/agents';
 import type { ContextSettings } from '@mangostudio/shared/chat';
 import type { ContextInfo, FallbackNotice } from '@/features/generation/types';
 
@@ -31,6 +32,12 @@ interface ChatPageProps {
   onStartSummarizedChat: () => Promise<void>;
   imageToolIntent: boolean;
   onImageToolIntentChange: (active: boolean) => void;
+  agentExecutionMode?: AgentExecutionMode;
+  selectedAgentId?: string;
+  agents?: ReadonlyArray<AgentProfile>;
+  isAgentListLoading?: boolean;
+  onAgentExecutionModeChange?: (mode: AgentExecutionMode) => void;
+  onSelectedAgentIdChange?: (agentId: string) => void;
 }
 
 export function ChatPage({
@@ -53,6 +60,12 @@ export function ChatPage({
   onStartSummarizedChat,
   imageToolIntent,
   onImageToolIntentChange,
+  agentExecutionMode = 'chat',
+  selectedAgentId = 'default',
+  agents = [],
+  isAgentListLoading = false,
+  onAgentExecutionModeChange,
+  onSelectedAgentIdChange,
 }: ChatPageProps) {
   const { data, status } = useMessagesQuery(chatId);
   const { t } = useI18n();
@@ -245,6 +258,12 @@ export function ChatPage({
         contextInfo={contextInfo}
         imageToolIntent={imageToolIntent}
         onImageToolIntentChange={onImageToolIntentChange}
+        agentExecutionMode={agentExecutionMode}
+        selectedAgentId={selectedAgentId}
+        agents={agents}
+        isAgentListLoading={isAgentListLoading}
+        onAgentExecutionModeChange={onAgentExecutionModeChange}
+        onSelectedAgentIdChange={onSelectedAgentIdChange}
       />
     </div>
   );

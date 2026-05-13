@@ -14,6 +14,7 @@ export interface UpdateChatData {
   textModel?: string;
   imageModel?: string;
   lastUsedMode?: string;
+  selectedAgentId?: string;
 }
 
 export interface ChatRecord {
@@ -25,6 +26,7 @@ export interface ChatRecord {
   textModel: string | null;
   imageModel: string | null;
   lastUsedMode: string | null;
+  selectedAgentId: string | null;
   userId: string | null;
   lastProviderState: string | null;
   lastContextState: string | null;
@@ -54,6 +56,7 @@ export async function createChat(data: CreateChatData, db: Kysely<Database>): Pr
     textModel: null,
     imageModel: null,
     lastUsedMode: null,
+    selectedAgentId: null,
     userId: data.userId,
     lastProviderState: null,
     lastContextState: null,
@@ -74,6 +77,7 @@ export async function updateChat(
   if (data.textModel !== undefined) updates.textModel = data.textModel;
   if (data.imageModel !== undefined) updates.imageModel = data.imageModel;
   if (data.lastUsedMode !== undefined) updates.lastUsedMode = data.lastUsedMode;
+  if (data.selectedAgentId !== undefined) updates.selectedAgentId = data.selectedAgentId;
 
   if (Object.keys(updates).length === 0) return;
 

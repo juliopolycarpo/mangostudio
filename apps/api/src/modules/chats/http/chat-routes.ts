@@ -92,6 +92,7 @@ export const chatRoutes = (app: Elysia) =>
                 textModel: body.textModel,
                 imageModel: body.imageModel,
                 lastUsedMode: body.lastUsedMode,
+                selectedAgentId: body.selectedAgentId,
               },
             },
             getDb()

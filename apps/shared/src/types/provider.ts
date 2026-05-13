@@ -1,5 +1,5 @@
 /** Represents the current input composer mode. */
-export type InteractionMode = 'chat' | 'image';
+export type InteractionMode = 'chat' | 'agent' | 'image';
 
 /** Supported AI provider types. */
 export type ProviderType = 'gemini' | 'openai' | 'openai-compatible' | 'anthropic' | 'deepseek';

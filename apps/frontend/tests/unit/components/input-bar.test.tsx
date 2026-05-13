@@ -14,11 +14,60 @@ function renderInputBar(overrides: Partial<React.ComponentProps<typeof InputBar>
 }
 
 describe('InputBar — chat-only composer', () => {
-  it('does not render a chat/image mode segmented control', () => {
-    renderInputBar();
+  it('renders the Chat and Agent mode segmented control when mode callbacks are provided', () => {
+    renderInputBar({ onAgentExecutionModeChange: vi.fn() });
 
-    expect(screen.queryByRole('button', { name: 'Chat' })).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Image' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Chat' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Agent' })).toBeInTheDocument();
+  });
+
+  it('shows the agent selector only in Agent mode', () => {
+    const agents = [
+      {
+        id: 'default',
+        name: 'Default',
+        description: '',
+        kind: 'builtin',
+        role: 'primary',
+        source: { type: 'builtin' },
+        systemPrompt: '',
+        toolNames: [],
+        toolsEnabled: false,
+        subagentIds: [],
+        metadata: {},
+      },
+    ] as const;
+
+    const { unmount } = renderInputBar({
+      agentExecutionMode: 'chat',
+      selectedAgentId: 'default',
+      agents,
+      onAgentExecutionModeChange: vi.fn(),
+      onSelectedAgentIdChange: vi.fn(),
+    });
+
+    expect(screen.queryByRole('combobox', { name: 'Select agent' })).toBeNull();
+    unmount();
+
+    renderInputBar({
+      agentExecutionMode: 'agent',
+      selectedAgentId: 'default',
+      agents,
+      onAgentExecutionModeChange: vi.fn(),
+      onSelectedAgentIdChange: vi.fn(),
+    });
+
+    expect(screen.getByRole('combobox', { name: 'Select agent' })).toHaveValue('default');
+  });
+
+  it('switches to Agent mode from the segmented control', async () => {
+    const user = userEvent.setup();
+    const onAgentExecutionModeChange = vi.fn();
+    renderInputBar({ onAgentExecutionModeChange });
+
+    await user.click(screen.getByRole('button', { name: 'Agent' }));
+
+    expect(onAgentExecutionModeChange).toHaveBeenCalledWith('agent');
   });
 
   it('does not render a reference image upload button', () => {

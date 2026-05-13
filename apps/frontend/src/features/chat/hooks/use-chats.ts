@@ -54,6 +54,19 @@ export function useChats() {
     [updateMutation]
   );
 
+  const updateChatAgentSelection = useCallback(
+    async (
+      chatId: string,
+      updates: { lastUsedMode: 'chat' | 'agent'; selectedAgentId?: string }
+    ) => {
+      await updateMutation.mutateAsync({
+        id: chatId,
+        updates,
+      });
+    },
+    [updateMutation]
+  );
+
   const deleteChat = useCallback(
     async (chatId: string) => {
       await deleteMutation.mutateAsync(chatId);
@@ -81,6 +94,7 @@ export function useChats() {
     createChat,
     updateChatModel,
     updateChatTitle,
+    updateChatAgentSelection,
     deleteChat,
     selectChat,
     setCurrentChatId,

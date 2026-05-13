@@ -9,6 +9,7 @@ import type {
 } from '@mangostudio/shared';
 import type { PromptSettings } from '@mangostudio/shared/prompt-rules';
 import type { ContextSettings } from '@mangostudio/shared/chat';
+import type { AgentExecutionMode, AgentId } from '@mangostudio/shared/agents';
 import type { ToolIntent } from '@mangostudio/shared/generation';
 import type { ProviderRuntimeSettings } from '@mangostudio/shared/provider-settings';
 import type { AgentTurnRequest } from '../../../services/providers/types';
@@ -92,6 +93,8 @@ export interface StreamTextTurnInput {
   maxToolIterations?: number;
   contextSettings?: ContextSettings;
   toolIntent?: ToolIntent;
+  agentMode?: AgentExecutionMode;
+  agentId?: AgentId;
   signal?: AbortSignal;
   resolvedModel?: ResolvedModel;
 }
@@ -162,6 +165,7 @@ export async function* streamTextTurn(
       type: 'text',
     }));
   const { modelId, capabilities, providerType } = resolvedModel;
+  const interactionMode = input.agentMode === 'agent' ? 'agent' : 'chat';
 
   const provider = providerType
     ? getProvider(providerType)
@@ -188,6 +192,7 @@ export async function* streamTextTurn(
       text: input.prompt,
       attachmentIds,
       timestamp: now,
+      interactionMode,
     },
     db
   );
@@ -751,10 +756,17 @@ export async function* streamTextTurn(
               generationTime,
               modelName: modelId,
               generatedImages: generatedImageArtifacts,
+              interactionMode,
             },
             db
           );
-          await updateChatAfterTurn(chatId, Date.now(), db);
+          await updateChatAfterTurn(
+            chatId,
+            Date.now(),
+            interactionMode,
+            interactionMode === 'agent' ? (input.agentId ?? 'default') : null,
+            db
+          );
         } catch {
           // best-effort
         }
@@ -908,7 +920,13 @@ export async function* streamTextTurn(
         db
       );
 
-      await updateChatAfterTurn(chatId, aiTimestamp, db);
+      await updateChatAfterTurn(
+        chatId,
+        aiTimestamp,
+        interactionMode,
+        interactionMode === 'agent' ? (input.agentId ?? 'default') : null,
+        db
+      );
 
       yield { type: 'done', messageId: aiMsgId, generationTime };
     }

@@ -56,4 +56,15 @@ describe('chat attachment contracts', () => {
 
     expect(Value.Check(RespondStreamBodySchema, body)).toBe(true);
   });
+
+  it('allows streaming text requests to include agent mode metadata', () => {
+    const body = {
+      chatId: 'chat-contract-1',
+      prompt: 'Use the selected agent.',
+      agentMode: 'agent',
+      agentId: 'default',
+    };
+
+    expect(Value.Check(RespondStreamBodySchema, body)).toBe(true);
+  });
 });

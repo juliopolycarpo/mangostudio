@@ -15,6 +15,7 @@ export interface ChatsTable {
   textModel: string | null;
   imageModel: string | null;
   lastUsedMode: string | null;
+  selectedAgentId: string | null;
   userId: string | null;
   lastProviderState: string | null;
   lastContextState: string | null;

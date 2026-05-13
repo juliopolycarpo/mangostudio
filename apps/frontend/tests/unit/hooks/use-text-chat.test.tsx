@@ -80,6 +80,7 @@ function makeProps(overrides: Partial<TextChatProps> = {}): TextChatProps {
     contextSettings: DEFAULT_CONTEXT_SETTINGS,
     chatTitleSettings: DEFAULT_CHAT_TITLE_SETTINGS,
     currentChatId: 'chat-1',
+    getAgentSelection: () => ({ mode: 'chat' as const, agentId: 'chat' }),
     ...overrides,
   };
 }
@@ -256,6 +257,56 @@ describe('useTextChat — maxToolIterations forwarding', () => {
     const firstCall = mockStream.mock.calls[0];
     const request = firstCall[0] as { contextSettings?: typeof props.contextSettings };
     expect(request.contextSettings).toEqual(props.contextSettings);
+  });
+
+  it('forwards agent mode metadata into the stream request body', async () => {
+    const props = makeProps({
+      getAgentSelection: () => ({ mode: 'agent', agentId: 'default', agentName: 'Default' }),
+    });
+    mockStream.mockImplementation(
+      makeStreamFn([{ type: 'done', done: true, generationTime: '0.5s' }])
+    );
+
+    const { result } = renderHook(() => useTextGeneration(props));
+
+    await act(async () => {
+      await result.current.handleRespond('ping');
+    });
+
+    await waitFor(() => expect(result.current.isGenerating).toBe(false));
+
+    const firstCall = mockStream.mock.calls[0];
+    const request = firstCall[0] as { agentMode?: string; agentId?: string };
+    expect(request.agentMode).toBe('agent');
+    expect(request.agentId).toBe('default');
+  });
+
+  it('marks optimistic messages as agent interactions in Agent mode', async () => {
+    const props = makeProps({
+      getAgentSelection: () => ({ mode: 'agent', agentId: 'default', agentName: 'Default' }),
+    });
+    mockStream.mockImplementation(
+      makeStreamFn([{ type: 'done', done: true, generationTime: '0.5s' }])
+    );
+
+    const { result } = renderHook(() => useTextGeneration(props));
+
+    await act(async () => {
+      await result.current.handleRespond('ping');
+    });
+
+    await waitFor(() => expect(result.current.isGenerating).toBe(false));
+
+    expect(props.optimistic.appendOptimisticMessages).toHaveBeenCalledWith(
+      'chat-1',
+      expect.arrayContaining([
+        expect.objectContaining({
+          interactionMode: 'agent',
+          agentId: 'default',
+          agentName: 'Default',
+        }),
+      ])
+    );
   });
 });
 

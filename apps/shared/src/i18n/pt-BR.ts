@@ -35,6 +35,7 @@ export const messages = {
     streaming: 'Gerando...',
     input: {
       modeChat: 'Chat',
+      modeAgent: 'Agente',
       modeImage: 'Criar Imagem',
       send: 'Enviar',
       generate: 'Gerar',
@@ -44,6 +45,8 @@ export const messages = {
       addReferenceImage: 'Adicionar imagem de referência',
       createImages: 'Criar imagens',
       createImagesHint: 'Sugerir ao modelo que use a ferramenta de geração de imagens',
+      selectAgent: 'Selecionar agente',
+      agentsLoading: 'Carregando agentes...',
     },
     feed: {
       emptyTitle: 'Inicie uma conversa ou crie uma imagem',
