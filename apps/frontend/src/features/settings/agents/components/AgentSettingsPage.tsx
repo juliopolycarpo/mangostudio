@@ -129,7 +129,7 @@ export function AgentSettingsPage() {
       <div className="space-y-6">
         <Card variant="solid" className="space-y-3 p-4 sm:p-6">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-            <div className="flex gap-3">
+            <div className="flex gap-3 items-start">
               <div className="rounded-2xl bg-primary/10 p-2 text-primary">
                 <Bot size={22} />
               </div>
@@ -181,7 +181,7 @@ export function AgentSettingsPage() {
     <div className="space-y-6">
       <Card variant="solid" className="space-y-3 p-4 sm:p-6">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-          <div className="flex gap-3">
+          <div className="flex gap-3 items-start">
             <div className="rounded-2xl bg-primary/10 p-2 text-primary">
               <Bot size={22} />
             </div>
@@ -240,7 +240,7 @@ export function AgentSettingsPage() {
         )}
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,280px)_minmax(0,1fr)]">
+      <div className="grid gap-4 lg:grid-cols-[240px_minmax(0,1fr)] xl:grid-cols-[280px_minmax(0,1fr)]">
         {/* Desktop agent list */}
         <div className="hidden lg:block">
           <AgentList

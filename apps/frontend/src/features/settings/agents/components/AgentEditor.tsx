@@ -251,7 +251,7 @@ export function AgentEditor({
               <h3 className="text-xs uppercase tracking-widest font-bold text-on-surface-variant/80 font-label">
                 {labels.sectionIdentity}
               </h3>
-              <div className="grid gap-3 sm:grid-cols-2">
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
                 <TextField
                   label={labels.name}
                   value={draft.name}
@@ -313,7 +313,7 @@ export function AgentEditor({
               <h3 className="text-xs uppercase tracking-widest font-bold text-on-surface-variant/80 font-label">
                 {labels.sectionReasoning}
               </h3>
-              <div className="grid gap-3 sm:grid-cols-2">
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
                 <label className="flex items-center gap-2 rounded-xl border border-outline-variant/20 bg-surface-container-lowest px-3 py-2 text-sm text-on-surface">
                   <input
                     type="checkbox"
@@ -385,7 +385,7 @@ export function AgentEditor({
                 {eligibleSubagents.length === 0 ? (
                   <p className="text-sm text-on-surface-variant/60">{labels.noSubagents}</p>
                 ) : (
-                  <div className="grid gap-2 sm:grid-cols-2">
+                  <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
                     {eligibleSubagents.map((subagent) => (
                       <label
                         key={subagent.id}
