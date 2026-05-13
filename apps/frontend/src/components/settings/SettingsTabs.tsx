@@ -12,6 +12,7 @@ export function SettingsTabs() {
     { to: '/settings/general' as const, label: t.settings.tabs.general },
     { to: '/settings/connectors' as const, label: t.settings.tabs.connectors },
     { to: '/settings/providers' as const, label: t.settings.tabs.providers },
+    { to: '/settings/agents' as const, label: t.settings.tabs.agents },
     { to: '/settings/prompts' as const, label: t.settings.tabs.prompts },
     { to: '/settings/appearance' as const, label: t.settings.tabs.appearance },
     { to: '/settings/context' as const, label: t.settings.tabs.context },
@@ -22,17 +23,17 @@ export function SettingsTabs() {
 
   return (
     <nav
-      className="flex flex-wrap gap-1 border-b border-outline-variant/20 pb-0"
+      className="flex gap-0.5 border-b border-outline-variant/20 pb-0 overflow-x-auto hide-scrollbar"
       aria-label="Settings navigation"
     >
       {tabs.map(({ to, label }) => (
         <Link
           key={to}
           to={to}
-          className="px-3 sm:px-4 py-2.5 text-sm font-semibold rounded-t-lg transition-all duration-200 text-on-surface-variant/60 hover:text-on-surface hover:bg-surface-container-high whitespace-nowrap"
+          className="px-3 sm:px-4 py-2.5 text-sm font-medium rounded-t-lg transition-all duration-200 text-on-surface-variant/60 hover:text-on-surface hover:bg-surface-container-high/60 whitespace-nowrap shrink-0"
           activeProps={{
             className:
-              'px-3 sm:px-4 py-2.5 text-sm font-semibold rounded-t-lg transition-all duration-200 text-primary border-b-2 border-primary -mb-px bg-primary/5 whitespace-nowrap',
+              'px-3 sm:px-4 py-2.5 text-sm font-semibold rounded-t-lg transition-all duration-200 text-primary border-b-2 border-primary -mb-px bg-primary/5 whitespace-nowrap shrink-0',
           }}
         >
           {label}
