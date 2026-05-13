@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import type {
   AgentId,
   AgentProfile,
@@ -6,7 +6,7 @@ import type {
   AgentRole,
 } from '@mangostudio/shared/agents';
 import type { ToolSettingsDescriptor } from '@mangostudio/shared/tool-settings';
-import { Eye, RotateCcw, Save, Trash2 } from 'lucide-react';
+import { Eye, RotateCcw, Save, Trash2, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { AgentMarkdownEditor } from './AgentMarkdownEditor';
 import { AgentToolPicker } from './AgentToolPicker';
@@ -47,6 +47,15 @@ interface AgentEditorLabels {
   readonly saving: string;
   readonly reset: string;
   readonly delete: string;
+  readonly sectionIdentity: string;
+  readonly sectionBehavior: string;
+  readonly sectionReasoning: string;
+  readonly sectionTools: string;
+  readonly unsavedChanges: string;
+  readonly confirmResetTitle: string;
+  readonly confirmResetDescription: string;
+  readonly confirmReset: string;
+  readonly cancel: string;
 }
 
 interface AgentEditorProps {
@@ -72,6 +81,23 @@ const REASONING_EFFORT_OPTIONS: ReadonlyArray<NonNullable<AgentProfile['reasonin
   'max',
 ];
 
+function areAgentsEqual(a: EditableAgentProfile, b: EditableAgentProfile): boolean {
+  return (
+    a.name === b.name &&
+    a.description === b.description &&
+    a.role === b.role &&
+    a.systemPrompt === b.systemPrompt &&
+    a.model === b.model &&
+    a.thinkingEnabled === b.thinkingEnabled &&
+    a.reasoningEffort === b.reasoningEffort &&
+    a.maxToolIterations === b.maxToolIterations &&
+    a.toolsEnabled === b.toolsEnabled &&
+    JSON.stringify(a.toolNames) === JSON.stringify(b.toolNames) &&
+    JSON.stringify(a.subagentIds) === JSON.stringify(b.subagentIds) &&
+    a.slug === b.slug
+  );
+}
+
 export function AgentEditor({
   agent,
   allAgents,
@@ -88,7 +114,9 @@ export function AgentEditor({
   const [draft, setDraft] = useState<EditableAgentProfile>(agent);
   const [mode, setMode] = useState<AgentEditorMode>('friendly');
   const [rawMarkdown, setRawMarkdown] = useState(() => serializeAgentMarkdown(agent));
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
 
+  const dirty = !areAgentsEqual(draft, agent);
   const isUserAgent = draft.kind === 'user';
   const eligibleSubagents = allAgents.filter(
     (candidate) =>
@@ -102,218 +130,302 @@ export function AgentEditor({
     setDraft((current) => ({ ...current, ...partial }));
   };
 
+  const handleSave = useCallback(() => {
+    onSave(draft, createUpsertBody(draft));
+  }, [draft, onSave]);
+
+  const handleReset = useCallback(() => {
+    if (dirty) {
+      setShowResetConfirm(true);
+      return;
+    }
+    if (isNew) {
+      onCancelNew();
+      return;
+    }
+    setDraft(agent);
+    setRawMarkdown(serializeAgentMarkdown(agent));
+  }, [dirty, isNew, agent, onCancelNew]);
+
+  const confirmReset = useCallback(() => {
+    setShowResetConfirm(false);
+    if (isNew) {
+      onCancelNew();
+      return;
+    }
+    setDraft(agent);
+    setRawMarkdown(serializeAgentMarkdown(agent));
+  }, [isNew, agent, onCancelNew]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key === 's') {
+        event.preventDefault();
+        if (!isSaving && dirty) {
+          handleSave();
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [handleSave, isSaving, dirty]);
+
   return (
-    <div className="space-y-4 rounded-2xl border border-outline-variant/20 bg-surface-container-high p-4 sm:p-6">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <div className="flex items-center gap-2">
+    <div className="space-y-0 rounded-2xl border border-outline-variant/20 bg-surface-container-high">
+      {/* Header */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between p-4 sm:p-6 border-b border-outline-variant/10">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
             <h2 className="text-xl font-bold text-on-surface">{title}</h2>
             <span className="rounded-full bg-surface-container-lowest px-2 py-0.5 text-xs text-on-surface-variant">
               {draft.kind === 'builtin' ? labels.builtIn : labels.user}
             </span>
+            {dirty && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 text-xs text-amber-600 dark:text-amber-400">
+                <AlertCircle size={12} />
+                {labels.unsavedChanges}
+              </span>
+            )}
           </div>
-          <p className="mt-1 text-sm text-on-surface-variant/70">{draft.id}</p>
+          <p className="mt-1 text-sm text-on-surface-variant/70 truncate">{draft.id}</p>
         </div>
         {isUserAgent && (
-          <div className="flex gap-2">
-            <Button
+          <div className="flex gap-1 p-1 rounded-xl bg-surface-container-lowest border border-outline-variant/10 shrink-0">
+            <button
               type="button"
-              variant={mode === 'friendly' ? 'secondary' : 'ghost'}
-              size="sm"
               onClick={() => setMode('friendly')}
+              className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all duration-200 ${
+                mode === 'friendly'
+                  ? 'bg-surface-container-high text-on-surface shadow-sm'
+                  : 'text-on-surface-variant/60 hover:text-on-surface'
+              }`}
             >
               {labels.friendlyMode}
-            </Button>
-            <Button
+            </button>
+            <button
               type="button"
-              variant={mode === 'raw' ? 'secondary' : 'ghost'}
-              size="sm"
               onClick={() => {
                 setRawMarkdown(serializeAgentMarkdown(draft));
                 setMode('raw');
               }}
+              className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all duration-200 ${
+                mode === 'raw'
+                  ? 'bg-surface-container-high text-on-surface shadow-sm'
+                  : 'text-on-surface-variant/60 hover:text-on-surface'
+              }`}
             >
               {labels.rawMode}
-            </Button>
+            </button>
           </div>
         )}
       </div>
 
-      {mode === 'raw' && isUserAgent ? (
-        <div className="space-y-3">
-          <AgentMarkdownEditor
-            label={labels.rawMarkdown}
-            markdown={rawMarkdown}
-            onChange={setRawMarkdown}
-          />
-          <Button
-            type="button"
-            variant="secondary"
-            loading={isPreviewing}
-            onClick={() => {
-              void onPreviewMarkdown(rawMarkdown, draft.id).then((profile) => {
-                setDraft({ ...profile, slug: draft.slug });
-                setRawMarkdown(serializeAgentMarkdown(profile));
-              });
-            }}
-          >
-            <Eye size={16} />
-            {isPreviewing ? labels.previewing : labels.preview}
-          </Button>
-        </div>
-      ) : (
-        <div className="space-y-4">
-          <div className="grid gap-3 sm:grid-cols-2">
-            <TextField
-              label={labels.name}
-              value={draft.name}
-              onChange={(name) => updateDraft({ name })}
+      {/* Body */}
+      <div className="p-4 sm:p-6 space-y-6">
+        {mode === 'raw' && isUserAgent ? (
+          <div className="space-y-3">
+            <AgentMarkdownEditor
+              label={labels.rawMarkdown}
+              markdown={rawMarkdown}
+              onChange={setRawMarkdown}
             />
-            {isNew && (
-              <TextField
-                label={labels.slug}
-                value={draft.slug ?? ''}
-                onChange={(slug) => updateDraft({ slug })}
-              />
-            )}
-            <TextField
-              label={labels.description}
-              value={draft.description}
-              onChange={(description) => updateDraft({ description })}
-            />
-            <TextField
-              label={labels.model}
-              value={draft.model ?? ''}
-              onChange={(model) => updateDraft({ model: model.trim() || undefined })}
-            />
-          </div>
-
-          <label className="block space-y-2">
-            <span className="text-sm font-semibold text-on-surface">{labels.role}</span>
-            <select
-              value={draft.role}
-              onChange={(event) => updateDraft({ role: event.target.value as AgentRole })}
-              className="w-full rounded-xl border border-outline-variant/20 bg-surface-container-lowest px-3 py-2 text-sm text-on-surface focus:border-primary/60 focus:outline-none focus:ring-1 focus:ring-primary/20"
+            <Button
+              type="button"
+              variant="secondary"
+              loading={isPreviewing}
+              onClick={() => {
+                void onPreviewMarkdown(rawMarkdown, draft.id).then((profile) => {
+                  setDraft({ ...profile, slug: draft.slug });
+                  setRawMarkdown(serializeAgentMarkdown(profile));
+                });
+              }}
             >
-              {ROLE_OPTIONS.map((role) => (
-                <option key={role} value={role}>
-                  {labels.roles[role]}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label className="block space-y-2">
-            <span className="text-sm font-semibold text-on-surface">{labels.systemPrompt}</span>
-            <textarea
-              value={draft.systemPrompt}
-              onChange={(event) => updateDraft({ systemPrompt: event.target.value })}
-              rows={8}
-              className="w-full rounded-xl border border-outline-variant/20 bg-surface-container-lowest px-3 py-2 text-sm text-on-surface focus:border-primary/60 focus:outline-none focus:ring-1 focus:ring-primary/20"
-            />
-          </label>
-
-          <div className="grid gap-3 sm:grid-cols-2">
-            <label className="flex items-center gap-2 rounded-xl border border-outline-variant/20 bg-surface-container-lowest px-3 py-2 text-sm text-on-surface">
-              <input
-                type="checkbox"
-                checked={draft.thinkingEnabled ?? false}
-                onChange={(event) => updateDraft({ thinkingEnabled: event.target.checked })}
-                className="accent-primary"
-              />
-              {labels.thinking}
-            </label>
-            <label className="block space-y-2">
-              <span className="text-sm font-semibold text-on-surface">
-                {labels.reasoningEffort}
-              </span>
-              <select
-                value={draft.reasoningEffort ?? ''}
-                onChange={(event) =>
-                  updateDraft({
-                    reasoningEffort: event.target.value
-                      ? (event.target.value as AgentProfile['reasoningEffort'])
-                      : undefined,
-                  })
-                }
-                className="w-full rounded-xl border border-outline-variant/20 bg-surface-container-lowest px-3 py-2 text-sm text-on-surface focus:border-primary/60 focus:outline-none focus:ring-1 focus:ring-primary/20"
-              >
-                <option value="" />
-                {REASONING_EFFORT_OPTIONS.map((effort) => (
-                  <option key={effort} value={effort}>
-                    {labels.reasoningEfforts[effort]}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <NumberField
-              label={labels.maxToolIterations}
-              value={draft.maxToolIterations ?? ''}
-              onChange={(maxToolIterations) => updateDraft({ maxToolIterations })}
-            />
-            <label className="flex items-center gap-2 rounded-xl border border-outline-variant/20 bg-surface-container-lowest px-3 py-2 text-sm text-on-surface">
-              <input
-                type="checkbox"
-                checked={draft.toolsEnabled}
-                onChange={(event) => updateDraft({ toolsEnabled: event.target.checked })}
-                className="accent-primary"
-              />
-              {labels.toolsEnabled}
-            </label>
+              <Eye size={16} />
+              {isPreviewing ? labels.previewing : labels.preview}
+            </Button>
           </div>
-
-          <AgentToolPicker
-            label={labels.toolAllowlist}
-            disabledLabel={labels.noTools}
-            tools={tools}
-            selectedToolNames={draft.toolNames}
-            disabled={!draft.toolsEnabled}
-            onChange={(toolNames) => updateDraft({ toolNames })}
-          />
-
-          <fieldset className="space-y-2" disabled={eligibleSubagents.length === 0}>
-            <legend className="text-sm font-semibold text-on-surface">{labels.subagents}</legend>
-            {eligibleSubagents.length === 0 ? (
-              <p className="text-sm text-on-surface-variant/60">{labels.noSubagents}</p>
-            ) : (
-              <div className="grid gap-2 sm:grid-cols-2">
-                {eligibleSubagents.map((subagent) => (
-                  <label
-                    key={subagent.id}
-                    className="flex items-center gap-2 rounded-xl border border-outline-variant/20 bg-surface-container-lowest px-3 py-2 text-sm text-on-surface"
+        ) : (
+          <div className="space-y-6">
+            {/* Identity */}
+            <section className="space-y-4">
+              <h3 className="text-xs uppercase tracking-widest font-bold text-on-surface-variant/80 font-label">
+                {labels.sectionIdentity}
+              </h3>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <TextField
+                  label={labels.name}
+                  value={draft.name}
+                  onChange={(name) => updateDraft({ name })}
+                />
+                {isNew && (
+                  <TextField
+                    label={labels.slug}
+                    value={draft.slug ?? ''}
+                    onChange={(slug) => updateDraft({ slug })}
+                  />
+                )}
+                <TextField
+                  label={labels.description}
+                  value={draft.description}
+                  onChange={(description) => updateDraft({ description })}
+                />
+                <label className="block space-y-2">
+                  <span className="text-sm font-semibold text-on-surface">{labels.role}</span>
+                  <select
+                    value={draft.role}
+                    onChange={(event) => updateDraft({ role: event.target.value as AgentRole })}
+                    className="w-full rounded-xl border border-outline-variant/20 bg-surface-container-lowest px-3 py-2 text-sm text-on-surface focus:border-primary/60 focus:outline-none focus:ring-1 focus:ring-primary/20"
                   >
-                    <input
-                      type="checkbox"
-                      checked={selectedSubagents.has(subagent.id)}
-                      onChange={(event) => {
-                        const subagentIds = event.target.checked
-                          ? [...draft.subagentIds, subagent.id]
-                          : draft.subagentIds.filter((id) => id !== subagent.id);
-                        updateDraft({ subagentIds });
-                      }}
-                      className="accent-primary"
-                    />
-                    {subagent.name}
-                  </label>
-                ))}
+                    {ROLE_OPTIONS.map((role) => (
+                      <option key={role} value={role}>
+                        {labels.roles[role]}
+                      </option>
+                    ))}
+                  </select>
+                </label>
               </div>
-            )}
-          </fieldset>
+            </section>
 
-          {isUserAgent && sourcePath && (
-            <label className="block space-y-2">
-              <span className="text-sm font-semibold text-on-surface">{labels.path}</span>
-              <input
-                readOnly
-                value={sourcePath}
-                className="w-full rounded-xl border border-outline-variant/20 bg-surface-container-lowest px-3 py-2 text-sm text-on-surface-variant"
+            {/* Behavior */}
+            <section className="space-y-4">
+              <h3 className="text-xs uppercase tracking-widest font-bold text-on-surface-variant/80 font-label">
+                {labels.sectionBehavior}
+              </h3>
+              <label className="block space-y-2">
+                <span className="text-sm font-semibold text-on-surface">{labels.systemPrompt}</span>
+                <textarea
+                  value={draft.systemPrompt}
+                  onChange={(event) => updateDraft({ systemPrompt: event.target.value })}
+                  rows={6}
+                  className="w-full rounded-xl border border-outline-variant/20 bg-surface-container-lowest px-3 py-2 text-sm text-on-surface focus:border-primary/60 focus:outline-none focus:ring-1 focus:ring-primary/20 resize-y"
+                />
+              </label>
+              <TextField
+                label={labels.model}
+                value={draft.model ?? ''}
+                onChange={(model) => updateDraft({ model: model.trim() || undefined })}
+                placeholder="e.g. gpt-4o"
               />
-            </label>
-          )}
-        </div>
-      )}
+            </section>
 
-      <div className="flex flex-wrap justify-between gap-2 border-t border-outline-variant/20 pt-4">
+            {/* Reasoning */}
+            <section className="space-y-4">
+              <h3 className="text-xs uppercase tracking-widest font-bold text-on-surface-variant/80 font-label">
+                {labels.sectionReasoning}
+              </h3>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="flex items-center gap-2 rounded-xl border border-outline-variant/20 bg-surface-container-lowest px-3 py-2 text-sm text-on-surface">
+                  <input
+                    type="checkbox"
+                    checked={draft.thinkingEnabled ?? false}
+                    onChange={(event) => updateDraft({ thinkingEnabled: event.target.checked })}
+                    className="accent-primary"
+                  />
+                  {labels.thinking}
+                </label>
+                <label className="block space-y-2">
+                  <span className="text-sm font-semibold text-on-surface">
+                    {labels.reasoningEffort}
+                  </span>
+                  <select
+                    value={draft.reasoningEffort ?? ''}
+                    onChange={(event) =>
+                      updateDraft({
+                        reasoningEffort: event.target.value
+                          ? (event.target.value as AgentProfile['reasoningEffort'])
+                          : undefined,
+                      })
+                    }
+                    className="w-full rounded-xl border border-outline-variant/20 bg-surface-container-lowest px-3 py-2 text-sm text-on-surface focus:border-primary/60 focus:outline-none focus:ring-1 focus:ring-primary/20"
+                  >
+                    <option value="" />
+                    {REASONING_EFFORT_OPTIONS.map((effort) => (
+                      <option key={effort} value={effort}>
+                        {labels.reasoningEfforts[effort]}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <NumberField
+                  label={labels.maxToolIterations}
+                  value={draft.maxToolIterations ?? ''}
+                  onChange={(maxToolIterations) => updateDraft({ maxToolIterations })}
+                />
+              </div>
+            </section>
+
+            {/* Tools */}
+            <section className="space-y-4">
+              <h3 className="text-xs uppercase tracking-widest font-bold text-on-surface-variant/80 font-label">
+                {labels.sectionTools}
+              </h3>
+              <label className="flex items-center gap-2 rounded-xl border border-outline-variant/20 bg-surface-container-lowest px-3 py-2 text-sm text-on-surface w-fit">
+                <input
+                  type="checkbox"
+                  checked={draft.toolsEnabled}
+                  onChange={(event) => updateDraft({ toolsEnabled: event.target.checked })}
+                  className="accent-primary"
+                />
+                {labels.toolsEnabled}
+              </label>
+
+              <AgentToolPicker
+                label={labels.toolAllowlist}
+                disabledLabel={labels.noTools}
+                tools={tools}
+                selectedToolNames={draft.toolNames}
+                disabled={!draft.toolsEnabled}
+                onChange={(toolNames) => updateDraft({ toolNames })}
+              />
+
+              <fieldset className="space-y-2" disabled={eligibleSubagents.length === 0}>
+                <legend className="text-sm font-semibold text-on-surface">
+                  {labels.subagents}
+                </legend>
+                {eligibleSubagents.length === 0 ? (
+                  <p className="text-sm text-on-surface-variant/60">{labels.noSubagents}</p>
+                ) : (
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    {eligibleSubagents.map((subagent) => (
+                      <label
+                        key={subagent.id}
+                        className="flex items-center gap-2 rounded-xl border border-outline-variant/20 bg-surface-container-lowest px-3 py-2 text-sm text-on-surface"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selectedSubagents.has(subagent.id)}
+                          onChange={(event) => {
+                            const subagentIds = event.target.checked
+                              ? [...draft.subagentIds, subagent.id]
+                              : draft.subagentIds.filter((id) => id !== subagent.id);
+                            updateDraft({ subagentIds });
+                          }}
+                          className="accent-primary"
+                        />
+                        {subagent.name}
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </fieldset>
+            </section>
+
+            {isUserAgent && sourcePath && (
+              <label className="block space-y-2">
+                <span className="text-sm font-semibold text-on-surface">{labels.path}</span>
+                <input
+                  readOnly
+                  value={sourcePath}
+                  className="w-full rounded-xl border border-outline-variant/20 bg-surface-container-lowest px-3 py-2 text-sm text-on-surface-variant"
+                />
+              </label>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Sticky action bar */}
+      <div className="sticky bottom-0 z-10 flex flex-wrap justify-between gap-2 border-t border-outline-variant/10 bg-surface-container-high/95 backdrop-blur-sm p-4 sm:p-6 rounded-b-2xl">
         <div>
           {isUserAgent && !isNew && (
             <Button type="button" variant="ghost" onClick={() => onDelete(draft)}>
@@ -323,28 +435,36 @@ export function AgentEditor({
           )}
         </div>
         <div className="flex gap-2">
-          <Button
-            type="button"
-            variant="ghost"
-            onClick={() => {
-              if (isNew) onCancelNew();
-              setDraft(agent);
-              setRawMarkdown(serializeAgentMarkdown(agent));
-            }}
-          >
+          <Button type="button" variant="ghost" onClick={handleReset}>
             <RotateCcw size={16} />
             {labels.reset}
           </Button>
-          <Button
-            type="button"
-            loading={isSaving}
-            onClick={() => onSave(draft, createUpsertBody(draft))}
-          >
+          <Button type="button" loading={isSaving} disabled={!dirty && !isNew} onClick={handleSave}>
             <Save size={16} />
             {isSaving ? labels.saving : labels.save}
           </Button>
         </div>
       </div>
+
+      {/* Reset confirmation dialog */}
+      {showResetConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+          <div className="w-full max-w-md rounded-2xl border border-outline-variant/20 bg-surface p-5 shadow-xl space-y-4">
+            <div className="space-y-1">
+              <h3 className="text-lg font-bold text-on-surface">{labels.confirmResetTitle}</h3>
+              <p className="text-sm text-on-surface-variant/70">{labels.confirmResetDescription}</p>
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="ghost" onClick={() => setShowResetConfirm(false)}>
+                {labels.cancel}
+              </Button>
+              <Button type="button" variant="primary" onClick={confirmReset}>
+                {labels.confirmReset}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -353,10 +473,12 @@ function TextField({
   label,
   value,
   onChange,
+  placeholder,
 }: {
   readonly label: string;
   readonly value: string;
   readonly onChange: (value: string) => void;
+  readonly placeholder?: string;
 }) {
   return (
     <label className="block space-y-2">
@@ -364,6 +486,7 @@ function TextField({
       <input
         value={value}
         onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder}
         className="w-full rounded-xl border border-outline-variant/20 bg-surface-container-lowest px-3 py-2 text-sm text-on-surface focus:border-primary/60 focus:outline-none focus:ring-1 focus:ring-primary/20"
       />
     </label>

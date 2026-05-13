@@ -6,7 +6,7 @@ import type {
   CreateAgentProfileBody,
   UserAgentId,
 } from '@mangostudio/shared/agents';
-import { Bot, Plus } from 'lucide-react';
+import { Bot, Plus, ChevronDown } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { useI18n } from '@/hooks/use-i18n';
@@ -35,12 +35,15 @@ export function AgentSettingsPage() {
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
   const [newAgent, setNewAgent] = useState<EditableAgentProfile | null>(null);
   const [agentPendingDelete, setAgentPendingDelete] = useState<AgentProfile | null>(null);
+  const [mobileListOpen, setMobileListOpen] = useState(false);
 
   const agents = useMemo(() => agentsQuery.data?.agents ?? [], [agentsQuery.data?.agents]);
   const selectedAgent = useMemo(() => {
     if (newAgent) return newAgent;
     return agents.find((agent) => agent.id === selectedAgentId) ?? agents[0] ?? null;
   }, [agents, newAgent, selectedAgentId]);
+
+  const selectedAgentName = selectedAgent?.name ?? labels.selectAgent;
 
   const invalidateAgents = async () => {
     await queryClient.invalidateQueries({ queryKey: agentSettingsKeys.list() });
@@ -121,6 +124,59 @@ export function AgentSettingsPage() {
     );
   }
 
+  if (agents.length === 0 && !newAgent) {
+    return (
+      <div className="space-y-6">
+        <Card variant="solid" className="space-y-3 p-4 sm:p-6">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div className="flex gap-3">
+              <div className="rounded-2xl bg-primary/10 p-2 text-primary">
+                <Bot size={22} />
+              </div>
+              <div>
+                <h2 className="text-lg font-bold text-on-surface">{labels.title}</h2>
+                <p className="text-sm text-on-surface-variant/70">{labels.description}</p>
+              </div>
+            </div>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => {
+                const draft = createNewAgent(labels.newAgentName, labels.newAgentDescription);
+                setNewAgent(draft);
+                setSelectedAgentId(draft.id);
+              }}
+            >
+              <Plus size={16} />
+              {labels.create}
+            </Button>
+          </div>
+        </Card>
+
+        <Card variant="solid" className="p-8 sm:p-12 text-center space-y-4">
+          <div className="p-4 bg-surface-container-high rounded-full w-fit mx-auto text-on-surface-variant/40">
+            <Bot size={32} />
+          </div>
+          <div className="space-y-1">
+            <p className="text-on-surface font-bold">{labels.emptyStateTitle}</p>
+            <p className="text-sm text-on-surface-variant/60">{labels.emptyStateDescription}</p>
+          </div>
+          <Button
+            variant="primary"
+            onClick={() => {
+              const draft = createNewAgent(labels.newAgentName, labels.newAgentDescription);
+              setNewAgent(draft);
+              setSelectedAgentId(draft.id);
+            }}
+          >
+            <Plus size={16} />
+            {labels.create}
+          </Button>
+        </Card>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       <Card variant="solid" className="space-y-3 p-4 sm:p-6">
@@ -149,17 +205,58 @@ export function AgentSettingsPage() {
         </div>
       </Card>
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1.7fr)]">
-        <AgentList
-          agents={newAgent ? [newAgent, ...agents] : agents}
-          selectedAgentId={selectedAgent?.id ?? null}
-          builtInLabel={labels.builtIn}
-          userLabel={labels.user}
-          onSelect={(agentId) => {
-            if (agentId !== NEW_AGENT_ID) setNewAgent(null);
-            setSelectedAgentId(agentId);
-          }}
-        />
+      {/* Mobile agent selector */}
+      <div className="lg:hidden">
+        <button
+          type="button"
+          aria-label={labels.selectAgent}
+          onClick={() => setMobileListOpen((prev) => !prev)}
+          className="w-full flex items-center justify-between gap-3 rounded-2xl border border-outline-variant/20 bg-surface-container-high px-4 py-3 text-left text-sm text-on-surface hover:bg-surface-container-highest transition-colors"
+        >
+          <span className="font-semibold truncate">{selectedAgentName}</span>
+          <ChevronDown
+            size={16}
+            className={`shrink-0 text-on-surface-variant transition-transform duration-200 ${
+              mobileListOpen ? 'rotate-180' : ''
+            }`}
+          />
+        </button>
+        {mobileListOpen && (
+          <div className="mt-2 p-2 rounded-2xl border border-outline-variant/20 bg-surface-container-high">
+            <AgentList
+              agents={newAgent ? [newAgent, ...agents] : agents}
+              selectedAgentId={selectedAgent?.id ?? null}
+              builtInLabel={labels.builtIn}
+              userLabel={labels.user}
+              builtInAgentsTitle={labels.builtInAgents}
+              userAgentsTitle={labels.userAgents}
+              onSelect={(agentId) => {
+                if (agentId !== NEW_AGENT_ID) setNewAgent(null);
+                setSelectedAgentId(agentId);
+                setMobileListOpen(false);
+              }}
+            />
+          </div>
+        )}
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,280px)_minmax(0,1fr)]">
+        {/* Desktop agent list */}
+        <div className="hidden lg:block">
+          <AgentList
+            agents={newAgent ? [newAgent, ...agents] : agents}
+            selectedAgentId={selectedAgent?.id ?? null}
+            builtInLabel={labels.builtIn}
+            userLabel={labels.user}
+            builtInAgentsTitle={labels.builtInAgents}
+            userAgentsTitle={labels.userAgents}
+            onSelect={(agentId) => {
+              if (agentId !== NEW_AGENT_ID) setNewAgent(null);
+              setSelectedAgentId(agentId);
+            }}
+          />
+        </div>
+
         {selectedAgent && (
           <AgentEditor
             key={selectedAgent.id}
@@ -196,6 +293,15 @@ export function AgentSettingsPage() {
               saving: labels.saving,
               reset: labels.reset,
               delete: labels.delete,
+              sectionIdentity: labels.sectionIdentity,
+              sectionBehavior: labels.sectionBehavior,
+              sectionReasoning: labels.sectionReasoning,
+              sectionTools: labels.sectionTools,
+              unsavedChanges: labels.unsavedChanges,
+              confirmResetTitle: labels.confirmResetTitle,
+              confirmResetDescription: labels.confirmResetDescription,
+              confirmReset: labels.confirmReset,
+              cancel: labels.cancel,
             }}
             isNew={selectedAgent.id === NEW_AGENT_ID}
             isSaving={saveMutation.isPending}
