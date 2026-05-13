@@ -53,6 +53,9 @@ dir = "/var/lib/mangostudio/uploads"
 [images]
 dir = "/var/lib/mangostudio/images"
 
+[agents]
+dir = "/var/lib/mangostudio/agents"
+
 [auth]
 secret = "your-64-char-random-secret"
 url = "https://your-domain.com"

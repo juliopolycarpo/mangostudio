@@ -107,6 +107,17 @@ SSE with `Content-Type: text/event-stream`. See [../architecture/streaming.md](.
 | `GET`  | `/api/settings/tools`           | Yes  | List tool descriptors |
 | `PUT`  | `/api/settings/tools/:toolName` | Yes  | Update tool settings  |
 
+### Agent Settings
+
+| Method   | Path                            | Auth | Purpose                |
+| -------- | ------------------------------- | ---- | ---------------------- |
+| `GET`    | `/api/settings/agents`          | Yes  | List agent profiles    |
+| `GET`    | `/api/settings/agents/:agentId` | Yes  | Get an agent profile   |
+| `PUT`    | `/api/settings/agents/:agentId` | Yes  | Update an agent        |
+| `POST`   | `/api/settings/agents`          | Yes  | Create a user agent    |
+| `DELETE` | `/api/settings/agents/:agentId` | Yes  | Delete a user agent    |
+| `POST`   | `/api/settings/agents/preview`  | Yes  | Preview agent markdown |
+
 ### Prompt Rules
 
 | Method | Path                          | Auth | Purpose                   |
