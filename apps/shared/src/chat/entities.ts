@@ -27,6 +27,7 @@ export interface Chat {
   textModel?: string;
   imageModel?: string;
   lastUsedMode?: InteractionMode;
+  selectedAgentId?: string | null;
 }
 
 /** Represents a message within a chat. */
@@ -43,6 +44,8 @@ export interface Message {
   generationTime?: string;
   isGenerating?: boolean;
   modelName?: string;
+  agentId?: string;
+  agentName?: string;
   parts?: MessagePart[];
   providerState?: string;
   generatedImages?: GeneratedImageArtifact[];

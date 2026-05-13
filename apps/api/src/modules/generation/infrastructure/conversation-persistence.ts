@@ -1,4 +1,5 @@
 import type { Kysely } from 'kysely';
+import type { InteractionMode } from '@mangostudio/shared';
 import type { ChatAttachment } from '@mangostudio/shared/chat';
 import type { Database } from '../../../db/types';
 import type { MessagePart } from '@mangostudio/shared/types';
@@ -16,6 +17,7 @@ export interface PersistUserMessageInput {
   text: string;
   attachmentIds?: string[];
   timestamp: number;
+  interactionMode?: InteractionMode;
 }
 
 export async function persistUserMessage(
@@ -29,7 +31,7 @@ export async function persistUserMessage(
     text: input.text,
     timestamp: input.timestamp,
     isGenerating: false,
-    interactionMode: 'chat',
+    interactionMode: input.interactionMode ?? 'chat',
   };
   const attachmentIds = input.attachmentIds ?? [];
 
@@ -69,6 +71,7 @@ export interface PersistAiResponseInput {
   generationTime: string;
   modelName: string;
   generatedImages?: PersistedGeneratedImageInput[];
+  interactionMode?: InteractionMode;
 }
 
 export interface PersistedGeneratedImageInput {
@@ -98,7 +101,7 @@ export async function persistAiResponse(
       isGenerating: false,
       generationTime: input.generationTime,
       modelName: input.modelName,
-      interactionMode: 'chat',
+      interactionMode: input.interactionMode ?? 'chat',
     },
     input,
     db
@@ -115,6 +118,7 @@ export interface PersistErrorResponseInput {
   generationTime: string;
   modelName: string;
   generatedImages?: PersistedGeneratedImageInput[];
+  interactionMode?: InteractionMode;
 }
 
 export async function persistErrorResponse(
@@ -132,7 +136,7 @@ export async function persistErrorResponse(
       isGenerating: false,
       generationTime: input.generationTime,
       modelName: input.modelName,
-      interactionMode: 'chat',
+      interactionMode: input.interactionMode ?? 'chat',
     },
     input,
     db
@@ -142,11 +146,13 @@ export async function persistErrorResponse(
 export async function updateChatAfterTurn(
   chatId: string,
   aiTimestamp: number,
+  lastUsedMode: InteractionMode,
+  selectedAgentId: string | null,
   db: Kysely<Database>
 ): Promise<void> {
   await db
     .updateTable('chats')
-    .set({ updatedAt: aiTimestamp, lastUsedMode: 'chat' })
+    .set({ updatedAt: aiTimestamp, lastUsedMode, selectedAgentId })
     .where('id', '=', chatId)
     .where('updatedAt', '<=', aiTimestamp)
     .execute();

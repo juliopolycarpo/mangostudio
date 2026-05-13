@@ -24,6 +24,8 @@ import {
 import * as realGeminiNs from '../../../src/services/gemini';
 import * as realProviderSettingsRepoNs from '../../../src/modules/provider-settings/infrastructure/provider-settings-repository';
 import * as realToolSettingsRepoNs from '../../../src/modules/tool-settings/infrastructure/tool-settings-repository';
+import { getAgentProfile } from '../../../src/modules/agents/application/agent-settings-service';
+import { AgentSettingsError } from '../../../src/modules/agents/domain/agent-profile';
 import type { AgentTurnRequest } from '../../../src/services/providers/types';
 
 const TEST_USER = {
@@ -50,6 +52,7 @@ const realGetAllToolDefinitions = getAllToolDefinitions;
 const realExecuteTool = executeTool;
 const realGetTool = getTool;
 const realGetSafeEffectiveToolSettings = getSafeEffectiveToolSettings;
+const realGetAgentProfile = getAgentProfile;
 // For the gemini barrel we snapshot the whole object immediately.
 const realGemini = { ...realGeminiNs };
 const realProviderSettingsRepo = { ...realProviderSettingsRepoNs };
@@ -92,6 +95,9 @@ afterEach(async () => {
     '../../../src/modules/tool-settings/infrastructure/tool-settings-repository',
     () => realToolSettingsRepo
   );
+  await mock.module('../../../src/modules/agents/application/agent-settings-service', () => ({
+    getAgentProfile: realGetAgentProfile,
+  }));
 });
 
 /**
@@ -216,6 +222,91 @@ describe('POST /respond/stream', () => {
 
     // Should reach the chat ownership check (404), not a schema validation error
     expect(response.status).toBe(404);
+  });
+
+  it('resolves Chat agent metadata when agentMode is chat without agentId', async () => {
+    const requestedAgentIds: string[] = [];
+    await mock.module('../../../src/modules/chats/infrastructure/chat-repository', () => ({
+      verifyChatOwnership: () => Promise.resolve(true),
+    }));
+    await mock.module('../../../src/modules/agents/application/agent-settings-service', () => ({
+      getAgentProfile: (_db: unknown, _userId: string, agentId: string) => {
+        requestedAgentIds.push(agentId);
+        return Promise.resolve({ id: 'chat' });
+      },
+    }));
+
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
+    restoreAuth = restore;
+
+    const response = await app.handle(
+      new Request('http://localhost/respond/stream', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chatId: 'chat-1', prompt: 'Hello', agentMode: 'chat' }),
+      })
+    );
+
+    expect(requestedAgentIds).toEqual(['chat']);
+    expect(response.headers.get('content-type') ?? '').not.toContain('text/event-stream');
+  });
+
+  it('defaults Agent mode to the Default agent', async () => {
+    const requestedAgentIds: string[] = [];
+    await mock.module('../../../src/modules/chats/infrastructure/chat-repository', () => ({
+      verifyChatOwnership: () => Promise.resolve(true),
+    }));
+    await mock.module('../../../src/modules/agents/application/agent-settings-service', () => ({
+      getAgentProfile: (_db: unknown, _userId: string, agentId: string) => {
+        requestedAgentIds.push(agentId);
+        return Promise.resolve({ id: 'default' });
+      },
+    }));
+
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
+    restoreAuth = restore;
+
+    const response = await app.handle(
+      new Request('http://localhost/respond/stream', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chatId: 'chat-1', prompt: 'Hello', agentMode: 'agent' }),
+      })
+    );
+
+    expect(requestedAgentIds).toEqual(['default']);
+    expect(response.headers.get('content-type') ?? '').not.toContain('text/event-stream');
+  });
+
+  it('returns 404 for an unknown agent before SSE starts', async () => {
+    await mock.module('../../../src/modules/chats/infrastructure/chat-repository', () => ({
+      verifyChatOwnership: () => Promise.resolve(true),
+    }));
+    await mock.module('../../../src/modules/agents/application/agent-settings-service', () => ({
+      getAgentProfile: () =>
+        Promise.reject(new AgentSettingsError('Agent not found.', 404, 'NOT_FOUND')),
+    }));
+
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
+    restoreAuth = restore;
+
+    const response = await app.handle(
+      new Request('http://localhost/respond/stream', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chatId: 'chat-1',
+          prompt: 'Hello',
+          agentMode: 'agent',
+          agentId: 'user:missing-agent',
+        }),
+      })
+    );
+
+    expect(response.status).toBe(404);
+    expect(response.headers.get('content-type') ?? '').not.toContain('text/event-stream');
+    const body = (await response.json()) as { error: string };
+    expect(body.error).toBe('Agent not found');
   });
 
   it('does not persist stateless-loop providerState to the database', async () => {

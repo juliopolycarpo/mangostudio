@@ -5,6 +5,7 @@
  */
 
 import { type Elysia } from 'elysia';
+import type { AgentExecutionMode, AgentId } from '@mangostudio/shared/agents';
 import { RespondStreamBodySchema } from '@mangostudio/shared/generation';
 import { ERROR_CODES } from '@mangostudio/shared/errors';
 import type { SSEErrorEvent } from '@mangostudio/shared/streaming';
@@ -32,6 +33,8 @@ import {
   EmptyTextTurnError,
   normalizeTextTurnAttachmentIds,
 } from '../application/text-turn-content';
+import { getAgentProfile } from '../../agents/application/agent-settings-service';
+import { AgentSettingsError } from '../../agents/domain/agent-profile';
 
 const KEEPALIVE_INTERVAL_MS = 15_000;
 
@@ -40,6 +43,25 @@ function sseEvent(data: object): Uint8Array {
 }
 
 const KEEPALIVE_BYTES = new TextEncoder().encode(': keepalive\n\n');
+
+interface ResolvedRequestAgent {
+  readonly mode: AgentExecutionMode;
+  readonly agentId: AgentId;
+}
+
+async function resolveRequestAgent(input: {
+  readonly db: ReturnType<typeof getDb>;
+  readonly userId: string;
+  readonly agentMode?: AgentExecutionMode;
+  readonly agentId?: string;
+}): Promise<ResolvedRequestAgent> {
+  const mode = input.agentMode ?? 'chat';
+  const agentId = mode === 'agent' ? (input.agentId ?? 'default') : 'chat';
+
+  const profile = await getAgentProfile(input.db, input.userId, agentId);
+
+  return { mode, agentId: profile.id };
+}
 
 function toSsePayload(event: StreamEvent): object {
   switch (event.type) {
@@ -184,13 +206,24 @@ export const respondStreamRoutes = (app: Elysia) =>
 
           // Model resolution must be pre-flight to return HTTP 503 before SSE headers flush.
           let resolvedModel: ResolvedModel;
+          let resolvedAgent: ResolvedRequestAgent;
           try {
+            resolvedAgent = await resolveRequestAgent({
+              db,
+              userId,
+              agentMode: body.agentMode,
+              agentId: body.agentId,
+            });
             resolvedModel = await resolveModel({
               requestedModel: body.model,
               userId,
               type: 'text',
             });
           } catch (err) {
+            if (err instanceof AgentSettingsError && err.status === 404) {
+              set.status = 404;
+              return { error: 'Agent not found', code: ERROR_CODES.NOT_FOUND };
+            }
             if (err instanceof NoModelAvailableError) {
               set.status = 503;
               return { error: err.message, code: ERROR_CODES.PROVIDER_ERROR };
@@ -240,6 +273,8 @@ export const respondStreamRoutes = (app: Elysia) =>
                     maxToolIterations: body.maxToolIterations,
                     contextSettings: body.contextSettings,
                     toolIntent: body.toolIntent,
+                    agentMode: resolvedAgent.mode,
+                    agentId: resolvedAgent.agentId,
                     signal: abortController.signal,
                     resolvedModel,
                   },

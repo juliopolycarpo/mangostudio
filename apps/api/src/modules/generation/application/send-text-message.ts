@@ -132,7 +132,7 @@ export async function sendTextMessage(
     db
   );
 
-  await updateChatAfterTurn(input.chatId, aiTimestamp, db);
+  await updateChatAfterTurn(input.chatId, aiTimestamp, 'chat', null, db);
 
   return {
     userMessage: {

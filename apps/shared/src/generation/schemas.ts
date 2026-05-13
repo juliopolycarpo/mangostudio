@@ -1,4 +1,5 @@
 import { Type, type Static } from '@sinclair/typebox';
+import { AgentExecutionModeSchema, AgentIdSchema } from '../agents/schemas';
 import { ContextSettingsSchema } from '../chat/schemas';
 import { ReasoningEffortSchema } from '../provider-settings/schemas';
 import { PromptSettingsSchema } from '../prompt-rules/schemas';
@@ -44,6 +45,8 @@ export const RespondStreamBodySchema = Type.Object({
   maxToolIterations: Type.Optional(Type.Integer({ minimum: 1, maximum: 25 })),
   contextSettings: Type.Optional(ContextSettingsSchema),
   toolIntent: ToolIntentSchema,
+  agentMode: Type.Optional(AgentExecutionModeSchema),
+  agentId: Type.Optional(AgentIdSchema),
 });
 
 export type RespondStreamBody = Static<typeof RespondStreamBodySchema>;
