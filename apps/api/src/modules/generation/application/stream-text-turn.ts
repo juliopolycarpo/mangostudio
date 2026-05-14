@@ -1106,25 +1106,33 @@ async function executeStandardToolCall(
       throw new Error(`Tool "${name}" is not allowed for this agent.`);
     }
     const runtime = context.delegationRuntime;
-    const delegateToAgent =
-      name === DELEGATE_TO_AGENT_TOOL_NAME && runtime
-        ? (request: DelegateToSubagentRequest) =>
-            executeDelegationToolCall(callId, request, runtime)
-        : undefined;
-    result = await withToolTimeout(
-      executeTool(
-        name,
-        args,
-        {
-          userId: context.userId,
-          chatId: context.chatId,
-          parameters: {},
-          ...(delegateToAgent ? { delegateToAgent } : {}),
-        },
+    if (name === DELEGATE_TO_AGENT_TOOL_NAME && runtime) {
+      const tool = getTool(name);
+      if (!tool) throw new Error(`Unknown tool: "${name}"`);
+      const effectiveSettings = getSafeEffectiveToolSettings(
+        tool,
         context.settingsByToolName.get(name)
-      ),
-      name
-    );
+      );
+      if (!effectiveSettings.enabled) {
+        throw new Error(`Tool "${name}" is disabled for this user.`);
+      }
+      const request = parseDelegationRequest(args);
+      result = await ensureDelegationResult(callId, request, runtime);
+    } else {
+      result = await withToolTimeout(
+        executeTool(
+          name,
+          args,
+          {
+            userId: context.userId,
+            chatId: context.chatId,
+            parameters: {},
+          },
+          context.settingsByToolName.get(name)
+        ),
+        name
+      );
+    }
     if (isSubagentRunResult(result)) {
       subagentTrace = createSubagentTraceForTool(callId, result);
       isError = result.status !== 'completed';
@@ -1262,6 +1270,7 @@ function isSubagentRunResult(value: unknown): value is SubagentRunResult {
     typeof result.agentId === 'string' &&
     typeof result.agentName === 'string' &&
     typeof result.summary === 'string' &&
+    Boolean(result.trace) &&
     typeof result.trace === 'object'
   );
 }
@@ -1283,6 +1292,170 @@ function createSubagentTraceForTool(
     tools: result.trace.tools,
     ...(result.trace.error ? { error: result.trace.error } : {}),
   };
+}
+
+function parseDelegationRequest(args: Record<string, unknown>): DelegateToSubagentRequest {
+  const agentId = getRequiredString(args.agentId, 'agentId');
+  const task = getRequiredString(args.task, 'task');
+  const context = getOptionalString(args.context);
+  const expectedOutput = getOptionalString(args.expectedOutput);
+  const maxTurns = getOptionalInteger(args.maxTurns);
+
+  return {
+    agentId,
+    task,
+    ...(context ? { context } : {}),
+    ...(expectedOutput ? { expectedOutput } : {}),
+    ...(maxTurns !== undefined ? { maxTurns } : {}),
+  };
+}
+
+async function ensureDelegationResult(
+  callId: string,
+  request: DelegateToSubagentRequest,
+  runtime: DelegationRuntime
+): Promise<SubagentRunResult> {
+  const maxAttempts = 2;
+  let lastError = '';
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const attemptRequest =
+      attempt === 1 ? request : addEnforcedDelegationOutputRequirement(request);
+
+    try {
+      runtime.onEvent?.({
+        type: 'system_event',
+        event: 'subagent_response_attempt',
+        detail: `call=${callId} attempt=${attempt}`,
+      });
+
+      const result = (await executeDelegationToolCall(callId, attemptRequest, runtime)) as unknown;
+      if (isValidSubagentResult(result)) {
+        return result;
+      }
+
+      lastError = 'Subagent returned an invalid or empty response.';
+      logDelegationWarn('invalid_result', {
+        callId,
+        agentId: request.agentId,
+        attempt,
+        status: isSubagentRunResult(result) ? result.status : 'invalid',
+        summaryLength: isSubagentRunResult(result) ? result.summary.length : 0,
+        toolCallCount: isSubagentRunResult(result) ? result.toolCallCount : 0,
+      });
+    } catch (error) {
+      lastError = errorToToolMessage(error);
+      logDelegationWarn('attempt_failed', {
+        callId,
+        agentId: request.agentId,
+        attempt,
+        error: lastError,
+      });
+    }
+  }
+
+  const summary = `Subagent failed to produce a final response. ${lastError}`.trim();
+  const fallback = createMissingSubagentResult(callId, request.agentId as AgentId, summary);
+  runtime.onEvent?.({
+    type: 'system_event',
+    event: 'subagent_response_fallback',
+    detail: `call=${callId} agent=${request.agentId}`,
+  });
+  return fallback;
+}
+
+function isValidSubagentResult(result: unknown): result is SubagentRunResult {
+  if (!isSubagentRunResult(result)) return false;
+  if (!result.summary.trim()) return false;
+  const last = result.trace.lastMessage?.trim() ?? '';
+  if (!last) return false;
+  const messagesValue = (result.trace as unknown as { messages?: unknown }).messages;
+  if (!Array.isArray(messagesValue)) return false;
+  for (const message of messagesValue) {
+    if (isSubagentTraceMessage(message) && message.role === 'assistant' && message.text.trim()) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function addEnforcedDelegationOutputRequirement(
+  request: DelegateToSubagentRequest
+): DelegateToSubagentRequest {
+  const suffix =
+    'Always end with a non-empty, plain-text summary. If you used tools, summarize the outcomes.';
+  const expectedOutput = request.expectedOutput?.trim();
+  if (!expectedOutput) return { ...request, expectedOutput: suffix };
+  if (expectedOutput.includes(suffix)) return request;
+  return { ...request, expectedOutput: `${expectedOutput}\n\n${suffix}` };
+}
+
+function createMissingSubagentResult(
+  callId: string,
+  agentId: AgentId,
+  summary: string
+): SubagentRunResult {
+  const text = summary.trim() || 'Subagent response missing.';
+  return {
+    agentId,
+    agentName: agentId,
+    status: 'failed',
+    summary: text,
+    messages: [{ role: 'assistant', text }],
+    toolCallCount: 0,
+    tools: [],
+    durationMs: 0,
+    error: { code: 'FAILED', message: text },
+    trace: {
+      type: 'subagent_trace',
+      toolCallId: callId,
+      agentId,
+      agentName: agentId,
+      status: 'failed',
+      summary: text,
+      toolCallCount: 0,
+      lastMessage: text,
+      messages: [{ role: 'assistant', text }],
+      tools: [],
+      error: text,
+    },
+  };
+}
+
+type LogValue = string | number | boolean;
+type LogMetadata = Record<string, LogValue>;
+
+function logDelegationWarn(event: string, metadata: LogMetadata): void {
+  console.warn(`[subagent-delegation] ${JSON.stringify({ event, ts: Date.now(), ...metadata })}`);
+}
+
+function isSubagentTraceMessage(
+  value: unknown
+): value is { role: 'assistant' | 'system'; text: string } {
+  if (typeof value !== 'object' || value === null) return false;
+  const record = value as Record<string, unknown>;
+  return (
+    (record.role === 'assistant' || record.role === 'system') && typeof record.text === 'string'
+  );
+}
+
+function getRequiredString(value: unknown, name: string): string {
+  const text = typeof value === 'string' ? value.trim() : '';
+  if (!text) throw new Error(`Missing required delegation field "${name}".`);
+  return text;
+}
+
+function getOptionalString(value: unknown): string | undefined {
+  const text = typeof value === 'string' ? value.trim() : '';
+  return text || undefined;
+}
+
+function getOptionalInteger(value: unknown): number | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    throw new Error('Delegation field "maxTurns" must be a finite number.');
+  }
+  return Math.max(1, Math.min(10, Math.round(value)));
 }
 
 function createFailedToolExecution(

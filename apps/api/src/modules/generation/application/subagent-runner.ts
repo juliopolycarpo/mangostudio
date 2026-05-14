@@ -20,6 +20,7 @@ import { getAgentProfile } from '../../agents/application/agent-settings-service
 const SUBAGENT_TIMEOUT_CODE = 'TIMEOUT';
 const SUBAGENT_ABORT_CODE = 'ABORTED';
 const SUBAGENT_FAILED_CODE = 'FAILED';
+const SUBAGENT_EMPTY_TEXT_FALLBACK = 'Subagent completed without a text response.';
 
 export type SubagentStatus = 'completed' | 'failed' | 'aborted' | 'timeout';
 
@@ -88,6 +89,13 @@ export async function runSubagentTurn(input: SubagentRuntimeInput): Promise<Suba
   const startedAt = Date.now();
   const targetProfile = await getAgentProfile(input.db, input.userId, input.request.agentId);
   assertTargetAllowed(input.parentAgentProfile, targetProfile);
+  logSubagentEvent('start', {
+    chatId: input.chatId,
+    userId: input.userId,
+    parentAgentId: input.parentAgentProfile.id,
+    targetAgentId: targetProfile.id,
+    depth: input.depth,
+  });
   input.onEvent?.({
     type: 'started',
     agentId: targetProfile.id,
@@ -107,14 +115,26 @@ export async function runSubagentTurn(input: SubagentRuntimeInput): Promise<Suba
       childAbort.signal,
       input.settings.timeoutMs
     );
+    const enforced = enforceSubagentRunResult(result);
+    input.onEvent?.({ type: 'text', agentId: enforced.agentId, text: enforced.summary });
     input.onEvent?.({
       type: 'completed',
-      agentId: result.agentId,
-      agentName: result.agentName,
-      summary: result.summary,
-      toolCallCount: result.toolCallCount,
+      agentId: enforced.agentId,
+      agentName: enforced.agentName,
+      summary: enforced.summary,
+      toolCallCount: enforced.toolCallCount,
     });
-    return result;
+    logSubagentEvent('completed', {
+      chatId: input.chatId,
+      userId: input.userId,
+      parentAgentId: input.parentAgentProfile.id,
+      targetAgentId: enforced.agentId,
+      status: enforced.status,
+      toolCallCount: enforced.toolCallCount,
+      summaryLength: enforced.summary.length,
+      durationMs: enforced.durationMs,
+    });
+    return enforced;
   } catch (error) {
     const normalized = normalizeSubagentFailure(error, childAbort.signal);
     input.onEvent?.({
@@ -123,13 +143,24 @@ export async function runSubagentTurn(input: SubagentRuntimeInput): Promise<Suba
       agentName: targetProfile.name,
       error: normalized.message,
     });
-    return createFailedResult({
+    const failed = createFailedResult({
       profile: targetProfile,
       status: normalized.status,
       code: normalized.code,
       message: normalized.message,
       durationMs: Date.now() - startedAt,
     });
+    logSubagentError('failed', {
+      chatId: input.chatId,
+      userId: input.userId,
+      parentAgentId: input.parentAgentProfile.id,
+      targetAgentId: targetProfile.id,
+      status: failed.status,
+      code: failed.error?.code ?? SUBAGENT_FAILED_CODE,
+      message: failed.summary,
+      durationMs: failed.durationMs,
+    });
+    return failed;
   } finally {
     clearTimeout(timeout);
   }
@@ -205,7 +236,7 @@ async function executeSubagentTurn(
       settings: runtime.runtimeSettings,
       signal: input.signal,
     });
-    summary = text.trim() || 'Subagent completed without a text response.';
+    summary = enforceSubagentSummary(text.trim(), tools);
     transcript.push({ role: 'assistant', text: summary });
     input.onEvent?.({ type: 'text', agentId: runtime.profile.id, text: summary });
     return createCompletedResult({
@@ -298,7 +329,7 @@ async function executeSubagentTurn(
     isFirstIteration = false;
   }
 
-  const trimmedSummary = summary.trim() || 'Subagent completed without a text response.';
+  const trimmedSummary = enforceSubagentSummary(summary.trim(), tools);
   transcript.push({ role: 'assistant', text: trimmedSummary });
 
   return createCompletedResult({
@@ -366,6 +397,14 @@ async function executeSubagentTools(input: {
     Array.from(input.calls.entries()).map(async ([callId, call]) => {
       let result: unknown;
       let isError = false;
+      const startedAt = Date.now();
+      logSubagentEvent('tool_call', {
+        chatId: input.chatId,
+        userId: input.userId,
+        callId,
+        tool: call.name,
+        argsBytes: call.argsStr.length,
+      });
       try {
         if (call.name === DELEGATE_TO_AGENT_TOOL_NAME) {
           throw new SubagentDelegationError(
@@ -394,6 +433,13 @@ async function executeSubagentTools(input: {
       }
 
       input.tools.push({ callId, name: call.name, ...(isError ? { isError } : {}) });
+      logSubagentEvent(isError ? 'tool_error' : 'tool_completed', {
+        chatId: input.chatId,
+        userId: input.userId,
+        callId,
+        tool: call.name,
+        durationMs: Date.now() - startedAt,
+      });
       return {
         callId,
         name: call.name,
@@ -414,7 +460,10 @@ function stringifySubagentToolResult(result: unknown): string {
 }
 
 function buildSubagentPrompt(request: DelegateToSubagentRequest): string {
-  const sections = [`Task:\n${request.task}`];
+  const sections = [
+    `Task:\n${request.task}`,
+    'Response requirements:\n- Always end with a concise, plain-text summary of your findings.\n- If you only used tools, summarise the tool outcomes instead of returning an empty response.\n- Do not finish immediately after tool calls without a final summary.',
+  ];
   if (request.context) sections.push(`Context:\n${request.context}`);
   if (request.expectedOutput) sections.push(`Expected output:\n${request.expectedOutput}`);
   return sections.join('\n\n');
@@ -517,11 +566,12 @@ function createFailedResult(input: {
   readonly message: string;
   readonly durationMs: number;
 }): SubagentRunResult {
+  const messages = [{ role: 'assistant' as const, text: input.message }];
   const trace = createTracePart({
     profile: input.profile,
     status: input.status,
     summary: input.message,
-    messages: [],
+    messages,
     tools: [],
     error: input.message,
   });
@@ -530,7 +580,7 @@ function createFailedResult(input: {
     agentName: input.profile.name,
     status: input.status,
     summary: input.message,
-    messages: [],
+    messages,
     toolCallCount: 0,
     tools: [],
     durationMs: input.durationMs,
@@ -547,7 +597,10 @@ function createTracePart(input: {
   readonly tools: ReadonlyArray<{ callId: string; name: string; isError?: boolean }>;
   readonly error?: string;
 }): SubagentTracePart {
-  const lastMessage = [...input.messages].reverse().find((message) => message.text.trim())?.text;
+  const summaryText = input.summary.trim();
+  const lastMessage =
+    [...input.messages].reverse().find((message) => message.text.trim())?.text ??
+    (summaryText ? summaryText : undefined);
   return {
     type: 'subagent_trace',
     toolCallId: '',
@@ -561,4 +614,49 @@ function createTracePart(input: {
     tools: input.tools,
     ...(input.error ? { error: input.error } : {}),
   };
+}
+
+function enforceSubagentSummary(summary: string, tools: ReadonlyArray<{ name: string }>): string {
+  const trimmed = summary.trim();
+  if (trimmed) return trimmed;
+  if (tools.length === 0) return SUBAGENT_EMPTY_TEXT_FALLBACK;
+
+  const names = tools.map((tool) => tool.name).filter(Boolean);
+  const unique = Array.from(new Set(names));
+  const shown = unique.slice(0, 8);
+  const suffix = unique.length > shown.length ? ` (+${unique.length - shown.length} more)` : '';
+  return `${SUBAGENT_EMPTY_TEXT_FALLBACK} Tools executed: ${shown.join(', ')}${suffix}.`;
+}
+
+function enforceSubagentRunResult(result: SubagentRunResult): SubagentRunResult {
+  const summary = enforceSubagentSummary(result.summary, result.tools);
+  const messages = result.messages.some(
+    (message) => message.role === 'assistant' && message.text.trim()
+  )
+    ? result.messages
+    : [...result.messages, { role: 'assistant' as const, text: summary }];
+  const trace = {
+    ...result.trace,
+    summary,
+    messages,
+    ...(result.trace.lastMessage ? {} : { lastMessage: summary }),
+  };
+  return {
+    ...result,
+    summary,
+    messages,
+    trace,
+    toolCallCount: result.tools.length,
+  };
+}
+
+type LogValue = string | number | boolean;
+type LogMetadata = Record<string, LogValue>;
+
+function logSubagentEvent(event: string, metadata: LogMetadata): void {
+  console.warn(`[subagent] ${JSON.stringify({ event, ts: Date.now(), ...metadata })}`);
+}
+
+function logSubagentError(event: string, metadata: LogMetadata): void {
+  console.error(`[subagent] ${JSON.stringify({ event, ts: Date.now(), ...metadata })}`);
 }

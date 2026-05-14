@@ -137,6 +137,20 @@ function parseSseEvents(rawText: string): Array<Record<string, unknown>> {
     .filter((event): event is Record<string, unknown> => event !== null);
 }
 
+function parsePersistedParts(value: unknown): Array<Record<string, unknown>> {
+  if (typeof value !== 'string') return [];
+  const trimmed = value.trim();
+  if (!trimmed) return [];
+  return JSON.parse(trimmed) as Array<Record<string, unknown>>;
+}
+
+function parsePersistedRecord(value: unknown): Record<string, unknown> {
+  if (typeof value !== 'string') return {};
+  const trimmed = value.trim();
+  if (!trimmed) return {};
+  return JSON.parse(trimmed) as Record<string, unknown>;
+}
+
 function makeAgentProfile(overrides: Partial<AgentProfile>): AgentProfile {
   return {
     id: 'default',
@@ -513,10 +527,7 @@ describe('POST /respond/stream', () => {
     const contextUpdate = chatSetCalls.find((u) => typeof u.lastContextState === 'string');
     expect(contextUpdate?.lastProviderState).toBeNull();
 
-    const persistedContext = JSON.parse(contextUpdate?.lastContextState as string) as Record<
-      string,
-      unknown
-    >;
+    const persistedContext = parsePersistedRecord(contextUpdate?.lastContextState);
     expect(persistedContext).toMatchObject({ mode: 'replay', severity: 'normal' });
     expect(typeof persistedContext.estimatedInputTokens).toBe('number');
   });
@@ -800,7 +811,7 @@ describe('POST /respond/stream', () => {
 
     const aiMessage = insertedMessages.find((message) => message.role === 'ai');
     expect(aiMessage).toBeDefined();
-    const parts = JSON.parse(aiMessage?.parts as string) as Array<Record<string, unknown>>;
+    const parts = parsePersistedParts(aiMessage?.parts);
     expect(parts.find((part) => part.type === 'subagent_trace')).toMatchObject({
       type: 'subagent_trace',
       toolCallId: 'delegate-1',
@@ -808,6 +819,342 @@ describe('POST /respond/stream', () => {
       status: 'completed',
       summary: 'Found the relevant files.',
     });
+  });
+
+  it('synthesizes a summary and emits subagent_text when a subagent only runs tools', async () => {
+    const parentToolResults: string[] = [];
+
+    await mock.module('../../../src/modules/chats/infrastructure/chat-repository', () => ({
+      verifyChatOwnership: () => Promise.resolve(true),
+    }));
+
+    await mock.module('../../../src/modules/agents/application/agent-settings-service', () => ({
+      getAgentProfile: (_db: unknown, _userId: string, agentId: string) =>
+        Promise.resolve(
+          agentId === 'user:explorer'
+            ? makeAgentProfile({
+                id: 'user:explorer',
+                name: 'Explore',
+                role: 'subagent',
+                systemPrompt: 'Explore the codebase.',
+                toolNames: ['noop'],
+                toolsEnabled: true,
+              })
+            : makeAgentProfile({
+                id: 'default',
+                name: 'Default',
+                role: 'both',
+                systemPrompt: 'Delegate exploration when useful.',
+                toolNames: ['delegate_to_agent'],
+                toolsEnabled: true,
+                subagentIds: ['user:explorer'],
+              })
+        ),
+    }));
+
+    await mock.module('../../../src/services/tools', () => {
+      const noopTool = {
+        definition: { name: 'noop', description: 'no-op', parameters: {} },
+        settings: {
+          title: 'Noop',
+          description: 'No-op tool',
+          category: 'system',
+          enabledByDefault: true,
+          canDisable: true,
+          defaultParameters: {},
+          parameterDescriptors: [],
+        },
+        execute: (_args: Record<string, unknown>, _context: Record<string, unknown>) =>
+          Promise.resolve({ ok: true }),
+      };
+
+      const delegateTool = {
+        definition: { name: 'delegate_to_agent', description: 'delegate', parameters: {} },
+        settings: {
+          title: 'Delegate',
+          description: 'Delegate tool',
+          category: 'system',
+          enabledByDefault: true,
+          canDisable: true,
+          defaultParameters: {},
+          parameterDescriptors: [],
+        },
+        execute: (
+          _args: Record<string, unknown>,
+          context: { delegateToAgent?: (input: unknown) => Promise<unknown> }
+        ) => {
+          if (!context.delegateToAgent) throw new Error('Delegation unavailable');
+          return context.delegateToAgent(_args);
+        },
+      };
+
+      const toolsByName = new Map([
+        ['noop', noopTool],
+        ['delegate_to_agent', delegateTool],
+      ]);
+
+      return {
+        getAllToolDefinitions: () => [noopTool.definition, delegateTool.definition],
+        getToolDefinitionsForAgent: (profile: AgentProfile) => {
+          if (!profile.toolsEnabled) return [];
+          const allowed = new Set(profile.toolNames);
+          return Array.from(toolsByName.values())
+            .filter((tool) => allowed.has('*') || allowed.has(tool.definition.name))
+            .map((tool) => tool.definition);
+        },
+        getTool: (name: string) => toolsByName.get(name),
+        getSafeEffectiveToolSettings: (
+          _tool: unknown,
+          settings?: { enabled?: boolean; parameters?: Record<string, unknown> }
+        ) => ({
+          enabled: settings?.enabled ?? true,
+          parameters: settings?.parameters ?? {},
+        }),
+        executeTool: async (
+          name: string,
+          args: Record<string, unknown>,
+          context: { delegateToAgent?: (input: unknown) => Promise<unknown> }
+        ) => {
+          const tool = toolsByName.get(name);
+          if (!tool) throw new Error(`Unknown tool: "${name}"`);
+          return tool.execute(args, context);
+        },
+      };
+    });
+
+    await mock.module('../../../src/services/providers/core/provider-registry', () => ({
+      getProviderForModel: () =>
+        Promise.resolve({
+          providerType: 'openai-compatible',
+          generateText: () => Promise.resolve({ text: '' }),
+          generateAgentTurnStream: async function* (req: AgentTurnRequest) {
+            await Promise.resolve();
+            if (req.agentId === 'user:explorer') {
+              if (!req.toolResults) {
+                yield { type: 'tool_call_started', callId: 'noop-1', name: 'noop' };
+                yield {
+                  type: 'tool_call_completed',
+                  callId: 'noop-1',
+                  name: 'noop',
+                  arguments: '{}',
+                };
+                yield { type: 'tool_call_started', callId: 'noop-2', name: 'noop' };
+                yield {
+                  type: 'tool_call_completed',
+                  callId: 'noop-2',
+                  name: 'noop',
+                  arguments: '{}',
+                };
+                yield { type: 'turn_completed', providerState: null };
+                return;
+              }
+              yield { type: 'turn_completed', providerState: null };
+              return;
+            }
+
+            if (!req.toolResults) {
+              yield { type: 'tool_call_started', callId: 'delegate-1', name: 'delegate_to_agent' };
+              yield {
+                type: 'tool_call_completed',
+                callId: 'delegate-1',
+                name: 'delegate_to_agent',
+                arguments: JSON.stringify({
+                  agentId: 'user:explorer',
+                  task: 'Run tools without producing text.',
+                }),
+              };
+              yield { type: 'turn_completed', providerState: null };
+              return;
+            }
+
+            parentToolResults.push(req.toolResults[0]?.result ?? '');
+            yield { type: 'assistant_text_delta', text: 'OK' };
+            yield { type: 'turn_completed', providerState: null };
+          },
+        }),
+    }));
+
+    await mock.module('../../../src/db/database', () => ({
+      getDb: () => ({
+        selectFrom: () => makeChain({ userId: TEST_USER.id }),
+        insertInto: () => ({ values: () => ({ execute: () => Promise.resolve() }) }),
+        updateTable: () => ({ set: () => makeChain(undefined) }),
+      }),
+    }));
+
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
+    restoreAuth = restore;
+
+    const response = await app.handle(
+      new Request('http://localhost/respond/stream', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chatId: 'test-chat',
+          prompt: 'Use an explorer.',
+          model: 'test-model',
+          agentMode: 'agent',
+          agentId: 'default',
+        }),
+      })
+    );
+
+    expect(response.status).toBe(200);
+    const sseEvents = parseSseEvents(await response.text());
+    expect(sseEvents.map((event) => event.type)).toContain('subagent_text');
+    expect(parentToolResults[0]).toContain('Tools executed:');
+    expect(parentToolResults[0]).toContain('noop');
+  });
+
+  it('retries once and falls back when the delegation response is missing or invalid', async () => {
+    const parentToolResults: string[] = [];
+    let callCount = 0;
+
+    await mock.module('../../../src/modules/chats/infrastructure/chat-repository', () => ({
+      verifyChatOwnership: () => Promise.resolve(true),
+    }));
+
+    await mock.module('../../../src/modules/agents/application/agent-settings-service', () => ({
+      getAgentProfile: (_db: unknown, _userId: string, agentId: string) =>
+        Promise.resolve(
+          agentId === 'user:explorer'
+            ? makeAgentProfile({
+                id: 'user:explorer',
+                name: 'Explore',
+                role: 'subagent',
+                systemPrompt: 'Explore the codebase.',
+                toolNames: [],
+                toolsEnabled: false,
+              })
+            : makeAgentProfile({
+                id: 'default',
+                name: 'Default',
+                role: 'both',
+                systemPrompt: 'Delegate exploration when useful.',
+                toolNames: ['delegate_to_agent'],
+                toolsEnabled: true,
+                subagentIds: ['user:explorer'],
+              })
+        ),
+    }));
+
+    await mock.module('../../../src/modules/generation/application/subagent-runner', () => ({
+      runSubagentTurn: () => {
+        callCount += 1;
+        if (callCount === 1) return Promise.resolve({});
+        return Promise.resolve({
+          agentId: 'user:explorer',
+          agentName: 'Explore',
+          status: 'completed',
+          summary: 'Recovered response.',
+          messages: [{ role: 'assistant', text: 'Recovered response.' }],
+          toolCallCount: 0,
+          tools: [],
+          durationMs: 1,
+          trace: {
+            type: 'subagent_trace',
+            toolCallId: '',
+            agentId: 'user:explorer',
+            agentName: 'Explore',
+            status: 'completed',
+            summary: 'Recovered response.',
+            toolCallCount: 0,
+            lastMessage: 'Recovered response.',
+            messages: [{ role: 'assistant', text: 'Recovered response.' }],
+            tools: [],
+          },
+        });
+      },
+      SubagentDelegationError: class SubagentDelegationError extends Error {
+        constructor(
+          message: string,
+          readonly code: string
+        ) {
+          super(message);
+          this.name = 'SubagentDelegationError';
+        }
+      },
+    }));
+
+    await mock.module('../../../src/services/tools', () => ({
+      getAllToolDefinitions: () => [
+        { name: 'delegate_to_agent', description: 'delegate', parameters: {} },
+      ],
+      getToolDefinitionsForAgent: () => [
+        { name: 'delegate_to_agent', description: 'delegate', parameters: {} },
+      ],
+      getTool: () => ({
+        definition: { name: 'delegate_to_agent', description: 'delegate', parameters: {} },
+        settings: {
+          title: 'Delegate',
+          description: 'Delegate tool',
+          category: 'system',
+          enabledByDefault: true,
+          canDisable: true,
+          defaultParameters: {},
+          parameterDescriptors: [],
+        },
+        execute: () => Promise.resolve({}),
+      }),
+      getSafeEffectiveToolSettings: () => ({ enabled: true, parameters: {} }),
+      executeTool: () => Promise.resolve({}),
+    }));
+
+    await mock.module('../../../src/services/providers/core/provider-registry', () => ({
+      getProviderForModel: () =>
+        Promise.resolve({
+          providerType: 'openai-compatible',
+          generateText: () => Promise.resolve({ text: '' }),
+          generateAgentTurnStream: async function* (req: AgentTurnRequest) {
+            await Promise.resolve();
+            if (!req.toolResults) {
+              yield { type: 'tool_call_started', callId: 'delegate-1', name: 'delegate_to_agent' };
+              yield {
+                type: 'tool_call_completed',
+                callId: 'delegate-1',
+                name: 'delegate_to_agent',
+                arguments: JSON.stringify({ agentId: 'user:explorer', task: 'Test retry.' }),
+              };
+              yield { type: 'turn_completed', providerState: null };
+              return;
+            }
+
+            parentToolResults.push(req.toolResults[0]?.result ?? '');
+            yield { type: 'assistant_text_delta', text: 'OK' };
+            yield { type: 'turn_completed', providerState: null };
+          },
+        }),
+    }));
+
+    await mock.module('../../../src/db/database', () => ({
+      getDb: () => ({
+        selectFrom: () => makeChain({ userId: TEST_USER.id }),
+        insertInto: () => ({ values: () => ({ execute: () => Promise.resolve() }) }),
+        updateTable: () => ({ set: () => makeChain(undefined) }),
+      }),
+    }));
+
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
+    restoreAuth = restore;
+
+    const response = await app.handle(
+      new Request('http://localhost/respond/stream', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chatId: 'test-chat',
+          prompt: 'Use an explorer.',
+          model: 'test-model',
+          agentMode: 'agent',
+          agentId: 'default',
+        }),
+      })
+    );
+
+    expect(response.status).toBe(200);
+    await response.text();
+    expect(parentToolResults[0]).toContain('Recovered response.');
+    expect(callCount).toBe(2);
   });
 
   it('returns 503 when model catalog is not configured', async () => {
@@ -969,7 +1316,7 @@ describe('POST /respond/stream', () => {
     // Assert the persisted AI message contains a typed continuation_transition part
     const aiMessage = insertedMessages.find((m) => m.role === 'ai');
     expect(aiMessage).toBeDefined();
-    const parts = JSON.parse(aiMessage?.parts as string) as Array<Record<string, unknown>>;
+    const parts = parsePersistedParts(aiMessage?.parts);
     const transitionPart = parts.find((p) => p.type === 'continuation_transition');
     expect(transitionPart).toBeDefined();
     expect(transitionPart).toMatchObject({
@@ -1423,7 +1770,7 @@ describe('POST /respond/stream', () => {
     // Persisted AI message must include the system_event part
     const aiMessage = insertedMessages.find((m) => m.role === 'ai');
     expect(aiMessage).toBeDefined();
-    const parts = JSON.parse(aiMessage?.parts as string) as Array<Record<string, unknown>>;
+    const parts = parsePersistedParts(aiMessage?.parts);
     const exhaustedPart = parts.find(
       (p) => p.type === 'system_event' && p.event === 'tool_loop_exhausted'
     );
@@ -1550,7 +1897,7 @@ describe('POST /respond/stream', () => {
     // Persisted AI message must contain a continuation_transition part with recovered=true
     const aiMessage = insertedMessages.find((m) => m.role === 'ai');
     expect(aiMessage).toBeDefined();
-    const parts = JSON.parse(aiMessage?.parts as string) as Array<Record<string, unknown>>;
+    const parts = parsePersistedParts(aiMessage?.parts);
     const transitionPart = parts.find((p) => p.type === 'continuation_transition');
     expect(transitionPart).toBeDefined();
     expect(transitionPart).toMatchObject({
@@ -1848,7 +2195,7 @@ describe('POST /respond/stream', () => {
 
     const aiMessage = insertedMessages.find((message) => message.role === 'ai');
     expect(aiMessage).toBeDefined();
-    const parts = JSON.parse(aiMessage?.parts as string) as Array<Record<string, unknown>>;
+    const parts = parsePersistedParts(aiMessage?.parts);
     const toolCallIndex = parts.findIndex(
       (part) => part.type === 'tool_call' && part.name === 'generate_image'
     );

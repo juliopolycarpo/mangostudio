@@ -154,6 +154,58 @@ describe('settings agents routes', () => {
     expect(otherPayload.systemPrompt).toBe('');
   });
 
+  it('updates built-in explore settings per user and returns the saved profile in the list endpoint', async () => {
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, settingsRoutes);
+    restoreAuth = restore;
+
+    const update = await app.handle(
+      new Request('http://localhost/settings/agents/explore', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: 'Explore',
+          description: 'Custom explore profile.',
+          role: 'subagent',
+          systemPrompt: 'Explore with persisted prompt.',
+          thinkingEnabled: true,
+          reasoningEffort: 'high',
+          maxToolIterations: 3,
+          toolNames: [],
+          toolsEnabled: false,
+          subagentIds: [],
+          metadata: {},
+        }),
+      })
+    );
+    const payload = (await update.json()) as AgentProfile;
+
+    expect(update.status).toBe(200);
+    expect(payload).toMatchObject({
+      id: 'explore',
+      systemPrompt: 'Explore with persisted prompt.',
+    });
+
+    const listResponse = await app.handle(new Request('http://localhost/settings/agents'));
+    const listPayload = (await listResponse.json()) as AgentProfileListResponse;
+
+    expect(listResponse.status).toBe(200);
+    expect(listPayload.agents.find((agent) => agent.id === 'explore')?.systemPrompt).toBe(
+      'Explore with persisted prompt.'
+    );
+
+    restoreAuth?.();
+    const other = createAuthenticatedApiTestApp(OTHER_USER, settingsRoutes);
+    restoreAuth = other.restore;
+
+    const otherListResponse = await other.app.handle(
+      new Request('http://localhost/settings/agents')
+    );
+    const otherListPayload = (await otherListResponse.json()) as AgentProfileListResponse;
+
+    expect(otherListResponse.status).toBe(200);
+    expect(otherListPayload.agents.find((agent) => agent.id === 'explore')?.systemPrompt).toBe('');
+  });
+
   it('creates, reads, updates, and deletes markdown-backed user agents', async () => {
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, settingsRoutes);
     restoreAuth = restore;
