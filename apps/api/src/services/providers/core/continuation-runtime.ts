@@ -15,6 +15,7 @@
  */
 
 import type { ProviderType, ContinuationReasonCode } from '@mangostudio/shared/types';
+import type { AgentId } from '@mangostudio/shared/agents';
 import {
   parseContinuationEnvelope,
   validateContinuationEnvelope,
@@ -82,6 +83,8 @@ export interface DecideContinuationInput {
   lastProviderState: string | null;
   provider: ProviderType;
   modelName: string;
+  agentId?: AgentId;
+  agentRuntimeHash?: string;
   systemPromptHash: string;
   toolsetHash: string;
 }
@@ -93,7 +96,15 @@ export interface DecideContinuationInput {
  * Pure function — no side effects, no I/O.
  */
 export function decideContinuation(input: DecideContinuationInput): ContinuationDecision {
-  const { lastProviderState, provider, modelName, systemPromptHash, toolsetHash } = input;
+  const {
+    lastProviderState,
+    provider,
+    modelName,
+    agentId,
+    agentRuntimeHash,
+    systemPromptHash,
+    toolsetHash,
+  } = input;
 
   if (!lastProviderState) {
     return { type: 'start_replay' };
@@ -113,6 +124,8 @@ export function decideContinuation(input: DecideContinuationInput): Continuation
   const validation = validateContinuationEnvelope(envelope, {
     provider,
     modelName,
+    agentId,
+    agentRuntimeHash,
     systemPromptHash,
     toolsetHash,
   });

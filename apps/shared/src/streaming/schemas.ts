@@ -6,6 +6,8 @@ const ContinuationReasonCodeSchema = Type.Union([
   Type.Literal('model_changed'),
   Type.Literal('system_prompt_changed'),
   Type.Literal('toolset_changed'),
+  Type.Literal('agent_changed'),
+  Type.Literal('agent_runtime_changed'),
   Type.Literal('cursor_expired'),
   Type.Literal('cursor_invalid'),
   Type.Literal('tool_result_cursor_loss'),

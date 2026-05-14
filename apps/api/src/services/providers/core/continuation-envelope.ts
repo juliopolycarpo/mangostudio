@@ -17,6 +17,7 @@
  */
 
 import type { ProviderType, ContinuationReasonCode } from '@mangostudio/shared/types';
+import type { AgentId } from '@mangostudio/shared/agents';
 import type { ToolDefinition } from '../types';
 import { computeHash, computeToolsetHash } from '../../../utils/hash';
 import { parseJsonWith } from '../../../lib/safe-parse';
@@ -32,6 +33,8 @@ export interface ContinuationEnvelope {
   provider: ProviderType;
   mode: ContinuationMode;
   modelName: string;
+  agentId?: AgentId;
+  agentRuntimeHash?: string;
   systemPromptHash: string;
   toolsetHash: string;
   cursor?: string;
@@ -58,6 +61,10 @@ export function parseContinuationEnvelope(
     if (typeof parsed.mode !== 'string') return null;
     if (!VALID_CONTINUATION_MODES.has(parsed.mode)) return null;
     if (typeof parsed.modelName !== 'string') return null;
+    if (parsed.agentId !== undefined && typeof parsed.agentId !== 'string') return null;
+    if (parsed.agentRuntimeHash !== undefined && typeof parsed.agentRuntimeHash !== 'string') {
+      return null;
+    }
     if (typeof parsed.systemPromptHash !== 'string') return null;
     if (typeof parsed.toolsetHash !== 'string') return null;
     // Durable modes must carry a cursor; reject silently so callers degrade to replay.
@@ -92,6 +99,8 @@ export function validateContinuationEnvelope(
   current: {
     provider: ProviderType;
     modelName: string;
+    agentId?: AgentId;
+    agentRuntimeHash?: string;
     systemPromptHash: string;
     toolsetHash: string;
   }
@@ -112,6 +121,26 @@ export function validateContinuationEnvelope(
       valid: false,
       reason: `model changed from "${envelope.modelName}" to "${current.modelName}"`,
       reasonCode: 'model_changed',
+      previousProvider: envelope.provider,
+    };
+  }
+  if (current.agentId && envelope.agentId !== undefined && envelope.agentId !== current.agentId) {
+    return {
+      valid: false,
+      reason: `agent changed from "${envelope.agentId ?? 'unknown'}" to "${current.agentId}"`,
+      reasonCode: 'agent_changed',
+      previousProvider: envelope.provider,
+    };
+  }
+  if (
+    current.agentRuntimeHash &&
+    envelope.agentRuntimeHash !== undefined &&
+    envelope.agentRuntimeHash !== current.agentRuntimeHash
+  ) {
+    return {
+      valid: false,
+      reason: 'agent runtime changed (hash mismatch)',
+      reasonCode: 'agent_runtime_changed',
       previousProvider: envelope.provider,
     };
   }
@@ -190,6 +219,8 @@ export function createContinuationEnvelope(
   mode: ContinuationMode,
   options: {
     modelName: string;
+    agentId?: AgentId;
+    agentRuntimeHash?: string;
     systemPrompt?: string;
     toolDefinitions?: ToolDefinition[];
   },
@@ -201,6 +232,8 @@ export function createContinuationEnvelope(
     provider,
     mode,
     modelName: options.modelName,
+    ...(options.agentId ? { agentId: options.agentId } : {}),
+    ...(options.agentRuntimeHash ? { agentRuntimeHash: options.agentRuntimeHash } : {}),
     systemPromptHash: computeSystemPromptHash(options.systemPrompt),
     toolsetHash: computeToolsetHash(options.toolDefinitions ?? []),
     ...(cursor ? { cursor } : {}),

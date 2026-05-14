@@ -9,6 +9,8 @@ export type ContinuationReasonCode =
   | 'model_changed'
   | 'system_prompt_changed'
   | 'toolset_changed'
+  | 'agent_changed'
+  | 'agent_runtime_changed'
   | 'cursor_expired'
   | 'cursor_invalid'
   | 'tool_result_cursor_loss'

@@ -25,6 +25,10 @@ function resolveTitleTemplate(
       return titles.systemPromptChanged;
     case 'toolset_changed':
       return titles.toolsetChanged;
+    case 'agent_changed':
+      return titles.agentChanged;
+    case 'agent_runtime_changed':
+      return titles.agentRuntimeChanged;
     case 'cursor_expired':
       return titles.cursorExpired;
     case 'cursor_invalid':

@@ -6,7 +6,7 @@ import type {
   CreateAgentProfileBody,
   UserAgentId,
 } from '@mangostudio/shared/agents';
-import { Bot, Plus, ChevronDown } from 'lucide-react';
+import { Bot, Plus } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { useI18n } from '@/hooks/use-i18n';
@@ -35,15 +35,12 @@ export function AgentSettingsPage() {
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
   const [newAgent, setNewAgent] = useState<EditableAgentProfile | null>(null);
   const [agentPendingDelete, setAgentPendingDelete] = useState<AgentProfile | null>(null);
-  const [mobileListOpen, setMobileListOpen] = useState(false);
 
   const agents = useMemo(() => agentsQuery.data?.agents ?? [], [agentsQuery.data?.agents]);
   const selectedAgent = useMemo(() => {
     if (newAgent) return newAgent;
     return agents.find((agent) => agent.id === selectedAgentId) ?? agents[0] ?? null;
   }, [agents, newAgent, selectedAgentId]);
-
-  const selectedAgentName = selectedAgent?.name ?? labels.selectAgent;
 
   const invalidateAgents = async () => {
     await queryClient.invalidateQueries({ queryKey: agentSettingsKeys.list() });
@@ -205,120 +202,80 @@ export function AgentSettingsPage() {
         </div>
       </Card>
 
-      {/* Mobile agent selector */}
-      <div className="lg:hidden">
-        <button
-          type="button"
-          aria-label={labels.selectAgent}
-          onClick={() => setMobileListOpen((prev) => !prev)}
-          className="w-full flex items-center justify-between gap-3 rounded-2xl border border-outline-variant/20 bg-surface-container-high px-4 py-3 text-left text-sm text-on-surface hover:bg-surface-container-highest transition-colors"
-        >
-          <span className="font-semibold truncate">{selectedAgentName}</span>
-          <ChevronDown
-            size={16}
-            className={`shrink-0 text-on-surface-variant transition-transform duration-200 ${
-              mobileListOpen ? 'rotate-180' : ''
-            }`}
-          />
-        </button>
-        {mobileListOpen && (
-          <div className="mt-2 p-2 rounded-2xl border border-outline-variant/20 bg-surface-container-high">
-            <AgentList
-              agents={newAgent ? [newAgent, ...agents] : agents}
-              selectedAgentId={selectedAgent?.id ?? null}
-              builtInLabel={labels.builtIn}
-              userLabel={labels.user}
-              builtInAgentsTitle={labels.builtInAgents}
-              userAgentsTitle={labels.userAgents}
-              onSelect={(agentId) => {
-                if (agentId !== NEW_AGENT_ID) setNewAgent(null);
-                setSelectedAgentId(agentId);
-                setMobileListOpen(false);
-              }}
-            />
-          </div>
-        )}
-      </div>
+      <AgentList
+        agents={newAgent ? [newAgent, ...agents] : agents}
+        selectedAgentId={selectedAgent?.id ?? null}
+        builtInLabel={labels.builtIn}
+        userLabel={labels.user}
+        builtInAgentsTitle={labels.builtInAgents}
+        userAgentsTitle={labels.userAgents}
+        onSelect={(agentId) => {
+          if (agentId !== NEW_AGENT_ID) setNewAgent(null);
+          setSelectedAgentId(agentId);
+        }}
+      />
 
-      <div className="grid gap-4 lg:grid-cols-[240px_minmax(0,1fr)] xl:grid-cols-[280px_minmax(0,1fr)]">
-        {/* Desktop agent list */}
-        <div className="hidden lg:block">
-          <AgentList
-            agents={newAgent ? [newAgent, ...agents] : agents}
-            selectedAgentId={selectedAgent?.id ?? null}
-            builtInLabel={labels.builtIn}
-            userLabel={labels.user}
-            builtInAgentsTitle={labels.builtInAgents}
-            userAgentsTitle={labels.userAgents}
-            onSelect={(agentId) => {
-              if (agentId !== NEW_AGENT_ID) setNewAgent(null);
-              setSelectedAgentId(agentId);
-            }}
-          />
-        </div>
-
-        {selectedAgent && (
-          <AgentEditor
-            key={selectedAgent.id}
-            agent={selectedAgent}
-            allAgents={agents}
-            tools={toolsQuery.data?.tools ?? []}
-            labels={{
-              builtIn: labels.builtIn,
-              user: labels.user,
-              createTitle: labels.createTitle,
-              name: labels.name,
-              slug: labels.slug,
-              description: labels.agentDescription,
-              role: labels.role,
-              roles: labels.roles,
-              systemPrompt: labels.systemPrompt,
-              model: labels.model,
-              thinking: labels.thinking,
-              reasoningEffort: labels.reasoningEffort,
-              reasoningEfforts: labels.reasoningEfforts,
-              maxToolIterations: labels.maxToolIterations,
-              toolsEnabled: labels.toolsEnabled,
-              toolAllowlist: labels.toolAllowlist,
-              noTools: labels.noTools,
-              subagents: labels.subagents,
-              noSubagents: labels.noSubagents,
-              path: labels.path,
-              friendlyMode: labels.friendlyMode,
-              rawMode: labels.rawMode,
-              rawMarkdown: labels.rawMarkdown,
-              preview: labels.preview,
-              previewing: labels.previewing,
-              save: labels.save,
-              saving: labels.saving,
-              reset: labels.reset,
-              delete: labels.delete,
-              sectionIdentity: labels.sectionIdentity,
-              sectionBehavior: labels.sectionBehavior,
-              sectionReasoning: labels.sectionReasoning,
-              sectionTools: labels.sectionTools,
-              unsavedChanges: labels.unsavedChanges,
-              confirmResetTitle: labels.confirmResetTitle,
-              confirmResetDescription: labels.confirmResetDescription,
-              confirmReset: labels.confirmReset,
-              cancel: labels.cancel,
-            }}
-            isNew={selectedAgent.id === NEW_AGENT_ID}
-            isSaving={saveMutation.isPending}
-            isPreviewing={previewMutation.isPending}
-            onSave={(agent, body) => saveMutation.mutate({ agent, body })}
-            onPreviewMarkdown={async (markdown, agentId) => {
-              const preview = await previewMutation.mutateAsync({
-                markdown,
-                agentId: agentId,
-              });
-              return preview.profile;
-            }}
-            onDelete={setAgentPendingDelete}
-            onCancelNew={() => setNewAgent(null)}
-          />
-        )}
-      </div>
+      {selectedAgent && (
+        <AgentEditor
+          key={selectedAgent.id}
+          agent={selectedAgent}
+          allAgents={agents}
+          tools={toolsQuery.data?.tools ?? []}
+          labels={{
+            builtIn: labels.builtIn,
+            user: labels.user,
+            createTitle: labels.createTitle,
+            name: labels.name,
+            slug: labels.slug,
+            description: labels.agentDescription,
+            role: labels.role,
+            roles: labels.roles,
+            systemPrompt: labels.systemPrompt,
+            model: labels.model,
+            thinking: labels.thinking,
+            reasoningEffort: labels.reasoningEffort,
+            reasoningEfforts: labels.reasoningEfforts,
+            maxToolIterations: labels.maxToolIterations,
+            toolsEnabled: labels.toolsEnabled,
+            toolAllowlist: labels.toolAllowlist,
+            noTools: labels.noTools,
+            subagents: labels.subagents,
+            noSubagents: labels.noSubagents,
+            path: labels.path,
+            friendlyMode: labels.friendlyMode,
+            rawMode: labels.rawMode,
+            rawMarkdown: labels.rawMarkdown,
+            preview: labels.preview,
+            previewing: labels.previewing,
+            save: labels.save,
+            saving: labels.saving,
+            reset: labels.reset,
+            delete: labels.delete,
+            sectionIdentity: labels.sectionIdentity,
+            sectionBehavior: labels.sectionBehavior,
+            sectionReasoning: labels.sectionReasoning,
+            sectionTools: labels.sectionTools,
+            unsavedChanges: labels.unsavedChanges,
+            confirmResetTitle: labels.confirmResetTitle,
+            confirmResetDescription: labels.confirmResetDescription,
+            confirmReset: labels.confirmReset,
+            cancel: labels.cancel,
+          }}
+          isNew={selectedAgent.id === NEW_AGENT_ID}
+          isSaving={saveMutation.isPending}
+          isPreviewing={previewMutation.isPending}
+          onSave={(agent, body) => saveMutation.mutate({ agent, body })}
+          onPreviewMarkdown={async (markdown, agentId) => {
+            const preview = await previewMutation.mutateAsync({
+              markdown,
+              agentId: agentId,
+            });
+            return preview.profile;
+          }}
+          onDelete={setAgentPendingDelete}
+          onCancelNew={() => setNewAgent(null)}
+        />
+      )}
 
       <DeleteAgentDialog
         title={labels.deleteTitle}

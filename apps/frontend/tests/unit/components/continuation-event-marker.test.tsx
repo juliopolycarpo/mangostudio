@@ -84,6 +84,21 @@ describe('ContinuationEventMarker', () => {
     expect(screen.getByText(/system prompt changed/i)).toBeInTheDocument();
   });
 
+  it('renders agent_runtime_changed label', () => {
+    render(
+      <ContinuationEventMarker
+        provider="openai"
+        modelName="gpt-4o"
+        fromMode="responses"
+        toMode="replay"
+        reasonCode="agent_runtime_changed"
+        recovered={true}
+      />
+    );
+
+    expect(screen.getByText(/agent settings changed/i)).toBeInTheDocument();
+  });
+
   it('renders envelope_malformed label without provider placeholders', () => {
     render(
       <ContinuationEventMarker

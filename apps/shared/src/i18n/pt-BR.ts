@@ -105,6 +105,9 @@ export const messages = {
           'System prompt alterado. Transcript reproduzido em {provider} {toMode}.',
         toolsetChanged:
           'Conjunto de ferramentas alterado. Transcript reproduzido em {provider} {toMode}.',
+        agentChanged: 'Agente alterado. Transcript reproduzido em {provider} {toMode}.',
+        agentRuntimeChanged:
+          'Configurações do agente alteradas. Transcript reproduzido em {provider} {toMode}.',
         cursorExpired: 'Cursor {provider} {fromMode} expirou. Usando replay do transcript.',
         cursorInvalid: 'Cursor {provider} {fromMode} foi invalidado. Usando replay do transcript.',
         toolResultCursorLoss:
