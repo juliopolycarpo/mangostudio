@@ -727,7 +727,7 @@ describe('POST /respond/stream', () => {
           generateText: () => Promise.resolve({ text: '' }),
           generateAgentTurnStream: async function* (req: AgentTurnRequest) {
             await Promise.resolve();
-            if (req.agentId === 'explore') {
+            if (req.agentId === 'user:explorer') {
               yield { type: 'assistant_text_delta', text: 'Found the relevant files.' };
               yield { type: 'turn_completed', providerState: null };
               return;
