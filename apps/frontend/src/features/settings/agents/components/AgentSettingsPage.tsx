@@ -10,7 +10,9 @@ import { Bot, Plus } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { useI18n } from '@/hooks/use-i18n';
+import { useModelCatalog } from '@/hooks/use-model-catalog';
 import { useToast } from '@/components/ui/Toast';
+import type { ModelCatalogResponse, ModelOption } from '@mangostudio/shared';
 import { toolSettingsListQueryOptions } from '../../tools/queries';
 import {
   createAgentProfile,
@@ -32,11 +34,16 @@ export function AgentSettingsPage() {
   const labels = t.settings.agents;
   const agentsQuery = useQuery(agentSettingsListQueryOptions());
   const toolsQuery = useQuery(toolSettingsListQueryOptions());
+  const modelCatalogQuery = useModelCatalog();
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
   const [newAgent, setNewAgent] = useState<EditableAgentProfile | null>(null);
   const [agentPendingDelete, setAgentPendingDelete] = useState<AgentProfile | null>(null);
 
   const agents = useMemo(() => agentsQuery.data?.agents ?? [], [agentsQuery.data?.agents]);
+  const modelOptions = useMemo(
+    () => buildAgentModelOptions(modelCatalogQuery.catalog),
+    [modelCatalogQuery.catalog]
+  );
   const selectedAgent = useMemo(() => {
     if (newAgent) return newAgent;
     return agents.find((agent) => agent.id === selectedAgentId) ?? agents[0] ?? null;
@@ -221,6 +228,7 @@ export function AgentSettingsPage() {
           agent={selectedAgent}
           allAgents={agents}
           tools={toolsQuery.data?.tools ?? []}
+          modelOptions={modelOptions}
           labels={{
             builtIn: labels.builtIn,
             user: labels.user,
@@ -232,6 +240,7 @@ export function AgentSettingsPage() {
             roles: labels.roles,
             systemPrompt: labels.systemPrompt,
             model: labels.model,
+            modelDefaultOption: t.settings.general.chatTitleModelCurrent,
             thinking: labels.thinking,
             reasoningEffort: labels.reasoningEffort,
             reasoningEfforts: labels.reasoningEfforts,
@@ -319,4 +328,26 @@ function createNewAgent(name: string, description: string): EditableAgentProfile
     metadata: {},
     slug: '',
   };
+}
+
+function buildAgentModelOptions(catalog: ModelCatalogResponse) {
+  const source = catalog.textModels.length > 0 ? catalog.textModels : catalog.allModels;
+  const byId = new Map<string, ModelOption>();
+  for (const option of source) {
+    if (!byId.has(option.modelId)) byId.set(option.modelId, option);
+  }
+
+  return Array.from(byId.values())
+    .sort((a, b) => {
+      const providerCmp = String(a.provider ?? '').localeCompare(String(b.provider ?? ''));
+      if (providerCmp !== 0) return providerCmp;
+      return a.displayName.localeCompare(b.displayName);
+    })
+    .map((option) => {
+      const label =
+        option.displayName && option.displayName !== option.modelId
+          ? `${option.displayName} (${option.modelId})`
+          : option.modelId;
+      return { value: option.modelId, label };
+    });
 }
