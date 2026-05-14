@@ -1877,10 +1877,8 @@ function mergeMessageParts(allParts: MessagePart[]): MessagePart[] {
 
   for (const part of allParts) {
     if (part.type === 'thinking') {
-      flushText();
       thinkingRun += part.text;
     } else if (part.type === 'text') {
-      flushThinking();
       textRun += part.text;
     } else {
       flushThinking();

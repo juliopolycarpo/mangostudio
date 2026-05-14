@@ -80,6 +80,28 @@ describe('ChatFeed — MessageParts interleaved rendering', () => {
     expect(thoughtProcessButtons).toHaveLength(2);
   });
 
+  it('normalizes token-level interleaving into one thinking block and one text block', () => {
+    const parts: MessagePart[] = [
+      { type: 'thinking', text: 'The ' },
+      { type: 'text', text: 'Let ' },
+      { type: 'thinking', text: 'user ' },
+      { type: 'text', text: 'me ' },
+      { type: 'thinking', text: 'wants me' },
+      { type: 'text', text: 'first explore' },
+    ];
+    const msg = makeMessage({ parts });
+
+    const { container } = render(<ChatFeed chatId="chat-1" messages={[msg]} />);
+
+    const thinkingButtons = container.querySelectorAll('button');
+    const thoughtProcessButtons = Array.from(thinkingButtons).filter((btn) =>
+      btn.textContent?.includes('Thought process')
+    );
+
+    expect(thoughtProcessButtons).toHaveLength(1);
+    expect(screen.getByText('Let me first explore')).toBeInTheDocument();
+  });
+
   it('renders tool call block with pending state when no matching result', () => {
     const parts: MessagePart[] = [
       { type: 'tool_call', toolCallId: 'c2', name: 'calculator', args: { expr: '2+2' } },
