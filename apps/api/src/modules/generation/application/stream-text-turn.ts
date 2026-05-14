@@ -1167,13 +1167,14 @@ async function executeStandardToolCall(
       cachedPartialChars: entry?.partialText?.length ?? 0,
     });
   }
+  const providerResult = isSubagentRunResult(result) ? createSubagentToolResult(result) : result;
 
   return {
     callId,
     name,
     args,
-    result,
-    resultStr: stringifyToolResult(result),
+    result: providerResult,
+    resultStr: stringifyToolResult(providerResult),
     isError,
     ...(subagentTrace ? { subagentTrace } : {}),
   };
@@ -1334,6 +1335,18 @@ function createSubagentTraceForTool(
   };
 }
 
+function createSubagentToolResult(result: SubagentRunResult): Record<string, unknown> {
+  return {
+    agentId: result.agentId,
+    agentName: result.agentName,
+    status: result.status,
+    summary: result.summary,
+    toolCallCount: result.toolCallCount,
+    durationMs: result.durationMs,
+    ...(result.error ? { error: result.error.message } : {}),
+  };
+}
+
 function parseDelegationRequest(args: Record<string, unknown>): DelegateToSubagentRequest {
   const agentId = getRequiredString(args.agentId, 'agentId');
   const task = getRequiredString(args.task, 'task');
@@ -1432,6 +1445,9 @@ async function ensureDelegationResult(
         });
         return createTimedOutSubagentResult(callId, request.agentId as AgentId, text);
       }
+      if (isNonRetryableDelegationError(error)) {
+        throw error;
+      }
       lastError = errorToToolMessage(error);
       const cacheEntry = getSubagentCachedEntry(callId);
       const recovered = tryRecoverFromCache(callId, request.agentId as AgentId, cacheEntry);
@@ -1474,6 +1490,28 @@ async function ensureDelegationResult(
     detail: `call=${callId} agent=${request.agentId}`,
   });
   return fallback;
+}
+
+function isNonRetryableDelegationError(error: unknown): boolean {
+  const code = getDelegationErrorCode(error);
+  if (!code) return false;
+  return [
+    'ABORTED',
+    'DISABLED',
+    'CHAT_DISABLED',
+    'MAX_CALLS',
+    'MAX_DEPTH',
+    'TARGET_NOT_ALLOWED',
+    'INVALID_ROLE',
+  ].includes(code);
+}
+
+function getDelegationErrorCode(error: unknown): string | undefined {
+  if (typeof error !== 'object' || error === null) return undefined;
+  const record = error as { code?: unknown; name?: unknown };
+  if (typeof record.code !== 'string') return undefined;
+  if (record.name !== 'SubagentDelegationError') return undefined;
+  return record.code;
 }
 
 function tryRecoverFromCache(

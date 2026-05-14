@@ -1766,10 +1766,11 @@ describe('POST /respond/stream', () => {
             }
 
             const raw = req.toolResults[0]?.result ?? '';
-            const parsed = JSON.parse(raw) as { summary?: unknown };
+            const parsed = JSON.parse(raw) as { summary?: unknown; tools?: unknown };
             if (typeof parsed.summary !== 'string' || !parsed.summary.trim()) {
               throw new Error(`Empty subagent summary detected: ${raw.slice(0, 200)}`);
             }
+            expect(parsed.tools).toBeUndefined();
             yield { type: 'assistant_text_delta', text: 'OK' };
             yield { type: 'turn_completed', providerState: null };
           },
