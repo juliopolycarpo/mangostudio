@@ -58,7 +58,7 @@ export const BUILT_IN_EXPLORE_AGENT: AgentProfile = Object.freeze({
   role: 'subagent',
   source: { type: 'builtin' as const },
   systemPrompt:
-    'Explore the requested problem space carefully. Gather relevant context, inspect available files or tools when useful, and return a concise summary with concrete findings, file paths, risks, and recommended next steps. Do not make changes unless explicitly asked.',
+    'Explore the requested problem space carefully. Gather relevant context, inspect available files or tools when useful, and return a concise, concrete final report.\n\nFinal report requirements:\n- Always end with a "Final Report" section.\n- Include: key findings, relevant file paths, tools/commands used, risks or unknowns, and recommended next steps.\n- Do not make changes unless explicitly asked.',
   toolNames: [],
   toolsEnabled: true,
   subagentIds: [],

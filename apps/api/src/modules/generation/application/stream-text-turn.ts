@@ -1,4 +1,5 @@
 import type { Kysely } from 'kysely';
+import { loadavg } from 'node:os';
 import type { Database } from '../../../db/types';
 import type {
   GeneratedImagePart,
@@ -78,10 +79,19 @@ import {
   type SubagentRunResult,
 } from './subagent-runner';
 import { DELEGATE_TO_AGENT_TOOL_NAME } from '../../../services/tools/builtin/delegate-to-agent';
+import {
+  getSubagentCachedEntry,
+  recordSubagentResult,
+  recordSubagentStatus,
+  recordSubagentText,
+} from './subagent-response-cache';
 
 const TOOL_TIMEOUT_MS = 30_000;
 const DEFAULT_MAX_TOOL_ITERATIONS = 10;
 const TOOL_LOOP_EXHAUSTED_MESSAGE = 'The model exceeded the maximum number of tool interactions.';
+const DELEGATION_MAX_RETRIES = 3;
+const DELEGATION_BACKOFF_BASE_MS = 25;
+const DELEGATION_BACKOFF_MAX_MS = 400;
 
 export interface StreamTextTurnInput {
   chatId: string;
@@ -1100,6 +1110,8 @@ async function executeStandardToolCall(
   let result: unknown;
   let isError = false;
   let subagentTrace: Extract<MessagePart, { type: 'subagent_trace' }> | undefined;
+  const isDelegationTool =
+    name === DELEGATE_TO_AGENT_TOOL_NAME && Boolean(context.delegationRuntime);
 
   try {
     if (!context.allowedToolNames.has(name)) {
@@ -1142,6 +1154,19 @@ async function executeStandardToolCall(
     isError = true;
   }
 
+  if (isDelegationTool) {
+    const entry = getSubagentCachedEntry(callId);
+    const summaryLength =
+      (isSubagentRunResult(result) ? result.summary.length : entry?.result?.summary.length) ?? 0;
+    logDelegationWarn('tool_result_ready', {
+      callId,
+      agentId: isSubagentRunResult(result) ? result.agentId : (entry?.agentId ?? ''),
+      isError,
+      summaryLength,
+      cachedPartialChars: entry?.partialText?.length ?? 0,
+    });
+  }
+
   return {
     callId,
     name,
@@ -1180,8 +1205,22 @@ async function executeDelegationToolCall(
     request,
     depth: 0,
     signal: runtime.signal,
-    onEvent: (event) => runtime.onEvent?.(toSubagentStreamEvent(callId, event)),
+    onEvent: (event) => {
+      if (event.type === 'text') {
+        recordSubagentText(callId, event.agentId, event.text);
+      }
+      if (event.type === 'completed') {
+        recordSubagentStatus(callId, event.agentId, event.agentName, 'completed');
+      }
+      if (event.type === 'failed') {
+        if (event.agentName) {
+          recordSubagentStatus(callId, event.agentId as AgentId, event.agentName, 'failed');
+        }
+      }
+      runtime.onEvent?.(toSubagentStreamEvent(callId, event));
+    },
   });
+  recordSubagentResult(callId, result);
 
   runtime.onEvent?.({
     type: 'system_event',
@@ -1315,7 +1354,7 @@ async function ensureDelegationResult(
   request: DelegateToSubagentRequest,
   runtime: DelegationRuntime
 ): Promise<SubagentRunResult> {
-  const maxAttempts = 2;
+  const maxAttempts = 1 + DELEGATION_MAX_RETRIES;
   let lastError = '';
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -1323,15 +1362,44 @@ async function ensureDelegationResult(
       attempt === 1 ? request : addEnforcedDelegationOutputRequirement(request);
 
     try {
+      if (attempt > 1) {
+        await sleepWithAbort(
+          computeBackoffMs(attempt),
+          runtime.signal,
+          `call=${callId} attempt=${attempt}`
+        );
+      }
       runtime.onEvent?.({
         type: 'system_event',
         event: 'subagent_response_attempt',
         detail: `call=${callId} attempt=${attempt}`,
       });
 
-      const result = (await executeDelegationToolCall(callId, attemptRequest, runtime)) as unknown;
+      const result = (await withDelegationTimeout(
+        executeDelegationToolCall(callId, attemptRequest, runtime),
+        runtime.settings.timeoutMs,
+        runtime.signal
+      )) as unknown;
       if (isValidSubagentResult(result)) {
         return result;
+      }
+
+      const cacheEntry = getSubagentCachedEntry(callId);
+      const recovered = tryRecoverFromCache(callId, request.agentId as AgentId, cacheEntry);
+      if (recovered) {
+        logDelegationWarn('recovered_from_cache', {
+          callId,
+          agentId: request.agentId,
+          attempt,
+          summaryLength: recovered.summary.length,
+          cachedPartialChars: cacheEntry?.partialText?.length ?? 0,
+        });
+        runtime.onEvent?.({
+          type: 'system_event',
+          event: 'subagent_response_recovered',
+          detail: `call=${callId} agent=${request.agentId} attempt=${attempt}`,
+        });
+        return recovered;
       }
 
       lastError = 'Subagent returned an invalid or empty response.';
@@ -1342,17 +1410,60 @@ async function ensureDelegationResult(
         status: isSubagentRunResult(result) ? result.status : 'invalid',
         summaryLength: isSubagentRunResult(result) ? result.summary.length : 0,
         toolCallCount: isSubagentRunResult(result) ? result.toolCallCount : 0,
+        scenario: classifyMissingResponseScenario(cacheEntry),
+        cachedPartialChars: cacheEntry?.partialText?.length ?? 0,
+        ...getInfraLogMetadata(),
       });
     } catch (error) {
+      if (error instanceof SubagentDelegationError && error.code === 'TIMEOUT') {
+        const text = `Subagent timed out after ${runtime.settings.timeoutMs}ms.`;
+        logDelegationWarn('timeout', {
+          callId,
+          agentId: request.agentId,
+          attempt,
+          error: text,
+          ...getInfraLogMetadata(),
+        });
+        runtime.onEvent?.({
+          type: 'system_event',
+          event: 'subagent_response_timeout',
+          detail: `call=${callId} agent=${request.agentId}`,
+        });
+        return createTimedOutSubagentResult(callId, request.agentId as AgentId, text);
+      }
       lastError = errorToToolMessage(error);
+      const cacheEntry = getSubagentCachedEntry(callId);
+      const recovered = tryRecoverFromCache(callId, request.agentId as AgentId, cacheEntry);
+      if (recovered) {
+        logDelegationWarn('recovered_from_cache_after_error', {
+          callId,
+          agentId: request.agentId,
+          attempt,
+          summaryLength: recovered.summary.length,
+          cachedPartialChars: cacheEntry?.partialText?.length ?? 0,
+        });
+        runtime.onEvent?.({
+          type: 'system_event',
+          event: 'subagent_response_recovered',
+          detail: `call=${callId} agent=${request.agentId} attempt=${attempt}`,
+        });
+        return recovered;
+      }
       logDelegationWarn('attempt_failed', {
         callId,
         agentId: request.agentId,
         attempt,
         error: lastError,
+        scenario: classifyMissingResponseScenario(cacheEntry),
+        cachedPartialChars: cacheEntry?.partialText?.length ?? 0,
+        ...getInfraLogMetadata(),
       });
     }
   }
+
+  const cacheEntry = getSubagentCachedEntry(callId);
+  const recovered = tryRecoverFromCache(callId, request.agentId as AgentId, cacheEntry);
+  if (recovered) return recovered;
 
   const summary = `Subagent failed to produce a final response. ${lastError}`.trim();
   const fallback = createMissingSubagentResult(callId, request.agentId as AgentId, summary);
@@ -1362,6 +1473,156 @@ async function ensureDelegationResult(
     detail: `call=${callId} agent=${request.agentId}`,
   });
   return fallback;
+}
+
+function tryRecoverFromCache(
+  callId: string,
+  agentId: AgentId,
+  cacheEntry: ReturnType<typeof getSubagentCachedEntry>
+): SubagentRunResult | undefined {
+  const cachedResult = cacheEntry?.result;
+  if (cachedResult && isValidSubagentResult(cachedResult)) return cachedResult;
+  const partial = cacheEntry?.partialText?.trim() ?? '';
+  if (!partial) return undefined;
+  return createRecoveredSubagentResult(callId, agentId, partial);
+}
+
+function createRecoveredSubagentResult(
+  callId: string,
+  agentId: AgentId,
+  summary: string
+): SubagentRunResult {
+  const text = summary.trim() || 'Subagent response recovered from cache.';
+  return {
+    agentId,
+    agentName: agentId,
+    status: 'completed',
+    summary: text,
+    messages: [{ role: 'assistant', text }],
+    toolCallCount: 0,
+    tools: [],
+    durationMs: 0,
+    trace: {
+      type: 'subagent_trace',
+      toolCallId: callId,
+      agentId,
+      agentName: agentId,
+      status: 'completed',
+      summary: text,
+      toolCallCount: 0,
+      lastMessage: text,
+      messages: [{ role: 'assistant', text }],
+      tools: [],
+    },
+  };
+}
+
+function createTimedOutSubagentResult(
+  callId: string,
+  agentId: AgentId,
+  summary: string
+): SubagentRunResult {
+  const text = summary.trim() || 'Subagent timed out.';
+  return {
+    agentId,
+    agentName: agentId,
+    status: 'timeout',
+    summary: text,
+    messages: [{ role: 'assistant', text }],
+    toolCallCount: 0,
+    tools: [],
+    durationMs: 0,
+    error: { code: 'TIMEOUT', message: text },
+    trace: {
+      type: 'subagent_trace',
+      toolCallId: callId,
+      agentId,
+      agentName: agentId,
+      status: 'timeout',
+      summary: text,
+      toolCallCount: 0,
+      lastMessage: text,
+      messages: [{ role: 'assistant', text }],
+      tools: [],
+      error: text,
+    },
+  };
+}
+
+function classifyMissingResponseScenario(
+  cacheEntry: ReturnType<typeof getSubagentCachedEntry>
+): 'produced_not_transmitted' | 'not_produced' {
+  const partial = cacheEntry?.partialText?.trim() ?? '';
+  if (partial) return 'produced_not_transmitted';
+  return 'not_produced';
+}
+
+function computeBackoffMs(attempt: number): number {
+  const exponent = Math.max(0, attempt - 2);
+  const base = Math.min(
+    DELEGATION_BACKOFF_MAX_MS,
+    DELEGATION_BACKOFF_BASE_MS * Math.pow(2, exponent)
+  );
+  const jitter = 0.2 * base;
+  const randomized = base + (Math.random() * 2 - 1) * jitter;
+  return Math.max(0, Math.round(Math.min(DELEGATION_BACKOFF_MAX_MS, randomized)));
+}
+
+async function sleepWithAbort(ms: number, signal?: AbortSignal, label?: string): Promise<void> {
+  if (ms <= 0) return;
+  if (signal?.aborted) throw new Error('Aborted');
+  await new Promise<void>((resolve, reject) => {
+    const onAbort = () => {
+      cleanup();
+      clearTimeout(timeoutId);
+      reject(new Error('Aborted'));
+    };
+    if (label) {
+      logDelegationWarn('backoff', { ms, label });
+    }
+    const cleanup = () => signal?.removeEventListener('abort', onAbort);
+    const timeoutId = setTimeout(() => {
+      cleanup();
+      resolve();
+    }, ms);
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
+function withDelegationTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  signal?: AbortSignal
+): Promise<T> {
+  const effective = Math.max(1_000, Math.round(timeoutMs));
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(
+      () =>
+        reject(new SubagentDelegationError(`Subagent timed out after ${effective}ms.`, 'TIMEOUT')),
+      effective
+    );
+  });
+  if (signal?.aborted) {
+    return Promise.reject(new SubagentDelegationError('Subagent aborted.', 'ABORTED'));
+  }
+  return Promise.race([promise, timeoutPromise]).finally(() => {
+    if (timeoutId) clearTimeout(timeoutId);
+  });
+}
+
+function getInfraLogMetadata(): Record<string, string | number | boolean> {
+  const mem = process.memoryUsage();
+  const [load1, load5, load15] = loadavg();
+  return {
+    pid: process.pid,
+    uptimeSec: Math.round(process.uptime()),
+    rssBytes: mem.rss,
+    heapUsedBytes: mem.heapUsed,
+    load1,
+    load5,
+    load15,
+  };
 }
 
 function isValidSubagentResult(result: unknown): result is SubagentRunResult {
@@ -1530,8 +1791,12 @@ function withToolTimeout<T>(promise: Promise<T>, name: string): Promise<T> {
 }
 
 function stringifyToolResult(result: unknown): string {
-  const serialized = JSON.stringify(result);
-  return typeof serialized === 'string' ? serialized : 'null';
+  try {
+    const serialized = JSON.stringify(result);
+    return typeof serialized === 'string' ? serialized : 'null';
+  } catch {
+    return JSON.stringify({ error: 'Tool result serialization failed.' });
+  }
 }
 
 function errorToToolMessage(error: unknown): string {

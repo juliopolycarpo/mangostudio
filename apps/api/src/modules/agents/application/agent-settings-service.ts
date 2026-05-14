@@ -154,7 +154,8 @@ async function synthesizeBuiltInProfile(
 
   return {
     ...baseProfile,
-    systemPrompt: agentId === 'chat' ? appSettings.promptSettings.textSystemPrompt : '',
+    systemPrompt:
+      agentId === 'chat' ? appSettings.promptSettings.textSystemPrompt : baseProfile.systemPrompt,
     thinkingEnabled: appSettings.thinkingEnabled,
     reasoningEffort: appSettings.reasoningEffort,
     maxToolIterations: appSettings.maxToolIterations,

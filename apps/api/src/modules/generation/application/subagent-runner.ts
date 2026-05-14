@@ -115,6 +115,15 @@ export async function runSubagentTurn(input: SubagentRuntimeInput): Promise<Suba
       childAbort.signal,
       input.settings.timeoutMs
     );
+    if (!result.summary.trim()) {
+      logSubagentEvent('empty_response_synthesized', {
+        chatId: input.chatId,
+        userId: input.userId,
+        parentAgentId: input.parentAgentProfile.id,
+        targetAgentId: result.agentId,
+        toolCallCount: result.tools.length,
+      });
+    }
     const enforced = enforceSubagentRunResult(result);
     input.onEvent?.({ type: 'text', agentId: enforced.agentId, text: enforced.summary });
     input.onEvent?.({
@@ -329,6 +338,14 @@ async function executeSubagentTurn(
     isFirstIteration = false;
   }
 
+  if (!summary.trim() && tools.length > 0) {
+    logSubagentEvent('provider_completed_without_text', {
+      chatId: input.chatId,
+      userId: input.userId,
+      agentId: runtime.profile.id,
+      toolCallCount: tools.length,
+    });
+  }
   const trimmedSummary = enforceSubagentSummary(summary.trim(), tools);
   transcript.push({ role: 'assistant', text: trimmedSummary });
 

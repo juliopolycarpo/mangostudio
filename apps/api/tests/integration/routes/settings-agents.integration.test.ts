@@ -203,7 +203,9 @@ describe('settings agents routes', () => {
     const otherListPayload = (await otherListResponse.json()) as AgentProfileListResponse;
 
     expect(otherListResponse.status).toBe(200);
-    expect(otherListPayload.agents.find((agent) => agent.id === 'explore')?.systemPrompt).toBe('');
+    expect(otherListPayload.agents.find((agent) => agent.id === 'explore')?.systemPrompt).toContain(
+      'Final Report'
+    );
   });
 
   it('creates, reads, updates, and deletes markdown-backed user agents', async () => {
