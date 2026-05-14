@@ -1,7 +1,11 @@
 import { Type, type Static } from '@sinclair/typebox';
 import { ReasoningEffortSchema } from '../provider-settings';
 
-export const BuiltInAgentIdSchema = Type.Union([Type.Literal('chat'), Type.Literal('default')]);
+export const BuiltInAgentIdSchema = Type.Union([
+  Type.Literal('chat'),
+  Type.Literal('default'),
+  Type.Literal('explore'),
+]);
 
 export const UserAgentIdSchema = Type.String({ pattern: '^user:[a-z0-9]+(?:-[a-z0-9]+)*$' });
 

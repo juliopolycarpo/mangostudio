@@ -1,6 +1,6 @@
 import type { AgentId, AgentProfile, AgentRole } from './contracts';
 
-const BUILT_IN_AGENT_IDS = ['chat', 'default'] as const;
+const BUILT_IN_AGENT_IDS = ['chat', 'default', 'explore'] as const;
 const AGENT_ROLE_VALUES = ['primary', 'subagent', 'both'] as const;
 const REASONING_EFFORT_VALUES = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
 const USER_AGENT_ID_PATTERN = /^user:[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -46,6 +46,21 @@ export const BUILT_IN_DEFAULT_AGENT: AgentProfile = Object.freeze({
   systemPrompt: '',
   toolNames: [],
   toolsEnabled: true,
+  subagentIds: ['explore'] as const,
+  metadata: {},
+});
+
+export const BUILT_IN_EXPLORE_AGENT: AgentProfile = Object.freeze({
+  id: 'explore',
+  name: 'Explore',
+  description: 'Built-in subagent for bounded research and codebase exploration.',
+  kind: 'builtin',
+  role: 'subagent',
+  source: { type: 'builtin' as const },
+  systemPrompt:
+    'Explore the requested problem space carefully. Gather relevant context, inspect available files or tools when useful, and return a concise summary with concrete findings, file paths, risks, and recommended next steps. Do not make changes unless explicitly asked.',
+  toolNames: [],
+  toolsEnabled: true,
   subagentIds: [],
   metadata: {},
 });
@@ -53,6 +68,7 @@ export const BUILT_IN_DEFAULT_AGENT: AgentProfile = Object.freeze({
 export const BUILT_IN_AGENT_PROFILES: ReadonlyArray<AgentProfile> = Object.freeze([
   BUILT_IN_CHAT_AGENT,
   BUILT_IN_DEFAULT_AGENT,
+  BUILT_IN_EXPLORE_AGENT,
 ]);
 
 export function isAgentId(value: unknown): value is AgentId {

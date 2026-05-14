@@ -8,7 +8,11 @@ import type {
   CreateAgentProfileBody,
   DeleteAgentProfileResponse,
 } from '@mangostudio/shared/agents';
-import { BUILT_IN_CHAT_AGENT, BUILT_IN_DEFAULT_AGENT } from '@mangostudio/shared/agents';
+import {
+  BUILT_IN_CHAT_AGENT,
+  BUILT_IN_DEFAULT_AGENT,
+  BUILT_IN_EXPLORE_AGENT,
+} from '@mangostudio/shared/agents';
 import type { Database } from '../../../db/types';
 import { getAppSettings } from '../../app-settings/application/app-settings-service';
 import { listToolSettingsDescriptors } from '../../tool-settings/application/tool-settings-service';
@@ -111,13 +115,18 @@ async function getEffectiveBuiltInProfiles(
   db: Kysely<Database>,
   userId: string
 ): Promise<ReadonlyArray<AgentProfile>> {
-  const [savedProfiles, chatProfile, defaultProfile] = await Promise.all([
+  const [savedProfiles, chatProfile, defaultProfile, exploreProfile] = await Promise.all([
     listSavedBuiltInAgentSettings(db, userId),
     synthesizeBuiltInProfile(db, userId, 'chat'),
     synthesizeBuiltInProfile(db, userId, 'default'),
+    synthesizeBuiltInProfile(db, userId, 'explore'),
   ]);
 
-  return [savedProfiles.get('chat') ?? chatProfile, savedProfiles.get('default') ?? defaultProfile];
+  return [
+    savedProfiles.get('chat') ?? chatProfile,
+    savedProfiles.get('default') ?? defaultProfile,
+    savedProfiles.get('explore') ?? exploreProfile,
+  ];
 }
 
 async function getEffectiveBuiltInProfile(
@@ -140,7 +149,7 @@ async function synthesizeBuiltInProfile(
     getAppSettings(db, userId),
     listToolSettingsDescriptors(db, userId),
   ]);
-  const baseProfile = agentId === 'chat' ? BUILT_IN_CHAT_AGENT : BUILT_IN_DEFAULT_AGENT;
+  const baseProfile = getBuiltInBaseProfile(agentId);
   const toolNames = toolSettings.tools.filter((tool) => tool.enabled).map((tool) => tool.name);
 
   return {
@@ -152,4 +161,10 @@ async function synthesizeBuiltInProfile(
     toolNames,
     toolsEnabled: toolNames.length > 0,
   };
+}
+
+function getBuiltInBaseProfile(agentId: BuiltInAgentId): AgentProfile {
+  if (agentId === 'chat') return BUILT_IN_CHAT_AGENT;
+  if (agentId === 'explore') return BUILT_IN_EXPLORE_AGENT;
+  return BUILT_IN_DEFAULT_AGENT;
 }

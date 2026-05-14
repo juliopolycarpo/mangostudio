@@ -52,9 +52,13 @@ describe('settings agents routes', () => {
 
     expect(response.status).toBe(200);
     expect(Value.Check(AgentProfileListResponseSchema, payload)).toBe(true);
-    expect(payload.agents.map((agent) => agent.id)).toEqual(['chat', 'default']);
+    expect(payload.agents.map((agent) => agent.id)).toEqual(['chat', 'default', 'explore']);
     expect(payload.agents.find((agent) => agent.id === 'chat')?.source).toEqual({
       type: 'builtin',
+    });
+    expect(payload.agents.find((agent) => agent.id === 'explore')).toMatchObject({
+      role: 'subagent',
+      kind: 'builtin',
     });
   });
 

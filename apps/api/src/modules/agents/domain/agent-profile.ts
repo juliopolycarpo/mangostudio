@@ -7,8 +7,8 @@ import type {
 } from '@mangostudio/shared/agents';
 import { assertAgentProfile, isAgentId, isReasoningEffort } from '@mangostudio/shared/agents';
 
-const BUILT_IN_AGENT_IDS = ['chat', 'default'] as const;
-const RESERVED_AGENT_SLUGS = ['chat', 'default', 'agents', 'claude'] as const;
+const BUILT_IN_AGENT_IDS = ['chat', 'default', 'explore'] as const;
+const RESERVED_AGENT_SLUGS = ['chat', 'default', 'explore', 'agents', 'claude'] as const;
 const SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 export class AgentSettingsError extends Error {
