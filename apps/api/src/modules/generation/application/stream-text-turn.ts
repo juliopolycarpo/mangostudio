@@ -74,6 +74,7 @@ import { getAppSettings } from '../../app-settings/application/app-settings-serv
 import {
   runSubagentTurn,
   SubagentDelegationError,
+  SUBAGENT_EMPTY_TEXT_FALLBACK,
   type DelegateToSubagentRequest,
   type SubagentProgressEvent,
   type SubagentRunResult,
@@ -1483,7 +1484,7 @@ function tryRecoverFromCache(
   const cachedResult = cacheEntry?.result;
   if (cachedResult && isValidSubagentResult(cachedResult)) return cachedResult;
   const partial = cacheEntry?.partialText?.trim() ?? '';
-  if (!partial) return undefined;
+  if (!partial || partial.startsWith(SUBAGENT_EMPTY_TEXT_FALLBACK)) return undefined;
   return createRecoveredSubagentResult(callId, agentId, partial);
 }
 
@@ -1628,6 +1629,7 @@ function getInfraLogMetadata(): Record<string, string | number | boolean> {
 function isValidSubagentResult(result: unknown): result is SubagentRunResult {
   if (!isSubagentRunResult(result)) return false;
   if (!result.summary.trim()) return false;
+  if (result.summary.startsWith(SUBAGENT_EMPTY_TEXT_FALLBACK)) return false;
   const last = result.trace.lastMessage?.trim() ?? '';
   if (!last) return false;
   const messagesValue = (result.trace as unknown as { messages?: unknown }).messages;

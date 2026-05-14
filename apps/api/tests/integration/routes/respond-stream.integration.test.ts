@@ -939,57 +939,73 @@ describe('POST /respond/stream', () => {
       };
     });
 
-    await mock.module('../../../src/services/providers/core/provider-registry', () => ({
-      getProviderForModel: () =>
-        Promise.resolve({
-          providerType: 'openai-compatible',
-          generateText: () => Promise.resolve({ text: '' }),
-          generateAgentTurnStream: async function* (req: AgentTurnRequest) {
-            await Promise.resolve();
-            if (req.agentId === 'user:explorer') {
+    await mock.module('../../../src/services/providers/core/provider-registry', () => {
+      let explorerAttempts = 0;
+      return {
+        getProviderForModel: () =>
+          Promise.resolve({
+            providerType: 'openai-compatible',
+            generateText: () => Promise.resolve({ text: '' }),
+            generateAgentTurnStream: async function* (req: AgentTurnRequest) {
+              await Promise.resolve();
+              if (req.agentId === 'user:explorer') {
+                if (!req.toolResults) {
+                  explorerAttempts++;
+                  yield { type: 'tool_call_started', callId: 'noop-1', name: 'noop' };
+                  yield {
+                    type: 'tool_call_completed',
+                    callId: 'noop-1',
+                    name: 'noop',
+                    arguments: '{}',
+                  };
+                  yield { type: 'tool_call_started', callId: 'noop-2', name: 'noop' };
+                  yield {
+                    type: 'tool_call_completed',
+                    callId: 'noop-2',
+                    name: 'noop',
+                    arguments: '{}',
+                  };
+                  yield { type: 'turn_completed', providerState: null };
+                  return;
+                }
+
+                // On retry (attempt 2), provide an actual summary
+                if (explorerAttempts > 1) {
+                  yield { type: 'assistant_text_delta', text: 'I explored the files.' };
+                  yield { type: 'turn_completed', providerState: null };
+                  return;
+                }
+
+                yield { type: 'turn_completed', providerState: null };
+                return;
+              }
+
               if (!req.toolResults) {
-                yield { type: 'tool_call_started', callId: 'noop-1', name: 'noop' };
                 yield {
-                  type: 'tool_call_completed',
-                  callId: 'noop-1',
-                  name: 'noop',
-                  arguments: '{}',
+                  type: 'tool_call_started',
+                  callId: 'delegate-1',
+                  name: 'delegate_to_agent',
                 };
-                yield { type: 'tool_call_started', callId: 'noop-2', name: 'noop' };
                 yield {
                   type: 'tool_call_completed',
-                  callId: 'noop-2',
-                  name: 'noop',
-                  arguments: '{}',
+                  callId: 'delegate-1',
+                  name: 'delegate_to_agent',
+                  arguments: JSON.stringify({
+                    agentId: 'user:explorer',
+                    task: 'Run tools without producing text.',
+                  }),
                 };
                 yield { type: 'turn_completed', providerState: null };
                 return;
               }
-              yield { type: 'turn_completed', providerState: null };
-              return;
-            }
 
-            if (!req.toolResults) {
-              yield { type: 'tool_call_started', callId: 'delegate-1', name: 'delegate_to_agent' };
-              yield {
-                type: 'tool_call_completed',
-                callId: 'delegate-1',
-                name: 'delegate_to_agent',
-                arguments: JSON.stringify({
-                  agentId: 'user:explorer',
-                  task: 'Run tools without producing text.',
-                }),
-              };
+              parentToolResults.push(req.toolResults[0]?.result ?? '');
+              yield { type: 'assistant_text_delta', text: 'OK' };
               yield { type: 'turn_completed', providerState: null };
-              return;
-            }
-
-            parentToolResults.push(req.toolResults[0]?.result ?? '');
-            yield { type: 'assistant_text_delta', text: 'OK' };
-            yield { type: 'turn_completed', providerState: null };
-          },
-        }),
-    }));
+            },
+          }),
+      };
+    });
 
     await mock.module('../../../src/db/database', () => ({
       getDb: () => ({
@@ -1019,8 +1035,7 @@ describe('POST /respond/stream', () => {
     expect(response.status).toBe(200);
     const sseEvents = parseSseEvents(await response.text());
     expect(sseEvents.map((event) => event.type)).toContain('subagent_text');
-    expect(parentToolResults[0]).toContain('Tools executed:');
-    expect(parentToolResults[0]).toContain('noop');
+    expect(parentToolResults[0]).toContain('I explored the files.');
   });
 
   it('retries once and falls back when the delegation response is missing or invalid', async () => {

@@ -20,7 +20,7 @@ import { getAgentProfile } from '../../agents/application/agent-settings-service
 const SUBAGENT_TIMEOUT_CODE = 'TIMEOUT';
 const SUBAGENT_ABORT_CODE = 'ABORTED';
 const SUBAGENT_FAILED_CODE = 'FAILED';
-const SUBAGENT_EMPTY_TEXT_FALLBACK = 'Subagent completed without a text response.';
+export const SUBAGENT_EMPTY_TEXT_FALLBACK = 'Subagent completed without a text response.';
 
 export type SubagentStatus = 'completed' | 'failed' | 'aborted' | 'timeout';
 
@@ -125,7 +125,10 @@ export async function runSubagentTurn(input: SubagentRuntimeInput): Promise<Suba
       });
     }
     const enforced = enforceSubagentRunResult(result);
-    input.onEvent?.({ type: 'text', agentId: enforced.agentId, text: enforced.summary });
+    // If the original result had no summary, we synthesized a fallback, so emit it as text.
+    if (!result.summary.trim()) {
+      input.onEvent?.({ type: 'text', agentId: enforced.agentId, text: enforced.summary });
+    }
     input.onEvent?.({
       type: 'completed',
       agentId: enforced.agentId,
