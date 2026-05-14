@@ -24,13 +24,13 @@ export function AgentList({
   const user = agents.filter((a) => a.kind === 'user');
 
   return (
-    <div className="flex flex-col gap-4 max-h-[calc(100vh-16rem)] overflow-y-auto pr-1">
+    <div className="flex flex-col gap-6">
       {builtIn.length > 0 && (
-        <section className="space-y-1.5">
+        <section className="space-y-3">
           <h3 className="text-xs uppercase tracking-widest font-bold text-on-surface-variant/70 font-label px-1">
             {builtInAgentsTitle}
           </h3>
-          <div className="space-y-1.5">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             {builtIn.map((agent) => (
               <AgentListItem
                 key={agent.id}
@@ -45,11 +45,11 @@ export function AgentList({
       )}
 
       {user.length > 0 && (
-        <section className="space-y-1.5">
+        <section className="space-y-3">
           <h3 className="text-xs uppercase tracking-widest font-bold text-on-surface-variant/70 font-label px-1">
             {userAgentsTitle}
           </h3>
-          <div className="space-y-1.5">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             {user.map((agent) => (
               <AgentListItem
                 key={agent.id}
