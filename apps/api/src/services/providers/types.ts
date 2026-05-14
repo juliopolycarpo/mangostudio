@@ -8,6 +8,7 @@ import type {
   ProviderType,
   AgentEvent,
 } from '@mangostudio/shared/types';
+import type { AgentId } from '@mangostudio/shared/agents';
 import type { ChatAttachmentKind } from '@mangostudio/shared/chat';
 import type { PromptCachePreference } from '@mangostudio/shared/provider-settings';
 
@@ -105,6 +106,8 @@ export interface GenerationConfig {
 export interface AgentTurnRequest {
   userId: string;
   modelName: string;
+  agentId?: AgentId;
+  agentRuntimeHash?: string;
   systemPrompt?: string;
   /** Full persisted chat history (used when no valid cursor is available). */
   history: ChatTurnContext[];

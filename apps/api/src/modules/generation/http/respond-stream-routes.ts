@@ -5,7 +5,7 @@
  */
 
 import { type Elysia } from 'elysia';
-import type { AgentExecutionMode, AgentId } from '@mangostudio/shared/agents';
+import type { AgentExecutionMode, AgentId, AgentProfile } from '@mangostudio/shared/agents';
 import { RespondStreamBodySchema } from '@mangostudio/shared/generation';
 import { ERROR_CODES } from '@mangostudio/shared/errors';
 import type { SSEErrorEvent } from '@mangostudio/shared/streaming';
@@ -47,6 +47,7 @@ const KEEPALIVE_BYTES = new TextEncoder().encode(': keepalive\n\n');
 interface ResolvedRequestAgent {
   readonly mode: AgentExecutionMode;
   readonly agentId: AgentId;
+  readonly profile: AgentProfile;
 }
 
 async function resolveRequestAgent(input: {
@@ -60,7 +61,7 @@ async function resolveRequestAgent(input: {
 
   const profile = await getAgentProfile(input.db, input.userId, agentId);
 
-  return { mode, agentId: profile.id };
+  return { mode, agentId: profile.id, profile };
 }
 
 function toSsePayload(event: StreamEvent): object {
@@ -215,7 +216,7 @@ export const respondStreamRoutes = (app: Elysia) =>
               agentId: body.agentId,
             });
             resolvedModel = await resolveModel({
-              requestedModel: body.model,
+              requestedModel: body.model ?? resolvedAgent.profile.model,
               userId,
               type: 'text',
             });
@@ -275,6 +276,7 @@ export const respondStreamRoutes = (app: Elysia) =>
                     toolIntent: body.toolIntent,
                     agentMode: resolvedAgent.mode,
                     agentId: resolvedAgent.agentId,
+                    resolvedAgentProfile: resolvedAgent.profile,
                     signal: abortController.signal,
                     resolvedModel,
                   },

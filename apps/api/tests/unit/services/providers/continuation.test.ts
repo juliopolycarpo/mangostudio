@@ -145,6 +145,29 @@ describe('validateContinuationEnvelope', () => {
     expect(result.valid).toBe(false);
     expect(result.reason).toContain('toolset');
   });
+
+  it('detects agent id mismatch when current turn is agent-bound', () => {
+    const envelope = { ...BASE_ENVELOPE, agentId: 'chat' as const };
+    const result = validateContinuationEnvelope(envelope, {
+      ...current,
+      agentId: 'default',
+    });
+
+    expect(result.valid).toBe(false);
+    expect(result.reasonCode).toBe('agent_changed');
+  });
+
+  it('detects agent runtime hash mismatch', () => {
+    const envelope = { ...BASE_ENVELOPE, agentId: 'default' as const, agentRuntimeHash: 'old' };
+    const result = validateContinuationEnvelope(envelope, {
+      ...current,
+      agentId: 'default',
+      agentRuntimeHash: 'new',
+    });
+
+    expect(result.valid).toBe(false);
+    expect(result.reasonCode).toBe('agent_runtime_changed');
+  });
 });
 
 describe('computeSystemPromptHash', () => {

@@ -103,6 +103,8 @@ export const messages: Messages = {
         modelChanged: 'Model changed to {model}. Replayed transcript on {provider} {toMode}.',
         systemPromptChanged: 'System prompt changed. Replayed transcript on {provider} {toMode}.',
         toolsetChanged: 'Toolset changed. Replayed transcript on {provider} {toMode}.',
+        agentChanged: 'Agent changed. Replayed transcript on {provider} {toMode}.',
+        agentRuntimeChanged: 'Agent settings changed. Replayed transcript on {provider} {toMode}.',
         cursorExpired: '{provider} {fromMode} cursor expired. Falling back to transcript replay.',
         cursorInvalid:
           '{provider} {fromMode} cursor was invalidated. Falling back to transcript replay.',

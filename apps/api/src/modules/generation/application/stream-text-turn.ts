@@ -9,7 +9,7 @@ import type {
 } from '@mangostudio/shared';
 import type { PromptSettings } from '@mangostudio/shared/prompt-rules';
 import type { ContextSettings } from '@mangostudio/shared/chat';
-import type { AgentExecutionMode, AgentId } from '@mangostudio/shared/agents';
+import type { AgentExecutionMode, AgentId, AgentProfile } from '@mangostudio/shared/agents';
 import type { ToolIntent } from '@mangostudio/shared/generation';
 import type { ProviderRuntimeSettings } from '@mangostudio/shared/provider-settings';
 import type { AgentTurnRequest } from '../../../services/providers/types';
@@ -22,15 +22,7 @@ import {
   getProviderForModel,
 } from '../../../services/providers/core/provider-registry';
 import { warmProviderForRequest } from '../../../services/providers/core/provider-readiness';
-import { mergeProviderRuntimeSettings } from '../../../services/providers/core/provider-settings-policy';
-import { getProviderSettings } from '../../provider-settings/infrastructure/provider-settings-repository';
-import { listSavedToolSettings } from '../../tool-settings/infrastructure/tool-settings-repository';
-import {
-  getAllToolDefinitions,
-  executeTool,
-  getTool,
-  getSafeEffectiveToolSettings,
-} from '../../../services/tools';
+import { executeTool, getTool, getSafeEffectiveToolSettings } from '../../../services/tools';
 import type { EffectiveToolSettings } from '../../../services/tools/types';
 import {
   GENERATE_IMAGE_TOOL_NAME,
@@ -72,9 +64,10 @@ import {
   type ContextSeverity,
   type ContinuationDisplayMode,
 } from '../../../services/providers/core/context-policy';
-import { composePrompt } from '../../prompt-rules/application/prompt-composer';
 import { assertTextTurnHasContent, normalizeTextTurnAttachmentIds } from './text-turn-content';
 import { resolveProviderRuntimeAttachments } from '../../attachments/application/runtime-attachment-resolver';
+import { resolveAgentRuntime, resolveRuntimeAgentId } from './resolve-agent-runtime';
+import { getAgentProfile } from '../../agents/application/agent-settings-service';
 
 const TOOL_TIMEOUT_MS = 30_000;
 const DEFAULT_MAX_TOOL_ITERATIONS = 10;
@@ -95,6 +88,7 @@ export interface StreamTextTurnInput {
   toolIntent?: ToolIntent;
   agentMode?: AgentExecutionMode;
   agentId?: AgentId;
+  resolvedAgentProfile?: AgentProfile;
   signal?: AbortSignal;
   resolvedModel?: ResolvedModel;
 }
@@ -157,10 +151,13 @@ export async function* streamTextTurn(
   const attachmentIds = normalizeTextTurnAttachmentIds(input.attachmentIds);
   assertTextTurnHasContent(input.prompt, attachmentIds);
 
+  const requestedAgentId = resolveRuntimeAgentId(input.agentMode, input.agentId);
+  const resolvedAgentProfile =
+    input.resolvedAgentProfile ?? (await getAgentProfile(db, input.userId, requestedAgentId));
   const resolvedModel =
     input.resolvedModel ??
     (await resolveModel({
-      requestedModel: input.model,
+      requestedModel: input.model ?? resolvedAgentProfile.model,
       userId: input.userId,
       type: 'text',
     }));
@@ -170,12 +167,29 @@ export async function* streamTextTurn(
   const provider = providerType
     ? getProvider(providerType)
     : await getProviderForModel(modelId, input.userId);
-  const savedProviderSettings = await getProviderSettings(db, input.userId, provider.providerType);
-  const runtimeSettings = mergeProviderRuntimeSettings(
-    provider.providerType,
-    savedProviderSettings,
-    getRequestRuntimeSettings(provider.providerType, input)
-  );
+  const agentRuntime = await resolveAgentRuntime({
+    db,
+    userId: input.userId,
+    agentMode: input.agentMode,
+    agentId: input.agentId,
+    provider: provider.providerType,
+    requestRuntimeSettings: getRequestRuntimeSettings(provider.providerType, input),
+    profile: resolvedAgentProfile,
+  });
+  let effectiveSystemPrompt = agentRuntime.effectiveSystemPrompt;
+  const effectivePrompt = input.prompt;
+  const toolDefs = [...agentRuntime.toolDefinitions];
+  const allowedToolNames = agentRuntime.allowedToolNames;
+  if (
+    provider.generateAgentTurnStream &&
+    input.toolIntent === 'image_generation_requested' &&
+    allowedToolNames.has(GENERATE_IMAGE_TOOL_NAME)
+  ) {
+    const hint =
+      'The user explicitly clicked Create images for this turn. Use the image generation tool when appropriate.';
+    effectiveSystemPrompt = effectiveSystemPrompt ? `${effectiveSystemPrompt}\n\n${hint}` : hint;
+  }
+  const runtimeSettings = agentRuntime.runtimeSettings;
   const warmupPromise = warmProviderForRequest(provider.providerType, {
     userId: input.userId,
     modelName: modelId,
@@ -229,26 +243,7 @@ export async function* streamTextTurn(
 
     if (provider.generateAgentTurnStream) {
       const richHistory = await loadRichHistory(chatId, { excludeId: userMsgId }, db);
-      const toolSettings = await listSavedToolSettings(db, userId);
-      const toolDefs = getAllToolDefinitions(toolSettings);
-
-      const isFirstTurn = !richHistory.some((t) => t.role === 'user');
-      const composition = composePrompt({
-        settings: input.promptSettings,
-        baseSystemPrompt: input.systemPrompt ?? '',
-        visiblePrompt: input.prompt,
-        isFirstTurn,
-      });
-      let effectiveSystemPrompt = composition.effectiveSystemPrompt || undefined;
-      const effectivePrompt = composition.effectivePrompt;
-
-      if (input.toolIntent === 'image_generation_requested') {
-        const hint =
-          'The user explicitly clicked Create images for this turn. Use the image generation tool when appropriate.';
-        effectiveSystemPrompt = effectiveSystemPrompt
-          ? `${effectiveSystemPrompt}\n\n${hint}`
-          : hint;
-      }
+      const toolSettings = agentRuntime.toolSettingsByName;
 
       // Cross-turn continuation state is sourced exclusively from the chat row.
       // Message-level providerState is kept only as an audit trail and must not
@@ -268,6 +263,8 @@ export async function* streamTextTurn(
         lastProviderState,
         provider: provider.providerType,
         modelName: modelId,
+        agentId: agentRuntime.profile.id,
+        agentRuntimeHash: agentRuntime.runtimeHash,
         systemPromptHash: currentSystemPromptHash,
         toolsetHash: currentToolsetHash,
       });
@@ -361,6 +358,8 @@ export async function* streamTextTurn(
         const req: AgentTurnRequest = {
           userId,
           modelName: modelId,
+          agentId: agentRuntime.profile.id,
+          agentRuntimeHash: agentRuntime.runtimeHash,
           systemPrompt: effectiveSystemPrompt,
           history: richHistory,
           prompt: isFirstIteration ? effectivePrompt : undefined,
@@ -543,6 +542,7 @@ export async function* streamTextTurn(
                 userId,
                 chatId,
                 settingsByToolName: toolSettings,
+                allowedToolNames,
               })
             )
           );
@@ -581,6 +581,7 @@ export async function* streamTextTurn(
                 userId,
                 chatId,
                 settingsByToolName: toolSettings,
+                allowedToolNames,
               });
               allParts.push({
                 type: 'tool_call',
@@ -618,6 +619,9 @@ export async function* streamTextTurn(
 
             try {
               const imageTool = getTool(name);
+              if (!allowedToolNames.has(name)) {
+                throw new Error(`Tool "${name}" is not allowed for this agent.`);
+              }
               if (!imageTool) throw new Error(`Unknown tool: "${name}"`);
               const effectiveSettings = getSafeEffectiveToolSettings(
                 imageTool,
@@ -764,7 +768,7 @@ export async function* streamTextTurn(
             chatId,
             Date.now(),
             interactionMode,
-            interactionMode === 'agent' ? (input.agentId ?? 'default') : null,
+            interactionMode === 'agent' ? agentRuntime.profile.id : null,
             db
           );
         } catch {
@@ -789,24 +793,6 @@ export async function* streamTextTurn(
       }
     } else if (provider.generateTextStream) {
       const history = await loadHistory(chatId, { excludeId: userMsgId }, db);
-
-      const isFirstTurn = !history.some((h) => h.role === 'user');
-      const composition = composePrompt({
-        settings: input.promptSettings,
-        baseSystemPrompt: input.systemPrompt ?? '',
-        visiblePrompt: input.prompt,
-        isFirstTurn,
-      });
-      let effectiveSystemPrompt = composition.effectiveSystemPrompt || undefined;
-      const effectivePrompt = composition.effectivePrompt;
-
-      if (input.toolIntent === 'image_generation_requested') {
-        const hint =
-          'The user explicitly clicked Create images for this turn. Use the image generation tool when appropriate.';
-        effectiveSystemPrompt = effectiveSystemPrompt
-          ? `${effectiveSystemPrompt}\n\n${hint}`
-          : hint;
-      }
 
       let legacyInThinking = false;
 
@@ -847,24 +833,6 @@ export async function* streamTextTurn(
       }
     } else {
       const history = await loadHistory(chatId, { excludeId: userMsgId }, db);
-
-      const isFirstTurn = !history.some((h) => h.role === 'user');
-      const composition = composePrompt({
-        settings: input.promptSettings,
-        baseSystemPrompt: input.systemPrompt ?? '',
-        visiblePrompt: input.prompt,
-        isFirstTurn,
-      });
-      let effectiveSystemPrompt = composition.effectiveSystemPrompt || undefined;
-      const effectivePrompt = composition.effectivePrompt;
-
-      if (input.toolIntent === 'image_generation_requested') {
-        const hint =
-          'The user explicitly clicked Create images for this turn. Use the image generation tool when appropriate.';
-        effectiveSystemPrompt = effectiveSystemPrompt
-          ? `${effectiveSystemPrompt}\n\n${hint}`
-          : hint;
-      }
 
       const result = await provider.generateText({
         userId,
@@ -924,7 +892,7 @@ export async function* streamTextTurn(
         chatId,
         aiTimestamp,
         interactionMode,
-        interactionMode === 'agent' ? (input.agentId ?? 'default') : null,
+        interactionMode === 'agent' ? agentRuntime.profile.id : null,
         db
       );
 
@@ -995,6 +963,7 @@ async function executeStandardToolCall(
     userId: string;
     chatId: string;
     settingsByToolName: ReadonlyMap<string, EffectiveToolSettings>;
+    allowedToolNames: ReadonlySet<string>;
   }
 ): Promise<StandardToolExecution> {
   const args = parseToolArgs(argsStr);
@@ -1002,6 +971,9 @@ async function executeStandardToolCall(
   let isError = false;
 
   try {
+    if (!context.allowedToolNames.has(name)) {
+      throw new Error(`Tool "${name}" is not allowed for this agent.`);
+    }
     result = await withToolTimeout(
       executeTool(
         name,
