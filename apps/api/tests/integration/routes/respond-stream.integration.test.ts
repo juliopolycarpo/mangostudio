@@ -688,6 +688,128 @@ describe('POST /respond/stream', () => {
     });
   });
 
+  it('streams subagent lifecycle events and persists a delegation trace', async () => {
+    const insertedMessages: Array<Record<string, unknown>> = [];
+    const parentToolResults: string[] = [];
+
+    await mock.module('../../../src/modules/chats/infrastructure/chat-repository', () => ({
+      verifyChatOwnership: () => Promise.resolve(true),
+    }));
+
+    await mock.module('../../../src/modules/agents/application/agent-settings-service', () => ({
+      getAgentProfile: (_db: unknown, _userId: string, agentId: string) =>
+        Promise.resolve(
+          agentId === 'user:explorer'
+            ? makeAgentProfile({
+                id: 'user:explorer',
+                name: 'Explore',
+                role: 'subagent',
+                systemPrompt: 'Explore the codebase.',
+                toolNames: [],
+                toolsEnabled: false,
+              })
+            : makeAgentProfile({
+                id: 'default',
+                name: 'Default',
+                role: 'both',
+                systemPrompt: 'Delegate exploration when useful.',
+                toolNames: ['delegate_to_agent'],
+                toolsEnabled: true,
+                subagentIds: ['user:explorer'],
+              })
+        ),
+    }));
+
+    await mock.module('../../../src/services/providers/core/provider-registry', () => ({
+      getProviderForModel: () =>
+        Promise.resolve({
+          providerType: 'openai-compatible',
+          generateText: () => Promise.resolve({ text: '' }),
+          generateAgentTurnStream: async function* (req: AgentTurnRequest) {
+            await Promise.resolve();
+            if (req.agentId === 'explore') {
+              yield { type: 'assistant_text_delta', text: 'Found the relevant files.' };
+              yield { type: 'turn_completed', providerState: null };
+              return;
+            }
+
+            if (!req.toolResults) {
+              yield {
+                type: 'tool_call_started',
+                callId: 'delegate-1',
+                name: 'delegate_to_agent',
+              };
+              yield {
+                type: 'tool_call_completed',
+                callId: 'delegate-1',
+                name: 'delegate_to_agent',
+                arguments: JSON.stringify({
+                  agentId: 'user:explorer',
+                  task: 'Find the relevant files for this feature.',
+                  expectedOutput: 'Concise file summary.',
+                }),
+              };
+              yield { type: 'turn_completed', providerState: null };
+              return;
+            }
+
+            parentToolResults.push(req.toolResults[0]?.result ?? '');
+            yield { type: 'assistant_text_delta', text: 'Used Explore.' };
+            yield { type: 'turn_completed', providerState: null };
+          },
+        }),
+    }));
+
+    await mock.module('../../../src/db/database', () => ({
+      getDb: () => ({
+        selectFrom: () => makeChain({ userId: TEST_USER.id }),
+        insertInto: (_table: string) => ({
+          values: (values: Record<string, unknown>) => {
+            if (_table === 'messages') insertedMessages.push({ ...values });
+            return { execute: () => Promise.resolve() };
+          },
+        }),
+        updateTable: () => ({ set: () => makeChain(undefined) }),
+      }),
+    }));
+
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
+    restoreAuth = restore;
+
+    const response = await app.handle(
+      new Request('http://localhost/respond/stream', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chatId: 'test-chat',
+          prompt: 'Use an explorer.',
+          model: 'test-model',
+          agentMode: 'agent',
+          agentId: 'default',
+        }),
+      })
+    );
+
+    expect(response.status).toBe(200);
+    const sseEvents = parseSseEvents(await response.text());
+
+    expect(sseEvents.map((event) => event.type)).toContain('subagent_started');
+    expect(sseEvents.map((event) => event.type)).toContain('subagent_text');
+    expect(sseEvents.map((event) => event.type)).toContain('subagent_completed');
+    expect(parentToolResults[0]).toContain('Found the relevant files.');
+
+    const aiMessage = insertedMessages.find((message) => message.role === 'ai');
+    expect(aiMessage).toBeDefined();
+    const parts = JSON.parse(aiMessage?.parts as string) as Array<Record<string, unknown>>;
+    expect(parts.find((part) => part.type === 'subagent_trace')).toMatchObject({
+      type: 'subagent_trace',
+      toolCallId: 'delegate-1',
+      agentId: 'user:explorer',
+      status: 'completed',
+      summary: 'Found the relevant files.',
+    });
+  });
+
   it('returns 503 when model catalog is not configured', async () => {
     // Mock getGeminiModelCatalog to return unconfigured state
     await mock.module('../../../src/services/gemini/catalog', () => ({

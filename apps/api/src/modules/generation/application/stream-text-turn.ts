@@ -10,6 +10,7 @@ import type {
 import type { PromptSettings } from '@mangostudio/shared/prompt-rules';
 import type { ContextSettings } from '@mangostudio/shared/chat';
 import type { AgentExecutionMode, AgentId, AgentProfile } from '@mangostudio/shared/agents';
+import type { MultiAgentSettings } from '@mangostudio/shared/app-settings';
 import type { ToolIntent } from '@mangostudio/shared/generation';
 import type { ProviderRuntimeSettings } from '@mangostudio/shared/provider-settings';
 import type { AgentTurnRequest } from '../../../services/providers/types';
@@ -68,6 +69,15 @@ import { assertTextTurnHasContent, normalizeTextTurnAttachmentIds } from './text
 import { resolveProviderRuntimeAttachments } from '../../attachments/application/runtime-attachment-resolver';
 import { resolveAgentRuntime, resolveRuntimeAgentId } from './resolve-agent-runtime';
 import { getAgentProfile } from '../../agents/application/agent-settings-service';
+import { getAppSettings } from '../../app-settings/application/app-settings-service';
+import {
+  runSubagentTurn,
+  SubagentDelegationError,
+  type DelegateToSubagentRequest,
+  type SubagentProgressEvent,
+  type SubagentRunResult,
+} from './subagent-runner';
+import { DELEGATE_TO_AGENT_TOOL_NAME } from '../../../services/tools/builtin/delegate-to-agent';
 
 const TOOL_TIMEOUT_MS = 30_000;
 const DEFAULT_MAX_TOOL_ITERATIONS = 10;
@@ -101,6 +111,24 @@ export type StreamEvent =
   | { type: 'tool_call_started'; callId: string; name: string }
   | { type: 'tool_call_completed'; callId: string; name: string; arguments: string }
   | { type: 'tool_result'; callId: string; name: string; result: unknown; isError: boolean }
+  | { type: 'subagent_started'; callId: string; agentId: string; agentName: string; task: string }
+  | { type: 'subagent_text'; callId: string; agentId: string; text: string }
+  | {
+      type: 'subagent_tool_call_started';
+      callId: string;
+      agentId: string;
+      toolCallId: string;
+      name: string;
+    }
+  | {
+      type: 'subagent_completed';
+      callId: string;
+      agentId: string;
+      agentName: string;
+      summary: string;
+      toolCallCount: number;
+    }
+  | { type: 'subagent_failed'; callId: string; agentId: string; agentName?: string; error: string }
   | { type: 'image_generation_started'; imageId: string; toolCallId: string; prompt: string }
   | {
       type: 'image_generation_completed';
@@ -167,19 +195,30 @@ export async function* streamTextTurn(
   const provider = providerType
     ? getProvider(providerType)
     : await getProviderForModel(modelId, input.userId);
-  const agentRuntime = await resolveAgentRuntime({
-    db,
-    userId: input.userId,
-    agentMode: input.agentMode,
-    agentId: input.agentId,
-    provider: provider.providerType,
-    requestRuntimeSettings: getRequestRuntimeSettings(provider.providerType, input),
-    profile: resolvedAgentProfile,
-  });
+  const [agentRuntime, appSettings] = await Promise.all([
+    resolveAgentRuntime({
+      db,
+      userId: input.userId,
+      agentMode: input.agentMode,
+      agentId: input.agentId,
+      provider: provider.providerType,
+      requestRuntimeSettings: getRequestRuntimeSettings(provider.providerType, input),
+      profile: resolvedAgentProfile,
+    }),
+    getAppSettings(db, input.userId),
+  ]);
   let effectiveSystemPrompt = agentRuntime.effectiveSystemPrompt;
   const effectivePrompt = input.prompt;
-  const toolDefs = [...agentRuntime.toolDefinitions];
-  const allowedToolNames = agentRuntime.allowedToolNames;
+  const multiAgentSettings = appSettings.multiAgentSettings;
+  const delegateToolAvailable = shouldExposeDelegateTool({
+    interactionMode,
+    profile: agentRuntime.profile,
+    settings: multiAgentSettings,
+  });
+  const toolDefs = agentRuntime.toolDefinitions.filter(
+    (tool) => tool.name !== DELEGATE_TO_AGENT_TOOL_NAME || delegateToolAvailable
+  );
+  const allowedToolNames = new Set(toolDefs.map((tool) => tool.name));
   if (
     provider.generateAgentTurnStream &&
     input.toolIntent === 'image_generation_requested' &&
@@ -223,6 +262,7 @@ export async function* streamTextTurn(
 
   const allParts: MessagePart[] = [];
   const generatedImageArtifacts: PersistedGeneratedImageInput[] = [];
+  const delegationState = { subagentCallCount: 0 };
   let fullText = '';
   const executionState: AgentTurnExecutionState = {
     durableProviderState: null,
@@ -536,16 +576,30 @@ export async function* streamTextTurn(
         );
 
         if (!hasImageGenerationCall) {
-          const toolExecutions = await Promise.all(
-            pendingCallEntries.map(([callId, call]) =>
-              executeStandardToolCall(callId, call.name, call.argsStr, {
-                userId,
-                chatId,
-                settingsByToolName: toolSettings,
-                allowedToolNames,
-              })
-            )
-          );
+          const toolExecutions: StandardToolExecution[] = [];
+          for await (const item of executeStandardToolCallsWithProgress(pendingCallEntries, {
+            userId,
+            chatId,
+            settingsByToolName: toolSettings,
+            allowedToolNames,
+            delegationRuntime: createDelegationRuntime({
+              db,
+              userId,
+              chatId,
+              parentAgentProfile: agentRuntime.profile,
+              parentModelName: modelId,
+              interactionMode,
+              settings: multiAgentSettings,
+              signal,
+              state: delegationState,
+            }),
+          })) {
+            if (item.kind === 'event') {
+              yield item.event;
+            } else {
+              toolExecutions.push(item.execution);
+            }
+          }
 
           for (const execution of toolExecutions) {
             allParts.push({
@@ -560,6 +614,9 @@ export async function* streamTextTurn(
               content: execution.resultStr,
               isError: execution.isError,
             });
+            if (execution.subagentTrace && multiAgentSettings.traceVisibility !== 'off') {
+              allParts.push(execution.subagentTrace);
+            }
             yield {
               type: 'tool_result',
               callId: execution.callId,
@@ -582,6 +639,17 @@ export async function* streamTextTurn(
                 chatId,
                 settingsByToolName: toolSettings,
                 allowedToolNames,
+                delegationRuntime: createDelegationRuntime({
+                  db,
+                  userId,
+                  chatId,
+                  parentAgentProfile: agentRuntime.profile,
+                  parentModelName: modelId,
+                  interactionMode,
+                  settings: multiAgentSettings,
+                  signal,
+                  state: delegationState,
+                }),
               });
               allParts.push({
                 type: 'tool_call',
@@ -595,6 +663,9 @@ export async function* streamTextTurn(
                 content: execution.resultStr,
                 isError: execution.isError,
               });
+              if (execution.subagentTrace && multiAgentSettings.traceVisibility !== 'off') {
+                allParts.push(execution.subagentTrace);
+              }
               yield {
                 type: 'tool_result',
                 callId: execution.callId,
@@ -953,6 +1024,64 @@ interface StandardToolExecution {
   result: unknown;
   resultStr: string;
   isError: boolean;
+  subagentTrace?: Extract<MessagePart, { type: 'subagent_trace' }>;
+}
+
+interface DelegationRuntime {
+  db: Kysely<Database>;
+  userId: string;
+  chatId: string;
+  parentAgentProfile: AgentProfile;
+  parentModelName: string;
+  interactionMode: 'chat' | 'agent';
+  settings: MultiAgentSettings;
+  signal?: AbortSignal;
+  state: { subagentCallCount: number };
+  onEvent?: (event: StreamEvent) => void;
+}
+
+type ToolExecutionProgressItem =
+  | { kind: 'event'; event: StreamEvent }
+  | { kind: 'execution'; execution: StandardToolExecution };
+
+async function* executeStandardToolCallsWithProgress(
+  calls: ReadonlyArray<[string, { name: string; argsStr: string }]>,
+  context: {
+    userId: string;
+    chatId: string;
+    settingsByToolName: ReadonlyMap<string, EffectiveToolSettings>;
+    allowedToolNames: ReadonlySet<string>;
+    delegationRuntime?: DelegationRuntime;
+  }
+): AsyncGenerator<ToolExecutionProgressItem> {
+  const queue = createAsyncQueue<ToolExecutionProgressItem>();
+  let remaining = calls.length;
+
+  for (const [callId, call] of calls) {
+    const runtime = context.delegationRuntime
+      ? {
+          ...context.delegationRuntime,
+          onEvent: (event: StreamEvent) => queue.push({ kind: 'event', event }),
+        }
+      : undefined;
+    void executeStandardToolCall(callId, call.name, call.argsStr, {
+      ...context,
+      delegationRuntime: runtime,
+    })
+      .then((execution) => queue.push({ kind: 'execution', execution }))
+      .catch((error: unknown) =>
+        queue.push({
+          kind: 'execution',
+          execution: createFailedToolExecution(callId, call.name, call.argsStr, error),
+        })
+      )
+      .finally(() => {
+        remaining -= 1;
+        if (remaining === 0) queue.close();
+      });
+  }
+
+  yield* queue;
 }
 
 async function executeStandardToolCall(
@@ -964,25 +1093,42 @@ async function executeStandardToolCall(
     chatId: string;
     settingsByToolName: ReadonlyMap<string, EffectiveToolSettings>;
     allowedToolNames: ReadonlySet<string>;
+    delegationRuntime?: DelegationRuntime;
   }
 ): Promise<StandardToolExecution> {
   const args = parseToolArgs(argsStr);
   let result: unknown;
   let isError = false;
+  let subagentTrace: Extract<MessagePart, { type: 'subagent_trace' }> | undefined;
 
   try {
     if (!context.allowedToolNames.has(name)) {
       throw new Error(`Tool "${name}" is not allowed for this agent.`);
     }
+    const runtime = context.delegationRuntime;
+    const delegateToAgent =
+      name === DELEGATE_TO_AGENT_TOOL_NAME && runtime
+        ? (request: DelegateToSubagentRequest) =>
+            executeDelegationToolCall(callId, request, runtime)
+        : undefined;
     result = await withToolTimeout(
       executeTool(
         name,
         args,
-        { userId: context.userId, chatId: context.chatId, parameters: {} },
+        {
+          userId: context.userId,
+          chatId: context.chatId,
+          parameters: {},
+          ...(delegateToAgent ? { delegateToAgent } : {}),
+        },
         context.settingsByToolName.get(name)
       ),
       name
     );
+    if (isSubagentRunResult(result)) {
+      subagentTrace = createSubagentTraceForTool(callId, result);
+      isError = result.status !== 'completed';
+    }
   } catch (error) {
     result = { error: errorToToolMessage(error) };
     isError = true;
@@ -995,6 +1141,200 @@ async function executeStandardToolCall(
     result,
     resultStr: stringifyToolResult(result),
     isError,
+    ...(subagentTrace ? { subagentTrace } : {}),
+  };
+}
+
+async function executeDelegationToolCall(
+  callId: string,
+  request: DelegateToSubagentRequest,
+  runtime: DelegationRuntime
+): Promise<SubagentRunResult> {
+  if (runtime.state.subagentCallCount >= runtime.settings.maxSubagentCalls) {
+    throw new SubagentDelegationError('Maximum subagent calls per turn reached.', 'MAX_CALLS');
+  }
+
+  runtime.state.subagentCallCount += 1;
+  runtime.onEvent?.({
+    type: 'system_event',
+    event: 'subagent_delegation_started',
+    detail: `call=${callId} target=${request.agentId}`,
+  });
+
+  const result = await runSubagentTurn({
+    db: runtime.db,
+    userId: runtime.userId,
+    chatId: runtime.chatId,
+    parentAgentProfile: runtime.parentAgentProfile,
+    parentModelName: runtime.parentModelName,
+    parentMode: runtime.interactionMode,
+    settings: runtime.settings,
+    request,
+    depth: 0,
+    signal: runtime.signal,
+    onEvent: (event) => runtime.onEvent?.(toSubagentStreamEvent(callId, event)),
+  });
+
+  runtime.onEvent?.({
+    type: 'system_event',
+    event:
+      result.status === 'completed'
+        ? 'subagent_delegation_completed'
+        : 'subagent_delegation_failed',
+    detail: `call=${callId} target=${result.agentId} status=${result.status} durationMs=${result.durationMs}`,
+  });
+
+  return result;
+}
+
+function toSubagentStreamEvent(callId: string, event: SubagentProgressEvent): StreamEvent {
+  switch (event.type) {
+    case 'started':
+      return {
+        type: 'subagent_started',
+        callId,
+        agentId: event.agentId,
+        agentName: event.agentName,
+        task: event.task,
+      };
+    case 'text':
+      return { type: 'subagent_text', callId, agentId: event.agentId, text: event.text };
+    case 'tool_call_started':
+      return {
+        type: 'subagent_tool_call_started',
+        callId,
+        agentId: event.agentId,
+        toolCallId: event.toolCallId,
+        name: event.name,
+      };
+    case 'completed':
+      return {
+        type: 'subagent_completed',
+        callId,
+        agentId: event.agentId,
+        agentName: event.agentName,
+        summary: event.summary,
+        toolCallCount: event.toolCallCount,
+      };
+    case 'failed':
+      return {
+        type: 'subagent_failed',
+        callId,
+        agentId: event.agentId,
+        agentName: event.agentName,
+        error: event.error,
+      };
+  }
+}
+
+function createDelegationRuntime(
+  input: Omit<DelegationRuntime, 'onEvent'>
+): DelegationRuntime | undefined {
+  if (
+    !shouldExposeDelegateTool({
+      interactionMode: input.interactionMode,
+      profile: input.parentAgentProfile,
+      settings: input.settings,
+    })
+  ) {
+    return undefined;
+  }
+  return input;
+}
+
+function shouldExposeDelegateTool(input: {
+  readonly interactionMode: 'chat' | 'agent';
+  readonly profile: AgentProfile;
+  readonly settings: MultiAgentSettings;
+}): boolean {
+  if (!input.settings.enabled) return false;
+  if (input.settings.maxDepth < 1) return false;
+  if (input.settings.maxSubagentCalls < 1) return false;
+  if (input.profile.subagentIds.length === 0) return false;
+  if (input.interactionMode === 'chat') return input.settings.chatDelegationEnabled;
+  return true;
+}
+
+function isSubagentRunResult(value: unknown): value is SubagentRunResult {
+  if (typeof value !== 'object' || value === null) return false;
+  const result = value as Partial<SubagentRunResult>;
+  return (
+    typeof result.agentId === 'string' &&
+    typeof result.agentName === 'string' &&
+    typeof result.summary === 'string' &&
+    typeof result.trace === 'object'
+  );
+}
+
+function createSubagentTraceForTool(
+  callId: string,
+  result: SubagentRunResult
+): Extract<MessagePart, { type: 'subagent_trace' }> {
+  return {
+    type: 'subagent_trace',
+    toolCallId: callId,
+    agentId: result.agentId,
+    agentName: result.agentName,
+    status: result.status,
+    summary: result.summary,
+    toolCallCount: result.toolCallCount,
+    ...(result.trace.lastMessage ? { lastMessage: result.trace.lastMessage } : {}),
+    messages: result.trace.messages,
+    tools: result.trace.tools,
+    ...(result.trace.error ? { error: result.trace.error } : {}),
+  };
+}
+
+function createFailedToolExecution(
+  callId: string,
+  name: string,
+  argsStr: string,
+  error: unknown
+): StandardToolExecution {
+  const result = { error: errorToToolMessage(error) };
+  return {
+    callId,
+    name,
+    args: parseToolArgs(argsStr),
+    result,
+    resultStr: stringifyToolResult(result),
+    isError: true,
+  };
+}
+
+function createAsyncQueue<T>(): AsyncIterable<T> & {
+  push: (item: T) => void;
+  close: () => void;
+} {
+  const items: T[] = [];
+  const waiters: Array<(result: IteratorResult<T>) => void> = [];
+  let closed = false;
+
+  return {
+    push(item: T) {
+      const waiter = waiters.shift();
+      if (waiter) {
+        waiter({ value: item, done: false });
+        return;
+      }
+      items.push(item);
+    },
+    close() {
+      closed = true;
+      while (waiters.length > 0) {
+        waiters.shift()?.({ value: undefined, done: true });
+      }
+    },
+    [Symbol.asyncIterator]() {
+      return {
+        next(): Promise<IteratorResult<T>> {
+          const item = items.shift();
+          if (item !== undefined) return Promise.resolve({ value: item, done: false });
+          if (closed) return Promise.resolve({ value: undefined, done: true });
+          return new Promise((resolve) => waiters.push(resolve));
+        },
+      };
+    },
   };
 }
 

@@ -1,17 +1,26 @@
-export type { AppSettings, ChatTitleSettings, ChatTitleStrategy, ImageQuality } from './contracts';
+export type {
+  AppSettings,
+  ChatTitleSettings,
+  ChatTitleStrategy,
+  ImageQuality,
+  MultiAgentSettings,
+} from './contracts';
 export {
   AppSettingsSchema,
   ChatTitleSettingsSchema,
   ImageQualitySchema,
+  MultiAgentSettingsSchema,
   type AppSettings as AppSettingsType,
   type ChatTitleSettings as ChatTitleSettingsType,
   type ChatTitleStrategy as ChatTitleStrategyType,
   type ImageQuality as ImageQualityType,
+  type MultiAgentSettings as MultiAgentSettingsType,
 } from './schemas';
 export {
   DEFAULT_APP_SETTINGS,
   DEFAULT_CHAT_TITLE_SETTINGS,
   DEFAULT_CONTEXT_SETTINGS,
+  DEFAULT_MULTI_AGENT_SETTINGS,
   DEFAULT_PROMPT_SETTINGS,
   IMAGE_QUALITY_OPTIONS,
   MAX_TOOL_ITERATIONS_DEFAULT,
@@ -21,5 +30,6 @@ export {
   normalizeAppSettings,
   normalizeChatTitleSettings,
   normalizeContextSettings,
+  normalizeMultiAgentSettings,
   normalizePromptSettings,
 } from './defaults';

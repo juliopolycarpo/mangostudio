@@ -3,6 +3,7 @@ import {
   DEFAULT_APP_SETTINGS,
   DEFAULT_CHAT_TITLE_SETTINGS,
   DEFAULT_CONTEXT_SETTINGS,
+  DEFAULT_MULTI_AGENT_SETTINGS,
   DEFAULT_PROMPT_SETTINGS,
   IMAGE_QUALITY_OPTIONS,
   MAX_TOOL_ITERATIONS_DEFAULT,
@@ -12,6 +13,7 @@ import {
   normalizeAppSettings,
   normalizeChatTitleSettings,
   normalizeContextSettings,
+  normalizeMultiAgentSettings,
   normalizePromptSettings,
 } from '../../src/app-settings';
 
@@ -167,6 +169,36 @@ describe('normalizeContextSettings', () => {
       preferredSummaryModel: '',
     });
     expect(result.preferredSummaryModel).toBe(DEFAULT_CONTEXT_SETTINGS.preferredSummaryModel);
+  });
+});
+
+describe('normalizeMultiAgentSettings', () => {
+  it('falls back to defaults when input is not an object', () => {
+    expect(normalizeMultiAgentSettings(undefined)).toEqual(DEFAULT_MULTI_AGENT_SETTINGS);
+    expect(normalizeMultiAgentSettings(null)).toEqual(DEFAULT_MULTI_AGENT_SETTINGS);
+    expect(normalizeMultiAgentSettings('disabled')).toEqual(DEFAULT_MULTI_AGENT_SETTINGS);
+  });
+
+  it('preserves valid values and clamps numeric limits', () => {
+    expect(
+      normalizeMultiAgentSettings({
+        enabled: false,
+        chatDelegationEnabled: true,
+        traceVisibility: 'full',
+        maxDepth: 9,
+        maxSubagentCalls: -1,
+        timeoutMs: 99_999_999,
+        defaultMaxTurns: 12,
+      })
+    ).toEqual({
+      enabled: false,
+      chatDelegationEnabled: true,
+      traceVisibility: 'full',
+      maxDepth: 3,
+      maxSubagentCalls: 0,
+      timeoutMs: 3_600_000,
+      defaultMaxTurns: 10,
+    });
   });
 });
 

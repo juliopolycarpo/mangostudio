@@ -7,7 +7,7 @@ import type {
   RuleFileSetting,
 } from '../prompt-rules';
 import type { ReasoningEffort } from '../types';
-import type { AppSettings, ChatTitleSettings, ImageQuality } from './contracts';
+import type { AppSettings, ChatTitleSettings, ImageQuality, MultiAgentSettings } from './contracts';
 
 const CURRENT_MODEL_SETTING = 'current_model';
 
@@ -55,12 +55,23 @@ export const DEFAULT_CHAT_TITLE_SETTINGS: ChatTitleSettings = {
   preferredModel: CURRENT_MODEL_SETTING,
 };
 
+export const DEFAULT_MULTI_AGENT_SETTINGS: MultiAgentSettings = {
+  enabled: true,
+  chatDelegationEnabled: false,
+  traceVisibility: 'compact',
+  maxDepth: 1,
+  maxSubagentCalls: 3,
+  timeoutMs: 15 * 60 * 1000,
+  defaultMaxTurns: 3,
+};
+
 export const DEFAULT_APP_SETTINGS: AppSettings = {
   promptSettings: DEFAULT_PROMPT_SETTINGS,
   globalImageQuality: '1K',
   thinkingEnabled: false,
   reasoningEffort: 'medium',
   maxToolIterations: MAX_TOOL_ITERATIONS_DEFAULT,
+  multiAgentSettings: DEFAULT_MULTI_AGENT_SETTINGS,
   contextSettings: DEFAULT_CONTEXT_SETTINGS,
   chatTitleSettings: DEFAULT_CHAT_TITLE_SETTINGS,
 };
@@ -104,9 +115,18 @@ function isChatTitleStrategy(value: unknown): value is ChatTitleSettings['strate
   return value === 'prompt_prefix' || value === 'model';
 }
 
+function isTraceVisibility(value: unknown): value is MultiAgentSettings['traceVisibility'] {
+  return value === 'compact' || value === 'full' || value === 'off';
+}
+
 function clampThreshold(value: number, fallback: number): number {
   if (!Number.isFinite(value)) return fallback;
   return Math.min(0.99, Math.max(0.5, Math.round(value * 100) / 100));
+}
+
+function clampInteger(value: unknown, fallback: number, min: number, max: number): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return fallback;
+  return Math.min(max, Math.max(min, Math.round(value)));
 }
 
 function normalizeRuleFileSetting(value: unknown, fallback: RuleFileSetting): RuleFileSetting {
@@ -226,6 +246,41 @@ export function normalizeChatTitleSettings(value: unknown): ChatTitleSettings {
   };
 }
 
+export function normalizeMultiAgentSettings(value: unknown): MultiAgentSettings {
+  if (!isRecord(value)) return DEFAULT_MULTI_AGENT_SETTINGS;
+
+  return {
+    enabled:
+      typeof value.enabled === 'boolean' ? value.enabled : DEFAULT_MULTI_AGENT_SETTINGS.enabled,
+    chatDelegationEnabled:
+      typeof value.chatDelegationEnabled === 'boolean'
+        ? value.chatDelegationEnabled
+        : DEFAULT_MULTI_AGENT_SETTINGS.chatDelegationEnabled,
+    traceVisibility: isTraceVisibility(value.traceVisibility)
+      ? value.traceVisibility
+      : DEFAULT_MULTI_AGENT_SETTINGS.traceVisibility,
+    maxDepth: clampInteger(value.maxDepth, DEFAULT_MULTI_AGENT_SETTINGS.maxDepth, 0, 3),
+    maxSubagentCalls: clampInteger(
+      value.maxSubagentCalls,
+      DEFAULT_MULTI_AGENT_SETTINGS.maxSubagentCalls,
+      0,
+      10
+    ),
+    timeoutMs: clampInteger(
+      value.timeoutMs,
+      DEFAULT_MULTI_AGENT_SETTINGS.timeoutMs,
+      1_000,
+      3_600_000
+    ),
+    defaultMaxTurns: clampInteger(
+      value.defaultMaxTurns,
+      DEFAULT_MULTI_AGENT_SETTINGS.defaultMaxTurns,
+      1,
+      10
+    ),
+  };
+}
+
 export function normalizeAppSettings(value: unknown): AppSettings {
   if (!isRecord(value)) return DEFAULT_APP_SETTINGS;
 
@@ -246,6 +301,7 @@ export function normalizeAppSettings(value: unknown): AppSettings {
         ? value.maxToolIterations
         : DEFAULT_APP_SETTINGS.maxToolIterations
     ),
+    multiAgentSettings: normalizeMultiAgentSettings(value.multiAgentSettings),
     contextSettings: normalizeContextSettings(value.contextSettings),
     chatTitleSettings: normalizeChatTitleSettings(value.chatTitleSettings),
   };

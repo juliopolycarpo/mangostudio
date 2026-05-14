@@ -315,4 +315,35 @@ describe('ChatFeed — generated_image part rendering', () => {
     expect(screen.getByAltText('Generated image')).toBeInTheDocument();
     expect(screen.getByText('Here is your image.')).toBeInTheDocument();
   });
+
+  it('renders and expands subagent trace parts', () => {
+    const parts: MessagePart[] = [
+      {
+        type: 'subagent_trace',
+        toolCallId: 'delegate-1',
+        agentId: 'explore',
+        agentName: 'Explore',
+        status: 'completed',
+        summary: 'Found the relevant files.',
+        toolCallCount: 1,
+        lastMessage: 'Found the relevant files.',
+        messages: [{ role: 'assistant', text: 'Found the relevant files.' }],
+        tools: [{ callId: 'tool-1', name: 'read_file' }],
+      },
+      { type: 'text', text: 'I used Explore.' },
+    ];
+    const msg = makeMessage({ parts });
+
+    render(<ChatFeed chatId="chat-1" messages={[msg]} />);
+
+    expect(screen.getByText('Explore')).toBeInTheDocument();
+    expect(screen.getByText('Subagent trace')).toBeInTheDocument();
+    expect(screen.getByText('I used Explore.')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText('Explore'));
+
+    expect(screen.getByText('Messages')).toBeInTheDocument();
+    expect(screen.getByText('Tool calls')).toBeInTheDocument();
+    expect(screen.getByText('read_file')).toBeInTheDocument();
+  });
 });

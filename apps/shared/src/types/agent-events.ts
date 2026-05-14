@@ -48,6 +48,31 @@ export interface GeneratedImagePart {
   generationTime?: string;
 }
 
+export interface SubagentTraceMessage {
+  role: 'assistant' | 'system';
+  text: string;
+}
+
+export interface SubagentToolTrace {
+  callId: string;
+  name: string;
+  isError?: boolean;
+}
+
+export interface SubagentTracePart {
+  type: 'subagent_trace';
+  toolCallId: string;
+  agentId: string;
+  agentName: string;
+  status: 'running' | 'completed' | 'failed' | 'aborted' | 'timeout';
+  summary: string;
+  toolCallCount: number;
+  lastMessage?: string;
+  messages: ReadonlyArray<SubagentTraceMessage>;
+  tools: ReadonlyArray<SubagentToolTrace>;
+  error?: string;
+}
+
 /** Discriminated union of all content block types in an assistant message. */
 export type MessagePart =
   | { type: 'text'; text: string }
@@ -55,6 +80,7 @@ export type MessagePart =
   | { type: 'tool_call'; toolCallId: string; name: string; args: Record<string, unknown> }
   | { type: 'tool_result'; toolCallId: string; content: string; isError?: boolean }
   | GeneratedImagePart
+  | SubagentTracePart
   | { type: 'error'; text: string }
   | { type: 'system_event'; event: string; detail?: string }
   | {

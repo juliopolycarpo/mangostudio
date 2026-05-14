@@ -19,6 +19,14 @@ function GeneralSettingsRoute() {
       setChatTitleStrategy={app.settings.setChatTitleStrategy}
       setChatTitlePromptPrefixLength={app.settings.setChatTitlePromptPrefixLength}
       setPreferredChatTitleModel={app.settings.setPreferredChatTitleModel}
+      multiAgentSettings={app.settings.multiAgentSettings}
+      setMultiAgentEnabled={app.settings.setMultiAgentEnabled}
+      setChatDelegationEnabled={app.settings.setChatDelegationEnabled}
+      setTraceVisibility={app.settings.setTraceVisibility}
+      setMaxDelegationDepth={app.settings.setMaxDelegationDepth}
+      setMaxSubagentCalls={app.settings.setMaxSubagentCalls}
+      setSubagentTimeoutMs={app.settings.setSubagentTimeoutMs}
+      setDefaultSubagentMaxTurns={app.settings.setDefaultSubagentMaxTurns}
     />
   );
 }

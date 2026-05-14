@@ -94,6 +94,51 @@ export interface SSEUserMessageIdEvent {
   done: false;
 }
 
+export interface SSESubagentStartedEvent {
+  type: 'subagent_started';
+  callId: string;
+  agentId: string;
+  agentName: string;
+  task: string;
+  done: false;
+}
+
+export interface SSESubagentTextEvent {
+  type: 'subagent_text';
+  callId: string;
+  agentId: string;
+  text: string;
+  done: false;
+}
+
+export interface SSESubagentToolCallStartedEvent {
+  type: 'subagent_tool_call_started';
+  callId: string;
+  agentId: string;
+  toolCallId: string;
+  name: string;
+  done: false;
+}
+
+export interface SSESubagentCompletedEvent {
+  type: 'subagent_completed';
+  callId: string;
+  agentId: string;
+  agentName: string;
+  summary: string;
+  toolCallCount: number;
+  done: false;
+}
+
+export interface SSESubagentFailedEvent {
+  type: 'subagent_failed';
+  callId: string;
+  agentId: string;
+  agentName?: string;
+  error: string;
+  done: false;
+}
+
 /**
  * Full discriminated union of all SSE chunks emitted by the streaming endpoint.
  * This is the canonical type — frontend and API both import from here.
@@ -106,6 +151,11 @@ export type StreamChunk =
   | { type: 'tool_call_started'; callId: string; name: string; done: false }
   | { type: 'tool_call_completed'; callId: string; name: string; arguments: string; done: false }
   | { type: 'tool_result'; callId: string; result: unknown; isError?: boolean; done: false }
+  | SSESubagentStartedEvent
+  | SSESubagentTextEvent
+  | SSESubagentToolCallStartedEvent
+  | SSESubagentCompletedEvent
+  | SSESubagentFailedEvent
   | SSEImageGenerationStartedEvent
   | SSEImageGenerationCompletedEvent
   | SSEImageGenerationFailedEvent

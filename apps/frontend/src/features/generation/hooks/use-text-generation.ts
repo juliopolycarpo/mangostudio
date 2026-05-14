@@ -126,6 +126,31 @@ function upsertGeneratedImagePart(
   return parts.map((part, index) => (index === existingIndex ? generatedImagePart : part));
 }
 
+function upsertSubagentTracePart(
+  parts: MessagePart[],
+  tracePart: Extract<MessagePart, { type: 'subagent_trace' }>
+): MessagePart[] {
+  const existingIndex = parts.findIndex(
+    (part) => part.type === 'subagent_trace' && part.toolCallId === tracePart.toolCallId
+  );
+
+  if (existingIndex === -1) return [...parts, tracePart];
+  return parts.map((part, index) => (index === existingIndex ? tracePart : part));
+}
+
+function updateSubagentTracePart(
+  parts: MessagePart[],
+  toolCallId: string,
+  update: (
+    current: Extract<MessagePart, { type: 'subagent_trace' }>
+  ) => Extract<MessagePart, { type: 'subagent_trace' }>
+): MessagePart[] {
+  return parts.map((part) => {
+    if (part.type !== 'subagent_trace' || part.toolCallId !== toolCallId) return part;
+    return update(part);
+  });
+}
+
 /** Handles text generation: creates messages, drives SSE stream, updates optimistic UI. */
 export function useTextGeneration({
   chats,
@@ -356,6 +381,97 @@ export function useTextGeneration({
                   isError: chunk.isError,
                 };
                 accumulatedParts = [...accumulatedParts, resultPart];
+                updateOptimisticMessage(activeChatId, currentAiMsgId, {
+                  parts: accumulatedParts,
+                });
+                break;
+              }
+              case 'subagent_started': {
+                accumulatedParts = upsertSubagentTracePart(accumulatedParts, {
+                  type: 'subagent_trace',
+                  toolCallId: chunk.callId,
+                  agentId: chunk.agentId,
+                  agentName: chunk.agentName,
+                  status: 'running',
+                  summary: chunk.task,
+                  toolCallCount: 0,
+                  messages: [],
+                  tools: [],
+                });
+                updateOptimisticMessage(activeChatId, currentAiMsgId, {
+                  parts: accumulatedParts,
+                });
+                break;
+              }
+              case 'subagent_text': {
+                accumulatedParts = updateSubagentTracePart(
+                  accumulatedParts,
+                  chunk.callId,
+                  (part) => {
+                    const previous = part.messages.at(-1);
+                    const messages =
+                      previous?.role === 'assistant'
+                        ? [
+                            ...part.messages.slice(0, -1),
+                            { role: 'assistant' as const, text: `${previous.text}${chunk.text}` },
+                          ]
+                        : [...part.messages, { role: 'assistant' as const, text: chunk.text }];
+                    const lastMessage = messages.at(-1)?.text;
+                    return {
+                      ...part,
+                      ...(lastMessage ? { lastMessage } : {}),
+                      messages,
+                    };
+                  }
+                );
+                updateOptimisticMessage(activeChatId, currentAiMsgId, {
+                  parts: accumulatedParts,
+                });
+                break;
+              }
+              case 'subagent_tool_call_started': {
+                accumulatedParts = updateSubagentTracePart(
+                  accumulatedParts,
+                  chunk.callId,
+                  (part) => ({
+                    ...part,
+                    toolCallCount: part.toolCallCount + 1,
+                    tools: [...part.tools, { callId: chunk.toolCallId, name: chunk.name }],
+                  })
+                );
+                updateOptimisticMessage(activeChatId, currentAiMsgId, {
+                  parts: accumulatedParts,
+                });
+                break;
+              }
+              case 'subagent_completed': {
+                accumulatedParts = updateSubagentTracePart(
+                  accumulatedParts,
+                  chunk.callId,
+                  (part) => ({
+                    ...part,
+                    status: 'completed',
+                    summary: chunk.summary,
+                    toolCallCount: chunk.toolCallCount,
+                    lastMessage: chunk.summary,
+                  })
+                );
+                updateOptimisticMessage(activeChatId, currentAiMsgId, {
+                  parts: accumulatedParts,
+                });
+                break;
+              }
+              case 'subagent_failed': {
+                accumulatedParts = updateSubagentTracePart(
+                  accumulatedParts,
+                  chunk.callId,
+                  (part) => ({
+                    ...part,
+                    status: 'failed',
+                    summary: chunk.error,
+                    error: chunk.error,
+                  })
+                );
                 updateOptimisticMessage(activeChatId, currentAiMsgId, {
                   parts: accumulatedParts,
                 });
