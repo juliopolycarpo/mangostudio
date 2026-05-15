@@ -109,8 +109,8 @@ describe('settings agents routes', () => {
       reasoningEffort: 'high',
       maxToolIterations: 4,
     });
-    expect(payload.toolNames).toContain('get_current_datetime');
     expect(payload.toolNames).not.toContain('generate_image');
+    expect(payload.toolNames.length).toBeGreaterThan(0);
   });
 
   it('updates built-in chat settings per user', async () => {

@@ -51,11 +51,10 @@ function makeAgentProfile(overrides: Partial<AgentProfile>): AgentProfile {
   };
 }
 
-beforeEach(() => {
-  clearRegistry();
-});
-
 describe('registerTool / getTool', () => {
+  beforeEach(() => {
+    clearRegistry();
+  });
   it('registers and retrieves a tool by name', () => {
     registerTool(makeTool('my_tool', () => Promise.resolve('result')));
 
@@ -80,6 +79,9 @@ describe('registerTool / getTool', () => {
 });
 
 describe('getAllTools / getAllToolDefinitions', () => {
+  beforeEach(() => {
+    clearRegistry();
+  });
   it('returns all registered tools', () => {
     registerTool(makeTool('a'));
     registerTool(makeTool('b'));
@@ -191,6 +193,10 @@ describe('getAllTools / getAllToolDefinitions', () => {
 });
 
 describe('executeTool', () => {
+  beforeEach(() => {
+    clearRegistry();
+  });
+
   it('executes a registered tool and returns its result', async () => {
     registerTool(
       makeTool('add', (args) => Promise.resolve((args.a as number) + (args.b as number)))

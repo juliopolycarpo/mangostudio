@@ -33,6 +33,7 @@ beforeAll(async () => {
       createdAt: now,
       updatedAt: now,
     })
+    .onConflict((oc) => oc.column('id').doNothing())
     .execute();
 });
 
@@ -222,6 +223,13 @@ describe('sendTextMessage attachments', () => {
         userId: TEST_USER.id,
       })
       .execute();
+
+    const chat = await db
+      .selectFrom('chats')
+      .select('id')
+      .where('id', '=', chatId)
+      .executeTakeFirst();
+    expect(chat).toBeDefined();
 
     let caughtError: unknown;
     try {
