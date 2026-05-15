@@ -3,6 +3,11 @@
  */
 
 import type { UpdateProviderRuntimeSettingsBody } from '@mangostudio/shared/provider-settings';
+import {
+  MAX_TOOL_ITERATIONS_DEFAULT,
+  MAX_TOOL_ITERATIONS_MAX,
+  MAX_TOOL_ITERATIONS_MIN,
+} from '@mangostudio/shared/app-settings';
 import { Card } from '@/components/ui/Card';
 import { useI18n } from '@/hooks/use-i18n';
 
@@ -41,22 +46,22 @@ export function ToolSettingsSection({
             <input
               id="tool-iterations"
               type="range"
-              min={1}
-              max={25}
+              min={MAX_TOOL_ITERATIONS_MIN}
+              max={MAX_TOOL_ITERATIONS_MAX}
               step={1}
-              value={form.maxToolIterations ?? 10}
+              value={form.maxToolIterations ?? MAX_TOOL_ITERATIONS_DEFAULT}
               onChange={(e) => onChange({ ...form, maxToolIterations: Number(e.target.value) })}
               className="flex-1 h-2 bg-surface-container-lowest rounded-full appearance-none cursor-pointer accent-primary"
             />
             <input
               type="number"
-              min={1}
-              max={25}
+              min={MAX_TOOL_ITERATIONS_MIN}
+              max={MAX_TOOL_ITERATIONS_MAX}
               step={1}
-              value={form.maxToolIterations ?? 10}
+              value={form.maxToolIterations ?? MAX_TOOL_ITERATIONS_DEFAULT}
               onChange={(e) => onChange({ ...form, maxToolIterations: Number(e.target.value) })}
               aria-label={s.maxToolIterations}
-              className="w-20 rounded-xl px-3 py-2 text-sm text-center bg-surface-container-lowest text-on-surface border border-outline-variant/20 focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/20 transition-colors"
+              className="w-24 rounded-xl px-3 py-2 text-sm text-center bg-surface-container-lowest text-on-surface border border-outline-variant/20 focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/20 transition-colors"
             />
           </div>
         </div>

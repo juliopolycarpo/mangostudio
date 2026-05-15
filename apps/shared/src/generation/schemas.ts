@@ -1,4 +1,5 @@
 import { Type, type Static } from '@sinclair/typebox';
+import { MAX_TOOL_ITERATIONS_MAX, MAX_TOOL_ITERATIONS_MIN } from '../agentic-limits';
 import { AgentExecutionModeSchema, AgentIdSchema } from '../agents/schemas';
 import { ContextSettingsSchema } from '../chat/schemas';
 import { ReasoningEffortSchema } from '../provider-settings/schemas';
@@ -42,7 +43,9 @@ export const RespondStreamBodySchema = Type.Object({
   thinkingEnabled: Type.Optional(Type.Boolean()),
   reasoningEffort: Type.Optional(ReasoningEffortSchema),
   thinkingVisibility: Type.Optional(Type.String()),
-  maxToolIterations: Type.Optional(Type.Integer({ minimum: 1, maximum: 25 })),
+  maxToolIterations: Type.Optional(
+    Type.Integer({ minimum: MAX_TOOL_ITERATIONS_MIN, maximum: MAX_TOOL_ITERATIONS_MAX })
+  ),
   contextSettings: Type.Optional(ContextSettingsSchema),
   toolIntent: ToolIntentSchema,
   agentMode: Type.Optional(AgentExecutionModeSchema),

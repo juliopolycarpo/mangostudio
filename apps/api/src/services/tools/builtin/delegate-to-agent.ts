@@ -3,8 +3,10 @@
  * Delegates bounded work to an allowed subagent during the current turn.
  */
 
-import type { DelegateToAgentInput, ToolContext } from '../types';
+import { SUBAGENT_MAX_TURNS_MAX, SUBAGENT_MAX_TURNS_MIN } from '@mangostudio/shared/app-settings';
+
 import { registerTool } from '../registry';
+import type { DelegateToAgentInput, ToolContext } from '../types';
 
 export const DELEGATE_TO_AGENT_TOOL_NAME = 'delegate_to_agent';
 
@@ -33,6 +35,8 @@ const definition = {
       },
       maxTurns: {
         type: 'number',
+        minimum: SUBAGENT_MAX_TURNS_MIN,
+        maximum: SUBAGENT_MAX_TURNS_MAX,
         description: 'Optional maximum subagent model/tool turns for this delegation.',
       },
     },
@@ -97,7 +101,7 @@ function getOptionalInteger(value: unknown): number | undefined {
   if (typeof value !== 'number' || !Number.isFinite(value)) {
     throw new Error('Delegation field "maxTurns" must be a finite number.');
   }
-  return Math.max(1, Math.min(10, Math.round(value)));
+  return Math.max(SUBAGENT_MAX_TURNS_MIN, Math.min(SUBAGENT_MAX_TURNS_MAX, Math.round(value)));
 }
 
 register();

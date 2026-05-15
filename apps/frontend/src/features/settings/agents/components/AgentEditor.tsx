@@ -5,6 +5,7 @@ import type {
   AgentProfileUpsertBody,
   AgentRole,
 } from '@mangostudio/shared/agents';
+import { MAX_TOOL_ITERATIONS_MAX, MAX_TOOL_ITERATIONS_MIN } from '@mangostudio/shared/app-settings';
 import type { ToolSettingsDescriptor } from '@mangostudio/shared/tool-settings';
 import { Eye, RotateCcw, Save, Trash2, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
@@ -531,8 +532,8 @@ function NumberField({
       <span className="text-sm font-semibold text-on-surface">{label}</span>
       <input
         type="number"
-        min={1}
-        max={25}
+        min={MAX_TOOL_ITERATIONS_MIN}
+        max={MAX_TOOL_ITERATIONS_MAX}
         value={value}
         onChange={(event) => {
           const nextValue = Number(event.target.value);

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSettings } from '@mangostudio/shared/app-settings';
-import { DEFAULT_APP_SETTINGS } from '@mangostudio/shared/app-settings';
+import { DEFAULT_APP_SETTINGS, MAX_TOOL_ITERATIONS_MAX } from '@mangostudio/shared/app-settings';
 import { client } from '../../../src/lib/api-client';
 import { useGlobalSettings } from '../../../src/hooks/use-global-settings';
 import { act, renderHook, waitFor } from '../../support/harness/render';
@@ -71,13 +71,15 @@ describe('useGlobalSettings', () => {
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
     act(() => {
-      result.current.setMaxToolIterations(999);
+      result.current.setMaxToolIterations(2_000);
     });
 
-    await waitFor(() => expect(result.current.maxToolIterations).toBe(25));
+    await waitFor(() => expect(result.current.maxToolIterations).toBe(MAX_TOOL_ITERATIONS_MAX));
     await waitFor(() => expect(mockPut).toHaveBeenCalledTimes(1));
 
-    expect(mockPut.mock.calls[0]?.[0]).toMatchObject({ maxToolIterations: 25 });
+    expect(mockPut.mock.calls[0]?.[0]).toMatchObject({
+      maxToolIterations: MAX_TOOL_ITERATIONS_MAX,
+    });
   });
 
   it('persists chat title auto rename settings through the app settings mutation', async () => {

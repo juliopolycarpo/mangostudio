@@ -9,6 +9,10 @@ import {
   MAX_TOOL_ITERATIONS_DEFAULT,
   MAX_TOOL_ITERATIONS_MAX,
   MAX_TOOL_ITERATIONS_MIN,
+  MAX_SUBAGENT_CALLS_MAX,
+  MAX_SUBAGENT_CALLS_MIN,
+  SUBAGENT_MAX_TURNS_MAX,
+  SUBAGENT_MAX_TURNS_MIN,
   clampMaxToolIterations,
   normalizeAppSettings,
   normalizeChatTitleSettings,
@@ -83,7 +87,7 @@ describe('clampMaxToolIterations', () => {
   });
 
   it('clamps to maximum', () => {
-    expect(clampMaxToolIterations(100)).toBe(MAX_TOOL_ITERATIONS_MAX);
+    expect(clampMaxToolIterations(MAX_TOOL_ITERATIONS_MAX + 100)).toBe(MAX_TOOL_ITERATIONS_MAX);
     expect(clampMaxToolIterations(MAX_TOOL_ITERATIONS_MAX + 1)).toBe(MAX_TOOL_ITERATIONS_MAX);
   });
 
@@ -188,16 +192,28 @@ describe('normalizeMultiAgentSettings', () => {
         maxDepth: 9,
         maxSubagentCalls: -1,
         timeoutMs: 99_999_999,
-        defaultMaxTurns: 12,
+        defaultMaxTurns: 0,
       })
     ).toEqual({
       enabled: false,
       chatDelegationEnabled: true,
       traceVisibility: 'full',
       maxDepth: 3,
-      maxSubagentCalls: 0,
+      maxSubagentCalls: MAX_SUBAGENT_CALLS_MIN,
       timeoutMs: 3_600_000,
-      defaultMaxTurns: 10,
+      defaultMaxTurns: SUBAGENT_MAX_TURNS_MIN,
+    });
+  });
+
+  it('supports high multi-agent exploration limits', () => {
+    expect(
+      normalizeMultiAgentSettings({
+        maxSubagentCalls: 2_000,
+        defaultMaxTurns: 2_000,
+      })
+    ).toMatchObject({
+      maxSubagentCalls: MAX_SUBAGENT_CALLS_MAX,
+      defaultMaxTurns: SUBAGENT_MAX_TURNS_MAX,
     });
   });
 });
@@ -358,12 +374,12 @@ describe('normalizeAppSettings', () => {
       globalImageQuality: IMAGE_QUALITY_OPTIONS[2],
       thinkingEnabled: true,
       reasoningEffort: 'high',
-      maxToolIterations: 5,
+      maxToolIterations: MAX_TOOL_ITERATIONS_MAX,
     });
     expect(result.globalImageQuality).toBe('2K');
     expect(result.thinkingEnabled).toBe(true);
     expect(result.reasoningEffort).toBe('high');
-    expect(result.maxToolIterations).toBe(5);
+    expect(result.maxToolIterations).toBe(MAX_TOOL_ITERATIONS_MAX);
   });
 
   it('normalizes nested prompt and context settings', () => {

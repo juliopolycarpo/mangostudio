@@ -3,6 +3,12 @@ import type {
   ChatTitleStrategy,
   MultiAgentSettings,
 } from '@mangostudio/shared/app-settings';
+import {
+  MAX_SUBAGENT_CALLS_MAX,
+  MAX_SUBAGENT_CALLS_MIN,
+  SUBAGENT_MAX_TURNS_MAX,
+  SUBAGENT_MAX_TURNS_MIN,
+} from '@mangostudio/shared/app-settings';
 import type { ModelOption } from '@mangostudio/shared';
 import type { Locale } from '@mangostudio/shared/i18n';
 import { Card } from '@/components/ui/Card';
@@ -175,16 +181,16 @@ export function GeneralSettings({
           <NumberSetting
             label={s.maxSubagentCallsLabel}
             value={multiAgentSettings.maxSubagentCalls}
-            min={0}
-            max={10}
+            min={MAX_SUBAGENT_CALLS_MIN}
+            max={MAX_SUBAGENT_CALLS_MAX}
             disabled={!multiAgentSettings.enabled}
             onChange={setMaxSubagentCalls}
           />
           <NumberSetting
             label={s.defaultMaxTurnsLabel}
             value={multiAgentSettings.defaultMaxTurns}
-            min={1}
-            max={10}
+            min={SUBAGENT_MAX_TURNS_MIN}
+            max={SUBAGENT_MAX_TURNS_MAX}
             disabled={!multiAgentSettings.enabled}
             onChange={setDefaultSubagentMaxTurns}
           />

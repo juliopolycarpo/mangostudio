@@ -3,6 +3,11 @@ import type {
   ProviderSettingsDescriptor,
   ReasoningPolicy,
 } from '@mangostudio/shared/provider-settings';
+import {
+  MAX_TOOL_ITERATIONS_DEFAULT,
+  MAX_TOOL_ITERATIONS_MAX,
+  MAX_TOOL_ITERATIONS_MIN,
+} from '@mangostudio/shared/app-settings';
 import type { ProviderType, ReasoningEffort } from '@mangostudio/shared/types';
 
 const PROVIDER_TYPES: ReadonlyArray<ProviderType> = [
@@ -31,7 +36,11 @@ const PROVIDER_POLICIES: Record<ProviderType, ProviderSettingsPolicy> = {
     toolUseSupported: true,
     structuredOutputSupported: true,
     maxOutputTokensLimit: 65_536,
-    defaults: { thinkingEnabled: true, reasoningEffort: 'medium', maxToolIterations: 10 },
+    defaults: {
+      thinkingEnabled: true,
+      reasoningEffort: 'medium',
+      maxToolIterations: MAX_TOOL_ITERATIONS_DEFAULT,
+    },
   },
   openai: {
     displayName: 'OpenAI',
@@ -40,7 +49,11 @@ const PROVIDER_POLICIES: Record<ProviderType, ProviderSettingsPolicy> = {
     toolUseSupported: true,
     structuredOutputSupported: true,
     maxOutputTokensLimit: 128_000,
-    defaults: { thinkingEnabled: true, reasoningEffort: 'medium', maxToolIterations: 10 },
+    defaults: {
+      thinkingEnabled: true,
+      reasoningEffort: 'medium',
+      maxToolIterations: MAX_TOOL_ITERATIONS_DEFAULT,
+    },
   },
   'openai-compatible': {
     displayName: 'OpenAI compatible',
@@ -49,7 +62,11 @@ const PROVIDER_POLICIES: Record<ProviderType, ProviderSettingsPolicy> = {
     toolUseSupported: true,
     structuredOutputSupported: true,
     maxOutputTokensLimit: 65_536,
-    defaults: { thinkingEnabled: false, reasoningEffort: 'medium', maxToolIterations: 10 },
+    defaults: {
+      thinkingEnabled: false,
+      reasoningEffort: 'medium',
+      maxToolIterations: MAX_TOOL_ITERATIONS_DEFAULT,
+    },
   },
   anthropic: {
     displayName: 'Anthropic',
@@ -58,7 +75,11 @@ const PROVIDER_POLICIES: Record<ProviderType, ProviderSettingsPolicy> = {
     toolUseSupported: true,
     structuredOutputSupported: false,
     maxOutputTokensLimit: 64_000,
-    defaults: { thinkingEnabled: true, reasoningEffort: 'medium', maxToolIterations: 10 },
+    defaults: {
+      thinkingEnabled: true,
+      reasoningEffort: 'medium',
+      maxToolIterations: MAX_TOOL_ITERATIONS_DEFAULT,
+    },
   },
   deepseek: {
     displayName: 'DeepSeek',
@@ -67,7 +88,11 @@ const PROVIDER_POLICIES: Record<ProviderType, ProviderSettingsPolicy> = {
     toolUseSupported: true,
     structuredOutputSupported: false,
     maxOutputTokensLimit: 64_000,
-    defaults: { thinkingEnabled: true, reasoningEffort: 'high', maxToolIterations: 10 },
+    defaults: {
+      thinkingEnabled: true,
+      reasoningEffort: 'high',
+      maxToolIterations: MAX_TOOL_ITERATIONS_DEFAULT,
+    },
   },
 };
 
@@ -173,8 +198,8 @@ function normalizeReasoningEffort(
 }
 
 function normalizeToolIterations(value: number | undefined): number {
-  if (!Number.isFinite(value)) return 10;
-  return Math.min(25, Math.max(1, Math.round(value as number)));
+  if (value === undefined || !Number.isFinite(value)) return MAX_TOOL_ITERATIONS_DEFAULT;
+  return Math.min(MAX_TOOL_ITERATIONS_MAX, Math.max(MAX_TOOL_ITERATIONS_MIN, Math.round(value)));
 }
 
 function normalizePositiveInteger(value: number | undefined, maximum: number): number | undefined {

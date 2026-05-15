@@ -48,7 +48,7 @@ describe('settings provider settings routes', () => {
       new Request('http://localhost/settings/providers/deepseek', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ reasoningEffort: 'max', maxToolIterations: 3 }),
+        body: JSON.stringify({ reasoningEffort: 'max', maxToolIterations: 1_000 }),
       })
     );
     const updatedPayload = await update.json();
@@ -56,7 +56,7 @@ describe('settings provider settings routes', () => {
     expect(update.status).toBe(200);
     expect(Value.Check(ProviderSettingsDescriptorSchema, updatedPayload)).toBe(true);
     expect(updatedPayload).toMatchObject({
-      settings: { provider: 'deepseek', reasoningEffort: 'max', maxToolIterations: 3 },
+      settings: { provider: 'deepseek', reasoningEffort: 'max', maxToolIterations: 1_000 },
     });
 
     restoreAuth?.();

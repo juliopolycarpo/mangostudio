@@ -13,10 +13,18 @@ describe('provider settings contracts', () => {
     }
   });
 
+  it('accepts frontier-scale tool iteration limits', () => {
+    expect(
+      Value.Check(UpdateProviderRuntimeSettingsBodySchema, {
+        maxToolIterations: 1_000,
+      })
+    ).toBe(true);
+  });
+
   it('rejects invalid update ranges', () => {
     expect(
       Value.Check(UpdateProviderRuntimeSettingsBodySchema, {
-        maxToolIterations: 26,
+        maxToolIterations: 1_001,
       })
     ).toBe(false);
     expect(

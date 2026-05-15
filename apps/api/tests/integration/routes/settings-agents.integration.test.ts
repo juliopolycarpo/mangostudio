@@ -128,7 +128,7 @@ describe('settings agents routes', () => {
           systemPrompt: 'Persisted chat prompt',
           thinkingEnabled: true,
           reasoningEffort: 'xhigh',
-          maxToolIterations: 5,
+          maxToolIterations: 1_000,
           toolNames: ['read_file'],
           toolsEnabled: true,
           subagentIds: [],
@@ -139,7 +139,11 @@ describe('settings agents routes', () => {
     const payload = (await update.json()) as AgentProfile;
 
     expect(update.status).toBe(200);
-    expect(payload).toMatchObject({ id: 'chat', systemPrompt: 'Persisted chat prompt' });
+    expect(payload).toMatchObject({
+      id: 'chat',
+      systemPrompt: 'Persisted chat prompt',
+      maxToolIterations: 1_000,
+    });
 
     restoreAuth?.();
     const other = createAuthenticatedApiTestApp(OTHER_USER, settingsRoutes);

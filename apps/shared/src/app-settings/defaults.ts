@@ -8,14 +8,33 @@ import type {
 } from '../prompt-rules';
 import type { ReasoningEffort } from '../types';
 import type { AppSettings, ChatTitleSettings, ImageQuality, MultiAgentSettings } from './contracts';
+import {
+  MAX_SUBAGENT_CALLS_DEFAULT,
+  MAX_SUBAGENT_CALLS_MAX,
+  MAX_SUBAGENT_CALLS_MIN,
+  MAX_TOOL_ITERATIONS_DEFAULT,
+  MAX_TOOL_ITERATIONS_MAX,
+  MAX_TOOL_ITERATIONS_MIN,
+  SUBAGENT_MAX_TURNS_DEFAULT,
+  SUBAGENT_MAX_TURNS_MAX,
+  SUBAGENT_MAX_TURNS_MIN,
+} from '../agentic-limits';
 
 const CURRENT_MODEL_SETTING = 'current_model';
 
 export const IMAGE_QUALITY_OPTIONS = ['512px', '1K', '2K', '4K'] as const;
 
-export const MAX_TOOL_ITERATIONS_MIN = 1;
-export const MAX_TOOL_ITERATIONS_MAX = 25;
-export const MAX_TOOL_ITERATIONS_DEFAULT = 10;
+export {
+  MAX_SUBAGENT_CALLS_DEFAULT,
+  MAX_SUBAGENT_CALLS_MAX,
+  MAX_SUBAGENT_CALLS_MIN,
+  MAX_TOOL_ITERATIONS_DEFAULT,
+  MAX_TOOL_ITERATIONS_MAX,
+  MAX_TOOL_ITERATIONS_MIN,
+  SUBAGENT_MAX_TURNS_DEFAULT,
+  SUBAGENT_MAX_TURNS_MAX,
+  SUBAGENT_MAX_TURNS_MIN,
+};
 
 export const DEFAULT_PROMPT_SETTINGS: PromptSettings = {
   textSystemPrompt: '',
@@ -60,9 +79,9 @@ export const DEFAULT_MULTI_AGENT_SETTINGS: MultiAgentSettings = {
   chatDelegationEnabled: false,
   traceVisibility: 'compact',
   maxDepth: 1,
-  maxSubagentCalls: 3,
+  maxSubagentCalls: MAX_SUBAGENT_CALLS_DEFAULT,
   timeoutMs: 15 * 60 * 1000,
-  defaultMaxTurns: 3,
+  defaultMaxTurns: SUBAGENT_MAX_TURNS_DEFAULT,
 };
 
 export const DEFAULT_APP_SETTINGS: AppSettings = {
@@ -263,8 +282,8 @@ export function normalizeMultiAgentSettings(value: unknown): MultiAgentSettings 
     maxSubagentCalls: clampInteger(
       value.maxSubagentCalls,
       DEFAULT_MULTI_AGENT_SETTINGS.maxSubagentCalls,
-      0,
-      10
+      MAX_SUBAGENT_CALLS_MIN,
+      MAX_SUBAGENT_CALLS_MAX
     ),
     timeoutMs: clampInteger(
       value.timeoutMs,
@@ -275,8 +294,8 @@ export function normalizeMultiAgentSettings(value: unknown): MultiAgentSettings 
     defaultMaxTurns: clampInteger(
       value.defaultMaxTurns,
       DEFAULT_MULTI_AGENT_SETTINGS.defaultMaxTurns,
-      1,
-      10
+      SUBAGENT_MAX_TURNS_MIN,
+      SUBAGENT_MAX_TURNS_MAX
     ),
   };
 }

@@ -51,7 +51,7 @@ describe('chat attachment contracts', () => {
       chatId: 'chat-contract-1',
       prompt: 'Use this attachment.',
       attachmentIds: ['attachment-contract-1'],
-      maxToolIterations: 1,
+      maxToolIterations: 1_000,
     };
 
     expect(Value.Check(RespondStreamBodySchema, body)).toBe(true);

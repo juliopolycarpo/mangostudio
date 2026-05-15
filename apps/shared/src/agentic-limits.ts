@@ -1,0 +1,11 @@
+export const MAX_TOOL_ITERATIONS_MIN = 1;
+export const MAX_TOOL_ITERATIONS_MAX = 1_000;
+export const MAX_TOOL_ITERATIONS_DEFAULT = 1_000;
+
+export const MAX_SUBAGENT_CALLS_MIN = 0;
+export const MAX_SUBAGENT_CALLS_MAX = 1_000;
+export const MAX_SUBAGENT_CALLS_DEFAULT = 1_000;
+
+export const SUBAGENT_MAX_TURNS_MIN = 1;
+export const SUBAGENT_MAX_TURNS_MAX = 1_000;
+export const SUBAGENT_MAX_TURNS_DEFAULT = 1_000;

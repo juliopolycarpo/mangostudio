@@ -147,7 +147,7 @@ Stay inside the allowed scope.
       role: 'both',
       systemPrompt: 'Read first.',
       reasoningEffort: 'high',
-      maxToolIterations: 3,
+      maxToolIterations: 1_000,
       toolNames: ['read_file'],
       toolsEnabled: true,
       subagentIds: ['user:reviewer'],
