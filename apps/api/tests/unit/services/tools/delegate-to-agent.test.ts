@@ -1,13 +1,46 @@
-import { describe, expect, it, beforeEach } from 'bun:test';
+import { describe, expect, it, beforeEach, afterEach } from 'bun:test';
 import { SUBAGENT_MAX_TURNS_MAX, SUBAGENT_MAX_TURNS_MIN } from '@mangostudio/shared/app-settings';
-import { clearRegistry, executeTool, getTool } from '../../../../src/services/tools/registry';
-import type { DelegateToAgentInput, ToolContext } from '../../../../src/services/tools/types';
+import {
+  clearRegistry,
+  executeTool,
+  getAllTools,
+  getTool,
+  registerTool,
+} from '../../../../src/services/tools/registry';
+import type {
+  DelegateToAgentInput,
+  ToolContext,
+  RegisteredTool,
+} from '../../../../src/services/tools/types';
 import { register } from '../../../../src/services/tools/builtin/delegate-to-agent';
 
+function snapshotRegistry(): RegisteredTool[] {
+  return getAllTools().map((tool) => ({
+    definition: { ...tool.definition },
+    settings: { ...tool.settings, parameterDescriptors: [...tool.settings.parameterDescriptors] },
+    execute: tool.execute,
+    buildDefinition: tool.buildDefinition,
+  }));
+}
+
+function restoreRegistry(snapshot: RegisteredTool[]): void {
+  clearRegistry();
+  for (const tool of snapshot) {
+    registerTool(tool);
+  }
+}
+
 describe('delegate_to_agent', () => {
+  let snapshot: RegisteredTool[];
+
   beforeEach(() => {
+    snapshot = snapshotRegistry();
     clearRegistry();
     register();
+  });
+
+  afterEach(() => {
+    restoreRegistry(snapshot);
   });
 
   it('registers with expected settings', () => {
