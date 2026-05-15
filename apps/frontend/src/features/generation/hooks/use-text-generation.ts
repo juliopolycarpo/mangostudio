@@ -16,6 +16,7 @@ import {
   type ContextSettings,
 } from '@mangostudio/shared/chat';
 import type { ToolIntent } from '@mangostudio/shared/generation';
+import type { SubagentTraceEvent, SubagentTraceEventName } from '@mangostudio/shared/types';
 import type { PromptSettings } from '@mangostudio/shared/prompt-rules';
 import { messageKeys } from '@/features/chat/queries';
 import { generateChatTitleSuggestion } from '@/features/chat/services/chat-title';
@@ -24,6 +25,8 @@ import { respondTextStream } from '@/services/generation-service';
 import { useChatStream } from '@/features/chat/hooks/use-chat-stream';
 import type { useOptimisticMessages } from '@/features/generation/hooks/use-optimistic-messages';
 import type { useChats } from '@/features/chat/hooks/use-chats';
+
+const PENDING_SUBAGENT_NAME = 'Subagent';
 
 interface UseTextGenerationOptions {
   chats: ReturnType<typeof useChats>;
@@ -135,7 +138,15 @@ function upsertSubagentTracePart(
   );
 
   if (existingIndex === -1) return [...parts, tracePart];
-  return parts.map((part, index) => (index === existingIndex ? tracePart : part));
+  return parts.map((part, index) => {
+    if (index !== existingIndex || part.type !== 'subagent_trace') return part;
+    return {
+      ...tracePart,
+      messages: tracePart.messages.length > 0 ? tracePart.messages : part.messages,
+      tools: tracePart.tools.length > 0 ? tracePart.tools : part.tools,
+      events: mergeSubagentTraceEvents(part.events, tracePart.events),
+    };
+  });
 }
 
 function updateSubagentTracePart(
@@ -149,6 +160,109 @@ function updateSubagentTracePart(
     if (part.type !== 'subagent_trace' || part.toolCallId !== toolCallId) return part;
     return update(part);
   });
+}
+
+function appendSubagentTraceEvent(parts: MessagePart[], event: ParsedSubagentEvent): MessagePart[] {
+  const existingIndex = parts.findIndex(
+    (part) => part.type === 'subagent_trace' && part.toolCallId === event.callId
+  );
+  const traceEvent: SubagentTraceEvent = {
+    event: event.event,
+    ...(event.attempt !== undefined ? { attempt: event.attempt } : {}),
+    ...(event.detail ? { detail: event.detail } : {}),
+  };
+
+  if (existingIndex === -1) {
+    return [
+      ...parts,
+      {
+        type: 'subagent_trace',
+        toolCallId: event.callId,
+        agentId: event.agentId ?? event.callId,
+        agentName: event.agentId ?? PENDING_SUBAGENT_NAME,
+        status: 'running',
+        summary: '',
+        toolCallCount: 0,
+        messages: [],
+        tools: [],
+        events: [traceEvent],
+      },
+    ];
+  }
+
+  return parts.map((part, index) => {
+    if (index !== existingIndex || part.type !== 'subagent_trace') return part;
+    const agentName =
+      part.agentName === PENDING_SUBAGENT_NAME && event.agentId ? event.agentId : part.agentName;
+    return {
+      ...part,
+      agentId: event.agentId ?? part.agentId,
+      agentName,
+      events: mergeSubagentTraceEvents(part.events, [traceEvent]),
+    };
+  });
+}
+
+function mergeSubagentTraceEvents(
+  current: ReadonlyArray<SubagentTraceEvent> | undefined,
+  next: ReadonlyArray<SubagentTraceEvent> | undefined
+): ReadonlyArray<SubagentTraceEvent> | undefined {
+  if (!current?.length) return next;
+  if (!next?.length) return current;
+
+  const merged = [...current];
+  for (const event of next) {
+    const exists = merged.some(
+      (item) =>
+        item.event === event.event && item.attempt === event.attempt && item.detail === event.detail
+    );
+    if (!exists) merged.push(event);
+  }
+  return merged;
+}
+
+interface ParsedSubagentEvent {
+  readonly callId: string;
+  readonly agentId?: string;
+  readonly event: SubagentTraceEventName;
+  readonly attempt?: number;
+  readonly detail?: string;
+}
+
+const SUBAGENT_SYSTEM_EVENTS: Readonly<Record<string, SubagentTraceEventName>> = {
+  subagent_delegation_started: 'delegation_started',
+  subagent_delegation_completed: 'delegation_completed',
+  subagent_delegation_failed: 'delegation_failed',
+  subagent_response_attempt: 'response_attempt',
+  subagent_response_recovered: 'response_recovered',
+  subagent_response_timeout: 'response_timeout',
+  subagent_response_fallback: 'response_fallback',
+};
+
+function parseSubagentSystemEvent(
+  event: string,
+  detail: string | undefined
+): ParsedSubagentEvent | null {
+  const lifecycleEvent = SUBAGENT_SYSTEM_EVENTS[event];
+  if (!lifecycleEvent) return null;
+  const callId = readDetailField(detail, 'call');
+  if (!callId) return null;
+  const attemptText = readDetailField(detail, 'attempt');
+  const attempt = attemptText ? Number(attemptText) : undefined;
+  const agentId = readDetailField(detail, 'agent') ?? readDetailField(detail, 'target');
+
+  return {
+    callId,
+    event: lifecycleEvent,
+    ...(agentId ? { agentId } : {}),
+    ...(attempt !== undefined && Number.isFinite(attempt) ? { attempt } : {}),
+    ...(detail ? { detail } : {}),
+  };
+}
+
+function readDetailField(detail: string | undefined, field: string): string | undefined {
+  const match = detail?.match(new RegExp(`(?:^|\\s)${field}=([^\\s]+)`));
+  return match?.[1];
 }
 
 /** Handles text generation: creates messages, drives SSE stream, updates optimistic UI. */
@@ -554,6 +668,14 @@ export function useTextGeneration({
                 break;
               }
               case 'system_event': {
+                const subagentEvent = parseSubagentSystemEvent(chunk.event, chunk.detail);
+                if (subagentEvent) {
+                  accumulatedParts = appendSubagentTraceEvent(accumulatedParts, subagentEvent);
+                  updateOptimisticMessage(activeChatId, currentAiMsgId, {
+                    parts: accumulatedParts,
+                  });
+                  break;
+                }
                 accumulatedParts = [
                   ...accumulatedParts,
                   { type: 'system_event', event: chunk.event, detail: chunk.detail },

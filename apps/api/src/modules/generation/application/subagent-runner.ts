@@ -4,7 +4,11 @@ import type { MultiAgentSettings } from '@mangostudio/shared/app-settings';
 import type { ProviderRuntimeSettings } from '@mangostudio/shared/provider-settings';
 import type { SubagentTracePart } from '@mangostudio/shared/types';
 import type { Database } from '../../../db/types';
-import type { AgentTurnRequest, AIProvider } from '../../../services/providers/types';
+import type {
+  AgentTurnRequest,
+  AIProvider,
+  ModelCapabilities,
+} from '../../../services/providers/types';
 import type { EffectiveToolSettings } from '../../../services/tools/types';
 import { safeJsonParse } from '../../../lib/safe-parse';
 import { executeTool, getSafeEffectiveToolSettings, getTool } from '../../../services/tools';
@@ -14,13 +18,15 @@ import {
   getProviderForModel,
 } from '../../../services/providers/core/provider-registry';
 import { resolveModel } from './resolve-model';
-import { resolveAgentRuntime } from './resolve-agent-runtime';
+import { resolveAgentRuntime, type ResolvedAgentRuntime } from './resolve-agent-runtime';
 import { getAgentProfile } from '../../agents/application/agent-settings-service';
 
 const SUBAGENT_TIMEOUT_CODE = 'TIMEOUT';
 const SUBAGENT_ABORT_CODE = 'ABORTED';
 const SUBAGENT_FAILED_CODE = 'FAILED';
 export const SUBAGENT_EMPTY_TEXT_FALLBACK = 'Subagent completed without a text response.';
+const SUBAGENT_SUMMARIZE_PROMPT =
+  'Final summary required. Respond now in plain text only — do not call any tools. Summarise your findings: key points, relevant file paths or commands, and recommended next steps if any.';
 
 export type SubagentStatus = 'completed' | 'failed' | 'aborted' | 'timeout';
 
@@ -348,6 +354,28 @@ async function executeSubagentTurn(
       agentId: runtime.profile.id,
       toolCallCount: tools.length,
     });
+    const followUpText = await streamSubagentSummarizeTurn({
+      provider,
+      userId: input.userId,
+      modelName: resolvedModel.modelId,
+      runtime,
+      providerState,
+      signal: input.signal,
+      modelCapabilities: resolvedModel.capabilities,
+      onTextDelta: (text) => {
+        input.onEvent?.({ type: 'text', agentId: runtime.profile.id, text });
+      },
+    });
+    if (followUpText.trim()) {
+      summary += followUpText;
+      logSubagentEvent('summarize_turn_recovered', {
+        chatId: input.chatId,
+        userId: input.userId,
+        agentId: runtime.profile.id,
+        toolCallCount: tools.length,
+        summaryLength: followUpText.length,
+      });
+    }
   }
   const trimmedSummary = enforceSubagentSummary(summary.trim(), tools);
   transcript.push({ role: 'assistant', text: trimmedSummary });
@@ -403,6 +431,60 @@ async function generatePlainSubagentText(input: {
     },
   });
   return result.text;
+}
+
+/**
+ * One follow-up streaming turn that forces the subagent to emit a final text summary.
+ * The model is given NO tool definitions so it cannot dodge into another tool call.
+ * Errors are swallowed — the caller falls back to a synthesized tool summary.
+ */
+async function streamSubagentSummarizeTurn(input: {
+  readonly provider: AIProvider;
+  readonly userId: string;
+  readonly modelName: string;
+  readonly runtime: ResolvedAgentRuntime;
+  readonly providerState: string | null;
+  readonly signal: AbortSignal;
+  readonly modelCapabilities?: ModelCapabilities;
+  readonly onTextDelta?: (text: string) => void;
+}): Promise<string> {
+  if (!input.provider.generateAgentTurnStream) return '';
+  let text = '';
+  try {
+    for await (const event of input.provider.generateAgentTurnStream({
+      userId: input.userId,
+      modelName: input.modelName,
+      agentId: input.runtime.profile.id,
+      agentRuntimeHash: input.runtime.runtimeHash,
+      systemPrompt: input.runtime.effectiveSystemPrompt,
+      history: [],
+      prompt: SUBAGENT_SUMMARIZE_PROMPT,
+      toolResults: undefined,
+      toolDefinitions: [],
+      providerState: input.providerState,
+      signal: input.signal,
+      modelCapabilities: input.modelCapabilities,
+      generationConfig: {
+        thinkingEnabled: input.runtime.runtimeSettings.thinkingEnabled ?? true,
+        reasoningEffort: input.runtime.runtimeSettings.reasoningEffort ?? 'medium',
+        maxToolIterations: 1,
+        maxOutputTokens: input.runtime.runtimeSettings.maxOutputTokens,
+        promptCachePreference: input.runtime.runtimeSettings.promptCachePreference,
+        parallelToolCallsEnabled: false,
+      },
+    })) {
+      if (input.signal.aborted) break;
+      if (event.type === 'assistant_text_delta') {
+        text += event.text;
+        input.onTextDelta?.(event.text);
+      }
+      if (event.type === 'turn_completed') break;
+      if (event.type === 'turn_error') break;
+    }
+  } catch {
+    // Swallow: the caller will fall back to the synthesized tool summary.
+  }
+  return text;
 }
 
 async function executeSubagentTools(input: {

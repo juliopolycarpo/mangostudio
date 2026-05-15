@@ -16,6 +16,8 @@ export type {
   ContinuationReasonCode,
   GeneratedImagePart,
   GeneratedImageStatus,
+  SubagentTraceEvent,
+  SubagentTraceEventName,
   SubagentTracePart,
 } from './agent-events';
 export type { GalleryItem, GeneratedImageArtifact } from './gallery';

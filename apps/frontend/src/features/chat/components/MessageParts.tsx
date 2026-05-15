@@ -163,6 +163,29 @@ function SubagentTraceBlock({ part }: { part: Extract<MessagePart, { type: 'suba
 
       {expanded && (
         <div className="space-y-4 border-t border-outline-variant/10 p-4">
+          {part.events?.length ? (
+            <div className="space-y-2">
+              <h4 className="text-xs font-bold uppercase tracking-widest text-on-surface-variant/80">
+                {labels.subagentLifecycle}
+              </h4>
+              <div className="space-y-1.5">
+                {part.events.map((event, index) => (
+                  <div
+                    // eslint-disable-next-line @eslint-react/no-array-index-key
+                    key={`${part.toolCallId}-event-${index}`}
+                    className="flex items-center justify-between gap-3 rounded-xl bg-surface-container-high px-3 py-2 text-xs text-on-surface-variant"
+                  >
+                    <span>{getSubagentTraceEventLabel(event, labels)}</span>
+                    {event.attempt ? (
+                      <span className="rounded-full bg-surface-container-lowest px-2 py-0.5 font-medium">
+                        #{event.attempt}
+                      </span>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
           {part.lastMessage ? (
             <TraceSection title={labels.subagentLastMessage} body={part.lastMessage} />
           ) : null}
@@ -241,4 +264,17 @@ function getSubagentStatusLabel(
   if (status === 'timeout') return labels.subagentStatusTimeout;
   if (status === 'running') return labels.statusGenerating;
   return labels.subagentStatusFailed;
+}
+
+function getSubagentTraceEventLabel(
+  event: NonNullable<Extract<MessagePart, { type: 'subagent_trace' }>['events']>[number],
+  labels: ReturnType<typeof useI18n>['t']['chat']['feed']
+): string {
+  if (event.event === 'delegation_started') return labels.subagentLifecycleDelegationStarted;
+  if (event.event === 'delegation_completed') return labels.subagentLifecycleDelegationCompleted;
+  if (event.event === 'delegation_failed') return labels.subagentLifecycleDelegationFailed;
+  if (event.event === 'response_recovered') return labels.subagentLifecycleRecovered;
+  if (event.event === 'response_timeout') return labels.subagentLifecycleTimeout;
+  if (event.event === 'response_fallback') return labels.subagentLifecycleFallback;
+  return labels.subagentLifecycleAttempt.replace('{attempt}', String(event.attempt ?? 1));
 }

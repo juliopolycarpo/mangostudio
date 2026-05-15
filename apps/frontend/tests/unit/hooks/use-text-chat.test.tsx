@@ -310,6 +310,82 @@ describe('useTextChat — maxToolIterations forwarding', () => {
   });
 });
 
+describe('useTextChat — subagent lifecycle events', () => {
+  beforeEach(() => {
+    mockStream.mockReset();
+  });
+
+  it('routes subagent retry system events into the trace part', async () => {
+    const props = makeProps({
+      getAgentSelection: () => ({ mode: 'agent', agentId: 'default', agentName: 'Default' }),
+    });
+    mockStream.mockImplementation(
+      makeStreamFn([
+        {
+          type: 'system_event',
+          event: 'subagent_response_attempt',
+          detail: 'call=delegate-1 attempt=1',
+          done: false,
+        },
+        {
+          type: 'subagent_started',
+          callId: 'delegate-1',
+          agentId: 'explore',
+          agentName: 'Explore',
+          task: 'Inspect the code.',
+          done: false,
+        },
+        {
+          type: 'system_event',
+          event: 'subagent_response_attempt',
+          detail: 'call=delegate-1 attempt=2',
+          done: false,
+        },
+        {
+          type: 'subagent_completed',
+          callId: 'delegate-1',
+          agentId: 'explore',
+          agentName: 'Explore',
+          summary: 'Found it.',
+          toolCallCount: 0,
+          done: false,
+        },
+        { type: 'done', done: true, generationTime: '0.5s' },
+      ])
+    );
+
+    const { result } = renderHook(() => useTextGeneration(props));
+
+    await act(async () => {
+      await result.current.handleRespond('delegate');
+    });
+
+    await waitFor(() => expect(result.current.isGenerating).toBe(false));
+
+    const calls: Array<[string, string, Partial<{ parts: MessagePart[] }>]> = vi.mocked(
+      props.optimistic.updateOptimisticMessage
+    ).mock.calls;
+    const finalParts = [...calls]
+      .reverse()
+      .find(([, , update]) => update.parts !== undefined)?.[2].parts;
+    const trace = finalParts?.find((part) => part.type === 'subagent_trace');
+
+    expect(trace).toMatchObject({
+      agentId: 'explore',
+      agentName: 'Explore',
+      events: [
+        { event: 'response_attempt', attempt: 1 },
+        { event: 'response_attempt', attempt: 2 },
+      ],
+    });
+    expect(
+      finalParts?.some(
+        (part) => part.type === 'system_event' && part.event === 'subagent_response_attempt'
+      )
+    ).toBe(false);
+  });
+});
+
 describe('useTextChat — prompt title auto rename', () => {
   beforeEach(() => {
     mockStream.mockReset();

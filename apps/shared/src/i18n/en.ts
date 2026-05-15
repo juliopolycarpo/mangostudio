@@ -80,6 +80,14 @@ export const messages: Messages = {
       subagentLastMessage: 'Last message',
       subagentMessages: 'Messages',
       subagentToolCalls: 'Tool calls',
+      subagentLifecycle: 'Lifecycle',
+      subagentLifecycleDelegationStarted: 'Delegation started',
+      subagentLifecycleDelegationCompleted: 'Delegation completed',
+      subagentLifecycleDelegationFailed: 'Delegation failed',
+      subagentLifecycleAttempt: 'Attempt {attempt}',
+      subagentLifecycleRecovered: 'Recovered response',
+      subagentLifecycleTimeout: 'Timed out',
+      subagentLifecycleFallback: 'Fallback response created',
     },
     context: {
       label: 'Context',
@@ -313,7 +321,7 @@ export const messages: Messages = {
       maxToolIterationsLabel: 'Max Tool Iterations',
       maxToolIterationsDescription:
         'Upper bound on how many tool-calling rounds the model may take in a single turn.',
-      maxToolIterationsHint: '{value} of 25',
+      maxToolIterationsHint: '{value} of 1000',
       chatTitlesLabel: 'Chat Titles',
       chatTitlesDescription:
         'Automatically rename timestamped new chats from the first user prompt.',
@@ -459,7 +467,7 @@ export const messages: Messages = {
       maxToolIterationsLabel: 'Max Tool Iterations',
       maxToolIterationsDescription:
         'Upper bound on how many tool-calling rounds the model may take in a single turn.',
-      maxToolIterationsHint: '{value} of 25',
+      maxToolIterationsHint: '{value} of 1000',
       executionTitle: 'Execution',
       autoModelOption: 'Auto (first available)',
       letAiDecideQualityLabel: 'Let AI decide quality',

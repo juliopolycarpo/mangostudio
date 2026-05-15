@@ -838,8 +838,9 @@ describe('POST /respond/stream', () => {
     });
   });
 
-  it('synthesizes a summary and emits subagent_text when a subagent only runs tools', async () => {
+  it('forces a summarize follow-up turn when the subagent runs tools but never streams text', async () => {
     const parentToolResults: string[] = [];
+    let summarizeTurnCount = 0;
 
     await mock.module('../../../src/modules/chats/infrastructure/chat-repository', () => ({
       verifyChatOwnership: () => Promise.resolve(true),
@@ -940,7 +941,6 @@ describe('POST /respond/stream', () => {
     });
 
     await mock.module('../../../src/services/providers/core/provider-registry', () => {
-      let explorerAttempts = 0;
       return {
         getProviderForModel: () =>
           Promise.resolve({
@@ -949,8 +949,19 @@ describe('POST /respond/stream', () => {
             generateAgentTurnStream: async function* (req: AgentTurnRequest) {
               await Promise.resolve();
               if (req.agentId === 'user:explorer') {
+                // Summarize follow-up turn: no tool definitions and a prompt set.
+                const isSummarizeTurn =
+                  (req.toolDefinitions?.length ?? 0) === 0 &&
+                  typeof req.prompt === 'string' &&
+                  req.prompt.length > 0;
+                if (isSummarizeTurn) {
+                  summarizeTurnCount += 1;
+                  yield { type: 'assistant_text_delta', text: 'I explored the files.' };
+                  yield { type: 'turn_completed', providerState: null };
+                  return;
+                }
+
                 if (!req.toolResults) {
-                  explorerAttempts++;
                   yield { type: 'tool_call_started', callId: 'noop-1', name: 'noop' };
                   yield {
                     type: 'tool_call_completed',
@@ -969,13 +980,7 @@ describe('POST /respond/stream', () => {
                   return;
                 }
 
-                // On retry (attempt 2), provide an actual summary
-                if (explorerAttempts > 1) {
-                  yield { type: 'assistant_text_delta', text: 'I explored the files.' };
-                  yield { type: 'turn_completed', providerState: null };
-                  return;
-                }
-
+                // Tool results received, but model has nothing more to say.
                 yield { type: 'turn_completed', providerState: null };
                 return;
               }
@@ -1036,6 +1041,7 @@ describe('POST /respond/stream', () => {
     const sseEvents = parseSseEvents(await response.text());
     expect(sseEvents.map((event) => event.type)).toContain('subagent_text');
     expect(parentToolResults[0]).toContain('I explored the files.');
+    expect(summarizeTurnCount).toBe(1);
   });
 
   it('retries once and falls back when the delegation response is missing or invalid', async () => {

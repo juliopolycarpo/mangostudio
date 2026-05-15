@@ -59,6 +59,21 @@ export interface SubagentToolTrace {
   isError?: boolean;
 }
 
+export type SubagentTraceEventName =
+  | 'delegation_started'
+  | 'delegation_completed'
+  | 'delegation_failed'
+  | 'response_attempt'
+  | 'response_recovered'
+  | 'response_timeout'
+  | 'response_fallback';
+
+export interface SubagentTraceEvent {
+  event: SubagentTraceEventName;
+  attempt?: number;
+  detail?: string;
+}
+
 export interface SubagentTracePart {
   type: 'subagent_trace';
   toolCallId: string;
@@ -70,6 +85,7 @@ export interface SubagentTracePart {
   lastMessage?: string;
   messages: ReadonlyArray<SubagentTraceMessage>;
   tools: ReadonlyArray<SubagentToolTrace>;
+  events?: ReadonlyArray<SubagentTraceEvent>;
   error?: string;
 }
 
