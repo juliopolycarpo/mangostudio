@@ -20,6 +20,7 @@ export type {
   SubagentTraceEventName,
   SubagentTracePart,
 } from './agent-events';
+export { mergeSubagentTraceEvents } from './agent-events';
 export type { GalleryItem, GeneratedImageArtifact } from './gallery';
 
 // Chat domain types — source of truth is chat/entities.ts

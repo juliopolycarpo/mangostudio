@@ -17,7 +17,9 @@ import {
 } from '@mangostudio/shared/chat';
 import type { ToolIntent } from '@mangostudio/shared/generation';
 import type { SubagentTraceEvent, SubagentTraceEventName } from '@mangostudio/shared/types';
+import { mergeSubagentTraceEvents } from '@mangostudio/shared/types';
 import type { PromptSettings } from '@mangostudio/shared/prompt-rules';
+import { useI18n } from '@/hooks/use-i18n';
 import { messageKeys } from '@/features/chat/queries';
 import { generateChatTitleSuggestion } from '@/features/chat/services/chat-title';
 import { compactChat, summarizeToNewChat } from '@/features/chat/services/context-compaction';
@@ -25,8 +27,6 @@ import { respondTextStream } from '@/services/generation-service';
 import { useChatStream } from '@/features/chat/hooks/use-chat-stream';
 import type { useOptimisticMessages } from '@/features/generation/hooks/use-optimistic-messages';
 import type { useChats } from '@/features/chat/hooks/use-chats';
-
-const PENDING_SUBAGENT_NAME = 'Subagent';
 
 interface UseTextGenerationOptions {
   chats: ReturnType<typeof useChats>;
@@ -162,7 +162,11 @@ function updateSubagentTracePart(
   });
 }
 
-function appendSubagentTraceEvent(parts: MessagePart[], event: ParsedSubagentEvent): MessagePart[] {
+function appendSubagentTraceEvent(
+  parts: MessagePart[],
+  event: ParsedSubagentEvent,
+  pendingSubagentName: string
+): MessagePart[] {
   const existingIndex = parts.findIndex(
     (part) => part.type === 'subagent_trace' && part.toolCallId === event.callId
   );
@@ -179,7 +183,7 @@ function appendSubagentTraceEvent(parts: MessagePart[], event: ParsedSubagentEve
         type: 'subagent_trace',
         toolCallId: event.callId,
         agentId: event.agentId ?? event.callId,
-        agentName: event.agentId ?? PENDING_SUBAGENT_NAME,
+        agentName: event.agentId ?? pendingSubagentName,
         status: 'running',
         summary: '',
         toolCallCount: 0,
@@ -193,7 +197,7 @@ function appendSubagentTraceEvent(parts: MessagePart[], event: ParsedSubagentEve
   return parts.map((part, index) => {
     if (index !== existingIndex || part.type !== 'subagent_trace') return part;
     const agentName =
-      part.agentName === PENDING_SUBAGENT_NAME && event.agentId ? event.agentId : part.agentName;
+      part.agentName === pendingSubagentName && event.agentId ? event.agentId : part.agentName;
     return {
       ...part,
       agentId: event.agentId ?? part.agentId,
@@ -201,24 +205,6 @@ function appendSubagentTraceEvent(parts: MessagePart[], event: ParsedSubagentEve
       events: mergeSubagentTraceEvents(part.events, [traceEvent]),
     };
   });
-}
-
-function mergeSubagentTraceEvents(
-  current: ReadonlyArray<SubagentTraceEvent> | undefined,
-  next: ReadonlyArray<SubagentTraceEvent> | undefined
-): ReadonlyArray<SubagentTraceEvent> | undefined {
-  if (!current?.length) return next;
-  if (!next?.length) return current;
-
-  const merged = [...current];
-  for (const event of next) {
-    const exists = merged.some(
-      (item) =>
-        item.event === event.event && item.attempt === event.attempt && item.detail === event.detail
-    );
-    if (!exists) merged.push(event);
-  }
-  return merged;
 }
 
 interface ParsedSubagentEvent {
@@ -281,6 +267,8 @@ export function useTextGeneration({
   getAgentSelection,
 }: UseTextGenerationOptions) {
   const queryClient = useQueryClient();
+  const { t } = useI18n();
+  const pendingSubagentName = t.chat.feed.subagentPendingName;
   const stream = useChatStream({ currentChatId });
   const { appendOptimisticMessages, updateOptimisticMessage } = optimistic;
   const [pendingContextAction, setPendingContextAction] = useState<'compact' | 'new-chat' | null>(
@@ -670,7 +658,11 @@ export function useTextGeneration({
               case 'system_event': {
                 const subagentEvent = parseSubagentSystemEvent(chunk.event, chunk.detail);
                 if (subagentEvent) {
-                  accumulatedParts = appendSubagentTraceEvent(accumulatedParts, subagentEvent);
+                  accumulatedParts = appendSubagentTraceEvent(
+                    accumulatedParts,
+                    subagentEvent,
+                    pendingSubagentName
+                  );
                   updateOptimisticMessage(activeChatId, currentAiMsgId, {
                     parts: accumulatedParts,
                   });
@@ -754,6 +746,7 @@ export function useTextGeneration({
       chatTitleSettings,
       getAgentSelection,
       stream,
+      pendingSubagentName,
     ]
   );
 

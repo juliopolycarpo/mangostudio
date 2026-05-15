@@ -240,7 +240,7 @@ export function AgentSettingsPage() {
             roles: labels.roles,
             systemPrompt: labels.systemPrompt,
             model: labels.model,
-            modelDefaultOption: t.settings.general.chatTitleModelCurrent,
+            modelDefaultOption: labels.modelDefaultOption,
             thinking: labels.thinking,
             reasoningEffort: labels.reasoningEffort,
             reasoningEfforts: labels.reasoningEfforts,

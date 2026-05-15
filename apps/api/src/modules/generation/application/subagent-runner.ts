@@ -31,7 +31,7 @@ const SUBAGENT_SUMMARIZE_PROMPT =
 export type SubagentStatus = 'completed' | 'failed' | 'aborted' | 'timeout';
 
 export interface DelegateToSubagentRequest {
-  readonly agentId: string;
+  readonly agentId: AgentId;
   readonly task: string;
   readonly context?: string;
   readonly expectedOutput?: string;
@@ -111,14 +111,14 @@ export async function runSubagentTurn(input: SubagentRuntimeInput): Promise<Suba
 
   const childAbort = createLinkedAbortController(input.signal);
   const timeout = setTimeout(
-    () => childAbort.abort(SUBAGENT_TIMEOUT_CODE),
+    () => childAbort.controller.abort(SUBAGENT_TIMEOUT_CODE),
     input.settings.timeoutMs
   );
 
   try {
     const result = await runWithTimeout(
-      executeSubagentTurn({ ...input, targetProfile, signal: childAbort.signal }),
-      childAbort.signal,
+      executeSubagentTurn({ ...input, targetProfile, signal: childAbort.controller.signal }),
+      childAbort.controller.signal,
       input.settings.timeoutMs
     );
     if (!result.summary.trim()) {
@@ -154,7 +154,7 @@ export async function runSubagentTurn(input: SubagentRuntimeInput): Promise<Suba
     });
     return enforced;
   } catch (error) {
-    const normalized = normalizeSubagentFailure(error, childAbort.signal);
+    const normalized = normalizeSubagentFailure(error, childAbort.controller.signal);
     input.onEvent?.({
       type: 'failed',
       agentId: targetProfile.id,
@@ -181,6 +181,7 @@ export async function runSubagentTurn(input: SubagentRuntimeInput): Promise<Suba
     return failed;
   } finally {
     clearTimeout(timeout);
+    childAbort.dispose();
   }
 }
 
@@ -581,15 +582,26 @@ function getSubagentRuntimeSettings(profile: AgentProfile): Partial<ProviderRunt
   };
 }
 
-function createLinkedAbortController(parent?: AbortSignal): AbortController {
+interface LinkedAbortController {
+  readonly controller: AbortController;
+  readonly dispose: () => void;
+}
+
+const noop = (): void => undefined;
+
+function createLinkedAbortController(parent?: AbortSignal): LinkedAbortController {
   const controller = new AbortController();
-  if (!parent) return controller;
+  if (!parent) return { controller, dispose: noop };
   if (parent.aborted) {
     controller.abort(SUBAGENT_ABORT_CODE);
-    return controller;
+    return { controller, dispose: noop };
   }
-  parent.addEventListener('abort', () => controller.abort(SUBAGENT_ABORT_CODE), { once: true });
-  return controller;
+  const onParentAbort = () => controller.abort(SUBAGENT_ABORT_CODE);
+  parent.addEventListener('abort', onParentAbort, { once: true });
+  return {
+    controller,
+    dispose: () => parent.removeEventListener('abort', onParentAbort),
+  };
 }
 
 function runWithTimeout<T>(

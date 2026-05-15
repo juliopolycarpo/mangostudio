@@ -69,6 +69,7 @@ export const messages = {
       noResponse: 'Sem resposta',
       createImageBadge: 'Criar Imagem',
       subagentTrace: 'Trace de subagente',
+      subagentPendingName: 'Subagente',
       subagentStatusCompleted: 'Concluído',
       subagentStatusFailed: 'Falhou',
       subagentStatusAborted: 'Abortado',
@@ -260,6 +261,7 @@ export const messages = {
       },
       systemPrompt: 'System Prompt',
       model: 'Modelo Sobrescrito',
+      modelDefaultOption: 'Usar o modelo padrão do agente',
       thinking: 'Ativar Raciocínio',
       reasoningEffort: 'Esforço de Raciocínio',
       reasoningEfforts: {

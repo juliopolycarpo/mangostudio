@@ -71,6 +71,7 @@ export const messages: Messages = {
       noResponse: 'No response',
       createImageBadge: 'Create Image',
       subagentTrace: 'Subagent trace',
+      subagentPendingName: 'Subagent',
       subagentStatusCompleted: 'Completed',
       subagentStatusFailed: 'Failed',
       subagentStatusAborted: 'Aborted',
@@ -256,6 +257,7 @@ export const messages: Messages = {
       },
       systemPrompt: 'System Prompt',
       model: 'Model Override',
+      modelDefaultOption: 'Use the agent default model',
       thinking: 'Enable Thinking',
       reasoningEffort: 'Reasoning Effort',
       reasoningEfforts: {

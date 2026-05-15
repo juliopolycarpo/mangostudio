@@ -16,17 +16,34 @@ export interface SubagentCachedEntry {
 
 const DEFAULT_TTL_MS = 10 * 60 * 1000;
 const MAX_PARTIAL_TEXT_CHARS = 30_000;
+const MAX_CACHE_ENTRIES = 1_000;
+const PRUNE_INTERVAL_MS = 30_000;
 
 const cache = new Map<string, SubagentCachedEntry>();
+let lastPrunedAt = 0;
 
 function now(): number {
   return Date.now();
 }
 
-function pruneExpired(ttlMs: number): void {
-  const cutoff = now() - ttlMs;
-  for (const [key, entry] of cache.entries()) {
+/**
+ * Throttled expiry sweep. Called from every cache mutation (including per-token
+ * text deltas), so it must stay O(1) amortized — full sweeps run at most once
+ * per PRUNE_INTERVAL_MS. A hard cap prevents unbounded growth between sweeps.
+ */
+function pruneIfDue(ttlMs: number): void {
+  const current = now();
+  if (current - lastPrunedAt < PRUNE_INTERVAL_MS && cache.size <= MAX_CACHE_ENTRIES) return;
+  lastPrunedAt = current;
+  const cutoff = current - ttlMs;
+  for (const [key, entry] of cache) {
     if (entry.updatedAt < cutoff) cache.delete(key);
+  }
+  // If still over cap, drop oldest insertions (Map preserves insertion order).
+  while (cache.size > MAX_CACHE_ENTRIES) {
+    const oldestKey = cache.keys().next().value;
+    if (oldestKey === undefined) break;
+    cache.delete(oldestKey);
   }
 }
 
@@ -47,7 +64,7 @@ export function recordSubagentText(
 ): void {
   const key = normalizeKey(callId);
   if (!key) return;
-  pruneExpired(ttlMs);
+  pruneIfDue(ttlMs);
   const existing = cache.get(key);
   const createdAt = existing?.createdAt ?? now();
   const partialText = clampText(`${existing?.partialText ?? ''}${textDelta}`);
@@ -72,7 +89,7 @@ export function recordSubagentStatus(
 ): void {
   const key = normalizeKey(callId);
   if (!key) return;
-  pruneExpired(ttlMs);
+  pruneIfDue(ttlMs);
   const existing = cache.get(key);
   const createdAt = existing?.createdAt ?? now();
   cache.set(key, {
@@ -94,7 +111,7 @@ export function recordSubagentResult(
 ): void {
   const key = normalizeKey(callId);
   if (!key) return;
-  pruneExpired(ttlMs);
+  pruneIfDue(ttlMs);
   const existing = cache.get(key);
   const createdAt = existing?.createdAt ?? now();
   cache.set(key, {
@@ -115,10 +132,11 @@ export function getSubagentCachedEntry(
 ): SubagentCachedEntry | undefined {
   const key = normalizeKey(callId);
   if (!key) return undefined;
-  pruneExpired(ttlMs);
+  pruneIfDue(ttlMs);
   return cache.get(key);
 }
 
 export function clearSubagentCache(): void {
   cache.clear();
+  lastPrunedAt = 0;
 }

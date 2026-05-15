@@ -1,5 +1,4 @@
 import type { Kysely } from 'kysely';
-import { loadavg } from 'node:os';
 import type { Database } from '../../../db/types';
 import type {
   GeneratedImagePart,
@@ -9,9 +8,16 @@ import type {
   ContinuationReasonCode,
   SubagentTraceEvent,
 } from '@mangostudio/shared';
+import {
+  DELEGATION_BACKOFF_BASE_MS,
+  DELEGATION_BACKOFF_MAX_MS,
+  DELEGATION_MAX_RETRIES,
+  mergeSubagentTraceEvents,
+} from '@mangostudio/shared';
 import type { PromptSettings } from '@mangostudio/shared/prompt-rules';
 import type { ContextSettings } from '@mangostudio/shared/chat';
 import type { AgentExecutionMode, AgentId, AgentProfile } from '@mangostudio/shared/agents';
+import { isAgentId } from '@mangostudio/shared/agents';
 import type { MultiAgentSettings } from '@mangostudio/shared/app-settings';
 import {
   MAX_TOOL_ITERATIONS_DEFAULT,
@@ -31,6 +37,11 @@ import {
 } from '../../../services/providers/core/provider-registry';
 import { warmProviderForRequest } from '../../../services/providers/core/provider-readiness';
 import { executeTool, getTool, getSafeEffectiveToolSettings } from '../../../services/tools';
+import {
+  getBoundedOptionalInteger,
+  getOptionalString,
+  getRequiredString,
+} from '../../../services/tools/arg-parsing';
 import type { EffectiveToolSettings } from '../../../services/tools/types';
 import {
   GENERATE_IMAGE_TOOL_NAME,
@@ -95,9 +106,6 @@ import {
 
 const TOOL_TIMEOUT_MS = 30_000;
 const TOOL_LOOP_EXHAUSTED_MESSAGE = 'The model exceeded the maximum number of tool interactions.';
-const DELEGATION_MAX_RETRIES = 3;
-const DELEGATION_BACKOFF_BASE_MS = 25;
-const DELEGATION_BACKOFF_MAX_MS = 400;
 
 export interface StreamTextTurnInput {
   chatId: string;
@@ -1220,8 +1228,8 @@ async function executeDelegationToolCall(
         recordSubagentStatus(callId, event.agentId, event.agentName, 'completed');
       }
       if (event.type === 'failed') {
-        if (event.agentName) {
-          recordSubagentStatus(callId, event.agentId as AgentId, event.agentName, 'failed');
+        if (event.agentName && isAgentId(event.agentId)) {
+          recordSubagentStatus(callId, event.agentId, event.agentName, 'failed');
         }
       }
       runtime.onEvent?.(toSubagentStreamEvent(callId, event));
@@ -1354,14 +1362,23 @@ function createSubagentToolResult(result: SubagentRunResult): Record<string, unk
 }
 
 function parseDelegationRequest(args: Record<string, unknown>): DelegateToSubagentRequest {
-  const agentId = getRequiredString(args.agentId, 'agentId');
+  const rawAgentId = getRequiredString(args.agentId, 'agentId');
+  if (!isAgentId(rawAgentId)) {
+    throw new SubagentDelegationError(
+      `Invalid delegation target agent id "${rawAgentId}".`,
+      'INVALID_AGENT_ID'
+    );
+  }
   const task = getRequiredString(args.task, 'task');
   const context = getOptionalString(args.context);
   const expectedOutput = getOptionalString(args.expectedOutput);
-  const maxTurns = getOptionalInteger(args.maxTurns);
+  const maxTurns = getBoundedOptionalInteger(args.maxTurns, 'maxTurns', {
+    min: SUBAGENT_MAX_TURNS_MIN,
+    max: SUBAGENT_MAX_TURNS_MAX,
+  });
 
   return {
-    agentId,
+    agentId: rawAgentId,
     task,
     ...(context ? { context } : {}),
     ...(expectedOutput ? { expectedOutput } : {}),
@@ -1411,7 +1428,7 @@ async function ensureDelegationResult(
       }
 
       const cacheEntry = getSubagentCachedEntry(callId);
-      const recovered = tryRecoverFromCache(callId, request.agentId as AgentId, cacheEntry);
+      const recovered = tryRecoverFromCache(callId, request.agentId, cacheEntry);
       if (recovered) {
         logDelegationWarn('recovered_from_cache', {
           callId,
@@ -1443,7 +1460,6 @@ async function ensureDelegationResult(
         toolCallCount: isSubagentRunResult(result) ? result.toolCallCount : 0,
         scenario: classifyMissingResponseScenario(cacheEntry),
         cachedPartialChars: cacheEntry?.partialText?.length ?? 0,
-        ...getInfraLogMetadata(),
       });
     } catch (error) {
       if (error instanceof SubagentDelegationError && error.code === 'TIMEOUT') {
@@ -1453,7 +1469,6 @@ async function ensureDelegationResult(
           agentId: request.agentId,
           attempt,
           error: text,
-          ...getInfraLogMetadata(),
         });
         runtime.onEvent?.({
           type: 'system_event',
@@ -1466,7 +1481,7 @@ async function ensureDelegationResult(
           detail: `call=${callId} agent=${request.agentId}`,
         });
         return withSubagentTraceEvents(
-          createTimedOutSubagentResult(callId, request.agentId as AgentId, text),
+          createTimedOutSubagentResult(callId, request.agentId, text),
           events
         );
       }
@@ -1475,7 +1490,7 @@ async function ensureDelegationResult(
       }
       lastError = errorToToolMessage(error);
       const cacheEntry = getSubagentCachedEntry(callId);
-      const recovered = tryRecoverFromCache(callId, request.agentId as AgentId, cacheEntry);
+      const recovered = tryRecoverFromCache(callId, request.agentId, cacheEntry);
       if (recovered) {
         logDelegationWarn('recovered_from_cache_after_error', {
           callId,
@@ -1503,17 +1518,16 @@ async function ensureDelegationResult(
         error: lastError,
         scenario: classifyMissingResponseScenario(cacheEntry),
         cachedPartialChars: cacheEntry?.partialText?.length ?? 0,
-        ...getInfraLogMetadata(),
       });
     }
   }
 
   const cacheEntry = getSubagentCachedEntry(callId);
-  const recovered = tryRecoverFromCache(callId, request.agentId as AgentId, cacheEntry);
+  const recovered = tryRecoverFromCache(callId, request.agentId, cacheEntry);
   if (recovered) return withSubagentTraceEvents(recovered, events);
 
   const summary = `Subagent failed to produce a final response. ${lastError}`.trim();
-  const fallback = createMissingSubagentResult(callId, request.agentId as AgentId, summary);
+  const fallback = createMissingSubagentResult(callId, request.agentId, summary);
   runtime.onEvent?.({
     type: 'system_event',
     event: 'subagent_response_fallback',
@@ -1541,21 +1555,6 @@ function withSubagentTraceEvents(
   };
 }
 
-function mergeSubagentTraceEvents(
-  current: ReadonlyArray<SubagentTraceEvent> | undefined,
-  next: ReadonlyArray<SubagentTraceEvent>
-): ReadonlyArray<SubagentTraceEvent> {
-  const merged = [...(current ?? [])];
-  for (const event of next) {
-    const exists = merged.some(
-      (item) =>
-        item.event === event.event && item.attempt === event.attempt && item.detail === event.detail
-    );
-    if (!exists) merged.push(event);
-  }
-  return merged;
-}
-
 function isNonRetryableDelegationError(error: unknown): boolean {
   const code = getDelegationErrorCode(error);
   if (!code) return false;
@@ -1567,6 +1566,7 @@ function isNonRetryableDelegationError(error: unknown): boolean {
     'MAX_DEPTH',
     'TARGET_NOT_ALLOWED',
     'INVALID_ROLE',
+    'INVALID_AGENT_ID',
   ].includes(code);
 }
 
@@ -1714,20 +1714,6 @@ function withDelegationTimeout<T>(
   });
 }
 
-function getInfraLogMetadata(): Record<string, string | number | boolean> {
-  const mem = process.memoryUsage();
-  const [load1, load5, load15] = loadavg();
-  return {
-    pid: process.pid,
-    uptimeSec: Math.round(process.uptime()),
-    rssBytes: mem.rss,
-    heapUsedBytes: mem.heapUsed,
-    load1,
-    load5,
-    load15,
-  };
-}
-
 /**
  * A subagent result is "valid" for the parent agent when it has a usable summary.
  *
@@ -1816,25 +1802,6 @@ function isSubagentTraceMessage(
   return (
     (record.role === 'assistant' || record.role === 'system') && typeof record.text === 'string'
   );
-}
-
-function getRequiredString(value: unknown, name: string): string {
-  const text = typeof value === 'string' ? value.trim() : '';
-  if (!text) throw new Error(`Missing required delegation field "${name}".`);
-  return text;
-}
-
-function getOptionalString(value: unknown): string | undefined {
-  const text = typeof value === 'string' ? value.trim() : '';
-  return text || undefined;
-}
-
-function getOptionalInteger(value: unknown): number | undefined {
-  if (value === undefined) return undefined;
-  if (typeof value !== 'number' || !Number.isFinite(value)) {
-    throw new Error('Delegation field "maxTurns" must be a finite number.');
-  }
-  return Math.max(SUBAGENT_MAX_TURNS_MIN, Math.min(SUBAGENT_MAX_TURNS_MAX, Math.round(value)));
 }
 
 function createFailedToolExecution(

@@ -5,6 +5,7 @@
 
 import { SUBAGENT_MAX_TURNS_MAX, SUBAGENT_MAX_TURNS_MIN } from '@mangostudio/shared/app-settings';
 
+import { getBoundedOptionalInteger, getOptionalString, getRequiredString } from '../arg-parsing';
 import { registerTool } from '../registry';
 import type { DelegateToAgentInput, ToolContext } from '../types';
 
@@ -74,7 +75,10 @@ function parseDelegateArgs(args: Record<string, unknown>): DelegateToAgentInput 
   const task = getRequiredString(args.task, 'task');
   const context = getOptionalString(args.context);
   const expectedOutput = getOptionalString(args.expectedOutput);
-  const maxTurns = getOptionalInteger(args.maxTurns);
+  const maxTurns = getBoundedOptionalInteger(args.maxTurns, 'maxTurns', {
+    min: SUBAGENT_MAX_TURNS_MIN,
+    max: SUBAGENT_MAX_TURNS_MAX,
+  });
 
   return {
     agentId,
@@ -83,25 +87,6 @@ function parseDelegateArgs(args: Record<string, unknown>): DelegateToAgentInput 
     ...(expectedOutput ? { expectedOutput } : {}),
     ...(maxTurns !== undefined ? { maxTurns } : {}),
   };
-}
-
-function getRequiredString(value: unknown, name: string): string {
-  const text = typeof value === 'string' ? value.trim() : '';
-  if (!text) throw new Error(`Missing required delegation field "${name}".`);
-  return text;
-}
-
-function getOptionalString(value: unknown): string | undefined {
-  const text = typeof value === 'string' ? value.trim() : '';
-  return text || undefined;
-}
-
-function getOptionalInteger(value: unknown): number | undefined {
-  if (value === undefined) return undefined;
-  if (typeof value !== 'number' || !Number.isFinite(value)) {
-    throw new Error('Delegation field "maxTurns" must be a finite number.');
-  }
-  return Math.max(SUBAGENT_MAX_TURNS_MIN, Math.min(SUBAGENT_MAX_TURNS_MAX, Math.round(value)));
 }
 
 register();

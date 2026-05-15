@@ -74,6 +74,28 @@ export interface SubagentTraceEvent {
   detail?: string;
 }
 
+/**
+ * Merges two trace event lists, de-duping by (event, attempt, detail).
+ * Used by both the API turn runner (cumulative trace per attempt) and the
+ * frontend stream consumer (incoming SSE events appended to optimistic state).
+ */
+export function mergeSubagentTraceEvents(
+  current: ReadonlyArray<SubagentTraceEvent> | undefined,
+  next: ReadonlyArray<SubagentTraceEvent> | undefined
+): ReadonlyArray<SubagentTraceEvent> | undefined {
+  if (!current?.length) return next;
+  if (!next?.length) return current;
+  const merged = [...current];
+  for (const event of next) {
+    const exists = merged.some(
+      (item) =>
+        item.event === event.event && item.attempt === event.attempt && item.detail === event.detail
+    );
+    if (!exists) merged.push(event);
+  }
+  return merged;
+}
+
 export interface SubagentTracePart {
   type: 'subagent_trace';
   toolCallId: string;
