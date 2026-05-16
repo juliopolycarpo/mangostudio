@@ -62,7 +62,6 @@ data: {"type":"user_message_id","messageId":"msg_abc123","done":false}
 data: {"type":"text","text":"Hello","done":false}
 
 data: {"type":"done","messageId":"msg_def456","done":true}
-
 ```
 
 - Each event is framed as `data: <JSON>\n\n`.
