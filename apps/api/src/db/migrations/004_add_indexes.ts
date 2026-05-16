@@ -2,7 +2,7 @@
  * Migration 004: adds performance indexes for common queries.
  */
 
-import { type Migration } from 'kysely/migration';
+import type { Migration } from 'kysely/migration';
 
 export const addIndexes: Migration = {
   async up(db) {

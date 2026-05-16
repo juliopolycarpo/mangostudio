@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'bun:test';
 import type { AgentId } from '@mangostudio/shared/agents';
-import type { SubagentRunResult } from '../../../../src/modules/generation/application/subagent-runner';
 import {
   clearSubagentCache,
   getSubagentCachedEntry,
@@ -8,6 +7,7 @@ import {
   recordSubagentStatus,
   recordSubagentText,
 } from '../../../../src/modules/generation/application/subagent-response-cache';
+import type { SubagentRunResult } from '../../../../src/modules/generation/application/subagent-runner';
 
 describe('subagent-response-cache', () => {
   it('records partial text deltas and final results for a call id', () => {

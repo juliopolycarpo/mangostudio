@@ -1,13 +1,13 @@
-import { type Elysia } from 'elysia';
-import { GenerateTextBodySchema } from '@mangostudio/shared/generation';
 import { ERROR_CODES } from '@mangostudio/shared/errors';
+import { GenerateTextBodySchema } from '@mangostudio/shared/generation';
+import type { Elysia } from 'elysia';
 import '../../../services/providers'; // ensure all providers are registered
 import { getDb } from '../../../db/database';
 import { requireAuth } from '../../../plugins/auth-middleware';
-import { sendTextMessage } from '../application/send-text-message';
+import { ChatAttachmentNotFoundError } from '../../attachments/infrastructure/attachment-repository';
 import { ChatNotFoundError } from '../../chats/domain/chat-ownership';
 import { NoModelAvailableError } from '../application/resolve-model';
-import { ChatAttachmentNotFoundError } from '../../attachments/infrastructure/attachment-repository';
+import { sendTextMessage } from '../application/send-text-message';
 import { EmptyTextTurnError } from '../application/text-turn-content';
 
 export const respondRoutes = (app: Elysia) =>

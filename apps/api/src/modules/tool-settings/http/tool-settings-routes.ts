@@ -1,10 +1,10 @@
-import { Elysia, t } from 'elysia';
-import { UpdateToolSettingsBodySchema } from '@mangostudio/shared/tool-settings';
+import type { ApiErrorResponse } from '@mangostudio/shared/errors';
 import type {
   ToolSettingsDescriptor,
   ToolSettingsListResponse,
 } from '@mangostudio/shared/tool-settings';
-import type { ApiErrorResponse } from '@mangostudio/shared/errors';
+import { UpdateToolSettingsBodySchema } from '@mangostudio/shared/tool-settings';
+import { Elysia, t } from 'elysia';
 import { getDb } from '../../../db/database';
 import { requireAuth } from '../../../plugins/auth-middleware';
 import {

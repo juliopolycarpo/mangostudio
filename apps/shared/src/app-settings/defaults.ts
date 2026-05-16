@@ -1,13 +1,3 @@
-import type { ContextCompactionBehavior, ContextSettings } from '../chat';
-import { CHAT_TITLE_PROMPT_LENGTH_DEFAULT, clampChatTitlePromptLength } from '../chat/title';
-import type {
-  PromptInjectionRole,
-  PromptSendFrequency,
-  PromptSettings,
-  RuleFileSetting,
-} from '../prompt-rules';
-import type { ReasoningEffort } from '../types';
-import type { AppSettings, ChatTitleSettings, ImageQuality, MultiAgentSettings } from './contracts';
 import {
   MAX_SUBAGENT_CALLS_DEFAULT,
   MAX_SUBAGENT_CALLS_MAX,
@@ -19,6 +9,16 @@ import {
   SUBAGENT_MAX_TURNS_MAX,
   SUBAGENT_MAX_TURNS_MIN,
 } from '../agentic-limits';
+import type { ContextCompactionBehavior, ContextSettings } from '../chat';
+import { CHAT_TITLE_PROMPT_LENGTH_DEFAULT, clampChatTitlePromptLength } from '../chat/title';
+import type {
+  PromptInjectionRole,
+  PromptSendFrequency,
+  PromptSettings,
+  RuleFileSetting,
+} from '../prompt-rules';
+import type { ReasoningEffort } from '../types';
+import type { AppSettings, ChatTitleSettings, ImageQuality, MultiAgentSettings } from './contracts';
 
 const CURRENT_MODEL_SETTING = 'current_model';
 

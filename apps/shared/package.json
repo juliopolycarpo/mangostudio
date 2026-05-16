@@ -5,9 +5,9 @@
   "license": "MIT",
   "type": "module",
   "scripts": {
-    "check": "eslint src tests --max-warnings 0 --cache --cache-location ../../node_modules/.cache/eslint/.eslintcache.shared && prettier --ignore-path ../../.prettierignore --check 'src/**/*.{ts,json}' 'tests/**/*.ts' --cache --cache-location ../../node_modules/.cache/prettier/.prettiercache.shared && tsc --noEmit",
-    "check:quick": "eslint src tests --max-warnings 0 --cache --cache-location ../../node_modules/.cache/eslint/.eslintcache.shared && prettier --ignore-path ../../.prettierignore --check 'src/**/*.{ts,json}' 'tests/**/*.ts' --cache --cache-location ../../node_modules/.cache/prettier/.prettiercache.shared",
-    "fix": "eslint src tests --fix --max-warnings 0 --cache --cache-location ../../node_modules/.cache/eslint/.eslintcache.shared && prettier --ignore-path ../../.prettierignore --write 'src/**/*.{ts,json}' 'tests/**/*.ts' --cache --cache-location ../../node_modules/.cache/prettier/.prettiercache.shared",
+    "check": "biome check src tests && eslint src tests --max-warnings 0 --cache --cache-location ../../node_modules/.cache/eslint/.eslintcache.shared && tsc --noEmit",
+    "check:quick": "biome check src tests && eslint src tests --max-warnings 0 --cache --cache-location ../../node_modules/.cache/eslint/.eslintcache.shared",
+    "fix": "biome check --write src tests && eslint src tests --fix --max-warnings 0 --cache --cache-location ../../node_modules/.cache/eslint/.eslintcache.shared",
     "test": "vitest run",
     "test:unit": "vitest run tests/unit",
     "test:coverage": "vitest run --coverage"

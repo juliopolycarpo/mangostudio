@@ -1,8 +1,8 @@
-import { describe, expect, it, vi } from 'vitest';
-import { fireEvent, screen, within } from '@testing-library/react';
 import { mockChats } from '@mangostudio/shared/test-utils';
-import { render } from '../../support/harness/render';
+import { fireEvent, screen, within } from '@testing-library/react';
+import { describe, expect, it, vi } from 'vitest';
 import { Sidebar } from '../../../src/features/sidebar/components/Sidebar';
+import { render } from '../../support/harness/render';
 
 const defaultProps = {
   currentPage: 'chat' as const,

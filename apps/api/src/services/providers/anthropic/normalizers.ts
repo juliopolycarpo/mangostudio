@@ -5,8 +5,8 @@
  * well-typed shapes so the provider file itself stays free of unsafe casts.
  */
 
-import { APIError as AnthropicAPIError } from '@anthropic-ai/sdk';
 import type Anthropic from '@anthropic-ai/sdk';
+import { APIError as AnthropicAPIError } from '@anthropic-ai/sdk';
 
 // ---------------------------------------------------------------------------
 // SDK boundary cast — Anthropic Messages API

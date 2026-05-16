@@ -4,23 +4,22 @@
  * for proper Eden type inference in the frontend.
  */
 
-import { Elysia } from 'elysia';
-import { staticPlugin } from '@elysiajs/static';
-import { openapi } from '@elysiajs/openapi';
 import { cors } from '@elysiajs/cors';
-
+import { openapi } from '@elysiajs/openapi';
+import { staticPlugin } from '@elysiajs/static';
+import { Elysia } from 'elysia';
+import { getConfig } from './lib/config';
 import { chatRoutes } from './modules/chats/http/chat-routes';
-import { messageRoutes } from './modules/messages/http/message-routes';
-import { uploadRoutes } from './routes/upload';
 import { generateRoutes } from './modules/generation/http/generate-routes';
 import { respondRoutes } from './modules/generation/http/respond-routes';
 import { respondStreamRoutes } from './modules/generation/http/respond-stream-routes';
-import { settingsRoutes } from './routes/settings';
-import { authRoutes } from './routes/auth';
-import { rateLimit } from './plugins/rate-limit';
+import { messageRoutes } from './modules/messages/http/message-routes';
 import { errorHandler } from './plugins/error-handler';
-import { getConfig } from './lib/config';
+import { rateLimit } from './plugins/rate-limit';
+import { authRoutes } from './routes/auth';
 import { createGeneratedImageRoutes } from './routes/generated-images';
+import { settingsRoutes } from './routes/settings';
+import { uploadRoutes } from './routes/upload';
 
 const UPLOADS_DIR = getConfig().uploads.dir;
 const IMAGES_DIR = getConfig().images.dir;

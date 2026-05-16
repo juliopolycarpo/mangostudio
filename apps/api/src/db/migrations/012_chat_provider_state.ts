@@ -1,4 +1,4 @@
-import { type Migration } from 'kysely/migration';
+import type { Migration } from 'kysely/migration';
 
 export const chatProviderState: Migration = {
   async up(db) {

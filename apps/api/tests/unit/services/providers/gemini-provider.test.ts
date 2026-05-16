@@ -24,8 +24,9 @@ describe('gemini-provider adapter', () => {
 
   it('is registered in the provider registry after import', async () => {
     await import('../../../../src/services/providers/gemini/index');
-    const { getProvider } =
-      await import('../../../../src/services/providers/core/provider-registry');
+    const { getProvider } = await import(
+      '../../../../src/services/providers/core/provider-registry'
+    );
     const provider = getProvider('gemini');
     expect(provider.providerType).toBe('gemini');
   });

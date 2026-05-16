@@ -3,12 +3,12 @@
  */
 
 import type OpenAI from 'openai';
-import type { ImageGenerationRequest, ImageGenerationResult } from '../types';
-import { isImageModelId } from '../core/capability-detector';
 import {
   normalizeGeneratedImageMimeType,
   saveGeneratedImage,
 } from '../../generated-images/generated-image-storage';
+import { isImageModelId } from '../core/capability-detector';
+import type { ImageGenerationRequest, ImageGenerationResult } from '../types';
 
 function alwaysReturnsBase64(modelName: string): boolean {
   const id = modelName.toLowerCase();

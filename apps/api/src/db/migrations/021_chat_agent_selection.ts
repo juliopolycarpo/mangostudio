@@ -1,5 +1,5 @@
 import { sql } from 'kysely';
-import { type Migration } from 'kysely/migration';
+import type { Migration } from 'kysely/migration';
 
 export const chatAgentSelection: Migration = {
   async up(db) {

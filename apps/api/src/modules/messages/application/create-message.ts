@@ -1,6 +1,6 @@
+import type { InteractionMode } from '@mangostudio/shared/types';
 import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';
-import type { InteractionMode } from '@mangostudio/shared/types';
 import { assertChatOwnership } from '../../chats/domain/chat-ownership';
 import { insertMessage } from '../infrastructure/message-repository';
 

@@ -2,14 +2,15 @@
  * Unit tests for the thinking-segment tracking logic in useTextChat.
  * Verifies that multiple thinking blocks are built correctly during SSE streaming.
  */
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+
 import type { MessagePart } from '@mangostudio/shared';
-import { act, renderHook, waitFor } from '../../support/harness/render';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useTextGeneration } from '../../../src/features/generation/hooks/use-text-generation';
 import {
   DEFAULT_CHAT_TITLE_SETTINGS,
   DEFAULT_CONTEXT_SETTINGS,
 } from '../../../src/hooks/use-global-settings';
+import { act, renderHook, waitFor } from '../../support/harness/render';
 
 vi.mock('../../../src/services/generation-service', () => ({
   respondTextStream: vi.fn(),
@@ -28,8 +29,9 @@ vi.mock('../../../src/features/chat/queries', () => ({
   messageKeys: { list: (id: string) => ['messages', id] },
 }));
 
-import { respondTextStream } from '../../../src/services/generation-service';
 import { generateChatTitleSuggestion } from '../../../src/features/chat/services/chat-title';
+import { respondTextStream } from '../../../src/services/generation-service';
+
 const mockStream = vi.mocked(respondTextStream);
 const mockGenerateChatTitle = vi.mocked(generateChatTitleSuggestion);
 

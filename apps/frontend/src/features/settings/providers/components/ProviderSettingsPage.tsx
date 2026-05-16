@@ -3,18 +3,18 @@
  * Shows runtime controls for a single provider based on its descriptor.
  */
 
-import { useState, useCallback, useEffect, useRef } from 'react';
+import type { UpdateProviderRuntimeSettingsBody } from '@mangostudio/shared/provider-settings';
 import { Link, useParams } from '@tanstack/react-router';
 import { ArrowLeft } from 'lucide-react';
-import type { UpdateProviderRuntimeSettingsBody } from '@mangostudio/shared/provider-settings';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Button } from '@/components/ui/Button';
+import { useToast } from '@/components/ui/Toast';
 import { useI18n } from '@/hooks/use-i18n';
 import { useProviderSettings, useUpdateProviderSettings } from '../hooks/use-provider-settings';
-import { useToast } from '@/components/ui/Toast';
-import { Button } from '@/components/ui/Button';
-import { ReasoningSettingsSection } from './ReasoningSettingsSection';
-import { ToolSettingsSection } from './ToolSettingsSection';
 import { CacheSettingsSection } from './CacheSettingsSection';
 import { ProviderAdvancedSection } from './ProviderAdvancedSection';
+import { ReasoningSettingsSection } from './ReasoningSettingsSection';
+import { ToolSettingsSection } from './ToolSettingsSection';
 
 const PROVIDER_SETTINGS_AUTOSAVE_MS = 300;
 

@@ -1,8 +1,8 @@
+import type { ContextInfo } from '@mangostudio/shared/chat';
 import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';
-import type { ContextInfo } from '@mangostudio/shared/chat';
-import { assertChatOwnership } from '../domain/chat-ownership';
 import { listByChatId } from '../../messages/infrastructure/message-repository';
+import { assertChatOwnership } from '../domain/chat-ownership';
 import { extractContextInfo } from './list-chats';
 
 export interface GetChatMessagesInput {

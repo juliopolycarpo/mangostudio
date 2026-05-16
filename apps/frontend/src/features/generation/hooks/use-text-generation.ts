@@ -1,6 +1,5 @@
 /* global console */
-import { useCallback, useState } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
+
 import type {
   GeneratedImagePart,
   Message,
@@ -10,23 +9,25 @@ import type {
 import type { AgentExecutionMode } from '@mangostudio/shared/agents';
 import type { ChatTitleSettings } from '@mangostudio/shared/app-settings';
 import {
-  createPromptChatTitle,
-  isTimestampChatTitle,
   type ContextCompactionResponse,
   type ContextSettings,
+  createPromptChatTitle,
+  isTimestampChatTitle,
 } from '@mangostudio/shared/chat';
 import type { ToolIntent } from '@mangostudio/shared/generation';
+import type { PromptSettings } from '@mangostudio/shared/prompt-rules';
 import type { SubagentTraceEvent, SubagentTraceEventName } from '@mangostudio/shared/types';
 import { mergeSubagentTraceEvents } from '@mangostudio/shared/types';
-import type { PromptSettings } from '@mangostudio/shared/prompt-rules';
-import { useI18n } from '@/hooks/use-i18n';
+import { useQueryClient } from '@tanstack/react-query';
+import { useCallback, useState } from 'react';
+import { useChatStream } from '@/features/chat/hooks/use-chat-stream';
+import type { useChats } from '@/features/chat/hooks/use-chats';
 import { messageKeys } from '@/features/chat/queries';
 import { generateChatTitleSuggestion } from '@/features/chat/services/chat-title';
 import { compactChat, summarizeToNewChat } from '@/features/chat/services/context-compaction';
-import { respondTextStream } from '@/services/generation-service';
-import { useChatStream } from '@/features/chat/hooks/use-chat-stream';
 import type { useOptimisticMessages } from '@/features/generation/hooks/use-optimistic-messages';
-import type { useChats } from '@/features/chat/hooks/use-chats';
+import { useI18n } from '@/hooks/use-i18n';
+import { respondTextStream } from '@/services/generation-service';
 
 interface UseTextGenerationOptions {
   chats: ReturnType<typeof useChats>;

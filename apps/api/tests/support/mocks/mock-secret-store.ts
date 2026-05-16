@@ -1,6 +1,6 @@
 import {
-  SecretStorageUnavailableError,
   type SecretDescriptor,
+  SecretStorageUnavailableError,
   type SecretStore,
 } from '../../../src/services/secret-store';
 

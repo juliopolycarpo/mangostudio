@@ -1,4 +1,4 @@
-import { describe, expect, it, mock, beforeEach, afterEach } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 import type { PromptSettings } from '@mangostudio/shared/prompt-rules';
 import { composePrompt } from '../../../../src/modules/prompt-rules/application/prompt-composer';
 

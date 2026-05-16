@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeAll } from 'bun:test';
+import { beforeAll, describe, expect, it } from 'bun:test';
 import { getDb } from '../../../src/db/database';
 import {
   insertMessage,

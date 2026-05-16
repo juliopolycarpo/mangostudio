@@ -4,11 +4,12 @@
  * thinking blocks appear when the parts array contains multiple thinking entries,
  * and that the legacy single-thinking-part format still renders correctly.
  */
-import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { fireEvent, screen } from '@testing-library/react';
+
 import type { Message, MessagePart } from '@mangostudio/shared';
-import { render } from '../../support/harness/render';
+import { fireEvent, screen } from '@testing-library/react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChatFeed } from '../../../src/features/chat/components/ChatFeed';
+import { render } from '../../support/harness/render';
 
 // The virtualizer depends on DOM layout measurements not available in jsdom.
 // We mock it so every item in the messages array is rendered directly.

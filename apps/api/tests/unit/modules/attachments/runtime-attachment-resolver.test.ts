@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { mkdirSync, rmSync, writeFileSync } from 'fs';
-import { join } from 'path';
 import type { Kysely } from 'kysely';
-import { loadConfigForTest, resetConfig } from '../../../../src/lib/config';
+import { join } from 'path';
 import type { ChatAttachmentSelect, Database } from '../../../../src/db/types';
+import { loadConfigForTest, resetConfig } from '../../../../src/lib/config';
 import {
   ChatAttachmentFileUnavailableError,
   resolveProviderRuntimeAttachments,

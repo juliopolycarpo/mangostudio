@@ -3,12 +3,12 @@
  * Reads the contents of a text file from disk.
  */
 
-import type { ToolContext } from '../types';
 import { registerTool } from '../registry';
+import type { ToolContext } from '../types';
 import {
-  type PathValidationSettings,
   normalizePathList,
   PathAccessError,
+  type PathValidationSettings,
   resolveAndValidatePath,
 } from './_fs-utils';
 

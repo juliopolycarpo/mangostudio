@@ -5,8 +5,8 @@
 
 import type { ProviderType } from '@mangostudio/shared/types';
 import { getDb } from '../../../db/database';
-import type { AIProvider } from '../types';
 import { parseStringArray } from '../../../utils/json';
+import type { AIProvider } from '../types';
 import { recordProviderCacheHit, recordProviderCacheMiss } from './provider-observability';
 
 const PROVIDER_ROUTE_CACHE_TTL_MS = 60_000;

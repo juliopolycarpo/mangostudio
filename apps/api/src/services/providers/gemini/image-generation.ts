@@ -2,15 +2,15 @@
  * Gemini image generation service.
  */
 
+import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
-import { readFileSync, existsSync } from 'fs';
-import { getResolvedGeminiApiKey } from './secret';
 import { getConfig } from '../../../lib/config';
-import { createGeminiClient } from './client';
 import {
   normalizeGeneratedImageMimeType,
   saveGeneratedImage,
 } from '../../generated-images/generated-image-storage';
+import { createGeminiClient } from './client';
+import { getResolvedGeminiApiKey } from './secret';
 
 interface GeminiImagePart {
   inlineData?: {

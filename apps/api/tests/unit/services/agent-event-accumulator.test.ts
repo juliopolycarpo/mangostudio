@@ -3,10 +3,9 @@
  */
 
 import { beforeEach, describe, expect, it } from 'bun:test';
-
-import { register as registerGetCurrentDatetime } from '../../../src/services/tools/builtin/get-current-datetime';
-import { getTool, executeTool } from '../../../src/services/tools/registry';
 import type { GetCurrentDatetimeResult } from '../../../src/services/tools/builtin/get-current-datetime';
+import { register as registerGetCurrentDatetime } from '../../../src/services/tools/builtin/get-current-datetime';
+import { executeTool, getTool } from '../../../src/services/tools/registry';
 
 const ctx = { userId: 'u1', chatId: 'c1', parameters: {} };
 

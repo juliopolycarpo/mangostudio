@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'bun:test';
 import {
-  buildOpenAIResponsesReplay,
-  buildGeminiInteractionsReplay,
   buildChatCompletionsReplay,
+  buildGeminiInteractionsReplay,
+  buildOpenAIResponsesReplay,
 } from '../../../../src/services/providers/core/replay-builder';
 import type { ChatTurnContext } from '../../../../src/services/providers/types';
 

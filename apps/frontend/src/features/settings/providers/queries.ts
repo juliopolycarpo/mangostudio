@@ -2,11 +2,11 @@
  * Provider settings query keys and options.
  */
 
-import { queryOptions } from '@tanstack/react-query';
 import type {
   ProviderSettingsDescriptor,
   ProviderSettingsListResponse,
 } from '@mangostudio/shared/provider-settings';
+import { queryOptions } from '@tanstack/react-query';
 import { client } from '@/lib/api-client';
 import { extractApiError } from '@/lib/utils';
 

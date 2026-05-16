@@ -1,10 +1,10 @@
-import { useState, useRef, useEffect } from 'react';
-import { Image, MessageSquare, LayoutGrid, Settings, Plus, Pencil, Trash2, X } from 'lucide-react';
 import type { Chat } from '@mangostudio/shared';
+import { Image, LayoutGrid, MessageSquare, Pencil, Plus, Settings, Trash2, X } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
 import { useToast } from '@/components/ui';
-import { useI18n } from '@/hooks/use-i18n';
 import { Logo } from '@/components/ui/Logo';
 import type { ContextInfo } from '@/features/generation/types';
+import { useI18n } from '@/hooks/use-i18n';
 import { ContextRing } from './ContextRing';
 
 interface Props {

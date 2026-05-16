@@ -1,15 +1,15 @@
-import { describe, expect, it, beforeEach, afterEach } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import type { AgentProfile } from '@mangostudio/shared/agents';
 import {
-  registerTool,
-  getTool,
-  getAllTools,
+  clearRegistry,
+  executeTool,
   getAllToolDefinitions,
+  getAllTools,
+  getTool,
   getToolDefinitionsForAgent,
   getToolDefinitionsForSettings,
   getToolDescriptors,
-  executeTool,
-  clearRegistry,
+  registerTool,
 } from '../../../src/services/tools/registry';
 import type { RegisteredTool, ToolContext, ToolExecutor } from '../../../src/services/tools/types';
 

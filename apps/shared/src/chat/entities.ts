@@ -1,6 +1,6 @@
-import type { InteractionMode } from '../types/provider';
 import type { MessagePart } from '../types/agent-events';
 import type { GeneratedImageArtifact } from '../types/gallery';
+import type { InteractionMode } from '../types/provider';
 
 export type ChatAttachmentKind = 'image' | 'text' | 'pdf' | 'data' | 'unknown';
 

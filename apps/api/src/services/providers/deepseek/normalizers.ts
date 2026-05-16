@@ -1,7 +1,7 @@
-import type { ModelMessage } from 'ai';
 import type { ReasoningEffort } from '@mangostudio/shared/types';
-import type { TextGenerationRequest } from '../types';
+import type { ModelMessage } from 'ai';
 import { appendAttachmentFallbackNotes } from '../core/attachment-content';
+import type { TextGenerationRequest } from '../types';
 
 /**
  * Maps Mango's `ReasoningEffort` to values accepted by the DeepSeek API.

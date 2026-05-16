@@ -3,7 +3,7 @@
  * Matches the existing SQLite schema from the prototype.
  */
 
-import { type Migration } from 'kysely/migration';
+import type { Migration } from 'kysely/migration';
 
 export const initialSchema: Migration = {
   async up(db) {

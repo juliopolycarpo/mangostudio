@@ -2,12 +2,12 @@
  * Integration tests for app-level settings pages backed by /api/settings/app.
  */
 
-import userEvent from '@testing-library/user-event';
+import { type AppSettings, DEFAULT_APP_SETTINGS } from '@mangostudio/shared/app-settings';
 import { fireEvent } from '@testing-library/react';
-import { DEFAULT_APP_SETTINGS, type AppSettings } from '@mangostudio/shared/app-settings';
+import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { PromptSettings } from '../../../src/components/settings/PromptSettings';
 import { GeneralSettings } from '../../../src/components/settings/GeneralSettings';
+import { PromptSettings } from '../../../src/components/settings/PromptSettings';
 import { useGlobalSettings } from '../../../src/hooks/use-global-settings';
 import { render, screen, waitFor } from '../../support/harness/render';
 import { createFetchScenario } from '../../support/mocks/create-fetch-scenario';

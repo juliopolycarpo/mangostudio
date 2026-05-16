@@ -1,11 +1,92 @@
-import eslint from '@eslint/js';
 import reactPlugin from '@eslint-react/eslint-plugin';
-import prettierConfig from 'eslint-config-prettier/flat';
 import reactHooksPlugin from 'eslint-plugin-react-hooks';
 import tseslint from 'typescript-eslint';
 
+const typeAwareRules = {
+  '@typescript-eslint/await-thenable': 'error',
+  '@typescript-eslint/no-array-delete': 'error',
+  '@typescript-eslint/no-duplicate-type-constituents': 'error',
+  '@typescript-eslint/no-redundant-type-constituents': 'error',
+  '@typescript-eslint/no-unnecessary-type-assertion': 'error',
+  '@typescript-eslint/no-unsafe-argument': 'error',
+  '@typescript-eslint/no-unsafe-assignment': 'error',
+  '@typescript-eslint/no-unsafe-call': 'error',
+  '@typescript-eslint/no-unsafe-enum-comparison': 'error',
+  '@typescript-eslint/no-unsafe-member-access': 'error',
+  '@typescript-eslint/no-unsafe-return': 'error',
+  '@typescript-eslint/no-unsafe-unary-minus': 'error',
+  '@typescript-eslint/prefer-promise-reject-errors': 'error',
+  '@typescript-eslint/require-await': 'error',
+  '@typescript-eslint/restrict-template-expressions': 'error',
+  '@typescript-eslint/triple-slash-reference': 'error',
+  '@typescript-eslint/unbound-method': 'error',
+};
+
+const reactResidualRules = {
+  '@eslint-react/error-boundaries': 'error',
+  '@eslint-react/no-access-state-in-setstate': 'error',
+  '@eslint-react/no-children-count': 'warn',
+  '@eslint-react/no-children-for-each': 'warn',
+  '@eslint-react/no-children-map': 'warn',
+  '@eslint-react/no-children-only': 'warn',
+  '@eslint-react/no-children-to-array': 'warn',
+  '@eslint-react/no-clone-element': 'warn',
+  '@eslint-react/no-component-will-mount': 'error',
+  '@eslint-react/no-component-will-receive-props': 'error',
+  '@eslint-react/no-component-will-update': 'error',
+  '@eslint-react/no-context-provider': 'warn',
+  '@eslint-react/no-create-ref': 'error',
+  '@eslint-react/no-direct-mutation-state': 'error',
+  '@eslint-react/no-leaked-conditional-rendering': 'error',
+  '@eslint-react/no-nested-lazy-component-declarations': 'error',
+  '@eslint-react/no-redundant-should-component-update': 'error',
+  '@eslint-react/no-set-state-in-component-did-mount': 'warn',
+  '@eslint-react/no-set-state-in-component-did-update': 'warn',
+  '@eslint-react/no-set-state-in-component-will-update': 'warn',
+  '@eslint-react/no-unnecessary-use-prefix': 'warn',
+  '@eslint-react/no-unsafe-component-will-mount': 'warn',
+  '@eslint-react/no-unsafe-component-will-receive-props': 'warn',
+  '@eslint-react/no-unsafe-component-will-update': 'warn',
+  '@eslint-react/no-unused-class-component-members': 'warn',
+  '@eslint-react/no-use-context': 'warn',
+  '@eslint-react/purity': 'warn',
+  '@eslint-react/set-state-in-effect': 'warn',
+  '@eslint-react/set-state-in-render': 'error',
+  '@eslint-react/unsupported-syntax': 'error',
+  '@eslint-react/use-memo': 'error',
+  '@eslint-react/use-state': 'warn',
+  '@eslint-react/jsx-no-children-prop-with-children': 'error',
+  '@eslint-react/jsx-no-comment-textnodes': 'warn',
+  '@eslint-react/jsx-no-key-after-spread': 'error',
+  '@eslint-react/jsx-no-leaked-semicolon': 'warn',
+  '@eslint-react/dom-no-find-dom-node': 'error',
+  '@eslint-react/dom-no-flush-sync': 'error',
+  '@eslint-react/dom-no-hydrate': 'error',
+  '@eslint-react/dom-no-render': 'error',
+  '@eslint-react/dom-no-render-return-value': 'error',
+  '@eslint-react/dom-no-unsafe-iframe-sandbox': 'warn',
+  '@eslint-react/dom-no-use-form-state': 'error',
+  '@eslint-react/web-api-no-leaked-event-listener': 'warn',
+  '@eslint-react/web-api-no-leaked-interval': 'warn',
+  '@eslint-react/web-api-no-leaked-resize-observer': 'warn',
+  '@eslint-react/web-api-no-leaked-timeout': 'warn',
+  '@eslint-react/naming-convention-context-name': 'warn',
+  '@eslint-react/naming-convention-id-name': 'warn',
+  '@eslint-react/naming-convention-ref-name': 'warn',
+  'react-hooks/config': 'error',
+  'react-hooks/error-boundaries': 'error',
+  'react-hooks/gating': 'error',
+  'react-hooks/globals': 'error',
+  'react-hooks/immutability': 'error',
+  'react-hooks/purity': 'error',
+  'react-hooks/set-state-in-effect': 'warn',
+  'react-hooks/set-state-in-render': 'error',
+  'react-hooks/static-components': 'error',
+  'react-hooks/unsupported-syntax': 'warn',
+  'react-hooks/use-memo': 'error',
+};
+
 export default tseslint.config(
-  // Global ignores
   {
     ignores: [
       '**/node_modules/**',
@@ -15,51 +96,22 @@ export default tseslint.config(
       'apps/frontend/src/routeTree.gen.ts',
     ],
   },
-  // Base JavaScript recommendations (applied to all files, no type-checking)
-  eslint.configs.recommended,
-  // TypeScript with type-checked rules — scoped to .ts/.tsx only so that plain
-  // .js tooling files (e.g. eslint.config.js) are not subjected to typed parsing.
   {
     files: ['**/*.{ts,tsx}'],
-    extends: [...tseslint.configs.recommendedTypeChecked],
     languageOptions: {
       ecmaVersion: 'latest',
-      sourceType: 'module',
+      parser: tseslint.parser,
       parserOptions: {
         projectService: true,
         tsconfigRootDir: import.meta.dirname,
       },
+      sourceType: 'module',
     },
-    rules: {
-      'no-undef': 'off',
-      'no-console': ['warn', { allow: ['warn', 'error'] }],
-      '@typescript-eslint/no-unused-vars': [
-        'error',
-        { argsIgnorePattern: '^_', varsIgnorePattern: '^_' },
-      ],
-      '@typescript-eslint/no-explicit-any': 'error',
-      '@typescript-eslint/explicit-function-return-type': 'off',
-      '@typescript-eslint/no-empty-function': 'error',
-      '@typescript-eslint/no-non-null-assertion': 'error',
-      '@typescript-eslint/consistent-type-imports': [
-        'error',
-        { prefer: 'type-imports', fixStyle: 'inline-type-imports' },
-      ],
+    plugins: {
+      '@typescript-eslint': tseslint.plugin,
     },
+    rules: typeAwareRules,
   },
-  // Semantic strictness pilot — API workspace only.
-  // Flags conditions that TypeScript can prove are always true/false.
-  {
-    files: ['apps/api/src/**/*.ts'],
-    rules: {
-      '@typescript-eslint/no-unnecessary-condition': 'warn',
-    },
-  },
-  // Require explicit return types in API services, utilities, and shared code.
-  // Elysia route/plugin files are excluded — their return types must be inferred
-  // for Eden Treaty type propagation. Frontend is excluded — React component and
-  // hook return types are either trivially JSX.Element or complex TanStack Query
-  // generics that add noise without safety.
   {
     files: [
       'apps/api/src/services/**/*.ts',
@@ -72,43 +124,22 @@ export default tseslint.config(
       '@typescript-eslint/explicit-function-return-type': [
         'error',
         {
-          allowExpressions: true,
-          allowTypedFunctionExpressions: true,
-          allowHigherOrderFunctions: true,
           allowDirectConstAssertionInArrowFunctions: true,
+          allowExpressions: true,
+          allowHigherOrderFunctions: true,
           allowIIFEs: true,
+          allowTypedFunctionExpressions: true,
         },
       ],
     },
   },
-  // Build scripts — console is the intended output mechanism
-  {
-    files: ['scripts/**/*.ts'],
-    rules: {
-      'no-console': 'off',
-    },
-  },
-  // React rules — frontend only
   {
     files: ['apps/frontend/**/*.{ts,tsx}'],
-    ...reactPlugin.configs['recommended-type-checked'],
     plugins: {
-      ...reactPlugin.configs['recommended-type-checked'].plugins,
+      '@eslint-react': reactPlugin,
       'react-hooks': reactHooksPlugin,
     },
-    rules: {
-      ...reactPlugin.configs['recommended-type-checked'].rules,
-      ...reactHooksPlugin.configs.recommended.rules,
-      'react-hooks/exhaustive-deps': 'error',
-      // React Compiler-adjacent rules from react-hooks v7.
-      // set-state-in-effect: warn — flags setState inside effects (prefer derived state or useMemo).
-      // refs/preserve-manual-memoization: kept off until codebase is compiler-ready.
-      'react-hooks/set-state-in-effect': 'warn',
-      'react-hooks/refs': 'off',
-      'react-hooks/preserve-manual-memoization': 'off',
-      'react-hooks/incompatible-library': 'off',
-    },
-  },
-  // Prettier last (disables conflicting stylistic rules; formatting is handled by Prettier itself)
-  prettierConfig
+    rules: reactResidualRules,
+    settings: reactPlugin.configs['recommended-type-checked'].settings,
+  }
 );

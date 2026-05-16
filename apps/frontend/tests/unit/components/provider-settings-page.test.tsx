@@ -1,12 +1,13 @@
 /**
  * Unit tests for ProviderSettingsPage component.
  */
-import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
+
+import type * as TanstackRouter from '@tanstack/react-router';
 import { screen } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ProviderSettingsPage } from '../../../src/features/settings/providers/components/ProviderSettingsPage';
 import { render } from '../../support/harness/render';
 import { createFetchScenario } from '../../support/mocks/create-fetch-scenario';
-import { ProviderSettingsPage } from '../../../src/features/settings/providers/components/ProviderSettingsPage';
-import type * as TanstackRouter from '@tanstack/react-router';
 
 // Mock TanStack Router — provide useParams
 vi.mock('@tanstack/react-router', async (importOriginal) => {

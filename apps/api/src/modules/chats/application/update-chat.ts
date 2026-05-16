@@ -1,6 +1,6 @@
 import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';
-import { updateChat, type UpdateChatData } from '../infrastructure/chat-repository';
+import { type UpdateChatData, updateChat } from '../infrastructure/chat-repository';
 
 export interface UpdateChatInput {
   chatId: string;

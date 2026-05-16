@@ -1,11 +1,11 @@
-import React from 'react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import {
+  type RenderHookOptions,
+  type RenderOptions,
   render as tlRender,
   renderHook as tlRenderHook,
-  type RenderOptions,
-  type RenderHookOptions,
 } from '@testing-library/react';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import type React from 'react';
 import { ToastProvider } from '../../../src/components/ui/Toast';
 import { I18nProvider } from '../../../src/hooks/use-i18n';
 import { ThemeProvider } from '../../../src/hooks/use-theme';

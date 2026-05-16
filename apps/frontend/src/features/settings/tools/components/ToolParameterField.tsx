@@ -2,12 +2,12 @@
  * Parameter input field generated from a descriptor.
  */
 
-import { useMemo, useState } from 'react';
-import { Pencil, Trash2 } from 'lucide-react';
 import type { ToolParameterDescriptor } from '@mangostudio/shared/tool-settings';
+import { Pencil, Trash2 } from 'lucide-react';
+import { useMemo, useState } from 'react';
+import { Button } from '@/components/ui/Button';
 import { useI18n } from '@/hooks/use-i18n';
 import { useModelCatalog } from '@/hooks/use-model-catalog';
-import { Button } from '@/components/ui/Button';
 
 interface ToolParameterFieldProps {
   descriptor: ToolParameterDescriptor;

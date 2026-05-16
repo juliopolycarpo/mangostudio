@@ -1,31 +1,33 @@
 import { describe, expect, it } from 'bun:test';
-import { buildGeminiInteractionsReplay } from '../../../../src/services/providers/core/replay-builder';
 import {
   computeSystemPromptHash,
   computeToolsetHash,
   parseContinuationEnvelope,
   serializeContinuationEnvelope,
 } from '../../../../src/services/providers/core/continuation-envelope';
-import { expectTurnCompletedEnvelope } from '../../../support/providers/contract-assertions';
-import { streamGeminiAgentTurn } from '../../../../src/services/providers/gemini/interactions-stream';
-import { processGeminiInteractionStream } from '../../../../src/services/providers/gemini/interactions-stream';
+import { buildGeminiInteractionsReplay } from '../../../../src/services/providers/core/replay-builder';
 import {
-  createFakeGeminiInteractionsClient,
-  completedInteractionEvent,
-  textDeltaEvent,
-  functionCallStartEvent,
-  functionCallDeltaEvent,
-  functionCallStopEvent,
-  thoughtSummaryEvent,
-  chainEvents,
-} from '../../../support/providers/fake-gemini-interactions';
-import { collectAgentEvents } from '../../../support/providers/agent-event-collector';
+  processGeminiInteractionStream,
+  streamGeminiAgentTurn,
+} from '../../../../src/services/providers/gemini/interactions-stream';
 import type {
   AgentEvent,
   AgentTurnRequest,
   ProviderRuntimeAttachment,
   ToolDefinition,
 } from '../../../../src/services/providers/types';
+import { collectAgentEvents } from '../../../support/providers/agent-event-collector';
+import { expectTurnCompletedEnvelope } from '../../../support/providers/contract-assertions';
+import {
+  chainEvents,
+  completedInteractionEvent,
+  createFakeGeminiInteractionsClient,
+  functionCallDeltaEvent,
+  functionCallStartEvent,
+  functionCallStopEvent,
+  textDeltaEvent,
+  thoughtSummaryEvent,
+} from '../../../support/providers/fake-gemini-interactions';
 
 const SEARCH_TOOL: ToolDefinition = {
   name: 'search',

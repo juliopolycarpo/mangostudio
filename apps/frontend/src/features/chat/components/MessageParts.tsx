@@ -1,13 +1,13 @@
 import type { MessagePart } from '@mangostudio/shared';
-import { useI18n } from '@/hooks/use-i18n';
-import { MarkdownContent } from '@/components/MarkdownContent';
-import { ThinkingBlock } from './ThinkingBlock';
-import { ToolCallBlock } from './ToolCallBlock';
-import { SystemEventMarker } from './SystemEventMarker';
-import { ContinuationEventMarker } from './ContinuationEventMarker';
-import { GeneratedImagePart } from './GeneratedImagePart';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { useState } from 'react';
+import { MarkdownContent } from '@/components/MarkdownContent';
+import { useI18n } from '@/hooks/use-i18n';
+import { ContinuationEventMarker } from './ContinuationEventMarker';
+import { GeneratedImagePart } from './GeneratedImagePart';
+import { SystemEventMarker } from './SystemEventMarker';
+import { ThinkingBlock } from './ThinkingBlock';
+import { ToolCallBlock } from './ToolCallBlock';
 
 interface MessagePartsProps {
   parts: MessagePart[];
@@ -56,7 +56,7 @@ export function MessageParts({ parts, messageId, isStreaming }: MessagePartsProp
           case 'subagent_trace':
             return (
               <SubagentTraceBlock
-                // eslint-disable-next-line @eslint-react/no-array-index-key
+                // biome-ignore lint/suspicious/noArrayIndexKey: message parts do not expose stable ids
                 key={`${messageId}-subagent-${idx}`}
                 part={part}
               />
@@ -66,7 +66,7 @@ export function MessageParts({ parts, messageId, isStreaming }: MessagePartsProp
               <div
                 // Parts within a message are append-only and position-stable, so
                 // the ordinal index is a valid identity. No part-level ID exists.
-                // eslint-disable-next-line @eslint-react/no-array-index-key
+                // biome-ignore lint/suspicious/noArrayIndexKey: message parts do not expose stable ids
                 key={`${messageId}-text-${idx}`}
                 className="bg-surface-container-low p-5 rounded-2xl border border-outline-variant/10 font-body text-sm leading-relaxed text-on-surface max-w-2xl"
               >
@@ -84,7 +84,7 @@ export function MessageParts({ parts, messageId, isStreaming }: MessagePartsProp
           case 'system_event':
             return (
               <SystemEventMarker
-                // eslint-disable-next-line @eslint-react/no-array-index-key
+                // biome-ignore lint/suspicious/noArrayIndexKey: message parts do not expose stable ids
                 key={`${messageId}-se-${idx}`}
                 event={part.event}
                 detail={part.detail}
@@ -93,7 +93,7 @@ export function MessageParts({ parts, messageId, isStreaming }: MessagePartsProp
           case 'continuation_transition':
             return (
               <ContinuationEventMarker
-                // eslint-disable-next-line @eslint-react/no-array-index-key
+                // biome-ignore lint/suspicious/noArrayIndexKey: message parts do not expose stable ids
                 key={`${messageId}-ct-${idx}`}
                 provider={part.provider}
                 modelName={part.modelName}
@@ -107,7 +107,7 @@ export function MessageParts({ parts, messageId, isStreaming }: MessagePartsProp
           case 'error':
             return (
               <div
-                // eslint-disable-next-line @eslint-react/no-array-index-key
+                // biome-ignore lint/suspicious/noArrayIndexKey: message parts do not expose stable ids
                 key={`${messageId}-error-${idx}`}
                 className="bg-error/10 border border-error/20 p-4 rounded-xl text-error text-sm font-body"
               >
@@ -171,7 +171,7 @@ function SubagentTraceBlock({ part }: { part: Extract<MessagePart, { type: 'suba
               <div className="space-y-1.5">
                 {part.events.map((event, index) => (
                   <div
-                    // eslint-disable-next-line @eslint-react/no-array-index-key
+                    // biome-ignore lint/suspicious/noArrayIndexKey: message parts do not expose stable ids
                     key={`${part.toolCallId}-event-${index}`}
                     className="flex items-center justify-between gap-3 rounded-xl bg-surface-container-high px-3 py-2 text-xs text-on-surface-variant"
                   >
@@ -197,7 +197,7 @@ function SubagentTraceBlock({ part }: { part: Extract<MessagePart, { type: 'suba
               <div className="space-y-2">
                 {part.messages.map((message, index) => (
                   <div
-                    // eslint-disable-next-line @eslint-react/no-array-index-key
+                    // biome-ignore lint/suspicious/noArrayIndexKey: message parts do not expose stable ids
                     key={`${part.toolCallId}-message-${index}`}
                     className="rounded-xl bg-surface-container-high px-3 py-2 text-on-surface-variant"
                   >

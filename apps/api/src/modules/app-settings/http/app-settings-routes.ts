@@ -1,5 +1,5 @@
+import { type AppSettings, AppSettingsSchema } from '@mangostudio/shared/app-settings';
 import { Elysia } from 'elysia';
-import { AppSettingsSchema, type AppSettings } from '@mangostudio/shared/app-settings';
 import { getDb } from '../../../db/database';
 import { requireAuth } from '../../../plugins/auth-middleware';
 import { getAppSettings, updateAppSettings } from '../application/app-settings-service';

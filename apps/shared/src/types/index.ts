@@ -3,28 +3,26 @@
  * This barrel re-exports all types from bounded-context submodules.
  */
 
-export type {
-  InteractionMode,
-  ProviderType,
-  SecretSource,
-  ReasoningEffort,
-  SecretMetadataRow,
-} from './provider';
+// Auth types — source of truth is auth/contracts.ts
+export type { AuthSession, AuthUser } from '../auth/contracts';
+// Chat domain types — source of truth is chat/entities.ts
+export type { Chat, Message } from '../chat/entities';
 export type {
   AgentEvent,
-  MessagePart,
   ContinuationReasonCode,
   GeneratedImagePart,
   GeneratedImageStatus,
+  MessagePart,
   SubagentTraceEvent,
   SubagentTraceEventName,
   SubagentTracePart,
 } from './agent-events';
 export { mergeSubagentTraceEvents } from './agent-events';
 export type { GalleryItem, GeneratedImageArtifact } from './gallery';
-
-// Chat domain types — source of truth is chat/entities.ts
-export type { Chat, Message } from '../chat/entities';
-
-// Auth types — source of truth is auth/contracts.ts
-export type { AuthUser, AuthSession } from '../auth/contracts';
+export type {
+  InteractionMode,
+  ProviderType,
+  ReasoningEffort,
+  SecretMetadataRow,
+  SecretSource,
+} from './provider';

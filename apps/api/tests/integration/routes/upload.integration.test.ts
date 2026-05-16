@@ -1,8 +1,8 @@
 import { afterEach, beforeAll, describe, expect, it } from 'bun:test';
+import { UploadChatAttachmentResponseSchema } from '@mangostudio/shared/chat';
+import { Value } from '@sinclair/typebox/value';
 import { existsSync } from 'fs';
 import { join } from 'path';
-import { Value } from '@sinclair/typebox/value';
-import { UploadChatAttachmentResponseSchema } from '@mangostudio/shared/chat';
 import { getDb } from '../../../src/db/database';
 import { getConfig } from '../../../src/lib/config';
 import { uploadRoutes } from '../../../src/routes/upload';

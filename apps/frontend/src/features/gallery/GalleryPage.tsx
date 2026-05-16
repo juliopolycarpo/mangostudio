@@ -1,9 +1,9 @@
-import { LayoutGrid, Download, Maximize2, X, Loader2 } from 'lucide-react';
 import type { GalleryItem } from '@mangostudio/shared';
-import { useState, useEffect, useRef } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
-import { useGalleryQuery } from './queries';
+import { Download, LayoutGrid, Loader2, Maximize2, X } from 'lucide-react';
+import { AnimatePresence, motion } from 'motion/react';
+import { useEffect, useRef, useState } from 'react';
 import { useI18n } from '@/hooks/use-i18n';
+import { useGalleryQuery } from './queries';
 
 export function GalleryPage() {
   const [selectedImage, setSelectedImage] = useState<GalleryItem | null>(null);

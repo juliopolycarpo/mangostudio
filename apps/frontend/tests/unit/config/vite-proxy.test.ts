@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
 import type { UserConfig } from 'vite';
+import { describe, expect, it } from 'vitest';
 import viteConfig from '../../../vite.config';
 
 function getProxyConfig(): NonNullable<NonNullable<UserConfig['server']>['proxy']> {

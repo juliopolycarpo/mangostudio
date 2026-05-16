@@ -5,8 +5,8 @@ import type {
   BuiltInAgentId,
   UserAgentId,
 } from '@mangostudio/shared/agents';
-import { MAX_TOOL_ITERATIONS_MAX, MAX_TOOL_ITERATIONS_MIN } from '@mangostudio/shared/app-settings';
 import { assertAgentProfile, isAgentId, isReasoningEffort } from '@mangostudio/shared/agents';
+import { MAX_TOOL_ITERATIONS_MAX, MAX_TOOL_ITERATIONS_MIN } from '@mangostudio/shared/app-settings';
 
 const BUILT_IN_AGENT_IDS = ['chat', 'default', 'explore'] as const;
 const RESERVED_AGENT_SLUGS = ['chat', 'default', 'explore', 'agents', 'claude'] as const;

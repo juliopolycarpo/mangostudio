@@ -4,13 +4,14 @@
  *
  * Also runs migrations on the in-memory test database so that all tables exist.
  */
-import { loadConfigForTest } from '../../../src/lib/config';
-import { getDb } from '../../../src/db/database';
-import { Migrator } from 'kysely/migration';
-import { allMigrations } from '../../../src/db/migrations';
+
 import { existsSync, unlinkSync } from 'fs';
-import { join } from 'path';
+import { Migrator } from 'kysely/migration';
 import { tmpdir } from 'os';
+import { join } from 'path';
+import { getDb } from '../../../src/db/database';
+import { allMigrations } from '../../../src/db/migrations';
+import { loadConfigForTest } from '../../../src/lib/config';
 
 // Use a per-worker temp file so persistSecret and syncConfigFileConnectors
 // share the same path without clobbering the real user config.

@@ -3,7 +3,7 @@
  * Raw secrets stay in Bun.secrets; SQLite stores only UI-safe metadata.
  */
 
-import { type Migration } from 'kysely/migration';
+import type { Migration } from 'kysely/migration';
 
 export const addSecretMetadata: Migration = {
   async up(db) {

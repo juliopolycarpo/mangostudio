@@ -3,7 +3,7 @@
  * Adds nullable baseUrl column for custom provider endpoints.
  */
 
-import { type Migration } from 'kysely/migration';
+import type { Migration } from 'kysely/migration';
 
 export const providerFields: Migration = {
   async up(db) {

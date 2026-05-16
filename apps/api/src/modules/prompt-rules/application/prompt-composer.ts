@@ -1,7 +1,7 @@
 import type {
-  PromptSettings,
   PromptInjectionRole,
   PromptSendFrequency,
+  PromptSettings,
 } from '@mangostudio/shared/prompt-rules';
 import { loadRuleFileContent } from './rule-file-resolver';
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
-import { computeHash, computeToolsetHash } from '../../../src/utils/hash';
 import type { ToolDefinition } from '../../../src/services/providers/types';
+import { computeHash, computeToolsetHash } from '../../../src/utils/hash';
 
 describe('computeHash', () => {
   it('returns a 64-char hex string (SHA-256)', () => {

@@ -5,34 +5,34 @@
  */
 
 import Anthropic from '@anthropic-ai/sdk';
-import { registerProvider } from '../core/provider-registry';
+import { appendAttachmentFallbackNotes } from '../core/attachment-content';
+import { isReasoningModel } from '../core/capability-detector';
+import { getModelContextLimit } from '../core/context-policy';
 import { withModelCache } from '../core/model-cache';
+import { withAbortTimeout } from '../core/probe-timeout';
 import {
   recordProviderCacheHit,
   recordProviderCacheMiss,
   recordProviderProbeTimeout,
 } from '../core/provider-observability';
+import { registerProvider } from '../core/provider-registry';
 import { createReadinessCache, createReadinessCacheKey } from '../core/readiness-cache';
-import { withAbortTimeout } from '../core/probe-timeout';
 import { createProviderSecretService } from '../core/secret-service';
-import { isReasoningModel } from '../core/capability-detector';
-import { getModelContextLimit } from '../core/context-policy';
-import { appendAttachmentFallbackNotes } from '../core/attachment-content';
+import type {
+  AgentEvent,
+  AgentTurnRequest,
+  AIProvider,
+  ImageGenerationResult,
+  ModelInfo,
+  ProviderHealthcheckRequest,
+  ProviderWarmupRequest,
+  StreamingChunk,
+  TextGenerationRequest,
+  TextGenerationResult,
+} from '../types';
 import { createAnthropicClient } from './client';
 import { narrowDelta, narrowSdkError, toMessageCreateParams } from './normalizers';
 import { streamAnthropicAgentTurn } from './stream';
-import type {
-  AIProvider,
-  TextGenerationRequest,
-  TextGenerationResult,
-  StreamingChunk,
-  ImageGenerationResult,
-  ModelInfo,
-  AgentTurnRequest,
-  AgentEvent,
-  ProviderHealthcheckRequest,
-  ProviderWarmupRequest,
-} from '../types';
 
 /**
  * Canonical fallback model IDs confirmed against the installed @anthropic-ai/sdk types.

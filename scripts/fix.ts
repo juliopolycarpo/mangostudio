@@ -1,4 +1,4 @@
-import { ROOT_DIR, ROOT_LINT_FILES, ROOT_FORMAT_FILES } from './lib/config';
+import { ROOT_BIOME_PATHS, ROOT_DIR, ROOT_ESLINT_FILES } from './lib/config';
 import {
   assertNoUnexpectedArguments,
   exitWithResults,
@@ -8,24 +8,24 @@ import {
   info,
   mapFilesToWorkspaces,
   parseArgs,
+  type RunResult,
   resolveDefaultBase,
   runCommand,
   runParallel,
   runWorkspaceScript,
-  type RunResult,
 } from './lib/runner';
 
 function printHelp(): never {
   console.log(`Usage: bun run fix [workspace flags] [mode flags]
 
-Runs ESLint --fix then Prettier --write.
+Runs Biome fixes then residual ESLint --fix.
 Default workspace selection: --all
 
 Workspace flags:
   --frontend
   --api
   --shared
-  --root     Run root-level fixes only (tooling lint + doc format)
+  --root     Run root-level fixes only (tooling lint + docs)
   --all
 
 Mode flags:
@@ -85,23 +85,23 @@ if (effectiveWorkspaces.length > 0) {
 
 if (effectiveIncludeRoot) {
   info('\nRoot');
-  const rootLintResult = await runCommand(
-    'root:lint:fix',
-    ['bunx', 'eslint', ...ROOT_LINT_FILES, '--fix', '--max-warnings', '0'],
+  const rootBiomeResult = await runCommand(
+    'root:biome:fix',
+    ['bunx', 'biome', 'check', '--write', ...ROOT_BIOME_PATHS],
     { cwd: ROOT_DIR }
   );
-  results.push(rootLintResult);
+  results.push(rootBiomeResult);
 
-  if (rootLintResult.exitCode !== 0) {
+  if (rootBiomeResult.exitCode !== 0) {
     exitWithResults(results);
   }
 
-  const rootFormatResult = await runCommand(
-    'root:format',
-    ['bunx', 'prettier', '--write', ...ROOT_FORMAT_FILES],
+  const rootLintResult = await runCommand(
+    'root:eslint:fix',
+    ['bunx', 'eslint', ...ROOT_ESLINT_FILES, '--fix', '--max-warnings', '0'],
     { cwd: ROOT_DIR }
   );
-  results.push(rootFormatResult);
+  results.push(rootLintResult);
 }
 
 if (results.length === 0) {

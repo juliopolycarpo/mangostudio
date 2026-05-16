@@ -1,5 +1,5 @@
-import { join, parse } from 'path';
 import { mkdirSync } from 'fs';
+import { join, parse } from 'path';
 import { getConfig } from '../../../lib/config';
 
 const FALLBACK_CHAT_TITLE = 'chat';

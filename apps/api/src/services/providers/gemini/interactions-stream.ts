@@ -6,36 +6,36 @@
  */
 
 import {
-  parseContinuationEnvelope,
-  serializeContinuationEnvelope,
-  createContinuationEnvelope,
-  computeSystemPromptHash,
-  computeToolsetHash,
-} from '../core/continuation-envelope';
-import { logProviderDegrade } from '../core/continuation-logger';
-import { getModelContextLimit } from '../core/context-policy';
-import {
-  buildGeminiInteractionsReplay,
-  toGeminiFunctionResultPayload,
-} from '../core/replay-builder';
-import { toolDefsToGeminiInteractions } from '../core/tool-mapper';
-import {
-  isFunctionCallStart,
-  narrowGeminiDelta,
-  extractGeminiUsage,
-  toInteractionParams,
-  type InteractionSSEEvent,
-} from './normalizers';
-import { getResolvedGeminiApiKey } from './secret';
-import { createGeminiClient } from './client';
-import type { AgentTurnRequest, AgentEvent } from '../types';
-import { buildInteractionsThinkingConfig } from './reasoning-config';
-import {
   attachmentToBase64,
   getAttachmentSupportKind,
   isAttachmentSupportedByProvider,
   unsupportedAttachmentNotes,
 } from '../core/attachment-content';
+import { getModelContextLimit } from '../core/context-policy';
+import {
+  computeSystemPromptHash,
+  computeToolsetHash,
+  createContinuationEnvelope,
+  parseContinuationEnvelope,
+  serializeContinuationEnvelope,
+} from '../core/continuation-envelope';
+import { logProviderDegrade } from '../core/continuation-logger';
+import {
+  buildGeminiInteractionsReplay,
+  toGeminiFunctionResultPayload,
+} from '../core/replay-builder';
+import { toolDefsToGeminiInteractions } from '../core/tool-mapper';
+import type { AgentEvent, AgentTurnRequest } from '../types';
+import { createGeminiClient } from './client';
+import {
+  extractGeminiUsage,
+  type InteractionSSEEvent,
+  isFunctionCallStart,
+  narrowGeminiDelta,
+  toInteractionParams,
+} from './normalizers';
+import { buildInteractionsThinkingConfig } from './reasoning-config';
+import { getResolvedGeminiApiKey } from './secret';
 
 const GEMINI_INTERACTIONS_ATTACHMENT_KINDS = ['image', 'pdf', 'text'] as const;
 

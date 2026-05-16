@@ -1,7 +1,7 @@
 import { Card } from '@/components/ui/Card';
 import { useI18n } from '@/hooks/use-i18n';
+import type { CodeThemeConfig, ThemeConfig } from '@/hooks/use-theme';
 import { useTheme } from '@/hooks/use-theme';
-import type { ThemeConfig, CodeThemeConfig } from '@/hooks/use-theme';
 import { CODE_THEMES, type CodeThemeId } from '@/lib/shiki';
 
 type FontSize = ThemeConfig['fontSize'];
@@ -123,7 +123,7 @@ function ThemeCard({
         style={{ background: preview.bg }}
         // Preview HTML is produced by Shiki's syntax highlighter from a static
         // sentence, not user input; HTML rendering is required to show tokens.
-        // eslint-disable-next-line @eslint-react/dom-no-dangerously-set-innerhtml
+        // biome-ignore lint/security/noDangerouslySetInnerHtml: renders a controlled inline SVG preview
         dangerouslySetInnerHTML={{ __html: preview.html }}
       />
       <div className="px-3 py-2 text-xs font-semibold text-on-surface-variant bg-surface-container-high">

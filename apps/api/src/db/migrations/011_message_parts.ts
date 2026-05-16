@@ -1,4 +1,4 @@
-import { type Migration } from 'kysely/migration';
+import type { Migration } from 'kysely/migration';
 
 /**
  * Migration 011 — add parts and providerState columns to messages.

@@ -3,33 +3,33 @@
  * Merges the agentic Interactions API path with the non-agentic text and image generation.
  */
 
+import { isReasoningModel } from '../core/capability-detector';
+import { recordProviderCacheHit, recordProviderCacheMiss } from '../core/provider-observability';
 import { registerProvider } from '../core/provider-registry';
 import { createReadinessCache, createReadinessCacheKey } from '../core/readiness-cache';
-import { recordProviderCacheHit, recordProviderCacheMiss } from '../core/provider-observability';
-import { isReasoningModel } from '../core/capability-detector';
+import type {
+  AgentEvent,
+  AgentTurnRequest,
+  AIProvider,
+  ImageGenerationRequest,
+  ImageGenerationResult,
+  ModelInfo,
+  ProviderHealthcheckRequest,
+  ProviderWarmupRequest,
+  StreamingChunk,
+  TextGenerationRequest,
+  TextGenerationResult,
+} from '../types';
+import { createGeminiClient } from './client';
+import { generateGeminiImage } from './image-generation';
+import { streamGeminiAgentTurn } from './interactions-stream';
+import { clearGeminiModelCatalog, getGeminiModelCatalog } from './model-catalog';
 import {
   getResolvedGeminiApiKey,
   syncGeminiConfigFileConnectors,
   validateGeminiApiKey,
 } from './secret';
-import { createGeminiClient } from './client';
-import { getGeminiModelCatalog, clearGeminiModelCatalog } from './model-catalog';
 import { generateGeminiText, generateGeminiTextStream } from './text';
-import { generateGeminiImage } from './image-generation';
-import { streamGeminiAgentTurn } from './interactions-stream';
-import type {
-  AIProvider,
-  TextGenerationRequest,
-  TextGenerationResult,
-  StreamingChunk,
-  ImageGenerationRequest,
-  ImageGenerationResult,
-  ModelInfo,
-  AgentTurnRequest,
-  AgentEvent,
-  ProviderHealthcheckRequest,
-  ProviderWarmupRequest,
-} from '../types';
 
 interface PreparedGeminiRuntime {
   readonly apiKey: string;

@@ -1,4 +1,4 @@
-import { type Migration } from 'kysely/migration';
+import type { Migration } from 'kysely/migration';
 
 /**
  * Migration 010 — add optional OpenAI auth-context columns to secret_metadata.

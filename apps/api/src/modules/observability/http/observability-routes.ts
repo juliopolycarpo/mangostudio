@@ -1,8 +1,8 @@
-import { Elysia } from 'elysia';
 import type {
   ProviderObservabilityLogsResponse,
   ProviderObservabilityMetricsResponse,
 } from '@mangostudio/shared/observability';
+import { Elysia } from 'elysia';
 import { requireAuth } from '../../../plugins/auth-middleware';
 import {
   getProviderObservabilityLogs,

@@ -92,7 +92,7 @@ bun run test --e2e
 bun run check
 ```
 
-This runs formatting checks, ESLint, and TypeScript type-checking across all workspaces.
+This runs Biome, residual ESLint, and TypeScript type-checking across all workspaces.
 
 ## Building
 

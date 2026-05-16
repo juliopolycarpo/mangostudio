@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'bun:test';
 import {
   createBunSecretStore,
-  SecretStorageUnavailableError,
   type SecretDescriptor,
+  SecretStorageUnavailableError,
 } from '../../../src/services/secret-store/store';
 
 type SecretRecord = SecretDescriptor & { value?: string };

@@ -1,9 +1,9 @@
 import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';
 import {
-  createChat,
-  type CreateChatData,
   type ChatRecord,
+  type CreateChatData,
+  createChat,
 } from '../infrastructure/chat-repository';
 
 export interface CreateChatInput {

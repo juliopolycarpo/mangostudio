@@ -1,12 +1,13 @@
 /**
  * Integration tests for the Prompt settings page.
  */
-import { describe, expect, it, vi } from 'vitest';
+
 import { fireEvent, screen } from '@testing-library/react';
-import { render } from '../../support/harness/render';
+import { describe, expect, it, vi } from 'vitest';
 import { PromptSettings } from '../../../src/components/settings/PromptSettings';
 import { SettingsTabs } from '../../../src/components/settings/SettingsTabs';
 import { DEFAULT_PROMPT_SETTINGS } from '../../../src/hooks/use-global-settings';
+import { render } from '../../support/harness/render';
 
 vi.mock('@tanstack/react-router', async () => {
   const actual = await vi.importActual('@tanstack/react-router');

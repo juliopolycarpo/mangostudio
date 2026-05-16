@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import type OpenAI from 'openai';
 import { existsSync, readdirSync, rmSync } from 'fs';
+import type OpenAI from 'openai';
 import { join } from 'path';
 import { loadConfigForTest, resetConfig } from '../../../../src/lib/config';
 
@@ -23,8 +23,9 @@ afterEach(() => {
 describe('generated image provider URLs', () => {
   it('stores OpenAI images under /images', async () => {
     const imagesDir = configureImageDirs();
-    const { generateOpenAIImage } =
-      await import('../../../../src/services/providers/openai/image-generation');
+    const { generateOpenAIImage } = await import(
+      '../../../../src/services/providers/openai/image-generation'
+    );
     const capture: { params?: OpenAI.Images.ImageGenerateParamsNonStreaming } = {};
 
     const fakeClient = {
@@ -55,8 +56,9 @@ describe('generated image provider URLs', () => {
 
   it('downloads DALL-E image URLs into the images directory', async () => {
     const imagesDir = configureImageDirs();
-    const { generateOpenAIImage } =
-      await import('../../../../src/services/providers/openai/image-generation');
+    const { generateOpenAIImage } = await import(
+      '../../../../src/services/providers/openai/image-generation'
+    );
     const originalFetch = globalThis.fetch;
     const capture: { params?: OpenAI.Images.ImageGenerateParamsNonStreaming } = {};
 
@@ -101,8 +103,9 @@ describe('generated image provider URLs', () => {
 
   it('stores OpenAI-compatible client images under /images', async () => {
     const imagesDir = configureImageDirs();
-    const { generateOpenAIImage } =
-      await import('../../../../src/services/providers/openai/image-generation');
+    const { generateOpenAIImage } = await import(
+      '../../../../src/services/providers/openai/image-generation'
+    );
 
     const fakeCompatibleClient = {
       images: {
@@ -123,8 +126,9 @@ describe('generated image provider URLs', () => {
 
   it('stores Gemini images under /images', async () => {
     const imagesDir = configureImageDirs();
-    const { saveGeminiGeneratedImageFromResponse } =
-      await import('../../../../src/services/providers/gemini/image-generation');
+    const { saveGeminiGeneratedImageFromResponse } = await import(
+      '../../../../src/services/providers/gemini/image-generation'
+    );
 
     const imageUrl = await saveGeminiGeneratedImageFromResponse({
       candidates: [

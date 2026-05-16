@@ -1,7 +1,7 @@
 import { createRouter } from '@tanstack/react-router';
-import { routeTree } from './routeTree.gen';
 import type { AuthContext } from './lib/auth-context';
 import { queryClient } from './lib/query-client';
+import { routeTree } from './routeTree.gen';
 
 /** Placeholder until RouterProvider injects the real context on each render. */
 const defaultAuth: AuthContext = { isAuthenticated: false, user: null, isPending: true };

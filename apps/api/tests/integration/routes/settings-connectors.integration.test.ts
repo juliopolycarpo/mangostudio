@@ -1,26 +1,26 @@
-import { describe, expect, it, afterEach, beforeAll, beforeEach, afterAll, mock } from 'bun:test';
-import { Value } from '@sinclair/typebox/value';
-import { Type } from '@sinclair/typebox';
-import { ConnectorStatusSchema } from '@mangostudio/shared/connectors';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, mock } from 'bun:test';
 import { ModelCatalogResponseSchema } from '@mangostudio/shared/catalog';
-import { settingsRoutes } from '../../../src/routes/settings';
-import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
+import { ConnectorStatusSchema } from '@mangostudio/shared/connectors';
+import { Type } from '@sinclair/typebox';
+import { Value } from '@sinclair/typebox/value';
 import { getDb } from '../../../src/db/database';
-import { upsertSecretMetadata } from '../../../src/services/secret-store/metadata';
+import { settingsRoutes } from '../../../src/routes/settings';
+import {
+  UnsafeBaseUrlError,
+  validateBaseUrl,
+} from '../../../src/services/providers/core/base-url-policy';
 import {
   getProvider,
   registerProvider,
 } from '../../../src/services/providers/core/provider-registry';
-import type { AIProvider } from '../../../src/services/providers/types';
 import {
   OpenAIAuthError,
   OpenAIConfigError,
   validateOpenAIAuthContext,
 } from '../../../src/services/providers/openai/index';
-import {
-  validateBaseUrl,
-  UnsafeBaseUrlError,
-} from '../../../src/services/providers/core/base-url-policy';
+import type { AIProvider } from '../../../src/services/providers/types';
+import { upsertSecretMetadata } from '../../../src/services/secret-store/metadata';
+import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
 
 // Capture real implementations before any test can override mock.module.
 // mock.restore() does NOT revert mock.module() overrides; explicit re-registration is required.

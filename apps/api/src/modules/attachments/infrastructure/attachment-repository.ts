@@ -1,5 +1,5 @@
-import type { Kysely } from 'kysely';
 import type { ChatAttachment } from '@mangostudio/shared/chat';
+import type { Kysely } from 'kysely';
 import type { ChatAttachmentInsert, ChatAttachmentSelect, Database } from '../../../db/types';
 
 export class ChatAttachmentNotFoundError extends Error {

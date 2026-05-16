@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import {
-  createGeminiClient,
-  resetGeminiClientCache,
-} from '../../../../src/services/providers/gemini/client';
-import {
   getProviderObservabilityMetrics,
   resetProviderObservability,
 } from '../../../../src/services/providers/core/provider-observability';
+import {
+  createGeminiClient,
+  resetGeminiClientCache,
+} from '../../../../src/services/providers/gemini/client';
 
 afterEach(() => {
   resetGeminiClientCache();

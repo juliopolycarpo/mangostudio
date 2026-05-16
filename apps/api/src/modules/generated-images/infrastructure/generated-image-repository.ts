@@ -1,5 +1,5 @@
-import type { Kysely } from 'kysely';
 import type { GalleryItem, GeneratedImageArtifact } from '@mangostudio/shared';
+import type { Kysely } from 'kysely';
 import type { Database, GeneratedImageSelect } from '../../../db/types';
 
 export interface CreateGeneratedImageArtifactData {

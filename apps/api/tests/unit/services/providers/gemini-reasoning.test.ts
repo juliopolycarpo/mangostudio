@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'bun:test';
 import {
-  getGeminiFamily,
-  buildTextThinkingConfig,
   buildInteractionsThinkingConfig,
+  buildTextThinkingConfig,
+  getGeminiFamily,
 } from '../../../../src/services/providers/gemini/reasoning-config';
 
 describe('getGeminiFamily', () => {

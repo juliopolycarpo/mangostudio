@@ -1,10 +1,10 @@
-import type { Kysely } from 'kysely';
+import { ERROR_CODES } from '@mangostudio/shared/errors';
 import type {
   ToolSettingsDescriptor,
   ToolSettingsListResponse,
   UpdateToolSettingsBody,
 } from '@mangostudio/shared/tool-settings';
-import { ERROR_CODES } from '@mangostudio/shared/errors';
+import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';
 import {
   getAllTools,

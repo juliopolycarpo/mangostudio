@@ -1,5 +1,7 @@
 import { afterEach, beforeAll, describe, expect, it } from 'bun:test';
 import { getDb } from '../../../../src/db/database';
+import { ChatNotFoundError } from '../../../../src/modules/chats/domain/chat-ownership';
+import { createChat } from '../../../../src/modules/chats/infrastructure/chat-repository';
 import {
   generateImage,
   ImageProviderNotSupportedError,
@@ -9,8 +11,6 @@ import {
   registerProvider,
 } from '../../../../src/services/providers/core/provider-registry';
 import type { AIProvider, ImageGenerationRequest } from '../../../../src/services/providers/types';
-import { ChatNotFoundError } from '../../../../src/modules/chats/domain/chat-ownership';
-import { createChat } from '../../../../src/modules/chats/infrastructure/chat-repository';
 
 const TEST_USER = {
   id: 'test-user-generate-image',

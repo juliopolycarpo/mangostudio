@@ -1,14 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 import {
+  healthcheckProviderConnection,
+  warmProviderForRequest,
+} from '../../../../src/services/providers/core/provider-readiness';
+import {
   clearRegistry,
   getProvider,
   listRegisteredProviderTypes,
   registerProvider,
 } from '../../../../src/services/providers/core/provider-registry';
-import {
-  healthcheckProviderConnection,
-  warmProviderForRequest,
-} from '../../../../src/services/providers/core/provider-readiness';
 import type {
   AIProvider,
   ProviderHealthcheckRequest,

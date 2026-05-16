@@ -1,10 +1,10 @@
-import { useState } from 'react';
-import { Mic, Send, Square, Image } from 'lucide-react';
 import type { ReasoningEffort } from '@mangostudio/shared';
 import type { AgentExecutionMode, AgentProfile } from '@mangostudio/shared/agents';
+import { Image, Mic, Send, Square } from 'lucide-react';
+import { useState } from 'react';
 import { ThinkingToggle } from '@/components/layout/ThinkingToggle';
-import { useI18n } from '@/hooks/use-i18n';
 import type { ContextInfo } from '@/features/generation/types';
+import { useI18n } from '@/hooks/use-i18n';
 
 function formatTokensCompact(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;

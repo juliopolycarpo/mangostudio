@@ -7,7 +7,7 @@
  * The guard function is tested in isolation — no HTTP server needed.
  * If someone narrows or removes checks inside isSpaRoute(), these tests fail.
  */
-import { describe, test, expect } from 'bun:test';
+import { describe, expect, test } from 'bun:test';
 import { isSpaRoute } from '../../../src/lib/spa-guard';
 
 describe('SPA onError NOT_FOUND guard', () => {

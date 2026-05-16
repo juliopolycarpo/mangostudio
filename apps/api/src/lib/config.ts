@@ -8,10 +8,10 @@
  * 4. Hardcoded defaults
  */
 
-import { parse as parseToml } from 'smol-toml';
-import { readFileSync, existsSync } from 'fs';
-import { join, isAbsolute } from 'path';
+import { existsSync, readFileSync } from 'fs';
 import { homedir } from 'os';
+import { isAbsolute, join } from 'path';
+import { parse as parseToml } from 'smol-toml';
 import { isStandaloneExecutable } from './runtime-paths';
 
 /**
@@ -220,7 +220,6 @@ function applyToml(cfg: MangoConfig, parsed: Record<string, unknown>): void {
 function applyEnvOverrides(cfg: MangoConfig, env: Record<string, string>): void {
   for (const [key, value] of Object.entries(env)) {
     const applier = ENV_KEY_MAP[key];
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- key may not exist in the map at runtime
     if (applier && value) {
       applier(cfg, value);
     }

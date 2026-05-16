@@ -1,28 +1,27 @@
-import { generateText, streamText } from 'ai';
 import type { SecretMetadataRow } from '@mangostudio/shared/types';
-
-import { registerProvider } from '../core/provider-registry';
+import { generateText, streamText } from 'ai';
+import { parseStringArray } from '../../../utils/json';
 import { withModelCache } from '../core/model-cache';
-import { createReadinessCache, createReadinessCacheKey } from '../core/readiness-cache';
 import { recordProviderCacheHit, recordProviderCacheMiss } from '../core/provider-observability';
+import { registerProvider } from '../core/provider-registry';
+import { createReadinessCache, createReadinessCacheKey } from '../core/readiness-cache';
 import { createProviderSecretService } from '../core/secret-service';
-import { createDeepSeekAgentClient, createDeepSeekClient, validateDeepSeekApiKey } from './client';
-import { fetchDeepSeekModels, getDeepSeekFallbackModels } from './model-catalog';
-import { buildDeepSeekProviderOptions, normalizeDeepSeekBaseUrl } from './options';
-import { buildDeepSeekMessages, buildDeepSeekSystemPrompt, toErrorMessage } from './normalizers';
-import { streamDeepSeekAgentTurn } from './agent-stream';
 import type {
+  AgentEvent,
+  AgentTurnRequest,
   AIProvider,
   ModelInfo,
+  ProviderHealthcheckRequest,
+  ProviderWarmupRequest,
   StreamingChunk,
   TextGenerationRequest,
   TextGenerationResult,
-  AgentTurnRequest,
-  AgentEvent,
-  ProviderHealthcheckRequest,
-  ProviderWarmupRequest,
 } from '../types';
-import { parseStringArray } from '../../../utils/json';
+import { streamDeepSeekAgentTurn } from './agent-stream';
+import { createDeepSeekAgentClient, createDeepSeekClient, validateDeepSeekApiKey } from './client';
+import { fetchDeepSeekModels, getDeepSeekFallbackModels } from './model-catalog';
+import { buildDeepSeekMessages, buildDeepSeekSystemPrompt, toErrorMessage } from './normalizers';
+import { buildDeepSeekProviderOptions, normalizeDeepSeekBaseUrl } from './options';
 
 const GENERATION_TIMEOUT_MS = 120_000;
 

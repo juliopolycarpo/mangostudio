@@ -2,10 +2,10 @@ import { describe, expect, it } from 'bun:test';
 import {
   buildGenerateImageToolDefinition,
   createGenerateImageToolPlan,
-  summarizeGenerateImageToolResult,
   GENERATE_IMAGE_AUTO_MODEL,
   GENERATE_IMAGE_DEFAULT_QUALITY,
   type GenerateImageToolOutcome,
+  summarizeGenerateImageToolResult,
 } from '../../../src/services/tools/builtin/generate-image';
 
 describe('generate_image tool planning', () => {

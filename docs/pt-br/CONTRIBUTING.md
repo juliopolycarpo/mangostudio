@@ -79,7 +79,7 @@ bun run test --e2e
 bun run check
 ```
 
-Executa verificação de formatação, ESLint e verificação de tipos TypeScript em todos os workspaces.
+Executa Biome, ESLint residual e verificação de tipos TypeScript em todos os workspaces.
 
 ## Build
 

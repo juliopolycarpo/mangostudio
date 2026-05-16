@@ -3,27 +3,27 @@
  * Parse → call use case → respond. No business logic here.
  */
 
-import { Elysia, t } from 'elysia';
+import type { Connector, ConnectorStatus } from '@mangostudio/shared';
 import {
   AddConnectorBodySchema,
   UpdateConnectorModelsBodySchema,
 } from '@mangostudio/shared/connectors';
-import { ERROR_CODES, type ApiErrorResponse } from '@mangostudio/shared/errors';
-import type { Connector, ConnectorStatus } from '@mangostudio/shared';
+import { type ApiErrorResponse, ERROR_CODES } from '@mangostudio/shared/errors';
+import { Elysia, t } from 'elysia';
 import { requireAuth } from '../../../plugins/auth-middleware';
-import { listConnectors } from '../application/list-connectors';
-import { addConnector, ConnectorValidationError } from '../application/add-connector';
 import {
-  removeConnector,
-  ConnectorNotFoundError,
-  ConnectorOwnershipError,
-} from '../application/remove-connector';
-import { updateConnectorModels } from '../application/update-connector-models';
-import {
-  InvalidGeminiApiKeyError,
   GeminiValidationUnavailableError,
+  InvalidGeminiApiKeyError,
 } from '../../../services/gemini';
 import { SecretStorageUnavailableError } from '../../../services/secret-store';
+import { addConnector, ConnectorValidationError } from '../application/add-connector';
+import { listConnectors } from '../application/list-connectors';
+import {
+  ConnectorNotFoundError,
+  ConnectorOwnershipError,
+  removeConnector,
+} from '../application/remove-connector';
+import { updateConnectorModels } from '../application/update-connector-models';
 import {
   OpenAIAuthError,
   OpenAIConfigError,

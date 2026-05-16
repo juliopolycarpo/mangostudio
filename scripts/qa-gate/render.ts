@@ -1,5 +1,4 @@
 import { ALL_WORKSPACE_NAMES, type WorkspaceName } from '../lib/config';
-import type { CoverageSummary, CoverageBucket } from './parse-lcov';
 import type {
   BundleStats,
   DependencyStats,
@@ -8,6 +7,7 @@ import type {
   Metrics,
   TestLaneStats,
 } from './collect';
+import type { CoverageBucket, CoverageSummary } from './parse-lcov';
 
 const [, , baseArg, headArg] = process.argv;
 if (!baseArg || !headArg) {

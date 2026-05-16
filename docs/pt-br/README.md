@@ -129,12 +129,12 @@ mangostudio/
 | `bun run dev --api`       | Inicia apenas o servidor de dev da API               |
 | `bun run build`           | Build do frontend para produção                      |
 | `bun run build --binary`  | Gera binários standalone com frontend embutido       |
-| `bun run check`           | Executa ESLint, Prettier check e typecheck           |
+| `bun run check`           | Executa Biome, ESLint residual e typecheck           |
 | `bun run test`            | Executa as lanes unit e integration                  |
 | `bun run test --unit`     | Executa apenas as suítes unitárias                   |
 | `bun run test --e2e`      | Executa a suíte end-to-end com Playwright (opt-in)   |
 | `bun run test --coverage` | Coleta cobertura de testes nos workspaces aplicáveis |
-| `bun run fix`             | Aplica ESLint --fix e depois Prettier --write        |
+| `bun run fix`             | Aplica correções do Biome e depois ESLint residual   |
 | `bun run verify`          | Gate CI completo: check, test, build (para no erro)  |
 | `bun run clean`           | Remove dist, coverage e artefatos de build           |
 

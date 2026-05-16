@@ -228,7 +228,7 @@ export function getModelContextLimit(modelName: string): number {
   const lower = modelName.toLowerCase();
 
   // Tier 1: exact match in curated table
-  if (Object.prototype.hasOwnProperty.call(MODEL_CONTEXT_LIMITS, lower)) {
+  if (Object.hasOwn(MODEL_CONTEXT_LIMITS, lower)) {
     return MODEL_CONTEXT_LIMITS[lower];
   }
 

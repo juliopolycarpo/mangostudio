@@ -3,7 +3,7 @@ import { readdir } from 'node:fs/promises';
 import { extname, join } from 'node:path';
 
 import { ALL_WORKSPACE_NAMES, ROOT_DIR, type WorkspaceName } from '../lib/config';
-import { parseLcovSummary, type CoverageSummary } from './parse-lcov';
+import { type CoverageSummary, parseLcovSummary } from './parse-lcov';
 
 // ── Types ──
 

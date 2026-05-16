@@ -1,16 +1,16 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { Loader2, Sparkles, MessageSquare, Code, Bug, Image } from 'lucide-react';
-import { ChatFeed } from './components/ChatFeed';
-import { ContextWarningCallout } from './components/ContextWarningCallout';
-import { InputBar } from './components/InputBar';
-import { useToast } from '@/components/ui/Toast';
-import { useMessagesQuery } from '@/features/chat/queries';
-import { useI18n } from '@/hooks/use-i18n';
-import { authClient } from '@/lib/auth-client';
 import type { ReasoningEffort } from '@mangostudio/shared';
 import type { AgentExecutionMode, AgentProfile } from '@mangostudio/shared/agents';
 import type { ContextSettings } from '@mangostudio/shared/chat';
+import { Bug, Code, Image, Loader2, MessageSquare, Sparkles } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useToast } from '@/components/ui/Toast';
+import { useMessagesQuery } from '@/features/chat/queries';
 import type { ContextInfo, FallbackNotice } from '@/features/generation/types';
+import { useI18n } from '@/hooks/use-i18n';
+import { authClient } from '@/lib/auth-client';
+import { ChatFeed } from './components/ChatFeed';
+import { ContextWarningCallout } from './components/ContextWarningCallout';
+import { InputBar } from './components/InputBar';
 
 interface ChatPageProps {
   chatId: string | null;

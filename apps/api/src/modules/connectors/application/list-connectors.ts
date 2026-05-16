@@ -3,12 +3,12 @@
  */
 
 import type { ConnectorStatus } from '@mangostudio/shared';
-import { listAllSecretMetadata } from '../infrastructure/connector-repository';
-import { toConnector, isVisibleConnector } from '../domain/connector';
 import {
   getProvider,
   listRegisteredProviderTypes,
 } from '../../../services/providers/core/provider-registry';
+import { isVisibleConnector, toConnector } from '../domain/connector';
+import { listAllSecretMetadata } from '../infrastructure/connector-repository';
 
 export async function listConnectors(userId: string): Promise<ConnectorStatus> {
   await Promise.allSettled(

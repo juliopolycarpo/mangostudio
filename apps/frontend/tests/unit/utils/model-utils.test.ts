@@ -1,12 +1,12 @@
-import { describe, it, expect } from 'vitest';
+import type { ModelCatalogResponse, ModelOption } from '@mangostudio/shared';
+import { describe, expect, it } from 'vitest';
 import {
   EMPTY_MODEL_CATALOG,
-  hasModelOption,
-  resolveSelectedModel,
-  resolveActiveModeModel,
   getModelSelectorPlaceholder,
+  hasModelOption,
+  resolveActiveModeModel,
+  resolveSelectedModel,
 } from '@/utils/model-utils';
-import type { ModelOption, ModelCatalogResponse } from '@mangostudio/shared';
 
 const options: ModelOption[] = [
   { modelId: 'gpt-4', displayName: 'GPT-4', resourceName: 'gpt-4', supportedActions: ['text'] },

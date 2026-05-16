@@ -1,5 +1,5 @@
 import { execSync } from 'child_process';
-import { type WorkspaceName, ALL_WORKSPACE_NAMES, WORKSPACES, ROOT_DIR } from './config';
+import { ALL_WORKSPACE_NAMES, ROOT_DIR, WORKSPACES, type WorkspaceName } from './config';
 
 const SCRIPT_START = performance.now();
 

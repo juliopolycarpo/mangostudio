@@ -38,8 +38,8 @@ export const WORKSPACES: Record<WorkspaceName, WorkspaceConfig> = {
 
 export const ALL_WORKSPACE_NAMES: WorkspaceName[] = ['frontend', 'api', 'shared'];
 
-// Files ESLint processes at root level (outside workspace src/)
-export const ROOT_LINT_FILES: string[] = [
+// Files ESLint still processes for rules not covered by Biome.
+export const ROOT_ESLINT_FILES: string[] = [
   'eslint.config.js',
   'playwright.config.ts',
   'scripts/**/*.ts',
@@ -49,22 +49,23 @@ export const ROOT_LINT_FILES: string[] = [
   'apps/shared/vitest.config.ts',
 ];
 
-// Files Prettier processes at root level (superset of lint files + docs + test globs)
-export const ROOT_FORMAT_FILES: string[] = [
-  'README.md',
-  'AGENTS.md',
-  'CLAUDE.md',
-  'GEMINI.md',
-  'CONTRIBUTING.md',
-  'docs/**/*.md',
+// Paths Biome checks at root level. Biome receives directories instead of
+// shell-only globs so the runner can spawn it without shell expansion.
+export const ROOT_BIOME_PATHS: string[] = [
+  'package.json',
+  'biome.json',
+  'lefthook.yml',
   'eslint.config.js',
   'playwright.config.ts',
-  'scripts/**/*.ts',
+  'scripts',
+  'apps/api/package.json',
+  'apps/frontend/package.json',
+  'apps/shared/package.json',
   'tests/browser-smoke/auth-flow.spec.ts',
   'apps/frontend/vite.config.ts',
   'apps/frontend/vitest.config.ts',
   'apps/shared/vitest.config.ts',
-  'apps/api/tests/**/*.ts',
-  'apps/frontend/tests/**/*.{ts,tsx}',
-  'apps/shared/tests/**/*.ts',
+  'apps/api/tests',
+  'apps/frontend/tests',
+  'apps/shared/tests',
 ];

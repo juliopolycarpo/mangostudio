@@ -7,35 +7,39 @@
  * rejected during connector setup.
  */
 
+import { isReasoningModel } from '../core/capability-detector';
+import { recordProviderCacheHit, recordProviderCacheMiss } from '../core/provider-observability';
 import { registerProvider } from '../core/provider-registry';
 import { createReadinessCache, createReadinessCacheKey } from '../core/readiness-cache';
-import { recordProviderCacheHit, recordProviderCacheMiss } from '../core/provider-observability';
-import { isReasoningModel } from '../core/capability-detector';
-import { createOpenAIClient, validateOpenAIAuthContext, type OpenAIAuthContext } from './client';
-import { secretService, listModelsWithCache, resolveAuthContext } from './model-catalog';
-import { buildChatMessages } from './message-mapper';
-import { streamWithResponsesAPI, streamAgentTurnWithResponsesAPI } from './responses-stream';
-import { generateOpenAIImage } from './image-generation';
-import { extractReasoningFromCompleted, extractReasoningChunks } from './normalizers';
 import type {
+  AgentEvent,
+  AgentTurnRequest,
   AIProvider,
-  TextGenerationRequest,
-  TextGenerationResult,
-  StreamingChunk,
   ImageGenerationRequest,
   ImageGenerationResult,
   ModelInfo,
-  AgentTurnRequest,
-  AgentEvent,
   ProviderHealthcheckRequest,
   ProviderWarmupRequest,
+  StreamingChunk,
+  TextGenerationRequest,
+  TextGenerationResult,
 } from '../types';
+import { createOpenAIClient, type OpenAIAuthContext, validateOpenAIAuthContext } from './client';
+import { generateOpenAIImage } from './image-generation';
+import { buildChatMessages } from './message-mapper';
+import { listModelsWithCache, resolveAuthContext, secretService } from './model-catalog';
+import { extractReasoningChunks, extractReasoningFromCompleted } from './normalizers';
+import { streamAgentTurnWithResponsesAPI, streamWithResponsesAPI } from './responses-stream';
 
-// Re-export for backward compatibility with test imports and external consumers
-export { validateOpenAIAuthContext, type OpenAIAuthContext };
 export { OpenAIAuthError, OpenAIConfigError } from './client';
-export { extractReasoningFromCompleted, extractReasoningChunks };
 export { streamWithResponsesAPI } from './responses-stream';
+// Re-export for backward compatibility with test imports and external consumers
+export {
+  extractReasoningChunks,
+  extractReasoningFromCompleted,
+  type OpenAIAuthContext,
+  validateOpenAIAuthContext,
+};
 
 interface PreparedOpenAIRuntime {
   readonly authContext: OpenAIAuthContext;

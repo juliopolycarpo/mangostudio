@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useRef } from 'react';
 import { Marked, Renderer } from 'marked';
-import { highlightCode, type CodeThemeId } from '@/lib/shiki';
+import { useEffect, useMemo, useRef } from 'react';
 import { useTheme } from '@/hooks/use-theme';
+import { type CodeThemeId, highlightCode } from '@/lib/shiki';
 
 const CLIPBOARD_ICON = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`;
 const CHECK_ICON = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`;
@@ -145,7 +145,7 @@ export function MarkdownContent({
       // HTML is produced by `marked` with a custom renderer that only emits
       // a fixed tag set and escapes raw HTML; rendering as HTML is required
       // to surface Shiki-highlighted code blocks and safe link elements.
-      // eslint-disable-next-line @eslint-react/dom-no-dangerously-set-innerhtml
+      // biome-ignore lint/security/noDangerouslySetInnerHtml: sanitized markdown is rendered as HTML here
       dangerouslySetInnerHTML={{ __html: renderedHtml }}
     />
   );

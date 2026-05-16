@@ -1,5 +1,5 @@
 import type { AgentId } from '@mangostudio/shared/agents';
-import type { SubagentStatus, SubagentRunResult } from './subagent-runner';
+import type { SubagentRunResult, SubagentStatus } from './subagent-runner';
 
 export type CachedSubagentScenario = 'produced_not_transmitted' | 'not_produced';
 

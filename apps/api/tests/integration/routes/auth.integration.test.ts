@@ -1,6 +1,6 @@
-import { describe, test, expect } from 'bun:test';
-import { createApiTestApp } from '../../support/harness/create-api-test-app';
+import { describe, expect, test } from 'bun:test';
 import { authRoutes } from '../../../src/routes/auth';
+import { createApiTestApp } from '../../support/harness/create-api-test-app';
 
 const app = createApiTestApp(authRoutes);
 

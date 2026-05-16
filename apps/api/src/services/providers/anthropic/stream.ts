@@ -3,18 +3,18 @@
  */
 
 import type Anthropic from '@anthropic-ai/sdk';
-import { createContinuationEnvelope } from '../core/continuation-envelope';
-import { getModelContextLimit } from '../core/context-policy';
+import { parseJsonWith } from '../../../lib/safe-parse';
 import { appendAttachmentFallbackNotes } from '../core/attachment-content';
+import { getModelContextLimit } from '../core/context-policy';
+import { createContinuationEnvelope } from '../core/continuation-envelope';
+import type { AgentEvent, AgentTurnRequest } from '../types';
 import { buildCachedAnthropicRequest } from './cached-request';
 import {
+  extractCacheUsage,
   isToolUseBlock,
   narrowDelta,
-  extractCacheUsage,
   toMessageCreateParams,
 } from './normalizers';
-import type { AgentTurnRequest, AgentEvent } from '../types';
-import { parseJsonWith } from '../../../lib/safe-parse';
 
 /** Opaque loop-state stored in providerState during the tool-call loop. */
 interface AnthropicLoopState {

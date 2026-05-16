@@ -1,10 +1,10 @@
-import { describe, expect, it, vi } from 'vitest';
-import { fireEvent, screen } from '@testing-library/react';
 import type * as TanstackRouter from '@tanstack/react-router';
-import { render } from '../../support/harness/render';
+import { fireEvent, screen } from '@testing-library/react';
+import { describe, expect, it, vi } from 'vitest';
 import { ContextSettings } from '../../../src/components/settings/ContextSettings';
 import { SettingsTabs } from '../../../src/components/settings/SettingsTabs';
 import { DEFAULT_CONTEXT_SETTINGS } from '../../../src/hooks/use-global-settings';
+import { render } from '../../support/harness/render';
 
 vi.mock('@tanstack/react-router', async (importOriginal) => {
   const actual = await importOriginal<typeof TanstackRouter>();

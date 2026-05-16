@@ -3,12 +3,12 @@
  */
 
 import type { ProviderType, SecretSource } from '@mangostudio/shared/types';
-import { bunSecretStore } from '../../../services/secret-store/store';
-import { getConfig, getMangoDir } from '../../../lib/config';
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
+import { dirname, join } from 'path';
 import { stringify as stringifyToml } from 'smol-toml';
-import { join, dirname } from 'path';
+import { getConfig, getMangoDir } from '../../../lib/config';
 import { readTomlStringSections } from '../../../lib/toml';
+import { bunSecretStore } from '../../../services/secret-store/store';
 import { PROVIDER_SECRET_CONFIG } from '../domain/connector';
 
 /** Persists an API key in the storage backend selected by `source`. */

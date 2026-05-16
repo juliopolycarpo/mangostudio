@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import { getDb } from '../../../src/db/database';
-import { persistImageTurn } from '../../../src/modules/generation/infrastructure/conversation-persistence';
 import { listGeneratedImagesForGallery } from '../../../src/modules/generated-images/infrastructure/generated-image-repository';
+import { persistImageTurn } from '../../../src/modules/generation/infrastructure/conversation-persistence';
 import { listByChatId } from '../../../src/modules/messages/infrastructure/message-repository';
 
 async function seedUser(user: { id: string; name: string; email: string }) {

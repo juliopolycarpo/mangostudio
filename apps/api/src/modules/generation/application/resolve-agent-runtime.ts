@@ -1,16 +1,16 @@
-import type { Kysely } from 'kysely';
 import type { AgentExecutionMode, AgentId, AgentProfile } from '@mangostudio/shared/agents';
 import type { ProviderRuntimeSettings } from '@mangostudio/shared/provider-settings';
 import type { ProviderType } from '@mangostudio/shared/types';
+import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';
+import { mergeProviderRuntimeSettings } from '../../../services/providers/core/provider-settings-policy';
 import type { ToolDefinition } from '../../../services/providers/types';
+import { getToolDefinitionsForAgent } from '../../../services/tools';
 import type { EffectiveToolSettings } from '../../../services/tools/types';
 import { computeHash } from '../../../utils/hash';
-import { getToolDefinitionsForAgent } from '../../../services/tools';
-import { mergeProviderRuntimeSettings } from '../../../services/providers/core/provider-settings-policy';
+import { getAgentProfile } from '../../agents/application/agent-settings-service';
 import { getProviderSettings } from '../../provider-settings/infrastructure/provider-settings-repository';
 import { listSavedToolSettings } from '../../tool-settings/infrastructure/tool-settings-repository';
-import { getAgentProfile } from '../../agents/application/agent-settings-service';
 
 export interface AgentRuntimeSourceMetadata {
   readonly agentId: AgentId;

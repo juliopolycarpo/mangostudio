@@ -1,16 +1,16 @@
-import { describe, expect, it, afterEach, beforeAll } from 'bun:test';
-import { chatRoutes } from '../../../src/modules/chats/http/chat-routes';
-import {
-  createApiTestApp,
-  createAuthenticatedApiTestApp,
-} from '../../support/harness/create-api-test-app';
+import { afterEach, beforeAll, describe, expect, it } from 'bun:test';
 import { getDb } from '../../../src/db/database';
+import { chatRoutes } from '../../../src/modules/chats/http/chat-routes';
 import { buildPersistedContextSnapshot } from '../../../src/services/providers/core/context-policy';
 import {
   getProvider,
   registerProvider,
 } from '../../../src/services/providers/core/provider-registry';
 import type { AIProvider } from '../../../src/services/providers/types';
+import {
+  createApiTestApp,
+  createAuthenticatedApiTestApp,
+} from '../../support/harness/create-api-test-app';
 
 const TEST_USER = {
   id: 'test-user-chats',

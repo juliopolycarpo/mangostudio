@@ -4,37 +4,37 @@
  * and error serialization.
  */
 
-import { type Elysia } from 'elysia';
 import type { AgentExecutionMode, AgentId, AgentProfile } from '@mangostudio/shared/agents';
-import { RespondStreamBodySchema } from '@mangostudio/shared/generation';
 import { ERROR_CODES } from '@mangostudio/shared/errors';
+import { RespondStreamBodySchema } from '@mangostudio/shared/generation';
 import type { SSEErrorEvent } from '@mangostudio/shared/streaming';
+import type { Elysia } from 'elysia';
 import '../../../services/providers'; // ensure all providers are registered
 import '../../../services/tools'; // ensure all builtins are registered
 import { getDb } from '../../../db/database';
 import { requireAuth } from '../../../plugins/auth-middleware';
-import { verifyChatOwnership } from '../../chats/infrastructure/chat-repository';
-import {
-  resolveModel,
-  NoModelAvailableError,
-  type ResolvedModel,
-} from '../application/resolve-model';
 import {
   getProvider,
   getProviderForModel,
 } from '../../../services/providers/core/provider-registry';
-import { streamTextTurn, type StreamEvent } from '../application/stream-text-turn';
+import { getAgentProfile } from '../../agents/application/agent-settings-service';
+import { AgentSettingsError } from '../../agents/domain/agent-profile';
 import {
   assertChatAttachmentIdsAvailable,
   ChatAttachmentNotFoundError,
 } from '../../attachments/infrastructure/attachment-repository';
+import { verifyChatOwnership } from '../../chats/infrastructure/chat-repository';
+import {
+  NoModelAvailableError,
+  type ResolvedModel,
+  resolveModel,
+} from '../application/resolve-model';
+import { type StreamEvent, streamTextTurn } from '../application/stream-text-turn';
 import {
   assertTextTurnHasContent,
   EmptyTextTurnError,
   normalizeTextTurnAttachmentIds,
 } from '../application/text-turn-content';
-import { getAgentProfile } from '../../agents/application/agent-settings-service';
-import { AgentSettingsError } from '../../agents/domain/agent-profile';
 
 const KEEPALIVE_INTERVAL_MS = 15_000;
 

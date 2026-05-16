@@ -1,11 +1,11 @@
 import type { Connector } from '@mangostudio/shared';
 import {
-  Settings,
-  Trash2,
-  ShieldCheck,
-  FileCode,
-  Database,
   CheckCircle2,
+  Database,
+  FileCode,
+  Settings,
+  ShieldCheck,
+  Trash2,
   XCircle,
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';

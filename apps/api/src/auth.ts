@@ -1,5 +1,5 @@
-import { betterAuth } from 'better-auth';
 import type { Auth } from 'better-auth';
+import { betterAuth } from 'better-auth';
 import { getDb } from './db/database';
 import { getConfig } from './lib/config';
 

@@ -10,10 +10,10 @@ import {
   fatal,
   header,
   parseArgs,
+  type RunResult,
   runParallel,
   runWorkspaceScript,
   warn,
-  type RunResult,
 } from './lib/runner';
 
 interface BinaryTarget {

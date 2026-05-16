@@ -1,8 +1,8 @@
-import type { ModelInfo } from '../types';
 import { isReasoningModel } from '../core/capability-detector';
 import { getModelContextLimit } from '../core/context-policy';
-import { recordProviderProbeTimeout } from '../core/provider-observability';
 import { withAbortTimeout } from '../core/probe-timeout';
+import { recordProviderProbeTimeout } from '../core/provider-observability';
+import type { ModelInfo } from '../types';
 import { normalizeDeepSeekBaseUrl } from './options';
 
 const MODEL_LIST_TIMEOUT_MS = 5_000;

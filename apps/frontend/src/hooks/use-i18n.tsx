@@ -1,6 +1,6 @@
-import { useState, useMemo, useCallback, createContext, use } from 'react';
+import { en, type Locale, type Messages, ptBR } from '@mangostudio/shared/i18n';
 import type { ReactNode } from 'react';
-import { ptBR, en, type Messages, type Locale } from '@mangostudio/shared/i18n';
+import { createContext, use, useCallback, useMemo, useState } from 'react';
 
 const LOCALE_STORAGE_KEY = 'mangostudio:locale';
 

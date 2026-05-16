@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+
 /**
  * Binary smoke test script.
  *
@@ -15,8 +16,8 @@
  *   API_PORT      - Port for the smoke server (default: 13001).
  */
 
-import { join } from 'path';
 import { existsSync } from 'fs';
+import { join } from 'path';
 
 // ---------------------------------------------------------------------------
 // Config

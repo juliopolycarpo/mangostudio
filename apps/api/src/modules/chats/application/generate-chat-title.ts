@@ -1,13 +1,13 @@
 import {
   createPromptChatTitle,
-  sanitizeGeneratedChatTitle,
   type GenerateChatTitleResponse,
+  sanitizeGeneratedChatTitle,
 } from '@mangostudio/shared/chat';
+import { warmProviderForRequest } from '../../../services/providers/core/provider-readiness';
 import {
   getProvider,
   getProviderForModel,
 } from '../../../services/providers/core/provider-registry';
-import { warmProviderForRequest } from '../../../services/providers/core/provider-readiness';
 import { resolveModel } from '../../generation/application/resolve-model';
 
 const CHAT_TITLE_SYSTEM_PROMPT =

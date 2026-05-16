@@ -1,5 +1,5 @@
-import { queryOptions } from '@tanstack/react-query';
 import type { RuleFileDescriptor } from '@mangostudio/shared/prompt-rules';
+import { queryOptions } from '@tanstack/react-query';
 import { client } from '@/lib/api-client';
 import { extractApiError } from '@/lib/utils';
 

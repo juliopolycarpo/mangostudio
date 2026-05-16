@@ -1,12 +1,12 @@
 import { describe, expect, it, spyOn } from 'bun:test';
 import {
-  logDegrade,
-  logValidContinuation,
-  logStateUpdate,
-  logPersistenceError,
-  logStateCleared,
   logContextInfo,
+  logDegrade,
+  logPersistenceError,
   logProviderDegrade,
+  logStateCleared,
+  logStateUpdate,
+  logValidContinuation,
 } from '../../../../src/services/providers/core/continuation-logger';
 
 function captureWarn(): Array<Record<string, unknown>> {

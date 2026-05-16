@@ -1,12 +1,12 @@
+import type { ContextInfo } from '@mangostudio/shared/chat';
 import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';
-import type { ContextInfo } from '@mangostudio/shared/chat';
-import { listByUserId } from '../infrastructure/chat-repository';
-import { parseContinuationEnvelope } from '../../../services/providers/core/continuation-envelope';
 import {
   getContextSeverity,
   parsePersistedContextSnapshot,
 } from '../../../services/providers/core/context-policy';
+import { parseContinuationEnvelope } from '../../../services/providers/core/continuation-envelope';
+import { listByUserId } from '../infrastructure/chat-repository';
 
 export function extractContextInfo(
   contextState: string | null | undefined,

@@ -1,13 +1,13 @@
 import { createDeepSeek, type DeepSeekProvider } from '@ai-sdk/deepseek';
 import OpenAI from 'openai';
+import { validateBaseUrl } from '../core/base-url-policy';
 import { getOrCreateCachedClient } from '../core/client-cache';
+import { withPromiseTimeout } from '../core/probe-timeout';
 import {
   recordProviderCacheHit,
   recordProviderCacheMiss,
   recordProviderProbeTimeout,
 } from '../core/provider-observability';
-import { validateBaseUrl } from '../core/base-url-policy';
-import { withPromiseTimeout } from '../core/probe-timeout';
 import { fetchDeepSeekModels } from './model-catalog';
 import { normalizeDeepSeekBaseUrl } from './options';
 

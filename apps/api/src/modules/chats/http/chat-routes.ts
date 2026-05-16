@@ -1,4 +1,3 @@
-import { type Elysia, t } from 'elysia';
 import {
   CompactChatBodySchema,
   CreateChatBodySchema,
@@ -8,25 +7,26 @@ import {
 } from '@mangostudio/shared/chat';
 import type { ApiErrorResponse } from '@mangostudio/shared/contracts';
 import { ERROR_CODES } from '@mangostudio/shared/errors';
+import { type Elysia, t } from 'elysia';
 import { getDb } from '../../../db/database';
 import { requireAuth } from '../../../plugins/auth-middleware';
 import { parseQueryInt } from '../../../utils/query';
+import { NoModelAvailableError } from '../../generation/application/resolve-model';
 import {
   compactChatUseCase,
   EmptyChatCompactionError,
   summarizeToNewChatUseCase,
 } from '../application/context-compaction';
 import { createChatUseCase } from '../application/create-chat';
+import { deleteChatUseCase } from '../application/delete-chat';
 import {
   EmptyChatTitlePromptError,
   generateChatTitleUseCase,
 } from '../application/generate-chat-title';
-import { updateChatUseCase } from '../application/update-chat';
-import { deleteChatUseCase } from '../application/delete-chat';
-import { listChatsUseCase } from '../application/list-chats';
 import { getChatMessagesUseCase } from '../application/get-chat-messages';
+import { listChatsUseCase } from '../application/list-chats';
+import { updateChatUseCase } from '../application/update-chat';
 import { ChatNotFoundError } from '../domain/chat-ownership';
-import { NoModelAvailableError } from '../../generation/application/resolve-model';
 
 function apiError(error: string, code: string): ApiErrorResponse {
   return { error, code };

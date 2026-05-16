@@ -2,21 +2,19 @@
  * Use case: add a new connector for any provider.
  */
 
+import type { AddConnectorBody, Connector } from '@mangostudio/shared';
+import { ERROR_CODES } from '@mangostudio/shared/errors';
 import { randomUUID } from 'crypto';
-import type { Connector } from '@mangostudio/shared';
-import type { AddConnectorBody } from '@mangostudio/shared';
-
-import { maskSecret } from '../../../utils/secrets';
-import { toConnector } from '../domain/connector';
-import { persistSecret } from '../infrastructure/secret-persistence';
-import { validateProviderKey } from '../infrastructure/provider-validation';
-import {
-  upsertSecretMetadata,
-  getSecretMetadataById,
-} from '../infrastructure/connector-repository';
 import { invalidateUnifiedCatalog } from '../../../services/providers/catalog';
 import { invalidateProviderModelCache } from '../../../services/providers/core/provider-registry';
-import { ERROR_CODES } from '@mangostudio/shared/errors';
+import { maskSecret } from '../../../utils/secrets';
+import { toConnector } from '../domain/connector';
+import {
+  getSecretMetadataById,
+  upsertSecretMetadata,
+} from '../infrastructure/connector-repository';
+import { validateProviderKey } from '../infrastructure/provider-validation';
+import { persistSecret } from '../infrastructure/secret-persistence';
 
 export class ConnectorValidationError extends Error {
   constructor(

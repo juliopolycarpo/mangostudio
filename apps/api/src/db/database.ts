@@ -2,13 +2,13 @@
  * Kysely database singleton using Bun's native SQLite.
  */
 
+import { Database as SQLiteDatabase } from 'bun:sqlite';
+import { mkdirSync } from 'fs';
 import { Kysely } from 'kysely';
 import { BunSqliteDialect } from 'kysely-bun-sqlite/dist/index.js';
-import { Database as SQLiteDatabase } from 'bun:sqlite';
 import { dirname } from 'path';
-import { mkdirSync } from 'fs';
-import type { Database } from './types';
 import { getConfig } from '../lib/config';
+import type { Database } from './types';
 
 let dbInstance: Kysely<Database> | null = null;
 

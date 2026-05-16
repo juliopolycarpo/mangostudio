@@ -1,15 +1,15 @@
 import { afterEach, describe, expect, it, mock } from 'bun:test';
 import type { SecretMetadataRow } from '@mangostudio/shared/types';
-import type { SecretMetadataInput } from '../../../../src/services/secret-store/metadata';
-import { createProviderSecretService } from '../../../../src/services/providers/core/secret-service';
-import { InMemorySecretStore } from '../../../support/mocks/mock-secret-store';
 import { getDb } from '../../../../src/db/database';
+import { createProviderSecretService } from '../../../../src/services/providers/core/secret-service';
 import { createOpenAIClient } from '../../../../src/services/providers/openai/client';
 import {
-  validateOpenAIAuthContext,
   OpenAIAuthError,
   OpenAIConfigError,
+  validateOpenAIAuthContext,
 } from '../../../../src/services/providers/openai/index';
+import type { SecretMetadataInput } from '../../../../src/services/secret-store/metadata';
+import { InMemorySecretStore } from '../../../support/mocks/mock-secret-store';
 
 const TEST_USER = 'test-user-openai';
 const NO_TOML = '/tmp/mangostudio-test-nonexistent-config.toml';
@@ -117,8 +117,9 @@ describe('openai-provider', () => {
 
   it('is registered in the provider registry after import', async () => {
     await import('../../../../src/services/providers/openai/index');
-    const { getProvider } =
-      await import('../../../../src/services/providers/core/provider-registry');
+    const { getProvider } = await import(
+      '../../../../src/services/providers/core/provider-registry'
+    );
     const provider = getProvider('openai');
     expect(provider.providerType).toBe('openai');
   });

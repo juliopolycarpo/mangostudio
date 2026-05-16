@@ -1,4 +1,4 @@
-import { ROOT_DIR, ROOT_LINT_FILES, ROOT_FORMAT_FILES } from './lib/config';
+import { ROOT_BIOME_PATHS, ROOT_DIR, ROOT_ESLINT_FILES } from './lib/config';
 import {
   assertNoUnexpectedArguments,
   exitWithResults,
@@ -8,24 +8,24 @@ import {
   info,
   mapFilesToWorkspaces,
   parseArgs,
+  type RunResult,
   resolveDefaultBase,
   runCommand,
   runParallel,
   runWorkspaceScript,
-  type RunResult,
 } from './lib/runner';
 
 function printHelp(): never {
   console.log(`Usage: bun run check [workspace flags] [mode flags]
 
-Runs ESLint, Prettier check, and TypeScript typecheck.
+Runs Biome, residual ESLint, and TypeScript typecheck.
 Default workspace selection: --all
 
 Workspace flags:
   --frontend
   --api
   --shared
-  --root     Run root-level checks only (tooling lint + doc format)
+  --root     Run root-level checks only (tooling lint + docs)
   --all
 
 Mode flags:
@@ -33,8 +33,8 @@ Mode flags:
   --changed      Scope to workspaces changed vs origin/main
   --base <ref>   Base ref for --changed (default: merge-base HEAD origin/main)
   --quick        Run check:quick (lint+format only, skip tsc)
-  --skip-lint    Skip ESLint
-  --skip-format  Skip Prettier
+  --skip-lint    Skip residual ESLint
+  --skip-format  Skip Biome
   --help`);
   process.exit(0);
 }
@@ -93,14 +93,14 @@ if (effectiveIncludeRoot) {
   const rootTasks: Array<() => Promise<RunResult>> = [];
   if (!flags['--skip-lint']) {
     rootTasks.push(() =>
-      runCommand('root:lint', ['bunx', 'eslint', ...ROOT_LINT_FILES, '--max-warnings', '0'], {
+      runCommand('root:eslint', ['bunx', 'eslint', ...ROOT_ESLINT_FILES, '--max-warnings', '0'], {
         cwd: ROOT_DIR,
       })
     );
   }
   if (!flags['--skip-format']) {
     rootTasks.push(() =>
-      runCommand('root:format:check', ['bunx', 'prettier', '--check', ...ROOT_FORMAT_FILES], {
+      runCommand('root:biome', ['bunx', 'biome', 'check', ...ROOT_BIOME_PATHS], {
         cwd: ROOT_DIR,
       })
     );

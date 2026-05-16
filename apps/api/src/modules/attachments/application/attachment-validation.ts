@@ -1,6 +1,6 @@
-import { extname } from 'path';
-import { fileTypeFromBuffer } from 'file-type';
 import type { ChatAttachmentKind } from '@mangostudio/shared/chat';
+import { fileTypeFromBuffer } from 'file-type';
+import { extname } from 'path';
 
 const IMAGE_MIME_EXTENSIONS = {
   'image/jpeg': ['jpg', 'jpeg'],

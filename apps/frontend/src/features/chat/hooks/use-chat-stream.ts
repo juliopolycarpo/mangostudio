@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ContextInfo, FallbackNotice } from '@/features/generation/types';
 
 interface UseChatStreamOptions {

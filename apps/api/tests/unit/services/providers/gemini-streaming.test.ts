@@ -1,4 +1,4 @@
-import { describe, expect, it, mock, beforeEach, afterEach } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 
 /**
  * Unit tests for GeminiProvider.generateTextStream.
@@ -34,8 +34,9 @@ describe('GeminiProvider.generateTextStream', () => {
   });
 
   afterEach(async () => {
-    const { resetGeminiClientCache } =
-      await import('../../../../src/services/providers/gemini/client');
+    const { resetGeminiClientCache } = await import(
+      '../../../../src/services/providers/gemini/client'
+    );
     resetGeminiClientCache();
     // Clear module cache between tests (Bun test isolation)
     mock.restore();

@@ -2,17 +2,17 @@
  * Hook: provider settings list and detail queries.
  */
 
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type {
   ProviderSettingsDescriptor,
   UpdateProviderRuntimeSettingsBody,
 } from '@mangostudio/shared/provider-settings';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { updateProviderSettings } from '../api';
 import {
+  providerSettingsDetailQueryOptions,
   providerSettingsKeys,
   providerSettingsListQueryOptions,
-  providerSettingsDetailQueryOptions,
 } from '../queries';
-import { updateProviderSettings } from '../api';
 
 function syncProviderSettingsCaches(
   queryClient: ReturnType<typeof useQueryClient>,

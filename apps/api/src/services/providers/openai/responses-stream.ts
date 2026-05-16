@@ -5,28 +5,28 @@
  * agentic turn loop (tool calling + continuation via previous_response_id).
  */
 
+import type { ReasoningEffort } from '@mangostudio/shared';
 import type OpenAI from 'openai';
-import { APIError as OpenAIAPIError, type APIPromise } from 'openai';
+import { type APIPromise, APIError as OpenAIAPIError } from 'openai';
 import type { Stream } from 'openai/streaming';
+import { parseJsonWith } from '../../../lib/safe-parse';
 import { isReasoningModel } from '../core/capability-detector';
 import { getModelContextLimit } from '../core/context-policy';
-import { buildOpenAIResponsesReplay } from '../core/replay-builder';
-import { toolDefsToResponsesAPI } from '../core/tool-mapper';
 import {
+  createContinuationEnvelope,
   parseContinuationEnvelope,
   serializeContinuationEnvelope,
-  createContinuationEnvelope,
 } from '../core/continuation-envelope';
 import { logProviderDegrade } from '../core/continuation-logger';
+import { buildOpenAIResponsesReplay } from '../core/replay-builder';
+import { toolDefsToResponsesAPI } from '../core/tool-mapper';
+import type { AgentEvent, AgentTurnRequest, StreamingChunk, TextGenerationRequest } from '../types';
+import { buildOpenAIResponsesUserMessage } from './message-mapper';
 import {
   extractReasoningFromCompleted,
   extractResponsesUsage,
   type ResponseStreamEvent,
 } from './normalizers';
-import { buildOpenAIResponsesUserMessage } from './message-mapper';
-import type { TextGenerationRequest, StreamingChunk, AgentTurnRequest, AgentEvent } from '../types';
-import type { ReasoningEffort } from '@mangostudio/shared';
-import { parseJsonWith } from '../../../lib/safe-parse';
 
 // ---------------------------------------------------------------------------
 // SDK boundary casts — OpenAI Responses API

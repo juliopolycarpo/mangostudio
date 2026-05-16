@@ -1,11 +1,11 @@
-import { describe, expect, it, mock, afterEach, beforeAll } from 'bun:test';
+import { afterEach, beforeAll, describe, expect, it, mock } from 'bun:test';
+import { getDb } from '../../../src/db/database';
+import { verifyChatOwnership } from '../../../src/modules/chats/infrastructure/chat-repository';
 import { messageRoutes } from '../../../src/modules/messages/http/message-routes';
 import {
   createApiTestApp,
   createAuthenticatedApiTestApp,
 } from '../../support/harness/create-api-test-app';
-import { getDb } from '../../../src/db/database';
-import { verifyChatOwnership } from '../../../src/modules/chats/infrastructure/chat-repository';
 
 // Capture real implementation before any test can override mock.module.
 // mock.restore() does NOT revert mock.module() overrides; explicit re-registration is required.

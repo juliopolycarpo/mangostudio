@@ -2,17 +2,18 @@
  * Unit tests for useChatsQuery chat mutation hooks.
  * Each test gets an isolated QueryClient via the render harness.
  */
-import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { act, renderHook } from '../../support/harness/render';
-import {
-  useCreateChatMutation,
-  useUpdateChatMutation,
-  useDeleteChatMutation,
-  chatKeys,
-} from '../../../src/features/chat/queries';
-import { useQueryClient } from '@tanstack/react-query';
+
 import type { Chat } from '@mangostudio/shared';
+import { useQueryClient } from '@tanstack/react-query';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  chatKeys,
+  useCreateChatMutation,
+  useDeleteChatMutation,
+  useUpdateChatMutation,
+} from '../../../src/features/chat/queries';
 import type * as ApiClient from '../../../src/lib/api-client';
+import { act, renderHook } from '../../support/harness/render';
 
 const EXISTING_CHAT: Chat = {
   id: 'chat-existing',

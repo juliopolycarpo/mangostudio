@@ -1,16 +1,16 @@
+import type { Chat, Message, UpdateChatBody, UpdateMessageBody } from '@mangostudio/shared';
 import {
   infiniteQueryOptions,
-  useQuery,
-  useMutation,
-  useQueryClient,
-  useInfiniteQuery,
-  queryOptions,
   type QueryClient,
+  queryOptions,
+  useInfiniteQuery,
+  useMutation,
+  useQuery,
+  useQueryClient,
 } from '@tanstack/react-query';
+import type { ContextInfo } from '@/features/generation/types';
 import { client } from '@/lib/api-client';
 import { extractApiError } from '@/lib/utils';
-import type { Chat, UpdateChatBody, Message, UpdateMessageBody } from '@mangostudio/shared';
-import type { ContextInfo } from '@/features/generation/types';
 
 // ---------------------------------------------------------------------------
 // Chat query keys

@@ -1,6 +1,6 @@
 import { createFileRoute } from '@tanstack/react-router';
-import { useApp } from '@/lib/app-context';
 import { GeneralSettings } from '@/components/settings/GeneralSettings';
+import { useApp } from '@/lib/app-context';
 
 export const Route = createFileRoute('/_authenticated/settings/general')({
   component: GeneralSettingsRoute,

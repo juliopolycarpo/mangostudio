@@ -1,11 +1,11 @@
-import { Toggle } from '@/components/ui/Toggle';
-import { Button } from '@/components/ui/Button';
-import { Input } from '@/components/ui/Input';
 import type {
-  RuleFileSetting,
   PromptInjectionRole,
   PromptSendFrequency,
+  RuleFileSetting,
 } from '@mangostudio/shared/prompt-rules';
+import { Button } from '@/components/ui/Button';
+import { Input } from '@/components/ui/Input';
+import { Toggle } from '@/components/ui/Toggle';
 
 interface RuleFileCardProps {
   setting: RuleFileSetting;

@@ -1,13 +1,13 @@
-import { ALL_WORKSPACE_NAMES, WORKSPACES, ROOT_DIR } from './lib/config';
+import { ALL_WORKSPACE_NAMES, ROOT_DIR, WORKSPACES } from './lib/config';
 import {
   exitWithResults,
   fatal,
   header,
   info,
+  type RunResult,
   runCommand,
   runParallel,
   runWorkspaceScript,
-  type RunResult,
 } from './lib/runner';
 
 function printHelp(): never {

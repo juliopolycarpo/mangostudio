@@ -1,8 +1,4 @@
-import { Type, type Static } from '@sinclair/typebox';
-import { CHAT_TITLE_PROMPT_LENGTH_MAX, CHAT_TITLE_PROMPT_LENGTH_MIN } from '../chat/title';
-import { ContextSettingsSchema } from '../chat';
-import { PromptSettingsSchema } from '../prompt-rules';
-import { ReasoningEffortSchema } from '../provider-settings';
+import { type Static, Type } from '@sinclair/typebox';
 import {
   MAX_SUBAGENT_CALLS_MAX,
   MAX_SUBAGENT_CALLS_MIN,
@@ -11,6 +7,10 @@ import {
   SUBAGENT_MAX_TURNS_MAX,
   SUBAGENT_MAX_TURNS_MIN,
 } from '../agentic-limits';
+import { ContextSettingsSchema } from '../chat';
+import { CHAT_TITLE_PROMPT_LENGTH_MAX, CHAT_TITLE_PROMPT_LENGTH_MIN } from '../chat/title';
+import { PromptSettingsSchema } from '../prompt-rules';
+import { ReasoningEffortSchema } from '../provider-settings';
 
 export const ImageQualitySchema = Type.Union([
   Type.Literal('512px'),

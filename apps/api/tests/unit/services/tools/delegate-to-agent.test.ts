@@ -1,5 +1,6 @@
-import { describe, expect, it, beforeEach, afterEach } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { SUBAGENT_MAX_TURNS_MAX, SUBAGENT_MAX_TURNS_MIN } from '@mangostudio/shared/app-settings';
+import { register } from '../../../../src/services/tools/builtin/delegate-to-agent';
 import {
   clearRegistry,
   executeTool,
@@ -9,10 +10,9 @@ import {
 } from '../../../../src/services/tools/registry';
 import type {
   DelegateToAgentInput,
-  ToolContext,
   RegisteredTool,
+  ToolContext,
 } from '../../../../src/services/tools/types';
-import { register } from '../../../../src/services/tools/builtin/delegate-to-agent';
 
 function snapshotRegistry(): RegisteredTool[] {
   return getAllTools().map((tool) => ({

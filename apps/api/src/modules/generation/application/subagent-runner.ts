@@ -1,25 +1,25 @@
-import type { Kysely } from 'kysely';
 import type { AgentId, AgentProfile } from '@mangostudio/shared/agents';
 import type { MultiAgentSettings } from '@mangostudio/shared/app-settings';
 import type { ProviderRuntimeSettings } from '@mangostudio/shared/provider-settings';
 import type { SubagentTracePart } from '@mangostudio/shared/types';
+import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';
+import { safeJsonParse } from '../../../lib/safe-parse';
+import {
+  getProviderForModel,
+  getProvider as getRegisteredProvider,
+} from '../../../services/providers/core/provider-registry';
 import type {
   AgentTurnRequest,
   AIProvider,
   ModelCapabilities,
 } from '../../../services/providers/types';
-import type { EffectiveToolSettings } from '../../../services/tools/types';
-import { safeJsonParse } from '../../../lib/safe-parse';
 import { executeTool, getSafeEffectiveToolSettings, getTool } from '../../../services/tools';
 import { DELEGATE_TO_AGENT_TOOL_NAME } from '../../../services/tools/builtin/delegate-to-agent';
-import {
-  getProvider as getRegisteredProvider,
-  getProviderForModel,
-} from '../../../services/providers/core/provider-registry';
-import { resolveModel } from './resolve-model';
-import { resolveAgentRuntime, type ResolvedAgentRuntime } from './resolve-agent-runtime';
+import type { EffectiveToolSettings } from '../../../services/tools/types';
 import { getAgentProfile } from '../../agents/application/agent-settings-service';
+import { type ResolvedAgentRuntime, resolveAgentRuntime } from './resolve-agent-runtime';
+import { resolveModel } from './resolve-model';
 
 const SUBAGENT_TIMEOUT_CODE = 'TIMEOUT';
 const SUBAGENT_ABORT_CODE = 'ABORTED';

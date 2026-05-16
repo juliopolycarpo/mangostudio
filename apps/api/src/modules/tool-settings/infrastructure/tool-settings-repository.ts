@@ -1,7 +1,7 @@
 import type { Kysely } from 'kysely';
-import type { EffectiveToolSettings } from '../../../services/tools/types';
 import type { Database, UserToolSettingsSelect } from '../../../db/types';
 import { safeJsonParse } from '../../../lib/safe-parse';
+import type { EffectiveToolSettings } from '../../../services/tools/types';
 import { generateId } from '../../../utils/id';
 
 export async function getSavedToolSettings(

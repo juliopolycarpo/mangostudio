@@ -1,6 +1,6 @@
+import type { GalleryItem } from '@mangostudio/shared';
 import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';
-import type { GalleryItem } from '@mangostudio/shared';
 import { listGeneratedImagesForGallery } from '../../generated-images/infrastructure/generated-image-repository';
 import { listLegacyGalleryImages } from '../infrastructure/message-repository';
 

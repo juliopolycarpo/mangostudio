@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'bun:test';
 import { isReasoningModel } from '@mangostudio/shared/utils/model-detection';
+import type { Responses } from 'openai/resources/responses/responses';
 import {
   extractReasoningFromCompleted,
   streamWithResponsesAPI,
 } from '../../../../src/services/providers/openai/index';
-import type { Responses } from 'openai/resources/responses/responses';
 import type { StreamingChunk } from '../../../../src/services/providers/types';
 
 /** Cast partial mock data to the full SDK type for test purposes. */

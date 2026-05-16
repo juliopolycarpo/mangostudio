@@ -1,40 +1,40 @@
-import { describe, expect, it, mock, afterEach } from 'bun:test';
+import { afterEach, describe, expect, it, mock } from 'bun:test';
 import type { AgentProfile } from '@mangostudio/shared/agents';
-import { respondStreamRoutes } from '../../../src/modules/generation/http/respond-stream-routes';
-import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
 import { getDb } from '../../../src/db/database';
-import {
-  verifyChatOwnership,
-  listByUserId,
-  getById,
-  createChat,
-  updateChat,
-  deleteChat,
-} from '../../../src/modules/chats/infrastructure/chat-repository';
-import {
-  getProviderForModel,
-  getProvider,
-  registerProvider,
-} from '../../../src/services/providers/core/provider-registry';
-import {
-  getAllToolDefinitions,
-  getToolDefinitionsForAgent,
-  executeTool,
-  getTool,
-  getSafeEffectiveToolSettings,
-} from '../../../src/services/tools';
-import { clearSubagentCache } from '../../../src/modules/generation/application/subagent-response-cache';
-import * as realGeminiNs from '../../../src/services/gemini';
-import * as realProviderSettingsRepoNs from '../../../src/modules/provider-settings/infrastructure/provider-settings-repository';
-import * as realToolSettingsRepoNs from '../../../src/modules/tool-settings/infrastructure/tool-settings-repository';
 import { getAgentProfile } from '../../../src/modules/agents/application/agent-settings-service';
 import { AgentSettingsError } from '../../../src/modules/agents/domain/agent-profile';
-import type { AgentTurnRequest } from '../../../src/services/providers/types';
 import { getAppSettings } from '../../../src/modules/app-settings/application/app-settings-service';
+import {
+  createChat,
+  deleteChat,
+  getById,
+  listByUserId,
+  updateChat,
+  verifyChatOwnership,
+} from '../../../src/modules/chats/infrastructure/chat-repository';
+import { clearSubagentCache } from '../../../src/modules/generation/application/subagent-response-cache';
 import {
   runSubagentTurn,
   SubagentDelegationError,
 } from '../../../src/modules/generation/application/subagent-runner';
+import { respondStreamRoutes } from '../../../src/modules/generation/http/respond-stream-routes';
+import * as realProviderSettingsRepoNs from '../../../src/modules/provider-settings/infrastructure/provider-settings-repository';
+import * as realToolSettingsRepoNs from '../../../src/modules/tool-settings/infrastructure/tool-settings-repository';
+import * as realGeminiNs from '../../../src/services/gemini';
+import {
+  getProvider,
+  getProviderForModel,
+  registerProvider,
+} from '../../../src/services/providers/core/provider-registry';
+import type { AgentTurnRequest } from '../../../src/services/providers/types';
+import {
+  executeTool,
+  getAllToolDefinitions,
+  getSafeEffectiveToolSettings,
+  getTool,
+  getToolDefinitionsForAgent,
+} from '../../../src/services/tools';
+import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
 
 const TEST_USER = {
   id: 'test-user-stream',

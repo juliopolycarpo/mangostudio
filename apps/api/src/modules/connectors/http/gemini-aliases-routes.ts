@@ -3,24 +3,26 @@
  * Delegates to existing Gemini service for legacy API consumers.
  */
 
-import { Elysia, t } from 'elysia';
-import { UpdateConnectorModelsBodySchema } from '@mangostudio/shared/connectors';
-import type { ApiErrorResponse } from '@mangostudio/shared/errors';
 import type { Connector, ConnectorStatus, ModelCatalogResponse } from '@mangostudio/shared';
 import {
-  getGeminiSecretStatus,
+  AddConnectorBodySchema,
+  UpdateConnectorModelsBodySchema,
+} from '@mangostudio/shared/connectors';
+import type { ApiErrorResponse } from '@mangostudio/shared/errors';
+import { Elysia, t } from 'elysia';
+import { requireAuth } from '../../../plugins/auth-middleware';
+import {
   addGeminiConnector,
   deleteGeminiConnector,
-  updateConnectorModels,
+  getGeminiSecretStatus,
   refreshGeminiModelCatalog,
+  updateConnectorModels,
 } from '../../../services/gemini';
 import {
   getUnifiedModelCatalog,
   invalidateUnifiedCatalog,
 } from '../../../services/providers/catalog';
 import { invalidateProviderRoutingCache } from '../../../services/providers/core/provider-registry';
-import { AddConnectorBodySchema } from '@mangostudio/shared/connectors';
-import { requireAuth } from '../../../plugins/auth-middleware';
 import { handleConnectorError } from './connectors-routes';
 
 export const geminiAliasRoutes = new Elysia()

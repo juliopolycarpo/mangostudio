@@ -2,15 +2,15 @@
  * OpenAI model listing with TTL cache.
  */
 
-import { withModelCache } from '../core/model-cache';
-import { getModelContextLimit } from '../core/context-policy';
-import { isImageModelId, isReasoningModel } from '../core/capability-detector';
-import { recordProviderProbeTimeout } from '../core/provider-observability';
-import { PROVIDER_PROBE_TIMEOUT_MS, withAbortTimeout } from '../core/probe-timeout';
-import { createProviderSecretService } from '../core/secret-service';
 import { parseStringArray } from '../../../utils/json';
-import { createOpenAIClient, validateOpenAIAuthContext, type OpenAIAuthContext } from './client';
+import { isImageModelId, isReasoningModel } from '../core/capability-detector';
+import { getModelContextLimit } from '../core/context-policy';
+import { withModelCache } from '../core/model-cache';
+import { PROVIDER_PROBE_TIMEOUT_MS, withAbortTimeout } from '../core/probe-timeout';
+import { recordProviderProbeTimeout } from '../core/provider-observability';
+import { createProviderSecretService } from '../core/secret-service';
 import type { ModelInfo } from '../types';
+import { createOpenAIClient, type OpenAIAuthContext, validateOpenAIAuthContext } from './client';
 
 const KNOWN_OPENAI_IMAGE_MODEL_IDS = [
   'gpt-image-2',

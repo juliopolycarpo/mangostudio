@@ -1,22 +1,22 @@
-import type { Kysely } from 'kysely';
 import type { ChatAttachment } from '@mangostudio/shared/chat';
+import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';
-import { assertChatOwnership } from '../../chats/domain/chat-ownership';
-import { resolveModel } from './resolve-model';
-import { loadHistory } from '../../messages/infrastructure/message-repository';
+import { warmProviderForRequest } from '../../../services/providers/core/provider-readiness';
 import {
   getProvider,
   getProviderForModel,
 } from '../../../services/providers/core/provider-registry';
-import { warmProviderForRequest } from '../../../services/providers/core/provider-readiness';
 import { generateId } from '../../../utils/id';
-import { assertChatAttachmentIdsAvailable } from '../../attachments/infrastructure/attachment-repository';
 import { resolveProviderRuntimeAttachments } from '../../attachments/application/runtime-attachment-resolver';
+import { assertChatAttachmentIdsAvailable } from '../../attachments/infrastructure/attachment-repository';
+import { assertChatOwnership } from '../../chats/domain/chat-ownership';
+import { loadHistory } from '../../messages/infrastructure/message-repository';
 import {
-  persistUserMessage,
   persistAiResponse,
+  persistUserMessage,
   updateChatAfterTurn,
 } from '../infrastructure/conversation-persistence';
+import { resolveModel } from './resolve-model';
 import { assertTextTurnHasContent, normalizeTextTurnAttachmentIds } from './text-turn-content';
 
 export interface SendTextMessageInput {

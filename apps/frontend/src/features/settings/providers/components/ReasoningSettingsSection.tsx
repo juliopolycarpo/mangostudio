@@ -2,9 +2,11 @@
  * Reasoning & Thinking section for provider settings.
  */
 
-import type { ReasoningPolicy } from '@mangostudio/shared/provider-settings';
-import type { UpdateProviderRuntimeSettingsBody } from '@mangostudio/shared/provider-settings';
 import type { ReasoningEffort } from '@mangostudio/shared';
+import type {
+  ReasoningPolicy,
+  UpdateProviderRuntimeSettingsBody,
+} from '@mangostudio/shared/provider-settings';
 import { Card } from '@/components/ui/Card';
 import { useI18n } from '@/hooks/use-i18n';
 import { EFFORT_DISPLAY_ORDER, EFFORT_LABEL_KEYS } from '../constants';

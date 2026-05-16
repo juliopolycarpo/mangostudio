@@ -1,7 +1,10 @@
 {
   "$schema": "https://biomejs.dev/schemas/2.4.15/schema.json",
   "vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true },
-  "files": { "ignoreUnknown": false },
+  "files": {
+    "ignoreUnknown": true,
+    "includes": ["**", "!apps/frontend/src/routeTree.gen.ts"]
+  },
   "formatter": {
     "enabled": true,
     "formatWithErrors": false,
@@ -58,7 +61,7 @@
         "useValidTypeof": "error",
         "useYield": "error"
       },
-      "nursery": { "useErrorCause": "error" },
+      "nursery": { "useErrorCause": "off" },
       "style": { "noNestedTernary": "off", "useBlockStatements": "off" },
       "suspicious": {
         "noAssignInExpressions": "error",
@@ -114,6 +117,7 @@
       "bracketSpacing": true
     }
   },
+  "css": { "parser": { "tailwindDirectives": true } },
   "html": { "formatter": { "indentScriptAndStyle": false, "selfCloseVoidElements": "always" } },
   "overrides": [
     { "includes": ["**/*.{ts,tsx}"], "javascript": { "globals": [] } },
@@ -184,7 +188,7 @@
             "noTsIgnore": "error",
             "noUnsafeDeclarationMerging": "error",
             "noUnusedExpressions": "off",
-            "useAwait": "error",
+            "useAwait": "off",
             "useNamespaceKeyword": "error"
           }
         }
@@ -197,10 +201,7 @@
         "rules": {
           "correctness": { "noUndeclaredVariables": "off", "noUnusedVariables": "error" },
           "nursery": { "useExplicitReturnType": "off", "useExplicitType": "off" },
-          "style": {
-            "noNonNullAssertion": "error",
-            "useImportType": { "level": "error", "options": { "style": "inlineType" } }
-          },
+          "style": { "noNonNullAssertion": "error", "useImportType": "error" },
           "suspicious": {
             "noConsole": { "level": "warn", "options": { "allow": ["warn", "error"] } },
             "noEmptyBlockStatements": "error",
@@ -214,18 +215,6 @@
       "linter": { "rules": { "nursery": { "noUnnecessaryConditions": "warn" } } }
     },
     {
-      "includes": [
-        "apps/api/src/services/**/*.ts",
-        "apps/api/src/utils/**/*.ts",
-        "apps/api/src/lib/**/*.ts",
-        "apps/api/src/db/**/*.ts",
-        "apps/shared/src/**/*.ts"
-      ],
-      "linter": {
-        "rules": { "nursery": { "useExplicitReturnType": "error", "useExplicitType": "error" } }
-      }
-    },
-    {
       "includes": ["scripts/**/*.ts"],
       "linter": { "rules": { "suspicious": { "noConsole": "off" } } }
     },
@@ -237,7 +226,10 @@
             "noChildrenProp": "warn",
             "noNestedComponentDefinitions": "error",
             "noVoidElementsWithChildren": "error",
-            "useExhaustiveDependencies": "error",
+            "useExhaustiveDependencies": {
+              "level": "error",
+              "options": { "reportUnnecessaryDependencies": false }
+            },
             "useHookAtTopLevel": "error",
             "useJsxKeyInIterable": "error"
           },

@@ -5,11 +5,11 @@
  */
 
 import type { ModelCatalogResponse, ModelOption } from '@mangostudio/shared';
-import { listRegisteredProviderTypes, getProvider } from './core/provider-registry';
-import { listAllSecretMetadata } from '../secret-store/metadata';
-import type { ModelInfo, AIProvider } from './types';
 import type { ProviderType } from '@mangostudio/shared/types';
 import { parseStringArray } from '../../utils/json';
+import { listAllSecretMetadata } from '../secret-store/metadata';
+import { getProvider, listRegisteredProviderTypes } from './core/provider-registry';
+import type { AIProvider, ModelInfo } from './types';
 
 const TTL_MS = 60 * 60 * 1000; // 1 hour
 const MAX_CATALOG_ENTRIES = 1000;

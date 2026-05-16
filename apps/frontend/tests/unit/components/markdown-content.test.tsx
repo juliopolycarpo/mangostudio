@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen } from '../../support/harness/render';
-import { MarkdownContent } from '../../../src/components/MarkdownContent';
 import * as shikiLib from '@/lib/shiki';
+import { MarkdownContent } from '../../../src/components/MarkdownContent';
+import { render, screen } from '../../support/harness/render';
 
 vi.mock('@/lib/shiki', () => ({
   highlightCode: vi.fn(() => null),

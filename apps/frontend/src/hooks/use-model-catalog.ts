@@ -1,9 +1,9 @@
-import { useCallback } from 'react';
-import { useQuery, useQueryClient, queryOptions } from '@tanstack/react-query';
 import type { ModelCatalogResponse } from '@mangostudio/shared';
-import { EMPTY_MODEL_CATALOG } from '../utils/model-utils';
+import { queryOptions, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useCallback } from 'react';
 import { client } from '../lib/api-client';
 import { extractApiError } from '../lib/utils';
+import { EMPTY_MODEL_CATALOG } from '../utils/model-utils';
 
 export const catalogKeys = {
   all: ['model-catalog'] as const,

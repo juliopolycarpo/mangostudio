@@ -2,7 +2,7 @@
  * Migration 005: adds support for multiple connectors and enabled models list.
  */
 
-import { type Migration } from 'kysely/migration';
+import type { Migration } from 'kysely/migration';
 
 export const multiConnectors: Migration = {
   async up(db) {

@@ -1,13 +1,14 @@
 /* global console */
-import { useState, useCallback } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
+
 import type { Message } from '@mangostudio/shared';
-import { galleryKeys } from '@/features/gallery/queries';
-import { generateImage, uploadReferenceImage } from '@/services/generation-service';
-import { useI18n } from '@/hooks/use-i18n';
-import type { useOptimisticMessages } from '@/features/generation/hooks/use-optimistic-messages';
+import { useQueryClient } from '@tanstack/react-query';
+import { useCallback, useState } from 'react';
 import type { useChats } from '@/features/chat/hooks/use-chats';
+import { galleryKeys } from '@/features/gallery/queries';
+import type { useOptimisticMessages } from '@/features/generation/hooks/use-optimistic-messages';
 import type { useGlobalSettings } from '@/hooks/use-global-settings';
+import { useI18n } from '@/hooks/use-i18n';
+import { generateImage, uploadReferenceImage } from '@/services/generation-service';
 
 interface UseImageGenerationOptions {
   chats: ReturnType<typeof useChats>;

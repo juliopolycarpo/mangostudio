@@ -1,13 +1,14 @@
 /**
  * Unit tests for AppearanceSettings component and useTheme hook.
  */
-import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
-import { screen, fireEvent, act } from '@testing-library/react';
-import { render, renderHook } from '../../support/harness/render';
+
+import type * as TanstackRouter from '@tanstack/react-router';
+import { act, fireEvent, screen } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AppearanceSettings } from '../../../src/components/settings/AppearanceSettings';
 import { SettingsTabs } from '../../../src/components/settings/SettingsTabs';
 import { useTheme } from '../../../src/hooks/use-theme';
-import type * as TanstackRouter from '@tanstack/react-router';
+import { render, renderHook } from '../../support/harness/render';
 
 // SettingsTabs uses TanStack Router Link — mock it to a simple anchor
 vi.mock('@tanstack/react-router', async (importOriginal) => {

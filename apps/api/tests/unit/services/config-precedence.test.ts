@@ -10,8 +10,8 @@
  * Uses temporary TOML files in /tmp so the tests do not depend on the
  * presence of .mango/config.toml in the developer's environment.
  */
-import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
-import { writeFileSync, mkdirSync, rmSync } from 'fs';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { mkdirSync, rmSync, writeFileSync } from 'fs';
 import { join, resolve } from 'path';
 import { loadConfig, resetConfig } from '../../../src/lib/config';
 

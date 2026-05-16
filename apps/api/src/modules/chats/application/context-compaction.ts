@@ -1,22 +1,22 @@
-import type { Kysely } from 'kysely';
 import type { ContextCompactionResponse, ContextInfo } from '@mangostudio/shared/chat';
 import type { MessagePart, ProviderType } from '@mangostudio/shared/types';
+import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';
-import { resolveModel } from '../../generation/application/resolve-model';
-import { loadHistory } from '../../messages/infrastructure/message-repository';
-import {
-  persistAiResponse,
-  updateChatAfterTurn,
-} from '../../generation/infrastructure/conversation-persistence';
-import {
-  getProvider,
-  getProviderForModel,
-} from '../../../services/providers/core/provider-registry';
 import {
   buildPersistedContextSnapshot,
   computeContextSnapshot,
 } from '../../../services/providers/core/context-policy';
+import {
+  getProvider,
+  getProviderForModel,
+} from '../../../services/providers/core/provider-registry';
 import { generateId } from '../../../utils/id';
+import { resolveModel } from '../../generation/application/resolve-model';
+import {
+  persistAiResponse,
+  updateChatAfterTurn,
+} from '../../generation/infrastructure/conversation-persistence';
+import { loadHistory } from '../../messages/infrastructure/message-repository';
 import { ChatNotFoundError } from '../domain/chat-ownership';
 import { createChat, getById, updateChat } from '../infrastructure/chat-repository';
 

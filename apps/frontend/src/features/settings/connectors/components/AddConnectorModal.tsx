@@ -1,5 +1,5 @@
 import type { ProviderType } from '@mangostudio/shared';
-import { Eye, EyeOff, LoaderCircle, ShieldCheck, FileCode, Database } from 'lucide-react';
+import { Database, Eye, EyeOff, FileCode, LoaderCircle, ShieldCheck } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { useI18n } from '@/hooks/use-i18n';

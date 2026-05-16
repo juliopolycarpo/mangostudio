@@ -1,9 +1,9 @@
-import { describe, expect, it, vi } from 'vitest';
-import userEvent from '@testing-library/user-event';
 import { screen } from '@testing-library/react';
-import { render } from '../../support/harness/render';
+import userEvent from '@testing-library/user-event';
+import { describe, expect, it, vi } from 'vitest';
 import { ChatPage } from '../../../src/features/chat/ChatPage';
 import { DEFAULT_CONTEXT_SETTINGS } from '../../../src/hooks/use-global-settings';
+import { render } from '../../support/harness/render';
 
 vi.mock('../../../src/features/chat/queries', () => ({
   useMessagesQuery: () => ({

@@ -1,3 +1,4 @@
+import type { AgentProfile, UserAgentId } from '@mangostudio/shared/agents';
 import {
   existsSync,
   lstatSync,
@@ -8,7 +9,6 @@ import {
   writeFileSync,
 } from 'fs';
 import { basename, extname, relative, resolve } from 'path';
-import type { AgentProfile, UserAgentId } from '@mangostudio/shared/agents';
 import { getConfig } from '../../../lib/config';
 import { AgentSettingsError, slugFromAgentId, userAgentIdFromSlug } from '../domain/agent-profile';
 import { parseAgentMarkdownProfile, serializeAgentMarkdown } from './agent-markdown-parser';

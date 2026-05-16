@@ -4,12 +4,12 @@
 
 import OpenAI, { APIError as OpenAIAPIError } from 'openai';
 import { getOrCreateCachedClient } from '../core/client-cache';
+import { PROVIDER_PROBE_TIMEOUT_MS, withAbortTimeout } from '../core/probe-timeout';
 import {
   recordProviderCacheHit,
   recordProviderCacheMiss,
   recordProviderProbeTimeout,
 } from '../core/provider-observability';
-import { PROVIDER_PROBE_TIMEOUT_MS, withAbortTimeout } from '../core/probe-timeout';
 
 const BASE_URL = 'https://api.openai.com/v1';
 const clientCache = new Map<string, OpenAI>();

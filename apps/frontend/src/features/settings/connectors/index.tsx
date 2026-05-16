@@ -1,16 +1,17 @@
 /* global console */
-import { useState } from 'react';
+
 import type { Connector, ModelCatalogResponse } from '@mangostudio/shared';
+import { useState } from 'react';
 import { useToast } from '@/components/ui/Toast';
 import { useI18n } from '@/hooks/use-i18n';
 import { deleteConnector } from './api';
-import { useConnectors } from './hooks/use-connectors';
-import { useConnectorForm } from './hooks/use-connector-form';
-import { useModelSelection } from './hooks/use-model-selection';
-import { ConnectorList } from './components/ConnectorList';
 import { AddConnectorModal } from './components/AddConnectorModal';
+import { ConnectorList } from './components/ConnectorList';
 import { ConnectorModelsModal } from './components/ConnectorModelsModal';
 import { DeleteConfirmDialog } from './components/DeleteConfirmDialog';
+import { useConnectorForm } from './hooks/use-connector-form';
+import { useConnectors } from './hooks/use-connectors';
+import { useModelSelection } from './hooks/use-model-selection';
 
 interface ConnectorsSettingsProps {
   modelCatalog: ModelCatalogResponse;

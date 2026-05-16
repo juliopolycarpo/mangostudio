@@ -1,16 +1,16 @@
+import type { GeneratedImagePart as GeneratedImagePartType } from '@mangostudio/shared';
 import {
-  Download,
   AlertCircle,
+  Bookmark,
+  ChevronDown,
+  Download,
   Image,
   ImageOff,
-  ChevronDown,
   Sparkles,
-  Bookmark,
 } from 'lucide-react';
-import { useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
+import { useState } from 'react';
 import { useI18n } from '@/hooks/use-i18n';
-import type { GeneratedImagePart as GeneratedImagePartType } from '@mangostudio/shared';
 import { ReservedAspectImage } from './ReservedAspectImage';
 
 interface Props {

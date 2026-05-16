@@ -3,10 +3,10 @@
  */
 
 import userEvent from '@testing-library/user-event';
-import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ToolSettingsPage } from '../../../src/features/settings/tools/components/ToolSettingsPage';
 import { render, screen, waitFor } from '../../support/harness/render';
 import { createFetchScenario } from '../../support/mocks/create-fetch-scenario';
-import { ToolSettingsPage } from '../../../src/features/settings/tools/components/ToolSettingsPage';
 
 const TOOLS_RESPONSE = {
   tools: [

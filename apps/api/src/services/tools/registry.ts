@@ -3,14 +3,15 @@
  * Tools self-register at import time via registerTool().
  */
 
-import type { ToolSettingsDescriptor } from '@mangostudio/shared/tool-settings';
 import type { AgentProfile } from '@mangostudio/shared/agents';
-import type { EffectiveToolSettings, RegisteredTool, ToolContext, ToolDefinition } from './types';
+import type { ToolSettingsDescriptor } from '@mangostudio/shared/tool-settings';
 import {
   getSafeEffectiveToolSettings,
   getToolDefinitionsForTools,
   getToolDescriptorsForTools,
 } from './settings-policy';
+import type { EffectiveToolSettings, RegisteredTool, ToolContext, ToolDefinition } from './types';
+
 export {
   getDefaultToolSettings,
   getSafeEffectiveToolSettings,

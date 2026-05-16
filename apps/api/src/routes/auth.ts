@@ -2,7 +2,7 @@
  * Auth routes: bridge between Elysia and Better Auth.
  */
 
-import { type Elysia } from 'elysia';
+import type { Elysia } from 'elysia';
 import { getAuth } from '../auth';
 
 // O Better Auth Elysia adapter precisa tratar chamadas em /api/auth

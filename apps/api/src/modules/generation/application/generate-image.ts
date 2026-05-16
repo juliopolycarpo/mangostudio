@@ -1,17 +1,17 @@
-import type { Kysely } from 'kysely';
-import type { Database } from '../../../db/types';
 import type { GeneratedImageArtifact } from '@mangostudio/shared';
 import type { PromptSettings } from '@mangostudio/shared/prompt-rules';
-import { assertChatOwnership } from '../../chats/domain/chat-ownership';
-import { resolveModel } from './resolve-model';
+import type { Kysely } from 'kysely';
+import type { Database } from '../../../db/types';
+import { warmProviderForRequest } from '../../../services/providers/core/provider-readiness';
 import {
   getProvider,
   getProviderForModel,
 } from '../../../services/providers/core/provider-registry';
-import { warmProviderForRequest } from '../../../services/providers/core/provider-readiness';
 import { generateId } from '../../../utils/id';
-import { persistImageTurn } from '../infrastructure/conversation-persistence';
+import { assertChatOwnership } from '../../chats/domain/chat-ownership';
 import { composePrompt } from '../../prompt-rules/application/prompt-composer';
+import { persistImageTurn } from '../infrastructure/conversation-persistence';
+import { resolveModel } from './resolve-model';
 
 export interface GenerateImageInput {
   chatId: string;

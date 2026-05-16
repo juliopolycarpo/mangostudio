@@ -2,9 +2,9 @@
  * Hook: connector list state and refresh.
  */
 
-import { useCallback } from 'react';
-import { useQuery, queryOptions } from '@tanstack/react-query';
 import type { ConnectorStatus } from '@mangostudio/shared';
+import { queryOptions, useQuery } from '@tanstack/react-query';
+import { useCallback } from 'react';
 import { client } from '@/lib/api-client';
 import { extractApiError } from '@/lib/utils';
 

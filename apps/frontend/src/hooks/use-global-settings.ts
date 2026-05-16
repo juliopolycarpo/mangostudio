@@ -1,26 +1,26 @@
-import { useCallback, useEffect, useMemo, useRef } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import type { ReasoningEffort } from '@mangostudio/shared';
 import {
+  type AppSettings,
+  type ChatTitleSettings,
+  type ChatTitleStrategy,
+  clampMaxToolIterations,
   DEFAULT_APP_SETTINGS,
   DEFAULT_CHAT_TITLE_SETTINGS,
   DEFAULT_CONTEXT_SETTINGS,
   DEFAULT_MULTI_AGENT_SETTINGS,
   DEFAULT_PROMPT_SETTINGS,
+  type ImageQuality,
   MAX_TOOL_ITERATIONS_DEFAULT,
   MAX_TOOL_ITERATIONS_MAX,
   MAX_TOOL_ITERATIONS_MIN,
-  clampMaxToolIterations,
+  type MultiAgentSettings,
   normalizeAppSettings,
   normalizeChatTitleSettings,
-  type AppSettings,
-  type ChatTitleSettings,
-  type ChatTitleStrategy,
-  type ImageQuality,
-  type MultiAgentSettings,
 } from '@mangostudio/shared/app-settings';
-import type { ReasoningEffort } from '@mangostudio/shared';
 import type { ContextCompactionBehavior, ContextSettings } from '@mangostudio/shared/chat';
 import type { RuleFileSetting } from '@mangostudio/shared/prompt-rules';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { updateAppSettings } from '@/features/settings/app/api';
 import { appSettingsKeys, appSettingsQueryOptions } from '@/features/settings/app/queries';
 

@@ -2,10 +2,10 @@
  * Unified model catalog route.
  */
 
-import { Elysia } from 'elysia';
 import type { ModelCatalogResponse } from '@mangostudio/shared';
-import { getUnifiedModelCatalog } from '../../services/providers/catalog';
+import { Elysia } from 'elysia';
 import { requireAuth } from '../../plugins/auth-middleware';
+import { getUnifiedModelCatalog } from '../../services/providers/catalog';
 
 export const modelRoutes = new Elysia()
   .use(requireAuth)

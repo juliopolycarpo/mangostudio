@@ -6,8 +6,8 @@
  * the common conversion primitives.
  */
 
-import type { ToolDefinition } from '../types';
 import type OpenAI from 'openai';
+import type { ToolDefinition } from '../types';
 
 /**
  * Converts internal ToolDefinitions to OpenAI Chat Completions tool format.

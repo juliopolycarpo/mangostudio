@@ -1,4 +1,3 @@
-import type { Kysely } from 'kysely';
 import type {
   AgentMarkdownPreviewResponse,
   AgentProfile,
@@ -13,17 +12,10 @@ import {
   BUILT_IN_DEFAULT_AGENT,
   BUILT_IN_EXPLORE_AGENT,
 } from '@mangostudio/shared/agents';
+import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';
 import { getAppSettings } from '../../app-settings/application/app-settings-service';
 import { listToolSettingsDescriptors } from '../../tool-settings/application/tool-settings-service';
-import {
-  createMarkdownAgent,
-  deleteMarkdownAgent,
-  listMarkdownAgentProfiles,
-  previewAgentMarkdown,
-  readMarkdownAgent,
-  writeMarkdownAgent,
-} from './agent-file-service';
 import {
   AgentSettingsError,
   assertAgentId,
@@ -38,6 +30,14 @@ import {
   listSavedBuiltInAgentSettings,
   upsertBuiltInAgentSettings,
 } from '../infrastructure/agent-settings-repository';
+import {
+  createMarkdownAgent,
+  deleteMarkdownAgent,
+  listMarkdownAgentProfiles,
+  previewAgentMarkdown,
+  readMarkdownAgent,
+  writeMarkdownAgent,
+} from './agent-file-service';
 
 export async function listAgentProfiles(
   db: Kysely<Database>,

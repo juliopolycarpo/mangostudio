@@ -4,8 +4,8 @@
  * Default interactionMode is 'image' so existing messages retain their visual behavior.
  */
 
-import { type Migration } from 'kysely/migration';
 import { sql } from 'kysely';
+import type { Migration } from 'kysely/migration';
 
 export const addInteractionMode: Migration = {
   async up(db) {

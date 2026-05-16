@@ -1,8 +1,8 @@
-import { describe, expect, it, vi } from 'vitest';
-import userEvent from '@testing-library/user-event';
 import { screen } from '@testing-library/react';
-import { render } from '../../support/harness/render';
+import userEvent from '@testing-library/user-event';
+import { describe, expect, it, vi } from 'vitest';
 import { InputBar } from '../../../src/features/chat/components/InputBar';
+import { render } from '../../support/harness/render';
 
 function renderInputBar(overrides: Partial<React.ComponentProps<typeof InputBar>> = {}) {
   const props: React.ComponentProps<typeof InputBar> = {
