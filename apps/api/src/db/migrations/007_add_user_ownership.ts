@@ -1,7 +1,7 @@
 import type { Migration } from 'kysely/migration';
 
 export const addUserOwnership: Migration = {
-  async up(db) {
+  async up(db): Promise<void> {
     // Adicionar userId às tabelas existentes
     await db.schema
       .alterTable('chats')
@@ -24,7 +24,7 @@ export const addUserOwnership: Migration = {
       .execute();
   },
 
-  async down(db) {
+  async down(db): Promise<void> {
     // SQLite não suporta DROP COLUMN antes do 3.35.0,
     // mas Bun's SQLite é recente o suficiente
     await db.schema.alterTable('chats').dropColumn('userId').execute();

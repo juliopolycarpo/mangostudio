@@ -6,7 +6,7 @@
 import type { Migration } from 'kysely/migration';
 
 export const addSecretMetadata: Migration = {
-  async up(db) {
+  async up(db): Promise<void> {
     await db.schema
       .createTable('secret_metadata')
       .ifNotExists()
@@ -20,7 +20,7 @@ export const addSecretMetadata: Migration = {
       .execute();
   },
 
-  async down(db) {
+  async down(db): Promise<void> {
     await db.schema.dropTable('secret_metadata').ifExists().execute();
   },
 };

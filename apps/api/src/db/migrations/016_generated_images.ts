@@ -1,7 +1,7 @@
 import type { Migration } from 'kysely/migration';
 
 export const generatedImages: Migration = {
-  async up(db) {
+  async up(db): Promise<void> {
     await db.schema
       .createTable('generated_images')
       .ifNotExists()
@@ -44,7 +44,7 @@ export const generatedImages: Migration = {
       .execute();
   },
 
-  async down(db) {
+  async down(db): Promise<void> {
     await db.schema.dropIndex('idx_generated_images_user_created_at').ifExists().execute();
     await db.schema.dropIndex('idx_generated_images_chat_created_at').ifExists().execute();
     await db.schema.dropIndex('idx_generated_images_message_id').ifExists().execute();

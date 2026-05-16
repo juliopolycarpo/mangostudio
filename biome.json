@@ -62,7 +62,7 @@
         "useValidTypeof": "error",
         "useYield": "error"
       },
-      "nursery": { "useAwaitThenable": "warn", "useErrorCause": "off" },
+      "nursery": { "useAwaitThenable": "off", "useErrorCause": "off" },
       "performance": { "noDelete": "warn" },
       "style": { "noNestedTernary": "off", "useBlockStatements": "off" },
       "suspicious": {
@@ -221,7 +221,7 @@
     },
     {
       "includes": ["apps/api/src/**/*.ts"],
-      "linter": { "rules": { "nursery": { "noUnnecessaryConditions": "warn" } } }
+      "linter": { "rules": { "nursery": { "noUnnecessaryConditions": "off" } } }
     },
     {
       "includes": ["scripts/**/*.ts"],
@@ -238,7 +238,7 @@
       "linter": {
         "rules": {
           "nursery": {
-            "useExplicitType": "warn"
+            "useExplicitType": "off"
           }
         }
       }

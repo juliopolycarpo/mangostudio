@@ -471,7 +471,6 @@ describe('useTextChat — prompt title auto rename', () => {
 
     await act(async () => {
       title.resolve({ title: 'Generated title' });
-      // biome-ignore lint/nursery/useAwaitThenable: Custom thenable
       await title.promise;
     });
 
@@ -514,7 +513,6 @@ describe('useTextChat — prompt title auto rename', () => {
 
     await act(async () => {
       titleUpdate.resolve(undefined);
-      // biome-ignore lint/nursery/useAwaitThenable: Custom thenable
       await titleUpdate.promise;
     });
   });

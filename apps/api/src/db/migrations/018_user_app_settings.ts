@@ -1,7 +1,7 @@
 import type { Migration } from 'kysely/migration';
 
 export const userAppSettings: Migration = {
-  async up(db) {
+  async up(db): Promise<void> {
     await db.schema
       .createTable('user_app_settings')
       .ifNotExists()
@@ -21,7 +21,7 @@ export const userAppSettings: Migration = {
       .execute();
   },
 
-  async down(db) {
+  async down(db): Promise<void> {
     await db.schema.dropIndex('idx_user_app_settings_user').ifExists().execute();
     await db.schema.dropTable('user_app_settings').ifExists().execute();
   },
