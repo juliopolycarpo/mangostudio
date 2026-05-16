@@ -65,7 +65,9 @@ config.toml
 !.claude/marketplaces/mangostudio-local/plugins/mangostudio-dprint-lsp/.claude-plugin/
 !.claude/marketplaces/mangostudio-local/plugins/mangostudio-dprint-lsp/.claude-plugin/plugin.json
 !.claude/marketplaces/mangostudio-local/plugins/mangostudio-dprint-lsp/README.md
-.gemini/
+.gemini/**
+!.gemini/settings.json
+!.gemini/AGENTS.md
 .agent/
 .agents/
 .kiro/
