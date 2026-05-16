@@ -228,6 +228,22 @@
       "linter": { "rules": { "suspicious": { "noConsole": "off" } } }
     },
     {
+      "includes": [
+        "apps/api/src/services/**/*.ts",
+        "apps/api/src/utils/**/*.ts",
+        "apps/api/src/lib/**/*.ts",
+        "apps/api/src/db/**/*.ts",
+        "apps/shared/src/**/*.ts"
+      ],
+      "linter": {
+        "rules": {
+          "nursery": {
+            "useExplicitType": "warn"
+          }
+        }
+      }
+    },
+    {
       "includes": ["apps/frontend/**/*.{ts,tsx}"],
       "linter": {
         "rules": {

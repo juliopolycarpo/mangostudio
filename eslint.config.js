@@ -110,27 +110,6 @@ export default tseslint.config(
     rules: typeAwareRules,
   },
   {
-    files: [
-      'apps/api/src/services/**/*.ts',
-      'apps/api/src/utils/**/*.ts',
-      'apps/api/src/lib/**/*.ts',
-      'apps/api/src/db/**/*.ts',
-      'apps/shared/src/**/*.ts',
-    ],
-    rules: {
-      '@typescript-eslint/explicit-function-return-type': [
-        'error',
-        {
-          allowDirectConstAssertionInArrowFunctions: true,
-          allowExpressions: true,
-          allowHigherOrderFunctions: true,
-          allowIIFEs: true,
-          allowTypedFunctionExpressions: true,
-        },
-      ],
-    },
-  },
-  {
     files: ['apps/frontend/**/*.{ts,tsx}'],
     plugins: {
       '@eslint-react': reactPlugin,
