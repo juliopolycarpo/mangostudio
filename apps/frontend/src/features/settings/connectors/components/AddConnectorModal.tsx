@@ -71,7 +71,7 @@ export function AddConnectorModal({
         <div className="space-y-4">
           {/* Provider selector */}
           <div className="flex flex-col gap-1.5">
-            <label className="text-sm font-medium text-on-surface-variant">{s.providerLabel}</label>
+            <span className="text-sm font-medium text-on-surface-variant">{s.providerLabel}</span>
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2">
               {PROVIDER_OPTIONS.map(({ id }) => (
                 <button
@@ -183,9 +183,9 @@ export function AddConnectorModal({
           </div>
 
           <div className="space-y-3">
-            <label className="text-xs font-bold text-on-surface-variant uppercase ml-1">
+            <span className="text-xs font-bold text-on-surface-variant uppercase ml-1">
               {s.saveToLabel}
-            </label>
+            </span>
             <div className="grid grid-cols-1 gap-2">
               {sourceOptions.map((src) => (
                 <button

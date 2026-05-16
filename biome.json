@@ -30,7 +30,6 @@
     "enabled": true,
     "rules": {
       "recommended": true,
-      "a11y": { "recommended": false },
       "nursery": { "useAwaitThenable": "off", "useErrorCause": "off" },
       "performance": { "noDelete": "warn" },
       "style": {

@@ -126,6 +126,7 @@ export function ModelSelector({
                       const isLocked = lockedProvider != null && model.provider !== lockedProvider;
                       return (
                         <button
+                          type="button"
                           key={model.modelId}
                           onClick={() => !isLocked && handleSelect(model.modelId)}
                           disabled={isLocked}

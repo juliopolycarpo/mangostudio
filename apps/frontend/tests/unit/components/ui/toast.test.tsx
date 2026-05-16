@@ -7,9 +7,15 @@ function ToastTester() {
 
   return (
     <div>
-      <button onClick={() => toast('Operation successful', 'success')}>Show Success</button>
-      <button onClick={() => toast('Something failed', 'error')}>Show Error</button>
-      <button onClick={() => toast('Just info')}>Show Info</button>
+      <button type="button" onClick={() => toast('Operation successful', 'success')}>
+        Show Success
+      </button>
+      <button type="button" onClick={() => toast('Something failed', 'error')}>
+        Show Error
+      </button>
+      <button type="button" onClick={() => toast('Just info')}>
+        Show Info
+      </button>
     </div>
   );
 }
