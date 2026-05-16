@@ -5,6 +5,8 @@ dist/
 coverage/
 playwright-report/
 test-results/
+.jscpd-out/
+.qa-gate/
 
 # ─── OS and logs ─── #
 .DS_Store

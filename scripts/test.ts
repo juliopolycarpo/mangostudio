@@ -69,9 +69,10 @@ const results: RunResult[] = [];
 
 if (shouldRunUnit) {
   info('\nPhase: unit');
-  const unitResults = await runParallel(
-    ALL_WORKSPACE_NAMES.map((workspace) => () => runWorkspaceScript(workspace, 'test:unit'))
-  );
+  const unitResults = await runParallel([
+    () => runCommand('root:test:unit', ['bun', 'test', 'scripts'], { cwd: ROOT_DIR }),
+    ...ALL_WORKSPACE_NAMES.map((workspace) => () => runWorkspaceScript(workspace, 'test:unit')),
+  ]);
   results.push(...unitResults);
 }
 

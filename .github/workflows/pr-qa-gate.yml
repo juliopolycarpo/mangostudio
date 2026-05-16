@@ -1,0 +1,188 @@
+name: PR QA Gate
+
+# Posts a single sticky comment on every PR comparing coverage, lines of code,
+# bundle size, dependency count, duplication, test counts, and lint/TS
+# violations between the PR base and head. Report-only — never fails the PR.
+# See scripts/qa-gate/{collect,render}.ts.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: pr-qa-gate-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  DATABASE_PATH: /tmp/mangostudio-qa-gate.sqlite
+
+jobs:
+  metrics-head:
+    name: Metrics — Head
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - uses: ./.github/actions/setup-mango
+
+      - name: Run database migrations
+        run: bun run --filter @mangostudio/api migrate
+
+      - name: Collect test lane counts
+        run: |
+          set +e
+          mkdir -p .qa-gate
+          for lane in unit integration; do
+            db="/tmp/mangostudio-qa-gate-${lane}.sqlite"
+            rm -f "$db" "$db-shm" "$db-wal"
+            DATABASE_PATH="$db" bun run test "--${lane}" > ".qa-gate/test-${lane}.log" 2>&1
+            echo "$?" > ".qa-gate/test-${lane}.exit-code"
+          done
+          exit 0
+
+      - name: Collect coverage
+        run: bun run test --coverage
+        continue-on-error: true
+
+      - name: Collect QA metrics
+        run: bun ./scripts/qa-gate/collect.ts > metrics.json
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: qa-metrics-head
+          path: metrics.json
+          retention-days: 7
+
+  metrics-base:
+    name: Metrics — Base
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+
+      - name: Overlay QA-gate tooling from PR head
+        # Base may predate the qa-gate scripts, jscpd devDep, and the API
+        # bunfig coverage config. Overlay them from the PR head so the same
+        # collector runs on both sides without requiring a backport. Keep the
+        # base lockfile for dependency delta measurement before overlaying the
+        # head dependency graph for installation.
+        run: |
+          set -euo pipefail
+          mkdir -p .qa-gate
+          cp bun.lock .qa-gate/base-bun.lock
+          git fetch --depth=1 origin ${{ github.event.pull_request.head.sha }}
+          git checkout FETCH_HEAD -- \
+            scripts/qa-gate \
+            apps/api/bunfig.toml \
+            package.json \
+            bun.lock \
+            .github/actions/setup-mango
+
+      - uses: ./.github/actions/setup-mango
+
+      - name: Run database migrations
+        run: bun run --filter @mangostudio/api migrate
+
+      - name: Collect test lane counts
+        run: |
+          set +e
+          mkdir -p .qa-gate
+          for lane in unit integration; do
+            db="/tmp/mangostudio-qa-gate-${lane}.sqlite"
+            rm -f "$db" "$db-shm" "$db-wal"
+            DATABASE_PATH="$db" bun run test "--${lane}" > ".qa-gate/test-${lane}.log" 2>&1
+            echo "$?" > ".qa-gate/test-${lane}.exit-code"
+          done
+          exit 0
+
+      - name: Collect coverage
+        run: bun run test --coverage
+        continue-on-error: true
+
+      - name: Collect QA metrics
+        run: bun ./scripts/qa-gate/collect.ts > metrics.json
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: qa-metrics-base
+          path: metrics.json
+          retention-days: 7
+
+  comment:
+    name: Post Comment
+    needs: [metrics-base, metrics-head]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: ./.github/actions/setup-mango
+
+      - name: Download head metrics
+        uses: actions/download-artifact@v5
+        with:
+          name: qa-metrics-head
+          path: ./qa-head
+        continue-on-error: true
+
+      - name: Download base metrics
+        uses: actions/download-artifact@v5
+        with:
+          name: qa-metrics-base
+          path: ./qa-base
+        continue-on-error: true
+
+      - name: Render comment
+        run: |
+          base="./qa-base/metrics.json"
+          head="./qa-head/metrics.json"
+          mkdir -p "$(dirname "$base")" "$(dirname "$head")"
+          [ -f "$base" ] || echo '{}' > "$base"
+          [ -f "$head" ] || echo '{}' > "$head"
+          bun ./scripts/qa-gate/render.ts "$base" "$head" > comment.md
+          echo "## Rendered comment preview" >> "$GITHUB_STEP_SUMMARY"
+          cat comment.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upsert PR comment
+        uses: actions/github-script@v9
+        continue-on-error: true
+        with:
+          script: |
+            const { readFile } = require('node:fs/promises');
+
+            const marker = '<!-- qa-gate-comment -->';
+            const body = await readFile('comment.md', 'utf8');
+            const issue_number = context.payload.pull_request.number;
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              ...context.repo,
+              issue_number,
+              per_page: 100,
+            });
+            const existing = comments.find((comment) => {
+              return comment.user?.type === 'Bot' && comment.body?.includes(marker);
+            });
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                ...context.repo,
+                comment_id: existing.id,
+                body,
+              });
+              return;
+            }
+
+            await github.rest.issues.createComment({
+              ...context.repo,
+              issue_number,
+              body,
+            });
