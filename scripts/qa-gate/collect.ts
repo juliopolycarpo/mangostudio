@@ -48,6 +48,11 @@ export interface TestLaneStats {
   readonly shared: number;
 }
 
+export interface ToolingCheckStats {
+  readonly checkQuickExitCode: number;
+  readonly failedTasks: readonly string[];
+}
+
 export type Failable<T> = T | { readonly error: string };
 
 export interface Metrics {
@@ -61,6 +66,7 @@ export interface Metrics {
   readonly frontendBundle: Failable<BundleStats>;
   readonly dependencies: Failable<DependencyStats>;
   readonly tests: Readonly<Record<TestLaneName, Failable<TestLaneStats>>>;
+  readonly tooling: Failable<ToolingCheckStats>;
 }
 
 // ── Helpers ──
@@ -220,7 +226,31 @@ const collectCoverage = async (workspace: WorkspaceName): Promise<CoverageSummar
   return source.kind === 'vitest' ? readVitestSummary(absPath) : parseLcovSummary(absPath);
 };
 
-// Removed ESLint
+// ── Repository tooling ──
+
+// biome-ignore lint/complexity/useRegexLiterals: Keep the escape code out of a regex literal.
+const ANSI_RE = new RegExp(String.raw`\x1B\[[0-?]*[ -/]*[@-~]`, 'g');
+
+const collectFailedTasks = (text: string): readonly string[] => {
+  const failedTasks: string[] = [];
+
+  for (const line of text.replaceAll(ANSI_RE, '').split('\n')) {
+    const match = line.match(/^\s+FAIL\s+(\S+)\s+/);
+    if (match) failedTasks.push(match[1]);
+  }
+
+  return failedTasks;
+};
+
+const collectToolingStats = async (): Promise<ToolingCheckStats> => {
+  const result = await runCapture(['bun', 'run', 'check', '--quick']);
+  const combined = `${result.stdout}\n${result.stderr}`;
+
+  return {
+    checkQuickExitCode: result.exitCode,
+    failedTasks: collectFailedTasks(combined),
+  };
+};
 
 // ── TypeScript errors ──
 
@@ -481,6 +511,7 @@ const buildMetrics = async (): Promise<Metrics> => {
     unit: await safe('tests:unit', () => collectTestLaneStats('unit')),
     integration: await safe('tests:integration', () => collectTestLaneStats('integration')),
   } satisfies Metrics['tests'];
+  const tooling = await safe('tooling', collectToolingStats);
 
   return {
     sha: getCommitSha(),
@@ -493,6 +524,7 @@ const buildMetrics = async (): Promise<Metrics> => {
     frontendBundle,
     dependencies,
     tests,
+    tooling,
   };
 };
 

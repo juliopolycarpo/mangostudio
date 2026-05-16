@@ -6,6 +6,7 @@ import type {
   LocBucket,
   Metrics,
   TestLaneStats,
+  ToolingCheckStats,
 } from './collect';
 import type { CoverageBucket, CoverageSummary } from './parse-lcov';
 
@@ -317,7 +318,7 @@ const renderTestsSection = (): string => {
   ].join('\n');
 };
 
-// ── Violations & Warnings ──
+// ── Repository tooling ──
 
 const sumTsErrors = (metrics: Metrics | null): number | null => {
   if (!metrics) return null;
@@ -330,9 +331,20 @@ const sumTsErrors = (metrics: Metrics | null): number | null => {
   return sum;
 };
 
-const renderViolationsSection = (): string => {
-  const baseEslint = ok(baseMetrics?.eslint) ? baseMetrics.eslint : null;
-  const headEslint = ok(headMetrics?.eslint) ? headMetrics.eslint : null;
+const getTooling = (metrics: Metrics | null): ToolingCheckStats | null => {
+  return ok(metrics?.tooling) ? metrics.tooling : null;
+};
+
+const renderToolingStatus = (stats: ToolingCheckStats | null): string => {
+  if (!stats) return NA;
+  const status = stats.checkQuickExitCode === 0 ? 'pass' : `FAIL (${stats.checkQuickExitCode})`;
+  if (stats.failedTasks.length === 0) return status;
+  return `${status}: ${stats.failedTasks.join(', ')}`;
+};
+
+const renderToolingSection = (): string => {
+  const baseTooling = getTooling(baseMetrics);
+  const headTooling = getTooling(headMetrics);
   const baseTs = sumTsErrors(baseMetrics);
   const headTs = sumTsErrors(headMetrics);
   const baseCirc = ok(baseMetrics?.circularDeps) ? baseMetrics.circularDeps : null;
@@ -341,10 +353,7 @@ const renderViolationsSection = (): string => {
   const rows: string[] = [];
   const numCell = (value: number | null) => (value == null ? NA : formatNumber(value));
   rows.push(
-    `| ESLint errors | ${numCell(baseEslint?.errors ?? null)} | ${numCell(headEslint?.errors ?? null)} | ${renderDelta(baseEslint?.errors, headEslint?.errors, { higherIsBetter: false, precision: 0 })} |`
-  );
-  rows.push(
-    `| ESLint warnings | ${numCell(baseEslint?.warnings ?? null)} | ${numCell(headEslint?.warnings ?? null)} | ${renderDelta(baseEslint?.warnings, headEslint?.warnings, { higherIsBetter: false, precision: 0 })} |`
+    `| Biome/dprint/madge quick check | ${renderToolingStatus(baseTooling)} | ${renderToolingStatus(headTooling)} | ${renderDelta(baseTooling?.checkQuickExitCode, headTooling?.checkQuickExitCode, { higherIsBetter: false, precision: 0 })} |`
   );
   rows.push(
     `| TS errors (total) | ${numCell(baseTs)} | ${numCell(headTs)} | ${renderDelta(baseTs, headTs, { higherIsBetter: false, precision: 0 })} |`
@@ -354,7 +363,7 @@ const renderViolationsSection = (): string => {
   );
 
   return [
-    '### Violations & Warnings',
+    '### Repo Tooling',
     '',
     '| Metric | Base | Head | Δ |',
     '|---|---|---|---|',
@@ -370,8 +379,7 @@ const renderSummary = (): string => {
   const headLoc = getLoc(headMetrics, 'total');
   const baseFrontLines = getCoverageBucket(baseMetrics?.coverage?.frontend, 'lines')?.pct ?? null;
   const headFrontLines = getCoverageBucket(headMetrics?.coverage?.frontend, 'lines')?.pct ?? null;
-  const baseEslint = ok(baseMetrics?.eslint) ? baseMetrics.eslint.errors : null;
-  const headEslint = ok(headMetrics?.eslint) ? headMetrics.eslint.errors : null;
+  const headTooling = getTooling(headMetrics);
   const baseDupPct = ok(baseMetrics?.duplication) ? baseMetrics.duplication.percentage : null;
   const headDupPct = ok(headMetrics?.duplication) ? headMetrics.duplication.percentage : null;
   const baseBundle = getBundle(baseMetrics);
@@ -388,9 +396,7 @@ const renderSummary = (): string => {
   bits.push(
     `**Frontend line coverage:** ${renderDelta(baseFrontLines, headFrontLines, { higherIsBetter: true, suffix: 'pp' })}`
   );
-  bits.push(
-    `**ESLint errors:** ${renderDelta(baseEslint, headEslint, { higherIsBetter: false, precision: 0 })}`
-  );
+  bits.push(`**Quick check:** ${renderToolingStatus(headTooling)}`);
   bits.push(
     `**Duplication:** ${renderDelta(baseDupPct, headDupPct, { higherIsBetter: false, suffix: 'pp' })}`
   );
@@ -428,7 +434,7 @@ for (const [side, metrics] of [
     const loc = metrics.loc[workspace];
     if (isError(loc)) errorNotes.push(`- ${side}/loc/${workspace}: \`${loc.error}\``);
   }
-  if (isError(metrics.eslint)) errorNotes.push(`- ${side}/eslint: \`${metrics.eslint.error}\``);
+  if (isError(metrics.tooling)) errorNotes.push(`- ${side}/tooling: \`${metrics.tooling.error}\``);
   if (isError(metrics.duplication))
     errorNotes.push(`- ${side}/duplication: \`${metrics.duplication.error}\``);
   if (isError(metrics.circularDeps))
@@ -456,7 +462,7 @@ lines.push(renderBundleSection());
 lines.push(renderDependenciesSection());
 lines.push(renderTestsSection());
 lines.push(renderDuplicationSection());
-lines.push(renderViolationsSection());
+lines.push(renderToolingSection());
 
 if (errorNotes.length > 0) {
   lines.push('<details>');

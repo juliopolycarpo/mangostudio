@@ -1,8 +1,8 @@
 name: PR QA Gate
 
 # Posts a single sticky comment on every PR comparing coverage, lines of code,
-# bundle size, dependency count, duplication, test counts, and lint/TS
-# violations between the PR base and head. Report-only — never fails the PR.
+# bundle size, dependency count, duplication, test counts, and repo tooling
+# signals between the PR base and head. Report-only — never fails the PR.
 # See scripts/qa-gate/{collect,render}.ts.
 
 on:
@@ -21,6 +21,53 @@ env:
   DATABASE_PATH: /tmp/mangostudio-qa-gate.sqlite
 
 jobs:
+  mark-updating:
+    name: Mark Comment Updating
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Mark QA gate comment as updating
+        uses: actions/github-script@v9
+        continue-on-error: true
+        with:
+          script: |
+            const marker = '<!-- qa-gate-comment -->';
+            const pullRequest = context.payload.pull_request;
+            const issue_number = pullRequest.number;
+            const shortSha = pullRequest.head.sha.slice(0, 7);
+            const body = [
+              '## QA Gate — Updating',
+              '',
+              `Detected a branch update at \`${shortSha}\`.`,
+              '',
+              'The QA Gate is updating this comment with fresh coverage, bundle, dependency, test, and repo tooling metrics. This can take a few minutes.',
+              '',
+              marker,
+            ].join('\n');
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              ...context.repo,
+              issue_number,
+              per_page: 100,
+            });
+            const existing = comments.find((comment) => {
+              return comment.user?.type === 'Bot' && comment.body?.includes(marker);
+            });
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                ...context.repo,
+                comment_id: existing.id,
+                body,
+              });
+              return;
+            }
+
+            await github.rest.issues.createComment({
+              ...context.repo,
+              issue_number,
+              body,
+            });
+
   metrics-head:
     name: Metrics — Head
     runs-on: ubuntu-latest
@@ -119,7 +166,7 @@ jobs:
 
   comment:
     name: Post Comment
-    needs: [metrics-base, metrics-head]
+    needs: [mark-updating, metrics-base, metrics-head]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5

@@ -32,7 +32,6 @@ const makeMetrics = (sha: string, lineCoverage: number): Metrics => ({
     shared: COVERAGE,
   },
   tsErrors: { frontend: 0, api: 0, shared: 0 },
-  eslint: { errors: 0, warnings: 0 },
   duplication: { clones: 0, duplicatedLines: 0, percentage: 0 },
   circularDeps: 0,
   frontendBundle: {
@@ -67,6 +66,7 @@ const makeMetrics = (sha: string, lineCoverage: number): Metrics => ({
       shared: 0,
     },
   },
+  tooling: { checkQuickExitCode: 0, failedTasks: [] },
 });
 
 const writeMetrics = async (metrics: Metrics): Promise<string> => {
@@ -122,6 +122,9 @@ describe('QA gate comment renderer', () => {
     expect(comment).toContain('Frontend Bundle');
     expect(comment).toContain('Dependencies');
     expect(comment).toContain('Tests by Lane');
+    expect(comment).toContain('Repo Tooling');
+    expect(comment).toContain('Biome/dprint/madge quick check');
+    expect(comment).not.toContain('ESLint');
     expect(comment).toContain('+2pp');
   });
 
