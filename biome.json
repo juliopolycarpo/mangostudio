@@ -22,7 +22,8 @@
       "!apps/*/dist/",
       "!apps/*/coverage/",
       "!.mango/out/",
-      "!apps/frontend/src/routeTree.gen.ts"
+      "!apps/frontend/src/routeTree.gen.ts",
+      "!**/*.md"
     ]
   },
   "linter": {
@@ -161,7 +162,9 @@
           "complexity": {
             "noBannedTypes": "error",
             "noUselessThisAlias": "error",
-            "noUselessTypeConstraint": "error"
+            "noUselessTypeConstraint": "error",
+            "useLiteralKeys": "error",
+            "useOptionalChain": "error"
           },
           "correctness": { "noUnusedVariables": "error" },
           "nursery": {
@@ -175,9 +178,14 @@
           },
           "style": {
             "noCommonJs": "error",
+            "noInferrableTypes": "error",
             "noNamespace": "error",
+            "noUselessElse": "error",
             "useArrayLiterals": "error",
             "useAsConstAssertion": "error",
+            "useExponentiationOperator": "error",
+            "useNodejsImportProtocol": "error",
+            "useTemplate": "error",
             "useThrowOnlyError": "error"
           },
           "suspicious": {
