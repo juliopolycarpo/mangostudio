@@ -111,6 +111,7 @@ export function Sidebar({
             Mango Studio
           </h1>
           <button
+            type="button"
             onClick={onMobileClose}
             className="ml-auto md:hidden p-2 rounded-lg hover:bg-surface-container-high transition-colors text-on-surface"
             aria-label="Close menu"
@@ -121,6 +122,7 @@ export function Sidebar({
 
         <div className="px-4 mb-4 flex items-center gap-2">
           <button
+            type="button"
             onClick={onNewChat}
             className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-primary text-on-primary rounded-xl font-bold transition-transform active:scale-95 shadow-lg shadow-primary/20"
           >
@@ -133,6 +135,7 @@ export function Sidebar({
         <div className="px-4 mb-4 md:hidden" data-testid="mobile-shortcuts">
           <div className="grid grid-cols-3 gap-2">
             <button
+              type="button"
               onClick={() => handleMobileNav('studio')}
               className={`flex flex-col items-center justify-center gap-1 p-2 rounded-lg transition-all duration-200 text-xs font-medium ${
                 currentPage === 'studio'
@@ -144,6 +147,7 @@ export function Sidebar({
               <span>{t.studio.title}</span>
             </button>
             <button
+              type="button"
               onClick={() => handleMobileNav('gallery')}
               className={`flex flex-col items-center justify-center gap-1 p-2 rounded-lg transition-all duration-200 text-xs font-medium ${
                 currentPage === 'gallery'
@@ -155,6 +159,7 @@ export function Sidebar({
               <span>{t.gallery.title}</span>
             </button>
             <button
+              type="button"
               onClick={() => handleMobileNav('settings')}
               className={`flex flex-col items-center justify-center gap-1 p-2 rounded-lg transition-all duration-200 text-xs font-medium ${
                 currentPage === 'settings'
@@ -175,13 +180,25 @@ export function Sidebar({
           {chats.map((chat) => {
             const ctx = contextCache?.get(chat.id);
             return (
+              // biome-ignore lint/a11y/useSemanticElements: cannot be a <button> because it contains nested interactive elements (edit/delete buttons, inline edit input)
               <div
                 key={chat.id}
+                role="button"
+                tabIndex={0}
                 className={`group relative flex items-center gap-3 px-4 py-2.5 rounded-lg transition-all duration-300 w-full text-left truncate cursor-pointer ${currentPage === 'chat' && currentChatId === chat.id ? 'text-primary bg-surface-container-high' : 'text-on-surface/70 hover:bg-surface-container-high hover:text-on-surface'}`}
                 onClick={() => {
                   if (editingChatId !== chat.id) {
                     onSelectChat(chat.id);
                     handleMobileNav('chat');
+                  }
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    if (editingChatId !== chat.id) {
+                      onSelectChat(chat.id);
+                      handleMobileNav('chat');
+                    }
                   }
                 }}
               >
@@ -210,6 +227,7 @@ export function Sidebar({
                 {editingChatId !== chat.id && (
                   <div className="opacity-0 group-hover:opacity-100 flex items-center gap-1 transition-opacity shrink-0">
                     <button
+                      type="button"
                       onClick={(e) => handleStartEdit(chat, e)}
                       className="p-1 hover:text-primary transition-colors"
                       title={t.chat.editTitle}
@@ -217,6 +235,7 @@ export function Sidebar({
                       <Pencil size={14} />
                     </button>
                     <button
+                      type="button"
                       onClick={(e) => handleDelete(chat.id, e)}
                       className="p-1 hover:text-error transition-colors"
                       title={t.chat.deleteTitle}
@@ -231,15 +250,27 @@ export function Sidebar({
         </nav>
 
         <div className="p-4 mt-auto border-t border-outline-variant/10 space-y-1 hidden md:block">
-          <button onClick={() => handleMobileNav('studio')} className={navItemClass('studio')}>
+          <button
+            type="button"
+            onClick={() => handleMobileNav('studio')}
+            className={navItemClass('studio')}
+          >
             <Image size={18} />
             <span className="font-label font-medium text-sm">{t.studio.title}</span>
           </button>
-          <button onClick={() => handleMobileNav('gallery')} className={navItemClass('gallery')}>
+          <button
+            type="button"
+            onClick={() => handleMobileNav('gallery')}
+            className={navItemClass('gallery')}
+          >
             <LayoutGrid size={18} />
             <span className="font-label font-medium text-sm">{t.gallery.title}</span>
           </button>
-          <button onClick={() => handleMobileNav('settings')} className={navItemClass('settings')}>
+          <button
+            type="button"
+            onClick={() => handleMobileNav('settings')}
+            className={navItemClass('settings')}
+          >
             <Settings size={18} />
             <span className="font-label font-medium text-sm">{t.settings.title}</span>
           </button>

@@ -25,6 +25,7 @@ export function ProviderSettingsMenu() {
       <div className="flex flex-col items-center gap-3 py-16">
         <p className="text-sm text-destructive">{t.settings.providers.loadError}</p>
         <button
+          type="button"
           onClick={() => void refetch()}
           className="text-xs text-primary underline underline-offset-2 hover:no-underline"
         >

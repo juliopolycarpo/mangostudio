@@ -4,7 +4,7 @@
 
 import type { ToolParameterDescriptor } from '@mangostudio/shared/tool-settings';
 import { Pencil, Trash2 } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useId, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { useI18n } from '@/hooks/use-i18n';
 import { useModelCatalog } from '@/hooks/use-model-catalog';
@@ -163,7 +163,6 @@ function PathListField({
                     }
                   }}
                   className="flex-1 rounded-lg px-3 py-1.5 text-sm bg-surface-container-lowest text-on-surface border border-outline-variant/20 focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/20"
-                  autoFocus
                 />
               ) : (
                 <>
@@ -173,6 +172,7 @@ function PathListField({
                     {item.path}
                   </span>
                   <button
+                    type="button"
                     onClick={() => startEdit(index)}
                     disabled={disabled}
                     className="p-1.5 rounded-md text-on-surface-variant hover:bg-surface-container-high disabled:opacity-50 disabled:cursor-not-allowed"
@@ -181,6 +181,7 @@ function PathListField({
                     <Pencil className="w-3.5 h-3.5" />
                   </button>
                   <button
+                    type="button"
                     onClick={() => handleDelete(index)}
                     disabled={disabled}
                     className="p-1.5 rounded-md text-danger hover:bg-danger/10 disabled:opacity-50 disabled:cursor-not-allowed"
@@ -204,6 +205,7 @@ export function ToolParameterField({
   onChange,
   disabled,
 }: ToolParameterFieldProps) {
+  const fieldId = useId();
   const { t } = useI18n();
   const { catalog } = useModelCatalog();
 
@@ -258,8 +260,13 @@ export function ToolParameterField({
   if (descriptor.modelType === 'image') {
     return (
       <div className="space-y-1">
-        {label && <label className="text-sm text-on-surface-variant">{label}</label>}
+        {label && (
+          <label htmlFor={`${fieldId}-model`} className="text-sm text-on-surface-variant">
+            {label}
+          </label>
+        )}
         <select
+          id={`${fieldId}-model`}
           value={toSafeString(descriptorValue)}
           onChange={(e) => onChange(e.target.value)}
           disabled={disabled}
@@ -299,8 +306,13 @@ export function ToolParameterField({
     case 'number': {
       return (
         <div className="space-y-1">
-          {label && <label className="text-sm text-on-surface-variant">{label}</label>}
+          {label && (
+            <label htmlFor={`${fieldId}-number`} className="text-sm text-on-surface-variant">
+              {label}
+            </label>
+          )}
           <input
+            id={`${fieldId}-number`}
             type="number"
             min={descriptor.min}
             max={descriptor.max}
@@ -318,8 +330,13 @@ export function ToolParameterField({
     case 'select': {
       return (
         <div className="space-y-1">
-          {label && <label className="text-sm text-on-surface-variant">{label}</label>}
+          {label && (
+            <label htmlFor={`${fieldId}-select`} className="text-sm text-on-surface-variant">
+              {label}
+            </label>
+          )}
           <select
+            id={`${fieldId}-select`}
             value={toSafeString(descriptorValue)}
             onChange={(e) => onChange(e.target.value)}
             disabled={disabled}
@@ -341,8 +358,13 @@ export function ToolParameterField({
         : toSafeString(descriptorValue);
       return (
         <div className="space-y-1">
-          {label && <label className="text-sm text-on-surface-variant">{label}</label>}
+          {label && (
+            <label htmlFor={`${fieldId}-list`} className="text-sm text-on-surface-variant">
+              {label}
+            </label>
+          )}
           <textarea
+            id={`${fieldId}-list`}
             value={listValue}
             onChange={(e) => {
               const lines = e.target.value
@@ -363,7 +385,7 @@ export function ToolParameterField({
     case 'path_list': {
       return (
         <div className="space-y-1">
-          {label && <label className="text-sm text-on-surface-variant">{label}</label>}
+          {label && <span className="text-sm text-on-surface-variant">{label}</span>}
           <PathListField
             value={descriptorValue}
             onChange={onChange}
@@ -377,8 +399,13 @@ export function ToolParameterField({
     default: {
       return (
         <div className="space-y-1">
-          {label && <label className="text-sm text-on-surface-variant">{label}</label>}
+          {label && (
+            <label htmlFor={`${fieldId}-text`} className="text-sm text-on-surface-variant">
+              {label}
+            </label>
+          )}
           <input
+            id={`${fieldId}-text`}
             type="text"
             value={toSafeString(descriptorValue)}
             onChange={(e) => onChange(e.target.value)}

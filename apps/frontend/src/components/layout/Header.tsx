@@ -59,6 +59,7 @@ export function Header({
     <header className="bg-surface-dim flex justify-between items-center px-3 sm:px-4 md:px-6 py-3 md:py-4 w-full sticky top-0 z-40 border-b border-outline-variant/10">
       <div className="flex items-center gap-2 sm:gap-3 md:gap-4 min-w-0 flex-1">
         <button
+          type="button"
           onClick={onMobileMenuToggle}
           className="md:hidden p-2 rounded-lg hover:bg-surface-container-high transition-colors text-on-surface shrink-0"
           aria-label="Open menu"
@@ -83,6 +84,7 @@ export function Header({
       <div className="flex items-center gap-2 sm:gap-3 shrink-0 ml-2">
         {currentPage === 'chat' && (
           <button
+            type="button"
             onClick={onNewChat}
             className="flex items-center gap-2 px-3 sm:px-4 py-2 rounded-full bg-surface-container-high hover:bg-surface-container-highest transition-colors text-sm font-medium text-on-surface active:scale-95 duration-200 shrink-0"
           >
@@ -91,6 +93,7 @@ export function Header({
           </button>
         )}
         <button
+          type="button"
           onClick={onNavigateToSettings}
           className={`p-2 rounded-full transition-all duration-200 active:scale-95 shrink-0 ${currentPage === 'settings' ? 'bg-primary/10 text-primary' : 'bg-surface-container-high text-on-surface hover:bg-surface-container-highest cursor-pointer'}`}
           title={t.settings.title}
@@ -104,6 +107,7 @@ export function Header({
               {session.user.name}
             </span>
             <button
+              type="button"
               onClick={() => void handleLogout()}
               disabled={loggingOut}
               data-testid="logout-button"

@@ -73,6 +73,7 @@ export function GalleryPage() {
                 </p>
                 <div className="flex gap-2">
                   <button
+                    type="button"
                     onClick={() => setSelectedImage(item)}
                     className="p-2 bg-white/20 hover:bg-white/30 backdrop-blur-md rounded-lg text-white transition-colors flex-1 flex items-center justify-center gap-2"
                   >
@@ -111,6 +112,7 @@ export function GalleryPage() {
             onClick={() => setSelectedImage(null)}
           >
             <button
+              type="button"
               className="absolute top-6 right-6 p-3 bg-white/10 hover:bg-white/20 rounded-full text-white transition-colors"
               onClick={() => setSelectedImage(null)}
             >

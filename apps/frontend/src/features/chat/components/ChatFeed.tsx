@@ -433,6 +433,7 @@ export function ChatFeed({ chatId, messages }: { chatId: string | null; messages
                                     <div className="absolute bottom-4 left-4 right-4 glass-panel rounded-xl p-3 flex justify-between items-center translate-y-12 opacity-0 group-hover:translate-y-0 group-hover:opacity-100 transition-all duration-300">
                                       <div className="flex gap-2">
                                         <button
+                                          type="button"
                                           onClick={() => {
                                             if (msg.imageUrl) handleDownload(msg.imageUrl);
                                           }}
@@ -442,13 +443,17 @@ export function ChatFeed({ chatId, messages }: { chatId: string | null; messages
                                           <Download size={16} />
                                         </button>
                                         <button
+                                          type="button"
                                           className="w-9 h-9 rounded-lg flex items-center justify-center bg-surface-container-highest/40 hover:bg-primary/20 text-on-surface transition-colors"
                                           title={t.chat.feed.saveToGallery}
                                         >
                                           <Bookmark size={16} />
                                         </button>
                                       </div>
-                                      <button className="px-4 py-1.5 rounded-lg bg-primary/10 hover:bg-primary/20 text-primary text-xs font-bold transition-colors">
+                                      <button
+                                        type="button"
+                                        className="px-4 py-1.5 rounded-lg bg-primary/10 hover:bg-primary/20 text-primary text-xs font-bold transition-colors"
+                                      >
                                         {t.chat.feed.regenerate}
                                       </button>
                                     </div>
