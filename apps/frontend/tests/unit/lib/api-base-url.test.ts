@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 describe('getApiBaseUrl', () => {
   beforeEach(() => {
     vi.resetModules();
-    delete import.meta.env.VITE_API_URL;
+    import.meta.env.VITE_API_URL = undefined;
   });
 
   it('prefers explicit VITE_API_URL when set', async () => {

@@ -17,7 +17,7 @@ describe('api-client 401 handling', () => {
 
     // Replace jsdom's non-configurable location with a mutable plain object
     // @ts-expect-error jsdom allows deleting window.location
-    delete window.location;
+    window.location = undefined;
     // @ts-expect-error assigning a plain object to window.location
     window.location = { href: 'http://localhost:3000/', pathname: '/' };
   });
