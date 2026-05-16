@@ -1,0 +1,28 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "mangostudio-local",
+  "description": "Project-local Claude Code plugins for MangoStudio language servers.",
+  "owner": {
+    "name": "MangoStudio"
+  },
+  "plugins": [
+    {
+      "name": "mangostudio-tsgo-lsp",
+      "version": "0.1.0",
+      "description": "Use the repository tsgo binary for TypeScript and JavaScript code intelligence.",
+      "source": "./plugins/mangostudio-tsgo-lsp"
+    },
+    {
+      "name": "mangostudio-biome-lsp",
+      "version": "0.1.0",
+      "description": "Use the repository Biome binary for web, JSON, and stylesheet code intelligence.",
+      "source": "./plugins/mangostudio-biome-lsp"
+    },
+    {
+      "name": "mangostudio-dprint-lsp",
+      "version": "0.1.0",
+      "description": "Use the repository dprint binary for Markdown, YAML, and TOML code intelligence.",
+      "source": "./plugins/mangostudio-dprint-lsp"
+    }
+  ]
+}

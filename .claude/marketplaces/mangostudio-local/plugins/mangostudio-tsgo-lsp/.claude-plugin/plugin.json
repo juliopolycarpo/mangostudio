@@ -1,0 +1,25 @@
+{
+  "name": "mangostudio-tsgo-lsp",
+  "version": "0.1.0",
+  "description": "Project-local tsgo LSP for MangoStudio.",
+  "author": {
+    "name": "MangoStudio"
+  },
+  "lspServers": {
+    "tsgo": {
+      "command": "tsgo",
+      "args": ["--lsp", "--stdio"],
+      "extensionToLanguage": {
+        ".ts": "typescript",
+        ".tsx": "typescriptreact",
+        ".mts": "typescript",
+        ".cts": "typescript",
+        ".js": "javascript",
+        ".jsx": "javascriptreact",
+        ".mjs": "javascript",
+        ".cjs": "javascript"
+      },
+      "startupTimeout": 120000
+    }
+  }
+}
