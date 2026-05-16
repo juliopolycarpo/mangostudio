@@ -95,6 +95,11 @@ if (effectiveIncludeRoot) {
   if (rootBiomeResult.exitCode !== 0) {
     exitWithResults(results);
   }
+
+  const rootDprintResult = await runCommand('root:dprint:fix', ['bunx', 'dprint', 'fmt'], {
+    cwd: ROOT_DIR,
+  });
+  results.push(rootDprintResult);
 }
 
 if (results.length === 0) {

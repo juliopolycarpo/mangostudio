@@ -97,6 +97,7 @@ if (effectiveIncludeRoot) {
         cwd: ROOT_DIR,
       })
     );
+    rootTasks.push(() => runCommand('root:dprint', ['bunx', 'dprint', 'check'], { cwd: ROOT_DIR }));
   }
   rootTasks.push(() =>
     runCommand(
