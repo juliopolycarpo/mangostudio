@@ -63,6 +63,7 @@
         "useYield": "error"
       },
       "nursery": { "useAwaitThenable": "warn", "useErrorCause": "off" },
+      "performance": { "noDelete": "warn" },
       "style": { "noNestedTernary": "off", "useBlockStatements": "off" },
       "suspicious": {
         "noAssignInExpressions": "error",
