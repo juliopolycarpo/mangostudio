@@ -48,7 +48,6 @@ config.toml
 .kiro/
 .trae/
 .opencode/
-opencode.json
 .cursorrules
 .cursor/
 
