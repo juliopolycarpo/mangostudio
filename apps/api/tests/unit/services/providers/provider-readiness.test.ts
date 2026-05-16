@@ -14,6 +14,8 @@ import type {
   ProviderHealthcheckRequest,
 } from '../../../../src/services/providers/types';
 
+const moduleSnapshot: AIProvider[] = listRegisteredProviderTypes().map((type) => getProvider(type));
+
 function makeStubProvider(
   type: 'gemini' | 'openai-compatible' | 'anthropic' | 'deepseek' | 'openai',
   overrides: Partial<AIProvider> = {}
@@ -37,16 +39,18 @@ function makeStubProvider(
 }
 
 describe('provider readiness', () => {
-  let snapshot: AIProvider[];
-
   beforeEach(() => {
-    snapshot = listRegisteredProviderTypes().map((type) => getProvider(type));
     clearRegistry();
+    for (const provider of moduleSnapshot) {
+      registerProvider(provider);
+    }
   });
 
   afterEach(() => {
     clearRegistry();
-    snapshot.forEach((provider) => registerProvider(provider));
+    for (const provider of moduleSnapshot) {
+      registerProvider(provider);
+    }
   });
 
   it('forwards warmup requests to the provider strategy', async () => {
