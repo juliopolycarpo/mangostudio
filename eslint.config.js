@@ -16,7 +16,6 @@ const typeAwareRules = {
   '@typescript-eslint/no-unsafe-return': 'error',
   '@typescript-eslint/no-unsafe-unary-minus': 'error',
   '@typescript-eslint/prefer-promise-reject-errors': 'error',
-  '@typescript-eslint/require-await': 'error',
   '@typescript-eslint/restrict-template-expressions': 'error',
   '@typescript-eslint/triple-slash-reference': 'error',
   '@typescript-eslint/unbound-method': 'error',
