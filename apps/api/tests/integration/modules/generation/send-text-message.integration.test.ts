@@ -5,6 +5,7 @@ import { getDb } from '../../../../src/db/database';
 import { getConfig } from '../../../../src/lib/config';
 import { sendTextMessage } from '../../../../src/modules/generation/application/send-text-message';
 import { EmptyTextTurnError } from '../../../../src/modules/generation/application/text-turn-content';
+import { createChat } from '../../../../src/modules/chats/infrastructure/chat-repository';
 import {
   getProvider,
   registerProvider,
@@ -58,23 +59,13 @@ describe('sendTextMessage attachments', () => {
     registerTextProvider(capturedRequests, 'Attachment response');
 
     const now = Date.now();
-    const chatId = `send-text-attachment-chat-${now}`;
     const attachmentId = `send-text-attachment-${now}`;
     const modelId = `send-text-model-${now}`;
+    const chat = await createChat({ title: 'Send Text Attachment Chat', userId: TEST_USER.id }, db);
+    const chatId = chat.id;
     const relativePath = `Send-Text-Attachment-Chat_${chatId}/${now}/${attachmentId}-reference.png`;
     writeStoredAttachment(relativePath, new Uint8Array([1, 2, 3, 4]));
     await seedConnector(modelId);
-    await db
-      .insertInto('chats')
-      .values({
-        id: chatId,
-        title: 'Send Text Attachment Chat',
-        createdAt: now,
-        updatedAt: now,
-        model: null,
-        userId: TEST_USER.id,
-      })
-      .execute();
     await db
       .insertInto('messages')
       .values({
@@ -154,23 +145,16 @@ describe('sendTextMessage attachments', () => {
     registerTextProvider(capturedRequests, 'Attachment-only response');
 
     const now = Date.now();
-    const chatId = `send-text-attachment-only-chat-${now}`;
     const attachmentId = `send-text-attachment-only-${now}`;
     const modelId = `send-text-attachment-only-model-${now}`;
+    const chat = await createChat(
+      { title: 'Send Text Attachment Only Chat', userId: TEST_USER.id },
+      db
+    );
+    const chatId = chat.id;
     const relativePath = `Send-Text-Attachment-Only-Chat_${chatId}/${now}/${attachmentId}-brief.txt`;
     writeStoredAttachment(relativePath, new Uint8Array([98, 114, 105, 101, 102]));
     await seedConnector(modelId);
-    await db
-      .insertInto('chats')
-      .values({
-        id: chatId,
-        title: 'Send Text Attachment Only Chat',
-        createdAt: now,
-        updatedAt: now,
-        model: null,
-        userId: TEST_USER.id,
-      })
-      .execute();
     await db
       .insertInto('chat_attachments')
       .values({
@@ -213,26 +197,15 @@ describe('sendTextMessage attachments', () => {
 
   it('rejects turns without prompt text or attachments before persisting messages', async () => {
     const db = getDb();
-    const now = Date.now();
-    const chatId = `send-text-empty-chat-${now}`;
-    await db
-      .insertInto('chats')
-      .values({
-        id: chatId,
-        title: 'Send Text Empty Chat',
-        createdAt: now,
-        updatedAt: now,
-        model: null,
-        userId: TEST_USER.id,
-      })
-      .execute();
+    const chat = await createChat({ title: 'Send Text Empty Chat', userId: TEST_USER.id }, db);
+    const chatId = chat.id;
 
-    const chat = await db
+    const chatRow = await db
       .selectFrom('chats')
       .select('id')
       .where('id', '=', chatId)
       .executeTakeFirst();
-    expect(chat).toBeDefined();
+    expect(chatRow).toBeDefined();
 
     let caughtError: unknown;
     try {

@@ -10,6 +10,7 @@ import {
 } from '../../../../src/services/providers/core/provider-registry';
 import type { AIProvider, ImageGenerationRequest } from '../../../../src/services/providers/types';
 import { ChatNotFoundError } from '../../../../src/modules/chats/domain/chat-ownership';
+import { createChat } from '../../../../src/modules/chats/infrastructure/chat-repository';
 
 const TEST_USER = {
   id: 'test-user-generate-image',
@@ -138,21 +139,11 @@ describe('generateImage', () => {
     registerNoImageProvider();
 
     const now = Date.now();
-    const chatId = `generate-image-chat-no-support-${now}`;
     const modelId = `no-support-model-${now}`;
     await seedConnector(modelId);
 
-    await db
-      .insertInto('chats')
-      .values({
-        id: chatId,
-        title: 'Generate Image Chat',
-        createdAt: now,
-        updatedAt: now,
-        model: null,
-        userId: TEST_USER.id,
-      })
-      .execute();
+    const chat = await createChat({ title: 'Generate Image Chat', userId: TEST_USER.id }, db);
+    const chatId = chat.id;
 
     let caughtError: unknown;
     try {
@@ -177,21 +168,14 @@ describe('generateImage', () => {
     registerImageProvider(capturedRequests, 'https://example.com/cat.png');
 
     const now = Date.now();
-    const chatId = `generate-image-chat-success-${now}`;
     const modelId = `success-model-${now}`;
     await seedConnector(modelId);
 
-    await db
-      .insertInto('chats')
-      .values({
-        id: chatId,
-        title: 'Generate Image Chat Success',
-        createdAt: now,
-        updatedAt: now,
-        model: null,
-        userId: TEST_USER.id,
-      })
-      .execute();
+    const chat = await createChat(
+      { title: 'Generate Image Chat Success', userId: TEST_USER.id },
+      db
+    );
+    const chatId = chat.id;
 
     const result = await generateImage(
       {
