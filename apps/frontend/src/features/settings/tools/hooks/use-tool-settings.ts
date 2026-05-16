@@ -35,6 +35,7 @@ export function useUpdateToolSetting() {
   const queryClient = useQueryClient();
 
   return useMutation({
+    // biome-ignore lint/suspicious/useAwait: Migrated from ESLint
     mutationFn: async ({ toolName, body }: { toolName: string; body: UpdateToolSettingsBody }) => {
       return updateToolSetting(toolName, body);
     },

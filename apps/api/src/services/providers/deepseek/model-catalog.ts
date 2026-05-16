@@ -52,6 +52,7 @@ export function toDeepSeekModelInfo(modelId: string): ModelInfo {
   };
 }
 
+// biome-ignore lint/suspicious/useAwait: Migrated from ESLint
 export async function fetchDeepSeekModels(params: {
   apiKey: string;
   baseUrl?: string | null;

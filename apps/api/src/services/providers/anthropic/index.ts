@@ -197,6 +197,7 @@ async function loadPreparedRuntime(
   };
 }
 
+// biome-ignore lint/suspicious/useAwait: Migrated from ESLint
 async function prepareRuntime(
   userId: string,
   modelName?: string
@@ -296,6 +297,7 @@ const anthropicProvider: AIProvider = {
     return Promise.reject(new Error('Anthropic does not support image generation.'));
   },
 
+  // biome-ignore lint/suspicious/useAwait: Migrated from ESLint
   async listModels(userId: string): Promise<ModelInfo[]> {
     return listModelsWithCache(userId);
   },
@@ -327,6 +329,7 @@ const anthropicProvider: AIProvider = {
     await secretService.validateApiKey(apiKey);
   },
 
+  // biome-ignore lint/suspicious/useAwait: Migrated from ESLint
   async resolveApiKey(userId: string, modelName?: string): Promise<string> {
     return secretService.resolveApiKey(userId, modelName);
   },

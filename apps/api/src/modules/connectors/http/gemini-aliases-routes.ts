@@ -28,10 +28,12 @@ import { handleConnectorError } from './connectors-routes';
 export const geminiAliasRoutes = new Elysia()
   .use(requireAuth)
 
+  // biome-ignore lint/suspicious/useAwait: Migrated from ESLint
   .get('/secrets/gemini', async ({ user }): Promise<ConnectorStatus> => {
     return getGeminiSecretStatus(user?.id ?? '');
   })
 
+  // biome-ignore lint/suspicious/useAwait: Migrated from ESLint
   .get('/models/gemini', async ({ user }): Promise<ModelCatalogResponse> => {
     return getUnifiedModelCatalog(user?.id ?? '');
   })

@@ -39,6 +39,7 @@ function handleAgentSettingsError(
 export const agentRoutes = new Elysia()
   .use(requireAuth)
 
+  // biome-ignore lint/suspicious/useAwait: Migrated from ESLint
   .get('/agents', async ({ user }): Promise<AgentProfileListResponse> => {
     return listAgentProfiles(getDb(), user?.id ?? '');
   })

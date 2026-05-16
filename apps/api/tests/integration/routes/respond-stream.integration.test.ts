@@ -928,6 +928,7 @@ describe('POST /respond/stream', () => {
           enabled: settings?.enabled ?? true,
           parameters: settings?.parameters ?? {},
         }),
+        // biome-ignore lint/suspicious/useAwait: Migrated from ESLint
         executeTool: async (
           name: string,
           args: Record<string, unknown>,

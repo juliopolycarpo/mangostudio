@@ -30,6 +30,7 @@ function handleToolSettingsError(
 export const toolSettingsRoutes = new Elysia()
   .use(requireAuth)
 
+  // biome-ignore lint/suspicious/useAwait: Migrated from ESLint
   .get('/tools', async ({ user }): Promise<ToolSettingsListResponse> => {
     return listToolSettingsDescriptors(getDb(), user?.id ?? '');
   })

@@ -93,6 +93,7 @@ export function handleConnectorError(
 export const connectorRoutes = new Elysia()
   .use(requireAuth)
 
+  // biome-ignore lint/suspicious/useAwait: Migrated from ESLint
   .get('/connectors', async ({ user }): Promise<ConnectorStatus> => {
     return listConnectors(user?.id ?? '');
   })

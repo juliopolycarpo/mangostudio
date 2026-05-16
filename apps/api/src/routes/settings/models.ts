@@ -11,6 +11,7 @@ export const modelRoutes = new Elysia()
   .use(requireAuth)
 
   /** Returns the unified model catalog across all providers. */
+  // biome-ignore lint/suspicious/useAwait: Migrated from ESLint
   .get('/models', async ({ user }): Promise<ModelCatalogResponse> => {
     return getUnifiedModelCatalog(user?.id ?? '');
   });

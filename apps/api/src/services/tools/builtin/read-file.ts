@@ -71,6 +71,7 @@ export async function executeReadFile(
   return { content, path: args.path, size };
 }
 
+// biome-ignore lint/suspicious/useAwait: Migrated from ESLint
 async function execute(
   args: Record<string, unknown>,
   context: ToolContext

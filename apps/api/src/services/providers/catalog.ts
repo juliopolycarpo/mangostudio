@@ -159,6 +159,7 @@ export function createUnifiedModelCatalogService(
     );
   }
 
+  // biome-ignore lint/suspicious/useAwait: Migrated from ESLint
   async function refreshCatalog(userId: string): Promise<ModelCatalogResponse> {
     const inflight = refreshPromises.get(userId);
     if (inflight) return inflight;
@@ -169,6 +170,7 @@ export function createUnifiedModelCatalogService(
         const PROVIDER_TIMEOUT_MS = 5_000;
 
         const results = await Promise.allSettled(
+          // biome-ignore lint/suspicious/useAwait: Migrated from ESLint
           providerTypes.map(async (pt) => {
             const provider = getProviderFn(pt);
             const timeoutPromise = new Promise<never>((_, reject) =>
@@ -235,6 +237,7 @@ export function createUnifiedModelCatalogService(
      * Refreshes the catalog by calling listModels() on every registered provider.
      * Providers that fail (e.g. no connector configured) are silently skipped.
      */
+    // biome-ignore lint/suspicious/useAwait: Migrated from ESLint
     async refresh(userId: string): Promise<ModelCatalogResponse> {
       return refreshCatalog(userId);
     },

@@ -32,6 +32,7 @@ function handleProviderSettingsError(
 export const providerSettingsRoutes = new Elysia()
   .use(requireAuth)
 
+  // biome-ignore lint/suspicious/useAwait: Migrated from ESLint
   .get('/providers', async ({ user }): Promise<ProviderSettingsListResponse> => {
     return listProviderSettingsDescriptors(getDb(), user?.id ?? '');
   })

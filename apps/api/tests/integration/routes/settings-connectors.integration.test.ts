@@ -345,6 +345,7 @@ const ConnectorResponseSchema = Type.Object({
  * All other requests are forwarded to the real fetch.
  */
 function makeOpenAISuccessFetch(originalFetch: typeof globalThis.fetch): typeof globalThis.fetch {
+  // biome-ignore lint/suspicious/useAwait: Migrated from ESLint
   return (async (input: string | URL | Request, init?: RequestInit) => {
     const url = input instanceof Request ? input.url : String(input);
     if (url.includes('api.openai.com') && url.includes('/models')) {
@@ -476,6 +477,7 @@ describe('openai connector routes', () => {
 
     // Mock fetch for the /models validation call
     const originalFetch = globalThis.fetch;
+    // biome-ignore lint/suspicious/useAwait: Migrated from ESLint
     globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
       const url = input instanceof Request ? input.url : String(input);
       if (url === `${COMPAT_BASE_URL}/models`) {
@@ -516,6 +518,7 @@ describe('openai connector routes', () => {
 
   it('POST /settings/connectors with provider deepseek stores default baseUrl metadata', async () => {
     const originalFetch = globalThis.fetch;
+    // biome-ignore lint/suspicious/useAwait: Migrated from ESLint
     globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
       const url = input instanceof Request ? input.url : String(input);
       if (url === 'https://api.deepseek.com/models') {
@@ -616,6 +619,7 @@ describe('openai connector routes', () => {
     }));
 
     const originalFetch = globalThis.fetch;
+    // biome-ignore lint/suspicious/useAwait: Migrated from ESLint
     globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
       const url = input instanceof Request ? input.url : String(input);
       if (url === `${COMPAT_BASE_URL}/models`) {

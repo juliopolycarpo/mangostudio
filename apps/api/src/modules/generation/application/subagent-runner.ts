@@ -488,6 +488,7 @@ async function streamSubagentSummarizeTurn(input: {
   return text;
 }
 
+// biome-ignore lint/suspicious/useAwait: Migrated from ESLint
 async function executeSubagentTools(input: {
   readonly calls: ReadonlyMap<string, { name: string; argsStr: string }>;
   readonly userId: string;

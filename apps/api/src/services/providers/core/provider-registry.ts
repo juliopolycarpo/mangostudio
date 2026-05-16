@@ -219,6 +219,7 @@ export function clearRegistry(): void {
  * Resolves the provider responsible for a given model by looking up the
  * connector that has the model enabled in secret_metadata.
  */
+// biome-ignore lint/suspicious/useAwait: Migrated from ESLint
 export async function getProviderForModel(modelName: string, userId: string): Promise<AIProvider> {
   return providerRegistry.getProviderForModel(modelName, userId);
 }

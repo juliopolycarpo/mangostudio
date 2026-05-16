@@ -124,6 +124,7 @@ export async function assertChatAttachmentIdsAvailable(
   return attachments;
 }
 
+// biome-ignore lint/suspicious/useAwait: Migrated from ESLint
 async function listAttachableRows(
   input: { attachmentIds: string[]; userId: string; chatId: string; messageId?: string },
   db: Kysely<Database>

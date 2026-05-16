@@ -219,6 +219,7 @@ const readVitestSummary = async (absPath: string): Promise<CoverageSummary> => {
   };
 };
 
+// biome-ignore lint/suspicious/useAwait: Migrated from ESLint
 const collectCoverage = async (workspace: WorkspaceName): Promise<CoverageSummary> => {
   const source = COVERAGE_SOURCES[workspace];
   const absPath = join(ROOT_DIR, source.file);

@@ -146,6 +146,7 @@ export function createGeminiModelCatalogService(
     return getResolvedGeminiApiKey(userId);
   };
 
+  // biome-ignore lint/suspicious/useAwait: Migrated from ESLint
   const fetchModels = async (apiKey: string): Promise<Model[]> => {
     return withPromiseTimeout(
       async () => {
@@ -170,6 +171,7 @@ export function createGeminiModelCatalogService(
   };
 
   return {
+    // biome-ignore lint/suspicious/useAwait: Migrated from ESLint
     async refreshGeminiModelCatalog(
       userId: string,
       _reason: GeminiModelCatalogRefreshReason

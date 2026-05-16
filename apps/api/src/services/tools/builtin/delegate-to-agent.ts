@@ -46,6 +46,7 @@ const definition = {
   },
 };
 
+// biome-ignore lint/suspicious/useAwait: Migrated from ESLint
 async function execute(args: Record<string, unknown>, context: ToolContext): Promise<unknown> {
   if (!context.delegateToAgent) {
     throw new Error('Delegation is not available in this runtime.');

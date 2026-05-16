@@ -54,6 +54,7 @@ export function AgentSettingsPage() {
   };
 
   const saveMutation = useMutation({
+    // biome-ignore lint/suspicious/useAwait: Migrated from ESLint
     mutationFn: async ({ agent, body }: SaveAgentInput) => {
       if (agent.kind === 'user' && agent.id === NEW_AGENT_ID) {
         const createBody: CreateAgentProfileBody = {

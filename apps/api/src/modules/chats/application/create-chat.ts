@@ -12,6 +12,7 @@ export interface CreateChatInput {
   userId: string;
 }
 
+// biome-ignore lint/suspicious/useAwait: Migrated from ESLint
 export async function createChatUseCase(
   input: CreateChatInput,
   db: Kysely<Database>

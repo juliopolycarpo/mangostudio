@@ -260,6 +260,7 @@ export function createProviderSecretService(
       await config.validateFn(apiKey, fetchImpl);
     },
 
+    // biome-ignore lint/suspicious/useAwait: Migrated from ESLint
     async syncConfigFileConnectors(userId: string): Promise<void> {
       return syncConfigFileConnectors(userId);
     },

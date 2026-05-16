@@ -20,6 +20,7 @@ export const messageRoutes = (app: Elysia) =>
        */
       .get(
         '/images',
+        // biome-ignore lint/suspicious/useAwait: Migrated from ESLint
         async ({ query, user }) => {
           return listGalleryUseCase(
             {

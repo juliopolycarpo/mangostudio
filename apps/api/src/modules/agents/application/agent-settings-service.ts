@@ -47,6 +47,7 @@ export async function listAgentProfiles(
   return { agents: [...builtIns, ...listMarkdownAgentProfiles()] };
 }
 
+// biome-ignore lint/suspicious/useAwait: Migrated from ESLint
 export async function getAgentProfile(
   db: Kysely<Database>,
   userId: string,
@@ -61,6 +62,7 @@ export async function getAgentProfile(
   return readMarkdownAgent(agentId).profile;
 }
 
+// biome-ignore lint/suspicious/useAwait: Migrated from ESLint
 export async function updateAgentProfile(
   db: Kysely<Database>,
   userId: string,

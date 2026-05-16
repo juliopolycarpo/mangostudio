@@ -84,6 +84,7 @@ async function loadPreparedRuntime(
   };
 }
 
+// biome-ignore lint/suspicious/useAwait: Migrated from ESLint
 async function prepareRuntime(
   userId: string,
   modelName?: string
@@ -243,6 +244,7 @@ const openAICompatibleProvider: AIProvider = {
     return generateOpenAIImage(client, req);
   },
 
+  // biome-ignore lint/suspicious/useAwait: Migrated from ESLint
   async listModels(userId: string): Promise<ModelInfo[]> {
     return listModelsWithCache(userId);
   },

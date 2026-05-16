@@ -77,6 +77,7 @@ export function getToolDefinitionsForAgent(
  * Executes a registered tool by name.
  * Throws if the tool is not found.
  */
+// biome-ignore lint/suspicious/useAwait: Migrated from ESLint
 export async function executeTool(
   name: string,
   args: Record<string, unknown>,

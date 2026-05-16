@@ -61,6 +61,7 @@ export async function listSecretMetadata(
 /**
  * Loads all metadata records across all providers for a user.
  */
+// biome-ignore lint/suspicious/useAwait: Migrated from ESLint
 export async function listAllSecretMetadata(userId: string): Promise<SecretMetadataRow[]> {
   const db = getDb();
   return db

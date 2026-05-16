@@ -196,7 +196,7 @@
             "noTsIgnore": "error",
             "noUnsafeDeclarationMerging": "error",
             "noUnusedExpressions": "off",
-            "useAwait": "off",
+            "useAwait": "error",
             "useNamespaceKeyword": "error"
           }
         }

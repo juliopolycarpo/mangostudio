@@ -55,6 +55,7 @@ function findGeminiInlineImage(
   return parts.find((part) => part.inlineData?.data)?.inlineData ?? null;
 }
 
+// biome-ignore lint/suspicious/useAwait: Migrated from ESLint
 export async function saveGeminiGeneratedImageFromResponse(
   response: GeminiImageResponse
 ): Promise<string> {

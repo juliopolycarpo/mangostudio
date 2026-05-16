@@ -40,6 +40,7 @@ export function withModelCache<T>(
   const cache = new Map<string, { value: T[]; expiresAt: number }>();
   const inflight = new Map<string, Promise<T[]>>();
 
+  // biome-ignore lint/suspicious/useAwait: Migrated from ESLint
   const cachedFetch = async function cachedFetch(userId: string): Promise<T[]> {
     // Return cached value if still fresh
     const entry = cache.get(userId);

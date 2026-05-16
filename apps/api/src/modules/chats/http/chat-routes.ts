@@ -37,6 +37,7 @@ export const chatRoutes = (app: Elysia) =>
     app
       .use(requireAuth)
       /** List all chats for the authenticated user ordered by most recently updated. */
+      // biome-ignore lint/suspicious/useAwait: Migrated from ESLint
       .get('/', async ({ user }) => {
         return listChatsUseCase(user?.id ?? '', getDb());
       })
@@ -44,6 +45,7 @@ export const chatRoutes = (app: Elysia) =>
       /** Create a new chat for the authenticated user. */
       .post(
         '/',
+        // biome-ignore lint/suspicious/useAwait: Migrated from ESLint
         async ({ body, user }) => {
           return createChatUseCase(
             { title: body.title, model: body.model, userId: user?.id ?? '' },
