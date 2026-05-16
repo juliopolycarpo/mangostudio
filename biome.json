@@ -3,7 +3,14 @@
   "vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true },
   "files": {
     "ignoreUnknown": true,
-    "includes": ["**", "!apps/frontend/src/routeTree.gen.ts"]
+    "includes": [
+      "**",
+      "!**/node_modules",
+      "!apps/*/dist",
+      "!apps/*/coverage",
+      "!.mango/out",
+      "!apps/frontend/src/routeTree.gen.ts"
+    ]
   },
   "formatter": {
     "enabled": true,
@@ -17,94 +24,22 @@
     "bracketSpacing": true,
     "expand": "auto",
     "useEditorconfig": true,
-    "includes": [
-      "**",
-      "!apps/*/dist/",
-      "!apps/*/coverage/",
-      "!.mango/out/",
-      "!apps/frontend/src/routeTree.gen.ts",
-      "!**/*.md"
-    ]
+    "includes": ["**", "!**/*.{md,mdx}"]
   },
   "linter": {
     "enabled": true,
     "rules": {
-      "recommended": false,
-      "complexity": {
-        "noAdjacentSpacesInRegex": "error",
-        "noExtraBooleanCast": "error",
-        "noUselessCatch": "error",
-        "noUselessEscapeInRegex": "error"
-      },
-      "correctness": {
-        "noConstAssign": "error",
-        "noConstantCondition": "error",
-        "noEmptyCharacterClassInRegex": "error",
-        "noEmptyPattern": "error",
-        "noGlobalObjectCalls": "error",
-        "noInvalidBuiltinInstantiation": "error",
-        "noInvalidConstructorSuper": "error",
-        "noNonoctalDecimalEscape": "error",
-        "noPrecisionLoss": "error",
-        "noSelfAssign": "error",
-        "noSetterReturn": "error",
-        "noSwitchDeclarations": "error",
-        "noUndeclaredVariables": "error",
-        "noUnreachable": "error",
-        "noUnreachableSuper": "error",
-        "noUnsafeFinally": "error",
-        "noUnsafeOptionalChaining": "error",
-        "noUnusedLabels": "error",
-        "noUnusedPrivateClassMembers": "error",
-        "noUnusedVariables": "error",
-        "useIsNan": "error",
-        "useValidForDirection": "error",
-        "useValidTypeof": "error",
-        "useYield": "error"
-      },
+      "recommended": true,
+      "a11y": { "recommended": false },
       "nursery": { "useAwaitThenable": "off", "useErrorCause": "off" },
       "performance": { "noDelete": "warn" },
-      "style": { "noNestedTernary": "off", "useBlockStatements": "off" },
-      "suspicious": {
-        "noAssignInExpressions": "error",
-        "noAsyncPromiseExecutor": "error",
-        "noCatchAssign": "error",
-        "noClassAssign": "error",
-        "noCompareNegZero": "error",
-        "noConstantBinaryExpressions": "error",
-        "noControlCharactersInRegex": "error",
-        "noDebugger": "error",
-        "noDuplicateCase": "error",
-        "noDuplicateClassMembers": "error",
-        "noDuplicateElseIf": "error",
-        "noDuplicateObjectKeys": "error",
-        "noDuplicateParameters": "error",
-        "noEmptyBlockStatements": "error",
-        "noFallthroughSwitchClause": "error",
-        "noFunctionAssign": "error",
-        "noGlobalAssign": "error",
-        "noImportAssign": "error",
-        "noIrregularWhitespace": "error",
-        "noMisleadingCharacterClass": "error",
-        "noPrototypeBuiltins": "error",
-        "noRedeclare": "error",
-        "noShadowRestrictedNames": "error",
-        "noSparseArray": "error",
-        "noUnassignedVariables": "error",
-        "noUnsafeNegation": "error",
-        "noUselessRegexBackrefs": "error",
-        "noWith": "error",
-        "useGetterReturn": "error"
-      }
-    },
-    "includes": [
-      "**",
-      "!**/node_modules/**",
-      "!apps/*/dist/**",
-      "!apps/*/coverage/**",
-      "!.mango/out/**",
-      "!apps/frontend/src/routeTree.gen.ts"
-    ]
+      "style": {
+        "noDescendingSpecificity": "off",
+        "noNestedTernary": "off",
+        "useBlockStatements": "off"
+      },
+      "suspicious": { "noTemplateCurlyInString": "off" }
+    }
   },
   "javascript": {
     "formatter": {
@@ -122,12 +57,19 @@
   "css": { "parser": { "tailwindDirectives": true } },
   "html": { "formatter": { "indentScriptAndStyle": false, "selfCloseVoidElements": "always" } },
   "overrides": [
-    { "includes": ["**/*.{ts,tsx}"], "javascript": { "globals": [] } },
     {
       "includes": ["**/*.{ts,tsx}"],
+      "javascript": { "globals": [] },
       "linter": {
         "rules": {
-          "complexity": { "noArguments": "error" },
+          "complexity": {
+            "noArguments": "error",
+            "noBannedTypes": "error",
+            "noUselessThisAlias": "error",
+            "noUselessTypeConstraint": "error",
+            "useLiteralKeys": "error",
+            "useOptionalChain": "error"
+          },
           "correctness": {
             "noConstAssign": "off",
             "noGlobalObjectCalls": "off",
@@ -136,38 +78,9 @@
             "noSetterReturn": "off",
             "noUndeclaredVariables": "off",
             "noUnreachable": "off",
-            "noUnreachableSuper": "off"
+            "noUnreachableSuper": "off",
+            "noUnusedVariables": "error"
           },
-          "nursery": { "useSpread": "error" },
-          "style": { "useConst": "error" },
-          "suspicious": {
-            "noClassAssign": "off",
-            "noDuplicateClassMembers": "off",
-            "noDuplicateObjectKeys": "off",
-            "noDuplicateParameters": "off",
-            "noFunctionAssign": "off",
-            "noImportAssign": "off",
-            "noRedeclare": "off",
-            "noUnsafeNegation": "off",
-            "noVar": "error",
-            "noWith": "off",
-            "useGetterReturn": "off"
-          }
-        }
-      }
-    },
-    {
-      "includes": ["**/*.{ts,tsx}"],
-      "linter": {
-        "rules": {
-          "complexity": {
-            "noBannedTypes": "error",
-            "noUselessThisAlias": "error",
-            "noUselessTypeConstraint": "error",
-            "useLiteralKeys": "error",
-            "useOptionalChain": "error"
-          },
-          "correctness": { "noUnusedVariables": "error" },
           "nursery": {
             "noBaseToString": "error",
             "noDuplicateEnumValues": "error",
@@ -175,46 +88,49 @@
             "noForIn": "error",
             "noImpliedEval": "error",
             "noMisusedPromises": "error",
-            "noUnsafePlusOperands": "error"
+            "noUnsafePlusOperands": "error",
+            "useExplicitReturnType": "off",
+            "useExplicitType": "off",
+            "useSpread": "error"
           },
           "style": {
             "noCommonJs": "error",
             "noInferrableTypes": "error",
             "noNamespace": "error",
+            "noNonNullAssertion": "error",
             "noUselessElse": "error",
             "useArrayLiterals": "error",
             "useAsConstAssertion": "error",
+            "useConst": "error",
             "useExponentiationOperator": "error",
+            "useImportType": "error",
             "useNodejsImportProtocol": "error",
             "useTemplate": "error",
             "useThrowOnlyError": "error"
           },
           "suspicious": {
+            "noClassAssign": "off",
+            "noConsole": { "level": "warn", "options": { "allow": ["warn", "error"] } },
+            "noDuplicateClassMembers": "off",
+            "noDuplicateObjectKeys": "off",
+            "noDuplicateParameters": "off",
+            "noEmptyBlockStatements": "error",
             "noExplicitAny": "error",
             "noExtraNonNullAssertion": "error",
+            "noFunctionAssign": "off",
+            "noImportAssign": "off",
             "noMisleadingInstantiator": "error",
             "noNonNullAssertedOptionalChain": "error",
+            "noRedeclare": "off",
             "noTsIgnore": "error",
             "noUnsafeDeclarationMerging": "error",
+            "noUnsafeNegation": "off",
             "noUnusedExpressions": "off",
+            "noVar": "error",
+            "noWith": "off",
             "useAwait": "error",
+            "useGetterReturn": "off",
             "useNamespaceKeyword": "error"
-          }
-        }
-      }
-    },
-    {
-      "includes": ["**/*.{ts,tsx}"],
-      "javascript": { "globals": [] },
-      "linter": {
-        "rules": {
-          "correctness": { "noUndeclaredVariables": "off", "noUnusedVariables": "error" },
-          "nursery": { "useExplicitReturnType": "off", "useExplicitType": "off" },
-          "style": { "noNonNullAssertion": "error", "useImportType": "error" },
-          "suspicious": {
-            "noConsole": { "level": "warn", "options": { "allow": ["warn", "error"] } },
-            "noEmptyBlockStatements": "error",
-            "noExplicitAny": "error"
           }
         }
       }
@@ -235,13 +151,7 @@
         "apps/api/src/db/**/*.ts",
         "apps/shared/src/**/*.ts"
       ],
-      "linter": {
-        "rules": {
-          "nursery": {
-            "useExplicitType": "off"
-          }
-        }
-      }
+      "linter": { "rules": { "nursery": { "useExplicitType": "off" } } }
     },
     {
       "includes": ["apps/frontend/**/*.{ts,tsx}"],
@@ -249,8 +159,8 @@
         "rules": {
           "correctness": {
             "noChildrenProp": "warn",
-            "noRenderReturnValue": "error",
             "noNestedComponentDefinitions": "error",
+            "noRenderReturnValue": "error",
             "noVoidElementsWithChildren": "error",
             "useExhaustiveDependencies": {
               "level": "error",
