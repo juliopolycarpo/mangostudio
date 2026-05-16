@@ -67,7 +67,7 @@ const listModelsWithCache = withModelCache(
       const apiKey = await secretService.resolveSecretValue(row);
       if (!apiKey) continue;
       const connectorModels = await listConnectorModels(row, apiKey);
-      connectorModels.forEach((model) => models.set(model.modelId, model));
+      for (const model of connectorModels) models.set(model.modelId, model);
     }
 
     return Array.from(models.values()).sort((a, b) => a.displayName.localeCompare(b.displayName));

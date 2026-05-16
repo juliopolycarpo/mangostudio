@@ -122,7 +122,7 @@ export function createUnifiedModelCatalogService(
     for (const c of connectors) {
       try {
         const models = parseStringArray(c.enabledModels);
-        models.forEach((m) => enabled.add(m));
+        for (const m of models) enabled.add(m);
       } catch {
         // Ignore parse errors
       }

@@ -3,6 +3,7 @@
  * Lists files and directories at a given path.
  */
 
+import type { Dirent } from 'node:fs';
 import { readdir } from 'node:fs/promises';
 import { registerTool } from '../registry';
 import type { ToolContext } from '../types';
@@ -64,7 +65,7 @@ export async function executeListDirectory(
   const settings = normalizeListDirectoryToolSettings(context.parameters);
   const resolvedPath = resolveAndValidatePath(args.path, settings);
 
-  let dirents;
+  let dirents: Dirent[];
   try {
     dirents = await readdir(resolvedPath, { withFileTypes: true });
   } catch (error) {
