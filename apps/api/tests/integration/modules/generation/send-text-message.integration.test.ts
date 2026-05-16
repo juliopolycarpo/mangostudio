@@ -21,15 +21,9 @@ let previousOpenAICompatibleProvider: AIProvider | null = null;
 const createdUploadFiles: string[] = [];
 
 beforeAll(async () => {
-  const db = getDb();
-  const exists = await db
-    .selectFrom('user')
-    .select('id')
-    .where('id', '=', TEST_USER.id)
-    .executeTakeFirst();
-  if (!exists) {
+  try {
     const now = Date.now();
-    await db
+    await getDb()
       .insertInto('user')
       .values({
         id: TEST_USER.id,
@@ -41,6 +35,8 @@ beforeAll(async () => {
         updatedAt: now,
       })
       .execute();
+  } catch {
+    // user may already exist from another test in coverage mode
   }
 });
 
