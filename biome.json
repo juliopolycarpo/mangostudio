@@ -249,6 +249,7 @@
         "rules": {
           "correctness": {
             "noChildrenProp": "warn",
+            "noRenderReturnValue": "error",
             "noNestedComponentDefinitions": "error",
             "noVoidElementsWithChildren": "error",
             "useExhaustiveDependencies": {
@@ -268,7 +269,12 @@
             "noDangerouslySetInnerHtml": "warn",
             "noDangerouslySetInnerHtmlWithChildren": "error"
           },
-          "suspicious": { "noArrayIndexKey": "warn", "noReactForwardRef": "warn" }
+          "suspicious": {
+            "noArrayIndexKey": "warn",
+            "noCommentText": "error",
+            "noReactForwardRef": "warn",
+            "noSuspiciousSemicolonInJsx": "error"
+          }
         }
       }
     }
