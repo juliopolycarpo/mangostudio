@@ -3,18 +3,18 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 describe('getApiBaseUrl', () => {
   beforeEach(() => {
     vi.resetModules();
-    import.meta.env.VITE_API_URL = undefined;
+    vi.unstubAllEnvs();
   });
 
   it('prefers explicit VITE_API_URL when set', async () => {
-    import.meta.env.VITE_API_URL = 'http://custom-api:9000';
+    vi.stubEnv('VITE_API_URL', 'http://custom-api:9000');
     const { getApiBaseUrl } = await import('@/lib/api-base-url');
 
     expect(getApiBaseUrl()).toBe('http://custom-api:9000');
   });
 
   it('trims trailing slashes from explicit VITE_API_URL', async () => {
-    import.meta.env.VITE_API_URL = 'http://example.com///';
+    vi.stubEnv('VITE_API_URL', 'http://example.com///');
     const { getApiBaseUrl } = await import('@/lib/api-base-url');
 
     expect(getApiBaseUrl()).toBe('http://example.com');
