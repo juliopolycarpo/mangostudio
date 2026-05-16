@@ -1,0 +1,260 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.4.15/schema.json",
+  "vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true },
+  "files": { "ignoreUnknown": false },
+  "formatter": {
+    "enabled": true,
+    "formatWithErrors": false,
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineEnding": "lf",
+    "lineWidth": 100,
+    "attributePosition": "auto",
+    "bracketSameLine": false,
+    "bracketSpacing": true,
+    "expand": "auto",
+    "useEditorconfig": true,
+    "includes": [
+      "**",
+      "!apps/*/dist/",
+      "!apps/*/coverage/",
+      "!.mango/out/",
+      "!apps/frontend/src/routeTree.gen.ts"
+    ]
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "recommended": false,
+      "complexity": {
+        "noAdjacentSpacesInRegex": "error",
+        "noExtraBooleanCast": "error",
+        "noUselessCatch": "error",
+        "noUselessEscapeInRegex": "error"
+      },
+      "correctness": {
+        "noConstAssign": "error",
+        "noConstantCondition": "error",
+        "noEmptyCharacterClassInRegex": "error",
+        "noEmptyPattern": "error",
+        "noGlobalObjectCalls": "error",
+        "noInvalidBuiltinInstantiation": "error",
+        "noInvalidConstructorSuper": "error",
+        "noNonoctalDecimalEscape": "error",
+        "noPrecisionLoss": "error",
+        "noSelfAssign": "error",
+        "noSetterReturn": "error",
+        "noSwitchDeclarations": "error",
+        "noUndeclaredVariables": "error",
+        "noUnreachable": "error",
+        "noUnreachableSuper": "error",
+        "noUnsafeFinally": "error",
+        "noUnsafeOptionalChaining": "error",
+        "noUnusedLabels": "error",
+        "noUnusedPrivateClassMembers": "error",
+        "noUnusedVariables": "error",
+        "useIsNan": "error",
+        "useValidForDirection": "error",
+        "useValidTypeof": "error",
+        "useYield": "error"
+      },
+      "nursery": { "useErrorCause": "error" },
+      "style": { "noNestedTernary": "off", "useBlockStatements": "off" },
+      "suspicious": {
+        "noAssignInExpressions": "error",
+        "noAsyncPromiseExecutor": "error",
+        "noCatchAssign": "error",
+        "noClassAssign": "error",
+        "noCompareNegZero": "error",
+        "noConstantBinaryExpressions": "error",
+        "noControlCharactersInRegex": "error",
+        "noDebugger": "error",
+        "noDuplicateCase": "error",
+        "noDuplicateClassMembers": "error",
+        "noDuplicateElseIf": "error",
+        "noDuplicateObjectKeys": "error",
+        "noDuplicateParameters": "error",
+        "noEmptyBlockStatements": "error",
+        "noFallthroughSwitchClause": "error",
+        "noFunctionAssign": "error",
+        "noGlobalAssign": "error",
+        "noImportAssign": "error",
+        "noIrregularWhitespace": "error",
+        "noMisleadingCharacterClass": "error",
+        "noPrototypeBuiltins": "error",
+        "noRedeclare": "error",
+        "noShadowRestrictedNames": "error",
+        "noSparseArray": "error",
+        "noUnassignedVariables": "error",
+        "noUnsafeNegation": "error",
+        "noUselessRegexBackrefs": "error",
+        "noWith": "error",
+        "useGetterReturn": "error"
+      }
+    },
+    "includes": [
+      "**",
+      "!**/node_modules/**",
+      "!apps/*/dist/**",
+      "!apps/*/coverage/**",
+      "!.mango/out/**",
+      "!apps/frontend/src/routeTree.gen.ts"
+    ]
+  },
+  "javascript": {
+    "formatter": {
+      "jsxQuoteStyle": "double",
+      "quoteProperties": "asNeeded",
+      "trailingCommas": "es5",
+      "semicolons": "always",
+      "arrowParentheses": "always",
+      "bracketSameLine": false,
+      "quoteStyle": "single",
+      "attributePosition": "auto",
+      "bracketSpacing": true
+    }
+  },
+  "html": { "formatter": { "indentScriptAndStyle": false, "selfCloseVoidElements": "always" } },
+  "overrides": [
+    { "includes": ["**/*.{ts,tsx}"], "javascript": { "globals": [] } },
+    {
+      "includes": ["**/*.{ts,tsx}"],
+      "linter": {
+        "rules": {
+          "complexity": { "noArguments": "error" },
+          "correctness": {
+            "noConstAssign": "off",
+            "noGlobalObjectCalls": "off",
+            "noInvalidBuiltinInstantiation": "off",
+            "noInvalidConstructorSuper": "off",
+            "noSetterReturn": "off",
+            "noUndeclaredVariables": "off",
+            "noUnreachable": "off",
+            "noUnreachableSuper": "off"
+          },
+          "nursery": { "useSpread": "error" },
+          "style": { "useConst": "error" },
+          "suspicious": {
+            "noClassAssign": "off",
+            "noDuplicateClassMembers": "off",
+            "noDuplicateObjectKeys": "off",
+            "noDuplicateParameters": "off",
+            "noFunctionAssign": "off",
+            "noImportAssign": "off",
+            "noRedeclare": "off",
+            "noUnsafeNegation": "off",
+            "noVar": "error",
+            "noWith": "off",
+            "useGetterReturn": "off"
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/*.{ts,tsx}"],
+      "linter": {
+        "rules": {
+          "complexity": {
+            "noBannedTypes": "error",
+            "noUselessThisAlias": "error",
+            "noUselessTypeConstraint": "error"
+          },
+          "correctness": { "noUnusedVariables": "error" },
+          "nursery": {
+            "noBaseToString": "error",
+            "noDuplicateEnumValues": "error",
+            "noFloatingPromises": "error",
+            "noForIn": "error",
+            "noImpliedEval": "error",
+            "noMisusedPromises": "error",
+            "noUnsafePlusOperands": "error"
+          },
+          "style": {
+            "noCommonJs": "error",
+            "noNamespace": "error",
+            "useArrayLiterals": "error",
+            "useAsConstAssertion": "error",
+            "useThrowOnlyError": "error"
+          },
+          "suspicious": {
+            "noExplicitAny": "error",
+            "noExtraNonNullAssertion": "error",
+            "noMisleadingInstantiator": "error",
+            "noNonNullAssertedOptionalChain": "error",
+            "noTsIgnore": "error",
+            "noUnsafeDeclarationMerging": "error",
+            "noUnusedExpressions": "off",
+            "useAwait": "error",
+            "useNamespaceKeyword": "error"
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/*.{ts,tsx}"],
+      "javascript": { "globals": [] },
+      "linter": {
+        "rules": {
+          "correctness": { "noUndeclaredVariables": "off", "noUnusedVariables": "error" },
+          "nursery": { "useExplicitReturnType": "off", "useExplicitType": "off" },
+          "style": {
+            "noNonNullAssertion": "error",
+            "useImportType": { "level": "error", "options": { "style": "inlineType" } }
+          },
+          "suspicious": {
+            "noConsole": { "level": "warn", "options": { "allow": ["warn", "error"] } },
+            "noEmptyBlockStatements": "error",
+            "noExplicitAny": "error"
+          }
+        }
+      }
+    },
+    {
+      "includes": ["apps/api/src/**/*.ts"],
+      "linter": { "rules": { "nursery": { "noUnnecessaryConditions": "warn" } } }
+    },
+    {
+      "includes": [
+        "apps/api/src/services/**/*.ts",
+        "apps/api/src/utils/**/*.ts",
+        "apps/api/src/lib/**/*.ts",
+        "apps/api/src/db/**/*.ts",
+        "apps/shared/src/**/*.ts"
+      ],
+      "linter": {
+        "rules": { "nursery": { "useExplicitReturnType": "error", "useExplicitType": "error" } }
+      }
+    },
+    {
+      "includes": ["scripts/**/*.ts"],
+      "linter": { "rules": { "suspicious": { "noConsole": "off" } } }
+    },
+    {
+      "includes": ["apps/frontend/**/*.{ts,tsx}"],
+      "linter": {
+        "rules": {
+          "correctness": {
+            "noChildrenProp": "warn",
+            "noNestedComponentDefinitions": "error",
+            "noVoidElementsWithChildren": "error",
+            "useExhaustiveDependencies": "error",
+            "useHookAtTopLevel": "error",
+            "useJsxKeyInIterable": "error"
+          },
+          "nursery": {
+            "noComponentHookFactories": "error",
+            "noJsxNamespace": "error",
+            "noScriptUrl": "warn",
+            "useReactAsyncServerFunction": "error"
+          },
+          "security": {
+            "noDangerouslySetInnerHtml": "warn",
+            "noDangerouslySetInnerHtmlWithChildren": "error"
+          },
+          "suspicious": { "noArrayIndexKey": "warn", "noReactForwardRef": "warn" }
+        }
+      }
+    }
+  ],
+  "assist": { "enabled": true, "actions": { "source": { "organizeImports": "on" } } }
+}
