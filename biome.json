@@ -33,7 +33,6 @@
       "nursery": { "useAwaitThenable": "off", "useErrorCause": "off" },
       "performance": { "noDelete": "warn" },
       "style": {
-        "noDescendingSpecificity": "off",
         "noNestedTernary": "off",
         "useBlockStatements": "off"
       },
