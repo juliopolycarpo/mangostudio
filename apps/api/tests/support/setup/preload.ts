@@ -17,6 +17,9 @@ import { tmpdir } from 'os';
 const testConfigPath = join(tmpdir(), `mangostudio-test-config-${process.pid}.toml`);
 if (existsSync(testConfigPath)) unlinkSync(testConfigPath);
 
+const testDbPath = join(tmpdir(), `mangostudio-test-${process.env.BUN_WORKER_ID || '0'}.sqlite`);
+if (existsSync(testDbPath)) unlinkSync(testDbPath);
+
 // 1. Set test config BEFORE any lazy singleton initializes
 loadConfigForTest({
   auth: {
@@ -24,7 +27,7 @@ loadConfigForTest({
     url: 'http://localhost:3001',
   },
   database: {
-    path: ':memory:',
+    path: testDbPath,
   },
   configFilePath: testConfigPath,
 });
