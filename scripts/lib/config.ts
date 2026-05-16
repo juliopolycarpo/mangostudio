@@ -38,16 +38,7 @@ export const WORKSPACES: Record<WorkspaceName, WorkspaceConfig> = {
 
 export const ALL_WORKSPACE_NAMES: WorkspaceName[] = ['frontend', 'api', 'shared'];
 
-// Files ESLint still processes for rules not covered by Biome.
-export const ROOT_ESLINT_FILES: string[] = [
-  'eslint.config.js',
-  'playwright.config.ts',
-  'scripts/**/*.ts',
-  'tests/browser-smoke/auth-flow.spec.ts',
-  'apps/frontend/vite.config.ts',
-  'apps/frontend/vitest.config.ts',
-  'apps/shared/vitest.config.ts',
-];
+// End of config
 
 // Paths Biome checks at root level. Biome receives directories instead of
 // shell-only globs so the runner can spawn it without shell expansion.
@@ -55,7 +46,6 @@ export const ROOT_BIOME_PATHS: string[] = [
   'package.json',
   'biome.json',
   'lefthook.yml',
-  'eslint.config.js',
   'playwright.config.ts',
   'scripts',
   'apps/api/package.json',

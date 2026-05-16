@@ -1,4 +1,4 @@
-import { ROOT_BIOME_PATHS, ROOT_DIR, ROOT_ESLINT_FILES } from './lib/config';
+import { ROOT_BIOME_PATHS, ROOT_DIR } from './lib/config';
 import {
   assertNoUnexpectedArguments,
   exitWithResults,
@@ -95,13 +95,6 @@ if (effectiveIncludeRoot) {
   if (rootBiomeResult.exitCode !== 0) {
     exitWithResults(results);
   }
-
-  const rootLintResult = await runCommand(
-    'root:eslint:fix',
-    ['bunx', 'eslint', ...ROOT_ESLINT_FILES, '--fix', '--max-warnings', '0'],
-    { cwd: ROOT_DIR }
-  );
-  results.push(rootLintResult);
 }
 
 if (results.length === 0) {

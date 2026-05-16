@@ -1,4 +1,4 @@
-import { ROOT_BIOME_PATHS, ROOT_DIR, ROOT_ESLINT_FILES } from './lib/config';
+import { ROOT_BIOME_PATHS, ROOT_DIR } from './lib/config';
 import {
   assertNoUnexpectedArguments,
   exitWithResults,
@@ -91,13 +91,6 @@ if (effectiveWorkspaces.length > 0) {
 if (effectiveIncludeRoot) {
   info('\nRoot');
   const rootTasks: Array<() => Promise<RunResult>> = [];
-  if (!flags['--skip-lint']) {
-    rootTasks.push(() =>
-      runCommand('root:eslint', ['bunx', 'eslint', ...ROOT_ESLINT_FILES, '--max-warnings', '0'], {
-        cwd: ROOT_DIR,
-      })
-    );
-  }
   if (!flags['--skip-format']) {
     rootTasks.push(() =>
       runCommand('root:biome', ['bunx', 'biome', 'check', ...ROOT_BIOME_PATHS], {

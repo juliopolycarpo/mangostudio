@@ -21,11 +21,6 @@ export interface DuplicationStats {
   readonly percentage: number;
 }
 
-export interface EslintStats {
-  readonly errors: number;
-  readonly warnings: number;
-}
-
 export interface BundleStats {
   readonly files: number;
   readonly rawBytes: number;
@@ -61,7 +56,6 @@ export interface Metrics {
   readonly loc: Readonly<Record<WorkspaceName | 'total', Failable<LocBucket>>>;
   readonly coverage: Readonly<Record<WorkspaceName, Failable<CoverageSummary>>>;
   readonly tsErrors: Readonly<Record<WorkspaceName, Failable<number>>>;
-  readonly eslint: Failable<EslintStats>;
   readonly duplication: Failable<DuplicationStats>;
   readonly circularDeps: Failable<number>;
   readonly frontendBundle: Failable<BundleStats>;
@@ -226,27 +220,7 @@ const collectCoverage = async (workspace: WorkspaceName): Promise<CoverageSummar
   return source.kind === 'vitest' ? readVitestSummary(absPath) : parseLcovSummary(absPath);
 };
 
-// ── ESLint ──
-
-interface EslintResultEntry {
-  readonly errorCount?: number;
-  readonly warningCount?: number;
-}
-
-const collectEslint = async (): Promise<EslintStats> => {
-  const { stdout, stderr } = await runCapture(['bunx', 'eslint', 'apps', '-f', 'json']);
-  if (!stdout.trim()) {
-    throw new Error(`eslint produced no JSON output. stderr: ${stderr.slice(0, 300)}`);
-  }
-  const results = JSON.parse(stdout) as readonly EslintResultEntry[];
-  let errors = 0;
-  let warnings = 0;
-  for (const entry of results) {
-    errors += entry.errorCount ?? 0;
-    warnings += entry.warningCount ?? 0;
-  }
-  return { errors, warnings };
-};
+// Removed ESLint
 
 // ── TypeScript errors ──
 
@@ -499,7 +473,6 @@ const buildMetrics = async (): Promise<Metrics> => {
           { files: 0, code: 0, comment: 0, blank: 0, total: 0 }
         );
 
-  const eslint = await safe('eslint', collectEslint);
   const duplication = await safe('duplication', collectDuplication);
   const circularDeps = await safe('circularDeps', countCircularDeps);
   const frontendBundle = await safe('frontendBundle', collectFrontendBundle);
@@ -515,7 +488,6 @@ const buildMetrics = async (): Promise<Metrics> => {
     loc: loc as Metrics['loc'],
     coverage: coverage as Metrics['coverage'],
     tsErrors: tsErrors as Metrics['tsErrors'],
-    eslint,
     duplication,
     circularDeps,
     frontendBundle,

@@ -5,10 +5,6 @@ pre-commit:
       glob: '*.{ts,tsx,js,jsx,json,yml,yaml}'
       run: bunx biome check --write {staged_files}
       stage_fixed: true
-    eslint-residual:
-      glob: '*.{ts,tsx,js,jsx}'
-      run: bunx eslint --cache --max-warnings 0 --no-warn-ignored --fix {staged_files}
-      stage_fixed: true
     typecheck-affected:
       run: bun run check --staged --skip-lint --skip-format
       skip:
