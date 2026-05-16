@@ -42,6 +42,7 @@ config.toml
 .roo/
 .aider*
 .claude/**
+!.claude/CLAUDE.md
 !.claude/settings.json
 !.claude/hooks/
 .claude/hooks/*
