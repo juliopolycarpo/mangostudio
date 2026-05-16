@@ -33,8 +33,8 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
-  lint:
-    name: Lint
+  check:
+    name: Check
     uses: ./.github/workflows/lint.yml
 
   test:
