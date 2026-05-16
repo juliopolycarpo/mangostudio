@@ -51,7 +51,7 @@ export function ReasoningSettingsSection({
 
       {/* Reasoning effort */}
       <div className="space-y-2">
-        <label className="text-sm text-on-surface">{s.reasoningEffort}</label>
+        <span className="text-sm text-on-surface">{s.reasoningEffort}</span>
         <div className="flex flex-wrap gap-2">
           {EFFORT_DISPLAY_ORDER.filter((e) => supportedSet.has(e)).map((effort) => (
             <button

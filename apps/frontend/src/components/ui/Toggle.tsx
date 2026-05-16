@@ -4,12 +4,22 @@ interface ToggleProps extends Omit<InputHTMLAttributes<HTMLInputElement>, 'type'
   label: string;
 }
 
-export function Toggle({ label, id, ...props }: ToggleProps) {
+export function Toggle({ label, id, checked, defaultChecked, ...props }: ToggleProps) {
   const inputId = id ?? label.toLowerCase().replace(/\s+/g, '-');
+  const isChecked = checked ?? defaultChecked ?? false;
 
   return (
     <label htmlFor={inputId} className="inline-flex items-center gap-3 cursor-pointer group">
-      <input id={inputId} type="checkbox" role="switch" className="sr-only peer" {...props} />
+      <input
+        id={inputId}
+        type="checkbox"
+        role="switch"
+        className="sr-only peer"
+        aria-checked={isChecked}
+        checked={checked}
+        defaultChecked={defaultChecked}
+        {...props}
+      />
       <span
         className="
           relative inline-block w-10 h-6 rounded-full
