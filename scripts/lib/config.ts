@@ -45,6 +45,7 @@ export const ALL_WORKSPACE_NAMES: WorkspaceName[] = ['frontend', 'api', 'shared'
 export const ROOT_BIOME_PATHS: string[] = [
   'package.json',
   'biome.json',
+  '.vscode',
   'lefthook.yml',
   'playwright.config.ts',
   'scripts',

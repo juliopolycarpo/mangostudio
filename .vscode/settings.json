@@ -5,6 +5,33 @@
     "source.fixAll.biome": "explicit",
     "source.organizeImports.biome": "explicit"
   },
+  "biome.requireConfiguration": true,
+  "biome.lsp.bin": {
+    "darwin-arm64": "./node_modules/@biomejs/cli-darwin-arm64/biome",
+    "darwin-x64": "./node_modules/@biomejs/cli-darwin-x64/biome",
+    "linux-arm64": "./node_modules/@biomejs/cli-linux-arm64/biome",
+    "linux-x64": "./node_modules/@biomejs/cli-linux-x64/biome",
+    "win32-arm64": "./node_modules/@biomejs/cli-win32-arm64/biome.exe",
+    "win32-x64": "./node_modules/@biomejs/cli-win32-x64/biome.exe"
+  },
+  "[typescript]": {
+    "editor.defaultFormatter": "biomejs.biome"
+  },
+  "[typescriptreact]": {
+    "editor.defaultFormatter": "biomejs.biome"
+  },
+  "[javascript]": {
+    "editor.defaultFormatter": "biomejs.biome"
+  },
+  "[javascriptreact]": {
+    "editor.defaultFormatter": "biomejs.biome"
+  },
+  "[json]": {
+    "editor.defaultFormatter": "biomejs.biome"
+  },
+  "[jsonc]": {
+    "editor.defaultFormatter": "biomejs.biome"
+  },
   "[markdown]": {
     "editor.defaultFormatter": "dprint.dprint"
   },
@@ -20,6 +47,20 @@
   "[dockerfile]": {
     "editor.defaultFormatter": "dprint.dprint"
   },
+  "js/ts.experimental.useTsgo": true,
   "typescript.tsdk": "node_modules/typescript/lib",
-  "typescript.enablePromptUseWorkspaceTsdk": true
+  "typescript.enablePromptUseWorkspaceTsdk": true,
+  "typescript.preferences.preferTypeOnlyAutoImports": true,
+  "typescript.updateImportsOnFileMove.enabled": "always",
+  "javascript.updateImportsOnFileMove.enabled": "always",
+  "typescript.disableAutomaticTypeAcquisition": true,
+  "files.watcherExclude": {
+    "**/.jscpd-out/**": true,
+    "**/.mango/out/**": true,
+    "**/.qa-gate/**": true,
+    "**/coverage/**": true,
+    "**/dist/**": true,
+    "**/playwright-report/**": true,
+    "**/test-results/**": true
+  }
 }
