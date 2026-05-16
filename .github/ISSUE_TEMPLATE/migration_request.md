@@ -1,9 +1,9 @@
 ---
 name: 🗄️ Migration Request
 about: Propose a database schema change
-title: 'migration: <short description>'
+title: "migration: <short description>"
 labels: migration
-assignees: ''
+assignees: ""
 ---
 
 ## 🗄️ Proposed schema change

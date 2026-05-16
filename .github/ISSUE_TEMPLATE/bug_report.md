@@ -1,9 +1,9 @@
 ---
 name: Bug report
 about: Report a reproducible problem in MangoStudio
-title: 'bug: <short description>'
+title: "bug: <short description>"
 labels: bug
-assignees: ''
+assignees: ""
 ---
 
 ## Describe the bug

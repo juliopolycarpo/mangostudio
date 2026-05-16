@@ -8,13 +8,13 @@ inputs:
   cache-key-suffix:
     description: Optional extra suffix appended to the cache key for partitioning.
     required: false
-    default: ''
+    default: ""
   cache-version:
     description: >
       Cache version string. Increment to immediately invalidate all Bun install
       caches across every job (use as a cache-poisoning rollback lever).
     required: false
-    default: 'v1'
+    default: "v1"
 outputs:
   cache-hit:
     description: "'true' if the Bun install cache was a full hit"

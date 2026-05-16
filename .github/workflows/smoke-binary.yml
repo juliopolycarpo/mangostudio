@@ -28,4 +28,4 @@ jobs:
         run: bun run scripts/test-build.ts
         env:
           PLATFORM: ${{ matrix.platform }}
-          API_PORT: '13001'
+          API_PORT: "13001"

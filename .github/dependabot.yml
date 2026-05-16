@@ -23,16 +23,16 @@ updates:
       eslint:
         patterns:
           - eslint*
-          - '@eslint/*'
+          - "@eslint/*"
           - typescript-eslint
       typescript:
         patterns:
           - typescript
-          - '@types/*'
+          - "@types/*"
       vitest:
         patterns:
           - vitest
-          - '@vitest/*'
+          - "@vitest/*"
       playwright:
         patterns:
-          - '@playwright/*'
+          - "@playwright/*"

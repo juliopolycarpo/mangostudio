@@ -6,23 +6,23 @@ on:
   push:
     branches:
       - main
-      - 'ci/**'
-      - 'feat/**'
-      - 'fix/**'
-      - 'chore/**'
-      - 'test/**'
-      - 'docs/**'
-      - 'refactor/**'
-      - 'migration/**'
-      - 'perf/**'
-      - 'security/**'
-      - 'release/**'
-      - 'hotfix/**'
-      - 'bugfix/**'
-      - 'build/**'
-      - 'style/**'
-      - 'copilot/**'
-      - 'claude/**'
+      - "ci/**"
+      - "feat/**"
+      - "fix/**"
+      - "chore/**"
+      - "test/**"
+      - "docs/**"
+      - "refactor/**"
+      - "migration/**"
+      - "perf/**"
+      - "security/**"
+      - "release/**"
+      - "hotfix/**"
+      - "bugfix/**"
+      - "build/**"
+      - "style/**"
+      - "copilot/**"
+      - "claude/**"
   workflow_dispatch:
 
 permissions:
