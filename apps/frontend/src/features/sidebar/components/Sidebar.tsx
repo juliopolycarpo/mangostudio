@@ -179,6 +179,12 @@ export function Sidebar({
           </div>
           {chats.map((chat) => {
             const ctx = contextCache?.get(chat.id);
+            const activateChat = () => {
+              if (editingChatId !== chat.id) {
+                onSelectChat(chat.id);
+                handleMobileNav('chat');
+              }
+            };
             return (
               // biome-ignore lint/a11y/useSemanticElements: cannot be a <button> because it contains nested interactive elements (edit/delete buttons, inline edit input)
               <div
@@ -186,19 +192,11 @@ export function Sidebar({
                 role="button"
                 tabIndex={0}
                 className={`group relative flex items-center gap-3 px-4 py-2.5 rounded-lg transition-all duration-300 w-full text-left truncate cursor-pointer ${currentPage === 'chat' && currentChatId === chat.id ? 'text-primary bg-surface-container-high' : 'text-on-surface/70 hover:bg-surface-container-high hover:text-on-surface'}`}
-                onClick={() => {
-                  if (editingChatId !== chat.id) {
-                    onSelectChat(chat.id);
-                    handleMobileNav('chat');
-                  }
-                }}
+                onClick={activateChat}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' || e.key === ' ') {
                     e.preventDefault();
-                    if (editingChatId !== chat.id) {
-                      onSelectChat(chat.id);
-                      handleMobileNav('chat');
-                    }
+                    activateChat();
                   }
                 }}
               >

@@ -24,13 +24,7 @@ export function ContextRing({ ratio, severity }: ContextRingProps) {
       className="relative flex items-center justify-center shrink-0"
       style={{ width: size, height: size }}
     >
-      <svg
-        width={size}
-        height={size}
-        className="-rotate-90"
-        role="img"
-        aria-label="Context usage indicator"
-      >
+      <svg width={size} height={size} className="-rotate-90">
         <title>Context usage indicator</title>
         <circle
           cx={size / 2}
