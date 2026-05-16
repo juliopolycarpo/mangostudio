@@ -11,7 +11,7 @@
     "dev": "bun run --watch src/index.ts",
     "start": "bun run src/index.ts",
     "build": "bun build src/index.ts --target=bun --outdir=dist",
-    "check": "biome check src tests && tsc --noEmit",
+    "check": "biome check src tests && tsgo --noEmit",
     "check:quick": "biome check src tests",
     "fix": "biome check --write src tests",
     "migrate": "bun run src/db/migrate.ts",

@@ -8,7 +8,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "check": "biome check src tests && tsc --noEmit",
+    "check": "biome check src tests && tsgo --noEmit",
     "check:quick": "biome check src tests",
     "fix": "biome check --write src tests",
     "test": "vitest run",

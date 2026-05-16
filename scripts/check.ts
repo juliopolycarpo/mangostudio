@@ -18,7 +18,7 @@ import {
 function printHelp(): never {
   console.log(`Usage: bun run check [workspace flags] [mode flags]
 
-Runs Biome, residual ESLint, and TypeScript typecheck.
+Runs Biome, residual ESLint, and TypeScript typecheck with tsgo.
 Default workspace selection: --all
 
 Workspace flags:
@@ -32,7 +32,7 @@ Mode flags:
   --staged       Scope to workspaces touched by staged files
   --changed      Scope to workspaces changed vs origin/main
   --base <ref>   Base ref for --changed (default: merge-base HEAD origin/main)
-  --quick        Run check:quick (lint+format only, skip tsc)
+  --quick        Run check:quick (lint+format only, skip tsgo)
   --skip-lint    Skip residual ESLint
   --skip-format  Skip Biome
   --help`);

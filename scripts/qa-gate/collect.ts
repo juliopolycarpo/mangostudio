@@ -230,7 +230,7 @@ const countTsErrors = async (workspace: WorkspaceName): Promise<number> => {
   const cfg = `apps/${workspace}/tsconfig.json`;
   const { stdout, stderr } = await runCapture([
     'bunx',
-    'tsc',
+    'tsgo',
     '-p',
     cfg,
     '--noEmit',
