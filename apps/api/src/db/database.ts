@@ -3,10 +3,10 @@
  */
 
 import { Database as SQLiteDatabase } from 'bun:sqlite';
-import { mkdirSync } from 'fs';
+import { mkdirSync } from 'node:fs';
+import { dirname } from 'node:path';
 import { Kysely } from 'kysely';
 import { BunSqliteDialect } from 'kysely-bun-sqlite/dist/index.js';
-import { dirname } from 'path';
 import { getConfig } from '../lib/config';
 import type { Database } from './types';
 

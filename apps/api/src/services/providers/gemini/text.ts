@@ -58,7 +58,7 @@ export async function generateGeminiText(
   ];
 
   const config: Record<string, unknown> = {};
-  if (systemPrompt && systemPrompt.trim()) {
+  if (systemPrompt?.trim()) {
     config.systemInstruction = systemPrompt;
   }
 

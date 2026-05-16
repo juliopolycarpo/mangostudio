@@ -192,8 +192,8 @@ describe('POST /chats', () => {
     expect(response.status).toBe(200);
     const body = (await response.json()) as Record<string, unknown>;
     expect(body).toHaveProperty('id');
-    expect(typeof body['id']).toBe('string');
-    expect((body['id'] as string).length).toBeGreaterThan(0);
+    expect(typeof body.id).toBe('string');
+    expect((body.id as string).length).toBeGreaterThan(0);
   });
 
   it('does not accept client-supplied id in body', async () => {
@@ -213,8 +213,8 @@ describe('POST /chats', () => {
     expect(response.status).toBe(200);
     const body = (await response.json()) as Record<string, unknown>;
     expect(body).toHaveProperty('id');
-    expect(typeof body['id']).toBe('string');
-    expect(body['id']).not.toBe(clientId);
+    expect(typeof body.id).toBe('string');
+    expect(body.id).not.toBe(clientId);
   });
 });
 

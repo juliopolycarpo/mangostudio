@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { existsSync, readdirSync, rmSync } from 'fs';
+import { existsSync, readdirSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
 import type OpenAI from 'openai';
-import { join } from 'path';
 import { loadConfigForTest, resetConfig } from '../../../../src/lib/config';
 
 const TMP_DIR = join('/tmp', `mango-provider-image-test-${process.pid}`);

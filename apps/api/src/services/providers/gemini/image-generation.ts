@@ -2,8 +2,8 @@
  * Gemini image generation service.
  */
 
-import { existsSync, readFileSync } from 'fs';
-import { join } from 'path';
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { getConfig } from '../../../lib/config';
 import {
   normalizeGeneratedImageMimeType,
@@ -91,7 +91,7 @@ export async function generateGeminiImage(
   prompt: string,
   systemPrompt?: string,
   referenceImageUrl?: string,
-  imageSize: string = '1K',
+  imageSize = '1K',
   modelName?: string,
   client?: ReturnType<typeof createGeminiClient>
 ): Promise<string> {
@@ -109,7 +109,7 @@ export async function generateGeminiImage(
 
   if (referenceImageUrl) {
     let base64Data: string;
-    let mimeType: string = 'image/png';
+    let mimeType = 'image/png';
 
     if (referenceImageUrl.startsWith('/uploads/')) {
       const filePath = join(uploadsDir, referenceImageUrl.replace('/uploads/', ''));
@@ -142,7 +142,7 @@ export async function generateGeminiImage(
 
   const config: Record<string, unknown> = {};
 
-  if (systemPrompt && systemPrompt.trim()) {
+  if (systemPrompt?.trim()) {
     config.systemInstruction = systemPrompt;
   }
 

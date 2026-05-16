@@ -19,19 +19,19 @@
       rel="stylesheet"
     />
     <script>
-      // Prevent flash of wrong theme (FOWT) — runs before React hydrates
-      (function () {
-        try {
-          var stored = JSON.parse(localStorage.getItem('mango-studio-theme') || '{}');
-          var theme = stored.appTheme || 'dark';
-          if (theme === 'system') {
-            theme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-          }
-          document.documentElement.dataset.theme = theme;
-        } catch (e) {
-          document.documentElement.dataset.theme = 'dark';
+    // Prevent flash of wrong theme (FOWT) — runs before React hydrates
+    (function () {
+      try {
+        var stored = JSON.parse(localStorage.getItem('mango-studio-theme') || '{}');
+        var theme = stored.appTheme || 'dark';
+        if (theme === 'system') {
+          theme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
         }
-      })();
+        document.documentElement.dataset.theme = theme;
+      } catch (_e) {
+        document.documentElement.dataset.theme = 'dark';
+      }
+    })();
     </script>
   </head>
   <body>

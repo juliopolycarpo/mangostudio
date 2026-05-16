@@ -1,11 +1,11 @@
+import { closeSync, existsSync, lstatSync, openSync, readFileSync, readSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { extname, isAbsolute, join } from 'node:path';
 import type {
   FixedRuleFileKind,
   RuleFileDescriptor,
   RuleFilePreviewResponse,
 } from '@mangostudio/shared/prompt-rules';
-import { closeSync, existsSync, lstatSync, openSync, readFileSync, readSync } from 'fs';
-import { homedir } from 'os';
-import { extname, isAbsolute, join } from 'path';
 
 const MAX_CONTENT_BYTES = 256 * 1024;
 

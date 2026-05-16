@@ -43,7 +43,7 @@ export function serializeAgentMarkdown(profile: AgentProfile): string {
 }
 
 function serializeStringList(key: string, values: ReadonlyArray<string>): string[] {
-  return [key + ':', ...values.map((value) => `  - ${quoteYamlScalar(value)}`)];
+  return [`${key}:`, ...values.map((value) => `  - ${quoteYamlScalar(value)}`)];
 }
 
 function serializeMetadataValue(value: string | number | boolean): string {

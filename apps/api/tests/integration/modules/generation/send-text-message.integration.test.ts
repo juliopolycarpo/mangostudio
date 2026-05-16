@@ -1,6 +1,6 @@
 import { afterEach, beforeAll, describe, expect, it } from 'bun:test';
-import { mkdirSync, rmSync, writeFileSync } from 'fs';
-import { dirname, join } from 'path';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { getDb } from '../../../../src/db/database';
 import { getConfig } from '../../../../src/lib/config';
 import { createChat } from '../../../../src/modules/chats/infrastructure/chat-repository';

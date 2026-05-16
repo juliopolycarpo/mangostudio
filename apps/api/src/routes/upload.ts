@@ -3,12 +3,12 @@
  * Includes robust file validation using magic bytes detection.
  */
 
+import { mkdirSync } from 'node:fs';
+import { extname, join } from 'node:path';
 import { UploadChatAttachmentResponseSchema } from '@mangostudio/shared/chat';
 import { ApiErrorResponseSchema, ERROR_CODES } from '@mangostudio/shared/errors';
 import { type Elysia, t } from 'elysia';
 import { fileTypeFromBuffer } from 'file-type';
-import { mkdirSync } from 'fs';
-import { extname, join } from 'path';
 import { getDb } from '../db/database';
 import { getConfig } from '../lib/config';
 import {

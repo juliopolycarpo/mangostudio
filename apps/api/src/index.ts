@@ -3,10 +3,10 @@
  * Elysia-based server running on Bun with Kysely SQLite persistence.
  */
 
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { staticPlugin } from '@elysiajs/static';
-import { existsSync } from 'fs';
 import { Migrator } from 'kysely/migration';
-import { join } from 'path';
 import { app } from './app';
 import { closeDb, getDb } from './db/database';
 import { allMigrations } from './db/migrations';

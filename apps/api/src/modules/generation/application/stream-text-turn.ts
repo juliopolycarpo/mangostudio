@@ -1662,10 +1662,7 @@ function classifyMissingResponseScenario(
 
 function computeBackoffMs(attempt: number): number {
   const exponent = Math.max(0, attempt - 2);
-  const base = Math.min(
-    DELEGATION_BACKOFF_MAX_MS,
-    DELEGATION_BACKOFF_BASE_MS * Math.pow(2, exponent)
-  );
+  const base = Math.min(DELEGATION_BACKOFF_MAX_MS, DELEGATION_BACKOFF_BASE_MS * 2 ** exponent);
   const jitter = 0.2 * base;
   const randomized = base + (Math.random() * 2 - 1) * jitter;
   return Math.max(0, Math.round(Math.min(DELEGATION_BACKOFF_MAX_MS, randomized)));

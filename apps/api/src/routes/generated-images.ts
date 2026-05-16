@@ -1,5 +1,5 @@
+import { extname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { Elysia } from 'elysia';
-import { extname, isAbsolute, relative, resolve, sep } from 'path';
 
 const GENERATED_IMAGE_CACHE_CONTROL = 'public, max-age=31536000, immutable';
 

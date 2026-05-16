@@ -1,8 +1,8 @@
 import { afterEach, beforeAll, describe, expect, it } from 'bun:test';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { UploadChatAttachmentResponseSchema } from '@mangostudio/shared/chat';
 import { Value } from '@sinclair/typebox/value';
-import { existsSync } from 'fs';
-import { join } from 'path';
 import { getDb } from '../../../src/db/database';
 import { getConfig } from '../../../src/lib/config';
 import { uploadRoutes } from '../../../src/routes/upload';
@@ -193,8 +193,8 @@ describe('POST /upload', () => {
     expect(response.status).toBe(200);
     const body = (await response.json()) as Record<string, unknown>;
     expect(body).toHaveProperty('imageUrl');
-    expect(typeof body['imageUrl']).toBe('string');
-    expect((body['imageUrl'] as string).startsWith('/uploads/')).toBe(true);
+    expect(typeof body.imageUrl).toBe('string');
+    expect((body.imageUrl as string).startsWith('/uploads/')).toBe(true);
   });
 
   it('rejects uploads with invalid file content (non-image bytes)', async () => {

@@ -8,9 +8,9 @@
  * 4. Hardcoded defaults
  */
 
-import { existsSync, readFileSync } from 'fs';
-import { homedir } from 'os';
-import { isAbsolute, join } from 'path';
+import { existsSync, readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { isAbsolute, join } from 'node:path';
 import { parse as parseToml } from 'smol-toml';
 import { isStandaloneExecutable } from './runtime-paths';
 

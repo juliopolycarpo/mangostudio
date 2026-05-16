@@ -16,8 +16,8 @@
  *   API_PORT      - Port for the smoke server (default: 13001).
  */
 
-import { existsSync } from 'fs';
-import { join } from 'path';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 
 // ---------------------------------------------------------------------------
 // Config

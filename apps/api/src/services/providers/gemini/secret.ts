@@ -3,11 +3,11 @@
  * Uses the shared createProviderSecretService factory for key resolution.
  */
 
+import { randomUUID } from 'node:crypto';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import type { AddConnectorBody, Connector, ConnectorStatus } from '@mangostudio/shared';
 import type { SecretMetadataRow } from '@mangostudio/shared/types';
-import { randomUUID } from 'crypto';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
-import { dirname, join } from 'path';
 import { stringify as stringifyToml } from 'smol-toml';
 import { getConfig, getMangoDir } from '../../../lib/config';
 import { readTomlStringSections } from '../../../lib/toml';
@@ -56,9 +56,7 @@ export class GeminiApiKeyMissingError extends Error {
 
 /** Error thrown when Gemini rejects a candidate API key. */
 export class InvalidGeminiApiKeyError extends Error {
-  constructor(
-    message: string = 'Gemini rejected the API key. Verify that it is valid and enabled.'
-  ) {
+  constructor(message = 'Gemini rejected the API key. Verify that it is valid and enabled.') {
     super(message);
     this.name = 'InvalidGeminiApiKeyError';
   }
@@ -66,7 +64,7 @@ export class InvalidGeminiApiKeyError extends Error {
 
 /** Error thrown when Gemini cannot be reached for validation. */
 export class GeminiValidationUnavailableError extends Error {
-  constructor(message: string = 'Unable to validate the Gemini API key right now. Try again.') {
+  constructor(message = 'Unable to validate the Gemini API key right now. Try again.') {
     super(message);
     this.name = 'GeminiValidationUnavailableError';
   }

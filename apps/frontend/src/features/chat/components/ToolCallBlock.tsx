@@ -49,7 +49,7 @@ function abbreviatePath(rawPath: unknown): string | null {
   if (typeof rawPath !== 'string' || rawPath.trim().length === 0) return null;
   let p = rawPath.trim();
   const homeMatch = p.match(/^\/home\/[^/]+/);
-  if (homeMatch) p = '~' + p.slice(homeMatch[0].length);
+  if (homeMatch) p = `~${p.slice(homeMatch[0].length)}`;
   return p;
 }
 

@@ -48,7 +48,8 @@ export async function generateOpenAIImage(
         mimeType: 'image/png',
       }),
     };
-  } else if (data?.url) {
+  }
+  if (data?.url) {
     const imageResponse = await fetch(data.url);
     if (!imageResponse.ok) {
       throw new Error('Failed to download generated image from OpenAI CDN.');
@@ -63,7 +64,6 @@ export async function generateOpenAIImage(
         mimeType,
       }),
     };
-  } else {
-    throw new Error(`No image data returned from OpenAI API for model "${req.modelName}".`);
   }
+  throw new Error(`No image data returned from OpenAI API for model "${req.modelName}".`);
 }

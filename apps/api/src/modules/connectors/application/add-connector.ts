@@ -2,9 +2,9 @@
  * Use case: add a new connector for any provider.
  */
 
+import { randomUUID } from 'node:crypto';
 import type { AddConnectorBody, Connector } from '@mangostudio/shared';
 import { ERROR_CODES } from '@mangostudio/shared/errors';
-import { randomUUID } from 'crypto';
 import { invalidateUnifiedCatalog } from '../../../services/providers/catalog';
 import { invalidateProviderModelCache } from '../../../services/providers/core/provider-registry';
 import { maskSecret } from '../../../utils/secrets';

@@ -1,4 +1,4 @@
-import { execSync } from 'child_process';
+import { execSync } from 'node:child_process';
 import { ALL_WORKSPACE_NAMES, ROOT_DIR, WORKSPACES, type WorkspaceName } from './config';
 
 const SCRIPT_START = performance.now();

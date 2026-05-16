@@ -4,8 +4,8 @@
  * so other providers can reuse it with minimal configuration.
  */
 
+import { existsSync } from 'node:fs';
 import type { ProviderType, SecretMetadataRow } from '@mangostudio/shared/types';
-import { existsSync } from 'fs';
 import { getConfig } from '../../../lib/config';
 import { readTomlStringSections } from '../../../lib/toml';
 import { parseStringArray } from '../../../utils/json';
@@ -197,7 +197,7 @@ export function createProviderSecretService(
         syncableEntries.set(name, { apiKey: key, existing });
 
         if (!existing) {
-          const { randomUUID } = await import('crypto');
+          const { randomUUID } = await import('node:crypto');
           await upsertMeta({
             id: randomUUID(),
             name,

@@ -11,8 +11,8 @@
  * presence of .mango/config.toml in the developer's environment.
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { mkdirSync, rmSync, writeFileSync } from 'fs';
-import { join, resolve } from 'path';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 import { loadConfig, resetConfig } from '../../../src/lib/config';
 
 const TMP_DIR = join('/tmp', `mango-config-test-${process.pid}`);
