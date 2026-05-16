@@ -40,7 +40,7 @@ describe('config precedence', () => {
   beforeEach(() => {
     mkdirSync(TMP_DIR, { recursive: true });
     savedEnv = saveEnv();
-    WATCHED_ENV_KEYS.forEach((k) => delete process.env[k]);
+    for (const k of WATCHED_ENV_KEYS) delete process.env[k];
     resetConfig();
   });
 
@@ -122,7 +122,7 @@ describe('corsOrigins includes server origin for same-origin deployments', () =>
   beforeEach(() => {
     mkdirSync(TMP_DIR, { recursive: true });
     savedEnv = saveEnv();
-    WATCHED_ENV_KEYS.forEach((k) => delete process.env[k]);
+    for (const k of WATCHED_ENV_KEYS) delete process.env[k];
     resetConfig();
   });
 

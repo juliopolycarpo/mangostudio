@@ -1827,7 +1827,7 @@ describe('POST /respond/stream', () => {
           discoveredTextModels: [],
           discoveredImageModels: [],
         }),
-      clearGeminiModelCatalog: () => undefined as void,
+      clearGeminiModelCatalog: () => undefined as undefined,
     }));
 
     await mock.module('../../../src/services/gemini', () => ({
@@ -1843,7 +1843,7 @@ describe('POST /respond/stream', () => {
         }),
       getDefaultTextModel: () => null,
       hasTextModel: () => false,
-      clearGeminiModelCatalog: () => undefined as void,
+      clearGeminiModelCatalog: () => undefined as undefined,
     }));
 
     // Mock DB to return a valid chat owned by our test user

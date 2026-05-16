@@ -221,7 +221,7 @@ async function smokeTest(): Promise<void> {
     }
   } finally {
     proc.kill();
-    await proc.exited.catch(() => undefined as void);
+    await proc.exited.catch(() => undefined as undefined);
     await Bun.$`rm -rf ${tmpHome}`.quiet();
   }
 }

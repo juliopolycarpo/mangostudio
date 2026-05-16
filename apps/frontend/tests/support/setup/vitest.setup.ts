@@ -39,8 +39,8 @@ globalThis.matchMedia =
     onchange: null,
     addListener: () => undefined,
     removeListener: () => undefined,
-    addEventListener: () => undefined as void,
-    removeEventListener: () => undefined as void,
+    addEventListener: () => undefined as undefined,
+    removeEventListener: () => undefined as undefined,
     dispatchEvent: () => false,
   }));
 
