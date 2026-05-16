@@ -80,6 +80,28 @@ describe('ChatFeed — MessageParts interleaved rendering', () => {
     expect(thoughtProcessButtons).toHaveLength(2);
   });
 
+  it('normalizes token-level interleaving into one thinking block and one text block', () => {
+    const parts: MessagePart[] = [
+      { type: 'thinking', text: 'The ' },
+      { type: 'text', text: 'Let ' },
+      { type: 'thinking', text: 'user ' },
+      { type: 'text', text: 'me ' },
+      { type: 'thinking', text: 'wants me' },
+      { type: 'text', text: 'first explore' },
+    ];
+    const msg = makeMessage({ parts });
+
+    const { container } = render(<ChatFeed chatId="chat-1" messages={[msg]} />);
+
+    const thinkingButtons = container.querySelectorAll('button');
+    const thoughtProcessButtons = Array.from(thinkingButtons).filter((btn) =>
+      btn.textContent?.includes('Thought process')
+    );
+
+    expect(thoughtProcessButtons).toHaveLength(1);
+    expect(screen.getByText('Let me first explore')).toBeInTheDocument();
+  });
+
   it('renders tool call block with pending state when no matching result', () => {
     const parts: MessagePart[] = [
       { type: 'tool_call', toolCallId: 'c2', name: 'calculator', args: { expr: '2+2' } },
@@ -314,5 +336,82 @@ describe('ChatFeed — generated_image part rendering', () => {
     // Image should appear in the document, not inside a collapsed thinking block
     expect(screen.getByAltText('Generated image')).toBeInTheDocument();
     expect(screen.getByText('Here is your image.')).toBeInTheDocument();
+  });
+
+  it('renders and expands subagent trace parts', () => {
+    const parts: MessagePart[] = [
+      {
+        type: 'subagent_trace',
+        toolCallId: 'delegate-1',
+        agentId: 'explore',
+        agentName: 'Explore',
+        status: 'completed',
+        summary: 'Found the relevant files.',
+        toolCallCount: 1,
+        lastMessage: 'Found the relevant files.',
+        messages: [{ role: 'assistant', text: 'Found the relevant files.' }],
+        tools: [{ callId: 'tool-1', name: 'read_file' }],
+      },
+      { type: 'text', text: 'I used Explore.' },
+    ];
+    const msg = makeMessage({ parts });
+
+    render(<ChatFeed chatId="chat-1" messages={[msg]} />);
+
+    expect(screen.getByText('Explore')).toBeInTheDocument();
+    expect(screen.getByText('Subagent trace')).toBeInTheDocument();
+    expect(screen.getByText('I used Explore.')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText('Explore'));
+
+    expect(screen.getByText('Messages')).toBeInTheDocument();
+    expect(screen.getByText('Tool calls')).toBeInTheDocument();
+    expect(screen.getByText('read_file')).toBeInTheDocument();
+  });
+
+  it('keeps subagent retry lifecycle inside the trace card', () => {
+    const parts: MessagePart[] = [
+      {
+        type: 'subagent_trace',
+        toolCallId: 'delegate-1',
+        agentId: 'explore',
+        agentName: 'Explore',
+        status: 'completed',
+        summary: 'Found the relevant files.',
+        toolCallCount: 1,
+        lastMessage: 'Found the relevant files.',
+        messages: [{ role: 'assistant', text: 'Found the relevant files.' }],
+        tools: [{ callId: 'tool-1', name: 'read_file' }],
+        events: [
+          {
+            event: 'response_attempt',
+            attempt: 1,
+            detail: 'call=delegate-1 attempt=1',
+          },
+          {
+            event: 'response_attempt',
+            attempt: 2,
+            detail: 'call=delegate-1 attempt=2',
+          },
+          {
+            event: 'delegation_completed',
+            detail: 'call=delegate-1 target=explore status=completed durationMs=1200',
+          },
+        ],
+      },
+    ];
+    const msg = makeMessage({ parts });
+
+    render(<ChatFeed chatId="chat-1" messages={[msg]} />);
+
+    expect(screen.queryByText(/call=delegate-1/)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByText('Explore'));
+
+    expect(screen.getByText('Lifecycle')).toBeInTheDocument();
+    expect(screen.getByText('Attempt 1')).toBeInTheDocument();
+    expect(screen.getByText('Attempt 2')).toBeInTheDocument();
+    expect(screen.getByText('Delegation completed')).toBeInTheDocument();
+    expect(screen.queryByText(/call=delegate-1/)).not.toBeInTheDocument();
   });
 });

@@ -5,10 +5,11 @@ import type {
   BuiltInAgentId,
   UserAgentId,
 } from '@mangostudio/shared/agents';
+import { MAX_TOOL_ITERATIONS_MAX, MAX_TOOL_ITERATIONS_MIN } from '@mangostudio/shared/app-settings';
 import { assertAgentProfile, isAgentId, isReasoningEffort } from '@mangostudio/shared/agents';
 
-const BUILT_IN_AGENT_IDS = ['chat', 'default'] as const;
-const RESERVED_AGENT_SLUGS = ['chat', 'default', 'agents', 'claude'] as const;
+const BUILT_IN_AGENT_IDS = ['chat', 'default', 'explore'] as const;
+const RESERVED_AGENT_SLUGS = ['chat', 'default', 'explore', 'agents', 'claude'] as const;
 const SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 export class AgentSettingsError extends Error {
@@ -139,7 +140,7 @@ function normalizeAgentIds(value: ReadonlyArray<unknown>): ReadonlyArray<AgentId
 }
 
 function clampToolIterations(value: number): number {
-  return Math.min(25, Math.max(1, Math.round(value)));
+  return Math.min(MAX_TOOL_ITERATIONS_MAX, Math.max(MAX_TOOL_ITERATIONS_MIN, Math.round(value)));
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'bun:test';
 import {
+  MAX_TOOL_ITERATIONS_DEFAULT,
+  MAX_TOOL_ITERATIONS_MAX,
+} from '@mangostudio/shared/app-settings';
+import {
   buildProviderSettingsDescriptor,
   mergeProviderRuntimeSettings,
   normalizeProviderRuntimeSettings,
@@ -41,5 +45,14 @@ describe('provider settings policy', () => {
 
     expect(settings.reasoningEffort).toBe('high');
     expect(settings.maxToolIterations).toBe(2);
+  });
+
+  it('defaults and clamps tool iteration limits for frontier-scale runs', () => {
+    expect(normalizeProviderRuntimeSettings('openai', {}).maxToolIterations).toBe(
+      MAX_TOOL_ITERATIONS_DEFAULT
+    );
+    expect(
+      normalizeProviderRuntimeSettings('openai', { maxToolIterations: 2_000 }).maxToolIterations
+    ).toBe(MAX_TOOL_ITERATIONS_MAX);
   });
 });

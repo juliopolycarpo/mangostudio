@@ -5,6 +5,11 @@ export type {
   SSESystemEvent,
   SSEContinuationTransitionEvent,
   SSEErrorEvent,
+  SSESubagentStartedEvent,
+  SSESubagentTextEvent,
+  SSESubagentToolCallStartedEvent,
+  SSESubagentCompletedEvent,
+  SSESubagentFailedEvent,
   StreamChunk,
 } from './events';
 export {

@@ -24,7 +24,9 @@ function isNearBottom(element: HTMLElement): boolean {
 }
 
 function extractRawMarkdown(msg: Message): string {
-  const parts: MessagePart[] = msg.parts ?? (msg.text ? [{ type: 'text', text: msg.text }] : []);
+  const parts = normalizeMessageParts(
+    msg.parts ?? (msg.text ? [{ type: 'text', text: msg.text }] : [])
+  );
   return parts
     .filter((p): p is Extract<MessagePart, { type: 'text' }> => p.type === 'text')
     .map((p) => p.text)
@@ -32,7 +34,40 @@ function extractRawMarkdown(msg: Message): string {
 }
 
 function messagePartsFromMessage(msg: Message): MessagePart[] {
-  return msg.parts ?? (msg.text ? [{ type: 'text', text: msg.text }] : []);
+  return normalizeMessageParts(msg.parts ?? (msg.text ? [{ type: 'text', text: msg.text }] : []));
+}
+
+function normalizeMessageParts(parts: MessagePart[]): MessagePart[] {
+  const normalized: MessagePart[] = [];
+  let thinkingRun = '';
+  let textRun = '';
+
+  const flushRuns = () => {
+    if (thinkingRun) {
+      normalized.push({ type: 'thinking', text: thinkingRun });
+      thinkingRun = '';
+    }
+    if (textRun) {
+      normalized.push({ type: 'text', text: textRun });
+      textRun = '';
+    }
+  };
+
+  for (const part of parts) {
+    if (part.type === 'thinking') {
+      thinkingRun += part.text;
+      continue;
+    }
+    if (part.type === 'text') {
+      textRun += part.text;
+      continue;
+    }
+    flushRuns();
+    normalized.push(part);
+  }
+
+  flushRuns();
+  return normalized;
 }
 
 function StreamingMessageBody({

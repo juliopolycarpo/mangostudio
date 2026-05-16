@@ -48,6 +48,69 @@ export interface GeneratedImagePart {
   generationTime?: string;
 }
 
+export interface SubagentTraceMessage {
+  role: 'assistant' | 'system';
+  text: string;
+}
+
+export interface SubagentToolTrace {
+  callId: string;
+  name: string;
+  isError?: boolean;
+}
+
+export type SubagentTraceEventName =
+  | 'delegation_started'
+  | 'delegation_completed'
+  | 'delegation_failed'
+  | 'response_attempt'
+  | 'response_recovered'
+  | 'response_timeout'
+  | 'response_fallback';
+
+export interface SubagentTraceEvent {
+  event: SubagentTraceEventName;
+  attempt?: number;
+  detail?: string;
+}
+
+/**
+ * Merges two trace event lists, de-duping by (event, attempt, detail).
+ * Used by both the API turn runner (cumulative trace per attempt) and the
+ * frontend stream consumer (incoming SSE events appended to optimistic state).
+ */
+export function mergeSubagentTraceEvents(
+  current: ReadonlyArray<SubagentTraceEvent> | undefined,
+  next: ReadonlyArray<SubagentTraceEvent> | undefined
+): ReadonlyArray<SubagentTraceEvent> | undefined {
+  if (!current?.length) return next;
+  if (!next?.length) return current;
+  const merged = [...current];
+  for (const event of next) {
+    const exists = merged.some(
+      (item) =>
+        item.event === event.event && item.attempt === event.attempt && item.detail === event.detail
+    );
+    if (!exists) merged.push(event);
+  }
+  return merged;
+}
+
+export interface SubagentTracePart {
+  type: 'subagent_trace';
+  toolCallId: string;
+  agentId: string;
+  agentName: string;
+  status: 'running' | 'completed' | 'failed' | 'aborted' | 'timeout';
+  summary: string;
+  toolCallCount: number;
+  lastMessage?: string;
+  messages: ReadonlyArray<SubagentTraceMessage>;
+  tools: ReadonlyArray<SubagentToolTrace>;
+  events?: ReadonlyArray<SubagentTraceEvent>;
+  error?: string;
+}
+
 /** Discriminated union of all content block types in an assistant message. */
 export type MessagePart =
   | { type: 'text'; text: string }
@@ -55,6 +118,7 @@ export type MessagePart =
   | { type: 'tool_call'; toolCallId: string; name: string; args: Record<string, unknown> }
   | { type: 'tool_result'; toolCallId: string; content: string; isError?: boolean }
   | GeneratedImagePart
+  | SubagentTracePart
   | { type: 'error'; text: string }
   | { type: 'system_event'; event: string; detail?: string }
   | {

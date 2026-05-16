@@ -1,7 +1,12 @@
 import { Type, type Static } from '@sinclair/typebox';
+import { MAX_TOOL_ITERATIONS_MAX, MAX_TOOL_ITERATIONS_MIN } from '../agentic-limits';
 import { ReasoningEffortSchema } from '../provider-settings';
 
-export const BuiltInAgentIdSchema = Type.Union([Type.Literal('chat'), Type.Literal('default')]);
+export const BuiltInAgentIdSchema = Type.Union([
+  Type.Literal('chat'),
+  Type.Literal('default'),
+  Type.Literal('explore'),
+]);
 
 export const UserAgentIdSchema = Type.String({ pattern: '^user:[a-z0-9]+(?:-[a-z0-9]+)*$' });
 
@@ -38,7 +43,9 @@ export const AgentProfileSchema = Type.Object({
   model: Type.Optional(Type.String({ minLength: 1 })),
   thinkingEnabled: Type.Optional(Type.Boolean()),
   reasoningEffort: Type.Optional(ReasoningEffortSchema),
-  maxToolIterations: Type.Optional(Type.Integer({ minimum: 1, maximum: 25 })),
+  maxToolIterations: Type.Optional(
+    Type.Integer({ minimum: MAX_TOOL_ITERATIONS_MIN, maximum: MAX_TOOL_ITERATIONS_MAX })
+  ),
   toolNames: Type.Array(Type.String({ minLength: 1 })),
   toolsEnabled: Type.Boolean(),
   subagentIds: Type.Array(AgentIdSchema),
@@ -57,7 +64,9 @@ export const AgentProfileUpsertBodySchema = Type.Object({
   model: Type.Optional(Type.String({ minLength: 1 })),
   thinkingEnabled: Type.Optional(Type.Boolean()),
   reasoningEffort: Type.Optional(ReasoningEffortSchema),
-  maxToolIterations: Type.Optional(Type.Integer({ minimum: 1, maximum: 25 })),
+  maxToolIterations: Type.Optional(
+    Type.Integer({ minimum: MAX_TOOL_ITERATIONS_MIN, maximum: MAX_TOOL_ITERATIONS_MAX })
+  ),
   toolNames: Type.Array(Type.String({ minLength: 1 })),
   toolsEnabled: Type.Boolean(),
   subagentIds: Type.Array(AgentIdSchema),

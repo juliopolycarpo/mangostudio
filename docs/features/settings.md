@@ -22,7 +22,7 @@ Controls global preferences that apply across all providers and tools.
 | `globalImageQuality` | `'512px' \| '1K' \| '2K' \| '4K'` | `'1K'`                 |
 | `thinkingEnabled`    | `boolean`                         | `true`                 |
 | `reasoningEffort`    | `ReasoningEffort`                 | `'medium'`             |
-| `maxToolIterations`  | `number` (1–25)                   | `10`                   |
+| `maxToolIterations`  | `number` (1–1000)                 | `1000`                 |
 | `contextSettings`    | `ContextSettings`                 | Compaction defaults    |
 
 **API:**

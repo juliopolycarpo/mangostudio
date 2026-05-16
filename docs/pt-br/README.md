@@ -10,7 +10,7 @@ Estúdio de geração de imagens e chat alimentado por IA com suporte a modelos 
 
 ## Pré-requisitos
 
-- [Bun](https://bun.sh/) (v1.3.11+)
+- [Bun](https://bun.sh/) (v1.3.14+)
 - Uma ou mais chaves de API para os provedores suportados (Gemini, compatíveis com OpenAI, Anthropic)
 
 ## Instalação

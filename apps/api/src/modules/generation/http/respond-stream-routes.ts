@@ -93,6 +93,51 @@ function toSsePayload(event: StreamEvent): object {
         isError: event.isError,
         done: false,
       };
+    case 'subagent_started':
+      return {
+        type: 'subagent_started',
+        callId: event.callId,
+        agentId: event.agentId,
+        agentName: event.agentName,
+        task: event.task,
+        done: false,
+      };
+    case 'subagent_text':
+      return {
+        type: 'subagent_text',
+        callId: event.callId,
+        agentId: event.agentId,
+        text: event.text,
+        done: false,
+      };
+    case 'subagent_tool_call_started':
+      return {
+        type: 'subagent_tool_call_started',
+        callId: event.callId,
+        agentId: event.agentId,
+        toolCallId: event.toolCallId,
+        name: event.name,
+        done: false,
+      };
+    case 'subagent_completed':
+      return {
+        type: 'subagent_completed',
+        callId: event.callId,
+        agentId: event.agentId,
+        agentName: event.agentName,
+        summary: event.summary,
+        toolCallCount: event.toolCallCount,
+        done: false,
+      };
+    case 'subagent_failed':
+      return {
+        type: 'subagent_failed',
+        callId: event.callId,
+        agentId: event.agentId,
+        agentName: event.agentName,
+        error: event.error,
+        done: false,
+      };
     case 'image_generation_started':
       return {
         type: 'image_generation_started',

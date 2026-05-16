@@ -1,4 +1,5 @@
 import { Type, type Static } from '@sinclair/typebox';
+import { MAX_TOOL_ITERATIONS_MAX, MAX_TOOL_ITERATIONS_MIN } from '../agentic-limits';
 
 export const ProviderTypeSchema = Type.Union([
   Type.Literal('gemini'),
@@ -35,7 +36,9 @@ export const ProviderRuntimeSettingsSchema = Type.Object({
   thinkingEnabled: Type.Optional(Type.Boolean()),
   reasoningEffort: Type.Optional(ReasoningEffortSchema),
   maxOutputTokens: Type.Optional(Type.Integer({ minimum: 1, maximum: 1_000_000 })),
-  maxToolIterations: Type.Optional(Type.Integer({ minimum: 1, maximum: 25 })),
+  maxToolIterations: Type.Optional(
+    Type.Integer({ minimum: MAX_TOOL_ITERATIONS_MIN, maximum: MAX_TOOL_ITERATIONS_MAX })
+  ),
   providerCompactionEnabled: Type.Optional(Type.Boolean()),
   promptCachePreference: Type.Optional(PromptCachePreferenceSchema),
   parallelToolCallsEnabled: Type.Optional(Type.Boolean()),
@@ -45,7 +48,9 @@ export const UpdateProviderRuntimeSettingsBodySchema = Type.Object({
   thinkingEnabled: Type.Optional(Type.Boolean()),
   reasoningEffort: Type.Optional(ReasoningEffortSchema),
   maxOutputTokens: Type.Optional(Type.Integer({ minimum: 1, maximum: 1_000_000 })),
-  maxToolIterations: Type.Optional(Type.Integer({ minimum: 1, maximum: 25 })),
+  maxToolIterations: Type.Optional(
+    Type.Integer({ minimum: MAX_TOOL_ITERATIONS_MIN, maximum: MAX_TOOL_ITERATIONS_MAX })
+  ),
   providerCompactionEnabled: Type.Optional(Type.Boolean()),
   promptCachePreference: Type.Optional(PromptCachePreferenceSchema),
   parallelToolCallsEnabled: Type.Optional(Type.Boolean()),

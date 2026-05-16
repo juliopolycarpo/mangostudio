@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeEach } from 'bun:test';
+import { describe, expect, it, beforeEach, afterEach } from 'bun:test';
 import type { AgentProfile } from '@mangostudio/shared/agents';
 import {
   registerTool,
@@ -14,6 +14,24 @@ import {
 import type { RegisteredTool, ToolContext, ToolExecutor } from '../../../src/services/tools/types';
 
 const ctx: ToolContext = { userId: 'u1', chatId: 'c1', parameters: {} };
+
+function snapshotRegistry(): RegisteredTool[] {
+  return getAllTools().map((tool) => {
+    return {
+      definition: { ...tool.definition },
+      settings: { ...tool.settings, parameterDescriptors: [...tool.settings.parameterDescriptors] },
+      execute: tool.execute,
+      buildDefinition: tool.buildDefinition,
+    };
+  });
+}
+
+function restoreRegistry(snapshot: RegisteredTool[]): void {
+  clearRegistry();
+  for (const tool of snapshot) {
+    registerTool(tool);
+  }
+}
 
 function makeTool(
   name: string,
@@ -51,11 +69,17 @@ function makeAgentProfile(overrides: Partial<AgentProfile>): AgentProfile {
   };
 }
 
-beforeEach(() => {
-  clearRegistry();
-});
-
 describe('registerTool / getTool', () => {
+  let snapshot: RegisteredTool[];
+
+  beforeEach(() => {
+    snapshot = snapshotRegistry();
+    clearRegistry();
+  });
+
+  afterEach(() => {
+    restoreRegistry(snapshot);
+  });
   it('registers and retrieves a tool by name', () => {
     registerTool(makeTool('my_tool', () => Promise.resolve('result')));
 
@@ -80,6 +104,16 @@ describe('registerTool / getTool', () => {
 });
 
 describe('getAllTools / getAllToolDefinitions', () => {
+  let snapshot: RegisteredTool[];
+
+  beforeEach(() => {
+    snapshot = snapshotRegistry();
+    clearRegistry();
+  });
+
+  afterEach(() => {
+    restoreRegistry(snapshot);
+  });
   it('returns all registered tools', () => {
     registerTool(makeTool('a'));
     registerTool(makeTool('b'));
@@ -191,6 +225,17 @@ describe('getAllTools / getAllToolDefinitions', () => {
 });
 
 describe('executeTool', () => {
+  let snapshot: RegisteredTool[];
+
+  beforeEach(() => {
+    snapshot = snapshotRegistry();
+    clearRegistry();
+  });
+
+  afterEach(() => {
+    restoreRegistry(snapshot);
+  });
+
   it('executes a registered tool and returns its result', async () => {
     registerTool(
       makeTool('add', (args) => Promise.resolve((args.a as number) + (args.b as number)))
@@ -250,6 +295,15 @@ describe('executeTool', () => {
 });
 
 describe('clearRegistry', () => {
+  let snapshot: RegisteredTool[];
+
+  beforeEach(() => {
+    snapshot = snapshotRegistry();
+  });
+
+  afterEach(() => {
+    restoreRegistry(snapshot);
+  });
   it('removes all registrations', () => {
     registerTool(makeTool('z'));
     clearRegistry();

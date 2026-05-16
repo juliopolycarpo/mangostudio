@@ -7,49 +7,37 @@ import type { MessagePart } from '@mangostudio/shared';
 
 /**
  * Replicates the merging algorithm from respond-stream.ts.
- * Merges consecutive thinking deltas into segments while preserving
- * the interleaved order of tool calls, text, and thinking blocks.
- * Consecutive text parts are also collapsed into one.
+ * Merges all thinking/text deltas within a structural section so token-level
+ * interleaving from the provider does not create one block per word.
  */
 function mergePartsForPersistence(allParts: MessagePart[]): MessagePart[] {
-  // Step 1: merge consecutive thinking deltas into segments
-  const orderedSegments: MessagePart[] = [];
-  let currentThinkingSegment = '';
+  const finalParts: MessagePart[] = [];
+  let currentThinkingRun = '';
+  let currentTextRun = '';
+
+  const flushRuns = () => {
+    if (currentThinkingRun) {
+      finalParts.push({ type: 'thinking', text: currentThinkingRun });
+      currentThinkingRun = '';
+    }
+    if (currentTextRun) {
+      finalParts.push({ type: 'text', text: currentTextRun });
+      currentTextRun = '';
+    }
+  };
 
   for (const part of allParts) {
     if (part.type === 'thinking') {
-      currentThinkingSegment += part.text;
-    } else {
-      if (currentThinkingSegment) {
-        orderedSegments.push({ type: 'thinking', text: currentThinkingSegment });
-        currentThinkingSegment = '';
-      }
-      orderedSegments.push(part);
-    }
-  }
-  if (currentThinkingSegment) {
-    orderedSegments.push({ type: 'thinking', text: currentThinkingSegment });
-  }
-
-  // Step 2: collapse consecutive text parts into one
-  const finalParts: MessagePart[] = [];
-  let currentTextRun = '';
-
-  for (const part of orderedSegments) {
-    if (part.type === 'text') {
+      currentThinkingRun += part.text;
+    } else if (part.type === 'text') {
       currentTextRun += part.text;
     } else {
-      if (currentTextRun) {
-        finalParts.push({ type: 'text', text: currentTextRun });
-        currentTextRun = '';
-      }
+      flushRuns();
       finalParts.push(part);
     }
   }
-  if (currentTextRun) {
-    finalParts.push({ type: 'text', text: currentTextRun });
-  }
 
+  flushRuns();
   return finalParts;
 }
 
@@ -150,5 +138,23 @@ describe('mergePartsForPersistence — interleaved thinking segments', () => {
 
   it('returns an empty array for empty input', () => {
     expect(mergePartsForPersistence([])).toEqual([]);
+  });
+
+  it('collapses token-level interleaving into one thinking block and one text block', () => {
+    const input: MessagePart[] = [
+      { type: 'thinking', text: 'The ' },
+      { type: 'text', text: 'Let ' },
+      { type: 'thinking', text: 'user ' },
+      { type: 'text', text: 'me ' },
+      { type: 'thinking', text: 'wants me' },
+      { type: 'text', text: 'first explore' },
+    ];
+
+    const result = mergePartsForPersistence(input);
+
+    expect(result).toEqual([
+      { type: 'thinking', text: 'The user wants me' },
+      { type: 'text', text: 'Let me first explore' },
+    ]);
   });
 });

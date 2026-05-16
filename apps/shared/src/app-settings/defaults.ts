@@ -7,15 +7,34 @@ import type {
   RuleFileSetting,
 } from '../prompt-rules';
 import type { ReasoningEffort } from '../types';
-import type { AppSettings, ChatTitleSettings, ImageQuality } from './contracts';
+import type { AppSettings, ChatTitleSettings, ImageQuality, MultiAgentSettings } from './contracts';
+import {
+  MAX_SUBAGENT_CALLS_DEFAULT,
+  MAX_SUBAGENT_CALLS_MAX,
+  MAX_SUBAGENT_CALLS_MIN,
+  MAX_TOOL_ITERATIONS_DEFAULT,
+  MAX_TOOL_ITERATIONS_MAX,
+  MAX_TOOL_ITERATIONS_MIN,
+  SUBAGENT_MAX_TURNS_DEFAULT,
+  SUBAGENT_MAX_TURNS_MAX,
+  SUBAGENT_MAX_TURNS_MIN,
+} from '../agentic-limits';
 
 const CURRENT_MODEL_SETTING = 'current_model';
 
 export const IMAGE_QUALITY_OPTIONS = ['512px', '1K', '2K', '4K'] as const;
 
-export const MAX_TOOL_ITERATIONS_MIN = 1;
-export const MAX_TOOL_ITERATIONS_MAX = 25;
-export const MAX_TOOL_ITERATIONS_DEFAULT = 10;
+export {
+  MAX_SUBAGENT_CALLS_DEFAULT,
+  MAX_SUBAGENT_CALLS_MAX,
+  MAX_SUBAGENT_CALLS_MIN,
+  MAX_TOOL_ITERATIONS_DEFAULT,
+  MAX_TOOL_ITERATIONS_MAX,
+  MAX_TOOL_ITERATIONS_MIN,
+  SUBAGENT_MAX_TURNS_DEFAULT,
+  SUBAGENT_MAX_TURNS_MAX,
+  SUBAGENT_MAX_TURNS_MIN,
+};
 
 export const DEFAULT_PROMPT_SETTINGS: PromptSettings = {
   textSystemPrompt: '',
@@ -55,12 +74,23 @@ export const DEFAULT_CHAT_TITLE_SETTINGS: ChatTitleSettings = {
   preferredModel: CURRENT_MODEL_SETTING,
 };
 
+export const DEFAULT_MULTI_AGENT_SETTINGS: MultiAgentSettings = {
+  enabled: true,
+  chatDelegationEnabled: false,
+  traceVisibility: 'compact',
+  maxDepth: 1,
+  maxSubagentCalls: MAX_SUBAGENT_CALLS_DEFAULT,
+  timeoutMs: 15 * 60 * 1000,
+  defaultMaxTurns: SUBAGENT_MAX_TURNS_DEFAULT,
+};
+
 export const DEFAULT_APP_SETTINGS: AppSettings = {
   promptSettings: DEFAULT_PROMPT_SETTINGS,
   globalImageQuality: '1K',
   thinkingEnabled: false,
   reasoningEffort: 'medium',
   maxToolIterations: MAX_TOOL_ITERATIONS_DEFAULT,
+  multiAgentSettings: DEFAULT_MULTI_AGENT_SETTINGS,
   contextSettings: DEFAULT_CONTEXT_SETTINGS,
   chatTitleSettings: DEFAULT_CHAT_TITLE_SETTINGS,
 };
@@ -104,9 +134,18 @@ function isChatTitleStrategy(value: unknown): value is ChatTitleSettings['strate
   return value === 'prompt_prefix' || value === 'model';
 }
 
+function isTraceVisibility(value: unknown): value is MultiAgentSettings['traceVisibility'] {
+  return value === 'compact' || value === 'full' || value === 'off';
+}
+
 function clampThreshold(value: number, fallback: number): number {
   if (!Number.isFinite(value)) return fallback;
   return Math.min(0.99, Math.max(0.5, Math.round(value * 100) / 100));
+}
+
+function clampInteger(value: unknown, fallback: number, min: number, max: number): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return fallback;
+  return Math.min(max, Math.max(min, Math.round(value)));
 }
 
 function normalizeRuleFileSetting(value: unknown, fallback: RuleFileSetting): RuleFileSetting {
@@ -226,6 +265,41 @@ export function normalizeChatTitleSettings(value: unknown): ChatTitleSettings {
   };
 }
 
+export function normalizeMultiAgentSettings(value: unknown): MultiAgentSettings {
+  if (!isRecord(value)) return DEFAULT_MULTI_AGENT_SETTINGS;
+
+  return {
+    enabled:
+      typeof value.enabled === 'boolean' ? value.enabled : DEFAULT_MULTI_AGENT_SETTINGS.enabled,
+    chatDelegationEnabled:
+      typeof value.chatDelegationEnabled === 'boolean'
+        ? value.chatDelegationEnabled
+        : DEFAULT_MULTI_AGENT_SETTINGS.chatDelegationEnabled,
+    traceVisibility: isTraceVisibility(value.traceVisibility)
+      ? value.traceVisibility
+      : DEFAULT_MULTI_AGENT_SETTINGS.traceVisibility,
+    maxDepth: clampInteger(value.maxDepth, DEFAULT_MULTI_AGENT_SETTINGS.maxDepth, 0, 3),
+    maxSubagentCalls: clampInteger(
+      value.maxSubagentCalls,
+      DEFAULT_MULTI_AGENT_SETTINGS.maxSubagentCalls,
+      MAX_SUBAGENT_CALLS_MIN,
+      MAX_SUBAGENT_CALLS_MAX
+    ),
+    timeoutMs: clampInteger(
+      value.timeoutMs,
+      DEFAULT_MULTI_AGENT_SETTINGS.timeoutMs,
+      1_000,
+      3_600_000
+    ),
+    defaultMaxTurns: clampInteger(
+      value.defaultMaxTurns,
+      DEFAULT_MULTI_AGENT_SETTINGS.defaultMaxTurns,
+      SUBAGENT_MAX_TURNS_MIN,
+      SUBAGENT_MAX_TURNS_MAX
+    ),
+  };
+}
+
 export function normalizeAppSettings(value: unknown): AppSettings {
   if (!isRecord(value)) return DEFAULT_APP_SETTINGS;
 
@@ -246,6 +320,7 @@ export function normalizeAppSettings(value: unknown): AppSettings {
         ? value.maxToolIterations
         : DEFAULT_APP_SETTINGS.maxToolIterations
     ),
+    multiAgentSettings: normalizeMultiAgentSettings(value.multiAgentSettings),
     contextSettings: normalizeContextSettings(value.contextSettings),
     chatTitleSettings: normalizeChatTitleSettings(value.chatTitleSettings),
   };

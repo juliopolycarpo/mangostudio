@@ -54,7 +54,7 @@ describe('settings app settings routes', () => {
           globalImageQuality: '4K',
           thinkingEnabled: true,
           reasoningEffort: 'high',
-          maxToolIterations: 4,
+          maxToolIterations: 1_000,
           contextSettings: {
             ...DEFAULT_APP_SETTINGS.contextSettings,
             compactionBehavior: 'off',
@@ -85,7 +85,7 @@ describe('settings app settings routes', () => {
       globalImageQuality: '4K',
       thinkingEnabled: true,
       reasoningEffort: 'high',
-      maxToolIterations: 4,
+      maxToolIterations: 1_000,
       contextSettings: {
         compactionBehavior: 'off',
         providerCompactionEnabled: false,

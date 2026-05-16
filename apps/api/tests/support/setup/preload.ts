@@ -15,7 +15,32 @@ import { tmpdir } from 'os';
 // Use a per-worker temp file so persistSecret and syncConfigFileConnectors
 // share the same path without clobbering the real user config.
 const testConfigPath = join(tmpdir(), `mangostudio-test-config-${process.pid}.toml`);
-if (existsSync(testConfigPath)) unlinkSync(testConfigPath);
+try {
+  if (existsSync(testConfigPath)) unlinkSync(testConfigPath);
+} catch (e: unknown) {
+  if (
+    typeof e === 'object' &&
+    e !== null &&
+    'code' in e &&
+    (e as { code: string }).code !== 'ENOENT'
+  ) {
+    throw e;
+  }
+}
+
+const testDbPath = join(tmpdir(), `mangostudio-test-${process.env.BUN_WORKER_ID || '0'}.sqlite`);
+try {
+  if (existsSync(testDbPath)) unlinkSync(testDbPath);
+} catch (e: unknown) {
+  if (
+    typeof e === 'object' &&
+    e !== null &&
+    'code' in e &&
+    (e as { code: string }).code !== 'ENOENT'
+  ) {
+    throw e;
+  }
+}
 
 // 1. Set test config BEFORE any lazy singleton initializes
 loadConfigForTest({
@@ -24,7 +49,7 @@ loadConfigForTest({
     url: 'http://localhost:3001',
   },
   database: {
-    path: ':memory:',
+    path: testDbPath,
   },
   configFilePath: testConfigPath,
 });

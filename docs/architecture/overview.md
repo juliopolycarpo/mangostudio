@@ -101,9 +101,20 @@ stream-text-turn.ts (orchestrator)
   ├─ Decide continuation strategy
   ├─ Call provider.generateAgentTurnStream()
   ├─ Execute tools (if model calls them)
+  ├─ Enforce subagent delegation response contract (delegate_to_agent)
   ├─ Feed tool results back to provider
   └─ Persist turn → yield SSE events
 ```
+
+### Subagent Delegation Enforcement
+
+Subagent delegation is executed through the `delegate_to_agent` tool. The orchestrator enforces a response contract so the parent agent always receives a usable final result, even when a provider ends a subagent run after tool calls without emitting assistant text.
+
+- **Response contract**: the delegation tool result must be a non-empty `SubagentRunResult` with a non-empty `summary`, `trace.lastMessage`, and at least one assistant message in `trace.messages`.
+- **Tool-only runs**: if a subagent executes tools but produces no assistant text, the runtime synthesizes a summary (including the tool names executed) and emits a `subagent_text` event for UI consistency.
+- **Main-agent verification**: the orchestrator validates that the delegation result satisfies the response contract; if it is missing or invalid, it retries up to 3 times with exponential backoff and stricter output requirements, then falls back to a standardized failure result.
+- **Response persistence**: subagent text deltas and final results are stored in an in-memory cache keyed by tool call id so the orchestrator can recover a usable result if the final payload is missing or invalid.
+- **Debug logging**: structured lifecycle logs are emitted with `[subagent]` and delegation enforcement logs with `[subagent-delegation]`, including call ids, tool counts, and summary lengths (without logging tool result contents).
 
 ## Cross-Cutting Concerns
 

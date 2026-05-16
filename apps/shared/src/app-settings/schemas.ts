@@ -3,6 +3,14 @@ import { CHAT_TITLE_PROMPT_LENGTH_MAX, CHAT_TITLE_PROMPT_LENGTH_MIN } from '../c
 import { ContextSettingsSchema } from '../chat';
 import { PromptSettingsSchema } from '../prompt-rules';
 import { ReasoningEffortSchema } from '../provider-settings';
+import {
+  MAX_SUBAGENT_CALLS_MAX,
+  MAX_SUBAGENT_CALLS_MIN,
+  MAX_TOOL_ITERATIONS_MAX,
+  MAX_TOOL_ITERATIONS_MIN,
+  SUBAGENT_MAX_TURNS_MAX,
+  SUBAGENT_MAX_TURNS_MIN,
+} from '../agentic-limits';
 
 export const ImageQualitySchema = Type.Union([
   Type.Literal('512px'),
@@ -21,12 +29,32 @@ export const ChatTitleSettingsSchema = Type.Object({
   preferredModel: Type.String(),
 });
 
+export const MultiAgentSettingsSchema = Type.Object({
+  enabled: Type.Boolean(),
+  chatDelegationEnabled: Type.Boolean(),
+  traceVisibility: Type.Union([Type.Literal('compact'), Type.Literal('full'), Type.Literal('off')]),
+  maxDepth: Type.Integer({ minimum: 0, maximum: 3 }),
+  maxSubagentCalls: Type.Integer({
+    minimum: MAX_SUBAGENT_CALLS_MIN,
+    maximum: MAX_SUBAGENT_CALLS_MAX,
+  }),
+  timeoutMs: Type.Integer({ minimum: 1_000, maximum: 3_600_000 }),
+  defaultMaxTurns: Type.Integer({
+    minimum: SUBAGENT_MAX_TURNS_MIN,
+    maximum: SUBAGENT_MAX_TURNS_MAX,
+  }),
+});
+
 export const AppSettingsSchema = Type.Object({
   promptSettings: PromptSettingsSchema,
   globalImageQuality: ImageQualitySchema,
   thinkingEnabled: Type.Boolean(),
   reasoningEffort: ReasoningEffortSchema,
-  maxToolIterations: Type.Integer({ minimum: 1, maximum: 25 }),
+  maxToolIterations: Type.Integer({
+    minimum: MAX_TOOL_ITERATIONS_MIN,
+    maximum: MAX_TOOL_ITERATIONS_MAX,
+  }),
+  multiAgentSettings: MultiAgentSettingsSchema,
   contextSettings: ContextSettingsSchema,
   chatTitleSettings: ChatTitleSettingsSchema,
 });
@@ -34,4 +62,5 @@ export const AppSettingsSchema = Type.Object({
 export type ImageQuality = Static<typeof ImageQualitySchema>;
 export type ChatTitleSettings = Static<typeof ChatTitleSettingsSchema>;
 export type ChatTitleStrategy = ChatTitleSettings['strategy'];
+export type MultiAgentSettings = Static<typeof MultiAgentSettingsSchema>;
 export type AppSettings = Static<typeof AppSettingsSchema>;

@@ -10,3 +10,4 @@ import './builtin/get-current-datetime';
 import './builtin/generate-image';
 import './builtin/read-file';
 import './builtin/list-directory';
+import './builtin/delegate-to-agent';

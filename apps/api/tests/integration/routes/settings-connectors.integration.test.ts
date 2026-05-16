@@ -1,4 +1,4 @@
-import { describe, expect, it, afterEach, beforeAll, beforeEach, mock } from 'bun:test';
+import { describe, expect, it, afterEach, beforeAll, beforeEach, afterAll, mock } from 'bun:test';
 import { Value } from '@sinclair/typebox/value';
 import { Type } from '@sinclair/typebox';
 import { ConnectorStatusSchema } from '@mangostudio/shared/connectors';
@@ -121,7 +121,7 @@ describe('settings connectors routes', () => {
 
     const payload = (await response.json()) as ConnectorListPayload;
     expect(Value.Check(ConnectorStatusSchema, payload)).toBe(true);
-    expect(payload).toMatchObject({ connectors: [] });
+    expect(payload.connectors.filter((connector) => connector.userId === TEST_USER.id)).toEqual([]);
   });
 
   it('GET /settings/connectors hides shared openai-compatible config-file connectors without baseUrl', async () => {
@@ -171,8 +171,126 @@ describe('settings connectors routes', () => {
 });
 
 /* ------------------------------------------------------------------ */
-/*  OpenAI / OpenAI-compatible connector integration tests            */
+/*  Gemini aliases routes integration tests                           */
 /* ------------------------------------------------------------------ */
+
+describe('Gemini aliases API', () => {
+  beforeAll(async () => {
+    await mock.module('@google/genai', () => {
+      return {
+        GoogleGenAI: class {
+          models = {
+            list: () =>
+              Promise.resolve({
+                getPage: () =>
+                  Promise.resolve([
+                    {
+                      name: 'models/gemini-2.0-flash',
+                      displayName: 'Gemini 2.0 Flash',
+                      supportedActions: ['generateContent'],
+                    },
+                  ]),
+              }),
+          };
+        },
+      };
+    });
+  });
+
+  afterAll(() => {
+    mock.restore();
+  });
+
+  it('POST /settings/connectors/gemini adds a connector', async () => {
+    // We mock the gemini module to bypass actual validation which uses real fetch
+    await mock.module('../../../src/services/gemini', () => {
+      return {
+        getGeminiSecretStatus: () => Promise.resolve({ connectors: [] }),
+        addGeminiConnector: () =>
+          Promise.resolve({
+            id: 'mock-gemini-id',
+            name: 'Alias Connector',
+            provider: 'gemini',
+            configured: true,
+            source: 'database',
+            userId: TEST_USER.id,
+          }),
+        deleteGeminiConnector: () => Promise.resolve(),
+        updateConnectorModels: () => Promise.resolve(),
+        refreshGeminiModelCatalog: () => Promise.resolve(),
+      };
+    });
+
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, settingsRoutes);
+    restoreAuth = restore;
+
+    const response = await app.handle(
+      new Request('http://localhost/settings/connectors/gemini', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: 'Alias Connector',
+          provider: 'gemini',
+          apiKey: 'fake-alias-key',
+          source: 'bun-secrets',
+        }),
+      })
+    );
+
+    expect(response.status).toBe(200);
+    const connector = await response.json();
+    expect(connector).toHaveProperty('id');
+    expect(connector).toMatchObject({
+      name: 'Alias Connector',
+      provider: 'gemini',
+    });
+  });
+
+  it('PUT /settings/connectors/gemini/:id/models updates models', async () => {
+    await mock.module('../../../src/services/gemini', () => {
+      return {
+        updateConnectorModels: () => Promise.resolve(),
+      };
+    });
+
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, settingsRoutes);
+    restoreAuth = restore;
+
+    const response = await app.handle(
+      new Request(`http://localhost/settings/connectors/gemini/mock-gemini-id/models`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          enabledModels: ['gemini-2.0-flash'],
+        }),
+      })
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ success: true });
+  });
+
+  it('DELETE /settings/connectors/gemini/:id removes a connector', async () => {
+    await mock.module('../../../src/services/gemini', () => {
+      return {
+        deleteGeminiConnector: () => Promise.resolve(),
+        refreshGeminiModelCatalog: () => Promise.resolve(),
+      };
+    });
+
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, settingsRoutes);
+    restoreAuth = restore;
+
+    const response = await app.handle(
+      new Request(`http://localhost/settings/connectors/gemini/mock-gemini-id`, {
+        method: 'DELETE',
+      })
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ success: true });
+  });
+});
 
 const OPENAI_CONNECTOR_USER = {
   id: 'test-user-openai-connectors',

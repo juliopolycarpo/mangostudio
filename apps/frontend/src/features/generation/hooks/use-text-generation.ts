@@ -16,7 +16,10 @@ import {
   type ContextSettings,
 } from '@mangostudio/shared/chat';
 import type { ToolIntent } from '@mangostudio/shared/generation';
+import type { SubagentTraceEvent, SubagentTraceEventName } from '@mangostudio/shared/types';
+import { mergeSubagentTraceEvents } from '@mangostudio/shared/types';
 import type { PromptSettings } from '@mangostudio/shared/prompt-rules';
+import { useI18n } from '@/hooks/use-i18n';
 import { messageKeys } from '@/features/chat/queries';
 import { generateChatTitleSuggestion } from '@/features/chat/services/chat-title';
 import { compactChat, summarizeToNewChat } from '@/features/chat/services/context-compaction';
@@ -126,6 +129,128 @@ function upsertGeneratedImagePart(
   return parts.map((part, index) => (index === existingIndex ? generatedImagePart : part));
 }
 
+function upsertSubagentTracePart(
+  parts: MessagePart[],
+  tracePart: Extract<MessagePart, { type: 'subagent_trace' }>
+): MessagePart[] {
+  const existingIndex = parts.findIndex(
+    (part) => part.type === 'subagent_trace' && part.toolCallId === tracePart.toolCallId
+  );
+
+  if (existingIndex === -1) return [...parts, tracePart];
+  return parts.map((part, index) => {
+    if (index !== existingIndex || part.type !== 'subagent_trace') return part;
+    return {
+      ...tracePart,
+      messages: tracePart.messages.length > 0 ? tracePart.messages : part.messages,
+      tools: tracePart.tools.length > 0 ? tracePart.tools : part.tools,
+      events: mergeSubagentTraceEvents(part.events, tracePart.events),
+    };
+  });
+}
+
+function updateSubagentTracePart(
+  parts: MessagePart[],
+  toolCallId: string,
+  update: (
+    current: Extract<MessagePart, { type: 'subagent_trace' }>
+  ) => Extract<MessagePart, { type: 'subagent_trace' }>
+): MessagePart[] {
+  return parts.map((part) => {
+    if (part.type !== 'subagent_trace' || part.toolCallId !== toolCallId) return part;
+    return update(part);
+  });
+}
+
+function appendSubagentTraceEvent(
+  parts: MessagePart[],
+  event: ParsedSubagentEvent,
+  pendingSubagentName: string
+): MessagePart[] {
+  const existingIndex = parts.findIndex(
+    (part) => part.type === 'subagent_trace' && part.toolCallId === event.callId
+  );
+  const traceEvent: SubagentTraceEvent = {
+    event: event.event,
+    ...(event.attempt !== undefined ? { attempt: event.attempt } : {}),
+    ...(event.detail ? { detail: event.detail } : {}),
+  };
+
+  if (existingIndex === -1) {
+    return [
+      ...parts,
+      {
+        type: 'subagent_trace',
+        toolCallId: event.callId,
+        agentId: event.agentId ?? event.callId,
+        agentName: event.agentId ?? pendingSubagentName,
+        status: 'running',
+        summary: '',
+        toolCallCount: 0,
+        messages: [],
+        tools: [],
+        events: [traceEvent],
+      },
+    ];
+  }
+
+  return parts.map((part, index) => {
+    if (index !== existingIndex || part.type !== 'subagent_trace') return part;
+    const agentName =
+      part.agentName === pendingSubagentName && event.agentId ? event.agentId : part.agentName;
+    return {
+      ...part,
+      agentId: event.agentId ?? part.agentId,
+      agentName,
+      events: mergeSubagentTraceEvents(part.events, [traceEvent]),
+    };
+  });
+}
+
+interface ParsedSubagentEvent {
+  readonly callId: string;
+  readonly agentId?: string;
+  readonly event: SubagentTraceEventName;
+  readonly attempt?: number;
+  readonly detail?: string;
+}
+
+const SUBAGENT_SYSTEM_EVENTS: Readonly<Record<string, SubagentTraceEventName>> = {
+  subagent_delegation_started: 'delegation_started',
+  subagent_delegation_completed: 'delegation_completed',
+  subagent_delegation_failed: 'delegation_failed',
+  subagent_response_attempt: 'response_attempt',
+  subagent_response_recovered: 'response_recovered',
+  subagent_response_timeout: 'response_timeout',
+  subagent_response_fallback: 'response_fallback',
+};
+
+function parseSubagentSystemEvent(
+  event: string,
+  detail: string | undefined
+): ParsedSubagentEvent | null {
+  const lifecycleEvent = SUBAGENT_SYSTEM_EVENTS[event];
+  if (!lifecycleEvent) return null;
+  const callId = readDetailField(detail, 'call');
+  if (!callId) return null;
+  const attemptText = readDetailField(detail, 'attempt');
+  const attempt = attemptText ? Number(attemptText) : undefined;
+  const agentId = readDetailField(detail, 'agent') ?? readDetailField(detail, 'target');
+
+  return {
+    callId,
+    event: lifecycleEvent,
+    ...(agentId ? { agentId } : {}),
+    ...(attempt !== undefined && Number.isFinite(attempt) ? { attempt } : {}),
+    ...(detail ? { detail } : {}),
+  };
+}
+
+function readDetailField(detail: string | undefined, field: string): string | undefined {
+  const match = detail?.match(new RegExp(`(?:^|\\s)${field}=([^\\s]+)`));
+  return match?.[1];
+}
+
 /** Handles text generation: creates messages, drives SSE stream, updates optimistic UI. */
 export function useTextGeneration({
   chats,
@@ -142,6 +267,8 @@ export function useTextGeneration({
   getAgentSelection,
 }: UseTextGenerationOptions) {
   const queryClient = useQueryClient();
+  const { t } = useI18n();
+  const pendingSubagentName = t.chat.feed.subagentPendingName;
   const stream = useChatStream({ currentChatId });
   const { appendOptimisticMessages, updateOptimisticMessage } = optimistic;
   const [pendingContextAction, setPendingContextAction] = useState<'compact' | 'new-chat' | null>(
@@ -361,6 +488,97 @@ export function useTextGeneration({
                 });
                 break;
               }
+              case 'subagent_started': {
+                accumulatedParts = upsertSubagentTracePart(accumulatedParts, {
+                  type: 'subagent_trace',
+                  toolCallId: chunk.callId,
+                  agentId: chunk.agentId,
+                  agentName: chunk.agentName,
+                  status: 'running',
+                  summary: chunk.task,
+                  toolCallCount: 0,
+                  messages: [],
+                  tools: [],
+                });
+                updateOptimisticMessage(activeChatId, currentAiMsgId, {
+                  parts: accumulatedParts,
+                });
+                break;
+              }
+              case 'subagent_text': {
+                accumulatedParts = updateSubagentTracePart(
+                  accumulatedParts,
+                  chunk.callId,
+                  (part) => {
+                    const previous = part.messages.at(-1);
+                    const messages =
+                      previous?.role === 'assistant'
+                        ? [
+                            ...part.messages.slice(0, -1),
+                            { role: 'assistant' as const, text: `${previous.text}${chunk.text}` },
+                          ]
+                        : [...part.messages, { role: 'assistant' as const, text: chunk.text }];
+                    const lastMessage = messages.at(-1)?.text;
+                    return {
+                      ...part,
+                      ...(lastMessage ? { lastMessage } : {}),
+                      messages,
+                    };
+                  }
+                );
+                updateOptimisticMessage(activeChatId, currentAiMsgId, {
+                  parts: accumulatedParts,
+                });
+                break;
+              }
+              case 'subagent_tool_call_started': {
+                accumulatedParts = updateSubagentTracePart(
+                  accumulatedParts,
+                  chunk.callId,
+                  (part) => ({
+                    ...part,
+                    toolCallCount: part.toolCallCount + 1,
+                    tools: [...part.tools, { callId: chunk.toolCallId, name: chunk.name }],
+                  })
+                );
+                updateOptimisticMessage(activeChatId, currentAiMsgId, {
+                  parts: accumulatedParts,
+                });
+                break;
+              }
+              case 'subagent_completed': {
+                accumulatedParts = updateSubagentTracePart(
+                  accumulatedParts,
+                  chunk.callId,
+                  (part) => ({
+                    ...part,
+                    status: 'completed',
+                    summary: chunk.summary,
+                    toolCallCount: chunk.toolCallCount,
+                    lastMessage: chunk.summary,
+                  })
+                );
+                updateOptimisticMessage(activeChatId, currentAiMsgId, {
+                  parts: accumulatedParts,
+                });
+                break;
+              }
+              case 'subagent_failed': {
+                accumulatedParts = updateSubagentTracePart(
+                  accumulatedParts,
+                  chunk.callId,
+                  (part) => ({
+                    ...part,
+                    status: 'failed',
+                    summary: chunk.error,
+                    error: chunk.error,
+                  })
+                );
+                updateOptimisticMessage(activeChatId, currentAiMsgId, {
+                  parts: accumulatedParts,
+                });
+                break;
+              }
               case 'image_generation_started': {
                 currentThinkingIdx = -1;
                 accumulatedParts = upsertGeneratedImagePart(accumulatedParts, {
@@ -438,6 +656,18 @@ export function useTextGeneration({
                 break;
               }
               case 'system_event': {
+                const subagentEvent = parseSubagentSystemEvent(chunk.event, chunk.detail);
+                if (subagentEvent) {
+                  accumulatedParts = appendSubagentTraceEvent(
+                    accumulatedParts,
+                    subagentEvent,
+                    pendingSubagentName
+                  );
+                  updateOptimisticMessage(activeChatId, currentAiMsgId, {
+                    parts: accumulatedParts,
+                  });
+                  break;
+                }
                 accumulatedParts = [
                   ...accumulatedParts,
                   { type: 'system_event', event: chunk.event, detail: chunk.detail },
@@ -516,6 +746,7 @@ export function useTextGeneration({
       chatTitleSettings,
       getAgentSelection,
       stream,
+      pendingSubagentName,
     ]
   );
 

@@ -10,11 +10,20 @@ import type {
 
 export type { ToolDefinition };
 
+export interface DelegateToAgentInput {
+  agentId: string;
+  task: string;
+  context?: string;
+  expectedOutput?: string;
+  maxTurns?: number;
+}
+
 /** Runtime context injected into every tool call. */
 export interface ToolContext {
   userId: string;
   chatId: string;
   parameters: Record<string, unknown>;
+  delegateToAgent?: (input: DelegateToAgentInput) => Promise<unknown>;
 }
 
 /** Function signature for tool implementations. */

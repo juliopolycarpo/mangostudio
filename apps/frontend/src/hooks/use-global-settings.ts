@@ -4,6 +4,7 @@ import {
   DEFAULT_APP_SETTINGS,
   DEFAULT_CHAT_TITLE_SETTINGS,
   DEFAULT_CONTEXT_SETTINGS,
+  DEFAULT_MULTI_AGENT_SETTINGS,
   DEFAULT_PROMPT_SETTINGS,
   MAX_TOOL_ITERATIONS_DEFAULT,
   MAX_TOOL_ITERATIONS_MAX,
@@ -15,6 +16,7 @@ import {
   type ChatTitleSettings,
   type ChatTitleStrategy,
   type ImageQuality,
+  type MultiAgentSettings,
 } from '@mangostudio/shared/app-settings';
 import type { ReasoningEffort } from '@mangostudio/shared';
 import type { ContextCompactionBehavior, ContextSettings } from '@mangostudio/shared/chat';
@@ -25,6 +27,7 @@ import { appSettingsKeys, appSettingsQueryOptions } from '@/features/settings/ap
 export {
   DEFAULT_CHAT_TITLE_SETTINGS,
   DEFAULT_CONTEXT_SETTINGS,
+  DEFAULT_MULTI_AGENT_SETTINGS,
   DEFAULT_PROMPT_SETTINGS,
   MAX_TOOL_ITERATIONS_DEFAULT,
   MAX_TOOL_ITERATIONS_MAX,
@@ -146,6 +149,19 @@ export function useGlobalSettings() {
     [saveSettings]
   );
 
+  const updateMultiAgentSettings = useCallback(
+    (updates: Partial<MultiAgentSettings>) => {
+      saveSettings((current) => ({
+        ...current,
+        multiAgentSettings: {
+          ...current.multiAgentSettings,
+          ...updates,
+        },
+      }));
+    },
+    [saveSettings]
+  );
+
   const setTextSystemPrompt = useCallback(
     (value: string) => {
       updatePromptSettings((current) => ({ ...current, textSystemPrompt: value }));
@@ -241,6 +257,7 @@ export function useGlobalSettings() {
       }));
     },
     contextSettings: settings.contextSettings,
+    multiAgentSettings: settings.multiAgentSettings,
     chatTitleSettings: settings.chatTitleSettings,
     setContextCompactionBehavior: (value: ContextCompactionBehavior) =>
       updateContextSettings({ compactionBehavior: value }),
@@ -253,6 +270,16 @@ export function useGlobalSettings() {
       updateContextSettings({ preferredSummaryModel: value }),
     setProviderCompactionEnabled: (value: boolean) =>
       updateContextSettings({ providerCompactionEnabled: value }),
+    setMultiAgentEnabled: (value: boolean) => updateMultiAgentSettings({ enabled: value }),
+    setChatDelegationEnabled: (value: boolean) =>
+      updateMultiAgentSettings({ chatDelegationEnabled: value }),
+    setTraceVisibility: (value: MultiAgentSettings['traceVisibility']) =>
+      updateMultiAgentSettings({ traceVisibility: value }),
+    setMaxDelegationDepth: (value: number) => updateMultiAgentSettings({ maxDepth: value }),
+    setMaxSubagentCalls: (value: number) => updateMultiAgentSettings({ maxSubagentCalls: value }),
+    setSubagentTimeoutMs: (value: number) => updateMultiAgentSettings({ timeoutMs: value }),
+    setDefaultSubagentMaxTurns: (value: number) =>
+      updateMultiAgentSettings({ defaultMaxTurns: value }),
     setChatAutoRenameEnabled: (value: boolean) =>
       updateChatTitleSettings({ autoRenameEnabled: value }),
     setChatTitleStrategy: (value: ChatTitleStrategy) =>

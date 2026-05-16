@@ -18,7 +18,7 @@
     "test": "bun run test:unit && bun run test:integration",
     "test:unit": "bun test tests/unit",
     "test:integration": "bun test tests/integration",
-    "test:coverage": "bun test --coverage tests/unit tests/integration"
+    "test:coverage": "bun test --coverage --parallel=1 tests/unit tests/integration"
   },
   "dependencies": {
     "@ai-sdk/deepseek": "^2.0.32",

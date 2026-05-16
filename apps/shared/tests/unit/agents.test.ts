@@ -26,6 +26,14 @@ describe('agent contracts', () => {
         kind: 'builtin',
         role: 'both',
         source: { type: 'builtin' },
+        subagentIds: ['explore'],
+      }),
+      expect.objectContaining({
+        id: 'explore',
+        name: 'Explore',
+        kind: 'builtin',
+        role: 'subagent',
+        source: { type: 'builtin' },
       }),
     ]);
 
@@ -139,7 +147,7 @@ Stay inside the allowed scope.
       role: 'both',
       systemPrompt: 'Read first.',
       reasoningEffort: 'high',
-      maxToolIterations: 3,
+      maxToolIterations: 1_000,
       toolNames: ['read_file'],
       toolsEnabled: true,
       subagentIds: ['user:reviewer'],

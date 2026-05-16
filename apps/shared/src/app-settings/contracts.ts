@@ -12,12 +12,23 @@ export interface ChatTitleSettings {
   preferredModel: string;
 }
 
+export interface MultiAgentSettings {
+  enabled: boolean;
+  chatDelegationEnabled: boolean;
+  traceVisibility: 'compact' | 'full' | 'off';
+  maxDepth: number;
+  maxSubagentCalls: number;
+  timeoutMs: number;
+  defaultMaxTurns: number;
+}
+
 export interface AppSettings {
   promptSettings: PromptSettings;
   globalImageQuality: ImageQuality;
   thinkingEnabled: boolean;
   reasoningEffort: ReasoningEffort;
   maxToolIterations: number;
+  multiAgentSettings: MultiAgentSettings;
   contextSettings: ContextSettings;
   chatTitleSettings: ChatTitleSettings;
 }

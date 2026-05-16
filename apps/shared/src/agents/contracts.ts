@@ -1,4 +1,4 @@
-export type BuiltInAgentId = 'chat' | 'default';
+export type BuiltInAgentId = 'chat' | 'default' | 'explore';
 export type UserAgentId = `user:${string}`;
 export type AgentId = BuiltInAgentId | UserAgentId;
 export type AgentExecutionMode = 'chat' | 'agent';

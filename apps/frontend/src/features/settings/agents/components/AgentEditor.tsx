@@ -5,6 +5,7 @@ import type {
   AgentProfileUpsertBody,
   AgentRole,
 } from '@mangostudio/shared/agents';
+import { MAX_TOOL_ITERATIONS_MAX, MAX_TOOL_ITERATIONS_MIN } from '@mangostudio/shared/app-settings';
 import type { ToolSettingsDescriptor } from '@mangostudio/shared/tool-settings';
 import { Eye, RotateCcw, Save, Trash2, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
@@ -28,6 +29,7 @@ interface AgentEditorLabels {
   readonly roles: Record<AgentRole, string>;
   readonly systemPrompt: string;
   readonly model: string;
+  readonly modelDefaultOption: string;
   readonly thinking: string;
   readonly reasoningEffort: string;
   readonly reasoningEfforts: Record<NonNullable<AgentProfile['reasoningEffort']>, string>;
@@ -62,6 +64,7 @@ interface AgentEditorProps {
   readonly agent: EditableAgentProfile;
   readonly allAgents: ReadonlyArray<AgentProfile>;
   readonly tools: ReadonlyArray<ToolSettingsDescriptor>;
+  readonly modelOptions: ReadonlyArray<ModelSelectOption>;
   readonly labels: AgentEditorLabels;
   readonly isNew: boolean;
   readonly isSaving: boolean;
@@ -102,6 +105,7 @@ export function AgentEditor({
   agent,
   allAgents,
   tools,
+  modelOptions,
   labels,
   isNew,
   isSaving,
@@ -125,6 +129,11 @@ export function AgentEditor({
   const selectedSubagents = new Set(draft.subagentIds);
   const sourcePath = draft.source.type === 'markdown' ? draft.source.path : undefined;
   const title = isNew ? labels.createTitle : draft.name;
+  const modelOptionIds = new Set(modelOptions.map((option) => option.value));
+  const resolvedModelOptions =
+    draft.model && !modelOptionIds.has(draft.model)
+      ? [{ value: draft.model, label: draft.model }, ...modelOptions]
+      : modelOptions;
 
   const updateDraft = (partial: Partial<EditableAgentProfile>) => {
     setDraft((current) => ({ ...current, ...partial }));
@@ -300,12 +309,23 @@ export function AgentEditor({
                   className="w-full rounded-xl border border-outline-variant/20 bg-surface-container-lowest px-3 py-2 text-sm text-on-surface focus:border-primary/60 focus:outline-none focus:ring-1 focus:ring-primary/20 resize-y"
                 />
               </label>
-              <TextField
-                label={labels.model}
-                value={draft.model ?? ''}
-                onChange={(model) => updateDraft({ model: model.trim() || undefined })}
-                placeholder="e.g. gpt-4o"
-              />
+              <label className="block space-y-2">
+                <span className="text-sm font-semibold text-on-surface">{labels.model}</span>
+                <select
+                  value={draft.model ?? ''}
+                  onChange={(event) =>
+                    updateDraft({ model: event.target.value ? event.target.value : undefined })
+                  }
+                  className="w-full rounded-xl border border-outline-variant/20 bg-surface-container-lowest px-3 py-2 text-sm text-on-surface focus:border-primary/60 focus:outline-none focus:ring-1 focus:ring-primary/20"
+                >
+                  <option value="">{labels.modelDefaultOption}</option>
+                  {resolvedModelOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
             </section>
 
             {/* Reasoning */}
@@ -493,6 +513,11 @@ function TextField({
   );
 }
 
+interface ModelSelectOption {
+  readonly value: string;
+  readonly label: string;
+}
+
 function NumberField({
   label,
   value,
@@ -507,8 +532,8 @@ function NumberField({
       <span className="text-sm font-semibold text-on-surface">{label}</span>
       <input
         type="number"
-        min={1}
-        max={25}
+        min={MAX_TOOL_ITERATIONS_MIN}
+        max={MAX_TOOL_ITERATIONS_MAX}
         value={value}
         onChange={(event) => {
           const nextValue = Number(event.target.value);

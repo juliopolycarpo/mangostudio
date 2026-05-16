@@ -153,7 +153,7 @@ describe('buildGeminiInteractionsReplay', () => {
             type: 'function_result',
             call_id: 'call_1',
             name: '',
-            result: { temp: 22 },
+            result: { output: '{"temp":22}' },
             is_error: false,
           },
         ],
@@ -161,7 +161,7 @@ describe('buildGeminiInteractionsReplay', () => {
     ]);
   });
 
-  it('parses tool_result content as JSON when possible', () => {
+  it('wraps tool_result content as function output', () => {
     const history: ChatTurnContext[] = [
       aiTurn('1', '', [
         { type: 'tool_call', toolCallId: 'tc_x', name: 'fetch', args: {} },
@@ -172,10 +172,10 @@ describe('buildGeminiInteractionsReplay', () => {
     const resultTurn = result.find((t) => t.role === 'user' && Array.isArray(t.content));
     expect(resultTurn).toBeDefined();
     const contents = resultTurn?.content as Array<Record<string, unknown>>;
-    expect(contents[0].result).toEqual({ ok: true });
+    expect(contents[0].result).toEqual({ output: '{"ok":true}' });
   });
 
-  it('keeps tool_result content as string when JSON.parse fails', () => {
+  it('wraps plain tool_result content as function output', () => {
     const history: ChatTurnContext[] = [
       aiTurn('1', '', [
         { type: 'tool_call', toolCallId: 'tc_y', name: 'cmd', args: {} },
@@ -185,7 +185,7 @@ describe('buildGeminiInteractionsReplay', () => {
     const result = buildGeminiInteractionsReplay(history);
     const resultTurn = result.find((t) => t.role === 'user' && Array.isArray(t.content));
     const contents = resultTurn?.content as Array<Record<string, unknown>>;
-    expect(contents[0].result).toBe('plain text output');
+    expect(contents[0].result).toEqual({ output: 'plain text output' });
   });
 
   it('handles mixed history (some turns have parts, some do not)', () => {

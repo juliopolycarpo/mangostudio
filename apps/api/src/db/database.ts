@@ -3,7 +3,7 @@
  */
 
 import { Kysely } from 'kysely';
-import { BunSqliteDialect } from 'kysely-bun-sqlite';
+import { BunSqliteDialect } from 'kysely-bun-sqlite/dist/index.js';
 import { Database as SQLiteDatabase } from 'bun:sqlite';
 import { dirname } from 'path';
 import { mkdirSync } from 'fs';

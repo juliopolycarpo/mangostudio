@@ -1,4 +1,14 @@
-import type { ChatTitleSettings, ChatTitleStrategy } from '@mangostudio/shared/app-settings';
+import type {
+  ChatTitleSettings,
+  ChatTitleStrategy,
+  MultiAgentSettings,
+} from '@mangostudio/shared/app-settings';
+import {
+  MAX_SUBAGENT_CALLS_MAX,
+  MAX_SUBAGENT_CALLS_MIN,
+  SUBAGENT_MAX_TURNS_MAX,
+  SUBAGENT_MAX_TURNS_MIN,
+} from '@mangostudio/shared/app-settings';
 import type { ModelOption } from '@mangostudio/shared';
 import type { Locale } from '@mangostudio/shared/i18n';
 import { Card } from '@/components/ui/Card';
@@ -14,6 +24,14 @@ interface GeneralSettingsProps {
   setChatTitleStrategy: (value: ChatTitleStrategy) => void;
   setChatTitlePromptPrefixLength: (value: number) => void;
   setPreferredChatTitleModel: (value: string) => void;
+  multiAgentSettings: MultiAgentSettings;
+  setMultiAgentEnabled: (value: boolean) => void;
+  setChatDelegationEnabled: (value: boolean) => void;
+  setTraceVisibility: (value: MultiAgentSettings['traceVisibility']) => void;
+  setMaxDelegationDepth: (value: number) => void;
+  setMaxSubagentCalls: (value: number) => void;
+  setSubagentTimeoutMs: (value: number) => void;
+  setDefaultSubagentMaxTurns: (value: number) => void;
 }
 
 const IMAGE_QUALITY_OPTIONS = ['512px', '1K', '2K', '4K'] as const;
@@ -25,6 +43,7 @@ const LOCALE_OPTIONS: { value: Locale; label: string }[] = [
 
 const PROMPT_PREFIX_LENGTH_MIN = 10;
 const PROMPT_PREFIX_LENGTH_MAX = 80;
+const TIMEOUT_STEP_MS = 30_000;
 
 /**
  * General settings tab: language selector, image quality grid.
@@ -38,6 +57,14 @@ export function GeneralSettings({
   setChatTitleStrategy,
   setChatTitlePromptPrefixLength,
   setPreferredChatTitleModel,
+  multiAgentSettings,
+  setMultiAgentEnabled,
+  setChatDelegationEnabled,
+  setTraceVisibility,
+  setMaxDelegationDepth,
+  setMaxSubagentCalls,
+  setSubagentTimeoutMs,
+  setDefaultSubagentMaxTurns,
 }: GeneralSettingsProps) {
   const { t, locale, setLocale } = useI18n();
   const s = t.settings.general;
@@ -96,6 +123,105 @@ export function GeneralSettings({
               {q}
             </Button>
           ))}
+        </div>
+      </Card>
+
+      <Card variant="solid" className="space-y-4 p-4 sm:p-6">
+        <div className="flex items-start justify-between gap-4">
+          <div className="space-y-1">
+            <h3 className="text-xs uppercase tracking-widest font-bold text-on-surface-variant/80 font-label">
+              {s.multiAgentLabel}
+            </h3>
+            <p className="text-sm text-on-surface-variant/60">{s.multiAgentDescription}</p>
+          </div>
+          <input
+            type="checkbox"
+            checked={multiAgentSettings.enabled}
+            onChange={(event) => setMultiAgentEnabled(event.target.checked)}
+            aria-label={s.multiAgentEnabledLabel}
+            className="mt-1 h-4 w-4 rounded border-outline-variant/30 accent-primary"
+          />
+        </div>
+
+        <label className="flex items-center gap-2 rounded-xl border border-outline-variant/20 bg-surface-container-lowest px-3 py-2 text-sm text-on-surface">
+          <input
+            type="checkbox"
+            checked={multiAgentSettings.chatDelegationEnabled}
+            onChange={(event) => setChatDelegationEnabled(event.target.checked)}
+            disabled={!multiAgentSettings.enabled}
+            className="accent-primary disabled:opacity-50"
+          />
+          {s.chatDelegationEnabledLabel}
+        </label>
+
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <label className="block space-y-2">
+            <span className="text-sm font-semibold text-on-surface">{s.traceVisibilityLabel}</span>
+            <select
+              value={multiAgentSettings.traceVisibility}
+              onChange={(event) =>
+                setTraceVisibility(event.target.value as MultiAgentSettings['traceVisibility'])
+              }
+              disabled={!multiAgentSettings.enabled}
+              className="w-full rounded-xl px-3 py-2 text-sm bg-surface-container-lowest text-on-surface border border-outline-variant/20 focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/20 disabled:opacity-50"
+            >
+              <option value="compact">{s.traceVisibilityCompact}</option>
+              <option value="full">{s.traceVisibilityFull}</option>
+              <option value="off">{s.traceVisibilityOff}</option>
+            </select>
+          </label>
+          <NumberSetting
+            label={s.maxDepthLabel}
+            value={multiAgentSettings.maxDepth}
+            min={0}
+            max={3}
+            disabled={!multiAgentSettings.enabled}
+            onChange={setMaxDelegationDepth}
+          />
+          <NumberSetting
+            label={s.maxSubagentCallsLabel}
+            value={multiAgentSettings.maxSubagentCalls}
+            min={MAX_SUBAGENT_CALLS_MIN}
+            max={MAX_SUBAGENT_CALLS_MAX}
+            disabled={!multiAgentSettings.enabled}
+            onChange={setMaxSubagentCalls}
+          />
+          <NumberSetting
+            label={s.defaultMaxTurnsLabel}
+            value={multiAgentSettings.defaultMaxTurns}
+            min={SUBAGENT_MAX_TURNS_MIN}
+            max={SUBAGENT_MAX_TURNS_MAX}
+            disabled={!multiAgentSettings.enabled}
+            onChange={setDefaultSubagentMaxTurns}
+          />
+        </div>
+
+        <div className="space-y-3">
+          <div className="flex flex-col sm:flex-row sm:items-baseline sm:justify-between gap-1 sm:gap-4">
+            <label
+              htmlFor="subagent-timeout"
+              className="text-xs uppercase tracking-widest font-bold text-on-surface-variant/80 font-label"
+            >
+              {s.timeoutLabel}
+            </label>
+            <span className="text-sm font-medium text-on-surface">
+              {s.secondsHint.replace(
+                '{value}',
+                String(Math.round(multiAgentSettings.timeoutMs / 1000))
+              )}
+            </span>
+          </div>
+          <input
+            id="subagent-timeout"
+            type="range"
+            min={30_000}
+            max={900_000}
+            step={TIMEOUT_STEP_MS}
+            value={multiAgentSettings.timeoutMs}
+            onChange={(event) => setSubagentTimeoutMs(Number(event.target.value))}
+            disabled={!multiAgentSettings.enabled}
+            className="w-full h-2 bg-surface-container-lowest rounded-full appearance-none cursor-pointer accent-primary disabled:cursor-not-allowed disabled:opacity-50"
+          />
         </div>
       </Card>
 
@@ -196,5 +322,36 @@ export function GeneralSettings({
         </div>
       </Card>
     </div>
+  );
+}
+
+function NumberSetting({
+  label,
+  value,
+  min,
+  max,
+  disabled,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  disabled: boolean;
+  onChange: (value: number) => void;
+}) {
+  return (
+    <label className="block space-y-2">
+      <span className="text-sm font-semibold text-on-surface">{label}</span>
+      <input
+        type="number"
+        min={min}
+        max={max}
+        value={value}
+        disabled={disabled}
+        onChange={(event) => onChange(Number(event.target.value))}
+        className="w-full rounded-xl border border-outline-variant/20 bg-surface-container-lowest px-3 py-2 text-sm text-on-surface focus:border-primary/60 focus:outline-none focus:ring-1 focus:ring-primary/20 disabled:opacity-50"
+      />
+    </label>
   );
 }
