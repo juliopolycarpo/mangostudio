@@ -14,7 +14,7 @@ pre-commit:
       run: bunx dprint fmt {staged_files}
       stage_fixed: true
     typecheck-affected:
-      run: bun run check --staged --skip-lint --skip-format
+      run: bun run check --staged --skip-format
       skip:
         - merge
         - rebase
