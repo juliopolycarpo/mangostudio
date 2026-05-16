@@ -73,13 +73,13 @@ bun run test --integration
 bun run test --e2e
 ```
 
-## Linting e Verificação de Tipos
+## Checks e Verificação de Tipos
 
 ```bash
 bun run check
 ```
 
-Executa verificação de formatação, ESLint e verificação de tipos TypeScript em todos os workspaces.
+Executa Biome, dprint, verificação de dependências circulares e verificação de tipos TypeScript em todos os workspaces.
 
 ## Build
 

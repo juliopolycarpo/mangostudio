@@ -3,27 +3,27 @@
  * Includes robust file validation using magic bytes detection.
  */
 
-import { type Elysia, t } from 'elysia';
+import { mkdirSync } from 'node:fs';
+import { extname, join } from 'node:path';
 import { UploadChatAttachmentResponseSchema } from '@mangostudio/shared/chat';
 import { ApiErrorResponseSchema, ERROR_CODES } from '@mangostudio/shared/errors';
-import { join, extname } from 'path';
-import { mkdirSync } from 'fs';
+import { type Elysia, t } from 'elysia';
 import { fileTypeFromBuffer } from 'file-type';
-import { getConfig } from '../lib/config';
-import { requireAuth } from '../plugins/auth-middleware';
 import { getDb } from '../db/database';
-import { getById } from '../modules/chats/infrastructure/chat-repository';
-import { generateId } from '../utils/id';
+import { getConfig } from '../lib/config';
+import {
+  buildAttachmentStoragePath,
+  writeAttachmentFile,
+} from '../modules/attachments/application/attachment-storage';
 import {
   CHAT_ATTACHMENT_MAX_SIZE,
   InvalidAttachmentError,
   validateChatAttachmentFile,
 } from '../modules/attachments/application/attachment-validation';
-import {
-  buildAttachmentStoragePath,
-  writeAttachmentFile,
-} from '../modules/attachments/application/attachment-storage';
 import { insertChatAttachment } from '../modules/attachments/infrastructure/attachment-repository';
+import { getById } from '../modules/chats/infrastructure/chat-repository';
+import { requireAuth } from '../plugins/auth-middleware';
+import { generateId } from '../utils/id';
 
 const UPLOADS_DIR = getConfig().uploads.dir;
 
@@ -86,7 +86,6 @@ export const uploadRoutes = (app: Elysia) =>
             'image/heif': ['.heic', '.heif'],
           };
 
-          // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- mime may not be a key in the map at runtime
           const expectedExts = expectedExtensions[fileType.mime] || [];
           if (expectedExts.length > 0 && !expectedExts.includes(ext.toLowerCase())) {
             console.warn(

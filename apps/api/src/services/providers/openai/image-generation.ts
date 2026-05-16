@@ -3,12 +3,12 @@
  */
 
 import type OpenAI from 'openai';
-import type { ImageGenerationRequest, ImageGenerationResult } from '../types';
-import { isImageModelId } from '../core/capability-detector';
 import {
   normalizeGeneratedImageMimeType,
   saveGeneratedImage,
 } from '../../generated-images/generated-image-storage';
+import { isImageModelId } from '../core/capability-detector';
+import type { ImageGenerationRequest, ImageGenerationResult } from '../types';
 
 function alwaysReturnsBase64(modelName: string): boolean {
   const id = modelName.toLowerCase();
@@ -48,7 +48,8 @@ export async function generateOpenAIImage(
         mimeType: 'image/png',
       }),
     };
-  } else if (data?.url) {
+  }
+  if (data?.url) {
     const imageResponse = await fetch(data.url);
     if (!imageResponse.ok) {
       throw new Error('Failed to download generated image from OpenAI CDN.');
@@ -63,7 +64,6 @@ export async function generateOpenAIImage(
         mimeType,
       }),
     };
-  } else {
-    throw new Error(`No image data returned from OpenAI API for model "${req.modelName}".`);
   }
+  throw new Error(`No image data returned from OpenAI API for model "${req.modelName}".`);
 }

@@ -1,5 +1,5 @@
 import type { AgentProfile } from '@mangostudio/shared/agents';
-import { Bot, User, ChevronRight } from 'lucide-react';
+import { Bot, ChevronRight, User } from 'lucide-react';
 
 interface AgentListProps {
   readonly agents: ReadonlyArray<AgentProfile>;

@@ -1,4 +1,4 @@
-import { ROOT_DIR, ROOT_LINT_FILES, ROOT_FORMAT_FILES } from './lib/config';
+import { ROOT_BIOME_PATHS, ROOT_DIR } from './lib/config';
 import {
   assertNoUnexpectedArguments,
   exitWithResults,
@@ -8,24 +8,24 @@ import {
   info,
   mapFilesToWorkspaces,
   parseArgs,
+  type RunResult,
   resolveDefaultBase,
   runCommand,
   runParallel,
   runWorkspaceScript,
-  type RunResult,
 } from './lib/runner';
 
 function printHelp(): never {
   console.log(`Usage: bun run fix [workspace flags] [mode flags]
 
-Runs ESLint --fix then Prettier --write.
+Runs Biome fixes for workspaces plus root Biome and dprint fixes.
 Default workspace selection: --all
 
 Workspace flags:
   --frontend
   --api
   --shared
-  --root     Run root-level fixes only (tooling lint + doc format)
+  --root     Run root-level fixes only (tooling lint + docs)
   --all
 
 Mode flags:
@@ -85,23 +85,21 @@ if (effectiveWorkspaces.length > 0) {
 
 if (effectiveIncludeRoot) {
   info('\nRoot');
-  const rootLintResult = await runCommand(
-    'root:lint:fix',
-    ['bunx', 'eslint', ...ROOT_LINT_FILES, '--fix', '--max-warnings', '0'],
+  const rootBiomeResult = await runCommand(
+    'root:biome:fix',
+    ['bunx', 'biome', 'check', '--write', ...ROOT_BIOME_PATHS],
     { cwd: ROOT_DIR }
   );
-  results.push(rootLintResult);
+  results.push(rootBiomeResult);
 
-  if (rootLintResult.exitCode !== 0) {
+  if (rootBiomeResult.exitCode !== 0) {
     exitWithResults(results);
   }
 
-  const rootFormatResult = await runCommand(
-    'root:format',
-    ['bunx', 'prettier', '--write', ...ROOT_FORMAT_FILES],
-    { cwd: ROOT_DIR }
-  );
-  results.push(rootFormatResult);
+  const rootDprintResult = await runCommand('root:dprint:fix', ['bunx', 'dprint', 'fmt'], {
+    cwd: ROOT_DIR,
+  });
+  results.push(rootDprintResult);
 }
 
 if (results.length === 0) {

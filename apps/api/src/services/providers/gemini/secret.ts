@@ -3,32 +3,31 @@
  * Uses the shared createProviderSecretService factory for key resolution.
  */
 
+import { randomUUID } from 'node:crypto';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import type { AddConnectorBody, Connector, ConnectorStatus } from '@mangostudio/shared';
 import type { SecretMetadataRow } from '@mangostudio/shared/types';
+import { stringify as stringifyToml } from 'smol-toml';
+import { getConfig, getMangoDir } from '../../../lib/config';
+import { readTomlStringSections } from '../../../lib/toml';
+import { parseStringArray } from '../../../utils/json';
+import { maskSecret } from '../../../utils/secrets';
 import {
-  GEMINI_PROVIDER,
-  listSecretMetadata,
-  getSecretMetadataById,
-  upsertSecretMetadata,
   deleteSecretMetadata,
+  GEMINI_PROVIDER,
+  getSecretMetadataById,
+  listSecretMetadata,
   type SecretMetadataInput,
+  upsertSecretMetadata,
 } from '../../secret-store/metadata';
 import { bunSecretStore, type SecretStore } from '../../secret-store/store';
+import { withAbortTimeout } from '../core/probe-timeout';
+import { recordProviderProbeTimeout } from '../core/provider-observability';
 import {
   createProviderSecretService,
   isPlaceholderConfigSecretValue,
 } from '../core/secret-service';
-import { maskSecret } from '../../../utils/secrets';
-import { recordProviderProbeTimeout } from '../core/provider-observability';
-import { withAbortTimeout } from '../core/probe-timeout';
-import { join, dirname } from 'path';
-import { getMangoDir } from '../../../lib/config';
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
-import { stringify as stringifyToml } from 'smol-toml';
-import { randomUUID } from 'crypto';
-import { getConfig } from '../../../lib/config';
-import { readTomlStringSections } from '../../../lib/toml';
-import { parseStringArray } from '../../../utils/json';
 
 const GEMINI_VALIDATION_URL =
   'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash';
@@ -57,9 +56,7 @@ export class GeminiApiKeyMissingError extends Error {
 
 /** Error thrown when Gemini rejects a candidate API key. */
 export class InvalidGeminiApiKeyError extends Error {
-  constructor(
-    message: string = 'Gemini rejected the API key. Verify that it is valid and enabled.'
-  ) {
+  constructor(message = 'Gemini rejected the API key. Verify that it is valid and enabled.') {
     super(message);
     this.name = 'InvalidGeminiApiKeyError';
   }
@@ -67,7 +64,7 @@ export class InvalidGeminiApiKeyError extends Error {
 
 /** Error thrown when Gemini cannot be reached for validation. */
 export class GeminiValidationUnavailableError extends Error {
-  constructor(message: string = 'Unable to validate the Gemini API key right now. Try again.') {
+  constructor(message = 'Unable to validate the Gemini API key right now. Try again.') {
     super(message);
     this.name = 'GeminiValidationUnavailableError';
   }
@@ -138,7 +135,6 @@ export function createGeminiSecretService(
       if (!existsSync(configPath)) return;
 
       const parsed = readTomlStringSections(configPath);
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- section may not exist in parsed TOML at runtime
       const tomlKeys = parsed.gemini_api_keys ?? {};
 
       const currentMetadata = await listMetadata(GEMINI_PROVIDER, userId);
@@ -280,7 +276,6 @@ export function createGeminiSecretService(
           mkdirSync(dirname(configPath), { recursive: true });
           const config = readTomlStringSections(configPath);
 
-          // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- section may not exist in parsed TOML at runtime
           config.gemini_api_keys ??= {};
           config.gemini_api_keys[body.name] = apiKey;
           writeFileSync(configPath, stringifyToml(config));
@@ -357,7 +352,6 @@ export function createGeminiSecretService(
           if (existsSync(configPath)) {
             const config = readTomlStringSections(configPath);
 
-            // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- section may not exist in parsed TOML at runtime
             if (config.gemini_api_keys) {
               delete config.gemini_api_keys[metadata.name];
               writeFileSync(configPath, stringifyToml(config));

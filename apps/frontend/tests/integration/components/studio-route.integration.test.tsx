@@ -1,10 +1,11 @@
 /**
  * Integration tests for the Studio placeholder route.
  */
-import { describe, expect, it, vi } from 'vitest';
+
 import { screen } from '@testing-library/react';
-import { render } from '../../support/harness/render';
+import { describe, expect, it, vi } from 'vitest';
 import { StudioPage } from '../../../src/routes/_authenticated/studio';
+import { render } from '../../support/harness/render';
 
 vi.mock('@tanstack/react-router', async () => {
   const actual = await vi.importActual('@tanstack/react-router');

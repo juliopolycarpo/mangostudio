@@ -3,13 +3,14 @@
  * Lists files and directories at a given path.
  */
 
+import type { Dirent } from 'node:fs';
 import { readdir } from 'node:fs/promises';
-import type { ToolContext } from '../types';
 import { registerTool } from '../registry';
+import type { ToolContext } from '../types';
 import {
-  type PathValidationSettings,
   normalizePathList,
   PathAccessError,
+  type PathValidationSettings,
   resolveAndValidatePath,
 } from './_fs-utils';
 
@@ -64,7 +65,7 @@ export async function executeListDirectory(
   const settings = normalizeListDirectoryToolSettings(context.parameters);
   const resolvedPath = resolveAndValidatePath(args.path, settings);
 
-  let dirents;
+  let dirents: Dirent[];
   try {
     dirents = await readdir(resolvedPath, { withFileTypes: true });
   } catch (error) {
@@ -81,6 +82,7 @@ export async function executeListDirectory(
   };
 }
 
+// biome-ignore lint/suspicious/useAwait: Migrated from ESLint
 async function execute(
   args: Record<string, unknown>,
   context: ToolContext

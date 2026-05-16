@@ -2,12 +2,12 @@
  * Unit tests for ToolSettingsPage component.
  */
 
-import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 import { screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ToolSettingsPage } from '../../../src/features/settings/tools/components/ToolSettingsPage';
 import { render } from '../../support/harness/render';
 import { createFetchScenario } from '../../support/mocks/create-fetch-scenario';
-import { ToolSettingsPage } from '../../../src/features/settings/tools/components/ToolSettingsPage';
 
 const TOOLS_RESPONSE = {
   tools: [

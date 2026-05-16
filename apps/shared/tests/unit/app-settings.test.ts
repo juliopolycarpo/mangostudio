@@ -1,24 +1,24 @@
 import { describe, expect, it } from 'vitest';
 import {
+  clampMaxToolIterations,
   DEFAULT_APP_SETTINGS,
   DEFAULT_CHAT_TITLE_SETTINGS,
   DEFAULT_CONTEXT_SETTINGS,
   DEFAULT_MULTI_AGENT_SETTINGS,
   DEFAULT_PROMPT_SETTINGS,
   IMAGE_QUALITY_OPTIONS,
+  MAX_SUBAGENT_CALLS_MAX,
+  MAX_SUBAGENT_CALLS_MIN,
   MAX_TOOL_ITERATIONS_DEFAULT,
   MAX_TOOL_ITERATIONS_MAX,
   MAX_TOOL_ITERATIONS_MIN,
-  MAX_SUBAGENT_CALLS_MAX,
-  MAX_SUBAGENT_CALLS_MIN,
-  SUBAGENT_MAX_TURNS_MAX,
-  SUBAGENT_MAX_TURNS_MIN,
-  clampMaxToolIterations,
   normalizeAppSettings,
   normalizeChatTitleSettings,
   normalizeContextSettings,
   normalizeMultiAgentSettings,
   normalizePromptSettings,
+  SUBAGENT_MAX_TURNS_MAX,
+  SUBAGENT_MAX_TURNS_MIN,
 } from '../../src/app-settings';
 
 describe('normalizeChatTitleSettings', () => {

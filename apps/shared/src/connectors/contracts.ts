@@ -1,10 +1,8 @@
 import type { ProviderType, SecretMetadataRow } from '../types/provider';
 
 /** Represents a validated and configured API connector. */
-export interface Connector extends Omit<
-  SecretMetadataRow,
-  'configured' | 'enabledModels' | 'provider'
-> {
+export interface Connector
+  extends Omit<SecretMetadataRow, 'configured' | 'enabledModels' | 'provider'> {
   provider: ProviderType;
   configured: boolean;
   enabledModels: string[];

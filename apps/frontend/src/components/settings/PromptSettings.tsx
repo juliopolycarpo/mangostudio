@@ -1,13 +1,13 @@
-import { useCallback } from 'react';
-import { Plus } from 'lucide-react';
-import { Card } from '@/components/ui/Card';
-import { Button } from '@/components/ui/Button';
-import { RuleFileCard } from '@/components/settings/RuleFileCard';
-import { useI18n } from '@/hooks/use-i18n';
 import type {
   PromptSettings as PromptSettingsData,
   RuleFileSetting,
 } from '@mangostudio/shared/prompt-rules';
+import { Plus } from 'lucide-react';
+import { useCallback } from 'react';
+import { RuleFileCard } from '@/components/settings/RuleFileCard';
+import { Button } from '@/components/ui/Button';
+import { Card } from '@/components/ui/Card';
+import { useI18n } from '@/hooks/use-i18n';
 
 interface PromptSettingsProps {
   promptSettings: PromptSettingsData;

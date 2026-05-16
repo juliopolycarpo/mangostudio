@@ -1,9 +1,9 @@
+import type { ProviderType } from '@mangostudio/shared/types';
 import {
   getCachedModelMetadata,
   getUnifiedModelCatalog,
 } from '../../../services/providers/catalog';
 import type { ModelCapabilities } from '../../../services/providers/types';
-import type { ProviderType } from '@mangostudio/shared/types';
 
 export interface ResolveModelInput {
   requestedModel?: string;

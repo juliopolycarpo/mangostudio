@@ -32,6 +32,7 @@ export interface ChatRecord {
   lastContextState: string | null;
 }
 
+// biome-ignore lint/suspicious/useAwait: Migrated from ESLint
 export async function listByUserId(userId: string, db: Kysely<Database>): Promise<ChatRecord[]> {
   return db
     .selectFrom('chats')
@@ -41,6 +42,7 @@ export async function listByUserId(userId: string, db: Kysely<Database>): Promis
     .execute();
 }
 
+// biome-ignore lint/suspicious/useAwait: Migrated from ESLint
 export async function getById(id: string, db: Kysely<Database>): Promise<ChatRecord | undefined> {
   return db.selectFrom('chats').selectAll().where('id', '=', id).executeTakeFirst();
 }

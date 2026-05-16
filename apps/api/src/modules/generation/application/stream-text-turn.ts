@@ -1,11 +1,9 @@
-import type { Kysely } from 'kysely';
-import type { Database } from '../../../db/types';
 import type {
+  ContinuationReasonCode,
   GeneratedImagePart,
   MessagePart,
   ProviderType,
   ReasoningEffort,
-  ContinuationReasonCode,
   SubagentTraceEvent,
 } from '@mangostudio/shared';
 import {
@@ -14,8 +12,6 @@ import {
   DELEGATION_MAX_RETRIES,
   mergeSubagentTraceEvents,
 } from '@mangostudio/shared';
-import type { PromptSettings } from '@mangostudio/shared/prompt-rules';
-import type { ContextSettings } from '@mangostudio/shared/chat';
 import type { AgentExecutionMode, AgentId, AgentProfile } from '@mangostudio/shared/agents';
 import { isAgentId } from '@mangostudio/shared/agents';
 import type { MultiAgentSettings } from '@mangostudio/shared/app-settings';
@@ -24,85 +20,89 @@ import {
   SUBAGENT_MAX_TURNS_MAX,
   SUBAGENT_MAX_TURNS_MIN,
 } from '@mangostudio/shared/app-settings';
+import type { ContextSettings } from '@mangostudio/shared/chat';
 import type { ToolIntent } from '@mangostudio/shared/generation';
+import type { PromptSettings } from '@mangostudio/shared/prompt-rules';
 import type { ProviderRuntimeSettings } from '@mangostudio/shared/provider-settings';
-import type { AgentTurnRequest } from '../../../services/providers/types';
+import type { Kysely } from 'kysely';
+import type { Database } from '../../../db/types';
 import { safeJsonParse } from '../../../lib/safe-parse';
-import { assertChatOwnership } from '../../chats/domain/chat-ownership';
-import { resolveModel, type ResolvedModel } from './resolve-model';
-import { loadHistory, loadRichHistory } from '../../messages/infrastructure/message-repository';
 import {
-  getProvider,
-  getProviderForModel,
-} from '../../../services/providers/core/provider-registry';
-import { warmProviderForRequest } from '../../../services/providers/core/provider-readiness';
-import { executeTool, getTool, getSafeEffectiveToolSettings } from '../../../services/tools';
+  buildPersistedContextSnapshot,
+  type ContextSeverity,
+  type ContinuationDisplayMode,
+  computeContextSnapshot,
+} from '../../../services/providers/core/context-policy';
 import {
-  getBoundedOptionalInteger,
-  getOptionalString,
-  getRequiredString,
-} from '../../../services/tools/arg-parsing';
-import type { EffectiveToolSettings } from '../../../services/tools/types';
-import {
-  GENERATE_IMAGE_TOOL_NAME,
-  createGenerateImageToolPlan,
-  generateImagesForToolPlan,
-  summarizeGenerateImageToolResult,
-  type GenerateImageToolOutcome,
-} from '../../../services/tools/builtin/generate-image';
-import { generateId } from '../../../utils/id';
-import {
-  persistUserMessage,
-  persistAiResponse,
-  persistErrorResponse,
-  updateChatAfterTurn,
-  type PersistedGeneratedImageInput,
-} from '../infrastructure/conversation-persistence';
-import {
+  type AgentTurnExecutionState,
+  type ContinuationEnvelope,
   computeSystemPromptHash,
   computeToolsetHash,
-  type ContinuationEnvelope,
-  type AgentTurnExecutionState,
 } from '../../../services/providers/core/continuation-envelope';
+import {
+  logContextInfo,
+  logDegrade,
+  logPersistenceError,
+  logStateCleared,
+  logStateUpdate,
+  logValidContinuation,
+} from '../../../services/providers/core/continuation-logger';
 import {
   decideContinuation,
   decideTurnPersistence,
   getContinuationStrategy,
 } from '../../../services/providers/core/continuation-runtime';
+import { warmProviderForRequest } from '../../../services/providers/core/provider-readiness';
 import {
-  logDegrade,
-  logValidContinuation,
-  logStateUpdate,
-  logContextInfo,
-  logPersistenceError,
-  logStateCleared,
-} from '../../../services/providers/core/continuation-logger';
+  getProvider,
+  getProviderForModel,
+} from '../../../services/providers/core/provider-registry';
+import type { AgentTurnRequest } from '../../../services/providers/types';
+import { executeTool, getSafeEffectiveToolSettings, getTool } from '../../../services/tools';
 import {
-  buildPersistedContextSnapshot,
-  computeContextSnapshot,
-  type ContextSeverity,
-  type ContinuationDisplayMode,
-} from '../../../services/providers/core/context-policy';
-import { assertTextTurnHasContent, normalizeTextTurnAttachmentIds } from './text-turn-content';
-import { resolveProviderRuntimeAttachments } from '../../attachments/application/runtime-attachment-resolver';
-import { resolveAgentRuntime, resolveRuntimeAgentId } from './resolve-agent-runtime';
+  getBoundedOptionalInteger,
+  getOptionalString,
+  getRequiredString,
+} from '../../../services/tools/arg-parsing';
+import { DELEGATE_TO_AGENT_TOOL_NAME } from '../../../services/tools/builtin/delegate-to-agent';
+import {
+  createGenerateImageToolPlan,
+  GENERATE_IMAGE_TOOL_NAME,
+  type GenerateImageToolOutcome,
+  generateImagesForToolPlan,
+  summarizeGenerateImageToolResult,
+} from '../../../services/tools/builtin/generate-image';
+import type { EffectiveToolSettings } from '../../../services/tools/types';
+import { generateId } from '../../../utils/id';
 import { getAgentProfile } from '../../agents/application/agent-settings-service';
 import { getAppSettings } from '../../app-settings/application/app-settings-service';
+import { resolveProviderRuntimeAttachments } from '../../attachments/application/runtime-attachment-resolver';
+import { assertChatOwnership } from '../../chats/domain/chat-ownership';
+import { loadHistory, loadRichHistory } from '../../messages/infrastructure/message-repository';
 import {
-  runSubagentTurn,
-  SubagentDelegationError,
-  SUBAGENT_EMPTY_TEXT_FALLBACK,
-  type DelegateToSubagentRequest,
-  type SubagentProgressEvent,
-  type SubagentRunResult,
-} from './subagent-runner';
-import { DELEGATE_TO_AGENT_TOOL_NAME } from '../../../services/tools/builtin/delegate-to-agent';
+  type PersistedGeneratedImageInput,
+  persistAiResponse,
+  persistErrorResponse,
+  persistUserMessage,
+  updateChatAfterTurn,
+} from '../infrastructure/conversation-persistence';
+import { resolveAgentRuntime, resolveRuntimeAgentId } from './resolve-agent-runtime';
+import { type ResolvedModel, resolveModel } from './resolve-model';
 import {
   getSubagentCachedEntry,
   recordSubagentResult,
   recordSubagentStatus,
   recordSubagentText,
 } from './subagent-response-cache';
+import {
+  type DelegateToSubagentRequest,
+  runSubagentTurn,
+  SUBAGENT_EMPTY_TEXT_FALLBACK,
+  SubagentDelegationError,
+  type SubagentProgressEvent,
+  type SubagentRunResult,
+} from './subagent-runner';
+import { assertTextTurnHasContent, normalizeTextTurnAttachmentIds } from './text-turn-content';
 
 const TOOL_TIMEOUT_MS = 30_000;
 const TOOL_LOOP_EXHAUSTED_MESSAGE = 'The model exceeded the maximum number of tool interactions.';
@@ -1662,10 +1662,7 @@ function classifyMissingResponseScenario(
 
 function computeBackoffMs(attempt: number): number {
   const exponent = Math.max(0, attempt - 2);
-  const base = Math.min(
-    DELEGATION_BACKOFF_MAX_MS,
-    DELEGATION_BACKOFF_BASE_MS * Math.pow(2, exponent)
-  );
+  const base = Math.min(DELEGATION_BACKOFF_MAX_MS, DELEGATION_BACKOFF_BASE_MS * 2 ** exponent);
   const jitter = 0.2 * base;
   const randomized = base + (Math.random() * 2 - 1) * jitter;
   return Math.max(0, Math.round(Math.min(DELEGATION_BACKOFF_MAX_MS, randomized)));

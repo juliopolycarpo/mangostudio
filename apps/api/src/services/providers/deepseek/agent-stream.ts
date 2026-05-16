@@ -1,9 +1,9 @@
 import type OpenAI from 'openai';
-import { createContinuationEnvelope } from '../core/continuation-envelope';
-import { getModelContextLimit } from '../core/context-policy';
-import { extractReasoningChunks } from '../openai/normalizers';
-import type { AgentTurnRequest, AgentEvent } from '../types';
 import { parseJsonWith } from '../../../lib/safe-parse';
+import { getModelContextLimit } from '../core/context-policy';
+import { createContinuationEnvelope } from '../core/continuation-envelope';
+import { extractReasoningChunks } from '../openai/normalizers';
+import type { AgentEvent, AgentTurnRequest } from '../types';
 import {
   buildDeepSeekMessages,
   buildDeepSeekProviderPrompt,
@@ -95,7 +95,6 @@ export async function* streamDeepSeekAgentTurn(
 
       const choice = chunk.choices[0];
       // choices array is empty on usage-only chunks
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
       if (!choice) continue;
 
       const delta = choice.delta as Record<string, unknown>;

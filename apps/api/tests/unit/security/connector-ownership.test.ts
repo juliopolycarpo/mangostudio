@@ -1,12 +1,12 @@
-import { describe, expect, it, afterEach, beforeAll } from 'bun:test';
+import { afterEach, beforeAll, describe, expect, it } from 'bun:test';
+import type { SecretSource } from '@mangostudio/shared/types';
+import { getDb } from '../../../src/db/database';
 import { settingsRoutes } from '../../../src/routes/settings';
-import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
 import {
   getSecretMetadataById,
   upsertSecretMetadata,
 } from '../../../src/services/secret-store/metadata';
-import { getDb } from '../../../src/db/database';
-import type { SecretSource } from '@mangostudio/shared/types';
+import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
 
 const USER_A = { id: 'user-a-own', name: 'User A', email: 'a-own@test.dev' };
 const USER_B = { id: 'user-b-own', name: 'User B', email: 'b-own@test.dev' };

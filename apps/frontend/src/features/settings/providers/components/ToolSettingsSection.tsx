@@ -2,12 +2,12 @@
  * Tool configuration section for provider settings.
  */
 
-import type { UpdateProviderRuntimeSettingsBody } from '@mangostudio/shared/provider-settings';
 import {
   MAX_TOOL_ITERATIONS_DEFAULT,
   MAX_TOOL_ITERATIONS_MAX,
   MAX_TOOL_ITERATIONS_MIN,
 } from '@mangostudio/shared/app-settings';
+import type { UpdateProviderRuntimeSettingsBody } from '@mangostudio/shared/provider-settings';
 import { Card } from '@/components/ui/Card';
 import { useI18n } from '@/hooks/use-i18n';
 

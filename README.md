@@ -129,23 +129,23 @@ mangostudio/
 | `bun run dev --api`       | Start only the API dev server                        |
 | `bun run build`           | Build the frontend for production                    |
 | `bun run build --binary`  | Generate standalone binaries with embedded frontend  |
-| `bun run check`           | Run ESLint, Prettier check, and typecheck            |
+| `bun run check`           | Run Biome, dprint, madge, and typecheck              |
 | `bun run test`            | Run unit and integration lanes                       |
 | `bun run test --unit`     | Run unit suites only                                 |
 | `bun run test --e2e`      | Run the Playwright end-to-end suite (opt-in)         |
 | `bun run test --coverage` | Run coverage collection across applicable workspaces |
-| `bun run fix`             | Apply ESLint --fix, then Prettier --write            |
+| `bun run fix`             | Apply Biome and dprint fixes                         |
 | `bun run verify`          | Full CI gate: check, test, build (stops on failure)  |
 | `bun run clean`           | Remove dist, coverage, and build artifacts           |
 
 ## Local Validation
 
-A [lefthook](https://github.com/evilmartians/lefthook) pre-commit hook runs ESLint + Prettier on staged files automatically and typechecks only the affected workspaces.
+A [lefthook](https://github.com/evilmartians/lefthook) pre-commit hook runs Biome on staged files automatically and typechecks only the affected workspaces.
 
-- `bun run check` — full check (lint, format, typecheck, circular deps).
+- `bun run check` — full check (Biome, dprint, typecheck, circular deps).
 - `bun run check --staged` — only the workspaces touched by staged files (used by the pre-commit hook).
 - `bun run check --changed` — only the workspaces changed vs `origin/main`.
-- `bun run check --quick` — lint + format only, skip typecheck.
+- `bun run check --quick` — Biome + dprint + circular deps, skip typecheck.
 - `bun run fix --staged` — auto-fix only the affected workspaces.
 
 ## Architecture

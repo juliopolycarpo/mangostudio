@@ -2,13 +2,13 @@
  * Secret persistence — read and write API keys across all supported storage backends.
  */
 
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import type { ProviderType, SecretSource } from '@mangostudio/shared/types';
-import { bunSecretStore } from '../../../services/secret-store/store';
-import { getConfig, getMangoDir } from '../../../lib/config';
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { stringify as stringifyToml } from 'smol-toml';
-import { join, dirname } from 'path';
+import { getConfig, getMangoDir } from '../../../lib/config';
 import { readTomlStringSections } from '../../../lib/toml';
+import { bunSecretStore } from '../../../services/secret-store/store';
 import { PROVIDER_SECRET_CONFIG } from '../domain/connector';
 
 /** Persists an API key in the storage backend selected by `source`. */

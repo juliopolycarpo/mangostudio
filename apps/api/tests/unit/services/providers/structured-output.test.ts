@@ -1,7 +1,7 @@
 import { describe, expect, it, mock } from 'bun:test';
+import { streamAnthropicAgentTurn } from '../../../../src/services/providers/anthropic/stream';
 import { streamAgentTurnWithResponsesAPI } from '../../../../src/services/providers/openai/responses-stream';
 import { streamOAICompatAgentTurn } from '../../../../src/services/providers/openai-compatible/chat-completions-stream';
-import { streamAnthropicAgentTurn } from '../../../../src/services/providers/anthropic/stream';
 import type {
   AgentEvent,
   AgentTurnRequest,

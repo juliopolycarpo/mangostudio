@@ -3,13 +3,13 @@
  * Creates one or more generated images during an agentic text turn.
  */
 
-import type { EffectiveToolSettings, ToolContext, ToolDefinition } from '../types';
-import type { ImageGenerationRequest, ImageGenerationResult } from '../../providers/types';
-import { getProvider, getProviderForModel } from '../../providers/core/provider-registry';
-import { warmProviderForRequest } from '../../providers/core/provider-readiness';
 import { resolveModel } from '../../../modules/generation/application/resolve-model';
 import { generateId } from '../../../utils/id';
+import { warmProviderForRequest } from '../../providers/core/provider-readiness';
+import { getProvider, getProviderForModel } from '../../providers/core/provider-registry';
+import type { ImageGenerationRequest, ImageGenerationResult } from '../../providers/types';
 import { registerTool } from '../registry';
+import type { EffectiveToolSettings, ToolContext, ToolDefinition } from '../types';
 
 export const GENERATE_IMAGE_TOOL_NAME = 'generate_image';
 

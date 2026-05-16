@@ -2,13 +2,13 @@
  * Use case: update the enabled-models list for a connector.
  */
 
+import { ERROR_CODES } from '@mangostudio/shared/errors';
+import { recalculateUnifiedCatalog } from '../../../services/providers/catalog';
+import { invalidateProviderRoutingCache } from '../../../services/providers/core/provider-registry';
 import {
   getSecretMetadataById,
   upsertSecretMetadata,
 } from '../infrastructure/connector-repository';
-import { recalculateUnifiedCatalog } from '../../../services/providers/catalog';
-import { invalidateProviderRoutingCache } from '../../../services/providers/core/provider-registry';
-import { ERROR_CODES } from '@mangostudio/shared/errors';
 
 export class ConnectorNotFoundError extends Error {
   readonly code = ERROR_CODES.NOT_FOUND;

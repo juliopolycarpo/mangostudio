@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { existsSync, readFileSync, readdirSync, rmSync } from 'fs';
-import { join } from 'path';
+import { existsSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
 import { loadConfigForTest, resetConfig } from '../../../src/lib/config';
 import {
   normalizeGeneratedImageMimeType,

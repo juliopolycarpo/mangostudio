@@ -1,12 +1,12 @@
-import { describe, expect, it, vi } from 'vitest';
-import { fireEvent, screen } from '@testing-library/react';
-import { render } from '../../support/harness/render';
-import { PromptSettings } from '../../../src/components/settings/PromptSettings';
-import { DEFAULT_PROMPT_SETTINGS } from '../../../src/hooks/use-global-settings';
 import type {
   PromptSettings as PromptSettingsData,
   RuleFileSetting,
 } from '@mangostudio/shared/prompt-rules';
+import { fireEvent, screen } from '@testing-library/react';
+import { describe, expect, it, vi } from 'vitest';
+import { PromptSettings } from '../../../src/components/settings/PromptSettings';
+import { DEFAULT_PROMPT_SETTINGS } from '../../../src/hooks/use-global-settings';
+import { render } from '../../support/harness/render';
 
 function createPromptSettings(overrides?: Partial<PromptSettingsData>): PromptSettingsData {
   return {

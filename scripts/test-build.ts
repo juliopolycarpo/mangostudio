@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+
 /**
  * Binary smoke test script.
  *
@@ -15,8 +16,8 @@
  *   API_PORT      - Port for the smoke server (default: 13001).
  */
 
-import { join } from 'path';
-import { existsSync } from 'fs';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 
 // ---------------------------------------------------------------------------
 // Config
@@ -220,7 +221,7 @@ async function smokeTest(): Promise<void> {
     }
   } finally {
     proc.kill();
-    await proc.exited.catch(() => undefined as void);
+    await proc.exited.catch(() => undefined as undefined);
     await Bun.$`rm -rf ${tmpHome}`.quiet();
   }
 }

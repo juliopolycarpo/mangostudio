@@ -9,7 +9,7 @@
  * with a shared backend such as Redis.
  */
 
-import { type Elysia } from 'elysia';
+import type { Elysia } from 'elysia';
 
 interface RateLimitConfig {
   /** Maximum number of requests per window (default: 100) */
@@ -102,7 +102,7 @@ export function rateLimit(config: Partial<RateLimitConfig> = {}) {
         const requestContext = context as RateLimitContext;
         // Skip rate limiting for certain paths
         const path = requestContext.path ?? new URL(requestContext.request.url).pathname;
-        if (mergedConfig.skip && mergedConfig.skip(path)) {
+        if (mergedConfig.skip?.(path)) {
           return { clientIp: 'skipped' };
         }
 

@@ -1,8 +1,8 @@
-import { queryOptions } from '@tanstack/react-query';
 import type {
   ProviderObservabilityLogsResponse,
   ProviderObservabilityMetricsResponse,
 } from '@mangostudio/shared/observability';
+import { queryOptions } from '@tanstack/react-query';
 import { client } from '@/lib/api-client';
 import { extractApiError } from '@/lib/utils';
 

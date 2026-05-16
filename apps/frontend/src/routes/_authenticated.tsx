@@ -1,20 +1,20 @@
 import {
   createFileRoute,
-  redirect,
   Outlet,
-  useRouterState,
+  redirect,
   useNavigate,
+  useRouterState,
 } from '@tanstack/react-router';
 import { Suspense, useState } from 'react';
-import { Spinner } from '@/components/ui/Spinner';
-import { Layout } from '@/components/layout/Layout';
 import { Header } from '@/components/layout/Header';
-import { useAppState } from '@/hooks/use-app-state';
-import { AppContext } from '@/lib/app-context';
+import { Layout } from '@/components/layout/Layout';
+import { Spinner } from '@/components/ui/Spinner';
 import { chatListQueryOptions, messagesQueryOptions } from '@/features/chat/queries';
-import { catalogQueryOptions } from '@/hooks/use-model-catalog';
-import { appSettingsQueryOptions } from '@/features/settings/app/queries';
 import { agentSettingsListQueryOptions } from '@/features/settings/agents/queries';
+import { appSettingsQueryOptions } from '@/features/settings/app/queries';
+import { useAppState } from '@/hooks/use-app-state';
+import { catalogQueryOptions } from '@/hooks/use-model-catalog';
+import { AppContext } from '@/lib/app-context';
 
 export const Route = createFileRoute('/_authenticated')({
   beforeLoad: ({ context, location }) => {

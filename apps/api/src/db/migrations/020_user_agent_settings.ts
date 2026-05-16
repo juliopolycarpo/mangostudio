@@ -1,7 +1,7 @@
-import { type Migration } from 'kysely/migration';
+import type { Migration } from 'kysely/migration';
 
 export const userAgentSettings: Migration = {
-  async up(db) {
+  async up(db): Promise<void> {
     await db.schema
       .createTable('user_agent_settings')
       .ifNotExists()
@@ -22,7 +22,7 @@ export const userAgentSettings: Migration = {
       .execute();
   },
 
-  async down(db) {
+  async down(db): Promise<void> {
     await db.schema.dropIndex('idx_user_agent_settings_user_agent').ifExists().execute();
     await db.schema.dropTable('user_agent_settings').ifExists().execute();
   },

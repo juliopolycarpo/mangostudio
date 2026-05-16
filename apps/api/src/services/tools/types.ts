@@ -2,11 +2,11 @@
  * Core types for the tool registry.
  */
 
-import type { ToolDefinition } from '../providers/types';
 import type {
   ToolParameterDescriptor,
   ToolSettingsCategory,
 } from '@mangostudio/shared/tool-settings';
+import type { ToolDefinition } from '../providers/types';
 
 export type { ToolDefinition };
 

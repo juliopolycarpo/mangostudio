@@ -1,13 +1,13 @@
-import type {
-  ProviderRuntimeSettings,
-  ProviderSettingsDescriptor,
-  ReasoningPolicy,
-} from '@mangostudio/shared/provider-settings';
 import {
   MAX_TOOL_ITERATIONS_DEFAULT,
   MAX_TOOL_ITERATIONS_MAX,
   MAX_TOOL_ITERATIONS_MIN,
 } from '@mangostudio/shared/app-settings';
+import type {
+  ProviderRuntimeSettings,
+  ProviderSettingsDescriptor,
+  ReasoningPolicy,
+} from '@mangostudio/shared/provider-settings';
 import type { ProviderType, ReasoningEffort } from '@mangostudio/shared/types';
 
 const PROVIDER_TYPES: ReadonlyArray<ProviderType> = [

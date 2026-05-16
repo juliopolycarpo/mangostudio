@@ -1,9 +1,9 @@
 /* global console */
 import type { GenerateImageResponse, GenerateTextResponse } from '@mangostudio/shared';
-import type { StreamChunk } from '@mangostudio/shared/streaming';
 import type { GenerateImageBody, RespondStreamBody } from '@mangostudio/shared/generation';
-import { client } from '../lib/api-client';
+import type { StreamChunk } from '@mangostudio/shared/streaming';
 import { getApiBaseUrl } from '../lib/api-base-url';
+import { client } from '../lib/api-client';
 
 export type GenerateImageRequest = Omit<GenerateImageBody, 'model'> & { model: string };
 export type RespondTextRequest = RespondStreamBody;

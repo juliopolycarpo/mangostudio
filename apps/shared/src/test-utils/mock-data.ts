@@ -1,8 +1,8 @@
 import type {
   Chat,
-  Message,
   GalleryItem,
   GeneratedImageArtifact,
+  Message,
   SecretMetadataRow,
 } from '../types';
 

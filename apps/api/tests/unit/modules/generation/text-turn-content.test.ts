@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import {
-  EmptyTextTurnError,
   assertTextTurnHasContent,
+  EmptyTextTurnError,
   normalizeTextTurnAttachmentIds,
 } from '../../../../src/modules/generation/application/text-turn-content';
 

@@ -1,4 +1,4 @@
-import { Type, type Static } from '@sinclair/typebox';
+import { type Static, Type } from '@sinclair/typebox';
 
 export const PathListItemSchema = Type.Object({
   path: Type.String(),

@@ -1,12 +1,12 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { Value } from '@sinclair/typebox/value';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
-import { join } from 'path';
-import { tmpdir } from 'os';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   DefaultRuleFilesResponseSchema,
   RuleFilePreviewResponseSchema,
 } from '@mangostudio/shared/prompt-rules';
+import { Value } from '@sinclair/typebox/value';
 import { settingsRoutes } from '../../../src/routes/settings';
 import {
   createApiTestApp,

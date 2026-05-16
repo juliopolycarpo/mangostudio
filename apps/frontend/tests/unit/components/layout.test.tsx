@@ -1,5 +1,5 @@
-import { describe, expect, it, vi } from 'vitest';
 import { mockChats } from '@mangostudio/shared/test-utils';
+import { describe, expect, it, vi } from 'vitest';
 import { Layout } from '../../../src/components/layout/Layout';
 import { render, screen } from '../../support/harness/render';
 

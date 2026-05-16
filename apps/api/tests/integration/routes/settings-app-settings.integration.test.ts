@@ -1,12 +1,12 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { Value } from '@sinclair/typebox/value';
 import {
+  type AppSettings,
   AppSettingsSchema,
   DEFAULT_APP_SETTINGS,
-  type AppSettings,
 } from '@mangostudio/shared/app-settings';
-import { settingsRoutes } from '../../../src/routes/settings';
+import { Value } from '@sinclair/typebox/value';
 import { getDb } from '../../../src/db/database';
+import { settingsRoutes } from '../../../src/routes/settings';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
 
 const TEST_USER = {

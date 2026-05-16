@@ -1,4 +1,4 @@
-import { Type, type Static } from '@sinclair/typebox';
+import { type Static, Type } from '@sinclair/typebox';
 import { ProviderTypeSchema } from '../provider-settings/schemas';
 
 const ContinuationReasonCodeSchema = Type.Union([

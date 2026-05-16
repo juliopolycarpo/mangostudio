@@ -1,9 +1,9 @@
 ---
 name: Feature request
 about: Suggest a new feature or improvement for MangoStudio
-title: 'feat: <short description>'
+title: "feat: <short description>"
 labels: enhancement
-assignees: ''
+assignees: ""
 ---
 
 ## Problem

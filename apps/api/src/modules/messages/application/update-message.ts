@@ -1,7 +1,7 @@
 import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';
 import { assertMessageOwnership } from '../domain/message-ownership';
-import { updateMessage, type UpdateMessageData } from '../infrastructure/message-repository';
+import { type UpdateMessageData, updateMessage } from '../infrastructure/message-repository';
 
 export interface UpdateMessageInput {
   messageId: string;

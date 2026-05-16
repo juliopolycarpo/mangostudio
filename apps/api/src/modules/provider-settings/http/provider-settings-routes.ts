@@ -1,17 +1,17 @@
-import { Elysia, t } from 'elysia';
-import { UpdateProviderRuntimeSettingsBodySchema } from '@mangostudio/shared/provider-settings';
+import type { ApiErrorResponse } from '@mangostudio/shared/errors';
 import type {
   ProviderSettingsDescriptor,
   ProviderSettingsListResponse,
 } from '@mangostudio/shared/provider-settings';
-import type { ApiErrorResponse } from '@mangostudio/shared/errors';
+import { UpdateProviderRuntimeSettingsBodySchema } from '@mangostudio/shared/provider-settings';
+import { Elysia, t } from 'elysia';
 import { getDb } from '../../../db/database';
 import { requireAuth } from '../../../plugins/auth-middleware';
 import {
   getProviderSettingsDescriptor,
   listProviderSettingsDescriptors,
-  parseProviderParam,
   ProviderSettingsError,
+  parseProviderParam,
   updateProviderSettingsDescriptor,
 } from '../application/provider-settings-service';
 
@@ -32,6 +32,7 @@ function handleProviderSettingsError(
 export const providerSettingsRoutes = new Elysia()
   .use(requireAuth)
 
+  // biome-ignore lint/suspicious/useAwait: Migrated from ESLint
   .get('/providers', async ({ user }): Promise<ProviderSettingsListResponse> => {
     return listProviderSettingsDescriptors(getDb(), user?.id ?? '');
   })

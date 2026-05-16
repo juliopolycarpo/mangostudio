@@ -1,9 +1,9 @@
 import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';
 import {
-  createChat,
-  type CreateChatData,
   type ChatRecord,
+  type CreateChatData,
+  createChat,
 } from '../infrastructure/chat-repository';
 
 export interface CreateChatInput {
@@ -12,6 +12,7 @@ export interface CreateChatInput {
   userId: string;
 }
 
+// biome-ignore lint/suspicious/useAwait: Migrated from ESLint
 export async function createChatUseCase(
   input: CreateChatInput,
   db: Kysely<Database>

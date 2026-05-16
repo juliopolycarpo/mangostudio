@@ -1,9 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
-import { join } from 'path';
-import { tmpdir } from 'os';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { loadConfigForTest } from '../../../../src/lib/config';
-import { AgentSettingsError } from '../../../../src/modules/agents/domain/agent-profile';
 import {
   createMarkdownAgent,
   deleteMarkdownAgent,
@@ -11,6 +10,7 @@ import {
   previewAgentMarkdown,
   readMarkdownAgent,
 } from '../../../../src/modules/agents/application/agent-file-service';
+import { AgentSettingsError } from '../../../../src/modules/agents/domain/agent-profile';
 
 let agentsDir: string;
 

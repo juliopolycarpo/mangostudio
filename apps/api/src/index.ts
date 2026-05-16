@@ -3,20 +3,19 @@
  * Elysia-based server running on Bun with Kysely SQLite persistence.
  */
 
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { staticPlugin } from '@elysiajs/static';
-import { join } from 'path';
-import { existsSync } from 'fs';
 import { Migrator } from 'kysely/migration';
-
-import { getDb, closeDb } from './db/database';
-import { allMigrations } from './db/migrations';
-import { getDefaultFrontendDir } from './lib/runtime-paths';
-import { getConfig } from './lib/config';
-import { isSpaRoute } from './lib/spa-guard';
 import { app } from './app';
+import { closeDb, getDb } from './db/database';
+import { allMigrations } from './db/migrations';
+import { getConfig } from './lib/config';
+import { getDefaultFrontendDir } from './lib/runtime-paths';
+import { isSpaRoute } from './lib/spa-guard';
 import {
-  loadObservabilitySnapshot,
   flushObservabilitySnapshot,
+  loadObservabilitySnapshot,
 } from './services/providers/core/provider-observability';
 
 const PORT = getConfig().server.port;

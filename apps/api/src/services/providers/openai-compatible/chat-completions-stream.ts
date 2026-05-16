@@ -6,15 +6,14 @@
  */
 
 import type OpenAI from 'openai';
+import { parseJsonWith } from '../../../lib/safe-parse';
+import { appendAttachmentFallbackNotes } from '../core/attachment-content';
+import { getModelContextLimit } from '../core/context-policy';
+import { createContinuationEnvelope } from '../core/continuation-envelope';
 import { buildChatCompletionsReplay } from '../core/replay-builder';
 import { toolDefsToChatCompletions } from '../core/tool-mapper';
-import { appendAttachmentFallbackNotes } from '../core/attachment-content';
-import type { StructuredOutputConfig } from '../types';
-import { createContinuationEnvelope } from '../core/continuation-envelope';
-import { getModelContextLimit } from '../core/context-policy';
 import { extractReasoningChunks } from '../openai/normalizers';
-import type { AgentTurnRequest, AgentEvent } from '../types';
-import { parseJsonWith } from '../../../lib/safe-parse';
+import type { AgentEvent, AgentTurnRequest, StructuredOutputConfig } from '../types';
 
 /**
  * Extended delta shape for OpenAI-compatible endpoints.
@@ -137,7 +136,6 @@ export async function* streamOAICompatAgentTurn(
       }
 
       const choice = chunk.choices[0];
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- choices array may be empty at runtime
       if (!choice) continue;
 
       // Cast to ExtendedChatDelta — the SDK type doesn't model DeepSeek/OpenRouter reasoning fields

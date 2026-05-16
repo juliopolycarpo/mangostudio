@@ -1,16 +1,20 @@
 pre-commit:
   parallel: true
   commands:
-    eslint:
-      glob: '*.{ts,tsx,js,jsx}'
-      run: bunx eslint --cache --max-warnings 0 --no-warn-ignored --fix {staged_files}
+    biome:
+      glob: "*.{ts,tsx,js,jsx,json}"
+      run: bunx biome check --write {staged_files}
       stage_fixed: true
-    prettier:
-      glob: '*.{ts,tsx,js,json,md,yml,yaml}'
-      run: bunx prettier --cache --write {staged_files}
+    dprint:
+      glob: "*.{md,mdx,toml,yml,yaml}"
+      run: bunx dprint fmt {staged_files}
+      stage_fixed: true
+    dprint-dockerfile:
+      glob: "{Dockerfile,Dockerfile.*}"
+      run: bunx dprint fmt {staged_files}
       stage_fixed: true
     typecheck-affected:
-      run: bun run check --staged --skip-lint --skip-format
+      run: bun run check --staged --skip-format
       skip:
         - merge
         - rebase

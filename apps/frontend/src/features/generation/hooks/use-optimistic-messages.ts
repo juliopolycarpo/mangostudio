@@ -1,9 +1,9 @@
-import { useCallback } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
-import type { InfiniteData } from '@tanstack/react-query';
 import type { Message } from '@mangostudio/shared';
-import { messageKeys } from '@/features/chat/queries';
+import type { InfiniteData } from '@tanstack/react-query';
+import { useQueryClient } from '@tanstack/react-query';
+import { useCallback } from 'react';
 import type { MessagesPage } from '@/features/chat/queries';
+import { messageKeys } from '@/features/chat/queries';
 
 type MessagesCache = InfiniteData<MessagesPage, string | null>;
 

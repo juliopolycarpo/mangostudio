@@ -10,9 +10,9 @@
  * Uses temporary TOML files in /tmp so the tests do not depend on the
  * presence of .mango/config.toml in the developer's environment.
  */
-import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
-import { writeFileSync, mkdirSync, rmSync } from 'fs';
-import { join, resolve } from 'path';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 import { loadConfig, resetConfig } from '../../../src/lib/config';
 
 const TMP_DIR = join('/tmp', `mango-config-test-${process.pid}`);
@@ -40,7 +40,7 @@ describe('config precedence', () => {
   beforeEach(() => {
     mkdirSync(TMP_DIR, { recursive: true });
     savedEnv = saveEnv();
-    WATCHED_ENV_KEYS.forEach((k) => delete process.env[k]);
+    for (const k of WATCHED_ENV_KEYS) delete process.env[k];
     resetConfig();
   });
 
@@ -122,7 +122,7 @@ describe('corsOrigins includes server origin for same-origin deployments', () =>
   beforeEach(() => {
     mkdirSync(TMP_DIR, { recursive: true });
     savedEnv = saveEnv();
-    WATCHED_ENV_KEYS.forEach((k) => delete process.env[k]);
+    for (const k of WATCHED_ENV_KEYS) delete process.env[k];
     resetConfig();
   });
 

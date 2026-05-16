@@ -2,13 +2,13 @@
  * Hook: tool settings list and update.
  */
 
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type {
   ToolSettingsDescriptor,
   UpdateToolSettingsBody,
 } from '@mangostudio/shared/tool-settings';
-import { toolSettingsKeys, toolSettingsListQueryOptions } from '../queries';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { updateToolSetting } from '../api';
+import { toolSettingsKeys, toolSettingsListQueryOptions } from '../queries';
 
 function syncToolSettingsListCache(
   queryClient: ReturnType<typeof useQueryClient>,
@@ -35,6 +35,7 @@ export function useUpdateToolSetting() {
   const queryClient = useQueryClient();
 
   return useMutation({
+    // biome-ignore lint/suspicious/useAwait: Migrated from ESLint
     mutationFn: async ({ toolName, body }: { toolName: string; body: UpdateToolSettingsBody }) => {
       return updateToolSetting(toolName, body);
     },

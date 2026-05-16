@@ -14,14 +14,14 @@
  * into wire params, SSE events, and persistence actions.
  */
 
-import type { ProviderType, ContinuationReasonCode } from '@mangostudio/shared/types';
 import type { AgentId } from '@mangostudio/shared/agents';
+import type { ContinuationReasonCode, ProviderType } from '@mangostudio/shared/types';
 import {
+  type ContinuationEnvelope,
+  type ContinuationMode,
+  isDurableMode,
   parseContinuationEnvelope,
   validateContinuationEnvelope,
-  isDurableMode,
-  type ContinuationMode,
-  type ContinuationEnvelope,
 } from './continuation-envelope';
 
 export type ContinuationDecision =

@@ -4,18 +4,18 @@
  */
 
 import type OpenAI from 'openai';
-import type {
-  AgentTurnRequest,
-  ModelCapabilities,
-  ProviderRuntimeAttachment,
-  TextGenerationRequest,
-} from '../types';
 import {
   attachmentToDataUrl,
   getAttachmentSupportKind,
   isAttachmentSupportedByProvider,
   unsupportedAttachmentNotes,
 } from '../core/attachment-content';
+import type {
+  AgentTurnRequest,
+  ModelCapabilities,
+  ProviderRuntimeAttachment,
+  TextGenerationRequest,
+} from '../types';
 
 const OPENAI_CHAT_ATTACHMENT_KINDS = ['image'] as const;
 const OPENAI_RESPONSES_ATTACHMENT_KINDS = ['image', 'pdf', 'text'] as const;

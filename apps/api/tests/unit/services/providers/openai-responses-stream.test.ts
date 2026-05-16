@@ -1,24 +1,24 @@
 import { describe, expect, it } from 'bun:test';
 import { APIError } from 'openai';
-import { streamAgentTurnWithResponsesAPI } from '../../../../src/services/providers/openai/responses-stream';
+import {
+  computeSystemPromptHash,
+  computeToolsetHash,
+  serializeContinuationEnvelope,
+} from '../../../../src/services/providers/core/continuation-envelope';
 import {
   isStrictCompatible,
   toolDefsToResponsesAPI,
 } from '../../../../src/services/providers/core/tool-mapper';
-import {
-  serializeContinuationEnvelope,
-  computeSystemPromptHash,
-  computeToolsetHash,
-} from '../../../../src/services/providers/core/continuation-envelope';
-import {
-  expectTurnCompletedEnvelope,
-  expectContinuationDegraded,
-} from '../../../../tests/support/providers/contract-assertions';
+import { streamAgentTurnWithResponsesAPI } from '../../../../src/services/providers/openai/responses-stream';
 import type {
   AgentEvent,
   AgentTurnRequest,
   ProviderRuntimeAttachment,
 } from '../../../../src/services/providers/types';
+import {
+  expectContinuationDegraded,
+  expectTurnCompletedEnvelope,
+} from '../../../../tests/support/providers/contract-assertions';
 
 type CreateFn = (
   params: Record<string, unknown>,

@@ -4,41 +4,41 @@
  * The baseURL is stored per-connector in secret_metadata.baseUrl.
  */
 
-import { registerProvider } from '../core/provider-registry';
 import { validateBaseUrl } from '../core/base-url-policy';
+import { isImageModelId, isReasoningModel } from '../core/capability-detector';
 import { withModelCache } from '../core/model-cache';
-import { createReadinessCache, createReadinessCacheKey } from '../core/readiness-cache';
+import { PROVIDER_PROBE_TIMEOUT_MS, withAbortTimeout } from '../core/probe-timeout';
 import {
   recordProviderCacheHit,
   recordProviderCacheMiss,
   recordProviderProbeTimeout,
 } from '../core/provider-observability';
-import { PROVIDER_PROBE_TIMEOUT_MS, withAbortTimeout } from '../core/probe-timeout';
+import { registerProvider } from '../core/provider-registry';
+import { createReadinessCache, createReadinessCacheKey } from '../core/readiness-cache';
 import { createProviderSecretService } from '../core/secret-service';
-import { isImageModelId, isReasoningModel } from '../core/capability-detector';
-import { buildChatMessages } from '../openai/message-mapper';
 import { generateOpenAIImage } from '../openai/image-generation';
+import { buildChatMessages } from '../openai/message-mapper';
 import { extractReasoningChunks } from '../openai/normalizers';
-import { createCompatibleClient } from './client';
-import { classifyEndpoint } from './endpoint-classifier';
-import { streamOAICompatAgentTurn } from './chat-completions-stream';
-import { resolveCompatibleClientConfig } from './resolve-client-config';
 import type {
+  AgentEvent,
+  AgentTurnRequest,
   AIProvider,
-  TextGenerationRequest,
-  TextGenerationResult,
-  StreamingChunk,
   ImageGenerationRequest,
   ImageGenerationResult,
   ModelInfo,
-  AgentTurnRequest,
-  AgentEvent,
   ProviderHealthcheckRequest,
   ProviderWarmupRequest,
+  StreamingChunk,
+  TextGenerationRequest,
+  TextGenerationResult,
 } from '../types';
+import { streamOAICompatAgentTurn } from './chat-completions-stream';
+import { createCompatibleClient } from './client';
+import { classifyEndpoint } from './endpoint-classifier';
+import { resolveCompatibleClientConfig } from './resolve-client-config';
 
 // Re-export for consumers
-export { extractReasoningChunks, classifyEndpoint };
+export { classifyEndpoint, extractReasoningChunks };
 
 const secretService = createProviderSecretService({
   provider: 'openai-compatible',
@@ -84,6 +84,7 @@ async function loadPreparedRuntime(
   };
 }
 
+// biome-ignore lint/suspicious/useAwait: Migrated from ESLint
 async function prepareRuntime(
   userId: string,
   modelName?: string
@@ -243,6 +244,7 @@ const openAICompatibleProvider: AIProvider = {
     return generateOpenAIImage(client, req);
   },
 
+  // biome-ignore lint/suspicious/useAwait: Migrated from ESLint
   async listModels(userId: string): Promise<ModelInfo[]> {
     return listModelsWithCache(userId);
   },

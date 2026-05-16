@@ -1,21 +1,21 @@
 /* global document */
 import type { GeneratedImagePart, Message, MessagePart } from '@mangostudio/shared';
-import {
-  Sparkles,
-  Download,
-  Bookmark,
-  ImageOff,
-  Image,
-  Copy,
-  Check,
-  ArrowDown,
-} from 'lucide-react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import { format } from 'date-fns';
+import {
+  ArrowDown,
+  Bookmark,
+  Check,
+  Copy,
+  Download,
+  Image,
+  ImageOff,
+  Sparkles,
+} from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { useVirtualizer } from '@tanstack/react-virtual';
-import { useI18n } from '@/hooks/use-i18n';
 import { MarkdownContent } from '@/components/MarkdownContent';
+import { useI18n } from '@/hooks/use-i18n';
 import { MessageParts } from './MessageParts';
 import { ReservedAspectImage } from './ReservedAspectImage';
 

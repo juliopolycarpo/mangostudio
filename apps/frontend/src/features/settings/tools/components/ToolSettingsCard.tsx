@@ -2,12 +2,12 @@
  * A card displaying a single tool's settings.
  */
 
-import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import type { ToolSettingsDescriptor } from '@mangostudio/shared/tool-settings';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Card } from '@/components/ui/Card';
 import { useI18n } from '@/hooks/use-i18n';
 import { useUpdateToolSetting } from '../hooks/use-tool-settings';
 import { ToolParameterField } from './ToolParameterField';
-import { Card } from '@/components/ui/Card';
 
 const TOOL_PARAMETERS_AUTOSAVE_MS = 300;
 

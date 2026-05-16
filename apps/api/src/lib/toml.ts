@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { parse as parseToml } from 'smol-toml';
 
 export type TomlStringSections = Record<string, Record<string, string>>;

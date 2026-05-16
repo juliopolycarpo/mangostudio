@@ -1,43 +1,44 @@
 import { describe, expect, it } from 'bun:test';
-import { Value } from '@sinclair/typebox/value';
 import { AddConnectorBodySchema } from '@mangostudio/shared/connectors';
-
+import { Value } from '@sinclair/typebox/value';
 import {
-  normalizeDeepSeekReasoningEffort,
-  buildDeepSeekSystemPrompt,
-} from '../../../../src/services/providers/deepseek/normalizers';
+  decideTurnPersistence,
+  getContinuationStrategy,
+} from '../../../../src/services/providers/core/continuation-runtime';
+import {
+  parseDeepSeekLoopState,
+  streamDeepSeekAgentTurn,
+} from '../../../../src/services/providers/deepseek/agent-stream';
 import {
   createDeepSeekAgentClient,
   createDeepSeekClient,
   validateDeepSeekApiKey,
 } from '../../../../src/services/providers/deepseek/client';
 import {
+  buildDeepSeekMessages,
+  buildDeepSeekRequestBody,
+} from '../../../../src/services/providers/deepseek/message-mapper';
+import {
   fetchDeepSeekModels,
   getDeepSeekFallbackModels,
   toDeepSeekModelInfo,
 } from '../../../../src/services/providers/deepseek/model-catalog';
 import {
-  buildDeepSeekMessages,
-  buildDeepSeekRequestBody,
-} from '../../../../src/services/providers/deepseek/message-mapper';
-import { parseDeepSeekLoopState } from '../../../../src/services/providers/deepseek/agent-stream';
+  buildDeepSeekSystemPrompt,
+  normalizeDeepSeekReasoningEffort,
+} from '../../../../src/services/providers/deepseek/normalizers';
+import type { AgentTurnRequest, ChatTurnContext } from '../../../../src/services/providers/types';
 import {
-  getContinuationStrategy,
-  decideTurnPersistence,
-} from '../../../../src/services/providers/core/continuation-runtime';
-import { streamDeepSeekAgentTurn } from '../../../../src/services/providers/deepseek/agent-stream';
-import {
-  reasoningDeltaChunk,
-  deepSeekUsageChunk,
-  toolCallSequence,
-  createFakeDeepSeekClient,
-} from '../../../support/providers/fake-deepseek-stream';
-import {
-  textDeltaChunk,
-  stopChunk,
   chainChunks,
+  stopChunk,
+  textDeltaChunk,
 } from '../../../support/providers/fake-chat-completions';
-import type { ChatTurnContext, AgentTurnRequest } from '../../../../src/services/providers/types';
+import {
+  createFakeDeepSeekClient,
+  deepSeekUsageChunk,
+  reasoningDeltaChunk,
+  toolCallSequence,
+} from '../../../support/providers/fake-deepseek-stream';
 
 // ---------------------------------------------------------------------------
 // Helpers

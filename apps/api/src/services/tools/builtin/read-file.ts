@@ -3,12 +3,12 @@
  * Reads the contents of a text file from disk.
  */
 
-import type { ToolContext } from '../types';
 import { registerTool } from '../registry';
+import type { ToolContext } from '../types';
 import {
-  type PathValidationSettings,
   normalizePathList,
   PathAccessError,
+  type PathValidationSettings,
   resolveAndValidatePath,
 } from './_fs-utils';
 
@@ -71,6 +71,7 @@ export async function executeReadFile(
   return { content, path: args.path, size };
 }
 
+// biome-ignore lint/suspicious/useAwait: Migrated from ESLint
 async function execute(
   args: Record<string, unknown>,
   context: ToolContext

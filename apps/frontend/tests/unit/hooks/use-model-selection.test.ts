@@ -1,7 +1,7 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, renderHook } from '../../support/harness/render';
-import { useModelSelection } from '../../../src/features/settings/connectors/hooks/use-model-selection';
 import type { Connector, ModelCatalogResponse } from '@mangostudio/shared';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { useModelSelection } from '../../../src/features/settings/connectors/hooks/use-model-selection';
+import { act, renderHook } from '../../support/harness/render';
 
 const mockUpdateConnectorModels = vi.fn();
 

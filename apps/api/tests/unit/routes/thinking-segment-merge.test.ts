@@ -2,7 +2,7 @@
  * Unit tests for the interleaved thinking segment-merging algorithm used in
  * respond-stream.ts before persisting the final message parts.
  */
-import { describe, it, expect } from 'bun:test';
+import { describe, expect, it } from 'bun:test';
 import type { MessagePart } from '@mangostudio/shared';
 
 /**

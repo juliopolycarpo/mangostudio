@@ -1,7 +1,7 @@
-import { type Migration } from 'kysely/migration';
+import type { Migration } from 'kysely/migration';
 
 export const userProviderSettings: Migration = {
-  async up(db) {
+  async up(db): Promise<void> {
     await db.schema
       .createTable('user_provider_settings')
       .ifNotExists()
@@ -22,7 +22,7 @@ export const userProviderSettings: Migration = {
       .execute();
   },
 
-  async down(db) {
+  async down(db): Promise<void> {
     await db.schema.dropIndex('idx_user_provider_settings_user_provider').ifExists().execute();
     await db.schema.dropTable('user_provider_settings').ifExists().execute();
   },

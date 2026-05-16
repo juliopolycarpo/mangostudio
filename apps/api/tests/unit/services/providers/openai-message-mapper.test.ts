@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'bun:test';
 import {
   buildChatMessages,
-  buildResponsesInput,
   buildOpenAIResponsesUserMessage,
+  buildResponsesInput,
 } from '../../../../src/services/providers/openai/message-mapper';
 import type {
   ProviderRuntimeAttachment,

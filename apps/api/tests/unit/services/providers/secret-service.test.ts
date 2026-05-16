@@ -1,13 +1,13 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { mkdtempSync, rmSync, writeFileSync } from 'fs';
-import { join } from 'path';
-import { tmpdir } from 'os';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { SecretMetadataRow } from '@mangostudio/shared/types';
-import type { SecretMetadataInput } from '../../../../src/services/secret-store/metadata';
 import {
   createProviderSecretService,
   isPlaceholderConfigSecretValue,
 } from '../../../../src/services/providers/core/secret-service';
+import type { SecretMetadataInput } from '../../../../src/services/secret-store/metadata';
 import { InMemorySecretStore } from '../../../support/mocks/mock-secret-store';
 
 function createMetadataHarness(initial: SecretMetadataRow[] = []) {

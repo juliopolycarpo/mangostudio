@@ -1,16 +1,16 @@
-import { describe, expect, it, afterEach, beforeAll } from 'bun:test';
-import { chatRoutes } from '../../../src/modules/chats/http/chat-routes';
-import {
-  createApiTestApp,
-  createAuthenticatedApiTestApp,
-} from '../../support/harness/create-api-test-app';
+import { afterEach, beforeAll, describe, expect, it } from 'bun:test';
 import { getDb } from '../../../src/db/database';
+import { chatRoutes } from '../../../src/modules/chats/http/chat-routes';
 import { buildPersistedContextSnapshot } from '../../../src/services/providers/core/context-policy';
 import {
   getProvider,
   registerProvider,
 } from '../../../src/services/providers/core/provider-registry';
 import type { AIProvider } from '../../../src/services/providers/types';
+import {
+  createApiTestApp,
+  createAuthenticatedApiTestApp,
+} from '../../support/harness/create-api-test-app';
 
 const TEST_USER = {
   id: 'test-user-chats',
@@ -192,8 +192,8 @@ describe('POST /chats', () => {
     expect(response.status).toBe(200);
     const body = (await response.json()) as Record<string, unknown>;
     expect(body).toHaveProperty('id');
-    expect(typeof body['id']).toBe('string');
-    expect((body['id'] as string).length).toBeGreaterThan(0);
+    expect(typeof body.id).toBe('string');
+    expect((body.id as string).length).toBeGreaterThan(0);
   });
 
   it('does not accept client-supplied id in body', async () => {
@@ -213,8 +213,8 @@ describe('POST /chats', () => {
     expect(response.status).toBe(200);
     const body = (await response.json()) as Record<string, unknown>;
     expect(body).toHaveProperty('id');
-    expect(typeof body['id']).toBe('string');
-    expect(body['id']).not.toBe(clientId);
+    expect(typeof body.id).toBe('string');
+    expect(body.id).not.toBe(clientId);
   });
 });
 

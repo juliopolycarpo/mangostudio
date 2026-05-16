@@ -1,4 +1,4 @@
-import { type Migration } from 'kysely/migration';
+import type { Migration } from 'kysely/migration';
 
 /**
  * Migration 011 — add parts and providerState columns to messages.
@@ -8,7 +8,7 @@ import { type Migration } from 'kysely/migration';
  * thinking signatures).
  */
 export const messageParts: Migration = {
-  async up(db) {
+  async up(db): Promise<void> {
     await db.schema
       .alterTable('messages')
       .addColumn('parts', 'text', (col) => col.defaultTo(null))
@@ -20,7 +20,7 @@ export const messageParts: Migration = {
       .execute();
   },
 
-  async down(_db) {
+  async down(_db): Promise<void> {
     // SQLite does not support DROP COLUMN before version 3.35.0.
     // Dropping these columns is a no-op; the schema is append-only.
   },

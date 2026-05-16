@@ -1,6 +1,6 @@
-import { describe, it, expect } from 'vitest';
-import { render, screen, act } from '../../../support/harness/render';
+import { describe, expect, it } from 'vitest';
 import { ToastProvider, useToast } from '@/components/ui/Toast';
+import { act, render, screen } from '../../../support/harness/render';
 
 function ToastTester() {
   const { toast } = useToast();

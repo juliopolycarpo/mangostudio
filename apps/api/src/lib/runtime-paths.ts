@@ -2,8 +2,8 @@
  * Runtime path helpers for development and standalone executable modes.
  */
 
-import { basename, dirname, join } from 'path';
-import { existsSync } from 'fs';
+import { existsSync } from 'node:fs';
+import { basename, dirname, join } from 'node:path';
 
 function isBunBinary(execPath: string): boolean {
   const executableName = basename(execPath).toLowerCase();

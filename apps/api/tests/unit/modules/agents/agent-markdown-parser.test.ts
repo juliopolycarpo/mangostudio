@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'bun:test';
-import { AgentSettingsError } from '../../../../src/modules/agents/domain/agent-profile';
 import {
   parseAgentMarkdownProfile,
   serializeAgentMarkdown,
 } from '../../../../src/modules/agents/application/agent-markdown-parser';
+import { AgentSettingsError } from '../../../../src/modules/agents/domain/agent-profile';
 
 describe('agent markdown parser', () => {
   it('parses compatible frontmatter and preserves markdown body as system prompt', () => {

@@ -1,4 +1,3 @@
-import { useState, useEffect, useCallback } from 'react';
 import type {
   AgentId,
   AgentProfile,
@@ -7,7 +6,8 @@ import type {
 } from '@mangostudio/shared/agents';
 import { MAX_TOOL_ITERATIONS_MAX, MAX_TOOL_ITERATIONS_MIN } from '@mangostudio/shared/app-settings';
 import type { ToolSettingsDescriptor } from '@mangostudio/shared/tool-settings';
-import { Eye, RotateCcw, Save, Trash2, AlertCircle } from 'lucide-react';
+import { AlertCircle, Eye, RotateCcw, Save, Trash2 } from 'lucide-react';
+import { useCallback, useEffect, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { AgentMarkdownEditor } from './AgentMarkdownEditor';
 import { AgentToolPicker } from './AgentToolPicker';

@@ -1,10 +1,10 @@
-import { useState, useCallback, useMemo } from 'react';
 import { createTimestampChatTitle } from '@mangostudio/shared/chat';
+import { useCallback, useMemo, useState } from 'react';
 import {
   useChatsQuery,
   useCreateChatMutation,
-  useUpdateChatMutation,
   useDeleteChatMutation,
+  useUpdateChatMutation,
 } from '@/features/chat/queries';
 
 export function useChats() {

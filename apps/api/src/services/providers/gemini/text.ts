@@ -4,22 +4,22 @@
  */
 
 import type { Content, Part } from '@google/genai';
-import { getResolvedGeminiApiKey } from './secret';
-import { createGeminiClient } from './client';
-import type {
-  StreamingChunk,
-  GenerationConfig,
-  ModelCapabilities,
-  ProviderRuntimeAttachment,
-  TextContextMessage,
-} from '../types';
-import { buildTextThinkingConfig } from './reasoning-config';
 import {
   attachmentToBase64,
   getAttachmentSupportKind,
   isAttachmentSupportedByProvider,
   unsupportedAttachmentNotes,
 } from '../core/attachment-content';
+import type {
+  GenerationConfig,
+  ModelCapabilities,
+  ProviderRuntimeAttachment,
+  StreamingChunk,
+  TextContextMessage,
+} from '../types';
+import { createGeminiClient } from './client';
+import { buildTextThinkingConfig } from './reasoning-config';
+import { getResolvedGeminiApiKey } from './secret';
 
 const GEMINI_CONTENT_ATTACHMENT_KINDS = ['image', 'pdf', 'text'] as const;
 
@@ -58,7 +58,7 @@ export async function generateGeminiText(
   ];
 
   const config: Record<string, unknown> = {};
-  if (systemPrompt && systemPrompt.trim()) {
+  if (systemPrompt?.trim()) {
     config.systemInstruction = systemPrompt;
   }
 

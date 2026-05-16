@@ -1,5 +1,5 @@
-import { queryOptions } from '@tanstack/react-query';
 import { DEFAULT_APP_SETTINGS, normalizeAppSettings } from '@mangostudio/shared/app-settings';
+import { queryOptions } from '@tanstack/react-query';
 import { client } from '@/lib/api-client';
 import { extractApiError } from '@/lib/utils';
 

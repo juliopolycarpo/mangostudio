@@ -34,7 +34,6 @@ interface ReasoningItemWithContent {
  * Tries summary array first, then falls back to reasoning content array.
  */
 export function extractReasoningFromCompleted(response: Responses.Response): string | null {
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- tests pass mock data where output may be undefined
   const output = response.output ?? [];
 
   for (const item of output) {

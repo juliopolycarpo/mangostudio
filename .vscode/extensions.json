@@ -1,7 +1,8 @@
 {
   "recommendations": [
-    "dbaeumer.vscode-eslint",
-    "esbenp.prettier-vscode",
+    "biomejs.biome",
+    "dprint.dprint",
+    "TypeScriptTeam.native-preview",
     "ms-playwright.playwright",
     "vitest.explorer",
     "oven.bun-vscode"

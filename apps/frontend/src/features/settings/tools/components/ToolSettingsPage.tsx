@@ -2,14 +2,14 @@
  * Tools settings page: global tool configuration grouped by category.
  */
 
-import { useMemo } from 'react';
 import type { ToolSettingsCategory } from '@mangostudio/shared/tool-settings';
+import { useMemo } from 'react';
+import { Button } from '@/components/ui/Button';
+import { Card } from '@/components/ui/Card';
+import { MAX_TOOL_ITERATIONS_MAX, MAX_TOOL_ITERATIONS_MIN } from '@/hooks/use-global-settings';
 import { useI18n } from '@/hooks/use-i18n';
 import { useToolSettings } from '../hooks/use-tool-settings';
 import { ToolSettingsCard } from './ToolSettingsCard';
-import { Card } from '@/components/ui/Card';
-import { Button } from '@/components/ui/Button';
-import { MAX_TOOL_ITERATIONS_MIN, MAX_TOOL_ITERATIONS_MAX } from '@/hooks/use-global-settings';
 
 interface ToolSettingsPageProps {
   maxToolIterations: number;

@@ -1,9 +1,9 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import userEvent from '@testing-library/user-event';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { AgentSettingsPage } from '../../../src/features/settings/agents/components/AgentSettingsPage';
+import { AgentToolPicker } from '../../../src/features/settings/agents/components/AgentToolPicker';
 import { render, screen } from '../../support/harness/render';
 import { createFetchScenario } from '../../support/mocks/create-fetch-scenario';
-import { AgentToolPicker } from '../../../src/features/settings/agents/components/AgentToolPicker';
-import { AgentSettingsPage } from '../../../src/features/settings/agents/components/AgentSettingsPage';
 
 const AGENTS_RESPONSE = {
   agents: [

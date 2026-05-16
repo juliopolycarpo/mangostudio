@@ -1,3 +1,4 @@
+import type { ModelOption } from '@mangostudio/shared';
 import type {
   ChatTitleSettings,
   ChatTitleStrategy,
@@ -9,10 +10,9 @@ import {
   SUBAGENT_MAX_TURNS_MAX,
   SUBAGENT_MAX_TURNS_MIN,
 } from '@mangostudio/shared/app-settings';
-import type { ModelOption } from '@mangostudio/shared';
 import type { Locale } from '@mangostudio/shared/i18n';
-import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
+import { Card } from '@/components/ui/Card';
 import { useI18n } from '@/hooks/use-i18n';
 
 interface GeneralSettingsProps {

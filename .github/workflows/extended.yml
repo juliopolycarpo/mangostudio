@@ -2,7 +2,7 @@ name: Extended
 
 on:
   schedule:
-    - cron: '0 6 * * *'
+    - cron: "0 6 * * *"
   workflow_dispatch:
 
 permissions:
@@ -31,4 +31,4 @@ jobs:
         run: bun run scripts/test-build.ts
         env:
           PLATFORM: windows-x64
-          API_PORT: '13001'
+          API_PORT: "13001"

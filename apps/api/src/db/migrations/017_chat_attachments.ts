@@ -1,7 +1,7 @@
-import { type Migration } from 'kysely/migration';
+import type { Migration } from 'kysely/migration';
 
 export const chatAttachments: Migration = {
-  async up(db) {
+  async up(db): Promise<void> {
     await db.schema
       .createTable('chat_attachments')
       .ifNotExists()
@@ -44,7 +44,7 @@ export const chatAttachments: Migration = {
       .execute();
   },
 
-  async down(db) {
+  async down(db): Promise<void> {
     await db.schema.dropIndex('idx_chat_attachments_user_chat').ifExists().execute();
     await db.schema.dropIndex('idx_chat_attachments_message').ifExists().execute();
     await db.schema.dropIndex('idx_chat_attachments_unlinked').ifExists().execute();

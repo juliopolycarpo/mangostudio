@@ -1,0 +1,37 @@
+{
+  "$schema": "https://dprint.dev/schemas/v0.json",
+  "lineWidth": 100,
+  "indentWidth": 2,
+  "newLineKind": "lf",
+  "useTabs": false,
+  "markdown": {
+    "textWrap": "maintain",
+    "emphasisKind": "asterisks",
+    "strongKind": "asterisks",
+    "lineWidth": 100
+  },
+  "dockerfile": {},
+  "toml": {},
+  "yaml": {},
+  "includes": ["**/*.{md,mdx,toml,yml,yaml}", "**/Dockerfile", "**/Dockerfile.*"],
+  "excludes": [
+    "**/node_modules",
+    "**/dist",
+    "**/coverage",
+    "**/build",
+    "**/test-results",
+    "**/playwright-report",
+    ".jscpd-out",
+    ".qa-gate",
+    ".mango/out",
+    "apps/frontend/src/routeTree.gen.ts",
+    "**/CHANGELOG.md",
+    "bun.lock"
+  ],
+  "plugins": [
+    "./node_modules/@dprint/markdown/plugin.wasm",
+    "./node_modules/@dprint/toml/plugin.wasm",
+    "./node_modules/@dprint/dockerfile/plugin.wasm",
+    "https://plugins.dprint.dev/g-plane/pretty_yaml-v0.6.0.wasm"
+  ]
+}

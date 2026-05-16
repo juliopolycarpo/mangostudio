@@ -2,16 +2,16 @@
  * Use case: remove a connector and its stored secret.
  */
 
+import { ERROR_CODES } from '@mangostudio/shared/errors';
 import type { ProviderType } from '@mangostudio/shared/types';
-import { isReadOnlySharedConnector } from '../domain/connector';
-import { removeSecret } from '../infrastructure/secret-persistence';
-import {
-  getSecretMetadataById,
-  deleteSecretMetadata,
-} from '../infrastructure/connector-repository';
 import { invalidateUnifiedCatalog } from '../../../services/providers/catalog';
 import { invalidateProviderModelCache } from '../../../services/providers/core/provider-registry';
-import { ERROR_CODES } from '@mangostudio/shared/errors';
+import { isReadOnlySharedConnector } from '../domain/connector';
+import {
+  deleteSecretMetadata,
+  getSecretMetadataById,
+} from '../infrastructure/connector-repository';
+import { removeSecret } from '../infrastructure/secret-persistence';
 
 export class ConnectorNotFoundError extends Error {
   readonly code = ERROR_CODES.NOT_FOUND;

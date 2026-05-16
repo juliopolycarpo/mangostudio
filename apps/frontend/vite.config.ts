@@ -1,10 +1,10 @@
+import { existsSync, readFileSync } from 'node:fs';
+import path from 'node:path';
 import tailwindcss from '@tailwindcss/vite';
-import react from '@vitejs/plugin-react';
 import { TanStackRouterVite } from '@tanstack/router-plugin/vite';
-import path from 'path';
-import { readFileSync, existsSync } from 'fs';
-import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react';
 import { parse as parseToml } from 'smol-toml';
+import { defineConfig } from 'vite';
 
 /** Reads MangoStudio config from .mango/config.toml with .mango/.env overrides. */
 function loadMangoConfig() {

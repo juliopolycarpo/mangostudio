@@ -1,10 +1,10 @@
-import { Elysia, t } from 'elysia';
-import { UpdateToolSettingsBodySchema } from '@mangostudio/shared/tool-settings';
+import type { ApiErrorResponse } from '@mangostudio/shared/errors';
 import type {
   ToolSettingsDescriptor,
   ToolSettingsListResponse,
 } from '@mangostudio/shared/tool-settings';
-import type { ApiErrorResponse } from '@mangostudio/shared/errors';
+import { UpdateToolSettingsBodySchema } from '@mangostudio/shared/tool-settings';
+import { Elysia, t } from 'elysia';
 import { getDb } from '../../../db/database';
 import { requireAuth } from '../../../plugins/auth-middleware';
 import {
@@ -30,6 +30,7 @@ function handleToolSettingsError(
 export const toolSettingsRoutes = new Elysia()
   .use(requireAuth)
 
+  // biome-ignore lint/suspicious/useAwait: Migrated from ESLint
   .get('/tools', async ({ user }): Promise<ToolSettingsListResponse> => {
     return listToolSettingsDescriptors(getDb(), user?.id ?? '');
   })

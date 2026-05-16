@@ -14,6 +14,6 @@ export {
   ToolSettingsCategorySchema,
   ToolSettingsDescriptorSchema,
   ToolSettingsListResponseSchema,
-  UpdateToolSettingsBodySchema,
   type UpdateToolSettingsBody,
+  UpdateToolSettingsBodySchema,
 } from './schemas';

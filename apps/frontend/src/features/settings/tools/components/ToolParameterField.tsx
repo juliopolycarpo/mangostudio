@@ -2,12 +2,12 @@
  * Parameter input field generated from a descriptor.
  */
 
-import { useMemo, useState } from 'react';
-import { Pencil, Trash2 } from 'lucide-react';
 import type { ToolParameterDescriptor } from '@mangostudio/shared/tool-settings';
+import { Pencil, Trash2 } from 'lucide-react';
+import { useMemo, useState } from 'react';
+import { Button } from '@/components/ui/Button';
 import { useI18n } from '@/hooks/use-i18n';
 import { useModelCatalog } from '@/hooks/use-model-catalog';
-import { Button } from '@/components/ui/Button';
 
 interface ToolParameterFieldProps {
   descriptor: ToolParameterDescriptor;
@@ -148,25 +148,23 @@ function PathListField({
                 className="h-4 w-4 rounded border-outline-variant/30 accent-primary shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
               />
               {editingIndex === index ? (
-                <>
-                  <input
-                    type="text"
-                    value={editingPath}
-                    onChange={(e) => setEditingPath(e.target.value)}
-                    onBlur={saveEdit}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault();
-                        saveEdit();
-                      }
-                      if (e.key === 'Escape') {
-                        cancelEdit();
-                      }
-                    }}
-                    className="flex-1 rounded-lg px-3 py-1.5 text-sm bg-surface-container-lowest text-on-surface border border-outline-variant/20 focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/20"
-                    autoFocus
-                  />
-                </>
+                <input
+                  type="text"
+                  value={editingPath}
+                  onChange={(e) => setEditingPath(e.target.value)}
+                  onBlur={saveEdit}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      saveEdit();
+                    }
+                    if (e.key === 'Escape') {
+                      cancelEdit();
+                    }
+                  }}
+                  className="flex-1 rounded-lg px-3 py-1.5 text-sm bg-surface-container-lowest text-on-surface border border-outline-variant/20 focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/20"
+                  autoFocus
+                />
               ) : (
                 <>
                   <span

@@ -1,4 +1,4 @@
-import { Type, type Static } from '@sinclair/typebox';
+import { type Static, Type } from '@sinclair/typebox';
 
 export const FixedRuleFileKindSchema = Type.Union([Type.Literal('agents'), Type.Literal('claude')]);
 

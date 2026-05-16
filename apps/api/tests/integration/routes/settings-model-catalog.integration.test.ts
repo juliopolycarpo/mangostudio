@@ -1,6 +1,6 @@
-import { describe, expect, it, afterEach } from 'bun:test';
-import { Value } from '@sinclair/typebox/value';
+import { afterEach, describe, expect, it } from 'bun:test';
 import { Type } from '@sinclair/typebox';
+import { Value } from '@sinclair/typebox/value';
 import { settingsRoutes } from '../../../src/routes/settings';
 import { clearGeminiModelCatalog } from '../../../src/services/gemini';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
@@ -16,6 +16,7 @@ let originalFetch: typeof globalThis.fetch = globalThis.fetch;
 
 function installProviderModelListFetch(): void {
   originalFetch = globalThis.fetch;
+  // biome-ignore lint/suspicious/useAwait: Migrated from ESLint
   globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = input instanceof Request ? input.url : String(input);
     if (url.includes('api.openai.com') && url.includes('/models')) {

@@ -1,8 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen } from '../../support/harness/render';
 import { SettingsTabs } from '../../../src/components/settings/SettingsTabs';
-import { LogsSettingsPage } from '../../../src/features/settings/observability';
-import { MetricsSettingsPage } from '../../../src/features/settings/observability';
+import {
+  LogsSettingsPage,
+  MetricsSettingsPage,
+} from '../../../src/features/settings/observability';
+import { render, screen } from '../../support/harness/render';
 import { createFetchScenario } from '../../support/mocks/create-fetch-scenario';
 
 vi.mock('@tanstack/react-router', () => {

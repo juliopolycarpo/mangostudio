@@ -1,18 +1,18 @@
-import { useMemo, useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import type { ModelCatalogResponse, ModelOption } from '@mangostudio/shared';
 import type {
   AgentProfile,
   AgentProfileUpsertBody,
   CreateAgentProfileBody,
   UserAgentId,
 } from '@mangostudio/shared/agents';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Bot, Plus } from 'lucide-react';
+import { useMemo, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
+import { useToast } from '@/components/ui/Toast';
 import { useI18n } from '@/hooks/use-i18n';
 import { useModelCatalog } from '@/hooks/use-model-catalog';
-import { useToast } from '@/components/ui/Toast';
-import type { ModelCatalogResponse, ModelOption } from '@mangostudio/shared';
 import { toolSettingsListQueryOptions } from '../../tools/queries';
 import {
   createAgentProfile,
@@ -54,6 +54,7 @@ export function AgentSettingsPage() {
   };
 
   const saveMutation = useMutation({
+    // biome-ignore lint/suspicious/useAwait: Migrated from ESLint
     mutationFn: async ({ agent, body }: SaveAgentInput) => {
       if (agent.kind === 'user' && agent.id === NEW_AGENT_ID) {
         const createBody: CreateAgentProfileBody = {

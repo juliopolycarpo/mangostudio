@@ -4,20 +4,20 @@
  * so other providers can reuse it with minimal configuration.
  */
 
+import { existsSync } from 'node:fs';
 import type { ProviderType, SecretMetadataRow } from '@mangostudio/shared/types';
-import {
-  listSecretMetadata,
-  getSecretMetadataById,
-  upsertSecretMetadata,
-  deleteSecretMetadata,
-  type SecretMetadataInput,
-} from '../../secret-store/metadata';
-import { bunSecretStore, type SecretStore } from '../../secret-store/store';
 import { getConfig } from '../../../lib/config';
-import { existsSync } from 'fs';
 import { readTomlStringSections } from '../../../lib/toml';
 import { parseStringArray } from '../../../utils/json';
 import { maskSecret } from '../../../utils/secrets';
+import {
+  deleteSecretMetadata,
+  getSecretMetadataById,
+  listSecretMetadata,
+  type SecretMetadataInput,
+  upsertSecretMetadata,
+} from '../../secret-store/metadata';
+import { bunSecretStore, type SecretStore } from '../../secret-store/store';
 
 type FetchLike = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 
@@ -159,7 +159,6 @@ export function createProviderSecretService(
         try {
           if (existsSync(tomlFilePath)) {
             const parsed = readTomlStringSections(tomlFilePath);
-            // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- tomlSection may not exist in parsed TOML at runtime
             const value = parsed[config.tomlSection]?.[connector.name];
             if (typeof value !== 'string') return null;
             if (isPlaceholderConfigSecretValue(value)) return null;
@@ -198,7 +197,7 @@ export function createProviderSecretService(
         syncableEntries.set(name, { apiKey: key, existing });
 
         if (!existing) {
-          const { randomUUID } = await import('crypto');
+          const { randomUUID } = await import('node:crypto');
           await upsertMeta({
             id: randomUUID(),
             name,
@@ -261,6 +260,7 @@ export function createProviderSecretService(
       await config.validateFn(apiKey, fetchImpl);
     },
 
+    // biome-ignore lint/suspicious/useAwait: Migrated from ESLint
     async syncConfigFileConnectors(userId: string): Promise<void> {
       return syncConfigFileConnectors(userId);
     },

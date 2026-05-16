@@ -1,6 +1,6 @@
-import { describe, it, expect } from 'vitest';
-import { render } from '../../../support/harness/render';
+import { describe, expect, it } from 'vitest';
 import { Spinner } from '@/components/ui/Spinner';
+import { render } from '../../../support/harness/render';
 
 describe('Spinner', () => {
   it('renders with default size (md)', () => {

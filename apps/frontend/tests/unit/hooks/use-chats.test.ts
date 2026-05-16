@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, renderHook } from '../../support/harness/render';
 import { useChats } from '../../../src/features/chat/hooks/use-chats';
+import { act, renderHook } from '../../support/harness/render';
 
 const { mockCreateChat, mockLoadChats } = vi.hoisted(() => ({
   mockCreateChat: vi.fn(),

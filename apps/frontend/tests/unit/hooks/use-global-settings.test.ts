@@ -1,8 +1,8 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSettings } from '@mangostudio/shared/app-settings';
 import { DEFAULT_APP_SETTINGS, MAX_TOOL_ITERATIONS_MAX } from '@mangostudio/shared/app-settings';
-import { client } from '../../../src/lib/api-client';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useGlobalSettings } from '../../../src/hooks/use-global-settings';
+import { client } from '../../../src/lib/api-client';
 import { act, renderHook, waitFor } from '../../support/harness/render';
 
 vi.mock('../../../src/lib/api-client', () => ({

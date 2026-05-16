@@ -1,9 +1,9 @@
-import { Type, type Static } from '@sinclair/typebox';
+import { type Static, Type } from '@sinclair/typebox';
 import { MAX_TOOL_ITERATIONS_MAX, MAX_TOOL_ITERATIONS_MIN } from '../agentic-limits';
 import { AgentExecutionModeSchema, AgentIdSchema } from '../agents/schemas';
 import { ContextSettingsSchema } from '../chat/schemas';
-import { ReasoningEffortSchema } from '../provider-settings/schemas';
 import { PromptSettingsSchema } from '../prompt-rules/schemas';
+import { ReasoningEffortSchema } from '../provider-settings/schemas';
 
 export const ToolIntentSchema = Type.Optional(
   Type.Union([Type.Literal('image_generation_requested')])

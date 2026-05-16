@@ -3,7 +3,7 @@
  * Rejects loopback, RFC1918 private, and link-local addresses.
  */
 
-import { lookup } from 'dns/promises';
+import { lookup } from 'node:dns/promises';
 
 /** Ranges that must never be reached by outbound provider requests. */
 const BLOCKED_IPV4_RANGES: [number, number, number][] = [

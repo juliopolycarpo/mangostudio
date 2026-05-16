@@ -1,8 +1,8 @@
-import { useState, useRef, useEffect } from 'react';
-import { Brain, ChevronDown, Check } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
-import { useI18n } from '@/hooks/use-i18n';
 import type { ReasoningEffort } from '@mangostudio/shared';
+import { Brain, Check, ChevronDown } from 'lucide-react';
+import { AnimatePresence, motion } from 'motion/react';
+import { useEffect, useRef, useState } from 'react';
+import { useI18n } from '@/hooks/use-i18n';
 
 interface ThinkingToggleProps {
   enabled: boolean;

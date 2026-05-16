@@ -1,8 +1,8 @@
 import { Brain, ChevronDown } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { useI18n } from '@/hooks/use-i18n';
 import { MarkdownContent } from '@/components/MarkdownContent';
+import { useI18n } from '@/hooks/use-i18n';
 
 interface ThinkingUiState {
   expanded: boolean;

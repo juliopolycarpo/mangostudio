@@ -4,8 +4,8 @@
  * Sanitizes raw error details from logs to prevent leaking internals to clients.
  */
 
+import { type ApiErrorResponse, ERROR_CODES } from '@mangostudio/shared/errors';
 import { Elysia } from 'elysia';
-import { ERROR_CODES, type ApiErrorResponse } from '@mangostudio/shared/errors';
 
 export const errorHandler = new Elysia({ name: 'error-handler' }).onError(
   ({ code, error, set }): ApiErrorResponse => {

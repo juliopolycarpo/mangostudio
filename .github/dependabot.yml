@@ -20,19 +20,14 @@ updates:
     cooldown:
       semver-major-days: 7
     groups:
-      eslint:
-        patterns:
-          - eslint*
-          - '@eslint/*'
-          - typescript-eslint
       typescript:
         patterns:
           - typescript
-          - '@types/*'
+          - "@types/*"
       vitest:
         patterns:
           - vitest
-          - '@vitest/*'
+          - "@vitest/*"
       playwright:
         patterns:
-          - '@playwright/*'
+          - "@playwright/*"

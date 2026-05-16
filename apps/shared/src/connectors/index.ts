@@ -1,12 +1,12 @@
 export type {
+  AddConnectorBody,
   Connector,
   ConnectorStatus,
   DeleteConnectorResponse,
-  AddConnectorBody,
   UpdateConnectorModelsBody,
 } from './contracts';
 export {
   AddConnectorBodySchema,
-  UpdateConnectorModelsBodySchema,
   ConnectorStatusSchema,
+  UpdateConnectorModelsBodySchema,
 } from './schemas';

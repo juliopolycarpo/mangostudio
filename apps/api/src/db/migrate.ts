@@ -4,7 +4,7 @@
  */
 
 import { Migrator } from 'kysely/migration';
-import { getDb, closeDb } from './database';
+import { closeDb, getDb } from './database';
 import { allMigrations } from './migrations';
 
 async function migrateToLatest(): Promise<void> {

@@ -1,13 +1,13 @@
-import { type Elysia, t } from 'elysia';
 import { CreateMessageBodySchema, UpdateMessageBodySchema } from '@mangostudio/shared/chat';
 import { ERROR_CODES } from '@mangostudio/shared/errors';
+import { type Elysia, t } from 'elysia';
 import { getDb } from '../../../db/database';
 import { requireAuth } from '../../../plugins/auth-middleware';
 import { parseQueryInt } from '../../../utils/query';
-import { createMessageUseCase } from '../application/create-message';
-import { updateMessageUseCase } from '../application/update-message';
-import { listGalleryUseCase } from '../application/list-gallery';
 import { ChatNotFoundError } from '../../chats/domain/chat-ownership';
+import { createMessageUseCase } from '../application/create-message';
+import { listGalleryUseCase } from '../application/list-gallery';
+import { updateMessageUseCase } from '../application/update-message';
 import { MessageNotFoundError } from '../domain/message-ownership';
 
 export const messageRoutes = (app: Elysia) =>
@@ -20,6 +20,7 @@ export const messageRoutes = (app: Elysia) =>
        */
       .get(
         '/images',
+        // biome-ignore lint/suspicious/useAwait: Migrated from ESLint
         async ({ query, user }) => {
           return listGalleryUseCase(
             {

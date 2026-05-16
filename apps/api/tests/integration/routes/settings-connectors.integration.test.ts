@@ -1,26 +1,26 @@
-import { describe, expect, it, afterEach, beforeAll, beforeEach, afterAll, mock } from 'bun:test';
-import { Value } from '@sinclair/typebox/value';
-import { Type } from '@sinclair/typebox';
-import { ConnectorStatusSchema } from '@mangostudio/shared/connectors';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, mock } from 'bun:test';
 import { ModelCatalogResponseSchema } from '@mangostudio/shared/catalog';
-import { settingsRoutes } from '../../../src/routes/settings';
-import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
+import { ConnectorStatusSchema } from '@mangostudio/shared/connectors';
+import { Type } from '@sinclair/typebox';
+import { Value } from '@sinclair/typebox/value';
 import { getDb } from '../../../src/db/database';
-import { upsertSecretMetadata } from '../../../src/services/secret-store/metadata';
+import { settingsRoutes } from '../../../src/routes/settings';
+import {
+  UnsafeBaseUrlError,
+  validateBaseUrl,
+} from '../../../src/services/providers/core/base-url-policy';
 import {
   getProvider,
   registerProvider,
 } from '../../../src/services/providers/core/provider-registry';
-import type { AIProvider } from '../../../src/services/providers/types';
 import {
   OpenAIAuthError,
   OpenAIConfigError,
   validateOpenAIAuthContext,
 } from '../../../src/services/providers/openai/index';
-import {
-  validateBaseUrl,
-  UnsafeBaseUrlError,
-} from '../../../src/services/providers/core/base-url-policy';
+import type { AIProvider } from '../../../src/services/providers/types';
+import { upsertSecretMetadata } from '../../../src/services/secret-store/metadata';
+import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
 
 // Capture real implementations before any test can override mock.module.
 // mock.restore() does NOT revert mock.module() overrides; explicit re-registration is required.
@@ -345,6 +345,7 @@ const ConnectorResponseSchema = Type.Object({
  * All other requests are forwarded to the real fetch.
  */
 function makeOpenAISuccessFetch(originalFetch: typeof globalThis.fetch): typeof globalThis.fetch {
+  // biome-ignore lint/suspicious/useAwait: Migrated from ESLint
   return (async (input: string | URL | Request, init?: RequestInit) => {
     const url = input instanceof Request ? input.url : String(input);
     if (url.includes('api.openai.com') && url.includes('/models')) {
@@ -476,6 +477,7 @@ describe('openai connector routes', () => {
 
     // Mock fetch for the /models validation call
     const originalFetch = globalThis.fetch;
+    // biome-ignore lint/suspicious/useAwait: Migrated from ESLint
     globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
       const url = input instanceof Request ? input.url : String(input);
       if (url === `${COMPAT_BASE_URL}/models`) {
@@ -516,6 +518,7 @@ describe('openai connector routes', () => {
 
   it('POST /settings/connectors with provider deepseek stores default baseUrl metadata', async () => {
     const originalFetch = globalThis.fetch;
+    // biome-ignore lint/suspicious/useAwait: Migrated from ESLint
     globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
       const url = input instanceof Request ? input.url : String(input);
       if (url === 'https://api.deepseek.com/models') {
@@ -616,6 +619,7 @@ describe('openai connector routes', () => {
     }));
 
     const originalFetch = globalThis.fetch;
+    // biome-ignore lint/suspicious/useAwait: Migrated from ESLint
     globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
       const url = input instanceof Request ? input.url : String(input);
       if (url === `${COMPAT_BASE_URL}/models`) {

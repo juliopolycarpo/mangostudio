@@ -1,6 +1,6 @@
-import { describe, it, expect } from 'vitest';
-import { render } from '../../support/harness/render';
+import { describe, expect, it } from 'vitest';
 import { ContextRing } from '@/features/sidebar/components/ContextRing';
+import { render } from '../../support/harness/render';
 
 describe('ContextRing', () => {
   it('renders the percentage text', () => {

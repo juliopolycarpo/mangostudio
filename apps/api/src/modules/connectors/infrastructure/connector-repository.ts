@@ -4,10 +4,10 @@
  */
 
 export {
+  deleteSecretMetadata,
+  getSecretMetadataById,
   listAllSecretMetadata,
   listSecretMetadata,
-  getSecretMetadataById,
-  upsertSecretMetadata,
-  deleteSecretMetadata,
   type SecretMetadataInput,
+  upsertSecretMetadata,
 } from '../../../services/secret-store/metadata';

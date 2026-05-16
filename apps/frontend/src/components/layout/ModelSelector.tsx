@@ -1,10 +1,10 @@
-import { useState, useRef, useEffect } from 'react';
-import { ChevronDown, Check, Sparkles, Cpu, Zap, Activity, Lock } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
-import type { ModelOption, ModelCatalogResponse, ProviderType } from '@mangostudio/shared';
-import { getModelSelectorPlaceholder } from '../../utils/model-utils';
+import type { ModelCatalogResponse, ModelOption, ProviderType } from '@mangostudio/shared';
+import { Activity, Check, ChevronDown, Cpu, Lock, Sparkles, Zap } from 'lucide-react';
+import { AnimatePresence, motion } from 'motion/react';
+import { useEffect, useRef, useState } from 'react';
 import { useI18n } from '@/hooks/use-i18n';
 import { cn } from '@/lib/utils';
+import { getModelSelectorPlaceholder } from '../../utils/model-utils';
 
 interface ModelSelectorProps {
   activeModel: string;

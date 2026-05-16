@@ -1,7 +1,7 @@
-import { describe, expect, it } from 'vitest';
 import { screen } from '@testing-library/react';
-import { render } from '../../support/harness/render';
+import { describe, expect, it } from 'vitest';
 import { ContinuationEventMarker } from '../../../src/features/chat/components/ContinuationEventMarker';
+import { render } from '../../support/harness/render';
 
 describe('ContinuationEventMarker', () => {
   it('renders cursor_expired label with provider and fromMode', () => {

@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import type { ProviderType } from '@mangostudio/shared/types';
-import { createProviderRegistryForTests } from '../../../../src/services/providers/core/provider-registry';
+import type { getDb } from '../../../../src/db/database';
 import {
   getProviderObservabilityMetrics,
   resetProviderObservability,
 } from '../../../../src/services/providers/core/provider-observability';
+import { createProviderRegistryForTests } from '../../../../src/services/providers/core/provider-registry';
 import type { AIProvider } from '../../../../src/services/providers/types';
-import type { getDb } from '../../../../src/db/database';
 
 let providerTypeCounter = 0;
 

@@ -1,13 +1,13 @@
 import {
-  Wrench,
-  CheckCircle,
   AlertCircle,
-  ChevronDown,
-  FolderOpen,
-  FileText,
-  ImagePlus,
-  Clock,
   ArrowRight,
+  CheckCircle,
+  ChevronDown,
+  Clock,
+  FileText,
+  FolderOpen,
+  ImagePlus,
+  Wrench,
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { useState } from 'react';
@@ -49,7 +49,7 @@ function abbreviatePath(rawPath: unknown): string | null {
   if (typeof rawPath !== 'string' || rawPath.trim().length === 0) return null;
   let p = rawPath.trim();
   const homeMatch = p.match(/^\/home\/[^/]+/);
-  if (homeMatch) p = '~' + p.slice(homeMatch[0].length);
+  if (homeMatch) p = `~${p.slice(homeMatch[0].length)}`;
   return p;
 }
 
@@ -96,7 +96,7 @@ export function ToolCallBlock({ name, args, result, isError, isPending }: ToolCa
                        : isPending
                          ? 'border-primary/30 text-primary'
                          : 'border-success/25 text-success'
-                   }`}
+}`}
       >
         {isPending ? (
           <ToolIcon toolName={name} className="animate-pulse shrink-0" />

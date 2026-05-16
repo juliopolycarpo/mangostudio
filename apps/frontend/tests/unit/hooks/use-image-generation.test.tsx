@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, renderHook, waitFor } from '../../support/harness/render';
 import { useImageGeneration } from '../../../src/features/generation/hooks/use-image-generation';
+import { act, renderHook, waitFor } from '../../support/harness/render';
 
 vi.mock('../../../src/services/generation-service', () => ({
   uploadReferenceImage: vi.fn(),
@@ -16,7 +16,7 @@ vi.mock('../../../src/features/gallery/queries', () => ({
   galleryKeys: { lists: () => ['gallery'] },
 }));
 
-import { uploadReferenceImage, generateImage } from '../../../src/services/generation-service';
+import { generateImage, uploadReferenceImage } from '../../../src/services/generation-service';
 
 const mockUpload = vi.mocked(uploadReferenceImage);
 const mockGenerate = vi.mocked(generateImage);

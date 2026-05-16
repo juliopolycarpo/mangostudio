@@ -1,10 +1,10 @@
-import { useState } from 'react';
-import { Plus, Settings, Menu } from 'lucide-react';
 import type { ModelCatalogResponse, ModelOption, ProviderType } from '@mangostudio/shared';
-import { ModelSelector } from './ModelSelector';
-import { authClient } from '@/lib/auth-client';
+import { Menu, Plus, Settings } from 'lucide-react';
+import { useState } from 'react';
 import { useToast } from '@/components/ui/Toast';
 import { useI18n } from '@/hooks/use-i18n';
+import { authClient } from '@/lib/auth-client';
+import { ModelSelector } from './ModelSelector';
 
 export interface HeaderProps {
   activeModel: string;

@@ -1,8 +1,8 @@
+import type { ModelOption } from '@mangostudio/shared';
 import type {
   ContextCompactionBehavior,
   ContextSettings as ContextSettingsValue,
 } from '@mangostudio/shared/chat';
-import type { ModelOption } from '@mangostudio/shared';
 import { Card } from '@/components/ui/Card';
 import { useI18n } from '@/hooks/use-i18n';
 

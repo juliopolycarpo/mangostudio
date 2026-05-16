@@ -1,11 +1,11 @@
 import { expect } from 'bun:test';
-import type { AgentEvent } from '../../../src/services/providers/types';
+import type { ContinuationReasonCode, ProviderType } from '@mangostudio/shared/types';
 import {
-  parseContinuationEnvelope,
   type ContinuationEnvelope,
   type ContinuationMode,
+  parseContinuationEnvelope,
 } from '../../../src/services/providers/core/continuation-envelope';
-import type { ProviderType, ContinuationReasonCode } from '@mangostudio/shared/types';
+import type { AgentEvent } from '../../../src/services/providers/types';
 
 export interface ExpectedEnvelope {
   provider: ProviderType;

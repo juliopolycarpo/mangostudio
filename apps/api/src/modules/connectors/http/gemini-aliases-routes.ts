@@ -3,33 +3,37 @@
  * Delegates to existing Gemini service for legacy API consumers.
  */
 
-import { Elysia, t } from 'elysia';
-import { UpdateConnectorModelsBodySchema } from '@mangostudio/shared/connectors';
-import type { ApiErrorResponse } from '@mangostudio/shared/errors';
 import type { Connector, ConnectorStatus, ModelCatalogResponse } from '@mangostudio/shared';
 import {
-  getGeminiSecretStatus,
+  AddConnectorBodySchema,
+  UpdateConnectorModelsBodySchema,
+} from '@mangostudio/shared/connectors';
+import type { ApiErrorResponse } from '@mangostudio/shared/errors';
+import { Elysia, t } from 'elysia';
+import { requireAuth } from '../../../plugins/auth-middleware';
+import {
   addGeminiConnector,
   deleteGeminiConnector,
-  updateConnectorModels,
+  getGeminiSecretStatus,
   refreshGeminiModelCatalog,
+  updateConnectorModels,
 } from '../../../services/gemini';
 import {
   getUnifiedModelCatalog,
   invalidateUnifiedCatalog,
 } from '../../../services/providers/catalog';
 import { invalidateProviderRoutingCache } from '../../../services/providers/core/provider-registry';
-import { AddConnectorBodySchema } from '@mangostudio/shared/connectors';
-import { requireAuth } from '../../../plugins/auth-middleware';
 import { handleConnectorError } from './connectors-routes';
 
 export const geminiAliasRoutes = new Elysia()
   .use(requireAuth)
 
+  // biome-ignore lint/suspicious/useAwait: Migrated from ESLint
   .get('/secrets/gemini', async ({ user }): Promise<ConnectorStatus> => {
     return getGeminiSecretStatus(user?.id ?? '');
   })
 
+  // biome-ignore lint/suspicious/useAwait: Migrated from ESLint
   .get('/models/gemini', async ({ user }): Promise<ModelCatalogResponse> => {
     return getUnifiedModelCatalog(user?.id ?? '');
   })

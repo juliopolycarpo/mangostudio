@@ -1,7 +1,7 @@
-import { type Migration } from 'kysely/migration';
+import type { Migration } from 'kysely/migration';
 
 export const authTables: Migration = {
-  async up(db) {
+  async up(db): Promise<void> {
     // Tabela de usuários
     await db.schema
       .createTable('user')
@@ -69,7 +69,7 @@ export const authTables: Migration = {
       .execute();
   },
 
-  async down(db) {
+  async down(db): Promise<void> {
     await db.schema.dropTable('verification').ifExists().execute();
     await db.schema.dropTable('account').ifExists().execute();
     await db.schema.dropTable('session').ifExists().execute();

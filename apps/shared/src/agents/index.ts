@@ -1,4 +1,3 @@
-export * from './profile';
 export type {
   AgentExecutionMode,
   AgentId,
@@ -16,13 +15,14 @@ export type {
   DeleteAgentProfileResponse,
   UserAgentId,
 } from './contracts';
+export * from './profile';
 export {
   AgentExecutionModeSchema,
   AgentIdSchema,
   AgentKindSchema,
-  AgentMetadataSchema,
   AgentMarkdownPreviewBodySchema,
   AgentMarkdownPreviewResponseSchema,
+  AgentMetadataSchema,
   AgentProfileListResponseSchema,
   AgentProfileSchema,
   AgentProfileUpsertBodySchema,

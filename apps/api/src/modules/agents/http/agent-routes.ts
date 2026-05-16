@@ -1,4 +1,3 @@
-import { Elysia, t } from 'elysia';
 import type {
   AgentMarkdownPreviewResponse,
   AgentProfile,
@@ -11,6 +10,7 @@ import {
   CreateAgentProfileBodySchema,
 } from '@mangostudio/shared/agents';
 import type { ApiErrorResponse } from '@mangostudio/shared/errors';
+import { Elysia, t } from 'elysia';
 import { getDb } from '../../../db/database';
 import { requireAuth } from '../../../plugins/auth-middleware';
 import {
@@ -39,6 +39,7 @@ function handleAgentSettingsError(
 export const agentRoutes = new Elysia()
   .use(requireAuth)
 
+  // biome-ignore lint/suspicious/useAwait: Migrated from ESLint
   .get('/agents', async ({ user }): Promise<AgentProfileListResponse> => {
     return listAgentProfiles(getDb(), user?.id ?? '');
   })

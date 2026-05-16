@@ -1,13 +1,13 @@
-import { describe, it, expect } from 'bun:test';
+import { describe, expect, it } from 'bun:test';
 import {
-  estimateTokenCount,
-  getModelContextLimit,
-  computeContextSnapshot,
-  recommendContextAction,
-  getContextSeverity,
   buildPersistedContextSnapshot,
-  parsePersistedContextSnapshot,
   type ContextSnapshot,
+  computeContextSnapshot,
+  estimateTokenCount,
+  getContextSeverity,
+  getModelContextLimit,
+  parsePersistedContextSnapshot,
+  recommendContextAction,
 } from '../../../../src/services/providers/core/context-policy';
 import type { ChatTurnContext } from '../../../../src/services/providers/types';
 

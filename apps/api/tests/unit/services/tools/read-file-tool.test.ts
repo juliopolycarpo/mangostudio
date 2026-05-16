@@ -1,7 +1,7 @@
-import { describe, expect, it, beforeEach, afterEach } from 'bun:test';
-import { mkdtempSync, writeFileSync, rmSync } from 'fs';
-import { join } from 'path';
-import { tmpdir } from 'os';
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   executeReadFile,
   normalizeReadFileToolSettings,

@@ -1,5 +1,5 @@
-import { execSync } from 'child_process';
-import { type WorkspaceName, ALL_WORKSPACE_NAMES, WORKSPACES, ROOT_DIR } from './config';
+import { execSync } from 'node:child_process';
+import { ALL_WORKSPACE_NAMES, ROOT_DIR, WORKSPACES, type WorkspaceName } from './config';
 
 const SCRIPT_START = performance.now();
 
@@ -193,6 +193,7 @@ export async function runCommand(
   return { label, exitCode, duration };
 }
 
+// biome-ignore lint/suspicious/useAwait: Migrated from ESLint
 export async function runWorkspaceScript(
   workspace: WorkspaceName,
   script: string,
@@ -207,6 +208,7 @@ export async function runWorkspaceScript(
 
 // ── Orchestration ──
 
+// biome-ignore lint/suspicious/useAwait: Migrated from ESLint
 export async function runParallel(tasks: Array<() => Promise<RunResult>>): Promise<RunResult[]> {
   return Promise.all(tasks.map((t) => t()));
 }

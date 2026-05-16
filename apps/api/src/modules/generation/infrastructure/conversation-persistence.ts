@@ -1,14 +1,14 @@
-import type { Kysely } from 'kysely';
 import type { InteractionMode } from '@mangostudio/shared';
 import type { ChatAttachment } from '@mangostudio/shared/chat';
-import type { Database } from '../../../db/types';
 import type { MessagePart } from '@mangostudio/shared/types';
-import {
-  insertMessage,
-  type CreateMessageData,
-} from '../../messages/infrastructure/message-repository';
-import { insertGeneratedImageArtifact } from '../../generated-images/infrastructure/generated-image-repository';
+import type { Kysely } from 'kysely';
+import type { Database } from '../../../db/types';
 import { linkAttachmentsToMessage } from '../../attachments/infrastructure/attachment-repository';
+import { insertGeneratedImageArtifact } from '../../generated-images/infrastructure/generated-image-repository';
+import {
+  type CreateMessageData,
+  insertMessage,
+} from '../../messages/infrastructure/message-repository';
 
 export interface PersistUserMessageInput {
   id: string;

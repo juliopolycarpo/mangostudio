@@ -1,9 +1,9 @@
-import { useQuery } from '@tanstack/react-query';
 import type {
   ProviderCacheMetrics,
   ProviderCacheName,
   ProviderProbeOperation,
 } from '@mangostudio/shared/observability';
+import { useQuery } from '@tanstack/react-query';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { useI18n } from '@/hooks/use-i18n';

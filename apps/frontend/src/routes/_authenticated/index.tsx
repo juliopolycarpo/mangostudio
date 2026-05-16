@@ -1,7 +1,7 @@
-import { createFileRoute } from '@tanstack/react-router';
-import { useApp } from '@/lib/app-context';
-import { ChatPage } from '@/features/chat/ChatPage';
 import type { ModelOption } from '@mangostudio/shared';
+import { createFileRoute } from '@tanstack/react-router';
+import { ChatPage } from '@/features/chat/ChatPage';
+import { useApp } from '@/lib/app-context';
 
 export const Route = createFileRoute('/_authenticated/')({
   component: ChatRoute,

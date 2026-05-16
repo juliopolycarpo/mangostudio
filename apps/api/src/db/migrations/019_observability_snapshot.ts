@@ -1,7 +1,7 @@
-import { type Migration } from 'kysely/migration';
+import type { Migration } from 'kysely/migration';
 
 export const observabilitySnapshot: Migration = {
-  async up(db) {
+  async up(db): Promise<void> {
     await db.schema
       .createTable('observability_snapshot')
       .ifNotExists()
@@ -11,7 +11,7 @@ export const observabilitySnapshot: Migration = {
       .execute();
   },
 
-  async down(db) {
+  async down(db): Promise<void> {
     await db.schema.dropTable('observability_snapshot').ifExists().execute();
   },
 };

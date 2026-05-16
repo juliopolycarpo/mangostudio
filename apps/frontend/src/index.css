@@ -1,4 +1,4 @@
-@import 'tailwindcss';
+@import "tailwindcss";
 
 @theme {
   --color-surface-dim: #131313;
@@ -21,9 +21,9 @@
   --color-warning: #fbbf24;
   --color-success: #4ade80;
 
-  --font-headline: 'Manrope', sans-serif;
-  --font-body: 'Inter', sans-serif;
-  --font-label: 'Inter', sans-serif;
+  --font-headline: "Manrope", sans-serif;
+  --font-body: "Inter", sans-serif;
+  --font-label: "Inter", sans-serif;
 
   --animate-slide: slide 1s ease-in-out infinite alternate;
   --animate-blink: blink 1s step-end infinite;
@@ -61,7 +61,7 @@
 }
 
 /* ── Light theme ── */
-[data-theme='light'] {
+[data-theme="light"] {
   /* M3 light palette */
   --color-surface-dim: #ededf4;
   --color-primary: #4b4dd8;
@@ -226,7 +226,7 @@ body {
 }
 
 .markdown-content code {
-  font-family: ui-monospace, 'Cascadia Code', 'Fira Code', monospace;
+  font-family: ui-monospace, "Cascadia Code", "Fira Code", monospace;
   font-size: 0.875em;
   background: var(--color-surface-container-high);
   padding: 0.15em 0.4em;
@@ -301,12 +301,12 @@ pre:hover .copy-code-btn {
 }
 
 .copy-code-btn:hover {
-  opacity: 1 !important;
+  opacity: 1;
   background: var(--color-surface-container-highest);
 }
 
 .copy-code-btn--copied {
-  opacity: 1 !important;
+  opacity: 1;
   color: var(--color-success);
 }
 
@@ -444,26 +444,26 @@ pre:hover .copy-code-btn {
 }
 
 /* ── Font size presets ── */
-[data-font-size='small'] {
+[data-font-size="small"] {
   --chat-font-size: 0.8125rem; /* 13px */
 }
-[data-font-size='default'] {
+[data-font-size="default"] {
   --chat-font-size: 0.875rem; /* 14px */
 }
-[data-font-size='large'] {
+[data-font-size="large"] {
   --chat-font-size: 1rem; /* 16px */
 }
 
 /* ── Chat density presets ── */
-[data-chat-density='compact'] {
+[data-chat-density="compact"] {
   --chat-message-gap: 1.5rem;
   --chat-padding: 0.75rem;
 }
-[data-chat-density='default'] {
+[data-chat-density="default"] {
   --chat-message-gap: 3rem;
   --chat-padding: 1.25rem;
 }
-[data-chat-density='comfortable'] {
+[data-chat-density="comfortable"] {
   --chat-message-gap: 4rem;
   --chat-padding: 1.5rem;
 }
@@ -485,7 +485,7 @@ pre:hover .copy-code-btn {
   input,
   select,
   textarea,
-  [role='button'] {
+  [role="button"] {
     min-height: 44px;
     min-width: 44px;
   }
@@ -496,10 +496,10 @@ pre:hover .copy-code-btn {
   *,
   *::before,
   *::after {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
-    scroll-behavior: auto !important;
+    animation-duration: 0.01ms;
+    animation-iteration-count: 1;
+    transition-duration: 0.01ms;
+    scroll-behavior: auto;
   }
 }
 

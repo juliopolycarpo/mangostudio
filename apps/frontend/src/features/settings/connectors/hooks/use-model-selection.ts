@@ -2,8 +2,8 @@
  * Hook: model enable/disable state, search/filter, and save.
  */
 
-import { useState } from 'react';
 import type { Connector, ModelCatalogResponse } from '@mangostudio/shared';
+import { useState } from 'react';
 import { updateConnectorModels } from '../api';
 
 export function useModelSelection(

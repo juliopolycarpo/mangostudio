@@ -1,16 +1,16 @@
-import { useState, useCallback, useMemo, useEffect } from 'react';
-import { useQuery } from '@tanstack/react-query';
 import type { ProviderType } from '@mangostudio/shared';
 import type { AgentExecutionMode } from '@mangostudio/shared/agents';
+import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useChats } from '@/features/chat/hooks/use-chats';
-import { agentSettingsListQueryOptions } from '@/features/settings/agents/queries';
-import { useModelCatalog } from './use-model-catalog';
-import { useGlobalSettings } from './use-global-settings';
 import { useOptimisticMessages } from '@/features/generation/hooks/use-optimistic-messages';
 import { useTextGeneration } from '@/features/generation/hooks/use-text-generation';
+import { agentSettingsListQueryOptions } from '@/features/settings/agents/queries';
 import { useProviderSettings } from '@/features/settings/providers/hooks/use-provider-settings';
 import { resolveActiveModeModel } from '@/utils/model-utils';
+import { useGlobalSettings } from './use-global-settings';
+import { useModelCatalog } from './use-model-catalog';
 
 interface AgentSelectionOverride {
   readonly chatId: string | null;

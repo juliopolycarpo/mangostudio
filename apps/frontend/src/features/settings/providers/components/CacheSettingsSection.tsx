@@ -2,8 +2,10 @@
  * Prompt caching and provider compaction section.
  */
 
-import type { PromptCachePreference } from '@mangostudio/shared/provider-settings';
-import type { UpdateProviderRuntimeSettingsBody } from '@mangostudio/shared/provider-settings';
+import type {
+  PromptCachePreference,
+  UpdateProviderRuntimeSettingsBody,
+} from '@mangostudio/shared/provider-settings';
 import { Card } from '@/components/ui/Card';
 import { useI18n } from '@/hooks/use-i18n';
 

@@ -5,11 +5,11 @@
  */
 
 import type { ModelCatalogResponse, ModelOption } from '@mangostudio/shared';
-import { listRegisteredProviderTypes, getProvider } from './core/provider-registry';
-import { listAllSecretMetadata } from '../secret-store/metadata';
-import type { ModelInfo, AIProvider } from './types';
 import type { ProviderType } from '@mangostudio/shared/types';
 import { parseStringArray } from '../../utils/json';
+import { listAllSecretMetadata } from '../secret-store/metadata';
+import { getProvider, listRegisteredProviderTypes } from './core/provider-registry';
+import type { AIProvider, ModelInfo } from './types';
 
 const TTL_MS = 60 * 60 * 1000; // 1 hour
 const MAX_CATALOG_ENTRIES = 1000;
@@ -122,7 +122,7 @@ export function createUnifiedModelCatalogService(
     for (const c of connectors) {
       try {
         const models = parseStringArray(c.enabledModels);
-        models.forEach((m) => enabled.add(m));
+        for (const m of models) enabled.add(m);
       } catch {
         // Ignore parse errors
       }
@@ -159,6 +159,7 @@ export function createUnifiedModelCatalogService(
     );
   }
 
+  // biome-ignore lint/suspicious/useAwait: Migrated from ESLint
   async function refreshCatalog(userId: string): Promise<ModelCatalogResponse> {
     const inflight = refreshPromises.get(userId);
     if (inflight) return inflight;
@@ -169,6 +170,7 @@ export function createUnifiedModelCatalogService(
         const PROVIDER_TIMEOUT_MS = 5_000;
 
         const results = await Promise.allSettled(
+          // biome-ignore lint/suspicious/useAwait: Migrated from ESLint
           providerTypes.map(async (pt) => {
             const provider = getProviderFn(pt);
             const timeoutPromise = new Promise<never>((_, reject) =>
@@ -235,6 +237,7 @@ export function createUnifiedModelCatalogService(
      * Refreshes the catalog by calling listModels() on every registered provider.
      * Providers that fail (e.g. no connector configured) are silently skipped.
      */
+    // biome-ignore lint/suspicious/useAwait: Migrated from ESLint
     async refresh(userId: string): Promise<ModelCatalogResponse> {
       return refreshCatalog(userId);
     },

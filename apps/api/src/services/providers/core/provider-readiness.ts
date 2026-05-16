@@ -1,6 +1,6 @@
 import type { ProviderType } from '@mangostudio/shared/types';
-import { getProvider } from './provider-registry';
 import type { ProviderHealthcheckRequest, ProviderWarmupRequest } from '../types';
+import { getProvider } from './provider-registry';
 
 function requireApiKey(provider: ProviderType, request: ProviderHealthcheckRequest): string {
   if (!request.apiKey?.trim()) {

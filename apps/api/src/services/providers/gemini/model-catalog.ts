@@ -5,13 +5,13 @@
 
 import type { Model } from '@google/genai';
 import type { ModelCatalogResponse, ModelOption } from '@mangostudio/shared';
-import { isImageModelId } from '../core/capability-detector';
-import { recordProviderProbeTimeout } from '../core/provider-observability';
-import { withPromiseTimeout } from '../core/probe-timeout';
-import { GeminiApiKeyMissingError } from './secret';
-import { listSecretMetadata, GEMINI_PROVIDER } from '../../secret-store/metadata';
 import { parseStringArray } from '../../../utils/json';
+import { GEMINI_PROVIDER, listSecretMetadata } from '../../secret-store/metadata';
+import { isImageModelId } from '../core/capability-detector';
+import { withPromiseTimeout } from '../core/probe-timeout';
+import { recordProviderProbeTimeout } from '../core/provider-observability';
 import { createGeminiClient } from './client';
+import { GeminiApiKeyMissingError } from './secret';
 
 export type GeminiModelCatalogRefreshReason = 'startup' | 'secret-updated' | 'manual' | 'ttl';
 
@@ -112,7 +112,7 @@ export function createGeminiModelCatalogService(
     for (const c of connectors) {
       try {
         const models = parseStringArray(c.enabledModels);
-        models.forEach((m) => enabled.add(m));
+        for (const m of models) enabled.add(m);
       } catch {
         // Ignore parse errors
       }
@@ -146,6 +146,7 @@ export function createGeminiModelCatalogService(
     return getResolvedGeminiApiKey(userId);
   };
 
+  // biome-ignore lint/suspicious/useAwait: Migrated from ESLint
   const fetchModels = async (apiKey: string): Promise<Model[]> => {
     return withPromiseTimeout(
       async () => {
@@ -170,6 +171,7 @@ export function createGeminiModelCatalogService(
   };
 
   return {
+    // biome-ignore lint/suspicious/useAwait: Migrated from ESLint
     async refreshGeminiModelCatalog(
       userId: string,
       _reason: GeminiModelCatalogRefreshReason

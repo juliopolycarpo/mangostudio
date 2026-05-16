@@ -3,10 +3,10 @@
  */
 
 import { Link } from '@tanstack/react-router';
+import { Card } from '@/components/ui/Card';
 import { useI18n } from '@/hooks/use-i18n';
 import { useProviderSettingsList } from '../hooks/use-provider-settings';
 import { ProviderSettingsCard } from './ProviderSettingsCard';
-import { Card } from '@/components/ui/Card';
 
 export function ProviderSettingsMenu() {
   const { t } = useI18n();

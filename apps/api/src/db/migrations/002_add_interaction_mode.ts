@@ -4,11 +4,11 @@
  * Default interactionMode is 'image' so existing messages retain their visual behavior.
  */
 
-import { type Migration } from 'kysely/migration';
 import { sql } from 'kysely';
+import type { Migration } from 'kysely/migration';
 
 export const addInteractionMode: Migration = {
-  async up(db) {
+  async up(db): Promise<void> {
     // Add interactionMode column to messages (default 'image' for existing rows)
     await sql`ALTER TABLE messages ADD COLUMN interactionMode TEXT NOT NULL DEFAULT 'image'`.execute(
       db
@@ -23,12 +23,12 @@ export const addInteractionMode: Migration = {
     await sql`UPDATE chats SET imageModel = model WHERE model IS NOT NULL`.execute(db);
   },
 
-  down(_db) {
+  async down(_db): Promise<void> {
     // SQLite does not support DROP COLUMN before version 3.35; recreate tables as workaround.
     // For simplicity in development, we skip the full recreation here.
     console.warn(
       '[migrate] 002 down: SQLite does not support DROP COLUMN — manual rollback required.'
     );
-    return Promise.resolve();
+    await Promise.resolve();
   },
 };

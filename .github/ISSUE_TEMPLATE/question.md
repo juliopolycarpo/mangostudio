@@ -1,9 +1,9 @@
 ---
 name: ❓ Question
 about: Ask a question about usage or behavior
-title: 'question: <short description>'
+title: "question: <short description>"
 labels: question
-assignees: ''
+assignees: ""
 ---
 
 ## ❓ What do you want to know?

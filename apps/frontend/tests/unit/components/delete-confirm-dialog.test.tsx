@@ -1,7 +1,7 @@
-import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '../../support/harness/render';
-import { DeleteConfirmDialog } from '@/features/settings/connectors/components/DeleteConfirmDialog';
 import type { Connector } from '@mangostudio/shared';
+import { describe, expect, it, vi } from 'vitest';
+import { DeleteConfirmDialog } from '@/features/settings/connectors/components/DeleteConfirmDialog';
+import { render, screen } from '../../support/harness/render';
 
 vi.mock('@/hooks/use-i18n', async () => {
   const actual = await vi.importActual('@/hooks/use-i18n');

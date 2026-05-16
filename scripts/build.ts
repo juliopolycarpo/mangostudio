@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
-import { cpSync, existsSync, mkdirSync } from 'fs';
-import { join } from 'path';
+import { cpSync, existsSync, mkdirSync } from 'node:fs';
+import { join } from 'node:path';
 
 import { ROOT_DIR, type WorkspaceName } from './lib/config';
 import {
@@ -10,10 +10,10 @@ import {
   fatal,
   header,
   parseArgs,
+  type RunResult,
   runParallel,
   runWorkspaceScript,
   warn,
-  type RunResult,
 } from './lib/runner';
 
 interface BinaryTarget {

@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'bun:test';
 import {
-  getRequiredString,
-  getOptionalString,
   getBoundedOptionalInteger,
+  getOptionalString,
+  getRequiredString,
 } from '../../../../src/services/tools/arg-parsing';
 
 describe('getRequiredString', () => {

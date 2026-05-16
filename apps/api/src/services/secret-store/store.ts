@@ -18,7 +18,7 @@ type BunSecretsApi = Pick<typeof Bun.secrets, 'get' | 'set' | 'delete'>;
 
 /** Error thrown when the OS-native secret store is unavailable. */
 export class SecretStorageUnavailableError extends Error {
-  constructor(message: string = 'OS secret storage is unavailable') {
+  constructor(message = 'OS secret storage is unavailable') {
     super(message);
     this.name = 'SecretStorageUnavailableError';
   }

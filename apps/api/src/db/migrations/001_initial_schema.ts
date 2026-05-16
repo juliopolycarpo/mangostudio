@@ -3,10 +3,10 @@
  * Matches the existing SQLite schema from the prototype.
  */
 
-import { type Migration } from 'kysely/migration';
+import type { Migration } from 'kysely/migration';
 
 export const initialSchema: Migration = {
-  async up(db) {
+  async up(db): Promise<void> {
     await db.schema
       .createTable('chats')
       .ifNotExists()
@@ -36,7 +36,7 @@ export const initialSchema: Migration = {
       .execute();
   },
 
-  async down(db) {
+  async down(db): Promise<void> {
     await db.schema.dropTable('messages').execute();
     await db.schema.dropTable('chats').execute();
   },
