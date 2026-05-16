@@ -6,7 +6,7 @@ Obrigado pelo seu interesse em contribuir com o MangoStudio!
 
 ## Pré-requisitos
 
-- [Bun](https://bun.sh/) v1.3.11 ou superior
+- [Bun](https://bun.sh/) v1.3.14 ou superior
 - Git com assinatura GPG configurada (veja [Diretrizes de Commit](#diretrizes-de-commit))
 
 ## Configuração do Ambiente

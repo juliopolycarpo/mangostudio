@@ -10,7 +10,7 @@ AI-powered image generation and chat studio supporting Gemini, OpenAI-compatible
 
 ## Prerequisites
 
-- [Bun](https://bun.sh/) (v1.3.11+)
+- [Bun](https://bun.sh/) (v1.3.14+)
 - One or more API keys for supported providers (Gemini, OpenAI-compatible, Anthropic)
 
 ## Installation
