@@ -301,12 +301,12 @@ pre:hover .copy-code-btn {
 }
 
 .copy-code-btn:hover {
-  opacity: 1 !important;
+  opacity: 1;
   background: var(--color-surface-container-highest);
 }
 
 .copy-code-btn--copied {
-  opacity: 1 !important;
+  opacity: 1;
   color: var(--color-success);
 }
 
@@ -496,10 +496,10 @@ pre:hover .copy-code-btn {
   *,
   *::before,
   *::after {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
-    scroll-behavior: auto !important;
+    animation-duration: 0.01ms;
+    animation-iteration-count: 1;
+    transition-duration: 0.01ms;
+    scroll-behavior: auto;
   }
 }
 
