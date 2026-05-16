@@ -86,13 +86,13 @@ bun run test --integration
 bun run test --e2e
 ```
 
-## Linting and Type Checking
+## Checking and Type Checking
 
 ```bash
 bun run check
 ```
 
-This runs Biome, residual ESLint, and TypeScript type-checking across all workspaces.
+This runs Biome, dprint, circular dependency checks, and TypeScript type-checking across all workspaces.
 
 ## Building
 

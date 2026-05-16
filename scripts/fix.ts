@@ -18,7 +18,7 @@ import {
 function printHelp(): never {
   console.log(`Usage: bun run fix [workspace flags] [mode flags]
 
-Runs Biome fixes then residual ESLint --fix.
+Runs Biome fixes for workspaces plus root Biome and dprint fixes.
 Default workspace selection: --all
 
 Workspace flags:
