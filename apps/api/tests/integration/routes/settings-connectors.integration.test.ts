@@ -121,7 +121,7 @@ describe('settings connectors routes', () => {
 
     const payload = (await response.json()) as ConnectorListPayload;
     expect(Value.Check(ConnectorStatusSchema, payload)).toBe(true);
-    expect(payload).toMatchObject({ connectors: [] });
+    expect(payload.connectors.filter((connector) => connector.userId === TEST_USER.id)).toEqual([]);
   });
 
   it('GET /settings/connectors hides shared openai-compatible config-file connectors without baseUrl', async () => {

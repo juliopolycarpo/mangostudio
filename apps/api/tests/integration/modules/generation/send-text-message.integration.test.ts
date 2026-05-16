@@ -21,20 +21,27 @@ let previousOpenAICompatibleProvider: AIProvider | null = null;
 const createdUploadFiles: string[] = [];
 
 beforeAll(async () => {
-  const now = Date.now();
-  await getDb()
-    .insertInto('user')
-    .values({
-      id: TEST_USER.id,
-      name: TEST_USER.name,
-      email: TEST_USER.email,
-      emailVerified: 0,
-      image: null,
-      createdAt: now,
-      updatedAt: now,
-    })
-    .onConflict((oc) => oc.column('id').doNothing())
-    .execute();
+  const db = getDb();
+  const exists = await db
+    .selectFrom('user')
+    .select('id')
+    .where('id', '=', TEST_USER.id)
+    .executeTakeFirst();
+  if (!exists) {
+    const now = Date.now();
+    await db
+      .insertInto('user')
+      .values({
+        id: TEST_USER.id,
+        name: TEST_USER.name,
+        email: TEST_USER.email,
+        emailVerified: 0,
+        image: null,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .execute();
+  }
 });
 
 afterEach(() => {
