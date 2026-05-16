@@ -47,6 +47,7 @@
   "[dockerfile]": {
     "editor.defaultFormatter": "dprint.dprint"
   },
+  "dprint.path": "./node_modules/.bin/dprint",
   "js/ts.experimental.useTsgo": true,
   "typescript.tsdk": "node_modules/typescript/lib",
   "typescript.enablePromptUseWorkspaceTsdk": true,
