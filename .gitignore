@@ -36,8 +36,14 @@ config.toml
 !.mango/.env.example
 
 # ─── Agent-local state / Every user must have their own ─── #
-.codex
-.codex/
+.codex/**
+!.codex/config.toml
+!.codex/AGENTS.md
+!.codex/hooks.json
+!.codex/hooks/
+.codex/hooks/*
+!.codex/hooks/session-start.sh
+!.codex/hooks/auto-fix.sh
 .continue/
 .roo/
 .aider*

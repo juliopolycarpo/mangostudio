@@ -1,0 +1,6 @@
+project_doc_fallback_filenames = [".codex/AGENTS.md"]
+hooks = "hooks.json"
+
+[features]
+hooks = true
+codex_hooks = true
