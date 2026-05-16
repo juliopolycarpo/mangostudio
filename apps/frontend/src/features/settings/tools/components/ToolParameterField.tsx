@@ -339,7 +339,8 @@ export function ToolParameterField({
 
     case 'string_list': {
       const listValue = Array.isArray(descriptorValue)
-        ? descriptorValue.join('\n')
+        ? // biome-ignore lint/nursery/noBaseToString: Migrated from ESLint
+          descriptorValue.join('\n')
         : toSafeString(descriptorValue);
       return (
         <div className="space-y-1">

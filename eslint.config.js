@@ -3,7 +3,6 @@ import reactHooksPlugin from 'eslint-plugin-react-hooks';
 import tseslint from 'typescript-eslint';
 
 const typeAwareRules = {
-  '@typescript-eslint/await-thenable': 'error',
   '@typescript-eslint/no-array-delete': 'error',
   '@typescript-eslint/no-duplicate-type-constituents': 'error',
   '@typescript-eslint/no-redundant-type-constituents': 'error',

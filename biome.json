@@ -62,7 +62,7 @@
         "useValidTypeof": "error",
         "useYield": "error"
       },
-      "nursery": { "useErrorCause": "off" },
+      "nursery": { "useAwaitThenable": "warn", "useErrorCause": "off" },
       "style": { "noNestedTernary": "off", "useBlockStatements": "off" },
       "suspicious": {
         "noAssignInExpressions": "error",
