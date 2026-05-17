@@ -231,6 +231,78 @@ OpenCode LSP and formatter wiring lives in `opencode.json`. The default TypeScri
 
 Prettier is disabled. OpenCode instructions load from `.opencode/AGENTS.md`, `.opencode/rules/`, and the root `AGENTS.md`.
 
+## Code Quality
+
+### Biome (Lint)
+
+Configured in `biome.json` with `recommended` rules enabled and workspace-specific overrides.
+
+**Global rules (all files):**
+
+| Category    | Key rules                                           |
+| ----------- | --------------------------------------------------- |
+| Correctness | Recommended defaults                                |
+| Performance | `noDelete` (warn)                                   |
+| Style       | `noNestedTernary` (off), `useBlockStatements` (off) |
+| Nursery     | `useAwaitThenable` (off), `useErrorCause` (off)     |
+
+**TypeScript/TSX overrides (`**/*.{ts,tsx}`):**
+
+| Category    | Enforced rules                                                                                                                                                                                                                                                                      |
+| ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Complexity  | `noArguments`, `noBannedTypes`, `noUselessThisAlias`, `noUselessTypeConstraint`, `useLiteralKeys`, `useOptionalChain` — all `error`                                                                                                                                                 |
+| Correctness | `noUnusedVariables` (`error`)                                                                                                                                                                                                                                                       |
+| Nursery     | `noBaseToString`, `noDuplicateEnumValues`, `noFloatingPromises`, `noForIn`, `noImpliedEval`, `noMisusedPromises`, `noUnsafePlusOperands` — all `error`                                                                                                                              |
+| Style       | `noCommonJs`, `noInferrableTypes`, `noNamespace`, `noNonNullAssertion`, `noUselessElse`, `useArrayLiterals`, `useAsConstAssertion`, `useConst`, `useExponentiationOperator`, `useImportType`, `useNodejsImportProtocol`, `useTemplate`, `useThrowOnlyError` — all `error`           |
+| Suspicious  | `noConsole` (warn, allows `warn`/`error`), `noEmptyBlockStatements`, `noExplicitAny`, `noExtraNonNullAssertion`, `noMisleadingInstantiator`, `noNonNullAssertedOptionalChain`, `noTsIgnore`, `noUnsafeDeclarationMerging`, `noVar`, `useAwait`, `useNamespaceKeyword` — all `error` |
+
+**Frontend-specific overrides (`apps/frontend/**/*.{ts,tsx}`):**
+
+| Category    | Enforced rules                                                                                                                                                                                                                        |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Correctness | `noChildrenProp` (warn), `noNestedComponentDefinitions` (error), `noRenderReturnValue` (error), `noVoidElementsWithChildren` (error), `useExhaustiveDependencies` (error), `useHookAtTopLevel` (error), `useJsxKeyInIterable` (error) |
+| Nursery     | `noComponentHookFactories` (error), `noJsxNamespace` (error), `noScriptUrl` (warn), `useReactAsyncServerFunction` (error)                                                                                                             |
+| Security    | `noDangerouslySetInnerHtml` (warn), `noDangerouslySetInnerHtmlWithChildren` (error)                                                                                                                                                   |
+| Suspicious  | `noArrayIndexKey` (warn), `noCommentText` (error), `noReactForwardRef` (warn), `noSuspiciousSemicolonInJsx` (error)                                                                                                                   |
+
+**Per-workspace relaxations:**
+
+| Workspace / path                                                         | Relaxed rule                            |
+| ------------------------------------------------------------------------ | --------------------------------------- |
+| `apps/api/src/**`                                                        | `nursery.noUnnecessaryConditions` (off) |
+| `scripts/**`                                                             | `suspicious.noConsole` (off)            |
+| `apps/api/src/services/`, `utils/`, `lib/`, `db/` and `apps/shared/src/` | `nursery.useExplicitType` (off)         |
+
+**Additional formatting and assist settings:**
+
+- Line width: 100, indent: 2 spaces, single quotes, semicolons, trailing commas (es5)
+- CSS parser enables Tailwind directives
+- HTML formatter self-closes void elements
+- `assist.actions.source.organizeImports` is enabled
+
+### dprint (Format)
+
+Configured in `dprint.json` with the following scope and settings:
+
+| Setting            | Value                                                                                                                                                                    |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Line width         | 100                                                                                                                                                                      |
+| Indent width       | 2                                                                                                                                                                        |
+| Line endings       | LF                                                                                                                                                                       |
+| Tabs               | false                                                                                                                                                                    |
+| Markdown text wrap | `maintain`                                                                                                                                                               |
+| Includes           | `**/*.{md,mdx,toml,yml,yaml}`, `**/Dockerfile`, `**/Dockerfile.*`                                                                                                        |
+| Excludes           | `node_modules`, `dist`, `coverage`, `build`, `test-results`, `playwright-report`, `.jscpd-out`, `.qa-gate`, `.mango/out`, `routeTree.gen.ts`, `CHANGELOG.md`, `bun.lock` |
+| Plugins            | markdown (WASM), toml (WASM), dockerfile (WASM), pretty_yaml                                                                                                             |
+
+### Circular Dependencies
+
+Detected via `madge` as part of `bun run check`. The check fails if any circular import paths exist across the workspace packages.
+
+### Copy/Paste Detection
+
+Scanned via `jscpd` during CI (qa-gate). Configuration is defined inline in `scripts/qa-gate/collect.ts`.
+
 ## Design System
 
 The frontend ships with a built-in design system under `apps/frontend/src/components/ui/`:
