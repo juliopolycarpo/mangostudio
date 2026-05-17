@@ -11,7 +11,6 @@ import {
   type RunResult,
   resolveDefaultBase,
   runCommand,
-  runParallel,
   runWorkspaceScript,
 } from './lib/runner';
 
@@ -77,10 +76,9 @@ const results: RunResult[] = [];
 
 if (effectiveWorkspaces.length > 0) {
   info('\nWorkspaces');
-  const wsResults = await runParallel(
-    effectiveWorkspaces.map((ws) => () => runWorkspaceScript(ws, 'fix'))
-  );
-  results.push(...wsResults);
+  for (const ws of effectiveWorkspaces) {
+    results.push(await runWorkspaceScript(ws, 'fix'));
+  }
 }
 
 if (effectiveIncludeRoot) {

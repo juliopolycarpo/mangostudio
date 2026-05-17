@@ -51,7 +51,7 @@ export interface TestLaneStats {
 }
 
 export interface ToolingCheckStats {
-  readonly checkQuickExitCode: number;
+  readonly checkExitCode: number;
   readonly failedTasks: readonly string[];
 }
 
@@ -213,11 +213,11 @@ const collectFailedTasks = (text: string): readonly string[] => {
 };
 
 const collectToolingStats = async (): Promise<ToolingCheckStats> => {
-  const result = await runCapture(['bun', 'run', 'check', '--quick']);
+  const result = await runCapture(['bun', 'run', 'check']);
   const combined = `${result.stdout}\n${result.stderr}`;
 
   return {
-    checkQuickExitCode: result.exitCode,
+    checkExitCode: result.exitCode,
     failedTasks: collectFailedTasks(combined),
   };
 };

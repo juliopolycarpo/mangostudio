@@ -339,7 +339,7 @@ const getTooling = (metrics: Metrics | null): ToolingCheckStats | null => {
 
 const renderToolingStatus = (stats: ToolingCheckStats | null): string => {
   if (!stats) return NA;
-  const status = stats.checkQuickExitCode === 0 ? 'pass' : `FAIL (${stats.checkQuickExitCode})`;
+  const status = stats.checkExitCode === 0 ? 'pass' : `FAIL (${stats.checkExitCode})`;
   if (stats.failedTasks.length === 0) return status;
   return `${status}: ${stats.failedTasks.join(', ')}`;
 };
@@ -355,7 +355,7 @@ const renderToolingSection = (): string => {
   const rows: string[] = [];
   const numCell = (value: number | null) => (value == null ? NA : formatNumber(value));
   rows.push(
-    `| Biome/dprint/madge quick check | ${renderToolingStatus(baseTooling)} | ${renderToolingStatus(headTooling)} | ${renderDelta(baseTooling?.checkQuickExitCode, headTooling?.checkQuickExitCode, { higherIsBetter: false, precision: 0 })} |`
+    `| Full repo check | ${renderToolingStatus(baseTooling)} | ${renderToolingStatus(headTooling)} | ${renderDelta(baseTooling?.checkExitCode, headTooling?.checkExitCode, { higherIsBetter: false, precision: 0 })} |`
   );
   rows.push(
     `| TS errors (total) | ${numCell(baseTs)} | ${numCell(headTs)} | ${renderDelta(baseTs, headTs, { higherIsBetter: false, precision: 0 })} |`

@@ -1,4 +1,4 @@
-import { ROOT_BIOME_PATHS, ROOT_DIR } from './lib/config';
+import { ROOT_BIOME_PATHS, ROOT_DIR, type WorkspaceName } from './lib/config';
 import {
   assertNoUnexpectedArguments,
   exitWithResults,
@@ -18,7 +18,7 @@ import {
 function printHelp(): never {
   console.log(`Usage: bun run check [workspace flags] [mode flags]
 
-Runs Biome, dprint, madge circular checks, and TypeScript typecheck with tsgo.
+Runs Biome, dprint, madge circular checks, and tsgo typechecks in parallel.
 Default workspace selection: --all
 
 Workspace flags:
@@ -32,14 +32,45 @@ Mode flags:
   --staged       Scope to workspaces touched by staged files
   --changed      Scope to workspaces changed vs origin/main
   --base <ref>   Base ref for --changed (default: merge-base HEAD origin/main)
-  --quick        Run check:quick plus root tooling, skip tsgo
   --skip-format  Skip root Biome and dprint
   --help`);
   process.exit(0);
 }
 
+function createWorkspaceTasks(
+  workspaces: ReadonlyArray<WorkspaceName>
+): Array<() => Promise<RunResult>> {
+  const quickChecks = workspaces.map(
+    (workspace) => () => runWorkspaceScript(workspace, 'check:quick')
+  );
+  const typechecks = workspaces.map(
+    (workspace) => () => runWorkspaceScript(workspace, 'typecheck')
+  );
+  return [...quickChecks, ...typechecks];
+}
+
+function createRootTasks(skipFormat: boolean): Array<() => Promise<RunResult>> {
+  const tasks: Array<() => Promise<RunResult>> = [];
+
+  if (!skipFormat) {
+    tasks.push(() =>
+      runCommand('root:biome', ['bunx', 'biome', 'check', ...ROOT_BIOME_PATHS], { cwd: ROOT_DIR })
+    );
+    tasks.push(() => runCommand('root:dprint', ['bunx', 'dprint', 'check'], { cwd: ROOT_DIR }));
+  }
+
+  tasks.push(() =>
+    runCommand(
+      'root:madge:circular',
+      ['bunx', 'madge', '--circular', '--extensions', 'ts,tsx', 'apps'],
+      { cwd: ROOT_DIR }
+    )
+  );
+  return tasks;
+}
+
 const { workspaces, includeRoot, flags, values, positional } = parseArgs({
-  booleanFlags: ['--staged', '--changed', '--quick', '--skip-format', '--skip-lint'],
+  booleanFlags: ['--staged', '--changed', '--skip-format', '--skip-lint'],
   valueFlags: ['--base'],
 });
 
@@ -75,45 +106,23 @@ if (flags['--staged']) {
   effectiveIncludeRoot = mapped.includeRoot;
 }
 
-const script = flags['--quick'] ? 'check:quick' : 'check';
-
-const results: RunResult[] = [];
+const tasks: Array<() => Promise<RunResult>> = [];
 
 if (effectiveWorkspaces.length > 0) {
   info('\nWorkspaces');
-  const wsResults = await runParallel(
-    effectiveWorkspaces.map((ws) => () => runWorkspaceScript(ws, script))
-  );
-  results.push(...wsResults);
+  tasks.push(...createWorkspaceTasks(effectiveWorkspaces));
 }
 
 if (effectiveIncludeRoot) {
   info('\nRoot');
-  const rootTasks: Array<() => Promise<RunResult>> = [];
-  if (!flags['--skip-format']) {
-    rootTasks.push(() =>
-      runCommand('root:biome', ['bunx', 'biome', 'check', ...ROOT_BIOME_PATHS], {
-        cwd: ROOT_DIR,
-      })
-    );
-    rootTasks.push(() => runCommand('root:dprint', ['bunx', 'dprint', 'check'], { cwd: ROOT_DIR }));
-  }
-  rootTasks.push(() =>
-    runCommand(
-      'root:madge:circular',
-      ['bunx', 'madge', '--circular', '--extensions', 'ts,tsx', 'apps'],
-      { cwd: ROOT_DIR }
-    )
-  );
-  if (rootTasks.length > 0) {
-    const rootResults = await runParallel(rootTasks);
-    results.push(...rootResults);
-  }
+  tasks.push(...createRootTasks(flags['--skip-format']));
 }
 
-if (results.length === 0) {
+if (tasks.length === 0) {
   info('No affected workspaces — nothing to check.');
   process.exit(0);
 }
+
+const results = await runParallel(tasks);
 
 exitWithResults(results);

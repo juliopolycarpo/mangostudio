@@ -174,7 +174,6 @@ Arquivos formatados são re-adicionados ao stage automaticamente. Todos os hooks
 - `bun run check` — verificação completa (Biome, dprint, typecheck, dependências circulares).
 - `bun run check --staged` — apenas os workspaces afetados pelos arquivos staged (usado pelo hook pre-commit).
 - `bun run check --changed` — apenas os workspaces modificados em relação a `origin/main`.
-- `bun run check --quick` — Biome + dprint + dependências circulares, sem typecheck.
 - `bun run fix --staged` — correção automática apenas nos workspaces afetados.
 
 ## Arquitetura

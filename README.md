@@ -174,7 +174,6 @@ Files that pass formatting are re-staged automatically. All hooks must succeed f
 - `bun run check` — full check (Biome, dprint, typecheck, circular deps).
 - `bun run check --staged` — only the workspaces touched by staged files (used by the pre-commit hook).
 - `bun run check --changed` — only the workspaces changed vs `origin/main`.
-- `bun run check --quick` — Biome + dprint + circular deps, skip typecheck.
 - `bun run fix --staged` — auto-fix only the affected workspaces.
 
 ## Architecture
