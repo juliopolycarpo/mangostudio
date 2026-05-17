@@ -17,7 +17,6 @@ const testRuntimeDir = mkdtempSync(
   join(tmpdir(), `mangostudio-test-${process.pid}-${process.env.BUN_WORKER_ID ?? '0'}-`)
 );
 const testConfigPath = join(testRuntimeDir, 'config.toml');
-const testDbPath = join(testRuntimeDir, 'database.sqlite');
 
 // 1. Set test config BEFORE any lazy singleton initializes
 loadConfigForTest({
@@ -26,7 +25,7 @@ loadConfigForTest({
     url: 'http://localhost:3001',
   },
   database: {
-    path: testDbPath,
+    path: ':memory:',
   },
   configFilePath: testConfigPath,
 });

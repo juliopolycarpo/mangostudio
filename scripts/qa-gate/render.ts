@@ -477,7 +477,9 @@ if (errorNotes.length > 0) {
 lines.push('<details>');
 lines.push('<summary>Out-of-scope (potential follow-ups)</summary>');
 lines.push('');
-lines.push('- Branches & statements for the API workspace (Bun LCOV does not emit them).');
+lines.push(
+  '- Full branches & statements for Bun-owned coverage sources (Bun LCOV does not emit them).'
+);
 lines.push('- Per-chunk bundle deltas for the largest frontend assets.');
 lines.push('- Runtime startup and first-load smoke timings.');
 lines.push('');

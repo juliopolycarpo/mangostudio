@@ -117,8 +117,8 @@ jobs:
           ref: ${{ github.event.pull_request.base.sha }}
 
       - name: Overlay QA-gate tooling from PR head
-        # Base may predate the qa-gate scripts, jscpd devDep, and the API
-        # bunfig coverage config. Overlay them from the PR head so the same
+        # Base may predate the qa-gate scripts, jscpd devDep, and workspace
+        # test/coverage config. Overlay them from the PR head so the same
         # collector runs on both sides without requiring a backport. Keep the
         # base lockfile for dependency delta measurement before overlaying the
         # head dependency graph for installation.
@@ -130,6 +130,12 @@ jobs:
           git checkout FETCH_HEAD -- \
             scripts/qa-gate \
             apps/api/bunfig.toml \
+            apps/api/package.json \
+            apps/frontend/bunfig.toml \
+            apps/frontend/package.json \
+            apps/frontend/vitest.config.ts \
+            apps/shared/bunfig.toml \
+            apps/shared/package.json \
             package.json \
             bun.lock \
             .github/actions/setup-mango

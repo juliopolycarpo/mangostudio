@@ -38,11 +38,11 @@ apps/
 
 ## Workspace Runners
 
-| Workspace       | Runner     | Environment |
-| --------------- | ---------- | ----------- |
-| `apps/api`      | `bun test` | Bun native  |
-| `apps/frontend` | `vitest`   | jsdom       |
-| `apps/shared`   | `vitest`   | node        |
+| Workspace       | Runner                | Environment                                     |
+| --------------- | --------------------- | ----------------------------------------------- |
+| `apps/api`      | `bun test`            | Bun native                                      |
+| `apps/frontend` | `bun:test` + `vitest` | Bun native for pure logic, jsdom for React/Vite |
+| `apps/shared`   | `bun:test`            | Bun native                                      |
 
 ## Root Scripts
 
@@ -247,7 +247,9 @@ Each provider stream test must cover:
 
 ## Coverage
 
-Frontend coverage is written to `apps/frontend/coverage/`:
+Frontend coverage is written to `apps/frontend/coverage/`. Vitest writes the
+React/Vite coverage report, and `bun:test` writes pure-logic LCOV under
+`apps/frontend/coverage/bun/`:
 
 ```bash
 bun run --filter @mangostudio/frontend test:coverage

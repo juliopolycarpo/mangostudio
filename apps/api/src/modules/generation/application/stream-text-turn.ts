@@ -26,6 +26,7 @@ import type { PromptSettings } from '@mangostudio/shared/prompt-rules';
 import type { ProviderRuntimeSettings } from '@mangostudio/shared/provider-settings';
 import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';
+import { shouldEmitDiagnosticLogs } from '../../../lib/diagnostic-logging';
 import { safeJsonParse } from '../../../lib/safe-parse';
 import {
   buildPersistedContextSnapshot,
@@ -1788,6 +1789,7 @@ type LogValue = string | number | boolean;
 type LogMetadata = Record<string, LogValue>;
 
 function logDelegationWarn(event: string, metadata: LogMetadata): void {
+  if (!shouldEmitDiagnosticLogs()) return;
   console.warn(`[subagent-delegation] ${JSON.stringify({ event, ts: Date.now(), ...metadata })}`);
 }
 

@@ -38,11 +38,11 @@ apps/
 
 ## Runners Por Workspace
 
-| Workspace       | Runner     | Ambiente   |
-| --------------- | ---------- | ---------- |
-| `apps/api`      | `bun test` | Bun native |
-| `apps/frontend` | `vitest`   | jsdom      |
-| `apps/shared`   | `vitest`   | node       |
+| Workspace       | Runner                | Ambiente                                           |
+| --------------- | --------------------- | -------------------------------------------------- |
+| `apps/api`      | `bun test`            | Bun native                                         |
+| `apps/frontend` | `bun:test` + `vitest` | Bun native para lógica pura, jsdom para React/Vite |
+| `apps/shared`   | `bun:test`            | Bun native                                         |
 
 ## Scripts Da Raiz
 
@@ -244,7 +244,9 @@ Cada teste de stream por provedor deve cobrir:
 
 ## Cobertura
 
-A cobertura do frontend é escrita em `apps/frontend/coverage/`:
+A cobertura do frontend é escrita em `apps/frontend/coverage/`. O Vitest escreve
+o relatório React/Vite, e `bun:test` escreve LCOV da lógica pura em
+`apps/frontend/coverage/bun/`:
 
 ```bash
 bun run --filter @mangostudio/frontend test:coverage

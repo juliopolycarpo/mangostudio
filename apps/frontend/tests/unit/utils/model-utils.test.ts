@@ -1,5 +1,5 @@
+import { describe, expect, it } from 'bun:test';
 import type { ModelCatalogResponse, ModelOption } from '@mangostudio/shared';
-import { describe, expect, it } from 'vitest';
 import {
   EMPTY_MODEL_CATALOG,
   getModelSelectorPlaceholder,

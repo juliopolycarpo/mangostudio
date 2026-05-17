@@ -11,10 +11,12 @@
     "check": "biome check src tests && tsgo --noEmit",
     "check:quick": "biome check src tests",
     "fix": "biome check --write src tests",
-    "test": "vitest run",
-    "test:unit": "vitest run tests/unit",
+    "test": "bun run test:unit && bun run test:integration",
+    "test:unit": "bun run test:unit:bun && bun run test:unit:vitest",
+    "test:unit:bun": "bun test tests/unit/lib/utils.test.ts tests/unit/utils/model-utils.test.ts",
+    "test:unit:vitest": "vitest run tests/unit",
     "test:integration": "vitest run tests/integration",
-    "test:coverage": "vitest run --coverage",
+    "test:coverage": "vitest run --coverage && bun test --coverage tests/unit/lib/utils.test.ts tests/unit/utils/model-utils.test.ts",
     "test:ui": "vitest --ui"
   },
   "dependencies": {

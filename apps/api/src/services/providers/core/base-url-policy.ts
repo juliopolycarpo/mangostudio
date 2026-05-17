@@ -5,6 +5,10 @@
 
 import { lookup } from 'node:dns/promises';
 
+type AddressFamily = 4 | 6;
+type ResolvedAddress = Readonly<{ address: string; family: AddressFamily }>;
+type HostResolver = (hostname: string) => Promise<ReadonlyArray<ResolvedAddress>>;
+
 /** Ranges that must never be reached by outbound provider requests. */
 const BLOCKED_IPV4_RANGES: [number, number, number][] = [
   // [network, mask, bits] — network & mask must match first `bits` of target
@@ -49,13 +53,42 @@ export class UnsafeBaseUrlError extends Error {
   }
 }
 
+const hostnameResolutionCache = new Map<string, Promise<ReadonlyArray<ResolvedAddress>>>();
+
+function resolveHostname(hostname: string): Promise<ReadonlyArray<ResolvedAddress>> {
+  const cached = hostnameResolutionCache.get(hostname);
+  if (cached) return cached;
+
+  const pending = lookup(hostname, { all: true })
+    .then((results) =>
+      results.map((result) => ({
+        address: result.address,
+        family: result.family as AddressFamily,
+      }))
+    )
+    .catch((error) => {
+      hostnameResolutionCache.delete(hostname);
+      throw error;
+    });
+
+  hostnameResolutionCache.set(hostname, pending);
+  return pending;
+}
+
+export interface ValidateBaseUrlOptions {
+  readonly resolveHostname?: HostResolver;
+}
+
 /**
  * Validates a base URL for outbound provider requests.
  * Rejects non-http(s) schemes and hostnames that resolve to private/loopback addresses.
  *
  * @throws {UnsafeBaseUrlError} if the URL is unsafe.
  */
-export async function validateBaseUrl(rawUrl: string): Promise<void> {
+export async function validateBaseUrl(
+  rawUrl: string,
+  options: ValidateBaseUrlOptions = {}
+): Promise<void> {
   let parsed: URL;
   try {
     parsed = new URL(rawUrl);
@@ -88,7 +121,7 @@ export async function validateBaseUrl(rawUrl: string): Promise<void> {
 
   // DNS resolution check
   try {
-    const results = await lookup(hostname, { all: true });
+    const results = await (options.resolveHostname ?? resolveHostname)(hostname);
     for (const result of results) {
       if (result.family === 4 && isBlockedIPv4(result.address)) {
         throw new UnsafeBaseUrlError('URL resolves to a blocked private or loopback address.');
