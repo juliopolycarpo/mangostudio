@@ -49,6 +49,11 @@ config.toml
 .aider*
 .claude/**
 !.claude/CLAUDE.md
+!.claude/rules/
+.claude/rules/*
+!.claude/rules/01-commands-and-validation.md
+!.claude/rules/02-local-plugins.md
+!.claude/rules/03-code-navigation.md
 !.claude/settings.json
 !.claude/hooks/
 .claude/hooks/*
