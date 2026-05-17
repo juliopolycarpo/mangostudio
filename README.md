@@ -138,6 +138,21 @@ mangostudio/
 | `bun run verify`          | Full CI gate: check, test, build (stops on failure)  |
 | `bun run clean`           | Remove dist, coverage, and build artifacts           |
 
+## Development Tooling
+
+| Tool           | Scope                                         | Primary Functionality                              |
+| -------------- | --------------------------------------------- | -------------------------------------------------- |
+| **Biome**      | JS, TS, JSX, TSX, JSON, JSONC, CSS, HTML      | Linter and formatter with unified rule sets        |
+| **dprint**     | Markdown, MDX, TOML, YAML, Dockerfile         | Pluggable formatter with WASM-based plugins        |
+| **tsgo**       | TS, TSX, MTS, CTS, JS, JSX, MJS, CJS          | TypeScript-native language server for code intel   |
+| **lefthook**   | Git hooks (pre-commit)                        | Git hooks manager that runs checks on staged files |
+| **madge**      | JS/TS dependency graphs                       | Circular dependency detection across workspaces    |
+| **jscpd**      | All source files                              | Copy/paste detection for code duplication alerts   |
+| **Vitest**     | Unit and integration tests (frontend, shared) | Test runner with coverage and watch mode           |
+| **Playwright** | End-to-end browser smoke tests                | Chromium-based browser automation for auth flows   |
+
+These binaries are installed as devDependencies and invoked through the root `bun run` scripts. No global installation is required.
+
 ## Local Validation
 
 A [lefthook](https://github.com/evilmartians/lefthook) pre-commit hook runs Biome on staged files automatically and typechecks only the affected workspaces.
