@@ -75,3 +75,9 @@ export const WORKSPACE_DPRINT_PATHS: Record<WorkspaceName, string[]> = {
   api: ['apps/api/AGENTS.md', 'apps/api/bunfig.toml'],
   shared: ['apps/shared/AGENTS.md', 'apps/shared/bunfig.toml'],
 };
+
+export const WORKSPACE_MADGE_PATHS: Record<WorkspaceName, string> = {
+  frontend: 'apps/frontend',
+  api: 'apps/api',
+  shared: 'apps/shared',
+};

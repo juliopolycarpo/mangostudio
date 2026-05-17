@@ -3,6 +3,7 @@ import {
   ROOT_DIR,
   ROOT_DPRINT_PATHS,
   WORKSPACE_DPRINT_PATHS,
+  WORKSPACE_MADGE_PATHS,
   type WorkspaceName,
 } from './lib/config';
 import {
@@ -64,7 +65,15 @@ function createWorkspaceTasks(
   const typechecks = workspaces.map(
     (workspace) => () => runWorkspaceScript(workspace, 'typecheck')
   );
-  return [...biomeChecks, ...dprintChecks, ...typechecks];
+  const madgeChecks = workspaces.map(
+    (workspace) => () =>
+      runCommand(
+        `root:madge:${workspace}:circular`,
+        ['bunx', 'madge', '--circular', '--extensions', 'ts,tsx', WORKSPACE_MADGE_PATHS[workspace]],
+        { cwd: ROOT_DIR }
+      )
+  );
+  return [...biomeChecks, ...dprintChecks, ...typechecks, ...madgeChecks];
 }
 
 function createRootTasks(skipFormat: boolean): Array<() => Promise<RunResult>> {
@@ -81,13 +90,6 @@ function createRootTasks(skipFormat: boolean): Array<() => Promise<RunResult>> {
     );
   }
 
-  tasks.push(() =>
-    runCommand(
-      'root:madge:circular',
-      ['bunx', 'madge', '--circular', '--extensions', 'ts,tsx', 'apps'],
-      { cwd: ROOT_DIR }
-    )
-  );
   return tasks;
 }
 
