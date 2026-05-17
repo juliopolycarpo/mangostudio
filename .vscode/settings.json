@@ -85,5 +85,7 @@
   },
   "typescript.native-preview.tsdk": "./node_modules/@typescript/native-preview",
   "typescript.experimental.useTsgo": true,
-  "dprint.experimentalLsp": true
+  "dprint.experimentalLsp": true,
+  "biome.lsp.trace.server": "messages",
+  "biome.lsp.watcher.kind": "recommended"
 }
