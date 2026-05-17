@@ -61,6 +61,6 @@ bun run test --e2e
 
 ## 6. Related Docs
 
-- [`../../CONTRIBUTING.md`](../../CONTRIBUTING.md) for contribution policy and commit rules
+- [`../../.github/CONTRIBUTING.md`](../../.github/CONTRIBUTING.md) for contribution policy and commit rules
 - [`../reference/api.md`](../reference/api.md) for endpoint mapping
 - [`../operations/deployment.md`](../operations/deployment.md) for standalone builds

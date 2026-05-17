@@ -193,7 +193,7 @@ The `Messages` type is inferred directly from the `pt-BR.ts` dictionary (`as con
 - [`docs/providers/development.md`](docs/providers/development.md) — provider integration guide
 - [`docs/reference/testing.md`](docs/reference/testing.md) — testing strategy and harness rules
 - [`docs/reference/agent-playbooks.md`](docs/reference/agent-playbooks.md) — feature-by-feature file maps
-- [`CONTRIBUTING.md`](CONTRIBUTING.md) — contribution guidelines
+- [`.github/CONTRIBUTING.md`](.github/CONTRIBUTING.md) — contribution guidelines
 
 ## Standalone Build Notes
 

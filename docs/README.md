@@ -41,9 +41,9 @@ right depth quickly instead of scanning a flat list of files.
 ### Ops and deployment
 
 - [`operations/deployment.md`](./operations/deployment.md)
-- [`operations/security.md`](./operations/security.md)
+- [`SECURITY.md`](../.github/SECURITY.md)
 
 ## Notes
 
-- Root-level docs should stay limited to top-level entry points such as `README.md`, `CONTRIBUTING.md`, and `AGENTS.md`.
+- Root-level docs should stay limited to top-level entry points such as `README.md`, `.github/CONTRIBUTING.md`, and `AGENTS.md`.
 - `docs/pt-br/` mirrors the same documentation structure in Brazilian Portuguese.
