@@ -76,7 +76,7 @@ const renderDelta = (
 ): string => {
   if (baseValue == null || headValue == null) return NA;
   const diff = headValue - baseValue;
-  if (Math.abs(diff) < 1e-9) return '—';
+  if (Math.abs(diff) < 1e-9) return '⚪ ▲ = 0';
   const precision = opts.precision ?? 2;
   const sign = diff > 0 ? '+' : '';
   const magnitude = `${sign}${diff.toFixed(precision).replace(/\.00$/, '')}${opts.suffix ?? ''}`;
@@ -92,7 +92,7 @@ const renderByteDelta = (
 ): string => {
   if (baseValue == null || headValue == null) return NA;
   const diff = headValue - baseValue;
-  if (diff === 0) return '—';
+  if (diff === 0) return '⚪ ▲ = 0';
   const sign = diff > 0 ? '+' : '-';
   const isGood = diff < 0;
   const arrow = diff > 0 ? '▲' : '▼';
