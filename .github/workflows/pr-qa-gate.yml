@@ -182,14 +182,14 @@ jobs:
       - uses: ./.github/actions/setup-mango
 
       - name: Download head metrics
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v8
         with:
           name: qa-metrics-head
           path: ./qa-head
         continue-on-error: true
 
       - name: Download base metrics
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v8
         with:
           name: qa-metrics-base
           path: ./qa-base
