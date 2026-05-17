@@ -155,7 +155,20 @@ These binaries are installed as devDependencies and invoked through the root `bu
 
 ## Local Validation
 
-A [lefthook](https://github.com/evilmartians/lefthook) pre-commit hook runs Biome on staged files automatically and typechecks only the affected workspaces.
+### Git Hooks
+
+A [lefthook](https://github.com/evilmartians/lefthook) pre-commit hook is installed automatically via `bun install` (through the `prepare` script). It runs the following checks in parallel on every `git commit`:
+
+| Hook                 | Trigger      | Files targeted              | Command                                                              |
+| -------------------- | ------------ | --------------------------- | -------------------------------------------------------------------- |
+| `biome`              | `pre-commit` | `*.{ts,tsx,js,jsx,json}`    | `bunx biome check --write {staged_files}`                            |
+| `dprint`             | `pre-commit` | `*.{md,mdx,toml,yml,yaml}`  | `bunx dprint fmt {staged_files}`                                     |
+| `dprint-dockerfile`  | `pre-commit` | `{Dockerfile,Dockerfile.*}` | `bunx dprint fmt {staged_files}`                                     |
+| `typecheck-affected` | `pre-commit` | All staged files            | `bun run check --staged --skip-format` (skipped during merge/rebase) |
+
+Files that pass formatting are re-staged automatically. All hooks must succeed for the commit to proceed.
+
+### Manual Checks
 
 - `bun run check` — full check (Biome, dprint, typecheck, circular deps).
 - `bun run check --staged` — only the workspaces touched by staged files (used by the pre-commit hook).
