@@ -3,6 +3,7 @@ import { useI18n } from '@/hooks/use-i18n';
 import type { CodeThemeConfig, ThemeConfig } from '@/hooks/use-theme';
 import { useTheme } from '@/hooks/use-theme';
 import { CODE_THEMES, type CodeThemeId } from '@/lib/shiki';
+import { ThemePreviewSample } from './ThemePreviewSample';
 
 type FontSize = ThemeConfig['fontSize'];
 type ChatDensity = ThemeConfig['chatDensity'];
@@ -68,26 +69,6 @@ function SettingsSection({
   );
 }
 
-/** Pre-rendered code snippet previews for each Shiki theme (static HTML). */
-const THEME_PREVIEWS: Record<CodeThemeId, { bg: string; html: string }> = {
-  'one-dark-pro': {
-    bg: '#282c34',
-    html: '<code><span style="color:#c678dd">const</span> <span style="color:#e5c07b">greeting</span> <span style="color:#56b6c2">=</span> <span style="color:#98c379">"hello"</span><span style="color:#abb2bf">;</span>\n<span style="color:#c678dd">function</span> <span style="color:#61afef">greet</span><span style="color:#abb2bf">(</span><span style="color:#e06c75">name</span><span style="color:#abb2bf">)</span> <span style="color:#abb2bf">{</span>\n  <span style="color:#c678dd">return</span> <span style="color:#98c379">`${greeting}, ${name}`</span><span style="color:#abb2bf">;</span>\n<span style="color:#abb2bf">}</span></code>',
-  },
-  'github-dark-dimmed': {
-    bg: '#22272e',
-    html: '<code><span style="color:#f47067">const</span> <span style="color:#f69d50">greeting</span> <span style="color:#adbac7">=</span> <span style="color:#96d0ff">"hello"</span><span style="color:#adbac7">;</span>\n<span style="color:#f47067">function</span> <span style="color:#dcbdfb">greet</span><span style="color:#adbac7">(</span><span style="color:#f69d50">name</span><span style="color:#adbac7">)</span> <span style="color:#adbac7">{</span>\n  <span style="color:#f47067">return</span> <span style="color:#96d0ff">`${greeting}, ${name}`</span><span style="color:#adbac7">;</span>\n<span style="color:#adbac7">}</span></code>',
-  },
-  'github-light': {
-    bg: '#ffffff',
-    html: '<code><span style="color:#cf222e">const</span> <span style="color:#953800">greeting</span> <span style="color:#24292f">=</span> <span style="color:#0a3069">"hello"</span><span style="color:#24292f">;</span>\n<span style="color:#cf222e">function</span> <span style="color:#8250df">greet</span><span style="color:#24292f">(</span><span style="color:#953800">name</span><span style="color:#24292f">)</span> <span style="color:#24292f">{</span>\n  <span style="color:#cf222e">return</span> <span style="color:#0a3069">`${greeting}, ${name}`</span><span style="color:#24292f">;</span>\n<span style="color:#24292f">}</span></code>',
-  },
-  'one-light': {
-    bg: '#fafafa',
-    html: '<code><span style="color:#a626a4">const</span> <span style="color:#c18401">greeting</span> <span style="color:#0184bc">=</span> <span style="color:#50a14f">"hello"</span><span style="color:#383a42">;</span>\n<span style="color:#a626a4">function</span> <span style="color:#4078f2">greet</span><span style="color:#383a42">(</span><span style="color:#e45649">name</span><span style="color:#383a42">)</span> <span style="color:#383a42">{</span>\n  <span style="color:#a626a4">return</span> <span style="color:#50a14f">`${greeting}, ${name}`</span><span style="color:#383a42">;</span>\n<span style="color:#383a42">}</span></code>',
-  },
-};
-
 const THEME_I18N_KEYS = {
   'one-dark-pro': 'oneDarkPro',
   'github-dark-dimmed': 'githubDarkDimmed',
@@ -106,7 +87,6 @@ function ThemeCard({
   onClick: () => void;
   label: string;
 }) {
-  const preview = THEME_PREVIEWS[themeId];
   return (
     <button
       type="button"
@@ -118,14 +98,7 @@ function ThemeCard({
         ${selected ? 'border-primary ring-1 ring-primary/30' : 'border-outline-variant/20 hover:border-outline-variant/50 cursor-pointer'}
       `}
     >
-      <pre
-        className="p-3 text-[11px] leading-normal font-mono overflow-hidden"
-        style={{ background: preview.bg }}
-        // Preview HTML is produced by Shiki's syntax highlighter from a static
-        // sentence, not user input; HTML rendering is required to show tokens.
-        // biome-ignore lint/security/noDangerouslySetInnerHtml: renders a controlled inline SVG preview
-        dangerouslySetInnerHTML={{ __html: preview.html }}
-      />
+      <ThemePreviewSample themeId={themeId} />
       <div className="px-3 py-2 text-xs font-semibold text-on-surface-variant bg-surface-container-high">
         {label}
       </div>

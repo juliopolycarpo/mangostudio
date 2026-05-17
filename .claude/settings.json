@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/session-path.sh\""
+          }
+        ]
+      }
+    ],
+    "CwdChanged": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/session-path.sh\""
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/auto-fix.sh\""
+          }
+        ]
+      }
+    ]
+  },
+  "enabledPlugins": {
+    "typescript-lsp@claude-plugins-official": false,
+    "web-lsp": false,
+    "mangostudio-tsgo-lsp@mangostudio-local": true,
+    "mangostudio-biome-lsp@mangostudio-local": true,
+    "mangostudio-dprint-lsp@mangostudio-local": true
+  },
+  "extraKnownMarketplaces": {
+    "mangostudio-local": {
+      "source": {
+        "source": "directory",
+        "path": "./marketplaces/mangostudio-local"
+      }
+    }
+  }
+}

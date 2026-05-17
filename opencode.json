@@ -1,0 +1,70 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "instructions": [".opencode/AGENTS.md", ".opencode/rules/*.md", "AGENTS.md"],
+  "lsp": {
+    "typescript": { "disabled": true },
+    "eslint": { "disabled": true },
+    "tsgo": {
+      "command": ["./node_modules/.bin/tsgo", "--lsp", "--stdio"],
+      "extensions": [".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"],
+      "initialization": {
+        "preferences": {
+          "preferTypeOnlyAutoImports": true,
+          "importModuleSpecifierPreference": "non-relative"
+        }
+      }
+    },
+    "biome": {
+      "command": ["./node_modules/.bin/biome", "lsp-proxy"],
+      "extensions": [
+        ".js",
+        ".jsx",
+        ".mjs",
+        ".cjs",
+        ".ts",
+        ".tsx",
+        ".mts",
+        ".cts",
+        ".json",
+        ".jsonc",
+        ".css",
+        ".html"
+      ]
+    },
+    "dprint": {
+      "command": ["./node_modules/.bin/dprint", "lsp"],
+      "extensions": [".md", ".mdx", ".toml", ".yml", ".yaml"]
+    }
+  },
+  "formatter": {
+    "prettier": { "disabled": true },
+    "biome-fix": {
+      "command": [
+        "./node_modules/.bin/biome",
+        "check",
+        "--write",
+        "--no-errors-on-unmatched",
+        "--files-ignore-unknown=true",
+        "$FILE"
+      ],
+      "extensions": [
+        ".js",
+        ".jsx",
+        ".mjs",
+        ".cjs",
+        ".ts",
+        ".tsx",
+        ".mts",
+        ".cts",
+        ".json",
+        ".jsonc",
+        ".css",
+        ".html"
+      ]
+    },
+    "dprint-fmt": {
+      "command": ["./node_modules/.bin/dprint", "fmt", "--allow-no-files", "$FILE"],
+      "extensions": [".md", ".mdx", ".toml", ".yml", ".yaml"]
+    }
+  }
+}

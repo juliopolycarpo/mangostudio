@@ -35,7 +35,20 @@ Default local URLs:
 - Use [`../reference/testing.md`](../reference/testing.md) before adding or changing behavior.
 - Use [`../architecture/overview.md`](../architecture/overview.md) for the workspace and module layout.
 
-## 4. Common Commands
+## 4. Git Hooks
+
+A [lefthook](https://github.com/evilmartians/lefthook) pre-commit hook is installed automatically during `bun install`. It runs these checks on every commit:
+
+| Check              | Trigger      | Files targeted              | Fails commit on                    |
+| ------------------ | ------------ | --------------------------- | ---------------------------------- |
+| Biome format/lint  | `pre-commit` | `*.{ts,tsx,js,jsx,json}`    | Format or lint errors              |
+| dprint format      | `pre-commit` | `*.{md,mdx,toml,yml,yaml}`  | Format errors                      |
+| dprint Dockerfile  | `pre-commit` | `{Dockerfile,Dockerfile.*}` | Format errors                      |
+| Typecheck affected | `pre-commit` | All staged files            | Type errors in affected workspaces |
+
+Formatted files are re-staged automatically. The typecheck step is skipped during merge or rebase.
+
+## 5. Common Commands
 
 ```bash
 bun run check
@@ -49,9 +62,12 @@ Targeted lanes:
 bun run test --unit
 bun run test --integration
 bun run test --e2e
+bun run check --staged    # only workspaces touched by staged files
+bun run check --quick     # skip typecheck
+bun run fix --staged      # auto-fix only affected workspaces
 ```
 
-## 5. Daily Workflow
+## 6. Daily Workflow
 
 1. Start from the nearest route, component, hook, service, or contract.
 2. Trace one layer outward instead of reading the whole repo.
@@ -59,8 +75,8 @@ bun run test --e2e
 4. Run `bun run check` after each change set.
 5. Before handoff or PR, run `bun run check && bun run test`.
 
-## 6. Related Docs
+## 7. Related Docs
 
-- [`../../CONTRIBUTING.md`](../../CONTRIBUTING.md) for contribution policy and commit rules
+- [`../../.github/CONTRIBUTING.md`](../../.github/CONTRIBUTING.md) for contribution policy and commit rules
 - [`../reference/api.md`](../reference/api.md) for endpoint mapping
 - [`../operations/deployment.md`](../operations/deployment.md) for standalone builds

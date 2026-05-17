@@ -2,7 +2,7 @@
 
 Obrigado pelo seu interesse em contribuir com o MangoStudio!
 
-> 🇺🇸 [Read in English](../../CONTRIBUTING.md)
+> 🇺🇸 [Read in English](../../.github/CONTRIBUTING.md)
 
 ## Pré-requisitos
 

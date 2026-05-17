@@ -36,21 +36,21 @@ bun run dev --frontend
 
 ## Documentation Map
 
-- [`docs/README.md`](./docs/README.md) — entry point to the documentation tree
-- [`docs/guides/contributor-quickstart.md`](./docs/guides/contributor-quickstart.md) — shortest contributor onboarding path
-- [`docs/reference/testing.md`](./docs/reference/testing.md) — testing taxonomy, runners, and support rules
-- [`docs/reference/agent-playbooks.md`](./docs/reference/agent-playbooks.md) — feature-by-feature file map for targeted work
+- [`docs/README.md`](../docs/README.md) — entry point to the documentation tree
+- [`docs/guides/contributor-quickstart.md`](../docs/guides/contributor-quickstart.md) — shortest contributor onboarding path
+- [`docs/reference/testing.md`](../docs/reference/testing.md) — testing taxonomy, runners, and support rules
+- [`docs/reference/agent-playbooks.md`](../docs/reference/agent-playbooks.md) — feature-by-feature file map for targeted work
 
 ## Code Standards
 
-Refer to [`AGENTS.md`](./AGENTS.md) for the full coding style, naming conventions, i18n rules, and testing guidelines. Key points:
+Refer to [`AGENTS.md`](../AGENTS.md) for the full coding style, naming conventions, i18n rules, and testing guidelines. Key points:
 
 - TypeScript throughout — no plain JS files
 - 2-space indentation, single quotes, semicolons
 - All UI strings must come from `@mangostudio/shared/i18n` — never hardcode user-visible text
 - Hooks that contain JSX must use `.tsx` extension
 - `CLAUDE.md` and `GEMINI.md` files with `@imports`
-- AI related Agents: Use [`AGENTS.md`](./AGENTS.md) as a source of agentic stuff
+- AI related Agents: Use [`AGENTS.md`](../AGENTS.md) as a source of agentic stuff
 
 ### Module Architecture
 

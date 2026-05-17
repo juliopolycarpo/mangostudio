@@ -1,0 +1,28 @@
+{
+  "name": "mangostudio-biome-lsp",
+  "version": "0.1.0",
+  "description": "Project-local Biome LSP for MangoStudio.",
+  "author": {
+    "name": "MangoStudio"
+  },
+  "lspServers": {
+    "biome": {
+      "command": "biome",
+      "args": ["lsp-proxy"],
+      "extensionToLanguage": {
+        ".js": "javascript",
+        ".jsx": "javascriptreact",
+        ".mjs": "javascript",
+        ".cjs": "javascript",
+        ".ts": "typescript",
+        ".tsx": "typescriptreact",
+        ".mts": "typescript",
+        ".cts": "typescript",
+        ".json": "json",
+        ".jsonc": "jsonc",
+        ".css": "css",
+        ".html": "html"
+      }
+    }
+  }
+}

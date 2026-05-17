@@ -138,9 +138,37 @@ mangostudio/
 | `bun run verify`          | Full CI gate: check, test, build (stops on failure)  |
 | `bun run clean`           | Remove dist, coverage, and build artifacts           |
 
+## Development Tooling
+
+| Tool           | Scope                                         | Primary Functionality                              |
+| -------------- | --------------------------------------------- | -------------------------------------------------- |
+| **Biome**      | JS, TS, JSX, TSX, JSON, JSONC, CSS, HTML      | Linter and formatter with unified rule sets        |
+| **dprint**     | Markdown, MDX, TOML, YAML, Dockerfile         | Pluggable formatter with WASM-based plugins        |
+| **tsgo**       | TS, TSX, MTS, CTS, JS, JSX, MJS, CJS          | TypeScript-native language server for code intel   |
+| **lefthook**   | Git hooks (pre-commit)                        | Git hooks manager that runs checks on staged files |
+| **madge**      | JS/TS dependency graphs                       | Circular dependency detection across workspaces    |
+| **jscpd**      | All source files                              | Copy/paste detection for code duplication alerts   |
+| **Vitest**     | Unit and integration tests (frontend, shared) | Test runner with coverage and watch mode           |
+| **Playwright** | End-to-end browser smoke tests                | Chromium-based browser automation for auth flows   |
+
+These binaries are installed as devDependencies and invoked through the root `bun run` scripts. No global installation is required.
+
 ## Local Validation
 
-A [lefthook](https://github.com/evilmartians/lefthook) pre-commit hook runs Biome on staged files automatically and typechecks only the affected workspaces.
+### Git Hooks
+
+A [lefthook](https://github.com/evilmartians/lefthook) pre-commit hook is installed automatically via `bun install` (through the `prepare` script). It runs the following checks in parallel on every `git commit`:
+
+| Hook                 | Trigger      | Files targeted              | Command                                                              |
+| -------------------- | ------------ | --------------------------- | -------------------------------------------------------------------- |
+| `biome`              | `pre-commit` | `*.{ts,tsx,js,jsx,json}`    | `bunx biome check --write {staged_files}`                            |
+| `dprint`             | `pre-commit` | `*.{md,mdx,toml,yml,yaml}`  | `bunx dprint fmt {staged_files}`                                     |
+| `dprint-dockerfile`  | `pre-commit` | `{Dockerfile,Dockerfile.*}` | `bunx dprint fmt {staged_files}`                                     |
+| `typecheck-affected` | `pre-commit` | All staged files            | `bun run check --staged --skip-format` (skipped during merge/rebase) |
+
+Files that pass formatting are re-staged automatically. All hooks must succeed for the commit to proceed.
+
+### Manual Checks
 
 - `bun run check` — full check (Biome, dprint, typecheck, circular deps).
 - `bun run check --staged` — only the workspaces touched by staged files (used by the pre-commit hook).
@@ -158,6 +186,122 @@ A [lefthook](https://github.com/evilmartians/lefthook) pre-commit hook runs Biom
 | **AI**       | Multi-provider (Gemini, OpenAI, Anthropic, DeepSeek, OpenAI-compatible)      |
 | **Runtime**  | Bun — no Node.js dependency                                                  |
 | **i18n**     | Pure TypeScript dictionary in `@mangostudio/shared/i18n`                     |
+
+## Editor Setup
+
+MangoStudio configures LSP servers across multiple editors for consistent code intelligence, diagnostics, and formatting.
+
+### VS Code
+
+Workspace settings in `.vscode/settings.json` wire three LSPs and enable format-on-save:
+
+| Language server | Binary                       | Handles                                  | Capabilities                                                                  |
+| --------------- | ---------------------------- | ---------------------------------------- | ----------------------------------------------------------------------------- |
+| **Biome LSP**   | `biome lsp-proxy`            | JS, TS, JSX, TSX, JSON, JSONC, CSS, HTML | Diagnostics, quick-fixes, format-on-save                                      |
+| **dprint LSP**  | `dprint lsp`                 | Markdown, MDX, TOML, YAML, Dockerfile    | Formatting diagnostics, format-on-save                                        |
+| **tsgo**        | `@typescript/native-preview` | TS, TSX, MTS, CTS, JS, JSX, MJS, CJS     | Full code intelligence (hover, go-to-def, references, rename, call hierarchy) |
+
+Format-on-save is enabled globally with Biome as the default formatter. dprint is set as the default formatter for Markdown, MDX, TOML, YAML, and Dockerfile files. Code actions on save include `source.fixAll.biome` and `source.organizeImports.biome`.
+
+### Claude Code
+
+Claude Code uses project-local LSP plugins registered under `.claude/marketplaces/mangostudio-local/`. Enabled in `.claude/settings.json`, these plugins shadow upstream `typescript-lsp` and `web-lsp`:
+
+| Plugin                   | Binary            | Handles                                                      | Capabilities                                         |
+| ------------------------ | ----------------- | ------------------------------------------------------------ | ---------------------------------------------------- |
+| `mangostudio-tsgo-lsp`   | `tsgo`            | `.ts`, `.tsx`, `.mts`, `.cts`, `.js`, `.jsx`, `.mjs`, `.cjs` | Hover, go-to-def, references, call hierarchy, rename |
+| `mangostudio-biome-lsp`  | `biome lsp-proxy` | `.js/.ts/.jsx/.tsx`, `.json`, `.jsonc`, `.css`, `.html`      | Diagnostics and quick-fixes (no navigation)          |
+| `mangostudio-dprint-lsp` | `dprint lsp`      | `.md`, `.mdx`, `.toml`, `.yml`, `.yaml`                      | Formatting diagnostics only (no navigation)          |
+
+Claude Code hooks auto-prepend `node_modules/.bin` to PATH on session start and directory changes (`SessionStart` / `CwdChanged`). After every write or edit, a `PostToolUse` hook runs `auto-fix.sh` to format the touched file.
+
+To install the local plugins, run `bash scripts/claude/setup.sh` or use `/reload-plugins` inside a Claude Code session.
+
+### OpenCode
+
+OpenCode LSP and formatter wiring lives in `opencode.json`. The default TypeScript and ESLint LSPs are disabled in favour of project-local tools:
+
+| LSP / Formatter | Command                       | Extensions                                                   |
+| --------------- | ----------------------------- | ------------------------------------------------------------ |
+| `tsgo` LSP      | `tsgo --lsp --stdio`          | `.ts`, `.tsx`, `.mts`, `.cts`, `.js`, `.jsx`, `.mjs`, `.cjs` |
+| `biome` LSP     | `biome lsp-proxy`             | `.js/.ts/.jsx/.tsx`, `.json`, `.jsonc`, `.css`, `.html`      |
+| `dprint` LSP    | `dprint lsp`                  | `.md`, `.mdx`, `.toml`, `.yml`, `.yaml`                      |
+| `biome-fix`     | `biome check --write`         | Same as Biome LSP extensions                                 |
+| `dprint-fmt`    | `dprint fmt --allow-no-files` | Same as dprint LSP extensions                                |
+
+Prettier is disabled. OpenCode instructions load from `.opencode/AGENTS.md`, `.opencode/rules/`, and the root `AGENTS.md`.
+
+## Code Quality
+
+### Biome (Lint)
+
+Configured in `biome.json` with `recommended` rules enabled and workspace-specific overrides.
+
+**Global rules (all files):**
+
+| Category    | Key rules                                           |
+| ----------- | --------------------------------------------------- |
+| Correctness | Recommended defaults                                |
+| Performance | `noDelete` (warn)                                   |
+| Style       | `noNestedTernary` (off), `useBlockStatements` (off) |
+| Nursery     | `useAwaitThenable` (off), `useErrorCause` (off)     |
+
+**TypeScript/TSX overrides (`**/*.{ts,tsx}`):**
+
+| Category    | Enforced rules                                                                                                                                                                                                                                                                      |
+| ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Complexity  | `noArguments`, `noBannedTypes`, `noUselessThisAlias`, `noUselessTypeConstraint`, `useLiteralKeys`, `useOptionalChain` — all `error`                                                                                                                                                 |
+| Correctness | `noUnusedVariables` (`error`)                                                                                                                                                                                                                                                       |
+| Nursery     | `noBaseToString`, `noDuplicateEnumValues`, `noFloatingPromises`, `noForIn`, `noImpliedEval`, `noMisusedPromises`, `noUnsafePlusOperands` — all `error`                                                                                                                              |
+| Style       | `noCommonJs`, `noInferrableTypes`, `noNamespace`, `noNonNullAssertion`, `noUselessElse`, `useArrayLiterals`, `useAsConstAssertion`, `useConst`, `useExponentiationOperator`, `useImportType`, `useNodejsImportProtocol`, `useTemplate`, `useThrowOnlyError` — all `error`           |
+| Suspicious  | `noConsole` (warn, allows `warn`/`error`), `noEmptyBlockStatements`, `noExplicitAny`, `noExtraNonNullAssertion`, `noMisleadingInstantiator`, `noNonNullAssertedOptionalChain`, `noTsIgnore`, `noUnsafeDeclarationMerging`, `noVar`, `useAwait`, `useNamespaceKeyword` — all `error` |
+
+**Frontend-specific overrides (`apps/frontend/**/*.{ts,tsx}`):**
+
+| Category    | Enforced rules                                                                                                                                                                                                                        |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Correctness | `noChildrenProp` (warn), `noNestedComponentDefinitions` (error), `noRenderReturnValue` (error), `noVoidElementsWithChildren` (error), `useExhaustiveDependencies` (error), `useHookAtTopLevel` (error), `useJsxKeyInIterable` (error) |
+| Nursery     | `noComponentHookFactories` (error), `noJsxNamespace` (error), `noScriptUrl` (warn), `useReactAsyncServerFunction` (error)                                                                                                             |
+| Security    | `noDangerouslySetInnerHtml` (warn), `noDangerouslySetInnerHtmlWithChildren` (error)                                                                                                                                                   |
+| Suspicious  | `noArrayIndexKey` (warn), `noCommentText` (error), `noReactForwardRef` (warn), `noSuspiciousSemicolonInJsx` (error)                                                                                                                   |
+
+**Per-workspace relaxations:**
+
+| Workspace / path                                                         | Relaxed rule                            |
+| ------------------------------------------------------------------------ | --------------------------------------- |
+| `apps/api/src/**`                                                        | `nursery.noUnnecessaryConditions` (off) |
+| `scripts/**`                                                             | `suspicious.noConsole` (off)            |
+| `apps/api/src/services/`, `utils/`, `lib/`, `db/` and `apps/shared/src/` | `nursery.useExplicitType` (off)         |
+
+**Additional formatting and assist settings:**
+
+- Line width: 100, indent: 2 spaces, single quotes, semicolons, trailing commas (es5)
+- CSS parser enables Tailwind directives
+- HTML formatter self-closes void elements
+- `assist.actions.source.organizeImports` is enabled
+
+### dprint (Format)
+
+Configured in `dprint.json` with the following scope and settings:
+
+| Setting            | Value                                                                                                                                                                    |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Line width         | 100                                                                                                                                                                      |
+| Indent width       | 2                                                                                                                                                                        |
+| Line endings       | LF                                                                                                                                                                       |
+| Tabs               | false                                                                                                                                                                    |
+| Markdown text wrap | `maintain`                                                                                                                                                               |
+| Includes           | `**/*.{md,mdx,toml,yml,yaml}`, `**/Dockerfile`, `**/Dockerfile.*`                                                                                                        |
+| Excludes           | `node_modules`, `dist`, `coverage`, `build`, `test-results`, `playwright-report`, `.jscpd-out`, `.qa-gate`, `.mango/out`, `routeTree.gen.ts`, `CHANGELOG.md`, `bun.lock` |
+| Plugins            | markdown (WASM), toml (WASM), dockerfile (WASM), pretty_yaml                                                                                                             |
+
+### Circular Dependencies
+
+Detected via `madge` as part of `bun run check`. The check fails if any circular import paths exist across the workspace packages.
+
+### Copy/Paste Detection
+
+Scanned via `jscpd` during CI (qa-gate). Configuration is defined inline in `scripts/qa-gate/collect.ts`.
 
 ## Design System
 
@@ -193,7 +337,7 @@ The `Messages` type is inferred directly from the `pt-BR.ts` dictionary (`as con
 - [`docs/providers/development.md`](docs/providers/development.md) — provider integration guide
 - [`docs/reference/testing.md`](docs/reference/testing.md) — testing strategy and harness rules
 - [`docs/reference/agent-playbooks.md`](docs/reference/agent-playbooks.md) — feature-by-feature file maps
-- [`CONTRIBUTING.md`](CONTRIBUTING.md) — contribution guidelines
+- [`.github/CONTRIBUTING.md`](.github/CONTRIBUTING.md) — contribution guidelines
 
 ## Standalone Build Notes
 
