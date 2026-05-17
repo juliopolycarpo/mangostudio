@@ -2,6 +2,7 @@ import { join } from 'node:path';
 
 import { ALL_WORKSPACE_NAMES, ROOT_DIR, type WorkspaceName } from '../lib/config';
 import { type CoverageBucket, type CoverageSummary, parseLcovSummary } from './parse-lcov';
+import { readSourceBranchCoverageSummary } from './source-branch-coverage';
 
 export type CoverageSourceKind = 'json-summary' | 'lcov';
 
@@ -28,6 +29,11 @@ export const WORKSPACE_COVERAGE_SOURCES: Readonly<
   ],
   api: [{ kind: 'lcov', file: 'apps/api/coverage/lcov.info' }],
   shared: [{ kind: 'lcov', file: 'apps/shared/coverage/lcov.info' }],
+};
+
+const SOURCE_BRANCH_COVERAGE_FILES: Readonly<Partial<Record<WorkspaceName, string>>> = {
+  api: 'apps/api/coverage/lcov.info',
+  shared: 'apps/shared/coverage/lcov.info',
 };
 
 export const readJsonCoverageSummary = async (absPath: string): Promise<CoverageSummary> => {
@@ -87,7 +93,14 @@ export const readWorkspaceCoverageSummary = async (
   const summaries = await Promise.all(
     WORKSPACE_COVERAGE_SOURCES[workspace].map(readCoverageSource)
   );
-  return mergeCoverageSummaries(summaries);
+  const summary = mergeCoverageSummaries(summaries);
+  const branchCoverageFile = SOURCE_BRANCH_COVERAGE_FILES[workspace];
+  if (!branchCoverageFile || summary.branches) return summary;
+
+  return {
+    ...summary,
+    branches: await readSourceBranchCoverageSummary(join(ROOT_DIR, branchCoverageFile)),
+  };
 };
 
 export const coverageWorkspaceNames = (): readonly WorkspaceName[] => ALL_WORKSPACE_NAMES;
