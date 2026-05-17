@@ -116,14 +116,16 @@ if (runCoverage) {
     (workspace) => WORKSPACES[workspace].hasCoverage
   );
 
-  if (coverageWorkspaces.length > 0) {
-    const coverageResults = await runParallel(
-      coverageWorkspaces.map(
-        (workspace) => () => runWorkspaceScript(workspace, 'test:coverage', { ifPresent: true })
-      )
-    );
-    results.push(...coverageResults);
-  }
+  // Coverage is the most expensive phase. Bundle the root scripts unit tests
+  // here so `--coverage` is a self-contained replacement for `--unit
+  // --integration --coverage` on CI, avoiding a duplicate test pass.
+  const coverageResults = await runParallel([
+    () => runCommand('root:test:unit', ['bun', 'test', 'scripts'], { cwd: ROOT_DIR }),
+    ...coverageWorkspaces.map(
+      (workspace) => () => runWorkspaceScript(workspace, 'test:coverage', { ifPresent: true })
+    ),
+  ]);
+  results.push(...coverageResults);
 }
 
 exitWithResults(results);
