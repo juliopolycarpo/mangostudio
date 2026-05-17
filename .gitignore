@@ -83,7 +83,13 @@ config.toml
 .agents/
 .kiro/
 .trae/
-.opencode/
+.opencode/**
+!.opencode/AGENTS.md
+!.opencode/rules/
+.opencode/rules/*
+!.opencode/rules/01-scope.md
+!.opencode/rules/02-lsp-navigation.md
+!.opencode/rules/03-formatters-and-checks.md
 .cursorrules
 .cursor/
 
