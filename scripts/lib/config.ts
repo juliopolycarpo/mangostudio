@@ -59,3 +59,19 @@ export const ROOT_BIOME_PATHS: string[] = [
   'apps/frontend/tests',
   'apps/shared/tests',
 ];
+
+export const ROOT_DPRINT_PATHS: string[] = [
+  'AGENTS.md',
+  'README.md',
+  'docs',
+  '.github',
+  '.mango',
+  'lefthook.yml',
+  'dprint.json',
+];
+
+export const WORKSPACE_DPRINT_PATHS: Record<WorkspaceName, string[]> = {
+  frontend: ['apps/frontend/AGENTS.md', 'apps/frontend/bunfig.toml'],
+  api: ['apps/api/AGENTS.md', 'apps/api/bunfig.toml'],
+  shared: ['apps/shared/AGENTS.md', 'apps/shared/bunfig.toml'],
+};

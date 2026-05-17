@@ -1,4 +1,10 @@
-import { ROOT_BIOME_PATHS, ROOT_DIR, type WorkspaceName } from './lib/config';
+import {
+  ROOT_BIOME_PATHS,
+  ROOT_DIR,
+  ROOT_DPRINT_PATHS,
+  WORKSPACE_DPRINT_PATHS,
+  type WorkspaceName,
+} from './lib/config';
 import {
   assertNoUnexpectedArguments,
   exitWithResults,
@@ -40,13 +46,25 @@ Mode flags:
 function createWorkspaceTasks(
   workspaces: ReadonlyArray<WorkspaceName>
 ): Array<() => Promise<RunResult>> {
-  const quickChecks = workspaces.map(
+  const biomeChecks = workspaces.map(
     (workspace) => () => runWorkspaceScript(workspace, 'check:quick')
   );
+  const dprintChecks = workspaces
+    .filter((workspace) => WORKSPACE_DPRINT_PATHS[workspace].length > 0)
+    .map(
+      (workspace) => () =>
+        runCommand(
+          `root:dprint:${workspace}`,
+          ['bunx', 'dprint', 'check', ...WORKSPACE_DPRINT_PATHS[workspace]],
+          {
+            cwd: ROOT_DIR,
+          }
+        )
+    );
   const typechecks = workspaces.map(
     (workspace) => () => runWorkspaceScript(workspace, 'typecheck')
   );
-  return [...quickChecks, ...typechecks];
+  return [...biomeChecks, ...dprintChecks, ...typechecks];
 }
 
 function createRootTasks(skipFormat: boolean): Array<() => Promise<RunResult>> {
@@ -56,7 +74,11 @@ function createRootTasks(skipFormat: boolean): Array<() => Promise<RunResult>> {
     tasks.push(() =>
       runCommand('root:biome', ['bunx', 'biome', 'check', ...ROOT_BIOME_PATHS], { cwd: ROOT_DIR })
     );
-    tasks.push(() => runCommand('root:dprint', ['bunx', 'dprint', 'check'], { cwd: ROOT_DIR }));
+    tasks.push(() =>
+      runCommand('root:dprint', ['bunx', 'dprint', 'check', ...ROOT_DPRINT_PATHS], {
+        cwd: ROOT_DIR,
+      })
+    );
   }
 
   tasks.push(() =>
