@@ -3,11 +3,6 @@ project_doc_fallback_filenames = [".codex/AGENTS.md"]
 [features]
 hooks = true
 
-[[hooks.SessionStart]]
-hooks = [
-  { type = "command", command = "bash -lc 'root=$(git rev-parse --show-toplevel 2>/dev/null || pwd); bash \"$root/.codex/hooks/session-start.sh\"'", timeout = 5 },
-]
-
 [[hooks.PostToolUse]]
 hooks = [
   { type = "command", command = "bash -lc 'root=$(git rev-parse --show-toplevel 2>/dev/null || pwd); bash \"$root/.codex/hooks/auto-fix.sh\"'", timeout = 30 },
