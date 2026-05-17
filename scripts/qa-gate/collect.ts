@@ -3,7 +3,9 @@ import { readdir } from 'node:fs/promises';
 import { extname, join } from 'node:path';
 
 import { ALL_WORKSPACE_NAMES, ROOT_DIR, type WorkspaceName } from '../lib/config';
-import { type CoverageSummary, parseLcovSummary } from './parse-lcov';
+import { readWorkspaceCoverageSummary } from './coverage-summary';
+import type { CoverageSummary } from './parse-lcov';
+import { parseTestLanePassCounts } from './test-lane-summary';
 
 // ── Types ──
 
@@ -49,7 +51,7 @@ export interface TestLaneStats {
 }
 
 export interface ToolingCheckStats {
-  readonly checkQuickExitCode: number;
+  readonly checkExitCode: number;
   readonly failedTasks: readonly string[];
 }
 
@@ -190,40 +192,8 @@ const measureLoc = async (workspaceDir: string): Promise<LocBucket> => {
 
 // ── Coverage ──
 
-const COVERAGE_SOURCES: Readonly<Record<WorkspaceName, { kind: 'vitest' | 'lcov'; file: string }>> =
-  {
-    frontend: { kind: 'vitest', file: 'apps/frontend/coverage/coverage-summary.json' },
-    shared: { kind: 'vitest', file: 'apps/shared/coverage/coverage-summary.json' },
-    api: { kind: 'lcov', file: 'apps/api/coverage/lcov.info' },
-  };
-
-interface VitestSummaryShape {
-  total?: {
-    lines: { total: number; covered: number; pct: number };
-    statements: { total: number; covered: number; pct: number };
-    functions: { total: number; covered: number; pct: number };
-    branches: { total: number; covered: number; pct: number };
-  };
-}
-
-const readVitestSummary = async (absPath: string): Promise<CoverageSummary> => {
-  const text = await Bun.file(absPath).text();
-  const json = JSON.parse(text) as VitestSummaryShape;
-  if (!json.total) throw new Error(`Missing 'total' in ${absPath}`);
-  const t = json.total;
-  return {
-    lines: { total: t.lines.total, covered: t.lines.covered, pct: t.lines.pct },
-    statements: { total: t.statements.total, covered: t.statements.covered, pct: t.statements.pct },
-    functions: { total: t.functions.total, covered: t.functions.covered, pct: t.functions.pct },
-    branches: { total: t.branches.total, covered: t.branches.covered, pct: t.branches.pct },
-  };
-};
-
-// biome-ignore lint/suspicious/useAwait: Migrated from ESLint
-const collectCoverage = async (workspace: WorkspaceName): Promise<CoverageSummary> => {
-  const source = COVERAGE_SOURCES[workspace];
-  const absPath = join(ROOT_DIR, source.file);
-  return source.kind === 'vitest' ? readVitestSummary(absPath) : parseLcovSummary(absPath);
+const collectCoverage = (workspace: WorkspaceName): Promise<CoverageSummary> => {
+  return readWorkspaceCoverageSummary(workspace);
 };
 
 // ── Repository tooling ──
@@ -243,11 +213,11 @@ const collectFailedTasks = (text: string): readonly string[] => {
 };
 
 const collectToolingStats = async (): Promise<ToolingCheckStats> => {
-  const result = await runCapture(['bun', 'run', 'check', '--quick']);
+  const result = await runCapture(['bun', 'run', 'check']);
   const combined = `${result.stdout}\n${result.stderr}`;
 
   return {
-    checkQuickExitCode: result.exitCode,
+    checkExitCode: result.exitCode,
     failedTasks: collectFailedTasks(combined),
   };
 };
@@ -304,18 +274,23 @@ const collectDuplication = async (): Promise<DuplicationStats> => {
 // ── Circular deps (madge) ──
 
 const countCircularDeps = async (): Promise<number> => {
-  const { stdout } = await runCapture([
-    'bunx',
-    'madge',
-    '--circular',
-    '--extensions',
-    'ts,tsx',
-    '--json',
-    'apps',
-  ]);
-  const trimmed = stdout.trim() || '[]';
-  const parsed = JSON.parse(trimmed) as unknown;
-  return Array.isArray(parsed) ? parsed.length : 0;
+  const counts = await Promise.all(
+    ALL_WORKSPACE_NAMES.map(async (workspace) => {
+      const { stdout } = await runCapture([
+        'bunx',
+        'madge',
+        '--circular',
+        '--extensions',
+        'ts,tsx',
+        '--json',
+        `apps/${workspace}`,
+      ]);
+      const trimmed = stdout.trim() || '[]';
+      const parsed = JSON.parse(trimmed) as unknown;
+      return Array.isArray(parsed) ? parsed.length : 0;
+    })
+  );
+  return counts.reduce((sum, count) => sum + count, 0);
 };
 
 // ── Frontend bundle ──
@@ -434,26 +409,7 @@ const parseExitCode = async (relPath: string): Promise<number | null> => {
 
 const collectTestLaneStats = async (lane: TestLaneName): Promise<TestLaneStats> => {
   const text = await Bun.file(join(ROOT_DIR, TEST_LANE_LOGS[lane])).text();
-  const stats: Record<WorkspaceName | 'root', number> = {
-    root: 0,
-    frontend: 0,
-    api: 0,
-    shared: 0,
-  };
-
-  for (const line of text.split('\n')) {
-    const workspaceMatch = line.match(
-      /^@mangostudio\/(frontend|api|shared) test:[^:]+:\s+(?:Tests\s+)?(\d+)\s+pass(?:ed)?\b/
-    );
-    if (workspaceMatch) {
-      const workspace = workspaceMatch[1] as WorkspaceName;
-      stats[workspace] = Number(workspaceMatch[2]);
-      continue;
-    }
-
-    const rootMatch = line.match(/^\s+(\d+)\s+pass$/);
-    if (rootMatch) stats.root = Number(rootMatch[1]);
-  }
+  const stats = parseTestLanePassCounts(text);
 
   return {
     exitCode: await parseExitCode(TEST_LANE_EXIT_CODES[lane]),

@@ -148,7 +148,8 @@ mangostudio/
 | **lefthook**   | Git hooks (pre-commit)                        | Git hooks manager that runs checks on staged files |
 | **madge**      | JS/TS dependency graphs                       | Circular dependency detection across workspaces    |
 | **jscpd**      | All source files                              | Copy/paste detection for code duplication alerts   |
-| **Vitest**     | Unit and integration tests (frontend, shared) | Test runner with coverage and watch mode           |
+| **bun:test**   | Unit tests (api, shared, frontend pure logic) | Fast native test runner with LCOV coverage         |
+| **Vitest**     | Frontend React and Vite-bound tests           | jsdom, Vite plugins, coverage, and watch mode      |
 | **Playwright** | End-to-end browser smoke tests                | Chromium-based browser automation for auth flows   |
 
 These binaries are installed as devDependencies and invoked through the root `bun run` scripts. No global installation is required.
@@ -173,7 +174,6 @@ Files that pass formatting are re-staged automatically. All hooks must succeed f
 - `bun run check` — full check (Biome, dprint, typecheck, circular deps).
 - `bun run check --staged` — only the workspaces touched by staged files (used by the pre-commit hook).
 - `bun run check --changed` — only the workspaces changed vs `origin/main`.
-- `bun run check --quick` — Biome + dprint + circular deps, skip typecheck.
 - `bun run fix --staged` — auto-fix only the affected workspaces.
 
 ## Architecture

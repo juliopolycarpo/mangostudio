@@ -11,14 +11,15 @@
     "dev": "bun run --watch src/index.ts",
     "start": "bun run src/index.ts",
     "build": "bun build src/index.ts --target=bun --outdir=dist",
-    "check": "biome check src tests && tsgo --noEmit",
+    "check": "bun run check:quick && bun run typecheck",
     "check:quick": "biome check src tests",
+    "typecheck": "tsgo --noEmit",
     "fix": "biome check --write src tests",
     "migrate": "bun run src/db/migrate.ts",
     "test": "bun run test:unit && bun run test:integration",
-    "test:unit": "bun test tests/unit",
-    "test:integration": "bun test tests/integration",
-    "test:coverage": "bun test --coverage --parallel=1 tests/unit tests/integration"
+    "test:unit": "MANGOSTUDIO_DIAGNOSTIC_LOGS=0 bun test tests/unit",
+    "test:integration": "MANGOSTUDIO_DIAGNOSTIC_LOGS=0 bun test tests/integration",
+    "test:coverage": "MANGOSTUDIO_DIAGNOSTIC_LOGS=0 bun test --coverage --parallel=1 tests/unit tests/integration"
   },
   "dependencies": {
     "@ai-sdk/deepseek": "^2.0.32",

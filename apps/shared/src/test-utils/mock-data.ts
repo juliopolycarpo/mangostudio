@@ -1,3 +1,5 @@
+import { faker } from '@faker-js/faker';
+import type { AuthUser } from '../auth/contracts';
 import type {
   Chat,
   GalleryItem,
@@ -24,13 +26,28 @@ export const MOCK_MODELS = {
   },
 };
 
-export function createMockChat(overrides: Partial<Chat> = {}): Chat {
-  const timestamp = Date.now();
+/** Call once at the top of a test file for deterministic faker output. */
+export function seedFaker(seed: number): void {
+  faker.seed(seed);
+}
+
+export function createMockUser(overrides: Partial<AuthUser> = {}): AuthUser {
   return {
-    id: `chat-${timestamp}`,
-    title: 'Test Chat',
-    createdAt: timestamp - 1000,
-    updatedAt: timestamp,
+    id: faker.string.uuid(),
+    name: faker.person.fullName(),
+    email: faker.internet.email({ provider: 'mangostudio.test' }),
+    emailVerified: false,
+    ...overrides,
+  };
+}
+
+export function createMockChat(overrides: Partial<Chat> = {}): Chat {
+  const now = Date.now();
+  return {
+    id: faker.string.uuid(),
+    title: faker.lorem.words(3),
+    createdAt: now - 1000,
+    updatedAt: now,
     textModel: MOCK_MODELS.text.id,
     imageModel: MOCK_MODELS.image.id,
     ...overrides,
@@ -38,14 +55,13 @@ export function createMockChat(overrides: Partial<Chat> = {}): Chat {
 }
 
 export function createMockMessage(overrides: Partial<Message> = {}): Message {
-  const timestamp = Date.now();
   return {
-    id: `msg-${timestamp}`,
-    chatId: 'chat-1',
+    id: faker.string.uuid(),
+    chatId: faker.string.uuid(),
     role: 'user',
-    text: 'Hello, world!',
+    text: faker.lorem.sentence(),
     interactionMode: 'chat',
-    timestamp,
+    timestamp: Date.now(),
     ...overrides,
   };
 }
@@ -62,38 +78,34 @@ export const toApiResponse = {
 export function createMockGeneratedImageArtifact(
   overrides: Partial<GeneratedImageArtifact> = {}
 ): GeneratedImageArtifact {
-  const timestamp = Date.now();
   return {
-    id: `artifact-${timestamp}`,
-    chatId: 'chat-1',
-    messageId: 'msg-1',
-    prompt: 'A beautiful landscape',
-    imageUrl: '/images/test-image.png',
-    createdAt: timestamp,
+    id: faker.string.uuid(),
+    chatId: faker.string.uuid(),
+    messageId: faker.string.uuid(),
+    prompt: faker.lorem.sentence(),
+    imageUrl: `/images/${faker.system.fileName({ extensionCount: 0 })}.png`,
+    createdAt: Date.now(),
     ...overrides,
   };
 }
 
 export function createMockGalleryItem(overrides: Partial<GalleryItem> = {}): GalleryItem {
-  return createMockGeneratedImageArtifact({
-    id: `gallery-${Date.now()}`,
-    ...overrides,
-  });
+  return createMockGeneratedImageArtifact(overrides);
 }
 
 export function createMockSecretMetadataRow(
   overrides: Partial<SecretMetadataRow> = {}
 ): SecretMetadataRow {
-  const timestamp = Date.now();
+  const now = Date.now();
   return {
-    id: 'test-connector-id',
-    name: 'Default',
+    id: faker.string.uuid(),
+    name: faker.company.name(),
     provider: 'gemini',
     configured: 1,
     source: 'bun-secrets',
-    maskedSuffix: '1234',
-    updatedAt: timestamp,
-    lastValidatedAt: timestamp - 60000,
+    maskedSuffix: faker.string.alphanumeric(4),
+    updatedAt: now,
+    lastValidatedAt: now - 60_000,
     lastValidationError: null,
     enabledModels: JSON.stringify(['gemini-pro', 'gemini-flash']),
     userId: null,

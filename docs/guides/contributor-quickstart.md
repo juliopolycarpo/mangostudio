@@ -63,7 +63,6 @@ bun run test --unit
 bun run test --integration
 bun run test --e2e
 bun run check --staged    # only workspaces touched by staged files
-bun run check --quick     # skip typecheck
 bun run fix --staged      # auto-fix only affected workspaces
 ```
 

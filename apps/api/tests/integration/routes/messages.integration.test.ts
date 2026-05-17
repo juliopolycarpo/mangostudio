@@ -1,7 +1,14 @@
 import { afterEach, beforeAll, describe, expect, it, mock } from 'bun:test';
+import { faker } from '@faker-js/faker';
 import { getDb } from '../../../src/db/database';
 import { verifyChatOwnership } from '../../../src/modules/chats/infrastructure/chat-repository';
 import { messageRoutes } from '../../../src/modules/messages/http/message-routes';
+import {
+  type ChatFixture,
+  insertTestChat,
+  insertTestUser,
+  type UserFixture,
+} from '../../support/factories';
 import {
   createApiTestApp,
   createAuthenticatedApiTestApp,
@@ -11,61 +18,12 @@ import {
 // mock.restore() does NOT revert mock.module() overrides; explicit re-registration is required.
 const realVerifyChatOwnership = verifyChatOwnership;
 
-const TEST_USER = {
-  id: 'test-user-messages',
-  name: 'Message User',
-  email: 'messages@mangostudio.test',
-};
-
-const OTHER_USER = {
-  id: 'other-user-messages',
-  name: 'Other Message User',
-  email: 'other-messages@mangostudio.test',
-};
+let TEST_USER!: UserFixture;
+let TEST_CHAT!: ChatFixture;
 
 beforeAll(async () => {
-  const db = getDb();
-  // Seed test user so chats.userId FK constraint is satisfied
-  await db
-    .insertInto('user')
-    .values({
-      id: TEST_USER.id,
-      name: TEST_USER.name,
-      email: TEST_USER.email,
-      emailVerified: 0,
-      image: null,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    })
-    .onConflict((oc) => oc.column('id').doNothing())
-    .execute();
-
-  await db
-    .insertInto('user')
-    .values({
-      id: OTHER_USER.id,
-      name: OTHER_USER.name,
-      email: OTHER_USER.email,
-      emailVerified: 0,
-      image: null,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    })
-    .onConflict((oc) => oc.column('id').doNothing())
-    .execute();
-  // Seed test chat so messages.chatId FK constraint is satisfied
-  await db
-    .insertInto('chats')
-    .values({
-      id: 'chat-1',
-      title: 'Test Chat',
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-      model: null,
-      userId: TEST_USER.id,
-    })
-    .onConflict((oc) => oc.column('id').doNothing())
-    .execute();
+  TEST_USER = await insertTestUser();
+  TEST_CHAT = await insertTestChat(TEST_USER.id);
 });
 
 let restoreAuth: (() => void) | null = null;
@@ -87,8 +45,8 @@ describe('POST /messages', () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          id: 'msg-1',
-          chatId: 'chat-1',
+          id: faker.string.uuid(),
+          chatId: faker.string.uuid(),
           role: 'user',
           text: 'Hello',
           timestamp: Date.now(),
@@ -107,8 +65,8 @@ describe('POST /messages', () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          id: 'msg-1',
-          chatId: 'chat-1',
+          id: faker.string.uuid(),
+          chatId: TEST_CHAT.id,
           role: 'admin', // invalid role
           text: 'Hello',
           timestamp: Date.now(),
@@ -133,7 +91,7 @@ describe('POST /messages', () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           id: 'msg-1',
-          chatId: 'chat-1',
+          chatId: TEST_CHAT.id,
           role: 'user',
           text: 'Hello',
           timestamp: Date.now(),
@@ -157,8 +115,8 @@ describe('POST /messages', () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          id: 'msg-2',
-          chatId: 'chat-1',
+          id: faker.string.uuid(),
+          chatId: TEST_CHAT.id,
           role: 'ai',
           text: 'Hello from AI',
           timestamp: Date.now(),
@@ -182,7 +140,7 @@ describe('POST /messages', () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          id: 'msg-1',
+          id: faker.string.uuid(),
           chatId: 'nonexistent-chat',
           role: 'user',
           text: 'Hello',
@@ -546,7 +504,7 @@ describe('PUT /messages/:id', () => {
       .insertInto('messages')
       .values({
         id: msgId,
-        chatId: 'chat-1',
+        chatId: TEST_CHAT.id,
         role: 'user',
         text: 'Original text',
         timestamp: Date.now(),

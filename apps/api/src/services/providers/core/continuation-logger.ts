@@ -8,15 +8,18 @@
  */
 
 import type { ContinuationReasonCode, ProviderType } from '@mangostudio/shared/types';
+import { shouldEmitDiagnosticLogs } from '../../../lib/diagnostic-logging';
 
 type LogMetadata = Record<string, string | number | boolean>;
 
 function logEvent(event: string, metadata: LogMetadata): void {
+  if (!shouldEmitDiagnosticLogs()) return;
   const ts = Date.now();
   console.warn(`[continuation] ${JSON.stringify({ event, ts, ...metadata })}`);
 }
 
 function logError(event: string, metadata: LogMetadata): void {
+  if (!shouldEmitDiagnosticLogs()) return;
   const ts = Date.now();
   console.error(`[continuation] ${JSON.stringify({ event, ts, ...metadata })}`);
 }

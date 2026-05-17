@@ -8,6 +8,7 @@ import { dirname } from 'node:path';
 import { Kysely } from 'kysely';
 import { BunSqliteDialect } from 'kysely-bun-sqlite/dist/index.js';
 import { getConfig } from '../lib/config';
+import { shouldEmitDiagnosticLogs } from '../lib/diagnostic-logging';
 import type { Database } from './types';
 
 let dbInstance: Kysely<Database> | null = null;
@@ -35,7 +36,9 @@ export function getDb(): Kysely<Database> {
       dialect: new BunSqliteDialect({ database: sqlite }),
     });
 
-    console.warn(`[db] Connected to SQLite at ${dbPath}`);
+    if (shouldEmitDiagnosticLogs()) {
+      console.warn(`[db] Connected to SQLite at ${dbPath}`);
+    }
   }
   return dbInstance;
 }
@@ -47,6 +50,8 @@ export async function closeDb(): Promise<void> {
   if (dbInstance) {
     await dbInstance.destroy();
     dbInstance = null;
-    console.warn('[db] Connection closed');
+    if (shouldEmitDiagnosticLogs()) {
+      console.warn('[db] Connection closed');
+    }
   }
 }

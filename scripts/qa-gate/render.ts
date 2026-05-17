@@ -76,7 +76,7 @@ const renderDelta = (
 ): string => {
   if (baseValue == null || headValue == null) return NA;
   const diff = headValue - baseValue;
-  if (Math.abs(diff) < 1e-9) return '—';
+  if (Math.abs(diff) < 1e-9) return '⚪ ▲ = 0';
   const precision = opts.precision ?? 2;
   const sign = diff > 0 ? '+' : '';
   const magnitude = `${sign}${diff.toFixed(precision).replace(/\.00$/, '')}${opts.suffix ?? ''}`;
@@ -92,7 +92,7 @@ const renderByteDelta = (
 ): string => {
   if (baseValue == null || headValue == null) return NA;
   const diff = headValue - baseValue;
-  if (diff === 0) return '—';
+  if (diff === 0) return '⚪ ▲ = 0';
   const sign = diff > 0 ? '+' : '-';
   const isGood = diff < 0;
   const arrow = diff > 0 ? '▲' : '▼';
@@ -135,6 +135,8 @@ const renderCoverageSection = (): string => {
   }
   return [
     '### Coverage',
+    '',
+    '_API/shared branches and statements are source-derived from LCOV line hits because Bun LCOV does not emit branch or statement records._',
     '',
     '| Workspace | Metric | Base | Head | Δ |',
     '|---|---|---|---|---|',
@@ -337,7 +339,7 @@ const getTooling = (metrics: Metrics | null): ToolingCheckStats | null => {
 
 const renderToolingStatus = (stats: ToolingCheckStats | null): string => {
   if (!stats) return NA;
-  const status = stats.checkQuickExitCode === 0 ? 'pass' : `FAIL (${stats.checkQuickExitCode})`;
+  const status = stats.checkExitCode === 0 ? 'pass' : `FAIL (${stats.checkExitCode})`;
   if (stats.failedTasks.length === 0) return status;
   return `${status}: ${stats.failedTasks.join(', ')}`;
 };
@@ -353,7 +355,7 @@ const renderToolingSection = (): string => {
   const rows: string[] = [];
   const numCell = (value: number | null) => (value == null ? NA : formatNumber(value));
   rows.push(
-    `| Biome/dprint/madge quick check | ${renderToolingStatus(baseTooling)} | ${renderToolingStatus(headTooling)} | ${renderDelta(baseTooling?.checkQuickExitCode, headTooling?.checkQuickExitCode, { higherIsBetter: false, precision: 0 })} |`
+    `| Full repo check | ${renderToolingStatus(baseTooling)} | ${renderToolingStatus(headTooling)} | ${renderDelta(baseTooling?.checkExitCode, headTooling?.checkExitCode, { higherIsBetter: false, precision: 0 })} |`
   );
   rows.push(
     `| TS errors (total) | ${numCell(baseTs)} | ${numCell(headTs)} | ${renderDelta(baseTs, headTs, { higherIsBetter: false, precision: 0 })} |`
@@ -477,7 +479,7 @@ if (errorNotes.length > 0) {
 lines.push('<details>');
 lines.push('<summary>Out-of-scope (potential follow-ups)</summary>');
 lines.push('');
-lines.push('- Branches & statements for the API workspace (Bun LCOV does not emit them).');
+lines.push('- Native Bun branch and statement records when Bun LCOV emits them directly.');
 lines.push('- Per-chunk bundle deltas for the largest frontend assets.');
 lines.push('- Runtime startup and first-load smoke timings.');
 lines.push('');

@@ -5,7 +5,7 @@
  * Also runs migrations on the in-memory test database so that all tables exist.
  */
 
-import { existsSync, unlinkSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Migrator } from 'kysely/migration';
@@ -13,35 +13,10 @@ import { getDb } from '../../../src/db/database';
 import { allMigrations } from '../../../src/db/migrations';
 import { loadConfigForTest } from '../../../src/lib/config';
 
-// Use a per-worker temp file so persistSecret and syncConfigFileConnectors
-// share the same path without clobbering the real user config.
-const testConfigPath = join(tmpdir(), `mangostudio-test-config-${process.pid}.toml`);
-try {
-  if (existsSync(testConfigPath)) unlinkSync(testConfigPath);
-} catch (e: unknown) {
-  if (
-    typeof e === 'object' &&
-    e !== null &&
-    'code' in e &&
-    (e as { code: string }).code !== 'ENOENT'
-  ) {
-    throw e;
-  }
-}
-
-const testDbPath = join(tmpdir(), `mangostudio-test-${process.env.BUN_WORKER_ID || '0'}.sqlite`);
-try {
-  if (existsSync(testDbPath)) unlinkSync(testDbPath);
-} catch (e: unknown) {
-  if (
-    typeof e === 'object' &&
-    e !== null &&
-    'code' in e &&
-    (e as { code: string }).code !== 'ENOENT'
-  ) {
-    throw e;
-  }
-}
+const testRuntimeDir = mkdtempSync(
+  join(tmpdir(), `mangostudio-test-${process.pid}-${process.env.BUN_WORKER_ID ?? '0'}-`)
+);
+const testConfigPath = join(testRuntimeDir, 'config.toml');
 
 // 1. Set test config BEFORE any lazy singleton initializes
 loadConfigForTest({
@@ -50,7 +25,7 @@ loadConfigForTest({
     url: 'http://localhost:3001',
   },
   database: {
-    path: testDbPath,
+    path: ':memory:',
   },
   configFilePath: testConfigPath,
 });

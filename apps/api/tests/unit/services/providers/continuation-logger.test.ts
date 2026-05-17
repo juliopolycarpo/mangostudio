@@ -1,4 +1,4 @@
-import { describe, expect, it, spyOn } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test';
 import {
   logContextInfo,
   logDegrade,
@@ -32,6 +32,22 @@ function captureError(): Array<Record<string, unknown>> {
 }
 
 describe('continuation-logger', () => {
+  let previousLogSetting: string | undefined;
+
+  beforeEach(() => {
+    previousLogSetting = process.env.MANGOSTUDIO_DIAGNOSTIC_LOGS;
+    process.env.MANGOSTUDIO_DIAGNOSTIC_LOGS = '1';
+  });
+
+  afterEach(() => {
+    if (previousLogSetting === undefined) {
+      delete process.env.MANGOSTUDIO_DIAGNOSTIC_LOGS;
+      return;
+    }
+
+    process.env.MANGOSTUDIO_DIAGNOSTIC_LOGS = previousLogSetting;
+  });
+
   describe('logDegrade', () => {
     it('emits a structured degrade event with all fields', () => {
       const entries = captureWarn();

@@ -2,8 +2,9 @@
   "extends": "../../tsconfig.json",
   "compilerOptions": {
     "lib": ["ES2022"],
+    "types": ["bun"],
     "rootDir": ".",
     "outDir": "dist"
   },
-  "include": ["src", "tests", "vitest.config.ts"]
+  "include": ["src", "tests"]
 }

@@ -140,16 +140,17 @@ mangostudio/
 
 ## Ferramentas de Desenvolvimento
 
-| Ferramenta     | Escopo                                              | Funcionalidade Principal                          |
-| -------------- | --------------------------------------------------- | ------------------------------------------------- |
-| **Biome**      | JS, TS, JSX, TSX, JSON, JSONC, CSS, HTML            | Linter e formatador com regras unificadas         |
-| **dprint**     | Markdown, MDX, TOML, YAML, Dockerfile               | Formatador plugável com plugins WASM              |
-| **tsgo**       | TS, TSX, MTS, CTS, JS, JSX, MJS, CJS                | Servidor de linguagem TypeScript nativo           |
-| **lefthook**   | Git hooks (pre-commit)                              | Gerenciador de hooks Git para validação em commit |
-| **madge**      | Grafos de dependência JS/TS                         | Detecção de dependências circulares               |
-| **jscpd**      | Todos os arquivos fonte                             | Detecção de código duplicado                      |
-| **Vitest**     | Testes unitários e de integração (frontend, shared) | Executor de testes com cobertura e watch          |
-| **Playwright** | Testes end-to-end no Chromium                       | Automação de navegador para fluxos de auth        |
+| Ferramenta     | Escopo                                               | Funcionalidade Principal                          |
+| -------------- | ---------------------------------------------------- | ------------------------------------------------- |
+| **Biome**      | JS, TS, JSX, TSX, JSON, JSONC, CSS, HTML             | Linter e formatador com regras unificadas         |
+| **dprint**     | Markdown, MDX, TOML, YAML, Dockerfile                | Formatador plugável com plugins WASM              |
+| **tsgo**       | TS, TSX, MTS, CTS, JS, JSX, MJS, CJS                 | Servidor de linguagem TypeScript nativo           |
+| **lefthook**   | Git hooks (pre-commit)                               | Gerenciador de hooks Git para validação em commit |
+| **madge**      | Grafos de dependência JS/TS                          | Detecção de dependências circulares               |
+| **jscpd**      | Todos os arquivos fonte                              | Detecção de código duplicado                      |
+| **bun:test**   | Testes unitários (api, shared, lógica pura frontend) | Executor nativo rápido com cobertura LCOV         |
+| **Vitest**     | Testes React frontend e dependentes do Vite          | jsdom, plugins Vite, cobertura e watch            |
+| **Playwright** | Testes end-to-end no Chromium                        | Automação de navegador para fluxos de auth        |
 
 Estes binários são instalados como devDependencies e invocados através dos scripts `bun run`. Nenhuma instalação global é necessária.
 
@@ -173,7 +174,6 @@ Arquivos formatados são re-adicionados ao stage automaticamente. Todos os hooks
 - `bun run check` — verificação completa (Biome, dprint, typecheck, dependências circulares).
 - `bun run check --staged` — apenas os workspaces afetados pelos arquivos staged (usado pelo hook pre-commit).
 - `bun run check --changed` — apenas os workspaces modificados em relação a `origin/main`.
-- `bun run check --quick` — Biome + dprint + dependências circulares, sem typecheck.
 - `bun run fix --staged` — correção automática apenas nos workspaces afetados.
 
 ## Arquitetura
