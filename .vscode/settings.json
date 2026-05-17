@@ -84,5 +84,6 @@
     "**/test-results/**": true
   },
   "typescript.native-preview.tsdk": "./node_modules/@typescript/native-preview",
-  "typescript.experimental.useTsgo": true
+  "typescript.experimental.useTsgo": true,
+  "dprint.experimentalLsp": true
 }
