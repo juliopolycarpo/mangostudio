@@ -94,6 +94,7 @@
         "@sinclair/typebox": "^0.34.49",
       },
       "devDependencies": {
+        "@types/bun": "^1.3.13",
         "typescript": "~6.0.3",
       },
     },

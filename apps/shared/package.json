@@ -8,9 +8,9 @@
     "check": "biome check src tests && tsgo --noEmit",
     "check:quick": "biome check src tests",
     "fix": "biome check --write src tests",
-    "test": "vitest run",
-    "test:unit": "vitest run tests/unit",
-    "test:coverage": "vitest run --coverage"
+    "test": "bun test",
+    "test:unit": "bun test tests/unit",
+    "test:coverage": "bun test --coverage"
   },
   "exports": {
     ".": "./src/index.ts",
@@ -34,6 +34,7 @@
     "./prompt-rules": "./src/prompt-rules/index.ts"
   },
   "devDependencies": {
+    "@types/bun": "^1.3.13",
     "typescript": "~6.0.3"
   },
   "dependencies": {
