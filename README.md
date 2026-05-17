@@ -187,6 +187,50 @@ Files that pass formatting are re-staged automatically. All hooks must succeed f
 | **Runtime**  | Bun — no Node.js dependency                                                  |
 | **i18n**     | Pure TypeScript dictionary in `@mangostudio/shared/i18n`                     |
 
+## Editor Setup
+
+MangoStudio configures LSP servers across multiple editors for consistent code intelligence, diagnostics, and formatting.
+
+### VS Code
+
+Workspace settings in `.vscode/settings.json` wire three LSPs and enable format-on-save:
+
+| Language server | Binary                       | Handles                                  | Capabilities                                                                  |
+| --------------- | ---------------------------- | ---------------------------------------- | ----------------------------------------------------------------------------- |
+| **Biome LSP**   | `biome lsp-proxy`            | JS, TS, JSX, TSX, JSON, JSONC, CSS, HTML | Diagnostics, quick-fixes, format-on-save                                      |
+| **dprint LSP**  | `dprint lsp`                 | Markdown, MDX, TOML, YAML, Dockerfile    | Formatting diagnostics, format-on-save                                        |
+| **tsgo**        | `@typescript/native-preview` | TS, TSX, MTS, CTS, JS, JSX, MJS, CJS     | Full code intelligence (hover, go-to-def, references, rename, call hierarchy) |
+
+Format-on-save is enabled globally with Biome as the default formatter. dprint is set as the default formatter for Markdown, MDX, TOML, YAML, and Dockerfile files. Code actions on save include `source.fixAll.biome` and `source.organizeImports.biome`.
+
+### Claude Code
+
+Claude Code uses project-local LSP plugins registered under `.claude/marketplaces/mangostudio-local/`. Enabled in `.claude/settings.json`, these plugins shadow upstream `typescript-lsp` and `web-lsp`:
+
+| Plugin                   | Binary            | Handles                                                      | Capabilities                                         |
+| ------------------------ | ----------------- | ------------------------------------------------------------ | ---------------------------------------------------- |
+| `mangostudio-tsgo-lsp`   | `tsgo`            | `.ts`, `.tsx`, `.mts`, `.cts`, `.js`, `.jsx`, `.mjs`, `.cjs` | Hover, go-to-def, references, call hierarchy, rename |
+| `mangostudio-biome-lsp`  | `biome lsp-proxy` | `.js/.ts/.jsx/.tsx`, `.json`, `.jsonc`, `.css`, `.html`      | Diagnostics and quick-fixes (no navigation)          |
+| `mangostudio-dprint-lsp` | `dprint lsp`      | `.md`, `.mdx`, `.toml`, `.yml`, `.yaml`                      | Formatting diagnostics only (no navigation)          |
+
+Claude Code hooks auto-prepend `node_modules/.bin` to PATH on session start and directory changes (`SessionStart` / `CwdChanged`). After every write or edit, a `PostToolUse` hook runs `auto-fix.sh` to format the touched file.
+
+To install the local plugins, run `bash scripts/claude/setup.sh` or use `/reload-plugins` inside a Claude Code session.
+
+### OpenCode
+
+OpenCode LSP and formatter wiring lives in `opencode.json`. The default TypeScript and ESLint LSPs are disabled in favour of project-local tools:
+
+| LSP / Formatter | Command                       | Extensions                                                   |
+| --------------- | ----------------------------- | ------------------------------------------------------------ |
+| `tsgo` LSP      | `tsgo --lsp --stdio`          | `.ts`, `.tsx`, `.mts`, `.cts`, `.js`, `.jsx`, `.mjs`, `.cjs` |
+| `biome` LSP     | `biome lsp-proxy`             | `.js/.ts/.jsx/.tsx`, `.json`, `.jsonc`, `.css`, `.html`      |
+| `dprint` LSP    | `dprint lsp`                  | `.md`, `.mdx`, `.toml`, `.yml`, `.yaml`                      |
+| `biome-fix`     | `biome check --write`         | Same as Biome LSP extensions                                 |
+| `dprint-fmt`    | `dprint fmt --allow-no-files` | Same as dprint LSP extensions                                |
+
+Prettier is disabled. OpenCode instructions load from `.opencode/AGENTS.md`, `.opencode/rules/`, and the root `AGENTS.md`.
+
 ## Design System
 
 The frontend ships with a built-in design system under `apps/frontend/src/components/ui/`:
