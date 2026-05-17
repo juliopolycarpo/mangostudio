@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { ALL_WORKSPACE_NAMES, ROOT_DIR, type WorkspaceName } from '../lib/config';
 import { type CoverageBucket, type CoverageSummary, parseLcovSummary } from './parse-lcov';
 import { readSourceBranchCoverageSummary } from './source-branch-coverage';
+import { readSourceStatementCoverageSummary } from './source-statement-coverage';
 
 export type CoverageSourceKind = 'json-summary' | 'lcov';
 
@@ -31,7 +32,7 @@ export const WORKSPACE_COVERAGE_SOURCES: Readonly<
   shared: [{ kind: 'lcov', file: 'apps/shared/coverage/lcov.info' }],
 };
 
-const SOURCE_BRANCH_COVERAGE_FILES: Readonly<Partial<Record<WorkspaceName, string>>> = {
+const SOURCE_DERIVED_COVERAGE_FILES: Readonly<Partial<Record<WorkspaceName, string>>> = {
   api: 'apps/api/coverage/lcov.info',
   shared: 'apps/shared/coverage/lcov.info',
 };
@@ -94,13 +95,20 @@ export const readWorkspaceCoverageSummary = async (
     WORKSPACE_COVERAGE_SOURCES[workspace].map(readCoverageSource)
   );
   const summary = mergeCoverageSummaries(summaries);
-  const branchCoverageFile = SOURCE_BRANCH_COVERAGE_FILES[workspace];
-  if (!branchCoverageFile || summary.branches) return summary;
+  const derivedCoverageFile = SOURCE_DERIVED_COVERAGE_FILES[workspace];
+  if (!derivedCoverageFile) return summary;
 
-  return {
-    ...summary,
-    branches: await readSourceBranchCoverageSummary(join(ROOT_DIR, branchCoverageFile)),
-  };
+  const lcovPath = join(ROOT_DIR, derivedCoverageFile);
+  const [branches, statements] = await Promise.all([
+    summary.branches
+      ? Promise.resolve(summary.branches)
+      : readSourceBranchCoverageSummary(lcovPath),
+    summary.statements
+      ? Promise.resolve(summary.statements)
+      : readSourceStatementCoverageSummary(lcovPath),
+  ]);
+
+  return { ...summary, branches, statements };
 };
 
 export const coverageWorkspaceNames = (): readonly WorkspaceName[] => ALL_WORKSPACE_NAMES;

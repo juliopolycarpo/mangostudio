@@ -136,7 +136,7 @@ const renderCoverageSection = (): string => {
   return [
     '### Coverage',
     '',
-    '_API/shared branches are source-derived from LCOV line hits because Bun LCOV does not emit branch records._',
+    '_API/shared branches and statements are source-derived from LCOV line hits because Bun LCOV does not emit branch or statement records._',
     '',
     '| Workspace | Metric | Base | Head | Δ |',
     '|---|---|---|---|---|',
@@ -479,7 +479,7 @@ if (errorNotes.length > 0) {
 lines.push('<details>');
 lines.push('<summary>Out-of-scope (potential follow-ups)</summary>');
 lines.push('');
-lines.push('- Native Bun branch records and statements when Bun LCOV emits them directly.');
+lines.push('- Native Bun branch and statement records when Bun LCOV emits them directly.');
 lines.push('- Per-chunk bundle deltas for the largest frontend assets.');
 lines.push('- Runtime startup and first-load smoke timings.');
 lines.push('');

@@ -123,7 +123,7 @@ describe('QA gate comment renderer', () => {
     expect(comment).toContain('Dependencies');
     expect(comment).toContain('Tests by Lane');
     expect(comment).toContain('Repo Tooling');
-    expect(comment).toContain('API/shared branches are source-derived');
+    expect(comment).toContain('API/shared branches and statements are source-derived');
     expect(comment).toContain('Full repo check');
     expect(comment).not.toContain('ESLint');
     expect(comment).toContain('+2pp');

@@ -3,7 +3,7 @@ import * as ts from 'typescript';
 
 import type { CoverageBucket } from './parse-lcov';
 
-interface LcovFileCoverage {
+export interface LcovFileCoverage {
   readonly sourcePath: string;
   readonly lineHits: ReadonlyMap<number, number>;
 }
@@ -154,7 +154,10 @@ const countBranches = (
   return totals;
 };
 
-const parseLcovLineHits = (lcovText: string, baseDir: string): readonly LcovFileCoverage[] => {
+export const parseLcovLineHits = (
+  lcovText: string,
+  baseDir: string
+): readonly LcovFileCoverage[] => {
   const files: LcovFileCoverage[] = [];
   let sourcePath: string | null = null;
   let lineHits = new Map<number, number>();
