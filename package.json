@@ -21,6 +21,7 @@
     "@dprint/dockerfile": "^0.3.3",
     "@dprint/markdown": "^0.22.0",
     "@dprint/toml": "^0.7.0",
+    "@faker-js/faker": "^10.4.0",
     "@playwright/test": "^1.58.2",
     "@typescript/native-preview": "^7.0.0-dev.20260516.1",
     "@vitest/coverage-v8": "^4.1.5",

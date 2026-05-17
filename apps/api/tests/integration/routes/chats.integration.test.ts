@@ -7,31 +7,16 @@ import {
   registerProvider,
 } from '../../../src/services/providers/core/provider-registry';
 import type { AIProvider } from '../../../src/services/providers/types';
+import { insertTestUser, type UserFixture } from '../../support/factories';
 import {
   createApiTestApp,
   createAuthenticatedApiTestApp,
 } from '../../support/harness/create-api-test-app';
 
-const TEST_USER = {
-  id: 'test-user-chats',
-  name: 'Chat User',
-  email: 'chats@mangostudio.test',
-};
+let TEST_USER!: UserFixture;
 
 beforeAll(async () => {
-  // Seed test user so chats.userId FK constraint is satisfied
-  await getDb()
-    .insertInto('user')
-    .values({
-      id: TEST_USER.id,
-      name: TEST_USER.name,
-      email: TEST_USER.email,
-      emailVerified: 0,
-      image: null,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    })
-    .execute();
+  TEST_USER = await insertTestUser();
 });
 
 let restoreAuth: (() => void) | null = null;
