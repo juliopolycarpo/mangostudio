@@ -19,6 +19,7 @@ concurrency:
 
 env:
   DATABASE_PATH: /tmp/mangostudio-qa-gate.sqlite
+  CACHE_VERSION: v1
 
 jobs:
   mark-updating:
@@ -78,6 +79,19 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
 
       - uses: ./.github/actions/setup-mango
+
+      # Same rationale as test.yml — the head metrics job runs vitest three
+      # times (unit, integration, coverage), so warming the optimizer cache
+      # pays back quickly. Suffix the key so head and base do not contend.
+      - name: Restore Vite optimizer cache
+        uses: actions/cache@v5
+        with:
+          path: apps/frontend/node_modules/.vite
+          key: ${{ runner.os }}-${{ env.CACHE_VERSION }}-vite-qa-head-${{ hashFiles('bun.lock', 'apps/frontend/vite.config.ts', 'apps/frontend/vitest.config.ts') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ env.CACHE_VERSION }}-vite-qa-head-
+            ${{ runner.os }}-${{ env.CACHE_VERSION }}-vite-test-
+            ${{ runner.os }}-${{ env.CACHE_VERSION }}-vite-
 
       - name: Run database migrations
         run: bun run --filter @mangostudio/api migrate
@@ -141,6 +155,18 @@ jobs:
             .github/actions/setup-mango
 
       - uses: ./.github/actions/setup-mango
+
+      # Mirror the head job's optimizer cache, scoped to the base side so the
+      # two jobs do not race on cache writes for the same key.
+      - name: Restore Vite optimizer cache
+        uses: actions/cache@v5
+        with:
+          path: apps/frontend/node_modules/.vite
+          key: ${{ runner.os }}-${{ env.CACHE_VERSION }}-vite-qa-base-${{ hashFiles('bun.lock', 'apps/frontend/vite.config.ts', 'apps/frontend/vitest.config.ts') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ env.CACHE_VERSION }}-vite-qa-base-
+            ${{ runner.os }}-${{ env.CACHE_VERSION }}-vite-test-
+            ${{ runner.os }}-${{ env.CACHE_VERSION }}-vite-
 
       - name: Run database migrations
         run: bun run --filter @mangostudio/api migrate

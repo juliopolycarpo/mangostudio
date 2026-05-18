@@ -44,7 +44,7 @@ describe('readSourceStatementCoverageSummary', () => {
         'type Status = "ok" | "error";',
         'export const NAME = "test";',
         'export function greet(name: string): string {',
-        '  return `Hello, ${name}!`;',
+        `  return \`Hello, \${name}!\`;`,
         '}',
       ].join('\n'),
       ['SF:src/example.ts', 'DA:4,1', 'DA:5,1', 'DA:6,1', 'end_of_record'].join('\n')

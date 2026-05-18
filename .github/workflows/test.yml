@@ -13,19 +13,31 @@ jobs:
     timeout-minutes: 10
     env:
       DATABASE_PATH: /tmp/mangostudio-test.sqlite
+      CACHE_VERSION: v1
     steps:
       - uses: actions/checkout@v6
 
       - uses: ./.github/actions/setup-mango
 
+      # Vitest reuses Vite's dep optimizer and stores transform/cache data
+      # under node_modules/.vite. Restoring it cuts the cold-start cost of
+      # the frontend test suite on every CI run.
+      - name: Restore Vite optimizer cache
+        uses: actions/cache@v5
+        with:
+          path: apps/frontend/node_modules/.vite
+          key: ${{ runner.os }}-${{ env.CACHE_VERSION }}-vite-test-${{ hashFiles('bun.lock', 'apps/frontend/vite.config.ts', 'apps/frontend/vitest.config.ts') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ env.CACHE_VERSION }}-vite-test-
+            ${{ runner.os }}-${{ env.CACHE_VERSION }}-vite-
+
       - name: Run database migrations
         run: bun run --filter @mangostudio/api migrate
 
-      - name: Run tests
-        run: bun run test --unit --integration
-
-      - name: Run coverage
-        if: always()
+      # `--coverage` is self-contained: it runs root scripts unit tests plus
+      # every workspace's full suite with instrumentation. Running a separate
+      # `--unit --integration` pass before this was duplicate work.
+      - name: Run tests with coverage
         run: bun run test --coverage
 
       - name: Upload coverage
