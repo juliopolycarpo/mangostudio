@@ -87,5 +87,7 @@
   "typescript.experimental.useTsgo": true,
   "dprint.experimentalLsp": true,
   "biome.lsp.trace.server": "messages",
-  "biome.lsp.watcher.kind": "recommended"
+  "biome.lsp.watcher.kind": "recommended",
+  "git.alwaysSignOff": true,
+  "git.enableCommitSigning": true
 }
