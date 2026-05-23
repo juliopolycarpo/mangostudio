@@ -8,6 +8,7 @@
 
   "files.exclude": {
     "**/node_modules": true,
+    "**/.tsbuildinfo": true,
     "**/dist": true,
     "**/coverage": true,
     "**/playwright-report": true,
@@ -16,9 +17,12 @@
     "**/.mango/out": true,
     "**/.qa-gate": true,
     "**/bun.lock": true,
-    "apps/frontend/src/routeTree.gen.ts": true
+    "apps/frontend/src/routeTree.gen.ts": true,
+    ".gemini": true,
+    ".gitmessage": true,
+    ".agents": true,
+    ".codex": true
   },
-  "explorer.excludeGitIgnore": true,
 
   "editor.formatOnSave": true,
   "editor.formatOnSaveMode": "file",
