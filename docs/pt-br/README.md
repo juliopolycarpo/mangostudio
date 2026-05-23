@@ -219,15 +219,12 @@ Para instalar os plugins locais, execute `bash scripts/claude/setup.sh` ou use `
 
 ### OpenCode
 
-A configuração de LSP e formatadores do OpenCode está em `opencode.json`. Os LSPs padrão de TypeScript e ESLint estão desativados em favor das ferramentas locais do projeto:
+A configuração de instruções e formatadores do OpenCode está em `opencode.json`. O suporte a LSP é ativado com `"lsp": true`, seguindo a recomendação atual do OpenCode.
 
-| LSP / Formatador | Comando                       | Extensões                                                    |
-| ---------------- | ----------------------------- | ------------------------------------------------------------ |
-| `tsgo` LSP       | `tsgo --lsp --stdio`          | `.ts`, `.tsx`, `.mts`, `.cts`, `.js`, `.jsx`, `.mjs`, `.cjs` |
-| `biome` LSP      | `biome lsp-proxy`             | `.js/.ts/.jsx/.tsx`, `.json`, `.jsonc`, `.css`, `.html`      |
-| `dprint` LSP     | `dprint lsp`                  | `.md`, `.mdx`, `.toml`, `.yml`, `.yaml`                      |
-| `biome-fix`      | `biome check --write`         | Mesmas extensões do Biome LSP                                |
-| `dprint-fmt`     | `dprint fmt --allow-no-files` | Mesmas extensões do dprint LSP                               |
+| Formatador   | Comando                       | Extensões                                                                                        |
+| ------------ | ----------------------------- | ------------------------------------------------------------------------------------------------ |
+| `biome-fix`  | `biome check --write`         | `.js`, `.jsx`, `.mjs`, `.cjs`, `.ts`, `.tsx`, `.mts`, `.cts`, `.json`, `.jsonc`, `.css`, `.html` |
+| `dprint-fmt` | `dprint fmt --allow-no-files` | `.md`, `.mdx`, `.toml`, `.yml`, `.yaml`                                                          |
 
 Prettier está desativado. As instruções do OpenCode são carregadas de `.opencode/AGENTS.md`, `.opencode/rules/` e do `AGENTS.md` raiz.
 
