@@ -1,6 +1,6 @@
 {
-  "files.autoSave": "onFocusChange",
-  "files.autoSaveWhenNoErrors": false,
+  "files.autoSave": "afterDelay",
+  "files.autoSaveWhenNoErrors": true,
   "files.trimTrailingWhitespace": true,
   "files.insertFinalNewline": true,
   "files.trimFinalNewlines": true,
@@ -8,7 +8,7 @@
   "editor.formatOnSave": true,
   "editor.formatOnSaveMode": "file",
   "editor.formatOnPaste": true,
-  "editor.formatOnType": false,
+  "editor.formatOnType": true,
   "editor.defaultFormatter": "biomejs.biome",
   "editor.codeActionsOnSave": {
     "source.fixAll.biome": "explicit",
@@ -89,5 +89,7 @@
   "biome.lsp.trace.server": "messages",
   "biome.lsp.watcher.kind": "recommended",
   "git.alwaysSignOff": true,
-  "git.enableCommitSigning": true
+  "git.enableCommitSigning": true,
+  "files.autoSaveDelay": 150,
+  "files.autoSaveWorkspaceFilesOnly": true
 }
