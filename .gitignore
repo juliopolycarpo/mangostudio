@@ -80,16 +80,13 @@ config.toml
 !.gemini/settings.json
 !.gemini/AGENTS.md
 .agent/
-.agents/
+.agents/**
+!.agents/opencode/
+!.agents/opencode/rules/
+!.agents/opencode/rules/01-code-navigation.md
 .kiro/
 .trae/
 .opencode/**
-!.opencode/AGENTS.md
-!.opencode/rules/
-.opencode/rules/*
-!.opencode/rules/01-scope.md
-!.opencode/rules/02-lsp-navigation.md
-!.opencode/rules/03-formatters-and-checks.md
 .cursorrules
 .cursor/
 
