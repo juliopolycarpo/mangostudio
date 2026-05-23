@@ -4,11 +4,25 @@
   "files.trimTrailingWhitespace": true,
   "files.insertFinalNewline": true,
   "files.trimFinalNewlines": true,
+  "files.eol": "\n",
+
+  "files.exclude": {
+    "**/node_modules": true,
+    "**/dist": true,
+    "**/coverage": true,
+    "**/playwright-report": true,
+    "**/test-results": true,
+    "**/.jscpd-out": true,
+    "**/.mango/out": true,
+    "**/.qa-gate": true,
+    "**/bun.lock": true,
+    "apps/frontend/src/routeTree.gen.ts": true
+  },
+  "explorer.excludeGitIgnore": true,
 
   "editor.formatOnSave": true,
   "editor.formatOnSaveMode": "file",
   "editor.formatOnPaste": true,
-  "editor.formatOnType": true,
   "editor.defaultFormatter": "biomejs.biome",
   "editor.codeActionsOnSave": {
     "source.fixAll.biome": "explicit",
@@ -18,6 +32,13 @@
     "source.fixAll.biome": "explicit",
     "source.organizeImports.biome": "explicit"
   },
+
+  "editor.rulers": [100],
+  "editor.bracketPairColorization.enabled": true,
+  "editor.guides.bracketPairs": true,
+  "editor.renderWhitespace": "boundary",
+  "editor.linkedEditing": true,
+  "breadcrumbs.enabled": true,
 
   "biome.requireConfiguration": true,
   "biome.lsp.bin": {
@@ -56,9 +77,8 @@
   "typescript.enablePromptUseWorkspaceTsdk": true,
   "typescript.preferences.preferTypeOnlyAutoImports": true,
   "typescript.preferences.importModuleSpecifier": "non-relative",
-  "typescript.updateImportsOnFileMove.enabled": "always",
   "typescript.disableAutomaticTypeAcquisition": true,
-  "typescript.tsserver.experimental.enableProjectDiagnostics": false,
+  "typescript.updateImportsOnFileMove.enabled": "always",
   "javascript.updateImportsOnFileMove.enabled": "always",
   "javascript.preferences.importModuleSpecifier": "non-relative",
 
@@ -74,6 +94,7 @@
     "**/test-results": true,
     "apps/frontend/src/routeTree.gen.ts": true
   },
+  "search.followSymlinks": false,
   "files.watcherExclude": {
     "**/.jscpd-out/**": true,
     "**/.mango/out/**": true,
@@ -89,7 +110,9 @@
   "biome.lsp.trace.server": "messages",
   "biome.lsp.watcher.kind": "recommended",
   "git.alwaysSignOff": true,
-  "git.enableCommitSigning": true,
   "files.autoSaveDelay": 150,
-  "files.autoSaveWorkspaceFilesOnly": true
+  "files.autoSaveWorkspaceFilesOnly": true,
+
+  "bun.debugTerminal.enabled": true,
+  "bun.test.filePattern": "**/*{.test,.spec,_test_,_spec_}{ts,tsx,js,jsx,mts,cts}"
 }

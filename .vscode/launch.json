@@ -1,0 +1,67 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "bun",
+      "internalConsoleOptions": "neverOpen",
+      "request": "launch",
+      "name": "Bun: Debug Current File",
+      "program": "${file}",
+      "cwd": "${workspaceFolder}",
+      "stopOnEntry": false,
+      "watchMode": false
+    },
+    {
+      "type": "bun",
+      "internalConsoleOptions": "neverOpen",
+      "request": "launch",
+      "name": "Bun: Run Current File (No Debug)",
+      "program": "${file}",
+      "cwd": "${workspaceFolder}",
+      "noDebug": true,
+      "watchMode": false
+    },
+    {
+      "type": "bun",
+      "internalConsoleOptions": "neverOpen",
+      "request": "attach",
+      "name": "Bun: Attach to Process",
+      "url": "ws://localhost:6499/",
+      "stopOnEntry": false
+    },
+    {
+      "type": "bun",
+      "request": "launch",
+      "name": "API: Debug Server",
+      "program": "${workspaceFolder}/apps/api/src/index.ts",
+      "cwd": "${workspaceFolder}/apps/api",
+      "env": {
+        "NODE_ENV": "development"
+      },
+      "stopOnEntry": false
+    },
+    {
+      "type": "bun",
+      "request": "launch",
+      "name": "API: Debug Current Test",
+      "program": "${workspaceFolder}/apps/api/node_modules/.bin/vitest",
+      "args": ["--run", "${relativeFile}"],
+      "cwd": "${workspaceFolder}/apps/api"
+    },
+    {
+      "type": "bun",
+      "request": "launch",
+      "name": "Frontend: Debug Current Test",
+      "program": "${workspaceFolder}/apps/frontend/node_modules/.bin/vitest",
+      "args": ["--run", "${relativeFile}"],
+      "cwd": "${workspaceFolder}/apps/frontend"
+    },
+    {
+      "type": "playwright",
+      "request": "launch",
+      "name": "E2E: Debug Current Test",
+      "trace": "on",
+      "test": "${relativeFile}"
+    }
+  ]
+}
