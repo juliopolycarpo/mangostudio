@@ -226,7 +226,7 @@ A configuração de instruções e formatadores do OpenCode está em `opencode.j
 | `biome-fix`  | `biome check --write`         | `.js`, `.jsx`, `.mjs`, `.cjs`, `.ts`, `.tsx`, `.mts`, `.cts`, `.json`, `.jsonc`, `.css`, `.html` |
 | `dprint-fmt` | `dprint fmt --allow-no-files` | `.md`, `.mdx`, `.toml`, `.yml`, `.yaml`                                                          |
 
-Prettier está desativado. As instruções do OpenCode são carregadas de `.opencode/AGENTS.md`, `.opencode/rules/` e do `AGENTS.md` raiz.
+Prettier está desativado. As instruções do OpenCode são carregadas de `.agents/opencode/rules/*.md`.
 
 ## Qualidade de Código
 

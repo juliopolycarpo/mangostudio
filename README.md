@@ -226,7 +226,7 @@ OpenCode reads project instructions and formatter wiring from `opencode.json`. L
 | `biome-fix`  | `biome check --write`         | `.js`, `.jsx`, `.mjs`, `.cjs`, `.ts`, `.tsx`, `.mts`, `.cts`, `.json`, `.jsonc`, `.css`, `.html` |
 | `dprint-fmt` | `dprint fmt --allow-no-files` | `.md`, `.mdx`, `.toml`, `.yml`, `.yaml`                                                          |
 
-Prettier is disabled. OpenCode instructions load from `.opencode/AGENTS.md`, `.opencode/rules/`, and the root `AGENTS.md`.
+Prettier is disabled. OpenCode instructions load from `.agents/opencode/rules/*.md`.
 
 ## Code Quality
 
