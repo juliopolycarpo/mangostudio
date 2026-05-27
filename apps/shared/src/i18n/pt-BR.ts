@@ -623,6 +623,7 @@ export const messages = {
     running: 'Executando ferramenta',
     done: 'Concluído',
     error: 'Erro na ferramenta',
+    moreCount: '+{count} mais',
     labels: {
       list_directory: 'Listar',
       read_file: 'Leu',

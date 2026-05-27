@@ -616,6 +616,7 @@ export const messages: Messages = {
     running: 'Running tool',
     done: 'Done',
     error: 'Tool error',
+    moreCount: '+{count} more',
     labels: {
       list_directory: 'List',
       read_file: 'Read',
