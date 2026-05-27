@@ -1,0 +1,75 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "dev",
+      "type": "shell",
+      "command": "bun",
+      "args": ["run", "dev"],
+      "isBackground": true,
+      "problemMatcher": []
+    },
+    {
+      "label": "check",
+      "type": "shell",
+      "command": "bun",
+      "args": ["run", "check"],
+      "group": { "kind": "test", "isDefault": true },
+      "problemMatcher": []
+    },
+    {
+      "label": "test",
+      "type": "shell",
+      "command": "bun",
+      "args": ["run", "test"],
+      "group": { "kind": "test" },
+      "problemMatcher": []
+    },
+    {
+      "label": "build",
+      "type": "shell",
+      "command": "bun",
+      "args": ["run", "build"],
+      "group": { "kind": "build", "isDefault": true },
+      "problemMatcher": []
+    },
+    {
+      "label": "fix",
+      "type": "shell",
+      "command": "bun",
+      "args": ["run", "fix"],
+      "problemMatcher": []
+    },
+    {
+      "label": "verify",
+      "type": "shell",
+      "command": "bun",
+      "args": ["run", "verify"],
+      "problemMatcher": []
+    },
+    {
+      "label": "clean",
+      "type": "shell",
+      "command": "bun",
+      "args": ["run", "clean"],
+      "problemMatcher": []
+    },
+    {
+      "label": "API: Start Debugger (attach)",
+      "type": "shell",
+      "command": "bun",
+      "args": ["--inspect-wait=ws://localhost:6499/", "run", "--cwd", "apps/api", "src/index.ts"],
+      "isBackground": true,
+      "problemMatcher": [
+        {
+          "pattern": [{ "regexp": ".", "file": 1, "location": 2, "message": 3 }],
+          "background": {
+            "activeOnStart": true,
+            "beginsPattern": ".",
+            "endsPattern": "Listening"
+          }
+        }
+      ]
+    }
+  ]
+}

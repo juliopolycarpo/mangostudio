@@ -31,7 +31,7 @@ Useful docs:
 - `package.json` — root scripts
 - `docs/reference/testing.md` — test taxonomy and harness rules
 - `docs/reference/agent-playbooks.md` — detailed file maps by feature area
-- `.claude/CLAUDE.md` — Claude Code plugin loadout and code navigation guide
+- `.claude/CLAUDE.md` — Claude Code hooks and code navigation guide
 
 ## Global Rules
 

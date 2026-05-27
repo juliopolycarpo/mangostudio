@@ -1,0 +1,74 @@
+[
+  {
+    "label": "dev",
+    "command": "bun",
+    "args": ["run", "dev"],
+    "use_new_terminal": false,
+    "allow_concurrent_runs": false,
+    "reveal": "always"
+  },
+  {
+    "label": "check",
+    "command": "bun",
+    "args": ["run", "check"],
+    "use_new_terminal": false,
+    "allow_concurrent_runs": false,
+    "reveal": "always"
+  },
+  {
+    "label": "fix",
+    "command": "bun",
+    "args": ["run", "fix"],
+    "use_new_terminal": false,
+    "allow_concurrent_runs": false,
+    "reveal": "always"
+  },
+  {
+    "label": "test",
+    "command": "bun",
+    "args": ["run", "test"],
+    "use_new_terminal": false,
+    "allow_concurrent_runs": false,
+    "reveal": "always"
+  },
+  {
+    "label": "test:e2e",
+    "command": "bun",
+    "args": ["run", "test", "--e2e"],
+    "use_new_terminal": false,
+    "allow_concurrent_runs": false,
+    "reveal": "always"
+  },
+  {
+    "label": "build",
+    "command": "bun",
+    "args": ["run", "build"],
+    "use_new_terminal": false,
+    "allow_concurrent_runs": false,
+    "reveal": "always"
+  },
+  {
+    "label": "frontend:dev",
+    "command": "bun",
+    "args": ["run", "--cwd", "apps/frontend", "dev"],
+    "use_new_terminal": false,
+    "allow_concurrent_runs": false,
+    "reveal": "always"
+  },
+  {
+    "label": "api:dev",
+    "command": "bun",
+    "args": ["run", "--cwd", "apps/api", "dev"],
+    "use_new_terminal": false,
+    "allow_concurrent_runs": false,
+    "reveal": "always"
+  },
+  {
+    "label": "api:migrate",
+    "command": "bun",
+    "args": ["run", "--cwd", "apps/api", "migrate"],
+    "use_new_terminal": false,
+    "allow_concurrent_runs": false,
+    "reveal": "always"
+  }
+]

@@ -8,7 +8,6 @@ Claude Code.
 Detailed rules live in `.claude/rules/`:
 
 - `01-commands-and-validation.md` — bun-only commands, validation loop
-- `02-local-plugins.md` — LSP plugin table, hooks, troubleshooting
 - `03-code-navigation.md` — tool priority, decision table, required workflows
 
 ## Trust AGENTS.md

@@ -1,41 +1,7 @@
 {
   "$schema": "https://opencode.ai/config.json",
-  "instructions": [".opencode/AGENTS.md", ".opencode/rules/*.md", "AGENTS.md"],
-  "lsp": {
-    "typescript": { "disabled": true },
-    "eslint": { "disabled": true },
-    "tsgo": {
-      "command": ["./node_modules/.bin/tsgo", "--lsp", "--stdio"],
-      "extensions": [".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"],
-      "initialization": {
-        "preferences": {
-          "preferTypeOnlyAutoImports": true,
-          "importModuleSpecifierPreference": "non-relative"
-        }
-      }
-    },
-    "biome": {
-      "command": ["./node_modules/.bin/biome", "lsp-proxy"],
-      "extensions": [
-        ".js",
-        ".jsx",
-        ".mjs",
-        ".cjs",
-        ".ts",
-        ".tsx",
-        ".mts",
-        ".cts",
-        ".json",
-        ".jsonc",
-        ".css",
-        ".html"
-      ]
-    },
-    "dprint": {
-      "command": ["./node_modules/.bin/dprint", "lsp"],
-      "extensions": [".md", ".mdx", ".toml", ".yml", ".yaml"]
-    }
-  },
+  "instructions": [".agents/opencode/rules/*.md"],
+  "lsp": true,
   "formatter": {
     "prettier": { "disabled": true },
     "biome-fix": {

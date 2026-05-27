@@ -205,31 +205,18 @@ A formatação ao salvar está ativada globalmente com Biome como formatador pad
 
 ### Claude Code
 
-O Claude Code usa plugins LSP locais do projeto registrados em `.claude/marketplaces/mangostudio-local/`. Ativados em `.claude/settings.json`, estes plugins substituem os `typescript-lsp` e `web-lsp` upstream:
-
-| Plugin                   | Binário           | Abrange                                                      | Capacidades                                                            |
-| ------------------------ | ----------------- | ------------------------------------------------------------ | ---------------------------------------------------------------------- |
-| `mangostudio-tsgo-lsp`   | `tsgo`            | `.ts`, `.tsx`, `.mts`, `.cts`, `.js`, `.jsx`, `.mjs`, `.cjs` | Hover, ir para definição, referências, hierarquia de chamada, renomear |
-| `mangostudio-biome-lsp`  | `biome lsp-proxy` | `.js/.ts/.jsx/.tsx`, `.json`, `.jsonc`, `.css`, `.html`      | Diagnósticos e correções rápidas (sem navegação)                       |
-| `mangostudio-dprint-lsp` | `dprint lsp`      | `.md`, `.mdx`, `.toml`, `.yml`, `.yaml`                      | Diagnósticos de formatação apenas (sem navegação)                      |
-
 Os hooks do Claude Code preprendem `node_modules/.bin` ao PATH automaticamente ao iniciar sessão e ao mudar de diretório (`SessionStart` / `CwdChanged`). Após cada escrita ou edição, um hook `PostToolUse` executa `auto-fix.sh` para formatar o arquivo modificado.
-
-Para instalar os plugins locais, execute `bash scripts/claude/setup.sh` ou use `/reload-plugins` dentro de uma sessão do Claude Code.
 
 ### OpenCode
 
-A configuração de LSP e formatadores do OpenCode está em `opencode.json`. Os LSPs padrão de TypeScript e ESLint estão desativados em favor das ferramentas locais do projeto:
+A configuração de instruções e formatadores do OpenCode está em `opencode.json`. O suporte a LSP é ativado com `"lsp": true`, seguindo a recomendação atual do OpenCode.
 
-| LSP / Formatador | Comando                       | Extensões                                                    |
-| ---------------- | ----------------------------- | ------------------------------------------------------------ |
-| `tsgo` LSP       | `tsgo --lsp --stdio`          | `.ts`, `.tsx`, `.mts`, `.cts`, `.js`, `.jsx`, `.mjs`, `.cjs` |
-| `biome` LSP      | `biome lsp-proxy`             | `.js/.ts/.jsx/.tsx`, `.json`, `.jsonc`, `.css`, `.html`      |
-| `dprint` LSP     | `dprint lsp`                  | `.md`, `.mdx`, `.toml`, `.yml`, `.yaml`                      |
-| `biome-fix`      | `biome check --write`         | Mesmas extensões do Biome LSP                                |
-| `dprint-fmt`     | `dprint fmt --allow-no-files` | Mesmas extensões do dprint LSP                               |
+| Formatador   | Comando                       | Extensões                                                                                        |
+| ------------ | ----------------------------- | ------------------------------------------------------------------------------------------------ |
+| `biome-fix`  | `biome check --write`         | `.js`, `.jsx`, `.mjs`, `.cjs`, `.ts`, `.tsx`, `.mts`, `.cts`, `.json`, `.jsonc`, `.css`, `.html` |
+| `dprint-fmt` | `dprint fmt --allow-no-files` | `.md`, `.mdx`, `.toml`, `.yml`, `.yaml`                                                          |
 
-Prettier está desativado. As instruções do OpenCode são carregadas de `.opencode/AGENTS.md`, `.opencode/rules/` e do `AGENTS.md` raiz.
+Prettier está desativado. As instruções do OpenCode são carregadas de `.agents/opencode/rules/*.md`.
 
 ## Qualidade de Código
 
