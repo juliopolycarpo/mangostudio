@@ -40,7 +40,7 @@
   "devDependencies": {
     "@mangostudio/api": "workspace:*",
     "@tailwindcss/vite": "^4.2.4",
-    "@tanstack/router-devtools": "1.166.13",
+    "@tanstack/router-devtools": "1.167.0",
     "@tanstack/router-plugin": "1.167.35",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
