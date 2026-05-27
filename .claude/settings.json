@@ -32,20 +32,5 @@
         ]
       }
     ]
-  },
-  "enabledPlugins": {
-    "typescript-lsp@claude-plugins-official": false,
-    "web-lsp": false,
-    "mangostudio-tsgo-lsp@mangostudio-local": true,
-    "mangostudio-biome-lsp@mangostudio-local": true,
-    "mangostudio-dprint-lsp@mangostudio-local": true
-  },
-  "extraKnownMarketplaces": {
-    "mangostudio-local": {
-      "source": {
-        "source": "directory",
-        "path": "./marketplaces/mangostudio-local"
-      }
-    }
   }
 }

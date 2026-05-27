@@ -205,17 +205,7 @@ A formatação ao salvar está ativada globalmente com Biome como formatador pad
 
 ### Claude Code
 
-O Claude Code usa plugins LSP locais do projeto registrados em `.claude/marketplaces/mangostudio-local/`. Ativados em `.claude/settings.json`, estes plugins substituem os `typescript-lsp` e `web-lsp` upstream:
-
-| Plugin                   | Binário           | Abrange                                                      | Capacidades                                                            |
-| ------------------------ | ----------------- | ------------------------------------------------------------ | ---------------------------------------------------------------------- |
-| `mangostudio-tsgo-lsp`   | `tsgo`            | `.ts`, `.tsx`, `.mts`, `.cts`, `.js`, `.jsx`, `.mjs`, `.cjs` | Hover, ir para definição, referências, hierarquia de chamada, renomear |
-| `mangostudio-biome-lsp`  | `biome lsp-proxy` | `.js/.ts/.jsx/.tsx`, `.json`, `.jsonc`, `.css`, `.html`      | Diagnósticos e correções rápidas (sem navegação)                       |
-| `mangostudio-dprint-lsp` | `dprint lsp`      | `.md`, `.mdx`, `.toml`, `.yml`, `.yaml`                      | Diagnósticos de formatação apenas (sem navegação)                      |
-
 Os hooks do Claude Code preprendem `node_modules/.bin` ao PATH automaticamente ao iniciar sessão e ao mudar de diretório (`SessionStart` / `CwdChanged`). Após cada escrita ou edição, um hook `PostToolUse` executa `auto-fix.sh` para formatar o arquivo modificado.
-
-Para instalar os plugins locais, execute `bash scripts/claude/setup.sh` ou use `/reload-plugins` dentro de uma sessão do Claude Code.
 
 ### OpenCode
 

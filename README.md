@@ -205,17 +205,7 @@ Format-on-save is enabled globally with Biome as the default formatter. dprint i
 
 ### Claude Code
 
-Claude Code uses project-local LSP plugins registered under `.claude/marketplaces/mangostudio-local/`. Enabled in `.claude/settings.json`, these plugins shadow upstream `typescript-lsp` and `web-lsp`:
-
-| Plugin                   | Binary            | Handles                                                      | Capabilities                                         |
-| ------------------------ | ----------------- | ------------------------------------------------------------ | ---------------------------------------------------- |
-| `mangostudio-tsgo-lsp`   | `tsgo`            | `.ts`, `.tsx`, `.mts`, `.cts`, `.js`, `.jsx`, `.mjs`, `.cjs` | Hover, go-to-def, references, call hierarchy, rename |
-| `mangostudio-biome-lsp`  | `biome lsp-proxy` | `.js/.ts/.jsx/.tsx`, `.json`, `.jsonc`, `.css`, `.html`      | Diagnostics and quick-fixes (no navigation)          |
-| `mangostudio-dprint-lsp` | `dprint lsp`      | `.md`, `.mdx`, `.toml`, `.yml`, `.yaml`                      | Formatting diagnostics only (no navigation)          |
-
 Claude Code hooks auto-prepend `node_modules/.bin` to PATH on session start and directory changes (`SessionStart` / `CwdChanged`). After every write or edit, a `PostToolUse` hook runs `auto-fix.sh` to format the touched file.
-
-To install the local plugins, run `bash scripts/claude/setup.sh` or use `/reload-plugins` inside a Claude Code session.
 
 ### OpenCode
 
