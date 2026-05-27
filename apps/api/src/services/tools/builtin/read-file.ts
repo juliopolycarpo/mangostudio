@@ -88,7 +88,7 @@ export function register(): void {
       title: 'Read file',
       description: 'Allows the AI to read text files from disk.',
       category: 'system',
-      enabledByDefault: false,
+      enabledByDefault: true,
       canDisable: true,
       defaultParameters: {
         allowedPaths: [],

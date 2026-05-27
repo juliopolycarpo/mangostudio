@@ -99,7 +99,7 @@ export function register(): void {
       title: 'List directory',
       description: 'Allows the AI to list files and directories on disk.',
       category: 'system',
-      enabledByDefault: false,
+      enabledByDefault: true,
       canDisable: true,
       defaultParameters: {
         allowedPaths: [],
