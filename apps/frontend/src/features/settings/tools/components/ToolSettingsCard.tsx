@@ -38,6 +38,16 @@ function getTranslatedToolText(
         title: s.toolNames.listDirectory,
         description: s.toolDescriptions.listDirectory,
       };
+    case 'glob':
+      return {
+        title: s.toolNames.glob,
+        description: s.toolDescriptions.glob,
+      };
+    case 'grep':
+      return {
+        title: s.toolNames.grep,
+        description: s.toolDescriptions.grep,
+      };
     default:
       return {
         title: descriptor.title,

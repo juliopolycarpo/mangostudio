@@ -478,10 +478,14 @@ export const messages: Messages = {
       toolNames: {
         readFile: 'Read file',
         listDirectory: 'List directory',
+        glob: 'Glob',
+        grep: 'Grep',
       },
       toolDescriptions: {
         readFile: 'Allows the AI to read text files from disk.',
         listDirectory: 'Allows the AI to list files and directories on disk.',
+        glob: 'Allows the AI to find files and directories by glob pattern.',
+        grep: 'Allows the AI to search file contents with regular expressions.',
       },
       parameters: {
         allowedPathsLabel: 'Allowed paths',
@@ -620,6 +624,8 @@ export const messages: Messages = {
     labels: {
       list_directory: 'List',
       read_file: 'Read',
+      glob: 'Glob',
+      grep: 'Grep',
       generate_image: 'Generate Image',
       get_current_datetime: 'Date',
       bash: 'Bash',

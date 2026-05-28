@@ -483,10 +483,14 @@ export const messages = {
       toolNames: {
         readFile: 'Ler arquivo',
         listDirectory: 'Listar diretório',
+        glob: 'Glob',
+        grep: 'Grep',
       },
       toolDescriptions: {
         readFile: 'Permite que a IA leia arquivos de texto do disco.',
         listDirectory: 'Permite que a IA liste arquivos e diretórios no disco.',
+        glob: 'Permite que a IA encontre arquivos e diretórios por padrão glob.',
+        grep: 'Permite que a IA pesquise o conteúdo de arquivos com expressões regulares.',
       },
       parameters: {
         allowedPathsLabel: 'Caminhos permitidos',
@@ -627,6 +631,8 @@ export const messages = {
     labels: {
       list_directory: 'Listar',
       read_file: 'Leu',
+      glob: 'Glob',
+      grep: 'Grep',
       generate_image: 'Gerar Imagem',
       get_current_datetime: 'Data',
       bash: 'Bash',
