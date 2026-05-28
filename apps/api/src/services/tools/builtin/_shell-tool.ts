@@ -4,7 +4,7 @@
  * interpreter and copy differ, so they are built from this single source.
  */
 
-import { getOptionalString, getRequiredString } from '../arg-parsing';
+import { clampIntegerSetting, getOptionalString, getRequiredString } from '../arg-parsing';
 import type { RegisteredTool, ToolContext } from '../types';
 import { runShellCommand, type ShellCommandResult, type ShellKind } from './_shell-exec';
 
@@ -49,13 +49,13 @@ export function buildShellTool(kind: ShellKind): RegisteredTool {
 
 export function normalizeShellToolSettings(parameters: Record<string, unknown>): ShellToolSettings {
   return {
-    timeoutMs: clampNumber(
+    timeoutMs: clampIntegerSetting(
       parameters.timeoutMs,
       SHELL_DEFAULT_TIMEOUT_MS,
       SHELL_MIN_TIMEOUT_MS,
       SHELL_MAX_TIMEOUT_MS
     ),
-    maxOutputBytes: clampNumber(
+    maxOutputBytes: clampIntegerSetting(
       parameters.maxOutputBytes,
       SHELL_DEFAULT_MAX_OUTPUT_BYTES,
       SHELL_MIN_MAX_OUTPUT_BYTES,
@@ -141,9 +141,4 @@ function buildSettings(label: string, description: string): RegisteredTool['sett
       },
     ],
   };
-}
-
-function clampNumber(value: unknown, fallback: number, min: number, max: number): number {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return fallback;
-  return Math.min(Math.max(Math.round(value), min), max);
 }

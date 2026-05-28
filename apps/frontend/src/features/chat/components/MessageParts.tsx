@@ -1,6 +1,6 @@
 import type { MessagePart } from '@mangostudio/shared';
 import { ChevronDown, ChevronRight } from 'lucide-react';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { MarkdownContent } from '@/components/MarkdownContent';
 import { useI18n } from '@/hooks/use-i18n';
 import { ContinuationEventMarker } from './ContinuationEventMarker';
@@ -19,7 +19,10 @@ interface MessagePartsProps {
 
 export function MessageParts({ parts, messageId, isStreaming }: MessagePartsProps) {
   const { t } = useI18n();
-  const { groups, consumed } = planToolGroups(parts, isStreaming);
+  const { groups, consumed } = useMemo(
+    () => planToolGroups(parts, isStreaming),
+    [parts, isStreaming]
+  );
   return (
     <>
       {parts.map((part, idx) => {

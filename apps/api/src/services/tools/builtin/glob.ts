@@ -4,7 +4,7 @@
  */
 
 import { relative } from 'node:path';
-import { getOptionalString, getRequiredString } from '../arg-parsing';
+import { clampIntegerSetting, getOptionalString, getRequiredString } from '../arg-parsing';
 import { registerTool } from '../registry';
 import type { ToolContext } from '../types';
 import {
@@ -68,7 +68,7 @@ export function normalizeGlobToolSettings(parameters: Record<string, unknown>): 
   return {
     allowedPaths: normalizePathList(parameters.allowedPaths),
     deniedPaths: normalizePathList(parameters.deniedPaths),
-    maxResults: clampInteger(
+    maxResults: clampIntegerSetting(
       parameters.maxResults,
       GLOB_DEFAULT_MAX_RESULTS,
       GLOB_MIN_MAX_RESULTS,
@@ -197,11 +197,6 @@ export function register(): void {
     },
     execute,
   });
-}
-
-function clampInteger(value: unknown, fallback: number, min: number, max: number): number {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return fallback;
-  return Math.min(Math.max(Math.round(value), min), max);
 }
 
 // Self-register on import

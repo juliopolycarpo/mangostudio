@@ -25,3 +25,20 @@ export function getBoundedOptionalInteger(
   }
   return Math.max(bounds.min, Math.min(bounds.max, Math.round(value)));
 }
+
+/**
+ * Clamps an unknown value to an integer inside [min, max], falling back to
+ * `fallback` for non-numeric or non-finite input. Shared by tool settings
+ * normalizers so bounds semantics never drift between tools.
+ *
+ * // Usage: clampIntegerSetting(parameters.maxResults, 100, 1, 5000)
+ */
+export function clampIntegerSetting(
+  value: unknown,
+  fallback: number,
+  min: number,
+  max: number
+): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return fallback;
+  return Math.min(Math.max(Math.round(value), min), max);
+}

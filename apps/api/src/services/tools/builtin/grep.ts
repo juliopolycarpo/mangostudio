@@ -6,7 +6,7 @@
 
 import { stat } from 'node:fs/promises';
 import { relative, resolve as resolvePath } from 'node:path';
-import { getOptionalString, getRequiredString } from '../arg-parsing';
+import { clampIntegerSetting, getOptionalString, getRequiredString } from '../arg-parsing';
 import { registerTool } from '../registry';
 import type { ToolContext } from '../types';
 import {
@@ -108,19 +108,19 @@ export function normalizeGrepToolSettings(parameters: Record<string, unknown>): 
   return {
     allowedPaths: normalizePathList(parameters.allowedPaths),
     deniedPaths: normalizePathList(parameters.deniedPaths),
-    maxResults: clampInteger(
+    maxResults: clampIntegerSetting(
       parameters.maxResults,
       GREP_DEFAULT_MAX_RESULTS,
       GREP_MIN_MAX_RESULTS,
       GREP_MAX_MAX_RESULTS
     ),
-    maxMatchesPerFile: clampInteger(
+    maxMatchesPerFile: clampIntegerSetting(
       parameters.maxMatchesPerFile,
       GREP_DEFAULT_MAX_PER_FILE,
       GREP_MIN_MAX_PER_FILE,
       GREP_MAX_MAX_PER_FILE
     ),
-    maxFileSizeBytes: clampInteger(
+    maxFileSizeBytes: clampIntegerSetting(
       parameters.maxFileSizeBytes,
       GREP_DEFAULT_MAX_FILE_BYTES,
       GREP_MIN_MAX_FILE_BYTES,
@@ -144,7 +144,7 @@ export async function executeGrep(
   let truncated = false;
 
   if (rootStats.isFile()) {
-    await searchFile({
+    const fileTruncated = await searchFile({
       absolute: rootPath,
       display: relative(process.cwd(), rootPath) || rootPath,
       regex,
@@ -152,13 +152,12 @@ export async function executeGrep(
       settings,
     });
     filesScanned = 1;
-    truncated = matches.length >= settings.maxResults;
     return {
       pattern: args.pattern,
       path: args.path,
       matches,
       filesScanned,
-      truncated,
+      truncated: fileTruncated,
     };
   }
 
@@ -179,13 +178,14 @@ export async function executeGrep(
       const absolute = resolvePath(rootPath, relativePath);
       if (!isPathAllowed(absolute, settings)) continue;
       filesScanned += 1;
-      await searchFile({
+      const fileTruncated = await searchFile({
         absolute,
         display: relativePath,
         regex,
         matches,
         settings,
       });
+      if (fileTruncated) truncated = true;
       if (matches.length >= settings.maxResults) {
         truncated = true;
         break;
@@ -214,32 +214,39 @@ interface SearchFileInput {
   settings: GrepToolSettings;
 }
 
-async function searchFile(input: SearchFileInput): Promise<void> {
+/** Returns true when a per-file or global cap forced us to stop before all matches were recorded. */
+async function searchFile(input: SearchFileInput): Promise<boolean> {
   const { absolute, display, regex, matches, settings } = input;
-  if (matches.length >= settings.maxResults) return;
+  if (matches.length >= settings.maxResults) return false;
 
   const file = Bun.file(absolute);
-  if (file.size === 0 || file.size > settings.maxFileSizeBytes) return;
+  if (file.size === 0 || file.size > settings.maxFileSizeBytes) return false;
 
-  if (await looksBinary(file)) return;
+  if (await looksBinary(file)) return false;
 
   let content: string;
   try {
     content = await file.text();
   } catch {
-    return;
+    return false;
   }
 
   const lines = content.split('\n');
   let perFile = 0;
   for (let i = 0; i < lines.length; i++) {
-    if (perFile >= settings.maxMatchesPerFile) break;
-    if (matches.length >= settings.maxResults) break;
+    if (perFile >= settings.maxMatchesPerFile || matches.length >= settings.maxResults) {
+      // Truncated only if at least one more match would have been recorded.
+      for (let j = i; j < lines.length; j++) {
+        if (regex.test(lines[j])) return true;
+      }
+      return false;
+    }
     const line = lines[i];
     if (!regex.test(line)) continue;
     matches.push({ file: display, line: i + 1, text: line });
     perFile += 1;
   }
+  return false;
 }
 
 async function looksBinary(file: ReturnType<typeof Bun.file>): Promise<boolean> {
@@ -371,11 +378,6 @@ export function register(): void {
     },
     execute,
   });
-}
-
-function clampInteger(value: unknown, fallback: number, min: number, max: number): number {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return fallback;
-  return Math.min(Math.max(Math.round(value), min), max);
 }
 
 // Self-register on import

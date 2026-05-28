@@ -127,7 +127,11 @@ interface CappedRead {
   truncated: boolean;
 }
 
-/** Reads a byte stream up to `maxBytes`, then stops to bound memory use. */
+/**
+ * Reads a byte stream, retaining at most `maxBytes` worth of data.
+ * Continues draining the stream past the cap (discarding bytes) so the child
+ * never blocks on a full pipe; flags `truncated` when any bytes were dropped.
+ */
 async function readStreamCapped(
   stream: ReadableStream<Uint8Array>,
   maxBytes: number
@@ -138,15 +142,18 @@ async function readStreamCapped(
   let truncated = false;
 
   try {
-    while (total < maxBytes) {
+    while (true) {
       const { done, value } = await reader.read();
       if (done) break;
       if (!value) continue;
+      if (total >= maxBytes) {
+        truncated = true;
+        continue;
+      }
       chunks.push(value);
       total += value.byteLength;
+      if (total > maxBytes) truncated = true;
     }
-    // Dropped bytes when we read past the cap, or stopped exactly at it with more pending.
-    truncated = total > maxBytes || (total === maxBytes && !(await reader.read()).done);
   } finally {
     reader.releaseLock();
   }
