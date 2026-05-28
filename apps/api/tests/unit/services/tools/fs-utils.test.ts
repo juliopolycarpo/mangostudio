@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   expandHome,
+  getRequiredPathArg,
   normalizeStringList,
   PathAccessError,
   resolveAndValidatePath,
@@ -38,6 +39,20 @@ describe('normalizeStringList', () => {
 
   it('returns an empty array for a number', () => {
     expect(normalizeStringList(42)).toEqual([]);
+  });
+});
+
+describe('getRequiredPathArg', () => {
+  it('returns the trimmed path', () => {
+    expect(getRequiredPathArg('  /tmp/file  ', 'path')).toBe('/tmp/file');
+  });
+
+  it('throws PathAccessError for an empty string', () => {
+    expect(() => getRequiredPathArg('   ', 'path')).toThrow(PathAccessError);
+  });
+
+  it('throws PathAccessError naming the field for a non-string', () => {
+    expect(() => getRequiredPathArg(42, 'path')).toThrow('Missing required path.');
   });
 });
 
