@@ -13,7 +13,7 @@ import type { TextGenerationRequest } from '../types';
  * - `xhigh` maps to `max`
  * - `max` stays `max`
  */
-export function normalizeDeepSeekReasoningEffort(effort: ReasoningEffort): string {
+export function normalizeDeepSeekReasoningEffort(effort: ReasoningEffort): 'high' | 'max' {
   switch (effort) {
     case 'low':
     case 'medium':
