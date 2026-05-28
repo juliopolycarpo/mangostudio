@@ -6,6 +6,7 @@
 import { registerTool } from '../registry';
 import type { ToolContext } from '../types';
 import {
+  getRequiredPathArg,
   normalizePathList,
   PathAccessError,
   type PathValidationSettings,
@@ -76,7 +77,7 @@ async function execute(
   args: Record<string, unknown>,
   context: ToolContext
 ): Promise<ReadFileToolResult> {
-  const path = getRequiredString(args.path, 'path');
+  const path = getRequiredPathArg(args.path, 'path');
   return executeReadFile({ path }, context);
 }
 
@@ -88,7 +89,7 @@ export function register(): void {
       title: 'Read file',
       description: 'Allows the AI to read text files from disk.',
       category: 'system',
-      enabledByDefault: false,
+      enabledByDefault: true,
       canDisable: true,
       defaultParameters: {
         allowedPaths: [],
@@ -115,12 +116,6 @@ export function register(): void {
     },
     execute,
   });
-}
-
-function getRequiredString(value: unknown, name: string): string {
-  const text = typeof value === 'string' ? value.trim() : '';
-  if (!text) throw new PathAccessError(`Missing required ${name}.`);
-  return text;
 }
 
 // Self-register on import

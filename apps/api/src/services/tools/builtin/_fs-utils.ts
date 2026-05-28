@@ -80,6 +80,18 @@ export class PathAccessError extends Error {
   }
 }
 
+/**
+ * Reads a required path argument, throwing PathAccessError when missing.
+ * Shared by the filesystem tools so their argument handling stays identical.
+ *
+ * // Usage: const path = getRequiredPathArg(args.path, 'path');
+ */
+export function getRequiredPathArg(value: unknown, name: string): string {
+  const text = typeof value === 'string' ? value.trim() : '';
+  if (!text) throw new PathAccessError(`Missing required ${name}.`);
+  return text;
+}
+
 export function resolveAndValidatePath(
   inputPath: string,
   settings: PathValidationSettings

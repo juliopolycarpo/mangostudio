@@ -1,6 +1,6 @@
 import type { MessagePart } from '@mangostudio/shared';
 import { ChevronDown, ChevronRight } from 'lucide-react';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { MarkdownContent } from '@/components/MarkdownContent';
 import { useI18n } from '@/hooks/use-i18n';
 import { ContinuationEventMarker } from './ContinuationEventMarker';
@@ -8,6 +8,8 @@ import { GeneratedImagePart } from './GeneratedImagePart';
 import { SystemEventMarker } from './SystemEventMarker';
 import { ThinkingBlock } from './ThinkingBlock';
 import { ToolCallBlock } from './ToolCallBlock';
+import { ToolCallGroupBlock } from './ToolCallGroupBlock';
+import { planToolGroups } from './tool-call-grouping';
 
 interface MessagePartsProps {
   parts: MessagePart[];
@@ -17,6 +19,10 @@ interface MessagePartsProps {
 
 export function MessageParts({ parts, messageId, isStreaming }: MessagePartsProps) {
   const { t } = useI18n();
+  const { groups, consumed } = useMemo(
+    () => planToolGroups(parts, isStreaming),
+    [parts, isStreaming]
+  );
   return (
     <>
       {parts.map((part, idx) => {
@@ -35,6 +41,11 @@ export function MessageParts({ parts, messageId, isStreaming }: MessagePartsProp
             );
           }
           case 'tool_call': {
+            if (consumed.has(idx)) return null;
+            const grouped = groups.get(idx);
+            if (grouped) {
+              return <ToolCallGroupBlock key={part.toolCallId} calls={grouped} />;
+            }
             const result = parts.find(
               (p) => p.type === 'tool_result' && p.toolCallId === part.toolCallId
             ) as Extract<MessagePart, { type: 'tool_result' }> | undefined;

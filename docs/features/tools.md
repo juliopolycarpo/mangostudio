@@ -88,6 +88,59 @@ Returns the current date and time in a requested timezone and locale.
 - **Parameters:** `timezone` (IANA, e.g. `America/Sao_Paulo`), `locale` (BCP 47, e.g. `pt-BR`)
 - **Execution:** Validates timezone, formats via `Intl.DateTimeFormat`, returns ISO UTC + localized datetime + offset.
 
+### `read_file`
+
+Reads the contents of a text file from disk.
+
+- **Tool name:** `read_file`
+- **Category:** `system`
+- **Parameters:** `path` (required, absolute or `~`-prefixed)
+- **Settings:** `allowedPaths`, `deniedPaths` (path lists; enforced by `resolveAndValidatePath`)
+- **Execution:** Reads the file with `Bun.file().text()` and returns `{ content, path, size }`.
+
+### `list_directory`
+
+Lists files and directories at a path.
+
+- **Tool name:** `list_directory`
+- **Category:** `system`
+- **Parameters:** `path` (required, absolute or `~`-prefixed)
+- **Settings:** `allowedPaths`, `deniedPaths`
+- **Execution:** Calls `readdir(path, { withFileTypes: true })` and returns `{ path, entries: { name, type }[] }`.
+
+### `glob`
+
+Finds filesystem paths matching a glob pattern, evaluated by `Bun.Glob`.
+
+- **Tool name:** `glob`
+- **Category:** `system`
+- **Parameters:** `pattern` (required, supports `*`, `**`, `?`, `[]`, `{a,b}`, `!`), `cwd` (optional base directory; defaults to `process.cwd()`)
+- **Settings:** `allowedPaths`, `deniedPaths`, `maxResults` (1–5,000; default 200), `includeDotfiles` (default `false`), `absolute` (default `false`)
+- **Execution:** Streams matches with `new Bun.Glob(pattern).scan({ cwd, dot, absolute, onlyFiles: false })`, stops at the cap, and reports `truncated`.
+
+### `grep`
+
+Searches files for lines matching a regular expression.
+
+- **Tool name:** `grep`
+- **Category:** `system`
+- **Parameters:** `pattern` (required regex), `path` (required file or directory), `glob` (optional file filter for directory searches), `caseInsensitive`
+- **Settings:** `allowedPaths`, `deniedPaths`, `maxResults` (1–5,000; default 100), `maxMatchesPerFile` (default 20), `maxFileSizeBytes` (default 1 MB), `includeDotfiles`
+- **Safety:** Files containing a null byte in the first 1 KB are treated as binary and skipped; files above `maxFileSizeBytes` are skipped. The regex is compiled with `new RegExp` and rejected via `GrepPatternError` if invalid.
+- **Execution:** When `path` is a directory, walks it with `Bun.Glob` (filtered by the optional `glob`); for each candidate, reads with `Bun.file().text()`, splits by newline, and records `{ file, line, text }` matches.
+
+### `bash` / `zsh` / `powershell`
+
+Run a shell command and return its captured `stdout`, `stderr`, exit code, and timing. The three tools share one implementation (`buildShellTool`) and only differ by interpreter.
+
+- **Tool names:** `bash`, `zsh`, `powershell`
+- **Category:** `system`
+- **Parameters:** `command` (required), `cwd` (optional working directory; `~` is expanded)
+- **Settings:** `timeoutMs` (1s–30s, default 15s), `maxOutputBytes` (1KB–1MB per stream, default 100KB)
+- **Availability:** Registered at import time only when the interpreter exists — `bash`/`zsh` via `Bun.which`, `powershell` only on Windows (`pwsh` then `powershell`). Unavailable shells are never offered to models.
+- **Safety:** Disabled by default (`enabledByDefault: false`); requires explicit opt-in. The process is killed with `SIGKILL` after `timeoutMs`, and per-stream output is capped at `maxOutputBytes` (flagged via `truncated`).
+- **Execution:** `runShellCommand()` spawns the interpreter with `Bun.spawn` (`bash -c` / `zsh -c` / `powershell -NoProfile -NonInteractive -Command`), reads both streams under the byte cap, and returns a structured `ShellCommandResult`.
+
 ## Settings Policy
 
 The settings policy (`settings-policy.ts`) provides pure functions for:

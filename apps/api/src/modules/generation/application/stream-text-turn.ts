@@ -601,7 +601,6 @@ export async function* streamTextTurn(
         );
 
         if (!hasImageGenerationCall) {
-          const toolExecutions: StandardToolExecution[] = [];
           for await (const item of executeStandardToolCallsWithProgress(pendingCallEntries, {
             userId,
             chatId,
@@ -622,60 +621,7 @@ export async function* streamTextTurn(
             if (item.kind === 'event') {
               yield item.event;
             } else {
-              toolExecutions.push(item.execution);
-            }
-          }
-
-          for (const execution of toolExecutions) {
-            allParts.push({
-              type: 'tool_call',
-              toolCallId: execution.callId,
-              name: execution.name,
-              args: execution.args,
-            });
-            allParts.push({
-              type: 'tool_result',
-              toolCallId: execution.callId,
-              content: execution.resultStr,
-              isError: execution.isError,
-            });
-            if (execution.subagentTrace && multiAgentSettings.traceVisibility !== 'off') {
-              allParts.push(execution.subagentTrace);
-            }
-            yield {
-              type: 'tool_result',
-              callId: execution.callId,
-              name: execution.name,
-              result: execution.result,
-              isError: execution.isError,
-            };
-            nextToolResults.push({
-              callId: execution.callId,
-              name: execution.name,
-              result: execution.resultStr,
-              isError: execution.isError,
-            });
-          }
-        } else {
-          for (const [callId, { name, argsStr }] of pendingCallEntries) {
-            if (name !== GENERATE_IMAGE_TOOL_NAME) {
-              const execution = await executeStandardToolCall(callId, name, argsStr, {
-                userId,
-                chatId,
-                settingsByToolName: toolSettings,
-                allowedToolNames,
-                delegationRuntime: createDelegationRuntime({
-                  db,
-                  userId,
-                  chatId,
-                  parentAgentProfile: agentRuntime.profile,
-                  parentModelName: modelId,
-                  interactionMode,
-                  settings: multiAgentSettings,
-                  signal,
-                  state: delegationState,
-                }),
-              });
+              const execution = item.execution;
               allParts.push({
                 type: 'tool_call',
                 toolCallId: execution.callId,
@@ -704,9 +650,45 @@ export async function* streamTextTurn(
                 result: execution.resultStr,
                 isError: execution.isError,
               });
-              continue;
             }
+          }
+        } else {
+          const nonImageEntries = pendingCallEntries.filter(
+            ([, call]) => call.name !== GENERATE_IMAGE_TOOL_NAME
+          );
+          const imageEntries = pendingCallEntries.filter(
+            ([, call]) => call.name === GENERATE_IMAGE_TOOL_NAME
+          );
 
+          const delegationRuntime = createDelegationRuntime({
+            db,
+            userId,
+            chatId,
+            parentAgentProfile: agentRuntime.profile,
+            parentModelName: modelId,
+            interactionMode,
+            settings: multiAgentSettings,
+            signal,
+            state: delegationState,
+          });
+
+          const nonImageResultEntries: ToolExecutionProgressItem[] = [];
+          const nonImageRunner =
+            nonImageEntries.length > 0
+              ? (async () => {
+                  for await (const item of executeStandardToolCallsWithProgress(nonImageEntries, {
+                    userId,
+                    chatId,
+                    settingsByToolName: toolSettings,
+                    allowedToolNames,
+                    delegationRuntime,
+                  })) {
+                    nonImageResultEntries.push(item);
+                  }
+                })()
+              : null;
+
+          for (const [callId, { name, argsStr }] of imageEntries) {
             const args = parseToolArgs(argsStr);
             let result: unknown;
             let isError = false;
@@ -811,6 +793,43 @@ export async function* streamTextTurn(
             allParts.push({ type: 'tool_result', toolCallId: callId, content: resultStr, isError });
             yield { type: 'tool_result', callId, name, result, isError };
             nextToolResults.push({ callId, name, result: resultStr, isError });
+          }
+
+          if (nonImageRunner) await nonImageRunner;
+          for (const item of nonImageResultEntries) {
+            if (item.kind === 'event') {
+              yield item.event;
+            } else {
+              const execution = item.execution;
+              allParts.push({
+                type: 'tool_call',
+                toolCallId: execution.callId,
+                name: execution.name,
+                args: execution.args,
+              });
+              allParts.push({
+                type: 'tool_result',
+                toolCallId: execution.callId,
+                content: execution.resultStr,
+                isError: execution.isError,
+              });
+              if (execution.subagentTrace && multiAgentSettings.traceVisibility !== 'off') {
+                allParts.push(execution.subagentTrace);
+              }
+              yield {
+                type: 'tool_result',
+                callId: execution.callId,
+                name: execution.name,
+                result: execution.result,
+                isError: execution.isError,
+              };
+              nextToolResults.push({
+                callId: execution.callId,
+                name: execution.name,
+                result: execution.resultStr,
+                isError: execution.isError,
+              });
+            }
           }
         }
 

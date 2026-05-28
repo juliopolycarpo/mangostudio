@@ -137,6 +137,27 @@ describe('ChatFeed — MessageParts interleaved rendering', () => {
     expect(screen.getByText('Used the tool.')).toBeInTheDocument();
   });
 
+  it('collapses consecutive read_file calls into a single grouped block', () => {
+    const parts: MessagePart[] = [
+      { type: 'tool_call', toolCallId: 'r1', name: 'read_file', args: { path: '/a.ts' } },
+      { type: 'tool_result', toolCallId: 'r1', content: '{}' },
+      { type: 'tool_call', toolCallId: 'r2', name: 'read_file', args: { path: '/b.ts' } },
+      { type: 'tool_result', toolCallId: 'r2', content: '{}' },
+      { type: 'tool_call', toolCallId: 'r3', name: 'read_file', args: { path: '/c.ts' } },
+      { type: 'tool_result', toolCallId: 'r3', content: '{}' },
+    ];
+    const msg = makeMessage({ parts });
+
+    const { container } = render(<ChatFeed chatId="chat-1" messages={[msg]} />);
+
+    // One summary pill, not three separate Read blocks.
+    const readButtons = Array.from(container.querySelectorAll('button')).filter((btn) =>
+      btn.textContent?.includes('Read')
+    );
+    expect(readButtons).toHaveLength(1);
+    expect(readButtons[0]).toHaveTextContent('+2 more');
+  });
+
   it('shows No response placeholder when there are no text or tool parts', () => {
     const msg = makeMessage({ parts: undefined, text: '' });
 

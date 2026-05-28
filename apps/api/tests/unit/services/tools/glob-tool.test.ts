@@ -1,0 +1,158 @@
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import {
+  executeGlob,
+  GLOB_DEFAULT_MAX_RESULTS,
+  GLOB_MAX_MAX_RESULTS,
+  GLOB_MIN_MAX_RESULTS,
+  normalizeGlobToolSettings,
+} from '../../../../src/services/tools/builtin/glob';
+import type { ToolContext } from '../../../../src/services/tools/types';
+
+let tempDir: string;
+
+beforeEach(() => {
+  tempDir = mkdtempSync(join(tmpdir(), 'glob-tool-test-'));
+});
+
+afterEach(() => {
+  rmSync(tempDir, { recursive: true, force: true });
+});
+
+function makeContext(parameters: Record<string, unknown> = {}): ToolContext {
+  return { userId: 'u1', chatId: 'c1', parameters };
+}
+
+function seedTree(): void {
+  writeFileSync(join(tempDir, 'a.ts'), 'export const a = 1;', 'utf-8');
+  writeFileSync(join(tempDir, 'b.ts'), 'export const b = 2;', 'utf-8');
+  writeFileSync(join(tempDir, 'README.md'), '# title', 'utf-8');
+  mkdirSync(join(tempDir, 'nested'));
+  writeFileSync(join(tempDir, 'nested', 'c.ts'), 'export const c = 3;', 'utf-8');
+  writeFileSync(join(tempDir, '.hidden.ts'), '// hidden', 'utf-8');
+}
+
+describe('normalizeGlobToolSettings', () => {
+  it('returns defaults for missing parameters', () => {
+    const settings = normalizeGlobToolSettings({});
+    expect(settings.allowedPaths).toEqual([]);
+    expect(settings.deniedPaths).toEqual([]);
+    expect(settings.maxResults).toBe(GLOB_DEFAULT_MAX_RESULTS);
+    expect(settings.includeDotfiles).toBe(false);
+    expect(settings.absolute).toBe(false);
+  });
+
+  it('clamps maxResults to its bounds', () => {
+    expect(normalizeGlobToolSettings({ maxResults: 0 }).maxResults).toBe(GLOB_MIN_MAX_RESULTS);
+    expect(normalizeGlobToolSettings({ maxResults: 99_999 }).maxResults).toBe(GLOB_MAX_MAX_RESULTS);
+  });
+
+  it('rounds fractional maxResults', () => {
+    expect(normalizeGlobToolSettings({ maxResults: 12.6 }).maxResults).toBe(13);
+  });
+
+  it('falls back to default when maxResults is non-numeric', () => {
+    expect(normalizeGlobToolSettings({ maxResults: 'many' }).maxResults).toBe(
+      GLOB_DEFAULT_MAX_RESULTS
+    );
+  });
+
+  it('respects boolean flags', () => {
+    const settings = normalizeGlobToolSettings({ includeDotfiles: true, absolute: true });
+    expect(settings.includeDotfiles).toBe(true);
+    expect(settings.absolute).toBe(true);
+  });
+});
+
+describe('executeGlob', () => {
+  it('matches files by pattern from the given cwd', async () => {
+    seedTree();
+    const result = await executeGlob({ pattern: '**/*.ts', cwd: tempDir }, makeContext());
+    const names = result.matches.sort();
+    expect(names).toEqual(['a.ts', 'b.ts', join('nested', 'c.ts')]);
+    expect(result.truncated).toBe(false);
+  });
+
+  it('skips dotfiles by default and includes them when enabled', async () => {
+    seedTree();
+    const without = await executeGlob({ pattern: '*.ts', cwd: tempDir }, makeContext());
+    expect(without.matches).not.toContain('.hidden.ts');
+
+    const withDot = await executeGlob(
+      { pattern: '*.ts', cwd: tempDir },
+      makeContext({ includeDotfiles: true })
+    );
+    expect(withDot.matches).toContain('.hidden.ts');
+  });
+
+  it('truncates when results exceed maxResults', async () => {
+    for (let i = 0; i < 5; i++) {
+      writeFileSync(join(tempDir, `f${i}.txt`), 'x', 'utf-8');
+    }
+    const result = await executeGlob(
+      { pattern: '*.txt', cwd: tempDir },
+      makeContext({ maxResults: 2 })
+    );
+    expect(result.matches).toHaveLength(2);
+    expect(result.truncated).toBe(true);
+  });
+
+  it('returns absolute paths when configured', async () => {
+    seedTree();
+    const result = await executeGlob(
+      { pattern: '*.ts', cwd: tempDir },
+      makeContext({ absolute: true })
+    );
+    for (const match of result.matches) {
+      expect(match.startsWith(tempDir)).toBe(true);
+    }
+  });
+
+  it('rejects cwd outside allowed paths', async () => {
+    seedTree();
+    let threw = false;
+    try {
+      await executeGlob(
+        { pattern: '*.ts', cwd: tempDir },
+        makeContext({ allowedPaths: ['/other'] })
+      );
+    } catch (error) {
+      threw = true;
+      expect((error as Error).message).toContain('not in the allowed paths');
+    }
+    expect(threw).toBe(true);
+  });
+
+  it('rejects cwd inside denied paths', async () => {
+    seedTree();
+    let threw = false;
+    try {
+      await executeGlob({ pattern: '*.ts', cwd: tempDir }, makeContext({ deniedPaths: [tempDir] }));
+    } catch (error) {
+      threw = true;
+      expect((error as Error).message).toContain('in the denied paths');
+    }
+    expect(threw).toBe(true);
+  });
+
+  it('expands ~ in cwd', async () => {
+    seedTree();
+    const originalHome = Bun.env.HOME;
+    Bun.env.HOME = tempDir;
+    try {
+      const result = await executeGlob({ pattern: '*.ts', cwd: '~' }, makeContext());
+      expect(result.matches.sort()).toEqual(['a.ts', 'b.ts']);
+    } finally {
+      Bun.env.HOME = originalHome;
+    }
+  });
+
+  it('returns no matches when nothing matches the pattern', async () => {
+    seedTree();
+    const result = await executeGlob({ pattern: '*.zzz', cwd: tempDir }, makeContext());
+    expect(result.matches).toEqual([]);
+    expect(result.truncated).toBe(false);
+  });
+});

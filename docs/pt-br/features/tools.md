@@ -88,6 +88,59 @@ Retorna a data e hora atuais em um fuso horário e locale solicitados.
 - **Parâmetros:** `timezone` (IANA, ex. `America/Sao_Paulo`), `locale` (BCP 47, ex. `pt-BR`)
 - **Execução:** Valida o timezone, formata via `Intl.DateTimeFormat` e retorna UTC ISO + datetime localizado + offset.
 
+### `read_file`
+
+Lê o conteúdo de um arquivo de texto do disco.
+
+- **Nome da tool:** `read_file`
+- **Categoria:** `system`
+- **Parâmetros:** `path` (obrigatório, absoluto ou começando com `~`)
+- **Settings:** `allowedPaths`, `deniedPaths` (listas de caminhos; aplicadas por `resolveAndValidatePath`)
+- **Execução:** Lê o arquivo com `Bun.file().text()` e retorna `{ content, path, size }`.
+
+### `list_directory`
+
+Lista arquivos e diretórios em um caminho.
+
+- **Nome da tool:** `list_directory`
+- **Categoria:** `system`
+- **Parâmetros:** `path` (obrigatório, absoluto ou começando com `~`)
+- **Settings:** `allowedPaths`, `deniedPaths`
+- **Execução:** Chama `readdir(path, { withFileTypes: true })` e retorna `{ path, entries: { name, type }[] }`.
+
+### `glob`
+
+Encontra caminhos do filesystem que correspondem a um padrão glob, avaliados por `Bun.Glob`.
+
+- **Nome da tool:** `glob`
+- **Categoria:** `system`
+- **Parâmetros:** `pattern` (obrigatório, suporta `*`, `**`, `?`, `[]`, `{a,b}`, `!`), `cwd` (diretório base opcional; padrão `process.cwd()`)
+- **Settings:** `allowedPaths`, `deniedPaths`, `maxResults` (1–5.000; padrão 200), `includeDotfiles` (padrão `false`), `absolute` (padrão `false`)
+- **Execução:** Itera os matches com `new Bun.Glob(pattern).scan({ cwd, dot, absolute, onlyFiles: false })`, para ao atingir o limite e sinaliza `truncated`.
+
+### `grep`
+
+Pesquisa nos arquivos por linhas que correspondam a uma expressão regular.
+
+- **Nome da tool:** `grep`
+- **Categoria:** `system`
+- **Parâmetros:** `pattern` (regex obrigatória), `path` (arquivo ou diretório obrigatório), `glob` (filtro opcional para buscas em diretório), `caseInsensitive`
+- **Settings:** `allowedPaths`, `deniedPaths`, `maxResults` (1–5.000; padrão 100), `maxMatchesPerFile` (padrão 20), `maxFileSizeBytes` (padrão 1 MB), `includeDotfiles`
+- **Segurança:** Arquivos com byte nulo nos primeiros 1 KB são tratados como binários e ignorados; arquivos acima de `maxFileSizeBytes` também são pulados. A regex é compilada com `new RegExp` e rejeitada via `GrepPatternError` quando inválida.
+- **Execução:** Quando `path` é um diretório, percorre-o com `Bun.Glob` (filtrado pelo `glob` opcional); para cada candidato lê com `Bun.file().text()`, divide por linha e registra matches `{ file, line, text }`.
+
+### `bash` / `zsh` / `powershell`
+
+Executam um comando de shell e retornam `stdout`, `stderr`, código de saída e tempo capturados. As três tools compartilham uma única implementação (`buildShellTool`) e diferem apenas pelo interpretador.
+
+- **Nomes das tools:** `bash`, `zsh`, `powershell`
+- **Categoria:** `system`
+- **Parâmetros:** `command` (obrigatório), `cwd` (diretório de trabalho opcional; `~` é expandido)
+- **Settings:** `timeoutMs` (1s–30s, padrão 15s), `maxOutputBytes` (1KB–1MB por stream, padrão 100KB)
+- **Disponibilidade:** Registradas no import apenas quando o interpretador existe — `bash`/`zsh` via `Bun.which`, `powershell` somente no Windows (`pwsh` e depois `powershell`). Shells indisponíveis nunca são oferecidos aos modelos.
+- **Segurança:** Desabilitadas por padrão (`enabledByDefault: false`); exigem ativação explícita. O processo é encerrado com `SIGKILL` após `timeoutMs`, e a saída por stream é limitada a `maxOutputBytes` (sinalizado por `truncated`).
+- **Execução:** `runShellCommand()` inicia o interpretador com `Bun.spawn` (`bash -c` / `zsh -c` / `powershell -NoProfile -NonInteractive -Command`), lê ambos os streams dentro do limite de bytes e retorna um `ShellCommandResult` estruturado.
+
 ## Settings Policy
 
 A settings policy em `settings-policy.ts` oferece funções puras para:
