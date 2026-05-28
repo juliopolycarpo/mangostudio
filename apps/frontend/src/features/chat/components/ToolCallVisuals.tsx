@@ -1,4 +1,4 @@
-import { Clock, FileText, FolderOpen, ImagePlus, Wrench } from 'lucide-react';
+import { Clock, FileText, FolderOpen, ImagePlus, Terminal, Wrench } from 'lucide-react';
 
 /**
  * Renders a per-tool icon based on the tool name.
@@ -17,6 +17,10 @@ export function ToolIcon({ toolName, className }: { toolName: string; className?
       return <ImagePlus size={size} className={className} />;
     case 'get_current_datetime':
       return <Clock size={size} className={className} />;
+    case 'bash':
+    case 'zsh':
+    case 'powershell':
+      return <Terminal size={size} className={className} />;
     default:
       return <Wrench size={size} className={className} />;
   }
@@ -38,7 +42,7 @@ export function abbreviatePath(rawPath: unknown): string | null {
 
 /**
  * Produces an optional inline hint string that follows the label.
- * For filesystem tools the path is shown; for others nothing is shown.
+ * Filesystem tools show the path; shell tools show the command; others none.
  *
  * // Usage: getToolHint('read_file', { path: '/home/ada/notes.md' }) // => '~/notes.md'
  */
@@ -47,6 +51,12 @@ export function getToolHint(toolName: string, args: Record<string, unknown>): st
     case 'list_directory':
     case 'read_file':
       return abbreviatePath(args.path);
+    case 'bash':
+    case 'zsh':
+    case 'powershell':
+      return typeof args.command === 'string' && args.command.trim().length > 0
+        ? args.command.trim()
+        : null;
     default:
       return null;
   }

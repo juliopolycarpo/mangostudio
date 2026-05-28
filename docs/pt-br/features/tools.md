@@ -88,6 +88,18 @@ Retorna a data e hora atuais em um fuso horário e locale solicitados.
 - **Parâmetros:** `timezone` (IANA, ex. `America/Sao_Paulo`), `locale` (BCP 47, ex. `pt-BR`)
 - **Execução:** Valida o timezone, formata via `Intl.DateTimeFormat` e retorna UTC ISO + datetime localizado + offset.
 
+### `bash` / `zsh` / `powershell`
+
+Executam um comando de shell e retornam `stdout`, `stderr`, código de saída e tempo capturados. As três tools compartilham uma única implementação (`buildShellTool`) e diferem apenas pelo interpretador.
+
+- **Nomes das tools:** `bash`, `zsh`, `powershell`
+- **Categoria:** `system`
+- **Parâmetros:** `command` (obrigatório), `cwd` (diretório de trabalho opcional; `~` é expandido)
+- **Settings:** `timeoutMs` (1s–30s, padrão 15s), `maxOutputBytes` (1KB–1MB por stream, padrão 100KB)
+- **Disponibilidade:** Registradas no import apenas quando o interpretador existe — `bash`/`zsh` via `Bun.which`, `powershell` somente no Windows (`pwsh` e depois `powershell`). Shells indisponíveis nunca são oferecidos aos modelos.
+- **Segurança:** Desabilitadas por padrão (`enabledByDefault: false`); exigem ativação explícita. O processo é encerrado com `SIGKILL` após `timeoutMs`, e a saída por stream é limitada a `maxOutputBytes` (sinalizado por `truncated`).
+- **Execução:** `runShellCommand()` inicia o interpretador com `Bun.spawn` (`bash -c` / `zsh -c` / `powershell -NoProfile -NonInteractive -Command`), lê ambos os streams dentro do limite de bytes e retorna um `ShellCommandResult` estruturado.
+
 ## Settings Policy
 
 A settings policy em `settings-policy.ts` oferece funções puras para:

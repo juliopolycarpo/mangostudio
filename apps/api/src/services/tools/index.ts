@@ -11,3 +11,6 @@ import './builtin/generate-image';
 import './builtin/read-file';
 import './builtin/list-directory';
 import './builtin/delegate-to-agent';
+import './builtin/bash';
+import './builtin/zsh';
+import './builtin/powershell';

@@ -629,6 +629,9 @@ export const messages = {
       read_file: 'Leu',
       generate_image: 'Gerar Imagem',
       get_current_datetime: 'Data',
+      bash: 'Bash',
+      zsh: 'Zsh',
+      powershell: 'PowerShell',
     },
   },
 

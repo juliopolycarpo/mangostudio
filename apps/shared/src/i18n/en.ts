@@ -622,6 +622,9 @@ export const messages: Messages = {
       read_file: 'Read',
       generate_image: 'Generate Image',
       get_current_datetime: 'Date',
+      bash: 'Bash',
+      zsh: 'Zsh',
+      powershell: 'PowerShell',
     },
   },
 
