@@ -1,4 +1,13 @@
-import { Clock, FileText, FolderOpen, ImagePlus, Terminal, Wrench } from 'lucide-react';
+import {
+  Clock,
+  FileSearch,
+  FileText,
+  FolderOpen,
+  ImagePlus,
+  Search,
+  Terminal,
+  Wrench,
+} from 'lucide-react';
 
 /**
  * Renders a per-tool icon based on the tool name.
@@ -21,6 +30,10 @@ export function ToolIcon({ toolName, className }: { toolName: string; className?
     case 'zsh':
     case 'powershell':
       return <Terminal size={size} className={className} />;
+    case 'grep':
+      return <Search size={size} className={className} />;
+    case 'glob':
+      return <FileSearch size={size} className={className} />;
     default:
       return <Wrench size={size} className={className} />;
   }
@@ -56,6 +69,11 @@ export function getToolHint(toolName: string, args: Record<string, unknown>): st
     case 'powershell':
       return typeof args.command === 'string' && args.command.trim().length > 0
         ? args.command.trim()
+        : null;
+    case 'grep':
+    case 'glob':
+      return typeof args.pattern === 'string' && args.pattern.trim().length > 0
+        ? args.pattern.trim()
         : null;
     default:
       return null;
