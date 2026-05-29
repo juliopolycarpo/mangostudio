@@ -14,7 +14,7 @@ import type {
   ToolingCheckStats,
 } from '../collect/types';
 import type { CoverageBucket } from '../parse-lcov';
-import { ok } from './format';
+import { NA, ok } from './format';
 
 export const COVERAGE_KEYS = ['lines', 'statements', 'functions', 'branches'] as const;
 export type CoverageKey = (typeof COVERAGE_KEYS)[number];
@@ -73,7 +73,7 @@ export const sumTsErrors = (metrics: Metrics | null): number | null => {
 
 /** Format the repo-check status cell: pass / FAIL(code) plus failed tasks. */
 export const renderToolingStatus = (stats: ToolingCheckStats | null): string => {
-  if (!stats) return 'n/a';
+  if (!stats) return NA;
   const status = stats.checkExitCode === 0 ? 'pass' : `FAIL (${stats.checkExitCode})`;
   if (stats.failedTasks.length === 0) return status;
   return `${status}: ${stats.failedTasks.join(', ')}`;

@@ -41,9 +41,13 @@ jobs:
 
       - name: Resolve version
         id: resolve
+        # Read the dispatch input via env, never interpolated into the shell, so
+        # a crafted version string cannot inject commands.
+        env:
+          INPUT_VERSION: ${{ github.event.inputs.version }}
         run: |
-          if [ -n "${{ github.event.inputs.version }}" ]; then
-            version="${{ github.event.inputs.version }}"
+          if [ -n "$INPUT_VERSION" ]; then
+            version="$INPUT_VERSION"
           else
             version="${GITHUB_REF_NAME#v}"
           fi
@@ -122,6 +126,14 @@ jobs:
         with:
           name: npm-dist
           path: dist-npm
+
+      - name: Restore executable bit on platform binaries
+        # actions/upload-artifact zips files and drops Unix mode bits, so the
+        # downloaded binaries arrive non-executable. npm only force-sets +x on
+        # bin entries (the wrapper's mangostudio.js), not on these plain files,
+        # so without this the published binary fails to spawn (EACCES) on
+        # macOS/Linux. The .exe platforms need no +x.
+        run: find dist-npm -type f -name mangostudio -exec chmod +x {} +
 
       - name: Publish to npm
         env:
