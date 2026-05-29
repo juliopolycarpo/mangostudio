@@ -19,17 +19,11 @@ jobs:
 
       - uses: ./.github/actions/setup-mango
 
-      # Vitest reuses Vite's dep optimizer and stores transform/cache data
-      # under node_modules/.vite. Restoring it cuts the cold-start cost of
-      # the frontend test suite on every CI run.
       - name: Restore Vite optimizer cache
-        uses: actions/cache@v5
+        uses: ./.github/actions/cache-vite
         with:
-          path: apps/frontend/node_modules/.vite
-          key: ${{ runner.os }}-${{ env.CACHE_VERSION }}-vite-test-${{ hashFiles('bun.lock', 'apps/frontend/vite.config.ts', 'apps/frontend/vitest.config.ts') }}
-          restore-keys: |
-            ${{ runner.os }}-${{ env.CACHE_VERSION }}-vite-test-
-            ${{ runner.os }}-${{ env.CACHE_VERSION }}-vite-
+          scope: test
+          cache-version: ${{ env.CACHE_VERSION }}
 
       - name: Run database migrations
         run: bun run --filter @mangostudio/api migrate

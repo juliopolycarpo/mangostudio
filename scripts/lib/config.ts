@@ -50,6 +50,7 @@ export const ROOT_BIOME_PATHS: string[] = [
   'lefthook.yml',
   'playwright.config.ts',
   'scripts',
+  'packages',
   'apps/api/package.json',
   'apps/frontend/package.json',
   'apps/shared/package.json',
@@ -67,6 +68,7 @@ export const ROOT_DPRINT_PATHS: string[] = [
   'docs',
   '.github',
   '.mango',
+  'packages',
   'lefthook.yml',
   'dprint.json',
 ];

@@ -80,18 +80,14 @@ jobs:
 
       - uses: ./.github/actions/setup-mango
 
-      # Same rationale as test.yml — the head metrics job runs vitest three
-      # times (unit, integration, coverage), so warming the optimizer cache
-      # pays back quickly. Suffix the key so head and base do not contend.
+      # The head metrics job runs vitest three times (unit, integration,
+      # coverage), so warming the optimizer cache pays back quickly. The qa-head
+      # scope keeps head and base from contending on the same key.
       - name: Restore Vite optimizer cache
-        uses: actions/cache@v5
+        uses: ./.github/actions/cache-vite
         with:
-          path: apps/frontend/node_modules/.vite
-          key: ${{ runner.os }}-${{ env.CACHE_VERSION }}-vite-qa-head-${{ hashFiles('bun.lock', 'apps/frontend/vite.config.ts', 'apps/frontend/vitest.config.ts') }}
-          restore-keys: |
-            ${{ runner.os }}-${{ env.CACHE_VERSION }}-vite-qa-head-
-            ${{ runner.os }}-${{ env.CACHE_VERSION }}-vite-test-
-            ${{ runner.os }}-${{ env.CACHE_VERSION }}-vite-
+          scope: qa-head
+          cache-version: ${{ env.CACHE_VERSION }}
 
       - name: Run database migrations
         run: bun run --filter @mangostudio/api migrate
@@ -152,21 +148,25 @@ jobs:
             apps/shared/package.json \
             package.json \
             bun.lock \
-            .github/actions/setup-mango
+            .github/actions/setup-mango \
+            .github/actions/cache-vite
 
       - uses: ./.github/actions/setup-mango
+        with:
+          # The overlay above intentionally keeps base source while pulling head's
+          # bun.lock, so the lock can reference workspaces the base tree lacks
+          # (e.g. a packages/* package added on the PR). A frozen install would
+          # reject that drift; non-frozen lets Bun reconcile against the present
+          # manifests. Dependency deltas still measure base via base-bun.lock.
+          frozen-lockfile: false
 
       # Mirror the head job's optimizer cache, scoped to the base side so the
       # two jobs do not race on cache writes for the same key.
       - name: Restore Vite optimizer cache
-        uses: actions/cache@v5
+        uses: ./.github/actions/cache-vite
         with:
-          path: apps/frontend/node_modules/.vite
-          key: ${{ runner.os }}-${{ env.CACHE_VERSION }}-vite-qa-base-${{ hashFiles('bun.lock', 'apps/frontend/vite.config.ts', 'apps/frontend/vitest.config.ts') }}
-          restore-keys: |
-            ${{ runner.os }}-${{ env.CACHE_VERSION }}-vite-qa-base-
-            ${{ runner.os }}-${{ env.CACHE_VERSION }}-vite-test-
-            ${{ runner.os }}-${{ env.CACHE_VERSION }}-vite-
+          scope: qa-base
+          cache-version: ${{ env.CACHE_VERSION }}
 
       - name: Run database migrations
         run: bun run --filter @mangostudio/api migrate

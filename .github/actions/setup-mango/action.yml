@@ -15,6 +15,16 @@ inputs:
       caches across every job (use as a cache-poisoning rollback lever).
     required: false
     default: "v1"
+  frozen-lockfile:
+    description: >
+      Whether to install with --frozen-lockfile. Keep "true" everywhere a job
+      checks out a single consistent ref. Set "false" only for jobs that build a
+      mixed tree on purpose (e.g. the PR QA gate base overlays head's bun.lock
+      onto base source, so the lock legitimately references workspaces the base
+      tree lacks). Frozen install is the default so lockfile drift still fails
+      real CI.
+    required: false
+    default: "true"
 outputs:
   cache-hit:
     description: "'true' if the Bun install cache was a full hit"
@@ -27,7 +37,7 @@ runs:
         bun-version-file: package.json
 
     - id: bun-cache
-      uses: actions/cache@v4
+      uses: actions/cache@v5
       with:
         path: ~/.bun/install/cache
         # Key includes cache-version so a single input bump rolls all caches.
@@ -37,11 +47,20 @@ runs:
 
     - name: Install dependencies
       shell: bash
+      env:
+        FROZEN_LOCKFILE: ${{ inputs.frozen-lockfile }}
       run: |
         echo "::group::bun install"
-        bun install --frozen-lockfile
+        if [ "$FROZEN_LOCKFILE" = "true" ]; then
+          bun install --frozen-lockfile
+        else
+          # Mixed-tree job: let Bun reconcile the lockfile against whatever
+          # manifests are present instead of failing on intentional drift.
+          bun install
+        fi
         echo "::endgroup::"
         {
           echo '### Setup'
           echo "- Bun cache hit: \`${{ steps.bun-cache.outputs.cache-hit }}\`"
+          echo "- Frozen lockfile: \`${FROZEN_LOCKFILE}\`"
         } >> "$GITHUB_STEP_SUMMARY"

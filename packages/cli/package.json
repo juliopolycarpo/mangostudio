@@ -1,0 +1,24 @@
+{
+  "name": "@mangostudio/cli",
+  "version": "0.1.0",
+  "description": "MangoStudio — AI image generation and chat studio. Installs the prebuilt standalone binary for your platform and exposes the `mangostudio` command.",
+  "license": "MIT",
+  "type": "commonjs",
+  "bin": {
+    "mangostudio": "bin/mangostudio.js"
+  },
+  "files": ["bin/mangostudio.js", "README.md"],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/juliopolycarpo/mangostudio.git",
+    "directory": "packages/cli"
+  },
+  "homepage": "https://github.com/juliopolycarpo/mangostudio#readme",
+  "bugs": {
+    "url": "https://github.com/juliopolycarpo/mangostudio/issues"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": ["mangostudio", "ai", "image-generation", "chat", "cli"]
+}

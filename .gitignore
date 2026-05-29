@@ -2,6 +2,7 @@
 node_modules/
 build/
 dist/
+dist-npm/
 coverage/
 playwright-report/
 test-results/

@@ -1,0 +1,179 @@
+name: Release
+
+# Cut a release: cross-compile standalone binaries for every platform, assemble
+# the npm distribution, publish a GitHub Release with the binaries + git-cliff
+# notes, publish the npm packages, and update CHANGELOG.md on main.
+#
+# Trigger by pushing a semver tag (git tag -s v0.1.0 && git push origin v0.1.0)
+# or via workflow_dispatch with an explicit version.
+#
+# Prerequisites: an NPM_TOKEN repo secret with publish rights to @mangostudio/*.
+
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release without the leading v (e.g. 0.1.0)"
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build binaries & npm packages
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: ./.github/actions/setup-mango
+
+      - name: Resolve version
+        id: resolve
+        # Read the dispatch input via env, never interpolated into the shell, so
+        # a crafted version string cannot inject commands.
+        env:
+          INPUT_VERSION: ${{ github.event.inputs.version }}
+        run: |
+          if [ -n "$INPUT_VERSION" ]; then
+            version="$INPUT_VERSION"
+          else
+            version="${GITHUB_REF_NAME#v}"
+          fi
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "Releasing v${version}"
+
+      - name: Build standalone binaries (all platforms)
+        run: VERSION="${{ steps.resolve.outputs.version }}" bun run build --binary
+
+      - name: Assemble npm distribution
+        run: VERSION="${{ steps.resolve.outputs.version }}" bun ./scripts/release/pack-npm.ts
+
+      - name: Archive per-platform binaries
+        run: |
+          version="${{ steps.resolve.outputs.version }}"
+          mkdir -p release-assets
+          for dir in .mango/out/*/; do
+            platform="$(basename "$dir")"
+            tar -czf "release-assets/mangostudio-${version}-${platform}.tar.gz" -C .mango/out "$platform"
+          done
+          ls -lh release-assets
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-assets
+          path: release-assets/
+          retention-days: 7
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: npm-dist
+          path: dist-npm/
+          retention-days: 7
+
+  github-release:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: ./.github/actions/setup-mango
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: release-assets
+          path: release-assets
+
+      - name: Generate release notes
+        run: bunx git-cliff --tag "v${{ needs.build.outputs.version }}" --latest --strip all > RELEASE_NOTES.md
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v${{ needs.build.outputs.version }}" release-assets/* \
+            --title "v${{ needs.build.outputs.version }}" \
+            --notes-file RELEASE_NOTES.md
+
+  npm-publish:
+    name: Publish npm packages
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: ./.github/actions/setup-mango
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: npm-dist
+          path: dist-npm
+
+      - name: Restore executable bit on platform binaries
+        # actions/upload-artifact zips files and drops Unix mode bits, so the
+        # downloaded binaries arrive non-executable. npm only force-sets +x on
+        # bin entries (the wrapper's mangostudio.js), not on these plain files,
+        # so without this the published binary fails to spawn (EACCES) on
+        # macOS/Linux. The .exe platforms need no +x.
+        run: find dist-npm -type f -name mangostudio -exec chmod +x {} +
+
+      - name: Publish to npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          echo "//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}" > ~/.npmrc
+          # Publish the platform packages first, then the main wrapper that
+          # references them as optional dependencies.
+          for dir in dist-npm/*/; do
+            [ "$(basename "$dir")" = "cli" ] && continue
+            (cd "$dir" && npm publish --access public)
+          done
+          (cd dist-npm/cli && npm publish --access public)
+
+  update-changelog:
+    name: Update CHANGELOG on main
+    needs: [build, github-release]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - uses: ./.github/actions/setup-mango
+
+      - name: Regenerate CHANGELOG.md
+        run: bun run changelog --release "${{ needs.build.outputs.version }}"
+
+      - name: Commit and push if changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet -- CHANGELOG.md; then
+            echo "CHANGELOG.md already up to date."
+            exit 0
+          fi
+          git add CHANGELOG.md
+          git commit -m "docs(changelog): update for v${{ needs.build.outputs.version }} [skip ci]"
+          git push origin main
