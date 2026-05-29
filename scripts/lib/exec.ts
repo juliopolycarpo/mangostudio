@@ -2,7 +2,7 @@
 // fan tasks out in parallel. All commands inherit stdio so output streams live.
 
 import { ROOT_DIR, WORKSPACES, type WorkspaceName } from './config';
-import { dim } from './log';
+import { dim, error } from './log';
 
 export interface RunResult {
   label: string;
@@ -54,4 +54,21 @@ export async function runWorkspaceScript(
 // biome-ignore lint/suspicious/useAwait: Migrated from ESLint
 export async function runParallel(tasks: Array<() => Promise<RunResult>>): Promise<RunResult[]> {
   return Promise.all(tasks.map((t) => t()));
+}
+
+/**
+ * Wrap an async function as a RunResult for in-process work that has no command
+ * line: times it, and reports exit code 1 (printing the message) if it throws.
+ * // Usage: results.push(await runTask('clean', () => removePaths(paths)));
+ */
+export async function runTask(label: string, fn: () => Promise<void>): Promise<RunResult> {
+  const start = performance.now();
+  let exitCode = 0;
+  try {
+    await fn();
+  } catch (caught) {
+    error(caught instanceof Error ? caught.message : String(caught));
+    exitCode = 1;
+  }
+  return { label, exitCode, duration: Math.round(performance.now() - start) };
 }

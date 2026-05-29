@@ -1,11 +1,31 @@
-import { ROOT_DIR } from './lib/config';
+import { removePaths } from './lib/fs';
 import {
   assertNoUnexpectedArguments,
   exitWithResults,
   header,
   parseArgs,
-  runCommand,
+  type RunResult,
+  runTask,
 } from './lib/runner';
+
+// Build artifacts removed by a plain `clean`.
+const ARTIFACT_PATHS = [
+  'apps/frontend/dist',
+  'apps/api/dist',
+  'apps/shared/dist',
+  'apps/frontend/coverage',
+  'apps/api/coverage',
+  'apps/shared/coverage',
+  '.mango/out',
+];
+
+// Additionally removed by `--dist-clean`.
+const NODE_MODULES_PATHS = [
+  'node_modules',
+  'apps/frontend/node_modules',
+  'apps/api/node_modules',
+  'apps/shared/node_modules',
+];
 
 function printHelp(): never {
   console.log(`Usage: bun run clean [flags]
@@ -30,39 +50,10 @@ const isDistClean = flags['--dist-clean'] ?? false;
 
 header(isDistClean ? 'Dist Clean' : 'Clean');
 
-const results = [];
-
-const cleanResult = await runCommand(
-  'clean',
-  [
-    'rm',
-    '-rf',
-    'apps/frontend/dist',
-    'apps/api/dist',
-    'apps/shared/dist',
-    'apps/frontend/coverage',
-    'apps/api/coverage',
-    'apps/shared/coverage',
-    '.mango/out',
-  ],
-  { cwd: ROOT_DIR }
-);
-results.push(cleanResult);
+const results: RunResult[] = [await runTask('clean', () => removePaths(ARTIFACT_PATHS))];
 
 if (isDistClean) {
-  const nmResult = await runCommand(
-    'remove node_modules',
-    [
-      'rm',
-      '-rf',
-      'node_modules',
-      'apps/frontend/node_modules',
-      'apps/api/node_modules',
-      'apps/shared/node_modules',
-    ],
-    { cwd: ROOT_DIR }
-  );
-  results.push(nmResult);
+  results.push(await runTask('remove node_modules', () => removePaths(NODE_MODULES_PATHS)));
 }
 
 exitWithResults(results);
