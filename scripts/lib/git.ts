@@ -1,19 +1,30 @@
 // Git helpers for change-scoped runs (--staged / --changed) and workspace mapping.
 
-import { execSync } from 'node:child_process';
 import type { WorkspaceName } from './config';
+
+/**
+ * Run a git command via Bun's native spawnSync and return stdout.
+ * Args are passed as a list (no shell), so refs never need escaping.
+ * Throws with stderr on a non-zero exit.
+ * // Usage: const sha = git(['rev-parse', 'HEAD']).trim();
+ */
+function git(args: string[]): string {
+  const result = Bun.spawnSync(['git', ...args]);
+  if (!result.success) {
+    throw new Error(result.stderr.toString().trim() || `git ${args.join(' ')} failed`);
+  }
+  return result.stdout.toString();
+}
 
 /** Files staged for commit (added/copied/modified/renamed). */
 export function getStagedFiles(): string[] {
-  const out = execSync('git diff --name-only --cached --diff-filter=ACMR', {
-    encoding: 'utf8',
-  });
+  const out = git(['diff', '--name-only', '--cached', '--diff-filter=ACMR']);
   return out.split('\n').filter(Boolean);
 }
 
 /** Files changed between baseRef and HEAD. */
 export function getChangedFiles(baseRef: string): string[] {
-  const out = execSync(`git diff --name-only ${baseRef}...HEAD`, { encoding: 'utf8' });
+  const out = git(['diff', '--name-only', `${baseRef}...HEAD`]);
   return out.split('\n').filter(Boolean);
 }
 
@@ -36,7 +47,7 @@ export function mapFilesToWorkspaces(files: string[]): {
 /** Merge-base with origin/main, falling back to HEAD~1 outside a tracked branch. */
 export function resolveDefaultBase(): string {
   try {
-    return execSync('git merge-base HEAD origin/main', { encoding: 'utf8' }).trim();
+    return git(['merge-base', 'HEAD', 'origin/main']).trim();
   } catch {
     return 'HEAD~1';
   }
