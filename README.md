@@ -8,12 +8,28 @@ AI-powered image generation and chat studio supporting Gemini, OpenAI-compatible
 
 > 🇧🇷 [Leia em Português](docs/pt-br/README.md)
 
+## Install
+
+Run MangoStudio without cloning — install the CLI for your platform:
+
+```bash
+npm install -g @mangostudio/cli   # or: bun add -g @mangostudio/cli
+mangostudio
+```
+
+This pulls the prebuilt binary for your OS/arch and puts `mangostudio` on your
+`PATH`. Prefer a direct download? Grab a platform archive from the
+[latest release](https://github.com/juliopolycarpo/mangostudio/releases/latest).
+
+Set `GEMINI_API_KEY` (and optionally `API_PORT`, `DATABASE_PATH`) before running;
+see [`@mangostudio/cli`](packages/cli/README.md) for the full environment.
+
 ## Prerequisites
 
 - [Bun](https://bun.sh/) (v1.3.14+)
 - One or more API keys for supported providers (Gemini, OpenAI-compatible, Anthropic)
 
-## Installation
+## Develop from source
 
 1. Clone the repository:
 

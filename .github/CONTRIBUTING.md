@@ -126,6 +126,13 @@ git config commit.template .gitmessage
 
 This is a one-time local setup. The template is at `.gitmessage` in the repo root.
 
+## Changelog
+
+`CHANGELOG.md` is generated from Conventional Commits with git-cliff — never edit
+it by hand. Every PR gets a sticky **Changelog Preview** comment showing the
+entries it would add. Preview locally with `bun run changelog --preview`. See
+[`docs/reference/releasing.md`](../docs/reference/releasing.md) for the release flow.
+
 ## Pull Request Process
 
 1. Create a branch from `main` using a descriptive name (e.g., `feat/add-gallery-empty-state`).

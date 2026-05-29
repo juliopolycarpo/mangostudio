@@ -3,6 +3,16 @@
   "private": true,
   "license": "MIT",
   "version": "0.1.0",
+  "description": "AI-powered image generation and chat studio supporting Gemini, OpenAI-compatible, and Anthropic models.",
+  "author": "Julio Polycarpo",
+  "homepage": "https://github.com/juliopolycarpo/mangostudio#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/juliopolycarpo/mangostudio.git"
+  },
+  "bugs": {
+    "url": "https://github.com/juliopolycarpo/mangostudio/issues"
+  },
   "type": "module",
   "workspaces": ["apps/*", "packages/*"],
   "packageManager": "bun@1.3.14",

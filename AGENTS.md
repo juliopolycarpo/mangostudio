@@ -31,6 +31,8 @@ Useful docs:
 - `package.json` — root scripts
 - `docs/reference/testing.md` — test taxonomy and harness rules
 - `docs/reference/agent-playbooks.md` — detailed file maps by feature area
+- `docs/reference/releasing.md` — changelog (`bun run changelog`) and release pipeline
+- `scripts/README.md` — the Bun-native automation toolkit
 - `.claude/CLAUDE.md` — Claude Code hooks and code navigation guide
 
 ## Global Rules
@@ -63,6 +65,7 @@ Useful docs:
 - Persistence or migrations: `apps/api/src/db/database.ts`, `apps/api/src/db/types.ts`, `apps/api/src/db/migrations/`, and the owning service or route
 - Shared i18n or types: `apps/shared/src/i18n/`, `apps/shared/src/contracts/`, `apps/shared/src/types/`, and the affected API/frontend consumers
 - Config or standalone build: `apps/api/src/lib/config.ts`, `apps/api/src/lib/runtime-paths.ts`, `.mango/config.toml.example`, `.mango/.env.example`, `scripts/build.ts`
+- Changelog or release: `cliff.toml`, `scripts/changelog.ts`, `scripts/lib/changelog.ts`, `scripts/release/pack-npm.ts`, `packages/cli/`, `.github/workflows/{changelog-preview,release}.yml`, `docs/reference/releasing.md`
 - Attachments: `apps/api/src/modules/attachments/application/attachment-storage.ts`, `apps/api/src/modules/attachments/application/attachment-validation.ts`, `apps/frontend/src/features/chat/components/MessageParts.tsx`
 - Tools: `apps/api/src/services/tools/registry.ts`, `apps/api/src/services/tools/builtin/generate-image.ts`, `apps/api/src/modules/tool-settings/http/tool-settings-routes.ts`, `apps/frontend/src/features/settings/tools/index.tsx`
 - Prompt rules: `apps/api/src/modules/prompt-rules/application/prompt-composer.ts`, `apps/api/src/modules/prompt-rules/application/rule-file-resolver.ts`, `apps/api/src/modules/prompt-rules/http/rule-file-routes.ts`, `apps/frontend/src/features/settings/prompts/`
