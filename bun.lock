@@ -22,7 +22,7 @@
     },
     "apps/api": {
       "name": "@mangostudio/api",
-      "version": "0.0.1",
+      "version": "0.1.0",
       "dependencies": {
         "@ai-sdk/deepseek": "^2.0.32",
         "@ai-sdk/openai-compatible": "^2.0.47",
@@ -49,7 +49,7 @@
     },
     "apps/frontend": {
       "name": "@mangostudio/frontend",
-      "version": "0.0.1",
+      "version": "0.1.0",
       "dependencies": {
         "@elysiajs/eden": "^1.4.8",
         "@mangostudio/shared": "workspace:*",
@@ -90,13 +90,20 @@
     },
     "apps/shared": {
       "name": "@mangostudio/shared",
-      "version": "0.0.1",
+      "version": "0.1.0",
       "dependencies": {
         "@sinclair/typebox": "^0.34.49",
       },
       "devDependencies": {
         "@types/bun": "^1.3.14",
         "typescript": "~6.0.3",
+      },
+    },
+    "packages/cli": {
+      "name": "@mangostudio/cli",
+      "version": "0.1.0",
+      "bin": {
+        "mangostudio": "bin/mangostudio.js",
       },
     },
   },
@@ -342,6 +349,8 @@
     "@jscpd/tokenizer": ["@jscpd/tokenizer@4.2.2", "", { "dependencies": { "@jscpd/core": "4.2.2", "spark-md5": "^3.0.2" } }, "sha512-haV7OWM2xzQ3I7tWgNTAOcR+kkFr0lYxkdnTOSd5Pve4QGx1Jk7kwk9gotqpXTd6AauaPnBdfHPxeZrUY21QYA=="],
 
     "@mangostudio/api": ["@mangostudio/api@workspace:apps/api"],
+
+    "@mangostudio/cli": ["@mangostudio/cli@workspace:packages/cli"],
 
     "@mangostudio/frontend": ["@mangostudio/frontend@workspace:apps/frontend"],
 
