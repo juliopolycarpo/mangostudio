@@ -1,0 +1,70 @@
+name: Changelog Preview
+
+# Posts a single sticky comment previewing the changelog entries this PR would
+# add on release (git-cliff over the PR's base..head range). Report-only.
+# See scripts/changelog.ts and cliff.toml.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: changelog-preview-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  preview:
+    name: Render & Comment
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          # git-cliff needs the full history to walk the base..head range.
+          fetch-depth: 0
+
+      - uses: ./.github/actions/setup-mango
+
+      - name: Render changelog preview
+        run: bun run changelog --preview --base "$BASE_SHA" > comment.md
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+
+      - name: Upsert preview comment
+        uses: actions/github-script@v9
+        continue-on-error: true
+        with:
+          script: |
+            const { readFile } = require('node:fs/promises');
+
+            const marker = '<!-- changelog-preview-comment -->';
+            const body = await readFile('comment.md', 'utf8');
+            const issue_number = context.payload.pull_request.number;
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              ...context.repo,
+              issue_number,
+              per_page: 100,
+            });
+            const existing = comments.find((comment) => {
+              return comment.user?.type === 'Bot' && comment.body?.includes(marker);
+            });
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                ...context.repo,
+                comment_id: existing.id,
+                body,
+              });
+              return;
+            }
+
+            await github.rest.issues.createComment({
+              ...context.repo,
+              issue_number,
+              body,
+            });
