@@ -26,11 +26,11 @@ const collectErrorNotes = (base: Metrics | null, head: Metrics | null): string[]
       continue;
     }
     for (const workspace of ALL_WORKSPACE_NAMES) {
-      const cov = metrics.coverage[workspace];
+      const cov = metrics.coverage?.[workspace];
       if (isError(cov)) notes.push(`- ${side}/coverage/${workspace}: \`${cov.error}\``);
-      const ts = metrics.tsErrors[workspace];
+      const ts = metrics.tsErrors?.[workspace];
       if (isError(ts)) notes.push(`- ${side}/tsErrors/${workspace}: \`${ts.error}\``);
-      const loc = metrics.loc[workspace];
+      const loc = metrics.loc?.[workspace];
       if (isError(loc)) notes.push(`- ${side}/loc/${workspace}: \`${loc.error}\``);
     }
     if (isError(metrics.tooling)) notes.push(`- ${side}/tooling: \`${metrics.tooling.error}\``);

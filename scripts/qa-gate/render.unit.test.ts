@@ -139,4 +139,23 @@ describe('QA gate comment renderer', () => {
     expect(comment).toContain('Collector errors');
     expect(comment).toContain('metrics file was not loadable');
   });
+
+  // Regression: when a collector job fails, the workflow writes `{}` as the
+  // placeholder artifact. That parses to a valid object but has no metric
+  // records, which used to crash collectErrorNotes on metrics.coverage[ws].
+  it('keeps rendering when one metrics file is an empty placeholder', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'mango-render-'));
+    tempDirs.push(dir);
+    const emptyBasePath = join(dir, 'empty.json');
+    await writeFile(emptyBasePath, '{}', 'utf8');
+    const headPath = await writeMetrics(makeMetrics('abcdef1234', 82));
+
+    const comment = await render(emptyBasePath, headPath, {
+      expectedStderr: 'lacks metric fields; treating side as absent',
+    });
+
+    expect(comment).toContain('## QA Gate');
+    expect(comment).toContain('<!-- qa-gate-comment -->');
+    expect(comment).toContain('metrics file was not loadable');
+  });
 });
