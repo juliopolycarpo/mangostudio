@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import type { Metrics } from './collect';
+import type { Metrics } from './collect/types';
 
 const tempDirs: string[] = [];
 

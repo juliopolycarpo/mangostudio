@@ -7,7 +7,7 @@ import type {
   Metrics,
   TestLaneStats,
   ToolingCheckStats,
-} from './collect';
+} from './collect/types';
 import type { CoverageBucket, CoverageSummary } from './parse-lcov';
 
 const [, , baseArg, headArg] = process.argv;
