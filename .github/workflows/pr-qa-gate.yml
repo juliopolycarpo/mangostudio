@@ -152,6 +152,13 @@ jobs:
             .github/actions/cache-vite
 
       - uses: ./.github/actions/setup-mango
+        with:
+          # The overlay above intentionally keeps base source while pulling head's
+          # bun.lock, so the lock can reference workspaces the base tree lacks
+          # (e.g. a packages/* package added on the PR). A frozen install would
+          # reject that drift; non-frozen lets Bun reconcile against the present
+          # manifests. Dependency deltas still measure base via base-bun.lock.
+          frozen-lockfile: false
 
       # Mirror the head job's optimizer cache, scoped to the base side so the
       # two jobs do not race on cache writes for the same key.
