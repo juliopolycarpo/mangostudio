@@ -1,0 +1,24 @@
+name: Cache Vite optimizer
+description: >
+  Restore the frontend Vite dep-optimizer cache (apps/frontend/node_modules/.vite)
+  to cut the cold-start cost of Vite and Vitest. Run after checkout + setup-mango.
+  The scope input keeps parallel jobs from contending on the same cache key while
+  still letting them fall back to any warm Vite cache.
+inputs:
+  scope:
+    description: Cache key scope, e.g. test, qa-head, qa-base. Keeps parallel jobs from racing.
+    required: true
+  cache-version:
+    description: Bump to immediately invalidate every Vite cache (cache-poisoning rollback).
+    required: false
+    default: "v1"
+runs:
+  using: composite
+  steps:
+    - uses: actions/cache@v5
+      with:
+        path: apps/frontend/node_modules/.vite
+        key: ${{ runner.os }}-${{ inputs.cache-version }}-vite-${{ inputs.scope }}-${{ hashFiles('bun.lock', 'apps/frontend/vite.config.ts', 'apps/frontend/vitest.config.ts') }}
+        restore-keys: |
+          ${{ runner.os }}-${{ inputs.cache-version }}-vite-${{ inputs.scope }}-
+          ${{ runner.os }}-${{ inputs.cache-version }}-vite-
