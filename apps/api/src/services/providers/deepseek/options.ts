@@ -10,7 +10,7 @@ export function normalizeDeepSeekBaseUrl(baseUrl: string | null | undefined): st
 
 export function buildDeepSeekProviderOptions(
   config: GenerationConfig | undefined
-): { deepseek: DeepSeekLanguageModelOptions } | undefined {
+): { deepseek: DeepSeekLanguageModelOptions & { reasoningEffort?: string } } | undefined {
   if (!config?.thinkingEnabled) return undefined;
 
   const effort = normalizeDeepSeekReasoningEffort(config.reasoningEffort);

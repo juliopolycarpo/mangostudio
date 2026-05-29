@@ -3,9 +3,6 @@ import type { ModelMessage } from 'ai';
 import { appendAttachmentFallbackNotes } from '../core/attachment-content';
 import type { TextGenerationRequest } from '../types';
 
-/** DeepSeek thinking-effort values accepted by the AI SDK (subset of its union). */
-export type DeepSeekReasoningEffort = 'high' | 'max';
-
 /**
  * Maps Mango's `ReasoningEffort` to values accepted by the DeepSeek API.
  *
@@ -16,7 +13,7 @@ export type DeepSeekReasoningEffort = 'high' | 'max';
  * - `xhigh` maps to `max`
  * - `max` stays `max`
  */
-export function normalizeDeepSeekReasoningEffort(effort: ReasoningEffort): DeepSeekReasoningEffort {
+export function normalizeDeepSeekReasoningEffort(effort: ReasoningEffort): string {
   switch (effort) {
     case 'low':
     case 'medium':
