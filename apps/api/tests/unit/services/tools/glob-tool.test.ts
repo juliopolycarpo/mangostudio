@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -25,13 +25,17 @@ function makeContext(parameters: Record<string, unknown> = {}): ToolContext {
   return { userId: 'u1', chatId: 'c1', parameters };
 }
 
-function seedTree(): void {
-  writeFileSync(join(tempDir, 'a.ts'), 'export const a = 1;', 'utf-8');
-  writeFileSync(join(tempDir, 'b.ts'), 'export const b = 2;', 'utf-8');
-  writeFileSync(join(tempDir, 'README.md'), '# title', 'utf-8');
+function seedFile(filePath: string, content: string): Promise<number> {
+  return Bun.write(filePath, content);
+}
+
+async function seedTree(): Promise<void> {
+  await seedFile(join(tempDir, 'a.ts'), 'export const a = 1;');
+  await seedFile(join(tempDir, 'b.ts'), 'export const b = 2;');
+  await seedFile(join(tempDir, 'README.md'), '# title');
   mkdirSync(join(tempDir, 'nested'));
-  writeFileSync(join(tempDir, 'nested', 'c.ts'), 'export const c = 3;', 'utf-8');
-  writeFileSync(join(tempDir, '.hidden.ts'), '// hidden', 'utf-8');
+  await seedFile(join(tempDir, 'nested', 'c.ts'), 'export const c = 3;');
+  await seedFile(join(tempDir, '.hidden.ts'), '// hidden');
 }
 
 describe('normalizeGlobToolSettings', () => {
@@ -68,7 +72,7 @@ describe('normalizeGlobToolSettings', () => {
 
 describe('executeGlob', () => {
   it('matches files by pattern from the given cwd', async () => {
-    seedTree();
+    await seedTree();
     const result = await executeGlob({ pattern: '**/*.ts', cwd: tempDir }, makeContext());
     const names = result.matches.sort();
     expect(names).toEqual(['a.ts', 'b.ts', join('nested', 'c.ts')]);
@@ -76,7 +80,7 @@ describe('executeGlob', () => {
   });
 
   it('skips dotfiles by default and includes them when enabled', async () => {
-    seedTree();
+    await seedTree();
     const without = await executeGlob({ pattern: '*.ts', cwd: tempDir }, makeContext());
     expect(without.matches).not.toContain('.hidden.ts');
 
@@ -89,7 +93,7 @@ describe('executeGlob', () => {
 
   it('truncates when results exceed maxResults', async () => {
     for (let i = 0; i < 5; i++) {
-      writeFileSync(join(tempDir, `f${i}.txt`), 'x', 'utf-8');
+      await seedFile(join(tempDir, `f${i}.txt`), 'x');
     }
     const result = await executeGlob(
       { pattern: '*.txt', cwd: tempDir },
@@ -100,7 +104,7 @@ describe('executeGlob', () => {
   });
 
   it('returns absolute paths when configured', async () => {
-    seedTree();
+    await seedTree();
     const result = await executeGlob(
       { pattern: '*.ts', cwd: tempDir },
       makeContext({ absolute: true })
@@ -111,7 +115,7 @@ describe('executeGlob', () => {
   });
 
   it('rejects cwd outside allowed paths', async () => {
-    seedTree();
+    await seedTree();
     let threw = false;
     try {
       await executeGlob(
@@ -126,7 +130,7 @@ describe('executeGlob', () => {
   });
 
   it('rejects cwd inside denied paths', async () => {
-    seedTree();
+    await seedTree();
     let threw = false;
     try {
       await executeGlob({ pattern: '*.ts', cwd: tempDir }, makeContext({ deniedPaths: [tempDir] }));
@@ -138,7 +142,7 @@ describe('executeGlob', () => {
   });
 
   it('expands ~ in cwd', async () => {
-    seedTree();
+    await seedTree();
     const originalHome = Bun.env.HOME;
     Bun.env.HOME = tempDir;
     try {
@@ -150,7 +154,7 @@ describe('executeGlob', () => {
   });
 
   it('returns no matches when nothing matches the pattern', async () => {
-    seedTree();
+    await seedTree();
     const result = await executeGlob({ pattern: '*.zzz', cwd: tempDir }, makeContext());
     expect(result.matches).toEqual([]);
     expect(result.truncated).toBe(false);
