@@ -155,8 +155,10 @@ async function smokeTest(): Promise<void> {
   const tmpHome = await Bun.$`mktemp -d`.text().then((t) => t.trim());
   const dbPath = join(tmpHome, 'smoke.sqlite');
 
+  // The binary is a CLI; bare invocation prints help, so start the server
+  // explicitly in the foreground (API_PORT is honored by `serve`).
   const proc = Bun.spawn({
-    cmd: [BINARY_PATH],
+    cmd: [BINARY_PATH, 'serve'],
     cwd: PLATFORM_DIR,
     env: {
       ...process.env,
