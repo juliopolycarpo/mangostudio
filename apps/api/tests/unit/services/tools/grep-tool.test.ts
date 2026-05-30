@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -28,19 +28,21 @@ function makeContext(parameters: Record<string, unknown> = {}): ToolContext {
   return { userId: 'u1', chatId: 'c1', parameters };
 }
 
-function seedTree(): void {
-  writeFileSync(
+function seedFile(filePath: string, content: string): Promise<number> {
+  return Bun.write(filePath, content);
+}
+
+async function seedTree(): Promise<void> {
+  await seedFile(
     join(tempDir, 'a.ts'),
-    ['// TODO: rewrite', 'export const a = 1;', 'console.log("done");'].join('\n'),
-    'utf-8'
+    ['// TODO: rewrite', 'export const a = 1;', 'console.log("done");'].join('\n')
   );
-  writeFileSync(
+  await seedFile(
     join(tempDir, 'b.ts'),
-    ['export const TODO_LIST = [];', '// nothing here'].join('\n'),
-    'utf-8'
+    ['export const TODO_LIST = [];', '// nothing here'].join('\n')
   );
   mkdirSync(join(tempDir, 'nested'));
-  writeFileSync(join(tempDir, 'nested', 'c.txt'), 'TODO at nested level', 'utf-8');
+  await seedFile(join(tempDir, 'nested', 'c.txt'), 'TODO at nested level');
 }
 
 describe('normalizeGrepToolSettings', () => {
@@ -60,7 +62,7 @@ describe('normalizeGrepToolSettings', () => {
 
 describe('executeGrep', () => {
   it('returns line matches across files in a directory', async () => {
-    seedTree();
+    await seedTree();
     const result = await executeGrep({ pattern: 'TODO', path: tempDir }, makeContext());
 
     expect(result.matches.length).toBe(3);
@@ -75,7 +77,7 @@ describe('executeGrep', () => {
   });
 
   it('respects the glob filter on directory searches', async () => {
-    seedTree();
+    await seedTree();
     const result = await executeGrep(
       { pattern: 'TODO', path: tempDir, glob: '*.ts' },
       makeContext()
@@ -85,7 +87,7 @@ describe('executeGrep', () => {
   });
 
   it('searches a single file when path is a file', async () => {
-    seedTree();
+    await seedTree();
     const result = await executeGrep(
       { pattern: 'console', path: join(tempDir, 'a.ts') },
       makeContext()
@@ -97,7 +99,7 @@ describe('executeGrep', () => {
   });
 
   it('matches case-insensitively when configured', async () => {
-    writeFileSync(join(tempDir, 'casing.txt'), 'Hello\nhello\nHELLO', 'utf-8');
+    await seedFile(join(tempDir, 'casing.txt'), 'Hello\nhello\nHELLO');
     const result = await executeGrep(
       { pattern: 'hello', path: tempDir, caseInsensitive: true },
       makeContext()
@@ -106,7 +108,7 @@ describe('executeGrep', () => {
   });
 
   it('throws GrepPatternError when the regex is invalid', async () => {
-    seedTree();
+    await seedTree();
     let captured: unknown;
     try {
       await executeGrep({ pattern: '(', path: tempDir }, makeContext());
@@ -118,7 +120,7 @@ describe('executeGrep', () => {
 
   it('caps total matches with maxResults and reports truncation', async () => {
     for (let i = 0; i < 10; i++) {
-      writeFileSync(join(tempDir, `f${i}.txt`), 'match-me', 'utf-8');
+      await seedFile(join(tempDir, `f${i}.txt`), 'match-me');
     }
     const result = await executeGrep(
       { pattern: 'match-me', path: tempDir },
@@ -130,7 +132,7 @@ describe('executeGrep', () => {
 
   it('caps per-file matches with maxMatchesPerFile', async () => {
     const lines = Array.from({ length: 50 }, (_, i) => `match-${i}`).join('\n');
-    writeFileSync(join(tempDir, 'many.txt'), lines, 'utf-8');
+    await seedFile(join(tempDir, 'many.txt'), lines);
     const result = await executeGrep(
       { pattern: 'match-', path: tempDir },
       makeContext({ maxMatchesPerFile: 3 })
@@ -140,7 +142,7 @@ describe('executeGrep', () => {
 
   it('skips files larger than maxFileSizeBytes', async () => {
     const big = 'a'.repeat(5000);
-    writeFileSync(join(tempDir, 'big.txt'), `${big}\nTODO\n`, 'utf-8');
+    await seedFile(join(tempDir, 'big.txt'), `${big}\nTODO\n`);
     const result = await executeGrep(
       { pattern: 'TODO', path: tempDir },
       makeContext({ maxFileSizeBytes: 1000 })
@@ -150,15 +152,15 @@ describe('executeGrep', () => {
 
   it('skips binary files by null-byte sniff', async () => {
     const bytes = new Uint8Array([0, 1, 2, 3, 0, 4]);
-    writeFileSync(join(tempDir, 'data.bin'), bytes);
-    writeFileSync(join(tempDir, 'data.txt'), 'plain TODO here', 'utf-8');
+    await Bun.write(join(tempDir, 'data.bin'), bytes);
+    await seedFile(join(tempDir, 'data.txt'), 'plain TODO here');
     const result = await executeGrep({ pattern: 'TODO', path: tempDir }, makeContext());
     expect(result.matches.some((m) => m.file === 'data.bin')).toBe(false);
     expect(result.matches.some((m) => m.file === 'data.txt')).toBe(true);
   });
 
   it('rejects searches outside allowed paths', async () => {
-    seedTree();
+    await seedTree();
     let threw = false;
     try {
       await executeGrep(
@@ -173,7 +175,7 @@ describe('executeGrep', () => {
   });
 
   it('rejects searches inside denied paths', async () => {
-    seedTree();
+    await seedTree();
     let threw = false;
     try {
       await executeGrep(

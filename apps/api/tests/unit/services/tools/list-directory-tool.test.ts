@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -20,6 +20,10 @@ afterEach(() => {
 
 function makeContext(parameters: Record<string, unknown> = {}): ToolContext {
   return { userId: 'u1', chatId: 'c1', parameters };
+}
+
+function seedFile(filePath: string, content: string): Promise<number> {
+  return Bun.write(filePath, content);
 }
 
 describe('normalizeListDirectoryToolSettings', () => {
@@ -68,8 +72,8 @@ describe('normalizeListDirectoryToolSettings', () => {
 
 describe('executeListDirectory', () => {
   it('lists files and directories', async () => {
-    writeFileSync(join(tempDir, 'file-a.txt'), 'a', 'utf-8');
-    writeFileSync(join(tempDir, 'file-b.txt'), 'b', 'utf-8');
+    await seedFile(join(tempDir, 'file-a.txt'), 'a');
+    await seedFile(join(tempDir, 'file-b.txt'), 'b');
     mkdirSync(join(tempDir, 'sub-dir'));
 
     const result = await executeListDirectory({ path: tempDir }, makeContext());
@@ -121,7 +125,7 @@ describe('executeListDirectory', () => {
   });
 
   it('allows listing when path is in allowed list', async () => {
-    writeFileSync(join(tempDir, 'allowed.txt'), 'content', 'utf-8');
+    await seedFile(join(tempDir, 'allowed.txt'), 'content');
 
     const result = await executeListDirectory(
       { path: tempDir },
@@ -166,7 +170,7 @@ describe('executeListDirectory', () => {
   });
 
   it('ignores disabled denied paths', async () => {
-    writeFileSync(join(tempDir, 'disabled-denied.txt'), 'content', 'utf-8');
+    await seedFile(join(tempDir, 'disabled-denied.txt'), 'content');
 
     const result = await executeListDirectory(
       { path: tempDir },

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -20,6 +20,10 @@ afterEach(() => {
 
 function makeContext(parameters: Record<string, unknown> = {}): ToolContext {
   return { userId: 'u1', chatId: 'c1', parameters };
+}
+
+function seedFile(filePath: string, content: string): Promise<number> {
+  return Bun.write(filePath, content);
 }
 
 describe('normalizeReadFileToolSettings', () => {
@@ -69,7 +73,7 @@ describe('normalizeReadFileToolSettings', () => {
 describe('executeReadFile', () => {
   it('reads a text file and returns its content and size', async () => {
     const filePath = join(tempDir, 'hello.txt');
-    writeFileSync(filePath, 'Hello, world!', 'utf-8');
+    await seedFile(filePath, 'Hello, world!');
 
     const result = await executeReadFile({ path: filePath }, makeContext());
 
@@ -83,7 +87,7 @@ describe('executeReadFile', () => {
     if (!home) return;
 
     const filePath = join(tempDir, 'home-test.txt');
-    writeFileSync(filePath, 'home content', 'utf-8');
+    await seedFile(filePath, 'home content');
 
     // Mock home to tempDir for this test
     const originalHome = Bun.env.HOME;
@@ -111,7 +115,7 @@ describe('executeReadFile', () => {
 
   it('throws when path is outside allowed paths', async () => {
     const filePath = join(tempDir, 'secret.txt');
-    writeFileSync(filePath, 'secret', 'utf-8');
+    await seedFile(filePath, 'secret');
 
     let threw = false;
     try {
@@ -125,7 +129,7 @@ describe('executeReadFile', () => {
 
   it('throws when path is inside denied paths', async () => {
     const filePath = join(tempDir, 'secret.txt');
-    writeFileSync(filePath, 'secret', 'utf-8');
+    await seedFile(filePath, 'secret');
 
     let threw = false;
     try {
@@ -139,7 +143,7 @@ describe('executeReadFile', () => {
 
   it('allows reading when path is in allowed list', async () => {
     const filePath = join(tempDir, 'allowed.txt');
-    writeFileSync(filePath, 'allowed content', 'utf-8');
+    await seedFile(filePath, 'allowed content');
 
     const result = await executeReadFile(
       { path: filePath },
@@ -150,7 +154,7 @@ describe('executeReadFile', () => {
 
   it('ignores disabled allowed paths', async () => {
     const filePath = join(tempDir, 'disabled-allowed.txt');
-    writeFileSync(filePath, 'content', 'utf-8');
+    await seedFile(filePath, 'content');
 
     let threw = false;
     try {
@@ -172,7 +176,7 @@ describe('executeReadFile', () => {
 
   it('ignores disabled denied paths', async () => {
     const filePath = join(tempDir, 'disabled-denied.txt');
-    writeFileSync(filePath, 'content', 'utf-8');
+    await seedFile(filePath, 'content');
 
     const result = await executeReadFile(
       { path: filePath },

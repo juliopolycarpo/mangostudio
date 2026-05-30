@@ -33,6 +33,11 @@ function getTranslatedToolText(
         title: s.toolNames.readFile,
         description: s.toolDescriptions.readFile,
       };
+    case 'write_file':
+      return {
+        title: s.toolNames.writeFile,
+        description: s.toolDescriptions.writeFile,
+      };
     case 'list_directory':
       return {
         title: s.toolNames.listDirectory,

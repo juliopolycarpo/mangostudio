@@ -4,7 +4,13 @@ import type { MessagePart } from '@mangostudio/shared';
  * Tool names whose consecutive calls collapse into a single grouped block.
  * Limited to repetitive filesystem reads where a flat list adds noise.
  */
-export const GROUPABLE_TOOLS = new Set(['read_file', 'list_directory', 'glob', 'grep']);
+export const GROUPABLE_TOOLS = new Set([
+  'read_file',
+  'write_file',
+  'list_directory',
+  'glob',
+  'grep',
+]);
 
 /** A single tool call paired with its result, ready for rendering. */
 export interface ToolCallEntry {

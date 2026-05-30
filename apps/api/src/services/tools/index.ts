@@ -9,6 +9,7 @@ export * from './types';
 import './builtin/get-current-datetime';
 import './builtin/generate-image';
 import './builtin/read-file';
+import './builtin/write-file';
 import './builtin/list-directory';
 import './builtin/glob';
 import './builtin/grep';

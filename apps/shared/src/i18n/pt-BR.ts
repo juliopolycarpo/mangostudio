@@ -482,12 +482,14 @@ export const messages = {
         'Quando ativado, a IA pode escolher diferentes tamanhos de imagem por solicitação.',
       toolNames: {
         readFile: 'Ler arquivo',
+        writeFile: 'Escrever arquivo',
         listDirectory: 'Listar diretório',
         glob: 'Glob',
         grep: 'Grep',
       },
       toolDescriptions: {
         readFile: 'Permite que a IA leia arquivos de texto do disco.',
+        writeFile: 'Permite que a IA escreva conteúdo de texto em arquivos no disco.',
         listDirectory: 'Permite que a IA liste arquivos e diretórios no disco.',
         glob: 'Permite que a IA encontre arquivos e diretórios por padrão glob.',
         grep: 'Permite que a IA pesquise o conteúdo de arquivos com expressões regulares.',
@@ -631,6 +633,7 @@ export const messages = {
     labels: {
       list_directory: 'Listar',
       read_file: 'Leu',
+      write_file: 'Escreveu',
       glob: 'Glob',
       grep: 'Grep',
       generate_image: 'Gerar Imagem',

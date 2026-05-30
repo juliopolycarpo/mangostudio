@@ -1,5 +1,6 @@
 import {
   Clock,
+  FileEdit,
   FileSearch,
   FileText,
   FolderOpen,
@@ -22,6 +23,8 @@ export function ToolIcon({ toolName, className }: { toolName: string; className?
       return <FolderOpen size={size} className={className} />;
     case 'read_file':
       return <FileText size={size} className={className} />;
+    case 'write_file':
+      return <FileEdit size={size} className={className} />;
     case 'generate_image':
       return <ImagePlus size={size} className={className} />;
     case 'get_current_datetime':
@@ -63,6 +66,7 @@ export function getToolHint(toolName: string, args: Record<string, unknown>): st
   switch (toolName) {
     case 'list_directory':
     case 'read_file':
+    case 'write_file':
       return abbreviatePath(args.path);
     case 'bash':
     case 'zsh':
