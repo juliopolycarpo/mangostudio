@@ -37,28 +37,28 @@ export async function startServer(options: StartOptions = {}): Promise<ServerHan
   await loadObservabilitySnapshot();
   registerFrontend(app, getDefaultFrontendDir());
 
-  listenOrExit(port);
+  listenOrExit(port, host);
 
   if (options.writeStateFile !== false) {
     await persistState(port, host);
   }
 
-  logRunning(port);
+  logRunning(host, port);
   registerShutdown();
 
   return { port, host, stop: gracefulStop };
 }
 
 /** Bind the server port, exiting with a clear message when it is already in use. */
-function listenOrExit(port: number): void {
+function listenOrExit(port: number, host: string): void {
   try {
     // reusePort:false (Elysia defaults it to true) so a port already held by
     // another process raises EADDRINUSE instead of silently load-balancing —
     // this server is single-instance and a collision must fail loudly.
-    app.listen({ port, reusePort: false });
+    app.listen({ hostname: host, port, reusePort: false });
   } catch (error) {
     if (isAddressInUse(error)) {
-      console.error(`[api] Port ${port} is already in use.`);
+      console.error(`[api] Address ${host}:${port} is already in use.`);
       process.exit(1);
     }
     throw error;
@@ -84,9 +84,9 @@ async function persistState(port: number, host: string): Promise<void> {
   await writeState(state);
 }
 
-function logRunning(port: number): void {
-  console.warn(`[api] MangoStudio API running on http://localhost:${port}`);
-  console.warn(`[api] Scalar UI available at http://localhost:${port}/scalar`);
+function logRunning(host: string, port: number): void {
+  console.warn(`[api] MangoStudio API running on http://${host}:${port}`);
+  console.warn(`[api] Scalar UI available at http://${host}:${port}/scalar`);
 }
 
 /** Flush observability, drop the state file, and close the database. */

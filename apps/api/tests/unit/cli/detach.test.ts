@@ -35,10 +35,12 @@ function baseDeps(overrides: Partial<DetachDeps> = {}): Partial<DetachDeps> {
 describe('spawnDetached', () => {
   it('resolves with the child pid once it is healthy', async () => {
     let spawnedPort = 0;
+    let spawnedHost = '';
     const result = await spawnDetached(3001, 'localhost', {
       ...baseDeps(),
-      spawn: (port) => {
+      spawn: (port, host) => {
         spawnedPort = port;
+        spawnedHost = host;
         return CHILD_PID;
       },
     });
@@ -47,6 +49,7 @@ describe('spawnDetached', () => {
     expect(result.port).toBe(3001);
     expect(result.logFile).toMatch(/server-\d{8}-\d{6}\.log$/);
     expect(spawnedPort).toBe(3001);
+    expect(spawnedHost).toBe('localhost');
   });
 
   it('fails fast when the child dies during startup', async () => {

@@ -3,22 +3,81 @@ import { assertValidPort, parseServeArgs } from '../../../src/cli/args';
 import { CliError } from '../../../src/cli/errors';
 
 describe('parseServeArgs', () => {
-  it('defaults to no port and not detached', () => {
-    expect(parseServeArgs([])).toEqual({ port: undefined, detached: false });
+  it('defaults to no host, no port, and not detached', () => {
+    expect(parseServeArgs([])).toEqual({ host: undefined, port: undefined, detached: false });
   });
 
   it('parses a positional port', () => {
-    expect(parseServeArgs(['3000'])).toEqual({ port: 3000, detached: false });
+    expect(parseServeArgs(['3000'])).toEqual({ host: undefined, port: 3000, detached: false });
+  });
+
+  it('parses a positional host', () => {
+    expect(parseServeArgs(['127.0.0.1'])).toEqual({
+      host: '127.0.0.1',
+      port: undefined,
+      detached: false,
+    });
+    expect(parseServeArgs(['localhost'])).toEqual({
+      host: 'localhost',
+      port: undefined,
+      detached: false,
+    });
   });
 
   it('parses -d and --detach', () => {
-    expect(parseServeArgs(['-d'])).toEqual({ port: undefined, detached: true });
-    expect(parseServeArgs(['--detach'])).toEqual({ port: undefined, detached: true });
+    expect(parseServeArgs(['-d'])).toEqual({ host: undefined, port: undefined, detached: true });
+    expect(parseServeArgs(['--detach'])).toEqual({
+      host: undefined,
+      port: undefined,
+      detached: true,
+    });
   });
 
-  it('parses the port and flag in either order', () => {
-    expect(parseServeArgs(['3000', '-d'])).toEqual({ port: 3000, detached: true });
-    expect(parseServeArgs(['-d', '3000'])).toEqual({ port: 3000, detached: true });
+  it('parses the target and flag in either order', () => {
+    expect(parseServeArgs(['3000', '-d'])).toEqual({ host: undefined, port: 3000, detached: true });
+    expect(parseServeArgs(['-d', '127.0.0.1'])).toEqual({
+      host: '127.0.0.1',
+      port: undefined,
+      detached: true,
+    });
+  });
+
+  it('parses host:port targets', () => {
+    expect(parseServeArgs(['127.0.0.1:3023', '-d'])).toEqual({
+      host: '127.0.0.1',
+      port: 3023,
+      detached: true,
+    });
+    expect(parseServeArgs(['localhost:3023', '-d'])).toEqual({
+      host: 'localhost',
+      port: 3023,
+      detached: true,
+    });
+    expect(parseServeArgs(['192.168.0.23:3023', '-d'])).toEqual({
+      host: '192.168.0.23',
+      port: 3023,
+      detached: true,
+    });
+  });
+
+  it('normalizes host aliases', () => {
+    expect(parseServeArgs(['lan:3023', '-d'])).toEqual({
+      host: '0.0.0.0',
+      port: 3023,
+      detached: true,
+    });
+    expect(parseServeArgs(['all'])).toEqual({ host: '0.0.0.0', port: undefined, detached: false });
+    expect(parseServeArgs(['any'])).toEqual({ host: '0.0.0.0', port: undefined, detached: false });
+    expect(parseServeArgs(['public'])).toEqual({
+      host: '0.0.0.0',
+      port: undefined,
+      detached: false,
+    });
+    expect(parseServeArgs(['local'])).toEqual({
+      host: '127.0.0.1',
+      port: undefined,
+      detached: false,
+    });
   });
 
   it('rejects an unknown option', () => {
@@ -26,19 +85,29 @@ describe('parseServeArgs', () => {
   });
 
   it('rejects a non-numeric port', () => {
-    expect(() => parseServeArgs(['abc'])).toThrow(CliError);
+    expect(() => parseServeArgs(['localhost:abc'])).toThrow(CliError);
   });
 
   it('rejects non-decimal numeric forms instead of silently coercing them', () => {
-    // Number() would turn these into 16, 1000, 3.5, and 3000 respectively.
     expect(() => parseServeArgs(['0x10'])).toThrow(CliError);
     expect(() => parseServeArgs(['1e3'])).toThrow(CliError);
     expect(() => parseServeArgs(['3.5'])).toThrow(CliError);
     expect(() => parseServeArgs([' 3000 '])).toThrow(CliError);
+    expect(() => parseServeArgs(['localhost:0x10'])).toThrow(CliError);
+    expect(() => parseServeArgs(['localhost:1e3'])).toThrow(CliError);
+    expect(() => parseServeArgs(['localhost:3.5'])).toThrow(CliError);
+    expect(() => parseServeArgs(['localhost: 3000 '])).toThrow(CliError);
   });
 
   it('rejects a second positional argument', () => {
     expect(() => parseServeArgs(['3000', '4000'])).toThrow(CliError);
+  });
+
+  it('rejects invalid hosts', () => {
+    expect(() => parseServeArgs(['999.1.1.1'])).toThrow(CliError);
+    expect(() => parseServeArgs(['bad host'])).toThrow(CliError);
+    expect(() => parseServeArgs(['host:'])).toThrow(CliError);
+    expect(() => parseServeArgs([':3000'])).toThrow(CliError);
   });
 
   it('rejects an out-of-range port', () => {

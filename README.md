@@ -24,8 +24,8 @@ This pulls the prebuilt binary for your OS/arch and puts `mangostudio` on your
 `mangostudio` is a single-binary CLI that manages one local server:
 
 ```bash
-mangostudio serve [port]   # run in the foreground (default port 3001)
-mangostudio serve -d       # run in the background (logs to ~/.mango/logs/)
+mangostudio serve [host|port|host:port] # foreground (default localhost:3001)
+mangostudio serve lan:3001 -d           # background (logs to ~/.mango/logs/)
 mangostudio status         # show the running instance
 mangostudio stop           # graceful shutdown
 mangostudio doctor         # environment diagnostics
@@ -34,7 +34,7 @@ mangostudio doctor         # environment diagnostics
 Run `mangostudio` with no arguments for the full command list. See
 [`docs/reference/cli.md`](docs/reference/cli.md) for details.
 
-Set `GEMINI_API_KEY` (and optionally `API_PORT`, `DATABASE_PATH`) before running;
+Set `GEMINI_API_KEY` (and optionally `API_HOST`, `API_PORT`, `DATABASE_PATH`) before running;
 see [`@mangostudio/cli`](packages/cli/README.md) for the full environment.
 
 ## Prerequisites
