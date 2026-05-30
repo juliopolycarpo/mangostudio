@@ -201,7 +201,7 @@ Each platform has its own directory under \`.mango/out/\`:
 1. **Database Configuration**: The executable expects a SQLite database file.
    By default, it looks for:
    - Path specified by \`DATABASE_PATH\` environment variable
-   - \`~/.mangostudio/database.sqlite\` (preferred user data directory)
+   - \`~/.mango/database.sqlite\` (preferred user data directory)
    - \`database.sqlite\` in the runtime base directory if the user data directory is unavailable
 
    Runtime base directory means:
@@ -214,15 +214,19 @@ Each platform has its own directory under \`.mango/out/\`:
    - \`API_PORT\`: Port to listen on (default: 3001)
    - \`UPLOADS_DIR\`: Directory for uploaded files (default: runtime-base-dir/uploads)
 
-3. **Running**:
+3. **Running** (the binary is a CLI — \`<binary> <command>\`):
    \`\`\`bash
    # Linux/macOS
    cd .mango/out/linux-x64
-   ./mangostudio
+   ./mangostudio serve            # foreground on port 3001
+   ./mangostudio serve 3000 -d    # background on port 3000
+   ./mangostudio status           # show the running instance
+   ./mangostudio stop             # graceful shutdown
+   ./mangostudio doctor           # environment diagnostics
 
    # Windows
    cd .mango\\out\\windows-x64
-   mangostudio.exe
+   mangostudio.exe serve
    \`\`\`
 
 4. **First Run**:
@@ -231,6 +235,8 @@ Each platform has its own directory under \`.mango/out/\`:
    - Uploads directory will be created automatically
    - Frontend assets are served from the sidecar \`public/\` directory
    - API endpoints are available under \`/api/*\`
+   - Background (\`-d\`) runs write logs to \`~/.mango/logs/\` and track a single
+     running instance via \`~/.mango/run/server.json\`
 
 ## Notes
 - Binaries are standalone and include all dependencies
@@ -308,8 +314,8 @@ echo "Executable: $EXECUTABLE"
 cd "$EXECUTABLE_DIR"
 chmod +x "$(basename "$EXECUTABLE")" 2>/dev/null || true
 
-export API_PORT=$PORT
-exec "$(basename "$EXECUTABLE")"
+# The binary is a CLI; bare invocation prints help, so start the server explicitly.
+exec "$(basename "$EXECUTABLE")" serve "$PORT"
 `;
 
   await Bun.write(join(outDir, 'run.sh'), runScript);
@@ -350,9 +356,9 @@ echo Starting MangoStudio on port %PORT%
 echo Platform: %PLATFORM%
 echo Executable: %EXECUTABLE%
 
-set API_PORT=%PORT%
 cd /d "%EXECUTABLE_DIR%"
-"%EXECUTABLE%"
+REM The binary is a CLI; bare invocation prints help, so start the server explicitly.
+"%EXECUTABLE%" serve %PORT%
 `;
 
   await Bun.write(join(outDir, 'run.bat'), batchScript);

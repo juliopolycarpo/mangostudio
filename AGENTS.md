@@ -65,6 +65,7 @@ Useful docs:
 - Persistence or migrations: `apps/api/src/db/database.ts`, `apps/api/src/db/types.ts`, `apps/api/src/db/migrations/`, and the owning service or route
 - Shared i18n or types: `apps/shared/src/i18n/`, `apps/shared/src/contracts/`, `apps/shared/src/types/`, and the affected API/frontend consumers
 - Config or standalone build: `apps/api/src/lib/config.ts`, `apps/api/src/lib/runtime-paths.ts`, `.mango/config.toml.example`, `.mango/.env.example`, `scripts/build.ts`
+- CLI or server lifecycle (serve/status/stop/killserver/doctor): `apps/api/src/index.ts`, `apps/api/src/cli/`, `apps/api/src/server/start-server.ts`, `apps/api/src/lib/server-state.ts`, `apps/api/src/lib/mango-paths.ts`, `docs/reference/cli.md`
 - Changelog or release: `cliff.toml`, `scripts/changelog.ts`, `scripts/lib/changelog.ts`, `scripts/release/pack-npm.ts`, `packages/cli/`, `.github/workflows/{changelog-preview,release}.yml`, `docs/reference/releasing.md`
 - Attachments: `apps/api/src/modules/attachments/application/attachment-storage.ts`, `apps/api/src/modules/attachments/application/attachment-validation.ts`, `apps/frontend/src/features/chat/components/MessageParts.tsx`
 - Tools: `apps/api/src/services/tools/registry.ts`, `apps/api/src/services/tools/builtin/generate-image.ts`, `apps/api/src/modules/tool-settings/http/tool-settings-routes.ts`, `apps/frontend/src/features/settings/tools/index.tsx`

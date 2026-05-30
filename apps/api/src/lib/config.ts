@@ -114,8 +114,23 @@ export function getMangoDir(): string {
   return join(import.meta.dir, '../../../../.mango');
 }
 
-function getHomeMangoDir(): string {
+/**
+ * Returns the user-level MangoStudio directory (~/.mango).
+ * Used for standalone runtime data (db, uploads, logs, run state) and as the
+ * canonical anchor for daemon state across dev and standalone modes.
+ */
+// Usage: getHomeMangoDir() // → "/home/user/.mango"
+export function getHomeMangoDir(): string {
   return join(homedir(), '.mango');
+}
+
+/**
+ * Build version embedded at compile time via process.env.VERSION, or "dev" when
+ * running from source. Centralized here so the server state file and `doctor`
+ * report the same value. // Usage: getVersion() // → "1.2.3"
+ */
+export function getVersion(): string {
+  return process.env.VERSION || 'dev';
 }
 
 /** Resolves the config.toml path based on runtime mode. */

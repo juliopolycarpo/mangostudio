@@ -14,12 +14,25 @@ Run MangoStudio without cloning — install the CLI for your platform:
 
 ```bash
 npm install -g @mangostudio/cli   # or: bun add -g @mangostudio/cli
-mangostudio
+mangostudio serve                 # start on http://localhost:3001
 ```
 
 This pulls the prebuilt binary for your OS/arch and puts `mangostudio` on your
 `PATH`. Prefer a direct download? Grab a platform archive from the
 [latest release](https://github.com/juliopolycarpo/mangostudio/releases/latest).
+
+`mangostudio` is a single-binary CLI that manages one local server:
+
+```bash
+mangostudio serve [port]   # run in the foreground (default port 3001)
+mangostudio serve -d       # run in the background (logs to ~/.mango/logs/)
+mangostudio status         # show the running instance
+mangostudio stop           # graceful shutdown
+mangostudio doctor         # environment diagnostics
+```
+
+Run `mangostudio` with no arguments for the full command list. See
+[`docs/reference/cli.md`](docs/reference/cli.md) for details.
 
 Set `GEMINI_API_KEY` (and optionally `API_PORT`, `DATABASE_PATH`) before running;
 see [`@mangostudio/cli`](packages/cli/README.md) for the full environment.
