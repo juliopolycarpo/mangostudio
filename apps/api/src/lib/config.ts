@@ -114,7 +114,13 @@ export function getMangoDir(): string {
   return join(import.meta.dir, '../../../../.mango');
 }
 
-function getHomeMangoDir(): string {
+/**
+ * Returns the user-level MangoStudio directory (~/.mango).
+ * Used for standalone runtime data (db, uploads, logs, run state) and as the
+ * canonical anchor for daemon state across dev and standalone modes.
+ */
+// Usage: getHomeMangoDir() // → "/home/user/.mango"
+export function getHomeMangoDir(): string {
   return join(homedir(), '.mango');
 }
 

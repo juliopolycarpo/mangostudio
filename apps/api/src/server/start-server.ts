@@ -1,0 +1,114 @@
+/**
+ * Boots the MangoStudio API server: migrations, observability restore, frontend
+ * wiring, port binding, single-instance state file, and graceful shutdown.
+ * Shared by the foreground `serve` and the detached `__serve` startup paths.
+ */
+
+import { app } from '../app';
+import { closeDb } from '../db/database';
+import { getConfig } from '../lib/config';
+import { ensureRuntimeDirs } from '../lib/mango-paths';
+import { getDefaultFrontendDir } from '../lib/runtime-paths';
+import { removeState, type ServerState, writeState } from '../lib/server-state';
+import {
+  flushObservabilitySnapshot,
+  loadObservabilitySnapshot,
+} from '../services/providers/core/provider-observability';
+import { registerFrontend } from './frontend-static';
+import { runMigrations } from './migrations';
+
+export interface ServerHandle {
+  port: number;
+  host: string;
+  stop(): Promise<void>;
+}
+
+export interface StartOptions {
+  port?: number;
+  host?: string;
+  /** Write the single-instance state file once listening (default true). */
+  writeStateFile?: boolean;
+}
+
+/** Start the API server and return a handle. // Usage: await startServer({ writeStateFile: true }) */
+export async function startServer(options: StartOptions = {}): Promise<ServerHandle> {
+  const cfg = getConfig();
+  const port = options.port ?? cfg.server.port;
+  const host = options.host ?? cfg.server.host;
+
+  await runMigrations();
+  await loadObservabilitySnapshot();
+  registerFrontend(app, getDefaultFrontendDir());
+
+  listenOrExit(port);
+
+  if (options.writeStateFile !== false) {
+    await persistState(port, host);
+  }
+
+  logRunning(port);
+  registerShutdown();
+
+  return { port, host, stop: gracefulStop };
+}
+
+/** Bind the server port, exiting with a clear message when it is already in use. */
+function listenOrExit(port: number): void {
+  try {
+    app.listen(port);
+  } catch (error) {
+    if (isAddressInUse(error)) {
+      console.error(`[api] Port ${port} is already in use.`);
+      process.exit(1);
+    }
+    throw error;
+  }
+}
+
+function isAddressInUse(error: unknown): boolean {
+  return (error as { code?: string } | null)?.code === 'EADDRINUSE';
+}
+
+/** Record the running instance so status/stop/killserver can manage it. */
+async function persistState(port: number, host: string): Promise<void> {
+  await ensureRuntimeDirs();
+  const state: ServerState = {
+    pid: process.pid,
+    port,
+    host,
+    startedAt: Date.now(),
+    // Set by the detached parent so `status` can surface the log path; empty in foreground.
+    logFile: process.env.MANGO_LOG_FILE ?? '',
+    version: getVersion(),
+  };
+  await writeState(state);
+}
+
+function logRunning(port: number): void {
+  console.warn(`[api] MangoStudio API running on http://localhost:${port}`);
+  console.warn(`[api] Scalar UI available at http://localhost:${port}/scalar`);
+}
+
+/** Flush observability, drop the state file, and close the database. */
+async function gracefulStop(): Promise<void> {
+  await flushObservabilitySnapshot();
+  await removeState();
+  await closeDb();
+}
+
+function registerShutdown(): void {
+  const shutdown = (signal: 'SIGINT' | 'SIGTERM'): void => {
+    if (signal === 'SIGINT') {
+      console.warn('\n[api] Shutting down...');
+    }
+    void gracefulStop().finally(() => process.exit(0));
+  };
+
+  process.on('SIGINT', () => shutdown('SIGINT'));
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+}
+
+/** Build version embedded at compile time, or "dev" when running from source. */
+function getVersion(): string {
+  return process.env.VERSION || 'dev';
+}
