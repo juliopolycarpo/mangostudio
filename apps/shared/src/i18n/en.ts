@@ -626,6 +626,7 @@ export const messages: Messages = {
     labels: {
       list_directory: 'List',
       read_file: 'Read',
+      write_file: 'Write',
       glob: 'Glob',
       grep: 'Grep',
       generate_image: 'Generate Image',

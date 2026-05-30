@@ -633,6 +633,7 @@ export const messages = {
     labels: {
       list_directory: 'Listar',
       read_file: 'Leu',
+      write_file: 'Escreveu',
       glob: 'Glob',
       grep: 'Grep',
       generate_image: 'Gerar Imagem',
