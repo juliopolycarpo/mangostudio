@@ -43,7 +43,7 @@ export function checkDir(label: string, path: string, fs: FsProbe): CheckResult 
       ? ok(label, `${path} (writable)`)
       : fail(label, `${path} (not writable)`);
   }
-  return fs.isWritable(dirname(path))
+  return nearestExistingWritable(path, fs)
     ? ok(label, `${path} (will be created)`)
     : fail(label, `${path} (parent not writable)`);
 }
@@ -107,5 +107,22 @@ export function checkRuntime(version: string, standalone: boolean): CheckResult 
 }
 
 function isUsableDir(path: string, fs: FsProbe): boolean {
-  return fs.exists(path) ? fs.isWritable(path) : fs.isWritable(dirname(path));
+  return fs.exists(path) ? fs.isWritable(path) : nearestExistingWritable(path, fs);
+}
+
+/**
+ * Whether a not-yet-created path can be made: walk up to the nearest existing
+ * ancestor and check that it is writable. Handles fresh installs where several
+ * directory levels (e.g. ~/.mango/logs) do not exist yet.
+ */
+function nearestExistingWritable(path: string, fs: FsProbe): boolean {
+  let current = dirname(path);
+  while (!fs.exists(current)) {
+    const parent = dirname(current);
+    if (parent === current) {
+      return false; // reached the filesystem root without finding anything
+    }
+    current = parent;
+  }
+  return fs.isWritable(current);
 }

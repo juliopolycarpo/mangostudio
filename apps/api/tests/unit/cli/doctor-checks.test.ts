@@ -65,9 +65,17 @@ describe('checkDir', () => {
     expect(result.detail).toContain('will be created');
   });
 
-  it('fails when missing and the parent is not writable', () => {
-    const fs = new FakeFsProbe(new Set(), new Set());
-    expect(checkDir('Logs', '/data/logs', fs).status).toBe('fail');
+  it('passes when several levels are missing but an ancestor is writable', () => {
+    // Fresh install: ~/.mango and ~/.mango/logs do not exist yet, but ~ does.
+    const fs = new FakeFsProbe(new Set(['/home/user']), new Set(['/home/user']));
+    const result = checkDir('Logs', '/home/user/.mango/logs', fs);
+    expect(result.status).toBe('ok');
+    expect(result.detail).toContain('will be created');
+  });
+
+  it('fails when no existing ancestor is writable', () => {
+    const fs = new FakeFsProbe(new Set(['/home/user']), new Set());
+    expect(checkDir('Logs', '/home/user/.mango/logs', fs).status).toBe('fail');
   });
 });
 
