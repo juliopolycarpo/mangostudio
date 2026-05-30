@@ -8,8 +8,8 @@
     ".": "./src/app.ts"
   },
   "scripts": {
-    "dev": "bun run --watch src/index.ts",
-    "start": "bun run src/index.ts",
+    "dev": "bun run --watch src/index.ts serve",
+    "start": "bun run src/index.ts serve",
     "build": "bun build src/index.ts --target=bun --outdir=dist",
     "check": "bun run check:quick && bun run typecheck",
     "check:quick": "biome check src tests",
