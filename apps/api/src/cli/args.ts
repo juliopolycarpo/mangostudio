@@ -37,10 +37,12 @@ export function parseServeArgs(rest: string[]): ServeArgs {
 
 /** Parse and validate a positional port string. */
 function parsePort(value: string): number {
-  const port = Number(value);
-  if (!Number.isInteger(port)) {
+  // Require plain decimal digits: Number() would silently accept '0x10', '1e3',
+  // or ' 3000 ' and bind a port the user did not type.
+  if (!/^\d+$/.test(value)) {
     throw new CliError(`Invalid port: ${value}`);
   }
+  const port = Number(value);
   assertValidPort(port);
   return port;
 }

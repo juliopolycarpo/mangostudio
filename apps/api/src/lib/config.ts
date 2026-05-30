@@ -124,6 +124,15 @@ export function getHomeMangoDir(): string {
   return join(homedir(), '.mango');
 }
 
+/**
+ * Build version embedded at compile time via process.env.VERSION, or "dev" when
+ * running from source. Centralized here so the server state file and `doctor`
+ * report the same value. // Usage: getVersion() // → "1.2.3"
+ */
+export function getVersion(): string {
+  return process.env.VERSION || 'dev';
+}
+
 /** Resolves the config.toml path based on runtime mode. */
 function resolveConfigTomlPath(): string {
   const localPath = join(getMangoDir(), 'config.toml');

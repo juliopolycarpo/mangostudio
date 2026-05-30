@@ -11,6 +11,7 @@ import { readState } from '../lib/server-state';
 import { CliError } from './errors';
 import { probeHealth } from './health';
 import { createProcessController, type ProcessController } from './process-control';
+import { sleep } from './sleep';
 
 export interface DetachResult {
   pid: number;
@@ -106,7 +107,7 @@ function resolveDeps(deps: Partial<DetachDeps>): DetachDeps {
   return {
     controller: deps.controller ?? createProcessController(),
     now: deps.now ?? Date.now,
-    sleep: deps.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms))),
+    sleep: deps.sleep ?? sleep,
     spawn: deps.spawn ?? realSpawn,
     readState: deps.readState ?? readState,
     probeHealth: deps.probeHealth ?? probeHealth,

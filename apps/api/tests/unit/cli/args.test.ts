@@ -29,6 +29,14 @@ describe('parseServeArgs', () => {
     expect(() => parseServeArgs(['abc'])).toThrow(CliError);
   });
 
+  it('rejects non-decimal numeric forms instead of silently coercing them', () => {
+    // Number() would turn these into 16, 1000, 3.5, and 3000 respectively.
+    expect(() => parseServeArgs(['0x10'])).toThrow(CliError);
+    expect(() => parseServeArgs(['1e3'])).toThrow(CliError);
+    expect(() => parseServeArgs(['3.5'])).toThrow(CliError);
+    expect(() => parseServeArgs([' 3000 '])).toThrow(CliError);
+  });
+
   it('rejects a second positional argument', () => {
     expect(() => parseServeArgs(['3000', '4000'])).toThrow(CliError);
   });

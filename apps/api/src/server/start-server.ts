@@ -6,7 +6,7 @@
 
 import { app } from '../app';
 import { closeDb } from '../db/database';
-import { getConfig } from '../lib/config';
+import { getConfig, getVersion } from '../lib/config';
 import { ensureRuntimeDirs } from '../lib/mango-paths';
 import { getDefaultFrontendDir } from '../lib/runtime-paths';
 import { removeState, type ServerState, writeState } from '../lib/server-state';
@@ -24,8 +24,6 @@ export interface ServerHandle {
 }
 
 export interface StartOptions {
-  port?: number;
-  host?: string;
   /** Write the single-instance state file once listening (default true). */
   writeStateFile?: boolean;
 }
@@ -33,8 +31,7 @@ export interface StartOptions {
 /** Start the API server and return a handle. // Usage: await startServer({ writeStateFile: true }) */
 export async function startServer(options: StartOptions = {}): Promise<ServerHandle> {
   const cfg = getConfig();
-  const port = options.port ?? cfg.server.port;
-  const host = options.host ?? cfg.server.host;
+  const { port, host } = cfg.server;
 
   await runMigrations();
   await loadObservabilitySnapshot();
@@ -55,7 +52,10 @@ export async function startServer(options: StartOptions = {}): Promise<ServerHan
 /** Bind the server port, exiting with a clear message when it is already in use. */
 function listenOrExit(port: number): void {
   try {
-    app.listen(port);
+    // reusePort:false (Elysia defaults it to true) so a port already held by
+    // another process raises EADDRINUSE instead of silently load-balancing —
+    // this server is single-instance and a collision must fail loudly.
+    app.listen({ port, reusePort: false });
   } catch (error) {
     if (isAddressInUse(error)) {
       console.error(`[api] Port ${port} is already in use.`);
@@ -97,7 +97,14 @@ async function gracefulStop(): Promise<void> {
 }
 
 function registerShutdown(): void {
+  // Guard against a second signal (e.g. SIGINT + a `stop` SIGTERM) re-running
+  // gracefulStop and closing the database twice.
+  let shuttingDown = false;
   const shutdown = (signal: 'SIGINT' | 'SIGTERM'): void => {
+    if (shuttingDown) {
+      return;
+    }
+    shuttingDown = true;
     if (signal === 'SIGINT') {
       console.warn('\n[api] Shutting down...');
     }
@@ -106,9 +113,4 @@ function registerShutdown(): void {
 
   process.on('SIGINT', () => shutdown('SIGINT'));
   process.on('SIGTERM', () => shutdown('SIGTERM'));
-}
-
-/** Build version embedded at compile time, or "dev" when running from source. */
-function getVersion(): string {
-  return process.env.VERSION || 'dev';
 }

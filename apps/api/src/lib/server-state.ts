@@ -23,11 +23,25 @@ export interface ServerState {
 export async function readState(path: string = getPidFilePath()): Promise<ServerState | null> {
   try {
     const raw = await readFile(path, 'utf8');
-    return JSON.parse(raw) as ServerState;
+    const parsed = JSON.parse(raw) as unknown;
+    return isServerState(parsed) ? parsed : null;
   } catch {
     // Missing or unparseable → caller treats as "no instance".
     return null;
   }
+}
+
+/** Guard a parsed value against the ServerState shape (a partial/old file is "no instance"). */
+function isServerState(value: unknown): value is ServerState {
+  if (typeof value !== 'object' || value === null) {
+    return false;
+  }
+  const state = value as Record<string, unknown>;
+  return (
+    typeof state.pid === 'number' &&
+    typeof state.port === 'number' &&
+    typeof state.host === 'string'
+  );
 }
 
 /** Atomically write the state file via a temp file + rename. // Usage: await writeState(state) */

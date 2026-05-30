@@ -33,5 +33,5 @@ export function printHelp(): void {
 
 /** Print an unknown-command notice to stderr. // Usage: printUnknown('foo') */
 export function printUnknown(command: string): void {
-  writeError(`Unknown command: ${command}\n`);
+  writeError(`Unknown command: ${command}`);
 }

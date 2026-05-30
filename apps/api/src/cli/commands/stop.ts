@@ -5,6 +5,7 @@
 import { isStateLive, readState, removeState } from '../../lib/server-state';
 import { writeError, writeLine } from '../output';
 import { createProcessController, type ProcessController, waitForExit } from '../process-control';
+import { sleep } from '../sleep';
 
 export interface StopDeps {
   controller: ProcessController;
@@ -58,6 +59,6 @@ function resolveDeps(deps: Partial<StopDeps>): Required<StopDeps> {
     error: deps.error ?? writeError,
     exit: deps.exit ?? ((code) => process.exit(code)),
     now: deps.now ?? Date.now,
-    sleep: deps.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms))),
+    sleep: deps.sleep ?? sleep,
   };
 }

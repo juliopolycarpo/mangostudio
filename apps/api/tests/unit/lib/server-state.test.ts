@@ -53,6 +53,14 @@ describe('server-state', () => {
     expect(await readState(path)).toBeNull();
   });
 
+  it('returns null for valid JSON that is missing required fields', async () => {
+    // A truncated/older-format file must read as "no instance" rather than
+    // yielding a state with an undefined pid that downstream callers signal.
+    await writeFile(path, JSON.stringify({ port: 3001 }), 'utf8');
+
+    expect(await readState(path)).toBeNull();
+  });
+
   it('leaves no temp file behind after an atomic write', async () => {
     await writeState(makeState(), path);
 

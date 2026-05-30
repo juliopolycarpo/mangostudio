@@ -55,9 +55,10 @@ async function ensureNotRunning(deps: Partial<ServeDeps>): Promise<void> {
 async function startDetached(args: ServeArgs, deps: Partial<ServeDeps>): Promise<void> {
   const log = deps.log ?? writeLine;
   const spawn = deps.spawnDetached ?? spawnDetached;
-  const port = args.port ?? getConfig().server.port;
+  const { server } = getConfig();
+  const port = args.port ?? server.port;
 
-  const result = await spawn(port, getConfig().server.host);
+  const result = await spawn(port, server.host);
   log(`MangoStudio started (PID ${result.pid}, port ${result.port}).`);
   log(`Logs: ${result.logFile}`);
 }

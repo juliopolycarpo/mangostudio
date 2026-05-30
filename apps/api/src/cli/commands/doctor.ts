@@ -4,7 +4,7 @@
  */
 
 import { accessSync, constants, existsSync } from 'node:fs';
-import { getHomeMangoDir, loadConfig, type MangoConfig } from '../../lib/config';
+import { getHomeMangoDir, getVersion, loadConfig, type MangoConfig } from '../../lib/config';
 import { getLogsDir, getRunDir } from '../../lib/mango-paths';
 import { getDefaultFrontendDir, isStandaloneExecutable } from '../../lib/runtime-paths';
 import { isStateLive, readState, type ServerState } from '../../lib/server-state';
@@ -97,10 +97,6 @@ function badge(status: CheckStatus): string {
     return '[ok]  ';
   }
   return status === 'warn' ? '[warn]' : '[fail]';
-}
-
-function getVersion(): string {
-  return process.env.VERSION || 'dev';
 }
 
 function realFsProbe(): FsProbe {
