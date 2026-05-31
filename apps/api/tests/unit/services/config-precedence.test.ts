@@ -18,7 +18,14 @@ import { loadConfig, resetConfig } from '../../../src/lib/config';
 const TMP_DIR = join('/tmp', `mango-config-test-${process.pid}`);
 const TMP_TOML = join(TMP_DIR, 'config.toml');
 
-const WATCHED_ENV_KEYS = ['API_PORT', 'API_HOST', 'DATABASE_PATH', 'UPLOADS_DIR', 'IMAGES_DIR'];
+const WATCHED_ENV_KEYS = [
+  'API_PORT',
+  'API_HOST',
+  'BETTER_AUTH_URL',
+  'DATABASE_PATH',
+  'UPLOADS_DIR',
+  'IMAGES_DIR',
+];
 
 function saveEnv(): Record<string, string | undefined> {
   return Object.fromEntries(WATCHED_ENV_KEYS.map((k) => [k, process.env[k]]));
@@ -99,6 +106,23 @@ describe('config precedence', () => {
 
     // applyEnvOverrides: Number('not-a-number') = NaN; NaN || existing = existing
     expect(cfg.server.port).toBe(4242);
+  });
+
+  test('auth.url falls back to localhost when the default host is the 0.0.0.0 wildcard', () => {
+    const cfg = loadConfig(join(TMP_DIR, 'nonexistent.toml'));
+
+    // The default bind host is 0.0.0.0, but that wildcard is not browser-routable,
+    // so the derived Better Auth baseURL must use localhost.
+    expect(cfg.server.host).toBe('0.0.0.0');
+    expect(cfg.auth.url).toBe('http://localhost:3001');
+  });
+
+  test('auth.url uses an explicit non-wildcard host from config.toml', () => {
+    writeFileSync(TMP_TOML, '[server]\nhost = "192.168.1.5"\nport = 4000\n');
+
+    const cfg = loadConfig(TMP_TOML);
+
+    expect(cfg.auth.url).toBe('http://192.168.1.5:4000');
   });
 
   test('defaults images.dir to ~/.mango/images', () => {

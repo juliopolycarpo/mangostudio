@@ -64,7 +64,7 @@ export interface MangoConfig {
 }
 
 const DEFAULT_CONFIG: Omit<MangoConfig, 'corsOrigins' | 'configFilePath'> = {
-  server: { host: 'localhost', port: 3001 },
+  server: { host: '0.0.0.0', port: 3001 },
   frontend: { host: 'localhost', port: 5173 },
   database: { path: '' },
   uploads: { dir: '' },
@@ -131,6 +131,16 @@ export function getHomeMangoDir(): string {
  */
 export function getVersion(): string {
   return process.env.VERSION || 'dev';
+}
+
+/**
+ * Maps the IPv4 wildcard bind address to a browser-reachable host. `0.0.0.0`
+ * accepts connections on every interface but is not itself routable from a
+ * browser, so user-facing URLs and the derived auth baseURL must fall back to
+ * localhost. // Usage: displayHost('0.0.0.0') // → "localhost"
+ */
+export function displayHost(host: string): string {
+  return host === '0.0.0.0' ? 'localhost' : host;
 }
 
 /** Resolves the config.toml path based on runtime mode. */
@@ -245,9 +255,10 @@ function applyEnvOverrides(cfg: MangoConfig, env: Record<string, string>): void 
 function computeDerived(cfg: MangoConfig, tomlPath: string): void {
   cfg.configFilePath = tomlPath;
 
-  // auth.url defaults to server address
+  // auth.url defaults to the server address; the 0.0.0.0 wildcard is not a valid
+  // browser baseURL, so fall back to localhost (matches the running-server log).
   if (!cfg.auth.url) {
-    cfg.auth.url = `http://${cfg.server.host}:${cfg.server.port}`;
+    cfg.auth.url = `http://${displayHost(cfg.server.host)}:${cfg.server.port}`;
   }
 
   // database.path: auto-detect when empty, resolve relative paths against monorepo root

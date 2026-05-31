@@ -24,7 +24,7 @@ export interface DetachDeps {
   now: () => number;
   sleep: (ms: number) => Promise<void>;
   /** Spawn the detached child writing to logFile and return its pid. */
-  spawn: (port: number, logFile: string) => number;
+  spawn: (port: number, host: string, logFile: string) => number;
   readState: typeof readState;
   probeHealth: typeof probeHealth;
 }
@@ -42,7 +42,7 @@ export async function spawnDetached(
   await ensureRuntimeDirs();
 
   const logFile = getServerLogPath(d.now());
-  const childPid = d.spawn(port, logFile);
+  const childPid = d.spawn(port, host, logFile);
 
   await confirmStarted({ pid: childPid, port, host, logFile }, d);
   return { pid: childPid, port, logFile };
@@ -76,12 +76,12 @@ async function confirmStarted(child: PendingChild, d: DetachDeps): Promise<void>
 }
 
 /** Re-exec this binary (or `bun <entry>` in dev) with the hidden __serve command. */
-function realSpawn(port: number, logFile: string): number {
+function realSpawn(port: number, host: string, logFile: string): number {
   const logFd = openSync(logFile, 'a');
   try {
     const proc = Bun.spawn({
-      cmd: buildServeCommand(port),
-      env: { ...process.env, API_PORT: String(port), MANGO_LOG_FILE: logFile },
+      cmd: buildServeCommand(host, port),
+      env: { ...process.env, API_HOST: host, API_PORT: String(port), MANGO_LOG_FILE: logFile },
       detached: true,
       stdin: 'ignore',
       stdout: logFd,
@@ -96,11 +96,12 @@ function realSpawn(port: number, logFile: string): number {
 }
 
 /** In a compiled binary, re-exec it directly; in dev, run the entry via bun. */
-function buildServeCommand(port: number): string[] {
+function buildServeCommand(host: string, port: number): string[] {
+  const target = `${host}:${port}`;
   if (isStandaloneExecutable()) {
-    return [process.execPath, '__serve', String(port)];
+    return [process.execPath, '__serve', target];
   }
-  return [process.execPath, Bun.main, '__serve', String(port)];
+  return [process.execPath, Bun.main, '__serve', target];
 }
 
 function resolveDeps(deps: Partial<DetachDeps>): DetachDeps {

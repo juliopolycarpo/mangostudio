@@ -24,7 +24,7 @@ afterEach(() => {
 describe('runServe (detached)', () => {
   it('refuses to start when a live instance already exists', async () => {
     const refuse = runServe(
-      { port: 3000, detached: true },
+      { host: undefined, port: 3000, detached: true },
       {
         readState: () => Promise.resolve(STATE),
         removeState: noop,
@@ -40,10 +40,11 @@ describe('runServe (detached)', () => {
   it('clears a stale state file and spawns the detached server', async () => {
     let removed = false;
     let spawnedPort = 0;
+    let spawnedHost = '';
     const lines: string[] = [];
 
     await runServe(
-      { port: 3000, detached: true },
+      { host: '127.0.0.1', port: 3000, detached: true },
       {
         readState: () => Promise.resolve(STATE),
         removeState: () => {
@@ -51,8 +52,9 @@ describe('runServe (detached)', () => {
           return Promise.resolve();
         },
         controller: new FakeProcessController([]), // pid 42 is dead → stale
-        spawnDetached: (port) => {
+        spawnDetached: (port, host) => {
           spawnedPort = port;
+          spawnedHost = host;
           return Promise.resolve({ pid: 99, port, logFile: '/l.log' });
         },
         log: (msg) => lines.push(msg),
@@ -61,21 +63,24 @@ describe('runServe (detached)', () => {
 
     expect(removed).toBe(true);
     expect(spawnedPort).toBe(3000);
-    expect(lines.join('\n')).toContain('MangoStudio started (PID 99, port 3000).');
+    expect(spawnedHost).toBe('127.0.0.1');
+    expect(lines.join('\n')).toContain('MangoStudio started (PID 99, 127.0.0.1:3000).');
     expect(lines.join('\n')).toContain('Logs: /l.log');
   });
 
   it('spawns directly when no instance exists', async () => {
     let spawnedPort = 0;
+    let spawnedHost = '';
     const lines: string[] = [];
 
     await runServe(
-      { port: 3000, detached: true },
+      { host: undefined, port: 3000, detached: true },
       {
         readState: () => Promise.resolve(null),
         controller: new FakeProcessController(),
-        spawnDetached: (port) => {
+        spawnDetached: (port, host) => {
           spawnedPort = port;
+          spawnedHost = host;
           return Promise.resolve({ pid: 7, port, logFile: '/l.log' });
         },
         log: (msg) => lines.push(msg),
@@ -83,6 +88,7 @@ describe('runServe (detached)', () => {
     );
 
     expect(spawnedPort).toBe(3000);
+    expect(spawnedHost).toBe('0.0.0.0');
     expect(lines.join('\n')).toContain('PID 7');
   });
 
@@ -90,7 +96,7 @@ describe('runServe (detached)', () => {
     let readCalled = false;
 
     const invalid = runServe(
-      { port: 99_999, detached: true },
+      { host: undefined, port: 99_999, detached: true },
       {
         readState: () => {
           readCalled = true;

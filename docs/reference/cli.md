@@ -6,26 +6,29 @@ managing one local server. The same commands work from the installed binary
 
 ## Commands
 
-| Command           | Description                                               |
-| ----------------- | --------------------------------------------------------- |
-| `mangostudio`     | Print help and the command list.                          |
-| `serve [port]`    | Start the server in the foreground (default port `3001`). |
-| `serve [port] -d` | Start the server in the background (detached) and return. |
-| `status`          | Show whether a server is running and its details.         |
-| `stop`            | Gracefully stop the running server (SIGTERM).             |
-| `killserver`      | Force-kill the running server (SIGKILL).                  |
-| `doctor`          | Run environment and configuration diagnostics.            |
+| Command                            | Description                                                    |
+| ---------------------------------- | -------------------------------------------------------------- |
+| `mangostudio`                      | Print help and the command list.                               |
+| `serve [host\|port\|host:port]`    | Start the server in the foreground (default `localhost:3001`). |
+| `serve [host\|port\|host:port] -d` | Start the server in the background (detached) and return.      |
+| `status`                           | Show whether a server is running and its details.              |
+| `stop`                             | Gracefully stop the running server (SIGTERM).                  |
+| `killserver`                       | Force-kill the running server (SIGKILL).                       |
+| `doctor`                           | Run environment and configuration diagnostics.                 |
 
-`-d` / `--detach` and the positional port may be combined in any order, e.g.
-`mangostudio serve 3000 -d`.
+`-d` / `--detach` and the positional host/port target may be combined in any
+order, e.g. `mangostudio serve 127.0.0.1:3000 -d`.
+
+Host aliases: `lan`, `all`, `any`, and `public` bind `0.0.0.0`; `local` binds
+`127.0.0.1`.
 
 ## Examples
 
 ```bash
-mangostudio serve              # foreground on port 3001
-mangostudio serve 3000         # foreground on port 3000
-mangostudio serve -d           # background on the default port
-mangostudio serve 3000 -d      # background on port 3000
+mangostudio serve              # foreground on localhost:3001
+mangostudio serve 3000         # foreground on localhost:3000
+mangostudio serve 127.0.0.1 -d # background on 127.0.0.1:3001
+mangostudio serve lan:3000 -d  # background on 0.0.0.0:3000
 mangostudio status
 mangostudio stop
 ```
@@ -67,8 +70,9 @@ Foreground `serve` logs to the terminal instead of a file.
 
 ## Configuration
 
-Port and other settings follow the standard resolution order
-(`process.env` → `~/.mango/.env` → `config.toml` → defaults). A positional port
-on `serve` is applied as `API_PORT` before the server reads its config. See
+Host, port, and other settings follow the standard resolution order
+(`process.env` → `~/.mango/.env` → `config.toml` → defaults). A positional
+host/port on `serve` is applied as `API_HOST` / `API_PORT` before the server
+reads its config. See
 [`apps/api/src/lib/config.ts`](../../apps/api/src/lib/config.ts) and
 [`packages/cli/README.md`](../../packages/cli/README.md) for the full environment.

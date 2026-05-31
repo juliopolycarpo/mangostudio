@@ -10,7 +10,9 @@ Usage:
   mangostudio <command> [options]
 
 Commands:
-  serve [port] [-d]   Start the server (default port 3001).
+  serve [host|port|host:port] [-d]
+                      Start the server (default localhost:3001).
+                      Host aliases: lan, all, any, public => 0.0.0.0; local => 127.0.0.1.
                       -d / --detach runs it in the background.
   status              Show whether a server is running and its details.
   stop                Gracefully stop the running server.
@@ -21,6 +23,7 @@ Commands:
 Examples:
   mangostudio serve            Start in the foreground on port 3001
   mangostudio serve 3000       Start in the foreground on port 3000
+  mangostudio serve lan:3000   Start on all LAN interfaces, port 3000
   mangostudio serve -d         Start in the background
   mangostudio serve 3000 -d    Start in the background on port 3000
   mangostudio status

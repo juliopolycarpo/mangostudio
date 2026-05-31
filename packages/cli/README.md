@@ -19,8 +19,8 @@ No Node.js or Bun runtime is required to run it.
 `mangostudio` is a CLI that manages one local server:
 
 ```bash
-mangostudio serve [port]   # run in the foreground (default port 3001)
-mangostudio serve -d       # run in the background (logs to ~/.mango/logs/)
+mangostudio serve [host|port|host:port] # foreground (default localhost:3001)
+mangostudio serve lan:3001 -d           # background (logs to ~/.mango/logs/)
 mangostudio status         # show the running instance
 mangostudio stop           # graceful shutdown
 mangostudio doctor         # environment diagnostics
@@ -33,6 +33,7 @@ Configure it with environment variables:
 | Variable         | Purpose                                                    |
 | ---------------- | ---------------------------------------------------------- |
 | `GEMINI_API_KEY` | Google Gemini API key (required)                           |
+| `API_HOST`       | Host to listen on (default: `localhost`)                   |
 | `API_PORT`       | Port to listen on (default: `3001`)                        |
 | `DATABASE_PATH`  | SQLite database path (default: `~/.mango/database.sqlite`) |
 | `UPLOADS_DIR`    | Upload directory (default: `~/.mango/uploads`)             |

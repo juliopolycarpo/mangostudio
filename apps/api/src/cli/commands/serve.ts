@@ -3,7 +3,7 @@
  * Enforces a single running instance before doing any work.
  */
 
-import { getConfig } from '../../lib/config';
+import { displayHost, getConfig } from '../../lib/config';
 import { isStateLive, readState, removeState } from '../../lib/server-state';
 import { assertValidPort, type ServeArgs } from '../args';
 import { spawnDetached } from '../detach';
@@ -30,7 +30,7 @@ export async function runServe(args: ServeArgs, deps: Partial<ServeDeps> = {}): 
     await startDetached(args, deps);
     return;
   }
-  await startForeground(args.port);
+  await startForeground(args);
 }
 
 /** Refuse to start when a live instance already holds the state file. */
@@ -57,9 +57,10 @@ async function startDetached(args: ServeArgs, deps: Partial<ServeDeps>): Promise
   const spawn = deps.spawnDetached ?? spawnDetached;
   const { server } = getConfig();
   const port = args.port ?? server.port;
+  const host = args.host ?? server.host;
 
-  const result = await spawn(port, server.host);
-  log(`MangoStudio started (PID ${result.pid}, port ${result.port}).`);
+  const result = await spawn(port, host);
+  log(`MangoStudio started (PID ${result.pid}, ${displayHost(host)}:${result.port}).`);
   log(`Logs: ${result.logFile}`);
 }
 
@@ -67,9 +68,12 @@ async function startDetached(args: ServeArgs, deps: Partial<ServeDeps>): Promise
  * Run the server in this process. Sets API_PORT before the dynamic import so the
  * config singleton (read at app load) picks up a positional port override.
  */
-async function startForeground(port?: number): Promise<void> {
-  if (port !== undefined) {
-    process.env.API_PORT = String(port);
+async function startForeground(args: ServeArgs): Promise<void> {
+  if (args.port !== undefined) {
+    process.env.API_PORT = String(args.port);
+  }
+  if (args.host !== undefined) {
+    process.env.API_HOST = args.host;
   }
   const { startServer } = await import('../../server/start-server');
   await startServer({ writeStateFile: true });
