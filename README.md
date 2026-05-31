@@ -221,14 +221,14 @@ Claude Code hooks auto-prepend `node_modules/.bin` to PATH on session start and 
 
 ### OpenCode
 
-OpenCode reads project instructions and formatter wiring from `opencode.json`.
+OpenCode reads formatter wiring from `opencode.json`.
 
 | Formatter    | Command                       | Extensions                                                                                       |
 | ------------ | ----------------------------- | ------------------------------------------------------------------------------------------------ |
 | `biome-fix`  | `biome check --write`         | `.js`, `.jsx`, `.mjs`, `.cjs`, `.ts`, `.tsx`, `.mts`, `.cts`, `.json`, `.jsonc`, `.css`, `.html` |
 | `dprint-fmt` | `dprint fmt --allow-no-files` | `.md`, `.mdx`, `.toml`, `.yml`, `.yaml`                                                          |
 
-Prettier is disabled. OpenCode instructions load from `.agents/opencode/rules/*.md`.
+Prettier is disabled.
 
 ## Code Quality
 
