@@ -88,7 +88,7 @@ describe('runServe (detached)', () => {
     );
 
     expect(spawnedPort).toBe(3000);
-    expect(spawnedHost).toBe('localhost');
+    expect(spawnedHost).toBe('0.0.0.0');
     expect(lines.join('\n')).toContain('PID 7');
   });
 

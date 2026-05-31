@@ -64,7 +64,7 @@ export interface MangoConfig {
 }
 
 const DEFAULT_CONFIG: Omit<MangoConfig, 'corsOrigins' | 'configFilePath'> = {
-  server: { host: 'localhost', port: 3001 },
+  server: { host: '0.0.0.0', port: 3001 },
   frontend: { host: 'localhost', port: 5173 },
   database: { path: '' },
   uploads: { dir: '' },

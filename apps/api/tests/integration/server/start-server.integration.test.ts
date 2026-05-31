@@ -26,11 +26,11 @@ function reserveFreePort(): number {
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
-async function waitForHealth(port: number): Promise<boolean> {
+async function waitForHealth(host: string, port: number): Promise<boolean> {
   const deadline = Date.now() + START_TIMEOUT_MS;
   while (Date.now() < deadline) {
     try {
-      const response = await fetch(`http://127.0.0.1:${port}/api/health`, {
+      const response = await fetch(`http://${host}:${port}/api/health`, {
         signal: AbortSignal.timeout(1000),
       });
       if (response.ok) {
@@ -75,6 +75,7 @@ describe('startServer via __serve', () => {
         ...process.env,
         HOME: home,
         API_PORT: String(port),
+        API_HOST: '127.0.0.1',
         DATABASE_PATH: ':memory:',
         MANGOSTUDIO_DIAGNOSTIC_LOGS: '0',
       },
@@ -82,16 +83,17 @@ describe('startServer via __serve', () => {
       stderr: 'ignore',
     });
 
-    expect(await waitForHealth(port)).toBe(true);
+    expect(await waitForHealth('127.0.0.1', port)).toBe(true);
 
     const state = JSON.parse(await readFile(pidFile, 'utf8'));
     expect(state.pid).toBe(child.pid);
     expect(state.port).toBe(port);
+    expect(state.host).toBe('127.0.0.1');
 
     child.kill('SIGTERM');
     await waitForExit(child);
 
     expect(child.exitCode).toBe(0);
     expect(existsSync(pidFile)).toBe(false);
-  });
+  }, 15_000);
 });

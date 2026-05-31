@@ -85,8 +85,9 @@ async function persistState(port: number, host: string): Promise<void> {
 }
 
 function logRunning(host: string, port: number): void {
-  console.warn(`[api] MangoStudio API running on http://${host}:${port}`);
-  console.warn(`[api] Scalar UI available at http://${host}:${port}/scalar`);
+  const displayHost = host === '0.0.0.0' ? 'localhost' : host;
+  console.warn(`[api] MangoStudio API running on http://${displayHost}:${port}`);
+  console.warn(`[api] Scalar UI available at http://${displayHost}:${port}/scalar`);
 }
 
 /** Flush observability, drop the state file, and close the database. */
