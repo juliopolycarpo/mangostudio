@@ -33,7 +33,6 @@ Useful docs:
 - `docs/reference/agent-playbooks.md` — detailed file maps by feature area
 - `docs/reference/releasing.md` — changelog (`bun run changelog`) and release pipeline
 - `scripts/README.md` — the Bun-native automation toolkit
-- `.claude/CLAUDE.md` — Claude Code hooks and code navigation guide
 
 ## Global Rules
 
