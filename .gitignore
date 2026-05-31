@@ -59,9 +59,6 @@ config.toml
 .claude/hooks/*
 !.claude/hooks/auto-fix.sh
 !.claude/hooks/session-path.sh
-.gemini/**
-!.gemini/settings.json
-!.gemini/AGENTS.md
 .agent/
 .agents/**
 !.agents/opencode/

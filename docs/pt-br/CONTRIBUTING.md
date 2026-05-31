@@ -51,7 +51,7 @@ Consulte [`AGENTS.md`](../../AGENTS.md) para o guia completo de estilo, convenç
 - Indentação de 2 espaços, aspas simples, ponto e vírgula
 - Todas as strings visíveis ao usuário devem vir de `@mangostudio/shared/i18n` — nunca codifique texto diretamente
 - Hooks que contêm JSX devem usar a extensão `.tsx`
-- Arquivos `CLAUDE.md` e `GEMINI.md` com `@imports`
+- Arquivos `CLAUDE.md` com `@imports`
 - Agentes de IA: use [`AGENTS.md`](../../AGENTS.md) como fonte de orientações agnósticas
 
 ## Executando os Testes
