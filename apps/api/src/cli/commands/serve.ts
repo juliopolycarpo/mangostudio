@@ -3,7 +3,7 @@
  * Enforces a single running instance before doing any work.
  */
 
-import { getConfig } from '../../lib/config';
+import { displayHost, getConfig } from '../../lib/config';
 import { isStateLive, readState, removeState } from '../../lib/server-state';
 import { assertValidPort, type ServeArgs } from '../args';
 import { spawnDetached } from '../detach';
@@ -60,7 +60,7 @@ async function startDetached(args: ServeArgs, deps: Partial<ServeDeps>): Promise
   const host = args.host ?? server.host;
 
   const result = await spawn(port, host);
-  log(`MangoStudio started (PID ${result.pid}, ${host}:${result.port}).`);
+  log(`MangoStudio started (PID ${result.pid}, ${displayHost(host)}:${result.port}).`);
   log(`Logs: ${result.logFile}`);
 }
 

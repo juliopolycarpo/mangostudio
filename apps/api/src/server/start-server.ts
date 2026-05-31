@@ -6,7 +6,7 @@
 
 import { app } from '../app';
 import { closeDb } from '../db/database';
-import { getConfig, getVersion } from '../lib/config';
+import { displayHost, getConfig, getVersion } from '../lib/config';
 import { ensureRuntimeDirs } from '../lib/mango-paths';
 import { getDefaultFrontendDir } from '../lib/runtime-paths';
 import { removeState, type ServerState, writeState } from '../lib/server-state';
@@ -85,9 +85,9 @@ async function persistState(port: number, host: string): Promise<void> {
 }
 
 function logRunning(host: string, port: number): void {
-  const displayHost = host === '0.0.0.0' ? 'localhost' : host;
-  console.warn(`[api] MangoStudio API running on http://${displayHost}:${port}`);
-  console.warn(`[api] Scalar UI available at http://${displayHost}:${port}/scalar`);
+  const shown = displayHost(host);
+  console.warn(`[api] MangoStudio API running on http://${shown}:${port}`);
+  console.warn(`[api] Scalar UI available at http://${shown}:${port}/scalar`);
 }
 
 /** Flush observability, drop the state file, and close the database. */
