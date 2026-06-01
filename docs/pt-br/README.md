@@ -189,27 +189,11 @@ Arquivos formatados são re-adicionados ao stage automaticamente. Todos os hooks
 
 ## Configuração do Editor
 
-O MangoStudio configura servidores LSP em múltiplos editores para inteligência de código, diagnósticos e formatação consistentes.
-
-### VS Code
-
-As configurações do workspace em `.vscode/settings.json` conectam três LSPs e ativam formatação ao salvar:
-
-| Servidor de linguagem | Binário                      | Abrange                                  | Capacidades                                                                                    |
-| --------------------- | ---------------------------- | ---------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| **Biome LSP**         | `biome lsp-proxy`            | JS, TS, JSX, TSX, JSON, JSONC, CSS, HTML | Diagnósticos, correções rápidas, formatação ao salvar                                          |
-| **dprint LSP**        | `dprint lsp`                 | Markdown, MDX, TOML, YAML, Dockerfile    | Diagnósticos de formatação, formatação ao salvar                                               |
-| **tsgo**              | `@typescript/native-preview` | TS, TSX, MTS, CTS, JS, JSX, MJS, CJS     | Inteligência completa (hover, ir para definição, referências, renomear, hierarquia de chamada) |
-
-A formatação ao salvar está ativada globalmente com Biome como formatador padrão. dprint é o formatador padrão para Markdown, MDX, TOML, YAML e Dockerfile. As ações de código ao salvar incluem `source.fixAll.biome` e `source.organizeImports.biome`.
-
-### Claude Code
-
-Os hooks do Claude Code preprendem `node_modules/.bin` ao PATH automaticamente ao iniciar sessão e ao mudar de diretório (`SessionStart` / `CwdChanged`). Após cada escrita ou edição, um hook `PostToolUse` executa `auto-fix.sh` para formatar o arquivo modificado.
+Os hooks do Claude Code preprendem `node_modules/.bin` ao PATH automaticamente ao iniciar sessão e ao mudar de diretório (`SessionStart` / `CwdChanged`). Após cada escrita ou edição, um hook `PostToolUse` executa `auto-fix.mjs` para formatar o arquivo modificado.
 
 ### OpenCode
 
-A configuração de instruções e formatadores do OpenCode está em `opencode.json`. O suporte a LSP é ativado com `"lsp": true`, seguindo a recomendação atual do OpenCode.
+A configuração de instruções e formatadores do OpenCode está em `opencode.json`.
 
 | Formatador   | Comando                       | Extensões                                                                                        |
 | ------------ | ----------------------------- | ------------------------------------------------------------------------------------------------ |

@@ -173,7 +173,6 @@ mangostudio/
 | -------------- | --------------------------------------------- | -------------------------------------------------- |
 | **Biome**      | JS, TS, JSX, TSX, JSON, JSONC, CSS, HTML      | Linter and formatter with unified rule sets        |
 | **dprint**     | Markdown, MDX, TOML, YAML, Dockerfile         | Pluggable formatter with WASM-based plugins        |
-| **tsgo**       | TS, TSX, MTS, CTS, JS, JSX, MJS, CJS          | TypeScript-native language server for code intel   |
 | **lefthook**   | Git hooks (pre-commit)                        | Git hooks manager that runs checks on staged files |
 | **madge**      | JS/TS dependency graphs                       | Circular dependency detection across workspaces    |
 | **jscpd**      | All source files                              | Copy/paste detection for code duplication alerts   |
@@ -218,34 +217,18 @@ Files that pass formatting are re-staged automatically. All hooks must succeed f
 
 ## Editor Setup
 
-MangoStudio configures LSP servers across multiple editors for consistent code intelligence, diagnostics, and formatting.
-
-### VS Code
-
-Workspace settings in `.vscode/settings.json` wire three LSPs and enable format-on-save:
-
-| Language server | Binary                       | Handles                                  | Capabilities                                                                  |
-| --------------- | ---------------------------- | ---------------------------------------- | ----------------------------------------------------------------------------- |
-| **Biome LSP**   | `biome lsp-proxy`            | JS, TS, JSX, TSX, JSON, JSONC, CSS, HTML | Diagnostics, quick-fixes, format-on-save                                      |
-| **dprint LSP**  | `dprint lsp`                 | Markdown, MDX, TOML, YAML, Dockerfile    | Formatting diagnostics, format-on-save                                        |
-| **tsgo**        | `@typescript/native-preview` | TS, TSX, MTS, CTS, JS, JSX, MJS, CJS     | Full code intelligence (hover, go-to-def, references, rename, call hierarchy) |
-
-Format-on-save is enabled globally with Biome as the default formatter. dprint is set as the default formatter for Markdown, MDX, TOML, YAML, and Dockerfile files. Code actions on save include `source.fixAll.biome` and `source.organizeImports.biome`.
-
-### Claude Code
-
-Claude Code hooks auto-prepend `node_modules/.bin` to PATH on session start and directory changes (`SessionStart` / `CwdChanged`). After every write or edit, a `PostToolUse` hook runs `auto-fix.sh` to format the touched file.
+Claude Code hooks auto-prepend `node_modules/.bin` to PATH on session start and directory changes (`SessionStart` / `CwdChanged`). After every write or edit, a `PostToolUse` hook runs `auto-fix.mjs` to format the touched file.
 
 ### OpenCode
 
-OpenCode reads project instructions and formatter wiring from `opencode.json`. LSP support is enabled with `"lsp": true`, following the current OpenCode recommendation.
+OpenCode reads formatter wiring from `opencode.json`.
 
 | Formatter    | Command                       | Extensions                                                                                       |
 | ------------ | ----------------------------- | ------------------------------------------------------------------------------------------------ |
 | `biome-fix`  | `biome check --write`         | `.js`, `.jsx`, `.mjs`, `.cjs`, `.ts`, `.tsx`, `.mts`, `.cts`, `.json`, `.jsonc`, `.css`, `.html` |
 | `dprint-fmt` | `dprint fmt --allow-no-files` | `.md`, `.mdx`, `.toml`, `.yml`, `.yaml`                                                          |
 
-Prettier is disabled. OpenCode instructions load from `.agents/opencode/rules/*.md`.
+Prettier is disabled.
 
 ## Code Quality
 

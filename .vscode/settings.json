@@ -18,7 +18,6 @@
     "**/.qa-gate": true,
     "**/bun.lock": true,
     "apps/frontend/src/routeTree.gen.ts": true,
-    ".gemini": true,
     ".gitmessage": true,
     ".agents": true,
     ".codex": true

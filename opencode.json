@@ -1,6 +1,5 @@
 {
   "$schema": "https://opencode.ai/config.json",
-  "instructions": [".agents/opencode/rules/*.md"],
   "lsp": true,
   "formatter": {
     "prettier": { "disabled": true },

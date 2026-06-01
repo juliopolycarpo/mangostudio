@@ -49,7 +49,7 @@ Refer to [`AGENTS.md`](../AGENTS.md) for the full coding style, naming conventio
 - 2-space indentation, single quotes, semicolons
 - All UI strings must come from `@mangostudio/shared/i18n` — never hardcode user-visible text
 - Hooks that contain JSX must use `.tsx` extension
-- `CLAUDE.md` and `GEMINI.md` files with `@imports`
+- `CLAUDE.md` files with `@imports`
 - AI related Agents: Use [`AGENTS.md`](../AGENTS.md) as a source of agentic stuff
 
 ### Module Architecture
