@@ -12,6 +12,7 @@ import { join } from 'node:path';
 
 const ENTRY = join(import.meta.dir, '../../../src/index.ts');
 const START_TIMEOUT_MS = 15_000;
+const VALID_AUTH_SECRET = 'test-secret-at-least-32-characters-long';
 
 /** Reserve a free TCP port by briefly binding to port 0. */
 function reserveFreePort(): number {
@@ -44,8 +45,30 @@ async function waitForHealth(host: string, port: number): Promise<boolean> {
   return false;
 }
 
+async function probeHealthOnce(host: string, port: number): Promise<boolean> {
+  try {
+    const response = await fetch(`http://${host}:${port}/api/health`, {
+      signal: AbortSignal.timeout(1000),
+    });
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
 async function waitForExit(child: Bun.Subprocess): Promise<void> {
-  await Promise.race([child.exited, sleep(5000)]);
+  const timedOut = Symbol('timedOut');
+  const result = await Promise.race([child.exited, sleep(5000).then(() => timedOut)]);
+  if (result === timedOut) {
+    throw new Error('child process did not exit in time');
+  }
+}
+
+function readStderr(child: Bun.Subprocess): Promise<string> {
+  if (!child.stderr || typeof child.stderr === 'number') {
+    return Promise.resolve('');
+  }
+  return Bun.readableStreamToText(child.stderr);
 }
 
 describe('startServer via __serve', () => {
@@ -77,6 +100,7 @@ describe('startServer via __serve', () => {
         API_PORT: String(port),
         API_HOST: '127.0.0.1',
         DATABASE_PATH: ':memory:',
+        BETTER_AUTH_SECRET: VALID_AUTH_SECRET,
         MANGOSTUDIO_DIAGNOSTIC_LOGS: '0',
       },
       stdout: 'ignore',
@@ -95,5 +119,31 @@ describe('startServer via __serve', () => {
 
     expect(child.exitCode).toBe(0);
     expect(existsSync(pidFile)).toBe(false);
+  }, 15_000);
+
+  it('exits before listening when the auth secret is missing', async () => {
+    const port = reserveFreePort();
+
+    child = Bun.spawn({
+      cmd: ['bun', ENTRY, '__serve', String(port)],
+      env: {
+        ...process.env,
+        HOME: home,
+        API_PORT: String(port),
+        API_HOST: '127.0.0.1',
+        DATABASE_PATH: ':memory:',
+        BETTER_AUTH_SECRET: '   ',
+        MANGOSTUDIO_DIAGNOSTIC_LOGS: '0',
+      },
+      stdout: 'ignore',
+      stderr: 'pipe',
+    });
+
+    const stderr = readStderr(child);
+    await waitForExit(child);
+
+    expect(child.exitCode).toBe(1);
+    expect(await stderr).toContain('BETTER_AUTH_SECRET is required');
+    expect(await probeHealthOnce('127.0.0.1', port)).toBe(false);
   }, 15_000);
 });

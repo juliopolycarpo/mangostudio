@@ -3,7 +3,7 @@
  * Enforces a single running instance before doing any work.
  */
 
-import { displayHost, getConfig } from '../../lib/config';
+import { displayHost, getAuthSecretValidationMessage, getConfig } from '../../lib/config';
 import { isStateLive, readState, removeState } from '../../lib/server-state';
 import { assertValidPort, type ServeArgs } from '../args';
 import { spawnDetached } from '../detach';
@@ -33,6 +33,15 @@ export async function runServe(args: ServeArgs, deps: Partial<ServeDeps> = {}): 
   await startForeground(args);
 }
 
+function assertServeConfig(): void {
+  const message = getAuthSecretValidationMessage(getConfig().auth.secret);
+  if (message) {
+    throw new CliError(
+      `${message} Set it to a unique random value before running mangostudio serve.`
+    );
+  }
+}
+
 /** Refuse to start when a live instance already holds the state file. */
 async function ensureNotRunning(deps: Partial<ServeDeps>): Promise<void> {
   const controller = deps.controller ?? createProcessController();
@@ -55,7 +64,9 @@ async function ensureNotRunning(deps: Partial<ServeDeps>): Promise<void> {
 async function startDetached(args: ServeArgs, deps: Partial<ServeDeps>): Promise<void> {
   const log = deps.log ?? writeLine;
   const spawn = deps.spawnDetached ?? spawnDetached;
-  const { server } = getConfig();
+  const config = getConfig();
+  assertServeConfig();
+  const { server } = config;
   const port = args.port ?? server.port;
   const host = args.host ?? server.host;
 
@@ -75,6 +86,7 @@ async function startForeground(args: ServeArgs): Promise<void> {
   if (args.host !== undefined) {
     process.env.API_HOST = args.host;
   }
+  assertServeConfig();
   const { startServer } = await import('../../server/start-server');
   await startServer({ writeStateFile: true });
 }

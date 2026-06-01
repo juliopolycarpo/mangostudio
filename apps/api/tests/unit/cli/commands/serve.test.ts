@@ -1,6 +1,6 @@
-import { afterEach, describe, expect, it } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { runServe } from '../../../../src/cli/commands/serve';
-import { resetConfig } from '../../../../src/lib/config';
+import { loadConfigForTest, resetConfig } from '../../../../src/lib/config';
 import type { ServerState } from '../../../../src/lib/server-state';
 import { FakeProcessController } from '../../../support/mocks/fake-process-controller';
 
@@ -14,6 +14,10 @@ const STATE: ServerState = {
 };
 
 const noop = (): Promise<void> => Promise.resolve();
+
+beforeEach(() => {
+  loadConfigForTest({ auth: { secret: 'test-secret-at-least-32-characters-long', url: '' } });
+});
 
 // runServe (detached branch) reads getConfig() for the host; reset the singleton
 // afterwards so it cannot leak into config-sensitive tests.
@@ -109,5 +113,25 @@ describe('runServe (detached)', () => {
 
     await expect(invalid).rejects.toThrow(/out of range/i);
     expect(readCalled).toBe(false);
+  });
+
+  it('rejects a missing auth secret before spawning', async () => {
+    let spawned = false;
+    loadConfigForTest({ auth: { secret: '   ', url: '' } });
+
+    const missingSecret = runServe(
+      { host: undefined, port: 3000, detached: true },
+      {
+        readState: () => Promise.resolve(null),
+        controller: new FakeProcessController(),
+        spawnDetached: () => {
+          spawned = true;
+          return Promise.resolve({ pid: 1, port: 3000, logFile: '' });
+        },
+      }
+    );
+
+    await expect(missingSecret).rejects.toThrow(/BETTER_AUTH_SECRET is required/);
+    expect(spawned).toBe(false);
   });
 });

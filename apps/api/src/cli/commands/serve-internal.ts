@@ -7,7 +7,9 @@
  * child's env.
  */
 
+import { getAuthSecretValidationMessage, getConfig } from '../../lib/config';
 import type { ServeArgs } from '../args';
+import { CliError } from '../errors';
 
 /** Run the server in the foreground of the detached child. // Usage: await runServeInternal({ port: 3000, detached: false }) */
 export async function runServeInternal(args: ServeArgs): Promise<void> {
@@ -17,6 +19,16 @@ export async function runServeInternal(args: ServeArgs): Promise<void> {
   if (args.host !== undefined) {
     process.env.API_HOST = args.host;
   }
+  assertServeConfig();
   const { startServer } = await import('../../server/start-server');
   await startServer({ writeStateFile: true });
+}
+
+function assertServeConfig(): void {
+  const message = getAuthSecretValidationMessage(getConfig().auth.secret);
+  if (message) {
+    throw new CliError(
+      `${message} Set it to a unique random value before running mangostudio serve.`
+    );
+  }
 }
