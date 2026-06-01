@@ -165,6 +165,9 @@ async function smokeTest(): Promise<void> {
       HOME: tmpHome,
       DATABASE_PATH: dbPath,
       API_PORT: String(PORT),
+      // Required since the auth-secret startup guard landed; a 32+ char
+      // random value satisfies the runtime check without exposing a real key.
+      BETTER_AUTH_SECRET: 'smoke-test-secret-at-least-32-characters-long',
     },
     stdout: 'ignore',
     stderr: 'ignore',

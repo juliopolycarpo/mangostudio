@@ -17,6 +17,11 @@ export default defineConfig({
       command: 'bun run dev --api',
       port: 3001,
       reuseExistingServer: !process.env.CI,
+      env: {
+        // Required since the auth-secret startup guard landed; a 32+ char
+        // random value satisfies the runtime check without exposing a real key.
+        BETTER_AUTH_SECRET: 'browser-smoke-test-secret-at-least-32-characters-long',
+      },
     },
     {
       command: 'bun run dev --frontend',
