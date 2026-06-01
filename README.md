@@ -14,6 +14,7 @@ Run MangoStudio without cloning — install the CLI for your platform:
 
 ```bash
 npm install -g @mangostudio/cli   # or: bun add -g @mangostudio/cli
+export BETTER_AUTH_SECRET="$(openssl rand -base64 32)"
 mangostudio serve                 # start on http://localhost:3001
 ```
 
@@ -34,8 +35,9 @@ mangostudio doctor         # environment diagnostics
 Run `mangostudio` with no arguments for the full command list. See
 [`docs/reference/cli.md`](docs/reference/cli.md) for details.
 
-Set `GEMINI_API_KEY` (and optionally `API_HOST`, `API_PORT`, `DATABASE_PATH`) before running;
-see [`@mangostudio/cli`](packages/cli/README.md) for the full environment.
+Set `BETTER_AUTH_SECRET` to a unique random value of at least 32 characters before first run.
+Set provider keys such as `GEMINI_API_KEY` when you are ready to use hosted models. Optional runtime settings include `API_HOST`, `API_PORT`, and `DATABASE_PATH`.
+See [`@mangostudio/cli`](packages/cli/README.md) for the full environment.
 
 ## Prerequisites
 
