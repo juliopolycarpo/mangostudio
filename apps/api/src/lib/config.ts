@@ -150,10 +150,11 @@ export function displayHost(host: string): string {
  * // Usage: getAuthSecretValidationMessage(process.env.BETTER_AUTH_SECRET ?? '')
  */
 export function getAuthSecretValidationMessage(secret: string): string | null {
-  if (!secret.trim()) {
+  const trimmed = secret.trim();
+  if (!trimmed) {
     return `BETTER_AUTH_SECRET is required and must be at least ${AUTH_SECRET_MIN_LENGTH} characters.`;
   }
-  if (secret.trim().length < AUTH_SECRET_MIN_LENGTH) {
+  if (trimmed.length < AUTH_SECRET_MIN_LENGTH) {
     return `BETTER_AUTH_SECRET must be at least ${AUTH_SECRET_MIN_LENGTH} characters.`;
   }
   return null;

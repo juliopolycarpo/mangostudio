@@ -3,13 +3,14 @@
  * Enforces a single running instance before doing any work.
  */
 
-import { displayHost, getAuthSecretValidationMessage, getConfig } from '../../lib/config';
+import { displayHost, getConfig } from '../../lib/config';
 import { isStateLive, readState, removeState } from '../../lib/server-state';
 import { assertValidPort, type ServeArgs } from '../args';
 import { spawnDetached } from '../detach';
 import { CliError } from '../errors';
 import { writeLine } from '../output';
 import { createProcessController, type ProcessController } from '../process-control';
+import { assertServeConfig } from '../serve-config-guard';
 
 export interface ServeDeps {
   controller: ProcessController;
@@ -31,15 +32,6 @@ export async function runServe(args: ServeArgs, deps: Partial<ServeDeps> = {}): 
     return;
   }
   await startForeground(args);
-}
-
-function assertServeConfig(): void {
-  const message = getAuthSecretValidationMessage(getConfig().auth.secret);
-  if (message) {
-    throw new CliError(
-      `${message} Set it to a unique random value before running mangostudio serve.`
-    );
-  }
 }
 
 /** Refuse to start when a live instance already holds the state file. */
