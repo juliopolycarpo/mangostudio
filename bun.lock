@@ -7,7 +7,7 @@
       "devDependencies": {
         "@biomejs/biome": "^2.4.15",
         "@dprint/dockerfile": "^0.3.3",
-        "@dprint/markdown": "^0.22.0",
+        "@dprint/markdown": "^0.22.1",
         "@dprint/toml": "^0.7.0",
         "@faker-js/faker": "^10.4.0",
         "@playwright/test": "^1.60.0",
@@ -248,7 +248,7 @@
 
     "@dprint/linux-x64-musl": ["@dprint/linux-x64-musl@0.54.0", "", { "os": "linux", "cpu": "x64" }, "sha512-it6Qdt06dyW2adbAXpOCb7/KQLxlm4i1UphUAWqWsZk4t3EYetyAza9J0g3Vu9itIWSEIo9MnccgANckQJ6+qw=="],
 
-    "@dprint/markdown": ["@dprint/markdown@0.22.0", "", {}, "sha512-HnDAIAGFM5lqXHC1RRd9tDB81l9YeO0cZbm5+WktvjSXJJpG9zFJi+2McjlN61Rl1U7jcfk3thxTyfqN8aoRow=="],
+    "@dprint/markdown": ["@dprint/markdown@0.22.1", "", {}, "sha512-L5BYR66HNxs5vmGGYze/SP9wrIJnHIhbZGCbdP2N+o5gbukhau3ulFbaG/rB7u9H51LXGePue1sFXVgS5IiU2A=="],
 
     "@dprint/toml": ["@dprint/toml@0.7.0", "", {}, "sha512-eFaQTcfxKHB+YyTh83x7GEv+gDPuj9q5NFOTaoj5rZmQTbj6OgjjMxUicmS1R8zYcx8YAq5oA9J3YFa5U6x2gA=="],
 
