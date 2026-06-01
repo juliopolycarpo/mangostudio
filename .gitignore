@@ -39,12 +39,10 @@ config.toml
 # ─── Agent-local state / Every user must have their own ─── #
 .codex/**
 !.codex/config.toml
-!.codex/AGENTS.md
 !.codex/hooks.json
 !.codex/hooks/
 .codex/hooks/*
-!.codex/hooks/session-start.sh
-!.codex/hooks/auto-fix.sh
+!.codex/hooks/auto-fix.mjs
 .continue/
 .roo/
 .aider*
@@ -57,8 +55,8 @@ config.toml
 !.claude/settings.json
 !.claude/hooks/
 .claude/hooks/*
-!.claude/hooks/auto-fix.sh
-!.claude/hooks/session-path.sh
+!.claude/hooks/auto-fix.mjs
+!.claude/hooks/session-path.mjs
 .agent/
 .agents/**
 !.agents/opencode/

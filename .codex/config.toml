@@ -1,9 +1,7 @@
-project_doc_fallback_filenames = [".codex/AGENTS.md"]
-
 [features]
 hooks = true
 
 [[hooks.PostToolUse]]
 hooks = [
-  { type = "command", command = "bash -lc 'root=$(git rev-parse --show-toplevel 2>/dev/null || pwd); bash \"$root/.codex/hooks/auto-fix.sh\"'", timeout = 30 },
+  { type = "command", command = "bun .codex/hooks/auto-fix.mjs", timeout = 30 },
 ]
