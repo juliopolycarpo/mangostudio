@@ -1,4 +1,5 @@
 import { existsSync, readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import path from 'node:path';
 import tailwindcss from '@tailwindcss/vite';
 import { TanStackRouterVite } from '@tanstack/router-plugin/vite';
@@ -6,12 +7,13 @@ import react from '@vitejs/plugin-react';
 import { parse as parseToml } from 'smol-toml';
 import { defineConfig } from 'vite';
 
-/** Reads MangoStudio config from .mango/config.toml with .mango/.env overrides. */
+/** Reads MangoStudio config from ~/.mango/config.toml with ~/.mango/.env overrides. */
 function loadMangoConfig() {
   const defaults = { serverHost: 'localhost', serverPort: 3001, frontendPort: 5173 };
+  const mangoDir = path.join(homedir(), '.mango');
 
   // Read config.toml
-  const tomlPath = path.resolve(__dirname, '../../.mango/config.toml');
+  const tomlPath = path.join(mangoDir, 'config.toml');
   if (existsSync(tomlPath)) {
     try {
       const parsed = parseToml(readFileSync(tomlPath, 'utf8')) as {
@@ -26,8 +28,8 @@ function loadMangoConfig() {
     }
   }
 
-  // Apply .mango/.env overrides
-  const envPath = path.resolve(__dirname, '../../.mango/.env');
+  // Apply ~/.mango/.env overrides
+  const envPath = path.join(mangoDir, '.env');
   if (existsSync(envPath)) {
     try {
       const content = readFileSync(envPath, 'utf8');
