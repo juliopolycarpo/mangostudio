@@ -28,22 +28,26 @@ function reserveFreePort(): number {
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
+async function probeHealthOnce(host: string, port: number): Promise<boolean> {
+  try {
+    const response = await fetch(`http://${host}:${port}/api/health`, {
+      signal: AbortSignal.timeout(1000),
+    });
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
 async function waitForHealth(host: string, port: number): Promise<void> {
-  const url = `http://${host}:${port}/api/health`;
   const deadline = Date.now() + START_TIMEOUT_MS;
   while (Date.now() < deadline) {
-    try {
-      const response = await fetch(url, {
-        signal: AbortSignal.timeout(1000),
-      });
-      if (response.ok) {
-        return;
-      }
-    } catch {
-      // Not up yet — keep polling.
+    if (await probeHealthOnce(host, port)) {
+      return;
     }
     await sleep(150);
   }
+  const url = `http://${host}:${port}/api/health`;
   throw new Error(`server health check did not pass at ${url} within ${START_TIMEOUT_MS}ms`);
 }
 
@@ -66,17 +70,6 @@ async function waitForState(pidFile: string, timeoutMs = START_TIMEOUT_MS): Prom
 async function waitForServerReady(host: string, port: number, pidFile: string): Promise<void> {
   await waitForHealth(host, port);
   await waitForState(pidFile);
-}
-
-async function probeHealthOnce(host: string, port: number): Promise<boolean> {
-  try {
-    const response = await fetch(`http://${host}:${port}/api/health`, {
-      signal: AbortSignal.timeout(1000),
-    });
-    return response.ok;
-  } catch {
-    return false;
-  }
 }
 
 async function waitForExit(child: Bun.Subprocess): Promise<void> {
