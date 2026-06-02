@@ -44,7 +44,6 @@ export async function persistSecret(
       const envVar = `${cfg.envPrefix}_${name.toUpperCase().replace(/[^A-Z0-9]/g, '_')}`;
       const currentContent = existsSync(envPath) ? readFileSync(envPath, 'utf8') : '';
       writeFileSync(envPath, `${currentContent}\n${envVar}="${apiKey}"\n`);
-      process.env[envVar] = apiKey;
       break;
     }
   }
@@ -98,7 +97,6 @@ export async function removeSecret(
           const content = readFileSync(envPath, 'utf8');
           const lines = content.split('\n').filter((l) => !l.trim().startsWith(`${envVar}=`));
           writeFileSync(envPath, lines.join('\n'));
-          delete process.env[envVar];
         }
       } catch (err) {
         console.error(`[connectors] Failed to remove key from .env:`, err);
