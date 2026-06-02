@@ -57,11 +57,12 @@ export async function runParallel(tasks: Array<() => Promise<RunResult>>): Promi
 }
 
 /**
- * Wrap an async function as a RunResult for in-process work that has no command
- * line: times it, and reports exit code 1 (printing the message) if it throws.
+ * Wrap in-process work (sync or async) as a RunResult for steps that have no
+ * command line: times it, and reports exit code 1 (printing the message) if it
+ * throws.
  * // Usage: results.push(await runTask('clean', () => removePaths(paths)));
  */
-export async function runTask(label: string, fn: () => Promise<void>): Promise<RunResult> {
+export async function runTask(label: string, fn: () => void | Promise<void>): Promise<RunResult> {
   const start = performance.now();
   let exitCode = 0;
   try {
