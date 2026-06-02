@@ -28,7 +28,7 @@
     "@tanstack/react-virtual": "^3.13.24",
     "better-auth": "^1.6.11",
     "clsx": "^2.1.1",
-    "date-fns": "^4.1.0",
+    "date-fns": "^4.4.0",
     "lucide-react": "^1.14.0",
     "marked": "^18.0.3",
     "motion": "^12.40.0",
