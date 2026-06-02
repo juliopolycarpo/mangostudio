@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { buildDetachedEnv } from '../../../src/cli/detach';
 
 const CONNECTOR_ENV_VARS = [
@@ -9,9 +9,35 @@ const CONNECTOR_ENV_VARS = [
   'OPENAI_API_KEY_COMPAT',
 ];
 
+// Every env key any test in this file mutates. Snapshot and restore them so
+// state never leaks into sibling tests or other suites in the same run.
+const MUTATED_ENV_KEYS = [
+  ...CONNECTOR_ENV_VARS,
+  'DATABASE_PATH',
+  'BETTER_AUTH_SECRET',
+  'FRONTEND_PORT',
+  'MANGOSTUDIO_DIAGNOSTIC_LOGS',
+  'SOME_RANDOM_VAR',
+  'ANOTHER_SECRET',
+];
+
+let envSnapshot: Record<string, string | undefined> = {};
+
+beforeEach(() => {
+  envSnapshot = {};
+  for (const key of MUTATED_ENV_KEYS) {
+    envSnapshot[key] = process.env[key];
+  }
+});
+
 afterEach(() => {
-  for (const key of CONNECTOR_ENV_VARS) {
-    delete process.env[key];
+  for (const key of MUTATED_ENV_KEYS) {
+    const original = envSnapshot[key];
+    if (original === undefined) {
+      delete process.env[key];
+    } else {
+      process.env[key] = original;
+    }
   }
 });
 

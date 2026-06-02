@@ -77,10 +77,12 @@ async function confirmStarted(child: PendingChild, d: DetachDeps): Promise<void>
 
 /**
  * Runtime env keys forwarded to detached child processes.
- * Only config-driven variables are included; connector secrets and
- * other injectable credentials are excluded.
+ * Connector secrets and other injectable credentials are excluded; only the
+ * runtime configuration (mirrors config.ts `ENV_KEY_MAP`) plus the system and
+ * networking variables the server actually needs to run are forwarded.
  */
 const DETACH_ENV_ALLOWLIST = new Set([
+  // Runtime configuration — keep in sync with config.ts ENV_KEY_MAP.
   'API_PORT',
   'API_HOST',
   'FRONTEND_PORT',
@@ -93,6 +95,29 @@ const DETACH_ENV_ALLOWLIST = new Set([
   'MANGO_LOG_FILE',
   'VERSION',
   'MANGOSTUDIO_DIAGNOSTIC_LOGS',
+  // System and networking essentials. Bun.spawn replaces (not merges) the
+  // child's environment, so omitting these would leave the detached server
+  // without executable lookup (breaking the shell-exec tool), home-dir
+  // resolution, or outbound TLS/proxy reachability to provider APIs.
+  'PATH',
+  'HOME',
+  'USERPROFILE',
+  'TMPDIR',
+  'TMP',
+  'TEMP',
+  'TZ',
+  'LANG',
+  'LC_ALL',
+  'NODE_ENV',
+  'NODE_EXTRA_CA_CERTS',
+  'SSL_CERT_FILE',
+  'SSL_CERT_DIR',
+  'HTTP_PROXY',
+  'HTTPS_PROXY',
+  'NO_PROXY',
+  'http_proxy',
+  'https_proxy',
+  'no_proxy',
 ]);
 
 /**
