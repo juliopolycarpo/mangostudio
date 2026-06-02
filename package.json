@@ -30,7 +30,7 @@
   "devDependencies": {
     "@biomejs/biome": "^2.4.15",
     "@dprint/dockerfile": "^0.3.3",
-    "@dprint/markdown": "^0.22.0",
+    "@dprint/markdown": "^0.22.1",
     "@dprint/toml": "^0.7.0",
     "@faker-js/faker": "^10.4.0",
     "@playwright/test": "^1.60.0",
