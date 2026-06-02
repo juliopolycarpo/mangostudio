@@ -71,6 +71,29 @@ const expectedVersionError = (manifest: Record<string, unknown>): string[] => {
   return ['Manifest version must be a non-empty string'];
 };
 
+// The wrapper installs a platform binary purely through optionalDependencies, so
+// a manifest missing them publishes cleanly yet leaves users with no binary.
+const optionalDependencyErrors = (
+  manifest: Record<string, unknown>,
+  platforms: readonly NpmPlatform[]
+): string[] => {
+  const deps = manifest.optionalDependencies;
+  if (!deps || typeof deps !== 'object' || Array.isArray(deps)) {
+    return ['Manifest optionalDependencies must be an object'];
+  }
+
+  const record = deps as Record<string, unknown>;
+  return platforms.flatMap((platform) => {
+    const name = platformPackageName(platform);
+    const pinned = record[name];
+    if (typeof pinned === 'string' && pinned.length > 0) {
+      return [];
+    }
+
+    return [`Manifest optionalDependencies must pin ${name}`];
+  });
+};
+
 const platformManifestErrors = (packageDir: string, platform: NpmPlatform): string[] => {
   const { errors, manifest } = readManifest(join(packageDir, 'package.json'));
   if (!manifest) {
@@ -106,7 +129,7 @@ const prefixedErrors = (prefix: string, errors: readonly string[]): string[] => 
   return errors.map((error) => `${prefix}: ${error}`);
 };
 
-const mainPackageErrors = (packageDir: string): string[] => {
+const mainPackageErrors = (packageDir: string, platforms: readonly NpmPlatform[]): string[] => {
   const { errors, manifest } = readManifest(join(packageDir, 'package.json'));
   if (!manifest) {
     return errors;
@@ -117,6 +140,7 @@ const mainPackageErrors = (packageDir: string): string[] => {
     ...missingFileError(join(packageDir, 'bin', 'mangostudio.js'), 'CLI wrapper'),
     ...expectedStringError(manifest, 'name', MAIN_PACKAGE),
     ...expectedVersionError(manifest),
+    ...optionalDependencyErrors(manifest, platforms),
   ];
 };
 
@@ -156,6 +180,6 @@ export function assertNpmDistributionAssets(
 
   assertNoErrors(`Invalid npm distribution at ${distDir}`, [
     ...errors,
-    ...prefixedErrors(MAIN_PACKAGE, mainPackageErrors(join(distDir, 'cli'))),
+    ...prefixedErrors(MAIN_PACKAGE, mainPackageErrors(join(distDir, 'cli'), platforms)),
   ]);
 }

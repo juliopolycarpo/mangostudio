@@ -115,4 +115,21 @@ describe('assertNpmDistributionAssets', () => {
       /Missing frontend index\.html/
     );
   });
+
+  test('rejects a wrapper whose optionalDependencies omit a platform package', () => {
+    const distDir = makeTempDir();
+    const packageDir = join(distDir, `${LINUX_X64.os}-${LINUX_X64.cpu}`);
+    writePlatformPackage(packageDir, LINUX_X64);
+    const cliDir = join(distDir, 'cli');
+    writeMainPackage(cliDir);
+    writeJson(join(cliDir, 'package.json'), {
+      name: '@mangostudio/cli',
+      version: '1.2.3',
+      optionalDependencies: {},
+    });
+
+    expect(() => assertNpmDistributionAssets(distDir, [LINUX_X64])).toThrow(
+      /optionalDependencies must pin @mangostudio\/cli-linux-x64/
+    );
+  });
 });
