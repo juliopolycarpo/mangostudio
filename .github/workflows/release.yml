@@ -135,6 +135,9 @@ jobs:
         # macOS/Linux. The .exe platforms need no +x.
         run: find dist-npm -type f -name mangostudio -exec chmod +x {} +
 
+      - name: Validate npm distribution
+        run: bun ./scripts/release/pack-npm.ts --validate dist-npm
+
       - name: Publish to npm
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
