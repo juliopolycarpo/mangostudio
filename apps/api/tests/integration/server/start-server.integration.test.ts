@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { existsSync } from 'node:fs';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -12,6 +12,7 @@ import { join } from 'node:path';
 
 const ENTRY = join(import.meta.dir, '../../../src/index.ts');
 const START_TIMEOUT_MS = 15_000;
+const TEST_TIMEOUT_MS = 30_000;
 const VALID_AUTH_SECRET = 'test-secret-at-least-32-characters-long';
 
 /** Reserve a free TCP port by briefly binding to port 0. */
@@ -27,40 +28,6 @@ function reserveFreePort(): number {
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
-async function waitForHealth(host: string, port: number): Promise<boolean> {
-  const deadline = Date.now() + START_TIMEOUT_MS;
-  while (Date.now() < deadline) {
-    try {
-      const response = await fetch(`http://${host}:${port}/api/health`, {
-        signal: AbortSignal.timeout(1000),
-      });
-      if (response.ok) {
-        return true;
-      }
-    } catch {
-      // Not up yet — keep polling.
-    }
-    await sleep(150);
-  }
-  return false;
-}
-
-/**
- * Wait for the single-instance state file to appear. Health is reachable the
- * instant the server listens, but persistState writes the file a beat later, so
- * polling here avoids a read race after waitForHealth.
- */
-async function waitForState(pidFile: string): Promise<boolean> {
-  const deadline = Date.now() + START_TIMEOUT_MS;
-  while (Date.now() < deadline) {
-    if (existsSync(pidFile)) {
-      return true;
-    }
-    await sleep(50);
-  }
-  return false;
-}
-
 async function probeHealthOnce(host: string, port: number): Promise<boolean> {
   try {
     const response = await fetch(`http://${host}:${port}/api/health`, {
@@ -70,6 +37,39 @@ async function probeHealthOnce(host: string, port: number): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+async function waitForHealth(host: string, port: number): Promise<void> {
+  const deadline = Date.now() + START_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    if (await probeHealthOnce(host, port)) {
+      return;
+    }
+    await sleep(150);
+  }
+  const url = `http://${host}:${port}/api/health`;
+  throw new Error(`server health check did not pass at ${url} within ${START_TIMEOUT_MS}ms`);
+}
+
+/**
+ * Wait for the single-instance state file to appear. Health is reachable the
+ * instant the server listens, but persistState writes the file a beat later, so
+ * polling here avoids a read race after waitForHealth.
+ */
+async function waitForState(pidFile: string, timeoutMs = START_TIMEOUT_MS): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (existsSync(pidFile)) {
+      return;
+    }
+    await sleep(50);
+  }
+  throw new Error(`server state file was not created at ${pidFile} within ${timeoutMs}ms`);
+}
+
+async function waitForServerReady(host: string, port: number, pidFile: string): Promise<void> {
+  await waitForHealth(host, port);
+  await waitForState(pidFile);
 }
 
 async function waitForExit(child: Bun.Subprocess): Promise<void> {
@@ -104,63 +104,93 @@ describe('startServer via __serve', () => {
     await rm(home, { force: true, recursive: true });
   });
 
-  it('listens, writes state, serves health, and cleans up on SIGTERM', async () => {
-    const port = reserveFreePort();
-    const pidFile = join(home, '.mango', 'run', 'server.json');
+  it(
+    'listens, writes state, serves health, and cleans up on SIGTERM',
+    async () => {
+      const port = reserveFreePort();
+      const pidFile = join(home, '.mango', 'run', 'server.json');
 
-    child = Bun.spawn({
-      cmd: ['bun', ENTRY, '__serve', String(port)],
-      env: {
-        ...process.env,
-        HOME: home,
-        API_PORT: String(port),
-        API_HOST: '127.0.0.1',
-        DATABASE_PATH: ':memory:',
-        BETTER_AUTH_SECRET: VALID_AUTH_SECRET,
-        MANGOSTUDIO_DIAGNOSTIC_LOGS: '0',
-      },
-      stdout: 'ignore',
-      stderr: 'ignore',
-    });
+      child = Bun.spawn({
+        cmd: ['bun', ENTRY, '__serve', String(port)],
+        env: {
+          ...process.env,
+          HOME: home,
+          API_PORT: String(port),
+          API_HOST: '127.0.0.1',
+          DATABASE_PATH: ':memory:',
+          BETTER_AUTH_SECRET: VALID_AUTH_SECRET,
+          MANGOSTUDIO_DIAGNOSTIC_LOGS: '0',
+        },
+        stdout: 'ignore',
+        stderr: 'ignore',
+      });
 
-    expect(await waitForHealth('127.0.0.1', port)).toBe(true);
-    expect(await waitForState(pidFile)).toBe(true);
+      await waitForServerReady('127.0.0.1', port, pidFile);
 
-    const state = JSON.parse(await readFile(pidFile, 'utf8'));
-    expect(state.pid).toBe(child.pid);
-    expect(state.port).toBe(port);
-    expect(state.host).toBe('127.0.0.1');
+      const state = JSON.parse(await readFile(pidFile, 'utf8'));
+      expect(state.pid).toBe(child.pid);
+      expect(state.port).toBe(port);
+      expect(state.host).toBe('127.0.0.1');
 
-    child.kill('SIGTERM');
-    await waitForExit(child);
+      child.kill('SIGTERM');
+      await waitForExit(child);
 
-    expect(child.exitCode).toBe(0);
-    expect(existsSync(pidFile)).toBe(false);
-  }, 15_000);
+      expect(child.exitCode).toBe(0);
+      expect(existsSync(pidFile)).toBe(false);
+    },
+    TEST_TIMEOUT_MS
+  );
 
-  it('exits before listening when the auth secret is missing', async () => {
-    const port = reserveFreePort();
+  it(
+    'exits before listening when the auth secret is missing',
+    async () => {
+      const port = reserveFreePort();
 
-    child = Bun.spawn({
-      cmd: ['bun', ENTRY, '__serve', String(port)],
-      env: {
-        ...process.env,
-        HOME: home,
-        API_PORT: String(port),
-        API_HOST: '127.0.0.1',
-        DATABASE_PATH: ':memory:',
-        BETTER_AUTH_SECRET: '   ',
-        MANGOSTUDIO_DIAGNOSTIC_LOGS: '0',
-      },
-      stdout: 'ignore',
-      stderr: 'pipe',
-    });
+      child = Bun.spawn({
+        cmd: ['bun', ENTRY, '__serve', String(port)],
+        env: {
+          ...process.env,
+          HOME: home,
+          API_PORT: String(port),
+          API_HOST: '127.0.0.1',
+          DATABASE_PATH: ':memory:',
+          BETTER_AUTH_SECRET: '   ',
+          MANGOSTUDIO_DIAGNOSTIC_LOGS: '0',
+        },
+        stdout: 'ignore',
+        stderr: 'pipe',
+      });
 
-    const stderr = readStderr(child);
-    await waitForExit(child);
+      const stderr = readStderr(child);
+      await waitForExit(child);
 
-    expect(child.exitCode).toBe(1);
-    expect(await stderr).toContain('BETTER_AUTH_SECRET is required');
-    expect(await probeHealthOnce('127.0.0.1', port)).toBe(false);
-  }, 15_000);
+      expect(child.exitCode).toBe(1);
+      expect(await stderr).toContain('BETTER_AUTH_SECRET is required');
+      expect(await probeHealthOnce('127.0.0.1', port)).toBe(false);
+    },
+    TEST_TIMEOUT_MS
+  );
+});
+
+describe('waitForState', () => {
+  it('waits for delayed state file creation', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'mango-state-wait-'));
+    const pidFile = join(dir, 'server.json');
+
+    try {
+      setTimeout(() => void writeFile(pidFile, '{}'), 25);
+      await waitForState(pidFile, 500);
+      expect(existsSync(pidFile)).toBe(true);
+    } finally {
+      await rm(dir, { force: true, recursive: true });
+    }
+  });
+
+  it('reports the missing state file path on timeout', async () => {
+    const pidFile = join(tmpdir(), `missing-server-${crypto.randomUUID()}.json`);
+
+    await expect(waitForState(pidFile, 25)).rejects.toThrow(
+      `server state file was not created at ${pidFile} within 25ms`
+    );
+  });
 });
