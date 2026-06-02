@@ -49,6 +49,15 @@ describe('buildPlatformManifest', () => {
     expect(manifest.cpu).toEqual(['x64']);
     expect(manifest.files).toEqual(['mangostudio', 'public']);
   });
+
+  test('includes public npm metadata', () => {
+    const manifest = buildPlatformManifest(LINUX_X64, '1.2.3');
+    expect(manifest.homepage).toBe('https://github.com/juliopolycarpo/mangostudio#readme');
+    expect(manifest.bugs).toEqual({ url: 'https://github.com/juliopolycarpo/mangostudio/issues' });
+    expect(manifest.publishConfig).toEqual({ access: 'public' });
+    expect(manifest.engines).toEqual({ node: '>=18' });
+    expect(manifest.keywords).toEqual(['mangostudio', 'ai', 'image-generation', 'chat', 'cli']);
+  });
 });
 
 describe('buildOptionalDependencies', () => {
