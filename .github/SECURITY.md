@@ -25,7 +25,7 @@ Only the latest commit on the `main` branch receives security fixes. We do not m
 
 API keys (Gemini, OpenAI, Anthropic, DeepSeek) support three persistence methods, in priority order:
 
-1. **Environment variables** (`.mango/.env`) — Highest priority, never committed.
+1. **Environment variables** (`~/.mango/.env`) — Highest priority, never committed.
 2. **config.toml** (`~/.mango/config.toml`) — Flat file, never committed.
 3. **OS Secret Store** (`Bun.secrets`) — Native OS-level secure storage. Recommended for maximum security.
 

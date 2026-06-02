@@ -5,6 +5,7 @@
 
 import { resolve } from 'node:path';
 import { expandHome } from './_fs-utils';
+import { type ShellEnvPolicy, sanitizeShellEnv } from './_shell-env';
 
 /** Shell interpreters exposed as tools. */
 export type ShellKind = 'bash' | 'zsh' | 'powershell';
@@ -25,6 +26,8 @@ export interface RunShellCommandInput {
   timeoutMs: number;
   /** Per-stream cap; output beyond this is dropped and flagged truncated. */
   maxOutputBytes: number;
+  /** Operator overrides for which env vars reach the child (secrets stripped by default). */
+  envPolicy?: ShellEnvPolicy;
 }
 
 export interface ShellCommandResult {
@@ -97,6 +100,8 @@ function spawnShell(executable: string, input: RunShellCommandInput) {
   try {
     return Bun.spawn(buildInvocation(input.kind, executable, input.command), {
       ...(cwd ? { cwd } : {}),
+      // Withhold connector API keys and the auth secret from AI-run commands.
+      env: sanitizeShellEnv(input.envPolicy),
       stdin: 'ignore',
       stdout: 'pipe',
       stderr: 'pipe',

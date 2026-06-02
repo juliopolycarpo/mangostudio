@@ -198,25 +198,29 @@ Each platform has its own directory under \`.mango/out/\`:
 
 ## Usage
 
-1. **Database Configuration**: The executable expects a SQLite database file.
+1. **Configuration Files**: Runtime config and secrets are user-owned files.
+   MangoStudio reads them from the same place in development and standalone mode:
+   - ~/.mango/config.toml
+   - ~/.mango/.env (overrides matching config.toml keys)
+
+2. **Database Configuration**: The executable expects a SQLite database file.
    By default, it looks for:
-   - Path specified by \`DATABASE_PATH\` environment variable
-   - \`~/.mango/database.sqlite\` (preferred user data directory)
-   - \`database.sqlite\` in the runtime base directory if the user data directory is unavailable
+   - Path specified by DATABASE_PATH environment variable
+   - ~/.mango/database.sqlite (preferred user data directory)
+   - database.sqlite in the runtime base directory if the user data directory is unavailable
 
    Runtime base directory means:
    - current working directory in development
    - executable directory in standalone mode
 
-2. **Environment Variables**:
-   - \`DATABASE_PATH\`: Custom path to SQLite database file
-   - \`GEMINI_API_KEY\`: Google Gemini API key (required)
-   - \`API_PORT\`: Port to listen on (default: 3001)
-   - \`UPLOADS_DIR\`: Directory for uploaded files (default: runtime-base-dir/uploads)
+3. **Environment Variables**:
+   - DATABASE_PATH: Custom path to SQLite database file
+   - GEMINI_API_KEY: Google Gemini API key (required)
+   - API_PORT: Port to listen on (default: 3001)
+   - UPLOADS_DIR: Directory for uploaded files (default: ~/.mango/uploads)
 
-3. **Running** (the binary is a CLI — \`<binary> <command>\`):
-   \`\`\`bash
-   # Linux/macOS
+4. **Running** (the binary is a CLI: <binary> <command>):
+   Linux/macOS:
    cd .mango/out/linux-x64
    ./mangostudio serve            # foreground on port 3001
    ./mangostudio serve 3000 -d    # background on port 3000
@@ -224,19 +228,18 @@ Each platform has its own directory under \`.mango/out/\`:
    ./mangostudio stop             # graceful shutdown
    ./mangostudio doctor           # environment diagnostics
 
-   # Windows
+   Windows:
    cd .mango\\out\\windows-x64
    mangostudio.exe serve
-   \`\`\`
 
-4. **First Run**:
+5. **First Run**:
    - The executable will create the database file if it doesn't exist
    - It will run migrations automatically
    - Uploads directory will be created automatically
-   - Frontend assets are served from the sidecar \`public/\` directory
-   - API endpoints are available under \`/api/*\`
-   - Background (\`-d\`) runs write logs to \`~/.mango/logs/\` and track a single
-     running instance via \`~/.mango/run/server.json\`
+   - Frontend assets are served from the sidecar public/ directory
+   - API endpoints are available under /api/*
+   - Background (-d) runs write logs to ~/.mango/logs/ and track a single
+     running instance via ~/.mango/run/server.json
 
 ## Notes
 - Binaries are standalone and include all dependencies

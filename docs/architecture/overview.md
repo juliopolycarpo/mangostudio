@@ -223,4 +223,4 @@ Columns use `camelCase`, tables use `snake_case`. Kysely type aliases: `<Entity>
 
 ## Standalone Build
 
-`bun run build --binary` compiles the API into platform-specific binaries via `bun build --compile`. Frontend assets are embedded as sidecar files. Supports 8 platforms (linux/windows/darwin × x64/arm64 + glibc/musl). Database defaults to `~/.mangostudio/database.sqlite`.
+`bun run build --binary` compiles the API into platform-specific binaries via `bun build --compile`. Frontend assets are embedded as sidecar files. Supports 8 platforms (linux/windows/darwin × x64/arm64 + glibc/musl). Database defaults to `~/.mango/database.sqlite`.

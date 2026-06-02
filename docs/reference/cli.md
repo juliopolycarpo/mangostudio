@@ -41,6 +41,14 @@ redirects the child's stdout/stderr to a timestamped log file, waits for the
 server to report healthy, prints the PID and log path, then exits. The child
 keeps running independently.
 
+The detached child does **not** inherit the parent shell's full environment: it
+is launched with a minimal allowlist (runtime config plus the system/networking
+variables the server needs) so connector secrets never land in a long-lived
+process environment. The child instead loads provider keys from `~/.mango/.env`
+on startup. Set provider keys such as `GEMINI_API_KEY` in `~/.mango/.env` rather
+than exporting them in your shell — a shell-only export reaches a foreground
+`serve` but is dropped by a background (`-d`) start.
+
 ## Single instance
 
 Only one server may run at a time. On startup the server writes a state file at
@@ -71,8 +79,12 @@ Foreground `serve` logs to the terminal instead of a file.
 ## Configuration
 
 Host, port, and other settings follow the standard resolution order
-(`process.env` → `~/.mango/.env` → `config.toml` → defaults). A positional
+(`process.env` → `.env` next to `config.toml` → `config.toml` → defaults). A positional
 host/port on `serve` is applied as `API_HOST` / `API_PORT` before the server
 reads its config. See
 [`apps/api/src/lib/config.ts`](../../apps/api/src/lib/config.ts) and
 [`packages/cli/README.md`](../../packages/cli/README.md) for the full environment.
+
+If no auth secret is configured, interactive `mangostudio serve` generates a
+strong `BETTER_AUTH_SECRET` and asks whether to persist it in `~/.mango/.env`
+or `~/.mango/config.toml` before starting.

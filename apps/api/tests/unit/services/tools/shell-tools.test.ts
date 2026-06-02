@@ -57,9 +57,9 @@ describe('buildShellTool', () => {
     });
   });
 
-  it('exposes timeout and output-size parameters', () => {
+  it('exposes timeout, output-size, and env-policy parameters', () => {
     const names = buildShellTool('bash').settings.parameterDescriptors.map((d) => d.name);
-    expect(names).toEqual(['timeoutMs', 'maxOutputBytes']);
+    expect(names).toEqual(['timeoutMs', 'maxOutputBytes', 'allowedEnvVars', 'deniedEnvVars']);
   });
 });
 
@@ -83,6 +83,20 @@ describe('normalizeShellToolSettings', () => {
 
   it('rounds fractional values before clamping', () => {
     expect(normalizeShellToolSettings({ timeoutMs: 5000.7 }).timeoutMs).toBe(5001);
+  });
+
+  it('defaults the env allow/deny lists to empty', () => {
+    const settings = normalizeShellToolSettings({});
+    expect(settings.allowedEnvVars).toEqual([]);
+    expect(settings.deniedEnvVars).toEqual([]);
+  });
+
+  it('normalizes env allow/deny lists from arrays and newline strings', () => {
+    const fromArray = normalizeShellToolSettings({ allowedEnvVars: [' GITHUB_TOKEN ', '', 'CI'] });
+    expect(fromArray.allowedEnvVars).toEqual(['GITHUB_TOKEN', 'CI']);
+
+    const fromString = normalizeShellToolSettings({ deniedEnvVars: 'HOME\n\nTMPDIR' });
+    expect(fromString.deniedEnvVars).toEqual(['HOME', 'TMPDIR']);
   });
 });
 

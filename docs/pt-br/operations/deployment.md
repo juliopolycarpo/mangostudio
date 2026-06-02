@@ -37,7 +37,7 @@ O binário serve a SPA do frontend a partir do diretório `public/` ao lado do e
 
 ## Configuração
 
-A configuração de produção usa os mesmos arquivos `.mango/config.toml` ou `.mango/.env`:
+A configuração de produção usa `~/.mango/config.toml` e `~/.mango/.env` para o usuário do processo:
 
 ```toml
 [server]
@@ -69,7 +69,7 @@ url = "https://your-domain.com"
 
 ## Banco De Dados
 
-O banco SQLite usa `~/.mangostudio/database.sqlite` por padrão. Em produção, configure um path persistente:
+O banco SQLite usa `~/.mango/database.sqlite` por padrão. Em produção, configure um path persistente:
 
 ```toml
 [database]
@@ -125,10 +125,10 @@ After=network.target
 Type=simple
 User=mangostudio
 WorkingDirectory=/opt/mangostudio
-ExecStart=/opt/mangostudio/mangostudio
+ExecStart=/opt/mangostudio/mangostudio serve
 Restart=on-failure
 RestartSec=5
-Environment="MANGO_CONFIG_PATH=/etc/mangostudio/config.toml"
+Environment="HOME=/var/lib/mangostudio"
 
 [Install]
 WantedBy=multi-user.target

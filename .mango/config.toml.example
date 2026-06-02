@@ -1,10 +1,11 @@
 # MangoStudio Configuration
-# Copy this file to .mango/config.toml (dev) or ~/.mango/config.toml (build).
+# Copy this file to ~/.mango/config.toml.
 #
 # Resolution hierarchy (highest priority wins):
-# 1. .mango/.env       — overrides matching keys from config.toml
-# 2. config.toml       — dev: ./.mango/config.toml | build: ~/.mango/config.toml
-# 3. Built-in defaults — hardcoded in the application
+# 1. process.env       — shell environment
+# 2. .env              — stored next to this config.toml
+# 3. config.toml       — ~/.mango/config.toml
+# 4. Built-in defaults — hardcoded in the application
 
 [server]
 host = "localhost"
@@ -16,12 +17,11 @@ port = 5173
 
 [database]
 # Empty = auto-detect:
-#   dev:   ./.mango/database.sqlite
-#   build: ~/.mango/database.sqlite
+#   ~/.mango/database.sqlite
 path = ""
 
 [uploads]
-# Empty = auto-detect: ./.mango/uploads (dev) or ~/.mango/uploads (build)
+# Empty = auto-detect: ~/.mango/uploads
 dir = ""
 
 [images]
@@ -33,7 +33,7 @@ dir = ""
 dir = ""
 
 [auth]
-# Required — minimum 32 characters
+# Minimum 32 characters. If empty, `mangostudio serve` can generate and store one.
 secret = "your-secret-key-here-min-32-chars"
 # Empty = derived from server host:port
 url = ""

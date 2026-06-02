@@ -5,11 +5,11 @@
 
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname } from 'node:path';
 import type { AddConnectorBody, Connector, ConnectorStatus } from '@mangostudio/shared';
 import type { SecretMetadataRow } from '@mangostudio/shared/types';
 import { stringify as stringifyToml } from 'smol-toml';
-import { getConfig, getMangoDir } from '../../../lib/config';
+import { getConfig, getConfigEnvFilePath, reloadSecretEnv } from '../../../lib/config';
 import { readTomlStringSections } from '../../../lib/toml';
 import { parseStringArray } from '../../../utils/json';
 import { maskSecret } from '../../../utils/secrets';
@@ -97,7 +97,7 @@ const geminiProviderSecret = createProviderSecretService({
 });
 
 function getEnvFilePath(): string {
-  return join(getMangoDir(), '.env');
+  return getConfigEnvFilePath(getConfig().configFilePath);
 }
 
 function getTomlFilePath(): string {
@@ -288,7 +288,8 @@ export function createGeminiSecretService(
           const envEntry = `\n${envVar}="${apiKey}"\n`;
           const currentContent = existsSync(envPath) ? readFileSync(envPath, 'utf8') : '';
           writeFileSync(envPath, currentContent + envEntry);
-          process.env[envVar] = apiKey;
+          // Re-sync process.env from the file (validated) so the key resolves now.
+          reloadSecretEnv();
           break;
         }
       }
@@ -371,7 +372,8 @@ export function createGeminiSecretService(
             const lines = content.split('\n');
             const filteredLines = lines.filter((line) => !line.trim().startsWith(`${envVar}=`));
             writeFileSync(envPath, filteredLines.join('\n'));
-            delete process.env[envVar];
+            // Re-sync process.env so the running server stops resolving the removed key.
+            reloadSecretEnv();
           }
         } catch (err) {
           console.error('[env] Failed to remove key from .env:', err);
