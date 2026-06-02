@@ -20,7 +20,8 @@ import {
   assertPlatformBuildAssets,
   assertPlatformPackageAssets,
 } from '../lib/npm-package-validation';
-import { header, info, success } from '../lib/runner';
+import { resolveReleaseVersion } from '../lib/release-version';
+import { error, header, info, success } from '../lib/runner';
 
 const OUT_DIR = join(ROOT_DIR, '.mango', 'out');
 const DIST_DIR = join(ROOT_DIR, 'dist-npm');
@@ -107,7 +108,7 @@ const main = async (): Promise<void> => {
     throw new Error(`Unknown argument(s): ${args.join(' ')}`);
   }
 
-  const version = process.env.VERSION?.replace(/^v/, '') ?? '0.0.0';
+  const version = resolveReleaseVersion();
   header(`Pack npm (v${version})`);
 
   await removePaths(['dist-npm']);
@@ -120,4 +121,9 @@ const main = async (): Promise<void> => {
   success(`\nStaged ${staged.length} platform package(s) + the wrapper in dist-npm/.`);
 };
 
-await main();
+try {
+  await main();
+} catch (caught) {
+  error(caught instanceof Error ? caught.message : String(caught));
+  process.exit(1);
+}

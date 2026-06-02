@@ -2,12 +2,14 @@ import { describe, expect, test } from 'bun:test';
 import {
   type CliffResult,
   cliffArgs,
-  INITIAL_VERSION,
   PREVIEW_MARKER,
   parseChangelogArgs,
   runChangelog,
   wrapPreviewComment,
 } from '../lib/changelog';
+
+// Fixed baseline so the parser tests do not depend on the root package.json.
+const BASELINE_VERSION = '0.1.0';
 
 // Named fake git-cliff runner: records the args it received and returns a
 // scripted result, so the wrapper is tested without invoking the real binary.
@@ -21,10 +23,16 @@ class FakeCliff {
 }
 
 describe('cliffArgs', () => {
-  test('init targets the baseline version and writes CHANGELOG.md', () => {
-    expect(cliffArgs({ kind: 'init' })).toEqual([
+  test('init targets the resolved version and writes CHANGELOG.md', () => {
+    expect(cliffArgs({ kind: 'init', version: '0.1.0' })).toEqual([
       '--tag',
-      `v${INITIAL_VERSION}`,
+      'v0.1.0',
+      '--output',
+      'CHANGELOG.md',
+    ]);
+    expect(cliffArgs({ kind: 'init', version: 'v2.0.0' })).toEqual([
+      '--tag',
+      'v2.0.0',
       '--output',
       'CHANGELOG.md',
     ]);
@@ -56,23 +64,36 @@ describe('cliffArgs', () => {
 
 describe('parseChangelogArgs', () => {
   test('parses each mode', () => {
-    expect(parseChangelogArgs(['--init'])).toEqual({ kind: 'init' });
-    expect(parseChangelogArgs(['--release', '0.2.0'])).toEqual({
+    expect(parseChangelogArgs(['--init'], BASELINE_VERSION)).toEqual({
+      kind: 'init',
+      version: BASELINE_VERSION,
+    });
+    expect(parseChangelogArgs(['--release', '0.2.0'], BASELINE_VERSION)).toEqual({
       kind: 'release',
       version: '0.2.0',
     });
-    expect(parseChangelogArgs(['--preview'])).toEqual({ kind: 'preview', base: 'origin/main' });
-    expect(parseChangelogArgs(['--preview', '--base', 'abc123'])).toEqual({
+    expect(parseChangelogArgs(['--preview'], BASELINE_VERSION)).toEqual({
+      kind: 'preview',
+      base: 'origin/main',
+    });
+    expect(parseChangelogArgs(['--preview', '--base', 'abc123'], BASELINE_VERSION)).toEqual({
       kind: 'preview',
       base: 'abc123',
     });
   });
 
+  test('init takes an explicit version override before the resolved baseline', () => {
+    expect(parseChangelogArgs(['--init', '9.9.9'], BASELINE_VERSION)).toEqual({
+      kind: 'init',
+      version: '9.9.9',
+    });
+  });
+
   test('returns null for help, empty, or a missing release version', () => {
-    expect(parseChangelogArgs([])).toBeNull();
-    expect(parseChangelogArgs(['--help'])).toBeNull();
-    expect(parseChangelogArgs(['--release'])).toBeNull();
-    expect(parseChangelogArgs(['--release', '--base'])).toBeNull();
+    expect(parseChangelogArgs([], BASELINE_VERSION)).toBeNull();
+    expect(parseChangelogArgs(['--help'], BASELINE_VERSION)).toBeNull();
+    expect(parseChangelogArgs(['--release'], BASELINE_VERSION)).toBeNull();
+    expect(parseChangelogArgs(['--release', '--base'], BASELINE_VERSION)).toBeNull();
   });
 });
 
@@ -101,7 +122,7 @@ describe('runChangelog', () => {
 
   test('init passes git-cliff output through and propagates exit code', () => {
     const fake = new FakeCliff({ stdout: '', exitCode: 0 });
-    const { output, exitCode } = runChangelog({ kind: 'init' }, fake.run);
+    const { output, exitCode } = runChangelog({ kind: 'init', version: '0.1.0' }, fake.run);
     expect(fake.lastArgs).toEqual(['--tag', 'v0.1.0', '--output', 'CHANGELOG.md']);
     expect(output).toBe('');
     expect(exitCode).toBe(0);
