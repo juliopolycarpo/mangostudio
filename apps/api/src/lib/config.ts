@@ -3,16 +3,15 @@
  *
  * Resolution hierarchy (highest priority wins):
  * 1. process.env           (shell environment — works in both dev and standalone binary)
- * 2. ./.mango/.env         (if it exists, overrides matching config.toml keys)
- * 3. config.toml           (dev: ./.mango/config.toml | build: ~/.mango/config.toml)
+ * 2. .env next to config.toml (if it exists, overrides matching config.toml keys)
+ * 3. config.toml           (~/.mango/config.toml in dev and standalone)
  * 4. Hardcoded defaults
  */
 
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { isAbsolute, join } from 'node:path';
+import { dirname, isAbsolute, join } from 'node:path';
 import { parse as parseToml } from 'smol-toml';
-import { isStandaloneExecutable } from './runtime-paths';
 
 /**
  * Absolute path to the monorepo root, derived from this file's location.
@@ -107,19 +106,8 @@ const ENV_KEY_MAP: Record<string, (cfg: MangoConfig, value: string) => void> = {
 };
 
 /**
- * Returns the .mango directory at the monorepo root.
- * Uses import.meta.dir (this file's directory) to navigate reliably
- * regardless of the process CWD when workspace scripts run.
- * config.ts lives at apps/api/src/lib/ → 4 levels up is the repo root.
- */
-export function getMangoDir(): string {
-  return join(import.meta.dir, '../../../../.mango');
-}
-
-/**
  * Returns the user-level MangoStudio directory (~/.mango).
- * Used for standalone runtime data (db, uploads, logs, run state) and as the
- * canonical anchor for daemon state across dev and standalone modes.
+ * Used for user config, secrets, and runtime data across dev and standalone modes.
  */
 // Usage: getHomeMangoDir() // → "/home/user/.mango"
 export function getHomeMangoDir(): string {
@@ -168,13 +156,14 @@ export function assertValidAuthSecret(secret: string): void {
   }
 }
 
-/** Resolves the config.toml path based on runtime mode. */
+/** Resolves the canonical user config.toml path. */
 function resolveConfigTomlPath(): string {
-  const localPath = join(getMangoDir(), 'config.toml');
-  if (!isStandaloneExecutable() && existsSync(localPath)) {
-    return localPath;
-  }
   return join(getHomeMangoDir(), 'config.toml');
+}
+
+/** Returns the .env path paired with a config.toml path. // Usage: getConfigEnvFilePath('/home/me/.mango/config.toml') */
+export function getConfigEnvFilePath(configFilePath = resolveConfigTomlPath()): string {
+  return join(dirname(configFilePath), '.env');
 }
 
 /** Parses a .env file into a key-value map (simple KEY=VALUE lines). */
@@ -227,14 +216,14 @@ export function isReloadableSecretEnvKey(key: string): boolean {
 let loadedSecretEnvKeys = new Set<string>();
 
 /**
- * Syncs connector secrets from .mango/.env into process.env so adding or removing
+ * Syncs connector secrets from ~/.mango/.env into process.env so adding or removing
  * a key applies to the running server (foreground or detached) without a restart.
  * Only keys passing isReloadableSecretEnvKey are touched, and keys this function
  * previously loaded but the file no longer defines are removed.
  * // Usage: reloadSecretEnv()
  */
 export function reloadSecretEnv(): void {
-  const parsed = parseEnvFile(join(getMangoDir(), '.env'));
+  const parsed = parseEnvFile(getConfigEnvFilePath(getConfig().configFilePath));
   const next = new Set<string>();
 
   for (const [key, value] of Object.entries(parsed)) {
@@ -332,20 +321,14 @@ function computeDerived(cfg: MangoConfig, tomlPath: string): void {
 
   // database.path: auto-detect when empty, resolve relative paths against monorepo root
   if (!cfg.database.path) {
-    if (isStandaloneExecutable()) {
-      cfg.database.path = join(getHomeMangoDir(), 'database.sqlite');
-    } else {
-      cfg.database.path = join(getMangoDir(), 'database.sqlite');
-    }
+    cfg.database.path = join(getHomeMangoDir(), 'database.sqlite');
   } else if (cfg.database.path !== ':memory:') {
     cfg.database.path = resolveUserPath(cfg.database.path);
   }
 
   // uploads.dir: auto-detect when empty, resolve relative paths against monorepo root
   if (!cfg.uploads.dir) {
-    cfg.uploads.dir = isStandaloneExecutable()
-      ? join(getHomeMangoDir(), 'uploads') // ~/.mango/uploads in standalone mode
-      : join(getMangoDir(), 'uploads'); // .mango/uploads in dev mode
+    cfg.uploads.dir = join(getHomeMangoDir(), 'uploads');
   } else {
     cfg.uploads.dir = resolveUserPath(cfg.uploads.dir);
   }
@@ -418,8 +401,8 @@ export function loadConfig(overridePath?: string): MangoConfig {
     }
   }
 
-  // 2. Read ./.mango/.env (overrides config.toml)
-  const envPath = join(getMangoDir(), '.env');
+  // 2. Read .env next to config.toml (overrides config.toml)
+  const envPath = getConfigEnvFilePath(tomlPath);
   const envOverrides = parseEnvFile(envPath);
   applyEnvOverrides(cfg, envOverrides);
 

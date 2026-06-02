@@ -36,7 +36,7 @@ export interface StartOptions {
 
 /** Start the API server and return a handle. // Usage: await startServer({ writeStateFile: true }) */
 export async function startServer(options: StartOptions = {}): Promise<ServerHandle> {
-  // Load connector secrets from .mango/.env into process.env. The detach spawn
+  // Load connector secrets from ~/.mango/.env into process.env. The detach spawn
   // allowlist withholds them from the child's initial env, so the server must
   // self-load them here for environment-source connectors to resolve.
   reloadSecretEnv();

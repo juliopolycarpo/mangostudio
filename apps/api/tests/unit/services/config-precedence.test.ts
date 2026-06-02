@@ -3,17 +3,17 @@
  *
  * Verifies the four-tier hierarchy documented in config.ts:
  *   1. process.env   (highest priority)
- *   2. .mango/.env   (file overrides)
+ *   2. .env next to config.toml (file overrides)
  *   3. config.toml
  *   4. Hardcoded defaults
  *
  * Uses temporary TOML files in /tmp so the tests do not depend on the
- * presence of .mango/config.toml in the developer's environment.
+ * presence of ~/.mango/config.toml in the developer's environment.
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { loadConfig, resetConfig } from '../../../src/lib/config';
+import { getConfigEnvFilePath, loadConfig, resetConfig } from '../../../src/lib/config';
 
 const TMP_DIR = join('/tmp', `mango-config-test-${process.pid}`);
 const TMP_TOML = join(TMP_DIR, 'config.toml');
@@ -21,6 +21,7 @@ const TMP_TOML = join(TMP_DIR, 'config.toml');
 const WATCHED_ENV_KEYS = [
   'API_PORT',
   'API_HOST',
+  'BETTER_AUTH_SECRET',
   'BETTER_AUTH_URL',
   'DATABASE_PATH',
   'UPLOADS_DIR',
@@ -108,6 +109,38 @@ describe('config precedence', () => {
     expect(cfg.server.port).toBe(4242);
   });
 
+  test('loads auth.secret from config.toml', () => {
+    writeFileSync(TMP_TOML, '[auth]\nsecret = "toml-secret-at-least-32-characters"\n');
+
+    const cfg = loadConfig(TMP_TOML);
+
+    expect(cfg.auth.secret).toBe('toml-secret-at-least-32-characters');
+  });
+
+  test('loads BETTER_AUTH_SECRET from .env next to config.toml', () => {
+    writeFileSync(TMP_TOML, '[auth]\nsecret = "toml-secret-at-least-32-characters"\n');
+    writeFileSync(
+      join(TMP_DIR, '.env'),
+      'BETTER_AUTH_SECRET="env-secret-at-least-32-characters"\n'
+    );
+
+    const cfg = loadConfig(TMP_TOML);
+
+    expect(cfg.auth.secret).toBe('env-secret-at-least-32-characters');
+  });
+
+  test('process.env BETTER_AUTH_SECRET overrides .env', () => {
+    writeFileSync(
+      join(TMP_DIR, '.env'),
+      'BETTER_AUTH_SECRET="env-secret-at-least-32-characters"\n'
+    );
+    process.env.BETTER_AUTH_SECRET = 'process-secret-at-least-32-characters';
+
+    const cfg = loadConfig(TMP_TOML);
+
+    expect(cfg.auth.secret).toBe('process-secret-at-least-32-characters');
+  });
+
   test('auth.url falls back to localhost when the default host is the 0.0.0.0 wildcard', () => {
     const cfg = loadConfig(join(TMP_DIR, 'nonexistent.toml'));
 
@@ -129,6 +162,17 @@ describe('config precedence', () => {
     const cfg = loadConfig(join(TMP_DIR, 'nonexistent.toml'));
 
     expect(cfg.images.dir).toBe(join(process.env.HOME ?? '', '.mango', 'images'));
+  });
+
+  test('defaults database.path and uploads.dir to ~/.mango', () => {
+    const cfg = loadConfig(join(TMP_DIR, 'nonexistent.toml'));
+
+    expect(cfg.database.path).toBe(join(process.env.HOME ?? '', '.mango', 'database.sqlite'));
+    expect(cfg.uploads.dir).toBe(join(process.env.HOME ?? '', '.mango', 'uploads'));
+  });
+
+  test('defaults .env path to ~/.mango next to config.toml', () => {
+    expect(getConfigEnvFilePath()).toBe(join(process.env.HOME ?? '', '.mango', '.env'));
   });
 
   test('process.env IMAGES_DIR overrides the default images directory', () => {
