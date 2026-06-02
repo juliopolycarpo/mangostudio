@@ -5,11 +5,11 @@
 
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname } from 'node:path';
 import type { AddConnectorBody, Connector, ConnectorStatus } from '@mangostudio/shared';
 import type { SecretMetadataRow } from '@mangostudio/shared/types';
 import { stringify as stringifyToml } from 'smol-toml';
-import { getConfig, getMangoDir, reloadSecretEnv } from '../../../lib/config';
+import { getConfig, getConfigEnvFilePath, reloadSecretEnv } from '../../../lib/config';
 import { readTomlStringSections } from '../../../lib/toml';
 import { parseStringArray } from '../../../utils/json';
 import { maskSecret } from '../../../utils/secrets';
@@ -97,7 +97,7 @@ const geminiProviderSecret = createProviderSecretService({
 });
 
 function getEnvFilePath(): string {
-  return join(getMangoDir(), '.env');
+  return getConfigEnvFilePath(getConfig().configFilePath);
 }
 
 function getTomlFilePath(): string {
