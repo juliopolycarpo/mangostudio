@@ -6,7 +6,13 @@
 
 import { app } from '../app';
 import { closeDb } from '../db/database';
-import { assertValidAuthSecret, displayHost, getConfig, getVersion } from '../lib/config';
+import {
+  assertValidAuthSecret,
+  displayHost,
+  getConfig,
+  getVersion,
+  reloadSecretEnv,
+} from '../lib/config';
 import { ensureRuntimeDirs } from '../lib/mango-paths';
 import { getDefaultFrontendDir } from '../lib/runtime-paths';
 import { removeState, type ServerState, writeState } from '../lib/server-state';
@@ -30,6 +36,11 @@ export interface StartOptions {
 
 /** Start the API server and return a handle. // Usage: await startServer({ writeStateFile: true }) */
 export async function startServer(options: StartOptions = {}): Promise<ServerHandle> {
+  // Load connector secrets from .mango/.env into process.env. The detach spawn
+  // allowlist withholds them from the child's initial env, so the server must
+  // self-load them here for environment-source connectors to resolve.
+  reloadSecretEnv();
+
   const cfg = getConfig();
   assertValidAuthSecret(cfg.auth.secret);
   const { port, host } = cfg.server;

@@ -45,6 +45,22 @@ async function waitForHealth(host: string, port: number): Promise<boolean> {
   return false;
 }
 
+/**
+ * Wait for the single-instance state file to appear. Health is reachable the
+ * instant the server listens, but persistState writes the file a beat later, so
+ * polling here avoids a read race after waitForHealth.
+ */
+async function waitForState(pidFile: string): Promise<boolean> {
+  const deadline = Date.now() + START_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    if (existsSync(pidFile)) {
+      return true;
+    }
+    await sleep(50);
+  }
+  return false;
+}
+
 async function probeHealthOnce(host: string, port: number): Promise<boolean> {
   try {
     const response = await fetch(`http://${host}:${port}/api/health`, {
@@ -108,6 +124,7 @@ describe('startServer via __serve', () => {
     });
 
     expect(await waitForHealth('127.0.0.1', port)).toBe(true);
+    expect(await waitForState(pidFile)).toBe(true);
 
     const state = JSON.parse(await readFile(pidFile, 'utf8'));
     expect(state.pid).toBe(child.pid);

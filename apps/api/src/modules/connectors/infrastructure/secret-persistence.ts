@@ -6,7 +6,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { ProviderType, SecretSource } from '@mangostudio/shared/types';
 import { stringify as stringifyToml } from 'smol-toml';
-import { getConfig, getMangoDir } from '../../../lib/config';
+import { getConfig, getMangoDir, reloadSecretEnv } from '../../../lib/config';
 import { readTomlStringSections } from '../../../lib/toml';
 import { bunSecretStore } from '../../../services/secret-store/store';
 import { PROVIDER_SECRET_CONFIG } from '../domain/connector';
@@ -44,6 +44,9 @@ export async function persistSecret(
       const envVar = `${cfg.envPrefix}_${name.toUpperCase().replace(/[^A-Z0-9]/g, '_')}`;
       const currentContent = existsSync(envPath) ? readFileSync(envPath, 'utf8') : '';
       writeFileSync(envPath, `${currentContent}\n${envVar}="${apiKey}"\n`);
+      // Re-sync process.env from the file so the new key resolves immediately,
+      // without forwarding it to detached children (the spawn allowlist withholds it).
+      reloadSecretEnv();
       break;
     }
   }
@@ -97,6 +100,8 @@ export async function removeSecret(
           const content = readFileSync(envPath, 'utf8');
           const lines = content.split('\n').filter((l) => !l.trim().startsWith(`${envVar}=`));
           writeFileSync(envPath, lines.join('\n'));
+          // Re-sync process.env so the running server stops resolving the removed key.
+          reloadSecretEnv();
         }
       } catch (err) {
         console.error(`[connectors] Failed to remove key from .env:`, err);

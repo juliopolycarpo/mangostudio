@@ -210,6 +210,50 @@ function parseEnvFile(filePath: string): Record<string, string> {
   return result;
 }
 
+// -- Connector secret env reload --
+
+/**
+ * Restricts which .env keys reloadSecretEnv may push into process.env to the
+ * connector-secret shape `<PROVIDER>_API_KEY[_<NAME>]`. A malformed or hostile
+ * .env line therefore cannot inject a runtime-sensitive variable such as PATH,
+ * NODE_OPTIONS, or LD_PRELOAD into the running process.
+ * // Usage: isReloadableSecretEnvKey('GEMINI_API_KEY_DEFAULT') // → true
+ */
+export function isReloadableSecretEnvKey(key: string): boolean {
+  return /^[A-Z0-9]+_API_KEY(?:_[A-Z0-9_]+)?$/.test(key);
+}
+
+/** Keys reloadSecretEnv injected from the file, tracked so removed keys are dropped. */
+let loadedSecretEnvKeys = new Set<string>();
+
+/**
+ * Syncs connector secrets from .mango/.env into process.env so adding or removing
+ * a key applies to the running server (foreground or detached) without a restart.
+ * Only keys passing isReloadableSecretEnvKey are touched, and keys this function
+ * previously loaded but the file no longer defines are removed.
+ * // Usage: reloadSecretEnv()
+ */
+export function reloadSecretEnv(): void {
+  const parsed = parseEnvFile(join(getMangoDir(), '.env'));
+  const next = new Set<string>();
+
+  for (const [key, value] of Object.entries(parsed)) {
+    if (!isReloadableSecretEnvKey(key)) continue;
+    process.env[key] = value;
+    next.add(key);
+  }
+
+  for (const key of loadedSecretEnvKeys) {
+    if (!next.has(key)) delete process.env[key];
+  }
+  loadedSecretEnvKeys = next;
+}
+
+/** Clears the reload tracking set (for tests). */
+export function resetSecretEnvTracking(): void {
+  loadedSecretEnvKeys = new Set();
+}
+
 /** Deep-clones the default config. */
 function cloneDefaults(): MangoConfig {
   return {
