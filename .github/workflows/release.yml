@@ -57,7 +57,11 @@ jobs:
       - name: Verify versions are in lockstep
         # Fail before producing artifacts if the root and workspace package.json
         # versions disagree, or if they do not match the tag being released.
-        run: bun run check:versions --expect "${{ steps.resolve.outputs.version }}"
+        # Pass the version via env (not shell interpolation) so a crafted tag
+        # cannot inject commands, matching the resolve step above.
+        env:
+          EXPECTED_VERSION: ${{ steps.resolve.outputs.version }}
+        run: bun run check:versions --expect "$EXPECTED_VERSION"
 
       - name: Build standalone binaries (all platforms)
         run: VERSION="${{ steps.resolve.outputs.version }}" bun run build --binary

@@ -1,6 +1,7 @@
 import { type CliffResult, parseChangelogArgs, runChangelog } from './lib/changelog';
 import { ROOT_DIR } from './lib/config';
 import { rootReleaseVersion } from './lib/release-version';
+import { fatal } from './lib/runner';
 
 function printHelp(): never {
   console.log(`Usage: bun run changelog <mode>
@@ -22,7 +23,16 @@ const runCliff = (args: readonly string[]): CliffResult => {
   return { stdout: proc.stdout.toString(), exitCode: proc.exitCode ?? 0 };
 };
 
-const mode = parseChangelogArgs(process.argv.slice(2), rootReleaseVersion());
+// Resolve the `--init` baseline up front; surface a malformed root version as a
+// clean fatal, matching build.ts and pack-npm.ts rather than an uncaught throw.
+let initialVersion: string;
+try {
+  initialVersion = rootReleaseVersion();
+} catch (caught) {
+  fatal(caught instanceof Error ? caught.message : String(caught));
+}
+
+const mode = parseChangelogArgs(process.argv.slice(2), initialVersion);
 if (!mode) {
   printHelp();
 }
