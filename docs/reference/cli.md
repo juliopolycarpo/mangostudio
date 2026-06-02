@@ -71,8 +71,12 @@ Foreground `serve` logs to the terminal instead of a file.
 ## Configuration
 
 Host, port, and other settings follow the standard resolution order
-(`process.env` → `~/.mango/.env` → `config.toml` → defaults). A positional
+(`process.env` → `.env` next to `config.toml` → `config.toml` → defaults). A positional
 host/port on `serve` is applied as `API_HOST` / `API_PORT` before the server
 reads its config. See
 [`apps/api/src/lib/config.ts`](../../apps/api/src/lib/config.ts) and
 [`packages/cli/README.md`](../../packages/cli/README.md) for the full environment.
+
+If no auth secret is configured, interactive `mangostudio serve` generates a
+strong `BETTER_AUTH_SECRET` and asks whether to persist it in `~/.mango/.env`
+or `~/.mango/config.toml` before starting.

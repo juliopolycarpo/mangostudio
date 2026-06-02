@@ -25,7 +25,7 @@ Apenas o commit mais recente da branch `main` recebe correções de segurança. 
 
 Chaves de API para Gemini, OpenAI, Anthropic e DeepSeek suportam três métodos de persistência, em ordem de prioridade:
 
-1. **Variáveis de ambiente** em `.mango/.env` — prioridade mais alta, nunca versionadas.
+1. **Variáveis de ambiente** em `~/.mango/.env` — prioridade mais alta, nunca versionadas.
 2. **config.toml** em `~/.mango/config.toml` — arquivo flat, nunca versionado.
 3. **OS Secret Store** via `Bun.secrets` — armazenamento nativo seguro do sistema operacional, recomendado para máxima segurança.
 

@@ -18,9 +18,10 @@ cd mangostudio
 bun install
 
 # Copy and configure
-cp .mango/config.toml.example .mango/config.toml
-cp .mango/.env.example .mango/.env
-# Edit .mango/.env and add your API keys
+mkdir -p ~/.mango
+cp .mango/config.toml.example ~/.mango/config.toml
+cp .mango/.env.example ~/.mango/.env
+# Edit ~/.mango/.env and add your API keys
 ```
 
 ## Development Workflow

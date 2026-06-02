@@ -13,8 +13,9 @@ bun install
 Optional local config:
 
 ```bash
-cp .mango/config.toml.example .mango/config.toml
-cp .mango/.env.example .mango/.env
+mkdir -p ~/.mango
+cp .mango/config.toml.example ~/.mango/config.toml
+cp .mango/.env.example ~/.mango/.env
 ```
 
 ## 2. Run The App

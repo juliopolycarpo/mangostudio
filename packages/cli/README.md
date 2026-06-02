@@ -32,18 +32,15 @@ Configure it with environment variables:
 
 | Variable             | Purpose                                                    |
 | -------------------- | ---------------------------------------------------------- |
-| `BETTER_AUTH_SECRET` | Auth signing secret, at least 32 characters (required)     |
+| `BETTER_AUTH_SECRET` | Auth signing secret, at least 32 characters                |
 | `GEMINI_API_KEY`     | Google Gemini API key                                      |
 | `API_HOST`           | Host to listen on (default: `localhost`)                   |
 | `API_PORT`           | Port to listen on (default: `3001`)                        |
 | `DATABASE_PATH`      | SQLite database path (default: `~/.mango/database.sqlite`) |
 | `UPLOADS_DIR`        | Upload directory (default: `~/.mango/uploads`)             |
 
-Generate a local secret before first run, for example:
-
-```bash
-export BETTER_AUTH_SECRET="$(openssl rand -base64 32)"
-```
+On first run, `mangostudio serve` can generate a strong auth secret and ask
+whether to store it in `~/.mango/.env` or `~/.mango/config.toml`.
 
 The database is created and migrated automatically on first run.
 

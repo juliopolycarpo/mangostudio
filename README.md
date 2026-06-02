@@ -14,7 +14,6 @@ Run MangoStudio without cloning — install the CLI for your platform:
 
 ```bash
 npm install -g @mangostudio/cli   # or: bun add -g @mangostudio/cli
-export BETTER_AUTH_SECRET="$(openssl rand -base64 32)"
 mangostudio serve                 # start on http://localhost:3001
 ```
 
@@ -35,7 +34,7 @@ mangostudio doctor         # environment diagnostics
 Run `mangostudio` with no arguments for the full command list. See
 [`docs/reference/cli.md`](docs/reference/cli.md) for details.
 
-Set `BETTER_AUTH_SECRET` to a unique random value of at least 32 characters before first run.
+On first run, `mangostudio serve` can generate a strong `BETTER_AUTH_SECRET` and store it in `~/.mango/.env` or `~/.mango/config.toml`.
 Set provider keys such as `GEMINI_API_KEY` when you are ready to use hosted models. Optional runtime settings include `API_HOST`, `API_PORT`, and `DATABASE_PATH`.
 See [`@mangostudio/cli`](packages/cli/README.md) for the full environment.
 
@@ -77,7 +76,7 @@ MangoStudio has a flexible multi-connector system for managing multiple API keys
 
 1. **OS Secret Store** — Native secure storage via `Bun.secrets`. Recommended for maximum security.
 2. **config.toml** — Stores keys in `~/.mango/config.toml`. Ideal for sharing keys across instances or CLI tools.
-3. **.env file** — Adds variables to the `.mango/.env` file.
+3. **.env file** — Adds variables to the `~/.mango/.env` file.
 
 ### How to Configure
 
@@ -101,7 +100,7 @@ MangoStudio will sync these keys automatically the next time the Settings page i
 
 ```
 mangostudio/
-├── .mango/            # Example configuration
+├── .mango/            # Example configuration templates only
 │   └── config.toml.example
 ├── apps/
 │   ├── api/
@@ -344,7 +343,7 @@ The `Messages` type is inferred directly from the `pt-BR.ts` dictionary (`as con
 
 The `bun run build --binary` command compiles the API into platform-specific binaries under `.mango/out/<platform>/`.
 
-- The database is persisted at `~/.mangostudio/database.sqlite` by default.
+- The database is persisted at `~/.mango/database.sqlite` by default.
 - Frontend assets are served from the `public/` directory next to the executable.
 
 ## License

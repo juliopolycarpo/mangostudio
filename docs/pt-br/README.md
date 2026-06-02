@@ -46,7 +46,7 @@ O MangoStudio possui um sistema flexível de múltiplos conectores que permite g
 
 1. **OS Secret Store** — Armazenamento nativo seguro do sistema operacional (via `Bun.secrets`). Recomendado para maior segurança.
 2. **config.toml** — Armazena chaves em `~/.mango/config.toml`. Ideal para compartilhar chaves entre instâncias ou ferramentas CLI.
-3. **Arquivo .env** — Adiciona variáveis ao arquivo `.mango/.env`.
+3. **Arquivo .env** — Adiciona variáveis ao arquivo `~/.mango/.env`.
 
 ### Como Configurar
 
@@ -70,7 +70,7 @@ O MangoStudio sincroniza essas chaves automaticamente ao carregar a página de C
 
 ```
 mangostudio/
-├── .mango/            # Exemplo de configuração
+├── .mango/            # Templates de configuração de exemplo
 │   └── config.toml.example
 ├── apps/
 │   ├── api/
@@ -327,7 +327,7 @@ Quando uma alteração relevante for feita em `docs/`, a versão correspondente 
 
 O comando `bun run build --binary` compila a API em binários específicos por plataforma em `out/<platform>/`.
 
-- O banco de dados é persistido em `~/.mangostudio/database.sqlite` por padrão.
+- O banco de dados é persistido em `~/.mango/database.sqlite` por padrão.
 - Os assets do frontend são servidos a partir do diretório `public/` vizinho ao executável.
 
 ## Licença
