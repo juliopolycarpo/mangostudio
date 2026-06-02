@@ -75,13 +75,60 @@ async function confirmStarted(child: PendingChild, d: DetachDeps): Promise<void>
   );
 }
 
+/**
+ * Runtime env keys forwarded to detached child processes.
+ * Only config-driven variables are included; connector secrets and
+ * other injectable credentials are excluded.
+ */
+const DETACH_ENV_ALLOWLIST = new Set([
+  'API_PORT',
+  'API_HOST',
+  'FRONTEND_PORT',
+  'DATABASE_PATH',
+  'UPLOADS_DIR',
+  'IMAGES_DIR',
+  'AGENTS_DIR',
+  'BETTER_AUTH_SECRET',
+  'BETTER_AUTH_URL',
+  'MANGO_LOG_FILE',
+  'VERSION',
+  'MANGOSTUDIO_DIAGNOSTIC_LOGS',
+]);
+
+/**
+ * Build a minimal env for a detached `__serve` child, forwarding only
+ * runtime configuration variables from the parent's environment.
+ * // Usage: buildDetachedEnv('localhost', 3001, '/tmp/server.log')
+ */
+export function buildDetachedEnv(
+  host: string,
+  port: number,
+  logFile: string
+): Record<string, string> {
+  const env: Record<string, string> = {};
+
+  for (const key of DETACH_ENV_ALLOWLIST) {
+    const value = process.env[key];
+    if (value !== undefined) {
+      env[key] = value;
+    }
+  }
+
+  // Always apply the explicit spawn parameters as overrides.
+  env.API_HOST = host;
+  env.API_PORT = String(port);
+  env.MANGO_LOG_FILE = logFile;
+
+  return env;
+}
+
 /** Re-exec this binary (or `bun <entry>` in dev) with the hidden __serve command. */
 function realSpawn(port: number, host: string, logFile: string): number {
   const logFd = openSync(logFile, 'a');
   try {
     const proc = Bun.spawn({
       cmd: buildServeCommand(host, port),
-      env: { ...process.env, API_HOST: host, API_PORT: String(port), MANGO_LOG_FILE: logFile },
+      env: buildDetachedEnv(host, port, logFile),
       detached: true,
       stdin: 'ignore',
       stdout: logFd,
