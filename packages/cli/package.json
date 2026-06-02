@@ -17,6 +17,9 @@
   "bugs": {
     "url": "https://github.com/juliopolycarpo/mangostudio/issues"
   },
+  "publishConfig": {
+    "access": "public"
+  },
   "engines": {
     "node": ">=18"
   },

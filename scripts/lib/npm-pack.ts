@@ -5,6 +5,11 @@
 export const CLI_SCOPE = '@mangostudio';
 export const MAIN_PACKAGE = `${CLI_SCOPE}/cli`;
 const REPOSITORY_URL = 'git+https://github.com/juliopolycarpo/mangostudio.git';
+const HOMEPAGE_URL = 'https://github.com/juliopolycarpo/mangostudio#readme';
+const BUGS_URL = 'https://github.com/juliopolycarpo/mangostudio/issues';
+const PACKAGE_KEYWORDS = ['mangostudio', 'ai', 'image-generation', 'chat', 'cli'];
+const NODE_ENGINES = { node: '>=18' };
+const PUBLIC_PUBLISH_CONFIG = { access: 'public' };
 
 export interface NpmPlatform {
   /** build.ts output directory under .mango/out. */
@@ -43,6 +48,11 @@ export function buildPlatformManifest(
     description: `MangoStudio prebuilt binary for ${platform.os}-${platform.cpu}.`,
     license: 'MIT',
     repository: { type: 'git', url: REPOSITORY_URL, directory: 'packages/cli' },
+    homepage: HOMEPAGE_URL,
+    bugs: { url: BUGS_URL },
+    publishConfig: PUBLIC_PUBLISH_CONFIG,
+    engines: NODE_ENGINES,
+    keywords: PACKAGE_KEYWORDS,
     os: [platform.os],
     cpu: [platform.cpu],
     files: [platform.binary, 'public'],
