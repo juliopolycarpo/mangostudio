@@ -121,12 +121,18 @@ describe('checkFrontend', () => {
 });
 
 describe('checkAuthSecret', () => {
-  it('warns when unset', () => {
-    expect(checkAuthSecret(makeConfig({ auth: { secret: '', url: '' } })).status).toBe('warn');
+  it('fails when unset', () => {
+    const result = checkAuthSecret(makeConfig({ auth: { secret: '', url: '' } }));
+
+    expect(result.status).toBe('fail');
+    expect(result.detail).toContain('BETTER_AUTH_SECRET is required');
   });
 
-  it('warns when shorter than 32 characters', () => {
-    expect(checkAuthSecret(makeConfig({ auth: { secret: 'short', url: '' } })).status).toBe('warn');
+  it('fails when shorter than 32 characters', () => {
+    const result = checkAuthSecret(makeConfig({ auth: { secret: 'short', url: '' } }));
+
+    expect(result.status).toBe('fail');
+    expect(result.detail).toContain('at least 32 characters');
   });
 
   it('passes for a sufficiently long secret', () => {

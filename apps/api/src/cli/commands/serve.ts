@@ -10,6 +10,7 @@ import { spawnDetached } from '../detach';
 import { CliError } from '../errors';
 import { writeLine } from '../output';
 import { createProcessController, type ProcessController } from '../process-control';
+import { assertServeConfig } from '../serve-config-guard';
 
 export interface ServeDeps {
   controller: ProcessController;
@@ -55,7 +56,9 @@ async function ensureNotRunning(deps: Partial<ServeDeps>): Promise<void> {
 async function startDetached(args: ServeArgs, deps: Partial<ServeDeps>): Promise<void> {
   const log = deps.log ?? writeLine;
   const spawn = deps.spawnDetached ?? spawnDetached;
-  const { server } = getConfig();
+  const config = getConfig();
+  assertServeConfig();
+  const { server } = config;
   const port = args.port ?? server.port;
   const host = args.host ?? server.host;
 
@@ -75,6 +78,7 @@ async function startForeground(args: ServeArgs): Promise<void> {
   if (args.host !== undefined) {
     process.env.API_HOST = args.host;
   }
+  assertServeConfig();
   const { startServer } = await import('../../server/start-server');
   await startServer({ writeStateFile: true });
 }

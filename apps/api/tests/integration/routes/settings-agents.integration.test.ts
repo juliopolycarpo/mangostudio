@@ -28,12 +28,17 @@ const OTHER_USER = {
   email: 'other-agent-settings@mangostudio.test',
 };
 
+const TEST_AUTH_SECRET = 'test-secret-at-least-32-characters-long';
+
 let restoreAuth: (() => void) | null = null;
 let agentsDir: string;
 
 beforeEach(() => {
   agentsDir = mkdtempSync(join(tmpdir(), 'mango-agent-routes-'));
-  loadConfigForTest({ agents: { dir: agentsDir } });
+  loadConfigForTest({
+    agents: { dir: agentsDir },
+    auth: { secret: TEST_AUTH_SECRET, url: '' },
+  });
 });
 
 afterEach(() => {

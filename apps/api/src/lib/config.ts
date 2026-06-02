@@ -73,6 +73,8 @@ const DEFAULT_CONFIG: Omit<MangoConfig, 'corsOrigins' | 'configFilePath'> = {
   auth: { secret: '', url: '' },
 };
 
+export const AUTH_SECRET_MIN_LENGTH = 32;
+
 /** Maps .env keys to config paths for override resolution. */
 const ENV_KEY_MAP: Record<string, (cfg: MangoConfig, value: string) => void> = {
   API_PORT: (cfg, v) => {
@@ -141,6 +143,29 @@ export function getVersion(): string {
  */
 export function displayHost(host: string): string {
   return host === '0.0.0.0' ? 'localhost' : host;
+}
+
+/**
+ * Returns why a Better Auth secret is unusable, or null when it is safe to use.
+ * // Usage: getAuthSecretValidationMessage(process.env.BETTER_AUTH_SECRET ?? '')
+ */
+export function getAuthSecretValidationMessage(secret: string): string | null {
+  const trimmed = secret.trim();
+  if (!trimmed) {
+    return `BETTER_AUTH_SECRET is required and must be at least ${AUTH_SECRET_MIN_LENGTH} characters.`;
+  }
+  if (trimmed.length < AUTH_SECRET_MIN_LENGTH) {
+    return `BETTER_AUTH_SECRET must be at least ${AUTH_SECRET_MIN_LENGTH} characters.`;
+  }
+  return null;
+}
+
+/** Fails before Better Auth can initialize with an unsafe secret. // Usage: assertValidAuthSecret(secret) */
+export function assertValidAuthSecret(secret: string): void {
+  const message = getAuthSecretValidationMessage(secret);
+  if (message) {
+    throw new Error(`${message} Set it to a unique random value before starting MangoStudio.`);
+  }
 }
 
 /** Resolves the config.toml path based on runtime mode. */

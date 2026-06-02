@@ -5,7 +5,11 @@
  */
 
 import { dirname, join } from 'node:path';
-import type { MangoConfig } from '../lib/config';
+import {
+  AUTH_SECRET_MIN_LENGTH,
+  getAuthSecretValidationMessage,
+  type MangoConfig,
+} from '../lib/config';
 import type { ServerState } from '../lib/server-state';
 
 export type CheckStatus = 'ok' | 'warn' | 'fail';
@@ -21,8 +25,6 @@ export interface FsProbe {
   exists(path: string): boolean;
   isWritable(path: string): boolean;
 }
-
-const MIN_SECRET_LENGTH = 32;
 
 export function ok(label: string, detail: string): CheckResult {
   return { label, status: 'ok', detail };
@@ -73,13 +75,11 @@ export function checkFrontend(frontendDir: string, fs: FsProbe): CheckResult {
 }
 
 export function checkAuthSecret(config: MangoConfig): CheckResult {
-  if (!config.auth.secret) {
-    return warn('Auth secret', 'BETTER_AUTH_SECRET not set');
+  const message = getAuthSecretValidationMessage(config.auth.secret);
+  if (message) {
+    return fail('Auth secret', message);
   }
-  if (config.auth.secret.length < MIN_SECRET_LENGTH) {
-    return warn('Auth secret', `shorter than ${MIN_SECRET_LENGTH} characters`);
-  }
-  return ok('Auth secret', 'set');
+  return ok('Auth secret', `set (${AUTH_SECRET_MIN_LENGTH}+ characters)`);
 }
 
 export function checkInstance(

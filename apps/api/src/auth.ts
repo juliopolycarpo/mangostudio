@@ -1,7 +1,7 @@
 import type { Auth } from 'better-auth';
 import { betterAuth } from 'better-auth';
 import { getDb } from './db/database';
-import { getConfig } from './lib/config';
+import { assertValidAuthSecret, getConfig } from './lib/config';
 
 let authInstance: Auth | null = null;
 
@@ -12,6 +12,7 @@ let authInstance: Auth | null = null;
 export function getAuth(): Auth {
   if (!authInstance) {
     const config = getConfig();
+    assertValidAuthSecret(config.auth.secret);
 
     authInstance = betterAuth({
       database: {

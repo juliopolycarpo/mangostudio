@@ -8,6 +8,7 @@
  */
 
 import type { ServeArgs } from '../args';
+import { assertServeConfig } from '../serve-config-guard';
 
 /** Run the server in the foreground of the detached child. // Usage: await runServeInternal({ port: 3000, detached: false }) */
 export async function runServeInternal(args: ServeArgs): Promise<void> {
@@ -17,6 +18,7 @@ export async function runServeInternal(args: ServeArgs): Promise<void> {
   if (args.host !== undefined) {
     process.env.API_HOST = args.host;
   }
+  assertServeConfig();
   const { startServer } = await import('../../server/start-server');
   await startServer({ writeStateFile: true });
 }

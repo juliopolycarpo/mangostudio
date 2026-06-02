@@ -6,7 +6,7 @@
 
 import { app } from '../app';
 import { closeDb } from '../db/database';
-import { displayHost, getConfig, getVersion } from '../lib/config';
+import { assertValidAuthSecret, displayHost, getConfig, getVersion } from '../lib/config';
 import { ensureRuntimeDirs } from '../lib/mango-paths';
 import { getDefaultFrontendDir } from '../lib/runtime-paths';
 import { removeState, type ServerState, writeState } from '../lib/server-state';
@@ -31,6 +31,7 @@ export interface StartOptions {
 /** Start the API server and return a handle. // Usage: await startServer({ writeStateFile: true }) */
 export async function startServer(options: StartOptions = {}): Promise<ServerHandle> {
   const cfg = getConfig();
+  assertValidAuthSecret(cfg.auth.secret);
   const { port, host } = cfg.server;
 
   await runMigrations();
