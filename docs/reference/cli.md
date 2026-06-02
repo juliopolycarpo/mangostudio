@@ -41,6 +41,14 @@ redirects the child's stdout/stderr to a timestamped log file, waits for the
 server to report healthy, prints the PID and log path, then exits. The child
 keeps running independently.
 
+The detached child does **not** inherit the parent shell's full environment: it
+is launched with a minimal allowlist (runtime config plus the system/networking
+variables the server needs) so connector secrets never land in a long-lived
+process environment. The child instead loads provider keys from `~/.mango/.env`
+on startup. Set provider keys such as `GEMINI_API_KEY` in `~/.mango/.env` rather
+than exporting them in your shell — a shell-only export reaches a foreground
+`serve` but is dropped by a background (`-d`) start.
+
 ## Single instance
 
 Only one server may run at a time. On startup the server writes a state file at
