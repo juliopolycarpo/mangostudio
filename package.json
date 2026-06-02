@@ -20,6 +20,7 @@
     "dev": "bun ./scripts/dev.ts",
     "build": "bun ./scripts/build.ts",
     "check": "bun ./scripts/check.ts",
+    "check:versions": "bun ./scripts/check-versions.ts",
     "test": "bun ./scripts/test.ts",
     "fix": "bun ./scripts/fix.ts",
     "verify": "bun ./scripts/verify.ts",

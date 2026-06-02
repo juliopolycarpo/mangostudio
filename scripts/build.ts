@@ -4,6 +4,7 @@ import { cpSync, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { ROOT_DIR, type WorkspaceName } from './lib/config';
+import { resolveReleaseVersion } from './lib/release-version';
 import {
   assertNoUnexpectedArguments,
   exitWithResults,
@@ -447,11 +448,18 @@ if (!isBinaryBuild && (isProductionBuild || isDevelopmentBuild || values['--plat
 }
 
 if (isBinaryBuild) {
+  let version: string;
+  try {
+    version = resolveReleaseVersion();
+  } catch (caught) {
+    fatal(caught instanceof Error ? caught.message : String(caught));
+  }
+
   await buildStandaloneBinary({
     buildType: isDevelopmentBuild ? 'development' : 'production',
     dryRun: flags['--dry-run'] ?? process.env.DRY_RUN === '1',
     onlyPlatform: values['--platform'] ?? process.env.ONLY_PLATFORM,
-    version: process.env.VERSION || '0.0.1',
+    version,
   });
   process.exit(0);
 }

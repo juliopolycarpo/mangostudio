@@ -6,6 +6,7 @@ import {
   WORKSPACE_MADGE_PATHS,
   type WorkspaceName,
 } from './lib/config';
+import { assertVersionsInLockstep } from './lib/release-version';
 import {
   assertNoUnexpectedArguments,
   exitWithResults,
@@ -19,6 +20,7 @@ import {
   resolveDefaultBase,
   runCommand,
   runParallel,
+  runTask,
   runWorkspaceScript,
 } from './lib/runner';
 
@@ -77,7 +79,9 @@ function createWorkspaceTasks(
 }
 
 function createRootTasks(skipFormat: boolean): Array<() => Promise<RunResult>> {
-  const tasks: Array<() => Promise<RunResult>> = [];
+  const tasks: Array<() => Promise<RunResult>> = [
+    () => runTask('root:versions', () => assertVersionsInLockstep()),
+  ];
 
   if (!skipFormat) {
     tasks.push(() =>

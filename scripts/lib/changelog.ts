@@ -2,9 +2,6 @@
 // the PR preview formatting in one testable place; scripts/changelog.ts wires
 // these to the actual binary.
 
-/** Baseline version for the first generated changelog. */
-export const INITIAL_VERSION = '0.1.0';
-
 /** Default base ref the PR preview diffs against. */
 export const DEFAULT_PREVIEW_BASE = 'origin/main';
 
@@ -12,7 +9,7 @@ export const DEFAULT_PREVIEW_BASE = 'origin/main';
 export const PREVIEW_MARKER = '<!-- changelog-preview-comment -->';
 
 export type ChangelogMode =
-  | { readonly kind: 'init' }
+  | { readonly kind: 'init'; readonly version: string }
   | { readonly kind: 'preview'; readonly base: string }
   | { readonly kind: 'release'; readonly version: string };
 
@@ -29,7 +26,6 @@ const stripLeadingV = (version: string): string => version.replace(/^v/, '');
 export function cliffArgs(mode: ChangelogMode): string[] {
   switch (mode.kind) {
     case 'init':
-      return ['--tag', `v${INITIAL_VERSION}`, '--output', 'CHANGELOG.md'];
     case 'release':
       return ['--tag', `v${stripLeadingV(mode.version)}`, '--output', 'CHANGELOG.md'];
     case 'preview':
@@ -63,10 +59,22 @@ export function runChangelog(
   return { output, exitCode: result.exitCode };
 }
 
-/** Parse changelog CLI args into a mode, or null to print usage. */
-export function parseChangelogArgs(argv: readonly string[]): ChangelogMode | null {
+/** Parse changelog CLI args into a mode, or null to print usage.
+ * `initialVersion` is the resolved baseline for `--init`; an explicit
+ * `--init <version>` overrides it.
+ * // Usage: parseChangelogArgs(process.argv.slice(2), rootReleaseVersion()) */
+export function parseChangelogArgs(
+  argv: readonly string[],
+  initialVersion: string
+): ChangelogMode | null {
   if (argv.includes('--help') || argv.length === 0) return null;
-  if (argv.includes('--init')) return { kind: 'init' };
+
+  const initIndex = argv.indexOf('--init');
+  if (initIndex !== -1) {
+    const explicit = argv[initIndex + 1];
+    const version = explicit && !explicit.startsWith('--') ? explicit : initialVersion;
+    return { kind: 'init', version };
+  }
 
   const releaseIndex = argv.indexOf('--release');
   if (releaseIndex !== -1) {

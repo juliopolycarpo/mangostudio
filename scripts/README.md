@@ -11,6 +11,7 @@ scripts/
 ├── dev.ts            Start dev servers (bun run dev)
 ├── build.ts          Build workspaces or standalone binaries (bun run build)
 ├── check.ts          Biome + dprint + madge + tsgo, in parallel (bun run check)
+├── check-versions.ts Assert root + workspace package.json versions agree (bun run check:versions)
 ├── fix.ts            Apply Biome + dprint fixes (bun run fix)
 ├── test.ts           Run unit/integration/e2e/coverage lanes (bun run test)
 ├── verify.ts         check → test → build gate (bun run verify)
@@ -27,17 +28,18 @@ scripts/
 `lib/runner.ts` is a barrel re-exporting focused, single-concern modules — prefer
 importing the specific module in new code:
 
-| Module         | Concern                                                      |
-| -------------- | ------------------------------------------------------------ |
-| `log.ts`       | Leveled console output + ANSI colors                         |
-| `args.ts`      | CLI argument + workspace-selection parsing                   |
-| `git.ts`       | Change detection (`Bun.spawnSync`), workspace mapping        |
-| `exec.ts`      | `runCommand`, `runWorkspaceScript`, `runParallel`, `runTask` |
-| `summary.ts`   | Pass/fail reporting + exit handling                          |
-| `fs.ts`        | Cross-platform `removePaths` (no spawned `rm`)               |
-| `config.ts`    | Workspace definitions + root lint/format path lists          |
-| `changelog.ts` | git-cliff arg/format logic (wrapped behind a project API)    |
-| `npm-pack.ts`  | npm distribution manifest builders                           |
+| Module               | Concern                                                         |
+| -------------------- | --------------------------------------------------------------- |
+| `log.ts`             | Leveled console output + ANSI colors                            |
+| `args.ts`            | CLI argument + workspace-selection parsing                      |
+| `git.ts`             | Change detection (`Bun.spawnSync`), workspace mapping           |
+| `exec.ts`            | `runCommand`, `runWorkspaceScript`, `runParallel`, `runTask`    |
+| `summary.ts`         | Pass/fail reporting + exit handling                             |
+| `fs.ts`              | Cross-platform `removePaths` (no spawned `rm`)                  |
+| `config.ts`          | Workspace definitions + root lint/format path lists             |
+| `changelog.ts`       | git-cliff arg/format logic (wrapped behind a project API)       |
+| `npm-pack.ts`        | npm distribution manifest builders                              |
+| `release-version.ts` | Canonical release version resolver + lockstep consistency check |
 
 ## Conventions
 
@@ -61,9 +63,14 @@ importing the specific module in new code:
 
 `bun run changelog` wraps [git-cliff](https://git-cliff.org) (config: `cliff.toml`):
 
-- `--init` — regenerate `CHANGELOG.md` from full history (baseline `v0.1.0`)
+- `--init [version]` — regenerate `CHANGELOG.md` from full history (default tag: the root `package.json` version)
 - `--preview [--base <ref>]` — print the current branch's entries (used by the PR bot)
 - `--release <version>` — regenerate `CHANGELOG.md` including `<version>`
+
+The release version (build, npm packaging, and changelog) resolves through
+`lib/release-version.ts`: the root `package.json` version, overridable by the
+`VERSION` env var, validated as semver. `bun run check:versions` keeps the root
+and workspace versions in lockstep.
 
 `scripts/release/pack-npm.ts` turns `.mango/out/<arch>` binaries into the npm
 distribution. See `docs/reference/releasing.md` for the full release flow.
