@@ -6,6 +6,7 @@
 
 import { clampIntegerSetting, getOptionalString, getRequiredString } from '../arg-parsing';
 import type { RegisteredTool, ToolContext } from '../types';
+import { normalizeStringList } from './_fs-utils';
 import { runShellCommand, type ShellCommandResult, type ShellKind } from './_shell-exec';
 
 export const SHELL_DEFAULT_TIMEOUT_MS = 15_000;
@@ -31,6 +32,10 @@ const PRESENTATION: Record<ShellKind, ShellPresentation> = {
 interface ShellToolSettings {
   timeoutMs: number;
   maxOutputBytes: number;
+  /** Secret-shaped env vars forwarded to commands anyway (denylist exceptions). */
+  allowedEnvVars: string[];
+  /** Extra env vars always withheld from commands (denylist additions). */
+  deniedEnvVars: string[];
 }
 
 /**
@@ -61,6 +66,8 @@ export function normalizeShellToolSettings(parameters: Record<string, unknown>):
       SHELL_MIN_MAX_OUTPUT_BYTES,
       SHELL_MAX_MAX_OUTPUT_BYTES
     ),
+    allowedEnvVars: normalizeStringList(parameters.allowedEnvVars),
+    deniedEnvVars: normalizeStringList(parameters.deniedEnvVars),
   };
 }
 
@@ -78,6 +85,7 @@ function execute(
     ...(cwd ? { cwd } : {}),
     timeoutMs: settings.timeoutMs,
     maxOutputBytes: settings.maxOutputBytes,
+    envPolicy: { allow: settings.allowedEnvVars, deny: settings.deniedEnvVars },
   });
 }
 
@@ -117,6 +125,8 @@ function buildSettings(label: string, description: string): RegisteredTool['sett
     defaultParameters: {
       timeoutMs: SHELL_DEFAULT_TIMEOUT_MS,
       maxOutputBytes: SHELL_DEFAULT_MAX_OUTPUT_BYTES,
+      allowedEnvVars: [],
+      deniedEnvVars: [],
     },
     parameterDescriptors: [
       {
@@ -138,6 +148,27 @@ function buildSettings(label: string, description: string): RegisteredTool['sett
         defaultValue: SHELL_DEFAULT_MAX_OUTPUT_BYTES,
         min: SHELL_MIN_MAX_OUTPUT_BYTES,
         max: SHELL_MAX_MAX_OUTPUT_BYTES,
+      },
+      {
+        name: 'allowedEnvVars',
+        label: 'Forwarded secret variables',
+        description:
+          'Exact environment variable names to pass through to commands even when they look ' +
+          'like secrets (e.g. GITHUB_TOKEN). One per line. Leave empty to withhold every ' +
+          'auto-detected secret.',
+        type: 'string_list',
+        required: false,
+        defaultValue: [] as string[],
+      },
+      {
+        name: 'deniedEnvVars',
+        label: 'Blocked variables',
+        description:
+          'Exact environment variable names to always withhold from commands, on top of the ' +
+          'auto-detected secrets. One per line.',
+        type: 'string_list',
+        required: false,
+        defaultValue: [] as string[],
       },
     ],
   };

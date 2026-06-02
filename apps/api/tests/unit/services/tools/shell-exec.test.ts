@@ -163,4 +163,26 @@ describe('runShellCommand env sanitization', () => {
     });
     expect(result.stdout.trim()).toBe('[visible]');
   });
+
+  it.skipIf(!hasBash)('forwards a secret variable named in the allow policy', async () => {
+    const result = await runShellCommand({
+      kind: 'bash',
+      command: `echo "[$${SECRET_KEY}]"`,
+      timeoutMs: 5000,
+      maxOutputBytes: 1000,
+      envPolicy: { allow: [SECRET_KEY] },
+    });
+    expect(result.stdout.trim()).toBe('[sk-must-not-leak]');
+  });
+
+  it.skipIf(!hasBash)('withholds a non-secret variable named in the deny policy', async () => {
+    const result = await runShellCommand({
+      kind: 'bash',
+      command: `echo "[$${PUBLIC_KEY}]"`,
+      timeoutMs: 5000,
+      maxOutputBytes: 1000,
+      envPolicy: { deny: [PUBLIC_KEY] },
+    });
+    expect(result.stdout.trim()).toBe('[]');
+  });
 });
