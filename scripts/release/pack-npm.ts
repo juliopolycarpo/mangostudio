@@ -4,8 +4,8 @@
 // dist-npm/cli/ (the main wrapper with injected optionalDependencies), ready for
 // `npm publish`. Run after the binary build; release.yml drives it.
 
-import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { cpSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 import { ROOT_DIR } from '../lib/config';
 import { removePaths } from '../lib/fs';
 import {
@@ -15,7 +15,12 @@ import {
   type NpmPlatform,
   platformPackageName,
 } from '../lib/npm-pack';
-import { header, info, success, warn } from '../lib/runner';
+import {
+  assertNpmDistributionAssets,
+  assertPlatformBuildAssets,
+  assertPlatformPackageAssets,
+} from '../lib/npm-package-validation';
+import { header, info, success } from '../lib/runner';
 
 const OUT_DIR = join(ROOT_DIR, '.mango', 'out');
 const DIST_DIR = join(ROOT_DIR, 'dist-npm');
@@ -25,17 +30,35 @@ const writeManifest = (dir: string, manifest: Record<string, unknown>): void => 
   writeFileSync(join(dir, 'package.json'), `${JSON.stringify(manifest, null, 2)}\n`);
 };
 
+const printHelp = (): never => {
+  console.log(`Usage: bun ./scripts/release/pack-npm.ts [--validate [dist-dir]]
+
+Default:
+  Assemble dist-npm/ from .mango/out/ binary build output.
+
+Flags:
+  --validate [dist-dir]  Validate staged npm package assets without assembling.
+  --help                 Show this help message`);
+  process.exit(0);
+};
+
+const resolveValidationDistDir = (args: readonly string[]): string | undefined => {
+  if (args[0] !== '--validate') {
+    return undefined;
+  }
+
+  if (args.length > 2) {
+    throw new Error(`Unexpected validation argument(s): ${args.slice(2).join(' ')}`);
+  }
+
+  return resolve(ROOT_DIR, args[1] ?? 'dist-npm');
+};
+
 // Stage one platform package: manifest + binary + frontend public/ sidecar.
-// Returns false when the platform's binary was not built (partial release).
-const stagePlatform = (platform: NpmPlatform, version: string): boolean => {
+const stagePlatform = (platform: NpmPlatform, version: string): NpmPlatform => {
   const sourceDir = join(OUT_DIR, platform.arch);
   const binarySource = join(sourceDir, platform.binary);
-  if (!existsSync(binarySource)) {
-    warn(
-      `Skipping ${platformPackageName(platform)} — ${platform.binary} not found in ${sourceDir}`
-    );
-    return false;
-  }
+  assertPlatformBuildAssets(sourceDir, platform);
 
   const packageDir = join(DIST_DIR, `${platform.os}-${platform.cpu}`);
   mkdirSync(packageDir, { recursive: true });
@@ -43,11 +66,11 @@ const stagePlatform = (platform: NpmPlatform, version: string): boolean => {
   cpSync(binarySource, join(packageDir, platform.binary));
 
   const publicSource = join(sourceDir, 'public');
-  if (existsSync(publicSource)) {
-    cpSync(publicSource, join(packageDir, 'public'), { recursive: true });
-  }
+  cpSync(publicSource, join(packageDir, 'public'), { recursive: true });
+  assertPlatformPackageAssets(packageDir, platform);
+
   info(`Staged ${platformPackageName(platform)}`);
-  return true;
+  return platform;
 };
 
 // Stage the main wrapper package: copy bin + README, inject the version and
@@ -67,20 +90,33 @@ const stageMainPackage = (version: string, platforms: readonly NpmPlatform[]): v
 };
 
 const main = async (): Promise<void> => {
+  const args = process.argv.slice(2);
+  if (args.includes('--help')) {
+    printHelp();
+  }
+
+  const validationDistDir = resolveValidationDistDir(args);
+  if (validationDistDir) {
+    header('Validate npm distribution');
+    assertNpmDistributionAssets(validationDistDir);
+    success(`npm distribution is publishable: ${validationDistDir}`);
+    return;
+  }
+
+  if (args.length > 0) {
+    throw new Error(`Unknown argument(s): ${args.join(' ')}`);
+  }
+
   const version = process.env.VERSION?.replace(/^v/, '') ?? '0.0.0';
   header(`Pack npm (v${version})`);
 
   await removePaths(['dist-npm']);
   mkdirSync(DIST_DIR, { recursive: true });
 
-  const staged = NPM_PLATFORMS.filter((platform) => stagePlatform(platform, version));
-  if (staged.length === 0) {
-    throw new Error(
-      'No platform binaries found in .mango/out — run `bun run build --binary` first.'
-    );
-  }
+  const staged = NPM_PLATFORMS.map((platform) => stagePlatform(platform, version));
 
   stageMainPackage(version, staged);
+  assertNpmDistributionAssets(DIST_DIR, staged);
   success(`\nStaged ${staged.length} platform package(s) + the wrapper in dist-npm/.`);
 };
 
