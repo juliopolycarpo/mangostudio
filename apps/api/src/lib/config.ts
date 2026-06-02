@@ -106,6 +106,14 @@ const ENV_KEY_MAP: Record<string, (cfg: MangoConfig, value: string) => void> = {
 };
 
 /**
+ * Env var names that carry runtime configuration (the keys of ENV_KEY_MAP).
+ * Exported so the detached-spawn allowlist can forward exactly these without a
+ * hand-maintained copy that drifts when a new key is added here.
+ * // Usage: RUNTIME_CONFIG_ENV_KEYS
+ */
+export const RUNTIME_CONFIG_ENV_KEYS: readonly string[] = Object.keys(ENV_KEY_MAP);
+
+/**
  * Returns the user-level MangoStudio directory (~/.mango).
  * Used for user config, secrets, and runtime data across dev and standalone modes.
  */

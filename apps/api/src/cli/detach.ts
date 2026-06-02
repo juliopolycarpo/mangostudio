@@ -5,6 +5,7 @@
  */
 
 import { closeSync, openSync } from 'node:fs';
+import { RUNTIME_CONFIG_ENV_KEYS } from '../lib/config';
 import { ensureRuntimeDirs, getServerLogPath } from '../lib/mango-paths';
 import { isStandaloneExecutable } from '../lib/runtime-paths';
 import { readState } from '../lib/server-state';
@@ -81,17 +82,11 @@ async function confirmStarted(child: PendingChild, d: DetachDeps): Promise<void>
  * runtime configuration (mirrors config.ts `ENV_KEY_MAP`) plus the system and
  * networking variables the server actually needs to run are forwarded.
  */
-const DETACH_ENV_ALLOWLIST = new Set([
-  // Runtime configuration — keep in sync with config.ts ENV_KEY_MAP.
-  'API_PORT',
-  'API_HOST',
-  'FRONTEND_PORT',
-  'DATABASE_PATH',
-  'UPLOADS_DIR',
-  'IMAGES_DIR',
-  'AGENTS_DIR',
-  'BETTER_AUTH_SECRET',
-  'BETTER_AUTH_URL',
+const DETACH_ENV_ALLOWLIST = new Set<string>([
+  // Runtime configuration — sourced from config.ts so a new ENV_KEY_MAP key
+  // reaches detached children without editing two lists.
+  ...RUNTIME_CONFIG_ENV_KEYS,
+  // Runtime vars read directly from process.env (not part of ENV_KEY_MAP).
   'MANGO_LOG_FILE',
   'VERSION',
   'MANGOSTUDIO_DIAGNOSTIC_LOGS',
@@ -115,9 +110,24 @@ const DETACH_ENV_ALLOWLIST = new Set([
   'HTTP_PROXY',
   'HTTPS_PROXY',
   'NO_PROXY',
+  'ALL_PROXY',
   'http_proxy',
   'https_proxy',
   'no_proxy',
+  'all_proxy',
+  // Windows runtime essentials. Bun.spawn replaces the env, and without these a
+  // detached Windows server loses networking/crypto (SystemRoot/windir),
+  // executable resolution for the shell tools (COMSPEC/PATHEXT), and the
+  // standard data directories provider SDKs read.
+  'SystemRoot',
+  'windir',
+  'SystemDrive',
+  'COMSPEC',
+  'PATHEXT',
+  'APPDATA',
+  'LOCALAPPDATA',
+  'ProgramData',
+  'NUMBER_OF_PROCESSORS',
 ]);
 
 /**
