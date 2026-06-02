@@ -1,10 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
-  getMangoDir,
+  getConfigEnvFilePath,
   isReloadableSecretEnvKey,
+  loadConfigForTest,
   reloadSecretEnv,
+  resetConfig,
   resetSecretEnvTracking,
 } from '../../../src/lib/config';
 
@@ -27,14 +29,16 @@ describe('isReloadableSecretEnvKey', () => {
 describe('reloadSecretEnv', () => {
   const SECRET_KEY = 'GEMINI_API_KEY_RELOADTEST';
   const TOUCHED_KEYS = [SECRET_KEY, 'NODE_OPTIONS', 'PATH'];
-  const ENV_FILE_PATH = join(getMangoDir(), '.env');
+  const TMP_DIR = join('/tmp', `mango-reload-env-test-${process.pid}`);
 
-  let envFileSnapshot: string | null = null;
+  let envFilePath = '';
   const envVarSnapshot: Record<string, string | undefined> = {};
 
   beforeEach(() => {
+    mkdirSync(TMP_DIR, { recursive: true });
+    loadConfigForTest({ configFilePath: join(TMP_DIR, 'config.toml') });
+    envFilePath = getConfigEnvFilePath(join(TMP_DIR, 'config.toml'));
     resetSecretEnvTracking();
-    envFileSnapshot = existsSync(ENV_FILE_PATH) ? readFileSync(ENV_FILE_PATH, 'utf8') : null;
     for (const key of TOUCHED_KEYS) {
       envVarSnapshot[key] = process.env[key];
     }
@@ -42,11 +46,7 @@ describe('reloadSecretEnv', () => {
   });
 
   afterEach(() => {
-    if (envFileSnapshot === null) {
-      if (existsSync(ENV_FILE_PATH)) rmSync(ENV_FILE_PATH);
-    } else {
-      writeFileSync(ENV_FILE_PATH, envFileSnapshot);
-    }
+    rmSync(TMP_DIR, { recursive: true, force: true });
     for (const key of TOUCHED_KEYS) {
       const original = envVarSnapshot[key];
       if (original === undefined) {
@@ -55,13 +55,14 @@ describe('reloadSecretEnv', () => {
         process.env[key] = original;
       }
     }
+    resetConfig();
     resetSecretEnvTracking();
   });
 
   it('loads valid secret keys but never injects runtime-sensitive vars', () => {
     const injected = process.env.NODE_OPTIONS;
     writeFileSync(
-      ENV_FILE_PATH,
+      envFilePath,
       `${SECRET_KEY}="sk-reload-value"\nNODE_OPTIONS="--inspect-brk"\nPATH="/evil"\n`
     );
 
@@ -74,11 +75,11 @@ describe('reloadSecretEnv', () => {
   });
 
   it('drops a previously loaded key once the file no longer defines it', () => {
-    writeFileSync(ENV_FILE_PATH, `${SECRET_KEY}="sk-reload-value"\n`);
+    writeFileSync(envFilePath, `${SECRET_KEY}="sk-reload-value"\n`);
     reloadSecretEnv();
     expect(process.env[SECRET_KEY]).toBe('sk-reload-value');
 
-    writeFileSync(ENV_FILE_PATH, '');
+    writeFileSync(envFilePath, '');
     reloadSecretEnv();
 
     expect(process.env[SECRET_KEY]).toBeUndefined();

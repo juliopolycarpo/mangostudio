@@ -1,7 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { getMangoDir, resetSecretEnvTracking } from '../../../src/lib/config';
+import {
+  getConfigEnvFilePath,
+  loadConfigForTest,
+  resetConfig,
+  resetSecretEnvTracking,
+} from '../../../src/lib/config';
 import {
   persistSecret,
   removeSecret,
@@ -10,31 +15,25 @@ import {
 const CONNECTOR_ENV_VAR = 'GEMINI_API_KEY_DEFAULT';
 const SECRET_VALUE = 'sk-regression-test-key';
 
-// persistSecret/removeSecret with the 'environment' source write to the real
-// .mango/.env and re-sync process.env. Snapshot and restore both so these tests
-// never corrupt the developer's local config or leak state into sibling tests.
-const ENV_FILE_PATH = join(getMangoDir(), '.env');
-let envFileSnapshot: string | null = null;
+const TMP_DIR = join('/tmp', `mango-secret-persistence-test-${process.pid}`);
 let envVarSnapshot: string | undefined;
 
 beforeEach(() => {
+  mkdirSync(TMP_DIR, { recursive: true });
+  loadConfigForTest({ configFilePath: join(TMP_DIR, 'config.toml') });
   resetSecretEnvTracking();
-  envFileSnapshot = existsSync(ENV_FILE_PATH) ? readFileSync(ENV_FILE_PATH, 'utf8') : null;
   envVarSnapshot = process.env[CONNECTOR_ENV_VAR];
   delete process.env[CONNECTOR_ENV_VAR];
 });
 
 afterEach(() => {
-  if (envFileSnapshot === null) {
-    if (existsSync(ENV_FILE_PATH)) rmSync(ENV_FILE_PATH);
-  } else {
-    writeFileSync(ENV_FILE_PATH, envFileSnapshot);
-  }
+  rmSync(TMP_DIR, { recursive: true, force: true });
   if (envVarSnapshot === undefined) {
     delete process.env[CONNECTOR_ENV_VAR];
   } else {
     process.env[CONNECTOR_ENV_VAR] = envVarSnapshot;
   }
+  resetConfig();
   resetSecretEnvTracking();
 });
 
@@ -43,6 +42,9 @@ describe('persistSecret environment source', () => {
     await persistSecret('regression-test-id', 'Default', 'gemini', 'environment', SECRET_VALUE);
 
     expect(process.env[CONNECTOR_ENV_VAR]).toBe(SECRET_VALUE);
+    expect(readFileSync(getConfigEnvFilePath(join(TMP_DIR, 'config.toml')), 'utf8')).toContain(
+      CONNECTOR_ENV_VAR
+    );
   });
 
   it('drops the secret from process.env after removeSecret', async () => {
