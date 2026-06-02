@@ -2,11 +2,10 @@
  * Unit tests for ToolSettingsPage component.
  */
 
-import { screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ToolSettingsPage } from '../../../src/features/settings/tools/components/ToolSettingsPage';
-import { render } from '../../support/harness/render';
+import { act, fireEvent, render, screen } from '../../support/harness/render';
 import { createFetchScenario } from '../../support/mocks/create-fetch-scenario';
 
 const TOOLS_RESPONSE = {
@@ -61,6 +60,7 @@ describe('ToolSettingsPage', () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     fetchScenario.restore();
   });
 
@@ -194,6 +194,68 @@ describe('ToolSettingsPage', () => {
     await screen.findByText('Current date and time');
 
     expect(screen.queryByText('Save')).not.toBeInTheDocument();
+  });
+
+  it('ignores failed autosave results after unmount', async () => {
+    const originalWindow = window;
+    let rejectToolUpdate: ((reason?: unknown) => void) | undefined;
+
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const method = input instanceof Request ? input.method : init?.method;
+      const url = input instanceof Request ? input.url : String(input);
+      const path = new URL(url, 'http://localhost').pathname;
+
+      if ((method ?? 'GET').toUpperCase() === 'GET' && path === '/api/settings/tools') {
+        return Promise.resolve(
+          new Response(JSON.stringify(TOOLS_RESPONSE), {
+            headers: { 'Content-Type': 'application/json' },
+          })
+        );
+      }
+
+      if (method === 'PUT' && path === '/api/settings/tools/get_current_datetime') {
+        return new Promise<Response>((_, reject) => {
+          rejectToolUpdate = reject;
+        });
+      }
+
+      return Promise.reject(new Error(`Unhandled request: ${method ?? 'GET'} ${path}`));
+    });
+
+    vi.stubGlobal('fetch', fetchMock);
+    const { unmount } = render(
+      <ToolSettingsPage maxToolIterations={10} setMaxToolIterations={setMaxToolIterations} />
+    );
+
+    await screen.findByText('Current date and time');
+
+    vi.useFakeTimers();
+    fireEvent.change(screen.getByDisplayValue('UTC'), {
+      target: { value: 'Europe/Lisbon' },
+    });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(350);
+    });
+
+    if (!rejectToolUpdate) throw new Error('Expected autosave PUT request');
+
+    unmount();
+
+    try {
+      vi.stubGlobal('window', undefined);
+      rejectToolUpdate(new Error('save failed'));
+      for (let index = 0; index < 5; index += 1) {
+        await Promise.resolve();
+      }
+    } finally {
+      vi.stubGlobal('window', originalWindow);
+    }
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/api/settings/tools/get_current_datetime'),
+      expect.objectContaining({ method: 'PUT' })
+    );
   });
 
   it('renders model selector when parameter has modelType image', async () => {

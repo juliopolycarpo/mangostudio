@@ -67,9 +67,17 @@ export function ToolSettingsCard({ descriptor }: ToolSettingsCardProps) {
   const { mutateAsync, isPending } = useUpdateToolSetting();
   const translated = getTranslatedToolText(descriptor, t);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isMountedRef = useRef(true);
 
   const [enabled, setEnabled] = useState(descriptor.enabled);
   const [params, setParams] = useState<Record<string, unknown>>({ ...descriptor.parameters });
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
 
   const handleToggle = useCallback(async () => {
     const newEnabled = !enabled;
@@ -79,8 +87,10 @@ export function ToolSettingsCard({ descriptor }: ToolSettingsCardProps) {
         toolName: descriptor.name,
         body: { enabled: newEnabled },
       });
+      if (!isMountedRef.current) return;
       setEnabled(typeof nextDescriptor.enabled === 'boolean' ? nextDescriptor.enabled : newEnabled);
     } catch {
+      if (!isMountedRef.current) return;
       setEnabled(descriptor.enabled);
     }
   }, [enabled, mutateAsync, descriptor.name, descriptor.enabled]);
@@ -101,10 +111,12 @@ export function ToolSettingsCard({ descriptor }: ToolSettingsCardProps) {
         nextDescriptor.parameters && typeof nextDescriptor.parameters === 'object'
           ? { ...nextDescriptor.parameters }
           : requestedParams;
+      if (!isMountedRef.current) return;
       setParams((currentParams) =>
         areToolParametersEqual(currentParams, requestedParams) ? nextParameters : currentParams
       );
     } catch {
+      if (!isMountedRef.current) return;
       setParams((currentParams) =>
         areToolParametersEqual(currentParams, requestedParams)
           ? { ...descriptor.parameters }
