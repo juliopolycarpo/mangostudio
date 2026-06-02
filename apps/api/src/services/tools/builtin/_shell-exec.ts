@@ -5,6 +5,7 @@
 
 import { resolve } from 'node:path';
 import { expandHome } from './_fs-utils';
+import { sanitizeShellEnv } from './_shell-env';
 
 /** Shell interpreters exposed as tools. */
 export type ShellKind = 'bash' | 'zsh' | 'powershell';
@@ -97,6 +98,8 @@ function spawnShell(executable: string, input: RunShellCommandInput) {
   try {
     return Bun.spawn(buildInvocation(input.kind, executable, input.command), {
       ...(cwd ? { cwd } : {}),
+      // Withhold connector API keys and the auth secret from AI-run commands.
+      env: sanitizeShellEnv(),
       stdin: 'ignore',
       stdout: 'pipe',
       stderr: 'pipe',

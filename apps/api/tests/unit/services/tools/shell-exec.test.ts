@@ -128,3 +128,39 @@ describe('runShellCommand', () => {
     expect(Date.now() - startedAt).toBeLessThan(4000);
   });
 });
+
+describe('runShellCommand env sanitization', () => {
+  const SECRET_KEY = 'SHELLTEST_API_KEY_LEAK';
+  const PUBLIC_KEY = 'SHELLTEST_PUBLIC_MARKER';
+
+  beforeEach(() => {
+    process.env[SECRET_KEY] = 'sk-must-not-leak';
+    process.env[PUBLIC_KEY] = 'visible';
+  });
+
+  afterEach(() => {
+    delete process.env[SECRET_KEY];
+    delete process.env[PUBLIC_KEY];
+  });
+
+  it.skipIf(!hasBash)('withholds connector secrets from the spawned shell', async () => {
+    const result = await runShellCommand({
+      kind: 'bash',
+      command: `echo "[$${SECRET_KEY}]"`,
+      timeoutMs: 5000,
+      maxOutputBytes: 1000,
+    });
+    // The variable is unset in the child, so it expands to empty.
+    expect(result.stdout.trim()).toBe('[]');
+  });
+
+  it.skipIf(!hasBash)('still forwards non-secret environment variables', async () => {
+    const result = await runShellCommand({
+      kind: 'bash',
+      command: `echo "[$${PUBLIC_KEY}]"`,
+      timeoutMs: 5000,
+      maxOutputBytes: 1000,
+    });
+    expect(result.stdout.trim()).toBe('[visible]');
+  });
+});
