@@ -13,6 +13,7 @@
 
 import { type ApiErrorResponse, ERROR_CODES } from '@mangostudio/shared/errors';
 import type { Elysia } from 'elysia';
+import { type RateLimitEntry, RateLimitStore } from './rate-limit-store';
 
 /** A named limit bucket: requests are counted per (bucket, client IP). */
 export interface RateLimitBucket {
@@ -45,11 +46,6 @@ interface RateLimitConfig {
   classify?: (path: string) => RateLimitBucket | null;
   /** Trust proxy headers (X-Forwarded-For, etc.) for client IP (default: false) */
   trustProxy?: boolean;
-}
-
-interface RateLimitEntry {
-  count: number;
-  resetTime: number;
 }
 
 /** Mutable response controls Elysia exposes on the context. */
@@ -86,10 +82,28 @@ function resolvePath(path: string | undefined, url: string): string {
   return path ?? new URL(url).pathname;
 }
 
+/** Upper bound on a plausible IP token (IPv6 + zone id ≈ 50 chars); reject longer. */
+const MAX_CLIENT_IP_LENGTH = 64;
+
+/**
+ * Trimmed IP candidate, or null when it is empty or implausibly long. Bounds the
+ * store-key size so a hostile forwarded header cannot push megabyte-long keys
+ * into memory. // Usage: sanitizeClientIp(' 1.2.3.4 ') // → "1.2.3.4"
+ */
+function sanitizeClientIp(value: string | undefined | null): string | null {
+  if (!value) return null;
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.length > MAX_CLIENT_IP_LENGTH) return null;
+  return trimmed;
+}
+
 /**
  * Extract the client IP, honoring proxy headers only when explicitly trusted.
  * `ip` is the peer socket address (the unspoofable default); proxy headers
- * override it only when `trustProxy` is set.
+ * override it only when `trustProxy` is set. Every source is run through
+ * `sanitizeClientIp`, so a blank leading X-Forwarded-For hop (e.g. ",9.9.9.9")
+ * or an oversized value falls through to the next source instead of yielding an
+ * empty/huge key that would bypass or bloat the limiter.
  *
  * Takes `headers` and `ip` as discrete arguments rather than the request or the
  * whole Elysia context on purpose. Elysia statically analyzes hook source to
@@ -100,15 +114,14 @@ function resolvePath(path: string | undefined, url: string): string {
  * the request. Referencing only the `headers` sub-object sidesteps both.
  */
 function extractClientIp(headers: Headers, ip: string | undefined, trustProxy: boolean): string {
-  if (!trustProxy) return ip ?? 'unknown';
+  if (!trustProxy) return sanitizeClientIp(ip) ?? 'unknown';
 
-  // Honor the first X-Forwarded-For hop, but ignore a blank leading entry
-  // (e.g. ",9.9.9.9") instead of treating it as a real — and so un-limitable —
-  // client, which would let a crafted header bypass the limiter.
-  const forwarded = headers.get('x-forwarded-for')?.split(',')[0].trim();
+  const forwarded = sanitizeClientIp(headers.get('x-forwarded-for')?.split(',')[0]);
   if (forwarded) return forwarded;
 
-  return headers.get('cf-connecting-ip') || headers.get('x-real-ip') || ip || 'unknown';
+  const proxyIp =
+    sanitizeClientIp(headers.get('cf-connecting-ip')) ?? sanitizeClientIp(headers.get('x-real-ip'));
+  return proxyIp ?? sanitizeClientIp(ip) ?? 'unknown';
 }
 
 /**
@@ -122,8 +135,8 @@ function extractClientIp(headers: Headers, ip: string | undefined, trustProxy: b
 export function rateLimit(config: Partial<RateLimitConfig> = {}) {
   const mergedConfig: RateLimitConfig = { ...defaultConfig, ...config };
 
-  // In-memory store: `rate-limit:<bucket>:<ip>` key → entry
-  const store = new Map<string, RateLimitEntry>();
+  // In-memory store, keyed `rate-limit:<bucket>:<ip>`, bounded by maxStoreSize.
+  const store = new RateLimitStore(mergedConfig.maxStoreSize);
   let lastCleanup = Date.now();
 
   // Single bucket used when the caller does not supply a `classify` function.
@@ -138,42 +151,15 @@ export function rateLimit(config: Partial<RateLimitConfig> = {}) {
     return mergedConfig.classify ? mergedConfig.classify(path) : defaultBucket;
   }
 
-  /** Remove expired entries; evict oldest when store exceeds maxStoreSize. */
-  function cleanup(): void {
-    const now = Date.now();
-    for (const [key, entry] of store) {
-      if (entry.resetTime < now) {
-        store.delete(key);
-      }
-    }
-    // If still over limit after expiry cleanup, evict oldest entries
-    if (store.size > mergedConfig.maxStoreSize) {
-      const overflow = store.size - mergedConfig.maxStoreSize;
-      let evicted = 0;
-      for (const key of store.keys()) {
-        store.delete(key);
-        evicted++;
-        if (evicted >= overflow) break;
-      }
-    }
+  /** Periodic expiry sweep; overflow eviction runs per-request via the store. */
+  function runScheduledCleanup(now: number): void {
+    store.removeExpired(now);
     lastCleanup = now;
   }
 
   /** Call in tests or on graceful shutdown to free resources. */
   function teardown(): void {
     store.clear();
-  }
-
-  /** Increment (or initialize/reset) the counter for a bucket+IP key. */
-  function touch(key: string, bucket: RateLimitBucket, now: number): RateLimitEntry {
-    const existing = store.get(key);
-    if (!existing || existing.resetTime < now) {
-      const entry: RateLimitEntry = { count: 1, resetTime: now + bucket.windowMs };
-      store.set(key, entry);
-      return entry;
-    }
-    existing.count++;
-    return existing;
   }
 
   /** Set X-RateLimit-* headers reflecting the current bucket state. */
@@ -230,12 +216,15 @@ export function rateLimit(config: Partial<RateLimitConfig> = {}) {
 
         const now = Date.now();
 
-        // Lazy cleanup: run only when the interval has elapsed
+        // Lazy expiry sweep: run only when the interval has elapsed.
         if (now - lastCleanup >= mergedConfig.cleanupIntervalMs) {
-          cleanup();
+          runScheduledCleanup(now);
         }
 
-        const entry = touch(`rate-limit:${bucket.name}:${clientIp}`, bucket, now);
+        const entry = store.touch(`rate-limit:${bucket.name}:${clientIp}`, bucket.windowMs, now);
+        // Bound memory immediately (not just on the timer) so a flood of distinct
+        // keys — e.g. spoofed forwarded IPs — cannot grow the store unbounded.
+        store.evictOverflow();
         // Pass `ctx.set`, not `ctx`: aliasing the whole context here would make
         // Elysia eagerly parse the request body. See extractClientIp.
         setRateHeaders(ctx.set, bucket, entry);

@@ -125,4 +125,26 @@ describe('rate-limit buckets', () => {
 
     limiter.teardown();
   });
+
+  /**
+   * Defense-in-depth: an implausibly long forwarded value must not become a
+   * giant store key. It is rejected and the limiter falls through to the
+   * x-real-ip fallback, which still identifies the caller and enforces limits.
+   */
+  it('rejects an oversized X-Forwarded-For value and falls back', async () => {
+    const limiter = rateLimit({ max: 2, windowMs: 60_000, trustProxy: true });
+    const app = new Elysia().use(limiter).get('/chats', () => ({ ok: true }));
+    const get = () =>
+      app.handle(
+        new Request('http://localhost/chats', {
+          headers: { 'x-forwarded-for': '9'.repeat(500), 'x-real-ip': '5.5.5.5' },
+        })
+      );
+
+    expect((await get()).status).toBe(200);
+    expect((await get()).status).toBe(200);
+    expect((await get()).status).toBe(429); // counted under x-real-ip, not the 500-char value
+
+    limiter.teardown();
+  });
 });
