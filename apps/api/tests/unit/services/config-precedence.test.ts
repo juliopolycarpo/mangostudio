@@ -13,7 +13,12 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { getConfigEnvFilePath, loadConfig, resetConfig } from '../../../src/lib/config';
+import {
+  getConfigEnvFilePath,
+  loadConfig,
+  parseBooleanFlag,
+  resetConfig,
+} from '../../../src/lib/config';
 
 const TMP_DIR = join('/tmp', `mango-config-test-${process.pid}`);
 const TMP_TOML = join(TMP_DIR, 'config.toml');
@@ -26,6 +31,7 @@ const WATCHED_ENV_KEYS = [
   'DATABASE_PATH',
   'UPLOADS_DIR',
   'IMAGES_DIR',
+  'TRUST_PROXY',
 ];
 
 function saveEnv(): Record<string, string | undefined> {
@@ -181,6 +187,51 @@ describe('config precedence', () => {
     const cfg = loadConfig(join(TMP_DIR, 'nonexistent.toml'));
 
     expect(cfg.images.dir).toBe(resolve(import.meta.dir, '../../../../../tmp/generated-images'));
+  });
+
+  test('security.trustProxy defaults to false', () => {
+    const cfg = loadConfig(join(TMP_DIR, 'nonexistent.toml'));
+
+    expect(cfg.security.trustProxy).toBe(false);
+  });
+
+  test('loads security.trustProxy from config.toml', () => {
+    writeFileSync(TMP_TOML, '[security]\ntrustProxy = true\n');
+
+    const cfg = loadConfig(TMP_TOML);
+
+    expect(cfg.security.trustProxy).toBe(true);
+  });
+
+  test('process.env TRUST_PROXY overrides config.toml security.trustProxy', () => {
+    writeFileSync(TMP_TOML, '[security]\ntrustProxy = true\n');
+    process.env.TRUST_PROXY = '0';
+
+    const cfg = loadConfig(TMP_TOML);
+
+    expect(cfg.security.trustProxy).toBe(false);
+  });
+
+  test('process.env TRUST_PROXY enables trust over the default', () => {
+    process.env.TRUST_PROXY = 'true';
+
+    const cfg = loadConfig(join(TMP_DIR, 'nonexistent.toml'));
+
+    expect(cfg.security.trustProxy).toBe(true);
+  });
+});
+
+describe('parseBooleanFlag', () => {
+  test('treats 1/true/yes/on (any case) as true', () => {
+    for (const truthy of ['1', 'true', 'TRUE', 'Yes', 'on', ' on ']) {
+      expect(parseBooleanFlag(truthy)).toBe(true);
+    }
+  });
+
+  test('treats everything else as false', () => {
+    for (const falsy of ['0', 'false', 'no', 'off', '', 'enabled', '2']) {
+      expect(parseBooleanFlag(falsy)).toBe(false);
+    }
   });
 });
 

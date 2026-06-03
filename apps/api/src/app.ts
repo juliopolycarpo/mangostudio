@@ -35,7 +35,9 @@ const api = new Elysia({ prefix: '/api' })
   // Rate limiting with per-route-group buckets. `classifyRateLimit` routes
   // health and auth into their own generous buckets so they are not gated by
   // the general API limit, while everything else shares the baseline bucket.
-  .use(rateLimit({ classify: classifyRateLimit }))
+  // `trustProxy` lets proxied deployments (e.g. Docker behind nginx) resolve
+  // the real client IP from forwarded headers; off by default (see config).
+  .use(rateLimit({ classify: classifyRateLimit, trustProxy: getConfig().security.trustProxy }))
   // Health check — covered by its own generous bucket (registered after the
   // limiter so the limiter's hooks apply to it).
   .get('/health', () => ({ status: 'ok', timestamp: Date.now() }))
