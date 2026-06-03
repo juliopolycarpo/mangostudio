@@ -150,15 +150,23 @@ export function ToolSettingsCard({ descriptor }: ToolSettingsCardProps) {
     };
   }, [hasUnsavedParams, isPending, persistParameters]);
 
+  // Hold the latest flush inputs in a ref so the unmount effect can stay
+  // subscribed to nothing ([] deps). Depending on persistParameters/params here
+  // would re-run this cleanup on every keystroke and fire an immediate,
+  // non-debounced save of the previous value, defeating the autosave debounce.
+  const flushInputsRef = useRef({ hasUnsavedParams, isPending, persistParameters });
+  flushInputsRef.current = { hasUnsavedParams, isPending, persistParameters };
+
   useEffect(
     () => () => {
       if (saveTimerRef.current) {
         clearTimeout(saveTimerRef.current);
       }
-      if (!hasUnsavedParams || isPending) return;
-      void persistParameters();
+      const flushInputs = flushInputsRef.current;
+      if (!flushInputs.hasUnsavedParams || flushInputs.isPending) return;
+      void flushInputs.persistParameters();
     },
-    [hasUnsavedParams, isPending, persistParameters]
+    []
   );
 
   return (
