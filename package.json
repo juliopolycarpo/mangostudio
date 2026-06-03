@@ -39,7 +39,7 @@
     "dprint": "^0.54.0",
     "git-cliff": "^2.13.1",
     "jscpd": "^4",
-    "lefthook": "^2.1.6",
+    "lefthook": "^2.1.9",
     "madge": "^8.0.0",
     "typescript": "~6.0.3"
   }
