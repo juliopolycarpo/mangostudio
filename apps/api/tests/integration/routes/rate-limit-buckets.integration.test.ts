@@ -12,18 +12,22 @@ type GetFn = (path: string) => Promise<Response>;
 /**
  * Mirrors the production `/api` wiring (prefix + errorHandler + the real
  * classify policy) so the test exercises the same prefixed runtime paths the
- * skip predicate previously mishandled. `trustProxy` makes the client IP
- * deterministic under `app.handle()`. Returns a `get` closure bound to the
- * concrete app so callers avoid Elysia's invariant instance type.
+ * skip predicate previously mishandled. The general-bucket route is mounted as
+ * a separate plugin via `.use()`, matching how production registers feature
+ * routes (e.g. `chatRoutes`) — this proves the limiter's hooks still apply
+ * across the `.use()` plugin boundary, not just to inline routes. `trustProxy`
+ * makes the client IP deterministic under `app.handle()`. Returns a `get`
+ * closure bound to the concrete app so callers avoid Elysia's invariant type.
  */
 function buildApiApp() {
   const limiter = rateLimit({ classify: classifyRateLimit, trustProxy: true });
+  const chatRoutes = new Elysia().get('/chats', () => ({ ok: true }));
   const api = new Elysia({ prefix: '/api' })
     .use(errorHandler)
     .use(limiter)
     .get('/health', () => ({ status: 'ok' }))
     .group('/auth', (group) => group.get('/session', () => ({ ok: true })))
-    .get('/chats', () => ({ ok: true }));
+    .use(chatRoutes);
   const app = new Elysia().use(api);
   const get: GetFn = (path) =>
     app.handle(new Request(`http://localhost${path}`, { headers: CALLER }));
