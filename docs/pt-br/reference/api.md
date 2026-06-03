@@ -142,12 +142,12 @@ Todos os erros da API seguem o shape `ApiErrorResponse`:
 
 ```json
 {
-  "error": true,
-  "code": "NOT_FOUND",
-  "message": "Chat not found",
-  "status": 404
+  "error": "Chat not found",
+  "code": "NOT_FOUND"
 }
 ```
+
+`error` carrega a mensagem legível e `code` uma das constantes abaixo; o HTTP status fica na própria resposta. Falhas em campos específicos podem incluir um mapa opcional `details`.
 
 Erros de streaming usam `SSEErrorEvent`:
 
@@ -157,12 +157,12 @@ data: {"type":"error","error":"Provider API error","done":true}
 
 ### Códigos De Erro Comuns
 
-| Código                 | HTTP Status | Significado                                |
-| ---------------------- | ----------- | ------------------------------------------ |
-| `NOT_FOUND`            | 404         | Recurso não existe                         |
-| `VALIDATION_ERROR`     | 400         | Body de request inválido                   |
-| `UNAUTHORIZED`         | 401         | Sessão ausente ou inválida                 |
-| `FORBIDDEN`            | 403         | Recurso não pertence ao usuário            |
-| `CONFLICT`             | 409         | Recurso duplicado                          |
-| `UNPROCESSABLE_ENTITY` | 422         | JSON válido, semântica inválida            |
-| `SERVICE_UNAVAILABLE`  | 503         | Modelo indisponível ou provedor fora do ar |
+| Código           | HTTP Status | Significado                               |
+| ---------------- | ----------- | ----------------------------------------- |
+| `UNAUTHORIZED`   | 401         | Sessão ausente ou inválida                |
+| `OWNERSHIP`      | 403         | Recurso não pertence ao usuário           |
+| `NOT_FOUND`      | 404         | Recurso não existe                        |
+| `VALIDATION`     | 422         | Body de request ou semântica inválida     |
+| `RATE_LIMITED`   | 429         | Muitas requisições (ver `Retry-After`)    |
+| `INTERNAL`       | 500         | Erro inesperado do servidor               |
+| `PROVIDER_ERROR` | 502 / 503   | Provedor de modelo falhou ou indisponível |

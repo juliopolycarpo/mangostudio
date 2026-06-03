@@ -124,7 +124,7 @@ Better Auth handles sessions via cookie-based authentication. The `auth-middlewa
 
 ### Error Handling
 
-- API errors use `ApiErrorResponse` from `@mangostudio/shared/contracts`: `{ error: true, code, message, status }`.
+- API errors use `ApiErrorResponse` from `@mangostudio/shared/contracts`: `{ error: string, code?: string, details?: Record<string, string> }`. The HTTP status is carried by the response, not the body.
 - Streaming errors use `SSEErrorEvent` from `@mangostudio/shared/streaming`: `{ type: 'error', error, done: true }`.
 - Domain errors extend `Error` with typed codes (e.g., `ChatNotFoundError`, `ToolParameterError`).
 - The centralized `error-handler.ts` plugin maps thrown errors to HTTP responses.

@@ -113,7 +113,7 @@ O Better Auth gerencia sessões via autenticação baseada em cookies. O plugin 
 
 ### Tratamento De Erros
 
-- Erros de API usam `ApiErrorResponse` de `@mangostudio/shared/contracts`: `{ error: true, code, message, status }`.
+- Erros de API usam `ApiErrorResponse` de `@mangostudio/shared/contracts`: `{ error: string, code?: string, details?: Record<string, string> }`. O HTTP status é carregado pela resposta, não pelo body.
 - Erros de streaming usam `SSEErrorEvent` de `@mangostudio/shared/streaming`: `{ type: 'error', error, done: true }`.
 - Erros de domínio estendem `Error` com códigos tipados, como `ChatNotFoundError` e `ToolParameterError`.
 - O plugin centralizado `error-handler.ts` mapeia exceções lançadas para respostas HTTP.
