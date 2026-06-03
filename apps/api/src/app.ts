@@ -16,6 +16,7 @@ import { respondStreamRoutes } from './modules/generation/http/respond-stream-ro
 import { messageRoutes } from './modules/messages/http/message-routes';
 import { errorHandler } from './plugins/error-handler';
 import { rateLimit } from './plugins/rate-limit';
+import { classifyRateLimit } from './plugins/rate-limit-policy';
 import { authRoutes } from './routes/auth';
 import { createGeneratedImageRoutes } from './routes/generated-images';
 import { settingsRoutes } from './routes/settings';
@@ -29,18 +30,15 @@ const IMAGES_DIR = getConfig().images.dir;
  * Separating this ensures Eden Treaty correctly identifies /api as a namespace.
  */
 const api = new Elysia({ prefix: '/api' })
-  // Health check
-  .get('/health', () => ({ status: 'ok', timestamp: Date.now() }))
   // Centralized error handling
   .use(errorHandler)
-  // Rate limiting for API routes
-  .use(
-    rateLimit({
-      max: 100,
-      windowMs: 60000,
-      skip: (path) => path === '/health' || path.startsWith('/auth'),
-    })
-  )
+  // Rate limiting with per-route-group buckets. `classifyRateLimit` routes
+  // health and auth into their own generous buckets so they are not gated by
+  // the general API limit, while everything else shares the baseline bucket.
+  .use(rateLimit({ classify: classifyRateLimit }))
+  // Health check — covered by its own generous bucket (registered after the
+  // limiter so the limiter's hooks apply to it).
+  .get('/health', () => ({ status: 'ok', timestamp: Date.now() }))
   // Register features
   .use(authRoutes)
   .use(chatRoutes)

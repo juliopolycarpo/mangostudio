@@ -1,32 +1,49 @@
 /**
  * Basic rate limiting plugin for Elysia.
- * Limits requests per IP address with configurable window and max requests.
- * Uses in-memory storage with LRU eviction (suitable for single-instance deployment).
+ * Counts requests per (bucket, client IP) with a configurable window and max.
+ * An injected `classify` function sorts each request path into a named bucket,
+ * letting route groups (e.g. health, auth, general API) carry independent
+ * limits without sharing a counter.
  *
  * NOTE: This implementation uses process-local in-memory storage. It will NOT
- * correctly enforce rate limits across multiple processes or instances (e.g., in a
- * load-balanced deployment). For multi-process deployments, replace the `store` Map
- * with a shared backend such as Redis.
+ * correctly enforce rate limits across multiple processes or instances (e.g.,
+ * in a load-balanced deployment). For multi-process deployments, replace the
+ * `store` Map with a shared backend such as Redis.
  */
 
+import { type ApiErrorResponse, ERROR_CODES } from '@mangostudio/shared/errors';
 import type { Elysia } from 'elysia';
 
-interface RateLimitConfig {
-  /** Maximum number of requests per window (default: 100) */
+/** A named limit bucket: requests are counted per (bucket, client IP). */
+export interface RateLimitBucket {
+  /** Identifier used to namespace the per-IP counter store. */
+  name: string;
+  /** Maximum number of requests allowed per window. */
   max: number;
-  /** Time window in milliseconds (default: 60000 = 1 minute) */
+  /** Window length in milliseconds. */
   windowMs: number;
-  /** Message to return when rate limited (default: 'Too many requests') */
+}
+
+interface RateLimitConfig {
+  /** Max requests for the default bucket when `classify` is not provided. */
+  max: number;
+  /** Window for the default bucket when `classify` is not provided. */
+  windowMs: number;
+  /** Message returned in the 429 body (default: 'Too many requests…') */
   message: string;
   /** Whether to include rate limit headers (default: true) */
   headers: boolean;
-  /** Maximum number of IP entries to keep in memory (default: 10000) */
+  /** Maximum number of counter entries to keep in memory (default: 10000) */
   maxStoreSize: number;
-  /** How often to run lazy cleanup in milliseconds (default: 300000 = 5 minutes) */
+  /** How often to run lazy cleanup in milliseconds (default: 300000 = 5 min) */
   cleanupIntervalMs: number;
-  /** Skip rate limiting for certain paths (e.g., health checks) */
-  skip?: (path: string) => boolean;
-  /** Trust proxy headers (X-Forwarded-For, etc.) for client IP extraction (default: false) */
+  /**
+   * Resolve which bucket applies to a request path. Return `null` to exempt the
+   * path from rate limiting entirely. Defaults to a single 'global' bucket
+   * built from `max`/`windowMs`.
+   */
+  classify?: (path: string) => RateLimitBucket | null;
+  /** Trust proxy headers (X-Forwarded-For, etc.) for client IP (default: false) */
   trustProxy?: boolean;
 }
 
@@ -55,6 +72,26 @@ const defaultConfig: RateLimitConfig = {
   cleanupIntervalMs: 5 * 60 * 1000, // 5 minutes
 };
 
+/** Resolve the request path, preferring Elysia's parsed `path`. */
+function resolvePath(ctx: RateLimitContext): string {
+  return ctx.path ?? new URL(ctx.request.url).pathname;
+}
+
+/** Extract the client IP, honoring proxy headers only when explicitly trusted. */
+function extractClientIp(ctx: RateLimitContext, trustProxy: boolean): string {
+  if (!trustProxy) return ctx.ip ?? 'unknown';
+
+  const forwarded = ctx.request.headers.get('x-forwarded-for');
+  if (forwarded) return forwarded.split(',')[0].trim();
+
+  return (
+    ctx.request.headers.get('cf-connecting-ip') ||
+    ctx.request.headers.get('x-real-ip') ||
+    ctx.ip ||
+    'unknown'
+  );
+}
+
 /**
  * Creates a rate limiting plugin for Elysia.
  * Cleanup runs lazily on requests instead of via setInterval to avoid
@@ -66,9 +103,21 @@ const defaultConfig: RateLimitConfig = {
 export function rateLimit(config: Partial<RateLimitConfig> = {}) {
   const mergedConfig: RateLimitConfig = { ...defaultConfig, ...config };
 
-  // In-memory store: IP key → entry
+  // In-memory store: `rate-limit:<bucket>:<ip>` key → entry
   const store = new Map<string, RateLimitEntry>();
   let lastCleanup = Date.now();
+
+  // Single bucket used when the caller does not supply a `classify` function.
+  const defaultBucket: RateLimitBucket = {
+    name: 'global',
+    max: mergedConfig.max,
+    windowMs: mergedConfig.windowMs,
+  };
+
+  /** Resolve the bucket for a path, or `null` when the path is exempt. */
+  function resolveBucket(path: string): RateLimitBucket | null {
+    return mergedConfig.classify ? mergedConfig.classify(path) : defaultBucket;
+  }
 
   /** Remove expired entries; evict oldest when store exceeds maxStoreSize. */
   function cleanup(): void {
@@ -96,40 +145,65 @@ export function rateLimit(config: Partial<RateLimitConfig> = {}) {
     store.clear();
   }
 
+  /** Increment (or initialize/reset) the counter for a bucket+IP key. */
+  function touch(key: string, bucket: RateLimitBucket, now: number): RateLimitEntry {
+    const existing = store.get(key);
+    if (!existing || existing.resetTime < now) {
+      const entry: RateLimitEntry = { count: 1, resetTime: now + bucket.windowMs };
+      store.set(key, entry);
+      return entry;
+    }
+    existing.count++;
+    return existing;
+  }
+
+  /** Set X-RateLimit-* headers reflecting the current bucket state. */
+  function setRateHeaders(
+    ctx: RateLimitContext,
+    bucket: RateLimitBucket,
+    entry: RateLimitEntry
+  ): void {
+    if (!mergedConfig.headers) return;
+    const remaining = Math.max(0, bucket.max - entry.count);
+    ctx.set.headers ??= {};
+    ctx.set.headers['X-RateLimit-Limit'] = bucket.max.toString();
+    ctx.set.headers['X-RateLimit-Remaining'] = remaining.toString();
+    ctx.set.headers['X-RateLimit-Reset'] = Math.ceil(entry.resetTime / 1000).toString();
+  }
+
+  /** Build the 429 response, setting status and a Retry-After header. */
+  function rejectOverLimit(
+    ctx: RateLimitContext,
+    entry: RateLimitEntry,
+    now: number
+  ): ApiErrorResponse {
+    ctx.set.status = 429;
+    ctx.set.headers ??= {};
+    ctx.set.headers['Retry-After'] = Math.max(
+      1,
+      Math.ceil((entry.resetTime - now) / 1000)
+    ).toString();
+    return { error: mergedConfig.message, code: ERROR_CODES.RATE_LIMITED };
+  }
+
   const plugin = (app: Elysia) => {
     return app
       .derive((context) => {
-        const requestContext = context as RateLimitContext;
-        // Skip rate limiting for certain paths
-        const path = requestContext.path ?? new URL(requestContext.request.url).pathname;
-        if (mergedConfig.skip?.(path)) {
-          return { clientIp: 'skipped' };
-        }
-
-        // Extract client IP; only trust proxy headers when explicitly enabled
-        let clientIp: string;
-        if (mergedConfig.trustProxy) {
-          const xForwardedFor = requestContext.request.headers.get('x-forwarded-for');
-          clientIp = xForwardedFor
-            ? xForwardedFor.split(',')[0].trim()
-            : requestContext.request.headers.get('cf-connecting-ip') ||
-              requestContext.request.headers.get('x-real-ip') ||
-              requestContext.ip ||
-              'unknown';
-        } else {
-          clientIp = requestContext.ip ?? 'unknown';
-        }
-
-        return { clientIp };
+        const ctx = context as RateLimitContext;
+        return { clientIp: extractClientIp(ctx, mergedConfig.trustProxy ?? false) };
       })
       .onBeforeHandle((context) => {
-        const requestContext = context as RateLimitContext;
-        const { clientIp } = requestContext;
+        const ctx = context as RateLimitContext;
+        const { clientIp } = ctx;
 
-        // 'skipped' sentinel is set by derive() when the skip predicate matched;
-        // avoid re-evaluating the predicate with a potentially different path.
-        if (!clientIp || clientIp === 'unknown' || clientIp === 'skipped') {
+        // Cannot identify the caller → cannot fairly rate limit.
+        if (!clientIp || clientIp === 'unknown') {
           return;
+        }
+
+        const bucket = resolveBucket(resolvePath(ctx));
+        if (!bucket) {
+          return; // path is exempt
         }
 
         const now = Date.now();
@@ -139,34 +213,11 @@ export function rateLimit(config: Partial<RateLimitConfig> = {}) {
           cleanup();
         }
 
-        const key = `rate-limit:${clientIp}`;
-        const existing = store.get(key);
+        const entry = touch(`rate-limit:${bucket.name}:${clientIp}`, bucket, now);
+        setRateHeaders(ctx, bucket, entry);
 
-        // Initialize or reset expired entry; capture in `entry` to avoid a second Map lookup
-        let entry: RateLimitEntry;
-        if (!existing || existing.resetTime < now) {
-          entry = { count: 1, resetTime: now + mergedConfig.windowMs };
-          store.set(key, entry);
-        } else {
-          existing.count++;
-          entry = existing;
-        }
-
-        // Set rate limit headers
-        if (mergedConfig.headers) {
-          const remaining = Math.max(0, mergedConfig.max - entry.count);
-          requestContext.set.headers ??= {};
-          requestContext.set.headers['X-RateLimit-Limit'] = mergedConfig.max.toString();
-          requestContext.set.headers['X-RateLimit-Remaining'] = remaining.toString();
-          requestContext.set.headers['X-RateLimit-Reset'] = Math.ceil(
-            entry.resetTime / 1000
-          ).toString();
-        }
-
-        // Check if rate limited
-        if (entry.count > mergedConfig.max) {
-          requestContext.set.status = 429;
-          throw new Error(mergedConfig.message);
+        if (entry.count > bucket.max) {
+          return rejectOverLimit(ctx, entry, now);
         }
       });
   };
