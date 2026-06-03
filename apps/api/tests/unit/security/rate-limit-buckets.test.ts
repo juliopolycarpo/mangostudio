@@ -101,4 +101,28 @@ describe('rate-limit buckets', () => {
 
     teardown();
   });
+
+  /**
+   * Regression: a blank leading X-Forwarded-For hop (e.g. ",9.9.9.9") must not
+   * resolve to an empty client IP and shadow a usable fallback header. An empty
+   * IP is treated as unidentifiable and skipped, so a crafted header would
+   * otherwise bypass limiting under `trustProxy`.
+   */
+  it('falls back past a blank X-Forwarded-For hop instead of skipping the limiter', async () => {
+    const limiter = rateLimit({ max: 2, windowMs: 60_000, trustProxy: true });
+    const app = new Elysia().use(limiter).get('/chats', () => ({ ok: true }));
+    // The blank first hop must yield to the x-real-ip fallback, not an empty IP.
+    const get = () =>
+      app.handle(
+        new Request('http://localhost/chats', {
+          headers: { 'x-forwarded-for': ',9.9.9.9', 'x-real-ip': '5.5.5.5' },
+        })
+      );
+
+    expect((await get()).status).toBe(200);
+    expect((await get()).status).toBe(200);
+    expect((await get()).status).toBe(429); // resolved via x-real-ip, so limiting applies
+
+    limiter.teardown();
+  });
 });

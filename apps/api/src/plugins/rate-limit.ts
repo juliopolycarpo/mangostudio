@@ -102,8 +102,11 @@ function resolvePath(path: string | undefined, url: string): string {
 function extractClientIp(headers: Headers, ip: string | undefined, trustProxy: boolean): string {
   if (!trustProxy) return ip ?? 'unknown';
 
-  const forwarded = headers.get('x-forwarded-for');
-  if (forwarded) return forwarded.split(',')[0].trim();
+  // Honor the first X-Forwarded-For hop, but ignore a blank leading entry
+  // (e.g. ",9.9.9.9") instead of treating it as a real — and so un-limitable —
+  // client, which would let a crafted header bypass the limiter.
+  const forwarded = headers.get('x-forwarded-for')?.split(',')[0].trim();
+  if (forwarded) return forwarded;
 
   return headers.get('cf-connecting-ip') || headers.get('x-real-ip') || ip || 'unknown';
 }
