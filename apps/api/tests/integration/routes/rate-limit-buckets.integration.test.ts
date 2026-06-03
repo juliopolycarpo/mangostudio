@@ -89,4 +89,55 @@ describe('rate-limit buckets under the /api prefix', () => {
 
     teardown();
   });
+
+  /**
+   * Regression: the limiter must not consume the request body. The Better Auth
+   * passthrough route reads the raw `request` itself, so if the limiter's hooks
+   * make Elysia eagerly parse the body, the stream is already used and auth
+   * (e.g. sign-up) fails with `ERR_BODY_ALREADY_USED`.
+   */
+  it('leaves the request body intact for passthrough handlers', async () => {
+    const limiter = rateLimit({ classify: classifyRateLimit, trustProxy: true });
+    // Mirrors the auth route: hand the untouched `request` to a downstream reader.
+    const authRoutes = new Elysia().group('/auth', (group) =>
+      group.all('/*', async ({ request }) => ({ echo: await request.json() }))
+    );
+    const api = new Elysia({ prefix: '/api' }).use(errorHandler).use(limiter).use(authRoutes);
+    const app = new Elysia().use(api);
+
+    const res = await app.handle(
+      new Request('http://localhost/api/auth/sign-up/email', {
+        method: 'POST',
+        headers: { ...CALLER, 'content-type': 'application/json' },
+        body: JSON.stringify({ email: 'smoke@test.local' }),
+      })
+    );
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ echo: { email: 'smoke@test.local' } });
+
+    limiter.teardown();
+  });
+
+  /**
+   * Regression: without `trustProxy` and without proxy headers (the production
+   * default), the limiter must still enforce. Elysia never sets `ctx.ip`, so it
+   * resolves the caller from the server socket; if that breaks, every request
+   * collapses to the 'unknown' sentinel and limits silently stop applying.
+   * Uses a real `listen()` server because `app.handle()` has no socket peer.
+   */
+  it('enforces limits by socket IP without trustProxy or proxy headers', async () => {
+    const limiter = rateLimit({ classify: () => ({ name: 'tiny', max: 2, windowMs: 60_000 }) });
+    const app = new Elysia().use(limiter).get('/x', () => ({ ok: true }));
+    app.listen(0); // ephemeral port
+    const port = (app.server as { port?: number } | null)?.port;
+    const hit = async () => (await fetch(`http://localhost:${port}/x`)).status;
+
+    expect(await hit()).toBe(200);
+    expect(await hit()).toBe(200);
+    expect(await hit()).toBe(429); // third request exceeds max=2
+
+    await app.stop();
+    limiter.teardown();
+  });
 });

@@ -52,14 +52,23 @@ interface RateLimitEntry {
   resetTime: number;
 }
 
+/** Mutable response controls Elysia exposes on the context. */
+interface RateLimitSet {
+  headers?: Record<string, string>;
+  status?: number;
+}
+
+/** Minimal slice of the Bun server needed to resolve the peer socket address. */
+interface RateLimitServer {
+  requestIP(request: Request): { address: string } | null;
+}
+
 interface RateLimitContext {
   path?: string;
   request: Request;
-  set: {
-    headers?: Record<string, string>;
-    status?: number;
-  };
-  ip?: string;
+  set: RateLimitSet;
+  // Elysia never populates `ctx.ip`; the peer address comes from `server`.
+  server?: RateLimitServer | null;
   clientIp?: string;
 }
 
@@ -73,23 +82,30 @@ const defaultConfig: RateLimitConfig = {
 };
 
 /** Resolve the request path, preferring Elysia's parsed `path`. */
-function resolvePath(ctx: RateLimitContext): string {
-  return ctx.path ?? new URL(ctx.request.url).pathname;
+function resolvePath(path: string | undefined, url: string): string {
+  return path ?? new URL(url).pathname;
 }
 
-/** Extract the client IP, honoring proxy headers only when explicitly trusted. */
-function extractClientIp(ctx: RateLimitContext, trustProxy: boolean): string {
-  if (!trustProxy) return ctx.ip ?? 'unknown';
+/**
+ * Extract the client IP, honoring proxy headers only when explicitly trusted.
+ * `ip` is the peer socket address (the unspoofable default); proxy headers
+ * override it only when `trustProxy` is set.
+ *
+ * Takes `headers` and `ip` as discrete arguments rather than the request or the
+ * whole Elysia context on purpose. Elysia statically analyzes hook source to
+ * decide what to materialize: handing a hook the full context (or the bare
+ * `request`) makes it treat the body as "maybe used" and eagerly parse it,
+ * which consumes the stream before the Better Auth passthrough can read it
+ * (`ERR_BODY_ALREADY_USED`) — and also drops the `set` mutations made later in
+ * the request. Referencing only the `headers` sub-object sidesteps both.
+ */
+function extractClientIp(headers: Headers, ip: string | undefined, trustProxy: boolean): string {
+  if (!trustProxy) return ip ?? 'unknown';
 
-  const forwarded = ctx.request.headers.get('x-forwarded-for');
+  const forwarded = headers.get('x-forwarded-for');
   if (forwarded) return forwarded.split(',')[0].trim();
 
-  return (
-    ctx.request.headers.get('cf-connecting-ip') ||
-    ctx.request.headers.get('x-real-ip') ||
-    ctx.ip ||
-    'unknown'
-  );
+  return headers.get('cf-connecting-ip') || headers.get('x-real-ip') || ip || 'unknown';
 }
 
 /**
@@ -158,31 +174,24 @@ export function rateLimit(config: Partial<RateLimitConfig> = {}) {
   }
 
   /** Set X-RateLimit-* headers reflecting the current bucket state. */
-  function setRateHeaders(
-    ctx: RateLimitContext,
-    bucket: RateLimitBucket,
-    entry: RateLimitEntry
-  ): void {
+  function setRateHeaders(set: RateLimitSet, bucket: RateLimitBucket, entry: RateLimitEntry): void {
     if (!mergedConfig.headers) return;
     const remaining = Math.max(0, bucket.max - entry.count);
-    ctx.set.headers ??= {};
-    ctx.set.headers['X-RateLimit-Limit'] = bucket.max.toString();
-    ctx.set.headers['X-RateLimit-Remaining'] = remaining.toString();
-    ctx.set.headers['X-RateLimit-Reset'] = Math.ceil(entry.resetTime / 1000).toString();
+    set.headers ??= {};
+    set.headers['X-RateLimit-Limit'] = bucket.max.toString();
+    set.headers['X-RateLimit-Remaining'] = remaining.toString();
+    set.headers['X-RateLimit-Reset'] = Math.ceil(entry.resetTime / 1000).toString();
   }
 
   /** Build the 429 response, setting status and a Retry-After header. */
   function rejectOverLimit(
-    ctx: RateLimitContext,
+    set: RateLimitSet,
     entry: RateLimitEntry,
     now: number
   ): ApiErrorResponse {
-    ctx.set.status = 429;
-    ctx.set.headers ??= {};
-    ctx.set.headers['Retry-After'] = Math.max(
-      1,
-      Math.ceil((entry.resetTime - now) / 1000)
-    ).toString();
+    set.status = 429;
+    set.headers ??= {};
+    set.headers['Retry-After'] = Math.max(1, Math.ceil((entry.resetTime - now) / 1000)).toString();
     return { error: mergedConfig.message, code: ERROR_CODES.RATE_LIMITED };
   }
 
@@ -190,7 +199,17 @@ export function rateLimit(config: Partial<RateLimitConfig> = {}) {
     return app
       .derive((context) => {
         const ctx = context as RateLimitContext;
-        return { clientIp: extractClientIp(ctx, mergedConfig.trustProxy ?? false) };
+        // Elysia leaves `ctx.ip` unset, so derive the peer address from the
+        // server socket — otherwise every caller collapses to 'unknown' and the
+        // limiter never enforces. `trustProxy` still gates header overrides.
+        // Pass `headers`, not `ctx`/`request`: see extractClientIp.
+        const socketIp = ctx.server?.requestIP(ctx.request)?.address;
+        const clientIp = extractClientIp(
+          ctx.request.headers,
+          socketIp,
+          mergedConfig.trustProxy ?? false
+        );
+        return { clientIp };
       })
       .onBeforeHandle((context) => {
         const ctx = context as RateLimitContext;
@@ -201,7 +220,7 @@ export function rateLimit(config: Partial<RateLimitConfig> = {}) {
           return;
         }
 
-        const bucket = resolveBucket(resolvePath(ctx));
+        const bucket = resolveBucket(resolvePath(ctx.path, ctx.request.url));
         if (!bucket) {
           return; // path is exempt
         }
@@ -214,10 +233,12 @@ export function rateLimit(config: Partial<RateLimitConfig> = {}) {
         }
 
         const entry = touch(`rate-limit:${bucket.name}:${clientIp}`, bucket, now);
-        setRateHeaders(ctx, bucket, entry);
+        // Pass `ctx.set`, not `ctx`: aliasing the whole context here would make
+        // Elysia eagerly parse the request body. See extractClientIp.
+        setRateHeaders(ctx.set, bucket, entry);
 
         if (entry.count > bucket.max) {
-          return rejectOverLimit(ctx, entry, now);
+          return rejectOverLimit(ctx.set, entry, now);
         }
       });
   };
