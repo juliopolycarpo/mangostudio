@@ -131,7 +131,7 @@ Better Auth handles sessions via cookie-based authentication. The `auth-middlewa
 
 ### Rate Limiting
 
-In-memory rate limiter (`rate-limit.ts`) with configurable window and max requests. Lazy cleanup of expired counters. Can be trusted-proxy-aware for deployment behind reverse proxies.
+In-memory rate limiter (`rate-limit.ts`) that counts requests per (bucket, client IP). A `classify` function (`rate-limit-policy.ts`) sorts each request path into a named bucket — `health` and `auth` get their own, more generous buckets so they are never gated by the general API limit, while everything else shares the baseline `general` bucket. Limited requests return a `429` `ApiErrorResponse` (`code: RATE_LIMITED`) with a `Retry-After` header. Lazy cleanup of expired counters. Can be trusted-proxy-aware for deployment behind reverse proxies.
 
 ### Validation
 

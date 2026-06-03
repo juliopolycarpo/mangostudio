@@ -120,7 +120,7 @@ O Better Auth gerencia sessões via autenticação baseada em cookies. O plugin 
 
 ### Rate Limiting
 
-Há um rate limiter em memória (`rate-limit.ts`) com janela e limite máximo de requests configuráveis. A limpeza de contadores expirados é lazy. Pode operar de forma proxy-aware quando a aplicação está atrás de reverse proxies.
+Há um rate limiter em memória (`rate-limit.ts`) que conta requests por (bucket, IP do cliente). Uma função `classify` (`rate-limit-policy.ts`) classifica cada path em um bucket nomeado — `health` e `auth` têm buckets próprios e mais generosos, então não ficam sujeitos ao limite geral da API, enquanto os demais endpoints compartilham o bucket `general` de base. Requests bloqueados retornam `429` no formato `ApiErrorResponse` (`code: RATE_LIMITED`) com header `Retry-After`. A limpeza de contadores expirados é lazy. Pode operar de forma proxy-aware quando a aplicação está atrás de reverse proxies.
 
 ### Validação
 
