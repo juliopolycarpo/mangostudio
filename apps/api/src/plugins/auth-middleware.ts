@@ -1,3 +1,4 @@
+import { type ApiErrorResponse, ERROR_CODES } from '@mangostudio/shared/errors';
 import type { Elysia } from 'elysia';
 import { getAuth } from '../auth';
 
@@ -25,6 +26,6 @@ export const requireAuth = (app: Elysia) =>
   app.use(authMiddleware).onBeforeHandle(({ user, set }) => {
     if (!user) {
       set.status = 401;
-      return { error: 'Unauthorized' };
+      return { error: 'Unauthorized', code: ERROR_CODES.UNAUTHORIZED } satisfies ApiErrorResponse;
     }
   });
