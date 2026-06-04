@@ -24,7 +24,7 @@ export function SettingsTabs() {
   return (
     <nav
       className="flex flex-wrap gap-1 sm:gap-0.5 border-b border-outline-variant/20 pb-0"
-      aria-label="Settings navigation"
+      aria-label={t.common.settingsNavigation}
     >
       {tabs.map(({ to, label }) => (
         <Link

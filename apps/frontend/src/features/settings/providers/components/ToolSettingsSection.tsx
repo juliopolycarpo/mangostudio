@@ -85,7 +85,10 @@ export function ToolSettingsSection({
               maxOutputTokens: e.target.value ? Number(e.target.value) : undefined,
             })
           }
-          placeholder={`1 – ${maxOutputTokensLimit}`}
+          placeholder={s.maxOutputTokensPlaceholder.replace(
+            '{limit}',
+            String(maxOutputTokensLimit)
+          )}
           className="w-full rounded-xl px-4 py-2.5 text-sm bg-surface-container-high text-on-surface border border-outline-variant/20 placeholder:text-on-surface/30 focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/20 transition-colors"
         />
       </div>

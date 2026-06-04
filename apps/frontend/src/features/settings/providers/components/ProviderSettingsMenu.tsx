@@ -29,7 +29,7 @@ export function ProviderSettingsMenu() {
           onClick={() => void refetch()}
           className="text-xs text-primary underline underline-offset-2 hover:no-underline"
         >
-          Retry
+          {t.common.retry}
         </button>
       </div>
     );

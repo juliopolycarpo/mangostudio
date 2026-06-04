@@ -495,11 +495,7 @@ export function ChatFeed({ chatId, messages }: { chatId: string | null; messages
                               {!msg.text && !msg.imageUrl && !msg.isGenerating && (
                                 <div className="bg-surface-container-lowest p-6 rounded-xl border border-outline-variant/5">
                                   <p className="font-body text-xs text-on-surface-variant leading-relaxed">
-                                    Using{' '}
-                                    <span className="text-primary-fixed-dim italic">
-                                      Neural Diffusion Path
-                                    </span>
-                                    .
+                                    {t.chat.feed.neuralDiffusionPath}
                                   </p>
                                 </div>
                               )}

@@ -37,14 +37,23 @@ export function resolveActiveModeModel(
   return resolveSelectedModel(globalModel, options);
 }
 
-export function getModelSelectorPlaceholder(catalog: ModelCatalogResponse): string {
+export interface ModelSelectorLabels {
+  loading: string;
+  unavailable: string;
+  noModelsAvailable: string;
+}
+
+export function getModelSelectorPlaceholder(
+  catalog: ModelCatalogResponse,
+  labels: ModelSelectorLabels
+): string {
   if (catalog.status === 'loading') {
-    return 'Loading models...';
+    return labels.loading;
   }
 
   if (catalog.status === 'error') {
-    return 'Models unavailable';
+    return labels.unavailable;
   }
 
-  return 'No models available';
+  return labels.noModelsAvailable;
 }

@@ -71,6 +71,7 @@ export const messages: Messages = {
       thoughtFor: 'Thought for {time}',
       respondedIn: 'Responded in {time}',
       noResponse: 'No response',
+      neuralDiffusionPath: 'Using Neural Diffusion Path.',
       createImageBadge: 'Create Image',
       subagentTrace: 'Subagent trace',
       subagentPendingName: 'Subagent',
@@ -452,6 +453,8 @@ export const messages: Messages = {
       capabilityTools: 'Tools',
       capabilityCaching: 'Caching',
       capabilityCompaction: 'Compaction',
+      reservedForFuture: 'Reserved for future settings',
+      maxOutputTokensPlaceholder: '1 – {limit}',
     },
     tools: {
       title: 'Tools',
@@ -596,6 +599,13 @@ export const messages: Messages = {
   common: {
     loading: 'Loading...',
     downloadFilenamePrefix: 'mangostudio',
+    mangoStudioLogo: 'Mango Studio Logo',
+    retry: 'Retry',
+    noResultsFor: 'No results for "{query}"',
+    contextIndicator: 'Context usage indicator',
+    settingsNavigation: 'Settings navigation',
+    openMenu: 'Open menu',
+    closeMenu: 'Close menu',
     disclaimer: 'Artificial Intelligence can make mistakes. Please double-check the results.',
   },
 
@@ -632,6 +642,9 @@ export const messages: Messages = {
     done: 'Done',
     error: 'Tool error',
     moreCount: '+{count} more',
+    argsLabel: 'args',
+    errorLabel: 'error',
+    resultLabel: 'result',
     labels: {
       list_directory: 'List',
       read_file: 'Read',
@@ -652,6 +665,15 @@ export const messages: Messages = {
     referenceImageUploadFailed: 'Failed to upload reference image. Please try again.',
     textGenerationFailed: 'Failed to get a response. Please try again.',
     imageGenerationFailed: 'Failed to generate image. Please try again.',
+    streamRequestFailed: 'Stream request failed',
+    streamResponseNoBody: 'Stream response has no body',
+  },
+
+  models: {
+    loading: 'Loading models...',
+    unavailable: 'Models unavailable',
+    noModelsAvailable: 'No models available',
+    preview: 'Preview',
   },
 
   api: {

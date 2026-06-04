@@ -1,3 +1,5 @@
+import { useI18n } from '@/hooks/use-i18n';
+
 interface ContextRingProps {
   ratio: number;
   severity: string;
@@ -5,6 +7,7 @@ interface ContextRingProps {
 
 /** Tiny circular progress ring for context usage. */
 export function ContextRing({ ratio, severity }: ContextRingProps) {
+  const { t } = useI18n();
   const size = 20;
   const stroke = 2.5;
   const r = (size - stroke) / 2;
@@ -25,7 +28,7 @@ export function ContextRing({ ratio, severity }: ContextRingProps) {
       style={{ width: size, height: size }}
     >
       <svg width={size} height={size} className="-rotate-90">
-        <title>Context usage indicator</title>
+        <title>{t.common.contextIndicator}</title>
         <circle
           cx={size / 2}
           cy={size / 2}

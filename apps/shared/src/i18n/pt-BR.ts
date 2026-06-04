@@ -69,6 +69,7 @@ export const messages = {
       thoughtFor: 'Pensou por {time}',
       respondedIn: 'Respondeu em {time}',
       noResponse: 'Sem resposta',
+      neuralDiffusionPath: 'Usando Neural Diffusion Path.',
       createImageBadge: 'Criar Imagem',
       subagentTrace: 'Trace de subagente',
       subagentPendingName: 'Subagente',
@@ -457,6 +458,8 @@ export const messages = {
       capabilityTools: 'Ferramentas',
       capabilityCaching: 'Cache',
       capabilityCompaction: 'Compactação',
+      reservedForFuture: 'Reservado para configurações futuras',
+      maxOutputTokensPlaceholder: '1 – {limit}',
     },
     tools: {
       title: 'Ferramentas',
@@ -603,6 +606,13 @@ export const messages = {
   common: {
     loading: 'Carregando...',
     downloadFilenamePrefix: 'mangostudio',
+    mangoStudioLogo: 'Logo do Mango Studio',
+    retry: 'Tentar novamente',
+    noResultsFor: 'Nenhum resultado para "{query}"',
+    contextIndicator: 'Indicador de uso de contexto',
+    settingsNavigation: 'Navegação de configurações',
+    openMenu: 'Abrir menu',
+    closeMenu: 'Fechar menu',
     disclaimer: 'A Inteligencia Artificial pode cometer erros, verifique os resultados com cautela',
   },
 
@@ -639,6 +649,9 @@ export const messages = {
     done: 'Concluído',
     error: 'Erro na ferramenta',
     moreCount: '+{count} mais',
+    argsLabel: 'argumentos',
+    errorLabel: 'erro',
+    resultLabel: 'resultado',
     labels: {
       list_directory: 'Listar',
       read_file: 'Leu',
@@ -659,6 +672,15 @@ export const messages = {
     referenceImageUploadFailed: 'Falha ao enviar a imagem de referência. Tente novamente.',
     textGenerationFailed: 'Falha ao obter uma resposta. Tente novamente.',
     imageGenerationFailed: 'Falha ao gerar imagem. Tente novamente.',
+    streamRequestFailed: 'Falha na requisição de stream',
+    streamResponseNoBody: 'Resposta do stream sem corpo',
+  },
+
+  models: {
+    loading: 'Carregando modelos...',
+    unavailable: 'Modelos indisponíveis',
+    noModelsAvailable: 'Nenhum modelo disponível',
+    preview: 'Pré-visualização',
   },
 
   api: {

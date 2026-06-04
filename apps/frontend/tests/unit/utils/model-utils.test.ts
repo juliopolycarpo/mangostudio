@@ -18,6 +18,12 @@ const options: ModelOption[] = [
   },
 ];
 
+const labels = {
+  loading: 'Loading models...',
+  unavailable: 'Models unavailable',
+  noModelsAvailable: 'No models available',
+};
+
 describe('hasModelOption', () => {
   it('returns false for undefined modelId', () => {
     expect(hasModelOption(undefined, options)).toBe(false);
@@ -87,17 +93,17 @@ describe('resolveActiveModeModel', () => {
 describe('getModelSelectorPlaceholder', () => {
   it('returns loading message when status is loading', () => {
     const catalog: ModelCatalogResponse = { ...EMPTY_MODEL_CATALOG, status: 'loading' };
-    expect(getModelSelectorPlaceholder(catalog)).toBe('Loading models...');
+    expect(getModelSelectorPlaceholder(catalog, labels)).toBe('Loading models...');
   });
 
   it('returns error message when status is error', () => {
     const catalog: ModelCatalogResponse = { ...EMPTY_MODEL_CATALOG, status: 'error' };
-    expect(getModelSelectorPlaceholder(catalog)).toBe('Models unavailable');
+    expect(getModelSelectorPlaceholder(catalog, labels)).toBe('Models unavailable');
   });
 
   it('returns no models message when status is idle', () => {
     const catalog: ModelCatalogResponse = { ...EMPTY_MODEL_CATALOG, status: 'idle' };
-    expect(getModelSelectorPlaceholder(catalog)).toBe('No models available');
+    expect(getModelSelectorPlaceholder(catalog, labels)).toBe('No models available');
   });
 
   it('returns no models message when status is ready', () => {
@@ -106,6 +112,6 @@ describe('getModelSelectorPlaceholder', () => {
       status: 'ready',
       configured: true,
     };
-    expect(getModelSelectorPlaceholder(catalog)).toBe('No models available');
+    expect(getModelSelectorPlaceholder(catalog, labels)).toBe('No models available');
   });
 });
