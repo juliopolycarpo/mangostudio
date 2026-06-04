@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { galleryKeys, galleryListQueryOptions } from '../../../src/features/gallery/queries';
 
 const { mockGetImages } = vi.hoisted(() => ({
@@ -27,6 +27,10 @@ function getQueryFn() {
 }
 
 describe('gallery queries', () => {
+  beforeEach(() => {
+    mockGetImages.mockReset();
+  });
+
   it('uses a stable gallery list key', () => {
     expect(galleryKeys.lists()).toEqual(['gallery', 'list']);
   });
