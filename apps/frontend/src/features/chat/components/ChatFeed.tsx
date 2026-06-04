@@ -379,7 +379,7 @@ export function ChatFeed({ chatId, messages }: { chatId: string | null; messages
                                       ? t.chat.feed.statusGenerated
                                       : t.chat.feed.statusReplied
                                 )
-                                .replace('{model}', msg.modelName)
+                                .replace('{model}', () => msg.modelName ?? '')
                             : t.chat.feed.modelFallback}
                         </span>
                         {!msg.isGenerating && !isImageTurn && (

@@ -157,7 +157,7 @@ export function ConnectorModelsModal({
             filteredTextModels.length === 0 &&
             filteredImageModels.length === 0 && (
               <div className="rounded-2xl border border-dashed border-outline-variant/20 bg-surface-container-lowest px-4 py-8 text-center text-sm text-on-surface-variant/70">
-                {t.common.noResultsFor.replace('{query}', modelSearchQuery)}
+                {t.common.noResultsFor.replace('{query}', () => modelSearchQuery)}
               </div>
             )}
         </div>

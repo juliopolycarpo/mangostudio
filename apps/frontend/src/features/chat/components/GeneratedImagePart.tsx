@@ -181,7 +181,7 @@ export function GeneratedImagePart({ part }: Props) {
             {modelLabel
               ? t.chat.feed.modelStatus
                   .replace('{status}', t.chat.feed.statusGenerating)
-                  .replace('{model}', modelLabel)
+                  .replace('{model}', () => modelLabel)
               : t.chat.feed.generatingImage}
           </span>
           <span className="text-[10px] text-on-surface-variant/50 font-body">{part.prompt}</span>
