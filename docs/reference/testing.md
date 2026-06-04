@@ -255,6 +255,27 @@ React/Vite coverage report, and `bun:test` writes pure-logic LCOV under
 bun run --filter @mangostudio/frontend test:coverage
 ```
 
+Current frontend coverage thresholds:
+
+- Statements: `70`
+- Branches: `60`
+- Functions: `64`
+- Lines: `72`
+
+Last verified with `bun run test --coverage` on this baseline:
+
+- Statements: `71.74%`
+- Branches: `62.92%`
+- Functions: `65.30%`
+- Lines: `73.81%`
+
+When raising or repairing coverage, prioritize release-critical surfaces first:
+
+- Auth lifecycle routes and logout/session transitions
+- Connector settings CRUD and provider validation errors
+- Chat orchestration and streaming UI states
+- Gallery loading, empty, pagination, and download flows
+
 ## Verification Checklist
 
 Before merging, run:
