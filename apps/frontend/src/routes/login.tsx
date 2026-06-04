@@ -6,8 +6,12 @@ import { Input } from '@/components/ui/Input';
 import { Logo } from '@/components/ui/Logo';
 import { useI18n } from '@/hooks/use-i18n';
 import { authClient } from '@/lib/auth-client';
+import { safeRedirect } from '@/lib/safe-redirect';
 
 export const Route = createFileRoute('/login')({
+  validateSearch: (raw: Record<string, unknown>): { redirect?: string } => ({
+    redirect: typeof raw.redirect === 'string' ? raw.redirect : undefined,
+  }),
   component: LoginPage,
 });
 
@@ -15,6 +19,7 @@ function LoginPage() {
   const navigate = useNavigate();
   const { t } = useI18n();
   const { data: session, isPending } = authClient.useSession();
+  const { redirect } = Route.useSearch();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -22,10 +27,9 @@ function LoginPage() {
 
   useEffect(() => {
     if (!isPending && session?.user) {
-      const redirect = new URLSearchParams(window.location.search).get('redirect');
-      void navigate({ to: redirect || '/' });
+      void navigate({ to: safeRedirect(redirect) });
     }
-  }, [session?.user, isPending, navigate]);
+  }, [session?.user, isPending, navigate, redirect]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

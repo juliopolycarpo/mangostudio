@@ -4,9 +4,14 @@ import { RouterProvider } from '@tanstack/react-router';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { authClient } from './lib/auth-client';
+import { setAuthNavigate } from './lib/auth-navigate';
 import { queryClient } from './lib/query-client';
 import { router } from './router';
 import './index.css';
+
+setAuthNavigate(() => {
+  router.navigate({ to: '/login' });
+});
 
 function App() {
   const { data: session, isPending } = authClient.useSession();

@@ -1,6 +1,7 @@
 import { treaty } from '@elysiajs/eden';
 import type { App } from '@mangostudio/api';
 import { getApiBaseUrl } from './api-base-url';
+import { navigateToLoginPage } from './auth-navigate';
 
 /** Debounced 401 redirect — prevents multiple simultaneous redirects from
  *  parallel queries and avoids redirecting when already on the login page. */
@@ -12,7 +13,7 @@ function handle401(): void {
   redirectScheduled = true;
   // Small delay so in-flight parallel requests don't each trigger a redirect
   setTimeout(() => {
-    window.location.href = '/login';
+    navigateToLoginPage();
   }, 100);
 }
 
