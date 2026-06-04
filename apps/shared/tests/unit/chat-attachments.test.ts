@@ -5,7 +5,13 @@ import {
   ChatAttachmentSchema,
   UploadChatAttachmentResponseSchema,
 } from '../../src/chat';
-import { GenerateTextBodySchema, RespondStreamBodySchema } from '../../src/generation';
+import {
+  GENERATION_ATTACHMENT_IDS_MAX_ITEMS,
+  GENERATION_MODEL_ID_MAX_LENGTH,
+  GENERATION_PROMPT_MAX_LENGTH,
+  GenerateTextBodySchema,
+  RespondStreamBodySchema,
+} from '../../src/generation';
 
 const attachment = {
   id: 'attachment-contract-1',
@@ -66,5 +72,35 @@ describe('chat attachment contracts', () => {
     };
 
     expect(Value.Check(RespondStreamBodySchema, body)).toBe(true);
+  });
+
+  it('rejects oversized text generation payload fields', () => {
+    expect(
+      Value.Check(GenerateTextBodySchema, {
+        chatId: 'chat-contract-1',
+        prompt: 'x'.repeat(GENERATION_PROMPT_MAX_LENGTH + 1),
+      })
+    ).toBe(false);
+
+    expect(
+      Value.Check(GenerateTextBodySchema, {
+        chatId: 'chat-contract-1',
+        prompt: 'Hello',
+        model: 'x'.repeat(GENERATION_MODEL_ID_MAX_LENGTH + 1),
+      })
+    ).toBe(false);
+  });
+
+  it('rejects oversized streaming attachment arrays', () => {
+    expect(
+      Value.Check(RespondStreamBodySchema, {
+        chatId: 'chat-contract-1',
+        prompt: 'Use these attachments.',
+        attachmentIds: Array.from(
+          { length: GENERATION_ATTACHMENT_IDS_MAX_ITEMS + 1 },
+          (_, index) => `attachment-${index}`
+        ),
+      })
+    ).toBe(false);
   });
 });
