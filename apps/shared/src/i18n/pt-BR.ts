@@ -605,6 +605,7 @@ export const messages = {
 
   common: {
     loading: 'Carregando...',
+    appName: 'Mango Studio',
     downloadFilenamePrefix: 'mangostudio',
     mangoStudioLogo: 'Logo do Mango Studio',
     retry: 'Tentar novamente',

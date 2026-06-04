@@ -598,6 +598,7 @@ export const messages: Messages = {
 
   common: {
     loading: 'Loading...',
+    appName: 'Mango Studio',
     downloadFilenamePrefix: 'mangostudio',
     mangoStudioLogo: 'Mango Studio Logo',
     retry: 'Retry',

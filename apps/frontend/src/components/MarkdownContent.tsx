@@ -34,6 +34,10 @@ function createRenderer(theme: CodeThemeId, copyCodeLabel: string): Renderer {
   renderer.image = ({ href, title, text }) => {
     const safeHref = href?.startsWith('javascript:') ? '#' : (href ?? '#');
     const titleAttr = title ? ` title="${title}"` : '';
+    // Structured `generated_image` parts are the supported image path in chat.
+    // Rendering arbitrary markdown images as real <img> tags lets external or
+    // hallucinated URLs thrash the virtualized feed while they resolve/fail.
+    // Keep the reference visible, but render it as a stable link instead.
     return `<a href="${safeHref}" target="_blank" rel="noopener noreferrer" class="markdown-image-link"${titleAttr}>${text || safeHref}</a>`;
   };
 
