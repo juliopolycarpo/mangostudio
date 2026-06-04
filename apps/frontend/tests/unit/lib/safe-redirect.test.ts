@@ -31,6 +31,10 @@ describe('safeRedirect', () => {
     expect(safeRedirect('//evil.com/phishing')).toBe('/');
   });
 
+  it('rejects backslash protocol-relative URLs', () => {
+    expect(safeRedirect('/\\evil.com/phishing')).toBe('/');
+  });
+
   it('rejects bare protocol URLs', () => {
     expect(safeRedirect('https://evil.com')).toBe('/');
     expect(safeRedirect('http://evil.com')).toBe('/');
