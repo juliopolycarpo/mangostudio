@@ -694,6 +694,32 @@ describe('useTextChat — failure surfaced as timeline item', () => {
     expect(errorParts[0].type === 'error' && errorParts[0].text).toBe('network boom');
   });
 
+  it('uses the localized fallback when the stream throws a non-Error value', async () => {
+    const props = makeProps();
+    mockStream.mockImplementation(() => Promise.reject('offline'));
+
+    const { result } = renderHook(() => useTextGeneration(props));
+
+    await act(async () => {
+      await result.current.handleRespond('test prompt');
+    });
+
+    await waitFor(() => expect(result.current.isGenerating).toBe(false));
+
+    const calls: Array<
+      [string, string, Partial<{ parts: MessagePart[]; isGenerating: boolean; text: string }>]
+    > = vi.mocked(props.optimistic.updateOptimisticMessage).mock.calls;
+
+    const finalCall = [...calls].reverse().find(([, , update]) => update.isGenerating === false);
+    expect(finalCall).toBeDefined();
+    if (!finalCall) throw new Error('expected a terminal update');
+    expect(finalCall[2].text).toBe('Failed to get a response. Please try again.');
+    expect(finalCall[2].parts).toContainEqual({
+      type: 'error',
+      text: 'Failed to get a response. Please try again.',
+    });
+  });
+
   it('does not duplicate error parts when stream yielded an error chunk before throwing', async () => {
     const props = makeProps();
     mockStream.mockImplementation((_req, onChunk) => {

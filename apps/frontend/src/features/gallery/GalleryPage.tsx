@@ -3,6 +3,7 @@ import { Download, LayoutGrid, Loader2, Maximize2, X } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { useEffect, useRef, useState } from 'react';
 import { useI18n } from '@/hooks/use-i18n';
+import { buildGeneratedImageFilename } from '@/lib/download-filenames';
 import { useGalleryQuery } from './queries';
 
 export function GalleryPage() {
@@ -84,7 +85,7 @@ export function GalleryPage() {
                   </button>
                   <a
                     href={item.imageUrl}
-                    download={`gemini-art-${item.id}.png`}
+                    download={buildGeneratedImageFilename(t.common.downloadFilenamePrefix, item.id)}
                     target="_blank"
                     rel="noreferrer"
                     className="p-2 bg-primary hover:bg-primary/90 rounded-lg text-on-primary transition-colors flex items-center justify-center"
@@ -136,7 +137,10 @@ export function GalleryPage() {
                 <p className="text-on-surface font-medium">{selectedImage.prompt}</p>
                 <a
                   href={selectedImage.imageUrl}
-                  download={`gemini-art-${selectedImage.id}.png`}
+                  download={buildGeneratedImageFilename(
+                    t.common.downloadFilenamePrefix,
+                    selectedImage.id
+                  )}
                   target="_blank"
                   rel="noreferrer"
                   className="mt-4 inline-flex items-center gap-2 px-4 py-2 bg-primary text-on-primary rounded-full text-sm font-bold hover:bg-primary/90 transition-colors"

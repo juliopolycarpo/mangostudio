@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'bun:test';
+import { buildGeneratedImageFilename } from '@/lib/download-filenames';
 import { cn, extractApiError } from '@/lib/utils';
+
+const defaultErrorFallback = 'An unknown error occurred';
 
 describe('cn', () => {
   it('merges class names', () => {
@@ -30,26 +33,40 @@ describe('extractApiError', () => {
   });
 
   it('returns empty string for empty string input', () => {
-    expect(extractApiError('')).toBe('Unknown error');
+    expect(extractApiError('')).toBe(defaultErrorFallback);
   });
 
   it('returns fallback for null', () => {
-    expect(extractApiError(null)).toBe('Unknown error');
+    expect(extractApiError(null)).toBe(defaultErrorFallback);
   });
 
   it('returns fallback for undefined', () => {
-    expect(extractApiError(undefined)).toBe('Unknown error');
+    expect(extractApiError(undefined)).toBe(defaultErrorFallback);
   });
 
   it('returns fallback for object without error field', () => {
-    expect(extractApiError({ status: 500 })).toBe('Unknown error');
+    expect(extractApiError({ status: 500 })).toBe(defaultErrorFallback);
   });
 
   it('returns fallback for object with empty error string', () => {
-    expect(extractApiError({ error: '' })).toBe('Unknown error');
+    expect(extractApiError({ error: '' })).toBe(defaultErrorFallback);
   });
 
   it('returns custom fallback when provided', () => {
     expect(extractApiError(null, 'Custom fallback')).toBe('Custom fallback');
+  });
+});
+
+describe('buildGeneratedImageFilename', () => {
+  it('uses the provider-neutral app prefix', () => {
+    expect(buildGeneratedImageFilename('mangostudio', 'image-1')).toBe(
+      'mangostudio-art-image-1.png'
+    );
+  });
+
+  it('sanitizes unsafe filename segments', () => {
+    expect(buildGeneratedImageFilename('mango studio', 'image/1')).toBe(
+      'mango-studio-art-image-1.png'
+    );
   });
 });

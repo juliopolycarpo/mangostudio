@@ -709,8 +709,7 @@ export function useTextGeneration({
           updateOptimisticMessage(activeChatId, currentAiMsgId, { isGenerating: false });
         } else {
           console.error('[respond]', error);
-          const errorText =
-            error instanceof Error ? error.message : 'Failed to get a response. Please try again.';
+          const errorText = error instanceof Error ? error.message : t.errors.textGenerationFailed;
           const alreadyHasError = accumulatedParts.some((p) => p.type === 'error');
           const nextParts: MessagePart[] = alreadyHasError
             ? accumulatedParts
@@ -737,6 +736,7 @@ export function useTextGeneration({
       getActiveModel,
       systemPrompt,
       promptSettings,
+      t,
       appendOptimisticMessages,
       updateOptimisticMessage,
       queryClient,

@@ -42,7 +42,7 @@ export const messages: Messages = {
       send: 'Send',
       generate: 'Generate',
       stop: 'Stop',
-      placeholder: 'Ask Gemini anything...',
+      placeholder: 'Ask the AI model anything...',
       imagePlaceholder: 'Describe your image...',
       addReferenceImage: 'Add reference image',
       createImages: 'Create images',
@@ -58,6 +58,8 @@ export const messages: Messages = {
       statusThinking: 'Thinking',
       statusGenerated: 'Generated',
       statusReplied: 'Replied',
+      modelFallback: 'AI model',
+      modelStatus: '{status} with: {model}',
       download: 'Download',
       saveToGallery: 'Save to Gallery',
       regenerate: 'Regenerate',
@@ -153,6 +155,7 @@ export const messages: Messages = {
       chatCompacted: 'Context compacted into a summary',
       summaryHandoff: 'This chat started from a summarized handoff',
     },
+    titleGenerationFailed: 'Failed to generate chat title',
   },
 
   studio: {
@@ -290,6 +293,7 @@ export const messages: Messages = {
       previewed: 'Markdown validated',
       loadError: 'Failed to load agents',
       saveError: 'Failed to save agent',
+      createError: 'Failed to create agent',
       deleteError: 'Failed to delete agent',
       previewError: 'Failed to preview agent',
       deleteTitle: 'Delete agent',
@@ -583,10 +587,15 @@ export const messages: Messages = {
         oneLight: 'One Light',
       },
     },
+    app: {
+      loadError: 'Failed to load app settings',
+      saveError: 'Failed to save app settings',
+    },
   },
 
   common: {
     loading: 'Loading...',
+    downloadFilenamePrefix: 'mangostudio',
     disclaimer: 'Artificial Intelligence can make mistakes. Please double-check the results.',
   },
 
@@ -638,8 +647,11 @@ export const messages: Messages = {
   },
 
   errors: {
+    unknown: 'An unknown error occurred',
     imageNotSupported: 'This provider does not support image generation.',
     referenceImageUploadFailed: 'Failed to upload reference image. Please try again.',
+    textGenerationFailed: 'Failed to get a response. Please try again.',
+    imageGenerationFailed: 'Failed to generate image. Please try again.',
   },
 
   api: {

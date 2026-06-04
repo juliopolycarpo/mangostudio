@@ -132,8 +132,7 @@ export function useImageGeneration({
         generatedImageSucceeded = true;
       } catch (error: unknown) {
         console.error('[generate]', error);
-        const errorText =
-          error instanceof Error ? error.message : 'Failed to generate image. Please try again.';
+        const errorText = error instanceof Error ? error.message : t.errors.imageGenerationFailed;
         updateOptimisticMessage(activeChatId, optimisticAiMsgId, {
           isGenerating: false,
           text: errorText,
