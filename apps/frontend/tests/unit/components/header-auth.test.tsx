@@ -5,9 +5,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { Header } from '../../../src/components/layout/Header';
 import { render } from '../../support/harness/render';
 
-const { mockNavigate, mockSignOut } = vi.hoisted(() => ({
+type SessionUser = { user: { name: string } } | null;
+
+const { mockNavigate, mockSignOut, sessionState } = vi.hoisted(() => ({
   mockNavigate: vi.fn(),
   mockSignOut: vi.fn(),
+  sessionState: { current: { user: { name: 'Test' } } as SessionUser },
 }));
 
 vi.mock('@tanstack/react-router', async () => {
@@ -20,13 +23,15 @@ vi.mock('@tanstack/react-router', async () => {
 
 vi.mock('../../../src/lib/auth-client', () => ({
   authClient: {
-    useSession: () => ({ data: { user: { name: 'Test' } } }),
+    useSession: () => ({ data: sessionState.current }),
     signOut: mockSignOut,
   },
 }));
 
-function renderHeader(overrides: Partial<ComponentProps<typeof Header>> = {}) {
-  const props: ComponentProps<typeof Header> = {
+function buildProps(
+  overrides: Partial<ComponentProps<typeof Header>> = {}
+): ComponentProps<typeof Header> {
+  return {
     activeModel: 'gpt-4',
     activeModels: [],
     isModelSelectorDisabled: false,
@@ -47,15 +52,19 @@ function renderHeader(overrides: Partial<ComponentProps<typeof Header>> = {}) {
     },
     ...overrides,
   };
+}
 
-  render(<Header {...props} />);
-  return props;
+function renderHeader(overrides: Partial<ComponentProps<typeof Header>> = {}) {
+  const props = buildProps(overrides);
+  const result = render(<Header {...props} />);
+  return { ...result, props };
 }
 
 describe('Header auth navigation', () => {
   beforeEach(() => {
     mockNavigate.mockReset();
     mockSignOut.mockReset();
+    sessionState.current = { user: { name: 'Test' } };
   });
 
   it('shows logout button when user session exists', () => {
@@ -63,16 +72,20 @@ describe('Header auth navigation', () => {
     expect(screen.getByTestId('logout-button')).toBeInTheDocument();
   });
 
-  it('navigates to /login after successful sign-out', async () => {
+  it('navigates to /login only once Better Auth clears the session', async () => {
     const user = userEvent.setup();
-    mockSignOut.mockImplementation(
-      (opts: { fetchOptions?: { onSuccess?: () => void; onError?: () => void } }) => {
-        opts?.fetchOptions?.onSuccess?.();
-      }
-    );
+    mockSignOut.mockResolvedValue(undefined);
 
-    renderHeader();
+    const { rerender, props } = renderHeader();
     await user.click(screen.getByTestId('logout-button'));
+
+    // The session atom is still populated right after sign-out (Better Auth
+    // refetches it asynchronously), so navigation must NOT fire yet.
+    expect(mockNavigate).not.toHaveBeenCalled();
+
+    // Simulate Better Auth clearing the session atom.
+    sessionState.current = null;
+    rerender(<Header {...props} />);
 
     await waitFor(() => {
       expect(mockNavigate).toHaveBeenCalledWith({ to: '/login' });
@@ -81,11 +94,10 @@ describe('Header auth navigation', () => {
 
   it('handles sign-out error without navigating', async () => {
     const user = userEvent.setup();
-    mockSignOut.mockImplementation(
-      (opts: { fetchOptions?: { onSuccess?: () => void; onError?: () => void } }) => {
-        opts?.fetchOptions?.onError?.();
-      }
-    );
+    mockSignOut.mockImplementation((opts: { fetchOptions?: { onError?: () => void } }) => {
+      opts?.fetchOptions?.onError?.();
+      return Promise.resolve(undefined);
+    });
 
     renderHeader();
     await user.click(screen.getByTestId('logout-button'));

@@ -21,16 +21,20 @@ const createTestQueryClient = () =>
 
 function render(ui: React.ReactElement, options?: Omit<RenderOptions, 'wrapper'>) {
   const testQueryClient = createTestQueryClient();
-  return tlRender(
-    <QueryClientProvider client={testQueryClient}>
-      <ThemeProvider>
-        <I18nProvider>
-          <ToastProvider>{ui}</ToastProvider>
-        </I18nProvider>
-      </ThemeProvider>
-    </QueryClientProvider>,
-    options
-  );
+  // Providers go through the `wrapper` option (not inline) so testing-library's
+  // `rerender` keeps them mounted across re-renders.
+  return tlRender(ui, {
+    ...options,
+    wrapper: ({ children }) => (
+      <QueryClientProvider client={testQueryClient}>
+        <ThemeProvider>
+          <I18nProvider>
+            <ToastProvider>{children}</ToastProvider>
+          </I18nProvider>
+        </ThemeProvider>
+      </QueryClientProvider>
+    ),
+  });
 }
 
 function renderHook<Result, Props>(
