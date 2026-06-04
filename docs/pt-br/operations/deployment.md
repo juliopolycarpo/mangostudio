@@ -114,6 +114,20 @@ your-domain.com {
 }
 ```
 
+### Confiar nos headers de proxy
+
+Atrás de um reverse proxy (incluindo Docker atrás de nginx/Caddy/load balancer),
+o peer do socket é o proxy, não o cliente, então por padrão todos os chamadores
+caem em um único contador de rate limit. Defina `TRUST_PROXY=true` (env) ou
+`trustProxy = true` em `[security]` no `config.toml` para que o limiter resolva o
+IP real do cliente a partir dos headers `X-Forwarded-For` / `X-Real-IP` /
+`CF-Connecting-IP` que o proxy define.
+
+> **Só habilite isso atrás de um proxy que sobrescreve esses headers** (a config
+> nginx acima usa `$proxy_add_x_forwarded_for`). Com exposição direta à internet,
+> um header confiável permite que qualquer cliente forje seu IP e burle o rate
+> limiting.
+
 ## Serviço systemd
 
 ```ini

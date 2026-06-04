@@ -114,6 +114,19 @@ your-domain.com {
 }
 ```
 
+### Trusting proxy headers
+
+Behind a reverse proxy (including Docker behind nginx/Caddy/a load balancer) the
+socket peer is the proxy, not the client, so by default every caller collapses
+to one rate-limit counter. Set `TRUST_PROXY=true` (env) or `trustProxy = true`
+under `[security]` in `config.toml` so the limiter resolves the real client IP
+from the `X-Forwarded-For` / `X-Real-IP` / `CF-Connecting-IP` headers the proxy
+sets.
+
+> **Only enable this behind a proxy that overwrites those headers** (the nginx
+> config above uses `$proxy_add_x_forwarded_for`). With direct internet exposure,
+> a trusted header lets any client spoof its IP and evade rate limiting.
+
 ## Systemd Service
 
 ```ini

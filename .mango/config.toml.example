@@ -38,6 +38,13 @@ secret = "your-secret-key-here-min-32-chars"
 # Empty = derived from server host:port
 url = ""
 
+[security]
+# Trust proxy headers (X-Forwarded-For / X-Real-IP / CF-Connecting-IP) when
+# resolving the client IP for rate limiting. Enable ONLY behind a reverse proxy
+# that overwrites these headers (nginx, a load balancer, Docker behind a proxy);
+# otherwise clients can spoof their IP. Default: false.
+# trustProxy = false
+
 # Gemini API key connectors.
 # Keys defined here appear automatically in the Settings UI.
 # You can enable/disable specific models per connector in the UI.

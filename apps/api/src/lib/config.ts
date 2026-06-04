@@ -56,6 +56,15 @@ export interface MangoConfig {
     secret: string;
     url: string;
   };
+  security: {
+    /**
+     * Trust proxy headers (X-Forwarded-For, X-Real-IP, CF-Connecting-IP) when
+     * resolving the client IP for rate limiting. Enable ONLY when the app runs
+     * behind a reverse proxy that overwrites these headers (e.g. nginx, a load
+     * balancer, Docker behind a proxy); otherwise clients can spoof them.
+     */
+    trustProxy: boolean;
+  };
   /** Computed CORS origins derived from frontend host/port. */
   corsOrigins: string[];
   /** Path to the config.toml that was loaded (for TOML-based services). */
@@ -70,9 +79,19 @@ const DEFAULT_CONFIG: Omit<MangoConfig, 'corsOrigins' | 'configFilePath'> = {
   images: { dir: '' },
   agents: { dir: '' },
   auth: { secret: '', url: '' },
+  security: { trustProxy: false },
 };
 
 export const AUTH_SECRET_MIN_LENGTH = 32;
+
+/**
+ * Parses a boolean-ish env/TOML string. Accepts `1`, `true`, `yes`, `on`
+ * (case-insensitive) as true; everything else is false.
+ * // Usage: parseBooleanFlag('true') // → true
+ */
+export function parseBooleanFlag(value: string): boolean {
+  return ['1', 'true', 'yes', 'on'].includes(value.trim().toLowerCase());
+}
 
 /** Maps .env keys to config paths for override resolution. */
 const ENV_KEY_MAP: Record<string, (cfg: MangoConfig, value: string) => void> = {
@@ -102,6 +121,9 @@ const ENV_KEY_MAP: Record<string, (cfg: MangoConfig, value: string) => void> = {
   },
   BETTER_AUTH_URL: (cfg, v) => {
     cfg.auth.url = v;
+  },
+  TRUST_PROXY: (cfg, v) => {
+    cfg.security.trustProxy = parseBooleanFlag(v);
   },
 };
 
@@ -261,6 +283,7 @@ function cloneDefaults(): MangoConfig {
     images: { ...DEFAULT_CONFIG.images },
     agents: { ...DEFAULT_CONFIG.agents },
     auth: { ...DEFAULT_CONFIG.auth },
+    security: { ...DEFAULT_CONFIG.security },
     corsOrigins: [],
     configFilePath: '',
   };
@@ -304,6 +327,11 @@ function applyToml(cfg: MangoConfig, parsed: Record<string, unknown>): void {
   if (auth) {
     if (typeof auth.secret === 'string') cfg.auth.secret = auth.secret;
     if (typeof auth.url === 'string') cfg.auth.url = auth.url;
+  }
+
+  const security = parsed.security as Record<string, unknown> | undefined;
+  if (security) {
+    if (typeof security.trustProxy === 'boolean') cfg.security.trustProxy = security.trustProxy;
   }
 }
 
@@ -459,6 +487,7 @@ export function loadConfigForTest(partial: Partial<MangoConfig> = {}): MangoConf
   if (partial.images) Object.assign(cfg.images, partial.images);
   if (partial.agents) Object.assign(cfg.agents, partial.agents);
   if (partial.auth) Object.assign(cfg.auth, partial.auth);
+  if (partial.security) Object.assign(cfg.security, partial.security);
   if (partial.corsOrigins) cfg.corsOrigins = partial.corsOrigins;
   if (partial.configFilePath) cfg.configFilePath = partial.configFilePath;
 

@@ -144,12 +144,12 @@ All API errors follow the `ApiErrorResponse` shape:
 
 ```json
 {
-  "error": true,
-  "code": "NOT_FOUND",
-  "message": "Chat not found",
-  "status": 404
+  "error": "Chat not found",
+  "code": "NOT_FOUND"
 }
 ```
+
+`error` carries the human-readable message and `code` one of the constants below; the HTTP status is on the response itself. Field-level failures may add an optional `details` map.
 
 Streaming errors use `SSEErrorEvent`:
 
@@ -159,12 +159,12 @@ data: {"type":"error","error":"Provider API error","done":true}
 
 ### Common Error Codes
 
-| Code                   | HTTP Status | Meaning                            |
-| ---------------------- | ----------- | ---------------------------------- |
-| `NOT_FOUND`            | 404         | Resource does not exist            |
-| `VALIDATION_ERROR`     | 400         | Invalid request body               |
-| `UNAUTHORIZED`         | 401         | Missing or invalid session         |
-| `FORBIDDEN`            | 403         | Resource not owned by user         |
-| `CONFLICT`             | 409         | Duplicate resource                 |
-| `UNPROCESSABLE_ENTITY` | 422         | Valid JSON, invalid semantics      |
-| `SERVICE_UNAVAILABLE`  | 503         | No model available / provider down |
+| Code             | HTTP Status | Meaning                                    |
+| ---------------- | ----------- | ------------------------------------------ |
+| `UNAUTHORIZED`   | 401         | Missing or invalid session                 |
+| `OWNERSHIP`      | 403         | Resource not owned by the user             |
+| `NOT_FOUND`      | 404         | Resource does not exist                    |
+| `VALIDATION`     | 422         | Invalid request body or semantics          |
+| `RATE_LIMITED`   | 429         | Too many requests (see `Retry-After`)      |
+| `INTERNAL`       | 500         | Unexpected server error                    |
+| `PROVIDER_ERROR` | 502 / 503   | Upstream model provider failed/unavailable |
