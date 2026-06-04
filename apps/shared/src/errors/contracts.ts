@@ -15,6 +15,7 @@ export interface SSEErrorEvent {
 /** Canonical error code constants shared across API and frontend. */
 export const ERROR_CODES = {
   UNAUTHORIZED: 'UNAUTHORIZED',
+  METHOD_NOT_ALLOWED: 'METHOD_NOT_ALLOWED',
   NOT_FOUND: 'NOT_FOUND',
   VALIDATION: 'VALIDATION',
   PROVIDER_ERROR: 'PROVIDER_ERROR',
