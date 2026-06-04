@@ -14,6 +14,9 @@ function handle401(): void {
   // Small delay so in-flight parallel requests don't each trigger a redirect
   setTimeout(() => {
     navigateToLoginPage();
+    // Re-arm for future sessions: SPA navigation never reloads the page, so the
+    // module-level flag would otherwise stay true and suppress every later 401.
+    redirectScheduled = false;
   }, 100);
 }
 
