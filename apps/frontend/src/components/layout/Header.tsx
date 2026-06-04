@@ -1,6 +1,7 @@
 import type { ModelCatalogResponse, ModelOption, ProviderType } from '@mangostudio/shared';
+import { useNavigate } from '@tanstack/react-router';
 import { Menu, Plus, Settings } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useToast } from '@/components/ui/Toast';
 import { useI18n } from '@/hooks/use-i18n';
 import { authClient } from '@/lib/auth-client';
@@ -35,18 +36,27 @@ export function Header({
   lockedProvider,
   onMobileMenuToggle,
 }: HeaderProps) {
+  const navigate = useNavigate();
   const { data: session } = authClient.useSession();
   const { toast } = useToast();
   const { t } = useI18n();
   const [loggingOut, setLoggingOut] = useState(false);
 
+  // Navigate to /login only once Better Auth has actually cleared the session.
+  // signOut runs fetchOptions.onSuccess *before* it refetches the session (the
+  // client toggles the session signal in a deferred setTimeout), so navigating
+  // from onSuccess races a stale session and login.tsx bounces the user back
+  // into the app. Gating on the cleared session removes the race entirely.
+  useEffect(() => {
+    if (loggingOut && !session?.user) {
+      void navigate({ to: '/login' });
+    }
+  }, [loggingOut, session?.user, navigate]);
+
   const handleLogout = async () => {
     setLoggingOut(true);
     await authClient.signOut({
       fetchOptions: {
-        // Full page replace avoids stale-session race: SPA navigate fires before
-        // Better Auth clears its session atom, causing login.tsx to redirect back.
-        onSuccess: () => window.location.replace('/login'),
         onError: () => {
           setLoggingOut(false);
           toast(t.auth.logoutError, 'error');

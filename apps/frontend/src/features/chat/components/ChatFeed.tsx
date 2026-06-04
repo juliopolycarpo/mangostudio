@@ -16,7 +16,7 @@ import { AnimatePresence, motion } from 'motion/react';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { MarkdownContent } from '@/components/MarkdownContent';
 import { useI18n } from '@/hooks/use-i18n';
-import { buildGeneratedImageFilename } from '@/lib/download-filenames';
+import { triggerImageDownload } from '@/lib/download-image';
 import { MessageParts } from './MessageParts';
 import { ReservedAspectImage } from './ReservedAspectImage';
 
@@ -260,14 +260,7 @@ export function ChatFeed({ chatId, messages }: { chatId: string | null; messages
   };
 
   const handleDownload = useCallback(
-    (imageUrl: string) => {
-      const link = document.createElement('a');
-      link.href = imageUrl;
-      link.download = buildGeneratedImageFilename(t.common.downloadFilenamePrefix, Date.now());
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-    },
+    (imageUrl: string) => triggerImageDownload(imageUrl, t.common.downloadFilenamePrefix),
     [t.common.downloadFilenamePrefix]
   );
 
@@ -379,7 +372,7 @@ export function ChatFeed({ chatId, messages }: { chatId: string | null; messages
                                       ? t.chat.feed.statusGenerated
                                       : t.chat.feed.statusReplied
                                 )
-                                .replace('{model}', msg.modelName)
+                                .replace('{model}', () => msg.modelName ?? '')
                             : t.chat.feed.modelFallback}
                         </span>
                         {!msg.isGenerating && !isImageTurn && (

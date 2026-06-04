@@ -208,6 +208,19 @@ describe('MarkdownContent — copy code button', () => {
     expect(container.querySelector('.copy-code-btn')).toBeInTheDocument();
   });
 
+  it('escapes the copy button aria-label so a crafted label cannot inject attributes', () => {
+    const { container } = render(
+      <MarkdownContent
+        content={'```js\nconst x = 1;\n```'}
+        copyCodeLabel={'Copy" onmouseover="alert(1)'}
+      />
+    );
+    const btn = container.querySelector('.copy-code-btn') as HTMLButtonElement;
+    expect(btn).toBeInTheDocument();
+    expect(btn.getAttribute('aria-label')).toBe('Copy" onmouseover="alert(1)');
+    expect(btn.hasAttribute('onmouseover')).toBe(false);
+  });
+
   it('does not inject copy button for inline code', () => {
     const { container } = render(<MarkdownContent content={'use `inline` code here'} />);
     expect(container.querySelector('code')).toBeInTheDocument();

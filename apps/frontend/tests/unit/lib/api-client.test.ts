@@ -2,9 +2,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 describe('api-client 401 handling', () => {
   let capturedFetcher: ((url: string, init?: RequestInit) => Promise<Response>) | null = null;
+  let navigateToLoginPageMock = vi.fn();
 
   beforeEach(() => {
     capturedFetcher = null;
+    navigateToLoginPageMock = vi.fn();
     vi.resetModules();
     vi.useFakeTimers();
 
@@ -13,6 +15,10 @@ describe('api-client 401 handling', () => {
         capturedFetcher = options.fetcher ?? null;
         return {};
       }),
+    }));
+
+    vi.doMock('../../../src/lib/auth-navigate', () => ({
+      navigateToLoginPage: navigateToLoginPageMock,
     }));
 
     // Replace jsdom's non-configurable location with a mutable plain object
@@ -29,7 +35,7 @@ describe('api-client 401 handling', () => {
     return capturedFetcher;
   }
 
-  it('triggers a redirect to /login on 401', async () => {
+  it('triggers auth navigation on 401', async () => {
     globalThis.fetch = vi
       .fn()
       .mockResolvedValue(new Response('', { status: 401 })) as unknown as typeof fetch;
@@ -40,25 +46,14 @@ describe('api-client 401 handling', () => {
     const fetcher = getFetcher();
     await fetcher('/api/test', {});
 
-    expect(window.location.href).toBe('http://localhost:3000/');
     vi.advanceTimersByTime(100);
-    expect(window.location.href).toBe('/login');
+    expect(navigateToLoginPageMock).toHaveBeenCalledOnce();
   });
 
-  it('does not redirect multiple times for concurrent 401s', async () => {
+  it('does not navigate multiple times for concurrent 401s', async () => {
     globalThis.fetch = vi
       .fn()
       .mockResolvedValue(new Response('', { status: 401 })) as unknown as typeof fetch;
-
-    let hrefValue = 'http://localhost:3000/';
-    const hrefSpy = vi.fn((v: string) => {
-      hrefValue = v;
-    });
-    Object.defineProperty(window.location, 'href', {
-      get: () => hrefValue,
-      set: hrefSpy,
-      configurable: true,
-    });
 
     await import('../../../src/lib/api-client');
     const fetcher = getFetcher();
@@ -67,11 +62,10 @@ describe('api-client 401 handling', () => {
     await fetcher('/api/b', {});
 
     vi.advanceTimersByTime(100);
-    expect(hrefSpy).toHaveBeenCalledTimes(1);
-    expect(hrefSpy).toHaveBeenCalledWith('/login');
+    expect(navigateToLoginPageMock).toHaveBeenCalledTimes(1);
   });
 
-  it('does not redirect when already on /login', async () => {
+  it('does not navigate when already on /login', async () => {
     globalThis.fetch = vi
       .fn()
       .mockResolvedValue(new Response('', { status: 401 })) as unknown as typeof fetch;
@@ -81,12 +75,6 @@ describe('api-client 401 handling', () => {
       href: 'http://localhost:3000/login',
       pathname: '/login',
     };
-    const hrefSpy = vi.fn();
-    Object.defineProperty(window.location, 'href', {
-      get: () => 'http://localhost:3000/login',
-      set: hrefSpy,
-      configurable: true,
-    });
 
     await import('../../../src/lib/api-client');
     const fetcher = getFetcher();
@@ -94,10 +82,10 @@ describe('api-client 401 handling', () => {
     await fetcher('/api/test', {});
     vi.advanceTimersByTime(100);
 
-    expect(hrefSpy).not.toHaveBeenCalled();
+    expect(navigateToLoginPageMock).not.toHaveBeenCalled();
   });
 
-  it('does not redirect when already on /signup', async () => {
+  it('does not navigate when already on /signup', async () => {
     globalThis.fetch = vi
       .fn()
       .mockResolvedValue(new Response('', { status: 401 })) as unknown as typeof fetch;
@@ -107,12 +95,6 @@ describe('api-client 401 handling', () => {
       href: 'http://localhost:3000/signup',
       pathname: '/signup',
     };
-    const hrefSpy = vi.fn();
-    Object.defineProperty(window.location, 'href', {
-      get: () => 'http://localhost:3000/signup',
-      set: hrefSpy,
-      configurable: true,
-    });
 
     await import('../../../src/lib/api-client');
     const fetcher = getFetcher();
@@ -120,7 +102,7 @@ describe('api-client 401 handling', () => {
     await fetcher('/api/test', {});
     vi.advanceTimersByTime(100);
 
-    expect(hrefSpy).not.toHaveBeenCalled();
+    expect(navigateToLoginPageMock).not.toHaveBeenCalled();
   });
 
   it('returns the response for non-401 statuses', async () => {

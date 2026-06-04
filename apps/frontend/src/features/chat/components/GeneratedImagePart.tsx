@@ -11,7 +11,7 @@ import {
 import { AnimatePresence, motion } from 'motion/react';
 import { useState } from 'react';
 import { useI18n } from '@/hooks/use-i18n';
-import { buildGeneratedImageFilename } from '@/lib/download-filenames';
+import { triggerImageDownload } from '@/lib/download-image';
 import { ReservedAspectImage } from './ReservedAspectImage';
 
 interface Props {
@@ -93,15 +93,7 @@ export function GeneratedImagePart({ part }: Props) {
                       type="button"
                       onClick={(e) => {
                         e.stopPropagation();
-                        const link = document.createElement('a');
-                        link.href = imageUrl;
-                        link.download = buildGeneratedImageFilename(
-                          t.common.downloadFilenamePrefix,
-                          Date.now()
-                        );
-                        document.body.appendChild(link);
-                        link.click();
-                        document.body.removeChild(link);
+                        triggerImageDownload(imageUrl, t.common.downloadFilenamePrefix);
                       }}
                       className="w-8 h-8 rounded-lg flex items-center justify-center bg-surface-container-highest/40 hover:bg-primary/20 text-on-surface transition-colors"
                       title={t.chat.feed.download}
@@ -112,15 +104,7 @@ export function GeneratedImagePart({ part }: Props) {
                       type="button"
                       onClick={(e) => {
                         e.stopPropagation();
-                        const link = document.createElement('a');
-                        link.href = imageUrl;
-                        link.download = buildGeneratedImageFilename(
-                          t.common.downloadFilenamePrefix,
-                          Date.now()
-                        );
-                        document.body.appendChild(link);
-                        link.click();
-                        document.body.removeChild(link);
+                        triggerImageDownload(imageUrl, t.common.downloadFilenamePrefix);
                       }}
                       className="w-8 h-8 rounded-lg flex items-center justify-center bg-surface-container-highest/40 hover:bg-primary/20 text-on-surface transition-colors"
                       title={t.chat.feed.saveToGallery}
@@ -181,7 +165,7 @@ export function GeneratedImagePart({ part }: Props) {
             {modelLabel
               ? t.chat.feed.modelStatus
                   .replace('{status}', t.chat.feed.statusGenerating)
-                  .replace('{model}', modelLabel)
+                  .replace('{model}', () => modelLabel)
               : t.chat.feed.generatingImage}
           </span>
           <span className="text-[10px] text-on-surface-variant/50 font-body">{part.prompt}</span>
