@@ -1,4 +1,4 @@
-import { createFileRoute, Link, useNavigate } from '@tanstack/react-router';
+import { createFileRoute, Link, useRouter } from '@tanstack/react-router';
 import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
@@ -9,14 +9,18 @@ import { authClient } from '@/lib/auth-client';
 import { safeRedirect } from '@/lib/safe-redirect';
 
 export const Route = createFileRoute('/login')({
-  validateSearch: (raw: Record<string, unknown>): { redirect?: string } => ({
-    redirect: typeof raw.redirect === 'string' ? raw.redirect : undefined,
-  }),
+  // Sanitize the redirect target up-front so every reader gets a safe,
+  // app-internal path; keep it optional so navigating to /login without a
+  // target (logout, signup link) stays valid.
+  validateSearch: (raw: Record<string, unknown>): { redirect?: string } => {
+    if (typeof raw.redirect !== 'string') return {};
+    return { redirect: safeRedirect(raw.redirect) };
+  },
   component: LoginPage,
 });
 
 function LoginPage() {
-  const navigate = useNavigate();
+  const router = useRouter();
   const { t } = useI18n();
   const { data: session, isPending } = authClient.useSession();
   const { redirect } = Route.useSearch();
@@ -27,9 +31,11 @@ function LoginPage() {
 
   useEffect(() => {
     if (!isPending && session?.user) {
-      void navigate({ to: safeRedirect(redirect) });
+      // history.push accepts a full href (path + search + hash); navigate({ to })
+      // expects a typed route path. `redirect` is already sanitized above.
+      router.history.push(redirect ?? '/');
     }
-  }, [session?.user, isPending, navigate, redirect]);
+  }, [session?.user, isPending, router, redirect]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
