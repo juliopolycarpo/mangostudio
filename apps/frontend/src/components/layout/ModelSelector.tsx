@@ -28,7 +28,11 @@ export function ModelSelector({
   const { t } = useI18n();
 
   const selectedModel = activeModels.find((m) => m.modelId === activeModel);
-  const placeholder = getModelSelectorPlaceholder(modelCatalog);
+  const placeholder = getModelSelectorPlaceholder(modelCatalog, {
+    loading: t.models.loading,
+    unavailable: t.models.unavailable,
+    noModelsAvailable: t.models.noModelsAvailable,
+  });
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -114,7 +118,7 @@ export function ModelSelector({
             <div className="py-2">
               {Object.keys(groups).length === 0 ? (
                 <div className="px-4 py-3 text-sm text-on-surface-variant italic">
-                  No models available
+                  {t.models.noModelsAvailable}
                 </div>
               ) : (
                 Object.entries(groups).map(([providerKey, models]) => (
@@ -159,7 +163,7 @@ export function ModelSelector({
                               <div className="flex items-center gap-1.5">
                                 {model.modelId.includes('preview') && (
                                   <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-surface-container-highest text-on-surface-variant border border-outline-variant/30">
-                                    Preview
+                                    {t.models.preview}
                                   </span>
                                 )}
                                 {model.capabilities?.reasoning && !isLocked && (

@@ -11,6 +11,7 @@ import {
 import { AnimatePresence, motion } from 'motion/react';
 import { useState } from 'react';
 import { useI18n } from '@/hooks/use-i18n';
+import { buildGeneratedImageFilename } from '@/lib/download-filenames';
 import { ReservedAspectImage } from './ReservedAspectImage';
 
 interface Props {
@@ -94,7 +95,10 @@ export function GeneratedImagePart({ part }: Props) {
                         e.stopPropagation();
                         const link = document.createElement('a');
                         link.href = imageUrl;
-                        link.download = `mango-art-${Date.now()}.png`;
+                        link.download = buildGeneratedImageFilename(
+                          t.common.downloadFilenamePrefix,
+                          Date.now()
+                        );
                         document.body.appendChild(link);
                         link.click();
                         document.body.removeChild(link);
@@ -110,7 +114,10 @@ export function GeneratedImagePart({ part }: Props) {
                         e.stopPropagation();
                         const link = document.createElement('a');
                         link.href = imageUrl;
-                        link.download = `mango-art-${Date.now()}.png`;
+                        link.download = buildGeneratedImageFilename(
+                          t.common.downloadFilenamePrefix,
+                          Date.now()
+                        );
                         document.body.appendChild(link);
                         link.click();
                         document.body.removeChild(link);
@@ -172,7 +179,9 @@ export function GeneratedImagePart({ part }: Props) {
         <div className="flex flex-col gap-1">
           <span className="text-xs font-medium text-on-surface">
             {modelLabel
-              ? `${t.chat.feed.statusGenerating} with ${modelLabel}`
+              ? t.chat.feed.modelStatus
+                  .replace('{status}', t.chat.feed.statusGenerating)
+                  .replace('{model}', modelLabel)
               : t.chat.feed.generatingImage}
           </span>
           <span className="text-[10px] text-on-surface-variant/50 font-body">{part.prompt}</span>

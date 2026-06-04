@@ -3,6 +3,7 @@
  */
 
 import type { ConnectorStatus } from '@mangostudio/shared';
+import { en } from '@mangostudio/shared/i18n';
 import { queryOptions, useQuery } from '@tanstack/react-query';
 import { useCallback } from 'react';
 import { client } from '@/lib/api-client';
@@ -17,7 +18,9 @@ export const connectorQueryOptions = () =>
     queryKey: connectorKeys.status,
     queryFn: async () => {
       const { data, error } = await client.api.settings.connectors.get();
-      if (error) throw new Error(extractApiError(error.value, 'Failed to load connectors'));
+      if (error) {
+        throw new Error(extractApiError(error.value, en.settings.connectors.failedToLoad));
+      }
       return data as ConnectorStatus;
     },
   });

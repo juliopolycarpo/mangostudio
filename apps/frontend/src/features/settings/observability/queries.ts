@@ -1,3 +1,4 @@
+import { en } from '@mangostudio/shared/i18n';
 import type {
   ProviderObservabilityLogsResponse,
   ProviderObservabilityMetricsResponse,
@@ -19,7 +20,7 @@ export function observabilityMetricsQueryOptions() {
     refetchInterval: 5_000,
     queryFn: async () => {
       const { data, error } = await client.api.settings.metrics.get();
-      if (error) throw new Error(extractApiError(error.value, 'Failed to load metrics'));
+      if (error) throw new Error(extractApiError(error.value, en.settings.metrics.failedToLoad));
       return data as ProviderObservabilityMetricsResponse;
     },
   });
@@ -32,7 +33,7 @@ export function observabilityLogsQueryOptions() {
     refetchInterval: 5_000,
     queryFn: async () => {
       const { data, error } = await client.api.settings.logs.get();
-      if (error) throw new Error(extractApiError(error.value, 'Failed to load logs'));
+      if (error) throw new Error(extractApiError(error.value, en.settings.logs.failedToLoad));
       return data as ProviderObservabilityLogsResponse;
     },
   });

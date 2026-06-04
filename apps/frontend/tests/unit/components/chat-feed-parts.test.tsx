@@ -166,6 +166,19 @@ describe('ChatFeed — MessageParts interleaved rendering', () => {
     expect(screen.getByText('No response')).toBeInTheDocument();
   });
 
+  it('uses a neutral fallback label when assistant model name is missing', () => {
+    const msg = makeMessage({
+      parts: undefined,
+      text: 'Plain text response.',
+      modelName: undefined,
+    });
+
+    render(<ChatFeed chatId="chat-1" messages={[msg]} />);
+
+    expect(screen.getByText('AI model')).toBeInTheDocument();
+    expect(screen.queryByText('Gemini')).not.toBeInTheDocument();
+  });
+
   it('renders text parts for messages without explicit parts array (backward compat)', () => {
     const msg = makeMessage({ parts: undefined, text: 'Plain text response.' });
 
@@ -193,7 +206,7 @@ describe('ChatFeed — MessageParts interleaved rendering', () => {
 
     render(<ChatFeed chatId="chat-1" messages={[msg]} />);
 
-    expect(screen.getByText(/Generated/)).toBeInTheDocument();
+    expect(screen.getByText('Generated with: gpt-image-2')).toBeInTheDocument();
     expect(screen.getByAltText('Generated')).toHaveAttribute('src', '/images/generated-123.png');
     expect(screen.getByText(/Thought for/)).toBeInTheDocument();
     expect(screen.getByText('1K')).toBeInTheDocument();

@@ -62,7 +62,7 @@ export function Header({
           type="button"
           onClick={onMobileMenuToggle}
           className="md:hidden p-2 rounded-lg hover:bg-surface-container-high transition-colors text-on-surface shrink-0"
-          aria-label="Open menu"
+          aria-label={t.common.openMenu}
         >
           <Menu size={20} />
         </button>

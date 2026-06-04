@@ -1,6 +1,7 @@
 /* global console */
 import type { GenerateImageResponse, GenerateTextResponse } from '@mangostudio/shared';
 import type { GenerateImageBody, RespondStreamBody } from '@mangostudio/shared/generation';
+import { en } from '@mangostudio/shared/i18n';
 import type { StreamChunk } from '@mangostudio/shared/streaming';
 import { getApiBaseUrl } from '../lib/api-base-url';
 import { client } from '../lib/api-client';
@@ -26,7 +27,9 @@ export async function generateImage(request: GenerateImageRequest): Promise<Gene
   const { data, error } = await client.api.generate.post(request);
 
   if (error) {
-    throw new Error((error.value as { error?: string } | null)?.error || 'Image generation failed');
+    throw new Error(
+      (error.value as { error?: string } | null)?.error || en.errors.imageGenerationFailed
+    );
   }
 
   // Eden Treaty infers a union that includes the error shape even after the guard above.
@@ -38,7 +41,9 @@ export async function respondText(request: RespondTextRequest): Promise<Generate
   const { data, error } = await client.api.respond.post(request);
 
   if (error) {
-    throw new Error((error.value as { error?: string } | null)?.error || 'Text generation failed');
+    throw new Error(
+      (error.value as { error?: string } | null)?.error || en.errors.textGenerationFailed
+    );
   }
 
   // Eden Treaty infers a union that includes the error shape even after the guard above.
@@ -70,7 +75,7 @@ export async function respondTextStream(
   });
 
   if (!response.ok) {
-    let message = 'Stream request failed';
+    let message = en.errors.streamRequestFailed;
     try {
       const body: unknown = await response.json();
       if (body && typeof body === 'object' && 'error' in body && typeof body.error === 'string') {
@@ -82,7 +87,7 @@ export async function respondTextStream(
     throw new Error(message);
   }
 
-  if (!response.body) throw new Error('Stream response has no body');
+  if (!response.body) throw new Error(en.errors.streamResponseNoBody);
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';

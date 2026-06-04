@@ -30,12 +30,14 @@ interface UseConnectorFormOptions {
   onSuccess: () => void | Promise<void>;
   errorRequired: string;
   baseUrlRequired: string;
+  unknownError: string;
 }
 
 export function useConnectorForm({
   onSuccess,
   errorRequired,
   baseUrlRequired,
+  unknownError,
 }: UseConnectorFormOptions) {
   const [form, setForm] = useState<ConnectorFormState>(INITIAL_FORM);
   const [isSaving, setIsSaving] = useState(false);
@@ -83,7 +85,7 @@ export function useConnectorForm({
       await onSuccess();
       reset();
     } catch (err) {
-      setFormError(err instanceof Error ? err.message : 'Unknown error');
+      setFormError(err instanceof Error ? err.message : unknownError);
     } finally {
       setIsSaving(false);
     }

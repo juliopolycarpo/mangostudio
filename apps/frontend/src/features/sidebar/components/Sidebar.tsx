@@ -108,13 +108,13 @@ export function Sidebar({
         <div className="px-6 py-6 mb-4 flex items-center gap-3">
           <Logo className="w-10 h-10 shrink-0" />
           <h1 className="font-headline text-lg font-semibold text-on-background tracking-tight truncate">
-            Mango Studio
+            {t.common.appName}
           </h1>
           <button
             type="button"
             onClick={onMobileClose}
             className="ml-auto md:hidden p-2 rounded-lg hover:bg-surface-container-high transition-colors text-on-surface"
-            aria-label="Close menu"
+            aria-label={t.common.closeMenu}
           >
             <X size={20} />
           </button>

@@ -16,6 +16,7 @@ import { AnimatePresence, motion } from 'motion/react';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { MarkdownContent } from '@/components/MarkdownContent';
 import { useI18n } from '@/hooks/use-i18n';
+import { buildGeneratedImageFilename } from '@/lib/download-filenames';
 import { MessageParts } from './MessageParts';
 import { ReservedAspectImage } from './ReservedAspectImage';
 
@@ -258,14 +259,17 @@ export function ChatFeed({ chatId, messages }: { chatId: string | null; messages
     setImageErrors((prev) => ({ ...prev, [id]: true }));
   };
 
-  const handleDownload = useCallback((imageUrl: string) => {
-    const link = document.createElement('a');
-    link.href = imageUrl;
-    link.download = `gemini-art-${Date.now()}.png`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  }, []);
+  const handleDownload = useCallback(
+    (imageUrl: string) => {
+      const link = document.createElement('a');
+      link.href = imageUrl;
+      link.download = buildGeneratedImageFilename(t.common.downloadFilenamePrefix, Date.now());
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    },
+    [t.common.downloadFilenamePrefix]
+  );
 
   return (
     <section
@@ -364,16 +368,19 @@ export function ChatFeed({ chatId, messages }: { chatId: string | null; messages
                         </div>
                         <span className="text-xs font-bold font-headline tracking-wide uppercase text-primary">
                           {msg.modelName
-                            ? `${
-                                msg.isGenerating
-                                  ? isImageTurn
-                                    ? t.chat.feed.statusGenerating
-                                    : t.chat.feed.statusThinking
-                                  : isImageTurn
-                                    ? t.chat.feed.statusGenerated
-                                    : t.chat.feed.statusReplied
-                              } with: ${msg.modelName}`
-                            : 'Gemini'}
+                            ? t.chat.feed.modelStatus
+                                .replace(
+                                  '{status}',
+                                  msg.isGenerating
+                                    ? isImageTurn
+                                      ? t.chat.feed.statusGenerating
+                                      : t.chat.feed.statusThinking
+                                    : isImageTurn
+                                      ? t.chat.feed.statusGenerated
+                                      : t.chat.feed.statusReplied
+                                )
+                                .replace('{model}', msg.modelName)
+                            : t.chat.feed.modelFallback}
                         </span>
                         {!msg.isGenerating && !isImageTurn && (
                           <CopyMessageButton
@@ -488,11 +495,7 @@ export function ChatFeed({ chatId, messages }: { chatId: string | null; messages
                               {!msg.text && !msg.imageUrl && !msg.isGenerating && (
                                 <div className="bg-surface-container-lowest p-6 rounded-xl border border-outline-variant/5">
                                   <p className="font-body text-xs text-on-surface-variant leading-relaxed">
-                                    Using{' '}
-                                    <span className="text-primary-fixed-dim italic">
-                                      Neural Diffusion Path
-                                    </span>
-                                    .
+                                    {t.chat.feed.neuralDiffusionPath}
                                   </p>
                                 </div>
                               )}

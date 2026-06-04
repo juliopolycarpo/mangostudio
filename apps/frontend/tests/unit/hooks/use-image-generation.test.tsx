@@ -167,4 +167,26 @@ describe('useImageGeneration — reference image upload failure', () => {
     );
     expect(props.chats.loadChats).not.toHaveBeenCalled();
   });
+
+  it('uses the localized fallback when image generation throws a non-Error value', async () => {
+    mockGenerate.mockRejectedValue('offline');
+
+    const props = makeProps();
+    const { result } = renderHook(() => useImageGeneration(props));
+
+    await act(async () => {
+      await result.current.handleGenerate('a mango robot');
+    });
+
+    await waitFor(() => expect(result.current.isGenerating).toBe(false));
+
+    expect(props.optimistic.updateOptimisticMessage).toHaveBeenCalledWith(
+      'chat-1',
+      expect.stringContaining('optimistic-ai'),
+      expect.objectContaining({
+        isGenerating: false,
+        text: 'Failed to generate image. Please try again.',
+      })
+    );
+  });
 });

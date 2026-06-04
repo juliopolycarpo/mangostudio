@@ -79,7 +79,7 @@ export function ToolCallBlock({ name, args, result, isError, isPending }: ToolCa
               {Object.keys(args).length > 0 && (
                 <div>
                   <p className="text-on-surface-variant/50 uppercase tracking-wider text-[10px] mb-1">
-                    args
+                    {t.tools.argsLabel}
                   </p>
                   <pre className="text-on-surface-variant/70 whitespace-pre-wrap leading-relaxed">
                     {JSON.stringify(args, null, 2)}
@@ -91,7 +91,7 @@ export function ToolCallBlock({ name, args, result, isError, isPending }: ToolCa
                   <p
                     className={`uppercase tracking-wider text-[10px] mb-1 ${isError ? 'text-error/50' : 'text-on-surface-variant/50'}`}
                   >
-                    {isError ? 'error' : 'result'}
+                    {isError ? t.tools.errorLabel : t.tools.resultLabel}
                   </p>
                   <pre
                     className={`whitespace-pre-wrap leading-relaxed ${isError ? 'text-error/80' : 'text-on-surface-variant/70'}`}

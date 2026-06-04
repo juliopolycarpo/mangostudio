@@ -58,7 +58,7 @@ export function ProviderSettingsPage() {
       <div className="flex flex-col items-center gap-3 py-16">
         <p className="text-sm text-destructive">{s.loadError}</p>
         <Button variant="ghost" size="sm" onClick={() => void refetch()}>
-          Retry
+          {t.common.retry}
         </Button>
       </div>
     );

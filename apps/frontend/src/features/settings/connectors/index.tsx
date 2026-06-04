@@ -38,6 +38,7 @@ export function ConnectorsSettings({ modelCatalog, reloadModelCatalog }: Connect
   const connectorForm = useConnectorForm({
     errorRequired: s.errorRequired,
     baseUrlRequired: s.baseUrlRequired,
+    unknownError: t.errors.unknown,
     onSuccess: async () => {
       setIsAddModalOpen(false);
       toast(s.addSuccess, 'success');
@@ -62,7 +63,7 @@ export function ConnectorsSettings({ modelCatalog, reloadModelCatalog }: Connect
       toast(s.deleteSuccess, 'success');
     } catch (err) {
       console.error(err);
-      toast('Failed to delete connector', 'error');
+      toast(s.failedToDelete, 'error');
     } finally {
       await reloadConnectors();
       setConnectorToDelete(null);

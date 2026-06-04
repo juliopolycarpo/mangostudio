@@ -1,5 +1,6 @@
 import { Marked, Renderer } from 'marked';
 import { useEffect, useMemo, useRef } from 'react';
+import { useI18n } from '@/hooks/use-i18n';
 import { useTheme } from '@/hooks/use-theme';
 import { type CodeThemeId, highlightCode } from '@/lib/shiki';
 
@@ -19,7 +20,7 @@ function escapeHtml(value: string): string {
     .replaceAll("'", '&#39;');
 }
 
-function createRenderer(theme: CodeThemeId): Renderer {
+function createRenderer(theme: CodeThemeId, copyCodeLabel: string): Renderer {
   const renderer = new Renderer();
 
   renderer.link = ({ href, title, tokens }) => {
@@ -48,20 +49,20 @@ function createRenderer(theme: CodeThemeId): Renderer {
     if (highlighted) {
       return highlighted
         .replace('<pre ', `<pre data-lang="${safeLang}" `)
-        .replace('</pre>', `${copyButton('Copy code')}</pre>`);
+        .replace('</pre>', `${copyButton(copyCodeLabel)}</pre>`);
     }
 
     const escaped = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     const langClass = safeLang ? ` class="language-${safeLang}"` : '';
     const langAttr = safeLang ? ` data-lang="${safeLang}"` : '';
-    return `<pre${langAttr}><code${langClass}>${escaped}</code>${copyButton('Copy code')}</pre>`;
+    return `<pre${langAttr}><code${langClass}>${escaped}</code>${copyButton(copyCodeLabel)}</pre>`;
   };
 
   return renderer;
 }
 
-function createParser(theme: CodeThemeId): Marked {
-  return new Marked({ gfm: true, breaks: true, renderer: createRenderer(theme) });
+function createParser(theme: CodeThemeId, copyCodeLabel: string): Marked {
+  return new Marked({ gfm: true, breaks: true, renderer: createRenderer(theme, copyCodeLabel) });
 }
 
 interface MarkdownContentProps {
@@ -76,13 +77,19 @@ export function MarkdownContent({
   content,
   className,
   isStreaming,
-  copyCodeLabel = 'Copy code',
-  codeCopiedLabel = 'Copied!',
+  copyCodeLabel,
+  codeCopiedLabel,
 }: MarkdownContentProps) {
+  const { t } = useI18n();
+  const resolvedCopyCodeLabel = copyCodeLabel ?? t.chat.copyCode;
+  const resolvedCodeCopiedLabel = codeCopiedLabel ?? t.chat.codeCopied;
   const containerRef = useRef<HTMLDivElement>(null);
   const { resolvedCodeTheme } = useTheme();
 
-  const parser = useMemo(() => createParser(resolvedCodeTheme), [resolvedCodeTheme]);
+  const parser = useMemo(
+    () => createParser(resolvedCodeTheme, resolvedCopyCodeLabel),
+    [resolvedCodeTheme, resolvedCopyCodeLabel]
+  );
 
   const html = useMemo(() => {
     if (!content) return '';
@@ -111,7 +118,7 @@ export function MarkdownContent({
         try {
           await navigator.clipboard.writeText(text);
           btn.innerHTML = CHECK_ICON;
-          btn.setAttribute('aria-label', codeCopiedLabel);
+          btn.setAttribute('aria-label', resolvedCodeCopiedLabel);
           btn.classList.add('copy-code-btn--copied');
           // Timer is tracked in pendingResetTimers and cleared on unmount
           // (see effect cleanup below), the rule cannot trace through the
@@ -120,7 +127,7 @@ export function MarkdownContent({
           const resetTimer = setTimeout(() => {
             pendingResetTimers.delete(resetTimer);
             btn.innerHTML = CLIPBOARD_ICON;
-            btn.setAttribute('aria-label', copyCodeLabel);
+            btn.setAttribute('aria-label', resolvedCopyCodeLabel);
             btn.classList.remove('copy-code-btn--copied');
           }, 2000);
           pendingResetTimers.add(resetTimer);
@@ -136,7 +143,7 @@ export function MarkdownContent({
       for (const timer of pendingResetTimers) clearTimeout(timer);
       pendingResetTimers.clear();
     };
-  }, [copyCodeLabel, codeCopiedLabel]);
+  }, [resolvedCopyCodeLabel, resolvedCodeCopiedLabel]);
 
   return (
     <div

@@ -40,7 +40,7 @@ export const messages = {
       send: 'Enviar',
       generate: 'Gerar',
       stop: 'Parar',
-      placeholder: 'Pergunte ao Gemini...',
+      placeholder: 'Pergunte ao modelo de IA...',
       imagePlaceholder: 'Descreva sua imagem...',
       addReferenceImage: 'Adicionar imagem de referência',
       createImages: 'Criar imagens',
@@ -56,6 +56,8 @@ export const messages = {
       statusThinking: 'Pensando',
       statusGenerated: 'Gerado',
       statusReplied: 'Respondido',
+      modelFallback: 'Modelo de IA',
+      modelStatus: '{status} com: {model}',
       download: 'Baixar',
       saveToGallery: 'Salvar na Galeria',
       regenerate: 'Regenerar',
@@ -67,6 +69,7 @@ export const messages = {
       thoughtFor: 'Pensou por {time}',
       respondedIn: 'Respondeu em {time}',
       noResponse: 'Sem resposta',
+      neuralDiffusionPath: 'Usando Neural Diffusion Path.',
       createImageBadge: 'Criar Imagem',
       subagentTrace: 'Trace de subagente',
       subagentPendingName: 'Subagente',
@@ -155,6 +158,7 @@ export const messages = {
       chatCompacted: 'Contexto compactado em um resumo',
       summaryHandoff: 'Este chat começou a partir de um resumo anterior',
     },
+    titleGenerationFailed: 'Falha ao gerar título do chat',
   },
 
   studio: {
@@ -294,6 +298,7 @@ export const messages = {
       previewed: 'Markdown validado',
       loadError: 'Falha ao carregar agentes',
       saveError: 'Falha ao salvar agente',
+      createError: 'Falha ao criar agente',
       deleteError: 'Falha ao excluir agente',
       previewError: 'Falha ao pré-visualizar agente',
       deleteTitle: 'Excluir agente',
@@ -453,6 +458,8 @@ export const messages = {
       capabilityTools: 'Ferramentas',
       capabilityCaching: 'Cache',
       capabilityCompaction: 'Compactação',
+      reservedForFuture: 'Reservado para configurações futuras',
+      maxOutputTokensPlaceholder: '1 – {limit}',
     },
     tools: {
       title: 'Ferramentas',
@@ -590,10 +597,23 @@ export const messages = {
         oneLight: 'One Light',
       },
     },
+    app: {
+      loadError: 'Falha ao carregar configurações do app',
+      saveError: 'Falha ao salvar configurações do app',
+    },
   },
 
   common: {
     loading: 'Carregando...',
+    appName: 'Mango Studio',
+    downloadFilenamePrefix: 'mangostudio',
+    mangoStudioLogo: 'Logo do Mango Studio',
+    retry: 'Tentar novamente',
+    noResultsFor: 'Nenhum resultado para "{query}"',
+    contextIndicator: 'Indicador de uso de contexto',
+    settingsNavigation: 'Navegação de configurações',
+    openMenu: 'Abrir menu',
+    closeMenu: 'Fechar menu',
     disclaimer: 'A Inteligencia Artificial pode cometer erros, verifique os resultados com cautela',
   },
 
@@ -630,6 +650,9 @@ export const messages = {
     done: 'Concluído',
     error: 'Erro na ferramenta',
     moreCount: '+{count} mais',
+    argsLabel: 'argumentos',
+    errorLabel: 'erro',
+    resultLabel: 'resultado',
     labels: {
       list_directory: 'Listar',
       read_file: 'Leu',
@@ -645,8 +668,20 @@ export const messages = {
   },
 
   errors: {
+    unknown: 'Ocorreu um erro desconhecido',
     imageNotSupported: 'Este provider não suporta geração de imagens.',
     referenceImageUploadFailed: 'Falha ao enviar a imagem de referência. Tente novamente.',
+    textGenerationFailed: 'Falha ao obter uma resposta. Tente novamente.',
+    imageGenerationFailed: 'Falha ao gerar imagem. Tente novamente.',
+    streamRequestFailed: 'Falha na requisição de stream',
+    streamResponseNoBody: 'Resposta do stream sem corpo',
+  },
+
+  models: {
+    loading: 'Carregando modelos...',
+    unavailable: 'Modelos indisponíveis',
+    noModelsAvailable: 'Nenhum modelo disponível',
+    preview: 'Pré-visualização',
   },
 
   api: {
