@@ -35,6 +35,14 @@ describe('safeRedirect', () => {
     expect(safeRedirect('/\\evil.com/phishing')).toBe('/');
   });
 
+  it('rejects control-char protocol-relative URLs that browsers normalize to "//"', () => {
+    // Browsers/the URL parser strip tab, LF, and CR, so "/\n/evil.com" would
+    // otherwise resolve to the protocol-relative "//evil.com".
+    expect(safeRedirect('/\n/evil.com')).toBe('/');
+    expect(safeRedirect('/\t/evil.com')).toBe('/');
+    expect(safeRedirect('/\r/evil.com')).toBe('/');
+  });
+
   it('rejects bare protocol URLs', () => {
     expect(safeRedirect('https://evil.com')).toBe('/');
     expect(safeRedirect('http://evil.com')).toBe('/');
