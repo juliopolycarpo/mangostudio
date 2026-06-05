@@ -1,9 +1,12 @@
 import { type Static, Type } from '@sinclair/typebox';
+import { ReadonlyArraySchema } from '../schema-helpers';
 
 export const PathListItemSchema = Type.Object({
   path: Type.String(),
   enabled: Type.Boolean(),
 });
+
+export type PathListItem = Static<typeof PathListItemSchema>;
 
 const ToolParameterValueSchema = Type.Union([
   Type.String(),
@@ -42,7 +45,8 @@ export const ToolParameterDescriptorSchema = Type.Object({
   defaultValue: Type.Optional(ToolParameterValueSchema),
   min: Type.Optional(Type.Number()),
   max: Type.Optional(Type.Number()),
-  options: Type.Optional(Type.Array(ToolParameterOptionSchema)),
+  options: Type.Optional(ReadonlyArraySchema(ToolParameterOptionSchema)),
+  /** When set, the frontend renders a catalog-backed model selector. */
   modelType: Type.Optional(Type.Literal('image')),
 });
 
@@ -56,7 +60,7 @@ export const ToolSettingsDescriptorSchema = Type.Object({
   enabled: Type.Boolean(),
   canDisable: Type.Boolean(),
   parameters: ToolParametersSchema,
-  parameterDescriptors: Type.Array(ToolParameterDescriptorSchema),
+  parameterDescriptors: ReadonlyArraySchema(ToolParameterDescriptorSchema),
 });
 
 export const ToolSettingsListResponseSchema = Type.Object({

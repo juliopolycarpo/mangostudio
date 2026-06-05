@@ -1,5 +1,7 @@
 import { type Static, Type } from '@sinclair/typebox';
+import { ProviderTypeSchema } from '../provider-settings/schemas';
 
+/** Runtime state of the cached model catalog. */
 export const ModelCatalogStatusSchema = Type.Union([
   Type.Literal('idle'),
   Type.Literal('loading'),
@@ -9,6 +11,7 @@ export const ModelCatalogStatusSchema = Type.Union([
 
 export type ModelCatalogStatus = Static<typeof ModelCatalogStatusSchema>;
 
+/** Provider capabilities for a model. */
 export const ModelCapabilitiesSchema = Type.Object({
   text: Type.Boolean(),
   image: Type.Boolean(),
@@ -28,6 +31,7 @@ export const ModelCapabilitiesSchema = Type.Object({
 
 export type ModelCapabilities = Static<typeof ModelCapabilitiesSchema>;
 
+/** A UI-safe model option discovered from a provider. */
 export const ModelOptionSchema = Type.Object({
   modelId: Type.String(),
   resourceName: Type.String(),
@@ -35,13 +39,15 @@ export const ModelOptionSchema = Type.Object({
   description: Type.Optional(Type.String()),
   version: Type.Optional(Type.String()),
   supportedActions: Type.Array(Type.String()),
-  provider: Type.Optional(Type.String()),
+  provider: Type.Optional(ProviderTypeSchema),
   capabilities: Type.Optional(ModelCapabilitiesSchema),
+  /** Maximum input tokens accepted by the model (from provider API). */
   inputTokenLimit: Type.Optional(Type.Number()),
 });
 
 export type ModelOption = Static<typeof ModelOptionSchema>;
 
+/** Cached model catalog returned by the API settings route. */
 export const ModelCatalogResponseSchema = Type.Object({
   configured: Type.Boolean(),
   status: ModelCatalogStatusSchema,

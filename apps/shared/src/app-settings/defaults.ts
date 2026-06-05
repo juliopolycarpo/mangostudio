@@ -18,7 +18,7 @@ import type {
   RuleFileSetting,
 } from '../prompt-rules';
 import type { ReasoningEffort } from '../types';
-import type { AppSettings, ChatTitleSettings, ImageQuality, MultiAgentSettings } from './contracts';
+import type { AppSettings, ChatTitleSettings, ImageQuality, MultiAgentSettings } from './schemas';
 
 const CURRENT_MODEL_SETTING = 'current_model';
 

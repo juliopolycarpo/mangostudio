@@ -1,10 +1,3 @@
-export type {
-  AppSettings,
-  ChatTitleSettings,
-  ChatTitleStrategy,
-  ImageQuality,
-  MultiAgentSettings,
-} from './contracts';
 export {
   clampMaxToolIterations,
   DEFAULT_APP_SETTINGS,
@@ -29,13 +22,13 @@ export {
   SUBAGENT_MAX_TURNS_MIN,
 } from './defaults';
 export {
-  type AppSettings as AppSettingsType,
+  type AppSettings,
   AppSettingsSchema,
-  type ChatTitleSettings as ChatTitleSettingsType,
+  type ChatTitleSettings,
   ChatTitleSettingsSchema,
-  type ChatTitleStrategy as ChatTitleStrategyType,
-  type ImageQuality as ImageQualityType,
+  type ChatTitleStrategy,
+  type ImageQuality,
   ImageQualitySchema,
-  type MultiAgentSettings as MultiAgentSettingsType,
+  type MultiAgentSettings,
   MultiAgentSettingsSchema,
 } from './schemas';

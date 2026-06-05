@@ -1,51 +1,16 @@
-import type { ContinuationReasonCode, ProviderType } from '../types';
+// Event shapes with runtime validation live in `./schemas` (the canonical
+// source). They are re-exported here so the discriminated `StreamChunk` union
+// and existing `@mangostudio/shared/streaming` imports keep one definition.
+export type {
+  SSEContextEvent,
+  SSEContinuationTransitionEvent,
+  SSEErrorEvent,
+  SSEFallbackEvent,
+  SSESystemEvent,
+  SSEThinkingStartEvent,
+} from './schemas';
 
-/** SSE event: context window usage info, emitted after each turn. */
-export interface SSEContextEvent {
-  type: 'context_info';
-  estimatedInputTokens: number;
-  contextLimit: number;
-  estimatedUsageRatio: number;
-  mode: 'stateful' | 'stateless-loop' | 'replay' | 'compacted' | 'degraded';
-  severity: 'normal' | 'info' | 'warning' | 'danger' | 'critical';
-  done: false;
-}
-
-/** SSE event: signals the start of a new thinking segment. */
-export interface SSEThinkingStartEvent {
-  type: 'thinking_start';
-  done: false;
-}
-
-/** SSE event: fallback/degradation notice, emitted when continuation mode changes. */
-export interface SSEFallbackEvent {
-  type: 'fallback_notice';
-  from: string;
-  to: string;
-  reason: string;
-  done: false;
-}
-
-/** SSE event: system event timeline marker, persisted in message parts. */
-export interface SSESystemEvent {
-  type: 'system_event';
-  event: string;
-  detail?: string;
-  done: boolean;
-}
-
-/** SSE event: typed continuation degradation marker, emitted alongside fallback_notice. */
-export interface SSEContinuationTransitionEvent {
-  type: 'continuation_transition';
-  provider: ProviderType;
-  modelName: string;
-  fromProvider?: ProviderType;
-  fromMode: string;
-  toMode: string;
-  reasonCode: ContinuationReasonCode;
-  detail?: string;
-  done: false;
-}
+import type { SSEContinuationTransitionEvent, SSEErrorEvent } from './schemas';
 
 /** SSE event: an image placeholder was created for a tool-generated image. */
 export interface SSEImageGenerationStartedEvent {
@@ -78,13 +43,6 @@ export interface SSEImageGenerationFailedEvent {
   modelName?: string;
   generationTime?: string;
   done: false;
-}
-
-/** SSE error event emitted by streaming endpoints when generation fails. */
-export interface SSEErrorEvent {
-  type: 'error';
-  error: string;
-  done: true;
 }
 
 /** SSE event: persisted user message id for the current streamed turn. */

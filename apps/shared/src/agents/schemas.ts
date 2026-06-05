@@ -1,6 +1,7 @@
 import { type Static, Type } from '@sinclair/typebox';
 import { MAX_TOOL_ITERATIONS_MAX, MAX_TOOL_ITERATIONS_MIN } from '../agentic-limits';
 import { ReasoningEffortSchema } from '../provider-settings';
+import { ReadonlyArraySchema } from '../schema-helpers';
 
 export const BuiltInAgentIdSchema = Type.Union([
   Type.Literal('chat'),
@@ -8,7 +9,14 @@ export const BuiltInAgentIdSchema = Type.Union([
   Type.Literal('explore'),
 ]);
 
-export const UserAgentIdSchema = Type.String({ pattern: '^user:[a-z0-9]+(?:-[a-z0-9]+)*$' });
+/**
+ * User agent ids are slugged `user:<slug>` strings. `Type.Unsafe` keeps the
+ * strict runtime pattern while inferring the precise `user:${string}` template
+ * type — without it the derived `AgentId` union would collapse to `string`.
+ */
+export const UserAgentIdSchema = Type.Unsafe<`user:${string}`>(
+  Type.String({ pattern: '^user:[a-z0-9]+(?:-[a-z0-9]+)*$' })
+);
 
 export const AgentIdSchema = Type.Union([BuiltInAgentIdSchema, UserAgentIdSchema]);
 
@@ -46,9 +54,9 @@ export const AgentProfileSchema = Type.Object({
   maxToolIterations: Type.Optional(
     Type.Integer({ minimum: MAX_TOOL_ITERATIONS_MIN, maximum: MAX_TOOL_ITERATIONS_MAX })
   ),
-  toolNames: Type.Array(Type.String({ minLength: 1 })),
+  toolNames: ReadonlyArraySchema(Type.String({ minLength: 1 })),
   toolsEnabled: Type.Boolean(),
-  subagentIds: Type.Array(AgentIdSchema),
+  subagentIds: ReadonlyArraySchema(AgentIdSchema),
   metadata: AgentMetadataSchema,
 });
 
@@ -67,9 +75,9 @@ export const AgentProfileUpsertBodySchema = Type.Object({
   maxToolIterations: Type.Optional(
     Type.Integer({ minimum: MAX_TOOL_ITERATIONS_MIN, maximum: MAX_TOOL_ITERATIONS_MAX })
   ),
-  toolNames: Type.Array(Type.String({ minLength: 1 })),
+  toolNames: ReadonlyArraySchema(Type.String({ minLength: 1 })),
   toolsEnabled: Type.Boolean(),
-  subagentIds: Type.Array(AgentIdSchema),
+  subagentIds: ReadonlyArraySchema(AgentIdSchema),
   metadata: AgentMetadataSchema,
 });
 
@@ -99,6 +107,7 @@ export type AgentExecutionMode = Static<typeof AgentExecutionModeSchema>;
 export type AgentKind = Static<typeof AgentKindSchema>;
 export type AgentRole = Static<typeof AgentRoleSchema>;
 export type AgentSource = Static<typeof AgentSourceSchema>;
+export type AgentMetadata = Readonly<Static<typeof AgentMetadataSchema>>;
 export type AgentProfile = Static<typeof AgentProfileSchema>;
 export type AgentProfileListResponse = Static<typeof AgentProfileListResponseSchema>;
 export type AgentProfileUpsertBody = Static<typeof AgentProfileUpsertBodySchema>;

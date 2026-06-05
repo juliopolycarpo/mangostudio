@@ -1,20 +1,7 @@
 import type { MessagePart } from '../types/agent-events';
 import type { GeneratedImageArtifact } from '../types/gallery';
 import type { InteractionMode } from '../types/provider';
-
-export type ChatAttachmentKind = 'image' | 'text' | 'pdf' | 'data' | 'unknown';
-
-export interface ChatAttachment {
-  id: string;
-  chatId: string;
-  messageId?: string | null;
-  originalName: string;
-  mimeType: string;
-  sizeBytes: number;
-  kind: ChatAttachmentKind;
-  url: string;
-  createdAt: number;
-}
+import type { ChatAttachment } from './schemas';
 
 /** Represents a chat session. */
 export interface Chat {

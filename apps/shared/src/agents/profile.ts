@@ -1,4 +1,4 @@
-import type { AgentId, AgentProfile, AgentRole } from './contracts';
+import type { AgentId, AgentProfile, AgentRole } from './schemas';
 
 const BUILT_IN_AGENT_IDS = ['chat', 'default', 'explore'] as const;
 const AGENT_ROLE_VALUES = ['primary', 'subagent', 'both'] as const;
