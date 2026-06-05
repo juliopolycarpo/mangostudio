@@ -34,3 +34,30 @@ Read `../../AGENTS.md` first. This file only adds API-local entrypoints, invaria
 - Integration tests must use `apps/api/tests/support/harness/create-api-test-app.ts`.
 - Integration test URLs use the plugin group path directly, without `/api`.
 - Validate public response shapes with `Value.Check(Schema, payload)` when the contract matters.
+
+### Preload await gotcha
+
+`apps/api/tests/support/setup/preload.ts` runs before any test module. **Do not place
+synchronous-required initialization after the first `await` in the preload.** Bun does
+NOT block test module loading on preload top-level `await` — test files evaluate their
+top-level code as soon as the preload suspends.
+
+In practice this means:
+
+1. `loadConfigForTest()` — must run first (sync)
+2. `registerApplicationServices()` — must run before any `await` (sync)
+3. Database migrations — can run after, they only need to complete before the first
+   test *executes*, not before test module *evaluation*
+
+A preload smoke test lives at `tests/unit/services/preload-smoke.test.ts` and fails
+fast if services are not registered at module-load time.
+
+#### Test-specific provider/tool registration
+
+Unit tests that call `clearRegistry()` (e.g., `tool-registry.test.ts`, `list-providers.test.ts`)
+MUST snapshot the registry in `beforeEach` and restore via `registerProviders()` /
+`registerTools()` in `afterEach`. After a test file completes, the global registries
+must be fully populated so that subsequent files see the expected runtime services.
+
+When adding a new provider or tool, update `tests/support/registration-expectations.ts`
+so the expectation lists stay co-located with the registration points.

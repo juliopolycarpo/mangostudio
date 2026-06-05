@@ -572,7 +572,7 @@ describe('openai connector routes', () => {
       restoreAuth = restore;
 
       // Create connector
-      await app.handle(
+      const createResponse = await app.handle(
         new Request('http://localhost/settings/connectors', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -584,6 +584,7 @@ describe('openai connector routes', () => {
           }),
         })
       );
+      expect(createResponse.status).toBe(200);
 
       // List connectors
       const listResponse = await app.handle(new Request('http://localhost/settings/connectors'));
@@ -633,7 +634,7 @@ describe('openai connector routes', () => {
       restoreAuth = restore;
 
       // Create connector
-      await app.handle(
+      const createResponse = await app.handle(
         new Request('http://localhost/settings/connectors', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -646,6 +647,7 @@ describe('openai connector routes', () => {
           }),
         })
       );
+      expect(createResponse.status).toBe(200);
 
       // List connectors
       const listResponse = await app.handle(new Request('http://localhost/settings/connectors'));
