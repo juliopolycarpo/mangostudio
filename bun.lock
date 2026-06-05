@@ -9,7 +9,6 @@
         "@dprint/dockerfile": "^0.3.3",
         "@dprint/markdown": "^0.22.1",
         "@dprint/toml": "^0.7.0",
-        "@faker-js/faker": "^10.4.0",
         "@playwright/test": "^1.60.0",
         "@typescript/native-preview": "^7.0.0-dev.20260516.1",
         "dprint": "^0.54.0",
@@ -42,6 +41,7 @@
         "smol-toml": "^1.6.1",
       },
       "devDependencies": {
+        "@faker-js/faker": "^10.4.0",
         "@sinclair/typebox": "^0.34.0",
         "@types/bun": "^1.3.14",
         "typescript": "~6.0.3",
@@ -92,6 +92,7 @@
       "name": "@mangostudio/shared",
       "version": "0.1.0",
       "dependencies": {
+        "@faker-js/faker": "^10.4.0",
         "@sinclair/typebox": "^0.34.49",
       },
       "devDependencies": {
