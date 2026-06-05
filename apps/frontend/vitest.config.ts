@@ -8,6 +8,10 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
+      // Swap `motion/react` for a synchronous stub. Real exit animations leave
+      // elements mounted mid-transition, which made AnimatePresence-driven
+      // assertions race the animation and fail only under load.
+      'motion/react': path.resolve(__dirname, './tests/support/setup/motion-react-stub.tsx'),
     },
   },
   test: {

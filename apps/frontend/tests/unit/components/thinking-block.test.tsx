@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor } from '@testing-library/react';
+import { fireEvent, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ThinkingBlock } from '@/features/chat/components/ThinkingBlock';
 import { render } from '../../support/harness/render';
@@ -22,7 +22,7 @@ describe('ThinkingBlock', () => {
     expect(screen.getByText('Streaming thought')).toBeInTheDocument();
   });
 
-  it('toggles expansion on click', async () => {
+  it('toggles expansion on click', () => {
     render(<ThinkingBlock messageId="msg-3" text="Toggle thought" isStreaming={false} />);
     const button = screen.getByRole('button', { name: /Thought process/i });
 
@@ -35,9 +35,23 @@ describe('ThinkingBlock', () => {
 
     // Close
     fireEvent.click(button);
-    await waitFor(() => {
-      expect(screen.queryByText('Toggle thought')).not.toBeInTheDocument();
-    });
+    expect(screen.queryByText('Toggle thought')).not.toBeInTheDocument();
+  });
+
+  // Regression: collapsing must unmount the body on the same tick. With real
+  // `motion` exit animations this assertion raced the transition and the node
+  // stayed mounted mid-animation, so it only failed under CI load (green on the
+  // PR branch, red after merge into main). The synchronous assertion fails fast
+  // wherever the deterministic-unmount contract is broken — no waitFor timeout.
+  it('removes the thought body synchronously on collapse', () => {
+    render(<ThinkingBlock messageId="msg-collapse" text="Race thought" isStreaming={false} />);
+    const button = screen.getByRole('button', { name: /Thought process/i });
+
+    fireEvent.click(button);
+    expect(screen.getByText('Race thought')).toBeInTheDocument();
+
+    fireEvent.click(button);
+    expect(screen.queryByText('Race thought')).not.toBeInTheDocument();
   });
 
   it('handles scroll events', () => {
