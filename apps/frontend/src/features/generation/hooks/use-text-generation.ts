@@ -6,7 +6,7 @@ import type {
   MessagePart,
   ReasoningEffort,
 } from '@mangostudio/shared';
-import type { AgentExecutionMode } from '@mangostudio/shared/agents';
+import { type AgentExecutionMode, isAgentId } from '@mangostudio/shared/agents';
 import type { ChatTitleSettings } from '@mangostudio/shared/app-settings';
 import {
   type ContextCompactionResponse,
@@ -382,7 +382,7 @@ export function useTextGeneration({
             contextSettings,
             toolIntent,
             agentMode: agentSelection.mode,
-            agentId: agentSelection.agentId,
+            agentId: isAgentId(agentSelection.agentId) ? agentSelection.agentId : undefined,
           },
           (chunk) => {
             switch (chunk.type) {

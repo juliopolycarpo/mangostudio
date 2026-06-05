@@ -12,6 +12,8 @@ export const ChatAttachmentKindSchema = Type.Union([
   Type.Literal('data'),
   Type.Literal('unknown'),
 ]);
+
+export type ChatAttachmentKind = Static<typeof ChatAttachmentKindSchema>;
 const ContextModeSchema = Type.Union([
   Type.Literal('stateful'),
   Type.Literal('stateless-loop'),

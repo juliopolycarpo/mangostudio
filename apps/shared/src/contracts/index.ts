@@ -1,7 +1,11 @@
 /**
  * Backward-compatibility barrel.
- * All contracts now live in bounded-context submodules.
- * This file re-exports everything so existing imports continue to work.
+ *
+ * Contracts live in bounded-context submodules where TypeBox schemas
+ * (`<module>/schemas.ts`) are the canonical source of truth and public types are
+ * derived via `Static<>`. This file only re-exports the public types so existing
+ * `@mangostudio/shared/contracts` imports keep working — prefer importing from
+ * the bounded-context entrypoint (e.g. `@mangostudio/shared/agents`) in new code.
  */
 
 // Agents
@@ -21,18 +25,18 @@ export type {
   CreateAgentProfileBody,
   DeleteAgentProfileResponse,
   UserAgentId,
-} from '../agents/contracts';
+} from '../agents';
 // App settings
-export type { AppSettings, ImageQuality } from '../app-settings/contracts';
+export type { AppSettings, ImageQuality } from '../app-settings';
 // Auth
-export type { SignInBody, SignUpBody } from '../auth/schemas';
+export type { SignInBody, SignUpBody } from '../auth';
 // Catalog
 export type {
   ModelCapabilities,
   ModelCatalogResponse,
   ModelCatalogStatus,
   ModelOption,
-} from '../catalog/contracts';
+} from '../catalog';
 // Chat
 export type {
   CompactChatBody,
@@ -45,25 +49,25 @@ export type {
   SummarizeToNewChatBody,
   UpdateChatBody,
   UpdateMessageBody,
-} from '../chat/schemas';
+} from '../chat';
 // Connectors
-// Legacy alias (was exported from this file before split)
 export type {
+  AddConnectorBody,
   Connector,
   ConnectorStatus,
   DeleteConnectorResponse,
+  // Legacy alias (was exported from this file before the split)
   DeleteConnectorResponse as DeleteGeminiSecretResponse,
-} from '../connectors/contracts';
-export type { AddConnectorBody, UpdateConnectorModelsBody } from '../connectors/schemas';
+  UpdateConnectorModelsBody,
+} from '../connectors';
 // Errors
-export type { ApiErrorResponse, SSEErrorEvent } from '../errors/contracts';
+export type { ApiErrorResponse, SSEErrorEvent } from '../errors';
+// Generation
 export type {
   GeneratedMessage,
   GenerateImageResponse,
   GenerateTextResponse,
-} from '../generation/contracts';
-// Generation
-export type { GenerateImageBody, GenerateTextBody, RespondStreamBody } from '../generation/schemas';
+} from '../generation';
 // Observability
 export type {
   ObservabilityLogKind,
@@ -75,14 +79,14 @@ export type {
   ProviderObservabilityMetricsResponse,
   ProviderProbeMetrics,
   ProviderProbeOperation,
-} from '../observability/contracts';
+} from '../observability';
 // Prompt rules
 export type {
   FixedRuleFileKind,
   RuleFileDescriptor,
   RuleFilePreviewBody,
   RuleFilePreviewResponse,
-} from '../prompt-rules/contracts';
+} from '../prompt-rules';
 // Provider settings
 export type {
   PromptCachePreference,
@@ -91,14 +95,14 @@ export type {
   ProviderSettingsDescriptor,
   ProviderSettingsListResponse,
   ReasoningPolicy,
-} from '../provider-settings/contracts';
+} from '../provider-settings';
 // Streaming SSE events
 export type {
   SSEContextEvent,
   SSEFallbackEvent,
   SSESystemEvent,
   SSEThinkingStartEvent,
-} from '../streaming/events';
+} from '../streaming';
 // Tool settings
 export type {
   ToolParameterDescriptor,
@@ -107,4 +111,4 @@ export type {
   ToolSettingsCategory,
   ToolSettingsDescriptor,
   ToolSettingsListResponse,
-} from '../tool-settings/contracts';
+} from '../tool-settings';

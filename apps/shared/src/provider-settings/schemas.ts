@@ -1,5 +1,6 @@
 import { type Static, Type } from '@sinclair/typebox';
 import { MAX_TOOL_ITERATIONS_MAX, MAX_TOOL_ITERATIONS_MIN } from '../agentic-limits';
+import { ReadonlyArraySchema } from '../schema-helpers';
 
 export const ProviderTypeSchema = Type.Union([
   Type.Literal('gemini'),
@@ -8,6 +9,8 @@ export const ProviderTypeSchema = Type.Union([
   Type.Literal('anthropic'),
   Type.Literal('deepseek'),
 ]);
+
+export const ProviderSettingScopeSchema = Type.Literal('provider');
 
 export const ReasoningEffortSchema = Type.Union([
   Type.Literal('low'),
@@ -24,7 +27,7 @@ export const PromptCachePreferenceSchema = Type.Union([
 ]);
 
 export const ReasoningPolicySchema = Type.Object({
-  supportedEfforts: Type.Array(ReasoningEffortSchema, { minItems: 1 }),
+  supportedEfforts: ReadonlyArraySchema(ReasoningEffortSchema, { minItems: 1 }),
   defaultEffort: ReasoningEffortSchema,
   maxEffort: Type.Optional(ReasoningEffortSchema),
   thinkingToggleSupported: Type.Boolean(),
@@ -59,7 +62,7 @@ export const UpdateProviderRuntimeSettingsBodySchema = Type.Object({
 export const ProviderSettingsDescriptorSchema = Type.Object({
   provider: ProviderTypeSchema,
   displayName: Type.String(),
-  scope: Type.Literal('provider'),
+  scope: ProviderSettingScopeSchema,
   reasoning: ReasoningPolicySchema,
   promptCachingSupported: Type.Boolean(),
   toolUseSupported: Type.Boolean(),
@@ -72,6 +75,9 @@ export const ProviderSettingsListResponseSchema = Type.Object({
   providers: Type.Array(ProviderSettingsDescriptorSchema),
 });
 
+export type ProviderSettingScope = Static<typeof ProviderSettingScopeSchema>;
+export type PromptCachePreference = Static<typeof PromptCachePreferenceSchema>;
+export type ReasoningPolicy = Static<typeof ReasoningPolicySchema>;
 export type ProviderRuntimeSettings = Static<typeof ProviderRuntimeSettingsSchema>;
 export type UpdateProviderRuntimeSettingsBody = Static<
   typeof UpdateProviderRuntimeSettingsBodySchema

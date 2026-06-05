@@ -1,6 +1,10 @@
 import { type Static, Type } from '@sinclair/typebox';
 import { ProviderTypeSchema } from '../provider-settings/schemas';
 
+// SSE error events are defined once in the errors module and re-exported here so
+// streaming consumers keep a single canonical `SSEErrorEvent` shape.
+export { type SSEErrorEvent, SSEErrorEventSchema } from '../errors';
+
 const ContinuationReasonCodeSchema = Type.Union([
   Type.Literal('provider_changed'),
   Type.Literal('model_changed'),
@@ -77,11 +81,3 @@ export const SSEContinuationTransitionEventSchema = Type.Object({
 });
 
 export type SSEContinuationTransitionEvent = Static<typeof SSEContinuationTransitionEventSchema>;
-
-export const SSEErrorEventSchema = Type.Object({
-  type: Type.Literal('error'),
-  error: Type.String(),
-  done: Type.Literal(true),
-});
-
-export type SSEErrorEvent = Static<typeof SSEErrorEventSchema>;
