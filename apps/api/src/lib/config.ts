@@ -9,7 +9,7 @@
  */
 
 import { existsSync, readFileSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { dirname, isAbsolute, join } from 'node:path';
 import { parse as parseToml } from 'smol-toml';
 
@@ -419,10 +419,71 @@ function computeDerived(cfg: MangoConfig, tomlPath: string): void {
 }
 
 /**
+ * True when running under the Bun test runner, which sets NODE_ENV=test.
+ * // Usage: if (isTestRuntime()) { ... }
+ */
+function isTestRuntime(): boolean {
+  return process.env.NODE_ENV === 'test';
+}
+
+/**
+ * The single managed config location for the Bun test runner. Every test that
+ * does not provide its own config file shares this path, and the test
+ * environment deletes the file between tests — so config-file connector writes
+ * from one test cannot leak into another test's reads. Scoped by pid (and Bun
+ * worker id) to stay isolated across processes.
+ * // Usage: loadConfigForTest({ configFilePath: TEST_MANAGED_CONFIG_PATH })
+ */
+export const TEST_MANAGED_CONFIG_DIR = join(
+  tmpdir(),
+  `mangostudio-test-${process.pid}-${process.env.BUN_WORKER_ID ?? '0'}`
+);
+export const TEST_MANAGED_CONFIG_PATH = join(TEST_MANAGED_CONFIG_DIR, 'config.toml');
+
+let warnedTestSandboxFallback = false;
+
+/**
+ * Builds an isolated, in-memory config for the Bun test runner. Used when a
+ * caller reaches for configuration before the test environment installed it
+ * (e.g. tests started from the repo root, where the workspace bunfig preload
+ * never runs). This guarantees a test process can never read or write the
+ * developer's real ~/.mango database, secrets, or uploads.
+ */
+function loadTestSandboxConfig(): MangoConfig {
+  const cfg = cloneDefaults();
+  cfg.database.path = ':memory:';
+  cfg.auth.secret = 'test-sandbox-secret-at-least-32-characters';
+  cfg.uploads.dir = join(TEST_MANAGED_CONFIG_DIR, 'uploads');
+  cfg.images.dir = join(TEST_MANAGED_CONFIG_DIR, 'images');
+  cfg.agents.dir = join(TEST_MANAGED_CONFIG_DIR, 'agents');
+  computeDerived(cfg, TEST_MANAGED_CONFIG_PATH);
+
+  if (!warnedTestSandboxFallback) {
+    warnedTestSandboxFallback = true;
+    console.warn(
+      '[config] Configuration was requested before the test environment was ' +
+        'initialized; falling back to an isolated in-memory sandbox so the real ' +
+        '~/.mango is never touched. If a database-backed test then fails with a ' +
+        'missing table, it was started without the preload — run API tests via ' +
+        '`bun run --filter @mangostudio/api test:unit` (see docs/reference/testing.md).'
+    );
+  }
+  return cfg;
+}
+
+/**
  * Loads configuration from config.toml with .env overrides.
  * @param overridePath - Force a specific config.toml path (for tests).
  */
 export function loadConfig(overridePath?: string): MangoConfig {
+  // Safety net: under the test runner an absent overridePath means something
+  // reached for config before the test environment was set up. Never fall
+  // through to the real ~/.mango here. Callers that pass an explicit
+  // overridePath (the config-loader tests) keep the real resolution behavior.
+  if (overridePath === undefined && isTestRuntime()) {
+    return loadTestSandboxConfig();
+  }
+
   const cfg = cloneDefaults();
 
   // 1. Determine and read config.toml
@@ -489,10 +550,15 @@ export function loadConfigForTest(partial: Partial<MangoConfig> = {}): MangoConf
   if (partial.auth) Object.assign(cfg.auth, partial.auth);
   if (partial.security) Object.assign(cfg.security, partial.security);
   if (partial.corsOrigins) cfg.corsOrigins = partial.corsOrigins;
-  if (partial.configFilePath) cfg.configFilePath = partial.configFilePath;
 
-  // Compute derived values for fields not explicitly set
-  computeDerived(cfg, cfg.configFilePath || '/dev/null');
+  // Default to the single managed test config path (not /dev/null, which
+  // *exists* and makes config-file connector sync run against an empty file —
+  // silently deleting just-created connectors). The test environment removes
+  // this file between tests, so config-file writes never leak across tests.
+  if (!cfg.database.path) cfg.database.path = ':memory:';
+  const configFilePath = partial.configFilePath ?? TEST_MANAGED_CONFIG_PATH;
+
+  computeDerived(cfg, configFilePath);
 
   configInstance = cfg;
   return cfg;
