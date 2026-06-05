@@ -5,8 +5,6 @@
  */
 
 import type { Elysia } from 'elysia';
-import '../../services/providers'; // ensure all providers are registered
-import '../../services/tools'; // ensure all tools are registered
 import { agentRoutes } from '../../modules/agents/http/agent-routes';
 import { appSettingsRoutes } from '../../modules/app-settings/http/app-settings-routes';
 import { connectorRoutes } from '../../modules/connectors/http/connectors-routes';

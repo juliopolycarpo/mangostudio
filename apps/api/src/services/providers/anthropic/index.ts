@@ -15,7 +15,6 @@ import {
   recordProviderCacheMiss,
   recordProviderProbeTimeout,
 } from '../core/provider-observability';
-import { registerProvider } from '../core/provider-registry';
 import { createReadinessCache, createReadinessCacheKey } from '../core/readiness-cache';
 import { createProviderSecretService } from '../core/secret-service';
 import type {
@@ -334,8 +333,5 @@ const anthropicProvider: AIProvider = {
     return secretService.resolveApiKey(userId, modelName);
   },
 };
-
-// Self-register on import
-registerProvider(anthropicProvider);
 
 export { anthropicProvider };

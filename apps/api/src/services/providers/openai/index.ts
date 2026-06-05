@@ -9,7 +9,6 @@
 
 import { isReasoningModel } from '../core/capability-detector';
 import { recordProviderCacheHit, recordProviderCacheMiss } from '../core/provider-observability';
-import { registerProvider } from '../core/provider-registry';
 import { createReadinessCache, createReadinessCacheKey } from '../core/readiness-cache';
 import type {
   AgentEvent,
@@ -163,8 +162,5 @@ const openAIProvider: AIProvider = {
     return apiKey;
   },
 };
-
-// Self-register on import
-registerProvider(openAIProvider);
 
 export { openAIProvider };

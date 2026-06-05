@@ -1,25 +1,51 @@
-import { describe, expect, it } from 'bun:test';
-import { listRegisteredProviderTypes } from '../../../../src/services/providers/core/provider-registry';
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import type { ProviderType } from '@mangostudio/shared/types';
+import {
+  clearRegistry,
+  listRegisteredProviderTypes,
+} from '../../../../src/services/providers/core/provider-registry';
+import { registerProviders } from '../../../../src/services/providers/register-providers';
 
-// Import providers to trigger their self-registration side effects
-import '../../../../src/services/providers/gemini/index';
-import '../../../../src/services/providers/openai-compatible/index';
-import '../../../../src/services/providers/anthropic/index';
-import '../../../../src/services/providers/deepseek/index';
+const EXPECTED_PROVIDER_TYPES = [
+  'anthropic',
+  'deepseek',
+  'gemini',
+  'openai',
+  'openai-compatible',
+] as const satisfies readonly ProviderType[];
+
+function sortedRegisteredProviderTypes(): ProviderType[] {
+  return [...listRegisteredProviderTypes()].sort();
+}
+
+function restoreProviders(): void {
+  clearRegistry();
+  registerProviders();
+}
 
 describe('listRegisteredProviderTypes', () => {
-  it('returns all registered provider types after imports', () => {
-    const types = listRegisteredProviderTypes();
-
-    expect(types).toContain('gemini');
-    expect(types).toContain('openai-compatible');
-    expect(types).toContain('anthropic');
-    expect(types).toContain('deepseek');
+  beforeEach(() => {
+    clearRegistry();
   });
 
-  it('returns an array of unique provider types', () => {
-    const types = listRegisteredProviderTypes();
+  afterEach(() => {
+    restoreProviders();
+  });
+
+  it('returns all provider types after explicit registration', () => {
+    registerProviders();
+
+    expect(sortedRegisteredProviderTypes()).toEqual([...EXPECTED_PROVIDER_TYPES].sort());
+  });
+
+  it('keeps provider registration idempotent', () => {
+    registerProviders();
+    registerProviders();
+
+    const types = sortedRegisteredProviderTypes();
     const unique = [...new Set(types)];
+
     expect(types.length).toBe(unique.length);
+    expect(types).toEqual([...EXPECTED_PROVIDER_TYPES].sort());
   });
 });

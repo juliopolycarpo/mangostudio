@@ -5,7 +5,6 @@
 
 import { isReasoningModel } from '../core/capability-detector';
 import { recordProviderCacheHit, recordProviderCacheMiss } from '../core/provider-observability';
-import { registerProvider } from '../core/provider-registry';
 import { createReadinessCache, createReadinessCacheKey } from '../core/readiness-cache';
 import type {
   AgentEvent,
@@ -187,8 +186,5 @@ const geminiProvider: AIProvider = {
     return getResolvedGeminiApiKey(userId, modelName);
   },
 };
-
-// Self-register on import
-registerProvider(geminiProvider);
 
 export { geminiProvider };

@@ -233,7 +233,7 @@ async function execute(
   return summarizeGenerateImageToolResult(outcomes);
 }
 
-/** Registers this tool. Called once at import time; can be re-called after clearRegistry(). */
+/** Registers this built-in tool. // Usage: register() */
 export function register(): void {
   registerTool({
     definition,
@@ -407,6 +407,3 @@ function formatDurationSince(startedAt: number): string {
 function errorToMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'Image generation failed';
 }
-
-// Self-register on import
-register();

@@ -46,3 +46,8 @@ if (error) {
   console.error('[test-preload] Migration failed:', error);
   process.exit(1);
 }
+
+const { registerApplicationServices } = await import(
+  '../../../src/services/register-application-services'
+);
+registerApplicationServices();

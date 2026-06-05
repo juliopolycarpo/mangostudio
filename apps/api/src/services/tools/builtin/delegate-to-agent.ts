@@ -55,6 +55,7 @@ async function execute(args: Record<string, unknown>, context: ToolContext): Pro
   return context.delegateToAgent(parseDelegateArgs(args));
 }
 
+/** Registers this built-in tool. // Usage: register() */
 export function register(): void {
   registerTool({
     definition,
@@ -89,5 +90,3 @@ function parseDelegateArgs(args: Record<string, unknown>): DelegateToAgentInput 
     ...(maxTurns !== undefined ? { maxTurns } : {}),
   };
 }
-
-register();

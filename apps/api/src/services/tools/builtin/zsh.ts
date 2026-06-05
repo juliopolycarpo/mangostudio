@@ -4,13 +4,9 @@
  */
 
 import { registerTool } from '../registry';
-import { isShellAvailable } from './_shell-exec';
 import { buildShellTool } from './_shell-tool';
 
-/** Registers this tool. Called at import time when available, or directly by tests. */
+/** Registers this built-in tool. // Usage: register() */
 export function register(): void {
   registerTool(buildShellTool('zsh'));
 }
-
-// Self-register on import only when the shell exists.
-if (isShellAvailable('zsh')) register();
