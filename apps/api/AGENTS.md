@@ -31,26 +31,49 @@ Read `../../AGENTS.md` first. This file only adds API-local entrypoints, invaria
 
 - Unit: `bun run --filter @mangostudio/api test:unit`
 - Integration: `bun run --filter @mangostudio/api test:integration`
+- **Run API tests from the workspace, not the repo root.** `bunfig.toml` (which
+  declares the preload) is resolved relative to the working directory, so
+  `bun test apps/api/...` from the root silently skips the bootstrap. Use the
+  `--filter` commands above or `cd apps/api && bun test`. If you get them wrong,
+  the harness throws an actionable error instead of touching real data.
 - Integration tests must use `apps/api/tests/support/harness/create-api-test-app.ts`.
 - Integration test URLs use the plugin group path directly, without `/api`.
 - Validate public response shapes with `Value.Check(Schema, payload)` when the contract matters.
+- Reuse `tests/support/factories` (`insertTestUser`, `insertTestChat`) instead of
+  hand-seeding `user`/`chats` rows.
 
-### Preload await gotcha
+### Test environment bootstrap
 
-`apps/api/tests/support/setup/preload.ts` runs before any test module. **Do not place
-synchronous-required initialization after the first `await` in the preload.** Bun does
-NOT block test module loading on preload top-level `await` — test files evaluate their
-top-level code as soon as the preload suspends.
+`tests/support/setup/test-environment.ts` owns the whole Bun-test bootstrap and is
+the single source of truth. The bunfig preload and the harness both go through it:
 
-In practice this means:
+1. Installs an isolated config (`:memory:` DB + a managed temp config file, never
+   the real `~/.mango`).
+2. Registers providers and tools.
+3. Migrates the in-memory DB.
+4. Resets the managed config file between every test (global `beforeEach`/`afterEach`).
 
-1. `loadConfigForTest()` — must run first (sync)
-2. `registerApplicationServices()` — must run before any `await` (sync)
-3. Database migrations — can run after, they only need to complete before the first
-   test *executes*, not before test module *evaluation*
+**Bun preload await gotcha:** Bun does NOT block test-module loading on the
+preload's top-level `await` — test files evaluate as soon as the preload suspends.
+`setupTestEnvironment()` therefore does config + service registration synchronously,
+before its first `await` (migrations). Keep that ordering if you change it.
 
-A preload smoke test lives at `tests/unit/services/preload-smoke.test.ts` and fails
-fast if services are not registered at module-load time.
+A preload smoke test (`tests/unit/services/preload-smoke.test.ts`) fails fast if
+services are not registered at module-load time.
+
+#### Config isolation
+
+Tests must never read or write the developer's real `~/.mango`. Two layers enforce it:
+
+- `loadConfig()` falls back to an in-memory sandbox under `NODE_ENV=test` when no
+  config was installed (e.g. tests started from the repo root).
+- `loadConfigForTest()` defaults to `:memory:` and the managed config path. The
+  managed config file is wiped between tests, so a config-file connector written by
+  one test can never leak into another's reads — provider secret services resolve
+  the config path lazily, so any stale path would otherwise be picked up.
+
+Spawned-server tests (`start-server.integration.test.ts`) must run the child under
+`NODE_ENV=production` so it exercises real config resolution, not the test sandbox.
 
 #### Test-specific provider/tool registration
 

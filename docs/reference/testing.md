@@ -11,7 +11,9 @@ apps/
       unit/
       integration/
       support/
+        setup/     # test-environment.ts (bootstrap) + preload.ts
         harness/   # create-api-test-app.ts
+        factories/ # insertTestUser, insertTestChat
         mocks/     # fake collaborators
 
   frontend/
@@ -87,10 +89,30 @@ bun run --filter @mangostudio/api test:unit
 bun run --filter @mangostudio/api test:integration
 ```
 
+> **Run API tests from the workspace.** `apps/api/bunfig.toml` declares the test
+> preload, and Bun resolves `bunfig.toml` relative to the current directory. Running
+> `bun test apps/api/...` from the repo root silently skips the preload — so always use
+> `bun run --filter @mangostudio/api test:unit` / `test:integration`, or
+> `cd apps/api && bun test`. When the preload is skipped, the config layer falls back to
+> an isolated in-memory sandbox (never the real `~/.mango`) and the harness throws an
+> actionable error, so a wrong-directory run fails loudly instead of corrupting data.
+
 API support lives in `apps/api/tests/support/`:
 
+- `setup/test-environment.ts` — single source of truth for the test bootstrap (config,
+  registration, migrations, and per-test config-file reset); used by the preload and harness
+- `setup/preload.ts` — thin bunfig preload that delegates to `setupTestEnvironment()`
 - `harness/create-api-test-app.ts` — wraps route plugins in a minimal Elysia app for `app.handle()` testing
+- `factories/` — DB row factories (`insertTestUser`, `insertTestChat`)
 - `mocks/` — fake collaborators (secret store, etc.)
+
+#### Test isolation
+
+The bootstrap points the config singleton at an in-memory database and a managed temp
+config file, never the developer's real `~/.mango`. The managed config file is wiped
+between every test, so a config-file connector written by one test cannot leak into
+another test's reads. Tests needing custom config call `loadConfigForTest({ ... })` in
+their own `beforeEach`; it defaults to `:memory:` and the managed path.
 
 ### Frontend
 
