@@ -8,20 +8,17 @@
  */
 
 import type { ContinuationReasonCode, ProviderType } from '@mangostudio/shared/types';
-import { shouldEmitDiagnosticLogs } from '../../../lib/diagnostic-logging';
+import { createDiagnosticLogger } from '../../../lib/logger';
 
 type LogMetadata = Record<string, string | number | boolean>;
+const continuationLogger = createDiagnosticLogger('continuation');
 
 function logEvent(event: string, metadata: LogMetadata): void {
-  if (!shouldEmitDiagnosticLogs()) return;
-  const ts = Date.now();
-  console.warn(`[continuation] ${JSON.stringify({ event, ts, ...metadata })}`);
+  continuationLogger.warn(event, metadata);
 }
 
 function logError(event: string, metadata: LogMetadata): void {
-  if (!shouldEmitDiagnosticLogs()) return;
-  const ts = Date.now();
-  console.error(`[continuation] ${JSON.stringify({ event, ts, ...metadata })}`);
+  continuationLogger.error(event, metadata);
 }
 
 export interface DegradeParams {

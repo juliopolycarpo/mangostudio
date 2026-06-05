@@ -5,6 +5,7 @@
  * Degrades to full replay on safe cursor loss and aborts unsafe tool loops.
  */
 
+import { createDiagnosticLogger } from '../../../lib/logger';
 import {
   attachmentToBase64,
   getAttachmentSupportKind,
@@ -38,6 +39,7 @@ import { buildInteractionsThinkingConfig } from './reasoning-config';
 import { getResolvedGeminiApiKey } from './secret';
 
 const GEMINI_INTERACTIONS_ATTACHMENT_KINDS = ['image', 'pdf', 'text'] as const;
+const geminiInteractionsLogger = createDiagnosticLogger('gemini-interactions');
 
 /**
  * Opaque state persisted across turns for Gemini.
@@ -371,7 +373,7 @@ export async function* processGeminiInteractionStream(
           yield { type: 'tool_call_arguments_delta', callId: call.id, delta: argChunk };
         }
       } else if (nd.kind !== 'thought_signature') {
-        console.warn('[gemini-interactions] unknown delta type:', JSON.stringify(event.delta));
+        geminiInteractionsLogger.warn('unknown_delta_type', { delta: event.delta });
       }
     } else if (event.event_type === 'content.stop') {
       const call = activeCalls.get(event.index);
@@ -389,9 +391,11 @@ export async function* processGeminiInteractionStream(
       const gu = extractGeminiUsage(event.interaction.usage);
       if (gu.totalInputTokens > 0) providerReportedInputTokens = gu.totalInputTokens;
       if (gu.cachedTokens > 0 && gu.totalInputTokens > 0) {
-        console.warn(
-          `[prefix-cache][gemini] ${gu.cachedTokens}/${gu.totalInputTokens} input tokens from cache (${Math.round((gu.cachedTokens / gu.totalInputTokens) * 100)}%)`
-        );
+        geminiInteractionsLogger.info('prefix_cache_hit', {
+          cachedTokens: gu.cachedTokens,
+          totalInputTokens: gu.totalInputTokens,
+          hitPercent: Math.round((gu.cachedTokens / gu.totalInputTokens) * 100),
+        });
       }
     } else if (event.event_type === 'interaction.start') {
       interactionId = event.interaction.id;

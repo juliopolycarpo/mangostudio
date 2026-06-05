@@ -3,6 +3,7 @@
  */
 
 import type Anthropic from '@anthropic-ai/sdk';
+import { createDiagnosticLogger } from '../../../lib/logger';
 import { parseJsonWith } from '../../../lib/safe-parse';
 import { appendAttachmentFallbackNotes } from '../core/attachment-content';
 import { getModelContextLimit } from '../core/context-policy';
@@ -21,6 +22,8 @@ interface AnthropicLoopState {
   provider: 'anthropic';
   loopMessages: Array<Anthropic.MessageParam>;
 }
+
+const anthropicStreamLogger = createDiagnosticLogger('anthropic-stream');
 
 export function parseAnthropicLoopState(
   providerState: string | null | undefined
@@ -55,10 +58,7 @@ export async function* streamAnthropicAgentTurn(
   // opted into by the caller — surface the mismatch loudly so callers can see
   // their request was dropped instead of silently ignored.
   if (req.generationConfig?.structuredOutput) {
-    console.warn(
-      `[anthropic][structured-output] ignoring structuredOutput request for model=${req.modelName}` +
-        `: Anthropic Messages API does not expose a native JSON Schema constraint`
-    );
+    anthropicStreamLogger.warn('structured_output_ignored', { model: req.modelName });
   }
 
   const providerPrompt = buildAnthropicProviderPrompt(req);
@@ -161,12 +161,12 @@ export async function* streamAnthropicAgentTurn(
       const cu = extractCacheUsage(finalMsg.usage);
       if (cu.inputTokens > 0) providerReportedInputTokens = cu.inputTokens;
       if (cu.cachedTokens > 0 || cu.cacheCreationTokens > 0) {
-        console.warn(
-          `[prefix-cache][anthropic] read=${cu.cachedTokens} creation=${cu.cacheCreationTokens} total=${cu.inputTokens} tokens` +
-            (cu.inputTokens > 0
-              ? ` (${Math.round((cu.cachedTokens / cu.inputTokens) * 100)}% cache hit)`
-              : '')
-        );
+        anthropicStreamLogger.info('prefix_cache_hit', {
+          readTokens: cu.cachedTokens,
+          creationTokens: cu.cacheCreationTokens,
+          totalInputTokens: cu.inputTokens,
+          hitPercent: cu.inputTokens > 0 ? Math.round((cu.cachedTokens / cu.inputTokens) * 100) : 0,
+        });
       }
     } catch {
       // Non-critical — don't block the response for cache logging

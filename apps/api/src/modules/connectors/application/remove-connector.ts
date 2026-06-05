@@ -4,6 +4,7 @@
 
 import { ERROR_CODES } from '@mangostudio/shared/errors';
 import type { ProviderType } from '@mangostudio/shared/types';
+import { createDiagnosticLogger } from '../../../lib/logger';
 import { invalidateUnifiedCatalog } from '../../../services/providers/catalog';
 import { invalidateProviderModelCache } from '../../../services/providers/core/provider-registry';
 import { isReadOnlySharedConnector } from '../domain/connector';
@@ -12,6 +13,8 @@ import {
   getSecretMetadataById,
 } from '../infrastructure/connector-repository';
 import { removeSecret } from '../infrastructure/secret-persistence';
+
+const connectorLogger = createDiagnosticLogger('connectors');
 
 export class ConnectorNotFoundError extends Error {
   readonly code = ERROR_CODES.NOT_FOUND;
@@ -41,5 +44,5 @@ export async function removeConnector(userId: string, id: string): Promise<void>
   invalidateProviderModelCache(meta.provider as ProviderType, userId);
   invalidateUnifiedCatalog(userId);
 
-  console.warn(`[connectors] DEL connector ${id}`);
+  connectorLogger.info('connector_deleted', { id, provider: meta.provider, source: meta.source });
 }

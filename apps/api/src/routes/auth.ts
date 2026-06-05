@@ -5,9 +5,11 @@
 import { type ApiErrorResponse, ERROR_CODES } from '@mangostudio/shared/errors';
 import type { Elysia } from 'elysia';
 import { getAuth } from '../auth';
+import { createDiagnosticLogger } from '../lib/logger';
 
 const BETTER_AUTH_ACCEPT_METHODS = ['GET', 'POST'];
 const ALLOWED_AUTH_METHODS = BETTER_AUTH_ACCEPT_METHODS.join(', ');
+const authLogger = createDiagnosticLogger('auth-plugin');
 
 // O Better Auth Elysia adapter precisa tratar chamadas em /api/auth
 export const authRoutes = (app: Elysia) =>
@@ -15,13 +17,7 @@ export const authRoutes = (app: Elysia) =>
     app
       .get('/ok', () => ({ ok: true }))
       .all('/*', (context) => {
-        console.warn(
-          JSON.stringify({
-            scope: 'auth-plugin',
-            method: context.request.method,
-            path: context.path,
-          })
-        );
+        authLogger.info('request', { method: context.request.method, path: context.path });
 
         if (BETTER_AUTH_ACCEPT_METHODS.includes(context.request.method)) {
           return getAuth().handler(context.request);

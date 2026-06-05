@@ -9,6 +9,7 @@ import { openapi } from '@elysiajs/openapi';
 import { staticPlugin } from '@elysiajs/static';
 import { Elysia } from 'elysia';
 import { getConfig } from './lib/config';
+import { createDiagnosticLogger } from './lib/logger';
 import { chatRoutes } from './modules/chats/http/chat-routes';
 import { generateRoutes } from './modules/generation/http/generate-routes';
 import { respondRoutes } from './modules/generation/http/respond-routes';
@@ -24,6 +25,7 @@ import { uploadRoutes } from './routes/upload';
 
 const UPLOADS_DIR = getConfig().uploads.dir;
 const IMAGES_DIR = getConfig().images.dir;
+const requestLogger = createDiagnosticLogger('request');
 
 /**
  * Base API instance with /api prefix.
@@ -59,7 +61,7 @@ export const app = new Elysia()
     // Only log API and auth requests to avoid spamming frontend assets logs
     const url = new URL(request.url);
     if (url.pathname.startsWith('/api')) {
-      console.warn(`[request] ${request.method} ${url.pathname}`);
+      requestLogger.info('received', { method: request.method, path: url.pathname });
     }
   })
   // Enable CORS for frontend requests

@@ -193,6 +193,8 @@ describe('streamAnthropicAgentTurn — structured output degrade', () => {
   }
 
   it('logs a warning and continues when structuredOutput is requested', async () => {
+    const previousLogSetting = process.env.MANGOSTUDIO_DIAGNOSTIC_LOGS;
+    process.env.MANGOSTUDIO_DIAGNOSTIC_LOGS = '1';
     const warn = mock((..._args: unknown[]) => undefined);
     const original = console.warn;
     console.warn = warn;
@@ -211,15 +213,21 @@ describe('streamAnthropicAgentTurn — structured output degrade', () => {
         )
       );
 
-      const joined = warn.mock.calls
-        .flat()
-        .filter((a): a is string => typeof a === 'string')
-        .join(' ');
-      expect(joined).toContain('[anthropic][structured-output]');
-      expect(joined).toContain('claude-sonnet-4-5');
+      const entry = JSON.parse(String(warn.mock.calls[0][0])) as Record<string, unknown>;
+      expect(entry).toMatchObject({
+        level: 'warn',
+        scope: 'anthropic-stream',
+        event: 'structured_output_ignored',
+        metadata: { model: 'claude-sonnet-4-5' },
+      });
       expect(events.some((e) => e.type === 'turn_completed')).toBe(true);
     } finally {
       console.warn = original;
+      if (previousLogSetting === undefined) {
+        delete process.env.MANGOSTUDIO_DIAGNOSTIC_LOGS;
+      } else {
+        process.env.MANGOSTUDIO_DIAGNOSTIC_LOGS = previousLogSetting;
+      }
     }
   });
 });

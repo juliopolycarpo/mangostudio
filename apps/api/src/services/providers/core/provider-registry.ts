@@ -5,12 +5,14 @@
 
 import type { ProviderType } from '@mangostudio/shared/types';
 import { getDb } from '../../../db/database';
+import { createDiagnosticLogger } from '../../../lib/logger';
 import { parseStringArray } from '../../../utils/json';
 import type { AIProvider } from '../types';
 import { recordProviderCacheHit, recordProviderCacheMiss } from './provider-observability';
 
 const PROVIDER_ROUTE_CACHE_TTL_MS = 60_000;
 const MAX_PROVIDER_ROUTE_CACHE_ENTRIES = 1_000;
+const registryLogger = createDiagnosticLogger('provider-registry');
 
 interface CachedProviderRoute {
   readonly providerType: ProviderType;
@@ -148,9 +150,7 @@ function createProviderRegistry(dbAccessor: typeof getDb = getDb): ProviderRegis
             return this.getProvider(providerType);
           }
         } catch {
-          console.warn(
-            `[registry] Skipping connector '${row.provider}': malformed enabledModels JSON`
-          );
+          registryLogger.warn('malformed_enabled_models', { provider: row.provider });
         }
       }
 
