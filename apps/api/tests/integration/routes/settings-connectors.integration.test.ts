@@ -1,7 +1,6 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, mock } from 'bun:test';
 import { ModelCatalogResponseSchema } from '@mangostudio/shared/catalog';
 import { ConnectorStatusSchema } from '@mangostudio/shared/connectors';
-import { Type } from '@sinclair/typebox';
 import { Value } from '@sinclair/typebox/value';
 import { getDb } from '../../../src/db/database';
 import { settingsRoutes } from '../../../src/routes/settings';
@@ -20,42 +19,21 @@ import {
 } from '../../../src/services/providers/openai/index';
 import type { AIProvider } from '../../../src/services/providers/types';
 import { upsertSecretMetadata } from '../../../src/services/secret-store/metadata';
+import {
+  type ConnectorListPayload,
+  type ConnectorPayload,
+  ConnectorResponseSchema,
+  type ErrorPayload,
+  type ModelCatalogPayload,
+  makeOpenAISuccessFetch,
+  type SuccessPayload,
+} from '../../support/connectors';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
 
 // Capture real implementations before any test can override mock.module.
 // mock.restore() does NOT revert mock.module() overrides; explicit re-registration is required.
 const realValidateOpenAIAuthContext = validateOpenAIAuthContext;
 const realValidateBaseUrl = validateBaseUrl;
-
-/** Typed response shapes for test assertions. */
-interface ConnectorEntry {
-  id: string;
-  userId: string | null;
-  provider: string;
-  name: string;
-  baseUrl: string | null;
-  configured: boolean;
-}
-interface ConnectorListPayload {
-  connectors: ConnectorEntry[];
-}
-interface ConnectorPayload {
-  id: string;
-  provider: string;
-  baseUrl: string | null;
-  configured: boolean;
-}
-interface ErrorPayload {
-  error: string;
-}
-interface SuccessPayload {
-  success: boolean;
-}
-interface ModelCatalogPayload {
-  status: string;
-  textModels: unknown[];
-  imageModels: unknown[];
-}
 
 const TEST_USER = {
   id: 'test-user-connectors',
@@ -329,37 +307,6 @@ const OPENAI_FAIL_USER = {
   name: 'OpenAI Fail User',
   email: 'test-openai-fail@mangostudio.test',
 };
-
-const ConnectorResponseSchema = Type.Object({
-  id: Type.String(),
-  name: Type.String(),
-  provider: Type.String(),
-  configured: Type.Boolean(),
-  source: Type.String(),
-  baseUrl: Type.Union([Type.String(), Type.Null()]),
-});
-
-/**
- * Returns a fetch mock that intercepts any URL containing '/models' and
- * responds with a minimal OpenAI-compatible model list (HTTP 200).
- * All other requests are forwarded to the real fetch.
- */
-function makeOpenAISuccessFetch(originalFetch: typeof globalThis.fetch): typeof globalThis.fetch {
-  // biome-ignore lint/suspicious/useAwait: Migrated from ESLint
-  return (async (input: string | URL | Request, init?: RequestInit) => {
-    const url = input instanceof Request ? input.url : String(input);
-    if (url.includes('api.openai.com') && url.includes('/models')) {
-      return new Response(
-        JSON.stringify({
-          object: 'list',
-          data: [{ id: 'gpt-4o', object: 'model', created: 0, owned_by: 'openai' }],
-        }),
-        { status: 200, headers: { 'Content-Type': 'application/json' } }
-      );
-    }
-    return originalFetch(input, init);
-  }) as typeof fetch;
-}
 
 describe('openai connector routes', () => {
   beforeAll(async () => {
