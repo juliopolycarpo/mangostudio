@@ -5,14 +5,7 @@ import {
   listRegisteredProviderTypes,
 } from '../../../../src/services/providers/core/provider-registry';
 import { registerProviders } from '../../../../src/services/providers/register-providers';
-
-const EXPECTED_PROVIDER_TYPES = [
-  'anthropic',
-  'deepseek',
-  'gemini',
-  'openai',
-  'openai-compatible',
-] as const satisfies readonly ProviderType[];
+import { expectedProviderTypes } from '../../../support/registration-expectations';
 
 function sortedRegisteredProviderTypes(): ProviderType[] {
   return [...listRegisteredProviderTypes()].sort();
@@ -35,7 +28,7 @@ describe('listRegisteredProviderTypes', () => {
   it('returns all provider types after explicit registration', () => {
     registerProviders();
 
-    expect(sortedRegisteredProviderTypes()).toEqual([...EXPECTED_PROVIDER_TYPES].sort());
+    expect(sortedRegisteredProviderTypes()).toEqual(expectedProviderTypes());
   });
 
   it('keeps provider registration idempotent', () => {
@@ -46,6 +39,6 @@ describe('listRegisteredProviderTypes', () => {
     const unique = [...new Set(types)];
 
     expect(types.length).toBe(unique.length);
-    expect(types).toEqual([...EXPECTED_PROVIDER_TYPES].sort());
+    expect(types).toEqual(expectedProviderTypes());
   });
 });
