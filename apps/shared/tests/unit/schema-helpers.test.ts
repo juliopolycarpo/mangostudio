@@ -2,13 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import { type Static, Type } from '@sinclair/typebox';
 import { Value } from '@sinclair/typebox/value';
 import { ReadonlyArraySchema } from '../../src/schema-helpers';
-
-// Compile-time type-equality helper — `bun run check` (tsgo) fails on drift.
-type Equals<A, B> =
-  (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
-function assertType<_T extends true>(): void {
-  // Compile-time only: the type parameter constraint does the work.
-}
+import { assertType, type Equals } from '../../src/test-utils/type-assert';
 
 const StringListSchema = ReadonlyArraySchema(Type.String());
 

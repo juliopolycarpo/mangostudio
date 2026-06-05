@@ -19,14 +19,8 @@ import {
 } from '../../src/observability';
 import type { ProviderTypeSchema, ReasoningEffortSchema } from '../../src/provider-settings';
 import type { SSEErrorEvent as StreamingSSEErrorEvent } from '../../src/streaming';
+import { assertType, type Equals } from '../../src/test-utils/type-assert';
 import type { ProviderType, ReasoningEffort } from '../../src/types';
-
-// Compile-time type-equality helper — `bun run check` (tsgo) fails on drift.
-type Equals<A, B> =
-  (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
-function assertType<_T extends true>(): void {
-  // Compile-time only: the type parameter constraint does the work.
-}
 
 // 1. Domain enums in `types/provider.ts` stay in lockstep with their schemas.
 //    These types are hand-written for layering reasons, so a parity assertion is
