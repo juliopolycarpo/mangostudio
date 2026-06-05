@@ -4,7 +4,7 @@ import type { ProviderRuntimeSettings } from '@mangostudio/shared/provider-setti
 import type { SubagentTracePart } from '@mangostudio/shared/types';
 import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';
-import { shouldEmitDiagnosticLogs } from '../../../lib/diagnostic-logging';
+import { createDiagnosticLogger } from '../../../lib/logger';
 import { safeJsonParse } from '../../../lib/safe-parse';
 import {
   getProviderForModel,
@@ -26,6 +26,7 @@ const SUBAGENT_TIMEOUT_CODE = 'TIMEOUT';
 const SUBAGENT_ABORT_CODE = 'ABORTED';
 const SUBAGENT_FAILED_CODE = 'FAILED';
 export const SUBAGENT_EMPTY_TEXT_FALLBACK = 'Subagent completed without a text response.';
+const subagentLogger = createDiagnosticLogger('subagent');
 const SUBAGENT_SUMMARIZE_PROMPT =
   'Final summary required. Respond now in plain text only — do not call any tools. Summarise your findings: key points, relevant file paths or commands, and recommended next steps if any.';
 
@@ -770,11 +771,9 @@ type LogValue = string | number | boolean;
 type LogMetadata = Record<string, LogValue>;
 
 function logSubagentEvent(event: string, metadata: LogMetadata): void {
-  if (!shouldEmitDiagnosticLogs()) return;
-  console.warn(`[subagent] ${JSON.stringify({ event, ts: Date.now(), ...metadata })}`);
+  subagentLogger.warn(event, metadata);
 }
 
 function logSubagentError(event: string, metadata: LogMetadata): void {
-  if (!shouldEmitDiagnosticLogs()) return;
-  console.error(`[subagent] ${JSON.stringify({ event, ts: Date.now(), ...metadata })}`);
+  subagentLogger.error(event, metadata);
 }

@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from 'bun:test';
 import {
   logContextInfo,
   logDegrade,
@@ -12,10 +12,7 @@ import {
 function captureWarn(): Array<Record<string, unknown>> {
   const entries: Array<Record<string, unknown>> = [];
   spyOn(console, 'warn').mockImplementation((msg: string) => {
-    const prefix = '[continuation] ';
-    if (msg.startsWith(prefix)) {
-      entries.push(JSON.parse(msg.slice(prefix.length)) as Record<string, unknown>);
-    }
+    entries.push(readContinuationEntry(msg));
   });
   return entries;
 }
@@ -23,12 +20,15 @@ function captureWarn(): Array<Record<string, unknown>> {
 function captureError(): Array<Record<string, unknown>> {
   const entries: Array<Record<string, unknown>> = [];
   spyOn(console, 'error').mockImplementation((msg: string) => {
-    const prefix = '[continuation] ';
-    if (msg.startsWith(prefix)) {
-      entries.push(JSON.parse(msg.slice(prefix.length)) as Record<string, unknown>);
-    }
+    entries.push(readContinuationEntry(msg));
   });
   return entries;
+}
+
+function readContinuationEntry(msg: string): Record<string, unknown> {
+  const entry = JSON.parse(msg) as Record<string, unknown>;
+  expect(entry.scope).toBe('continuation');
+  return { ...entry, ...(entry.metadata as Record<string, unknown>) };
 }
 
 describe('continuation-logger', () => {
@@ -40,6 +40,7 @@ describe('continuation-logger', () => {
   });
 
   afterEach(() => {
+    mock.restore();
     if (previousLogSetting === undefined) {
       delete process.env.MANGOSTUDIO_DIAGNOSTIC_LOGS;
       return;

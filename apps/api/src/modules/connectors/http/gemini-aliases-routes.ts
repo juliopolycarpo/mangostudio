@@ -10,6 +10,7 @@ import {
 } from '@mangostudio/shared/connectors';
 import type { ApiErrorResponse } from '@mangostudio/shared/errors';
 import { Elysia, t } from 'elysia';
+import { createDiagnosticLogger } from '../../../lib/logger';
 import { requireAuth } from '../../../plugins/auth-middleware';
 import {
   addGeminiConnector,
@@ -24,6 +25,8 @@ import {
 } from '../../../services/providers/catalog';
 import { invalidateProviderRoutingCache } from '../../../services/providers/core/provider-registry';
 import { handleConnectorError } from './connectors-routes';
+
+const connectorLogger = createDiagnosticLogger('connectors');
 
 export const geminiAliasRoutes = new Elysia()
   .use(requireAuth)
@@ -62,7 +65,7 @@ export const geminiAliasRoutes = new Elysia()
         await refreshGeminiModelCatalog(user?.id ?? '', 'secret-updated');
         invalidateUnifiedCatalog(user?.id ?? '');
         invalidateProviderRoutingCache(user?.id ?? '');
-        console.warn(`[connectors] DEL connector ${params.id}`);
+        connectorLogger.info('connector_deleted', { id: params.id, provider: 'gemini' });
         return { success: true };
       } catch (error) {
         return handleConnectorError(error, set);

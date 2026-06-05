@@ -11,6 +11,7 @@ import { type Elysia, t } from 'elysia';
 import { fileTypeFromBuffer } from 'file-type';
 import { getDb } from '../db/database';
 import { getConfig } from '../lib/config';
+import { createDiagnosticLogger } from '../lib/logger';
 import {
   buildAttachmentStoragePath,
   writeAttachmentFile,
@@ -26,6 +27,7 @@ import { requireAuth } from '../plugins/auth-middleware';
 import { generateId } from '../utils/id';
 
 const UPLOADS_DIR = getConfig().uploads.dir;
+const uploadLogger = createDiagnosticLogger('upload');
 
 // Ensure uploads directory exists at module load
 mkdirSync(UPLOADS_DIR, { recursive: true });
@@ -88,10 +90,10 @@ export const uploadRoutes = (app: Elysia) =>
 
           const expectedExts = expectedExtensions[fileType.mime] || [];
           if (expectedExts.length > 0 && !expectedExts.includes(ext.toLowerCase())) {
-            console.warn(
-              `File extension mismatch: detected ${fileType.mime} but extension is ${ext}`
-            );
-            // We'll still allow it, but log a warning
+            uploadLogger.warn('extension_mismatch', {
+              detectedMime: fileType.mime,
+              extension: ext,
+            });
           }
 
           await Bun.write(filePath, buffer);

@@ -8,10 +8,11 @@ import { dirname } from 'node:path';
 import { Kysely } from 'kysely';
 import { BunSqliteDialect } from 'kysely-bun-sqlite/dist/index.js';
 import { getConfig } from '../lib/config';
-import { shouldEmitDiagnosticLogs } from '../lib/diagnostic-logging';
+import { createDiagnosticLogger } from '../lib/logger';
 import type { Database } from './types';
 
 let dbInstance: Kysely<Database> | null = null;
+const dbLogger = createDiagnosticLogger('db');
 
 /**
  * Returns the singleton Kysely database instance.
@@ -36,9 +37,7 @@ export function getDb(): Kysely<Database> {
       dialect: new BunSqliteDialect({ database: sqlite }),
     });
 
-    if (shouldEmitDiagnosticLogs()) {
-      console.warn(`[db] Connected to SQLite at ${dbPath}`);
-    }
+    dbLogger.info('connected', { path: dbPath });
   }
   return dbInstance;
 }
@@ -50,8 +49,6 @@ export async function closeDb(): Promise<void> {
   if (dbInstance) {
     await dbInstance.destroy();
     dbInstance = null;
-    if (shouldEmitDiagnosticLogs()) {
-      console.warn('[db] Connection closed');
-    }
+    dbLogger.info('closed');
   }
 }

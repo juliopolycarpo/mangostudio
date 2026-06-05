@@ -26,7 +26,7 @@ import type { PromptSettings } from '@mangostudio/shared/prompt-rules';
 import type { ProviderRuntimeSettings } from '@mangostudio/shared/provider-settings';
 import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';
-import { shouldEmitDiagnosticLogs } from '../../../lib/diagnostic-logging';
+import { createDiagnosticLogger } from '../../../lib/logger';
 import { safeJsonParse } from '../../../lib/safe-parse';
 import {
   buildPersistedContextSnapshot,
@@ -107,6 +107,8 @@ import { assertTextTurnHasContent, normalizeTextTurnAttachmentIds } from './text
 
 const TOOL_TIMEOUT_MS = 30_000;
 const TOOL_LOOP_EXHAUSTED_MESSAGE = 'The model exceeded the maximum number of tool interactions.';
+const streamTextTurnLogger = createDiagnosticLogger('stream-text-turn');
+const delegationLogger = createDiagnosticLogger('subagent-delegation');
 
 export interface StreamTextTurnInput {
   chatId: string;
@@ -1017,7 +1019,7 @@ export async function* streamTextTurn(
     if (signal?.aborted) return;
 
     const message = error instanceof Error ? error.message : 'Stream generation failed';
-    console.error('[stream-text-turn] Error:', message);
+    streamTextTurnLogger.error('turn_failed', { chatId, message });
 
     // Clear stale durable state so a failed turn does not leave an invalid cursor
     // that would cause every subsequent turn to fail the same way.
@@ -1808,8 +1810,7 @@ type LogValue = string | number | boolean;
 type LogMetadata = Record<string, LogValue>;
 
 function logDelegationWarn(event: string, metadata: LogMetadata): void {
-  if (!shouldEmitDiagnosticLogs()) return;
-  console.warn(`[subagent-delegation] ${JSON.stringify({ event, ts: Date.now(), ...metadata })}`);
+  delegationLogger.warn(event, metadata);
 }
 
 function isSubagentTraceMessage(

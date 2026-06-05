@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from 'bun:test';
 import { ApiErrorResponseSchema, ERROR_CODES } from '@mangostudio/shared/errors';
 import { Value } from '@sinclair/typebox/value';
 import { Elysia } from 'elysia';
@@ -9,6 +9,21 @@ import { createApiTestApp } from '../../support/harness/create-api-test-app';
 const app = createApiTestApp(authRoutes);
 
 describe('Auth routes', () => {
+  let previousLogSetting: string | undefined;
+
+  beforeEach(() => {
+    previousLogSetting = process.env.MANGOSTUDIO_DIAGNOSTIC_LOGS;
+  });
+
+  afterEach(() => {
+    mock.restore();
+    if (previousLogSetting === undefined) {
+      delete process.env.MANGOSTUDIO_DIAGNOSTIC_LOGS;
+      return;
+    }
+    process.env.MANGOSTUDIO_DIAGNOSTIC_LOGS = previousLogSetting;
+  });
+
   test('GET /auth/ok — deve retornar ok', async () => {
     const res = await app.handle(new Request('http://localhost/auth/ok'));
     expect(res.status).toBe(200);
@@ -57,5 +72,31 @@ describe('Auth routes', () => {
     const payload = await res.json();
     expect(Value.Check(ApiErrorResponseSchema, payload)).toBe(true);
     expect(payload).toEqual({ error: 'Unauthorized', code: ERROR_CODES.UNAUTHORIZED });
+  });
+
+  test('auth diagnostics stay silent when disabled', async () => {
+    process.env.MANGOSTUDIO_DIAGNOSTIC_LOGS = '0';
+    const lines: string[] = [];
+    spyOn(console, 'warn').mockImplementation((line: string) => lines.push(line));
+
+    await app.handle(new Request('http://localhost/auth/session', { method: 'DELETE' }));
+
+    expect(lines).toHaveLength(0);
+  });
+
+  test('auth diagnostics emit structured JSON when enabled', async () => {
+    process.env.MANGOSTUDIO_DIAGNOSTIC_LOGS = '1';
+    const lines: string[] = [];
+    spyOn(console, 'warn').mockImplementation((line: string) => lines.push(line));
+
+    await app.handle(new Request('http://localhost/auth/session', { method: 'DELETE' }));
+
+    expect(lines).toHaveLength(1);
+    expect(JSON.parse(lines[0])).toMatchObject({
+      level: 'info',
+      scope: 'auth-plugin',
+      event: 'request',
+      metadata: { method: 'DELETE', path: '/auth/session' },
+    });
   });
 });
