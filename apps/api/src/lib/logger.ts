@@ -42,7 +42,7 @@ export function logDiagnostic(
   metadata: LogMetadata = {}
 ): void {
   if (!shouldEmitDiagnosticLogs()) return;
-  writeLog(level, { level, scope, event, ts: Date.now(), metadata: normalizeMetadata(metadata) });
+  writeLog({ level, scope, event, ts: Date.now(), metadata: normalizeMetadata(metadata) });
 }
 
 function normalizeMetadata(metadata: LogMetadata): LogMetadata {
@@ -57,9 +57,9 @@ function normalizeValue(value: unknown): unknown {
   return value;
 }
 
-function writeLog(level: LogLevel, entry: LogEntry): void {
+function writeLog(entry: LogEntry): void {
   const line = JSON.stringify(entry);
-  if (level === 'error') {
+  if (entry.level === 'error') {
     console.error(line);
     return;
   }
