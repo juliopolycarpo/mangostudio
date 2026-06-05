@@ -42,7 +42,8 @@ Useful docs:
 - Any frontend file that contains JSX must use the `.tsx` extension.
 - All user-visible frontend strings must come from `@mangostudio/shared/i18n`.
 - Public API shape changes must update the API code, shared contract, frontend consumer, and relevant tests in the same task.
-- API error responses must use `ApiErrorResponse` from `@mangostudio/shared/contracts` or `SSEErrorEvent` from `@mangostudio/shared/streaming`.
+- Shared contracts are schema-first: the TypeBox schema in `apps/shared/src/<module>/schemas.ts` is the single source of truth, and public types are derived with `Static<>`. Never hand-write a duplicate interface for a shape that already has a schema. `apps/shared/src/contracts/index.ts` is a compatibility barrel only — import from the bounded-context entrypoint (e.g. `@mangostudio/shared/agents`) in new code.
+- API error responses must use `ApiErrorResponse` from `@mangostudio/shared/errors` or `SSEErrorEvent` from `@mangostudio/shared/streaming`.
 - Add new environment parsing only in `apps/api/src/lib/config.ts`.
 - Shared code must remain framework-agnostic.
 - Cross-workspace imports must use package names, never relative paths.
