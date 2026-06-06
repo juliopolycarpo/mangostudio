@@ -2,7 +2,7 @@ import { Card } from '@/components/ui/Card';
 import { useI18n } from '@/hooks/use-i18n';
 import type { CodeThemeConfig, ThemeConfig } from '@/hooks/use-theme';
 import { useTheme } from '@/hooks/use-theme';
-import { CODE_THEMES, type CodeThemeId } from '@/lib/shiki';
+import { CODE_THEMES, type CodeThemeId } from '@/lib/code-themes';
 import { ThemePreviewSample } from './ThemePreviewSample';
 
 type FontSize = ThemeConfig['fontSize'];

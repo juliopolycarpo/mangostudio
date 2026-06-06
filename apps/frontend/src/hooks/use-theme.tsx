@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { createContext, use, useCallback, useEffect, useMemo, useState } from 'react';
-import type { CodeThemeId } from '@/lib/shiki';
+import type { CodeThemeId } from '@/lib/code-themes';
 
 const STORAGE_KEY = 'mango-studio-theme';
 

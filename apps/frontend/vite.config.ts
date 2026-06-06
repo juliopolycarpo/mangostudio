@@ -87,7 +87,19 @@ export default defineConfig({
             if (id.includes('@tanstack/react-router') || id.includes('@tanstack/react-query'))
               return 'router';
             if (id.includes('motion') || id.includes('lucide-react')) return 'ui';
-            if (id.includes('marked') || id.includes('shiki')) return 'markdown';
+            if (id.includes('marked')) return 'markdown-parser';
+            if (
+              id.includes('@shikijs/core') ||
+              id.includes('@shikijs/engine-javascript') ||
+              id.includes('@shikijs/primitive') ||
+              id.includes('@shikijs/types') ||
+              id.includes('@shikijs/vscode-textmate') ||
+              id.includes('hast-util-to-html')
+            ) {
+              return 'syntax-core';
+            }
+            if (id.includes('@shikijs/themes')) return 'syntax-themes';
+            if (id.includes('@shikijs/langs')) return;
             if (id.includes('@tanstack/react-virtual')) return 'virtual';
             return 'vendor-deps';
           }

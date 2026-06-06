@@ -1,17 +1,47 @@
+import { act } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as shikiLib from '@/lib/shiki';
 import { MarkdownContent } from '../../../src/components/MarkdownContent';
+import { MarkdownContentRenderer } from '../../../src/components/MarkdownContentRenderer';
 import { render, screen } from '../../support/harness/render';
 
 vi.mock('@/lib/shiki', () => ({
   highlightCode: vi.fn(() => null),
   initHighlighter: vi.fn().mockResolvedValue(undefined),
+  preloadCodeLanguages: vi.fn().mockResolvedValue(true),
   CODE_THEMES: ['one-dark-pro', 'github-dark-dimmed', 'github-light', 'one-light'],
 }));
 
+function createPendingPreload(): Promise<boolean> {
+  return new Promise(() => undefined);
+}
+
+function createDeferredPreload() {
+  let resolvePreload!: (loaded: boolean) => void;
+  const promise = new Promise<boolean>((resolve) => {
+    resolvePreload = resolve;
+  });
+  return { promise, resolvePreload };
+}
+
 describe('MarkdownContent', () => {
-  it('renders bold and italic text', () => {
+  beforeEach(() => {
+    vi.mocked(shikiLib.highlightCode).mockReset();
+    vi.mocked(shikiLib.highlightCode).mockReturnValue(null);
+    vi.mocked(shikiLib.preloadCodeLanguages).mockReset();
+    vi.mocked(shikiLib.preloadCodeLanguages).mockReturnValue(createPendingPreload());
+  });
+
+  it('lazy-loads the markdown renderer behind the public component', async () => {
     render(<MarkdownContent content="**bold** and *italic*" />);
+    const bold = await screen.findByText('bold');
+    const container = bold.closest('.markdown-content');
+    if (!container) throw new Error('expected .markdown-content ancestor element');
+    expect(container.querySelector('strong')).toHaveTextContent('bold');
+  });
+
+  it('renders bold and italic text', () => {
+    render(<MarkdownContentRenderer content="**bold** and *italic*" />);
     const container = screen.getByText('bold').closest('.markdown-content');
     if (!container) throw new Error('expected .markdown-content ancestor element');
     expect(container.querySelector('strong')).toHaveTextContent('bold');
@@ -19,7 +49,7 @@ describe('MarkdownContent', () => {
   });
 
   it('renders links with target="_blank" and rel="noopener noreferrer"', () => {
-    render(<MarkdownContent content="[example](https://example.com)" />);
+    render(<MarkdownContentRenderer content="[example](https://example.com)" />);
     const link = screen.getByText('example');
     expect(link.tagName).toBe('A');
     expect(link.getAttribute('target')).toBe('_blank');
@@ -28,33 +58,33 @@ describe('MarkdownContent', () => {
   });
 
   it('neutralizes javascript: URLs', () => {
-    render(<MarkdownContent content="[click](javascript:alert(1))" />);
+    render(<MarkdownContentRenderer content="[click](javascript:alert(1))" />);
     const link = screen.getByText('click');
     expect(link.getAttribute('href')).toBe('#');
   });
 
   it('renders GFM tables', () => {
     const table = '| A | B |\n|---|---|\n| 1 | 2 |';
-    const { container } = render(<MarkdownContent content={table} />);
+    const { container } = render(<MarkdownContentRenderer content={table} />);
     expect(container.querySelector('table')).toBeInTheDocument();
     expect(container.querySelector('th')).toHaveTextContent('A');
     expect(container.querySelectorAll('td')).toHaveLength(2);
   });
 
   it('renders code blocks', () => {
-    const code = '```js\nconst x = 1;\n```';
-    const { container } = render(<MarkdownContent content={code} />);
+    const code = '```\nconst x = 1;\n```';
+    const { container } = render(<MarkdownContentRenderer content={code} />);
     expect(container.querySelector('pre')).toBeInTheDocument();
     expect(container.querySelector('code')).toHaveTextContent('const x = 1;');
   });
 
   it('renders line breaks with breaks: true', () => {
-    const { container } = render(<MarkdownContent content={'line1\nline2'} />);
+    const { container } = render(<MarkdownContentRenderer content={'line1\nline2'} />);
     expect(container.querySelector('br')).toBeInTheDocument();
   });
 
   it('renders empty content as empty div', () => {
-    const { container } = render(<MarkdownContent content="" />);
+    const { container } = render(<MarkdownContentRenderer content="" />);
     const div = container.querySelector('.markdown-content');
     if (!div) throw new Error('expected .markdown-content element');
     expect(div).toBeInTheDocument();
@@ -62,24 +92,26 @@ describe('MarkdownContent', () => {
   });
 
   it('renders correctly with isStreaming prop', () => {
-    render(<MarkdownContent content="**streaming** content" isStreaming />);
+    render(<MarkdownContentRenderer content="**streaming** content" isStreaming />);
     expect(screen.getByText('streaming')).toBeInTheDocument();
   });
 
   it('applies custom className', () => {
-    const { container } = render(<MarkdownContent content="test" className="custom-class" />);
+    const { container } = render(
+      <MarkdownContentRenderer content="test" className="custom-class" />
+    );
     expect(container.querySelector('.markdown-content.custom-class')).toBeInTheDocument();
   });
 
   it('memoizes parsed output for same content', () => {
-    const { container } = render(<MarkdownContent content="**hello**" />);
+    const { container } = render(<MarkdownContentRenderer content="**hello**" />);
     const el1 = container.querySelector('.markdown-content');
     if (!el1) throw new Error('expected .markdown-content element');
     const firstHtml = el1.innerHTML;
 
     // Re-render the same content — memoized output should be identical.
     // Use a second render instead of rerender to stay inside the ThemeProvider wrapper.
-    const { container: container2 } = render(<MarkdownContent content="**hello**" />);
+    const { container: container2 } = render(<MarkdownContentRenderer content="**hello**" />);
     const el2 = container2.querySelector('.markdown-content');
     if (!el2) throw new Error('expected .markdown-content element in second render');
     const secondHtml = el2.innerHTML;
@@ -89,7 +121,7 @@ describe('MarkdownContent', () => {
 
   it('renders markdown image syntax as a stable external link', () => {
     const { container } = render(
-      <MarkdownContent content="![alt text](https://example.com/img.png)" />
+      <MarkdownContentRenderer content="![alt text](https://example.com/img.png)" />
     );
     const link = screen.getByText('alt text');
     expect(link.tagName).toBe('A');
@@ -100,7 +132,7 @@ describe('MarkdownContent', () => {
 
   it('escapes raw html images instead of rendering them', () => {
     const { container } = render(
-      <MarkdownContent content={'<img src="https://example.com/img.png" alt="unsafe">'} />
+      <MarkdownContentRenderer content={'<img src="https://example.com/img.png" alt="unsafe">'} />
     );
 
     expect(container.querySelector('img')).not.toBeInTheDocument();
@@ -111,13 +143,13 @@ describe('MarkdownContent', () => {
 
   it('renders nested lists', () => {
     const md = '- item 1\n  - nested 1\n  - nested 2\n- item 2';
-    const { container } = render(<MarkdownContent content={md} />);
+    const { container } = render(<MarkdownContentRenderer content={md} />);
     const lists = container.querySelectorAll('ul');
     expect(lists.length).toBeGreaterThanOrEqual(2);
   });
 
   it('renders blockquotes', () => {
-    const { container } = render(<MarkdownContent content="> a quote" />);
+    const { container } = render(<MarkdownContentRenderer content="> a quote" />);
     expect(container.querySelector('blockquote')).toBeInTheDocument();
   });
 });
@@ -129,52 +161,93 @@ describe('MarkdownContent — syntax highlighting', () => {
   beforeEach(() => {
     vi.mocked(shikiLib.highlightCode).mockReset();
     vi.mocked(shikiLib.highlightCode).mockReturnValue(null);
+    vi.mocked(shikiLib.preloadCodeLanguages).mockReset();
+    vi.mocked(shikiLib.preloadCodeLanguages).mockResolvedValue(true);
   });
 
-  it('renders Shiki output when highlighter is loaded and language is known', () => {
-    vi.mocked(shikiLib.highlightCode).mockReturnValueOnce(SHIKI_HTML);
-    const { container } = render(<MarkdownContent content={'```typescript\nconst x = 1;\n```'} />);
-    const pre = container.querySelector('pre');
-    expect(pre).toBeInTheDocument();
-    expect(container.querySelector('span[style]')).toBeInTheDocument();
-    expect(shikiLib.highlightCode).toHaveBeenCalledWith(
+  it('loads fenced code languages before reparsing with Shiki', async () => {
+    const preload = createDeferredPreload();
+    vi.mocked(shikiLib.preloadCodeLanguages).mockReturnValue(preload.promise);
+    vi.mocked(shikiLib.highlightCode).mockReturnValue(SHIKI_HTML);
+    const { container } = render(
+      <MarkdownContentRenderer content={'```typescript\nconst x = 1;\n```'} />
+    );
+
+    await act(async () => {
+      preload.resolvePreload(true);
+      await Promise.resolve();
+    });
+
+    await vi.waitFor(() => {
+      expect(shikiLib.preloadCodeLanguages).toHaveBeenCalledWith(['typescript']);
+      expect(container.querySelector('span[style]')).toBeInTheDocument();
+    });
+    expect(shikiLib.highlightCode).toHaveBeenLastCalledWith(
       'const x = 1;',
       'typescript',
       'one-dark-pro'
     );
   });
 
-  it('adds data-lang attribute to Shiki pre element', () => {
-    vi.mocked(shikiLib.highlightCode).mockReturnValueOnce(SHIKI_HTML);
-    const { container } = render(<MarkdownContent content={'```typescript\nconst x = 1;\n```'} />);
-    const pre = container.querySelector('pre');
-    expect(pre?.getAttribute('data-lang')).toBe('typescript');
+  it('preloads languages for code blocks nested inside list items', async () => {
+    vi.mocked(shikiLib.preloadCodeLanguages).mockReturnValue(createPendingPreload());
+    render(<MarkdownContentRenderer content={'- step one\n\n  ```rust\n  fn main() {}\n  ```'} />);
+
+    await vi.waitFor(() => {
+      expect(shikiLib.preloadCodeLanguages).toHaveBeenCalledWith(['rust']);
+    });
+  });
+
+  it('adds data-lang attribute to Shiki pre element', async () => {
+    const preload = createDeferredPreload();
+    vi.mocked(shikiLib.preloadCodeLanguages).mockReturnValue(preload.promise);
+    vi.mocked(shikiLib.highlightCode).mockReturnValue(SHIKI_HTML);
+    const { container } = render(
+      <MarkdownContentRenderer content={'```typescript\nconst x = 1;\n```'} />
+    );
+
+    await act(async () => {
+      preload.resolvePreload(true);
+      await Promise.resolve();
+    });
+
+    await vi.waitFor(() => {
+      expect(container.querySelector('pre')?.getAttribute('data-lang')).toBe('typescript');
+    });
   });
 
   it('falls back to plain code block when language is unknown', () => {
-    vi.mocked(shikiLib.highlightCode).mockReturnValueOnce(null);
-    const { container } = render(<MarkdownContent content={'```unknownlang\nfoo()\n```'} />);
+    vi.mocked(shikiLib.preloadCodeLanguages).mockReturnValue(createPendingPreload());
+    const { container } = render(
+      <MarkdownContentRenderer content={'```unknownlang\nfoo()\n```'} />
+    );
     expect(container.querySelector('pre')).toBeInTheDocument();
     expect(container.querySelector('pre > code')).toBeInTheDocument();
     expect(container.querySelector('span[style]')).not.toBeInTheDocument();
   });
 
   it('renders plain code block when no language is specified', () => {
-    const { container } = render(<MarkdownContent content={'```\nplain code\n```'} />);
+    const { container } = render(<MarkdownContentRenderer content={'```\nplain code\n```'} />);
     expect(container.querySelector('pre')).toBeInTheDocument();
     expect(container.querySelector('pre > code')).toBeInTheDocument();
     expect(container.querySelector('span[style]')).not.toBeInTheDocument();
   });
 
-  it('falls back gracefully when Shiki highlighter is not yet loaded', () => {
-    vi.mocked(shikiLib.highlightCode).mockReturnValueOnce(null);
-    const { container } = render(<MarkdownContent content={'```typescript\nconst x = 1;\n```'} />);
+  it('falls back gracefully while Shiki highlighter is not yet loaded', () => {
+    vi.mocked(shikiLib.preloadCodeLanguages).mockReturnValue(createPendingPreload());
+    const { container } = render(
+      <MarkdownContentRenderer content={'```typescript\nconst x = 1;\n```'} />
+    );
     expect(container.querySelector('pre')).toBeInTheDocument();
     expect(container.querySelector('code')).toHaveTextContent('const x = 1;');
+    expect(shikiLib.highlightCode).not.toHaveBeenCalled();
   });
 
   it('adds data-lang attribute to fallback pre for language badge', () => {
-    const { container } = render(<MarkdownContent content={'```python\nprint("hello")\n```'} />);
+    vi.mocked(shikiLib.preloadCodeLanguages).mockReturnValue(createPendingPreload());
+    const { container } = render(
+      <MarkdownContentRenderer content={'```python\nprint("hello")\n```'} />
+    );
     const pre = container.querySelector('pre');
     expect(pre?.getAttribute('data-lang')).toBe('python');
   });
@@ -186,6 +259,8 @@ describe('MarkdownContent — copy code button', () => {
   beforeEach(() => {
     vi.mocked(shikiLib.highlightCode).mockReset();
     vi.mocked(shikiLib.highlightCode).mockReturnValue(null);
+    vi.mocked(shikiLib.preloadCodeLanguages).mockReset();
+    vi.mocked(shikiLib.preloadCodeLanguages).mockReturnValue(createPendingPreload());
 
     clipboardWriteText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, 'clipboard', {
@@ -196,22 +271,22 @@ describe('MarkdownContent — copy code button', () => {
   });
 
   it('renders a copy button in each code block', () => {
-    const { container } = render(<MarkdownContent content={'```js\nconst x = 1;\n```'} />);
+    const { container } = render(<MarkdownContentRenderer content={'```\nconst x = 1;\n```'} />);
     const btn = container.querySelector('.copy-code-btn');
     expect(btn).toBeInTheDocument();
   });
 
   it('renders copy button even during streaming', () => {
     const { container } = render(
-      <MarkdownContent content={'```js\nconst x = 1;\n```'} isStreaming />
+      <MarkdownContentRenderer content={'```\nconst x = 1;\n```'} isStreaming />
     );
     expect(container.querySelector('.copy-code-btn')).toBeInTheDocument();
   });
 
   it('escapes the copy button aria-label so a crafted label cannot inject attributes', () => {
     const { container } = render(
-      <MarkdownContent
-        content={'```js\nconst x = 1;\n```'}
+      <MarkdownContentRenderer
+        content={'```\nconst x = 1;\n```'}
         copyCodeLabel={'Copy" onmouseover="alert(1)'}
       />
     );
@@ -222,21 +297,21 @@ describe('MarkdownContent — copy code button', () => {
   });
 
   it('does not inject copy button for inline code', () => {
-    const { container } = render(<MarkdownContent content={'use `inline` code here'} />);
+    const { container } = render(<MarkdownContentRenderer content={'use `inline` code here'} />);
     expect(container.querySelector('code')).toBeInTheDocument();
     expect(container.querySelector('.copy-code-btn')).not.toBeInTheDocument();
   });
 
   it('injects one copy button per code block', () => {
-    const md = '```js\nfoo()\n```\n\n```ts\nbar()\n```';
-    const { container } = render(<MarkdownContent content={md} />);
+    const md = '```\nfoo()\n```\n\n```\nbar()\n```';
+    const { container } = render(<MarkdownContentRenderer content={md} />);
     const pres = container.querySelectorAll('pre');
     const btns = container.querySelectorAll('.copy-code-btn');
     expect(btns).toHaveLength(pres.length);
   });
 
   it('calls clipboard.writeText with code text on click', async () => {
-    const { container } = render(<MarkdownContent content={'```js\nconst x = 1;\n```'} />);
+    const { container } = render(<MarkdownContentRenderer content={'```\nconst x = 1;\n```'} />);
     const btn = container.querySelector('.copy-code-btn') as HTMLButtonElement;
     btn.click();
     await vi.waitFor(() => {
@@ -245,7 +320,7 @@ describe('MarkdownContent — copy code button', () => {
   });
 
   it('adds copied class to button after successful copy', async () => {
-    const { container } = render(<MarkdownContent content={'```js\nconst x = 1;\n```'} />);
+    const { container } = render(<MarkdownContentRenderer content={'```\nconst x = 1;\n```'} />);
     const btn = container.querySelector('.copy-code-btn') as HTMLButtonElement;
     btn.click();
     await vi.waitFor(() => {
@@ -255,7 +330,7 @@ describe('MarkdownContent — copy code button', () => {
 
   it('reverts button state after 2 seconds', async () => {
     vi.useFakeTimers();
-    const { container } = render(<MarkdownContent content={'```js\nconst x = 1;\n```'} />);
+    const { container } = render(<MarkdownContentRenderer content={'```\nconst x = 1;\n```'} />);
     const btn = container.querySelector('.copy-code-btn') as HTMLButtonElement;
     btn.click();
     await vi.waitFor(() => expect(btn.classList.contains('copy-code-btn--copied')).toBe(true));

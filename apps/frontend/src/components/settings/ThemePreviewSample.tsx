@@ -1,4 +1,4 @@
-import type { CodeThemeId } from '@/lib/shiki';
+import type { CodeThemeId } from '@/lib/code-themes';
 
 type TokenType =
   | 'keyword'
