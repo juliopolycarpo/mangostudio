@@ -17,12 +17,9 @@ import {
 } from '../../../services/gemini';
 import { SecretStorageUnavailableError } from '../../../services/secret-store';
 import { addConnector, ConnectorValidationError } from '../application/add-connector';
+import { ConnectorNotFoundError, ConnectorOwnershipError } from '../application/connector-errors';
 import { listConnectors } from '../application/list-connectors';
-import {
-  ConnectorNotFoundError,
-  ConnectorOwnershipError,
-  removeConnector,
-} from '../application/remove-connector';
+import { removeConnector } from '../application/remove-connector';
 import { updateConnectorModels } from '../application/update-connector-models';
 import {
   OpenAIAuthError,

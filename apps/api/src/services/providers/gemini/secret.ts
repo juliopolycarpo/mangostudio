@@ -11,6 +11,7 @@ import type { SecretMetadataRow } from '@mangostudio/shared/types';
 import { stringify as stringifyToml } from 'smol-toml';
 import { getConfig, getConfigEnvFilePath, reloadSecretEnv } from '../../../lib/config';
 import { readTomlStringSections } from '../../../lib/toml';
+import { ConnectorNotFoundError } from '../../../modules/connectors/application/connector-errors';
 import { parseStringArray } from '../../../utils/json';
 import { maskSecret } from '../../../utils/secrets';
 import {
@@ -326,7 +327,7 @@ export function createGeminiSecretService(
       enabledModels: string[]
     ): Promise<void> {
       const metadata = await getMetadataById(id, userId);
-      if (!metadata) throw new Error('Connector not found');
+      if (!metadata) throw new ConnectorNotFoundError();
 
       await upsertMetadata({
         id: metadata.id,

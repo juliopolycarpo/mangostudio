@@ -2,22 +2,13 @@
  * Use case: update the enabled-models list for a connector.
  */
 
-import { ERROR_CODES } from '@mangostudio/shared/errors';
 import { recalculateUnifiedCatalog } from '../../../services/providers/catalog';
 import { invalidateProviderRoutingCache } from '../../../services/providers/core/provider-registry';
 import {
   getSecretMetadataById,
   upsertSecretMetadata,
 } from '../infrastructure/connector-repository';
-
-export class ConnectorNotFoundError extends Error {
-  readonly code = ERROR_CODES.NOT_FOUND;
-  readonly status = 404;
-  constructor() {
-    super('Connector not found.');
-    this.name = 'ConnectorNotFoundError';
-  }
-}
+import { ConnectorNotFoundError } from './connector-errors';
 
 export async function updateConnectorModels(
   userId: string,
