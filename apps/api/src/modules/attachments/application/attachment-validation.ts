@@ -23,7 +23,7 @@ const PDF_MIME = 'application/pdf';
 const PDF_EXTENSIONS = ['pdf'];
 
 export const CHAT_ATTACHMENT_MAX_SIZE = '20m';
-export const CHAT_ATTACHMENT_MAX_SIZE_BYTES = 20 * 1024 * 1024;
+const CHAT_ATTACHMENT_MAX_SIZE_BYTES = 20 * 1024 * 1024;
 
 export class InvalidAttachmentError extends Error {
   constructor(message: string) {
@@ -32,7 +32,7 @@ export class InvalidAttachmentError extends Error {
   }
 }
 
-export interface ValidatedAttachmentFile {
+interface ValidatedAttachmentFile {
   buffer: ArrayBuffer;
   mimeType: string;
   extension: string;

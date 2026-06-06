@@ -10,12 +10,11 @@ import {
   getAllTools,
   getDefaultToolSettings,
   getTool,
-  getToolDefinitionForSettings,
   getToolDescriptors,
   mergeToolSettings,
   ToolParameterError,
 } from '../../../services/tools/registry';
-import type { EffectiveToolSettings, ToolDefinition } from '../../../services/tools/types';
+import type { EffectiveToolSettings } from '../../../services/tools/types';
 import {
   getSavedToolSettings,
   listSavedToolSettings,
@@ -31,11 +30,6 @@ export class ToolSettingsError extends Error {
     super(message);
     this.name = 'ToolSettingsError';
   }
-}
-
-export interface ToolRuntimeSettings {
-  definitions: ToolDefinition[];
-  settingsByName: Map<string, EffectiveToolSettings>;
 }
 
 export async function listToolSettingsDescriptors(
@@ -73,23 +67,6 @@ export async function updateToolSettingsDescriptor(
   return getToolDescriptors(new Map([[toolName, persistedSettings]])).find(
     (descriptor) => descriptor.name === toolName
   ) as ToolSettingsDescriptor;
-}
-
-export async function getEnabledToolRuntime(
-  db: Kysely<Database>,
-  userId: string
-): Promise<ToolRuntimeSettings> {
-  const savedSettings = await listSavedToolSettings(db, userId);
-  const settingsByName = resolveEffectiveSettings(savedSettings);
-  const definitions: ToolDefinition[] = [];
-
-  for (const tool of getAllTools()) {
-    const settings = settingsByName.get(tool.definition.name) ?? getDefaultToolSettings(tool);
-    const definition = getToolDefinitionForSettings(tool, settings);
-    if (definition) definitions.push(definition);
-  }
-
-  return { definitions, settingsByName };
 }
 
 function validateSettingsUpdate(

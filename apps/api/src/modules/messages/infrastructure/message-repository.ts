@@ -37,7 +37,7 @@ export interface UpdateMessageData {
   styleParams?: string[] | null;
 }
 
-export interface MessageRow {
+interface MessageRow {
   id: string;
   chatId: string;
   role: 'user' | 'ai';
@@ -54,7 +54,7 @@ export interface MessageRow {
   providerState: string | null;
 }
 
-export interface MappedMessage {
+interface MappedMessage {
   id: string;
   chatId: string;
   role: 'user' | 'ai';
@@ -73,13 +73,13 @@ export interface MappedMessage {
   attachments: ChatAttachment[] | undefined;
 }
 
-export interface SimpleTurn {
+interface SimpleTurn {
   id: string;
   role: 'user' | 'ai';
   text: string;
 }
 
-export interface RichTurn {
+interface RichTurn {
   id: string;
   role: 'user' | 'ai';
   text: string;
@@ -88,24 +88,24 @@ export interface RichTurn {
   modelName?: string | null;
 }
 
-export interface ListByChatOptions {
+interface ListByChatOptions {
   cursor?: number;
   limit?: number;
 }
 
-export interface ListHistoryOptions {
+interface ListHistoryOptions {
   excludeId?: string;
   limit?: number;
 }
 
-export interface ListGalleryOptions {
+interface ListGalleryOptions {
   cursor?: number;
   limit?: number;
 }
 
 const CONTEXT_BOUNDARY_EVENTS = new Set(['chat_compacted', 'summary_handoff']);
 
-export function mapMessage(
+function mapMessage(
   row: MessageRow,
   generatedImages?: GeneratedImageArtifact[],
   attachments?: ChatAttachment[]

@@ -13,16 +13,16 @@ import { getConfig } from '../../../lib/config';
 import { AgentSettingsError, slugFromAgentId, userAgentIdFromSlug } from '../domain/agent-profile';
 import { parseAgentMarkdownProfile, serializeAgentMarkdown } from './agent-markdown-parser';
 
-export const MAX_AGENT_MARKDOWN_BYTES = 256 * 1024;
+const MAX_AGENT_MARKDOWN_BYTES = 256 * 1024;
 
 const MARKDOWN_EXTENSION = '.md';
 
-export interface AgentFileRecord {
+interface AgentFileRecord {
   readonly profile: AgentProfile;
   readonly markdown: string;
 }
 
-export function getAgentsDir(): string {
+function getAgentsDir(): string {
   return getConfig().agents.dir;
 }
 
