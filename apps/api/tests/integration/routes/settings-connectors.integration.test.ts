@@ -5,35 +5,26 @@ import { Value } from '@sinclair/typebox/value';
 import { getDb } from '../../../src/db/database';
 import { settingsRoutes } from '../../../src/routes/settings';
 import {
-  UnsafeBaseUrlError,
-  validateBaseUrl,
-} from '../../../src/services/providers/core/base-url-policy';
-import {
   getProvider,
   registerProvider,
 } from '../../../src/services/providers/core/provider-registry';
-import {
-  OpenAIAuthError,
-  OpenAIConfigError,
-  validateOpenAIAuthContext,
-} from '../../../src/services/providers/openai/index';
+import { OpenAIAuthError, OpenAIConfigError } from '../../../src/services/providers/openai/index';
 import type { AIProvider } from '../../../src/services/providers/types';
 import { upsertSecretMetadata } from '../../../src/services/secret-store/metadata';
 import {
+  allowAnyBaseUrl,
   type ConnectorListPayload,
   type ConnectorPayload,
   ConnectorResponseSchema,
   type ErrorPayload,
   type ModelCatalogPayload,
+  makeModelsEndpointFetch,
   makeOpenAISuccessFetch,
+  restoreConnectorProviderMocks,
   type SuccessPayload,
+  withFetch,
 } from '../../support/connectors';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
-
-// Capture real implementations before any test can override mock.module.
-// mock.restore() does NOT revert mock.module() overrides; explicit re-registration is required.
-const realValidateOpenAIAuthContext = validateOpenAIAuthContext;
-const realValidateBaseUrl = validateBaseUrl;
 
 const TEST_USER = {
   id: 'test-user-connectors',
@@ -46,16 +37,9 @@ let restoreAuth: (() => void) | null = null;
 afterEach(async () => {
   restoreAuth?.();
   restoreAuth = null;
-  // Restore real module bindings to prevent mock leakage into later test files.
-  await mock.module('../../../src/services/providers/openai/index', () => ({
-    validateOpenAIAuthContext: realValidateOpenAIAuthContext,
-    OpenAIAuthError,
-    OpenAIConfigError,
-  }));
-  await mock.module('../../../src/services/providers/core/base-url-policy', () => ({
-    validateBaseUrl: realValidateBaseUrl,
-    UnsafeBaseUrlError,
-  }));
+  // Re-register the real openai/base-url modules so mock.module overrides do not
+  // leak into later test files (mock.restore() does not revert mock.module()).
+  await restoreConnectorProviderMocks();
 });
 
 describe('settings connectors routes', () => {
@@ -353,10 +337,7 @@ describe('openai connector routes', () => {
   it('POST /settings/connectors with provider openai and no baseUrl returns 201', async () => {
     // The route calls validateOpenAIAuthContext which uses the OpenAI SDK internally.
     // Mock global fetch so the SDK model listing call returns 200.
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = makeOpenAISuccessFetch(originalFetch);
-
-    try {
+    await withFetch(makeOpenAISuccessFetch(globalThis.fetch), async () => {
       const { app, restore } = createAuthenticatedApiTestApp(OPENAI_CONNECTOR_USER, settingsRoutes);
       restoreAuth = restore;
 
@@ -380,9 +361,7 @@ describe('openai connector routes', () => {
       expect(payload.provider).toBe('openai');
       expect(payload.baseUrl).toBeNull();
       expect(payload.configured).toBe(true);
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
+    });
   });
 
   it('POST /settings/connectors with provider openai-compatible and no baseUrl returns 400', async () => {
@@ -411,62 +390,45 @@ describe('openai connector routes', () => {
   it('POST /settings/connectors with provider openai-compatible and valid baseUrl returns 201', async () => {
     const COMPAT_BASE_URL = 'https://openrouter.ai/api/v1';
 
-    // Mock validateBaseUrl to avoid DNS lookups in test
-    await mock.module('../../../src/services/providers/core/base-url-policy', () => ({
-      validateBaseUrl: () => Promise.resolve(),
-      UnsafeBaseUrlError: class UnsafeBaseUrlError extends Error {
-        constructor(message: string) {
-          super(message);
-          this.name = 'UnsafeBaseUrlError';
-        }
-      },
-    }));
+    await allowAnyBaseUrl();
+    await withFetch(
+      makeModelsEndpointFetch(globalThis.fetch, `${COMPAT_BASE_URL}/models`),
+      async () => {
+        const { app, restore } = createAuthenticatedApiTestApp(
+          OPENAI_CONNECTOR_USER,
+          settingsRoutes
+        );
+        restoreAuth = restore;
 
-    // Mock fetch for the /models validation call
-    const originalFetch = globalThis.fetch;
-    // biome-ignore lint/suspicious/useAwait: Migrated from ESLint
-    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
-      const url = input instanceof Request ? input.url : String(input);
-      if (url === `${COMPAT_BASE_URL}/models`) {
-        return new Response(JSON.stringify({ data: [] }), { status: 200 });
+        const response = await app.handle(
+          new Request('http://localhost/settings/connectors', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              name: 'openrouter-key',
+              apiKey: 'sk-or-test-key-9999',
+              source: 'config-file',
+              provider: 'openai-compatible',
+              baseUrl: COMPAT_BASE_URL,
+            }),
+          })
+        );
+
+        expect(response.status).toBe(200);
+
+        const payload = (await response.json()) as ConnectorPayload;
+        expect(Value.Check(ConnectorResponseSchema, payload)).toBe(true);
+        expect(payload.provider).toBe('openai-compatible');
+        expect(payload.baseUrl).toBe(COMPAT_BASE_URL);
+        expect(payload.configured).toBe(true);
       }
-      return originalFetch(input, init);
-    }) as unknown as typeof fetch;
-
-    try {
-      const { app, restore } = createAuthenticatedApiTestApp(OPENAI_CONNECTOR_USER, settingsRoutes);
-      restoreAuth = restore;
-
-      const response = await app.handle(
-        new Request('http://localhost/settings/connectors', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            name: 'openrouter-key',
-            apiKey: 'sk-or-test-key-9999',
-            source: 'config-file',
-            provider: 'openai-compatible',
-            baseUrl: COMPAT_BASE_URL,
-          }),
-        })
-      );
-
-      expect(response.status).toBe(200);
-
-      const payload = (await response.json()) as ConnectorPayload;
-      expect(Value.Check(ConnectorResponseSchema, payload)).toBe(true);
-      expect(payload.provider).toBe('openai-compatible');
-      expect(payload.baseUrl).toBe(COMPAT_BASE_URL);
-      expect(payload.configured).toBe(true);
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
+    );
   });
 
   it('POST /settings/connectors with provider deepseek stores default baseUrl metadata', async () => {
-    const originalFetch = globalThis.fetch;
-    // biome-ignore lint/suspicious/useAwait: Migrated from ESLint
-    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    const realFetch = globalThis.fetch;
+    // biome-ignore lint/suspicious/useAwait: matches the fetch signature
+    const deepseekModelsFetch = (async (input: string | URL | Request, init?: RequestInit) => {
       const url = input instanceof Request ? input.url : String(input);
       if (url === 'https://api.deepseek.com/models') {
         expect(init?.headers).toMatchObject({ Authorization: 'Bearer sk-deepseek-test-key' });
@@ -475,10 +437,10 @@ describe('openai connector routes', () => {
           headers: { 'Content-Type': 'application/json' },
         });
       }
-      return originalFetch(input, init);
-    }) as typeof fetch;
+      return realFetch(input, init);
+    }) as typeof globalThis.fetch;
 
-    try {
+    await withFetch(deepseekModelsFetch, async () => {
       const { app, restore } = createAuthenticatedApiTestApp(
         DEEPSEEK_CONNECTOR_USER,
         settingsRoutes
@@ -505,16 +467,11 @@ describe('openai connector routes', () => {
       expect(payload.provider).toBe('deepseek');
       expect(payload.baseUrl).toBeNull();
       expect(payload.configured).toBe(true);
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
+    });
   });
 
   it('GET /settings/connectors returns openai connector with baseUrl null', async () => {
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = makeOpenAISuccessFetch(originalFetch);
-
-    try {
+    await withFetch(makeOpenAISuccessFetch(globalThis.fetch), async () => {
       const { app, restore } = createAuthenticatedApiTestApp(OPENAI_LIST_USER, settingsRoutes);
       restoreAuth = restore;
 
@@ -547,72 +504,51 @@ describe('openai connector routes', () => {
 
       expect(openaiConnector).toBeDefined();
       expect(openaiConnector?.baseUrl).toBeNull();
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
+    });
   });
 
   it('GET /settings/connectors returns openai-compatible connector with correct baseUrl', async () => {
     const COMPAT_BASE_URL = 'https://api.deepseek.com/v1';
 
-    // Mock validateBaseUrl
-    await mock.module('../../../src/services/providers/core/base-url-policy', () => ({
-      validateBaseUrl: () => Promise.resolve(),
-      UnsafeBaseUrlError: class UnsafeBaseUrlError extends Error {
-        constructor(message: string) {
-          super(message);
-          this.name = 'UnsafeBaseUrlError';
-        }
-      },
-    }));
+    await allowAnyBaseUrl();
+    await withFetch(
+      makeModelsEndpointFetch(globalThis.fetch, `${COMPAT_BASE_URL}/models`),
+      async () => {
+        const { app, restore } = createAuthenticatedApiTestApp(COMPAT_LIST_USER, settingsRoutes);
+        restoreAuth = restore;
 
-    const originalFetch = globalThis.fetch;
-    // biome-ignore lint/suspicious/useAwait: Migrated from ESLint
-    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
-      const url = input instanceof Request ? input.url : String(input);
-      if (url === `${COMPAT_BASE_URL}/models`) {
-        return new Response(JSON.stringify({ data: [] }), { status: 200 });
+        // Create connector
+        const createResponse = await app.handle(
+          new Request('http://localhost/settings/connectors', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              name: 'deepseek-for-list',
+              apiKey: 'sk-live-compat-list-bbbb',
+              source: 'config-file',
+              provider: 'openai-compatible',
+              baseUrl: COMPAT_BASE_URL,
+            }),
+          })
+        );
+        expect(createResponse.status).toBe(200);
+
+        // List connectors
+        const listResponse = await app.handle(new Request('http://localhost/settings/connectors'));
+
+        expect(listResponse.status).toBe(200);
+
+        const listPayload = (await listResponse.json()) as ConnectorListPayload;
+        expect(Value.Check(ConnectorStatusSchema, listPayload)).toBe(true);
+
+        const compatConnector = listPayload.connectors.find(
+          (c) => c.provider === 'openai-compatible' && c.name === 'deepseek-for-list'
+        );
+
+        expect(compatConnector).toBeDefined();
+        expect(compatConnector?.baseUrl).toBe(COMPAT_BASE_URL);
       }
-      return originalFetch(input, init);
-    }) as unknown as typeof fetch;
-
-    try {
-      const { app, restore } = createAuthenticatedApiTestApp(COMPAT_LIST_USER, settingsRoutes);
-      restoreAuth = restore;
-
-      // Create connector
-      const createResponse = await app.handle(
-        new Request('http://localhost/settings/connectors', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            name: 'deepseek-for-list',
-            apiKey: 'sk-live-compat-list-bbbb',
-            source: 'config-file',
-            provider: 'openai-compatible',
-            baseUrl: COMPAT_BASE_URL,
-          }),
-        })
-      );
-      expect(createResponse.status).toBe(200);
-
-      // List connectors
-      const listResponse = await app.handle(new Request('http://localhost/settings/connectors'));
-
-      expect(listResponse.status).toBe(200);
-
-      const listPayload = (await listResponse.json()) as ConnectorListPayload;
-      expect(Value.Check(ConnectorStatusSchema, listPayload)).toBe(true);
-
-      const compatConnector = listPayload.connectors.find(
-        (c) => c.provider === 'openai-compatible' && c.name === 'deepseek-for-list'
-      );
-
-      expect(compatConnector).toBeDefined();
-      expect(compatConnector?.baseUrl).toBe(COMPAT_BASE_URL);
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
+    );
   });
 
   it('PUT /settings/connectors/:id/models updates a shared OpenAI connector loaded from config-file', async () => {
@@ -682,10 +618,7 @@ describe('openai project-scoped connector routes', () => {
   it('POST /settings/connectors stores organizationId and projectId nullably', async () => {
     // The route calls validateOpenAIAuthContext directly via the SDK.
     // Mock fetch to return a 200 so validation passes without real API calls.
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = makeOpenAISuccessFetch(originalFetch);
-
-    try {
+    await withFetch(makeOpenAISuccessFetch(globalThis.fetch), async () => {
       const { app, restore } = createAuthenticatedApiTestApp(OPENAI_PROJ_USER, settingsRoutes);
       restoreAuth = restore;
 
@@ -723,16 +656,11 @@ describe('openai project-scoped connector routes', () => {
       expect(row).toBeDefined();
       expect(row?.organizationId).toBe('org-testorg999');
       expect(row?.projectId).toBe('proj_testproj888');
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
+    });
   });
 
   it('POST /settings/connectors with omitted org/project stores null', async () => {
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = makeOpenAISuccessFetch(originalFetch);
-
-    try {
+    await withFetch(makeOpenAISuccessFetch(globalThis.fetch), async () => {
       const { app, restore } = createAuthenticatedApiTestApp(OPENAI_PROJ_USER, settingsRoutes);
       restoreAuth = restore;
 
@@ -762,16 +690,11 @@ describe('openai project-scoped connector routes', () => {
       expect(row).toBeDefined();
       expect(row?.organizationId).toBeNull();
       expect(row?.projectId).toBeNull();
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
+    });
   });
 
   it('PUT /settings/connectors/:id/models preserves organizationId and projectId for OpenAI connectors', async () => {
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = makeOpenAISuccessFetch(originalFetch);
-
-    try {
+    await withFetch(makeOpenAISuccessFetch(globalThis.fetch), async () => {
       const { app, restore } = createAuthenticatedApiTestApp(OPENAI_PROJ_USER, settingsRoutes);
       restoreAuth = restore;
 
@@ -815,9 +738,7 @@ describe('openai project-scoped connector routes', () => {
       expect(row?.organizationId).toBe('org-testorg999');
       expect(row?.projectId).toBe('proj_testproj888');
       expect(row?.enabledModels).toBe(JSON.stringify(['gpt-4o']));
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
+    });
   });
 
   it('POST /settings/connectors returns 401 when OpenAI rejects credentials', async () => {
