@@ -26,6 +26,24 @@ function reserveFreePort(): number {
   return port;
 }
 
+/**
+ * Environment for the spawned server. It boots the real production server, so
+ * NODE_ENV is forced to 'production': inheriting the parent's NODE_ENV=test
+ * would trip the in-memory config safety net in src/lib/config.ts and ignore
+ * the explicit API_PORT / DATABASE_PATH below.
+ */
+function serverEnv(home: string, port: number): Record<string, string> {
+  return {
+    ...(process.env as Record<string, string>),
+    NODE_ENV: 'production',
+    HOME: home,
+    API_PORT: String(port),
+    API_HOST: '127.0.0.1',
+    DATABASE_PATH: ':memory:',
+    MANGOSTUDIO_DIAGNOSTIC_LOGS: '0',
+  };
+}
+
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function probeHealthOnce(host: string, port: number): Promise<boolean> {
@@ -113,13 +131,8 @@ describe('startServer via __serve', () => {
       child = Bun.spawn({
         cmd: ['bun', ENTRY, '__serve', String(port)],
         env: {
-          ...process.env,
-          HOME: home,
-          API_PORT: String(port),
-          API_HOST: '127.0.0.1',
-          DATABASE_PATH: ':memory:',
+          ...serverEnv(home, port),
           BETTER_AUTH_SECRET: VALID_AUTH_SECRET,
-          MANGOSTUDIO_DIAGNOSTIC_LOGS: '0',
         },
         stdout: 'ignore',
         stderr: 'ignore',
@@ -149,13 +162,8 @@ describe('startServer via __serve', () => {
       child = Bun.spawn({
         cmd: ['bun', ENTRY, '__serve', String(port)],
         env: {
-          ...process.env,
-          HOME: home,
-          API_PORT: String(port),
-          API_HOST: '127.0.0.1',
-          DATABASE_PATH: ':memory:',
+          ...serverEnv(home, port),
           BETTER_AUTH_SECRET: '   ',
-          MANGOSTUDIO_DIAGNOSTIC_LOGS: '0',
         },
         stdout: 'ignore',
         stderr: 'pipe',

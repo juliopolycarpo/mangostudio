@@ -1,48 +1,15 @@
 /**
- * Bun test preload: configures the MangoConfig singleton before any test module
- * imports trigger lazy initialization of the database or auth singletons.
+ * Bun test preload (configured in `apps/api/bunfig.toml`). It runs before any
+ * test module loads and delegates to the shared `setupTestEnvironment()` so the
+ * preload and the test harness agree on a single bootstrap.
  *
- * Also runs migrations on the in-memory test database so that all tables exist.
+ * NOTE: `bunfig.toml` is resolved relative to the current working directory, so
+ * this preload only runs when tests start from `apps/api` (e.g. via
+ * `bun run --filter @mangostudio/api test:unit`). The config safety net in
+ * `src/lib/config.ts` and the harness guard keep wrong-directory runs safe and
+ * loud. See docs/reference/testing.md.
  */
 
-import { mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { Migrator } from 'kysely/migration';
-import { getDb } from '../../../src/db/database';
-import { allMigrations } from '../../../src/db/migrations';
-import { loadConfigForTest } from '../../../src/lib/config';
+import { setupTestEnvironment } from './test-environment';
 
-const testRuntimeDir = mkdtempSync(
-  join(tmpdir(), `mangostudio-test-${process.pid}-${process.env.BUN_WORKER_ID ?? '0'}-`)
-);
-const testConfigPath = join(testRuntimeDir, 'config.toml');
-
-// 1. Set test config BEFORE any lazy singleton initializes
-loadConfigForTest({
-  auth: {
-    secret: 'test-secret-at-least-32-characters-long',
-    url: 'http://localhost:3001',
-  },
-  database: {
-    path: ':memory:',
-  },
-  configFilePath: testConfigPath,
-});
-
-// 2. Run migrations on the singleton in-memory database
-const db = getDb();
-const migrator = new Migrator({
-  db,
-  provider: {
-    getMigrations() {
-      return Promise.resolve(allMigrations);
-    },
-  },
-});
-
-const { error } = await migrator.migrateToLatest();
-if (error) {
-  console.error('[test-preload] Migration failed:', error);
-  process.exit(1);
-}
+await setupTestEnvironment();

@@ -86,7 +86,7 @@ function execute(
   return Promise.resolve({ isoUtc, unixMs, timezone, locale, localDateTime, offset });
 }
 
-/** Registers this tool. Called once at import time; can be re-called after clearRegistry(). */
+/** Registers this built-in tool. // Usage: register() */
 export function register(): void {
   registerTool({
     definition,
@@ -126,6 +126,3 @@ function getStringArg(...values: unknown[]): string {
   }
   return '';
 }
-
-// Self-register on import
-register();

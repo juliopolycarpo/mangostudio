@@ -129,13 +129,23 @@ export function createProviderSecretService(
   const getMetaById = deps.getMetadataById ?? getSecretMetadataById;
   const upsertMeta = deps.upsertMetadata ?? upsertSecretMetadata;
   const deleteMeta = deps.deleteMetadata ?? deleteSecretMetadata;
-  const tomlFilePath = deps.tomlFilePath ?? getConfig().configFilePath;
 
-  // TTL debounce: avoid re-syncing the config file on every request.
-  // The TOML config file rarely changes during runtime, so a 30-second
-  // debounce is safe and eliminates redundant disk I/O and DB queries
-  // on hot paths like /respond/stream.
-  const SYNC_TTL_MS = 30_000;
+  // Resolve the config path lazily on every use, never at construction time.
+  // Capturing getConfig().configFilePath here would freeze whichever config was
+  // active when this module was first imported. In tests that import order can
+  // precede loadConfigForTest(), which would pin the developer's real
+  // ~/.mango/config.toml and leak its connectors into the in-memory test DB.
+  const resolveTomlFilePath = (): string => deps.tomlFilePath ?? getConfig().configFilePath;
+
+  // TTL debounce: avoid re-syncing the config file on every request. The TOML
+  // config file rarely changes during runtime, so a 30-second debounce is safe
+  // and eliminates redundant disk I/O and DB queries on hot paths like
+  // /respond/stream.
+  //
+  // The debounce is disabled under the test runner: a process-global cache keyed
+  // by userId would otherwise make whether a sync runs depend on what a *prior*
+  // test did within the window, turning the integration suite order-dependent.
+  const SYNC_TTL_MS = process.env.NODE_ENV === 'test' ? 0 : 30_000;
   const lastSyncByUser = new Map<string, number>();
 
   const resolveSecretValue = async (connector: SecretMetadataRow): Promise<string | null> => {
@@ -157,6 +167,7 @@ export function createProviderSecretService(
 
       case 'config-file': {
         try {
+          const tomlFilePath = resolveTomlFilePath();
           if (existsSync(tomlFilePath)) {
             const parsed = readTomlStringSections(tomlFilePath);
             const value = parsed[config.tomlSection]?.[connector.name];
@@ -179,6 +190,7 @@ export function createProviderSecretService(
     const lastSync = lastSyncByUser.get(userId);
     if (lastSync && now() - lastSync < SYNC_TTL_MS) return;
     try {
+      const tomlFilePath = resolveTomlFilePath();
       if (!existsSync(tomlFilePath)) return;
       const parsed = readTomlStringSections(tomlFilePath);
       const tomlKeys = parsed[config.tomlSection] ?? {};
@@ -272,7 +284,9 @@ export function createProviderSecretService(
     now,
     secretStore,
     provider: config.provider,
-    tomlFilePath,
+    get tomlFilePath() {
+      return resolveTomlFilePath();
+    },
     tomlSection: config.tomlSection,
     envVarPrefix: config.envVarPrefix,
     resolveSecretValue,

@@ -127,11 +127,15 @@ export function createGeminiSecretService(
   const getMetadataById = dependencies.getMetadataById ?? getSecretMetadataById;
   const upsertMetadata = dependencies.upsertMetadata ?? upsertSecretMetadata;
   const deleteMetadata = dependencies.deleteMetadata ?? deleteSecretMetadata;
-  const resolvedTomlFilePath = dependencies.tomlFilePath ?? getTomlFilePath();
+
+  // Resolve lazily on every use, never at construction. A captured path would
+  // freeze whichever config was active at import time; in tests that can precede
+  // loadConfigForTest() and pin the real ~/.mango/config.toml. See secret-service.ts.
+  const resolveTomlFilePath = (): string => dependencies.tomlFilePath ?? getTomlFilePath();
 
   const syncConfigFileConnectors = async (userId: string): Promise<void> => {
     try {
-      const configPath = resolvedTomlFilePath;
+      const configPath = resolveTomlFilePath();
       if (!existsSync(configPath)) return;
 
       const parsed = readTomlStringSections(configPath);
@@ -272,7 +276,7 @@ export function createGeminiSecretService(
           break;
 
         case 'config-file': {
-          const configPath = resolvedTomlFilePath;
+          const configPath = resolveTomlFilePath();
           mkdirSync(dirname(configPath), { recursive: true });
           const config = readTomlStringSections(configPath);
 
@@ -349,7 +353,7 @@ export function createGeminiSecretService(
 
       if (metadata.source === 'config-file') {
         try {
-          const configPath = resolvedTomlFilePath;
+          const configPath = resolveTomlFilePath();
           if (existsSync(configPath)) {
             const config = readTomlStringSections(configPath);
 

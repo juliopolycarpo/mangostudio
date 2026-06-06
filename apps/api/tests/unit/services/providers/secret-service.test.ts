@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { SecretMetadataRow } from '@mangostudio/shared/types';
+import { getConfig, loadConfigForTest } from '../../../../src/lib/config';
 import {
   createProviderSecretService,
   isPlaceholderConfigSecretValue,
@@ -89,6 +90,44 @@ describe('isPlaceholderConfigSecretValue', () => {
     expect(isPlaceholderConfigSecretValue('sk-or-test-key-9999')).toBe(true);
     expect(isPlaceholderConfigSecretValue('your-secret-key-here')).toBe(true);
     expect(isPlaceholderConfigSecretValue('sk-live-realistic-value')).toBe(false);
+  });
+});
+
+describe('createProviderSecretService config path resolution', () => {
+  // The active config is a shared process singleton. Snapshot the values the
+  // test preload installed and restore them so mutating the config here cannot
+  // leak into sibling test files that run in the same Bun process.
+  const savedAuth = { ...getConfig().auth };
+  const savedConfigFilePath = getConfig().configFilePath;
+
+  function setActiveConfigFilePath(configFilePath: string): void {
+    loadConfigForTest({ database: { path: ':memory:' }, auth: savedAuth, configFilePath });
+  }
+
+  afterEach(() => {
+    setActiveConfigFilePath(savedConfigFilePath);
+  });
+
+  it('reads getConfig().configFilePath at use time, not at construction time', () => {
+    const pathA = writeTempToml('[openai_api_keys]\na = "sk-live-aaaa"\n');
+    const pathB = writeTempToml('[openai_api_keys]\nb = "sk-live-bbbb"\n');
+
+    setActiveConfigFilePath(pathA);
+
+    const service = createProviderSecretService({
+      provider: 'openai',
+      tomlSection: 'openai_api_keys',
+      envVarPrefix: 'OPENAI_API_KEY',
+      validateFn: () => Promise.resolve(),
+    });
+
+    expect(service.tomlFilePath).toBe(pathA);
+
+    // Regression: a config switch after construction must be reflected. A path
+    // captured at construction (the previous bug) would freeze on pathA and let
+    // the developer's real ~/.mango/config.toml leak into the in-memory test DB.
+    setActiveConfigFilePath(pathB);
+    expect(service.tomlFilePath).toBe(pathB);
   });
 });
 

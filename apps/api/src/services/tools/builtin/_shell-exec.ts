@@ -42,13 +42,27 @@ export interface ShellCommandResult {
   durationMs: number;
 }
 
+const executableCache = new Map<ShellKind, string | null>();
+
 /**
  * Resolves the executable path for a shell kind, honoring platform rules.
  * PowerShell is Windows-only per product requirement; bash/zsh follow PATH.
+ * The PATH lookup is memoized — shell availability is stable for a process, so
+ * startup registration and per-test expectations avoid repeated `Bun.which` scans.
  *
  * // Usage: findShellExecutable('bash') // => '/usr/bin/bash' | null
  */
 export function findShellExecutable(kind: ShellKind): string | null {
+  const cached = executableCache.get(kind);
+  if (cached !== undefined) return cached;
+
+  const resolved = resolveShellExecutable(kind);
+  executableCache.set(kind, resolved);
+  return resolved;
+}
+
+/** Performs the uncached PATH lookup for a shell kind. */
+function resolveShellExecutable(kind: ShellKind): string | null {
   if (kind === 'powershell') {
     if (process.platform !== 'win32') return null;
     return Bun.which('pwsh') ?? Bun.which('powershell');

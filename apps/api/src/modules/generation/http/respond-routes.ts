@@ -1,7 +1,6 @@
 import { ERROR_CODES } from '@mangostudio/shared/errors';
 import { GenerateTextBodySchema } from '@mangostudio/shared/generation';
 import type { Elysia } from 'elysia';
-import '../../../services/providers'; // ensure all providers are registered
 import { getDb } from '../../../db/database';
 import { requireAuth } from '../../../plugins/auth-middleware';
 import { ChatAttachmentNotFoundError } from '../../attachments/infrastructure/attachment-repository';

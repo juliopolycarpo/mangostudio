@@ -133,7 +133,7 @@ function execute(args: Record<string, unknown>, context: ToolContext): Promise<G
   return executeGlob({ pattern, ...(cwd ? { cwd } : {}) }, context);
 }
 
-/** Registers this tool. Called once at import time; can be re-called after clearRegistry(). */
+/** Registers this built-in tool. // Usage: register() */
 export function register(): void {
   registerTool({
     definition,
@@ -198,6 +198,3 @@ export function register(): void {
     execute,
   });
 }
-
-// Self-register on import
-register();

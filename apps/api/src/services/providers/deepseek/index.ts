@@ -3,7 +3,6 @@ import { generateText, streamText } from 'ai';
 import { parseStringArray } from '../../../utils/json';
 import { withModelCache } from '../core/model-cache';
 import { recordProviderCacheHit, recordProviderCacheMiss } from '../core/provider-observability';
-import { registerProvider } from '../core/provider-registry';
 import { createReadinessCache, createReadinessCacheKey } from '../core/readiness-cache';
 import { createProviderSecretService } from '../core/secret-service';
 import type {
@@ -232,7 +231,5 @@ export class DeepSeekConnectorError extends Error {
     this.name = 'DeepSeekConnectorError';
   }
 }
-
-registerProvider(deepSeekProvider);
 
 export { deepSeekProvider };

@@ -13,7 +13,6 @@ import {
   recordProviderCacheMiss,
   recordProviderProbeTimeout,
 } from '../core/provider-observability';
-import { registerProvider } from '../core/provider-registry';
 import { createReadinessCache, createReadinessCacheKey } from '../core/readiness-cache';
 import { createProviderSecretService } from '../core/secret-service';
 import { generateOpenAIImage } from '../openai/image-generation';
@@ -300,8 +299,5 @@ const openAICompatibleProvider: AIProvider = {
     return apiKey;
   },
 };
-
-// Self-register on import
-registerProvider(openAICompatibleProvider);
 
 export { openAICompatibleProvider };

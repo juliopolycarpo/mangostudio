@@ -22,6 +22,9 @@ import { authRoutes } from './routes/auth';
 import { createGeneratedImageRoutes } from './routes/generated-images';
 import { settingsRoutes } from './routes/settings';
 import { uploadRoutes } from './routes/upload';
+import { registerApplicationServices } from './services/register-application-services';
+
+registerApplicationServices();
 
 const UPLOADS_DIR = getConfig().uploads.dir;
 const IMAGES_DIR = getConfig().images.dir;

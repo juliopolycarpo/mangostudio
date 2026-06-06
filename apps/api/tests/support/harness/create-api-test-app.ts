@@ -1,5 +1,6 @@
 import { Elysia } from 'elysia';
 import { getAuth } from '../../../src/auth';
+import { assertTestEnvironmentReady } from '../setup/test-environment';
 
 type ApiTestPlugin = Parameters<Elysia['use']>[0];
 
@@ -10,6 +11,8 @@ type ApiTestPlugin = Parameters<Elysia['use']>[0];
  * @returns An Elysia app configured for request handling in tests.
  */
 export function createApiTestApp(...plugins: ApiTestPlugin[]) {
+  assertTestEnvironmentReady('createApiTestApp');
+
   const app = new Elysia();
 
   for (const plugin of plugins) {
@@ -33,6 +36,8 @@ export function createAuthenticatedApiTestApp(
   mockUser: { id: string; name: string; email: string },
   ...plugins: ApiTestPlugin[]
 ) {
+  assertTestEnvironmentReady('createAuthenticatedApiTestApp');
+
   const auth = getAuth();
   const api = auth.api as Record<string, unknown>;
   const originalGetSession = auth.api.getSession.bind(auth.api);
