@@ -70,7 +70,8 @@ bun run test --unit
 # Apenas integração
 bun run test --integration
 
-# End-to-end
+# Setup end-to-end, depois teste
+bun run test:e2e:setup
 bun run test --e2e
 ```
 

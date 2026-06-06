@@ -1,3 +1,4 @@
+import { BROWSER_SMOKE_TEST_COMMAND } from './lib/browser-smoke';
 import { ALL_WORKSPACE_NAMES, ROOT_DIR, WORKSPACES } from './lib/config';
 import {
   exitWithResults,
@@ -102,7 +103,7 @@ if (results.some((result) => result.exitCode !== 0)) {
 
 if (shouldRunE2E) {
   info('\nPhase: e2e');
-  const e2eResult = await runCommand('e2e', ['bunx', 'playwright', 'test'], { cwd: ROOT_DIR });
+  const e2eResult = await runCommand('e2e', [...BROWSER_SMOKE_TEST_COMMAND], { cwd: ROOT_DIR });
   results.push(e2eResult);
 }
 

@@ -62,6 +62,7 @@ Targeted lanes:
 ```bash
 bun run test --unit
 bun run test --integration
+bun run test:e2e:setup  # install Chromium before the first e2e run
 bun run test --e2e
 bun run check --staged    # only workspaces touched by staged files
 bun run fix --staged      # auto-fix only affected workspaces
