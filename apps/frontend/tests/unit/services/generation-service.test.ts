@@ -189,7 +189,10 @@ describe('generateImage', () => {
   });
 
   it('returns the generated image payload on success', async () => {
-    const payload = { images: ['data:image/png;base64,abc'] } as unknown as GenerateImageResponse;
+    const payload = {
+      userMessage: { id: 'user-msg-1' },
+      aiMessage: { id: 'ai-msg-1' },
+    } as unknown as GenerateImageResponse;
     mockGeneratePost.mockResolvedValue({ data: payload, error: null });
 
     const request = makeImageRequest();
@@ -215,8 +218,19 @@ describe('generateImage', () => {
 });
 
 describe('uploadReferenceImage', () => {
+  // The error and reject paths log via console.error; silence it so the
+  // expected-failure tests don't pollute the test output.
+  let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
+
   beforeEach(() => {
     vi.clearAllMocks();
+    consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {
+      /* swallow expected error logs in test */
+    });
+  });
+
+  afterEach(() => {
+    consoleErrorSpy.mockRestore();
   });
 
   const file = new File(['bytes'], 'ref.png', { type: 'image/png' });
