@@ -1,9 +1,7 @@
 import type { AgentId } from '@mangostudio/shared/agents';
 import type { SubagentRunResult, SubagentStatus } from './subagent-runner';
 
-export type CachedSubagentScenario = 'produced_not_transmitted' | 'not_produced';
-
-export interface SubagentCachedEntry {
+interface SubagentCachedEntry {
   readonly callId: string;
   readonly agentId?: AgentId;
   readonly agentName?: string;

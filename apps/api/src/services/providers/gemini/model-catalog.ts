@@ -13,7 +13,7 @@ import { recordProviderProbeTimeout } from '../core/provider-observability';
 import { createGeminiClient } from './client';
 import { GeminiApiKeyMissingError } from './secret';
 
-export type GeminiModelCatalogRefreshReason = 'startup' | 'secret-updated' | 'manual' | 'ttl';
+type GeminiModelCatalogRefreshReason = 'startup' | 'secret-updated' | 'manual' | 'ttl';
 
 interface GeminiModelCatalogServiceDependencies {
   getApiKey?: (userId: string) => Promise<string>;
@@ -273,16 +273,7 @@ const geminiModelCatalogService = createGeminiModelCatalogService();
 
 export const refreshGeminiModelCatalog =
   geminiModelCatalogService.refreshGeminiModelCatalog.bind(geminiModelCatalogService);
-export const refreshIfStale =
-  geminiModelCatalogService.refreshIfStale.bind(geminiModelCatalogService);
 export const clearGeminiModelCatalog =
   geminiModelCatalogService.clearGeminiModelCatalog.bind(geminiModelCatalogService);
 export const getGeminiModelCatalog =
   geminiModelCatalogService.getGeminiModelCatalog.bind(geminiModelCatalogService);
-export const getDefaultTextModel =
-  geminiModelCatalogService.getDefaultTextModel.bind(geminiModelCatalogService);
-export const getDefaultImageModel =
-  geminiModelCatalogService.getDefaultImageModel.bind(geminiModelCatalogService);
-export const hasTextModel = geminiModelCatalogService.hasTextModel.bind(geminiModelCatalogService);
-export const hasImageModel =
-  geminiModelCatalogService.hasImageModel.bind(geminiModelCatalogService);

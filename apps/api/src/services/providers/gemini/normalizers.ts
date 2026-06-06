@@ -4,21 +4,14 @@
  * Accepts streaming events from the Interactions API and provides
  * well-typed accessors so the provider file stays free of unsafe casts.
  */
-
 import type { Interactions } from '@google/genai';
 
-// Re-export SDK types for convenience in the provider module
-export type ContentStart = Interactions.ContentStart;
-export type ContentDelta = Interactions.ContentDelta;
-export type ContentStop = Interactions.ContentStop;
-export type InteractionCompleteEvent = Interactions.InteractionCompleteEvent;
-export type InteractionStartEvent = Interactions.InteractionStartEvent;
+type ContentStart = Interactions.ContentStart;
+type ContentDelta = Interactions.ContentDelta;
+type FunctionCallContent = Interactions.FunctionCallContent;
 export type InteractionSSEEvent = Interactions.InteractionSSEEvent;
-export type FunctionCallContent = Interactions.FunctionCallContent;
-export type GeminiInteraction = Interactions.Interaction;
-export type GeminiUsage = Interactions.Usage;
-export type CreateModelInteractionParamsStreaming =
-  Interactions.CreateModelInteractionParamsStreaming;
+type GeminiUsage = Interactions.Usage;
+type CreateModelInteractionParamsStreaming = Interactions.CreateModelInteractionParamsStreaming;
 
 // ---------------------------------------------------------------------------
 // SDK boundary cast — Gemini Interactions API
