@@ -25,7 +25,6 @@ export interface MarkdownContentProps {
 export function MarkdownContentRenderer({
   content,
   className,
-  isStreaming,
   copyCodeLabel,
   codeCopiedLabel,
 }: MarkdownContentProps) {
@@ -36,7 +35,13 @@ export function MarkdownContentRenderer({
   const [highlightVersion, setHighlightVersion] = useState(0);
   const resolvedCopyLabel = copyCodeLabel ?? t.chat.copyCode;
   const resolvedCopiedLabel = codeCopiedLabel ?? t.chat.codeCopied;
-  const codeLanguages = useMemo(() => detectCodeLanguages(content), [content]);
+  // Key keeps the array identity stable while the language set is unchanged, so
+  // streaming new content does not re-fire the highlighter effect every chunk.
+  const codeLanguageKey = useMemo(() => detectCodeLanguages(content).join('\n'), [content]);
+  const codeLanguages = useMemo(
+    () => (codeLanguageKey ? codeLanguageKey.split('\n') : []),
+    [codeLanguageKey]
+  );
 
   useCodeHighlighter(codeLanguages, setHighlighter, setHighlightVersion);
   useCopyCodeButtons(containerRef, resolvedCopyLabel, resolvedCopiedLabel);
@@ -45,8 +50,9 @@ export function MarkdownContentRenderer({
     () => createParser(resolvedCodeTheme, resolvedCopyLabel, highlighter),
     [resolvedCodeTheme, resolvedCopyLabel, highlighter, highlightVersion]
   );
-  const html = useParsedMarkdown(content, parser);
-  const renderedHtml = isStreaming ? parseMarkdown(parser, content) : html;
+  // The memo re-parses whenever content or parser changes (i.e. every streamed
+  // chunk), so it already reflects the latest content without a second parse.
+  const renderedHtml = useParsedMarkdown(content, parser);
 
   return (
     <div
@@ -179,14 +185,19 @@ function parseMarkdown(parser: Marked, content: string): string {
   return parser.parse(content, { async: false });
 }
 
+// Reused across calls; the lexer keeps no per-document state worth resetting.
+const codeLanguageLexer = new Marked({ gfm: true, breaks: true });
+
 function detectCodeLanguages(content: string): string[] {
   if (!content) return [];
 
-  const parser = new Marked({ gfm: true, breaks: true });
-  return parser.lexer(content).flatMap((token) => {
-    if (token.type !== 'code' || !('lang' in token) || !token.lang) return [];
-    return [token.lang];
+  const languages = new Set<string>();
+  // walkTokens recurses into list items and blockquotes, so fenced code nested
+  // inside them still has its grammar preloaded for highlighting.
+  codeLanguageLexer.walkTokens(codeLanguageLexer.lexer(content), (token) => {
+    if (token.type === 'code' && 'lang' in token && token.lang) languages.add(token.lang);
   });
+  return [...languages].sort();
 }
 
 async function loadCodeHighlighter(languages: readonly string[]): Promise<CodeHighlighter> {

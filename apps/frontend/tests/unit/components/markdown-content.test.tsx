@@ -189,6 +189,15 @@ describe('MarkdownContent — syntax highlighting', () => {
     );
   });
 
+  it('preloads languages for code blocks nested inside list items', async () => {
+    vi.mocked(shikiLib.preloadCodeLanguages).mockReturnValue(createPendingPreload());
+    render(<MarkdownContentRenderer content={'- step one\n\n  ```rust\n  fn main() {}\n  ```'} />);
+
+    await vi.waitFor(() => {
+      expect(shikiLib.preloadCodeLanguages).toHaveBeenCalledWith(['rust']);
+    });
+  });
+
   it('adds data-lang attribute to Shiki pre element', async () => {
     const preload = createDeferredPreload();
     vi.mocked(shikiLib.preloadCodeLanguages).mockReturnValue(preload.promise);
