@@ -48,7 +48,7 @@ export function ToolIcon({ toolName, className }: { toolName: string; className?
  *
  * // Usage: abbreviatePath('/home/ada/notes.md') // => '~/notes.md'
  */
-export function abbreviatePath(rawPath: unknown): string | null {
+function abbreviatePath(rawPath: unknown): string | null {
   if (typeof rawPath !== 'string' || rawPath.trim().length === 0) return null;
   let p = rawPath.trim();
   const homeMatch = p.match(/^\/home\/[^/]+/);

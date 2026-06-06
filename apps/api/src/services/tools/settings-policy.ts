@@ -43,7 +43,7 @@ export function getToolDescriptorsForTools(
   );
 }
 
-export function getToolDefinitionForSettings(
+function getToolDefinitionForSettings(
   tool: RegisteredTool,
   settings: EffectiveToolSettings
 ): ToolDefinition | null {

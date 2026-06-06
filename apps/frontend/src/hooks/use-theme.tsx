@@ -36,7 +36,7 @@ const DEFAULT_CONFIG: ThemeConfig = {
   chatDensity: 'default',
 };
 
-export type ResolvedTheme = 'dark' | 'light';
+type ResolvedTheme = 'dark' | 'light';
 
 interface ThemeContextValue {
   config: ThemeConfig;

@@ -5,7 +5,7 @@ import { client } from '../lib/api-client';
 import { extractApiError } from '../lib/utils';
 import { EMPTY_MODEL_CATALOG } from '../utils/model-utils';
 
-export const catalogKeys = {
+const catalogKeys = {
   all: ['model-catalog'] as const,
 };
 

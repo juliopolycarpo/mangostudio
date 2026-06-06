@@ -26,15 +26,15 @@ export interface FsProbe {
   isWritable(path: string): boolean;
 }
 
-export function ok(label: string, detail: string): CheckResult {
+function ok(label: string, detail: string): CheckResult {
   return { label, status: 'ok', detail };
 }
 
-export function warn(label: string, detail: string): CheckResult {
+function warn(label: string, detail: string): CheckResult {
   return { label, status: 'warn', detail };
 }
 
-export function fail(label: string, detail: string): CheckResult {
+function fail(label: string, detail: string): CheckResult {
   return { label, status: 'fail', detail };
 }
 

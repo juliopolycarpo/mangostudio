@@ -15,7 +15,6 @@ import type { EffectiveToolSettings, RegisteredTool, ToolContext, ToolDefinition
 export {
   getDefaultToolSettings,
   getSafeEffectiveToolSettings,
-  getToolDefinitionForSettings,
   mergeToolSettings,
   normalizeToolParameters,
   ToolParameterError,

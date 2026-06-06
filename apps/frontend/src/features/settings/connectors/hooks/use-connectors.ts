@@ -9,7 +9,7 @@ import { useCallback } from 'react';
 import { client } from '@/lib/api-client';
 import { extractApiError } from '@/lib/utils';
 
-export const connectorKeys = {
+const connectorKeys = {
   status: ['connector-status'] as const,
 };
 

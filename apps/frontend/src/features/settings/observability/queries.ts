@@ -7,7 +7,7 @@ import { queryOptions } from '@tanstack/react-query';
 import { client } from '@/lib/api-client';
 import { extractApiError } from '@/lib/utils';
 
-export const observabilityKeys = {
+const observabilityKeys = {
   all: ['observability'] as const,
   metrics: () => [...observabilityKeys.all, 'metrics'] as const,
   logs: () => [...observabilityKeys.all, 'logs'] as const,
