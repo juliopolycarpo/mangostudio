@@ -9,6 +9,10 @@ import { clearRegistry, getAllTools, registerTool } from '../../../../src/servic
 import type { RegisteredTool } from '../../../../src/services/tools/types';
 
 const USER_ID = 'user-tool-settings-test';
+// Distinct ids per write test keep saved-settings rows from leaking across the
+// shared in-memory DB (only the registry is reset between tests, not the DB).
+const PARAM_UPDATE_USER_ID = 'user-tool-settings-param-test';
+const DISABLE_USER_ID = 'user-tool-settings-disable-test';
 
 function snapshotRegistry(): RegisteredTool[] {
   return getAllTools().map((tool) => ({
@@ -122,6 +126,41 @@ describe('tool-settings-service', () => {
           parameters: { unknown_param: 'bad' },
         })
       ).rejects.toBeInstanceOf(ToolSettingsError);
+    });
+
+    it('persists a parameter update and round-trips it through the database', async () => {
+      const db = getDb();
+      const descriptor = await updateToolSettingsDescriptor(
+        db,
+        PARAM_UPDATE_USER_ID,
+        'test_alpha',
+        {
+          parameters: { quality: 9 },
+        }
+      );
+
+      expect(descriptor.name).toBe('test_alpha');
+      expect(descriptor.enabled).toBe(true);
+      expect(descriptor.parameters).toEqual({ quality: 9 });
+
+      const listed = await listToolSettingsDescriptors(db, PARAM_UPDATE_USER_ID);
+      const alpha = listed.tools.find((t) => t.name === 'test_alpha');
+      if (!alpha) throw new Error('Expected test_alpha descriptor');
+      expect(alpha.parameters).toEqual({ quality: 9 });
+    });
+
+    it('persists a disabled state for a disableable tool', async () => {
+      const db = getDb();
+      const descriptor = await updateToolSettingsDescriptor(db, DISABLE_USER_ID, 'test_alpha', {
+        enabled: false,
+      });
+
+      expect(descriptor.enabled).toBe(false);
+
+      const listed = await listToolSettingsDescriptors(db, DISABLE_USER_ID);
+      const alpha = listed.tools.find((t) => t.name === 'test_alpha');
+      if (!alpha) throw new Error('Expected test_alpha descriptor');
+      expect(alpha.enabled).toBe(false);
     });
   });
 });
