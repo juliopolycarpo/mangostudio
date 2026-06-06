@@ -6,6 +6,7 @@ import {
   WORKSPACE_MADGE_PATHS,
   type WorkspaceName,
 } from './lib/config';
+import { assertNoDisallowedWorkspaceDependencies } from './lib/dependency-policy';
 import { assertVersionsInLockstep } from './lib/release-version';
 import {
   assertNoUnexpectedArguments,
@@ -80,7 +81,11 @@ function createWorkspaceTasks(
 
 function createRootTasks(skipFormat: boolean): Array<() => Promise<RunResult>> {
   const tasks: Array<() => Promise<RunResult>> = [
-    () => runTask('root:versions', () => assertVersionsInLockstep()),
+    () =>
+      runTask('root:versions', () => {
+        assertVersionsInLockstep();
+      }),
+    () => runTask('root:dependency-policy', () => assertNoDisallowedWorkspaceDependencies()),
   ];
 
   if (!skipFormat) {
