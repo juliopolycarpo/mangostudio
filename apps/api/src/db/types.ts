@@ -4,7 +4,7 @@
 
 import type { InteractionMode } from '@mangostudio/shared';
 import type { ChatAttachmentKind } from '@mangostudio/shared/chat';
-import type { Insertable, Selectable, Updateable } from 'kysely';
+import type { Insertable, Selectable } from 'kysely';
 
 export interface ChatsTable {
   id: string;
@@ -193,54 +193,15 @@ export interface Database {
   observability_snapshot: ObservabilitySnapshotTable;
 }
 
-export type ChatSelect = Selectable<ChatsTable>;
-export type ChatInsert = Insertable<ChatsTable>;
-export type ChatUpdate = Updateable<ChatsTable>;
-
-export type MessageSelect = Selectable<MessagesTable>;
-export type MessageInsert = Insertable<MessagesTable>;
-export type MessageUpdate = Updateable<MessagesTable>;
-
 export type GeneratedImageSelect = Selectable<GeneratedImagesTable>;
-export type GeneratedImageInsert = Insertable<GeneratedImagesTable>;
-export type GeneratedImageUpdate = Updateable<GeneratedImagesTable>;
 
 export type ChatAttachmentSelect = Selectable<ChatAttachmentsTable>;
 export type ChatAttachmentInsert = Insertable<ChatAttachmentsTable>;
-export type ChatAttachmentUpdate = Updateable<ChatAttachmentsTable>;
-
-export type SecretMetadataSelect = Selectable<SecretMetadataTable>;
-export type SecretMetadataInsert = Insertable<SecretMetadataTable>;
-export type SecretMetadataUpdate = Updateable<SecretMetadataTable>;
-
-export type UserSelect = Selectable<UserTable>;
-export type UserInsert = Insertable<UserTable>;
-export type UserUpdate = Updateable<UserTable>;
-
-export type SessionSelect = Selectable<SessionTable>;
-export type SessionInsert = Insertable<SessionTable>;
-export type SessionUpdate = Updateable<SessionTable>;
-
-export type AccountSelect = Selectable<AccountTable>;
-export type AccountInsert = Insertable<AccountTable>;
-export type AccountUpdate = Updateable<AccountTable>;
-
-export type VerificationSelect = Selectable<VerificationTable>;
-export type VerificationInsert = Insertable<VerificationTable>;
-export type VerificationUpdate = Updateable<VerificationTable>;
 
 export type UserProviderSettingsSelect = Selectable<UserProviderSettingsTable>;
-export type UserProviderSettingsInsert = Insertable<UserProviderSettingsTable>;
-export type UserProviderSettingsUpdate = Updateable<UserProviderSettingsTable>;
 
 export type UserToolSettingsSelect = Selectable<UserToolSettingsTable>;
-export type UserToolSettingsInsert = Insertable<UserToolSettingsTable>;
-export type UserToolSettingsUpdate = Updateable<UserToolSettingsTable>;
 
 export type UserAppSettingsSelect = Selectable<UserAppSettingsTable>;
-export type UserAppSettingsInsert = Insertable<UserAppSettingsTable>;
-export type UserAppSettingsUpdate = Updateable<UserAppSettingsTable>;
 
 export type UserAgentSettingsSelect = Selectable<UserAgentSettingsTable>;
-export type UserAgentSettingsInsert = Insertable<UserAgentSettingsTable>;
-export type UserAgentSettingsUpdate = Updateable<UserAgentSettingsTable>;
