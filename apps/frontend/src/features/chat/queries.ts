@@ -1,4 +1,4 @@
-import type { Chat, Message, UpdateChatBody, UpdateMessageBody } from '@mangostudio/shared';
+import type { Chat, Message, UpdateChatBody } from '@mangostudio/shared';
 import {
   infiniteQueryOptions,
   type QueryClient,
@@ -147,45 +147,5 @@ export function useMessagesQuery(chatId: string | null) {
   return useInfiniteQuery({
     ...messagesQueryOptions(id),
     enabled: !!chatId,
-  });
-}
-
-export function useCreateMessageMutation() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async (newMessage: Message) => {
-      const { data, error } = await client.api.messages.post({
-        ...newMessage,
-        timestamp: newMessage.timestamp,
-      });
-      if (error) throw new Error(extractApiError(error.value));
-      return data;
-    },
-    onSuccess: (_, variables) => {
-      void queryClient.invalidateQueries({ queryKey: messageKeys.list(variables.chatId) });
-      void queryClient.invalidateQueries({ queryKey: ['chats'] });
-    },
-  });
-}
-
-export function useUpdateMessageMutation() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async ({
-      id,
-      chatId: _chatId,
-      updates,
-    }: {
-      id: string;
-      chatId: string;
-      updates: UpdateMessageBody;
-    }) => {
-      const { data, error } = await client.api.messages({ id }).put(updates);
-      if (error) throw new Error(extractApiError(error.value));
-      return data;
-    },
-    onSuccess: (_, variables) => {
-      void queryClient.invalidateQueries({ queryKey: messageKeys.list(variables.chatId) });
-    },
   });
 }

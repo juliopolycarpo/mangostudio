@@ -1,5 +1,5 @@
 /* global console */
-import type { GenerateImageResponse, GenerateTextResponse } from '@mangostudio/shared';
+import type { GenerateImageResponse } from '@mangostudio/shared';
 import type { GenerateImageBody, RespondStreamBody } from '@mangostudio/shared/generation';
 import { en } from '@mangostudio/shared/i18n';
 import type { StreamChunk } from '@mangostudio/shared/streaming';
@@ -37,27 +37,14 @@ export async function generateImage(request: GenerateImageRequest): Promise<Gene
   return data as unknown as GenerateImageResponse;
 }
 
-export async function respondText(request: RespondTextRequest): Promise<GenerateTextResponse> {
-  const { data, error } = await client.api.respond.post(request);
-
-  if (error) {
-    throw new Error(
-      (error.value as { error?: string } | null)?.error || en.errors.textGenerationFailed
-    );
-  }
-
-  // Eden Treaty infers a union that includes the error shape even after the guard above.
-  // The double cast is intentional and safe here.
-  return data as unknown as GenerateTextResponse;
-}
-
 export type { StreamChunk };
 
 /**
  * Calls POST /api/respond/stream and invokes onChunk for each SSE event.
- * Throws if the request fails or the stream sends an error event.
+ * Throws if the HTTP request fails or the response has no body; error events
+ * carried inside the stream are delivered through onChunk like any other chunk.
  *
- * @param request - Same body as respondText.
+ * @param request - Text generation request payload sent as the POST body.
  * @param onChunk - Called for every parsed SSE data event.
  * @param signal - Optional AbortSignal to cancel the stream.
  */
