@@ -51,6 +51,7 @@ bun run check               # format + lint + typecheck em todos os workspaces
 bun run test                # unit + integration (e2e é opt-in)
 bun run test --unit         # suítes unit da API, shared e frontend
 bun run test --integration  # suítes de integração da API e frontend
+bun run test:e2e:setup     # instala Playwright Chromium + dependências do SO
 bun run test --e2e          # auth smoke suite em Playwright Chromium (opt-in)
 bun run test --coverage     # coleta de cobertura nos workspaces aplicáveis
 bun run test --all          # todas as lanes, incluindo e2e
@@ -61,8 +62,13 @@ bun run test --all          # todas as lanes, incluindo e2e
 Suíte Playwright Chromium em `tests/browser-smoke/`. Cobre o fluxo completo de auth contra uma stack real rodando com API em `:3001` e frontend em `:5173`.
 
 ```bash
+bun run test:e2e:setup
 bun run test --e2e
 ```
+
+Rode `bun run test:e2e:setup` uma vez em uma máquina nova ou quando o Playwright avisar que o binário do Chromium está ausente. O script encapsula `bunx playwright install --with-deps chromium`, então instala apenas o navegador usado por esta suíte e evita comandos `npx`.
+
+O job de browser-smoke em CI roda em `ubuntu-24.04` porque o Playwright 1.60 ainda não consegue instalar dependências do Chromium no Ubuntu 26.04. Se você usa Ubuntu 26.04 localmente, rode a lane e2e em um container ou VM Ubuntu 24.04/22.04 até o suporte upstream chegar.
 
 `playwright.config.ts` na raiz do repositório inicia ambos os servidores via `webServer` antes de rodar os testes. Em CI, força `workers: 1` e faz upload de traces e screenshots em caso de falha.
 

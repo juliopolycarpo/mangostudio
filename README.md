@@ -162,6 +162,7 @@ mangostudio/
 | `bun run check`           | Run Biome, dprint, madge, and typecheck              |
 | `bun run test`            | Run unit and integration lanes                       |
 | `bun run test --unit`     | Run unit suites only                                 |
+| `bun run test:e2e:setup`  | Install Playwright Chromium for browser smoke tests  |
 | `bun run test --e2e`      | Run the Playwright end-to-end suite (opt-in)         |
 | `bun run test --coverage` | Run coverage collection across applicable workspaces |
 | `bun run fix`             | Apply Biome and dprint fixes                         |
