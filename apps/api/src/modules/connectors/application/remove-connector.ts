@@ -2,7 +2,6 @@
  * Use case: remove a connector and its stored secret.
  */
 
-import { ERROR_CODES } from '@mangostudio/shared/errors';
 import type { ProviderType } from '@mangostudio/shared/types';
 import { createDiagnosticLogger } from '../../../lib/logger';
 import { invalidateUnifiedCatalog } from '../../../services/providers/catalog';
@@ -13,26 +12,9 @@ import {
   getSecretMetadataById,
 } from '../infrastructure/connector-repository';
 import { removeSecret } from '../infrastructure/secret-persistence';
+import { ConnectorNotFoundError, ConnectorOwnershipError } from './connector-errors';
 
 const connectorLogger = createDiagnosticLogger('connectors');
-
-export class ConnectorNotFoundError extends Error {
-  readonly code = ERROR_CODES.NOT_FOUND;
-  readonly status = 404;
-  constructor() {
-    super('Connector not found.');
-    this.name = 'ConnectorNotFoundError';
-  }
-}
-
-export class ConnectorOwnershipError extends Error {
-  readonly code = ERROR_CODES.OWNERSHIP;
-  readonly status = 403;
-  constructor() {
-    super('Cannot delete a shared connector.');
-    this.name = 'ConnectorOwnershipError';
-  }
-}
 
 export async function removeConnector(userId: string, id: string): Promise<void> {
   const meta = await getSecretMetadataById(id, userId);

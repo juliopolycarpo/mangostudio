@@ -4,7 +4,7 @@ import { ConnectorValidationError } from '../../../../src/modules/connectors/app
 import {
   ConnectorNotFoundError,
   ConnectorOwnershipError,
-} from '../../../../src/modules/connectors/application/remove-connector';
+} from '../../../../src/modules/connectors/application/connector-errors';
 import { handleConnectorError } from '../../../../src/modules/connectors/http/connectors-routes';
 import {
   OpenAIAuthError,

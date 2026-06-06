@@ -47,6 +47,7 @@ export interface ConnectorPayload {
 }
 export interface ErrorPayload {
   error: string;
+  code?: string;
 }
 export interface SuccessPayload {
   success: boolean;

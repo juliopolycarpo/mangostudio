@@ -1,8 +1,10 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, mock } from 'bun:test';
 import { ModelCatalogResponseSchema } from '@mangostudio/shared/catalog';
 import { ConnectorStatusSchema } from '@mangostudio/shared/connectors';
+import { ApiErrorResponseSchema, ERROR_CODES } from '@mangostudio/shared/errors';
 import { Value } from '@sinclair/typebox/value';
 import { getDb } from '../../../src/db/database';
+import { ConnectorNotFoundError } from '../../../src/modules/connectors/application/connector-errors';
 import { settingsRoutes } from '../../../src/routes/settings';
 import {
   getProvider,
@@ -230,6 +232,31 @@ describe('Gemini aliases API', () => {
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ success: true });
+  });
+
+  it('PUT /settings/connectors/gemini/:id/models returns 404 for a missing connector', async () => {
+    await mock.module('../../../src/services/gemini', () => {
+      return {
+        updateConnectorModels: () => Promise.reject(new ConnectorNotFoundError()),
+      };
+    });
+
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, settingsRoutes);
+    restoreAuth = restore;
+
+    const response = await app.handle(
+      new Request('http://localhost/settings/connectors/gemini/missing-gemini-id/models', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabledModels: ['gemini-2.0-flash'] }),
+      })
+    );
+
+    expect(response.status).toBe(404);
+
+    const payload = (await response.json()) as ErrorPayload;
+    expect(Value.Check(ApiErrorResponseSchema, payload)).toBe(true);
+    expect(payload).toEqual({ error: 'Connector not found.', code: ERROR_CODES.NOT_FOUND });
   });
 
   it('DELETE /settings/connectors/gemini/:id removes a connector', async () => {
@@ -594,6 +621,25 @@ describe('openai connector routes', () => {
     expect(row).toBeDefined();
     expect(row?.userId).toBeNull();
     expect(row?.enabledModels).toBe(JSON.stringify(['gpt-4o']));
+  });
+
+  it('PUT /settings/connectors/:id/models returns 404 for a missing connector', async () => {
+    const { app, restore } = createAuthenticatedApiTestApp(OPENAI_LIST_USER, settingsRoutes);
+    restoreAuth = restore;
+
+    const response = await app.handle(
+      new Request('http://localhost/settings/connectors/missing-openai-id/models', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabledModels: ['gpt-4o'] }),
+      })
+    );
+
+    expect(response.status).toBe(404);
+
+    const payload = (await response.json()) as ErrorPayload;
+    expect(Value.Check(ApiErrorResponseSchema, payload)).toBe(true);
+    expect(payload).toEqual({ error: 'Connector not found.', code: ERROR_CODES.NOT_FOUND });
   });
 });
 
