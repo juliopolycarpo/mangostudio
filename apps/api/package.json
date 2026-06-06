@@ -17,7 +17,7 @@
     "fix": "biome check --write src tests",
     "migrate": "bun run src/db/migrate.ts",
     "test": "bun run test:unit && bun run test:integration",
-    "test:unit": "MANGOSTUDIO_DIAGNOSTIC_LOGS=0 bun test tests/unit",
+    "test:unit": "MANGOSTUDIO_DIAGNOSTIC_LOGS=0 bun test --parallel=1 tests/unit",
     "test:integration": "MANGOSTUDIO_DIAGNOSTIC_LOGS=0 bun test tests/integration",
     "test:coverage": "MANGOSTUDIO_DIAGNOSTIC_LOGS=0 bun test --coverage --parallel=1 tests/unit tests/integration"
   },
