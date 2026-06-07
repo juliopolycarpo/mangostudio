@@ -147,10 +147,7 @@ const geminiProvider: AIProvider = {
     });
   },
 
-  invalidateModelCache(userId?: string): void {
-    lifecycle.invalidateModelCache(userId);
-  },
-
+  invalidateModelCache: lifecycle.invalidateModelCache,
   syncConfigFileConnectors: lifecycle.syncConfigFileConnectors,
   warmup: lifecycle.warmup,
 
