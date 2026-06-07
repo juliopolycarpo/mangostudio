@@ -52,6 +52,16 @@ export function messagePartsFromMessage(msg: Message): MessagePart[] {
 }
 
 /**
+ * True when a message belongs to an image-generation turn, including legacy
+ * messages that only carry an `imageUrl` without an explicit interaction mode.
+ *
+ * Usage: isImageInteraction({ interactionMode: 'image' })
+ */
+export function isImageInteraction(msg: Message): boolean {
+  return msg.interactionMode === 'image' || (!msg.interactionMode && !!msg.imageUrl);
+}
+
+/**
  * Joins a message's text parts into raw markdown for clipboard copy.
  *
  * Usage: extractRawMarkdown(msg)

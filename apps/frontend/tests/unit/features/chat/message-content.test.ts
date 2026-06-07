@@ -8,6 +8,7 @@ import type { Message, MessagePart } from '@mangostudio/shared';
 import { describe, expect, it } from 'vitest';
 import {
   extractRawMarkdown,
+  isImageInteraction,
   messagePartsFromMessage,
   normalizeMessageParts,
 } from '../../../../src/features/chat/components/message-content';
@@ -115,5 +116,27 @@ describe('extractRawMarkdown', () => {
     const msg = makeMessage({ parts: [{ type: 'thinking', text: 'only thinking' }] });
 
     expect(extractRawMarkdown(msg)).toBe('');
+  });
+});
+
+describe('isImageInteraction', () => {
+  it('is true for an explicit image interaction mode', () => {
+    expect(isImageInteraction(makeMessage({ interactionMode: 'image' }))).toBe(true);
+  });
+
+  it('is true for a legacy message that only carries an imageUrl', () => {
+    expect(
+      isImageInteraction(makeMessage({ interactionMode: undefined, imageUrl: '/img.png' }))
+    ).toBe(true);
+  });
+
+  it('is false for a chat interaction even when an imageUrl is present', () => {
+    expect(isImageInteraction(makeMessage({ interactionMode: 'chat', imageUrl: '/img.png' }))).toBe(
+      false
+    );
+  });
+
+  it('is false for a plain text message with no image', () => {
+    expect(isImageInteraction(makeMessage({ interactionMode: undefined, text: 'hi' }))).toBe(false);
   });
 });
