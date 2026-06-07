@@ -172,4 +172,33 @@ describe('createGeminiModelCatalogService', () => {
     expect(clearedSnapshot.textModels).toEqual([]);
     expect(clearedSnapshot.imageModels).toEqual([]);
   });
+
+  it('clears cached catalogs for every user', async () => {
+    const service = createGeminiModelCatalogService({
+      getApiKey: () => Promise.resolve('test-key'),
+      listModels: () =>
+        Promise.resolve([
+          createMockModel({
+            name: 'models/gemini-2.5-flash',
+            displayName: 'Gemini 2.5 Flash',
+            supportedActions: ['generateContent'],
+          }),
+        ]),
+    });
+
+    await service.refreshGeminiModelCatalog(TEST_USER, 'manual');
+    await service.refreshGeminiModelCatalog('another-user', 'manual');
+
+    expect((await service.getGeminiModelCatalog(TEST_USER)).allModels[0]?.modelId).toBe(
+      'gemini-2.5-flash'
+    );
+    expect((await service.getGeminiModelCatalog('another-user')).allModels[0]?.modelId).toBe(
+      'gemini-2.5-flash'
+    );
+
+    service.clearAllGeminiModelCatalogs();
+
+    expect(service.refreshIfStale(TEST_USER, 'manual').allModels).toEqual([]);
+    expect(service.refreshIfStale('another-user', 'manual').allModels).toEqual([]);
+  });
 });

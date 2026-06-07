@@ -27,4 +27,44 @@ describe('withModelCache', () => {
     expect(refreshed).toEqual([{ modelId: 'user-1-2' }]);
     expect(calls).toBe(2);
   });
+
+  it('returns the fallback when the first fetch fails', async () => {
+    const fallback = [{ modelId: 'fallback-model' }];
+
+    const cachedFetch = withModelCache(() => Promise.reject(new Error('model discovery failed')), {
+      ttl: 60_000,
+      fallback,
+    });
+
+    const models = await cachedFetch('user-1');
+
+    expect(models).toEqual(fallback);
+  });
+
+  it('returns stale cached models when a refresh fails after ttl expiry', async () => {
+    let now = 0;
+    let shouldFail = false;
+
+    const cachedFetch = withModelCache(
+      () => {
+        if (shouldFail) {
+          return Promise.reject(new Error('refresh failed'));
+        }
+
+        return Promise.resolve([{ modelId: 'cached-model' }]);
+      },
+      {
+        ttl: 10,
+        fallback: [{ modelId: 'fallback-model' }],
+        now: () => now,
+      }
+    );
+
+    expect(await cachedFetch('user-1')).toEqual([{ modelId: 'cached-model' }]);
+
+    now = 11;
+    shouldFail = true;
+
+    expect(await cachedFetch('user-1')).toEqual([{ modelId: 'cached-model' }]);
+  });
 });

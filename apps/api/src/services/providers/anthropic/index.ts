@@ -10,12 +10,8 @@ import { isReasoningModel } from '../core/capability-detector';
 import { getModelContextLimit } from '../core/context-policy';
 import { withModelCache } from '../core/model-cache';
 import { withAbortTimeout } from '../core/probe-timeout';
-import {
-  recordProviderCacheHit,
-  recordProviderCacheMiss,
-  recordProviderProbeTimeout,
-} from '../core/provider-observability';
-import { createReadinessCache, createReadinessCacheKey } from '../core/readiness-cache';
+import { createProviderLifecycle } from '../core/provider-lifecycle';
+import { recordProviderProbeTimeout } from '../core/provider-observability';
 import { createProviderSecretService } from '../core/secret-service';
 import type {
   AgentEvent,
@@ -24,7 +20,6 @@ import type {
   ImageGenerationResult,
   ModelInfo,
   ProviderHealthcheckRequest,
-  ProviderWarmupRequest,
   StreamingChunk,
   TextGenerationRequest,
   TextGenerationResult,
@@ -181,11 +176,6 @@ interface PreparedAnthropicRuntime {
   readonly client: ReturnType<typeof createAnthropicClient>;
 }
 
-const preparedRuntimeCache = createReadinessCache<PreparedAnthropicRuntime>({
-  onHit: () => recordProviderCacheHit('anthropic', 'prepared-runtime'),
-  onMiss: () => recordProviderCacheMiss('anthropic', 'prepared-runtime'),
-});
-
 async function loadPreparedRuntime(
   userId: string,
   modelName?: string
@@ -197,30 +187,18 @@ async function loadPreparedRuntime(
   };
 }
 
-// biome-ignore lint/suspicious/useAwait: Migrated from ESLint
-async function prepareRuntime(
-  userId: string,
-  modelName?: string
-): Promise<PreparedAnthropicRuntime> {
-  return preparedRuntimeCache.get(createReadinessCacheKey(userId, modelName), () =>
-    loadPreparedRuntime(userId, modelName)
-  );
-}
-
-function invalidatePreparedRuntime(userId?: string): void {
-  if (!userId) {
-    preparedRuntimeCache.clearWhere(() => true);
-    return;
-  }
-
-  preparedRuntimeCache.clearByUserPrefix(userId);
-}
+const lifecycle = createProviderLifecycle<PreparedAnthropicRuntime>({
+  provider: 'anthropic',
+  loadPreparedRuntime,
+  invalidateCachedModels: listModelsWithCache.invalidate,
+  syncConfigFileConnectors: secretService.syncConfigFileConnectors,
+});
 
 const anthropicProvider: AIProvider = {
   providerType: 'anthropic',
 
   async generateText(req: TextGenerationRequest): Promise<TextGenerationResult> {
-    const { client } = await prepareRuntime(req.userId, req.modelName);
+    const { client } = await lifecycle.prepareRuntime(req.userId, req.modelName);
 
     const response = await client.messages.create(
       {
@@ -242,12 +220,12 @@ const anthropicProvider: AIProvider = {
   },
 
   async *generateAgentTurnStream(req: AgentTurnRequest): AsyncIterable<AgentEvent> {
-    const { client } = await prepareRuntime(req.userId, req.modelName);
+    const { client } = await lifecycle.prepareRuntime(req.userId, req.modelName);
     yield* streamAnthropicAgentTurn(client, req);
   },
 
   async *generateTextStream(req: TextGenerationRequest): AsyncIterable<StreamingChunk> {
-    const { client } = await prepareRuntime(req.userId, req.modelName);
+    const { client } = await lifecycle.prepareRuntime(req.userId, req.modelName);
 
     const thinkingEnabled = req.generationConfig?.thinkingEnabled ?? false;
     const effort = req.generationConfig?.reasoningEffort ?? 'medium';
@@ -288,25 +266,13 @@ const anthropicProvider: AIProvider = {
     return Promise.reject(new Error('Anthropic does not support image generation.'));
   },
 
-  // biome-ignore lint/suspicious/useAwait: Migrated from ESLint
-  async listModels(userId: string): Promise<ModelInfo[]> {
+  listModels(userId: string): Promise<ModelInfo[]> {
     return listModelsWithCache(userId);
   },
 
-  invalidateModelCache(userId?: string): void {
-    listModelsWithCache.invalidate(userId);
-    invalidatePreparedRuntime(userId);
-  },
-
-  async syncConfigFileConnectors(userId: string): Promise<void> {
-    await secretService.syncConfigFileConnectors(userId);
-  },
-
-  async warmup(req: ProviderWarmupRequest): Promise<void> {
-    await preparedRuntimeCache.prime(createReadinessCacheKey(req.userId, req.modelName), () =>
-      loadPreparedRuntime(req.userId, req.modelName)
-    );
-  },
+  invalidateModelCache: lifecycle.invalidateModelCache,
+  syncConfigFileConnectors: lifecycle.syncConfigFileConnectors,
+  warmup: lifecycle.warmup,
 
   async healthcheck(req: ProviderHealthcheckRequest): Promise<void> {
     if (!req.apiKey?.trim()) {

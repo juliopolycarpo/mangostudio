@@ -4,8 +4,7 @@
  */
 
 import { isReasoningModel } from '../core/capability-detector';
-import { recordProviderCacheHit, recordProviderCacheMiss } from '../core/provider-observability';
-import { createReadinessCache, createReadinessCacheKey } from '../core/readiness-cache';
+import { createProviderLifecycle } from '../core/provider-lifecycle';
 import type {
   AgentEvent,
   AgentTurnRequest,
@@ -14,7 +13,6 @@ import type {
   ImageGenerationResult,
   ModelInfo,
   ProviderHealthcheckRequest,
-  ProviderWarmupRequest,
   StreamingChunk,
   TextGenerationRequest,
   TextGenerationResult,
@@ -22,7 +20,11 @@ import type {
 import { createGeminiClient } from './client';
 import { generateGeminiImage } from './image-generation';
 import { streamGeminiAgentTurn } from './interactions-stream';
-import { clearGeminiModelCatalog, getGeminiModelCatalog } from './model-catalog';
+import {
+  clearAllGeminiModelCatalogs,
+  clearGeminiModelCatalog,
+  getGeminiModelCatalog,
+} from './model-catalog';
 import {
   getResolvedGeminiApiKey,
   syncGeminiConfigFileConnectors,
@@ -35,11 +37,6 @@ interface PreparedGeminiRuntime {
   readonly client: ReturnType<typeof createGeminiClient>;
 }
 
-const preparedRuntimeCache = createReadinessCache<PreparedGeminiRuntime>({
-  onHit: () => recordProviderCacheHit('gemini', 'prepared-runtime'),
-  onMiss: () => recordProviderCacheMiss('gemini', 'prepared-runtime'),
-});
-
 async function loadPreparedRuntime(
   userId: string,
   modelName?: string
@@ -51,27 +48,25 @@ async function loadPreparedRuntime(
   };
 }
 
-// biome-ignore lint/suspicious/useAwait: Migrated from ESLint
-async function prepareRuntime(userId: string, modelName?: string): Promise<PreparedGeminiRuntime> {
-  return preparedRuntimeCache.get(createReadinessCacheKey(userId, modelName), () =>
-    loadPreparedRuntime(userId, modelName)
-  );
-}
+const lifecycle = createProviderLifecycle<PreparedGeminiRuntime>({
+  provider: 'gemini',
+  loadPreparedRuntime,
+  invalidateCachedModels: (userId?: string) => {
+    if (userId) {
+      clearGeminiModelCatalog(userId);
+      return;
+    }
 
-function invalidatePreparedRuntime(userId?: string): void {
-  if (!userId) {
-    preparedRuntimeCache.clearWhere(() => true);
-    return;
-  }
-
-  preparedRuntimeCache.clearByUserPrefix(userId);
-}
+    clearAllGeminiModelCatalogs();
+  },
+  syncConfigFileConnectors: syncGeminiConfigFileConnectors,
+});
 
 const geminiProvider: AIProvider = {
   providerType: 'gemini',
 
   async generateText(req: TextGenerationRequest): Promise<TextGenerationResult> {
-    const { client } = await prepareRuntime(req.userId, req.modelName);
+    const { client } = await lifecycle.prepareRuntime(req.userId, req.modelName);
     const text = await generateGeminiText(
       req.userId,
       req.history,
@@ -85,7 +80,7 @@ const geminiProvider: AIProvider = {
   },
 
   async *generateTextStream(req: TextGenerationRequest): AsyncIterable<StreamingChunk> {
-    const { client } = await prepareRuntime(req.userId, req.modelName);
+    const { client } = await lifecycle.prepareRuntime(req.userId, req.modelName);
     for await (const chunk of generateGeminiTextStream(
       req.userId,
       req.history,
@@ -102,12 +97,12 @@ const geminiProvider: AIProvider = {
   },
 
   async *generateAgentTurnStream(req: AgentTurnRequest): AsyncIterable<AgentEvent> {
-    const { client } = await prepareRuntime(req.userId, req.modelName);
+    const { client } = await lifecycle.prepareRuntime(req.userId, req.modelName);
     yield* streamGeminiAgentTurn(req, client);
   },
 
   async generateImage(req: ImageGenerationRequest): Promise<ImageGenerationResult> {
-    const { client } = await prepareRuntime(req.userId, req.modelName);
+    const { client } = await lifecycle.prepareRuntime(req.userId, req.modelName);
     const imageUrl = await generateGeminiImage(
       req.userId,
       req.prompt,
@@ -152,22 +147,9 @@ const geminiProvider: AIProvider = {
     });
   },
 
-  invalidateModelCache(userId?: string): void {
-    if (userId) {
-      clearGeminiModelCatalog(userId);
-    }
-    invalidatePreparedRuntime(userId);
-  },
-
-  async syncConfigFileConnectors(userId: string): Promise<void> {
-    await syncGeminiConfigFileConnectors(userId);
-  },
-
-  async warmup(req: ProviderWarmupRequest): Promise<void> {
-    await preparedRuntimeCache.prime(createReadinessCacheKey(req.userId, req.modelName), () =>
-      loadPreparedRuntime(req.userId, req.modelName)
-    );
-  },
+  invalidateModelCache: lifecycle.invalidateModelCache,
+  syncConfigFileConnectors: lifecycle.syncConfigFileConnectors,
+  warmup: lifecycle.warmup,
 
   async healthcheck(req: ProviderHealthcheckRequest): Promise<void> {
     if (!req.apiKey?.trim()) {
