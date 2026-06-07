@@ -285,8 +285,12 @@ describe('POST /respond/stream — tool execution edge cases', () => {
     });
   });
 
-  it('stops delegation retry when signal is aborted during backoff', async () => {
-    let delegationStarted = false;
+  it('stops delegation retry when the stream is aborted during backoff', async () => {
+    let delegationCallCount = 0;
+    // Simulates a client disconnect: the route aborts streamTextTurn's signal
+    // from the ReadableStream's cancel() callback, so cancelling the reader is
+    // how a real abort reaches the delegation retry loop.
+    let cancelStream: (() => void) | undefined;
 
     await mock.module('../../../src/modules/chats/infrastructure/chat-repository', () => ({
       verifyChatOwnership: () => Promise.resolve(true),
@@ -333,7 +337,11 @@ describe('POST /respond/stream — tool execution edge cases', () => {
 
     await mock.module('../../../src/modules/generation/application/subagent-runner', () => ({
       runSubagentTurn: () => {
-        delegationStarted = true;
+        delegationCallCount += 1;
+        // Abort synchronously on the first attempt: the empty result below is
+        // invalid, so without the abort the loop would retry up to 4 times.
+        // Aborting here must stop it before attempt 2's backoff completes.
+        cancelStream?.();
         return Promise.resolve({});
       },
       SubagentDelegationError: class SubagentDelegationError extends Error {
@@ -410,9 +418,7 @@ describe('POST /respond/stream — tool execution edge cases', () => {
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
     restoreAuth = restore;
 
-    const controller = new AbortController();
-
-    const responsePromise = app.handle(
+    const response = await app.handle(
       new Request('http://localhost/respond/stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -423,18 +429,25 @@ describe('POST /respond/stream — tool execution edge cases', () => {
           agentMode: 'agent',
           agentId: 'default',
         }),
-        signal: controller.signal,
       })
     );
-
-    setTimeout(() => {
-      controller.abort();
-    }, 10);
-
-    const response = await responsePromise;
     expect(response.status).toBe(200);
-    await response.text();
 
-    expect(delegationStarted).toBe(true);
+    const body = response.body;
+    if (!body) throw new Error('Expected an SSE response body stream.');
+    const reader = body.getReader();
+    cancelStream = () => void reader.cancel();
+    // Drive the stream to completion. runSubagentTurn cancels it on the first
+    // attempt, which aborts the signal before attempt 2's backoff elapses.
+    while (true) {
+      const { done } = await reader.read();
+      if (done) break;
+    }
+
+    // Abort lands inside attempt 1, so every later attempt short-circuits in
+    // sleepWithAbort and never re-invokes the subagent. The original test only
+    // checked that delegation started, which passed even though the abort was
+    // a no-op and all 4 attempts actually ran.
+    expect(delegationCallCount).toBe(1);
   });
 });
