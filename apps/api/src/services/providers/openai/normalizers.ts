@@ -7,9 +7,7 @@
 
 import type { Responses } from 'openai/resources/responses/responses';
 
-// Re-export SDK types used by both provider files
 export type ResponseStreamEvent = Responses.ResponseStreamEvent;
-export type ResponseCreateParamsStreaming = Responses.ResponseCreateParamsStreaming;
 
 // ---------------------------------------------------------------------------
 // SDK type gaps

@@ -80,7 +80,7 @@ export function serializeContinuationEnvelope(envelope: ContinuationEnvelope): s
   return JSON.stringify(envelope);
 }
 
-export interface ValidationResult {
+interface ValidationResult {
   valid: boolean;
   /** Human-readable log message — do NOT surface in UI or API responses. */
   reason?: string;
@@ -182,15 +182,6 @@ export function isDurableMode(mode: ContinuationMode): boolean {
 export function computeSystemPromptHash(systemPrompt: string | undefined): string {
   if (!systemPrompt || systemPrompt.trim() === '') return 'none';
   return computeHash(systemPrompt);
-}
-
-/**
- * Token usage and context information returned by a provider after a turn.
- * Providers populate this from their SDK-specific usage shapes.
- */
-export interface ProviderTurnResultContext {
-  providerReportedInputTokens?: number;
-  contextLimit?: number;
 }
 
 /**

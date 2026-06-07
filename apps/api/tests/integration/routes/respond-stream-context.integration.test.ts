@@ -26,20 +26,6 @@ afterEach(async () => {
 
 describe('POST /respond/stream — context and continuation', () => {
   it('returns 503 when model catalog is not configured', async () => {
-    await mock.module('../../../src/services/gemini/catalog', () => ({
-      getGeminiModelCatalog: () =>
-        Promise.resolve({
-          configured: false,
-          status: 'idle',
-          allModels: [],
-          textModels: [],
-          imageModels: [],
-          discoveredTextModels: [],
-          discoveredImageModels: [],
-        }),
-      clearGeminiModelCatalog: () => undefined as undefined,
-    }));
-
     await mock.module('../../../src/services/gemini', () => ({
       getGeminiModelCatalog: () =>
         Promise.resolve({

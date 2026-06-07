@@ -54,10 +54,12 @@ describe('GeminiProvider.generateTextStream', () => {
     // Also mock the secret resolution so we don't need real API keys
     await mock.module('../../../../src/services/providers/gemini/secret', mockGeminiSecretModule);
 
-    const { generateTextStream } = await import('../../../../src/services/gemini/text');
+    const { generateGeminiTextStream } = await import(
+      '../../../../src/services/providers/gemini/text'
+    );
 
     const chunks: Array<{ type?: string; text?: string; done: boolean }> = [];
-    for await (const chunk of generateTextStream(
+    for await (const chunk of generateGeminiTextStream(
       'user-1',
       [],
       'Hi',
@@ -97,10 +99,12 @@ describe('GeminiProvider.generateTextStream', () => {
 
     await mock.module('../../../../src/services/providers/gemini/secret', mockGeminiSecretModule);
 
-    const { generateTextStream } = await import('../../../../src/services/gemini/text');
+    const { generateGeminiTextStream } = await import(
+      '../../../../src/services/providers/gemini/text'
+    );
 
     await (expect(async () => {
-      for await (const _chunk of generateTextStream(
+      for await (const _chunk of generateGeminiTextStream(
         'user-1',
         [],
         'bad prompt',
@@ -113,10 +117,18 @@ describe('GeminiProvider.generateTextStream', () => {
   });
 
   it('throws when no modelName is provided', async () => {
-    const { generateTextStream } = await import('../../../../src/services/gemini/text');
+    const { generateGeminiTextStream } = await import(
+      '../../../../src/services/providers/gemini/text'
+    );
 
     await (expect(async () => {
-      for await (const _chunk of generateTextStream('user-1', [], 'Hi', undefined, undefined)) {
+      for await (const _chunk of generateGeminiTextStream(
+        'user-1',
+        [],
+        'Hi',
+        undefined,
+        undefined
+      )) {
         // consume
       }
     }).toThrow('No Gemini text model was provided.') as unknown as Promise<void>);
@@ -150,10 +162,12 @@ describe('GeminiProvider.generateTextStream', () => {
 
     await mock.module('../../../../src/services/providers/gemini/secret', mockGeminiSecretModule);
 
-    const { generateTextStream } = await import('../../../../src/services/gemini/text');
+    const { generateGeminiTextStream } = await import(
+      '../../../../src/services/providers/gemini/text'
+    );
 
     const chunks = [];
-    for await (const chunk of generateTextStream(
+    for await (const chunk of generateGeminiTextStream(
       'user-1',
       [],
       'Hi',
@@ -190,9 +204,11 @@ describe('GeminiProvider.generateTextStream', () => {
 
     await mock.module('../../../../src/services/providers/gemini/secret', mockGeminiSecretModule);
 
-    const { generateTextStream } = await import('../../../../src/services/gemini/text');
+    const { generateGeminiTextStream } = await import(
+      '../../../../src/services/providers/gemini/text'
+    );
 
-    for await (const _chunk of generateTextStream(
+    for await (const _chunk of generateGeminiTextStream(
       'user-1',
       [],
       'Hi',
@@ -227,10 +243,12 @@ describe('GeminiProvider.generateTextStream', () => {
 
     await mock.module('../../../../src/services/providers/gemini/secret', mockGeminiSecretModule);
 
-    const { generateTextStream } = await import('../../../../src/services/gemini/text');
+    const { generateGeminiTextStream } = await import(
+      '../../../../src/services/providers/gemini/text'
+    );
 
     const chunks = [];
-    for await (const chunk of generateTextStream(
+    for await (const chunk of generateGeminiTextStream(
       'user-1',
       [],
       'Hi',
