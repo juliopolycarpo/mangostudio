@@ -1,5 +1,5 @@
 /**
- * Unit tests for the thinking-segment tracking logic in useTextChat.
+ * Unit tests for the thinking-segment tracking logic in useTextGeneration.
  * Verifies that multiple thinking blocks are built correctly during SSE streaming.
  */
 
@@ -48,6 +48,38 @@ function makeStreamFn(chunks: Parameters<Parameters<typeof respondTextStream>[1]
   };
 }
 
+function createAbortError() {
+  const error = new Error('The operation was aborted.');
+  error.name = 'AbortError';
+  return error;
+}
+
+function makeAbortableStreamFn(chunks: Parameters<Parameters<typeof respondTextStream>[1]>[0][]) {
+  return (_req: unknown, onChunk: (chunk: (typeof chunks)[0]) => void, signal?: AbortSignal) => {
+    for (const chunk of chunks) {
+      onChunk(chunk);
+    }
+
+    return new Promise<void>((resolve, reject) => {
+      if (!signal) {
+        resolve();
+        return;
+      }
+      if (signal.aborted) {
+        reject(createAbortError());
+        return;
+      }
+
+      const handleAbort = () => {
+        signal.removeEventListener('abort', handleAbort);
+        reject(createAbortError());
+      };
+
+      signal.addEventListener('abort', handleAbort, { once: true });
+    });
+  };
+}
+
 function createDeferred<T>() {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((res) => {
@@ -57,9 +89,9 @@ function createDeferred<T>() {
   return { promise, resolve };
 }
 
-type TextChatProps = Parameters<typeof useTextGeneration>[0];
+type TextGenerationProps = Parameters<typeof useTextGeneration>[0];
 
-function makeProps(overrides: Partial<TextChatProps> = {}): TextChatProps {
+function makeProps(overrides: Partial<TextGenerationProps> = {}): TextGenerationProps {
   const updateOptimisticMessage = vi.fn();
   const appendOptimisticMessages = vi.fn();
   return {
@@ -69,13 +101,13 @@ function makeProps(overrides: Partial<TextChatProps> = {}): TextChatProps {
       createChat: vi.fn().mockResolvedValue({ id: 'chat-new' }),
       updateChatTitle: vi.fn().mockResolvedValue(undefined),
       loadChats: vi.fn().mockResolvedValue(undefined),
-    } as unknown as TextChatProps['chats'],
+    } as unknown as TextGenerationProps['chats'],
     getActiveModel: () => 'test-model',
     systemPrompt: '',
     optimistic: {
       appendOptimisticMessages,
       updateOptimisticMessage,
-    } as unknown as TextChatProps['optimistic'],
+    } as unknown as TextGenerationProps['optimistic'],
     thinkingEnabled: true,
     reasoningEffort: 'medium' as const,
     maxToolIterations: 10,
@@ -87,7 +119,7 @@ function makeProps(overrides: Partial<TextChatProps> = {}): TextChatProps {
   };
 }
 
-describe('useTextChat — thinking segment tracking', () => {
+describe('useTextGeneration — thinking segment tracking', () => {
   beforeEach(() => {
     mockStream.mockReset();
     mockGenerateChatTitle.mockReset();
@@ -210,7 +242,7 @@ describe('useTextChat — thinking segment tracking', () => {
   });
 });
 
-describe('useTextChat — maxToolIterations forwarding', () => {
+describe('useTextGeneration — maxToolIterations forwarding', () => {
   beforeEach(() => {
     mockStream.mockReset();
   });
@@ -312,7 +344,7 @@ describe('useTextChat — maxToolIterations forwarding', () => {
   });
 });
 
-describe('useTextChat — subagent lifecycle events', () => {
+describe('useTextGeneration — subagent lifecycle events', () => {
   beforeEach(() => {
     mockStream.mockReset();
   });
@@ -388,7 +420,7 @@ describe('useTextChat — subagent lifecycle events', () => {
   });
 });
 
-describe('useTextChat — prompt title auto rename', () => {
+describe('useTextGeneration — prompt title auto rename', () => {
   beforeEach(() => {
     mockStream.mockReset();
     mockGenerateChatTitle.mockReset();
@@ -408,7 +440,7 @@ describe('useTextChat — prompt title auto rename', () => {
         }),
         updateChatTitle: vi.fn().mockResolvedValue(undefined),
         loadChats: vi.fn().mockResolvedValue(undefined),
-      } as unknown as TextChatProps['chats'],
+      } as unknown as TextGenerationProps['chats'],
     });
     mockStream.mockImplementation(
       makeStreamFn([{ type: 'done', done: true, generationTime: '0.5s' }])
@@ -449,7 +481,7 @@ describe('useTextChat — prompt title auto rename', () => {
         createChat: vi.fn().mockResolvedValue({ id: 'chat-new' }),
         updateChatTitle: vi.fn().mockResolvedValue(undefined),
         loadChats: vi.fn().mockResolvedValue(undefined),
-      } as unknown as TextChatProps['chats'],
+      } as unknown as TextGenerationProps['chats'],
     });
     mockGenerateChatTitle.mockReturnValue(title.promise);
     mockStream.mockImplementation(
@@ -493,7 +525,7 @@ describe('useTextChat — prompt title auto rename', () => {
         createChat: vi.fn().mockResolvedValue({ id: 'chat-new' }),
         updateChatTitle: vi.fn().mockReturnValue(titleUpdate.promise),
         loadChats: vi.fn().mockResolvedValue(undefined),
-      } as unknown as TextChatProps['chats'],
+      } as unknown as TextGenerationProps['chats'],
     });
     mockStream.mockImplementation(
       makeStreamFn([{ type: 'done', done: true, generationTime: '0.5s' }])
@@ -531,7 +563,7 @@ describe('useTextChat — prompt title auto rename', () => {
         createChat: vi.fn().mockResolvedValue({ id: 'chat-new' }),
         updateChatTitle: vi.fn().mockResolvedValue(undefined),
         loadChats: vi.fn().mockResolvedValue(undefined),
-      } as unknown as TextChatProps['chats'],
+      } as unknown as TextGenerationProps['chats'],
     });
     mockStream.mockImplementation(
       makeStreamFn([{ type: 'done', done: true, generationTime: '0.5s' }])
@@ -565,7 +597,7 @@ describe('useTextChat — prompt title auto rename', () => {
         createChat: vi.fn().mockResolvedValue({ id: 'chat-new' }),
         updateChatTitle: vi.fn().mockResolvedValue(undefined),
         loadChats: vi.fn().mockResolvedValue(undefined),
-      } as unknown as TextChatProps['chats'],
+      } as unknown as TextGenerationProps['chats'],
     });
     mockGenerateChatTitle.mockResolvedValue({ title: 'Generated title' });
     mockStream.mockImplementation(
@@ -602,7 +634,7 @@ describe('useTextChat — prompt title auto rename', () => {
         createChat: vi.fn().mockResolvedValue({ id: 'chat-new' }),
         updateChatTitle: vi.fn().mockResolvedValue(undefined),
         loadChats: vi.fn().mockResolvedValue(undefined),
-      } as unknown as TextChatProps['chats'],
+      } as unknown as TextGenerationProps['chats'],
     });
     mockGenerateChatTitle.mockRejectedValue(new Error('provider unavailable'));
     mockStream.mockImplementation(
@@ -629,7 +661,7 @@ describe('useTextChat — prompt title auto rename', () => {
   });
 });
 
-describe('useTextChat — server message id reconciliation', () => {
+describe('useTextGeneration — server message id reconciliation', () => {
   beforeEach(() => {
     mockStream.mockReset();
   });
@@ -666,7 +698,7 @@ describe('useTextChat — server message id reconciliation', () => {
   });
 });
 
-describe('useTextChat — failure surfaced as timeline item', () => {
+describe('useTextGeneration — failure surfaced as timeline item', () => {
   beforeEach(() => {
     mockStream.mockReset();
   });
@@ -746,7 +778,7 @@ describe('useTextChat — failure surfaced as timeline item', () => {
   });
 });
 
-describe('useTextChat — toolIntent forwarding', () => {
+describe('useTextGeneration — toolIntent forwarding', () => {
   beforeEach(() => {
     mockStream.mockReset();
   });
@@ -789,5 +821,97 @@ describe('useTextChat — toolIntent forwarding', () => {
     const firstCall = mockStream.mock.calls[0];
     const request = firstCall[0] as { toolIntent?: string };
     expect(request.toolIntent).toBeUndefined();
+  });
+});
+
+describe('useTextGeneration — stream metadata and abort lifecycle', () => {
+  beforeEach(() => {
+    mockStream.mockReset();
+  });
+
+  it('updates context info from stream metadata chunks', async () => {
+    const props = makeProps();
+    mockStream.mockImplementation(
+      makeStreamFn([
+        {
+          type: 'context_info',
+          estimatedInputTokens: 2048,
+          contextLimit: 8192,
+          estimatedUsageRatio: 0.25,
+          mode: 'stateful',
+          severity: 'info',
+          done: false,
+        },
+        { type: 'done', done: true, generationTime: '0.5s' },
+      ])
+    );
+
+    const { result } = renderHook(() => useTextGeneration(props));
+
+    await act(async () => {
+      await result.current.handleRespond('ping');
+    });
+
+    await waitFor(() =>
+      expect(result.current.contextInfo).toEqual({
+        estimatedInputTokens: 2048,
+        contextLimit: 8192,
+        estimatedUsageRatio: 0.25,
+        mode: 'stateful',
+        severity: 'info',
+      })
+    );
+  });
+
+  it('captures fallback notices from metadata chunks', async () => {
+    const props = makeProps();
+    mockStream.mockImplementation(
+      makeStreamFn([
+        {
+          type: 'fallback_notice',
+          from: 'gpt-5',
+          to: 'gpt-4.1',
+          reason: 'provider overload',
+          done: false,
+        },
+        { type: 'done', done: true, generationTime: '0.5s' },
+      ])
+    );
+
+    const { result } = renderHook(() => useTextGeneration(props));
+
+    await act(async () => {
+      await result.current.handleRespond('ping');
+    });
+
+    await waitFor(() =>
+      expect(result.current.fallbackNotice).toEqual({
+        from: 'gpt-5',
+        to: 'gpt-4.1',
+        reason: 'provider overload',
+      })
+    );
+  });
+
+  it('marks the optimistic assistant message as stopped after an abort', async () => {
+    const props = makeProps();
+    mockStream.mockImplementation(
+      makeAbortableStreamFn([{ type: 'text', text: 'partial answer', done: false }])
+    );
+
+    const { result } = renderHook(() => useTextGeneration(props));
+
+    await act(async () => {
+      const responsePromise = result.current.handleRespond('stop me');
+      result.current.handleStop();
+      await responsePromise;
+    });
+
+    await waitFor(() => expect(result.current.isGenerating).toBe(false));
+    expect(props.optimistic.updateOptimisticMessage).toHaveBeenCalledWith(
+      'chat-1',
+      expect.stringContaining('optimistic-ai'),
+      { isGenerating: false }
+    );
   });
 });

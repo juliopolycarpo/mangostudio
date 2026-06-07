@@ -1,0 +1,236 @@
+import type { MessagePart } from '@mangostudio/shared';
+import type { StreamChunk } from '@mangostudio/shared/streaming';
+import { describe, expect, it } from 'vitest';
+import {
+  createTextGenerationStreamState,
+  reduceTextGenerationStreamChunk,
+} from '../../../../src/features/generation/text-generation-stream-reducer';
+
+const REDUCER_OPTIONS = { pendingSubagentName: 'Pending subagent' };
+
+function reduceChunks(chunks: StreamChunk[]) {
+  return chunks.reduce(
+    (state, chunk) => reduceTextGenerationStreamChunk(state, chunk, REDUCER_OPTIONS),
+    createTextGenerationStreamState({
+      userMessageId: 'optimistic-user-1',
+      aiMessageId: 'optimistic-ai-1',
+    })
+  );
+}
+
+function getPartsByType<TType extends MessagePart['type']>(parts: MessagePart[], type: TType) {
+  return parts.filter((part): part is Extract<MessagePart, { type: TType }> => part.type === type);
+}
+
+describe('text generation stream reducer', () => {
+  it('builds separate thinking segments across tool boundaries', () => {
+    const state = reduceChunks([
+      { type: 'thinking_start', done: false },
+      { type: 'thinking', text: 'before tool', done: false },
+      { type: 'tool_call_started', callId: 'tool-1', name: 'search', done: false },
+      { type: 'thinking_start', done: false },
+      { type: 'thinking', text: 'after tool', done: false },
+      { type: 'text', text: 'answer', done: false },
+    ]);
+
+    expect(getPartsByType(state.parts, 'thinking')).toEqual([
+      { type: 'thinking', text: 'before tool' },
+      { type: 'thinking', text: 'after tool' },
+    ]);
+    expect(state.text).toBe('answer');
+    expect(state.activeThinkingIndex).toBeNull();
+  });
+
+  it('updates tool call parts and tolerates malformed argument payloads', () => {
+    const state = reduceChunks([
+      { type: 'tool_call_started', callId: 'tool-1', name: 'search', done: false },
+      {
+        type: 'tool_call_completed',
+        callId: 'tool-1',
+        name: 'search',
+        arguments: '{not-json',
+        done: false,
+      },
+      {
+        type: 'tool_result',
+        callId: 'tool-1',
+        result: { hits: 2 },
+        isError: false,
+        done: false,
+      },
+    ]);
+
+    expect(state.parts).toEqual([
+      { type: 'tool_call', toolCallId: 'tool-1', name: 'search', args: {} },
+      {
+        type: 'tool_result',
+        toolCallId: 'tool-1',
+        content: JSON.stringify({ hits: 2 }),
+        isError: false,
+      },
+    ]);
+  });
+
+  it('upserts generated image parts as image events progress', () => {
+    const state = reduceChunks([
+      {
+        type: 'image_generation_started',
+        imageId: 'image-1',
+        toolCallId: 'tool-1',
+        prompt: 'cat portrait',
+        done: false,
+      },
+      {
+        type: 'image_generation_completed',
+        imageId: 'image-1',
+        toolCallId: 'tool-1',
+        prompt: 'cat portrait',
+        imageUrl: 'https://example.com/cat.png',
+        modelName: 'flux',
+        generationTime: '1.3s',
+        done: false,
+      },
+      {
+        type: 'image_generation_started',
+        imageId: 'image-2',
+        toolCallId: 'tool-2',
+        prompt: 'dog portrait',
+        done: false,
+      },
+      {
+        type: 'image_generation_failed',
+        imageId: 'image-2',
+        toolCallId: 'tool-2',
+        prompt: 'dog portrait',
+        error: 'provider failed',
+        modelName: 'flux',
+        generationTime: '2.1s',
+        done: false,
+      },
+    ]);
+
+    expect(getPartsByType(state.parts, 'generated_image')).toEqual([
+      {
+        type: 'generated_image',
+        imageId: 'image-1',
+        toolCallId: 'tool-1',
+        status: 'completed',
+        prompt: 'cat portrait',
+        imageUrl: 'https://example.com/cat.png',
+        modelName: 'flux',
+        generationTime: '1.3s',
+      },
+      {
+        type: 'generated_image',
+        imageId: 'image-2',
+        toolCallId: 'tool-2',
+        status: 'error',
+        prompt: 'dog portrait',
+        error: 'provider failed',
+        modelName: 'flux',
+        generationTime: '2.1s',
+      },
+    ]);
+  });
+
+  it('merges subagent system and lifecycle events into the trace part', () => {
+    const state = reduceChunks([
+      {
+        type: 'system_event',
+        event: 'subagent_response_attempt',
+        detail: 'call=delegate-1 attempt=1',
+        done: false,
+      },
+      {
+        type: 'subagent_started',
+        callId: 'delegate-1',
+        agentId: 'explore',
+        agentName: 'Explore',
+        task: 'Inspect reducers.',
+        done: false,
+      },
+      {
+        type: 'subagent_text',
+        callId: 'delegate-1',
+        agentId: 'explore',
+        text: 'Found ',
+        done: false,
+      },
+      { type: 'subagent_text', callId: 'delegate-1', agentId: 'explore', text: 'it.', done: false },
+      {
+        type: 'subagent_tool_call_started',
+        callId: 'delegate-1',
+        agentId: 'explore',
+        toolCallId: 'tool-9',
+        name: 'grep',
+        done: false,
+      },
+      {
+        type: 'subagent_completed',
+        callId: 'delegate-1',
+        agentId: 'explore',
+        agentName: 'Explore',
+        summary: 'Reducer isolated.',
+        toolCallCount: 1,
+        done: false,
+      },
+    ]);
+
+    expect(getPartsByType(state.parts, 'subagent_trace')).toEqual([
+      expect.objectContaining({
+        toolCallId: 'delegate-1',
+        agentId: 'explore',
+        agentName: 'Explore',
+        status: 'completed',
+        summary: 'Reducer isolated.',
+        toolCallCount: 1,
+        lastMessage: 'Reducer isolated.',
+        messages: [{ role: 'assistant', text: 'Found it.' }],
+        tools: [{ callId: 'tool-9', name: 'grep' }],
+        events: [{ event: 'response_attempt', attempt: 1, detail: 'call=delegate-1 attempt=1' }],
+      }),
+    ]);
+  });
+
+  it('reconciles server message ids and terminal done updates', () => {
+    const state = reduceChunks([
+      { type: 'user_message_id', messageId: 'server-user-1', done: false },
+      { type: 'text', text: 'hello', done: false },
+      { type: 'done', done: true, messageId: 'server-ai-1', generationTime: '0.8s' },
+    ]);
+
+    expect(state.currentUserMessageId).toBe('server-user-1');
+    expect(state.currentAiMessageId).toBe('server-ai-1');
+    expect(state.receivedServerUserMessageId).toBe(true);
+    expect(state.receivedServerAiMessageId).toBe(true);
+    expect(state.aiMessageUpdate).toEqual({
+      targetMessageId: 'optimistic-ai-1',
+      patch: {
+        id: 'server-ai-1',
+        isGenerating: false,
+        text: 'hello',
+        parts: [{ type: 'text', text: 'hello' }],
+        generationTime: '0.8s',
+      },
+    });
+  });
+
+  it('appends a terminal error part without losing accumulated text', () => {
+    const state = reduceChunks([
+      { type: 'text', text: 'partial answer', done: false },
+      { type: 'error', error: 'provider exploded', done: true },
+    ]);
+
+    expect(state.aiMessageUpdate).toEqual({
+      targetMessageId: 'optimistic-ai-1',
+      patch: {
+        isGenerating: false,
+        text: 'partial answer',
+        parts: [
+          { type: 'text', text: 'partial answer' },
+          { type: 'error', text: 'provider exploded' },
+        ],
+      },
+    });
+  });
+});
