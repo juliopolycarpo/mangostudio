@@ -1,5 +1,9 @@
 import type OpenAI from 'openai';
 import { parseJsonWith } from '../../../lib/safe-parse';
+import {
+  type ChatCompletionsDelta,
+  createChatCompletionsAccumulator,
+} from '../core/chat-completions-accumulator';
 import { getModelContextLimit } from '../core/context-policy';
 import { createContinuationEnvelope } from '../core/continuation-envelope';
 import { extractReasoningChunks } from '../openai/normalizers';
@@ -66,12 +70,10 @@ export async function* streamDeepSeekAgentTurn(
       { signal: req.signal }
     );
 
-    let assistantText = '';
-    let assistantReasoning = '';
-    const pendingToolCalls = new Map<number, { callId: string; name: string; argsStr: string }>();
+    const accumulator = createChatCompletionsAccumulator({ extractReasoningChunks });
 
     for await (const chunk of stream) {
-      if (req.signal?.aborted) break;
+      if (req.signal?.aborted) return;
 
       const rawChunk = chunk as unknown as Record<string, unknown>;
       const usage = rawChunk.usage as
@@ -97,70 +99,21 @@ export async function* streamDeepSeekAgentTurn(
       // choices array is empty on usage-only chunks
       if (!choice) continue;
 
-      const delta = choice.delta as Record<string, unknown>;
-
-      for (const reasoningChunk of extractReasoningChunks(delta)) {
-        assistantReasoning += reasoningChunk;
-        yield { type: 'reasoning_delta', text: reasoningChunk };
-      }
-
-      if (typeof delta.content === 'string' && delta.content) {
-        assistantText += delta.content;
-        yield { type: 'assistant_text_delta', text: delta.content };
-      }
-
-      const toolCalls = delta.tool_calls as
-        | Array<{ index?: number; id?: string; function?: { name?: string; arguments?: string } }>
-        | undefined;
-      if (Array.isArray(toolCalls)) {
-        for (const tcDelta of toolCalls) {
-          const idx = typeof tcDelta.index === 'number' ? tcDelta.index : 0;
-          const fn = tcDelta.function;
-
-          if (typeof tcDelta.id === 'string') {
-            const callId = tcDelta.id;
-            const name = typeof fn?.name === 'string' ? fn.name : '';
-            const args = typeof fn?.arguments === 'string' ? fn.arguments : '';
-            pendingToolCalls.set(idx, { callId, name, argsStr: args });
-            yield { type: 'tool_call_started', callId, name: name || undefined };
-          } else {
-            const tc = pendingToolCalls.get(idx);
-            if (tc) {
-              const argsDelta = typeof fn?.arguments === 'string' ? fn.arguments : '';
-              tc.argsStr += argsDelta;
-              if (argsDelta) {
-                yield { type: 'tool_call_arguments_delta', callId: tc.callId, delta: argsDelta };
-              }
-            }
-          }
-        }
+      const delta = choice.delta as ChatCompletionsDelta;
+      for (const event of accumulator.addDelta(delta)) {
+        yield event;
       }
 
       if (choice.finish_reason) {
-        for (const tc of pendingToolCalls.values()) {
-          yield {
-            type: 'tool_call_completed',
-            callId: tc.callId,
-            name: tc.name,
-            arguments: tc.argsStr,
-          };
+        for (const event of accumulator.finishToolCalls()) {
+          yield event;
         }
       }
     }
 
-    const assistantMsg: Record<string, unknown> =
-      pendingToolCalls.size > 0
-        ? {
-            role: 'assistant',
-            content: assistantText || null,
-            tool_calls: Array.from(pendingToolCalls.values()).map((tc) => ({
-              id: tc.callId,
-              type: 'function',
-              function: { name: tc.name, arguments: tc.argsStr },
-            })),
-            ...(assistantReasoning ? { reasoning_content: assistantReasoning } : {}),
-          }
-        : { role: 'assistant', content: assistantText };
+    if (req.signal?.aborted) return;
+
+    const assistantMsg = accumulator.buildAssistantMessage();
 
     const newLoopMessages: unknown[] = [
       ...(loopState?.loopMessages ?? []),
