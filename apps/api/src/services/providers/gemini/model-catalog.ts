@@ -64,6 +64,7 @@ interface GeminiModelCatalogService {
   ): Promise<ModelCatalogResponse>;
   refreshIfStale(userId: string, reason: GeminiModelCatalogRefreshReason): ModelCatalogResponse;
   clearGeminiModelCatalog(userId: string): ModelCatalogResponse;
+  clearAllGeminiModelCatalogs(): void;
   getGeminiModelCatalog(userId: string): Promise<ModelCatalogResponse>;
   getDefaultTextModel(userId: string): string;
   getDefaultImageModel(userId: string): string;
@@ -236,6 +237,12 @@ export function createGeminiModelCatalogService(
       return snap;
     },
 
+    clearAllGeminiModelCatalogs(): void {
+      fullCatalogs.clear();
+      snapshots.clear();
+      refreshPromises.clear();
+    },
+
     async getGeminiModelCatalog(userId: string): Promise<ModelCatalogResponse> {
       if (getFullCatalog(userId).length > 0) {
         await recalculateSnapshot(userId);
@@ -275,5 +282,7 @@ export const refreshGeminiModelCatalog =
   geminiModelCatalogService.refreshGeminiModelCatalog.bind(geminiModelCatalogService);
 export const clearGeminiModelCatalog =
   geminiModelCatalogService.clearGeminiModelCatalog.bind(geminiModelCatalogService);
+export const clearAllGeminiModelCatalogs =
+  geminiModelCatalogService.clearAllGeminiModelCatalogs.bind(geminiModelCatalogService);
 export const getGeminiModelCatalog =
   geminiModelCatalogService.getGeminiModelCatalog.bind(geminiModelCatalogService);

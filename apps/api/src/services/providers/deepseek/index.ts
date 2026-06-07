@@ -2,8 +2,7 @@ import type { SecretMetadataRow } from '@mangostudio/shared/types';
 import { generateText, streamText } from 'ai';
 import { parseStringArray } from '../../../utils/json';
 import { withModelCache } from '../core/model-cache';
-import { recordProviderCacheHit, recordProviderCacheMiss } from '../core/provider-observability';
-import { createReadinessCache, createReadinessCacheKey } from '../core/readiness-cache';
+import { createProviderLifecycle } from '../core/provider-lifecycle';
 import { createProviderSecretService } from '../core/secret-service';
 import type {
   AgentEvent,
@@ -11,7 +10,6 @@ import type {
   AIProvider,
   ModelInfo,
   ProviderHealthcheckRequest,
-  ProviderWarmupRequest,
   StreamingChunk,
   TextGenerationRequest,
   TextGenerationResult,
@@ -89,11 +87,6 @@ interface PreparedDeepSeekRuntime {
   readonly agentClient: ReturnType<typeof createDeepSeekAgentClient>;
 }
 
-const preparedRuntimeCache = createReadinessCache<PreparedDeepSeekRuntime>({
-  onHit: () => recordProviderCacheHit('deepseek', 'prepared-runtime'),
-  onMiss: () => recordProviderCacheMiss('deepseek', 'prepared-runtime'),
-});
-
 async function loadPreparedRuntime(
   userId: string,
   modelName?: string
@@ -107,30 +100,18 @@ async function loadPreparedRuntime(
   };
 }
 
-// biome-ignore lint/suspicious/useAwait: Migrated from ESLint
-async function prepareRuntime(
-  userId: string,
-  modelName?: string
-): Promise<PreparedDeepSeekRuntime> {
-  return preparedRuntimeCache.get(createReadinessCacheKey(userId, modelName), () =>
-    loadPreparedRuntime(userId, modelName)
-  );
-}
-
-function invalidatePreparedRuntime(userId?: string): void {
-  if (!userId) {
-    preparedRuntimeCache.clearWhere(() => true);
-    return;
-  }
-
-  preparedRuntimeCache.clearByUserPrefix(userId);
-}
+const lifecycle = createProviderLifecycle<PreparedDeepSeekRuntime>({
+  provider: 'deepseek',
+  loadPreparedRuntime,
+  invalidateCachedModels: listModelsWithCache.invalidate,
+  syncConfigFileConnectors: secretService.syncConfigFileConnectors,
+});
 
 const deepSeekProvider: AIProvider = {
   providerType: 'deepseek',
 
   async generateText(req: TextGenerationRequest): Promise<TextGenerationResult> {
-    const { textClient } = await prepareRuntime(req.userId, req.modelName);
+    const { textClient } = await lifecycle.prepareRuntime(req.userId, req.modelName);
     const result = await generateText({
       model: textClient(req.modelName),
       system: buildDeepSeekSystemPrompt(req),
@@ -148,7 +129,7 @@ const deepSeekProvider: AIProvider = {
   },
 
   async *generateTextStream(req: TextGenerationRequest): AsyncIterable<StreamingChunk> {
-    const { textClient } = await prepareRuntime(req.userId, req.modelName);
+    const { textClient } = await lifecycle.prepareRuntime(req.userId, req.modelName);
     const result = streamText({
       model: textClient(req.modelName),
       system: buildDeepSeekSystemPrompt(req),
@@ -180,29 +161,17 @@ const deepSeekProvider: AIProvider = {
   },
 
   async *generateAgentTurnStream(req: AgentTurnRequest): AsyncIterable<AgentEvent> {
-    const { agentClient } = await prepareRuntime(req.userId, req.modelName);
+    const { agentClient } = await lifecycle.prepareRuntime(req.userId, req.modelName);
     yield* streamDeepSeekAgentTurn(agentClient, req);
   },
 
-  // biome-ignore lint/suspicious/useAwait: Migrated from ESLint
-  async listModels(userId: string): Promise<ModelInfo[]> {
+  listModels(userId: string): Promise<ModelInfo[]> {
     return listModelsWithCache(userId);
   },
 
-  invalidateModelCache(userId?: string): void {
-    listModelsWithCache.invalidate(userId);
-    invalidatePreparedRuntime(userId);
-  },
-
-  async syncConfigFileConnectors(userId: string): Promise<void> {
-    await secretService.syncConfigFileConnectors(userId);
-  },
-
-  async warmup(req: ProviderWarmupRequest): Promise<void> {
-    await preparedRuntimeCache.prime(createReadinessCacheKey(req.userId, req.modelName), () =>
-      loadPreparedRuntime(req.userId, req.modelName)
-    );
-  },
+  invalidateModelCache: lifecycle.invalidateModelCache,
+  syncConfigFileConnectors: lifecycle.syncConfigFileConnectors,
+  warmup: lifecycle.warmup,
 
   async healthcheck(req: ProviderHealthcheckRequest): Promise<void> {
     if (!req.apiKey?.trim()) {

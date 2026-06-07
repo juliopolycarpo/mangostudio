@@ -8,8 +8,7 @@
  */
 
 import { isReasoningModel } from '../core/capability-detector';
-import { recordProviderCacheHit, recordProviderCacheMiss } from '../core/provider-observability';
-import { createReadinessCache, createReadinessCacheKey } from '../core/readiness-cache';
+import { createProviderLifecycle } from '../core/provider-lifecycle';
 import type {
   AgentEvent,
   AgentTurnRequest,
@@ -18,7 +17,6 @@ import type {
   ImageGenerationResult,
   ModelInfo,
   ProviderHealthcheckRequest,
-  ProviderWarmupRequest,
   StreamingChunk,
   TextGenerationRequest,
   TextGenerationResult,
@@ -45,11 +43,6 @@ interface PreparedOpenAIRuntime {
   readonly client: ReturnType<typeof createOpenAIClient>;
 }
 
-const preparedRuntimeCache = createReadinessCache<PreparedOpenAIRuntime>({
-  onHit: () => recordProviderCacheHit('openai', 'prepared-runtime'),
-  onMiss: () => recordProviderCacheMiss('openai', 'prepared-runtime'),
-});
-
 async function loadPreparedRuntime(
   userId: string,
   modelName?: string
@@ -61,26 +54,18 @@ async function loadPreparedRuntime(
   };
 }
 
-// biome-ignore lint/suspicious/useAwait: Migrated from ESLint
-async function prepareRuntime(userId: string, modelName?: string): Promise<PreparedOpenAIRuntime> {
-  const cacheKey = createReadinessCacheKey(userId, modelName);
-  return preparedRuntimeCache.get(cacheKey, () => loadPreparedRuntime(userId, modelName));
-}
-
-function invalidatePreparedRuntime(userId?: string): void {
-  if (!userId) {
-    preparedRuntimeCache.clearWhere(() => true);
-    return;
-  }
-
-  preparedRuntimeCache.clearByUserPrefix(userId);
-}
+const lifecycle = createProviderLifecycle<PreparedOpenAIRuntime>({
+  provider: 'openai',
+  loadPreparedRuntime,
+  invalidateCachedModels: listModelsWithCache.invalidate,
+  syncConfigFileConnectors: secretService.syncConfigFileConnectors,
+});
 
 const openAIProvider: AIProvider = {
   providerType: 'openai',
 
   async generateText(req: TextGenerationRequest): Promise<TextGenerationResult> {
-    const { client } = await prepareRuntime(req.userId, req.modelName);
+    const { client } = await lifecycle.prepareRuntime(req.userId, req.modelName);
 
     const completion = await client.chat.completions.create(
       { model: req.modelName, messages: buildChatMessages(req), stream: false },
@@ -93,7 +78,7 @@ const openAIProvider: AIProvider = {
   },
 
   async *generateTextStream(req: TextGenerationRequest): AsyncIterable<StreamingChunk> {
-    const { client } = await prepareRuntime(req.userId, req.modelName);
+    const { client } = await lifecycle.prepareRuntime(req.userId, req.modelName);
 
     if (isReasoningModel(req.modelName) && req.generationConfig?.thinkingEnabled) {
       yield* streamWithResponsesAPI(client, req);
@@ -112,34 +97,22 @@ const openAIProvider: AIProvider = {
   },
 
   async *generateAgentTurnStream(req: AgentTurnRequest): AsyncIterable<AgentEvent> {
-    const { client } = await prepareRuntime(req.userId, req.modelName);
+    const { client } = await lifecycle.prepareRuntime(req.userId, req.modelName);
     yield* streamAgentTurnWithResponsesAPI(client, req);
   },
 
   async generateImage(req: ImageGenerationRequest): Promise<ImageGenerationResult> {
-    const { client } = await prepareRuntime(req.userId, req.modelName);
+    const { client } = await lifecycle.prepareRuntime(req.userId, req.modelName);
     return generateOpenAIImage(client, req);
   },
 
-  // biome-ignore lint/suspicious/useAwait: Migrated from ESLint
-  async listModels(userId: string): Promise<ModelInfo[]> {
+  listModels(userId: string): Promise<ModelInfo[]> {
     return listModelsWithCache(userId);
   },
 
-  invalidateModelCache(userId?: string): void {
-    listModelsWithCache.invalidate(userId);
-    invalidatePreparedRuntime(userId);
-  },
-
-  async syncConfigFileConnectors(userId: string): Promise<void> {
-    await secretService.syncConfigFileConnectors(userId);
-  },
-
-  async warmup(req: ProviderWarmupRequest): Promise<void> {
-    await preparedRuntimeCache.prime(createReadinessCacheKey(req.userId, req.modelName), () =>
-      loadPreparedRuntime(req.userId, req.modelName)
-    );
-  },
+  invalidateModelCache: lifecycle.invalidateModelCache,
+  syncConfigFileConnectors: lifecycle.syncConfigFileConnectors,
+  warmup: lifecycle.warmup,
 
   async healthcheck(req: ProviderHealthcheckRequest): Promise<void> {
     if (!req.apiKey?.trim()) {

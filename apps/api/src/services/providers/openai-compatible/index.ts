@@ -8,12 +8,8 @@ import { validateBaseUrl } from '../core/base-url-policy';
 import { isImageModelId, isReasoningModel } from '../core/capability-detector';
 import { withModelCache } from '../core/model-cache';
 import { PROVIDER_PROBE_TIMEOUT_MS, withAbortTimeout } from '../core/probe-timeout';
-import {
-  recordProviderCacheHit,
-  recordProviderCacheMiss,
-  recordProviderProbeTimeout,
-} from '../core/provider-observability';
-import { createReadinessCache, createReadinessCacheKey } from '../core/readiness-cache';
+import { createProviderLifecycle } from '../core/provider-lifecycle';
+import { recordProviderProbeTimeout } from '../core/provider-observability';
 import { createProviderSecretService } from '../core/secret-service';
 import { generateOpenAIImage } from '../openai/image-generation';
 import { buildChatMessages } from '../openai/message-mapper';
@@ -26,7 +22,6 @@ import type {
   ImageGenerationResult,
   ModelInfo,
   ProviderHealthcheckRequest,
-  ProviderWarmupRequest,
   StreamingChunk,
   TextGenerationRequest,
   TextGenerationResult,
@@ -66,11 +61,6 @@ interface PreparedCompatibleRuntime {
   readonly client: ReturnType<typeof createCompatibleClient>;
 }
 
-const preparedRuntimeCache = createReadinessCache<PreparedCompatibleRuntime>({
-  onHit: () => recordProviderCacheHit('openai-compatible', 'prepared-runtime'),
-  onMiss: () => recordProviderCacheMiss('openai-compatible', 'prepared-runtime'),
-});
-
 async function loadPreparedRuntime(
   userId: string,
   modelName?: string
@@ -81,25 +71,6 @@ async function loadPreparedRuntime(
     baseUrl,
     client: createCompatibleClient(apiKey, baseUrl),
   };
-}
-
-// biome-ignore lint/suspicious/useAwait: Migrated from ESLint
-async function prepareRuntime(
-  userId: string,
-  modelName?: string
-): Promise<PreparedCompatibleRuntime> {
-  return preparedRuntimeCache.get(createReadinessCacheKey(userId, modelName), () =>
-    loadPreparedRuntime(userId, modelName)
-  );
-}
-
-function invalidatePreparedRuntime(userId?: string): void {
-  if (!userId) {
-    preparedRuntimeCache.clearWhere(() => true);
-    return;
-  }
-
-  preparedRuntimeCache.clearByUserPrefix(userId);
 }
 
 const listModelsWithCache = withModelCache(
@@ -185,11 +156,18 @@ const listModelsWithCache = withModelCache(
   { ttl: 3_600_000, fallback: [] }
 );
 
+const lifecycle = createProviderLifecycle<PreparedCompatibleRuntime>({
+  provider: 'openai-compatible',
+  loadPreparedRuntime,
+  invalidateCachedModels: listModelsWithCache.invalidate,
+  syncConfigFileConnectors: secretService.syncConfigFileConnectors,
+});
+
 const openAICompatibleProvider: AIProvider = {
   providerType: 'openai-compatible',
 
   async generateText(req: TextGenerationRequest): Promise<TextGenerationResult> {
-    const { client } = await prepareRuntime(req.userId, req.modelName);
+    const { client } = await lifecycle.prepareRuntime(req.userId, req.modelName);
 
     const completion = await client.chat.completions.create(
       {
@@ -206,12 +184,12 @@ const openAICompatibleProvider: AIProvider = {
   },
 
   async *generateAgentTurnStream(req: AgentTurnRequest): AsyncIterable<AgentEvent> {
-    const { client } = await prepareRuntime(req.userId, req.modelName);
+    const { client } = await lifecycle.prepareRuntime(req.userId, req.modelName);
     yield* streamOAICompatAgentTurn(client, req);
   },
 
   async *generateTextStream(req: TextGenerationRequest): AsyncIterable<StreamingChunk> {
-    const { client } = await prepareRuntime(req.userId, req.modelName);
+    const { client } = await lifecycle.prepareRuntime(req.userId, req.modelName);
 
     const stream = await client.chat.completions.create(
       {
@@ -238,30 +216,18 @@ const openAICompatibleProvider: AIProvider = {
       throw new Error(`Image generation is not supported by model "${req.modelName}".`);
     }
 
-    const { client } = await prepareRuntime(req.userId, req.modelName);
+    const { client } = await lifecycle.prepareRuntime(req.userId, req.modelName);
 
     return generateOpenAIImage(client, req);
   },
 
-  // biome-ignore lint/suspicious/useAwait: Migrated from ESLint
-  async listModels(userId: string): Promise<ModelInfo[]> {
+  listModels(userId: string): Promise<ModelInfo[]> {
     return listModelsWithCache(userId);
   },
 
-  invalidateModelCache(userId?: string): void {
-    listModelsWithCache.invalidate(userId);
-    invalidatePreparedRuntime(userId);
-  },
-
-  async syncConfigFileConnectors(userId: string): Promise<void> {
-    await secretService.syncConfigFileConnectors(userId);
-  },
-
-  async warmup(req: ProviderWarmupRequest): Promise<void> {
-    await preparedRuntimeCache.prime(createReadinessCacheKey(req.userId, req.modelName), () =>
-      loadPreparedRuntime(req.userId, req.modelName)
-    );
-  },
+  invalidateModelCache: lifecycle.invalidateModelCache,
+  syncConfigFileConnectors: lifecycle.syncConfigFileConnectors,
+  warmup: lifecycle.warmup,
 
   async healthcheck(req: ProviderHealthcheckRequest): Promise<void> {
     if (!req.apiKey?.trim()) {
