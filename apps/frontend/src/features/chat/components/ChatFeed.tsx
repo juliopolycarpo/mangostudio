@@ -1,5 +1,5 @@
 /* global document */
-import type { GeneratedImagePart, Message, MessagePart } from '@mangostudio/shared';
+import type { GeneratedImagePart, Message } from '@mangostudio/shared';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { format } from 'date-fns';
 import {
@@ -17,59 +17,10 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import { MarkdownContent } from '@/components/MarkdownContent';
 import { useI18n } from '@/hooks/use-i18n';
 import { triggerImageDownload } from '@/lib/download-image';
+import { isNearBottom } from '../hooks/use-chat-auto-follow';
 import { MessageParts } from './MessageParts';
+import { extractRawMarkdown, messagePartsFromMessage } from './message-content';
 import { ReservedAspectImage } from './ReservedAspectImage';
-
-function isNearBottom(element: HTMLElement): boolean {
-  return element.scrollHeight - element.scrollTop - element.clientHeight <= 24;
-}
-
-function extractRawMarkdown(msg: Message): string {
-  const parts = normalizeMessageParts(
-    msg.parts ?? (msg.text ? [{ type: 'text', text: msg.text }] : [])
-  );
-  return parts
-    .filter((p): p is Extract<MessagePart, { type: 'text' }> => p.type === 'text')
-    .map((p) => p.text)
-    .join('\n\n');
-}
-
-function messagePartsFromMessage(msg: Message): MessagePart[] {
-  return normalizeMessageParts(msg.parts ?? (msg.text ? [{ type: 'text', text: msg.text }] : []));
-}
-
-function normalizeMessageParts(parts: MessagePart[]): MessagePart[] {
-  const normalized: MessagePart[] = [];
-  let thinkingRun = '';
-  let textRun = '';
-
-  const flushRuns = () => {
-    if (thinkingRun) {
-      normalized.push({ type: 'thinking', text: thinkingRun });
-      thinkingRun = '';
-    }
-    if (textRun) {
-      normalized.push({ type: 'text', text: textRun });
-      textRun = '';
-    }
-  };
-
-  for (const part of parts) {
-    if (part.type === 'thinking') {
-      thinkingRun += part.text;
-      continue;
-    }
-    if (part.type === 'text') {
-      textRun += part.text;
-      continue;
-    }
-    flushRuns();
-    normalized.push(part);
-  }
-
-  flushRuns();
-  return normalized;
-}
 
 function StreamingMessageBody({
   msg,
