@@ -4,35 +4,21 @@
 
 import type Anthropic from '@anthropic-ai/sdk';
 import { createDiagnosticLogger } from '../../../lib/logger';
-import { parseJsonWith } from '../../../lib/safe-parse';
-import { appendAttachmentFallbackNotes } from '../core/attachment-content';
-import { getModelContextLimit } from '../core/context-policy';
-import { createContinuationEnvelope } from '../core/continuation-envelope';
 import type { AgentEvent, AgentTurnRequest } from '../types';
 import { buildCachedAnthropicRequest } from './cached-request';
 import {
-  extractCacheUsage,
-  isToolUseBlock,
-  narrowDelta,
-  toMessageCreateParams,
-} from './normalizers';
-
-/** Opaque loop-state stored in providerState during the tool-call loop. */
-interface AnthropicLoopState {
-  provider: 'anthropic';
-  loopMessages: Array<Anthropic.MessageParam>;
-}
+  buildAnthropicCurrentInput,
+  buildAnthropicLoopMessages,
+  buildAnthropicProviderPrompt,
+  buildAnthropicRequestMessages,
+  parseAnthropicLoopState,
+  serializeAnthropicTurnState,
+} from './loop-state';
+import { extractCacheUsage, toMessageCreateParams } from './normalizers';
+import { createAnthropicStreamAccumulator } from './stream-accumulator';
+import { buildAnthropicThinkingConfig } from './thinking-config';
 
 const anthropicStreamLogger = createDiagnosticLogger('anthropic-stream');
-
-export function parseAnthropicLoopState(
-  providerState: string | null | undefined
-): AnthropicLoopState | null {
-  return parseJsonWith(providerState, (parsed) => {
-    if (parsed.provider !== 'anthropic' || !Array.isArray(parsed.loopMessages)) return null;
-    return parsed as unknown as AnthropicLoopState;
-  });
-}
 
 /**
  * Streams a single agentic turn for Anthropic.
@@ -45,13 +31,6 @@ export async function* streamAnthropicAgentTurn(
   const loopState = parseAnthropicLoopState(req.providerState);
   const thinkingEnabled = req.generationConfig?.thinkingEnabled ?? false;
   const effort = req.generationConfig?.reasoningEffort ?? 'medium';
-  const budgetMap: Record<string, number> = {
-    low: 1024,
-    medium: 2048,
-    high: 8192,
-    xhigh: 8192,
-    max: 8192,
-  };
 
   // Anthropic Messages API has no native JSON Schema constraint. Structured
   // output for Claude is achieved through prompt engineering and must be
@@ -62,41 +41,14 @@ export async function* streamAnthropicAgentTurn(
   }
 
   const providerPrompt = buildAnthropicProviderPrompt(req);
+  const currentInput = buildAnthropicCurrentInput(req, providerPrompt);
+  const messages = buildAnthropicRequestMessages(req, loopState, currentInput);
 
-  // Build messages: DB history + accumulated loop messages + current input
-  const messages: Anthropic.MessageParam[] = [
-    ...req.history.map(
-      (turn): Anthropic.MessageParam => ({
-        role: turn.role === 'ai' ? 'assistant' : 'user',
-        content: turn.text,
-      })
-    ),
-    ...(loopState?.loopMessages ?? []),
-  ];
-
-  // Add current input: tool results or user prompt
-  if (req.toolResults && req.toolResults.length > 0) {
-    messages.push({
-      role: 'user',
-      content: req.toolResults.map((tr) => ({
-        type: 'tool_result' as const,
-        tool_use_id: tr.callId,
-        content: tr.result,
-        is_error: tr.isError ?? false,
-      })),
-    });
-  } else if (providerPrompt !== undefined) {
-    messages.push({ role: 'user', content: providerPrompt });
-  }
-
-  // Build request with prompt caching
   const cachedReq = buildCachedAnthropicRequest({
     systemPrompt: req.systemPrompt ?? '',
     toolDefinitions: req.toolDefinitions ?? [],
     messages,
-    thinkingConfig: thinkingEnabled
-      ? { type: 'enabled', budget_tokens: budgetMap[effort] }
-      : undefined,
+    thinkingConfig: buildAnthropicThinkingConfig(thinkingEnabled, effort),
   });
 
   const params = { model: req.modelName, ...cachedReq };
@@ -106,102 +58,28 @@ export async function* streamAnthropicAgentTurn(
       signal: req.signal,
     });
 
+    const accumulator = createAnthropicStreamAccumulator();
     const assistantContent: Anthropic.ContentBlock[] = [];
-    const blockByIndex = new Map<number, { callId: string; name: string; inputStr: string }>();
 
     for await (const event of stream) {
       if (req.signal?.aborted) break;
 
-      if (event.type === 'content_block_start') {
-        if (isToolUseBlock(event.content_block)) {
-          const callId = event.content_block.id || `tu_${Date.now()}_${event.index}`;
-          const name = event.content_block.name;
-          blockByIndex.set(event.index, { callId, name, inputStr: '' });
-          yield { type: 'tool_call_started', callId, name };
-        }
-      } else if (event.type === 'content_block_delta') {
-        const nd = narrowDelta(event.delta);
-        if (nd.kind === 'thinking') {
-          yield { type: 'reasoning_delta', text: nd.thinking };
-        } else if (nd.kind === 'text') {
-          yield { type: 'assistant_text_delta', text: nd.text };
-        } else if (nd.kind === 'input_json') {
-          const block = blockByIndex.get(event.index);
-          if (block) {
-            block.inputStr += nd.partial_json;
-            yield {
-              type: 'tool_call_arguments_delta',
-              callId: block.callId,
-              delta: nd.partial_json,
-            };
-          }
-        }
-      } else if (event.type === 'content_block_stop') {
-        const block = blockByIndex.get(event.index);
-        if (block) {
-          yield {
-            type: 'tool_call_completed',
-            callId: block.callId,
-            name: block.name,
-            arguments: block.inputStr,
-          };
-          blockByIndex.delete(event.index);
-        }
-      } else if (event.type === 'message_stop') {
+      for (const agentEvent of accumulator.mapEvent(event)) {
+        yield agentEvent;
+      }
+
+      if (event.type === 'message_stop') {
         const finalMsg = await stream.finalMessage();
-        for (const block of finalMsg.content) {
-          assistantContent.push(block);
-        }
+        assistantContent.push(...finalMsg.content);
       }
     }
 
-    let providerReportedInputTokens: number | undefined;
-    try {
-      const finalMsg = await stream.finalMessage();
-      const cu = extractCacheUsage(finalMsg.usage);
-      if (cu.inputTokens > 0) providerReportedInputTokens = cu.inputTokens;
-      if (cu.cachedTokens > 0 || cu.cacheCreationTokens > 0) {
-        anthropicStreamLogger.info('prefix_cache_hit', {
-          readTokens: cu.cachedTokens,
-          creationTokens: cu.cacheCreationTokens,
-          totalInputTokens: cu.inputTokens,
-          hitPercent: cu.inputTokens > 0 ? Math.round((cu.cachedTokens / cu.inputTokens) * 100) : 0,
-        });
-      }
-    } catch {
-      // Non-critical — don't block the response for cache logging
-    }
-
-    const newLoopMessages: Anthropic.MessageParam[] = [
-      ...(loopState?.loopMessages ?? []),
-      ...(req.toolResults && req.toolResults.length > 0
-        ? [
-            {
-              role: 'user' as const,
-              content: req.toolResults.map((tr) => ({
-                type: 'tool_result' as const,
-                tool_use_id: tr.callId,
-                content: tr.result,
-                is_error: tr.isError ?? false,
-              })),
-            },
-          ]
-        : providerPrompt !== undefined
-          ? [{ role: 'user' as const, content: providerPrompt }]
-          : []),
-      ...(assistantContent.length > 0
-        ? [{ role: 'assistant' as const, content: assistantContent }]
-        : []),
-    ];
-
-    const envelope = createContinuationEnvelope('anthropic', 'stateless-loop', req, undefined, {
-      providerReportedInputTokens,
-      contextLimit: getModelContextLimit(req.modelName),
-    });
+    const providerReportedInputTokens = await reportCacheUsage(stream);
+    const newLoopMessages = buildAnthropicLoopMessages(loopState, currentInput, assistantContent);
 
     yield {
       type: 'turn_completed',
-      providerState: JSON.stringify({ ...envelope, loopMessages: newLoopMessages }),
+      providerState: serializeAnthropicTurnState(req, newLoopMessages, providerReportedInputTokens),
     };
   } catch (err: unknown) {
     yield {
@@ -211,7 +89,28 @@ export async function* streamAnthropicAgentTurn(
   }
 }
 
-function buildAnthropicProviderPrompt(req: AgentTurnRequest): string | undefined {
-  if (req.prompt === undefined && (req.attachments?.length ?? 0) === 0) return undefined;
-  return appendAttachmentFallbackNotes(req.prompt ?? '', req.attachments, req.modelCapabilities);
+/**
+ * Reads prompt-cache usage from the final message, logging cache hits.
+ * Returns the provider-reported input tokens, or undefined when unavailable.
+ * Never throws — usage logging must not block the response.
+ */
+async function reportCacheUsage(
+  stream: ReturnType<Anthropic['messages']['stream']>
+): Promise<number | undefined> {
+  try {
+    const finalMsg = await stream.finalMessage();
+    const usage = extractCacheUsage(finalMsg.usage);
+    if (usage.cachedTokens > 0 || usage.cacheCreationTokens > 0) {
+      anthropicStreamLogger.info('prefix_cache_hit', {
+        readTokens: usage.cachedTokens,
+        creationTokens: usage.cacheCreationTokens,
+        totalInputTokens: usage.inputTokens,
+        hitPercent:
+          usage.inputTokens > 0 ? Math.round((usage.cachedTokens / usage.inputTokens) * 100) : 0,
+      });
+    }
+    return usage.inputTokens > 0 ? usage.inputTokens : undefined;
+  } catch {
+    return undefined;
+  }
 }

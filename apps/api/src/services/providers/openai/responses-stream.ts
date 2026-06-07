@@ -22,11 +22,9 @@ import { buildOpenAIResponsesReplay } from '../core/replay-builder';
 import { toolDefsToResponsesAPI } from '../core/tool-mapper';
 import type { AgentEvent, AgentTurnRequest, StreamingChunk, TextGenerationRequest } from '../types';
 import { buildOpenAIResponsesUserMessage } from './message-mapper';
-import {
-  extractReasoningFromCompleted,
-  extractResponsesUsage,
-  type ResponseStreamEvent,
-} from './normalizers';
+import type { ResponseStreamEvent } from './normalizers';
+import { createResponsesAgentAccumulator } from './responses-agent-accumulator';
+import { createResponsesReasoningTracker } from './responses-reasoning-tracker';
 
 // ---------------------------------------------------------------------------
 // SDK boundary casts — OpenAI Responses API
@@ -163,79 +161,22 @@ export async function* streamWithResponsesAPI(
     { signal: req.signal }
   );
 
-  // Deduplication state
-  const seenSummaryDeltas = new Set<string>();
-  let thinkingWasEmitted = false;
-  let summaryEventsWereSeen = false;
+  const reasoning = createResponsesReasoningTracker();
 
   for await (const ev of stream) {
     if (req.signal?.aborted) break;
 
-    switch (ev.type) {
-      // --- Reasoning summary (preferred path) ---
-      case 'response.reasoning_summary_text.delta': {
-        const key = `${ev.item_id}:${ev.summary_index}`;
-        seenSummaryDeltas.add(key);
-        summaryEventsWereSeen = true;
-        thinkingWasEmitted = true;
-        if (ev.delta) yield { type: 'thinking', text: ev.delta, done: false };
-        break;
-      }
+    const reasoningText = reasoning.consumeStreamEvent(ev);
+    if (reasoningText !== null) {
+      yield { type: 'thinking', text: reasoningText, done: false };
+      continue;
+    }
 
-      // --- Raw reasoning text (fallback when no summary) ---
-      case 'response.reasoning_text.delta': {
-        if (!summaryEventsWereSeen) {
-          thinkingWasEmitted = true;
-          if (ev.delta) yield { type: 'thinking', text: ev.delta, done: false };
-        }
-        break;
-      }
-
-      // --- Summary done events (fallback if no delta was streamed) ---
-      case 'response.reasoning_summary_text.done': {
-        const key = `${ev.item_id}:${ev.summary_index}`;
-        if (!seenSummaryDeltas.has(key) && ev.text) {
-          thinkingWasEmitted = true;
-          yield { type: 'thinking', text: ev.text, done: false };
-        }
-        break;
-      }
-
-      case 'response.reasoning_summary_part.done': {
-        if (ev.part.text) {
-          const key = `${ev.item_id}:${ev.summary_index}`;
-          if (!seenSummaryDeltas.has(key)) {
-            thinkingWasEmitted = true;
-            yield { type: 'thinking', text: ev.part.text, done: false };
-          }
-        }
-        break;
-      }
-
-      case 'response.reasoning_text.done': {
-        if (!summaryEventsWereSeen && !thinkingWasEmitted && ev.text) {
-          yield { type: 'thinking', text: ev.text, done: false };
-          thinkingWasEmitted = true;
-        }
-        break;
-      }
-
-      // --- Assistant text ---
-      case 'response.output_text.delta': {
-        if (ev.delta) yield { type: 'text', text: ev.delta, done: false };
-        break;
-      }
-
-      // --- Final response fallback ---
-      case 'response.completed': {
-        if (!thinkingWasEmitted) {
-          const reasoning = extractReasoningFromCompleted(ev.response);
-          if (reasoning) {
-            yield { type: 'thinking', text: reasoning, done: false };
-          }
-        }
-        break;
-      }
+    if (ev.type === 'response.output_text.delta') {
+      if (ev.delta) yield { type: 'text', text: ev.delta, done: false };
+    } else if (ev.type === 'response.completed') {
+      const fallback = reasoning.consumeCompleted(ev.response);
+      if (fallback) yield { type: 'thinking', text: fallback, done: false };
     }
   }
 
@@ -379,117 +320,12 @@ export async function* streamAgentTurnWithResponsesAPI(
     }
   }
 
-  // Deduplication state for reasoning events
-  const seenSummaryDeltas = new Set<string>();
-  let summaryEventsWereSeen = false;
-  let thinkingWasEmitted = false;
-  let newResponseId: string | null = null;
-  let usageInputTokens: number | undefined;
-
-  // Map output item IDs (fc_xxx) → function call IDs (call_xxx) for consistent callId
-  const itemIdToCallId = new Map<string, { callId: string; name: string }>();
+  const accumulator = createResponsesAgentAccumulator();
 
   for await (const ev of stream) {
     if (req.signal?.aborted) break;
-
-    switch (ev.type) {
-      case 'response.reasoning_summary_text.delta': {
-        const key = `${ev.item_id}:${ev.summary_index}`;
-        seenSummaryDeltas.add(key);
-        summaryEventsWereSeen = true;
-        thinkingWasEmitted = true;
-        if (ev.delta) yield { type: 'reasoning_delta', text: ev.delta };
-        break;
-      }
-
-      case 'response.reasoning_text.delta': {
-        if (!summaryEventsWereSeen && ev.delta) {
-          thinkingWasEmitted = true;
-          yield { type: 'reasoning_delta', text: ev.delta };
-        }
-        break;
-      }
-
-      case 'response.reasoning_summary_text.done': {
-        const key = `${ev.item_id}:${ev.summary_index}`;
-        if (!seenSummaryDeltas.has(key) && ev.text) {
-          thinkingWasEmitted = true;
-          yield { type: 'reasoning_delta', text: ev.text };
-        }
-        break;
-      }
-
-      case 'response.reasoning_summary_part.done': {
-        if (ev.part.text) {
-          const key = `${ev.item_id}:${ev.summary_index}`;
-          if (!seenSummaryDeltas.has(key)) {
-            thinkingWasEmitted = true;
-            yield { type: 'reasoning_delta', text: ev.part.text };
-          }
-        }
-        break;
-      }
-
-      case 'response.reasoning_text.done': {
-        if (!summaryEventsWereSeen && !thinkingWasEmitted && ev.text) {
-          yield { type: 'reasoning_delta', text: ev.text };
-          thinkingWasEmitted = true;
-        }
-        break;
-      }
-
-      case 'response.output_item.added': {
-        if (ev.item.type === 'function_call') {
-          const callId = ev.item.call_id;
-          const itemId = ev.item.id ?? callId;
-          itemIdToCallId.set(itemId, { callId, name: ev.item.name });
-          yield { type: 'tool_call_started', callId, name: ev.item.name };
-        }
-        break;
-      }
-
-      case 'response.function_call_arguments.delta': {
-        const mapped = itemIdToCallId.get(ev.item_id);
-        if (ev.delta && mapped) {
-          yield {
-            type: 'tool_call_arguments_delta',
-            callId: mapped.callId,
-            delta: ev.delta,
-          };
-        }
-        break;
-      }
-
-      case 'response.function_call_arguments.done': {
-        const mapped = itemIdToCallId.get(ev.item_id);
-        if (mapped) {
-          yield {
-            type: 'tool_call_completed',
-            callId: mapped.callId,
-            name: mapped.name,
-            arguments: ev.arguments,
-          };
-        }
-        break;
-      }
-
-      case 'response.output_text.delta': {
-        if (ev.delta) yield { type: 'assistant_text_delta', text: ev.delta };
-        break;
-      }
-
-      case 'response.completed': {
-        newResponseId = ev.response.id;
-        const ru = extractResponsesUsage(ev.response);
-        if (ru.inputTokens) usageInputTokens = ru.inputTokens;
-        if (!thinkingWasEmitted) {
-          const reasoning = extractReasoningFromCompleted(ev.response);
-          if (reasoning) {
-            yield { type: 'reasoning_delta', text: reasoning };
-          }
-        }
-        break;
-      }
+    for (const event of accumulator.mapEvent(ev)) {
+      yield event;
     }
   }
 
@@ -497,9 +333,9 @@ export async function* streamAgentTurnWithResponsesAPI(
     'openai',
     'responses',
     req,
-    newResponseId ?? undefined,
+    accumulator.responseId ?? undefined,
     {
-      providerReportedInputTokens: usageInputTokens,
+      providerReportedInputTokens: accumulator.usageInputTokens,
       contextLimit: getModelContextLimit(req.modelName),
     }
   );

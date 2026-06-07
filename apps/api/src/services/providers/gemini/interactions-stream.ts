@@ -5,7 +5,6 @@
  * Degrades to full replay on safe cursor loss and aborts unsafe tool loops.
  */
 
-import { createDiagnosticLogger } from '../../../lib/logger';
 import {
   attachmentToBase64,
   getAttachmentSupportKind,
@@ -28,18 +27,12 @@ import {
 import { toolDefsToGeminiInteractions } from '../core/tool-mapper';
 import type { AgentEvent, AgentTurnRequest } from '../types';
 import { createGeminiClient } from './client';
-import {
-  extractGeminiUsage,
-  type InteractionSSEEvent,
-  isFunctionCallStart,
-  narrowGeminiDelta,
-  toInteractionParams,
-} from './normalizers';
+import { createGeminiInteractionAccumulator } from './interaction-accumulator';
+import { type InteractionSSEEvent, toInteractionParams } from './normalizers';
 import { buildInteractionsThinkingConfig } from './reasoning-config';
 import { getResolvedGeminiApiKey } from './secret';
 
 const GEMINI_INTERACTIONS_ATTACHMENT_KINDS = ['image', 'pdf', 'text'] as const;
-const geminiInteractionsLogger = createDiagnosticLogger('gemini-interactions');
 
 /**
  * Opaque state persisted across turns for Gemini.
@@ -332,85 +325,29 @@ export async function* processGeminiInteractionStream(
   stream: AsyncIterable<InteractionSSEEvent>,
   req: AgentTurnRequest
 ): AsyncIterable<AgentEvent> {
-  const activeCalls = new Map<
-    number,
-    { id: string; name: string; args: Record<string, unknown>; started: boolean }
-  >();
-  let interactionId: string | undefined;
-  let providerReportedInputTokens: number | undefined;
+  const accumulator = createGeminiInteractionAccumulator();
 
   for await (const event of stream) {
-    if (event.event_type === 'content.start') {
-      if (isFunctionCallStart(event.content)) {
-        const callId =
-          event.content.id || `call_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-        const name = event.content.name;
-        const callEntry = { id: callId, name, args: {}, started: false };
-        activeCalls.set(event.index, callEntry);
-        if (name) {
-          callEntry.started = true;
-          yield { type: 'tool_call_started', callId, name };
-        }
-      }
-    } else if (event.event_type === 'content.delta') {
-      const nd = narrowGeminiDelta(event.delta);
-      if (nd.kind === 'thought_summary') {
-        if (nd.text) {
-          yield { type: 'reasoning_delta', text: nd.text };
-        }
-      } else if (nd.kind === 'text') {
-        yield { type: 'assistant_text_delta', text: nd.text };
-      } else if (nd.kind === 'function_call') {
-        const call = activeCalls.get(event.index);
-        if (call) {
-          if (nd.name && !call.name) call.name = nd.name;
-          if (!call.started && call.name) {
-            call.started = true;
-            yield { type: 'tool_call_started', callId: call.id, name: call.name };
-          }
-          Object.assign(call.args, nd.args);
-          const argChunk = JSON.stringify(nd.args);
-          yield { type: 'tool_call_arguments_delta', callId: call.id, delta: argChunk };
-        }
-      } else if (nd.kind !== 'thought_signature') {
-        geminiInteractionsLogger.warn('unknown_delta_type', { delta: event.delta });
-      }
-    } else if (event.event_type === 'content.stop') {
-      const call = activeCalls.get(event.index);
-      if (call) {
-        yield {
-          type: 'tool_call_completed',
-          callId: call.id,
-          name: call.name,
-          arguments: JSON.stringify(call.args),
-        };
-        activeCalls.delete(event.index);
-      }
-    } else if (event.event_type === 'interaction.complete') {
-      interactionId = event.interaction.id;
-      const gu = extractGeminiUsage(event.interaction.usage);
-      if (gu.totalInputTokens > 0) providerReportedInputTokens = gu.totalInputTokens;
-      if (gu.cachedTokens > 0 && gu.totalInputTokens > 0) {
-        geminiInteractionsLogger.info('prefix_cache_hit', {
-          cachedTokens: gu.cachedTokens,
-          totalInputTokens: gu.totalInputTokens,
-          hitPercent: Math.round((gu.cachedTokens / gu.totalInputTokens) * 100),
-        });
-      }
-    } else if (event.event_type === 'interaction.start') {
-      interactionId = event.interaction.id;
+    for (const agentEvent of accumulator.mapEvent(event)) {
+      yield agentEvent;
     }
   }
 
-  if (!interactionId) {
+  if (!accumulator.interactionId) {
     yield { type: 'turn_error', error: 'No interaction ID returned from Gemini streaming' };
     return;
   }
 
-  const envelope = createContinuationEnvelope('gemini', 'interactions', req, interactionId, {
-    providerReportedInputTokens,
-    contextLimit: getModelContextLimit(req.modelName),
-  });
+  const envelope = createContinuationEnvelope(
+    'gemini',
+    'interactions',
+    req,
+    accumulator.interactionId,
+    {
+      providerReportedInputTokens: accumulator.providerReportedInputTokens,
+      contextLimit: getModelContextLimit(req.modelName),
+    }
+  );
 
   yield { type: 'turn_completed', providerState: serializeContinuationEnvelope(envelope) };
 }
