@@ -1,5 +1,5 @@
 /* global document */
-import type { GeneratedImagePart, Message } from '@mangostudio/shared';
+import type { Message } from '@mangostudio/shared';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { format } from 'date-fns';
 import {
@@ -13,11 +13,11 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useState } from 'react';
 import { MarkdownContent } from '@/components/MarkdownContent';
 import { useI18n } from '@/hooks/use-i18n';
 import { triggerImageDownload } from '@/lib/download-image';
-import { isNearBottom } from '../hooks/use-chat-auto-follow';
+import { useChatAutoFollow } from '../hooks/use-chat-auto-follow';
 import { MessageParts } from './MessageParts';
 import { extractRawMarkdown, messagePartsFromMessage } from './message-content';
 import { ReservedAspectImage } from './ReservedAspectImage';
@@ -116,14 +116,12 @@ function CopyMessageButton({
 export function ChatFeed({ chatId, messages }: { chatId: string | null; messages: Message[] }) {
   const { t } = useI18n();
   const [imageErrors, setImageErrors] = useState<Record<string, boolean>>({});
-  const [showScrollButton, setShowScrollButton] = useState(false);
-  const parentRef = useRef<HTMLDivElement>(null);
-  const feedShouldAutoFollowRef = useRef(true);
-  const previousGeneratingMessageIdRef = useRef<string | null>(null);
-  const pendingScrollToBottomRef = useRef(true);
-  const previousChatIdRef = useRef<string | null>(chatId);
+  const { parentRef, showScrollButton, handleScroll, scrollToBottom } = useChatAutoFollow(
+    chatId,
+    messages
+  );
 
-  const getScrollElement = useCallback(() => parentRef.current, []);
+  const getScrollElement = useCallback(() => parentRef.current, [parentRef]);
   const getItemKey = useCallback((index: number) => messages[index]?.id ?? index, [messages]);
   const estimateSize = useCallback(() => 150, []);
 
@@ -134,77 +132,6 @@ export function ChatFeed({ chatId, messages }: { chatId: string | null; messages
     estimateSize,
     overscan: 5,
   });
-  const latestMessage = messages.at(-1);
-  const latestMessageId = latestMessage?.id ?? null;
-  const latestIsGenerating = latestMessage?.isGenerating ?? false;
-  // Track content length as a primitive to avoid the streaming scroll effect
-  // re-firing on every in-place part update (e.g. image completion events).
-  const latestPartsCount = latestMessage?.parts?.length ?? 0;
-  const latestTextLen = latestMessage?.text?.length ?? 0;
-  // When a generated image part transitions status (generating → completed),
-  // the row height typically changes significantly. Capture that signal as a
-  // primitive so the auto-follow layout effect re-scrolls to bottom.
-  const latestImageCompletionSignature =
-    latestMessage?.parts
-      ?.filter((p): p is GeneratedImagePart => p.type === 'generated_image')
-      .map((p) => `${p.imageId}:${p.status}:${p.imageUrl ?? ''}`)
-      .join(',') ?? '';
-
-  useEffect(() => {
-    if (previousChatIdRef.current !== chatId) {
-      previousChatIdRef.current = chatId;
-      feedShouldAutoFollowRef.current = true;
-      pendingScrollToBottomRef.current = true;
-    }
-  }, [chatId]);
-
-  useLayoutEffect(() => {
-    if (!pendingScrollToBottomRef.current || !parentRef.current || messages.length === 0) return;
-    parentRef.current.scrollTop = parentRef.current.scrollHeight;
-    pendingScrollToBottomRef.current = false;
-  }, [chatId, messages.length]);
-
-  // Keep auto-follow during streaming. The layout effect runs before paint,
-  // so users do not see the one-frame pre-scroll position.
-  useLayoutEffect(() => {
-    const isNewGeneratingMessage =
-      latestIsGenerating && previousGeneratingMessageIdRef.current !== latestMessageId;
-    if (isNewGeneratingMessage) {
-      feedShouldAutoFollowRef.current = true;
-    }
-    if (!latestIsGenerating || !parentRef.current) return;
-    if (feedShouldAutoFollowRef.current) {
-      parentRef.current.scrollTop = parentRef.current.scrollHeight;
-    }
-  }, [
-    latestMessageId,
-    latestIsGenerating,
-    latestPartsCount,
-    latestTextLen,
-    latestImageCompletionSignature,
-  ]);
-
-  useEffect(() => {
-    previousGeneratingMessageIdRef.current = latestIsGenerating ? latestMessageId : null;
-  }, [latestMessageId, latestIsGenerating]);
-
-  const handleFeedScroll = (event: React.UIEvent<HTMLElement>) => {
-    const nearBottom = isNearBottom(event.currentTarget);
-    if (!nearBottom) {
-      feedShouldAutoFollowRef.current = false;
-    } else {
-      feedShouldAutoFollowRef.current = true;
-    }
-    // Suppress the button while auto-following so transient position
-    // changes during content growth (e.g. image loads) don't flash it.
-    setShowScrollButton(!feedShouldAutoFollowRef.current && !nearBottom);
-  };
-
-  const handleScrollToBottom = () => {
-    if (!parentRef.current) return;
-    feedShouldAutoFollowRef.current = true;
-    parentRef.current.scrollTo({ top: parentRef.current.scrollHeight, behavior: 'smooth' });
-  };
 
   const handleImageError = (id: string) => {
     setImageErrors((prev) => ({ ...prev, [id]: true }));
@@ -218,7 +145,7 @@ export function ChatFeed({ chatId, messages }: { chatId: string | null; messages
   return (
     <section
       ref={parentRef}
-      onScroll={handleFeedScroll}
+      onScroll={handleScroll}
       className="flex-1 min-h-0 overflow-y-auto px-3 sm:px-4 md:px-6 py-4 sm:py-6 md:py-8 hide-scrollbar max-w-5xl mx-auto w-full"
     >
       {messages.length === 0 && (
@@ -480,7 +407,7 @@ export function ChatFeed({ chatId, messages }: { chatId: string | null; messages
             exit={{ opacity: 0, y: 10 }}
             transition={{ duration: 0.2 }}
             type="button"
-            onClick={handleScrollToBottom}
+            onClick={scrollToBottom}
             className="glass-elevated sticky bottom-4 left-1/2 -translate-x-1/2 z-10 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium text-on-surface-variant border border-outline-variant/30 cursor-pointer hover:border-outline-variant/50 hover:text-on-surface transition-colors duration-200"
             title={t.chat.scrollToBottom}
           >
