@@ -63,12 +63,10 @@ import type { ResolvedModel } from './resolve-model';
 import { resolveTurnContext } from './resolve-turn-context';
 import {
   createDelegationRuntime,
-  errorToToolMessage,
   executeStandardToolCallsWithProgress,
-  parseToolArgs,
-  stringifyToolResult,
   type ToolExecutionProgressItem,
 } from './standard-tool-execution';
+import { errorToToolMessage, parseToolArgs, stringifyToolResult } from './tool-result-utils';
 
 const TOOL_LOOP_EXHAUSTED_MESSAGE = 'The model exceeded the maximum number of tool interactions.';
 const streamTextTurnLogger = createDiagnosticLogger('stream-text-turn');

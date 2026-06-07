@@ -5,7 +5,6 @@ import type { MultiAgentSettings } from '@mangostudio/shared/app-settings';
 import { SUBAGENT_MAX_TURNS_MAX, SUBAGENT_MAX_TURNS_MIN } from '@mangostudio/shared/app-settings';
 import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';
-import { safeJsonParse } from '../../../lib/safe-parse';
 import { executeTool, getSafeEffectiveToolSettings, getTool } from '../../../services/tools';
 import {
   getBoundedOptionalInteger,
@@ -28,6 +27,7 @@ import {
   type SubagentProgressEvent,
   type SubagentRunResult,
 } from './subagent-runner';
+import { errorToToolMessage, parseToolArgs, stringifyToolResult } from './tool-result-utils';
 
 const TOOL_TIMEOUT_MS = 30_000;
 
@@ -451,10 +451,6 @@ function createAsyncQueue<T>(): AsyncIterable<T> & {
   };
 }
 
-export function parseToolArgs(argsStr: string): Record<string, unknown> {
-  return safeJsonParse(argsStr) ?? {};
-}
-
 function withToolTimeout<T>(promise: Promise<T>, name: string): Promise<T> {
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
   const timeoutPromise = new Promise<never>((_, reject) => {
@@ -467,17 +463,4 @@ function withToolTimeout<T>(promise: Promise<T>, name: string): Promise<T> {
   return Promise.race([promise, timeoutPromise]).finally(() => {
     if (timeoutId) clearTimeout(timeoutId);
   });
-}
-
-export function stringifyToolResult(result: unknown): string {
-  try {
-    const serialized = JSON.stringify(result);
-    return typeof serialized === 'string' ? serialized : 'null';
-  } catch {
-    return JSON.stringify({ error: 'Tool result serialization failed.' });
-  }
-}
-
-export function errorToToolMessage(error: unknown): string {
-  return error instanceof Error ? error.message : 'Tool execution failed';
 }

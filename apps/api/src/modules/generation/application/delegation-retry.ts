@@ -13,6 +13,7 @@ import {
   SubagentDelegationError,
   type SubagentRunResult,
 } from './subagent-runner';
+import { errorToToolMessage } from './tool-result-utils';
 
 const delegationLogger = createDiagnosticLogger('subagent-delegation');
 
@@ -447,10 +448,6 @@ function isSubagentTraceMessage(
   return (
     (record.role === 'assistant' || record.role === 'system') && typeof record.text === 'string'
   );
-}
-
-function errorToToolMessage(error: unknown): string {
-  return error instanceof Error ? error.message : 'Tool execution failed';
 }
 
 type LogValue = string | number | boolean;
