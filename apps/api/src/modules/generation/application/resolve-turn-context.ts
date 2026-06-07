@@ -13,6 +13,7 @@ import {
 } from '../../../services/providers/core/provider-registry';
 import type { AIProvider, ToolDefinition } from '../../../services/providers/types';
 import { DELEGATE_TO_AGENT_TOOL_NAME } from '../../../services/tools/builtin/delegate-to-agent';
+import { GENERATE_IMAGE_TOOL_NAME } from '../../../services/tools/builtin/generate-image';
 import { getAgentProfile } from '../../agents/application/agent-settings-service';
 import { getAppSettings } from '../../app-settings/application/app-settings-service';
 import { assertChatOwnership } from '../../chats/domain/chat-ownership';
@@ -115,7 +116,7 @@ export async function resolveTurnContext(
   if (
     provider.generateAgentTurnStream &&
     input.toolIntent === 'image_generation_requested' &&
-    allowedToolNames.has('generate_image')
+    allowedToolNames.has(GENERATE_IMAGE_TOOL_NAME)
   ) {
     const hint =
       'The user explicitly clicked Create images for this turn. Use the image generation tool when appropriate.';
