@@ -17,6 +17,7 @@ import { GENERATE_IMAGE_TOOL_NAME } from '../../../services/tools/builtin/genera
 import { getAgentProfile } from '../../agents/application/agent-settings-service';
 import { getAppSettings } from '../../app-settings/application/app-settings-service';
 import { assertChatOwnership } from '../../chats/domain/chat-ownership';
+import { shouldExposeDelegateTool } from './delegate-tool-availability';
 import {
   type ResolvedAgentRuntime,
   resolveAgentRuntime,
@@ -155,17 +156,4 @@ function getRequestRuntimeSettings(
       ? { providerCompactionEnabled: input.contextSettings.providerCompactionEnabled }
       : {}),
   };
-}
-
-function shouldExposeDelegateTool(input: {
-  readonly interactionMode: 'chat' | 'agent';
-  readonly profile: AgentProfile;
-  readonly settings: MultiAgentSettings;
-}): boolean {
-  if (!input.settings.enabled) return false;
-  if (input.settings.maxDepth < 1) return false;
-  if (input.settings.maxSubagentCalls < 1) return false;
-  if (input.profile.subagentIds.length === 0) return false;
-  if (input.interactionMode === 'chat') return input.settings.chatDelegationEnabled;
-  return true;
 }

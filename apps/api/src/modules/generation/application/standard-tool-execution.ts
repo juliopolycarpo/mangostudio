@@ -13,6 +13,7 @@ import {
 } from '../../../services/tools/arg-parsing';
 import { DELEGATE_TO_AGENT_TOOL_NAME } from '../../../services/tools/builtin/delegate-to-agent';
 import type { EffectiveToolSettings } from '../../../services/tools/types';
+import { shouldExposeDelegateTool } from './delegate-tool-availability';
 import { ensureDelegationResult, isSubagentRunResult, logDelegationWarn } from './delegation-retry';
 import {
   getSubagentCachedEntry,
@@ -235,19 +236,6 @@ export function createDelegationRuntime(
     return undefined;
   }
   return input;
-}
-
-export function shouldExposeDelegateTool(input: {
-  readonly interactionMode: 'chat' | 'agent';
-  readonly profile: AgentProfile;
-  readonly settings: MultiAgentSettings;
-}): boolean {
-  if (!input.settings.enabled) return false;
-  if (input.settings.maxDepth < 1) return false;
-  if (input.settings.maxSubagentCalls < 1) return false;
-  if (input.profile.subagentIds.length === 0) return false;
-  if (input.interactionMode === 'chat') return input.settings.chatDelegationEnabled;
-  return true;
 }
 
 export async function executeDelegationToolCall(

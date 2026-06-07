@@ -349,23 +349,25 @@ export async function* streamTextTurn(
           ([, call]) => call.name === GENERATE_IMAGE_TOOL_NAME
         );
 
+        const delegationRuntime = createDelegationRuntime({
+          db,
+          userId,
+          chatId,
+          parentAgentProfile: agentRuntime.profile,
+          parentModelName: modelId,
+          interactionMode,
+          settings: multiAgentSettings,
+          signal,
+          state: delegationState,
+        });
+
         if (!hasImageGenerationCall) {
           for await (const item of executeStandardToolCallsWithProgress(pendingCallEntries, {
             userId,
             chatId,
             settingsByToolName: toolSettings,
             allowedToolNames,
-            delegationRuntime: createDelegationRuntime({
-              db,
-              userId,
-              chatId,
-              parentAgentProfile: agentRuntime.profile,
-              parentModelName: modelId,
-              interactionMode,
-              settings: multiAgentSettings,
-              signal,
-              state: delegationState,
-            }),
+            delegationRuntime,
           })) {
             yield* collectToolExecutionResult(item, {
               allParts,
@@ -380,18 +382,6 @@ export async function* streamTextTurn(
           const imageEntries = pendingCallEntries.filter(
             ([, call]) => call.name === GENERATE_IMAGE_TOOL_NAME
           );
-
-          const delegationRuntime = createDelegationRuntime({
-            db,
-            userId,
-            chatId,
-            parentAgentProfile: agentRuntime.profile,
-            parentModelName: modelId,
-            interactionMode,
-            settings: multiAgentSettings,
-            signal,
-            state: delegationState,
-          });
 
           const nonImageResultEntries: ToolExecutionProgressItem[] = [];
           const nonImageRunner =
