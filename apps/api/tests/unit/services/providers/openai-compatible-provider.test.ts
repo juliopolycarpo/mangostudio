@@ -3,10 +3,20 @@ import type { SecretMetadataRow } from '@mangostudio/shared/types';
 import { createProviderSecretService } from '../../../../src/services/providers/core/secret-service';
 import { createCompatibleClient } from '../../../../src/services/providers/openai-compatible/client';
 import { resolveCompatibleClientConfig } from '../../../../src/services/providers/openai-compatible/resolve-client-config';
-import type { AgentEvent } from '../../../../src/services/providers/types';
+import type { AgentEvent, AgentTurnRequest } from '../../../../src/services/providers/types';
 import type { SecretMetadataInput } from '../../../../src/services/secret-store/metadata';
 import { InMemorySecretStore } from '../../../support/mocks/mock-secret-store';
+import { collectAgentEvents } from '../../../support/providers/agent-event-collector';
 import { expectTurnCompletedEnvelope } from '../../../support/providers/contract-assertions';
+import {
+  chainChunks,
+  createFakeChatCompletionsClient,
+  stopChunk,
+  textDeltaChunk,
+  toolCallArgumentsDeltaChunk,
+  toolCallStartChunk,
+  usageChunk,
+} from '../../../support/providers/fake-chat-completions';
 
 const TEST_USER = 'test-user-oai-compat';
 const NO_TOML = '/tmp/mangostudio-test-nonexistent-config.toml';
@@ -104,26 +114,49 @@ interface CaptureCall {
   args?: Record<string, unknown>;
 }
 
-function makeFakeClient(
-  chunks: Array<Record<string, unknown>>,
-  capture: CaptureCall = {}
-): unknown {
+function parseProviderState(raw: string): Record<string, unknown> {
+  return JSON.parse(raw) as Record<string, unknown>;
+}
+
+function findAssistantMsg(state: Record<string, unknown>): Record<string, unknown> | undefined {
+  const loopMessages = state.loopMessages as Array<Record<string, unknown>> | undefined;
+  return loopMessages?.find((message) => message.role === 'assistant');
+}
+
+function baseTurnRequest(overrides: Partial<AgentTurnRequest> = {}): AgentTurnRequest {
   return {
-    chat: {
-      completions: {
-        create: (args: Record<string, unknown>) => {
-          capture.args = args;
-          async function* iter(): AsyncIterable<unknown> {
-            for (const c of chunks) {
-              await Promise.resolve();
-              yield c;
-            }
-          }
-          return Promise.resolve(iter());
-        },
-      },
-    },
+    userId: 'u',
+    modelName: 'gpt-4o',
+    systemPrompt: undefined,
+    history: [],
+    prompt: 'Hello',
+    toolDefinitions: [],
+    providerState: null,
+    signal: new AbortController().signal,
+    generationConfig: { thinkingEnabled: false, reasoningEffort: 'medium' },
+    ...overrides,
   };
+}
+
+async function collectCompatEvents(
+  stream: AsyncIterable<Record<string, unknown>>,
+  overrides: Partial<AgentTurnRequest> = {},
+  capture: CaptureCall = {}
+): Promise<AgentEvent[]> {
+  const { streamOAICompatAgentTurn } = await import(
+    '../../../../src/services/providers/openai-compatible/chat-completions-stream'
+  );
+  const client = createFakeChatCompletionsClient((args) => {
+    capture.args = args;
+    return Promise.resolve(stream);
+  });
+
+  return collectAgentEvents(
+    streamOAICompatAgentTurn(
+      client as unknown as Parameters<typeof streamOAICompatAgentTurn>[0],
+      baseTurnRequest(overrides)
+    )
+  );
 }
 
 describe('openai-compatible-provider', () => {
@@ -256,71 +289,138 @@ describe('openai-compatible resolveClientConfig (via secretService)', () => {
 
 describe('openai-compatible generateAgentTurnStream turn_completed contract', () => {
   it('emits turn_completed with mode=stateless-loop', async () => {
-    const { streamOAICompatAgentTurn } = await import(
-      '../../../../src/services/providers/openai-compatible/chat-completions-stream'
-    );
-    const fakeClient = makeFakeClient([
-      { choices: [{ delta: { content: 'Hi' }, finish_reason: null }] },
-      { choices: [{ delta: {}, finish_reason: 'stop' }] },
-    ]);
+    const events = await collectCompatEvents(chainChunks(textDeltaChunk('Hi'), stopChunk()), {
+      userId: 'test-user-no-connectors',
+      modelName: 'test-model',
+    });
 
-    const events: Array<{ type: string; providerState?: string }> = [];
-
-    for await (const event of streamOAICompatAgentTurn(
-      fakeClient as Parameters<typeof streamOAICompatAgentTurn>[0],
-      {
-        userId: 'test-user-no-connectors',
-        modelName: 'test-model',
-        systemPrompt: undefined,
-        history: [],
-        prompt: 'Hello',
-        toolDefinitions: [],
-        providerState: null,
-        signal: new AbortController().signal,
-        generationConfig: { thinkingEnabled: false, reasoningEffort: 'medium' },
-      }
-    )) {
-      events.push(event);
-    }
-
-    expectTurnCompletedEnvelope(events as unknown as AgentEvent[], {
+    expectTurnCompletedEnvelope(events, {
       provider: 'openai-compatible',
       mode: 'stateless-loop',
     });
   });
 });
 
-describe('openai-compatible chat-completions-stream token accounting', () => {
-  it('sets stream_options.include_usage on chat.completions.create', async () => {
-    const { streamOAICompatAgentTurn } = await import(
-      '../../../../src/services/providers/openai-compatible/chat-completions-stream'
-    );
-    const capture: CaptureCall = {};
-    const fakeClient = makeFakeClient(
-      [
-        { choices: [{ delta: { content: 'Hi' }, finish_reason: null }] },
-        { choices: [{ delta: {}, finish_reason: 'stop' }] },
-      ],
-      capture
+describe('openai-compatible chat-completions-stream events', () => {
+  it('yields reasoning_delta and assistant_text_delta', async () => {
+    const events = await collectCompatEvents(
+      chainChunks(
+        (function* () {
+          yield {
+            choices: [
+              { delta: { reasoning: 'Think first', content: 'Final answer' }, finish_reason: null },
+            ],
+          };
+        })(),
+        stopChunk()
+      )
     );
 
-    const events = [];
-    for await (const event of streamOAICompatAgentTurn(
-      fakeClient as Parameters<typeof streamOAICompatAgentTurn>[0],
-      {
-        userId: 'u',
-        modelName: 'gpt-4o',
-        systemPrompt: undefined,
-        history: [],
-        prompt: 'Hello',
-        toolDefinitions: [],
-        providerState: null,
-        signal: new AbortController().signal,
-        generationConfig: { thinkingEnabled: false, reasoningEffort: 'medium' },
-      }
-    )) {
-      events.push(event);
-    }
+    expect(events).toContainEqual({ type: 'reasoning_delta', text: 'Think first' });
+    expect(events).toContainEqual({ type: 'assistant_text_delta', text: 'Final answer' });
+  });
+
+  it('yields tool call started, arguments delta, and completed events', async () => {
+    const events = await collectCompatEvents(
+      chainChunks(
+        toolCallStartChunk(0, 'call_1', 'search'),
+        toolCallArgumentsDeltaChunk(0, '{"query":"cats"}'),
+        stopChunk()
+      )
+    );
+
+    expect(events).toContainEqual({ type: 'tool_call_started', callId: 'call_1', name: 'search' });
+    expect(events).toContainEqual({
+      type: 'tool_call_arguments_delta',
+      callId: 'call_1',
+      delta: '{"query":"cats"}',
+    });
+    expect(events).toContainEqual({
+      type: 'tool_call_completed',
+      callId: 'call_1',
+      name: 'search',
+      arguments: '{"query":"cats"}',
+    });
+  });
+
+  it('preserves reasoning_content in loop state when tool calls are present', async () => {
+    const events = await collectCompatEvents(
+      chainChunks(
+        (function* () {
+          yield {
+            choices: [
+              {
+                delta: {
+                  reasoning_content: 'Thinking about tools',
+                  tool_calls: [{ index: 0, id: 'call_1', function: { name: 'search' } }],
+                },
+                finish_reason: null,
+              },
+            ],
+          };
+        })(),
+        toolCallArgumentsDeltaChunk(0, '{"q":"test"}'),
+        stopChunk()
+      )
+    );
+
+    const completed = events.find((event) => event.type === 'turn_completed');
+    expect(completed).toBeDefined();
+    if (completed?.type !== 'turn_completed') return;
+    if (!completed.providerState) throw new Error('expected providerState');
+
+    const assistantMsg = findAssistantMsg(parseProviderState(completed.providerState));
+    expect(assistantMsg?.reasoning_content).toBe('Thinking about tools');
+    expect(assistantMsg?.tool_calls).toHaveLength(1);
+  });
+
+  it('omits reasoning_content from final assistant message when no tool calls are present', async () => {
+    const events = await collectCompatEvents(
+      chainChunks(
+        (function* () {
+          yield {
+            choices: [
+              {
+                delta: { reasoning_content: 'Private reasoning', content: 'Answer here' },
+                finish_reason: null,
+              },
+            ],
+          };
+        })(),
+        stopChunk()
+      )
+    );
+
+    const completed = events.find((event) => event.type === 'turn_completed');
+    expect(completed).toBeDefined();
+    if (completed?.type !== 'turn_completed') return;
+    if (!completed.providerState) throw new Error('expected providerState');
+
+    const assistantMsg = findAssistantMsg(parseProviderState(completed.providerState));
+    expect(assistantMsg?.reasoning_content).toBeUndefined();
+  });
+
+  it('stops on abort without emitting turn_completed', async () => {
+    const controller = new AbortController();
+    const events = await collectCompatEvents(
+      (async function* () {
+        await Promise.resolve();
+        yield { choices: [{ delta: { content: 'First' }, finish_reason: null }] };
+        controller.abort();
+        yield { choices: [{ delta: { content: 'Second' }, finish_reason: 'stop' }] };
+      })(),
+      { signal: controller.signal }
+    );
+
+    expect(events.filter((event) => event.type === 'assistant_text_delta')).toHaveLength(1);
+    expect(events.some((event) => event.type === 'turn_completed')).toBe(false);
+  });
+});
+
+describe('openai-compatible chat-completions-stream token accounting', () => {
+  it('sets stream_options.include_usage on chat.completions.create', async () => {
+    const capture: CaptureCall = {};
+    await collectCompatEvents(chainChunks(textDeltaChunk('Hi'), stopChunk()), {}, capture);
 
     expect(capture.args).toBeDefined();
     expect(capture.args?.stream).toBe(true);
@@ -328,38 +428,14 @@ describe('openai-compatible chat-completions-stream token accounting', () => {
   });
 
   it('populates context.providerReportedInputTokens in the envelope when usage is reported', async () => {
-    const { streamOAICompatAgentTurn } = await import(
-      '../../../../src/services/providers/openai-compatible/chat-completions-stream'
-    );
     const capture: CaptureCall = {};
-    const fakeClient = makeFakeClient(
-      [
-        { choices: [{ delta: { content: 'Hi' }, finish_reason: null }] },
-        { choices: [{ delta: {}, finish_reason: 'stop' }] },
-        { choices: [], usage: { prompt_tokens: 1234, completion_tokens: 5 } },
-      ],
+    const events = await collectCompatEvents(
+      chainChunks(textDeltaChunk('Hi'), stopChunk(), usageChunk(1234, 5)),
+      {},
       capture
     );
 
-    const events: Array<{ type: string; providerState?: string }> = [];
-    for await (const event of streamOAICompatAgentTurn(
-      fakeClient as Parameters<typeof streamOAICompatAgentTurn>[0],
-      {
-        userId: 'u',
-        modelName: 'gpt-4o',
-        systemPrompt: undefined,
-        history: [],
-        prompt: 'Hello',
-        toolDefinitions: [],
-        providerState: null,
-        signal: new AbortController().signal,
-        generationConfig: { thinkingEnabled: false, reasoningEffort: 'medium' },
-      }
-    )) {
-      events.push(event);
-    }
-
-    const envelope = expectTurnCompletedEnvelope(events as unknown as AgentEvent[], {
+    const envelope = expectTurnCompletedEnvelope(events, {
       provider: 'openai-compatible',
       mode: 'stateless-loop',
       providerReportedInputTokens: 1234,
@@ -368,37 +444,14 @@ describe('openai-compatible chat-completions-stream token accounting', () => {
   });
 
   it('omits context when usage is not reported by the endpoint', async () => {
-    const { streamOAICompatAgentTurn } = await import(
-      '../../../../src/services/providers/openai-compatible/chat-completions-stream'
-    );
     const capture: CaptureCall = {};
-    const fakeClient = makeFakeClient(
-      [
-        { choices: [{ delta: { content: 'Hi' }, finish_reason: null }] },
-        { choices: [{ delta: {}, finish_reason: 'stop' }] },
-      ],
+    const events = await collectCompatEvents(
+      chainChunks(textDeltaChunk('Hi'), stopChunk()),
+      {},
       capture
     );
 
-    const events: Array<{ type: string; providerState?: string }> = [];
-    for await (const event of streamOAICompatAgentTurn(
-      fakeClient as Parameters<typeof streamOAICompatAgentTurn>[0],
-      {
-        userId: 'u',
-        modelName: 'gpt-4o',
-        systemPrompt: undefined,
-        history: [],
-        prompt: 'Hello',
-        toolDefinitions: [],
-        providerState: null,
-        signal: new AbortController().signal,
-        generationConfig: { thinkingEnabled: false, reasoningEffort: 'medium' },
-      }
-    )) {
-      events.push(event);
-    }
-
-    const envelope = expectTurnCompletedEnvelope(events as unknown as AgentEvent[], {
+    const envelope = expectTurnCompletedEnvelope(events, {
       provider: 'openai-compatible',
       mode: 'stateless-loop',
     });
