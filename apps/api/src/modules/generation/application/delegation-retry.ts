@@ -334,6 +334,12 @@ function withDelegationTimeout<T>(
   timeoutMs: number,
   signal?: AbortSignal
 ): Promise<T> {
+  // Check abort before arming the timer: returning early after the setTimeout
+  // is scheduled leaks the timer and leaves timeoutPromise to reject unhandled
+  // once it fires.
+  if (signal?.aborted) {
+    return Promise.reject(new SubagentDelegationError('Subagent aborted.', 'ABORTED'));
+  }
   const effective = Math.max(1_000, Math.round(timeoutMs));
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
   const timeoutPromise = new Promise<never>((_, reject) => {
@@ -343,9 +349,6 @@ function withDelegationTimeout<T>(
       effective
     );
   });
-  if (signal?.aborted) {
-    return Promise.reject(new SubagentDelegationError('Subagent aborted.', 'ABORTED'));
-  }
   return Promise.race([promise, timeoutPromise]).finally(() => {
     if (timeoutId) clearTimeout(timeoutId);
   });
