@@ -1,54 +1,22 @@
-import type {
-  ContinuationReasonCode,
-  GeneratedImagePart,
-  MessagePart,
-  ProviderType,
-  ReasoningEffort,
-} from '@mangostudio/shared';
-import type { AgentExecutionMode, AgentId, AgentProfile } from '@mangostudio/shared/agents';
+import type { ContinuationReasonCode, MessagePart, ProviderType } from '@mangostudio/shared';
 import { MAX_TOOL_ITERATIONS_DEFAULT } from '@mangostudio/shared/app-settings';
-import type { ContextSettings } from '@mangostudio/shared/chat';
-import type { ToolIntent } from '@mangostudio/shared/generation';
-import type { PromptSettings } from '@mangostudio/shared/prompt-rules';
 import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';
 import { createDiagnosticLogger } from '../../../lib/logger';
-import { safeJsonParse } from '../../../lib/safe-parse';
-import {
-  buildPersistedContextSnapshot,
-  type ContextSeverity,
-  type ContinuationDisplayMode,
-  computeContextSnapshot,
-} from '../../../services/providers/core/context-policy';
 import {
   type AgentTurnExecutionState,
-  type ContinuationEnvelope,
   computeSystemPromptHash,
   computeToolsetHash,
 } from '../../../services/providers/core/continuation-envelope';
 import {
-  logContextInfo,
   logDegrade,
-  logPersistenceError,
   logStateCleared,
-  logStateUpdate,
   logValidContinuation,
 } from '../../../services/providers/core/continuation-logger';
-import {
-  decideContinuation,
-  decideTurnPersistence,
-  getContinuationStrategy,
-} from '../../../services/providers/core/continuation-runtime';
+import { decideContinuation } from '../../../services/providers/core/continuation-runtime';
 import { warmProviderForRequest } from '../../../services/providers/core/provider-readiness';
 import type { AgentTurnRequest } from '../../../services/providers/types';
-import { getSafeEffectiveToolSettings, getTool } from '../../../services/tools';
-import {
-  createGenerateImageToolPlan,
-  GENERATE_IMAGE_TOOL_NAME,
-  type GenerateImageToolOutcome,
-  generateImagesForToolPlan,
-  summarizeGenerateImageToolResult,
-} from '../../../services/tools/builtin/generate-image';
+import { GENERATE_IMAGE_TOOL_NAME } from '../../../services/tools/builtin/generate-image';
 import { generateId } from '../../../utils/id';
 import { resolveProviderRuntimeAttachments } from '../../attachments/application/runtime-attachment-resolver';
 import { loadHistory, loadRichHistory } from '../../messages/infrastructure/message-repository';
@@ -59,88 +27,24 @@ import {
   persistUserMessage,
   updateChatAfterTurn,
 } from '../infrastructure/conversation-persistence';
-import type { ResolvedModel } from './resolve-model';
 import { resolveTurnContext } from './resolve-turn-context';
 import {
   createDelegationRuntime,
   executeStandardToolCallsWithProgress,
   type ToolExecutionProgressItem,
-  type ToolStreamEvent,
 } from './standard-tool-execution';
-import { errorToToolMessage, parseToolArgs, stringifyToolResult } from './tool-result-utils';
+import {
+  collectToolExecutionResult,
+  executeImageGenerationCall,
+  handleTurnCompleted,
+  mergeMessageParts,
+} from './stream-text-turn-helpers';
+import type { StreamEvent, StreamTextTurnInput } from './stream-text-turn-types';
+
+export type { StreamEvent, StreamTextTurnInput };
 
 const TOOL_LOOP_EXHAUSTED_MESSAGE = 'The model exceeded the maximum number of tool interactions.';
 const streamTextTurnLogger = createDiagnosticLogger('stream-text-turn');
-
-export interface StreamTextTurnInput {
-  chatId: string;
-  userId: string;
-  prompt: string;
-  attachmentIds?: string[];
-  model?: string;
-  systemPrompt?: string;
-  promptSettings?: PromptSettings;
-  thinkingEnabled?: boolean;
-  reasoningEffort?: ReasoningEffort;
-  maxToolIterations?: number;
-  contextSettings?: ContextSettings;
-  toolIntent?: ToolIntent;
-  agentMode?: AgentExecutionMode;
-  agentId?: AgentId;
-  resolvedAgentProfile?: AgentProfile;
-  signal?: AbortSignal;
-  resolvedModel?: ResolvedModel;
-}
-
-export type StreamEvent =
-  | { type: 'user_message_id'; messageId: string }
-  | { type: 'thinking_start' }
-  | { type: 'thinking'; text: string }
-  | { type: 'text'; text: string }
-  | { type: 'tool_call_started'; callId: string; name: string }
-  | { type: 'tool_call_completed'; callId: string; name: string; arguments: string }
-  | { type: 'tool_result'; callId: string; name: string; result: unknown; isError: boolean }
-  | ToolStreamEvent
-  | { type: 'image_generation_started'; imageId: string; toolCallId: string; prompt: string }
-  | {
-      type: 'image_generation_completed';
-      imageId: string;
-      toolCallId: string;
-      prompt: string;
-      imageUrl: string;
-      modelName?: string;
-      generationTime?: string;
-    }
-  | {
-      type: 'image_generation_failed';
-      imageId: string;
-      toolCallId: string;
-      prompt: string;
-      error: string;
-      modelName?: string;
-      generationTime?: string;
-    }
-  | { type: 'fallback_notice'; from: string; to: string; reason: string }
-  | {
-      type: 'continuation_transition';
-      provider: ProviderType;
-      modelName: string;
-      fromProvider?: ProviderType;
-      fromMode: string;
-      toMode: string;
-      reasonCode: ContinuationReasonCode;
-      detail?: string;
-    }
-  | {
-      type: 'context_info';
-      estimatedInputTokens: number;
-      contextLimit: number;
-      estimatedUsageRatio: number;
-      mode: ContinuationDisplayMode;
-      severity: ContextSeverity;
-    }
-  | { type: 'done'; messageId: string; generationTime: string }
-  | { type: 'error'; error: string };
 
 export async function* streamTextTurn(
   input: StreamTextTurnInput,
@@ -405,80 +309,19 @@ export async function* streamTextTurn(
               inThinkingSegment = false;
               rawProviderState = event.providerState ?? null;
               turnCompleted = true;
-
-              const persistence = decideTurnPersistence(rawProviderState, provider.providerType);
-              const resultEnvelope = persistence.envelope;
-              executionState.durableProviderState = persistence.durableProviderState;
-              executionState.turnLocalState = persistence.durableProviderState
-                ? null
-                : rawProviderState;
-
-              if (resultEnvelope) {
-                logStateUpdate({
-                  chatId,
-                  provider: resultEnvelope.provider,
-                  mode: resultEnvelope.mode,
-                  hasCursor: !!resultEnvelope.cursor,
-                });
-              }
-
-              const displayMode = resolveDisplayMode(
-                resultEnvelope,
-                degradedThisTurn,
-                provider.providerType
-              );
-              const providerReportedInputTokens =
-                resultEnvelope?.context?.providerReportedInputTokens;
-              const turnLocalCharCount =
-                providerReportedInputTokens === undefined && displayMode !== 'stateful'
-                  ? computeTurnLocalCharCount(input.prompt, rawProviderState)
-                  : undefined;
-              const snapshot = computeContextSnapshot({
-                modelName: modelId,
-                history: richHistory,
-                systemPrompt: effectiveSystemPrompt,
-                toolDefinitions: toolDefs,
-                providerReportedTokens: providerReportedInputTokens,
-                mode: displayMode,
-                contextLimitOverride: resultEnvelope?.context?.contextLimit,
-                turnLocalCharCount,
-              });
-
-              logContextInfo({
+              yield* handleTurnCompleted({
+                db,
+                providerType: provider.providerType,
+                modelId,
                 chatId,
-                provider: provider.providerType,
-                model: modelId,
-                inputTokens: snapshot.estimatedInputTokens,
-                limit: snapshot.contextLimit,
-                ratio: snapshot.estimatedUsageRatio,
-                mode: displayMode,
+                prompt: input.prompt,
+                richHistory,
+                effectiveSystemPrompt,
+                toolDefs,
+                rawProviderState,
+                degradedThisTurn,
+                executionState,
               });
-
-              const contextState = buildPersistedContextSnapshot(snapshot);
-              await db
-                .updateTable('chats')
-                .set({
-                  lastProviderState: executionState.durableProviderState,
-                  lastContextState: JSON.stringify(contextState),
-                })
-                .where('id', '=', chatId)
-                .execute()
-                .catch((err) => {
-                  logPersistenceError({
-                    chatId,
-                    error: String(err),
-                    phase: 'turn_state',
-                  });
-                });
-
-              yield {
-                type: 'context_info',
-                estimatedInputTokens: snapshot.estimatedInputTokens,
-                contextLimit: snapshot.contextLimit,
-                estimatedUsageRatio: snapshot.estimatedUsageRatio,
-                mode: displayMode,
-                severity: contextState.severity,
-              };
               break;
             }
 
@@ -524,39 +367,11 @@ export async function* streamTextTurn(
               state: delegationState,
             }),
           })) {
-            if (item.kind === 'event') {
-              yield item.event;
-            } else {
-              const execution = item.execution;
-              allParts.push({
-                type: 'tool_call',
-                toolCallId: execution.callId,
-                name: execution.name,
-                args: execution.args,
-              });
-              allParts.push({
-                type: 'tool_result',
-                toolCallId: execution.callId,
-                content: execution.resultStr,
-                isError: execution.isError,
-              });
-              if (execution.subagentTrace && multiAgentSettings.traceVisibility !== 'off') {
-                allParts.push(execution.subagentTrace);
-              }
-              yield {
-                type: 'tool_result',
-                callId: execution.callId,
-                name: execution.name,
-                result: execution.result,
-                isError: execution.isError,
-              };
-              nextToolResults.push({
-                callId: execution.callId,
-                name: execution.name,
-                result: execution.resultStr,
-                isError: execution.isError,
-              });
-            }
+            yield* collectToolExecutionResult(item, {
+              allParts,
+              nextToolResults,
+              includeSubagentTrace: multiAgentSettings.traceVisibility !== 'off',
+            });
           }
         } else {
           const nonImageEntries = pendingCallEntries.filter(
@@ -595,147 +410,24 @@ export async function* streamTextTurn(
               : null;
 
           for (const [callId, { name, argsStr }] of imageEntries) {
-            const args = parseToolArgs(argsStr);
-            let result: unknown;
-            let isError = false;
-
-            allParts.push({ type: 'tool_call', toolCallId: callId, name, args });
-
-            try {
-              const imageTool = getTool(name);
-              if (!allowedToolNames.has(name)) {
-                throw new Error(`Tool "${name}" is not allowed for this agent.`);
-              }
-              if (!imageTool) throw new Error(`Unknown tool: "${name}"`);
-              const effectiveSettings = getSafeEffectiveToolSettings(
-                imageTool,
-                toolSettings.get(name)
-              );
-              if (!effectiveSettings.enabled) {
-                throw new Error(`Tool "${name}" is disabled for this user.`);
-              }
-
-              const plan = createGenerateImageToolPlan(args, {
-                toolCallId: callId,
-                parameters: effectiveSettings.parameters,
-              });
-              const imagePartsById = new Map<string, GeneratedImagePart>();
-              for (const imageId of plan.imageIds) {
-                const part: GeneratedImagePart = {
-                  type: 'generated_image',
-                  imageId,
-                  toolCallId: callId,
-                  status: 'generating',
-                  prompt: plan.prompt,
-                };
-                imagePartsById.set(imageId, part);
-                allParts.push(part);
-                yield {
-                  type: 'image_generation_started',
-                  imageId,
-                  toolCallId: callId,
-                  prompt: plan.prompt,
-                };
-              }
-
-              const outcomes: GenerateImageToolOutcome[] = [];
-              for await (const outcome of generateImagesForToolPlan(plan, { userId, signal })) {
-                outcomes.push(outcome);
-                const part = imagePartsById.get(outcome.imageId);
-                if (outcome.type === 'completed') {
-                  if (part) {
-                    part.status = 'completed';
-                    part.imageUrl = outcome.imageUrl;
-                    part.modelName = outcome.modelName;
-                    part.generationTime = outcome.generationTime;
-                  }
-                  generatedImageArtifacts.push({
-                    id: outcome.imageId,
-                    prompt: outcome.prompt,
-                    imageUrl: outcome.imageUrl,
-                    createdAt: outcome.createdAt,
-                    toolCallId: callId,
-                    modelName: outcome.modelName,
-                    generationTime: outcome.generationTime,
-                    metadata: { quality: plan.quality },
-                  });
-                  yield {
-                    type: 'image_generation_completed',
-                    imageId: outcome.imageId,
-                    toolCallId: callId,
-                    prompt: outcome.prompt,
-                    imageUrl: outcome.imageUrl,
-                    modelName: outcome.modelName,
-                    generationTime: outcome.generationTime,
-                  };
-                } else {
-                  if (part) {
-                    part.status = 'error';
-                    part.error = outcome.error;
-                    part.modelName = outcome.modelName;
-                    part.generationTime = outcome.generationTime;
-                  }
-                  yield {
-                    type: 'image_generation_failed',
-                    imageId: outcome.imageId,
-                    toolCallId: callId,
-                    prompt: outcome.prompt,
-                    error: outcome.error,
-                    modelName: outcome.modelName,
-                    generationTime: outcome.generationTime,
-                  };
-                }
-              }
-
-              const imageResult = summarizeGenerateImageToolResult(outcomes);
-              result = imageResult;
-              isError = imageResult.images.length === 0 && (imageResult.errors?.length ?? 0) > 0;
-            } catch (error) {
-              result = { error: errorToToolMessage(error) };
-              isError = true;
-            }
-
-            const resultStr = stringifyToolResult(result);
-            allParts.push({ type: 'tool_result', toolCallId: callId, content: resultStr, isError });
-            yield { type: 'tool_result', callId, name, result, isError };
-            nextToolResults.push({ callId, name, result: resultStr, isError });
+            yield* executeImageGenerationCall(callId, name, argsStr, {
+              userId,
+              signal,
+              allowedToolNames,
+              toolSettings,
+              allParts,
+              generatedImageArtifacts,
+              nextToolResults,
+            });
           }
 
           if (nonImageRunner) await nonImageRunner;
           for (const item of nonImageResultEntries) {
-            if (item.kind === 'event') {
-              yield item.event;
-            } else {
-              const execution = item.execution;
-              allParts.push({
-                type: 'tool_call',
-                toolCallId: execution.callId,
-                name: execution.name,
-                args: execution.args,
-              });
-              allParts.push({
-                type: 'tool_result',
-                toolCallId: execution.callId,
-                content: execution.resultStr,
-                isError: execution.isError,
-              });
-              if (execution.subagentTrace && multiAgentSettings.traceVisibility !== 'off') {
-                allParts.push(execution.subagentTrace);
-              }
-              yield {
-                type: 'tool_result',
-                callId: execution.callId,
-                name: execution.name,
-                result: execution.result,
-                isError: execution.isError,
-              };
-              nextToolResults.push({
-                callId: execution.callId,
-                name: execution.name,
-                result: execution.resultStr,
-                isError: execution.isError,
-              });
-            }
+            yield* collectToolExecutionResult(item, {
+              allParts,
+              nextToolResults,
+              includeSubagentTrace: multiAgentSettings.traceVisibility !== 'off',
+            });
           }
         }
 
@@ -965,74 +657,4 @@ export async function* streamTextTurn(
 
     yield { type: 'error', error: message };
   }
-}
-
-/**
- * Resolves the user-facing display mode from the parsed envelope and the
- * degradation flag observed during the iteration. A cursor present means
- * server-side continuation; a stateless-loop envelope without a degradation
- * means the provider accumulated turn-local state; everything else is replay.
- */
-function resolveDisplayMode(
-  envelope: ContinuationEnvelope | null,
-  degraded: boolean,
-  providerType: ProviderType
-): ContinuationDisplayMode {
-  if (getContinuationStrategy(providerType).strategy === 'replay') return 'replay';
-  if (envelope?.cursor) return 'stateful';
-  if (envelope?.mode === 'stateless-loop' && !degraded) return 'stateless-loop';
-  return 'replay';
-}
-
-/**
- * Approximate the character count of live request payload that is not yet in
- * persisted history, for use when the provider did not report token usage.
- */
-function computeTurnLocalCharCount(
-  prompt: string,
-  providerState: string | null
-): number | undefined {
-  let total = prompt.length;
-  const parsed = safeJsonParse(providerState);
-  if (parsed && Array.isArray(parsed.loopMessages)) {
-    for (const msg of parsed.loopMessages) {
-      total += JSON.stringify(msg).length;
-    }
-  }
-  return total > 0 ? total : undefined;
-}
-
-function mergeMessageParts(allParts: MessagePart[]): MessagePart[] {
-  const finalParts: MessagePart[] = [];
-  let thinkingRun = '';
-  let textRun = '';
-
-  const flushThinking = () => {
-    if (thinkingRun) {
-      finalParts.push({ type: 'thinking', text: thinkingRun });
-      thinkingRun = '';
-    }
-  };
-  const flushText = () => {
-    if (textRun) {
-      finalParts.push({ type: 'text', text: textRun });
-      textRun = '';
-    }
-  };
-
-  for (const part of allParts) {
-    if (part.type === 'thinking') {
-      thinkingRun += part.text;
-    } else if (part.type === 'text') {
-      textRun += part.text;
-    } else {
-      flushThinking();
-      flushText();
-      finalParts.push(part);
-    }
-  }
-  flushThinking();
-  flushText();
-
-  return finalParts;
 }

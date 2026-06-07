@@ -1,0 +1,81 @@
+import type { ContinuationReasonCode, ProviderType, ReasoningEffort } from '@mangostudio/shared';
+import type { AgentExecutionMode, AgentId, AgentProfile } from '@mangostudio/shared/agents';
+import type { ContextSettings } from '@mangostudio/shared/chat';
+import type { ToolIntent } from '@mangostudio/shared/generation';
+import type { PromptSettings } from '@mangostudio/shared/prompt-rules';
+import type {
+  ContextSeverity,
+  ContinuationDisplayMode,
+} from '../../../services/providers/core/context-policy';
+import type { ResolvedModel } from './resolve-model';
+import type { ToolStreamEvent } from './standard-tool-execution';
+
+export interface StreamTextTurnInput {
+  chatId: string;
+  userId: string;
+  prompt: string;
+  attachmentIds?: string[];
+  model?: string;
+  systemPrompt?: string;
+  promptSettings?: PromptSettings;
+  thinkingEnabled?: boolean;
+  reasoningEffort?: ReasoningEffort;
+  maxToolIterations?: number;
+  contextSettings?: ContextSettings;
+  toolIntent?: ToolIntent;
+  agentMode?: AgentExecutionMode;
+  agentId?: AgentId;
+  resolvedAgentProfile?: AgentProfile;
+  signal?: AbortSignal;
+  resolvedModel?: ResolvedModel;
+}
+
+export type StreamEvent =
+  | { type: 'user_message_id'; messageId: string }
+  | { type: 'thinking_start' }
+  | { type: 'thinking'; text: string }
+  | { type: 'text'; text: string }
+  | { type: 'tool_call_started'; callId: string; name: string }
+  | { type: 'tool_call_completed'; callId: string; name: string; arguments: string }
+  | { type: 'tool_result'; callId: string; name: string; result: unknown; isError: boolean }
+  | ToolStreamEvent
+  | { type: 'image_generation_started'; imageId: string; toolCallId: string; prompt: string }
+  | {
+      type: 'image_generation_completed';
+      imageId: string;
+      toolCallId: string;
+      prompt: string;
+      imageUrl: string;
+      modelName?: string;
+      generationTime?: string;
+    }
+  | {
+      type: 'image_generation_failed';
+      imageId: string;
+      toolCallId: string;
+      prompt: string;
+      error: string;
+      modelName?: string;
+      generationTime?: string;
+    }
+  | { type: 'fallback_notice'; from: string; to: string; reason: string }
+  | {
+      type: 'continuation_transition';
+      provider: ProviderType;
+      modelName: string;
+      fromProvider?: ProviderType;
+      fromMode: string;
+      toMode: string;
+      reasonCode: ContinuationReasonCode;
+      detail?: string;
+    }
+  | {
+      type: 'context_info';
+      estimatedInputTokens: number;
+      contextLimit: number;
+      estimatedUsageRatio: number;
+      mode: ContinuationDisplayMode;
+      severity: ContextSeverity;
+    }
+  | { type: 'done'; messageId: string; generationTime: string }
+  | { type: 'error'; error: string };
