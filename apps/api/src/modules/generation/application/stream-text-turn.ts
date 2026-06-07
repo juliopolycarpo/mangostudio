@@ -65,6 +65,7 @@ import {
   createDelegationRuntime,
   executeStandardToolCallsWithProgress,
   type ToolExecutionProgressItem,
+  type ToolStreamEvent,
 } from './standard-tool-execution';
 import { errorToToolMessage, parseToolArgs, stringifyToolResult } from './tool-result-utils';
 
@@ -99,24 +100,7 @@ export type StreamEvent =
   | { type: 'tool_call_started'; callId: string; name: string }
   | { type: 'tool_call_completed'; callId: string; name: string; arguments: string }
   | { type: 'tool_result'; callId: string; name: string; result: unknown; isError: boolean }
-  | { type: 'subagent_started'; callId: string; agentId: string; agentName: string; task: string }
-  | { type: 'subagent_text'; callId: string; agentId: string; text: string }
-  | {
-      type: 'subagent_tool_call_started';
-      callId: string;
-      agentId: string;
-      toolCallId: string;
-      name: string;
-    }
-  | {
-      type: 'subagent_completed';
-      callId: string;
-      agentId: string;
-      agentName: string;
-      summary: string;
-      toolCallCount: number;
-    }
-  | { type: 'subagent_failed'; callId: string; agentId: string; agentName?: string; error: string }
+  | ToolStreamEvent
   | { type: 'image_generation_started'; imageId: string; toolCallId: string; prompt: string }
   | {
       type: 'image_generation_completed';
@@ -137,7 +121,6 @@ export type StreamEvent =
       generationTime?: string;
     }
   | { type: 'fallback_notice'; from: string; to: string; reason: string }
-  | { type: 'system_event'; event: string; detail: string }
   | {
       type: 'continuation_transition';
       provider: ProviderType;

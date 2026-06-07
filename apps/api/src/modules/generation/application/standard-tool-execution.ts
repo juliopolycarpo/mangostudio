@@ -51,10 +51,15 @@ export interface DelegationRuntime {
   settings: MultiAgentSettings;
   signal?: AbortSignal;
   state: { subagentCallCount: number };
-  onEvent?: (event: StreamEvent) => void;
+  onEvent?: (event: ToolStreamEvent) => void;
 }
 
-export type StreamEvent =
+/**
+ * The subset of stream events emitted by the tool-execution layer: generic
+ * system notices plus subagent delegation progress. The full streamTextTurn
+ * union is a superset, so these flow through unchanged.
+ */
+export type ToolStreamEvent =
   | { type: 'system_event'; event: string; detail: string }
   | { type: 'subagent_started'; callId: string; agentId: string; agentName: string; task: string }
   | { type: 'subagent_text'; callId: string; agentId: string; text: string }
@@ -76,7 +81,7 @@ export type StreamEvent =
   | { type: 'subagent_failed'; callId: string; agentId: string; agentName?: string; error: string };
 
 export type ToolExecutionProgressItem =
-  | { kind: 'event'; event: StreamEvent }
+  | { kind: 'event'; event: ToolStreamEvent }
   | { kind: 'execution'; execution: StandardToolExecution };
 
 export async function* executeStandardToolCallsWithProgress(
@@ -100,7 +105,7 @@ export async function* executeStandardToolCallsWithProgress(
     const runtime = context.delegationRuntime
       ? {
           ...context.delegationRuntime,
-          onEvent: (event: StreamEvent) => queue.push({ kind: 'event', event }),
+          onEvent: (event: ToolStreamEvent) => queue.push({ kind: 'event', event }),
         }
       : undefined;
     void executeStandardToolCall(callId, call.name, call.argsStr, {
@@ -301,7 +306,10 @@ export async function executeDelegationToolCall(
   return result;
 }
 
-export function toSubagentStreamEvent(callId: string, event: SubagentProgressEvent): StreamEvent {
+export function toSubagentStreamEvent(
+  callId: string,
+  event: SubagentProgressEvent
+): ToolStreamEvent {
   switch (event.type) {
     case 'started':
       return {
