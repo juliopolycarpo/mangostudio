@@ -94,6 +94,10 @@ export async function* executeStandardToolCallsWithProgress(
     delegationRuntime?: DelegationRuntime;
   }
 ): AsyncGenerator<ToolExecutionProgressItem> {
+  // No calls means no completion callbacks ever fire, so the queue would never
+  // close and `yield* queue` would hang. Exit before arming the queue.
+  if (calls.length === 0) return;
+
   const queue = createAsyncQueue<ToolExecutionProgressItem>();
   let remaining = calls.length;
 
