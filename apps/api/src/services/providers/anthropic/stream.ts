@@ -18,8 +18,6 @@ import { extractCacheUsage, toMessageCreateParams } from './normalizers';
 import { createAnthropicStreamAccumulator } from './stream-accumulator';
 import { buildAnthropicThinkingConfig } from './thinking-config';
 
-export { parseAnthropicLoopState } from './loop-state';
-
 const anthropicStreamLogger = createDiagnosticLogger('anthropic-stream');
 
 /**
