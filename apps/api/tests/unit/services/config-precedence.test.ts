@@ -135,6 +135,15 @@ describe('config precedence', () => {
     expect(cfg.auth.secret).toBe('env-secret-at-least-32-characters');
   });
 
+  test('ignores comments and malformed .env lines while applying valid overrides', () => {
+    writeFileSync(TMP_TOML, '[server]\nport = 4242\n');
+    writeFileSync(join(TMP_DIR, '.env'), '# comment\nMALFORMED\n=value\nAPI_PORT=5555\n');
+
+    const cfg = loadConfig(TMP_TOML);
+
+    expect(cfg.server.port).toBe(5555);
+  });
+
   test('process.env BETTER_AUTH_SECRET overrides .env', () => {
     writeFileSync(
       join(TMP_DIR, '.env'),

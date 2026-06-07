@@ -11,6 +11,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, isAbsolute, join } from 'node:path';
+import { parseRuntimeEnvFile } from '@mangostudio/shared/runtime-env';
 import { parse as parseToml } from 'smol-toml';
 
 /**
@@ -196,39 +197,6 @@ export function getConfigEnvFilePath(configFilePath = resolveConfigTomlPath()): 
   return join(dirname(configFilePath), '.env');
 }
 
-/** Parses a .env file into a key-value map (simple KEY=VALUE lines). */
-function parseEnvFile(filePath: string): Record<string, string> {
-  const result: Record<string, string> = {};
-  if (!existsSync(filePath)) return result;
-
-  try {
-    const content = readFileSync(filePath, 'utf8');
-    for (const line of content.split('\n')) {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith('#')) continue;
-
-      const eqIndex = trimmed.indexOf('=');
-      if (eqIndex === -1) continue;
-
-      const key = trimmed.slice(0, eqIndex).trim();
-      let value = trimmed.slice(eqIndex + 1).trim();
-
-      // Strip surrounding quotes
-      if (
-        (value.startsWith('"') && value.endsWith('"')) ||
-        (value.startsWith("'") && value.endsWith("'"))
-      ) {
-        value = value.slice(1, -1);
-      }
-
-      result[key] = value;
-    }
-  } catch {
-    // Ignore read errors — config.toml or defaults will be used
-  }
-  return result;
-}
-
 // -- Connector secret env reload --
 
 /**
@@ -253,7 +221,7 @@ let loadedSecretEnvKeys = new Set<string>();
  * // Usage: reloadSecretEnv()
  */
 export function reloadSecretEnv(): void {
-  const parsed = parseEnvFile(getConfigEnvFilePath(getConfig().configFilePath));
+  const parsed = parseRuntimeEnvFile(getConfigEnvFilePath(getConfig().configFilePath));
   const next = new Set<string>();
 
   for (const [key, value] of Object.entries(parsed)) {
@@ -500,7 +468,7 @@ export function loadConfig(overridePath?: string): MangoConfig {
 
   // 2. Read .env next to config.toml (overrides config.toml)
   const envPath = getConfigEnvFilePath(tomlPath);
-  const envOverrides = parseEnvFile(envPath);
+  const envOverrides = parseRuntimeEnvFile(envPath);
   applyEnvOverrides(cfg, envOverrides);
 
   // 3. Apply process.env (highest priority — works in dev and standalone binary)

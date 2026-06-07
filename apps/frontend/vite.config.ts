@@ -1,61 +1,66 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
+import { parseRuntimeEnvFile } from '@mangostudio/shared/runtime-env';
 import tailwindcss from '@tailwindcss/vite';
 import { TanStackRouterVite } from '@tanstack/router-plugin/vite';
 import react from '@vitejs/plugin-react';
 import { parse as parseToml } from 'smol-toml';
 import { defineConfig } from 'vite';
 
+interface MangoViteConfig {
+  serverHost: string;
+  serverPort: number;
+  frontendPort: number;
+}
+
+type MangoTomlConfig = {
+  server?: { host?: string; port?: number };
+  frontend?: { port?: number };
+};
+
 /** Reads MangoStudio config from ~/.mango/config.toml with ~/.mango/.env overrides. */
-function loadMangoConfig() {
-  const defaults = { serverHost: 'localhost', serverPort: 3001, frontendPort: 5173 };
+function loadMangoConfig(): MangoViteConfig {
+  const config = createMangoConfigDefaults();
   const mangoDir = path.join(homedir(), '.mango');
 
-  // Read config.toml
-  const tomlPath = path.join(mangoDir, 'config.toml');
+  applyTomlConfig(config, path.join(mangoDir, 'config.toml'));
+  applyRuntimeEnvOverrides(config, path.join(mangoDir, '.env'));
+
+  return config;
+}
+
+function createMangoConfigDefaults(): MangoViteConfig {
+  return { serverHost: 'localhost', serverPort: 3001, frontendPort: 5173 };
+}
+
+function applyTomlConfig(config: MangoViteConfig, tomlPath: string): void {
   if (existsSync(tomlPath)) {
     try {
-      const parsed = parseToml(readFileSync(tomlPath, 'utf8')) as {
-        server?: { host?: string; port?: number };
-        frontend?: { port?: number };
-      };
-      if (parsed.server?.host) defaults.serverHost = parsed.server.host;
-      if (parsed.server?.port) defaults.serverPort = parsed.server.port;
-      if (parsed.frontend?.port) defaults.frontendPort = parsed.frontend.port;
+      applyParsedTomlConfig(config, parseToml(readFileSync(tomlPath, 'utf8')) as MangoTomlConfig);
     } catch {
       // Ignore parse errors — use defaults
     }
   }
+}
 
-  // Apply ~/.mango/.env overrides
-  const envPath = path.join(mangoDir, '.env');
-  if (existsSync(envPath)) {
-    try {
-      const content = readFileSync(envPath, 'utf8');
-      for (const line of content.split('\n')) {
-        const trimmed = line.trim();
-        if (!trimmed || trimmed.startsWith('#')) continue;
-        const eqIndex = trimmed.indexOf('=');
-        if (eqIndex === -1) continue;
-        const key = trimmed.slice(0, eqIndex).trim();
-        let value = trimmed.slice(eqIndex + 1).trim();
-        if (
-          (value.startsWith('"') && value.endsWith('"')) ||
-          (value.startsWith("'") && value.endsWith("'"))
-        ) {
-          value = value.slice(1, -1);
-        }
-        if (key === 'API_PORT') defaults.serverPort = Number(value) || defaults.serverPort;
-        if (key === 'API_HOST') defaults.serverHost = value;
-        if (key === 'FRONTEND_PORT') defaults.frontendPort = Number(value) || defaults.frontendPort;
-      }
-    } catch {
-      // Ignore read errors
-    }
+function applyParsedTomlConfig(config: MangoViteConfig, parsed: MangoTomlConfig): void {
+  if (parsed.server?.host) config.serverHost = parsed.server.host;
+  if (parsed.server?.port) config.serverPort = parsed.server.port;
+  if (parsed.frontend?.port) config.frontendPort = parsed.frontend.port;
+}
+
+function applyRuntimeEnvOverrides(config: MangoViteConfig, envPath: string): void {
+  const envOverrides = parseRuntimeEnvFile(envPath);
+  for (const [key, value] of Object.entries(envOverrides)) {
+    applyRuntimeEnvOverride(config, key, value);
   }
+}
 
-  return defaults;
+function applyRuntimeEnvOverride(config: MangoViteConfig, key: string, value: string): void {
+  if (key === 'API_PORT') config.serverPort = Number(value) || config.serverPort;
+  if (key === 'API_HOST') config.serverHost = value;
+  if (key === 'FRONTEND_PORT') config.frontendPort = Number(value) || config.frontendPort;
 }
 
 const mangoConfig = loadMangoConfig();
