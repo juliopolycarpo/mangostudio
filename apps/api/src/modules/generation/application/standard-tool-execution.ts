@@ -15,6 +15,7 @@ import {
 } from '../../../services/tools/arg-parsing';
 import { DELEGATE_TO_AGENT_TOOL_NAME } from '../../../services/tools/builtin/delegate-to-agent';
 import type { EffectiveToolSettings } from '../../../services/tools/types';
+import { ensureDelegationResult } from './delegation-retry';
 import {
   getSubagentCachedEntry,
   recordSubagentResult,
@@ -53,10 +54,6 @@ export interface DelegationRuntime {
   signal?: AbortSignal;
   state: { subagentCallCount: number };
   onEvent?: (event: StreamEvent) => void;
-  executeDelegation: (
-    callId: string,
-    request: DelegateToSubagentRequest
-  ) => Promise<SubagentRunResult>;
 }
 
 export type StreamEvent =
@@ -163,7 +160,16 @@ export async function executeStandardToolCall(
         throw new Error(`Tool "${name}" is disabled for this user.`);
       }
       const request = parseDelegationRequest(args);
-      result = await runtime.executeDelegation(callId, request);
+      // Retry/cache-recovery wraps each single-attempt delegation; the per-call
+      // runtime carries the abort signal, timeout, and the onEvent sink that
+      // streams subagent progress back to the caller.
+      result = await ensureDelegationResult(callId, request, {
+        signal: runtime.signal,
+        timeoutMs: runtime.settings.timeoutMs,
+        onEvent: runtime.onEvent,
+        executeDelegation: (delegationCallId, delegationRequest) =>
+          executeDelegationToolCall(delegationCallId, delegationRequest, runtime),
+      });
     } else {
       result = await withToolTimeout(
         executeTool(
@@ -459,7 +465,7 @@ function createAsyncQueue<T>(): AsyncIterable<T> & {
   };
 }
 
-function parseToolArgs(argsStr: string): Record<string, unknown> {
+export function parseToolArgs(argsStr: string): Record<string, unknown> {
   return safeJsonParse(argsStr) ?? {};
 }
 
@@ -477,7 +483,7 @@ function withToolTimeout<T>(promise: Promise<T>, name: string): Promise<T> {
   });
 }
 
-function stringifyToolResult(result: unknown): string {
+export function stringifyToolResult(result: unknown): string {
   try {
     const serialized = JSON.stringify(result);
     return typeof serialized === 'string' ? serialized : 'null';
@@ -486,7 +492,7 @@ function stringifyToolResult(result: unknown): string {
   }
 }
 
-function errorToToolMessage(error: unknown): string {
+export function errorToToolMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'Tool execution failed';
 }
 

@@ -58,7 +58,7 @@ export interface TurnContext {
   toolDefinitions: ToolDefinition[];
   allowedToolNames: Set<string>;
   delegateToolAvailable: boolean;
-  effectiveSystemPrompt: string;
+  effectiveSystemPrompt: string | undefined;
 }
 
 export async function resolveTurnContext(
@@ -112,7 +112,7 @@ export async function resolveTurnContext(
   );
   const allowedToolNames = new Set(toolDefinitions.map((tool) => tool.name));
 
-  let effectiveSystemPrompt = agentRuntime.effectiveSystemPrompt ?? '';
+  let effectiveSystemPrompt = agentRuntime.effectiveSystemPrompt;
   if (
     provider.generateAgentTurnStream &&
     input.toolIntent === 'image_generation_requested' &&
