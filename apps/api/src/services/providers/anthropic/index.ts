@@ -32,6 +32,7 @@ import type {
 import { createAnthropicClient } from './client';
 import { narrowDelta, narrowSdkError, toMessageCreateParams } from './normalizers';
 import { streamAnthropicAgentTurn } from './stream';
+import { buildAnthropicThinkingConfig } from './thinking-config';
 
 /**
  * Canonical fallback model IDs confirmed against the installed @anthropic-ai/sdk types.
@@ -250,13 +251,7 @@ const anthropicProvider: AIProvider = {
 
     const thinkingEnabled = req.generationConfig?.thinkingEnabled ?? false;
     const effort = req.generationConfig?.reasoningEffort ?? 'medium';
-    const budgetMap: Record<string, number> = {
-      low: 1024,
-      medium: 2048,
-      high: 8192,
-      xhigh: 8192,
-      max: 8192,
-    };
+    const thinkingConfig = buildAnthropicThinkingConfig(thinkingEnabled, effort);
 
     const params: Record<string, unknown> = {
       model: req.modelName,
@@ -265,11 +260,8 @@ const anthropicProvider: AIProvider = {
       messages: buildMessages(req),
     };
 
-    if (thinkingEnabled) {
-      params.thinking = {
-        type: 'enabled',
-        budget_tokens: budgetMap[effort],
-      };
+    if (thinkingConfig) {
+      params.thinking = thinkingConfig;
     }
 
     const stream = client.messages.stream(toMessageCreateParams(params), {

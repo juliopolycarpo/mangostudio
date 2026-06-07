@@ -1,67 +1,32 @@
 import { describe, expect, it } from 'bun:test';
+import { buildAnthropicThinkingConfig } from '../../../../src/services/providers/anthropic/thinking-config';
 
 /**
  * Unit tests for Anthropic provider extended thinking support.
  *
- * Tests the thinking parameter construction and chunk yielding logic directly,
- * without importing the full provider (which would trigger Bun module cache
- * contamination from other test files that import the provider without mocks).
+ * Tests the real thinking-config builder plus the chunk-yielding logic. The
+ * chunk simulation avoids importing the full provider (which would trigger Bun
+ * module-cache contamination from other test files that import it without mocks).
  */
 
-describe('anthropic-provider thinking config construction', () => {
-  const budgetMap = { low: 1024, medium: 2048, high: 8192 } as const;
-
-  it('constructs thinking config when thinkingEnabled is true', () => {
-    const thinkingEnabled = true;
-    const effort = 'medium' as const;
-
-    const params: Record<string, unknown> = {
-      model: 'claude-sonnet-4-5-20250514',
-      max_tokens: thinkingEnabled ? 16000 : 8192,
-      messages: [],
-    };
-
-    if (thinkingEnabled) {
-      params.thinking = {
-        type: 'enabled',
-        budget_tokens: budgetMap[effort] ?? 2048,
-      };
-    }
-
-    expect(params.thinking).toEqual({ type: 'enabled', budget_tokens: 2048 });
-    expect(params.max_tokens).toBe(16000);
+describe('buildAnthropicThinkingConfig', () => {
+  it('constructs an enabled config when thinking is on', () => {
+    expect(buildAnthropicThinkingConfig(true, 'medium')).toEqual({
+      type: 'enabled',
+      budget_tokens: 2048,
+    });
   });
 
-  it('does not construct thinking config when thinkingEnabled is false', () => {
-    const thinkingEnabled = false;
-    const effort = 'medium' as const;
-
-    const params: Record<string, unknown> = {
-      model: 'claude-haiku-3-5-20241022',
-      max_tokens: thinkingEnabled ? 16000 : 8192,
-      messages: [],
-    };
-
-    if (thinkingEnabled) {
-      params.thinking = {
-        type: 'enabled',
-        budget_tokens: budgetMap[effort] ?? 2048,
-      };
-    }
-
-    expect(params.thinking).toBeUndefined();
-    expect(params.max_tokens).toBe(8192);
+  it('returns undefined when thinking is off', () => {
+    expect(buildAnthropicThinkingConfig(false, 'medium')).toBeUndefined();
   });
 
-  it('maps effort levels to correct budget_tokens', () => {
-    for (const [effort, expected] of Object.entries(budgetMap)) {
-      const result = budgetMap[effort as keyof typeof budgetMap];
-      expect(result).toBe(expected);
-    }
-
-    expect(budgetMap.low).toBe(1024);
-    expect(budgetMap.medium).toBe(2048);
-    expect(budgetMap.high).toBe(8192);
+  it('maps each effort level to its token budget', () => {
+    expect(buildAnthropicThinkingConfig(true, 'low')?.budget_tokens).toBe(1024);
+    expect(buildAnthropicThinkingConfig(true, 'medium')?.budget_tokens).toBe(2048);
+    expect(buildAnthropicThinkingConfig(true, 'high')?.budget_tokens).toBe(8192);
+    expect(buildAnthropicThinkingConfig(true, 'xhigh')?.budget_tokens).toBe(8192);
+    expect(buildAnthropicThinkingConfig(true, 'max')?.budget_tokens).toBe(8192);
   });
 });
 
