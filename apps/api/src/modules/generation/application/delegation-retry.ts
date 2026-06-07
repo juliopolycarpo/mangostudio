@@ -384,7 +384,7 @@ function isValidSubagentResult(result: unknown): result is SubagentRunResult {
   return false;
 }
 
-function isSubagentRunResult(value: unknown): value is SubagentRunResult {
+export function isSubagentRunResult(value: unknown): value is SubagentRunResult {
   if (typeof value !== 'object' || value === null) return false;
   const result = value as Partial<SubagentRunResult>;
   return (
@@ -456,6 +456,6 @@ function errorToToolMessage(error: unknown): string {
 type LogValue = string | number | boolean;
 type LogMetadata = Record<string, LogValue>;
 
-function logDelegationWarn(event: string, metadata: LogMetadata): void {
+export function logDelegationWarn(event: string, metadata: LogMetadata): void {
   delegationLogger.warn(event, metadata);
 }

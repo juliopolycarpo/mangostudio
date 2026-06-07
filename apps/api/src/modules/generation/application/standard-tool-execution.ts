@@ -5,7 +5,6 @@ import type { MultiAgentSettings } from '@mangostudio/shared/app-settings';
 import { SUBAGENT_MAX_TURNS_MAX, SUBAGENT_MAX_TURNS_MIN } from '@mangostudio/shared/app-settings';
 import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';
-import { createDiagnosticLogger } from '../../../lib/logger';
 import { safeJsonParse } from '../../../lib/safe-parse';
 import { executeTool, getSafeEffectiveToolSettings, getTool } from '../../../services/tools';
 import {
@@ -15,7 +14,7 @@ import {
 } from '../../../services/tools/arg-parsing';
 import { DELEGATE_TO_AGENT_TOOL_NAME } from '../../../services/tools/builtin/delegate-to-agent';
 import type { EffectiveToolSettings } from '../../../services/tools/types';
-import { ensureDelegationResult } from './delegation-retry';
+import { ensureDelegationResult, isSubagentRunResult, logDelegationWarn } from './delegation-retry';
 import {
   getSubagentCachedEntry,
   recordSubagentResult,
@@ -31,7 +30,6 @@ import {
 } from './subagent-runner';
 
 const TOOL_TIMEOUT_MS = 30_000;
-const delegationLogger = createDiagnosticLogger('subagent-delegation');
 
 export interface StandardToolExecution {
   callId: string;
@@ -368,18 +366,6 @@ export function parseDelegationRequest(args: Record<string, unknown>): DelegateT
   };
 }
 
-function isSubagentRunResult(value: unknown): value is SubagentRunResult {
-  if (typeof value !== 'object' || value === null) return false;
-  const result = value as Partial<SubagentRunResult>;
-  return (
-    typeof result.agentId === 'string' &&
-    typeof result.agentName === 'string' &&
-    typeof result.summary === 'string' &&
-    Boolean(result.trace) &&
-    typeof result.trace === 'object'
-  );
-}
-
 function createSubagentTraceForTool(
   callId: string,
   result: SubagentRunResult
@@ -494,11 +480,4 @@ export function stringifyToolResult(result: unknown): string {
 
 export function errorToToolMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'Tool execution failed';
-}
-
-type LogValue = string | number | boolean;
-type LogMetadata = Record<string, LogValue>;
-
-function logDelegationWarn(event: string, metadata: LogMetadata): void {
-  delegationLogger.warn(event, metadata);
 }
