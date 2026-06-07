@@ -8,32 +8,16 @@
 import type OpenAI from 'openai';
 import { parseJsonWith } from '../../../lib/safe-parse';
 import { appendAttachmentFallbackNotes } from '../core/attachment-content';
+import {
+  type ChatCompletionsDelta,
+  createChatCompletionsAccumulator,
+} from '../core/chat-completions-accumulator';
 import { getModelContextLimit } from '../core/context-policy';
 import { createContinuationEnvelope } from '../core/continuation-envelope';
 import { buildChatCompletionsReplay } from '../core/replay-builder';
 import { toolDefsToChatCompletions } from '../core/tool-mapper';
 import { extractReasoningChunks } from '../openai/normalizers';
 import type { AgentEvent, AgentTurnRequest, StructuredOutputConfig } from '../types';
-
-/**
- * Extended delta shape for OpenAI-compatible endpoints.
- *
- * The OpenAI SDK's `ChatCompletionChunk.Choice.Delta` type only covers
- * standard fields. DeepSeek and OpenRouter add reasoning-related fields
- * that the SDK doesn't model. This interface covers the superset.
- */
-interface ExtendedChatDelta extends Record<string, unknown> {
-  content?: string | null;
-  role?: string;
-  tool_calls?: Array<{
-    index?: number;
-    id?: string;
-    function?: { name?: string; arguments?: string };
-  }>;
-  reasoning_content?: string;
-  reasoning?: string;
-  reasoning_details?: Array<{ type?: string; text?: string }>;
-}
 
 /**
  * Maps a StructuredOutputConfig to the Chat Completions response_format shape.
@@ -118,14 +102,11 @@ export async function* streamOAICompatAgentTurn(
       { signal: req.signal }
     );
 
-    // Accumulate the full assistant message for loop-state
-    let assistantText = '';
-    let assistantReasoning = '';
+    const accumulator = createChatCompletionsAccumulator({ extractReasoningChunks });
     let providerReportedInputTokens: number | undefined;
-    const pendingToolCalls = new Map<number, { callId: string; name: string; argsStr: string }>();
 
     for await (const chunk of stream) {
-      if (req.signal?.aborted) break;
+      if (req.signal?.aborted) return;
 
       // Usage chunks arrive in the terminal frame (when stream_options.include_usage is set)
       // and typically have an empty choices array. Capture prompt_tokens for context accounting
@@ -138,56 +119,19 @@ export async function* streamOAICompatAgentTurn(
       const choice = chunk.choices[0];
       if (!choice) continue;
 
-      // Cast to ExtendedChatDelta — the SDK type doesn't model DeepSeek/OpenRouter reasoning fields
-      const delta = choice.delta as ExtendedChatDelta;
-
-      for (const reasoningChunk of extractReasoningChunks(delta)) {
-        assistantReasoning += reasoningChunk;
-        yield { type: 'reasoning_delta', text: reasoningChunk };
-      }
-
-      if (typeof delta.content === 'string' && delta.content) {
-        assistantText += delta.content;
-        yield { type: 'assistant_text_delta', text: delta.content };
-      }
-
-      // Tool call streaming
-      const toolCalls = delta.tool_calls;
-      if (Array.isArray(toolCalls)) {
-        for (const tcDelta of toolCalls) {
-          const idx = typeof tcDelta.index === 'number' ? tcDelta.index : 0;
-          const fn = tcDelta.function;
-
-          if (typeof tcDelta.id === 'string') {
-            const callId = tcDelta.id;
-            const name = typeof fn?.name === 'string' ? fn.name : '';
-            const args = typeof fn?.arguments === 'string' ? fn.arguments : '';
-            pendingToolCalls.set(idx, { callId, name, argsStr: args });
-            yield { type: 'tool_call_started', callId, name: name || undefined };
-          } else {
-            const tc = pendingToolCalls.get(idx);
-            if (tc) {
-              const argsDelta = typeof fn?.arguments === 'string' ? fn.arguments : '';
-              tc.argsStr += argsDelta;
-              if (argsDelta) {
-                yield { type: 'tool_call_arguments_delta', callId: tc.callId, delta: argsDelta };
-              }
-            }
-          }
-        }
+      const delta = choice.delta as ChatCompletionsDelta;
+      for (const event of accumulator.addDelta(delta)) {
+        yield event;
       }
 
       if (choice.finish_reason) {
-        for (const tc of pendingToolCalls.values()) {
-          yield {
-            type: 'tool_call_completed',
-            callId: tc.callId,
-            name: tc.name,
-            arguments: tc.argsStr,
-          };
+        for (const event of accumulator.finishToolCalls()) {
+          yield event;
         }
       }
     }
+
+    if (req.signal?.aborted) return;
 
     // Build the assistant message for loop-state accumulation.
     // reasoning_content is only included on intra-turn loop messages (when tool calls are
@@ -195,19 +139,8 @@ export async function* streamOAICompatAgentTurn(
     // during continuation. It is intentionally OMITTED from the final message (no pending
     // tool calls) so reasoning is never persisted cross-turn.
     // See: https://api-docs.deepseek.com/guides/thinking_mode
-    const assistantMsg: OpenAI.ChatCompletionMessageParam =
-      pendingToolCalls.size > 0
-        ? {
-            role: 'assistant',
-            content: assistantText || null,
-            tool_calls: Array.from(pendingToolCalls.values()).map((tc) => ({
-              id: tc.callId,
-              type: 'function' as const,
-              function: { name: tc.name, arguments: tc.argsStr },
-            })),
-            ...(assistantReasoning ? { reasoning_content: assistantReasoning } : {}),
-          }
-        : { role: 'assistant', content: assistantText };
+    const assistantMsg =
+      accumulator.buildAssistantMessage() as unknown as OpenAI.ChatCompletionMessageParam;
 
     const newLoopMessages: OpenAI.ChatCompletionMessageParam[] = [
       ...(turnLocalLoopState?.loopMessages ?? []),

@@ -27,7 +27,12 @@ import {
   buildDeepSeekSystemPrompt,
   normalizeDeepSeekReasoningEffort,
 } from '../../../../src/services/providers/deepseek/normalizers';
-import type { AgentTurnRequest, ChatTurnContext } from '../../../../src/services/providers/types';
+import type {
+  AgentEvent,
+  AgentTurnRequest,
+  ChatTurnContext,
+} from '../../../../src/services/providers/types';
+import { expectTurnCompletedEnvelope } from '../../../support/providers/contract-assertions';
 import {
   chainChunks,
   stopChunk,
@@ -513,6 +518,11 @@ describe('streamDeepSeekAgentTurn', () => {
       name: 'get_weather',
     });
     expect(events).toContainEqual({
+      type: 'tool_call_arguments_delta',
+      callId: 'call_1',
+      delta: '{"city":"Paris"}',
+    });
+    expect(events).toContainEqual({
       type: 'tool_call_completed',
       callId: 'call_1',
       name: 'get_weather',
@@ -578,6 +588,23 @@ describe('streamDeepSeekAgentTurn', () => {
     expect(state.promptCacheMissTokens).toBe(20);
   });
 
+  it('captures provider-reported prompt tokens in the completion envelope', async () => {
+    const stream = chainChunks(
+      textDeltaChunk('Token usage'),
+      stopChunk(),
+      deepSeekUsageChunk(100, 20)
+    );
+    const events = [];
+    for await (const ev of collect(baseReq, stream)) events.push(ev);
+
+    const envelope = expectTurnCompletedEnvelope(events as AgentEvent[], {
+      provider: 'deepseek',
+      mode: 'stateless-loop',
+      providerReportedInputTokens: 100,
+    });
+    expect(envelope?.context?.contextLimit).toBe(1_048_576);
+  });
+
   it('emits turn_error on API failure', async () => {
     const brokenClient = createFakeDeepSeekClient({
       [Symbol.asyncIterator]() {
@@ -609,10 +636,14 @@ describe('streamDeepSeekAgentTurn', () => {
 
   it('respects abort signal', async () => {
     const controller = new AbortController();
-    const chunks: Record<string, unknown>[] = [
-      { choices: [{ delta: { content: 'First' }, finish_reason: null }] },
-    ];
-    const abortClient = createFakeDeepSeekClient(new AbortableAsyncStream(chunks, controller));
+    const abortClient = createFakeDeepSeekClient(
+      (async function* () {
+        await Promise.resolve();
+        yield { choices: [{ delta: { content: 'First' }, finish_reason: null }] };
+        controller.abort();
+        yield { choices: [{ delta: { content: 'Second' }, finish_reason: 'stop' }] };
+      })()
+    );
 
     const req: AgentTurnRequest = { ...baseReq, signal: controller.signal };
     const events: unknown[] = [];
@@ -623,18 +654,6 @@ describe('streamDeepSeekAgentTurn', () => {
     expect(
       events.filter((e) => (e as { type: string }).type === 'assistant_text_delta')
     ).toHaveLength(1);
+    expect(events.some((e) => (e as { type: string }).type === 'turn_completed')).toBe(false);
   });
 });
-
-class AbortableAsyncStream {
-  constructor(
-    private chunks: Record<string, unknown>[],
-    private controller: AbortController
-  ) {}
-  async *[Symbol.asyncIterator]() {
-    for (const chunk of this.chunks) {
-      if (this.controller.signal.aborted) break;
-      yield await Promise.resolve(chunk);
-    }
-  }
-}
