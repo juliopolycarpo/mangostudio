@@ -76,3 +76,4 @@ config.toml
 **/.eslintcache
 **/.tsbuildinfo
 **/node_modules/.cache/
+.turbo/
