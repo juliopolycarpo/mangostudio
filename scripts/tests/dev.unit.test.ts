@@ -2,7 +2,12 @@ import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ROOT_DIR } from '../lib/config';
-import { createTurboDevCommand, getDevCwd, selectDevWorkspaces } from '../lib/dev';
+import {
+  createTurboDevCommand,
+  getDevCwd,
+  selectDevWorkspaces,
+  selectTurboDevUi,
+} from '../lib/dev';
 
 const readText = (relativePath: string): string =>
   readFileSync(join(ROOT_DIR, relativePath), 'utf8');
@@ -16,13 +21,29 @@ describe('dev script', () => {
   });
 
   test('creates one filtered Turbo invocation for selected workspaces', () => {
-    expect(createTurboDevCommand(['api', 'frontend'])).toEqual([
+    expect(createTurboDevCommand(['api', 'frontend'], 'tui')).toEqual([
       'turbo',
       'run',
       'dev',
+      '--ui=tui',
       '--filter=@mangostudio/api',
       '--filter=@mangostudio/frontend',
     ]);
+  });
+
+  test('can force stream output for non-interactive dev invocations', () => {
+    expect(createTurboDevCommand(['api'], 'stream')).toEqual([
+      'turbo',
+      'run',
+      'dev',
+      '--ui=stream',
+      '--filter=@mangostudio/api',
+    ]);
+  });
+
+  test('uses stream mode in CI and TUI locally', () => {
+    expect(selectTurboDevUi({ CI: 'true' })).toBe('stream');
+    expect(selectTurboDevUi({})).toBe('tui');
   });
 
   test('runs Turbo from the repository root', () => {
@@ -48,6 +69,6 @@ describe('dev script', () => {
   });
 
   test('forwards the terminal so the Turbo TUI stays interactive', () => {
-    expect(readText('scripts/dev.ts')).toContain("stdin: 'inherit'");
+    expect(readText('scripts/dev.ts')).toContain("stdin: turboUi === 'tui' ? 'inherit' : 'ignore'");
   });
 });

@@ -1,4 +1,10 @@
-import { createTurboDevCommand, DEV_WORKSPACES, getDevCwd, selectDevWorkspaces } from './lib/dev';
+import {
+  createTurboDevCommand,
+  DEV_WORKSPACES,
+  getDevCwd,
+  selectDevWorkspaces,
+  selectTurboDevUi,
+} from './lib/dev';
 import {
   assertNoUnexpectedArguments,
   fatal,
@@ -50,9 +56,11 @@ header('Dev');
 
 info(`Starting dev task(s): ${runnableWorkspaces.join(', ')}`);
 
-const result = await runCommand('dev', createTurboDevCommand(runnableWorkspaces), {
+const turboUi = selectTurboDevUi(process.env);
+
+const result = await runCommand('dev', createTurboDevCommand(runnableWorkspaces, turboUi), {
   cwd: getDevCwd(),
-  stdin: 'inherit',
+  stdin: turboUi === 'tui' ? 'inherit' : 'ignore',
 });
 
 process.exit(result.exitCode);
