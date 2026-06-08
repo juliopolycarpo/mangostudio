@@ -27,7 +27,7 @@
     "@elysiajs/cors": "^1.4.2",
     "@elysiajs/openapi": "^1.4.15",
     "@elysiajs/static": "^1.4.10",
-    "@google/genai": "^1.52.0",
+    "@google/genai": "^2.7.0",
     "@mangostudio/shared": "workspace:*",
     "ai": "^6.0.191",
     "better-auth": "^1.6.11",
