@@ -45,6 +45,7 @@ export const ALL_WORKSPACE_NAMES: WorkspaceName[] = ['frontend', 'api', 'shared'
 export const ROOT_BIOME_PATHS: string[] = [
   'package.json',
   'biome.json',
+  'turbo.jsonc',
   '.zed',
   '.vscode',
   '.claude/settings.json',
@@ -55,7 +56,9 @@ export const ROOT_BIOME_PATHS: string[] = [
   'scripts',
   'packages',
   'apps/api/package.json',
+  'apps/api/turbo.json',
   'apps/frontend/package.json',
+  'apps/frontend/turbo.json',
   'apps/shared/package.json',
   'tests/browser-smoke/auth-flow.spec.ts',
   'apps/frontend/vite.config.ts',

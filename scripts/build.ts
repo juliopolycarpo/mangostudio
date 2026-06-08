@@ -3,17 +3,15 @@
 import { cpSync, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { createTurboBuildCommand, getBuildCwd, selectBuildWorkspaces } from './lib/build';
 import { ROOT_DIR, type WorkspaceName } from './lib/config';
 import { resolveReleaseVersion } from './lib/release-version';
 import {
   assertNoUnexpectedArguments,
-  exitWithResults,
   fatal,
   header,
   parseArgs,
-  type RunResult,
-  runParallel,
-  runWorkspaceScript,
+  runCommand,
   warn,
 } from './lib/runner';
 
@@ -30,7 +28,6 @@ interface BinaryBuildOptions {
   version: string;
 }
 
-const BUILDABLE_WORKSPACES: WorkspaceName[] = ['frontend', 'api'];
 const ALL_BINARY_TARGETS: BinaryTarget[] = [
   { target: 'bun-linux-x64', arch: 'linux-x64', name: 'mangostudio' },
   { target: 'bun-linux-arm64', arch: 'linux-arm64', name: 'mangostudio' },
@@ -75,15 +72,17 @@ function resolveBinaryTargets(onlyPlatform?: string): BinaryTarget[] {
 }
 
 async function buildFrontendSidecar(dryRun: boolean): Promise<void> {
-  console.log('🏗️  Building frontend sidecar...');
+  console.log('🏗️  Ensuring frontend sidecar...');
 
   if (dryRun) {
-    console.log('   (dry run) Would build @mangostudio/frontend');
-    console.log('✅ Frontend built successfully (dry run)');
+    console.log('   (dry run) Would run turbo build for @mangostudio/frontend');
+    console.log('✅ Frontend sidecar ready (dry run)');
     return;
   }
 
-  const result = await runWorkspaceScript('frontend', 'build');
+  const result = await runCommand('build:frontend', createTurboBuildCommand(['frontend']), {
+    cwd: getBuildCwd(),
+  });
   if (result.exitCode !== 0) {
     fatal('Frontend build failed during standalone binary packaging.');
   }
@@ -423,7 +422,7 @@ async function buildStandaloneBinary(options: BinaryBuildOptions): Promise<void>
   console.log('  Windows:     .mango\\out\\run.bat');
 }
 
-const { workspaces, includeRoot, flags, values, positional, usedDefaultSelection } = parseArgs({
+const { workspaces, flags, values, positional, usedDefaultSelection } = parseArgs({
   booleanFlags: ['--binary', '--production', '--development', '--dry-run'],
   valueFlags: ['--platform'],
 });
@@ -464,17 +463,13 @@ if (isBinaryBuild) {
   process.exit(0);
 }
 
-if (includeRoot) {
+if (process.argv.includes('--root')) {
   warn('Ignoring `--root` for workspace builds.');
 }
 
 const requestedWorkspaces = usedDefaultSelection ? defaultBuildWorkspaces : workspaces;
-const buildTargets = requestedWorkspaces.filter((workspace) =>
-  BUILDABLE_WORKSPACES.includes(workspace)
-);
-const skippedWorkspaces = requestedWorkspaces.filter(
-  (workspace) => !BUILDABLE_WORKSPACES.includes(workspace)
-);
+const { runnableWorkspaces: buildTargets, skippedWorkspaces } =
+  selectBuildWorkspaces(requestedWorkspaces);
 
 if (skippedWorkspaces.length > 0) {
   warn(`Skipping workspaces without a build entrypoint: ${skippedWorkspaces.join(', ')}`);
@@ -486,8 +481,8 @@ if (buildTargets.length === 0) {
 
 header('Build');
 
-const results: RunResult[] = await runParallel(
-  buildTargets.map((workspace) => () => runWorkspaceScript(workspace, 'build', { ifPresent: true }))
-);
+const result = await runCommand('build', createTurboBuildCommand(buildTargets), {
+  cwd: getBuildCwd(),
+});
 
-exitWithResults(results);
+process.exit(result.exitCode);
