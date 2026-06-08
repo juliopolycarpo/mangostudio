@@ -42,9 +42,8 @@ if (!PLATFORM || !(PLATFORM in PLATFORM_META)) {
   process.exit(1);
 }
 
-const BUILD_PLATFORM = PLATFORM;
-const { binary: BINARY_NAME, canExecute: CAN_EXECUTE } = PLATFORM_META[BUILD_PLATFORM];
-const PLATFORM_DIR = join(OUT_DIR, BUILD_PLATFORM);
+const { binary: BINARY_NAME, canExecute: CAN_EXECUTE } = PLATFORM_META[PLATFORM];
+const PLATFORM_DIR = join(OUT_DIR, PLATFORM);
 const BINARY_PATH = join(PLATFORM_DIR, BINARY_NAME);
 const PUBLIC_DIR = join(PLATFORM_DIR, 'public');
 
@@ -96,8 +95,8 @@ async function waitFor(url: string, retries = 15, delayMs = 500): Promise<void> 
 // ---------------------------------------------------------------------------
 
 async function buildBinary(): Promise<void> {
-  console.log(`\n🔨 Building binary for ${BUILD_PLATFORM}...`);
-  await run(['bun', 'run', 'build:binary', '--platform', BUILD_PLATFORM]);
+  console.log(`\n🔨 Building binary for ${PLATFORM}...`);
+  await run(['bun', 'run', 'build:binary', '--platform', PLATFORM]);
   pass(`Binary built: ${BINARY_PATH}`);
 }
 
@@ -213,7 +212,7 @@ async function smokeTest(): Promise<void> {
 // Main
 // ---------------------------------------------------------------------------
 
-console.log(`\n🧪 Binary smoke test — platform: ${BUILD_PLATFORM}`);
+console.log(`\n🧪 Binary smoke test — platform: ${PLATFORM}`);
 console.log(`   Can execute on this host: ${CAN_EXECUTE}`);
 
 if (!SKIP_BUILD) {
