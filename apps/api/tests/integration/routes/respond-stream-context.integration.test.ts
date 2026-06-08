@@ -4,7 +4,14 @@ import type { AgentTurnRequest } from '../../../src/services/providers/types';
 import { insertTestUser, type UserFixture } from '../../support/factories';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
 import {
+  buildRespondStreamRequest,
   makeChain,
+  mockDbWithFullCapture,
+  mockDbWithMessageCapture,
+  mockNoopTools,
+  mockPassThroughDb,
+  mockProviderRegistry,
+  mockVerifiedChatOwnership,
   parsePersistedParts,
   parseSseEvents,
   restoreAllMocks,
@@ -42,30 +49,20 @@ describe('POST /respond/stream — context and continuation', () => {
       clearGeminiModelCatalog: () => undefined as undefined,
     }));
 
-    await mock.module('../../../src/db/database', () => ({
-      getDb: () => ({
-        selectFrom: () => makeChain({ userId: TEST_USER.id }),
-        insertInto: () => ({ values: () => ({ execute: () => Promise.resolve() }) }),
-        updateTable: () => makeChain(undefined),
-      }),
-    }));
+    await mock.module('../../../src/db/database', mockPassThroughDb(TEST_USER.id));
 
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
     restoreAuth = restore;
 
     const response = await app.handle(
-      new Request('http://localhost/respond/stream', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chatId: 'some-chat', prompt: 'Hello' }),
-      })
+      buildRespondStreamRequest({ chatId: 'some-chat', prompt: 'Hello' })
     );
 
     expect(response.status).toBe(503);
   });
 
   it('emits fallback_notice and context_info with mode=replay when provider yields continuation_degraded then turn_completed without cursor', async () => {
-    const insertedMessages: Array<Record<string, unknown>> = [];
+    const dbMock = mockDbWithMessageCapture(TEST_USER.id);
 
     const STATELESS_STATE = JSON.stringify({
       schemaVersion: 1,
@@ -77,58 +74,30 @@ describe('POST /respond/stream — context and continuation', () => {
       loopMessages: [],
     });
 
-    await mock.module('../../../src/modules/chats/infrastructure/chat-repository', () => ({
-      verifyChatOwnership: () => Promise.resolve(true),
-    }));
+    await mockVerifiedChatOwnership();
 
-    await mock.module('../../../src/services/providers/core/provider-registry', () => ({
-      getProviderForModel: () =>
-        Promise.resolve({
-          providerType: 'openai-compatible',
-          generateText: () => Promise.resolve({ text: '' }),
-          generateAgentTurnStream: async function* (_req: AgentTurnRequest) {
-            await Promise.resolve();
-            yield {
-              type: 'continuation_degraded',
-              from: 'stateful',
-              to: 'replay',
-              reason: 'cursor_expired',
-              reasonCode: 'cursor_expired',
-            };
-            yield { type: 'assistant_text_delta', text: 'Hello' };
-            yield { type: 'turn_completed', providerState: STATELESS_STATE };
-          },
-        }),
-    }));
+    await mockProviderRegistry(async function* streamDegradedContinuation() {
+      await Promise.resolve();
+      yield {
+        type: 'continuation_degraded',
+        from: 'stateful',
+        to: 'replay',
+        reason: 'cursor_expired',
+        reasonCode: 'cursor_expired',
+      };
+      yield { type: 'assistant_text_delta', text: 'Hello' };
+      yield { type: 'turn_completed', providerState: STATELESS_STATE };
+    });
 
-    await mock.module('../../../src/services/tools', () => ({
-      getAllToolDefinitions: () => [],
-      getToolDefinitionsForAgent: () => [],
-      executeTool: () => Promise.resolve({}),
-    }));
+    await mockNoopTools();
 
-    await mock.module('../../../src/db/database', () => ({
-      getDb: () => ({
-        selectFrom: () => makeChain({ userId: TEST_USER.id }),
-        insertInto: (_table: string) => ({
-          values: (values: Record<string, unknown>) => {
-            if (_table === 'messages') insertedMessages.push({ ...values });
-            return { execute: () => Promise.resolve() };
-          },
-        }),
-        updateTable: () => makeChain(undefined),
-      }),
-    }));
+    await mock.module('../../../src/db/database', dbMock.moduleFactory);
 
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
     restoreAuth = restore;
 
     const response = await app.handle(
-      new Request('http://localhost/respond/stream', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chatId: 'test-chat', prompt: 'Hi', model: 'deepseek-chat' }),
-      })
+      buildRespondStreamRequest({ chatId: 'test-chat', prompt: 'Hi', model: 'deepseek-chat' })
     );
 
     expect(response.status).toBe(200);
@@ -157,7 +126,7 @@ describe('POST /respond/stream — context and continuation', () => {
     expect(contextInfo).toBeDefined();
     expect(contextInfo).toMatchObject({ type: 'context_info', mode: 'replay' });
 
-    const aiMessage = insertedMessages.find((m) => m.role === 'ai');
+    const aiMessage = dbMock.insertedMessages.find((m) => m.role === 'ai');
     expect(aiMessage).toBeDefined();
     const parts = parsePersistedParts(aiMessage?.parts);
     const transitionPart = parts.find((p) => p.type === 'continuation_transition');
@@ -183,55 +152,30 @@ describe('POST /respond/stream — context and continuation', () => {
       loopMessages: [],
     });
 
-    await mock.module('../../../src/modules/chats/infrastructure/chat-repository', () => ({
-      verifyChatOwnership: () => Promise.resolve(true),
-    }));
+    await mockVerifiedChatOwnership();
 
-    await mock.module('../../../src/services/providers/core/provider-registry', () => ({
-      getProviderForModel: () =>
-        Promise.resolve({
-          providerType: 'openai-compatible',
-          generateText: () => Promise.resolve({ text: '' }),
-          generateAgentTurnStream: async function* (_req: AgentTurnRequest) {
-            await Promise.resolve();
-            yield {
-              type: 'continuation_degraded',
-              from: 'responses',
-              to: 'replay',
-              reason: 'cursor_expired',
-              reasonCode: 'cursor_expired',
-            };
-            yield { type: 'assistant_text_delta', text: 'OK' };
-            yield { type: 'turn_completed', providerState: STATELESS_STATE };
-          },
-        }),
-    }));
+    await mockProviderRegistry(async function* streamFallbackNotice() {
+      await Promise.resolve();
+      yield {
+        type: 'continuation_degraded',
+        from: 'responses',
+        to: 'replay',
+        reason: 'cursor_expired',
+        reasonCode: 'cursor_expired',
+      };
+      yield { type: 'assistant_text_delta', text: 'OK' };
+      yield { type: 'turn_completed', providerState: STATELESS_STATE };
+    });
 
-    await mock.module('../../../src/services/tools', () => ({
-      getAllToolDefinitions: () => [],
-      getToolDefinitionsForAgent: () => [],
-      executeTool: () => Promise.resolve({}),
-    }));
+    await mockNoopTools();
 
-    await mock.module('../../../src/db/database', () => ({
-      getDb: () => ({
-        selectFrom: () => makeChain({ userId: TEST_USER.id }),
-        insertInto: (_table: string) => ({
-          values: () => ({ execute: () => Promise.resolve() }),
-        }),
-        updateTable: () => makeChain(undefined),
-      }),
-    }));
+    await mock.module('../../../src/db/database', mockPassThroughDb(TEST_USER.id));
 
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
     restoreAuth = restore;
 
     const response = await app.handle(
-      new Request('http://localhost/respond/stream', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chatId: 'test-chat', prompt: 'Hi', model: 'deepseek-chat' }),
-      })
+      buildRespondStreamRequest({ chatId: 'test-chat', prompt: 'Hi', model: 'deepseek-chat' })
     );
 
     expect(response.status).toBe(200);
@@ -265,46 +209,26 @@ describe('POST /respond/stream — context and continuation', () => {
       },
     });
 
-    await mock.module('../../../src/modules/chats/infrastructure/chat-repository', () => ({
-      verifyChatOwnership: () => Promise.resolve(true),
-    }));
+    await mockVerifiedChatOwnership();
 
-    await mock.module('../../../src/services/providers/core/provider-registry', () => ({
-      getProviderForModel: () =>
-        Promise.resolve({
-          providerType: 'openai',
-          generateText: () => Promise.resolve({ text: '' }),
-          generateAgentTurnStream: async function* (_req: AgentTurnRequest) {
-            await Promise.resolve();
-            yield { type: 'assistant_text_delta', text: 'OK' };
-            yield { type: 'turn_completed', providerState: STATEFUL_STATE };
-          },
-        }),
-    }));
+    await mockProviderRegistry(
+      async function* streamStatefulContinuation() {
+        await Promise.resolve();
+        yield { type: 'assistant_text_delta', text: 'OK' };
+        yield { type: 'turn_completed', providerState: STATEFUL_STATE };
+      },
+      { providerType: 'openai' }
+    );
 
-    await mock.module('../../../src/services/tools', () => ({
-      getAllToolDefinitions: () => [],
-      getToolDefinitionsForAgent: () => [],
-      executeTool: () => Promise.resolve({}),
-    }));
+    await mockNoopTools();
 
-    await mock.module('../../../src/db/database', () => ({
-      getDb: () => ({
-        selectFrom: () => makeChain({ userId: TEST_USER.id }),
-        insertInto: () => ({ values: () => ({ execute: () => Promise.resolve() }) }),
-        updateTable: () => makeChain(undefined),
-      }),
-    }));
+    await mock.module('../../../src/db/database', mockPassThroughDb(TEST_USER.id));
 
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
     restoreAuth = restore;
 
     const response = await app.handle(
-      new Request('http://localhost/respond/stream', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chatId: 'test-chat', prompt: 'Hi', model: 'gpt-4o' }),
-      })
+      buildRespondStreamRequest({ chatId: 'test-chat', prompt: 'Hi', model: 'gpt-4o' })
     );
 
     expect(response.status).toBe(200);
@@ -320,31 +244,18 @@ describe('POST /respond/stream — context and continuation', () => {
   });
 
   it('replays only the compacted boundary and newer turns after a chat compaction marker', async () => {
-    await mock.module('../../../src/modules/chats/infrastructure/chat-repository', () => ({
-      verifyChatOwnership: () => Promise.resolve(true),
-    }));
+    await mockVerifiedChatOwnership();
 
-    await mock.module('../../../src/services/providers/core/provider-registry', () => ({
-      getProviderForModel: () =>
-        Promise.resolve({
-          providerType: 'openai-compatible',
-          generateText: () => Promise.resolve({ text: '' }),
-          generateAgentTurnStream: async function* (req: AgentTurnRequest) {
-            await Promise.resolve();
-            yield {
-              type: 'assistant_text_delta',
-              text: JSON.stringify(req.history.map((turn) => turn.text)),
-            };
-            yield { type: 'turn_completed', providerState: null };
-          },
-        }),
-    }));
+    await mockProviderRegistry(async function* streamCompactedHistory(req: AgentTurnRequest) {
+      await Promise.resolve();
+      yield {
+        type: 'assistant_text_delta',
+        text: JSON.stringify(req.history.map((turn) => turn.text)),
+      };
+      yield { type: 'turn_completed', providerState: null };
+    });
 
-    await mock.module('../../../src/services/tools', () => ({
-      getAllToolDefinitions: () => [],
-      getToolDefinitionsForAgent: () => [],
-      executeTool: () => Promise.resolve({}),
-    }));
+    await mockNoopTools();
 
     const messageRows = [
       {
@@ -423,11 +334,7 @@ describe('POST /respond/stream — context and continuation', () => {
     restoreAuth = restore;
 
     const response = await app.handle(
-      new Request('http://localhost/respond/stream', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chatId: 'test-chat', prompt: 'Continue', model: 'test-model' }),
-      })
+      buildRespondStreamRequest({ chatId: 'test-chat', prompt: 'Continue', model: 'test-model' })
     );
 
     expect(response.status).toBe(200);
@@ -439,31 +346,23 @@ describe('POST /respond/stream — context and continuation', () => {
   });
 
   it('emits terminal error when provider errors on tool-result continuation', async () => {
-    const insertedMessages: Array<Record<string, unknown>> = [];
+    const dbMock = mockDbWithFullCapture(TEST_USER.id);
 
-    await mock.module('../../../src/modules/chats/infrastructure/chat-repository', () => ({
-      verifyChatOwnership: () => Promise.resolve(true),
-    }));
+    await mockVerifiedChatOwnership();
 
     let iteration = 0;
-    await mock.module('../../../src/services/providers/core/provider-registry', () => ({
-      getProviderForModel: () =>
-        Promise.resolve({
-          providerType: 'openai-compatible',
-          generateText: () => Promise.resolve({ text: '' }),
-          generateAgentTurnStream: async function* (_req: AgentTurnRequest) {
-            await Promise.resolve();
-            iteration += 1;
-            if (iteration === 1) {
-              yield { type: 'tool_call_started', callId: 'c1', name: 'noop' };
-              yield { type: 'tool_call_completed', callId: 'c1', name: 'noop', arguments: '{}' };
-              yield { type: 'turn_completed', providerState: null };
-            } else {
-              yield { type: 'turn_error', error: 'tool-result continuation failed' };
-            }
-          },
-        }),
-    }));
+    await mockProviderRegistry(async function* streamToolContinuationError() {
+      await Promise.resolve();
+      iteration += 1;
+      if (iteration !== 1) {
+        yield { type: 'turn_error', error: 'tool-result continuation failed' };
+        return;
+      }
+
+      yield { type: 'tool_call_started', callId: 'c1', name: 'noop' };
+      yield { type: 'tool_call_completed', callId: 'c1', name: 'noop', arguments: '{}' };
+      yield { type: 'turn_completed', providerState: null };
+    });
 
     await mock.module('../../../src/services/tools', () => ({
       getAllToolDefinitions: () => [{ name: 'noop', description: 'no-op', parameters: {} }],
@@ -471,34 +370,13 @@ describe('POST /respond/stream — context and continuation', () => {
       executeTool: () => Promise.resolve({ ok: true }),
     }));
 
-    const chatSetCalls: Array<Record<string, unknown>> = [];
-    await mock.module('../../../src/db/database', () => ({
-      getDb: () => ({
-        selectFrom: () => makeChain({ userId: TEST_USER.id }),
-        insertInto: (_table: string) => ({
-          values: (values: Record<string, unknown>) => {
-            if (_table === 'messages') insertedMessages.push({ ...values });
-            return { execute: () => Promise.resolve() };
-          },
-        }),
-        updateTable: () => ({
-          set: (values: Record<string, unknown>) => {
-            chatSetCalls.push({ ...values });
-            return makeChain(undefined);
-          },
-        }),
-      }),
-    }));
+    await mock.module('../../../src/db/database', dbMock.moduleFactory);
 
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
     restoreAuth = restore;
 
     const response = await app.handle(
-      new Request('http://localhost/respond/stream', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chatId: 'test-chat', prompt: 'use tool', model: 'test-model' }),
-      })
+      buildRespondStreamRequest({ chatId: 'test-chat', prompt: 'use tool', model: 'test-model' })
     );
 
     expect(response.status).toBe(200);
@@ -510,34 +388,25 @@ describe('POST /respond/stream — context and continuation', () => {
     const doneEvent = sseEvents.find((e) => e.type === 'done');
     expect(doneEvent).toBeUndefined();
 
-    const aiMessage = insertedMessages.find((m) => m.role === 'ai');
+    const aiMessage = dbMock.insertedMessages.find((m) => m.role === 'ai');
     expect(aiMessage).toBeDefined();
-    const clearedDurable = chatSetCalls.find(
+    const clearedDurable = dbMock.chatSetCalls.find(
       (u) => 'lastProviderState' in u && u.lastProviderState === null
     );
     expect(clearedDurable).toBeDefined();
   });
 
   it('emits system_event(tool_loop_exhausted) and terminal error when loop ceiling is reached with pending tool calls', async () => {
-    const insertedMessages: Array<Record<string, unknown>> = [];
+    const dbMock = mockDbWithMessageCapture(TEST_USER.id);
 
-    await mock.module('../../../src/modules/chats/infrastructure/chat-repository', () => ({
-      verifyChatOwnership: () => Promise.resolve(true),
-    }));
+    await mockVerifiedChatOwnership();
 
-    await mock.module('../../../src/services/providers/core/provider-registry', () => ({
-      getProviderForModel: () =>
-        Promise.resolve({
-          providerType: 'openai-compatible',
-          generateText: () => Promise.resolve({ text: '' }),
-          generateAgentTurnStream: async function* (_req: AgentTurnRequest) {
-            await Promise.resolve();
-            yield { type: 'tool_call_started', callId: 'c1', name: 'noop' };
-            yield { type: 'tool_call_completed', callId: 'c1', name: 'noop', arguments: '{}' };
-            yield { type: 'turn_completed', providerState: null };
-          },
-        }),
-    }));
+    await mockProviderRegistry(async function* streamPendingToolCall() {
+      await Promise.resolve();
+      yield { type: 'tool_call_started', callId: 'c1', name: 'noop' };
+      yield { type: 'tool_call_completed', callId: 'c1', name: 'noop', arguments: '{}' };
+      yield { type: 'turn_completed', providerState: null };
+    });
 
     await mock.module('../../../src/services/tools', () => ({
       getAllToolDefinitions: () => [{ name: 'noop', description: 'no-op', parameters: {} }],
@@ -545,32 +414,17 @@ describe('POST /respond/stream — context and continuation', () => {
       executeTool: () => Promise.resolve({ ok: true }),
     }));
 
-    await mock.module('../../../src/db/database', () => ({
-      getDb: () => ({
-        selectFrom: () => makeChain({ userId: TEST_USER.id }),
-        insertInto: (_table: string) => ({
-          values: (values: Record<string, unknown>) => {
-            if (_table === 'messages') insertedMessages.push({ ...values });
-            return { execute: () => Promise.resolve() };
-          },
-        }),
-        updateTable: () => makeChain(undefined),
-      }),
-    }));
+    await mock.module('../../../src/db/database', dbMock.moduleFactory);
 
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
     restoreAuth = restore;
 
     const response = await app.handle(
-      new Request('http://localhost/respond/stream', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          chatId: 'test-chat',
-          prompt: 'loop forever',
-          model: 'test-model',
-          maxToolIterations: 2,
-        }),
+      buildRespondStreamRequest({
+        chatId: 'test-chat',
+        prompt: 'loop forever',
+        model: 'test-model',
+        maxToolIterations: 2,
       })
     );
 
@@ -591,7 +445,7 @@ describe('POST /respond/stream — context and continuation', () => {
     const doneEvent = sseEvents.find((e) => e.type === 'done');
     expect(doneEvent).toBeUndefined();
 
-    const aiMessage = insertedMessages.find((m) => m.role === 'ai');
+    const aiMessage = dbMock.insertedMessages.find((m) => m.role === 'ai');
     expect(aiMessage).toBeDefined();
     const parts = parsePersistedParts(aiMessage?.parts);
     const exhaustedPart = parts.find(

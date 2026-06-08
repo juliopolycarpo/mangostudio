@@ -4,7 +4,11 @@ import type { AgentTurnRequest } from '../../../src/services/providers/types';
 import { insertTestUser, type UserFixture } from '../../support/factories';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
 import {
+  buildRespondStreamRequest,
   makeChain,
+  mockPassThroughDb,
+  mockProviderRegistry,
+  mockVerifiedChatOwnership,
   parsePersistedParts,
   parseSseEvents,
   realExecuteTool,
@@ -36,10 +40,12 @@ describe('POST /respond/stream — tools', () => {
     const generateImageRequests: Array<Record<string, unknown>> = [];
     let iteration = 0;
     let capturedToolResults: AgentTurnRequest['toolResults'];
+    const generateImage = (request: Record<string, unknown>) => {
+      generateImageRequests.push({ ...request });
+      return Promise.resolve({ imageUrl: `/images/generated-${generateImageRequests.length}.png` });
+    };
 
-    await mock.module('../../../src/modules/chats/infrastructure/chat-repository', () => ({
-      verifyChatOwnership: () => Promise.resolve(true),
-    }));
+    await mockVerifiedChatOwnership();
 
     await mock.module('../../../src/services/tools', () => ({
       getAllToolDefinitions: realGetAllToolDefinitions,
@@ -49,43 +55,33 @@ describe('POST /respond/stream — tools', () => {
       getSafeEffectiveToolSettings: realGetSafeEffectiveToolSettings,
     }));
 
-    await mock.module('../../../src/services/providers/core/provider-registry', () => ({
-      getProviderForModel: () =>
-        Promise.resolve({
-          providerType: 'openai-compatible',
-          generateText: () => Promise.resolve({ text: '' }),
-          generateImage: (request: Record<string, unknown>) => {
-            generateImageRequests.push({ ...request });
-            return Promise.resolve({
-              imageUrl: `/images/generated-${generateImageRequests.length}.png`,
-            });
-          },
-          generateAgentTurnStream: async function* (req: AgentTurnRequest) {
-            await Promise.resolve();
-            iteration += 1;
+    await mockProviderRegistry(
+      async function* streamImageToolLifecycle(req: AgentTurnRequest) {
+        await Promise.resolve();
+        iteration += 1;
 
-            if (iteration === 1) {
-              yield { type: 'tool_call_started', callId: 'image-call-1', name: 'generate_image' };
-              yield {
-                type: 'tool_call_completed',
-                callId: 'image-call-1',
-                name: 'generate_image',
-                arguments: JSON.stringify({
-                  prompt: 'Paint mangoes',
-                  count: 2,
-                  model: 'test-image-model',
-                }),
-              };
-              yield { type: 'turn_completed', providerState: null };
-              return;
-            }
+        if (iteration !== 1) {
+          capturedToolResults = req.toolResults;
+          yield { type: 'assistant_text_delta', text: 'Images ready' };
+          yield { type: 'turn_completed', providerState: null };
+          return;
+        }
 
-            capturedToolResults = req.toolResults;
-            yield { type: 'assistant_text_delta', text: 'Images ready' };
-            yield { type: 'turn_completed', providerState: null };
-          },
-        }),
-    }));
+        yield { type: 'tool_call_started', callId: 'image-call-1', name: 'generate_image' };
+        yield {
+          type: 'tool_call_completed',
+          callId: 'image-call-1',
+          name: 'generate_image',
+          arguments: JSON.stringify({
+            prompt: 'Paint mangoes',
+            count: 2,
+            model: 'test-image-model',
+          }),
+        };
+        yield { type: 'turn_completed', providerState: null };
+      },
+      { generateImage: generateImage }
+    );
 
     const dbMock: Record<string, unknown> = {};
     Object.assign(dbMock, {
@@ -109,11 +105,7 @@ describe('POST /respond/stream — tools', () => {
     restoreAuth = restore;
 
     const response = await app.handle(
-      new Request('http://localhost/respond/stream', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chatId: 'test-chat', prompt: 'Make images', model: 'test-model' }),
-      })
+      buildRespondStreamRequest({ chatId: 'test-chat', prompt: 'Make images', model: 'test-model' })
     );
     const sseEvents = parseSseEvents(await response.text());
 
@@ -208,9 +200,7 @@ describe('POST /respond/stream — tools', () => {
   it('omits disabled tools from provider requests', async () => {
     let capturedToolDefinitions: AgentTurnRequest['toolDefinitions'];
 
-    await mock.module('../../../src/modules/chats/infrastructure/chat-repository', () => ({
-      verifyChatOwnership: () => Promise.resolve(true),
-    }));
+    await mockVerifiedChatOwnership();
 
     await mock.module(
       '../../../src/modules/tool-settings/infrastructure/tool-settings-repository',
@@ -225,37 +215,20 @@ describe('POST /respond/stream — tools', () => {
       })
     );
 
-    await mock.module('../../../src/services/providers/core/provider-registry', () => ({
-      getProviderForModel: () =>
-        Promise.resolve({
-          providerType: 'openai-compatible',
-          generateText: () => Promise.resolve({ text: '' }),
-          generateAgentTurnStream: async function* (req: AgentTurnRequest) {
-            await Promise.resolve();
-            capturedToolDefinitions = req.toolDefinitions;
-            yield { type: 'assistant_text_delta', text: 'Hi' };
-            yield { type: 'turn_completed', providerState: null };
-          },
-        }),
-    }));
+    await mockProviderRegistry(async function* streamToolDefinitions(req: AgentTurnRequest) {
+      await Promise.resolve();
+      capturedToolDefinitions = req.toolDefinitions;
+      yield { type: 'assistant_text_delta', text: 'Hi' };
+      yield { type: 'turn_completed', providerState: null };
+    });
 
-    await mock.module('../../../src/db/database', () => ({
-      getDb: () => ({
-        selectFrom: () => makeChain({ userId: TEST_USER.id }),
-        insertInto: () => ({ values: () => ({ execute: () => Promise.resolve() }) }),
-        updateTable: () => ({ set: () => makeChain(undefined) }),
-      }),
-    }));
+    await mock.module('../../../src/db/database', mockPassThroughDb(TEST_USER.id));
 
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
     restoreAuth = restore;
 
     const response = await app.handle(
-      new Request('http://localhost/respond/stream', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chatId: 'test-chat', prompt: 'Hello', model: 'test-model' }),
-      })
+      buildRespondStreamRequest({ chatId: 'test-chat', prompt: 'Hello', model: 'test-model' })
     );
     await response.text();
 
@@ -271,9 +244,7 @@ describe('POST /respond/stream — tools', () => {
   it('passes saved tool parameters into execution context', async () => {
     let iteration = 0;
 
-    await mock.module('../../../src/modules/chats/infrastructure/chat-repository', () => ({
-      verifyChatOwnership: () => Promise.resolve(true),
-    }));
+    await mockVerifiedChatOwnership();
 
     await mock.module(
       '../../../src/modules/tool-settings/infrastructure/tool-settings-repository',
@@ -290,30 +261,24 @@ describe('POST /respond/stream — tools', () => {
       })
     );
 
-    await mock.module('../../../src/services/providers/core/provider-registry', () => ({
-      getProviderForModel: () =>
-        Promise.resolve({
-          providerType: 'openai-compatible',
-          generateText: () => Promise.resolve({ text: '' }),
-          generateAgentTurnStream: async function* (_req: AgentTurnRequest) {
-            await Promise.resolve();
-            iteration += 1;
-            if (iteration === 1) {
-              yield { type: 'tool_call_started', callId: 'time-1', name: 'get_current_datetime' };
-              yield {
-                type: 'tool_call_completed',
-                callId: 'time-1',
-                name: 'get_current_datetime',
-                arguments: '{}',
-              };
-              yield { type: 'turn_completed', providerState: null };
-              return;
-            }
-            yield { type: 'assistant_text_delta', text: 'Done' };
-            yield { type: 'turn_completed', providerState: null };
-          },
-        }),
-    }));
+    await mockProviderRegistry(async function* streamSavedToolParameters() {
+      await Promise.resolve();
+      iteration += 1;
+      if (iteration !== 1) {
+        yield { type: 'assistant_text_delta', text: 'Done' };
+        yield { type: 'turn_completed', providerState: null };
+        return;
+      }
+
+      yield { type: 'tool_call_started', callId: 'time-1', name: 'get_current_datetime' };
+      yield {
+        type: 'tool_call_completed',
+        callId: 'time-1',
+        name: 'get_current_datetime',
+        arguments: '{}',
+      };
+      yield { type: 'turn_completed', providerState: null };
+    });
 
     await mock.module('../../../src/services/tools', () => ({
       getAllToolDefinitions: realGetAllToolDefinitions,
@@ -323,26 +288,16 @@ describe('POST /respond/stream — tools', () => {
       getSafeEffectiveToolSettings: realGetSafeEffectiveToolSettings,
     }));
 
-    await mock.module('../../../src/db/database', () => ({
-      getDb: () => ({
-        selectFrom: () => makeChain({ userId: TEST_USER.id }),
-        insertInto: () => ({ values: () => ({ execute: () => Promise.resolve() }) }),
-        updateTable: () => ({ set: () => makeChain(undefined) }),
-      }),
-    }));
+    await mock.module('../../../src/db/database', mockPassThroughDb(TEST_USER.id));
 
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
     restoreAuth = restore;
 
     const response = await app.handle(
-      new Request('http://localhost/respond/stream', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          chatId: 'test-chat',
-          prompt: 'What time is it?',
-          model: 'test-model',
-        }),
+      buildRespondStreamRequest({
+        chatId: 'test-chat',
+        prompt: 'What time is it?',
+        model: 'test-model',
       })
     );
     const toolResult = parseSseEvents(await response.text()).find(

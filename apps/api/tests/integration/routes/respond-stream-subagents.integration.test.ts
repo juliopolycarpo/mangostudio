@@ -5,8 +5,14 @@ import type { AgentTurnRequest } from '../../../src/services/providers/types';
 import { insertTestUser, type UserFixture } from '../../support/factories';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
 import {
-  makeAgentProfile,
-  makeChain,
+  buildRespondStreamRequest,
+  createSubagentDelegationError,
+  mockDbWithMessageCapture,
+  mockMultiAgentAppSettings,
+  mockPassThroughDb,
+  mockProviderRegistry,
+  mockSubagentAgentSettings,
+  mockVerifiedChatOwnership,
   parsePersistedParts,
   parseSseEvents,
   restoreAllMocks,
@@ -28,104 +34,53 @@ afterEach(async () => {
 
 describe('POST /respond/stream — subagent delegation', () => {
   it('streams subagent lifecycle events and persists a delegation trace', async () => {
-    const insertedMessages: Array<Record<string, unknown>> = [];
+    const dbMock = mockDbWithMessageCapture(TEST_USER.id);
     const parentToolResults: string[] = [];
 
-    await mock.module('../../../src/modules/chats/infrastructure/chat-repository', () => ({
-      verifyChatOwnership: () => Promise.resolve(true),
-    }));
+    await mockVerifiedChatOwnership();
+    await mockSubagentAgentSettings();
 
-    await mock.module('../../../src/modules/agents/application/agent-settings-service', () => ({
-      getAgentProfile: (_db: unknown, _userId: string, agentId: string) =>
-        Promise.resolve(
-          agentId === 'user:explorer'
-            ? makeAgentProfile({
-                id: 'user:explorer',
-                name: 'Explore',
-                role: 'subagent',
-                systemPrompt: 'Explore the codebase.',
-                toolNames: [],
-                toolsEnabled: false,
-              })
-            : makeAgentProfile({
-                id: 'default',
-                name: 'Default',
-                role: 'both',
-                systemPrompt: 'Delegate exploration when useful.',
-                toolNames: ['delegate_to_agent'],
-                toolsEnabled: true,
-                subagentIds: ['user:explorer'],
-              })
-        ),
-    }));
+    await mockProviderRegistry(async function* streamDelegationLifecycle(req: AgentTurnRequest) {
+      await Promise.resolve();
+      if (req.agentId === 'user:explorer') {
+        yield { type: 'assistant_text_delta', text: 'Found the relevant files.' };
+        yield { type: 'turn_completed', providerState: null };
+        return;
+      }
 
-    await mock.module('../../../src/services/providers/core/provider-registry', () => ({
-      getProviderForModel: () =>
-        Promise.resolve({
-          providerType: 'openai-compatible',
-          generateText: () => Promise.resolve({ text: '' }),
-          generateAgentTurnStream: async function* (req: AgentTurnRequest) {
-            await Promise.resolve();
-            if (req.agentId === 'user:explorer') {
-              yield { type: 'assistant_text_delta', text: 'Found the relevant files.' };
-              yield { type: 'turn_completed', providerState: null };
-              return;
-            }
+      if (req.toolResults) {
+        parentToolResults.push(req.toolResults[0]?.result ?? '');
+        yield { type: 'assistant_text_delta', text: 'Used Explore.' };
+        yield { type: 'turn_completed', providerState: null };
+        return;
+      }
 
-            if (!req.toolResults) {
-              yield {
-                type: 'tool_call_started',
-                callId: 'delegate-1',
-                name: 'delegate_to_agent',
-              };
-              yield {
-                type: 'tool_call_completed',
-                callId: 'delegate-1',
-                name: 'delegate_to_agent',
-                arguments: JSON.stringify({
-                  agentId: 'user:explorer',
-                  task: 'Find the relevant files for this feature.',
-                  expectedOutput: 'Concise file summary.',
-                }),
-              };
-              yield { type: 'turn_completed', providerState: null };
-              return;
-            }
-
-            parentToolResults.push(req.toolResults[0]?.result ?? '');
-            yield { type: 'assistant_text_delta', text: 'Used Explore.' };
-            yield { type: 'turn_completed', providerState: null };
-          },
+      yield { type: 'tool_call_started', callId: 'delegate-1', name: 'delegate_to_agent' };
+      yield {
+        type: 'tool_call_completed',
+        callId: 'delegate-1',
+        name: 'delegate_to_agent',
+        arguments: JSON.stringify({
+          agentId: 'user:explorer',
+          task: 'Find the relevant files for this feature.',
+          expectedOutput: 'Concise file summary.',
         }),
-    }));
+      };
+      yield { type: 'turn_completed', providerState: null };
+    });
 
-    await mock.module('../../../src/db/database', () => ({
-      getDb: () => ({
-        selectFrom: () => makeChain({ userId: TEST_USER.id }),
-        insertInto: (_table: string) => ({
-          values: (values: Record<string, unknown>) => {
-            if (_table === 'messages') insertedMessages.push({ ...values });
-            return { execute: () => Promise.resolve() };
-          },
-        }),
-        updateTable: () => ({ set: () => makeChain(undefined) }),
-      }),
-    }));
+    await mock.module('../../../src/db/database', dbMock.moduleFactory);
 
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
     restoreAuth = restore;
 
     const response = await app.handle(
-      new Request('http://localhost/respond/stream', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          chatId: 'test-chat',
-          prompt: 'Use an explorer.',
-          model: 'test-model',
-          agentMode: 'agent',
-          agentId: 'default',
-        }),
+      buildRespondStreamRequest({
+        chatId: 'test-chat',
+        prompt: 'Use an explorer.',
+        model: 'test-model',
+        agentMode: 'agent',
+        agentId: 'default',
       })
     );
 
@@ -137,7 +92,7 @@ describe('POST /respond/stream — subagent delegation', () => {
     expect(sseEvents.map((event) => event.type)).toContain('subagent_completed');
     expect(parentToolResults[0]).toContain('Found the relevant files.');
 
-    const aiMessage = insertedMessages.find((message) => message.role === 'ai');
+    const aiMessage = dbMock.insertedMessages.find((message) => message.role === 'ai');
     expect(aiMessage).toBeDefined();
     const parts = parsePersistedParts(aiMessage?.parts);
     expect(parts.find((part) => part.type === 'subagent_trace')).toMatchObject({
@@ -153,33 +108,10 @@ describe('POST /respond/stream — subagent delegation', () => {
     const parentToolResults: string[] = [];
     let summarizeTurnCount = 0;
 
-    await mock.module('../../../src/modules/chats/infrastructure/chat-repository', () => ({
-      verifyChatOwnership: () => Promise.resolve(true),
-    }));
-
-    await mock.module('../../../src/modules/agents/application/agent-settings-service', () => ({
-      getAgentProfile: (_db: unknown, _userId: string, agentId: string) =>
-        Promise.resolve(
-          agentId === 'user:explorer'
-            ? makeAgentProfile({
-                id: 'user:explorer',
-                name: 'Explore',
-                role: 'subagent',
-                systemPrompt: 'Explore the codebase.',
-                toolNames: ['noop'],
-                toolsEnabled: true,
-              })
-            : makeAgentProfile({
-                id: 'default',
-                name: 'Default',
-                role: 'both',
-                systemPrompt: 'Delegate exploration when useful.',
-                toolNames: ['delegate_to_agent'],
-                toolsEnabled: true,
-                subagentIds: ['user:explorer'],
-              })
-        ),
-    }));
+    await mockVerifiedChatOwnership();
+    await mockSubagentAgentSettings({
+      subagentOverrides: { toolNames: ['noop'], toolsEnabled: true },
+    });
 
     await mock.module('../../../src/services/tools', () => {
       const noopTool = {
@@ -252,98 +184,47 @@ describe('POST /respond/stream — subagent delegation', () => {
       };
     });
 
-    await mock.module('../../../src/services/providers/core/provider-registry', () => {
-      return {
-        getProviderForModel: () =>
-          Promise.resolve({
-            providerType: 'openai-compatible',
-            generateText: () => Promise.resolve({ text: '' }),
-            generateAgentTurnStream: async function* (req: AgentTurnRequest) {
-              await Promise.resolve();
-              if (req.agentId === 'user:explorer') {
-                const isSummarizeTurn =
-                  (req.toolDefinitions?.length ?? 0) === 0 &&
-                  typeof req.prompt === 'string' &&
-                  req.prompt.length > 0;
-                if (isSummarizeTurn) {
-                  summarizeTurnCount += 1;
-                  yield { type: 'assistant_text_delta', text: 'I explored the files.' };
-                  yield { type: 'turn_completed', providerState: null };
-                  return;
-                }
+    await mockProviderRegistry(async function* streamSummarizeFallback(req: AgentTurnRequest) {
+      await Promise.resolve();
+      if (req.agentId === 'user:explorer') {
+        yield* streamExplorerToolTurn(req, () => {
+          summarizeTurnCount += 1;
+        });
+        return;
+      }
 
-                if (!req.toolResults) {
-                  yield { type: 'tool_call_started', callId: 'noop-1', name: 'noop' };
-                  yield {
-                    type: 'tool_call_completed',
-                    callId: 'noop-1',
-                    name: 'noop',
-                    arguments: '{}',
-                  };
-                  yield { type: 'tool_call_started', callId: 'noop-2', name: 'noop' };
-                  yield {
-                    type: 'tool_call_completed',
-                    callId: 'noop-2',
-                    name: 'noop',
-                    arguments: '{}',
-                  };
-                  yield { type: 'turn_completed', providerState: null };
-                  return;
-                }
+      if (req.toolResults) {
+        parentToolResults.push(req.toolResults[0]?.result ?? '');
+        yield { type: 'assistant_text_delta', text: 'OK' };
+        yield { type: 'turn_completed', providerState: null };
+        return;
+      }
 
-                yield { type: 'turn_completed', providerState: null };
-                return;
-              }
-
-              if (!req.toolResults) {
-                yield {
-                  type: 'tool_call_started',
-                  callId: 'delegate-1',
-                  name: 'delegate_to_agent',
-                };
-                yield {
-                  type: 'tool_call_completed',
-                  callId: 'delegate-1',
-                  name: 'delegate_to_agent',
-                  arguments: JSON.stringify({
-                    agentId: 'user:explorer',
-                    task: 'Run tools without producing text.',
-                  }),
-                };
-                yield { type: 'turn_completed', providerState: null };
-                return;
-              }
-
-              parentToolResults.push(req.toolResults[0]?.result ?? '');
-              yield { type: 'assistant_text_delta', text: 'OK' };
-              yield { type: 'turn_completed', providerState: null };
-            },
-          }),
+      yield { type: 'tool_call_started', callId: 'delegate-1', name: 'delegate_to_agent' };
+      yield {
+        type: 'tool_call_completed',
+        callId: 'delegate-1',
+        name: 'delegate_to_agent',
+        arguments: JSON.stringify({
+          agentId: 'user:explorer',
+          task: 'Run tools without producing text.',
+        }),
       };
+      yield { type: 'turn_completed', providerState: null };
     });
 
-    await mock.module('../../../src/db/database', () => ({
-      getDb: () => ({
-        selectFrom: () => makeChain({ userId: TEST_USER.id }),
-        insertInto: () => ({ values: () => ({ execute: () => Promise.resolve() }) }),
-        updateTable: () => ({ set: () => makeChain(undefined) }),
-      }),
-    }));
+    await mock.module('../../../src/db/database', mockPassThroughDb(TEST_USER.id));
 
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
     restoreAuth = restore;
 
     const response = await app.handle(
-      new Request('http://localhost/respond/stream', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          chatId: 'test-chat',
-          prompt: 'Use an explorer.',
-          model: 'test-model',
-          agentMode: 'agent',
-          agentId: 'default',
-        }),
+      buildRespondStreamRequest({
+        chatId: 'test-chat',
+        prompt: 'Use an explorer.',
+        model: 'test-model',
+        agentMode: 'agent',
+        agentId: 'default',
       })
     );
 
@@ -358,33 +239,8 @@ describe('POST /respond/stream — subagent delegation', () => {
     const parentToolResults: string[] = [];
     let callCount = 0;
 
-    await mock.module('../../../src/modules/chats/infrastructure/chat-repository', () => ({
-      verifyChatOwnership: () => Promise.resolve(true),
-    }));
-
-    await mock.module('../../../src/modules/agents/application/agent-settings-service', () => ({
-      getAgentProfile: (_db: unknown, _userId: string, agentId: string) =>
-        Promise.resolve(
-          agentId === 'user:explorer'
-            ? makeAgentProfile({
-                id: 'user:explorer',
-                name: 'Explore',
-                role: 'subagent',
-                systemPrompt: 'Explore the codebase.',
-                toolNames: [],
-                toolsEnabled: false,
-              })
-            : makeAgentProfile({
-                id: 'default',
-                name: 'Default',
-                role: 'both',
-                systemPrompt: 'Delegate exploration when useful.',
-                toolNames: ['delegate_to_agent'],
-                toolsEnabled: true,
-                subagentIds: ['user:explorer'],
-              })
-        ),
-    }));
+    await mockVerifiedChatOwnership();
+    await mockSubagentAgentSettings();
 
     await mock.module('../../../src/modules/generation/application/subagent-runner', () => ({
       runSubagentTurn: () => {
@@ -413,15 +269,7 @@ describe('POST /respond/stream — subagent delegation', () => {
           },
         });
       },
-      SubagentDelegationError: class SubagentDelegationError extends Error {
-        constructor(
-          message: string,
-          readonly code: string
-        ) {
-          super(message);
-          this.name = 'SubagentDelegationError';
-        }
-      },
+      SubagentDelegationError: createSubagentDelegationError(),
     }));
 
     await mock.module('../../../src/services/tools', () => ({
@@ -448,54 +296,37 @@ describe('POST /respond/stream — subagent delegation', () => {
       executeTool: () => Promise.resolve({}),
     }));
 
-    await mock.module('../../../src/services/providers/core/provider-registry', () => ({
-      getProviderForModel: () =>
-        Promise.resolve({
-          providerType: 'openai-compatible',
-          generateText: () => Promise.resolve({ text: '' }),
-          generateAgentTurnStream: async function* (req: AgentTurnRequest) {
-            await Promise.resolve();
-            if (!req.toolResults) {
-              yield { type: 'tool_call_started', callId: 'delegate-1', name: 'delegate_to_agent' };
-              yield {
-                type: 'tool_call_completed',
-                callId: 'delegate-1',
-                name: 'delegate_to_agent',
-                arguments: JSON.stringify({ agentId: 'user:explorer', task: 'Test retry.' }),
-              };
-              yield { type: 'turn_completed', providerState: null };
-              return;
-            }
+    await mockProviderRegistry(async function* streamDelegationRetry(req: AgentTurnRequest) {
+      await Promise.resolve();
+      if (req.toolResults) {
+        parentToolResults.push(req.toolResults[0]?.result ?? '');
+        yield { type: 'assistant_text_delta', text: 'OK' };
+        yield { type: 'turn_completed', providerState: null };
+        return;
+      }
 
-            parentToolResults.push(req.toolResults[0]?.result ?? '');
-            yield { type: 'assistant_text_delta', text: 'OK' };
-            yield { type: 'turn_completed', providerState: null };
-          },
-        }),
-    }));
+      yield { type: 'tool_call_started', callId: 'delegate-1', name: 'delegate_to_agent' };
+      yield {
+        type: 'tool_call_completed',
+        callId: 'delegate-1',
+        name: 'delegate_to_agent',
+        arguments: JSON.stringify({ agentId: 'user:explorer', task: 'Test retry.' }),
+      };
+      yield { type: 'turn_completed', providerState: null };
+    });
 
-    await mock.module('../../../src/db/database', () => ({
-      getDb: () => ({
-        selectFrom: () => makeChain({ userId: TEST_USER.id }),
-        insertInto: () => ({ values: () => ({ execute: () => Promise.resolve() }) }),
-        updateTable: () => ({ set: () => makeChain(undefined) }),
-      }),
-    }));
+    await mock.module('../../../src/db/database', mockPassThroughDb(TEST_USER.id));
 
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
     restoreAuth = restore;
 
     const response = await app.handle(
-      new Request('http://localhost/respond/stream', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          chatId: 'test-chat',
-          prompt: 'Use an explorer.',
-          model: 'test-model',
-          agentMode: 'agent',
-          agentId: 'default',
-        }),
+      buildRespondStreamRequest({
+        chatId: 'test-chat',
+        prompt: 'Use an explorer.',
+        model: 'test-model',
+        agentMode: 'agent',
+        agentId: 'default',
       })
     );
 
@@ -509,48 +340,9 @@ describe('POST /respond/stream — subagent delegation', () => {
     const parentToolResults: string[] = [];
     let callCount = 0;
 
-    await mock.module('../../../src/modules/chats/infrastructure/chat-repository', () => ({
-      verifyChatOwnership: () => Promise.resolve(true),
-    }));
-
-    await mock.module('../../../src/modules/app-settings/application/app-settings-service', () => ({
-      getAppSettings: () =>
-        Promise.resolve({
-          multiAgentSettings: {
-            enabled: true,
-            chatDelegationEnabled: true,
-            traceVisibility: 'full',
-            maxDepth: 2,
-            maxSubagentCalls: 5,
-            timeoutMs: 5_000,
-            defaultMaxTurns: 2,
-          },
-        }),
-    }));
-
-    await mock.module('../../../src/modules/agents/application/agent-settings-service', () => ({
-      getAgentProfile: (_db: unknown, _userId: string, agentId: string) =>
-        Promise.resolve(
-          agentId === 'user:explorer'
-            ? makeAgentProfile({
-                id: 'user:explorer',
-                name: 'Explore',
-                role: 'subagent',
-                systemPrompt: 'Explore the codebase.',
-                toolNames: [],
-                toolsEnabled: false,
-              })
-            : makeAgentProfile({
-                id: 'default',
-                name: 'Default',
-                role: 'both',
-                systemPrompt: 'Delegate exploration when useful.',
-                toolNames: ['delegate_to_agent'],
-                toolsEnabled: true,
-                subagentIds: ['user:explorer'],
-              })
-        ),
-    }));
+    await mockVerifiedChatOwnership();
+    await mockMultiAgentAppSettings();
+    await mockSubagentAgentSettings();
 
     await mock.module('../../../src/modules/generation/application/subagent-runner', () => ({
       runSubagentTurn: (input: {
@@ -574,15 +366,7 @@ describe('POST /respond/stream — subagent delegation', () => {
         });
         return Promise.resolve({});
       },
-      SubagentDelegationError: class SubagentDelegationError extends Error {
-        constructor(
-          message: string,
-          readonly code: string
-        ) {
-          super(message);
-          this.name = 'SubagentDelegationError';
-        }
-      },
+      SubagentDelegationError: createSubagentDelegationError(),
     }));
 
     await mock.module('../../../src/services/tools', () => ({
@@ -609,54 +393,37 @@ describe('POST /respond/stream — subagent delegation', () => {
       executeTool: () => Promise.resolve({}),
     }));
 
-    await mock.module('../../../src/services/providers/core/provider-registry', () => ({
-      getProviderForModel: () =>
-        Promise.resolve({
-          providerType: 'openai-compatible',
-          generateText: () => Promise.resolve({ text: '' }),
-          generateAgentTurnStream: async function* (req: AgentTurnRequest) {
-            await Promise.resolve();
-            if (!req.toolResults) {
-              yield { type: 'tool_call_started', callId: 'delegate-1', name: 'delegate_to_agent' };
-              yield {
-                type: 'tool_call_completed',
-                callId: 'delegate-1',
-                name: 'delegate_to_agent',
-                arguments: JSON.stringify({ agentId: 'user:explorer', task: 'Stream then drop.' }),
-              };
-              yield { type: 'turn_completed', providerState: null };
-              return;
-            }
+    await mockProviderRegistry(async function* streamCacheRecovery(req: AgentTurnRequest) {
+      await Promise.resolve();
+      if (req.toolResults) {
+        parentToolResults.push(req.toolResults[0]?.result ?? '');
+        yield { type: 'assistant_text_delta', text: 'OK' };
+        yield { type: 'turn_completed', providerState: null };
+        return;
+      }
 
-            parentToolResults.push(req.toolResults[0]?.result ?? '');
-            yield { type: 'assistant_text_delta', text: 'OK' };
-            yield { type: 'turn_completed', providerState: null };
-          },
-        }),
-    }));
+      yield { type: 'tool_call_started', callId: 'delegate-1', name: 'delegate_to_agent' };
+      yield {
+        type: 'tool_call_completed',
+        callId: 'delegate-1',
+        name: 'delegate_to_agent',
+        arguments: JSON.stringify({ agentId: 'user:explorer', task: 'Stream then drop.' }),
+      };
+      yield { type: 'turn_completed', providerState: null };
+    });
 
-    await mock.module('../../../src/db/database', () => ({
-      getDb: () => ({
-        selectFrom: () => makeChain({ userId: TEST_USER.id }),
-        insertInto: () => ({ values: () => ({ execute: () => Promise.resolve() }) }),
-        updateTable: () => ({ set: () => makeChain(undefined) }),
-      }),
-    }));
+    await mock.module('../../../src/db/database', mockPassThroughDb(TEST_USER.id));
 
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
     restoreAuth = restore;
 
     const response = await app.handle(
-      new Request('http://localhost/respond/stream', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          chatId: 'test-chat',
-          prompt: 'Use an explorer.',
-          model: 'test-model',
-          agentMode: 'agent',
-          agentId: 'default',
-        }),
+      buildRespondStreamRequest({
+        chatId: 'test-chat',
+        prompt: 'Use an explorer.',
+        model: 'test-model',
+        agentMode: 'agent',
+        agentId: 'default',
       })
     );
 
@@ -671,63 +438,16 @@ describe('POST /respond/stream — subagent delegation', () => {
     const parentToolResults: string[] = [];
     let callCount = 0;
 
-    await mock.module('../../../src/modules/chats/infrastructure/chat-repository', () => ({
-      verifyChatOwnership: () => Promise.resolve(true),
-    }));
-
-    await mock.module('../../../src/modules/app-settings/application/app-settings-service', () => ({
-      getAppSettings: () =>
-        Promise.resolve({
-          multiAgentSettings: {
-            enabled: true,
-            chatDelegationEnabled: true,
-            traceVisibility: 'full',
-            maxDepth: 2,
-            maxSubagentCalls: 5,
-            timeoutMs: 5_000,
-            defaultMaxTurns: 2,
-          },
-        }),
-    }));
-
-    await mock.module('../../../src/modules/agents/application/agent-settings-service', () => ({
-      getAgentProfile: (_db: unknown, _userId: string, agentId: string) =>
-        Promise.resolve(
-          agentId === 'user:explorer'
-            ? makeAgentProfile({
-                id: 'user:explorer',
-                name: 'Explore',
-                role: 'subagent',
-                systemPrompt: 'Explore the codebase.',
-                toolNames: [],
-                toolsEnabled: false,
-              })
-            : makeAgentProfile({
-                id: 'default',
-                name: 'Default',
-                role: 'both',
-                systemPrompt: 'Delegate exploration when useful.',
-                toolNames: ['delegate_to_agent'],
-                toolsEnabled: true,
-                subagentIds: ['user:explorer'],
-              })
-        ),
-    }));
+    await mockVerifiedChatOwnership();
+    await mockMultiAgentAppSettings();
+    await mockSubagentAgentSettings();
 
     await mock.module('../../../src/modules/generation/application/subagent-runner', () => ({
       runSubagentTurn: () => {
         callCount += 1;
         return Promise.resolve({});
       },
-      SubagentDelegationError: class SubagentDelegationError extends Error {
-        constructor(
-          message: string,
-          readonly code: string
-        ) {
-          super(message);
-          this.name = 'SubagentDelegationError';
-        }
-      },
+      SubagentDelegationError: createSubagentDelegationError(),
     }));
 
     await mock.module('../../../src/services/tools', () => ({
@@ -754,54 +474,37 @@ describe('POST /respond/stream — subagent delegation', () => {
       executeTool: () => Promise.resolve({}),
     }));
 
-    await mock.module('../../../src/services/providers/core/provider-registry', () => ({
-      getProviderForModel: () =>
-        Promise.resolve({
-          providerType: 'openai-compatible',
-          generateText: () => Promise.resolve({ text: '' }),
-          generateAgentTurnStream: async function* (req: AgentTurnRequest) {
-            await Promise.resolve();
-            if (!req.toolResults) {
-              yield { type: 'tool_call_started', callId: 'delegate-1', name: 'delegate_to_agent' };
-              yield {
-                type: 'tool_call_completed',
-                callId: 'delegate-1',
-                name: 'delegate_to_agent',
-                arguments: JSON.stringify({ agentId: 'user:explorer', task: 'No output.' }),
-              };
-              yield { type: 'turn_completed', providerState: null };
-              return;
-            }
+    await mockProviderRegistry(async function* streamNoOutputFallback(req: AgentTurnRequest) {
+      await Promise.resolve();
+      if (req.toolResults) {
+        parentToolResults.push(req.toolResults[0]?.result ?? '');
+        yield { type: 'assistant_text_delta', text: 'OK' };
+        yield { type: 'turn_completed', providerState: null };
+        return;
+      }
 
-            parentToolResults.push(req.toolResults[0]?.result ?? '');
-            yield { type: 'assistant_text_delta', text: 'OK' };
-            yield { type: 'turn_completed', providerState: null };
-          },
-        }),
-    }));
+      yield { type: 'tool_call_started', callId: 'delegate-1', name: 'delegate_to_agent' };
+      yield {
+        type: 'tool_call_completed',
+        callId: 'delegate-1',
+        name: 'delegate_to_agent',
+        arguments: JSON.stringify({ agentId: 'user:explorer', task: 'No output.' }),
+      };
+      yield { type: 'turn_completed', providerState: null };
+    });
 
-    await mock.module('../../../src/db/database', () => ({
-      getDb: () => ({
-        selectFrom: () => makeChain({ userId: TEST_USER.id }),
-        insertInto: () => ({ values: () => ({ execute: () => Promise.resolve() }) }),
-        updateTable: () => ({ set: () => makeChain(undefined) }),
-      }),
-    }));
+    await mock.module('../../../src/db/database', mockPassThroughDb(TEST_USER.id));
 
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
     restoreAuth = restore;
 
     const response = await app.handle(
-      new Request('http://localhost/respond/stream', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          chatId: 'test-chat',
-          prompt: 'Use an explorer.',
-          model: 'test-model',
-          agentMode: 'agent',
-          agentId: 'default',
-        }),
+      buildRespondStreamRequest({
+        chatId: 'test-chat',
+        prompt: 'Use an explorer.',
+        model: 'test-model',
+        agentMode: 'agent',
+        agentId: 'default',
       })
     );
 
@@ -815,63 +518,16 @@ describe('POST /respond/stream — subagent delegation', () => {
     const parentToolResults: string[] = [];
     let callCount = 0;
 
-    await mock.module('../../../src/modules/chats/infrastructure/chat-repository', () => ({
-      verifyChatOwnership: () => Promise.resolve(true),
-    }));
-
-    await mock.module('../../../src/modules/app-settings/application/app-settings-service', () => ({
-      getAppSettings: () =>
-        Promise.resolve({
-          multiAgentSettings: {
-            enabled: true,
-            chatDelegationEnabled: true,
-            traceVisibility: 'full',
-            maxDepth: 2,
-            maxSubagentCalls: 5,
-            timeoutMs: 25,
-            defaultMaxTurns: 2,
-          },
-        }),
-    }));
-
-    await mock.module('../../../src/modules/agents/application/agent-settings-service', () => ({
-      getAgentProfile: (_db: unknown, _userId: string, agentId: string) =>
-        Promise.resolve(
-          agentId === 'user:explorer'
-            ? makeAgentProfile({
-                id: 'user:explorer',
-                name: 'Explore',
-                role: 'subagent',
-                systemPrompt: 'Explore the codebase.',
-                toolNames: [],
-                toolsEnabled: false,
-              })
-            : makeAgentProfile({
-                id: 'default',
-                name: 'Default',
-                role: 'both',
-                systemPrompt: 'Delegate exploration when useful.',
-                toolNames: ['delegate_to_agent'],
-                toolsEnabled: true,
-                subagentIds: ['user:explorer'],
-              })
-        ),
-    }));
+    await mockVerifiedChatOwnership();
+    await mockMultiAgentAppSettings({ timeoutMs: 25 });
+    await mockSubagentAgentSettings();
 
     await mock.module('../../../src/modules/generation/application/subagent-runner', () => ({
       runSubagentTurn: () => {
         callCount += 1;
         return new Promise(() => undefined);
       },
-      SubagentDelegationError: class SubagentDelegationError extends Error {
-        constructor(
-          message: string,
-          readonly code: string
-        ) {
-          super(message);
-          this.name = 'SubagentDelegationError';
-        }
-      },
+      SubagentDelegationError: createSubagentDelegationError(),
     }));
 
     await mock.module('../../../src/services/tools', () => ({
@@ -898,54 +554,37 @@ describe('POST /respond/stream — subagent delegation', () => {
       executeTool: () => Promise.resolve({}),
     }));
 
-    await mock.module('../../../src/services/providers/core/provider-registry', () => ({
-      getProviderForModel: () =>
-        Promise.resolve({
-          providerType: 'openai-compatible',
-          generateText: () => Promise.resolve({ text: '' }),
-          generateAgentTurnStream: async function* (req: AgentTurnRequest) {
-            await Promise.resolve();
-            if (!req.toolResults) {
-              yield { type: 'tool_call_started', callId: 'delegate-1', name: 'delegate_to_agent' };
-              yield {
-                type: 'tool_call_completed',
-                callId: 'delegate-1',
-                name: 'delegate_to_agent',
-                arguments: JSON.stringify({ agentId: 'user:explorer', task: 'Hang forever.' }),
-              };
-              yield { type: 'turn_completed', providerState: null };
-              return;
-            }
+    await mockProviderRegistry(async function* streamTimeoutFallback(req: AgentTurnRequest) {
+      await Promise.resolve();
+      if (req.toolResults) {
+        parentToolResults.push(req.toolResults[0]?.result ?? '');
+        yield { type: 'assistant_text_delta', text: 'OK' };
+        yield { type: 'turn_completed', providerState: null };
+        return;
+      }
 
-            parentToolResults.push(req.toolResults[0]?.result ?? '');
-            yield { type: 'assistant_text_delta', text: 'OK' };
-            yield { type: 'turn_completed', providerState: null };
-          },
-        }),
-    }));
+      yield { type: 'tool_call_started', callId: 'delegate-1', name: 'delegate_to_agent' };
+      yield {
+        type: 'tool_call_completed',
+        callId: 'delegate-1',
+        name: 'delegate_to_agent',
+        arguments: JSON.stringify({ agentId: 'user:explorer', task: 'Hang forever.' }),
+      };
+      yield { type: 'turn_completed', providerState: null };
+    });
 
-    await mock.module('../../../src/db/database', () => ({
-      getDb: () => ({
-        selectFrom: () => makeChain({ userId: TEST_USER.id }),
-        insertInto: () => ({ values: () => ({ execute: () => Promise.resolve() }) }),
-        updateTable: () => ({ set: () => makeChain(undefined) }),
-      }),
-    }));
+    await mock.module('../../../src/db/database', mockPassThroughDb(TEST_USER.id));
 
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
     restoreAuth = restore;
 
     const response = await app.handle(
-      new Request('http://localhost/respond/stream', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          chatId: 'test-chat',
-          prompt: 'Use an explorer.',
-          model: 'test-model',
-          agentMode: 'agent',
-          agentId: 'default',
-        }),
+      buildRespondStreamRequest({
+        chatId: 'test-chat',
+        prompt: 'Use an explorer.',
+        model: 'test-model',
+        agentMode: 'agent',
+        agentId: 'default',
       })
     );
 
@@ -958,48 +597,9 @@ describe('POST /respond/stream — subagent delegation', () => {
   it('runs 1000+ delegation cycles with 0% empty tool results', async () => {
     let delegationIndex = 0;
 
-    await mock.module('../../../src/modules/chats/infrastructure/chat-repository', () => ({
-      verifyChatOwnership: () => Promise.resolve(true),
-    }));
-
-    await mock.module('../../../src/modules/app-settings/application/app-settings-service', () => ({
-      getAppSettings: () =>
-        Promise.resolve({
-          multiAgentSettings: {
-            enabled: true,
-            chatDelegationEnabled: true,
-            traceVisibility: 'off',
-            maxDepth: 2,
-            maxSubagentCalls: 10,
-            timeoutMs: 5_000,
-            defaultMaxTurns: 2,
-          },
-        }),
-    }));
-
-    await mock.module('../../../src/modules/agents/application/agent-settings-service', () => ({
-      getAgentProfile: (_db: unknown, _userId: string, agentId: string) =>
-        Promise.resolve(
-          agentId === 'user:explorer'
-            ? makeAgentProfile({
-                id: 'user:explorer',
-                name: 'Explore',
-                role: 'subagent',
-                systemPrompt: 'Explore the codebase.',
-                toolNames: [],
-                toolsEnabled: false,
-              })
-            : makeAgentProfile({
-                id: 'default',
-                name: 'Default',
-                role: 'both',
-                systemPrompt: 'Delegate exploration when useful.',
-                toolNames: ['delegate_to_agent'],
-                toolsEnabled: true,
-                subagentIds: ['user:explorer'],
-              })
-        ),
-    }));
+    await mockVerifiedChatOwnership();
+    await mockMultiAgentAppSettings({ traceVisibility: 'off', maxSubagentCalls: 10 });
+    await mockSubagentAgentSettings();
 
     await mock.module('../../../src/modules/generation/application/subagent-runner', () => ({
       runSubagentTurn: () =>
@@ -1025,15 +625,7 @@ describe('POST /respond/stream — subagent delegation', () => {
             tools: [],
           },
         }),
-      SubagentDelegationError: class SubagentDelegationError extends Error {
-        constructor(
-          message: string,
-          readonly code: string
-        ) {
-          super(message);
-          this.name = 'SubagentDelegationError';
-        }
-      },
+      SubagentDelegationError: createSubagentDelegationError(),
     }));
 
     await mock.module('../../../src/services/tools', () => ({
@@ -1060,62 +652,45 @@ describe('POST /respond/stream — subagent delegation', () => {
       executeTool: () => Promise.resolve({}),
     }));
 
-    await mock.module('../../../src/services/providers/core/provider-registry', () => ({
-      getProviderForModel: () =>
-        Promise.resolve({
-          providerType: 'openai-compatible',
-          generateText: () => Promise.resolve({ text: '' }),
-          generateAgentTurnStream: async function* (req: AgentTurnRequest) {
-            await Promise.resolve();
-            if (!req.toolResults) {
-              delegationIndex += 1;
-              const callId = `delegate-${delegationIndex}`;
-              yield { type: 'tool_call_started', callId, name: 'delegate_to_agent' };
-              yield {
-                type: 'tool_call_completed',
-                callId,
-                name: 'delegate_to_agent',
-                arguments: JSON.stringify({ agentId: 'user:explorer', task: `Cycle ${callId}` }),
-              };
-              yield { type: 'turn_completed', providerState: null };
-              return;
-            }
+    await mockProviderRegistry(async function* streamManyDelegations(req: AgentTurnRequest) {
+      await Promise.resolve();
+      if (req.toolResults) {
+        const raw = req.toolResults[0]?.result ?? '';
+        const parsed = JSON.parse(raw) as { summary?: unknown; tools?: unknown };
+        if (typeof parsed.summary !== 'string' || !parsed.summary.trim()) {
+          throw new Error(`Empty subagent summary detected: ${raw.slice(0, 200)}`);
+        }
+        expect(parsed.tools).toBeUndefined();
+        yield { type: 'assistant_text_delta', text: 'OK' };
+        yield { type: 'turn_completed', providerState: null };
+        return;
+      }
 
-            const raw = req.toolResults[0]?.result ?? '';
-            const parsed = JSON.parse(raw) as { summary?: unknown; tools?: unknown };
-            if (typeof parsed.summary !== 'string' || !parsed.summary.trim()) {
-              throw new Error(`Empty subagent summary detected: ${raw.slice(0, 200)}`);
-            }
-            expect(parsed.tools).toBeUndefined();
-            yield { type: 'assistant_text_delta', text: 'OK' };
-            yield { type: 'turn_completed', providerState: null };
-          },
-        }),
-    }));
+      delegationIndex += 1;
+      const callId = `delegate-${delegationIndex}`;
+      yield { type: 'tool_call_started', callId, name: 'delegate_to_agent' };
+      yield {
+        type: 'tool_call_completed',
+        callId,
+        name: 'delegate_to_agent',
+        arguments: JSON.stringify({ agentId: 'user:explorer', task: `Cycle ${callId}` }),
+      };
+      yield { type: 'turn_completed', providerState: null };
+    });
 
-    await mock.module('../../../src/db/database', () => ({
-      getDb: () => ({
-        selectFrom: () => makeChain({ userId: TEST_USER.id }),
-        insertInto: () => ({ values: () => ({ execute: () => Promise.resolve() }) }),
-        updateTable: () => ({ set: () => makeChain(undefined) }),
-      }),
-    }));
+    await mock.module('../../../src/db/database', mockPassThroughDb(TEST_USER.id));
 
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
     restoreAuth = restore;
 
     for (let i = 0; i < 1000; i++) {
       const response = await app.handle(
-        new Request('http://localhost/respond/stream', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            chatId: 'test-chat',
-            prompt: `Cycle ${i}`,
-            model: 'test-model',
-            agentMode: 'agent',
-            agentId: 'default',
-          }),
+        buildRespondStreamRequest({
+          chatId: 'test-chat',
+          prompt: `Cycle ${i}`,
+          model: 'test-model',
+          agentMode: 'agent',
+          agentId: 'default',
         })
       );
       expect(response.status).toBe(200);
@@ -1123,3 +698,35 @@ describe('POST /respond/stream — subagent delegation', () => {
     }
   }, 60_000);
 });
+
+async function* streamExplorerToolTurn(
+  req: AgentTurnRequest,
+  onSummarizeTurn: () => void
+): AsyncIterable<Record<string, unknown>> {
+  await Promise.resolve();
+  if (isExplorerSummarizeTurn(req)) {
+    onSummarizeTurn();
+    yield { type: 'assistant_text_delta', text: 'I explored the files.' };
+    yield { type: 'turn_completed', providerState: null };
+    return;
+  }
+
+  if (req.toolResults) {
+    yield { type: 'turn_completed', providerState: null };
+    return;
+  }
+
+  yield { type: 'tool_call_started', callId: 'noop-1', name: 'noop' };
+  yield { type: 'tool_call_completed', callId: 'noop-1', name: 'noop', arguments: '{}' };
+  yield { type: 'tool_call_started', callId: 'noop-2', name: 'noop' };
+  yield { type: 'tool_call_completed', callId: 'noop-2', name: 'noop', arguments: '{}' };
+  yield { type: 'turn_completed', providerState: null };
+}
+
+function isExplorerSummarizeTurn(req: AgentTurnRequest): boolean {
+  return (
+    (req.toolDefinitions?.length ?? 0) === 0 &&
+    typeof req.prompt === 'string' &&
+    req.prompt.length > 0
+  );
+}
