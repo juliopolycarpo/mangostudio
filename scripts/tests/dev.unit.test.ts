@@ -46,4 +46,8 @@ describe('dev script', () => {
     expect(devScript).not.toContain('runWorkspaceScript');
     expect(devScript).not.toContain('Promise.all');
   });
+
+  test('forwards the terminal so the Turbo TUI stays interactive', () => {
+    expect(readText('scripts/dev.ts')).toContain("stdin: 'inherit'");
+  });
 });

@@ -52,6 +52,7 @@ info(`Starting dev task(s): ${runnableWorkspaces.join(', ')}`);
 
 const result = await runCommand('dev', createTurboDevCommand(runnableWorkspaces), {
   cwd: getDevCwd(),
+  stdin: 'inherit',
 });
 
 process.exit(result.exitCode);
