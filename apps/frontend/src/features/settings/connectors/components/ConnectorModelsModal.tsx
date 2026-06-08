@@ -66,23 +66,19 @@ export function ConnectorModelsModal({
         </div>
 
         <div className="flex-1 overflow-y-auto pr-2 space-y-6 hide-scrollbar">
-          {filteredTextModels.length > 0 && (
-            <ModelToggleList
-              title={s.textModelsLabel}
-              models={filteredTextModels}
-              enabledModelIds={enabledModelIds}
-              onToggleModel={onToggleModel}
-            />
-          )}
+          <ModelToggleList
+            title={s.textModelsLabel}
+            models={filteredTextModels}
+            enabledModelIds={enabledModelIds}
+            onToggleModel={onToggleModel}
+          />
 
-          {filteredImageModels.length > 0 && (
-            <ModelToggleList
-              title={s.imageModelsLabel}
-              models={filteredImageModels}
-              enabledModelIds={enabledModelIds}
-              onToggleModel={onToggleModel}
-            />
-          )}
+          <ModelToggleList
+            title={s.imageModelsLabel}
+            models={filteredImageModels}
+            enabledModelIds={enabledModelIds}
+            onToggleModel={onToggleModel}
+          />
 
           {textModels.length === 0 && imageModels.length === 0 && (
             <div className="rounded-2xl border border-dashed border-outline-variant/20 bg-surface-container-lowest px-4 py-8 text-center text-sm text-on-surface-variant/70">
