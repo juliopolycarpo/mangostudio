@@ -20,7 +20,10 @@ export function selectDevWorkspaces(workspaces: WorkspaceName[]): DevSelection {
 /** Build a filtered Turbo dev command. // Usage: createTurboDevCommand(['api'], 'stream'); */
 export function createTurboDevCommand(workspaces: WorkspaceName[], ui: TurboDevUi): string[] {
   const filters = workspaces.map((workspace) => `--filter=${WORKSPACES[workspace].packageName}`);
-  return ['turbo', 'run', 'dev', `--ui=${ui}`, ...filters];
+  // Loose env mode so the uncached dev servers inherit the full ambient
+  // environment (e.g. BETTER_AUTH_SECRET, provider keys). Turbo 2.x defaults to
+  // strict mode, which would otherwise strip vars the servers read at startup.
+  return ['turbo', 'run', 'dev', `--ui=${ui}`, '--env-mode=loose', ...filters];
 }
 
 /** Return the repository root for Turbo dev invocations. // Usage: cwd: getDevCwd(); */

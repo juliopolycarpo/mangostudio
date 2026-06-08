@@ -26,6 +26,7 @@ describe('dev script', () => {
       'run',
       'dev',
       '--ui=tui',
+      '--env-mode=loose',
       '--filter=@mangostudio/api',
       '--filter=@mangostudio/frontend',
     ]);
@@ -37,8 +38,13 @@ describe('dev script', () => {
       'run',
       'dev',
       '--ui=stream',
+      '--env-mode=loose',
       '--filter=@mangostudio/api',
     ]);
+  });
+
+  test('runs dev servers in loose env mode so injected secrets survive', () => {
+    expect(createTurboDevCommand(['api'], 'stream')).toContain('--env-mode=loose');
   });
 
   test('uses stream mode in CI and TUI locally', () => {
