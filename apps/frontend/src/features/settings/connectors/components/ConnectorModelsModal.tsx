@@ -1,6 +1,7 @@
 import type { Connector, ModelCatalogResponse } from '@mangostudio/shared';
 import { Button } from '@/components/ui/Button';
 import { useI18n } from '@/hooks/use-i18n';
+import { ModelToggleList } from './ModelToggleList';
 
 interface ConnectorModelsModalProps {
   connector: Connector;
@@ -40,6 +41,7 @@ export function ConnectorModelsModal({
 
   const filteredTextModels = filterByQuery(textModels);
   const filteredImageModels = filterByQuery(imageModels);
+  const enabledModelIds = new Set(connector.enabledModels);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-sm animate-in fade-in duration-200">
@@ -64,89 +66,19 @@ export function ConnectorModelsModal({
         </div>
 
         <div className="flex-1 overflow-y-auto pr-2 space-y-6 hide-scrollbar">
-          {filteredTextModels.length > 0 && (
-            <div className="space-y-3">
-              <h4 className="text-[10px] uppercase tracking-widest font-bold text-on-surface-variant/60">
-                {s.textModelsLabel}
-              </h4>
-              <div className="grid grid-cols-1 gap-2">
-                {filteredTextModels.map((m) => {
-                  const isEnabled = connector.enabledModels.includes(m.modelId);
-                  return (
-                    <label
-                      key={m.modelId}
-                      className={`flex items-center gap-4 p-4 rounded-xl border cursor-pointer transition-all ${
-                        isEnabled
-                          ? 'bg-primary/10 border-primary/30'
-                          : 'bg-surface-container-lowest border-outline-variant/10 hover:border-outline-variant/30'
-                      }`}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={isEnabled}
-                        onChange={(e) => {
-                          void onToggleModel(m.modelId, e.target.checked);
-                        }}
-                        className="w-5 h-5 rounded border-outline-variant text-primary focus:ring-primary bg-surface-container-lowest"
-                      />
-                      <div className="space-y-0.5">
-                        <div
-                          className={`text-sm font-bold ${isEnabled ? 'text-primary' : 'text-on-surface'}`}
-                        >
-                          {m.displayName}
-                        </div>
-                        <div className="text-[10px] font-mono text-on-surface-variant/60">
-                          {m.modelId}
-                        </div>
-                      </div>
-                    </label>
-                  );
-                })}
-              </div>
-            </div>
-          )}
+          <ModelToggleList
+            title={s.textModelsLabel}
+            models={filteredTextModels}
+            enabledModelIds={enabledModelIds}
+            onToggleModel={onToggleModel}
+          />
 
-          {filteredImageModels.length > 0 && (
-            <div className="space-y-3">
-              <h4 className="text-[10px] uppercase tracking-widest font-bold text-on-surface-variant/60">
-                {s.imageModelsLabel}
-              </h4>
-              <div className="grid grid-cols-1 gap-2">
-                {filteredImageModels.map((m) => {
-                  const isEnabled = connector.enabledModels.includes(m.modelId);
-                  return (
-                    <label
-                      key={m.modelId}
-                      className={`flex items-center gap-4 p-4 rounded-xl border cursor-pointer transition-all ${
-                        isEnabled
-                          ? 'bg-primary/10 border-primary/30'
-                          : 'bg-surface-container-lowest border-outline-variant/10 hover:border-outline-variant/30'
-                      }`}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={isEnabled}
-                        onChange={(e) => {
-                          void onToggleModel(m.modelId, e.target.checked);
-                        }}
-                        className="w-5 h-5 rounded border-outline-variant text-primary focus:ring-primary bg-surface-container-lowest"
-                      />
-                      <div className="space-y-0.5">
-                        <div
-                          className={`text-sm font-bold ${isEnabled ? 'text-primary' : 'text-on-surface'}`}
-                        >
-                          {m.displayName}
-                        </div>
-                        <div className="text-[10px] font-mono text-on-surface-variant/60">
-                          {m.modelId}
-                        </div>
-                      </div>
-                    </label>
-                  );
-                })}
-              </div>
-            </div>
-          )}
+          <ModelToggleList
+            title={s.imageModelsLabel}
+            models={filteredImageModels}
+            enabledModelIds={enabledModelIds}
+            onToggleModel={onToggleModel}
+          />
 
           {textModels.length === 0 && imageModels.length === 0 && (
             <div className="rounded-2xl border border-dashed border-outline-variant/20 bg-surface-container-lowest px-4 py-8 text-center text-sm text-on-surface-variant/70">

@@ -132,6 +132,33 @@ describe('AgentSettingsPage', () => {
     expect(roleSelect).toHaveTextContent('Subagent');
     expect(roleSelect).toHaveTextContent('Both');
   });
+
+  it('starts a draft agent from the populated header action', async () => {
+    const user = userEvent.setup();
+    fetchScenario.respondWithJson('GET', '/api/settings/agents', { body: AGENTS_RESPONSE });
+    fetchScenario.respondWithJson('GET', '/api/settings/tools', { body: TOOLS_RESPONSE });
+
+    render(<AgentSettingsPage />);
+
+    await user.click(await screen.findByRole('button', { name: 'Create Agent' }));
+
+    expect(screen.getByRole('heading', { name: 'New Agent' })).toBeInTheDocument();
+    expect(screen.getByDisplayValue('New Agent')).toBeInTheDocument();
+  });
+
+  it('starts a draft agent from the empty state action', async () => {
+    const user = userEvent.setup();
+    fetchScenario.respondWithJson('GET', '/api/settings/agents', { body: { agents: [] } });
+    fetchScenario.respondWithJson('GET', '/api/settings/tools', { body: TOOLS_RESPONSE });
+
+    render(<AgentSettingsPage />);
+
+    await screen.findByText('No agents yet');
+    await user.click(screen.getAllByRole('button', { name: 'Create Agent' })[1]);
+
+    expect(screen.getByRole('heading', { name: 'New Agent' })).toBeInTheDocument();
+    expect(screen.getByDisplayValue('New Agent')).toBeInTheDocument();
+  });
 });
 
 describe('AgentToolPicker', () => {

@@ -24,6 +24,7 @@ import { agentSettingsKeys, agentSettingsListQueryOptions } from '../queries';
 import { AgentEditor, type EditableAgentProfile } from './AgentEditor';
 import { AgentList } from './AgentList';
 import { DeleteAgentDialog } from './DeleteAgentDialog';
+import { SettingsSectionHeader } from './SettingsSectionHeader';
 
 const NEW_AGENT_ID = 'user:new-agent' as const;
 
@@ -48,6 +49,12 @@ export function AgentSettingsPage() {
     if (newAgent) return newAgent;
     return agents.find((agent) => agent.id === selectedAgentId) ?? agents[0] ?? null;
   }, [agents, newAgent, selectedAgentId]);
+
+  const handleCreateAgent = () => {
+    const draft = createNewAgent(labels.newAgentName, labels.newAgentDescription);
+    setNewAgent(draft);
+    setSelectedAgentId(draft.id);
+  };
 
   const invalidateAgents = async () => {
     await queryClient.invalidateQueries({ queryKey: agentSettingsKeys.list() });
@@ -132,31 +139,7 @@ export function AgentSettingsPage() {
   if (agents.length === 0 && !newAgent) {
     return (
       <div className="space-y-6">
-        <Card variant="solid" className="space-y-3 p-4 sm:p-6">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-            <div className="flex gap-3 items-start">
-              <div className="rounded-2xl bg-primary/10 p-2 text-primary">
-                <Bot size={22} />
-              </div>
-              <div>
-                <h2 className="text-lg font-bold text-on-surface">{labels.title}</h2>
-                <p className="text-sm text-on-surface-variant/70">{labels.description}</p>
-              </div>
-            </div>
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={() => {
-                const draft = createNewAgent(labels.newAgentName, labels.newAgentDescription);
-                setNewAgent(draft);
-                setSelectedAgentId(draft.id);
-              }}
-            >
-              <Plus size={16} />
-              {labels.create}
-            </Button>
-          </div>
-        </Card>
+        <AgentSettingsHeader labels={labels} onCreate={handleCreateAgent} />
 
         <Card variant="solid" className="p-8 sm:p-12 text-center space-y-4">
           <div className="p-4 bg-surface-container-high rounded-full w-fit mx-auto text-on-surface-variant/40">
@@ -166,14 +149,7 @@ export function AgentSettingsPage() {
             <p className="text-on-surface font-bold">{labels.emptyStateTitle}</p>
             <p className="text-sm text-on-surface-variant/60">{labels.emptyStateDescription}</p>
           </div>
-          <Button
-            variant="primary"
-            onClick={() => {
-              const draft = createNewAgent(labels.newAgentName, labels.newAgentDescription);
-              setNewAgent(draft);
-              setSelectedAgentId(draft.id);
-            }}
-          >
+          <Button variant="primary" onClick={handleCreateAgent}>
             <Plus size={16} />
             {labels.create}
           </Button>
@@ -184,31 +160,7 @@ export function AgentSettingsPage() {
 
   return (
     <div className="space-y-6">
-      <Card variant="solid" className="space-y-3 p-4 sm:p-6">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-          <div className="flex gap-3 items-start">
-            <div className="rounded-2xl bg-primary/10 p-2 text-primary">
-              <Bot size={22} />
-            </div>
-            <div>
-              <h2 className="text-lg font-bold text-on-surface">{labels.title}</h2>
-              <p className="text-sm text-on-surface-variant/70">{labels.description}</p>
-            </div>
-          </div>
-          <Button
-            type="button"
-            variant="secondary"
-            onClick={() => {
-              const draft = createNewAgent(labels.newAgentName, labels.newAgentDescription);
-              setNewAgent(draft);
-              setSelectedAgentId(draft.id);
-            }}
-          >
-            <Plus size={16} />
-            {labels.create}
-          </Button>
-        </div>
-      </Card>
+      <AgentSettingsHeader labels={labels} onCreate={handleCreateAgent} />
 
       <AgentList
         agents={newAgent ? [newAgent, ...agents] : agents}
@@ -301,6 +253,33 @@ export function AgentSettingsPage() {
         }}
       />
     </div>
+  );
+}
+
+interface AgentHeaderLabels {
+  readonly title: string;
+  readonly description: string;
+  readonly create: string;
+}
+
+interface AgentSettingsHeaderProps {
+  readonly labels: AgentHeaderLabels;
+  readonly onCreate: () => void;
+}
+
+function AgentSettingsHeader({ labels, onCreate }: AgentSettingsHeaderProps) {
+  return (
+    <SettingsSectionHeader
+      title={labels.title}
+      description={labels.description}
+      icon={<Bot size={22} />}
+      action={
+        <Button type="button" variant="secondary" onClick={onCreate}>
+          <Plus size={16} />
+          {labels.create}
+        </Button>
+      }
+    />
   );
 }
 
