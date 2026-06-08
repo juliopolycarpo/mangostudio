@@ -1,15 +1,19 @@
-import type { WorkspaceName } from './lib/config';
+import {
+  createTurboDevCommand,
+  DEV_WORKSPACES,
+  getDevCwd,
+  selectDevWorkspaces,
+  selectTurboDevUi,
+} from './lib/dev';
 import {
   assertNoUnexpectedArguments,
   fatal,
   header,
   info,
   parseArgs,
-  runWorkspaceScript,
+  runCommand,
   warn,
 } from './lib/runner';
-
-const DEV_WORKSPACES: WorkspaceName[] = ['api', 'frontend'];
 
 function printHelp(): never {
   console.log(`Usage: bun run dev [workspace flags]
@@ -38,12 +42,7 @@ if (includeRoot) {
 }
 
 const requestedWorkspaces = usedDefaultSelection ? DEV_WORKSPACES : workspaces;
-const runnableWorkspaces = requestedWorkspaces.filter((workspace) =>
-  DEV_WORKSPACES.includes(workspace)
-);
-const skippedWorkspaces = requestedWorkspaces.filter(
-  (workspace) => !DEV_WORKSPACES.includes(workspace)
-);
+const { runnableWorkspaces, skippedWorkspaces } = selectDevWorkspaces(requestedWorkspaces);
 
 if (skippedWorkspaces.length > 0) {
   warn(`Skipping workspaces without a dev entrypoint: ${skippedWorkspaces.join(', ')}`);
@@ -55,9 +54,13 @@ if (runnableWorkspaces.length === 0) {
 
 header('Dev');
 
-const procs = runnableWorkspaces.map((ws) => {
-  info(`Starting ${ws} dev server...`);
-  return runWorkspaceScript(ws, 'dev');
+info(`Starting dev task(s): ${runnableWorkspaces.join(', ')}`);
+
+const turboUi = selectTurboDevUi(process.env);
+
+const result = await runCommand('dev', createTurboDevCommand(runnableWorkspaces, turboUi), {
+  cwd: getDevCwd(),
+  stdin: turboUi === 'tui' ? 'inherit' : 'ignore',
 });
 
-await Promise.all(procs);
+process.exit(result.exitCode);

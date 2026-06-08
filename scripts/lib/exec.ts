@@ -12,12 +12,14 @@ export interface RunResult {
 
 /**
  * Spawn a command and resolve once it exits, capturing label/exit code/duration.
+ * Pass `stdin: 'inherit'` for interactive children (e.g. Turbo's TUI); it stays
+ * 'ignore' by default so parallel fan-out never fights over the terminal.
  * // Usage: await runCommand('build', ['bun', 'run', 'build']);
  */
 export async function runCommand(
   label: string,
   cmd: string[],
-  opts?: { cwd?: string; env?: Record<string, string> }
+  opts?: { cwd?: string; env?: Record<string, string>; stdin?: 'inherit' | 'ignore' }
 ): Promise<RunResult> {
   const start = performance.now();
   dim(`  $ ${cmd.join(' ')}`);
@@ -25,6 +27,7 @@ export async function runCommand(
   const proc = Bun.spawn({
     cmd,
     cwd: opts?.cwd ?? ROOT_DIR,
+    stdin: opts?.stdin ?? 'ignore',
     stdout: 'inherit',
     stderr: 'inherit',
     env: { ...process.env, ...opts?.env },
