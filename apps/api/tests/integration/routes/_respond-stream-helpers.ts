@@ -1,5 +1,6 @@
 import { mock } from 'bun:test';
 import type { AgentProfile } from '@mangostudio/shared/agents';
+import type { ProviderType } from '@mangostudio/shared/types';
 import { getDb } from '../../../src/db/database';
 import { getAgentProfile } from '../../../src/modules/agents/application/agent-settings-service';
 import { AgentSettingsError } from '../../../src/modules/agents/domain/agent-profile';
@@ -25,6 +26,7 @@ import {
   getProviderForModel,
   registerProvider,
 } from '../../../src/services/providers/core/provider-registry';
+import type { AgentTurnRequest } from '../../../src/services/providers/types';
 import {
   executeTool,
   getAllToolDefinitions,
@@ -123,6 +125,260 @@ export function makeChain(firstValue: unknown): Record<string, unknown> {
     },
   });
   return proxy;
+}
+
+export interface CapturedDbMock {
+  insertedMessages: Array<Record<string, unknown>>;
+  chatSetCalls: Array<Record<string, unknown>>;
+  moduleFactory: () => { getDb: () => Record<string, unknown> };
+}
+
+export type AgentStreamFactory = (req: AgentTurnRequest) => AsyncIterable<Record<string, unknown>>;
+
+export interface ProviderRegistryMockOptions {
+  providerType?: ProviderType;
+  generateImage?: (request: Record<string, unknown>) => Promise<{ imageUrl: string }>;
+}
+
+export interface SubagentProfileMockOptions {
+  subagentOverrides?: Partial<AgentProfile>;
+  parentOverrides?: Partial<AgentProfile>;
+}
+
+export interface MultiAgentSettingsOverrides {
+  enabled?: boolean;
+  chatDelegationEnabled?: boolean;
+  traceVisibility?: 'off' | 'summary' | 'full';
+  maxDepth?: number;
+  maxSubagentCalls?: number;
+  timeoutMs?: number;
+  defaultMaxTurns?: number;
+}
+
+/**
+ * Builds a standard POST request for the streaming route.
+ * // Usage: app.handle(buildRespondStreamRequest({ chatId: 'c1', prompt: 'Hi' }))
+ */
+export function buildRespondStreamRequest(body: Record<string, unknown>): Request {
+  return new Request('http://localhost/respond/stream', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+}
+
+/**
+ * Mocks chat ownership as verified for streaming route authorization.
+ * // Usage: await mockVerifiedChatOwnership()
+ */
+export async function mockVerifiedChatOwnership(): Promise<void> {
+  await mock.module('../../../src/modules/chats/infrastructure/chat-repository', () => ({
+    verifyChatOwnership: () => Promise.resolve(true),
+  }));
+}
+
+/**
+ * Mocks the database with no-op writes and a successful chat ownership row.
+ * // Usage: await mock.module('../../../src/db/database', mockPassThroughDb(userId))
+ */
+export function mockPassThroughDb(userId: string): () => { getDb: () => Record<string, unknown> } {
+  return () => ({
+    getDb: () => createCapturedDb(userId, [], []),
+  });
+}
+
+/**
+ * Mocks the database and captures inserted message rows.
+ * // Usage: const db = mockDbWithMessageCapture(userId)
+ */
+export function mockDbWithMessageCapture(userId: string): CapturedDbMock {
+  const insertedMessages: Array<Record<string, unknown>> = [];
+  const chatSetCalls: Array<Record<string, unknown>> = [];
+
+  return createCapturedDbMock(userId, insertedMessages, chatSetCalls);
+}
+
+/**
+ * Mocks the database and captures inserted messages plus chat update payloads.
+ * // Usage: const db = mockDbWithFullCapture(userId)
+ */
+export function mockDbWithFullCapture(userId: string): CapturedDbMock {
+  return mockDbWithMessageCapture(userId);
+}
+
+/**
+ * Mocks a provider registry entry backed by a named agent stream factory.
+ * // Usage: await mockProviderRegistry(async function* stream(req) { ... })
+ */
+export async function mockProviderRegistry(
+  streamFactory: AgentStreamFactory,
+  options: ProviderRegistryMockOptions = {}
+): Promise<void> {
+  await mock.module('../../../src/services/providers/core/provider-registry', () => ({
+    getProviderForModel: () => Promise.resolve(createProviderMock(streamFactory, options)),
+  }));
+}
+
+/**
+ * Mocks the tools service with empty definitions and no-op execution.
+ * // Usage: await mockNoopTools()
+ */
+export async function mockNoopTools(): Promise<void> {
+  await mock.module('../../../src/services/tools', () => ({
+    getAllToolDefinitions: () => [],
+    getToolDefinitionsForAgent: () => [],
+    executeTool: () => Promise.resolve({}),
+  }));
+}
+
+/**
+ * Mocks default parent/subagent profiles used by delegation tests.
+ * // Usage: await mockSubagentAgentSettings({ subagentOverrides: { toolsEnabled: true } })
+ */
+export async function mockSubagentAgentSettings(
+  options: SubagentProfileMockOptions = {}
+): Promise<void> {
+  await mock.module('../../../src/modules/agents/application/agent-settings-service', () => ({
+    getAgentProfile: (_db: unknown, _userId: string, agentId: string) =>
+      Promise.resolve(resolveSubagentProfile(agentId, options)),
+  }));
+}
+
+/**
+ * Mocks multi-agent app settings with production-like defaults.
+ * // Usage: await mockMultiAgentAppSettings({ timeoutMs: 25 })
+ */
+export async function mockMultiAgentAppSettings(
+  overrides: MultiAgentSettingsOverrides = {}
+): Promise<void> {
+  await mock.module('../../../src/modules/app-settings/application/app-settings-service', () => ({
+    getAppSettings: () => Promise.resolve({ multiAgentSettings: multiAgentSettings(overrides) }),
+  }));
+}
+
+/**
+ * Returns the delegation error class expected by subagent-runner mocks.
+ * // Usage: SubagentDelegationError: createSubagentDelegationError()
+ */
+export function createSubagentDelegationError(): typeof realSubagentDelegationError {
+  return class SubagentDelegationError extends Error {
+    constructor(
+      message: string,
+      readonly code: string
+    ) {
+      super(message);
+      this.name = 'SubagentDelegationError';
+    }
+  } as typeof realSubagentDelegationError;
+}
+
+function createCapturedDbMock(
+  userId: string,
+  insertedMessages: Array<Record<string, unknown>>,
+  chatSetCalls: Array<Record<string, unknown>>
+): CapturedDbMock {
+  return {
+    insertedMessages,
+    chatSetCalls,
+    moduleFactory: () => ({
+      getDb: () => createCapturedDb(userId, insertedMessages, chatSetCalls),
+    }),
+  };
+}
+
+function createCapturedDb(
+  userId: string,
+  insertedMessages: Array<Record<string, unknown>>,
+  chatSetCalls: Array<Record<string, unknown>>
+): Record<string, unknown> {
+  return {
+    selectFrom: () => makeChain({ userId }),
+    insertInto: (table: string) => createInsertCapture(table, insertedMessages),
+    updateTable: () => createUpdateCapture(chatSetCalls),
+  };
+}
+
+function createInsertCapture(
+  table: string,
+  insertedMessages: Array<Record<string, unknown>>
+): Record<string, unknown> {
+  return {
+    values: (values: Record<string, unknown>) => {
+      if (table === 'messages') insertedMessages.push({ ...values });
+      return { execute: () => Promise.resolve() };
+    },
+  };
+}
+
+function createUpdateCapture(
+  chatSetCalls: Array<Record<string, unknown>>
+): Record<string, unknown> {
+  return {
+    set: (values: Record<string, unknown>) => {
+      chatSetCalls.push({ ...values });
+      return makeChain(undefined);
+    },
+  };
+}
+
+function createProviderMock(
+  streamFactory: AgentStreamFactory,
+  options: ProviderRegistryMockOptions
+): Record<string, unknown> {
+  return {
+    providerType: options.providerType ?? 'openai-compatible',
+    generateText: () => Promise.resolve({ text: '' }),
+    generateAgentTurnStream: streamFactory,
+    ...(options.generateImage ? { generateImage: options.generateImage } : {}),
+  };
+}
+
+function resolveSubagentProfile(
+  agentId: string,
+  options: SubagentProfileMockOptions
+): AgentProfile {
+  if (agentId === 'user:explorer') return explorerProfile(options.subagentOverrides);
+  return parentProfile(options.parentOverrides);
+}
+
+function explorerProfile(overrides: Partial<AgentProfile> = {}): AgentProfile {
+  return makeAgentProfile({
+    id: 'user:explorer',
+    name: 'Explore',
+    role: 'subagent',
+    systemPrompt: 'Explore the codebase.',
+    toolNames: [],
+    toolsEnabled: false,
+    ...overrides,
+  });
+}
+
+function parentProfile(overrides: Partial<AgentProfile> = {}): AgentProfile {
+  return makeAgentProfile({
+    id: 'default',
+    name: 'Default',
+    role: 'both',
+    systemPrompt: 'Delegate exploration when useful.',
+    toolNames: ['delegate_to_agent'],
+    toolsEnabled: true,
+    subagentIds: ['user:explorer'],
+    ...overrides,
+  });
+}
+
+function multiAgentSettings(
+  overrides: MultiAgentSettingsOverrides
+): Required<MultiAgentSettingsOverrides> {
+  return {
+    enabled: true,
+    chatDelegationEnabled: true,
+    traceVisibility: 'full',
+    maxDepth: 2,
+    maxSubagentCalls: 5,
+    timeoutMs: 5_000,
+    defaultMaxTurns: 2,
+    ...overrides,
+  };
 }
 
 export function parseSseEvents(rawText: string): Array<Record<string, unknown>> {
