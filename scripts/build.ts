@@ -3,7 +3,7 @@
 import { cpSync, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { createTurboBuildCommand, getBuildCwd, selectBuildWorkspaces } from './lib/build';
+import { createTurboBuildCommand, selectBuildWorkspaces } from './lib/build';
 import { ROOT_DIR, type WorkspaceName } from './lib/config';
 import { resolveReleaseVersion } from './lib/release-version';
 import {
@@ -81,7 +81,7 @@ async function buildFrontendSidecar(dryRun: boolean): Promise<void> {
   }
 
   const result = await runCommand('build:frontend', createTurboBuildCommand(['frontend']), {
-    cwd: getBuildCwd(),
+    cwd: ROOT_DIR,
   });
   if (result.exitCode !== 0) {
     fatal('Frontend build failed during standalone binary packaging.');
@@ -482,7 +482,7 @@ if (buildTargets.length === 0) {
 header('Build');
 
 const result = await runCommand('build', createTurboBuildCommand(buildTargets), {
-  cwd: getBuildCwd(),
+  cwd: ROOT_DIR,
 });
 
 process.exit(result.exitCode);

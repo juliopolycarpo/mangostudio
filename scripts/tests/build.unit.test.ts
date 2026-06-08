@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { createTurboBuildCommand, getBuildCwd, selectBuildWorkspaces } from '../lib/build';
+import { createTurboBuildCommand, selectBuildWorkspaces } from '../lib/build';
 import { ROOT_DIR } from '../lib/config';
 
 const readText = (relativePath: string): string =>
@@ -20,14 +20,9 @@ describe('build script', () => {
       'turbo',
       'run',
       'build',
-      '--only',
       '--filter=@mangostudio/api',
       '--filter=@mangostudio/frontend',
     ]);
-  });
-
-  test('runs Turbo builds from the repository root', () => {
-    expect(getBuildCwd()).toBe(ROOT_DIR);
   });
 
   test('exposes explicit root build scripts for turbo and binary packaging', () => {
