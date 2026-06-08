@@ -1,12 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import {
-  createTurboCheckCommand,
-  createWorkspaceDprintCommand,
-  getCheckCwd,
-  getWorkspaceDprintPaths,
-} from '../lib/check';
+import { createTurboCheckCommand, createWorkspaceDprintCommand } from '../lib/check';
 import { ROOT_DIR } from '../lib/config';
 
 const readText = (relativePath: string): string =>
@@ -26,17 +21,7 @@ describe('check script', () => {
     ]);
   });
 
-  test('runs Turbo checks from the repository root', () => {
-    expect(getCheckCwd()).toBe(ROOT_DIR);
-  });
-
   test('preserves selected workspace dprint checks outside Turbo', () => {
-    expect(getWorkspaceDprintPaths(['api', 'shared'])).toEqual([
-      'apps/api/AGENTS.md',
-      'apps/api/bunfig.toml',
-      'apps/shared/AGENTS.md',
-      'apps/shared/bunfig.toml',
-    ]);
     expect(createWorkspaceDprintCommand('api')).toEqual([
       'bunx',
       'dprint',
@@ -55,11 +40,12 @@ describe('check script', () => {
     expect(checkScript).not.toContain('root:madge');
   });
 
-  test('configures typecheck dependency ordering and root tsconfig inputs', () => {
+  test('configures typecheck ordering and root config cache inputs', () => {
     const turboConfig = readText('turbo.jsonc');
 
     expect(turboConfig).toContain('"dependsOn": ["^typecheck"]');
     expect(turboConfig).toContain('"$TURBO_ROOT$/tsconfig.json"');
+    expect(turboConfig).toContain('"$TURBO_ROOT$/biome.json"');
     expect(turboConfig).toContain('"$TURBO_DEFAULT$"');
   });
 

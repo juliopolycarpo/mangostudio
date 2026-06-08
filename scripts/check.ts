@@ -1,4 +1,4 @@
-import { createTurboCheckCommand, createWorkspaceDprintCommand, getCheckCwd } from './lib/check';
+import { createTurboCheckCommand, createWorkspaceDprintCommand } from './lib/check';
 import {
   ROOT_BIOME_PATHS,
   ROOT_DIR,
@@ -51,7 +51,7 @@ function createWorkspaceTasks(
 ): Array<() => Promise<RunResult>> {
   const turboChecks = () =>
     runCommand('workspaces:check', createTurboCheckCommand([...workspaces]), {
-      cwd: getCheckCwd(),
+      cwd: ROOT_DIR,
     });
   return [turboChecks, ...createWorkspaceDprintTasks(workspaces)];
 }

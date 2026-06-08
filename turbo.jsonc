@@ -11,7 +11,9 @@
       "dependsOn": ["^build"],
       "env": ["VITE_*"]
     },
-    "check:quick": {},
+    "check:quick": {
+      "inputs": ["$TURBO_ROOT$/biome.json", "$TURBO_DEFAULT$"]
+    },
     "typecheck": {
       "dependsOn": ["^typecheck"],
       "inputs": ["$TURBO_ROOT$/tsconfig.json", "$TURBO_DEFAULT$"]
