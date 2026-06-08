@@ -19,6 +19,8 @@
   "scripts": {
     "dev": "bun ./scripts/dev.ts",
     "build": "bun ./scripts/build.ts",
+    "build:binary": "bun ./scripts/build.ts --binary",
+    "build:turbo": "turbo run build",
     "check": "bun ./scripts/check.ts",
     "check:versions": "bun ./scripts/check-versions.ts",
     "test": "bun ./scripts/test.ts",

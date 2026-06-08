@@ -4,15 +4,15 @@
  * Binary smoke test script.
  *
  * Behaviour:
- *   1. Builds the frontend (skipped if SKIP_BUILD=1).
- *   2. Builds the binary for the requested platform.
- *   3. Validates that the artifact layout is correct.
- *   4. If the binary can run on the current host, starts it and asserts
+ *   1. Builds the standalone bundle for the requested platform
+ *      (skipped if SKIP_BUILD=1).
+ *   2. Validates that the artifact layout is correct.
+ *   3. If the binary can run on the current host, starts it and asserts
  *      that core HTTP endpoints respond correctly.
  *
  * Environment variables:
  *   PLATFORM      - Target platform (linux-x64 | windows-x64). Required.
- *   SKIP_BUILD    - Set to 1 to skip frontend + binary build steps.
+ *   SKIP_BUILD    - Set to 1 to skip the standalone build step.
  *   API_PORT      - Port for the smoke server (default: 13001).
  */
 
@@ -94,32 +94,9 @@ async function waitFor(url: string, retries = 15, delayMs = 500): Promise<void> 
 // Build steps
 // ---------------------------------------------------------------------------
 
-async function buildFrontend(): Promise<void> {
-  console.log('\n📦 Building frontend...');
-  await run(['bun', 'run', 'build']);
-  pass('Frontend built');
-}
-
 async function buildBinary(): Promise<void> {
   console.log(`\n🔨 Building binary for ${PLATFORM}...`);
-  const env = { ...process.env, ONLY_PLATFORM: PLATFORM };
-  const proc = Bun.spawn({
-    cmd: ['bun', 'run', 'build', '--binary'],
-    cwd: ROOT_DIR,
-    env,
-    stdout: 'pipe',
-    stderr: 'pipe',
-  });
-  const [out, err, code] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-    proc.exited,
-  ]);
-  if (code !== 0) {
-    if (out.trim()) console.error(out.trim());
-    if (err.trim()) console.error(err.trim());
-    fail(`Binary build failed (exit ${code})`);
-  }
+  await run(['bun', 'run', 'build:binary', '--platform', PLATFORM]);
   pass(`Binary built: ${BINARY_PATH}`);
 }
 
@@ -239,7 +216,6 @@ console.log(`\n🧪 Binary smoke test — platform: ${PLATFORM}`);
 console.log(`   Can execute on this host: ${CAN_EXECUTE}`);
 
 if (!SKIP_BUILD) {
-  await buildFrontend();
   await buildBinary();
 }
 
