@@ -1,11 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { createTurboCheckCommand, createWorkspaceDprintCommand } from '../lib/check';
-import { ROOT_DIR } from '../lib/config';
-
-const readText = (relativePath: string): string =>
-  readFileSync(join(ROOT_DIR, relativePath), 'utf8');
+import { readText } from './support/read-text';
 
 describe('check script', () => {
   test('creates one filtered Turbo invocation for selected workspaces', () => {

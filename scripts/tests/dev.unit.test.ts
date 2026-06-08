@@ -1,6 +1,4 @@
 import { describe, expect, test } from 'bun:test';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { ROOT_DIR } from '../lib/config';
 import {
   createTurboDevCommand,
@@ -8,9 +6,7 @@ import {
   selectDevWorkspaces,
   selectTurboDevUi,
 } from '../lib/dev';
-
-const readText = (relativePath: string): string =>
-  readFileSync(join(ROOT_DIR, relativePath), 'utf8');
+import { readText } from './support/read-text';
 
 describe('dev script', () => {
   test('keeps only dev-capable workspaces', () => {

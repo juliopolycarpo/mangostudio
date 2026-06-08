@@ -8,8 +8,8 @@ import {
   type RunResult,
   runCommand,
   runParallel,
-  runWorkspaceScript,
 } from './lib/runner';
+import { createTurboTestCommand } from './lib/test';
 
 function printHelp(): never {
   console.log(`Usage: bun run test [lane flags]
@@ -72,7 +72,10 @@ if (shouldRunUnit) {
   info('\nPhase: unit');
   const unitResults = await runParallel([
     () => runCommand('root:test:unit', ['bun', 'test', 'scripts'], { cwd: ROOT_DIR }),
-    ...ALL_WORKSPACE_NAMES.map((workspace) => () => runWorkspaceScript(workspace, 'test:unit')),
+    () =>
+      runCommand('workspaces:test:unit', createTurboTestCommand('test:unit', ALL_WORKSPACE_NAMES), {
+        cwd: ROOT_DIR,
+      }),
   ]);
   results.push(...unitResults);
 }
@@ -88,11 +91,14 @@ if (shouldRunIntegration) {
   );
 
   if (integrationWorkspaces.length > 0) {
-    const integrationResults = await runParallel(
-      integrationWorkspaces.map(
-        (workspace) => () => runWorkspaceScript(workspace, 'test:integration', { ifPresent: true })
-      )
-    );
+    const integrationResults = await runParallel([
+      () =>
+        runCommand(
+          'workspaces:test:integration',
+          createTurboTestCommand('test:integration', integrationWorkspaces),
+          { cwd: ROOT_DIR }
+        ),
+    ]);
     results.push(...integrationResults);
   }
 }
@@ -122,9 +128,12 @@ if (runCoverage) {
   // --integration --coverage` on CI, avoiding a duplicate test pass.
   const coverageResults = await runParallel([
     () => runCommand('root:test:unit', ['bun', 'test', 'scripts'], { cwd: ROOT_DIR }),
-    ...coverageWorkspaces.map(
-      (workspace) => () => runWorkspaceScript(workspace, 'test:coverage', { ifPresent: true })
-    ),
+    () =>
+      runCommand(
+        'workspaces:test:coverage',
+        createTurboTestCommand('test:coverage', coverageWorkspaces),
+        { cwd: ROOT_DIR }
+      ),
   ]);
   results.push(...coverageResults);
 }
