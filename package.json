@@ -27,6 +27,10 @@
     "verify": "bun ./scripts/verify.ts",
     "clean": "bun ./scripts/clean.ts",
     "changelog": "bun ./scripts/changelog.ts",
+    "turbo": "turbo",
+    "turbo:version": "turbo --version",
+    "turbo:dry": "turbo run build --dry=json",
+    "turbo:graph": "turbo run build --graph=.turbo/graph.html",
     "prepare": "lefthook install"
   },
   "devDependencies": {
@@ -41,6 +45,7 @@
     "jscpd": "^4",
     "lefthook": "^2.1.9",
     "madge": "^8.0.0",
-    "typescript": "~6.0.3"
+    "typescript": "~6.0.3",
+    "turbo": "2.9.16"
   }
 }
