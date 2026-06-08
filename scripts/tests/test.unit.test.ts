@@ -1,17 +1,20 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+// Bun parses JSONC natively, so importing the config tolerates the comments and
+// trailing commas `turbo.jsonc` is allowed to carry (JSON.parse would throw).
+import turboConfigJson from '../../turbo.jsonc';
 import { ROOT_DIR } from '../lib/config';
 import { createTurboTestCommand } from '../lib/test';
 
 const readText = (relativePath: string): string =>
   readFileSync(join(ROOT_DIR, relativePath), 'utf8');
 
-const readJson = <T>(relativePath: string): T => JSON.parse(readText(relativePath)) as T;
-
 interface TurboConfig {
   tasks: Record<string, { cache?: boolean; dependsOn?: string[]; outputs?: string[] }>;
 }
+
+const turboConfig = turboConfigJson as TurboConfig;
 
 describe('test script', () => {
   test('creates one filtered Turbo invocation for a workspace test lane', () => {
@@ -44,8 +47,6 @@ describe('test script', () => {
   });
 
   test('keeps conservative Turbo cache boundaries for test lanes', () => {
-    const turboConfig = readJson<TurboConfig>('turbo.jsonc');
-
     expect(turboConfig.tasks['test:unit']).toEqual({});
     expect(turboConfig.tasks['test:integration']).toEqual({ cache: false });
     expect(turboConfig.tasks['test:coverage']).toEqual({
@@ -56,8 +57,6 @@ describe('test script', () => {
   });
 
   test('does not add build dependencies to source-driven test lanes', () => {
-    const turboConfig = readJson<TurboConfig>('turbo.jsonc');
-
     for (const task of ['test:unit', 'test:integration', 'test:coverage']) {
       expect(turboConfig.tasks[task]?.dependsOn ?? []).not.toContain('^build');
     }
