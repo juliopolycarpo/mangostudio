@@ -1,15 +1,10 @@
 import { describe, expect, test } from 'bun:test';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import {
   BROWSER_SMOKE_BROWSER,
   BROWSER_SMOKE_SETUP_COMMAND,
   BROWSER_SMOKE_TEST_COMMAND,
 } from '../lib/browser-smoke';
-import { ROOT_DIR } from '../lib/config';
-
-const readText = (relativePath: string): string =>
-  readFileSync(join(ROOT_DIR, relativePath), 'utf8');
+import { readText } from './support/read-text';
 
 describe('browser smoke setup', () => {
   test('installs only Chromium with Playwright system dependencies through Bun', () => {

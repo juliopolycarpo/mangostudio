@@ -1,11 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { createTurboBuildCommand, selectBuildWorkspaces } from '../lib/build';
-import { ROOT_DIR } from '../lib/config';
-
-const readText = (relativePath: string): string =>
-  readFileSync(join(ROOT_DIR, relativePath), 'utf8');
+import { readText } from './support/read-text';
 
 describe('build script', () => {
   test('keeps only build-capable workspaces', () => {

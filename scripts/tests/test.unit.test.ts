@@ -1,14 +1,9 @@
 import { describe, expect, test } from 'bun:test';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 // Bun parses JSONC natively, so importing the config tolerates the comments and
 // trailing commas `turbo.jsonc` is allowed to carry (JSON.parse would throw).
 import turboConfigJson from '../../turbo.jsonc';
-import { ROOT_DIR } from '../lib/config';
 import { createTurboTestCommand } from '../lib/test';
-
-const readText = (relativePath: string): string =>
-  readFileSync(join(ROOT_DIR, relativePath), 'utf8');
+import { readText } from './support/read-text';
 
 interface TurboConfig {
   tasks: Record<string, { cache?: boolean; dependsOn?: string[]; outputs?: string[] }>;
