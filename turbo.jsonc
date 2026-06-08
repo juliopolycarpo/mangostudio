@@ -12,7 +12,10 @@
       "env": ["VITE_*"]
     },
     "check:quick": {},
-    "typecheck": {},
+    "typecheck": {
+      "dependsOn": ["^typecheck"],
+      "inputs": ["$TURBO_ROOT$/tsconfig.json", "$TURBO_DEFAULT$"]
+    },
     "circular": {},
     "test:unit": {},
     "test:integration": {

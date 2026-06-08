@@ -1,9 +1,9 @@
+import { createTurboCheckCommand, createWorkspaceDprintCommand, getCheckCwd } from './lib/check';
 import {
   ROOT_BIOME_PATHS,
   ROOT_DIR,
   ROOT_DPRINT_PATHS,
   WORKSPACE_DPRINT_PATHS,
-  WORKSPACE_MADGE_PATHS,
   type WorkspaceName,
 } from './lib/config';
 import { assertNoDisallowedWorkspaceDependencies } from './lib/dependency-policy';
@@ -22,7 +22,6 @@ import {
   runCommand,
   runParallel,
   runTask,
-  runWorkspaceScript,
 } from './lib/runner';
 
 function printHelp(): never {
@@ -50,33 +49,28 @@ Mode flags:
 function createWorkspaceTasks(
   workspaces: ReadonlyArray<WorkspaceName>
 ): Array<() => Promise<RunResult>> {
-  const biomeChecks = workspaces.map(
-    (workspace) => () => runWorkspaceScript(workspace, 'check:quick')
-  );
-  const dprintChecks = workspaces
-    .filter((workspace) => WORKSPACE_DPRINT_PATHS[workspace].length > 0)
-    .map(
-      (workspace) => () =>
-        runCommand(
-          `root:dprint:${workspace}`,
-          ['bunx', 'dprint', 'check', ...WORKSPACE_DPRINT_PATHS[workspace]],
-          {
-            cwd: ROOT_DIR,
-          }
-        )
-    );
-  const typechecks = workspaces.map(
-    (workspace) => () => runWorkspaceScript(workspace, 'typecheck')
-  );
-  const madgeChecks = workspaces.map(
-    (workspace) => () =>
-      runCommand(
-        `root:madge:${workspace}:circular`,
-        ['bunx', 'madge', '--circular', '--extensions', 'ts,tsx', WORKSPACE_MADGE_PATHS[workspace]],
-        { cwd: ROOT_DIR }
-      )
-  );
-  return [...biomeChecks, ...dprintChecks, ...typechecks, ...madgeChecks];
+  const turboChecks = () =>
+    runCommand('workspaces:check', createTurboCheckCommand([...workspaces]), {
+      cwd: getCheckCwd(),
+    });
+  return [turboChecks, ...createWorkspaceDprintTasks(workspaces)];
+}
+
+function createWorkspaceDprintTasks(
+  workspaces: ReadonlyArray<WorkspaceName>
+): Array<() => Promise<RunResult>> {
+  return workspaces.filter(hasWorkspaceDprintPaths).map(createWorkspaceDprintTask);
+}
+
+function createWorkspaceDprintTask(workspace: WorkspaceName): () => Promise<RunResult> {
+  return () =>
+    runCommand(`root:dprint:${workspace}`, createWorkspaceDprintCommand(workspace), {
+      cwd: ROOT_DIR,
+    });
+}
+
+function hasWorkspaceDprintPaths(workspace: WorkspaceName): boolean {
+  return WORKSPACE_DPRINT_PATHS[workspace].length > 0;
 }
 
 function createRootTasks(skipFormat: boolean): Array<() => Promise<RunResult>> {
