@@ -11,6 +11,7 @@
     "check": "bun run check:quick && bun run typecheck",
     "check:quick": "biome check src tests",
     "typecheck": "tsgo --noEmit",
+    "circular": "madge --circular --extensions ts,tsx .",
     "fix": "biome check --write src tests",
     "test": "bun run test:unit && bun run test:integration",
     "test:unit": "bun run test:unit:bun && bun run test:unit:vitest",
