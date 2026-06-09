@@ -25,7 +25,7 @@
     },
     "test:coverage": {
       "cache": false,
-      "outputs": ["coverage/**"]
+      "outputs": ["$TURBO_ROOT$/.mango/artifacts/coverage/**"]
     }
   }
 }

@@ -275,9 +275,9 @@ Each provider stream test must cover:
 
 ## Coverage
 
-Frontend coverage is written to `apps/frontend/coverage/`. Vitest writes the
-React/Vite coverage report, and `bun:test` writes pure-logic LCOV under
-`apps/frontend/coverage/bun/`:
+Coverage reports are written under `.mango/artifacts/coverage/`. Frontend Vitest writes the
+React/Vite report to `.mango/artifacts/coverage/frontend/vitest/`, and frontend `bun:test`
+writes pure-logic LCOV under `.mango/artifacts/coverage/frontend/bun/`:
 
 ```bash
 bun run --filter @mangostudio/frontend test:coverage

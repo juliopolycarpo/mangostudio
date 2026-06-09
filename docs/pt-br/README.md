@@ -122,22 +122,22 @@ mangostudio/
 
 ## Scripts Principais
 
-| Comando                   | Descrição                                            |
-| ------------------------- | ---------------------------------------------------- |
-| `bun install`             | Instala todas as dependências do workspace           |
-| `bun run dev`             | Inicia todos os servidores de dev simultaneamente    |
-| `bun run dev --api`       | Inicia apenas o servidor de dev da API               |
-| `bun run build`           | Build do frontend para produção                      |
-| `bun run build --binary`  | Gera binários standalone com frontend embutido       |
-| `bun run check`           | Executa Biome, dprint, madge e typecheck             |
-| `bun run test`            | Executa as lanes unit e integration                  |
-| `bun run test --unit`     | Executa apenas as suítes unitárias                   |
-| `bun run test:e2e:setup`  | Instala Playwright Chromium para browser smoke       |
-| `bun run test --e2e`      | Executa a suíte end-to-end com Playwright (opt-in)   |
-| `bun run test --coverage` | Coleta cobertura de testes nos workspaces aplicáveis |
-| `bun run fix`             | Aplica correções do Biome e dprint                   |
-| `bun run verify`          | Gate CI completo: check, test, build (para no erro)  |
-| `bun run clean`           | Remove dist, coverage e artefatos de build           |
+| Comando                   | Descrição                                                              |
+| ------------------------- | ---------------------------------------------------------------------- |
+| `bun install`             | Instala todas as dependências do workspace                             |
+| `bun run dev`             | Inicia todos os servidores de dev simultaneamente                      |
+| `bun run dev --api`       | Inicia apenas o servidor de dev da API                                 |
+| `bun run build`           | Build do frontend para produção                                        |
+| `bun run build --binary`  | Gera binários standalone com frontend embutido                         |
+| `bun run check`           | Executa Biome, dprint, madge e typecheck                               |
+| `bun run test`            | Executa as lanes unit e integration                                    |
+| `bun run test --unit`     | Executa apenas as suítes unitárias                                     |
+| `bun run test:e2e:setup`  | Instala Playwright Chromium para browser smoke                         |
+| `bun run test --e2e`      | Executa a suíte end-to-end com Playwright (opt-in)                     |
+| `bun run test --coverage` | Coleta cobertura de testes nos workspaces aplicáveis                   |
+| `bun run fix`             | Aplica correções do Biome e dprint                                     |
+| `bun run verify`          | Gate CI completo: check, test, build (para no erro)                    |
+| `bun run clean`           | Remove dist, relatórios locais de teste, coverage e artefatos de build |
 
 ## Ferramentas de Desenvolvimento
 
@@ -256,16 +256,16 @@ Configurado em `biome.json` com as regras `recommended` ativadas e sobrescritas 
 
 Configurado em `dprint.json` com o seguinte escopo e configurações:
 
-| Configuração             | Valor                                                                                                                                                                    |
-| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Largura de linha         | 100                                                                                                                                                                      |
-| Indentação               | 2 espaços                                                                                                                                                                |
-| Fim de linha             | LF                                                                                                                                                                       |
-| Tabulação                | false                                                                                                                                                                    |
-| Quebra de texto Markdown | `maintain`                                                                                                                                                               |
-| Inclusões                | `**/*.{md,mdx,toml,yml,yaml}`, `**/Dockerfile`, `**/Dockerfile.*`                                                                                                        |
-| Exclusões                | `node_modules`, `dist`, `coverage`, `build`, `test-results`, `playwright-report`, `.jscpd-out`, `.qa-gate`, `.mango/out`, `routeTree.gen.ts`, `CHANGELOG.md`, `bun.lock` |
-| Plugins                  | markdown (WASM), toml (WASM), dockerfile (WASM), pretty_yaml                                                                                                             |
+| Configuração             | Valor                                                                                                                                                                                        |
+| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Largura de linha         | 100                                                                                                                                                                                          |
+| Indentação               | 2 espaços                                                                                                                                                                                    |
+| Fim de linha             | LF                                                                                                                                                                                           |
+| Tabulação                | false                                                                                                                                                                                        |
+| Quebra de texto Markdown | `maintain`                                                                                                                                                                                   |
+| Inclusões                | `**/*.{md,mdx,toml,yml,yaml}`, `**/Dockerfile`, `**/Dockerfile.*`                                                                                                                            |
+| Exclusões                | `node_modules`, `dist`, `coverage`, `build`, `test-results`, `playwright-report`, `.jscpd-out`, `.qa-gate`, `.mango/artifacts`, `.mango/out`, `routeTree.gen.ts`, `CHANGELOG.md`, `bun.lock` |
+| Plugins                  | markdown (WASM), toml (WASM), dockerfile (WASM), pretty_yaml                                                                                                                                 |
 
 ### Dependências Circulares
 

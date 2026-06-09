@@ -30,6 +30,7 @@ export default defineConfig({
     reporters: process.env.GITHUB_ACTIONS === 'true' ? ['default', 'github-actions'] : ['default'],
     coverage: {
       provider: 'v8',
+      reportsDirectory: path.resolve(__dirname, '../../.mango/artifacts/coverage/frontend/vitest'),
       reporter: ['text', 'json-summary', 'lcov'],
       exclude: [
         'node_modules/',

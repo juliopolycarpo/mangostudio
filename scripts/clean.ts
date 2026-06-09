@@ -8,15 +8,20 @@ import {
   runTask,
 } from './lib/runner';
 
-// Build artifacts removed by a plain `clean`.
+// Build and local test artifacts removed by a plain `clean`.
 const ARTIFACT_PATHS = [
   'apps/frontend/dist',
   'apps/api/dist',
   'apps/shared/dist',
+  '.mango/artifacts',
+  '.mango/out',
   'apps/frontend/coverage',
   'apps/api/coverage',
   'apps/shared/coverage',
-  '.mango/out',
+  'playwright-report',
+  'test-results',
+  '.jscpd-out',
+  '.qa-gate',
 ];
 
 // Additionally removed by `--dist-clean`.
@@ -30,7 +35,7 @@ const NODE_MODULES_PATHS = [
 function printHelp(): never {
   console.log(`Usage: bun run clean [flags]
 
-Removes dist, coverage, and build artifacts.
+Removes dist, local test reports, coverage, and build artifacts.
 
 Flags:
   --dist-clean   Also remove all node_modules directories

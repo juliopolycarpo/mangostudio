@@ -2,10 +2,16 @@ import { defineConfig } from '@playwright/test';
 
 export default defineConfig({
   testDir: './tests/browser-smoke',
+  outputDir: '.mango/artifacts/playwright/test-results',
   timeout: 30_000,
   retries: process.env.CI ? 1 : 0,
   workers: process.env.CI ? 1 : undefined,
-  reporter: process.env.CI ? [['github'], ['html', { open: 'never' }]] : 'list',
+  reporter: process.env.CI
+    ? [
+        ['github'],
+        ['html', { open: 'never', outputFolder: '.mango/artifacts/playwright/html-report' }],
+      ]
+    : 'list',
   projects: [{ name: 'chromium', use: { browserName: 'chromium' } }],
   use: {
     baseURL: 'http://localhost:5173',

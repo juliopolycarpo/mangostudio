@@ -5,7 +5,7 @@ import { ROOT_DIR } from '../../lib/config';
 import { runCapture } from './support';
 import type { DuplicationStats } from './types';
 
-const JSCPD_OUTPUT_DIR = '.jscpd-out';
+const JSCPD_OUTPUT_DIR = '.mango/artifacts/qa-gate/jscpd';
 
 /** Run jscpd over apps/ and return clone/duplicated-line totals. */
 export const collectDuplication = async (): Promise<DuplicationStats> => {

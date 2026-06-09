@@ -30,9 +30,10 @@ uploads/
 config.toml
 
 # ─── Mango local config/runtime — keep only examples ─── #
+.mango/*
+.mango/artifacts/
 .mango/out/
 .mango/config.toml
-.mango/*
 !.mango/config.toml.example
 !.mango/.env.example
 

@@ -25,16 +25,19 @@ export const WORKSPACE_COVERAGE_SOURCES: Readonly<
   Record<WorkspaceName, readonly CoverageSource[]>
 > = {
   frontend: [
-    { kind: 'json-summary', file: 'apps/frontend/coverage/coverage-summary.json' },
-    { kind: 'lcov', file: 'apps/frontend/coverage/bun/lcov.info' },
+    {
+      kind: 'json-summary',
+      file: '.mango/artifacts/coverage/frontend/vitest/coverage-summary.json',
+    },
+    { kind: 'lcov', file: '.mango/artifacts/coverage/frontend/bun/lcov.info' },
   ],
-  api: [{ kind: 'lcov', file: 'apps/api/coverage/lcov.info' }],
-  shared: [{ kind: 'lcov', file: 'apps/shared/coverage/lcov.info' }],
+  api: [{ kind: 'lcov', file: '.mango/artifacts/coverage/api/lcov.info' }],
+  shared: [{ kind: 'lcov', file: '.mango/artifacts/coverage/shared/lcov.info' }],
 };
 
 const SOURCE_DERIVED_COVERAGE_FILES: Readonly<Partial<Record<WorkspaceName, string>>> = {
-  api: 'apps/api/coverage/lcov.info',
-  shared: 'apps/shared/coverage/lcov.info',
+  api: '.mango/artifacts/coverage/api/lcov.info',
+  shared: '.mango/artifacts/coverage/shared/lcov.info',
 };
 
 export const readJsonCoverageSummary = async (absPath: string): Promise<CoverageSummary> => {
