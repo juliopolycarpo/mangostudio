@@ -97,7 +97,7 @@ function createRootTasks(skipFormat: boolean): Array<() => Promise<RunResult>> {
 }
 
 const { workspaces, includeRoot, flags, values, positional } = parseArgs({
-  booleanFlags: ['--staged', '--changed', '--skip-format', '--skip-lint'],
+  booleanFlags: ['--staged', '--changed', '--skip-format'],
   valueFlags: ['--base'],
 });
 
