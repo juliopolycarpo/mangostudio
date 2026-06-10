@@ -96,4 +96,14 @@ describe('renderVerdict', () => {
   it('reports when head metrics are absent entirely', () => {
     expect(renderVerdict(base, null)).toContain('Verdict unavailable');
   });
+
+  // A missing base must not produce the "healthy against base" claim: the
+  // comparative checks never ran.
+  it('qualifies the healthy verdict when comparisons were unavailable', () => {
+    const verdict = renderVerdict(null, makeMetrics('head-sha'));
+
+    expect(verdict).toContain('✅ **No attention signals**');
+    expect(verdict).toContain('comparisons were unavailable');
+    expect(verdict).not.toContain('healthy against base');
+  });
 });

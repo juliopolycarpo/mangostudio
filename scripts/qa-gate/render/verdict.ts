@@ -93,6 +93,17 @@ export const collectAttentionItems = (base: Metrics | null, head: Metrics | null
   return items;
 };
 
+// True when every base↔head comparison had both sides; when false the healthy
+// verdict must not claim a clean comparison it never made (comparative items
+// return null both for "healthy" and for "side missing").
+const allComparisonsAvailable = (base: Metrics | null, head: Metrics | null): boolean =>
+  getTotalLineCoverage(base) != null &&
+  getTotalLineCoverage(head) != null &&
+  getDuplication(base) != null &&
+  getDuplication(head) != null &&
+  getBundle(base) != null &&
+  getBundle(head) != null;
+
 /**
  * Render the one-line verdict shown at the top of the QA-gate comment.
  * // Usage: renderVerdict(base, head)
@@ -102,8 +113,11 @@ export const renderVerdict = (base: Metrics | null, head: Metrics | null): strin
     return '⚠️ **Verdict unavailable** — head metrics were not collected; see collector errors below.';
   }
   const items = collectAttentionItems(base, head);
-  if (items.length === 0) {
-    return '✅ **No attention signals** — collected metrics look healthy against base.';
+  if (items.length > 0) {
+    return `⚠️ **Needs attention:** ${items.join(' · ')}`;
   }
-  return `⚠️ **Needs attention:** ${items.join(' · ')}`;
+  if (!allComparisonsAvailable(base, head)) {
+    return '✅ **No attention signals** — head metrics look healthy, but some base↔head comparisons were unavailable; see metric details and collector notes.';
+  }
+  return '✅ **No attention signals** — collected metrics look healthy against base.';
 };
