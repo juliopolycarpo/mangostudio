@@ -69,17 +69,8 @@ jobs:
       - name: Assemble npm distribution
         run: VERSION="${{ steps.resolve.outputs.version }}" bun ./scripts/release/pack-npm.ts
 
-      - name: Archive per-platform binaries
-        run: |
-          version="${{ steps.resolve.outputs.version }}"
-          mkdir -p release-assets
-          rm -f release-assets/SHA256SUMS
-          for dir in .mango/out/*/; do
-            platform="$(basename "$dir")"
-            tar -czf "release-assets/mangostudio-${version}-${platform}.tar.gz" -C .mango/out "$platform"
-          done
-          (cd release-assets && sha256sum *.tar.gz > SHA256SUMS)
-          ls -lh release-assets
+      - name: Archive release assets
+        run: VERSION="${{ steps.resolve.outputs.version }}" bun ./scripts/release/archive-assets.ts
 
       - uses: actions/upload-artifact@v7
         with:
@@ -227,13 +218,21 @@ jobs:
           VERSION: ${{ needs.build.outputs.version }}
         run: |
           source scripts/release/retry.sh
-          archive="mangostudio-${VERSION}-${PLATFORM}.tar.gz"
+          if [[ "$PLATFORM" == windows* ]]; then
+            archive="mangostudio-${VERSION}-${PLATFORM}.zip"
+          else
+            archive="mangostudio-${VERSION}-${PLATFORM}.tar.gz"
+          fi
           mkdir -p verify-assets/extract
           retry_command 5 60 gh release download "v${VERSION}" --pattern "$archive" --dir verify-assets --clobber
           retry_command 5 60 gh release download "v${VERSION}" --pattern SHA256SUMS --dir verify-assets --clobber
           bun ./scripts/release/verify-checksum.ts verify-assets/SHA256SUMS "verify-assets/${archive}"
-          tar -xzf "verify-assets/${archive}" -C verify-assets/extract
-          binary_path="verify-assets/extract/${PLATFORM}/${BINARY}"
+          if [[ "$archive" == *.zip ]]; then
+            unzip -q "verify-assets/${archive}" -d verify-assets/extract
+          else
+            tar -xzf "verify-assets/${archive}" -C verify-assets/extract
+          fi
+          binary_path="verify-assets/extract/${BINARY}"
           chmod +x "$binary_path" 2>/dev/null || true
           actual="$("$binary_path" --version)"
           if [ "$actual" != "$VERSION" ]; then

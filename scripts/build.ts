@@ -5,6 +5,7 @@ import { join } from 'node:path';
 
 import { createTurboBuildCommand, selectBuildWorkspaces } from './lib/build';
 import { ROOT_DIR, type WorkspaceName } from './lib/config';
+import { ALL_BINARY_TARGETS, type BinaryTarget, filterBinaryTargets } from './lib/release-targets';
 import { resolveReleaseVersion } from './lib/release-version';
 import {
   assertNoUnexpectedArguments,
@@ -15,29 +16,12 @@ import {
   warn,
 } from './lib/runner';
 
-interface BinaryTarget {
-  target: string;
-  arch: string;
-  name: string;
-}
-
 interface BinaryBuildOptions {
   buildType: 'production' | 'development';
   dryRun: boolean;
   onlyPlatform?: string;
   version: string;
 }
-
-const ALL_BINARY_TARGETS: BinaryTarget[] = [
-  { target: 'bun-linux-x64', arch: 'linux-x64', name: 'mangostudio' },
-  { target: 'bun-linux-arm64', arch: 'linux-arm64', name: 'mangostudio' },
-  { target: 'bun-windows-x64', arch: 'windows-x64', name: 'mangostudio.exe' },
-  { target: 'bun-windows-arm64', arch: 'windows-arm64', name: 'mangostudio.exe' },
-  { target: 'bun-darwin-x64', arch: 'darwin-x64', name: 'mangostudio' },
-  { target: 'bun-darwin-arm64', arch: 'darwin-arm64', name: 'mangostudio' },
-  { target: 'bun-linux-x64-musl', arch: 'linux-x64-musl', name: 'mangostudio' },
-  { target: 'bun-linux-arm64-musl', arch: 'linux-arm64-musl', name: 'mangostudio' },
-];
 
 function printHelp(): never {
   console.log(`Usage: bun run build [workspace flags]
@@ -59,16 +43,6 @@ Binary flags:
   --dry-run        Preview the build without writing artifacts
   --help           Show this help message`);
   process.exit(0);
-}
-
-function resolveBinaryTargets(onlyPlatform?: string): BinaryTarget[] {
-  if (!onlyPlatform) {
-    return ALL_BINARY_TARGETS;
-  }
-
-  return ALL_BINARY_TARGETS.filter(
-    (target) => target.arch === onlyPlatform || target.target === onlyPlatform
-  );
 }
 
 async function buildFrontendSidecar(dryRun: boolean): Promise<void> {
@@ -371,7 +345,7 @@ REM The binary is a CLI; bare invocation prints help, so start the server explic
 async function buildStandaloneBinary(options: BinaryBuildOptions): Promise<void> {
   header('Build (binary)');
 
-  const targets = resolveBinaryTargets(options.onlyPlatform);
+  const targets = filterBinaryTargets(options.onlyPlatform);
   if (targets.length === 0) {
     fatal(
       `No platforms match filter: ${options.onlyPlatform}. Available platforms: ${ALL_BINARY_TARGETS.map((target) => target.arch).join(', ')}`

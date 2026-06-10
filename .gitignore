@@ -3,6 +3,7 @@ node_modules/
 build/
 dist/
 dist-npm/
+release-assets/
 coverage/
 playwright-report/
 test-results/
