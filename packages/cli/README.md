@@ -24,6 +24,7 @@ mangostudio serve lan:3001 -d           # background (logs to ~/.mango/logs/)
 mangostudio status         # show the running instance
 mangostudio stop           # graceful shutdown
 mangostudio doctor         # environment diagnostics
+mangostudio --version      # print the installed version
 ```
 
 Run `mangostudio` with no arguments for the full command list.

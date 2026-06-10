@@ -15,6 +15,7 @@ managing one local server. The same commands work from the installed binary
 | `stop`                             | Gracefully stop the running server (SIGTERM).                  |
 | `killserver`                       | Force-kill the running server (SIGKILL).                       |
 | `doctor`                           | Run environment and configuration diagnostics.                 |
+| `version`, `--version`, `-v`       | Print the embedded MangoStudio version.                        |
 
 `-d` / `--detach` and the positional host/port target may be combined in any
 order, e.g. `mangostudio serve 127.0.0.1:3000 -d`.
@@ -29,6 +30,7 @@ mangostudio serve              # foreground on localhost:3001
 mangostudio serve 3000         # foreground on localhost:3000
 mangostudio serve 127.0.0.1 -d # background on 127.0.0.1:3001
 mangostudio serve lan:3000 -d  # background on 0.0.0.0:3000
+mangostudio --version
 mangostudio status
 mangostudio stop
 ```
