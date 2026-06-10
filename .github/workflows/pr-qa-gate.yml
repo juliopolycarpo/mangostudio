@@ -1,9 +1,20 @@
 name: PR QA Gate
 
-# Posts a single sticky comment on every PR comparing coverage, lines of code,
-# bundle size, dependency count, duplication, test counts, and repo tooling
-# signals between the PR base and head. Report-only — never fails the PR.
-# See scripts/qa-gate/{collect,render}.ts.
+# Owns the automation-managed comments on every PR: a commit summary, a
+# changelog preview, and a QA metrics comparison (coverage, lines of code,
+# bundle size, dependencies, duplication, tests, repo tooling) between the PR
+# base and head. Report-only — never fails the PR.
+#
+# Comment lifecycle (scripts/qa-gate/publish/managed-comments.mjs):
+# - publish-pending posts the commit summary + changelog preview and a
+#   temporary "QA Gate — Running" placeholder while metrics collect.
+# - the final publish deletes every managed comment and recreates the set, so
+#   the bot comments stay grouped at the end of the discussion in a fixed
+#   order: commits, changelog preview, QA gate.
+# - both publishes re-check the PR head via the API and skip when a newer
+#   commit landed, so a stale run can never report on an outdated HEAD
+#   (cancel-in-progress concurrency stops most stale runs even earlier).
+# See scripts/qa-gate/{collect,render}.ts for the metrics themselves.
 
 on:
   pull_request:
@@ -22,52 +33,69 @@ env:
   CACHE_VERSION: v1
 
 jobs:
-  mark-updating:
-    name: Mark Comment Updating
+  publish-pending:
+    name: Publish Pending Comments
     runs-on: ubuntu-latest
-    timeout-minutes: 3
+    timeout-minutes: 10
     steps:
-      - name: Mark QA gate comment as updating
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          # Full history: the commit summary and git-cliff both walk base..head.
+          fetch-depth: 0
+
+      - uses: ./.github/actions/setup-mango
+
+      - name: Render commit summary
+        continue-on-error: true
+        run: bun ./scripts/qa-gate/render-commits.ts "$BASE_SHA" "$HEAD_SHA" > commits.md
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+
+      - name: Render changelog preview
+        continue-on-error: true
+        run: bun run changelog --preview --base "$BASE_SHA" > changelog.md
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+
+      - name: Publish comments (QA pending)
         uses: actions/github-script@v9
         continue-on-error: true
         with:
           script: |
-            const marker = '<!-- qa-gate-comment -->';
+            const publish = await import(
+              `${process.env.GITHUB_WORKSPACE}/scripts/qa-gate/publish/managed-comments.mjs`
+            );
             const pullRequest = context.payload.pull_request;
-            const issue_number = pullRequest.number;
-            const shortSha = pullRequest.head.sha.slice(0, 7);
-            const body = [
-              '## QA Gate — Updating',
-              '',
-              `Detected a branch update at \`${shortSha}\`.`,
-              '',
-              'The QA Gate is updating this comment with fresh coverage, bundle, dependency, test, and repo tooling metrics. This can take a few minutes.',
-              '',
-              marker,
-            ].join('\n');
-            const comments = await github.paginate(github.rest.issues.listComments, {
-              ...context.repo,
-              issue_number,
-              per_page: 100,
-            });
-            const existing = comments.find((comment) => {
-              return comment.user?.type === 'Bot' && comment.body?.includes(marker);
-            });
-
-            if (existing) {
-              await github.rest.issues.updateComment({
-                ...context.repo,
-                comment_id: existing.id,
-                body,
-              });
-              return;
-            }
-
-            await github.rest.issues.createComment({
-              ...context.repo,
-              issue_number,
-              body,
-            });
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            await publish.publishManagedComments(
+              { github, context, core },
+              {
+                pullNumber: pullRequest.number,
+                expectedHeadSha: pullRequest.head.sha,
+                comments: [
+                  {
+                    marker: publish.COMMITS_MARKER,
+                    body: await publish.readCommentBody('commits.md', {
+                      marker: publish.COMMITS_MARKER,
+                      fallback: '## Commits\n\n_Commit summary failed to render for this run._',
+                    }),
+                  },
+                  {
+                    marker: publish.CHANGELOG_PREVIEW_MARKER,
+                    body: await publish.readCommentBody('changelog.md', {
+                      marker: publish.CHANGELOG_PREVIEW_MARKER,
+                      fallback: '## 📝 Changelog Preview\n\n_Changelog preview failed to render for this run._',
+                    }),
+                  },
+                  {
+                    marker: publish.QA_GATE_MARKER,
+                    body: publish.renderQaPendingBody({ headSha: pullRequest.head.sha, runUrl }),
+                  },
+                ],
+              }
+            );
 
   metrics-head:
     name: Metrics — Head
@@ -116,6 +144,8 @@ jobs:
           name: qa-metrics-head
           path: metrics.json
           retention-days: 7
+          # Reruns of this job must be able to replace their own artifact.
+          overwrite: true
 
   metrics-base:
     name: Metrics — Base
@@ -195,15 +225,23 @@ jobs:
           name: qa-metrics-base
           path: metrics.json
           retention-days: 7
+          # Reruns of this job must be able to replace their own artifact.
+          overwrite: true
 
   comment:
-    name: Post Comment
-    needs: [mark-updating, metrics-base, metrics-head]
+    name: Publish Final Comments
+    needs: [publish-pending, metrics-base, metrics-head]
+    # Publish even when a metrics side failed: the renderer degrades to n/a
+    # columns plus collector-error notes instead of stranding the placeholder.
     if: always()
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          # Full history: the commit summary and git-cliff both walk base..head.
+          fetch-depth: 0
 
       - uses: ./.github/actions/setup-mango
 
@@ -221,7 +259,7 @@ jobs:
           path: ./qa-base
         continue-on-error: true
 
-      - name: Render comment
+      - name: Render QA gate comment
         run: |
           base="./qa-base/metrics.json"
           head="./qa-head/metrics.json"
@@ -232,36 +270,55 @@ jobs:
           echo "## Rendered comment preview" >> "$GITHUB_STEP_SUMMARY"
           cat comment.md >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Upsert PR comment
+      - name: Render commit summary
+        continue-on-error: true
+        run: bun ./scripts/qa-gate/render-commits.ts "$BASE_SHA" "$HEAD_SHA" > commits.md
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+
+      - name: Render changelog preview
+        continue-on-error: true
+        run: bun run changelog --preview --base "$BASE_SHA" > changelog.md
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+
+      - name: Publish comments (final)
         uses: actions/github-script@v9
         continue-on-error: true
         with:
           script: |
-            const { readFile } = require('node:fs/promises');
-
-            const marker = '<!-- qa-gate-comment -->';
-            const body = await readFile('comment.md', 'utf8');
-            const issue_number = context.payload.pull_request.number;
-            const comments = await github.paginate(github.rest.issues.listComments, {
-              ...context.repo,
-              issue_number,
-              per_page: 100,
-            });
-            const existing = comments.find((comment) => {
-              return comment.user?.type === 'Bot' && comment.body?.includes(marker);
-            });
-
-            if (existing) {
-              await github.rest.issues.updateComment({
-                ...context.repo,
-                comment_id: existing.id,
-                body,
-              });
-              return;
-            }
-
-            await github.rest.issues.createComment({
-              ...context.repo,
-              issue_number,
-              body,
-            });
+            const publish = await import(
+              `${process.env.GITHUB_WORKSPACE}/scripts/qa-gate/publish/managed-comments.mjs`
+            );
+            const pullRequest = context.payload.pull_request;
+            await publish.publishManagedComments(
+              { github, context, core },
+              {
+                pullNumber: pullRequest.number,
+                expectedHeadSha: pullRequest.head.sha,
+                comments: [
+                  {
+                    marker: publish.COMMITS_MARKER,
+                    body: await publish.readCommentBody('commits.md', {
+                      marker: publish.COMMITS_MARKER,
+                      fallback: '## Commits\n\n_Commit summary failed to render for this run._',
+                    }),
+                  },
+                  {
+                    marker: publish.CHANGELOG_PREVIEW_MARKER,
+                    body: await publish.readCommentBody('changelog.md', {
+                      marker: publish.CHANGELOG_PREVIEW_MARKER,
+                      fallback: '## 📝 Changelog Preview\n\n_Changelog preview failed to render for this run._',
+                    }),
+                  },
+                  {
+                    marker: publish.QA_GATE_MARKER,
+                    body: await publish.readCommentBody('comment.md', {
+                      marker: publish.QA_GATE_MARKER,
+                      fallback: '## QA Gate\n\n_QA metrics failed to render for this run; see the workflow logs._',
+                    }),
+                  },
+                ],
+              }
+            );
