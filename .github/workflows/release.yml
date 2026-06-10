@@ -228,7 +228,13 @@ jobs:
           retry_command 5 60 gh release download "v${VERSION}" --pattern SHA256SUMS --dir verify-assets --clobber
           bun ./scripts/release/verify-checksum.ts verify-assets/SHA256SUMS "verify-assets/${archive}"
           if [[ "$archive" == *.zip ]]; then
-            unzip -q "verify-assets/${archive}" -d verify-assets/extract
+            # unzip is not guaranteed on the Windows runner's bash PATH; fall
+            # back to PowerShell's Expand-Archive, which always ships with it.
+            if command -v unzip >/dev/null 2>&1; then
+              unzip -q "verify-assets/${archive}" -d verify-assets/extract
+            else
+              powershell -NoProfile -Command "Expand-Archive -Path 'verify-assets/${archive}' -DestinationPath 'verify-assets/extract' -Force"
+            fi
           else
             tar -xzf "verify-assets/${archive}" -C verify-assets/extract
           fi
