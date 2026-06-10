@@ -19,6 +19,11 @@ jobs:
 
       - uses: ./.github/actions/setup-mango
 
+      - uses: ./.github/actions/cache-turbo
+        with:
+          scope: test
+          cache-version: ${{ env.CACHE_VERSION }}
+
       - name: Restore Vite optimizer cache
         uses: ./.github/actions/cache-vite
         with:

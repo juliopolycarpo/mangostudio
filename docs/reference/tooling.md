@@ -45,8 +45,26 @@ Current task definitions:
 
 ### Cache Directory
 
-Turborepo writes its local cache to `.turbo/` at the repository root. This
-directory is gitignored and should never be committed.
+Turborepo writes its local task-output cache to `.turbo/cache` at the repository
+root. This directory is gitignored and should never be committed.
+
+CI persists the local Turbo cache with `actions/cache` in the check, test, and
+build lanes. Each lane uses a separate key prefix so the lanes never share a
+cache entry — each saves and restores only its own snapshot:
+
+```text
+${{ runner.os }}-${{ env.CACHE_VERSION }}-turbo-<lane>-${{ github.sha }}
+```
+
+The `github.sha` suffix makes every successful run save a fresh cache, while the
+lane restore prefix restores the most recent cache for that lane. Bumping
+`CACHE_VERSION` still invalidates all CI caches when a cache-poisoning rollback
+is needed.
+
+The CI check lane still keeps its separate `.mango/artifacts/tsbuildinfo/` cache
+because shared TypeScript build-info files are deliberately not Turbo task
+outputs. Vite optimizer caches also remain separate because they are dependency
+optimizer state, not task outputs.
 
 ### Future Work
 

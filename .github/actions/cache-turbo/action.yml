@@ -1,0 +1,22 @@
+name: Cache Turbo local artifacts
+description: >
+  Restore Turborepo's local task-output cache for one CI lane. Run after
+  checkout + setup-mango so dependencies and the workspace are ready.
+inputs:
+  scope:
+    description: Cache key scope, e.g. check, test, or build.
+    required: true
+  cache-version:
+    description: Bump to immediately invalidate every Turbo cache.
+    required: false
+    default: "v1"
+runs:
+  using: composite
+  steps:
+    - name: Restore turbo cache
+      uses: actions/cache@v5
+      with:
+        path: .turbo/cache
+        key: ${{ runner.os }}-${{ inputs.cache-version }}-turbo-${{ inputs.scope }}-${{ github.sha }}
+        restore-keys: |
+          ${{ runner.os }}-${{ inputs.cache-version }}-turbo-${{ inputs.scope }}-
