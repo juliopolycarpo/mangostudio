@@ -22,7 +22,4 @@
 
 <!-- Mention any new environment variables, schema changes, breaking changes, or open questions. -->
 
-## Commits
-
-<!-- COMMITS START -->
-<!-- COMMITS END -->
+<!-- The commit list is published automatically as a bot comment by the PR QA workflow. -->
