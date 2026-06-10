@@ -40,9 +40,7 @@ jobs:
         with:
           name: coverage
           path: |
-            apps/frontend/coverage/
-            apps/api/coverage/
-            apps/shared/coverage/
+            .mango/artifacts/coverage/
           retention-days: 7
 
       - name: Coverage summary

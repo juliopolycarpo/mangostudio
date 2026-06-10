@@ -58,7 +58,7 @@ jobs:
         with:
           name: playwright-results
           path: |
-            test-results/
+            .mango/artifacts/playwright/test-results/
           retention-days: 7
 
       - name: Upload Playwright HTML report
@@ -66,5 +66,5 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: playwright-report
-          path: playwright-report/
+          path: .mango/artifacts/playwright/html-report/
           retention-days: 7

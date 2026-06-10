@@ -250,9 +250,9 @@ Cada teste de stream por provedor deve cobrir:
 
 ## Cobertura
 
-A cobertura do frontend é escrita em `apps/frontend/coverage/`. O Vitest escreve
-o relatório React/Vite, e `bun:test` escreve LCOV da lógica pura em
-`apps/frontend/coverage/bun/`:
+Os relatórios de cobertura são escritos em `.mango/artifacts/coverage/`. O Vitest do frontend
+escreve o relatório React/Vite em `.mango/artifacts/coverage/frontend/vitest/`, e `bun:test`
+escreve LCOV da lógica pura em `.mango/artifacts/coverage/frontend/bun/`:
 
 ```bash
 bun run --filter @mangostudio/frontend test:coverage

@@ -5,6 +5,7 @@
     "jsx": "react-jsx",
     "rootDir": ".",
     "outDir": "dist",
+    "tsBuildInfoFile": "../../.mango/artifacts/tsbuildinfo/frontend.tsbuildinfo",
     "paths": {
       "@/*": ["./src/*"]
     }

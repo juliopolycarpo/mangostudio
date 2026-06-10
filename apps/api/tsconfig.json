@@ -2,7 +2,8 @@
   "extends": "../../tsconfig.json",
   "compilerOptions": {
     "lib": ["ES2022"],
-    "types": ["bun"]
+    "types": ["bun"],
+    "tsBuildInfoFile": "../../.mango/artifacts/tsbuildinfo/api.tsbuildinfo"
   },
   "include": ["src", "tests"]
 }

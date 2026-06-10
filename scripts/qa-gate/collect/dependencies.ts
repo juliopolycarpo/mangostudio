@@ -7,7 +7,7 @@ import type { DependencyStats } from './types';
 
 // PR QA gate snapshots the base lockfile here so dependency deltas are measured
 // against the base, not the overlaid head graph. Falls back to the live lock.
-const DEPENDENCY_LOCK_SNAPSHOT = join(ROOT_DIR, '.qa-gate/base-bun.lock');
+const DEPENDENCY_LOCK_SNAPSHOT = join(ROOT_DIR, '.mango/artifacts/qa-gate/base-bun.lock');
 
 const countWorkspaceDependencyEntries = (
   lockText: string,

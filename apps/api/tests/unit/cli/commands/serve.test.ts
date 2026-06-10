@@ -117,13 +117,13 @@ describe('runServe (detached)', () => {
 
   it('rejects a missing auth secret before spawning', async () => {
     let spawned = false;
-    loadConfigForTest({ auth: { secret: '   ', url: '' } });
 
     const missingSecret = runServe(
       { host: undefined, port: 3000, detached: true },
       {
         readState: () => Promise.resolve(null),
         controller: new FakeProcessController(),
+        ensureAuthSecret: () => Promise.reject(new Error('BETTER_AUTH_SECRET is required')),
         spawnDetached: () => {
           spawned = true;
           return Promise.resolve({ pid: 1, port: 3000, logFile: '' });

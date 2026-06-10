@@ -46,7 +46,7 @@ describe('test script', () => {
     expect(turboConfig.tasks['test:integration']).toEqual({ cache: false });
     expect(turboConfig.tasks['test:coverage']).toEqual({
       cache: false,
-      outputs: ['coverage/**'],
+      outputs: ['$TURBO_ROOT$/.mango/artifacts/coverage/**'],
     });
     expect(turboConfig.tasks['test:e2e']).toBeUndefined();
   });

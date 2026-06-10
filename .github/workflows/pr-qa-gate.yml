@@ -95,12 +95,12 @@ jobs:
       - name: Collect test lane counts
         run: |
           set +e
-          mkdir -p .qa-gate
+          mkdir -p .mango/artifacts/qa-gate
           for lane in unit integration; do
             db="/tmp/mangostudio-qa-gate-${lane}.sqlite"
             rm -f "$db" "$db-shm" "$db-wal"
-            DATABASE_PATH="$db" bun run test "--${lane}" > ".qa-gate/test-${lane}.log" 2>&1
-            echo "$?" > ".qa-gate/test-${lane}.exit-code"
+            DATABASE_PATH="$db" bun run test "--${lane}" > ".mango/artifacts/qa-gate/test-${lane}.log" 2>&1
+            echo "$?" > ".mango/artifacts/qa-gate/test-${lane}.exit-code"
           done
           exit 0
 
@@ -134,8 +134,8 @@ jobs:
         # head dependency graph for installation.
         run: |
           set -euo pipefail
-          mkdir -p .qa-gate
-          cp bun.lock .qa-gate/base-bun.lock
+          mkdir -p .mango/artifacts/qa-gate
+          cp bun.lock .mango/artifacts/qa-gate/base-bun.lock
           git fetch --depth=1 origin ${{ github.event.pull_request.head.sha }}
           git checkout FETCH_HEAD -- \
             scripts/qa-gate \
@@ -174,12 +174,12 @@ jobs:
       - name: Collect test lane counts
         run: |
           set +e
-          mkdir -p .qa-gate
+          mkdir -p .mango/artifacts/qa-gate
           for lane in unit integration; do
             db="/tmp/mangostudio-qa-gate-${lane}.sqlite"
             rm -f "$db" "$db-shm" "$db-wal"
-            DATABASE_PATH="$db" bun run test "--${lane}" > ".qa-gate/test-${lane}.log" 2>&1
-            echo "$?" > ".qa-gate/test-${lane}.exit-code"
+            DATABASE_PATH="$db" bun run test "--${lane}" > ".mango/artifacts/qa-gate/test-${lane}.log" 2>&1
+            echo "$?" > ".mango/artifacts/qa-gate/test-${lane}.exit-code"
           done
           exit 0
 

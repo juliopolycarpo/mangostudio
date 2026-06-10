@@ -9,6 +9,6 @@
     "skipLibCheck": true,
     "noEmit": true,
     "incremental": true,
-    "tsBuildInfoFile": ".tsbuildinfo"
+    "tsBuildInfoFile": ".mango/artifacts/tsbuildinfo/root.tsbuildinfo"
   }
 }

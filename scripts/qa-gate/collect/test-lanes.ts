@@ -7,13 +7,13 @@ import { parseTestLanePassCounts } from '../test-lane-summary';
 import type { TestLaneName, TestLaneStats } from './types';
 
 const TEST_LANE_LOGS: Readonly<Record<TestLaneName, string>> = {
-  unit: '.qa-gate/test-unit.log',
-  integration: '.qa-gate/test-integration.log',
+  unit: '.mango/artifacts/qa-gate/test-unit.log',
+  integration: '.mango/artifacts/qa-gate/test-integration.log',
 };
 
 const TEST_LANE_EXIT_CODES: Readonly<Record<TestLaneName, string>> = {
-  unit: '.qa-gate/test-unit.exit-code',
-  integration: '.qa-gate/test-integration.exit-code',
+  unit: '.mango/artifacts/qa-gate/test-unit.exit-code',
+  integration: '.mango/artifacts/qa-gate/test-integration.exit-code',
 };
 
 const parseExitCode = async (relPath: string): Promise<number | null> => {
