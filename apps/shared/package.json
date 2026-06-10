@@ -10,7 +10,7 @@
     "typecheck": "tsgo --noEmit",
     "circular": "madge --circular --extensions ts,tsx .",
     "fix": "biome check --write src tests",
-    "test": "bun test",
+    "test": "bun run test:unit",
     "test:unit": "bun test tests/unit",
     "test:coverage": "bun test --coverage"
   },
