@@ -8,12 +8,13 @@ retry_command() {
   shift 2
 
   local attempt=1
+  local status=0
   while true; do
-    if "$@"; then
-      return 0
-    fi
+    # Capture the command's real exit status: `if "$@"; then ...; fi` would leave
+    # $? as the (always-zero) status of the if-compound, masking the failure.
+    "$@" && return 0
 
-    local status="$?"
+    status="$?"
     if [ "$attempt" -ge "$attempts" ]; then
       return "$status"
     fi
