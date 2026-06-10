@@ -22,7 +22,14 @@ import {
   type ReleaseAssetPlan,
 } from '../lib/release-assets';
 import { resolveReleaseVersion } from '../lib/release-version';
-import { assertNoUnexpectedArguments, error, header, parseArgs, success } from '../lib/runner';
+import {
+  assertNoUnexpectedArguments,
+  captureCommand,
+  error,
+  header,
+  parseArgs,
+  success,
+} from '../lib/runner';
 
 const printHelp = (): never => {
   console.log(`Usage: bun ./scripts/release/archive-assets.ts [--platform <target>]
@@ -139,13 +146,7 @@ function sha256File(path: string): string {
 }
 
 async function runCommand(cmd: string[], cwd?: string): Promise<void> {
-  const proc = Bun.spawn({ cmd, cwd, stdout: 'pipe', stderr: 'pipe' });
-  const [stdout, stderr, exitCode] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-    proc.exited,
-  ]);
-
+  const { stdout, stderr, exitCode } = await captureCommand(cmd, { cwd });
   if (exitCode !== 0) {
     throw new Error(`Command failed (${exitCode}): ${cmd.join(' ')}\n${stderr || stdout}`);
   }

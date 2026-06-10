@@ -10,6 +10,39 @@ export interface RunResult {
   duration: number;
 }
 
+export interface CaptureResult {
+  stdout: string;
+  stderr: string;
+  exitCode: number;
+}
+
+/**
+ * Spawn a command and capture its output instead of streaming it, so callers can
+ * fold stdout/stderr into an error message or inspect the result. Inherits
+ * process.env, optionally extended by `env`.
+ * // Usage: const { exitCode, stderr } = await captureCommand(['tar', '-czf', out, dir]);
+ */
+export async function captureCommand(
+  cmd: string[],
+  opts?: { cwd?: string; env?: Record<string, string> }
+): Promise<CaptureResult> {
+  const proc = Bun.spawn({
+    cmd,
+    cwd: opts?.cwd,
+    env: opts?.env ? { ...process.env, ...opts.env } : process.env,
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+
+  const [stdout, stderr, exitCode] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+    proc.exited,
+  ]);
+
+  return { stdout, stderr, exitCode };
+}
+
 /**
  * Spawn a command and resolve once it exits, capturing label/exit code/duration.
  * Pass `stdin: 'inherit'` for interactive children (e.g. Turbo's TUI); it stays

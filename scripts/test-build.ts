@@ -19,6 +19,7 @@
 import { existsSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { captureCommand } from './lib/exec';
 import { resolveReleaseVersion } from './lib/release-version';
 
 // ---------------------------------------------------------------------------
@@ -74,18 +75,14 @@ function resolvePlatform(platform: string | undefined): string {
 }
 
 async function run(cmd: string[], cwd?: string, env?: Record<string, string>): Promise<void> {
-  const proc = Bun.spawn({
-    cmd,
+  const {
+    stdout: out,
+    stderr: err,
+    exitCode: code,
+  } = await captureCommand(cmd, {
     cwd: cwd ?? ROOT_DIR,
-    env: env ? { ...process.env, ...env } : process.env,
-    stdout: 'pipe',
-    stderr: 'pipe',
+    env,
   });
-  const [out, err, code] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-    proc.exited,
-  ]);
 
   if (code !== 0) {
     if (out.trim()) console.error(out.trim());

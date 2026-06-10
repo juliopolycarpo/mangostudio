@@ -9,6 +9,7 @@ import { ALL_BINARY_TARGETS, type BinaryTarget, filterBinaryTargets } from './li
 import { resolveReleaseVersion } from './lib/release-version';
 import {
   assertNoUnexpectedArguments,
+  captureCommand,
   fatal,
   header,
   parseArgs,
@@ -105,18 +106,7 @@ async function buildStandaloneTarget(
       args.push('--minify');
     }
 
-    const proc = Bun.spawn({
-      cmd: ['bun', ...args],
-      cwd: ROOT_DIR,
-      stdout: 'pipe',
-      stderr: 'pipe',
-    });
-
-    const [stdout, stderr, exitCode] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-      proc.exited,
-    ]);
+    const { stdout, stderr, exitCode } = await captureCommand(['bun', ...args], { cwd: ROOT_DIR });
 
     if (exitCode !== 0) {
       console.error(`❌ Failed to build ${target.arch}:`);
