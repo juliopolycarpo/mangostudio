@@ -60,6 +60,25 @@ export const getTestLane = (
 export const getTooling = (metrics: Metrics | null): ToolingCheckStats | null =>
   ok(metrics?.tooling) ? metrics.tooling : null;
 
+/**
+ * Aggregate line coverage across every workspace (covered/total + pct).
+ * // Usage: getTotalLineCoverage(head)?.pct
+ */
+export const getTotalLineCoverage = (metrics: Metrics | null): CoverageBucket | null => {
+  if (!metrics) return null;
+  let covered = 0;
+  let total = 0;
+  for (const workspace of ALL_WORKSPACE_NAMES) {
+    const bucket = getCoverageBucket(metrics.coverage?.[workspace], 'lines');
+    if (!bucket) return null;
+    covered += bucket.covered;
+    total += bucket.total;
+  }
+  if (total === 0) return null;
+  // Match parse-lcov's two-decimal pct rounding so deltas compare cleanly.
+  return { covered, total, pct: Number(((covered / total) * 100).toFixed(2)) };
+};
+
 export const sumTsErrors = (metrics: Metrics | null): number | null => {
   if (!metrics) return null;
   let sum = 0;

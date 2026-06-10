@@ -3,12 +3,12 @@
 import type { Metrics } from '../collect/types';
 import {
   getBundle,
-  getCoverageBucket,
   getDependencies,
   getDuplication,
   getLoc,
   getTestLane,
   getTooling,
+  getTotalLineCoverage,
   renderToolingStatus,
 } from './access';
 import { renderByteDelta, renderDelta } from './format';
@@ -16,8 +16,8 @@ import { renderByteDelta, renderDelta } from './format';
 export const renderSummary = (base: Metrics | null, head: Metrics | null): string => {
   const baseLoc = getLoc(base, 'total');
   const headLoc = getLoc(head, 'total');
-  const baseFrontLines = getCoverageBucket(base?.coverage?.frontend, 'lines')?.pct ?? null;
-  const headFrontLines = getCoverageBucket(head?.coverage?.frontend, 'lines')?.pct ?? null;
+  const baseLines = getTotalLineCoverage(base)?.pct ?? null;
+  const headLines = getTotalLineCoverage(head)?.pct ?? null;
   const baseDup = getDuplication(base);
   const headDup = getDuplication(head);
   const baseBundle = getBundle(base);
@@ -29,7 +29,7 @@ export const renderSummary = (base: Metrics | null, head: Metrics | null): strin
 
   return [
     `**LoC (code):** ${renderDelta(baseLoc?.code, headLoc?.code, { higherIsBetter: false, precision: 0 })}`,
-    `**Frontend line coverage:** ${renderDelta(baseFrontLines, headFrontLines, { higherIsBetter: true, suffix: 'pp' })}`,
+    `**Line coverage (all workspaces):** ${renderDelta(baseLines, headLines, { higherIsBetter: true, suffix: 'pp' })}`,
     `**Quick check:** ${renderToolingStatus(getTooling(head))}`,
     `**Duplication:** ${renderDelta(baseDup?.percentage ?? null, headDup?.percentage ?? null, { higherIsBetter: false, suffix: 'pp' })}`,
     `**Bundle gzip:** ${renderByteDelta(baseBundle?.gzipBytes, headBundle?.gzipBytes)}`,
