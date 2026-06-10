@@ -91,6 +91,23 @@ describe('renderCommitsComment', () => {
     expect(empty).toContain(COMMITS_COMMENT_MARKER);
   });
 
+  it('drops the full-message section when the body would exceed the GitHub limit', () => {
+    const huge = 'x'.repeat(2_000);
+    const many: CommitEntry[] = Array.from({ length: 40 }, (_, index) => ({
+      sha: `${index}`.padStart(40, '0'),
+      subject: `commit ${index}`,
+      message: `commit ${index}\n\n${huge}`,
+    }));
+
+    const comment = renderCommitsComment(many, RANGE);
+
+    expect(comment.length).toBeLessThanOrEqual(65_536);
+    expect(comment).not.toContain('<details>');
+    expect(comment).toContain('Full commit messages omitted');
+    expect(comment).toContain('- `0000000` commit 0');
+    expect(comment.trimEnd().endsWith(COMMITS_COMMENT_MARKER)).toBe(true);
+  });
+
   it('sizes the fence past backtick runs inside the body', () => {
     const fencey: CommitEntry = {
       sha: 'dddd444dddd444dddd444dddd444dddd444dddd4',

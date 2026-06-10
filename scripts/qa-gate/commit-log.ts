@@ -61,6 +61,26 @@ const renderFullMessage = (entry: CommitEntry): string => {
   ].join('\n');
 };
 
+// GitHub rejects issue/PR comment bodies over 65,536 characters with a 422, so
+// the full-message section is dropped before a long-lived branch hits that cap.
+const GITHUB_COMMENT_LIMIT = 65_536;
+
+const commitListLines = (entries: readonly CommitEntry[]): string[] =>
+  entries.map((entry) => `- \`${shortSha(entry.sha)}\` ${entry.subject}`);
+
+const fullMessagesLines = (entries: readonly CommitEntry[]): string[] => [
+  '',
+  '<details>',
+  '<summary>Full commit messages</summary>',
+  '',
+  entries.map(renderFullMessage).join('\n\n'),
+  '',
+  '</details>',
+];
+
+const composeCommitsComment = (head: readonly string[], body: readonly string[]): string =>
+  [...head, ...body, '', COMMITS_COMMENT_MARKER].join('\n');
+
 /**
  * Render the commit-summary comment markdown (base..head, oldest first).
  * // Usage: renderCommitsComment(entries, { baseSha, headSha })
@@ -70,25 +90,24 @@ export const renderCommitsComment = (
   range: { baseSha: string; headSha: string }
 ): string => {
   const count = entries.length;
-  const heading = `## Commits — ${count} commit${count === 1 ? '' : 's'}`;
-  const rangeLine = `Base \`${shortSha(range.baseSha)}\` → head \`${shortSha(range.headSha)}\`, oldest first.`;
-  const lines: string[] = [heading, '', rangeLine, ''];
+  const head = [
+    `## Commits — ${count} commit${count === 1 ? '' : 's'}`,
+    '',
+    `Base \`${shortSha(range.baseSha)}\` → head \`${shortSha(range.headSha)}\`, oldest first.`,
+    '',
+  ];
 
   if (count === 0) {
-    lines.push('_No commits between base and head._');
-  } else {
-    lines.push(...entries.map((entry) => `- \`${shortSha(entry.sha)}\` ${entry.subject}`));
-    lines.push(
-      '',
-      '<details>',
-      '<summary>Full commit messages</summary>',
-      '',
-      entries.map(renderFullMessage).join('\n\n'),
-      '',
-      '</details>'
-    );
+    return composeCommitsComment(head, ['_No commits between base and head._']);
   }
 
-  lines.push('', COMMITS_COMMENT_MARKER);
-  return lines.join('\n');
+  const list = commitListLines(entries);
+  const withMessages = composeCommitsComment(head, [...list, ...fullMessagesLines(entries)]);
+  if (withMessages.length <= GITHUB_COMMENT_LIMIT) return withMessages;
+
+  return composeCommitsComment(head, [
+    ...list,
+    '',
+    "_Full commit messages omitted — they exceed GitHub's comment size limit._",
+  ]);
 };
