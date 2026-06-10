@@ -8,9 +8,9 @@ name: PR QA Gate
 # Comment lifecycle (scripts/qa-gate/publish/managed-comments.mjs):
 # - publish-pending posts the commit summary + changelog preview and a
 #   temporary "QA Gate — Running" placeholder while metrics collect.
-# - the final publish deletes every managed comment and recreates the set, so
-#   the bot comments stay grouped at the end of the discussion in a fixed
-#   order: commits, changelog preview, QA gate.
+# - the final publish recreates the managed set and then deletes the stale
+#   copies, so the bot comments stay grouped at the end of the discussion in a
+#   fixed order: commits, changelog preview, QA gate.
 # - both publishes re-check the PR head via the API and skip when a newer
 #   commit landed, so a stale run can never report on an outdated HEAD
 #   (cancel-in-progress concurrency stops most stale runs even earlier).
@@ -77,17 +77,11 @@ jobs:
                 comments: [
                   {
                     marker: publish.COMMITS_MARKER,
-                    body: await publish.readCommentBody('commits.md', {
-                      marker: publish.COMMITS_MARKER,
-                      fallback: '## Commits\n\n_Commit summary failed to render for this run._',
-                    }),
+                    body: await publish.readCommentBody('commits.md', publish.COMMITS_MARKER),
                   },
                   {
                     marker: publish.CHANGELOG_PREVIEW_MARKER,
-                    body: await publish.readCommentBody('changelog.md', {
-                      marker: publish.CHANGELOG_PREVIEW_MARKER,
-                      fallback: '## 📝 Changelog Preview\n\n_Changelog preview failed to render for this run._',
-                    }),
+                    body: await publish.readCommentBody('changelog.md', publish.CHANGELOG_PREVIEW_MARKER),
                   },
                   {
                     marker: publish.QA_GATE_MARKER,
@@ -233,7 +227,9 @@ jobs:
     needs: [publish-pending, metrics-base, metrics-head]
     # Publish even when a metrics side failed: the renderer degrades to n/a
     # columns plus collector-error notes instead of stranding the placeholder.
-    if: always()
+    # !cancelled() rather than always(): a run cancelled by a newer push must
+    # stop here instead of racing the newer run's publishes.
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -260,6 +256,10 @@ jobs:
         continue-on-error: true
 
       - name: Render QA gate comment
+        # continue-on-error so a renderer crash still reaches the publish step,
+        # which substitutes the QA fallback body instead of stranding the
+        # "QA Gate — Running" placeholder.
+        continue-on-error: true
         run: |
           base="./qa-base/metrics.json"
           head="./qa-head/metrics.json"
@@ -300,24 +300,15 @@ jobs:
                 comments: [
                   {
                     marker: publish.COMMITS_MARKER,
-                    body: await publish.readCommentBody('commits.md', {
-                      marker: publish.COMMITS_MARKER,
-                      fallback: '## Commits\n\n_Commit summary failed to render for this run._',
-                    }),
+                    body: await publish.readCommentBody('commits.md', publish.COMMITS_MARKER),
                   },
                   {
                     marker: publish.CHANGELOG_PREVIEW_MARKER,
-                    body: await publish.readCommentBody('changelog.md', {
-                      marker: publish.CHANGELOG_PREVIEW_MARKER,
-                      fallback: '## 📝 Changelog Preview\n\n_Changelog preview failed to render for this run._',
-                    }),
+                    body: await publish.readCommentBody('changelog.md', publish.CHANGELOG_PREVIEW_MARKER),
                   },
                   {
                     marker: publish.QA_GATE_MARKER,
-                    body: await publish.readCommentBody('comment.md', {
-                      marker: publish.QA_GATE_MARKER,
-                      fallback: '## QA Gate\n\n_QA metrics failed to render for this run; see the workflow logs._',
-                    }),
+                    body: await publish.readCommentBody('comment.md', publish.QA_GATE_MARKER),
                   },
                 ],
               }

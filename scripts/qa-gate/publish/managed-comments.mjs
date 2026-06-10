@@ -20,13 +20,26 @@ export const MANAGED_MARKER_ORDER = Object.freeze([
   QA_GATE_MARKER,
 ]);
 
+/** Fallback body per marker, published when its renderer produced no output. */
+export const MANAGED_FALLBACKS = Object.freeze({
+  [COMMITS_MARKER]: '## Commits\n\n_Commit summary failed to render for this run._',
+  [CHANGELOG_PREVIEW_MARKER]:
+    '## 📝 Changelog Preview\n\n_Changelog preview failed to render for this run._',
+  [QA_GATE_MARKER]:
+    '## QA Gate\n\n_QA metrics failed to render for this run; see the workflow logs._',
+});
+
 /**
- * True when a PR comment is one of ours: bot-authored and carrying a marker.
+ * True when a PR comment is one of ours: bot-authored and ending in a marker.
+ * Anchoring at the end keeps another bot that merely quotes a marker mid-body
+ * from being treated (and deleted) as ours; every managed body ends with its
+ * marker, enforced by publishManagedComments.
  * // Usage: comments.filter(isManagedComment)
  */
 export function isManagedComment(comment) {
   if (comment?.user?.type !== 'Bot' || typeof comment.body !== 'string') return false;
-  return MANAGED_MARKER_ORDER.some((marker) => comment.body.includes(marker));
+  const body = comment.body.trimEnd();
+  return MANAGED_MARKER_ORDER.some((marker) => body.endsWith(marker));
 }
 
 /**
@@ -51,15 +64,17 @@ export function renderQaPendingBody({ headSha, runUrl }) {
  * Read a rendered comment body, falling back when the renderer failed.
  *
  * The workflow renders bodies with continue-on-error so one broken renderer
- * cannot strand the pending placeholder; this substitutes a marked fallback
- * for missing, empty, or marker-less files.
+ * cannot strand the pending placeholder; this substitutes the marker's
+ * fallback from MANAGED_FALLBACKS for missing, empty, or marker-less files.
  *
- * // Usage: await readCommentBody('commits.md', { marker, fallback: '_Commit summary failed to render._' })
+ * // Usage: await readCommentBody('commits.md', COMMITS_MARKER)
  */
-export async function readCommentBody(path, { marker, fallback }) {
+export async function readCommentBody(path, marker) {
+  const fallback = MANAGED_FALLBACKS[marker];
+  if (!fallback) throw new Error(`Unknown managed comment marker: ${marker}`);
   try {
     const text = (await readFile(path, 'utf8')).trim();
-    if (text.includes(marker)) return text;
+    if (text.endsWith(marker)) return text;
   } catch {
     // Missing file: the render step failed; the fallback below covers it.
   }
@@ -79,12 +94,14 @@ export async function fetchCurrentHeadSha(github, context, pullNumber) {
 }
 
 /**
- * Delete every managed comment, then recreate the given bodies in order.
+ * Recreate the managed comment set in order, then delete the stale copies.
  *
  * Refuses to publish when the PR head moved past `expectedHeadSha`, so an
  * older run can never overwrite a newer run's comments. Sequential creates
- * make the final discussion order deterministic. Idempotent: re-running with
- * the same inputs converges to the same comment set.
+ * make the final discussion order deterministic. Creating before deleting
+ * means an API failure mid-publish leaves duplicates for the next run to
+ * clean up, never a PR with no comments. Idempotent: re-running with the
+ * same inputs converges to the same comment set.
  *
  * // Usage: await publishManagedComments({ github, context, core }, { pullNumber, expectedHeadSha, comments: [{ marker, body }] })
  */
@@ -92,12 +109,17 @@ export async function publishManagedComments(
   { github, context, core },
   { pullNumber, expectedHeadSha, comments }
 ) {
+  const seen = new Set();
   for (const { marker, body } of comments) {
     if (!MANAGED_MARKER_ORDER.includes(marker)) {
       throw new Error(`Unknown managed comment marker: ${marker}`);
     }
-    if (!body.includes(marker)) {
-      throw new Error(`Comment body for ${marker} is missing its marker`);
+    if (seen.has(marker)) {
+      throw new Error(`Duplicate managed comment marker: ${marker}`);
+    }
+    seen.add(marker);
+    if (!body.trimEnd().endsWith(marker)) {
+      throw new Error(`Comment body for ${marker} must end with its marker`);
     }
   }
   const ordered = [...comments].sort(
@@ -112,14 +134,13 @@ export async function publishManagedComments(
     return false;
   }
 
-  const existing = await github.paginate(github.rest.issues.listComments, {
-    ...context.repo,
-    issue_number: pullNumber,
-    per_page: 100,
-  });
-  for (const comment of existing.filter(isManagedComment)) {
-    await github.rest.issues.deleteComment({ ...context.repo, comment_id: comment.id });
-  }
+  const stale = (
+    await github.paginate(github.rest.issues.listComments, {
+      ...context.repo,
+      issue_number: pullNumber,
+      per_page: 100,
+    })
+  ).filter(isManagedComment);
 
   for (const { body } of ordered) {
     await github.rest.issues.createComment({
@@ -127,6 +148,9 @@ export async function publishManagedComments(
       issue_number: pullNumber,
       body,
     });
+  }
+  for (const comment of stale) {
+    await github.rest.issues.deleteComment({ ...context.repo, comment_id: comment.id });
   }
   return true;
 }

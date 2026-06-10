@@ -11,6 +11,7 @@ import {
   COMMITS_MARKER,
   fetchCurrentHeadSha,
   isManagedComment,
+  MANAGED_FALLBACKS,
   MANAGED_MARKER_ORDER,
   publishManagedComments,
   QA_GATE_MARKER,
@@ -38,7 +39,11 @@ class FakeGithubClient {
   createdBodies: string[] = [];
   private nextId = 1000;
 
-  constructor(comments: FakeComment[], headSha: string) {
+  constructor(
+    comments: FakeComment[],
+    headSha: string,
+    private readonly failCreates = false
+  ) {
     this.comments = [...comments];
     this.headSha = headSha;
   }
@@ -55,6 +60,7 @@ class FakeGithubClient {
         return Promise.resolve();
       },
       createComment: ({ body }: { body: string }) => {
+        if (this.failCreates) return Promise.reject(new Error('create failed'));
         this.createdBodies.push(body);
         this.comments.push({ id: this.nextId++, body, user: { type: 'Bot' } });
         return Promise.resolve();
@@ -107,14 +113,26 @@ describe('managed comment markers', () => {
       QA_GATE_MARKER,
     ]);
   });
+
+  it('registers a fallback body for every managed marker', () => {
+    expect(Object.keys(MANAGED_FALLBACKS).sort()).toEqual([...MANAGED_MARKER_ORDER].sort());
+  });
 });
 
 describe('isManagedComment', () => {
-  it('matches only bot comments carrying a managed marker', () => {
+  it('matches only bot comments ending with a managed marker', () => {
     expect(isManagedComment(bot(1, QA_GATE_MARKER))).toBe(true);
     expect(isManagedComment(human(2))).toBe(false);
     expect(isManagedComment({ id: 3, body: QA_GATE_MARKER, user: { type: 'User' } })).toBe(false);
     expect(isManagedComment({ id: 4, body: 'no marker', user: { type: 'Bot' } })).toBe(false);
+    // Another bot quoting a marker mid-body must never be deleted as ours.
+    expect(
+      isManagedComment({
+        id: 5,
+        body: `quoting ${QA_GATE_MARKER} mid-body`,
+        user: { type: 'Bot' },
+      })
+    ).toBe(false);
   });
 });
 
@@ -185,7 +203,22 @@ describe('publishManagedComments', () => {
     ]);
   });
 
-  it('rejects bodies missing their marker and unknown markers', async () => {
+  it('keeps the previous comments when a create fails mid-publish', async () => {
+    const github = new FakeGithubClient([bot(1, QA_GATE_MARKER)], 'head-sha', true);
+    const core = new FakeCore();
+
+    await expect(
+      publishManagedComments(
+        { github, context, core },
+        { pullNumber: 7, expectedHeadSha: 'head-sha', comments: desiredComments }
+      )
+    ).rejects.toThrow('create failed');
+
+    expect(github.deletedIds).toEqual([]);
+    expect(github.comments.map((comment) => comment.id)).toEqual([1]);
+  });
+
+  it('rejects bodies not ending with their marker and unknown markers', async () => {
     const github = new FakeGithubClient([], 'head-sha');
     const core = new FakeCore();
 
@@ -198,7 +231,7 @@ describe('publishManagedComments', () => {
           comments: [{ marker: QA_GATE_MARKER, body: 'no marker here' }],
         }
       )
-    ).rejects.toThrow('missing its marker');
+    ).rejects.toThrow('must end with its marker');
 
     await expect(
       publishManagedComments(
@@ -211,18 +244,35 @@ describe('publishManagedComments', () => {
       )
     ).rejects.toThrow('Unknown managed comment marker');
   });
+
+  it('rejects duplicate managed markers in one publish', async () => {
+    const github = new FakeGithubClient([], 'head-sha');
+    const core = new FakeCore();
+
+    await expect(
+      publishManagedComments(
+        { github, context, core },
+        {
+          pullNumber: 7,
+          expectedHeadSha: 'head-sha',
+          comments: [
+            { marker: QA_GATE_MARKER, body: `qa\n${QA_GATE_MARKER}` },
+            { marker: QA_GATE_MARKER, body: `qa again\n${QA_GATE_MARKER}` },
+          ],
+        }
+      )
+    ).rejects.toThrow('Duplicate managed comment marker');
+  });
 });
 
 describe('readCommentBody', () => {
-  const options = { marker: QA_GATE_MARKER, fallback: '_QA render failed._' };
-
-  it('returns the file content when it carries the marker', async () => {
+  it('returns the file content when it ends with the marker', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'mango-publish-'));
     tempDirs.push(dir);
     const path = join(dir, 'comment.md');
     await writeFile(path, `rendered body\n${QA_GATE_MARKER}\n`, 'utf8');
 
-    expect(await readCommentBody(path, options)).toBe(`rendered body\n${QA_GATE_MARKER}`);
+    expect(await readCommentBody(path, QA_GATE_MARKER)).toBe(`rendered body\n${QA_GATE_MARKER}`);
   });
 
   it('falls back for missing files and marker-less content', async () => {
@@ -230,10 +280,16 @@ describe('readCommentBody', () => {
     tempDirs.push(dir);
     const markerless = join(dir, 'markerless.md');
     await writeFile(markerless, 'partial output, render crashed midway', 'utf8');
-    const expected = `_QA render failed._\n\n${QA_GATE_MARKER}`;
+    const expected = [MANAGED_FALLBACKS[QA_GATE_MARKER], '', QA_GATE_MARKER].join('\n');
 
-    expect(await readCommentBody(join(dir, 'absent.md'), options)).toBe(expected);
-    expect(await readCommentBody(markerless, options)).toBe(expected);
+    expect(await readCommentBody(join(dir, 'absent.md'), QA_GATE_MARKER)).toBe(expected);
+    expect(await readCommentBody(markerless, QA_GATE_MARKER)).toBe(expected);
+  });
+
+  it('rejects markers without a registered fallback', async () => {
+    await expect(readCommentBody('whatever.md', '<!-- rogue -->')).rejects.toThrow(
+      'Unknown managed comment marker'
+    );
   });
 });
 
