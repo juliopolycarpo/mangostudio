@@ -49,8 +49,8 @@ Turborepo writes its local task-output cache to `.turbo/cache` at the repository
 root. This directory is gitignored and should never be committed.
 
 CI persists the local Turbo cache with `actions/cache` in the check, test, and
-build lanes. Each lane uses a separate key prefix so one lane cannot evict the
-others:
+build lanes. Each lane uses a separate key prefix so the lanes never share a
+cache entry — each saves and restores only its own snapshot:
 
 ```text
 ${{ runner.os }}-${{ env.CACHE_VERSION }}-turbo-<lane>-${{ github.sha }}
