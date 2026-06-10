@@ -28,7 +28,7 @@ Current task definitions:
 | `dev`              | off   | —                                                  | Persistent — runs dev servers                |
 | `build`            | on    | `dist/**`; env `VITE_*`                            | Depends on upstream `^build`; restores dist  |
 | `check:quick`      | on    | —                                                  | Lint / format; inputs scoped to `biome.json` |
-| `typecheck`        | on    | `$TURBO_ROOT$/.mango/artifacts/tsbuildinfo/**`     | Inputs scoped to root `tsconfig.json`        |
+| `typecheck`        | on    | —                                                  | Inputs scoped to root `tsconfig.json`        |
 | `circular`         | on    | —                                                  | Circular dependency detection                |
 | `test:unit`        | on    | env `DATABASE_PATH`, `CI`, `MANGOSTUDIO_*`         | Unit tests                                   |
 | `test:integration` | off   | env `DATABASE_PATH`, `CI`, `MANGOSTUDIO_*`         | Integration tests (always re-run)            |
