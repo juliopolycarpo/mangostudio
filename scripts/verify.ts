@@ -4,8 +4,13 @@ import { exitWithResults, header, info, type RunResult, runCommand } from './lib
 function printHelp(): never {
   console.log(`Usage: bun run verify
 
-Runs the full CI gate sequentially: check → test → build.
+Runs the full local CI gate: check → test --coverage → build --all.
 Stops on first failure.
+
+This matches the CI pipeline (ci.yml) minus the smoke jobs, which require
+platform runners not available in every local environment:
+  - Browser smoke:  bun run test --e2e
+  - Binary smoke:   bun scripts/test-build.ts
 
 Flags:
   --help   Show this help message`);
@@ -22,8 +27,8 @@ const results: RunResult[] = [];
 
 const phases: Array<{ label: string; cmd: string[] }> = [
   { label: 'check', cmd: ['bun', './scripts/check.ts'] },
-  { label: 'test', cmd: ['bun', './scripts/test.ts'] },
-  { label: 'build', cmd: ['bun', 'run', '--filter', '@mangostudio/frontend', 'build'] },
+  { label: 'test', cmd: ['bun', './scripts/test.ts', '--coverage'] },
+  { label: 'build', cmd: ['bun', './scripts/build.ts', '--all'] },
 ];
 
 for (const phase of phases) {

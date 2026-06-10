@@ -8,8 +8,6 @@ export interface WorkspaceConfig {
   name: WorkspaceName;
   packageName: string;
   path: string;
-  hasIntegrationTests: boolean;
-  hasCoverage: boolean;
 }
 
 export const WORKSPACES: Record<WorkspaceName, WorkspaceConfig> = {
@@ -17,22 +15,16 @@ export const WORKSPACES: Record<WorkspaceName, WorkspaceConfig> = {
     name: 'frontend',
     packageName: '@mangostudio/frontend',
     path: join(ROOT_DIR, 'apps/frontend'),
-    hasIntegrationTests: true,
-    hasCoverage: true,
   },
   api: {
     name: 'api',
     packageName: '@mangostudio/api',
     path: join(ROOT_DIR, 'apps/api'),
-    hasIntegrationTests: true,
-    hasCoverage: true,
   },
   shared: {
     name: 'shared',
     packageName: '@mangostudio/shared',
     path: join(ROOT_DIR, 'apps/shared'),
-    hasIntegrationTests: false,
-    hasCoverage: true,
   },
 };
 

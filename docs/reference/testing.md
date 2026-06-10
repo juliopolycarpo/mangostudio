@@ -57,7 +57,21 @@ bun run test:e2e:setup     # install Playwright Chromium + OS dependencies
 bun run test --e2e          # Playwright Chromium auth smoke suite (opt-in)
 bun run test --coverage     # coverage collection across applicable workspaces
 bun run test --all          # all lanes including e2e
+bun run verify              # full local CI gate: check → test --coverage → build --all
 ```
+
+### Lane Taxonomy
+
+| Lane        | Task name          | Workspaces            | Runner              | Turbo cached |
+| ----------- | ------------------ | --------------------- | ------------------- | ------------ |
+| unit        | `test:unit`        | api, frontend, shared | bun test / vitest   | yes          |
+| integration | `test:integration` | api, frontend         | bun test / vitest   | no           |
+| coverage    | `test:coverage`    | api, frontend, shared | bun test / vitest   | no           |
+| e2e         | —                  | root (browser-smoke)  | Playwright Chromium | —            |
+| scripts     | `//#test:scripts`  | root                  | bun test            | yes          |
+
+Turbo skips packages that do not define a given task, so passing all workspace
+filters is safe — no per-workspace metadata is needed to gate lane participation.
 
 ## Browser Smoke
 
@@ -311,6 +325,10 @@ Before merging, run:
 ```bash
 bun run check
 bun run test
-# or use the full CI gate shortcut:
+# or use the full local CI gate shortcut (check → test --coverage → build --all):
 bun run verify
 ```
+
+`bun run verify` matches the CI pipeline minus the smoke jobs (browser and binary),
+which require platform runners not available in every local environment. Run those
+separately with `bun run test --e2e` and `bun scripts/test-build.ts`.
