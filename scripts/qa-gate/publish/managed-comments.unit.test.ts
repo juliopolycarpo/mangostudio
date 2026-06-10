@@ -27,7 +27,7 @@ afterEach(async () => {
 
 interface FakeComment {
   readonly id: number;
-  readonly body: string;
+  body: string;
   readonly user: { readonly type: string };
 }
 
@@ -37,6 +37,7 @@ class FakeGithubClient {
   headSha: string;
   deletedIds: number[] = [];
   createdBodies: string[] = [];
+  updatedComments: { readonly id: number; readonly body: string }[] = [];
   private nextId = 1000;
 
   constructor(
@@ -63,6 +64,13 @@ class FakeGithubClient {
         if (this.failCreates) return Promise.reject(new Error('create failed'));
         this.createdBodies.push(body);
         this.comments.push({ id: this.nextId++, body, user: { type: 'Bot' } });
+        return Promise.resolve();
+      },
+      updateComment: ({ comment_id, body }: { comment_id: number; body: string }) => {
+        this.updatedComments.push({ id: comment_id, body });
+        this.comments = this.comments.map((comment) =>
+          comment.id === comment_id ? { ...comment, body } : comment
+        );
         return Promise.resolve();
       },
     },
@@ -149,9 +157,17 @@ describe('renderQaPendingBody', () => {
 });
 
 describe('publishManagedComments', () => {
-  it('deletes stale managed comments and recreates bodies in fixed order', async () => {
+  it('updates the latest managed comments and deletes older duplicates', async () => {
     const github = new FakeGithubClient(
-      [bot(1, QA_GATE_MARKER), human(2), bot(3, CHANGELOG_PREVIEW_MARKER), bot(4, COMMITS_MARKER)],
+      [
+        bot(1, QA_GATE_MARKER),
+        human(2),
+        bot(3, CHANGELOG_PREVIEW_MARKER),
+        bot(4, COMMITS_MARKER),
+        bot(5, COMMITS_MARKER),
+        bot(6, CHANGELOG_PREVIEW_MARKER),
+        bot(7, QA_GATE_MARKER),
+      ],
       'head-sha'
     );
     const core = new FakeCore();
@@ -162,14 +178,36 @@ describe('publishManagedComments', () => {
     );
 
     expect(published).toBe(true);
-    expect(github.deletedIds).toEqual([1, 3, 4]);
-    expect(github.createdBodies.map((body) => body.split('\n')[0])).toEqual([
-      'commits',
-      'changelog',
-      'qa',
+    expect(github.deletedIds.sort((a, b) => a - b)).toEqual([1, 3, 4]);
+    expect(github.createdBodies).toEqual([]);
+    expect(github.updatedComments.map(({ id, body }) => [id, body.split('\n')[0]])).toEqual([
+      [5, 'commits'],
+      [6, 'changelog'],
+      [7, 'qa'],
     ]);
     expect(github.comments.filter((comment) => comment.user.type === 'User')).toHaveLength(1);
+    expect(github.comments.filter(isManagedComment).map((comment) => comment.id)).toEqual([
+      5, 6, 7,
+    ]);
     expect(core.notices).toEqual([]);
+  });
+
+  it('creates only missing managed comments', async () => {
+    const github = new FakeGithubClient([bot(1, CHANGELOG_PREVIEW_MARKER)], 'head-sha');
+    const core = new FakeCore();
+
+    const published = await publishManagedComments(
+      { github, context, core },
+      { pullNumber: 7, expectedHeadSha: 'head-sha', comments: desiredComments }
+    );
+
+    expect(published).toBe(true);
+    expect(github.createdBodies.map((body) => body.split('\n')[0])).toEqual(['commits', 'qa']);
+    expect(github.updatedComments.map(({ id, body }) => [id, body.split('\n')[0]])).toEqual([
+      [1, 'changelog'],
+    ]);
+    expect(github.deletedIds).toEqual([]);
+    expect(github.comments.filter(isManagedComment)).toHaveLength(3);
   });
 
   it('skips publishing when the PR head moved past the expected sha', async () => {
@@ -196,6 +234,8 @@ describe('publishManagedComments', () => {
     await publishManagedComments({ github, context, core }, options);
 
     expect(github.comments.filter(isManagedComment)).toHaveLength(3);
+    expect(github.createdBodies).toHaveLength(3);
+    expect(github.updatedComments).toEqual([]);
     expect(github.comments.map((comment) => comment.body.split('\n')[0])).toEqual([
       'commits',
       'changelog',

@@ -37,9 +37,13 @@ export const MANAGED_FALLBACKS = Object.freeze({
  * // Usage: comments.filter(isManagedComment)
  */
 export function isManagedComment(comment) {
-  if (comment?.user?.type !== 'Bot' || typeof comment.body !== 'string') return false;
+  return managedMarkerForComment(comment) !== null;
+}
+
+function managedMarkerForComment(comment) {
+  if (comment?.user?.type !== 'Bot' || typeof comment.body !== 'string') return null;
   const body = comment.body.trimEnd();
-  return MANAGED_MARKER_ORDER.some((marker) => body.endsWith(marker));
+  return MANAGED_MARKER_ORDER.find((marker) => body.endsWith(marker)) ?? null;
 }
 
 /**
@@ -93,22 +97,7 @@ export async function fetchCurrentHeadSha(github, context, pullNumber) {
   return data.head.sha;
 }
 
-/**
- * Recreate the managed comment set in order, then delete the stale copies.
- *
- * Refuses to publish when the PR head moved past `expectedHeadSha`, so an
- * older run can never overwrite a newer run's comments. Sequential creates
- * make the final discussion order deterministic. Creating before deleting
- * means an API failure mid-publish leaves duplicates for the next run to
- * clean up, never a PR with no comments. Idempotent: re-running with the
- * same inputs converges to the same comment set.
- *
- * // Usage: await publishManagedComments({ github, context, core }, { pullNumber, expectedHeadSha, comments: [{ marker, body }] })
- */
-export async function publishManagedComments(
-  { github, context, core },
-  { pullNumber, expectedHeadSha, comments }
-) {
+function orderedManagedComments(comments) {
   const seen = new Set();
   for (const { marker, body } of comments) {
     if (!MANAGED_MARKER_ORDER.includes(marker)) {
@@ -122,10 +111,56 @@ export async function publishManagedComments(
       throw new Error(`Comment body for ${marker} must end with its marker`);
     }
   }
-  const ordered = [...comments].sort(
+  return [...comments].sort(
     (a, b) => MANAGED_MARKER_ORDER.indexOf(a.marker) - MANAGED_MARKER_ORDER.indexOf(b.marker)
   );
+}
 
+async function listManagedComments(github, context, pullNumber) {
+  const comments = await github.paginate(github.rest.issues.listComments, {
+    ...context.repo,
+    issue_number: pullNumber,
+    per_page: 100,
+  });
+  return comments
+    .map((comment) => ({ comment, marker: managedMarkerForComment(comment) }))
+    .filter(({ marker }) => marker !== null);
+}
+
+function selectManagedCommentsToKeep(managedComments, desiredMarkers) {
+  const keepByMarker = new Map();
+  const stale = [];
+
+  for (const { comment, marker } of managedComments) {
+    if (!desiredMarkers.has(marker)) {
+      stale.push(comment);
+      continue;
+    }
+
+    const previous = keepByMarker.get(marker);
+    if (previous) stale.push(previous);
+    keepByMarker.set(marker, comment);
+  }
+
+  return { keepByMarker, stale };
+}
+
+/**
+ * Update the managed comment set in place, creating only missing comments.
+ *
+ * Refuses to publish when the PR head moved past `expectedHeadSha`, so an
+ * older run can never overwrite a newer run's comments. Existing comments are
+ * edited instead of recreated to avoid timeline churn on every push. Duplicate
+ * managed comments left by older runs are cleaned up after the current bodies
+ * are safely updated.
+ *
+ * // Usage: await publishManagedComments({ github, context, core }, { pullNumber, expectedHeadSha, comments: [{ marker, body }] })
+ */
+export async function publishManagedComments(
+  { github, context, core },
+  { pullNumber, expectedHeadSha, comments }
+) {
+  const ordered = orderedManagedComments(comments);
   const currentHeadSha = await fetchCurrentHeadSha(github, context, pullNumber);
   if (currentHeadSha !== expectedHeadSha) {
     core.notice(
@@ -134,21 +169,31 @@ export async function publishManagedComments(
     return false;
   }
 
-  const stale = (
-    await github.paginate(github.rest.issues.listComments, {
-      ...context.repo,
-      issue_number: pullNumber,
-      per_page: 100,
-    })
-  ).filter(isManagedComment);
+  const desiredMarkers = new Set(ordered.map(({ marker }) => marker));
+  const { keepByMarker, stale } = selectManagedCommentsToKeep(
+    await listManagedComments(github, context, pullNumber),
+    desiredMarkers
+  );
 
-  for (const { body } of ordered) {
-    await github.rest.issues.createComment({
-      ...context.repo,
-      issue_number: pullNumber,
-      body,
-    });
+  for (const { marker, body } of ordered) {
+    const existing = keepByMarker.get(marker);
+    if (!existing) {
+      await github.rest.issues.createComment({
+        ...context.repo,
+        issue_number: pullNumber,
+        body,
+      });
+      continue;
+    }
+    if (existing.body !== body) {
+      await github.rest.issues.updateComment({
+        ...context.repo,
+        comment_id: existing.id,
+        body,
+      });
+    }
   }
+
   for (const comment of stale) {
     await github.rest.issues.deleteComment({ ...context.repo, comment_id: comment.id });
   }

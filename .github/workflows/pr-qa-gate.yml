@@ -8,9 +8,9 @@ name: PR QA Gate
 # Comment lifecycle (scripts/qa-gate/publish/managed-comments.mjs):
 # - publish-pending posts the commit summary + changelog preview and a
 #   temporary "QA Gate — Running" placeholder while metrics collect.
-# - the final publish recreates the managed set and then deletes the stale
-#   copies, so the bot comments stay grouped at the end of the discussion in a
-#   fixed order: commits, changelog preview, QA gate.
+# - the final publish updates those same managed comments in place, creating
+#   only missing comments and cleaning up duplicate managed comments left by
+#   older runs.
 # - both publishes re-check the PR head via the API and skip when a newer
 #   commit landed, so a stale run can never report on an outdated HEAD
 #   (cancel-in-progress concurrency stops most stale runs even earlier).

@@ -51,11 +51,10 @@ Powers the bot comments the `pr-qa-gate.yml` workflow manages on every PR:
   headline, summary deltas, collapsed metric tables) from base/head metrics.
 - `render-commits.ts` + `commit-log.ts` — render the commit-summary comment
   (list + expandable full messages) from the PR's base..head range.
-- `publish/managed-comments.mjs` — publisher that recreates the managed
-  comments at the end of the discussion in a fixed order (commits, changelog
-  preview, QA gate), then deletes the stale copies. Plain ESM so
-  `actions/github-script` imports it directly; it skips publishing when the PR
-  head has moved on.
+- `publish/managed-comments.mjs` — publisher that updates the managed comments
+  in place, creates missing comments, and deletes duplicate managed comments
+  left by older runs. Plain ESM so `actions/github-script` imports it directly;
+  it skips publishing when the PR head has moved on.
 
 ## Conventions
 
