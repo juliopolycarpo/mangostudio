@@ -1,5 +1,5 @@
 import { BROWSER_SMOKE_TEST_COMMAND } from './lib/browser-smoke';
-import { ALL_WORKSPACE_NAMES, ROOT_DIR, WORKSPACES } from './lib/config';
+import { ALL_WORKSPACE_NAMES, ROOT_DIR } from './lib/config';
 import {
   exitWithResults,
   fatal,
@@ -88,21 +88,15 @@ if (results.some((result) => result.exitCode !== 0)) {
 
 if (shouldRunIntegration) {
   info('\nPhase: integration');
-  const integrationWorkspaces = ALL_WORKSPACE_NAMES.filter(
-    (workspace) => WORKSPACES[workspace].hasIntegrationTests
-  );
-
-  if (integrationWorkspaces.length > 0) {
-    const integrationResults = await runParallel([
-      () =>
-        runCommand(
-          'workspaces:test:integration',
-          createTurboTestCommand('test:integration', integrationWorkspaces),
-          { cwd: ROOT_DIR }
-        ),
-    ]);
-    results.push(...integrationResults);
-  }
+  const integrationResults = await runParallel([
+    () =>
+      runCommand(
+        'workspaces:test:integration',
+        createTurboTestCommand('test:integration', ALL_WORKSPACE_NAMES),
+        { cwd: ROOT_DIR }
+      ),
+  ]);
+  results.push(...integrationResults);
 }
 
 if (results.some((result) => result.exitCode !== 0)) {
@@ -121,9 +115,6 @@ if (results.some((result) => result.exitCode !== 0)) {
 
 if (runCoverage) {
   info('\nPhase: coverage');
-  const coverageWorkspaces = ALL_WORKSPACE_NAMES.filter(
-    (workspace) => WORKSPACES[workspace].hasCoverage
-  );
 
   // Coverage is the most expensive phase. Bundle the root scripts unit tests
   // here so `--coverage` is a self-contained replacement for `--unit
@@ -133,7 +124,7 @@ if (runCoverage) {
     () =>
       runCommand(
         'workspaces:test:coverage',
-        createTurboTestCommand('test:coverage', coverageWorkspaces),
+        createTurboTestCommand('test:coverage', ALL_WORKSPACE_NAMES),
         { cwd: ROOT_DIR }
       ),
   ]);
