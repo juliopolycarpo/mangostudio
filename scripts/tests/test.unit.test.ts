@@ -6,7 +6,16 @@ import { createTurboTestCommand } from '../lib/test';
 import { readText } from './support/read-text';
 
 interface TurboConfig {
-  tasks: Record<string, { cache?: boolean; dependsOn?: string[]; outputs?: string[] }>;
+  tasks: Record<
+    string,
+    {
+      cache?: boolean;
+      dependsOn?: string[];
+      env?: string[];
+      inputs?: string[];
+      outputs?: string[];
+    }
+  >;
 }
 
 const turboConfig = turboConfigJson as TurboConfig;
@@ -33,20 +42,22 @@ describe('test script', () => {
     expect(testScript).not.toContain('runWorkspaceScript');
   });
 
-  test('keeps root script tests explicit and browser smoke outside Turbo', () => {
+  test('runs root script tests through Turbo and keeps browser smoke outside', () => {
     const testScript = readText('scripts/test.ts');
 
-    expect(testScript).toContain("runCommand('root:test:unit', ['bun', 'test', 'scripts']");
+    expect(testScript).toContain("'//#test:scripts'");
     expect(testScript).toContain("runCommand('e2e', [...BROWSER_SMOKE_TEST_COMMAND]");
     expect(testScript).not.toContain("createTurboTestCommand('test:e2e'");
   });
 
-  test('keeps conservative Turbo cache boundaries for test lanes', () => {
-    expect(turboConfig.tasks['test:unit']).toEqual({});
-    expect(turboConfig.tasks['test:integration']).toEqual({ cache: false });
+  test('declares env and cache boundaries for test lanes', () => {
+    const testEnv = ['DATABASE_PATH', 'CI', 'MANGOSTUDIO_*'];
+    expect(turboConfig.tasks['test:unit']).toEqual({ env: testEnv });
+    expect(turboConfig.tasks['test:integration']).toEqual({ cache: false, env: testEnv });
     expect(turboConfig.tasks['test:coverage']).toEqual({
       cache: false,
       outputs: ['$TURBO_ROOT$/.mango/artifacts/coverage/**'],
+      env: testEnv,
     });
     expect(turboConfig.tasks['test:e2e']).toBeUndefined();
   });

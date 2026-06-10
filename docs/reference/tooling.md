@@ -23,16 +23,17 @@ extension is used so that inline comments can document migration decisions.
 
 Current task definitions:
 
-| Task               | Cache | Notes                             |
-| ------------------ | ----- | --------------------------------- |
-| `dev`              | off   | Persistent — runs dev servers     |
-| `build`            | on    | Depends on upstream `^build`      |
-| `check:quick`      | on    | Lint / format checks              |
-| `typecheck`        | on    | TypeScript type-checking          |
-| `circular`         | on    | Circular dependency detection     |
-| `test:unit`        | on    | Unit tests                        |
-| `test:integration` | off   | Integration tests (always re-run) |
-| `test:coverage`    | off   | Coverage reports (always re-run)  |
+| Task               | Cache | Outputs / Env                                      | Notes                                        |
+| ------------------ | ----- | -------------------------------------------------- | -------------------------------------------- |
+| `dev`              | off   | —                                                  | Persistent — runs dev servers                |
+| `build`            | on    | `dist/**`; env `VITE_*`                            | Depends on upstream `^build`; restores dist  |
+| `check:quick`      | on    | —                                                  | Lint / format; inputs scoped to `biome.json` |
+| `typecheck`        | on    | —                                                  | Inputs scoped to root `tsconfig.json`        |
+| `circular`         | on    | —                                                  | Circular dependency detection                |
+| `test:unit`        | on    | env `DATABASE_PATH`, `CI`, `MANGOSTUDIO_*`         | Unit tests                                   |
+| `test:integration` | off   | env `DATABASE_PATH`, `CI`, `MANGOSTUDIO_*`         | Integration tests (always re-run)            |
+| `test:coverage`    | off   | `$TURBO_ROOT$/.mango/artifacts/coverage/**`; env ↑ | Coverage reports (always re-run)             |
+| `//#test:scripts`  | on    | inputs `scripts/**`                                | Root scripts tests (cached via turbo)        |
 
 ### Inspection Scripts
 
@@ -49,7 +50,6 @@ directory is gitignored and should never be committed.
 
 ### Future Work
 
-- Interactive TUI (`ui: "tui"`) — evaluated separately.
 - Remote Cache for CI.
 - `--affected` filtering in CI pipelines.
 - Package-specific Turbo configuration once the base graph is stable.

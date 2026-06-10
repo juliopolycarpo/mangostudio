@@ -9,6 +9,7 @@
     },
     "build": {
       "dependsOn": ["^build"],
+      "outputs": ["dist/**"],
       "env": ["VITE_*"]
     },
     "check:quick": {
@@ -16,16 +17,28 @@
     },
     "typecheck": {
       "dependsOn": ["^typecheck"],
+      // tsbuildinfo is per-workspace gitignored incremental state that all
+      // workspaces write into one shared root dir. Declaring it as an output
+      // here makes every workspace's typecheck task claim the same glob, which
+      // overlaps across tasks and cross-contaminates the restored cache. tsgo
+      // re-validates buildinfo on disk, so it is left out of the Turbo cache.
       "inputs": ["$TURBO_ROOT$/tsconfig.json", "$TURBO_DEFAULT$"]
     },
     "circular": {},
-    "test:unit": {},
+    "test:unit": {
+      "env": ["DATABASE_PATH", "CI", "MANGOSTUDIO_*"]
+    },
     "test:integration": {
-      "cache": false
+      "cache": false,
+      "env": ["DATABASE_PATH", "CI", "MANGOSTUDIO_*"]
     },
     "test:coverage": {
       "cache": false,
-      "outputs": ["$TURBO_ROOT$/.mango/artifacts/coverage/**"]
+      "outputs": ["$TURBO_ROOT$/.mango/artifacts/coverage/**"],
+      "env": ["DATABASE_PATH", "CI", "MANGOSTUDIO_*"]
+    },
+    "//#test:scripts": {
+      "inputs": ["scripts/**"]
     }
   }
 }

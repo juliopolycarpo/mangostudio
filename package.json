@@ -24,6 +24,7 @@
     "check": "bun ./scripts/check.ts",
     "check:versions": "bun ./scripts/check-versions.ts",
     "test": "bun ./scripts/test.ts",
+    "test:scripts": "bun test scripts",
     "test:e2e:setup": "bun ./scripts/test-e2e-setup.ts",
     "fix": "bun ./scripts/fix.ts",
     "verify": "bun ./scripts/verify.ts",

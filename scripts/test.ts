@@ -11,6 +11,8 @@ import {
 } from './lib/runner';
 import { createTurboTestCommand } from './lib/test';
 
+const ROOT_SCRIPTS_TEST_COMMAND = ['turbo', 'run', '//#test:scripts', '--ui=stream'];
+
 function printHelp(): never {
   console.log(`Usage: bun run test [lane flags]
 
@@ -71,7 +73,7 @@ const results: RunResult[] = [];
 if (shouldRunUnit) {
   info('\nPhase: unit');
   const unitResults = await runParallel([
-    () => runCommand('root:test:unit', ['bun', 'test', 'scripts'], { cwd: ROOT_DIR }),
+    () => runCommand('root:test:scripts', ROOT_SCRIPTS_TEST_COMMAND, { cwd: ROOT_DIR }),
     () =>
       runCommand('workspaces:test:unit', createTurboTestCommand('test:unit', ALL_WORKSPACE_NAMES), {
         cwd: ROOT_DIR,
@@ -127,7 +129,7 @@ if (runCoverage) {
   // here so `--coverage` is a self-contained replacement for `--unit
   // --integration --coverage` on CI, avoiding a duplicate test pass.
   const coverageResults = await runParallel([
-    () => runCommand('root:test:unit', ['bun', 'test', 'scripts'], { cwd: ROOT_DIR }),
+    () => runCommand('root:test:scripts', ROOT_SCRIPTS_TEST_COMMAND, { cwd: ROOT_DIR }),
     () =>
       runCommand(
         'workspaces:test:coverage',
