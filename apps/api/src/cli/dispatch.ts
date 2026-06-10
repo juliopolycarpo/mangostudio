@@ -10,6 +10,7 @@ import { runServe } from './commands/serve';
 import { runServeInternal } from './commands/serve-internal';
 import { runStatus } from './commands/status';
 import { runStop } from './commands/stop';
+import { runVersion } from './commands/version';
 import { CliError } from './errors';
 import { writeError } from './output';
 import { printHelp, printUnknown } from './usage';
@@ -54,6 +55,11 @@ async function route(command: string | undefined, rest: string[]): Promise<void>
       return;
     case 'doctor':
       await runDoctor();
+      return;
+    case 'version':
+    case '-v':
+    case '--version':
+      runVersion();
       return;
     default:
       printUnknown(command);

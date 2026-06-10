@@ -51,14 +51,20 @@ Releases are tag-driven. From an up-to-date `main`:
    git push origin v0.2.0
    ```
 
-`.github/workflows/release.yml` then runs four jobs:
+`.github/workflows/release.yml` is designed to converge when a networked release
+step flakes: using **Re-run failed jobs** is safe because published npm versions
+are skipped, release assets are uploaded with clobber semantics, and the
+changelog push rebases before retrying.
 
-| Job                | What it does                                                                                                                                                                           |
-| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `build`            | Verifies versions are in lockstep with the tag, cross-compiles every platform binary (`build.ts`), and assembles the npm distribution (`pack-npm.ts`); uploads archives + `dist-npm/`. |
-| `github-release`   | Creates the GitHub Release with the binary archives and git-cliff notes.                                                                                                               |
-| `npm-publish`      | Publishes the platform packages, then the `@mangostudio/cli` wrapper.                                                                                                                  |
-| `update-changelog` | Regenerates `CHANGELOG.md` and commits it back to `main`.                                                                                                                              |
+It runs five jobs:
+
+| Job                | What it does                                                                                                                                                                                                                |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `build`            | Verifies versions are in lockstep with the tag, cross-compiles every platform binary (`build.ts`), assembles the npm distribution (`pack-npm.ts`), and uploads binary archives plus `SHA256SUMS`.                           |
+| `github-release`   | Creates the GitHub Release, or updates an existing one by refreshing notes and uploading assets with `--clobber`.                                                                                                           |
+| `npm-publish`      | Publishes the platform packages, then the `@mangostudio/cli` wrapper; already-published versions are skipped, transient failures are retried, and provenance falls back to a warning-only publish if npm rejects it.        |
+| `verify-release`   | Installs `@mangostudio/cli@<version>` from npm on Ubuntu, macOS, and Windows; downloads the matching release tarball, verifies `SHA256SUMS`, and runs `mangostudio --version`. Windows arm64 is published but not verified. |
+| `update-changelog` | Regenerates `CHANGELOG.md` and commits it back to `main`, retrying the push after `git pull --rebase origin main` if another commit lands first.                                                                            |
 
 `workflow_dispatch` accepts an explicit `version` input for a manual run; it is
 validated against the committed version the same way.
@@ -71,10 +77,28 @@ execs the prebuilt binary (esbuild-style). Each platform package carries the
 binary plus its `public/` frontend sidecar. Builders live in
 `scripts/lib/npm-pack.ts`; staging in `scripts/release/pack-npm.ts`.
 
+`scripts/release/publish-npm.ts` owns npm publication. It checks
+`npm view <name>@<version> version` before publishing, uses `npm publish --access
+public --provenance` for new versions, retries transient network/5xx failures,
+and never retries a 403/version-conflict without first re-checking whether the
+version became visible. `--dry-run` prints the same decisions without publishing:
+
+```bash
+bun ./scripts/release/publish-npm.ts dist-npm --dry-run
+```
+
+Release archives are accompanied by `SHA256SUMS`; the verification job checks the
+runner-specific archive against that manifest before executing the extracted
+binary's `--version` command.
+
 ## Prerequisites
 
 - **`NPM_TOKEN`** repo secret with publish rights to the `@mangostudio` scope.
 - Permission for the release workflow to push `CHANGELOG.md` to `main`
   (`contents: write`); adjust if branch protection blocks the bot.
+
+The npm publish job grants `id-token: write` so token-based publishes can include
+npm provenance. npm trusted publishing (OIDC without `NPM_TOKEN`) is the future
+upgrade path once the packages are configured on npmjs.com.
 
 The first release (`v0.1.0`) is cut by pushing the tag after this work merges.

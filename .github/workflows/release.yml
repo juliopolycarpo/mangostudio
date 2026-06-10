@@ -73,10 +73,12 @@ jobs:
         run: |
           version="${{ steps.resolve.outputs.version }}"
           mkdir -p release-assets
+          rm -f release-assets/SHA256SUMS
           for dir in .mango/out/*/; do
             platform="$(basename "$dir")"
             tar -czf "release-assets/mangostudio-${version}-${platform}.tar.gz" -C .mango/out "$platform"
           done
+          (cd release-assets && sha256sum *.tar.gz > SHA256SUMS)
           ls -lh release-assets
 
       - uses: actions/upload-artifact@v7
@@ -113,19 +115,43 @@ jobs:
       - name: Generate release notes
         run: bunx git-cliff --tag "v${{ needs.build.outputs.version }}" --latest --strip all > RELEASE_NOTES.md
 
-      - name: Create GitHub Release
+      - name: Create or update GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.build.outputs.version }}
         run: |
-          gh release create "v${{ needs.build.outputs.version }}" release-assets/* \
-            --title "v${{ needs.build.outputs.version }}" \
-            --notes-file RELEASE_NOTES.md
+          source scripts/release/retry.sh
+          tag="v${VERSION}"
+          update_release() {
+            retry_command 3 30 gh release edit "$tag" --title "$tag" --notes-file RELEASE_NOTES.md
+            retry_command 3 30 gh release upload "$tag" release-assets/* --clobber
+          }
+          if gh release view "$tag" >/dev/null 2>&1; then
+            update_release
+          else
+            for attempt in 1 2 3; do
+              if gh release create "$tag" release-assets/* --title "$tag" --notes-file RELEASE_NOTES.md; then
+                exit 0
+              fi
+              if gh release view "$tag" >/dev/null 2>&1; then
+                update_release
+                exit 0
+              fi
+              if [ "$attempt" = "3" ]; then
+                exit 1
+              fi
+              sleep 30
+            done
+          fi
 
   npm-publish:
     name: Publish npm packages
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v6
 
@@ -152,13 +178,68 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           echo "//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}" > ~/.npmrc
-          # Publish the platform packages first, then the main wrapper that
-          # references them as optional dependencies.
-          for dir in dist-npm/*/; do
-            [ "$(basename "$dir")" = "cli" ] && continue
-            (cd "$dir" && npm publish --access public)
-          done
-          (cd dist-npm/cli && npm publish --access public)
+          bun ./scripts/release/publish-npm.ts dist-npm
+
+  verify-release:
+    name: Verify release install (${{ matrix.os }})
+    needs: [build, npm-publish, github-release]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux-x64
+            binary: mangostudio
+          - os: macos-latest
+            platform: darwin-arm64
+            binary: mangostudio
+          - os: windows-latest
+            platform: windows-x64
+            binary: mangostudio.exe
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: ./.github/actions/setup-mango
+
+      - name: Install CLI from npm
+        shell: bash
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          source scripts/release/retry.sh
+          retry_command 5 60 npm install -g "@mangostudio/cli@${VERSION}"
+          actual="$(mangostudio --version)"
+          if [ "$actual" != "$VERSION" ]; then
+            echo "Expected npm CLI version ${VERSION}, got ${actual}"
+            exit 1
+          fi
+
+      - name: Verify GitHub Release archive
+        shell: bash
+        env:
+          BINARY: ${{ matrix.binary }}
+          GH_TOKEN: ${{ github.token }}
+          PLATFORM: ${{ matrix.platform }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          source scripts/release/retry.sh
+          archive="mangostudio-${VERSION}-${PLATFORM}.tar.gz"
+          mkdir -p verify-assets/extract
+          retry_command 5 60 gh release download "v${VERSION}" --pattern "$archive" --dir verify-assets --clobber
+          retry_command 5 60 gh release download "v${VERSION}" --pattern SHA256SUMS --dir verify-assets --clobber
+          bun ./scripts/release/verify-checksum.ts verify-assets/SHA256SUMS "verify-assets/${archive}"
+          tar -xzf "verify-assets/${archive}" -C verify-assets/extract
+          binary_path="verify-assets/extract/${PLATFORM}/${BINARY}"
+          chmod +x "$binary_path" 2>/dev/null || true
+          actual="$("$binary_path" --version)"
+          if [ "$actual" != "$VERSION" ]; then
+            echo "Expected release archive version ${VERSION}, got ${actual}"
+            exit 1
+          fi
 
   update-changelog:
     name: Update CHANGELOG on main
@@ -188,4 +269,14 @@ jobs:
           fi
           git add CHANGELOG.md
           git commit -m "docs(changelog): update for v${{ needs.build.outputs.version }} [skip ci]"
-          git push origin main
+          for attempt in 1 2 3; do
+            if git push origin main; then
+              exit 0
+            fi
+            if [ "$attempt" = "3" ]; then
+              exit 1
+            fi
+            git pull --rebase origin main
+          done
+          # If branch protection later blocks bot pushes, replace the direct push
+          # with a small github-actions[bot] PR via `gh pr create`.

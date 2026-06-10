@@ -18,6 +18,7 @@ Commands:
   stop                Gracefully stop the running server.
   killserver          Force-kill the running server.
   doctor              Run environment and configuration diagnostics.
+  version, --version  Print the MangoStudio version.
   help                Show this help.
 
 Examples:
@@ -26,6 +27,7 @@ Examples:
   mangostudio serve lan:3000   Start on all LAN interfaces, port 3000
   mangostudio serve -d         Start in the background
   mangostudio serve 3000 -d    Start in the background on port 3000
+  mangostudio --version
   mangostudio status
   mangostudio stop`;
 
