@@ -2,6 +2,8 @@
 // plus an expandable section with each full commit message. The git invocation
 // lives in render-commits.ts; everything here is testable without git.
 
+import { shortSha } from './render/format';
+
 /** Marker the comment publisher uses to find/replace this comment. */
 export const COMMITS_COMMENT_MARKER = '<!-- pr-commits-comment -->';
 
@@ -28,20 +30,36 @@ export const parseCommitLog = (raw: string): CommitEntry[] => {
   for (const record of raw.split(COMMIT_RECORD_SEPARATOR)) {
     const trimmed = record.replace(/^\n/, '');
     if (trimmed.trim().length === 0) continue;
-    const [sha, subject, message] = trimmed.split(COMMIT_FIELD_SEPARATOR);
-    if (!sha || subject === undefined || message === undefined) continue;
-    entries.push({ sha: sha.trim(), subject, message: message.trimEnd() });
+    // %B is raw, so a body containing the separator splits further; rejoin the
+    // tail instead of silently truncating the message.
+    const [sha, subject, ...rest] = trimmed.split(COMMIT_FIELD_SEPARATOR);
+    if (!sha || subject === undefined || rest.length === 0) continue;
+    entries.push({
+      sha: sha.trim(),
+      subject,
+      message: rest.join(COMMIT_FIELD_SEPARATOR).trimEnd(),
+    });
   }
   return entries;
 };
 
-const shortSha = (sha: string): string => sha.slice(0, 7);
+// Fence one backtick longer than any run inside the body (minimum four) so a
+// commit message can never break out of its code block.
+const fenceFor = (text: string): string => {
+  const longestRun = text.match(/`+/g)?.reduce((max, run) => Math.max(max, run.length), 0) ?? 0;
+  return '`'.repeat(Math.max(4, longestRun + 1));
+};
 
-// Four-backtick fence so commit bodies containing ``` cannot break out.
-const renderFullMessage = (entry: CommitEntry): string =>
-  [`#### \`${shortSha(entry.sha)}\` ${entry.subject}`, '', '````text', entry.message, '````'].join(
-    '\n'
-  );
+const renderFullMessage = (entry: CommitEntry): string => {
+  const fence = fenceFor(entry.message);
+  return [
+    `#### \`${shortSha(entry.sha)}\` ${entry.subject}`,
+    '',
+    `${fence}text`,
+    entry.message,
+    fence,
+  ].join('\n');
+};
 
 /**
  * Render the commit-summary comment markdown (base..head, oldest first).

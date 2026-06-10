@@ -39,6 +39,20 @@ describe('parseCommitLog', () => {
     expect(parseCommitLog('')).toEqual([]);
     expect(parseCommitLog('\n')).toEqual([]);
   });
+
+  // %B is raw, so a body containing the field separator must not be truncated.
+  it('preserves message content containing the field separator', () => {
+    const raw = record(
+      'cccc333',
+      'chore: odd body',
+      `chore: odd body\n\nweird${COMMIT_FIELD_SEPARATOR}payload\n`
+    );
+
+    const entries = parseCommitLog(raw);
+
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.message).toBe(`chore: odd body\n\nweird${COMMIT_FIELD_SEPARATOR}payload`);
+  });
 });
 
 describe('renderCommitsComment', () => {
@@ -75,5 +89,18 @@ describe('renderCommitsComment', () => {
     expect(empty).toContain('_No commits between base and head._');
     expect(empty).not.toContain('<details>');
     expect(empty).toContain(COMMITS_COMMENT_MARKER);
+  });
+
+  it('sizes the fence past backtick runs inside the body', () => {
+    const fencey: CommitEntry = {
+      sha: 'dddd444dddd444dddd444dddd444dddd444dddd4',
+      subject: 'docs: fence-heavy body',
+      message: 'body with a fence:\n````\ninner\n````',
+    };
+
+    const comment = renderCommitsComment([fencey], RANGE);
+
+    expect(comment).toContain('`````text');
+    expect(comment).toContain('\n`````\n');
   });
 });
