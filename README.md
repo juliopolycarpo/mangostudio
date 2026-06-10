@@ -166,7 +166,7 @@ mangostudio/
 | `bun run test --e2e`      | Run the Playwright end-to-end suite (opt-in)                   |
 | `bun run test --coverage` | Run coverage collection across applicable workspaces           |
 | `bun run fix`             | Apply Biome and dprint fixes                                   |
-| `bun run verify`          | Full CI gate: check, test, build (stops on failure)            |
+| `bun run verify`          | Full local CI gate: check, test --coverage, build --all        |
 | `bun run clean`           | Remove dist, local test reports, coverage, and build artifacts |
 
 ## Development Tooling
