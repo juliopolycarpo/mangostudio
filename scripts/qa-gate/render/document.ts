@@ -12,6 +12,7 @@ import { renderLocSection } from './loc';
 import { renderSummary } from './summary';
 import { renderTestsSection } from './tests';
 import { renderToolingSection } from './tooling';
+import { renderVerdict } from './verdict';
 
 export const COMMENT_MARKER = '<!-- qa-gate-comment -->';
 
@@ -55,12 +56,19 @@ export const renderDocument = (base: Metrics | null, head: Metrics | null): stri
   const generated = head?.generatedAt ?? base?.generatedAt ?? new Date().toISOString();
   const errorNotes = collectErrorNotes(base, head);
 
+  // Verdict and summary stay visible; the full tables collapse behind a
+  // single details block to keep the PR discussion scannable.
   const lines: string[] = [
     '## QA Gate — Coverage & Quality',
     '',
     `**Base:** \`${shortSha(base?.sha)}\` • **Head:** \`${shortSha(head?.sha)}\` • _generated ${generated}_`,
     '',
+    renderVerdict(base, head),
+    '',
     renderSummary(base, head),
+    '',
+    '<details>',
+    '<summary>Metric details (coverage, LoC, bundle, dependencies, tests, duplication, tooling)</summary>',
     '',
     renderCoverageSection(base, head),
     renderLocSection(base, head),
@@ -69,6 +77,8 @@ export const renderDocument = (base: Metrics | null, head: Metrics | null): stri
     renderTestsSection(base, head),
     renderDuplicationSection(base, head),
     renderToolingSection(base, head),
+    '</details>',
+    '',
   ];
 
   if (errorNotes.length > 0) {
@@ -83,18 +93,7 @@ export const renderDocument = (base: Metrics | null, head: Metrics | null): stri
     );
   }
 
-  lines.push(
-    '<details>',
-    '<summary>Out-of-scope (potential follow-ups)</summary>',
-    '',
-    '- Native Bun branch and statement records when Bun LCOV emits them directly.',
-    '- Per-chunk bundle deltas for the largest frontend assets.',
-    '- Runtime startup and first-load smoke timings.',
-    '',
-    '</details>',
-    '',
-    COMMENT_MARKER
-  );
+  lines.push(COMMENT_MARKER);
 
   return lines.join('\n');
 };

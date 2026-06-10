@@ -131,8 +131,9 @@ This is a one-time local setup. The template is at `.gitmessage` in the repo roo
 ## Changelog
 
 `CHANGELOG.md` is generated from Conventional Commits with git-cliff — never edit
-it by hand. Every PR gets a sticky **Changelog Preview** comment showing the
-entries it would add. Preview locally with `bun run changelog --preview`. See
+it by hand. The PR QA workflow posts bot comments on every PR — a commit
+summary, a **Changelog Preview** showing the entries the PR would add, and a QA
+metrics report. Preview the changelog locally with `bun run changelog --preview`. See
 [`docs/reference/releasing.md`](../docs/reference/releasing.md) for the release flow.
 
 ## Pull Request Process

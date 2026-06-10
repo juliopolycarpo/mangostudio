@@ -18,7 +18,7 @@ scripts/
 ├── clean.ts          Remove build artifacts (bun run clean)
 ├── changelog.ts      git-cliff wrapper: init/preview/release (bun run changelog)
 ├── lib/              Shared toolkit (see below)
-├── qa-gate/          PR metrics collector + comment renderer
+├── qa-gate/          PR metrics collector, comment renderers + comment publisher
 ├── release/          Release-time packaging (pack-npm.ts)
 └── tests/            Cross-cutting unit tests (co-located tests live beside sources)
 ```
@@ -40,6 +40,21 @@ importing the specific module in new code:
 | `changelog.ts`       | git-cliff arg/format logic (wrapped behind a project API)       |
 | `npm-pack.ts`        | npm distribution manifest builders                              |
 | `release-version.ts` | Canonical release version resolver + lockstep consistency check |
+
+## qa-gate/ — PR comment automation
+
+Powers the bot comments the `pr-qa-gate.yml` workflow manages on every PR:
+
+- `collect.ts` + `collect/*` — gather coverage, LoC, bundle, dependency,
+  duplication, test, and tooling metrics into a `metrics.json`.
+- `render.ts` + `render/*` — render the QA-gate comparison comment (verdict
+  headline, summary deltas, collapsed metric tables) from base/head metrics.
+- `render-commits.ts` + `commit-log.ts` — render the commit-summary comment
+  (list + expandable full messages) from the PR's base..head range.
+- `publish/managed-comments.mjs` — publisher that updates the managed comments
+  in place, creates missing comments, and deletes duplicate managed comments
+  left by older runs. Plain ESM so `actions/github-script` imports it directly;
+  it skips publishing when the PR head has moved on.
 
 ## Conventions
 

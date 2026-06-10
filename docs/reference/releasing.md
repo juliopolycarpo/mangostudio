@@ -33,8 +33,9 @@ tag (the release workflow runs `bun run check:versions --expect <tag>`).
 | `bun run changelog --preview [--base r]` | Print this branch's entries (powers the PR preview bot)                 |
 | `bun run changelog --release <version>`  | Regenerate `CHANGELOG.md` including `<version>`                         |
 
-Every PR gets a sticky **Changelog Preview** comment
-(`.github/workflows/changelog-preview.yml`) showing the entries it would add.
+Every PR gets a **Changelog Preview** bot comment showing the entries it would
+add. It is published by the PR QA workflow (`.github/workflows/pr-qa-gate.yml`)
+together with the commit summary and QA gate comments.
 
 ## Cutting a release
 
