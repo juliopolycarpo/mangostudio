@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import {
@@ -23,7 +23,10 @@ describe('runtime paths', () => {
   let tempDir = '';
 
   beforeEach(() => {
-    tempDir = mkdtempSync(join(tmpdir(), 'mango-runtime-paths-'));
+    // Canonicalize: on macOS tmpdir() lives under /var -> /private/var, and
+    // getRuntimeBaseDir() realpath-resolves the executable, so the expected
+    // paths must already be resolved for the comparisons to hold.
+    tempDir = realpathSync(mkdtempSync(join(tmpdir(), 'mango-runtime-paths-')));
     process.chdir(tempDir);
   });
 

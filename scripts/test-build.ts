@@ -16,8 +16,10 @@
  *   API_PORT      - Port for the smoke server (default: 13001).
  */
 
-import { existsSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { existsSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+
+import { resolveReleaseVersion } from './lib/release-version';
 
 // ---------------------------------------------------------------------------
 // Config
@@ -29,10 +31,9 @@ const REQUESTED_PLATFORM = process.env.PLATFORM;
 const SKIP_BUILD = process.env.SKIP_BUILD === '1';
 const PORT = parseInt(process.env.API_PORT ?? '13001', 10);
 const RELEASE_ASSETS_DIR = join(ROOT_DIR, 'release-assets');
-const ROOT_MANIFEST = JSON.parse(readFileSync(join(ROOT_DIR, 'package.json'), 'utf8')) as {
-  version: string;
-};
-const VERSION = (process.env.VERSION ?? ROOT_MANIFEST.version).replace(/^v/, '');
+// Resolve via the canonical helper so the archive name we expect matches the one
+// archive-assets.ts produces (same VERSION override + semver validation).
+const VERSION = resolveReleaseVersion({ rootDir: ROOT_DIR });
 
 const PLATFORM_META: Record<string, { binary: string; canExecute: boolean }> = {
   'linux-x64': { binary: 'mangostudio', canExecute: process.platform === 'linux' },

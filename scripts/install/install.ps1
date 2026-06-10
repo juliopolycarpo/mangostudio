@@ -7,6 +7,11 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
+# Windows PowerShell 5.1 (the default powershell.exe) does not auto-load
+# System.Net.Http, so [System.Net.Http.HttpClientHandler] below would throw.
+# PowerShell 7 already has it loaded; the load is a harmless no-op there.
+Add-Type -AssemblyName System.Net.Http -ErrorAction SilentlyContinue
+
 $Repo = 'juliopolycarpo/mangostudio'
 $GitHubBase = "https://github.com/$Repo"
 
