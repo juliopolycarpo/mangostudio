@@ -2,7 +2,7 @@
  * Runtime path helpers for development and standalone executable modes.
  */
 
-import { existsSync } from 'node:fs';
+import { existsSync, realpathSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 
 function isBunBinary(execPath: string): boolean {
@@ -17,6 +17,14 @@ export function isStandaloneExecutable(): boolean {
   return !isBunBinary(process.execPath);
 }
 
+function getExecutablePath(): string {
+  try {
+    return realpathSync(process.execPath);
+  } catch {
+    return process.execPath;
+  }
+}
+
 /**
  * Returns the base directory for runtime sidecar files.
  *
@@ -26,7 +34,7 @@ export function isStandaloneExecutable(): boolean {
  */
 export function getRuntimeBaseDir(): string {
   if (isStandaloneExecutable()) {
-    return dirname(process.execPath);
+    return dirname(getExecutablePath());
   }
 
   return process.cwd();

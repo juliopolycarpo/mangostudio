@@ -13,12 +13,13 @@ AI-powered image generation and chat studio supporting Gemini, OpenAI-compatible
 Run MangoStudio without cloning — install the CLI for your platform:
 
 ```bash
-npm install -g @mangostudio/cli   # or: bun add -g @mangostudio/cli
-mangostudio serve                 # start on http://localhost:3001
+curl -fsSL https://github.com/juliopolycarpo/mangostudio/releases/latest/download/install.sh | bash
+mangostudio serve # start on http://localhost:3001
 ```
 
-This pulls the prebuilt binary for your OS/arch and puts `mangostudio` on your
-`PATH`. Prefer a direct download? Grab a platform archive from the
+This downloads the prebuilt binary for your OS/arch, verifies `SHA256SUMS`, and
+puts `mangostudio` on your `PATH`. Prefer a package manager? Use
+`bun add -g @mangostudio/cli`. Windows users can download `install.ps1` from the
 [latest release](https://github.com/juliopolycarpo/mangostudio/releases/latest).
 
 `mangostudio` is a single-binary CLI that manages one local server:

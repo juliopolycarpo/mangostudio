@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import {
@@ -10,6 +10,7 @@ import {
 
 const originalExecPath = process.execPath;
 const originalCwd = process.cwd();
+const symlinkTest = process.platform === 'win32' ? it.skip : it;
 
 function setExecPath(execPath: string): void {
   Object.defineProperty(process, 'execPath', {
@@ -22,7 +23,10 @@ describe('runtime paths', () => {
   let tempDir = '';
 
   beforeEach(() => {
-    tempDir = mkdtempSync(join(tmpdir(), 'mango-runtime-paths-'));
+    // Canonicalize: on macOS tmpdir() lives under /var -> /private/var, and
+    // getRuntimeBaseDir() realpath-resolves the executable, so the expected
+    // paths must already be resolved for the comparisons to hold.
+    tempDir = realpathSync(mkdtempSync(join(tmpdir(), 'mango-runtime-paths-')));
     process.chdir(tempDir);
   });
 
@@ -46,6 +50,21 @@ describe('runtime paths', () => {
     expect(isStandaloneExecutable()).toBe(true);
     expect(getRuntimeBaseDir()).toBe(dirname(executablePath));
     expect(getDefaultFrontendDir()).toBe(join(dirname(executablePath), 'public'));
+  });
+
+  symlinkTest('resolves standalone executable symlinks before locating sidecars', () => {
+    const installDir = join(tempDir, 'dist', '0.1.0');
+    const binDir = join(tempDir, 'bin');
+    const executablePath = join(installDir, 'mangostudio');
+    const symlinkPath = join(binDir, 'mangostudio');
+    mkdirSync(installDir, { recursive: true });
+    mkdirSync(binDir, { recursive: true });
+    writeFileSync(executablePath, 'binary');
+    symlinkSync(executablePath, symlinkPath);
+    setExecPath(symlinkPath);
+
+    expect(getRuntimeBaseDir()).toBe(installDir);
+    expect(getDefaultFrontendDir()).toBe(join(installDir, 'public'));
   });
 
   it('prefers the monorepo frontend dist directory when it exists', () => {
