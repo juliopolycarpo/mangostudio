@@ -18,9 +18,16 @@ mangostudio serve # start on http://localhost:3001
 ```
 
 This downloads the prebuilt binary for your OS/arch, verifies `SHA256SUMS`, and
-puts `mangostudio` on your `PATH`. Prefer a package manager? Use
-`bun add -g @mangostudio/cli`. Windows users can download `install.ps1` from the
-[latest release](https://github.com/juliopolycarpo/mangostudio/releases/latest).
+puts `mangostudio` on your `PATH`. Prefer a package manager? Use Homebrew
+(macOS & Linux):
+
+```bash
+brew tap juliopolycarpo/tap
+brew install mangostudio
+```
+
+or `bun add -g @mangostudio/cli`. Windows users can download `install.ps1` from
+the [latest release](https://github.com/juliopolycarpo/mangostudio/releases/latest).
 
 `mangostudio` is a single-binary CLI that manages one local server:
 
