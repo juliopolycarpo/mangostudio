@@ -10,6 +10,15 @@ AI-powered image generation and chat studio supporting Gemini, OpenAI-compatible
 
 ## Install
 
+| Method          | Command                                                                                                                  |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| Shell installer | `curl -fsSL https://github.com/juliopolycarpo/mangostudio/releases/latest/download/install.sh \| bash`                   |
+| Docker          | `docker run -p 3001:3001 -v mango-data:/data -e BETTER_AUTH_SECRET=<32+ chars> ghcr.io/juliopolycarpo/mangostudio:0.1.0` |
+| Homebrew        | `brew install juliopolycarpo/tap/mangostudio`                                                                            |
+| Cargo           | `cargo install mangostudio`                                                                                              |
+| Bun             | `bun add -g @mangostudio/cli`                                                                                            |
+| Scoop           | `scoop install mangostudio` after `scoop bucket add juliopolycarpo https://github.com/juliopolycarpo/scoop-bucket`       |
+
 Run MangoStudio without cloning — install the CLI for your platform:
 
 ```bash
@@ -59,6 +68,7 @@ Run `mangostudio` with no arguments for the full command list. See
 On first run, `mangostudio serve` can generate a strong `BETTER_AUTH_SECRET` and store it in `~/.mango/.env` or `~/.mango/config.toml`.
 Set provider keys such as `GEMINI_API_KEY` when you are ready to use hosted models. Optional runtime settings include `API_HOST`, `API_PORT`, and `DATABASE_PATH`.
 See [`@mangostudio/cli`](packages/cli/README.md) for the full environment.
+For container deployment details, see [`docs/operations/deployment.md`](docs/operations/deployment.md#docker).
 
 ## Prerequisites
 

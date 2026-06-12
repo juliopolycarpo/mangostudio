@@ -2,6 +2,65 @@
 
 MangoStudio can be deployed as standalone platform-specific binaries with embedded frontend assets.
 
+## Docker
+
+Release images are published to GitHub Container Registry:
+
+```bash
+docker run -p 3001:3001 \
+  -v mango-data:/data \
+  -e BETTER_AUTH_SECRET="$(openssl rand -base64 32)" \
+  -e GEMINI_API_KEY="your-key" \
+  ghcr.io/juliopolycarpo/mangostudio:0.1.0
+```
+
+The image sets `HOME=/data`, so the default runtime files live under the mounted
+volume:
+
+- `/data/.mango/config.toml`
+- `/data/.mango/.env`
+- `/data/.mango/database.sqlite`
+- `/data/.mango/uploads`
+- `/data/.mango/images`
+- `/data/.mango/agents`
+
+Useful environment variables:
+
+| Variable             | Purpose                                                      |
+| -------------------- | ------------------------------------------------------------ |
+| `BETTER_AUTH_SECRET` | Required 32+ character auth secret                           |
+| `GEMINI_API_KEY`     | Gemini connector key; other provider keys use the same env   |
+| `API_PORT`           | Container listen port, default `3001`                        |
+| `DATABASE_PATH`      | Override SQLite path, default `/data/.mango/database.sqlite` |
+| `UPLOADS_DIR`        | Override uploaded file storage path                          |
+| `IMAGES_DIR`         | Override generated image storage path                        |
+| `AGENTS_DIR`         | Override agent settings storage path                         |
+| `BETTER_AUTH_URL`    | Public URL when deployed behind a domain                     |
+| `TRUST_PROXY`        | Set to `true` only behind a header-overwriting proxy         |
+
+Compose example:
+
+```yaml
+services:
+  mangostudio:
+    image: ghcr.io/juliopolycarpo/mangostudio:0.1.0
+    ports:
+      - "3001:3001"
+    volumes:
+      - mango-data:/data
+    environment:
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET}
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      API_PORT: "3001"
+      DATABASE_PATH: /data/.mango/database.sqlite
+
+volumes:
+  mango-data:
+```
+
+The first GHCR package may need its visibility changed to public in the GitHub
+package settings after the first release push.
+
 ## Production Build
 
 ```bash

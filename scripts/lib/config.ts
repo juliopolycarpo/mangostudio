@@ -63,6 +63,7 @@ export const ROOT_BIOME_PATHS: string[] = [
 export const ROOT_DPRINT_PATHS: string[] = [
   'AGENTS.md',
   'README.md',
+  'Dockerfile',
   'docs',
   '.github',
   '.mango',

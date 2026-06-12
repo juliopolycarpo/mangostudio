@@ -60,17 +60,18 @@ Powers the bot comments the `pr-qa-gate.yml` workflow manages on every PR:
 
 Run by `.github/workflows/release.yml`; each is also runnable locally:
 
-| Script               | Concern                                                                  |
-| -------------------- | ------------------------------------------------------------------------ |
-| `archive-assets.ts`  | Assemble `release-assets/` (platform archives, installers, `SHA256SUMS`) |
-| `pack-npm.ts`        | Stage `.mango/out/<arch>` binaries into the npm distribution             |
-| `publish-npm.ts`     | Idempotent npm publication with retry + provenance fallback              |
-| `verify-checksum.ts` | Check one downloaded asset against `SHA256SUMS`                          |
-| `dist-manifest.ts`   | Shared renderer: fill `{{VERSION}}`/`{{SHA_*}}` from `SHA256SUMS`        |
-| `update-homebrew.ts` | Render `Formula/mangostudio.rb` from `SHA256SUMS` + `templates/`         |
-| `update-scoop.ts`    | Render `bucket/mangostudio.json` from `SHA256SUMS` + `templates/`        |
-| `push-dist-repo.ts`  | Push changed files into an external dist repo (tap/bucket), idempotently |
-| `retry.sh`           | `retry_command` helper sourced by workflow shell steps                   |
+| Script                | Concern                                                                  |
+| --------------------- | ------------------------------------------------------------------------ |
+| `archive-assets.ts`   | Assemble `release-assets/` (platform archives, installers, `SHA256SUMS`) |
+| `stage-docker-ctx.ts` | Stage Linux musl binaries into `docker-ctx/` for Docker Buildx           |
+| `pack-npm.ts`         | Stage `.mango/out/<arch>` binaries into the npm distribution             |
+| `publish-npm.ts`      | Idempotent npm publication with retry + provenance fallback              |
+| `verify-checksum.ts`  | Check one downloaded asset against `SHA256SUMS`                          |
+| `dist-manifest.ts`    | Shared renderer: fill `{{VERSION}}`/`{{SHA_*}}` from `SHA256SUMS`        |
+| `update-homebrew.ts`  | Render `Formula/mangostudio.rb` from `SHA256SUMS` + `templates/`         |
+| `update-scoop.ts`     | Render `bucket/mangostudio.json` from `SHA256SUMS` + `templates/`        |
+| `push-dist-repo.ts`   | Push changed files into an external dist repo (tap/bucket), idempotently |
+| `retry.sh`            | `retry_command` helper sourced by workflow shell steps                   |
 
 ## Conventions
 
