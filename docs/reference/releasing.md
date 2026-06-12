@@ -1,8 +1,9 @@
 # Releasing
 
-MangoStudio ships as standalone binaries (GitHub Releases) and as an npm CLI
-(`@mangostudio/cli`). The changelog is generated from Conventional Commits with
-[git-cliff](https://git-cliff.org); nothing here is hand-edited.
+MangoStudio ships as standalone binaries (GitHub Releases), as an npm CLI
+(`@mangostudio/cli`), via a Homebrew tap, and as a crates.io launcher crate
+(`cargo install mangostudio`). The changelog is generated from Conventional
+Commits with [git-cliff](https://git-cliff.org); nothing here is hand-edited.
 
 ## Version source
 
@@ -18,6 +19,9 @@ lockstep:
 - `package.json`
 - `apps/api/package.json`, `apps/frontend/package.json`, `apps/shared/package.json`
 - `packages/cli/package.json`
+- `packages/cargo-shim/Cargo.toml` **and** `packages/cargo-shim/Cargo.lock` (the
+  lockfile records the crate's own version and the release publishes with
+  `--locked`, so both must move together)
 
 `bun run check:versions` enforces this; it also runs as part of `bun run check`.
 Pass `--expect <version>` to additionally require the committed version to match a
@@ -42,7 +46,9 @@ together with the commit summary and QA gate comments.
 Releases are tag-driven. From an up-to-date `main`:
 
 1. Bump the version to the same value in every lockstep `package.json` (root,
-   `apps/*`, and `packages/cli`; see [Version source](#version-source)).
+   `apps/*`, and `packages/cli`; see [Version source](#version-source)) and in
+   `packages/cargo-shim/Cargo.toml`, then refresh the crate lockfile with
+   `cargo update --workspace` (run inside `packages/cargo-shim/`).
 2. Run `bun run check:versions` to confirm they agree, then commit the bump.
 3. Tag and push (the tag must match the committed version):
 
@@ -56,16 +62,17 @@ step flakes: using **Re-run failed jobs** is safe because published npm versions
 are skipped, release assets are uploaded with clobber semantics, and the
 changelog push rebases before retrying.
 
-It runs six jobs:
+It runs seven jobs:
 
-| Job                | What it does                                                                                                                                                                                                                  |
-| ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `build`            | Verifies versions are in lockstep with the tag, cross-compiles every platform binary (`build.ts`), assembles the npm distribution (`pack-npm.ts`), and uploads binary archives plus `SHA256SUMS`.                             |
-| `github-release`   | Creates the GitHub Release, or updates an existing one by refreshing notes and uploading assets with `--clobber`.                                                                                                             |
-| `npm-publish`      | Publishes the platform packages, then the `@mangostudio/cli` wrapper; already-published versions are skipped, transient failures are retried, and provenance falls back to a warning-only publish if npm rejects it.          |
-| `homebrew`         | Renders `Formula/mangostudio.rb` from `SHA256SUMS` (`update-homebrew.ts`) and pushes it to `juliopolycarpo/homebrew-tap` (`push-dist-repo.ts`). No other job depends on it, so a tap failure never blocks npm or the Release. |
-| `verify-release`   | Installs `@mangostudio/cli@<version>` from npm on Ubuntu, macOS, and Windows; downloads the matching release tarball, verifies `SHA256SUMS`, and runs `mangostudio --version`. Windows arm64 is published but not verified.   |
-| `update-changelog` | Regenerates `CHANGELOG.md` and commits it back to `main`, retrying the push after `git pull --rebase origin main` if another commit lands first.                                                                              |
+| Job                | What it does                                                                                                                                                                                                                     |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `build`            | Verifies versions are in lockstep with the tag, cross-compiles every platform binary (`build.ts`), assembles the npm distribution (`pack-npm.ts`), and uploads binary archives plus `SHA256SUMS`.                                |
+| `github-release`   | Creates the GitHub Release, or updates an existing one by refreshing notes and uploading assets with `--clobber`.                                                                                                                |
+| `npm-publish`      | Publishes the platform packages, then the `@mangostudio/cli` wrapper; already-published versions are skipped, transient failures are retried, and provenance falls back to a warning-only publish if npm rejects it.             |
+| `homebrew`         | Renders `Formula/mangostudio.rb` from `SHA256SUMS` (`update-homebrew.ts`) and pushes it to `juliopolycarpo/homebrew-tap` (`push-dist-repo.ts`). No other job depends on it, so a tap failure never blocks npm or the Release.    |
+| `cargo-publish`    | Publishes the `mangostudio` launcher crate (`packages/cargo-shim`) to crates.io. Idempotent: already-published versions are skipped, publishes are retried, and an upload that lands despite an error is detected. Non-blocking. |
+| `verify-release`   | Installs `@mangostudio/cli@<version>` from npm on Ubuntu, macOS, and Windows; downloads the matching release tarball, verifies `SHA256SUMS`, and runs `mangostudio --version`. Windows arm64 is published but not verified.      |
+| `update-changelog` | Regenerates `CHANGELOG.md` and commits it back to `main`, retrying the push after `git pull --rebase origin main` if another commit lands first.                                                                                 |
 
 `workflow_dispatch` accepts an explicit `version` input for a manual run; it is
 validated against the committed version the same way.
@@ -135,11 +142,38 @@ One-time setup (already done; documented for future projects):
    it to the Scoop bucket when that lands) and save it as the **`DIST_REPOS_TOKEN`**
    repo secret.
 
+## crates.io launcher
+
+`cargo install mangostudio` (and `cargo binstall mangostudio`) installs a thin
+Rust launcher from `packages/cargo-shim/` — the only Rust in the repository. On
+first run it downloads the platform archive matching the crate version from the
+GitHub release into `~/.mango/dist/<version>/` (verified against `SHA256SUMS`,
+same layout as the shell installer) and execs the real binary. See
+[`packages/cargo-shim/README.md`](../../packages/cargo-shim/README.md).
+
+Design notes:
+
+- binstall's prebuilt strategies are **intentionally disabled** in the crate
+  metadata: the app needs its `public/` sidecar beside the binary, and binstall
+  only installs binaries out of an archive, which would drop the UI. binstall
+  therefore falls back to compiling the launcher, which installs the complete
+  archive on first run.
+- musl is detected at compile time (`target_env = "musl"`); Alpine users should
+  prefer the shell installer, which detects musl at runtime.
+- The crate's CI lane (`.github/workflows/cargo-shim.yml`) is path-filtered to
+  `packages/cargo-shim/**`, so Bun-only changes never wait on a Rust toolchain.
+- The `cargo-publish` release job checks crates.io before publishing and
+  re-checks between retries, so workflow re-runs converge instead of failing on
+  "version already exists".
+
 ## Prerequisites
 
 - **`NPM_TOKEN`** repo secret with publish rights to the `@mangostudio` scope.
 - **`DIST_REPOS_TOKEN`** repo secret: fine-grained PAT with contents read/write
   on `juliopolycarpo/homebrew-tap` (see [Homebrew tap](#homebrew-tap)).
+- **`CARGO_REGISTRY_TOKEN`** repo secret: crates.io API token with
+  `publish-new` + `publish-update` scope for the `mangostudio` crate (see
+  [crates.io launcher](#cratesio-launcher)).
 - Permission for the release workflow to push `CHANGELOG.md` to `main`
   (`contents: write`); adjust if branch protection blocks the bot.
 

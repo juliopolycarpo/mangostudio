@@ -2,15 +2,16 @@ name: Release
 
 # Cut a release: cross-compile standalone binaries for every platform, assemble
 # the npm distribution, publish a GitHub Release with the binaries + git-cliff
-# notes, publish the npm packages, update the Homebrew tap formula, and update
-# CHANGELOG.md on main.
+# notes, publish the npm packages, update the Homebrew tap formula, publish the
+# crates.io launcher crate, and update CHANGELOG.md on main.
 #
 # Trigger by pushing a semver tag (git tag -s v0.1.0 && git push origin v0.1.0)
 # or via workflow_dispatch with an explicit version.
 #
 # Prerequisites: an NPM_TOKEN repo secret with publish rights to @mangostudio/*,
-# and a DIST_REPOS_TOKEN fine-grained PAT with contents read/write on
-# juliopolycarpo/homebrew-tap.
+# a DIST_REPOS_TOKEN fine-grained PAT with contents read/write on
+# juliopolycarpo/homebrew-tap, and a CARGO_REGISTRY_TOKEN crates.io API token
+# with publish-new + publish-update scope for the mangostudio crate.
 
 on:
   push:
@@ -208,6 +209,50 @@ jobs:
             --token-env DIST_REPOS_TOKEN \
             --message "mangostudio ${VERSION}" \
             --file tap/Formula/mangostudio.rb:Formula/mangostudio.rb
+
+  cargo-publish:
+    # Publishes the thin launcher crate (packages/cargo-shim) so `cargo
+    # install mangostudio` resolves this release. Nothing depends on this job,
+    # so a crates.io failure never blocks the GitHub Release, npm, or Homebrew
+    # channels. Already-published versions are skipped, and an upload that
+    # lands despite a reported error is detected between retries, so re-runs
+    # converge.
+    name: Publish to crates.io
+    needs: [build, github-release]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Publish launcher crate (idempotent)
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          published() {
+            curl -fsSL --retry 3 "https://crates.io/api/v1/crates/mangostudio/${VERSION}" | grep -q '"num"'
+          }
+          if published; then
+            echo "mangostudio ${VERSION} is already on crates.io; skipping."
+            exit 0
+          fi
+          for attempt in 1 2 3; do
+            if (cd packages/cargo-shim && cargo publish --locked); then
+              exit 0
+            fi
+            if published; then
+              echo "Version became visible after attempt ${attempt}; treating as published."
+              exit 0
+            fi
+            if [ "$attempt" = "3" ]; then
+              exit 1
+            fi
+            sleep 30
+          done
 
   verify-release:
     name: Verify release install (${{ matrix.os }})

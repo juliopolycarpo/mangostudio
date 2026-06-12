@@ -11,7 +11,7 @@ scripts/
 ├── dev.ts            Start dev servers (bun run dev)
 ├── build.ts          Build workspaces or standalone binaries (bun run build)
 ├── check.ts          Biome + dprint + madge + tsgo, in parallel (bun run check)
-├── check-versions.ts Assert root + workspace package.json versions agree (bun run check:versions)
+├── check-versions.ts Assert root + workspace + cargo-shim versions agree (bun run check:versions)
 ├── fix.ts            Apply Biome + dprint fixes (bun run fix)
 ├── test.ts           Run unit/integration/e2e/coverage lanes (bun run test)
 ├── verify.ts         check → test → build gate (bun run verify)
@@ -98,8 +98,9 @@ Run by `.github/workflows/release.yml`; each is also runnable locally:
 
 The release version (build, npm packaging, and changelog) resolves through
 `lib/release-version.ts`: the root `package.json` version, overridable by the
-`VERSION` env var, validated as semver. `bun run check:versions` keeps the root
-and workspace versions in lockstep.
+`VERSION` env var, validated as semver. `bun run check:versions` keeps the root,
+workspace, and `packages/cargo-shim/Cargo.toml`/`Cargo.lock` versions in
+lockstep.
 
 `scripts/release/pack-npm.ts` turns `.mango/out/<arch>` binaries into the npm
 distribution. See `docs/reference/releasing.md` for the full release flow.
