@@ -69,7 +69,7 @@ It runs nine jobs:
 | ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `build`            | Verifies versions are in lockstep with the tag, cross-compiles every platform binary (`build.ts`), assembles the npm distribution (`pack-npm.ts`), and uploads binary archives plus `SHA256SUMS`.                                |
 | `github-release`   | Creates the GitHub Release, or updates an existing one by refreshing notes and uploading assets with `--clobber`.                                                                                                                |
-| `docker`           | Stages the Linux musl archives into `docker-ctx/` (`stage-docker-ctx.ts`) and publishes `ghcr.io/juliopolycarpo/mangostudio:<version>` plus `latest` for amd64 and arm64. It uses only `GITHUB_TOKEN` with `packages: write`.    |
+| `docker`           | Stages Linux glibc and musl archives into `docker-ctx/` (`stage-docker-ctx.ts`) and publishes Bookworm and Alpine images for amd64 and arm64. It uses only `GITHUB_TOKEN` with `packages: write`.                                |
 | `npm-publish`      | Publishes the platform packages, then the `@mangostudio/cli` wrapper; already-published versions are skipped, transient failures are retried, and provenance falls back to a warning-only publish if npm rejects it.             |
 | `homebrew`         | Renders `Formula/mangostudio.rb` from `SHA256SUMS` (`update-homebrew.ts`) and pushes it to `juliopolycarpo/homebrew-tap` (`push-dist-repo.ts`). No other job depends on it, so a tap failure never blocks npm or the Release.    |
 | `scoop`            | Renders `bucket/mangostudio.json` from `SHA256SUMS` (`update-scoop.ts`) and pushes it to `juliopolycarpo/scoop-bucket` (`push-dist-repo.ts`). No other job depends on it, so a bucket failure never blocks npm or the Release.   |
@@ -104,16 +104,21 @@ binary's `--version` command.
 
 ## Docker image
 
-`ghcr.io/juliopolycarpo/mangostudio:<version>` is built from the Linux musl
-release archives rather than compiling inside Docker. The release workflow
-extracts the `linux-x64-musl` and `linux-arm64-musl` tarballs into `docker-ctx/`,
-then Docker Buildx publishes a two-platform manifest:
+`ghcr.io/juliopolycarpo/mangostudio:<version>` is the default Debian Bookworm
+image and is built from the Linux glibc release archives rather than compiling
+inside Docker. The release workflow extracts the `linux-x64`, `linux-arm64`,
+`linux-x64-musl`, and `linux-arm64-musl` tarballs into `docker-ctx/`, then Docker
+Buildx publishes two-platform manifests for the Bookworm and Alpine variants.
+The bare version and `latest` tags point to Bookworm; Alpine is published under
+the `-alpine` version suffix:
 
 ```bash
 docker pull ghcr.io/juliopolycarpo/mangostudio:0.1.0
 docker run -p 3001:3001 -v mango-data:/data \
   -e BETTER_AUTH_SECRET="change-me-to-32-plus-chars" \
   ghcr.io/juliopolycarpo/mangostudio:0.1.0
+
+docker pull ghcr.io/juliopolycarpo/mangostudio:0.1.0-alpine
 ```
 
 The image stores runtime state below `/data` by setting `HOME=/data`; mount that

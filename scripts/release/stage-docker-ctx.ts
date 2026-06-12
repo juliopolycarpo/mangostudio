@@ -10,6 +10,7 @@ import {
   type DockerStageTarget,
   dockerReleaseAssetName,
   parseDockerArchFilter,
+  parseDockerVariantFilter,
 } from '../lib/docker-stage';
 import { resolveReleaseVersion } from '../lib/release-version';
 import {
@@ -26,12 +27,13 @@ interface StageOptions {
 }
 
 function printHelp(): never {
-  console.log(`Usage: bun ./scripts/release/stage-docker-ctx.ts [--arch <amd64|arm64|all>]
+  console.log(`Usage: bun ./scripts/release/stage-docker-ctx.ts [--arch <amd64|arm64|all>] [--variant <bookworm|alpine|all>]
 
-Stages musl standalone binaries into docker-ctx/ for Docker buildx.
+Stages standalone binaries into docker-ctx/ for Docker buildx.
 
 Flags:
   --arch <arch>          Stage one Docker TARGETARCH value (default: all)
+  --variant <variant>    Stage one image variant (default: all)
   --context-dir <path>   Override output directory (default: docker-ctx)
   --release-assets <dir> Stage from release tarballs instead of .mango/out
   --help                 Show this help message`);
@@ -72,10 +74,15 @@ async function stageFromReleaseAsset(
   releaseAssetsDir: string
 ): Promise<void> {
   const version = resolveReleaseVersion();
-  const archivePath = join(releaseAssetsDir, dockerReleaseAssetName(version, target.dockerArch));
-  assertFile(archivePath, `${target.platform.arch} release archive`);
+  const archivePath = join(
+    releaseAssetsDir,
+    dockerReleaseAssetName(version, target.dockerVariant, target.dockerArch)
+  );
+  assertFile(archivePath, `${target.dockerVariant}/${target.platform.arch} release archive`);
 
-  const extractDir = mkdtempSync(join(tmpdir(), `mangostudio-docker-${target.dockerArch}-`));
+  const extractDir = mkdtempSync(
+    join(tmpdir(), `mangostudio-docker-${target.dockerVariant}-${target.dockerArch}-`)
+  );
   try {
     await runCommand(['tar', '-xzf', archivePath, '-C', extractDir]);
     copyTarget(target, join(extractDir, target.platform.name), join(extractDir, 'public'));
@@ -117,16 +124,18 @@ async function runCommand(cmd: string[]): Promise<void> {
 
 async function main(): Promise<void> {
   const { flags, values, positional } = parseArgs({
-    valueFlags: ['--arch', '--context-dir', '--release-assets'],
+    valueFlags: ['--arch', '--variant', '--context-dir', '--release-assets'],
   });
   if (flags['--help']) printHelp();
   assertNoUnexpectedArguments(positional);
 
   const onlyArch = parseDockerArchFilter(values['--arch']);
+  const onlyVariant = parseDockerVariantFilter(values['--variant']);
   const plan = createDockerStagePlan({
     rootDir: ROOT_DIR,
     contextDir: values['--context-dir'],
     onlyArch,
+    onlyVariant,
   });
 
   header('Stage Docker context');

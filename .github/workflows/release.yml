@@ -142,10 +142,10 @@ jobs:
           fi
 
   docker:
-    # Publishes the container image from the musl binaries already produced by
+    # Publishes container images from the Linux binaries already produced by
     # the build job. Nothing depends on this job, so a registry failure never
     # blocks the GitHub Release, npm, Homebrew, Scoop, or crates.io channels.
-    name: Publish Docker image
+    name: Publish Docker images
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -177,7 +177,8 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ github.token }}
 
-      - uses: docker/build-push-action@v6
+      - name: Build and publish default Bookworm image
+        uses: docker/build-push-action@v6
         with:
           context: .
           platforms: linux/amd64,linux/arm64
@@ -186,7 +187,22 @@ jobs:
             VERSION=${{ needs.build.outputs.version }}
           tags: |
             ghcr.io/${{ github.repository }}:${{ needs.build.outputs.version }}
+            ghcr.io/${{ github.repository }}:${{ needs.build.outputs.version }}-bookworm
             ghcr.io/${{ github.repository }}:latest
+            ghcr.io/${{ github.repository }}:bookworm
+
+      - name: Build and publish Alpine image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.alpine
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: |
+            VERSION=${{ needs.build.outputs.version }}
+          tags: |
+            ghcr.io/${{ github.repository }}:${{ needs.build.outputs.version }}-alpine
+            ghcr.io/${{ github.repository }}:alpine
 
   npm-publish:
     name: Publish npm packages

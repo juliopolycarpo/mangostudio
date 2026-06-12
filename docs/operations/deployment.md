@@ -4,7 +4,8 @@ MangoStudio can be deployed as standalone platform-specific binaries with embedd
 
 ## Docker
 
-Release images are published to GitHub Container Registry:
+Release images are published to GitHub Container Registry. The default image is
+Debian Bookworm; Alpine images use the `-alpine` version suffix:
 
 ```bash
 docker run -p 3001:3001 \
