@@ -6,6 +6,51 @@ GHCR, as an npm CLI (`@mangostudio/cli`), via a Homebrew tap, via a Scoop bucket
 changelog is generated from Conventional Commits with [git-cliff](https://git-cliff.org);
 nothing here is hand-edited.
 
+## One-shot contract
+
+Setting the secrets below and pushing a signed semver tag (`v0.2.0`) is the entire
+release procedure. The workflow validates version lockstep, builds every artifact,
+publishes each channel independently, and commits `CHANGELOG.md` back to `main`.
+
+| Secret                      | Used by                                  | Scope                                                                                                        |
+| --------------------------- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `NPM_TOKEN`                 | `npm-publish`                            | Publish rights on `@mangostudio/*`                                                                           |
+| `DIST_REPOS_TOKEN`          | `homebrew`, `scoop`                      | Fine-grained PAT with contents read/write on `juliopolycarpo/homebrew-tap` and `juliopolycarpo/scoop-bucket` |
+| `CARGO_REGISTRY_TOKEN`      | `cargo-publish`                          | crates.io publish token for the `mangostudio` crate                                                          |
+| *(built-in `GITHUB_TOKEN`)* | `github-release`, `docker`, attestations | No extra setup — workflow grants `packages: write` for GHCR                                                  |
+
+### One-time setup checklist
+
+Complete these once per fork or org before the first tag push:
+
+1. Create the shared Homebrew tap [`juliopolycarpo/homebrew-tap`](https://github.com/juliopolycarpo/homebrew-tap) with a `Formula/` directory.
+2. Create the shared Scoop bucket [`juliopolycarpo/scoop-bucket`](https://github.com/juliopolycarpo/scoop-bucket) with a `bucket/` directory.
+3. Reserve the `mangostudio` crate name on [crates.io](https://crates.io) and generate an API token.
+4. Add the three repo secrets (`NPM_TOKEN`, `DIST_REPOS_TOKEN`, `CARGO_REGISTRY_TOKEN`) to this repository.
+5. After the first GHCR push, set the `ghcr.io/juliopolycarpo/mangostudio` package visibility to **public** in GitHub package settings.
+6. Ensure branch protection allows the release bot to push `CHANGELOG.md` to `main` (`contents: write` on the workflow).
+
+## Release asset naming
+
+Every downstream channel (Homebrew, Scoop, Cargo launcher, shell installers)
+hardcodes these public asset names. Do not rename them without updating every
+template and installer in the same release.
+
+| Asset                                        | Notes                                                                                                                      |
+| -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `mangostudio-<version>-<platform>.tar.gz`    | Linux and macOS platforms (`linux-x64`, `linux-arm64`, `linux-x64-musl`, `linux-arm64-musl`, `darwin-x64`, `darwin-arm64`) |
+| `mangostudio-<version>-<platform>.zip`       | Windows platforms (`windows-x64`, `windows-arm64`)                                                                         |
+| `mangostudio-<version>-frontend-dist.tar.gz` | Frontend bundle only (`apps/frontend/dist`)                                                                                |
+| `install.sh` / `install.ps1`                 | Shell installers copied from `scripts/install/`                                                                            |
+| `SHA256SUMS`                                 | Checksums for every asset above                                                                                            |
+
+Each platform archive has a **flat root**: `mangostudio` (or `mangostudio.exe`),
+`public/`, and `README.md` — no nested platform directory. The binary resolves
+its frontend sidecar beside the real executable path.
+
+`scripts/release/archive-assets.ts` assembles the full set; `scripts/lib/release-assets.ts`
+defines the naming contract and is covered by unit tests.
+
 ## Version source
 
 There is **one** release version. The root `package.json` `version` is canonical;
@@ -59,9 +104,10 @@ Releases are tag-driven. From an up-to-date `main`:
    ```
 
 `.github/workflows/release.yml` is designed to converge when a networked release
-step flakes: using **Re-run failed jobs** is safe because published npm versions
-are skipped, release assets are uploaded with clobber semantics, and the
-changelog push rebases before retrying.
+step flakes: **Re-run failed jobs** is always safe because channel jobs are
+independent — one failing never blocks the others. Published npm versions are
+skipped, release assets upload with clobber semantics, and the changelog push
+rebases before retrying.
 
 It runs nine jobs:
 
@@ -238,6 +284,8 @@ Design notes:
   "version already exists".
 
 ## Prerequisites
+
+The [One-shot contract](#one-shot-contract) table lists every secret. In short:
 
 - **`NPM_TOKEN`** repo secret with publish rights to the `@mangostudio` scope.
 - **`DIST_REPOS_TOKEN`** repo secret: fine-grained PAT with contents read/write

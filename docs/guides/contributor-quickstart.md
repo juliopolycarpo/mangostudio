@@ -54,6 +54,7 @@ Formatted files are re-staged automatically. The typecheck step is skipped durin
 ```bash
 bun run check
 bun run test
+bun run verify   # full local CI gate: check → test --coverage → build --all
 bun run build
 ```
 
@@ -74,7 +75,7 @@ bun run fix --staged      # auto-fix only affected workspaces
 2. Trace one layer outward instead of reading the whole repo.
 3. Keep changes scoped to one concern.
 4. Run `bun run check` after each change set.
-5. Before handoff or PR, run `bun run check && bun run test`.
+5. Before handoff or PR, run `bun run verify` (or `bun run check && bun run test` for a lighter pass).
 
 ## 7. Related Docs
 

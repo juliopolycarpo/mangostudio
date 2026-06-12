@@ -4,6 +4,22 @@ MangoStudio ships as a single binary that doubles as a CLI for running and
 managing one local server. The same commands work from the installed binary
 (`mangostudio`) and from source (`bun run apps/api/src/index.ts <command>`).
 
+## Install channels
+
+Pick any distribution channel — each ships the same prebuilt binary and frontend
+sidecar. See the [README install matrix](../../README.md#install) for
+copy-paste commands, or:
+
+| Channel            | Entry point                                                                                                      |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------- |
+| npm / bun          | `@mangostudio/cli` — see [`packages/cli/README.md`](../../packages/cli/README.md)                                |
+| Homebrew           | `brew install juliopolycarpo/tap/mangostudio`                                                                    |
+| Shell / PowerShell | `install.sh` / `install.ps1` from GitHub Releases                                                                |
+| Scoop              | `juliopolycarpo/scoop-bucket` → `scoop install mangostudio`                                                      |
+| Cargo              | `cargo install mangostudio` — see [`packages/cargo-shim/README.md`](../../packages/cargo-shim/README.md)         |
+| Docker             | `ghcr.io/juliopolycarpo/mangostudio` — see [`docs/operations/deployment.md`](../operations/deployment.md#docker) |
+| Manual             | Download platform archives from GitHub Releases and verify `SHA256SUMS`                                          |
+
 ## Commands
 
 | Command                            | Description                                                    |

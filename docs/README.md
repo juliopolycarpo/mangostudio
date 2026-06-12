@@ -41,6 +41,7 @@ right depth quickly instead of scanning a flat list of files.
 ### Ops and deployment
 
 - [`reference/cli.md`](./reference/cli.md)
+- [`reference/releasing.md`](./reference/releasing.md)
 - [`operations/deployment.md`](./operations/deployment.md)
 - [`SECURITY.md`](../.github/SECURITY.md)
 

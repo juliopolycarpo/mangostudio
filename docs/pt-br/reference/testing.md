@@ -55,7 +55,18 @@ bun run test:e2e:setup     # instala Playwright Chromium + dependências do SO
 bun run test --e2e          # auth smoke suite em Playwright Chromium (opt-in)
 bun run test --coverage     # coleta de cobertura nos workspaces aplicáveis
 bun run test --all          # todas as lanes, incluindo e2e
+bun run verify              # gate CI local completo: check → test --coverage → build --all
 ```
+
+### Taxonomia de lanes
+
+| Lane        | Nome da task       | Workspaces            | Runner              | Cache Turbo |
+| ----------- | ------------------ | --------------------- | ------------------- | ----------- |
+| unit        | `test:unit`        | api, frontend, shared | bun test / vitest   | sim         |
+| integration | `test:integration` | api, frontend         | bun test / vitest   | não         |
+| coverage    | `test:coverage`    | api, frontend, shared | bun test / vitest   | não         |
+| e2e         | —                  | root (browser-smoke)  | Playwright Chromium | —           |
+| scripts     | `//#test:scripts`  | root                  | bun test            | sim         |
 
 ## Browser Smoke
 
@@ -268,3 +279,7 @@ bun run test
 # ou use o atalho do gate completo de CI:
 bun run verify
 ```
+
+`bun run verify` corresponde ao pipeline de CI menos os jobs de smoke (browser e
+binary), que exigem runners de plataforma nem sempre disponíveis localmente.
+Rode-os separadamente com `bun run test --e2e` e `bun scripts/test-build.ts`.

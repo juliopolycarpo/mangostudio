@@ -4,16 +4,66 @@
 
 # MangoStudio
 
+[![CI](https://github.com/juliopolycarpo/mangostudio/actions/workflows/ci.yml/badge.svg)](https://github.com/juliopolycarpo/mangostudio/actions/workflows/ci.yml)
+[![Release](https://github.com/juliopolycarpo/mangostudio/actions/workflows/release.yml/badge.svg)](https://github.com/juliopolycarpo/mangostudio/actions/workflows/release.yml)
+
 Estúdio de geração de imagens e chat alimentado por IA com suporte a modelos Gemini, compatíveis com OpenAI e Anthropic.
 
 > 🇺🇸 [Read in English](../../README.md)
 
-## Pré-requisitos
+## Instalar
+
+Execute o MangoStudio sem clonar o repositório. Cada canal distribui o mesmo
+binário pré-compilado (mais o sidecar `public/` do frontend) e verifica
+downloads contra `SHA256SUMS` quando aplicável.
+
+| Canal                  | Comando                                                                                                                |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| npm / bun              | `npm i -g @mangostudio/cli` / `bun add -g @mangostudio/cli`                                                            |
+| Homebrew (macOS/Linux) | `brew install juliopolycarpo/tap/mangostudio`                                                                          |
+| Instalador shell       | `curl -fsSL https://github.com/juliopolycarpo/mangostudio/releases/latest/download/install.sh \| bash`                 |
+| Scoop (Windows)        | `scoop bucket add juliopolycarpo https://github.com/juliopolycarpo/scoop-bucket` e depois `scoop install mangostudio`  |
+| Cargo                  | `cargo install mangostudio` (ou `cargo binstall mangostudio`)                                                          |
+| Docker                 | `docker run -p 3001:3001 -v mango-data:/data ghcr.io/juliopolycarpo/mangostudio`                                       |
+| Manual                 | Baixe em [GitHub Releases](https://github.com/juliopolycarpo/mangostudio/releases/latest) e verifique com `SHA256SUMS` |
+
+Início rápido com o instalador shell:
+
+```bash
+curl -fsSL https://github.com/juliopolycarpo/mangostudio/releases/latest/download/install.sh | bash
+mangostudio serve # inicia em http://localhost:3001
+```
+
+No Windows, baixe e execute `install.ps1` na
+[release mais recente](https://github.com/juliopolycarpo/mangostudio/releases/latest),
+ou use Scoop (veja a tabela acima). O canal Cargo instala um
+[launcher pequeno](../../packages/cargo-shim/README.md) que baixa o mesmo
+arquivo verificado por checksum na primeira execução.
+
+`mangostudio` é um CLI de binário único que gerencia um servidor local:
+
+```bash
+mangostudio serve [host|port|host:port] # foreground (padrão localhost:3001)
+mangostudio serve lan:3001 -d           # background (logs em ~/.mango/logs/)
+mangostudio status         # mostra a instância em execução
+mangostudio stop           # encerramento gracioso
+mangostudio doctor         # diagnóstico de ambiente
+```
+
+Execute `mangostudio` sem argumentos para a lista completa de comandos. Veja
+[`docs/reference/cli.md`](../reference/cli.md) para detalhes.
+
+Na primeira execução, `mangostudio serve` pode gerar um `BETTER_AUTH_SECRET` forte
+e armazená-lo em `~/.mango/.env` ou `~/.mango/config.toml`. Configure chaves de
+provedor como `GEMINI_API_KEY` quando estiver pronto para usar modelos hospedados.
+Para deploy em container, veja [`docs/operations/deployment.md`](../operations/deployment.md#docker).
+
+## Pré-requisitos (desenvolvimento)
 
 - [Bun](https://bun.sh/) (v1.3.14+)
 - Uma ou mais chaves de API para os provedores suportados (Gemini, compatíveis com OpenAI, Anthropic)
 
-## Instalação
+## Desenvolver a partir do código-fonte
 
 1. Clone o repositório:
 
@@ -135,8 +185,9 @@ mangostudio/
 | `bun run test:e2e:setup`  | Instala Playwright Chromium para browser smoke                         |
 | `bun run test --e2e`      | Executa a suíte end-to-end com Playwright (opt-in)                     |
 | `bun run test --coverage` | Coleta cobertura de testes nos workspaces aplicáveis                   |
+| `bun run test:scripts`    | Executa testes de automação em `scripts/`                              |
 | `bun run fix`             | Aplica correções do Biome e dprint                                     |
-| `bun run verify`          | Gate CI completo: check, test, build (para no erro)                    |
+| `bun run verify`          | Gate CI local completo: check, test --coverage, build --all            |
 | `bun run clean`           | Remove dist, relatórios locais de teste, coverage e artefatos de build |
 
 ## Ferramentas de Desenvolvimento
@@ -307,6 +358,8 @@ O tipo `Messages` é inferido diretamente do dicionário `pt-BR.ts` (`as const`)
 - [`./guides/contributor-quickstart.md`](./guides/contributor-quickstart.md) — onboarding rápido para contribuidores
 - [`./architecture/continuation.md`](./architecture/continuation.md) — arquitetura de continuação
 - [`./providers/development.md`](./providers/development.md) — guia de integração de provedores
+- [`./reference/cli.md`](./reference/cli.md) — referência da CLI e canais de instalação
+- [`./reference/releasing.md`](./reference/releasing.md) — runbook de release e canais de distribuição
 - [`./reference/testing.md`](./reference/testing.md) — estratégia e guia de testes
 - [`./reference/agent-playbooks.md`](./reference/agent-playbooks.md) — mapas de arquivos por feature
 - [`./CONTRIBUTING.md`](./CONTRIBUTING.md) — diretrizes de contribuição em Português
