@@ -127,32 +127,15 @@ async function listManagedComments(github, context, pullNumber) {
     .filter(({ marker }) => marker !== null);
 }
 
-function selectManagedCommentsToKeep(managedComments, desiredMarkers) {
-  const keepByMarker = new Map();
-  const stale = [];
-
-  for (const { comment, marker } of managedComments) {
-    if (!desiredMarkers.has(marker)) {
-      stale.push(comment);
-      continue;
-    }
-
-    const previous = keepByMarker.get(marker);
-    if (previous) stale.push(previous);
-    keepByMarker.set(marker, comment);
-  }
-
-  return { keepByMarker, stale };
-}
-
 /**
- * Update the managed comment set in place, creating only missing comments.
+ * Re-post the managed comment set at the bottom of the PR timeline.
  *
  * Refuses to publish when the PR head moved past `expectedHeadSha`, so an
- * older run can never overwrite a newer run's comments. Existing comments are
- * edited instead of recreated to avoid timeline churn on every push. Duplicate
- * managed comments left by older runs are cleaned up after the current bodies
- * are safely updated.
+ * older run can never overwrite a newer run's comments. Comments are always
+ * recreated instead of edited in place: GitHub keeps edited comments at their
+ * original timeline position, which buries them above newly pushed commits.
+ * The previous managed comments are deleted only after the new set is fully
+ * created, so a mid-publish failure never leaves the PR without comments.
  *
  * // Usage: await publishManagedComments({ github, context, core }, { pullNumber, expectedHeadSha, comments: [{ marker, body }] })
  */
@@ -169,32 +152,17 @@ export async function publishManagedComments(
     return false;
   }
 
-  const desiredMarkers = new Set(ordered.map(({ marker }) => marker));
-  const { keepByMarker, stale } = selectManagedCommentsToKeep(
-    await listManagedComments(github, context, pullNumber),
-    desiredMarkers
-  );
+  const previous = await listManagedComments(github, context, pullNumber);
 
-  for (const { marker, body } of ordered) {
-    const existing = keepByMarker.get(marker);
-    if (!existing) {
-      await github.rest.issues.createComment({
-        ...context.repo,
-        issue_number: pullNumber,
-        body,
-      });
-      continue;
-    }
-    if (existing.body !== body) {
-      await github.rest.issues.updateComment({
-        ...context.repo,
-        comment_id: existing.id,
-        body,
-      });
-    }
+  for (const { body } of ordered) {
+    await github.rest.issues.createComment({
+      ...context.repo,
+      issue_number: pullNumber,
+      body,
+    });
   }
 
-  for (const comment of stale) {
+  for (const { comment } of previous) {
     await github.rest.issues.deleteComment({ ...context.repo, comment_id: comment.id });
   }
   return true;
