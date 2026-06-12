@@ -1,0 +1,48 @@
+name: Cargo Shim
+
+# Lints, tests, and builds the crates.io launcher crate. This is the only Rust
+# in the repository, so the lane is path-filtered: Bun-only changes never wait
+# on a Rust toolchain.
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "packages/cargo-shim/**"
+      - ".github/workflows/cargo-shim.yml"
+  push:
+    branches: [main]
+    paths:
+      - "packages/cargo-shim/**"
+      - ".github/workflows/cargo-shim.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cargo-shim-${{ github.head_ref || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  cargo-shim:
+    name: fmt, clippy, test, build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: packages/cargo-shim
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - run: cargo fmt --check
+
+      - run: cargo clippy --all-targets --locked -- -D warnings
+
+      - run: cargo test --locked
+
+      - run: cargo build --locked

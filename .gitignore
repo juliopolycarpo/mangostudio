@@ -74,6 +74,9 @@ config.toml
 .local/
 .scratch/
 
+# ─── Rust build output (cargo-shim launcher crate) ─── #
+packages/cargo-shim/target/
+
 # ─── Build and lint caches (generated, never committed) ─── #
 **/.eslintcache
 **/.tsbuildinfo

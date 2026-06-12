@@ -31,7 +31,7 @@ URLs locais padrão:
 
 ## 3. Saber Por Onde Começar
 
-- Leia [`../../AGENTS.md`](../../AGENTS.md) para regras e roteamento do repositório.
+- Leia [`../../../AGENTS.md`](../../../AGENTS.md) para regras e roteamento do repositório.
 - Use [`../reference/agent-playbooks.md`](../reference/agent-playbooks.md) quando precisar de um mapa de arquivos por feature.
 - Use [`../reference/testing.md`](../reference/testing.md) antes de adicionar ou alterar comportamento.
 - Use [`../architecture/overview.md`](../architecture/overview.md) para o layout dos workspaces e módulos.
@@ -78,6 +78,6 @@ bun run fix --staged      # correção automática apenas nos workspaces afetado
 
 ## 7. Documentos Relacionados
 
-- [`../../.github/CONTRIBUTING.md`](../../.github/CONTRIBUTING.md) para política de contribuição e regras de commit
+- [`../../../.github/CONTRIBUTING.md`](../../../.github/CONTRIBUTING.md) para política de contribuição e regras de commit
 - [`../reference/api.md`](../reference/api.md) para o mapa de endpoints
 - [`../operations/deployment.md`](../operations/deployment.md) para builds standalone

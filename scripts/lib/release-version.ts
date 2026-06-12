@@ -24,8 +24,19 @@ export const LOCKSTEP_PACKAGES: readonly string[] = [
   'packages/cli/package.json',
 ];
 
+/** The crates.io launcher manifest; its [package] version must match root. */
+export const CARGO_SHIM_MANIFEST = 'packages/cargo-shim/Cargo.toml';
+
+/** The launcher's committed lockfile. It records the crate's own version, and
+ * the release job publishes with `--locked`, so a Cargo.toml bump without a
+ * lockfile refresh must fail here instead of inside the release pipeline. */
+export const CARGO_SHIM_LOCKFILE = 'packages/cargo-shim/Cargo.lock';
+
+/** The crate name the lockstep check looks up inside Cargo.lock. */
+const CARGO_SHIM_CRATE = 'mangostudio';
+
 export interface VersionEntry {
-  /** package.json path relative to the repo root. */
+  /** Manifest path (package.json, Cargo.toml, or Cargo.lock) relative to the repo root. */
   readonly path: string;
   readonly version: string;
 }
@@ -97,6 +108,59 @@ export function rootReleaseVersion(rootDir: string = ROOT_DIR): string {
   return version;
 }
 
+function readTextFile(path: string, label: string): string {
+  try {
+    return readFileSync(path, 'utf8');
+  } catch (cause) {
+    throw new Error(`Cannot read ${label} at ${path}`, { cause });
+  }
+}
+
+/** Read the `[package]` version from a Cargo.toml without a TOML dependency.
+ * Dependency tables also carry `version =` keys, so parsing is section-aware.
+ * // Usage: readCargoManifestVersion('/repo/packages/cargo-shim/Cargo.toml') */
+export function readCargoManifestVersion(manifestPath: string): string {
+  const raw = readTextFile(manifestPath, 'Cargo manifest');
+  let inPackageSection = false;
+  for (const line of raw.split('\n')) {
+    const trimmed = line.trim();
+    const section = trimmed.match(/^\[(.+)\]$/);
+    if (section) {
+      inPackageSection = section[1] === 'package';
+      continue;
+    }
+    const version = inPackageSection && trimmed.match(/^version\s*=\s*"([^"]+)"/);
+    if (version) {
+      return version[1];
+    }
+  }
+  throw new Error(`Missing "version" in [package] section of ${manifestPath}`);
+}
+
+/** Read one crate's resolved version from a Cargo.lock `[[package]]` entry.
+ * // Usage: readCargoLockVersion('/repo/packages/cargo-shim/Cargo.lock', 'mangostudio') */
+export function readCargoLockVersion(lockfilePath: string, crateName: string): string {
+  const raw = readTextFile(lockfilePath, 'Cargo lockfile');
+  let inNamedPackage = false;
+  for (const line of raw.split('\n')) {
+    const trimmed = line.trim();
+    if (trimmed === '[[package]]') {
+      inNamedPackage = false;
+      continue;
+    }
+    const name = trimmed.match(/^name\s*=\s*"([^"]+)"/);
+    if (name) {
+      inNamedPackage = name[1] === crateName;
+      continue;
+    }
+    const version = inNamedPackage && trimmed.match(/^version\s*=\s*"([^"]+)"/);
+    if (version) {
+      return version[1];
+    }
+  }
+  throw new Error(`Cargo.lock at ${lockfilePath} does not list ${crateName}`);
+}
+
 /** The version every release artifact should carry: the VERSION env override
  * when set, otherwise the root package.json version. Throws when the chosen
  * value is not valid semver, so builds fail before mislabeling artifacts.
@@ -113,13 +177,24 @@ export function resolveReleaseVersion(options: ResolveReleaseVersionOptions = {}
   return normalized;
 }
 
-/** Read every lockstep package.json and report versions that diverge from root.
+/** Read every lockstep manifest (package.json files plus the cargo-shim
+ * Cargo.toml/Cargo.lock) and report versions that diverge from root.
  * // Usage: collectVersionConsistency().mismatches */
 export function collectVersionConsistency(rootDir: string = ROOT_DIR): VersionConsistency {
-  const entries = LOCKSTEP_PACKAGES.map((relativePath) => ({
-    path: relativePath,
-    version: readPackageVersion(join(rootDir, relativePath)),
-  }));
+  const entries: VersionEntry[] = [
+    ...LOCKSTEP_PACKAGES.map((relativePath) => ({
+      path: relativePath,
+      version: readPackageVersion(join(rootDir, relativePath)),
+    })),
+    {
+      path: CARGO_SHIM_MANIFEST,
+      version: readCargoManifestVersion(join(rootDir, CARGO_SHIM_MANIFEST)),
+    },
+    {
+      path: CARGO_SHIM_LOCKFILE,
+      version: readCargoLockVersion(join(rootDir, CARGO_SHIM_LOCKFILE), CARGO_SHIM_CRATE),
+    },
+  ];
 
   const expected = entries[0].version;
   const mismatches = entries.filter((entry) => entry.version !== expected);

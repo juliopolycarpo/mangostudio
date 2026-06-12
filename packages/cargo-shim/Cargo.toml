@@ -1,0 +1,34 @@
+[package]
+name = "mangostudio"
+# Lockstep with the root package.json — `bun run check:versions` enforces it.
+version = "0.1.0"
+categories = ["command-line-utilities"]
+edition = "2021"
+homepage = "https://github.com/juliopolycarpo/mangostudio#readme"
+keywords = ["ai", "image-generation", "chat", "cli"]
+license = "MIT"
+readme = "README.md"
+repository = "https://github.com/juliopolycarpo/mangostudio"
+description = "AI-powered image generation and chat studio (launcher; downloads the prebuilt binary on first run)"
+
+# Keep dependencies minimal: blocking HTTP with rustls (std has no TLS), no
+# async runtime. Archive handling is cfg-gated to match the release asset
+# formats: tar.gz on Unix, zip on Windows.
+[dependencies]
+sha2 = "0.11"
+ureq = { version = "3", default-features = false, features = ["rustls"] }
+
+[target.'cfg(unix)'.dependencies]
+flate2 = "1"
+tar = "0.4"
+
+[target.'cfg(windows)'.dependencies]
+zip = { version = "8", default-features = false, features = ["deflate"] }
+
+[package.metadata.binstall]
+# The release archives bundle the Bun-compiled app *plus* its `public/`
+# frontend sidecar, but binstall installs only binaries out of an archive — a
+# passthrough install would silently drop the UI. Disabling the prebuilt
+# strategies makes `cargo binstall mangostudio` compile this launcher instead
+# (same as `cargo install`), which downloads the complete archive on first run.
+disabled-strategies = ["crate-meta-data", "quick-install"]
