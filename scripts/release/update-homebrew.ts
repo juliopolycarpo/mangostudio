@@ -2,13 +2,12 @@
 // Render the Homebrew formula for one release: fill the formula template with
 // the version and the per-platform archive checksums from SHA256SUMS.
 
-import { mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
-import { filterBinaryTargets, releaseArchiveFileName } from '../lib/release-targets';
-import { isValidSemver, normalizeVersion, resolveReleaseVersion } from '../lib/release-version';
+import { normalizeVersion, resolveReleaseVersion } from '../lib/release-version';
 import { assertNoUnexpectedArguments, error, parseArgs, success } from '../lib/runner';
-import { findChecksum } from './verify-checksum';
+import { renderDistManifest, resolveManifestPath, type ShaPlaceholderMap } from './dist-manifest';
 
 export const HOMEBREW_FORMULA_TEMPLATE_PATH = join(
   import.meta.dir,
@@ -17,12 +16,12 @@ export const HOMEBREW_FORMULA_TEMPLATE_PATH = join(
 );
 
 /** Template placeholders mapped to the release platform whose archive checksum fills them. */
-export const HOMEBREW_SHA_PLACEHOLDERS = {
+export const HOMEBREW_SHA_PLACEHOLDERS: ShaPlaceholderMap = {
   SHA_DARWIN_ARM64: 'darwin-arm64',
   SHA_DARWIN_X64: 'darwin-x64',
   SHA_LINUX_ARM64: 'linux-arm64',
   SHA_LINUX_X64: 'linux-x64',
-} as const;
+};
 
 export interface RenderHomebrewFormulaInput {
   readonly version: string;
@@ -38,28 +37,7 @@ export interface RenderHomebrewFormulaInput {
  * // Usage: renderHomebrewFormula({ version: '1.2.3', manifest, template })
  */
 export function renderHomebrewFormula(input: RenderHomebrewFormulaInput): string {
-  const version = normalizeVersion(input.version);
-  if (!isValidSemver(version)) {
-    throw new Error(`Invalid release version "${input.version}". Expected semver like 1.2.3.`);
-  }
-
-  let rendered = input.template.replaceAll('{{VERSION}}', version);
-  for (const [placeholder, platformId] of Object.entries(HOMEBREW_SHA_PLACEHOLDERS)) {
-    const [target] = filterBinaryTargets(platformId);
-    if (!target) throw new Error(`Unknown release platform: ${platformId}`);
-    const assetName = releaseArchiveFileName(version, target);
-    rendered = rendered.replaceAll(`{{${placeholder}}}`, findChecksum(input.manifest, assetName));
-  }
-
-  const leftover = rendered.match(/\{\{[^}]*\}\}/);
-  if (leftover) {
-    throw new Error(`Formula template placeholder ${leftover[0]} was not filled`);
-  }
-  return rendered;
-}
-
-function resolveManifestPath(sumsPath: string): string {
-  return statSync(sumsPath).isDirectory() ? join(sumsPath, 'SHA256SUMS') : sumsPath;
+  return renderDistManifest({ ...input, shaPlaceholders: HOMEBREW_SHA_PLACEHOLDERS });
 }
 
 const printHelp = (): never => {

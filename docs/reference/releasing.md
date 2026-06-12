@@ -1,9 +1,10 @@
 # Releasing
 
 MangoStudio ships as standalone binaries (GitHub Releases), as an npm CLI
-(`@mangostudio/cli`), via a Homebrew tap, and as a crates.io launcher crate
-(`cargo install mangostudio`). The changelog is generated from Conventional
-Commits with [git-cliff](https://git-cliff.org); nothing here is hand-edited.
+(`@mangostudio/cli`), via a Homebrew tap, via a Scoop bucket (Windows), and as a
+crates.io launcher crate (`cargo install mangostudio`). The changelog is generated
+from Conventional Commits with [git-cliff](https://git-cliff.org); nothing here is
+hand-edited.
 
 ## Version source
 
@@ -62,7 +63,7 @@ step flakes: using **Re-run failed jobs** is safe because published npm versions
 are skipped, release assets are uploaded with clobber semantics, and the
 changelog push rebases before retrying.
 
-It runs seven jobs:
+It runs eight jobs:
 
 | Job                | What it does                                                                                                                                                                                                                     |
 | ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -70,6 +71,7 @@ It runs seven jobs:
 | `github-release`   | Creates the GitHub Release, or updates an existing one by refreshing notes and uploading assets with `--clobber`.                                                                                                                |
 | `npm-publish`      | Publishes the platform packages, then the `@mangostudio/cli` wrapper; already-published versions are skipped, transient failures are retried, and provenance falls back to a warning-only publish if npm rejects it.             |
 | `homebrew`         | Renders `Formula/mangostudio.rb` from `SHA256SUMS` (`update-homebrew.ts`) and pushes it to `juliopolycarpo/homebrew-tap` (`push-dist-repo.ts`). No other job depends on it, so a tap failure never blocks npm or the Release.    |
+| `scoop`            | Renders `bucket/mangostudio.json` from `SHA256SUMS` (`update-scoop.ts`) and pushes it to `juliopolycarpo/scoop-bucket` (`push-dist-repo.ts`). No other job depends on it, so a bucket failure never blocks npm or the Release.   |
 | `cargo-publish`    | Publishes the `mangostudio` launcher crate (`packages/cargo-shim`) to crates.io. Idempotent: already-published versions are skipped, publishes are retried, and an upload that lands despite an error is detected. Non-blocking. |
 | `verify-release`   | Installs `@mangostudio/cli@<version>` from npm on Ubuntu, macOS, and Windows; downloads the matching release tarball, verifies `SHA256SUMS`, and runs `mangostudio --version`. Windows arm64 is published but not verified.      |
 | `update-changelog` | Regenerates `CHANGELOG.md` and commits it back to `main`, retrying the push after `git pull --rebase origin main` if another commit lands first.                                                                                 |
@@ -123,8 +125,8 @@ The formula installs the flat archive (`mangostudio` + `public/` + `README.md`)
 into `libexec` and symlinks the binary, because the binary resolves its
 `public/` frontend sidecar beside its real (symlink-resolved) executable path.
 
-`push-dist-repo.ts` is distribution-agnostic — a future Scoop bucket reuses it
-with a different `--repo` and `--file` mapping:
+`push-dist-repo.ts` is distribution-agnostic — the [Scoop bucket](#scoop-bucket)
+reuses it with a different `--repo` and `--file` mapping:
 
 ```bash
 bun ./scripts/release/push-dist-repo.ts \
@@ -134,13 +136,55 @@ bun ./scripts/release/push-dist-repo.ts \
   --file tap/Formula/mangostudio.rb:Formula/mangostudio.rb
 ```
 
+The renderer is shared too: `scripts/release/dist-manifest.ts` fills `{{VERSION}}`
+and the per-platform `{{SHA_*}}` placeholders from `SHA256SUMS`, and the two thin
+entrypoints (`update-homebrew.ts`, `update-scoop.ts`) bind it to their template and
+placeholder map.
+
 One-time setup (already done; documented for future projects):
 
 1. Create the shared tap repo: `gh repo create juliopolycarpo/homebrew-tap --public`,
    seeded with a `README.md` and a `Formula/` directory.
-2. Create a fine-grained PAT with **contents read/write on the tap repo** (extend
-   it to the Scoop bucket when that lands) and save it as the **`DIST_REPOS_TOKEN`**
-   repo secret.
+2. Create a fine-grained PAT with **contents read/write on the tap repo** (and the
+   Scoop bucket below) and save it as the **`DIST_REPOS_TOKEN`** repo secret.
+
+## Scoop bucket
+
+`scoop install mangostudio` works on Windows via the **shared** bucket repo
+[`juliopolycarpo/scoop-bucket`](https://github.com/juliopolycarpo/scoop-bucket).
+Users add the bucket once under the `juliopolycarpo` alias, then install any app
+published there:
+
+```powershell
+scoop bucket add juliopolycarpo https://github.com/juliopolycarpo/scoop-bucket
+scoop install mangostudio
+```
+
+Like the tap, it is shared so future projects reuse the same route: each project
+owns one `bucket/<name>.json` and a release job that rewrites only that file.
+
+The `scoop` job updates the manifest on every tag push, mirroring `homebrew`:
+
+1. `scripts/release/update-scoop.ts` parses `SHA256SUMS`, validates that both
+   `mangostudio-<version>-windows-{x64,arm64}.zip` archives are present (failing
+   loud on naming-contract drift), and renders
+   `scripts/release/templates/mangostudio.json.tmpl`. The manifest declares
+   `"bin": "mangostudio.exe"`; Scoop's shim execs the real exe path, so the
+   binary resolves its `public/` frontend sidecar beside it.
+2. `scripts/release/push-dist-repo.ts` clones the bucket, copies the manifest only
+   if its content changed (re-runs are no-ops), commits as `github-actions[bot]`,
+   and pushes with rebase-retry — the same machinery the tap uses.
+
+The manifest also carries Scoop `checkver`/`autoupdate` metadata, so the
+community excavator bots can refresh it from the GitHub release even if the push
+job ever lags.
+
+One-time setup (already done; documented for future projects):
+
+1. Create the shared bucket repo: `gh repo create juliopolycarpo/scoop-bucket --public`,
+   seeded with a `README.md` and a `bucket/` directory.
+2. Extend the `DIST_REPOS_TOKEN` PAT with **contents read/write on the bucket
+   repo** (the same PAT already covers the Homebrew tap).
 
 ## crates.io launcher
 
@@ -170,7 +214,8 @@ Design notes:
 
 - **`NPM_TOKEN`** repo secret with publish rights to the `@mangostudio` scope.
 - **`DIST_REPOS_TOKEN`** repo secret: fine-grained PAT with contents read/write
-  on `juliopolycarpo/homebrew-tap` (see [Homebrew tap](#homebrew-tap)).
+  on `juliopolycarpo/homebrew-tap` (see [Homebrew tap](#homebrew-tap)) and
+  `juliopolycarpo/scoop-bucket` (see [Scoop bucket](#scoop-bucket)).
 - **`CARGO_REGISTRY_TOKEN`** repo secret: crates.io API token with
   `publish-new` + `publish-update` scope for the `mangostudio` crate (see
   [crates.io launcher](#cratesio-launcher)).

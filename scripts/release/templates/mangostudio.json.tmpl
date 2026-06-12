@@ -1,0 +1,34 @@
+{
+  "version": "{{VERSION}}",
+  "description": "AI-powered image generation and chat studio",
+  "homepage": "https://github.com/juliopolycarpo/mangostudio",
+  "license": "MIT",
+  "architecture": {
+    "64bit": {
+      "url": "https://github.com/juliopolycarpo/mangostudio/releases/download/v{{VERSION}}/mangostudio-{{VERSION}}-windows-x64.zip",
+      "hash": "{{SHA_WINDOWS_X64}}"
+    },
+    "arm64": {
+      "url": "https://github.com/juliopolycarpo/mangostudio/releases/download/v{{VERSION}}/mangostudio-{{VERSION}}-windows-arm64.zip",
+      "hash": "{{SHA_WINDOWS_ARM64}}"
+    }
+  },
+  "bin": "mangostudio.exe",
+  "checkver": {
+    "github": "https://github.com/juliopolycarpo/mangostudio"
+  },
+  "autoupdate": {
+    "architecture": {
+      "64bit": {
+        "url": "https://github.com/juliopolycarpo/mangostudio/releases/download/v$version/mangostudio-$version-windows-x64.zip"
+      },
+      "arm64": {
+        "url": "https://github.com/juliopolycarpo/mangostudio/releases/download/v$version/mangostudio-$version-windows-arm64.zip"
+      }
+    },
+    "hash": {
+      "url": "https://github.com/juliopolycarpo/mangostudio/releases/download/v$version/SHA256SUMS",
+      "regex": "$sha256\\s+$basename"
+    }
+  }
+}

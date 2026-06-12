@@ -33,8 +33,15 @@ the same prebuilt, checksum-verified binary on first run):
 cargo install mangostudio # or: cargo binstall mangostudio
 ```
 
-or `bun add -g @mangostudio/cli`. Windows users can download `install.ps1` from
-the [latest release](https://github.com/juliopolycarpo/mangostudio/releases/latest).
+or `bun add -g @mangostudio/cli`. On Windows, use [Scoop](https://scoop.sh):
+
+```powershell
+scoop bucket add juliopolycarpo https://github.com/juliopolycarpo/scoop-bucket
+scoop install mangostudio
+```
+
+or download `install.ps1` from the
+[latest release](https://github.com/juliopolycarpo/mangostudio/releases/latest).
 
 `mangostudio` is a single-binary CLI that manages one local server:
 
