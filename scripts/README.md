@@ -18,6 +18,7 @@ scripts/
 ├── clean.ts          Remove build artifacts (bun run clean)
 ├── changelog.ts      git-cliff wrapper: init/preview/release (bun run changelog)
 ├── lib/              Shared toolkit (see below)
+├── install/          Shell installers shipped as release assets (install.sh, install.ps1)
 ├── qa-gate/          PR metrics collector, comment renderers + comment publisher
 ├── release/          Release-time packaging + publication (see below)
 └── tests/            Cross-cutting unit tests (co-located tests live beside sources)

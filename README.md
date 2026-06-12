@@ -4,53 +4,41 @@
 
 # MangoStudio
 
+[![CI](https://github.com/juliopolycarpo/mangostudio/actions/workflows/ci.yml/badge.svg)](https://github.com/juliopolycarpo/mangostudio/actions/workflows/ci.yml)
+[![Release](https://github.com/juliopolycarpo/mangostudio/actions/workflows/release.yml/badge.svg)](https://github.com/juliopolycarpo/mangostudio/actions/workflows/release.yml)
+
 AI-powered image generation and chat studio supporting Gemini, OpenAI-compatible, and Anthropic models.
 
 > 🇧🇷 [Leia em Português](docs/pt-br/README.md)
 
 ## Install
 
-| Method          | Command                                                                                                                  |
-| --------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| Shell installer | `curl -fsSL https://github.com/juliopolycarpo/mangostudio/releases/latest/download/install.sh \| bash`                   |
-| Docker          | `docker run -p 3001:3001 -v mango-data:/data -e BETTER_AUTH_SECRET=<32+ chars> ghcr.io/juliopolycarpo/mangostudio:0.1.0` |
-| Homebrew        | `brew install juliopolycarpo/tap/mangostudio`                                                                            |
-| Cargo           | `cargo install mangostudio`                                                                                              |
-| Bun             | `bun add -g @mangostudio/cli`                                                                                            |
-| Scoop           | `scoop install mangostudio` after `scoop bucket add juliopolycarpo https://github.com/juliopolycarpo/scoop-bucket`       |
+Run MangoStudio without cloning the repository. Every channel ships the same
+prebuilt binary (plus its `public/` frontend sidecar) and verifies downloads
+against `SHA256SUMS` where applicable.
 
-Run MangoStudio without cloning — install the CLI for your platform:
+| Channel                | Command                                                                                                                  |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| npm / bun              | `npm i -g @mangostudio/cli` / `bun add -g @mangostudio/cli`                                                              |
+| Homebrew (macOS/Linux) | `brew install juliopolycarpo/tap/mangostudio`                                                                            |
+| Shell installer        | `curl -fsSL https://github.com/juliopolycarpo/mangostudio/releases/latest/download/install.sh \| bash`                   |
+| Scoop (Windows)        | `scoop bucket add juliopolycarpo https://github.com/juliopolycarpo/scoop-bucket` then `scoop install mangostudio`        |
+| Cargo                  | `cargo install mangostudio` (or `cargo binstall mangostudio`)                                                            |
+| Docker                 | `docker run -p 3001:3001 -v mango-data:/data ghcr.io/juliopolycarpo/mangostudio`                                         |
+| Manual                 | Download from [GitHub Releases](https://github.com/juliopolycarpo/mangostudio/releases/latest), verify with `SHA256SUMS` |
+
+Quick start with the shell installer:
 
 ```bash
 curl -fsSL https://github.com/juliopolycarpo/mangostudio/releases/latest/download/install.sh | bash
 mangostudio serve # start on http://localhost:3001
 ```
 
-This downloads the prebuilt binary for your OS/arch, verifies `SHA256SUMS`, and
-puts `mangostudio` on your `PATH`. Prefer a package manager? Use Homebrew
-(macOS & Linux):
-
-```bash
-brew tap juliopolycarpo/tap
-brew install mangostudio
-```
-
-or Cargo (builds a [small launcher](packages/cargo-shim/README.md) that downloads
-the same prebuilt, checksum-verified binary on first run):
-
-```bash
-cargo install mangostudio # or: cargo binstall mangostudio
-```
-
-or `bun add -g @mangostudio/cli`. On Windows, use [Scoop](https://scoop.sh):
-
-```powershell
-scoop bucket add juliopolycarpo https://github.com/juliopolycarpo/scoop-bucket
-scoop install mangostudio
-```
-
-or download `install.ps1` from the
-[latest release](https://github.com/juliopolycarpo/mangostudio/releases/latest).
+On Windows, download and run `install.ps1` from the
+[latest release](https://github.com/juliopolycarpo/mangostudio/releases/latest),
+or use Scoop (see table above). The Cargo channel installs a
+[small launcher](packages/cargo-shim/README.md) that downloads the same
+checksum-verified archive on first run.
 
 `mangostudio` is a single-binary CLI that manages one local server:
 
@@ -197,6 +185,7 @@ mangostudio/
 | `bun run test:e2e:setup`  | Install Playwright Chromium for browser smoke tests            |
 | `bun run test --e2e`      | Run the Playwright end-to-end suite (opt-in)                   |
 | `bun run test --coverage` | Run coverage collection across applicable workspaces           |
+| `bun run test:scripts`    | Run cross-cutting automation tests under `scripts/`            |
 | `bun run fix`             | Apply Biome and dprint fixes                                   |
 | `bun run verify`          | Full local CI gate: check, test --coverage, build --all        |
 | `bun run clean`           | Remove dist, local test reports, coverage, and build artifacts |
@@ -368,6 +357,8 @@ The `Messages` type is inferred directly from the `pt-BR.ts` dictionary (`as con
 - [`docs/guides/contributor-quickstart.md`](docs/guides/contributor-quickstart.md) — fastest contributor onboarding path
 - [`docs/architecture/continuation.md`](docs/architecture/continuation.md) — continuation architecture deep-dive
 - [`docs/providers/development.md`](docs/providers/development.md) — provider integration guide
+- [`docs/reference/cli.md`](docs/reference/cli.md) — CLI commands and install channels
+- [`docs/reference/releasing.md`](docs/reference/releasing.md) — release runbook and distribution channels
 - [`docs/reference/testing.md`](docs/reference/testing.md) — testing strategy and harness rules
 - [`docs/reference/agent-playbooks.md`](docs/reference/agent-playbooks.md) — feature-by-feature file maps
 - [`.github/CONTRIBUTING.md`](.github/CONTRIBUTING.md) — contribution guidelines

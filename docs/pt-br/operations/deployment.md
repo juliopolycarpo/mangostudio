@@ -2,6 +2,44 @@
 
 O MangoStudio pode ser implantado como binários standalone específicos por plataforma com assets do frontend embutidos.
 
+## Docker
+
+Imagens de release são publicadas no GitHub Container Registry. A imagem padrão
+usa Debian Bookworm; imagens Alpine usam o sufixo `-alpine`:
+
+```bash
+docker run -p 3001:3001 \
+  -v mango-data:/data \
+  -e BETTER_AUTH_SECRET="$(openssl rand -base64 32)" \
+  -e GEMINI_API_KEY="sua-chave" \
+  ghcr.io/juliopolycarpo/mangostudio:0.1.0
+```
+
+A imagem define `HOME=/data`, então os arquivos de runtime padrão ficam no volume
+montado (`/data/.mango/…`). Após o primeiro push no GHCR, pode ser necessário
+alterar a visibilidade do pacote para **public** nas configurações do GitHub.
+
+## Deploy manual de binário
+
+Para instalação bare-metal sem gerenciador de pacotes, baixe o arquivo de
+plataforma e `SHA256SUMS` do
+[GitHub Releases](https://github.com/juliopolycarpo/mangostudio/releases/latest)
+e verifique antes de extrair:
+
+```bash
+VERSION=0.1.0
+PLATFORM=linux-x64
+curl -LO "https://github.com/juliopolycarpo/mangostudio/releases/download/v${VERSION}/SHA256SUMS"
+curl -LO "https://github.com/juliopolycarpo/mangostudio/releases/download/v${VERSION}/mangostudio-${VERSION}-${PLATFORM}.tar.gz"
+
+grep "mangostudio-${VERSION}-${PLATFORM}.tar.gz" SHA256SUMS | sha256sum -c -
+tar -xzf "mangostudio-${VERSION}-${PLATFORM}.tar.gz" -C /opt/mangostudio
+```
+
+Arquivos Windows usam `.zip` (`windows-x64`, `windows-arm64`). Nomes e layout
+estão documentados em
+[`docs/reference/releasing.md`](../../reference/releasing.md#release-asset-naming).
+
 ## Build De Produção
 
 ```bash

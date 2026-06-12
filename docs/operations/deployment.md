@@ -62,6 +62,34 @@ volumes:
 The first GHCR package may need its visibility changed to public in the GitHub
 package settings after the first release push.
 
+## Manual binary deploy
+
+For bare-metal installs without a package manager, download the platform archive
+and `SHA256SUMS` from [GitHub Releases](https://github.com/juliopolycarpo/mangostudio/releases/latest),
+then verify before extracting:
+
+```bash
+VERSION=0.1.0
+PLATFORM=linux-x64
+curl -LO "https://github.com/juliopolycarpo/mangostudio/releases/download/v${VERSION}/SHA256SUMS"
+curl -LO "https://github.com/juliopolycarpo/mangostudio/releases/download/v${VERSION}/mangostudio-${VERSION}-${PLATFORM}.tar.gz"
+
+# Linux — verify checksum
+grep "mangostudio-${VERSION}-${PLATFORM}.tar.gz" SHA256SUMS | sha256sum -c -
+
+# macOS — verify checksum
+grep "mangostudio-${VERSION}-darwin-arm64.tar.gz" SHA256SUMS | shasum -a 256 -c -
+
+# Or use the project helper (from a clone)
+bun ./scripts/release/verify-checksum.ts SHA256SUMS "mangostudio-${VERSION}-${PLATFORM}.tar.gz"
+
+tar -xzf "mangostudio-${VERSION}-${PLATFORM}.tar.gz" -C /opt/mangostudio
+```
+
+Windows archives use `.zip` instead of `.tar.gz` (`windows-x64`, `windows-arm64`).
+Asset names and archive layout are documented in
+[`docs/reference/releasing.md`](../reference/releasing.md#release-asset-naming).
+
 ## Production Build
 
 ```bash

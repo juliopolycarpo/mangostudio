@@ -54,6 +54,7 @@ Arquivos formatados são re-adicionados ao stage automaticamente. A verificaçã
 ```bash
 bun run check
 bun run test
+bun run verify   # gate CI local: check → test --coverage → build --all
 bun run build
 ```
 
@@ -74,7 +75,7 @@ bun run fix --staged      # correção automática apenas nos workspaces afetado
 2. Expanda uma camada por vez em vez de ler o repositório inteiro.
 3. Mantenha as alterações focadas em uma preocupação.
 4. Rode `bun run check` após cada conjunto de mudanças.
-5. Antes do handoff ou PR, rode `bun run check && bun run test`.
+5. Antes do handoff ou PR, rode `bun run verify` (ou `bun run check && bun run test` para uma passagem mais leve).
 
 ## 7. Documentos Relacionados
 
