@@ -2,16 +2,18 @@ name: Release
 
 # Cut a release: cross-compile standalone binaries for every platform, assemble
 # the npm distribution, publish a GitHub Release with the binaries + git-cliff
-# notes, publish the npm packages, update the Homebrew tap formula, publish the
-# crates.io launcher crate, and update CHANGELOG.md on main.
+# notes, publish the npm packages, update the Homebrew tap formula and the Scoop
+# bucket manifest, publish the crates.io launcher crate, and update CHANGELOG.md
+# on main.
 #
 # Trigger by pushing a semver tag (git tag -s v0.1.0 && git push origin v0.1.0)
 # or via workflow_dispatch with an explicit version.
 #
 # Prerequisites: an NPM_TOKEN repo secret with publish rights to @mangostudio/*,
 # a DIST_REPOS_TOKEN fine-grained PAT with contents read/write on
-# juliopolycarpo/homebrew-tap, and a CARGO_REGISTRY_TOKEN crates.io API token
-# with publish-new + publish-update scope for the mangostudio crate.
+# juliopolycarpo/homebrew-tap and juliopolycarpo/scoop-bucket, and a
+# CARGO_REGISTRY_TOKEN crates.io API token with publish-new + publish-update
+# scope for the mangostudio crate.
 
 on:
   push:
@@ -209,6 +211,41 @@ jobs:
             --token-env DIST_REPOS_TOKEN \
             --message "mangostudio ${VERSION}" \
             --file tap/Formula/mangostudio.rb:Formula/mangostudio.rb
+
+  scoop:
+    # Renders bucket/mangostudio.json from the released SHA256SUMS and pushes it
+    # to the shared Scoop bucket. Nothing depends on this job, so a bucket
+    # failure never blocks the GitHub Release or npm publication.
+    name: Update Scoop bucket
+    needs: [build, github-release]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: ./.github/actions/setup-mango
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: release-assets
+          path: release-assets
+
+      - name: Render manifest and push to juliopolycarpo/scoop-bucket
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+          DIST_REPOS_TOKEN: ${{ secrets.DIST_REPOS_TOKEN }}
+        run: |
+          bun ./scripts/release/update-scoop.ts \
+            --version "$VERSION" \
+            --sums release-assets/SHA256SUMS \
+            --out bucket/mangostudio.json
+          bun ./scripts/release/push-dist-repo.ts \
+            --repo juliopolycarpo/scoop-bucket \
+            --token-env DIST_REPOS_TOKEN \
+            --message "mangostudio ${VERSION}" \
+            --file bucket/mangostudio.json:bucket/mangostudio.json
 
   cargo-publish:
     # Publishes the thin launcher crate (packages/cargo-shim) so `cargo
