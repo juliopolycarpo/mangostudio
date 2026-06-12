@@ -1,10 +1,10 @@
 # Releasing
 
-MangoStudio ships as standalone binaries (GitHub Releases), as an npm CLI
-(`@mangostudio/cli`), via a Homebrew tap, via a Scoop bucket (Windows), and as a
-crates.io launcher crate (`cargo install mangostudio`). The changelog is generated
-from Conventional Commits with [git-cliff](https://git-cliff.org); nothing here is
-hand-edited.
+MangoStudio ships as standalone binaries (GitHub Releases), as a Docker image on
+GHCR, as an npm CLI (`@mangostudio/cli`), via a Homebrew tap, via a Scoop bucket
+(Windows), and as a crates.io launcher crate (`cargo install mangostudio`). The
+changelog is generated from Conventional Commits with [git-cliff](https://git-cliff.org);
+nothing here is hand-edited.
 
 ## Version source
 
@@ -63,12 +63,13 @@ step flakes: using **Re-run failed jobs** is safe because published npm versions
 are skipped, release assets are uploaded with clobber semantics, and the
 changelog push rebases before retrying.
 
-It runs eight jobs:
+It runs nine jobs:
 
 | Job                | What it does                                                                                                                                                                                                                     |
 | ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `build`            | Verifies versions are in lockstep with the tag, cross-compiles every platform binary (`build.ts`), assembles the npm distribution (`pack-npm.ts`), and uploads binary archives plus `SHA256SUMS`.                                |
 | `github-release`   | Creates the GitHub Release, or updates an existing one by refreshing notes and uploading assets with `--clobber`.                                                                                                                |
+| `docker`           | Stages Linux glibc and musl archives into `docker-ctx/` (`stage-docker-ctx.ts`) and publishes Bookworm and Alpine images for amd64 and arm64. It uses only `GITHUB_TOKEN` with `packages: write`.                                |
 | `npm-publish`      | Publishes the platform packages, then the `@mangostudio/cli` wrapper; already-published versions are skipped, transient failures are retried, and provenance falls back to a warning-only publish if npm rejects it.             |
 | `homebrew`         | Renders `Formula/mangostudio.rb` from `SHA256SUMS` (`update-homebrew.ts`) and pushes it to `juliopolycarpo/homebrew-tap` (`push-dist-repo.ts`). No other job depends on it, so a tap failure never blocks npm or the Release.    |
 | `scoop`            | Renders `bucket/mangostudio.json` from `SHA256SUMS` (`update-scoop.ts`) and pushes it to `juliopolycarpo/scoop-bucket` (`push-dist-repo.ts`). No other job depends on it, so a bucket failure never blocks npm or the Release.   |
@@ -100,6 +101,32 @@ bun ./scripts/release/publish-npm.ts dist-npm --dry-run
 Release archives are accompanied by `SHA256SUMS`; the verification job checks the
 runner-specific archive against that manifest before executing the extracted
 binary's `--version` command.
+
+## Docker image
+
+`ghcr.io/juliopolycarpo/mangostudio:<version>` is the default Debian Bookworm
+image and is built from the Linux glibc release archives rather than compiling
+inside Docker. The release workflow extracts the `linux-x64`, `linux-arm64`,
+`linux-x64-musl`, and `linux-arm64-musl` tarballs into `docker-ctx/`, then Docker
+Buildx publishes two-platform manifests for the Bookworm and Alpine variants.
+The bare version and `latest` tags point to Bookworm; Alpine is published under
+the `-alpine` version suffix:
+
+```bash
+docker pull ghcr.io/juliopolycarpo/mangostudio:0.1.0
+docker run -p 3001:3001 -v mango-data:/data \
+  -e BETTER_AUTH_SECRET="change-me-to-32-plus-chars" \
+  ghcr.io/juliopolycarpo/mangostudio:0.1.0
+
+docker pull ghcr.io/juliopolycarpo/mangostudio:0.1.0-alpine
+```
+
+The image stores runtime state below `/data` by setting `HOME=/data`; mount that
+path for config, SQLite, uploads, generated images, agent files, logs, and run
+state. No extra registry secret is required because the release job grants
+`packages: write` to the workflow `GITHUB_TOKEN`. On first publication, make the
+GHCR package public in the repository package settings if public pulls are
+desired.
 
 ## Homebrew tap
 

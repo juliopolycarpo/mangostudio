@@ -2,9 +2,9 @@ name: Release
 
 # Cut a release: cross-compile standalone binaries for every platform, assemble
 # the npm distribution, publish a GitHub Release with the binaries + git-cliff
-# notes, publish the npm packages, update the Homebrew tap formula and the Scoop
-# bucket manifest, publish the crates.io launcher crate, and update CHANGELOG.md
-# on main.
+# notes, publish the GHCR image, publish the npm packages, update the Homebrew tap
+# formula and the Scoop bucket manifest, publish the crates.io launcher crate,
+# and update CHANGELOG.md on main.
 #
 # Trigger by pushing a semver tag (git tag -s v0.1.0 && git push origin v0.1.0)
 # or via workflow_dispatch with an explicit version.
@@ -13,7 +13,7 @@ name: Release
 # a single DIST_REPOS_TOKEN fine-grained PAT with contents read/write on both
 # dist repos (juliopolycarpo/homebrew-tap and juliopolycarpo/scoop-bucket), and
 # a CARGO_REGISTRY_TOKEN crates.io API token with publish-new + publish-update
-# scope for the mangostudio crate.
+# scope for the mangostudio crate. GHCR uses the workflow GITHUB_TOKEN.
 
 on:
   push:
@@ -140,6 +140,69 @@ jobs:
               sleep 30
             done
           fi
+
+  docker:
+    # Publishes container images from the Linux binaries already produced by
+    # the build job. Nothing depends on this job, so a registry failure never
+    # blocks the GitHub Release, npm, Homebrew, Scoop, or crates.io channels.
+    name: Publish Docker images
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: ./.github/actions/setup-mango
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: release-assets
+          path: release-assets
+
+      - name: Stage Docker build context
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+        run: bun ./scripts/release/stage-docker-ctx.ts --release-assets release-assets
+
+      - uses: docker/setup-qemu-action@v3
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Build and publish default Bookworm image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: |
+            VERSION=${{ needs.build.outputs.version }}
+          tags: |
+            ghcr.io/${{ github.repository }}:${{ needs.build.outputs.version }}
+            ghcr.io/${{ github.repository }}:${{ needs.build.outputs.version }}-bookworm
+            ghcr.io/${{ github.repository }}:latest
+            ghcr.io/${{ github.repository }}:bookworm
+
+      - name: Build and publish Alpine image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.alpine
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: |
+            VERSION=${{ needs.build.outputs.version }}
+          tags: |
+            ghcr.io/${{ github.repository }}:${{ needs.build.outputs.version }}-alpine
+            ghcr.io/${{ github.repository }}:alpine
 
   npm-publish:
     name: Publish npm packages

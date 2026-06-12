@@ -4,6 +4,7 @@ build/
 dist/
 dist-npm/
 release-assets/
+docker-ctx/
 coverage/
 playwright-report/
 test-results/

@@ -10,7 +10,9 @@
     "strongKind": "asterisks",
     "lineWidth": 100
   },
-  "dockerfile": {},
+  "dockerfile": {
+    "associations": ["**/Dockerfile", "**/Dockerfile.*"]
+  },
   "toml": {},
   "yaml": {},
   "includes": ["**/*.{md,mdx,toml,yml,yaml}", "**/Dockerfile", "**/Dockerfile.*"],

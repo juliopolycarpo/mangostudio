@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { existsSync } from 'node:fs';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -16,14 +17,22 @@ const TEST_TIMEOUT_MS = 30_000;
 const VALID_AUTH_SECRET = 'test-secret-at-least-32-characters-long';
 
 /** Reserve a free TCP port by briefly binding to port 0. */
-function reserveFreePort(): number {
-  const server = Bun.serve({ port: 0, fetch: () => new Response('ok') });
-  const { port } = server;
-  server.stop(true);
-  if (typeof port !== 'number') {
+async function reserveFreePort(): Promise<number> {
+  const server = createServer();
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', resolve);
+  });
+
+  const address = server.address();
+  await new Promise<void>((resolve, reject) => {
+    server.close((error) => (error ? reject(error) : resolve()));
+  });
+
+  if (!address || typeof address === 'string') {
     throw new Error('failed to reserve a free port');
   }
-  return port;
+  return address.port;
 }
 
 /**
@@ -90,12 +99,13 @@ async function waitForServerReady(host: string, port: number, pidFile: string): 
   await waitForState(pidFile);
 }
 
-async function waitForExit(child: Bun.Subprocess): Promise<void> {
+async function waitForExit(child: Bun.Subprocess): Promise<number> {
   const timedOut = Symbol('timedOut');
   const result = await Promise.race([child.exited, sleep(5000).then(() => timedOut)]);
-  if (result === timedOut) {
+  if (typeof result !== 'number') {
     throw new Error('child process did not exit in time');
   }
+  return result;
 }
 
 function readStderr(child: Bun.Subprocess): Promise<string> {
@@ -125,7 +135,7 @@ describe('startServer via __serve', () => {
   it(
     'listens, writes state, serves health, and cleans up on SIGTERM',
     async () => {
-      const port = reserveFreePort();
+      const port = await reserveFreePort();
       const pidFile = join(home, '.mango', 'run', 'server.json');
 
       child = Bun.spawn({
@@ -146,9 +156,9 @@ describe('startServer via __serve', () => {
       expect(state.host).toBe('127.0.0.1');
 
       child.kill('SIGTERM');
-      await waitForExit(child);
+      const exitCode = await waitForExit(child);
 
-      expect(child.exitCode).toBe(0);
+      expect(exitCode).toBe(0);
       expect(existsSync(pidFile)).toBe(false);
     },
     TEST_TIMEOUT_MS
@@ -157,7 +167,7 @@ describe('startServer via __serve', () => {
   it(
     'exits before listening when the auth secret is missing',
     async () => {
-      const port = reserveFreePort();
+      const port = await reserveFreePort();
 
       child = Bun.spawn({
         cmd: ['bun', ENTRY, '__serve', String(port)],
@@ -170,9 +180,9 @@ describe('startServer via __serve', () => {
       });
 
       const stderr = readStderr(child);
-      await waitForExit(child);
+      const exitCode = await waitForExit(child);
 
-      expect(child.exitCode).toBe(1);
+      expect(exitCode).toBe(1);
       expect(await stderr).toContain('BETTER_AUTH_SECRET is required');
       expect(await probeHealthOnce('127.0.0.1', port)).toBe(false);
     },

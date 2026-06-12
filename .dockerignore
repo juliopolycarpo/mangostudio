@@ -1,0 +1,6 @@
+**
+!Dockerfile
+!Dockerfile.alpine
+!.dockerignore
+!docker-ctx
+!docker-ctx/**
