@@ -138,6 +138,13 @@ fn install(install_dir: &Path) -> Result<(), String> {
         let _ = fs::remove_dir_all(&staging);
         return Err(format!("archive is missing {BINARY_NAME}"));
     }
+    // The binary serves its UI from the sibling `public/` sidecar, so reject an
+    // archive that dropped it instead of installing a binary that fails later.
+    // Mirrors the shell installer's `public/index.html` check.
+    if !staging.join("public").join("index.html").is_file() {
+        let _ = fs::remove_dir_all(&staging);
+        return Err("archive is missing public/index.html".to_string());
+    }
     make_executable(&staged_binary)?;
 
     let _ = fs::remove_dir_all(install_dir);
