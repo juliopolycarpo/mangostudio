@@ -56,15 +56,16 @@ step flakes: using **Re-run failed jobs** is safe because published npm versions
 are skipped, release assets are uploaded with clobber semantics, and the
 changelog push rebases before retrying.
 
-It runs five jobs:
+It runs six jobs:
 
-| Job                | What it does                                                                                                                                                                                                                |
-| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `build`            | Verifies versions are in lockstep with the tag, cross-compiles every platform binary (`build.ts`), assembles the npm distribution (`pack-npm.ts`), and uploads binary archives plus `SHA256SUMS`.                           |
-| `github-release`   | Creates the GitHub Release, or updates an existing one by refreshing notes and uploading assets with `--clobber`.                                                                                                           |
-| `npm-publish`      | Publishes the platform packages, then the `@mangostudio/cli` wrapper; already-published versions are skipped, transient failures are retried, and provenance falls back to a warning-only publish if npm rejects it.        |
-| `verify-release`   | Installs `@mangostudio/cli@<version>` from npm on Ubuntu, macOS, and Windows; downloads the matching release tarball, verifies `SHA256SUMS`, and runs `mangostudio --version`. Windows arm64 is published but not verified. |
-| `update-changelog` | Regenerates `CHANGELOG.md` and commits it back to `main`, retrying the push after `git pull --rebase origin main` if another commit lands first.                                                                            |
+| Job                | What it does                                                                                                                                                                                                                  |
+| ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `build`            | Verifies versions are in lockstep with the tag, cross-compiles every platform binary (`build.ts`), assembles the npm distribution (`pack-npm.ts`), and uploads binary archives plus `SHA256SUMS`.                             |
+| `github-release`   | Creates the GitHub Release, or updates an existing one by refreshing notes and uploading assets with `--clobber`.                                                                                                             |
+| `npm-publish`      | Publishes the platform packages, then the `@mangostudio/cli` wrapper; already-published versions are skipped, transient failures are retried, and provenance falls back to a warning-only publish if npm rejects it.          |
+| `homebrew`         | Renders `Formula/mangostudio.rb` from `SHA256SUMS` (`update-homebrew.ts`) and pushes it to `juliopolycarpo/homebrew-tap` (`push-dist-repo.ts`). No other job depends on it, so a tap failure never blocks npm or the Release. |
+| `verify-release`   | Installs `@mangostudio/cli@<version>` from npm on Ubuntu, macOS, and Windows; downloads the matching release tarball, verifies `SHA256SUMS`, and runs `mangostudio --version`. Windows arm64 is published but not verified.   |
+| `update-changelog` | Regenerates `CHANGELOG.md` and commits it back to `main`, retrying the push after `git pull --rebase origin main` if another commit lands first.                                                                              |
 
 `workflow_dispatch` accepts an explicit `version` input for a manual run; it is
 validated against the committed version the same way.
@@ -91,9 +92,54 @@ Release archives are accompanied by `SHA256SUMS`; the verification job checks th
 runner-specific archive against that manifest before executing the extracted
 binary's `--version` command.
 
+## Homebrew tap
+
+`brew install juliopolycarpo/tap/mangostudio` works on macOS and Linux via the
+**shared** tap repo [`juliopolycarpo/homebrew-tap`](https://github.com/juliopolycarpo/homebrew-tap)
+(`homebrew-<tap>` → `brew tap juliopolycarpo/tap`). It is shared so future
+projects reuse the same distribution route: each project owns one
+`Formula/<name>.rb` and a release job that rewrites only that file.
+
+The `homebrew` job updates the formula on every tag push:
+
+1. `scripts/release/update-homebrew.ts` parses `SHA256SUMS`, validates that all
+   four `mangostudio-<version>-{darwin,linux}-{arm64,x64}.tar.gz` archives are
+   present (failing loud on naming-contract drift), and renders
+   `scripts/release/templates/mangostudio.rb.tmpl`.
+2. `scripts/release/push-dist-repo.ts` clones the tap, copies the formula only
+   if its content changed (re-runs are no-ops), commits as
+   `github-actions[bot]`, and pushes with up to three attempts, rebasing onto
+   the remote between each. It only ever touches the mapped files, never other
+   formulas.
+
+The formula installs the flat archive (`mangostudio` + `public/` + `README.md`)
+into `libexec` and symlinks the binary, because the binary resolves its
+`public/` frontend sidecar beside its real (symlink-resolved) executable path.
+
+`push-dist-repo.ts` is distribution-agnostic — a future Scoop bucket reuses it
+with a different `--repo` and `--file` mapping:
+
+```bash
+bun ./scripts/release/push-dist-repo.ts \
+  --repo juliopolycarpo/homebrew-tap \
+  --token-env DIST_REPOS_TOKEN \
+  --message "mangostudio 0.1.0" \
+  --file tap/Formula/mangostudio.rb:Formula/mangostudio.rb
+```
+
+One-time setup (already done; documented for future projects):
+
+1. Create the shared tap repo: `gh repo create juliopolycarpo/homebrew-tap --public`,
+   seeded with a `README.md` and a `Formula/` directory.
+2. Create a fine-grained PAT with **contents read/write on the tap repo** (extend
+   it to the Scoop bucket when that lands) and save it as the **`DIST_REPOS_TOKEN`**
+   repo secret.
+
 ## Prerequisites
 
 - **`NPM_TOKEN`** repo secret with publish rights to the `@mangostudio` scope.
+- **`DIST_REPOS_TOKEN`** repo secret: fine-grained PAT with contents read/write
+  on `juliopolycarpo/homebrew-tap` (see [Homebrew tap](#homebrew-tap)).
 - Permission for the release workflow to push `CHANGELOG.md` to `main`
   (`contents: write`); adjust if branch protection blocks the bot.
 

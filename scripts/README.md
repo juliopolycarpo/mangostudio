@@ -19,7 +19,7 @@ scripts/
 ├── changelog.ts      git-cliff wrapper: init/preview/release (bun run changelog)
 ├── lib/              Shared toolkit (see below)
 ├── qa-gate/          PR metrics collector, comment renderers + comment publisher
-├── release/          Release-time packaging (pack-npm.ts)
+├── release/          Release-time packaging + publication (see below)
 └── tests/            Cross-cutting unit tests (co-located tests live beside sources)
 ```
 
@@ -51,10 +51,24 @@ Powers the bot comments the `pr-qa-gate.yml` workflow manages on every PR:
   headline, summary deltas, collapsed metric tables) from base/head metrics.
 - `render-commits.ts` + `commit-log.ts` — render the commit-summary comment
   (list + expandable full messages) from the PR's base..head range.
-- `publish/managed-comments.mjs` — publisher that updates the managed comments
-  in place, creates missing comments, and deletes duplicate managed comments
-  left by older runs. Plain ESM so `actions/github-script` imports it directly;
+- `publish/managed-comments.mjs` — publisher that re-posts the managed
+  comments at the bottom of the PR timeline (creates the new set, then deletes
+  the previous one). Plain ESM so `actions/github-script` imports it directly;
   it skips publishing when the PR head has moved on.
+
+## release/ — release-time packaging + publication
+
+Run by `.github/workflows/release.yml`; each is also runnable locally:
+
+| Script               | Concern                                                                  |
+| -------------------- | ------------------------------------------------------------------------ |
+| `archive-assets.ts`  | Assemble `release-assets/` (platform archives, installers, `SHA256SUMS`) |
+| `pack-npm.ts`        | Stage `.mango/out/<arch>` binaries into the npm distribution             |
+| `publish-npm.ts`     | Idempotent npm publication with retry + provenance fallback              |
+| `verify-checksum.ts` | Check one downloaded asset against `SHA256SUMS`                          |
+| `update-homebrew.ts` | Render `Formula/mangostudio.rb` from `SHA256SUMS` + `templates/`         |
+| `push-dist-repo.ts`  | Push changed files into an external dist repo (tap/bucket), idempotently |
+| `retry.sh`           | `retry_command` helper sourced by workflow shell steps                   |
 
 ## Conventions
 

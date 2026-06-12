@@ -2,12 +2,15 @@ name: Release
 
 # Cut a release: cross-compile standalone binaries for every platform, assemble
 # the npm distribution, publish a GitHub Release with the binaries + git-cliff
-# notes, publish the npm packages, and update CHANGELOG.md on main.
+# notes, publish the npm packages, update the Homebrew tap formula, and update
+# CHANGELOG.md on main.
 #
 # Trigger by pushing a semver tag (git tag -s v0.1.0 && git push origin v0.1.0)
 # or via workflow_dispatch with an explicit version.
 #
-# Prerequisites: an NPM_TOKEN repo secret with publish rights to @mangostudio/*.
+# Prerequisites: an NPM_TOKEN repo secret with publish rights to @mangostudio/*,
+# and a DIST_REPOS_TOKEN fine-grained PAT with contents read/write on
+# juliopolycarpo/homebrew-tap.
 
 on:
   push:
@@ -170,6 +173,41 @@ jobs:
         run: |
           echo "//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}" > ~/.npmrc
           bun ./scripts/release/publish-npm.ts dist-npm
+
+  homebrew:
+    # Renders Formula/mangostudio.rb from the released SHA256SUMS and pushes it
+    # to the shared tap. Nothing depends on this job, so a tap failure never
+    # blocks the GitHub Release or npm publication.
+    name: Update Homebrew tap
+    needs: [build, github-release]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: ./.github/actions/setup-mango
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: release-assets
+          path: release-assets
+
+      - name: Render formula and push to juliopolycarpo/homebrew-tap
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+          DIST_REPOS_TOKEN: ${{ secrets.DIST_REPOS_TOKEN }}
+        run: |
+          bun ./scripts/release/update-homebrew.ts \
+            --version "$VERSION" \
+            --sums release-assets/SHA256SUMS \
+            --out tap/Formula/mangostudio.rb
+          bun ./scripts/release/push-dist-repo.ts \
+            --repo juliopolycarpo/homebrew-tap \
+            --token-env DIST_REPOS_TOKEN \
+            --message "mangostudio ${VERSION}" \
+            --file tap/Formula/mangostudio.rb:Formula/mangostudio.rb
 
   verify-release:
     name: Verify release install (${{ matrix.os }})
