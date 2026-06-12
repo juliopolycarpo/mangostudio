@@ -183,7 +183,8 @@ One-time setup (already done; documented for future projects):
 
 1. Create the shared bucket repo: `gh repo create juliopolycarpo/scoop-bucket --public`,
    seeded with a `README.md` and a `bucket/` directory.
-2. Add **contents read/write on the bucket repo** to the `DIST_REPOS_TOKEN` PAT.
+2. Extend the `DIST_REPOS_TOKEN` PAT with **contents read/write on the bucket
+   repo** (the same PAT already covers the Homebrew tap).
 
 ## crates.io launcher
 

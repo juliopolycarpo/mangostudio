@@ -10,9 +10,9 @@ name: Release
 # or via workflow_dispatch with an explicit version.
 #
 # Prerequisites: an NPM_TOKEN repo secret with publish rights to @mangostudio/*,
-# a DIST_REPOS_TOKEN fine-grained PAT with contents read/write on
-# juliopolycarpo/homebrew-tap and juliopolycarpo/scoop-bucket, and a
-# CARGO_REGISTRY_TOKEN crates.io API token with publish-new + publish-update
+# a single DIST_REPOS_TOKEN fine-grained PAT with contents read/write on both
+# dist repos (juliopolycarpo/homebrew-tap and juliopolycarpo/scoop-bucket), and
+# a CARGO_REGISTRY_TOKEN crates.io API token with publish-new + publish-update
 # scope for the mangostudio crate.
 
 on:
