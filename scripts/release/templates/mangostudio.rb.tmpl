@@ -1,0 +1,40 @@
+class Mangostudio < Formula
+  desc "AI-powered image generation and chat studio"
+  homepage "https://github.com/juliopolycarpo/mangostudio"
+  version "{{VERSION}}"
+  license "MIT"
+
+  on_macos do
+    on_arm do
+      url "https://github.com/juliopolycarpo/mangostudio/releases/download/v{{VERSION}}/mangostudio-{{VERSION}}-darwin-arm64.tar.gz"
+      sha256 "{{SHA_DARWIN_ARM64}}"
+    end
+    on_intel do
+      url "https://github.com/juliopolycarpo/mangostudio/releases/download/v{{VERSION}}/mangostudio-{{VERSION}}-darwin-x64.tar.gz"
+      sha256 "{{SHA_DARWIN_X64}}"
+    end
+  end
+
+  on_linux do
+    on_arm do
+      url "https://github.com/juliopolycarpo/mangostudio/releases/download/v{{VERSION}}/mangostudio-{{VERSION}}-linux-arm64.tar.gz"
+      sha256 "{{SHA_LINUX_ARM64}}"
+    end
+    on_intel do
+      url "https://github.com/juliopolycarpo/mangostudio/releases/download/v{{VERSION}}/mangostudio-{{VERSION}}-linux-x64.tar.gz"
+      sha256 "{{SHA_LINUX_X64}}"
+    end
+  end
+
+  def install
+    # The binary resolves its frontend sidecar (public/) beside the real
+    # executable path, so install the whole flat archive into libexec and
+    # expose only the symlinked binary on PATH.
+    libexec.install Dir["*"]
+    bin.install_symlink libexec/"mangostudio"
+  end
+
+  test do
+    assert_match version.to_s, shell_output("#{bin}/mangostudio --version")
+  end
+end
