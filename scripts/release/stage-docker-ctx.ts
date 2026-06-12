@@ -47,9 +47,12 @@ export async function stageDockerContext(
 ): Promise<void> {
   prepareContextDir(plan.contextDir);
 
+  const releaseAssetsDir = options.releaseAssetsDir;
+  const releaseVersion = releaseAssetsDir ? resolveReleaseVersion() : undefined;
+
   for (const target of plan.targets) {
-    if (options.releaseAssetsDir) {
-      await stageFromReleaseAsset(target, options.releaseAssetsDir);
+    if (releaseAssetsDir && releaseVersion) {
+      await stageFromReleaseAsset(target, releaseAssetsDir, releaseVersion);
     } else {
       stageFromBuildOutput(target);
     }
@@ -71,9 +74,9 @@ function stageFromBuildOutput(target: DockerStageTarget): void {
 
 async function stageFromReleaseAsset(
   target: DockerStageTarget,
-  releaseAssetsDir: string
+  releaseAssetsDir: string,
+  version: string
 ): Promise<void> {
-  const version = resolveReleaseVersion();
   const archivePath = join(
     releaseAssetsDir,
     dockerReleaseAssetName(version, target.dockerVariant, target.dockerArch)
