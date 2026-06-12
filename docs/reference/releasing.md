@@ -108,8 +108,9 @@ The `homebrew` job updates the formula on every tag push:
    `scripts/release/templates/mangostudio.rb.tmpl`.
 2. `scripts/release/push-dist-repo.ts` clones the tap, copies the formula only
    if its content changed (re-runs are no-ops), commits as
-   `github-actions[bot]`, and pushes with up to three `git pull --rebase`
-   retries. It only ever touches the mapped files, never other formulas.
+   `github-actions[bot]`, and pushes with up to three attempts, rebasing onto
+   the remote between each. It only ever touches the mapped files, never other
+   formulas.
 
 The formula installs the flat archive (`mangostudio` + `public/` + `README.md`)
 into `libexec` and symlinks the binary, because the binary resolves its
