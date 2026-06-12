@@ -1,0 +1,164 @@
+name: Release Dry Run
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/release*.yml"
+      - "scripts/release/**"
+      - "scripts/install/**"
+      - "scripts/build.ts"
+      - "scripts/lib/docker-stage.ts"
+      - "scripts/lib/npm-pack.ts"
+      - "scripts/lib/npm-package-validation.ts"
+      - "scripts/lib/npm-publish.ts"
+      - "scripts/lib/release-assets.ts"
+      - "scripts/lib/release-targets.ts"
+      - "scripts/lib/release-version.ts"
+      - "packages/cli/**"
+      - "packages/cargo-shim/**"
+      - "Dockerfile"
+      - "Dockerfile.alpine"
+  workflow_dispatch:
+  schedule:
+    - cron: "0 7 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-dry-run-${{ github.head_ref || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+env:
+  DRY_RUN_VERSION: 0.0.0-dryrun
+
+jobs:
+  changes:
+    name: Detect changed release areas
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      cargo_shim: ${{ steps.changed.outputs.cargo_shim }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - id: changed
+        name: Check cargo shim paths
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          EVENT_NAME: ${{ github.event_name }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [ "$EVENT_NAME" != "pull_request" ]; then
+            echo "cargo_shim=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          git diff --name-only "$BASE_SHA" "$HEAD_SHA" > "$RUNNER_TEMP/changed-files"
+          if grep -q '^packages/cargo-shim/' "$RUNNER_TEMP/changed-files"; then
+            echo "cargo_shim=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "cargo_shim=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  dry-run-linux:
+    name: Linux release dry run
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: ./.github/actions/setup-mango
+
+      - name: Verify committed versions are in lockstep
+        run: bun run check:versions
+
+      - name: Build Linux x64 binary
+        run: bun run build --binary --platform linux-x64
+        env:
+          VERSION: ${{ env.DRY_RUN_VERSION }}
+
+      - name: Assemble npm distribution
+        run: bun ./scripts/release/pack-npm.ts --platform linux-x64
+        env:
+          VERSION: ${{ env.DRY_RUN_VERSION }}
+
+      - name: Validate npm distribution
+        run: bun ./scripts/release/pack-npm.ts --validate dist-npm --platform linux-x64
+
+      - name: Dry-run npm publish
+        run: bun ./scripts/release/publish-npm.ts dist-npm --dry-run
+
+      - name: Archive Linux release assets
+        run: bun ./scripts/release/archive-assets.ts --platform linux-x64
+        env:
+          VERSION: ${{ env.DRY_RUN_VERSION }}
+
+      - name: Verify archive checksum
+        run: |
+          archive="release-assets/mangostudio-${DRY_RUN_VERSION}-linux-x64.tar.gz"
+          bun ./scripts/release/verify-checksum.ts release-assets/SHA256SUMS "$archive"
+
+      - name: Install local archive
+        env:
+          MANGOSTUDIO_BIN_DIR: ${{ runner.temp }}/mango-bin
+          MANGOSTUDIO_INSTALL_DIR: ${{ runner.temp }}/mango-dist
+        run: |
+          archive="release-assets/mangostudio-${DRY_RUN_VERSION}-linux-x64.tar.gz"
+          bash scripts/install/install.sh --local "$archive"
+          actual="$("${MANGOSTUDIO_BIN_DIR}/mangostudio" --version)"
+          if [ "$actual" != "$DRY_RUN_VERSION" ]; then
+            echo "Expected ${DRY_RUN_VERSION}, got ${actual}"
+            exit 1
+          fi
+
+      - name: Render distribution manifests
+        run: |
+          sums="$RUNNER_TEMP/SHA256SUMS"
+          cp release-assets/SHA256SUMS "$sums"
+
+          append_if_missing() {
+            asset="$1"
+            sha="$2"
+            if ! grep -q "  ${asset}$" "$sums"; then
+              printf '%s  %s\n' "$sha" "$asset" >> "$sums"
+            fi
+          }
+
+          append_if_missing "mangostudio-${DRY_RUN_VERSION}-darwin-arm64.tar.gz" "$(printf 'a%.0s' {1..64})"
+          append_if_missing "mangostudio-${DRY_RUN_VERSION}-darwin-x64.tar.gz" "$(printf 'b%.0s' {1..64})"
+          append_if_missing "mangostudio-${DRY_RUN_VERSION}-linux-arm64.tar.gz" "$(printf 'c%.0s' {1..64})"
+          append_if_missing "mangostudio-${DRY_RUN_VERSION}-windows-x64.zip" "$(printf 'd%.0s' {1..64})"
+          append_if_missing "mangostudio-${DRY_RUN_VERSION}-windows-arm64.zip" "$(printf 'e%.0s' {1..64})"
+
+          bun ./scripts/release/update-homebrew.ts \
+            --version "$DRY_RUN_VERSION" \
+            --sums "$sums" \
+            --out "$RUNNER_TEMP/mangostudio.rb"
+          grep -q "version \"${DRY_RUN_VERSION}\"" "$RUNNER_TEMP/mangostudio.rb"
+          grep -Eq 'sha256 "[0-9a-f]{64}"' "$RUNNER_TEMP/mangostudio.rb"
+
+          bun ./scripts/release/update-scoop.ts \
+            --version "$DRY_RUN_VERSION" \
+            --sums "$sums" \
+            --out "$RUNNER_TEMP/mangostudio.json"
+          bun -e 'JSON.parse(await Bun.file(process.argv.at(-1)).text())' "$RUNNER_TEMP/mangostudio.json"
+
+  dry-run-cargo:
+    name: Cargo publish dry run
+    needs: changes
+    if: needs.changes.outputs.cargo_shim == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: packages/cargo-shim
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - run: cargo publish --dry-run --locked

@@ -32,6 +32,21 @@ export const NPM_PLATFORMS: readonly NpmPlatform[] = [
   { arch: 'windows-arm64', os: 'win32', cpu: 'arm64', binary: 'mangostudio.exe' },
 ];
 
+/** Select npm-distributable platform packages, optionally limited by build target id. */
+export function filterNpmPlatforms(onlyPlatform?: string): readonly NpmPlatform[] {
+  if (!onlyPlatform) {
+    return NPM_PLATFORMS;
+  }
+
+  const platforms = NPM_PLATFORMS.filter((platform) => platform.arch === onlyPlatform);
+  if (platforms.length === 0) {
+    throw new Error(
+      `No npm platform matches filter: ${onlyPlatform}. Available platforms: ${NPM_PLATFORMS.map((platform) => platform.arch).join(', ')}`
+    );
+  }
+  return platforms;
+}
+
 /** npm package name for a platform, e.g. @mangostudio/cli-linux-x64. */
 export function platformPackageName(platform: NpmPlatform): string {
   return `${MAIN_PACKAGE}-${platform.os}-${platform.cpu}`;
