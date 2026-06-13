@@ -4,17 +4,13 @@ on:
   pull_request:
     branches: [main]
     paths:
+      # Mirror the release import graph; prefer over-triggering. Release-script
+      # logic is also unit-tested via the `test` workflow.
       - ".github/workflows/release*.yml"
       - "scripts/release/**"
       - "scripts/install/**"
       - "scripts/build.ts"
-      - "scripts/lib/docker-stage.ts"
-      - "scripts/lib/npm-pack.ts"
-      - "scripts/lib/npm-package-validation.ts"
-      - "scripts/lib/npm-publish.ts"
-      - "scripts/lib/release-assets.ts"
-      - "scripts/lib/release-targets.ts"
-      - "scripts/lib/release-version.ts"
+      - "scripts/lib/**"
       - "packages/cli/**"
       - "packages/cargo-shim/**"
       # The dry-run builds the default Bookworm image from the staged release
