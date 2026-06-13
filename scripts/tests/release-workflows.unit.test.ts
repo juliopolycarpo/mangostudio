@@ -122,6 +122,31 @@ describe('release workflow binary gate', () => {
     expect(workflow).not.toContain('If branch protection later blocks bot pushes');
   });
 
+  test('stateful release retry loops document why they do not use retry_command', () => {
+    const workflow = readText('.github/workflows/release.yml');
+    const attemptVar = '$' + '{attempt}';
+    const githubReleaseBlock =
+      /\n {2}github-release:\n([\s\S]*?)(?=\n {2}\S|$)/.exec(workflow)?.[1] ?? '';
+    const cargoPublishBlock =
+      /\n {2}cargo-publish:\n([\s\S]*?)(?=\n {2}\S|$)/.exec(workflow)?.[1] ?? '';
+
+    expect(githubReleaseBlock).toContain('source scripts/release/retry.sh');
+    expect(githubReleaseBlock).toContain('retry_command 3 30 gh release edit');
+    expect(githubReleaseBlock).toContain('retry_command 3 30 gh release upload');
+    expect(githubReleaseBlock).toContain('Stateful retry: scripts/release/retry.sh cannot model');
+    expect(githubReleaseBlock).toContain('if gh release create "$tag"');
+    expect(githubReleaseBlock).toContain('if gh release view "$tag" >/dev/null 2>&1; then');
+
+    expect(cargoPublishBlock).toContain(
+      'Stateful retry: scripts/release/retry.sh only repeats one command'
+    );
+    expect(cargoPublishBlock).toContain(
+      '(cd packages/cargo-shim && CARGO_REGISTRY_TOKEN="$publish_token" cargo publish --locked)'
+    );
+    expect(cargoPublishBlock).toContain('if published; then');
+    expect(cargoPublishBlock).toContain(`Version became visible after attempt ${attemptVar}`);
+  });
+
   test('binary smoke helper checks version, exact health status, and failure logs', () => {
     const helper = readText('scripts/release/smoke-binary.sh');
     const portVar = '$' + '{port}';
