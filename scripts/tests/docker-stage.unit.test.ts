@@ -109,8 +109,12 @@ describe('Docker release wiring', () => {
     const repoExpression = '$' + '{{ github.repository }}';
     const versionExpression = '$' + '{{ needs.build.outputs.version }}';
 
-    expect(workflow).toContain('docker/build-push-action@v6');
-    expect(workflow).toContain('docker/setup-qemu-action@v3');
+    expect(workflow).toContain(
+      'docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2'
+    );
+    expect(workflow).toContain(
+      'docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0'
+    );
     expect(workflow).toContain('packages: write');
     expect(workflow).toContain('platforms: linux/amd64,linux/arm64');
     expect(workflow).toContain(`ghcr.io/${repoExpression}:${versionExpression}`);
