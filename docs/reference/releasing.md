@@ -87,6 +87,26 @@ Every PR gets a **Changelog Preview** bot comment showing the entries it would
 add. It is published by the PR QA workflow (`.github/workflows/pr-qa-gate.yml`)
 together with the commit summary and QA gate comments.
 
+## Testing the release pipeline
+
+`.github/workflows/release-dry-run.yml` runs automatically for PRs that touch
+release workflows, release scripts, install scripts, binary build tooling, CLI
+packages, or Dockerfiles. It also runs weekly as a canary and can be started
+manually with `workflow_dispatch`.
+
+The dry-run is read-only: it verifies lockstep versions, builds one Linux binary
+with a synthetic prerelease version, assembles and validates the matching npm
+distribution, runs the npm publisher in `--dry-run` mode, archives the binary,
+verifies `SHA256SUMS`, installs the local tarball through `install.sh --local`,
+and renders Homebrew and Scoop manifests into the runner temp directory. PRs
+that touch `packages/cargo-shim/**` also run `cargo publish --dry-run --locked`;
+scheduled and manual canary runs include that cargo check as well.
+
+Only a real signed tag exercises registry and repository side effects: npm
+publication, GHCR push, GitHub Release upload, Homebrew tap push, Scoop bucket
+push, crates.io publication, and the cross-platform `verify-release` matrix.
+Those steps stay in `.github/workflows/release.yml`.
+
 ## Cutting a release
 
 Releases are tag-driven. From an up-to-date `main`:

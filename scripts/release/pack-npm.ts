@@ -11,7 +11,7 @@ import { removePaths } from '../lib/fs';
 import {
   buildMainManifest,
   buildPlatformManifest,
-  NPM_PLATFORMS,
+  filterNpmPlatforms,
   type NpmPlatform,
   platformPackageName,
 } from '../lib/npm-pack';
@@ -32,27 +32,61 @@ const writeManifest = (dir: string, manifest: Record<string, unknown>): void => 
 };
 
 const printHelp = (): never => {
-  console.log(`Usage: bun ./scripts/release/pack-npm.ts [--validate [dist-dir]]
+  console.log(`Usage: bun ./scripts/release/pack-npm.ts [--platform <target>]
+       bun ./scripts/release/pack-npm.ts --validate [dist-dir] [--platform <target>]
 
 Default:
   Assemble dist-npm/ from .mango/out/ binary build output.
 
 Flags:
+  --platform <id>       Limit npm package staging/validation to one target.
   --validate [dist-dir]  Validate staged npm package assets without assembling.
   --help                 Show this help message`);
   process.exit(0);
 };
 
-const resolveValidationDistDir = (args: readonly string[]): string | undefined => {
-  if (args[0] !== '--validate') {
-    return undefined;
+interface CliArgs {
+  readonly onlyPlatform?: string;
+  readonly validationDistDir?: string;
+}
+
+const parseCliArgs = (args: readonly string[]): CliArgs => {
+  let onlyPlatform: string | undefined;
+  let validationDistDir: string | undefined;
+  let validate = false;
+
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === '--help') printHelp();
+    if (arg === '--validate') {
+      validate = true;
+      const next = args[index + 1];
+      if (next && !next.startsWith('--')) {
+        validationDistDir = resolve(ROOT_DIR, next);
+        index += 1;
+      }
+      continue;
+    }
+    if (arg === '--platform') {
+      const next = args[index + 1];
+      if (!next || next.startsWith('--')) throw new Error('--platform requires a target id');
+      onlyPlatform = next;
+      index += 1;
+      continue;
+    }
+    if (arg.startsWith('--platform=')) {
+      onlyPlatform = arg.slice('--platform='.length);
+      if (!onlyPlatform) throw new Error('--platform requires a target id');
+      continue;
+    }
+
+    throw new Error(`Unknown argument: ${arg}`);
   }
 
-  if (args.length > 2) {
-    throw new Error(`Unexpected validation argument(s): ${args.slice(2).join(' ')}`);
-  }
-
-  return resolve(ROOT_DIR, args[1] ?? 'dist-npm');
+  return {
+    onlyPlatform,
+    validationDistDir: validate ? (validationDistDir ?? resolve(ROOT_DIR, 'dist-npm')) : undefined,
+  };
 };
 
 // Stage one platform package: manifest + binary + frontend public/ sidecar.
@@ -91,21 +125,14 @@ const stageMainPackage = (version: string, platforms: readonly NpmPlatform[]): v
 };
 
 const main = async (): Promise<void> => {
-  const args = process.argv.slice(2);
-  if (args.includes('--help')) {
-    printHelp();
-  }
+  const args = parseCliArgs(process.argv.slice(2));
+  const platforms = filterNpmPlatforms(args.onlyPlatform);
 
-  const validationDistDir = resolveValidationDistDir(args);
-  if (validationDistDir) {
+  if (args.validationDistDir) {
     header('Validate npm distribution');
-    assertNpmDistributionAssets(validationDistDir);
-    success(`npm distribution is publishable: ${validationDistDir}`);
+    assertNpmDistributionAssets(args.validationDistDir, platforms);
+    success(`npm distribution is publishable: ${args.validationDistDir}`);
     return;
-  }
-
-  if (args.length > 0) {
-    throw new Error(`Unknown argument(s): ${args.join(' ')}`);
   }
 
   const version = resolveReleaseVersion();
@@ -114,7 +141,7 @@ const main = async (): Promise<void> => {
   await removePaths(['dist-npm']);
   mkdirSync(DIST_DIR, { recursive: true });
 
-  const staged = NPM_PLATFORMS.map((platform) => stagePlatform(platform, version));
+  const staged = platforms.map((platform) => stagePlatform(platform, version));
 
   stageMainPackage(version, staged);
   assertNpmDistributionAssets(DIST_DIR, staged);

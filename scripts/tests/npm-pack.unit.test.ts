@@ -3,6 +3,7 @@ import {
   buildMainManifest,
   buildOptionalDependencies,
   buildPlatformManifest,
+  filterNpmPlatforms,
   MAIN_PACKAGE,
   NPM_PLATFORMS,
   type NpmPlatform,
@@ -37,6 +38,20 @@ describe('NPM_PLATFORMS', () => {
       expect(['x64', 'arm64']).toContain(platform.cpu);
       expect(platform.binary).toBe(platform.os === 'win32' ? 'mangostudio.exe' : 'mangostudio');
     }
+  });
+});
+
+describe('filterNpmPlatforms', () => {
+  test('returns every npm platform by default', () => {
+    expect(filterNpmPlatforms()).toEqual(NPM_PLATFORMS);
+  });
+
+  test('limits npm package staging to one build target id', () => {
+    expect(filterNpmPlatforms('linux-x64')).toEqual([LINUX_X64]);
+  });
+
+  test('rejects build targets that are not npm-distributable', () => {
+    expect(() => filterNpmPlatforms('linux-x64-musl')).toThrow(/No npm platform matches filter/);
   });
 });
 
