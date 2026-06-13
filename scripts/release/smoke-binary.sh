@@ -24,6 +24,11 @@ if [ "$actual_version" != "$expected_version" ]; then
   exit 1
 fi
 
+# Source the shared boot/health helper relative to this script so the smoke
+# works regardless of the caller's CWD.
+# shellcheck source=wait-for-health.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/wait-for-health.sh"
+
 tmp_home="$(mktemp -d)"
 server_log="${tmp_home}/mangostudio-smoke.log"
 server_pid=""
@@ -49,23 +54,9 @@ trap cleanup EXIT
 ) &
 server_pid="$!"
 
-ready=0
-for _ in $(seq 1 30); do
-  if ! kill -0 "$server_pid" >/dev/null 2>&1; then
-    echo "MangoStudio exited before becoming healthy." >&2
-    cat "$server_log" >&2 || true
-    exit 1
-  fi
-
-  response="$(curl -fsS "http://localhost:${port}/api/health" 2>/dev/null || true)"
-  if printf '%s' "$response" | grep -Eq '"status"[[:space:]]*:[[:space:]]*"ok"'; then
-    ready=1
-    break
-  fi
-  sleep 1
-done
-
-if [ "$ready" != "1" ]; then
+# Short-circuit if the binary crashed before becoming healthy, otherwise wait
+# for /api/health to report "ok" within the shared retry budget.
+if ! wait_for_health "$port" "kill -0 $server_pid"; then
   echo "MangoStudio did not become healthy on port ${port}." >&2
   cat "$server_log" >&2 || true
   exit 1

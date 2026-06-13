@@ -186,4 +186,26 @@ describe('Docker release wiring', () => {
 
     expect(normalize(dockerfile)).toBe(normalize(alpineDockerfile));
   });
+
+  test('binary and Docker smoke scripts share the wait-for-health helper', () => {
+    const binarySmoke = readText('scripts/release/smoke-binary.sh');
+    const dockerSmoke = readText('scripts/release/smoke-docker-image.sh');
+    const healthHelper = readText('scripts/release/wait-for-health.sh');
+
+    expect(healthHelper).toContain('wait_for_health()');
+    expect(healthHelper).toContain('"status"[[:space:]]*:[[:space:]]*"ok"');
+
+    for (const script of [binarySmoke, dockerSmoke]) {
+      expect(script).toContain(
+        'source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/wait-for-health.sh"'
+      );
+      expect(script).toContain('wait_for_health "$port"');
+    }
+
+    // The wait_for_health helper owns the JSON grep; the smoke scripts just
+    // delegate. Catches a regression where someone re-inlines the loop.
+    const inlineStatusMatch = /grep -Eq.+status/;
+    expect(binarySmoke).not.toMatch(inlineStatusMatch);
+    expect(dockerSmoke).not.toMatch(inlineStatusMatch);
+  });
 });

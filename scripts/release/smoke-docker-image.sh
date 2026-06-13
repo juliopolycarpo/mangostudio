@@ -10,6 +10,11 @@ if [ -z "$image" ] || [ -z "$platform" ]; then
   exit 2
 fi
 
+# Source the shared boot/health helper relative to this script so the smoke
+# works regardless of the caller's CWD.
+# shellcheck source=wait-for-health.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/wait-for-health.sh"
+
 container_name="mangostudio-smoke-${platform//\//-}-${port}"
 
 cleanup() {
@@ -27,20 +32,9 @@ docker run -d \
   -e GEMINI_API_KEY="${GEMINI_API_KEY:-dummy}" \
   "$image" >/dev/null
 
-# Emulated (qemu) arm64 containers boot far slower than native amd64, so allow a
-# generous budget; the loop breaks early on the first healthy response.
-retries="${HEALTH_RETRIES:-60}"
-ready=0
-for _ in $(seq 1 "$retries"); do
-  response="$(curl -fsS "http://localhost:${port}/api/health" 2>/dev/null || true)"
-  if printf '%s' "$response" | grep -Eq '"status"[[:space:]]*:[[:space:]]*"ok"'; then
-    ready=1
-    break
-  fi
-  sleep 1
-done
-
-if [ "$ready" != "1" ]; then
+# Emulated (qemu) arm64 containers boot far slower than native amd64, so the
+# default retry budget is generous. HEALTH_RETRIES lets CI override it.
+if ! wait_for_health "$port" : "${HEALTH_RETRIES:-60}"; then
   echo "Docker image did not become healthy: ${image} (${platform})" >&2
   docker logs "$container_name" >&2 || true
   exit 1
