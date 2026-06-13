@@ -581,7 +581,17 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
+      # contents: write for the direct push; pull-requests: write for the
+      # protected-branch fallback that opens a github-actions[bot] PR.
       contents: write
+      pull-requests: write
+    # Serialize the changelog landing across concurrent tag releases (the
+    # workflow's top-level group is per-ref, so two tags can release at once).
+    # Keyed on the workflow, not the ref, so their CHANGELOG.md writes never race;
+    # cancel-in-progress: false lets an in-flight update finish before the next.
+    concurrency:
+      group: update-changelog
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
@@ -591,26 +601,16 @@ jobs:
       - uses: ./.github/actions/setup-mango
 
       - name: Regenerate CHANGELOG.md
-        run: bun run changelog --release "${{ needs.build.outputs.version }}"
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+        run: bun run changelog --release "$VERSION"
 
-      - name: Commit and push if changed
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          if git diff --quiet -- CHANGELOG.md; then
-            echo "CHANGELOG.md already up to date."
-            exit 0
-          fi
-          git add CHANGELOG.md
-          git commit -m "docs(changelog): update for v${{ needs.build.outputs.version }} [skip ci]"
-          for attempt in 1 2 3; do
-            if git push origin main; then
-              exit 0
-            fi
-            if [ "$attempt" = "3" ]; then
-              exit 1
-            fi
-            git pull --rebase origin main
-          done
-          # If branch protection later blocks bot pushes, replace the direct push
-          # with a small github-actions[bot] PR via `gh pr create`.
+      # Lands the regenerated changelog on main: direct push on the fast path,
+      # falling back to a github-actions[bot] PR (with squash auto-merge where the
+      # repo allows it) when branch protection rejects the push. No-ops when the
+      # changelog is already current.
+      - name: Land CHANGELOG.md on main
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: bun ./scripts/release/push-changelog.ts --version "$VERSION" --branch main

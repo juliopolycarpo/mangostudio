@@ -84,6 +84,34 @@ describe('release workflow binary gate', () => {
     expect(workflow).not.toContain('- "Dockerfile.alpine"');
   });
 
+  test('changelog update lands via a protection-tolerant script, not a raw direct push', () => {
+    const workflow = readText('.github/workflows/release.yml');
+    const block = /\n {2}update-changelog:\n([\s\S]*?)(?=\n {2}\S|$)/.exec(workflow);
+    expect(block, 'update-changelog job not found').not.toBeNull();
+    const job = block?.[1] ?? '';
+
+    // Fallback needs pull-requests: write on top of contents: write.
+    expect(job).toContain('contents: write');
+    expect(job).toContain('pull-requests: write');
+
+    // A dedicated, ref-independent concurrency group serializes CHANGELOG.md
+    // writes when two tags release at once.
+    expect(job).toContain('group: update-changelog');
+    expect(job).toContain('cancel-in-progress: false');
+
+    // Landing goes through the reusable script (direct push + bot-PR fallback),
+    // with the version passed via env rather than interpolated into the shell.
+    expect(job).toContain(
+      'bun ./scripts/release/push-changelog.ts --version "$VERSION" --branch main'
+    );
+    expect(job).toContain(`GH_TOKEN: $${'{{ github.token }}'}`);
+    expect(job).toContain('bun run changelog --release "$VERSION"');
+
+    // The old direct-push loop and its "unimplemented fallback" comment are gone.
+    expect(job).not.toContain('git push origin main');
+    expect(workflow).not.toContain('If branch protection later blocks bot pushes');
+  });
+
   test('binary smoke helper checks version, exact health status, and failure logs', () => {
     const helper = readText('scripts/release/smoke-binary.sh');
     const portVar = '$' + '{port}';
