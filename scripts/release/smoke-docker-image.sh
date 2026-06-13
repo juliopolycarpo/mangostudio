@@ -27,8 +27,11 @@ docker run -d \
   -e GEMINI_API_KEY="${GEMINI_API_KEY:-dummy}" \
   "$image" >/dev/null
 
+# Emulated (qemu) arm64 containers boot far slower than native amd64, so allow a
+# generous budget; the loop breaks early on the first healthy response.
+retries="${HEALTH_RETRIES:-60}"
 ready=0
-for _ in $(seq 1 30); do
+for _ in $(seq 1 "$retries"); do
   response="$(curl -fsS "http://localhost:${port}/api/health" 2>/dev/null || true)"
   if printf '%s' "$response" | grep -Eq '"status"[[:space:]]*:[[:space:]]*"ok"'; then
     ready=1

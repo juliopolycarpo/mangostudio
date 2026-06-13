@@ -46,14 +46,16 @@ jobs:
 
       - uses: ./.github/actions/setup-mango
 
-      - name: Install arm64 Docker emulation
+      - name: Set up QEMU for arm64 emulation
         if: matrix.docker_arch == 'arm64'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends binfmt-support qemu-user-static
-          sudo update-binfmts --enable qemu-aarch64
+        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
+        with:
+          platforms: arm64
 
       - name: Run smoke test
+        # Host binary smoke is identical across every matrix leg (PLATFORM is
+        # always linux-x64), so run it once instead of once per Docker variant.
+        if: matrix.variant == 'bookworm' && matrix.docker_arch == 'amd64'
         run: bun run scripts/test-build.ts
         env:
           PLATFORM: ${{ matrix.platform }}
