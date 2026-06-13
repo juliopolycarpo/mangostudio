@@ -11,9 +11,10 @@ name: Release
 #
 # Prerequisites: an NPM_TOKEN repo secret with publish rights to @mangostudio/*,
 # a single DIST_REPOS_TOKEN fine-grained PAT with contents read/write on both
-# dist repos (juliopolycarpo/homebrew-tap and juliopolycarpo/scoop-bucket), and
-# a CARGO_REGISTRY_TOKEN crates.io API token with publish-new + publish-update
-# scope for the mangostudio crate. GHCR uses the workflow GITHUB_TOKEN.
+# dist repos (juliopolycarpo/homebrew-tap and juliopolycarpo/scoop-bucket).
+# crates.io publishing prefers Trusted Publishing via OIDC and temporarily falls
+# back to CARGO_REGISTRY_TOKEN until the trusted publisher is registered and
+# proven. GHCR uses the workflow GITHUB_TOKEN.
 
 on:
   push:
@@ -399,6 +400,7 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
@@ -406,8 +408,18 @@ jobs:
         with:
           toolchain: 1.96.0
 
+      - id: crates-auth
+        name: Mint crates.io Trusted Publishing token
+        continue-on-error: true
+        uses: rust-lang/crates-io-auth-action@bbd81622f20ce9e2dd9622e3218b975523e45bbe # v1.0.4
+
+      - name: Report crates.io token fallback
+        if: steps.crates-auth.outcome != 'success'
+        run: echo "Trusted Publishing token unavailable; falling back to CARGO_REGISTRY_TOKEN during migration."
+
       - name: Publish launcher crate (idempotent)
         env:
+          CRATES_IO_TRUSTED_PUBLISHING_TOKEN: ${{ steps.crates-auth.outputs.token }}
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
           VERSION: ${{ needs.build.outputs.version }}
         run: |
@@ -418,8 +430,16 @@ jobs:
             echo "mangostudio ${VERSION} is already on crates.io; skipping."
             exit 0
           fi
+          # A token is only required to actually publish; the idempotency check
+          # above already short-circuits already-published versions so re-runs
+          # converge even after CARGO_REGISTRY_TOKEN is removed.
+          publish_token="${CRATES_IO_TRUSTED_PUBLISHING_TOKEN:-$CARGO_REGISTRY_TOKEN}"
+          if [ -z "$publish_token" ]; then
+            echo "No crates.io publish token available. Configure Trusted Publishing for .github/workflows/release.yml or restore CARGO_REGISTRY_TOKEN."
+            exit 1
+          fi
           for attempt in 1 2 3; do
-            if (cd packages/cargo-shim && cargo publish --locked); then
+            if (cd packages/cargo-shim && CARGO_REGISTRY_TOKEN="$publish_token" cargo publish --locked); then
               exit 0
             fi
             if published; then

@@ -149,6 +149,14 @@ metrics report. Preview the changelog locally with `bun run changelog --preview`
 4. PRs require all CI checks to pass before merging.
 5. Screenshots or GIFs are required for UI changes.
 
+### Security Automation
+
+Every PR also runs the repository security gates:
+
+- **CodeQL** (`.github/workflows/codeql.yml`) uses GitHub code scanning advanced setup for JavaScript/TypeScript, no-build extraction, and the `security-extended` query suite. Review both the `CodeQL / Analyze (javascript-typescript)` workflow check and the follow-up `Code scanning results / CodeQL` check. New high, critical, or error-level alerts must be fixed or intentionally triaged before merge.
+- **Dependency Review** (`.github/workflows/dependency-review.yml`) runs when manifests or lockfiles change and fails on new moderate-or-worse vulnerable dependencies. It does not enforce license policy.
+- The first PR that adds or changes code scanning may get a generic `github-advanced-security[bot]` setup comment. Treat that as an enablement notice; the actionable status is in the checks above and the repository Security tab.
+
 ## Database Migrations
 
 ```bash
