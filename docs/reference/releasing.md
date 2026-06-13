@@ -10,7 +10,8 @@ nothing here is hand-edited.
 
 Setting the secrets below and pushing a signed semver tag (`v0.2.0`) is the entire
 release procedure. The workflow validates version lockstep, builds every artifact,
-publishes each channel independently, and commits `CHANGELOG.md` back to `main`.
+publishes each channel independently, and lands `CHANGELOG.md` on `main` (direct
+push, or a `github-actions[bot]` pull request when the branch is protected).
 
 | Secret                      | Used by                                  | Scope                                                                                                        |
 | --------------------------- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
@@ -28,7 +29,7 @@ Complete these once per fork or org before the first tag push:
 3. Reserve the `mangostudio` crate name on [crates.io](https://crates.io) and generate an API token.
 4. Add the three repo secrets (`NPM_TOKEN`, `DIST_REPOS_TOKEN`, `CARGO_REGISTRY_TOKEN`) to this repository.
 5. After the first GHCR push, set the `ghcr.io/juliopolycarpo/mangostudio` package visibility to **public** in GitHub package settings.
-6. Ensure branch protection allows the release bot to push `CHANGELOG.md` to `main` (`contents: write` on the workflow).
+6. No branch-protection tuning is required for the changelog: the `update-changelog` job pushes `CHANGELOG.md` to `main` directly when it can (`contents: write`), and falls back to a `github-actions[bot]` pull request when protection rejects the push (`pull-requests: write`). Enable repo auto-merge if you want that PR to merge itself once checks pass.
 
 ## Release asset naming
 
@@ -127,21 +128,21 @@ Releases are tag-driven. From an up-to-date `main`:
 step flakes: **Re-run failed jobs** is always safe because channel jobs are
 independent — one failing never blocks the others. Published npm versions are
 skipped, release assets upload with clobber semantics, and the changelog push
-rebases before retrying.
+rebases before retrying (or opens a bot PR if `main` is protected).
 
 It runs nine jobs:
 
-| Job                | What it does                                                                                                                                                                                                                     |
-| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `build`            | Verifies versions are in lockstep with the tag, cross-compiles every platform binary (`build.ts`), assembles the npm distribution (`pack-npm.ts`), and uploads binary archives plus `SHA256SUMS`.                                |
-| `github-release`   | Creates the GitHub Release, or updates an existing one by refreshing notes and uploading assets with `--clobber`.                                                                                                                |
-| `docker`           | Stages Linux glibc and musl archives into `docker-ctx/` (`stage-docker-ctx.ts`) and publishes Bookworm and Alpine images for amd64 and arm64. It uses only `GITHUB_TOKEN` with `packages: write`.                                |
-| `npm-publish`      | Publishes the platform packages, then the `@mangostudio/cli` wrapper; already-published versions are skipped, transient failures are retried, and provenance falls back to a warning-only publish if npm rejects it.             |
-| `homebrew`         | Renders `Formula/mangostudio.rb` from `SHA256SUMS` (`update-homebrew.ts`) and pushes it to `juliopolycarpo/homebrew-tap` (`push-dist-repo.ts`). No other job depends on it, so a tap failure never blocks npm or the Release.    |
-| `scoop`            | Renders `bucket/mangostudio.json` from `SHA256SUMS` (`update-scoop.ts`) and pushes it to `juliopolycarpo/scoop-bucket` (`push-dist-repo.ts`). No other job depends on it, so a bucket failure never blocks npm or the Release.   |
-| `cargo-publish`    | Publishes the `mangostudio` launcher crate (`packages/cargo-shim`) to crates.io. Idempotent: already-published versions are skipped, publishes are retried, and an upload that lands despite an error is detected. Non-blocking. |
-| `verify-release`   | Installs `@mangostudio/cli@<version>` from npm on Ubuntu, macOS, and Windows; downloads the matching release tarball, verifies `SHA256SUMS`, and runs `mangostudio --version`. Windows arm64 is published but not verified.      |
-| `update-changelog` | Regenerates `CHANGELOG.md` and commits it back to `main`, retrying the push after `git pull --rebase origin main` if another commit lands first.                                                                                 |
+| Job                | What it does                                                                                                                                                                                                                                                                                                |
+| ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `build`            | Verifies versions are in lockstep with the tag, cross-compiles every platform binary (`build.ts`), assembles the npm distribution (`pack-npm.ts`), and uploads binary archives plus `SHA256SUMS`.                                                                                                           |
+| `github-release`   | Creates the GitHub Release, or updates an existing one by refreshing notes and uploading assets with `--clobber`.                                                                                                                                                                                           |
+| `docker`           | Stages Linux glibc and musl archives into `docker-ctx/` (`stage-docker-ctx.ts`) and publishes Bookworm and Alpine images for amd64 and arm64. It uses only `GITHUB_TOKEN` with `packages: write`.                                                                                                           |
+| `npm-publish`      | Publishes the platform packages, then the `@mangostudio/cli` wrapper; already-published versions are skipped, transient failures are retried, and provenance falls back to a warning-only publish if npm rejects it.                                                                                        |
+| `homebrew`         | Renders `Formula/mangostudio.rb` from `SHA256SUMS` (`update-homebrew.ts`) and pushes it to `juliopolycarpo/homebrew-tap` (`push-dist-repo.ts`). No other job depends on it, so a tap failure never blocks npm or the Release.                                                                               |
+| `scoop`            | Renders `bucket/mangostudio.json` from `SHA256SUMS` (`update-scoop.ts`) and pushes it to `juliopolycarpo/scoop-bucket` (`push-dist-repo.ts`). No other job depends on it, so a bucket failure never blocks npm or the Release.                                                                              |
+| `cargo-publish`    | Publishes the `mangostudio` launcher crate (`packages/cargo-shim`) to crates.io. Idempotent: already-published versions are skipped, publishes are retried, and an upload that lands despite an error is detected. Non-blocking.                                                                            |
+| `verify-release`   | Installs `@mangostudio/cli@<version>` from npm on Ubuntu, macOS, and Windows; downloads the matching release tarball, verifies `SHA256SUMS`, and runs `mangostudio --version`. Windows arm64 is published but not verified.                                                                                 |
+| `update-changelog` | Regenerates `CHANGELOG.md` and lands it on `main` via `push-changelog.ts`: direct push (rebasing if another commit landed first), or a `github-actions[bot]` PR with squash auto-merge when branch protection rejects the push. A dedicated concurrency group serializes it across concurrent tag releases. |
 
 `workflow_dispatch` accepts an explicit `version` input for a manual run; it is
 validated against the committed version the same way.
@@ -314,8 +315,10 @@ The [One-shot contract](#one-shot-contract) table lists every secret. In short:
 - **`CARGO_REGISTRY_TOKEN`** repo secret: crates.io API token with
   `publish-new` + `publish-update` scope for the `mangostudio` crate (see
   [crates.io launcher](#cratesio-launcher)).
-- Permission for the release workflow to push `CHANGELOG.md` to `main`
-  (`contents: write`); adjust if branch protection blocks the bot.
+- Permission for the release workflow to land `CHANGELOG.md` on `main`: the
+  `update-changelog` job grants `contents: write` for the direct push and
+  `pull-requests: write` for the protected-branch PR fallback — no branch-protection
+  changes needed.
 
 The npm publish job grants `id-token: write` so token-based publishes can include
 npm provenance. npm trusted publishing (OIDC without `NPM_TOKEN`) is the future
