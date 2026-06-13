@@ -54,10 +54,17 @@ trap cleanup EXIT
 ) &
 server_pid="$!"
 
-# Short-circuit if the binary crashed before becoming healthy, otherwise wait
-# for /api/health to report "ok" within the shared retry budget.
-if ! wait_for_health "$port" "kill -0 $server_pid"; then
-  echo "MangoStudio did not become healthy on port ${port}." >&2
+# Wait for /api/health to report "ok" within the shared retry budget, short-
+# circuiting if the binary crashed first. The helper returns 2 when the process
+# exited and 1 when the health budget was exhausted; surface them distinctly.
+boot_status=0
+wait_for_health "$port" "kill -0 $server_pid" || boot_status=$?
+if [ "$boot_status" -ne 0 ]; then
+  if [ "$boot_status" -eq 2 ]; then
+    echo "MangoStudio exited before becoming healthy." >&2
+  else
+    echo "MangoStudio did not become healthy on port ${port}." >&2
+  fi
   cat "$server_log" >&2 || true
   exit 1
 fi

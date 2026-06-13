@@ -160,6 +160,7 @@ describe('release workflow binary gate', () => {
       `source "$(cd "$(dirname "${bashSource}")" && pwd)/wait-for-health.sh"`
     );
     expect(helper).toContain('wait_for_health "$port" "kill -0 $server_pid"');
+    expect(helper).toContain('exited before becoming healthy');
     expect(helper).toContain('cat "$server_log"');
   });
 });

@@ -34,7 +34,7 @@ docker run -d \
 
 # Emulated (qemu) arm64 containers boot far slower than native amd64, so the
 # default retry budget is generous. HEALTH_RETRIES lets CI override it.
-if ! wait_for_health "$port" : "${HEALTH_RETRIES:-60}"; then
+if ! wait_for_health "$port" : 60; then
   echo "Docker image did not become healthy: ${image} (${platform})" >&2
   docker logs "$container_name" >&2 || true
   exit 1

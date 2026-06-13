@@ -22,7 +22,9 @@
 # Environment:
 #   HEALTH_RETRIES  Overrides the [retries] argument when set.
 
-set -euo pipefail
+# No top-level `set` here: this file is only ever sourced, and a sourced helper
+# must not mutate the caller's shell options. The callers already enable strict
+# mode, and the function below is nounset-safe and uses explicit returns.
 
 # Only define the function if it has not been provided by a more specific
 # caller; sourcing this file twice (e.g. from a test harness) stays a no-op.
