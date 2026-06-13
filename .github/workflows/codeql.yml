@@ -1,5 +1,8 @@
 name: CodeQL
 
+# Advanced setup for GitHub code scanning. This is intentionally separate from
+# ci.yml: CodeQL uploads SARIF to the Security tab and the "Code scanning
+# results" PR check, while ci.yml owns build/test correctness.
 on:
   pull_request:
     branches: [main]
@@ -28,13 +31,21 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        language: [javascript-typescript]
+        include:
+          - language: javascript-typescript
+            build-mode: none
+            queries: security-extended
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
+      # JavaScript/TypeScript extraction does not need a repository build. Keep
+      # build-mode explicit so future compiled-language additions must choose
+      # their own build path instead of inheriting an accidental one.
       - uses: github/codeql-action/init@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4
         with:
           languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+          queries: ${{ matrix.queries }}
 
       - uses: github/codeql-action/analyze@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4
         with:

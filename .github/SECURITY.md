@@ -54,6 +54,18 @@ In-memory rate limiter with configurable window and max requests per window. Pro
 - Frontend assets are minified and tree-shaken.
 - Environment variables are not bundled into the binary.
 
+### Automation Security Gates
+
+Pull requests are checked by two GitHub security workflows before merge:
+
+- **CodeQL** (`.github/workflows/codeql.yml`) runs on pull requests to `main`, pushes to `main`, a weekly schedule, and manual dispatch. It uses CodeQL advanced setup for JavaScript/TypeScript with explicit no-build extraction and the `security-extended` query suite. The workflow uploads SARIF with a stable language category so alerts are visible in the Security tab and in the PR `Code scanning results / CodeQL` check.
+- **Dependency Review** (`.github/workflows/dependency-review.yml`) runs on pull requests to `main` and blocks newly introduced moderate-or-worse vulnerable dependencies from manifest or lockfile changes. License checks are intentionally disabled.
+
+When GitHub posts an Advanced Security setup comment on a PR, use it as a pointer
+to the Security tab, not as the review process itself. Maintainers should review
+the CodeQL analysis job, the `Code scanning results / CodeQL` check, and the
+Dependency Review check before merging security-sensitive changes.
+
 ## What NOT to Report
 
 - Missing GPG signatures on commits (this is a contribution guideline, not a security boundary).

@@ -1,5 +1,8 @@
 name: Dependency Review
 
+# Pull-request supply-chain gate. This complements CodeQL: CodeQL looks for code
+# vulnerabilities, while dependency review blocks vulnerable packages newly
+# introduced through manifest or lockfile changes.
 on:
   pull_request:
     branches: [main]
