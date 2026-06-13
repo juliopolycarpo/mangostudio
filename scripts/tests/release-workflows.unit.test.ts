@@ -2,13 +2,17 @@ import { describe, expect, test } from 'bun:test';
 
 import { readText } from './support/read-text';
 
+// Isolate a single top-level job's block (up to the next `  <job>:` header or
+// EOF) so an assertion about one job cannot be masked or satisfied by a later
+// job that happens to share the same content. Returns '' when the job is absent.
+function extractJobBlock(workflow: string, job: string): string {
+  return new RegExp(`\\n  ${job}:\\n([\\s\\S]*?)(?=\\n  \\S|$)`).exec(workflow)?.[1] ?? '';
+}
+
 function expectJobNeeds(workflow: string, job: string, needs: string): void {
-  // Isolate the job's own block (up to the next top-level `  <job>:` header or
-  // EOF) before asserting `needs`, so a regression in one job cannot be masked
-  // by a later job that happens to share the same `needs:` value.
-  const block = new RegExp(`\\n  ${job}:\\n([\\s\\S]*?)(?=\\n  \\S|$)`).exec(workflow);
-  expect(block, `job "${job}" not found in workflow`).not.toBeNull();
-  expect(block?.[1]).toMatch(new RegExp(`\\n    needs: ${needs}(?:\\n|$)`));
+  const block = extractJobBlock(workflow, job);
+  expect(block, `job "${job}" not found in workflow`).not.toBe('');
+  expect(block).toMatch(new RegExp(`\\n    needs: ${needs}(?:\\n|$)`));
 }
 
 describe('release workflow binary gate', () => {
@@ -96,9 +100,8 @@ describe('release workflow binary gate', () => {
 
   test('changelog update lands via a protection-tolerant script, not a raw direct push', () => {
     const workflow = readText('.github/workflows/release.yml');
-    const block = /\n {2}update-changelog:\n([\s\S]*?)(?=\n {2}\S|$)/.exec(workflow);
-    expect(block, 'update-changelog job not found').not.toBeNull();
-    const job = block?.[1] ?? '';
+    const job = extractJobBlock(workflow, 'update-changelog');
+    expect(job, 'update-changelog job not found').not.toBe('');
 
     // Fallback needs pull-requests: write on top of contents: write.
     expect(job).toContain('contents: write');
@@ -120,6 +123,29 @@ describe('release workflow binary gate', () => {
     // The old direct-push loop and its "unimplemented fallback" comment are gone.
     expect(job).not.toContain('git push origin main');
     expect(workflow).not.toContain('If branch protection later blocks bot pushes');
+  });
+
+  test('stateful release retry loops document why they do not use retry_command', () => {
+    const workflow = readText('.github/workflows/release.yml');
+    const attemptVar = '$' + '{attempt}';
+    const githubReleaseBlock = extractJobBlock(workflow, 'github-release');
+    const cargoPublishBlock = extractJobBlock(workflow, 'cargo-publish');
+
+    expect(githubReleaseBlock).toContain('source scripts/release/retry.sh');
+    expect(githubReleaseBlock).toContain('retry_command 3 30 gh release edit');
+    expect(githubReleaseBlock).toContain('retry_command 3 30 gh release upload');
+    expect(githubReleaseBlock).toContain('Stateful retry: scripts/release/retry.sh cannot model');
+    expect(githubReleaseBlock).toContain('if gh release create "$tag"');
+    expect(githubReleaseBlock).toContain('if gh release view "$tag" >/dev/null 2>&1; then');
+
+    expect(cargoPublishBlock).toContain(
+      'Stateful retry: scripts/release/retry.sh only repeats one command'
+    );
+    expect(cargoPublishBlock).toContain(
+      '(cd packages/cargo-shim && CARGO_REGISTRY_TOKEN="$publish_token" cargo publish --locked)'
+    );
+    expect(cargoPublishBlock).toContain('if published; then');
+    expect(cargoPublishBlock).toContain(`Version became visible after attempt ${attemptVar}`);
   });
 
   test('binary smoke helper checks version, exact health status, and failure logs', () => {
