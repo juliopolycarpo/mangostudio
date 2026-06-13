@@ -124,19 +124,9 @@ jobs:
           sums="$RUNNER_TEMP/SHA256SUMS"
           cp release-assets/SHA256SUMS "$sums"
 
-          append_if_missing() {
-            asset="$1"
-            sha="$2"
-            if ! grep -q "  ${asset}$" "$sums"; then
-              printf '%s  %s\n' "$sha" "$asset" >> "$sums"
-            fi
-          }
-
-          append_if_missing "mangostudio-${DRY_RUN_VERSION}-darwin-arm64.tar.gz" "$(printf 'a%.0s' {1..64})"
-          append_if_missing "mangostudio-${DRY_RUN_VERSION}-darwin-x64.tar.gz" "$(printf 'b%.0s' {1..64})"
-          append_if_missing "mangostudio-${DRY_RUN_VERSION}-linux-arm64.tar.gz" "$(printf 'c%.0s' {1..64})"
-          append_if_missing "mangostudio-${DRY_RUN_VERSION}-windows-x64.zip" "$(printf 'd%.0s' {1..64})"
-          append_if_missing "mangostudio-${DRY_RUN_VERSION}-windows-arm64.zip" "$(printf 'e%.0s' {1..64})"
+          bun ./scripts/release/fill-dry-run-checksums.ts \
+            --version "$DRY_RUN_VERSION" \
+            --sums "$sums"
 
           bun ./scripts/release/update-homebrew.ts \
             --version "$DRY_RUN_VERSION" \
