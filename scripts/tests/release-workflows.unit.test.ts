@@ -32,6 +32,25 @@ describe('release workflow binary gate', () => {
     expectJobNeeds(workflow, 'cargo-publish', String.raw`\[build, verify-build, github-release\]`);
   });
 
+  test('post-publish verification covers broader npm, crates.io, and Homebrew installs', () => {
+    const workflow = readText('.github/workflows/release.yml');
+
+    expect(workflow).toContain('  verify-release:');
+    expect(workflow).toContain('os: ubuntu-24.04-arm');
+    expect(workflow).toContain('platform: linux-arm64');
+    expect(workflow).toContain('os: macos-15-intel');
+    expect(workflow).toContain('platform: darwin-x64');
+    expect(workflow).toContain('windows-arm64 remains uncovered');
+
+    expectJobNeeds(workflow, 'verify-release', String.raw`\[build, npm-publish, github-release\]`);
+    expectJobNeeds(workflow, 'verify-cargo', String.raw`\[build, cargo-publish, github-release\]`);
+    expectJobNeeds(workflow, 'verify-homebrew', String.raw`\[build, homebrew\]`);
+
+    expect(workflow).toContain('cargo install mangostudio --version "$VERSION" --locked');
+    expect(workflow).toContain('MANGOSTUDIO_DIST_URL: https://github.com/');
+    expect(workflow).toContain('brew install juliopolycarpo/tap/mangostudio');
+  });
+
   test('release dry run exercises the same serve and health check path', () => {
     const workflow = readText('.github/workflows/release-dry-run.yml');
     const runnerTempVar = '$' + '{RUNNER_TEMP}';
