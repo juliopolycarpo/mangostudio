@@ -120,10 +120,12 @@ find_checksum() {
   local asset_name="$2"
   local checksum filename rest
 
+  # Keep in lockstep with archive-assets.ts, verify-checksum.ts, cargo-shim,
+  # and install.ps1; see scripts/tests/support/SHA256SUMS.sample.
   while read -r checksum filename rest || [ -n "${checksum:-}" ]; do
     filename="${filename#\*}"
     if [ "$filename" = "$asset_name" ]; then
-      printf '%s\n' "$checksum"
+      printf '%s\n' "$checksum" | tr '[:upper:]' '[:lower:]'
       return 0
     fi
   done < "$manifest"
@@ -210,44 +212,54 @@ print_path_hint() {
   log "Add ${bin_dir} to your PATH to run mangostudio from any shell."
 }
 
-while [ "$#" -gt 0 ]; do
-  case "$1" in
-    --local)
-      shift
-      [ "$#" -gt 0 ] || fail '--local requires an archive path'
-      LOCAL_ARCHIVE="$1"
-      ;;
-    --help | -h)
-      usage
-      exit 0
-      ;;
-    *) fail "unknown argument: $1" ;;
-  esac
-  shift
-done
+main() {
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --local)
+        shift
+        [ "$#" -gt 0 ] || fail '--local requires an archive path'
+        LOCAL_ARCHIVE="$1"
+        ;;
+      --help | -h)
+        usage
+        exit 0
+        ;;
+      *) fail "unknown argument: $1" ;;
+    esac
+    shift
+  done
 
-PLATFORM="$(detect_platform)"
-VERSION="$(resolve_version "$PLATFORM")"
-ASSET_NAME="mangostudio-${VERSION}-${PLATFORM}.tar.gz"
-INSTALL_ROOT="${MANGOSTUDIO_INSTALL_DIR:-${HOME}/.mango/dist}"
-BIN_DIR="${MANGOSTUDIO_BIN_DIR:-${HOME}/.local/bin}"
-TMP_DIR="$(mktemp -d)"
-trap 'rm -rf "$TMP_DIR"' EXIT
+  PLATFORM="$(detect_platform)"
+  VERSION="$(resolve_version "$PLATFORM")"
+  ASSET_NAME="mangostudio-${VERSION}-${PLATFORM}.tar.gz"
+  INSTALL_ROOT="${MANGOSTUDIO_INSTALL_DIR:-${HOME}/.mango/dist}"
+  BIN_DIR="${MANGOSTUDIO_BIN_DIR:-${HOME}/.local/bin}"
+  TMP_DIR="$(mktemp -d)"
+  trap 'rm -rf "$TMP_DIR"' EXIT
 
-if [ -n "$LOCAL_ARCHIVE" ]; then
-  ARCHIVE_PATH="$LOCAL_ARCHIVE"
-  log "Installing MangoStudio ${VERSION} from ${LOCAL_ARCHIVE}"
-else
-  ARCHIVE_PATH="${TMP_DIR}/${ASSET_NAME}"
-  CHECKSUM_PATH="${TMP_DIR}/SHA256SUMS"
-  log "Downloading MangoStudio ${VERSION} for ${PLATFORM}"
-  curl_download "${GITHUB_BASE}/releases/download/v${VERSION}/${ASSET_NAME}" "$ARCHIVE_PATH"
-  curl_download "${GITHUB_BASE}/releases/download/v${VERSION}/SHA256SUMS" "$CHECKSUM_PATH"
-  verify_checksum "$CHECKSUM_PATH" "$ARCHIVE_PATH" "$ASSET_NAME"
+  if [ -n "$LOCAL_ARCHIVE" ]; then
+    ARCHIVE_PATH="$LOCAL_ARCHIVE"
+    log "Installing MangoStudio ${VERSION} from ${LOCAL_ARCHIVE}"
+  else
+    ARCHIVE_PATH="${TMP_DIR}/${ASSET_NAME}"
+    CHECKSUM_PATH="${TMP_DIR}/SHA256SUMS"
+    log "Downloading MangoStudio ${VERSION} for ${PLATFORM}"
+    curl_download "${GITHUB_BASE}/releases/download/v${VERSION}/${ASSET_NAME}" "$ARCHIVE_PATH"
+    curl_download "${GITHUB_BASE}/releases/download/v${VERSION}/SHA256SUMS" "$CHECKSUM_PATH"
+    verify_checksum "$CHECKSUM_PATH" "$ARCHIVE_PATH" "$ASSET_NAME"
+  fi
+
+  INSTALL_DIR="$(install_archive "$ARCHIVE_PATH" "$VERSION" "$INSTALL_ROOT")"
+  link_binary "$INSTALL_DIR" "$BIN_DIR"
+  log "Installed MangoStudio ${VERSION} to ${INSTALL_DIR}"
+  log "Linked ${BIN_DIR}/mangostudio"
+  print_path_hint "$BIN_DIR"
+}
+
+# Run main unless the script is being sourced (e.g. by unit tests). Comparing
+# BASH_SOURCE[0] to $0 would wrongly skip `curl ... | bash`, where the script is
+# read from stdin and BASH_SOURCE[0] is unset; probing whether `return` is valid
+# detects sourcing correctly across direct, piped, and sourced execution.
+if ! (return 0 2>/dev/null); then
+  main "$@"
 fi
-
-INSTALL_DIR="$(install_archive "$ARCHIVE_PATH" "$VERSION" "$INSTALL_ROOT")"
-link_binary "$INSTALL_DIR" "$BIN_DIR"
-log "Installed MangoStudio ${VERSION} to ${INSTALL_DIR}"
-log "Linked ${BIN_DIR}/mangostudio"
-print_path_hint "$BIN_DIR"
