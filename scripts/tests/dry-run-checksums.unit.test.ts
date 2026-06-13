@@ -27,7 +27,7 @@ describe('fillDryRunChecksumManifest', () => {
     for (const target of ALL_BINARY_TARGETS) {
       expect(filled).toContain(`  ${releaseArchiveFileName('0.0.0-dryrun', target)}\n`);
     }
-    expect(filled.match(new RegExp(existingAsset, 'g'))).toHaveLength(1);
+    expect(filled.split(existingAsset).length - 1).toBe(1);
   });
 
   test('does not rewrite a complete manifest', () => {

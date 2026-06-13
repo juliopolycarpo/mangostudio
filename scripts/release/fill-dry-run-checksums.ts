@@ -21,7 +21,7 @@ is missing from a dry-run SHA256SUMS manifest.
 Flags:
   --version <version>  Release version used in archive names
   --sums <path>        SHA256SUMS file to update in place
-  --help              Show this help message`);
+  --help               Show this help message`);
   process.exit(0);
 };
 
