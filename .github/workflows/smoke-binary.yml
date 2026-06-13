@@ -9,7 +9,7 @@ permissions:
 
 jobs:
   smoke:
-    name: ${{ matrix.platform }}
+    name: ${{ matrix.platform }} / Docker ${{ matrix.variant }} ${{ matrix.docker_arch }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 10
     strategy:
@@ -18,11 +18,40 @@ jobs:
         include:
           - platform: linux-x64
             runner: ubuntu-latest
+            variant: bookworm
+            docker_arch: amd64
+            binary_platform: linux-x64
+            dockerfile: Dockerfile
+          - platform: linux-x64
+            runner: ubuntu-latest
+            variant: bookworm
+            docker_arch: arm64
+            binary_platform: linux-arm64
+            dockerfile: Dockerfile
+          - platform: linux-x64
+            runner: ubuntu-latest
+            variant: alpine
+            docker_arch: amd64
+            binary_platform: linux-x64-musl
+            dockerfile: Dockerfile.alpine
+          - platform: linux-x64
+            runner: ubuntu-latest
+            variant: alpine
+            docker_arch: arm64
+            binary_platform: linux-arm64-musl
+            dockerfile: Dockerfile.alpine
 
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
       - uses: ./.github/actions/setup-mango
+
+      - name: Install arm64 Docker emulation
+        if: matrix.docker_arch == 'arm64'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends binfmt-support qemu-user-static
+          sudo update-binfmts --enable qemu-aarch64
 
       - name: Run smoke test
         run: bun run scripts/test-build.ts
@@ -30,77 +59,22 @@ jobs:
           PLATFORM: ${{ matrix.platform }}
           API_PORT: "13001"
 
-      - name: Build Linux x64 binary for Docker
-        run: bun run build:binary --platform linux-x64
-
-      - name: Build Linux musl x64 binary for Docker
-        run: bun run build:binary --platform linux-x64-musl
+      - name: Build Docker binary
+        run: bun run build:binary --platform ${{ matrix.binary_platform }}
 
       - name: Stage Docker context
-        run: bun ./scripts/release/stage-docker-ctx.ts --arch amd64
+        run: bun ./scripts/release/stage-docker-ctx.ts --arch ${{ matrix.docker_arch }} --variant ${{ matrix.variant }}
 
-      - name: Build Bookworm Docker image
-        run: docker build --platform linux/amd64 --build-arg VERSION=smoke -t mangostudio:smoke-bookworm .
+      - name: Build Docker image
+        run: |
+          docker build \
+            --platform linux/${{ matrix.docker_arch }} \
+            --build-arg VERSION=smoke \
+            -f ${{ matrix.dockerfile }} \
+            -t mangostudio:smoke-${{ matrix.variant }}-${{ matrix.docker_arch }} .
 
-      - name: Build Alpine Docker image
-        run: docker build --platform linux/amd64 --build-arg VERSION=smoke -f Dockerfile.alpine -t mangostudio:smoke-alpine .
-
-      - name: Run Bookworm Docker smoke test
+      - name: Run Docker smoke test
         env:
           BETTER_AUTH_SECRET: smoke-test-secret-at-least-32-characters-long
-        run: |
-          docker run --rm -d \
-            --name mangostudio-smoke \
-            --platform linux/amd64 \
-            -p 13002:3001 \
-            -e BETTER_AUTH_SECRET="$BETTER_AUTH_SECRET" \
-            -e GEMINI_API_KEY=dummy \
-            mangostudio:smoke-bookworm
-          trap 'docker rm -f mangostudio-smoke >/dev/null 2>&1 || true' EXIT
-
-          ready=0
-          for _ in $(seq 1 30); do
-            if curl -fsS http://localhost:13002/api/health >/dev/null 2>&1; then
-              ready=1
-              break
-            fi
-            sleep 1
-          done
-
-          if [ "$ready" != "1" ]; then
-            docker logs mangostudio-smoke
-            exit 1
-          fi
-
-          curl -fsS http://localhost:13002/
-          curl -fsS http://localhost:13002/ | grep -q '<html'
-
-      - name: Run Alpine Docker smoke test
-        env:
-          BETTER_AUTH_SECRET: smoke-test-secret-at-least-32-characters-long
-        run: |
-          docker run --rm -d \
-            --name mangostudio-smoke \
-            --platform linux/amd64 \
-            -p 13002:3001 \
-            -e BETTER_AUTH_SECRET="$BETTER_AUTH_SECRET" \
-            -e GEMINI_API_KEY=dummy \
-            mangostudio:smoke-alpine
-          trap 'docker rm -f mangostudio-smoke >/dev/null 2>&1 || true' EXIT
-
-          ready=0
-          for _ in $(seq 1 30); do
-            if curl -fsS http://localhost:13002/api/health >/dev/null 2>&1; then
-              ready=1
-              break
-            fi
-            sleep 1
-          done
-
-          if [ "$ready" != "1" ]; then
-            docker logs mangostudio-smoke
-            exit 1
-          fi
-
-          curl -fsS http://localhost:13002/
-          curl -fsS http://localhost:13002/ | grep -q '<html'
+          GEMINI_API_KEY: dummy
+        run: scripts/release/smoke-docker-image.sh mangostudio:smoke-${{ matrix.variant }}-${{ matrix.docker_arch }} linux/${{ matrix.docker_arch }} 13002
