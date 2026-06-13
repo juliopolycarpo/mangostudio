@@ -316,8 +316,9 @@ jobs:
 
   homebrew:
     # Renders Formula/mangostudio.rb from the released SHA256SUMS and pushes it
-    # to the shared tap. Nothing depends on this job, so a tap failure never
-    # blocks the GitHub Release or npm publication.
+    # to the shared tap. Only the post-publish verify-homebrew check depends on
+    # this job, so a tap failure never blocks the GitHub Release or npm
+    # publication.
     name: Update Homebrew tap
     needs: [build, verify-build, github-release]
     runs-on: ubuntu-latest
@@ -386,9 +387,10 @@ jobs:
 
   cargo-publish:
     # Publishes the thin launcher crate (packages/cargo-shim) so `cargo
-    # install mangostudio` resolves this release. Nothing depends on this job,
-    # so a crates.io failure never blocks the GitHub Release, npm, or Homebrew
-    # channels. Already-published versions are skipped, and an upload that
+    # install mangostudio` resolves this release. Only the post-publish
+    # verify-cargo check depends on this job, so a crates.io failure never
+    # blocks the GitHub Release, npm, or Homebrew channels. Already-published
+    # versions are skipped, and an upload that
     # lands despite a reported error is detected between retries, so re-runs
     # converge.
     name: Publish to crates.io
@@ -456,8 +458,8 @@ jobs:
           - os: windows-latest
             platform: windows-x64
             binary: mangostudio.exe
-          # windows-arm64 remains uncovered while windows-11-arm is in public
-          # preview and the npm wrapper smoke already exercises Windows x64.
+          # windows-arm64 remains uncovered; the npm wrapper smoke already
+          # exercises the Windows install path on x64.
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
