@@ -1,24 +1,13 @@
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { fileError } from './fs-assert';
 import { MAIN_PACKAGE, NPM_PLATFORMS, type NpmPlatform, platformPackageName } from './npm-pack';
 
 interface ManifestReadResult {
   readonly errors: string[];
   readonly manifest?: Record<string, unknown>;
 }
-
-const missingFileError = (filePath: string, label: string): string[] => {
-  if (!existsSync(filePath)) {
-    return [`Missing ${label}: ${filePath}`];
-  }
-
-  if (statSync(filePath).isFile()) {
-    return [];
-  }
-
-  return [`Expected ${label} to be a file: ${filePath}`];
-};
 
 const readManifest = (manifestPath: string): ManifestReadResult => {
   if (!existsSync(manifestPath)) {
@@ -112,8 +101,8 @@ const platformManifestErrors = (packageDir: string, platform: NpmPlatform): stri
 };
 
 const platformPackageErrors = (packageDir: string, platform: NpmPlatform): string[] => [
-  ...missingFileError(join(packageDir, platform.binary), 'binary'),
-  ...missingFileError(join(packageDir, 'public', 'index.html'), 'frontend index.html'),
+  ...fileError(join(packageDir, platform.binary), 'binary'),
+  ...fileError(join(packageDir, 'public', 'index.html'), 'frontend index.html'),
   ...platformManifestErrors(packageDir, platform),
 ];
 
@@ -137,7 +126,7 @@ const mainPackageErrors = (packageDir: string, platforms: readonly NpmPlatform[]
 
   return [
     ...errors,
-    ...missingFileError(join(packageDir, 'bin', 'mangostudio.js'), 'CLI wrapper'),
+    ...fileError(join(packageDir, 'bin', 'mangostudio.js'), 'CLI wrapper'),
     ...expectedStringError(manifest, 'name', MAIN_PACKAGE),
     ...expectedVersionError(manifest),
     ...optionalDependencyErrors(manifest, platforms),
@@ -149,8 +138,8 @@ const mainPackageErrors = (packageDir: string, platforms: readonly NpmPlatform[]
  */
 export function assertPlatformBuildAssets(sourceDir: string, platform: NpmPlatform): void {
   assertNoErrors(`Invalid build output for ${platform.arch}`, [
-    ...missingFileError(join(sourceDir, platform.binary), 'binary'),
-    ...missingFileError(join(sourceDir, 'public', 'index.html'), 'frontend index.html'),
+    ...fileError(join(sourceDir, platform.binary), 'binary'),
+    ...fileError(join(sourceDir, 'public', 'index.html'), 'frontend index.html'),
   ]);
 }
 
