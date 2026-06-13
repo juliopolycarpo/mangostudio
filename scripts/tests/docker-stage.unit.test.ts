@@ -163,4 +163,27 @@ describe('Docker release wiring', () => {
     expect(smokeHelper).toContain("grep -q '<html'");
     expect(smokeHelper).toContain('docker logs "$container_name"');
   });
+
+  test('Dockerfile variants document their lockstep and stay byte-for-byte past the variant segments', () => {
+    const dockerfile = readText('Dockerfile');
+    const alpineDockerfile = readText('Dockerfile.alpine');
+
+    for (const contents of [dockerfile, alpineDockerfile]) {
+      expect(contents).toContain('Lockstep with the other MangoStudio image variant');
+      expect(contents).toContain('the `FROM` base image');
+      expect(contents).toContain('the user/package-install `RUN`');
+      expect(contents).toContain('the variant segment inside the docker-ctx COPY paths');
+    }
+
+    // Strip the three documented variant segments so the remaining text must
+    // be byte-for-byte identical. A drift here is the silent mistake the
+    // lockstep comment warns against, so fail loudly when it happens.
+    const normalize = (contents: string): string =>
+      contents
+        .replace(/^FROM .*$/m, 'FROM <variant>')
+        .replace(/^RUN[\s\S]*?\n\n/m, 'RUN <variant>\n\n')
+        .replace(/^COPY docker-ctx\/[a-z]+\//gm, 'COPY docker-ctx/<variant>/');
+
+    expect(normalize(dockerfile)).toBe(normalize(alpineDockerfile));
+  });
 });
