@@ -196,8 +196,9 @@ describe('Docker release wiring', () => {
     expect(healthHelper).toContain('"status"[[:space:]]*:[[:space:]]*"ok"');
 
     for (const script of [binarySmoke, dockerSmoke]) {
+      const bashSource = '$' + '{BASH_SOURCE[0]}';
       expect(script).toContain(
-        'source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/wait-for-health.sh"'
+        `source "$(cd "$(dirname "${bashSource}")" && pwd)/wait-for-health.sh"`
       );
       expect(script).toContain('wait_for_health "$port"');
     }
