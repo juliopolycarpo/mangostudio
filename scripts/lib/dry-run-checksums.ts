@@ -2,6 +2,8 @@ import { createHash } from 'node:crypto';
 
 import { ALL_BINARY_TARGETS, releaseArchiveFileName } from './release-targets';
 
+// Keep in lockstep with verify-checksum.ts, archive-assets.ts, cargo-shim,
+// install.sh, and install.ps1; see scripts/tests/support/SHA256SUMS.sample.
 const CHECKSUM_LINE_PATTERN = /^([a-fA-F0-9]{64})\s+\*?(.+)$/;
 
 export interface DryRunChecksumRow {

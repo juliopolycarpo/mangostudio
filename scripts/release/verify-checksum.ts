@@ -14,8 +14,8 @@ export function sha256File(filePath: string): string {
 /** Find an asset checksum in a sha256sum-compatible manifest. // Usage: findChecksum(manifest, 'app.tar.gz') */
 export function findChecksum(manifest: string, assetName: string): string {
   for (const line of manifest.split(/\r?\n/)) {
-    // Keep in lockstep with archive-assets.ts, cargo-shim, install.sh, and
-    // install.ps1; see scripts/tests/support/SHA256SUMS.sample.
+    // Keep in lockstep with archive-assets.ts, cargo-shim, install.sh,
+    // install.ps1, and dry-run-checksums.ts; see scripts/tests/support/SHA256SUMS.sample.
     const match = line.trim().match(/^([a-fA-F0-9]{64})\s+\*?(.+)$/);
     if (match?.[2] === assetName) return match[1].toLowerCase();
   }
