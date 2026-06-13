@@ -1,4 +1,14 @@
 # syntax=docker/dockerfile:1
+#
+# Lockstep with the other MangoStudio image variant. The lines that may
+# legitimately differ between this file and its pair are exactly three:
+# 1. the `FROM` base image,
+# 2. the user/package-install `RUN` that follows it (apt-get vs apk, etc.),
+# 3. the variant segment inside the docker-ctx COPY paths (matches the
+# stage-docker-ctx.ts directory layout).
+# Everything else (LABEL, ENV, USER, VOLUME, EXPOSE, ENTRYPOINT, CMD, and the
+# shape of the COPY lines) must stay byte-for-byte identical so a hardening
+# change applied here propagates to the other variant by copy/paste.
 
 FROM alpine:3.21
 ARG TARGETARCH

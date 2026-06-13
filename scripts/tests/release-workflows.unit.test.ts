@@ -148,15 +148,19 @@ describe('release workflow binary gate', () => {
     expect(cargoPublishBlock).toContain(`Version became visible after attempt ${attemptVar}`);
   });
 
-  test('binary smoke helper checks version, exact health status, and failure logs', () => {
+  test('binary smoke helper checks version, delegates the health poll, and surfaces failure logs', () => {
     const helper = readText('scripts/release/smoke-binary.sh');
     const portVar = '$' + '{port}';
+    const bashSource = '$' + '{BASH_SOURCE[0]}';
 
     expect(helper).toContain('"$binary_path" --version');
     expect(helper).toContain('API_HOST=127.0.0.1');
     expect(helper).toContain(`"$binary_path" serve "127.0.0.1:${portVar}"`);
-    expect(helper).toContain('/api/health');
-    expect(helper).toContain('"status"[[:space:]]*:[[:space:]]*"ok"');
+    expect(helper).toContain(
+      `source "$(cd "$(dirname "${bashSource}")" && pwd)/wait-for-health.sh"`
+    );
+    expect(helper).toContain('wait_for_health "$port" "kill -0 $server_pid"');
+    expect(helper).toContain('exited before becoming healthy');
     expect(helper).toContain('cat "$server_log"');
   });
 });
