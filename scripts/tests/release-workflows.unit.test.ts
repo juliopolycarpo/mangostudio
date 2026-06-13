@@ -61,6 +61,16 @@ describe('release workflow binary gate', () => {
     );
   });
 
+  test('release dry run derives placeholder checksums from release targets', () => {
+    const workflow = readText('.github/workflows/release-dry-run.yml');
+
+    expect(workflow).toContain('bun ./scripts/release/fill-dry-run-checksums.ts \\');
+    expect(workflow).toContain('--version "$DRY_RUN_VERSION" \\');
+    expect(workflow).toContain('--sums "$sums"');
+    expect(workflow).not.toContain('append_if_missing');
+    expect(workflow).not.toContain('darwin-arm64.tar.gz" "$(printf');
+  });
+
   test('release dry run exercises the Docker release-asset staging path', () => {
     const workflow = readText('.github/workflows/release-dry-run.yml');
 
