@@ -230,6 +230,54 @@ jobs:
             ghcr.io/${{ github.repository }}:${{ needs.build.outputs.version }}-alpine
             ghcr.io/${{ github.repository }}:alpine
 
+  verify-image:
+    name: Verify published Docker image (${{ matrix.variant }}, ${{ matrix.arch }})
+    needs: [build, docker]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: bookworm
+            arch: amd64
+            tag_suffix: ""
+          - variant: bookworm
+            arch: arm64
+            tag_suffix: ""
+          - variant: alpine
+            arch: amd64
+            tag_suffix: "-alpine"
+          - variant: alpine
+            arch: arm64
+            tag_suffix: "-alpine"
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Set up QEMU for arm64 emulation
+        if: matrix.arch == 'arm64'
+        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
+        with:
+          platforms: arm64
+
+      - name: Log in to GHCR
+        env:
+          GHCR_TOKEN: ${{ github.token }}
+        run: echo "$GHCR_TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Pull and smoke published image
+        env:
+          BETTER_AUTH_SECRET: smoke-test-secret-at-least-32-characters-long
+          GEMINI_API_KEY: dummy
+          IMAGE: ghcr.io/${{ github.repository }}:${{ needs.build.outputs.version }}${{ matrix.tag_suffix }}
+          PLATFORM: linux/${{ matrix.arch }}
+        run: |
+          docker pull --platform "$PLATFORM" "$IMAGE"
+          scripts/release/smoke-docker-image.sh "$IMAGE" "$PLATFORM" 13002
+
   npm-publish:
     name: Publish npm packages
     needs: [build, verify-build]

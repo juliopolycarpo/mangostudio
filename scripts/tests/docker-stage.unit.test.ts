@@ -123,16 +123,44 @@ describe('Docker release wiring', () => {
     expect(workflow).toContain('file: Dockerfile.alpine');
   });
 
+  test('release verifies the published multi-arch GHCR images', () => {
+    const workflow = readText('.github/workflows/release.yml');
+    const repoExpression = '$' + '{{ github.repository }}';
+    const versionExpression = '$' + '{{ needs.build.outputs.version }}';
+
+    expect(workflow).toContain('verify-image:');
+    expect(workflow).toContain('needs: [build, docker]');
+    expect(workflow).toContain('packages: read');
+    expect(workflow).toContain('arch: amd64');
+    expect(workflow).toContain('arch: arm64');
+    expect(workflow).toContain('variant: bookworm');
+    expect(workflow).toContain('variant: alpine');
+    expect(workflow).toContain(`IMAGE: ghcr.io/${repoExpression}:${versionExpression}`);
+    expect(workflow).toContain('tag_suffix: "-alpine"');
+    expect(workflow).toContain('docker pull --platform "$PLATFORM" "$IMAGE"');
+    expect(workflow).toContain('scripts/release/smoke-docker-image.sh "$IMAGE" "$PLATFORM"');
+  });
+
   test('smoke workflow builds and runs the Docker image variants before PR merge', () => {
     const workflow = readText('.github/workflows/smoke-binary.yml');
+    const smokeHelper = readText('scripts/release/smoke-docker-image.sh');
+    const dockerArchExpression = '$' + '{{ matrix.docker_arch }}';
+    const binaryPlatformExpression = '$' + '{{ matrix.binary_platform }}';
 
-    expect(workflow).toContain('build:binary --platform linux-x64');
-    expect(workflow).toContain('build:binary --platform linux-x64-musl');
-    expect(workflow).toContain('stage-docker-ctx.ts --arch amd64');
-    expect(workflow).toContain('docker build --platform linux/amd64');
+    expect(workflow).toContain('binary_platform: linux-x64');
+    expect(workflow).toContain('binary_platform: linux-x64-musl');
+    expect(workflow).toContain('binary_platform: linux-arm64');
+    expect(workflow).toContain('binary_platform: linux-arm64-musl');
+    expect(workflow).toContain(`build:binary --platform ${binaryPlatformExpression}`);
+    expect(workflow).toContain(`stage-docker-ctx.ts --arch ${dockerArchExpression}`);
+    expect(workflow).toContain(`--platform linux/${dockerArchExpression}`);
+    expect(workflow).toContain('docker_arch: amd64');
+    expect(workflow).toContain('docker_arch: arm64');
     expect(workflow).toContain('Dockerfile.alpine');
-    expect(workflow).toContain('docker run --rm -d');
-    expect(workflow).toContain('/api/health');
-    expect(workflow).toContain("grep -q '<html'");
+    expect(workflow).toContain('scripts/release/smoke-docker-image.sh');
+    expect(smokeHelper).toContain('docker run -d');
+    expect(smokeHelper).toContain('/api/health');
+    expect(smokeHelper).toContain("grep -q '<html'");
+    expect(smokeHelper).toContain('docker logs "$container_name"');
   });
 });
