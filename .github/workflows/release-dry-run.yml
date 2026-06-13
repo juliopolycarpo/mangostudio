@@ -17,8 +17,13 @@ on:
       - "scripts/lib/release-version.ts"
       - "packages/cli/**"
       - "packages/cargo-shim/**"
+      # The dry-run builds the default Bookworm image from the staged release
+      # assets (see the Docker steps in dry-run-linux). Dockerfile.alpine is
+      # intentionally absent here: ci.yml's always-on `smoke` job builds both
+      # Dockerfiles from build output on every PR, so the Alpine image is already
+      # exercised pre-merge. This workflow's unique Docker value is the
+      # release-asset staging path, which the Bookworm build covers.
       - "Dockerfile"
-      - "Dockerfile.alpine"
   workflow_dispatch:
   schedule:
     - cron: "0 7 * * 1"
@@ -67,7 +72,7 @@ jobs:
   dry-run-linux:
     name: Linux release dry run
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
@@ -149,6 +154,31 @@ jobs:
             --sums "$sums" \
             --out "$RUNNER_TEMP/mangostudio.json"
           bun -e 'JSON.parse(await Bun.file(process.argv.at(-1)).text())' "$RUNNER_TEMP/mangostudio.json"
+
+      # Docker dry run. The release `docker` job stages images from the published
+      # release tarballs (stage-docker-ctx.ts --release-assets), not from the raw
+      # build output. ci.yml's always-on `smoke` job already builds both
+      # Dockerfiles from build output on every PR, so the unique value here is the
+      # release-asset staging path. Stage the linux-x64 archive produced above
+      # into the Bookworm context, build the default image, and boot it — the same
+      # asset → context → image → health chain the real release runs, under
+      # 0.0.0-dryrun. Native amd64 only (no QEMU): arm64 and Alpine are covered by
+      # ci.yml's smoke matrix.
+      - name: Stage Bookworm Docker context from release assets
+        run: bun ./scripts/release/stage-docker-ctx.ts --release-assets release-assets --arch amd64 --variant bookworm
+        env:
+          VERSION: ${{ env.DRY_RUN_VERSION }}
+
+      - name: Build Bookworm Docker image
+        run: |
+          docker build \
+            --platform linux/amd64 \
+            --build-arg VERSION="${DRY_RUN_VERSION}" \
+            -f Dockerfile \
+            -t mangostudio:dryrun-bookworm-amd64 .
+
+      - name: Verify Docker image serves health
+        run: scripts/release/smoke-docker-image.sh mangostudio:dryrun-bookworm-amd64 linux/amd64 13002
 
   dry-run-cargo:
     name: Cargo publish dry run

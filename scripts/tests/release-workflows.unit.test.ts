@@ -61,6 +61,29 @@ describe('release workflow binary gate', () => {
     );
   });
 
+  test('release dry run exercises the Docker release-asset staging path', () => {
+    const workflow = readText('.github/workflows/release-dry-run.yml');
+
+    // Stages from the published tarballs (the release `docker` job's path), not
+    // from build output, so it covers what ci.yml's smoke job does not.
+    expect(workflow).toContain(
+      'bun ./scripts/release/stage-docker-ctx.ts --release-assets release-assets --arch amd64 --variant bookworm'
+    );
+    expect(workflow).toContain('-f Dockerfile \\');
+    expect(workflow).toContain(
+      'scripts/release/smoke-docker-image.sh mangostudio:dryrun-bookworm-amd64 linux/amd64 13002'
+    );
+  });
+
+  test('release dry run path filter does not over-promise Alpine Docker coverage', () => {
+    const workflow = readText('.github/workflows/release-dry-run.yml');
+
+    // The dry-run only builds the Bookworm image, so its paths: filter must not
+    // claim to exercise Dockerfile.alpine; ci.yml's smoke job covers that.
+    expect(workflow).toContain('- "Dockerfile"');
+    expect(workflow).not.toContain('- "Dockerfile.alpine"');
+  });
+
   test('binary smoke helper checks version, exact health status, and failure logs', () => {
     const helper = readText('scripts/release/smoke-binary.sh');
     const portVar = '$' + '{port}';
