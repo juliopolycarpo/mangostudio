@@ -3,7 +3,12 @@ import { describe, expect, test } from 'bun:test';
 import { readText } from './support/read-text';
 
 function expectJobNeeds(workflow: string, job: string, needs: string): void {
-  expect(workflow).toMatch(new RegExp(`\\n  ${job}:\\n[\\s\\S]*?\\n    needs: ${needs}`));
+  // Isolate the job's own block (up to the next top-level `  <job>:` header or
+  // EOF) before asserting `needs`, so a regression in one job cannot be masked
+  // by a later job that happens to share the same `needs:` value.
+  const block = new RegExp(`\\n  ${job}:\\n([\\s\\S]*?)(?=\\n  \\S|$)`).exec(workflow);
+  expect(block, `job "${job}" not found in workflow`).not.toBeNull();
+  expect(block?.[1]).toMatch(new RegExp(`\\n    needs: ${needs}(?:\\n|$)`));
 }
 
 describe('release workflow binary gate', () => {
