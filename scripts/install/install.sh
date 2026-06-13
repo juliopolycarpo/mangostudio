@@ -256,6 +256,10 @@ main() {
   print_path_hint "$BIN_DIR"
 }
 
-if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+# Run main unless the script is being sourced (e.g. by unit tests). Comparing
+# BASH_SOURCE[0] to $0 would wrongly skip `curl ... | bash`, where the script is
+# read from stdin and BASH_SOURCE[0] is unset; probing whether `return` is valid
+# detects sourcing correctly across direct, piped, and sourced execution.
+if ! (return 0 2>/dev/null); then
   main "$@"
 fi
