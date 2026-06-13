@@ -90,9 +90,35 @@ jobs:
           path: dist-npm/
           retention-days: 7
 
+  verify-build:
+    name: Verify built Linux binary
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: release-assets
+          path: release-assets
+
+      - name: Run Linux x64 binary smoke test
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          archive="release-assets/mangostudio-${VERSION}-linux-x64.tar.gz"
+          mkdir -p verify-assets/extract
+          tar -xzf "$archive" -C verify-assets/extract
+          binary_path="verify-assets/extract/mangostudio"
+          chmod +x "$binary_path" 2>/dev/null || true
+          scripts/release/smoke-binary.sh "$binary_path" "$VERSION" 13003
+
   github-release:
     name: Publish GitHub Release
-    needs: build
+    needs: [build, verify-build]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -146,7 +172,7 @@ jobs:
     # the build job. Nothing depends on this job, so a registry failure never
     # blocks the GitHub Release, npm, Homebrew, Scoop, or crates.io channels.
     name: Publish Docker images
-    needs: build
+    needs: [build, verify-build]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -206,7 +232,7 @@ jobs:
 
   npm-publish:
     name: Publish npm packages
-    needs: build
+    needs: [build, verify-build]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -245,7 +271,7 @@ jobs:
     # to the shared tap. Nothing depends on this job, so a tap failure never
     # blocks the GitHub Release or npm publication.
     name: Update Homebrew tap
-    needs: [build, github-release]
+    needs: [build, verify-build, github-release]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -280,7 +306,7 @@ jobs:
     # to the shared Scoop bucket. Nothing depends on this job, so a bucket
     # failure never blocks the GitHub Release or npm publication.
     name: Update Scoop bucket
-    needs: [build, github-release]
+    needs: [build, verify-build, github-release]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -318,7 +344,7 @@ jobs:
     # lands despite a reported error is detected between retries, so re-runs
     # converge.
     name: Publish to crates.io
-    needs: [build, github-release]
+    needs: [build, verify-build, github-release]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
