@@ -292,8 +292,7 @@ mod tests {
             Ok("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
         );
         assert_eq!(
-            expected_checksum(CHECKSUM_FIXTURE, "mangostudio-0.1.0-darwin-arm64.tar.gz")
-                .as_deref(),
+            expected_checksum(CHECKSUM_FIXTURE, "mangostudio-0.1.0-darwin-arm64.tar.gz").as_deref(),
             Ok("fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210")
         );
         assert_eq!(
