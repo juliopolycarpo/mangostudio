@@ -195,8 +195,10 @@ fn fetch(url: &str) -> Result<Vec<u8>, String> {
         .map_err(|error| error.to_string())
 }
 
-/// Find the sha256 for `asset` in a `sha256sum`-style manifest. Lines look
-/// like `<hex>  <name>`; a `*` before the name marks binary mode and is
+/// Find the sha256 for `asset` in a `sha256sum`-style manifest. The format is
+/// produced by archive-assets.ts and pinned by
+/// scripts/tests/support/SHA256SUMS.sample alongside verify-checksum.ts,
+/// install.sh, and install.ps1. A `*` before the name marks binary mode and is
 /// equivalent.
 fn expected_checksum(manifest: &str, asset: &str) -> Result<String, String> {
     for line in manifest.lines() {
@@ -275,6 +277,8 @@ fn run_binary(binary: &Path) -> Result<(), String> {
 mod tests {
     use super::*;
 
+    const CHECKSUM_FIXTURE: &str = include_str!("../../../scripts/tests/support/SHA256SUMS.sample");
+
     #[test]
     fn platform_id_maps_the_test_host_to_a_release_asset() {
         let id = platform_id().expect("test host is a supported release platform");
@@ -282,22 +286,27 @@ mod tests {
     }
 
     #[test]
-    fn expected_checksum_finds_plain_and_binary_mode_entries() {
-        let manifest =
-            "aaaa  mangostudio-0.1.0-linux-x64.tar.gz\nBBBB *mangostudio-0.1.0-darwin-arm64.tar.gz\n";
+    fn expected_checksum_reads_shared_fixture_line_shapes() {
         assert_eq!(
-            expected_checksum(manifest, "mangostudio-0.1.0-linux-x64.tar.gz").as_deref(),
-            Ok("aaaa")
+            expected_checksum(CHECKSUM_FIXTURE, "mangostudio-0.1.0-linux-x64.tar.gz").as_deref(),
+            Ok("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
         );
         assert_eq!(
-            expected_checksum(manifest, "mangostudio-0.1.0-darwin-arm64.tar.gz").as_deref(),
-            Ok("bbbb")
+            expected_checksum(CHECKSUM_FIXTURE, "mangostudio-0.1.0-darwin-arm64.tar.gz")
+                .as_deref(),
+            Ok("fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210")
+        );
+        assert_eq!(
+            expected_checksum(CHECKSUM_FIXTURE, "mangostudio-0.1.0-windows-x64.zip").as_deref(),
+            Ok("abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789")
         );
     }
 
     #[test]
     fn expected_checksum_rejects_unlisted_assets() {
-        assert!(expected_checksum("aaaa  other.tar.gz\n", "missing.tar.gz").is_err());
+        assert!(
+            expected_checksum(CHECKSUM_FIXTURE, "mangostudio-0.1.0-linux-arm64.tar.gz").is_err()
+        );
     }
 
     #[test]

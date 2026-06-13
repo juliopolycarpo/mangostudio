@@ -134,6 +134,8 @@ function assertFile(path: string, label: string): void {
 }
 
 function writeChecksumManifest(plan: ReleaseAssetPlan): void {
+  // Format contract is pinned by scripts/tests/support/SHA256SUMS.sample and
+  // consumed by verify-checksum.ts, cargo-shim, install.sh, and install.ps1.
   const lines = plan.checksummedAssetPaths.map((assetPath) => {
     assertFile(assetPath, basename(assetPath));
     return `${sha256File(assetPath)}  ${basename(assetPath)}`;
