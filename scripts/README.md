@@ -37,6 +37,7 @@ importing the specific module in new code:
 | `exec.ts`            | `runCommand`, `runWorkspaceScript`, `runParallel`, `runTask`    |
 | `summary.ts`         | Pass/fail reporting + exit handling                             |
 | `fs.ts`              | Cross-platform `removePaths` (no spawned `rm`)                  |
+| `fs-assert.ts`       | `assertFile`/`assertDirectory` (throw) + `fileError` (collect)  |
 | `config.ts`          | Workspace definitions + root lint/format path lists             |
 | `changelog.ts`       | git-cliff arg/format logic (wrapped behind a project API)       |
 | `npm-pack.ts`        | npm distribution manifest builders                              |

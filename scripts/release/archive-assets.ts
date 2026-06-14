@@ -2,18 +2,10 @@
 // Assemble the GitHub Release asset set with stable names and flat archive roots.
 
 import { createHash } from 'node:crypto';
-import {
-  chmodSync,
-  cpSync,
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  rmSync,
-  statSync,
-  writeFileSync,
-} from 'node:fs';
+import { chmodSync, cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 
+import { assertDirectory, assertFile } from '../lib/fs-assert';
 import {
   createReleaseAssetPlan,
   type FrontendArchivePlan,
@@ -119,18 +111,6 @@ function assertPlatformInputs(plan: PlatformArchivePlan): void {
   assertDirectory(plan.publicDir, `${plan.platform.arch} public directory`);
   assertFile(join(plan.publicDir, 'index.html'), `${plan.platform.arch} public/index.html`);
   assertFile(plan.readmePath, 'standalone README.md');
-}
-
-function assertDirectory(path: string, label: string): void {
-  if (!existsSync(path) || !statSync(path).isDirectory()) {
-    throw new Error(`Missing ${label}: ${path}`);
-  }
-}
-
-function assertFile(path: string, label: string): void {
-  if (!existsSync(path) || !statSync(path).isFile()) {
-    throw new Error(`Missing ${label}: ${path}`);
-  }
 }
 
 function writeChecksumManifest(plan: ReleaseAssetPlan): void {

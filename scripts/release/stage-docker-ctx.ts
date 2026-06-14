@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 
-import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, rmSync, statSync } from 'node:fs';
+import { chmodSync, cpSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ROOT_DIR } from '../lib/config';
@@ -12,6 +12,7 @@ import {
   parseDockerArchFilter,
   parseDockerVariantFilter,
 } from '../lib/docker-stage';
+import { assertDirectory, assertFile } from '../lib/fs-assert';
 import { resolveReleaseVersion } from '../lib/release-version';
 import {
   assertNoUnexpectedArguments,
@@ -104,18 +105,6 @@ function copyTarget(target: DockerStageTarget, binaryPath: string, publicDir: st
   cpSync(binaryPath, target.stagedBinaryPath);
   chmodSync(target.stagedBinaryPath, 0o755);
   cpSync(publicDir, target.stagedPublicDir, { recursive: true });
-}
-
-function assertFile(path: string, label: string): void {
-  if (!existsSync(path) || !statSync(path).isFile()) {
-    throw new Error(`Missing ${label}: ${path}`);
-  }
-}
-
-function assertDirectory(path: string, label: string): void {
-  if (!existsSync(path) || !statSync(path).isDirectory()) {
-    throw new Error(`Missing ${label}: ${path}`);
-  }
 }
 
 async function runCommand(cmd: string[]): Promise<void> {
