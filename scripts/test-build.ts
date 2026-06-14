@@ -189,7 +189,7 @@ async function validateReleaseArchive(): Promise<void> {
   if (PLATFORM.arch !== 'linux-x64') return;
 
   console.log('\n📦 Validating release archive layout...');
-  const extractDir = await makeTempDir();
+  const extractDir = makeTempDir();
 
   try {
     await run(['tar', '-xzf', ARCHIVE_PATH, '-C', extractDir]);
@@ -219,7 +219,7 @@ async function smokeLocalInstaller(): Promise<void> {
   }
 
   console.log('\n📦 Installing release archive with install.sh --local...');
-  const tempHome = await makeTempDir();
+  const tempHome = makeTempDir();
 
   try {
     await run(['bash', 'scripts/install/install.sh', '--local', ARCHIVE_PATH], ROOT_DIR, {
@@ -246,7 +246,7 @@ async function validateInstalledBinary(tempHome: string): Promise<void> {
 async function smokeTest(): Promise<void> {
   console.log(`\n🚀 Starting binary on port ${PORT}...`);
 
-  const tmpHome = await makeTempDir();
+  const tmpHome = makeTempDir();
   const dbPath = join(tmpHome, 'smoke.sqlite');
 
   // The binary is a CLI; bare invocation prints help, so start the server
