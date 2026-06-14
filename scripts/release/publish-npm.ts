@@ -7,6 +7,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { ROOT_DIR } from '../lib/config';
 import {
+  formatNpmPublishSummary,
   type NpmCommandResult,
   type NpmPublishPackage,
   type NpmRunner,
@@ -109,9 +110,7 @@ const main = async (): Promise<void> => {
     runner: new BunNpmRunner(),
   });
 
-  success(
-    `npm publish complete: ${summary.published} published, ${summary.skipped} skipped, ${summary.dryRun} dry-run.`
-  );
+  success(formatNpmPublishSummary(summary));
 };
 
 if (import.meta.main) {

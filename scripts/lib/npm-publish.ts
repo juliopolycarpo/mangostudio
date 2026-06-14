@@ -41,7 +41,13 @@ export interface NpmPublishSummary {
   readonly published: number;
   readonly skipped: number;
   readonly dryRun: number;
+  readonly provenance: NpmPublishProvenanceOutcome;
 }
+
+export type NpmPublishProvenanceOutcome =
+  | { readonly status: 'disabled' }
+  | { readonly status: 'dropped'; readonly package: string }
+  | { readonly status: 'full' };
 
 export type NpmPublishFailureKind = 'conflict' | 'fatal' | 'provenance' | 'transient';
 
@@ -56,6 +62,7 @@ interface PublishContext {
 
 interface PublishState {
   provenance: boolean;
+  provenanceDroppedAt?: string;
 }
 
 type PackageOutcome = 'dryRun' | 'published' | 'skipped';
@@ -125,7 +132,14 @@ export async function publishPackages(
     summary[outcome] += 1;
   }
 
-  return summary;
+  return { ...summary, provenance: summarizeProvenance(context.state) };
+}
+
+/** Format the final npm publish status line. // Usage: success(formatNpmPublishSummary(summary)) */
+export function formatNpmPublishSummary(summary: NpmPublishSummary): string {
+  return `npm publish complete: ${summary.published} published, ${summary.skipped} skipped, ${summary.dryRun} dry-run. Provenance: ${formatProvenanceOutcome(
+    summary.provenance
+  )}.`;
 }
 
 function comparePackageDirs(left: string, right: string): number {
@@ -199,6 +213,7 @@ async function publishOnce(
   context.logger.warn(
     `npm rejected provenance for ${packageSpec(packageInfo)}; retrying without it.`
   );
+  context.state.provenanceDroppedAt = packageSpec(packageInfo);
   context.state.provenance = false;
   return runPublish(packageInfo, context, attempt);
 }
@@ -279,6 +294,19 @@ function hasPublishRetry(context: PublishContext, attempt: number): boolean {
 
 function maxPublishAttempts(context: PublishContext): number {
   return context.retryDelaysMs.length + 1;
+}
+
+function summarizeProvenance(state: PublishState): NpmPublishProvenanceOutcome {
+  if (state.provenance) return { status: 'full' };
+  if (state.provenanceDroppedAt) {
+    return { status: 'dropped', package: state.provenanceDroppedAt };
+  }
+  return { status: 'disabled' };
+}
+
+function formatProvenanceOutcome(outcome: NpmPublishProvenanceOutcome): string {
+  if (outcome.status === 'dropped') return `dropped at ${outcome.package}`;
+  return outcome.status;
 }
 
 function maxViewAttempts(context: PublishContext): number {

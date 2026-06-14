@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import {
   classifyPublishFailure,
+  formatNpmPublishSummary,
   isMissingPackageViewResult,
   type NpmCommandOptions,
   type NpmCommandResult,
@@ -69,7 +70,11 @@ const missing = (): NpmCommandResult => fail('npm ERR! code E404\n404 Not Found'
 const publishWithFakes = (
   runner: FakeNpmRunner,
   packages: readonly NpmPublishPackage[] = [PLATFORM_PACKAGE],
-  options: { readonly dryRun?: boolean; readonly retryDelaysMs?: readonly number[] } = {}
+  options: {
+    readonly dryRun?: boolean;
+    readonly provenance?: boolean;
+    readonly retryDelaysMs?: readonly number[];
+  } = {}
 ) => {
   const sleeper = new FakeSleeper();
   const logger = new CapturingLogger();
@@ -79,6 +84,7 @@ const publishWithFakes = (
     retryDelaysMs: options.retryDelaysMs ?? [10],
     runner,
     sleep: sleeper.sleep,
+    provenance: options.provenance,
   });
 
   return { logger, result, sleeper };
@@ -119,7 +125,12 @@ describe('publishPackages', () => {
     const runner = new FakeNpmRunner([ok('1.2.3\n')]);
     const { result } = publishWithFakes(runner);
 
-    await expect(result).resolves.toEqual({ published: 0, skipped: 1, dryRun: 0 });
+    await expect(result).resolves.toEqual({
+      published: 0,
+      skipped: 1,
+      dryRun: 0,
+      provenance: { status: 'full' },
+    });
     expect(runner.calls.map((call) => call.args[0])).toEqual(['view']);
   });
 
@@ -127,7 +138,12 @@ describe('publishPackages', () => {
     const runner = new FakeNpmRunner([missing(), ok()]);
     const { result } = publishWithFakes(runner);
 
-    await expect(result).resolves.toEqual({ published: 1, skipped: 0, dryRun: 0 });
+    await expect(result).resolves.toEqual({
+      published: 1,
+      skipped: 0,
+      dryRun: 0,
+      provenance: { status: 'full' },
+    });
     expect(runner.calls[1].args).toEqual(['publish', '--access', 'public', '--provenance']);
   });
 
@@ -135,7 +151,12 @@ describe('publishPackages', () => {
     const runner = new FakeNpmRunner([missing(), fail('ECONNRESET socket hang up'), ok()]);
     const { result, sleeper } = publishWithFakes(runner);
 
-    await expect(result).resolves.toEqual({ published: 1, skipped: 0, dryRun: 0 });
+    await expect(result).resolves.toEqual({
+      published: 1,
+      skipped: 0,
+      dryRun: 0,
+      provenance: { status: 'full' },
+    });
     expect(runner.calls.map((call) => call.args[0])).toEqual(['view', 'publish', 'publish']);
     expect(sleeper.delays).toEqual([10]);
   });
@@ -148,7 +169,12 @@ describe('publishPackages', () => {
     ]);
     const { result, sleeper } = publishWithFakes(runner);
 
-    await expect(result).resolves.toEqual({ published: 1, skipped: 0, dryRun: 0 });
+    await expect(result).resolves.toEqual({
+      published: 1,
+      skipped: 0,
+      dryRun: 0,
+      provenance: { status: 'full' },
+    });
     expect(runner.calls.map((call) => call.args[0])).toEqual(['view', 'publish', 'view']);
     expect(sleeper.delays).toEqual([]);
   });
@@ -163,17 +189,56 @@ describe('publishPackages', () => {
     ]);
     const { result } = publishWithFakes(runner, [PLATFORM_PACKAGE, CLI_PACKAGE]);
 
-    await expect(result).resolves.toEqual({ published: 2, skipped: 0, dryRun: 0 });
+    await expect(result).resolves.toEqual({
+      published: 2,
+      skipped: 0,
+      dryRun: 0,
+      provenance: {
+        status: 'dropped',
+        package: '@mangostudio/cli-linux-x64@1.2.3',
+      },
+    });
     expect(runner.calls[1].args).toEqual(['publish', '--access', 'public', '--provenance']);
     expect(runner.calls[2].args).toEqual(['publish', '--access', 'public']);
     expect(runner.calls[4].args).toEqual(['publish', '--access', 'public']);
+  });
+
+  test('summarizes disabled provenance without passing the flag', async () => {
+    const runner = new FakeNpmRunner([missing(), ok()]);
+    const { result } = publishWithFakes(runner, [PLATFORM_PACKAGE], { provenance: false });
+
+    await expect(result).resolves.toEqual({
+      published: 1,
+      skipped: 0,
+      dryRun: 0,
+      provenance: { status: 'disabled' },
+    });
+    expect(runner.calls[1].args).toEqual(['publish', '--access', 'public']);
+  });
+
+  test('formats the provenance outcome for the CLI summary', () => {
+    expect(
+      formatNpmPublishSummary({
+        published: 2,
+        skipped: 1,
+        dryRun: 0,
+        provenance: { status: 'dropped', package: '@mangostudio/cli-linux-x64@1.2.3' },
+      })
+    ).toBe(
+      'npm publish complete: 2 published, 1 skipped, 0 dry-run. Provenance: dropped at @mangostudio/cli-linux-x64@1.2.3.'
+    );
   });
 
   test('dry-run prints the pending publish without publishing', async () => {
     const runner = new FakeNpmRunner([missing()]);
     const { logger, result } = publishWithFakes(runner, [PLATFORM_PACKAGE], { dryRun: true });
 
-    await expect(result).resolves.toEqual({ published: 0, skipped: 0, dryRun: 1 });
+    await expect(result).resolves.toEqual({
+      published: 0,
+      skipped: 0,
+      dryRun: 1,
+      provenance: { status: 'full' },
+    });
     expect(runner.calls.map((call) => call.args[0])).toEqual(['view']);
     expect(logger.messages.join('\n')).toContain('would publish @mangostudio/cli-linux-x64@1.2.3');
   });
