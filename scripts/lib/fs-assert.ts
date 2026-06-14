@@ -77,8 +77,8 @@ export function assertSafeToDelete(path: string, options: SafeDeleteOptions): vo
   }
 
   if (
-    isStrictDescendant(rootDir, resolved) ||
-    allowedRoots.some((root) => isStrictDescendant(root, resolved))
+    isStrictDescendant(resolved, rootDir) ||
+    allowedRoots.some((root) => isStrictDescendant(resolved, root))
   ) {
     return;
   }
@@ -86,8 +86,8 @@ export function assertSafeToDelete(path: string, options: SafeDeleteOptions): vo
   throw refuseDelete(resolved, label);
 }
 
-function refuseDelete(path: string, label: string): never {
-  throw new Error(`Refusing to remove ${label} outside the workspace: ${path}`);
+function refuseDelete(path: string, label: string): Error {
+  return new Error(`Refusing to remove ${label} outside the workspace: ${path}`);
 }
 
 function isFilesystemRoot(path: string): boolean {
@@ -99,6 +99,6 @@ function isStrictAncestor(ancestor: string, descendant: string): boolean {
   return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel);
 }
 
-function isStrictDescendant(parent: string, child: string): boolean {
-  return isStrictAncestor(parent, child);
+function isStrictDescendant(descendant: string, ancestor: string): boolean {
+  return isStrictAncestor(ancestor, descendant);
 }
