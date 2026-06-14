@@ -1,0 +1,269 @@
+name: Canary
+
+# Publish a canary build from the latest green commit on main. ci.yml calls this
+# reusable workflow as a job gated on every CI job passing + a push to main, so
+# the commit that just went green is the canary source — no SHA re-resolution.
+#
+# Channels are independent fan-out jobs off a single build. Each is idempotent and
+# individually re-runnable, so one failing never blocks the others and a maintainer
+# can re-run just the failed job (see the canary-summary job):
+#   - Docker: ghcr.io/<repo>:canary (rolling) + :canary-<sha7> (immutable per-commit),
+#     Debian bookworm multi-arch (amd64 + arm64). Alpine stays tag-release-only.
+#   - npm:    @mangostudio/cli@<root>-canary.<sha7> under the `canary` dist-tag, so
+#     `latest` never moves. Install with `npm i -g @mangostudio/cli@canary`.
+#   - crates: mangostudio <root>-canary.<sha7>, backed by a `v<version>` GitHub
+#     pre-release that hosts the platform archives the cargo launcher downloads.
+#
+# crates.io versions are permanent (only yankable); the per-commit GitHub
+# pre-releases that back them are pruned to the most recent few.
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+# Only the newest green commit should own the rolling `canary` Docker tag and the
+# npm `canary` dist-tag, so supersede in-flight canary publishes. Per-commit
+# versions are unique, so a cancelled run never leaves a conflicting half-publish.
+concurrency:
+  group: canary-publish
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build canary binaries & npm packages
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      version: ${{ steps.identity.outputs.version }}
+      sha: ${{ steps.identity.outputs.sha }}
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          fetch-depth: 0
+
+      - uses: ./.github/actions/setup-mango
+
+      - name: Resolve canary identity
+        id: identity
+        run: bun ./scripts/release/canary-version.ts >> "$GITHUB_OUTPUT"
+
+      - name: Build standalone binaries (all platforms)
+        run: VERSION="${{ steps.identity.outputs.version }}" bun run build --binary
+
+      - name: Assemble npm distribution
+        run: VERSION="${{ steps.identity.outputs.version }}" bun ./scripts/release/pack-npm.ts
+
+      - name: Archive release assets
+        run: VERSION="${{ steps.identity.outputs.version }}" bun ./scripts/release/archive-assets.ts
+
+      - name: Stage Docker build context (bookworm)
+        run: bun ./scripts/release/stage-docker-ctx.ts --release-assets release-assets --variant bookworm
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: canary-release-assets
+          path: release-assets/
+          retention-days: 7
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: canary-npm-dist
+          path: dist-npm/
+          retention-days: 7
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: canary-docker-ctx
+          path: docker-ctx/
+          retention-days: 7
+
+  npm-canary:
+    name: Publish npm (canary dist-tag)
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - uses: ./.github/actions/setup-mango
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: canary-npm-dist
+          path: dist-npm
+
+      - name: Restore executable bit on platform binaries
+        # actions/upload-artifact drops Unix mode bits, so restore +x before
+        # publishing (matches the release npm-publish job).
+        run: find dist-npm -type f -name mangostudio -exec chmod +x {} +
+
+      - name: Validate npm distribution
+        run: bun ./scripts/release/pack-npm.ts --validate dist-npm
+
+      - name: Publish to npm under the canary dist-tag
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          echo "//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}" > ~/.npmrc
+          bun ./scripts/release/publish-npm.ts dist-npm --tag canary
+
+  docker-canary:
+    name: Publish Docker canary image (bookworm)
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: canary-docker-ctx
+          path: docker-ctx
+
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
+
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Build and push bookworm canary image (amd64 + arm64)
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+          SHA7: ${{ needs.build.outputs.sha }}
+          IMAGE: ghcr.io/${{ github.repository }}
+        run: |
+          source scripts/release/retry.sh
+          retry_command 3 30 docker buildx build \
+            --platform linux/amd64,linux/arm64 \
+            --build-arg "VERSION=${VERSION}" \
+            --tag "${IMAGE}:canary" \
+            --tag "${IMAGE}:canary-${SHA7}" \
+            --push \
+            .
+
+  crates-canary:
+    name: Publish crates.io canary
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      # contents: write to create/refresh the v<version> pre-release the launcher
+      # downloads from; id-token: write for crates.io Trusted Publishing.
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - uses: ./.github/actions/setup-mango
+
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          toolchain: 1.96.0
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: canary-release-assets
+          path: release-assets
+
+      - name: Publish pre-release assets for the launcher to download
+        # The cargo shim resolves .../releases/download/v<version>/, so a crates
+        # canary needs a matching GitHub pre-release hosting the platform archives.
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          source scripts/release/retry.sh
+          tag="v${VERSION}"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            retry_command 3 30 gh release upload "$tag" release-assets/* --clobber
+          else
+            retry_command 3 30 gh release create "$tag" release-assets/* \
+              --prerelease \
+              --title "$tag" \
+              --notes "Canary build from ${GITHUB_SHA}. Pre-release: not for production; tags are pruned and may disappear."
+          fi
+
+      - id: crates-auth
+        name: Mint crates.io Trusted Publishing token
+        continue-on-error: true
+        uses: rust-lang/crates-io-auth-action@bbd81622f20ce9e2dd9622e3218b975523e45bbe # v1.0.4
+
+      - name: Report crates.io token fallback
+        if: steps.crates-auth.outcome != 'success'
+        run: echo "Trusted Publishing token unavailable; falling back to CARGO_REGISTRY_TOKEN."
+
+      - name: Stamp and publish launcher crate (idempotent)
+        env:
+          CRATES_IO_TRUSTED_PUBLISHING_TOKEN: ${{ steps.crates-auth.outputs.token }}
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          published() {
+            curl -fsSL --retry 3 "https://crates.io/api/v1/crates/mangostudio/${VERSION}" | grep -q '"num"'
+          }
+          if published; then
+            echo "mangostudio ${VERSION} is already on crates.io; skipping."
+            exit 0
+          fi
+          # Stamp the ephemeral canary version into the manifest + lockfile, then
+          # publish dirty (the working tree is intentionally modified, never committed).
+          bun ./scripts/release/stamp-cargo-version.ts "$VERSION"
+          publish_token="${CRATES_IO_TRUSTED_PUBLISHING_TOKEN:-$CARGO_REGISTRY_TOKEN}"
+          if [ -z "$publish_token" ]; then
+            echo "No crates.io publish token available. Configure Trusted Publishing or restore CARGO_REGISTRY_TOKEN."
+            exit 1
+          fi
+          # Stateful retry: cargo publish can fail after crates.io accepts the
+          # upload, so keep the published() visibility probe between attempts.
+          for attempt in 1 2 3; do
+            if (cd packages/cargo-shim && CARGO_REGISTRY_TOKEN="$publish_token" cargo publish --locked --allow-dirty); then
+              exit 0
+            fi
+            if published; then
+              echo "Version became visible after attempt ${attempt}; treating as published."
+              exit 0
+            fi
+            if [ "$attempt" = "3" ]; then
+              exit 1
+            fi
+            sleep 30
+          done
+
+      - name: Prune old canary pre-releases
+        if: always()
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/release/prune-canary-releases.sh 10
+
+  canary-summary:
+    name: Canary publish summary
+    needs: [build, npm-canary, docker-canary, crates-canary]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Write canary publish summary
+        env:
+          TITLE: Canary ${{ needs.build.outputs.version }} (canary-${{ needs.build.outputs.sha }})
+        run: |
+          bash scripts/release/publish-summary.sh \
+            "npm-canary=${{ needs.npm-canary.result }}" \
+            "docker-canary=${{ needs.docker-canary.result }}" \
+            "crates-canary=${{ needs.crates-canary.result }}"

@@ -6,6 +6,7 @@ import {
   assertVersionsInLockstep,
   CARGO_SHIM_LOCKFILE,
   CARGO_SHIM_MANIFEST,
+  canaryReleaseVersion,
   collectVersionConsistency,
   isValidSemver,
   LOCKSTEP_PACKAGES,
@@ -215,6 +216,30 @@ describe('readCargoLockVersion', () => {
     expect(() => readCargoLockVersion(join(repo.dir, CARGO_SHIM_LOCKFILE), 'mangostudio')).toThrow(
       /Cannot read Cargo lockfile/
     );
+  });
+});
+
+describe('canaryReleaseVersion', () => {
+  test('appends a 7-char short sha as a prerelease identifier on the root version', () => {
+    repo.writePackage('package.json', '0.1.0');
+    expect(canaryReleaseVersion('1234abcdef0', repo.dir)).toBe('0.1.0-canary.1234abc');
+  });
+
+  test('guards an all-digit, leading-zero short sha (illegal semver numeric id)', () => {
+    repo.writePackage('package.json', '0.1.0');
+    const version = canaryReleaseVersion('0123456789abcdef', repo.dir);
+    expect(version).toBe('0.1.0-canary.g0123456');
+    expect(isValidSemver(version)).toBe(true);
+  });
+
+  test('leaves an alphanumeric leading-zero short sha unprefixed', () => {
+    repo.writePackage('package.json', '0.1.0');
+    expect(canaryReleaseVersion('0a3f1b2c', repo.dir)).toBe('0.1.0-canary.0a3f1b2');
+  });
+
+  test('rejects a sha that is not at least 7 hex characters', () => {
+    repo.writePackage('package.json', '0.1.0');
+    expect(() => canaryReleaseVersion('zzz', repo.dir)).toThrow(/Invalid commit sha/);
   });
 });
 

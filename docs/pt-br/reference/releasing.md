@@ -15,12 +15,12 @@ esse é o procedimento completo de release. O workflow valida lockstep de versã
 gera todos os artefatos, publica cada canal de forma independente e faz commit de
 `CHANGELOG.md` de volta em `main`.
 
-| Secret                      | Usado por                                | Escopo                                                                                                                     |
-| --------------------------- | ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `NPM_TOKEN`                 | `npm-publish`                            | Direitos de publicação em `@mangostudio/*`                                                                                 |
-| `DIST_REPOS_TOKEN`          | `homebrew`, `scoop`                      | PAT fine-grained com contents read/write em `juliopolycarpo/homebrew-tap` e `juliopolycarpo/scoop-bucket`                  |
-| `CARGO_REGISTRY_TOKEN`      | `cargo-publish`                          | Fallback temporário no crates.io até Trusted Publishing estar registrado e verificado para o crate `mangostudio`           |
-| *(built-in `GITHUB_TOKEN`)* | `github-release`, `docker`, attestations | Sem setup extra — o workflow concede `packages: write` para GHCR; `cargo-publish` concede `id-token: write` para OIDC auth |
+| Secret                      | Usado por                                                | Escopo                                                                                                                                      |
+| --------------------------- | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `NPM_TOKEN`                 | `npm-publish`, `npm-canary`                              | Direitos de publicação em `@mangostudio/*`                                                                                                  |
+| `DIST_REPOS_TOKEN`          | `homebrew`, `scoop`                                      | PAT fine-grained com contents read/write em `juliopolycarpo/homebrew-tap` e `juliopolycarpo/scoop-bucket`                                   |
+| `CARGO_REGISTRY_TOKEN`      | `cargo-publish`, `crates-canary`                         | Fallback temporário no crates.io até Trusted Publishing estar registrado e verificado para o crate `mangostudio`                            |
+| *(built-in `GITHUB_TOKEN`)* | `github-release`, `docker`, o canal canary, attestations | Sem setup extra — o workflow concede `packages: write` para GHCR; `cargo-publish`/`crates-canary` concedem `id-token: write` para OIDC auth |
 
 ### Checklist de setup único
 
@@ -60,6 +60,37 @@ a variável de ambiente `VERSION` (definida pelo workflow a partir da tag) a
 sobrescreve. `bun run check:versions` valida lockstep entre root, workspaces,
 `packages/cli` e `packages/cargo-shim/Cargo.toml`/`Cargo.lock`.
 
+## Canal canary
+
+Todo commit que entra verde em `main` é publicado como **canary**. O job `canary`
+em `.github/workflows/ci.yml` é gated em todos os outros jobs de CI passarem e em
+um push para `main`, então o commit que acabou de ficar verde é a fonte do canary
+— sem trigger separado. Ele chama o reutilizável `.github/workflows/canary.yml`.
+
+A versão é `<versão-raiz>-canary.<sha7>` (ex.: `0.1.0-canary.1234abc`). Consuma
+qualquer canal:
+
+```bash
+docker pull ghcr.io/juliopolycarpo/mangostudio:canary
+docker pull ghcr.io/juliopolycarpo/mangostudio:canary-1234abc
+npm install -g @mangostudio/cli@canary
+cargo install mangostudio --version 0.1.0-canary.1234abc
+```
+
+- **Docker** (`docker-canary`): Debian Bookworm multi-arch (amd64 + arm64) nas
+  tags `canary` (rolling) e `canary-<sha7>` (imutável). Alpine só em tags.
+- **npm** (`npm-canary`): `@mangostudio/cli` na dist-tag `canary`, então `latest`
+  nunca aponta para um canary.
+- **crates** (`crates-canary`): `mangostudio <version>`, apoiado por um
+  **pre-release** `v<version>` no GitHub que hospeda os arquivos que o launcher baixa.
+
+Cada canal é independente e idempotente (igual à release por tag): uma falha não
+bloqueia as outras e **Re-run failed jobs** re-executa só o canal que falhou
+(o job `canary-summary` escreve uma tabela ✅/❌ por canal). ⚠️ Versões no
+crates.io são **permanentes** (só yank, nunca deletáveis); os pre-releases
+`v<version>-canary.<sha7>` que as apoiam são podados para os 10 mais recentes
+(`prune-canary-releases.sh`) e ficam excluídos do trigger de release (`!v*-canary*`).
+
 ## Cortar uma release
 
 Releases são orientadas por tag. A partir de um `main` atualizado:
@@ -77,10 +108,14 @@ Releases são orientadas por tag. A partir de um `main` atualizado:
 
 **Re-run failed jobs** é sempre seguro: jobs de canal são independentes — uma
 falha nunca bloqueia as outras. Versões npm já publicadas são ignoradas, assets
-de release usam clobber e o push do changelog faz rebase antes de retentar.
+de release usam clobber e o push do changelog faz rebase antes de retentar. Para
+durabilidade extra: artefatos de build retêm por 30 dias, o job `docker` retenta
+cada push multi-arch e baixa o GitHub Release publicado se o artefato expirou, e o
+job `release-summary` (sempre executa) escreve uma tabela ✅/❌ por canal.
 
-O workflow executa 13 jobs: `build`, `verify-build`, `github-release`, `docker`,
+O workflow executa 14 jobs: `build`, `verify-build`, `github-release`, `docker`,
 `verify-image`, `npm-publish`, `homebrew`, `scoop`, `cargo-publish`,
-`verify-release`, `verify-cargo`, `verify-homebrew` e `update-changelog`. Veja a
+`verify-release`, `verify-cargo`, `verify-homebrew`, `update-changelog` e
+`release-summary`. Veja a
 [versão em inglês](../../reference/releasing.md#cutting-a-release) para a tabela
 completa de jobs e detalhes por canal (npm, Docker, Homebrew, Scoop, crates.io).

@@ -147,6 +147,28 @@ describe('publishPackages', () => {
     expect(runner.calls[1].args).toEqual(['publish', '--access', 'public', '--provenance']);
   });
 
+  test('publishes under a dist-tag when one is provided', async () => {
+    const runner = new FakeNpmRunner([missing(), ok()]);
+    const sleeper = new FakeSleeper();
+    await publishPackages([PLATFORM_PACKAGE], {
+      distTag: 'canary',
+      logger: new CapturingLogger(),
+      retryDelaysMs: [10],
+      runner,
+      sleep: sleeper.sleep,
+    });
+
+    // --tag precedes --provenance, and the default path (no distTag) stays bare.
+    expect(runner.calls[1].args).toEqual([
+      'publish',
+      '--access',
+      'public',
+      '--tag',
+      'canary',
+      '--provenance',
+    ]);
+  });
+
   test('retries transient publish failures before succeeding', async () => {
     const runner = new FakeNpmRunner([missing(), fail('ECONNRESET socket hang up'), ok()]);
     const { result, sleeper } = publishWithFakes(runner);

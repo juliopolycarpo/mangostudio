@@ -13,12 +13,12 @@ release procedure. The workflow validates version lockstep, builds every artifac
 publishes each channel independently, and lands `CHANGELOG.md` on `main` (direct
 push, or a `github-actions[bot]` pull request when the branch is protected).
 
-| Secret                      | Used by                                  | Scope                                                                                                                         |
-| --------------------------- | ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| `NPM_TOKEN`                 | `npm-publish`                            | Publish rights on `@mangostudio/*`                                                                                            |
-| `DIST_REPOS_TOKEN`          | `homebrew`, `scoop`                      | Fine-grained PAT with contents read/write on `juliopolycarpo/homebrew-tap` and `juliopolycarpo/scoop-bucket`                  |
-| `CARGO_REGISTRY_TOKEN`      | `cargo-publish`                          | Temporary crates.io fallback until Trusted Publishing is registered and verified for the `mangostudio` crate                  |
-| *(built-in `GITHUB_TOKEN`)* | `github-release`, `docker`, attestations | No extra setup — workflow grants `packages: write` for GHCR; `cargo-publish` grants `id-token: write` for crates.io OIDC auth |
+| Secret                      | Used by                                                      | Scope                                                                                                                                        |
+| --------------------------- | ------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `NPM_TOKEN`                 | `npm-publish`, `npm-canary`                                  | Publish rights on `@mangostudio/*`                                                                                                           |
+| `DIST_REPOS_TOKEN`          | `homebrew`, `scoop`                                          | Fine-grained PAT with contents read/write on `juliopolycarpo/homebrew-tap` and `juliopolycarpo/scoop-bucket`                                 |
+| `CARGO_REGISTRY_TOKEN`      | `cargo-publish`, `crates-canary`                             | Temporary crates.io fallback until Trusted Publishing is registered and verified for the `mangostudio` crate                                 |
+| *(built-in `GITHUB_TOKEN`)* | `github-release`, `docker`, the canary channel, attestations | No extra setup — workflow grants `packages: write` for GHCR; `cargo-publish`/`crates-canary` grant `id-token: write` for crates.io OIDC auth |
 
 ### One-time setup checklist
 
@@ -94,8 +94,9 @@ together with the commit summary and QA gate comments.
 
 `.github/workflows/release-dry-run.yml` runs automatically for PRs that touch
 release workflows, release scripts, install scripts, binary build tooling, CLI
-packages, or Dockerfiles. It also runs weekly as a canary and can be started
-manually with `workflow_dispatch`.
+packages, or Dockerfiles. It also runs weekly as a drift check and can be started
+manually with `workflow_dispatch`. (This is read-only and unrelated to the
+[Canary channel](#canary-channel), which actually publishes from `main`.)
 
 The dry-run is read-only: it verifies lockstep versions, builds one Linux binary
 with a synthetic prerelease version, assembles and validates the matching npm
@@ -109,6 +110,52 @@ Only a real signed tag exercises registry and repository side effects: npm
 publication, GHCR push, GitHub Release upload, Homebrew tap push, Scoop bucket
 push, crates.io publication, and the cross-platform `verify-release` matrix.
 Those steps stay in `.github/workflows/release.yml`.
+
+## Canary channel
+
+Every commit that lands green on `main` is published as a **canary**. The canary
+job in `.github/workflows/ci.yml` is gated on every other CI job passing and on a
+push to `main`, so the commit that just went green is the canary source — there is
+no separate trigger or SHA re-resolution. It calls the reusable
+`.github/workflows/canary.yml`, whose jobs share the build and fan out per channel.
+
+The version is `<root-version>-canary.<sha7>` (e.g. `0.1.0-canary.1234abc`), where
+`<sha7>` is the 7-char short commit SHA. Consume any channel:
+
+```bash
+# Docker — rolling tag (newest green) or the immutable per-commit tag
+docker pull ghcr.io/juliopolycarpo/mangostudio:canary
+docker pull ghcr.io/juliopolycarpo/mangostudio:canary-1234abc
+
+# npm — the `canary` dist-tag; `latest` is never touched
+npm install -g @mangostudio/cli@canary
+
+# crates.io — exact prerelease version
+cargo install mangostudio --version 0.1.0-canary.1234abc
+```
+
+| Channel | Job             | What it publishes                                                                                                                       |
+| ------- | --------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| Docker  | `docker-canary` | Debian Bookworm multi-arch (amd64 + arm64) under the rolling `canary` tag and the immutable `canary-<sha7>` tag. Alpine stays tag-only. |
+| npm     | `npm-canary`    | `@mangostudio/cli@<version>` under the `canary` dist-tag, so `npm i -g @mangostudio/cli` (latest) never resolves to a canary.           |
+| crates  | `crates-canary` | `mangostudio <version>`, backed by a `v<version>` GitHub **pre-release** that hosts the platform archives the launcher downloads.       |
+
+Each channel is independent and idempotent, exactly like the tag release: a docker
+failure never blocks npm or crates, and **Re-run failed jobs** re-runs only the
+failed channel (the `canary-summary` job writes a per-channel ✅/❌ table naming
+the job to re-run). The `canary-publish` concurrency group cancels superseded
+in-flight runs so the rolling `canary` tag and dist-tag always track the newest
+green commit; per-commit versions are unique, so a cancelled run never leaves a
+conflicting half-publish.
+
+Caveats:
+
+- **crates.io versions are permanent** (only yankable, never deletable), so every
+  green `main` commit leaves an immutable `…-canary.<sha7>` crate version forever.
+- The per-commit `v<version>-canary.<sha7>` GitHub pre-releases exist only to host
+  the binaries the cargo launcher downloads; `scripts/release/prune-canary-releases.sh`
+  keeps the most recent 10 and deletes older ones (and their tags). These tags are
+  excluded from the release trigger (`!v*-canary*`), so they never cut a release.
 
 ## Cutting a release
 
@@ -130,10 +177,15 @@ Releases are tag-driven. From an up-to-date `main`:
 step flakes: **Re-run failed jobs** is always safe because channel jobs are
 independent — one failing never blocks the others. Published npm versions are
 skipped, release assets upload with clobber semantics, and the changelog push
-rebases before retrying (or opens a bot PR if `main` is protected).
+rebases before retrying (or opens a bot PR if `main` is protected). For extra
+durability: build artifacts retain for 30 days, the `docker` job retries each
+multi-arch push and falls back to downloading the published GitHub Release when
+its build artifact has expired (so it re-runs in isolation long after the run),
+and the always-run `release-summary` job writes a per-channel ✅/❌ table naming
+the exact job to re-run.
 
-It runs 13 jobs — the publish channels plus the gates that verify them, listed
-here in workflow order:
+It runs 14 jobs — the publish channels, the gates that verify them, and a final
+summary, listed here in workflow order:
 
 | Job                | What it does                                                                                                                                                                                                                                                                                                                                                                 |
 | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -150,6 +202,7 @@ here in workflow order:
 | `verify-cargo`     | Installs `mangostudio` from crates.io, points the launcher at the GitHub Release assets, and checks `mangostudio --version`. Depends on `cargo-publish`.                                                                                                                                                                                                                     |
 | `verify-homebrew`  | Taps `juliopolycarpo/homebrew-tap`, `brew install`s the formula on macOS, and checks `mangostudio --version`. Depends on `homebrew`.                                                                                                                                                                                                                                         |
 | `update-changelog` | Regenerates `CHANGELOG.md` and lands it on `main` via `push-changelog.ts`: direct push (rebasing if another commit landed first), or a `github-actions[bot]` PR with squash auto-merge when branch protection rejects the push. A dedicated concurrency group serializes it across concurrent tag releases.                                                                  |
+| `release-summary`  | Always runs (even when a channel fails) and writes a per-channel ✅/❌ status table to the run summary (`publish-summary.sh`), naming the exact job to re-run. Because the fan-out isolates failures, a partial release is recovered by re-running only the failed job(s).                                                                                                   |
 
 `workflow_dispatch` accepts an explicit `version` input for a manual run; it is
 validated against the committed version the same way.
@@ -166,10 +219,13 @@ binary plus its `public/` frontend sidecar. Builders live in
 `npm view <name>@<version> version` before publishing, uses `npm publish --access
 public --provenance` for new versions, retries transient network/5xx failures,
 and never retries a 403/version-conflict without first re-checking whether the
-version became visible. `--dry-run` prints the same decisions without publishing:
+version became visible. `--dry-run` prints the same decisions without publishing,
+and `--tag <dist-tag>` publishes under a non-default dist-tag (the
+[Canary channel](#canary-channel) uses `--tag canary` so `latest` never moves):
 
 ```bash
 bun ./scripts/release/publish-npm.ts dist-npm --dry-run
+bun ./scripts/release/publish-npm.ts dist-npm --tag canary
 ```
 
 Release archives are accompanied by `SHA256SUMS`; the verification job checks the
@@ -201,6 +257,10 @@ state. No extra registry secret is required because the release job grants
 `packages: write` to the workflow `GITHUB_TOKEN`. On first publication, make the
 GHCR package public in the repository package settings if public pulls are
 desired.
+
+Between tags, the [Canary channel](#canary-channel) publishes the same image under
+the `canary` (rolling) and `canary-<sha7>` (immutable) tags — Bookworm multi-arch
+only.
 
 ## Homebrew tap
 
@@ -310,6 +370,11 @@ Design notes:
 - The `cargo-publish` release job checks crates.io before publishing and
   re-checks between retries, so workflow re-runs converge instead of failing on
   "version already exists".
+- The [Canary channel](#canary-channel) publishes prerelease crate versions too.
+  Because the launcher resolves `…/releases/download/v<version>/`, `crates-canary`
+  first creates a `v<version>` GitHub pre-release holding the platform archives,
+  then stamps the ephemeral version into `Cargo.toml`/`Cargo.lock`
+  (`stamp-cargo-version.ts`) and publishes with `--locked --allow-dirty`.
 
 ## Prerequisites
 

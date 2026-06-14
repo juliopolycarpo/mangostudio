@@ -177,6 +177,25 @@ export function resolveReleaseVersion(options: ResolveReleaseVersionOptions = {}
   return normalized;
 }
 
+/** Build the canary prerelease version for a main-branch commit:
+ * `<root>-canary.<sha7>`, e.g. 0.1.0-canary.1234abc. The sha is truncated to 7
+ * lowercase hex chars; a purely numeric short sha with a leading zero is an
+ * illegal semver numeric identifier (semver.org §9), so it is prefixed with `g`
+ * (git-describe style) to stay valid for npm and crates.io. The mutable Docker
+ * `canary-<sha7>` tag uses the raw sha, where registry tags impose no such rule.
+ * // Usage: canaryReleaseVersion('1234abcdef0') -> '0.1.0-canary.1234abc' */
+export function canaryReleaseVersion(sha: string, rootDir: string = ROOT_DIR): string {
+  const normalized = sha.trim().toLowerCase();
+  if (!/^[0-9a-f]{7,40}$/.test(normalized)) {
+    throw new Error(`Invalid commit sha "${sha}"; expected at least 7 hexadecimal characters.`);
+  }
+  const short = normalized.slice(0, 7);
+  const identifier = /^0\d+$/.test(short) ? `g${short}` : short;
+  const version = `${rootReleaseVersion(rootDir)}-canary.${identifier}`;
+  assertValidVersion(version, 'canary sha');
+  return version;
+}
+
 /** Read every lockstep manifest (package.json files plus the cargo-shim
  * Cargo.toml/Cargo.lock) and report versions that diverge from root.
  * // Usage: collectVersionConsistency().mismatches */
