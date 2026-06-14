@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import {
@@ -7,6 +8,7 @@ import {
   parseDockerArchFilter,
   parseDockerVariantFilter,
 } from '../lib/docker-stage';
+import { assertSafeToDelete } from '../lib/fs-assert';
 import { readText } from './support/read-text';
 
 describe('Docker stage planning', () => {
@@ -83,6 +85,27 @@ describe('Docker stage planning', () => {
     );
     expect(dockerReleaseAssetName('1.2.3', 'alpine', 'arm64')).toBe(
       'mangostudio-1.2.3-linux-arm64-musl.tar.gz'
+    );
+  });
+
+  test('guards context-dir deletes to workspace and temp descendants', () => {
+    const plan = createDockerStagePlan({ rootDir: '/repo' });
+    const guard = {
+      rootDir: '/repo',
+      allowedOutsideRoots: [tmpdir()],
+      label: 'Docker context',
+    };
+
+    expect(() => assertSafeToDelete(plan.contextDir, guard)).not.toThrow();
+    expect(() => assertSafeToDelete(join(tmpdir(), 'docker-ctx'), guard)).not.toThrow();
+    expect(() => assertSafeToDelete('/', guard)).toThrow(
+      /Refusing to remove Docker context outside the workspace/
+    );
+    expect(() => assertSafeToDelete('/repo', guard)).toThrow(
+      /Refusing to remove Docker context outside the workspace/
+    );
+    expect(() => assertSafeToDelete('/outside', guard)).toThrow(
+      /Refusing to remove Docker context outside the workspace/
     );
   });
 });

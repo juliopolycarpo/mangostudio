@@ -3,9 +3,11 @@
 
 import { createHash } from 'node:crypto';
 import { chmodSync, cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 
-import { assertDirectory, assertFile } from '../lib/fs-assert';
+import { ROOT_DIR } from '../lib/config';
+import { assertDirectory, assertFile, assertSafeToDelete } from '../lib/fs-assert';
 import {
   createReleaseAssetPlan,
   type FrontendArchivePlan,
@@ -48,6 +50,12 @@ export async function archiveReleaseAssets(plan: ReleaseAssetPlan): Promise<void
 }
 
 function prepareAssetsDir(assetsDir: string): void {
+  assertSafeToDelete(assetsDir, {
+    rootDir: ROOT_DIR,
+    allowedOutsideRoots: [tmpdir()],
+    label: 'release assets directory',
+  });
+
   rmSync(assetsDir, { force: true, recursive: true });
   mkdirSync(assetsDir, { recursive: true });
 }
