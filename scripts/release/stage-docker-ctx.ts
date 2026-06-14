@@ -12,7 +12,7 @@ import {
   parseDockerArchFilter,
   parseDockerVariantFilter,
 } from '../lib/docker-stage';
-import { assertDirectory, assertFile } from '../lib/fs-assert';
+import { assertDirectory, assertFile, assertSafeToDelete } from '../lib/fs-assert';
 import { resolveReleaseVersion } from '../lib/release-version';
 import {
   assertNoUnexpectedArguments,
@@ -61,9 +61,12 @@ export async function stageDockerContext(
 }
 
 function prepareContextDir(contextDir: string): void {
-  if (contextDir === '/' || contextDir.length < 3) {
-    throw new Error(`Refusing to remove unsafe Docker context directory: ${contextDir}`);
-  }
+  // Deletes are limited to docker-ctx under the repo or an explicit temp override.
+  assertSafeToDelete(contextDir, {
+    rootDir: ROOT_DIR,
+    allowedOutsideRoots: [tmpdir()],
+    label: 'Docker context',
+  });
 
   rmSync(contextDir, { force: true, recursive: true });
   mkdirSync(contextDir, { recursive: true });
