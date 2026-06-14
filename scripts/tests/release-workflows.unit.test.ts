@@ -24,12 +24,12 @@ describe('release workflow binary gate', () => {
 
     expect(workflow).toContain('  binary:');
     expect(workflow).toContain(`name: Binary ${platformExpression}`);
-    expect(workflow).toContain('platform: linux-x64');
-    expect(workflow).toContain('platform: linux-arm64');
-    expect(workflow).toContain('platform: darwin-arm64');
-    expect(workflow).toContain('platform: darwin-x64');
-    expect(workflow).toContain('platform: windows-x64');
-    expect(workflow).toContain('platform: windows-arm64');
+    expect(workflow).toContain('- platform: linux-x64');
+    expect(workflow).toContain('- platform: linux-arm64');
+    expect(workflow).toContain('- platform: darwin-arm64');
+    expect(workflow).toContain('- platform: darwin-x64');
+    expect(workflow).toContain('- platform: windows-x64');
+    expect(workflow).toContain('- platform: windows-arm64');
     expect(workflow).toContain('runner: ubuntu-24.04-arm');
     expect(workflow).toContain('runner: macos-15-intel');
     expect(workflow).toContain('runner: windows-11-arm');
