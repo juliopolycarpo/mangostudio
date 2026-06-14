@@ -331,4 +331,5 @@ bun run verify
 
 `bun run verify` matches the CI pipeline minus the smoke jobs (browser and binary),
 which require platform runners not available in every local environment. Run those
-separately with `bun run test --e2e` and `bun scripts/test-build.ts`.
+separately with `bun run test --e2e` and
+`PLATFORM=linux-x64 bun run scripts/test-build.ts`.

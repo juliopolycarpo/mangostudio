@@ -50,9 +50,10 @@ jobs:
     uses: ./.github/workflows/browser-smoke.yml
 
   smoke:
-    # Builds both Dockerfiles (Bookworm + Alpine, amd64 + arm64) from the local
-    # build output and boots each image on every PR. release-dry-run.yml does not
-    # repeat this; it instead exercises the release-asset staging path
+    # Builds and boots native host binaries across the supported OS/arch runners,
+    # then builds both Dockerfiles (Bookworm + Alpine, amd64 + arm64) from the
+    # local build output. release-dry-run.yml does not repeat the Docker smoke;
+    # it instead exercises the release-asset staging path
     # (stage-docker-ctx.ts --release-assets) that this job does not cover.
     name: Smoke — Binary
     uses: ./.github/workflows/smoke-binary.yml

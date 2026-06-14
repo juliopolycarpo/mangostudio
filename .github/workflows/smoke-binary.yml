@@ -8,34 +8,62 @@ permissions:
   contents: read
 
 jobs:
-  smoke:
-    name: ${{ matrix.platform }} / Docker ${{ matrix.variant }} ${{ matrix.docker_arch }}
+  binary:
+    name: Binary ${{ matrix.platform }}
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 10
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
         include:
           - platform: linux-x64
             runner: ubuntu-latest
+          - platform: linux-arm64
+            runner: ubuntu-24.04-arm
+          - platform: darwin-arm64
+            runner: macos-latest
+          - platform: darwin-x64
+            runner: macos-15-intel
+          - platform: windows-x64
+            runner: windows-latest
+          - platform: windows-arm64
+            runner: windows-11-arm
+
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - uses: ./.github/actions/setup-mango
+
+      - name: Run binary smoke test
+        run: bun run scripts/test-build.ts
+        env:
+          PLATFORM: ${{ matrix.platform }}
+          API_PORT: "13001"
+
+  docker:
+    name: Docker ${{ matrix.variant }} ${{ matrix.docker_arch }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
             variant: bookworm
             docker_arch: amd64
             binary_platform: linux-x64
             dockerfile: Dockerfile
-          - platform: linux-x64
-            runner: ubuntu-latest
+          - runner: ubuntu-24.04-arm
             variant: bookworm
             docker_arch: arm64
             binary_platform: linux-arm64
             dockerfile: Dockerfile
-          - platform: linux-x64
-            runner: ubuntu-latest
+          - runner: ubuntu-latest
             variant: alpine
             docker_arch: amd64
             binary_platform: linux-x64-musl
             dockerfile: Dockerfile.alpine
-          - platform: linux-x64
-            runner: ubuntu-latest
+          - runner: ubuntu-24.04-arm
             variant: alpine
             docker_arch: arm64
             binary_platform: linux-arm64-musl
@@ -45,21 +73,6 @@ jobs:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
       - uses: ./.github/actions/setup-mango
-
-      - name: Set up QEMU for arm64 emulation
-        if: matrix.docker_arch == 'arm64'
-        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
-        with:
-          platforms: arm64
-
-      - name: Run smoke test
-        # Host binary smoke is identical across every matrix leg (PLATFORM is
-        # always linux-x64), so run it once instead of once per Docker variant.
-        if: matrix.variant == 'bookworm' && matrix.docker_arch == 'amd64'
-        run: bun run scripts/test-build.ts
-        env:
-          PLATFORM: ${{ matrix.platform }}
-          API_PORT: "13001"
 
       - name: Build Docker binary
         run: bun run build:binary --platform ${{ matrix.binary_platform }}

@@ -11,15 +11,21 @@
  *      that core HTTP endpoints respond correctly.
  *
  * Environment variables:
- *   PLATFORM      - Target platform (linux-x64 | windows-x64). Required.
+ *   PLATFORM      - Target platform (for example linux-x64). Required.
  *   SKIP_BUILD    - Set to 1 to skip the standalone build step.
  *   API_PORT      - Port for the smoke server (default: 13001).
  */
 
-import { existsSync, rmSync, statSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, statSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { captureCommand } from './lib/exec';
+import {
+  type BinaryTarget,
+  filterBinaryTargets,
+  releaseArchiveFileName,
+} from './lib/release-targets';
 import { resolveReleaseVersion } from './lib/release-version';
 
 // ---------------------------------------------------------------------------
@@ -36,18 +42,25 @@ const RELEASE_ASSETS_DIR = join(ROOT_DIR, 'release-assets');
 // archive-assets.ts produces (same VERSION override + semver validation).
 const VERSION = resolveReleaseVersion({ rootDir: ROOT_DIR });
 
-const PLATFORM_META: Record<string, { binary: string; canExecute: boolean }> = {
-  'linux-x64': { binary: 'mangostudio', canExecute: process.platform === 'linux' },
-  'windows-x64': { binary: 'mangostudio.exe', canExecute: process.platform === 'win32' },
+const hostRuntimeByPlatform: Partial<
+  Record<BinaryTarget['arch'], { platform: typeof process.platform; arch: typeof process.arch }>
+> = {
+  'linux-x64': { platform: 'linux', arch: 'x64' },
+  'linux-arm64': { platform: 'linux', arch: 'arm64' },
+  'windows-x64': { platform: 'win32', arch: 'x64' },
+  'windows-arm64': { platform: 'win32', arch: 'arm64' },
+  'darwin-x64': { platform: 'darwin', arch: 'x64' },
+  'darwin-arm64': { platform: 'darwin', arch: 'arm64' },
 };
 
 const PLATFORM = resolvePlatform(REQUESTED_PLATFORM);
 
-const { binary: BINARY_NAME, canExecute: CAN_EXECUTE } = PLATFORM_META[PLATFORM];
-const PLATFORM_DIR = join(OUT_DIR, PLATFORM);
+const BINARY_NAME = PLATFORM.name;
+const CAN_EXECUTE = canExecutePlatform(PLATFORM);
+const PLATFORM_DIR = join(OUT_DIR, PLATFORM.arch);
 const BINARY_PATH = join(PLATFORM_DIR, BINARY_NAME);
 const PUBLIC_DIR = join(PLATFORM_DIR, 'public');
-const ARCHIVE_PATH = join(RELEASE_ASSETS_DIR, `mangostudio-${VERSION}-${PLATFORM}.tar.gz`);
+const ARCHIVE_PATH = join(RELEASE_ASSETS_DIR, releaseArchiveFileName(VERSION, PLATFORM));
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -62,16 +75,27 @@ function fail(msg: string): never {
   process.exit(1);
 }
 
-function resolvePlatform(platform: string | undefined): string {
-  if (platform && platform in PLATFORM_META) {
-    return platform;
+function resolvePlatform(platform: string | undefined): BinaryTarget {
+  if (platform) {
+    const [target] = filterBinaryTargets(platform);
+    if (target) return target;
   }
 
-  console.error(`❌ PLATFORM must be one of: ${Object.keys(PLATFORM_META).join(', ')}`);
+  const supported = filterBinaryTargets()
+    .map((target) => target.arch)
+    .join(', ');
+  console.error(`❌ PLATFORM must be one of: ${supported}`);
   console.error(
     '   Set it via environment variable: PLATFORM=linux-x64 bun run scripts/test-build.ts'
   );
   process.exit(1);
+}
+
+function canExecutePlatform(platform: BinaryTarget): boolean {
+  if (platform.arch.endsWith('-musl')) return false;
+
+  const expected = hostRuntimeByPlatform[platform.arch];
+  return process.platform === expected?.platform && process.arch === expected.arch;
 }
 
 async function run(cmd: string[], cwd?: string, env?: Record<string, string>): Promise<void> {
@@ -93,9 +117,8 @@ async function run(cmd: string[], cwd?: string, env?: Record<string, string>): P
   if (out.trim()) console.log(out.trim());
 }
 
-async function makeTempDir(): Promise<string> {
-  const path = await Bun.$`mktemp -d`.text();
-  return path.trim();
+function makeTempDir(): string {
+  return mkdtempSync(join(tmpdir(), 'mangostudio-smoke-'));
 }
 
 function removeTempDir(path: string): void {
@@ -120,8 +143,8 @@ async function waitFor(url: string, retries = 15, delayMs = 500): Promise<void> 
 // ---------------------------------------------------------------------------
 
 async function buildBinary(): Promise<void> {
-  console.log(`\n🔨 Building binary for ${PLATFORM}...`);
-  await run(['bun', 'run', 'build:binary', '--platform', PLATFORM]);
+  console.log(`\n🔨 Building binary for ${PLATFORM.arch}...`);
+  await run(['bun', 'run', 'build:binary', '--platform', PLATFORM.arch]);
   pass(`Binary built: ${BINARY_PATH}`);
 }
 
@@ -152,21 +175,21 @@ function validateLayout(): void {
 // ---------------------------------------------------------------------------
 
 async function archiveAssets(): Promise<void> {
-  if (PLATFORM !== 'linux-x64') {
+  if (PLATFORM.arch !== 'linux-x64') {
     console.log('\n📦 Release archive smoke skipped for non-linux-x64 platform.');
     return;
   }
 
   console.log('\n📦 Archiving release assets...');
-  await run(['bun', './scripts/release/archive-assets.ts', '--platform', PLATFORM]);
+  await run(['bun', './scripts/release/archive-assets.ts', '--platform', PLATFORM.arch]);
   pass(`Release archive created: ${ARCHIVE_PATH}`);
 }
 
 async function validateReleaseArchive(): Promise<void> {
-  if (PLATFORM !== 'linux-x64') return;
+  if (PLATFORM.arch !== 'linux-x64') return;
 
   console.log('\n📦 Validating release archive layout...');
-  const extractDir = await makeTempDir();
+  const extractDir = makeTempDir();
 
   try {
     await run(['tar', '-xzf', ARCHIVE_PATH, '-C', extractDir]);
@@ -177,7 +200,8 @@ async function validateReleaseArchive(): Promise<void> {
 }
 
 function validateExtractedArchive(extractDir: string): void {
-  if (existsSync(join(extractDir, PLATFORM))) fail('Archive contains nested platform directory');
+  if (existsSync(join(extractDir, PLATFORM.arch)))
+    fail('Archive contains nested platform directory');
   if (!existsSync(join(extractDir, BINARY_NAME))) fail(`Archive is missing ${BINARY_NAME}`);
   if (!existsSync(join(extractDir, 'public', 'index.html')))
     fail('Archive is missing public/index.html');
@@ -189,13 +213,13 @@ function validateExtractedArchive(extractDir: string): void {
 }
 
 async function smokeLocalInstaller(): Promise<void> {
-  if (PLATFORM !== 'linux-x64' || process.platform !== 'linux') {
+  if (PLATFORM.arch !== 'linux-x64' || process.platform !== 'linux') {
     console.log('\n📦 Local installer smoke skipped for this host/platform.');
     return;
   }
 
   console.log('\n📦 Installing release archive with install.sh --local...');
-  const tempHome = await makeTempDir();
+  const tempHome = makeTempDir();
 
   try {
     await run(['bash', 'scripts/install/install.sh', '--local', ARCHIVE_PATH], ROOT_DIR, {
@@ -222,7 +246,7 @@ async function validateInstalledBinary(tempHome: string): Promise<void> {
 async function smokeTest(): Promise<void> {
   console.log(`\n🚀 Starting binary on port ${PORT}...`);
 
-  const tmpHome = await makeTempDir();
+  const tmpHome = makeTempDir();
   const dbPath = join(tmpHome, 'smoke.sqlite');
 
   // The binary is a CLI; bare invocation prints help, so start the server
@@ -305,7 +329,7 @@ async function smokeTest(): Promise<void> {
 // Main
 // ---------------------------------------------------------------------------
 
-console.log(`\n🧪 Binary smoke test — platform: ${PLATFORM}`);
+console.log(`\n🧪 Binary smoke test — platform: ${PLATFORM.arch}`);
 console.log(`   Can execute on this host: ${CAN_EXECUTE}`);
 
 if (!SKIP_BUILD) {

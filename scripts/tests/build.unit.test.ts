@@ -59,4 +59,19 @@ describe('build script', () => {
   test('uses the binary alias for standalone smoke builds', () => {
     expect(readText('scripts/test-build.ts')).toContain("'build:binary'");
   });
+
+  test('loads the standalone smoke script before build output exists', () => {
+    const result = Bun.spawnSync({
+      cmd: ['bun', 'run', 'scripts/test-build.ts'],
+      env: {
+        ...process.env,
+        PLATFORM: 'linux-x64-musl',
+        SKIP_BUILD: '1',
+      },
+    });
+    const output = `${result.stdout.toString()}${result.stderr.toString()}`;
+
+    expect(output).toContain('platform: linux-x64-musl');
+    expect(output).not.toContain('ReferenceError');
+  });
 });
