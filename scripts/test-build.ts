@@ -42,6 +42,17 @@ const RELEASE_ASSETS_DIR = join(ROOT_DIR, 'release-assets');
 // archive-assets.ts produces (same VERSION override + semver validation).
 const VERSION = resolveReleaseVersion({ rootDir: ROOT_DIR });
 
+const hostRuntimeByPlatform: Partial<
+  Record<BinaryTarget['arch'], { platform: typeof process.platform; arch: typeof process.arch }>
+> = {
+  'linux-x64': { platform: 'linux', arch: 'x64' },
+  'linux-arm64': { platform: 'linux', arch: 'arm64' },
+  'windows-x64': { platform: 'win32', arch: 'x64' },
+  'windows-arm64': { platform: 'win32', arch: 'arm64' },
+  'darwin-x64': { platform: 'darwin', arch: 'x64' },
+  'darwin-arm64': { platform: 'darwin', arch: 'arm64' },
+};
+
 const PLATFORM = resolvePlatform(REQUESTED_PLATFORM);
 
 const BINARY_NAME = PLATFORM.name;
@@ -86,17 +97,6 @@ function canExecutePlatform(platform: BinaryTarget): boolean {
   const expected = hostRuntimeByPlatform[platform.arch];
   return process.platform === expected?.platform && process.arch === expected.arch;
 }
-
-const hostRuntimeByPlatform: Partial<
-  Record<BinaryTarget['arch'], { platform: typeof process.platform; arch: typeof process.arch }>
-> = {
-  'linux-x64': { platform: 'linux', arch: 'x64' },
-  'linux-arm64': { platform: 'linux', arch: 'arm64' },
-  'windows-x64': { platform: 'win32', arch: 'x64' },
-  'windows-arm64': { platform: 'win32', arch: 'arm64' },
-  'darwin-x64': { platform: 'darwin', arch: 'x64' },
-  'darwin-arm64': { platform: 'darwin', arch: 'arm64' },
-};
 
 async function run(cmd: string[], cwd?: string, env?: Record<string, string>): Promise<void> {
   const {
