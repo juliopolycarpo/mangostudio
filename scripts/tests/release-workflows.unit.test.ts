@@ -16,6 +16,35 @@ function expectJobNeeds(workflow: string, job: string, needs: string): void {
 }
 
 describe('release workflow binary gate', () => {
+  test('pre-merge binary smoke covers native host platforms and Docker variants', () => {
+    const workflow = readText('.github/workflows/smoke-binary.yml');
+    const platformExpression = '$' + '{{ matrix.platform }}';
+    const variantExpression = '$' + '{{ matrix.variant }}';
+    const dockerArchExpression = '$' + '{{ matrix.docker_arch }}';
+
+    expect(workflow).toContain('  binary:');
+    expect(workflow).toContain(`name: Binary ${platformExpression}`);
+    expect(workflow).toContain('platform: linux-x64');
+    expect(workflow).toContain('platform: linux-arm64');
+    expect(workflow).toContain('platform: darwin-arm64');
+    expect(workflow).toContain('platform: darwin-x64');
+    expect(workflow).toContain('platform: windows-x64');
+    expect(workflow).toContain('platform: windows-arm64');
+    expect(workflow).toContain('runner: ubuntu-24.04-arm');
+    expect(workflow).toContain('runner: macos-15-intel');
+    expect(workflow).toContain('runner: windows-11-arm');
+    expect(workflow).toContain(`PLATFORM: ${platformExpression}`);
+
+    expect(workflow).toContain('  docker:');
+    expect(workflow).toContain(`name: Docker ${variantExpression} ${dockerArchExpression}`);
+    expect(workflow).toContain('binary_platform: linux-x64');
+    expect(workflow).toContain('binary_platform: linux-arm64');
+    expect(workflow).toContain('binary_platform: linux-x64-musl');
+    expect(workflow).toContain('binary_platform: linux-arm64-musl');
+    expect(workflow).toContain(`--platform linux/${dockerArchExpression}`);
+    expect(workflow).not.toContain('docker/setup-qemu-action');
+  });
+
   test('runs the built linux-x64 archive before any publish channel starts', () => {
     const workflow = readText('.github/workflows/release.yml');
     const versionVar = '$' + '{VERSION}';
