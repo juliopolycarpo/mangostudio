@@ -61,6 +61,11 @@ jobs:
         run: VERSION="${{ steps.identity.outputs.version }}" bun ./scripts/release/archive-assets.ts
 
       - name: Stage Docker build context (bookworm)
+        # stage-docker-ctx resolves the asset name from $VERSION (release-version.ts
+        # falls back to the committed root version otherwise), so it must match the
+        # canary version that named the archives in release-assets.
+        env:
+          VERSION: ${{ steps.identity.outputs.version }}
         run: bun ./scripts/release/stage-docker-ctx.ts --release-assets release-assets --variant bookworm
 
       - name: Stage Cargo canary assets
