@@ -43,7 +43,11 @@ fn run() -> Result<(), String> {
 }
 
 fn is_canary_version() -> bool {
-    VERSION.split('+').next().unwrap_or(VERSION).contains("-canary")
+    VERSION
+        .split('+')
+        .next()
+        .unwrap_or(VERSION)
+        .contains("-canary")
 }
 
 /// Map the compile-time target onto the release platform ids frozen by the
