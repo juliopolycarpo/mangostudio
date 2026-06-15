@@ -19,9 +19,9 @@ name: Release
 on:
   push:
     tags:
-      # Stable + real prerelease tags (v0.1.0, v0.2.0-rc.1). The canary channel
-      # creates v<version>-canary.<sha> pre-release tags on every green main push
-      # to host launcher assets; exclude them so they never fire a full release.
+      # Stable + real prerelease tags (v0.1.0, v0.2.0-rc.1). Keep canary-like
+      # tags excluded so legacy or manual v<version>-canary.<sha> tags never fire
+      # a full release.
       - "v*.*.*"
       - "!v*-canary*"
   workflow_dispatch:

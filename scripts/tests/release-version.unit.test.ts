@@ -6,6 +6,7 @@ import {
   assertVersionsInLockstep,
   CARGO_SHIM_LOCKFILE,
   CARGO_SHIM_MANIFEST,
+  canaryCargoVersion,
   canaryReleaseVersion,
   collectVersionConsistency,
   isValidSemver,
@@ -240,6 +241,13 @@ describe('canaryReleaseVersion', () => {
   test('rejects a sha that is not at least 7 hex characters', () => {
     repo.writePackage('package.json', '0.1.0');
     expect(() => canaryReleaseVersion('zzz', repo.dir)).toThrow(/Invalid commit sha/);
+  });
+});
+
+describe('canaryCargoVersion', () => {
+  test('uses a fixed canary prerelease for the root version', () => {
+    repo.writePackage('package.json', '0.1.0');
+    expect(canaryCargoVersion(repo.dir)).toBe('0.1.0-canary');
   });
 });
 

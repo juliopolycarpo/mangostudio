@@ -67,29 +67,37 @@ em `.github/workflows/ci.yml` é gated em todos os outros jobs de CI passarem e 
 um push para `main`, então o commit que acabou de ficar verde é a fonte do canary
 — sem trigger separado. Ele chama o reutilizável `.github/workflows/canary.yml`.
 
-A versão é `<versão-raiz>-canary.<sha7>` (ex.: `0.1.0-canary.1234abc`). Consuma
-qualquer canal:
+Docker e npm usam `<versão-raiz>-canary.<sha7>` (ex.:
+`0.1.0-canary.1234abc`). Cargo usa um prerelease fixo
+`<versão-raiz>-canary` (ex.: `0.1.0-canary`) cujos assets baixados são
+atualizados por todo commit verde em `main`. Consuma qualquer canal:
 
 ```bash
 docker pull ghcr.io/juliopolycarpo/mangostudio:canary
 docker pull ghcr.io/juliopolycarpo/mangostudio:canary-1234abc
 npm install -g @mangostudio/cli@canary
-cargo install mangostudio --version 0.1.0-canary.1234abc
+cargo install mangostudio --version 0.1.0-canary
 ```
 
 - **Docker** (`docker-canary`): Debian Bookworm multi-arch (amd64 + arm64) nas
   tags `canary` (rolling) e `canary-<sha7>` (imutável). Alpine só em tags.
 - **npm** (`npm-canary`): `@mangostudio/cli` na dist-tag `canary`, então `latest`
   nunca aponta para um canary.
-- **crates** (`crates-canary`): `mangostudio <version>`, apoiado por um
-  **pre-release** `v<version>` no GitHub que hospeda os arquivos que o launcher baixa.
+- **crates** (`crates-canary`): `mangostudio <root>-canary`, apoiado por um
+  pre-release `v<root>-canary` no GitHub cujos assets são sobrescritos a cada
+  commit verde em `main`.
 
 Cada canal é independente e idempotente (igual à release por tag): uma falha não
-bloqueia as outras e **Re-run failed jobs** re-executa só o canal que falhou
-(o job `canary-summary` escreve uma tabela ✅/❌ por canal). ⚠️ Versões no
-crates.io são **permanentes** (só yank, nunca deletáveis); os pre-releases
-`v<version>-canary.<sha7>` que as apoiam são podados para os 10 mais recentes
-(`prune-canary-releases.sh`) e ficam excluídos do trigger de release (`!v*-canary*`).
+bloqueia as outras e **Re-run failed jobs** re-executa só o canal que falhou (o
+job `canary-summary` escreve uma tabela ✅/❌ por canal). O canary do crates.io
+deliberadamente **não** publica versões `…-canary.<sha7>`: versões no crates.io
+são permanentes (só yank, nunca deletáveis), então um crate canary por SHA
+comprometido não poderia ser removido sem contato com o time do crates.io. O
+crates.io não tem uma dist-tag `canary` mutável no estilo npm para `cargo
+install`; o canary Cargo é um prerelease fixo para a versão raiz atual, enquanto
+os assets do GitHub Release por trás desse launcher são mutáveis. Tags
+`v<version>-canary.<sha7>` continuam excluídas do trigger de release
+(`!v*-canary*`) como guarda para tags antigas ou manuais.
 
 ## Cortar uma release
 

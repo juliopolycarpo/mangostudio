@@ -104,7 +104,7 @@ distribution, runs the npm publisher in `--dry-run` mode, archives the binary,
 verifies `SHA256SUMS`, installs the local tarball through `install.sh --local`,
 and renders Homebrew and Scoop manifests into the runner temp directory. PRs
 that touch `packages/cargo-shim/**` also run `cargo publish --dry-run --locked`;
-scheduled and manual canary runs include that cargo check as well.
+scheduled and manual dry-run runs include that cargo check as well.
 
 Only a real signed tag exercises registry and repository side effects: npm
 publication, GHCR push, GitHub Release upload, Homebrew tap push, Scoop bucket
@@ -119,8 +119,11 @@ push to `main`, so the commit that just went green is the canary source — ther
 no separate trigger or SHA re-resolution. It calls the reusable
 `.github/workflows/canary.yml`, whose jobs share the build and fan out per channel.
 
-The version is `<root-version>-canary.<sha7>` (e.g. `0.1.0-canary.1234abc`), where
-`<sha7>` is the 7-char short commit SHA. Consume any channel:
+Docker and npm use `<root-version>-canary.<sha7>` (e.g.
+`0.1.0-canary.1234abc`), where `<sha7>` is the 7-char short commit SHA. Cargo
+uses a fixed `<root-version>-canary` prerelease (e.g. `0.1.0-canary`) whose
+downloaded assets are refreshed by every green `main` commit. Consume any canary
+channel:
 
 ```bash
 # Docker — rolling tag (newest green) or the immutable per-commit tag
@@ -130,19 +133,19 @@ docker pull ghcr.io/juliopolycarpo/mangostudio:canary-1234abc
 # npm — the `canary` dist-tag; `latest` is never touched
 npm install -g @mangostudio/cli@canary
 
-# crates.io — exact prerelease version
-cargo install mangostudio --version 0.1.0-canary.1234abc
+# Cargo — fixed prerelease version backed by rolling GitHub release assets
+cargo install mangostudio --version 0.1.0-canary
 ```
 
 | Channel | Job             | What it publishes                                                                                                                       |
 | ------- | --------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
 | Docker  | `docker-canary` | Debian Bookworm multi-arch (amd64 + arm64) under the rolling `canary` tag and the immutable `canary-<sha7>` tag. Alpine stays tag-only. |
 | npm     | `npm-canary`    | `@mangostudio/cli@<version>` under the `canary` dist-tag, so `npm i -g @mangostudio/cli` (latest) never resolves to a canary.           |
-| crates  | `crates-canary` | `mangostudio <version>`, backed by a `v<version>` GitHub **pre-release** that hosts the platform archives the launcher downloads.       |
+| crates  | `crates-canary` | `mangostudio <root>-canary`, backed by a rolling `v<root>-canary` GitHub pre-release whose assets are clobbered each green main commit. |
 
 Each channel is independent and idempotent, exactly like the tag release: a docker
-failure never blocks npm or crates, and **Re-run failed jobs** re-runs only the
-failed channel (the `canary-summary` job writes a per-channel ✅/❌ table naming
+failure never blocks npm or crates, and **Re-run failed jobs** re-runs only the failed
+channel (the `canary-summary` job writes a per-channel ✅/❌ table naming
 the job to re-run). The `canary-publish` concurrency group cancels superseded
 in-flight runs so the rolling `canary` tag and dist-tag always track the newest
 green commit; per-commit versions are unique, so a cancelled run never leaves a
@@ -150,12 +153,15 @@ conflicting half-publish.
 
 Caveats:
 
-- **crates.io versions are permanent** (only yankable, never deletable), so every
-  green `main` commit leaves an immutable `…-canary.<sha7>` crate version forever.
-- The per-commit `v<version>-canary.<sha7>` GitHub pre-releases exist only to host
-  the binaries the cargo launcher downloads; `scripts/release/prune-canary-releases.sh`
-  keeps the most recent 10 and deletes older ones (and their tags). These tags are
-  excluded from the release trigger (`!v*-canary*`), so they never cut a release.
+- The crates.io canary deliberately does **not** publish
+  `…-canary.<sha7>` versions. crates.io versions are permanent (only yankable,
+  never deletable), so a compromised per-SHA canary crate could not be removed
+  without contacting the crates.io team.
+- crates.io has no npm-style mutable `canary` dist-tag for `cargo install`; Cargo
+  canary is a fixed prerelease for the current root version, while the GitHub
+  release assets behind that launcher are mutable.
+- Canary-like `v<version>-canary.<sha7>` tags remain excluded from the tag release
+  trigger (`!v*-canary*`) as a guard for legacy or manual per-SHA tags.
 
 ## Cutting a release
 
@@ -370,11 +376,10 @@ Design notes:
 - The `cargo-publish` release job checks crates.io before publishing and
   re-checks between retries, so workflow re-runs converge instead of failing on
   "version already exists".
-- The [Canary channel](#canary-channel) publishes prerelease crate versions too.
-  Because the launcher resolves `…/releases/download/v<version>/`, `crates-canary`
-  first creates a `v<version>` GitHub pre-release holding the platform archives,
-  then stamps the ephemeral version into `Cargo.toml`/`Cargo.lock`
-  (`stamp-cargo-version.ts`) and publishes with `--locked --allow-dirty`.
+- The [Canary channel](#canary-channel) publishes only the fixed
+  `<root>-canary` crate version for Cargo, never a per-SHA
+  `…-canary.<sha7>` crate. The launcher refreshes canary assets on each run so
+  installed canary users track the rolling `v<root>-canary` GitHub pre-release.
 
 ## Prerequisites
 

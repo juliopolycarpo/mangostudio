@@ -30,7 +30,7 @@ const LOCKFILE = [
   '',
 ].join('\n');
 
-const CANARY = '0.1.0-canary.g0123456';
+const CANARY = '0.1.0-canary';
 
 describe('setCargoManifestVersion', () => {
   test('rewrites the [package] version, leaving dependency versions untouched', () => {

@@ -180,8 +180,8 @@ describe('release workflow binary gate', () => {
   test('release tag trigger excludes canary pre-release tags', () => {
     const workflow = readText('.github/workflows/release.yml');
 
-    // Stable + real prereleases fire the release; canary v<version>-canary.<sha>
-    // tags (created on every green main push to host launcher assets) must not.
+    // Stable + real prereleases fire the release; canary-like
+    // v<version>-canary.<sha> tags must not.
     expect(workflow).toContain('- "v*.*.*"');
     expect(workflow).toContain('- "!v*-canary*"');
   });
@@ -223,24 +223,27 @@ describe('release workflow binary gate', () => {
   test('release ends with an always-run per-channel summary naming jobs to re-run', () => {
     const workflow = readText('.github/workflows/release.yml');
     const summaryBlock = extractJobBlock(workflow, 'release-summary');
+    const alwaysExpression = '$' + '{{ always() }}';
+    const dockerResult = '$' + '{{ needs.docker.result }}';
+    const npmResult = '$' + '{{ needs.npm-publish.result }}';
+    const cargoResult = '$' + '{{ needs.cargo-publish.result }}';
     expect(summaryBlock, 'release-summary job not found').not.toBe('');
 
-    expect(summaryBlock).toContain('if: ${{ always() }}');
+    expect(summaryBlock).toContain(`if: ${alwaysExpression}`);
     expect(summaryBlock).toContain('bash scripts/release/publish-summary.sh');
-    expect(summaryBlock).toContain('docker=${{ needs.docker.result }}');
-    expect(summaryBlock).toContain('npm-publish=${{ needs.npm-publish.result }}');
-    expect(summaryBlock).toContain('cargo-publish=${{ needs.cargo-publish.result }}');
+    expect(summaryBlock).toContain(`docker=${dockerResult}`);
+    expect(summaryBlock).toContain(`npm-publish=${npmResult}`);
+    expect(summaryBlock).toContain(`cargo-publish=${cargoResult}`);
   });
 
   test('ci gates the canary publish on every job passing and a push to main', () => {
     const workflow = readText('.github/workflows/ci.yml');
     const canaryBlock = extractJobBlock(workflow, 'canary');
+    const mainPushIf = '$' + "{{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}";
     expect(canaryBlock, 'canary job not found in ci.yml').not.toBe('');
 
     expectJobNeeds(workflow, 'canary', String.raw`\[check, test, build, browser-smoke, smoke\]`);
-    expect(canaryBlock).toContain(
-      "if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}"
-    );
+    expect(canaryBlock).toContain(`if: ${mainPushIf}`);
     expect(canaryBlock).toContain('uses: ./.github/workflows/canary.yml');
     expect(canaryBlock).toContain('secrets: inherit');
 
@@ -251,10 +254,14 @@ describe('release workflow binary gate', () => {
     expect(canaryBlock).toContain('contents: write');
   });
 
-  test('canary publishes Docker, npm, and crates as isolated idempotent fan-out jobs', () => {
+  test('canary publishes Docker, npm, and fixed-version crates as isolated jobs', () => {
     const workflow = readText('.github/workflows/canary.yml');
     const imageVar = '$' + '{IMAGE}';
     const sha7Var = '$' + '{SHA7}';
+    const cargoVersionOutput = '$' + '{{ steps.identity.outputs.cargo_version }}';
+    const cargoVersionNeeds = '$' + '{{ needs.build.outputs.cargo_version }}';
+    const cargoVersionVar = '$' + '{CARGO_VERSION}';
+    const versionVar = '$' + '{VERSION}';
 
     // Reusable workflow; only the newest green commit owns the rolling tags.
     expect(workflow).toContain('on:\n  workflow_call:');
@@ -264,6 +271,8 @@ describe('release workflow binary gate', () => {
     expectJobNeeds(workflow, 'npm-canary', 'build');
     expectJobNeeds(workflow, 'docker-canary', 'build');
     expectJobNeeds(workflow, 'crates-canary', 'build');
+    expect(workflow).toContain(`cargo_version: ${cargoVersionOutput}`);
+    expect(workflow).toContain('name: canary-cargo-assets');
 
     // Docker: bookworm multi-arch, rolling + immutable canary tags, no Alpine.
     const dockerBlock = extractJobBlock(workflow, 'docker-canary');
@@ -277,24 +286,34 @@ describe('release workflow binary gate', () => {
     const npmBlock = extractJobBlock(workflow, 'npm-canary');
     expect(npmBlock).toContain('bun ./scripts/release/publish-npm.ts dist-npm --tag canary');
 
-    // crates: backed by a v<version> pre-release the launcher downloads from,
-    // an ephemeral version stamp, and a dirty --locked publish.
+    // crates: fixed <root>-canary crate, backed by rolling v<root>-canary assets.
+    // The per-SHA app version is only used to build/rename assets, never as the
+    // crate version or GitHub pre-release tag.
     const cratesBlock = extractJobBlock(workflow, 'crates-canary');
-    expect(cratesBlock).toContain('gh release create "$tag" release-assets/*');
-    expect(cratesBlock).toContain('--prerelease');
-    expect(cratesBlock).toContain('bun ./scripts/release/stamp-cargo-version.ts "$VERSION"');
+    expect(cratesBlock).toContain(`CARGO_VERSION: ${cargoVersionNeeds}`);
+    expect(cratesBlock).toContain(`tag="v${cargoVersionVar}"`);
+    expect(cratesBlock).toContain('gh release create "$tag" cargo-canary-assets/*');
+    expect(cratesBlock).toContain('gh release upload "$tag" cargo-canary-assets/* --clobber');
+    expect(cratesBlock).toContain('bun ./scripts/release/stamp-cargo-version.ts "$CARGO_VERSION"');
     expect(cratesBlock).toContain('cargo publish --locked --allow-dirty');
-    expect(cratesBlock).toContain('bash scripts/release/prune-canary-releases.sh 10');
+    expect(cratesBlock).not.toContain(`tag="v${versionVar}"`);
+    expect(workflow).not.toContain('prune-canary-releases.sh');
   });
 
   test('canary ends with an always-run per-channel summary', () => {
     const workflow = readText('.github/workflows/canary.yml');
     const summaryBlock = extractJobBlock(workflow, 'canary-summary');
+    const alwaysExpression = '$' + '{{ always() }}';
+    const npmResult = '$' + '{{ needs.npm-canary.result }}';
+    const dockerResult = '$' + '{{ needs.docker-canary.result }}';
+    const cratesResult = '$' + '{{ needs.crates-canary.result }}';
     expect(summaryBlock, 'canary-summary job not found').not.toBe('');
 
-    expect(summaryBlock).toContain('if: ${{ always() }}');
+    expect(summaryBlock).toContain(`if: ${alwaysExpression}`);
     expect(summaryBlock).toContain('bash scripts/release/publish-summary.sh');
-    expect(summaryBlock).toContain('docker-canary=${{ needs.docker-canary.result }}');
+    expect(summaryBlock).toContain(`npm-canary=${npmResult}`);
+    expect(summaryBlock).toContain(`docker-canary=${dockerResult}`);
+    expect(summaryBlock).toContain(`crates-canary=${cratesResult}`);
   });
 
   test('binary smoke helper checks version, delegates the health poll, and surfaces failure logs', () => {

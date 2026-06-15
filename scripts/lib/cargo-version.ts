@@ -8,7 +8,7 @@
 const VERSION_LINE = /^(\s*version\s*=\s*")[^"]+(".*)$/;
 
 /** Rewrite the `[package]` version in a Cargo.toml, leaving dependency tables'
- * own `version =` keys untouched. // Usage: setCargoManifestVersion(src, '0.1.0-canary.g123abc') */
+ * own `version =` keys untouched. // Usage: setCargoManifestVersion(src, '0.1.0-canary') */
 export function setCargoManifestVersion(source: string, version: string): string {
   let inPackageSection = false;
   let replaced = false;
@@ -29,7 +29,7 @@ export function setCargoManifestVersion(source: string, version: string): string
 }
 
 /** Rewrite one crate's version in a Cargo.lock `[[package]]` entry.
- * // Usage: setCargoLockVersion(src, 'mangostudio', '0.1.0-canary.g123abc') */
+ * // Usage: setCargoLockVersion(src, 'mangostudio', '0.1.0-canary') */
 export function setCargoLockVersion(source: string, crateName: string, version: string): string {
   let inNamedPackage = false;
   let replaced = false;
