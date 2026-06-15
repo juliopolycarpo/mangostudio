@@ -274,6 +274,7 @@ jobs:
           TITLE: Canary ${{ needs.build.outputs.version }} (canary-${{ needs.build.outputs.sha }})
         run: |
           bash scripts/release/publish-summary.sh \
+            "build=${{ needs.build.result }}" \
             "npm-canary=${{ needs.npm-canary.result }}" \
             "docker-canary=${{ needs.docker-canary.result }}" \
             "crates-canary=${{ needs.crates-canary.result }}"

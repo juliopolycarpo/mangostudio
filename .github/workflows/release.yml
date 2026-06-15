@@ -694,6 +694,7 @@ jobs:
           TITLE: Release ${{ needs.build.outputs.version }}
         run: |
           bash scripts/release/publish-summary.sh \
+            "build=${{ needs.build.result }}" \
             "github-release=${{ needs.github-release.result }}" \
             "npm-publish=${{ needs.npm-publish.result }}" \
             "docker=${{ needs.docker.result }}" \

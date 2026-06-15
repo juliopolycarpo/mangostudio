@@ -224,6 +224,7 @@ describe('release workflow binary gate', () => {
     const workflow = readText('.github/workflows/release.yml');
     const summaryBlock = extractJobBlock(workflow, 'release-summary');
     const alwaysExpression = '$' + '{{ always() }}';
+    const buildResult = '$' + '{{ needs.build.result }}';
     const dockerResult = '$' + '{{ needs.docker.result }}';
     const npmResult = '$' + '{{ needs.npm-publish.result }}';
     const cargoResult = '$' + '{{ needs.cargo-publish.result }}';
@@ -231,6 +232,9 @@ describe('release workflow binary gate', () => {
 
     expect(summaryBlock).toContain(`if: ${alwaysExpression}`);
     expect(summaryBlock).toContain('bash scripts/release/publish-summary.sh');
+    // The shared build gate is reported too: when it fails every channel goes
+    // "skipped", so without this row the summary would hide the real failure.
+    expect(summaryBlock).toContain(`build=${buildResult}`);
     expect(summaryBlock).toContain(`docker=${dockerResult}`);
     expect(summaryBlock).toContain(`npm-publish=${npmResult}`);
     expect(summaryBlock).toContain(`cargo-publish=${cargoResult}`);
@@ -304,6 +308,7 @@ describe('release workflow binary gate', () => {
     const workflow = readText('.github/workflows/canary.yml');
     const summaryBlock = extractJobBlock(workflow, 'canary-summary');
     const alwaysExpression = '$' + '{{ always() }}';
+    const buildResult = '$' + '{{ needs.build.result }}';
     const npmResult = '$' + '{{ needs.npm-canary.result }}';
     const dockerResult = '$' + '{{ needs.docker-canary.result }}';
     const cratesResult = '$' + '{{ needs.crates-canary.result }}';
@@ -311,6 +316,9 @@ describe('release workflow binary gate', () => {
 
     expect(summaryBlock).toContain(`if: ${alwaysExpression}`);
     expect(summaryBlock).toContain('bash scripts/release/publish-summary.sh');
+    // Surface the shared build gate so its failure is not masked by the
+    // channels all showing "skipped".
+    expect(summaryBlock).toContain(`build=${buildResult}`);
     expect(summaryBlock).toContain(`npm-canary=${npmResult}`);
     expect(summaryBlock).toContain(`docker-canary=${dockerResult}`);
     expect(summaryBlock).toContain(`crates-canary=${cratesResult}`);
