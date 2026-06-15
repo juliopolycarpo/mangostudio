@@ -94,6 +94,12 @@ describe('release workflow binary gate', () => {
     );
   });
 
+  test('release dry run also triggers for canary workflow changes', () => {
+    const workflow = readText('.github/workflows/release-dry-run.yml');
+
+    expect(workflow).toContain('- ".github/workflows/canary.yml"');
+  });
+
   test('release dry run derives placeholder checksums from release targets', () => {
     const workflow = readText('.github/workflows/release-dry-run.yml');
 

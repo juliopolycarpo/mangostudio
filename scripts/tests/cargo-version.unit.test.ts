@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setCargoLockVersion, setCargoManifestVersion } from '../lib/cargo-version';
@@ -74,5 +74,14 @@ describe('round-trips through the release-version readers', () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  test('the workflow stamp script imports ROOT_DIR from the exported config module', () => {
+    const script = readFileSync(
+      join(import.meta.dir, '..', 'release', 'stamp-cargo-version.ts'),
+      'utf8'
+    );
+    expect(script).toContain("import { ROOT_DIR } from '../lib/config';");
+    expect(script).not.toContain("ROOT_DIR,\n} from '../lib/release-version'");
   });
 });

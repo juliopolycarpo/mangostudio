@@ -119,10 +119,12 @@ describe('Docker release wiring', () => {
 
     expect(dockerfile).toContain('FROM debian:bookworm-slim');
     expect(dockerfile).toContain('libstdc++6');
-    expect(dockerfile).toContain(`COPY docker-ctx/bookworm/${targetArch}/mangostudio`);
+    expect(dockerfile).toContain(`COPY --chmod=0755 docker-ctx/bookworm/${targetArch}/mangostudio`);
     expect(alpineDockerfile).toContain('FROM alpine:3.21');
     expect(alpineDockerfile).toContain('libstdc++');
-    expect(alpineDockerfile).toContain(`COPY docker-ctx/alpine/${targetArch}/mangostudio`);
+    expect(alpineDockerfile).toContain(
+      `COPY --chmod=0755 docker-ctx/alpine/${targetArch}/mangostudio`
+    );
     expect(dockerfile).toContain('org.opencontainers.image.source');
     expect(dockerignore).toContain('!docker-ctx/**');
   });
@@ -211,7 +213,10 @@ describe('Docker release wiring', () => {
       contents
         .replace(/^FROM .*$/m, 'FROM <variant>')
         .replace(/^RUN[\s\S]*?\n\n/m, 'RUN <variant>\n\n')
-        .replace(/^COPY docker-ctx\/[a-z]+\//gm, 'COPY docker-ctx/<variant>/');
+        .replace(
+          /^COPY (?:(--chmod=0755) )?docker-ctx\/[a-z]+\//gm,
+          (_, chmod: string | undefined) => `COPY ${chmod ? `${chmod} ` : ''}docker-ctx/<variant>/`
+        );
 
     expect(normalize(dockerfile)).toBe(normalize(alpineDockerfile));
   });

@@ -29,7 +29,7 @@ LABEL org.opencontainers.image.source=$SOURCE_URL \
       org.opencontainers.image.licenses=MIT \
       org.opencontainers.image.description="AI-powered image generation and chat studio"
 
-COPY docker-ctx/bookworm/${TARGETARCH}/mangostudio /usr/local/bin/mangostudio
+COPY --chmod=0755 docker-ctx/bookworm/${TARGETARCH}/mangostudio /usr/local/bin/mangostudio
 COPY docker-ctx/bookworm/${TARGETARCH}/public /usr/local/bin/public
 
 ENV HOME=/data

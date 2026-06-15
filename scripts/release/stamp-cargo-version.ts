@@ -8,12 +8,12 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { setCargoLockVersion, setCargoManifestVersion } from '../lib/cargo-version';
+import { ROOT_DIR } from '../lib/config';
 import {
   CARGO_SHIM_LOCKFILE,
   CARGO_SHIM_MANIFEST,
   isValidSemver,
   normalizeVersion,
-  ROOT_DIR,
 } from '../lib/release-version';
 import { error, success } from '../lib/runner';
 
