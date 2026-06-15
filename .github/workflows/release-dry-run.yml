@@ -157,6 +157,10 @@ jobs:
           VERSION: ${{ env.DRY_RUN_VERSION }}
 
       - name: Build Bookworm Docker image
+        # The Dockerfile uses `COPY --chmod`, a BuildKit-only directive. Force
+        # BuildKit instead of relying on the runner's default builder.
+        env:
+          DOCKER_BUILDKIT: "1"
         run: |
           docker build \
             --platform linux/amd64 \
