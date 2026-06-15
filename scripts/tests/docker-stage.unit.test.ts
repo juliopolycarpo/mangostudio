@@ -119,10 +119,12 @@ describe('Docker release wiring', () => {
 
     expect(dockerfile).toContain('FROM debian:bookworm-slim');
     expect(dockerfile).toContain('libstdc++6');
-    expect(dockerfile).toContain(`COPY docker-ctx/bookworm/${targetArch}/mangostudio`);
+    expect(dockerfile).toContain(`COPY --chmod=0755 docker-ctx/bookworm/${targetArch}/mangostudio`);
     expect(alpineDockerfile).toContain('FROM alpine:3.21');
     expect(alpineDockerfile).toContain('libstdc++');
-    expect(alpineDockerfile).toContain(`COPY docker-ctx/alpine/${targetArch}/mangostudio`);
+    expect(alpineDockerfile).toContain(
+      `COPY --chmod=0755 docker-ctx/alpine/${targetArch}/mangostudio`
+    );
     expect(dockerfile).toContain('org.opencontainers.image.source');
     expect(dockerignore).toContain('!docker-ctx/**');
   });
@@ -131,19 +133,25 @@ describe('Docker release wiring', () => {
     const workflow = readText('.github/workflows/release.yml');
     const repoExpression = '$' + '{{ github.repository }}';
     const versionExpression = '$' + '{{ needs.build.outputs.version }}';
+    const imageVar = '$' + '{IMAGE}';
+    const versionVar = '$' + '{VERSION}';
 
-    expect(workflow).toContain(
-      'docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2'
-    );
+    // Scripted, retry-wrapped buildx (not build-push-action) so each multi-arch
+    // push can be retried on a transient GHCR failure.
+    expect(workflow).not.toContain('docker/build-push-action');
     expect(workflow).toContain(
       'docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0'
     );
     expect(workflow).toContain('packages: write');
-    expect(workflow).toContain('platforms: linux/amd64,linux/arm64');
-    expect(workflow).toContain(`ghcr.io/${repoExpression}:${versionExpression}`);
-    expect(workflow).toContain(`ghcr.io/${repoExpression}:${versionExpression}-bookworm`);
-    expect(workflow).toContain(`ghcr.io/${repoExpression}:${versionExpression}-alpine`);
-    expect(workflow).toContain('file: Dockerfile.alpine');
+    expect(workflow).toContain('--platform linux/amd64,linux/arm64');
+    // The image and version flow through env; tags are built from them.
+    expect(workflow).toContain(`IMAGE: ghcr.io/${repoExpression}`);
+    expect(workflow).toContain(`VERSION: ${versionExpression}`);
+    expect(workflow).toContain(`--tag "${imageVar}:${versionVar}"`);
+    expect(workflow).toContain(`--tag "${imageVar}:${versionVar}-bookworm"`);
+    expect(workflow).toContain(`--tag "${imageVar}:latest"`);
+    expect(workflow).toContain(`--tag "${imageVar}:${versionVar}-alpine"`);
+    expect(workflow).toContain('--file Dockerfile.alpine');
   });
 
   test('release verifies the published multi-arch GHCR images', () => {
@@ -205,7 +213,10 @@ describe('Docker release wiring', () => {
       contents
         .replace(/^FROM .*$/m, 'FROM <variant>')
         .replace(/^RUN[\s\S]*?\n\n/m, 'RUN <variant>\n\n')
-        .replace(/^COPY docker-ctx\/[a-z]+\//gm, 'COPY docker-ctx/<variant>/');
+        .replace(
+          /^COPY (?:(--chmod=0755) )?docker-ctx\/[a-z]+\//gm,
+          (_, chmod: string | undefined) => `COPY ${chmod ? `${chmod} ` : ''}docker-ctx/<variant>/`
+        );
 
     expect(normalize(dockerfile)).toBe(normalize(alpineDockerfile));
   });

@@ -94,6 +94,12 @@ describe('release workflow binary gate', () => {
     );
   });
 
+  test('release dry run also triggers for canary workflow changes', () => {
+    const workflow = readText('.github/workflows/release-dry-run.yml');
+
+    expect(workflow).toContain('- ".github/workflows/canary.yml"');
+  });
+
   test('release dry run derives placeholder checksums from release targets', () => {
     const workflow = readText('.github/workflows/release-dry-run.yml');
 
@@ -175,6 +181,153 @@ describe('release workflow binary gate', () => {
     );
     expect(cargoPublishBlock).toContain('if published; then');
     expect(cargoPublishBlock).toContain(`Version became visible after attempt ${attemptVar}`);
+  });
+
+  test('release tag trigger excludes canary pre-release tags', () => {
+    const workflow = readText('.github/workflows/release.yml');
+
+    // Stable + real prereleases fire the release; canary-like
+    // v<version>-canary.<sha> tags must not.
+    expect(workflow).toContain('- "v*.*.*"');
+    expect(workflow).toContain('- "!v*-canary*"');
+  });
+
+  test('release build artifacts retain long enough to re-run a single failed job', () => {
+    const workflow = readText('.github/workflows/release.yml');
+    const buildBlock = extractJobBlock(workflow, 'build');
+
+    // 30 days widens the window for re-running just the docker/npm publish job
+    // off the original artifacts.
+    expect(buildBlock).not.toContain('retention-days: 7');
+    expect(buildBlock).toContain('retention-days: 30');
+  });
+
+  test('docker job re-runs durably: GHCR-asset fallback plus retried scripted buildx', () => {
+    const workflow = readText('.github/workflows/release.yml');
+    const dockerBlock = extractJobBlock(workflow, 'docker');
+    const versionVar = '$' + '{VERSION}';
+    const imageVar = '$' + '{IMAGE}';
+
+    // The artifact download is tolerant; a fallback fetches the published release
+    // so a late, isolated re-run still has the binaries to stage from.
+    expect(dockerBlock).toContain('continue-on-error: true');
+    expect(dockerBlock).toContain("if: steps.assets.outcome != 'success'");
+    expect(dockerBlock).toContain(`retry_command 3 30 gh release download "v${versionVar}"`);
+
+    // Scripted buildx (not build-push-action) so each multi-arch push is retried;
+    // the full tag set is preserved.
+    expect(dockerBlock).not.toContain('docker/build-push-action');
+    expect(dockerBlock).toContain('source scripts/release/retry.sh');
+    expect(dockerBlock).toContain('retry_command 3 30 docker buildx build');
+    expect(dockerBlock).toContain('--platform linux/amd64,linux/arm64');
+    expect(dockerBlock).toContain(`--tag "${imageVar}:${versionVar}"`);
+    expect(dockerBlock).toContain(`--tag "${imageVar}:latest"`);
+    expect(dockerBlock).toContain(`--tag "${imageVar}:${versionVar}-alpine"`);
+    expect(dockerBlock).toContain('--file Dockerfile.alpine');
+  });
+
+  test('release ends with an always-run per-channel summary naming jobs to re-run', () => {
+    const workflow = readText('.github/workflows/release.yml');
+    const summaryBlock = extractJobBlock(workflow, 'release-summary');
+    const alwaysExpression = '$' + '{{ always() }}';
+    const buildResult = '$' + '{{ needs.build.result }}';
+    const dockerResult = '$' + '{{ needs.docker.result }}';
+    const npmResult = '$' + '{{ needs.npm-publish.result }}';
+    const cargoResult = '$' + '{{ needs.cargo-publish.result }}';
+    expect(summaryBlock, 'release-summary job not found').not.toBe('');
+
+    expect(summaryBlock).toContain(`if: ${alwaysExpression}`);
+    expect(summaryBlock).toContain('bash scripts/release/publish-summary.sh');
+    // The shared build gate is reported too: when it fails every channel goes
+    // "skipped", so without this row the summary would hide the real failure.
+    expect(summaryBlock).toContain(`build=${buildResult}`);
+    expect(summaryBlock).toContain(`docker=${dockerResult}`);
+    expect(summaryBlock).toContain(`npm-publish=${npmResult}`);
+    expect(summaryBlock).toContain(`cargo-publish=${cargoResult}`);
+  });
+
+  test('ci gates the canary publish on every job passing and a push to main', () => {
+    const workflow = readText('.github/workflows/ci.yml');
+    const canaryBlock = extractJobBlock(workflow, 'canary');
+    const mainPushIf = '$' + "{{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}";
+    expect(canaryBlock, 'canary job not found in ci.yml').not.toBe('');
+
+    expectJobNeeds(workflow, 'canary', String.raw`\[check, test, build, browser-smoke, smoke\]`);
+    expect(canaryBlock).toContain(`if: ${mainPushIf}`);
+    expect(canaryBlock).toContain('uses: ./.github/workflows/canary.yml');
+    expect(canaryBlock).toContain('secrets: inherit');
+
+    // The calling job's permissions are the ceiling for the reusable workflow,
+    // since ci.yml's top-level grant is read-only.
+    expect(canaryBlock).toContain('packages: write');
+    expect(canaryBlock).toContain('id-token: write');
+    expect(canaryBlock).toContain('contents: write');
+  });
+
+  test('canary publishes Docker, npm, and fixed-version crates as isolated jobs', () => {
+    const workflow = readText('.github/workflows/canary.yml');
+    const imageVar = '$' + '{IMAGE}';
+    const sha7Var = '$' + '{SHA7}';
+    const cargoVersionOutput = '$' + '{{ steps.identity.outputs.cargo_version }}';
+    const cargoVersionNeeds = '$' + '{{ needs.build.outputs.cargo_version }}';
+    const cargoVersionVar = '$' + '{CARGO_VERSION}';
+    const versionVar = '$' + '{VERSION}';
+
+    // Reusable workflow; only the newest green commit owns the rolling tags.
+    expect(workflow).toContain('on:\n  workflow_call:');
+    expect(workflow).toContain('group: canary-publish');
+    expect(workflow).toContain('cancel-in-progress: true');
+
+    expectJobNeeds(workflow, 'npm-canary', 'build');
+    expectJobNeeds(workflow, 'docker-canary', 'build');
+    expectJobNeeds(workflow, 'crates-canary', 'build');
+    expect(workflow).toContain(`cargo_version: ${cargoVersionOutput}`);
+    expect(workflow).toContain('name: canary-cargo-assets');
+
+    // Docker: bookworm multi-arch, rolling + immutable canary tags, no Alpine.
+    const dockerBlock = extractJobBlock(workflow, 'docker-canary');
+    expect(dockerBlock).toContain('retry_command 3 30 docker buildx build');
+    expect(dockerBlock).toContain('--platform linux/amd64,linux/arm64');
+    expect(dockerBlock).toContain(`--tag "${imageVar}:canary"`);
+    expect(dockerBlock).toContain(`--tag "${imageVar}:canary-${sha7Var}"`);
+    expect(dockerBlock).not.toContain('Dockerfile.alpine');
+
+    // npm: canary dist-tag so `latest` never moves.
+    const npmBlock = extractJobBlock(workflow, 'npm-canary');
+    expect(npmBlock).toContain('bun ./scripts/release/publish-npm.ts dist-npm --tag canary');
+
+    // crates: fixed <root>-canary crate, backed by rolling v<root>-canary assets.
+    // The per-SHA app version is only used to build/rename assets, never as the
+    // crate version or GitHub pre-release tag.
+    const cratesBlock = extractJobBlock(workflow, 'crates-canary');
+    expect(cratesBlock).toContain(`CARGO_VERSION: ${cargoVersionNeeds}`);
+    expect(cratesBlock).toContain(`tag="v${cargoVersionVar}"`);
+    expect(cratesBlock).toContain('gh release create "$tag" cargo-canary-assets/*');
+    expect(cratesBlock).toContain('gh release upload "$tag" cargo-canary-assets/* --clobber');
+    expect(cratesBlock).toContain('bun ./scripts/release/stamp-cargo-version.ts "$CARGO_VERSION"');
+    expect(cratesBlock).toContain('cargo publish --locked --allow-dirty');
+    expect(cratesBlock).not.toContain(`tag="v${versionVar}"`);
+    expect(workflow).not.toContain('prune-canary-releases.sh');
+  });
+
+  test('canary ends with an always-run per-channel summary', () => {
+    const workflow = readText('.github/workflows/canary.yml');
+    const summaryBlock = extractJobBlock(workflow, 'canary-summary');
+    const alwaysExpression = '$' + '{{ always() }}';
+    const buildResult = '$' + '{{ needs.build.result }}';
+    const npmResult = '$' + '{{ needs.npm-canary.result }}';
+    const dockerResult = '$' + '{{ needs.docker-canary.result }}';
+    const cratesResult = '$' + '{{ needs.crates-canary.result }}';
+    expect(summaryBlock, 'canary-summary job not found').not.toBe('');
+
+    expect(summaryBlock).toContain(`if: ${alwaysExpression}`);
+    expect(summaryBlock).toContain('bash scripts/release/publish-summary.sh');
+    // Surface the shared build gate so its failure is not masked by the
+    // channels all showing "skipped".
+    expect(summaryBlock).toContain(`build=${buildResult}`);
+    expect(summaryBlock).toContain(`npm-canary=${npmResult}`);
+    expect(summaryBlock).toContain(`docker-canary=${dockerResult}`);
+    expect(summaryBlock).toContain(`crates-canary=${cratesResult}`);
   });
 
   test('binary smoke helper checks version, delegates the health poll, and surfaces failure logs', () => {

@@ -13,7 +13,8 @@ On first run the launcher downloads the prebuilt platform archive matching the c
 Bun-compiled `mangostudio` binary plus its `public/` frontend sidecar) from the GitHub release,
 verifies it against the release `SHA256SUMS`, and unpacks it into `~/.mango/dist/<version>/` — the
 same shared layout the shell installer uses. Every later run execs the real binary directly with
-your arguments and environment untouched.
+your arguments and environment untouched. Canary launcher versions (`*-canary`) refresh that
+versioned install before every run so they track the rolling canary release assets.
 
 ## Environment overrides
 

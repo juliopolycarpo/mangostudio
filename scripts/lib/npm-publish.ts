@@ -31,6 +31,8 @@ export interface NpmPublishLogger {
 export interface NpmPublishOptions {
   readonly runner: NpmRunner;
   readonly dryRun?: boolean;
+  /** npm dist-tag to publish under (e.g. 'canary'). Omitted ⇒ npm's default 'latest'. */
+  readonly distTag?: string;
   readonly logger?: NpmPublishLogger;
   readonly provenance?: boolean;
   readonly retryDelaysMs?: readonly number[];
@@ -53,6 +55,7 @@ export type NpmPublishFailureKind = 'conflict' | 'fatal' | 'provenance' | 'trans
 
 interface PublishContext {
   readonly dryRun: boolean;
+  readonly distTag: string | undefined;
   readonly logger: NpmPublishLogger;
   readonly retryDelaysMs: readonly number[];
   readonly runner: NpmRunner;
@@ -154,6 +157,7 @@ function packageDirSortKey(dirName: string): number {
 function createContext(options: NpmPublishOptions): PublishContext {
   return {
     dryRun: options.dryRun ?? false,
+    distTag: options.distTag,
     logger: options.logger ?? DEFAULT_LOGGER,
     retryDelaysMs: options.retryDelaysMs ?? PUBLISH_RETRY_DELAYS_MS,
     runner: options.runner,
@@ -224,6 +228,7 @@ function runPublish(
   attempt: number
 ): Promise<NpmCommandResult> {
   const args = ['publish', '--access', 'public'];
+  if (context.distTag) args.push('--tag', context.distTag);
   if (context.state.provenance) args.push('--provenance');
 
   context.logger.info(

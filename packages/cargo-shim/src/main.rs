@@ -36,10 +36,18 @@ fn main() {
 fn run() -> Result<(), String> {
     let install_dir = install_root()?.join(VERSION);
     let binary_path = install_dir.join(BINARY_NAME);
-    if !binary_path.is_file() {
+    if is_canary_version() || !binary_path.is_file() {
         install(&install_dir)?;
     }
     run_binary(&binary_path)
+}
+
+fn is_canary_version() -> bool {
+    VERSION
+        .split('+')
+        .next()
+        .unwrap_or(VERSION)
+        .contains("-canary")
 }
 
 /// Map the compile-time target onto the release platform ids frozen by the
@@ -283,6 +291,11 @@ mod tests {
     fn platform_id_maps_the_test_host_to_a_release_asset() {
         let id = platform_id().expect("test host is a supported release platform");
         assert!(asset_name(id).starts_with(&format!("mangostudio-{VERSION}-")));
+    }
+
+    #[test]
+    fn committed_launcher_version_is_not_canary() {
+        assert!(!is_canary_version());
     }
 
     #[test]

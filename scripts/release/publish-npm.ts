@@ -19,6 +19,7 @@ import { error, header, log, success, warn } from '../lib/runner';
 interface CliArgs {
   readonly distDir: string;
   readonly dryRun: boolean;
+  readonly distTag: string | undefined;
 }
 
 class BunNpmRunner implements NpmRunner {
@@ -41,7 +42,7 @@ class BunNpmRunner implements NpmRunner {
 }
 
 const printHelp = (): never => {
-  console.log(`Usage: bun ./scripts/release/publish-npm.ts [dist-dir] [--dry-run]
+  console.log(`Usage: bun ./scripts/release/publish-npm.ts [dist-dir] [--dry-run] [--tag <dist-tag>]
 
 Publishes staged npm packages platform-first, then the @mangostudio/cli wrapper.
 
@@ -49,19 +50,34 @@ Arguments:
   dist-dir   Staged npm distribution directory (default: dist-npm)
 
 Flags:
-  --dry-run  Check registry state and print publish decisions without publishing
-  --help     Show this help message`);
+  --dry-run        Check registry state and print publish decisions without publishing
+  --tag <dist-tag>  Publish under this npm dist-tag (e.g. canary). Default: latest
+  --help           Show this help message`);
   process.exit(0);
 };
 
 const parseArgs = (args: readonly string[]): CliArgs => {
   let distArg: string | undefined;
   let dryRun = false;
+  let distTag: string | undefined;
 
-  for (const arg of args) {
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
     if (arg === '--help') printHelp();
     if (arg === '--dry-run') {
       dryRun = true;
+      continue;
+    }
+    if (arg === '--tag') {
+      const next = args[index + 1];
+      if (!next || next.startsWith('-')) throw new Error('--tag requires a dist-tag value');
+      distTag = next;
+      index += 1;
+      continue;
+    }
+    if (arg.startsWith('--tag=')) {
+      distTag = arg.slice('--tag='.length);
+      if (!distTag) throw new Error('--tag requires a dist-tag value');
       continue;
     }
     if (arg.startsWith('-')) throw new Error(`Unknown option: ${arg}`);
@@ -69,7 +85,7 @@ const parseArgs = (args: readonly string[]): CliArgs => {
     distArg = arg;
   }
 
-  return { distDir: resolve(ROOT_DIR, distArg ?? 'dist-npm'), dryRun };
+  return { distDir: resolve(ROOT_DIR, distArg ?? 'dist-npm'), dryRun, distTag };
 };
 
 const loadPackages = (distDir: string): NpmPublishPackage[] => {
@@ -103,9 +119,11 @@ const main = async (): Promise<void> => {
   const args = parseArgs(process.argv.slice(2));
   const packages = loadPackages(args.distDir);
 
-  header(args.dryRun ? 'Dry-run npm publish' : 'Publish npm packages');
+  const tagLabel = args.distTag ? ` (dist-tag: ${args.distTag})` : '';
+  header(`${args.dryRun ? 'Dry-run npm publish' : 'Publish npm packages'}${tagLabel}`);
   const summary = await publishPackages(packages, {
     dryRun: args.dryRun,
+    distTag: args.distTag,
     logger: { info: log, warn },
     runner: new BunNpmRunner(),
   });

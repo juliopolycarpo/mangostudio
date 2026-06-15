@@ -57,3 +57,19 @@ jobs:
     # (stage-docker-ctx.ts --release-assets) that this job does not cover.
     name: Smoke — Binary
     uses: ./.github/workflows/smoke-binary.yml
+
+  canary:
+    # Publish a canary build from the latest green commit on main. Gating on every
+    # other CI job means this only runs once the commit is fully green, so that
+    # commit is the canary source. The job-level permissions here are the ceiling
+    # for the called workflow (ci.yml's top-level grant is read-only); canary.yml's
+    # own jobs scope down further.
+    name: Canary
+    needs: [check, test, build, browser-smoke, smoke]
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    permissions:
+      contents: write
+      packages: write
+      id-token: write
+    uses: ./.github/workflows/canary.yml
+    secrets: inherit
