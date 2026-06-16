@@ -186,7 +186,8 @@ describe('release workflow binary gate', () => {
       'CRATES_IO_USER_AGENT: "mangostudio-release (https://github.com/juliopolycarpo/mangostudio)"'
     );
     expect(cargoPublishBlock).not.toContain('https://crates.io/api/v1/crates/mangostudio');
-    expect(cargoPublishBlock).toContain('if published; then');
+    expect(cargoPublishBlock).toContain('source scripts/release/crates-published.sh');
+    expect(cargoPublishBlock).toContain('if published "$VERSION"; then');
     expect(cargoPublishBlock).toContain(`Version became visible after attempt ${attemptVar}`);
   });
 
@@ -316,11 +317,13 @@ describe('release workflow binary gate', () => {
       'CRATES_IO_USER_AGENT: "mangostudio-release (https://github.com/juliopolycarpo/mangostudio)"'
     );
     expect(cratesBlock).not.toContain('https://crates.io/api/v1/crates/mangostudio');
+    expect(cratesBlock).toContain('source scripts/release/crates-published.sh');
+    expect(cratesBlock).toContain('if published "$CARGO_VERSION"; then');
     expect(cratesBlock).toContain('bun ./scripts/release/stamp-cargo-version.ts "$CARGO_VERSION"');
     expect(cratesBlock).toContain('cargo publish --locked --allow-dirty');
     expect(
       cratesBlock.indexOf('gh release upload "$tag" cargo-canary-assets/* --clobber')
-    ).toBeLessThan(cratesBlock.indexOf('if published; then'));
+    ).toBeLessThan(cratesBlock.indexOf('if published "$CARGO_VERSION"; then'));
     expect(cratesBlock).not.toContain(`tag="v${versionVar}"`);
     expect(workflow).not.toContain('prune-canary-releases.sh');
   });
