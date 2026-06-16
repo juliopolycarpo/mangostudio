@@ -1,4 +1,3 @@
-import { closeSync, existsSync, lstatSync, openSync, readFileSync, readSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { extname, isAbsolute, join } from 'node:path';
 import type {
@@ -6,6 +5,12 @@ import type {
   RuleFileDescriptor,
   RuleFilePreviewResponse,
 } from '@mangostudio/shared/prompt-rules';
+import {
+  type RegularFileContent,
+  RegularFileReadError,
+  readRegularFileUtf8,
+  statRegularFile,
+} from '../../../lib/safe-file';
 
 const MAX_CONTENT_BYTES = 256 * 1024;
 
@@ -34,25 +39,6 @@ function expandTilde(raw: string): string {
   return raw;
 }
 
-function isReadableRegularFile(absolutePath: string): boolean {
-  try {
-    const stat = lstatSync(absolutePath);
-    if (!stat.isFile()) return false;
-    readFileSync(absolutePath, { flag: 'r' });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function getFileSize(absolutePath: string): number | undefined {
-  try {
-    return lstatSync(absolutePath).size;
-  } catch {
-    return undefined;
-  }
-}
-
 function validateCustomPath(raw: string): string {
   if (raw.startsWith('~')) {
     return expandTilde(raw);
@@ -75,47 +61,22 @@ function assertMarkdownExtension(filePath: string): void {
   }
 }
 
-function isErrnoException(err: unknown): err is NodeJS.ErrnoException {
-  return err instanceof Error && 'code' in err && 'errno' in err;
+/** Open the rule file once and read it, truncating content above the cap. */
+function readRuleFile(absolutePath: string): RegularFileContent {
+  return readRegularFileUtf8(absolutePath, { maxBytes: MAX_CONTENT_BYTES, truncateOversize: true });
 }
 
-function assertRegularFile(filePath: string): void {
-  try {
-    const stat = lstatSync(filePath);
-    if (!stat.isFile()) {
-      throw new RuleFileError('Path is not a regular file', 422, 'VALIDATION');
+function toRuleFileError(error: unknown): RuleFileError {
+  if (error instanceof RuleFileError) return error;
+  if (error instanceof RegularFileReadError) {
+    if (error.reason === 'not-found') return new RuleFileError('File not found', 404, 'NOT_FOUND');
+    if (error.reason === 'not-regular-file') {
+      return new RuleFileError('Path is not a regular file', 422, 'VALIDATION');
     }
-  } catch (err: unknown) {
-    if (err instanceof RuleFileError) throw err;
-
-    if (isErrnoException(err) && err.code === 'ENOENT') {
-      throw new RuleFileError('File not found', 404, 'NOT_FOUND');
-    }
-    const message = err instanceof Error ? err.message : 'unknown error';
-    throw new RuleFileError(`Cannot access file: ${message}`, 422, 'VALIDATION');
+    return new RuleFileError('File is not readable', 422, 'VALIDATION');
   }
-}
-
-function readFileContent(absolutePath: string): { content: string; truncated: boolean } {
-  const stat = lstatSync(absolutePath);
-  const shouldTruncate = stat.size > MAX_CONTENT_BYTES;
-
-  try {
-    if (shouldTruncate) {
-      const buffer = Buffer.alloc(MAX_CONTENT_BYTES);
-      const fd = openSync(absolutePath, 'r');
-      try {
-        readSync(fd, buffer, 0, MAX_CONTENT_BYTES, 0);
-      } finally {
-        closeSync(fd);
-      }
-      return { content: buffer.toString('utf8'), truncated: true };
-    }
-
-    return { content: readFileSync(absolutePath, 'utf8'), truncated: false };
-  } catch {
-    throw new RuleFileError('File is not readable', 422, 'VALIDATION');
-  }
+  const message = error instanceof Error ? error.message : 'unknown error';
+  return new RuleFileError(`Cannot access file: ${message}`, 422, 'VALIDATION');
 }
 
 function buildDescriptor(
@@ -124,52 +85,28 @@ function buildDescriptor(
   filePath: string
 ): RuleFileDescriptor {
   const resolved = expandTilde(filePath);
-  const ex = existsSync(resolved);
-
-  if (!ex) {
-    return {
-      kind,
-      label,
-      path: filePath,
-      exists: false,
-      readable: false,
-    };
-  }
 
   try {
-    const stat = lstatSync(resolved);
-    if (!stat.isFile()) {
-      return {
-        kind,
-        label,
-        path: filePath,
-        exists: true,
-        readable: false,
-        error: 'Path is not a regular file',
-      };
-    }
-  } catch {
-    return {
-      kind,
-      label,
-      path: filePath,
-      exists: true,
-      readable: false,
-      error: 'Cannot stat file',
-    };
+    const { sizeBytes } = statRegularFile(resolved);
+    return { kind, label, path: filePath, exists: true, readable: true, sizeBytes };
+  } catch (error) {
+    return buildUnreadableDescriptor(kind, label, filePath, error);
+  }
+}
+
+function buildUnreadableDescriptor(
+  kind: FixedRuleFileKind | undefined,
+  label: string,
+  filePath: string,
+  error: unknown
+): RuleFileDescriptor {
+  if (error instanceof RegularFileReadError && error.reason !== 'not-found') {
+    const message =
+      error.reason === 'not-regular-file' ? 'Path is not a regular file' : 'File is not readable';
+    return { kind, label, path: filePath, exists: true, readable: false, error: message };
   }
 
-  const readable = isReadableRegularFile(resolved);
-
-  return {
-    kind,
-    label,
-    path: filePath,
-    exists: true,
-    readable,
-    sizeBytes: readable ? getFileSize(resolved) : undefined,
-    error: readable ? undefined : 'File is not readable',
-  };
+  return { kind, label, path: filePath, exists: false, readable: false };
 }
 
 export function getDefaultRuleFileDescriptors(): RuleFileDescriptor[] {
@@ -182,14 +119,7 @@ export function loadRuleFileContent(rawPath: string): string | null {
   try {
     const resolved = validateCustomPath(rawPath);
     assertMarkdownExtension(resolved);
-
-    if (!existsSync(resolved)) return null;
-
-    assertRegularFile(resolved);
-
-    if (!isReadableRegularFile(resolved)) return null;
-
-    return readFileContent(resolved).content;
+    return readRuleFile(resolved).content;
   } catch {
     return null;
   }
@@ -198,22 +128,21 @@ export function loadRuleFileContent(rawPath: string): string | null {
 export function previewRuleFile(rawPath: string): RuleFilePreviewResponse {
   const resolved = validateCustomPath(rawPath);
   assertMarkdownExtension(resolved);
-  assertRegularFile(resolved);
 
-  if (!isReadableRegularFile(resolved)) {
-    throw new RuleFileError('File is not readable', 422, 'VALIDATION');
+  let file: RegularFileContent;
+  try {
+    file = readRuleFile(resolved);
+  } catch (error) {
+    throw toRuleFileError(error);
   }
-
-  const { content, truncated } = readFileContent(resolved);
-  const sizeBytes = getFileSize(resolved);
 
   return {
     label: rawPath,
     path: rawPath,
     exists: true,
     readable: true,
-    sizeBytes,
-    content,
-    truncated,
+    sizeBytes: file.sizeBytes,
+    content: file.content,
+    truncated: file.truncated,
   };
 }
