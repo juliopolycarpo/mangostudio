@@ -20,7 +20,6 @@ import {
   checkRuntime,
   type FsProbe,
 } from '../doctor-checks';
-import { probeHealth } from '../health';
 import { writeLine } from '../output';
 import { createProcessController, type ProcessController } from '../process-control';
 
@@ -29,7 +28,6 @@ export interface DoctorDeps {
   fs: FsProbe;
   frontendDir: () => string;
   controller: ProcessController;
-  probeHealth: typeof probeHealth;
   readState: typeof readState;
   log: (msg: string) => void;
   exit: (code: number) => void;
@@ -38,7 +36,6 @@ export interface DoctorDeps {
 interface InstanceProbe {
   state: ServerState | null;
   alive: boolean;
-  healthy: boolean;
 }
 
 /** Run diagnostics and print a checklist; exit 1 on any failure. // Usage: await runDoctor() */
@@ -62,7 +59,7 @@ async function collectResults(
     checkDatabase(config, d.fs),
     checkFrontend(d.frontendDir(), d.fs),
     checkAuthSecret(config),
-    checkInstance(instance.state, instance.alive, instance.healthy),
+    checkInstance(instance.state, instance.alive),
     checkRuntime(getVersion(), isStandaloneExecutable()),
   ];
 }
@@ -70,11 +67,10 @@ async function collectResults(
 async function inspectInstance(d: Required<DoctorDeps>): Promise<InstanceProbe> {
   const state = await d.readState();
   if (!state) {
-    return { state: null, alive: false, healthy: false };
+    return { state: null, alive: false };
   }
   const alive = isStateLive(state, (pid) => d.controller.isAlive(pid));
-  const healthy = alive ? await d.probeHealth(state.host, state.port) : false;
-  return { state, alive, healthy };
+  return { state, alive };
 }
 
 function render(results: CheckResult[], d: Required<DoctorDeps>): void {
@@ -119,7 +115,6 @@ function resolveDeps(deps: Partial<DoctorDeps>): Required<DoctorDeps> {
     fs: deps.fs ?? realFsProbe(),
     frontendDir: deps.frontendDir ?? getDefaultFrontendDir,
     controller: deps.controller ?? createProcessController(),
-    probeHealth: deps.probeHealth ?? probeHealth,
     readState: deps.readState ?? readState,
     log: deps.log ?? writeLine,
     exit: deps.exit ?? ((code) => process.exit(code)),

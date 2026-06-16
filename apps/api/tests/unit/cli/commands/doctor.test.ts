@@ -32,7 +32,6 @@ describe('runDoctor', () => {
       fs: ALL_OK,
       frontendDir: () => '/app',
       controller: new FakeProcessController(),
-      probeHealth: () => Promise.resolve(true),
       readState: () => Promise.resolve(null),
       log: (msg) => lines.push(msg),
       exit: (code) => {
@@ -54,7 +53,6 @@ describe('runDoctor', () => {
       fs: NOTHING,
       frontendDir: () => '/app',
       controller: new FakeProcessController(),
-      probeHealth: () => Promise.resolve(false),
       readState: () => Promise.resolve(null),
       log: () => undefined,
       exit: (code) => {

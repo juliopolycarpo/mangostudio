@@ -27,7 +27,6 @@ describe('runStatus', () => {
       readState: () => Promise.resolve(null),
       removeState: noop,
       controller: new FakeProcessController(),
-      probeHealth: () => Promise.resolve(false),
       log,
       now: () => 0,
     });
@@ -46,7 +45,6 @@ describe('runStatus', () => {
         return Promise.resolve();
       },
       controller: new FakeProcessController([]),
-      probeHealth: () => Promise.resolve(false),
       log,
       now: () => 0,
     });
@@ -62,7 +60,6 @@ describe('runStatus', () => {
       readState: () => Promise.resolve(STATE),
       removeState: noop,
       controller: new FakeProcessController([42]),
-      probeHealth: () => Promise.resolve(true),
       log,
       now: () => 5000,
     });
@@ -71,21 +68,6 @@ describe('runStatus', () => {
     expect(text).toContain('MangoStudio is running.');
     expect(text).toContain('PID:     42');
     expect(text).toContain('Uptime:  5s');
-    expect(text).toContain('Health:  ok');
-  });
-
-  it('shows health unreachable when the probe fails', async () => {
-    const { lines, log } = capture();
-
-    await runStatus({
-      readState: () => Promise.resolve(STATE),
-      removeState: noop,
-      controller: new FakeProcessController([42]),
-      probeHealth: () => Promise.resolve(false),
-      log,
-      now: () => 0,
-    });
-
-    expect(lines.join('\n')).toContain('Health:  unreachable');
+    expect(text).toContain('Health:  not probed');
   });
 });

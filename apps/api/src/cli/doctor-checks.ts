@@ -82,21 +82,14 @@ export function checkAuthSecret(config: MangoConfig): CheckResult {
   return ok('Auth secret', `set (${AUTH_SECRET_MIN_LENGTH}+ characters)`);
 }
 
-export function checkInstance(
-  state: ServerState | null,
-  alive: boolean,
-  healthy: boolean
-): CheckResult {
+export function checkInstance(state: ServerState | null, alive: boolean): CheckResult {
   if (!state) {
     return ok('Instance', 'not running');
   }
   if (!alive) {
     return warn('Instance', `stale state file (PID ${state.pid})`);
   }
-  return ok(
-    'Instance',
-    `running (PID ${state.pid}, port ${state.port}, health ${healthy ? 'ok' : 'unreachable'})`
-  );
+  return ok('Instance', `running (PID ${state.pid}, port ${state.port}, health not probed)`);
 }
 
 export function checkRuntime(version: string, standalone: boolean): CheckResult {

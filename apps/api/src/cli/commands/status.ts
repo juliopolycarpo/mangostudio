@@ -4,13 +4,11 @@
 
 import { isStateLive, readState, removeState, type ServerState } from '../../lib/server-state';
 import { formatUptime } from '../format';
-import { probeHealth } from '../health';
 import { writeLine } from '../output';
 import { createProcessController, type ProcessController } from '../process-control';
 
 export interface StatusDeps {
   controller: ProcessController;
-  probeHealth: typeof probeHealth;
   readState: typeof readState;
   removeState: typeof removeState;
   log: (msg: string) => void;
@@ -30,25 +28,23 @@ export async function runStatus(deps: Partial<StatusDeps> = {}): Promise<void> {
     return;
   }
 
-  const healthy = await d.probeHealth(state.host, state.port);
-  printRunning(state, healthy, d);
+  printRunning(state, d);
 }
 
-function printRunning(state: ServerState, healthy: boolean, d: Required<StatusDeps>): void {
+function printRunning(state: ServerState, d: Required<StatusDeps>): void {
   d.log('MangoStudio is running.');
   d.log(`  PID:     ${state.pid}`);
   d.log(`  Port:    ${state.port}`);
   d.log(`  Host:    ${state.host}`);
   d.log(`  Uptime:  ${formatUptime(d.now() - state.startedAt)}`);
   d.log(`  Logs:    ${state.logFile || '(foreground)'}`);
-  d.log(`  Health:  ${healthy ? 'ok' : 'unreachable'}`);
+  d.log('  Health:  not probed');
   d.log(`  Version: ${state.version}`);
 }
 
 function resolveDeps(deps: Partial<StatusDeps>): Required<StatusDeps> {
   return {
     controller: deps.controller ?? createProcessController(),
-    probeHealth: deps.probeHealth ?? probeHealth,
     readState: deps.readState ?? readState,
     removeState: deps.removeState ?? removeState,
     log: deps.log ?? writeLine,
