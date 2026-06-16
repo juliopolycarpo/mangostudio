@@ -470,7 +470,12 @@ jobs:
             if (cd packages/cargo-shim && CARGO_REGISTRY_TOKEN="$publish_token" cargo publish --locked); then
               exit 0
             fi
-            if published "$VERSION"; then
+            # Probe in a subshell so a transient or unreachable-index failure
+            # inside published() (its hard `exit 1`) is contained here and
+            # treated as "not visible yet, keep retrying" instead of aborting
+            # the whole step. The pre-publish check above calls published()
+            # directly, so an ambiguous index still hard-fails there.
+            if (published "$VERSION"); then
               echo "Version became visible after attempt ${attempt}; treating as published."
               exit 0
             fi

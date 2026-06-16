@@ -6,6 +6,10 @@
 # CRATES_IO_USER_AGENT from the environment. Returns 0 when the version is
 # already published, 1 when it is not, and exits non-zero (refusing to guess)
 # when the sparse index cannot be reached or returns an unexpected status.
+#
+# Callers that want to tolerate an unreachable index (e.g. a post-publish
+# visibility poll that should keep retrying) can invoke `published` inside a
+# subshell, so its hard exit is contained and surfaces as a non-zero status.
 
 published() {
   local version="$1"

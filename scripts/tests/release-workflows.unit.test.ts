@@ -187,7 +187,11 @@ describe('release workflow binary gate', () => {
     );
     expect(cargoPublishBlock).not.toContain('https://crates.io/api/v1/crates/mangostudio');
     expect(cargoPublishBlock).toContain('source scripts/release/crates-published.sh');
+    // Pre-publish check hard-fails on an ambiguous index; the post-failure
+    // visibility poll is subshell-wrapped so a transient index error is
+    // contained and the retry loop keeps going.
     expect(cargoPublishBlock).toContain('if published "$VERSION"; then');
+    expect(cargoPublishBlock).toContain('if (published "$VERSION"); then');
     expect(cargoPublishBlock).toContain(`Version became visible after attempt ${attemptVar}`);
   });
 
@@ -318,7 +322,10 @@ describe('release workflow binary gate', () => {
     );
     expect(cratesBlock).not.toContain('https://crates.io/api/v1/crates/mangostudio');
     expect(cratesBlock).toContain('source scripts/release/crates-published.sh');
+    // Pre-publish check hard-fails on an ambiguous index; the post-failure
+    // visibility poll is subshell-wrapped so the retry loop keeps going.
     expect(cratesBlock).toContain('if published "$CARGO_VERSION"; then');
+    expect(cratesBlock).toContain('if (published "$CARGO_VERSION"); then');
     expect(cratesBlock).toContain('bun ./scripts/release/stamp-cargo-version.ts "$CARGO_VERSION"');
     expect(cratesBlock).toContain('cargo publish --locked --allow-dirty');
     expect(
