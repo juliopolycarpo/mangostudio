@@ -143,23 +143,19 @@ describe('checkAuthSecret', () => {
 
 describe('checkInstance', () => {
   it('reports not running when there is no state', () => {
-    const result = checkInstance(null, false, false);
+    const result = checkInstance(null, false);
     expect(result.status).toBe('ok');
     expect(result.detail).toBe('not running');
   });
 
   it('warns on a stale state file', () => {
-    expect(checkInstance(makeState(), false, false).status).toBe('warn');
+    expect(checkInstance(makeState(), false).status).toBe('warn');
   });
 
-  it('reports a healthy running instance', () => {
-    const result = checkInstance(makeState(), true, true);
+  it('reports a running instance without probing health', () => {
+    const result = checkInstance(makeState(), true);
     expect(result.status).toBe('ok');
-    expect(result.detail).toContain('health ok');
-  });
-
-  it('reports an unreachable running instance', () => {
-    expect(checkInstance(makeState(), true, false).detail).toContain('health unreachable');
+    expect(result.detail).toContain('health not probed');
   });
 });
 

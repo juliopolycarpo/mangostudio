@@ -45,13 +45,28 @@ export function createPromptChatTitle(
   return `${normalizedPrompt.slice(0, normalizedMaxLength).trimEnd()}...`;
 }
 
+const TITLE_QUOTE_CHARS = new Set(['"', "'", '`']);
+
+/**
+ * Trims leading and trailing quote/backtick characters in a single linear pass.
+ *
+ * Replaces a `/^["'`]+|["'`]+$/g` cleanup that backtracks on adversarial model
+ * output like `""""…"` (CodeQL js/polynomial-redos).
+ */
+function trimQuoteChars(value: string): string {
+  let start = 0;
+  let end = value.length;
+  while (start < end && TITLE_QUOTE_CHARS.has(value[start])) start += 1;
+  while (end > start && TITLE_QUOTE_CHARS.has(value[end - 1])) end -= 1;
+  return value.slice(start, end);
+}
+
 export function sanitizeGeneratedChatTitle(title: string, fallbackTitle: string): string {
-  const normalizedTitle = title
+  const withoutPrefix = title
     .replace(/\s+/g, ' ')
     .trim()
-    .replace(/^title\s*:\s*/i, '')
-    .replace(/^["'`]+|["'`]+$/g, '')
-    .trim();
+    .replace(/^title\s*:\s*/i, '');
+  const normalizedTitle = trimQuoteChars(withoutPrefix).trim();
 
   if (normalizedTitle.length === 0) return fallbackTitle;
   return createPromptChatTitle(normalizedTitle, CHAT_TITLE_PROMPT_LENGTH_MAX) ?? fallbackTitle;

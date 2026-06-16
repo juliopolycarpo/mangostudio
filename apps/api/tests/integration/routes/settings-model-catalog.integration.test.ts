@@ -3,6 +3,7 @@ import { Type } from '@sinclair/typebox';
 import { Value } from '@sinclair/typebox/value';
 import { settingsRoutes } from '../../../src/routes/settings';
 import { clearGeminiModelCatalog } from '../../../src/services/gemini';
+import { isProviderModelsUrl } from '../../support/connectors';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
 
 const TEST_USER = {
@@ -19,7 +20,7 @@ function installProviderModelListFetch(): void {
   // biome-ignore lint/suspicious/useAwait: Migrated from ESLint
   globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = input instanceof Request ? input.url : String(input);
-    if (url.includes('api.openai.com') && url.includes('/models')) {
+    if (isProviderModelsUrl(url, 'api.openai.com')) {
       return new Response(JSON.stringify({ data: [{ id: 'gpt-4o' }] }), { status: 200 });
     }
     if (url === 'https://api.deepseek.com/models') {

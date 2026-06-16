@@ -69,6 +69,23 @@ export const ConnectorResponseSchema = Type.Object({
 });
 
 /**
+ * True when `rawUrl` targets `<hostname>`'s model-listing endpoint. Matches the
+ * parsed host and path instead of a substring so a deceptive host such as
+ * `api.openai.com.evil.test` does not satisfy the stub (CodeQL
+ * js/incomplete-url-substring-sanitization).
+ * // Usage: isProviderModelsUrl(url, 'api.openai.com')
+ */
+export function isProviderModelsUrl(rawUrl: string, hostname: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(rawUrl);
+  } catch {
+    return false;
+  }
+  return parsed.hostname === hostname && parsed.pathname.endsWith('/models');
+}
+
+/**
  * Returns a fetch that answers OpenAI `/models` calls with a minimal 200 model
  * list and forwards everything else. // Usage: globalThis.fetch = makeOpenAISuccessFetch(globalThis.fetch)
  */
@@ -76,7 +93,7 @@ export function makeOpenAISuccessFetch(originalFetch: FetchImpl): FetchImpl {
   // biome-ignore lint/suspicious/useAwait: matches the fetch signature
   return (async (input: string | URL | Request, init?: RequestInit) => {
     const url = input instanceof Request ? input.url : String(input);
-    if (url.includes('api.openai.com') && url.includes('/models')) {
+    if (isProviderModelsUrl(url, 'api.openai.com')) {
       return new Response(
         JSON.stringify({
           object: 'list',
