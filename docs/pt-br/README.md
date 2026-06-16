@@ -1,5 +1,5 @@
 <div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
+<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/b9f25ec1-2619-44a6-af6a-00e8f6fb2731" />
 </div>
 
 # MangoStudio
@@ -55,7 +55,9 @@ Execute `mangostudio` sem argumentos para a lista completa de comandos. Veja
 
 Na primeira execução, `mangostudio serve` pode gerar um `BETTER_AUTH_SECRET` forte
 e armazená-lo em `~/.mango/.env` ou `~/.mango/config.toml`. Configure chaves de
-provedor como `GEMINI_API_KEY` quando estiver pronto para usar modelos hospedados.
+provedor como `GEMINI_API_KEY` quando estiver pronto para usar modelos hospedados. Configurações
+opcionais de runtime incluem `API_HOST`, `API_PORT` e `DATABASE_PATH`.
+Veja [`@mangostudio/cli`](../../packages/cli/README.md) para o ambiente completo.
 Para deploy em container, veja [`docs/operations/deployment.md`](../operations/deployment.md#docker).
 
 ## Pré-requisitos (desenvolvimento)
@@ -196,7 +198,6 @@ mangostudio/
 | -------------- | ---------------------------------------------------- | ------------------------------------------------- |
 | **Biome**      | JS, TS, JSX, TSX, JSON, JSONC, CSS, HTML             | Linter e formatador com regras unificadas         |
 | **dprint**     | Markdown, MDX, TOML, YAML, Dockerfile                | Formatador plugável com plugins WASM              |
-| **tsgo**       | TS, TSX, MTS, CTS, JS, JSX, MJS, CJS                 | Servidor de linguagem TypeScript nativo           |
 | **lefthook**   | Git hooks (pre-commit)                               | Gerenciador de hooks Git para validação em commit |
 | **madge**      | Grafos de dependência JS/TS                          | Detecção de dependências circulares               |
 | **jscpd**      | Todos os arquivos fonte                              | Detecção de código duplicado                      |
@@ -241,7 +242,7 @@ Arquivos formatados são re-adicionados ao stage automaticamente. Todos os hooks
 
 ## Configuração do Editor
 
-Os hooks do Claude Code preprendem `node_modules/.bin` ao PATH automaticamente ao iniciar sessão e ao mudar de diretório (`SessionStart` / `CwdChanged`). Após cada escrita ou edição, um hook `PostToolUse` executa `auto-fix.mjs` para formatar o arquivo modificado.
+Os hooks do Claude Code prependem `node_modules/.bin` ao PATH automaticamente ao iniciar sessão e ao mudar de diretório (`SessionStart` / `CwdChanged`). Após cada escrita ou edição, um hook `PostToolUse` executa `auto-fix.mjs` para formatar o arquivo modificado.
 
 ### OpenCode
 
@@ -379,7 +380,7 @@ Quando uma alteração relevante for feita em `docs/`, a versão correspondente 
 
 ## Notas de Build Standalone
 
-O comando `bun run build --binary` compila a API em binários específicos por plataforma em `out/<platform>/`.
+O comando `bun run build --binary` compila a API em binários específicos por plataforma em `.mango/out/<platform>/`.
 
 - O banco de dados é persistido em `~/.mango/database.sqlite` por padrão.
 - Os assets do frontend são servidos a partir do diretório `public/` vizinho ao executável.
