@@ -531,6 +531,30 @@ describe('classifyEndpoint', () => {
     expect(classifyEndpoint('https://my-custom-llm.example.com/v1')).toBe('generic');
     expect(classifyEndpoint('http://localhost:11434')).toBe('generic');
   });
+
+  it('does not classify deceptive hostnames that embed provider domains', async () => {
+    const { classifyEndpoint } = await import(
+      '../../../../src/services/providers/openai-compatible/index'
+    );
+    expect(classifyEndpoint('https://api.deepseek.com.evil.test/v1')).toBe('generic');
+    expect(classifyEndpoint('https://evil.test/?next=openrouter.ai')).toBe('generic');
+    expect(classifyEndpoint('https://deepseek.com.attacker.example/v1')).toBe('generic');
+  });
+
+  it('classifies provider subdomains correctly', async () => {
+    const { classifyEndpoint } = await import(
+      '../../../../src/services/providers/openai-compatible/index'
+    );
+    expect(classifyEndpoint('https://api.deepseek.com/v1')).toBe('deepseek');
+    expect(classifyEndpoint('https://openrouter.ai/api/v1')).toBe('openrouter');
+  });
+
+  it('classifies malformed base URLs as generic', async () => {
+    const { classifyEndpoint } = await import(
+      '../../../../src/services/providers/openai-compatible/index'
+    );
+    expect(classifyEndpoint('not-a-url')).toBe('generic');
+  });
 });
 
 describe('extractReasoningChunks', () => {
