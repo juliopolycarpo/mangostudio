@@ -2,11 +2,10 @@
  * Secret persistence — read and write API keys across all supported storage backends.
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname } from 'node:path';
 import type { ProviderType, SecretSource } from '@mangostudio/shared/types';
 import { stringify as stringifyToml } from 'smol-toml';
 import { getConfig, getConfigEnvFilePath, reloadSecretEnv } from '../../../lib/config';
+import { readUtf8FileOrNull, SECRET_FILE_MODE, writeFileAtomic } from '../../../lib/safe-file';
 import { readTomlStringSections } from '../../../lib/toml';
 import { bunSecretStore } from '../../../services/secret-store/store';
 import { PROVIDER_SECRET_CONFIG } from '../domain/connector';
@@ -31,19 +30,20 @@ export async function persistSecret(
 
     case 'config-file': {
       const configPath = getConfig().configFilePath;
-      mkdirSync(dirname(configPath), { recursive: true });
       const config = readTomlStringSections(configPath);
       config[cfg.tomlSection] ??= {};
       config[cfg.tomlSection][name] = apiKey;
-      writeFileSync(configPath, stringifyToml(config));
+      writeFileAtomic(configPath, stringifyToml(config), { mode: SECRET_FILE_MODE });
       break;
     }
 
     case 'environment': {
       const envPath = getConfigEnvFilePath(getConfig().configFilePath);
       const envVar = `${cfg.envPrefix}_${name.toUpperCase().replace(/[^A-Z0-9]/g, '_')}`;
-      const currentContent = existsSync(envPath) ? readFileSync(envPath, 'utf8') : '';
-      writeFileSync(envPath, `${currentContent}\n${envVar}="${apiKey}"\n`);
+      const currentContent = readUtf8FileOrNull(envPath) ?? '';
+      writeFileAtomic(envPath, `${currentContent}\n${envVar}="${apiKey}"\n`, {
+        mode: SECRET_FILE_MODE,
+      });
       // Re-sync process.env from the file so the new key resolves immediately,
       // without forwarding it to detached children (the spawn allowlist withholds it).
       reloadSecretEnv();
@@ -76,15 +76,13 @@ export async function removeSecret(
     case 'config-file': {
       try {
         const configPath = getConfig().configFilePath;
-        if (existsSync(configPath)) {
-          const config = readTomlStringSections(configPath);
-          const section = (config as Record<string, Record<string, string> | undefined>)[
-            cfg.tomlSection
-          ];
-          if (section) {
-            delete section[name];
-            writeFileSync(configPath, stringifyToml(config));
-          }
+        const config = readTomlStringSections(configPath);
+        const section = (config as Record<string, Record<string, string> | undefined>)[
+          cfg.tomlSection
+        ];
+        if (section && name in section) {
+          delete section[name];
+          writeFileAtomic(configPath, stringifyToml(config), { mode: SECRET_FILE_MODE });
         }
       } catch (err) {
         console.error(`[connectors] Failed to remove key from config.toml:`, err);
@@ -95,11 +93,11 @@ export async function removeSecret(
     case 'environment': {
       try {
         const envPath = getConfigEnvFilePath(getConfig().configFilePath);
-        if (existsSync(envPath)) {
+        const content = readUtf8FileOrNull(envPath);
+        if (content !== null) {
           const envVar = `${cfg.envPrefix}_${name.toUpperCase().replace(/[^A-Z0-9]/g, '_')}`;
-          const content = readFileSync(envPath, 'utf8');
           const lines = content.split('\n').filter((l) => !l.trim().startsWith(`${envVar}=`));
-          writeFileSync(envPath, lines.join('\n'));
+          writeFileAtomic(envPath, lines.join('\n'), { mode: SECRET_FILE_MODE });
           // Re-sync process.env so the running server stops resolving the removed key.
           reloadSecretEnv();
         }

@@ -4,13 +4,12 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname } from 'node:path';
 import type { AddConnectorBody, Connector, ConnectorStatus } from '@mangostudio/shared';
 import type { SecretMetadataRow } from '@mangostudio/shared/types';
 import { stringify as stringifyToml } from 'smol-toml';
 import { getConfig, getConfigEnvFilePath, reloadSecretEnv } from '../../../lib/config';
-import { readTomlStringSections } from '../../../lib/toml';
+import { readUtf8FileOrNull, SECRET_FILE_MODE, writeFileAtomic } from '../../../lib/safe-file';
+import { parseTomlStringSections, readTomlStringSections } from '../../../lib/toml';
 import { ConnectorNotFoundError } from '../../../modules/connectors/application/connector-errors';
 import { parseStringArray } from '../../../utils/json';
 import { maskSecret } from '../../../utils/secrets';
@@ -136,10 +135,10 @@ export function createGeminiSecretService(
 
   const syncConfigFileConnectors = async (userId: string): Promise<void> => {
     try {
-      const configPath = resolveTomlFilePath();
-      if (!existsSync(configPath)) return;
+      const configContent = readUtf8FileOrNull(resolveTomlFilePath());
+      if (configContent === null) return;
 
-      const parsed = readTomlStringSections(configPath);
+      const parsed = parseTomlStringSections(configContent);
       const tomlKeys = parsed.gemini_api_keys ?? {};
 
       const currentMetadata = await listMetadata(GEMINI_PROVIDER, userId);
@@ -278,12 +277,11 @@ export function createGeminiSecretService(
 
         case 'config-file': {
           const configPath = resolveTomlFilePath();
-          mkdirSync(dirname(configPath), { recursive: true });
           const config = readTomlStringSections(configPath);
 
           config.gemini_api_keys ??= {};
           config.gemini_api_keys[body.name] = apiKey;
-          writeFileSync(configPath, stringifyToml(config));
+          writeFileAtomic(configPath, stringifyToml(config), { mode: SECRET_FILE_MODE });
           break;
         }
 
@@ -291,8 +289,8 @@ export function createGeminiSecretService(
           const envPath = getEnvFilePath();
           const envVar = `GEMINI_API_KEY_${body.name.toUpperCase().replace(/[^A-Z0-9]/g, '_')}`;
           const envEntry = `\n${envVar}="${apiKey}"\n`;
-          const currentContent = existsSync(envPath) ? readFileSync(envPath, 'utf8') : '';
-          writeFileSync(envPath, currentContent + envEntry);
+          const currentContent = readUtf8FileOrNull(envPath) ?? '';
+          writeFileAtomic(envPath, currentContent + envEntry, { mode: SECRET_FILE_MODE });
           // Re-sync process.env from the file (validated) so the key resolves now.
           reloadSecretEnv();
           break;
@@ -355,13 +353,11 @@ export function createGeminiSecretService(
       if (metadata.source === 'config-file') {
         try {
           const configPath = resolveTomlFilePath();
-          if (existsSync(configPath)) {
-            const config = readTomlStringSections(configPath);
+          const config = readTomlStringSections(configPath);
 
-            if (config.gemini_api_keys) {
-              delete config.gemini_api_keys[metadata.name];
-              writeFileSync(configPath, stringifyToml(config));
-            }
+          if (config.gemini_api_keys && metadata.name in config.gemini_api_keys) {
+            delete config.gemini_api_keys[metadata.name];
+            writeFileAtomic(configPath, stringifyToml(config), { mode: SECRET_FILE_MODE });
           }
         } catch (err) {
           console.error('[config] Failed to remove key from config.toml:', err);
@@ -371,12 +367,12 @@ export function createGeminiSecretService(
       if (metadata.source === 'environment') {
         try {
           const envPath = getEnvFilePath();
-          if (existsSync(envPath)) {
+          const content = readUtf8FileOrNull(envPath);
+          if (content !== null) {
             const envVar = `GEMINI_API_KEY_${metadata.name.toUpperCase().replace(/[^A-Z0-9]/g, '_')}`;
-            const content = readFileSync(envPath, 'utf8');
             const lines = content.split('\n');
             const filteredLines = lines.filter((line) => !line.trim().startsWith(`${envVar}=`));
-            writeFileSync(envPath, filteredLines.join('\n'));
+            writeFileAtomic(envPath, filteredLines.join('\n'), { mode: SECRET_FILE_MODE });
             // Re-sync process.env so the running server stops resolving the removed key.
             reloadSecretEnv();
           }

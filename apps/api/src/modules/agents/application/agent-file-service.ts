@@ -1,15 +1,13 @@
-import {
-  existsSync,
-  lstatSync,
-  mkdirSync,
-  readdirSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs';
+import { type Dirent, readdirSync, rmSync } from 'node:fs';
 import { basename, extname, relative, resolve } from 'node:path';
 import type { AgentProfile, UserAgentId } from '@mangostudio/shared/agents';
 import { getConfig } from '../../../lib/config';
+import {
+  RegularFileReadError,
+  readRegularFileUtf8,
+  statRegularFile,
+  writeFileAtomic,
+} from '../../../lib/safe-file';
 import { AgentSettingsError, slugFromAgentId, userAgentIdFromSlug } from '../domain/agent-profile';
 import { parseAgentMarkdownProfile, serializeAgentMarkdown } from './agent-markdown-parser';
 
@@ -27,10 +25,7 @@ function getAgentsDir(): string {
 }
 
 export function listMarkdownAgentProfiles(): AgentProfile[] {
-  const agentsDir = getAgentsDir();
-  if (!existsSync(agentsDir)) return [];
-
-  return readdirSync(agentsDir, { withFileTypes: true })
+  return readAgentsDirEntries()
     .filter((entry) => entry.isFile() && extname(entry.name) === MARKDOWN_EXTENSION)
     .map((entry) =>
       readMarkdownAgent(userAgentIdFromSlug(basename(entry.name, MARKDOWN_EXTENSION)))
@@ -39,10 +34,20 @@ export function listMarkdownAgentProfiles(): AgentProfile[] {
     .sort((left, right) => left.name.localeCompare(right.name));
 }
 
+function readAgentsDirEntries(): Dirent[] {
+  try {
+    return readdirSync(getAgentsDir(), { withFileTypes: true });
+  } catch (error) {
+    // A missing agents directory just means no markdown agents yet.
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
+    throw error;
+  }
+}
+
 export function readMarkdownAgent(agentId: UserAgentId): AgentFileRecord {
   const filePath = resolveAgentPath(agentId);
-  assertReadableMarkdownFile(filePath);
-  const markdown = readAgentMarkdown(filePath);
+  assertMarkdownExtension(filePath);
+  const markdown = readAgentMarkdownFile(filePath);
   return {
     markdown,
     profile: parseAgentMarkdownProfile(markdown, { id: agentId, path: filePath }),
@@ -53,35 +58,49 @@ export function writeMarkdownAgent(profile: AgentProfile): AgentProfile {
   if (!profile.id.startsWith('user:')) {
     throw new AgentSettingsError('Only user agents can be written to markdown.', 422, 'VALIDATION');
   }
-
-  const agentId = profile.id as UserAgentId;
-  const filePath = resolveAgentPath(agentId);
-  mkdirSync(getAgentsDir(), { recursive: true });
-  const markdown = serializeAgentMarkdown({
-    ...profile,
-    source: { type: 'markdown', path: filePath },
-  });
-  assertMarkdownSize(markdown);
-  writeFileSync(filePath, markdown, 'utf8');
-  return parseAgentMarkdownProfile(markdown, { id: agentId, path: filePath });
+  return persistMarkdownAgent(profile.id as UserAgentId, profile, false);
 }
 
 export function createMarkdownAgent(profile: AgentProfile): AgentProfile {
   if (!profile.id.startsWith('user:')) {
     throw new AgentSettingsError('Only user agents can be created as markdown.', 422, 'VALIDATION');
   }
+  return persistMarkdownAgent(profile.id as UserAgentId, profile, true);
+}
 
-  const filePath = resolveAgentPath(profile.id as UserAgentId);
-  if (existsSync(filePath)) {
-    throw new AgentSettingsError('Agent already exists.', 409, 'VALIDATION');
+/**
+ * Serialize and write a user agent's markdown atomically. `exclusive` rejects an
+ * existing file with EEXIST instead of overwriting, closing the create-time race
+ * that an `existsSync` precheck could not.
+ */
+function persistMarkdownAgent(
+  agentId: UserAgentId,
+  profile: AgentProfile,
+  exclusive: boolean
+): AgentProfile {
+  const filePath = resolveAgentPath(agentId);
+  const markdown = serializeAgentMarkdown({
+    ...profile,
+    source: { type: 'markdown', path: filePath },
+  });
+  assertMarkdownSize(markdown);
+
+  try {
+    writeFileAtomic(filePath, markdown, { exclusive });
+  } catch (error) {
+    if (exclusive && (error as NodeJS.ErrnoException).code === 'EEXIST') {
+      throw new AgentSettingsError('Agent already exists.', 409, 'VALIDATION');
+    }
+    throw error;
   }
 
-  return writeMarkdownAgent(profile);
+  return parseAgentMarkdownProfile(markdown, { id: agentId, path: filePath });
 }
 
 export function deleteMarkdownAgent(agentId: UserAgentId): void {
   const filePath = resolveAgentPath(agentId);
-  assertReadableMarkdownFile(filePath);
+  assertMarkdownExtension(filePath);
+  assertExistingAgentFile(filePath);
   rmSync(filePath, { force: true });
 }
 
@@ -111,31 +130,45 @@ function assertPathInsideAgentsDir(filePath: string, agentsDir: string): void {
   }
 }
 
-function assertReadableMarkdownFile(filePath: string): void {
+function assertMarkdownExtension(filePath: string): void {
   if (extname(filePath) !== MARKDOWN_EXTENSION) {
     throw new AgentSettingsError('Only .md agent files are allowed.', 422, 'VALIDATION');
   }
+}
 
+function readAgentMarkdownFile(filePath: string): string {
   try {
-    const stat = lstatSync(filePath);
-    if (!stat.isFile()) {
-      throw new AgentSettingsError('Agent path is not a regular file.', 422, 'VALIDATION');
-    }
-    if (stat.size > MAX_AGENT_MARKDOWN_BYTES) {
-      throw new AgentSettingsError('Agent markdown is too large.', 422, 'VALIDATION');
-    }
+    return readRegularFileUtf8(filePath, { maxBytes: MAX_AGENT_MARKDOWN_BYTES }).content;
   } catch (error) {
-    if (error instanceof AgentSettingsError) throw error;
-    throw new AgentSettingsError('Agent not found.', 404, 'NOT_FOUND');
+    throw toAgentReadError(error);
   }
 }
 
-function readAgentMarkdown(filePath: string): string {
+function assertExistingAgentFile(filePath: string): void {
   try {
-    return readFileSync(filePath, 'utf8');
-  } catch {
-    throw new AgentSettingsError('Agent file is not readable.', 422, 'VALIDATION');
+    if (statRegularFile(filePath).sizeBytes > MAX_AGENT_MARKDOWN_BYTES) {
+      throw new AgentSettingsError('Agent markdown is too large.', 422, 'VALIDATION');
+    }
+  } catch (error) {
+    throw toAgentReadError(error);
   }
+}
+
+function toAgentReadError(error: unknown): AgentSettingsError {
+  if (error instanceof AgentSettingsError) return error;
+  if (error instanceof RegularFileReadError) {
+    switch (error.reason) {
+      case 'not-found':
+        return new AgentSettingsError('Agent not found.', 404, 'NOT_FOUND');
+      case 'not-regular-file':
+        return new AgentSettingsError('Agent path is not a regular file.', 422, 'VALIDATION');
+      case 'too-large':
+        return new AgentSettingsError('Agent markdown is too large.', 422, 'VALIDATION');
+      default:
+        return new AgentSettingsError('Agent file is not readable.', 422, 'VALIDATION');
+    }
+  }
+  return new AgentSettingsError('Agent not found.', 404, 'NOT_FOUND');
 }
 
 function assertMarkdownSize(markdown: string): void {
