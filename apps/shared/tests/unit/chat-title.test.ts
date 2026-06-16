@@ -52,7 +52,26 @@ describe('sanitizeGeneratedChatTitle', () => {
     );
   });
 
+  it('strips single, double, and backtick wrapping quotes', () => {
+    expect(sanitizeGeneratedChatTitle("'Single Quoted'", 'Fallback')).toBe('Single Quoted');
+    expect(sanitizeGeneratedChatTitle('`Backtick Quoted`', 'Fallback')).toBe('Backtick Quoted');
+  });
+
   it('uses the prompt title fallback when the model returns no usable text', () => {
     expect(sanitizeGeneratedChatTitle('   ', 'Fallback Title')).toBe('Fallback Title');
+  });
+
+  it('handles adversarial repeated quotes without catastrophic backtracking', () => {
+    const hostile = `${'"'.repeat(50_000)}Title${'`'.repeat(50_000)}`;
+
+    const start = performance.now();
+    const result = sanitizeGeneratedChatTitle(hostile, 'Fallback');
+
+    expect(result).toBe('Title');
+    expect(performance.now() - start).toBeLessThan(100);
+  });
+
+  it('falls back when the title is only quote characters', () => {
+    expect(sanitizeGeneratedChatTitle('""""""', 'Fallback')).toBe('Fallback');
   });
 });
