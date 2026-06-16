@@ -8,6 +8,16 @@ function stubFetch(respond: () => Response | Promise<Response>): void {
   globalThis.fetch = (() => Promise.resolve(respond())) as unknown as typeof fetch;
 }
 
+/** Records every fetch target so we can assert which host was (not) reached. */
+function recordingFetch(): { calls: string[] } {
+  const calls: string[] = [];
+  globalThis.fetch = ((input: string | URL | Request) => {
+    calls.push(input instanceof Request ? input.url : String(input));
+    return Promise.resolve(new Response(JSON.stringify({ status: 'ok' }), { status: 200 }));
+  }) as unknown as typeof fetch;
+  return { calls };
+}
+
 afterEach(() => {
   globalThis.fetch = realFetch;
 });
@@ -31,5 +41,30 @@ describe('probeHealth', () => {
   it('returns false when the request throws', async () => {
     globalThis.fetch = (() => Promise.reject(new Error('refused'))) as unknown as typeof fetch;
     expect(await probeHealth('localhost', 3001)).toBe(false);
+  });
+
+  it.each([
+    ['localhost', 'http://localhost:3001/api/health'],
+    ['127.0.0.1', 'http://127.0.0.1:3001/api/health'],
+    ['127.0.0.2', 'http://127.0.0.2:3001/api/health'],
+    ['0.0.0.0', 'http://127.0.0.1:3001/api/health'],
+    ['::1', 'http://[::1]:3001/api/health'],
+    ['::', 'http://[::1]:3001/api/health'],
+  ])('probes the loopback target for local host %s', async (host, expectedUrl) => {
+    const { calls } = recordingFetch();
+    expect(await probeHealth(host, 3001)).toBe(true);
+    expect(calls).toEqual([expectedUrl]);
+  });
+
+  it.each([
+    'evil.test',
+    '169.254.169.254',
+    '10.0.0.1',
+    '192.168.1.5',
+    'example.com',
+  ])('fails closed without issuing a request for non-local host %s', async (host) => {
+    const { calls } = recordingFetch();
+    expect(await probeHealth(host, 3001)).toBe(false);
+    expect(calls).toEqual([]);
   });
 });
