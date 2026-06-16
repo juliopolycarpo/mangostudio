@@ -1,10 +1,18 @@
-import { describe, expect, it } from 'bun:test';
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parseRuntimeEnvContent, parseRuntimeEnvFile } from '../../src/runtime-env';
 
-const TMP_DIR = join(tmpdir(), `mango-runtime-env-test-${process.pid}`);
+let tmpDir: string;
+
+beforeEach(() => {
+  tmpDir = mkdtempSync(join(tmpdir(), 'mango-runtime-env-test-'));
+});
+
+afterEach(() => {
+  rmSync(tmpDir, { recursive: true, force: true });
+});
 
 describe('parseRuntimeEnvContent', () => {
   it('parses simple KEY=value lines', () => {
@@ -43,25 +51,14 @@ describe('parseRuntimeEnvContent', () => {
 
 describe('parseRuntimeEnvFile', () => {
   it('returns parsed values from an env file', () => {
-    mkdirSync(TMP_DIR, { recursive: true });
-    const envPath = join(TMP_DIR, '.env');
+    const envPath = join(tmpDir, '.env');
     writeFileSync(envPath, 'API_HOST="127.0.0.1"\n');
 
-    try {
-      expect(parseRuntimeEnvFile(envPath)).toEqual({ API_HOST: '127.0.0.1' });
-    } finally {
-      rmSync(TMP_DIR, { recursive: true, force: true });
-    }
+    expect(parseRuntimeEnvFile(envPath)).toEqual({ API_HOST: '127.0.0.1' });
   });
 
   it('returns an empty map for missing or unreadable paths', () => {
-    mkdirSync(TMP_DIR, { recursive: true });
-
-    try {
-      expect(parseRuntimeEnvFile(join(TMP_DIR, 'missing.env'))).toEqual({});
-      expect(parseRuntimeEnvFile(TMP_DIR)).toEqual({});
-    } finally {
-      rmSync(TMP_DIR, { recursive: true, force: true });
-    }
+    expect(parseRuntimeEnvFile(join(tmpDir, 'missing.env'))).toEqual({});
+    expect(parseRuntimeEnvFile(tmpDir)).toEqual({});
   });
 });
