@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   getConfigEnvFilePath,
@@ -54,5 +54,46 @@ describe('persistSecret environment source', () => {
     await removeSecret('regression-test-id', 'Default', 'gemini', 'environment');
 
     expect(process.env[CONNECTOR_ENV_VAR]).toBeUndefined();
+  });
+});
+
+describe('persistSecret config-file source', () => {
+  const CONFIG_PATH = join(TMP_DIR, 'config.toml');
+
+  it('creates config.toml with owner-only permissions and stores the key', async () => {
+    await persistSecret('config-id', 'Default', 'gemini', 'config-file', SECRET_VALUE);
+
+    const content = readFileSync(CONFIG_PATH, 'utf8');
+    expect(content).toContain('[gemini_api_keys]');
+    expect(content).toContain(SECRET_VALUE);
+    if (process.platform !== 'win32') {
+      expect(statSync(CONFIG_PATH).mode & 0o777).toBe(0o600);
+    }
+  });
+
+  it('removes only the named key and leaves the file when it is absent', async () => {
+    await persistSecret('config-id', 'Default', 'gemini', 'config-file', SECRET_VALUE);
+
+    await removeSecret('config-id', 'Default', 'gemini', 'config-file');
+    expect(readFileSync(CONFIG_PATH, 'utf8')).not.toContain(SECRET_VALUE);
+
+    // A second removal against the now-missing key is a no-op, not a throw.
+    await removeSecret('config-id', 'Default', 'gemini', 'config-file');
+  });
+
+  it('preserves unrelated non-string config when writing and removing keys', async () => {
+    writeFileSync(CONFIG_PATH, '[server]\nport = 4111\nstandalone = true\n', 'utf8');
+
+    await persistSecret('config-id', 'Default', 'gemini', 'config-file', SECRET_VALUE);
+    const afterWrite = readFileSync(CONFIG_PATH, 'utf8');
+    expect(afterWrite).toContain('port = 4111');
+    expect(afterWrite).toContain('standalone = true');
+    expect(afterWrite).toContain(SECRET_VALUE);
+
+    await removeSecret('config-id', 'Default', 'gemini', 'config-file');
+    const afterRemove = readFileSync(CONFIG_PATH, 'utf8');
+    expect(afterRemove).toContain('port = 4111');
+    expect(afterRemove).toContain('standalone = true');
+    expect(afterRemove).not.toContain(SECRET_VALUE);
   });
 });

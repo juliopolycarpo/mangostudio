@@ -1,5 +1,6 @@
-import { afterEach, beforeAll, describe, expect, it } from 'bun:test';
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'bun:test';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { getDb } from '../../../../src/db/database';
 import { getConfig } from '../../../../src/lib/config';
@@ -21,7 +22,17 @@ const TEST_USER = {
 let previousOpenAICompatibleProvider: AIProvider | null = null;
 const createdUploadFiles: string[] = [];
 
+// Write attachment fixtures into a unique per-run uploads directory instead of the
+// predictable shared test uploads path, then restore the original directory.
+let uploadsDir: string;
+let originalUploadsDir: string;
+
 beforeAll(async () => {
+  const config = getConfig();
+  originalUploadsDir = config.uploads.dir;
+  uploadsDir = mkdtempSync(join(tmpdir(), 'mango-send-text-uploads-'));
+  config.uploads.dir = uploadsDir;
+
   try {
     const now = Date.now();
     await getDb()
@@ -39,6 +50,11 @@ beforeAll(async () => {
   } catch {
     // user may already exist from another test in coverage mode
   }
+});
+
+afterAll(() => {
+  getConfig().uploads.dir = originalUploadsDir;
+  rmSync(uploadsDir, { recursive: true, force: true });
 });
 
 afterEach(() => {

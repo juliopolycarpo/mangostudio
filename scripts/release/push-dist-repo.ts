@@ -3,7 +3,7 @@
 // later) into an external repo: clone, copy only changed files, commit as
 // github-actions[bot], and push with a rebase retry. Re-runs are no-ops.
 
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
@@ -92,12 +92,24 @@ export function syncFilesIntoClone(mappings: readonly FileMapping[], cloneDir: s
   for (const { localPath, repoPath } of mappings) {
     const next = readFileSync(localPath);
     const destination = join(cloneDir, repoPath);
-    if (existsSync(destination) && readFileSync(destination).equals(next)) continue;
+    // Read the destination once and treat a missing file as "changed", instead of
+    // an existsSync probe that another process could invalidate before the read.
+    const current = readFileIfPresent(destination);
+    if (current?.equals(next)) continue;
     mkdirSync(dirname(destination), { recursive: true });
     writeFileSync(destination, next);
     changed.push(repoPath);
   }
   return changed;
+}
+
+function readFileIfPresent(filePath: string): Buffer | null {
+  try {
+    return readFileSync(filePath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw error;
+  }
 }
 
 export interface PushDistRepoOptions {

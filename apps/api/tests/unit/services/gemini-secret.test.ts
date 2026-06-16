@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'bun:test';
+import { join } from 'node:path';
 import type { SecretMetadataRow } from '@mangostudio/shared/types';
 import { createGeminiSecretService, InvalidGeminiApiKeyError } from '../../../src/services/gemini';
 import type { SecretMetadataInput } from '../../../src/services/secret-store/metadata';
 import { InMemorySecretStore } from '../../support/mocks/mock-secret-store';
 
 const TEST_USER = 'test-user';
-const NO_TOML = '/tmp/mangostudio-test-nonexistent-config.toml';
+const NO_TOML = join(import.meta.dir, '.mangostudio-test-nonexistent-config.toml');
 
 function createMetadataHarness(initial: SecretMetadataRow[] = []) {
   let rows: SecretMetadataRow[] = [...initial];

@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   getDefaultRuleFileDescriptors,
+  loadRuleFileContent,
   previewRuleFile,
   RuleFileError,
 } from '../../../../src/modules/prompt-rules/application/rule-file-resolver';
@@ -168,5 +169,29 @@ describe('previewRuleFile', () => {
 
     expect(result.content).toBe('');
     expect(result.truncated).toBe(false);
+  });
+});
+
+describe('loadRuleFileContent', () => {
+  it('returns content for a valid .md file', () => {
+    const filePath = createFile('rules.md', '# Rules');
+
+    expect(loadRuleFileContent(filePath)).toBe('# Rules');
+  });
+
+  it('returns null for missing files, directories, and wrong extensions', () => {
+    expect(loadRuleFileContent(join(tmpDir, 'missing.md'))).toBeNull();
+    expect(loadRuleFileContent(createDirectory('dir.md'))).toBeNull();
+    expect(loadRuleFileContent(createFile('rules.txt', 'nope'))).toBeNull();
+  });
+
+  it('truncates oversized files instead of failing', () => {
+    const MAX_BYTES = 256 * 1024;
+    const filePath = createLargeFile('large.md', MAX_BYTES + 500);
+
+    const content = loadRuleFileContent(filePath);
+
+    expect(content).not.toBeNull();
+    expect((content as string).length).toBe(MAX_BYTES);
   });
 });

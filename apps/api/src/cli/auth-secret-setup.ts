@@ -5,8 +5,6 @@
  */
 
 import { randomBytes } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname } from 'node:path';
 import { createInterface } from 'node:readline/promises';
 import { parse as parseToml, stringify as stringifyToml } from 'smol-toml';
 import {
@@ -15,6 +13,7 @@ import {
   getConfigEnvFilePath,
   resetConfig,
 } from '../lib/config';
+import { readUtf8FileOrNull, SECRET_FILE_MODE, writeFileAtomic } from '../lib/safe-file';
 import { CliError } from './errors';
 import { writeLine } from './output';
 
@@ -134,9 +133,8 @@ function persistGeneratedSecret(
 }
 
 function persistEnvSecret(filePath: string, secret: string): void {
-  mkdirSync(dirname(filePath), { recursive: true });
-  const current = existsSync(filePath) ? readFileSync(filePath, 'utf8') : '';
-  writeFileSync(filePath, upsertEnvValue(current, secret));
+  const current = readUtf8FileOrNull(filePath) ?? '';
+  writeFileAtomic(filePath, upsertEnvValue(current, secret), { mode: SECRET_FILE_MODE });
 }
 
 function upsertEnvValue(content: string, secret: string): string {
@@ -165,17 +163,17 @@ function insertEnvSecretLine(lines: string[], entry: string): void {
 }
 
 function persistTomlSecret(filePath: string, secret: string): void {
-  mkdirSync(dirname(filePath), { recursive: true });
   const config = readTomlRecord(filePath);
   const auth = isRecord(config.auth) ? { ...config.auth } : {};
   auth.secret = secret;
   config.auth = auth;
-  writeFileSync(filePath, stringifyToml(config));
+  writeFileAtomic(filePath, stringifyToml(config), { mode: SECRET_FILE_MODE });
 }
 
 function readTomlRecord(filePath: string): Record<string, unknown> {
-  if (!existsSync(filePath)) return {};
-  const parsed = parseToml(readFileSync(filePath, 'utf8'));
+  const content = readUtf8FileOrNull(filePath);
+  if (content === null) return {};
+  const parsed = parseToml(content);
   return isRecord(parsed) ? parsed : {};
 }
 

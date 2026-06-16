@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, mock } from 'bun:test';
+import { join } from 'node:path';
 import type { SecretMetadataRow } from '@mangostudio/shared/types';
 import { getDb } from '../../../../src/db/database';
 import { createProviderSecretService } from '../../../../src/services/providers/core/secret-service';
@@ -12,7 +13,7 @@ import type { SecretMetadataInput } from '../../../../src/services/secret-store/
 import { InMemorySecretStore } from '../../../support/mocks/mock-secret-store';
 
 const TEST_USER = 'test-user-openai';
-const NO_TOML = '/tmp/mangostudio-test-nonexistent-config.toml';
+const NO_TOML = join(import.meta.dir, '.mangostudio-test-nonexistent-config.toml');
 
 /**
  * Creates an in-memory metadata harness for test isolation.

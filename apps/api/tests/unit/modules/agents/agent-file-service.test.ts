@@ -9,6 +9,7 @@ import {
   listMarkdownAgentProfiles,
   previewAgentMarkdown,
   readMarkdownAgent,
+  writeMarkdownAgent,
 } from '../../../../src/modules/agents/application/agent-file-service';
 import { AgentSettingsError } from '../../../../src/modules/agents/domain/agent-profile';
 
@@ -71,6 +72,32 @@ describe('agent file service', () => {
       })
     ).toThrow(AgentSettingsError);
     expect(() => readMarkdownAgent('user:../escape')).toThrow(AgentSettingsError);
+  });
+
+  it('overwrites an existing agent on write and reports not found for missing reads', () => {
+    const base = {
+      id: 'user:editor' as const,
+      name: 'Editor',
+      description: '',
+      kind: 'user' as const,
+      role: 'primary' as const,
+      source: { type: 'markdown' as const },
+      toolNames: [],
+      toolsEnabled: false,
+      subagentIds: [],
+      metadata: {},
+    };
+    createMarkdownAgent({ ...base, systemPrompt: 'First prompt.' });
+
+    writeMarkdownAgent({ ...base, systemPrompt: 'Second prompt.' });
+
+    expect(readMarkdownAgent('user:editor').profile.systemPrompt).toBe('Second prompt.');
+    expect(() => readMarkdownAgent('user:ghost')).toThrow(AgentSettingsError);
+    try {
+      readMarkdownAgent('user:ghost');
+    } catch (error) {
+      expect((error as AgentSettingsError).status).toBe(404);
+    }
   });
 
   it('previews markdown and rejects oversized content', () => {
