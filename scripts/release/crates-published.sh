@@ -16,7 +16,7 @@ published() {
   local found http_status index_response
   index_response="$(mktemp)"
   http_status="$(
-    curl -sSL --retry 3 \
+    curl -sSL --retry 3 --retry-connrefused \
       --user-agent "$CRATES_IO_USER_AGENT" \
       --output "$index_response" \
       --write-out "%{http_code}" \
