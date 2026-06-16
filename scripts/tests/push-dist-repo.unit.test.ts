@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -142,6 +142,23 @@ describe('syncFilesIntoClone', () => {
     );
 
     expect(changed).toEqual(['Formula/changed.rb', 'Formula/new.rb']);
+  });
+
+  test('creates missing nested parent directories for new repo paths', () => {
+    const dir = makeTempDir();
+    const cloneDir = join(dir, 'clone');
+    mkdirSync(cloneDir, { recursive: true });
+    writeFileSync(join(dir, 'manifest.json'), '{"version":"1"}');
+
+    const changed = syncFilesIntoClone(
+      [{ localPath: join(dir, 'manifest.json'), repoPath: 'bucket/nested/manifest.json' }],
+      cloneDir
+    );
+
+    expect(changed).toEqual(['bucket/nested/manifest.json']);
+    expect(readFileSync(join(cloneDir, 'bucket/nested/manifest.json'), 'utf8')).toBe(
+      '{"version":"1"}'
+    );
   });
 
   test('throws when a local file is missing', () => {
