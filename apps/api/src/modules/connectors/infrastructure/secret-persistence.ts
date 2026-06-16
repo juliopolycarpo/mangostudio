@@ -6,7 +6,7 @@ import type { ProviderType, SecretSource } from '@mangostudio/shared/types';
 import { stringify as stringifyToml } from 'smol-toml';
 import { getConfig, getConfigEnvFilePath, reloadSecretEnv } from '../../../lib/config';
 import { readUtf8FileOrNull, SECRET_FILE_MODE, writeFileAtomic } from '../../../lib/safe-file';
-import { readTomlStringSections } from '../../../lib/toml';
+import { deleteTomlSectionValue, readTomlDocument, setTomlSectionValue } from '../../../lib/toml';
 import { bunSecretStore } from '../../../services/secret-store/store';
 import { PROVIDER_SECRET_CONFIG } from '../domain/connector';
 
@@ -30,9 +30,8 @@ export async function persistSecret(
 
     case 'config-file': {
       const configPath = getConfig().configFilePath;
-      const config = readTomlStringSections(configPath);
-      config[cfg.tomlSection] ??= {};
-      config[cfg.tomlSection][name] = apiKey;
+      const config = readTomlDocument(configPath);
+      setTomlSectionValue(config, cfg.tomlSection, name, apiKey);
       writeFileAtomic(configPath, stringifyToml(config), { mode: SECRET_FILE_MODE });
       break;
     }
@@ -76,12 +75,8 @@ export async function removeSecret(
     case 'config-file': {
       try {
         const configPath = getConfig().configFilePath;
-        const config = readTomlStringSections(configPath);
-        const section = (config as Record<string, Record<string, string> | undefined>)[
-          cfg.tomlSection
-        ];
-        if (section && name in section) {
-          delete section[name];
+        const config = readTomlDocument(configPath);
+        if (deleteTomlSectionValue(config, cfg.tomlSection, name)) {
           writeFileAtomic(configPath, stringifyToml(config), { mode: SECRET_FILE_MODE });
         }
       } catch (err) {

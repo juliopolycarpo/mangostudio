@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { mkdirSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   getConfigEnvFilePath,
@@ -79,5 +79,21 @@ describe('persistSecret config-file source', () => {
 
     // A second removal against the now-missing key is a no-op, not a throw.
     await removeSecret('config-id', 'Default', 'gemini', 'config-file');
+  });
+
+  it('preserves unrelated non-string config when writing and removing keys', async () => {
+    writeFileSync(CONFIG_PATH, '[server]\nport = 4111\nstandalone = true\n', 'utf8');
+
+    await persistSecret('config-id', 'Default', 'gemini', 'config-file', SECRET_VALUE);
+    const afterWrite = readFileSync(CONFIG_PATH, 'utf8');
+    expect(afterWrite).toContain('port = 4111');
+    expect(afterWrite).toContain('standalone = true');
+    expect(afterWrite).toContain(SECRET_VALUE);
+
+    await removeSecret('config-id', 'Default', 'gemini', 'config-file');
+    const afterRemove = readFileSync(CONFIG_PATH, 'utf8');
+    expect(afterRemove).toContain('port = 4111');
+    expect(afterRemove).toContain('standalone = true');
+    expect(afterRemove).not.toContain(SECRET_VALUE);
   });
 });

@@ -9,7 +9,12 @@ import type { SecretMetadataRow } from '@mangostudio/shared/types';
 import { stringify as stringifyToml } from 'smol-toml';
 import { getConfig, getConfigEnvFilePath, reloadSecretEnv } from '../../../lib/config';
 import { readUtf8FileOrNull, SECRET_FILE_MODE, writeFileAtomic } from '../../../lib/safe-file';
-import { parseTomlStringSections, readTomlStringSections } from '../../../lib/toml';
+import {
+  deleteTomlSectionValue,
+  parseTomlStringSections,
+  readTomlDocument,
+  setTomlSectionValue,
+} from '../../../lib/toml';
 import { ConnectorNotFoundError } from '../../../modules/connectors/application/connector-errors';
 import { parseStringArray } from '../../../utils/json';
 import { maskSecret } from '../../../utils/secrets';
@@ -277,10 +282,8 @@ export function createGeminiSecretService(
 
         case 'config-file': {
           const configPath = resolveTomlFilePath();
-          const config = readTomlStringSections(configPath);
-
-          config.gemini_api_keys ??= {};
-          config.gemini_api_keys[body.name] = apiKey;
+          const config = readTomlDocument(configPath);
+          setTomlSectionValue(config, 'gemini_api_keys', body.name, apiKey);
           writeFileAtomic(configPath, stringifyToml(config), { mode: SECRET_FILE_MODE });
           break;
         }
@@ -353,10 +356,8 @@ export function createGeminiSecretService(
       if (metadata.source === 'config-file') {
         try {
           const configPath = resolveTomlFilePath();
-          const config = readTomlStringSections(configPath);
-
-          if (config.gemini_api_keys && metadata.name in config.gemini_api_keys) {
-            delete config.gemini_api_keys[metadata.name];
+          const config = readTomlDocument(configPath);
+          if (deleteTomlSectionValue(config, 'gemini_api_keys', metadata.name)) {
             writeFileAtomic(configPath, stringifyToml(config), { mode: SECRET_FILE_MODE });
           }
         } catch (err) {
