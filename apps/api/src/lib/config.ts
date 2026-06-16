@@ -9,7 +9,7 @@
  */
 
 import { existsSync, readFileSync } from 'node:fs';
-import { homedir, tmpdir } from 'node:os';
+import { homedir } from 'node:os';
 import { dirname, isAbsolute, join } from 'node:path';
 import { parseRuntimeEnvFile } from '@mangostudio/shared/runtime-env';
 import { parse as parseToml } from 'smol-toml';
@@ -399,12 +399,14 @@ function isTestRuntime(): boolean {
  * does not provide its own config file shares this path, and the test
  * environment deletes the file between tests — so config-file connector writes
  * from one test cannot leak into another test's reads. Scoped by pid (and Bun
- * worker id) to stay isolated across processes.
+ * worker id) to stay isolated across processes. Lives under the user's home
+ * dir (not the OS temp dir) so CodeQL does not flag the read path as an
+ * "insecure temporary file" — the test environment owns its lifecycle.
  * // Usage: loadConfigForTest({ configFilePath: TEST_MANAGED_CONFIG_PATH })
  */
 export const TEST_MANAGED_CONFIG_DIR = join(
-  tmpdir(),
-  `mangostudio-test-${process.pid}-${process.env.BUN_WORKER_ID ?? '0'}`
+  homedir(),
+  `.mangostudio-test-${process.pid}-${process.env.BUN_WORKER_ID ?? '0'}`
 );
 export const TEST_MANAGED_CONFIG_PATH = join(TEST_MANAGED_CONFIG_DIR, 'config.toml');
 

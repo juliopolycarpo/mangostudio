@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+import { join } from 'node:path';
 import type { SecretMetadataRow } from '@mangostudio/shared/types';
 import { createProviderSecretService } from '../../../../src/services/providers/core/secret-service';
 import { createCompatibleClient } from '../../../../src/services/providers/openai-compatible/client';
@@ -19,7 +20,7 @@ import {
 } from '../../../support/providers/fake-chat-completions';
 
 const TEST_USER = 'test-user-oai-compat';
-const NO_TOML = '/tmp/mangostudio-test-nonexistent-config.toml';
+const NO_TOML = join(import.meta.dir, '.mangostudio-test-nonexistent-config.toml');
 const OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1';
 const DEEPSEEK_BASE_URL = 'https://api.deepseek.com/v1';
 
