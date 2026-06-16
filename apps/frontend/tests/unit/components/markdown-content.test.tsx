@@ -63,6 +63,30 @@ describe('MarkdownContent', () => {
     expect(link.getAttribute('href')).toBe('#');
   });
 
+  it.each([
+    ['mixed-case javascript', '[x](JavaScript:alert(1))'],
+    ['whitespace-prefixed javascript', '[x](  javascript:alert(1))'],
+    ['data URLs', '[x](data:text/html,alert)'],
+    ['vbscript URLs', '[x](vbscript:msgbox(1))'],
+  ])('neutralizes %s in links', (_label, content) => {
+    render(<MarkdownContentRenderer content={content} />);
+    expect(screen.getByText('x').getAttribute('href')).toBe('#');
+  });
+
+  it('preserves mailto and relative links', () => {
+    const { container } = render(
+      <MarkdownContentRenderer content={'[mail](mailto:a@b.com) and [rel](/docs/page)'} />
+    );
+    const [mail, rel] = Array.from(container.querySelectorAll('a'));
+    expect(mail.getAttribute('href')).toBe('mailto:a@b.com');
+    expect(rel.getAttribute('href')).toBe('/docs/page');
+  });
+
+  it('neutralizes unsafe schemes in image fallback links', () => {
+    render(<MarkdownContentRenderer content="![pic](vbscript:msgbox(1))" />);
+    expect(screen.getByText('pic').getAttribute('href')).toBe('#');
+  });
+
   it('renders GFM tables', () => {
     const table = '| A | B |\n|---|---|\n| 1 | 2 |';
     const { container } = render(<MarkdownContentRenderer content={table} />);

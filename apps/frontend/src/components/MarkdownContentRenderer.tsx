@@ -142,16 +142,42 @@ function renderLink({ href, title, tokens }: Parameters<Renderer['link']>[0]): s
     tokens
       ?.map((token): string => ('text' in token ? (token.text as string) : token.raw))
       .join('') ?? '';
-  const safeHref = href?.startsWith('javascript:') ? '#' : (href ?? '#');
+  const safeHref = safeMarkdownUrl(href);
   const titleAttr = title ? ` title="${escapeHtml(title)}"` : '';
   return `<a href="${escapeHtml(safeHref)}" target="_blank" rel="noopener noreferrer"${titleAttr}>${text}</a>`;
 }
 
 function renderImage({ href, title, text }: Parameters<Renderer['image']>[0]): string {
-  const safeHref = href?.startsWith('javascript:') ? '#' : (href ?? '#');
+  const safeHref = safeMarkdownUrl(href);
   const titleAttr = title ? ` title="${escapeHtml(title)}"` : '';
   const body = text || safeHref;
   return `<a href="${escapeHtml(safeHref)}" target="_blank" rel="noopener noreferrer" class="markdown-image-link"${titleAttr}>${escapeHtml(body)}</a>`;
+}
+
+// Schemes the chat renderer may turn into a clickable target. Anything else
+// (javascript:, data:, vbscript:, …) is neutralized to a harmless anchor.
+const SAFE_LINK_PROTOCOLS = new Set(['http:', 'https:', 'mailto:']);
+const UNSAFE_URL_FALLBACK = '#';
+// Base only used to resolve scheme-less relative hrefs so they classify as safe;
+// the original href is always what gets rendered, never this base.
+const RELATIVE_URL_BASE = 'https://markdown.invalid/';
+
+/**
+ * Returns `href` when it is a safe link target, otherwise '#'.
+ *
+ * Parsing with the WHATWG `URL` API strips smuggled tabs/newlines and
+ * normalizes scheme casing, so only http(s)/mailto absolute URLs and
+ * scheme-less relative URLs survive. // Usage: safeMarkdownUrl('javascript:alert(1)') === '#'
+ */
+function safeMarkdownUrl(href: string | null | undefined): string {
+  if (!href) return UNSAFE_URL_FALLBACK;
+  let protocol: string;
+  try {
+    protocol = new URL(href, RELATIVE_URL_BASE).protocol;
+  } catch {
+    return UNSAFE_URL_FALLBACK;
+  }
+  return SAFE_LINK_PROTOCOLS.has(protocol) ? href : UNSAFE_URL_FALLBACK;
 }
 
 function renderCode(
