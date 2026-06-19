@@ -1,0 +1,125 @@
+# Path-based PR labeling. Mirrors the Repo Map / Task Routing in AGENTS.md.
+# Globs are matched against the PR's changed file paths only — actions/labeler
+# never checks out or executes PR code. Keep these maps in sync with AGENTS.md.
+
+"area: frontend":
+  - changed-files:
+      - any-glob-to-any-file: "apps/frontend/**"
+
+"area: api":
+  - changed-files:
+      - any-glob-to-any-file: "apps/api/**"
+
+"area: shared":
+  - changed-files:
+      - any-glob-to-any-file: "apps/shared/**"
+
+"area: auth":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "apps/api/src/auth.ts"
+          - "apps/api/src/plugins/auth-middleware.ts"
+          - "apps/frontend/src/lib/auth-client.ts"
+          - "apps/frontend/src/routes/login.tsx"
+          - "apps/frontend/src/routes/signup.tsx"
+          - "apps/shared/src/auth/**"
+          - "tests/browser-smoke/auth-flow.spec.ts"
+
+"area: chat":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "apps/api/src/modules/chats/**"
+          - "apps/api/src/modules/messages/**"
+          - "apps/frontend/src/features/chat/**"
+          - "apps/shared/src/chat/**"
+
+"area: generation":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "apps/api/src/modules/generation/**"
+          - "apps/frontend/src/features/generation/**"
+          - "apps/frontend/src/services/generation-service.ts"
+          - "apps/shared/src/generation/**"
+
+"area: gallery":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "apps/api/src/modules/generated-images/**"
+          - "apps/api/src/services/generated-images/**"
+          - "apps/frontend/src/features/gallery/**"
+
+"area: providers":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "apps/api/src/services/providers/**"
+          - "apps/api/src/services/gemini/**"
+          - "apps/frontend/src/hooks/use-model-catalog.ts"
+          - "apps/shared/src/catalog/**"
+
+"area: connectors":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "apps/api/src/modules/connectors/**"
+          - "apps/api/src/services/secret-store/**"
+          - "apps/shared/src/connectors/**"
+
+"area: settings":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "apps/api/src/modules/app-settings/**"
+          - "apps/api/src/modules/provider-settings/**"
+          - "apps/api/src/modules/tool-settings/**"
+          - "apps/frontend/src/features/settings/**"
+          - "apps/shared/src/app-settings/**"
+          - "apps/shared/src/provider-settings/**"
+
+"area: tools":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "apps/api/src/services/tools/**"
+          - "apps/api/src/modules/tool-settings/**"
+          - "apps/shared/src/tool-settings/**"
+
+"area: db":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "apps/api/src/db/**"
+          - "apps/api/src/db/migrations/**"
+
+"area: cli":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "apps/api/src/cli/**"
+          - "apps/api/src/index.ts"
+          - "apps/api/src/server/**"
+          - "apps/api/src/lib/server-state.ts"
+          - "apps/api/src/lib/mango-paths.ts"
+
+"area: i18n":
+  - changed-files:
+      - any-glob-to-any-file: "apps/shared/src/i18n/**"
+
+"area: components":
+  - changed-files:
+      - any-glob-to-any-file: "apps/frontend/src/components/**"
+
+"area: build":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "scripts/build.ts"
+          - ".mango/**"
+          - "apps/api/src/lib/config.ts"
+          - "apps/api/src/lib/runtime-paths.ts"
+
+"area: docs":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "docs/**"
+          - "**/*.md"
+
+"type: ci":
+  - changed-files:
+      - any-glob-to-any-file:
+          - ".github/workflows/**"
+          - ".github/actions/**"
+          - ".github/labeler.yml"
