@@ -114,7 +114,10 @@
   - changed-files:
       - any-glob-to-any-file:
           - "docs/**"
-          - "**/*.md"
+          - "*.md"
+          - "apps/**/*.md"
+          - "packages/**/*.md"
+          - "scripts/**/*.md"
 
 "type: ci":
   - changed-files:
