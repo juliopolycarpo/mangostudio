@@ -84,7 +84,6 @@
   - changed-files:
       - any-glob-to-any-file:
           - "apps/api/src/db/**"
-          - "apps/api/src/db/migrations/**"
 
 "area: cli":
   - changed-files:
