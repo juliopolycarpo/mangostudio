@@ -2,7 +2,7 @@
 name: 🗄️ Migration Request
 about: Propose a database schema change
 title: "migration: <short description>"
-labels: migration
+labels: ["type: migration", "status: needs triage"]
 assignees: ""
 ---
 

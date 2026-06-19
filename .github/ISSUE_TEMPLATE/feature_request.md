@@ -2,7 +2,7 @@
 name: Feature request
 about: Suggest a new feature or improvement for MangoStudio
 title: "feat: <short description>"
-labels: enhancement
+labels: ["type: feature", "status: needs triage"]
 assignees: ""
 ---
 

@@ -2,7 +2,7 @@
 name: Bug report
 about: Report a reproducible problem in MangoStudio
 title: "bug: <short description>"
-labels: bug
+labels: ["type: bug", "status: needs triage"]
 assignees: ""
 ---
 

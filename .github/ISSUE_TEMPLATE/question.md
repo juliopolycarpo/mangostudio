@@ -2,7 +2,7 @@
 name: ❓ Question
 about: Ask a question about usage or behavior
 title: "question: <short description>"
-labels: question
+labels: ["type: question", "status: needs triage"]
 assignees: ""
 ---
 
