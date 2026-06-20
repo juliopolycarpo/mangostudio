@@ -8,6 +8,8 @@ updates:
       timezone: UTC
     commit-message:
       prefix: chore(ci)
+    labels:
+      - "type: dependencies"
 
   - package-ecosystem: bun
     directory: /
@@ -19,6 +21,8 @@ updates:
       prefix: chore(deps)
     cooldown:
       semver-major-days: 7
+    labels:
+      - "type: dependencies"
     groups:
       typescript:
         patterns:

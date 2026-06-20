@@ -80,6 +80,21 @@
           - "apps/api/src/modules/tool-settings/**"
           - "apps/shared/src/tool-settings/**"
 
+"area: tooling":
+  - changed-files:
+      - any-glob-to-any-file:
+          # Lint, format, git-hook, editor, and repo-meta configuration.
+          # Split from "area: build" so DevX tooling is not conflated with
+          # product/binary build work; see issue #381.
+          - "biome.json"
+          - "dprint.json"
+          - "lefthook.yml"
+          - "opencode.json"
+          - ".editorconfig"
+          - ".gitattributes"
+          - ".gitmessage"
+          - ".gitignore"
+
 "area: db":
   - changed-files:
       - any-glob-to-any-file:
@@ -109,24 +124,14 @@
           - ".mango/**"
           - "apps/api/src/lib/config.ts"
           - "apps/api/src/lib/runtime-paths.ts"
-          # Root build / dependency / tooling manifests. Without these, the
-          # "Verify classification labels" gate fails routine dependency-bump
-          # (package.json + bun.lock) and tooling/config PRs that match no glob.
-          - "package.json"
-          - "bun.lock"
+          # Root build manifests only. Dependency and DevX tooling globs were
+          # split out into "type: dependencies" and "area: tooling" so the
+          # label matches the change kind; see issue #381.
           - "tsconfig*.json"
           - "turbo.jsonc"
-          - "biome.json"
-          - "dprint.json"
-          - "lefthook.yml"
           - "cliff.toml"
           - "Dockerfile*"
           - ".dockerignore"
-          - "opencode.json"
-          - ".editorconfig"
-          - ".gitignore"
-          - ".gitattributes"
-          - ".gitmessage"
 
 "area: docs":
   - changed-files:
@@ -148,6 +153,15 @@
           - ".github/actions/**"
           - ".github/labeler.yml"
           - ".github/dependabot.yml"
+
+"type: dependencies":
+  - changed-files:
+      - any-glob-to-any-file:
+          # Routine dependency bumps. Dependabot bun PRs touch only these two
+          # files and now classify distinctly from product build work; also
+          # applied as an auto-label by .github/dependabot.yml. See issue #381.
+          - "package.json"
+          - "bun.lock"
 
 "type: test":
   - changed-files:

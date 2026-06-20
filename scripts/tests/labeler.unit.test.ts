@@ -2,6 +2,15 @@ import { describe, expect, test } from 'bun:test';
 
 import { readText } from './support/read-text';
 
+/** Slice a labeler config into the body of a single label section. */
+function extractLabelSection(labeler: string, start: string, end: string): string {
+  const startIdx = labeler.indexOf(start);
+  if (startIdx < 0) return '';
+  const bodyStart = startIdx + start.length;
+  const endIdx = labeler.indexOf(end, bodyStart);
+  return endIdx < 0 ? labeler.slice(bodyStart) : labeler.slice(bodyStart, endIdx);
+}
+
 describe('labeler coverage', () => {
   test('classifies scripts and test-only changes', () => {
     const labeler = readText('.github/labeler.yml');
@@ -30,9 +39,62 @@ describe('labeler coverage', () => {
     const labeler = readText('.github/labeler.yml');
 
     expect(labeler).toContain('- "LICENSE"');
-    expect(labeler).toContain('- ".gitignore"');
     expect(labeler).toContain('- ".github/**/*.md"');
     expect(labeler).toContain('- ".github/dependabot.yml"');
+  });
+
+  test('splits dependency bumps into a dedicated label', () => {
+    const labeler = readText('.github/labeler.yml');
+
+    // Dependabot bun PRs must be classified as dependency maintenance, not
+    // conflated with product build work; see issue #381.
+    expect(labeler).toContain('"type: dependencies":');
+    const depsSection = extractLabelSection(labeler, '"type: dependencies":', '"type: test":');
+    expect(depsSection).toContain('- "package.json"');
+    expect(depsSection).toContain('- "bun.lock"');
+  });
+
+  test('keeps build manifests out of the dependencies label', () => {
+    const labeler = readText('.github/labeler.yml');
+
+    // The dependency label is a clean split from area: build, so build-only
+    // manifests must not also be classified as dependency updates.
+    const depsSection = extractLabelSection(labeler, '"type: dependencies":', '"type: test":');
+    expect(depsSection).not.toContain('tsconfig');
+    expect(depsSection).not.toContain('Dockerfile');
+    expect(depsSection).not.toContain('turbo.jsonc');
+    expect(depsSection).not.toContain('cliff.toml');
+  });
+
+  test('classifies DevX tooling as area: tooling, not area: build', () => {
+    const labeler = readText('.github/labeler.yml');
+
+    expect(labeler).toContain('"area: tooling":');
+    const toolingSection = extractLabelSection(labeler, '"area: tooling":', '"area: db":');
+    expect(toolingSection).toContain('- "biome.json"');
+    expect(toolingSection).toContain('- "dprint.json"');
+    expect(toolingSection).toContain('- "lefthook.yml"');
+    expect(toolingSection).toContain('- "opencode.json"');
+    expect(toolingSection).toContain('- ".editorconfig"');
+    expect(toolingSection).toContain('- ".gitattributes"');
+    expect(toolingSection).toContain('- ".gitmessage"');
+    expect(toolingSection).toContain('- ".gitignore"');
+
+    const buildSection = extractLabelSection(labeler, '"area: build":', '"area: docs":');
+    expect(buildSection).not.toContain('biome.json');
+    expect(buildSection).not.toContain('dprint.json');
+    expect(buildSection).not.toContain('lefthook.yml');
+    expect(buildSection).not.toContain('opencode.json');
+    expect(buildSection).not.toContain('.editorconfig');
+    expect(buildSection).not.toContain('.gitattributes');
+    expect(buildSection).not.toContain('.gitmessage');
+    expect(buildSection).not.toContain('.gitignore');
+  });
+
+  test('applies type: dependencies as a Dependabot auto-label for both ecosystems', () => {
+    const dependabot = readText('.github/dependabot.yml');
+
+    expect(dependabot).toContain('"type: dependencies"');
   });
 
   test('fails the labeler workflow when no classification label is applied', () => {
