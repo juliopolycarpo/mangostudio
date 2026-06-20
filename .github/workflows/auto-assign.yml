@@ -48,11 +48,13 @@ jobs:
             // Whoever has historically committed to the files this PR touches is a
             // natural reviewer. Reading the base-branch history keeps the signal on
             // trusted commits and picks up new contributors without config changes.
-            const files = await github.paginate(github.rest.pulls.listFiles, {
+            // A single page bounded to MAX_FILES is enough to derive owners;
+            // paginating every changed file would waste API quota on large PRs.
+            const { data: files } = await github.rest.pulls.listFiles({
               owner,
               repo,
               pull_number: pr.number,
-              per_page: 100,
+              per_page: MAX_FILES,
             });
             const paths = [
               ...new Set(
