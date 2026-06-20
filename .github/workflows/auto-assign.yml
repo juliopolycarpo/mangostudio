@@ -1,0 +1,154 @@
+name: Auto Assign
+
+# pull_request_target lets the workflow assign/review PRs from forks without
+# checking out or executing untrusted PR code. It only reads PR metadata and the
+# base-branch commit history through GitHub APIs to derive owners, so new
+# contributors are picked up automatically with no per-label config to maintain.
+on:
+  pull_request_target:
+    types: [opened, reopened, ready_for_review, synchronize]
+
+concurrency:
+  group: auto-assign-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  assign:
+    name: Route PR ownership
+    if: ${{ !github.event.pull_request.draft }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+    steps:
+      - name: Assign owners from changed-file history
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const MAX_FILES = 50;
+            const COMMITS_PER_FILE = 10;
+            const MAX_REVIEWERS = 3;
+
+            const isBot = (user) =>
+              !user || user.type === 'Bot' || user.login.endsWith('[bot]');
+
+            const pr = context.payload.pull_request;
+            if (!pr) {
+              core.setFailed('Auto-assignment can only run for pull request events.');
+              return;
+            }
+
+            const { owner, repo } = context.repo;
+            const authorLogin = pr.user?.login;
+
+            // Whoever has historically committed to the files this PR touches is a
+            // natural reviewer. Reading the base-branch history keeps the signal on
+            // trusted commits and picks up new contributors without config changes.
+            // A single page bounded to MAX_FILES is enough to derive owners;
+            // paginating every changed file would waste API quota on large PRs.
+            const { data: files } = await github.rest.pulls.listFiles({
+              owner,
+              repo,
+              pull_number: pr.number,
+              per_page: MAX_FILES,
+            });
+            const paths = [
+              ...new Set(
+                files
+                  .slice(0, MAX_FILES)
+                  .flatMap((file) => [file.filename, file.previous_filename])
+                  .filter(Boolean)
+              ),
+            ];
+
+            const reviewerScores = new Map();
+            for (const path of paths) {
+              let commits;
+              try {
+                ({ data: commits } = await github.rest.repos.listCommits({
+                  owner,
+                  repo,
+                  path,
+                  sha: pr.base.ref,
+                  per_page: COMMITS_PER_FILE,
+                }));
+              } catch (error) {
+                core.info(`Skipping history for ${path}: ${error.message}`);
+                continue;
+              }
+              for (const commit of commits) {
+                const login = commit.author?.login;
+                if (!login || isBot(commit.author) || login === authorLogin) continue;
+                reviewerScores.set(login, (reviewerScores.get(login) ?? 0) + 1);
+              }
+            }
+
+            const candidates = [...reviewerScores.entries()]
+              .sort((a, b) => b[1] - a[1])
+              .map(([login]) => login)
+              .slice(0, MAX_REVIEWERS);
+
+            const { data: currentPr } = await github.rest.pulls.get({
+              owner,
+              repo,
+              pull_number: pr.number,
+            });
+
+            // Skip anyone already requested or who has already reviewed so repeated
+            // pushes don't re-ping reviewers after they have weighed in.
+            const reviews = await github.paginate(github.rest.pulls.listReviews, {
+              owner,
+              repo,
+              pull_number: pr.number,
+              per_page: 100,
+            });
+            const handledReviewers = new Set([
+              ...(currentPr.requested_reviewers ?? []).map((user) => user.login),
+              ...reviews.map((review) => review.user?.login).filter(Boolean),
+            ]);
+            const reviewersToRequest = candidates.filter(
+              (login) => !handledReviewers.has(login)
+            );
+
+            // requestReviewers/addAssignees only accept users with repo access, so
+            // request one at a time and let a non-collaborator drop out instead of
+            // failing the whole batch.
+            for (const reviewer of reviewersToRequest) {
+              try {
+                await github.rest.pulls.requestReviewers({
+                  owner,
+                  repo,
+                  pull_number: pr.number,
+                  reviewers: [reviewer],
+                });
+                core.info(`Requested review from ${reviewer}`);
+              } catch (error) {
+                core.info(`Could not request review from ${reviewer}: ${error.message}`);
+              }
+            }
+
+            // The author owns their PR; bots (e.g. Dependabot) are left unassigned.
+            if (authorLogin && !isBot(pr.user)) {
+              const alreadyAssigned = (currentPr.assignees ?? []).some(
+                (user) => user.login === authorLogin
+              );
+              if (alreadyAssigned) {
+                core.info(`${authorLogin} already owns this PR.`);
+              } else {
+                try {
+                  await github.rest.issues.addAssignees({
+                    owner,
+                    repo,
+                    issue_number: pr.number,
+                    assignees: [authorLogin],
+                  });
+                  core.info(`Assigned ${authorLogin}`);
+                } catch (error) {
+                  core.info(`Could not assign ${authorLogin}: ${error.message}`);
+                }
+              }
+            }

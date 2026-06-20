@@ -58,7 +58,7 @@ Useful docs:
 
 ## Classification Labels
 
-`.github/labeler.yml` plus the "Verify classification labels" gate (`labeler.yml` workflow) require every PR to carry at least one `area:` or `type:` label. The taxonomy is auto-applied by path and applied manually when no glob matches. Keep new labels and glob moves in sync between `.github/labeler.yml`, `.github/dependabot.yml`, `scripts/tests/labeler.unit.test.ts`, and this table.
+`.github/labeler.yml` plus the "Verify classification labels" gate (`labeler.yml` workflow) require every PR to carry at least one `area:` or `type:` label. PR ownership is separate: the `auto-assign.yml` workflow assigns the author and requests reviews from prior committers of the PR's changed files (base-branch history), so it needs no per-label owner config. Keep new labels and glob moves in sync between `.github/labeler.yml`, `.github/dependabot.yml`, `scripts/tests/labeler.unit.test.ts`, and this table.
 
 ### `area:` (where)
 
