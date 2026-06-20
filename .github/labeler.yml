@@ -105,7 +105,7 @@
 "area: build":
   - changed-files:
       - any-glob-to-any-file:
-          - "scripts/build.ts"
+          - "scripts/**"
           - ".mango/**"
           - "apps/api/src/lib/config.ts"
           - "apps/api/src/lib/runtime-paths.ts"
@@ -125,3 +125,13 @@
           - ".github/workflows/**"
           - ".github/actions/**"
           - ".github/labeler.yml"
+
+"type: test":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "**/*.test.ts"
+          - "**/*.test.tsx"
+          - "**/*.spec.ts"
+          - "**/*.spec.tsx"
+          - "scripts/tests/**"
+          - "tests/**"
