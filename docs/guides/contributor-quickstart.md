@@ -77,7 +77,11 @@ bun run fix --staged      # auto-fix only affected workspaces
 4. Run `bun run check` after each change set.
 5. Before handoff or PR, run `bun run verify` (or `bun run check && bun run test` for a lighter pass).
 
-## 7. Related Docs
+## 7. PR Automation
+
+Pull requests are classified by `.github/labeler.yml`, and the `auto-assign.yml` workflow assigns you as the owner and requests reviews from contributors who have previously committed to the files your PR changes. Both run automatically — there is no per-label routing config to update when adding labels or onboarding contributors.
+
+## 8. Related Docs
 
 - [`../../.github/CONTRIBUTING.md`](../../.github/CONTRIBUTING.md) for contribution policy and commit rules
 - [`../reference/api.md`](../reference/api.md) for endpoint mapping

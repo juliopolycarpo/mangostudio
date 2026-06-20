@@ -115,7 +115,7 @@ describe('labeler coverage', () => {
   test('reads applied labels from the labeler output, not a second API call', () => {
     const workflow = readText('.github/workflows/labeler.yml');
 
-    expect(workflow).toContain('ALL_LABELS: ${{ steps.label.outputs.all-labels }}');
+    expect(workflow).toContain('ALL_LABELS: $' + '{{ steps.label.outputs.all-labels }}');
     expect(workflow).not.toContain('listLabelsOnIssue');
     expect(workflow).not.toContain('issues: read');
   });
