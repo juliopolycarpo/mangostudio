@@ -94,7 +94,13 @@ describe('labeler coverage', () => {
   test('applies type: dependencies as a Dependabot auto-label for both ecosystems', () => {
     const dependabot = readText('.github/dependabot.yml');
 
-    expect(dependabot).toContain('"type: dependencies"');
+    // One block per ecosystem; each must carry the auto-label so neither the
+    // github-actions nor the bun ecosystem loses dependency classification.
+    const ecosystemBlocks = dependabot.split('package-ecosystem:').slice(1);
+    expect(ecosystemBlocks).toHaveLength(2);
+    for (const block of ecosystemBlocks) {
+      expect(block).toContain('"type: dependencies"');
+    }
   });
 
   test('fails the labeler workflow when no classification label is applied', () => {
