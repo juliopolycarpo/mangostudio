@@ -27,6 +27,7 @@ import {
   releaseArchiveFileName,
 } from './lib/release-targets';
 import { resolveReleaseVersion } from './lib/release-version';
+import { waitForServerReady } from './lib/wait-for-health';
 
 // ---------------------------------------------------------------------------
 // Config
@@ -123,19 +124,6 @@ function makeTempDir(): string {
 
 function removeTempDir(path: string): void {
   rmSync(path, { force: true, recursive: true });
-}
-
-async function waitFor(url: string, retries = 15, delayMs = 500): Promise<void> {
-  for (let i = 0; i < retries; i++) {
-    try {
-      const res = await fetch(url);
-      if (res.ok) return;
-    } catch {
-      // not ready yet
-    }
-    await Bun.sleep(delayMs);
-  }
-  fail(`Server never became ready at ${url}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -269,7 +257,11 @@ async function smokeTest(): Promise<void> {
 
   try {
     console.log('   Waiting for server to be ready...');
-    await waitFor(`http://localhost:${PORT}/api/health`);
+    try {
+      await waitForServerReady(`http://localhost:${PORT}/api/health`);
+    } catch (caught) {
+      fail(caught instanceof Error ? caught.message : String(caught));
+    }
 
     console.log('\n🔍 Running HTTP assertions...');
 
