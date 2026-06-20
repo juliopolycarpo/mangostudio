@@ -56,6 +56,44 @@ Useful docs:
 - DB tables: `snake_case`; DB columns: `camelCase`
 - Kysely aliases: `<Entity>Select`, `<Entity>Insert`, `<Entity>Update`
 
+## Classification Labels
+
+`.github/labeler.yml` plus the "Verify classification labels" gate (`labeler.yml` workflow) require every PR to carry at least one `area:` or `type:` label. The taxonomy is auto-applied by path and applied manually when no glob matches. Keep new labels and glob moves in sync between `.github/labeler.yml`, `.github/dependabot.yml`, `scripts/tests/labeler.unit.test.ts`, and this table.
+
+### `area:` (where)
+
+- `area: build` — `scripts/**`, `.mango/**`, `apps/api/src/lib/{config,runtime-paths}.ts`, `tsconfig*.json`, `turbo.jsonc`, `cliff.toml`, `Dockerfile*`, `.dockerignore`
+- `area: cli` — `apps/api/src/cli/**`, `apps/api/src/index.ts`, `apps/api/src/server/**`, `apps/api/src/lib/{server-state,mango-paths}.ts`
+- `area: tooling` — `biome.json`, `dprint.json`, `lefthook.yml`, `opencode.json`, `.editorconfig`, `.gitattributes`, `.gitmessage`, `.gitignore`
+- `area: db` — `apps/api/src/db/**`
+- `area: docs` — `docs/**`, `*.md` under any app or package, `LICENSE`, `.github/**/*.md`, issue/PR templates
+- `area: frontend` — `apps/frontend/**`
+- `area: api` — `apps/api/**`
+- `area: shared` — `apps/shared/**`
+- `area: auth` — auth entry points + `apps/shared/src/auth/**` + `tests/browser-smoke/auth-flow.spec.ts`
+- `area: chat` — `apps/api/src/modules/{chats,messages}/**`, `apps/frontend/src/features/chat/**`, `apps/shared/src/chat/**`
+- `area: generation` — `apps/api/src/modules/generation/**`, `apps/frontend/src/features/generation/**`, `apps/frontend/src/services/generation-service.ts`, `apps/shared/src/generation/**`
+- `area: gallery` — generated-image API + storage + frontend gallery
+- `area: providers` — provider adapters, `apps/shared/src/catalog/**`, model catalog hook
+- `area: connectors` — connector modules, secret store, `apps/shared/src/connectors/**`
+- `area: settings` — app/provider/tool settings modules + frontend settings
+- `area: tools` — tool registry, tool settings, `apps/shared/src/tool-settings/**`
+- `area: i18n` — `apps/shared/src/i18n/**`
+- `area: components` — `apps/frontend/src/components/**`
+
+### `type:` (what)
+
+- `type: ci` — `.github/{workflows,actions,labeler.yml,dependabot.yml}`
+- `type: dependencies` — `package.json`, `bun.lock` (also auto-applied by Dependabot for both `bun` and `github-actions` ecosystems)
+- `type: test` — `**/*.{test,spec}.{ts,tsx}`, `scripts/tests/**`, `tests/**`, `playwright.config.ts`
+- `type: refactor` — manual, mirrors the `refactor` Conventional Commit type
+- `type: perf` — manual, mirrors the `perf` Conventional Commit type
+- `type: docs` — manual, mirrors the `docs` Conventional Commit type
+- `type: security` — manual, security-sensitive changes
+- `type: hardening` — manual, defensive work closing a class of bugs
+- `type: chore` — manual, maintenance that fits no other type
+- `type: bug`, `type: feature`, `type: migration`, `type: question` — manual / issue-template defaults
+
 ## Task Routing
 
 - Auth: `apps/api/src/auth.ts`, `apps/api/src/plugins/auth-middleware.ts`, `apps/frontend/src/lib/auth-client.ts`, `apps/frontend/src/routes/login.tsx`, `apps/frontend/src/routes/signup.tsx`, `tests/browser-smoke/auth-flow.spec.ts`
