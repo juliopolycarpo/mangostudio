@@ -25,4 +25,27 @@ jobs:
       contents: read
       pull-requests: write
     steps:
-      - uses: actions/labeler@8558fd74291d67161a8a78ce36a881fa63b766a9 # v5.0.0
+      - id: label
+        uses: actions/labeler@8558fd74291d67161a8a78ce36a881fa63b766a9 # v5.0.0
+      - name: Verify classification labels
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          # all-labels is a comma-separated list of every label on the PR after
+          # labeling. Consuming it avoids a second labels API round-trip and the
+          # extra read token scope that a separate labels lookup would require.
+          ALL_LABELS: ${{ steps.label.outputs.all-labels }}
+        with:
+          script: |
+            const labelNames = (process.env.ALL_LABELS ?? '')
+              .split(',')
+              .map((name) => name.trim())
+              .filter(Boolean);
+            const hasClassificationLabel = labelNames.some(
+              (name) => name.startsWith('area: ') || name.startsWith('type: ')
+            );
+
+            if (!hasClassificationLabel) {
+              core.setFailed(
+                `No area: or type: label was applied to PR #${context.issue.number}. Update .github/labeler.yml for the changed paths.`
+              );
+            }
