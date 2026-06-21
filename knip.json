@@ -1,0 +1,21 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "entry": [
+    ".claude/hooks/*.mjs",
+    ".codex/hooks/*.mjs",
+    "scripts/qa-gate/collect.ts",
+    "scripts/qa-gate/render.ts",
+    "scripts/qa-gate/render-commits.ts",
+    "scripts/qa-gate/render-coverage-summary.ts",
+    "scripts/release/**/*.{ts,sh}",
+    "scripts/test-build.ts",
+    "scripts/agent-hooks.test.mjs"
+  ],
+  "ignoreDependencies": [
+    "dprint",
+    "@dprint/markdown",
+    "@dprint/toml",
+    "@dprint/dockerfile",
+    "jscpd"
+  ]
+}
