@@ -10,12 +10,12 @@ import type {
 } from '../types';
 import { normalizeDeepSeekReasoningEffort } from './normalizers';
 
-export interface DeepSeekTurNLoopState {
+export interface DeepSeekTurnLoopState {
   provider: 'deepseek';
   loopMessages: unknown[];
 }
 
-export function buildDeepSeekMessages(params: {
+export function buildDeepSeekAgentMessages(params: {
   systemPrompt?: string;
   history: ChatTurnContext[];
   loopMessages?: unknown[];

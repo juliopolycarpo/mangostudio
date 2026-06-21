@@ -17,7 +17,11 @@ import type {
 import { streamDeepSeekAgentTurn } from './agent-stream';
 import { createDeepSeekAgentClient, createDeepSeekClient, validateDeepSeekApiKey } from './client';
 import { fetchDeepSeekModels, getDeepSeekFallbackModels } from './model-catalog';
-import { buildDeepSeekMessages, buildDeepSeekSystemPrompt, toErrorMessage } from './normalizers';
+import {
+  buildDeepSeekChatMessages,
+  buildDeepSeekSystemPrompt,
+  toErrorMessage,
+} from './normalizers';
 import { buildDeepSeekProviderOptions, normalizeDeepSeekBaseUrl } from './options';
 
 const GENERATION_TIMEOUT_MS = 120_000;
@@ -115,7 +119,7 @@ const deepSeekProvider: AIProvider = {
     const result = await generateText({
       model: textClient(req.modelName),
       system: buildDeepSeekSystemPrompt(req),
-      messages: buildDeepSeekMessages(req),
+      messages: buildDeepSeekChatMessages(req),
       abortSignal: req.signal,
       timeout: { totalMs: GENERATION_TIMEOUT_MS },
       providerOptions: buildDeepSeekProviderOptions(req.generationConfig),
@@ -133,7 +137,7 @@ const deepSeekProvider: AIProvider = {
     const result = streamText({
       model: textClient(req.modelName),
       system: buildDeepSeekSystemPrompt(req),
-      messages: buildDeepSeekMessages(req),
+      messages: buildDeepSeekChatMessages(req),
       abortSignal: req.signal,
       timeout: { totalMs: GENERATION_TIMEOUT_MS },
       providerOptions: buildDeepSeekProviderOptions(req.generationConfig),

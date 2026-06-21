@@ -38,7 +38,7 @@ export function buildDeepSeekSystemPrompt(req: TextGenerationRequest): string | 
     : DEEPSEEK_REASONING_LANGUAGE_INSTRUCTION;
 }
 
-export function buildDeepSeekMessages(req: TextGenerationRequest): ModelMessage[] {
+export function buildDeepSeekChatMessages(req: TextGenerationRequest): ModelMessage[] {
   const prompt = appendAttachmentFallbackNotes(req.prompt, req.attachments, req.modelCapabilities);
 
   return [
