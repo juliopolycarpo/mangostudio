@@ -102,6 +102,11 @@ export async function* streamOAICompatAgentTurn(
       ),
     extractReasoningChunks,
     complete: ({ accumulator, context }) => {
+      // Build the assistant message for loop-state accumulation.
+      // reasoning_content is only included on intra-turn loop messages (when tool calls are
+      // still pending) to satisfy DeepSeek's requirement that reasoning context is available
+      // during continuation. It is intentionally OMITTED from the final message (no pending
+      // tool calls) so reasoning is never persisted cross-turn.
       // See: https://api-docs.deepseek.com/guides/thinking_mode
       const assistantMsg =
         accumulator.buildAssistantMessage() as unknown as OpenAI.ChatCompletionMessageParam;
