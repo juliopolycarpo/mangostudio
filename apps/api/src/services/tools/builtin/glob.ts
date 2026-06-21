@@ -15,7 +15,7 @@ import {
   resolveAndValidatePath,
 } from './_fs-utils';
 
-export const GLOB_TOOL_NAME = 'glob';
+const GLOB_TOOL_NAME = 'glob';
 
 export const GLOB_DEFAULT_MAX_RESULTS = 200;
 export const GLOB_MIN_MAX_RESULTS = 1;

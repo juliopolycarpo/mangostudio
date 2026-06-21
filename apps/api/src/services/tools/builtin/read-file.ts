@@ -13,7 +13,7 @@ import {
   resolveAndValidatePath,
 } from './_fs-utils';
 
-export const READ_FILE_TOOL_NAME = 'read_file';
+const READ_FILE_TOOL_NAME = 'read_file';
 
 export interface ReadFileToolArgs {
   path: string;

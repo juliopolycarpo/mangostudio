@@ -15,7 +15,7 @@ import {
   resolveAndValidatePath,
 } from './_fs-utils';
 
-export const LIST_DIRECTORY_TOOL_NAME = 'list_directory';
+const LIST_DIRECTORY_TOOL_NAME = 'list_directory';
 
 export interface ListDirectoryToolArgs {
   path: string;

@@ -18,19 +18,19 @@ import {
   resolveAndValidatePath,
 } from './_fs-utils';
 
-export const GREP_TOOL_NAME = 'grep';
+const GREP_TOOL_NAME = 'grep';
 
 export const GREP_DEFAULT_MAX_RESULTS = 100;
 export const GREP_MIN_MAX_RESULTS = 1;
 export const GREP_MAX_MAX_RESULTS = 5_000;
 
 export const GREP_DEFAULT_MAX_PER_FILE = 20;
-export const GREP_MIN_MAX_PER_FILE = 1;
-export const GREP_MAX_MAX_PER_FILE = 1_000;
+const GREP_MIN_MAX_PER_FILE = 1;
+const GREP_MAX_MAX_PER_FILE = 1_000;
 
 export const GREP_DEFAULT_MAX_FILE_BYTES = 1_000_000;
-export const GREP_MIN_MAX_FILE_BYTES = 1_000;
-export const GREP_MAX_MAX_FILE_BYTES = 10_000_000;
+const GREP_MIN_MAX_FILE_BYTES = 1_000;
+const GREP_MAX_MAX_FILE_BYTES = 10_000_000;
 
 const BINARY_PROBE_BYTES = 1024;
 const DEFAULT_FILE_GLOB = '**/*';
