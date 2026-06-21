@@ -10,6 +10,14 @@ import {
 import { isImageModelId } from '../core/capability-detector';
 import type { ImageGenerationRequest, ImageGenerationResult } from '../types';
 
+interface OpenAIClientRuntimeLike {
+  readonly client: OpenAI;
+}
+
+interface GenerateImageWithOpenAIClientOptions {
+  validateModelBeforeRuntime?: boolean;
+}
+
 function alwaysReturnsBase64(modelName: string): boolean {
   const id = modelName.toLowerCase();
   return id.startsWith('gpt-image') || id.startsWith('chatgpt-image');
@@ -66,4 +74,17 @@ export async function generateOpenAIImage(
     };
   }
   throw new Error(`No image data returned from OpenAI API for model "${req.modelName}".`);
+}
+
+export async function generateImageWithOpenAIClient<Runtime extends OpenAIClientRuntimeLike>(
+  prepareRuntime: (userId: string, modelName?: string) => Promise<Runtime>,
+  req: ImageGenerationRequest,
+  options: GenerateImageWithOpenAIClientOptions = {}
+): Promise<ImageGenerationResult> {
+  if (options.validateModelBeforeRuntime && !isImageModelId(req.modelName)) {
+    throw new Error(`Image generation is not supported by model "${req.modelName}".`);
+  }
+
+  const { client } = await prepareRuntime(req.userId, req.modelName);
+  return generateOpenAIImage(client, req);
 }

@@ -2,6 +2,12 @@ import type {
   ToolParameterDescriptor,
   ToolSettingsDescriptor,
 } from '@mangostudio/shared/tool-settings';
+import {
+  normalizePathItemArray,
+  normalizePathList,
+  normalizeStringArray,
+  normalizeStringList,
+} from './list-normalization';
 import type { EffectiveToolSettings, RegisteredTool, ToolDefinition } from './types';
 
 export class ToolParameterError extends Error {
@@ -193,19 +199,16 @@ function normalizeStringListValue(
   value: unknown
 ): string[] {
   if (Array.isArray(value)) {
-    const strings = value.filter((item): item is string => typeof item === 'string');
-    if (strings.length !== value.length) {
+    const strings = normalizeStringArray(value, { rejectInvalid: true });
+    if (!strings) {
       throw new ToolParameterError(
         `Parameter "${descriptor.name}" for tool "${tool.definition.name}" must be an array of strings.`
       );
     }
-    return strings.map((s) => s.trim()).filter((s) => s.length > 0);
+    return strings;
   }
   if (typeof value === 'string') {
-    return value
-      .split('\n')
-      .map((s) => s.trim())
-      .filter((s) => s.length > 0);
+    return normalizeStringList(value);
   }
   throw new ToolParameterError(
     `Parameter "${descriptor.name}" for tool "${tool.definition.name}" must be a string list.`
@@ -218,35 +221,16 @@ function normalizePathListValue(
   value: unknown
 ): Array<{ path: string; enabled: boolean }> {
   if (Array.isArray(value)) {
-    const items: Array<{ path: string; enabled: boolean }> = [];
-    for (const raw of value) {
-      if (
-        typeof raw === 'object' &&
-        raw !== null &&
-        'path' in raw &&
-        typeof (raw as Record<string, unknown>).path === 'string' &&
-        'enabled' in raw &&
-        typeof (raw as Record<string, unknown>).enabled === 'boolean'
-      ) {
-        const entry = raw as { path: string; enabled: boolean };
-        const trimmed = entry.path.trim();
-        if (trimmed.length > 0) {
-          items.push({ path: trimmed, enabled: entry.enabled });
-        }
-      } else {
-        throw new ToolParameterError(
-          `Parameter "${descriptor.name}" for tool "${tool.definition.name}" must be an array of path items.`
-        );
-      }
+    const items = normalizePathItemArray(value, { rejectInvalid: true });
+    if (!items) {
+      throw new ToolParameterError(
+        `Parameter "${descriptor.name}" for tool "${tool.definition.name}" must be an array of path items.`
+      );
     }
     return items;
   }
   if (typeof value === 'string') {
-    return value
-      .split('\n')
-      .map((s) => s.trim())
-      .filter((s) => s.length > 0)
-      .map((path) => ({ path, enabled: true }));
+    return normalizePathList(value);
   }
   throw new ToolParameterError(
     `Parameter "${descriptor.name}" for tool "${tool.definition.name}" must be a path list.`

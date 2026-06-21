@@ -15,15 +15,19 @@ import type {
   AIProvider,
   ImageGenerationRequest,
   ImageGenerationResult,
-  ModelInfo,
   ProviderHealthcheckRequest,
   StreamingChunk,
   TextGenerationRequest,
   TextGenerationResult,
 } from '../types';
+import { generateChatCompletionText, streamChatCompletionText } from './chat-completions';
 import { createOpenAIClient, type OpenAIAuthContext, validateOpenAIAuthContext } from './client';
-import { generateOpenAIImage } from './image-generation';
-import { buildChatMessages } from './message-mapper';
+import {
+  createOpenAIClientRuntimeLoader,
+  createOpenAIProviderLifecycleHandlers,
+  type OpenAIClientRuntime,
+} from './client-runtime';
+import { generateImageWithOpenAIClient } from './image-generation';
 import { listModelsWithCache, resolveAuthContext, secretService } from './model-catalog';
 import { extractReasoningChunks, extractReasoningFromCompleted } from './normalizers';
 import { streamAgentTurnWithResponsesAPI, streamWithResponsesAPI } from './responses-stream';
@@ -38,21 +42,9 @@ export {
   validateOpenAIAuthContext,
 };
 
-interface PreparedOpenAIRuntime {
-  readonly authContext: OpenAIAuthContext;
-  readonly client: ReturnType<typeof createOpenAIClient>;
-}
+type PreparedOpenAIRuntime = OpenAIClientRuntime<OpenAIAuthContext>;
 
-async function loadPreparedRuntime(
-  userId: string,
-  modelName?: string
-): Promise<PreparedOpenAIRuntime> {
-  const authContext = await resolveAuthContext(userId, modelName);
-  return {
-    authContext,
-    client: createOpenAIClient(authContext),
-  };
-}
+const loadPreparedRuntime = createOpenAIClientRuntimeLoader(resolveAuthContext, createOpenAIClient);
 
 const lifecycle = createProviderLifecycle<PreparedOpenAIRuntime>({
   provider: 'openai',
@@ -66,15 +58,7 @@ const openAIProvider: AIProvider = {
 
   async generateText(req: TextGenerationRequest): Promise<TextGenerationResult> {
     const { client } = await lifecycle.prepareRuntime(req.userId, req.modelName);
-
-    const completion = await client.chat.completions.create(
-      { model: req.modelName, messages: buildChatMessages(req), stream: false },
-      { signal: req.signal }
-    );
-
-    const text = completion.choices[0]?.message?.content ?? '';
-    if (!text) throw new Error('No text returned from OpenAI API.');
-    return { text };
+    return generateChatCompletionText(client, req, 'No text returned from OpenAI API.');
   },
 
   async *generateTextStream(req: TextGenerationRequest): AsyncIterable<StreamingChunk> {
@@ -83,16 +67,7 @@ const openAIProvider: AIProvider = {
     if (isReasoningModel(req.modelName) && req.generationConfig?.thinkingEnabled) {
       yield* streamWithResponsesAPI(client, req);
     } else {
-      const stream = await client.chat.completions.create(
-        { model: req.modelName, messages: buildChatMessages(req), stream: true },
-        { signal: req.signal }
-      );
-      for await (const chunk of stream) {
-        if (req.signal?.aborted) break;
-        const delta = chunk.choices[0]?.delta?.content;
-        if (delta) yield { type: 'text', text: delta, done: false };
-      }
-      yield { type: 'text', text: '', done: true };
+      yield* streamChatCompletionText(client, req);
     }
   },
 
@@ -101,18 +76,12 @@ const openAIProvider: AIProvider = {
     yield* streamAgentTurnWithResponsesAPI(client, req);
   },
 
-  async generateImage(req: ImageGenerationRequest): Promise<ImageGenerationResult> {
-    const { client } = await lifecycle.prepareRuntime(req.userId, req.modelName);
-    return generateOpenAIImage(client, req);
+  generateImage(req: ImageGenerationRequest): Promise<ImageGenerationResult> {
+    return generateImageWithOpenAIClient(lifecycle.prepareRuntime, req);
   },
 
-  listModels(userId: string): Promise<ModelInfo[]> {
-    return listModelsWithCache(userId);
-  },
-
-  invalidateModelCache: lifecycle.invalidateModelCache,
-  syncConfigFileConnectors: lifecycle.syncConfigFileConnectors,
-  warmup: lifecycle.warmup,
+  listModels: listModelsWithCache,
+  ...createOpenAIProviderLifecycleHandlers(lifecycle),
 
   async healthcheck(req: ProviderHealthcheckRequest): Promise<void> {
     if (!req.apiKey?.trim()) {
