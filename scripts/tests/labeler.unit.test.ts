@@ -119,4 +119,12 @@ describe('labeler coverage', () => {
     expect(workflow).not.toContain('listLabelsOnIssue');
     expect(workflow).not.toContain('issues: read');
   });
+
+  test('documents that ownership routing belongs in auto-assign, not here', () => {
+    const workflow = readText('.github/workflows/labeler.yml');
+
+    expect(workflow).toContain('auto-assign.yml');
+    expect(workflow).not.toContain('addAssignees');
+    expect(workflow).not.toContain('requestReviewers');
+  });
 });

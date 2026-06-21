@@ -1,5 +1,8 @@
 name: Auto Assign
 
+# Ownership routing only (author assignment + history-based reviewer requests).
+# Path-based area:/type: classification is handled by .github/workflows/labeler.yml.
+
 # pull_request_target lets the workflow assign/review PRs from forks without
 # checking out or executing untrusted PR code. It only reads PR metadata and the
 # base-branch commit history through GitHub APIs to derive owners, so new
