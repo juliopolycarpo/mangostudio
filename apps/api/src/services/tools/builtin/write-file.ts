@@ -15,7 +15,7 @@ import {
   resolveAndValidatePath,
 } from './_fs-utils';
 
-export const WRITE_FILE_TOOL_NAME = 'write_file';
+const WRITE_FILE_TOOL_NAME = 'write_file';
 
 export interface WriteFileToolArgs {
   path: string;
