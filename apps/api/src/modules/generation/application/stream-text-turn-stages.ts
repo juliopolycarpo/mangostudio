@@ -1,0 +1,930 @@
+import type {
+  ContinuationReasonCode,
+  MessagePart,
+  ProviderType,
+  ReasoningEffort,
+} from '@mangostudio/shared';
+import type { MultiAgentSettings } from '@mangostudio/shared/app-settings';
+import { MAX_TOOL_ITERATIONS_DEFAULT } from '@mangostudio/shared/app-settings';
+import type { Kysely } from 'kysely';
+import type { Database } from '../../../db/types';
+import { createDiagnosticLogger } from '../../../lib/logger';
+import {
+  type AgentTurnExecutionState,
+  computeSystemPromptHash,
+  computeToolsetHash,
+} from '../../../services/providers/core/continuation-envelope';
+import {
+  logDegrade,
+  logStateCleared,
+  logValidContinuation,
+} from '../../../services/providers/core/continuation-logger';
+import { decideContinuation } from '../../../services/providers/core/continuation-runtime';
+import { warmProviderForRequest } from '../../../services/providers/core/provider-readiness';
+import type {
+  AgentEvent,
+  AgentTurnRequest,
+  AIProvider,
+  ChatTurnContext,
+  ToolDefinition,
+} from '../../../services/providers/types';
+import { GENERATE_IMAGE_TOOL_NAME } from '../../../services/tools/builtin/generate-image';
+import { generateId } from '../../../utils/id';
+import { resolveProviderRuntimeAttachments } from '../../attachments/application/runtime-attachment-resolver';
+import { loadHistory, loadRichHistory } from '../../messages/infrastructure/message-repository';
+import {
+  type PersistedGeneratedImageInput,
+  persistAiResponse,
+  persistErrorResponse,
+  persistUserMessage,
+  updateChatAfterTurn,
+} from '../infrastructure/conversation-persistence';
+import type { ResolvedAgentRuntime } from './resolve-agent-runtime';
+import type { ResolvedModel } from './resolve-model';
+import { resolveTurnContext } from './resolve-turn-context';
+import {
+  createDelegationRuntime,
+  executeStandardToolCallsWithProgress,
+  type ToolExecutionProgressItem,
+} from './standard-tool-execution';
+import {
+  collectToolExecutionResult,
+  executeImageGenerationCall,
+  handleTurnCompleted,
+  mergeMessageParts,
+} from './stream-text-turn-helpers';
+import type { StreamEvent, StreamTextTurnInput } from './stream-text-turn-types';
+
+export const TOOL_LOOP_EXHAUSTED_MESSAGE =
+  'The model exceeded the maximum number of tool interactions.';
+
+export const streamTextTurnLogger = createDiagnosticLogger('stream-text-turn');
+
+/** Mutable session state threaded through all stream-text-turn stages. */
+export interface StreamTextTurnSession {
+  input: StreamTextTurnInput;
+  db: Kysely<Database>;
+  chatId: string;
+  userId: string;
+  signal?: AbortSignal;
+  userMsgId: string;
+  aiMsgId: string;
+  startTime: number;
+  interactionMode: 'chat' | 'agent';
+  resolvedModel: ResolvedModel;
+  provider: AIProvider;
+  agentRuntime: ResolvedAgentRuntime;
+  multiAgentSettings: MultiAgentSettings;
+  toolDefs: ToolDefinition[];
+  allowedToolNames: Set<string>;
+  effectiveSystemPrompt: string | undefined;
+  effectivePrompt: string;
+  thinkingEnabled: boolean;
+  reasoningEffort: ReasoningEffort;
+  attachmentIds: string[];
+  warmupPromise: Promise<void>;
+  runtimeAttachments: Awaited<ReturnType<typeof resolveProviderRuntimeAttachments>>;
+  allParts: MessagePart[];
+  generatedImageArtifacts: PersistedGeneratedImageInput[];
+  delegationState: { subagentCallCount: number };
+  fullText: string;
+  executionState: AgentTurnExecutionState;
+}
+
+interface DegradationContext {
+  from: string;
+  to: string;
+  reason: string;
+  reasonCode: ContinuationReasonCode;
+  fromProvider?: ProviderType;
+}
+
+/** Agent-loop iteration state carried across tool-loop passes. */
+interface AgentLoopState {
+  rawProviderState: string | null;
+  pendingToolResults: AgentTurnRequest['toolResults'];
+  isFirstIteration: boolean;
+  inThinkingSegment: boolean;
+  pendingCalls: Map<string, { name: string; argsStr: string }>;
+  turnCompleted: boolean;
+  degradedThisTurn: boolean;
+}
+
+/**
+ * Resolve turn context, persist the user message, start provider warmup, and
+ * assemble the mutable session used by later stages. Attachment resolution and
+ * the warmup await are deferred to {@link resolveTurnAttachments} so their
+ * failures are handled inside the orchestrator's try/catch.
+ */
+export async function prepareStreamTextTurn(
+  input: StreamTextTurnInput,
+  db: Kysely<Database>
+): Promise<StreamTextTurnSession> {
+  const turnContext = await resolveTurnContext(input, db);
+  const {
+    resolvedModel,
+    provider,
+    agentRuntime,
+    multiAgentSettings,
+    toolDefinitions: toolDefs,
+    allowedToolNames,
+    effectiveSystemPrompt,
+    attachmentIds,
+    interactionMode,
+    chatId,
+    userId,
+  } = turnContext;
+  const { modelId } = resolvedModel;
+  const runtimeSettings = agentRuntime.runtimeSettings;
+
+  const warmupPromise = warmProviderForRequest(provider.providerType, {
+    userId: input.userId,
+    modelName: modelId,
+    purpose: provider.generateAgentTurnStream ? 'agent-turn' : 'stream-text',
+  });
+
+  const now = Date.now();
+  const userMsgId = generateId();
+  await persistUserMessage(
+    {
+      id: userMsgId,
+      userId: input.userId,
+      chatId: input.chatId,
+      text: input.prompt,
+      attachmentIds,
+      timestamp: now,
+      interactionMode,
+    },
+    db
+  );
+
+  return {
+    input,
+    db,
+    chatId,
+    userId,
+    signal: input.signal,
+    userMsgId,
+    aiMsgId: generateId(),
+    startTime: Date.now(),
+    interactionMode,
+    resolvedModel,
+    provider,
+    agentRuntime,
+    multiAgentSettings,
+    toolDefs,
+    allowedToolNames,
+    effectiveSystemPrompt,
+    effectivePrompt: input.prompt,
+    thinkingEnabled: runtimeSettings.thinkingEnabled ?? true,
+    reasoningEffort: runtimeSettings.reasoningEffort ?? 'medium',
+    attachmentIds,
+    warmupPromise,
+    runtimeAttachments: [],
+    allParts: [],
+    generatedImageArtifacts: [],
+    delegationState: { subagentCallCount: 0 },
+    fullText: '',
+    executionState: {
+      durableProviderState: null,
+      turnLocalState: null,
+    },
+  };
+}
+
+/**
+ * Resolve provider runtime attachments and await provider warmup. Runs inside
+ * the orchestrator try/catch so a missing/invalid attachment is persisted as an
+ * error response and clears stale provider state, rather than escaping uncaught.
+ */
+export async function resolveTurnAttachments(session: StreamTextTurnSession): Promise<void> {
+  session.runtimeAttachments = await resolveProviderRuntimeAttachments(
+    {
+      attachmentIds: session.attachmentIds,
+      userId: session.userId,
+      chatId: session.chatId,
+      messageId: session.userMsgId,
+    },
+    session.db
+  );
+  await session.warmupPromise;
+}
+
+/**
+ * Yield continuation-degradation stream events and record the transition part.
+ */
+export function* emitContinuationDegradation(
+  session: StreamTextTurnSession,
+  ctx: DegradationContext
+): Generator<StreamEvent> {
+  const { provider, resolvedModel, chatId } = session;
+  const { modelId } = resolvedModel;
+
+  logDegrade({
+    chatId,
+    provider: provider.providerType,
+    model: modelId,
+    from: ctx.from,
+    to: ctx.to,
+    reason: ctx.reason,
+    reasonCode: ctx.reasonCode,
+    fromProvider: ctx.fromProvider,
+  });
+  const detail = `${ctx.from} → ${ctx.to}`;
+  const transitionPart: Extract<MessagePart, { type: 'continuation_transition' }> = {
+    type: 'continuation_transition',
+    provider: provider.providerType,
+    modelName: modelId,
+    fromProvider: ctx.fromProvider,
+    fromMode: ctx.from,
+    toMode: ctx.to,
+    reasonCode: ctx.reasonCode,
+    detail,
+    recovered: false,
+  };
+  session.allParts.push(transitionPart);
+  yield { type: 'fallback_notice', from: ctx.from, to: ctx.to, reason: ctx.reason };
+  yield {
+    type: 'continuation_transition',
+    provider: provider.providerType,
+    modelName: modelId,
+    fromProvider: ctx.fromProvider,
+    fromMode: ctx.from,
+    toMode: ctx.to,
+    reasonCode: ctx.reasonCode,
+    detail,
+  };
+}
+
+/**
+ * Decide cross-turn continuation and yield any degradation events.
+ */
+export async function* prepareAgentContinuation(
+  session: StreamTextTurnSession
+): AsyncGenerator<StreamEvent, string | null> {
+  const { db, chatId, provider, agentRuntime, toolDefs, effectiveSystemPrompt, resolvedModel } =
+    session;
+  const { modelId } = resolvedModel;
+
+  const chatRow = await db
+    .selectFrom('chats')
+    .select('lastProviderState')
+    .where('id', '=', chatId)
+    .executeTakeFirst();
+  const lastProviderState = chatRow?.lastProviderState ?? null;
+
+  const decision = decideContinuation({
+    lastProviderState,
+    provider: provider.providerType,
+    modelName: modelId,
+    agentId: agentRuntime.profile.id,
+    agentRuntimeHash: agentRuntime.runtimeHash,
+    systemPromptHash: computeSystemPromptHash(effectiveSystemPrompt),
+    toolsetHash: computeToolsetHash(toolDefs),
+  });
+
+  switch (decision.type) {
+    case 'continue_with_cursor':
+      logValidContinuation({
+        chatId,
+        provider: provider.providerType,
+        model: modelId,
+        mode: decision.envelope.mode,
+      });
+      return decision.providerState;
+    case 'degrade_to_replay':
+      yield* emitContinuationDegradation(session, {
+        from: decision.previousMode,
+        to: 'replay',
+        reason: decision.reason,
+        reasonCode: decision.reasonCode,
+        fromProvider: decision.previousProvider,
+      });
+      return null;
+    case 'start_replay':
+      return null;
+  }
+}
+
+/**
+ * Map one provider agent-stream event into stream output and session updates.
+ */
+export async function* emitAgentStreamEvent(
+  session: StreamTextTurnSession,
+  event: AgentEvent,
+  loop: AgentLoopState,
+  richHistory: ChatTurnContext[]
+): AsyncGenerator<StreamEvent> {
+  const {
+    provider,
+    resolvedModel,
+    chatId,
+    input,
+    toolDefs,
+    effectiveSystemPrompt,
+    executionState,
+  } = session;
+  const { modelId } = resolvedModel;
+
+  switch (event.type) {
+    case 'reasoning_delta':
+      if (!loop.inThinkingSegment) {
+        loop.inThinkingSegment = true;
+        yield { type: 'thinking_start' };
+      }
+      session.allParts.push({ type: 'thinking', text: event.text });
+      yield { type: 'thinking', text: event.text };
+      break;
+
+    case 'tool_call_started':
+      loop.inThinkingSegment = false;
+      loop.pendingCalls.set(event.callId, { name: event.name ?? '', argsStr: '' });
+      yield { type: 'tool_call_started', callId: event.callId, name: event.name ?? '' };
+      break;
+
+    case 'tool_call_arguments_delta': {
+      const call = loop.pendingCalls.get(event.callId);
+      if (call) call.argsStr += event.delta;
+      break;
+    }
+
+    case 'tool_call_completed':
+      loop.pendingCalls.set(event.callId, { name: event.name, argsStr: event.arguments });
+      yield {
+        type: 'tool_call_completed',
+        callId: event.callId,
+        name: event.name,
+        arguments: event.arguments,
+      };
+      break;
+
+    case 'assistant_text_delta':
+      loop.inThinkingSegment = false;
+      session.fullText += event.text;
+      session.allParts.push({ type: 'text', text: event.text });
+      yield { type: 'text', text: event.text };
+      break;
+
+    case 'turn_completed':
+      loop.inThinkingSegment = false;
+      loop.rawProviderState = event.providerState ?? null;
+      loop.turnCompleted = true;
+      yield* handleTurnCompleted({
+        db: session.db,
+        providerType: provider.providerType,
+        modelId,
+        chatId,
+        prompt: input.prompt,
+        richHistory,
+        effectiveSystemPrompt,
+        toolDefs,
+        rawProviderState: loop.rawProviderState,
+        degradedThisTurn: loop.degradedThisTurn,
+        executionState,
+      });
+      break;
+
+    case 'continuation_degraded':
+      loop.degradedThisTurn = true;
+      yield* emitContinuationDegradation(session, {
+        from: event.from,
+        to: event.to,
+        reason: event.reason,
+        reasonCode: event.reasonCode,
+      });
+      break;
+
+    case 'turn_error':
+      throw new Error(event.error);
+  }
+}
+
+function createAgentLoopState(rawProviderState: string | null): AgentLoopState {
+  return {
+    rawProviderState,
+    pendingToolResults: undefined,
+    isFirstIteration: true,
+    inThinkingSegment: false,
+    pendingCalls: new Map(),
+    turnCompleted: false,
+    degradedThisTurn: false,
+  };
+}
+
+/**
+ * Execute pending tool calls from one agent iteration, yielding progress events.
+ */
+async function* executePendingToolCalls(
+  session: StreamTextTurnSession,
+  pendingCallEntries: [string, { name: string; argsStr: string }][],
+  nextToolResults: NonNullable<AgentTurnRequest['toolResults']>
+): AsyncGenerator<StreamEvent> {
+  const {
+    db,
+    userId,
+    chatId,
+    agentRuntime,
+    multiAgentSettings,
+    allowedToolNames,
+    interactionMode,
+    resolvedModel,
+    delegationState,
+    signal,
+  } = session;
+  const toolSettings = agentRuntime.toolSettingsByName;
+  const { modelId } = resolvedModel;
+
+  const delegationRuntime = createDelegationRuntime({
+    db,
+    userId,
+    chatId,
+    parentAgentProfile: agentRuntime.profile,
+    parentModelName: modelId,
+    interactionMode,
+    settings: multiAgentSettings,
+    signal,
+    state: delegationState,
+  });
+
+  const hasImageGenerationCall = pendingCallEntries.some(
+    ([, call]) => call.name === GENERATE_IMAGE_TOOL_NAME
+  );
+
+  if (!hasImageGenerationCall) {
+    for await (const item of executeStandardToolCallsWithProgress(pendingCallEntries, {
+      userId,
+      chatId,
+      settingsByToolName: toolSettings,
+      allowedToolNames,
+      delegationRuntime,
+    })) {
+      yield* collectToolExecutionResult(item, {
+        allParts: session.allParts,
+        nextToolResults,
+        includeSubagentTrace: multiAgentSettings.traceVisibility !== 'off',
+      });
+    }
+    return;
+  }
+
+  const nonImageEntries = pendingCallEntries.filter(
+    ([, call]) => call.name !== GENERATE_IMAGE_TOOL_NAME
+  );
+  const imageEntries = pendingCallEntries.filter(
+    ([, call]) => call.name === GENERATE_IMAGE_TOOL_NAME
+  );
+
+  const nonImageResultEntries: ToolExecutionProgressItem[] = [];
+  const nonImageRunner =
+    nonImageEntries.length > 0
+      ? (async () => {
+          for await (const item of executeStandardToolCallsWithProgress(nonImageEntries, {
+            userId,
+            chatId,
+            settingsByToolName: toolSettings,
+            allowedToolNames,
+            delegationRuntime,
+          })) {
+            nonImageResultEntries.push(item);
+          }
+        })()
+      : null;
+
+  for (const [callId, { name, argsStr }] of imageEntries) {
+    yield* executeImageGenerationCall(callId, name, argsStr, {
+      userId,
+      signal,
+      allowedToolNames,
+      toolSettings,
+      allParts: session.allParts,
+      generatedImageArtifacts: session.generatedImageArtifacts,
+      nextToolResults,
+    });
+  }
+
+  if (nonImageRunner) await nonImageRunner;
+  for (const item of nonImageResultEntries) {
+    yield* collectToolExecutionResult(item, {
+      allParts: session.allParts,
+      nextToolResults,
+      includeSubagentTrace: multiAgentSettings.traceVisibility !== 'off',
+    });
+  }
+}
+
+/**
+ * Run the agent turn tool loop: stream provider events and execute tool calls
+ * until the model finishes, aborts, or hits the iteration cap.
+ */
+export async function* runAgentToolLoop(
+  session: StreamTextTurnSession
+): AsyncGenerator<StreamEvent, { exhausted: boolean; pendingCallCount: number }> {
+  const {
+    provider,
+    agentRuntime,
+    resolvedModel,
+    toolDefs,
+    effectiveSystemPrompt,
+    effectivePrompt,
+    runtimeAttachments,
+    chatId,
+    userId,
+    signal,
+    input,
+  } = session;
+  const { modelId, capabilities } = resolvedModel;
+  const runtimeSettings = agentRuntime.runtimeSettings;
+  const maxIter = runtimeSettings.maxToolIterations ?? MAX_TOOL_ITERATIONS_DEFAULT;
+
+  const richHistory = await loadRichHistory(chatId, { excludeId: session.userMsgId }, session.db);
+  const initialProviderState = yield* prepareAgentContinuation(session);
+
+  const generateAgentTurnStream = provider.generateAgentTurnStream;
+  if (!generateAgentTurnStream) {
+    return { exhausted: false, pendingCallCount: 0 };
+  }
+  const boundAgentTurnStream = generateAgentTurnStream.bind(provider);
+
+  const loop = createAgentLoopState(initialProviderState);
+
+  for (let iteration = 0; iteration < maxIter; iteration++) {
+    if (signal?.aborted) break;
+
+    const req: AgentTurnRequest = {
+      userId,
+      modelName: modelId,
+      agentId: agentRuntime.profile.id,
+      agentRuntimeHash: agentRuntime.runtimeHash,
+      systemPrompt: effectiveSystemPrompt,
+      history: richHistory,
+      prompt: loop.isFirstIteration ? effectivePrompt : undefined,
+      toolResults: loop.pendingToolResults,
+      toolDefinitions: toolDefs,
+      providerState: loop.rawProviderState,
+      signal,
+      attachments: loop.isFirstIteration ? runtimeAttachments : undefined,
+      modelCapabilities: capabilities,
+      generationConfig: {
+        thinkingEnabled: session.thinkingEnabled,
+        reasoningEffort: session.reasoningEffort,
+        maxToolIterations: maxIter,
+        maxOutputTokens: runtimeSettings.maxOutputTokens,
+        promptCachePreference: runtimeSettings.promptCachePreference,
+        parallelToolCallsEnabled: runtimeSettings.parallelToolCallsEnabled,
+        enableProviderCompaction: runtimeSettings.providerCompactionEnabled,
+        providerCompactionThreshold: input.contextSettings?.warningThreshold,
+      },
+    };
+
+    loop.pendingCalls = new Map();
+    loop.turnCompleted = false;
+    loop.degradedThisTurn = false;
+
+    for await (const event of boundAgentTurnStream(req)) {
+      if (signal?.aborted) break;
+      yield* emitAgentStreamEvent(session, event, loop, richHistory);
+    }
+
+    if (signal?.aborted || !loop.turnCompleted) break;
+    if (loop.pendingCalls.size === 0) break;
+
+    const nextToolResults: NonNullable<AgentTurnRequest['toolResults']> = [];
+    const pendingCallEntries = Array.from(loop.pendingCalls.entries());
+    yield* executePendingToolCalls(session, pendingCallEntries, nextToolResults);
+
+    loop.pendingToolResults = nextToolResults;
+    loop.isFirstIteration = false;
+  }
+
+  const exhausted = loop.pendingCalls.size > 0 && !signal?.aborted;
+  return { exhausted, pendingCallCount: loop.pendingCalls.size };
+}
+
+/**
+ * Stream text from a legacy provider that exposes generateTextStream.
+ */
+export async function* runLegacyTextStream(
+  session: StreamTextTurnSession
+): AsyncGenerator<StreamEvent> {
+  const {
+    provider,
+    chatId,
+    userId,
+    effectivePrompt,
+    effectiveSystemPrompt,
+    resolvedModel,
+    signal,
+    input,
+  } = session;
+  const { modelId, capabilities } = resolvedModel;
+  const runtimeSettings = session.agentRuntime.runtimeSettings;
+
+  const history = await loadHistory(chatId, { excludeId: session.userMsgId }, session.db);
+  let legacyInThinking = false;
+
+  const generateTextStream = provider.generateTextStream;
+  if (!generateTextStream) return;
+
+  for await (const chunk of generateTextStream({
+    userId,
+    history,
+    prompt: effectivePrompt,
+    systemPrompt: effectiveSystemPrompt,
+    modelName: modelId,
+    signal,
+    generationConfig: {
+      thinkingEnabled: session.thinkingEnabled,
+      reasoningEffort: session.reasoningEffort,
+      maxOutputTokens: runtimeSettings.maxOutputTokens,
+      promptCachePreference: runtimeSettings.promptCachePreference,
+      parallelToolCallsEnabled: runtimeSettings.parallelToolCallsEnabled,
+      enableProviderCompaction: runtimeSettings.providerCompactionEnabled,
+      providerCompactionThreshold: input.contextSettings?.warningThreshold,
+    },
+    attachments: session.runtimeAttachments,
+    modelCapabilities: capabilities,
+  })) {
+    if (signal?.aborted) break;
+
+    if (chunk.type === 'thinking' && chunk.text) {
+      if (!legacyInThinking) {
+        legacyInThinking = true;
+        yield { type: 'thinking_start' };
+      }
+      session.allParts.push({ type: 'thinking', text: chunk.text });
+      yield { type: 'thinking', text: chunk.text };
+    } else if (chunk.type === 'text' && chunk.text && !chunk.done) {
+      legacyInThinking = false;
+      session.fullText += chunk.text;
+      session.allParts.push({ type: 'text', text: chunk.text });
+      yield { type: 'text', text: chunk.text };
+    }
+  }
+}
+
+/**
+ * Generate a single non-streaming text response from the provider.
+ */
+export async function* runSingleShotTextGeneration(
+  session: StreamTextTurnSession
+): AsyncGenerator<StreamEvent> {
+  const {
+    provider,
+    chatId,
+    userId,
+    effectivePrompt,
+    effectiveSystemPrompt,
+    resolvedModel,
+    signal,
+    input,
+  } = session;
+  const { modelId, capabilities } = resolvedModel;
+  const runtimeSettings = session.agentRuntime.runtimeSettings;
+
+  const history = await loadHistory(chatId, { excludeId: session.userMsgId }, session.db);
+
+  const generateText = provider.generateText;
+  if (!generateText) return;
+
+  const result = await generateText({
+    userId,
+    history,
+    prompt: effectivePrompt,
+    systemPrompt: effectiveSystemPrompt,
+    modelName: modelId,
+    signal,
+    generationConfig: {
+      thinkingEnabled: session.thinkingEnabled,
+      reasoningEffort: session.reasoningEffort,
+      maxOutputTokens: runtimeSettings.maxOutputTokens,
+      promptCachePreference: runtimeSettings.promptCachePreference,
+      parallelToolCallsEnabled: runtimeSettings.parallelToolCallsEnabled,
+      enableProviderCompaction: runtimeSettings.providerCompactionEnabled,
+      providerCompactionThreshold: input.contextSettings?.warningThreshold,
+    },
+    attachments: session.runtimeAttachments,
+    modelCapabilities: capabilities,
+  });
+
+  if (!signal?.aborted) {
+    session.fullText = result.text;
+    yield { type: 'text', text: session.fullText };
+  }
+}
+
+/**
+ * Clear stale chat-level provider state when no durable cursor was produced.
+ */
+export async function clearStaleProviderState(session: StreamTextTurnSession): Promise<void> {
+  if (session.signal?.aborted || session.executionState.durableProviderState) return;
+
+  await session.db
+    .updateTable('chats')
+    .set({ lastProviderState: null })
+    .where('id', '=', session.chatId)
+    .execute()
+    .catch((err) => {
+      logStateCleared({
+        chatId: session.chatId,
+        reason: 'no_durable_state',
+        error: String(err),
+      });
+    });
+}
+
+/**
+ * Persist a successful turn and emit the done event.
+ */
+export async function* finalizeSuccessfulTurn(
+  session: StreamTextTurnSession
+): AsyncGenerator<StreamEvent> {
+  const {
+    db,
+    aiMsgId,
+    userId,
+    chatId,
+    startTime,
+    interactionMode,
+    agentRuntime,
+    resolvedModel,
+    generatedImageArtifacts,
+    executionState,
+  } = session;
+  const { modelId } = resolvedModel;
+
+  const generationTime = `${((Date.now() - startTime) / 1000).toFixed(1)}s`;
+  const aiTimestamp = Date.now();
+
+  for (const part of session.allParts) {
+    if (part.type === 'continuation_transition') {
+      part.recovered = true;
+    }
+  }
+
+  const finalParts = mergeMessageParts(session.allParts);
+
+  await persistAiResponse(
+    {
+      id: aiMsgId,
+      userId,
+      chatId,
+      text: session.fullText,
+      parts: finalParts.length > 0 ? finalParts : null,
+      providerState: executionState.durableProviderState,
+      timestamp: aiTimestamp,
+      generationTime,
+      modelName: modelId,
+      generatedImages: generatedImageArtifacts,
+    },
+    db
+  );
+
+  await updateChatAfterTurn(
+    chatId,
+    aiTimestamp,
+    interactionMode,
+    interactionMode === 'agent' ? agentRuntime.profile.id : null,
+    db
+  );
+
+  yield { type: 'done', messageId: aiMsgId, generationTime };
+}
+
+/**
+ * Handle tool-loop exhaustion: clear state, persist error, and emit events.
+ */
+export async function* finalizeToolLoopExhausted(
+  session: StreamTextTurnSession,
+  pendingCallCount: number
+): AsyncGenerator<StreamEvent> {
+  const {
+    db,
+    aiMsgId,
+    userId,
+    chatId,
+    startTime,
+    interactionMode,
+    agentRuntime,
+    resolvedModel,
+    generatedImageArtifacts,
+    executionState,
+  } = session;
+  const { modelId } = resolvedModel;
+  const maxIter = agentRuntime.runtimeSettings.maxToolIterations ?? MAX_TOOL_ITERATIONS_DEFAULT;
+
+  const detail = `Reached ${maxIter} iterations with ${pendingCallCount} pending tool calls`;
+  session.allParts.push({ type: 'system_event', event: 'tool_loop_exhausted', detail });
+  yield { type: 'system_event', event: 'tool_loop_exhausted', detail };
+  yield { type: 'error', error: TOOL_LOOP_EXHAUSTED_MESSAGE };
+
+  if (!executionState.durableProviderState) {
+    await db
+      .updateTable('chats')
+      .set({ lastProviderState: null })
+      .where('id', '=', chatId)
+      .execute()
+      .catch((err) => {
+        logStateCleared({
+          chatId,
+          reason: 'loop_exhausted',
+          error: String(err),
+        });
+      });
+  }
+
+  const generationTime = `${((Date.now() - startTime) / 1000).toFixed(1)}s`;
+  const errorParts: MessagePart[] = [
+    ...session.allParts,
+    { type: 'error', text: TOOL_LOOP_EXHAUSTED_MESSAGE },
+  ];
+
+  try {
+    await persistErrorResponse(
+      {
+        id: aiMsgId,
+        userId,
+        chatId,
+        text: session.fullText || TOOL_LOOP_EXHAUSTED_MESSAGE,
+        parts: errorParts,
+        timestamp: Date.now(),
+        generationTime,
+        modelName: modelId,
+        generatedImages: generatedImageArtifacts,
+        interactionMode,
+      },
+      db
+    );
+    await updateChatAfterTurn(
+      chatId,
+      Date.now(),
+      interactionMode,
+      interactionMode === 'agent' ? agentRuntime.profile.id : null,
+      db
+    );
+  } catch {
+    // best-effort
+  }
+}
+
+/**
+ * Handle an unexpected turn failure: clear stale state, persist error, emit event.
+ */
+export async function* finalizeTurnError(
+  session: StreamTextTurnSession,
+  error: unknown
+): AsyncGenerator<StreamEvent> {
+  const {
+    signal,
+    chatId,
+    db,
+    executionState,
+    aiMsgId,
+    userId,
+    startTime,
+    resolvedModel,
+    generatedImageArtifacts,
+  } = session;
+
+  if (signal?.aborted) return;
+
+  const message = error instanceof Error ? error.message : 'Stream generation failed';
+  streamTextTurnLogger.error('turn_failed', { chatId, message });
+
+  if (!executionState.durableProviderState) {
+    await db
+      .updateTable('chats')
+      .set({ lastProviderState: null })
+      .where('id', '=', chatId)
+      .execute()
+      .catch((err) => {
+        logStateCleared({
+          chatId,
+          reason: 'turn_error',
+          error: String(err),
+        });
+      });
+  }
+
+  try {
+    const generationTime = `${((Date.now() - startTime) / 1000).toFixed(1)}s`;
+    const errorParts: MessagePart[] = [...session.allParts, { type: 'error', text: message }];
+    await persistErrorResponse(
+      {
+        id: aiMsgId,
+        userId,
+        chatId,
+        text: session.fullText || message,
+        parts: errorParts,
+        timestamp: Date.now(),
+        generationTime,
+        modelName: resolvedModel.modelId,
+        generatedImages: generatedImageArtifacts,
+      },
+      db
+    );
+  } catch {
+    // best-effort
+  }
+
+  yield { type: 'error', error: message };
+}
