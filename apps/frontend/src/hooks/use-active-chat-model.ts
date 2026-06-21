@@ -16,7 +16,7 @@ export function useActiveChatModel({
   settings,
   currentTextModel,
 }: UseActiveChatModelParams) {
-  const activeModels = useMemo(() => catalog.textModels, [catalog.textModels]);
+  const activeModels = catalog.textModels;
   const activeModel = useMemo(
     () => resolveActiveModeModel(currentTextModel ?? undefined, undefined, activeModels),
     [activeModels, currentTextModel]
