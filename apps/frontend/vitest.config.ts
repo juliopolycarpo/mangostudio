@@ -29,7 +29,11 @@ export default defineConfig({
     ],
     reporters: process.env.GITHUB_ACTIONS === 'true' ? ['default', 'github-actions'] : ['default'],
     coverage: {
-      provider: 'v8',
+      // istanbul instruments source through the Vite transform pipeline, so it
+      // works under Bun (which runs vitest via the `node` shim). The v8 provider
+      // needs V8 inspector coverage APIs that Bun does not implement, which made
+      // `bun run test --coverage` fail outside CI runners that ship real Node.
+      provider: 'istanbul',
       reportsDirectory: path.resolve(__dirname, '../../.mango/artifacts/coverage/frontend/vitest'),
       reporter: ['text', 'json-summary', 'lcov'],
       exclude: [
