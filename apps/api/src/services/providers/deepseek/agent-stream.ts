@@ -1,9 +1,6 @@
 import type OpenAI from 'openai';
 import { parseJsonWith } from '../../../lib/safe-parse';
-import {
-  type ChatCompletionsDelta,
-  createChatCompletionsAccumulator,
-} from '../core/chat-completions-accumulator';
+import { streamChatCompletionsAgentTurnLoop } from '../core/agent-turn-stream-loop';
 import { getModelContextLimit } from '../core/context-policy';
 import { createContinuationEnvelope } from '../core/continuation-envelope';
 import { extractReasoningChunks } from '../openai/normalizers';
@@ -55,109 +52,69 @@ export async function* streamDeepSeekAgentTurn(
     signal: req.signal,
   });
 
-  try {
-    let providerReportedInputTokens: number | undefined;
-    let promptCacheHitTokens: number | undefined;
-    let promptCacheMissTokens: number | undefined;
+  yield* streamChatCompletionsAgentTurnLoop({
+    signal: req.signal,
+    openStream: () =>
+      client.chat.completions.create(
+        body as unknown as OpenAI.ChatCompletionCreateParamsStreaming,
+        { signal: req.signal }
+      ),
+    extractReasoningChunks,
+    complete: ({ accumulator, context }) => {
+      const assistantMsg = accumulator.buildAssistantMessage();
+      const newLoopMessages = buildDeepSeekLoopMessages(
+        loopState?.loopMessages,
+        req,
+        providerPrompt,
+        assistantMsg
+      );
+      const envelope = createContinuationEnvelope('deepseek', 'stateless-loop', req, undefined, {
+        ...(context.providerReportedInputTokens !== undefined
+          ? { providerReportedInputTokens: context.providerReportedInputTokens }
+          : {}),
+        contextLimit: getModelContextLimit(req.modelName),
+      });
+      const providerState: Record<string, unknown> = {
+        ...envelope,
+        loopMessages: newLoopMessages,
+        ...(context.promptCacheHitTokens !== undefined
+          ? { promptCacheHitTokens: context.promptCacheHitTokens }
+          : {}),
+        ...(context.promptCacheMissTokens !== undefined
+          ? { promptCacheMissTokens: context.promptCacheMissTokens }
+          : {}),
+      };
 
-    const stream = await client.chat.completions.create(
-      body as unknown as OpenAI.ChatCompletionCreateParamsStreaming,
-      { signal: req.signal }
-    );
+      return [{ type: 'turn_completed' as const, providerState: JSON.stringify(providerState) }];
+    },
+    fallbackErrorMessage: 'DeepSeek request failed',
+  });
+}
 
-    const accumulator = createChatCompletionsAccumulator({ extractReasoningChunks });
+function buildDeepSeekLoopMessages(
+  loopMessages: DeepSeekTurnLoopState['loopMessages'] | undefined,
+  req: AgentTurnRequest,
+  providerPrompt: string | undefined,
+  assistantMsg: Record<string, unknown>
+): unknown[] {
+  return [
+    ...(loopMessages ?? []),
+    ...buildCurrentDeepSeekLoopMessages(req, providerPrompt),
+    assistantMsg,
+  ];
+}
 
-    for await (const chunk of stream) {
-      if (req.signal?.aborted) return;
-
-      const rawChunk = chunk as unknown as Record<string, unknown>;
-      const usage = rawChunk.usage as
-        | {
-            prompt_tokens?: number;
-            prompt_cache_hit_tokens?: number;
-            prompt_cache_miss_tokens?: number;
-          }
-        | undefined;
-      if (usage) {
-        if (typeof usage.prompt_tokens === 'number') {
-          providerReportedInputTokens = usage.prompt_tokens;
-        }
-        if (typeof usage.prompt_cache_hit_tokens === 'number') {
-          promptCacheHitTokens = usage.prompt_cache_hit_tokens;
-        }
-        if (typeof usage.prompt_cache_miss_tokens === 'number') {
-          promptCacheMissTokens = usage.prompt_cache_miss_tokens;
-        }
-      }
-
-      const choice = chunk.choices[0];
-      // choices array is empty on usage-only chunks
-      if (!choice) continue;
-
-      const delta = choice.delta as ChatCompletionsDelta;
-      for (const event of accumulator.addDelta(delta)) {
-        yield event;
-      }
-
-      if (choice.finish_reason) {
-        for (const event of accumulator.finishToolCalls()) {
-          yield event;
-        }
-      }
-    }
-
-    if (req.signal?.aborted) return;
-
-    const assistantMsg = accumulator.buildAssistantMessage();
-
-    const newLoopMessages: unknown[] = [
-      ...(loopState?.loopMessages ?? []),
-      ...(req.toolResults && req.toolResults.length > 0
-        ? req.toolResults.map((tr) => ({
-            role: 'tool',
-            tool_call_id: tr.callId,
-            content: tr.result,
-          }))
-        : providerPrompt !== undefined
-          ? [{ role: 'user', content: providerPrompt }]
-          : []),
-      assistantMsg,
-    ];
-
-    const context: { providerReportedInputTokens?: number; contextLimit?: number } = {};
-    if (providerReportedInputTokens !== undefined) {
-      context.providerReportedInputTokens = providerReportedInputTokens;
-    }
-    context.contextLimit = getModelContextLimit(req.modelName);
-
-    const envelope = createContinuationEnvelope(
-      'deepseek',
-      'stateless-loop',
-      req,
-      undefined,
-      context
-    );
-
-    const providerState: Record<string, unknown> = {
-      ...envelope,
-      loopMessages: newLoopMessages,
-    };
-
-    if (promptCacheHitTokens !== undefined) {
-      providerState.promptCacheHitTokens = promptCacheHitTokens;
-    }
-    if (promptCacheMissTokens !== undefined) {
-      providerState.promptCacheMissTokens = promptCacheMissTokens;
-    }
-
-    yield {
-      type: 'turn_completed',
-      providerState: JSON.stringify(providerState),
-    };
-  } catch (err: unknown) {
-    yield {
-      type: 'turn_error',
-      error: err instanceof Error ? err.message : 'DeepSeek request failed',
-    };
+function buildCurrentDeepSeekLoopMessages(
+  req: AgentTurnRequest,
+  providerPrompt: string | undefined
+): unknown[] {
+  if (req.toolResults && req.toolResults.length > 0) {
+    return req.toolResults.map((tr) => ({
+      role: 'tool',
+      tool_call_id: tr.callId,
+      content: tr.result,
+    }));
   }
+
+  return providerPrompt !== undefined ? [{ role: 'user', content: providerPrompt }] : [];
 }

@@ -10,6 +10,10 @@ import type OpenAI from 'openai';
 import { type APIPromise, APIError as OpenAIAPIError } from 'openai';
 import type { Stream } from 'openai/streaming';
 import { parseJsonWith } from '../../../lib/safe-parse';
+import {
+  type AgentTurnStreamOpenResult,
+  streamAgentTurnLoop,
+} from '../core/agent-turn-stream-loop';
 import { isReasoningModel } from '../core/capability-detector';
 import { getModelContextLimit } from '../core/context-policy';
 import {
@@ -258,17 +262,18 @@ export async function* streamAgentTurnWithResponsesAPI(
     return client.responses.create(params, { signal: req.signal });
   };
 
-  let stream: AsyncIterable<ResponseStreamEvent>;
-  try {
-    stream = await makeRequest(previousResponseId);
-  } catch (err: unknown) {
-    const isCursorError =
-      err instanceof OpenAIAPIError &&
-      (err.status === 404 ||
-        err.status === 409 ||
-        (err.status === 400 && /previous_response_id/i.test(err.message)));
-    const canFallback = isCursorError && previousResponseId;
-    if (canFallback) {
+  const openStream = async (): Promise<AgentTurnStreamOpenResult<ResponseStreamEvent>> => {
+    try {
+      return { stream: await makeRequest(previousResponseId) };
+    } catch (err: unknown) {
+      const isCursorError =
+        err instanceof OpenAIAPIError &&
+        (err.status === 404 ||
+          err.status === 409 ||
+          (err.status === 400 && /previous_response_id/i.test(err.message)));
+      const canFallback = isCursorError && previousResponseId;
+      if (!canFallback) throw err;
+
       const status = err instanceof OpenAIAPIError ? (err.status as number) : 'unknown';
 
       if (req.toolResults) {
@@ -283,18 +288,22 @@ export async function* streamAgentTurnWithResponsesAPI(
           status,
           toolResults: true,
         });
-        yield {
-          type: 'continuation_degraded',
-          from: 'responses',
-          to: 'tool_loop_aborted',
-          reason: `cursor_error during tool-result continuation (status=${status})`,
-          reasonCode: 'tool_result_cursor_loss' as const,
+        return {
+          terminalEvents: [
+            {
+              type: 'continuation_degraded',
+              from: 'responses',
+              to: 'tool_loop_aborted',
+              reason: `cursor_error during tool-result continuation (status=${status})`,
+              reasonCode: 'tool_result_cursor_loss' as const,
+            },
+            {
+              type: 'turn_error',
+              error:
+                'Server-side continuation cursor expired during tool execution. The response may be incomplete.',
+            },
+          ],
         };
-        yield {
-          type: 'turn_error',
-          error: `Server-side continuation cursor expired during tool execution. The response may be incomplete.`,
-        };
-        return;
       }
 
       // 404 = expired; 400/409 = invalid request shape referencing the prior response.
@@ -306,41 +315,47 @@ export async function* streamAgentTurnWithResponsesAPI(
         reasonCode,
         status,
       });
-      yield {
-        type: 'continuation_degraded',
-        from: 'responses',
-        to: 'replay',
-        reason: `cursor_error (status=${status})`,
-        reasonCode,
-      };
       input = [...buildOpenAIResponsesReplay(req.history), ...currentResponsesUserInput(req)];
-      stream = await makeRequest(null);
-    } else {
-      throw err;
+      return {
+        preludeEvents: [
+          {
+            type: 'continuation_degraded',
+            from: 'responses',
+            to: 'replay',
+            reason: `cursor_error (status=${status})`,
+            reasonCode,
+          },
+        ],
+        stream: await makeRequest(null),
+      };
     }
-  }
+  };
 
-  const accumulator = createResponsesAgentAccumulator();
-
-  for await (const ev of stream) {
-    if (req.signal?.aborted) break;
-    for (const event of accumulator.mapEvent(ev)) {
-      yield event;
-    }
-  }
-
-  const envelope = createContinuationEnvelope(
-    'openai',
-    'responses',
-    req,
-    accumulator.responseId ?? undefined,
-    {
-      providerReportedInputTokens: accumulator.usageInputTokens,
-      contextLimit: getModelContextLimit(req.modelName),
-    }
-  );
-
-  yield { type: 'turn_completed', providerState: serializeContinuationEnvelope(envelope) };
+  yield* streamAgentTurnLoop({
+    signal: req.signal,
+    completeOnAbort: true,
+    openStream,
+    createAccumulator: createResponsesAgentAccumulator,
+    createContext: () => undefined,
+    mapChunk: ({ chunk, accumulator }) => accumulator.mapEvent(chunk),
+    complete: ({ accumulator }) => [
+      {
+        type: 'turn_completed' as const,
+        providerState: serializeContinuationEnvelope(
+          createContinuationEnvelope(
+            'openai',
+            'responses',
+            req,
+            accumulator.responseId ?? undefined,
+            {
+              providerReportedInputTokens: accumulator.usageInputTokens,
+              contextLimit: getModelContextLimit(req.modelName),
+            }
+          )
+        ),
+      },
+    ],
+  });
 }
 
 function currentResponsesUserInput(

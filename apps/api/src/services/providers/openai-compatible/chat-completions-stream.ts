@@ -7,11 +7,8 @@
 
 import type OpenAI from 'openai';
 import { parseJsonWith } from '../../../lib/safe-parse';
+import { streamChatCompletionsAgentTurnLoop } from '../core/agent-turn-stream-loop';
 import { appendAttachmentFallbackNotes } from '../core/attachment-content';
-import {
-  type ChatCompletionsDelta,
-  createChatCompletionsAccumulator,
-} from '../core/chat-completions-accumulator';
 import { getModelContextLimit } from '../core/context-policy';
 import { createContinuationEnvelope } from '../core/continuation-envelope';
 import { buildChatCompletionsReplay } from '../core/replay-builder';
@@ -89,101 +86,86 @@ export async function* streamOAICompatAgentTurn(
 
   const responseFormat = buildResponseFormat(req.generationConfig?.structuredOutput);
 
-  try {
-    const stream = await client.chat.completions.create(
-      {
-        model: req.modelName,
-        messages,
-        ...(tools ? { tools, tool_choice: 'auto' } : {}),
-        ...(responseFormat ? { response_format: responseFormat } : {}),
-        stream: true,
-        stream_options: { include_usage: true },
-      },
-      { signal: req.signal }
-    );
+  yield* streamChatCompletionsAgentTurnLoop({
+    signal: req.signal,
+    openStream: () =>
+      client.chat.completions.create(
+        {
+          model: req.modelName,
+          messages,
+          ...(tools ? { tools, tool_choice: 'auto' } : {}),
+          ...(responseFormat ? { response_format: responseFormat } : {}),
+          stream: true,
+          stream_options: { include_usage: true },
+        },
+        { signal: req.signal }
+      ),
+    extractReasoningChunks,
+    complete: ({ accumulator, context }) => {
+      // See: https://api-docs.deepseek.com/guides/thinking_mode
+      const assistantMsg =
+        accumulator.buildAssistantMessage() as unknown as OpenAI.ChatCompletionMessageParam;
+      const newLoopMessages = buildOAICompatLoopMessages(
+        turnLocalLoopState?.loopMessages,
+        req,
+        providerPrompt,
+        assistantMsg
+      );
+      const envelope = createContinuationEnvelope(
+        'openai-compatible',
+        'stateless-loop',
+        req,
+        undefined,
+        context.providerReportedInputTokens !== undefined
+          ? {
+              providerReportedInputTokens: context.providerReportedInputTokens,
+              contextLimit: getModelContextLimit(req.modelName),
+            }
+          : undefined
+      );
 
-    const accumulator = createChatCompletionsAccumulator({ extractReasoningChunks });
-    let providerReportedInputTokens: number | undefined;
-
-    for await (const chunk of stream) {
-      if (req.signal?.aborted) return;
-
-      // Usage chunks arrive in the terminal frame (when stream_options.include_usage is set)
-      // and typically have an empty choices array. Capture prompt_tokens for context accounting
-      // before the continue-on-empty-choices guard below.
-      const usage = (chunk as { usage?: { prompt_tokens?: number } }).usage;
-      if (usage && typeof usage.prompt_tokens === 'number') {
-        providerReportedInputTokens = usage.prompt_tokens;
-      }
-
-      const choice = chunk.choices[0];
-      if (!choice) continue;
-
-      const delta = choice.delta as ChatCompletionsDelta;
-      for (const event of accumulator.addDelta(delta)) {
-        yield event;
-      }
-
-      if (choice.finish_reason) {
-        for (const event of accumulator.finishToolCalls()) {
-          yield event;
-        }
-      }
-    }
-
-    if (req.signal?.aborted) return;
-
-    // Build the assistant message for loop-state accumulation.
-    // reasoning_content is only included on intra-turn loop messages (when tool calls are
-    // still pending) to satisfy DeepSeek's requirement that reasoning context is available
-    // during continuation. It is intentionally OMITTED from the final message (no pending
-    // tool calls) so reasoning is never persisted cross-turn.
-    // See: https://api-docs.deepseek.com/guides/thinking_mode
-    const assistantMsg =
-      accumulator.buildAssistantMessage() as unknown as OpenAI.ChatCompletionMessageParam;
-
-    const newLoopMessages: OpenAI.ChatCompletionMessageParam[] = [
-      ...(turnLocalLoopState?.loopMessages ?? []),
-      ...(req.toolResults && req.toolResults.length > 0
-        ? req.toolResults.map(
-            (tr): OpenAI.ChatCompletionMessageParam => ({
-              role: 'tool',
-              tool_call_id: tr.callId,
-              content: tr.result,
-            })
-          )
-        : providerPrompt !== undefined
-          ? [{ role: 'user' as const, content: providerPrompt }]
-          : []),
-      assistantMsg,
-    ];
-
-    const envelope = createContinuationEnvelope(
-      'openai-compatible',
-      'stateless-loop',
-      req,
-      undefined,
-      providerReportedInputTokens !== undefined
-        ? {
-            providerReportedInputTokens,
-            contextLimit: getModelContextLimit(req.modelName),
-          }
-        : undefined
-    );
-
-    yield {
-      type: 'turn_completed',
-      providerState: JSON.stringify({ ...envelope, loopMessages: newLoopMessages }),
-    };
-  } catch (err: unknown) {
-    yield {
-      type: 'turn_error',
-      error: err instanceof Error ? err.message : 'OpenAI-compatible request failed',
-    };
-  }
+      return [
+        {
+          type: 'turn_completed' as const,
+          providerState: JSON.stringify({ ...envelope, loopMessages: newLoopMessages }),
+        },
+      ];
+    },
+    fallbackErrorMessage: 'OpenAI-compatible request failed',
+  });
 }
 
 function buildOAICompatProviderPrompt(req: AgentTurnRequest): string | undefined {
   if (req.prompt === undefined && (req.attachments?.length ?? 0) === 0) return undefined;
   return appendAttachmentFallbackNotes(req.prompt ?? '', req.attachments, req.modelCapabilities);
+}
+
+function buildOAICompatLoopMessages(
+  loopMessages: OpenAI.ChatCompletionMessageParam[] | undefined,
+  req: AgentTurnRequest,
+  providerPrompt: string | undefined,
+  assistantMsg: OpenAI.ChatCompletionMessageParam
+): OpenAI.ChatCompletionMessageParam[] {
+  return [
+    ...(loopMessages ?? []),
+    ...buildCurrentOAICompatLoopMessages(req, providerPrompt),
+    assistantMsg,
+  ];
+}
+
+function buildCurrentOAICompatLoopMessages(
+  req: AgentTurnRequest,
+  providerPrompt: string | undefined
+): OpenAI.ChatCompletionMessageParam[] {
+  if (req.toolResults && req.toolResults.length > 0) {
+    return req.toolResults.map(
+      (tr): OpenAI.ChatCompletionMessageParam => ({
+        role: 'tool',
+        tool_call_id: tr.callId,
+        content: tr.result,
+      })
+    );
+  }
+
+  return providerPrompt !== undefined ? [{ role: 'user' as const, content: providerPrompt }] : [];
 }
