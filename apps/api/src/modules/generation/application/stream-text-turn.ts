@@ -1,4 +1,3 @@
-import { MAX_TOOL_ITERATIONS_DEFAULT } from '@mangostudio/shared/app-settings';
 import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';
 import {
@@ -7,6 +6,7 @@ import {
   finalizeToolLoopExhausted,
   finalizeTurnError,
   prepareStreamTextTurn,
+  resolveTurnAttachments,
   runAgentToolLoop,
   runLegacyTextStream,
   runSingleShotTextGeneration,
@@ -23,13 +23,13 @@ export async function* streamTextTurn(
   yield { type: 'user_message_id', messageId: session.userMsgId };
 
   try {
+    await resolveTurnAttachments(session);
+
     if (session.provider.generateAgentTurnStream) {
-      const maxIter =
-        session.agentRuntime.runtimeSettings.maxToolIterations ?? MAX_TOOL_ITERATIONS_DEFAULT;
       const loopResult = yield* runAgentToolLoop(session);
 
       if (loopResult.exhausted) {
-        yield* finalizeToolLoopExhausted(session, maxIter, loopResult.pendingCallCount);
+        yield* finalizeToolLoopExhausted(session, loopResult.pendingCallCount);
         return;
       }
 

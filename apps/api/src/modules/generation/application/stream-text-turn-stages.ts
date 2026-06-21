@@ -81,6 +81,8 @@ export interface StreamTextTurnSession {
   effectivePrompt: string;
   thinkingEnabled: boolean;
   reasoningEffort: ReasoningEffort;
+  attachmentIds: string[];
+  warmupPromise: Promise<void>;
   runtimeAttachments: Awaited<ReturnType<typeof resolveProviderRuntimeAttachments>>;
   allParts: MessagePart[];
   generatedImageArtifacts: PersistedGeneratedImageInput[];
@@ -109,8 +111,10 @@ interface AgentLoopState {
 }
 
 /**
- * Resolve turn context, persist the user message, warm the provider, and
- * assemble the mutable session used by later stages.
+ * Resolve turn context, persist the user message, start provider warmup, and
+ * assemble the mutable session used by later stages. Attachment resolution and
+ * the warmup await are deferred to {@link resolveTurnAttachments} so their
+ * failures are handled inside the orchestrator's try/catch.
  */
 export async function prepareStreamTextTurn(
   input: StreamTextTurnInput,
@@ -154,17 +158,6 @@ export async function prepareStreamTextTurn(
     db
   );
 
-  const runtimeAttachments = await resolveProviderRuntimeAttachments(
-    {
-      attachmentIds,
-      userId,
-      chatId,
-      messageId: userMsgId,
-    },
-    db
-  );
-  await warmupPromise;
-
   return {
     input,
     db,
@@ -185,7 +178,9 @@ export async function prepareStreamTextTurn(
     effectivePrompt: input.prompt,
     thinkingEnabled: runtimeSettings.thinkingEnabled ?? true,
     reasoningEffort: runtimeSettings.reasoningEffort ?? 'medium',
-    runtimeAttachments,
+    attachmentIds,
+    warmupPromise,
+    runtimeAttachments: [],
     allParts: [],
     generatedImageArtifacts: [],
     delegationState: { subagentCallCount: 0 },
@@ -195,6 +190,24 @@ export async function prepareStreamTextTurn(
       turnLocalState: null,
     },
   };
+}
+
+/**
+ * Resolve provider runtime attachments and await provider warmup. Runs inside
+ * the orchestrator try/catch so a missing/invalid attachment is persisted as an
+ * error response and clears stale provider state, rather than escaping uncaught.
+ */
+export async function resolveTurnAttachments(session: StreamTextTurnSession): Promise<void> {
+  session.runtimeAttachments = await resolveProviderRuntimeAttachments(
+    {
+      attachmentIds: session.attachmentIds,
+      userId: session.userId,
+      chatId: session.chatId,
+      messageId: session.userMsgId,
+    },
+    session.db
+  );
+  await session.warmupPromise;
 }
 
 /**
@@ -782,7 +795,6 @@ export async function* finalizeSuccessfulTurn(
  */
 export async function* finalizeToolLoopExhausted(
   session: StreamTextTurnSession,
-  maxIter: number,
   pendingCallCount: number
 ): AsyncGenerator<StreamEvent> {
   const {
@@ -798,6 +810,7 @@ export async function* finalizeToolLoopExhausted(
     executionState,
   } = session;
   const { modelId } = resolvedModel;
+  const maxIter = agentRuntime.runtimeSettings.maxToolIterations ?? MAX_TOOL_ITERATIONS_DEFAULT;
 
   const detail = `Reached ${maxIter} iterations with ${pendingCallCount} pending tool calls`;
   session.allParts.push({ type: 'system_event', event: 'tool_loop_exhausted', detail });
