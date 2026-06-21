@@ -33,7 +33,7 @@ import {
   type SubagentRunResult,
 } from './subagent-turn-types';
 
-export const subagentLogger = createDiagnosticLogger('subagent');
+const subagentLogger = createDiagnosticLogger('subagent');
 
 type LogValue = string | number | boolean;
 type LogMetadata = Record<string, LogValue>;
