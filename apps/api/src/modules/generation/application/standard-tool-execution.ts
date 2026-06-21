@@ -129,7 +129,7 @@ export async function* executeStandardToolCallsWithProgress(
   yield* queue;
 }
 
-export async function executeStandardToolCall(
+async function executeStandardToolCall(
   callId: string,
   name: string,
   argsStr: string,
@@ -238,7 +238,7 @@ export function createDelegationRuntime(
   return input;
 }
 
-export async function executeDelegationToolCall(
+async function executeDelegationToolCall(
   callId: string,
   request: DelegateToSubagentRequest,
   runtime: DelegationRuntime
@@ -294,10 +294,7 @@ export async function executeDelegationToolCall(
   return result;
 }
 
-export function toSubagentStreamEvent(
-  callId: string,
-  event: SubagentProgressEvent
-): ToolStreamEvent {
+function toSubagentStreamEvent(callId: string, event: SubagentProgressEvent): ToolStreamEvent {
   switch (event.type) {
     case 'started':
       return {
@@ -337,7 +334,7 @@ export function toSubagentStreamEvent(
   }
 }
 
-export function parseDelegationRequest(args: Record<string, unknown>): DelegateToSubagentRequest {
+function parseDelegationRequest(args: Record<string, unknown>): DelegateToSubagentRequest {
   const rawAgentId = getRequiredString(args.agentId, 'agentId');
   if (!isAgentId(rawAgentId)) {
     throw new SubagentDelegationError(
