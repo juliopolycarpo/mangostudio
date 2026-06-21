@@ -46,7 +46,7 @@
     "@typescript/native-preview": "^7.0.0-dev.20260516.1",
     "dprint": "^0.54.0",
     "git-cliff": "^2.13.1",
-    "jscpd": "^4",
+    "jscpd": "^5",
     "knip": "^6.17.1",
     "lefthook": "^2.1.9",
     "madge": "^8.0.0",
