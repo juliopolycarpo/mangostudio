@@ -9,18 +9,19 @@ import { createContinuationEnvelope } from '../core/continuation-envelope';
 import { extractReasoningChunks } from '../openai/normalizers';
 import type { AgentEvent, AgentTurnRequest } from '../types';
 import {
-  buildDeepSeekMessages,
+  buildDeepSeekAgentMessages,
   buildDeepSeekProviderPrompt,
   buildDeepSeekRequestBody,
-  type DeepSeekTurNLoopState,
+  buildDeepSeekTools,
+  type DeepSeekTurnLoopState,
 } from './message-mapper';
 
 export function parseDeepSeekLoopState(
   providerState: string | null | undefined
-): DeepSeekTurNLoopState | null {
+): DeepSeekTurnLoopState | null {
   return parseJsonWith(providerState, (parsed) => {
     if (parsed.provider !== 'deepseek' || !Array.isArray(parsed.loopMessages)) return null;
-    return parsed as unknown as DeepSeekTurNLoopState;
+    return parsed as unknown as DeepSeekTurnLoopState;
   });
 }
 
@@ -33,7 +34,7 @@ export async function* streamDeepSeekAgentTurn(
   const reasoningEffort = req.generationConfig?.reasoningEffort;
   const providerPrompt = buildDeepSeekProviderPrompt(req);
 
-  const messages = buildDeepSeekMessages({
+  const messages = buildDeepSeekAgentMessages({
     systemPrompt: req.systemPrompt,
     history: req.history,
     loopMessages: loopState?.loopMessages,
@@ -43,13 +44,7 @@ export async function* streamDeepSeekAgentTurn(
     modelCapabilities: req.modelCapabilities,
   });
 
-  const tools =
-    req.toolDefinitions && req.toolDefinitions.length > 0
-      ? req.toolDefinitions.map((def) => ({
-          type: 'function' as const,
-          function: { name: def.name, description: def.description, parameters: def.parameters },
-        }))
-      : undefined;
+  const tools = buildDeepSeekTools(req.toolDefinitions);
 
   const body = buildDeepSeekRequestBody({
     modelName: req.modelName,

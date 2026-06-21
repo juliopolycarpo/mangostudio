@@ -15,7 +15,7 @@ import {
   validateDeepSeekApiKey,
 } from '../../../../src/services/providers/deepseek/client';
 import {
-  buildDeepSeekMessages,
+  buildDeepSeekAgentMessages,
   buildDeepSeekRequestBody,
 } from '../../../../src/services/providers/deepseek/message-mapper';
 import {
@@ -24,6 +24,7 @@ import {
   toDeepSeekModelInfo,
 } from '../../../../src/services/providers/deepseek/model-catalog';
 import {
+  buildDeepSeekChatMessages,
   buildDeepSeekSystemPrompt,
   normalizeDeepSeekReasoningEffort,
 } from '../../../../src/services/providers/deepseek/normalizers';
@@ -245,17 +246,41 @@ describe('buildDeepSeekSystemPrompt', () => {
 });
 
 // ---------------------------------------------------------------------------
-// buildDeepSeekMessages
+// buildDeepSeekChatMessages
 // ---------------------------------------------------------------------------
 
-describe('buildDeepSeekMessages', () => {
+describe('buildDeepSeekChatMessages', () => {
+  it('maps chat history and prompt for SDK text generation', () => {
+    const messages = buildDeepSeekChatMessages({
+      userId: 'test-user',
+      history: [
+        { role: 'user', text: 'Hello' },
+        { role: 'ai', text: 'Hi there' },
+      ],
+      prompt: 'Continue',
+      modelName: 'deepseek-v4-flash',
+    });
+
+    expect(messages).toEqual([
+      { role: 'user', content: 'Hello' },
+      { role: 'assistant', content: 'Hi there' },
+      { role: 'user', content: 'Continue' },
+    ]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildDeepSeekAgentMessages
+// ---------------------------------------------------------------------------
+
+describe('buildDeepSeekAgentMessages', () => {
   const history = buildHistory([
     { id: '1', role: 'user', text: 'What is the weather?' },
     { id: '2', role: 'ai', text: 'The weather is sunny.' },
   ]);
 
   it('includes system prompt when provided', () => {
-    const messages = buildDeepSeekMessages({
+    const messages = buildDeepSeekAgentMessages({
       systemPrompt: 'You are a helpful assistant.',
       history: [],
     });
@@ -264,13 +289,13 @@ describe('buildDeepSeekMessages', () => {
   });
 
   it('omits system prompt when not provided', () => {
-    const messages = buildDeepSeekMessages({ history: [] });
+    const messages = buildDeepSeekAgentMessages({ history: [] });
 
     expect(messages.some((m) => m.role === 'system')).toBe(false);
   });
 
   it('builds replay from history', () => {
-    const messages = buildDeepSeekMessages({ history });
+    const messages = buildDeepSeekAgentMessages({ history });
 
     expect(messages).toContainEqual({ role: 'user', content: 'What is the weather?' });
     expect(messages).toContainEqual({ role: 'assistant', content: 'The weather is sunny.' });
@@ -278,7 +303,7 @@ describe('buildDeepSeekMessages', () => {
 
   it('includes loop messages after history', () => {
     const loopMessages = [{ role: 'assistant', content: 'Intermediate thought.' }];
-    const messages = buildDeepSeekMessages({ history, loopMessages });
+    const messages = buildDeepSeekAgentMessages({ history, loopMessages });
 
     const idx1 = messages.findIndex((m) => m.content === 'What is the weather?');
     const idx2 = messages.findIndex((m) => m.content === 'Intermediate thought.');
@@ -286,7 +311,7 @@ describe('buildDeepSeekMessages', () => {
   });
 
   it('adds tool results as tool role messages', () => {
-    const messages = buildDeepSeekMessages({
+    const messages = buildDeepSeekAgentMessages({
       history,
       toolResults: [{ callId: 'call_1', name: 'get_weather', result: '{"temp":22}' }],
     });
@@ -299,7 +324,7 @@ describe('buildDeepSeekMessages', () => {
   });
 
   it('adds user prompt when no tool results', () => {
-    const messages = buildDeepSeekMessages({
+    const messages = buildDeepSeekAgentMessages({
       history: [],
       prompt: 'Hello!',
     });
@@ -308,7 +333,7 @@ describe('buildDeepSeekMessages', () => {
   });
 
   it('prefers tool results over user prompt', () => {
-    const messages = buildDeepSeekMessages({
+    const messages = buildDeepSeekAgentMessages({
       history: [],
       prompt: 'This should not appear',
       toolResults: [{ callId: 'c1', name: 'tool', result: 'result' }],
