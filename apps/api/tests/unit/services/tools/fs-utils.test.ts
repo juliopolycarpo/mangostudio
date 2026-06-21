@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import {
   expandHome,
   getRequiredPathArg,
+  normalizePathList,
   normalizeStringList,
   PathAccessError,
   resolveAndValidatePath,
@@ -39,6 +40,21 @@ describe('normalizeStringList', () => {
 
   it('returns an empty array for a number', () => {
     expect(normalizeStringList(42)).toEqual([]);
+  });
+});
+
+describe('normalizePathList', () => {
+  it('maps legacy string arrays to enabled path entries', () => {
+    expect(normalizePathList([' /tmp ', '', '/var'])).toEqual([
+      { path: '/tmp', enabled: true },
+      { path: '/var', enabled: true },
+    ]);
+  });
+
+  it('keeps lenient filesystem-tool parsing for malformed path arrays', () => {
+    expect(
+      normalizePathList([{ path: ' /tmp ', enabled: true }, 42, { path: '', enabled: false }])
+    ).toEqual([{ path: '/tmp', enabled: true }]);
   });
 });
 

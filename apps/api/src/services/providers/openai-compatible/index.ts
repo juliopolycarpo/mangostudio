@@ -11,8 +11,13 @@ import { PROVIDER_PROBE_TIMEOUT_MS, withAbortTimeout } from '../core/probe-timeo
 import { createProviderLifecycle } from '../core/provider-lifecycle';
 import { recordProviderProbeTimeout } from '../core/provider-observability';
 import { createProviderSecretService } from '../core/secret-service';
-import { generateOpenAIImage } from '../openai/image-generation';
-import { buildChatMessages } from '../openai/message-mapper';
+import { generateChatCompletionText, streamChatCompletionText } from '../openai/chat-completions';
+import {
+  createOpenAIClientRuntimeLoader,
+  createOpenAIProviderLifecycleHandlers,
+  type OpenAIClientRuntime,
+} from '../openai/client-runtime';
+import { generateImageWithOpenAIClient } from '../openai/image-generation';
 import { extractReasoningChunks } from '../openai/normalizers';
 import type {
   AgentEvent,
@@ -55,23 +60,12 @@ async function resolveClientConfig(
   return resolveCompatibleClientConfig(rows, secretService.resolveSecretValue, modelName);
 }
 
-interface PreparedCompatibleRuntime {
-  readonly apiKey: string;
-  readonly baseUrl: string;
-  readonly client: ReturnType<typeof createCompatibleClient>;
-}
+type PreparedCompatibleRuntime = OpenAIClientRuntime<{ apiKey: string; baseUrl: string }>;
 
-async function loadPreparedRuntime(
-  userId: string,
-  modelName?: string
-): Promise<PreparedCompatibleRuntime> {
-  const { apiKey, baseUrl } = await resolveClientConfig(userId, modelName);
-  return {
-    apiKey,
-    baseUrl,
-    client: createCompatibleClient(apiKey, baseUrl),
-  };
-}
+const loadPreparedRuntime = createOpenAIClientRuntimeLoader(
+  resolveClientConfig,
+  ({ apiKey, baseUrl }) => createCompatibleClient(apiKey, baseUrl)
+);
 
 const listModelsWithCache = withModelCache(
   async (userId: string): Promise<ModelInfo[]> => {
@@ -168,19 +162,7 @@ const openAICompatibleProvider: AIProvider = {
 
   async generateText(req: TextGenerationRequest): Promise<TextGenerationResult> {
     const { client } = await lifecycle.prepareRuntime(req.userId, req.modelName);
-
-    const completion = await client.chat.completions.create(
-      {
-        model: req.modelName,
-        messages: buildChatMessages(req),
-        stream: false,
-      },
-      { signal: req.signal }
-    );
-
-    const text = completion.choices[0]?.message?.content ?? '';
-    if (!text) throw new Error('No text returned from OpenAI-compatible API.');
-    return { text };
+    return generateChatCompletionText(client, req, 'No text returned from OpenAI-compatible API.');
   },
 
   async *generateAgentTurnStream(req: AgentTurnRequest): AsyncIterable<AgentEvent> {
@@ -190,44 +172,17 @@ const openAICompatibleProvider: AIProvider = {
 
   async *generateTextStream(req: TextGenerationRequest): AsyncIterable<StreamingChunk> {
     const { client } = await lifecycle.prepareRuntime(req.userId, req.modelName);
-
-    const stream = await client.chat.completions.create(
-      {
-        model: req.modelName,
-        messages: buildChatMessages(req),
-        stream: true,
-      },
-      { signal: req.signal }
-    );
-
-    for await (const chunk of stream) {
-      if (req.signal?.aborted) break;
-      const delta = chunk.choices[0]?.delta?.content;
-      if (delta) {
-        yield { type: 'text', text: delta, done: false };
-      }
-    }
-
-    yield { type: 'text', text: '', done: true };
+    yield* streamChatCompletionText(client, req);
   },
 
-  async generateImage(req: ImageGenerationRequest): Promise<ImageGenerationResult> {
-    if (!isImageModelId(req.modelName)) {
-      throw new Error(`Image generation is not supported by model "${req.modelName}".`);
-    }
-
-    const { client } = await lifecycle.prepareRuntime(req.userId, req.modelName);
-
-    return generateOpenAIImage(client, req);
+  generateImage(req: ImageGenerationRequest): Promise<ImageGenerationResult> {
+    return generateImageWithOpenAIClient(lifecycle.prepareRuntime, req, {
+      validateModelBeforeRuntime: true,
+    });
   },
 
-  listModels(userId: string): Promise<ModelInfo[]> {
-    return listModelsWithCache(userId);
-  },
-
-  invalidateModelCache: lifecycle.invalidateModelCache,
-  syncConfigFileConnectors: lifecycle.syncConfigFileConnectors,
-  warmup: lifecycle.warmup,
+  listModels: listModelsWithCache,
+  ...createOpenAIProviderLifecycleHandlers(lifecycle),
 
   async healthcheck(req: ProviderHealthcheckRequest): Promise<void> {
     if (!req.apiKey?.trim()) {
