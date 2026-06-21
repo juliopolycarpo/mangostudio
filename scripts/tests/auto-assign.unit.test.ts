@@ -49,4 +49,11 @@ describe('auto-assignment workflow', () => {
 
     expect(labeler).toContain('".github/workflows/**"');
   });
+
+  test('documents that classification belongs in labeler, not here', () => {
+    const workflow = readText('.github/workflows/auto-assign.yml');
+
+    expect(workflow).toContain('labeler.yml');
+    expect(workflow).not.toContain('actions/labeler');
+  });
 });

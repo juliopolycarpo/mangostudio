@@ -1,5 +1,9 @@
 name: Labeler
 
+# Classification only (area:/type: labels from .github/labeler.yml). Assignee and
+# reviewer routing lives in .github/workflows/auto-assign.yml — do not duplicate
+# ownership logic here.
+
 # pull_request_target so PRs from forks can be labeled: the fork GITHUB_TOKEN on
 # `pull_request` is read-only. actions/labeler only reads the list of changed
 # file paths — it never checks out or executes PR code — so this trigger is safe.
