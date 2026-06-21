@@ -23,6 +23,7 @@
     "build:turbo": "turbo run build",
     "check": "bun ./scripts/check.ts",
     "check:versions": "bun ./scripts/check-versions.ts",
+    "code-health": "knip --reporter markdown",
     "test": "bun ./scripts/test.ts",
     "test:scripts": "bun test scripts",
     "test:e2e:setup": "bun ./scripts/test-e2e-setup.ts",
@@ -46,9 +47,10 @@
     "dprint": "^0.54.0",
     "git-cliff": "^2.13.1",
     "jscpd": "^4",
+    "knip": "^6.17.1",
     "lefthook": "^2.1.9",
     "madge": "^8.0.0",
-    "typescript": "~6.0.3",
-    "turbo": "2.9.16"
+    "turbo": "2.9.16",
+    "typescript": "~6.0.3"
   }
 }

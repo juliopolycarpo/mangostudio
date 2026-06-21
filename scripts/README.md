@@ -89,6 +89,11 @@ Run by `.github/workflows/release.yml`; each is also runnable locally:
 - **Wrap third-party tools** behind a project-owned module (see `lib/changelog.ts`
   around git-cliff) so the integration is testable and swappable.
 
+## Code health scan
+
+Run `bun run code-health` from the repo root to produce the Knip unused code and dependency report.
+Scanner-specific entrypoints and false-positive dependency ignores live in `knip.json`.
+
 ## Adding a script
 
 1. Create `scripts/<name>.ts`; import helpers from `lib/`.
