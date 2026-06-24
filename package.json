@@ -38,7 +38,7 @@
     "prepare": "lefthook install"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.4.15",
+    "@biomejs/biome": "^2.5.1",
     "@dprint/dockerfile": "^0.3.3",
     "@dprint/markdown": "^0.22.1",
     "@dprint/toml": "^0.7.0",
