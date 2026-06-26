@@ -3,7 +3,8 @@
 // scripts/release/pack-npm.ts wires these to the filesystem.
 
 export const CLI_SCOPE = '@mangostudio';
-export const MAIN_PACKAGE = `${CLI_SCOPE}/cli`;
+export const MAIN_PACKAGE = 'mangostudio';
+export const PLATFORM_PACKAGE_PREFIX = `${CLI_SCOPE}/cli`;
 const REPOSITORY_URL = 'git+https://github.com/juliopolycarpo/mangostudio.git';
 const HOMEPAGE_URL = 'https://github.com/juliopolycarpo/mangostudio#readme';
 const BUGS_URL = 'https://github.com/juliopolycarpo/mangostudio/issues';
@@ -47,9 +48,9 @@ export function filterNpmPlatforms(onlyPlatform?: string): readonly NpmPlatform[
   return platforms;
 }
 
-/** npm package name for a platform, e.g. @mangostudio/cli-linux-x64. */
+/** Scoped npm package name for a platform, e.g. @mangostudio/cli-linux-x64. */
 export function platformPackageName(platform: NpmPlatform): string {
-  return `${MAIN_PACKAGE}-${platform.os}-${platform.cpu}`;
+  return `${PLATFORM_PACKAGE_PREFIX}-${platform.os}-${platform.cpu}`;
 }
 
 /** package.json for a per-platform binary package, gated by os + cpu. */

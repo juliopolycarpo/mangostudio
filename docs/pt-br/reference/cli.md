@@ -15,7 +15,7 @@ pré-compilado e sidecar do frontend. Veja a
 
 | Canal              | Ponto de entrada                                                                                             |
 | ------------------ | ------------------------------------------------------------------------------------------------------------ |
-| npm / bun          | `@mangostudio/cli` — veja [`packages/cli/README.md`](../../../packages/cli/README.md)                        |
+| npm / bun          | `mangostudio` — veja [`packages/cli/README.md`](../../../packages/cli/README.md)                             |
 | Homebrew           | `brew install juliopolycarpo/tap/mangostudio`                                                                |
 | Shell / PowerShell | `install.sh` / `install.ps1` do GitHub Releases                                                              |
 | Scoop              | `juliopolycarpo/scoop-bucket` → `scoop install mangostudio`                                                  |

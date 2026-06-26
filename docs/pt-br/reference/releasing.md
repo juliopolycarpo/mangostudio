@@ -1,7 +1,7 @@
 # Releases
 
 O MangoStudio é distribuído como binários standalone (GitHub Releases), imagem
-Docker no GHCR, CLI npm (`@mangostudio/cli`), tap Homebrew, bucket Scoop
+Docker no GHCR, CLI npm (`mangostudio`), tap Homebrew, bucket Scoop
 (Windows) e crate launcher no crates.io (`cargo install mangostudio`). O
 changelog é gerado a partir de Conventional Commits com
 [git-cliff](https://git-cliff.org); nada é editado manualmente.
@@ -17,7 +17,7 @@ gera todos os artefatos, publica cada canal de forma independente e faz commit d
 
 | Secret                      | Usado por                                                | Escopo                                                                                                                                      |
 | --------------------------- | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| `NPM_TOKEN`                 | `npm-publish`, `npm-canary`                              | Direitos de publicação em `@mangostudio/*`                                                                                                  |
+| `NPM_TOKEN`                 | `npm-publish`, `npm-canary`                              | Direitos de publicação em `mangostudio` e `@mangostudio/cli-*`                                                                              |
 | `DIST_REPOS_TOKEN`          | `homebrew`, `scoop`                                      | PAT fine-grained com contents read/write em `juliopolycarpo/homebrew-tap` e `juliopolycarpo/scoop-bucket`                                   |
 | `CARGO_REGISTRY_TOKEN`      | `cargo-publish`, `crates-canary`                         | Fallback temporário no crates.io até Trusted Publishing estar registrado e verificado para o crate `mangostudio`                            |
 | *(built-in `GITHUB_TOKEN`)* | `github-release`, `docker`, o canal canary, attestations | Sem setup extra — o workflow concede `packages: write` para GHCR; `cargo-publish`/`crates-canary` concedem `id-token: write` para OIDC auth |
@@ -75,13 +75,13 @@ atualizados por todo commit verde em `main`. Consuma qualquer canal:
 ```bash
 docker pull ghcr.io/juliopolycarpo/mangostudio:canary
 docker pull ghcr.io/juliopolycarpo/mangostudio:canary-1234abc
-npm install -g @mangostudio/cli@canary
+npm install -g mangostudio@canary
 cargo install mangostudio --version 0.1.0-canary
 ```
 
 - **Docker** (`docker-canary`): Debian Bookworm multi-arch (amd64 + arm64) nas
   tags `canary` (rolling) e `canary-<sha7>` (imutável). Alpine só em tags.
-- **npm** (`npm-canary`): `@mangostudio/cli` na dist-tag `canary`, então `latest`
+- **npm** (`npm-canary`): `mangostudio` na dist-tag `canary`, então `latest`
   nunca aponta para um canary.
 - **crates** (`crates-canary`): `mangostudio <root>-canary`, apoiado por um
   pre-release `v<root>-canary` no GitHub cujos assets são sobrescritos a cada

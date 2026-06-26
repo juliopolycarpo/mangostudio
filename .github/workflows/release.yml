@@ -9,9 +9,10 @@ name: Release
 # Trigger by pushing a semver tag (git tag -s v0.1.0 && git push origin v0.1.0)
 # or via workflow_dispatch with an explicit version.
 #
-# Prerequisites: an NPM_TOKEN repo secret with publish rights to @mangostudio/*,
-# a single DIST_REPOS_TOKEN fine-grained PAT with contents read/write on both
-# dist repos (juliopolycarpo/homebrew-tap and juliopolycarpo/scoop-bucket).
+# Prerequisites: an NPM_TOKEN repo secret with publish rights to mangostudio and
+# @mangostudio/cli-*, plus a single DIST_REPOS_TOKEN fine-grained PAT with
+# contents read/write on both dist repos (juliopolycarpo/homebrew-tap and
+# juliopolycarpo/scoop-bucket).
 # crates.io publishing prefers Trusted Publishing via OIDC and temporarily falls
 # back to CARGO_REGISTRY_TOKEN until the trusted publisher is registered and
 # proven. GHCR uses the workflow GITHUB_TOKEN.
@@ -524,7 +525,7 @@ jobs:
           VERSION: ${{ needs.build.outputs.version }}
         run: |
           source scripts/release/retry.sh
-          retry_command 5 60 npm install -g "@mangostudio/cli@${VERSION}"
+          retry_command 5 60 npm install -g "mangostudio@${VERSION}"
           actual="$(mangostudio --version)"
           if [ "$actual" != "$VERSION" ]; then
             echo "Expected npm CLI version ${VERSION}, got ${actual}"

@@ -1,4 +1,4 @@
-# @mangostudio/cli
+# mangostudio
 
 Install [MangoStudio](https://github.com/juliopolycarpo/mangostudio) — an
 AI-powered image generation and chat studio — as a single command.
@@ -6,8 +6,8 @@ AI-powered image generation and chat studio — as a single command.
 ## Install
 
 ```bash
-npm install -g @mangostudio/cli
-# or: bun add -g @mangostudio/cli
+npm install -g mangostudio
+# or: bun add -g mangostudio
 ```
 
 This pulls the prebuilt standalone binary for your platform (via a

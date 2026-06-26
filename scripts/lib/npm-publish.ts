@@ -110,7 +110,12 @@ export function orderNpmPackageDirs(dirNames: readonly string[]): string[] {
 export function isMissingPackageViewResult(result: NpmCommandResult): boolean {
   return (
     result.exitCode !== 0 &&
-    matchesAny(result, [/\bE404\b/i, /404 Not Found/i, /not in this registry/i])
+    matchesAny(result, [
+      /\bE404\b/i,
+      /404 Not Found/i,
+      /not in this registry/i,
+      /No version of .* satisfying/i,
+    ])
   );
 }
 
@@ -227,7 +232,8 @@ function runPublish(
   context: PublishContext,
   attempt: number
 ): Promise<NpmCommandResult> {
-  const args = ['publish', '--access', 'public'];
+  const args = ['publish'];
+  if (isScopedPackage(packageInfo.name)) args.push('--access', 'public');
   if (context.distTag) args.push('--tag', context.distTag);
   if (context.state.provenance) args.push('--provenance');
 
@@ -333,6 +339,10 @@ function publishError(packageInfo: NpmPublishPackage, result: NpmCommandResult):
 
 function packageSpec(packageInfo: NpmPublishPackage): string {
   return `${packageInfo.name}@${packageInfo.version}`;
+}
+
+function isScopedPackage(packageName: string): boolean {
+  return packageName.startsWith('@');
 }
 
 function commandOutput(result: NpmCommandResult): string {

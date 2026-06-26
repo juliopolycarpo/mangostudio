@@ -40,7 +40,7 @@ const writeMainPackage = (packageDir: string): void => {
   writeFileSync(join(packageDir, 'bin', 'mangostudio.js'), '#!/usr/bin/env node');
   writeJson(
     join(packageDir, 'package.json'),
-    buildMainManifest({ name: '@mangostudio/cli' }, '1.2.3', [LINUX_X64])
+    buildMainManifest({ name: 'mangostudio' }, '1.2.3', [LINUX_X64])
   );
 };
 
@@ -123,7 +123,7 @@ describe('assertNpmDistributionAssets', () => {
     const cliDir = join(distDir, 'cli');
     writeMainPackage(cliDir);
     writeJson(join(cliDir, 'package.json'), {
-      name: '@mangostudio/cli',
+      name: 'mangostudio',
       version: '1.2.3',
       optionalDependencies: {},
     });

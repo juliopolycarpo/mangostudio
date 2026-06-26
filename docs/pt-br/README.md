@@ -19,7 +19,7 @@ downloads contra `SHA256SUMS` quando aplicável.
 
 | Canal                  | Comando                                                                                                                |
 | ---------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| npm / bun              | `npm i -g @mangostudio/cli` / `bun add -g @mangostudio/cli`                                                            |
+| npm / bun              | `npm i -g mangostudio` / `bun add -g mangostudio`                                                                      |
 | Homebrew (macOS/Linux) | `brew install juliopolycarpo/tap/mangostudio`                                                                          |
 | Instalador shell       | `curl -fsSL https://github.com/juliopolycarpo/mangostudio/releases/latest/download/install.sh \| bash`                 |
 | Scoop (Windows)        | `scoop bucket add juliopolycarpo https://github.com/juliopolycarpo/scoop-bucket` e depois `scoop install mangostudio`  |
@@ -57,7 +57,7 @@ Na primeira execução, `mangostudio serve` pode gerar um `BETTER_AUTH_SECRET` f
 e armazená-lo em `~/.mango/.env` ou `~/.mango/config.toml`. Configure chaves de
 provedor como `GEMINI_API_KEY` quando estiver pronto para usar modelos hospedados. Configurações
 opcionais de runtime incluem `API_HOST`, `API_PORT` e `DATABASE_PATH`.
-Veja [`@mangostudio/cli`](../../packages/cli/README.md) para o ambiente completo.
+Veja [`mangostudio`](../../packages/cli/README.md) para o ambiente completo.
 Para deploy em container, veja [`docs/operations/deployment.md`](../operations/deployment.md#docker).
 
 ## Pré-requisitos (desenvolvimento)
