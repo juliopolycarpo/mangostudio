@@ -104,7 +104,7 @@
       },
     },
     "packages/cli": {
-      "name": "@mangostudio/cli",
+      "name": "mangostudio",
       "version": "0.1.0",
       "bin": {
         "mangostudio": "bin/mangostudio.js",
@@ -333,8 +333,6 @@
     "@jridgewell/trace-mapping": ["@jridgewell/trace-mapping@0.3.31", "", { "dependencies": { "@jridgewell/resolve-uri": "^3.1.0", "@jridgewell/sourcemap-codec": "^1.4.14" } }, "sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw=="],
 
     "@mangostudio/api": ["@mangostudio/api@workspace:apps/api"],
-
-    "@mangostudio/cli": ["@mangostudio/cli@workspace:packages/cli"],
 
     "@mangostudio/frontend": ["@mangostudio/frontend@workspace:apps/frontend"],
 
@@ -1093,6 +1091,8 @@
     "magicast": ["magicast@0.5.2", "", { "dependencies": { "@babel/parser": "^7.29.0", "@babel/types": "^7.29.0", "source-map-js": "^1.2.1" } }, "sha512-E3ZJh4J3S9KfwdjZhe2afj6R9lGIN5Pher1pF39UGrXRqq/VDaGVIGN13BjHd2u8B61hArAGOnso7nBOouW3TQ=="],
 
     "make-dir": ["make-dir@4.0.0", "", { "dependencies": { "semver": "^7.5.3" } }, "sha512-hXdUTZYIVOt1Ex//jAQi+wTZZpUpwBj/0QsOzqegb3rGMMeJiSEu5xLHnYfBrRV4RH2+OCSOO95Is/7x1WJ4bw=="],
+
+    "mangostudio": ["mangostudio@workspace:packages/cli"],
 
     "marked": ["marked@18.0.3", "", { "bin": { "marked": "bin/marked.js" } }, "sha512-7VT90JOkDeaRWpfjOReRGPEKn0ecdARBkDGL+tT1wZY0efPPqkUxLUSmzy/C7TIylQYJC9STISEsCHrqb/7VIA=="],
 

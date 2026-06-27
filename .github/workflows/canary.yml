@@ -9,8 +9,8 @@ name: Canary
 # can re-run just the failed job (see the canary-summary job):
 #   - Docker: ghcr.io/<repo>:canary (rolling) + :canary-<sha7> (immutable per-commit),
 #     Debian bookworm multi-arch (amd64 + arm64). Alpine stays tag-release-only.
-#   - npm:    @mangostudio/cli@<root>-canary.<sha7> under the `canary` dist-tag, so
-#     `latest` never moves. Install with `npm i -g @mangostudio/cli@canary`.
+#   - npm:    mangostudio@<root>-canary.<sha7> under the `canary` dist-tag, so
+#     `latest` never moves. Install with `npm i -g mangostudio@canary`.
 #   - crates: mangostudio <root>-canary, backed by a rolling `v<root>-canary`
 #     GitHub pre-release whose assets are refreshed on every green main commit.
 #

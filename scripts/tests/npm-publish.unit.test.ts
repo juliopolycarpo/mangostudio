@@ -20,7 +20,7 @@ const PLATFORM_PACKAGE: NpmPublishPackage = {
 
 const CLI_PACKAGE: NpmPublishPackage = {
   dir: '/dist/cli',
-  name: '@mangostudio/cli',
+  name: 'mangostudio',
   version: '1.2.3',
 };
 
@@ -104,6 +104,11 @@ describe('orderNpmPackageDirs', () => {
 describe('npm publish failure classification', () => {
   test('detects missing package responses from npm view', () => {
     expect(isMissingPackageViewResult(missing())).toBe(true);
+    expect(
+      isMissingPackageViewResult(
+        fail('error: No version of "mangostudio" satisfying "1.2.3" found')
+      )
+    ).toBe(true);
   });
 
   test('classifies publish failures by retry behavior', () => {
@@ -169,6 +174,19 @@ describe('publishPackages', () => {
     ]);
   });
 
+  test('omits scoped access flags for the unscoped wrapper', async () => {
+    const runner = new FakeNpmRunner([missing(), ok()]);
+    const { result } = publishWithFakes(runner, [CLI_PACKAGE]);
+
+    await expect(result).resolves.toEqual({
+      published: 1,
+      skipped: 0,
+      dryRun: 0,
+      provenance: { status: 'full' },
+    });
+    expect(runner.calls[1].args).toEqual(['publish', '--provenance']);
+  });
+
   test('retries transient publish failures before succeeding', async () => {
     const runner = new FakeNpmRunner([missing(), fail('ECONNRESET socket hang up'), ok()]);
     const { result, sleeper } = publishWithFakes(runner);
@@ -222,7 +240,7 @@ describe('publishPackages', () => {
     });
     expect(runner.calls[1].args).toEqual(['publish', '--access', 'public', '--provenance']);
     expect(runner.calls[2].args).toEqual(['publish', '--access', 'public']);
-    expect(runner.calls[4].args).toEqual(['publish', '--access', 'public']);
+    expect(runner.calls[4].args).toEqual(['publish']);
   });
 
   test('summarizes disabled provenance without passing the flag', async () => {

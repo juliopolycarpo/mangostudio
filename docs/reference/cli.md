@@ -12,7 +12,7 @@ copy-paste commands, or:
 
 | Channel            | Entry point                                                                                                      |
 | ------------------ | ---------------------------------------------------------------------------------------------------------------- |
-| npm / bun          | `@mangostudio/cli` — see [`packages/cli/README.md`](../../packages/cli/README.md)                                |
+| npm / bun          | `mangostudio` — see [`packages/cli/README.md`](../../packages/cli/README.md)                                     |
 | Homebrew           | `brew install juliopolycarpo/tap/mangostudio`                                                                    |
 | Shell / PowerShell | `install.sh` / `install.ps1` from GitHub Releases                                                                |
 | Scoop              | `juliopolycarpo/scoop-bucket` → `scoop install mangostudio`                                                      |

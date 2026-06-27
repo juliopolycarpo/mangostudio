@@ -24,7 +24,7 @@ const WIN_ARM64: NpmPlatform = {
 };
 
 describe('platformPackageName', () => {
-  test('maps os/cpu to the scoped package name', () => {
+  test('maps os/cpu to the scoped platform package name', () => {
     expect(platformPackageName(LINUX_X64)).toBe('@mangostudio/cli-linux-x64');
     expect(platformPackageName(WIN_ARM64)).toBe('@mangostudio/cli-win32-arm64');
   });
@@ -84,6 +84,10 @@ describe('buildOptionalDependencies', () => {
 });
 
 describe('buildMainManifest', () => {
+  test('uses the unscoped wrapper package name', () => {
+    expect(MAIN_PACKAGE).toBe('mangostudio');
+  });
+
   test('preserves the base manifest and injects version + optionalDependencies', () => {
     const base = { name: MAIN_PACKAGE, bin: { mangostudio: 'bin/mangostudio.js' } };
     const manifest = buildMainManifest(base, '2.0.0');

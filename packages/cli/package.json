@@ -1,5 +1,5 @@
 {
-  "name": "@mangostudio/cli",
+  "name": "mangostudio",
   "version": "0.1.0",
   "description": "MangoStudio — AI image generation and chat studio. Installs the prebuilt standalone binary for your platform and exposes the `mangostudio` command.",
   "license": "MIT",

@@ -121,7 +121,7 @@ const stageMainPackage = (version: string, platforms: readonly NpmPlatform[]): v
     unknown
   >;
   writeManifest(packageDir, buildMainManifest(baseManifest, version, platforms));
-  info('Staged @mangostudio/cli wrapper');
+  info('Staged mangostudio wrapper');
 };
 
 const main = async (): Promise<void> => {

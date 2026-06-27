@@ -1,7 +1,7 @@
 # Releasing
 
 MangoStudio ships as standalone binaries (GitHub Releases), as a Docker image on
-GHCR, as an npm CLI (`@mangostudio/cli`), via a Homebrew tap, via a Scoop bucket
+GHCR, as an npm CLI (`mangostudio`), via a Homebrew tap, via a Scoop bucket
 (Windows), and as a crates.io launcher crate (`cargo install mangostudio`). The
 changelog is generated from Conventional Commits with [git-cliff](https://git-cliff.org);
 nothing here is hand-edited.
@@ -15,7 +15,7 @@ push, or a `github-actions[bot]` pull request when the branch is protected).
 
 | Secret                      | Used by                                                      | Scope                                                                                                                                        |
 | --------------------------- | ------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| `NPM_TOKEN`                 | `npm-publish`, `npm-canary`                                  | Publish rights on `@mangostudio/*`                                                                                                           |
+| `NPM_TOKEN`                 | `npm-publish`, `npm-canary`                                  | Publish rights on `mangostudio` and `@mangostudio/cli-*`                                                                                     |
 | `DIST_REPOS_TOKEN`          | `homebrew`, `scoop`                                          | Fine-grained PAT with contents read/write on `juliopolycarpo/homebrew-tap` and `juliopolycarpo/scoop-bucket`                                 |
 | `CARGO_REGISTRY_TOKEN`      | `cargo-publish`, `crates-canary`                             | Temporary crates.io fallback until Trusted Publishing is registered and verified for the `mangostudio` crate                                 |
 | *(built-in `GITHUB_TOKEN`)* | `github-release`, `docker`, the canary channel, attestations | No extra setup — workflow grants `packages: write` for GHCR; `cargo-publish`/`crates-canary` grant `id-token: write` for crates.io OIDC auth |
@@ -131,7 +131,7 @@ docker pull ghcr.io/juliopolycarpo/mangostudio:canary
 docker pull ghcr.io/juliopolycarpo/mangostudio:canary-1234abc
 
 # npm — the `canary` dist-tag; `latest` is never touched
-npm install -g @mangostudio/cli@canary
+npm install -g mangostudio@canary
 
 # Cargo — fixed prerelease version backed by rolling GitHub release assets
 cargo install mangostudio --version 0.1.0-canary
@@ -140,7 +140,7 @@ cargo install mangostudio --version 0.1.0-canary
 | Channel | Job             | What it publishes                                                                                                                       |
 | ------- | --------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
 | Docker  | `docker-canary` | Debian Bookworm multi-arch (amd64 + arm64) under the rolling `canary` tag and the immutable `canary-<sha7>` tag. Alpine stays tag-only. |
-| npm     | `npm-canary`    | `@mangostudio/cli@<version>` under the `canary` dist-tag, so `npm i -g @mangostudio/cli` (latest) never resolves to a canary.           |
+| npm     | `npm-canary`    | `mangostudio@<version>` under the `canary` dist-tag, so `npm i -g mangostudio` (latest) never resolves to a canary.                     |
 | crates  | `crates-canary` | `mangostudio <root>-canary`, backed by a rolling `v<root>-canary` GitHub pre-release whose assets are clobbered each green main commit. |
 
 Each channel is independent and idempotent, exactly like the tag release: a docker
@@ -200,11 +200,11 @@ summary, listed here in workflow order:
 | `github-release`   | Creates the GitHub Release, or updates an existing one by refreshing notes and uploading assets with `--clobber`.                                                                                                                                                                                                                                                            |
 | `docker`           | Stages Linux glibc and musl archives into `docker-ctx/` (`stage-docker-ctx.ts`) and publishes Bookworm and Alpine images for amd64 and arm64. It uses only `GITHUB_TOKEN` with `packages: write`.                                                                                                                                                                            |
 | `verify-image`     | Pulls each published GHCR image (Bookworm and Alpine, amd64 and arm64) and boots it (`smoke-docker-image.sh`). Depends on `docker`; its matrix legs are non-blocking for the other channels.                                                                                                                                                                                 |
-| `npm-publish`      | Publishes the platform packages, then the `@mangostudio/cli` wrapper; already-published versions are skipped, transient failures are retried, and provenance falls back to a warning-only publish if npm rejects it.                                                                                                                                                         |
+| `npm-publish`      | Publishes the platform packages, then the `mangostudio` wrapper; already-published versions are skipped, transient failures are retried, and provenance falls back to a warning-only publish if npm rejects it.                                                                                                                                                              |
 | `homebrew`         | Renders `Formula/mangostudio.rb` from `SHA256SUMS` (`update-homebrew.ts`) and pushes it to `juliopolycarpo/homebrew-tap` (`push-dist-repo.ts`). No other job depends on it, so a tap failure never blocks npm or the Release.                                                                                                                                                |
 | `scoop`            | Renders `bucket/mangostudio.json` from `SHA256SUMS` (`update-scoop.ts`) and pushes it to `juliopolycarpo/scoop-bucket` (`push-dist-repo.ts`). No other job depends on it, so a bucket failure never blocks npm or the Release.                                                                                                                                               |
 | `cargo-publish`    | Publishes the `mangostudio` launcher crate (`packages/cargo-shim`) to crates.io using Trusted Publishing when crates.io has registered `.github/workflows/release.yml`, with `CARGO_REGISTRY_TOKEN` as a temporary fallback. Idempotent: already-published versions are skipped, publishes are retried, and an upload that lands despite an error is detected. Non-blocking. |
-| `verify-release`   | Installs `@mangostudio/cli@<version>` from npm on Ubuntu, macOS, and Windows; downloads the matching release tarball, verifies `SHA256SUMS`, and runs `mangostudio --version`. Windows arm64 is published but not verified.                                                                                                                                                  |
+| `verify-release`   | Installs `mangostudio@<version>` from npm on Ubuntu, macOS, and Windows; downloads the matching release tarball, verifies `SHA256SUMS`, and runs `mangostudio --version`. Windows arm64 is published but not verified.                                                                                                                                                       |
 | `verify-cargo`     | Installs `mangostudio` from crates.io, points the launcher at the GitHub Release assets, and checks `mangostudio --version`. Depends on `cargo-publish`.                                                                                                                                                                                                                     |
 | `verify-homebrew`  | Taps `juliopolycarpo/homebrew-tap`, `brew install`s the formula on macOS, and checks `mangostudio --version`. Depends on `homebrew`.                                                                                                                                                                                                                                         |
 | `update-changelog` | Regenerates `CHANGELOG.md` and lands it on `main` via `push-changelog.ts`: direct push (rebasing if another commit landed first), or a `github-actions[bot]` PR with squash auto-merge when branch protection rejects the push. A dedicated concurrency group serializes it across concurrent tag releases.                                                                  |
@@ -215,7 +215,7 @@ validated against the committed version the same way.
 
 ## npm distribution
 
-`@mangostudio/cli` is a thin wrapper: its `bin/mangostudio.js` shim resolves the
+`mangostudio` is a thin wrapper: its `bin/mangostudio.js` shim resolves the
 `@mangostudio/cli-<os>-<cpu>` optional dependency npm installed for the host and
 execs the prebuilt binary (esbuild-style). Each platform package carries the
 binary plus its `public/` frontend sidecar. Builders live in
@@ -385,7 +385,8 @@ Design notes:
 
 The [One-shot contract](#one-shot-contract) table lists every secret. In short:
 
-- **`NPM_TOKEN`** repo secret with publish rights to the `@mangostudio` scope.
+- **`NPM_TOKEN`** repo secret with publish rights to `mangostudio` and the
+  `@mangostudio/cli-*` platform packages.
 - **`DIST_REPOS_TOKEN`** repo secret: fine-grained PAT with contents read/write
   on `juliopolycarpo/homebrew-tap` (see [Homebrew tap](#homebrew-tap)) and
   `juliopolycarpo/scoop-bucket` (see [Scoop bucket](#scoop-bucket)).

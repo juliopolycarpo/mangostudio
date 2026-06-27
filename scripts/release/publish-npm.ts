@@ -6,6 +6,7 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { ROOT_DIR } from '../lib/config';
+import { MAIN_PACKAGE } from '../lib/npm-pack';
 import {
   formatNpmPublishSummary,
   type NpmCommandResult,
@@ -22,10 +23,12 @@ interface CliArgs {
   readonly distTag: string | undefined;
 }
 
-class BunNpmRunner implements NpmRunner {
+class RegistryRunner implements NpmRunner {
   async run(args: readonly string[], options: { readonly cwd: string }): Promise<NpmCommandResult> {
+    // Reads go through `bun pm view` (clear missing-version signal); writes use `npm`.
+    const cmd = args[0] === 'view' ? ['bun', 'pm', ...args] : ['npm', ...args];
     const proc = Bun.spawn({
-      cmd: ['npm', ...args],
+      cmd,
       cwd: options.cwd,
       stderr: 'pipe',
       stdin: 'ignore',
@@ -44,7 +47,7 @@ class BunNpmRunner implements NpmRunner {
 const printHelp = (): never => {
   console.log(`Usage: bun ./scripts/release/publish-npm.ts [dist-dir] [--dry-run] [--tag <dist-tag>]
 
-Publishes staged npm packages platform-first, then the @mangostudio/cli wrapper.
+Publishes staged npm packages platform-first, then the ${MAIN_PACKAGE} wrapper.
 
 Arguments:
   dist-dir   Staged npm distribution directory (default: dist-npm)
@@ -95,7 +98,7 @@ const loadPackages = (distDir: string): NpmPublishPackage[] => {
   const packages = orderNpmPackageDirs(dirNames).map((dirName) => readPackage(distDir, dirName));
 
   if (packages.length === 0) throw new Error(`No npm package directories found in ${distDir}`);
-  if (packages.at(-1)?.name !== '@mangostudio/cli') {
+  if (packages.at(-1)?.name !== MAIN_PACKAGE) {
     throw new Error('Staged npm distribution must include dist-npm/cli as the final package.');
   }
 
@@ -125,7 +128,7 @@ const main = async (): Promise<void> => {
     dryRun: args.dryRun,
     distTag: args.distTag,
     logger: { info: log, warn },
-    runner: new BunNpmRunner(),
+    runner: new RegistryRunner(),
   });
 
   success(formatNpmPublishSummary(summary));
