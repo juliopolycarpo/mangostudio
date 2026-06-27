@@ -23,8 +23,9 @@ interface CliArgs {
   readonly distTag: string | undefined;
 }
 
-class BunNpmRunner implements NpmRunner {
+class RegistryRunner implements NpmRunner {
   async run(args: readonly string[], options: { readonly cwd: string }): Promise<NpmCommandResult> {
+    // Reads go through `bun pm view` (clear missing-version signal); writes use `npm`.
     const cmd = args[0] === 'view' ? ['bun', 'pm', ...args] : ['npm', ...args];
     const proc = Bun.spawn({
       cmd,
@@ -127,7 +128,7 @@ const main = async (): Promise<void> => {
     dryRun: args.dryRun,
     distTag: args.distTag,
     logger: { info: log, warn },
-    runner: new BunNpmRunner(),
+    runner: new RegistryRunner(),
   });
 
   success(formatNpmPublishSummary(summary));

@@ -106,7 +106,7 @@ export function orderNpmPackageDirs(dirNames: readonly string[]): string[] {
   return [...dirNames].sort(comparePackageDirs);
 }
 
-/** True when `npm view` reported that a package version is absent. // Usage: isMissingPackageViewResult(result) */
+/** True when a registry view reported that a package version is absent. // Usage: isMissingPackageViewResult(result) */
 export function isMissingPackageViewResult(result: NpmCommandResult): boolean {
   return (
     result.exitCode !== 0 &&
