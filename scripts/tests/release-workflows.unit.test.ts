@@ -138,21 +138,22 @@ describe('release workflow binary gate', () => {
     const job = extractJobBlock(workflow, 'update-changelog');
     expect(job, 'update-changelog job not found').not.toBe('');
 
-    // Fallback needs pull-requests: write on top of contents: write.
+    // The workflow token only needs to push commits/branches. The protected-
+    // branch PR fallback uses CHANGELOG_PR_TOKEN through the REST API.
     expect(job).toContain('contents: write');
-    expect(job).toContain('pull-requests: write');
+    expect(job).not.toContain('pull-requests: write');
 
     // A dedicated, ref-independent concurrency group serializes CHANGELOG.md
     // writes when two tags release at once.
     expect(job).toContain('group: update-changelog');
     expect(job).toContain('cancel-in-progress: false');
 
-    // Landing goes through the reusable script (direct push + bot-PR fallback),
+    // Landing goes through the reusable script (direct push + REST PR fallback),
     // with the version passed via env rather than interpolated into the shell.
     expect(job).toContain(
       'bun ./scripts/release/push-changelog.ts --version "$VERSION" --branch main'
     );
-    expect(job).toContain(`GH_TOKEN: $${'{{ github.token }}'}`);
+    expect(job).toContain(`GH_TOKEN: $${'{{ secrets.CHANGELOG_PR_TOKEN }}'}`);
     expect(job).toContain('bun run changelog --release "$VERSION"');
 
     // The old direct-push loop and its "unimplemented fallback" comment are gone.

@@ -11,13 +11,14 @@ nothing here is hand-edited.
 Setting the secrets below and pushing a signed semver tag (`v0.2.0`) is the entire
 release procedure. The workflow validates version lockstep, builds every artifact,
 publishes each channel independently, and lands `CHANGELOG.md` on `main` (direct
-push, or a `github-actions[bot]` pull request when the branch is protected).
+push, or a REST-created pull request when the branch is protected).
 
 | Secret                      | Used by                                                      | Scope                                                                                                                                        |
 | --------------------------- | ------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- |
 | `NPM_TOKEN`                 | `npm-publish`, `npm-canary`                                  | Publish rights on `mangostudio` and `@mangostudio/cli-*`                                                                                     |
 | `DIST_REPOS_TOKEN`          | `homebrew`, `scoop`                                          | Fine-grained PAT with contents read/write on `juliopolycarpo/homebrew-tap` and `juliopolycarpo/scoop-bucket`                                 |
 | `CARGO_REGISTRY_TOKEN`      | `cargo-publish`, `crates-canary`                             | Temporary crates.io fallback until Trusted Publishing is registered and verified for the `mangostudio` crate                                 |
+| `CHANGELOG_PR_TOKEN`        | `update-changelog`                                           | Fine-grained PAT with pull requests read/write on this repository; used only when branch protection rejects the direct changelog push        |
 | *(built-in `GITHUB_TOKEN`)* | `github-release`, `docker`, the canary channel, attestations | No extra setup — workflow grants `packages: write` for GHCR; `cargo-publish`/`crates-canary` grant `id-token: write` for crates.io OIDC auth |
 
 ### One-time setup checklist
@@ -28,10 +29,10 @@ Complete these once per fork or org before the first tag push:
 2. Create the shared Scoop bucket [`juliopolycarpo/scoop-bucket`](https://github.com/juliopolycarpo/scoop-bucket) with a `bucket/` directory.
 3. Reserve the `mangostudio` crate name on [crates.io](https://crates.io) and generate an API token for the initial publish.
 4. Configure crates.io Trusted Publishing for the existing `mangostudio` crate: crate **Settings -> Trusted Publishing -> Add -> GitHub**, repository owner `juliopolycarpo`, repository name `mangostudio`, workflow filename `release.yml`, and no environment unless the release job is later moved behind a GitHub environment.
-5. Add the repo secrets (`NPM_TOKEN`, `DIST_REPOS_TOKEN`, and the temporary `CARGO_REGISTRY_TOKEN` fallback) to this repository.
+5. Add the repo secrets (`NPM_TOKEN`, `DIST_REPOS_TOKEN`, `CHANGELOG_PR_TOKEN`, and the temporary `CARGO_REGISTRY_TOKEN` fallback) to this repository.
 6. After one release proves `cargo-publish` minted a Trusted Publishing token successfully, remove the `CARGO_REGISTRY_TOKEN` repo secret. Until then, the release job falls back to the secret if crates.io has not accepted the OIDC publisher yet.
 7. After the first GHCR push, set the `ghcr.io/juliopolycarpo/mangostudio` package visibility to **public** in GitHub package settings.
-8. No branch-protection tuning is required for the changelog: the `update-changelog` job pushes `CHANGELOG.md` to `main` directly when it can (`contents: write`), and falls back to a `github-actions[bot]` pull request when protection rejects the push (`pull-requests: write`). Enable repo auto-merge if you want that PR to merge itself once checks pass.
+8. No branch-protection tuning is required for the changelog: the `update-changelog` job pushes `CHANGELOG.md` to `main` directly when it can (`contents: write`), and falls back to a pull request created with `CHANGELOG_PR_TOKEN` through GitHub's REST API when protection rejects the push. Review and merge that PR after checks pass.
 
 ## Release asset naming
 
@@ -187,7 +188,7 @@ Releases are tag-driven. From an up-to-date `main`:
 step flakes: **Re-run failed jobs** is always safe because channel jobs are
 independent — one failing never blocks the others. Published npm versions are
 skipped, release assets upload with clobber semantics, and the changelog push
-rebases before retrying (or opens a bot PR if `main` is protected). For extra
+rebases before retrying (or opens a REST-created PR if `main` is protected). For extra
 durability: build artifacts retain for 30 days, the `docker` job retries each
 multi-arch push and falls back to downloading the published GitHub Release when
 its build artifact has expired (so it re-runs in isolation long after the run),
@@ -211,7 +212,7 @@ summary, listed here in workflow order:
 | `verify-release`   | Installs `mangostudio@<version>` from npm on Ubuntu, macOS, and Windows; downloads the matching release tarball, verifies `SHA256SUMS`, and runs `mangostudio --version`. Windows arm64 is published but not verified.                                                                                                                                                       |
 | `verify-cargo`     | Installs `mangostudio` from crates.io, points the launcher at the GitHub Release assets, and checks `mangostudio --version`. Depends on `cargo-publish`.                                                                                                                                                                                                                     |
 | `verify-homebrew`  | Taps `juliopolycarpo/homebrew-tap`, `brew install`s the formula on macOS, and checks `mangostudio --version`. Depends on `homebrew`.                                                                                                                                                                                                                                         |
-| `update-changelog` | Regenerates `CHANGELOG.md` and lands it on `main` via `push-changelog.ts`: direct push (rebasing if another commit landed first), or a `github-actions[bot]` PR with squash auto-merge when branch protection rejects the push. A dedicated concurrency group serializes it across concurrent tag releases.                                                                  |
+| `update-changelog` | Regenerates `CHANGELOG.md` and lands it on `main` via `push-changelog.ts`: direct push (rebasing if another commit landed first), or a REST-created PR when branch protection rejects the push. A dedicated concurrency group serializes it across concurrent tag releases.                                                                                                  |
 | `release-summary`  | Always runs (even when a channel fails) and writes a per-channel ✅/❌ status table to the run summary (`publish-summary.sh`), naming the exact job to re-run. Because the fan-out isolates failures, a partial release is recovered by re-running only the failed job(s).                                                                                                   |
 
 `workflow_dispatch` accepts an explicit `version` input for a manual run; it is
@@ -397,10 +398,12 @@ The [One-shot contract](#one-shot-contract) table lists every secret. In short:
 - **`CARGO_REGISTRY_TOKEN`** repo secret: crates.io API token with
   `publish-new` + `publish-update` scope for the `mangostudio` crate (see
   [crates.io launcher](#cratesio-launcher)).
+- **`CHANGELOG_PR_TOKEN`** repo secret: fine-grained PAT with pull requests
+  read/write on this repository for the protected-branch changelog PR fallback.
 - Permission for the release workflow to land `CHANGELOG.md` on `main`: the
   `update-changelog` job grants `contents: write` for the direct push and
-  `pull-requests: write` for the protected-branch PR fallback — no branch-protection
-  changes needed.
+  uses `CHANGELOG_PR_TOKEN` for the protected-branch PR fallback — no
+  branch-protection changes needed.
 
 The npm publish job grants `id-token: write` so token-based publishes can include
 npm provenance. npm trusted publishing (OIDC without `NPM_TOKEN`) is the future

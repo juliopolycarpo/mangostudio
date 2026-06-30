@@ -4,8 +4,8 @@
 // Fast path: commit and push directly. A rebase retry absorbs unrelated commits
 // that land on the base branch between checkout and push (the concurrent-release
 // race). If the push is rejected because the branch is protected, fall back to
-// opening a github-actions[bot] pull request — and enable squash auto-merge when
-// the repo allows it — so the changelog still lands without a failed release.
+// opening a pull request through GitHub's REST API so the changelog still lands
+// without a failed release.
 //
 // The regenerate step (`bun run changelog --release <version>`) runs before this
 // script; here we only commit the working-tree change and get it onto the branch.
@@ -16,6 +16,7 @@ import { error, info, success, warn } from '../lib/log';
 const GIT_BOT_NAME = 'github-actions[bot]';
 const GIT_BOT_EMAIL = 'github-actions[bot]@users.noreply.github.com';
 const CHANGELOG_FILE = 'CHANGELOG.md';
+const PULL_REQUESTS_ENDPOINT = 'repos/{owner}/{repo}/pulls';
 const PUSH_ATTEMPTS = 3;
 
 const stripLeadingV = (version: string): string => version.replace(/^v/, '');
@@ -63,7 +64,7 @@ export const directCommitMessage = (version: string): string =>
 
 /** Pull-request title for the protected-branch fallback. Intentionally omits
  * [skip ci]: the PR's commits must run the branch's required checks for
- * auto-merge to complete. */
+ * normal review and merge. */
 export const pullRequestTitle = (version: string): string =>
   `docs(changelog): update for v${version}`;
 
@@ -76,7 +77,7 @@ export const pullRequestBody = (version: string): string =>
     `Automated changelog update for \`v${version}\`.`,
     '',
     'The release workflow opened this PR because the direct push to the default',
-    'branch was rejected by branch protection. Safe to squash-merge.',
+    'branch was rejected by branch protection. Safe to review and squash-merge.',
   ].join('\n');
 
 // Signals git/GitHub emit when a push is refused by branch protection (as
@@ -123,7 +124,7 @@ export type LandResult = 'up-to-date' | 'pushed' | 'pull-request';
 /**
  * Commit the regenerated CHANGELOG.md and land it on `baseBranch`.
  * Returns 'up-to-date' when nothing changed, 'pushed' on a direct push, or
- * 'pull-request' when a protected branch forced the bot-PR fallback.
+ * 'pull-request' when a protected branch forced the REST PR fallback.
  * // Usage: await landChangelog({ version, baseBranch: 'main', git, gh })
  */
 export async function landChangelog(options: LandChangelogOptions): Promise<LandResult> {
@@ -176,73 +177,89 @@ interface OpenPullRequestOptions {
   readonly gh: CommandRunner;
 }
 
-/** Push the changelog commit to a short-lived branch and open (or reuse) a bot
- * PR, enabling squash auto-merge when the repo allows it. */
+/** Push the changelog commit to a short-lived branch and open (or reuse) a PR. */
 async function openChangelogPullRequest(options: OpenPullRequestOptions): Promise<'pull-request'> {
   const { version, baseBranch, remote, runGit, gh } = options;
   const headBranch = fallbackBranchName(version);
-  warn(`Direct push to ${baseBranch} was rejected (protected branch); opening a bot pull request.`);
+  warn(`Direct push to ${baseBranch} was rejected (protected branch); opening a pull request.`);
 
-  // Drop the [skip ci] marker so the PR's required checks run and auto-merge can
-  // complete; force-push so a re-run refreshes an existing fallback branch.
+  // Drop the [skip ci] marker so the PR's required checks run; force-push so a
+  // re-run refreshes an existing fallback branch.
   await runGit(['commit', '--amend', '--no-edit', '-m', pullRequestTitle(version)]);
   await runGit(['push', '--force', remote, `HEAD:refs/heads/${headBranch}`]);
 
-  if (!(await hasOpenPullRequest(gh, headBranch))) {
+  if (!(await hasOpenPullRequest(gh, headBranch, baseBranch))) {
     const create = await gh([
-      'pr',
-      'create',
-      '--base',
-      baseBranch,
-      '--head',
-      headBranch,
-      '--title',
-      pullRequestTitle(version),
-      '--body',
-      pullRequestBody(version),
+      'api',
+      '--method',
+      'POST',
+      PULL_REQUESTS_ENDPOINT,
+      '--raw-field',
+      `base=${baseBranch}`,
+      '--raw-field',
+      `head=${headBranch}`,
+      '--raw-field',
+      `title=${pullRequestTitle(version)}`,
+      '--raw-field',
+      `body=${pullRequestBody(version)}`,
+      '--jq',
+      '.html_url',
     ]);
     if (create.exitCode !== 0) {
-      throw new Error(`gh pr create failed (${create.exitCode}): ${combinedOutput(create)}`);
+      throw new Error(
+        [
+          `gh api pull request create failed (${create.exitCode}): ${combinedOutput(create)}`,
+          'Configure GH_TOKEN with a token that can create pull requests; in CI,',
+          'set the CHANGELOG_PR_TOKEN repository secret with Pull requests: write.',
+        ].join('\n')
+      );
     }
+    const url = create.stdout.trim();
+    if (url) info(`Opened changelog pull request: ${url}`);
   }
 
-  // Best effort: enable squash auto-merge if the repo allows it. --auto waits for
-  // required checks (it never bypasses them), so a disabled-auto-merge repo just
-  // leaves the PR open for a maintainer rather than failing the release.
-  const merge = await gh(['pr', 'merge', headBranch, '--squash', '--auto']);
-  if (merge.exitCode !== 0) {
-    warn(
-      `Could not enable auto-merge for ${headBranch}; leaving the pull request open for review.`
-    );
-  }
   return 'pull-request';
 }
 
 /** Whether an open PR already exists for `headBranch` (idempotent re-runs). */
-async function hasOpenPullRequest(gh: CommandRunner, headBranch: string): Promise<boolean> {
+async function hasOpenPullRequest(
+  gh: CommandRunner,
+  headBranch: string,
+  baseBranch: string
+): Promise<boolean> {
   const existing = await gh([
-    'pr',
-    'list',
-    '--head',
-    headBranch,
-    '--state',
-    'open',
-    '--json',
-    'number',
+    'api',
+    '--paginate',
+    '--method',
+    'GET',
+    PULL_REQUESTS_ENDPOINT,
+    '--raw-field',
+    'state=open',
+    '--raw-field',
+    `base=${baseBranch}`,
+    '--raw-field',
+    'per_page=100',
     '--jq',
-    'length',
+    `map(select(.head.ref == "${headBranch}" and .head.repo.full_name == .base.repo.full_name)) | length`,
   ]);
   if (existing.exitCode !== 0) return false;
-  const count = Number.parseInt(existing.stdout.trim(), 10);
-  return Number.isFinite(count) && count > 0;
+  // `--paginate` runs the jq per page and concatenates, so sum the per-page
+  // counts rather than parsing a single number (a head branch beyond the first
+  // page would otherwise be missed and a duplicate PR create attempted).
+  const count = existing.stdout
+    .split('\n')
+    .map((line) => Number.parseInt(line.trim(), 10))
+    .filter((value) => Number.isFinite(value))
+    .reduce((total, value) => total + value, 0);
+  return count > 0;
 }
 
 const printHelp = (): never => {
   console.log(`Usage: bun ./scripts/release/push-changelog.ts --version <version> [--branch <name>]
 
 Lands the regenerated CHANGELOG.md on the default branch (default: main). Tries a
-direct push, falling back to a github-actions[bot] pull request when the branch
-is protected. Requires GH_TOKEN for the fallback. No-ops when nothing changed.`);
+direct push, falling back to a REST-created pull request when the branch is
+protected. Requires GH_TOKEN for the fallback. No-ops when nothing changed.`);
   process.exit(0);
 };
 
