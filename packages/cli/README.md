@@ -1,6 +1,6 @@
 # mangostudio
 
-Install [MangoStudio](https://github.com/juliopolycarpo/mangostudio) — an
+Install [MangoStudio](https://mangostudio.dev) — an
 AI-powered image generation and chat studio — as a single command.
 
 ## Install
