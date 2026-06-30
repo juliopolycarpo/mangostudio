@@ -229,6 +229,7 @@ async function hasOpenPullRequest(
 ): Promise<boolean> {
   const existing = await gh([
     'api',
+    '--paginate',
     '--method',
     'GET',
     PULL_REQUESTS_ENDPOINT,
@@ -242,8 +243,15 @@ async function hasOpenPullRequest(
     `map(select(.head.ref == "${headBranch}" and .head.repo.full_name == .base.repo.full_name)) | length`,
   ]);
   if (existing.exitCode !== 0) return false;
-  const count = Number.parseInt(existing.stdout.trim(), 10);
-  return Number.isFinite(count) && count > 0;
+  // `--paginate` runs the jq per page and concatenates, so sum the per-page
+  // counts rather than parsing a single number (a head branch beyond the first
+  // page would otherwise be missed and a duplicate PR create attempted).
+  const count = existing.stdout
+    .split('\n')
+    .map((line) => Number.parseInt(line.trim(), 10))
+    .filter((value) => Number.isFinite(value))
+    .reduce((total, value) => total + value, 0);
+  return count > 0;
 }
 
 const printHelp = (): never => {

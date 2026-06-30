@@ -285,6 +285,26 @@ describe('landChangelog', () => {
     expect(gh.calls.some((call) => call[0] === 'api' && call.includes('POST'))).toBe(false);
   });
 
+  test('reuses an open PR found on a later page of paginated results', async () => {
+    const { work } = seedRepos(true);
+    // `gh api --paginate` runs the jq per page and concatenates: the head branch
+    // matches on the second page (0 on the first), so the counts must be summed.
+    const gh = ghStub({
+      'api GET repos/{owner}/{repo}/pulls': { stdout: '0\n1\n', stderr: '', exitCode: 0 },
+    });
+    writeFileSync(join(work, 'CHANGELOG.md'), '# Changelog\n\nUpdated for 1.2.3.\n');
+
+    const result = await landChangelog({
+      version: '1.2.3',
+      baseBranch: 'main',
+      git: gitRunner(work),
+      gh: gh.run,
+    });
+
+    expect(result).toBe('pull-request');
+    expect(gh.calls.some((call) => call[0] === 'api' && call.includes('POST'))).toBe(false);
+  });
+
   test('explains the required token when REST PR creation is denied', async () => {
     const { remote, work } = seedRepos(true);
     const gh = ghStub({
