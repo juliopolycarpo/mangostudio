@@ -71,9 +71,11 @@ const findApiCall = (
   );
 
 const fieldValue = (call: string[], field: string): string | undefined => {
-  const index = call.indexOf(`--raw-field`);
-  for (let i = index; i < call.length; i += 1) {
-    if (call[i] === '--raw-field' && call[i + 1]?.startsWith(`${field}=`)) {
+  for (let i = 0; i < call.length; i += 1) {
+    if (
+      (call[i] === '--raw-field' || call[i] === '--field') &&
+      call[i + 1]?.startsWith(`${field}=`)
+    ) {
       return call[i + 1]?.slice(field.length + 1);
     }
   }

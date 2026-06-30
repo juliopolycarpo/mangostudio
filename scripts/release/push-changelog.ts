@@ -250,7 +250,10 @@ async function ensureHeadBranch(gh: CommandRunner, headBranch: string, sha: stri
     `${REFS_ENDPOINT}/heads/${headBranch}`,
     '--raw-field',
     `sha=${sha}`,
-    '--raw-field',
+    // `force` is a boolean in the API; --field type-converts it, whereas
+    // --raw-field would send the string "true" and the non-fast-forward
+    // rewind would be rejected.
+    '--field',
     'force=true',
   ]);
   if (update.exitCode !== 0) {
