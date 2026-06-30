@@ -1,69 +1,32 @@
-import { afterEach, describe, expect, test } from 'bun:test';
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { describe, expect, test } from 'bun:test';
 
 import type { CaptureResult } from '../lib/exec';
 import {
   type CommandRunner,
-  directCommitMessage,
-  fallbackBranchName,
-  isProtectionRejection,
+  changelogBranchName,
+  commitMessage,
   landChangelog,
   parsePushChangelogArgs,
   pullRequestBody,
   pullRequestTitle,
 } from '../release/push-changelog';
 
-const tempDirs: string[] = [];
+const BASE_SHA = 'base-sha-0000000000000000000000000000000000000000';
+const OLD_CHANGELOG = '# Changelog\n\nInitial.\n';
+const NEW_CHANGELOG = '# Changelog\n\nUpdated for 1.2.3.\n';
+const OLD_BLOB_SHA = 'old-blob-sha';
 
-const makeTempDir = (): string => {
-  const dir = mkdtempSync(join(tmpdir(), 'mangostudio-changelog-test-'));
-  tempDirs.push(dir);
-  return dir;
-};
+const toBase64 = (text: string): string => Buffer.from(text, 'utf8').toString('base64');
 
-afterEach(() => {
-  for (const dir of tempDirs) rmSync(dir, { force: true, recursive: true });
-  tempDirs.length = 0;
-});
+const ok = (stdout = ''): CaptureResult => ({ stdout, stderr: '', exitCode: 0 });
+const fail = (stderr: string, exitCode = 1): CaptureResult => ({ stdout: '', stderr, exitCode });
 
-// Isolated git: no host/user config so signing and hook policies never leak in.
-const git = (cwd: string, ...args: string[]): string => {
-  const result = Bun.spawnSync({
-    cmd: ['git', ...args],
-    cwd,
-    env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' },
-  });
-  if (result.exitCode !== 0) {
-    throw new Error(`git ${args.join(' ')} failed: ${result.stderr.toString()}`);
-  }
-  return result.stdout.toString();
-};
-
-/** A git CommandRunner bound to `cwd`, returning the captured result (no throw). */
-const gitRunner =
-  (cwd: string): CommandRunner =>
-  (args) => {
-    const result = Bun.spawnSync({
-      cmd: ['git', '-C', cwd, ...args],
-      env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' },
-    });
-    return Promise.resolve({
-      stdout: result.stdout.toString(),
-      stderr: result.stderr.toString(),
-      exitCode: result.exitCode ?? 0,
-    });
-  };
-
-/** A gh stub that records every invocation and replies per a lookup of the
- * REST command. Pull request listing defaults to "no open PR" so the create
- * path runs. */
+/** A gh stub that records every invocation and replies per a lookup keyed on
+ * the REST method + endpoint, mirroring the real `gh api` call shape. */
 const ghStub = (
   overrides: Record<string, CaptureResult> = {}
 ): { run: CommandRunner; calls: string[][] } => {
   const calls: string[][] = [];
-  const ok = (stdout = ''): CaptureResult => ({ stdout, stderr: '', exitCode: 0 });
   const commandKey = (args: readonly string[]): string => {
     if (args[0] !== 'api') return `${args[0]} ${args[1]}`;
     const methodIndex = args.indexOf('--method');
@@ -75,51 +38,46 @@ const ghStub = (
     calls.push([...args]);
     const key = commandKey(args);
     if (key in overrides) return Promise.resolve(overrides[key]);
+    if (key === 'api GET repos/{owner}/{repo}/git/ref/heads/main')
+      return Promise.resolve(ok(`${BASE_SHA}\n`));
+    if (key === 'api GET repos/{owner}/{repo}/contents/CHANGELOG.md') {
+      return Promise.resolve(
+        ok(`${JSON.stringify({ sha: OLD_BLOB_SHA, content: toBase64(OLD_CHANGELOG) })}\n`)
+      );
+    }
+    if (key === 'api POST repos/{owner}/{repo}/git/refs') return Promise.resolve(ok());
+    if (key.startsWith('api PATCH repos/{owner}/{repo}/git/refs/heads/'))
+      return Promise.resolve(ok());
+    if (key === 'api PUT repos/{owner}/{repo}/contents/CHANGELOG.md') return Promise.resolve(ok());
     if (key === 'api GET repos/{owner}/{repo}/pulls') return Promise.resolve(ok('0\n'));
+    if (key === 'api POST repos/{owner}/{repo}/pulls') {
+      return Promise.resolve(ok('https://github.com/example/mangostudio/pull/1\n'));
+    }
     return Promise.resolve(ok());
   };
   return { run, calls };
 };
 
-/** Seed a bare remote (with a main branch + CHANGELOG.md) and a work clone of
- * it. When `protectMain` is set, the remote rejects pushes to main like GitHub
- * branch protection does, leaving other branches pushable. */
-const seedRepos = (protectMain = false): { remote: string; work: string } => {
-  const dir = makeTempDir();
-  const seedDir = join(dir, 'seed');
-  const remote = join(dir, 'remote.git');
-  const work = join(dir, 'work');
+const findApiCall = (
+  calls: string[][],
+  method: string,
+  endpointPrefix: string
+): string[] | undefined =>
+  calls.find(
+    (call) =>
+      call[0] === 'api' &&
+      call.includes(method) &&
+      call.some((arg) => arg.startsWith('repos/') && arg.startsWith(endpointPrefix))
+  );
 
-  git(dir, 'init', '--initial-branch=main', 'seed');
-  writeFileSync(join(seedDir, 'CHANGELOG.md'), '# Changelog\n\nInitial.\n');
-  git(seedDir, 'config', 'user.name', 'seed');
-  git(seedDir, 'config', 'user.email', 'seed@example.com');
-  git(seedDir, 'config', 'commit.gpgsign', 'false');
-  git(seedDir, 'add', '.');
-  git(seedDir, 'commit', '-m', 'seed changelog');
-  git(dir, 'clone', '--bare', '--quiet', 'seed', 'remote.git');
-  git(dir, 'clone', '--quiet', 'remote.git', 'work');
-
-  if (protectMain) {
-    const hook = join(remote, 'hooks', 'pre-receive');
-    writeFileSync(
-      hook,
-      [
-        '#!/bin/sh',
-        'while read old new ref; do',
-        '  if [ "$ref" = "refs/heads/main" ]; then',
-        '    echo "remote: error: GH006: Protected branch update failed for refs/heads/main." 1>&2',
-        '    exit 1',
-        '  fi',
-        'done',
-        'exit 0',
-        '',
-      ].join('\n')
-    );
-    chmodSync(hook, 0o755);
+const fieldValue = (call: string[], field: string): string | undefined => {
+  const index = call.indexOf(`--raw-field`);
+  for (let i = index; i < call.length; i += 1) {
+    if (call[i] === '--raw-field' && call[i + 1]?.startsWith(`${field}=`)) {
+      return call[i + 1]?.slice(field.length + 1);
+    }
   }
-
-  return { remote, work };
+  return undefined;
 };
 
 describe('parsePushChangelogArgs', () => {
@@ -151,179 +109,196 @@ describe('parsePushChangelogArgs', () => {
 });
 
 describe('message builders', () => {
-  test('direct commit carries [skip ci]; the PR title does not', () => {
-    expect(directCommitMessage('1.2.3')).toBe('docs(changelog): update for v1.2.3 [skip ci]');
-    expect(pullRequestTitle('1.2.3')).toBe('docs(changelog): update for v1.2.3');
+  test('commit message carries a chore(release) subject and a DCO trailer', () => {
+    const message = commitMessage('1.2.3');
+    expect(message).toContain('chore(release): update changelog for v1.2.3');
+    expect(message).toContain(
+      'Signed-off-by: github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>'
+    );
   });
 
-  test('fallback branch and PR body reference the version', () => {
-    expect(fallbackBranchName('1.2.3')).toBe('chore/changelog-v1.2.3');
+  test('PR title mirrors the commit subject so cliff.toml skips it too', () => {
+    expect(pullRequestTitle('1.2.3')).toBe('chore(release): update changelog for v1.2.3');
+  });
+
+  test('branch name and PR body reference the version', () => {
+    expect(changelogBranchName('1.2.3')).toBe('chore/changelog-v1.2.3');
     expect(pullRequestBody('1.2.3')).toContain('`v1.2.3`');
-    expect(pullRequestBody('1.2.3')).toContain('branch protection');
-  });
-});
-
-describe('isProtectionRejection', () => {
-  test('matches branch-protection signals', () => {
-    for (const message of [
-      'remote: error: GH006: Protected branch update failed for refs/heads/main.',
-      '! [remote rejected] main -> main (protected branch hook declined)',
-      'remote: error: Changes must be made through a pull request.',
-      'remote: error: Required status check "ci" is expected.',
-      'remote: Pull request is required for this branch.',
-    ]) {
-      expect(isProtectionRejection(message)).toBe(true);
-    }
-  });
-
-  test('ignores non-fast-forward and network errors so they keep retrying', () => {
-    for (const message of [
-      '! [rejected] main -> main (non-fast-forward)',
-      'Updates were rejected because the remote contains work that you do not have. (fetch first)',
-      'fatal: unable to access: Could not resolve host: github.com',
-    ]) {
-      expect(isProtectionRejection(message)).toBe(false);
-    }
+    expect(pullRequestBody('1.2.3')).toContain('merge commit');
   });
 });
 
 describe('landChangelog', () => {
-  test('no-ops when CHANGELOG.md is unchanged', async () => {
-    const { work } = seedRepos();
-    const gh = ghStub();
+  test('no-ops when the base branch already has the regenerated changelog', async () => {
+    const ghActions = ghStub();
+    const ghPr = ghStub();
 
     const result = await landChangelog({
       version: '1.2.3',
       baseBranch: 'main',
-      git: gitRunner(work),
-      gh: gh.run,
+      newChangelog: OLD_CHANGELOG,
+      ghActions: ghActions.run,
+      ghPr: ghPr.run,
     });
 
     expect(result).toBe('up-to-date');
-    expect(gh.calls).toHaveLength(0);
+    expect(ghActions.calls.some((call) => call[0] === 'api' && call.includes('PUT'))).toBe(false);
+    expect(ghPr.calls).toHaveLength(0);
   });
 
-  test('direct-pushes the changelog commit when main is writable', async () => {
-    const { remote, work } = seedRepos();
-    const gh = ghStub();
-    writeFileSync(join(work, 'CHANGELOG.md'), '# Changelog\n\nUpdated for 1.2.3.\n');
+  test('commits via the Contents API and opens a PR when the changelog changed', async () => {
+    const ghActions = ghStub();
+    const ghPr = ghStub();
 
     const result = await landChangelog({
       version: '1.2.3',
       baseBranch: 'main',
-      git: gitRunner(work),
-      gh: gh.run,
-    });
-
-    expect(result).toBe('pushed');
-    expect(gh.calls).toHaveLength(0);
-    expect(git(remote, 'show', 'main:CHANGELOG.md')).toContain('Updated for 1.2.3');
-    expect(git(remote, 'log', '-1', '--format=%an %s', 'main')).toBe(
-      'github-actions[bot] docs(changelog): update for v1.2.3 [skip ci]\n'
-    );
-  });
-
-  test('falls back to a REST-created PR when main is protected', async () => {
-    const { remote, work } = seedRepos(true);
-    const gh = ghStub();
-    const mainBefore = git(remote, 'rev-parse', 'main');
-    writeFileSync(join(work, 'CHANGELOG.md'), '# Changelog\n\nUpdated for 1.2.3.\n');
-
-    const result = await landChangelog({
-      version: '1.2.3',
-      baseBranch: 'main',
-      git: gitRunner(work),
-      gh: gh.run,
+      newChangelog: NEW_CHANGELOG,
+      ghActions: ghActions.run,
+      ghPr: ghPr.run,
     });
 
     expect(result).toBe('pull-request');
-    // main is untouched; the change lands on the fallback branch instead.
-    expect(git(remote, 'rev-parse', 'main')).toBe(mainBefore);
-    expect(git(remote, 'show', 'chore/changelog-v1.2.3:CHANGELOG.md')).toContain(
-      'Updated for 1.2.3'
+
+    const createBranch = findApiCall(ghActions.calls, 'POST', 'repos/{owner}/{repo}/git/refs');
+    expect(createBranch).toBeDefined();
+    expect(fieldValue(createBranch as string[], 'ref')).toBe('refs/heads/chore/changelog-v1.2.3');
+    expect(fieldValue(createBranch as string[], 'sha')).toBe(BASE_SHA);
+
+    const commit = findApiCall(
+      ghActions.calls,
+      'PUT',
+      'repos/{owner}/{repo}/contents/CHANGELOG.md'
     );
-    // The PR branch commit drops [skip ci] so required checks can run.
-    expect(git(remote, 'log', '-1', '--format=%s', 'chore/changelog-v1.2.3')).toBe(
-      'docs(changelog): update for v1.2.3\n'
+    expect(commit).toBeDefined();
+    expect(fieldValue(commit as string[], 'branch')).toBe('chore/changelog-v1.2.3');
+    expect(fieldValue(commit as string[], 'sha')).toBe(OLD_BLOB_SHA);
+    expect(fieldValue(commit as string[], 'content')).toBe(toBase64(NEW_CHANGELOG));
+    const committedMessage = fieldValue(commit as string[], 'message') ?? '';
+    expect(committedMessage).toContain('chore(release): update changelog for v1.2.3');
+    expect(committedMessage).toContain('Signed-off-by: github-actions[bot]');
+
+    const createPr = findApiCall(ghPr.calls, 'POST', 'repos/{owner}/{repo}/pulls');
+    expect(createPr).toBeDefined();
+    expect(fieldValue(createPr as string[], 'base')).toBe('main');
+    expect(fieldValue(createPr as string[], 'head')).toBe('chore/changelog-v1.2.3');
+    expect(fieldValue(createPr as string[], 'title')).toBe(
+      'chore(release): update changelog for v1.2.3'
     );
 
-    const create = gh.calls.find((call) => call[0] === 'api' && call.includes('POST'));
-    expect(create).toEqual([
-      'api',
-      '--method',
-      'POST',
-      'repos/{owner}/{repo}/pulls',
-      '--raw-field',
-      'base=main',
-      '--raw-field',
-      'head=chore/changelog-v1.2.3',
-      '--raw-field',
-      'title=docs(changelog): update for v1.2.3',
-      '--raw-field',
-      `body=${pullRequestBody('1.2.3')}`,
-      '--jq',
-      '.html_url',
-    ]);
-    expect(gh.calls.some((call) => call[0] === 'pr')).toBe(false);
+    // Never merges the PR it opens.
+    expect(ghPr.calls.some((call) => call[0] === 'api' && call.includes('PUT'))).toBe(false);
+    expect(ghPr.calls.some((call) => call.includes('merge'))).toBe(false);
+  });
+
+  test('commits without a blob sha when CHANGELOG.md does not exist yet', async () => {
+    const ghActions = ghStub({
+      'api GET repos/{owner}/{repo}/contents/CHANGELOG.md': fail('gh: Not Found (HTTP 404)', 1),
+    });
+    const ghPr = ghStub();
+
+    const result = await landChangelog({
+      version: '1.2.3',
+      baseBranch: 'main',
+      newChangelog: NEW_CHANGELOG,
+      ghActions: ghActions.run,
+      ghPr: ghPr.run,
+    });
+
+    expect(result).toBe('pull-request');
+    const commit = findApiCall(
+      ghActions.calls,
+      'PUT',
+      'repos/{owner}/{repo}/contents/CHANGELOG.md'
+    );
+    expect(fieldValue(commit as string[], 'sha')).toBeUndefined();
+  });
+
+  test('resets an already-existing changelog branch instead of failing', async () => {
+    const ghActions = ghStub({
+      'api POST repos/{owner}/{repo}/git/refs': fail('gh: Reference already exists (HTTP 422)', 1),
+    });
+    const ghPr = ghStub();
+
+    const result = await landChangelog({
+      version: '1.2.3',
+      baseBranch: 'main',
+      newChangelog: NEW_CHANGELOG,
+      ghActions: ghActions.run,
+      ghPr: ghPr.run,
+    });
+
+    expect(result).toBe('pull-request');
+    const reset = findApiCall(
+      ghActions.calls,
+      'PATCH',
+      'repos/{owner}/{repo}/git/refs/heads/chore/changelog-v1.2.3'
+    );
+    expect(reset).toBeDefined();
+    expect(fieldValue(reset as string[], 'sha')).toBe(BASE_SHA);
+    expect(fieldValue(reset as string[], 'force')).toBe('true');
   });
 
   test('reuses an existing open PR instead of creating a duplicate', async () => {
-    const { work } = seedRepos(true);
-    const gh = ghStub({
-      'api GET repos/{owner}/{repo}/pulls': { stdout: '1\n', stderr: '', exitCode: 0 },
+    const ghActions = ghStub();
+    const ghPr = ghStub({
+      'api GET repos/{owner}/{repo}/pulls': ok('1\n'),
     });
-    writeFileSync(join(work, 'CHANGELOG.md'), '# Changelog\n\nUpdated for 1.2.3.\n');
 
     const result = await landChangelog({
       version: '1.2.3',
       baseBranch: 'main',
-      git: gitRunner(work),
-      gh: gh.run,
+      newChangelog: NEW_CHANGELOG,
+      ghActions: ghActions.run,
+      ghPr: ghPr.run,
     });
 
     expect(result).toBe('pull-request');
-    expect(gh.calls.some((call) => call[0] === 'api' && call.includes('POST'))).toBe(false);
+    expect(ghPr.calls.some((call) => call[0] === 'api' && call.includes('POST'))).toBe(false);
   });
 
   test('reuses an open PR found on a later page of paginated results', async () => {
-    const { work } = seedRepos(true);
+    const ghActions = ghStub();
     // `gh api --paginate` runs the jq per page and concatenates: the head branch
     // matches on the second page (0 on the first), so the counts must be summed.
-    const gh = ghStub({
-      'api GET repos/{owner}/{repo}/pulls': { stdout: '0\n1\n', stderr: '', exitCode: 0 },
+    const ghPr = ghStub({
+      'api GET repos/{owner}/{repo}/pulls': ok('0\n1\n'),
     });
-    writeFileSync(join(work, 'CHANGELOG.md'), '# Changelog\n\nUpdated for 1.2.3.\n');
 
     const result = await landChangelog({
       version: '1.2.3',
       baseBranch: 'main',
-      git: gitRunner(work),
-      gh: gh.run,
+      newChangelog: NEW_CHANGELOG,
+      ghActions: ghActions.run,
+      ghPr: ghPr.run,
     });
 
     expect(result).toBe('pull-request');
-    expect(gh.calls.some((call) => call[0] === 'api' && call.includes('POST'))).toBe(false);
+    expect(ghPr.calls.some((call) => call[0] === 'api' && call.includes('POST'))).toBe(false);
   });
 
   test('explains the required token when REST PR creation is denied', async () => {
-    const { remote, work } = seedRepos(true);
-    const gh = ghStub({
-      'api POST repos/{owner}/{repo}/pulls': {
-        stdout: '',
-        stderr: 'Resource not accessible by integration',
-        exitCode: 1,
-      },
+    const ghActions = ghStub();
+    const ghPr = ghStub({
+      'api POST repos/{owner}/{repo}/pulls': fail('Resource not accessible by integration', 1),
     });
-    writeFileSync(join(work, 'CHANGELOG.md'), '# Changelog\n\nUpdated for 1.2.3.\n');
 
     await expect(
       landChangelog({
         version: '1.2.3',
         baseBranch: 'main',
-        git: gitRunner(work),
-        gh: gh.run,
+        newChangelog: NEW_CHANGELOG,
+        ghActions: ghActions.run,
+        ghPr: ghPr.run,
       })
     ).rejects.toThrow(/CHANGELOG_PR_TOKEN/);
-    expect(git(remote, 'show', 'chore/changelog-v1.2.3:CHANGELOG.md')).toContain('1.2.3');
+
+    // The commit already landed on the changelog branch before the PR step ran.
+    const commit = findApiCall(
+      ghActions.calls,
+      'PUT',
+      'repos/{owner}/{repo}/contents/CHANGELOG.md'
+    );
+    expect(commit).toBeDefined();
   });
 });

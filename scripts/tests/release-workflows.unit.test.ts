@@ -133,13 +133,14 @@ describe('release workflow binary gate', () => {
     expect(workflow).not.toContain('- "Dockerfile.alpine"');
   });
 
-  test('changelog update lands via a protection-tolerant script, not a raw direct push', () => {
+  test('changelog update always opens a pull request, never pushes to main directly', () => {
     const workflow = readText('.github/workflows/release.yml');
     const job = extractJobBlock(workflow, 'update-changelog');
     expect(job, 'update-changelog job not found').not.toBe('');
 
-    // The workflow token only needs to push commits/branches. The protected-
-    // branch PR fallback uses CHANGELOG_PR_TOKEN through the REST API.
+    // The workflow token only needs to write the commit through the Contents
+    // API. Opening the pull request always uses CHANGELOG_PR_TOKEN, since the
+    // workflow GITHUB_TOKEN is barred from creating PRs.
     expect(job).toContain('contents: write');
     expect(job).not.toContain('pull-requests: write');
 
@@ -148,15 +149,17 @@ describe('release workflow binary gate', () => {
     expect(job).toContain('group: update-changelog');
     expect(job).toContain('cancel-in-progress: false');
 
-    // Landing goes through the reusable script (direct push + REST PR fallback),
-    // with the version passed via env rather than interpolated into the shell.
+    // Landing goes through the reusable script (always opens a PR via the REST
+    // API, never a direct push), with the version passed via env rather than
+    // interpolated into the shell.
     expect(job).toContain(
       'bun ./scripts/release/push-changelog.ts --version "$VERSION" --branch main'
     );
-    expect(job).toContain(`GH_TOKEN: $${'{{ secrets.CHANGELOG_PR_TOKEN }}'}`);
+    expect(job).toContain(`GH_ACTIONS_TOKEN: $${'{{ github.token }}'}`);
+    expect(job).toContain(`GH_PR_TOKEN: $${'{{ secrets.CHANGELOG_PR_TOKEN }}'}`);
     expect(job).toContain('bun run changelog --release "$VERSION"');
 
-    // The old direct-push loop and its "unimplemented fallback" comment are gone.
+    // No raw direct push to main remains; landing only happens via the script.
     expect(job).not.toContain('git push origin main');
     expect(workflow).not.toContain('If branch protection later blocks bot pushes');
   });
