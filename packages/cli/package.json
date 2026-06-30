@@ -13,7 +13,7 @@
     "url": "git+https://github.com/juliopolycarpo/mangostudio.git",
     "directory": "packages/cli"
   },
-  "homepage": "https://github.com/juliopolycarpo/mangostudio#readme",
+  "homepage": "https://mangostudio.dev",
   "bugs": {
     "url": "https://github.com/juliopolycarpo/mangostudio/issues"
   },

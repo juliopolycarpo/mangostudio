@@ -20,8 +20,9 @@ against `SHA256SUMS` where applicable.
 | Channel                | Command                                                                                                                  |
 | ---------------------- | ------------------------------------------------------------------------------------------------------------------------ |
 | npm / bun              | `npm i -g mangostudio` / `bun add -g mangostudio`                                                                        |
+| PowerShell (Windows)   | `irm https://mangostudio.dev/install.ps1 \| iex`                                                                         |
 | Homebrew (macOS/Linux) | `brew install juliopolycarpo/tap/mangostudio`                                                                            |
-| Shell installer        | `curl -fsSL https://github.com/juliopolycarpo/mangostudio/releases/latest/download/install.sh \| bash`                   |
+| Shell installer        | `curl -fsSL https://mangostudio.dev/install.sh \| bash`                                                                  |
 | Scoop (Windows)        | `scoop bucket add juliopolycarpo https://github.com/juliopolycarpo/scoop-bucket` then `scoop install mangostudio`        |
 | Cargo                  | `cargo install mangostudio` (or `cargo binstall mangostudio`)                                                            |
 | Docker                 | `docker run -p 3001:3001 -v mango-data:/data ghcr.io/juliopolycarpo/mangostudio`                                         |
@@ -30,12 +31,16 @@ against `SHA256SUMS` where applicable.
 Quick start with the shell installer:
 
 ```bash
-curl -fsSL https://github.com/juliopolycarpo/mangostudio/releases/latest/download/install.sh | bash
+curl -fsSL https://mangostudio.dev/install.sh | bash
 mangostudio serve # start on http://localhost:3001
 ```
 
-On Windows, download and run `install.ps1` from the
-[latest release](https://github.com/juliopolycarpo/mangostudio/releases/latest),
+On Windows, run the hosted PowerShell installer:
+
+```powershell
+irm https://mangostudio.dev/install.ps1 | iex
+```
+
 or use Scoop (see table above). The Cargo channel installs a
 [small launcher](packages/cargo-shim/README.md) that downloads the same
 checksum-verified archive on first run.

@@ -35,16 +35,15 @@ Complete these once per fork or org before the first tag push:
 
 ## Release asset naming
 
-Every downstream channel (Homebrew, Scoop, Cargo launcher, shell installers)
-hardcodes these public asset names. Do not rename them without updating every
-template and installer in the same release.
+Every downstream channel (Homebrew, Scoop, Cargo launcher, the mangostudio.dev
+install scripts) hardcodes these public asset names. Do not rename them without
+updating every template and installer in the same release.
 
 | Asset                                        | Notes                                                                                                                      |
 | -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
 | `mangostudio-<version>-<platform>.tar.gz`    | Linux and macOS platforms (`linux-x64`, `linux-arm64`, `linux-x64-musl`, `linux-arm64-musl`, `darwin-x64`, `darwin-arm64`) |
 | `mangostudio-<version>-<platform>.zip`       | Windows platforms (`windows-x64`, `windows-arm64`)                                                                         |
 | `mangostudio-<version>-frontend-dist.tar.gz` | Frontend bundle only (`apps/frontend/dist`)                                                                                |
-| `install.sh` / `install.ps1`                 | Shell installers copied from `scripts/install/`                                                                            |
 | `SHA256SUMS`                                 | Checksums for every asset above                                                                                            |
 
 Each platform archive has a **flat root**: `mangostudio` (or `mangostudio.exe`),
@@ -53,6 +52,11 @@ its frontend sidecar beside the real executable path.
 
 `scripts/release/archive-assets.ts` assembles the full set; `scripts/lib/release-assets.ts`
 defines the naming contract and is covered by unit tests.
+
+Install scripts are **not** release assets. The canonical installers are hosted at
+[mangostudio.dev](https://mangostudio.dev) (`install.sh` / `install.ps1`) and download
+the platform archives above, verifying them against `SHA256SUMS`. The repo keeps
+`scripts/install/install.sh` only as a dry-run/test fixture (see below).
 
 ## Version source
 

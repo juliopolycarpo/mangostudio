@@ -1,6 +1,6 @@
 # mangostudio (launcher crate)
 
-[MangoStudio](https://github.com/juliopolycarpo/mangostudio) is an AI-powered image generation and
+[MangoStudio](https://mangostudio.dev) is an AI-powered image generation and
 chat studio. This crate is **not the application source** — it is a thin launcher so the Rust
 toolchain can install the product:
 

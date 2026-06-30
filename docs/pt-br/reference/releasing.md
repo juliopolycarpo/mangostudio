@@ -37,21 +37,26 @@ Complete uma vez por fork ou org antes do primeiro push de tag:
 
 ## Nomenclatura de assets de release
 
-Todo canal downstream (Homebrew, Scoop, launcher Cargo, instaladores shell)
-codifica estes nomes públicos de assets. Não os renomeie sem atualizar todos os
-templates e instaladores na mesma release.
+Todo canal downstream (Homebrew, Scoop, launcher Cargo, os scripts de
+instalação do mangostudio.dev) codifica estes nomes públicos de assets. Não os
+renomeie sem atualizar todos os templates e instaladores na mesma release.
 
-| Asset                                        | Notas                                       |
-| -------------------------------------------- | ------------------------------------------- |
-| `mangostudio-<version>-<platform>.tar.gz`    | Plataformas Linux e macOS                   |
-| `mangostudio-<version>-<platform>.zip`       | Plataformas Windows                         |
-| `mangostudio-<version>-frontend-dist.tar.gz` | Bundle do frontend apenas                   |
-| `install.sh` / `install.ps1`                 | Instaladores copiados de `scripts/install/` |
-| `SHA256SUMS`                                 | Checksums de todos os assets acima          |
+| Asset                                        | Notas                              |
+| -------------------------------------------- | ---------------------------------- |
+| `mangostudio-<version>-<platform>.tar.gz`    | Plataformas Linux e macOS          |
+| `mangostudio-<version>-<platform>.zip`       | Plataformas Windows                |
+| `mangostudio-<version>-frontend-dist.tar.gz` | Bundle do frontend apenas          |
+| `SHA256SUMS`                                 | Checksums de todos os assets acima |
 
 Cada arquivo de plataforma tem **raiz plana**: `mangostudio` (ou
 `mangostudio.exe`), `public/` e `README.md` — sem diretório de plataforma
 aninhado.
+
+Os scripts de instalação **não** são assets de release. Os instaladores
+canônicos ficam hospedados em [mangostudio.dev](https://mangostudio.dev)
+(`install.sh` / `install.ps1`) e baixam os arquivos de plataforma acima,
+verificando-os contra `SHA256SUMS`. O repositório mantém
+`scripts/install/install.sh` apenas como fixture de teste do dry-run.
 
 ## Fonte da versão
 
