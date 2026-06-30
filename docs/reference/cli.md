@@ -14,7 +14,7 @@ copy-paste commands, or:
 | ------------------ | ---------------------------------------------------------------------------------------------------------------- |
 | npm / bun          | `mangostudio` — see [`packages/cli/README.md`](../../packages/cli/README.md)                                     |
 | Homebrew           | `brew install juliopolycarpo/tap/mangostudio`                                                                    |
-| Shell / PowerShell | `install.sh` / `install.ps1` from GitHub Releases                                                                |
+| Shell / PowerShell | `install.sh` / `install.ps1` from [mangostudio.dev](https://mangostudio.dev)                                     |
 | Scoop              | `juliopolycarpo/scoop-bucket` → `scoop install mangostudio`                                                      |
 | Cargo              | `cargo install mangostudio` — see [`packages/cargo-shim/README.md`](../../packages/cargo-shim/README.md)         |
 | Docker             | `ghcr.io/juliopolycarpo/mangostudio` — see [`docs/operations/deployment.md`](../operations/deployment.md#docker) |

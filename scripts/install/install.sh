@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# Test-only fixture: exercises `--local` archive installation in the release
+# dry-run (.github/workflows/release-dry-run.yml) and `bun run test:build`.
+# NOT published to GitHub Releases — the canonical user installer is hosted at
+# https://mangostudio.dev/install.sh.
 set -euo pipefail
 
 REPO="juliopolycarpo/mangostudio"
@@ -97,7 +101,7 @@ version_from_local_archive() {
 
   [[ "$name" == mangostudio-*"$suffix" ]] || fail "local archive does not match ${platform}: ${name}"
   value="${name#mangostudio-}"
-  normalize_version "${value%$suffix}"
+  normalize_version "${value%"$suffix"}"
 }
 
 resolve_version() {
@@ -121,7 +125,7 @@ find_checksum() {
   local checksum filename rest
 
   # Keep in lockstep with archive-assets.ts, verify-checksum.ts, cargo-shim,
-  # and install.ps1; see scripts/tests/support/SHA256SUMS.sample.
+  # and dry-run-checksums.ts; see scripts/tests/support/SHA256SUMS.sample.
   while read -r checksum filename rest || [ -n "${checksum:-}" ]; do
     filename="${filename#\*}"
     if [ "$filename" = "$asset_name" ]; then

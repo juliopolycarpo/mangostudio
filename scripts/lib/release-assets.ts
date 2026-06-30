@@ -30,19 +30,12 @@ export interface FrontendArchivePlan {
   readonly archivePath: string;
 }
 
-export interface InstallerAssetPlan {
-  readonly sourcePath: string;
-  readonly assetName: string;
-  readonly assetPath: string;
-}
-
 export interface ReleaseAssetPlan {
   readonly rootDir: string;
   readonly outDir: string;
   readonly assetsDir: string;
   readonly platformArchives: readonly PlatformArchivePlan[];
   readonly frontendArchive: FrontendArchivePlan;
-  readonly installerAssets: readonly InstallerAssetPlan[];
   readonly checksummedAssetPaths: readonly string[];
   readonly checksumPath: string;
 }
@@ -62,11 +55,9 @@ export function createReleaseAssetPlan(options: ReleaseAssetPlanOptions): Releas
     createPlatformArchivePlan(target, options.version, outDir, assetsDir)
   );
   const frontendArchive = createFrontendArchivePlan(rootDir, options.version, assetsDir);
-  const installerAssets = createInstallerAssetPlans(rootDir, assetsDir);
   const checksummedAssetPaths = [
     ...platformArchives.map((asset) => asset.archivePath),
     frontendArchive.archivePath,
-    ...installerAssets.map((asset) => asset.assetPath),
   ];
 
   return {
@@ -75,7 +66,6 @@ export function createReleaseAssetPlan(options: ReleaseAssetPlanOptions): Releas
     assetsDir,
     platformArchives,
     frontendArchive,
-    installerAssets,
     checksummedAssetPaths,
     checksumPath: join(assetsDir, 'SHA256SUMS'),
   };
@@ -111,12 +101,4 @@ function createFrontendArchivePlan(
     assetName,
     archivePath: join(assetsDir, assetName),
   };
-}
-
-function createInstallerAssetPlans(rootDir: string, assetsDir: string): InstallerAssetPlan[] {
-  return ['install.sh', 'install.ps1'].map((assetName) => ({
-    sourcePath: join(rootDir, 'scripts', 'install', assetName),
-    assetName,
-    assetPath: join(assetsDir, assetName),
-  }));
 }

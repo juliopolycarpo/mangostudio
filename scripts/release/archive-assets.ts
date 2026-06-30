@@ -2,7 +2,7 @@
 // Assemble the GitHub Release asset set with stable names and flat archive roots.
 
 import { createHash } from 'node:crypto';
-import { chmodSync, cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 
@@ -11,7 +11,6 @@ import { assertDirectory, assertFile, assertSafeToDelete } from '../lib/fs-asser
 import {
   createReleaseAssetPlan,
   type FrontendArchivePlan,
-  type InstallerAssetPlan,
   type PlatformArchivePlan,
   type ReleaseAssetPlan,
 } from '../lib/release-assets';
@@ -28,7 +27,7 @@ import {
 const printHelp = (): never => {
   console.log(`Usage: bun ./scripts/release/archive-assets.ts [--platform <target>]
 
-Creates release-assets/ with platform archives, frontend dist, installers, and SHA256SUMS.
+Creates release-assets/ with platform archives, frontend dist, and SHA256SUMS.
 
 Flags:
   --platform <id>  Limit platform archives to one target (example: linux-x64)
@@ -45,7 +44,6 @@ export async function archiveReleaseAssets(plan: ReleaseAssetPlan): Promise<void
   }
 
   await archiveFrontend(plan.frontendArchive);
-  copyInstallers(plan.installerAssets);
   writeChecksumManifest(plan);
 }
 
@@ -104,16 +102,6 @@ async function archiveFrontend(plan: FrontendArchivePlan): Promise<void> {
   await runCommand(['tar', '-czf', plan.archivePath, '-C', plan.sourceDir, '.']);
 }
 
-function copyInstallers(installers: readonly InstallerAssetPlan[]): void {
-  for (const installer of installers) {
-    assertFile(installer.sourcePath, installer.assetName);
-    cpSync(installer.sourcePath, installer.assetPath);
-    if (installer.assetName === 'install.sh') {
-      chmodSync(installer.assetPath, 0o755);
-    }
-  }
-}
-
 function assertPlatformInputs(plan: PlatformArchivePlan): void {
   assertFile(plan.binaryPath, `${plan.platform.arch} binary`);
   assertDirectory(plan.publicDir, `${plan.platform.arch} public directory`);
@@ -123,7 +111,7 @@ function assertPlatformInputs(plan: PlatformArchivePlan): void {
 
 function writeChecksumManifest(plan: ReleaseAssetPlan): void {
   // Format contract is pinned by scripts/tests/support/SHA256SUMS.sample and
-  // consumed by verify-checksum.ts, cargo-shim, install.sh, and install.ps1.
+  // consumed by verify-checksum.ts, cargo-shim, and the mangostudio.dev install scripts.
   const lines = plan.checksummedAssetPaths.map((assetPath) => {
     assertFile(assetPath, basename(assetPath));
     return `${sha256File(assetPath)}  ${basename(assetPath)}`;

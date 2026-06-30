@@ -41,7 +41,7 @@ describe('releaseArchiveFileName', () => {
 });
 
 describe('createReleaseAssetPlan', () => {
-  test('plans flat platform archives, frontend dist, installers, and SHA256SUMS', () => {
+  test('plans flat platform archives, frontend dist, and SHA256SUMS', () => {
     const plan = createReleaseAssetPlan({ version: '1.2.3', rootDir: '/repo' });
 
     expect(plan.platformArchives.map((asset) => asset.assetName)).toEqual([
@@ -55,16 +55,10 @@ describe('createReleaseAssetPlan', () => {
       'mangostudio-1.2.3-linux-arm64-musl.tar.gz',
     ]);
     expect(plan.frontendArchive.assetName).toBe('mangostudio-1.2.3-frontend-dist.tar.gz');
-    expect(plan.installerAssets.map((asset) => asset.assetName)).toEqual([
-      'install.sh',
-      'install.ps1',
-    ]);
     expect(plan.checksumPath).toBe(join('/repo', 'release-assets', 'SHA256SUMS'));
     expect(plan.checksummedAssetPaths.map((assetPath) => basename(assetPath))).toEqual([
       ...plan.platformArchives.map((asset) => asset.assetName),
       'mangostudio-1.2.3-frontend-dist.tar.gz',
-      'install.sh',
-      'install.ps1',
     ]);
   });
 

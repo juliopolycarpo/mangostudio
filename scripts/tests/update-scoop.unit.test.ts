@@ -14,7 +14,6 @@ const fixtureManifest = (version: string): string =>
     ),
     `${'a'.repeat(64)}  mangostudio-${version}-darwin-arm64.tar.gz`,
     `${'b'.repeat(64)}  mangostudio-${version}-linux-x64.tar.gz`,
-    `${'0'.repeat(64)}  install.ps1`,
   ].join('\n');
 
 const template = readFileSync(SCOOP_MANIFEST_TEMPLATE_PATH, 'utf8');

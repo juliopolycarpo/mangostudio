@@ -16,7 +16,6 @@ const fixtureManifest = (version: string): string =>
     ),
     `${'e'.repeat(64)}  mangostudio-${version}-windows-x64.zip`,
     `${'f'.repeat(64)}  mangostudio-${version}-frontend-dist.tar.gz`,
-    `${'0'.repeat(64)}  install.sh`,
   ].join('\n');
 
 const template = readFileSync(HOMEBREW_FORMULA_TEMPLATE_PATH, 'utf8');
