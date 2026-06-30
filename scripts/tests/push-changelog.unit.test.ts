@@ -57,17 +57,25 @@ const gitRunner =
   };
 
 /** A gh stub that records every invocation and replies per a lookup of the
- * subcommand. `pr list` defaults to "no open PR" so the create path runs. */
+ * REST command. Pull request listing defaults to "no open PR" so the create
+ * path runs. */
 const ghStub = (
   overrides: Record<string, CaptureResult> = {}
 ): { run: CommandRunner; calls: string[][] } => {
   const calls: string[][] = [];
   const ok = (stdout = ''): CaptureResult => ({ stdout, stderr: '', exitCode: 0 });
+  const commandKey = (args: readonly string[]): string => {
+    if (args[0] !== 'api') return `${args[0]} ${args[1]}`;
+    const methodIndex = args.indexOf('--method');
+    const method = methodIndex >= 0 ? (args[methodIndex + 1] ?? 'GET') : 'GET';
+    const endpoint = args.find((arg) => arg.startsWith('repos/')) ?? '';
+    return `api ${method} ${endpoint}`;
+  };
   const run: CommandRunner = (args) => {
     calls.push([...args]);
-    const key = `${args[0]} ${args[1]}`;
+    const key = commandKey(args);
     if (key in overrides) return Promise.resolve(overrides[key]);
-    if (key === 'pr list') return Promise.resolve(ok('0\n'));
+    if (key === 'api GET repos/{owner}/{repo}/pulls') return Promise.resolve(ok('0\n'));
     return Promise.resolve(ok());
   };
   return { run, calls };
@@ -215,7 +223,7 @@ describe('landChangelog', () => {
     );
   });
 
-  test('falls back to a bot PR when main is protected', async () => {
+  test('falls back to a REST-created PR when main is protected', async () => {
     const { remote, work } = seedRepos(true);
     const gh = ghStub();
     const mainBefore = git(remote, 'rev-parse', 'main');
@@ -239,31 +247,31 @@ describe('landChangelog', () => {
       'docs(changelog): update for v1.2.3\n'
     );
 
-    const create = gh.calls.find((call) => call[0] === 'pr' && call[1] === 'create');
+    const create = gh.calls.find((call) => call[0] === 'api' && call.includes('POST'));
     expect(create).toEqual([
-      'pr',
-      'create',
-      '--base',
-      'main',
-      '--head',
-      'chore/changelog-v1.2.3',
-      '--title',
-      'docs(changelog): update for v1.2.3',
-      '--body',
-      pullRequestBody('1.2.3'),
+      'api',
+      '--method',
+      'POST',
+      'repos/{owner}/{repo}/pulls',
+      '--raw-field',
+      'base=main',
+      '--raw-field',
+      'head=chore/changelog-v1.2.3',
+      '--raw-field',
+      'title=docs(changelog): update for v1.2.3',
+      '--raw-field',
+      `body=${pullRequestBody('1.2.3')}`,
+      '--jq',
+      '.html_url',
     ]);
-    expect(gh.calls).toContainEqual([
-      'pr',
-      'merge',
-      'chore/changelog-v1.2.3',
-      '--squash',
-      '--auto',
-    ]);
+    expect(gh.calls.some((call) => call[0] === 'pr')).toBe(false);
   });
 
   test('reuses an existing open PR instead of creating a duplicate', async () => {
     const { work } = seedRepos(true);
-    const gh = ghStub({ 'pr list': { stdout: '1\n', stderr: '', exitCode: 0 } });
+    const gh = ghStub({
+      'api GET repos/{owner}/{repo}/pulls': { stdout: '1\n', stderr: '', exitCode: 0 },
+    });
     writeFileSync(join(work, 'CHANGELOG.md'), '# Changelog\n\nUpdated for 1.2.3.\n');
 
     const result = await landChangelog({
@@ -274,35 +282,28 @@ describe('landChangelog', () => {
     });
 
     expect(result).toBe('pull-request');
-    expect(gh.calls.some((call) => call[1] === 'create')).toBe(false);
-    expect(gh.calls).toContainEqual([
-      'pr',
-      'merge',
-      'chore/changelog-v1.2.3',
-      '--squash',
-      '--auto',
-    ]);
+    expect(gh.calls.some((call) => call[0] === 'api' && call.includes('POST'))).toBe(false);
   });
 
-  test('still lands the PR when auto-merge is not allowed', async () => {
+  test('explains the required token when REST PR creation is denied', async () => {
     const { remote, work } = seedRepos(true);
     const gh = ghStub({
-      'pr merge': {
+      'api POST repos/{owner}/{repo}/pulls': {
         stdout: '',
-        stderr: 'auto-merge is not allowed for this repository',
+        stderr: 'Resource not accessible by integration',
         exitCode: 1,
       },
     });
     writeFileSync(join(work, 'CHANGELOG.md'), '# Changelog\n\nUpdated for 1.2.3.\n');
 
-    const result = await landChangelog({
-      version: '1.2.3',
-      baseBranch: 'main',
-      git: gitRunner(work),
-      gh: gh.run,
-    });
-
-    expect(result).toBe('pull-request');
+    await expect(
+      landChangelog({
+        version: '1.2.3',
+        baseBranch: 'main',
+        git: gitRunner(work),
+        gh: gh.run,
+      })
+    ).rejects.toThrow(/CHANGELOG_PR_TOKEN/);
     expect(git(remote, 'show', 'chore/changelog-v1.2.3:CHANGELOG.md')).toContain('1.2.3');
   });
 });
