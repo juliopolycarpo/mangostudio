@@ -7,7 +7,7 @@ pre-commit:
       stage_fixed: true
     dprint:
       glob: "*.{md,mdx,toml,yml,yaml}"
-      run: bunx dprint fmt {staged_files}
+      run: bunx dprint fmt --allow-no-files {staged_files}
       stage_fixed: true
     dprint-dockerfile:
       glob: "{Dockerfile,Dockerfile.*}"
