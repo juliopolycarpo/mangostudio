@@ -1,4 +1,4 @@
-import logoUrl from '@/assets/logo.webp';
+import logoUrl from '@/assets/logo.png';
 import { useI18n } from '@/hooks/use-i18n';
 
 interface LogoProps {
