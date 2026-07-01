@@ -123,6 +123,13 @@ async function buildStandaloneTarget(
       console.log(`📁 Copied frontend dist to ${frontendDestination}`);
     }
 
+    const cursorSidecarSource = join(ROOT_DIR, 'apps/api/src/services/providers/cursor/sidecar');
+    const cursorSidecarDestination = join(platformOutDir, 'cursor-sidecar');
+    if (existsSync(cursorSidecarSource)) {
+      cpSync(cursorSidecarSource, cursorSidecarDestination, { recursive: true });
+      console.log(`📁 Copied Cursor sidecar to ${cursorSidecarDestination}`);
+    }
+
     return true;
   } catch (caughtError) {
     console.error(`❌ Error building ${target.arch}:`, caughtError);

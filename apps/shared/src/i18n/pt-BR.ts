@@ -399,6 +399,8 @@ export const messages = {
       cancelButton: 'Cancelar',
       addConnectorButton: 'Adicionar Conector',
       validating: 'Validando...',
+      cursorNodeRequired: 'Você precisa do Node.js instalado para executar agentes Cursor SDK.',
+      cursorNodeNotFound: 'Binário `node` não encontrado.',
       modalsModalTitle: 'Escolher Modelos Disponíveis',
       modelsModalTitle: 'Escolher Modelos Disponíveis',
       modelsModalDescription: 'Os modelos habilitados para',
@@ -623,6 +625,7 @@ export const messages = {
     openai: 'OpenAI',
     'openai-compatible': 'OpenAI Compatível',
     deepseek: 'DeepSeek',
+    cursor: 'Cursor',
     openrouter: 'OpenRouter',
   },
 

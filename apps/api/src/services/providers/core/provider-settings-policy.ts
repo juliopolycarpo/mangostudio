@@ -9,6 +9,7 @@ import type {
   ReasoningPolicy,
 } from '@mangostudio/shared/provider-settings';
 import type { ProviderType, ReasoningEffort } from '@mangostudio/shared/types';
+import { detectNodeRuntime } from '../cursor/node-runtime';
 
 const PROVIDER_TYPES: ReadonlyArray<ProviderType> = [
   'gemini',
@@ -16,6 +17,7 @@ const PROVIDER_TYPES: ReadonlyArray<ProviderType> = [
   'openai-compatible',
   'anthropic',
   'deepseek',
+  'cursor',
 ];
 
 interface ProviderSettingsPolicy {
@@ -94,6 +96,19 @@ const PROVIDER_POLICIES: Record<ProviderType, ProviderSettingsPolicy> = {
       maxToolIterations: MAX_TOOL_ITERATIONS_DEFAULT,
     },
   },
+  cursor: {
+    displayName: 'Cursor',
+    reasoning: buildReasoningPolicy(['low', 'medium', 'high'], true, false),
+    promptCachingSupported: false,
+    toolUseSupported: false,
+    structuredOutputSupported: false,
+    maxOutputTokensLimit: 128_000,
+    defaults: {
+      thinkingEnabled: true,
+      reasoningEffort: 'medium',
+      maxToolIterations: MAX_TOOL_ITERATIONS_DEFAULT,
+    },
+  },
 };
 
 function buildReasoningPolicy(
@@ -123,11 +138,33 @@ export function getDefaultProviderSettings(provider: ProviderType): ProviderRunt
   return normalizeProviderRuntimeSettings(provider, PROVIDER_POLICIES[provider].defaults);
 }
 
+export function getProviderRuntimeAvailability(provider: ProviderType): {
+  runtimeAvailable: boolean;
+  runtimeUnavailableReason?: string;
+} {
+  if (provider !== 'cursor') {
+    return { runtimeAvailable: true };
+  }
+
+  const runtime = detectNodeRuntime();
+  if (runtime.available) {
+    return { runtimeAvailable: true };
+  }
+
+  return {
+    runtimeAvailable: false,
+    runtimeUnavailableReason:
+      runtime.reason ??
+      'You need NodeJS installed to run Cursor SDK Agents. `node` binary not found',
+  };
+}
+
 export function buildProviderSettingsDescriptor(
   provider: ProviderType,
   savedSettings?: Partial<ProviderRuntimeSettings>
 ): ProviderSettingsDescriptor {
   const policy = getProviderSettingsPolicy(provider);
+  const runtime = getProviderRuntimeAvailability(provider);
   return {
     provider,
     displayName: policy.displayName,
@@ -138,6 +175,10 @@ export function buildProviderSettingsDescriptor(
     structuredOutputSupported: policy.structuredOutputSupported,
     maxOutputTokensLimit: policy.maxOutputTokensLimit,
     settings: normalizeProviderRuntimeSettings(provider, savedSettings),
+    runtimeAvailable: runtime.runtimeAvailable,
+    ...(runtime.runtimeUnavailableReason
+      ? { runtimeUnavailableReason: runtime.runtimeUnavailableReason }
+      : {}),
   };
 }
 

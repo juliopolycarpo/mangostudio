@@ -121,6 +121,22 @@ work = "another-key-here"
 
 MangoStudio will sync these keys automatically the next time the Settings page is loaded or a generation is requested.
 
+### Cursor SDK Connector
+
+The **Cursor** provider runs local Cursor SDK agents against your workspace. It requires:
+
+- `CURSOR_API_KEY` (or `[cursor_api_keys]` in `config.toml`)
+- **Node.js 22.13+** on the host (the agent loop runs in a Node sidecar)
+
+Optional workspace override:
+
+```toml
+[cursor]
+workspace_dir = "/path/to/your/project"
+```
+
+See [docs/providers/cursor.md](docs/providers/cursor.md) for details.
+
 ## Project Structure
 
 ```

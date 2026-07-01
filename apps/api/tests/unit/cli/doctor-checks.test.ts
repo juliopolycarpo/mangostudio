@@ -38,6 +38,7 @@ function makeConfig(overrides: Partial<MangoConfig> = {}): MangoConfig {
     agents: { dir: '/data/agents' },
     auth: { secret: 'x'.repeat(32), url: 'http://localhost:3001' },
     security: { trustProxy: false },
+    cursor: { workspaceDir: '' },
     corsOrigins: [],
     configFilePath: '/data/config.toml',
     ...overrides,

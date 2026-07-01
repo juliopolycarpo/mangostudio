@@ -70,6 +70,10 @@ export interface MangoConfig {
   corsOrigins: string[];
   /** Path to the config.toml that was loaded (for TOML-based services). */
   configFilePath: string;
+  cursor: {
+    /** Workspace directory for Cursor SDK local agents. Empty = process.cwd(). */
+    workspaceDir: string;
+  };
 }
 
 const DEFAULT_CONFIG: Omit<MangoConfig, 'corsOrigins' | 'configFilePath'> = {
@@ -81,6 +85,7 @@ const DEFAULT_CONFIG: Omit<MangoConfig, 'corsOrigins' | 'configFilePath'> = {
   agents: { dir: '' },
   auth: { secret: '', url: '' },
   security: { trustProxy: false },
+  cursor: { workspaceDir: '' },
 };
 
 export const AUTH_SECRET_MIN_LENGTH = 32;
@@ -125,6 +130,9 @@ const ENV_KEY_MAP: Record<string, (cfg: MangoConfig, value: string) => void> = {
   },
   TRUST_PROXY: (cfg, v) => {
     cfg.security.trustProxy = parseBooleanFlag(v);
+  },
+  CURSOR_WORKSPACE_DIR: (cfg, v) => {
+    cfg.cursor.workspaceDir = v;
   },
 };
 
@@ -252,6 +260,7 @@ function cloneDefaults(): MangoConfig {
     agents: { ...DEFAULT_CONFIG.agents },
     auth: { ...DEFAULT_CONFIG.auth },
     security: { ...DEFAULT_CONFIG.security },
+    cursor: { ...DEFAULT_CONFIG.cursor },
     corsOrigins: [],
     configFilePath: '',
   };
@@ -301,6 +310,11 @@ function applyToml(cfg: MangoConfig, parsed: Record<string, unknown>): void {
   if (security) {
     if (typeof security.trustProxy === 'boolean') cfg.security.trustProxy = security.trustProxy;
   }
+
+  const cursor = parsed.cursor as Record<string, unknown> | undefined;
+  if (cursor) {
+    if (typeof cursor.workspace_dir === 'string') cfg.cursor.workspaceDir = cursor.workspace_dir;
+  }
 }
 
 /** Applies .env overrides onto a config object. */
@@ -347,6 +361,10 @@ function computeDerived(cfg: MangoConfig, tomlPath: string): void {
     cfg.agents.dir = join(getHomeMangoDir(), 'agents');
   } else {
     cfg.agents.dir = resolveUserPath(cfg.agents.dir);
+  }
+
+  if (cfg.cursor.workspaceDir) {
+    cfg.cursor.workspaceDir = resolveUserPath(cfg.cursor.workspaceDir);
   }
 
   // CORS origins from frontend host/port (include +1 for Vite port bumping)

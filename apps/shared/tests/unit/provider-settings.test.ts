@@ -56,6 +56,7 @@ describe('provider settings contracts', () => {
         reasoningEffort: 'xhigh',
         maxToolIterations: 10,
       },
+      runtimeAvailable: true,
     };
 
     expect(Value.Check(ProviderSettingsDescriptorSchema, descriptor)).toBe(true);

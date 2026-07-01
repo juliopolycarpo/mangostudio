@@ -59,6 +59,7 @@ const MOCK_DESCRIPTORS = {
         thinkingEnabled: true,
         reasoningEffort: 'high',
       },
+      runtimeAvailable: true,
     },
     {
       provider: 'anthropic',
@@ -77,6 +78,7 @@ const MOCK_DESCRIPTORS = {
       settings: {
         provider: 'anthropic',
       },
+      runtimeAvailable: true,
     },
   ],
 };

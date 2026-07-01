@@ -8,6 +8,7 @@ export const ProviderTypeSchema = Type.Union([
   Type.Literal('openai-compatible'),
   Type.Literal('anthropic'),
   Type.Literal('deepseek'),
+  Type.Literal('cursor'),
 ]);
 
 export const ProviderSettingScopeSchema = Type.Literal('provider');
@@ -69,6 +70,8 @@ export const ProviderSettingsDescriptorSchema = Type.Object({
   structuredOutputSupported: Type.Boolean(),
   maxOutputTokensLimit: Type.Integer({ minimum: 1 }),
   settings: ProviderRuntimeSettingsSchema,
+  runtimeAvailable: Type.Boolean(),
+  runtimeUnavailableReason: Type.Optional(Type.String()),
 });
 
 export const ProviderSettingsListResponseSchema = Type.Object({

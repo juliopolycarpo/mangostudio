@@ -1,8 +1,10 @@
 import type { ProviderType } from '@mangostudio/shared';
+import { useQuery } from '@tanstack/react-query';
 import { Database, Eye, EyeOff, FileCode, LoaderCircle, ShieldCheck } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { useI18n } from '@/hooks/use-i18n';
+import { providerSettingsListQueryOptions } from '../../providers/queries';
 import type { useConnectorForm } from '../hooks/use-connector-form';
 
 const PROVIDER_OPTIONS: { id: ProviderType }[] = [
@@ -11,6 +13,7 @@ const PROVIDER_OPTIONS: { id: ProviderType }[] = [
   { id: 'openai-compatible' },
   { id: 'anthropic' },
   { id: 'deepseek' },
+  { id: 'cursor' },
 ];
 
 type FormHook = ReturnType<typeof useConnectorForm>;
@@ -38,6 +41,21 @@ export function AddConnectorModal({
 }: AddConnectorModalProps) {
   const { t } = useI18n();
   const s = t.settings.connectors;
+  const { data: providerSettings } = useQuery(providerSettingsListQueryOptions());
+
+  const isProviderUnavailable = (provider: ProviderType): boolean => {
+    const descriptor = providerSettings?.providers.find((entry) => entry.provider === provider);
+    return descriptor?.runtimeAvailable === false;
+  };
+
+  const unavailableReason = (provider: ProviderType): string | undefined => {
+    const descriptor = providerSettings?.providers.find((entry) => entry.provider === provider);
+    if (descriptor?.runtimeUnavailableReason) return descriptor.runtimeUnavailableReason;
+    if (provider === 'cursor' && descriptor?.runtimeAvailable === false) {
+      return `${s.cursorNodeRequired} ${s.cursorNodeNotFound}`;
+    }
+    return undefined;
+  };
 
   const sourceOptions = [
     {
@@ -72,27 +90,42 @@ export function AddConnectorModal({
           {/* Provider selector */}
           <div className="flex flex-col gap-1.5">
             <span className="text-sm font-medium text-on-surface-variant">{s.providerLabel}</span>
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2">
-              {PROVIDER_OPTIONS.map(({ id }) => (
-                <button
-                  key={id}
-                  type="button"
-                  onClick={() =>
-                    setForm({
-                      ...form,
-                      provider: id,
-                      baseUrl: id === 'openai-compatible' || id === 'deepseek' ? form.baseUrl : '',
-                    })
-                  }
-                  className={`py-2 px-3 rounded-xl border text-xs font-bold text-center transition-all ${
-                    form.provider === id
-                      ? 'bg-primary/10 border-primary text-primary'
-                      : 'bg-surface-container-lowest border-outline-variant/10 text-on-surface hover:border-outline-variant/30'
-                  }`}
-                >
-                  {t.providers[id]}
-                </button>
-              ))}
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2">
+              {PROVIDER_OPTIONS.map(({ id }) => {
+                const unavailable = isProviderUnavailable(id);
+                const hint = unavailableReason(id);
+                return (
+                  <div key={id} className="flex flex-col gap-1">
+                    <button
+                      type="button"
+                      disabled={unavailable}
+                      onClick={() => {
+                        if (unavailable) return;
+                        setForm({
+                          ...form,
+                          provider: id,
+                          baseUrl:
+                            id === 'openai-compatible' || id === 'deepseek' ? form.baseUrl : '',
+                        });
+                      }}
+                      className={`py-2 px-3 rounded-xl border text-xs font-bold text-center transition-all ${
+                        unavailable
+                          ? 'opacity-40 cursor-not-allowed bg-surface-container-lowest border-outline-variant/10 text-on-surface-variant'
+                          : form.provider === id
+                            ? 'bg-primary/10 border-primary text-primary'
+                            : 'bg-surface-container-lowest border-outline-variant/10 text-on-surface hover:border-outline-variant/30'
+                      }`}
+                    >
+                      {t.providers[id]}
+                    </button>
+                    {unavailable && hint ? (
+                      <p className="text-[10px] leading-snug text-on-surface-variant/60 px-1">
+                        {hint}
+                      </p>
+                    ) : null}
+                  </div>
+                );
+              })}
             </div>
           </div>
 

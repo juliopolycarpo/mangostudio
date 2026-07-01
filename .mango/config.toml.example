@@ -68,3 +68,12 @@ url = ""
 # Anthropic API key connectors.
 [anthropic_api_keys]
 # default = "sk-ant-..."
+
+# Cursor API key connectors.
+[cursor_api_keys]
+# default = "cursor_..."
+
+# Optional workspace directory for Cursor SDK local agents.
+# Empty = current working directory when MangoStudio starts.
+[cursor]
+# workspace_dir = "/path/to/your/project"
