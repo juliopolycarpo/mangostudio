@@ -142,7 +142,11 @@ describe('streamCursorAgentSidecar', () => {
   it('throws when Node.js runtime is unavailable', async () => {
     await mock.module('../../../../../src/services/providers/cursor/runtime-availability', () => ({
       detectCursorRuntimeAvailability: () =>
-        Promise.resolve({ available: false, reason: 'Node.js 22.13 or newer is required.' }),
+        Promise.resolve({
+          available: false,
+          reasonCode: 'cursor.version_insufficient',
+          reasonParams: { foundVersion: 'v20.0.0' },
+        }),
     }));
 
     const { streamCursorAgentSidecar, CursorSidecarError } = await import(

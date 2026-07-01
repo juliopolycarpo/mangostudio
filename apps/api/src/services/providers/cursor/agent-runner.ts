@@ -9,6 +9,7 @@ import { getCursorSidecarScriptPath } from '../../../lib/runtime-paths';
 import { sanitizeShellEnv } from '../../tools/builtin/_shell-env';
 import type { StreamingChunk } from '../types';
 import { detectCursorRuntimeAvailability } from './runtime-availability';
+import { resolveCursorRuntimeUnavailableMessage } from './runtime-reason';
 
 export interface CursorSidecarCustomTool {
   name: string;
@@ -139,7 +140,7 @@ export async function* streamCursorAgentSidecar(
 ): AsyncIterable<StreamingChunk> {
   const runtime = await detectCursorRuntimeAvailability();
   if (!runtime.available || !runtime.nodePath) {
-    throw new CursorSidecarError(runtime.reason ?? 'Node.js is required for Cursor SDK agents.');
+    throw new CursorSidecarError(resolveCursorRuntimeUnavailableMessage(runtime));
   }
 
   const child = spawn(

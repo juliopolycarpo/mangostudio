@@ -27,6 +27,7 @@ import { CursorApiError, fetchCursorModels, validateCursorApiKey } from './clien
 import { ensureCursorAgentHooks } from './hooks';
 import { buildCursorAgentPrompt } from './prompt-builder';
 import { detectCursorRuntimeAvailability } from './runtime-availability';
+import { resolveCursorRuntimeUnavailableMessage } from './runtime-reason';
 
 const secretService = createProviderSecretService({
   provider: 'cursor',
@@ -148,9 +149,7 @@ async function prepareCursorSidecar(
 ): Promise<PreparedCursorSidecar> {
   const runtime = await detectCursorRuntimeAvailability();
   if (!runtime.available || !runtime.nodePath) {
-    throw new CursorRuntimeUnavailableError(
-      runtime.reason ?? 'Node.js is required for Cursor SDK agents.'
-    );
+    throw new CursorRuntimeUnavailableError(resolveCursorRuntimeUnavailableMessage(runtime));
   }
 
   const agentDir = await ensureCursorAgentHooks(runtime.nodePath);
@@ -207,9 +206,7 @@ async function loadPreparedRuntime(
 ): Promise<PreparedCursorRuntime> {
   const runtime = await detectCursorRuntimeAvailability();
   if (!runtime.available) {
-    throw new CursorRuntimeUnavailableError(
-      runtime.reason ?? 'Node.js is required for Cursor SDK agents.'
-    );
+    throw new CursorRuntimeUnavailableError(resolveCursorRuntimeUnavailableMessage(runtime));
   }
 
   const { apiKey, workspaceDir } = await resolveClientConfig(userId, modelName);
@@ -341,9 +338,7 @@ const cursorProvider: AIProvider = {
 
     const runtime = await detectCursorRuntimeAvailability();
     if (!runtime.available) {
-      throw new CursorRuntimeUnavailableError(
-        runtime.reason ?? 'Node.js is required for Cursor SDK agents.'
-      );
+      throw new CursorRuntimeUnavailableError(resolveCursorRuntimeUnavailableMessage(runtime));
     }
 
     await validateCursorApiKey(req.apiKey.trim());

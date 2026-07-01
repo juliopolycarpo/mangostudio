@@ -61,4 +61,32 @@ describe('provider settings contracts', () => {
 
     expect(Value.Check(ProviderSettingsDescriptorSchema, descriptor)).toBe(true);
   });
+
+  it('accepts cursor runtime unavailability reason codes', () => {
+    expect(
+      Value.Check(ProviderSettingsDescriptorSchema, {
+        provider: 'cursor',
+        displayName: 'Cursor',
+        scope: 'provider',
+        reasoning: {
+          supportedEfforts: ['low', 'medium', 'high'],
+          defaultEffort: 'medium',
+          thinkingToggleSupported: true,
+          reasoningWithToolsSupported: false,
+        },
+        promptCachingSupported: false,
+        toolUseSupported: false,
+        structuredOutputSupported: false,
+        maxOutputTokensLimit: 128000,
+        settings: {
+          provider: 'cursor',
+          thinkingEnabled: true,
+          reasoningEffort: 'medium',
+          maxToolIterations: 10,
+        },
+        runtimeAvailable: false,
+        runtimeUnavailableReason: 'cursor.node_not_found',
+      })
+    ).toBe(true);
+  });
 });

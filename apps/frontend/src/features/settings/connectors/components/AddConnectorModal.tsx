@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/Input';
 import { useI18n } from '@/hooks/use-i18n';
 import { providerSettingsListQueryOptions } from '../../providers/queries';
 import type { useConnectorForm } from '../hooks/use-connector-form';
+import { formatConnectorRuntimeUnavailableHint } from '../lib/runtime-unavailable-hint';
 
 const PROVIDER_OPTIONS: { id: ProviderType }[] = [
   { id: 'gemini' },
@@ -50,11 +51,12 @@ export function AddConnectorModal({
 
   const unavailableReason = (provider: ProviderType): string | undefined => {
     const descriptor = providerSettings?.providers.find((entry) => entry.provider === provider);
-    if (descriptor?.runtimeUnavailableReason) return descriptor.runtimeUnavailableReason;
-    if (provider === 'cursor' && descriptor?.runtimeAvailable === false) {
-      return `${s.cursorNodeRequired} ${s.cursorNodeNotFound}`;
-    }
-    return undefined;
+    if (descriptor?.runtimeAvailable !== false) return undefined;
+    return formatConnectorRuntimeUnavailableHint(
+      descriptor.runtimeUnavailableReason,
+      descriptor.runtimeUnavailableReasonParams,
+      s
+    );
   };
 
   const sourceOptions = [
@@ -78,55 +80,66 @@ export function AddConnectorModal({
     },
   ];
 
+  const unavailableProviders = PROVIDER_OPTIONS.flatMap(({ id }) => {
+    if (!isProviderUnavailable(id)) return [];
+    const hint = unavailableReason(id);
+    return hint ? [{ id, hint }] : [];
+  });
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-sm animate-in fade-in duration-200">
-      <div className="bg-surface-container-high w-full max-w-lg rounded-3xl p-5 sm:p-8 shadow-2xl border border-outline-variant/20 space-y-5 sm:space-y-6 max-h-[90vh] sm:max-h-[85vh] overflow-y-auto">
-        <div className="space-y-2">
+      <div className="bg-surface-container-high w-full max-w-lg rounded-3xl p-5 sm:p-8 shadow-2xl border border-outline-variant/20 flex flex-col max-h-[90vh] sm:max-h-[85vh]">
+        <div className="space-y-2 mb-5 sm:mb-6">
           <h3 className="text-xl font-bold text-on-surface">{s.addModalTitle}</h3>
           <p className="text-sm text-on-surface-variant/70">{s.addModalDescription}</p>
         </div>
 
-        <div className="space-y-4">
+        <div className="flex-1 overflow-y-auto hide-scrollbar pr-1 space-y-4 min-h-0">
           {/* Provider selector */}
           <div className="flex flex-col gap-1.5">
             <span className="text-sm font-medium text-on-surface-variant">{s.providerLabel}</span>
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2">
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
               {PROVIDER_OPTIONS.map(({ id }) => {
                 const unavailable = isProviderUnavailable(id);
-                const hint = unavailableReason(id);
                 return (
-                  <div key={id} className="flex flex-col gap-1">
-                    <button
-                      type="button"
-                      disabled={unavailable}
-                      onClick={() => {
-                        if (unavailable) return;
-                        setForm({
-                          ...form,
-                          provider: id,
-                          baseUrl:
-                            id === 'openai-compatible' || id === 'deepseek' ? form.baseUrl : '',
-                        });
-                      }}
-                      className={`py-2 px-3 rounded-xl border text-xs font-bold text-center transition-all ${
-                        unavailable
-                          ? 'opacity-40 cursor-not-allowed bg-surface-container-lowest border-outline-variant/10 text-on-surface-variant'
-                          : form.provider === id
-                            ? 'bg-primary/10 border-primary text-primary'
-                            : 'bg-surface-container-lowest border-outline-variant/10 text-on-surface hover:border-outline-variant/30'
-                      }`}
-                    >
-                      {t.providers[id]}
-                    </button>
-                    {unavailable && hint ? (
-                      <p className="text-[10px] leading-snug text-on-surface-variant/60 px-1">
-                        {hint}
-                      </p>
-                    ) : null}
-                  </div>
+                  <button
+                    key={id}
+                    type="button"
+                    disabled={unavailable}
+                    onClick={() => {
+                      if (unavailable) return;
+                      setForm({
+                        ...form,
+                        provider: id,
+                        baseUrl:
+                          id === 'openai-compatible' || id === 'deepseek' ? form.baseUrl : '',
+                      });
+                    }}
+                    className={`min-h-11 py-2.5 px-3 rounded-xl border text-xs sm:text-sm font-semibold text-center leading-snug transition-all ${
+                      unavailable
+                        ? 'opacity-40 cursor-not-allowed bg-surface-container-lowest border-outline-variant/10 text-on-surface-variant'
+                        : form.provider === id
+                          ? 'bg-primary/10 border-primary text-primary'
+                          : 'bg-surface-container-lowest border-outline-variant/10 text-on-surface hover:border-outline-variant/30'
+                    }`}
+                  >
+                    {t.providers[id]}
+                  </button>
                 );
               })}
             </div>
+            {unavailableProviders.length > 0 ? (
+              <div className="mt-1 rounded-xl border border-outline-variant/15 bg-surface-container-lowest px-3 py-2.5 space-y-1.5">
+                {unavailableProviders.map(({ id, hint }) => (
+                  <p key={id} className="text-[11px] leading-snug text-on-surface-variant/70">
+                    <span className="font-semibold text-on-surface-variant">
+                      {t.providers[id]}:
+                    </span>{' '}
+                    {hint}
+                  </p>
+                ))}
+              </div>
+            ) : null}
           </div>
 
           <Input
@@ -246,9 +259,11 @@ export function AddConnectorModal({
           </div>
         </div>
 
-        {formError && <p className="text-xs text-error font-medium text-center">{formError}</p>}
+        {formError ? (
+          <p className="mt-4 text-xs text-error font-medium text-center shrink-0">{formError}</p>
+        ) : null}
 
-        <div className="flex gap-3">
+        <div className="flex gap-3 pt-4 sm:pt-5 shrink-0">
           <Button variant="secondary" onClick={onClose} className="flex-1">
             {s.cancelButton}
           </Button>

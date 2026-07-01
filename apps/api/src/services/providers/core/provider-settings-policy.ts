@@ -5,6 +5,8 @@ import {
 } from '@mangostudio/shared/app-settings';
 import type {
   ProviderRuntimeSettings,
+  ProviderRuntimeUnavailableReason,
+  ProviderRuntimeUnavailableReasonParams,
   ProviderSettingsDescriptor,
   ReasoningPolicy,
 } from '@mangostudio/shared/provider-settings';
@@ -140,7 +142,8 @@ export function getDefaultProviderSettings(provider: ProviderType): ProviderRunt
 
 export async function getProviderRuntimeAvailability(provider: ProviderType): Promise<{
   runtimeAvailable: boolean;
-  runtimeUnavailableReason?: string;
+  runtimeUnavailableReason?: ProviderRuntimeUnavailableReason;
+  runtimeUnavailableReasonParams?: ProviderRuntimeUnavailableReasonParams;
 }> {
   if (provider !== 'cursor') {
     return { runtimeAvailable: true };
@@ -153,7 +156,8 @@ export async function getProviderRuntimeAvailability(provider: ProviderType): Pr
 
   return {
     runtimeAvailable: false,
-    runtimeUnavailableReason: runtime.reason,
+    runtimeUnavailableReason: runtime.reasonCode ?? 'cursor.node_not_found',
+    ...(runtime.reasonParams ? { runtimeUnavailableReasonParams: runtime.reasonParams } : {}),
   };
 }
 
@@ -176,6 +180,9 @@ export async function buildProviderSettingsDescriptor(
     runtimeAvailable: runtime.runtimeAvailable,
     ...(runtime.runtimeUnavailableReason
       ? { runtimeUnavailableReason: runtime.runtimeUnavailableReason }
+      : {}),
+    ...(runtime.runtimeUnavailableReasonParams
+      ? { runtimeUnavailableReasonParams: runtime.runtimeUnavailableReasonParams }
       : {}),
   };
 }

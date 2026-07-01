@@ -87,6 +87,7 @@ describe('provider settings policy', () => {
     );
 
     expect(runtime.available).toBe(false);
-    expect(runtime.reason).toContain('Cursor SDK sidecar script is missing');
+    expect(runtime.reasonCode).toBe('cursor.sidecar_missing');
+    expect(runtime.reasonParams?.sidecarPath).toContain('cursor-sidecar/run-agent.mjs');
   });
 });

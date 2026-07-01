@@ -6,6 +6,10 @@
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { promisify } from 'node:util';
+import type {
+  ProviderRuntimeUnavailableReason,
+  ProviderRuntimeUnavailableReasonParams,
+} from '@mangostudio/shared/provider-settings';
 
 const execFileAsync = promisify(execFile);
 
@@ -15,7 +19,8 @@ const CACHE_TTL_MS = 30_000;
 
 export interface NodeRuntimeStatus {
   available: boolean;
-  reason?: string;
+  reasonCode?: ProviderRuntimeUnavailableReason;
+  reasonParams?: ProviderRuntimeUnavailableReasonParams;
   nodePath?: string;
   version?: string;
 }
@@ -82,7 +87,7 @@ async function probeNodeRuntime(): Promise<NodeRuntimeStatus> {
   if (!nodePath) {
     return {
       available: false,
-      reason: 'You need NodeJS installed to run Cursor SDK Agents. `node` binary not found',
+      reasonCode: 'cursor.node_not_found',
     };
   }
 
@@ -90,7 +95,7 @@ async function probeNodeRuntime(): Promise<NodeRuntimeStatus> {
   if (!versionText) {
     return {
       available: false,
-      reason: 'You need NodeJS installed to run Cursor SDK Agents. `node` binary not found',
+      reasonCode: 'cursor.node_not_found',
     };
   }
 
@@ -100,7 +105,8 @@ async function probeNodeRuntime(): Promise<NodeRuntimeStatus> {
       available: false,
       nodePath,
       version: versionText,
-      reason: `Node.js ${MIN_NODE_MAJOR}.${MIN_NODE_MINOR}+ is required for Cursor SDK Agents (found ${versionText}).`,
+      reasonCode: 'cursor.version_insufficient',
+      reasonParams: { foundVersion: versionText },
     };
   }
 

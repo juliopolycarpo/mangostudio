@@ -48,6 +48,19 @@ export const ProviderRuntimeSettingsSchema = Type.Object({
   parallelToolCallsEnabled: Type.Optional(Type.Boolean()),
 });
 
+export const CURSOR_MIN_NODE_VERSION = '22.13';
+
+export const ProviderRuntimeUnavailableReasonSchema = Type.Union([
+  Type.Literal('cursor.node_not_found'),
+  Type.Literal('cursor.version_insufficient'),
+  Type.Literal('cursor.sidecar_missing'),
+]);
+
+export const ProviderRuntimeUnavailableReasonParamsSchema = Type.Object({
+  foundVersion: Type.Optional(Type.String()),
+  sidecarPath: Type.Optional(Type.String()),
+});
+
 export const UpdateProviderRuntimeSettingsBodySchema = Type.Object({
   thinkingEnabled: Type.Optional(Type.Boolean()),
   reasoningEffort: Type.Optional(ReasoningEffortSchema),
@@ -71,7 +84,8 @@ export const ProviderSettingsDescriptorSchema = Type.Object({
   maxOutputTokensLimit: Type.Integer({ minimum: 1 }),
   settings: ProviderRuntimeSettingsSchema,
   runtimeAvailable: Type.Boolean(),
-  runtimeUnavailableReason: Type.Optional(Type.String()),
+  runtimeUnavailableReason: Type.Optional(ProviderRuntimeUnavailableReasonSchema),
+  runtimeUnavailableReasonParams: Type.Optional(ProviderRuntimeUnavailableReasonParamsSchema),
 });
 
 export const ProviderSettingsListResponseSchema = Type.Object({
@@ -84,6 +98,12 @@ export type ReasoningPolicy = Static<typeof ReasoningPolicySchema>;
 export type ProviderRuntimeSettings = Static<typeof ProviderRuntimeSettingsSchema>;
 export type UpdateProviderRuntimeSettingsBody = Static<
   typeof UpdateProviderRuntimeSettingsBodySchema
+>;
+export type ProviderRuntimeUnavailableReason = Static<
+  typeof ProviderRuntimeUnavailableReasonSchema
+>;
+export type ProviderRuntimeUnavailableReasonParams = Static<
+  typeof ProviderRuntimeUnavailableReasonParamsSchema
 >;
 export type ProviderSettingsDescriptor = Static<typeof ProviderSettingsDescriptorSchema>;
 export type ProviderSettingsListResponse = Static<typeof ProviderSettingsListResponseSchema>;

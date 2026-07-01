@@ -402,6 +402,10 @@ export const messages = {
       validating: 'Validando...',
       cursorNodeRequired: 'Você precisa do Node.js instalado para executar agentes Cursor SDK.',
       cursorNodeNotFound: 'Binário `node` não encontrado.',
+      cursorNodeVersionInsufficient:
+        'Node.js {minVersion}+ é necessário para agentes Cursor SDK (encontrado {version}).',
+      cursorSidecarMissing: 'O script sidecar do Cursor SDK está ausente.',
+      cursorSidecarMissingAt: 'O script sidecar do Cursor SDK está ausente em {path}.',
       modalsModalTitle: 'Escolher Modelos Disponíveis',
       modelsModalTitle: 'Escolher Modelos Disponíveis',
       modelsModalDescription: 'Os modelos habilitados para',

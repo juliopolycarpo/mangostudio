@@ -398,6 +398,10 @@ export const messages: Messages = {
       validating: 'Validating...',
       cursorNodeRequired: 'You need NodeJS installed to run Cursor SDK Agents.',
       cursorNodeNotFound: '`node` binary not found',
+      cursorNodeVersionInsufficient:
+        'Node.js {minVersion}+ is required for Cursor SDK Agents (found {version}).',
+      cursorSidecarMissing: 'Cursor SDK sidecar script is missing.',
+      cursorSidecarMissingAt: 'Cursor SDK sidecar script is missing at {path}.',
       modalsModalTitle: 'Choose Available Models',
       modelsModalTitle: 'Choose Available Models',
       modelsModalDescription: 'Models enabled for',

@@ -1,9 +1,7 @@
 import { existsSync } from 'node:fs';
+import type { ProviderRuntimeUnavailableReasonParams } from '@mangostudio/shared/provider-settings';
 import { getCursorSidecarScriptPath } from '../../../lib/runtime-paths';
 import { detectNodeRuntime, type NodeRuntimeStatus } from './node-runtime';
-
-const NODE_RUNTIME_UNAVAILABLE_REASON =
-  'You need NodeJS installed to run Cursor SDK Agents. `node` binary not found';
 
 export interface CursorRuntimeStatus extends NodeRuntimeStatus {
   sidecarScriptPath?: string;
@@ -22,18 +20,20 @@ export function evaluateCursorRuntimeAvailability(
     return {
       ...nodeRuntime,
       available: false,
-      reason: nodeRuntime.reason ?? NODE_RUNTIME_UNAVAILABLE_REASON,
+      reasonCode: nodeRuntime.reasonCode ?? 'cursor.node_not_found',
     };
   }
 
   const sidecarScriptPath = options.sidecarScriptPath ?? getCursorSidecarScriptPath();
   const sidecarExists = options.sidecarExists ?? existsSync;
   if (!sidecarExists(sidecarScriptPath)) {
+    const reasonParams: ProviderRuntimeUnavailableReasonParams = { sidecarPath: sidecarScriptPath };
     return {
       ...nodeRuntime,
       available: false,
       sidecarScriptPath,
-      reason: `Cursor SDK sidecar script is missing at ${sidecarScriptPath}.`,
+      reasonCode: 'cursor.sidecar_missing',
+      reasonParams,
     };
   }
 

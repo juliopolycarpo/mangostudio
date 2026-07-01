@@ -274,7 +274,7 @@ describe('cursor provider foundation', () => {
     const runtime = await getProviderRuntimeAvailability('cursor');
     expect(typeof runtime.runtimeAvailable).toBe('boolean');
     if (!runtime.runtimeAvailable) {
-      expect(runtime.runtimeUnavailableReason).toContain('NodeJS');
+      expect(runtime.runtimeUnavailableReason).toBe('cursor.node_not_found');
     }
   });
 

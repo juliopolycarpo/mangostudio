@@ -5,16 +5,22 @@
  */
 
 import { dirname, join } from 'node:path';
+import type {
+  ProviderRuntimeUnavailableReason,
+  ProviderRuntimeUnavailableReasonParams,
+} from '@mangostudio/shared/provider-settings';
 import {
   AUTH_SECRET_MIN_LENGTH,
   getAuthSecretValidationMessage,
   type MangoConfig,
 } from '../lib/config';
 import type { ServerState } from '../lib/server-state';
+import { formatCursorRuntimeUnavailableReason } from '../services/providers/cursor/runtime-reason';
 
 export interface NodeRuntimeProbe {
   available: boolean;
-  reason?: string;
+  reasonCode?: ProviderRuntimeUnavailableReason;
+  reasonParams?: ProviderRuntimeUnavailableReasonParams;
   version?: string;
 }
 
@@ -113,7 +119,9 @@ export function checkCursorNodeRuntime(runtime: NodeRuntimeProbe): CheckResult {
   }
   return fail(
     'Cursor runtime',
-    runtime.reason ?? 'Node.js >= 22.13 and the Cursor SDK sidecar are required.'
+    runtime.reasonCode
+      ? formatCursorRuntimeUnavailableReason(runtime.reasonCode, runtime.reasonParams)
+      : 'Node.js >= 22.13 and the Cursor SDK sidecar are required.'
   );
 }
 

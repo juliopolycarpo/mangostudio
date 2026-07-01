@@ -1,8 +1,13 @@
 export {
+  CURSOR_MIN_NODE_VERSION,
   type PromptCachePreference,
   PromptCachePreferenceSchema,
   type ProviderRuntimeSettings,
   ProviderRuntimeSettingsSchema,
+  type ProviderRuntimeUnavailableReason,
+  type ProviderRuntimeUnavailableReasonParams,
+  ProviderRuntimeUnavailableReasonParamsSchema,
+  ProviderRuntimeUnavailableReasonSchema,
   type ProviderSettingScope,
   ProviderSettingScopeSchema,
   type ProviderSettingsDescriptor,

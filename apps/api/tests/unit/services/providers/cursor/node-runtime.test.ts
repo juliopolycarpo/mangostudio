@@ -16,7 +16,7 @@ describe('cursor node runtime detector', () => {
       expect(status.nodePath).toBeTruthy();
       expect(status.version).toMatch(/^v?\d+\.\d+\.\d+/);
     } else {
-      expect(status.reason).toBeTruthy();
+      expect(status.reasonCode).toBeTruthy();
     }
   });
 

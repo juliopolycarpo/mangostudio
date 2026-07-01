@@ -79,7 +79,11 @@ describe('runDoctor', () => {
       controller: new FakeProcessController(),
       readState: () => Promise.resolve(null),
       detectCursorRuntime: () =>
-        Promise.resolve({ available: false, reason: 'Node.js 22.13 or newer is required.' }),
+        Promise.resolve({
+          available: false,
+          reasonCode: 'cursor.version_insufficient',
+          reasonParams: { foundVersion: 'v20.0.0' },
+        }),
       isCursorConfigured: () => true,
       log: (msg) => lines.push(msg),
       exit: (code) => {
@@ -107,7 +111,10 @@ describe('runDoctor', () => {
         Promise.resolve({
           available: false,
           version: 'v22.13.0',
-          reason: 'Cursor SDK sidecar script is missing at /tmp/cursor-sidecar/run-agent.mjs.',
+          reasonCode: 'cursor.sidecar_missing',
+          reasonParams: {
+            sidecarPath: '/tmp/cursor-sidecar/run-agent.mjs',
+          },
         }),
       isCursorConfigured: () => true,
       log: (msg) => lines.push(msg),

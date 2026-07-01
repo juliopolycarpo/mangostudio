@@ -181,7 +181,8 @@ describe('checkCursorNodeRuntime', () => {
   it('fails when Node is unavailable', () => {
     const result = checkCursorNodeRuntime({
       available: false,
-      reason: 'Node.js 22.13 or newer is required.',
+      reasonCode: 'cursor.version_insufficient',
+      reasonParams: { foundVersion: 'v20.0.0' },
     });
     expect(result.status).toBe('fail');
     expect(result.detail).toContain('Node.js 22.13');
@@ -190,7 +191,8 @@ describe('checkCursorNodeRuntime', () => {
   it('fails when the Cursor SDK sidecar is missing', () => {
     const result = checkCursorNodeRuntime({
       available: false,
-      reason: 'Cursor SDK sidecar script is missing at /tmp/cursor-sidecar/run-agent.mjs.',
+      reasonCode: 'cursor.sidecar_missing',
+      reasonParams: { sidecarPath: '/tmp/cursor-sidecar/run-agent.mjs' },
     });
     expect(result.status).toBe('fail');
     expect(result.detail).toContain('sidecar script is missing');
