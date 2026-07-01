@@ -4,11 +4,79 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com), and this
 project adheres to [Semantic Versioning](https://semver.org).
 
-## [0.1.0] - 2026-05-29
+## [0.1.0] - 2026-06-30
 
 ### 🚀 Features
 
-- **(cli)** Add @mangostudio/cli npm wrapper package
+- **(ci)** Auto-assign PR owner and reviewers from changed-file history (#389)
+- **(ci)** Auto-label PRs and pre-tag issues with taxonomy labels (#375)
+
+### 🐛 Bug Fixes
+
+- **(ci)** Cover labeler scripts and tests (#380)
+- **(scripts)** Raise + platform-extend binary cold-start wait (#378)
+- **(security)** Harden filesystem access and temp writes (#363)
+- **(security)** Harden URL and text sanitization across surfaces (#362)
+- **(release)** Harden crates.io publish probes for canary and release workflows (#353)
+
+### 🏗️ Build
+
+- **(release)** Adopt mangostudio.dev as canonical install source (#413)
+- **(cli)** Align npm package name (#411)
+
+### 🧹 Miscellaneous
+
+- **(ci)** Bump rust-lang/crates-io-auth-action from 1.0.4 to 1.0.5 (#374)
+- **(ci)** Bump actions/checkout from 6.0.3 to 7.0.0 (#376)
+- **(ci)** Bump actions/labeler from 5.0.0 to 6.1.0 (#385)
+- **(tooling)** Configure code health scanner (#391)
+- **(ci)** Bump docker/login-action from 3.7.0 to 4.2.0 (#350)
+
+### ♻️ Refactor
+
+- **(frontend)** Decompose chat and agent state surfaces (#400)
+- **(generation)** Decompose executeSubagentTurn into stage functions (#399)
+- **(generation)** Decompose streamTextTurn into stage functions (#398)
+- **(api)** Unify provider agent stream loops (#397)
+- **(api)** Extract duplicated helper flows (#396)
+- **(api)** Disambiguate DeepSeek message builders (#393)
+- **(api,frontend)** Trim dead and over-exported symbols (#392)
+
+### 📚 Documentation
+
+- **(ci)** Clarify labeler vs auto-assign workflow split (#390)
+- **(pt-br)** Align README with English counterpart and current tooling (#352)
+
+### 🧪 Testing
+
+- **(frontend)** Use istanbul coverage provider for bun portability (#395)
+
+### ⬆️ Dependencies
+
+- **(deps)** Bump turbo from 2.9.16 to 2.9.18 (#407)
+- **(deps)** Bump @playwright/test in the playwright group (#402)
+- **(deps)** Bump the vitest group with 3 updates (#401)
+- **(deps)** Bump ai from 6.0.191 to 6.0.208 (#404)
+- **(deps)** Bump react and react-dom to v19.2.7 (#277)
+- **(deps)** Bump @tanstack/router-plugin from 1.167.35 to 1.168.18 (#311)
+- **(deps)** Bump jscpd from 4.2.2 to 5.0.9 (#386)
+- **(deps)** Bump @tailwindcss/vite from 4.2.4 to 4.3.1 (#388)
+
+### 👷 CI
+
+- **(labeler)** Split area: build into type: dependencies and area: tooling (#382)
+## [0.1.0-canary] - 2026-06-15
+
+### 🚀 Features
+
+- **(release)** Canary channel on main + fault-tolerant publishing (#347)
+- **(release)** Publish Docker image to GHCR (#328)
+- **(release)** Publish mangostudio to crates.io as a binary-launcher crate (#326)
+- **(release)** Add platform installers and stable release assets (#324)
+- **(qa-gate)** Add managed PR comment lifecycle (#319)
+- **(cli)** Accept IP and port serve targets with aliases (#264)
+- **(tools)** Add write_file builtin tool (#263)
+- **(cli)** Add CLI commands and extract server bootstrap (#262)
 - **(tools)** Add grep, glob and shell built-in tools (#256)
 - **(api,frontend,shared)** Add subagent delegation and lifecycle (#237)
 - **(generation)** Resolve selected agent runtime (#236)
@@ -73,7 +141,24 @@ project adheres to [Semantic Versioning](https://semver.org).
 
 ### 🐛 Bug Fixes
 
-- **(deepseek)** Align reasoningEffort type with AI SDK union
+- **(scripts)** Harden recursive delete guards with assertSafeToDelete (#344)
+- **(release)** Align checksum manifest parsing (#339)
+- **(api)** Return not found for missing connector model updates (#294)
+- **(browser-smoke)** Automate Chromium setup (#292)
+- **(api)** Isolate test config and replace side-effect registration (#291)
+- **(deps)** Declare faker in owning workspaces (#289)
+- **(frontend)** Use TanStack Router for SPA auth redirects (#285)
+- **(frontend)** Replace hardcoded strings with i18n keys (#284)
+- **(generation)** Cap request payload sizes (#283)
+- **(api)** Return canonical auth error responses (#282)
+- **(api)** Scope rate limits per route group and bound store (#281)
+- **(frontend)** Ignore tool autosave after unmount (#276)
+- **(api)** Wait for lifecycle state before assertions (#275)
+- **(release)** Centralize version resolver with lockstep checks (#274)
+- **(release)** Validate npm package assets before publish (#273)
+- **(npm)** Harden public package metadata (#272)
+- **(detach)** Allowlist env vars forwarded to detached child (#271)
+- **(auth)** Require configured auth secret before serving (#270)
 - **(frontend)** Enable Biome a11y rules and fix violations (#242)
 - **(api)** Persist replay context state independently (#163)
 - **(api)** Harden Gemini continuation
@@ -105,7 +190,14 @@ project adheres to [Semantic Versioning](https://semver.org).
 
 ### 🧹 Miscellaneous
 
-- **(meta)** Add repository metadata and install docs
+- **(scripts)** Align validation lanes with CI gate (#321)
+- **(turbo)** Harden task graph with outputs, inputs, and env (#320)
+- **(tooling)** Consolidate temp artifacts under .mango/artifacts (#318)
+- **(test)** Orchestrate test lanes with turbo (#317)
+- **(check)** Delegate workspace validation to turbo (#316)
+- **(build)** Cache workspace builds with turbo (#315)
+- **(scripts)** Route dev servers through turbo tui (#310)
+- **(tooling)** Add turborepo 2.x baseline (#309)
 - **(ci)** Bump actions/download-artifact from 5 to 8 (#239)
 - **(tooling)** Improve agent and editor experience (#244)
 - **(docs)** Restructure docs and create pt-br mirror (#216)
@@ -126,22 +218,31 @@ project adheres to [Semantic Versioning](https://semver.org).
 - **(github)** Add extended issue templates (question, migration, config)
 - **(github)** Add repository templates and contributing guide
 
-### ◀️ Revert
-
-- **(deepseek)** Restore reasoningEffort intersection workaround
-
 ### ⚡ Performance
 
+- **(frontend)** Lazy load markdown rendering and code-split Shiki (#293)
 - **(ci)** Cache vite optimizer and deduplicate test passes (#246)
 - **(api)** Add top-level Anthropic automatic prompt caching
 
 ### ♻️ Refactor
 
-- **(scripts)** Split qa-gate render into section renderers
-- **(scripts)** Split qa-gate collect into focused collectors
-- **(scripts)** Use Bun-native fs removal in clean
-- **(scripts)** Replace execSync git helpers with Bun.spawnSync
-- **(scripts)** Split runner into focused lib modules
+- **(scripts)** Extract shared fs-assert helper for release scripts (#343)
+- **(settings)** Extract repeated settings controls (#307)
+- **(config)** Share runtime env parsing (#306)
+- **(providers)** Extract shared lifecycle helper (#305)
+- **(frontend)** Extract text generation stream reducer (#304)
+- **(chat)** Split chat feed into row and role components (#303)
+- **(providers)** Extract stream event mapper accumulators (#302)
+- **(providers)** Share chat completions stream accumulator (#301)
+- **(generation)** Split stream-text-turn into focused modules (#300)
+- **(api)** Remove unused provider compatibility exports (#299)
+- **(api)** Prune unused database row aliases (#298)
+- **(api)** Reduce internal exports to module-private scope (#297)
+- **(frontend)** Drop stale non-streaming client wrappers (#296)
+- **(api)** Centralized structured diagnostic logging (#290)
+- **(shared)** Unify shared contracts under TypeBox schemas (#287)
+- **(agents)** Consolidate tooling and migrate hooks to mjs (#265)
+- **(scripts)** Modularize qa-gate, runner, and improve CI (#261)
 - **(config)** Reorganize agent config and simplify LSP tooling (#251)
 - **(css)** Extract markdown styles and fix specificity (#243)
 - **(tooling)** Migrate lint/format to biome and add QA gate (#238)
@@ -176,18 +277,30 @@ project adheres to [Semantic Versioning](https://semver.org).
 
 ### 📚 Documentation
 
-- **(scripts)** Add scripts architecture and releasing guides
+- Refresh distribution, release runbook, and tooling docs (#329)
 - **(continuation)** Add architecture and provider dev guide (#172)
 - **(chore)** Improve repository guidelines for LLM agents
 
 ### 🧪 Testing
 
+- **(api)** Reuse streaming route test builders (#308)
+- **(frontend)** Make motion animations deterministic in tests (#288)
+- **(coverage)** Raise thresholds and add critical-flow tests (#286)
 - Migrate to bun:test, expand coverage, harden qa gate (#245)
 - **(api)** Add provider fake factories for tests (#171)
 - **(e2e)** Add Playwright Chromium auth smoke suite (#34)
 
 ### ⬆️ Dependencies
 
+- **(deps)** Remove unused workspace dependencies (#295)
+- **(deps)** Bump @tanstack/react-virtual from 3.13.24 to 3.14.2 (#278)
+- **(deps)** Bump lefthook from 2.1.6 to 2.1.9 (#280)
+- **(deps)** Bump @dprint/markdown from 0.22.0 to 0.22.1 (#268)
+- **(deps)** Bump date-fns from 4.1.0 to 4.4.0 (#269)
+- **(deps)** Bump the vitest group with 3 updates (#266)
+- **(deps)** Bump kysely from 0.29.0 to 0.29.2 (#267)
+- **(deps)** Bump motion from 12.38.0 to 12.40.0 (#259)
+- **(deps)** Bump @vitejs/plugin-react from 6.0.1 to 6.0.2 (#260)
 - **(deps)** Bump @tanstack/react-query from 5.100.9 to 5.100.14 (#255)
 - **(deps)** Bump @types/react (#252)
 - **(deps)** Bump @tanstack/react-router from 1.169.2 to 1.170.8 (#254)
@@ -282,10 +395,24 @@ project adheres to [Semantic Versioning](https://semver.org).
 
 ### 👷 CI
 
-- **(release)** Add release pipeline for binaries, npm, and GitHub release
-- Normalize cache versions and extract shared vite cache action
-- **(changelog)** Add PR changelog preview bot
-- **(changelog)** Add git-cliff config and changelog wrapper
+- **(smoke)** Expand binary platform coverage (#346)
+- **(release)** Surface npm provenance fallback (#345)
+- **(docker)** Dedupe smoke health loop and lock Dockerfile variants (#342)
+- **(release)** Document stateful retry behavior (#341)
+- **(release)** Derive dry-run checksums from targets (#340)
+- **(security)** Add supply chain scanning (#338)
+- **(release)** Land changelog via bot PR on protected main (#337)
+- **(release)** Broaden dry-run shared lib filter (#336)
+- **(release)** Cover Docker release-asset staging in dry run (#335)
+- **(release)** Verify additional install channels (#334)
+- **(release)** Verify published Docker images (#333)
+- **(actions)** Pin workflow actions to shas (#332)
+- **(release)** Gate publishing on binary smoke (#331)
+- **(release)** Add dry-run workflow (#330)
+- **(release)** Publish Scoop bucket manifest to juliopolycarpo/scoop-bucket (#327)
+- **(release)** Publish Homebrew formula to homebrew-tap (#325)
+- **(release)** Make pipeline idempotent with retry and verification (#323)
+- **(turbo)** Persist local task cache in workflows (#322)
 - **(actions)** Add reusable setup-mango composite action and cache layers
 - **(workflows)** Harden workflows and stabilize auth/logout smoke tests
 - **(template)** Automate pull request template with branch commits
