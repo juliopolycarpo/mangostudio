@@ -33,6 +33,7 @@ function createMockChild(
     signalCode?: NodeJS.Signals;
     spawnError?: Error;
     stderr?: string;
+    onStdin?: (chunk: string) => void;
   } = {}
 ): MockChild {
   const stderr = new PassThrough();
@@ -53,7 +54,10 @@ function createMockChild(
 
   child = Object.assign(new EventEmitter(), {
     stdin: {
-      write: (chunk: string) => stdinStream.write(chunk),
+      write: (chunk: string) => {
+        options.onStdin?.(chunk);
+        return stdinStream.write(chunk);
+      },
       end: () => {
         stdinStream.end();
         if (options.stderr) {
@@ -89,10 +93,14 @@ function createMockChild(
 }
 
 async function setupAgentRunnerMocks(spawnImpl: () => MockChild): Promise<void> {
-  await mock.module('../../../../../src/services/providers/cursor/node-runtime', () => ({
-    detectNodeRuntime: () =>
-      Promise.resolve({ available: true, nodePath: NODE_PATH, version: 'v22.13.0' }),
-    resetNodeRuntimeCache: () => undefined,
+  await mock.module('../../../../../src/services/providers/cursor/runtime-availability', () => ({
+    detectCursorRuntimeAvailability: () =>
+      Promise.resolve({
+        available: true,
+        nodePath: NODE_PATH,
+        version: 'v22.13.0',
+        sidecarScriptPath: '/fake/cursor-sidecar/run-agent.mjs',
+      }),
   }));
   await mock.module('../../../../../src/lib/runtime-paths', () => ({
     getCursorSidecarScriptPath: () => '/fake/cursor-sidecar/run-agent.mjs',
@@ -122,10 +130,9 @@ describe('streamCursorAgentSidecar', () => {
   });
 
   it('throws when Node.js runtime is unavailable', async () => {
-    await mock.module('../../../../../src/services/providers/cursor/node-runtime', () => ({
-      detectNodeRuntime: () =>
+    await mock.module('../../../../../src/services/providers/cursor/runtime-availability', () => ({
+      detectCursorRuntimeAvailability: () =>
         Promise.resolve({ available: false, reason: 'Node.js 22.13 or newer is required.' }),
-      resetNodeRuntimeCache: () => undefined,
     }));
 
     const { streamCursorAgentSidecar, CursorSidecarError } = await import(
@@ -178,6 +185,75 @@ describe('streamCursorAgentSidecar', () => {
       name: 'read_file',
       args: { path: 'README.md' },
     });
+  });
+
+  it('emits one streaming chunk for two-phase Cursor tool_call events', async () => {
+    await setupAgentRunnerMocks(() =>
+      createMockChild([
+        JSON.stringify({
+          type: 'tool_call',
+          callId: 'tool-1',
+          name: 'bash',
+          status: 'running',
+          args: { command: 'echo hi' },
+        }),
+        JSON.stringify({
+          type: 'tool_call',
+          callId: 'tool-1',
+          name: 'bash',
+          status: 'completed',
+          args: { command: 'echo hi' },
+          result: 'hi',
+        }),
+        JSON.stringify({
+          type: 'tool_call',
+          callId: 'tool-1',
+          name: 'bash',
+          status: 'completed',
+          args: { command: 'echo hi' },
+          result: 'hi',
+        }),
+        JSON.stringify({ type: 'done' }),
+      ])
+    );
+
+    const chunks = await collectSidecarChunks();
+    expect(chunks.filter((chunk) => chunk.type === 'tool_call')).toEqual([
+      {
+        type: 'tool_call',
+        toolCallId: 'tool-1',
+        name: 'bash',
+        args: { command: 'echo hi' },
+        content: 'hi',
+        done: false,
+      },
+    ]);
+  });
+
+  it('forwards shell tool allowlist config to the sidecar request', async () => {
+    let stdinRequest: CursorSidecarRequest | undefined;
+    await setupAgentRunnerMocks(() =>
+      createMockChild([JSON.stringify({ type: 'done' })], {
+        onStdin: (chunk) => {
+          stdinRequest = JSON.parse(chunk) as CursorSidecarRequest;
+        },
+      })
+    );
+
+    const shellTools: NonNullable<CursorSidecarRequest['shellTools']> = [
+      {
+        kind: 'bash',
+        executable: '/bin/bash',
+        description: 'Run Bash',
+        inputSchema: { type: 'object' },
+        timeoutMs: 5000,
+        maxOutputBytes: 10_000,
+      },
+    ];
+
+    await collectSidecarChunks({ ...DEFAULT_REQUEST, shellTools });
+
+    expect(stdinRequest?.shellTools).toEqual(shellTools);
   });
 
   it('yields an error chunk and stops when the sidecar reports failure', async () => {

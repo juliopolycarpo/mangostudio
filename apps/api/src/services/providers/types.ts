@@ -88,6 +88,7 @@ export interface GenerationConfig {
   thinkingEnabled: boolean;
   reasoningEffort: ReasoningEffort;
   tools?: ToolDefinition[];
+  toolSettings?: Record<string, { enabled: boolean; parameters: Record<string, unknown> }>;
   maxToolIterations?: number;
   maxOutputTokens?: number;
   promptCachePreference?: PromptCachePreference;

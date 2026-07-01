@@ -21,7 +21,7 @@ Local agents run against a configurable workspace directory:
 - Default: MangoStudio's current working directory
 - Override via `CURSOR_WORKSPACE_DIR` or `[cursor] workspace_dir` in `~/.mango/config.toml`
 
-The agent runs with tools enabled and **without** the Cursor sandbox so MangoStudio's own allowlists and upcoming secure sandbox can govern side effects.
+The agent runs with Cursor SDK tools enabled and **without** the Cursor sandbox. MangoStudio forwards enabled `bash`, `zsh`, and `powershell` tools from the active agent as Cursor custom tools, including MangoStudio timeout and output caps; Cursor's built-in local tools remain governed by the configured workspace and Cursor runtime.
 
 ## Model Discovery
 
@@ -36,7 +36,8 @@ Cursor models expose `internalAgentTools: true` in the catalog to indicate the S
 1. Chat requests resolve to the `cursor` provider via enabled connector models.
 2. MangoStudio flattens system prompt + history + user prompt into a single agent prompt.
 3. A Node sidecar (`cursor-sidecar/run-agent.mjs`) runs `Agent.create` + `agent.send` + `run.stream()`.
-4. NDJSON events are mapped to MangoStudio `StreamingChunk` values (`text`, `thinking`, `tool_call`, `error`). Internal tool calls are surfaced in chat as `cursor_internal_tool_call` system events.
+4. Enabled MangoStudio shell tools are passed to the sidecar as Cursor SDK custom tools.
+5. NDJSON events are mapped to MangoStudio `StreamingChunk` values (`text`, `thinking`, `tool_call`, `error`). Internal tool calls are surfaced in chat as `cursor_internal_tool_call` system events.
 
 Cursor runs its own agent loop; MangoStudio does **not** implement `generateAgentTurnStream` for this provider.
 
@@ -44,7 +45,8 @@ Cursor runs its own agent loop; MangoStudio does **not** implement `generateAgen
 
 - API keys follow the standard connector secret backends (OS secret store, `config.toml`, `.env`).
 - Local agents can read/edit files and run shell commands in the configured workspace.
-- MangoStudio relies on its tool allowlists and sandbox roadmap rather than Cursor's optional sandbox.
+- MangoStudio's shell tool allowlist controls which MangoStudio shell custom tools are exposed to Cursor.
+- Cursor's built-in local tools are not routed through MangoStudio's tool registry; side effects are governed by the configured workspace and Cursor runtime unless Cursor sandboxing is enabled in a future change.
 
 ## Standalone Builds
 

@@ -1,6 +1,8 @@
 import type { ReasoningEffort, SecretMetadataRow } from '@mangostudio/shared/types';
 import { getConfig } from '../../../lib/config';
 import { parseStringArray } from '../../../utils/json';
+import { findShellExecutable, type ShellKind } from '../../tools/builtin/_shell-exec';
+import { normalizeShellToolSettings } from '../../tools/builtin/_shell-tool';
 import { withModelCache } from '../core/model-cache';
 import { createProviderLifecycle } from '../core/provider-lifecycle';
 import { createProviderSecretService } from '../core/secret-service';
@@ -12,10 +14,10 @@ import type {
   TextGenerationRequest,
   TextGenerationResult,
 } from '../types';
-import { streamCursorAgentSidecar } from './agent-runner';
+import { type CursorSidecarShellTool, streamCursorAgentSidecar } from './agent-runner';
 import { CursorApiError, fetchCursorModels, validateCursorApiKey } from './client';
-import { detectNodeRuntime } from './node-runtime';
 import { buildCursorAgentPrompt } from './prompt-builder';
+import { detectCursorRuntimeAvailability } from './runtime-availability';
 
 const secretService = createProviderSecretService({
   provider: 'cursor',
@@ -67,6 +69,43 @@ function resolveCursorWorkspaceDir(): string {
   return configured || process.cwd();
 }
 
+const CURSOR_SHELL_TOOL_NAMES = [
+  'bash',
+  'zsh',
+  'powershell',
+] as const satisfies readonly ShellKind[];
+
+function buildCursorShellTools(
+  config: TextGenerationRequest['generationConfig']
+): CursorSidecarShellTool[] | undefined {
+  const definitions = new Map((config?.tools ?? []).map((tool) => [tool.name, tool]));
+  if (definitions.size === 0) return undefined;
+
+  const shellTools: CursorSidecarShellTool[] = [];
+  for (const kind of CURSOR_SHELL_TOOL_NAMES) {
+    const definition = definitions.get(kind);
+    if (!definition) continue;
+
+    const savedSettings = config?.toolSettings?.[kind];
+    if (savedSettings?.enabled === false) continue;
+
+    const executable = findShellExecutable(kind);
+    if (!executable) continue;
+
+    const settings = normalizeShellToolSettings(savedSettings?.parameters ?? {});
+    shellTools.push({
+      kind,
+      executable,
+      description: definition.description,
+      inputSchema: definition.parameters,
+      timeoutMs: settings.timeoutMs,
+      maxOutputBytes: settings.maxOutputBytes,
+    });
+  }
+
+  return shellTools.length > 0 ? shellTools : undefined;
+}
+
 const listModelsWithCache = withModelCache(
   async (userId: string): Promise<ModelInfo[]> => {
     await secretService.syncConfigFileConnectors(userId);
@@ -101,7 +140,7 @@ async function loadPreparedRuntime(
   userId: string,
   modelName?: string
 ): Promise<PreparedCursorRuntime> {
-  const runtime = await detectNodeRuntime();
+  const runtime = await detectCursorRuntimeAvailability();
   if (!runtime.available) {
     throw new CursorRuntimeUnavailableError(
       runtime.reason ?? 'Node.js is required for Cursor SDK agents.'
@@ -152,6 +191,7 @@ async function runCursorGeneration(req: TextGenerationRequest): Promise<string> 
       cwd: workspaceDir,
       prompt,
       params: buildCursorModelParams(req.generationConfig),
+      shellTools: buildCursorShellTools(req.generationConfig),
     },
     req.signal
   )) {
@@ -194,6 +234,7 @@ const cursorProvider: AIProvider = {
         cwd: workspaceDir,
         prompt,
         params: buildCursorModelParams(req.generationConfig),
+        shellTools: buildCursorShellTools(req.generationConfig),
       },
       req.signal
     )) {
@@ -219,7 +260,7 @@ const cursorProvider: AIProvider = {
       throw new CursorApiError('Cursor API key is empty.');
     }
 
-    const runtime = await detectNodeRuntime();
+    const runtime = await detectCursorRuntimeAvailability();
     if (!runtime.available) {
       throw new CursorRuntimeUnavailableError(
         runtime.reason ?? 'Node.js is required for Cursor SDK agents.'
