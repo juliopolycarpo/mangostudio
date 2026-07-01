@@ -29,6 +29,11 @@ interface SidecarEvent {
   done?: boolean;
 }
 
+interface ChildExitStatus {
+  code: number | null;
+  signal: NodeJS.Signals | null;
+}
+
 export function resolveCursorSidecarScriptPath(): string {
   return getCursorSidecarScriptPath();
 }
@@ -81,6 +86,7 @@ export async function* streamCursorAgentSidecar(
     stdio: ['pipe', 'pipe', 'pipe'],
     env: buildCursorSidecarEnv(),
   });
+  const childExit = waitForChildExit(child);
 
   let stderr = '';
   child.stderr.on('data', (chunk: Buffer) => {
@@ -138,7 +144,9 @@ export async function* streamCursorAgentSidecar(
       yield chunk;
     }
 
-    const exitCode = await waitForChildExit(child);
+    const exitStatus = await childExit;
+    if (signal?.aborted) return;
+
     if (spawnError) {
       yield {
         type: 'error',
@@ -147,10 +155,10 @@ export async function* streamCursorAgentSidecar(
       };
       return;
     }
-    if (!sawTerminal && exitCode !== 0) {
+    if (!sawTerminal && exitStatus.code !== 0) {
       yield {
         type: 'error',
-        content: stderr.trim() || `Cursor sidecar exited with code ${exitCode}.`,
+        content: stderr.trim() || formatCursorSidecarExit(exitStatus),
         done: true,
       };
       return;
@@ -165,11 +173,18 @@ export async function* streamCursorAgentSidecar(
   }
 }
 
-function waitForChildExit(child: ChildProcessWithoutNullStreams): Promise<number | null> {
-  if (child.exitCode !== null) return Promise.resolve(child.exitCode);
+function waitForChildExit(child: ChildProcessWithoutNullStreams): Promise<ChildExitStatus> {
+  if (child.exitCode !== null || child.signalCode !== null || child.killed) {
+    return Promise.resolve({ code: child.exitCode, signal: child.signalCode });
+  }
   return new Promise((resolve) => {
-    child.once('close', (code) => resolve(code));
+    child.once('close', (code, signal) => resolve({ code, signal }));
   });
+}
+
+function formatCursorSidecarExit(status: ChildExitStatus): string {
+  if (status.signal) return `Cursor sidecar exited with signal ${status.signal}.`;
+  return `Cursor sidecar exited with code ${status.code}.`;
 }
 
 export class CursorSidecarError extends Error {

@@ -9,7 +9,7 @@ import type {
   ReasoningPolicy,
 } from '@mangostudio/shared/provider-settings';
 import type { ProviderType, ReasoningEffort } from '@mangostudio/shared/types';
-import { detectNodeRuntime } from '../cursor/node-runtime';
+import { detectCursorRuntimeAvailability } from '../cursor/runtime-availability';
 
 const PROVIDER_TYPES: ReadonlyArray<ProviderType> = [
   'gemini',
@@ -146,16 +146,14 @@ export async function getProviderRuntimeAvailability(provider: ProviderType): Pr
     return { runtimeAvailable: true };
   }
 
-  const runtime = await detectNodeRuntime();
+  const runtime = await detectCursorRuntimeAvailability();
   if (runtime.available) {
     return { runtimeAvailable: true };
   }
 
   return {
     runtimeAvailable: false,
-    runtimeUnavailableReason:
-      runtime.reason ??
-      'You need NodeJS installed to run Cursor SDK Agents. `node` binary not found',
+    runtimeUnavailableReason: runtime.reason,
   };
 }
 

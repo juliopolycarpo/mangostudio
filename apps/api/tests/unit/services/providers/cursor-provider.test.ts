@@ -1,11 +1,15 @@
 import { afterEach, describe, expect, it, mock } from 'bun:test';
+import { createMockSecretMetadataRow } from '@mangostudio/shared/test-utils';
 import { getProviderRuntimeAvailability } from '../../../../src/services/providers/core/provider-settings-policy';
 import { buildCursorSidecarEnv } from '../../../../src/services/providers/cursor/agent-runner';
 import {
   CursorApiError,
   fetchCursorModels,
 } from '../../../../src/services/providers/cursor/client';
-import { buildCursorModelParams } from '../../../../src/services/providers/cursor/index';
+import {
+  buildCursorModelParams,
+  getCursorConnectorRowsForModel,
+} from '../../../../src/services/providers/cursor/index';
 import {
   getCursorFallbackModels,
   toCursorModelInfo,
@@ -29,6 +33,37 @@ describe('cursor provider foundation', () => {
   it('provides fallback models when discovery is unavailable', () => {
     const models = getCursorFallbackModels();
     expect(models.map((model) => model.modelId)).toEqual(['composer-2.5', 'auto']);
+  });
+
+  it('prefers explicit Cursor connector rows before wildcard fallbacks', () => {
+    const wildcard = createMockSecretMetadataRow({
+      id: 'wildcard',
+      provider: 'cursor',
+      enabledModels: JSON.stringify([]),
+    });
+    const disabledExplicit = createMockSecretMetadataRow({
+      id: 'disabled-explicit',
+      provider: 'cursor',
+      configured: 0,
+      enabledModels: JSON.stringify(['composer-2.5']),
+    });
+    const explicit = createMockSecretMetadataRow({
+      id: 'explicit',
+      provider: 'cursor',
+      enabledModels: JSON.stringify(['composer-2.5']),
+    });
+    const otherModel = createMockSecretMetadataRow({
+      id: 'other-model',
+      provider: 'cursor',
+      enabledModels: JSON.stringify(['auto']),
+    });
+
+    expect(
+      getCursorConnectorRowsForModel(
+        [wildcard, disabledExplicit, otherModel, explicit],
+        'composer-2.5'
+      ).map((row) => row.id)
+    ).toEqual(['explicit', 'wildcard']);
   });
 
   it('falls back to static models for transient discovery failures', async () => {

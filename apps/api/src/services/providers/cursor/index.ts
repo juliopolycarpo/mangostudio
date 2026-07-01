@@ -31,16 +31,35 @@ async function resolveClientConfig(
   await secretService.syncConfigFileConnectors(userId);
   const rows = await secretService.listMeta('cursor', userId);
 
-  for (const row of rows) {
-    if (!row.configured) continue;
-    const enabled = parseStringArray(row.enabledModels);
-    if (modelName && enabled.length > 0 && !enabled.includes(modelName)) continue;
+  for (const row of getCursorConnectorRowsForModel(rows, modelName)) {
     const apiKey = await secretService.resolveSecretValue(row);
     if (!apiKey) continue;
     return { apiKey, workspaceDir: resolveCursorWorkspaceDir() };
   }
 
   throw new CursorConnectorError('No Cursor API key is configured for the requested model.');
+}
+
+export function getCursorConnectorRowsForModel(
+  rows: SecretMetadataRow[],
+  modelName?: string
+): SecretMetadataRow[] {
+  const configuredRows = rows.filter((row) => row.configured);
+  if (!modelName) return configuredRows;
+
+  const explicitMatches: SecretMetadataRow[] = [];
+  const fallbackMatches: SecretMetadataRow[] = [];
+
+  for (const row of configuredRows) {
+    const enabled = parseStringArray(row.enabledModels);
+    if (enabled.includes(modelName)) {
+      explicitMatches.push(row);
+    } else if (enabled.length === 0) {
+      fallbackMatches.push(row);
+    }
+  }
+
+  return [...explicitMatches, ...fallbackMatches];
 }
 
 function resolveCursorWorkspaceDir(): string {

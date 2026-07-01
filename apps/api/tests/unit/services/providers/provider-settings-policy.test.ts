@@ -8,6 +8,7 @@ import {
   mergeProviderRuntimeSettings,
   normalizeProviderRuntimeSettings,
 } from '../../../../src/services/providers/core/provider-settings-policy';
+import { evaluateCursorRuntimeAvailability } from '../../../../src/services/providers/cursor/runtime-availability';
 
 describe('provider settings policy', () => {
   it('maps DeepSeek compatible efforts to supported values', () => {
@@ -74,5 +75,18 @@ describe('provider settings policy', () => {
     expect(descriptor.settings.reasoningEffort).toBe('high');
     expect(descriptor.toolUseSupported).toBe(false);
     expect(descriptor.reasoning.reasoningWithToolsSupported).toBe(false);
+  });
+
+  it('marks Cursor unavailable when the sidecar script is missing', () => {
+    const runtime = evaluateCursorRuntimeAvailability(
+      { available: true, nodePath: '/usr/bin/node', version: 'v22.13.0' },
+      {
+        sidecarScriptPath: '/missing/cursor-sidecar/run-agent.mjs',
+        sidecarExists: () => false,
+      }
+    );
+
+    expect(runtime.available).toBe(false);
+    expect(runtime.reason).toContain('Cursor SDK sidecar script is missing');
   });
 });

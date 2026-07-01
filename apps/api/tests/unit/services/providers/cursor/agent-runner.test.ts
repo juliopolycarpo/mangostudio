@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, mock } from 'bun:test';
 import { EventEmitter } from 'node:events';
 import { PassThrough, Readable } from 'node:stream';
 import type { CursorSidecarRequest } from '../../../../../src/services/providers/cursor/agent-runner';
+import type { StreamingChunk } from '../../../../../src/services/providers/types';
 
 const NODE_PATH = '/usr/bin/node';
 const DEFAULT_REQUEST: CursorSidecarRequest = {
@@ -21,19 +22,36 @@ type MockChild = EventEmitter & {
   stderr: PassThrough;
   killed: boolean;
   exitCode: number | null;
-  kill: () => void;
+  signalCode: NodeJS.Signals | null;
+  kill: (signal?: NodeJS.Signals | number) => void;
 };
 
 function createMockChild(
   stdoutLines: string[],
-  options: { exitCode?: number; spawnError?: Error; stderr?: string } = {}
+  options: {
+    exitCode?: number;
+    signalCode?: NodeJS.Signals;
+    spawnError?: Error;
+    stderr?: string;
+  } = {}
 ): MockChild {
   const stderr = new PassThrough();
   const stdinStream = new PassThrough();
 
   let stdout = Readable.from(stdoutLines.map((line) => `${line}\n`));
+  let closed = false;
+  let child: MockChild;
+  const closeChild = () => {
+    if (closed) return;
+    closed = true;
+    const code = options.signalCode ? null : (options.exitCode ?? 0);
+    const signal = options.signalCode ?? null;
+    child.exitCode = code;
+    child.signalCode = signal;
+    child.emit('close', code, signal);
+  };
 
-  const child = Object.assign(new EventEmitter(), {
+  child = Object.assign(new EventEmitter(), {
     stdin: {
       write: (chunk: string) => stdinStream.write(chunk),
       end: () => {
@@ -46,8 +64,7 @@ function createMockChild(
           if (options.spawnError) {
             child.emit('error', options.spawnError);
           }
-          child.exitCode = options.exitCode ?? 0;
-          child.emit('close', options.exitCode ?? 0);
+          closeChild();
         });
       },
       on: (...args: Parameters<PassThrough['on']>) => stdinStream.on(...args),
@@ -61,10 +78,10 @@ function createMockChild(
     stderr,
     killed: false,
     exitCode: null as number | null,
+    signalCode: null as NodeJS.Signals | null,
     kill() {
       this.killed = true;
-      child.exitCode = options.exitCode ?? 0;
-      child.emit('close', options.exitCode ?? 0);
+      closeChild();
     },
   }) as MockChild;
 
@@ -208,5 +225,42 @@ describe('streamCursorAgentSidecar', () => {
     }
 
     expect(killed).toBe(true);
+  });
+
+  it('does not hang when abort observes an already signal-closed child', async () => {
+    let killed = false;
+    await setupAgentRunnerMocks(() => {
+      const child = createMockChild([JSON.stringify({ type: 'text', text: 'slow' })], {
+        signalCode: 'SIGTERM',
+      });
+      const originalKill = child.kill.bind(child);
+      child.kill = (signal?: NodeJS.Signals | number) => {
+        killed = true;
+        originalKill(signal);
+      };
+      return child;
+    });
+
+    const controller = new AbortController();
+    const { streamCursorAgentSidecar } = await import(
+      '../../../../../src/services/providers/cursor/agent-runner'
+    );
+    const chunks: StreamingChunk[] = [];
+    const run = (async () => {
+      for await (const chunk of streamCursorAgentSidecar(DEFAULT_REQUEST, controller.signal)) {
+        chunks.push(chunk);
+        controller.abort();
+      }
+      return 'completed' as const;
+    })();
+
+    const result = await Promise.race([
+      run,
+      new Promise<'timed-out'>((resolve) => setTimeout(() => resolve('timed-out'), 250)),
+    ]);
+
+    expect(result).toBe('completed');
+    expect(killed).toBe(true);
+    expect(chunks).toEqual([{ type: 'text', text: 'slow', done: false }]);
   });
 });
