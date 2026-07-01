@@ -16,6 +16,14 @@ import {
 } from '../../../../src/services/providers/cursor/model-catalog';
 import { buildCursorAgentPrompt } from '../../../../src/services/providers/cursor/prompt-builder';
 
+function restoreEnv(key: string, previous: string | undefined): void {
+  if (previous === undefined) {
+    delete process.env[key];
+    return;
+  }
+  process.env[key] = previous;
+}
+
 describe('cursor provider foundation', () => {
   afterEach(() => {
     mock.restore();
@@ -131,6 +139,45 @@ describe('cursor provider foundation', () => {
         CUSTOM_TOKEN: 'custom-secret',
       })
     ).toEqual({ PATH: '/usr/bin', HOME: '/tmp/user' });
+  });
+
+  it('applies the shell env allow/deny policy to cursor custom tools', async () => {
+    await mock.module('../../../../src/services/tools/builtin/_shell-exec', () => ({
+      findShellExecutable: () => '/bin/bash',
+    }));
+
+    const previousToken = process.env.GITHUB_TOKEN;
+    const previousApiKey = process.env.CURSOR_API_KEY;
+    process.env.GITHUB_TOKEN = 'gh-secret';
+    process.env.CURSOR_API_KEY = 'cursor-secret';
+
+    try {
+      const { buildCursorShellTools: build } = await import(
+        '../../../../src/services/providers/cursor/index'
+      );
+
+      const [tool] =
+        build({
+          thinkingEnabled: false,
+          reasoningEffort: 'medium',
+          tools: [{ name: 'bash', description: 'Run Bash', parameters: { type: 'object' } }],
+          toolSettings: {
+            bash: {
+              enabled: true,
+              parameters: { allowedEnvVars: ['GITHUB_TOKEN'], deniedEnvVars: ['PATH'] },
+            },
+          },
+        }) ?? [];
+
+      // Allow-listed secret survives, auto-detected secret is stripped, explicit
+      // deny wins over the ambient value.
+      expect(tool?.env?.GITHUB_TOKEN).toBe('gh-secret');
+      expect(tool?.env?.CURSOR_API_KEY).toBeUndefined();
+      expect(tool?.env?.PATH).toBeUndefined();
+    } finally {
+      restoreEnv('GITHUB_TOKEN', previousToken);
+      restoreEnv('CURSOR_API_KEY', previousApiKey);
+    }
   });
 
   it('maps supported reasoning efforts to Cursor model params', () => {

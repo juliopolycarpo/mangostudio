@@ -17,6 +17,13 @@ export interface CursorSidecarShellTool {
   inputSchema: Record<string, unknown>;
   timeoutMs: number;
   maxOutputBytes: number;
+  /**
+   * Environment handed to commands this tool runs, already filtered by the
+   * shell env allow/deny policy. Computed in the API process (which still holds
+   * the full environment) so allow-listed secrets survive and denied vars are
+   * dropped — the sidecar's own process env is separately stripped of secrets.
+   */
+  env?: Record<string, string>;
 }
 
 export interface CursorSidecarRequest {

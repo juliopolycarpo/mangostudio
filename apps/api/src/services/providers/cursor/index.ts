@@ -1,6 +1,7 @@
 import type { ReasoningEffort, SecretMetadataRow } from '@mangostudio/shared/types';
 import { getConfig } from '../../../lib/config';
 import { parseStringArray } from '../../../utils/json';
+import { sanitizeShellEnv } from '../../tools/builtin/_shell-env';
 import { findShellExecutable, type ShellKind } from '../../tools/builtin/_shell-exec';
 import { normalizeShellToolSettings } from '../../tools/builtin/_shell-tool';
 import { withModelCache } from '../core/model-cache';
@@ -75,7 +76,7 @@ const CURSOR_SHELL_TOOL_NAMES = [
   'powershell',
 ] as const satisfies readonly ShellKind[];
 
-function buildCursorShellTools(
+export function buildCursorShellTools(
   config: TextGenerationRequest['generationConfig']
 ): CursorSidecarShellTool[] | undefined {
   const definitions = new Map((config?.tools ?? []).map((tool) => [tool.name, tool]));
@@ -100,6 +101,11 @@ function buildCursorShellTools(
       inputSchema: definition.parameters,
       timeoutMs: settings.timeoutMs,
       maxOutputBytes: settings.maxOutputBytes,
+      // Apply the same env allow/deny policy as the in-process shell tools. This
+      // must be resolved here (not in the sidecar), because the sidecar's own
+      // process env is stripped of secrets before it starts, so an allow-listed
+      // secret could never be recovered downstream.
+      env: sanitizeShellEnv({ allow: settings.allowedEnvVars, deny: settings.deniedEnvVars }),
     });
   }
 

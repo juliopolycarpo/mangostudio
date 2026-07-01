@@ -48,6 +48,16 @@ function clampInteger(value, fallback, min, max) {
   return Math.min(max, Math.max(min, Math.round(value)));
 }
 
+/** Keeps only string-valued entries from a request-provided env map. */
+function normalizeEnvRecord(value) {
+  if (!isRecord(value)) return undefined;
+  const env = {};
+  for (const [key, entry] of Object.entries(value)) {
+    if (typeof entry === 'string') env[key] = entry;
+  }
+  return Object.keys(env).length > 0 ? env : undefined;
+}
+
 async function readStdinJson() {
   const chunks = [];
   let total = 0;
@@ -99,6 +109,7 @@ function normalizeShellTools(value) {
         MIN_MAX_OUTPUT_BYTES,
         MAX_MAX_OUTPUT_BYTES
       ),
+      env: normalizeEnvRecord(item.env),
     });
   }
 
@@ -133,7 +144,9 @@ async function runShellCommand(tool, args) {
   try {
     child = spawn(tool.executable, buildShellInvocation(tool.kind, command), {
       ...(cwd ? { cwd } : {}),
-      env: process.env,
+      // Prefer the API-computed, policy-filtered env; fall back to the sidecar's
+      // own (already secret-stripped) env when a request omits it.
+      env: tool.env ?? process.env,
       stdin: 'ignore',
       stdout: 'pipe',
       stderr: 'pipe',

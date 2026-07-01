@@ -21,7 +21,7 @@ Local agents run against a configurable workspace directory:
 - Default: MangoStudio's current working directory
 - Override via `CURSOR_WORKSPACE_DIR` or `[cursor] workspace_dir` in `~/.mango/config.toml`
 
-The agent runs with Cursor SDK tools enabled and **without** the Cursor sandbox. MangoStudio forwards enabled `bash`, `zsh`, and `powershell` tools from the active agent as Cursor custom tools, including MangoStudio timeout and output caps; Cursor's built-in local tools remain governed by the configured workspace and Cursor runtime.
+The agent runs with Cursor SDK tools enabled and **without** the Cursor sandbox. MangoStudio forwards enabled `bash`, `zsh`, and `powershell` tools from the active agent as Cursor custom tools, including MangoStudio timeout, output caps, and the shell environment allow/deny policy; Cursor's built-in local tools remain governed by the configured workspace and Cursor runtime.
 
 ## Model Discovery
 
@@ -46,6 +46,7 @@ Cursor runs its own agent loop; MangoStudio does **not** implement `generateAgen
 - API keys follow the standard connector secret backends (OS secret store, `config.toml`, `.env`).
 - Local agents can read/edit files and run shell commands in the configured workspace.
 - MangoStudio's shell tool allowlist controls which MangoStudio shell custom tools are exposed to Cursor.
+- Each forwarded shell tool carries a resolved environment filtered by its `allowedEnvVars`/`deniedEnvVars` policy. The env is computed in the API process (before the sidecar's own environment is stripped of secrets), so allow-listed values reach the command while auto-detected and explicitly denied secrets do not.
 - Cursor's built-in local tools are not routed through MangoStudio's tool registry; side effects are governed by the configured workspace and Cursor runtime unless Cursor sandboxing is enabled in a future change.
 
 ## Standalone Builds
