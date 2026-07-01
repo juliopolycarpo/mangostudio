@@ -44,4 +44,19 @@ Cursor runs its own agent loop; MangoStudio does **not** implement `generateAgen
 
 ## Standalone Builds
 
-Binary builds copy `cursor-sidecar/` next to the executable (similar to the frontend `public/` sidecar). Node.js must still be installed separately on the host.
+Binary builds vendor a self-contained `cursor-sidecar/` beside the executable (similar to the frontend `public/` sidecar):
+
+```
+<platform>/
+  mangostudio
+  public/
+  cursor-sidecar/
+    run-agent.mjs
+    node_modules/@cursor/sdk             # platform-independent SDK JS
+    node_modules/@cursor/sdk-<platform>  # native agent + ripgrep binaries
+    node_modules/<js deps…>
+```
+
+`@cursor/sdk` cannot be bundled — its dist loads chunks via dynamic `require()` and resolves its native runtime through `createRequire(import.meta.url)` — so the real package tree ships on disk (see `scripts/lib/cursor-sidecar.ts`). Each platform archive carries only its own native package; Bun refuses to install off-host `os`/`cpu` packages, so cross-compiled targets fetch theirs straight from the npm registry at build time.
+
+**MangoStudio never ships a Node.js runtime.** The sidecar runs under the user's own Node.js `>= 22.13`, which must be installed separately on the host. Platforms without a Cursor native package (for example `windows-arm64` and the musl variants beyond glibc reach) skip the sidecar entirely, and the connector reports as unavailable there.

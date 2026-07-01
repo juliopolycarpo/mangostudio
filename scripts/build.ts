@@ -5,6 +5,12 @@ import { join } from 'node:path';
 
 import { createTurboBuildCommand, selectBuildWorkspaces } from './lib/build';
 import { ROOT_DIR, type WorkspaceName } from './lib/config';
+import {
+  assembleCursorSidecar,
+  type CursorSidecarStaging,
+  cursorNativePackageFor,
+  prepareCursorSidecarStaging,
+} from './lib/cursor-sidecar';
 import { ALL_BINARY_TARGETS, type BinaryTarget, filterBinaryTargets } from './lib/release-targets';
 import { resolveReleaseVersion } from './lib/release-version';
 import {
@@ -66,7 +72,13 @@ async function buildFrontendSidecar(dryRun: boolean): Promise<void> {
 async function buildStandaloneTarget(
   target: BinaryTarget,
   options: BinaryBuildOptions,
-  context: { apiSource: string; buildTime: string; frontendDist: string; outDir: string }
+  context: {
+    apiSource: string;
+    buildTime: string;
+    frontendDist: string;
+    outDir: string;
+    cursorSidecar: CursorSidecarStaging | null;
+  }
 ): Promise<boolean> {
   const platformOutDir = join(context.outDir, target.arch);
   mkdirSync(platformOutDir, { recursive: true });
@@ -79,6 +91,11 @@ async function buildStandaloneTarget(
     console.log(`   (dry run) Would compile for ${target.target}`);
     console.log(`✅ Successfully built ${target.name} for ${target.arch} (dry run)`);
     console.log(`📁 Would copy frontend dist to ${join(platformOutDir, 'public')}`);
+    if (cursorNativePackageFor(target)) {
+      console.log(`📁 Would vendor Cursor sidecar to ${join(platformOutDir, 'cursor-sidecar')}`);
+    } else {
+      console.log(`⏭️  Cursor sidecar unsupported for ${target.arch}; would skip`);
+    }
     return true;
   }
 
@@ -123,11 +140,14 @@ async function buildStandaloneTarget(
       console.log(`📁 Copied frontend dist to ${frontendDestination}`);
     }
 
-    const cursorSidecarSource = join(ROOT_DIR, 'apps/api/src/services/providers/cursor/sidecar');
-    const cursorSidecarDestination = join(platformOutDir, 'cursor-sidecar');
-    if (existsSync(cursorSidecarSource)) {
-      cpSync(cursorSidecarSource, cursorSidecarDestination, { recursive: true });
-      console.log(`📁 Copied Cursor sidecar to ${cursorSidecarDestination}`);
+    if (context.cursorSidecar) {
+      const cursorSidecarDestination = join(platformOutDir, 'cursor-sidecar');
+      const staged = assembleCursorSidecar(cursorSidecarDestination, target, context.cursorSidecar);
+      if (staged) {
+        console.log(`📁 Vendored Cursor sidecar to ${cursorSidecarDestination}`);
+      } else {
+        console.log(`⏭️  Cursor sidecar unsupported for ${target.arch}; skipped`);
+      }
     }
 
     return true;
@@ -364,13 +384,26 @@ async function buildStandaloneBinary(options: BinaryBuildOptions): Promise<void>
 
   await buildFrontendSidecar(options.dryRun);
 
+  const cursorSidecar = options.dryRun ? null : await prepareCursorSidecarStaging(targets);
+
   console.log(`🎯 Building executables for ${targets.length} platform(s)`);
 
-  const results = await Promise.all(
-    targets.map((target) =>
-      buildStandaloneTarget(target, options, { apiSource, buildTime, frontendDist, outDir })
-    )
-  );
+  let results: boolean[];
+  try {
+    results = await Promise.all(
+      targets.map((target) =>
+        buildStandaloneTarget(target, options, {
+          apiSource,
+          buildTime,
+          frontendDist,
+          outDir,
+          cursorSidecar,
+        })
+      )
+    );
+  } finally {
+    cursorSidecar?.cleanup();
+  }
 
   const successCount = results.filter(Boolean).length;
   const failedCount = results.length - successCount;
