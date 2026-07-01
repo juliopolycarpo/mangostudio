@@ -98,10 +98,7 @@ const lifecycle = createProviderLifecycle<PreparedCursorRuntime>({
   syncConfigFileConnectors: secretService.syncConfigFileConnectors,
 });
 
-async function runCursorGeneration(
-  req: TextGenerationRequest,
-  onChunk?: (chunk: StreamingChunk) => void
-): Promise<string> {
+async function runCursorGeneration(req: TextGenerationRequest): Promise<string> {
   const { apiKey, workspaceDir } = await lifecycle.prepareRuntime(req.userId, req.modelName);
   const prompt = buildCursorAgentPrompt({
     systemPrompt: req.systemPrompt,
@@ -125,7 +122,6 @@ async function runCursorGeneration(
     if (chunk.type === 'text' && chunk.text) {
       text += chunk.text;
     }
-    onChunk?.(chunk);
     if (chunk.done) break;
   }
 
@@ -152,8 +148,6 @@ const cursorProvider: AIProvider = {
       prompt: req.prompt,
     });
 
-    let sawTerminal = false;
-
     for await (const chunk of streamCursorAgentSidecar(
       {
         apiKey,
@@ -164,16 +158,11 @@ const cursorProvider: AIProvider = {
       req.signal
     )) {
       if (req.signal?.aborted) break;
-      if (chunk.type === 'error') {
-        sawTerminal = true;
-        yield chunk;
-        return;
-      }
       yield chunk;
-    }
-
-    if (!sawTerminal) {
-      yield { type: 'text', text: '', done: true };
+      // The sidecar stream always emits exactly one terminal chunk (error or a
+      // final empty text chunk); forward it and stop instead of appending a
+      // second terminal of our own.
+      if (chunk.done) return;
     }
   },
 
