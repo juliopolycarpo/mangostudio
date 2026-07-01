@@ -7,6 +7,10 @@ import { getCursorFallbackModels, toCursorModelInfo } from './model-catalog';
 
 interface CursorModelListEntry {
   id?: string;
+  parameters?: Array<{
+    id: string;
+    values: Array<{ value: string }>;
+  }>;
 }
 
 interface CursorSdkErrorLike {
@@ -46,15 +50,21 @@ function canUseCursorModelFallback(error: unknown): boolean {
 export async function fetchCursorModels(params: { apiKey: string }): Promise<ModelInfo[]> {
   try {
     const { Cursor } = await loadCursorSdk();
-    const models = await Cursor.models.list({ apiKey: params.apiKey.trim() });
-    const ids = (models as CursorModelListEntry[])
-      .map((entry) => entry.id)
-      .filter((id): id is string => Boolean(id));
+    const models = (await Cursor.models.list({
+      apiKey: params.apiKey.trim(),
+    })) as CursorModelListEntry[];
+    const discovered = models
+      .map((entry) => {
+        const id = entry.id?.trim();
+        if (!id) return null;
+        return toCursorModelInfo(id, entry.parameters);
+      })
+      .filter((entry): entry is NonNullable<typeof entry> => entry !== null);
 
-    if (ids.length === 0) {
+    if (discovered.length === 0) {
       throw new CursorApiError('Cursor returned no models for this API key.');
     }
-    return ids.map(toCursorModelInfo).sort((a, b) => a.displayName.localeCompare(b.displayName));
+    return discovered.sort((a, b) => a.displayName.localeCompare(b.displayName));
   } catch (error) {
     if (error instanceof CursorApiError) throw error;
     if (!canUseCursorModelFallback(error)) {

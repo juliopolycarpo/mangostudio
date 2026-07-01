@@ -10,6 +10,7 @@ import { createProviderSecretService } from '../core/secret-service';
 import type {
   AIProvider,
   ModelInfo,
+  ModelParameterInfo,
   ProviderHealthcheckRequest,
   StreamingChunk,
   TextGenerationRequest,
@@ -165,13 +166,27 @@ function isCursorThinkingEffort(value: ReasoningEffort): value is CursorThinking
 }
 
 export function buildCursorModelParams(
-  config: TextGenerationRequest['generationConfig']
+  config: TextGenerationRequest['generationConfig'],
+  modelParameters?: ModelParameterInfo[]
 ): Array<{ id: string; value: string }> | undefined {
   if (!config?.thinkingEnabled) return undefined;
   if (!config.reasoningEffort || !isCursorThinkingEffort(config.reasoningEffort)) return undefined;
   // Medium maps to the SDK default — only low/high are sent as explicit params.
   if (config.reasoningEffort === 'medium') return undefined;
+  if (!modelParameters) return undefined;
+
+  const thinkingParam = modelParameters.find((parameter) => parameter.id === 'thinking');
+  if (!thinkingParam?.values.includes(config.reasoningEffort)) return undefined;
+
   return [{ id: 'thinking', value: config.reasoningEffort }];
+}
+
+async function resolveCursorModelParameters(
+  userId: string,
+  modelName: string
+): Promise<ModelParameterInfo[] | undefined> {
+  const models = await listModelsWithCache(userId);
+  return models.find((model) => model.modelId === modelName)?.parameters;
 }
 
 const lifecycle = createProviderLifecycle<PreparedCursorRuntime>({
@@ -183,6 +198,7 @@ const lifecycle = createProviderLifecycle<PreparedCursorRuntime>({
 
 async function runCursorGeneration(req: TextGenerationRequest): Promise<string> {
   const { apiKey, workspaceDir } = await lifecycle.prepareRuntime(req.userId, req.modelName);
+  const modelParameters = await resolveCursorModelParameters(req.userId, req.modelName);
   const prompt = buildCursorAgentPrompt({
     systemPrompt: req.systemPrompt,
     history: req.history,
@@ -196,7 +212,7 @@ async function runCursorGeneration(req: TextGenerationRequest): Promise<string> 
       model: req.modelName,
       cwd: workspaceDir,
       prompt,
-      params: buildCursorModelParams(req.generationConfig),
+      params: buildCursorModelParams(req.generationConfig, modelParameters),
       shellTools: buildCursorShellTools(req.generationConfig),
     },
     req.signal
@@ -227,6 +243,7 @@ const cursorProvider: AIProvider = {
 
   async *generateTextStream(req: TextGenerationRequest): AsyncIterable<StreamingChunk> {
     const { apiKey, workspaceDir } = await lifecycle.prepareRuntime(req.userId, req.modelName);
+    const modelParameters = await resolveCursorModelParameters(req.userId, req.modelName);
     const prompt = buildCursorAgentPrompt({
       systemPrompt: req.systemPrompt,
       history: req.history,
@@ -239,7 +256,7 @@ const cursorProvider: AIProvider = {
         model: req.modelName,
         cwd: workspaceDir,
         prompt,
-        params: buildCursorModelParams(req.generationConfig),
+        params: buildCursorModelParams(req.generationConfig, modelParameters),
         shellTools: buildCursorShellTools(req.generationConfig),
       },
       req.signal

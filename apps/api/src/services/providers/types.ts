@@ -193,6 +193,12 @@ export interface ImageGenerationResult {
   imageUrl: string;
 }
 
+/** Declared model parameter with allowed values (from provider discovery). */
+export interface ModelParameterInfo {
+  id: string;
+  values: string[];
+}
+
 /** Provider capabilities and metadata for a single model. */
 export interface ModelInfo {
   modelId: string;
@@ -201,6 +207,8 @@ export interface ModelInfo {
   provider: ProviderType;
   /** Maximum input tokens accepted by the model (from provider API). */
   inputTokenLimit?: number;
+  /** Provider-specific parameter definitions discovered from the model catalog. */
+  parameters?: ModelParameterInfo[];
   capabilities: ModelCapabilities;
 }
 

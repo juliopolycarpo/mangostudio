@@ -226,19 +226,43 @@ describe('cursor provider foundation', () => {
     }
   });
 
-  it('maps supported reasoning efforts to Cursor model params', () => {
-    expect(buildCursorModelParams({ thinkingEnabled: true, reasoningEffort: 'high' })).toEqual([
-      { id: 'thinking', value: 'high' },
-    ]);
-    expect(buildCursorModelParams({ thinkingEnabled: true, reasoningEffort: 'low' })).toEqual([
-      { id: 'thinking', value: 'low' },
-    ]);
-    expect(buildCursorModelParams({ thinkingEnabled: true, reasoningEffort: 'medium' })).toBe(
+  it('maps supported reasoning efforts to Cursor model params when the model declares thinking', () => {
+    const thinkingParameters = [{ id: 'thinking', values: ['low', 'medium', 'high'] }];
+
+    expect(
+      buildCursorModelParams({ thinkingEnabled: true, reasoningEffort: 'high' }, thinkingParameters)
+    ).toEqual([{ id: 'thinking', value: 'high' }]);
+    expect(
+      buildCursorModelParams({ thinkingEnabled: true, reasoningEffort: 'low' }, thinkingParameters)
+    ).toEqual([{ id: 'thinking', value: 'low' }]);
+    expect(
+      buildCursorModelParams(
+        { thinkingEnabled: true, reasoningEffort: 'medium' },
+        thinkingParameters
+      )
+    ).toBe(undefined);
+    expect(
+      buildCursorModelParams(
+        { thinkingEnabled: false, reasoningEffort: 'high' },
+        thinkingParameters
+      )
+    ).toBe(undefined);
+  });
+
+  it('omits Cursor model params when metadata is missing or unsupported', () => {
+    expect(buildCursorModelParams({ thinkingEnabled: true, reasoningEffort: 'high' })).toBe(
       undefined
     );
-    expect(buildCursorModelParams({ thinkingEnabled: false, reasoningEffort: 'high' })).toBe(
-      undefined
-    );
+    expect(
+      buildCursorModelParams({ thinkingEnabled: true, reasoningEffort: 'high' }, [
+        { id: 'mode', values: ['fast'] },
+      ])
+    ).toBe(undefined);
+    expect(
+      buildCursorModelParams({ thinkingEnabled: true, reasoningEffort: 'high' }, [
+        { id: 'thinking', values: ['low'] },
+      ])
+    ).toBe(undefined);
   });
 
   it('builds a flattened prompt from system, history, and user input', () => {
