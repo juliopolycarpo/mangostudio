@@ -34,7 +34,7 @@ describe('runDoctor', () => {
       frontendDir: () => '/app',
       controller: new FakeProcessController(),
       readState: () => Promise.resolve(null),
-      detectNodeRuntime: () => Promise.resolve({ available: true, version: 'v22.13.0' }),
+      detectCursorRuntime: () => Promise.resolve({ available: true, version: 'v22.13.0' }),
       isCursorConfigured: () => false,
       log: (msg) => lines.push(msg),
       exit: (code) => {
@@ -57,7 +57,7 @@ describe('runDoctor', () => {
       frontendDir: () => '/app',
       controller: new FakeProcessController(),
       readState: () => Promise.resolve(null),
-      detectNodeRuntime: () => Promise.resolve({ available: true, version: 'v22.13.0' }),
+      detectCursorRuntime: () => Promise.resolve({ available: true, version: 'v22.13.0' }),
       isCursorConfigured: () => false,
       log: () => undefined,
       exit: (code) => {
@@ -68,7 +68,7 @@ describe('runDoctor', () => {
     expect(exited).toBe(1);
   });
 
-  it('fails when Cursor is configured but Node runtime is unavailable', async () => {
+  it('fails when Cursor is configured but runtime is unavailable', async () => {
     const lines: string[] = [];
     let exited = -1;
 
@@ -78,7 +78,7 @@ describe('runDoctor', () => {
       frontendDir: () => '/app',
       controller: new FakeProcessController(),
       readState: () => Promise.resolve(null),
-      detectNodeRuntime: () =>
+      detectCursorRuntime: () =>
         Promise.resolve({ available: false, reason: 'Node.js 22.13 or newer is required.' }),
       isCursorConfigured: () => true,
       log: (msg) => lines.push(msg),
@@ -88,7 +88,37 @@ describe('runDoctor', () => {
     });
 
     const text = lines.join('\n');
-    expect(text).toContain('Cursor Node runtime');
+    expect(text).toContain('Cursor runtime');
+    expect(text).toContain('1 failure(s)');
+    expect(exited).toBe(1);
+  });
+
+  it('fails when Cursor is configured but the SDK sidecar is missing', async () => {
+    const lines: string[] = [];
+    let exited = -1;
+
+    await runDoctor({
+      loadConfig: makeConfig,
+      fs: ALL_OK,
+      frontendDir: () => '/app',
+      controller: new FakeProcessController(),
+      readState: () => Promise.resolve(null),
+      detectCursorRuntime: () =>
+        Promise.resolve({
+          available: false,
+          version: 'v22.13.0',
+          reason: 'Cursor SDK sidecar script is missing at /tmp/cursor-sidecar/run-agent.mjs.',
+        }),
+      isCursorConfigured: () => true,
+      log: (msg) => lines.push(msg),
+      exit: (code) => {
+        exited = code;
+      },
+    });
+
+    const text = lines.join('\n');
+    expect(text).toContain('Cursor runtime');
+    expect(text).toContain('sidecar script is missing');
     expect(text).toContain('1 failure(s)');
     expect(exited).toBe(1);
   });

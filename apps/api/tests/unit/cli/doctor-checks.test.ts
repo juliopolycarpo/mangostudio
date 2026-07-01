@@ -174,6 +174,7 @@ describe('checkCursorNodeRuntime', () => {
   it('passes when Node meets the minimum version', () => {
     const result = checkCursorNodeRuntime({ available: true, version: 'v22.13.0' });
     expect(result.status).toBe('ok');
+    expect(result.label).toBe('Cursor runtime');
     expect(result.detail).toContain('v22.13.0');
   });
 
@@ -184,5 +185,14 @@ describe('checkCursorNodeRuntime', () => {
     });
     expect(result.status).toBe('fail');
     expect(result.detail).toContain('Node.js 22.13');
+  });
+
+  it('fails when the Cursor SDK sidecar is missing', () => {
+    const result = checkCursorNodeRuntime({
+      available: false,
+      reason: 'Cursor SDK sidecar script is missing at /tmp/cursor-sidecar/run-agent.mjs.',
+    });
+    expect(result.status).toBe('fail');
+    expect(result.detail).toContain('sidecar script is missing');
   });
 });

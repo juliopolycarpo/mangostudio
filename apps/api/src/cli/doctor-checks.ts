@@ -105,15 +105,15 @@ export function checkRuntime(version: string, standalone: boolean): CheckResult 
   );
 }
 
-/** When Cursor connectors are configured, Node.js >= 22.13 is required for generation. */
+/** When Cursor connectors are configured, Node.js >= 22.13 and the SDK sidecar are required. */
 export function checkCursorNodeRuntime(runtime: NodeRuntimeProbe): CheckResult {
   if (runtime.available) {
     const detail = runtime.version ? `${runtime.version} (meets >= 22.13)` : 'available';
-    return ok('Cursor Node runtime', detail);
+    return ok('Cursor runtime', detail);
   }
   return fail(
-    'Cursor Node runtime',
-    runtime.reason ?? 'Node.js >= 22.13 is required for Cursor SDK agents.'
+    'Cursor runtime',
+    runtime.reason ?? 'Node.js >= 22.13 and the Cursor SDK sidecar are required.'
   );
 }
 
