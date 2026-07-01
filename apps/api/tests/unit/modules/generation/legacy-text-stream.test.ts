@@ -109,6 +109,30 @@ describe('runLegacyTextStream', () => {
     expect(session.fullText).toBe('done');
   });
 
+  it('scopes the tool-call event name to the provider type', async () => {
+    await mockMessageRepository();
+    const { runLegacyTextStream } = await import(
+      '../../../../src/modules/generation/application/stream-text-turn-stages'
+    );
+    const session = createSession([
+      { type: 'tool_call', toolCallId: 'tool-1', name: 'search', done: false },
+      { type: 'text', text: '', done: true },
+    ]);
+    session.provider = {
+      ...session.provider,
+      providerType: 'openai',
+    } as unknown as StreamTextTurnSession['provider'];
+
+    const events = [];
+    for await (const event of runLegacyTextStream(session)) events.push(event);
+
+    expect(events).toContainEqual({
+      type: 'system_event',
+      event: 'openai_internal_tool_call',
+      detail: 'search',
+    });
+  });
+
   it('passes the resolved tool allowlist and settings to legacy providers', async () => {
     await mockMessageRepository();
     const { runLegacyTextStream } = await import(

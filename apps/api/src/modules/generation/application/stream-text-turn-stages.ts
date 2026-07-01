@@ -685,9 +685,10 @@ export async function* runLegacyTextStream(
       yield { type: 'text', text: chunk.text };
     } else if (chunk.type === 'tool_call') {
       const detail = chunk.name ?? 'tool';
+      const eventName = `${provider.providerType}_internal_tool_call`;
       legacyInThinking = false;
-      session.allParts.push({ type: 'system_event', event: 'cursor_internal_tool_call', detail });
-      yield { type: 'system_event', event: 'cursor_internal_tool_call', detail };
+      session.allParts.push({ type: 'system_event', event: eventName, detail });
+      yield { type: 'system_event', event: eventName, detail };
     }
   }
 }
