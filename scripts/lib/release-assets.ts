@@ -94,10 +94,10 @@ function createPlatformArchivePlan(
 }
 
 /**
- * Archive members relative to a platform's build output dir. The Cursor SDK
- * sidecar is optional (absent on platforms without a native package, or when
- * vendoring was skipped), so it is only listed when the caller found it present.
- * // Usage: platformArchiveMembers(plan, { includeCursorSidecar: existsSync(plan.cursorSidecarDir) })
+ * Archive members relative to a platform's build output dir. The release
+ * archive script validates required Cursor sidecar assets before including
+ * them for platforms with a native Cursor SDK package.
+ * // Usage: platformArchiveMembers(plan, { includeCursorSidecar: true })
  */
 export function platformArchiveMembers(
   plan: PlatformArchivePlan,

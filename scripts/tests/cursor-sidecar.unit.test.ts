@@ -79,4 +79,12 @@ describe('cursor sidecar SDK staging', () => {
     expect(source).not.toContain('arrayBuffer()');
     expect(source).not.toContain("['tar', '-xzf'");
   });
+
+  test('uses Node 22-compatible disposal and no hard-coded tool RPC timeout', () => {
+    const source = readText('apps/api/src/services/providers/cursor/sidecar/run-agent.mjs');
+
+    expect(source).not.toContain('await using');
+    expect(source).not.toContain('TOOL_RPC_TIMEOUT_MS');
+    expect(source).toContain('disposeAgent');
+  });
 });

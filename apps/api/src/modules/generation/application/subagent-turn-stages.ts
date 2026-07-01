@@ -460,6 +460,12 @@ async function generatePlainSubagentText(input: {
       },
     })) {
       if (chunk.type === 'text' && chunk.text) text += chunk.text;
+      if (chunk.type === 'error') {
+        throw new SubagentDelegationError(
+          chunk.content ?? 'Subagent provider stream failed.',
+          SUBAGENT_FAILED_CODE
+        );
+      }
     }
     return text;
   }

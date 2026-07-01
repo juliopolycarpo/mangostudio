@@ -88,7 +88,7 @@ describe('createReleaseAssetPlan', () => {
 });
 
 describe('platformArchiveMembers', () => {
-  test('lists the Cursor sidecar only when present', () => {
+  test('lists the Cursor sidecar only when requested', () => {
     const [linux] = createReleaseAssetPlan({
       version: '1.2.3',
       rootDir: '/repo',

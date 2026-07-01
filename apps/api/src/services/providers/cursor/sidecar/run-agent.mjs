@@ -8,8 +8,6 @@
 import { createInterface } from 'node:readline';
 import { Agent, CursorAgentError } from '@cursor/sdk';
 
-const TOOL_RPC_TIMEOUT_MS = 30_000;
-
 function writeEvent(event) {
   process.stdout.write(`${JSON.stringify(event)}\n`);
 }
@@ -48,6 +46,7 @@ function normalizeSettingSources(value) {
 function createStdinMultiplexer() {
   const rl = createInterface({ input: process.stdin });
   const toolWaiters = new Map();
+  let toolRpcTimeoutMs;
   let requestResolve;
   let gotRequest = false;
 
@@ -75,7 +74,7 @@ function createStdinMultiplexer() {
       const waiter = toolWaiters.get(parsed.id);
       if (waiter) {
         toolWaiters.delete(parsed.id);
-        clearTimeout(waiter.timeout);
+        if (waiter.timeout) clearTimeout(waiter.timeout);
         waiter.resolve(parsed);
       }
     }
@@ -83,18 +82,30 @@ function createStdinMultiplexer() {
 
   return {
     readRequest: () => requestPromise,
+    setToolRpcTimeoutMs(value) {
+      toolRpcTimeoutMs = normalizeToolRpcTimeoutMs(value);
+    },
     waitForToolResponse(id) {
       return new Promise((resolve, reject) => {
-        const timeout = setTimeout(() => {
-          toolWaiters.delete(id);
-          reject(new Error(`Tool RPC timed out after ${TOOL_RPC_TIMEOUT_MS}ms.`));
-        }, TOOL_RPC_TIMEOUT_MS);
-        timeout.unref?.();
+        const timeout =
+          toolRpcTimeoutMs === undefined
+            ? undefined
+            : setTimeout(() => {
+                toolWaiters.delete(id);
+                reject(new Error(`Tool RPC timed out after ${toolRpcTimeoutMs}ms.`));
+              }, toolRpcTimeoutMs);
+        timeout?.unref?.();
         toolWaiters.set(id, { resolve, reject, timeout });
       });
     },
     close: () => rl.close(),
   };
+}
+
+function normalizeToolRpcTimeoutMs(value) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return undefined;
+  const rounded = Math.trunc(value);
+  return rounded > 0 ? rounded : undefined;
 }
 
 let nextToolRequestId = 0;
@@ -162,9 +173,23 @@ function shouldEmitToolCall(event, emittedToolCalls) {
   return true;
 }
 
+async function disposeAgent(agent) {
+  const asyncDispose = agent?.[Symbol.asyncDispose];
+  if (typeof asyncDispose === 'function') {
+    await asyncDispose.call(agent);
+    return;
+  }
+
+  const dispose = agent?.[Symbol.dispose];
+  if (typeof dispose === 'function') {
+    dispose.call(agent);
+  }
+}
+
 async function main() {
   const stdinMux = createStdinMultiplexer();
   const request = await stdinMux.readRequest();
+  stdinMux.setToolRpcTimeoutMs(request.toolRpcTimeoutMs);
 
   const apiKey = typeof request.apiKey === 'string' ? request.apiKey.trim() : '';
   const model = typeof request.model === 'string' ? request.model.trim() : '';
@@ -181,56 +206,61 @@ async function main() {
   const customTools = toolDefs ? createRpcBackedCustomTools(toolDefs, stdinMux) : undefined;
   const settingSources = normalizeSettingSources(request.settingSources);
 
-  await using agent = await Agent.create({
-    apiKey,
-    model: { id: model, ...(modelParams ? { params: modelParams } : {}) },
-    local: {
-      cwd,
-      settingSources,
-      ...(customTools ? { customTools } : {}),
-    },
-  });
+  let agent;
+  try {
+    agent = await Agent.create({
+      apiKey,
+      model: { id: model, ...(modelParams ? { params: modelParams } : {}) },
+      local: {
+        cwd,
+        settingSources,
+        ...(customTools ? { customTools } : {}),
+      },
+    });
 
-  const run = await agent.send(prompt);
-  const emittedToolCalls = new Set();
+    const run = await agent.send(prompt);
+    const emittedToolCalls = new Set();
 
-  for await (const event of run.stream()) {
-    if (event.type === 'assistant') {
-      const text = extractAssistantText(event);
-      if (text) {
-        writeEvent({ type: 'text', text });
+    for await (const event of run.stream()) {
+      if (event.type === 'assistant') {
+        const text = extractAssistantText(event);
+        if (text) {
+          writeEvent({ type: 'text', text });
+        }
+        continue;
       }
-      continue;
+
+      if (event.type === 'thinking' && typeof event.text === 'string' && event.text) {
+        writeEvent({ type: 'thinking', text: event.text });
+        continue;
+      }
+
+      if (event.type === 'tool_call') {
+        if (!shouldEmitToolCall(event, emittedToolCalls)) continue;
+        writeEvent({
+          type: 'tool_call',
+          callId: event.call_id,
+          name: event.name,
+          status: event.status,
+          args: event.args,
+          result: event.result,
+        });
+      }
     }
 
-    if (event.type === 'thinking' && typeof event.text === 'string' && event.text) {
-      writeEvent({ type: 'thinking', text: event.text });
-      continue;
+    const result = await run.wait();
+
+    if (result.status === 'error') {
+      writeEvent({ type: 'error', content: `Cursor agent run failed (${result.id}).`, done: true });
+      process.exitCode = 2;
+      return;
     }
 
-    if (event.type === 'tool_call') {
-      if (!shouldEmitToolCall(event, emittedToolCalls)) continue;
-      writeEvent({
-        type: 'tool_call',
-        callId: event.call_id,
-        name: event.name,
-        status: event.status,
-        args: event.args,
-        result: event.result,
-      });
-    }
+    writeEvent({ type: 'done', done: true });
+  } finally {
+    stdinMux.close();
+    await disposeAgent(agent);
   }
-
-  const result = await run.wait();
-  stdinMux.close();
-
-  if (result.status === 'error') {
-    writeEvent({ type: 'error', content: `Cursor agent run failed (${result.id}).`, done: true });
-    process.exitCode = 2;
-    return;
-  }
-
-  writeEvent({ type: 'done', done: true });
 }
 
 main().catch((error) => {

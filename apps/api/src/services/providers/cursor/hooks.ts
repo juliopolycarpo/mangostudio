@@ -80,7 +80,7 @@ export async function ensureCursorAgentHooks(nodePath: string): Promise<string> 
   await writeFile(denyScriptPath, DENY_SCRIPT_SOURCE, 'utf8');
   await chmod(denyScriptPath, 0o755);
 
-  const hookCommand = `${nodePath} ${denyScriptPath}`;
+  const hookCommand = buildCursorHookCommand(nodePath, denyScriptPath);
   const hooksConfig = {
     version: 1,
     hooks: {
@@ -97,4 +97,23 @@ export async function ensureCursorAgentHooks(nodePath: string): Promise<string> 
     'utf8'
   );
   return agentDir;
+}
+
+export function buildCursorHookCommand(
+  nodePath: string,
+  denyScriptPath: string,
+  platform: NodeJS.Platform = process.platform
+): string {
+  return `${quoteHookCommandArg(nodePath, platform)} ${quoteHookCommandArg(denyScriptPath, platform)}`;
+}
+
+export function quoteHookCommandArg(
+  value: string,
+  platform: NodeJS.Platform = process.platform
+): string {
+  if (platform === 'win32') {
+    return `"${value.replace(/"/g, '\\"')}"`;
+  }
+
+  return `'${value.replace(/'/g, `'\\''`)}'`;
 }
