@@ -29,8 +29,10 @@ describe('provider settings policy', () => {
     );
   });
 
-  it('allows OpenAI xhigh without DeepSeek-specific mapping', () => {
-    const descriptor = buildProviderSettingsDescriptor('openai', { reasoningEffort: 'xhigh' });
+  it('allows OpenAI xhigh without DeepSeek-specific mapping', async () => {
+    const descriptor = await buildProviderSettingsDescriptor('openai', {
+      reasoningEffort: 'xhigh',
+    });
 
     expect(descriptor.reasoning.supportedEfforts).toContain('xhigh');
     expect(descriptor.settings.reasoningEffort).toBe('xhigh');

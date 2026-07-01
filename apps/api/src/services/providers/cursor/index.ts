@@ -82,7 +82,7 @@ async function loadPreparedRuntime(
   userId: string,
   modelName?: string
 ): Promise<PreparedCursorRuntime> {
-  const runtime = detectNodeRuntime();
+  const runtime = await detectNodeRuntime();
   if (!runtime.available) {
     throw new CursorConnectorError(runtime.reason ?? 'Node.js is required for Cursor SDK agents.');
   }
@@ -119,6 +119,9 @@ async function runCursorGeneration(
     },
     req.signal
   )) {
+    if (chunk.type === 'error') {
+      throw new CursorConnectorError(chunk.content ?? 'Cursor agent run failed.');
+    }
     if (chunk.type === 'text' && chunk.text) {
       text += chunk.text;
     }
@@ -187,7 +190,7 @@ const cursorProvider: AIProvider = {
       throw new Error('cursor healthcheck requires an API key.');
     }
 
-    const runtime = detectNodeRuntime();
+    const runtime = await detectNodeRuntime();
     if (!runtime.available) {
       throw new Error(runtime.reason ?? 'Node.js is required for Cursor SDK agents.');
     }

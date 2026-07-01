@@ -36,15 +36,15 @@ describe('cursor provider foundation', () => {
     expect(prompt).toContain('User: Summarize the repo.');
   });
 
-  it('exposes runtime availability for the cursor provider descriptor', () => {
-    const runtime = getProviderRuntimeAvailability('cursor');
+  it('exposes runtime availability for the cursor provider descriptor', async () => {
+    const runtime = await getProviderRuntimeAvailability('cursor');
     expect(typeof runtime.runtimeAvailable).toBe('boolean');
     if (!runtime.runtimeAvailable) {
       expect(runtime.runtimeUnavailableReason).toContain('NodeJS');
     }
   });
 
-  it('marks non-cursor providers as runtime-available', () => {
-    expect(getProviderRuntimeAvailability('openai')).toEqual({ runtimeAvailable: true });
+  it('marks non-cursor providers as runtime-available', async () => {
+    expect(await getProviderRuntimeAvailability('openai')).toEqual({ runtimeAvailable: true });
   });
 });

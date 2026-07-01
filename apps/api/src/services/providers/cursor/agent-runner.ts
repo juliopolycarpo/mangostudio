@@ -65,7 +65,7 @@ export async function* streamCursorAgentSidecar(
   request: CursorSidecarRequest,
   signal?: AbortSignal
 ): AsyncIterable<StreamingChunk> {
-  const runtime = detectNodeRuntime();
+  const runtime = await detectNodeRuntime();
   if (!runtime.available || !runtime.nodePath) {
     throw new CursorSidecarError(runtime.reason ?? 'Node.js is required for Cursor SDK agents.');
   }
@@ -78,6 +78,17 @@ export async function* streamCursorAgentSidecar(
   let stderr = '';
   child.stderr.on('data', (chunk: Buffer) => {
     stderr += chunk.toString('utf8');
+  });
+
+  // Capture spawn failures (e.g. the node binary disappearing between detection
+  // and spawn) so an unhandled 'error' event can't crash the whole API process.
+  let spawnError: Error | null = null;
+  child.on('error', (error: Error) => {
+    spawnError = error;
+  });
+  child.stdin.on('error', () => {
+    // The sidecar reads all of stdin before responding, but if it exits early
+    // the write below can emit EPIPE; swallow it so it never becomes uncaught.
   });
 
   const abortHandler = () => {
@@ -103,6 +114,11 @@ export async function* streamCursorAgentSidecar(
         continue;
       }
 
+      if (event.type === 'done') {
+        sawTerminal = true;
+        break;
+      }
+
       const chunk = mapSidecarEvent(event);
       if (!chunk) continue;
 
@@ -113,14 +129,17 @@ export async function* streamCursorAgentSidecar(
       }
 
       yield chunk;
-
-      if (event.type === 'done') {
-        sawTerminal = true;
-        break;
-      }
     }
 
     const exitCode = await waitForChildExit(child);
+    if (spawnError) {
+      yield {
+        type: 'error',
+        content: (spawnError as Error).message || 'Failed to start the Cursor sidecar.',
+        done: true,
+      };
+      return;
+    }
     if (!sawTerminal && exitCode !== 0) {
       yield {
         type: 'error',
@@ -130,11 +149,7 @@ export async function* streamCursorAgentSidecar(
       return;
     }
 
-    if (!sawTerminal) {
-      yield { type: 'text', text: '', done: true };
-    } else {
-      yield { type: 'text', text: '', done: true };
-    }
+    yield { type: 'text', text: '', done: true };
   } finally {
     signal?.removeEventListener('abort', abortHandler);
     if (!child.killed) {

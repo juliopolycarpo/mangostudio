@@ -138,15 +138,15 @@ export function getDefaultProviderSettings(provider: ProviderType): ProviderRunt
   return normalizeProviderRuntimeSettings(provider, PROVIDER_POLICIES[provider].defaults);
 }
 
-export function getProviderRuntimeAvailability(provider: ProviderType): {
+export async function getProviderRuntimeAvailability(provider: ProviderType): Promise<{
   runtimeAvailable: boolean;
   runtimeUnavailableReason?: string;
-} {
+}> {
   if (provider !== 'cursor') {
     return { runtimeAvailable: true };
   }
 
-  const runtime = detectNodeRuntime();
+  const runtime = await detectNodeRuntime();
   if (runtime.available) {
     return { runtimeAvailable: true };
   }
@@ -159,12 +159,12 @@ export function getProviderRuntimeAvailability(provider: ProviderType): {
   };
 }
 
-export function buildProviderSettingsDescriptor(
+export async function buildProviderSettingsDescriptor(
   provider: ProviderType,
   savedSettings?: Partial<ProviderRuntimeSettings>
-): ProviderSettingsDescriptor {
+): Promise<ProviderSettingsDescriptor> {
   const policy = getProviderSettingsPolicy(provider);
-  const runtime = getProviderRuntimeAvailability(provider);
+  const runtime = await getProviderRuntimeAvailability(provider);
   return {
     provider,
     displayName: policy.displayName,

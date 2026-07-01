@@ -9,8 +9,8 @@ describe('cursor node runtime detector', () => {
     resetNodeRuntimeCache();
   });
 
-  it('reports availability when node meets the minimum version', () => {
-    const status = detectNodeRuntime({ force: true });
+  it('reports availability when node meets the minimum version', async () => {
+    const status = await detectNodeRuntime({ force: true });
     expect(typeof status.available).toBe('boolean');
     if (status.available) {
       expect(status.nodePath).toBeTruthy();
@@ -20,9 +20,9 @@ describe('cursor node runtime detector', () => {
     }
   });
 
-  it('caches repeated probes within the TTL window', () => {
-    const first = detectNodeRuntime({ force: true });
-    const second = detectNodeRuntime();
+  it('caches repeated probes within the TTL window', async () => {
+    const first = await detectNodeRuntime({ force: true });
+    const second = await detectNodeRuntime();
     expect(second).toEqual(first);
   });
 });

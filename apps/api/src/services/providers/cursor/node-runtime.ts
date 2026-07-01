@@ -3,8 +3,11 @@
  * The Cursor SDK local agent stream requires Node.js >= 22.13 (Bun is unsupported).
  */
 
-import { spawnSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
+import { promisify } from 'node:util';
+
+const execFileAsync = promisify(execFile);
 
 const MIN_NODE_MAJOR = 22;
 const MIN_NODE_MINOR = 13;
@@ -23,6 +26,7 @@ interface NodeRuntimeCache {
 }
 
 let cached: NodeRuntimeCache | null = null;
+let inflight: Promise<NodeRuntimeStatus> | null = null;
 
 const NODE_BINARY_CANDIDATES = process.platform === 'win32' ? ['node.exe', 'node'] : ['node'];
 
@@ -42,7 +46,17 @@ function meetsMinimumVersion(version: { major: number; minor: number }): boolean
   return version.minor >= MIN_NODE_MINOR;
 }
 
-function resolveNodeBinary(): string | null {
+/** Runs `<binary> --version` off the event loop, returning trimmed stdout or null. */
+async function probeNodeVersion(binary: string): Promise<string | null> {
+  try {
+    const { stdout } = await execFileAsync(binary, ['--version'], { timeout: 2_000 });
+    return stdout.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+async function resolveNodeBinary(): Promise<string | null> {
   const pathEntries = (process.env.PATH ?? '').split(process.platform === 'win32' ? ';' : ':');
 
   for (const entry of pathEntries) {
@@ -57,19 +71,14 @@ function resolveNodeBinary(): string | null {
   }
 
   for (const candidate of NODE_BINARY_CANDIDATES) {
-    const result = spawnSync(candidate, ['--version'], {
-      encoding: 'utf8',
-      timeout: 2_000,
-      stdio: ['ignore', 'pipe', 'ignore'],
-    });
-    if (result.status === 0 && result.stdout) return candidate;
+    if (await probeNodeVersion(candidate)) return candidate;
   }
 
   return null;
 }
 
-function probeNodeRuntime(): NodeRuntimeStatus {
-  const nodePath = resolveNodeBinary();
+async function probeNodeRuntime(): Promise<NodeRuntimeStatus> {
+  const nodePath = await resolveNodeBinary();
   if (!nodePath) {
     return {
       available: false,
@@ -77,20 +86,14 @@ function probeNodeRuntime(): NodeRuntimeStatus {
     };
   }
 
-  const result = spawnSync(nodePath, ['--version'], {
-    encoding: 'utf8',
-    timeout: 2_000,
-    stdio: ['ignore', 'pipe', 'ignore'],
-  });
-
-  if (result.status !== 0 || !result.stdout) {
+  const versionText = await probeNodeVersion(nodePath);
+  if (!versionText) {
     return {
       available: false,
       reason: 'You need NodeJS installed to run Cursor SDK Agents. `node` binary not found',
     };
   }
 
-  const versionText = result.stdout.trim();
   const parsed = parseNodeVersion(versionText);
   if (!parsed || !meetsMinimumVersion(parsed)) {
     return {
@@ -108,19 +111,36 @@ function probeNodeRuntime(): NodeRuntimeStatus {
   };
 }
 
-/** Returns cached Node.js availability for the Cursor SDK sidecar. */
-export function detectNodeRuntime(options?: { force?: boolean }): NodeRuntimeStatus {
+/**
+ * Returns cached Node.js availability for the Cursor SDK sidecar.
+ *
+ * The probe runs `node --version` in a child process; doing so asynchronously
+ * keeps it off the event loop so callers on request paths (e.g. the provider
+ * settings descriptor endpoint) never block. Concurrent probes are deduped.
+ */
+export function detectNodeRuntime(options?: { force?: boolean }): Promise<NodeRuntimeStatus> {
   const now = Date.now();
   if (!options?.force && cached && now - cached.checkedAt < CACHE_TTL_MS) {
-    return cached.status;
+    return Promise.resolve(cached.status);
   }
 
-  const status = probeNodeRuntime();
-  cached = { checkedAt: now, status };
-  return status;
+  if (!options?.force && inflight) return inflight;
+
+  const probe = probeNodeRuntime()
+    .then((status) => {
+      cached = { checkedAt: Date.now(), status };
+      return status;
+    })
+    .finally(() => {
+      if (inflight === probe) inflight = null;
+    });
+
+  inflight = probe;
+  return probe;
 }
 
 /** Clears the cached Node runtime probe (primarily for tests). */
 export function resetNodeRuntimeCache(): void {
   cached = null;
+  inflight = null;
 }
