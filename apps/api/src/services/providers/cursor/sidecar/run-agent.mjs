@@ -213,22 +213,38 @@ function readStreamCapped(stream, maxBytes) {
     const chunks = [];
     let total = 0;
     let truncated = false;
+    let settled = false;
+
+    const done = () => {
+      if (settled) return;
+      settled = true;
+      const merged = Buffer.concat(chunks);
+      resolve({ text: merged.subarray(0, maxBytes).toString('utf8'), truncated });
+    };
+
+    const fail = (error) => {
+      if (settled) return;
+      settled = true;
+      reject(error);
+    };
 
     stream.on('data', (chunk) => {
       const buffer = Buffer.from(chunk);
       if (total < maxBytes) {
         chunks.push(buffer);
         total += buffer.byteLength;
-        if (total > maxBytes) truncated = true;
+        if (total > maxBytes) {
+          truncated = true;
+          stream.destroy();
+        }
         return;
       }
       truncated = true;
+      stream.destroy();
     });
-    stream.once('error', reject);
-    stream.once('end', () => {
-      const merged = Buffer.concat(chunks);
-      resolve({ text: merged.subarray(0, maxBytes).toString('utf8'), truncated });
-    });
+    stream.once('error', fail);
+    stream.once('end', done);
+    stream.once('close', done);
   });
 }
 
