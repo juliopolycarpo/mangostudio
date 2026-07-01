@@ -233,6 +233,9 @@ function normalizeReasoningEffort(
   if (policy.reasoning.supportedEfforts.includes(requested)) return requested;
 
   if (provider === 'deepseek') return requested === 'max' || requested === 'xhigh' ? 'max' : 'high';
+  if (provider === 'cursor' && (requested === 'max' || requested === 'xhigh')) {
+    return policy.reasoning.defaultEffort;
+  }
   if (requested === 'max') return policy.reasoning.maxEffort ?? policy.reasoning.defaultEffort;
   if (requested === 'xhigh') return policy.reasoning.maxEffort ?? 'high';
   return policy.reasoning.defaultEffort;

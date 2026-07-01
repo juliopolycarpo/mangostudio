@@ -51,9 +51,12 @@ export async function fetchCursorModels(params: { apiKey: string }): Promise<Mod
       .map((entry) => entry.id)
       .filter((id): id is string => Boolean(id));
 
-    if (ids.length === 0) return getCursorFallbackModels();
+    if (ids.length === 0) {
+      throw new CursorApiError('Cursor returned no models for this API key.');
+    }
     return ids.map(toCursorModelInfo).sort((a, b) => a.displayName.localeCompare(b.displayName));
   } catch (error) {
+    if (error instanceof CursorApiError) throw error;
     if (!canUseCursorModelFallback(error)) {
       throw new CursorApiError(
         error instanceof Error ? error.message : 'Cursor model discovery failed.',

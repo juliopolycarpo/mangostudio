@@ -34,6 +34,8 @@ describe('runDoctor', () => {
       frontendDir: () => '/app',
       controller: new FakeProcessController(),
       readState: () => Promise.resolve(null),
+      detectNodeRuntime: () => Promise.resolve({ available: true, version: 'v22.13.0' }),
+      isCursorConfigured: () => false,
       log: (msg) => lines.push(msg),
       exit: (code) => {
         exited = code;
@@ -55,12 +57,39 @@ describe('runDoctor', () => {
       frontendDir: () => '/app',
       controller: new FakeProcessController(),
       readState: () => Promise.resolve(null),
+      detectNodeRuntime: () => Promise.resolve({ available: true, version: 'v22.13.0' }),
+      isCursorConfigured: () => false,
       log: () => undefined,
       exit: (code) => {
         exited = code;
       },
     });
 
+    expect(exited).toBe(1);
+  });
+
+  it('fails when Cursor is configured but Node runtime is unavailable', async () => {
+    const lines: string[] = [];
+    let exited = -1;
+
+    await runDoctor({
+      loadConfig: makeConfig,
+      fs: ALL_OK,
+      frontendDir: () => '/app',
+      controller: new FakeProcessController(),
+      readState: () => Promise.resolve(null),
+      detectNodeRuntime: () =>
+        Promise.resolve({ available: false, reason: 'Node.js 22.13 or newer is required.' }),
+      isCursorConfigured: () => true,
+      log: (msg) => lines.push(msg),
+      exit: (code) => {
+        exited = code;
+      },
+    });
+
+    const text = lines.join('\n');
+    expect(text).toContain('Cursor Node runtime');
+    expect(text).toContain('1 failure(s)');
     expect(exited).toBe(1);
   });
 });

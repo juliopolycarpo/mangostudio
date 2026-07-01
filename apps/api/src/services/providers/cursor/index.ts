@@ -13,7 +13,7 @@ import type {
   TextGenerationResult,
 } from '../types';
 import { streamCursorAgentSidecar } from './agent-runner';
-import { fetchCursorModels, validateCursorApiKey } from './client';
+import { CursorApiError, fetchCursorModels, validateCursorApiKey } from './client';
 import { detectNodeRuntime } from './node-runtime';
 import { buildCursorAgentPrompt } from './prompt-builder';
 
@@ -93,15 +93,20 @@ async function loadPreparedRuntime(
   return { apiKey, workspaceDir };
 }
 
-function isCursorThinkingEffort(value: ReasoningEffort): value is 'low' | 'high' {
-  return value === 'low' || value === 'high';
+const CURSOR_THINKING_EFFORTS = ['low', 'medium', 'high'] as const;
+type CursorThinkingEffort = (typeof CURSOR_THINKING_EFFORTS)[number];
+
+function isCursorThinkingEffort(value: ReasoningEffort): value is CursorThinkingEffort {
+  return (CURSOR_THINKING_EFFORTS as readonly ReasoningEffort[]).includes(value);
 }
 
 export function buildCursorModelParams(
   config: TextGenerationRequest['generationConfig']
 ): Array<{ id: string; value: string }> | undefined {
   if (!config?.thinkingEnabled) return undefined;
-  if (!isCursorThinkingEffort(config.reasoningEffort)) return undefined;
+  if (!config.reasoningEffort || !isCursorThinkingEffort(config.reasoningEffort)) return undefined;
+  // Medium maps to the SDK default — only low/high are sent as explicit params.
+  if (config.reasoningEffort === 'medium') return undefined;
   return [{ id: 'thinking', value: config.reasoningEffort }];
 }
 
@@ -192,7 +197,7 @@ const cursorProvider: AIProvider = {
 
   async healthcheck(req: ProviderHealthcheckRequest): Promise<void> {
     if (!req.apiKey?.trim()) {
-      throw new Error('cursor healthcheck requires an API key.');
+      throw new CursorApiError('Cursor API key is empty.');
     }
 
     const runtime = await detectNodeRuntime();

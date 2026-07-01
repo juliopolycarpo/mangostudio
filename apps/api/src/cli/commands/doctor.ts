@@ -3,16 +3,22 @@
  * plain-text checklist. Exits non-zero if any check fails.
  */
 
-import { accessSync, constants, existsSync } from 'node:fs';
+import { accessSync, constants, existsSync, readFileSync } from 'node:fs';
+import { parse as parseToml } from 'smol-toml';
 import { getHomeMangoDir, getVersion, loadConfig, type MangoConfig } from '../../lib/config';
 import { getLogsDir, getRunDir } from '../../lib/mango-paths';
 import { getDefaultFrontendDir, isStandaloneExecutable } from '../../lib/runtime-paths';
 import { isStateLive, readState, type ServerState } from '../../lib/server-state';
 import {
+  detectNodeRuntime,
+  type NodeRuntimeStatus,
+} from '../../services/providers/cursor/node-runtime';
+import {
   type CheckResult,
   type CheckStatus,
   checkAuthSecret,
   checkConfig,
+  checkCursorNodeRuntime,
   checkDatabase,
   checkDir,
   checkFrontend,
@@ -29,6 +35,8 @@ export interface DoctorDeps {
   frontendDir: () => string;
   controller: ProcessController;
   readState: typeof readState;
+  detectNodeRuntime: () => Promise<NodeRuntimeStatus>;
+  isCursorConfigured: (config: MangoConfig) => boolean;
   log: (msg: string) => void;
   exit: (code: number) => void;
 }
@@ -51,7 +59,7 @@ async function collectResults(
   d: Required<DoctorDeps>
 ): Promise<CheckResult[]> {
   const instance = await inspectInstance(d);
-  return [
+  const results: CheckResult[] = [
     checkDir('Home directory', getHomeMangoDir(), d.fs),
     checkDir('Logs directory', getLogsDir(), d.fs),
     checkDir('Run directory', getRunDir(), d.fs),
@@ -62,6 +70,13 @@ async function collectResults(
     checkInstance(instance.state, instance.alive),
     checkRuntime(getVersion(), isStandaloneExecutable()),
   ];
+
+  if (d.isCursorConfigured(config)) {
+    const runtime = await d.detectNodeRuntime();
+    results.push(checkCursorNodeRuntime(runtime));
+  }
+
+  return results;
 }
 
 async function inspectInstance(d: Required<DoctorDeps>): Promise<InstanceProbe> {
@@ -116,7 +131,28 @@ function resolveDeps(deps: Partial<DoctorDeps>): Required<DoctorDeps> {
     frontendDir: deps.frontendDir ?? getDefaultFrontendDir,
     controller: deps.controller ?? createProcessController(),
     readState: deps.readState ?? readState,
+    detectNodeRuntime: deps.detectNodeRuntime ?? detectNodeRuntime,
+    isCursorConfigured: deps.isCursorConfigured ?? isCursorConnectorConfigured,
     log: deps.log ?? writeLine,
     exit: deps.exit ?? ((code) => process.exit(code)),
   };
+}
+
+/** True when a Cursor API key is present in env or config.toml. */
+export function isCursorConnectorConfigured(config: MangoConfig): boolean {
+  if (process.env.CURSOR_API_KEY?.trim()) return true;
+
+  const configPath = config.configFilePath;
+  if (!configPath || !existsSync(configPath)) return false;
+
+  try {
+    const parsed = parseToml(readFileSync(configPath, 'utf8')) as Record<string, unknown>;
+    const section = parsed.cursor_api_keys;
+    if (!section || typeof section !== 'object') return false;
+    return Object.values(section as Record<string, unknown>).some(
+      (value) => typeof value === 'string' && value.trim().length > 0
+    );
+  } catch {
+    return false;
+  }
 }

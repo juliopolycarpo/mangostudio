@@ -19,6 +19,7 @@ export function toCursorModelInfo(modelId: string): ModelInfo {
       streaming: true,
       reasoning: true,
       tools: false,
+      internalAgentTools: true,
       statefulContinuation: false,
       promptCaching: false,
       parallelToolCalls: false,

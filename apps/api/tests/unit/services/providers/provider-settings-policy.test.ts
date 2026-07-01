@@ -57,4 +57,22 @@ describe('provider settings policy', () => {
       normalizeProviderRuntimeSettings('openai', { maxToolIterations: 2_000 }).maxToolIterations
     ).toBe(MAX_TOOL_ITERATIONS_MAX);
   });
+
+  it('normalizes unsupported cursor efforts to medium', () => {
+    expect(normalizeProviderRuntimeSettings('cursor', { reasoningEffort: 'max' })).toMatchObject({
+      reasoningEffort: 'medium',
+    });
+    expect(normalizeProviderRuntimeSettings('cursor', { reasoningEffort: 'xhigh' })).toMatchObject({
+      reasoningEffort: 'medium',
+    });
+  });
+
+  it('exposes cursor reasoning descriptor without MangoStudio tool loop support', async () => {
+    const descriptor = await buildProviderSettingsDescriptor('cursor', { reasoningEffort: 'high' });
+
+    expect(descriptor.reasoning.supportedEfforts).toEqual(['low', 'medium', 'high']);
+    expect(descriptor.settings.reasoningEffort).toBe('high');
+    expect(descriptor.toolUseSupported).toBe(false);
+    expect(descriptor.reasoning.reasoningWithToolsSupported).toBe(false);
+  });
 });

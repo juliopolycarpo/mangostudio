@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import {
   checkAuthSecret,
   checkConfig,
+  checkCursorNodeRuntime,
   checkDatabase,
   checkDir,
   checkFrontend,
@@ -166,5 +167,22 @@ describe('checkRuntime', () => {
     expect(result.status).toBe('ok');
     expect(result.detail).toContain('v1.2.3');
     expect(result.detail).toContain('standalone');
+  });
+});
+
+describe('checkCursorNodeRuntime', () => {
+  it('passes when Node meets the minimum version', () => {
+    const result = checkCursorNodeRuntime({ available: true, version: 'v22.13.0' });
+    expect(result.status).toBe('ok');
+    expect(result.detail).toContain('v22.13.0');
+  });
+
+  it('fails when Node is unavailable', () => {
+    const result = checkCursorNodeRuntime({
+      available: false,
+      reason: 'Node.js 22.13 or newer is required.',
+    });
+    expect(result.status).toBe('fail');
+    expect(result.detail).toContain('Node.js 22.13');
   });
 });

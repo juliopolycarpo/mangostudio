@@ -25,14 +25,18 @@ The agent runs with tools enabled and **without** the Cursor sandbox so MangoStu
 
 ## Model Discovery
 
-`Cursor.models.list({ apiKey })` runs in-process on the Bun API for connector validation and catalog discovery. Fallback models include `composer-2.5` and `auto`.
+`Cursor.models.list({ apiKey })` runs in-process on the Bun API for connector validation and catalog discovery. Auth failures propagate as validation errors; transient outages may fall back to `composer-2.5` and `auto`. An empty model list is treated as an error instead of silently enabling fallback models.
+
+## Capabilities
+
+Cursor models expose `internalAgentTools: true` in the catalog to indicate the SDK runs its own agent tool loop internally. MangoStudio does **not** expose `tools: true` or implement `generateAgentTurnStream` for this provider — internal tool activity appears in chat as system events instead.
 
 ## Generation Path
 
 1. Chat requests resolve to the `cursor` provider via enabled connector models.
 2. MangoStudio flattens system prompt + history + user prompt into a single agent prompt.
 3. A Node sidecar (`cursor-sidecar/run-agent.mjs`) runs `Agent.create` + `agent.send` + `run.stream()`.
-4. NDJSON events are mapped to MangoStudio `StreamingChunk` values (`text`, `thinking`, `tool_call`, `error`).
+4. NDJSON events are mapped to MangoStudio `StreamingChunk` values (`text`, `thinking`, `tool_call`, `error`). Internal tool calls are surfaced in chat as `cursor_internal_tool_call` system events.
 
 Cursor runs its own agent loop; MangoStudio does **not** implement `generateAgentTurnStream` for this provider.
 

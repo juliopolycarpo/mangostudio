@@ -45,6 +45,8 @@ export interface ModelCapabilities {
   streaming: boolean;
   reasoning?: boolean;
   tools?: boolean;
+  /** Provider runs its own agent tool loop (not MangoStudio-managed tools). */
+  internalAgentTools?: boolean;
   statefulContinuation?: boolean;
   promptCaching?: boolean;
   parallelToolCalls?: boolean;

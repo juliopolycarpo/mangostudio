@@ -14,6 +14,7 @@ import {
   registerProvider,
 } from '../../../src/services/providers/core/provider-registry';
 import { CursorApiError } from '../../../src/services/providers/cursor/client';
+import { CursorRuntimeUnavailableError } from '../../../src/services/providers/cursor/index';
 import { OpenAIAuthError, OpenAIConfigError } from '../../../src/services/providers/openai/index';
 import type { AIProvider } from '../../../src/services/providers/types';
 import { upsertSecretMetadata } from '../../../src/services/secret-store/metadata';
@@ -49,6 +50,7 @@ let restoreAuth: (() => void) | null = null;
 function createCursorTestProvider(
   options: {
     rejectApiKey?: boolean;
+    rejectRuntime?: boolean;
     syncConfigFileConnectors?: AIProvider['syncConfigFileConnectors'];
   } = {}
 ): AIProvider {
@@ -74,10 +76,16 @@ function createCursorTestProvider(
           capabilities: { text: true, image: false, streaming: true, reasoning: true },
         },
       ]),
-    healthcheck: () =>
-      options.rejectApiKey
+    healthcheck: () => {
+      if (options.rejectRuntime) {
+        return Promise.reject(
+          new CursorRuntimeUnavailableError('Node.js 22.13 or newer is required.')
+        );
+      }
+      return options.rejectApiKey
         ? Promise.reject(new CursorApiError('Cursor API key rejected'))
-        : Promise.resolve(),
+        : Promise.resolve();
+    },
     validateApiKey: () => Promise.resolve(),
     resolveApiKey: () => Promise.resolve('cursor-test-key'),
     syncConfigFileConnectors: options.syncConfigFileConnectors,
@@ -269,6 +277,34 @@ describe('cursor connector routes', () => {
     expect(payload).toEqual({
       error: 'Cursor API key rejected',
       code: ERROR_CODES.VALIDATION,
+    });
+  });
+
+  it('POST /settings/connectors returns provider error when Node runtime is unavailable', async () => {
+    registerProvider(createCursorTestProvider({ rejectRuntime: true }));
+    const { app, restore } = createAuthenticatedApiTestApp(CURSOR_CONNECTOR_USER, settingsRoutes);
+    restoreAuth = restore;
+
+    const response = await app.handle(
+      new Request('http://localhost/settings/connectors', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: 'cursor-missing-node',
+          apiKey: 'cursor-live-node-key',
+          source: 'config-file',
+          provider: 'cursor',
+        }),
+      })
+    );
+
+    expect(response.status).toBe(503);
+
+    const payload = (await response.json()) as ErrorPayload;
+    expect(Value.Check(ApiErrorResponseSchema, payload)).toBe(true);
+    expect(payload).toEqual({
+      error: 'Node.js 22.13 or newer is required.',
+      code: ERROR_CODES.PROVIDER_ERROR,
     });
   });
 

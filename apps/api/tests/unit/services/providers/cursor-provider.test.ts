@@ -23,6 +23,7 @@ describe('cursor provider foundation', () => {
     expect(model.capabilities.text).toBe(true);
     expect(model.capabilities.streaming).toBe(true);
     expect(model.capabilities.tools).toBe(false);
+    expect(model.capabilities.internalAgentTools).toBe(true);
   });
 
   it('provides fallback models when discovery is unavailable', () => {
@@ -67,6 +68,24 @@ describe('cursor provider foundation', () => {
     );
   });
 
+  it('rejects empty model lists instead of returning fallbacks', async () => {
+    await mock.module('@cursor/sdk', () => ({
+      Cursor: {
+        models: {
+          list: () => Promise.resolve([]),
+        },
+      },
+    }));
+
+    const { fetchCursorModels: fetchModels } = await import(
+      '../../../../src/services/providers/cursor/client'
+    );
+
+    await expect(fetchModels({ apiKey: 'cursor-empty-key' })).rejects.toBeInstanceOf(
+      CursorApiError
+    );
+  });
+
   it('strips secret-shaped environment variables from sidecar env', () => {
     expect(
       buildCursorSidecarEnv({
@@ -82,6 +101,9 @@ describe('cursor provider foundation', () => {
   it('maps supported reasoning efforts to Cursor model params', () => {
     expect(buildCursorModelParams({ thinkingEnabled: true, reasoningEffort: 'high' })).toEqual([
       { id: 'thinking', value: 'high' },
+    ]);
+    expect(buildCursorModelParams({ thinkingEnabled: true, reasoningEffort: 'low' })).toEqual([
+      { id: 'thinking', value: 'low' },
     ]);
     expect(buildCursorModelParams({ thinkingEnabled: true, reasoningEffort: 'medium' })).toBe(
       undefined

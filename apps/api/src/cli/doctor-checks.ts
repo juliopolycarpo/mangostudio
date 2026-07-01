@@ -12,6 +12,12 @@ import {
 } from '../lib/config';
 import type { ServerState } from '../lib/server-state';
 
+export interface NodeRuntimeProbe {
+  available: boolean;
+  reason?: string;
+  version?: string;
+}
+
 export type CheckStatus = 'ok' | 'warn' | 'fail';
 
 export interface CheckResult {
@@ -96,6 +102,18 @@ export function checkRuntime(version: string, standalone: boolean): CheckResult 
   return ok(
     'Runtime',
     `v${version} ${process.platform}-${process.arch} ${standalone ? 'standalone' : 'dev'}`
+  );
+}
+
+/** When Cursor connectors are configured, Node.js >= 22.13 is required for generation. */
+export function checkCursorNodeRuntime(runtime: NodeRuntimeProbe): CheckResult {
+  if (runtime.available) {
+    const detail = runtime.version ? `${runtime.version} (meets >= 22.13)` : 'available';
+    return ok('Cursor Node runtime', detail);
+  }
+  return fail(
+    'Cursor Node runtime',
+    runtime.reason ?? 'Node.js >= 22.13 is required for Cursor SDK agents.'
   );
 }
 
