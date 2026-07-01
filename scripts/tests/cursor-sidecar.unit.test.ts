@@ -28,13 +28,13 @@ describe('cursor sidecar native package mapping', () => {
     expect(byArch['windows-x64']).toBe('@cursor/sdk-win32-x64');
   });
 
-  test('musl targets reuse the glibc linux native package', () => {
+  test('musl targets skip the Cursor sidecar', () => {
     const byArch = Object.fromEntries(
       ALL_BINARY_TARGETS.map((target) => [target.arch, cursorNativePackageFor(target)])
     );
 
-    expect(byArch['linux-x64-musl']).toBe('@cursor/sdk-linux-x64');
-    expect(byArch['linux-arm64-musl']).toBe('@cursor/sdk-linux-arm64');
+    expect(byArch['linux-x64-musl']).toBeNull();
+    expect(byArch['linux-arm64-musl']).toBeNull();
   });
 
   test('platforms without a Cursor runtime are skipped', () => {

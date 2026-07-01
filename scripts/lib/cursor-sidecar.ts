@@ -38,9 +38,9 @@ const CURSOR_SDK_VERSION_PATTERN = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
  */
 const CURSOR_NATIVE_PACKAGES: Record<ReleasePlatformId, string | null> = {
   'linux-x64': '@cursor/sdk-linux-x64',
-  'linux-x64-musl': '@cursor/sdk-linux-x64',
+  'linux-x64-musl': null,
   'linux-arm64': '@cursor/sdk-linux-arm64',
-  'linux-arm64-musl': '@cursor/sdk-linux-arm64',
+  'linux-arm64-musl': null,
   'windows-x64': '@cursor/sdk-win32-x64',
   'windows-arm64': null,
   'darwin-x64': '@cursor/sdk-darwin-x64',
