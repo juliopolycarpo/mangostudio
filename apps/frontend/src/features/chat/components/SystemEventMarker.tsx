@@ -28,6 +28,11 @@ function resolveLabel(
         label: t.chat.systemEvents.summaryHandoff,
         severity: 'info',
       };
+    case 'cursor_internal_tool_call':
+      return {
+        label: t.chat.systemEvents.cursorInternalToolCall.replace('{tool}', detail ?? ''),
+        severity: 'info',
+      };
     default:
       return { label: detail ?? event, severity: 'info' };
   }

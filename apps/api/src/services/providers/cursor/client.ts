@@ -9,8 +9,38 @@ interface CursorModelListEntry {
   id?: string;
 }
 
+interface CursorSdkErrorLike {
+  status?: number;
+  statusCode?: number;
+  isRetryable?: boolean;
+}
+
 function loadCursorSdk(): Promise<typeof import('@cursor/sdk')> {
   return import('@cursor/sdk');
+}
+
+function getCursorErrorStatus(error: unknown): number | undefined {
+  if (!error || typeof error !== 'object') return undefined;
+  const candidate = error as CursorSdkErrorLike;
+  return candidate.status ?? candidate.statusCode;
+}
+
+function isCursorAuthError(error: unknown): boolean {
+  const status = getCursorErrorStatus(error);
+  return status === 401 || status === 403;
+}
+
+function canUseCursorModelFallback(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return true;
+
+  const candidate = error as CursorSdkErrorLike;
+  if (candidate.isRetryable === true) return true;
+  if (candidate.isRetryable === false) return false;
+
+  const status = getCursorErrorStatus(error);
+  if (status === undefined) return true;
+  if (isCursorAuthError(error)) return false;
+  return status === 408 || status === 409 || status === 429 || status >= 500;
 }
 
 export async function fetchCursorModels(params: { apiKey: string }): Promise<ModelInfo[]> {
@@ -23,7 +53,13 @@ export async function fetchCursorModels(params: { apiKey: string }): Promise<Mod
 
     if (ids.length === 0) return getCursorFallbackModels();
     return ids.map(toCursorModelInfo).sort((a, b) => a.displayName.localeCompare(b.displayName));
-  } catch {
+  } catch (error) {
+    if (!canUseCursorModelFallback(error)) {
+      throw new CursorApiError(
+        error instanceof Error ? error.message : 'Cursor model discovery failed.',
+        { cause: error }
+      );
+    }
     return getCursorFallbackModels();
   }
 }

@@ -157,6 +157,7 @@ export const messages = {
     systemEvents: {
       chatCompacted: 'Contexto compactado em um resumo',
       summaryHandoff: 'Este chat começou a partir de um resumo anterior',
+      cursorInternalToolCall: 'Cursor usou {tool}',
     },
     titleGenerationFailed: 'Falha ao gerar título do chat',
   },

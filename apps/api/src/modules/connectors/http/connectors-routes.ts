@@ -15,6 +15,8 @@ import {
   GeminiValidationUnavailableError,
   InvalidGeminiApiKeyError,
 } from '../../../services/gemini';
+import { CursorApiError } from '../../../services/providers/cursor/client';
+import { CursorRuntimeUnavailableError } from '../../../services/providers/cursor/index';
 import { SecretStorageUnavailableError } from '../../../services/secret-store';
 import { addConnector, ConnectorValidationError } from '../application/add-connector';
 import { ConnectorNotFoundError, ConnectorOwnershipError } from '../application/connector-errors';
@@ -77,6 +79,16 @@ export function handleConnectorError(
   if (error instanceof OpenAIConfigError) {
     set.status = 422;
     return { error: error.message, code: ERROR_CODES.VALIDATION };
+  }
+
+  if (error instanceof CursorApiError) {
+    set.status = 422;
+    return { error: error.message, code: ERROR_CODES.VALIDATION };
+  }
+
+  if (error instanceof CursorRuntimeUnavailableError) {
+    set.status = 503;
+    return { error: error.message, code: ERROR_CODES.PROVIDER_ERROR };
   }
 
   console.error('[connectors] Unexpected error:', error);

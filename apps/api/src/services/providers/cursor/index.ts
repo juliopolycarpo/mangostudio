@@ -1,4 +1,4 @@
-import type { SecretMetadataRow } from '@mangostudio/shared/types';
+import type { ReasoningEffort, SecretMetadataRow } from '@mangostudio/shared/types';
 import { getConfig } from '../../../lib/config';
 import { parseStringArray } from '../../../utils/json';
 import { withModelCache } from '../core/model-cache';
@@ -34,7 +34,7 @@ async function resolveClientConfig(
   for (const row of rows) {
     if (!row.configured) continue;
     const enabled = parseStringArray(row.enabledModels);
-    if (modelName && !enabled.includes(modelName)) continue;
+    if (modelName && enabled.length > 0 && !enabled.includes(modelName)) continue;
     const apiKey = await secretService.resolveSecretValue(row);
     if (!apiKey) continue;
     return { apiKey, workspaceDir: resolveCursorWorkspaceDir() };
@@ -84,11 +84,25 @@ async function loadPreparedRuntime(
 ): Promise<PreparedCursorRuntime> {
   const runtime = await detectNodeRuntime();
   if (!runtime.available) {
-    throw new CursorConnectorError(runtime.reason ?? 'Node.js is required for Cursor SDK agents.');
+    throw new CursorRuntimeUnavailableError(
+      runtime.reason ?? 'Node.js is required for Cursor SDK agents.'
+    );
   }
 
   const { apiKey, workspaceDir } = await resolveClientConfig(userId, modelName);
   return { apiKey, workspaceDir };
+}
+
+function isCursorThinkingEffort(value: ReasoningEffort): value is 'low' | 'high' {
+  return value === 'low' || value === 'high';
+}
+
+export function buildCursorModelParams(
+  config: TextGenerationRequest['generationConfig']
+): Array<{ id: string; value: string }> | undefined {
+  if (!config?.thinkingEnabled) return undefined;
+  if (!isCursorThinkingEffort(config.reasoningEffort)) return undefined;
+  return [{ id: 'thinking', value: config.reasoningEffort }];
 }
 
 const lifecycle = createProviderLifecycle<PreparedCursorRuntime>({
@@ -113,6 +127,7 @@ async function runCursorGeneration(req: TextGenerationRequest): Promise<string> 
       model: req.modelName,
       cwd: workspaceDir,
       prompt,
+      params: buildCursorModelParams(req.generationConfig),
     },
     req.signal
   )) {
@@ -154,6 +169,7 @@ const cursorProvider: AIProvider = {
         model: req.modelName,
         cwd: workspaceDir,
         prompt,
+        params: buildCursorModelParams(req.generationConfig),
       },
       req.signal
     )) {
@@ -181,7 +197,9 @@ const cursorProvider: AIProvider = {
 
     const runtime = await detectNodeRuntime();
     if (!runtime.available) {
-      throw new Error(runtime.reason ?? 'Node.js is required for Cursor SDK agents.');
+      throw new CursorRuntimeUnavailableError(
+        runtime.reason ?? 'Node.js is required for Cursor SDK agents.'
+      );
     }
 
     await validateCursorApiKey(req.apiKey.trim());
@@ -201,6 +219,13 @@ export class CursorConnectorError extends Error {
   constructor(message: string, options?: ErrorOptions) {
     super(message, options);
     this.name = 'CursorConnectorError';
+  }
+}
+
+export class CursorRuntimeUnavailableError extends Error {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = 'CursorRuntimeUnavailableError';
   }
 }
 

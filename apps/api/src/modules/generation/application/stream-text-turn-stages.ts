@@ -646,6 +646,10 @@ export async function* runLegacyTextStream(
   })) {
     if (signal?.aborted) break;
 
+    if (chunk.type === 'error') {
+      throw new Error(chunk.content ?? 'Stream generation failed');
+    }
+
     if (chunk.type === 'thinking' && chunk.text) {
       if (!legacyInThinking) {
         legacyInThinking = true;
@@ -658,6 +662,11 @@ export async function* runLegacyTextStream(
       session.fullText += chunk.text;
       session.allParts.push({ type: 'text', text: chunk.text });
       yield { type: 'text', text: chunk.text };
+    } else if (chunk.type === 'tool_call') {
+      const detail = chunk.name ?? 'tool';
+      legacyInThinking = false;
+      session.allParts.push({ type: 'system_event', event: 'cursor_internal_tool_call', detail });
+      yield { type: 'system_event', event: 'cursor_internal_tool_call', detail };
     }
   }
 }

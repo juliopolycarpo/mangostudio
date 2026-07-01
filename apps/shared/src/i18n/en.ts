@@ -155,6 +155,7 @@ export const messages: Messages = {
     systemEvents: {
       chatCompacted: 'Context compacted into a summary',
       summaryHandoff: 'This chat started from a summarized handoff',
+      cursorInternalToolCall: 'Cursor used {tool}',
     },
     titleGenerationFailed: 'Failed to generate chat title',
   },

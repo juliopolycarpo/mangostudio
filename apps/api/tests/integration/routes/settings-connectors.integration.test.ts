@@ -3,13 +3,17 @@ import { ModelCatalogResponseSchema } from '@mangostudio/shared/catalog';
 import { ConnectorStatusSchema } from '@mangostudio/shared/connectors';
 import { ApiErrorResponseSchema, ERROR_CODES } from '@mangostudio/shared/errors';
 import { Value } from '@sinclair/typebox/value';
+import { stringify as stringifyToml } from 'smol-toml';
 import { getDb } from '../../../src/db/database';
+import { getConfig } from '../../../src/lib/config';
+import { SECRET_FILE_MODE, writeFileAtomic } from '../../../src/lib/safe-file';
 import { ConnectorNotFoundError } from '../../../src/modules/connectors/application/connector-errors';
 import { settingsRoutes } from '../../../src/routes/settings';
 import {
   getProvider,
   registerProvider,
 } from '../../../src/services/providers/core/provider-registry';
+import { CursorApiError } from '../../../src/services/providers/cursor/client';
 import { OpenAIAuthError, OpenAIConfigError } from '../../../src/services/providers/openai/index';
 import type { AIProvider } from '../../../src/services/providers/types';
 import { upsertSecretMetadata } from '../../../src/services/secret-store/metadata';
@@ -34,7 +38,51 @@ const TEST_USER = {
   email: 'test-connectors@mangostudio.test',
 };
 
+const CURSOR_CONNECTOR_USER = {
+  id: 'test-user-cursor-connectors',
+  name: 'Cursor Test User',
+  email: 'test-cursor-connectors@mangostudio.test',
+};
+
 let restoreAuth: (() => void) | null = null;
+
+function createCursorTestProvider(
+  options: {
+    rejectApiKey?: boolean;
+    syncConfigFileConnectors?: AIProvider['syncConfigFileConnectors'];
+  } = {}
+): AIProvider {
+  return {
+    providerType: 'cursor',
+    generateText: () => Promise.resolve({ text: '' }),
+    generateTextStream: async function* () {
+      await Promise.resolve();
+      yield { type: 'text', text: '', done: true };
+    },
+    listModels: () =>
+      Promise.resolve([
+        {
+          modelId: 'composer-2.5',
+          displayName: 'composer-2.5',
+          provider: 'cursor',
+          capabilities: { text: true, image: false, streaming: true, reasoning: true },
+        },
+        {
+          modelId: 'auto',
+          displayName: 'auto',
+          provider: 'cursor',
+          capabilities: { text: true, image: false, streaming: true, reasoning: true },
+        },
+      ]),
+    healthcheck: () =>
+      options.rejectApiKey
+        ? Promise.reject(new CursorApiError('Cursor API key rejected'))
+        : Promise.resolve(),
+    validateApiKey: () => Promise.resolve(),
+    resolveApiKey: () => Promise.resolve('cursor-test-key'),
+    syncConfigFileConnectors: options.syncConfigFileConnectors,
+  };
+}
 
 afterEach(async () => {
   restoreAuth?.();
@@ -131,6 +179,159 @@ describe('settings connectors routes', () => {
     expect(connectorNames).not.toContain('openai-for-list');
     expect(connectorNames).not.toContain('deepseek-for-list');
     expect(connectorNames).not.toContain('openai-proj-model-update');
+  });
+});
+
+describe('cursor connector routes', () => {
+  let originalCursorProvider: AIProvider;
+
+  beforeAll(async () => {
+    const db = getDb();
+    const now = Date.now();
+    await db
+      .insertInto('user')
+      .values({
+        id: CURSOR_CONNECTOR_USER.id,
+        name: CURSOR_CONNECTOR_USER.name,
+        email: CURSOR_CONNECTOR_USER.email,
+        emailVerified: 0,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .onConflict((oc) => oc.column('id').doNothing())
+      .execute();
+  });
+
+  beforeEach(() => {
+    originalCursorProvider = getProvider('cursor');
+    registerProvider(
+      createCursorTestProvider({
+        syncConfigFileConnectors:
+          originalCursorProvider.syncConfigFileConnectors?.bind(originalCursorProvider),
+      })
+    );
+  });
+
+  afterEach(() => {
+    restoreAuth?.();
+    restoreAuth = null;
+    registerProvider(originalCursorProvider);
+  });
+
+  it('POST /settings/connectors with provider cursor returns 201', async () => {
+    const { app, restore } = createAuthenticatedApiTestApp(CURSOR_CONNECTOR_USER, settingsRoutes);
+    restoreAuth = restore;
+
+    const response = await app.handle(
+      new Request('http://localhost/settings/connectors', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: 'cursor-for-create',
+          apiKey: 'cursor-live-create-key',
+          source: 'config-file',
+          provider: 'cursor',
+        }),
+      })
+    );
+
+    expect(response.status).toBe(200);
+
+    const payload = (await response.json()) as ConnectorPayload;
+    expect(Value.Check(ConnectorResponseSchema, payload)).toBe(true);
+    expect(payload.provider).toBe('cursor');
+    expect(payload.baseUrl).toBeNull();
+    expect(payload.configured).toBe(true);
+  });
+
+  it('POST /settings/connectors with invalid cursor key returns validation error', async () => {
+    registerProvider(createCursorTestProvider({ rejectApiKey: true }));
+    const { app, restore } = createAuthenticatedApiTestApp(CURSOR_CONNECTOR_USER, settingsRoutes);
+    restoreAuth = restore;
+
+    const response = await app.handle(
+      new Request('http://localhost/settings/connectors', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: 'cursor-invalid-key',
+          apiKey: 'cursor-invalid-key',
+          source: 'config-file',
+          provider: 'cursor',
+        }),
+      })
+    );
+
+    expect(response.status).toBe(422);
+
+    const payload = (await response.json()) as ErrorPayload;
+    expect(Value.Check(ApiErrorResponseSchema, payload)).toBe(true);
+    expect(payload).toEqual({
+      error: 'Cursor API key rejected',
+      code: ERROR_CODES.VALIDATION,
+    });
+  });
+
+  it('enables cursor models and exposes them in the model catalog', async () => {
+    const { app, restore } = createAuthenticatedApiTestApp(CURSOR_CONNECTOR_USER, settingsRoutes);
+    restoreAuth = restore;
+
+    const createResponse = await app.handle(
+      new Request('http://localhost/settings/connectors', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: 'cursor-for-models',
+          apiKey: 'cursor-live-models-key',
+          source: 'config-file',
+          provider: 'cursor',
+        }),
+      })
+    );
+    expect(createResponse.status).toBe(200);
+    const connector = (await createResponse.json()) as ConnectorPayload;
+
+    const updateResponse = await app.handle(
+      new Request(`http://localhost/settings/connectors/${connector.id}/models`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabledModels: ['composer-2.5'] }),
+      })
+    );
+    expect(updateResponse.status).toBe(200);
+
+    const catalogResponse = await app.handle(new Request('http://localhost/settings/models'));
+    expect(catalogResponse.status).toBe(200);
+    const catalog = (await catalogResponse.json()) as ModelCatalogPayload;
+    expect(catalog.textModels).toEqual(
+      expect.arrayContaining([expect.objectContaining({ modelId: 'composer-2.5' })])
+    );
+  });
+
+  it('syncs cursor config-file connectors into the connector list', async () => {
+    writeFileAtomic(
+      getConfig().configFilePath,
+      stringifyToml({
+        cursor_api_keys: {
+          'shared-cursor-config': 'cursor-live-config-key',
+        },
+      }),
+      { mode: SECRET_FILE_MODE }
+    );
+
+    const { app, restore } = createAuthenticatedApiTestApp(CURSOR_CONNECTOR_USER, settingsRoutes);
+    restoreAuth = restore;
+
+    const response = await app.handle(new Request('http://localhost/settings/connectors'));
+    expect(response.status).toBe(200);
+
+    const payload = (await response.json()) as ConnectorListPayload;
+    expect(Value.Check(ConnectorStatusSchema, payload)).toBe(true);
+    expect(
+      payload.connectors.some(
+        (connector) => connector.provider === 'cursor' && connector.name === 'shared-cursor-config'
+      )
+    ).toBe(true);
   });
 });
 

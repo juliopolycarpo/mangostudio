@@ -5,6 +5,7 @@
 import { type ChildProcessWithoutNullStreams, spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { getCursorSidecarScriptPath } from '../../../lib/runtime-paths';
+import { sanitizeShellEnv } from '../../tools/builtin/_shell-env';
 import type { StreamingChunk } from '../types';
 import { detectNodeRuntime } from './node-runtime';
 
@@ -30,6 +31,12 @@ interface SidecarEvent {
 
 export function resolveCursorSidecarScriptPath(): string {
   return getCursorSidecarScriptPath();
+}
+
+export function buildCursorSidecarEnv(
+  source: NodeJS.ProcessEnv = process.env
+): Record<string, string> {
+  return sanitizeShellEnv({}, source);
 }
 
 function mapSidecarEvent(event: SidecarEvent): StreamingChunk | null {
@@ -72,7 +79,7 @@ export async function* streamCursorAgentSidecar(
 
   const child = spawn(runtime.nodePath, [resolveCursorSidecarScriptPath()], {
     stdio: ['pipe', 'pipe', 'pipe'],
-    env: process.env,
+    env: buildCursorSidecarEnv(),
   });
 
   let stderr = '';
