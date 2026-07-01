@@ -2,7 +2,7 @@
 // Assemble the GitHub Release asset set with stable names and flat archive roots.
 
 import { createHash } from 'node:crypto';
-import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 
@@ -12,6 +12,7 @@ import {
   createReleaseAssetPlan,
   type FrontendArchivePlan,
   type PlatformArchivePlan,
+  platformArchiveMembers,
   type ReleaseAssetPlan,
 } from '../lib/release-assets';
 import { resolveReleaseVersion } from '../lib/release-version';
@@ -66,14 +67,17 @@ async function archivePlatform(plan: PlatformArchivePlan, assetsDir: string): Pr
     return;
   }
 
+  const members = platformArchiveMembers(plan, {
+    includeCursorSidecar: existsSync(plan.cursorSidecarDir),
+  });
+
   await runCommand([
     'tar',
     '-czf',
     plan.archivePath,
     '-C',
     plan.sourceDir,
-    plan.platform.name,
-    'public',
+    ...members,
     '-C',
     dirname(plan.readmePath),
     'README.md',
@@ -89,10 +93,14 @@ async function archivePlatformZip(plan: PlatformArchivePlan, assetsDir: string):
   cpSync(plan.publicDir, join(stagingDir, 'public'), { recursive: true });
   cpSync(plan.readmePath, join(stagingDir, 'README.md'));
 
-  await runCommand(
-    ['zip', '-qr', plan.archivePath, plan.platform.name, 'public', 'README.md'],
-    stagingDir
-  );
+  const includeCursorSidecar = existsSync(plan.cursorSidecarDir);
+  if (includeCursorSidecar) {
+    cpSync(plan.cursorSidecarDir, join(stagingDir, 'cursor-sidecar'), { recursive: true });
+  }
+
+  const members = platformArchiveMembers(plan, { includeCursorSidecar });
+
+  await runCommand(['zip', '-qr', plan.archivePath, ...members, 'README.md'], stagingDir);
   rmSync(stagingDir, { force: true, recursive: true });
 }
 

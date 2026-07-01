@@ -47,8 +47,12 @@ const CURSOR_NATIVE_PACKAGES: Record<ReleasePlatformId, string | null> = {
   'darwin-arm64': '@cursor/sdk-darwin-arm64',
 };
 
+export function cursorNativePackageForArch(arch: ReleasePlatformId): string | null {
+  return CURSOR_NATIVE_PACKAGES[arch] ?? null;
+}
+
 export function cursorNativePackageFor(target: BinaryTarget): string | null {
-  return CURSOR_NATIVE_PACKAGES[target.arch];
+  return cursorNativePackageForArch(target.arch);
 }
 
 export interface CursorSidecarStaging {
