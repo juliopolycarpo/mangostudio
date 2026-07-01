@@ -656,6 +656,7 @@ export async function* runLegacyTextStream(
 
   for await (const chunk of generateTextStream({
     userId,
+    chatId,
     history,
     prompt: effectivePrompt,
     systemPrompt: effectiveSystemPrompt,
@@ -717,6 +718,7 @@ export async function* runSingleShotTextGeneration(
 
   const result = await generateText({
     userId,
+    chatId,
     history,
     prompt: effectivePrompt,
     systemPrompt: effectiveSystemPrompt,

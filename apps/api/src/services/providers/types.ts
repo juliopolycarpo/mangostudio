@@ -147,6 +147,8 @@ export interface AgentTurnRequest {
 /** Input for text generation. */
 export interface TextGenerationRequest {
   userId: string;
+  /** Owning chat — required for provider-routed tool execution (e.g. Cursor sidecar RPC). */
+  chatId?: string;
   history: TextContextMessage[];
   prompt: string;
   systemPrompt?: string;

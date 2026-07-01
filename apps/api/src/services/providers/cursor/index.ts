@@ -1,9 +1,9 @@
 import type { ReasoningEffort, SecretMetadataRow } from '@mangostudio/shared/types';
 import { getConfig } from '../../../lib/config';
+import { stringifyToolResult } from '../../../modules/generation/application/tool-result-utils';
 import { parseStringArray } from '../../../utils/json';
-import { sanitizeShellEnv } from '../../tools/builtin/_shell-env';
-import { findShellExecutable, type ShellKind } from '../../tools/builtin/_shell-exec';
-import { normalizeShellToolSettings } from '../../tools/builtin/_shell-tool';
+import { DELEGATE_TO_AGENT_TOOL_NAME } from '../../tools/builtin/delegate-to-agent';
+import { executeTool } from '../../tools/registry';
 import { withModelCache } from '../core/model-cache';
 import { createProviderLifecycle } from '../core/provider-lifecycle';
 import { createProviderSecretService } from '../core/secret-service';
@@ -15,9 +15,16 @@ import type {
   StreamingChunk,
   TextGenerationRequest,
   TextGenerationResult,
+  ToolDefinition,
 } from '../types';
-import { type CursorSidecarShellTool, streamCursorAgentSidecar } from './agent-runner';
+import {
+  type CursorSidecarCustomTool,
+  type CursorSidecarExecuteResult,
+  type CursorSidecarRequest,
+  streamCursorAgentSidecar,
+} from './agent-runner';
 import { CursorApiError, fetchCursorModels, validateCursorApiKey } from './client';
+import { ensureCursorAgentHooks } from './hooks';
 import { buildCursorAgentPrompt } from './prompt-builder';
 import { detectCursorRuntimeAvailability } from './runtime-availability';
 
@@ -71,46 +78,97 @@ function resolveCursorWorkspaceDir(): string {
   return configured || process.cwd();
 }
 
-const CURSOR_SHELL_TOOL_NAMES = [
-  'bash',
-  'zsh',
-  'powershell',
-] as const satisfies readonly ShellKind[];
-
-export function buildCursorShellTools(
+/** Maps allowlisted MangoStudio tool definitions to Cursor SDK customTools metadata. */
+export function buildCursorCustomTools(
   config: TextGenerationRequest['generationConfig']
-): CursorSidecarShellTool[] | undefined {
-  const definitions = new Map((config?.tools ?? []).map((tool) => [tool.name, tool]));
-  if (definitions.size === 0) return undefined;
+): CursorSidecarCustomTool[] | undefined {
+  const tools = (config?.tools ?? []).filter((tool) => tool.name !== DELEGATE_TO_AGENT_TOOL_NAME);
+  if (tools.length === 0) return undefined;
 
-  const shellTools: CursorSidecarShellTool[] = [];
-  for (const kind of CURSOR_SHELL_TOOL_NAMES) {
-    const definition = definitions.get(kind);
-    if (!definition) continue;
+  return tools.map((tool) => ({
+    name: tool.name,
+    description: tool.description,
+    inputSchema: tool.parameters,
+  }));
+}
 
-    const savedSettings = config?.toolSettings?.[kind];
-    if (savedSettings?.enabled === false) continue;
+function buildAllowedToolNameSet(tools: ToolDefinition[] | undefined): ReadonlySet<string> {
+  return new Set(
+    (tools ?? []).map((tool) => tool.name).filter((name) => name !== DELEGATE_TO_AGENT_TOOL_NAME)
+  );
+}
 
-    const executable = findShellExecutable(kind);
-    if (!executable) continue;
-
-    const settings = normalizeShellToolSettings(savedSettings?.parameters ?? {});
-    shellTools.push({
-      kind,
-      executable,
-      description: definition.description,
-      inputSchema: definition.parameters,
-      timeoutMs: settings.timeoutMs,
-      maxOutputBytes: settings.maxOutputBytes,
-      // Apply the same env allow/deny policy as the in-process shell tools. This
-      // must be resolved here (not in the sidecar), because the sidecar's own
-      // process env is stripped of secrets before it starts, so an allow-listed
-      // secret could never be recovered downstream.
-      env: sanitizeShellEnv({ allow: settings.allowedEnvVars, deny: settings.deniedEnvVars }),
-    });
+async function executeCursorCustomTool(
+  req: TextGenerationRequest,
+  allowedToolNames: ReadonlySet<string>,
+  name: string,
+  args: Record<string, unknown>
+): Promise<CursorSidecarExecuteResult> {
+  if (!allowedToolNames.has(name)) {
+    return { error: `Tool "${name}" is not allowed for this agent.`, isError: true };
   }
 
-  return shellTools.length > 0 ? shellTools : undefined;
+  try {
+    const result = await executeTool(
+      name,
+      args,
+      {
+        userId: req.userId,
+        chatId: req.chatId ?? '',
+        parameters: {},
+      },
+      req.generationConfig?.toolSettings?.[name]
+    );
+    return { result: stringifyToolResult(result) };
+  } catch (error) {
+    return {
+      error: error instanceof Error ? error.message : 'Tool execution failed.',
+      isError: true,
+    };
+  }
+}
+
+interface PreparedCursorSidecar {
+  request: CursorSidecarRequest;
+  executeCustomTool: (
+    name: string,
+    args: Record<string, unknown>
+  ) => Promise<CursorSidecarExecuteResult>;
+}
+
+async function prepareCursorSidecar(
+  req: TextGenerationRequest,
+  params: {
+    apiKey: string;
+    workspaceDir: string;
+    model: string;
+    prompt: string;
+    modelParams?: Array<{ id: string; value: string }>;
+  }
+): Promise<PreparedCursorSidecar> {
+  const runtime = await detectCursorRuntimeAvailability();
+  if (!runtime.available || !runtime.nodePath) {
+    throw new CursorRuntimeUnavailableError(
+      runtime.reason ?? 'Node.js is required for Cursor SDK agents.'
+    );
+  }
+
+  const agentDir = await ensureCursorAgentHooks(runtime.nodePath);
+  const customTools = buildCursorCustomTools(req.generationConfig);
+  const allowedToolNames = buildAllowedToolNameSet(req.generationConfig?.tools);
+
+  return {
+    request: {
+      apiKey: params.apiKey,
+      model: params.model,
+      cwd: agentDir,
+      prompt: params.prompt,
+      params: params.modelParams,
+      ...(customTools ? { customTools } : {}),
+      settingSources: ['project'],
+    },
+    executeCustomTool: (name, args) => executeCursorCustomTool(req, allowedToolNames, name, args),
+  };
 }
 
 const listModelsWithCache = withModelCache(
@@ -171,7 +229,6 @@ export function buildCursorModelParams(
 ): Array<{ id: string; value: string }> | undefined {
   if (!config?.thinkingEnabled) return undefined;
   if (!config.reasoningEffort || !isCursorThinkingEffort(config.reasoningEffort)) return undefined;
-  // Medium maps to the SDK default — only low/high are sent as explicit params.
   if (config.reasoningEffort === 'medium') return undefined;
   if (!modelParameters) return undefined;
 
@@ -203,20 +260,21 @@ async function runCursorGeneration(req: TextGenerationRequest): Promise<string> 
     systemPrompt: req.systemPrompt,
     history: req.history,
     prompt: req.prompt,
+    workspaceDir,
+  });
+  const modelParams = buildCursorModelParams(req.generationConfig, modelParameters);
+  const sidecar = await prepareCursorSidecar(req, {
+    apiKey,
+    workspaceDir,
+    model: req.modelName,
+    prompt,
+    modelParams,
   });
 
   let text = '';
-  for await (const chunk of streamCursorAgentSidecar(
-    {
-      apiKey,
-      model: req.modelName,
-      cwd: workspaceDir,
-      prompt,
-      params: buildCursorModelParams(req.generationConfig, modelParameters),
-      shellTools: buildCursorShellTools(req.generationConfig),
-    },
-    req.signal
-  )) {
+  for await (const chunk of streamCursorAgentSidecar(sidecar.request, req.signal, {
+    executeCustomTool: sidecar.executeCustomTool,
+  })) {
     if (chunk.type === 'error') {
       throw new CursorConnectorError(chunk.content ?? 'Cursor agent run failed.');
     }
@@ -248,24 +306,22 @@ const cursorProvider: AIProvider = {
       systemPrompt: req.systemPrompt,
       history: req.history,
       prompt: req.prompt,
+      workspaceDir,
+    });
+    const modelParams = buildCursorModelParams(req.generationConfig, modelParameters);
+    const sidecar = await prepareCursorSidecar(req, {
+      apiKey,
+      workspaceDir,
+      model: req.modelName,
+      prompt,
+      modelParams,
     });
 
-    for await (const chunk of streamCursorAgentSidecar(
-      {
-        apiKey,
-        model: req.modelName,
-        cwd: workspaceDir,
-        prompt,
-        params: buildCursorModelParams(req.generationConfig, modelParameters),
-        shellTools: buildCursorShellTools(req.generationConfig),
-      },
-      req.signal
-    )) {
+    for await (const chunk of streamCursorAgentSidecar(sidecar.request, req.signal, {
+      executeCustomTool: sidecar.executeCustomTool,
+    })) {
       if (req.signal?.aborted) break;
       yield chunk;
-      // The sidecar stream always emits exactly one terminal chunk (error or a
-      // final empty text chunk); forward it and stop instead of appending a
-      // second terminal of our own.
       if (chunk.done) return;
     }
   },

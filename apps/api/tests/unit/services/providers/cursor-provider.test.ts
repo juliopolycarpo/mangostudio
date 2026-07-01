@@ -9,6 +9,7 @@ import {
   validateCursorApiKey,
 } from '../../../../src/services/providers/cursor/client';
 import {
+  buildCursorCustomTools,
   buildCursorModelParams,
   getCursorConnectorRowsForModel,
 } from '../../../../src/services/providers/cursor/index';
@@ -17,14 +18,6 @@ import {
   toCursorModelInfo,
 } from '../../../../src/services/providers/cursor/model-catalog';
 import { buildCursorAgentPrompt } from '../../../../src/services/providers/cursor/prompt-builder';
-
-function restoreEnv(key: string, previous: string | undefined): void {
-  if (previous === undefined) {
-    delete process.env[key];
-    return;
-  }
-  process.env[key] = previous;
-}
 
 describe('cursor provider foundation', () => {
   afterEach(() => {
@@ -187,43 +180,37 @@ describe('cursor provider foundation', () => {
     ).toEqual({ PATH: '/usr/bin', HOME: '/tmp/user' });
   });
 
-  it('applies the shell env allow/deny policy to cursor custom tools', async () => {
-    await mock.module('../../../../src/services/tools/builtin/_shell-exec', () => ({
-      findShellExecutable: () => '/bin/bash',
-    }));
+  it('maps all allowlisted tools to Cursor customTools metadata', () => {
+    const tools = buildCursorCustomTools({
+      thinkingEnabled: false,
+      reasoningEffort: 'medium',
+      tools: [
+        { name: 'bash', description: 'Run Bash', parameters: { type: 'object' } },
+        { name: 'read_file', description: 'Read files', parameters: { type: 'object' } },
+        {
+          name: 'delegate_to_agent',
+          description: 'Delegate',
+          parameters: { type: 'object' },
+        },
+      ],
+    });
 
-    const previousToken = process.env.GITHUB_TOKEN;
-    const previousApiKey = process.env.CURSOR_API_KEY;
-    process.env.GITHUB_TOKEN = 'gh-secret';
-    process.env.CURSOR_API_KEY = 'cursor-secret';
+    expect(tools?.map((tool) => tool.name)).toEqual(['bash', 'read_file']);
+    expect(tools?.[0]).toMatchObject({
+      name: 'bash',
+      description: 'Run Bash',
+      inputSchema: { type: 'object' },
+    });
+  });
 
-    try {
-      const { buildCursorShellTools: build } = await import(
-        '../../../../src/services/providers/cursor/index'
-      );
-
-      const [tool] =
-        build({
-          thinkingEnabled: false,
-          reasoningEffort: 'medium',
-          tools: [{ name: 'bash', description: 'Run Bash', parameters: { type: 'object' } }],
-          toolSettings: {
-            bash: {
-              enabled: true,
-              parameters: { allowedEnvVars: ['GITHUB_TOKEN'], deniedEnvVars: ['PATH'] },
-            },
-          },
-        }) ?? [];
-
-      // Allow-listed secret survives, auto-detected secret is stripped, explicit
-      // deny wins over the ambient value.
-      expect(tool?.env?.GITHUB_TOKEN).toBe('gh-secret');
-      expect(tool?.env?.CURSOR_API_KEY).toBeUndefined();
-      expect(tool?.env?.PATH).toBeUndefined();
-    } finally {
-      restoreEnv('GITHUB_TOKEN', previousToken);
-      restoreEnv('CURSOR_API_KEY', previousApiKey);
-    }
+  it('returns undefined when no tools are allowlisted', () => {
+    expect(
+      buildCursorCustomTools({
+        thinkingEnabled: false,
+        reasoningEffort: 'medium',
+        tools: [],
+      })
+    ).toBeUndefined();
   });
 
   it('maps supported reasoning efforts to Cursor model params when the model declares thinking', () => {
@@ -265,9 +252,10 @@ describe('cursor provider foundation', () => {
     ).toBe(undefined);
   });
 
-  it('builds a flattened prompt from system, history, and user input', () => {
+  it('builds a flattened prompt from system, history, workspace, and user input', () => {
     const prompt = buildCursorAgentPrompt({
       systemPrompt: 'Be concise.',
+      workspaceDir: '/workspace/project',
       history: [
         { role: 'user', text: 'Hello' },
         { role: 'ai', text: 'Hi there.' },
@@ -275,6 +263,7 @@ describe('cursor provider foundation', () => {
       prompt: 'Summarize the repo.',
     });
 
+    expect(prompt).toContain('Workspace root:\n/workspace/project');
     expect(prompt).toContain('System instructions:\nBe concise.');
     expect(prompt).toContain('User: Hello');
     expect(prompt).toContain('Assistant: Hi there.');

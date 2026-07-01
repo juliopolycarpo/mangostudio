@@ -1,29 +1,19 @@
 /**
  * Spawns the Node.js Cursor SDK sidecar and maps NDJSON events to StreamingChunk.
+ * Supports bidirectional stdio RPC so MangoStudio tools execute via executeTool in the API.
  */
 
 import { type ChildProcessWithoutNullStreams, spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { getCursorSidecarScriptPath } from '../../../lib/runtime-paths';
 import { sanitizeShellEnv } from '../../tools/builtin/_shell-env';
-import type { ShellKind } from '../../tools/builtin/_shell-exec';
 import type { StreamingChunk } from '../types';
 import { detectCursorRuntimeAvailability } from './runtime-availability';
 
-export interface CursorSidecarShellTool {
-  kind: ShellKind;
-  executable: string;
+export interface CursorSidecarCustomTool {
+  name: string;
   description: string;
   inputSchema: Record<string, unknown>;
-  timeoutMs: number;
-  maxOutputBytes: number;
-  /**
-   * Environment handed to commands this tool runs, already filtered by the
-   * shell env allow/deny policy. Computed in the API process (which still holds
-   * the full environment) so allow-listed secrets survive and denied vars are
-   * dropped — the sidecar's own process env is separately stripped of secrets.
-   */
-  env?: Record<string, string>;
 }
 
 export interface CursorSidecarRequest {
@@ -32,20 +22,44 @@ export interface CursorSidecarRequest {
   cwd: string;
   prompt: string;
   params?: Array<{ id: string; value: string }>;
-  shellTools?: CursorSidecarShellTool[];
+  customTools?: CursorSidecarCustomTool[];
+  settingSources?: string[];
 }
 
-interface SidecarEvent {
-  type: 'text' | 'thinking' | 'tool_call' | 'error' | 'done';
-  text?: string;
-  content?: string;
-  callId?: string;
-  name?: string;
-  status?: string;
-  args?: unknown;
+export interface CursorSidecarExecuteResult {
   result?: unknown;
-  done?: boolean;
+  error?: string;
+  isError?: boolean;
 }
+
+export interface StreamCursorAgentSidecarOptions {
+  executeCustomTool?: (
+    name: string,
+    args: Record<string, unknown>
+  ) => Promise<CursorSidecarExecuteResult>;
+}
+
+type SidecarEvent =
+  | {
+      type: 'text' | 'thinking' | 'error' | 'done';
+      text?: string;
+      content?: string;
+      done?: boolean;
+    }
+  | {
+      type: 'tool_call';
+      callId?: string;
+      name?: string;
+      status?: string;
+      args?: unknown;
+      result?: unknown;
+    }
+  | {
+      type: 'tool_request';
+      id: string;
+      name: string;
+      args?: unknown;
+    };
 
 interface ChildExitStatus {
   code: number | null;
@@ -95,7 +109,10 @@ function mapSidecarEvent(
   }
 }
 
-function shouldSkipToolCallEvent(event: SidecarEvent, emittedToolCallIds: Set<string>): boolean {
+function shouldSkipToolCallEvent(
+  event: Extract<SidecarEvent, { type: 'tool_call' }>,
+  emittedToolCallIds: Set<string>
+): boolean {
   if (event.status === 'running') return true;
   const callId = typeof event.callId === 'string' ? event.callId.trim() : '';
   if (!callId) return false;
@@ -104,9 +121,21 @@ function shouldSkipToolCallEvent(event: SidecarEvent, emittedToolCallIds: Set<st
   return false;
 }
 
+function writeToolResponse(
+  stdin: ChildProcessWithoutNullStreams['stdin'],
+  response: { type: 'tool_response'; id: string } & CursorSidecarExecuteResult
+): void {
+  try {
+    stdin.write(`${JSON.stringify(response)}\n`);
+  } catch {
+    // Sidecar may have exited; swallow EPIPE.
+  }
+}
+
 export async function* streamCursorAgentSidecar(
   request: CursorSidecarRequest,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  options: StreamCursorAgentSidecarOptions = {}
 ): AsyncIterable<StreamingChunk> {
   const runtime = await detectCursorRuntimeAvailability();
   if (!runtime.available || !runtime.nodePath) {
@@ -128,15 +157,12 @@ export async function* streamCursorAgentSidecar(
     stderr += chunk.toString('utf8');
   });
 
-  // Capture spawn failures (e.g. the node binary disappearing between detection
-  // and spawn) so an unhandled 'error' event can't crash the whole API process.
   let spawnError: Error | null = null;
   child.on('error', (error: Error) => {
     spawnError = error;
   });
   child.stdin.on('error', () => {
-    // The sidecar reads all of stdin before responding, but if it exits early
-    // the write below can emit EPIPE; swallow it so it never becomes uncaught.
+    // Writes after the sidecar exits can emit EPIPE; swallow so it stays uncaught.
   });
 
   const abortHandler = () => {
@@ -146,7 +172,6 @@ export async function* streamCursorAgentSidecar(
 
   try {
     child.stdin.write(`${JSON.stringify(request)}\n`);
-    child.stdin.end();
 
     const rl = createInterface({ input: child.stdout });
     let sawTerminal = false;
@@ -168,6 +193,41 @@ export async function* streamCursorAgentSidecar(
         break;
       }
 
+      if (event.type === 'tool_request') {
+        const { id, name } = event;
+        const args =
+          typeof event.args === 'object' && event.args !== null
+            ? (event.args as Record<string, unknown>)
+            : {};
+
+        void (async () => {
+          try {
+            const outcome = options.executeCustomTool
+              ? await options.executeCustomTool(name, args)
+              : {
+                  error: `Tool "${name}" is not available on the Cursor provider path.`,
+                  isError: true,
+                };
+            writeToolResponse(child.stdin, { type: 'tool_response', id, ...outcome });
+          } catch (error) {
+            writeToolResponse(child.stdin, {
+              type: 'tool_response',
+              id,
+              error: error instanceof Error ? error.message : 'Tool execution failed.',
+              isError: true,
+            });
+          }
+        })();
+
+        yield {
+          type: 'tool_call',
+          name,
+          args,
+          done: false,
+        };
+        continue;
+      }
+
       const chunk = mapSidecarEvent(event, emittedToolCallIds);
       if (!chunk) continue;
 
@@ -178,6 +238,12 @@ export async function* streamCursorAgentSidecar(
       }
 
       yield chunk;
+    }
+
+    try {
+      child.stdin.end();
+    } catch {
+      // Sidecar may have already closed stdin.
     }
 
     const exitStatus = await childExit;

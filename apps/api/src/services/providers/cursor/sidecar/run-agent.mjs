@@ -1,39 +1,14 @@
 #!/usr/bin/env node
 /**
  * Node sidecar for Cursor SDK local agent runs.
- * Reads a JSON request from stdin and writes NDJSON events to stdout.
+ * Line 1 on stdin is the JSON request; subsequent lines are tool_response RPC messages.
+ * Writes NDJSON events (and tool_request RPC) to stdout.
  */
 
-import { spawn } from 'node:child_process';
-import { homedir } from 'node:os';
-import { resolve } from 'node:path';
+import { createInterface } from 'node:readline';
 import { Agent, CursorAgentError } from '@cursor/sdk';
 
-const MAX_STDIN_BYTES = 2 * 1024 * 1024;
-const SHELL_TOOL_NAMES = new Set(['bash', 'zsh', 'powershell']);
-const DEFAULT_SHELL_TIMEOUT_MS = 15_000;
-const MIN_SHELL_TIMEOUT_MS = 1_000;
-const MAX_SHELL_TIMEOUT_MS = 30_000;
-const DEFAULT_MAX_OUTPUT_BYTES = 100_000;
-const MIN_MAX_OUTPUT_BYTES = 1_000;
-const MAX_MAX_OUTPUT_BYTES = 1_000_000;
-
-const DEFAULT_SHELL_SCHEMA = {
-  type: 'object',
-  properties: {
-    command: {
-      type: 'string',
-      minLength: 1,
-      description: 'Command to execute.',
-    },
-    cwd: {
-      type: 'string',
-      description: 'Optional working directory. Absolute path or one starting with ~.',
-    },
-  },
-  required: ['command'],
-  additionalProperties: false,
-};
+const TOOL_RPC_TIMEOUT_MS = 30_000;
 
 function writeEvent(event) {
   process.stdout.write(`${JSON.stringify(event)}\n`);
@@ -43,222 +18,123 @@ function isRecord(value) {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function clampInteger(value, fallback, min, max) {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return fallback;
-  return Math.min(max, Math.max(min, Math.round(value)));
-}
-
-/** Keeps only string-valued entries from a request-provided env map. */
-function normalizeEnvRecord(value) {
-  if (!isRecord(value)) return undefined;
-  const env = {};
-  for (const [key, entry] of Object.entries(value)) {
-    if (typeof entry === 'string') env[key] = entry;
-  }
-  return Object.keys(env).length > 0 ? env : undefined;
-}
-
-async function readStdinJson() {
-  const chunks = [];
-  let total = 0;
-
-  for await (const chunk of process.stdin) {
-    total += chunk.length;
-    if (total > MAX_STDIN_BYTES) {
-      throw new Error('Sidecar request exceeded maximum stdin size.');
-    }
-    chunks.push(chunk);
-  }
-
-  const raw = Buffer.concat(chunks).toString('utf8').trim();
-  if (!raw) {
-    throw new Error('Sidecar request body is empty.');
-  }
-
-  return JSON.parse(raw);
-}
-
-function normalizeShellTools(value) {
+function normalizeCustomTools(value) {
   if (!Array.isArray(value)) return undefined;
 
   const tools = [];
   for (const item of value) {
     if (!isRecord(item)) continue;
-
-    const kind = typeof item.kind === 'string' ? item.kind : '';
-    const executable = typeof item.executable === 'string' ? item.executable.trim() : '';
-    if (!SHELL_TOOL_NAMES.has(kind) || !executable) continue;
-
+    const name = typeof item.name === 'string' ? item.name.trim() : '';
+    if (!name) continue;
     tools.push({
-      kind,
-      executable,
+      name,
       description:
         typeof item.description === 'string' && item.description.trim()
           ? item.description
-          : `Runs a command with ${kind}.`,
-      inputSchema: isRecord(item.inputSchema) ? item.inputSchema : DEFAULT_SHELL_SCHEMA,
-      timeoutMs: clampInteger(
-        item.timeoutMs,
-        DEFAULT_SHELL_TIMEOUT_MS,
-        MIN_SHELL_TIMEOUT_MS,
-        MAX_SHELL_TIMEOUT_MS
-      ),
-      maxOutputBytes: clampInteger(
-        item.maxOutputBytes,
-        DEFAULT_MAX_OUTPUT_BYTES,
-        MIN_MAX_OUTPUT_BYTES,
-        MAX_MAX_OUTPUT_BYTES
-      ),
-      env: normalizeEnvRecord(item.env),
+          : `MangoStudio tool: ${name}`,
+      inputSchema: isRecord(item.inputSchema) ? item.inputSchema : { type: 'object' },
     });
   }
 
   return tools.length > 0 ? tools : undefined;
 }
 
-function createShellCustomTools(shellTools) {
-  if (!shellTools) return undefined;
+function normalizeSettingSources(value) {
+  if (!Array.isArray(value)) return ['project'];
+  const sources = value.filter((entry) => typeof entry === 'string' && entry.trim());
+  return sources.length > 0 ? sources : ['project'];
+}
 
+function createStdinMultiplexer() {
+  const rl = createInterface({ input: process.stdin });
+  const toolWaiters = new Map();
+  let requestResolve;
+  let gotRequest = false;
+
+  const requestPromise = new Promise((resolve) => {
+    requestResolve = resolve;
+  });
+
+  rl.on('line', (line) => {
+    if (!line.trim()) return;
+
+    let parsed;
+    try {
+      parsed = JSON.parse(line);
+    } catch {
+      return;
+    }
+
+    if (!gotRequest) {
+      gotRequest = true;
+      requestResolve(parsed);
+      return;
+    }
+
+    if (parsed?.type === 'tool_response' && typeof parsed.id === 'string') {
+      const waiter = toolWaiters.get(parsed.id);
+      if (waiter) {
+        toolWaiters.delete(parsed.id);
+        clearTimeout(waiter.timeout);
+        waiter.resolve(parsed);
+      }
+    }
+  });
+
+  return {
+    readRequest: () => requestPromise,
+    waitForToolResponse(id) {
+      return new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          toolWaiters.delete(id);
+          reject(new Error(`Tool RPC timed out after ${TOOL_RPC_TIMEOUT_MS}ms.`));
+        }, TOOL_RPC_TIMEOUT_MS);
+        timeout.unref?.();
+        toolWaiters.set(id, { resolve, reject, timeout });
+      });
+    },
+    close: () => rl.close(),
+  };
+}
+
+let nextToolRequestId = 0;
+
+function createRpcBackedCustomTools(toolDefs, stdinMux) {
   return Object.fromEntries(
-    shellTools.map((tool) => [
-      tool.kind,
+    toolDefs.map((tool) => [
+      tool.name,
       {
         description: tool.description,
         inputSchema: tool.inputSchema,
-        execute: (args) => runShellCommand(tool, args),
+        execute: (args) => executeViaApi(tool.name, args, stdinMux),
       },
     ])
   );
 }
 
-async function runShellCommand(tool, args) {
-  const command = isRecord(args) && typeof args.command === 'string' ? args.command : '';
-  if (!command.trim()) throw new Error('Missing required command.');
+async function executeViaApi(name, args, stdinMux) {
+  const id = `mango-tool-${++nextToolRequestId}`;
+  const safeArgs = isRecord(args) ? args : {};
 
-  const cwd =
-    isRecord(args) && typeof args.cwd === 'string' ? resolveWorkingDirectory(args.cwd) : undefined;
-  const startedAt = Date.now();
-  let timedOut = false;
+  writeEvent({ type: 'tool_request', id, name, args: safeArgs });
 
-  let child;
-  try {
-    child = spawn(tool.executable, buildShellInvocation(tool.kind, command), {
-      ...(cwd ? { cwd } : {}),
-      // Prefer the API-computed, policy-filtered env; fall back to the sidecar's
-      // own (already secret-stripped) env when a request omits it.
-      env: tool.env ?? process.env,
-      stdin: 'ignore',
-      stdout: 'pipe',
-      stderr: 'pipe',
-      windowsHide: true,
-    });
-  } catch (error) {
-    throw new Error(`Cannot run ${tool.kind} command: ${formatError(error)}`);
-  }
-
-  const timeout = setTimeout(() => {
-    timedOut = true;
-    child.kill('SIGKILL');
-  }, tool.timeoutMs);
-  timeout.unref?.();
-
-  try {
-    const [stdout, stderr, exitStatus] = await Promise.all([
-      readStreamCapped(child.stdout, tool.maxOutputBytes),
-      readStreamCapped(child.stderr, tool.maxOutputBytes),
-      waitForChildExit(child),
-    ]);
-
+  const response = await stdinMux.waitForToolResponse(id);
+  if (response.isError) {
+    const message =
+      typeof response.error === 'string'
+        ? response.error
+        : typeof response.result === 'string'
+          ? response.result
+          : 'Tool execution failed.';
     return {
-      shell: tool.kind,
-      command,
-      exitCode: exitStatus.code,
-      signal: exitStatus.signal,
-      stdout: stdout.text,
-      stderr: stderr.text,
-      truncated: stdout.truncated || stderr.truncated,
-      timedOut,
-      durationMs: Date.now() - startedAt,
+      content: [{ type: 'text', text: message }],
+      isError: true,
     };
-  } finally {
-    clearTimeout(timeout);
   }
-}
 
-function buildShellInvocation(kind, command) {
-  if (kind === 'powershell') {
-    return ['-NoProfile', '-NonInteractive', '-Command', command];
-  }
-  return ['-c', command];
-}
-
-function resolveWorkingDirectory(cwd) {
-  const text = cwd.trim();
-  if (!text) return undefined;
-  return resolve(expandHome(text));
-}
-
-function expandHome(path) {
-  if (path === '~' || path.startsWith('~/')) {
-    const home = process.env.HOME || homedir();
-    if (!home) return path;
-    if (path === '~') return home;
-    return `${home}/${path.slice(2)}`;
-  }
-  return path;
-}
-
-function readStreamCapped(stream, maxBytes) {
-  return new Promise((resolve, reject) => {
-    const chunks = [];
-    let total = 0;
-    let truncated = false;
-    let settled = false;
-
-    const done = () => {
-      if (settled) return;
-      settled = true;
-      const merged = Buffer.concat(chunks);
-      resolve({ text: merged.subarray(0, maxBytes).toString('utf8'), truncated });
-    };
-
-    const fail = (error) => {
-      if (settled) return;
-      settled = true;
-      reject(error);
-    };
-
-    stream.on('data', (chunk) => {
-      const buffer = Buffer.from(chunk);
-      if (total < maxBytes) {
-        chunks.push(buffer);
-        total += buffer.byteLength;
-        if (total > maxBytes) {
-          truncated = true;
-          stream.destroy();
-        }
-        return;
-      }
-      truncated = true;
-      stream.destroy();
-    });
-    stream.once('error', fail);
-    stream.once('end', done);
-    stream.once('close', done);
-  });
-}
-
-function waitForChildExit(child) {
-  return new Promise((resolve, reject) => {
-    child.once('error', (error) =>
-      reject(new Error(`Cannot run shell command: ${formatError(error)}`))
-    );
-    child.once('close', (code, signal) => resolve({ code, signal }));
-  });
-}
-
-function formatError(error) {
-  return error instanceof Error ? error.message : String(error);
+  if (typeof response.result === 'string') return response.result;
+  if (response.result !== undefined) return response.result;
+  return '';
 }
 
 function extractAssistantText(event) {
@@ -287,7 +163,9 @@ function shouldEmitToolCall(event, emittedToolCalls) {
 }
 
 async function main() {
-  const request = await readStdinJson();
+  const stdinMux = createStdinMultiplexer();
+  const request = await stdinMux.readRequest();
+
   const apiKey = typeof request.apiKey === 'string' ? request.apiKey.trim() : '';
   const model = typeof request.model === 'string' ? request.model.trim() : '';
   const cwd = typeof request.cwd === 'string' ? request.cwd.trim() : '';
@@ -299,14 +177,16 @@ async function main() {
   if (!prompt.trim()) throw new Error('Sidecar request missing prompt.');
 
   const modelParams = Array.isArray(request.params) ? request.params : undefined;
-  const customTools = createShellCustomTools(normalizeShellTools(request.shellTools));
+  const toolDefs = normalizeCustomTools(request.customTools);
+  const customTools = toolDefs ? createRpcBackedCustomTools(toolDefs, stdinMux) : undefined;
+  const settingSources = normalizeSettingSources(request.settingSources);
 
   await using agent = await Agent.create({
     apiKey,
     model: { id: model, ...(modelParams ? { params: modelParams } : {}) },
     local: {
       cwd,
-      settingSources: [],
+      settingSources,
       ...(customTools ? { customTools } : {}),
     },
   });
@@ -342,6 +222,8 @@ async function main() {
   }
 
   const result = await run.wait();
+  stdinMux.close();
+
   if (result.status === 'error') {
     writeEvent({ type: 'error', content: `Cursor agent run failed (${result.id}).`, done: true });
     process.exitCode = 2;

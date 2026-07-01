@@ -1,15 +1,19 @@
 import { afterEach, describe, expect, it, mock } from 'bun:test';
 import { EventEmitter } from 'node:events';
 import { PassThrough, Readable } from 'node:stream';
-import type { CursorSidecarRequest } from '../../../../../src/services/providers/cursor/agent-runner';
+import type {
+  CursorSidecarExecuteResult,
+  CursorSidecarRequest,
+} from '../../../../../src/services/providers/cursor/agent-runner';
 import type { StreamingChunk } from '../../../../../src/services/providers/types';
 
 const NODE_PATH = '/usr/bin/node';
 const DEFAULT_REQUEST: CursorSidecarRequest = {
   apiKey: 'cursor-test-key',
   model: 'composer-2.5',
-  cwd: '/workspace',
+  cwd: '/home/user/.mango/cursor-agent',
   prompt: 'Hello',
+  settingSources: ['project'],
 };
 
 type MockChild = EventEmitter & {
@@ -112,13 +116,19 @@ async function setupAgentRunnerMocks(spawnImpl: () => MockChild): Promise<void> 
 
 async function collectSidecarChunks(
   request: CursorSidecarRequest = DEFAULT_REQUEST,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  executeCustomTool?: (
+    name: string,
+    args: Record<string, unknown>
+  ) => Promise<CursorSidecarExecuteResult>
 ) {
   const { streamCursorAgentSidecar } = await import(
     '../../../../../src/services/providers/cursor/agent-runner'
   );
   const chunks = [];
-  for await (const chunk of streamCursorAgentSidecar(request, signal)) {
+  for await (const chunk of streamCursorAgentSidecar(request, signal, {
+    executeCustomTool,
+  })) {
     chunks.push(chunk);
   }
   return chunks;
@@ -230,30 +240,81 @@ describe('streamCursorAgentSidecar', () => {
     ]);
   });
 
-  it('forwards shell tool allowlist config to the sidecar request', async () => {
+  it('forwards customTools metadata to the sidecar request', async () => {
     let stdinRequest: CursorSidecarRequest | undefined;
     await setupAgentRunnerMocks(() =>
       createMockChild([JSON.stringify({ type: 'done' })], {
         onStdin: (chunk) => {
-          stdinRequest = JSON.parse(chunk) as CursorSidecarRequest;
+          stdinRequest = JSON.parse(chunk.trim()) as CursorSidecarRequest;
         },
       })
     );
 
-    const shellTools: NonNullable<CursorSidecarRequest['shellTools']> = [
+    const customTools: NonNullable<CursorSidecarRequest['customTools']> = [
       {
-        kind: 'bash',
-        executable: '/bin/bash',
+        name: 'bash',
         description: 'Run Bash',
         inputSchema: { type: 'object' },
-        timeoutMs: 5000,
-        maxOutputBytes: 10_000,
+      },
+      {
+        name: 'read_file',
+        description: 'Read a file',
+        inputSchema: { type: 'object' },
       },
     ];
 
-    await collectSidecarChunks({ ...DEFAULT_REQUEST, shellTools });
+    await collectSidecarChunks({ ...DEFAULT_REQUEST, customTools });
 
-    expect(stdinRequest?.shellTools).toEqual(shellTools);
+    expect(stdinRequest?.customTools).toEqual(customTools);
+    expect(stdinRequest?.settingSources).toEqual(['project']);
+  });
+
+  it('round-trips tool_request RPC through executeCustomTool', async () => {
+    const stdinWrites: string[] = [];
+    await setupAgentRunnerMocks(() =>
+      createMockChild(
+        [
+          JSON.stringify({
+            type: 'tool_request',
+            id: 'mango-tool-1',
+            name: 'read_file',
+            args: { path: '/workspace/README.md' },
+          }),
+          JSON.stringify({ type: 'done' }),
+        ],
+        {
+          onStdin: (chunk) => {
+            stdinWrites.push(chunk);
+          },
+        }
+      )
+    );
+
+    const executeCustomTool = mock(
+      (name: string, args: Record<string, unknown>): Promise<CursorSidecarExecuteResult> => {
+        expect(name).toBe('read_file');
+        expect(args).toEqual({ path: '/workspace/README.md' });
+        return Promise.resolve({ result: '{"content":"hello"}' });
+      }
+    );
+
+    const chunks = await collectSidecarChunks(DEFAULT_REQUEST, undefined, executeCustomTool);
+
+    expect(executeCustomTool).toHaveBeenCalledTimes(1);
+    expect(chunks.some((chunk) => chunk.type === 'tool_call' && chunk.name === 'read_file')).toBe(
+      true
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    const responseLine = stdinWrites.find((line) => line.includes('tool_response'));
+    expect(responseLine).toBeDefined();
+    if (!responseLine) throw new Error('expected tool_response on stdin');
+    expect(JSON.parse(responseLine.trim())).toMatchObject({
+      type: 'tool_response',
+      id: 'mango-tool-1',
+      result: '{"content":"hello"}',
+    });
   });
 
   it('yields an error chunk and stops when the sidecar reports failure', async () => {
