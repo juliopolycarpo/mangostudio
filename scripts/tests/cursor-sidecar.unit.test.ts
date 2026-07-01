@@ -1,7 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 
-import { cursorNativePackageFor } from '../lib/cursor-sidecar';
+import {
+  createCursorSdkInstallCommand,
+  cursorNativePackageFor,
+  normalizeCursorSdkVersion,
+} from '../lib/cursor-sidecar';
 import { ALL_BINARY_TARGETS } from '../lib/release-targets';
+import { readText } from './support/read-text';
 
 describe('cursor sidecar native package mapping', () => {
   test('every release target resolves to a package name or an explicit null', () => {
@@ -36,5 +41,42 @@ describe('cursor sidecar native package mapping', () => {
     const winArm = ALL_BINARY_TARGETS.find((target) => target.arch === 'windows-arm64');
     expect(winArm).toBeDefined();
     if (winArm) expect(cursorNativePackageFor(winArm)).toBeNull();
+  });
+});
+
+describe('cursor sidecar SDK staging', () => {
+  test('installs all optional native packages through Bun', () => {
+    expect(createCursorSdkInstallCommand('1.2.3')).toEqual([
+      'bun',
+      'install',
+      '--no-save',
+      '--ignore-scripts',
+      '--os=*',
+      '--cpu=*',
+      '@cursor/sdk@1.2.3',
+    ]);
+  });
+
+  test('normalizes manifest ranges to exact Cursor SDK versions', () => {
+    expect(normalizeCursorSdkVersion('^1.0.22')).toBe('1.0.22');
+    expect(normalizeCursorSdkVersion('~1.0.22-beta.1')).toBe('1.0.22-beta.1');
+    expect(normalizeCursorSdkVersion('v1.0.22')).toBe('1.0.22');
+  });
+
+  test('rejects non-version Cursor SDK specs before package manager execution', () => {
+    expect(() => normalizeCursorSdkVersion('latest')).toThrow(
+      'Unsupported @cursor/sdk version spec'
+    );
+    expect(() => normalizeCursorSdkVersion('file:../cursor-sdk')).toThrow(
+      'Unsupported @cursor/sdk version spec'
+    );
+  });
+
+  test('avoids in-process registry tarball downloads', () => {
+    const source = readText('scripts/lib/cursor-sidecar.ts');
+
+    expect(source).not.toContain('await fetch(');
+    expect(source).not.toContain('arrayBuffer()');
+    expect(source).not.toContain("['tar', '-xzf'");
   });
 });

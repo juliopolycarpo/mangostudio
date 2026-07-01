@@ -22,14 +22,14 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 import { ROOT_DIR } from './config';
 import { captureCommand } from './exec';
 import { warn } from './log';
 import type { BinaryTarget, ReleasePlatformId } from './release-targets';
 
 const SIDECAR_SOURCE_DIR = join(ROOT_DIR, 'apps/api/src/services/providers/cursor/sidecar');
-const NPM_REGISTRY = 'https://registry.npmjs.org';
+const CURSOR_SDK_VERSION_PATTERN = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
 
 /**
  * Maps each release target to the `@cursor/sdk-<platform>` package that carries
@@ -58,7 +58,7 @@ export function cursorNativePackageFor(target: BinaryTarget): string | null {
 export interface CursorSidecarStaging {
   /** node_modules holding the platform-independent SDK JS closure. */
   readonly jsClosureDir: string;
-  /** Cache dir holding extracted native packages keyed by package name. */
+  /** node_modules holding the optional native packages keyed by package name. */
   readonly nativePackagesDir: string;
   readonly version: string;
   /** Removes the temporary staging tree. */
@@ -70,7 +70,7 @@ export function resolveCursorSdkVersion(): string {
   const installed = join(ROOT_DIR, 'apps/api/node_modules/@cursor/sdk/package.json');
   if (existsSync(installed)) {
     const pkg = JSON.parse(readFileSync(installed, 'utf8')) as { version?: string };
-    if (pkg.version) return pkg.version;
+    if (pkg.version) return normalizeCursorSdkVersion(pkg.version);
   }
 
   const apiPkg = JSON.parse(readFileSync(join(ROOT_DIR, 'apps/api/package.json'), 'utf8')) as {
@@ -78,7 +78,27 @@ export function resolveCursorSdkVersion(): string {
   };
   const spec = apiPkg.dependencies?.['@cursor/sdk'];
   if (!spec) throw new Error('@cursor/sdk is not declared in apps/api/package.json');
-  return spec.replace(/^[^0-9]*/, '');
+  return normalizeCursorSdkVersion(spec);
+}
+
+export function normalizeCursorSdkVersion(spec: string): string {
+  const version = spec.trim().replace(/^[~^=v]*/, '');
+  if (!CURSOR_SDK_VERSION_PATTERN.test(version)) {
+    throw new Error(`Unsupported @cursor/sdk version spec: ${spec}`);
+  }
+  return version;
+}
+
+export function createCursorSdkInstallCommand(version: string): string[] {
+  return [
+    'bun',
+    'install',
+    '--no-save',
+    '--ignore-scripts',
+    '--os=*',
+    '--cpu=*',
+    `@cursor/sdk@${normalizeCursorSdkVersion(version)}`,
+  ];
 }
 
 /**
@@ -104,19 +124,9 @@ export async function prepareCursorSidecarStaging(
 
   try {
     const jsClosureDir = await installJsClosure(root, version);
-    const nativePackagesDir = join(root, 'native');
-    mkdirSync(nativePackagesDir, { recursive: true });
+    assertNativePackagesInstalled(jsClosureDir, targets);
 
-    const neededPackages = new Set<string>();
-    for (const target of targets) {
-      const pkg = cursorNativePackageFor(target);
-      if (pkg) neededPackages.add(pkg);
-    }
-    for (const pkg of neededPackages) {
-      await fetchNativePackage(pkg, version, nativePackagesDir);
-    }
-
-    return { jsClosureDir, nativePackagesDir, version, cleanup };
+    return { jsClosureDir, nativePackagesDir: jsClosureDir, version, cleanup };
   } catch (error) {
     warn(`Skipping Cursor sidecar vendoring: ${error instanceof Error ? error.message : error}`);
     cleanup();
@@ -171,52 +181,31 @@ async function installJsClosure(root: string, version: string): Promise<string> 
     )}\n`
   );
 
-  const { exitCode, stderr } = await captureCommand(['bun', 'install', '--no-save'], {
-    cwd: installDir,
-  });
+  const { exitCode, stderr, stdout } = await captureCommand(
+    createCursorSdkInstallCommand(version),
+    {
+      cwd: installDir,
+    }
+  );
   if (exitCode !== 0) {
-    throw new Error(`bun install for the Cursor sidecar failed: ${stderr.trim()}`);
+    const detail = stderr.trim() || stdout.trim();
+    throw new Error(`bun install for the Cursor sidecar failed: ${detail}`);
   }
 
   return join(installDir, 'node_modules');
 }
 
-/**
- * Downloads and extracts one `@cursor/sdk-<platform>` package into the cache.
- * Bun refuses to install packages whose `os`/`cpu` differ from the build host,
- * so cross-compiled targets pull their native package straight from the registry.
- */
-async function fetchNativePackage(
-  packageName: string,
-  version: string,
-  cacheDir: string
-): Promise<void> {
-  const dest = join(cacheDir, packageName);
-  if (existsSync(dest)) return;
-
-  const shortName = packageName.slice(packageName.indexOf('/') + 1);
-  const url = `${NPM_REGISTRY}/${packageName}/-/${shortName}-${version}.tgz`;
-
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`Failed to download ${packageName}@${version}: ${response.status}`);
+function assertNativePackagesInstalled(nodeModulesDir: string, targets: BinaryTarget[]): void {
+  const neededPackages = new Set<string>();
+  for (const target of targets) {
+    const pkg = cursorNativePackageFor(target);
+    if (pkg) neededPackages.add(pkg);
   }
 
-  const tarball = join(cacheDir, `${shortName}-${version}.tgz`);
-  writeFileSync(tarball, new Uint8Array(await response.arrayBuffer()));
-
-  const extractDir = join(cacheDir, `.extract-${shortName}`);
-  mkdirSync(extractDir, { recursive: true });
-  const { exitCode, stderr } = await captureCommand(['tar', '-xzf', tarball, '-C', extractDir]);
-  if (exitCode !== 0) {
-    throw new Error(`Failed to extract ${packageName}@${version}: ${stderr.trim()}`);
+  const missing = [...neededPackages].filter((pkg) => !existsSync(join(nodeModulesDir, pkg)));
+  if (missing.length > 0) {
+    throw new Error(`bun install did not stage Cursor native packages: ${missing.join(', ')}`);
   }
-
-  mkdirSync(dirname(dest), { recursive: true });
-  cpSync(join(extractDir, 'package'), dest, { recursive: true });
-
-  rmSync(tarball, { force: true });
-  rmSync(extractDir, { recursive: true, force: true });
 }
 
 /** Excludes npm bin shims and native platform packages from the shared JS closure copy. */
