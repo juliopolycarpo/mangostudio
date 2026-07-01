@@ -4,7 +4,9 @@ import { getProviderRuntimeAvailability } from '../../../../src/services/provide
 import { buildCursorSidecarEnv } from '../../../../src/services/providers/cursor/agent-runner';
 import {
   CursorApiError,
+  CursorValidationUnavailableError,
   fetchCursorModels,
+  validateCursorApiKey,
 } from '../../../../src/services/providers/cursor/client';
 import {
   buildCursorModelParams,
@@ -108,6 +110,50 @@ describe('cursor provider foundation', () => {
 
     await expect(fetchCursorModels({ apiKey: 'cursor-bad-key' })).rejects.toBeInstanceOf(
       CursorApiError
+    );
+  });
+
+  it('treats auth errors during key validation as CursorApiError', async () => {
+    await mock.module('@cursor/sdk', () => ({
+      Cursor: {
+        models: {
+          list: () =>
+            Promise.reject(Object.assign(new Error('Cursor API key rejected'), { status: 403 })),
+        },
+      },
+    }));
+
+    await expect(validateCursorApiKey('cursor-bad-key')).rejects.toBeInstanceOf(CursorApiError);
+  });
+
+  it('treats transient failures during key validation as CursorValidationUnavailableError', async () => {
+    await mock.module('@cursor/sdk', () => ({
+      Cursor: {
+        models: {
+          list: () =>
+            Promise.reject(
+              Object.assign(new Error('Cursor temporarily unavailable'), { status: 503 })
+            ),
+        },
+      },
+    }));
+
+    await expect(validateCursorApiKey('cursor-good-key')).rejects.toBeInstanceOf(
+      CursorValidationUnavailableError
+    );
+  });
+
+  it('treats network errors during key validation as CursorValidationUnavailableError', async () => {
+    await mock.module('@cursor/sdk', () => ({
+      Cursor: {
+        models: {
+          list: () => Promise.reject(new Error('fetch failed')),
+        },
+      },
+    }));
+
+    await expect(validateCursorApiKey('cursor-good-key')).rejects.toBeInstanceOf(
+      CursorValidationUnavailableError
     );
   });
 

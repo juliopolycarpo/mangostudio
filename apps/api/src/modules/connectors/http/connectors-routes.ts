@@ -15,7 +15,10 @@ import {
   GeminiValidationUnavailableError,
   InvalidGeminiApiKeyError,
 } from '../../../services/gemini';
-import { CursorApiError } from '../../../services/providers/cursor/client';
+import {
+  CursorApiError,
+  CursorValidationUnavailableError,
+} from '../../../services/providers/cursor/client';
 import { CursorRuntimeUnavailableError } from '../../../services/providers/cursor/index';
 import { SecretStorageUnavailableError } from '../../../services/secret-store';
 import { addConnector, ConnectorValidationError } from '../application/add-connector';
@@ -84,6 +87,11 @@ export function handleConnectorError(
   if (error instanceof CursorApiError) {
     set.status = 422;
     return { error: error.message, code: ERROR_CODES.VALIDATION };
+  }
+
+  if (error instanceof CursorValidationUnavailableError) {
+    set.status = 502;
+    return { error: error.message, code: ERROR_CODES.PROVIDER_ERROR };
   }
 
   if (error instanceof CursorRuntimeUnavailableError) {

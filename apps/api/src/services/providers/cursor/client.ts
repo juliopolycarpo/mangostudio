@@ -77,9 +77,14 @@ export async function validateCursorApiKey(apiKey: string): Promise<void> {
     const { Cursor } = await loadCursorSdk();
     await Cursor.models.list({ apiKey: trimmed });
   } catch (error) {
-    throw new CursorApiError(
-      error instanceof Error ? error.message : 'Cursor API key validation failed.'
-    );
+    if (error instanceof CursorApiError) throw error;
+    if (isCursorAuthError(error)) {
+      throw new CursorApiError(
+        error instanceof Error ? error.message : 'Cursor rejected the API key.',
+        { cause: error }
+      );
+    }
+    throw new CursorValidationUnavailableError(error instanceof Error ? error.message : undefined);
   }
 }
 
@@ -87,5 +92,12 @@ export class CursorApiError extends Error {
   constructor(message: string, options?: ErrorOptions) {
     super(message, options);
     this.name = 'CursorApiError';
+  }
+}
+
+export class CursorValidationUnavailableError extends Error {
+  constructor(message = 'Unable to validate the Cursor API key right now. Try again.') {
+    super(message);
+    this.name = 'CursorValidationUnavailableError';
   }
 }
