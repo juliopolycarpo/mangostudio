@@ -4,7 +4,7 @@ name: Release
 # the npm distribution, publish a GitHub Release with the binaries + git-cliff
 # notes, publish the GHCR image, publish the npm packages, update the Homebrew tap
 # formula and the Scoop bucket manifest, publish the crates.io launcher crate,
-# and update CHANGELOG.md on main.
+# and open a pull request updating CHANGELOG.md on main.
 #
 # Trigger by pushing a semver tag (git tag -s v0.1.0 && git push origin v0.1.0)
 # or via workflow_dispatch with an explicit version.
@@ -13,7 +13,8 @@ name: Release
 # @mangostudio/cli-*, a single DIST_REPOS_TOKEN fine-grained PAT with contents
 # read/write on both dist repos (juliopolycarpo/homebrew-tap and
 # juliopolycarpo/scoop-bucket), and CHANGELOG_PR_TOKEN with pull-requests write
-# on this repo for the protected-branch changelog fallback.
+# on this repo to open the changelog pull request (the workflow GITHUB_TOKEN
+# is barred from creating PRs).
 # crates.io publishing prefers Trusted Publishing via OIDC and temporarily falls
 # back to CARGO_REGISTRY_TOKEN until the trusted publisher is registered and
 # proven. GHCR uses the workflow GITHUB_TOKEN.
@@ -631,14 +632,15 @@ jobs:
           fi
 
   update-changelog:
-    name: Update CHANGELOG on main
+    name: Open CHANGELOG pull request
     needs: [build, github-release]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
-      # contents: write covers the direct push and fallback branch push. The
-      # protected-branch PR fallback uses CHANGELOG_PR_TOKEN via GitHub's REST
-      # API instead of the workflow GITHUB_TOKEN.
+      # contents: write lets the workflow token create the changelog branch and
+      # commit through the REST Contents API (a GitHub-Verified github-actions[bot]
+      # commit). Opening the pull request itself always uses CHANGELOG_PR_TOKEN
+      # instead, since GitHub refuses to let the workflow GITHUB_TOKEN create PRs.
       contents: write
     # Serialize the changelog landing across concurrent tag releases (the
     # workflow's top-level group is per-ref, so two tags can release at once).
@@ -660,12 +662,14 @@ jobs:
           VERSION: ${{ needs.build.outputs.version }}
         run: bun run changelog --release "$VERSION"
 
-      # Lands the regenerated changelog on main: direct push on the fast path,
-      # falling back to a REST-created PR when branch protection rejects the
-      # push. No-ops when the changelog is already current.
-      - name: Land CHANGELOG.md on main
+      # Always opens a pull request with the regenerated changelog instead of
+      # pushing to main directly, so it goes through normal review and is
+      # merged by hand with a merge commit. No-ops when the changelog is
+      # already current.
+      - name: Open CHANGELOG.md pull request
         env:
-          GH_TOKEN: ${{ secrets.CHANGELOG_PR_TOKEN }}
+          GH_ACTIONS_TOKEN: ${{ github.token }}
+          GH_PR_TOKEN: ${{ secrets.CHANGELOG_PR_TOKEN }}
           VERSION: ${{ needs.build.outputs.version }}
         run: bun ./scripts/release/push-changelog.ts --version "$VERSION" --branch main
 

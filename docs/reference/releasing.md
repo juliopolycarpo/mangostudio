@@ -10,16 +10,16 @@ nothing here is hand-edited.
 
 Setting the secrets below and pushing a signed semver tag (`v0.2.0`) is the entire
 release procedure. The workflow validates version lockstep, builds every artifact,
-publishes each channel independently, and lands `CHANGELOG.md` on `main` (direct
-push, or a REST-created pull request when the branch is protected).
+publishes each channel independently, and always opens a pull request updating
+`CHANGELOG.md` on `main` (never a direct push).
 
-| Secret                      | Used by                                                      | Scope                                                                                                                                        |
-| --------------------------- | ------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| `NPM_TOKEN`                 | `npm-publish`, `npm-canary`                                  | Publish rights on `mangostudio` and `@mangostudio/cli-*`                                                                                     |
-| `DIST_REPOS_TOKEN`          | `homebrew`, `scoop`                                          | Fine-grained PAT with contents read/write on `juliopolycarpo/homebrew-tap` and `juliopolycarpo/scoop-bucket`                                 |
-| `CARGO_REGISTRY_TOKEN`      | `cargo-publish`, `crates-canary`                             | Temporary crates.io fallback until Trusted Publishing is registered and verified for the `mangostudio` crate                                 |
-| `CHANGELOG_PR_TOKEN`        | `update-changelog`                                           | Fine-grained PAT with pull requests read/write on this repository; used only when branch protection rejects the direct changelog push        |
-| *(built-in `GITHUB_TOKEN`)* | `github-release`, `docker`, the canary channel, attestations | No extra setup — workflow grants `packages: write` for GHCR; `cargo-publish`/`crates-canary` grant `id-token: write` for crates.io OIDC auth |
+| Secret                      | Used by                                                                          | Scope                                                                                                                                                                                                                        |
+| --------------------------- | -------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `NPM_TOKEN`                 | `npm-publish`, `npm-canary`                                                      | Publish rights on `mangostudio` and `@mangostudio/cli-*`                                                                                                                                                                     |
+| `DIST_REPOS_TOKEN`          | `homebrew`, `scoop`                                                              | Fine-grained PAT with contents read/write on `juliopolycarpo/homebrew-tap` and `juliopolycarpo/scoop-bucket`                                                                                                                 |
+| `CARGO_REGISTRY_TOKEN`      | `cargo-publish`, `crates-canary`                                                 | Temporary crates.io fallback until Trusted Publishing is registered and verified for the `mangostudio` crate                                                                                                                 |
+| `CHANGELOG_PR_TOKEN`        | `update-changelog`                                                               | Fine-grained PAT with pull requests write (+ contents read) on this repository; opens the changelog PR, since the workflow `GITHUB_TOKEN` cannot create pull requests                                                        |
+| *(built-in `GITHUB_TOKEN`)* | `github-release`, `docker`, `update-changelog`, the canary channel, attestations | No extra setup — workflow grants `packages: write` for GHCR, `contents: write` so `update-changelog` can write the GitHub-Verified changelog commit via the REST Contents API, and `id-token: write` for crates.io OIDC auth |
 
 ### One-time setup checklist
 
@@ -32,7 +32,7 @@ Complete these once per fork or org before the first tag push:
 5. Add the repo secrets (`NPM_TOKEN`, `DIST_REPOS_TOKEN`, `CHANGELOG_PR_TOKEN`, and the temporary `CARGO_REGISTRY_TOKEN` fallback) to this repository.
 6. After one release proves `cargo-publish` minted a Trusted Publishing token successfully, remove the `CARGO_REGISTRY_TOKEN` repo secret. Until then, the release job falls back to the secret if crates.io has not accepted the OIDC publisher yet.
 7. After the first GHCR push, set the `ghcr.io/juliopolycarpo/mangostudio` package visibility to **public** in GitHub package settings.
-8. No branch-protection tuning is required for the changelog: the `update-changelog` job pushes `CHANGELOG.md` to `main` directly when it can (`contents: write`), and falls back to a pull request created with `CHANGELOG_PR_TOKEN` through GitHub's REST API when protection rejects the push. Review and merge that PR after checks pass.
+8. No branch-protection tuning is required for the changelog: the `update-changelog` job always opens a pull request with `CHANGELOG_PR_TOKEN` through GitHub's REST API rather than pushing to `main` directly. The commit itself is written with the built-in `GITHUB_TOKEN` via the REST Contents API, so it lands GitHub-Verified and carries a DCO `Signed-off-by: github-actions[bot]` trailer. Review and merge that PR with a merge commit after checks pass.
 
 ## Release asset naming
 
@@ -399,11 +399,14 @@ The [One-shot contract](#one-shot-contract) table lists every secret. In short:
   `publish-new` + `publish-update` scope for the `mangostudio` crate (see
   [crates.io launcher](#cratesio-launcher)).
 - **`CHANGELOG_PR_TOKEN`** repo secret: fine-grained PAT with pull requests
-  read/write on this repository for the protected-branch changelog PR fallback.
+  write (+ contents read) on this repository, used to open the changelog PR
+  (the workflow `GITHUB_TOKEN` cannot create pull requests).
 - Permission for the release workflow to land `CHANGELOG.md` on `main`: the
-  `update-changelog` job grants `contents: write` for the direct push and
-  uses `CHANGELOG_PR_TOKEN` for the protected-branch PR fallback — no
-  branch-protection changes needed.
+  `update-changelog` job grants `contents: write` so the built-in `GITHUB_TOKEN`
+  can write the changelog commit via the REST Contents API (GitHub-Verified,
+  with a DCO `Signed-off-by` trailer), then opens the pull request with
+  `CHANGELOG_PR_TOKEN` — `main` stays protected and no branch-protection
+  changes are needed.
 
 The npm publish job grants `id-token: write` so token-based publishes can include
 npm provenance. npm trusted publishing (OIDC without `NPM_TOKEN`) is the future

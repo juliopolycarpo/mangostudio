@@ -1,30 +1,36 @@
 #!/usr/bin/env bun
-// Land the regenerated CHANGELOG.md on the default branch after a release.
+// Land the regenerated CHANGELOG.md after a release by always opening a pull
+// request — never pushing or merging it. This keeps `main` protected without
+// fighting branch-protection rejections: the workflow's default GITHUB_TOKEN
+// (`ghActions`) writes the commit through GitHub's REST Contents API, which
+// produces a GitHub-Verified `github-actions[bot]` commit (no local GPG key
+// needed) carrying a DCO `Signed-off-by` trailer. A separate PAT (`ghPr`,
+// the `CHANGELOG_PR_TOKEN` repo secret) opens the PR, because GitHub refuses
+// to let the built-in Actions token create or approve pull requests.
 //
-// Fast path: commit and push directly. A rebase retry absorbs unrelated commits
-// that land on the base branch between checkout and push (the concurrent-release
-// race). If the push is rejected because the branch is protected, fall back to
-// opening a pull request through GitHub's REST API so the changelog still lands
-// without a failed release.
-//
-// The regenerate step (`bun run changelog --release <version>`) runs before this
-// script; here we only commit the working-tree change and get it onto the branch.
+// The regenerate step (`bun run changelog --release <version>`) runs before
+// this script; here we only compare, commit (via the API), and open the PR.
 
 import { type CaptureResult, captureCommand } from '../lib/exec';
-import { error, info, success, warn } from '../lib/log';
+import { error, info, success } from '../lib/log';
 
-const GIT_BOT_NAME = 'github-actions[bot]';
-const GIT_BOT_EMAIL = 'github-actions[bot]@users.noreply.github.com';
 const CHANGELOG_FILE = 'CHANGELOG.md';
+const CONTENTS_ENDPOINT = `repos/{owner}/{repo}/contents/${CHANGELOG_FILE}`;
 const PULL_REQUESTS_ENDPOINT = 'repos/{owner}/{repo}/pulls';
-const PUSH_ATTEMPTS = 3;
+const REFS_ENDPOINT = 'repos/{owner}/{repo}/git/refs';
+
+// The well-known github-actions[bot] account. Stamping its address on the
+// Signed-off-by trailer keeps the DCO trailer consistent with the commit
+// author GitHub itself assigns to API commits made with the default token.
+const GITHUB_ACTIONS_BOT_NAME = 'github-actions[bot]';
+const GITHUB_ACTIONS_BOT_EMAIL = '41898282+github-actions[bot]@users.noreply.github.com';
 
 const stripLeadingV = (version: string): string => version.replace(/^v/, '');
 
 export interface PushChangelogArgs {
   /** Released version without the leading `v`. */
   readonly version: string;
-  /** Default branch the changelog lands on. */
+  /** Default branch the changelog PR targets. */
   readonly branch: string;
 }
 
@@ -57,168 +63,242 @@ export function parsePushChangelogArgs(argv: readonly string[]): PushChangelogAr
   return { version, branch: values['--branch'] || 'main' };
 }
 
-/** Direct-push commit subject. Carries [skip ci] so a changelog-only push to the
- * default branch does not retrigger CI; the message format GitHub recognizes. */
-export const directCommitMessage = (version: string): string =>
-  `docs(changelog): update for v${version} [skip ci]`;
+/** Commit subject + DCO trailer for the changelog commit. `chore(release)`
+ * matches cliff.toml's existing skip rule, so this commit never re-enters a
+ * future changelog. */
+export const commitMessage = (version: string): string =>
+  [
+    `chore(release): update changelog for v${version}`,
+    '',
+    `Signed-off-by: ${GITHUB_ACTIONS_BOT_NAME} <${GITHUB_ACTIONS_BOT_EMAIL}>`,
+  ].join('\n');
 
-/** Pull-request title for the protected-branch fallback. Intentionally omits
- * [skip ci]: the PR's commits must run the branch's required checks for
- * normal review and merge. */
+/** Pull-request title. Mirrors the commit subject so a squash-merge keeps the
+ * same `chore(release)` prefix cliff.toml skips. */
 export const pullRequestTitle = (version: string): string =>
-  `docs(changelog): update for v${version}`;
+  `chore(release): update changelog for v${version}`;
 
-/** Short-lived head branch for the fallback pull request. */
-export const fallbackBranchName = (version: string): string => `chore/changelog-v${version}`;
+/** Head branch the changelog commit lands on before the PR is opened. */
+export const changelogBranchName = (version: string): string => `chore/changelog-v${version}`;
 
-/** Body for the fallback pull request. */
+/** Body for the changelog pull request. */
 export const pullRequestBody = (version: string): string =>
   [
     `Automated changelog update for \`v${version}\`.`,
     '',
-    'The release workflow opened this PR because the direct push to the default',
-    'branch was rejected by branch protection. Safe to review and squash-merge.',
+    'The release workflow always opens this PR instead of pushing to the',
+    'default branch directly, so the update goes through normal review.',
+    'Merge it with a merge commit once checks pass.',
   ].join('\n');
-
-// Signals git/GitHub emit when a push is refused by branch protection (as
-// opposed to a non-fast-forward we can rebase past, or a transient network
-// error). Matched case-insensitively against combined stdout+stderr.
-const PROTECTION_SIGNALS = [
-  'GH006',
-  'protected branch',
-  'protection',
-  'changes must be made through a pull request',
-  'pull request is required',
-  'required status check',
-  'push declined',
-] as const;
-
-/** True when a failed push looks like a branch-protection rejection, so the
- * caller should open a pull request instead of retrying the direct push. */
-export function isProtectionRejection(output: string): boolean {
-  const haystack = output.toLowerCase();
-  return PROTECTION_SIGNALS.some((signal) => haystack.includes(signal));
-}
 
 export type CommandRunner = (args: readonly string[]) => Promise<CaptureResult>;
 
-/** Build a runner that invokes `command` (optionally in `cwd`) and returns its
- * captured result without throwing, so callers can inspect a non-zero exit. */
-export function createRunner(command: string, cwd?: string): CommandRunner {
-  return (args) => captureCommand([command, ...args], cwd ? { cwd } : undefined);
+/** Build a runner that invokes `command` and returns its captured result
+ * without throwing, so callers can inspect a non-zero exit. `env` lets two
+ * runners for the same command (e.g. `gh`) carry different tokens. */
+export function createRunner(
+  command: string,
+  opts?: { cwd?: string; env?: Record<string, string> }
+): CommandRunner {
+  return (args) => captureCommand([command, ...args], opts);
 }
 
 const combinedOutput = (result: CaptureResult): string =>
   `${result.stderr}\n${result.stdout}`.trim();
 
+const requireEnv = (name: string): string => {
+  const value = process.env[name];
+  if (!value) throw new Error(`Missing required environment variable: ${name}`);
+  return value;
+};
+
+const toBase64 = (text: string): string => Buffer.from(text, 'utf8').toString('base64');
+const fromBase64 = (content: string): string =>
+  Buffer.from(content.replace(/\n/g, ''), 'base64').toString('utf8');
+
+// Signals GitHub's REST API emits for "ref/file does not exist yet" and "ref
+// already exists" respectively, distinguished from other failures (auth,
+// network) so the caller knows when to fall back instead of aborting.
+const isNotFound = (output: string): boolean => /\b404\b|not found/i.test(output);
+const isAlreadyExists = (output: string): boolean =>
+  /\b422\b|already exists|unprocessable/i.test(output);
+
 export interface LandChangelogOptions {
   readonly version: string;
   readonly baseBranch: string;
-  readonly git: CommandRunner;
-  readonly gh: CommandRunner;
-  readonly remote?: string;
+  /** The freshly regenerated CHANGELOG.md contents (read from disk by main()). */
+  readonly newChangelog: string;
+  /** Default GITHUB_TOKEN: writes the verified commit via the Contents API. */
+  readonly ghActions: CommandRunner;
+  /** CHANGELOG_PR_TOKEN PAT: the only identity allowed to open the PR. */
+  readonly ghPr: CommandRunner;
 }
 
-export type LandResult = 'up-to-date' | 'pushed' | 'pull-request';
+export type LandResult = 'up-to-date' | 'pull-request';
 
 /**
- * Commit the regenerated CHANGELOG.md and land it on `baseBranch`.
- * Returns 'up-to-date' when nothing changed, 'pushed' on a direct push, or
- * 'pull-request' when a protected branch forced the REST PR fallback.
- * // Usage: await landChangelog({ version, baseBranch: 'main', git, gh })
+ * Commit the regenerated CHANGELOG.md (via the REST Contents API, so it lands
+ * GitHub-Verified) on a fresh `chore/changelog-v<version>` branch and open a
+ * pull request for it. Returns 'up-to-date' when nothing changed, or
+ * 'pull-request' once the PR exists (created or already open).
+ * // Usage: await landChangelog({ version, baseBranch: 'main', newChangelog, ghActions, ghPr })
  */
 export async function landChangelog(options: LandChangelogOptions): Promise<LandResult> {
-  const remote = options.remote ?? 'origin';
-  const { version, baseBranch, git, gh } = options;
+  const { version, baseBranch, newChangelog, ghActions, ghPr } = options;
+  const headBranch = changelogBranchName(version);
 
-  const runGit = async (args: readonly string[]): Promise<CaptureResult> => {
-    const result = await git(args);
+  const runGh = async (
+    gh: CommandRunner,
+    args: readonly string[],
+    label: string
+  ): Promise<CaptureResult> => {
+    const result = await gh(args);
     if (result.exitCode !== 0) {
-      throw new Error(
-        `git ${args.join(' ')} failed (${result.exitCode}): ${combinedOutput(result)}`
-      );
+      throw new Error(`gh ${label} failed (${result.exitCode}): ${combinedOutput(result)}`);
     }
     return result;
   };
 
-  // No-op when the changelog is already current (exit 0 == no diff).
-  const diff = await git(['diff', '--quiet', '--', CHANGELOG_FILE]);
-  if (diff.exitCode === 0) return 'up-to-date';
+  const baseRef = await runGh(
+    ghActions,
+    [
+      'api',
+      '--method',
+      'GET',
+      `repos/{owner}/{repo}/git/ref/heads/${baseBranch}`,
+      '--jq',
+      '.object.sha',
+    ],
+    `resolve ${baseBranch}`
+  );
+  const baseSha = baseRef.stdout.trim();
 
-  await runGit(['config', 'user.name', GIT_BOT_NAME]);
-  await runGit(['config', 'user.email', GIT_BOT_EMAIL]);
-  // The ephemeral CI checkout has no signing key; never inherit a host policy.
-  await runGit(['config', 'commit.gpgsign', 'false']);
-  await runGit(['add', '--', CHANGELOG_FILE]);
-  await runGit(['commit', '--quiet', '-m', directCommitMessage(version)]);
-
-  for (let attempt = 1; attempt <= PUSH_ATTEMPTS; attempt += 1) {
-    const push = await git(['push', remote, `HEAD:refs/heads/${baseBranch}`]);
-    if (push.exitCode === 0) return 'pushed';
-
-    const output = combinedOutput(push);
-    if (isProtectionRejection(output)) {
-      return openChangelogPullRequest({ version, baseBranch, remote, runGit, gh });
-    }
-    if (attempt === PUSH_ATTEMPTS) {
-      throw new Error(`Failed to push ${CHANGELOG_FILE} to ${baseBranch}: ${output}`);
-    }
-    // Non-fast-forward: rebase our commit onto the moved branch and retry.
-    await runGit(['pull', '--rebase', remote, baseBranch]);
+  // Read the current file at the base branch so we can no-op on an unchanged
+  // changelog and carry its blob `sha` into the update (the Contents API
+  // requires it to overwrite an existing file).
+  const existing = await ghActions([
+    'api',
+    '--method',
+    'GET',
+    CONTENTS_ENDPOINT,
+    '--raw-field',
+    `ref=${baseBranch}`,
+    '--jq',
+    '{sha: .sha, content: .content}',
+  ]);
+  let existingSha: string | undefined;
+  if (existing.exitCode === 0) {
+    const parsed = JSON.parse(existing.stdout) as { sha: string; content: string };
+    existingSha = parsed.sha;
+    if (fromBase64(parsed.content) === newChangelog) return 'up-to-date';
+  } else if (!isNotFound(combinedOutput(existing))) {
+    throw new Error(
+      `Failed to read ${CHANGELOG_FILE} from ${baseBranch}: ${combinedOutput(existing)}`
+    );
   }
-  throw new Error('unreachable');
+
+  await ensureHeadBranch(ghActions, headBranch, baseSha);
+
+  await runGh(
+    ghActions,
+    [
+      'api',
+      '--method',
+      'PUT',
+      CONTENTS_ENDPOINT,
+      '--raw-field',
+      `message=${commitMessage(version)}`,
+      '--raw-field',
+      `content=${toBase64(newChangelog)}`,
+      '--raw-field',
+      `branch=${headBranch}`,
+      ...(existingSha ? ['--raw-field', `sha=${existingSha}`] : []),
+    ],
+    'commit changelog'
+  );
+
+  if (!(await hasOpenPullRequest(ghPr, headBranch, baseBranch))) {
+    await openPullRequest({ version, baseBranch, headBranch, ghPr });
+  }
+
+  return 'pull-request';
+}
+
+/** Point `headBranch` at `sha`, creating it if absent and resetting it
+ * (force) if it already exists from a prior run — keeping the PR to exactly
+ * one commit across re-runs instead of accumulating history. */
+async function ensureHeadBranch(gh: CommandRunner, headBranch: string, sha: string): Promise<void> {
+  const create = await gh([
+    'api',
+    '--method',
+    'POST',
+    REFS_ENDPOINT,
+    '--raw-field',
+    `ref=refs/heads/${headBranch}`,
+    '--raw-field',
+    `sha=${sha}`,
+  ]);
+  if (create.exitCode === 0) return;
+  if (!isAlreadyExists(combinedOutput(create))) {
+    throw new Error(`Failed to create branch ${headBranch}: ${combinedOutput(create)}`);
+  }
+
+  const update = await gh([
+    'api',
+    '--method',
+    'PATCH',
+    `${REFS_ENDPOINT}/heads/${headBranch}`,
+    '--raw-field',
+    `sha=${sha}`,
+    // `force` is a boolean in the API; --field type-converts it, whereas
+    // --raw-field would send the string "true" and the non-fast-forward
+    // rewind would be rejected.
+    '--field',
+    'force=true',
+  ]);
+  if (update.exitCode !== 0) {
+    throw new Error(`Failed to reset branch ${headBranch}: ${combinedOutput(update)}`);
+  }
 }
 
 interface OpenPullRequestOptions {
   readonly version: string;
   readonly baseBranch: string;
-  readonly remote: string;
-  readonly runGit: CommandRunner;
-  readonly gh: CommandRunner;
+  readonly headBranch: string;
+  readonly ghPr: CommandRunner;
 }
 
-/** Push the changelog commit to a short-lived branch and open (or reuse) a PR. */
-async function openChangelogPullRequest(options: OpenPullRequestOptions): Promise<'pull-request'> {
-  const { version, baseBranch, remote, runGit, gh } = options;
-  const headBranch = fallbackBranchName(version);
-  warn(`Direct push to ${baseBranch} was rejected (protected branch); opening a pull request.`);
-
-  // Drop the [skip ci] marker so the PR's required checks run; force-push so a
-  // re-run refreshes an existing fallback branch.
-  await runGit(['commit', '--amend', '--no-edit', '-m', pullRequestTitle(version)]);
-  await runGit(['push', '--force', remote, `HEAD:refs/heads/${headBranch}`]);
-
-  if (!(await hasOpenPullRequest(gh, headBranch, baseBranch))) {
-    const create = await gh([
-      'api',
-      '--method',
-      'POST',
-      PULL_REQUESTS_ENDPOINT,
-      '--raw-field',
-      `base=${baseBranch}`,
-      '--raw-field',
-      `head=${headBranch}`,
-      '--raw-field',
-      `title=${pullRequestTitle(version)}`,
-      '--raw-field',
-      `body=${pullRequestBody(version)}`,
-      '--jq',
-      '.html_url',
-    ]);
-    if (create.exitCode !== 0) {
-      throw new Error(
-        [
-          `gh api pull request create failed (${create.exitCode}): ${combinedOutput(create)}`,
-          'Configure GH_TOKEN with a token that can create pull requests; in CI,',
-          'set the CHANGELOG_PR_TOKEN repository secret with Pull requests: write.',
-        ].join('\n')
-      );
-    }
-    const url = create.stdout.trim();
-    if (url) info(`Opened changelog pull request: ${url}`);
+/** Open the changelog pull request. Never merges it — a human reviews and
+ * merges with a merge commit. */
+async function openPullRequest(options: OpenPullRequestOptions): Promise<void> {
+  const { version, baseBranch, headBranch, ghPr } = options;
+  const create = await ghPr([
+    'api',
+    '--method',
+    'POST',
+    PULL_REQUESTS_ENDPOINT,
+    '--raw-field',
+    `base=${baseBranch}`,
+    '--raw-field',
+    `head=${headBranch}`,
+    '--raw-field',
+    `title=${pullRequestTitle(version)}`,
+    '--raw-field',
+    `body=${pullRequestBody(version)}`,
+    '--jq',
+    '.html_url',
+  ]);
+  if (create.exitCode !== 0) {
+    throw new Error(
+      [
+        `gh api pull request create failed (${create.exitCode}): ${combinedOutput(create)}`,
+        'Configure GH_TOKEN with a token that can create pull requests; in CI,',
+        'set the CHANGELOG_PR_TOKEN repository secret with Pull requests: write.',
+      ].join('\n')
+    );
   }
-
-  return 'pull-request';
+  const url = create.stdout.trim();
+  if (url) info(`Opened changelog pull request: ${url}`);
 }
 
 /** Whether an open PR already exists for `headBranch` (idempotent re-runs). */
@@ -257,9 +337,12 @@ async function hasOpenPullRequest(
 const printHelp = (): never => {
   console.log(`Usage: bun ./scripts/release/push-changelog.ts --version <version> [--branch <name>]
 
-Lands the regenerated CHANGELOG.md on the default branch (default: main). Tries a
-direct push, falling back to a REST-created pull request when the branch is
-protected. Requires GH_TOKEN for the fallback. No-ops when nothing changed.`);
+Always opens a pull request with the regenerated CHANGELOG.md (default base
+branch: main) instead of pushing to it directly. The commit is created through
+GitHub's REST Contents API using GH_ACTIONS_TOKEN, so it lands GitHub-Verified
+and carries a DCO Signed-off-by trailer; the PR itself is opened with
+GH_PR_TOKEN (the CHANGELOG_PR_TOKEN repo secret), since the default Actions
+token cannot create pull requests. No-ops when nothing changed.`);
   process.exit(0);
 };
 
@@ -268,19 +351,19 @@ async function main(): Promise<void> {
   if (argv.includes('--help') || argv.length === 0) printHelp();
 
   const args = parsePushChangelogArgs(argv);
+  const newChangelog = await Bun.file(CHANGELOG_FILE).text();
+
   const result = await landChangelog({
     version: args.version,
     baseBranch: args.branch,
-    git: createRunner('git'),
-    gh: createRunner('gh'),
+    newChangelog,
+    ghActions: createRunner('gh', { env: { GH_TOKEN: requireEnv('GH_ACTIONS_TOKEN') } }),
+    ghPr: createRunner('gh', { env: { GH_TOKEN: requireEnv('GH_PR_TOKEN') } }),
   });
 
   switch (result) {
     case 'up-to-date':
       info(`${CHANGELOG_FILE} already up to date.`);
-      break;
-    case 'pushed':
-      success(`Pushed ${CHANGELOG_FILE} update for v${args.version} to ${args.branch}.`);
       break;
     case 'pull-request':
       success(`Opened changelog pull request for v${args.version} into ${args.branch}.`);
