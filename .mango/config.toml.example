@@ -78,3 +78,6 @@ url = ""
 [cursor]
 # workspace_dir = "/path/to/your/project"
 # sidecar_script = "/absolute/path/to/run-agent.mjs"
+# Node.js binary used to run the sidecar (also settable via MANGO_NODE_PATH).
+# Empty = auto-detect from PATH and well-known install locations.
+# node_path = "/usr/local/bin/node"

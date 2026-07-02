@@ -75,6 +75,8 @@ export interface MangoConfig {
     workspaceDir: string;
     /** Override path to the Cursor SDK sidecar script. Empty = auto-detect. */
     sidecarScriptPath: string;
+    /** Override path to the Node.js binary for the sidecar. Empty = auto-detect. */
+    nodePath: string;
   };
 }
 
@@ -87,7 +89,7 @@ const DEFAULT_CONFIG: Omit<MangoConfig, 'corsOrigins' | 'configFilePath'> = {
   agents: { dir: '' },
   auth: { secret: '', url: '' },
   security: { trustProxy: false },
-  cursor: { workspaceDir: '', sidecarScriptPath: '' },
+  cursor: { workspaceDir: '', sidecarScriptPath: '', nodePath: '' },
 };
 
 export const AUTH_SECRET_MIN_LENGTH = 32;
@@ -138,6 +140,9 @@ const ENV_KEY_MAP: Record<string, (cfg: MangoConfig, value: string) => void> = {
   },
   MANGO_CURSOR_SIDECAR_SCRIPT: (cfg, v) => {
     cfg.cursor.sidecarScriptPath = v;
+  },
+  MANGO_NODE_PATH: (cfg, v) => {
+    cfg.cursor.nodePath = v;
   },
 };
 
@@ -322,6 +327,9 @@ function applyToml(cfg: MangoConfig, parsed: Record<string, unknown>): void {
     if (typeof cursor.sidecar_script === 'string') {
       cfg.cursor.sidecarScriptPath = cursor.sidecar_script;
     }
+    if (typeof cursor.node_path === 'string') {
+      cfg.cursor.nodePath = cursor.node_path;
+    }
   }
 }
 
@@ -377,6 +385,10 @@ function computeDerived(cfg: MangoConfig, tomlPath: string): void {
 
   if (cfg.cursor.sidecarScriptPath) {
     cfg.cursor.sidecarScriptPath = resolveUserPath(cfg.cursor.sidecarScriptPath);
+  }
+
+  if (cfg.cursor.nodePath) {
+    cfg.cursor.nodePath = resolveUserPath(cfg.cursor.nodePath);
   }
 
   // CORS origins from frontend host/port (include +1 for Vite port bumping)

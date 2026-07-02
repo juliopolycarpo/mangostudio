@@ -32,6 +32,9 @@ const WATCHED_ENV_KEYS = [
   'UPLOADS_DIR',
   'IMAGES_DIR',
   'TRUST_PROXY',
+  'CURSOR_WORKSPACE_DIR',
+  'MANGO_CURSOR_SIDECAR_SCRIPT',
+  'MANGO_NODE_PATH',
 ];
 
 function saveEnv(): Record<string, string | undefined> {
@@ -244,6 +247,29 @@ describe('config precedence', () => {
     const cfg = loadConfig(TMP_TOML);
 
     expect(cfg.cursor.sidecarScriptPath).toBe('/tmp/from-env.mjs');
+  });
+
+  test('loads cursor node path override from config.toml', () => {
+    writeFileSync(TMP_TOML, '[cursor]\nnode_path = "/opt/node22/bin/node"\n');
+
+    const cfg = loadConfig(TMP_TOML);
+
+    expect(cfg.cursor.nodePath).toBe('/opt/node22/bin/node');
+  });
+
+  test('MANGO_NODE_PATH env var overrides config.toml node_path', () => {
+    writeFileSync(TMP_TOML, '[cursor]\nnode_path = "/tmp/from-toml-node"\n');
+    process.env.MANGO_NODE_PATH = '/tmp/from-env-node';
+
+    const cfg = loadConfig(TMP_TOML);
+
+    expect(cfg.cursor.nodePath).toBe('/tmp/from-env-node');
+  });
+
+  test('cursor node path defaults to empty (auto-detect)', () => {
+    const cfg = loadConfig(join(TMP_DIR, 'nonexistent.toml'));
+
+    expect(cfg.cursor.nodePath).toBe('');
   });
 });
 

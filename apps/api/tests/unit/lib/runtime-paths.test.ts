@@ -86,7 +86,9 @@ describe('runtime paths', () => {
 
   it('honors a configured Cursor sidecar script override', () => {
     const overridePath = join(tempDir, 'custom-sidecar', 'run-agent.mjs');
-    loadConfigForTest({ cursor: { workspaceDir: '', sidecarScriptPath: overridePath } });
+    loadConfigForTest({
+      cursor: { workspaceDir: '', sidecarScriptPath: overridePath, nodePath: '' },
+    });
 
     expect(getCursorSidecarScriptPath()).toBe(overridePath);
   });
