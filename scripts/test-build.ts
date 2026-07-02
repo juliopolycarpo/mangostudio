@@ -347,7 +347,10 @@ async function smokeTest(): Promise<void> {
   const tmpHome = makeTempDir();
   const dbPath = join(tmpHome, 'smoke.sqlite');
   const authBaseUrl = `http://127.0.0.1:${PORT}`;
-  const cursorFixture = createCursorSmokeSidecarFixture(PLATFORM.arch);
+  const cursorFixture =
+    NPM_PLATFORM && platformShipsCursorSidecar(NPM_PLATFORM)
+      ? createCursorSmokeSidecarFixture(PLATFORM.arch)
+      : null;
   let serverStderr = '';
 
   // The binary is a CLI; bare invocation prints help, so start the server
@@ -363,7 +366,7 @@ async function smokeTest(): Promise<void> {
       API_HOST: '127.0.0.1',
       API_PORT: String(PORT),
       BETTER_AUTH_URL: authBaseUrl,
-      MANGO_CURSOR_SIDECAR_SCRIPT: cursorFixture.sidecarScriptPath,
+      ...(cursorFixture ? { MANGO_CURSOR_SIDECAR_SCRIPT: cursorFixture.sidecarScriptPath } : {}),
       // Required since the auth-secret startup guard landed; a 32+ char
       // random value satisfies the runtime check without exposing a real key.
       BETTER_AUTH_SECRET: 'smoke-test-secret-at-least-32-characters-long',
@@ -441,32 +444,38 @@ async function smokeTest(): Promise<void> {
       pass('/api/auth/get-session → handled by Better Auth (not intercepted by SPA fallback)');
     }
 
-    console.log('\n🔌 Running Cursor connector smoke...');
-    await assertNodeRuntimeForCursor();
+    if (cursorFixture) {
+      console.log('\n🔌 Running Cursor connector smoke...');
+      await assertNodeRuntimeForCursor();
 
-    const signupEmail = `smoke-${Date.now()}@test.local`;
-    const signupResponse = await fetch(`${authBaseUrl}/api/auth/sign-up/email`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        email: signupEmail,
-        password: 'smoke-pass-12345',
-        name: 'Smoke User',
-      }),
-    });
-    if (!signupResponse.ok) {
-      const signupBody = await signupResponse.text();
-      fail(`Auth sign-up failed with ${signupResponse.status}: ${signupBody}`);
+      const signupEmail = `smoke-${Date.now()}@test.local`;
+      const signupResponse = await fetch(`${authBaseUrl}/api/auth/sign-up/email`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: signupEmail,
+          password: 'smoke-pass-12345',
+          name: 'Smoke User',
+        }),
+      });
+      if (!signupResponse.ok) {
+        const signupBody = await signupResponse.text();
+        fail(`Auth sign-up failed with ${signupResponse.status}: ${signupBody}`);
+      }
+      pass('POST /api/auth/sign-up/email → session created');
+
+      const sessionCookie = buildSessionCookieHeader(signupResponse);
+      await smokeCursorConnector(PORT, sessionCookie, serverStderr);
+    } else {
+      console.log(
+        `\n⏭️  Cursor connector smoke skipped — ${PLATFORM.arch} ships no Cursor sidecar.`
+      );
     }
-    pass('POST /api/auth/sign-up/email → session created');
-
-    const sessionCookie = buildSessionCookieHeader(signupResponse);
-    await smokeCursorConnector(PORT, sessionCookie, serverStderr);
   } finally {
     proc.kill();
     await proc.exited.catch(() => undefined as undefined);
     await stderrPump.catch(() => undefined as undefined);
-    cursorFixture.cleanup();
+    cursorFixture?.cleanup();
     removeTempDir(tmpHome);
   }
 }

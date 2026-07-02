@@ -21,6 +21,12 @@ describe('cursor smoke sidecar fixture', () => {
     expect(cursorSidecarPackageTreeErrors(fixture.rootDir, '@cursor/sdk-linux-x64')).toEqual([]);
   });
 
+  test('throws for platforms that ship no native Cursor sidecar', () => {
+    expect(() => createCursorSmokeSidecarFixture('windows-arm64')).toThrow(
+      'does not ship a Cursor sidecar'
+    );
+  });
+
   test('validate_api_key returns a canned auth rejection over the sidecar protocol', async () => {
     const fixture = createCursorSmokeSidecarFixture('linux-x64');
     cleanup = fixture.cleanup;
