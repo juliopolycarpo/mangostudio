@@ -19,8 +19,10 @@
 import { existsSync, mkdtempSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-
+import { createCursorSmokeSidecarFixture } from './lib/cursor-smoke-sidecar-fixture';
 import { captureCommand } from './lib/exec';
+import { NPM_PLATFORMS, platformShipsCursorSidecar } from './lib/npm-pack';
+import { collectCursorSidecarLayoutErrors } from './lib/npm-package-validation';
 import {
   type BinaryTarget,
   filterBinaryTargets,
@@ -39,6 +41,7 @@ const REQUESTED_PLATFORM = process.env.PLATFORM;
 const SKIP_BUILD = process.env.SKIP_BUILD === '1';
 const PORT = parseInt(process.env.API_PORT ?? '13001', 10);
 const RELEASE_ASSETS_DIR = join(ROOT_DIR, 'release-assets');
+const NPM_PLATFORM = NPM_PLATFORMS.find((platform) => platform.arch === REQUESTED_PLATFORM);
 // Resolve via the canonical helper so the archive name we expect matches the one
 // archive-assets.ts produces (same VERSION override + semver validation).
 const VERSION = resolveReleaseVersion({ rootDir: ROOT_DIR });
@@ -156,6 +159,14 @@ function validateLayout(): void {
   const cssFiles = Array.from(new Bun.Glob('*.css').scanSync(join(PUBLIC_DIR, 'assets')));
   if (cssFiles.length === 0) fail('No CSS files in public/assets/');
   pass(`CSS assets: ${cssFiles.length} file(s)`);
+
+  if (NPM_PLATFORM && platformShipsCursorSidecar(NPM_PLATFORM)) {
+    const layoutErrors = collectCursorSidecarLayoutErrors(PLATFORM_DIR, NPM_PLATFORM);
+    if (layoutErrors.length > 0) {
+      fail(`Cursor sidecar layout invalid:\n- ${layoutErrors.join('\n- ')}`);
+    }
+    pass('cursor-sidecar layout includes SDK chunks and native runtime package');
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -231,11 +242,113 @@ async function validateInstalledBinary(tempHome: string): Promise<void> {
 // Runtime smoke test
 // ---------------------------------------------------------------------------
 
+const MODULE_RESOLUTION_FAILURE_PATTERNS = [
+  'ResolveMessage',
+  'Cannot find module',
+  './642.js',
+] as const;
+
+const GRACEFUL_CURSOR_CONNECTOR_STATUSES = new Set([422, 502, 503]);
+
+function assertNoModuleResolutionFailures(text: string, label: string): void {
+  for (const pattern of MODULE_RESOLUTION_FAILURE_PATTERNS) {
+    if (text.includes(pattern)) {
+      fail(`${label} contains forbidden module-resolution pattern: ${pattern}`);
+    }
+  }
+}
+
+function parseNodeVersion(raw: string): { major: number; minor: number } | null {
+  const match = raw.trim().match(/^v?(\d+)\.(\d+)\.(\d+)/);
+  if (!match) return null;
+  return { major: Number(match[1]), minor: Number(match[2]) };
+}
+
+function nodeMeetsCursorMinimum(version: { major: number; minor: number }): boolean {
+  if (version.major > 22) return true;
+  if (version.major < 22) return false;
+  return version.minor >= 13;
+}
+
+async function assertNodeRuntimeForCursor(): Promise<void> {
+  const { stdout, exitCode } = await captureCommand(['node', '--version']);
+  if (exitCode !== 0)
+    fail('Node.js is required for Cursor connector smoke but `node --version` failed');
+
+  const version = parseNodeVersion(stdout);
+  if (!version || !nodeMeetsCursorMinimum(version)) {
+    fail(`Node.js 22.13 or newer is required for Cursor connector smoke (got ${stdout.trim()})`);
+  }
+  pass(`Node.js ${stdout.trim()} satisfies Cursor sidecar minimum`);
+}
+
+function buildSessionCookieHeader(response: Response): string {
+  const setCookies =
+    typeof response.headers.getSetCookie === 'function'
+      ? response.headers.getSetCookie()
+      : [response.headers.get('set-cookie')].filter((value): value is string => Boolean(value));
+
+  if (setCookies.length === 0) {
+    fail('Auth sign-up did not return a session cookie');
+  }
+
+  return setCookies.map((cookie) => cookie.split(';')[0]).join('; ');
+}
+
+async function smokeCursorConnector(
+  port: number,
+  sessionCookie: string,
+  serverStderr: string
+): Promise<void> {
+  const response = await fetch(`http://127.0.0.1:${port}/api/settings/connectors`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Cookie: sessionCookie,
+    },
+    body: JSON.stringify({
+      name: 'smoke-cursor-connector',
+      apiKey: 'smoke-invalid-cursor-key',
+      source: 'config-file',
+      provider: 'cursor',
+    }),
+  });
+
+  const body = await response.text();
+  assertNoModuleResolutionFailures(body, 'Cursor connector response body');
+  assertNoModuleResolutionFailures(serverStderr, 'Server stderr');
+
+  if (!GRACEFUL_CURSOR_CONNECTOR_STATUSES.has(response.status)) {
+    fail(
+      `POST /api/settings/connectors (cursor) returned ${response.status}; expected a graceful provider outcome (422/502/503). Body: ${body}`
+    );
+  }
+
+  if (response.status === 422) {
+    let payload: { error?: string };
+    try {
+      payload = JSON.parse(body) as { error?: string };
+    } catch {
+      fail(`Cursor connector validation response is not JSON: ${body}`);
+    }
+    if (!payload.error?.trim()) {
+      fail('Cursor connector validation response is missing a user-facing error message');
+    }
+  }
+
+  pass(
+    `POST /api/settings/connectors (cursor) → ${response.status} without module-resolution failures`
+  );
+}
+
 async function smokeTest(): Promise<void> {
   console.log(`\n🚀 Starting binary on port ${PORT}...`);
 
   const tmpHome = makeTempDir();
   const dbPath = join(tmpHome, 'smoke.sqlite');
+  const authBaseUrl = `http://127.0.0.1:${PORT}`;
+  const cursorFixture = createCursorSmokeSidecarFixture(PLATFORM.arch);
+  let serverStderr = '';
 
   // The binary is a CLI; bare invocation prints help, so start the server
   // explicitly in the foreground (API_PORT is honored by `serve`).
@@ -244,21 +357,38 @@ async function smokeTest(): Promise<void> {
     cwd: PLATFORM_DIR,
     env: {
       ...process.env,
+      NODE_ENV: 'production',
       HOME: tmpHome,
       DATABASE_PATH: dbPath,
+      API_HOST: '127.0.0.1',
       API_PORT: String(PORT),
+      BETTER_AUTH_URL: authBaseUrl,
+      MANGO_CURSOR_SIDECAR_SCRIPT: cursorFixture.sidecarScriptPath,
       // Required since the auth-secret startup guard landed; a 32+ char
       // random value satisfies the runtime check without exposing a real key.
       BETTER_AUTH_SECRET: 'smoke-test-secret-at-least-32-characters-long',
     },
     stdout: 'ignore',
-    stderr: 'ignore',
+    stderr: 'pipe',
   });
+
+  const stderrReader = proc.stderr.getReader();
+  const stderrPump = (async () => {
+    const decoder = new TextDecoder();
+    while (true) {
+      const { done, value } = await stderrReader.read();
+      if (done) break;
+      if (value) {
+        serverStderr += decoder.decode(value, { stream: true });
+      }
+    }
+    serverStderr += decoder.decode();
+  })();
 
   try {
     console.log('   Waiting for server to be ready...');
     try {
-      await waitForServerReady(`http://localhost:${PORT}/api/health`);
+      await waitForServerReady(`http://127.0.0.1:${PORT}/api/health`);
     } catch (caught) {
       fail(caught instanceof Error ? caught.message : String(caught));
     }
@@ -267,7 +397,7 @@ async function smokeTest(): Promise<void> {
 
     // /api/health → 200 JSON
     {
-      const res = await fetch(`http://localhost:${PORT}/api/health`);
+      const res = await fetch(`http://127.0.0.1:${PORT}/api/health`);
       if (res.status !== 200) fail(`/api/health returned ${res.status}`);
       const ct = res.headers.get('content-type') ?? '';
       if (!ct.includes('application/json')) fail(`/api/health content-type is not JSON: ${ct}`);
@@ -276,7 +406,7 @@ async function smokeTest(): Promise<void> {
 
     // / → 200 HTML
     {
-      const res = await fetch(`http://localhost:${PORT}/`);
+      const res = await fetch(`http://127.0.0.1:${PORT}/`);
       if (res.status !== 200) fail(`/ returned ${res.status}`);
       const body = await res.text();
       if (!body.includes('<html')) fail(`/ response does not contain <html>`);
@@ -285,14 +415,14 @@ async function smokeTest(): Promise<void> {
 
     // /index.html → 200 HTML
     {
-      const res = await fetch(`http://localhost:${PORT}/index.html`);
+      const res = await fetch(`http://127.0.0.1:${PORT}/index.html`);
       if (res.status !== 200) fail(`/index.html returned ${res.status}`);
       pass('/index.html → 200 HTML');
     }
 
     // /assets/fake.js → 404 (must NOT be intercepted by SPA fallback)
     {
-      const res = await fetch(`http://localhost:${PORT}/assets/fake.js`);
+      const res = await fetch(`http://127.0.0.1:${PORT}/assets/fake.js`);
       if (res.status !== 404) fail(`/assets/fake.js should return 404, got ${res.status}`);
       pass('/assets/fake.js → 404 (SPA fallback bypassed)');
     }
@@ -302,7 +432,7 @@ async function smokeTest(): Promise<void> {
     // Better Auth may return text/plain or application/json depending on session
     // state — the key assertion is that the response is NOT the SPA index.html.
     {
-      const res = await fetch(`http://localhost:${PORT}/api/auth/get-session`);
+      const res = await fetch(`http://127.0.0.1:${PORT}/api/auth/get-session`);
       if (res.status === 404)
         fail('/api/auth/get-session returned 404 — SPA fallback is intercepting auth routes');
       const ct = res.headers.get('content-type') ?? '';
@@ -310,9 +440,33 @@ async function smokeTest(): Promise<void> {
         fail(`/api/auth/get-session returned text/html — SPA fallback is intercepting auth routes`);
       pass('/api/auth/get-session → handled by Better Auth (not intercepted by SPA fallback)');
     }
+
+    console.log('\n🔌 Running Cursor connector smoke...');
+    await assertNodeRuntimeForCursor();
+
+    const signupEmail = `smoke-${Date.now()}@test.local`;
+    const signupResponse = await fetch(`${authBaseUrl}/api/auth/sign-up/email`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: signupEmail,
+        password: 'smoke-pass-12345',
+        name: 'Smoke User',
+      }),
+    });
+    if (!signupResponse.ok) {
+      const signupBody = await signupResponse.text();
+      fail(`Auth sign-up failed with ${signupResponse.status}: ${signupBody}`);
+    }
+    pass('POST /api/auth/sign-up/email → session created');
+
+    const sessionCookie = buildSessionCookieHeader(signupResponse);
+    await smokeCursorConnector(PORT, sessionCookie, serverStderr);
   } finally {
     proc.kill();
     await proc.exited.catch(() => undefined as undefined);
+    await stderrPump.catch(() => undefined as undefined);
+    cursorFixture.cleanup();
     removeTempDir(tmpHome);
   }
 }

@@ -95,6 +95,32 @@ Cenários em `tests/browser-smoke/auth-flow.spec.ts`:
 | --------------- | ----------------------- | -------------------- |
 | `browser-smoke` | `playwright` (Chromium) | browser real + stack |
 
+## Binary Smoke
+
+`scripts/test-build.ts` compila o binário standalone para uma plataforma alvo, valida o
+layout do pacote (incluindo chunks do sidecar do Cursor) e sobe o binário em runners de CI
+compatíveis para exercitar rotas HTTP centrais e a validação de conector Cursor.
+
+```bash
+PLATFORM=linux-x64 bun run scripts/test-build.ts
+```
+
+Em hosts Windows, use `PLATFORM=windows-x64`. O workflow de CI `Smoke — Binary` executa
+esse script nas seis plataformas nativas.
+
+A etapa de runtime cria um usuário descartável, envia um conector Cursor com chave fake e
+garante que o binário retorna um erro de provider controlado (422/502/503) sem falhas de
+resolução de módulo como `Cannot find module` ou `./642.js`. O smoke permanece hermético
+ao apontar `MANGO_CURSOR_SIDECAR_SCRIPT` para um sidecar fake temporário criado por
+`scripts/lib/cursor-smoke-sidecar-fixture.ts` — sem chamadas reais à API do Cursor.
+
+Runners do GitHub precisam de Node.js `>= 22.13` no `PATH` para a etapa do conector
+Cursor; o script falha cedo se a versão for antiga.
+
+| Lane           | Runner          | Ambiente                            |
+| -------------- | --------------- | ----------------------------------- |
+| `smoke-binary` | `test-build.ts` | binário compilado no OS/arch nativo |
+
 ## Scripts Por Workspace
 
 ### API
