@@ -2,17 +2,22 @@ import { existsSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import {
   cursorNativePackageForNodeRuntime,
+  formatUnsupportedCursorNativePlatforms,
   isCursorSdkChunkFileName,
 } from '@mangostudio/shared/catalog';
-import type { ProviderRuntimeUnavailableReasonParams } from '@mangostudio/shared/provider-settings';
+import {
+  CURSOR_MIN_NODE_VERSION,
+  type ProviderRuntimeUnavailableReasonParams,
+} from '@mangostudio/shared/provider-settings';
 import { getCursorSidecarScriptPath } from '../../../lib/runtime-paths';
 import { detectNodeRuntime, type NodeRuntimeStatus, resetNodeRuntimeCache } from './node-runtime';
+import { formatCursorRuntimeUnavailableReason } from './runtime-reason';
 
 export interface CursorRuntimeStatus extends NodeRuntimeStatus {
   sidecarScriptPath?: string;
 }
 
-interface CursorRuntimeAvailabilityOptions {
+export interface CursorRuntimeAvailabilityOptions {
   arch?: string;
   devSdkPackagePath?: string;
   pathExists?: (path: string) => boolean;
@@ -20,6 +25,14 @@ interface CursorRuntimeAvailabilityOptions {
   sidecarScriptPath?: string;
   sidecarExists?: (path: string) => boolean;
   platform?: string;
+}
+
+export type CursorRuntimeChainLink = 'node' | 'sidecar' | 'sdk' | 'native';
+
+export interface CursorRuntimeChainStep {
+  link: CursorRuntimeChainLink;
+  ok: boolean;
+  detail: string;
 }
 
 interface CursorRuntimeCache {
@@ -64,6 +77,162 @@ function sdkPackageComplete(
   readDir: (path: string) => readonly string[]
 ): boolean {
   return SDK_DIST_FLAVORS.every((flavor) => hasNumberedChunk(sdkPackageDir, flavor, readDir));
+}
+
+function resolveCursorRuntimeProbeContext(options: CursorRuntimeAvailabilityOptions = {}) {
+  const sidecarScriptPath = options.sidecarScriptPath ?? getCursorSidecarScriptPath();
+  const pathExists = options.pathExists ?? existsSync;
+  const readDir = options.readDir ?? readdirSync;
+  const sidecarExists = options.sidecarExists ?? pathExists;
+  const platform = options.platform ?? process.platform;
+  const arch = options.arch ?? process.arch;
+  const sidecarDir = dirname(sidecarScriptPath);
+  const sidecarNodeModulesDir = join(sidecarDir, 'node_modules');
+  const sdkPackageDir = join(sidecarNodeModulesDir, CURSOR_SCOPE_DIR, CURSOR_SDK_DIR);
+  const devSdkPackagePaths = options.devSdkPackagePath
+    ? [options.devSdkPackagePath]
+    : defaultDevSdkPackagePaths();
+
+  return {
+    arch,
+    devSdkPackagePaths,
+    pathExists,
+    platform,
+    readDir,
+    sdkPackageDir,
+    sidecarDir,
+    sidecarExists,
+    sidecarNodeModulesDir,
+    sidecarScriptPath,
+  };
+}
+
+/**
+ * Reports each link in the Cursor runtime chain independently so `doctor` can
+ * show which step failed without short-circuiting like runtime gating does.
+ */
+export function describeCursorRuntimeChain(
+  nodeRuntime: NodeRuntimeStatus,
+  options: CursorRuntimeAvailabilityOptions = {}
+): CursorRuntimeChainStep[] {
+  const ctx = resolveCursorRuntimeProbeContext(options);
+  const steps: CursorRuntimeChainStep[] = [];
+
+  if (nodeRuntime.available) {
+    const path = nodeRuntime.nodePath ?? 'node';
+    const version = nodeRuntime.version ?? 'unknown';
+    steps.push({
+      link: 'node',
+      ok: true,
+      detail: `${path} (${version}, meets >= ${CURSOR_MIN_NODE_VERSION})`,
+    });
+  } else {
+    const reasonCode = nodeRuntime.reasonCode ?? 'cursor.node_not_found';
+    steps.push({
+      link: 'node',
+      ok: false,
+      detail: formatCursorRuntimeUnavailableReason(reasonCode, nodeRuntime.reasonParams),
+    });
+  }
+
+  if (!ctx.sidecarExists(ctx.sidecarScriptPath)) {
+    steps.push({
+      link: 'sidecar',
+      ok: false,
+      detail: formatCursorRuntimeUnavailableReason('cursor.sidecar_missing', {
+        sidecarPath: ctx.sidecarScriptPath,
+      }),
+    });
+  } else {
+    steps.push({
+      link: 'sidecar',
+      ok: true,
+      detail: `${ctx.sidecarScriptPath} (present)`,
+    });
+  }
+
+  let usingWorkspaceSdk = false;
+  if (!ctx.pathExists(ctx.sidecarNodeModulesDir)) {
+    const devSdkPath = ctx.devSdkPackagePaths.find(ctx.pathExists);
+    if (devSdkPath) {
+      usingWorkspaceSdk = true;
+      steps.push({
+        link: 'sdk',
+        ok: true,
+        detail: `Cursor SDK package present in workspace (${devSdkPath})`,
+      });
+    } else {
+      steps.push({
+        link: 'sdk',
+        ok: false,
+        detail: formatCursorRuntimeUnavailableReason('cursor.sdk_missing', {
+          sidecarPath: ctx.sidecarScriptPath,
+        }),
+      });
+    }
+  } else if (!ctx.pathExists(join(ctx.sdkPackageDir, 'package.json'))) {
+    steps.push({
+      link: 'sdk',
+      ok: false,
+      detail: formatCursorRuntimeUnavailableReason('cursor.sdk_missing', {
+        sidecarPath: ctx.sidecarScriptPath,
+      }),
+    });
+  } else if (!sdkPackageComplete(ctx.sdkPackageDir, ctx.readDir)) {
+    steps.push({
+      link: 'sdk',
+      ok: false,
+      detail: formatCursorRuntimeUnavailableReason('cursor.sdk_incomplete', {
+        sidecarPath: ctx.sidecarScriptPath,
+      }),
+    });
+  } else {
+    steps.push({
+      link: 'sdk',
+      ok: true,
+      detail: `${join(ctx.sdkPackageDir, 'package.json')} (cjs/esm chunks complete)`,
+    });
+  }
+
+  const nativePackage = cursorNativePackageForNodeRuntime(ctx.platform, ctx.arch);
+  if (usingWorkspaceSdk) {
+    // The workspace SDK carries its own native runtime, so gating skips the
+    // sidecar-tree native probe here; mirror that instead of reporting a
+    // false failure against the (absent) sidecar node_modules.
+    steps.push({
+      link: 'native',
+      ok: true,
+      detail: 'resolved with workspace SDK (dev)',
+    });
+  } else if (!nativePackage) {
+    const platformLabel = `${ctx.platform}-${ctx.arch}`;
+    steps.push({
+      link: 'native',
+      ok: false,
+      detail: `platform unsupported: ${platformLabel} (unsupported targets: ${formatUnsupportedCursorNativePlatforms()})`,
+    });
+  } else if (
+    !ctx.pathExists(
+      join(ctx.sidecarNodeModulesDir, ...packagePathSegments(nativePackage), 'package.json')
+    )
+  ) {
+    steps.push({
+      link: 'native',
+      ok: false,
+      detail: formatCursorRuntimeUnavailableReason('cursor.native_runtime_missing', {
+        packageName: nativePackage,
+        sidecarPath: ctx.sidecarScriptPath,
+      }),
+    });
+  } else {
+    steps.push({
+      link: 'native',
+      ok: true,
+      detail: `${nativePackage} (present)`,
+    });
+  }
+
+  return steps;
 }
 
 export function evaluateCursorRuntimeAvailability(

@@ -22,21 +22,25 @@ import {
   hasProviderTomlSecret,
   PROVIDER_SECRET_CONFIG,
 } from '../../modules/connectors/domain/connector';
+import { detectNodeRuntime } from '../../services/providers/cursor/node-runtime';
 import {
-  type CursorRuntimeStatus,
-  detectCursorRuntimeAvailability,
+  type CursorRuntimeChainStep,
+  describeCursorRuntimeChain,
 } from '../../services/providers/cursor/runtime-availability';
+import type { DoctorArgs } from '../args';
+import { probeCursorDoctorRuntime } from '../cursor-doctor-probe';
 import {
   type CheckResult,
   type CheckStatus,
   checkAuthSecret,
   checkConfig,
-  checkCursorNodeRuntime,
   checkDatabase,
   checkDir,
   checkFrontend,
   checkInstance,
   checkRuntime,
+  collectCursorDoctorChecks,
+  cursorRuntimeChainReady,
   type FsProbe,
 } from '../doctor-checks';
 import { writeLine } from '../output';
@@ -48,8 +52,9 @@ export interface DoctorDeps {
   frontendDir: () => string;
   controller: ProcessController;
   readState: typeof readState;
-  detectCursorRuntime: () => Promise<CursorRuntimeStatus>;
+  getCursorDoctorChain: () => Promise<readonly CursorRuntimeChainStep[]>;
   isCursorConfigured: (config: MangoConfig) => boolean;
+  probeCursorRuntime: typeof probeCursorDoctorRuntime;
   log: (msg: string) => void;
   exit: (code: number) => void;
 }
@@ -60,15 +65,19 @@ interface InstanceProbe {
 }
 
 /** Run diagnostics and print a checklist; exit 1 on any failure. // Usage: await runDoctor() */
-export async function runDoctor(deps: Partial<DoctorDeps> = {}): Promise<void> {
+export async function runDoctor(
+  options: DoctorArgs = { all: false, cursorProbe: false },
+  deps: Partial<DoctorDeps> = {}
+): Promise<void> {
   const d = resolveDeps(deps);
   const config = d.loadConfig();
-  const results = await collectResults(config, d);
+  const results = await collectResults(config, options, d);
   render(results, d);
 }
 
 async function collectResults(
   config: MangoConfig,
+  options: DoctorArgs,
   d: Required<DoctorDeps>
 ): Promise<CheckResult[]> {
   const instance = await inspectInstance(d);
@@ -84,9 +93,13 @@ async function collectResults(
     checkRuntime(getVersion(), isStandaloneExecutable()),
   ];
 
-  if (d.isCursorConfigured(config)) {
-    const runtime = await d.detectCursorRuntime();
-    results.push(checkCursorNodeRuntime(runtime));
+  if (d.isCursorConfigured(config) || options.all) {
+    const chain = await d.getCursorDoctorChain();
+    const probe =
+      options.cursorProbe && cursorRuntimeChainReady(chain)
+        ? await d.probeCursorRuntime()
+        : undefined;
+    results.push(...collectCursorDoctorChecks(chain, probe));
   }
 
   return results;
@@ -144,8 +157,11 @@ function resolveDeps(deps: Partial<DoctorDeps>): Required<DoctorDeps> {
     frontendDir: deps.frontendDir ?? getDefaultFrontendDir,
     controller: deps.controller ?? createProcessController(),
     readState: deps.readState ?? readState,
-    detectCursorRuntime: deps.detectCursorRuntime ?? detectCursorRuntimeAvailability,
+    getCursorDoctorChain:
+      deps.getCursorDoctorChain ??
+      (async () => describeCursorRuntimeChain(await detectNodeRuntime())),
     isCursorConfigured: deps.isCursorConfigured ?? isCursorConnectorConfigured,
+    probeCursorRuntime: deps.probeCursorRuntime ?? probeCursorDoctorRuntime,
     log: deps.log ?? writeLine,
     exit: deps.exit ?? ((code) => process.exit(code)),
   };

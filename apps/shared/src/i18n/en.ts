@@ -413,6 +413,8 @@ export const messages: Messages = {
         'This platform has no Cursor native runtime in the sidecar. Reinstall MangoStudio.',
       cursorNativeRuntimeMissingPackage:
         'Cursor native runtime package {packageName} is missing. Reinstall MangoStudio.',
+      cursorRuntimeDoctorHint:
+        'Run `mango doctor` for a full Cursor runtime checklist (use `--all` to check without a connector).',
       modalsModalTitle: 'Choose Available Models',
       modelsModalTitle: 'Choose Available Models',
       modelsModalDescription: 'Models enabled for',

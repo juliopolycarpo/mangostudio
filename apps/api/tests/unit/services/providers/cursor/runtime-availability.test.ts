@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'bun:test';
 import { join } from 'node:path';
-import { evaluateCursorRuntimeAvailability } from '../../../../../src/services/providers/cursor/runtime-availability';
+import {
+  describeCursorRuntimeChain,
+  evaluateCursorRuntimeAvailability,
+} from '../../../../../src/services/providers/cursor/runtime-availability';
 
 const NODE_OK = { available: true, nodePath: '/usr/bin/node', version: 'v22.13.0' };
 const SIDECAR_PATH = join('/app', 'cursor-sidecar', 'run-agent.mjs');
@@ -121,5 +124,66 @@ describe('cursor runtime availability', () => {
     });
 
     expect(status.available).toBe(true);
+  });
+});
+
+describe('describeCursorRuntimeChain', () => {
+  it('reports every link independently when Node fails', () => {
+    const fs = completePackagedFs();
+    const chain = describeCursorRuntimeChain(
+      {
+        available: false,
+        reasonCode: 'cursor.version_insufficient',
+        reasonParams: { foundVersion: 'v20.0.0' },
+      },
+      { ...fs, platform: 'linux', arch: 'x64', sidecarScriptPath: SIDECAR_PATH }
+    );
+
+    expect(chain.map((step) => step.link)).toEqual(['node', 'sidecar', 'sdk', 'native']);
+    expect(chain[0]?.ok).toBe(false);
+    expect(chain[0]?.detail).toContain('22.13');
+    expect(chain[1]?.ok).toBe(true);
+    expect(chain[3]?.ok).toBe(true);
+  });
+
+  it('does not report a false native failure when the SDK resolves from the workspace', () => {
+    const devSdkPackagePath = join(
+      '/repo',
+      'apps',
+      'api',
+      'node_modules',
+      '@cursor',
+      'sdk',
+      'package.json'
+    );
+    const fs = fakeFs([SIDECAR_PATH, devSdkPackagePath]);
+
+    const chain = describeCursorRuntimeChain(NODE_OK, {
+      ...fs,
+      devSdkPackagePath,
+      platform: 'linux',
+      arch: 'x64',
+      sidecarScriptPath: SIDECAR_PATH,
+    });
+
+    expect(chain.every((step) => step.ok)).toBe(true);
+    expect(chain.at(-1)).toMatchObject({ link: 'native', ok: true });
+    expect(chain.at(-1)?.detail).toContain('workspace SDK');
+  });
+
+  it('reports unsupported platforms on the native link', () => {
+    const chain = describeCursorRuntimeChain(NODE_OK, {
+      ...completePackagedFs(),
+      platform: 'win32',
+      arch: 'arm64',
+      sidecarScriptPath: SIDECAR_PATH,
+    });
+
+    expect(chain.at(-1)).toMatchObject({
+      link: 'native',
+      ok: false,
+    });
+    expect(chain.at(-1)?.detail).toContain('platform unsupported: win32-arm64');
+    expect(chain.at(-1)?.detail).toContain('windows-arm64');
   });
 });

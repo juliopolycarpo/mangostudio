@@ -4,7 +4,9 @@ export {
   type CursorNativePackagePlatform,
   cursorNativePackageForNodeRuntime,
   cursorNativePackageForPlatform,
+  formatUnsupportedCursorNativePlatforms,
   isCursorSdkChunkFileName,
+  listUnsupportedCursorNativePlatforms,
 } from './cursor-native-packages';
 export {
   type ModelCapabilities,

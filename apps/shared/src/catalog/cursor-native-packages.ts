@@ -44,3 +44,15 @@ export function cursorNativePackageForNodeRuntime(platform: string, arch: string
 export function isCursorSdkChunkFileName(fileName: string): boolean {
   return CURSOR_SDK_CHUNK_FILE_PATTERN.test(fileName);
 }
+
+/** Platforms where Cursor does not publish a native runtime package. */
+export function listUnsupportedCursorNativePlatforms(): CursorNativePackagePlatform[] {
+  return (Object.entries(CURSOR_NATIVE_PACKAGES) as [CursorNativePackagePlatform, string | null][])
+    .filter(([, packageName]) => packageName === null)
+    .map(([platform]) => platform);
+}
+
+/** Comma-separated list of unsupported native targets for diagnostics copy. */
+export function formatUnsupportedCursorNativePlatforms(): string {
+  return listUnsupportedCursorNativePlatforms().join(', ');
+}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { assertValidPort, parseServeArgs } from '../../../src/cli/args';
+import { assertValidPort, parseDoctorArgs, parseServeArgs } from '../../../src/cli/args';
 import { CliError } from '../../../src/cli/errors';
 
 describe('parseServeArgs', () => {
@@ -113,6 +113,22 @@ describe('parseServeArgs', () => {
   it('rejects an out-of-range port', () => {
     expect(() => parseServeArgs(['0'])).toThrow(CliError);
     expect(() => parseServeArgs(['99999'])).toThrow(CliError);
+  });
+});
+
+describe('parseDoctorArgs', () => {
+  it('defaults to no flags', () => {
+    expect(parseDoctorArgs([])).toEqual({ all: false, cursorProbe: false });
+  });
+
+  it('parses --all and --cursor-probe', () => {
+    expect(parseDoctorArgs(['--all'])).toEqual({ all: true, cursorProbe: false });
+    expect(parseDoctorArgs(['--cursor-probe'])).toEqual({ all: false, cursorProbe: true });
+    expect(parseDoctorArgs(['--all', '--cursor-probe'])).toEqual({ all: true, cursorProbe: true });
+  });
+
+  it('rejects unknown options', () => {
+    expect(() => parseDoctorArgs(['--bogus'])).toThrow(CliError);
   });
 });
 

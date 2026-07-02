@@ -11,6 +11,11 @@ export interface ServeArgs {
   detached: boolean;
 }
 
+export interface DoctorArgs {
+  all: boolean;
+  cursorProbe: boolean;
+}
+
 const PORT_MIN = 1;
 const PORT_MAX = 65_535;
 
@@ -43,6 +48,26 @@ export function parseServeArgs(rest: string[]): ServeArgs {
   }
 
   return { host, port, detached };
+}
+
+/** Parse `doctor` args: optional --all and --cursor-probe flags. */
+export function parseDoctorArgs(rest: string[]): DoctorArgs {
+  let all = false;
+  let cursorProbe = false;
+
+  for (const arg of rest) {
+    if (arg === '--all') {
+      all = true;
+      continue;
+    }
+    if (arg === '--cursor-probe') {
+      cursorProbe = true;
+      continue;
+    }
+    throw new CliError(`Unknown option for doctor: ${arg}`);
+  }
+
+  return { all, cursorProbe };
 }
 
 interface ServeTarget {

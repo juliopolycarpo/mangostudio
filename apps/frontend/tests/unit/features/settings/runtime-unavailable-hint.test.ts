@@ -32,4 +32,8 @@ describe('formatConnectorRuntimeUnavailableHint', () => {
       'Cursor native runtime package @cursor/sdk-linux-x64 is missing. Reinstall MangoStudio.'
     );
   });
+
+  it('exposes the mango doctor hint in connector messages', () => {
+    expect(en.settings.connectors.cursorRuntimeDoctorHint).toContain('mango doctor');
+  });
 });

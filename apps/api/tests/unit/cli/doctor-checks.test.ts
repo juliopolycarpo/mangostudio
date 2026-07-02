@@ -2,12 +2,13 @@ import { describe, expect, it } from 'bun:test';
 import {
   checkAuthSecret,
   checkConfig,
-  checkCursorNodeRuntime,
   checkDatabase,
   checkDir,
   checkFrontend,
   checkInstance,
   checkRuntime,
+  collectCursorDoctorChecks,
+  cursorRuntimeChainReady,
   type FsProbe,
 } from '../../../src/cli/doctor-checks';
 import type { MangoConfig } from '../../../src/lib/config';
@@ -170,31 +171,77 @@ describe('checkRuntime', () => {
   });
 });
 
-describe('checkCursorNodeRuntime', () => {
-  it('passes when Node meets the minimum version', () => {
-    const result = checkCursorNodeRuntime({ available: true, version: 'v22.13.0' });
-    expect(result.status).toBe('ok');
-    expect(result.label).toBe('Cursor runtime');
-    expect(result.detail).toContain('v22.13.0');
+describe('collectCursorDoctorChecks', () => {
+  it('maps each healthy chain link to an ok row', () => {
+    const results = collectCursorDoctorChecks([
+      { link: 'node', ok: true, detail: '/usr/bin/node (v22.13.0, meets >= 22.13)' },
+      { link: 'sidecar', ok: true, detail: '/app/cursor-sidecar/run-agent.mjs (present)' },
+      { link: 'sdk', ok: true, detail: '@cursor/sdk complete' },
+      { link: 'native', ok: true, detail: '@cursor/sdk-linux-x64 (present)' },
+    ]);
+
+    expect(results.map((row) => row.label)).toEqual([
+      'Cursor Node',
+      'Cursor sidecar',
+      'Cursor SDK',
+      'Cursor native',
+    ]);
+    expect(results.every((row) => row.status === 'ok')).toBe(true);
   });
 
-  it('fails when Node is unavailable', () => {
-    const result = checkCursorNodeRuntime({
-      available: false,
-      reasonCode: 'cursor.version_insufficient',
-      reasonParams: { foundVersion: 'v20.0.0' },
-    });
-    expect(result.status).toBe('fail');
-    expect(result.detail).toContain('Node.js 22.13');
+  it('surfaces failing links with remediation detail', () => {
+    const results = collectCursorDoctorChecks([
+      {
+        link: 'node',
+        ok: false,
+        detail: 'Node.js 22.13+ is required for Cursor SDK Agents (found v20.0.0).',
+      },
+      {
+        link: 'sidecar',
+        ok: false,
+        detail: 'Cursor SDK sidecar script is missing at /tmp/cursor-sidecar/run-agent.mjs.',
+      },
+      { link: 'sdk', ok: true, detail: 'workspace sdk present' },
+      {
+        link: 'native',
+        ok: false,
+        detail: 'platform unsupported: win32-arm64 (unsupported targets: linux-x64-musl, ...)',
+      },
+    ]);
+
+    expect(results[0]?.status).toBe('fail');
+    expect(results[0]?.detail).toContain('Node.js 22.13');
+    expect(results[1]?.detail).toContain('sidecar script is missing');
+    expect(results[3]?.detail).toContain('platform unsupported');
   });
 
-  it('fails when the Cursor SDK sidecar is missing', () => {
-    const result = checkCursorNodeRuntime({
-      available: false,
-      reasonCode: 'cursor.sidecar_missing',
-      reasonParams: { sidecarPath: '/tmp/cursor-sidecar/run-agent.mjs' },
+  it('appends a probe row when provided', () => {
+    const results = collectCursorDoctorChecks([{ link: 'node', ok: true, detail: 'ok' }], {
+      ok: true,
+      detail: 'validate_api_key reached SDK (auth rejected probe key)',
     });
-    expect(result.status).toBe('fail');
-    expect(result.detail).toContain('sidecar script is missing');
+
+    expect(results.at(-1)).toMatchObject({
+      label: 'Cursor probe',
+      status: 'ok',
+      detail: 'validate_api_key reached SDK (auth rejected probe key)',
+    });
+  });
+});
+
+describe('cursorRuntimeChainReady', () => {
+  it('is true only when every chain link passed', () => {
+    expect(
+      cursorRuntimeChainReady([
+        { link: 'node', ok: true, detail: '' },
+        { link: 'sidecar', ok: true, detail: '' },
+      ])
+    ).toBe(true);
+    expect(
+      cursorRuntimeChainReady([
+        { link: 'node', ok: true, detail: '' },
+        { link: 'sidecar', ok: false, detail: 'missing' },
+      ])
+    ).toBe(false);
   });
 });
