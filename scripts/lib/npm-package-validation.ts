@@ -126,6 +126,7 @@ function cursorSidecarErrors(packageDir: string, platform: NpmPlatform): string[
   const sidecarDir = join(packageDir, 'cursor-sidecar');
   return [
     ...fileError(join(sidecarDir, 'run-agent.mjs'), 'Cursor sidecar script'),
+    ...fileError(join(sidecarDir, 'sidecar-runtime.mjs'), 'Cursor sidecar runtime'),
     ...cursorSidecarPackageTreeErrors(sidecarDir, nativePackage),
   ];
 }

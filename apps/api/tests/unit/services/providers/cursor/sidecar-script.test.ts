@@ -17,6 +17,10 @@ const SIDECAR_SOURCE = join(
   import.meta.dir,
   '../../../../../src/services/providers/cursor/sidecar/run-agent.mjs'
 );
+const SIDECAR_RUNTIME_SOURCE = join(
+  import.meta.dir,
+  '../../../../../src/services/providers/cursor/sidecar/sidecar-runtime.mjs'
+);
 
 /**
  * Stub @cursor/sdk driven by the requested model id:
@@ -95,6 +99,7 @@ beforeAll(() => {
   fixtureDir = mkdtempSync(join(tmpdir(), 'mango-sidecar-script-test-'));
   sidecarScriptPath = join(fixtureDir, 'run-agent.mjs');
   copyFileSync(SIDECAR_SOURCE, sidecarScriptPath);
+  copyFileSync(SIDECAR_RUNTIME_SOURCE, join(fixtureDir, 'sidecar-runtime.mjs'));
 
   const sdkDir = join(fixtureDir, 'node_modules', '@cursor', 'sdk');
   mkdirSync(sdkDir, { recursive: true });

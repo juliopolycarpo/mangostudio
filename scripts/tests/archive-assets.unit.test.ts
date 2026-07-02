@@ -56,6 +56,7 @@ describe('archiveReleaseAssets', () => {
     writeFileSync(join(outDir, 'README.md'), '# Standalone build\n');
     mkdirSync(sidecarDir, { recursive: true });
     writeFileSync(join(sidecarDir, 'run-agent.mjs'), '#!/usr/bin/env node');
+    writeFileSync(join(sidecarDir, 'sidecar-runtime.mjs'), 'export {};');
     mkdirSync(join(sidecarDir, 'node_modules', '@cursor', 'sdk'), { recursive: true });
     writeFileSync(
       join(sidecarDir, 'node_modules', '@cursor', 'sdk', 'package.json'),

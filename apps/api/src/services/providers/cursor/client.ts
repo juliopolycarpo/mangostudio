@@ -2,17 +2,13 @@
  * Cursor client helpers for model discovery and API key validation.
  */
 
-import { createInterface } from 'node:readline';
+import { requestNodeSidecar } from '../core/node-sidecar/single-call';
+import { NodeSidecarError } from '../core/node-sidecar/spawn-sidecar';
 import type { ModelInfo } from '../types';
 import { getCursorFallbackModels, toCursorModelInfo } from './model-catalog';
 import { detectCursorRuntimeAvailability } from './runtime-availability';
 import { resolveCursorRuntimeUnavailableMessage } from './runtime-reason';
-import {
-  formatCursorSidecarExit,
-  spawnCursorSidecarProcess,
-  terminateCursorSidecar,
-  terminateCursorSidecarWithEscalation,
-} from './sidecar-process';
+import { describeCursorSpawnError, resolveCursorSidecarScriptPath } from './sidecar-process';
 
 interface CursorModelListEntry {
   id?: string;
@@ -103,64 +99,14 @@ function parseCursorSidecarRpcError(
   );
 }
 
-function tryParseCursorSidecarResponse(line: string): CursorClientSidecarResponse | null {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(line);
-  } catch {
-    return null;
-  }
-  const type = (parsed as { type?: unknown } | null)?.type;
+function isCursorSidecarResponse(
+  value: Record<string, unknown>
+): value is CursorClientSidecarResponse {
+  const type = value.type;
   if (type === 'models' || type === 'ok' || type === 'error') {
-    return parsed as CursorClientSidecarResponse;
+    return true;
   }
-  return null;
-}
-
-async function readCursorSidecarResponse(
-  sidecar: ReturnType<typeof spawnCursorSidecarProcess>
-): Promise<CursorClientSidecarResponse> {
-  const rl = createInterface({ input: sidecar.child.stdout });
-  let response: CursorClientSidecarResponse | undefined;
-
-  try {
-    for await (const line of rl) {
-      const trimmed = line.trim();
-      if (!trimmed) continue;
-      const parsed = tryParseCursorSidecarResponse(trimmed);
-      if (!parsed) continue;
-      response = parsed;
-      break;
-    }
-  } catch (error) {
-    throw new CursorValidationUnavailableError(
-      getCursorErrorMessage(error, 'Failed to read the Cursor sidecar response.')
-    );
-  } finally {
-    rl.close();
-  }
-
-  const exitStatus = await sidecar.childExit;
-  const spawnErrorMessage = sidecar.getSpawnErrorMessage();
-  if (spawnErrorMessage) {
-    throw new CursorValidationUnavailableError(spawnErrorMessage);
-  }
-
-  if (!response) {
-    throw new CursorValidationUnavailableError(
-      sidecar.getStderr().trim() || formatCursorSidecarExit(exitStatus)
-    );
-  }
-
-  if (response.type === 'error') return response;
-
-  if (exitStatus.code !== 0) {
-    throw new CursorValidationUnavailableError(
-      sidecar.getStderr().trim() || formatCursorSidecarExit(exitStatus)
-    );
-  }
-
-  return response;
+  return false;
 }
 
 async function requestCursorSidecar(
@@ -172,45 +118,28 @@ async function requestCursorSidecar(
     throw new CursorValidationUnavailableError(resolveCursorRuntimeUnavailableMessage(runtime));
   }
 
-  const sidecar = spawnCursorSidecarProcess({
-    nodePath: runtime.nodePath,
-    sidecarScriptPath: runtime.sidecarScriptPath,
-  });
   const timeoutMs = options.timeoutMs ?? CURSOR_SIDECAR_RPC_TIMEOUT_MS;
   const killGraceMs = options.killGraceMs ?? CURSOR_SIDECAR_RPC_KILL_GRACE_MS;
-  let timedOut = false;
-  let timeout: ReturnType<typeof setTimeout> | undefined;
-
-  const responsePromise = readCursorSidecarResponse(sidecar);
-  responsePromise.catch(() => undefined);
-
-  const timeoutPromise = new Promise<never>((_, reject) => {
-    timeout = setTimeout(() => {
-      timedOut = true;
-      terminateCursorSidecar(sidecar.child);
-      reject(
-        new CursorValidationUnavailableError(
-          `Cursor sidecar request timed out after ${timeoutMs}ms.`
-        )
-      );
-    }, timeoutMs);
-    timeout.unref?.();
-  });
 
   try {
-    sidecar.child.stdin.write(`${JSON.stringify(request)}\n`);
-    sidecar.child.stdin.end();
-
-    const response = await Promise.race([responsePromise, timeoutPromise]);
+    const response = await requestNodeSidecar<CursorClientSidecarResponse>({
+      nodePath: runtime.nodePath,
+      sidecarScriptPath: runtime.sidecarScriptPath ?? resolveCursorSidecarScriptPath(),
+      request,
+      timeoutMs,
+      killGraceMs,
+      sidecarLabel: 'Cursor',
+      isResponse: isCursorSidecarResponse,
+      ignoreExitCodeWhen: (response) => response.type === 'error',
+      describeSpawnError: describeCursorSpawnError,
+    });
     if (response.type === 'error') throw parseCursorSidecarRpcError(response);
     return response;
-  } finally {
-    if (timeout) clearTimeout(timeout);
-    if (timedOut) {
-      await terminateCursorSidecarWithEscalation(sidecar.child, sidecar.childExit, killGraceMs);
-    } else {
-      terminateCursorSidecar(sidecar.child);
+  } catch (error) {
+    if (error instanceof NodeSidecarError) {
+      throw new CursorValidationUnavailableError(error.message);
     }
+    throw error;
   }
 }
 

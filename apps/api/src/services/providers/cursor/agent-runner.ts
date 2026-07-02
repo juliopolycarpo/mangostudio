@@ -12,16 +12,18 @@
  *   a grace period.
  */
 
-import { createInterface } from 'node:readline';
+import {
+  NodeSidecarError,
+  type NodeSidecarExecuteResult,
+  streamNodeSidecarEvents,
+} from '../core/node-sidecar/spawn-sidecar';
 import type { StreamingChunk } from '../types';
 import { detectCursorRuntimeAvailability } from './runtime-availability';
 import { resolveCursorRuntimeUnavailableMessage } from './runtime-reason';
 import {
   CURSOR_SIDECAR_PROTOCOL_VERSION,
-  formatCursorSidecarExit,
-  spawnCursorSidecarProcess,
-  terminateCursorSidecar,
-  terminateCursorSidecarWithEscalation,
+  describeCursorSpawnError,
+  resolveCursorSidecarScriptPath,
 } from './sidecar-process';
 
 export {
@@ -34,7 +36,6 @@ const READY_TIMEOUT_MS = 10_000;
 const IDLE_TIMEOUT_MS = 300_000;
 const TURN_TIMEOUT_MS = 3_600_000;
 const KILL_GRACE_MS = 2_000;
-const STDERR_EXCERPT_MAX_CHARS = 2_000;
 
 export interface CursorSidecarCustomTool {
   name: string;
@@ -52,11 +53,7 @@ export interface CursorSidecarRequest {
   settingSources?: string[];
 }
 
-export interface CursorSidecarExecuteResult {
-  result?: unknown;
-  error?: string;
-  isError?: boolean;
-}
+export type CursorSidecarExecuteResult = NodeSidecarExecuteResult;
 
 export interface StreamCursorAgentSidecarOptions {
   executeCustomTool?: (
@@ -170,79 +167,6 @@ function shouldSkipToolCallEvent(
   return false;
 }
 
-function writeToolResponse(
-  stdin: NodeJS.WritableStream,
-  response: { type: 'tool_response'; id: string } & CursorSidecarExecuteResult
-): void {
-  try {
-    stdin.write(`${JSON.stringify(response)}\n`);
-  } catch {
-    // Sidecar may have exited; swallow EPIPE.
-  }
-}
-
-/** Appends a truncated stderr tail to an error message for diagnosability. */
-function withStderrExcerpt(message: string, stderr: string): string {
-  const tail = stderr.trim().slice(-STDERR_EXCERPT_MAX_CHARS);
-  return tail ? `${message}\nSidecar stderr:\n${tail}` : message;
-}
-
-type LineReadResult = { kind: 'line'; line: string } | { kind: 'eof' } | { kind: 'timeout' };
-
-interface DeadlineLineReader {
-  next(timeoutMs: number): Promise<LineReadResult>;
-  close(): void;
-}
-
-/**
- * Wraps readline's push events into a single-consumer pull API so each read
- * can carry its own watchdog deadline (readline's async iterator cannot).
- */
-function createDeadlineLineReader(input: NodeJS.ReadableStream): DeadlineLineReader {
-  const rl = createInterface({ input });
-  const buffered: string[] = [];
-  let eof = false;
-  let notify: (() => void) | null = null;
-
-  rl.on('line', (line) => {
-    buffered.push(line);
-    notify?.();
-  });
-  rl.on('close', () => {
-    eof = true;
-    notify?.();
-  });
-
-  return {
-    async next(timeoutMs: number): Promise<LineReadResult> {
-      const deadline = Date.now() + Math.max(0, timeoutMs);
-      while (true) {
-        const line = buffered.shift();
-        if (line !== undefined) return { kind: 'line', line };
-        if (eof) return { kind: 'eof' };
-
-        const remaining = deadline - Date.now();
-        if (remaining <= 0) return { kind: 'timeout' };
-
-        const arrived = await new Promise<boolean>((resolve) => {
-          const timer = setTimeout(() => {
-            notify = null;
-            resolve(false);
-          }, remaining);
-          timer.unref?.();
-          notify = () => {
-            clearTimeout(timer);
-            notify = null;
-            resolve(true);
-          };
-        });
-        if (!arrived) return { kind: 'timeout' };
-      }
-    },
-    close: () => rl.close(),
-  };
-}
-
 export async function* streamCursorAgentSidecar(
   request: CursorSidecarRequest,
   signal?: AbortSignal,
@@ -257,193 +181,53 @@ export async function* streamCursorAgentSidecar(
   const idleTimeoutMs = options.idleTimeoutMs ?? IDLE_TIMEOUT_MS;
   const turnTimeoutMs = options.turnTimeoutMs ?? TURN_TIMEOUT_MS;
   const killGraceMs = options.killGraceMs ?? KILL_GRACE_MS;
-
-  const sidecar = spawnCursorSidecarProcess({
-    nodePath: runtime.nodePath,
-    sidecarScriptPath: runtime.sidecarScriptPath,
-  });
-  const { child, childExit } = sidecar;
-
-  const killWithEscalation = () => {
-    void terminateCursorSidecarWithEscalation(child, childExit, killGraceMs);
-  };
-  const abortHandler = killWithEscalation;
-  signal?.addEventListener('abort', abortHandler, { once: true });
-
-  const reader = createDeadlineLineReader(child.stdout);
+  const emittedToolCallIds = new Set<string>();
 
   try {
-    if (signal?.aborted) {
-      abortHandler();
-      return;
-    }
-
-    child.stdin.write(`${JSON.stringify(request)}\n`);
-
-    let sawTerminal = false;
-    let sawFirstEvent = false;
-    let pendingToolRpcCount = 0;
-    const emittedToolCallIds = new Set<string>();
-    const turnDeadline = Date.now() + turnTimeoutMs;
-
-    while (true) {
-      if (signal?.aborted) break;
-
-      const inactivityBudget = sawFirstEvent ? idleTimeoutMs : readyTimeoutMs;
-      const read = await reader.next(Math.min(inactivityBudget, turnDeadline - Date.now()));
-      if (read.kind === 'eof') break;
-
-      if (read.kind === 'timeout') {
-        if (signal?.aborted) break;
-
-        if (Date.now() >= turnDeadline) {
-          killWithEscalation();
-          yield {
-            type: 'error',
-            content: `Cursor agent turn exceeded the ${Math.round(turnTimeoutMs / 1000)}s limit and was terminated.`,
-            done: true,
-          };
-          return;
-        }
-
-        if (!sawFirstEvent) {
-          killWithEscalation();
-          throw new CursorSidecarError(
-            withStderrExcerpt(
-              `Cursor sidecar failed to start within ${Math.round(readyTimeoutMs / 1000)}s.`,
-              sidecar.getStderr()
-            )
-          );
-        }
-
-        // A MangoStudio tool executing on the API side legitimately silences
-        // the sidecar; only enforce inactivity when nothing is in flight.
-        if (pendingToolRpcCount > 0) continue;
-
-        killWithEscalation();
-        yield {
-          type: 'error',
-          content: `Cursor sidecar produced no output for ${Math.round(idleTimeoutMs / 1000)}s and was terminated.`,
-          done: true,
-        };
+    for await (const output of streamNodeSidecarEvents<SidecarEvent>({
+      nodePath: runtime.nodePath,
+      sidecarScriptPath: runtime.sidecarScriptPath ?? resolveCursorSidecarScriptPath(),
+      request,
+      protocolVersion: CURSOR_SIDECAR_PROTOCOL_VERSION,
+      sidecarLabel: 'Cursor',
+      signal,
+      describeSpawnError: describeCursorSpawnError,
+      executeTool: options.executeCustomTool,
+      readyTimeoutMs,
+      idleTimeoutMs,
+      turnTimeoutMs,
+      killGraceMs,
+    })) {
+      if (output.kind === 'error') {
+        yield { type: 'error', content: output.content, done: true };
         return;
       }
 
-      if (!read.line.trim()) continue;
-
-      let event: SidecarEvent;
-      try {
-        event = JSON.parse(read.line) as SidecarEvent;
-      } catch {
-        continue;
-      }
-
-      if (!sawFirstEvent) {
-        sawFirstEvent = true;
-        if (event.type === 'ready') {
-          if (event.protocolVersion !== CURSOR_SIDECAR_PROTOCOL_VERSION) {
-            killWithEscalation();
-            throw new CursorSidecarError(
-              `The MangoStudio binary and vendored Cursor sidecar are out of sync ` +
-                `(protocol ${event.protocolVersion ?? 'unknown'}, expected ${CURSOR_SIDECAR_PROTOCOL_VERSION}). ` +
-                'Reinstall MangoStudio.'
-            );
-          }
-          continue;
-        }
-        // No handshake: tolerate custom sidecar_script overrides that predate it.
-      } else if (event.type === 'ready') {
-        continue;
-      }
-
-      if (event.type === 'done') {
-        sawTerminal = true;
-        break;
-      }
-
-      if (event.type === 'tool_request') {
-        const { id, name } = event;
-        const args =
-          typeof event.args === 'object' && event.args !== null
-            ? (event.args as Record<string, unknown>)
-            : {};
-
-        pendingToolRpcCount += 1;
-        void (async () => {
-          try {
-            const outcome = options.executeCustomTool
-              ? await options.executeCustomTool(name, args)
-              : {
-                  error: `Tool "${name}" is not available on the Cursor provider path.`,
-                  isError: true,
-                };
-            writeToolResponse(child.stdin, { type: 'tool_response', id, ...outcome });
-          } catch (error) {
-            writeToolResponse(child.stdin, {
-              type: 'tool_response',
-              id,
-              error: error instanceof Error ? error.message : 'Tool execution failed.',
-              isError: true,
-            });
-          } finally {
-            pendingToolRpcCount -= 1;
-          }
-        })();
-
+      if (output.kind === 'tool_request') {
         yield {
           type: 'tool_call',
-          toolCallId: id,
-          name,
-          args,
+          toolCallId: output.id,
+          name: output.name,
+          args: output.args,
           done: false,
         };
         continue;
       }
 
-      const chunk = mapSidecarEvent(event, emittedToolCallIds);
+      const chunk = mapSidecarEvent(output.event, emittedToolCallIds);
       if (!chunk) continue;
 
-      if (chunk.type === 'error') {
-        sawTerminal = true;
-        yield chunk;
-        return;
-      }
-
       yield chunk;
+      if (chunk.type === 'error') return;
     }
 
-    try {
-      child.stdin.end();
-    } catch {
-      // Sidecar may have already closed stdin.
-    }
-
-    const exitStatus = await childExit;
     if (signal?.aborted) return;
-
-    const spawnErrorMessage = sidecar.getSpawnErrorMessage();
-    if (spawnErrorMessage) {
-      yield {
-        type: 'error',
-        content: spawnErrorMessage,
-        done: true,
-      };
-      return;
-    }
-    if (!sawTerminal && exitStatus.code !== 0) {
-      yield {
-        type: 'error',
-        content: sidecar.getStderr().trim() || formatCursorSidecarExit(exitStatus),
-        done: true,
-      };
-      return;
-    }
-
     yield { type: 'text', text: '', done: true };
-  } finally {
-    signal?.removeEventListener('abort', abortHandler);
-    reader.close();
-    terminateCursorSidecar(child);
+  } catch (error) {
+    if (error instanceof NodeSidecarError) {
+      throw new CursorSidecarError(error.message, { cause: error });
+    }
+    throw error;
   }
 }
 

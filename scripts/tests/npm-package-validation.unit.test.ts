@@ -53,6 +53,7 @@ const writeCursorSidecar = (packageDir: string, platform: NpmPlatform): void => 
   const sidecarDir = join(packageDir, 'cursor-sidecar');
   mkdirSync(sidecarDir, { recursive: true });
   writeFileSync(join(sidecarDir, 'run-agent.mjs'), '#!/usr/bin/env node');
+  writeFileSync(join(sidecarDir, 'sidecar-runtime.mjs'), 'export {};');
   mkdirSync(join(sidecarDir, 'node_modules', '@cursor', 'sdk'), { recursive: true });
   writeJson(join(sidecarDir, 'node_modules', '@cursor', 'sdk', 'package.json'), {
     name: '@cursor/sdk',
