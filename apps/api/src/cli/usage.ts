@@ -17,7 +17,11 @@ Commands:
   status              Show whether a server is running and its details.
   stop                Gracefully stop the running server.
   killserver          Force-kill the running server.
-  doctor              Run environment and configuration diagnostics.
+  doctor [--all] [--cursor-probe]
+                      Run environment and configuration diagnostics.
+                      Cursor runtime checks run when a Cursor connector is
+                      configured, or with --all. --cursor-probe spawns the
+                      sidecar validate_api_key RPC with a dummy key.
   version, --version  Print the MangoStudio version.
   help                Show this help.
 
