@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 import { EventEmitter } from 'node:events';
 import { PassThrough, Readable } from 'node:stream';
+import type { ProviderRuntimeUnavailableReason } from '@mangostudio/shared/provider-settings';
 import { getCursorFallbackModels } from '../../../../../src/services/providers/cursor/model-catalog';
 
 const NODE_PATH = '/usr/bin/node';
@@ -15,10 +16,7 @@ type RuntimeStatus =
     }
   | {
       available: false;
-      reasonCode:
-        | 'cursor.node_not_found'
-        | 'cursor.version_insufficient'
-        | 'cursor.sidecar_missing';
+      reasonCode: ProviderRuntimeUnavailableReason;
       reasonParams?: Record<string, string>;
     };
 

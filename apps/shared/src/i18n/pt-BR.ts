@@ -406,6 +406,16 @@ export const messages = {
         'Node.js {minVersion}+ é necessário para agentes Cursor SDK (encontrado {version}).',
       cursorSidecarMissing: 'O script sidecar do Cursor SDK está ausente.',
       cursorSidecarMissingAt: 'O script sidecar do Cursor SDK está ausente em {path}.',
+      cursorSdkMissing: 'O pacote Cursor SDK está ausente do sidecar. Reinstale o MangoStudio.',
+      cursorSdkMissingAt:
+        'O pacote Cursor SDK está ausente do sidecar em {path}. Reinstale o MangoStudio.',
+      cursorSdkIncomplete: 'O pacote Cursor SDK está incompleto. Reinstale o MangoStudio.',
+      cursorSdkIncompleteAt:
+        'O pacote Cursor SDK está incompleto em {path}. Reinstale o MangoStudio.',
+      cursorNativeRuntimeMissing:
+        'Esta plataforma não tem runtime nativo do Cursor no sidecar. Reinstale o MangoStudio.',
+      cursorNativeRuntimeMissingPackage:
+        'O pacote de runtime nativo do Cursor {packageName} está ausente. Reinstale o MangoStudio.',
       modalsModalTitle: 'Escolher Modelos Disponíveis',
       modelsModalTitle: 'Escolher Modelos Disponíveis',
       modelsModalDescription: 'Os modelos habilitados para',

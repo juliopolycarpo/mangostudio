@@ -21,6 +21,18 @@ export function formatConnectorRuntimeUnavailableHint(
       return params?.sidecarPath
         ? connectors.cursorSidecarMissingAt.replace('{path}', params.sidecarPath)
         : connectors.cursorSidecarMissing;
+    case 'cursor.sdk_missing':
+      return params?.sidecarPath
+        ? connectors.cursorSdkMissingAt.replace('{path}', params.sidecarPath)
+        : connectors.cursorSdkMissing;
+    case 'cursor.sdk_incomplete':
+      return params?.sidecarPath
+        ? connectors.cursorSdkIncompleteAt.replace('{path}', params.sidecarPath)
+        : connectors.cursorSdkIncomplete;
+    case 'cursor.native_runtime_missing':
+      return params?.packageName
+        ? connectors.cursorNativeRuntimeMissingPackage.replace('{packageName}', params.packageName)
+        : connectors.cursorNativeRuntimeMissing;
     default:
       return undefined;
   }

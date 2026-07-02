@@ -54,10 +54,14 @@ export const ProviderRuntimeUnavailableReasonSchema = Type.Union([
   Type.Literal('cursor.node_not_found'),
   Type.Literal('cursor.version_insufficient'),
   Type.Literal('cursor.sidecar_missing'),
+  Type.Literal('cursor.sdk_missing'),
+  Type.Literal('cursor.sdk_incomplete'),
+  Type.Literal('cursor.native_runtime_missing'),
 ]);
 
 export const ProviderRuntimeUnavailableReasonParamsSchema = Type.Object({
   foundVersion: Type.Optional(Type.String()),
+  packageName: Type.Optional(Type.String()),
   sidecarPath: Type.Optional(Type.String()),
 });
 
