@@ -18,6 +18,15 @@ import {
   runSubagentTurn,
   SubagentDelegationError,
 } from '../../../src/modules/generation/application/subagent-runner';
+import {
+  insertMessage,
+  listLegacyGalleryImages,
+  listByChatId as listMessagesByChatId,
+  loadHistory,
+  loadRichHistory,
+  updateMessage,
+  verifyMessageOwnership,
+} from '../../../src/modules/messages/infrastructure/message-repository';
 import * as realProviderSettingsRepoNs from '../../../src/modules/provider-settings/infrastructure/provider-settings-repository';
 import * as realToolSettingsRepoNs from '../../../src/modules/tool-settings/infrastructure/tool-settings-repository';
 import * as realGeminiNs from '../../../src/services/gemini';
@@ -61,6 +70,13 @@ export const realSubagentDelegationError = SubagentDelegationError;
 export const realGemini = { ...realGeminiNs };
 export const realProviderSettingsRepo = { ...realProviderSettingsRepoNs };
 export const realToolSettingsRepo = { ...realToolSettingsRepoNs };
+export const realInsertMessage = insertMessage;
+export const realUpdateMessage = updateMessage;
+export const realListMessagesByChatId = listMessagesByChatId;
+export const realLoadHistory = loadHistory;
+export const realLoadRichHistory = loadRichHistory;
+export const realVerifyMessageOwnership = verifyMessageOwnership;
+export const realListLegacyGalleryImages = listLegacyGalleryImages;
 
 export { AgentSettingsError };
 
@@ -105,6 +121,15 @@ export async function restoreAllMocks(): Promise<void> {
   await mock.module('../../../src/modules/generation/application/subagent-runner', () => ({
     runSubagentTurn: realRunSubagentTurn,
     SubagentDelegationError: realSubagentDelegationError,
+  }));
+  await mock.module('../../../src/modules/messages/infrastructure/message-repository', () => ({
+    insertMessage: realInsertMessage,
+    updateMessage: realUpdateMessage,
+    listByChatId: realListMessagesByChatId,
+    loadHistory: realLoadHistory,
+    loadRichHistory: realLoadRichHistory,
+    verifyMessageOwnership: realVerifyMessageOwnership,
+    listLegacyGalleryImages: realListLegacyGalleryImages,
   }));
 }
 

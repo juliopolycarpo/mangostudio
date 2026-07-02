@@ -26,6 +26,7 @@ import type {
   AgentTurnRequest,
   AIProvider,
   ChatTurnContext,
+  GenerationConfig,
   ToolDefinition,
 } from '../../../services/providers/types';
 import { GENERATE_IMAGE_TOOL_NAME } from '../../../services/tools/builtin/generate-image';
@@ -108,6 +109,36 @@ interface AgentLoopState {
   pendingCalls: Map<string, { name: string; argsStr: string }>;
   turnCompleted: boolean;
   degradedThisTurn: boolean;
+}
+
+function buildLegacyGenerationConfig(session: StreamTextTurnSession): GenerationConfig {
+  const runtimeSettings = session.agentRuntime.runtimeSettings;
+  return {
+    thinkingEnabled: session.thinkingEnabled,
+    reasoningEffort: session.reasoningEffort,
+    tools: session.toolDefs,
+    toolSettings: serializeToolSettings(session.agentRuntime.toolSettingsByName),
+    maxOutputTokens: runtimeSettings.maxOutputTokens,
+    promptCachePreference: runtimeSettings.promptCachePreference,
+    parallelToolCallsEnabled: runtimeSettings.parallelToolCallsEnabled,
+    enableProviderCompaction: runtimeSettings.providerCompactionEnabled,
+    providerCompactionThreshold: session.input.contextSettings?.warningThreshold,
+  };
+}
+
+function serializeToolSettings(
+  settingsByName: ResolvedAgentRuntime['toolSettingsByName'] | undefined
+): GenerationConfig['toolSettings'] | undefined {
+  if (!settingsByName?.size) return undefined;
+
+  const serialized: NonNullable<GenerationConfig['toolSettings']> = {};
+  for (const [name, settings] of settingsByName) {
+    serialized[name] = {
+      enabled: settings.enabled,
+      parameters: settings.parameters,
+    };
+  }
+  return serialized;
 }
 
 /**
@@ -614,10 +645,8 @@ export async function* runLegacyTextStream(
     effectiveSystemPrompt,
     resolvedModel,
     signal,
-    input,
   } = session;
   const { modelId, capabilities } = resolvedModel;
-  const runtimeSettings = session.agentRuntime.runtimeSettings;
 
   const history = await loadHistory(chatId, { excludeId: session.userMsgId }, session.db);
   let legacyInThinking = false;
@@ -627,24 +656,21 @@ export async function* runLegacyTextStream(
 
   for await (const chunk of generateTextStream({
     userId,
+    chatId,
     history,
     prompt: effectivePrompt,
     systemPrompt: effectiveSystemPrompt,
     modelName: modelId,
     signal,
-    generationConfig: {
-      thinkingEnabled: session.thinkingEnabled,
-      reasoningEffort: session.reasoningEffort,
-      maxOutputTokens: runtimeSettings.maxOutputTokens,
-      promptCachePreference: runtimeSettings.promptCachePreference,
-      parallelToolCallsEnabled: runtimeSettings.parallelToolCallsEnabled,
-      enableProviderCompaction: runtimeSettings.providerCompactionEnabled,
-      providerCompactionThreshold: input.contextSettings?.warningThreshold,
-    },
+    generationConfig: buildLegacyGenerationConfig(session),
     attachments: session.runtimeAttachments,
     modelCapabilities: capabilities,
   })) {
     if (signal?.aborted) break;
+
+    if (chunk.type === 'error') {
+      throw new Error(chunk.content ?? 'Stream generation failed');
+    }
 
     if (chunk.type === 'thinking' && chunk.text) {
       if (!legacyInThinking) {
@@ -658,6 +684,12 @@ export async function* runLegacyTextStream(
       session.fullText += chunk.text;
       session.allParts.push({ type: 'text', text: chunk.text });
       yield { type: 'text', text: chunk.text };
+    } else if (chunk.type === 'tool_call') {
+      const detail = chunk.name ?? 'tool';
+      const eventName = `${provider.providerType}_internal_tool_call`;
+      legacyInThinking = false;
+      session.allParts.push({ type: 'system_event', event: eventName, detail });
+      yield { type: 'system_event', event: eventName, detail };
     }
   }
 }
@@ -676,10 +708,8 @@ export async function* runSingleShotTextGeneration(
     effectiveSystemPrompt,
     resolvedModel,
     signal,
-    input,
   } = session;
   const { modelId, capabilities } = resolvedModel;
-  const runtimeSettings = session.agentRuntime.runtimeSettings;
 
   const history = await loadHistory(chatId, { excludeId: session.userMsgId }, session.db);
 
@@ -688,20 +718,13 @@ export async function* runSingleShotTextGeneration(
 
   const result = await generateText({
     userId,
+    chatId,
     history,
     prompt: effectivePrompt,
     systemPrompt: effectiveSystemPrompt,
     modelName: modelId,
     signal,
-    generationConfig: {
-      thinkingEnabled: session.thinkingEnabled,
-      reasoningEffort: session.reasoningEffort,
-      maxOutputTokens: runtimeSettings.maxOutputTokens,
-      promptCachePreference: runtimeSettings.promptCachePreference,
-      parallelToolCallsEnabled: runtimeSettings.parallelToolCallsEnabled,
-      enableProviderCompaction: runtimeSettings.providerCompactionEnabled,
-      providerCompactionThreshold: input.contextSettings?.warningThreshold,
-    },
+    generationConfig: buildLegacyGenerationConfig(session),
     attachments: session.runtimeAttachments,
     modelCapabilities: capabilities,
   });

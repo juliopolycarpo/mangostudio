@@ -4,7 +4,7 @@
 // dist-npm/cli/ (the main wrapper with injected optionalDependencies), ready for
 // `npm publish`. Run after the binary build; release.yml drives it.
 
-import { cpSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { ROOT_DIR } from '../lib/config';
 import { removePaths } from '../lib/fs';
@@ -102,6 +102,14 @@ const stagePlatform = (platform: NpmPlatform, version: string): NpmPlatform => {
 
   const publicSource = join(sourceDir, 'public');
   cpSync(publicSource, join(packageDir, 'public'), { recursive: true });
+
+  // Ship the vendored Cursor SDK sidecar when the binary build produced it, so
+  // installs on hosts with Node.js can run the Cursor connector.
+  const cursorSidecarSource = join(sourceDir, 'cursor-sidecar');
+  if (existsSync(cursorSidecarSource)) {
+    cpSync(cursorSidecarSource, join(packageDir, 'cursor-sidecar'), { recursive: true });
+  }
+
   assertPlatformPackageAssets(packageDir, platform);
 
   info(`Staged ${platformPackageName(platform)}`);

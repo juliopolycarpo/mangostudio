@@ -50,6 +50,7 @@ const DEEPSEEK_DESCRIPTOR = {
     reasoningEffort: 'high',
     maxToolIterations: 10,
   },
+  runtimeAvailable: true,
 };
 
 describe('ProviderSettingsPage integration', () => {

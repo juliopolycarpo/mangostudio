@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { basename, join } from 'node:path';
 
-import { createReleaseAssetPlan } from '../lib/release-assets';
+import { createReleaseAssetPlan, platformArchiveMembers } from '../lib/release-assets';
 import {
   ALL_BINARY_TARGETS,
   filterBinaryTargets,
@@ -74,6 +74,9 @@ describe('createReleaseAssetPlan', () => {
     expect(archive.sourceDir).toBe(join('/repo', '.mango', 'out', 'linux-x64'));
     expect(archive.binaryPath).toBe(join('/repo', '.mango', 'out', 'linux-x64', 'mangostudio'));
     expect(archive.publicDir).toBe(join('/repo', '.mango', 'out', 'linux-x64', 'public'));
+    expect(archive.cursorSidecarDir).toBe(
+      join('/repo', '.mango', 'out', 'linux-x64', 'cursor-sidecar')
+    );
     expect(archive.readmePath).toBe(join('/repo', '.mango', 'out', 'README.md'));
   });
 
@@ -81,5 +84,25 @@ describe('createReleaseAssetPlan', () => {
     expect(() =>
       createReleaseAssetPlan({ version: '1.2.3', rootDir: '/repo', onlyPlatform: 'freebsd-x64' })
     ).toThrow(/No release platform matches filter/);
+  });
+});
+
+describe('platformArchiveMembers', () => {
+  test('lists the Cursor sidecar only when requested', () => {
+    const [linux] = createReleaseAssetPlan({
+      version: '1.2.3',
+      rootDir: '/repo',
+      onlyPlatform: 'linux-x64',
+    }).platformArchives;
+
+    expect(platformArchiveMembers(linux, { includeCursorSidecar: false })).toEqual([
+      'mangostudio',
+      'public',
+    ]);
+    expect(platformArchiveMembers(linux, { includeCursorSidecar: true })).toEqual([
+      'mangostudio',
+      'public',
+      'cursor-sidecar',
+    ]);
   });
 });

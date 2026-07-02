@@ -5,12 +5,24 @@
  */
 
 import { dirname, join } from 'node:path';
+import type {
+  ProviderRuntimeUnavailableReason,
+  ProviderRuntimeUnavailableReasonParams,
+} from '@mangostudio/shared/provider-settings';
 import {
   AUTH_SECRET_MIN_LENGTH,
   getAuthSecretValidationMessage,
   type MangoConfig,
 } from '../lib/config';
 import type { ServerState } from '../lib/server-state';
+import { formatCursorRuntimeUnavailableReason } from '../services/providers/cursor/runtime-reason';
+
+export interface NodeRuntimeProbe {
+  available: boolean;
+  reasonCode?: ProviderRuntimeUnavailableReason;
+  reasonParams?: ProviderRuntimeUnavailableReasonParams;
+  version?: string;
+}
 
 export type CheckStatus = 'ok' | 'warn' | 'fail';
 
@@ -96,6 +108,20 @@ export function checkRuntime(version: string, standalone: boolean): CheckResult 
   return ok(
     'Runtime',
     `v${version} ${process.platform}-${process.arch} ${standalone ? 'standalone' : 'dev'}`
+  );
+}
+
+/** When Cursor connectors are configured, Node.js >= 22.13 and the SDK sidecar are required. */
+export function checkCursorNodeRuntime(runtime: NodeRuntimeProbe): CheckResult {
+  if (runtime.available) {
+    const detail = runtime.version ? `${runtime.version} (meets >= 22.13)` : 'available';
+    return ok('Cursor runtime', detail);
+  }
+  return fail(
+    'Cursor runtime',
+    runtime.reasonCode
+      ? formatCursorRuntimeUnavailableReason(runtime.reasonCode, runtime.reasonParams)
+      : 'Node.js >= 22.13 and the Cursor SDK sidecar are required.'
   );
 }
 

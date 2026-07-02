@@ -19,7 +19,40 @@ export const PROVIDER_SECRET_CONFIG: Record<
   },
   anthropic: { tomlSection: 'anthropic_api_keys', envPrefix: 'ANTHROPIC_API_KEY' },
   deepseek: { tomlSection: 'deepseek_api_keys', envPrefix: 'DEEPSEEK_API_KEY' },
+  cursor: { tomlSection: 'cursor_api_keys', envPrefix: 'CURSOR_API_KEY' },
 };
+
+/** True when any non-empty env value exists for `prefix` or `prefix_<NAME>`. */
+export function hasProviderSecretEnv(
+  prefix: string,
+  env: Record<string, string | undefined>
+): boolean {
+  for (const [key, value] of Object.entries(env)) {
+    if (!value?.trim()) continue;
+    if (key === prefix || key.startsWith(`${prefix}_`)) return true;
+  }
+  return false;
+}
+
+/** True when a provider TOML section contains at least one non-empty secret value. */
+export function hasProviderTomlSecret(
+  tomlSection: string,
+  configPath: string,
+  readToml: (path: string) => Record<string, unknown>
+): boolean {
+  if (!configPath) return false;
+
+  try {
+    const parsed = readToml(configPath);
+    const section = parsed[tomlSection];
+    if (!section || typeof section !== 'object') return false;
+    return Object.values(section as Record<string, unknown>).some(
+      (value) => typeof value === 'string' && value.trim().length > 0
+    );
+  } catch {
+    return false;
+  }
+}
 
 /** Maps a raw DB row to the shared Connector shape. */
 export function toConnector(row: {

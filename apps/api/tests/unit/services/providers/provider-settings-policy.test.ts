@@ -8,6 +8,7 @@ import {
   mergeProviderRuntimeSettings,
   normalizeProviderRuntimeSettings,
 } from '../../../../src/services/providers/core/provider-settings-policy';
+import { evaluateCursorRuntimeAvailability } from '../../../../src/services/providers/cursor/runtime-availability';
 
 describe('provider settings policy', () => {
   it('maps DeepSeek compatible efforts to supported values', () => {
@@ -29,8 +30,10 @@ describe('provider settings policy', () => {
     );
   });
 
-  it('allows OpenAI xhigh without DeepSeek-specific mapping', () => {
-    const descriptor = buildProviderSettingsDescriptor('openai', { reasoningEffort: 'xhigh' });
+  it('allows OpenAI xhigh without DeepSeek-specific mapping', async () => {
+    const descriptor = await buildProviderSettingsDescriptor('openai', {
+      reasoningEffort: 'xhigh',
+    });
 
     expect(descriptor.reasoning.supportedEfforts).toContain('xhigh');
     expect(descriptor.settings.reasoningEffort).toBe('xhigh');
@@ -54,5 +57,37 @@ describe('provider settings policy', () => {
     expect(
       normalizeProviderRuntimeSettings('openai', { maxToolIterations: 2_000 }).maxToolIterations
     ).toBe(MAX_TOOL_ITERATIONS_MAX);
+  });
+
+  it('normalizes unsupported cursor efforts to medium', () => {
+    expect(normalizeProviderRuntimeSettings('cursor', { reasoningEffort: 'max' })).toMatchObject({
+      reasoningEffort: 'medium',
+    });
+    expect(normalizeProviderRuntimeSettings('cursor', { reasoningEffort: 'xhigh' })).toMatchObject({
+      reasoningEffort: 'medium',
+    });
+  });
+
+  it('exposes cursor reasoning descriptor without MangoStudio tool loop support', async () => {
+    const descriptor = await buildProviderSettingsDescriptor('cursor', { reasoningEffort: 'high' });
+
+    expect(descriptor.reasoning.supportedEfforts).toEqual(['low', 'medium', 'high']);
+    expect(descriptor.settings.reasoningEffort).toBe('high');
+    expect(descriptor.toolUseSupported).toBe(false);
+    expect(descriptor.reasoning.reasoningWithToolsSupported).toBe(false);
+  });
+
+  it('marks Cursor unavailable when the sidecar script is missing', () => {
+    const runtime = evaluateCursorRuntimeAvailability(
+      { available: true, nodePath: '/usr/bin/node', version: 'v22.13.0' },
+      {
+        sidecarScriptPath: '/missing/cursor-sidecar/run-agent.mjs',
+        sidecarExists: () => false,
+      }
+    );
+
+    expect(runtime.available).toBe(false);
+    expect(runtime.reasonCode).toBe('cursor.sidecar_missing');
+    expect(runtime.reasonParams?.sidecarPath).toContain('cursor-sidecar/run-agent.mjs');
   });
 });

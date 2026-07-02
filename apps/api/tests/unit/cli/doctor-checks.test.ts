@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import {
   checkAuthSecret,
   checkConfig,
+  checkCursorNodeRuntime,
   checkDatabase,
   checkDir,
   checkFrontend,
@@ -38,6 +39,7 @@ function makeConfig(overrides: Partial<MangoConfig> = {}): MangoConfig {
     agents: { dir: '/data/agents' },
     auth: { secret: 'x'.repeat(32), url: 'http://localhost:3001' },
     security: { trustProxy: false },
+    cursor: { workspaceDir: '' },
     corsOrigins: [],
     configFilePath: '/data/config.toml',
     ...overrides,
@@ -165,5 +167,34 @@ describe('checkRuntime', () => {
     expect(result.status).toBe('ok');
     expect(result.detail).toContain('v1.2.3');
     expect(result.detail).toContain('standalone');
+  });
+});
+
+describe('checkCursorNodeRuntime', () => {
+  it('passes when Node meets the minimum version', () => {
+    const result = checkCursorNodeRuntime({ available: true, version: 'v22.13.0' });
+    expect(result.status).toBe('ok');
+    expect(result.label).toBe('Cursor runtime');
+    expect(result.detail).toContain('v22.13.0');
+  });
+
+  it('fails when Node is unavailable', () => {
+    const result = checkCursorNodeRuntime({
+      available: false,
+      reasonCode: 'cursor.version_insufficient',
+      reasonParams: { foundVersion: 'v20.0.0' },
+    });
+    expect(result.status).toBe('fail');
+    expect(result.detail).toContain('Node.js 22.13');
+  });
+
+  it('fails when the Cursor SDK sidecar is missing', () => {
+    const result = checkCursorNodeRuntime({
+      available: false,
+      reasonCode: 'cursor.sidecar_missing',
+      reasonParams: { sidecarPath: '/tmp/cursor-sidecar/run-agent.mjs' },
+    });
+    expect(result.status).toBe('fail');
+    expect(result.detail).toContain('sidecar script is missing');
   });
 });

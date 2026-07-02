@@ -57,3 +57,13 @@ export function getDefaultFrontendDir(): string {
   // Fallback to local public dir
   return join(getRuntimeBaseDir(), 'public');
 }
+
+/** Returns the Cursor SDK sidecar script path for the current runtime mode. */
+export function getCursorSidecarScriptPath(): string {
+  const devSidecar = join(import.meta.dir, '../services/providers/cursor/sidecar/run-agent.mjs');
+  if (existsSync(devSidecar)) {
+    return devSidecar;
+  }
+
+  return join(getRuntimeBaseDir(), 'cursor-sidecar', 'run-agent.mjs');
+}

@@ -9,6 +9,7 @@ import { isShellAvailable, type ShellKind } from '../../src/services/tools/built
 
 export const EXPECTED_PROVIDER_TYPES = [
   'anthropic',
+  'cursor',
   'deepseek',
   'gemini',
   'openai',

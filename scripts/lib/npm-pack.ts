@@ -2,6 +2,9 @@
 // per-platform package manifests, and the main package's optional dependencies.
 // scripts/release/pack-npm.ts wires these to the filesystem.
 
+import { cursorNativePackageForArch } from './cursor-sidecar';
+import type { ReleasePlatformId } from './release-targets';
+
 export const CLI_SCOPE = '@mangostudio';
 export const MAIN_PACKAGE = 'mangostudio';
 export const PLATFORM_PACKAGE_PREFIX = `${CLI_SCOPE}/cli`;
@@ -53,11 +56,21 @@ export function platformPackageName(platform: NpmPlatform): string {
   return `${PLATFORM_PACKAGE_PREFIX}-${platform.os}-${platform.cpu}`;
 }
 
+/** True when the platform ships a vendored Cursor SDK sidecar beside the binary. */
+export function platformShipsCursorSidecar(platform: NpmPlatform): boolean {
+  return cursorNativePackageForArch(platform.arch as ReleasePlatformId) !== null;
+}
+
 /** package.json for a per-platform binary package, gated by os + cpu. */
 export function buildPlatformManifest(
   platform: NpmPlatform,
   version: string
 ): Record<string, unknown> {
+  const files = [platform.binary, 'public'];
+  if (platformShipsCursorSidecar(platform)) {
+    files.push('cursor-sidecar');
+  }
+
   return {
     name: platformPackageName(platform),
     version,
@@ -71,7 +84,7 @@ export function buildPlatformManifest(
     keywords: PACKAGE_KEYWORDS,
     os: [platform.os],
     cpu: [platform.cpu],
-    files: [platform.binary, 'public'],
+    files,
   };
 }
 

@@ -11,6 +11,8 @@ import {
   OpenAIConfigError,
   UnsafeBaseUrlError,
 } from '../../../../src/modules/connectors/infrastructure/provider-validation';
+import { CursorApiError } from '../../../../src/services/providers/cursor/client';
+import { CursorRuntimeUnavailableError } from '../../../../src/services/providers/cursor/index';
 import {
   GeminiValidationUnavailableError,
   InvalidGeminiApiKeyError,
@@ -73,6 +75,18 @@ describe('handleConnectorError', () => {
         expectedStatus: 422,
         expectedCode: ERROR_CODES.VALIDATION,
         expectedMessage: 'Project ID is required',
+      },
+      {
+        error: new CursorApiError('Cursor API key is invalid.'),
+        expectedStatus: 422,
+        expectedCode: ERROR_CODES.VALIDATION,
+        expectedMessage: 'Cursor API key is invalid.',
+      },
+      {
+        error: new CursorRuntimeUnavailableError('Node.js 22.13 or newer is required.'),
+        expectedStatus: 503,
+        expectedCode: ERROR_CODES.PROVIDER_ERROR,
+        expectedMessage: 'Node.js 22.13 or newer is required.',
       },
     ] as const;
 

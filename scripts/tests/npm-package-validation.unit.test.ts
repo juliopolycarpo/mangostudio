@@ -2,18 +2,27 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { cursorNativePackageForArch } from '../lib/cursor-sidecar';
 import { buildMainManifest, buildPlatformManifest, type NpmPlatform } from '../lib/npm-pack';
 import {
   assertNpmDistributionAssets,
   assertPlatformBuildAssets,
   assertPlatformPackageAssets,
 } from '../lib/npm-package-validation';
+import type { ReleasePlatformId } from '../lib/release-targets';
 
 const LINUX_X64: NpmPlatform = {
   arch: 'linux-x64',
   os: 'linux',
   cpu: 'x64',
   binary: 'mangostudio',
+};
+
+const WINDOWS_ARM64: NpmPlatform = {
+  arch: 'windows-arm64',
+  os: 'win32',
+  cpu: 'arm64',
+  binary: 'mangostudio.exe',
 };
 
 let tempDirs: string[] = [];
@@ -32,7 +41,25 @@ const writePlatformPackage = (packageDir: string, platform: NpmPlatform): void =
   mkdirSync(join(packageDir, 'public'), { recursive: true });
   writeFileSync(join(packageDir, platform.binary), 'binary');
   writeFileSync(join(packageDir, 'public', 'index.html'), '<!doctype html>');
+  writeCursorSidecar(packageDir, platform);
   writeJson(join(packageDir, 'package.json'), buildPlatformManifest(platform, '1.2.3'));
+};
+
+const writeCursorSidecar = (packageDir: string, platform: NpmPlatform): void => {
+  const nativePackage = cursorNativePackageForArch(platform.arch as ReleasePlatformId);
+  if (!nativePackage) return;
+
+  const sidecarDir = join(packageDir, 'cursor-sidecar');
+  mkdirSync(sidecarDir, { recursive: true });
+  writeFileSync(join(sidecarDir, 'run-agent.mjs'), '#!/usr/bin/env node');
+  mkdirSync(join(sidecarDir, 'node_modules', '@cursor', 'sdk'), { recursive: true });
+  writeJson(join(sidecarDir, 'node_modules', '@cursor', 'sdk', 'package.json'), {
+    name: '@cursor/sdk',
+  });
+  mkdirSync(join(sidecarDir, 'node_modules', nativePackage), { recursive: true });
+  writeJson(join(sidecarDir, 'node_modules', nativePackage, 'package.json'), {
+    name: nativePackage,
+  });
 };
 
 const writeMainPackage = (packageDir: string): void => {
@@ -69,6 +96,17 @@ describe('assertPlatformBuildAssets', () => {
       /Missing frontend index\.html/
     );
   });
+
+  test('rejects build output with a missing Cursor sidecar', () => {
+    const sourceDir = makeTempDir();
+    mkdirSync(join(sourceDir, 'public'), { recursive: true });
+    writeFileSync(join(sourceDir, LINUX_X64.binary), 'binary');
+    writeFileSync(join(sourceDir, 'public', 'index.html'), '<!doctype html>');
+
+    expect(() => assertPlatformBuildAssets(sourceDir, LINUX_X64)).toThrow(
+      /Missing Cursor sidecar script/
+    );
+  });
 });
 
 describe('assertPlatformPackageAssets', () => {
@@ -77,6 +115,13 @@ describe('assertPlatformPackageAssets', () => {
     writePlatformPackage(packageDir, LINUX_X64);
 
     expect(() => assertPlatformPackageAssets(packageDir, LINUX_X64)).not.toThrow();
+  });
+
+  test('accepts a platform package without a Cursor native runtime', () => {
+    const packageDir = makeTempDir();
+    writePlatformPackage(packageDir, WINDOWS_ARM64);
+
+    expect(() => assertPlatformPackageAssets(packageDir, WINDOWS_ARM64)).not.toThrow();
   });
 
   test('rejects a package manifest that omits the frontend sidecar', () => {
@@ -89,6 +134,29 @@ describe('assertPlatformPackageAssets', () => {
 
     expect(() => assertPlatformPackageAssets(packageDir, LINUX_X64)).toThrow(
       /Manifest files must include public/
+    );
+  });
+
+  test('rejects a package manifest that omits the Cursor sidecar', () => {
+    const packageDir = makeTempDir();
+    writePlatformPackage(packageDir, LINUX_X64);
+    writeJson(join(packageDir, 'package.json'), {
+      ...buildPlatformManifest(LINUX_X64, '1.2.3'),
+      files: [LINUX_X64.binary, 'public'],
+    });
+
+    expect(() => assertPlatformPackageAssets(packageDir, LINUX_X64)).toThrow(
+      /Manifest files must include cursor-sidecar/
+    );
+  });
+
+  test('rejects a staged platform package with a missing Cursor sidecar', () => {
+    const packageDir = makeTempDir();
+    writePlatformPackage(packageDir, LINUX_X64);
+    rmSync(join(packageDir, 'cursor-sidecar', 'run-agent.mjs'));
+
+    expect(() => assertPlatformPackageAssets(packageDir, LINUX_X64)).toThrow(
+      /Missing Cursor sidecar script/
     );
   });
 });

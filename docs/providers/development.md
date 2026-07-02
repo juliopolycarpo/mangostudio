@@ -50,6 +50,11 @@ separate provider type lets the catalog report DeepSeek-specific reasoning,
 tool, caching, and continuation capabilities without changing generic
 OpenAI-compatible behavior.
 
+Cursor is also a first-class provider, but it is an **adapter** over the local
+`@cursor/sdk` agent runtime rather than a chat-completions wrapper. See
+[docs/providers/cursor.md](cursor.md) for the Node.js sidecar requirement and
+workspace configuration.
+
 ---
 
 ## How to Decide Continuation Mode

@@ -18,6 +18,8 @@ export const ModelCapabilitiesSchema = Type.Object({
   streaming: Type.Boolean(),
   reasoning: Type.Optional(Type.Boolean()),
   tools: Type.Optional(Type.Boolean()),
+  /** Provider runs its own agent tool loop (not MangoStudio-managed tools). */
+  internalAgentTools: Type.Optional(Type.Boolean()),
   statefulContinuation: Type.Optional(Type.Boolean()),
   promptCaching: Type.Optional(Type.Boolean()),
   parallelToolCalls: Type.Optional(Type.Boolean()),

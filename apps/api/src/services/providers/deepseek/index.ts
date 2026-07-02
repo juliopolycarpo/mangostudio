@@ -46,7 +46,7 @@ async function resolveClientConfig(
   for (const row of rows) {
     if (!row.configured) continue;
     const enabled = parseStringArray(row.enabledModels);
-    if (modelName && !enabled.includes(modelName)) continue;
+    if (modelName && enabled.length > 0 && !enabled.includes(modelName)) continue;
     const apiKey = await secretService.resolveSecretValue(row);
     if (!apiKey) continue;
     return { apiKey, baseUrl: normalizeDeepSeekBaseUrl(row.baseUrl) };

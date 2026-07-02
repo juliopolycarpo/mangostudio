@@ -17,6 +17,7 @@ function makeConfig(): MangoConfig {
     agents: { dir: '/data/agents' },
     auth: { secret: 'x'.repeat(32), url: 'http://localhost:3001' },
     security: { trustProxy: false },
+    cursor: { workspaceDir: '' },
     corsOrigins: [],
     configFilePath: '/data/config.toml',
   };
@@ -33,6 +34,8 @@ describe('runDoctor', () => {
       frontendDir: () => '/app',
       controller: new FakeProcessController(),
       readState: () => Promise.resolve(null),
+      detectCursorRuntime: () => Promise.resolve({ available: true, version: 'v22.13.0' }),
+      isCursorConfigured: () => false,
       log: (msg) => lines.push(msg),
       exit: (code) => {
         exited = code;
@@ -54,12 +57,76 @@ describe('runDoctor', () => {
       frontendDir: () => '/app',
       controller: new FakeProcessController(),
       readState: () => Promise.resolve(null),
+      detectCursorRuntime: () => Promise.resolve({ available: true, version: 'v22.13.0' }),
+      isCursorConfigured: () => false,
       log: () => undefined,
       exit: (code) => {
         exited = code;
       },
     });
 
+    expect(exited).toBe(1);
+  });
+
+  it('fails when Cursor is configured but runtime is unavailable', async () => {
+    const lines: string[] = [];
+    let exited = -1;
+
+    await runDoctor({
+      loadConfig: makeConfig,
+      fs: ALL_OK,
+      frontendDir: () => '/app',
+      controller: new FakeProcessController(),
+      readState: () => Promise.resolve(null),
+      detectCursorRuntime: () =>
+        Promise.resolve({
+          available: false,
+          reasonCode: 'cursor.version_insufficient',
+          reasonParams: { foundVersion: 'v20.0.0' },
+        }),
+      isCursorConfigured: () => true,
+      log: (msg) => lines.push(msg),
+      exit: (code) => {
+        exited = code;
+      },
+    });
+
+    const text = lines.join('\n');
+    expect(text).toContain('Cursor runtime');
+    expect(text).toContain('1 failure(s)');
+    expect(exited).toBe(1);
+  });
+
+  it('fails when Cursor is configured but the SDK sidecar is missing', async () => {
+    const lines: string[] = [];
+    let exited = -1;
+
+    await runDoctor({
+      loadConfig: makeConfig,
+      fs: ALL_OK,
+      frontendDir: () => '/app',
+      controller: new FakeProcessController(),
+      readState: () => Promise.resolve(null),
+      detectCursorRuntime: () =>
+        Promise.resolve({
+          available: false,
+          version: 'v22.13.0',
+          reasonCode: 'cursor.sidecar_missing',
+          reasonParams: {
+            sidecarPath: '/tmp/cursor-sidecar/run-agent.mjs',
+          },
+        }),
+      isCursorConfigured: () => true,
+      log: (msg) => lines.push(msg),
+      exit: (code) => {
+        exited = code;
+      },
+    });
+
+    const text = lines.join('\n');
+    expect(text).toContain('Cursor runtime');
+    expect(text).toContain('sidecar script is missing');
+    expect(text).toContain('1 failure(s)');
     expect(exited).toBe(1);
   });
 });

@@ -155,6 +155,7 @@ export const messages: Messages = {
     systemEvents: {
       chatCompacted: 'Context compacted into a summary',
       summaryHandoff: 'This chat started from a summarized handoff',
+      cursorInternalToolCall: 'Cursor used {tool}',
     },
     titleGenerationFailed: 'Failed to generate chat title',
   },
@@ -395,6 +396,12 @@ export const messages: Messages = {
       cancelButton: 'Cancel',
       addConnectorButton: 'Add Connector',
       validating: 'Validating...',
+      cursorNodeRequired: 'You need NodeJS installed to run Cursor SDK Agents.',
+      cursorNodeNotFound: '`node` binary not found',
+      cursorNodeVersionInsufficient:
+        'Node.js {minVersion}+ is required for Cursor SDK Agents (found {version}).',
+      cursorSidecarMissing: 'Cursor SDK sidecar script is missing.',
+      cursorSidecarMissingAt: 'Cursor SDK sidecar script is missing at {path}.',
       modalsModalTitle: 'Choose Available Models',
       modelsModalTitle: 'Choose Available Models',
       modelsModalDescription: 'Models enabled for',
@@ -616,6 +623,7 @@ export const messages: Messages = {
     openai: 'OpenAI',
     'openai-compatible': 'OpenAI Compatible',
     deepseek: 'DeepSeek',
+    cursor: 'Cursor',
     openrouter: 'OpenRouter',
   },
 

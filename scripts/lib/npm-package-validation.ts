@@ -1,8 +1,16 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { cursorNativePackageForArch } from './cursor-sidecar';
 import { fileError } from './fs-assert';
-import { MAIN_PACKAGE, NPM_PLATFORMS, type NpmPlatform, platformPackageName } from './npm-pack';
+import {
+  MAIN_PACKAGE,
+  NPM_PLATFORMS,
+  type NpmPlatform,
+  platformPackageName,
+  platformShipsCursorSidecar,
+} from './npm-pack';
+import type { ReleasePlatformId } from './release-targets';
 
 interface ManifestReadResult {
   readonly errors: string[];
@@ -84,13 +92,13 @@ const optionalDependencyErrors = (
 };
 
 const platformManifestErrors = (packageDir: string, platform: NpmPlatform): string[] => {
-  const { errors, manifest } = readManifest(join(packageDir, 'package.json'));
+  const { errors: manifestReadErrors, manifest } = readManifest(join(packageDir, 'package.json'));
   if (!manifest) {
-    return errors;
+    return manifestReadErrors;
   }
 
-  return [
-    ...errors,
+  const errors = [
+    ...manifestReadErrors,
     ...expectedStringError(manifest, 'name', platformPackageName(platform)),
     ...expectedVersionError(manifest),
     ...expectedArrayItemError(manifest, 'os', platform.os),
@@ -98,13 +106,36 @@ const platformManifestErrors = (packageDir: string, platform: NpmPlatform): stri
     ...expectedArrayItemError(manifest, 'files', platform.binary),
     ...expectedArrayItemError(manifest, 'files', 'public'),
   ];
+  if (platformShipsCursorSidecar(platform)) {
+    errors.push(...expectedArrayItemError(manifest, 'files', 'cursor-sidecar'));
+  }
+  return errors;
 };
 
 const platformPackageErrors = (packageDir: string, platform: NpmPlatform): string[] => [
   ...fileError(join(packageDir, platform.binary), 'binary'),
   ...fileError(join(packageDir, 'public', 'index.html'), 'frontend index.html'),
+  ...cursorSidecarErrors(packageDir, platform),
   ...platformManifestErrors(packageDir, platform),
 ];
+
+function cursorSidecarErrors(packageDir: string, platform: NpmPlatform): string[] {
+  const nativePackage = cursorNativePackageForArch(platform.arch as ReleasePlatformId);
+  if (!nativePackage) return [];
+
+  const sidecarDir = join(packageDir, 'cursor-sidecar');
+  return [
+    ...fileError(join(sidecarDir, 'run-agent.mjs'), 'Cursor sidecar script'),
+    ...fileError(
+      join(sidecarDir, 'node_modules', '@cursor', 'sdk', 'package.json'),
+      'Cursor SDK package'
+    ),
+    ...fileError(
+      join(sidecarDir, 'node_modules', nativePackage, 'package.json'),
+      `Cursor native package ${nativePackage}`
+    ),
+  ];
+}
 
 const assertNoErrors = (heading: string, errors: readonly string[]): void => {
   if (errors.length === 0) {
@@ -140,6 +171,7 @@ export function assertPlatformBuildAssets(sourceDir: string, platform: NpmPlatfo
   assertNoErrors(`Invalid build output for ${platform.arch}`, [
     ...fileError(join(sourceDir, platform.binary), 'binary'),
     ...fileError(join(sourceDir, 'public', 'index.html'), 'frontend index.html'),
+    ...cursorSidecarErrors(sourceDir, platform),
   ]);
 }
 

@@ -45,6 +45,8 @@ export interface ModelCapabilities {
   streaming: boolean;
   reasoning?: boolean;
   tools?: boolean;
+  /** Provider runs its own agent tool loop (not MangoStudio-managed tools). */
+  internalAgentTools?: boolean;
   statefulContinuation?: boolean;
   promptCaching?: boolean;
   parallelToolCalls?: boolean;
@@ -86,6 +88,7 @@ export interface GenerationConfig {
   thinkingEnabled: boolean;
   reasoningEffort: ReasoningEffort;
   tools?: ToolDefinition[];
+  toolSettings?: Record<string, { enabled: boolean; parameters: Record<string, unknown> }>;
   maxToolIterations?: number;
   maxOutputTokens?: number;
   promptCachePreference?: PromptCachePreference;
@@ -144,6 +147,8 @@ export interface AgentTurnRequest {
 /** Input for text generation. */
 export interface TextGenerationRequest {
   userId: string;
+  /** Owning chat — required for provider-routed tool execution (e.g. Cursor sidecar RPC). */
+  chatId?: string;
   history: TextContextMessage[];
   prompt: string;
   systemPrompt?: string;
@@ -190,6 +195,12 @@ export interface ImageGenerationResult {
   imageUrl: string;
 }
 
+/** Declared model parameter with allowed values (from provider discovery). */
+export interface ModelParameterInfo {
+  id: string;
+  values: string[];
+}
+
 /** Provider capabilities and metadata for a single model. */
 export interface ModelInfo {
   modelId: string;
@@ -198,6 +209,8 @@ export interface ModelInfo {
   provider: ProviderType;
   /** Maximum input tokens accepted by the model (from provider API). */
   inputTokenLimit?: number;
+  /** Provider-specific parameter definitions discovered from the model catalog. */
+  parameters?: ModelParameterInfo[];
   capabilities: ModelCapabilities;
 }
 

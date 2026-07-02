@@ -3,16 +3,35 @@
  * plain-text checklist. Exits non-zero if any check fails.
  */
 
-import { accessSync, constants, existsSync } from 'node:fs';
-import { getHomeMangoDir, getVersion, loadConfig, type MangoConfig } from '../../lib/config';
+import { accessSync, constants, existsSync, readFileSync } from 'node:fs';
+import { parseRuntimeEnvFile } from '@mangostudio/shared/runtime-env';
+import { parse as parseToml } from 'smol-toml';
+import {
+  getConfigEnvFilePath,
+  getHomeMangoDir,
+  getVersion,
+  isReloadableSecretEnvKey,
+  loadConfig,
+  type MangoConfig,
+} from '../../lib/config';
 import { getLogsDir, getRunDir } from '../../lib/mango-paths';
 import { getDefaultFrontendDir, isStandaloneExecutable } from '../../lib/runtime-paths';
 import { isStateLive, readState, type ServerState } from '../../lib/server-state';
+import {
+  hasProviderSecretEnv,
+  hasProviderTomlSecret,
+  PROVIDER_SECRET_CONFIG,
+} from '../../modules/connectors/domain/connector';
+import {
+  type CursorRuntimeStatus,
+  detectCursorRuntimeAvailability,
+} from '../../services/providers/cursor/runtime-availability';
 import {
   type CheckResult,
   type CheckStatus,
   checkAuthSecret,
   checkConfig,
+  checkCursorNodeRuntime,
   checkDatabase,
   checkDir,
   checkFrontend,
@@ -29,6 +48,8 @@ export interface DoctorDeps {
   frontendDir: () => string;
   controller: ProcessController;
   readState: typeof readState;
+  detectCursorRuntime: () => Promise<CursorRuntimeStatus>;
+  isCursorConfigured: (config: MangoConfig) => boolean;
   log: (msg: string) => void;
   exit: (code: number) => void;
 }
@@ -51,7 +72,7 @@ async function collectResults(
   d: Required<DoctorDeps>
 ): Promise<CheckResult[]> {
   const instance = await inspectInstance(d);
-  return [
+  const results: CheckResult[] = [
     checkDir('Home directory', getHomeMangoDir(), d.fs),
     checkDir('Logs directory', getLogsDir(), d.fs),
     checkDir('Run directory', getRunDir(), d.fs),
@@ -62,6 +83,13 @@ async function collectResults(
     checkInstance(instance.state, instance.alive),
     checkRuntime(getVersion(), isStandaloneExecutable()),
   ];
+
+  if (d.isCursorConfigured(config)) {
+    const runtime = await d.detectCursorRuntime();
+    results.push(checkCursorNodeRuntime(runtime));
+  }
+
+  return results;
 }
 
 async function inspectInstance(d: Required<DoctorDeps>): Promise<InstanceProbe> {
@@ -116,7 +144,36 @@ function resolveDeps(deps: Partial<DoctorDeps>): Required<DoctorDeps> {
     frontendDir: deps.frontendDir ?? getDefaultFrontendDir,
     controller: deps.controller ?? createProcessController(),
     readState: deps.readState ?? readState,
+    detectCursorRuntime: deps.detectCursorRuntime ?? detectCursorRuntimeAvailability,
+    isCursorConfigured: deps.isCursorConfigured ?? isCursorConnectorConfigured,
     log: deps.log ?? writeLine,
     exit: deps.exit ?? ((code) => process.exit(code)),
   };
+}
+
+/** True when a Cursor API key is present in env or config.toml. */
+export function isCursorConnectorConfigured(config: MangoConfig): boolean {
+  const { envPrefix, tomlSection } = PROVIDER_SECRET_CONFIG.cursor;
+  if (hasProviderSecretEnv(envPrefix, mergeConnectorSecretEnv(config))) return true;
+
+  const configPath = config.configFilePath;
+  if (!configPath || !existsSync(configPath)) return false;
+
+  return hasProviderTomlSecret(
+    tomlSection,
+    configPath,
+    (path) => parseToml(readFileSync(path, 'utf8')) as Record<string, unknown>
+  );
+}
+
+function mergeConnectorSecretEnv(config: MangoConfig): Record<string, string | undefined> {
+  const merged: Record<string, string | undefined> = { ...process.env };
+  const envFile = parseRuntimeEnvFile(getConfigEnvFilePath(config.configFilePath));
+
+  for (const [key, value] of Object.entries(envFile)) {
+    if (!isReloadableSecretEnvKey(key)) continue;
+    merged[key] = value;
+  }
+
+  return merged;
 }

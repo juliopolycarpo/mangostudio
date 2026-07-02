@@ -5,10 +5,13 @@ import {
 } from '@mangostudio/shared/app-settings';
 import type {
   ProviderRuntimeSettings,
+  ProviderRuntimeUnavailableReason,
+  ProviderRuntimeUnavailableReasonParams,
   ProviderSettingsDescriptor,
   ReasoningPolicy,
 } from '@mangostudio/shared/provider-settings';
 import type { ProviderType, ReasoningEffort } from '@mangostudio/shared/types';
+import { detectCursorRuntimeAvailability } from '../cursor/runtime-availability';
 
 const PROVIDER_TYPES: ReadonlyArray<ProviderType> = [
   'gemini',
@@ -16,6 +19,7 @@ const PROVIDER_TYPES: ReadonlyArray<ProviderType> = [
   'openai-compatible',
   'anthropic',
   'deepseek',
+  'cursor',
 ];
 
 interface ProviderSettingsPolicy {
@@ -94,6 +98,19 @@ const PROVIDER_POLICIES: Record<ProviderType, ProviderSettingsPolicy> = {
       maxToolIterations: MAX_TOOL_ITERATIONS_DEFAULT,
     },
   },
+  cursor: {
+    displayName: 'Cursor',
+    reasoning: buildReasoningPolicy(['low', 'medium', 'high'], true, false),
+    promptCachingSupported: false,
+    toolUseSupported: false,
+    structuredOutputSupported: false,
+    maxOutputTokensLimit: 128_000,
+    defaults: {
+      thinkingEnabled: true,
+      reasoningEffort: 'medium',
+      maxToolIterations: MAX_TOOL_ITERATIONS_DEFAULT,
+    },
+  },
 };
 
 function buildReasoningPolicy(
@@ -123,11 +140,33 @@ export function getDefaultProviderSettings(provider: ProviderType): ProviderRunt
   return normalizeProviderRuntimeSettings(provider, PROVIDER_POLICIES[provider].defaults);
 }
 
-export function buildProviderSettingsDescriptor(
+export async function getProviderRuntimeAvailability(provider: ProviderType): Promise<{
+  runtimeAvailable: boolean;
+  runtimeUnavailableReason?: ProviderRuntimeUnavailableReason;
+  runtimeUnavailableReasonParams?: ProviderRuntimeUnavailableReasonParams;
+}> {
+  if (provider !== 'cursor') {
+    return { runtimeAvailable: true };
+  }
+
+  const runtime = await detectCursorRuntimeAvailability();
+  if (runtime.available) {
+    return { runtimeAvailable: true };
+  }
+
+  return {
+    runtimeAvailable: false,
+    runtimeUnavailableReason: runtime.reasonCode ?? 'cursor.node_not_found',
+    ...(runtime.reasonParams ? { runtimeUnavailableReasonParams: runtime.reasonParams } : {}),
+  };
+}
+
+export async function buildProviderSettingsDescriptor(
   provider: ProviderType,
   savedSettings?: Partial<ProviderRuntimeSettings>
-): ProviderSettingsDescriptor {
+): Promise<ProviderSettingsDescriptor> {
   const policy = getProviderSettingsPolicy(provider);
+  const runtime = await getProviderRuntimeAvailability(provider);
   return {
     provider,
     displayName: policy.displayName,
@@ -138,6 +177,13 @@ export function buildProviderSettingsDescriptor(
     structuredOutputSupported: policy.structuredOutputSupported,
     maxOutputTokensLimit: policy.maxOutputTokensLimit,
     settings: normalizeProviderRuntimeSettings(provider, savedSettings),
+    runtimeAvailable: runtime.runtimeAvailable,
+    ...(runtime.runtimeUnavailableReason
+      ? { runtimeUnavailableReason: runtime.runtimeUnavailableReason }
+      : {}),
+    ...(runtime.runtimeUnavailableReasonParams
+      ? { runtimeUnavailableReasonParams: runtime.runtimeUnavailableReasonParams }
+      : {}),
   };
 }
 
@@ -192,6 +238,9 @@ function normalizeReasoningEffort(
   if (policy.reasoning.supportedEfforts.includes(requested)) return requested;
 
   if (provider === 'deepseek') return requested === 'max' || requested === 'xhigh' ? 'max' : 'high';
+  if (provider === 'cursor' && (requested === 'max' || requested === 'xhigh')) {
+    return policy.reasoning.defaultEffort;
+  }
   if (requested === 'max') return policy.reasoning.maxEffort ?? policy.reasoning.defaultEffort;
   if (requested === 'xhigh') return policy.reasoning.maxEffort ?? 'high';
   return policy.reasoning.defaultEffort;
