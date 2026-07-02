@@ -28,6 +28,8 @@ function resolveLabel(
         label: t.chat.systemEvents.summaryHandoff,
         severity: 'info',
       };
+    // Legacy: Cursor now streams real tool_call/tool_result parts; this case
+    // only renders historical persisted messages.
     case 'cursor_internal_tool_call':
       return {
         label: t.chat.systemEvents.cursorInternalToolCall.replace('{tool}', detail ?? ''),
