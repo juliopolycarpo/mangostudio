@@ -160,15 +160,16 @@ async function executeViaApi(name, args, stdinMux) {
         : typeof response.result === 'string'
           ? response.result
           : 'Tool execution failed.';
+    writeEvent({ type: 'tool_result', id, name, result: message, isError: true });
     return {
       content: [{ type: 'text', text: message }],
       isError: true,
     };
   }
 
-  if (typeof response.result === 'string') return response.result;
-  if (response.result !== undefined) return response.result;
-  return '';
+  const result = response.result === undefined ? '' : response.result;
+  writeEvent({ type: 'tool_result', id, name, result, isError: false });
+  return result;
 }
 
 function extractAssistantText(event) {

@@ -68,12 +68,12 @@ describe('provider settings policy', () => {
     });
   });
 
-  it('exposes cursor reasoning descriptor without MangoStudio tool loop support', async () => {
+  it('exposes cursor reasoning descriptor with tool use but no reasoning-with-tools', async () => {
     const descriptor = await buildProviderSettingsDescriptor('cursor', { reasoningEffort: 'high' });
 
     expect(descriptor.reasoning.supportedEfforts).toEqual(['low', 'medium', 'high']);
     expect(descriptor.settings.reasoningEffort).toBe('high');
-    expect(descriptor.toolUseSupported).toBe(false);
+    expect(descriptor.toolUseSupported).toBe(true);
     expect(descriptor.reasoning.reasoningWithToolsSupported).toBe(false);
   });
 

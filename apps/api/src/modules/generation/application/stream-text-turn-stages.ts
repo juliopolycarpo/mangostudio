@@ -55,6 +55,7 @@ import {
   mergeMessageParts,
 } from './stream-text-turn-helpers';
 import type { StreamEvent, StreamTextTurnInput } from './stream-text-turn-types';
+import { parseToolArgs, stringifyToolResult } from './tool-result-utils';
 
 export const TOOL_LOOP_EXHAUSTED_MESSAGE =
   'The model exceeded the maximum number of tool interactions.';
@@ -389,6 +390,39 @@ export async function* emitAgentStreamEvent(
       };
       break;
 
+    case 'tool_result': {
+      // Only providers that run their own tool loop (e.g. Cursor's sidecar)
+      // emit tool_result; the result marks the call satisfied so the
+      // orchestrator must not re-execute it.
+      if (!resolvedModel.capabilities?.internalAgentTools) break;
+      loop.inThinkingSegment = false;
+      const satisfiedCall = loop.pendingCalls.get(event.callId);
+      if (satisfiedCall) {
+        loop.pendingCalls.delete(event.callId);
+        session.allParts.push({
+          type: 'tool_call',
+          toolCallId: event.callId,
+          name: satisfiedCall.name || event.name,
+          args: parseToolArgs(satisfiedCall.argsStr),
+        });
+      }
+      session.allParts.push({
+        type: 'tool_result',
+        toolCallId: event.callId,
+        content:
+          typeof event.result === 'string' ? event.result : stringifyToolResult(event.result),
+        isError: event.isError ?? false,
+      });
+      yield {
+        type: 'tool_result',
+        callId: event.callId,
+        name: event.name,
+        result: event.result,
+        isError: event.isError ?? false,
+      };
+      break;
+    }
+
     case 'assistant_text_delta':
       loop.inThinkingSegment = false;
       session.fullText += event.text;
@@ -583,6 +617,7 @@ export async function* runAgentToolLoop(
 
     const req: AgentTurnRequest = {
       userId,
+      chatId,
       modelName: modelId,
       agentId: agentRuntime.profile.id,
       agentRuntimeHash: agentRuntime.runtimeHash,
@@ -598,6 +633,7 @@ export async function* runAgentToolLoop(
       generationConfig: {
         thinkingEnabled: session.thinkingEnabled,
         reasoningEffort: session.reasoningEffort,
+        toolSettings: serializeToolSettings(agentRuntime.toolSettingsByName),
         maxToolIterations: maxIter,
         maxOutputTokens: runtimeSettings.maxOutputTokens,
         promptCachePreference: runtimeSettings.promptCachePreference,
@@ -685,6 +721,8 @@ export async function* runLegacyTextStream(
       session.allParts.push({ type: 'text', text: chunk.text });
       yield { type: 'text', text: chunk.text };
     } else if (chunk.type === 'tool_call') {
+      // Coarse marker for legacy-path providers without generateAgentTurnStream;
+      // agent-turn providers surface real tool_call/tool_result parts instead.
       const detail = chunk.name ?? 'tool';
       const eventName = `${provider.providerType}_internal_tool_call`;
       legacyInThinking = false;

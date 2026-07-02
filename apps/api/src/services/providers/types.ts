@@ -108,6 +108,8 @@ export interface GenerationConfig {
 /** Request for a single agentic turn — supports tool calling and provider-side continuation. */
 export interface AgentTurnRequest {
   userId: string;
+  /** Owning chat — required for provider-routed tool execution (e.g. Cursor sidecar RPC). */
+  chatId?: string;
   modelName: string;
   agentId?: AgentId;
   agentRuntimeHash?: string;

@@ -100,9 +100,11 @@ const PROVIDER_POLICIES: Record<ProviderType, ProviderSettingsPolicy> = {
   },
   cursor: {
     displayName: 'Cursor',
+    // reasoningWithToolsSupported stays false until the Cursor SDK confirms
+    // the thinking param can be combined with customTools.
     reasoning: buildReasoningPolicy(['low', 'medium', 'high'], true, false),
     promptCachingSupported: false,
-    toolUseSupported: false,
+    toolUseSupported: true,
     structuredOutputSupported: false,
     maxOutputTokensLimit: 128_000,
     defaults: {

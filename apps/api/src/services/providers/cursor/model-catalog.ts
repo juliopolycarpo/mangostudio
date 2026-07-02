@@ -43,7 +43,7 @@ export function toCursorModelInfo(
       image: false,
       streaming: true,
       reasoning: true,
-      tools: false,
+      tools: true,
       internalAgentTools: true,
       statefulContinuation: false,
       promptCaching: false,

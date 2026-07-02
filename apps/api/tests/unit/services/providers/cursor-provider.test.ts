@@ -23,7 +23,7 @@ describe('cursor provider foundation', () => {
     expect(model.provider).toBe('cursor');
     expect(model.capabilities.text).toBe(true);
     expect(model.capabilities.streaming).toBe(true);
-    expect(model.capabilities.tools).toBe(false);
+    expect(model.capabilities.tools).toBe(true);
     expect(model.capabilities.internalAgentTools).toBe(true);
   });
 
@@ -76,19 +76,15 @@ describe('cursor provider foundation', () => {
   });
 
   it('maps all allowlisted tools to Cursor customTools metadata', () => {
-    const tools = buildCursorCustomTools({
-      thinkingEnabled: false,
-      reasoningEffort: 'medium',
-      tools: [
-        { name: 'bash', description: 'Run Bash', parameters: { type: 'object' } },
-        { name: 'read_file', description: 'Read files', parameters: { type: 'object' } },
-        {
-          name: 'delegate_to_agent',
-          description: 'Delegate',
-          parameters: { type: 'object' },
-        },
-      ],
-    });
+    const tools = buildCursorCustomTools([
+      { name: 'bash', description: 'Run Bash', parameters: { type: 'object' } },
+      { name: 'read_file', description: 'Read files', parameters: { type: 'object' } },
+      {
+        name: 'delegate_to_agent',
+        description: 'Delegate',
+        parameters: { type: 'object' },
+      },
+    ]);
 
     expect(tools?.map((tool) => tool.name)).toEqual(['bash', 'read_file']);
     expect(tools?.[0]).toMatchObject({
@@ -99,13 +95,8 @@ describe('cursor provider foundation', () => {
   });
 
   it('returns undefined when no tools are allowlisted', () => {
-    expect(
-      buildCursorCustomTools({
-        thinkingEnabled: false,
-        reasoningEffort: 'medium',
-        tools: [],
-      })
-    ).toBeUndefined();
+    expect(buildCursorCustomTools([])).toBeUndefined();
+    expect(buildCursorCustomTools(undefined)).toBeUndefined();
   });
 
   it('maps supported reasoning efforts to Cursor model params when the model declares thinking', () => {
