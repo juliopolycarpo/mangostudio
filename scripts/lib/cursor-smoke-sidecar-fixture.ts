@@ -21,6 +21,9 @@ export interface CursorSmokeSidecarFixture {
 
 const FAKE_SIDECAR_SOURCE = `import { createInterface } from 'node:readline';
 
+// Mirrors PROTOCOL_VERSION in apps/api/src/services/providers/cursor/sidecar/run-agent.mjs.
+console.log(JSON.stringify({ type: 'ready', protocolVersion: 1 }));
+
 const rl = createInterface({ input: process.stdin });
 rl.on('line', (line) => {
   let request;

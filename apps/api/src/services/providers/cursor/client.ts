@@ -141,11 +141,9 @@ async function readCursorSidecarResponse(
   }
 
   const exitStatus = await sidecar.childExit;
-  const spawnError = sidecar.getSpawnError();
-  if (spawnError) {
-    throw new CursorValidationUnavailableError(
-      spawnError.message || 'Failed to start the Cursor sidecar.'
-    );
+  const spawnErrorMessage = sidecar.getSpawnErrorMessage();
+  if (spawnErrorMessage) {
+    throw new CursorValidationUnavailableError(spawnErrorMessage);
   }
 
   if (!response) {

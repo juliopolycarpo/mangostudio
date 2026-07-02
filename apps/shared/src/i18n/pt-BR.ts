@@ -402,6 +402,8 @@ export const messages = {
       validating: 'Validando...',
       cursorNodeRequired: 'Você precisa do Node.js instalado para executar agentes Cursor SDK.',
       cursorNodeNotFound: 'Binário `node` não encontrado.',
+      cursorNodeInvalid:
+        'O binário Node.js configurado em {path} não pode ser executado. Corrija ou remova MANGO_NODE_PATH / cursor.node_path.',
       cursorNodeVersionInsufficient:
         'Node.js {minVersion}+ é necessário para agentes Cursor SDK (encontrado {version}).',
       cursorSidecarMissing: 'O script sidecar do Cursor SDK está ausente.',

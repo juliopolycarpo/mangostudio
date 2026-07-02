@@ -6,7 +6,7 @@ import {
 } from '@mangostudio/shared/catalog';
 import type { ProviderRuntimeUnavailableReasonParams } from '@mangostudio/shared/provider-settings';
 import { getCursorSidecarScriptPath } from '../../../lib/runtime-paths';
-import { detectNodeRuntime, type NodeRuntimeStatus } from './node-runtime';
+import { detectNodeRuntime, type NodeRuntimeStatus, resetNodeRuntimeCache } from './node-runtime';
 
 export interface CursorRuntimeStatus extends NodeRuntimeStatus {
   sidecarScriptPath?: string;
@@ -194,7 +194,12 @@ export function detectCursorRuntimeAvailability(options?: {
   return probe;
 }
 
+/**
+ * Clears the cached availability probe, including the underlying Node runtime
+ * cache it is derived from, so the next detect re-evaluates from scratch.
+ */
 export function resetCursorRuntimeAvailabilityCache(): void {
   cached = null;
   inflight = null;
+  resetNodeRuntimeCache();
 }
