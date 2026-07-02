@@ -85,6 +85,7 @@ export function AddConnectorModal({
     const hint = unavailableReason(id);
     return hint ? [{ id, hint }] : [];
   });
+  const cursorUnavailable = isProviderUnavailable('cursor');
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-sm animate-in fade-in duration-200">
@@ -138,6 +139,11 @@ export function AddConnectorModal({
                     {hint}
                   </p>
                 ))}
+                {cursorUnavailable ? (
+                  <p className="text-[11px] leading-snug text-on-surface-variant/70">
+                    {s.cursorRuntimeDoctorHint}
+                  </p>
+                ) : null}
               </div>
             ) : null}
           </div>
