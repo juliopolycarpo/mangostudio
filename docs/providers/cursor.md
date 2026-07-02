@@ -70,3 +70,27 @@ Binary builds vendor a self-contained `cursor-sidecar/` beside the executable (s
 ### Distribution
 
 Release archives (`tar.gz`/`zip`) and the per-platform npm packages carry the `cursor-sidecar/` tree next to the binary whenever the build produced one, so installs on a host with Node.js can run the Cursor connector. Docker images intentionally omit the sidecar: the images ship no Node.js runtime, so the connector reports as unavailable inside a container regardless.
+
+## Troubleshooting
+
+When the Cursor connector is disabled in **Settings → Connectors**, the add-connector
+modal shows a reason-specific hint. Common cases:
+
+| Symptom                             | Likely cause                                                                          | Fix                                                                                |
+| ----------------------------------- | ------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| `node` not found                    | Node.js not installed or not on `PATH`                                                | Install Node.js **22.13+**                                                         |
+| Version too old                     | Node below 22.13                                                                      | Upgrade Node.js                                                                    |
+| Sidecar / SDK missing or incomplete | Broken or partial install                                                             | Reinstall MangoStudio                                                              |
+| Native runtime missing              | Platform package absent from sidecar                                                  | Reinstall MangoStudio on a supported platform                                      |
+| Platform unsupported                | No Cursor native package (e.g. `windows-arm64`, `linux-x64-musl`, `linux-arm64-musl`) | Use a supported OS/arch; Cursor does not publish native runtimes for these targets |
+
+Run the CLI diagnostics checklist:
+
+```bash
+mangostudio doctor              # Cursor section when a connector is configured
+mangostudio doctor --all        # always include Cursor chain checks
+mangostudio doctor --all --cursor-probe   # plus live sidecar validate_api_key probe
+```
+
+`--cursor-probe` spawns the sidecar with an invalid API key. An auth rejection
+means the Node → sidecar → SDK chain reached the Cursor SDK successfully.

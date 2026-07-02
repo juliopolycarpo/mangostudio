@@ -22,16 +22,18 @@ copy-paste commands, or:
 
 ## Commands
 
-| Command                            | Description                                                    |
-| ---------------------------------- | -------------------------------------------------------------- |
-| `mangostudio`                      | Print help and the command list.                               |
-| `serve [host\|port\|host:port]`    | Start the server in the foreground (default `localhost:3001`). |
-| `serve [host\|port\|host:port] -d` | Start the server in the background (detached) and return.      |
-| `status`                           | Show whether a server is running and its details.              |
-| `stop`                             | Gracefully stop the running server (SIGTERM).                  |
-| `killserver`                       | Force-kill the running server (SIGKILL).                       |
-| `doctor`                           | Run environment and configuration diagnostics.                 |
-| `version`, `--version`, `-v`       | Print the embedded MangoStudio version.                        |
+| Command                            | Description                                                                         |
+| ---------------------------------- | ----------------------------------------------------------------------------------- |
+| `mangostudio`                      | Print help and the command list.                                                    |
+| `serve [host\|port\|host:port]`    | Start the server in the foreground (default `localhost:3001`).                      |
+| `serve [host\|port\|host:port] -d` | Start the server in the background (detached) and return.                           |
+| `status`                           | Show whether a server is running and its details.                                   |
+| `stop`                             | Gracefully stop the running server (SIGTERM).                                       |
+| `killserver`                       | Force-kill the running server (SIGKILL).                                            |
+| `doctor`                           | Run environment and configuration diagnostics.                                      |
+| `doctor --all`                     | Include Cursor runtime checks even without a Cursor connector.                      |
+| `doctor --cursor-probe`            | After chain checks pass, spawn the sidecar `validate_api_key` RPC with a dummy key. |
+| `version`, `--version`, `-v`       | Print the embedded MangoStudio version.                                             |
 
 `-d` / `--detach` and the positional host/port target may be combined in any
 order, e.g. `mangostudio serve 127.0.0.1:3000 -d`.
@@ -86,6 +88,45 @@ and cleaned up automatically.
 These live under `~/.mango` in both development and standalone modes so
 `status`/`stop` resolve the same instance regardless of how it was launched.
 Foreground `serve` logs to the terminal instead of a file.
+
+## Doctor
+
+`mangostudio doctor` prints a plain-text checklist for home directories, config,
+database, frontend, auth secret, running instance, and MangoStudio runtime.
+
+When a Cursor connector is configured (API key in env, `~/.mango/.env`, or
+`[cursor_api_keys]` in `config.toml`), doctor also reports each link in the
+Cursor runtime chain:
+
+| Check            | What it verifies                                            |
+| ---------------- | ----------------------------------------------------------- |
+| `Cursor Node`    | Host Node.js `>= 22.13` (`node` path and version)           |
+| `Cursor sidecar` | `cursor-sidecar/run-agent.mjs` beside the binary            |
+| `Cursor SDK`     | Vendored `@cursor/sdk` package with cjs/esm chunks          |
+| `Cursor native`  | Platform-native `@cursor/sdk-*` package in the sidecar tree |
+
+Pass `--all` to run the Cursor section even when no Cursor connector is
+configured. Pass `--cursor-probe` to spawn the sidecar after the chain checks
+pass; an auth rejection for the probe key means the Node → sidecar → SDK path
+is healthy.
+
+Example (Cursor configured, healthy chain):
+
+```text
+MangoStudio doctor
+
+[ok]   Home directory     /home/user/.mango (writable)
+...
+[ok]   Cursor Node        /usr/bin/node (v22.13.0, meets >= 22.13)
+[ok]   Cursor sidecar     /opt/mangostudio/cursor-sidecar/run-agent.mjs (present)
+[ok]   Cursor SDK         .../node_modules/@cursor/sdk/package.json (cjs/esm chunks complete)
+[ok]   Cursor native      @cursor/sdk-linux-x64 (present)
+
+0 warning(s), 0 failure(s).
+```
+
+See [`docs/providers/cursor.md`](../providers/cursor.md#troubleshooting) for
+reason-code meanings and remediation.
 
 ## Exit codes
 
