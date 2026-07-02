@@ -41,7 +41,40 @@ describe('archiveReleaseAssets', () => {
     });
 
     await expect(archiveReleaseAssets(plan)).rejects.toThrow(
-      /Missing linux-x64 Cursor sidecar script/
+      /Invalid linux-x64 Cursor sidecar layout/
     );
+  });
+
+  test('rejects supported Cursor platforms when SDK chunks are missing', async () => {
+    const rootDir = makeTempDir();
+    const outDir = join(rootDir, 'out');
+    const sourceDir = join(outDir, 'linux-x64');
+    const sidecarDir = join(sourceDir, 'cursor-sidecar');
+    mkdirSync(join(sourceDir, 'public'), { recursive: true });
+    writeFileSync(join(sourceDir, 'mangostudio'), 'binary');
+    writeFileSync(join(sourceDir, 'public', 'index.html'), '<!doctype html>');
+    writeFileSync(join(outDir, 'README.md'), '# Standalone build\n');
+    mkdirSync(sidecarDir, { recursive: true });
+    writeFileSync(join(sidecarDir, 'run-agent.mjs'), '#!/usr/bin/env node');
+    mkdirSync(join(sidecarDir, 'node_modules', '@cursor', 'sdk'), { recursive: true });
+    writeFileSync(
+      join(sidecarDir, 'node_modules', '@cursor', 'sdk', 'package.json'),
+      JSON.stringify({ name: '@cursor/sdk' })
+    );
+    mkdirSync(join(sidecarDir, 'node_modules', '@cursor', 'sdk-linux-x64'), { recursive: true });
+    writeFileSync(
+      join(sidecarDir, 'node_modules', '@cursor', 'sdk-linux-x64', 'package.json'),
+      JSON.stringify({ name: '@cursor/sdk-linux-x64', bin: { rg: 'bin/rg' } })
+    );
+
+    const plan = createReleaseAssetPlan({
+      version: '1.2.3',
+      rootDir,
+      outDir,
+      assetsDir: join(rootDir, 'release-assets'),
+      onlyPlatform: 'linux-x64',
+    });
+
+    await expect(archiveReleaseAssets(plan)).rejects.toThrow(/numbered chunks|chunk directory/);
   });
 });

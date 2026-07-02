@@ -130,6 +130,16 @@ function cursorSidecarErrors(packageDir: string, platform: NpmPlatform): string[
   ];
 }
 
+/** Collect Cursor sidecar layout errors for a built platform directory.
+ * Usage: collectCursorSidecarLayoutErrors('.mango/out/linux-x64', platform);
+ */
+export function collectCursorSidecarLayoutErrors(
+  sourceDir: string,
+  platform: NpmPlatform
+): string[] {
+  return cursorSidecarErrors(sourceDir, platform);
+}
+
 const assertNoErrors = (heading: string, errors: readonly string[]): void => {
   if (errors.length === 0) {
     return;
