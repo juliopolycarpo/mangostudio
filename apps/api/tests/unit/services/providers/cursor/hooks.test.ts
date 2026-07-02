@@ -30,15 +30,15 @@ describe('Cursor hook command quoting', () => {
         'win32'
       )
     ).toBe(
-      '"C:\\Program Files\\nodejs\\node.exe" "C:\\Users\\Jane Doe\\.mango\\cursor-agent\\.cursor\\hooks\\deny-builtins.mjs"'
+      '"C:\\\\Program Files\\\\nodejs\\\\node.exe" "C:\\\\Users\\\\Jane Doe\\\\.mango\\\\cursor-agent\\\\.cursor\\\\hooks\\\\deny-builtins.mjs"'
     );
   });
 
-  test('doubles Windows backslashes before an embedded quote', () => {
+  test('escapes Windows paths containing an embedded quote', () => {
     expect(quoteHookCommandArg('a\\"c', 'win32')).toBe('"a\\\\\\"c"');
   });
 
-  test('doubles Windows trailing backslashes', () => {
-    expect(quoteHookCommandArg('C:\\path\\', 'win32')).toBe('"C:\\path\\\\"');
+  test('escapes Windows paths ending in a backslash', () => {
+    expect(quoteHookCommandArg('C:\\path\\', 'win32')).toBe('"C:\\\\path\\\\"');
   });
 });
