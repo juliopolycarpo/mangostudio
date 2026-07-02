@@ -17,7 +17,7 @@ function makeConfig(): MangoConfig {
     agents: { dir: '/data/agents' },
     auth: { secret: 'x'.repeat(32), url: 'http://localhost:3001' },
     security: { trustProxy: false },
-    cursor: { workspaceDir: '' },
+    cursor: { workspaceDir: '', sidecarScriptPath: '' },
     corsOrigins: [],
     configFilePath: '/data/config.toml',
   };

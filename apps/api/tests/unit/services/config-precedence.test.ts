@@ -228,6 +228,23 @@ describe('config precedence', () => {
 
     expect(cfg.security.trustProxy).toBe(true);
   });
+
+  test('loads cursor sidecar script override from config.toml', () => {
+    writeFileSync(TMP_TOML, '[cursor]\nsidecar_script = "/tmp/custom-run-agent.mjs"\n');
+
+    const cfg = loadConfig(TMP_TOML);
+
+    expect(cfg.cursor.sidecarScriptPath).toBe('/tmp/custom-run-agent.mjs');
+  });
+
+  test('MANGO_CURSOR_SIDECAR_SCRIPT env var overrides config.toml sidecar_script', () => {
+    writeFileSync(TMP_TOML, '[cursor]\nsidecar_script = "/tmp/from-toml.mjs"\n');
+    process.env.MANGO_CURSOR_SIDECAR_SCRIPT = '/tmp/from-env.mjs';
+
+    const cfg = loadConfig(TMP_TOML);
+
+    expect(cfg.cursor.sidecarScriptPath).toBe('/tmp/from-env.mjs');
+  });
 });
 
 describe('parseBooleanFlag', () => {

@@ -8,6 +8,7 @@ import {
   assertNpmDistributionAssets,
   assertPlatformBuildAssets,
   assertPlatformPackageAssets,
+  collectCursorSidecarLayoutErrors,
 } from '../lib/npm-package-validation';
 import type { ReleasePlatformId } from '../lib/release-targets';
 
@@ -117,6 +118,21 @@ describe('assertPlatformBuildAssets', () => {
     expect(() => assertPlatformBuildAssets(sourceDir, LINUX_X64)).toThrow(
       /Missing Cursor sidecar script/
     );
+  });
+});
+
+describe('collectCursorSidecarLayoutErrors', () => {
+  test('rejects a Cursor sidecar tree that is missing numbered SDK chunks', () => {
+    const sourceDir = makeTempDir();
+    writePlatformPackage(sourceDir, LINUX_X64);
+    rmSync(join(sourceDir, 'cursor-sidecar', 'node_modules', '@cursor', 'sdk', 'dist', 'cjs'), {
+      recursive: true,
+      force: true,
+    });
+
+    const errors = collectCursorSidecarLayoutErrors(sourceDir, LINUX_X64);
+    expect(errors.length).toBeGreaterThan(0);
+    expect(errors.some((error) => error.includes('cjs'))).toBe(true);
   });
 });
 

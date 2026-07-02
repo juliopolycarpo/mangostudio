@@ -100,6 +100,32 @@ Test scenarios (`tests/browser-smoke/auth-flow.spec.ts`):
 | --------------- | ----------------------- | -------------------- |
 | `browser-smoke` | `playwright` (Chromium) | real browser + stack |
 
+## Binary Smoke
+
+`scripts/test-build.ts` builds the standalone binary for a target platform, validates
+packaging layout (including Cursor sidecar SDK chunks), and boots the binary on matching
+CI runners to exercise core HTTP routes plus Cursor connector validation.
+
+```bash
+PLATFORM=linux-x64 bun run scripts/test-build.ts
+```
+
+On Windows hosts, use `PLATFORM=windows-x64`. The CI `Smoke — Binary` workflow runs this
+script across all six native platform runners.
+
+The runtime leg signs up a throwaway user, posts a Cursor connector with a fake API key,
+and asserts the binary returns a graceful provider error (422/502/503) without
+module-resolution failures such as `Cannot find module` or `./642.js`. The smoke stays
+hermetic by pointing `MANGO_CURSOR_SIDECAR_SCRIPT` at a temp fake sidecar created by
+`scripts/lib/cursor-smoke-sidecar-fixture.ts` — no real Cursor API calls.
+
+GitHub-hosted runners must provide Node.js `>= 22.13` on `PATH` for the Cursor connector
+leg; the script fails fast when the version is too old.
+
+| Lane           | Runner          | Environment                       |
+| -------------- | --------------- | --------------------------------- |
+| `smoke-binary` | `test-build.ts` | compiled binary on native OS/arch |
+
 ## Workspace Scripts
 
 ### API

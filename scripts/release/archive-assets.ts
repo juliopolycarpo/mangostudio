@@ -9,6 +9,8 @@ import { basename, dirname, join } from 'node:path';
 import { ROOT_DIR } from '../lib/config';
 import { cursorNativePackageFor } from '../lib/cursor-sidecar';
 import { assertDirectory, assertFile, assertSafeToDelete } from '../lib/fs-assert';
+import { NPM_PLATFORMS } from '../lib/npm-pack';
+import { collectCursorSidecarLayoutErrors } from '../lib/npm-package-validation';
 import {
   createReleaseAssetPlan,
   type FrontendArchivePlan,
@@ -114,20 +116,14 @@ function assertPlatformInputs(plan: PlatformArchivePlan): void {
   assertFile(plan.binaryPath, `${plan.platform.arch} binary`);
   assertDirectory(plan.publicDir, `${plan.platform.arch} public directory`);
   assertFile(join(plan.publicDir, 'index.html'), `${plan.platform.arch} public/index.html`);
-  const nativePackage = cursorNativePackageFor(plan.platform);
-  if (nativePackage) {
-    assertFile(
-      join(plan.cursorSidecarDir, 'run-agent.mjs'),
-      `${plan.platform.arch} Cursor sidecar script`
-    );
-    assertFile(
-      join(plan.cursorSidecarDir, 'node_modules', '@cursor', 'sdk', 'package.json'),
-      `${plan.platform.arch} Cursor SDK package`
-    );
-    assertFile(
-      join(plan.cursorSidecarDir, 'node_modules', nativePackage, 'package.json'),
-      `${plan.platform.arch} Cursor native package ${nativePackage}`
-    );
+  const npmPlatform = NPM_PLATFORMS.find((platform) => platform.arch === plan.platform.arch);
+  if (npmPlatform && cursorNativePackageFor(plan.platform)) {
+    const layoutErrors = collectCursorSidecarLayoutErrors(plan.sourceDir, npmPlatform);
+    if (layoutErrors.length > 0) {
+      throw new Error(
+        `Invalid ${plan.platform.arch} Cursor sidecar layout:\n- ${layoutErrors.join('\n- ')}`
+      );
+    }
   }
   assertFile(plan.readmePath, 'standalone README.md');
 }
