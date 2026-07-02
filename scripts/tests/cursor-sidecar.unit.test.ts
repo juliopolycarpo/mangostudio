@@ -1,4 +1,8 @@
 import { describe, expect, test } from 'bun:test';
+import { spawn } from 'node:child_process';
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, sep } from 'node:path';
 
 import {
   createCursorSdkInstallCommand,
@@ -7,6 +11,103 @@ import {
 } from '../lib/cursor-sidecar';
 import { ALL_BINARY_TARGETS } from '../lib/release-targets';
 import { readText } from './support/read-text';
+
+function collectSourceFiles(dir: string): string[] {
+  const files: string[] = [];
+
+  for (const entry of readdirSync(dir)) {
+    const path = join(dir, entry);
+    const stat = statSync(path);
+    if (stat.isDirectory()) {
+      files.push(...collectSourceFiles(path));
+      continue;
+    }
+    files.push(path);
+  }
+
+  return files;
+}
+
+function toPosixPath(path: string): string {
+  return path.split(sep).join('/');
+}
+
+async function runCursorSidecarProtocol(request: Record<string, unknown>): Promise<{
+  code: number | null;
+  signal: NodeJS.Signals | null;
+  stdout: Array<Record<string, unknown>>;
+  stderr: string;
+}> {
+  const tempDir = mkdtempSync(join(tmpdir(), 'mangostudio-cursor-sidecar-'));
+
+  try {
+    const sidecarPath = join(tempDir, 'run-agent.mjs');
+    writeFileSync(
+      sidecarPath,
+      readText('apps/api/src/services/providers/cursor/sidecar/run-agent.mjs')
+    );
+
+    const sdkDir = join(tempDir, 'node_modules', '@cursor', 'sdk');
+    mkdirSync(sdkDir, { recursive: true });
+    writeFileSync(
+      join(sdkDir, 'package.json'),
+      JSON.stringify({ type: 'module', exports: './index.js' })
+    );
+    writeFileSync(
+      join(sdkDir, 'index.js'),
+      [
+        'export class Agent {};',
+        'export const Cursor = {',
+        '  models: {',
+        '    list: async ({ apiKey }) => {',
+        "      if (apiKey === 'cursor-bad-key') {",
+        "        const error = new Error('Cursor API key rejected');",
+        '        error.status = 401;',
+        '        error.isRetryable = false;',
+        '        throw error;',
+        '      }',
+        "      return [{ id: 'composer-2.5', parameters: [{ id: 'thinking', values: [{ value: 'high' }] }] }];",
+        '    },',
+        '  },',
+        '};',
+      ].join('\n')
+    );
+
+    const child = spawn('node', [sidecarPath], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: { PATH: process.env.PATH ?? '' },
+    });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (chunk: Buffer) => {
+      stdout += chunk.toString('utf8');
+    });
+    child.stderr.on('data', (chunk: Buffer) => {
+      stderr += chunk.toString('utf8');
+    });
+
+    child.stdin.end(`${JSON.stringify(request)}\n`);
+
+    const status = await new Promise<{ code: number | null; signal: NodeJS.Signals | null }>(
+      (resolve, reject) => {
+        child.once('error', reject);
+        child.once('close', (code, signal) => resolve({ code, signal }));
+      }
+    );
+
+    return {
+      ...status,
+      stdout: stdout
+        .split('\n')
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .map((line) => JSON.parse(line) as Record<string, unknown>),
+      stderr,
+    };
+  } finally {
+    rmSync(tempDir, { recursive: true, force: true });
+  }
+}
 
 describe('cursor sidecar native package mapping', () => {
   test('every release target resolves to a package name or an explicit null', () => {
@@ -86,5 +187,63 @@ describe('cursor sidecar SDK staging', () => {
     expect(source).not.toContain('await using');
     expect(source).not.toContain('TOOL_RPC_TIMEOUT_MS');
     expect(source).toContain('disposeAgent');
+  });
+
+  test('keeps Cursor SDK imports inside the Node sidecar boundary', () => {
+    const offenders = collectSourceFiles('apps/api/src')
+      .filter((path) => /\.(?:[cm]?[jt]sx?)$/.test(path))
+      .filter((path) => !toPosixPath(path).includes('/services/providers/cursor/sidecar/'))
+      .filter((path) => readText(path).includes('@cursor/sdk'));
+
+    expect(offenders).toEqual([]);
+  });
+
+  test('handles model listing and API key validation protocol requests', async () => {
+    const list = await runCursorSidecarProtocol({
+      type: 'list_models',
+      apiKey: 'cursor-good-key',
+    });
+    expect(list.code).toBe(0);
+    expect(list.stderr).toBe('');
+    expect(list.stdout).toEqual([
+      {
+        type: 'models',
+        models: [
+          {
+            id: 'composer-2.5',
+            parameters: [{ id: 'thinking', values: [{ value: 'high' }] }],
+          },
+        ],
+      },
+    ]);
+
+    const validation = await runCursorSidecarProtocol({
+      type: 'validate_api_key',
+      apiKey: 'cursor-good-key',
+    });
+    expect(validation.code).toBe(0);
+    expect(validation.stderr).toBe('');
+    expect(validation.stdout).toEqual([{ type: 'ok' }]);
+  });
+
+  test('serializes sidecar protocol errors with status and retryability', async () => {
+    const result = await runCursorSidecarProtocol({
+      type: 'list_models',
+      apiKey: 'cursor-bad-key',
+    });
+
+    expect(result.code).toBe(1);
+    expect(result.stderr).toBe('');
+    expect(result.stdout).toEqual([
+      {
+        type: 'error',
+        message: 'Cursor API key rejected',
+        content: 'Cursor API key rejected',
+        status: 401,
+        isRetryable: false,
+        retryable: false,
+        done: true,
+      },
+    ]);
   });
 });

@@ -6,7 +6,7 @@
  */
 
 import { createInterface } from 'node:readline';
-import { Agent, CursorAgentError } from '@cursor/sdk';
+import { Agent, Cursor } from '@cursor/sdk';
 
 function writeEvent(event) {
   process.stdout.write(`${JSON.stringify(event)}\n`);
@@ -14,6 +14,29 @@ function writeEvent(event) {
 
 function isRecord(value) {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function errorStatus(error) {
+  if (!isRecord(error)) return undefined;
+  const status = error.status ?? error.statusCode;
+  return typeof status === 'number' ? status : undefined;
+}
+
+function errorRetryable(error) {
+  if (!isRecord(error)) return undefined;
+  return typeof error.isRetryable === 'boolean' ? error.isRetryable : undefined;
+}
+
+function serializeError(error, fallback) {
+  const message = error instanceof Error && error.message ? error.message : fallback;
+  const status = errorStatus(error);
+  const isRetryable = errorRetryable(error);
+  return {
+    message,
+    content: message,
+    ...(status === undefined ? {} : { status }),
+    ...(isRetryable === undefined ? {} : { isRetryable, retryable: isRetryable }),
+  };
 }
 
 function normalizeCustomTools(value) {
@@ -186,17 +209,39 @@ async function disposeAgent(agent) {
   }
 }
 
-async function main() {
-  const stdinMux = createStdinMultiplexer();
-  const request = await stdinMux.readRequest();
+function readApiKey(request) {
+  const apiKey = typeof request.apiKey === 'string' ? request.apiKey.trim() : '';
+  if (!apiKey) throw new Error('Sidecar request missing apiKey.');
+  return apiKey;
+}
+
+function normalizeModelList(models) {
+  if (!Array.isArray(models)) return [];
+
+  return models.map((model) => ({
+    ...(typeof model?.id === 'string' ? { id: model.id } : {}),
+    ...(Array.isArray(model?.parameters) ? { parameters: model.parameters } : {}),
+  }));
+}
+
+async function listModels(request) {
+  const models = await Cursor.models.list({ apiKey: readApiKey(request) });
+  writeEvent({ type: 'models', models: normalizeModelList(models) });
+}
+
+async function validateApiKey(request) {
+  await Cursor.models.list({ apiKey: readApiKey(request) });
+  writeEvent({ type: 'ok' });
+}
+
+async function runAgent(request, stdinMux) {
   stdinMux.setToolRpcTimeoutMs(request.toolRpcTimeoutMs);
 
-  const apiKey = typeof request.apiKey === 'string' ? request.apiKey.trim() : '';
+  const apiKey = readApiKey(request);
   const model = typeof request.model === 'string' ? request.model.trim() : '';
   const cwd = typeof request.cwd === 'string' ? request.cwd.trim() : '';
   const prompt = typeof request.prompt === 'string' ? request.prompt : '';
 
-  if (!apiKey) throw new Error('Sidecar request missing apiKey.');
   if (!model) throw new Error('Sidecar request missing model.');
   if (!cwd) throw new Error('Sidecar request missing cwd.');
   if (!prompt.trim()) throw new Error('Sidecar request missing prompt.');
@@ -258,26 +303,39 @@ async function main() {
 
     writeEvent({ type: 'done', done: true });
   } finally {
-    stdinMux.close();
     await disposeAgent(agent);
   }
 }
 
-main().catch((error) => {
-  if (error instanceof CursorAgentError) {
-    writeEvent({
-      type: 'error',
-      content: error.message,
-      retryable: error.isRetryable,
-      done: true,
-    });
-    process.exitCode = 1;
-    return;
-  }
+async function main() {
+  const stdinMux = createStdinMultiplexer();
+  const request = await stdinMux.readRequest();
+  if (!isRecord(request)) throw new Error('Sidecar request must be a JSON object.');
 
+  const type = typeof request.type === 'string' ? request.type : 'run_agent';
+  try {
+    switch (type) {
+      case 'run_agent':
+        await runAgent(request, stdinMux);
+        return;
+      case 'list_models':
+        await listModels(request);
+        return;
+      case 'validate_api_key':
+        await validateApiKey(request);
+        return;
+      default:
+        throw new Error(`Unsupported Cursor sidecar request type "${type}".`);
+    }
+  } finally {
+    stdinMux.close();
+  }
+}
+
+main().catch((error) => {
   writeEvent({
     type: 'error',
-    content: error instanceof Error ? error.message : 'Cursor sidecar failed.',
+    ...serializeError(error, 'Cursor sidecar failed.'),
     done: true,
   });
   process.exitCode = 1;

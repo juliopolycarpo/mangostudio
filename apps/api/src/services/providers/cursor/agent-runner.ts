@@ -3,13 +3,17 @@
  * Supports bidirectional stdio RPC so MangoStudio tools execute via executeTool in the API.
  */
 
-import { type ChildProcessWithoutNullStreams, spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
-import { getCursorSidecarScriptPath } from '../../../lib/runtime-paths';
-import { sanitizeShellEnv } from '../../tools/builtin/_shell-env';
 import type { StreamingChunk } from '../types';
 import { detectCursorRuntimeAvailability } from './runtime-availability';
 import { resolveCursorRuntimeUnavailableMessage } from './runtime-reason';
+import {
+  formatCursorSidecarExit,
+  spawnCursorSidecarProcess,
+  terminateCursorSidecar,
+} from './sidecar-process';
+
+export { buildCursorSidecarEnv, resolveCursorSidecarScriptPath } from './sidecar-process';
 
 export interface CursorSidecarCustomTool {
   name: string;
@@ -62,21 +66,6 @@ type SidecarEvent =
       args?: unknown;
     };
 
-interface ChildExitStatus {
-  code: number | null;
-  signal: NodeJS.Signals | null;
-}
-
-export function resolveCursorSidecarScriptPath(): string {
-  return getCursorSidecarScriptPath();
-}
-
-export function buildCursorSidecarEnv(
-  source: NodeJS.ProcessEnv = process.env
-): Record<string, string> {
-  return sanitizeShellEnv({}, source);
-}
-
 function mapSidecarEvent(
   event: SidecarEvent,
   emittedToolCallIds: Set<string>
@@ -123,7 +112,7 @@ function shouldSkipToolCallEvent(
 }
 
 function writeToolResponse(
-  stdin: ChildProcessWithoutNullStreams['stdin'],
+  stdin: NodeJS.WritableStream,
   response: { type: 'tool_response'; id: string } & CursorSidecarExecuteResult
 ): void {
   try {
@@ -143,28 +132,11 @@ export async function* streamCursorAgentSidecar(
     throw new CursorSidecarError(resolveCursorRuntimeUnavailableMessage(runtime));
   }
 
-  const child = spawn(
-    runtime.nodePath,
-    [runtime.sidecarScriptPath ?? resolveCursorSidecarScriptPath()],
-    {
-      stdio: ['pipe', 'pipe', 'pipe'],
-      env: buildCursorSidecarEnv(),
-    }
-  );
-  const childExit = waitForChildExit(child);
-
-  let stderr = '';
-  child.stderr.on('data', (chunk: Buffer) => {
-    stderr += chunk.toString('utf8');
+  const sidecar = spawnCursorSidecarProcess({
+    nodePath: runtime.nodePath,
+    sidecarScriptPath: runtime.sidecarScriptPath,
   });
-
-  let spawnError: Error | null = null;
-  child.on('error', (error: Error) => {
-    spawnError = error;
-  });
-  child.stdin.on('error', () => {
-    // Writes after the sidecar exits can emit EPIPE; swallow so it stays uncaught.
-  });
+  const { child, childExit } = sidecar;
 
   const abortHandler = () => {
     child.kill('SIGTERM');
@@ -172,6 +144,11 @@ export async function* streamCursorAgentSidecar(
   signal?.addEventListener('abort', abortHandler, { once: true });
 
   try {
+    if (signal?.aborted) {
+      abortHandler();
+      return;
+    }
+
     child.stdin.write(`${JSON.stringify(request)}\n`);
 
     const rl = createInterface({ input: child.stdout });
@@ -250,10 +227,11 @@ export async function* streamCursorAgentSidecar(
     const exitStatus = await childExit;
     if (signal?.aborted) return;
 
+    const spawnError = sidecar.getSpawnError();
     if (spawnError) {
       yield {
         type: 'error',
-        content: (spawnError as Error).message || 'Failed to start the Cursor sidecar.',
+        content: spawnError.message || 'Failed to start the Cursor sidecar.',
         done: true,
       };
       return;
@@ -261,7 +239,7 @@ export async function* streamCursorAgentSidecar(
     if (!sawTerminal && exitStatus.code !== 0) {
       yield {
         type: 'error',
-        content: stderr.trim() || formatCursorSidecarExit(exitStatus),
+        content: sidecar.getStderr().trim() || formatCursorSidecarExit(exitStatus),
         done: true,
       };
       return;
@@ -270,24 +248,8 @@ export async function* streamCursorAgentSidecar(
     yield { type: 'text', text: '', done: true };
   } finally {
     signal?.removeEventListener('abort', abortHandler);
-    if (!child.killed) {
-      child.kill('SIGTERM');
-    }
+    terminateCursorSidecar(child);
   }
-}
-
-function waitForChildExit(child: ChildProcessWithoutNullStreams): Promise<ChildExitStatus> {
-  if (child.exitCode !== null || child.signalCode !== null || child.killed) {
-    return Promise.resolve({ code: child.exitCode, signal: child.signalCode });
-  }
-  return new Promise((resolve) => {
-    child.once('close', (code, signal) => resolve({ code, signal }));
-  });
-}
-
-function formatCursorSidecarExit(status: ChildExitStatus): string {
-  if (status.signal) return `Cursor sidecar exited with signal ${status.signal}.`;
-  return `Cursor sidecar exited with code ${status.code}.`;
 }
 
 export class CursorSidecarError extends Error {
