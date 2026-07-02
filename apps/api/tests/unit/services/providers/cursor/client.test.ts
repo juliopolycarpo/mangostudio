@@ -251,6 +251,26 @@ describe('Cursor sidecar client', () => {
     await expect(validateCursorApiKey('cursor-bad-key')).rejects.toBeInstanceOf(CursorApiError);
   });
 
+  it('treats transient failures during key validation as unavailable', async () => {
+    spawnImpl = () =>
+      createMockChild(
+        [
+          JSON.stringify({
+            type: 'error',
+            message: 'Cursor temporarily unavailable',
+            status: 503,
+            isRetryable: true,
+          }),
+        ],
+        { exitCode: 1 }
+      );
+    const { CursorValidationUnavailableError, validateCursorApiKey } = await importClient();
+
+    await expect(validateCursorApiKey('cursor-good-key')).rejects.toBeInstanceOf(
+      CursorValidationUnavailableError
+    );
+  });
+
   it('treats sidecar timeouts during key validation as unavailable', async () => {
     spawnImpl = () => createMockChild([], { closeOnEnd: false, closeOnKill: true });
     const { CursorValidationUnavailableError, validateCursorApiKey } = await importClient();

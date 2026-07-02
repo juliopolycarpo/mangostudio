@@ -103,12 +103,18 @@ function parseCursorSidecarRpcError(
   );
 }
 
-function parseCursorSidecarResponse(line: string): CursorClientSidecarResponse {
-  const parsed = JSON.parse(line) as CursorClientSidecarResponse;
-  if (parsed?.type === 'models' || parsed?.type === 'ok' || parsed?.type === 'error') {
-    return parsed;
+function tryParseCursorSidecarResponse(line: string): CursorClientSidecarResponse | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(line);
+  } catch {
+    return null;
   }
-  throw new CursorValidationUnavailableError('Cursor sidecar returned an unexpected response.');
+  const type = (parsed as { type?: unknown } | null)?.type;
+  if (type === 'models' || type === 'ok' || type === 'error') {
+    return parsed as CursorClientSidecarResponse;
+  }
+  return null;
 }
 
 async function readCursorSidecarResponse(
@@ -121,12 +127,14 @@ async function readCursorSidecarResponse(
     for await (const line of rl) {
       const trimmed = line.trim();
       if (!trimmed) continue;
-      response = parseCursorSidecarResponse(trimmed);
+      const parsed = tryParseCursorSidecarResponse(trimmed);
+      if (!parsed) continue;
+      response = parsed;
       break;
     }
   } catch (error) {
     throw new CursorValidationUnavailableError(
-      getCursorErrorMessage(error, 'Cursor sidecar returned invalid JSON.')
+      getCursorErrorMessage(error, 'Failed to read the Cursor sidecar response.')
     );
   } finally {
     rl.close();

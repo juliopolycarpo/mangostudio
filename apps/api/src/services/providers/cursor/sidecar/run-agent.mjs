@@ -237,12 +237,11 @@ async function validateApiKey(request) {
 async function runAgent(request, stdinMux) {
   stdinMux.setToolRpcTimeoutMs(request.toolRpcTimeoutMs);
 
-  const apiKey = typeof request.apiKey === 'string' ? request.apiKey.trim() : '';
+  const apiKey = readApiKey(request);
   const model = typeof request.model === 'string' ? request.model.trim() : '';
   const cwd = typeof request.cwd === 'string' ? request.cwd.trim() : '';
   const prompt = typeof request.prompt === 'string' ? request.prompt : '';
 
-  if (!apiKey) throw new Error('Sidecar request missing apiKey.');
   if (!model) throw new Error('Sidecar request missing model.');
   if (!cwd) throw new Error('Sidecar request missing cwd.');
   if (!prompt.trim()) throw new Error('Sidecar request missing prompt.');
