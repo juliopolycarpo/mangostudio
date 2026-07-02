@@ -61,14 +61,9 @@ function hasNumberedChunk(
 
 function sdkPackageComplete(
   sdkPackageDir: string,
-  pathExists: (path: string) => boolean,
   readDir: (path: string) => readonly string[]
 ): boolean {
-  return SDK_DIST_FLAVORS.every(
-    (flavor) =>
-      pathExists(join(sdkPackageDir, 'dist', flavor)) &&
-      hasNumberedChunk(sdkPackageDir, flavor, readDir)
-  );
+  return SDK_DIST_FLAVORS.every((flavor) => hasNumberedChunk(sdkPackageDir, flavor, readDir));
 }
 
 export function evaluateCursorRuntimeAvailability(
@@ -132,7 +127,7 @@ export function evaluateCursorRuntimeAvailability(
     };
   }
 
-  if (!sdkPackageComplete(sdkPackageDir, pathExists, readDir)) {
+  if (!sdkPackageComplete(sdkPackageDir, readDir)) {
     return {
       ...nodeRuntime,
       available: false,
