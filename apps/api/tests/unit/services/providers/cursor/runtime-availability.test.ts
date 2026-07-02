@@ -146,6 +146,31 @@ describe('describeCursorRuntimeChain', () => {
     expect(chain[3]?.ok).toBe(true);
   });
 
+  it('does not report a false native failure when the SDK resolves from the workspace', () => {
+    const devSdkPackagePath = join(
+      '/repo',
+      'apps',
+      'api',
+      'node_modules',
+      '@cursor',
+      'sdk',
+      'package.json'
+    );
+    const fs = fakeFs([SIDECAR_PATH, devSdkPackagePath]);
+
+    const chain = describeCursorRuntimeChain(NODE_OK, {
+      ...fs,
+      devSdkPackagePath,
+      platform: 'linux',
+      arch: 'x64',
+      sidecarScriptPath: SIDECAR_PATH,
+    });
+
+    expect(chain.every((step) => step.ok)).toBe(true);
+    expect(chain.at(-1)).toMatchObject({ link: 'native', ok: true });
+    expect(chain.at(-1)?.detail).toContain('workspace SDK');
+  });
+
   it('reports unsupported platforms on the native link', () => {
     const chain = describeCursorRuntimeChain(NODE_OK, {
       ...completePackagedFs(),

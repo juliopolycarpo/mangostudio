@@ -151,9 +151,11 @@ export function describeCursorRuntimeChain(
     });
   }
 
+  let usingWorkspaceSdk = false;
   if (!ctx.pathExists(ctx.sidecarNodeModulesDir)) {
     const devSdkPath = ctx.devSdkPackagePaths.find(ctx.pathExists);
     if (devSdkPath) {
+      usingWorkspaceSdk = true;
       steps.push({
         link: 'sdk',
         ok: true,
@@ -193,7 +195,16 @@ export function describeCursorRuntimeChain(
   }
 
   const nativePackage = cursorNativePackageForNodeRuntime(ctx.platform, ctx.arch);
-  if (!nativePackage) {
+  if (usingWorkspaceSdk) {
+    // The workspace SDK carries its own native runtime, so gating skips the
+    // sidecar-tree native probe here; mirror that instead of reporting a
+    // false failure against the (absent) sidecar node_modules.
+    steps.push({
+      link: 'native',
+      ok: true,
+      detail: 'resolved with workspace SDK (dev)',
+    });
+  } else if (!nativePackage) {
     const platformLabel = `${ctx.platform}-${ctx.arch}`;
     steps.push({
       link: 'native',
