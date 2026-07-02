@@ -64,7 +64,24 @@ type SidecarEvent =
       id: string;
       name: string;
       args?: unknown;
+    }
+  | {
+      type: 'tool_result';
+      id?: string;
+      name?: string;
+      result?: unknown;
+      isError?: boolean;
     };
+
+function stringifySidecarResult(result: unknown): string | undefined {
+  if (result === undefined) return undefined;
+  if (typeof result === 'string') return result;
+  try {
+    return JSON.stringify(result);
+  } catch {
+    return String(result);
+  }
+}
 
 function mapSidecarEvent(
   event: SidecarEvent,
@@ -85,7 +102,16 @@ function mapSidecarEvent(
           typeof event.args === 'object' && event.args !== null
             ? (event.args as Record<string, unknown>)
             : undefined,
-        content: typeof event.result === 'string' ? event.result : undefined,
+        content: stringifySidecarResult(event.result),
+        done: false,
+      };
+    case 'tool_result':
+      return {
+        type: 'tool_result',
+        toolCallId: event.id,
+        name: event.name,
+        content: stringifySidecarResult(event.result) ?? '',
+        isError: event.isError === true,
         done: false,
       };
     case 'error':
@@ -199,6 +225,7 @@ export async function* streamCursorAgentSidecar(
 
         yield {
           type: 'tool_call',
+          toolCallId: id,
           name,
           args,
           done: false,

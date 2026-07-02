@@ -1,3 +1,4 @@
+import { MAX_TOOL_ITERATIONS_DEFAULT } from '@mangostudio/shared/app-settings';
 import type { ReasoningEffort, SecretMetadataRow } from '@mangostudio/shared/types';
 import { getConfig } from '../../../lib/config';
 import { stringifyToolResult } from '../../../modules/generation/application/tool-result-utils';
@@ -8,7 +9,10 @@ import { withModelCache } from '../core/model-cache';
 import { createProviderLifecycle } from '../core/provider-lifecycle';
 import { createProviderSecretService } from '../core/secret-service';
 import type {
+  AgentEvent,
+  AgentTurnRequest,
   AIProvider,
+  GenerationConfig,
   ModelInfo,
   ModelParameterInfo,
   ProviderHealthcheckRequest,
@@ -23,6 +27,13 @@ import {
   type CursorSidecarRequest,
   streamCursorAgentSidecar,
 } from './agent-runner';
+import {
+  CURSOR_TOOL_BUDGET_EXHAUSTED_MESSAGE,
+  createBudgetedToolExecutor,
+  createCursorAgentTurnMappingState,
+  flushOutstandingToolResults,
+  mapCursorChunkToAgentEvents,
+} from './agent-turn';
 import { CursorApiError, fetchCursorModels, validateCursorApiKey } from './client';
 import { ensureCursorAgentHooks } from './hooks';
 import { buildCursorAgentPrompt } from './prompt-builder';
@@ -81,12 +92,12 @@ function resolveCursorWorkspaceDir(): string {
 
 /** Maps allowlisted MangoStudio tool definitions to Cursor SDK customTools metadata. */
 export function buildCursorCustomTools(
-  config: TextGenerationRequest['generationConfig']
+  tools: ToolDefinition[] | undefined
 ): CursorSidecarCustomTool[] | undefined {
-  const tools = (config?.tools ?? []).filter((tool) => tool.name !== DELEGATE_TO_AGENT_TOOL_NAME);
-  if (tools.length === 0) return undefined;
+  const allowed = (tools ?? []).filter((tool) => tool.name !== DELEGATE_TO_AGENT_TOOL_NAME);
+  if (allowed.length === 0) return undefined;
 
-  return tools.map((tool) => ({
+  return allowed.map((tool) => ({
     name: tool.name,
     description: tool.description,
     inputSchema: tool.parameters,
@@ -99,8 +110,15 @@ function buildAllowedToolNameSet(tools: ToolDefinition[] | undefined): ReadonlyS
   );
 }
 
+/** Context needed to execute a Cursor-routed tool through the API registry. */
+interface CursorToolExecutionContext {
+  userId: string;
+  chatId: string;
+  toolSettings?: GenerationConfig['toolSettings'];
+}
+
 async function executeCursorCustomTool(
-  req: TextGenerationRequest,
+  ctx: CursorToolExecutionContext,
   allowedToolNames: ReadonlySet<string>,
   name: string,
   args: Record<string, unknown>
@@ -114,11 +132,11 @@ async function executeCursorCustomTool(
       name,
       args,
       {
-        userId: req.userId,
-        chatId: req.chatId ?? '',
+        userId: ctx.userId,
+        chatId: ctx.chatId,
         parameters: {},
       },
-      req.generationConfig?.toolSettings?.[name]
+      ctx.toolSettings?.[name]
     );
     return { result: stringifyToolResult(result) };
   } catch (error) {
@@ -137,24 +155,22 @@ interface PreparedCursorSidecar {
   ) => Promise<CursorSidecarExecuteResult>;
 }
 
-async function prepareCursorSidecar(
-  req: TextGenerationRequest,
-  params: {
-    apiKey: string;
-    workspaceDir: string;
-    model: string;
-    prompt: string;
-    modelParams?: Array<{ id: string; value: string }>;
-  }
-): Promise<PreparedCursorSidecar> {
+async function prepareCursorSidecar(params: {
+  apiKey: string;
+  model: string;
+  prompt: string;
+  modelParams?: Array<{ id: string; value: string }>;
+  tools: ToolDefinition[] | undefined;
+  toolExecution: CursorToolExecutionContext;
+}): Promise<PreparedCursorSidecar> {
   const runtime = await detectCursorRuntimeAvailability();
   if (!runtime.available || !runtime.nodePath) {
     throw new CursorRuntimeUnavailableError(resolveCursorRuntimeUnavailableMessage(runtime));
   }
 
   const agentDir = await ensureCursorAgentHooks(runtime.nodePath);
-  const customTools = buildCursorCustomTools(req.generationConfig);
-  const allowedToolNames = buildAllowedToolNameSet(req.generationConfig?.tools);
+  const customTools = buildCursorCustomTools(params.tools);
+  const allowedToolNames = buildAllowedToolNameSet(params.tools);
 
   return {
     request: {
@@ -166,7 +182,8 @@ async function prepareCursorSidecar(
       ...(customTools ? { customTools } : {}),
       settingSources: ['project'],
     },
-    executeCustomTool: (name, args) => executeCursorCustomTool(req, allowedToolNames, name, args),
+    executeCustomTool: (name, args) =>
+      executeCursorCustomTool(params.toolExecution, allowedToolNames, name, args),
   };
 }
 
@@ -260,12 +277,17 @@ async function runCursorGeneration(req: TextGenerationRequest): Promise<string> 
     workspaceDir,
   });
   const modelParams = buildCursorModelParams(req.generationConfig, modelParameters);
-  const sidecar = await prepareCursorSidecar(req, {
+  const sidecar = await prepareCursorSidecar({
     apiKey,
-    workspaceDir,
     model: req.modelName,
     prompt,
     modelParams,
+    tools: req.generationConfig?.tools,
+    toolExecution: {
+      userId: req.userId,
+      chatId: req.chatId ?? '',
+      toolSettings: req.generationConfig?.toolSettings,
+    },
   });
 
   let text = '';
@@ -288,6 +310,83 @@ async function runCursorGeneration(req: TextGenerationRequest): Promise<string> 
   return text;
 }
 
+/**
+ * Streams a full Cursor agent turn. The Cursor SDK owns the tool loop inside
+ * the sidecar, so this adapter emits tool_result events itself and finishes
+ * with turn_completed carrying no pending calls — the orchestrator completes
+ * in a single iteration.
+ */
+async function* runCursorAgentTurn(req: AgentTurnRequest): AsyncIterable<AgentEvent> {
+  if (req.toolResults?.length) {
+    throw new CursorConnectorError(
+      'Cursor runs its tool loop inside the sidecar; the orchestrator must not feed back tool results.'
+    );
+  }
+
+  const { apiKey, workspaceDir } = await lifecycle.prepareRuntime(req.userId, req.modelName);
+  const modelParameters = await resolveCursorModelParameters(req.userId, req.modelName);
+  const prompt = buildCursorAgentPrompt({
+    systemPrompt: req.systemPrompt,
+    history: req.history,
+    prompt: req.prompt ?? '',
+    workspaceDir,
+  });
+  const modelParams = buildCursorModelParams(req.generationConfig, modelParameters);
+  const sidecar = await prepareCursorSidecar({
+    apiKey,
+    model: req.modelName,
+    prompt,
+    modelParams,
+    tools: req.toolDefinitions,
+    toolExecution: {
+      userId: req.userId,
+      chatId: req.chatId ?? '',
+      toolSettings: req.generationConfig?.toolSettings,
+    },
+  });
+
+  const abortController = new AbortController();
+  const forwardAbort = () => abortController.abort();
+  req.signal?.addEventListener('abort', forwardAbort, { once: true });
+  if (req.signal?.aborted) abortController.abort();
+
+  const budgetedExecutor = createBudgetedToolExecutor({
+    maxToolCalls: req.generationConfig?.maxToolIterations ?? MAX_TOOL_ITERATIONS_DEFAULT,
+    execute: sidecar.executeCustomTool,
+    onExhausted: () => abortController.abort(),
+  });
+
+  const mappingState = createCursorAgentTurnMappingState();
+  let sawError = false;
+
+  try {
+    for await (const chunk of streamCursorAgentSidecar(sidecar.request, abortController.signal, {
+      executeCustomTool: budgetedExecutor.execute,
+    })) {
+      if (req.signal?.aborted || budgetedExecutor.isExhausted()) break;
+
+      for (const event of mapCursorChunkToAgentEvents(chunk, mappingState)) {
+        if (event.type === 'turn_error') sawError = true;
+        yield event;
+      }
+      if (sawError) return;
+      if (chunk.done) break;
+    }
+  } finally {
+    req.signal?.removeEventListener('abort', forwardAbort);
+    abortController.abort();
+  }
+
+  if (req.signal?.aborted) return;
+  if (budgetedExecutor.isExhausted()) {
+    yield { type: 'turn_error', error: CURSOR_TOOL_BUDGET_EXHAUSTED_MESSAGE };
+    return;
+  }
+
+  yield* flushOutstandingToolResults(mappingState);
+  yield { type: 'turn_completed' };
+}
+
 const cursorProvider: AIProvider = {
   providerType: 'cursor',
 
@@ -295,6 +394,8 @@ const cursorProvider: AIProvider = {
     const text = await runCursorGeneration(req);
     return { text };
   },
+
+  generateAgentTurnStream: runCursorAgentTurn,
 
   async *generateTextStream(req: TextGenerationRequest): AsyncIterable<StreamingChunk> {
     const { apiKey, workspaceDir } = await lifecycle.prepareRuntime(req.userId, req.modelName);
@@ -306,12 +407,17 @@ const cursorProvider: AIProvider = {
       workspaceDir,
     });
     const modelParams = buildCursorModelParams(req.generationConfig, modelParameters);
-    const sidecar = await prepareCursorSidecar(req, {
+    const sidecar = await prepareCursorSidecar({
       apiKey,
-      workspaceDir,
       model: req.modelName,
       prompt,
       modelParams,
+      tools: req.generationConfig?.tools,
+      toolExecution: {
+        userId: req.userId,
+        chatId: req.chatId ?? '',
+        toolSettings: req.generationConfig?.toolSettings,
+      },
     });
 
     for await (const chunk of streamCursorAgentSidecar(sidecar.request, req.signal, {
