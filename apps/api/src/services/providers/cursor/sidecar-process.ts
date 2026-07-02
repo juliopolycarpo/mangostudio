@@ -1,15 +1,5 @@
 import { getCursorSidecarScriptPath } from '../../../lib/runtime-paths';
-import {
-  appendBoundedTail,
-  buildNodeSidecarEnv,
-  type ChildExitStatus,
-  formatNodeSidecarExit,
-  type SpawnedNodeSidecarProcess,
-  spawnNodeSidecarProcess,
-  terminateNodeSidecar,
-  terminateNodeSidecarWithEscalation,
-  waitForChildExit,
-} from '../core/node-sidecar/spawn-sidecar';
+import { appendBoundedTail, buildNodeSidecarEnv } from '../core/node-sidecar/spawn-sidecar';
 import { formatCursorRuntimeUnavailableReason } from './runtime-reason';
 
 /**
@@ -20,16 +10,7 @@ import { formatCursorRuntimeUnavailableReason } from './runtime-reason';
  */
 export const CURSOR_SIDECAR_PROTOCOL_VERSION = 1;
 
-export type { ChildExitStatus };
-export { appendBoundedTail, waitForChildExit };
-
-export interface SpawnCursorSidecarProcessOptions {
-  nodePath: string;
-  sidecarScriptPath?: string;
-  envSource?: NodeJS.ProcessEnv;
-}
-
-export type SpawnedCursorSidecarProcess = SpawnedNodeSidecarProcess;
+export { appendBoundedTail };
 
 export function resolveCursorSidecarScriptPath(): string {
   return getCursorSidecarScriptPath();
@@ -39,17 +20,6 @@ export function buildCursorSidecarEnv(
   source: NodeJS.ProcessEnv = process.env
 ): Record<string, string> {
   return buildNodeSidecarEnv(source);
-}
-
-export function spawnCursorSidecarProcess(
-  options: SpawnCursorSidecarProcessOptions
-): SpawnedCursorSidecarProcess {
-  return spawnNodeSidecarProcess({
-    nodePath: options.nodePath,
-    sidecarScriptPath: options.sidecarScriptPath ?? resolveCursorSidecarScriptPath(),
-    envSource: options.envSource,
-    describeSpawnError: describeCursorSpawnError,
-  });
 }
 
 /**
@@ -69,20 +39,4 @@ export function describeCursorSpawnError(
     return formatCursorRuntimeUnavailableReason('cursor.node_invalid', { nodePath });
   }
   return error.message || 'Failed to start the Cursor sidecar.';
-}
-
-export function terminateCursorSidecar(child: Parameters<typeof terminateNodeSidecar>[0]): void {
-  terminateNodeSidecar(child);
-}
-
-export function terminateCursorSidecarWithEscalation(
-  child: Parameters<typeof terminateNodeSidecarWithEscalation>[0],
-  childExit: Promise<ChildExitStatus>,
-  graceMs: number
-): Promise<void> {
-  return terminateNodeSidecarWithEscalation(child, childExit, graceMs);
-}
-
-export function formatCursorSidecarExit(status: ChildExitStatus): string {
-  return formatNodeSidecarExit(status, 'Cursor');
 }
