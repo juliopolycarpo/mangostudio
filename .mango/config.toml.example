@@ -77,3 +77,4 @@ url = ""
 # Empty = current working directory when MangoStudio starts.
 [cursor]
 # workspace_dir = "/path/to/your/project"
+# sidecar_script = "/absolute/path/to/run-agent.mjs"

@@ -2,7 +2,9 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { loadConfigForTest, resetConfig } from '../../../src/lib/config';
 import {
+  getCursorSidecarScriptPath,
   getDefaultFrontendDir,
   getRuntimeBaseDir,
   isStandaloneExecutable,
@@ -33,6 +35,7 @@ describe('runtime paths', () => {
   afterEach(() => {
     process.chdir(originalCwd);
     setExecPath(originalExecPath);
+    resetConfig();
     rmSync(tempDir, { force: true, recursive: true });
   });
 
@@ -79,5 +82,12 @@ describe('runtime paths', () => {
     setExecPath('/usr/bin/bun');
 
     expect(getDefaultFrontendDir()).toBe(join(tempDir, 'public'));
+  });
+
+  it('honors a configured Cursor sidecar script override', () => {
+    const overridePath = join(tempDir, 'custom-sidecar', 'run-agent.mjs');
+    loadConfigForTest({ cursor: { workspaceDir: '', sidecarScriptPath: overridePath } });
+
+    expect(getCursorSidecarScriptPath()).toBe(overridePath);
   });
 });

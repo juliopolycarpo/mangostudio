@@ -73,6 +73,8 @@ export interface MangoConfig {
   cursor: {
     /** Workspace directory for Cursor SDK local agents. Empty = process.cwd(). */
     workspaceDir: string;
+    /** Override path to the Cursor SDK sidecar script. Empty = auto-detect. */
+    sidecarScriptPath: string;
   };
 }
 
@@ -85,7 +87,7 @@ const DEFAULT_CONFIG: Omit<MangoConfig, 'corsOrigins' | 'configFilePath'> = {
   agents: { dir: '' },
   auth: { secret: '', url: '' },
   security: { trustProxy: false },
-  cursor: { workspaceDir: '' },
+  cursor: { workspaceDir: '', sidecarScriptPath: '' },
 };
 
 export const AUTH_SECRET_MIN_LENGTH = 32;
@@ -133,6 +135,9 @@ const ENV_KEY_MAP: Record<string, (cfg: MangoConfig, value: string) => void> = {
   },
   CURSOR_WORKSPACE_DIR: (cfg, v) => {
     cfg.cursor.workspaceDir = v;
+  },
+  MANGO_CURSOR_SIDECAR_SCRIPT: (cfg, v) => {
+    cfg.cursor.sidecarScriptPath = v;
   },
 };
 
@@ -314,6 +319,9 @@ function applyToml(cfg: MangoConfig, parsed: Record<string, unknown>): void {
   const cursor = parsed.cursor as Record<string, unknown> | undefined;
   if (cursor) {
     if (typeof cursor.workspace_dir === 'string') cfg.cursor.workspaceDir = cursor.workspace_dir;
+    if (typeof cursor.sidecar_script === 'string') {
+      cfg.cursor.sidecarScriptPath = cursor.sidecar_script;
+    }
   }
 }
 
@@ -365,6 +373,10 @@ function computeDerived(cfg: MangoConfig, tomlPath: string): void {
 
   if (cfg.cursor.workspaceDir) {
     cfg.cursor.workspaceDir = resolveUserPath(cfg.cursor.workspaceDir);
+  }
+
+  if (cfg.cursor.sidecarScriptPath) {
+    cfg.cursor.sidecarScriptPath = resolveUserPath(cfg.cursor.sidecarScriptPath);
   }
 
   // CORS origins from frontend host/port (include +1 for Vite port bumping)
@@ -537,6 +549,7 @@ export function loadConfigForTest(partial: Partial<MangoConfig> = {}): MangoConf
   if (partial.agents) Object.assign(cfg.agents, partial.agents);
   if (partial.auth) Object.assign(cfg.auth, partial.auth);
   if (partial.security) Object.assign(cfg.security, partial.security);
+  if (partial.cursor) Object.assign(cfg.cursor, partial.cursor);
   if (partial.corsOrigins) cfg.corsOrigins = partial.corsOrigins;
 
   // Default to the single managed test config path (not /dev/null, which
