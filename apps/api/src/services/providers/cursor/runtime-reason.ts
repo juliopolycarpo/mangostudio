@@ -11,6 +11,8 @@ export function formatCursorRuntimeUnavailableReason(
   switch (reasonCode) {
     case 'cursor.node_not_found':
       return 'You need NodeJS installed to run Cursor SDK Agents. `node` binary not found';
+    case 'cursor.node_invalid':
+      return `The configured Node.js binary at ${params?.nodePath ?? 'unknown path'} is not runnable. Fix or remove MANGO_NODE_PATH / cursor.node_path.`;
     case 'cursor.version_insufficient':
       return `Node.js ${CURSOR_MIN_NODE_VERSION}+ is required for Cursor SDK Agents (found ${params?.foundVersion ?? 'unknown'}).`;
     case 'cursor.sidecar_missing':

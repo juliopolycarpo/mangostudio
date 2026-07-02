@@ -52,6 +52,7 @@ export const CURSOR_MIN_NODE_VERSION = '22.13';
 
 export const ProviderRuntimeUnavailableReasonSchema = Type.Union([
   Type.Literal('cursor.node_not_found'),
+  Type.Literal('cursor.node_invalid'),
   Type.Literal('cursor.version_insufficient'),
   Type.Literal('cursor.sidecar_missing'),
   Type.Literal('cursor.sdk_missing'),
@@ -63,6 +64,7 @@ export const ProviderRuntimeUnavailableReasonParamsSchema = Type.Object({
   foundVersion: Type.Optional(Type.String()),
   packageName: Type.Optional(Type.String()),
   sidecarPath: Type.Optional(Type.String()),
+  nodePath: Type.Optional(Type.String()),
 });
 
 export const UpdateProviderRuntimeSettingsBodySchema = Type.Object({

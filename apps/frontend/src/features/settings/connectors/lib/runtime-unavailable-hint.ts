@@ -13,6 +13,8 @@ export function formatConnectorRuntimeUnavailableHint(
   switch (reason) {
     case 'cursor.node_not_found':
       return `${connectors.cursorNodeRequired} ${connectors.cursorNodeNotFound}`;
+    case 'cursor.node_invalid':
+      return connectors.cursorNodeInvalid.replace('{path}', params?.nodePath ?? '?');
     case 'cursor.version_insufficient':
       return connectors.cursorNodeVersionInsufficient
         .replace('{minVersion}', CURSOR_MIN_NODE_VERSION)
