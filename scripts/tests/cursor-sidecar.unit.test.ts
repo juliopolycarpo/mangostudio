@@ -88,6 +88,10 @@ async function runCursorSidecarProtocol(request: Record<string, unknown>): Promi
       sidecarPath,
       readText('apps/api/src/services/providers/cursor/sidecar/run-agent.mjs')
     );
+    writeFileSync(
+      join(tempDir, 'sidecar-runtime.mjs'),
+      readText('apps/api/src/services/providers/cursor/sidecar/sidecar-runtime.mjs')
+    );
 
     const sdkDir = join(tempDir, 'node_modules', '@cursor', 'sdk');
     mkdirSync(sdkDir, { recursive: true });
@@ -298,12 +302,15 @@ describe('cursor sidecar SDK staging', () => {
   });
 
   test('uses Node 22-compatible disposal and a default tool RPC timeout', () => {
-    const source = readText('apps/api/src/services/providers/cursor/sidecar/run-agent.mjs');
+    const agentSource = readText('apps/api/src/services/providers/cursor/sidecar/run-agent.mjs');
+    const runtimeSource = readText(
+      'apps/api/src/services/providers/cursor/sidecar/sidecar-runtime.mjs'
+    );
 
-    expect(source).not.toContain('await using');
-    expect(source).toContain('DEFAULT_TOOL_RPC_TIMEOUT_MS');
-    expect(source).toContain('normalizeToolRpcTimeoutMs');
-    expect(source).toContain('disposeAgent');
+    expect(agentSource).not.toContain('await using');
+    expect(runtimeSource).toContain('DEFAULT_TOOL_RPC_TIMEOUT_MS');
+    expect(runtimeSource).toContain('normalizeToolRpcTimeoutMs');
+    expect(agentSource).toContain('disposeAgent');
   });
 
   test('sidecar protocol version stays in lockstep with the runner', () => {

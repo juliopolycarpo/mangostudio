@@ -29,7 +29,14 @@ interface ProviderSettingsPolicy {
   toolUseSupported: boolean;
   structuredOutputSupported: boolean;
   maxOutputTokensLimit: number;
+  detectRuntimeAvailability?: () => Promise<ProviderRuntimeStatus>;
   defaults: Omit<ProviderRuntimeSettings, 'provider'>;
+}
+
+interface ProviderRuntimeStatus {
+  available: boolean;
+  reasonCode?: ProviderRuntimeUnavailableReason;
+  reasonParams?: ProviderRuntimeUnavailableReasonParams;
 }
 
 const PROVIDER_POLICIES: Record<ProviderType, ProviderSettingsPolicy> = {
@@ -107,6 +114,7 @@ const PROVIDER_POLICIES: Record<ProviderType, ProviderSettingsPolicy> = {
     toolUseSupported: true,
     structuredOutputSupported: false,
     maxOutputTokensLimit: 128_000,
+    detectRuntimeAvailability: detectCursorRuntimeAvailability,
     defaults: {
       thinkingEnabled: true,
       reasoningEffort: 'medium',
@@ -147,11 +155,12 @@ export async function getProviderRuntimeAvailability(provider: ProviderType): Pr
   runtimeUnavailableReason?: ProviderRuntimeUnavailableReason;
   runtimeUnavailableReasonParams?: ProviderRuntimeUnavailableReasonParams;
 }> {
-  if (provider !== 'cursor') {
+  const detectRuntimeAvailability = PROVIDER_POLICIES[provider].detectRuntimeAvailability;
+  if (!detectRuntimeAvailability) {
     return { runtimeAvailable: true };
   }
 
-  const runtime = await detectCursorRuntimeAvailability();
+  const runtime = await detectRuntimeAvailability();
   if (runtime.available) {
     return { runtimeAvailable: true };
   }

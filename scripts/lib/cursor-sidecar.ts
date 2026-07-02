@@ -4,6 +4,7 @@
 //
 //   <outdir>/cursor-sidecar/
 //     run-agent.mjs
+//     sidecar-runtime.mjs
 //     node_modules/@cursor/sdk            (platform-independent JS)
 //     node_modules/@cursor/sdk-<platform> (native agent + ripgrep binaries)
 //     node_modules/<js deps…>
