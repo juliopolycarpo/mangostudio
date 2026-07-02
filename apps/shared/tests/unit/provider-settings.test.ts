@@ -63,6 +63,48 @@ describe('provider settings contracts', () => {
   });
 
   it('accepts cursor runtime unavailability reason codes', () => {
+    for (const reason of [
+      'cursor.node_not_found',
+      'cursor.version_insufficient',
+      'cursor.sidecar_missing',
+      'cursor.sdk_missing',
+      'cursor.sdk_incomplete',
+      'cursor.native_runtime_missing',
+    ]) {
+      expect(
+        Value.Check(ProviderSettingsDescriptorSchema, {
+          provider: 'cursor',
+          displayName: 'Cursor',
+          scope: 'provider',
+          reasoning: {
+            supportedEfforts: ['low', 'medium', 'high'],
+            defaultEffort: 'medium',
+            thinkingToggleSupported: true,
+            reasoningWithToolsSupported: false,
+          },
+          promptCachingSupported: false,
+          toolUseSupported: false,
+          structuredOutputSupported: false,
+          maxOutputTokensLimit: 128000,
+          settings: {
+            provider: 'cursor',
+            thinkingEnabled: true,
+            reasoningEffort: 'medium',
+            maxToolIterations: 10,
+          },
+          runtimeAvailable: false,
+          runtimeUnavailableReason: reason,
+          runtimeUnavailableReasonParams: {
+            foundVersion: 'v20.0.0',
+            packageName: '@cursor/sdk-linux-x64',
+            sidecarPath: '/tmp/cursor-sidecar/run-agent.mjs',
+          },
+        })
+      ).toBe(true);
+    }
+  });
+
+  it('rejects unknown cursor runtime unavailability reason codes', () => {
     expect(
       Value.Check(ProviderSettingsDescriptorSchema, {
         provider: 'cursor',
@@ -85,8 +127,8 @@ describe('provider settings contracts', () => {
           maxToolIterations: 10,
         },
         runtimeAvailable: false,
-        runtimeUnavailableReason: 'cursor.node_not_found',
+        runtimeUnavailableReason: 'cursor.unknown',
       })
-    ).toBe(true);
+    ).toBe(false);
   });
 });

@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { cursorNativePackageForArch } from './cursor-sidecar';
+import { cursorNativePackageForArch, cursorSidecarPackageTreeErrors } from './cursor-sidecar';
 import { fileError } from './fs-assert';
 import {
   MAIN_PACKAGE,
@@ -126,14 +126,7 @@ function cursorSidecarErrors(packageDir: string, platform: NpmPlatform): string[
   const sidecarDir = join(packageDir, 'cursor-sidecar');
   return [
     ...fileError(join(sidecarDir, 'run-agent.mjs'), 'Cursor sidecar script'),
-    ...fileError(
-      join(sidecarDir, 'node_modules', '@cursor', 'sdk', 'package.json'),
-      'Cursor SDK package'
-    ),
-    ...fileError(
-      join(sidecarDir, 'node_modules', nativePackage, 'package.json'),
-      `Cursor native package ${nativePackage}`
-    ),
+    ...cursorSidecarPackageTreeErrors(sidecarDir, nativePackage),
   ];
 }
 

@@ -15,6 +15,15 @@ export function formatCursorRuntimeUnavailableReason(
       return `Node.js ${CURSOR_MIN_NODE_VERSION}+ is required for Cursor SDK Agents (found ${params?.foundVersion ?? 'unknown'}).`;
     case 'cursor.sidecar_missing':
       return `Cursor SDK sidecar script is missing at ${params?.sidecarPath ?? 'unknown path'}.`;
+    case 'cursor.sdk_missing':
+      return `Cursor SDK package is missing from the sidecar at ${params?.sidecarPath ?? 'unknown path'}. Reinstall MangoStudio.`;
+    case 'cursor.sdk_incomplete':
+      return `Cursor SDK package is incomplete at ${params?.sidecarPath ?? 'unknown path'}. Reinstall MangoStudio.`;
+    case 'cursor.native_runtime_missing':
+      if (params?.packageName) {
+        return `Cursor native runtime package ${params.packageName} is missing. Reinstall MangoStudio.`;
+      }
+      return 'This platform has no Cursor native runtime in the sidecar. Reinstall MangoStudio.';
   }
 }
 

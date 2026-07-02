@@ -1,15 +1,29 @@
 import { describe, expect, test } from 'bun:test';
 import { spawn } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, sep } from 'node:path';
+import { CURSOR_NATIVE_PACKAGES as SHARED_CURSOR_NATIVE_PACKAGES } from '@mangostudio/shared/catalog';
 
 import {
+  assembleCursorSidecar,
+  CURSOR_NATIVE_PACKAGES,
+  collectCursorSdkChunks,
   createCursorSdkInstallCommand,
   cursorNativePackageFor,
+  cursorSdkPackageTreeErrors,
+  cursorSidecarPackageTreeErrors,
   normalizeCursorSdkVersion,
 } from '../lib/cursor-sidecar';
-import { ALL_BINARY_TARGETS } from '../lib/release-targets';
+import { ALL_BINARY_TARGETS, type BinaryTarget } from '../lib/release-targets';
 import { readText } from './support/read-text';
 
 function collectSourceFiles(dir: string): string[] {
@@ -30,6 +44,34 @@ function collectSourceFiles(dir: string): string[] {
 
 function toPosixPath(path: string): string {
   return path.split(sep).join('/');
+}
+
+function linuxX64Target(): BinaryTarget {
+  const target = ALL_BINARY_TARGETS.find((candidate) => candidate.arch === 'linux-x64');
+  if (!target) throw new Error('linux-x64 target fixture not found');
+  return target;
+}
+
+function writeFakeSdkPackage(nodeModulesDir: string, options: { cjsChunk?: boolean } = {}): void {
+  const shouldWriteCjsChunk = options.cjsChunk ?? true;
+  const sdkDir = join(nodeModulesDir, '@cursor', 'sdk');
+  mkdirSync(join(sdkDir, 'dist', 'cjs'), { recursive: true });
+  mkdirSync(join(sdkDir, 'dist', 'esm'), { recursive: true });
+  writeFileSync(join(sdkDir, 'package.json'), JSON.stringify({ name: '@cursor/sdk' }));
+  if (shouldWriteCjsChunk) {
+    writeFileSync(join(sdkDir, 'dist', 'cjs', '642.js'), '');
+  }
+  writeFileSync(join(sdkDir, 'dist', 'esm', '642.js'), '');
+}
+
+function writeFakeNativePackage(nodeModulesDir: string, packageName: string): void {
+  const packageDir = join(nodeModulesDir, packageName);
+  mkdirSync(join(packageDir, 'bin'), { recursive: true });
+  writeFileSync(
+    join(packageDir, 'package.json'),
+    JSON.stringify({ name: packageName, bin: { rg: 'bin/rg' } })
+  );
+  writeFileSync(join(packageDir, 'bin', 'rg'), 'rg');
 }
 
 async function runCursorSidecarProtocol(request: Record<string, unknown>): Promise<{
@@ -110,6 +152,10 @@ async function runCursorSidecarProtocol(request: Record<string, unknown>): Promi
 }
 
 describe('cursor sidecar native package mapping', () => {
+  test('uses the shared native package map', () => {
+    expect(CURSOR_NATIVE_PACKAGES).toBe(SHARED_CURSOR_NATIVE_PACKAGES);
+  });
+
   test('every release target resolves to a package name or an explicit null', () => {
     for (const target of ALL_BINARY_TARGETS) {
       const pkg = cursorNativePackageFor(target);
@@ -171,6 +217,76 @@ describe('cursor sidecar SDK staging', () => {
     expect(() => normalizeCursorSdkVersion('file:../cursor-sdk')).toThrow(
       'Unsupported @cursor/sdk version spec'
     );
+  });
+
+  test('accepts a complete staged SDK and native package tree', () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'mangostudio-cursor-sidecar-tree-'));
+
+    try {
+      const sidecarDir = join(tempDir, 'cursor-sidecar');
+      const nodeModulesDir = join(sidecarDir, 'node_modules');
+      const nativePackage = cursorNativePackageFor(linuxX64Target());
+      expect(nativePackage).toBe('@cursor/sdk-linux-x64');
+      if (!nativePackage) return;
+
+      writeFakeSdkPackage(nodeModulesDir);
+      writeFakeNativePackage(nodeModulesDir, nativePackage);
+
+      expect(
+        cursorSidecarPackageTreeErrors(
+          sidecarDir,
+          nativePackage,
+          collectCursorSdkChunks(join(nodeModulesDir, '@cursor', 'sdk'))
+        )
+      ).toEqual([]);
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  test('rejects staged SDK trees missing dynamic chunks', () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'mangostudio-cursor-sidecar-tree-'));
+
+    try {
+      const nodeModulesDir = join(tempDir, 'node_modules');
+      writeFakeSdkPackage(nodeModulesDir, { cjsChunk: false });
+
+      expect(cursorSdkPackageTreeErrors(nodeModulesDir).join('\n')).toContain(
+        'Missing Cursor SDK cjs numbered chunks'
+      );
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  test('assembles sidecars with the staged dynamic chunk set', () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'mangostudio-cursor-sidecar-assemble-'));
+
+    try {
+      const nodeModulesDir = join(tempDir, 'node_modules');
+      const nativePackage = cursorNativePackageFor(linuxX64Target());
+      expect(nativePackage).toBe('@cursor/sdk-linux-x64');
+      if (!nativePackage) return;
+
+      writeFakeSdkPackage(nodeModulesDir);
+      writeFakeNativePackage(nodeModulesDir, nativePackage);
+
+      const destSidecarDir = join(tempDir, 'dest', 'cursor-sidecar');
+      expect(
+        assembleCursorSidecar(destSidecarDir, linuxX64Target(), {
+          jsClosureDir: nodeModulesDir,
+          nativePackagesDir: nodeModulesDir,
+          sdkChunks: collectCursorSdkChunks(join(nodeModulesDir, '@cursor', 'sdk')),
+          version: '1.0.22',
+          cleanup: () => undefined,
+        })
+      ).toBe(true);
+      expect(
+        existsSync(join(destSidecarDir, 'node_modules', '@cursor', 'sdk', 'dist', 'cjs', '642.js'))
+      ).toBe(true);
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
   });
 
   test('avoids in-process registry tarball downloads', () => {

@@ -402,6 +402,15 @@ export const messages: Messages = {
         'Node.js {minVersion}+ is required for Cursor SDK Agents (found {version}).',
       cursorSidecarMissing: 'Cursor SDK sidecar script is missing.',
       cursorSidecarMissingAt: 'Cursor SDK sidecar script is missing at {path}.',
+      cursorSdkMissing: 'Cursor SDK package is missing from the sidecar. Reinstall MangoStudio.',
+      cursorSdkMissingAt:
+        'Cursor SDK package is missing from the sidecar at {path}. Reinstall MangoStudio.',
+      cursorSdkIncomplete: 'Cursor SDK package is incomplete. Reinstall MangoStudio.',
+      cursorSdkIncompleteAt: 'Cursor SDK package is incomplete at {path}. Reinstall MangoStudio.',
+      cursorNativeRuntimeMissing:
+        'This platform has no Cursor native runtime in the sidecar. Reinstall MangoStudio.',
+      cursorNativeRuntimeMissingPackage:
+        'Cursor native runtime package {packageName} is missing. Reinstall MangoStudio.',
       modalsModalTitle: 'Choose Available Models',
       modelsModalTitle: 'Choose Available Models',
       modelsModalDescription: 'Models enabled for',

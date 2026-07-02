@@ -17,12 +17,18 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import {
+  CURSOR_NATIVE_PACKAGES,
+  cursorNativePackageForPlatform,
+  isCursorSdkChunkFileName,
+} from '@mangostudio/shared/catalog';
 import { ROOT_DIR } from './config';
 import { captureCommand } from './exec';
 import { warn } from './log';
@@ -30,25 +36,18 @@ import type { BinaryTarget, ReleasePlatformId } from './release-targets';
 
 const SIDECAR_SOURCE_DIR = join(ROOT_DIR, 'apps/api/src/services/providers/cursor/sidecar');
 const CURSOR_SDK_VERSION_PATTERN = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
+const CURSOR_SDK_PACKAGE_SEGMENTS = ['@cursor', 'sdk'] as const;
+const CURSOR_SDK_DIST_FLAVORS = ['cjs', 'esm'] as const;
 
-/**
- * Maps each release target to the `@cursor/sdk-<platform>` package that carries
- * its native agent runtime. `null` means the Cursor SDK ships no runtime for
- * that platform, so the sidecar is skipped there rather than shipped broken.
- */
-const CURSOR_NATIVE_PACKAGES: Record<ReleasePlatformId, string | null> = {
-  'linux-x64': '@cursor/sdk-linux-x64',
-  'linux-x64-musl': null,
-  'linux-arm64': '@cursor/sdk-linux-arm64',
-  'linux-arm64-musl': null,
-  'windows-x64': '@cursor/sdk-win32-x64',
-  'windows-arm64': null,
-  'darwin-x64': '@cursor/sdk-darwin-x64',
-  'darwin-arm64': '@cursor/sdk-darwin-arm64',
-};
+export { CURSOR_NATIVE_PACKAGES };
+
+export interface CursorSdkChunkManifest {
+  readonly cjs: readonly string[];
+  readonly esm: readonly string[];
+}
 
 export function cursorNativePackageForArch(arch: ReleasePlatformId): string | null {
-  return CURSOR_NATIVE_PACKAGES[arch] ?? null;
+  return cursorNativePackageForPlatform(arch);
 }
 
 export function cursorNativePackageFor(target: BinaryTarget): string | null {
@@ -60,6 +59,8 @@ export interface CursorSidecarStaging {
   readonly jsClosureDir: string;
   /** node_modules holding the optional native packages keyed by package name. */
   readonly nativePackagesDir: string;
+  /** Dynamic SDK chunks recorded from the staged install. */
+  readonly sdkChunks: CursorSdkChunkManifest;
   readonly version: string;
   /** Removes the temporary staging tree. */
   cleanup(): void;
@@ -124,9 +125,14 @@ export async function prepareCursorSidecarStaging(
 
   try {
     const jsClosureDir = await installJsClosure(root, version);
+    const sdkErrors = cursorSdkPackageTreeErrors(jsClosureDir);
+    if (sdkErrors.length > 0) {
+      throw new Error(`bun install staged an incomplete Cursor SDK:\n- ${sdkErrors.join('\n- ')}`);
+    }
+    const sdkChunks = collectCursorSdkChunks(cursorSdkPackageDir(jsClosureDir));
     assertNativePackagesInstalled(jsClosureDir, targets);
 
-    return { jsClosureDir, nativePackagesDir: jsClosureDir, version, cleanup };
+    return { jsClosureDir, nativePackagesDir: jsClosureDir, sdkChunks, version, cleanup };
   } catch (error) {
     warn(`Skipping Cursor sidecar vendoring: ${error instanceof Error ? error.message : error}`);
     cleanup();
@@ -160,6 +166,11 @@ export function assembleCursorSidecar(
     filter: keepJsClosureEntry,
   });
   cpSync(cachedNative, join(destNodeModules, nativePackage), { recursive: true });
+
+  const errors = cursorSidecarPackageTreeErrors(destSidecarDir, nativePackage, staging.sdkChunks);
+  if (errors.length > 0) {
+    throw new Error(`Assembled Cursor sidecar is incomplete:\n- ${errors.join('\n- ')}`);
+  }
 
   return true;
 }
@@ -202,10 +213,155 @@ function assertNativePackagesInstalled(nodeModulesDir: string, targets: BinaryTa
     if (pkg) neededPackages.add(pkg);
   }
 
-  const missing = [...neededPackages].filter((pkg) => !existsSync(join(nodeModulesDir, pkg)));
-  if (missing.length > 0) {
-    throw new Error(`bun install did not stage Cursor native packages: ${missing.join(', ')}`);
+  const errors = [...neededPackages].flatMap((pkg) =>
+    cursorNativePackageTreeErrors(nodeModulesDir, pkg)
+  );
+  if (errors.length > 0) {
+    throw new Error(`bun install did not stage Cursor native packages:\n- ${errors.join('\n- ')}`);
   }
+}
+
+function cursorSdkPackageDir(nodeModulesDir: string): string {
+  return join(nodeModulesDir, ...CURSOR_SDK_PACKAGE_SEGMENTS);
+}
+
+function packageDir(nodeModulesDir: string, packageName: string): string {
+  return join(nodeModulesDir, ...packageName.split('/'));
+}
+
+function listCursorSdkChunks(distDir: string): string[] {
+  try {
+    return readdirSync(distDir).filter(isCursorSdkChunkFileName).sort();
+  } catch {
+    return [];
+  }
+}
+
+export function collectCursorSdkChunks(sdkPackageDir: string): CursorSdkChunkManifest {
+  return {
+    cjs: listCursorSdkChunks(join(sdkPackageDir, 'dist', 'cjs')),
+    esm: listCursorSdkChunks(join(sdkPackageDir, 'dist', 'esm')),
+  };
+}
+
+export function cursorSdkChunkErrors(
+  sdkPackageDir: string,
+  expectedChunks?: CursorSdkChunkManifest
+): string[] {
+  const errors: string[] = [];
+
+  for (const flavor of CURSOR_SDK_DIST_FLAVORS) {
+    const distDir = join(sdkPackageDir, 'dist', flavor);
+    if (!existsSync(distDir)) {
+      errors.push(`Missing Cursor SDK ${flavor} chunk directory: ${distDir}`);
+      continue;
+    }
+
+    const chunks = listCursorSdkChunks(distDir);
+    if (chunks.length === 0) {
+      errors.push(`Missing Cursor SDK ${flavor} numbered chunks in ${distDir}`);
+      continue;
+    }
+
+    const expected = expectedChunks?.[flavor];
+    if (!expected) continue;
+
+    const missing = expected.filter((chunk) => !chunks.includes(chunk));
+    const extra = chunks.filter((chunk) => !expected.includes(chunk));
+    if (missing.length > 0 || extra.length > 0) {
+      errors.push(
+        `Cursor SDK ${flavor} chunks differ from staged install: missing [${missing.join(', ') || 'none'}], extra [${extra.join(', ') || 'none'}]`
+      );
+    }
+  }
+
+  return errors;
+}
+
+interface PackageManifestReadResult {
+  readonly errors: string[];
+  readonly manifest?: Record<string, unknown>;
+}
+
+function readPackageManifest(packageDir: string, label: string): PackageManifestReadResult {
+  const manifestPath = join(packageDir, 'package.json');
+  if (!existsSync(manifestPath)) {
+    return { errors: [`Missing ${label} package: ${manifestPath}`] };
+  }
+
+  try {
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as unknown;
+    if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest)) {
+      return { errors: [`${label} package manifest must be a JSON object: ${manifestPath}`] };
+    }
+    return { errors: [], manifest: manifest as Record<string, unknown> };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return { errors: [`Invalid ${label} package manifest at ${manifestPath}: ${message}`] };
+  }
+}
+
+function declaredPackageEntrypoints(manifest: Record<string, unknown>): string[] {
+  const entrypoints = new Set<string>();
+  if (typeof manifest.main === 'string' && manifest.main.length > 0) {
+    entrypoints.add(manifest.main);
+  }
+
+  if (typeof manifest.bin === 'string' && manifest.bin.length > 0) {
+    entrypoints.add(manifest.bin);
+  } else if (manifest.bin && typeof manifest.bin === 'object' && !Array.isArray(manifest.bin)) {
+    for (const value of Object.values(manifest.bin)) {
+      if (typeof value === 'string' && value.length > 0) entrypoints.add(value);
+    }
+  }
+
+  return [...entrypoints];
+}
+
+export function packageDeclaredEntrypointErrors(packageDir: string, label: string): string[] {
+  const { errors, manifest } = readPackageManifest(packageDir, label);
+  if (!manifest) return errors;
+
+  return [
+    ...errors,
+    ...declaredPackageEntrypoints(manifest).flatMap((entrypoint) => {
+      const path = join(packageDir, entrypoint);
+      return existsSync(path) ? [] : [`Missing ${label} package entrypoint: ${path}`];
+    }),
+  ];
+}
+
+export function cursorSdkPackageTreeErrors(
+  nodeModulesDir: string,
+  expectedChunks?: CursorSdkChunkManifest
+): string[] {
+  const sdkDir = cursorSdkPackageDir(nodeModulesDir);
+  return [
+    ...readPackageManifest(sdkDir, 'Cursor SDK').errors,
+    ...cursorSdkChunkErrors(sdkDir, expectedChunks),
+  ];
+}
+
+export function cursorNativePackageTreeErrors(
+  nodeModulesDir: string,
+  nativePackage: string
+): string[] {
+  return packageDeclaredEntrypointErrors(
+    packageDir(nodeModulesDir, nativePackage),
+    `Cursor native package ${nativePackage}`
+  );
+}
+
+export function cursorSidecarPackageTreeErrors(
+  sidecarDir: string,
+  nativePackage: string,
+  expectedChunks?: CursorSdkChunkManifest
+): string[] {
+  const nodeModulesDir = join(sidecarDir, 'node_modules');
+  return [
+    ...cursorSdkPackageTreeErrors(nodeModulesDir, expectedChunks),
+    ...cursorNativePackageTreeErrors(nodeModulesDir, nativePackage),
+  ];
 }
 
 /** Excludes npm bin shims and native platform packages from the shared JS closure copy. */
