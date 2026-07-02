@@ -297,12 +297,27 @@ describe('cursor sidecar SDK staging', () => {
     expect(source).not.toContain("['tar', '-xzf'");
   });
 
-  test('uses Node 22-compatible disposal and no hard-coded tool RPC timeout', () => {
+  test('uses Node 22-compatible disposal and a default tool RPC timeout', () => {
     const source = readText('apps/api/src/services/providers/cursor/sidecar/run-agent.mjs');
 
     expect(source).not.toContain('await using');
-    expect(source).not.toContain('TOOL_RPC_TIMEOUT_MS');
+    expect(source).toContain('DEFAULT_TOOL_RPC_TIMEOUT_MS');
+    expect(source).toContain('normalizeToolRpcTimeoutMs');
     expect(source).toContain('disposeAgent');
+  });
+
+  test('sidecar protocol version stays in lockstep with the runner', () => {
+    const sidecarSource = readText('apps/api/src/services/providers/cursor/sidecar/run-agent.mjs');
+    const runnerSource = readText('apps/api/src/services/providers/cursor/sidecar-process.ts');
+
+    const sidecarVersion = sidecarSource.match(/^const PROTOCOL_VERSION = (\d+);$/m)?.[1];
+    const runnerVersion = runnerSource.match(
+      /^export const CURSOR_SIDECAR_PROTOCOL_VERSION = (\d+);$/m
+    )?.[1];
+
+    expect(sidecarVersion).toBeDefined();
+    expect(runnerVersion).toBeDefined();
+    expect(sidecarVersion).toBe(runnerVersion as string);
   });
 
   test('keeps Cursor SDK imports inside the Node sidecar boundary', () => {
@@ -322,6 +337,7 @@ describe('cursor sidecar SDK staging', () => {
     expect(list.code).toBe(0);
     expect(list.stderr).toBe('');
     expect(list.stdout).toEqual([
+      { type: 'ready', protocolVersion: 1 },
       {
         type: 'models',
         models: [
@@ -339,7 +355,7 @@ describe('cursor sidecar SDK staging', () => {
     });
     expect(validation.code).toBe(0);
     expect(validation.stderr).toBe('');
-    expect(validation.stdout).toEqual([{ type: 'ok' }]);
+    expect(validation.stdout).toEqual([{ type: 'ready', protocolVersion: 1 }, { type: 'ok' }]);
   });
 
   test('serializes sidecar protocol errors with status and retryability', async () => {
@@ -351,6 +367,7 @@ describe('cursor sidecar SDK staging', () => {
     expect(result.code).toBe(1);
     expect(result.stderr).toBe('');
     expect(result.stdout).toEqual([
+      { type: 'ready', protocolVersion: 1 },
       {
         type: 'error',
         message: 'Cursor API key rejected',

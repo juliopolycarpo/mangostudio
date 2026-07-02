@@ -39,6 +39,7 @@ describe('cursor smoke sidecar fixture', () => {
     expect(result.code).toBe(1);
     expect(result.stderr).toBe('');
     expect(result.stdout).toEqual([
+      { type: 'ready', protocolVersion: 1 },
       {
         type: 'error',
         message: 'Cursor API key rejected',
