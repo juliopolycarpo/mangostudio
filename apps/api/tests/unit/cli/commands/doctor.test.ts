@@ -65,6 +65,11 @@ function makeDoctorDeps(overrides: Record<string, unknown> = {}) {
         ok: true,
         detail: 'validate_api_key reached SDK (auth rejected probe key)',
       }),
+    listChatGptConnectors: () => [],
+    collectChatGptChecks: () =>
+      Promise.resolve([
+        { label: 'ChatGPT secrets', status: 'ok' as const, detail: 'secret store reachable' },
+      ]),
     log: () => undefined,
     exit: () => undefined,
     ...overrides,
@@ -77,7 +82,7 @@ describe('runDoctor', () => {
     let exited = -1;
 
     await runDoctor(
-      { all: false, cursorProbe: false },
+      { all: false, cursorProbe: false, chatgptRefresh: false },
       {
         ...makeDoctorDeps(),
         log: (msg) => lines.push(msg),
@@ -98,7 +103,7 @@ describe('runDoctor', () => {
     let exited = -1;
 
     await runDoctor(
-      { all: false, cursorProbe: false },
+      { all: false, cursorProbe: false, chatgptRefresh: false },
       {
         ...makeDoctorDeps({ fs: NOTHING }),
         exit: (code) => {
@@ -115,7 +120,7 @@ describe('runDoctor', () => {
     let exited = -1;
 
     await runDoctor(
-      { all: false, cursorProbe: false },
+      { all: false, cursorProbe: false, chatgptRefresh: false },
       {
         ...makeDoctorDeps({
           isCursorConfigured: () => true,
@@ -142,7 +147,7 @@ describe('runDoctor', () => {
     const lines: string[] = [];
 
     await runDoctor(
-      { all: true, cursorProbe: false },
+      { all: true, cursorProbe: false, chatgptRefresh: false },
       {
         ...makeDoctorDeps(),
         log: (msg) => lines.push(msg),
@@ -154,11 +159,67 @@ describe('runDoctor', () => {
     expect(text).toContain('Cursor sidecar');
   });
 
+  it('skips ChatGPT checks when no connector exists and --all is absent', async () => {
+    const lines: string[] = [];
+
+    await runDoctor(
+      { all: false, cursorProbe: false, chatgptRefresh: false },
+      {
+        ...makeDoctorDeps(),
+        log: (msg) => lines.push(msg),
+      }
+    );
+
+    expect(lines.join('\n')).not.toContain('ChatGPT secrets');
+  });
+
+  it('includes ChatGPT checks when a connector exists and forwards the refresh flag', async () => {
+    const lines: string[] = [];
+    const receivedRefresh: boolean[] = [];
+
+    await runDoctor(
+      { all: false, cursorProbe: false, chatgptRefresh: true },
+      {
+        ...makeDoctorDeps({
+          listChatGptConnectors: () => [{ id: 'connector-1' }],
+          collectChatGptChecks: (_config: unknown, _connectors: unknown, refresh: boolean) => {
+            receivedRefresh.push(refresh);
+            return Promise.resolve([
+              {
+                label: 'ChatGPT secrets',
+                status: 'ok' as const,
+                detail: 'secret store reachable',
+              },
+            ]);
+          },
+        }),
+        log: (msg) => lines.push(msg),
+      }
+    );
+
+    expect(lines.join('\n')).toContain('ChatGPT secrets');
+    expect(receivedRefresh).toEqual([true]);
+  });
+
+  it('runs ChatGPT checks with --all even without a connector', async () => {
+    const lines: string[] = [];
+
+    await runDoctor(
+      { all: true, cursorProbe: false, chatgptRefresh: false },
+      {
+        ...makeDoctorDeps(),
+        log: (msg) => lines.push(msg),
+      }
+    );
+
+    expect(lines.join('\n')).toContain('ChatGPT secrets');
+  });
+
   it('appends a probe row when --cursor-probe and the chain is ready', async () => {
     const lines: string[] = [];
 
     await runDoctor(
-      { all: true, cursorProbe: true },
+      { all: true, cursorProbe: true, chatgptRefresh: false },
       {
         ...makeDoctorDeps(),
         log: (msg) => lines.push(msg),

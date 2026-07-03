@@ -3,8 +3,10 @@
  * plain-text checklist. Exits non-zero if any check fails.
  */
 
+import { Database as SQLiteDatabase } from 'bun:sqlite';
 import { accessSync, constants, existsSync, readFileSync } from 'node:fs';
 import { parseRuntimeEnvFile } from '@mangostudio/shared/runtime-env';
+import type { SecretMetadataRow } from '@mangostudio/shared/types';
 import { parse as parseToml } from 'smol-toml';
 import {
   getConfigEnvFilePath,
@@ -28,6 +30,7 @@ import {
   describeCursorRuntimeChain,
 } from '../../services/providers/cursor/runtime-availability';
 import type { DoctorArgs } from '../args';
+import { collectChatGptDoctorChecks } from '../chatgpt-doctor-checks';
 import { probeCursorDoctorRuntime } from '../cursor-doctor-probe';
 import {
   type CheckResult,
@@ -55,6 +58,12 @@ export interface DoctorDeps {
   getCursorDoctorChain: () => Promise<readonly CursorRuntimeChainStep[]>;
   isCursorConfigured: (config: MangoConfig) => boolean;
   probeCursorRuntime: typeof probeCursorDoctorRuntime;
+  listChatGptConnectors: (config: MangoConfig) => SecretMetadataRow[];
+  collectChatGptChecks: (
+    config: MangoConfig,
+    connectors: readonly SecretMetadataRow[],
+    refresh: boolean
+  ) => Promise<CheckResult[]>;
   log: (msg: string) => void;
   exit: (code: number) => void;
 }
@@ -66,7 +75,7 @@ interface InstanceProbe {
 
 /** Run diagnostics and print a checklist; exit 1 on any failure. // Usage: await runDoctor() */
 export async function runDoctor(
-  options: DoctorArgs = { all: false, cursorProbe: false },
+  options: DoctorArgs = { all: false, cursorProbe: false, chatgptRefresh: false },
   deps: Partial<DoctorDeps> = {}
 ): Promise<void> {
   const d = resolveDeps(deps);
@@ -100,6 +109,13 @@ async function collectResults(
         ? await d.probeCursorRuntime()
         : undefined;
     results.push(...collectCursorDoctorChecks(chain, probe));
+  }
+
+  const chatgptConnectors = d.listChatGptConnectors(config);
+  if (chatgptConnectors.length > 0 || options.all) {
+    results.push(
+      ...(await d.collectChatGptChecks(config, chatgptConnectors, options.chatgptRefresh))
+    );
   }
 
   return results;
@@ -162,6 +178,10 @@ function resolveDeps(deps: Partial<DoctorDeps>): Required<DoctorDeps> {
       (async () => describeCursorRuntimeChain(await detectNodeRuntime())),
     isCursorConfigured: deps.isCursorConfigured ?? isCursorConnectorConfigured,
     probeCursorRuntime: deps.probeCursorRuntime ?? probeCursorDoctorRuntime,
+    listChatGptConnectors: deps.listChatGptConnectors ?? listChatGptConnectorRows,
+    collectChatGptChecks:
+      deps.collectChatGptChecks ??
+      ((config, connectors, refresh) => collectChatGptDoctorChecks(config, connectors, refresh)),
     log: deps.log ?? writeLine,
     exit: deps.exit ?? ((code) => process.exit(code)),
   };
@@ -180,6 +200,28 @@ export function isCursorConnectorConfigured(config: MangoConfig): boolean {
     configPath,
     (path) => parseToml(readFileSync(path, 'utf8')) as Record<string, unknown>
   );
+}
+
+/**
+ * Reads ChatGPT connector rows straight from SQLite. Opened read-only so
+ * doctor never creates or migrates the database; a missing file or table
+ * (fresh install) simply means no connectors.
+ */
+export function listChatGptConnectorRows(config: MangoConfig): SecretMetadataRow[] {
+  const dbPath = config.database.path;
+  if (dbPath === ':memory:' || !existsSync(dbPath)) return [];
+
+  let db: SQLiteDatabase | null = null;
+  try {
+    db = new SQLiteDatabase(dbPath, { readonly: true });
+    return db
+      .query("SELECT * FROM secret_metadata WHERE provider = 'chatgpt'")
+      .all() as unknown as SecretMetadataRow[];
+  } catch {
+    return [];
+  } finally {
+    db?.close();
+  }
 }
 
 function mergeConnectorSecretEnv(config: MangoConfig): Record<string, string | undefined> {
