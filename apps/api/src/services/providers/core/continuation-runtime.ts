@@ -79,6 +79,14 @@ export const CONTINUATION_STRATEGIES: Record<ProviderType, ContinuationStrategy>
     supportsDurableCursor: false,
     durableMode: null,
   },
+  // Stub entry until ChatGPT backend generation lands; no generation path
+  // exercises this strategy yet.
+  chatgpt: {
+    provider: 'chatgpt',
+    strategy: 'turn-local',
+    supportsDurableCursor: false,
+    durableMode: null,
+  },
 };
 
 export function getContinuationStrategy(provider: ProviderType): ContinuationStrategy {
