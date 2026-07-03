@@ -14,6 +14,7 @@ export interface ServeArgs {
 export interface DoctorArgs {
   all: boolean;
   cursorProbe: boolean;
+  chatgptRefresh: boolean;
 }
 
 const PORT_MIN = 1;
@@ -50,10 +51,11 @@ export function parseServeArgs(rest: string[]): ServeArgs {
   return { host, port, detached };
 }
 
-/** Parse `doctor` args: optional --all and --cursor-probe flags. */
+/** Parse `doctor` args: optional --all, --cursor-probe, and --chatgpt-refresh flags. */
 export function parseDoctorArgs(rest: string[]): DoctorArgs {
   let all = false;
   let cursorProbe = false;
+  let chatgptRefresh = false;
 
   for (const arg of rest) {
     if (arg === '--all') {
@@ -64,10 +66,14 @@ export function parseDoctorArgs(rest: string[]): DoctorArgs {
       cursorProbe = true;
       continue;
     }
+    if (arg === '--chatgpt-refresh') {
+      chatgptRefresh = true;
+      continue;
+    }
     throw new CliError(`Unknown option for doctor: ${arg}`);
   }
 
-  return { all, cursorProbe };
+  return { all, cursorProbe, chatgptRefresh };
 }
 
 interface ServeTarget {

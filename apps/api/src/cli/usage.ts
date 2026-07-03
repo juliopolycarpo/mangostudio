@@ -17,11 +17,13 @@ Commands:
   status              Show whether a server is running and its details.
   stop                Gracefully stop the running server.
   killserver          Force-kill the running server.
-  doctor [--all] [--cursor-probe]
+  doctor [--all] [--cursor-probe] [--chatgpt-refresh]
                       Run environment and configuration diagnostics.
-                      Cursor runtime checks run when a Cursor connector is
-                      configured, or with --all. --cursor-probe spawns the
-                      sidecar validate_api_key RPC with a dummy key.
+                      Cursor and ChatGPT connector checks run when the
+                      connector is configured, or with --all. --cursor-probe
+                      spawns the sidecar validate_api_key RPC with a dummy
+                      key. --chatgpt-refresh performs a live token refresh
+                      (rotates the stored refresh token).
   version, --version  Print the MangoStudio version.
   help                Show this help.
 

@@ -118,13 +118,30 @@ describe('parseServeArgs', () => {
 
 describe('parseDoctorArgs', () => {
   it('defaults to no flags', () => {
-    expect(parseDoctorArgs([])).toEqual({ all: false, cursorProbe: false });
+    expect(parseDoctorArgs([])).toEqual({ all: false, cursorProbe: false, chatgptRefresh: false });
   });
 
-  it('parses --all and --cursor-probe', () => {
-    expect(parseDoctorArgs(['--all'])).toEqual({ all: true, cursorProbe: false });
-    expect(parseDoctorArgs(['--cursor-probe'])).toEqual({ all: false, cursorProbe: true });
-    expect(parseDoctorArgs(['--all', '--cursor-probe'])).toEqual({ all: true, cursorProbe: true });
+  it('parses --all, --cursor-probe, and --chatgpt-refresh', () => {
+    expect(parseDoctorArgs(['--all'])).toEqual({
+      all: true,
+      cursorProbe: false,
+      chatgptRefresh: false,
+    });
+    expect(parseDoctorArgs(['--cursor-probe'])).toEqual({
+      all: false,
+      cursorProbe: true,
+      chatgptRefresh: false,
+    });
+    expect(parseDoctorArgs(['--chatgpt-refresh'])).toEqual({
+      all: false,
+      cursorProbe: false,
+      chatgptRefresh: true,
+    });
+    expect(parseDoctorArgs(['--all', '--cursor-probe', '--chatgpt-refresh'])).toEqual({
+      all: true,
+      cursorProbe: true,
+      chatgptRefresh: true,
+    });
   });
 
   it('rejects unknown options', () => {
