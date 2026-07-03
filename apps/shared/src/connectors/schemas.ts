@@ -82,6 +82,38 @@ export const ChatGptUsageSnapshotSchema = Type.Object({
 
 export type ChatGptUsageSnapshot = Static<typeof ChatGptUsageSnapshotSchema>;
 
+/** Which metered rate-limit window of a ChatGPT plan a usage sample belongs to. */
+export const ChatGptUsageWindowKeySchema = Type.Union([
+  Type.Literal('primary'),
+  Type.Literal('secondary'),
+]);
+
+export type ChatGptUsageWindowKey = Static<typeof ChatGptUsageWindowKeySchema>;
+
+/** One persisted point of a window's used-percent series. */
+export const ChatGptUsageSampleSchema = Type.Object({
+  /** Percentage of the window already consumed (0–100). */
+  usedPercent: Type.Number(),
+  /** Window length in minutes when the backend reported it. */
+  windowMinutes: Type.Optional(Type.Number()),
+  /** Unix epoch ms when the window resets, when the backend reported it. */
+  resetsAt: Type.Optional(Type.Number()),
+  /** Unix epoch ms when this sample was captured. */
+  sampledAt: Type.Number(),
+});
+
+export type ChatGptUsageSample = Static<typeof ChatGptUsageSampleSchema>;
+
+export const ChatGptUsageHistoryResponseSchema = Type.Object({
+  window: ChatGptUsageWindowKeySchema,
+  /** Number of days of history the response covers. */
+  days: Type.Number(),
+  /** Samples ascending by `sampledAt`; empty when nothing was recorded yet. */
+  samples: Type.Array(ChatGptUsageSampleSchema),
+});
+
+export type ChatGptUsageHistoryResponse = Static<typeof ChatGptUsageHistoryResponseSchema>;
+
 /** Backend outcome of consuming a rate-limit reset credit. */
 export const ChatGptRedeemOutcomeSchema = Type.Union([
   Type.Literal('reset'),

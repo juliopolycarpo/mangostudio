@@ -4,7 +4,9 @@
  */
 
 import type {
+  ChatGptUsageHistoryResponse,
   ChatGptUsageStats,
+  ChatGptUsageWindowKey,
   RedeemChatGptResetCreditResponse,
 } from '@mangostudio/shared/connectors';
 import { ERROR_CODES } from '@mangostudio/shared/errors';
@@ -14,6 +16,7 @@ import {
   fetchChatGptUsage,
   fetchChatGptUsageStats,
 } from '../../../services/providers/chatgpt/usage-fetch';
+import { listChatGptUsageSamples } from '../../../services/providers/chatgpt/usage-sample-store';
 import { getChatGptTokenService } from '../infrastructure/chatgpt/token-service';
 import { getSecretMetadataById } from '../infrastructure/connector-repository';
 import { ConnectorNotFoundError } from './connector-errors';
@@ -63,6 +66,27 @@ export async function redeemChatGptResetCredit(
 
   await fetchChatGptUsage(bundle).catch(() => null);
   return result;
+}
+
+/**
+ * Reads the persisted usage-sample series of one rate-limit window for a
+ * ChatGPT connector. Samples are account-scoped, so the connector is resolved
+ * to its ChatGPT account without touching the backend.
+ */
+export async function getChatGptUsageHistory(
+  userId: string,
+  connectorId: string,
+  window: ChatGptUsageWindowKey,
+  days: number
+): Promise<ChatGptUsageHistoryResponse> {
+  const meta = await requireChatGptConnector(userId, connectorId);
+  const bundle = await getChatGptTokenService().readBundle(meta.id);
+  const sinceMs = Date.now() - days * 24 * 60 * 60_000;
+  return {
+    window,
+    days,
+    samples: await listChatGptUsageSamples(bundle.accountId, window, sinceMs),
+  };
 }
 
 /**

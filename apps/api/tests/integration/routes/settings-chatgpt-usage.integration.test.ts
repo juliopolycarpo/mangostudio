@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import type { ChatGptUsageHistoryResponse } from '@mangostudio/shared/connectors';
 import { ERROR_CODES } from '@mangostudio/shared/errors';
+import { getDb } from '../../../src/db/database';
 import { getConfig } from '../../../src/lib/config';
 import { resetChatGptOAuthSessions } from '../../../src/modules/connectors/application/chatgpt-oauth';
 import {
@@ -45,7 +47,8 @@ beforeEach(async () => {
   harness = { user, fakeChatGpt, app };
 });
 
-afterEach(() => {
+afterEach(async () => {
+  await getDb().deleteFrom('connector_usage_samples').execute();
   restoreAuth?.();
   restoreAuth = null;
   setChatGptTokenServiceForTests(null);
@@ -201,6 +204,80 @@ describe('GET /settings/connectors/:id/usage/stats', () => {
 
   it('returns 404 for unknown connectors', async () => {
     const response = await fetchStats('no-such-connector');
+    expect(response.status).toBe(404);
+  });
+});
+
+describe('GET /settings/connectors/:id/usage/history', () => {
+  function fetchHistory(connectorId: string, queryString = ''): Promise<Response> {
+    return harness.app.handle(
+      new Request(`http://localhost/settings/connectors/${connectorId}/usage/history${queryString}`)
+    );
+  }
+
+  /** Triggers a snapshot refresh via the connectors listing (write-behind path). */
+  async function refreshUsageSnapshots(): Promise<void> {
+    const response = await harness.app.handle(new Request('http://localhost/settings/connectors'));
+    expect(response.status).toBe(200);
+  }
+
+  it('serves samples persisted from usage snapshots, defaulting to the weekly window', async () => {
+    const connectorId = await connectChatGpt();
+    harness.fakeChatGpt.usagePayload = {
+      plan_type: 'plus',
+      rate_limit: {
+        primary_window: { used_percent: 12, limit_window_seconds: 18_000 },
+        secondary_window: { used_percent: 37, limit_window_seconds: 604_800 },
+      },
+    };
+    await refreshUsageSnapshots();
+
+    const response = await fetchHistory(connectorId);
+    expect(response.status).toBe(200);
+    const payload = (await response.json()) as ChatGptUsageHistoryResponse;
+    expect(payload.window).toBe('secondary');
+    expect(payload.days).toBe(7);
+    expect(payload.samples).toHaveLength(1);
+    expect(payload.samples[0]).toMatchObject({ usedPercent: 37, windowMinutes: 10_080 });
+  });
+
+  it('serves the requested window and dedupes unchanged samples', async () => {
+    const connectorId = await connectChatGpt();
+    harness.fakeChatGpt.usagePayload = {
+      rate_limit: { primary_window: { used_percent: 12, limit_window_seconds: 18_000 } },
+    };
+    await refreshUsageSnapshots();
+    resetChatGptUsageStoreForTests(); // force a refetch of the identical payload
+    await refreshUsageSnapshots();
+
+    const response = await fetchHistory(connectorId, '?window=primary&days=30');
+    expect(response.status).toBe(200);
+    const payload = (await response.json()) as ChatGptUsageHistoryResponse;
+    expect(payload.window).toBe('primary');
+    expect(payload.days).toBe(30);
+    expect(payload.samples).toHaveLength(1);
+    expect(payload.samples[0]?.usedPercent).toBe(12);
+  });
+
+  it('returns an empty series when nothing was sampled yet', async () => {
+    const connectorId = await connectChatGpt();
+
+    const response = await fetchHistory(connectorId);
+    expect(response.status).toBe(200);
+    const payload = (await response.json()) as ChatGptUsageHistoryResponse;
+    expect(payload.samples).toEqual([]);
+  });
+
+  it('rejects out-of-range day spans', async () => {
+    const connectorId = await connectChatGpt();
+
+    expect((await fetchHistory(connectorId, '?days=0')).status).toBe(422);
+    expect((await fetchHistory(connectorId, '?days=91')).status).toBe(422);
+    expect((await fetchHistory(connectorId, '?window=hourly')).status).toBe(422);
+  });
+
+  it('returns 404 for unknown connectors', async () => {
+    const response = await fetchHistory('no-such-connector');
     expect(response.status).toBe(404);
   });
 });
