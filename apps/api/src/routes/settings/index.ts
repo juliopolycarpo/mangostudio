@@ -8,6 +8,7 @@ import type { Elysia } from 'elysia';
 import { agentRoutes } from '../../modules/agents/http/agent-routes';
 import { appSettingsRoutes } from '../../modules/app-settings/http/app-settings-routes';
 import { chatGptOAuthRoutes } from '../../modules/connectors/http/chatgpt-oauth-routes';
+import { chatGptUsageRoutes } from '../../modules/connectors/http/chatgpt-usage-routes';
 import { connectorRoutes } from '../../modules/connectors/http/connectors-routes';
 import { geminiAliasRoutes } from '../../modules/connectors/http/gemini-aliases-routes';
 import { observabilityRoutes } from '../../modules/observability/http/observability-routes';
@@ -23,6 +24,7 @@ export const settingsRoutes = (app: Elysia) =>
       .use(agentRoutes)
       .use(connectorRoutes)
       .use(chatGptOAuthRoutes)
+      .use(chatGptUsageRoutes)
       .use(modelRoutes)
       .use(providerSettingsRoutes)
       .use(toolSettingsRoutes)

@@ -64,6 +64,16 @@ export class FakeChatGptServer {
   usagePayload: Record<string, unknown> | null = null;
   /** Served on GET /wham/rate-limit-reset-credits when set; 404 otherwise. */
   resetCreditsPayload: Record<string, unknown> | null = null;
+  /** Served on GET /wham/profiles/me when set; 404 otherwise. */
+  profilePayload: Record<string, unknown> | null = null;
+  /** Credits the consume endpoint can still redeem; each `reset` decrements. */
+  resetCreditsAvailable = 0;
+  /** HTTP status the next consume request fails with; null serves normally. */
+  consumeFailureStatus: number | null = null;
+  /** Raw body override for consume responses (e.g. an unknown outcome code). */
+  consumeBodyOverride: Record<string, unknown> | null = null;
+
+  private readonly redeemedRequestIds = new Set<string>();
 
   tokenDelayMs = 0;
 
@@ -129,6 +139,12 @@ export class FakeChatGptServer {
     }
     if (request.method === 'GET' && url.pathname === '/wham/rate-limit-reset-credits') {
       return this.handleWhamPayload(request, this.resetCreditsPayload);
+    }
+    if (request.method === 'POST' && url.pathname === '/wham/rate-limit-reset-credits/consume') {
+      return this.handleConsume(request);
+    }
+    if (request.method === 'GET' && url.pathname === '/wham/profiles/me') {
+      return this.handleWhamPayload(request, this.profilePayload);
     }
     return new Response('Not found', { status: 404 });
   }
@@ -247,6 +263,51 @@ export class FakeChatGptServer {
     }
 
     return sseResponse(script.events, script.headers);
+  }
+
+  /**
+   * Stateful consume endpoint mirroring the backend's idempotency semantics:
+   * a replayed redeem_request_id answers `already_redeemed`, an exhausted
+   * credit pool answers `no_credit`, otherwise one credit is spent.
+   */
+  private async handleConsume(request: Request): Promise<Response> {
+    const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+    this.backendRequests.push({
+      path: new URL(request.url).pathname,
+      headers: {
+        authorization: request.headers.get('authorization'),
+        'chatgpt-account-id': request.headers.get('chatgpt-account-id'),
+        'openai-beta': request.headers.get('openai-beta'),
+        originator: request.headers.get('originator'),
+        session_id: request.headers.get('session_id'),
+      },
+      body,
+    });
+
+    if (this.consumeFailureStatus !== null) {
+      const status = this.consumeFailureStatus;
+      this.consumeFailureStatus = null;
+      return Response.json({ error: 'scripted consume failure' }, { status });
+    }
+    if (this.consumeBodyOverride) {
+      const override = this.consumeBodyOverride;
+      this.consumeBodyOverride = null;
+      return Response.json(override);
+    }
+
+    const redeemRequestId = body.redeem_request_id;
+    if (typeof redeemRequestId !== 'string' || redeemRequestId === '') {
+      return Response.json({ error: 'missing redeem_request_id' }, { status: 400 });
+    }
+    if (this.redeemedRequestIds.has(redeemRequestId)) {
+      return Response.json({ code: 'already_redeemed', windows_reset: 0 });
+    }
+    if (this.resetCreditsAvailable <= 0) {
+      return Response.json({ code: 'no_credit', windows_reset: 0 });
+    }
+    this.redeemedRequestIds.add(redeemRequestId);
+    this.resetCreditsAvailable -= 1;
+    return Response.json({ code: 'reset', windows_reset: 1 });
   }
 
   private handleWhamPayload(request: Request, payload: Record<string, unknown> | null): Response {
