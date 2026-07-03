@@ -645,6 +645,7 @@ export const messages = {
     'openai-compatible': 'OpenAI Compatível',
     deepseek: 'DeepSeek',
     cursor: 'Cursor',
+    chatgpt: 'ChatGPT',
     openrouter: 'OpenRouter',
   },
 

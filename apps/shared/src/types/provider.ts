@@ -8,7 +8,8 @@ export type ProviderType =
   | 'openai-compatible'
   | 'anthropic'
   | 'deepseek'
-  | 'cursor';
+  | 'cursor'
+  | 'chatgpt';
 
 /** Represents the source of a configured provider secret. */
 export type SecretSource = 'bun-secrets' | 'environment' | 'config-file' | 'none';

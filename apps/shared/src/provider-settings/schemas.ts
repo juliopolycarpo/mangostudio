@@ -9,6 +9,7 @@ export const ProviderTypeSchema = Type.Union([
   Type.Literal('anthropic'),
   Type.Literal('deepseek'),
   Type.Literal('cursor'),
+  Type.Literal('chatgpt'),
 ]);
 
 export const ProviderSettingScopeSchema = Type.Literal('provider');

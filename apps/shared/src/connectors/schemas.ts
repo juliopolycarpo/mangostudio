@@ -32,3 +32,35 @@ export type UpdateConnectorModelsBody = Static<typeof UpdateConnectorModelsBodyS
 export const ConnectorStatusSchema = Type.Object({
   connectors: Type.Array(Type.Any()),
 });
+
+export const StartChatGptOAuthBodySchema = Type.Object({
+  name: Type.String({ minLength: 1 }),
+});
+
+export type StartChatGptOAuthBody = Static<typeof StartChatGptOAuthBodySchema>;
+
+export const StartChatGptOAuthResponseSchema = Type.Object({
+  sessionId: Type.String(),
+  authorizeUrl: Type.String(),
+  /** Unix epoch ms when the OAuth session (and its loopback server) expires. */
+  expiresAt: Type.Number(),
+});
+
+export type StartChatGptOAuthResponse = Static<typeof StartChatGptOAuthResponseSchema>;
+
+export const ChatGptOAuthStatusSchema = Type.Object({
+  status: Type.Union([
+    Type.Literal('pending'),
+    Type.Literal('completed'),
+    Type.Literal('failed'),
+    Type.Literal('expired'),
+  ]),
+  /** Present when status === 'completed'. */
+  connectorId: Type.Optional(Type.String()),
+  /** Human-readable failure detail, present when status === 'failed'. */
+  error: Type.Optional(Type.String()),
+  /** Machine-readable failure code, present when status === 'failed'. */
+  errorCode: Type.Optional(Type.String()),
+});
+
+export type ChatGptOAuthStatus = Static<typeof ChatGptOAuthStatusSchema>;
