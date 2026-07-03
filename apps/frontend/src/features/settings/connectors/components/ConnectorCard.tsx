@@ -17,6 +17,7 @@ import { useChatGptOAuth } from '../hooks/use-chatgpt-oauth';
 import { ChatGptPromoChip } from './ChatGptPromoChip';
 import { ChatGptResetCreditAction } from './ChatGptResetCreditAction';
 import { ChatGptUsageMeter } from './ChatGptUsageMeter';
+import { ChatGptUsageStatsPanel } from './ChatGptUsageStatsPanel';
 
 interface ConnectorCardProps {
   connector: Connector;
@@ -147,13 +148,18 @@ export function ConnectorCard({
               {s.chatgptReauthWarning}
             </p>
           ) : null}
-          {isChatGpt && !c.needsReauth && c.usage ? (
+          {isChatGpt && !c.needsReauth ? (
             <>
-              <ChatGptUsageMeter usage={c.usage} />
-              <ChatGptResetCreditAction connector={c} onRedeemed={onUsageChanged} />
-              {c.usage.promoMessage ? (
-                <ChatGptPromoChip connectorId={c.id} message={c.usage.promoMessage} />
+              {c.usage ? (
+                <>
+                  <ChatGptUsageMeter usage={c.usage} />
+                  <ChatGptResetCreditAction connector={c} onRedeemed={onUsageChanged} />
+                  {c.usage.promoMessage ? (
+                    <ChatGptPromoChip connectorId={c.id} message={c.usage.promoMessage} />
+                  ) : null}
+                </>
               ) : null}
+              <ChatGptUsageStatsPanel connectorId={c.id} />
             </>
           ) : null}
           {chatGptOAuth.error ? (

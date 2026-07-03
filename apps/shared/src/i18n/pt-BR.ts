@@ -462,6 +462,16 @@ export const messages = {
       chatgptRedeemFailed:
         'Não foi possível resgatar o crédito de reset. Tentar novamente não gasta um segundo crédito.',
       chatgptPromoDismiss: 'Dispensar anúncio',
+      chatgptStatsToggle: 'Estatísticas de uso',
+      chatgptStatsLoading: 'Carregando estatísticas de uso...',
+      chatgptStatsEmpty: 'Nenhuma estatística de uso disponível para esta conta.',
+      chatgptStatsLifetime: 'Tokens no total',
+      chatgptStatsPeakDay: 'Pico diário',
+      chatgptStatsCurrentStreak: 'Sequência atual',
+      chatgptStatsLongestStreak: 'Maior sequência',
+      chatgptStatsStreakValue: '{days} dias',
+      chatgptStatsChartTitle: 'Tokens por dia — últimos 30 dias',
+      chatgptStatsDayTokens: '{date}: {tokens} tokens',
       cursorNodeRequired: 'Você precisa do Node.js instalado para executar agentes Cursor SDK.',
       cursorNodeNotFound: 'Binário `node` não encontrado.',
       cursorNodeInvalid:

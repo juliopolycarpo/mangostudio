@@ -458,6 +458,16 @@ export const messages: Messages = {
       chatgptRedeemFailed:
         'Could not redeem the reset credit. Retrying will not spend a second credit.',
       chatgptPromoDismiss: 'Dismiss announcement',
+      chatgptStatsToggle: 'Usage stats',
+      chatgptStatsLoading: 'Loading usage stats...',
+      chatgptStatsEmpty: 'No usage stats available for this account.',
+      chatgptStatsLifetime: 'Lifetime tokens',
+      chatgptStatsPeakDay: 'Peak day',
+      chatgptStatsCurrentStreak: 'Current streak',
+      chatgptStatsLongestStreak: 'Longest streak',
+      chatgptStatsStreakValue: '{days} days',
+      chatgptStatsChartTitle: 'Tokens per day — last 30 days',
+      chatgptStatsDayTokens: '{date}: {tokens} tokens',
       cursorNodeRequired: 'You need NodeJS installed to run Cursor SDK Agents.',
       cursorNodeNotFound: '`node` binary not found',
       cursorNodeInvalid:
