@@ -1,5 +1,5 @@
 /**
- * PKCE (RFC 7636) helpers for the ChatGPT OAuth flow.
+ * PKCE (RFC 7636) helpers shared by all OAuth connector flows.
  */
 
 export interface PkcePair {

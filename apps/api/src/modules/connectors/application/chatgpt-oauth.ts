@@ -33,9 +33,9 @@ import {
   CHATGPT_OAUTH_REDIRECT_URI,
   CHATGPT_OAUTH_SCOPES,
 } from '../infrastructure/chatgpt/oauth-constants';
-import { createOAuthState, createPkcePair } from '../infrastructure/chatgpt/pkce';
 import { getChatGptTokenService } from '../infrastructure/chatgpt/token-service';
 import { getSecretMetadataById } from '../infrastructure/connector-repository';
+import { createOAuthState, createPkcePair } from '../infrastructure/oauth/pkce';
 import { ConnectorValidationError } from './add-connector';
 import { ConnectorNotFoundError } from './connector-errors';
 

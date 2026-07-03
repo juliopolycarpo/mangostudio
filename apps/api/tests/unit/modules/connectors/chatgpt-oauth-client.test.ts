@@ -15,7 +15,7 @@ import { CHATGPT_OAUTH_CLIENT_ID } from '../../../../src/modules/connectors/infr
 import {
   createOAuthState,
   createPkcePair,
-} from '../../../../src/modules/connectors/infrastructure/chatgpt/pkce';
+} from '../../../../src/modules/connectors/infrastructure/oauth/pkce';
 import {
   makeJwt,
   makeTokenBundle,
