@@ -12,6 +12,7 @@ import { getConfig } from '../../../lib/config';
 import type { ChatGptTokenBundle } from '../../../modules/connectors/infrastructure/chatgpt/oauth-client';
 import { getOrCreateCachedClient } from '../core/client-cache';
 import { recordProviderCacheHit, recordProviderCacheMiss } from '../core/provider-observability';
+import { captureChatGptUsageHeaders } from './usage';
 
 const clientCache = new Map<string, OpenAI>();
 
@@ -31,6 +32,13 @@ export function createChatGptClient(bundle: ChatGptTokenBundle): OpenAI {
         apiKey: bundle.accessToken,
         baseURL,
         defaultHeaders: buildChatGptHeaders(bundle),
+        // Passive plan-usage capture: every backend response carries x-codex-*
+        // rate-limit headers, so tap them without an extra request.
+        fetch: async (input, init) => {
+          const response = await fetch(input, init);
+          captureChatGptUsageHeaders(bundle.accountId, response.headers);
+          return response;
+        },
       }),
     {
       onHit: () => recordProviderCacheHit('chatgpt', 'sdk-client'),
