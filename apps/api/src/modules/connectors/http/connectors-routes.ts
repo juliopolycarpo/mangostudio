@@ -26,6 +26,11 @@ import { ConnectorNotFoundError, ConnectorOwnershipError } from '../application/
 import { listConnectors } from '../application/list-connectors';
 import { removeConnector } from '../application/remove-connector';
 import { updateConnectorModels } from '../application/update-connector-models';
+import { ChatGptOAuthPortBusyError } from '../infrastructure/chatgpt/loopback-server';
+import {
+  ChatGptOAuthError,
+  ChatGptReauthRequiredError,
+} from '../infrastructure/chatgpt/oauth-client';
 import {
   OpenAIAuthError,
   OpenAIConfigError,
@@ -47,6 +52,15 @@ export function handleConnectorError(
   }
 
   if (error instanceof ConnectorOwnershipError) {
+    set.status = error.status;
+    return { error: error.message, code: error.code };
+  }
+
+  if (
+    error instanceof ChatGptOAuthPortBusyError ||
+    error instanceof ChatGptOAuthError ||
+    error instanceof ChatGptReauthRequiredError
+  ) {
     set.status = error.status;
     return { error: error.message, code: error.code };
   }
