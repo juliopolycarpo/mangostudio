@@ -98,7 +98,7 @@ const DEFAULT_CONFIG: Omit<MangoConfig, 'corsOrigins' | 'configFilePath'> = {
   cursor: { workspaceDir: '', sidecarScriptPath: '', nodePath: '' },
   chatgpt: {
     authBaseUrl: 'https://auth.openai.com',
-    apiBaseUrl: 'https://api.openai.com',
+    apiBaseUrl: 'https://chatgpt.com/backend-api/codex',
   },
 };
 
