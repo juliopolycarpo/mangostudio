@@ -14,6 +14,7 @@ import {
 import { Button } from '@/components/ui/Button';
 import { useI18n } from '@/hooks/use-i18n';
 import { useChatGptOAuth } from '../hooks/use-chatgpt-oauth';
+import { ChatGptUsageMeter } from './ChatGptUsageMeter';
 
 interface ConnectorCardProps {
   connector: Connector;
@@ -142,6 +143,7 @@ export function ConnectorCard({
               {s.chatgptReauthWarning}
             </p>
           ) : null}
+          {isChatGpt && !c.needsReauth && c.usage ? <ChatGptUsageMeter usage={c.usage} /> : null}
           {chatGptOAuth.error ? (
             <p className="text-[11px] leading-relaxed text-error">{chatGptOAuth.error}</p>
           ) : null}

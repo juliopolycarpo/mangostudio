@@ -1,4 +1,5 @@
 import type { ProviderType, SecretMetadataRow } from '../types/provider';
+import type { ChatGptUsageSnapshot } from './schemas';
 
 /** Represents a validated and configured API connector. */
 export interface Connector
@@ -13,6 +14,8 @@ export interface Connector
   planType?: string | null;
   /** True when the connector must be signed in again before use. */
   needsReauth?: boolean;
+  /** Latest plan-quota snapshot for ChatGPT connectors, when one was captured. */
+  usage?: ChatGptUsageSnapshot | null;
 }
 
 /** Current runtime-safe status for configured connectors. */

@@ -9,6 +9,8 @@ export {
   AddConnectorBodySchema,
   type ChatGptOAuthStatus,
   ChatGptOAuthStatusSchema,
+  type ChatGptUsageSnapshot,
+  ChatGptUsageSnapshotSchema,
   ConnectorStatusSchema,
   type StartChatGptOAuthBody,
   StartChatGptOAuthBodySchema,
