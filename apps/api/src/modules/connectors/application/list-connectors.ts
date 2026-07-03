@@ -3,6 +3,7 @@
  */
 
 import type { Connector, ConnectorStatus } from '@mangostudio/shared';
+import { getChatGptUsage } from '../../../services/providers/chatgpt/usage-fetch';
 import {
   getProvider,
   listRegisteredProviderTypes,
@@ -20,11 +21,16 @@ async function toConnectorStatus(row: Parameters<typeof toConnector>[0]): Promis
   const needsReauth = row.lastValidationError === CHATGPT_REAUTH_REQUIRED_CODE;
   try {
     const bundle = await getChatGptTokenService().readBundle(row.id);
+    // Best-effort quota snapshot: fresh from the store, refreshed when stale,
+    // and null when the backend has never answered. Skipped for connectors
+    // that need reauth — the backend would only reject the token.
+    const usage = needsReauth ? null : await getChatGptUsage(bundle);
     return {
       ...connector,
       accountLabel: maskSecret(bundle.email ?? bundle.accountId) ?? connector.maskedSuffix,
-      planType: bundle.planType,
+      planType: usage?.planType ?? bundle.planType,
       needsReauth,
+      usage,
     };
   } catch {
     return {

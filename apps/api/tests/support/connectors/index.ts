@@ -9,6 +9,7 @@
  */
 
 import { mock } from 'bun:test';
+import type { ChatGptUsageSnapshot } from '@mangostudio/shared/connectors';
 import { Type } from '@sinclair/typebox';
 import {
   UnsafeBaseUrlError,
@@ -40,6 +41,7 @@ export interface ConnectorEntry {
   accountLabel?: string | null;
   planType?: string | null;
   needsReauth?: boolean;
+  usage?: ChatGptUsageSnapshot | null;
 }
 export interface ConnectorListPayload {
   connectors: ConnectorEntry[];

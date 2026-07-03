@@ -91,6 +91,9 @@ afterAll(() => {
 // registered after the environment's, so it runs later).
 beforeEach(() => {
   getConfig().chatgpt.authBaseUrl = fakeAuthBaseUrl;
+  // Connector listing refreshes plan usage best-effort; keep it on the fake
+  // server (404s fast) instead of the real backend.
+  getConfig().chatgpt.apiBaseUrl = fakeAuthBaseUrl;
 });
 
 afterEach(() => {

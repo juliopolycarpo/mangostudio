@@ -16,6 +16,7 @@ import {
 import { respondStreamRoutes } from '../../src/modules/generation/http/respond-stream-routes';
 import { settingsRoutes } from '../../src/routes/settings';
 import { chatGptProvider } from '../../src/services/providers/chatgpt';
+import { resetChatGptUsageStoreForTests } from '../../src/services/providers/chatgpt/usage';
 import {
   type FakeChatGptServer,
   startFakeChatGptServer,
@@ -65,6 +66,7 @@ afterEach(() => {
   restoreAuth = null;
   setChatGptTokenServiceForTests(null);
   resetChatGptOAuthSessions();
+  resetChatGptUsageStoreForTests();
   if (previousChatGptConfig) Object.assign(getConfig().chatgpt, previousChatGptConfig);
   previousChatGptConfig = null;
   harness?.fakeChatGpt.stop();
@@ -257,6 +259,61 @@ describe('ChatGPT connector lifecycle E2E', () => {
     expect(events.some((event) => event.type === 'text' && event.text === 'partial')).toBe(true);
     expect(events.find((event) => event.type === 'error')).toBeDefined();
     expect(events.find((event) => event.type === 'done')).toBeUndefined();
+  });
+
+  it('carries plan usage on connector status from the wham endpoints and stream headers', async () => {
+    const { app, restore } = createAuthenticatedApiTestApp(
+      harness.user,
+      settingsRoutes,
+      respondStreamRoutes
+    );
+    restoreAuth = restore;
+
+    const nextExpiry = new Date(Date.now() + 86_400_000).toISOString();
+    harness.fakeChatGpt.usagePayload = {
+      plan_type: 'plus',
+      rate_limit: {
+        primary_window: { used_percent: 25, limit_window_seconds: 18_000 },
+        secondary_window: { used_percent: 40, limit_window_seconds: 604_800 },
+      },
+      rate_limit_reset_credits: { available_count: 2 },
+    };
+    harness.fakeChatGpt.resetCreditsPayload = {
+      available_count: 2,
+      credits: [
+        { status: 'available', expires_at: nextExpiry },
+        { status: 'available', expires_at: null },
+      ],
+    };
+
+    const connectorId = await connectChatGpt(app);
+    const listed = await assertConnectorListed(app, connectorId, { needsReauth: false });
+    expect(listed.usage).toMatchObject({
+      source: 'endpoint',
+      planType: 'plus',
+      primary: { usedPercent: 25, windowMinutes: 300 },
+      secondary: { usedPercent: 40, windowMinutes: 10_080 },
+      resetCredits: { availableCount: 2, nextExpiresAt: Date.parse(nextExpiry) },
+    });
+
+    // A generation response then updates the snapshot passively via headers.
+    await enableModel(app, connectorId, 'gpt-5.5');
+    harness.fakeChatGpt.queueResponsesScript({
+      type: 'events',
+      events: textResponseEvents('usage headers'),
+      headers: {
+        'x-codex-primary-used-percent': '77',
+        'x-codex-primary-window-minutes': '300',
+      },
+    });
+    const chat = await insertTestChat(harness.user.id);
+    await streamChatTurn(app, { chatId: chat.id, prompt: 'Hi', model: 'gpt-5.5' });
+
+    const relisted = await assertConnectorListed(app, connectorId, { needsReauth: false });
+    expect(relisted.usage).toMatchObject({
+      source: 'headers',
+      primary: { usedPercent: 77, windowMinutes: 300 },
+    });
   });
 
   it('expires a pending loopback session and frees the callback port', async () => {

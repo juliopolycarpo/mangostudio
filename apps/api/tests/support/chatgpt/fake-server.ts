@@ -22,7 +22,7 @@ export interface RecordedChatGptBackendRequest {
 }
 
 export type FakeChatGptResponsesScript =
-  | { type: 'events'; events: Array<Record<string, unknown>> }
+  | { type: 'events'; events: Array<Record<string, unknown>>; headers?: Record<string, string> }
   | { type: 'status'; status: number; body?: unknown }
   | { type: 'malformed'; events?: Array<Record<string, unknown>>; raw?: string };
 
@@ -59,6 +59,11 @@ export class FakeChatGptServer {
   private tokenSequence = 1;
   private queuedTokenFailures: QueuedTokenFailure[] = [];
   private responseScripts: FakeChatGptResponsesScript[] = [];
+
+  /** Served on GET /wham/usage when set; 404 otherwise. */
+  usagePayload: Record<string, unknown> | null = null;
+  /** Served on GET /wham/rate-limit-reset-credits when set; 404 otherwise. */
+  resetCreditsPayload: Record<string, unknown> | null = null;
 
   tokenDelayMs = 0;
 
@@ -118,6 +123,12 @@ export class FakeChatGptServer {
     }
     if (request.method === 'POST' && url.pathname === '/responses') {
       return this.handleResponses(request);
+    }
+    if (request.method === 'GET' && url.pathname === '/wham/usage') {
+      return this.handleWhamPayload(request, this.usagePayload);
+    }
+    if (request.method === 'GET' && url.pathname === '/wham/rate-limit-reset-credits') {
+      return this.handleWhamPayload(request, this.resetCreditsPayload);
     }
     return new Response('Not found', { status: 404 });
   }
@@ -235,7 +246,23 @@ export class FakeChatGptServer {
       return malformedSseResponse(script.events ?? [], script.raw);
     }
 
-    return sseResponse(script.events);
+    return sseResponse(script.events, script.headers);
+  }
+
+  private handleWhamPayload(request: Request, payload: Record<string, unknown> | null): Response {
+    this.backendRequests.push({
+      path: new URL(request.url).pathname,
+      headers: {
+        authorization: request.headers.get('authorization'),
+        'chatgpt-account-id': request.headers.get('chatgpt-account-id'),
+        'openai-beta': request.headers.get('openai-beta'),
+        originator: request.headers.get('originator'),
+        session_id: request.headers.get('session_id'),
+      },
+      body: {},
+    });
+    if (!payload) return new Response('Not found', { status: 404 });
+    return Response.json(payload);
   }
 }
 
@@ -243,10 +270,13 @@ export function startFakeChatGptServer(options?: FakeChatGptServerOptions): Fake
   return new FakeChatGptServer(options);
 }
 
-export function sseResponse(events: Array<Record<string, unknown>>): Response {
+export function sseResponse(
+  events: Array<Record<string, unknown>>,
+  extraHeaders?: Record<string, string>
+): Response {
   return new Response(sseBody(events), {
     status: 200,
-    headers: { 'Content-Type': 'text/event-stream' },
+    headers: { 'Content-Type': 'text/event-stream', ...extraHeaders },
   });
 }
 
