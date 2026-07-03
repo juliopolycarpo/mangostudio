@@ -8,7 +8,12 @@
  * valid siblings.
  */
 
-import type { ChatGptUsageSnapshot } from '@mangostudio/shared/connectors';
+import type {
+  ChatGptRedeemOutcome,
+  ChatGptUsageSnapshot,
+  ChatGptUsageStats,
+  RedeemChatGptResetCreditResponse,
+} from '@mangostudio/shared/connectors';
 
 type UsageWindow = NonNullable<ChatGptUsageSnapshot['primary']>;
 type AdditionalLimit = NonNullable<ChatGptUsageSnapshot['additionalLimits']>[number];
@@ -93,8 +98,15 @@ export function parseChatGptUsageHeaders(
   const reachedType = headers.get(`x-${HEADER_LIMIT_ID}-rate-limit-reached-type`);
   if (reachedType) snapshot.limitReached = true;
 
+  const promoMessage = headers.get(`x-${HEADER_LIMIT_ID}-promo-message`);
+  if (promoMessage) snapshot.promoMessage = promoMessage;
+
   const hasTelemetry =
-    snapshot.primary || snapshot.secondary || snapshot.credits || snapshot.limitReached;
+    snapshot.primary ||
+    snapshot.secondary ||
+    snapshot.credits ||
+    snapshot.limitReached ||
+    snapshot.promoMessage;
   return hasTelemetry ? snapshot : null;
 }
 
@@ -234,18 +246,98 @@ export function parseChatGptResetCreditsPayload(
 }
 
 // ---------------------------------------------------------------------------
+// /wham/rate-limit-reset-credits/consume payload parsing
+// ---------------------------------------------------------------------------
+
+const REDEEM_OUTCOMES: readonly ChatGptRedeemOutcome[] = [
+  'reset',
+  'nothing_to_reset',
+  'no_credit',
+  'already_redeemed',
+];
+
+function isRedeemOutcome(value: unknown): value is ChatGptRedeemOutcome {
+  return typeof value === 'string' && (REDEEM_OUTCOMES as readonly string[]).includes(value);
+}
+
+/**
+ * Parses a `POST /wham/rate-limit-reset-credits/consume` payload. Returns null
+ * for an unknown outcome code — a redemption spends a scarce user perk, so an
+ * unrecognized outcome must surface as an error, never be guessed at.
+ */
+export function parseChatGptRedeemResponse(
+  payload: unknown
+): RedeemChatGptResetCreditResponse | null {
+  const record = asRecord(payload);
+  if (!record || !isRedeemOutcome(record.code)) return null;
+  return { code: record.code, windowsReset: coerceNumber(record.windows_reset) ?? 0 };
+}
+
+// ---------------------------------------------------------------------------
+// /wham/profiles/me payload parsing
+// ---------------------------------------------------------------------------
+
+/**
+ * Parses the `stats` block of a `GET /wham/profiles/me` payload into usage
+ * stats, or null when the payload carries no stats at all. Daily buckets are
+ * parsed lossily per element and sorted ascending by date.
+ */
+export function parseChatGptProfileStats(payload: unknown): ChatGptUsageStats | null {
+  const stats = asRecord(asRecord(payload)?.stats);
+  if (!stats) return null;
+
+  const result: ChatGptUsageStats = {};
+  const lifetimeTokens = coerceNumber(stats.lifetime_tokens);
+  if (lifetimeTokens !== undefined) result.lifetimeTokens = lifetimeTokens;
+  const peakDailyTokens = coerceNumber(stats.peak_daily_tokens);
+  if (peakDailyTokens !== undefined) result.peakDailyTokens = peakDailyTokens;
+  const longestRunningTurnSec = coerceNumber(stats.longest_running_turn_sec);
+  if (longestRunningTurnSec !== undefined) result.longestRunningTurnSec = longestRunningTurnSec;
+  const currentStreakDays = coerceNumber(stats.current_streak_days);
+  if (currentStreakDays !== undefined) result.currentStreakDays = currentStreakDays;
+  const longestStreakDays = coerceNumber(stats.longest_streak_days);
+  if (longestStreakDays !== undefined) result.longestStreakDays = longestStreakDays;
+
+  if (Array.isArray(stats.daily_usage_buckets)) {
+    const buckets: NonNullable<ChatGptUsageStats['dailyUsage']> = [];
+    for (const entry of stats.daily_usage_buckets) {
+      const bucket = asRecord(entry);
+      const tokens = coerceNumber(bucket?.tokens);
+      if (typeof bucket?.start_date !== 'string' || bucket.start_date === '') continue;
+      if (tokens === undefined) continue;
+      buckets.push({ startDate: bucket.start_date, tokens });
+    }
+    if (buckets.length > 0) {
+      buckets.sort((a, b) => a.startDate.localeCompare(b.startDate));
+      result.dailyUsage = buckets;
+    }
+  }
+
+  return Object.keys(result).length > 0 ? result : null;
+}
+
+// ---------------------------------------------------------------------------
 // In-memory snapshot store (keyed by ChatGPT account id)
 // ---------------------------------------------------------------------------
 
 const usageStore = new Map<string, ChatGptUsageSnapshot>();
 
-/** Records a snapshot; between capture paths, the newest `capturedAt` wins. */
+/**
+ * Records a snapshot; between capture paths, the newest `capturedAt` wins.
+ * A promo message is sticky: the header only appears occasionally, so a newer
+ * snapshot without one keeps the last seen message until a newer header
+ * replaces it (dismissal is a frontend concern).
+ */
 export function recordChatGptUsageSnapshot(
   accountId: string,
   snapshot: ChatGptUsageSnapshot
 ): void {
   const existing = usageStore.get(accountId);
   if (existing && existing.capturedAt > snapshot.capturedAt) return;
+  if (existing?.promoMessage && snapshot.promoMessage === undefined) {
+    usageStore.set(accountId, { ...snapshot, promoMessage: existing.promoMessage });
+    return;
+  }
   usageStore.set(accountId, snapshot);
 }
 

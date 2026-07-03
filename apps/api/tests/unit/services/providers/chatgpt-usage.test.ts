@@ -3,6 +3,8 @@ import {
   captureChatGptUsageHeaders,
   getChatGptUsageSnapshot,
   isChatGptUsageStale,
+  parseChatGptProfileStats,
+  parseChatGptRedeemResponse,
   parseChatGptResetCreditsPayload,
   parseChatGptUsageHeaders,
   parseChatGptUsagePayload,
@@ -213,6 +215,102 @@ describe('parseChatGptResetCreditsPayload', () => {
   });
 });
 
+describe('parseChatGptUsageHeaders promo message', () => {
+  it('captures x-codex-promo-message and counts it as telemetry', () => {
+    const headers = new Headers({ 'x-codex-promo-message': 'Try the new plan!' });
+    expect(parseChatGptUsageHeaders(headers, NOW)).toEqual({
+      capturedAt: NOW,
+      source: 'headers',
+      promoMessage: 'Try the new plan!',
+    });
+  });
+});
+
+describe('parseChatGptRedeemResponse', () => {
+  it.each([
+    'reset',
+    'nothing_to_reset',
+    'no_credit',
+    'already_redeemed',
+  ] as const)('accepts the %s outcome', (code) => {
+    expect(parseChatGptRedeemResponse({ code, windows_reset: 2 })).toEqual({
+      code,
+      windowsReset: 2,
+    });
+  });
+
+  it('coerces a numeric-string windows_reset and defaults a missing one to 0', () => {
+    expect(parseChatGptRedeemResponse({ code: 'reset', windows_reset: '1' })).toEqual({
+      code: 'reset',
+      windowsReset: 1,
+    });
+    expect(parseChatGptRedeemResponse({ code: 'nothing_to_reset' })).toEqual({
+      code: 'nothing_to_reset',
+      windowsReset: 0,
+    });
+  });
+
+  it('returns null for unknown outcome codes and non-object payloads', () => {
+    expect(parseChatGptRedeemResponse({ code: 'mystery', windows_reset: 1 })).toBe(null);
+    expect(parseChatGptRedeemResponse({ windows_reset: 1 })).toBe(null);
+    expect(parseChatGptRedeemResponse('reset')).toBe(null);
+    expect(parseChatGptRedeemResponse(null)).toBe(null);
+  });
+});
+
+describe('parseChatGptProfileStats', () => {
+  it('parses a full stats block and sorts daily buckets ascending', () => {
+    expect(
+      parseChatGptProfileStats({
+        stats: {
+          lifetime_tokens: 1_234_567,
+          peak_daily_tokens: '9000',
+          longest_running_turn_sec: 320,
+          current_streak_days: 4,
+          longest_streak_days: 11,
+          daily_usage_buckets: [
+            { start_date: '2026-07-02', tokens: 300 },
+            { start_date: '2026-07-01', tokens: '200' },
+          ],
+        },
+      })
+    ).toEqual({
+      lifetimeTokens: 1_234_567,
+      peakDailyTokens: 9000,
+      longestRunningTurnSec: 320,
+      currentStreakDays: 4,
+      longestStreakDays: 11,
+      dailyUsage: [
+        { startDate: '2026-07-01', tokens: 200 },
+        { startDate: '2026-07-02', tokens: 300 },
+      ],
+    });
+  });
+
+  it('parses daily buckets lossily and tolerates a partial stats block', () => {
+    expect(
+      parseChatGptProfileStats({
+        stats: {
+          current_streak_days: 2,
+          daily_usage_buckets: [
+            'garbage',
+            { start_date: '', tokens: 5 },
+            { start_date: '2026-07-01' },
+            { start_date: '2026-07-02', tokens: 'broken' },
+          ],
+        },
+      })
+    ).toEqual({ currentStreakDays: 2 });
+  });
+
+  it('returns null when stats are absent, empty, or the payload is malformed', () => {
+    expect(parseChatGptProfileStats({})).toBe(null);
+    expect(parseChatGptProfileStats({ stats: {} })).toBe(null);
+    expect(parseChatGptProfileStats({ stats: 'nope' })).toBe(null);
+    expect(parseChatGptProfileStats(null)).toBe(null);
+  });
+});
+
 describe('usage snapshot store', () => {
   it('keeps the newest capturedAt regardless of capture path', () => {
     recordChatGptUsageSnapshot('acct', { capturedAt: NOW, source: 'endpoint' });
@@ -227,6 +325,27 @@ describe('usage snapshot store', () => {
     const snapshot = { capturedAt: NOW, source: 'endpoint' as const };
     expect(isChatGptUsageStale(snapshot, NOW + 60_000)).toBe(false);
     expect(isChatGptUsageStale(snapshot, NOW + 6 * 60_000)).toBe(true);
+  });
+
+  it('keeps the last promo message when a newer snapshot omits it', () => {
+    recordChatGptUsageSnapshot('acct', {
+      capturedAt: NOW,
+      source: 'headers',
+      promoMessage: 'Try the new plan!',
+    });
+    recordChatGptUsageSnapshot('acct', { capturedAt: NOW + 1000, source: 'endpoint' });
+    expect(getChatGptUsageSnapshot('acct')).toEqual({
+      capturedAt: NOW + 1000,
+      source: 'endpoint',
+      promoMessage: 'Try the new plan!',
+    });
+
+    recordChatGptUsageSnapshot('acct', {
+      capturedAt: NOW + 2000,
+      source: 'headers',
+      promoMessage: 'Newer promo',
+    });
+    expect(getChatGptUsageSnapshot('acct')?.promoMessage).toBe('Newer promo');
   });
 
   it('captureChatGptUsageHeaders stores only responses that carry telemetry', () => {

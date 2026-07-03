@@ -73,12 +73,76 @@ export const ChatGptUsageSnapshotSchema = Type.Object({
     })
   ),
   limitReached: Type.Optional(Type.Boolean()),
+  /** Occasional plan/announcement blurb from the `x-codex-promo-message` header. */
+  promoMessage: Type.Optional(Type.String()),
   /** Unix epoch ms when this snapshot was captured. */
   capturedAt: Type.Number(),
   source: Type.Union([Type.Literal('headers'), Type.Literal('endpoint')]),
 });
 
 export type ChatGptUsageSnapshot = Static<typeof ChatGptUsageSnapshotSchema>;
+
+/** Backend outcome of consuming a rate-limit reset credit. */
+export const ChatGptRedeemOutcomeSchema = Type.Union([
+  Type.Literal('reset'),
+  Type.Literal('nothing_to_reset'),
+  Type.Literal('no_credit'),
+  Type.Literal('already_redeemed'),
+]);
+
+export type ChatGptRedeemOutcome = Static<typeof ChatGptRedeemOutcomeSchema>;
+
+export const RedeemChatGptResetCreditBodySchema = Type.Object({
+  /**
+   * Client-generated idempotency key. Retries of the same confirmed click
+   * must reuse it so a network retry can never double-spend a credit.
+   */
+  redeemRequestId: Type.String({ minLength: 1 }),
+});
+
+export type RedeemChatGptResetCreditBody = Static<typeof RedeemChatGptResetCreditBodySchema>;
+
+export const RedeemChatGptResetCreditResponseSchema = Type.Object({
+  code: ChatGptRedeemOutcomeSchema,
+  /** Number of rate-limit windows the redemption restored. */
+  windowsReset: Type.Number(),
+});
+
+export type RedeemChatGptResetCreditResponse = Static<
+  typeof RedeemChatGptResetCreditResponseSchema
+>;
+
+/**
+ * Token-usage profile stats for a ChatGPT account. Every field the backend
+ * did not report is omitted — the contract is unversioned and parsed
+ * defensively, so absence never means an error.
+ */
+export const ChatGptUsageStatsSchema = Type.Object({
+  lifetimeTokens: Type.Optional(Type.Number()),
+  peakDailyTokens: Type.Optional(Type.Number()),
+  longestRunningTurnSec: Type.Optional(Type.Number()),
+  currentStreakDays: Type.Optional(Type.Number()),
+  longestStreakDays: Type.Optional(Type.Number()),
+  /** Per-day token buckets, ascending by date. */
+  dailyUsage: Type.Optional(
+    Type.Array(
+      Type.Object({
+        /** ISO date (YYYY-MM-DD) the bucket starts on. */
+        startDate: Type.String(),
+        tokens: Type.Number(),
+      })
+    )
+  ),
+});
+
+export type ChatGptUsageStats = Static<typeof ChatGptUsageStatsSchema>;
+
+export const ChatGptUsageStatsResponseSchema = Type.Object({
+  /** Null when the backend reported no stats (panel shows its empty state). */
+  stats: Type.Union([ChatGptUsageStatsSchema, Type.Null()]),
+});
+
+export type ChatGptUsageStatsResponse = Static<typeof ChatGptUsageStatsResponseSchema>;
 
 /** Loose runtime check schema for ConnectorStatus — connectors array may contain any shape. */
 export const ConnectorStatusSchema = Type.Object({
