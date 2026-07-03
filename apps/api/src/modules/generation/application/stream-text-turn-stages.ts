@@ -8,6 +8,7 @@ import type { MultiAgentSettings } from '@mangostudio/shared/app-settings';
 import { MAX_TOOL_ITERATIONS_DEFAULT } from '@mangostudio/shared/app-settings';
 import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';
+import { getErrorCode } from '../../../lib/error-code';
 import { createDiagnosticLogger } from '../../../lib/logger';
 import {
   type AgentTurnExecutionState,
@@ -989,10 +990,4 @@ export async function* finalizeTurnError(
   }
 
   yield { type: 'error', error: message, ...(code ? { code } : {}) };
-}
-
-function getErrorCode(error: unknown): string | undefined {
-  if (!error || typeof error !== 'object' || !('code' in error)) return undefined;
-  const code = (error as { code?: unknown }).code;
-  return typeof code === 'string' && code.length > 0 ? code : undefined;
 }

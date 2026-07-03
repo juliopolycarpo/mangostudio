@@ -10,6 +10,7 @@ import { RespondStreamBodySchema } from '@mangostudio/shared/generation';
 import type { SSEErrorEvent } from '@mangostudio/shared/streaming';
 import type { Elysia } from 'elysia';
 import { getDb } from '../../../db/database';
+import { getErrorCode } from '../../../lib/error-code';
 import { requireAuth } from '../../../plugins/auth-middleware';
 import {
   getProvider,
@@ -215,12 +216,6 @@ function toSsePayload(event: StreamEvent): object {
       return errorEvent;
     }
   }
-}
-
-function getErrorCode(error: unknown): string | undefined {
-  if (!error || typeof error !== 'object' || !('code' in error)) return undefined;
-  const code = (error as { code?: unknown }).code;
-  return typeof code === 'string' && code.length > 0 ? code : undefined;
 }
 
 export const respondStreamRoutes = (app: Elysia) =>
