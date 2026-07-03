@@ -949,6 +949,7 @@ export async function* finalizeTurnError(
   if (signal?.aborted) return;
 
   const message = error instanceof Error ? error.message : 'Stream generation failed';
+  const code = getErrorCode(error);
   streamTextTurnLogger.error('turn_failed', { chatId, message });
 
   if (!executionState.durableProviderState) {
@@ -987,5 +988,11 @@ export async function* finalizeTurnError(
     // best-effort
   }
 
-  yield { type: 'error', error: message };
+  yield { type: 'error', error: message, ...(code ? { code } : {}) };
+}
+
+function getErrorCode(error: unknown): string | undefined {
+  if (!error || typeof error !== 'object' || !('code' in error)) return undefined;
+  const code = (error as { code?: unknown }).code;
+  return typeof code === 'string' && code.length > 0 ? code : undefined;
 }

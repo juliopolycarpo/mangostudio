@@ -1,4 +1,8 @@
 import { describe, expect, it } from 'bun:test';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { loadConfigForTest } from '../../../src/lib/config';
 import {
   createBunSecretStore,
   type SecretDescriptor,
@@ -126,5 +130,62 @@ describe('createBunSecretStore', () => {
 
     const deleted = await store.deleteSecret({ service: 'svc', name: 'missing' });
     expect(deleted).toBe(false);
+  });
+
+  it('uses the configured unsafe file store when native secrets are unavailable', async () => {
+    const fallbackDir = mkdtempSync(join(tmpdir(), 'mango-secret-fallback-'));
+    loadConfigForTest({
+      secretStore: { unsafeFileFallbackDir: fallbackDir },
+    });
+    const api = {
+      get: (): Promise<string | null> => Promise.reject(new Error('libsecret not available')),
+      set: (): Promise<void> => Promise.reject(new Error('libsecret not available')),
+      delete: (): Promise<boolean> => Promise.reject(new Error('libsecret not available')),
+    };
+    const store = createBunSecretStore(api);
+
+    try {
+      expect(await store.isAvailable()).toBe(true);
+      await store.setSecret({ service: 'svc', name: 'api-key' }, 'fallback-secret');
+      expect(await store.getSecret({ service: 'svc', name: 'api-key' })).toBe('fallback-secret');
+      expect(await store.deleteSecret({ service: 'svc', name: 'api-key' })).toBe(true);
+      expect(await store.getSecret({ service: 'svc', name: 'api-key' })).toBeNull();
+    } finally {
+      loadConfigForTest({ secretStore: { unsafeFileFallbackDir: '' } });
+      rmSync(fallbackDir, { recursive: true, force: true });
+    }
+  });
+
+  it('prefers the configured unsafe file store over native secrets', async () => {
+    const fallbackDir = mkdtempSync(join(tmpdir(), 'mango-secret-fallback-'));
+    loadConfigForTest({
+      secretStore: { unsafeFileFallbackDir: fallbackDir },
+    });
+    let nativeCalls = 0;
+    const api = {
+      get: (): Promise<string | null> => {
+        nativeCalls += 1;
+        return Promise.resolve('native-secret');
+      },
+      set: (): Promise<void> => {
+        nativeCalls += 1;
+        return Promise.resolve();
+      },
+      delete: (): Promise<boolean> => {
+        nativeCalls += 1;
+        return Promise.resolve(true);
+      },
+    };
+    const store = createBunSecretStore(api);
+
+    try {
+      expect(await store.isAvailable()).toBe(true);
+      await store.setSecret({ service: 'svc', name: 'api-key' }, 'file-secret');
+      expect(await store.getSecret({ service: 'svc', name: 'api-key' })).toBe('file-secret');
+      expect(nativeCalls).toBe(0);
+    } finally {
+      loadConfigForTest({ secretStore: { unsafeFileFallbackDir: '' } });
+      rmSync(fallbackDir, { recursive: true, force: true });
+    }
   });
 });

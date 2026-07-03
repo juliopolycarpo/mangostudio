@@ -78,4 +78,4 @@ export type StreamEvent =
       severity: ContextSeverity;
     }
   | { type: 'done'; messageId: string; generationTime: string }
-  | { type: 'error'; error: string };
+  | { type: 'error'; error: string; code?: string };

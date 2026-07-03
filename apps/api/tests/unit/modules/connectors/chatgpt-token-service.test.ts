@@ -169,4 +169,14 @@ describe('chatgpt token service', () => {
       harness.service.ensureFreshTokens(makeConnectorRow('missing'))
     ).rejects.toBeInstanceOf(ChatGptOAuthError);
   });
+
+  it('deletes the stored bundle through the token service', async () => {
+    const harness = makeHarness({ bundleExpiresAt: NOW + 120_000 });
+
+    await expect(harness.service.deleteBundle(harness.row.id)).resolves.toBe(true);
+
+    expect(
+      harness.secretStore.store.get(`mangostudio:${chatGptSecretName(harness.row.id)}`)
+    ).toBeUndefined();
+  });
 });

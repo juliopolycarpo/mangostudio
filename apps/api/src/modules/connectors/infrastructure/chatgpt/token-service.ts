@@ -46,6 +46,8 @@ export interface ChatGptTokenService {
   readBundle(connectorId: string): Promise<ChatGptTokenBundle>;
   /** Persists a bundle for a connector id. */
   persistBundle(connectorId: string, bundle: ChatGptTokenBundle): Promise<void>;
+  /** Deletes the persisted bundle for a connector id. */
+  deleteBundle(connectorId: string): Promise<boolean>;
 }
 
 export function chatGptSecretName(connectorId: string): string {
@@ -103,6 +105,13 @@ export function createChatGptTokenService(deps: ChatGptTokenServiceDeps = {}): C
     );
   };
 
+  const deleteBundle = (connectorId: string): Promise<boolean> => {
+    return secretStore.deleteSecret({
+      service: 'mangostudio',
+      name: chatGptSecretName(connectorId),
+    });
+  };
+
   const refreshAndPersist = async (
     connector: SecretMetadataRow,
     bundle: ChatGptTokenBundle
@@ -149,6 +158,7 @@ export function createChatGptTokenService(deps: ChatGptTokenServiceDeps = {}): C
   return {
     readBundle,
     persistBundle,
+    deleteBundle,
 
     async ensureFreshTokens(connector: SecretMetadataRow): Promise<ChatGptTokenBundle> {
       const bundle = await readBundle(connector.id);

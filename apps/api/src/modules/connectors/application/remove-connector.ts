@@ -7,6 +7,7 @@ import { createDiagnosticLogger } from '../../../lib/logger';
 import { invalidateUnifiedCatalog } from '../../../services/providers/catalog';
 import { invalidateProviderModelCache } from '../../../services/providers/core/provider-registry';
 import { isReadOnlySharedConnector } from '../domain/connector';
+import { getChatGptTokenService } from '../infrastructure/chatgpt/token-service';
 import {
   deleteSecretMetadata,
   getSecretMetadataById,
@@ -21,7 +22,13 @@ export async function removeConnector(userId: string, id: string): Promise<void>
   if (!meta) throw new ConnectorNotFoundError();
   if (isReadOnlySharedConnector(meta)) throw new ConnectorOwnershipError();
 
-  await removeSecret(meta.id, meta.name, meta.provider as ProviderType, meta.source);
+  if (meta.provider === 'chatgpt') {
+    await getChatGptTokenService()
+      .deleteBundle(meta.id)
+      .catch(() => false);
+  } else {
+    await removeSecret(meta.id, meta.name, meta.provider as ProviderType, meta.source);
+  }
   await deleteSecretMetadata(meta.id, userId);
   invalidateProviderModelCache(meta.provider as ProviderType, userId);
   invalidateUnifiedCatalog(userId);

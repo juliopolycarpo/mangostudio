@@ -78,6 +78,7 @@ O orquestrador lê exclusivamente `chats.lastProviderState`.
 | OpenAI-compatible     | não            | nenhum                    | `buildChatCompletionsReplay`    | nenhum (sempre começa do zero)                | apenas `loopMessages`                |
 | Anthropic             | não            | nenhum                    | replay direto de Messages       | nenhum (sempre começa do zero)                | apenas `loopMessages`                |
 | DeepSeek              | não            | nenhum                    | `buildChatCompletionsReplay`    | nenhum (sempre começa do zero)                | apenas `loopMessages`                |
+| ChatGPT               | não            | nenhum                    | `buildOpenAIResponsesReplay`    | nenhum (sempre começa do zero)                | itens de loop Responses              |
 
 Arquivos principais:
 

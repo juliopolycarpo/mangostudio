@@ -13,6 +13,7 @@ export type ApiErrorResponse = Static<typeof ApiErrorResponseSchema>;
 export const SSEErrorEventSchema = Type.Object({
   type: Type.Literal('error'),
   error: Type.String(),
+  code: Type.Optional(Type.String()),
   done: Type.Literal(true),
 });
 

@@ -206,10 +206,21 @@ function toSsePayload(event: StreamEvent): object {
         generationTime: event.generationTime,
       };
     case 'error': {
-      const errorEvent: SSEErrorEvent = { type: 'error', error: event.error, done: true };
+      const errorEvent: SSEErrorEvent = {
+        type: 'error',
+        error: event.error,
+        ...(event.code ? { code: event.code } : {}),
+        done: true,
+      };
       return errorEvent;
     }
   }
+}
+
+function getErrorCode(error: unknown): string | undefined {
+  if (!error || typeof error !== 'object' || !('code' in error)) return undefined;
+  const code = (error as { code?: unknown }).code;
+  return typeof code === 'string' && code.length > 0 ? code : undefined;
 }
 
 export const respondStreamRoutes = (app: Elysia) =>
@@ -331,7 +342,13 @@ export const respondStreamRoutes = (app: Elysia) =>
               } catch (err) {
                 if (!abortController.signal.aborted) {
                   const message = err instanceof Error ? err.message : 'Stream generation failed';
-                  const errorEvent: SSEErrorEvent = { type: 'error', error: message, done: true };
+                  const code = getErrorCode(err);
+                  const errorEvent: SSEErrorEvent = {
+                    type: 'error',
+                    error: message,
+                    ...(code ? { code } : {}),
+                    done: true,
+                  };
                   controller.enqueue(sseEvent(errorEvent));
                 }
               } finally {

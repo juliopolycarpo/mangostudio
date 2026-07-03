@@ -38,6 +38,12 @@ right depth quickly instead of scanning a flat list of files.
 - [`features/attachments.md`](./features/attachments.md)
 - [`features/image-generation.md`](./features/image-generation.md)
 
+### Provider-specific notes
+
+- [`providers/chatgpt.md`](./providers/chatgpt.md)
+- [`providers/cursor.md`](./providers/cursor.md)
+- [`providers/deepseek.md`](./providers/deepseek.md)
+
 ### Ops and deployment
 
 - [`reference/cli.md`](./reference/cli.md)

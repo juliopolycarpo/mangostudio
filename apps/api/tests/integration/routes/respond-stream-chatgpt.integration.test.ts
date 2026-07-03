@@ -97,6 +97,7 @@ beforeAll(async () => {
     forceRefreshTokens: () => Promise.resolve(TOKEN_BUNDLE),
     readBundle: () => Promise.resolve(TOKEN_BUNDLE),
     persistBundle: () => Promise.resolve(),
+    deleteBundle: () => Promise.resolve(true),
   });
 });
 

@@ -109,6 +109,7 @@ provider format lives in `replay-builder.ts`.
 | Provider            | Replay function                 | Output shape                                                                     |
 | ------------------- | ------------------------------- | -------------------------------------------------------------------------------- |
 | OpenAI Responses    | `buildOpenAIResponsesReplay`    | Array of `ResponseInputItem` (role-based + function_call / function_call_output) |
+| ChatGPT             | `buildOpenAIResponsesReplay`    | Responses input plus turn-local reasoning/function-call loop items               |
 | Gemini Interactions | `buildGeminiInteractionsReplay` | Array of turn objects (role + content, function_call, function_result)           |
 | OpenAI-compatible   | `buildChatCompletionsReplay`    | `ChatCompletionMessageParam[]` (with `tool_calls` array)                         |
 | DeepSeek            | `buildChatCompletionsReplay`    | `ChatCompletionMessageParam[]` (with `reasoning_content` in tool loop messages)  |

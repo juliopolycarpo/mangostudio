@@ -69,6 +69,11 @@ on startup. Set provider keys such as `GEMINI_API_KEY` in `~/.mango/.env` rather
 than exporting them in your shell — a shell-only export reaches a foreground
 `serve` but is dropped by a background (`-d`) start.
 
+ChatGPT connectors are different from API-key providers: they are created by
+the Settings sign-in flow, store rotating tokens in the OS secret store, and use
+the fixed loopback callback port `1455`. Endpoint overrides for smoke tests or
+advanced debugging use `MANGO_CHATGPT_AUTH_BASE_URL` and `MANGO_CHATGPT_BASE_URL`.
+
 ## Single instance
 
 Only one server may run at a time. On startup the server writes a state file at
