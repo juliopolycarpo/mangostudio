@@ -1,6 +1,7 @@
 import type { ChatGptUsageSnapshot } from '@mangostudio/shared/connectors';
 import type { Messages } from '@mangostudio/shared/i18n';
 import { useI18n } from '@/hooks/use-i18n';
+import { computeBurnPace } from '../lib/usage-pace';
 
 type ConnectorMessages = Messages['settings']['connectors'];
 type UsageWindow = NonNullable<ChatGptUsageSnapshot['primary']>;
@@ -44,6 +45,17 @@ function UsageWindowBar({
 }) {
   const percent = Math.min(100, Math.max(0, window.usedPercent));
   const showReset = window.resetsAt !== undefined && window.resetsAt > now;
+  const pace = computeBurnPace(window, now);
+  const paceLabel =
+    pace &&
+    (pace.status === 'runningHot'
+      ? pace.projectedExhaustionAt !== undefined && pace.projectedExhaustionAt > now
+        ? `${s.chatgptPaceRunningHot} · ${s.chatgptPaceProjected.replace(
+            '{time}',
+            formatCompactDuration(pace.projectedExhaustionAt - now)
+          )}`
+        : s.chatgptPaceRunningHot
+      : s.chatgptPaceOnPace);
   return (
     <div className="space-y-1">
       <div className="flex items-baseline justify-between gap-2 text-[10px] text-on-surface-variant/60">
@@ -55,6 +67,14 @@ function UsageWindowBar({
               '{time}',
               formatCompactDuration((window.resetsAt as number) - now)
             )}`}
+          {paceLabel && (
+            <>
+              {' · '}
+              <span className={pace?.status === 'runningHot' ? 'text-amber-200/90' : undefined}>
+                {paceLabel}
+              </span>
+            </>
+          )}
         </span>
       </div>
       <div
