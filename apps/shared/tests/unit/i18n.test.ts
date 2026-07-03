@@ -68,4 +68,11 @@ describe('i18n provider-neutral copy', () => {
     expect(ptBR.settings.providers.reservedForFuture).toBe('Reservado para configurações futuras');
     expect(ptBR.settings.providers.maxOutputTokensPlaceholder).toContain('{limit}');
   });
+
+  it('provides ChatGPT connector OAuth labels', () => {
+    expect(en.settings.connectors.chatgptSignInButton).toBe('Sign in with ChatGPT');
+    expect(en.settings.connectors.chatgptPortBusyError).toContain('1455');
+    expect(ptBR.settings.connectors.chatgptSignInButton).toBe('Entrar com ChatGPT');
+    expect(ptBR.settings.connectors.chatgptPortBusyError).toContain('1455');
+  });
 });

@@ -1,20 +1,25 @@
 import type { Connector } from '@mangostudio/shared';
+import type { Messages } from '@mangostudio/shared/i18n';
 import {
   CheckCircle2,
   Database,
   FileCode,
+  RefreshCw,
   Settings,
   ShieldCheck,
   Trash2,
+  TriangleAlert,
   XCircle,
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { useI18n } from '@/hooks/use-i18n';
+import { useChatGptOAuth } from '../hooks/use-chatgpt-oauth';
 
 interface ConnectorCardProps {
   connector: Connector;
   onConfigure: (connector: Connector) => void;
   onDelete: (connector: Connector) => void;
+  onReauthenticated: (connector: Connector) => void | Promise<void>;
 }
 
 function isReadOnlySharedConnector(connector: Connector): boolean {
@@ -25,18 +30,73 @@ function isReadOnlySharedConnector(connector: Connector): boolean {
   );
 }
 
-export function ConnectorCard({ connector: c, onConfigure, onDelete }: ConnectorCardProps) {
+function formatPlan(
+  planType: string | null | undefined,
+  s: Messages['settings']['connectors']
+): string {
+  const normalizedPlanType = planType?.toLowerCase() ?? '';
+  switch (normalizedPlanType) {
+    case 'plus':
+      return s.chatgptPlanPlus;
+    case 'pro':
+      return s.chatgptPlanPro;
+    case 'team':
+      return s.chatgptPlanTeam;
+    case 'free':
+      return s.chatgptPlanFree;
+    case '':
+      return s.chatgptPlanUnknown;
+    default:
+      return s.chatgptPlanCustom.replace('{plan}', planType ?? normalizedPlanType);
+  }
+}
+
+export function ConnectorCard({
+  connector: c,
+  onConfigure,
+  onDelete,
+  onReauthenticated,
+}: ConnectorCardProps) {
   const { t } = useI18n();
   const s = t.settings.connectors;
   const isReadOnlyShared = isReadOnlySharedConnector(c);
+  const isChatGpt = c.provider === 'chatgpt';
+  const chatGptOAuth = useChatGptOAuth({
+    messages: s,
+    onSuccess: async () => {
+      await onReauthenticated(c);
+    },
+  });
+  const planLabel = formatPlan(c.planType, s);
+
+  const handleReauthenticate = () => {
+    const popup = window.open('about:blank', '_blank');
+    void chatGptOAuth.start({ name: c.name, connectorId: c.id, popup });
+  };
 
   return (
-    <div className="bg-surface-container-lowest border border-outline-variant/10 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4">
-      <div className="flex items-center gap-4">
+    <div
+      className={`bg-surface-container-lowest border rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4 ${
+        c.needsReauth ? 'border-amber-500/30' : 'border-outline-variant/10'
+      }`}
+    >
+      <div className="flex items-start gap-4">
         <div
-          className={`p-2.5 rounded-xl ${c.configured ? 'bg-primary/10 text-primary' : 'bg-error/10 text-error/80'}`}
+          className={`p-2.5 rounded-xl ${
+            c.needsReauth
+              ? 'bg-amber-500/10 text-amber-200'
+              : c.configured
+                ? 'bg-primary/10 text-primary'
+                : 'bg-error/10 text-error/80'
+          }`}
         >
-          {c.configured ? <CheckCircle2 size={20} /> : <XCircle size={20} />}
+          {c.needsReauth ? (
+            <TriangleAlert size={20} />
+          ) : c.configured ? (
+            <CheckCircle2 size={20} />
+          ) : (
+            <XCircle size={20} />
+          )}
         </div>
         <div className="space-y-0.5">
           <div className="flex items-center gap-2 flex-wrap">
@@ -58,8 +118,33 @@ export function ConnectorCard({ connector: c, onConfigure, onDelete }: Connector
               {c.source.replace('-', ' ')}
             </span>
             <span className="text-outline-variant">•</span>
-            <span className="font-mono text-on-surface-variant/60">{c.maskedSuffix ?? '****'}</span>
+            {isChatGpt ? (
+              <>
+                <span className="text-on-surface-variant/60">
+                  {s.chatgptSignedInAs.replace(
+                    '{account}',
+                    c.accountLabel ?? c.maskedSuffix ?? s.chatgptAccountUnknown
+                  )}
+                </span>
+                <span className="text-outline-variant">•</span>
+                <span className="rounded-full border border-outline-variant/20 bg-surface-container-high px-2 py-0.5 text-[10px] text-on-surface-variant">
+                  {s.chatgptPlanBadge.replace('{plan}', planLabel)}
+                </span>
+              </>
+            ) : (
+              <span className="font-mono text-on-surface-variant/60">
+                {c.maskedSuffix ?? '****'}
+              </span>
+            )}
           </div>
+          {isChatGpt && c.needsReauth ? (
+            <p className="text-[11px] leading-relaxed text-amber-200/80">
+              {s.chatgptReauthWarning}
+            </p>
+          ) : null}
+          {chatGptOAuth.error ? (
+            <p className="text-[11px] leading-relaxed text-error">{chatGptOAuth.error}</p>
+          ) : null}
           {isReadOnlyShared && (
             <p className="text-[10px] text-on-surface-variant/50">{s.managedExternally}</p>
           )}
@@ -67,6 +152,26 @@ export function ConnectorCard({ connector: c, onConfigure, onDelete }: Connector
       </div>
 
       <div className="flex items-center gap-2">
+        {isChatGpt && c.needsReauth ? (
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={handleReauthenticate}
+            disabled={chatGptOAuth.isBusy}
+          >
+            {chatGptOAuth.isBusy ? (
+              <>
+                <RefreshCw size={15} className="animate-spin" />
+                {s.chatgptReauthenticating}
+              </>
+            ) : (
+              <>
+                <RefreshCw size={15} />
+                {s.chatgptReauthenticate}
+              </>
+            )}
+          </Button>
+        ) : null}
         <Button
           variant="ghost"
           size="sm"

@@ -7,6 +7,12 @@ export interface Connector
   configured: boolean;
   enabledModels: string[];
   userId: string | null;
+  /** UI-safe account label for OAuth-backed connectors. */
+  accountLabel?: string | null;
+  /** Provider-specific subscription plan label when known. */
+  planType?: string | null;
+  /** True when the connector must be signed in again before use. */
+  needsReauth?: boolean;
 }
 
 /** Current runtime-safe status for configured connectors. */

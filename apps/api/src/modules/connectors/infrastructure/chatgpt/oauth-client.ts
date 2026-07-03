@@ -43,8 +43,10 @@ export class ChatGptOAuthError extends Error {
 }
 
 /** The refresh token was revoked or expired — the user must sign in again. */
+export const CHATGPT_REAUTH_REQUIRED_CODE = ERROR_CODES.CHATGPT_REAUTH_REQUIRED;
+
 export class ChatGptReauthRequiredError extends Error {
-  readonly code = 'CHATGPT_REAUTH_REQUIRED';
+  readonly code = CHATGPT_REAUTH_REQUIRED_CODE;
   readonly status = 401;
 
   constructor() {

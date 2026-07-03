@@ -35,6 +35,8 @@ export const ConnectorStatusSchema = Type.Object({
 
 export const StartChatGptOAuthBodySchema = Type.Object({
   name: Type.String({ minLength: 1 }),
+  /** Optional existing ChatGPT connector to refresh in place. */
+  connectorId: Type.Optional(Type.String({ minLength: 1 })),
 });
 
 export type StartChatGptOAuthBody = Static<typeof StartChatGptOAuthBodySchema>;

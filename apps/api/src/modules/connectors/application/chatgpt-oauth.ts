@@ -18,6 +18,7 @@ import { createDiagnosticLogger } from '../../../lib/logger';
 import { invalidateUnifiedCatalog } from '../../../services/providers/catalog';
 import { invalidateProviderModelCache } from '../../../services/providers/core/provider-registry';
 import { upsertSecretMetadata } from '../../../services/secret-store/metadata';
+import { parseStringArray } from '../../../utils/json';
 import { maskSecret } from '../../../utils/secrets';
 import {
   type ChatGptLoopbackServer,
@@ -34,6 +35,7 @@ import {
 } from '../infrastructure/chatgpt/oauth-constants';
 import { createOAuthState, createPkcePair } from '../infrastructure/chatgpt/pkce';
 import { getChatGptTokenService } from '../infrastructure/chatgpt/token-service';
+import { getSecretMetadataById } from '../infrastructure/connector-repository';
 import { ConnectorValidationError } from './add-connector';
 import { ConnectorNotFoundError } from './connector-errors';
 
@@ -46,6 +48,8 @@ interface OAuthSession {
   id: string;
   userId: string;
   connectorName: string;
+  targetConnectorId?: string;
+  enabledModels: string[];
   status: ChatGptOAuthStatus['status'];
   connectorId?: string;
   error?: string;
@@ -75,7 +79,7 @@ async function completeSession(
   bundle: ChatGptTokenBundle,
   now: () => number
 ): Promise<void> {
-  const connectorId = randomUUID();
+  const connectorId = session.targetConnectorId ?? randomUUID();
   await getChatGptTokenService().persistBundle(connectorId, bundle);
 
   const timestamp = now();
@@ -88,7 +92,8 @@ async function completeSession(
     maskedSuffix: maskSecret(bundle.email ?? bundle.accountId),
     updatedAt: timestamp,
     lastValidatedAt: timestamp,
-    enabledModels: [],
+    lastValidationError: null,
+    enabledModels: session.enabledModels,
     userId: session.userId,
     baseUrl: null,
   });
@@ -131,6 +136,17 @@ export async function startChatGptOAuth(
   }
 
   const now = deps.now ?? (() => Date.now());
+  let targetConnectorId: string | undefined;
+  let enabledModels: string[] = [];
+
+  if (body.connectorId) {
+    const connector = await getSecretMetadataById(body.connectorId, userId);
+    if (!connector || connector.provider !== 'chatgpt' || connector.userId !== userId) {
+      throw new ConnectorNotFoundError();
+    }
+    targetConnectorId = connector.id;
+    enabledModels = parseStringArray(connector.enabledModels);
+  }
 
   // Single active session per user: a stale pending session would otherwise
   // hold the fixed loopback port until its TTL expires.
@@ -150,6 +166,8 @@ export async function startChatGptOAuth(
     id: sessionId,
     userId,
     connectorName,
+    targetConnectorId,
+    enabledModels,
     status: 'pending',
     expiresAt,
     loopback: startChatGptLoopbackServer({

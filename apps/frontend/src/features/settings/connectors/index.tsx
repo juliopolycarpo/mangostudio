@@ -76,6 +76,11 @@ export function ConnectorsSettings({ modelCatalog, reloadModelCatalog }: Connect
         connectors={connectors}
         onAddConnector={() => setIsAddModalOpen(true)}
         onConfigureConnector={modelSelection.openModals}
+        onReauthenticatedConnector={async () => {
+          toast(s.chatgptReconnectSuccess, 'success');
+          await reloadConnectors();
+          await reloadModelCatalog();
+        }}
         onDeleteConnector={(c) => {
           if (isReadOnlySharedConnector(c)) {
             toast(s.sharedDeleteBlocked, 'error');
@@ -94,6 +99,13 @@ export function ConnectorsSettings({ modelCatalog, reloadModelCatalog }: Connect
           showKey={connectorForm.showKey}
           setShowKey={connectorForm.setShowKey}
           onSubmit={() => void connectorForm.submit()}
+          onOAuthSuccess={async () => {
+            setIsAddModalOpen(false);
+            connectorForm.reset();
+            toast(s.addSuccess, 'success');
+            await reloadConnectors();
+            await reloadModelCatalog();
+          }}
           onClose={() => {
             setIsAddModalOpen(false);
             connectorForm.reset();

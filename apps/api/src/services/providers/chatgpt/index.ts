@@ -18,7 +18,10 @@ import {
   parseChatGptTokenBundle,
   refreshTokenGrant,
 } from '../../../modules/connectors/infrastructure/chatgpt/oauth-client';
-import { getChatGptTokenService } from '../../../modules/connectors/infrastructure/chatgpt/token-service';
+import {
+  getChatGptTokenService,
+  markChatGptConnectorReauthRequired,
+} from '../../../modules/connectors/infrastructure/chatgpt/token-service';
 import { listSecretMetadata } from '../../secret-store/metadata';
 import { selectConnectorRowsForModel } from '../core/connector-model-rows';
 import { withModelCache } from '../core/model-cache';
@@ -100,14 +103,20 @@ async function* streamWithAuthRetry<T>(
     return;
   } catch (err) {
     if (!isAuthRejection(err)) throw err;
-    if (yielded) throw new ChatGptReauthRequiredError();
+    if (yielded) {
+      await markChatGptConnectorReauthRequired(runtime.connector);
+      throw new ChatGptReauthRequiredError();
+    }
   }
 
   const refreshed = await getChatGptTokenService().forceRefreshTokens(runtime.connector);
   try {
     yield* makeStream(createChatGptClient(refreshed));
   } catch (err) {
-    if (isAuthRejection(err)) throw new ChatGptReauthRequiredError();
+    if (isAuthRejection(err)) {
+      await markChatGptConnectorReauthRequired(runtime.connector);
+      throw new ChatGptReauthRequiredError();
+    }
     throw err;
   }
 }

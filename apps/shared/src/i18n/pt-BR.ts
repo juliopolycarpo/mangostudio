@@ -371,6 +371,8 @@ export const messages = {
       deleteConfirm: 'Tem certeza que deseja excluir este conector?',
       addModalTitle: 'Adicionar Conector',
       addModalDescription: 'Escolha o provider, configure a chave de API e o armazenamento.',
+      chatgptAddModalDescription:
+        'Conecte uma assinatura ChatGPT pelo navegador. Nenhuma chave de API é necessária.',
       providerLabel: 'Provider',
       selectProvider: 'Selecione o Provider',
       baseUrlLabel: 'URL Base',
@@ -400,6 +402,40 @@ export const messages = {
       cancelButton: 'Cancelar',
       addConnectorButton: 'Adicionar Conector',
       validating: 'Validando...',
+      chatgptOAuthTitle: 'Entrar com ChatGPT',
+      chatgptOAuthDescription:
+        'O MangoStudio abrirá o login da OpenAI e salvará tokens rotativos no armazenamento seguro do sistema.',
+      chatgptSignInButton: 'Entrar com ChatGPT',
+      chatgptSigningIn: 'Abrindo login...',
+      chatgptWaitingTitle: 'Conclua o login no navegador',
+      chatgptWaitingDescription:
+        'Depois da aprovação, este conector aparecerá aqui com seus modelos ChatGPT.',
+      chatgptRemoteAccessHint:
+        'O navegador precisa conseguir acessar este computador para concluir o retorno local.',
+      chatgptCancelSignIn: 'Cancelar login',
+      chatgptSignInSucceeded: 'ChatGPT conectado.',
+      chatgptPortBusyError:
+        'A porta 1455 já está em uso. Feche qualquer `codex login` em execução e tente novamente.',
+      chatgptDeniedError: 'O login do ChatGPT não foi concluído. Tente novamente.',
+      chatgptExpiredError: 'A sessão de login expirou. Inicie o login novamente.',
+      chatgptFailedError: 'Falha ao iniciar o login do ChatGPT.',
+      chatgptPopupBlocked:
+        'O navegador bloqueou a janela de login. Permita pop-ups para o MangoStudio e tente novamente.',
+      chatgptNameRequired: 'Nome é obrigatório para conectar o ChatGPT.',
+      chatgptReauthWarning:
+        'Esta sessão ChatGPT expirou ou foi revogada. Entre novamente para usar este conector.',
+      chatgptReauthenticate: 'Reautenticar',
+      chatgptReauthenticating: 'Aguardando login...',
+      chatgptReconnectSuccess: 'ChatGPT reconectado.',
+      chatgptSignedInAs: 'Conectado como {account}',
+      chatgptAccountUnknown: 'Conta ChatGPT',
+      chatgptPlanBadge: 'Plano {plan}',
+      chatgptPlanPlus: 'Plus',
+      chatgptPlanPro: 'Pro',
+      chatgptPlanTeam: 'Team',
+      chatgptPlanFree: 'Free',
+      chatgptPlanUnknown: 'Desconhecido',
+      chatgptPlanCustom: '{plan}',
       cursorNodeRequired: 'Você precisa do Node.js instalado para executar agentes Cursor SDK.',
       cursorNodeNotFound: 'Binário `node` não encontrado.',
       cursorNodeInvalid:

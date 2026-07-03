@@ -13,7 +13,9 @@ import { upsertSecretMetadata } from '../../../../services/secret-store/metadata
 import { bunSecretStore, type SecretStore } from '../../../../services/secret-store/store';
 import { parseStringArray } from '../../../../utils/json';
 import {
+  CHATGPT_REAUTH_REQUIRED_CODE,
   ChatGptOAuthError,
+  ChatGptReauthRequiredError,
   type ChatGptTokenBundle,
   parseChatGptTokenBundle,
   refreshTokenGrant,
@@ -50,6 +52,30 @@ export function chatGptSecretName(connectorId: string): string {
   return `chatgpt-api-key:${connectorId}`;
 }
 
+export async function markChatGptConnectorReauthRequired(
+  connector: SecretMetadataRow,
+  options: {
+    now?: () => number;
+    upsertMetadata?: typeof upsertSecretMetadata;
+  } = {}
+): Promise<void> {
+  const now = options.now ?? (() => Date.now());
+  const upsertMetadata = options.upsertMetadata ?? upsertSecretMetadata;
+  const timestamp = now();
+  try {
+    await upsertMetadata({
+      ...connector,
+      configured: true,
+      updatedAt: timestamp,
+      lastValidatedAt: timestamp,
+      lastValidationError: CHATGPT_REAUTH_REQUIRED_CODE,
+      enabledModels: parseStringArray(connector.enabledModels),
+    });
+  } catch {
+    // Best-effort status metadata must not mask the re-auth error itself.
+  }
+}
+
 export function createChatGptTokenService(deps: ChatGptTokenServiceDeps = {}): ChatGptTokenService {
   const secretStore = deps.secretStore ?? bunSecretStore;
   const fetchImpl = deps.fetchImpl ?? fetch;
@@ -81,11 +107,19 @@ export function createChatGptTokenService(deps: ChatGptTokenServiceDeps = {}): C
     connector: SecretMetadataRow,
     bundle: ChatGptTokenBundle
   ): Promise<ChatGptTokenBundle> => {
-    const rotated = await refreshTokenGrant({
-      bundle,
-      authBaseUrl: resolveAuthBaseUrl(),
-      fetchImpl,
-    });
+    let rotated: ChatGptTokenBundle;
+    try {
+      rotated = await refreshTokenGrant({
+        bundle,
+        authBaseUrl: resolveAuthBaseUrl(),
+        fetchImpl,
+      });
+    } catch (error) {
+      if (error instanceof ChatGptReauthRequiredError) {
+        await markChatGptConnectorReauthRequired(connector, { now, upsertMetadata });
+      }
+      throw error;
+    }
     await persistBundle(connector.id, rotated);
     await upsertMetadata({
       ...connector,
