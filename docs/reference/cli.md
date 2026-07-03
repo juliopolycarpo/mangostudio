@@ -31,8 +31,9 @@ copy-paste commands, or:
 | `stop`                             | Gracefully stop the running server (SIGTERM).                                       |
 | `killserver`                       | Force-kill the running server (SIGKILL).                                            |
 | `doctor`                           | Run environment and configuration diagnostics.                                      |
-| `doctor --all`                     | Include Cursor runtime checks even without a Cursor connector.                      |
+| `doctor --all`                     | Include Cursor and ChatGPT connector checks even without a configured connector.    |
 | `doctor --cursor-probe`            | After chain checks pass, spawn the sidecar `validate_api_key` RPC with a dummy key. |
+| `doctor --chatgpt-refresh`         | Perform a live ChatGPT token refresh probe (rotates the stored refresh token).      |
 | `version`, `--version`, `-v`       | Print the embedded MangoStudio version.                                             |
 
 `-d` / `--detach` and the positional host/port target may be combined in any
@@ -132,6 +133,33 @@ MangoStudio doctor
 
 See [`docs/providers/cursor.md`](../providers/cursor.md#troubleshooting) for
 reason-code meanings and remediation.
+
+### ChatGPT connector checks
+
+When at least one ChatGPT connector exists (or with `--all`), doctor also runs
+a ChatGPT section. OAuth connectors fail in ways API-key connectors don't —
+expired or revoked refresh tokens, an unreachable OS secret store, another
+process holding the fixed callback port, an unreachable backend — and each
+gets its own row:
+
+| Check             | What it verifies                                                                                 |
+| ----------------- | ------------------------------------------------------------------------------------------------ |
+| `ChatGPT secrets` | The secret store that holds the token bundles is reachable.                                      |
+| `ChatGPT tokens`  | Per connector: the stored bundle is readable and parses; access-token expiry countdown.          |
+| `ChatGPT refresh` | Only with `--chatgpt-refresh`: live refresh probe — reports rotation success or `invalid_grant`. |
+| `ChatGPT port`    | The fixed OAuth callback port `1455` is free (Codex CLI uses the same port).                     |
+| `ChatGPT auth`    | `chatgpt.auth_base_url` answers over HTTP (any status counts as reachable).                      |
+| `ChatGPT backend` | `chatgpt.api_base_url` answers over HTTP (any status counts as reachable).                       |
+
+Doctor is read-only by default: token bundles are only read, never refreshed,
+and no token material is ever printed — accounts appear masked exactly like the
+Settings connector card. `--chatgpt-refresh` is the one mutating exception: it
+performs a real refresh, which rotates and persists the stored refresh token,
+proving end-to-end that the session is still valid. An expired access token on
+its own is only a warning (it refreshes on next use); a failed refresh or a
+connector flagged for re-auth is a failure that means "sign in with ChatGPT
+again". Network probes use the standard 5-second provider probe timeout, so
+doctor never hangs offline.
 
 ## Exit codes
 
