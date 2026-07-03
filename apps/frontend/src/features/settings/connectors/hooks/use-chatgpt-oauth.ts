@@ -45,7 +45,6 @@ function mapFailedStatus(
   messages: Messages['settings']['connectors']
 ): string {
   if (status.error?.includes('1455')) return messages.chatgptPortBusyError;
-  if (status.errorCode === ERROR_CODES.CHATGPT_REAUTH_REQUIRED) return messages.chatgptDeniedError;
   return messages.chatgptDeniedError;
 }
 
@@ -139,6 +138,7 @@ export function useChatGptOAuth({ messages, onSuccess }: UseChatGptOAuthOptions)
     if (phase !== 'waiting' || !session) return;
 
     let stopped = false;
+    let settled = false;
     let intervalId: number | undefined;
 
     const settleSuccess = async (status: ChatGptOAuthStatus) => {
@@ -150,27 +150,32 @@ export function useChatGptOAuth({ messages, onSuccess }: UseChatGptOAuthOptions)
     };
 
     const poll = async () => {
+      if (stopped || settled) return;
       if (Date.now() >= session.expiresAt) {
+        settled = true;
         fail(messages.chatgptExpiredError, 'expired');
         return;
       }
 
       try {
         const status = await getChatGptOAuthStatus(session.sessionId);
-        if (stopped) return;
+        if (stopped || settled) return;
         if (status.status === 'completed') {
+          settled = true;
           await settleSuccess(status);
           return;
         }
         if (status.status === 'failed') {
+          settled = true;
           fail(mapFailedStatus(status, messages));
           return;
         }
         if (status.status === 'expired') {
+          settled = true;
           fail(messages.chatgptExpiredError, 'expired');
         }
       } catch (err) {
-        if (!stopped) fail(mapErrorMessage(err, messages));
+        if (!stopped && !settled) fail(mapErrorMessage(err, messages));
       }
     };
 
