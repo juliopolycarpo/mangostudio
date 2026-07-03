@@ -35,6 +35,11 @@ export interface ChatGptTokenServiceDeps {
 export interface ChatGptTokenService {
   /** Returns the stored bundle, refreshing (and persisting the rotation) when near expiry. */
   ensureFreshTokens(connector: SecretMetadataRow): Promise<ChatGptTokenBundle>;
+  /**
+   * Refreshes regardless of expiry (e.g. after the backend rejected an
+   * unexpired access token with 401). Joins an in-flight refresh when present.
+   */
+  forceRefreshTokens(connector: SecretMetadataRow): Promise<ChatGptTokenBundle>;
   /** Reads and parses the stored bundle without refreshing. */
   readBundle(connectorId: string): Promise<ChatGptTokenBundle>;
   /** Persists a bundle for a connector id. */
@@ -93,6 +98,20 @@ export function createChatGptTokenService(deps: ChatGptTokenServiceDeps = {}): C
     return rotated;
   };
 
+  const refreshSingleFlight = (
+    connector: SecretMetadataRow,
+    bundle: ChatGptTokenBundle
+  ): Promise<ChatGptTokenBundle> => {
+    const inflight = inflightRefreshes.get(connector.id);
+    if (inflight) return inflight;
+
+    const refresh = refreshAndPersist(connector, bundle).finally(() => {
+      inflightRefreshes.delete(connector.id);
+    });
+    inflightRefreshes.set(connector.id, refresh);
+    return refresh;
+  };
+
   return {
     readBundle,
     persistBundle,
@@ -100,15 +119,11 @@ export function createChatGptTokenService(deps: ChatGptTokenServiceDeps = {}): C
     async ensureFreshTokens(connector: SecretMetadataRow): Promise<ChatGptTokenBundle> {
       const bundle = await readBundle(connector.id);
       if (bundle.expiresAt - now() > EXPIRY_SKEW_MS) return bundle;
+      return refreshSingleFlight(connector, bundle);
+    },
 
-      const inflight = inflightRefreshes.get(connector.id);
-      if (inflight) return inflight;
-
-      const refresh = refreshAndPersist(connector, bundle).finally(() => {
-        inflightRefreshes.delete(connector.id);
-      });
-      inflightRefreshes.set(connector.id, refresh);
-      return refresh;
+    async forceRefreshTokens(connector: SecretMetadataRow): Promise<ChatGptTokenBundle> {
+      return refreshSingleFlight(connector, await readBundle(connector.id));
     },
   };
 }
