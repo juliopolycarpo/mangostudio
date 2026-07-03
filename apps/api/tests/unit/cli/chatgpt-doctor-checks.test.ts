@@ -233,8 +233,7 @@ describe('collectChatGptDoctorChecks', () => {
       false,
       makeDeps({
         fetchImpl: (input) => {
-          const url = String(input);
-          if (url.startsWith('https://auth.example.test')) {
+          if (new URL(String(input)).host === 'auth.example.test') {
             return Promise.resolve(new Response(null, { status: 403 }));
           }
           return Promise.reject(new Error('getaddrinfo ENOTFOUND api.example.test'));
