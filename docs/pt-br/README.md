@@ -7,7 +7,7 @@
 [![CI](https://github.com/juliopolycarpo/mangostudio/actions/workflows/ci.yml/badge.svg)](https://github.com/juliopolycarpo/mangostudio/actions/workflows/ci.yml)
 [![Release](https://github.com/juliopolycarpo/mangostudio/actions/workflows/release.yml/badge.svg)](https://github.com/juliopolycarpo/mangostudio/actions/workflows/release.yml)
 
-Estúdio de geração de imagens e chat alimentado por IA com suporte a modelos Gemini, compatíveis com OpenAI e Anthropic.
+Estúdio de geração de imagens e chat alimentado por IA com suporte a modelos Gemini, compatíveis com OpenAI, Anthropic, Cursor, DeepSeek e ChatGPT.
 
 > 🇺🇸 [Read in English](../../README.md)
 
@@ -68,7 +68,8 @@ Para deploy em container, veja [`docs/operations/deployment.md`](../operations/d
 ## Pré-requisitos (desenvolvimento)
 
 - [Bun](https://bun.sh/) (v1.3.14+)
-- Uma ou mais chaves de API para os provedores suportados (Gemini, compatíveis com OpenAI, Anthropic)
+- Uma ou mais chaves de API ou contas com login para provedores suportados
+  (Gemini, compatíveis com OpenAI, Anthropic, Cursor, DeepSeek, ChatGPT)
 
 ## Desenvolver a partir do código-fonte
 
@@ -111,6 +112,18 @@ Acesse a página **Configurações** na interface do MangoStudio para adicionar 
 
 Para cada conector, é possível habilitar ou desabilitar modelos específicos (ex: Gemini 2.5 Flash, Gemini 2.0 Flash Image). O MangoStudio seleciona automaticamente o conector correto com base no modelo ativo no chat.
 
+### Provedores Suportados
+
+| Provedor          | Credencial                                  | Notas                                        |
+| ----------------- | ------------------------------------------- | -------------------------------------------- |
+| Gemini            | Chave de API                                | Modelos de texto e imagem                    |
+| OpenAI            | Chave de API                                | IDs opcionais de organização/projeto         |
+| Compatível OpenAI | Chave de API + base URL                     | Endpoints compatíveis customizados           |
+| Anthropic         | Chave de API                                | Modelos Claude de texto                      |
+| DeepSeek          | Chave de API                                | Provedor de reasoning de primeira classe     |
+| Cursor            | Chave de API + sidecar Node.js 22.13+       | Agente local do Cursor SDK                   |
+| ChatGPT           | Login pelo navegador com assinatura ChatGPT | Armazena tokens rotativos no OS secret store |
+
 ### Sincronização via Terminal
 
 Você pode adicionar chaves manualmente em `~/.mango/config.toml`:
@@ -122,6 +135,14 @@ trabalho = "outra-chave-aqui"
 ```
 
 O MangoStudio sincroniza essas chaves automaticamente ao carregar a página de Configurações ou ao iniciar uma geração.
+
+### Conector De Assinatura ChatGPT
+
+O provedor **ChatGPT** usa login pelo navegador em vez de chave de API. Ele inicia
+um servidor temporário de callback na porta `1455`, armazena tokens OAuth
+rotativos no OS secret store e usa os modelos disponíveis no plano ChatGPT
+conectado. Veja [docs/providers/chatgpt.md](providers/chatgpt.md) para
+detalhes e notas de port-forwarding em hosts remotos.
 
 ## Estrutura do Projeto
 

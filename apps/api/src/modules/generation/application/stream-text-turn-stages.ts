@@ -8,6 +8,7 @@ import type { MultiAgentSettings } from '@mangostudio/shared/app-settings';
 import { MAX_TOOL_ITERATIONS_DEFAULT } from '@mangostudio/shared/app-settings';
 import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';
+import { getErrorCode } from '../../../lib/error-code';
 import { createDiagnosticLogger } from '../../../lib/logger';
 import {
   type AgentTurnExecutionState,
@@ -949,6 +950,7 @@ export async function* finalizeTurnError(
   if (signal?.aborted) return;
 
   const message = error instanceof Error ? error.message : 'Stream generation failed';
+  const code = getErrorCode(error);
   streamTextTurnLogger.error('turn_failed', { chatId, message });
 
   if (!executionState.durableProviderState) {
@@ -987,5 +989,5 @@ export async function* finalizeTurnError(
     // best-effort
   }
 
-  yield { type: 'error', error: message };
+  yield { type: 'error', error: message, ...(code ? { code } : {}) };
 }

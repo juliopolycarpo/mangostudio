@@ -35,6 +35,7 @@ const WATCHED_ENV_KEYS = [
   'CURSOR_WORKSPACE_DIR',
   'MANGO_CURSOR_SIDECAR_SCRIPT',
   'MANGO_NODE_PATH',
+  'MANGO_SECRET_STORE_UNSAFE_FILE_FALLBACK_DIR',
 ];
 
 function saveEnv(): Record<string, string | undefined> {
@@ -270,6 +271,28 @@ describe('config precedence', () => {
     const cfg = loadConfig(join(TMP_DIR, 'nonexistent.toml'));
 
     expect(cfg.cursor.nodePath).toBe('');
+  });
+
+  test('loads unsafe secret-store fallback directory from config.toml', () => {
+    writeFileSync(
+      TMP_TOML,
+      '[secret_store]\nunsafe_file_fallback_dir = "./tmp/test-secret-store"\n'
+    );
+
+    const cfg = loadConfig(TMP_TOML);
+
+    expect(cfg.secretStore.unsafeFileFallbackDir).toBe(
+      resolve(import.meta.dir, '../../../../../tmp/test-secret-store')
+    );
+  });
+
+  test('MANGO_SECRET_STORE_UNSAFE_FILE_FALLBACK_DIR overrides config.toml', () => {
+    writeFileSync(TMP_TOML, '[secret_store]\nunsafe_file_fallback_dir = "/tmp/from-toml"\n');
+    process.env.MANGO_SECRET_STORE_UNSAFE_FILE_FALLBACK_DIR = '/tmp/from-env';
+
+    const cfg = loadConfig(TMP_TOML);
+
+    expect(cfg.secretStore.unsafeFileFallbackDir).toBe('/tmp/from-env');
   });
 });
 

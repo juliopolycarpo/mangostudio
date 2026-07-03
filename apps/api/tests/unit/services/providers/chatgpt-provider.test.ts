@@ -344,6 +344,7 @@ describe('chatgpt provider — 401 refresh/retry policy', () => {
       },
       readBundle: () => Promise.resolve(bundles.fresh),
       persistBundle: () => Promise.resolve(),
+      deleteBundle: () => Promise.resolve(true),
     };
     setChatGptTokenServiceForTests(service);
   }

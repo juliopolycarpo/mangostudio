@@ -19,6 +19,7 @@
 import { existsSync, mkdtempSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { startFakeChatGptServer } from '../apps/api/tests/support/chatgpt/fake-server';
 import { createCursorSmokeSidecarFixture } from './lib/cursor-smoke-sidecar-fixture';
 import { captureCommand } from './lib/exec';
 import { NPM_PLATFORMS, platformShipsCursorSidecar } from './lib/npm-pack';
@@ -42,6 +43,7 @@ const SKIP_BUILD = process.env.SKIP_BUILD === '1';
 const PORT = parseInt(process.env.API_PORT ?? '13001', 10);
 const RELEASE_ASSETS_DIR = join(ROOT_DIR, 'release-assets');
 const NPM_PLATFORM = NPM_PLATFORMS.find((platform) => platform.arch === REQUESTED_PLATFORM);
+const CHATGPT_CALLBACK_PORT = 1455;
 // Resolve via the canonical helper so the archive name we expect matches the one
 // archive-assets.ts produces (same VERSION override + semver validation).
 const VERSION = resolveReleaseVersion({ rootDir: ROOT_DIR });
@@ -341,12 +343,110 @@ async function smokeCursorConnector(
   );
 }
 
+async function smokeChatGptConnector(port: number, sessionCookie: string): Promise<void> {
+  const startResponse = await fetch(
+    `http://127.0.0.1:${port}/api/settings/connectors/chatgpt/oauth/start`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Cookie: sessionCookie,
+      },
+      body: JSON.stringify({ name: 'smoke-chatgpt-connector' }),
+    }
+  );
+  if (!startResponse.ok) {
+    fail(`ChatGPT OAuth start failed with ${startResponse.status}: ${await startResponse.text()}`);
+  }
+  const started = (await startResponse.json()) as { sessionId: string; authorizeUrl: string };
+
+  const callbackResponse = await fetch(started.authorizeUrl);
+  if (!callbackResponse.ok) {
+    fail(`ChatGPT OAuth callback failed with ${callbackResponse.status}`);
+  }
+
+  const status = await waitForChatGptOAuthStatus(port, sessionCookie, started.sessionId);
+  if (status.status !== 'completed' || !status.connectorId) {
+    fail(`ChatGPT OAuth did not complete: ${JSON.stringify(status)}`);
+  }
+
+  const connectorsResponse = await fetch(`http://127.0.0.1:${port}/api/settings/connectors`, {
+    headers: { Cookie: sessionCookie },
+  });
+  if (!connectorsResponse.ok) {
+    fail(`GET /api/settings/connectors failed with ${connectorsResponse.status}`);
+  }
+  const connectors = (await connectorsResponse.json()) as {
+    connectors?: Array<{ id?: string; provider?: string; needsReauth?: boolean }>;
+  };
+  const connector = connectors.connectors?.find((item) => item.id === status.connectorId);
+  if (connector?.provider !== 'chatgpt' || connector.needsReauth) {
+    fail(`ChatGPT connector status is not healthy: ${JSON.stringify(connector)}`);
+  }
+
+  const modelsResponse = await fetch(`http://127.0.0.1:${port}/api/settings/models`, {
+    headers: { Cookie: sessionCookie },
+  });
+  if (!modelsResponse.ok) {
+    fail(`GET /api/settings/models failed with ${modelsResponse.status}`);
+  }
+  const models = (await modelsResponse.json()) as {
+    allModels?: Array<{ provider?: string; modelId?: string }>;
+  };
+  const hasChatGptModel = models.allModels?.some(
+    (model) => model.provider === 'chatgpt' && model.modelId === 'gpt-5.5'
+  );
+  if (!hasChatGptModel) {
+    fail(`ChatGPT model catalog did not include gpt-5.5: ${JSON.stringify(models)}`);
+  }
+
+  pass('ChatGPT OAuth connector smoke completed and listed models');
+}
+
+async function waitForChatGptOAuthStatus(
+  port: number,
+  sessionCookie: string,
+  sessionId: string
+): Promise<{ status: string; connectorId?: string; error?: string }> {
+  const deadline = Date.now() + 5_000;
+  let lastStatus: { status: string; connectorId?: string; error?: string } = { status: 'pending' };
+  while (Date.now() < deadline) {
+    const response = await fetch(
+      `http://127.0.0.1:${port}/api/settings/connectors/chatgpt/oauth/${sessionId}/status`,
+      { headers: { Cookie: sessionCookie } }
+    );
+    if (!response.ok) fail(`ChatGPT OAuth status failed with ${response.status}`);
+    lastStatus = (await response.json()) as typeof lastStatus;
+    if (lastStatus.status !== 'pending') return lastStatus;
+    await Bun.sleep(100);
+  }
+  return lastStatus;
+}
+
+function canBindChatGptCallbackPort(): boolean {
+  let server: ReturnType<typeof Bun.serve> | null = null;
+  try {
+    server = Bun.serve({
+      hostname: '127.0.0.1',
+      port: CHATGPT_CALLBACK_PORT,
+      fetch: () => new Response('ok'),
+    });
+    return true;
+  } catch {
+    return false;
+  } finally {
+    server?.stop(true);
+  }
+}
+
 async function smokeTest(): Promise<void> {
   console.log(`\n🚀 Starting binary on port ${PORT}...`);
 
   const tmpHome = makeTempDir();
   const dbPath = join(tmpHome, 'smoke.sqlite');
   const authBaseUrl = `http://127.0.0.1:${PORT}`;
+  const chatGptSmokeEnabled = canBindChatGptCallbackPort();
+  const fakeChatGpt = chatGptSmokeEnabled ? startFakeChatGptServer() : null;
   const cursorFixture =
     NPM_PLATFORM && platformShipsCursorSidecar(NPM_PLATFORM)
       ? createCursorSmokeSidecarFixture(PLATFORM.arch)
@@ -367,6 +467,13 @@ async function smokeTest(): Promise<void> {
       API_PORT: String(PORT),
       BETTER_AUTH_URL: authBaseUrl,
       ...(cursorFixture ? { MANGO_CURSOR_SIDECAR_SCRIPT: cursorFixture.sidecarScriptPath } : {}),
+      ...(fakeChatGpt
+        ? {
+            MANGO_CHATGPT_AUTH_BASE_URL: fakeChatGpt.authBaseUrl,
+            MANGO_CHATGPT_BASE_URL: fakeChatGpt.apiBaseUrl,
+            MANGO_SECRET_STORE_UNSAFE_FILE_FALLBACK_DIR: join(tmpHome, 'secret-store'),
+          }
+        : {}),
       // Required since the auth-secret startup guard landed; a 32+ char
       // random value satisfies the runtime check without exposing a real key.
       BETTER_AUTH_SECRET: 'smoke-test-secret-at-least-32-characters-long',
@@ -444,10 +551,7 @@ async function smokeTest(): Promise<void> {
       pass('/api/auth/get-session → handled by Better Auth (not intercepted by SPA fallback)');
     }
 
-    if (cursorFixture) {
-      console.log('\n🔌 Running Cursor connector smoke...');
-      await assertNodeRuntimeForCursor();
-
+    if (cursorFixture || fakeChatGpt) {
       const signupEmail = `smoke-${Date.now()}@test.local`;
       const signupResponse = await fetch(`${authBaseUrl}/api/auth/sign-up/email`, {
         method: 'POST',
@@ -465,10 +569,31 @@ async function smokeTest(): Promise<void> {
       pass('POST /api/auth/sign-up/email → session created');
 
       const sessionCookie = buildSessionCookieHeader(signupResponse);
-      await smokeCursorConnector(PORT, sessionCookie, serverStderr);
+
+      if (cursorFixture) {
+        console.log('\n🔌 Running Cursor connector smoke...');
+        await assertNodeRuntimeForCursor();
+        await smokeCursorConnector(PORT, sessionCookie, serverStderr);
+      } else {
+        console.log(
+          `\n⏭️  Cursor connector smoke skipped — ${PLATFORM.arch} ships no Cursor sidecar.`
+        );
+      }
+
+      if (fakeChatGpt) {
+        console.log('\n🔌 Running ChatGPT connector smoke...');
+        await smokeChatGptConnector(PORT, sessionCookie);
+      } else {
+        console.log(
+          `\n⏭️  ChatGPT connector smoke skipped — port ${CHATGPT_CALLBACK_PORT} is already bound.`
+        );
+      }
     } else {
       console.log(
         `\n⏭️  Cursor connector smoke skipped — ${PLATFORM.arch} ships no Cursor sidecar.`
+      );
+      console.log(
+        `\n⏭️  ChatGPT connector smoke skipped — port ${CHATGPT_CALLBACK_PORT} is already bound.`
       );
     }
   } finally {
@@ -476,6 +601,7 @@ async function smokeTest(): Promise<void> {
     await proc.exited.catch(() => undefined as undefined);
     await stderrPump.catch(() => undefined as undefined);
     cursorFixture?.cleanup();
+    fakeChatGpt?.stop();
     removeTempDir(tmpHome);
   }
 }

@@ -7,7 +7,7 @@
 [![CI](https://github.com/juliopolycarpo/mangostudio/actions/workflows/ci.yml/badge.svg)](https://github.com/juliopolycarpo/mangostudio/actions/workflows/ci.yml)
 [![Release](https://github.com/juliopolycarpo/mangostudio/actions/workflows/release.yml/badge.svg)](https://github.com/juliopolycarpo/mangostudio/actions/workflows/release.yml)
 
-AI-powered image generation and chat studio supporting Gemini, OpenAI-compatible, and Anthropic models.
+AI-powered image generation and chat studio supporting Gemini, OpenAI-compatible, Anthropic, Cursor, DeepSeek, and ChatGPT models.
 
 > 🇧🇷 [Leia em Português](docs/pt-br/README.md)
 
@@ -66,7 +66,8 @@ For container deployment details, see [`docs/operations/deployment.md`](docs/ope
 ## Prerequisites
 
 - [Bun](https://bun.sh/) (v1.3.14+)
-- One or more API keys for supported providers (Gemini, OpenAI-compatible, Anthropic)
+- One or more API keys or sign-in capable accounts for supported providers
+  (Gemini, OpenAI-compatible, Anthropic, Cursor, DeepSeek, ChatGPT)
 
 ## Develop from source
 
@@ -109,6 +110,18 @@ Go to the **Settings** page in the MangoStudio interface to add and manage conne
 
 For each connector, you can enable or disable specific models (e.g., Gemini 2.5 Flash, Gemini 2.0 Flash Image). MangoStudio automatically selects the correct connector based on the active model in the chat.
 
+### Supported Providers
+
+| Provider          | Credential                                  | Notes                                         |
+| ----------------- | ------------------------------------------- | --------------------------------------------- |
+| Gemini            | API key                                     | Text and image models                         |
+| OpenAI            | API key                                     | Optional organization/project IDs             |
+| OpenAI-compatible | API key + base URL                          | Custom compatible endpoints                   |
+| Anthropic         | API key                                     | Claude text models                            |
+| DeepSeek          | API key                                     | First-class reasoning provider                |
+| Cursor            | API key + Node.js 22.13+ sidecar            | Local Cursor SDK agent runs                   |
+| ChatGPT           | Browser sign-in with a ChatGPT subscription | Stores rotating tokens in the OS secret store |
+
 ### Terminal Sync
 
 You can manually add keys to `~/.mango/config.toml`:
@@ -136,6 +149,14 @@ workspace_dir = "/path/to/your/project"
 ```
 
 See [docs/providers/cursor.md](docs/providers/cursor.md) for details.
+
+### ChatGPT Subscription Connector
+
+The **ChatGPT** provider uses browser sign-in instead of an API key. It starts a
+temporary callback server on port `1455`, stores rotating OAuth tokens in the OS
+secret store, and uses the models available to the signed-in ChatGPT plan. See
+[docs/providers/chatgpt.md](docs/providers/chatgpt.md) for details and remote-host
+port-forwarding notes.
 
 ## Project Structure
 
@@ -250,14 +271,14 @@ Files that pass formatting are re-staged automatically. All hooks must succeed f
 
 ## Architecture
 
-| Layer        | Technologies                                                                 |
-| ------------ | ---------------------------------------------------------------------------- |
-| **Frontend** | React 19, Vite 8, Tailwind CSS v4, TanStack Router/Query                     |
-| **API**      | Elysia, Better Auth, native rate limiting, DDD-inspired modular architecture |
-| **Database** | SQLite via Kysely (type-safe query builder)                                  |
-| **AI**       | Multi-provider (Gemini, OpenAI, Anthropic, DeepSeek, OpenAI-compatible)      |
-| **Runtime**  | Bun — no Node.js dependency                                                  |
-| **i18n**     | Pure TypeScript dictionary in `@mangostudio/shared/i18n`                     |
+| Layer        | Technologies                                                                             |
+| ------------ | ---------------------------------------------------------------------------------------- |
+| **Frontend** | React 19, Vite 8, Tailwind CSS v4, TanStack Router/Query                                 |
+| **API**      | Elysia, Better Auth, native rate limiting, DDD-inspired modular architecture             |
+| **Database** | SQLite via Kysely (type-safe query builder)                                              |
+| **AI**       | Multi-provider (Gemini, OpenAI, Anthropic, DeepSeek, Cursor, ChatGPT, OpenAI-compatible) |
+| **Runtime**  | Bun — no Node.js dependency                                                              |
+| **i18n**     | Pure TypeScript dictionary in `@mangostudio/shared/i18n`                                 |
 
 ## Editor Setup
 

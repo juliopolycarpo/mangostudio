@@ -98,6 +98,7 @@ The orchestrator reads exclusively from `chats.lastProviderState` (line
 | OpenAI-compatible     | no             | none                      | `buildChatCompletionsReplay`             | none (always starts fresh)                   | `loopMessages` only             |
 | Anthropic             | no             | none                      | direct Messages replay (history-derived) | none (always starts fresh)                   | `loopMessages` only             |
 | DeepSeek              | no             | none                      | `buildChatCompletionsReplay`             | none (always starts fresh)                   | `loopMessages` only             |
+| ChatGPT               | no             | none                      | `buildOpenAIResponsesReplay`             | none (always starts fresh)                   | Responses loop items            |
 
 Source files:
 

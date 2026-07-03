@@ -84,6 +84,13 @@ export interface MangoConfig {
     /** ChatGPT API base URL. Override only for tests/debugging. */
     apiBaseUrl: string;
   };
+  secretStore: {
+    /**
+     * Unsafe plaintext secret-store directory for automated smoke tests.
+     * When set, this replaces the native Bun.secrets backend.
+     */
+    unsafeFileFallbackDir: string;
+  };
 }
 
 const DEFAULT_CONFIG: Omit<MangoConfig, 'corsOrigins' | 'configFilePath'> = {
@@ -100,6 +107,7 @@ const DEFAULT_CONFIG: Omit<MangoConfig, 'corsOrigins' | 'configFilePath'> = {
     authBaseUrl: 'https://auth.openai.com',
     apiBaseUrl: 'https://chatgpt.com/backend-api/codex',
   },
+  secretStore: { unsafeFileFallbackDir: '' },
 };
 
 export const AUTH_SECRET_MIN_LENGTH = 32;
@@ -159,6 +167,9 @@ const ENV_KEY_MAP: Record<string, (cfg: MangoConfig, value: string) => void> = {
   },
   MANGO_CHATGPT_BASE_URL: (cfg, v) => {
     cfg.chatgpt.apiBaseUrl = v;
+  },
+  MANGO_SECRET_STORE_UNSAFE_FILE_FALLBACK_DIR: (cfg, v) => {
+    cfg.secretStore.unsafeFileFallbackDir = v;
   },
 };
 
@@ -288,6 +299,7 @@ function cloneDefaults(): MangoConfig {
     security: { ...DEFAULT_CONFIG.security },
     cursor: { ...DEFAULT_CONFIG.cursor },
     chatgpt: { ...DEFAULT_CONFIG.chatgpt },
+    secretStore: { ...DEFAULT_CONFIG.secretStore },
     corsOrigins: [],
     configFilePath: '',
   };
@@ -358,6 +370,16 @@ function applyToml(cfg: MangoConfig, parsed: Record<string, unknown>): void {
       cfg.chatgpt.apiBaseUrl = chatgpt.api_base_url;
     }
   }
+
+  const secretStore = parsed.secret_store as Record<string, unknown> | undefined;
+  if (secretStore) {
+    if (
+      typeof secretStore.unsafe_file_fallback_dir === 'string' &&
+      secretStore.unsafe_file_fallback_dir
+    ) {
+      cfg.secretStore.unsafeFileFallbackDir = secretStore.unsafe_file_fallback_dir;
+    }
+  }
 }
 
 /** Applies .env overrides onto a config object. */
@@ -416,6 +438,10 @@ function computeDerived(cfg: MangoConfig, tomlPath: string): void {
 
   if (cfg.cursor.nodePath) {
     cfg.cursor.nodePath = resolveUserPath(cfg.cursor.nodePath);
+  }
+
+  if (cfg.secretStore.unsafeFileFallbackDir) {
+    cfg.secretStore.unsafeFileFallbackDir = resolveUserPath(cfg.secretStore.unsafeFileFallbackDir);
   }
 
   // CORS origins from frontend host/port (include +1 for Vite port bumping)
@@ -590,6 +616,7 @@ export function loadConfigForTest(partial: Partial<MangoConfig> = {}): MangoConf
   if (partial.security) Object.assign(cfg.security, partial.security);
   if (partial.cursor) Object.assign(cfg.cursor, partial.cursor);
   if (partial.chatgpt) Object.assign(cfg.chatgpt, partial.chatgpt);
+  if (partial.secretStore) Object.assign(cfg.secretStore, partial.secretStore);
   if (partial.corsOrigins) cfg.corsOrigins = partial.corsOrigins;
 
   // Default to the single managed test config path (not /dev/null, which

@@ -80,6 +80,7 @@ Replay é o caminho de fallback usado quando não há cursor durável disponíve
 | Provedor            | Função de replay                | Formato de saída                                                             |
 | ------------------- | ------------------------------- | ---------------------------------------------------------------------------- |
 | OpenAI Responses    | `buildOpenAIResponsesReplay`    | Array de `ResponseInputItem` com roles e function calls                      |
+| ChatGPT             | `buildOpenAIResponsesReplay`    | Input Responses mais itens locais de loop de reasoning/function-call         |
 | Gemini Interactions | `buildGeminiInteractionsReplay` | Array de objetos de turno com role, content, function_call e function_result |
 | OpenAI-compatible   | `buildChatCompletionsReplay`    | `ChatCompletionMessageParam[]` com array `tool_calls`                        |
 | DeepSeek            | `buildChatCompletionsReplay`    | `ChatCompletionMessageParam[]` com `reasoning_content` nos loops de tools    |

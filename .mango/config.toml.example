@@ -81,6 +81,11 @@ url = ""
 # auth_base_url = "https://auth.openai.com"
 # api_base_url = "https://chatgpt.com/backend-api/codex"
 
+# Unsafe plaintext secret store for automated binary smoke tests. When set, it
+# replaces native Bun.secrets storage. Leave empty in normal use.
+[secret_store]
+# unsafe_file_fallback_dir = ""
+
 # Optional workspace directory for Cursor SDK local agents.
 # Empty = current working directory when MangoStudio starts.
 [cursor]

@@ -35,6 +35,7 @@ export interface ConnectorEntry {
   name: string;
   baseUrl: string | null;
   configured: boolean;
+  lastValidationError?: string | null;
   enabledModels?: string[];
   accountLabel?: string | null;
   planType?: string | null;
@@ -58,6 +59,7 @@ export interface SuccessPayload {
 }
 export interface ModelCatalogPayload {
   status: string;
+  allModels: Array<{ provider?: string; modelId?: string }>;
   textModels: unknown[];
   imageModels: unknown[];
 }

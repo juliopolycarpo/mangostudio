@@ -47,6 +47,7 @@ Abra estes arquivos primeiro:
 - `apps/api/src/services/providers/anthropic/stream.ts`
 - `apps/api/src/services/providers/deepseek/agent-stream.ts`
 - `apps/api/src/services/providers/deepseek/client.ts`
+- `apps/api/src/services/providers/chatgpt/`
 - `apps/api/src/modules/generation/http/respond-routes.ts`
 - `apps/api/src/modules/chats/http/chat-routes.ts`
 - `apps/api/src/modules/messages/http/message-routes.ts`
@@ -63,8 +64,10 @@ Abra estes arquivos primeiro:
 Abra estes arquivos primeiro:
 
 - `apps/api/src/modules/connectors/http/connectors-routes.ts`
+- `apps/api/src/modules/connectors/http/chatgpt-oauth-routes.ts`
 - `apps/api/src/modules/connectors/http/gemini-aliases-routes.ts`
 - `apps/api/src/modules/connectors/application/`
+- `apps/api/src/modules/connectors/infrastructure/chatgpt/`
 - `apps/api/src/services/providers/`
 - `apps/api/src/services/secret-store/`
 - `apps/api/src/modules/provider-settings/http/provider-settings-routes.ts`
@@ -177,3 +180,4 @@ Abra estes arquivos primeiro:
 - `.mango/config.toml.example`
 - `.mango/.env.example`
 - `scripts/build.ts`
+- `scripts/test-build.ts` (binary smoke)

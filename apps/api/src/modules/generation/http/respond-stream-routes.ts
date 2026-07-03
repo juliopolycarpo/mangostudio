@@ -10,6 +10,7 @@ import { RespondStreamBodySchema } from '@mangostudio/shared/generation';
 import type { SSEErrorEvent } from '@mangostudio/shared/streaming';
 import type { Elysia } from 'elysia';
 import { getDb } from '../../../db/database';
+import { getErrorCode } from '../../../lib/error-code';
 import { requireAuth } from '../../../plugins/auth-middleware';
 import {
   getProvider,
@@ -206,7 +207,12 @@ function toSsePayload(event: StreamEvent): object {
         generationTime: event.generationTime,
       };
     case 'error': {
-      const errorEvent: SSEErrorEvent = { type: 'error', error: event.error, done: true };
+      const errorEvent: SSEErrorEvent = {
+        type: 'error',
+        error: event.error,
+        ...(event.code ? { code: event.code } : {}),
+        done: true,
+      };
       return errorEvent;
     }
   }
@@ -331,7 +337,13 @@ export const respondStreamRoutes = (app: Elysia) =>
               } catch (err) {
                 if (!abortController.signal.aborted) {
                   const message = err instanceof Error ? err.message : 'Stream generation failed';
-                  const errorEvent: SSEErrorEvent = { type: 'error', error: message, done: true };
+                  const code = getErrorCode(err);
+                  const errorEvent: SSEErrorEvent = {
+                    type: 'error',
+                    error: message,
+                    ...(code ? { code } : {}),
+                    done: true,
+                  };
                   controller.enqueue(sseEvent(errorEvent));
                 }
               } finally {
