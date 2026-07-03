@@ -14,13 +14,17 @@ import {
 import { Button } from '@/components/ui/Button';
 import { useI18n } from '@/hooks/use-i18n';
 import { useChatGptOAuth } from '../hooks/use-chatgpt-oauth';
+import { ChatGptPromoChip } from './ChatGptPromoChip';
+import { ChatGptResetCreditAction } from './ChatGptResetCreditAction';
 import { ChatGptUsageMeter } from './ChatGptUsageMeter';
+import { ChatGptUsageStatsPanel } from './ChatGptUsageStatsPanel';
 
 interface ConnectorCardProps {
   connector: Connector;
   onConfigure: (connector: Connector) => void;
   onDelete: (connector: Connector) => void;
   onReauthenticated: (connector: Connector) => void | Promise<void>;
+  onUsageChanged: () => void | Promise<void>;
 }
 
 function isReadOnlySharedConnector(connector: Connector): boolean {
@@ -57,6 +61,7 @@ export function ConnectorCard({
   onConfigure,
   onDelete,
   onReauthenticated,
+  onUsageChanged,
 }: ConnectorCardProps) {
   const { t } = useI18n();
   const s = t.settings.connectors;
@@ -143,7 +148,20 @@ export function ConnectorCard({
               {s.chatgptReauthWarning}
             </p>
           ) : null}
-          {isChatGpt && !c.needsReauth && c.usage ? <ChatGptUsageMeter usage={c.usage} /> : null}
+          {isChatGpt && !c.needsReauth ? (
+            <>
+              {c.usage ? (
+                <>
+                  <ChatGptUsageMeter usage={c.usage} />
+                  <ChatGptResetCreditAction connector={c} onRedeemed={onUsageChanged} />
+                  {c.usage.promoMessage ? (
+                    <ChatGptPromoChip connectorId={c.id} message={c.usage.promoMessage} />
+                  ) : null}
+                </>
+              ) : null}
+              <ChatGptUsageStatsPanel connectorId={c.id} />
+            </>
+          ) : null}
           {chatGptOAuth.error ? (
             <p className="text-[11px] leading-relaxed text-error">{chatGptOAuth.error}</p>
           ) : null}

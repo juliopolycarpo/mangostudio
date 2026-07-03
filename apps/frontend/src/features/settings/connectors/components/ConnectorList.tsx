@@ -11,6 +11,7 @@ interface ConnectorListProps {
   onConfigureConnector: (connector: Connector) => void;
   onDeleteConnector: (connector: Connector) => void;
   onReauthenticatedConnector: (connector: Connector) => void | Promise<void>;
+  onUsageChanged: () => void | Promise<void>;
 }
 
 export function ConnectorList({
@@ -19,6 +20,7 @@ export function ConnectorList({
   onConfigureConnector,
   onDeleteConnector,
   onReauthenticatedConnector,
+  onUsageChanged,
 }: ConnectorListProps) {
   const { t } = useI18n();
   const s = t.settings.connectors;
@@ -57,6 +59,7 @@ export function ConnectorList({
               onConfigure={onConfigureConnector}
               onDelete={onDeleteConnector}
               onReauthenticated={onReauthenticatedConnector}
+              onUsageChanged={onUsageChanged}
             />
           ))}
         </div>

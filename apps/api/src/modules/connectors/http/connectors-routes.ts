@@ -22,6 +22,7 @@ import {
 import { CursorRuntimeUnavailableError } from '../../../services/providers/cursor/index';
 import { SecretStorageUnavailableError } from '../../../services/secret-store';
 import { addConnector, ConnectorValidationError } from '../application/add-connector';
+import { ChatGptUsageActionError } from '../application/chatgpt-usage';
 import { ConnectorNotFoundError, ConnectorOwnershipError } from '../application/connector-errors';
 import { listConnectors } from '../application/list-connectors';
 import { removeConnector } from '../application/remove-connector';
@@ -59,7 +60,8 @@ export function handleConnectorError(
   if (
     error instanceof ChatGptOAuthPortBusyError ||
     error instanceof ChatGptOAuthError ||
-    error instanceof ChatGptReauthRequiredError
+    error instanceof ChatGptReauthRequiredError ||
+    error instanceof ChatGptUsageActionError
   ) {
     set.status = error.status;
     return { error: error.message, code: error.code };
