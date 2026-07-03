@@ -463,6 +463,7 @@ export const messages: Messages = {
       chatgptStatsEmpty: 'No usage stats available for this account.',
       chatgptStatsLifetime: 'Lifetime tokens',
       chatgptStatsPeakDay: 'Peak day',
+      chatgptStatsLongestTurn: 'Longest turn',
       chatgptStatsCurrentStreak: 'Current streak',
       chatgptStatsLongestStreak: 'Longest streak',
       chatgptStatsStreakValue: '{days} days',

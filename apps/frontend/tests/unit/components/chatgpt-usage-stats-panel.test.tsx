@@ -18,6 +18,7 @@ describe('ChatGptUsageStatsPanel', () => {
       stats: {
         lifetimeTokens: 123_456,
         peakDailyTokens: 8_000,
+        longestRunningTurnSec: 3_920,
         currentStreakDays: 4,
         longestStreakDays: 12,
         dailyUsage: [
@@ -37,6 +38,8 @@ describe('ChatGptUsageStatsPanel', () => {
     expect(screen.getByText('123,456')).toBeInTheDocument();
     expect(screen.getByText('Peak day')).toBeInTheDocument();
     expect(screen.getByText('8,000')).toBeInTheDocument();
+    expect(screen.getByText('Longest turn')).toBeInTheDocument();
+    expect(screen.getByText('1h 5m')).toBeInTheDocument();
     expect(screen.getByText('Current streak')).toBeInTheDocument();
     expect(screen.getByText('4 days')).toBeInTheDocument();
     expect(screen.getByText('Longest streak')).toBeInTheDocument();

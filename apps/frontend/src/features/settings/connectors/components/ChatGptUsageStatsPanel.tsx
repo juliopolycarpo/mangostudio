@@ -25,6 +25,20 @@ function formatDayLabel(startDate: string, locale: Locale): string {
   return new Intl.DateTimeFormat(locale, { month: 'short', day: 'numeric' }).format(date);
 }
 
+/** Compact turn duration with second granularity: "45s", "5m 20s", "1h 5m". */
+function formatTurnDuration(totalSeconds: number): string {
+  const seconds = Math.max(0, Math.round(totalSeconds));
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) {
+    const restSeconds = seconds % 60;
+    return restSeconds > 0 ? `${minutes}m ${restSeconds}s` : `${minutes}m`;
+  }
+  const hours = Math.floor(minutes / 60);
+  const restMinutes = minutes % 60;
+  return restMinutes > 0 ? `${hours}h ${restMinutes}m` : `${hours}h`;
+}
+
 function normalizeDailyUsage(stats: ChatGptUsageStats): DailyUsageBucket[] {
   return (stats.dailyUsage ?? [])
     .filter((bucket) => Number.isFinite(bucket.tokens))
@@ -40,6 +54,7 @@ function hasStats(stats: ChatGptUsageStats, dailyUsage: DailyUsageBucket[]): boo
   return (
     stats.lifetimeTokens !== undefined ||
     stats.peakDailyTokens !== undefined ||
+    stats.longestRunningTurnSec !== undefined ||
     stats.currentStreakDays !== undefined ||
     stats.longestStreakDays !== undefined ||
     dailyUsage.length > 0
@@ -128,6 +143,12 @@ function StatsBody({
           <StatCell
             label={s.chatgptStatsPeakDay}
             value={formatTokenCount(stats.peakDailyTokens, locale)}
+          />
+        )}
+        {stats.longestRunningTurnSec !== undefined && (
+          <StatCell
+            label={s.chatgptStatsLongestTurn}
+            value={formatTurnDuration(stats.longestRunningTurnSec)}
           />
         )}
         {stats.currentStreakDays !== undefined && (
