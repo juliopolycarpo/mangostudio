@@ -20,22 +20,20 @@ import { invalidateProviderModelCache } from '../../../services/providers/core/p
 import { upsertSecretMetadata } from '../../../services/secret-store/metadata';
 import { parseStringArray } from '../../../utils/json';
 import { maskSecret } from '../../../utils/secrets';
-import {
-  type ChatGptLoopbackServer,
-  startChatGptLoopbackServer,
-} from '../infrastructure/chatgpt/loopback-server';
+import { startChatGptLoopbackServer } from '../infrastructure/chatgpt/loopback-server';
 import {
   type ChatGptTokenBundle,
+  chatGptOAuthProfile,
   exchangeAuthorizationCode,
 } from '../infrastructure/chatgpt/oauth-client';
-import {
-  CHATGPT_OAUTH_CLIENT_ID,
-  CHATGPT_OAUTH_REDIRECT_URI,
-  CHATGPT_OAUTH_SCOPES,
-} from '../infrastructure/chatgpt/oauth-constants';
-import { createOAuthState, createPkcePair } from '../infrastructure/chatgpt/pkce';
 import { getChatGptTokenService } from '../infrastructure/chatgpt/token-service';
 import { getSecretMetadataById } from '../infrastructure/connector-repository';
+import { createOAuthState, createPkcePair } from '../infrastructure/oauth/pkce';
+import {
+  createOAuthSessionStore,
+  type OAuthSessionBase,
+} from '../infrastructure/oauth/session-store';
+import { buildAuthorizeUrl } from '../infrastructure/oauth/token-client';
 import { ConnectorValidationError } from './add-connector';
 import { ConnectorNotFoundError } from './connector-errors';
 
@@ -44,21 +42,13 @@ const oauthLogger = createDiagnosticLogger('chatgpt-oauth');
 
 type FetchLike = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 
-interface OAuthSession {
-  id: string;
-  userId: string;
+interface ChatGptOAuthSession extends OAuthSessionBase {
   connectorName: string;
   targetConnectorId?: string;
   enabledModels: string[];
-  status: ChatGptOAuthStatus['status'];
-  connectorId?: string;
-  error?: string;
-  errorCode?: string;
-  expiresAt: number;
-  loopback: ChatGptLoopbackServer;
 }
 
-const sessions = new Map<string, OAuthSession>();
+const sessions = createOAuthSessionStore<ChatGptOAuthSession>();
 
 /** Injectable seams for the integration tests (fake auth server, fixed clock). */
 export interface ChatGptOAuthDeps {
@@ -66,16 +56,14 @@ export interface ChatGptOAuthDeps {
   now?: () => number;
 }
 
-function markFailed(session: OAuthSession, message: string, errorCode?: string): void {
-  if (session.status !== 'pending') return;
-  session.status = 'failed';
-  session.error = message;
-  if (errorCode) session.errorCode = errorCode;
-  oauthLogger.warn('oauth_failed', { sessionId: session.id, error: message });
+function markFailed(session: ChatGptOAuthSession, message: string, errorCode?: string): void {
+  if (sessions.markFailed(session, message, errorCode)) {
+    oauthLogger.warn('oauth_failed', { sessionId: session.id, error: message });
+  }
 }
 
 async function completeSession(
-  session: OAuthSession,
+  session: ChatGptOAuthSession,
   bundle: ChatGptTokenBundle,
   now: () => number
 ): Promise<void> {
@@ -110,20 +98,6 @@ async function completeSession(
   });
 }
 
-function buildAuthorizeUrl(authBaseUrl: string, state: string, challenge: string): string {
-  const url = new URL('/oauth/authorize', authBaseUrl);
-  url.search = new URLSearchParams({
-    response_type: 'code',
-    client_id: CHATGPT_OAUTH_CLIENT_ID,
-    redirect_uri: CHATGPT_OAUTH_REDIRECT_URI,
-    scope: CHATGPT_OAUTH_SCOPES,
-    code_challenge: challenge,
-    code_challenge_method: 'S256',
-    state,
-  }).toString();
-  return url.toString();
-}
-
 /** Starts a new OAuth session, replacing any pending session for the user. */
 export async function startChatGptOAuth(
   userId: string,
@@ -150,19 +124,14 @@ export async function startChatGptOAuth(
 
   // Single active session per user: a stale pending session would otherwise
   // hold the fixed loopback port until its TTL expires.
-  for (const session of sessions.values()) {
-    if (session.userId === userId && session.status === 'pending') {
-      session.loopback.stop();
-      sessions.delete(session.id);
-    }
-  }
+  sessions.cancelPendingForUser(userId);
 
   const { verifier, challenge } = await createPkcePair();
   const state = createOAuthState();
   const sessionId = randomUUID();
   const expiresAt = now() + SESSION_TTL_MS;
 
-  const session: OAuthSession = {
+  const session: ChatGptOAuthSession = {
     id: sessionId,
     userId,
     connectorName,
@@ -194,19 +163,24 @@ export async function startChatGptOAuth(
       },
     }),
   };
-  sessions.set(sessionId, session);
+  sessions.add(session);
   oauthLogger.info('oauth_started', { sessionId, userId });
 
   return {
     sessionId,
-    authorizeUrl: buildAuthorizeUrl(getConfig().chatgpt.authBaseUrl, state, challenge),
+    authorizeUrl: buildAuthorizeUrl(
+      chatGptOAuthProfile,
+      getConfig().chatgpt.authBaseUrl,
+      state,
+      challenge
+    ),
     expiresAt,
   };
 }
 
-function requireSession(userId: string, sessionId: string): OAuthSession {
-  const session = sessions.get(sessionId);
-  if (!session || session.userId !== userId) throw new ConnectorNotFoundError();
+function requireSession(userId: string, sessionId: string): ChatGptOAuthSession {
+  const session = sessions.get(userId, sessionId);
+  if (!session) throw new ConnectorNotFoundError();
   return session;
 }
 
@@ -219,10 +193,7 @@ export function getChatGptOAuthStatus(
   const session = requireSession(userId, sessionId);
   const now = deps.now ?? (() => Date.now());
 
-  if (session.status === 'pending' && now() > session.expiresAt) {
-    session.status = 'expired';
-    session.loopback.stop();
-  }
+  sessions.expireIfDue(session, now());
 
   return {
     status: session.status,
@@ -235,15 +206,11 @@ export function getChatGptOAuthStatus(
 /** Cancels a pending OAuth session and releases the loopback port. */
 export function cancelChatGptOAuth(userId: string, sessionId: string): void {
   const session = requireSession(userId, sessionId);
-  session.loopback.stop();
-  sessions.delete(sessionId);
+  sessions.cancel(session);
   oauthLogger.info('oauth_cancelled', { sessionId, userId });
 }
 
 /** Clears all sessions and their loopback servers (for tests). */
 export function resetChatGptOAuthSessions(): void {
-  for (const session of sessions.values()) {
-    session.loopback.stop();
-  }
-  sessions.clear();
+  sessions.reset();
 }
