@@ -35,6 +35,10 @@ export interface ConnectorEntry {
   name: string;
   baseUrl: string | null;
   configured: boolean;
+  enabledModels?: string[];
+  accountLabel?: string | null;
+  planType?: string | null;
+  needsReauth?: boolean;
 }
 export interface ConnectorListPayload {
   connectors: ConnectorEntry[];

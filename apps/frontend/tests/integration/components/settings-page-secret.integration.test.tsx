@@ -12,6 +12,45 @@ function createDefaultProps() {
   };
 }
 
+function withProviderSettings(fetchScenario: ReturnType<typeof createFetchScenario>) {
+  fetchScenario.respondWithJson('GET', '/api/settings/providers', {
+    body: { providers: [] },
+  });
+  return fetchScenario;
+}
+
+function mockOAuthPopup() {
+  const popup = {
+    location: { href: '' },
+    close: vi.fn(),
+  } as unknown as Window;
+  const openSpy = vi.spyOn(window, 'open').mockReturnValue(popup);
+  return { popup, openSpy };
+}
+
+type FetchCall = [RequestInfo | URL, RequestInit | undefined];
+
+function findFetchCall(fetchMock: ReturnType<typeof vi.fn>, method: string, path: string) {
+  return fetchMock.mock.calls.find((rawCall) => {
+    const call = rawCall as FetchCall;
+    const input = call[0];
+    const init = call[1];
+    const requestMethod = init?.method ?? (input instanceof Request ? input.method : 'GET');
+    const rawUrl = input instanceof Request ? input.url : String(input);
+    return (
+      requestMethod.toUpperCase() === method.toUpperCase() &&
+      new URL(rawUrl, 'http://localhost').pathname === path
+    );
+  }) as FetchCall | undefined;
+}
+
+async function readJsonBody(call: FetchCall) {
+  const input = call[0];
+  const init = call[1];
+  const body = input instanceof Request ? await input.clone().text() : init?.body;
+  return JSON.parse(typeof body === 'string' ? body : String(body));
+}
+
 describe('ConnectorsSettings', () => {
   const fetchScenario = createFetchScenario();
 
@@ -21,6 +60,7 @@ describe('ConnectorsSettings', () => {
 
   afterEach(() => {
     fetchScenario.restore();
+    vi.restoreAllMocks();
   });
 
   it('shows empty state when no connectors are configured', async () => {
@@ -72,7 +112,7 @@ describe('ConnectorsSettings', () => {
 
     // Note: createFetchScenario uses a Map, so the same key can only have one response.
     // Register GET to return empty connectors; it will also be used for the reload after POST.
-    fetchScenario
+    withProviderSettings(fetchScenario)
       .respondWithJson('GET', '/api/settings/connectors', {
         body: { connectors: [] },
       })
@@ -119,7 +159,7 @@ describe('ConnectorsSettings', () => {
     const props = createDefaultProps();
     const user = userEvent.setup();
 
-    fetchScenario
+    withProviderSettings(fetchScenario)
       .respondWithJson('GET', '/api/settings/connectors', {
         body: { connectors: [] },
       })
@@ -166,5 +206,202 @@ describe('ConnectorsSettings', () => {
     const body = input instanceof Request ? await input.text() : init?.body;
     expect(typeof body === 'string' ? body : '').toContain('"provider":"deepseek"');
     expect(typeof body === 'string' ? body : '').toContain('"baseUrl":"https://api.deepseek.com"');
+  });
+
+  it('renders the ChatGPT OAuth panel without API key fields', async () => {
+    const props = createDefaultProps();
+    const user = userEvent.setup();
+
+    withProviderSettings(fetchScenario).respondWithJson('GET', '/api/settings/connectors', {
+      body: { connectors: [] },
+    });
+
+    render(<ConnectorsSettings {...props} />);
+
+    await screen.findByText(/no connectors found/i);
+    await user.click(screen.getAllByRole('button', { name: /add connector/i })[0]);
+    await user.click(screen.getByRole('button', { name: /chatgpt/i }));
+
+    expect(screen.getByText(/connect a chatgpt subscription in your browser/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^sign in with chatgpt$/i })).toBeInTheDocument();
+    expect(screen.queryByLabelText(/api key/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/save to/i)).not.toBeInTheDocument();
+  });
+
+  it('closes and refreshes after ChatGPT OAuth polling succeeds', async () => {
+    const props = createDefaultProps();
+    const user = userEvent.setup();
+    const { popup } = mockOAuthPopup();
+
+    withProviderSettings(fetchScenario)
+      .respondWithJson('GET', '/api/settings/connectors', {
+        body: { connectors: [] },
+      })
+      .respondWithJson('POST', '/api/settings/connectors/chatgpt/oauth/start', {
+        body: {
+          sessionId: 'session-success',
+          authorizeUrl: 'https://chatgpt.example/authorize',
+          expiresAt: Date.now() + 60_000,
+        },
+      })
+      .respondWithJson('GET', '/api/settings/connectors/chatgpt/oauth/session-success/status', {
+        body: { status: 'completed', connectorId: 'chatgpt-1' },
+      });
+
+    render(<ConnectorsSettings {...props} />);
+
+    await screen.findByText(/no connectors found/i);
+    await user.click(screen.getAllByRole('button', { name: /add connector/i })[0]);
+    await user.click(screen.getByRole('button', { name: /chatgpt/i }));
+    await user.type(screen.getByLabelText(/^name$/i), 'ChatGPT Plus');
+    await user.click(screen.getByRole('button', { name: /^sign in with chatgpt$/i }));
+
+    await waitFor(() => {
+      expect(popup.location.href).toBe('https://chatgpt.example/authorize');
+      expect(props.reloadModelCatalog).toHaveBeenCalledTimes(1);
+    });
+    expect(
+      screen.queryByText(/connect a chatgpt subscription in your browser/i)
+    ).not.toBeInTheDocument();
+  });
+
+  it('shows mapped ChatGPT OAuth failure copy', async () => {
+    const props = createDefaultProps();
+    const user = userEvent.setup();
+    mockOAuthPopup();
+
+    withProviderSettings(fetchScenario)
+      .respondWithJson('GET', '/api/settings/connectors', {
+        body: { connectors: [] },
+      })
+      .respondWithJson('POST', '/api/settings/connectors/chatgpt/oauth/start', {
+        body: {
+          sessionId: 'session-failed',
+          authorizeUrl: 'https://chatgpt.example/authorize',
+          expiresAt: Date.now() + 60_000,
+        },
+      })
+      .respondWithJson('GET', '/api/settings/connectors/chatgpt/oauth/session-failed/status', {
+        body: { status: 'failed', errorCode: 'VALIDATION' },
+      });
+
+    render(<ConnectorsSettings {...props} />);
+
+    await screen.findByText(/no connectors found/i);
+    await user.click(screen.getAllByRole('button', { name: /add connector/i })[0]);
+    await user.click(screen.getByRole('button', { name: /chatgpt/i }));
+    await user.type(screen.getByLabelText(/^name$/i), 'ChatGPT Plus');
+    await user.click(screen.getByRole('button', { name: /^sign in with chatgpt$/i }));
+
+    expect(
+      await screen.findByText('ChatGPT sign-in was not completed. Try again.')
+    ).toBeInTheDocument();
+    expect(props.reloadModelCatalog).not.toHaveBeenCalled();
+  });
+
+  it('cancels a pending ChatGPT OAuth session', async () => {
+    const props = createDefaultProps();
+    const user = userEvent.setup();
+    mockOAuthPopup();
+
+    withProviderSettings(fetchScenario)
+      .respondWithJson('GET', '/api/settings/connectors', {
+        body: { connectors: [] },
+      })
+      .respondWithJson('POST', '/api/settings/connectors/chatgpt/oauth/start', {
+        body: {
+          sessionId: 'session-pending',
+          authorizeUrl: 'https://chatgpt.example/authorize',
+          expiresAt: Date.now() + 60_000,
+        },
+      })
+      .respondWithJson('GET', '/api/settings/connectors/chatgpt/oauth/session-pending/status', {
+        body: { status: 'pending' },
+      })
+      .respondWithJson('POST', '/api/settings/connectors/chatgpt/oauth/session-pending/cancel', {
+        body: { success: true },
+      });
+
+    render(<ConnectorsSettings {...props} />);
+
+    await screen.findByText(/no connectors found/i);
+    await user.click(screen.getAllByRole('button', { name: /add connector/i })[0]);
+    await user.click(screen.getByRole('button', { name: /chatgpt/i }));
+    await user.type(screen.getByLabelText(/^name$/i), 'ChatGPT Plus');
+    await user.click(screen.getByRole('button', { name: /^sign in with chatgpt$/i }));
+
+    await screen.findByText('Complete the sign-in in your browser');
+    await user.click(screen.getByRole('button', { name: /cancel sign-in/i }));
+
+    await waitFor(() => {
+      expect(
+        findFetchCall(
+          fetchScenario.fetchMock,
+          'POST',
+          '/api/settings/connectors/chatgpt/oauth/session-pending/cancel'
+        )
+      ).toBeTruthy();
+    });
+  });
+
+  it('starts ChatGPT re-authentication with the connector id', async () => {
+    const props = createDefaultProps();
+    const user = userEvent.setup();
+    const { popup } = mockOAuthPopup();
+
+    fetchScenario
+      .respondWithJson('GET', '/api/settings/connectors', {
+        body: {
+          connectors: [
+            {
+              id: 'chatgpt-reauth',
+              name: 'ChatGPT Plus',
+              provider: 'chatgpt',
+              configured: true,
+              source: 'bun-secrets',
+              maskedSuffix: '****....com',
+              accountLabel: '****....com',
+              planType: 'plus',
+              needsReauth: true,
+              updatedAt: Date.now(),
+              lastValidatedAt: Date.now(),
+              lastValidationError: 'CHATGPT_REAUTH_REQUIRED',
+              enabledModels: [],
+              userId: 'user-1',
+            },
+          ],
+        },
+      })
+      .respondWithJson('POST', '/api/settings/connectors/chatgpt/oauth/start', {
+        body: {
+          sessionId: 'session-reauth',
+          authorizeUrl: 'https://chatgpt.example/authorize',
+          expiresAt: Date.now() + 60_000,
+        },
+      })
+      .respondWithJson('GET', '/api/settings/connectors/chatgpt/oauth/session-reauth/status', {
+        body: { status: 'completed', connectorId: 'chatgpt-reauth' },
+      });
+
+    render(<ConnectorsSettings {...props} />);
+
+    await screen.findByText('ChatGPT Plus');
+    await user.click(screen.getByRole('button', { name: /re-authenticate/i }));
+
+    await waitFor(() => {
+      expect(popup.location.href).toBe('https://chatgpt.example/authorize');
+      expect(props.reloadModelCatalog).toHaveBeenCalledTimes(1);
+    });
+
+    const startCall = findFetchCall(
+      fetchScenario.fetchMock,
+      'POST',
+      '/api/settings/connectors/chatgpt/oauth/start'
+    );
+    expect(startCall).toBeTruthy();
+    await expect(readJsonBody(startCall as FetchCall)).resolves.toMatchObject({
+      name: 'ChatGPT Plus',
+      connectorId: 'chatgpt-reauth',
+    });
   });
 });

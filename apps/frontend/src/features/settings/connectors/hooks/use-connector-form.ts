@@ -51,10 +51,11 @@ export function useConnectorForm({
   };
 
   const submit = async () => {
-    if (!form.name.trim() || !form.apiKey.trim()) {
+    if (!form.name.trim() || (form.provider !== 'chatgpt' && !form.apiKey.trim())) {
       setFormError(errorRequired);
       return;
     }
+    if (form.provider === 'chatgpt') return;
     if (form.provider === 'openai-compatible' && !form.baseUrl.trim()) {
       setFormError(baseUrlRequired);
       return;

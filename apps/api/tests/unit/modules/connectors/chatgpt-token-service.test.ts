@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import type { SecretMetadataRow } from '@mangostudio/shared/types';
 import {
+  CHATGPT_REAUTH_REQUIRED_CODE,
   ChatGptOAuthError,
   ChatGptReauthRequiredError,
 } from '../../../../src/modules/connectors/infrastructure/chatgpt/oauth-client';
@@ -125,7 +126,7 @@ describe('chatgpt token service', () => {
     expect(b).toEqual(c);
   });
 
-  it('maps invalid_grant to ChatGptReauthRequiredError and keeps the connector row', async () => {
+  it('maps invalid_grant to ChatGptReauthRequiredError and marks the connector row', async () => {
     const harness = makeHarness({
       bundleExpiresAt: NOW - 1_000,
       tokenEndpoint: () =>
@@ -135,7 +136,12 @@ describe('chatgpt token service', () => {
     await expect(harness.service.ensureFreshTokens(harness.row)).rejects.toBeInstanceOf(
       ChatGptReauthRequiredError
     );
-    expect(harness.upserts).toHaveLength(0);
+    expect(harness.upserts).toHaveLength(1);
+    expect(harness.upserts[0]).toMatchObject({
+      id: harness.row.id,
+      lastValidatedAt: NOW,
+      lastValidationError: CHATGPT_REAUTH_REQUIRED_CODE,
+    });
   });
 
   it('refreshes again after a completed refresh (single-flight entry is cleared)', async () => {

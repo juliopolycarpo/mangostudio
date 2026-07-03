@@ -100,12 +100,15 @@ afterEach(() => {
   tokenEndpointBehavior = 'ok';
 });
 
-async function startOAuthSession(app: { handle(request: Request): Promise<Response> }) {
+async function startOAuthSession(
+  app: { handle(request: Request): Promise<Response> },
+  body: { name: string; connectorId?: string } = { name: 'my-chatgpt' }
+) {
   const response = await app.handle(
     new Request('http://localhost/settings/connectors/chatgpt/oauth/start', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: 'my-chatgpt' }),
+      body: JSON.stringify(body),
     })
   );
   expect(response.status).toBe(200);
@@ -171,6 +174,9 @@ describe('chatgpt oauth routes', () => {
       configured: true,
       name: 'my-chatgpt',
       userId: TEST_USER.id,
+      accountLabel: '****....com',
+      planType: 'plus',
+      needsReauth: false,
     });
 
     // The token bundle was persisted through the secret store.
@@ -189,6 +195,80 @@ describe('chatgpt oauth routes', () => {
     const relistResponse = await app.handle(new Request('http://localhost/settings/connectors'));
     const relist = (await relistResponse.json()) as ConnectorListPayload;
     expect(relist.connectors.some((c) => c.id === status.connectorId)).toBe(false);
+  });
+
+  it('updates an existing connector in place during re-authentication', async () => {
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, settingsRoutes);
+    restoreAuth = restore;
+
+    const first = await startOAuthSession(app);
+    const firstUrl = new URL(first.authorizeUrl);
+    await fetch(
+      `${CALLBACK_BASE}/auth/callback?code=fake-auth-code&state=${firstUrl.searchParams.get('state')}`
+    );
+    const firstStatus = await fetchStatus(app, first.sessionId);
+    expect(firstStatus.connectorId).toBeTruthy();
+    const connectorId = firstStatus.connectorId as string;
+
+    const modelsResponse = await app.handle(
+      new Request(`http://localhost/settings/connectors/${connectorId}/models`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabledModels: ['chatgpt-5'] }),
+      })
+    );
+    expect(modelsResponse.status).toBe(200);
+
+    const second = await startOAuthSession(app, { name: 'my-chatgpt', connectorId });
+    const secondUrl = new URL(second.authorizeUrl);
+    await fetch(
+      `${CALLBACK_BASE}/auth/callback?code=second-code&state=${secondUrl.searchParams.get('state')}`
+    );
+    const secondStatus = await fetchStatus(app, second.sessionId);
+    expect(secondStatus.connectorId).toBe(connectorId);
+
+    const listResponse = await app.handle(new Request('http://localhost/settings/connectors'));
+    expect(listResponse.status).toBe(200);
+    const list = (await listResponse.json()) as ConnectorListPayload;
+    const matches = list.connectors.filter((c) => c.id === connectorId);
+    expect(matches).toHaveLength(1);
+    expect(matches[0]).toMatchObject({
+      provider: 'chatgpt',
+      enabledModels: ['chatgpt-5'],
+      accountLabel: '****....com',
+      planType: 'plus',
+      needsReauth: false,
+    });
+  });
+
+  it('marks ChatGPT connectors that require re-authentication', async () => {
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, settingsRoutes);
+    restoreAuth = restore;
+
+    const started = await startOAuthSession(app);
+    const authorizeUrl = new URL(started.authorizeUrl);
+    await fetch(
+      `${CALLBACK_BASE}/auth/callback?code=fake-auth-code&state=${authorizeUrl.searchParams.get('state')}`
+    );
+    const status = await fetchStatus(app, started.sessionId);
+    expect(status.connectorId).toBeTruthy();
+
+    await getDb()
+      .updateTable('secret_metadata')
+      .set({ lastValidationError: ERROR_CODES.CHATGPT_REAUTH_REQUIRED })
+      .where('id', '=', status.connectorId as string)
+      .execute();
+
+    const listResponse = await app.handle(new Request('http://localhost/settings/connectors'));
+    expect(listResponse.status).toBe(200);
+    const list = (await listResponse.json()) as ConnectorListPayload;
+    const connector = list.connectors.find((c) => c.id === status.connectorId);
+    expect(connector).toMatchObject({
+      provider: 'chatgpt',
+      needsReauth: true,
+      accountLabel: '****....com',
+      planType: 'plus',
+    });
   });
 
   it('marks the session failed on a state mismatch', async () => {

@@ -368,6 +368,8 @@ export const messages: Messages = {
       deleteConfirm: 'Are you sure you want to delete this connector?',
       addModalTitle: 'Add Connector',
       addModalDescription: 'Choose the provider, configure the API key and storage.',
+      chatgptAddModalDescription:
+        'Connect a ChatGPT subscription in your browser. No API key is required.',
       providerLabel: 'Provider',
       selectProvider: 'Select Provider',
       baseUrlLabel: 'Base URL',
@@ -396,6 +398,40 @@ export const messages: Messages = {
       cancelButton: 'Cancel',
       addConnectorButton: 'Add Connector',
       validating: 'Validating...',
+      chatgptOAuthTitle: 'Sign in with ChatGPT',
+      chatgptOAuthDescription:
+        'MangoStudio opens OpenAI sign-in and saves rotating tokens in the system secret store.',
+      chatgptSignInButton: 'Sign in with ChatGPT',
+      chatgptSigningIn: 'Opening sign-in...',
+      chatgptWaitingTitle: 'Complete the sign-in in your browser',
+      chatgptWaitingDescription:
+        'After approval, this connector will appear here with your ChatGPT models.',
+      chatgptRemoteAccessHint:
+        'Your browser must be able to reach this computer to complete the local callback.',
+      chatgptCancelSignIn: 'Cancel sign-in',
+      chatgptSignInSucceeded: 'ChatGPT connected.',
+      chatgptPortBusyError:
+        'Port 1455 is already in use. Close any running `codex login` and retry.',
+      chatgptDeniedError: 'ChatGPT sign-in was not completed. Try again.',
+      chatgptExpiredError: 'The sign-in session expired. Start sign-in again.',
+      chatgptFailedError: 'Failed to start ChatGPT sign-in.',
+      chatgptPopupBlocked:
+        'Your browser blocked the sign-in window. Allow pop-ups for MangoStudio and retry.',
+      chatgptNameRequired: 'Name is required to connect ChatGPT.',
+      chatgptReauthWarning:
+        'This ChatGPT session expired or was revoked. Sign in again to use this connector.',
+      chatgptReauthenticate: 'Re-authenticate',
+      chatgptReauthenticating: 'Waiting for sign-in...',
+      chatgptReconnectSuccess: 'ChatGPT reconnected.',
+      chatgptSignedInAs: 'Signed in as {account}',
+      chatgptAccountUnknown: 'ChatGPT account',
+      chatgptPlanBadge: '{plan} plan',
+      chatgptPlanPlus: 'Plus',
+      chatgptPlanPro: 'Pro',
+      chatgptPlanTeam: 'Team',
+      chatgptPlanFree: 'Free',
+      chatgptPlanUnknown: 'Unknown',
+      chatgptPlanCustom: '{plan}',
       cursorNodeRequired: 'You need NodeJS installed to run Cursor SDK Agents.',
       cursorNodeNotFound: '`node` binary not found',
       cursorNodeInvalid:
