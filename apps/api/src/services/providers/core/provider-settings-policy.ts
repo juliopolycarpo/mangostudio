@@ -122,14 +122,14 @@ const PROVIDER_POLICIES: Record<ProviderType, ProviderSettingsPolicy> = {
       maxToolIterations: MAX_TOOL_ITERATIONS_DEFAULT,
     },
   },
-  // Mirrors the openai policy for now; the exact reasoning policy is finalized
-  // together with the ChatGPT backend generation support.
   chatgpt: {
     displayName: 'ChatGPT',
+    // xhigh is offered in the UI and clamped to the backend's high on the wire.
     reasoning: buildReasoningPolicy(['low', 'medium', 'high', 'xhigh'], true, true),
-    promptCachingSupported: true,
+    promptCachingSupported: false,
     toolUseSupported: true,
-    structuredOutputSupported: true,
+    structuredOutputSupported: false,
+    // UI cap only — the adapter never sends max_output_tokens on the wire.
     maxOutputTokensLimit: 128_000,
     defaults: {
       thinkingEnabled: true,

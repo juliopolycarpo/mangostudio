@@ -17,6 +17,12 @@ interface PendingFunctionCall {
   name: string;
 }
 
+/**
+ * Output item types that stateless replay must re-send on the next iteration:
+ * reasoning (with encrypted_content), function calls, and assistant messages.
+ */
+const REPLAYABLE_OUTPUT_ITEM_TYPES = new Set(['reasoning', 'function_call', 'message']);
+
 export interface ResponsesAgentAccumulator {
   /** Maps one raw Responses stream event into zero or more AgentEvents. */
   mapEvent(ev: ResponseStreamEvent): AgentEvent[];
@@ -24,6 +30,8 @@ export interface ResponsesAgentAccumulator {
   readonly responseId: string | null;
   /** Provider-reported input tokens from `response.completed` usage, if any. */
   readonly usageInputTokens: number | undefined;
+  /** Replayable output items from `response.completed` (stateless replay). */
+  readonly outputItems: Array<Record<string, unknown>>;
 }
 
 /** Builds an accumulator for a single agentic Responses stream. */
@@ -34,6 +42,7 @@ export function createResponsesAgentAccumulator(): ResponsesAgentAccumulator {
   const itemIdToCallId = new Map<string, PendingFunctionCall>();
   let responseId: string | null = null;
   let usageInputTokens: number | undefined;
+  const outputItems: Array<Record<string, unknown>> = [];
 
   const mapToolEvent = (ev: ResponseStreamEvent): AgentEvent[] => {
     switch (ev.type) {
@@ -77,6 +86,11 @@ export function createResponsesAgentAccumulator(): ResponsesAgentAccumulator {
 
   const mapCompleted = (response: Responses.Response): AgentEvent[] => {
     responseId = response.id;
+    outputItems.push(
+      ...((response.output ?? []).filter((item) =>
+        REPLAYABLE_OUTPUT_ITEM_TYPES.has(item.type)
+      ) as unknown as Array<Record<string, unknown>>)
+    );
     const usage = extractResponsesUsage(response);
     if (usage.inputTokens) usageInputTokens = usage.inputTokens;
 
@@ -95,6 +109,9 @@ export function createResponsesAgentAccumulator(): ResponsesAgentAccumulator {
     },
     get usageInputTokens() {
       return usageInputTokens;
+    },
+    get outputItems() {
+      return outputItems;
     },
   };
 }

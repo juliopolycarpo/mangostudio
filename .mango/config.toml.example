@@ -79,7 +79,7 @@ url = ""
 # and MANGO_CHATGPT_BASE_URL.
 [chatgpt]
 # auth_base_url = "https://auth.openai.com"
-# api_base_url = "https://api.openai.com"
+# api_base_url = "https://chatgpt.com/backend-api/codex"
 
 # Optional workspace directory for Cursor SDK local agents.
 # Empty = current working directory when MangoStudio starts.
