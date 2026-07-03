@@ -139,9 +139,9 @@ describe('Docker release wiring', () => {
     // Scripted, retry-wrapped buildx (not build-push-action) so each multi-arch
     // push can be retried on a transient GHCR failure.
     expect(workflow).not.toContain('docker/build-push-action');
-    expect(workflow).toContain(
-      'docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0'
-    );
+    // Pin-verified via a 40-char SHA + version comment rather than a hardcoded
+    // pin, so a Dependabot bump of this action no longer breaks the test gate.
+    expect(workflow).toMatch(/docker\/setup-qemu-action@[0-9a-f]{40} # v\d+\.\d+\.\d+/);
     expect(workflow).toContain('packages: write');
     expect(workflow).toContain('--platform linux/amd64,linux/arm64');
     // The image and version flow through env; tags are built from them.
