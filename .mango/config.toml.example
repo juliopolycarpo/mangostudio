@@ -73,6 +73,14 @@ url = ""
 [cursor_api_keys]
 # default = "cursor_..."
 
+# ChatGPT (subscription) OAuth endpoints. Test/debug overrides only —
+# connectors are created via the "Sign in with ChatGPT" flow in Settings,
+# never by editing this file. Also settable via MANGO_CHATGPT_AUTH_BASE_URL
+# and MANGO_CHATGPT_BASE_URL.
+[chatgpt]
+# auth_base_url = "https://auth.openai.com"
+# api_base_url = "https://api.openai.com"
+
 # Optional workspace directory for Cursor SDK local agents.
 # Empty = current working directory when MangoStudio starts.
 [cursor]

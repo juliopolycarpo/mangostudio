@@ -33,6 +33,15 @@ export async function addConnector(userId: string, body: AddConnectorBody): Prom
 
   if (!apiKey) throw new ConnectorValidationError('API Key cannot be empty.');
 
+  // ChatGPT refresh tokens rotate on every refresh; the user-edited config-file
+  // and environment backends cannot follow that rotation, so only the OS secret
+  // store is a valid home for the token bundle.
+  if (provider === 'chatgpt' && body.source !== 'bun-secrets') {
+    throw new ConnectorValidationError(
+      'ChatGPT connectors can only be stored in the OS secret store (bun-secrets).'
+    );
+  }
+
   if (provider === 'openai-compatible' && !body.baseUrl?.trim()) {
     throw new ConnectorValidationError(
       'baseUrl is required for openai-compatible connectors.',
