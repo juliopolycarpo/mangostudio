@@ -26,12 +26,15 @@ import {
 import { logProviderDegrade } from '../continuation-logger';
 import { toolDefsToResponsesAPI } from '../tool-mapper';
 import { createResponsesAgentAccumulator } from './agent-accumulator';
+import { parseResponsesLoopState, serializeResponsesTurnState } from './loop-state';
 import type { ResponseStreamEvent } from './normalizers';
 import { createResponsesReasoningTracker } from './reasoning-tracker';
 import {
   buildResponsesAgentTurnInput,
   buildResponsesCreateParams,
+  buildResponsesCurrentTurnInput,
   buildResponsesRequestOptions,
+  buildResponsesSystemPromptItem,
   buildResponsesTextInput,
   buildStructuredTextFormat,
   normalizeResponsesReasoningEffort,
@@ -53,10 +56,13 @@ export async function* streamResponses(
   policy: ResponsesRequestPolicy
 ): AsyncIterable<StreamingChunk> {
   const rawEffort = req.generationConfig?.reasoningEffort ?? 'medium';
-  const effort = normalizeResponsesReasoningEffort(rawEffort);
+  const effort = normalizeResponsesReasoningEffort(rawEffort, policy.reasoningEffortCeiling);
   const params = buildResponsesCreateParams({
     model: req.modelName,
-    input: buildResponsesTextInput(req),
+    input: [
+      ...buildResponsesSystemPromptItem(req.systemPrompt, policy),
+      ...buildResponsesTextInput(req),
+    ],
     instructions: resolveResponsesInstructions(req.systemPrompt, policy),
     policy,
     useReasoning: true,
@@ -69,7 +75,7 @@ export async function* streamResponses(
 
   const stream = await client.responses.create(
     params,
-    buildResponsesRequestOptions(req.signal, policy)
+    buildResponsesRequestOptions(req.signal, policy, { sessionId: crypto.randomUUID() })
   );
   const reasoning = createResponsesReasoningTracker();
 
@@ -133,13 +139,24 @@ export async function* streamAgentTurnWithResponses(
 ): AsyncGenerator<AgentEvent> {
   const tools = toolDefsToResponsesAPI(req.toolDefinitions ?? []);
   const previousResponseId = parsePreviousResponseId(req.providerState, policy);
+  const loopState =
+    policy.continuation === 'stateless-replay'
+      ? parseResponsesLoopState(req.providerState, policy)
+      : null;
+  const sessionId = loopState?.sessionId ?? crypto.randomUUID();
+  const currentTurnInput = buildResponsesCurrentTurnInput(req);
   const rawEffort = req.generationConfig?.reasoningEffort ?? 'medium';
-  const effort = normalizeResponsesReasoningEffort(rawEffort);
+  const effort = normalizeResponsesReasoningEffort(rawEffort, policy.reasoningEffortCeiling);
   const useReasoning = isReasoningModel(req.modelName) && req.generationConfig?.thinkingEnabled;
   const contextLimit = getModelContextLimit(req.modelName);
   const textFormat = buildStructuredTextFormat(req.generationConfig?.structuredOutput);
 
-  let input = buildResponsesAgentTurnInput({ req, policy, previousResponseId });
+  let input = buildResponsesAgentTurnInput({
+    req,
+    policy,
+    previousResponseId,
+    loopItems: loopState?.loopItems,
+  });
 
   const makeRequest = (prevId: string | null): APIPromise<Stream<ResponseStreamEvent>> => {
     const params = buildResponsesCreateParams({
@@ -151,13 +168,18 @@ export async function* streamAgentTurnWithResponses(
       previousResponseId: prevId,
       useReasoning,
       reasoningEffort: effort,
+      reasoningSummary: policy.reasoningSummary,
+      parallelToolCalls: req.generationConfig?.parallelToolCallsEnabled,
       textFormat,
       maxOutputTokens: req.generationConfig?.maxOutputTokens,
       enableCompaction: req.generationConfig?.enableProviderCompaction ?? true,
       providerCompactionThreshold: req.generationConfig?.providerCompactionThreshold,
       contextLimit,
     }) as unknown as OpenAI.Responses.ResponseCreateParamsStreaming;
-    return client.responses.create(params, buildResponsesRequestOptions(req.signal, policy));
+    return client.responses.create(
+      params,
+      buildResponsesRequestOptions(req.signal, policy, { sessionId })
+    );
   };
 
   const openStream = async (): Promise<AgentTurnStreamOpenResult<ResponseStreamEvent>> => {
@@ -240,7 +262,26 @@ export async function* streamAgentTurnWithResponses(
     mapChunk: ({ chunk, accumulator }) => accumulator.mapEvent(chunk),
     complete: ({ accumulator }) => {
       if (policy.continuation !== 'previous-response-id') {
-        return [{ type: 'turn_completed' as const }];
+        // Stateless replay: carry this turn's items (current input + model
+        // output) to the next tool iteration via turn-local providerState.
+        return [
+          {
+            type: 'turn_completed' as const,
+            providerState: serializeResponsesTurnState(
+              req,
+              policy,
+              {
+                sessionId,
+                loopItems: [
+                  ...(loopState?.loopItems ?? []),
+                  ...currentTurnInput,
+                  ...accumulator.outputItems,
+                ],
+              },
+              accumulator.usageInputTokens
+            ),
+          },
+        ];
       }
 
       return [

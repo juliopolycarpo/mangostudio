@@ -26,16 +26,38 @@ const RESPONSES_ATTACHMENT_KINDS = ['image', 'pdf', 'text'] as const;
 
 export type ResponsesContinuationPolicy = 'previous-response-id' | 'stateless-replay';
 export type ResponsesReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh';
-type ResponsesReasoningSummary = 'auto' | 'concise';
+export type ResponsesReasoningSummary = 'auto' | 'concise';
+
+const REASONING_EFFORT_ORDER: readonly ResponsesReasoningEffort[] = [
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+];
+
+/** Per-request context available to policy-provided header builders. */
+export interface ResponsesRequestHeaderContext {
+  /** Stable id shared by every iteration of one agentic turn. */
+  sessionId?: string;
+}
 
 export interface ResponsesRequestPolicy {
   readonly provider: ProviderType;
   readonly store: boolean;
   readonly continuation: ResponsesContinuationPolicy;
   readonly instructions: 'system-prompt' | { pinned: string };
+  /**
+   * When `instructions` is pinned, the per-request system prompt is injected
+   * as the first input item with this role instead of being dropped.
+   */
+  readonly systemPromptRole?: 'developer' | 'user';
   readonly include?: readonly string[];
   readonly allowMaxOutputTokens: boolean;
-  readonly extraHeaders?: () => Record<string, string>;
+  /** Highest reasoning effort the backend accepts; higher requests clamp to it. */
+  readonly reasoningEffortCeiling?: ResponsesReasoningEffort;
+  /** Reasoning summary mode for agentic turns (default: 'concise'). */
+  readonly reasoningSummary?: ResponsesReasoningSummary;
+  readonly extraHeaders?: (ctx: ResponsesRequestHeaderContext) => Record<string, string>;
 }
 
 interface OpenAIUserContentRequest {
@@ -54,6 +76,7 @@ export interface BuildResponsesCreateParamsOptions {
   useReasoning?: boolean;
   reasoningEffort?: ResponsesReasoningEffort;
   reasoningSummary?: ResponsesReasoningSummary;
+  parallelToolCalls?: boolean;
   textFormat?: Record<string, unknown>;
   maxOutputTokens?: number;
   enableCompaction?: boolean;
@@ -65,6 +88,8 @@ export interface BuildResponsesAgentTurnInputOptions {
   req: AgentTurnRequest;
   policy: ResponsesRequestPolicy;
   previousResponseId?: string | null;
+  /** Turn-local items accumulated across tool iterations (stateless replay). */
+  loopItems?: Array<Record<string, unknown>>;
 }
 
 export interface ResponsesRequestOptions {
@@ -113,6 +138,7 @@ export function buildResponsesCreateParams(
     useReasoning,
     reasoningEffort = 'medium',
     reasoningSummary = 'concise',
+    parallelToolCalls,
     textFormat,
     maxOutputTokens,
     enableCompaction = true,
@@ -145,6 +171,9 @@ export function buildResponsesCreateParams(
       ? { previous_response_id: previousResponseId }
       : {}),
     ...(tools && tools.length > 0 ? { tools: toResponseTools(tools) } : {}),
+    ...(tools && tools.length > 0 && parallelToolCalls !== undefined
+      ? { parallel_tool_calls: parallelToolCalls }
+      : {}),
     store: policy.store,
     stream: true,
     ...include,
@@ -185,13 +214,27 @@ export function resolveResponsesInstructions(
 
 export function buildResponsesRequestOptions(
   signal: AbortSignal | undefined,
-  policy: ResponsesRequestPolicy
+  policy: ResponsesRequestPolicy,
+  headerContext: ResponsesRequestHeaderContext = {}
 ): ResponsesRequestOptions {
-  const headers = policy.extraHeaders?.();
+  const headers = policy.extraHeaders?.(headerContext);
   return {
     ...(signal ? { signal } : {}),
     ...(headers && Object.keys(headers).length > 0 ? { headers } : {}),
   };
+}
+
+/**
+ * Builds the system-prompt input item for pinned-instructions policies.
+ * Returns [] when the policy sends the system prompt via `instructions`.
+ */
+export function buildResponsesSystemPromptItem(
+  systemPrompt: string | undefined,
+  policy: ResponsesRequestPolicy
+): Array<Record<string, unknown>> {
+  if (policy.instructions === 'system-prompt' || !policy.systemPromptRole) return [];
+  if (!systemPrompt?.trim()) return [];
+  return [{ role: policy.systemPromptRole, content: systemPrompt }];
 }
 
 export function buildResponsesTextInput(
@@ -220,11 +263,14 @@ export function buildResponsesCurrentUserInput(
   return userMessage ? [userMessage] : [];
 }
 
-export function buildResponsesAgentTurnInput({
-  req,
-  policy,
-  previousResponseId,
-}: BuildResponsesAgentTurnInputOptions): Array<Record<string, unknown>> {
+/**
+ * Builds the items this iteration adds to the conversation: tool outputs when
+ * continuing a tool loop, otherwise the current user message. Shared by request
+ * assembly and turn-local loop-state accumulation so the two never drift.
+ */
+export function buildResponsesCurrentTurnInput(
+  req: AgentTurnRequest
+): Array<Record<string, unknown>> {
   const toolOutputs =
     req.toolResults?.map((tr) => ({
       type: 'function_call_output',
@@ -232,20 +278,27 @@ export function buildResponsesAgentTurnInput({
       output: tr.result,
     })) ?? [];
 
-  if (toolOutputs.length > 0) {
-    if (policy.continuation === 'previous-response-id' && previousResponseId) {
-      return toolOutputs;
-    }
-    return [...buildResponsesReplayForPolicy(req.history, policy), ...toolOutputs];
-  }
+  if (toolOutputs.length > 0) return toolOutputs;
+  return buildResponsesCurrentUserInput(req);
+}
+
+export function buildResponsesAgentTurnInput({
+  req,
+  policy,
+  previousResponseId,
+  loopItems,
+}: BuildResponsesAgentTurnInputOptions): Array<Record<string, unknown>> {
+  const currentInput = buildResponsesCurrentTurnInput(req);
 
   if (policy.continuation === 'previous-response-id' && previousResponseId) {
-    return buildResponsesCurrentUserInput(req);
+    return currentInput;
   }
 
   return [
+    ...buildResponsesSystemPromptItem(req.systemPrompt, policy),
     ...buildResponsesReplayForPolicy(req.history, policy),
-    ...buildResponsesCurrentUserInput(req),
+    ...(loopItems ?? []),
+    ...currentInput,
   ];
 }
 
@@ -295,12 +348,17 @@ export function buildResponsesUserMessage(
 }
 
 export function normalizeResponsesReasoningEffort(
-  effort: ReasoningEffort
+  effort: ReasoningEffort,
+  ceiling?: ResponsesReasoningEffort
 ): ResponsesReasoningEffort {
-  if (effort === 'low' || effort === 'medium' || effort === 'high' || effort === 'xhigh') {
-    return effort;
-  }
-  return 'high';
+  const normalized =
+    effort === 'low' || effort === 'medium' || effort === 'high' || effort === 'xhigh'
+      ? effort
+      : 'high';
+  if (!ceiling) return normalized;
+  return REASONING_EFFORT_ORDER.indexOf(normalized) > REASONING_EFFORT_ORDER.indexOf(ceiling)
+    ? ceiling
+    : normalized;
 }
 
 function buildResponsesReplayForPolicy(

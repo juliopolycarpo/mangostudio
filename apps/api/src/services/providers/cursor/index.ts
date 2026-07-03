@@ -2,9 +2,9 @@ import { MAX_TOOL_ITERATIONS_DEFAULT } from '@mangostudio/shared/app-settings';
 import type { ReasoningEffort, SecretMetadataRow } from '@mangostudio/shared/types';
 import { getConfig } from '../../../lib/config';
 import { stringifyToolResult } from '../../../modules/generation/application/tool-result-utils';
-import { parseStringArray } from '../../../utils/json';
 import { DELEGATE_TO_AGENT_TOOL_NAME } from '../../tools/builtin/delegate-to-agent';
 import { executeTool } from '../../tools/registry';
+import { selectConnectorRowsForModel } from '../core/connector-model-rows';
 import { withModelCache } from '../core/model-cache';
 import { createProviderLifecycle } from '../core/provider-lifecycle';
 import { createProviderSecretService } from '../core/secret-service';
@@ -67,22 +67,7 @@ export function getCursorConnectorRowsForModel(
   rows: SecretMetadataRow[],
   modelName?: string
 ): SecretMetadataRow[] {
-  const configuredRows = rows.filter((row) => row.configured);
-  if (!modelName) return configuredRows;
-
-  const explicitMatches: SecretMetadataRow[] = [];
-  const fallbackMatches: SecretMetadataRow[] = [];
-
-  for (const row of configuredRows) {
-    const enabled = parseStringArray(row.enabledModels);
-    if (enabled.includes(modelName)) {
-      explicitMatches.push(row);
-    } else if (enabled.length === 0) {
-      fallbackMatches.push(row);
-    }
-  }
-
-  return [...explicitMatches, ...fallbackMatches];
+  return selectConnectorRowsForModel(rows, modelName);
 }
 
 function resolveCursorWorkspaceDir(): string {
