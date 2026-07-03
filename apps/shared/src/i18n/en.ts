@@ -444,6 +444,20 @@ export const messages: Messages = {
       chatgptUsageCreditsBalance: 'Credits: {balance}',
       chatgptUsageCreditsUnlimited: 'Unlimited credits',
       chatgptUsageUpdated: 'updated {time} ago',
+      chatgptRedeemButton: 'Use a rate-limit reset',
+      chatgptRedeeming: 'Redeeming...',
+      chatgptRedeemConfirmTitle: 'Use a rate-limit reset?',
+      chatgptRedeemConfirmBody:
+        'This spends one of your {count} reset credits to restore exhausted rate-limit windows. It cannot be undone.',
+      chatgptRedeemConfirmAction: 'Use reset',
+      chatgptRedeemSuccess: 'Rate limit reset — {count} window(s) restored.',
+      chatgptRedeemNothingToReset:
+        'Nothing to reset — no rate-limit window is exhausted right now.',
+      chatgptRedeemNoCredit: 'No reset credits are available on this account.',
+      chatgptRedeemAlreadyRedeemed: 'This reset was already redeemed.',
+      chatgptRedeemFailed:
+        'Could not redeem the reset credit. Retrying will not spend a second credit.',
+      chatgptPromoDismiss: 'Dismiss announcement',
       cursorNodeRequired: 'You need NodeJS installed to run Cursor SDK Agents.',
       cursorNodeNotFound: '`node` binary not found',
       cursorNodeInvalid:

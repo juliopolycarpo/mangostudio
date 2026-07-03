@@ -448,6 +448,20 @@ export const messages = {
       chatgptUsageCreditsBalance: 'Créditos: {balance}',
       chatgptUsageCreditsUnlimited: 'Créditos ilimitados',
       chatgptUsageUpdated: 'atualizado há {time}',
+      chatgptRedeemButton: 'Usar um reset de limite',
+      chatgptRedeeming: 'Resgatando...',
+      chatgptRedeemConfirmTitle: 'Usar um reset de limite?',
+      chatgptRedeemConfirmBody:
+        'Isso gasta um dos seus {count} créditos de reset para restaurar janelas de limite esgotadas. Não pode ser desfeito.',
+      chatgptRedeemConfirmAction: 'Usar reset',
+      chatgptRedeemSuccess: 'Limite resetado — {count} janela(s) restaurada(s).',
+      chatgptRedeemNothingToReset:
+        'Nada para resetar — nenhuma janela de limite está esgotada no momento.',
+      chatgptRedeemNoCredit: 'Não há créditos de reset disponíveis nesta conta.',
+      chatgptRedeemAlreadyRedeemed: 'Este reset já foi resgatado.',
+      chatgptRedeemFailed:
+        'Não foi possível resgatar o crédito de reset. Tentar novamente não gasta um segundo crédito.',
+      chatgptPromoDismiss: 'Dispensar anúncio',
       cursorNodeRequired: 'Você precisa do Node.js instalado para executar agentes Cursor SDK.',
       cursorNodeNotFound: 'Binário `node` não encontrado.',
       cursorNodeInvalid:

@@ -81,6 +81,7 @@ export function ConnectorsSettings({ modelCatalog, reloadModelCatalog }: Connect
           await reloadConnectors();
           await reloadModelCatalog();
         }}
+        onUsageChanged={reloadConnectors}
         onDeleteConnector={(c) => {
           if (isReadOnlySharedConnector(c)) {
             toast(s.sharedDeleteBlocked, 'error');
