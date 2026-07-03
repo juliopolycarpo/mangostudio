@@ -41,6 +41,7 @@ function makeConfig(overrides: Partial<MangoConfig> = {}): MangoConfig {
     auth: { secret: 'x'.repeat(32), url: 'http://localhost:3001' },
     security: { trustProxy: false },
     cursor: { workspaceDir: '', sidecarScriptPath: '', nodePath: '' },
+    chatgpt: { authBaseUrl: 'https://auth.openai.com', apiBaseUrl: 'https://api.openai.com' },
     corsOrigins: [],
     configFilePath: '/data/config.toml',
     ...overrides,

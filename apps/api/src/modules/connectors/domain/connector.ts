@@ -20,6 +20,9 @@ export const PROVIDER_SECRET_CONFIG: Record<
   anthropic: { tomlSection: 'anthropic_api_keys', envPrefix: 'ANTHROPIC_API_KEY' },
   deepseek: { tomlSection: 'deepseek_api_keys', envPrefix: 'DEEPSEEK_API_KEY' },
   cursor: { tomlSection: 'cursor_api_keys', envPrefix: 'CURSOR_API_KEY' },
+  // Required by the exhaustive record type; chatgpt connectors reject the
+  // config-file and environment backends at add-time (rotating token bundle).
+  chatgpt: { tomlSection: 'chatgpt_tokens', envPrefix: 'CHATGPT_TOKEN' },
 };
 
 /** True when any non-empty env value exists for `prefix` or `prefix_<NAME>`. */

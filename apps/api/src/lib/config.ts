@@ -78,6 +78,12 @@ export interface MangoConfig {
     /** Override path to the Node.js binary for the sidecar. Empty = auto-detect. */
     nodePath: string;
   };
+  chatgpt: {
+    /** ChatGPT OAuth issuer base URL. Override only for tests/debugging. */
+    authBaseUrl: string;
+    /** ChatGPT API base URL. Override only for tests/debugging. */
+    apiBaseUrl: string;
+  };
 }
 
 const DEFAULT_CONFIG: Omit<MangoConfig, 'corsOrigins' | 'configFilePath'> = {
@@ -90,6 +96,10 @@ const DEFAULT_CONFIG: Omit<MangoConfig, 'corsOrigins' | 'configFilePath'> = {
   auth: { secret: '', url: '' },
   security: { trustProxy: false },
   cursor: { workspaceDir: '', sidecarScriptPath: '', nodePath: '' },
+  chatgpt: {
+    authBaseUrl: 'https://auth.openai.com',
+    apiBaseUrl: 'https://api.openai.com',
+  },
 };
 
 export const AUTH_SECRET_MIN_LENGTH = 32;
@@ -143,6 +153,12 @@ const ENV_KEY_MAP: Record<string, (cfg: MangoConfig, value: string) => void> = {
   },
   MANGO_NODE_PATH: (cfg, v) => {
     cfg.cursor.nodePath = v;
+  },
+  MANGO_CHATGPT_AUTH_BASE_URL: (cfg, v) => {
+    cfg.chatgpt.authBaseUrl = v;
+  },
+  MANGO_CHATGPT_BASE_URL: (cfg, v) => {
+    cfg.chatgpt.apiBaseUrl = v;
   },
 };
 
@@ -271,6 +287,7 @@ function cloneDefaults(): MangoConfig {
     auth: { ...DEFAULT_CONFIG.auth },
     security: { ...DEFAULT_CONFIG.security },
     cursor: { ...DEFAULT_CONFIG.cursor },
+    chatgpt: { ...DEFAULT_CONFIG.chatgpt },
     corsOrigins: [],
     configFilePath: '',
   };
@@ -329,6 +346,16 @@ function applyToml(cfg: MangoConfig, parsed: Record<string, unknown>): void {
     }
     if (typeof cursor.node_path === 'string') {
       cfg.cursor.nodePath = cursor.node_path;
+    }
+  }
+
+  const chatgpt = parsed.chatgpt as Record<string, unknown> | undefined;
+  if (chatgpt) {
+    if (typeof chatgpt.auth_base_url === 'string' && chatgpt.auth_base_url) {
+      cfg.chatgpt.authBaseUrl = chatgpt.auth_base_url;
+    }
+    if (typeof chatgpt.api_base_url === 'string' && chatgpt.api_base_url) {
+      cfg.chatgpt.apiBaseUrl = chatgpt.api_base_url;
     }
   }
 }
@@ -562,6 +589,7 @@ export function loadConfigForTest(partial: Partial<MangoConfig> = {}): MangoConf
   if (partial.auth) Object.assign(cfg.auth, partial.auth);
   if (partial.security) Object.assign(cfg.security, partial.security);
   if (partial.cursor) Object.assign(cfg.cursor, partial.cursor);
+  if (partial.chatgpt) Object.assign(cfg.chatgpt, partial.chatgpt);
   if (partial.corsOrigins) cfg.corsOrigins = partial.corsOrigins;
 
   // Default to the single managed test config path (not /dev/null, which

@@ -20,6 +20,7 @@ const PROVIDER_TYPES: ReadonlyArray<ProviderType> = [
   'anthropic',
   'deepseek',
   'cursor',
+  'chatgpt',
 ];
 
 interface ProviderSettingsPolicy {
@@ -115,6 +116,21 @@ const PROVIDER_POLICIES: Record<ProviderType, ProviderSettingsPolicy> = {
     structuredOutputSupported: false,
     maxOutputTokensLimit: 128_000,
     detectRuntimeAvailability: detectCursorRuntimeAvailability,
+    defaults: {
+      thinkingEnabled: true,
+      reasoningEffort: 'medium',
+      maxToolIterations: MAX_TOOL_ITERATIONS_DEFAULT,
+    },
+  },
+  // Mirrors the openai policy for now; the exact reasoning policy is finalized
+  // together with the ChatGPT backend generation support.
+  chatgpt: {
+    displayName: 'ChatGPT',
+    reasoning: buildReasoningPolicy(['low', 'medium', 'high', 'xhigh'], true, true),
+    promptCachingSupported: true,
+    toolUseSupported: true,
+    structuredOutputSupported: true,
+    maxOutputTokensLimit: 128_000,
     defaults: {
       thinkingEnabled: true,
       reasoningEffort: 'medium',
