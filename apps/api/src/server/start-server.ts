@@ -51,12 +51,13 @@ export async function startServer(options: StartOptions = {}): Promise<ServerHan
 
   listenOrExit(port, host);
 
+  registerShutdown();
+
   if (options.writeStateFile !== false) {
     await persistState(port, host);
   }
 
   logRunning(host, port);
-  registerShutdown();
 
   return { port, host, stop: gracefulStop };
 }
