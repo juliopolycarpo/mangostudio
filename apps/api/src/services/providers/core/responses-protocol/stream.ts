@@ -65,7 +65,9 @@ export async function* streamResponses(
     ],
     instructions: resolveResponsesInstructions(req.systemPrompt, policy),
     policy,
-    useReasoning: true,
+    // Honor an explicit thinking toggle (e.g. title/compaction calls pass
+    // `thinkingEnabled: false`); default reasoning on when the field is absent.
+    useReasoning: req.generationConfig?.thinkingEnabled ?? true,
     reasoningEffort: effort,
     reasoningSummary: 'auto',
     textFormat: buildStructuredTextFormat(req.generationConfig?.structuredOutput),
