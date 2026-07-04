@@ -43,7 +43,7 @@ function normalizeDailyUsage(stats: ChatGptUsageStats): DailyUsageBucket[] {
   return (stats.dailyUsage ?? [])
     .filter((bucket) => Number.isFinite(bucket.tokens))
     .map((bucket) => ({
-      startDate: bucket.startDate,
+      startDate: String(bucket.startDate),
       tokens: Math.max(0, bucket.tokens),
     }))
     .sort((a, b) => a.startDate.localeCompare(b.startDate))

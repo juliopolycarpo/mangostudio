@@ -1,3 +1,4 @@
+import type { ChatGptUsageStats } from '@mangostudio/shared/connectors';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChatGptUsageStatsPanel } from '@/features/settings/connectors/components/ChatGptUsageStatsPanel';
 import { fireEvent, render, screen, waitFor } from '../../support/harness/render';
@@ -57,5 +58,23 @@ describe('ChatGptUsageStatsPanel', () => {
     expect(
       await screen.findByText('No usage stats available for this account.')
     ).toBeInTheDocument();
+  });
+
+  it('renders numeric daily bucket start dates without crashing', async () => {
+    mockGetChatGptUsageStats.mockResolvedValue({
+      stats: {
+        dailyUsage: [
+          { startDate: 20260701, tokens: 200 },
+        ] as unknown as ChatGptUsageStats['dailyUsage'],
+      },
+    });
+
+    render(<ChatGptUsageStatsPanel connectorId="connector-numeric-date" />);
+    fireEvent.click(screen.getByRole('button', { name: /usage stats/i }));
+
+    expect(
+      await screen.findByRole('img', { name: 'Tokens per day — last 30 days' })
+    ).toBeInTheDocument();
+    expect(screen.getByText('20260701: 200 tokens')).toBeInTheDocument();
   });
 });
