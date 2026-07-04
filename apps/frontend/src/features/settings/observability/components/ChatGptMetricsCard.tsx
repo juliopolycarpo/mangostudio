@@ -1,6 +1,7 @@
 import type { Connector } from '@mangostudio/shared';
 import { Card } from '@/components/ui/Card';
 import { ChatGptResetCreditAction } from '@/features/settings/connectors/components/ChatGptResetCreditAction';
+import { ChatGptResetCreditList } from '@/features/settings/connectors/components/ChatGptResetCreditList';
 import { ChatGptUsageHistoryPanel } from '@/features/settings/connectors/components/ChatGptUsageHistoryPanel';
 import { ChatGptUsageMeter } from '@/features/settings/connectors/components/ChatGptUsageMeter';
 import { ChatGptUsageStatsPanel } from '@/features/settings/connectors/components/ChatGptUsageStatsPanel';
@@ -42,6 +43,9 @@ export function ChatGptMetricsCard({ connector: c, onRedeemed }: ChatGptMetricsC
       {c.usage ? (
         <>
           <ChatGptUsageMeter usage={c.usage} />
+          {c.usage.resetCredits?.credits && c.usage.resetCredits.credits.length > 0 && (
+            <ChatGptResetCreditList credits={c.usage.resetCredits.credits} />
+          )}
           <ChatGptResetCreditAction connector={c} onRedeemed={onRedeemed} />
         </>
       ) : (

@@ -22,7 +22,7 @@ export function ChatGptResetCreditAction({ connector, onRedeemed }: ChatGptReset
   const { toast } = useToast();
   const s = t.settings.connectors;
   const [isConfirmOpen, setIsConfirmOpen] = useState(false);
-  const { redeem, isRedeeming } = useChatGptResetRedeem({
+  const { redeem, isRedeeming, lastWindowsReset } = useChatGptResetRedeem({
     connectorId: connector.id,
     messages: s,
     toast,
@@ -68,6 +68,9 @@ export function ChatGptResetCreditAction({ connector, onRedeemed }: ChatGptReset
               <h3 className="text-xl font-bold text-on-surface">{s.chatgptRedeemConfirmTitle}</h3>
               <p className="text-sm text-on-surface-variant/70">
                 {s.chatgptRedeemConfirmBody.replace('{count}', String(availableCount))}
+                {lastWindowsReset !== null &&
+                  lastWindowsReset > 0 &&
+                  ` ${s.chatgptRedeemConfirmRestores.replace('{count}', String(lastWindowsReset))}`}
               </p>
             </div>
 

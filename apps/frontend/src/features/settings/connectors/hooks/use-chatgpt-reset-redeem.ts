@@ -49,6 +49,8 @@ export function useChatGptResetRedeem({
   onSettled,
 }: UseChatGptResetRedeemOptions) {
   const [isRedeeming, setIsRedeeming] = useState(false);
+  /** Windows restored by the last successful redemption; null until one lands. */
+  const [lastWindowsReset, setLastWindowsReset] = useState<number | null>(null);
   const requestIdRef = useRef<string | null>(null);
 
   const redeem = useCallback(async () => {
@@ -59,6 +61,7 @@ export function useChatGptResetRedeem({
     try {
       const result = await redeemChatGptResetCredit(connectorId, redeemRequestId);
       requestIdRef.current = null;
+      if (result.code === 'reset') setLastWindowsReset(result.windowsReset);
       const { message, type } = outcomeToast(result.code, result.windowsReset, messages);
       toast(message, type);
     } catch {
@@ -71,5 +74,5 @@ export function useChatGptResetRedeem({
     }
   }, [connectorId, messages, toast, onSettled]);
 
-  return { redeem, isRedeeming };
+  return { redeem, isRedeeming, lastWindowsReset };
 }
