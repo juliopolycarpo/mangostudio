@@ -60,10 +60,11 @@ describe('ChatGptUsageStatsPanel', () => {
     ).toBeInTheDocument();
   });
 
-  it('renders numeric daily bucket start dates without crashing', async () => {
+  it('renders and sorts numeric daily bucket start dates without crashing', async () => {
     mockGetChatGptUsageStats.mockResolvedValue({
       stats: {
         dailyUsage: [
+          { startDate: 20260702, tokens: 300 },
           { startDate: 20260701, tokens: 200 },
         ] as unknown as ChatGptUsageStats['dailyUsage'],
       },
@@ -76,5 +77,6 @@ describe('ChatGptUsageStatsPanel', () => {
       await screen.findByRole('img', { name: 'Tokens per day — last 30 days' })
     ).toBeInTheDocument();
     expect(screen.getByText('20260701: 200 tokens')).toBeInTheDocument();
+    expect(screen.getByText('20260702: 300 tokens')).toBeInTheDocument();
   });
 });

@@ -60,6 +60,10 @@ function coerceStartDate(value: unknown): string | undefined {
   return formatCompactDate(value) ?? String(value);
 }
 
+function compareStartDate(left: { startDate: unknown }, right: { startDate: unknown }): number {
+  return String(left.startDate).localeCompare(String(right.startDate));
+}
+
 function coerceBoolean(value: unknown): boolean | undefined {
   if (typeof value === 'boolean') return value;
   if (value === 'true') return true;
@@ -329,7 +333,7 @@ export function parseChatGptProfileStats(payload: unknown): ChatGptUsageStats | 
       buckets.push({ startDate, tokens });
     }
     if (buckets.length > 0) {
-      buckets.sort((a, b) => a.startDate.localeCompare(b.startDate));
+      buckets.sort(compareStartDate);
       result.dailyUsage = buckets;
     }
   }
