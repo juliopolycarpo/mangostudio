@@ -41,6 +41,25 @@ function toEpochMs(value: number): number {
   return value > 1e12 ? value : value * 1000;
 }
 
+function formatEpochDate(value: number): string | undefined {
+  const date = new Date(toEpochMs(value));
+  return Number.isFinite(date.getTime()) ? date.toISOString().slice(0, 10) : undefined;
+}
+
+function formatCompactDate(value: number): string | undefined {
+  if (!Number.isInteger(value)) return undefined;
+  const compactDate = String(value);
+  if (!/^\d{8}$/.test(compactDate)) return undefined;
+  return `${compactDate.slice(0, 4)}-${compactDate.slice(4, 6)}-${compactDate.slice(6, 8)}`;
+}
+
+function coerceStartDate(value: unknown): string | undefined {
+  if (typeof value === 'string') return value === '' ? undefined : value;
+  if (typeof value !== 'number' || !Number.isFinite(value)) return undefined;
+  if (value > 1e9) return formatEpochDate(value) ?? String(value);
+  return formatCompactDate(value) ?? String(value);
+}
+
 function coerceBoolean(value: unknown): boolean | undefined {
   if (typeof value === 'boolean') return value;
   if (value === 'true') return true;
@@ -304,9 +323,10 @@ export function parseChatGptProfileStats(payload: unknown): ChatGptUsageStats | 
     for (const entry of stats.daily_usage_buckets) {
       const bucket = asRecord(entry);
       const tokens = coerceNumber(bucket?.tokens);
-      if (typeof bucket?.start_date !== 'string' || bucket.start_date === '') continue;
+      const startDate = coerceStartDate(bucket?.start_date);
+      if (startDate === undefined) continue;
       if (tokens === undefined) continue;
-      buckets.push({ startDate: bucket.start_date, tokens });
+      buckets.push({ startDate, tokens });
     }
     if (buckets.length > 0) {
       buckets.sort((a, b) => a.startDate.localeCompare(b.startDate));

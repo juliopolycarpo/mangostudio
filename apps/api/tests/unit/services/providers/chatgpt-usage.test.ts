@@ -287,6 +287,28 @@ describe('parseChatGptProfileStats', () => {
     });
   });
 
+  it('coerces numeric daily bucket start dates before sorting', () => {
+    expect(
+      parseChatGptProfileStats({
+        stats: {
+          daily_usage_buckets: [
+            { start_date: Date.UTC(2026, 6, 3), tokens: 300 },
+            { start_date: 42, tokens: 400 },
+            { start_date: 20260702, tokens: 200 },
+            { start_date: Date.UTC(2026, 6, 1) / 1000, tokens: 100 },
+          ],
+        },
+      })
+    ).toEqual({
+      dailyUsage: [
+        { startDate: '2026-07-01', tokens: 100 },
+        { startDate: '2026-07-02', tokens: 200 },
+        { startDate: '2026-07-03', tokens: 300 },
+        { startDate: '42', tokens: 400 },
+      ],
+    });
+  });
+
   it('parses daily buckets lossily and tolerates a partial stats block', () => {
     expect(
       parseChatGptProfileStats({
