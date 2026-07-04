@@ -3,10 +3,13 @@ import { KeyRound } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { useI18n } from '@/hooks/use-i18n';
+import { USAGE_ALERT_THRESHOLDS, type UsageAlertThreshold } from '../lib/usage-alerts';
 import { ConnectorCard } from './ConnectorCard';
 
 interface ConnectorListProps {
   connectors: Connector[];
+  alertThreshold: UsageAlertThreshold;
+  onAlertThresholdChange: (threshold: UsageAlertThreshold) => void;
   onAddConnector: () => void;
   onConfigureConnector: (connector: Connector) => void;
   onDeleteConnector: (connector: Connector) => void;
@@ -16,6 +19,8 @@ interface ConnectorListProps {
 
 export function ConnectorList({
   connectors,
+  alertThreshold,
+  onAlertThresholdChange,
   onAddConnector,
   onConfigureConnector,
   onDeleteConnector,
@@ -24,17 +29,41 @@ export function ConnectorList({
 }: ConnectorListProps) {
   const { t } = useI18n();
   const s = t.settings.connectors;
+  const hasChatGpt = connectors.some((c) => c.provider === 'chatgpt');
 
   return (
     <Card variant="solid" className="p-4 sm:p-6 space-y-4">
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
         <h2 className="text-xs uppercase tracking-widest font-bold text-on-surface-variant/80 font-label">
           {s.title}
         </h2>
-        <Button variant="secondary" size="sm" onClick={onAddConnector} className="gap-1.5">
-          <span className="text-base leading-none">+</span>
-          {s.addButton}
-        </Button>
+        <div className="flex items-center gap-3">
+          {hasChatGpt && (
+            <label className="flex items-center gap-1.5 text-[10px] text-on-surface-variant/60">
+              {s.chatgptAlertThresholdLabel}
+              <select
+                value={alertThreshold === null ? 'off' : String(alertThreshold)}
+                onChange={(e) =>
+                  onAlertThresholdChange(
+                    e.target.value === 'off' ? null : (Number(e.target.value) as 75 | 90)
+                  )
+                }
+                className="rounded-lg border border-outline-variant/20 bg-surface-container-high px-2 py-1 text-xs text-on-surface"
+              >
+                <option value="off">{s.chatgptAlertThresholdOff}</option>
+                {USAGE_ALERT_THRESHOLDS.map((percent) => (
+                  <option key={percent} value={percent}>
+                    {s.chatgptAlertThresholdOption.replace('{percent}', String(percent))}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          <Button variant="secondary" size="sm" onClick={onAddConnector} className="gap-1.5">
+            <span className="text-base leading-none">+</span>
+            {s.addButton}
+          </Button>
+        </div>
       </div>
 
       {connectors.length === 0 ? (

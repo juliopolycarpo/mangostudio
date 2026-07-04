@@ -5,7 +5,9 @@
 import type { Connector } from '@mangostudio/shared';
 import type {
   ChatGptOAuthStatus,
+  ChatGptUsageHistoryResponse,
   ChatGptUsageStatsResponse,
+  ChatGptUsageWindowKey,
   RedeemChatGptResetCreditResponse,
   StartChatGptOAuthBody,
   StartChatGptOAuthResponse,
@@ -81,6 +83,15 @@ export async function getChatGptUsageStats(id: string): Promise<ChatGptUsageStat
   const { data, error } = await client.api.settings.connectors({ id }).usage.stats.get();
   if (error) throw new ConnectorApiError(error.value, fallback.failedToLoad);
   return data as ChatGptUsageStatsResponse;
+}
+
+export async function getChatGptUsageHistory(
+  id: string,
+  query: { window: ChatGptUsageWindowKey; days: number }
+): Promise<ChatGptUsageHistoryResponse> {
+  const { data, error } = await client.api.settings.connectors({ id }).usage.history.get({ query });
+  if (error) throw new ConnectorApiError(error.value, fallback.failedToLoad);
+  return data as ChatGptUsageHistoryResponse;
 }
 
 export async function cancelChatGptOAuth(sessionId: string): Promise<void> {

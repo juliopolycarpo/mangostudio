@@ -19,6 +19,7 @@ import { userAppSettings } from './018_user_app_settings';
 import { observabilitySnapshot } from './019_observability_snapshot';
 import { userAgentSettings } from './020_user_agent_settings';
 import { chatAgentSelection } from './021_chat_agent_selection';
+import { connectorUsageSamples } from './022_connector_usage_samples';
 
 export const allMigrations = {
   '001_initial_schema': initialSchema,
@@ -42,4 +43,5 @@ export const allMigrations = {
   '019_observability_snapshot': observabilitySnapshot,
   '020_user_agent_settings': userAgentSettings,
   '021_chat_agent_selection': chatAgentSelection,
+  '022_connector_usage_samples': connectorUsageSamples,
 };

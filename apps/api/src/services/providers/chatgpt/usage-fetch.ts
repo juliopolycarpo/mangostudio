@@ -25,6 +25,7 @@ import {
   parseChatGptUsagePayload,
   recordChatGptUsageSnapshot,
 } from './usage';
+import { persistChatGptUsageSamples } from './usage-sample-store';
 
 /** CodexBar uses 4s on these endpoints; they answer fast or not at all. */
 const WHAM_FETCH_TIMEOUT_MS = 4_000;
@@ -98,6 +99,7 @@ export async function fetchChatGptUsage(
   if (resetCredits) snapshot.resetCredits = resetCredits;
 
   recordChatGptUsageSnapshot(bundle.accountId, snapshot);
+  await persistChatGptUsageSamples(bundle.accountId, snapshot);
   return snapshot;
 }
 

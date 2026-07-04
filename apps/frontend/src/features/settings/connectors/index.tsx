@@ -9,6 +9,7 @@ import { AddConnectorModal } from './components/AddConnectorModal';
 import { ConnectorList } from './components/ConnectorList';
 import { ConnectorModelsModal } from './components/ConnectorModelsModal';
 import { DeleteConfirmDialog } from './components/DeleteConfirmDialog';
+import { useChatGptUsageAlerts } from './hooks/use-chatgpt-usage-alerts';
 import { useConnectorForm } from './hooks/use-connector-form';
 import { useConnectors } from './hooks/use-connectors';
 import { useModelSelection } from './hooks/use-model-selection';
@@ -32,6 +33,7 @@ export function ConnectorsSettings({ modelCatalog, reloadModelCatalog }: Connect
   const s = t.settings.connectors;
 
   const { connectors, reload: reloadConnectors } = useConnectors();
+  const usageAlerts = useChatGptUsageAlerts(connectors);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [connectorToDelete, setConnectorToDelete] = useState<Connector | null>(null);
 
@@ -74,6 +76,8 @@ export function ConnectorsSettings({ modelCatalog, reloadModelCatalog }: Connect
     <div className="space-y-4">
       <ConnectorList
         connectors={connectors}
+        alertThreshold={usageAlerts.threshold}
+        onAlertThresholdChange={usageAlerts.updateThreshold}
         onAddConnector={() => setIsAddModalOpen(true)}
         onConfigureConnector={modelSelection.openModals}
         onReauthenticatedConnector={async () => {

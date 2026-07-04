@@ -14,6 +14,7 @@ import type {
   ChatGptUsageStats,
   RedeemChatGptResetCreditResponse,
 } from '@mangostudio/shared/connectors';
+import { persistChatGptUsageSamples } from './usage-sample-store';
 
 type UsageWindow = NonNullable<ChatGptUsageSnapshot['primary']>;
 type AdditionalLimit = NonNullable<ChatGptUsageSnapshot['additionalLimits']>[number];
@@ -349,10 +350,16 @@ export function isChatGptUsageStale(snapshot: ChatGptUsageSnapshot, now = Date.n
   return now - snapshot.capturedAt > CHATGPT_USAGE_STALE_MS;
 }
 
-/** Passive capture hook for `/responses` (and other backend) response headers. */
+/**
+ * Passive capture hook for `/responses` (and other backend) response headers.
+ * Sample persistence is fire-and-forget here — this runs on the streaming hot
+ * path and the write is best-effort by design.
+ */
 export function captureChatGptUsageHeaders(accountId: string, headers: Headers): void {
   const snapshot = parseChatGptUsageHeaders(headers);
-  if (snapshot) recordChatGptUsageSnapshot(accountId, snapshot);
+  if (!snapshot) return;
+  recordChatGptUsageSnapshot(accountId, snapshot);
+  void persistChatGptUsageSamples(accountId, snapshot);
 }
 
 export function resetChatGptUsageStoreForTests(): void {

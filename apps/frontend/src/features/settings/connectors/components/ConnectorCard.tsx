@@ -16,6 +16,7 @@ import { useI18n } from '@/hooks/use-i18n';
 import { useChatGptOAuth } from '../hooks/use-chatgpt-oauth';
 import { ChatGptPromoChip } from './ChatGptPromoChip';
 import { ChatGptResetCreditAction } from './ChatGptResetCreditAction';
+import { ChatGptUsageHistoryPanel } from './ChatGptUsageHistoryPanel';
 import { ChatGptUsageMeter } from './ChatGptUsageMeter';
 import { ChatGptUsageStatsPanel } from './ChatGptUsageStatsPanel';
 
@@ -159,6 +160,7 @@ export function ConnectorCard({
                   ) : null}
                 </>
               ) : null}
+              <ChatGptUsageHistoryPanel connectorId={c.id} />
               <ChatGptUsageStatsPanel connectorId={c.id} />
             </>
           ) : null}

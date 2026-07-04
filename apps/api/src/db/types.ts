@@ -169,6 +169,17 @@ export interface UserAgentSettingsTable {
   updatedAt: number;
 }
 
+export interface ConnectorUsageSamplesTable {
+  id: string;
+  /** ChatGPT account id — usage windows are account-scoped, not connector-scoped. */
+  accountId: string;
+  window: 'primary' | 'secondary';
+  usedPercent: number;
+  windowMinutes: number | null;
+  resetsAt: number | null;
+  sampledAt: number;
+}
+
 export interface ObservabilitySnapshotTable {
   id: string;
   snapshotJson: string;
@@ -191,6 +202,7 @@ export interface Database {
   user_app_settings: UserAppSettingsTable;
   user_agent_settings: UserAgentSettingsTable;
   observability_snapshot: ObservabilitySnapshotTable;
+  connector_usage_samples: ConnectorUsageSamplesTable;
 }
 
 export type GeneratedImageSelect = Selectable<GeneratedImagesTable>;
