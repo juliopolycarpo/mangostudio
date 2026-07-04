@@ -2,13 +2,14 @@ import type {
   ProviderCacheMetrics,
   ProviderCacheName,
   ProviderProbeOperation,
+  ProviderUsageMetrics,
 } from '@mangostudio/shared/observability';
 import { useQuery } from '@tanstack/react-query';
 import { Card } from '@/components/ui/Card';
 import { connectorQueryOptions } from '@/features/settings/connectors/hooks/use-connectors';
 import { useI18n } from '@/hooks/use-i18n';
 import { observabilityMetricsQueryOptions } from '../queries';
-import { formatPercent, formatTimestamp } from '../utils';
+import { formatCompactDuration, formatPercent, formatTimestamp, formatTokenCount } from '../utils';
 import { ChatGptMetricsCard } from './ChatGptMetricsCard';
 
 /** ChatGPT usage snapshots are cached ~5 min server-side, so poll leisurely. */
@@ -52,8 +53,70 @@ function CacheMetricsTable(props: {
   );
 }
 
+function UsageSummaryRow(props: {
+  labels: {
+    textTurnsLabel: string;
+    imageGenerationsLabel: string;
+    inputTokensLabel: string;
+    inputTokensHint: string;
+    lastUsedLabel: string;
+    lastUsedAgoLabel: string;
+  };
+  usage: ProviderUsageMetrics;
+  now: number;
+  locale: 'pt-BR' | 'en';
+}) {
+  const lastUsedAgo =
+    props.usage.lastUsedAt !== undefined
+      ? props.labels.lastUsedAgoLabel.replace(
+          '{time}',
+          formatCompactDuration(props.now - props.usage.lastUsedAt)
+        )
+      : null;
+
+  return (
+    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <div className="rounded-xl bg-surface-container-lowest px-4 py-3">
+        <div className="text-xs uppercase tracking-widest font-bold text-on-surface-variant/70 font-label">
+          {props.labels.textTurnsLabel}
+        </div>
+        <div className="mt-1 text-sm font-semibold text-on-surface tabular-nums">
+          {props.usage.textTurns}
+        </div>
+      </div>
+      <div className="rounded-xl bg-surface-container-lowest px-4 py-3">
+        <div className="text-xs uppercase tracking-widest font-bold text-on-surface-variant/70 font-label">
+          {props.labels.imageGenerationsLabel}
+        </div>
+        <div className="mt-1 text-sm font-semibold text-on-surface tabular-nums">
+          {props.usage.imageGenerations}
+        </div>
+      </div>
+      <div className="rounded-xl bg-surface-container-lowest px-4 py-3">
+        <div className="text-xs uppercase tracking-widest font-bold text-on-surface-variant/70 font-label">
+          {props.labels.inputTokensLabel}
+        </div>
+        <div className="mt-1 text-sm font-semibold text-on-surface tabular-nums">
+          {formatTokenCount(props.usage.inputTokens, props.locale)}
+        </div>
+        <div className="mt-0.5 text-[10px] text-on-surface-variant/60">
+          {props.labels.inputTokensHint}
+        </div>
+      </div>
+      <div className="rounded-xl bg-surface-container-lowest px-4 py-3">
+        <div className="text-xs uppercase tracking-widest font-bold text-on-surface-variant/70 font-label">
+          {props.labels.lastUsedLabel}
+        </div>
+        <div className="mt-1 text-sm font-semibold text-on-surface tabular-nums">
+          {lastUsedAgo ?? '—'}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function MetricsSettingsPage() {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const { data, error, isLoading } = useQuery(observabilityMetricsQueryOptions());
   const connectorsQuery = useQuery({
     ...connectorQueryOptions(),
@@ -62,6 +125,7 @@ export function MetricsSettingsPage() {
   const chatGptConnectors = (connectorsQuery.data?.connectors ?? []).filter(
     (connector) => connector.provider === 'chatgpt' && !connector.needsReauth
   );
+  const now = Date.now();
   const labels = t.settings.metrics;
   const generatedAtLabel = data?.generatedAt ? formatTimestamp(data.generatedAt) : '-';
   const cacheLabels: Record<ProviderCacheName, string> = {
@@ -116,6 +180,27 @@ export function MetricsSettingsPage() {
             </div>
 
             <div className="grid gap-4">
+              {providerMetrics.usage ? (
+                <div className="space-y-3">
+                  <h4 className="text-xs uppercase tracking-widest font-bold text-on-surface-variant/80 font-label">
+                    {labels.usageSectionTitle}
+                  </h4>
+                  <UsageSummaryRow
+                    labels={{
+                      textTurnsLabel: labels.usageTextTurnsLabel,
+                      imageGenerationsLabel: labels.usageImageGenerationsLabel,
+                      inputTokensLabel: labels.usageInputTokensLabel,
+                      inputTokensHint: labels.usageInputTokensHint,
+                      lastUsedLabel: labels.usageLastUsedLabel,
+                      lastUsedAgoLabel: labels.usageLastUsedAgoLabel,
+                    }}
+                    usage={providerMetrics.usage}
+                    now={now}
+                    locale={locale}
+                  />
+                </div>
+              ) : null}
+
               <div className="space-y-3">
                 <h4 className="text-xs uppercase tracking-widest font-bold text-on-surface-variant/80 font-label">
                   {labels.cacheSectionTitle}
