@@ -46,7 +46,7 @@ function normalizeDailyUsage(stats: ChatGptUsageStats): DailyUsageBucket[] {
       startDate: String(bucket.startDate),
       tokens: Math.max(0, bucket.tokens),
     }))
-    .sort((a, b) => a.startDate.localeCompare(b.startDate))
+    .sort((a, b) => String(a.startDate).localeCompare(String(b.startDate)))
     .slice(-MAX_DAILY_BUCKETS);
 }
 
