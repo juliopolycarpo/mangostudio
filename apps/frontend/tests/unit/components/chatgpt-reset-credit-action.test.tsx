@@ -91,4 +91,23 @@ describe('ChatGptResetCreditAction', () => {
     );
     expect(screen.queryByText('Use a rate-limit reset?')).not.toBeInTheDocument();
   });
+
+  it('surfaces the windows restored by the last redemption in the next confirmation', async () => {
+    mockRedeemChatGptResetCredit.mockResolvedValue({ code: 'reset', windowsReset: 2 });
+    const onRedeemed = vi.fn();
+    render(
+      <ChatGptResetCreditAction
+        connector={makeConnector({ limitReached: true, resetCredits: { availableCount: 2 } })}
+        onRedeemed={onRedeemed}
+      />
+    );
+
+    fireEvent.click(screen.getByText('Use a rate-limit reset'));
+    expect(screen.queryByText(/restored 2 window/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText('Use reset'));
+    await waitFor(() => expect(onRedeemed).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(screen.getByText('Use a rate-limit reset'));
+    expect(screen.getByText(/restored 2 window\(s\)/)).toBeInTheDocument();
+  });
 });

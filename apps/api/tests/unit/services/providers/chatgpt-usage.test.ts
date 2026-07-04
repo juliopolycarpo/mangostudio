@@ -213,6 +213,75 @@ describe('parseChatGptResetCreditsPayload', () => {
   it('returns null for non-object payloads', () => {
     expect(parseChatGptResetCreditsPayload(undefined, NOW)).toBe(null);
   });
+
+  it('parses per-credit details lossily with epoch conversions', () => {
+    const grantedAt = new Date(NOW - 3 * 86_400_000).toISOString();
+    const redeemedAt = new Date(NOW - 86_400_000).toISOString();
+    const result = parseChatGptResetCreditsPayload(
+      {
+        available_count: 1,
+        credits: [
+          {
+            id: 'credit-1',
+            reset_type: 'weekly',
+            status: 'available',
+            granted_at: grantedAt,
+            expires_at: inOneDay,
+            title: 'Promo reset',
+            description: 'Granted for trying Codex',
+          },
+          {
+            id: 'credit-2',
+            status: 'redeemed',
+            granted_at: grantedAt,
+            redeemed_at: redeemedAt,
+          },
+          { id: 'credit-3', status: 'mystery-status', expires_at: 'not-a-date' },
+          'garbage',
+          { status: 'available' }, // no id → aggregate counts it, details skip it
+        ],
+      },
+      NOW
+    );
+
+    expect(result).toEqual({
+      availableCount: 1,
+      nextExpiresAt: NOW + 86_400_000,
+      credits: [
+        {
+          id: 'credit-1',
+          resetType: 'weekly',
+          status: 'available',
+          grantedAt: NOW - 3 * 86_400_000,
+          expiresAt: NOW + 86_400_000,
+          title: 'Promo reset',
+          description: 'Granted for trying Codex',
+        },
+        {
+          id: 'credit-2',
+          status: 'redeemed',
+          grantedAt: NOW - 3 * 86_400_000,
+          redeemedAt: NOW - 86_400_000,
+        },
+        { id: 'credit-3', status: 'mystery-status' },
+      ],
+    });
+  });
+
+  it('caps the per-credit detail list without breaking the aggregate count', () => {
+    const result = parseChatGptResetCreditsPayload(
+      {
+        credits: Array.from({ length: 25 }, (_, index) => ({
+          id: `credit-${index}`,
+          status: 'available',
+        })),
+      },
+      NOW
+    );
+
+    expect(result?.availableCount).toBe(25);
+    expect(result?.credits).toHaveLength(20);
+  });
 });
 
 describe('parseChatGptUsageHeaders promo message', () => {

@@ -11,6 +11,7 @@ export {
   ChatGptOAuthStatusSchema,
   type ChatGptRedeemOutcome,
   ChatGptRedeemOutcomeSchema,
+  type ChatGptResetCredit,
   type ChatGptUsageHistoryResponse,
   ChatGptUsageHistoryResponseSchema,
   type ChatGptUsageSample,
