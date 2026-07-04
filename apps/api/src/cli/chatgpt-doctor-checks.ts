@@ -5,8 +5,11 @@
  * callback port, an unreachable backend — and each gets its own checklist row
  * so "ChatGPT stopped working" becomes a copy-pasteable diagnosis.
  *
- * Read-only by default: the live refresh probe (which rotates the stored
- * refresh token) only runs behind the explicit `--chatgpt-refresh` flag.
+ * Never mutates user data by default: the live refresh probe (which rotates
+ * the stored refresh token) only runs behind the explicit `--chatgpt-refresh`
+ * flag. The storage check writes and deletes a throwaway probe secret so
+ * write-path failures (e.g. the Windows credential blob size limit) surface
+ * here instead of only during sign-in.
  */
 
 import { createServer } from 'node:net';
@@ -84,11 +87,31 @@ export async function collectChatGptDoctorChecks(
   return results;
 }
 
+/** Sized like a persisted OAuth token bundle (three JWTs), not an API key. */
+const SECRET_PROBE_BYTES = 8192;
+const SECRET_PROBE_DESCRIPTOR = { service: 'mangostudio', name: '__doctor-write-probe__' };
+
 async function checkSecretStorage(secretStore: SecretStore): Promise<CheckResult> {
   const label = 'ChatGPT secrets';
-  return (await secretStore.isAvailable())
-    ? ok(label, 'secret store reachable')
-    : fail(label, 'secret store unavailable — stored ChatGPT tokens cannot be read');
+  if (!(await secretStore.isAvailable())) {
+    return fail(label, 'secret store unavailable — stored ChatGPT tokens cannot be read');
+  }
+
+  try {
+    const payload = 'm'.repeat(SECRET_PROBE_BYTES);
+    await secretStore.setSecret(SECRET_PROBE_DESCRIPTOR, payload);
+    const readBack = await secretStore.getSecret(SECRET_PROBE_DESCRIPTOR);
+    if (readBack !== payload) {
+      return fail(label, 'secret store returned corrupted data for a token-sized write');
+    }
+    return ok(label, 'secret store reachable (token-sized write verified)');
+  } catch (error) {
+    return fail(label, `token-sized write failed — ${errorMessage(error)}`);
+  } finally {
+    await secretStore.deleteSecret(SECRET_PROBE_DESCRIPTOR).catch(() => {
+      // Best-effort cleanup; a leftover probe entry is harmless.
+    });
+  }
 }
 
 interface TokenStateResult {
