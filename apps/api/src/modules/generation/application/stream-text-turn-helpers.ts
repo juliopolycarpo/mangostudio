@@ -20,6 +20,7 @@ import {
   decideTurnPersistence,
   getContinuationStrategy,
 } from '../../../services/providers/core/continuation-runtime';
+import { recordProviderTurn } from '../../../services/providers/core/provider-observability';
 import type {
   AgentTurnRequest,
   ChatTurnContext,
@@ -280,6 +281,12 @@ export async function* handleTurnCompleted(ctx: TurnCompletedContext): AsyncGene
     limit: snapshot.contextLimit,
     ratio: snapshot.estimatedUsageRatio,
     mode: displayMode,
+  });
+
+  recordProviderTurn({
+    provider: ctx.providerType,
+    kind: 'text',
+    inputTokens: snapshot.estimatedInputTokens,
   });
 
   const contextState = buildPersistedContextSnapshot(snapshot);

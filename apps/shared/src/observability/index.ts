@@ -17,4 +17,8 @@ export {
   ProviderProbeMetricsSchema,
   type ProviderProbeOperation,
   ProviderProbeOperationSchema,
+  type ProviderUsageKind,
+  ProviderUsageKindSchema,
+  type ProviderUsageMetrics,
+  ProviderUsageMetricsSchema,
 } from './schemas';

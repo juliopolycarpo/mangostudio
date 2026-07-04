@@ -8,6 +8,7 @@ import {
   recordProviderCacheHit,
   recordProviderCacheMiss,
   recordProviderProbeTimeout,
+  recordProviderTurn,
   resetProviderObservability,
 } from '../../../src/services/providers/core/provider-observability';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
@@ -72,5 +73,36 @@ describe('settings observability routes', () => {
       operation: 'model-list',
       kind: 'probe-timeout',
     });
+  });
+
+  it('exposes per-provider usage counters after a recorded turn', async () => {
+    recordProviderTurn({ provider: 'openai', kind: 'text', inputTokens: 900 });
+    recordProviderTurn({ provider: 'openai', kind: 'image' });
+
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, settingsRoutes);
+    restoreAuth = restore;
+
+    const response = await app.handle(new Request('http://localhost/settings/metrics'));
+    const payload = (await response.json()) as ProviderObservabilityMetricsResponse;
+
+    expect(response.status).toBe(200);
+    expect(payload.providers[0]?.usage).toMatchObject({
+      textTurns: 1,
+      imageGenerations: 1,
+      inputTokens: 900,
+    });
+  });
+
+  it('omits the usage bucket for providers that were never used', async () => {
+    recordProviderCacheHit('anthropic', 'sdk-client');
+
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, settingsRoutes);
+    restoreAuth = restore;
+
+    const response = await app.handle(new Request('http://localhost/settings/metrics'));
+    const payload = (await response.json()) as ProviderObservabilityMetricsResponse;
+
+    expect(response.status).toBe(200);
+    expect(payload.providers[0]?.usage).toBeUndefined();
   });
 });

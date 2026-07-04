@@ -37,11 +37,25 @@ export const ProviderProbeMetricsSchema = Type.Object({
 
 export type ProviderProbeMetrics = Static<typeof ProviderProbeMetricsSchema>;
 
+export const ProviderUsageKindSchema = Type.Union([Type.Literal('text'), Type.Literal('image')]);
+
+export type ProviderUsageKind = Static<typeof ProviderUsageKindSchema>;
+
+export const ProviderUsageMetricsSchema = Type.Object({
+  textTurns: Type.Number(),
+  imageGenerations: Type.Number(),
+  inputTokens: Type.Number(),
+  lastUsedAt: Type.Optional(Type.Number()),
+});
+
+export type ProviderUsageMetrics = Static<typeof ProviderUsageMetricsSchema>;
+
 export const ProviderObservabilityMetricsSchema = Type.Object({
   provider: ProviderTypeSchema,
   totalProbeTimeouts: Type.Number(),
   caches: ReadonlyArraySchema(ProviderCacheMetricsSchema),
   probeTimeouts: ReadonlyArraySchema(ProviderProbeMetricsSchema),
+  usage: Type.Optional(ProviderUsageMetricsSchema),
 });
 
 export type ProviderObservabilityMetrics = Static<typeof ProviderObservabilityMetricsSchema>;

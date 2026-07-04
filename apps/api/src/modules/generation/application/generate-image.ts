@@ -2,6 +2,7 @@ import type { GeneratedImageArtifact } from '@mangostudio/shared';
 import type { PromptSettings } from '@mangostudio/shared/prompt-rules';
 import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';
+import { recordProviderTurn } from '../../../services/providers/core/provider-observability';
 import { warmProviderForRequest } from '../../../services/providers/core/provider-readiness';
 import {
   getProvider,
@@ -110,6 +111,8 @@ export async function generateImage(
     imageSize: input.imageQuality ?? '1K',
     modelName: modelId,
   });
+
+  recordProviderTurn({ provider: provider.providerType, kind: 'image' });
 
   const generationTime = `${((Date.now() - startTime) / 1000).toFixed(1)}s`;
   const styleParams = [input.imageQuality ?? '1K'];

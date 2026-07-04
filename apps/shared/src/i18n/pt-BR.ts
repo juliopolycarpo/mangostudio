@@ -640,7 +640,7 @@ export const messages = {
     metrics: {
       title: 'Métricas',
       description:
-        'Contadores em memória para taxa de acerto de cache dos providers e total de timeouts de probes.',
+        'Contadores em memória para uso do provider, taxa de acerto de cache e total de timeouts de probes. Os tokens são estimativas e não refletem cobrança.',
       chatgptUsageEmpty: 'Nenhum dado de uso disponível para esta conta ainda.',
       failedToLoad: 'Falha ao carregar métricas',
       empty: 'Nenhuma métrica de provider foi registrada ainda.',
@@ -648,6 +648,13 @@ export const messages = {
       totalProbeTimeoutsLabel: 'Timeouts de probe: {value}',
       cacheSectionTitle: 'Taxa de Acerto de Cache',
       probeSectionTitle: 'Timeouts de Probe por Operação',
+      usageSectionTitle: 'Uso',
+      usageTextTurnsLabel: 'Turnos de texto',
+      usageImageGenerationsLabel: 'Gerações de imagem',
+      usageInputTokensLabel: '~Tokens',
+      usageInputTokensHint: 'Estimativa (reportado pelo provider quando disponível).',
+      usageLastUsedLabel: 'Último uso',
+      usageLastUsedAgoLabel: 'há {time}',
       cacheLabel: 'Cache',
       hitsLabel: 'Acertos',
       missesLabel: 'Falhas',

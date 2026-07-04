@@ -73,6 +73,74 @@ describe('Observability settings pages', () => {
     expect(screen.getByText('80%')).toBeInTheDocument();
   });
 
+  it('renders the usage row when a provider has recorded turns', async () => {
+    fetchScenario.respondWithJson('GET', '/api/settings/metrics', {
+      body: {
+        generatedAt: 1_700_000_000_000,
+        providers: [
+          {
+            provider: 'openai',
+            totalProbeTimeouts: 0,
+            caches: [
+              { cacheName: 'sdk-client', hits: 0, misses: 0, hitRate: 0 },
+              { cacheName: 'prepared-runtime', hits: 0, misses: 0, hitRate: 0 },
+              { cacheName: 'provider-route', hits: 0, misses: 0, hitRate: 0 },
+            ],
+            probeTimeouts: [
+              { operation: 'healthcheck', timeoutCount: 0 },
+              { operation: 'model-list', timeoutCount: 0 },
+            ],
+            usage: {
+              textTurns: 7,
+              imageGenerations: 3,
+              inputTokens: 12_500,
+              lastUsedAt: 1_699_999_900_000,
+            },
+          },
+        ],
+      },
+    });
+
+    render(<MetricsSettingsPage />);
+
+    await screen.findByText('OpenAI');
+    expect(screen.getByText('Usage')).toBeInTheDocument();
+    expect(screen.getByText('Text turns')).toBeInTheDocument();
+    expect(screen.getByText('7')).toBeInTheDocument();
+    expect(screen.getByText('Image generations')).toBeInTheDocument();
+    expect(screen.getByText('3')).toBeInTheDocument();
+    expect(screen.getByText('~Tokens')).toBeInTheDocument();
+  });
+
+  it('hides the usage row for providers that were never used', async () => {
+    fetchScenario.respondWithJson('GET', '/api/settings/metrics', {
+      body: {
+        generatedAt: 1_700_000_000_000,
+        providers: [
+          {
+            provider: 'anthropic',
+            totalProbeTimeouts: 0,
+            caches: [
+              { cacheName: 'sdk-client', hits: 4, misses: 1, hitRate: 0.8 },
+              { cacheName: 'prepared-runtime', hits: 0, misses: 0, hitRate: 0 },
+              { cacheName: 'provider-route', hits: 0, misses: 0, hitRate: 0 },
+            ],
+            probeTimeouts: [
+              { operation: 'healthcheck', timeoutCount: 0 },
+              { operation: 'model-list', timeoutCount: 0 },
+            ],
+          },
+        ],
+      },
+    });
+
+    render(<MetricsSettingsPage />);
+
+    await screen.findByText('Anthropic');
+    expect(screen.queryByText('Usage')).not.toBeInTheDocument();
+    expect(screen.queryByText('Text turns')).not.toBeInTheDocument();
+  });
+
   it('loads and renders recent timeout logs', async () => {
     fetchScenario.respondWithJson('GET', '/api/settings/logs', {
       body: {

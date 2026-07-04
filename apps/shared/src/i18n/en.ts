@@ -632,7 +632,8 @@ export const messages: Messages = {
     },
     metrics: {
       title: 'Metrics',
-      description: 'Live in-memory counters for provider cache hit rates and probe timeout totals.',
+      description:
+        'Live in-memory counters for provider usage, cache hit rates, and probe timeout totals. Token counts are estimates and do not reflect billing.',
       chatgptUsageEmpty: 'No usage data available for this account yet.',
       failedToLoad: 'Failed to load metrics',
       empty: 'No provider metrics have been recorded yet.',
@@ -640,6 +641,13 @@ export const messages: Messages = {
       totalProbeTimeoutsLabel: 'Probe timeouts: {value}',
       cacheSectionTitle: 'Cache Hit Rate',
       probeSectionTitle: 'Probe Timeouts by Operation',
+      usageSectionTitle: 'Usage',
+      usageTextTurnsLabel: 'Text turns',
+      usageImageGenerationsLabel: 'Image generations',
+      usageInputTokensLabel: '~Tokens',
+      usageInputTokensHint: 'Estimated (provider-reported when available).',
+      usageLastUsedLabel: 'Last used',
+      usageLastUsedAgoLabel: '{time} ago',
       cacheLabel: 'Cache',
       hitsLabel: 'Hits',
       missesLabel: 'Misses',
