@@ -98,6 +98,39 @@ describe('observability schemas', () => {
     expect(Value.Check(ProviderObservabilityMetricsResponseSchema, SAMPLE_METRICS)).toBe(true);
   });
 
+  it('accepts a metrics snapshot with per-provider usage counters', () => {
+    expect(
+      Value.Check(ProviderObservabilityMetricsResponseSchema, {
+        ...SAMPLE_METRICS,
+        providers: [
+          {
+            ...SAMPLE_METRICS.providers[0],
+            usage: {
+              textTurns: 3,
+              imageGenerations: 1,
+              inputTokens: 2_048,
+              lastUsedAt: 1_700_000_001_000,
+            },
+          },
+        ],
+      })
+    ).toBe(true);
+  });
+
+  it('accepts usage counters without a lastUsedAt timestamp', () => {
+    expect(
+      Value.Check(ProviderObservabilityMetricsResponseSchema, {
+        ...SAMPLE_METRICS,
+        providers: [
+          {
+            ...SAMPLE_METRICS.providers[0],
+            usage: { textTurns: 1, imageGenerations: 0, inputTokens: 0 },
+          },
+        ],
+      })
+    ).toBe(true);
+  });
+
   it('accepts a canonical logs response', () => {
     expect(Value.Check(ProviderObservabilityLogsResponseSchema, SAMPLE_LOGS)).toBe(true);
   });

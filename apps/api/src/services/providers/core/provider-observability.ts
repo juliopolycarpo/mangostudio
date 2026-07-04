@@ -7,6 +7,8 @@ import type {
   ProviderObservabilityMetricsResponse,
   ProviderProbeMetrics,
   ProviderProbeOperation,
+  ProviderUsageKind,
+  ProviderUsageMetrics,
 } from '@mangostudio/shared/observability';
 import type { ProviderType } from '@mangostudio/shared/types';
 import { getDb } from '../../../db/database';
@@ -26,9 +28,24 @@ interface MutableCacheMetrics {
   misses: number;
 }
 
+interface MutableUsageMetrics {
+  textTurns: number;
+  imageGenerations: number;
+  inputTokens: number;
+  lastUsedAt: number | undefined;
+}
+
 interface MutableProviderMetrics {
   caches: Map<ProviderCacheName, MutableCacheMetrics>;
   probeTimeouts: Map<ProviderProbeOperation, number>;
+  usage: MutableUsageMetrics;
+}
+
+interface PersistedUsageMetrics {
+  textTurns: number;
+  imageGenerations: number;
+  inputTokens: number;
+  lastUsedAt?: number;
 }
 
 interface PersistedSnapshot {
@@ -38,6 +55,7 @@ interface PersistedSnapshot {
     provider: ProviderType;
     caches: Array<[ProviderCacheName, MutableCacheMetrics]>;
     probeTimeouts: Array<[ProviderProbeOperation, number]>;
+    usage?: PersistedUsageMetrics;
   }>;
   recentLogs: ProviderObservabilityLogEntry[];
 }
@@ -73,6 +91,12 @@ function toPersistedSnapshot(): PersistedSnapshot {
       provider,
       caches: Array.from(metrics.caches.entries()),
       probeTimeouts: Array.from(metrics.probeTimeouts.entries()),
+      usage: {
+        textTurns: metrics.usage.textTurns,
+        imageGenerations: metrics.usage.imageGenerations,
+        inputTokens: metrics.usage.inputTokens,
+        ...(metrics.usage.lastUsedAt !== undefined ? { lastUsedAt: metrics.usage.lastUsedAt } : {}),
+      },
     })),
     recentLogs: [...recentLogs],
   };
@@ -89,6 +113,14 @@ function fromPersistedSnapshot(snapshot: PersistedSnapshot): void {
     const restored: MutableProviderMetrics = {
       caches: new Map(entry.caches),
       probeTimeouts: new Map(entry.probeTimeouts),
+      usage: entry.usage
+        ? {
+            textTurns: entry.usage.textTurns,
+            imageGenerations: entry.usage.imageGenerations,
+            inputTokens: entry.usage.inputTokens,
+            lastUsedAt: entry.usage.lastUsedAt,
+          }
+        : { textTurns: 0, imageGenerations: 0, inputTokens: 0, lastUsedAt: undefined },
     };
     providerMetrics.set(entry.provider, restored);
   }
@@ -161,6 +193,7 @@ function ensureProviderMetrics(provider: ProviderType): MutableProviderMetrics {
   const created: MutableProviderMetrics = {
     caches: new Map(),
     probeTimeouts: new Map(),
+    usage: { textTurns: 0, imageGenerations: 0, inputTokens: 0, lastUsedAt: undefined },
   };
   providerMetrics.set(provider, created);
   return created;
@@ -224,6 +257,32 @@ export function recordProviderProbeTimeout(input: {
   markDirty();
 }
 
+/**
+ * Record a completed provider turn so usage counters stay in sync with traffic
+ * mangostudio itself generated. Fire-and-forget: this only mutates in-memory
+ * counters and schedules a debounced snapshot flush, so a failure here can never
+ * block or slow a generation.
+ *
+ * // Usage: recordProviderTurn({ provider: 'openai', kind: 'text', inputTokens: 1234 });
+ */
+export function recordProviderTurn(input: {
+  provider: ProviderType;
+  kind: ProviderUsageKind;
+  inputTokens?: number;
+}): void {
+  const metrics = ensureProviderMetrics(input.provider);
+  if (input.kind === 'text') {
+    metrics.usage.textTurns += 1;
+  } else {
+    metrics.usage.imageGenerations += 1;
+  }
+  if (input.inputTokens !== undefined && input.inputTokens > 0) {
+    metrics.usage.inputTokens += input.inputTokens;
+  }
+  metrics.usage.lastUsedAt = Date.now();
+  markDirty();
+}
+
 function toProviderCacheMetrics(
   cacheName: ProviderCacheName,
   metrics: MutableCacheMetrics
@@ -247,6 +306,19 @@ function toProviderProbeMetrics(
   };
 }
 
+function toProviderUsageMetrics(metrics: MutableUsageMetrics): ProviderUsageMetrics | undefined {
+  const { textTurns, imageGenerations, inputTokens, lastUsedAt } = metrics;
+  if (textTurns === 0 && imageGenerations === 0 && inputTokens === 0) {
+    return undefined;
+  }
+  return {
+    textTurns,
+    imageGenerations,
+    inputTokens,
+    ...(lastUsedAt !== undefined ? { lastUsedAt } : {}),
+  };
+}
+
 function toProviderObservabilityMetrics(
   provider: ProviderType,
   metrics: MutableProviderMetrics
@@ -260,11 +332,14 @@ function toProviderObservabilityMetrics(
     toProviderProbeMetrics(operation, metrics.probeTimeouts.get(operation) ?? 0)
   );
 
+  const usage = toProviderUsageMetrics(metrics.usage);
+
   return {
     provider,
     totalProbeTimeouts: probeTimeouts.reduce((total, item) => total + item.timeoutCount, 0),
     caches,
     probeTimeouts,
+    ...(usage !== undefined ? { usage } : {}),
   };
 }
 

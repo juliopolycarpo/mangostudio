@@ -79,6 +79,8 @@ export type {
   ProviderObservabilityMetricsResponse,
   ProviderProbeMetrics,
   ProviderProbeOperation,
+  ProviderUsageKind,
+  ProviderUsageMetrics,
 } from '../observability';
 // Prompt rules
 export type {
