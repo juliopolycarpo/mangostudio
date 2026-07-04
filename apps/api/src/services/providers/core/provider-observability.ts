@@ -60,6 +60,10 @@ interface PersistedSnapshot {
   recentLogs: ProviderObservabilityLogEntry[];
 }
 
+function createEmptyUsageMetrics(): MutableUsageMetrics {
+  return { textTurns: 0, imageGenerations: 0, inputTokens: 0, lastUsedAt: undefined };
+}
+
 const providerMetrics = new Map<ProviderType, MutableProviderMetrics>();
 const recentLogs: ProviderObservabilityLogEntry[] = [];
 let nextLogId = 0;
@@ -120,7 +124,7 @@ function fromPersistedSnapshot(snapshot: PersistedSnapshot): void {
             inputTokens: entry.usage.inputTokens,
             lastUsedAt: entry.usage.lastUsedAt,
           }
-        : { textTurns: 0, imageGenerations: 0, inputTokens: 0, lastUsedAt: undefined },
+        : createEmptyUsageMetrics(),
     };
     providerMetrics.set(entry.provider, restored);
   }
@@ -193,7 +197,7 @@ function ensureProviderMetrics(provider: ProviderType): MutableProviderMetrics {
   const created: MutableProviderMetrics = {
     caches: new Map(),
     probeTimeouts: new Map(),
-    usage: { textTurns: 0, imageGenerations: 0, inputTokens: 0, lastUsedAt: undefined },
+    usage: createEmptyUsageMetrics(),
   };
   providerMetrics.set(provider, created);
   return created;
