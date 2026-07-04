@@ -74,22 +74,6 @@ export function MetricsSettingsPage() {
     'model-list': labels.operations.modelList,
   };
 
-  if (isLoading) {
-    return (
-      <Card variant="solid" className="p-4 sm:p-6 text-sm text-on-surface-variant/70">
-        {t.common.loading}
-      </Card>
-    );
-  }
-
-  if (error) {
-    return (
-      <Card variant="solid" className="p-4 sm:p-6 text-sm text-error">
-        {labels.failedToLoad}
-      </Card>
-    );
-  }
-
   return (
     <div className="space-y-4">
       <Card variant="solid" className="space-y-1 p-4 sm:p-6">
@@ -108,7 +92,15 @@ export function MetricsSettingsPage() {
         />
       ))}
 
-      {data?.providers.length ? (
+      {isLoading ? (
+        <Card variant="solid" className="p-4 sm:p-6 text-sm text-on-surface-variant/70">
+          {t.common.loading}
+        </Card>
+      ) : error ? (
+        <Card variant="solid" className="p-4 sm:p-6 text-sm text-error">
+          {labels.failedToLoad}
+        </Card>
+      ) : data?.providers.length ? (
         data.providers.map((providerMetrics) => (
           <Card key={providerMetrics.provider} variant="solid" className="space-y-4 p-4 sm:p-6">
             <div className="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between">
