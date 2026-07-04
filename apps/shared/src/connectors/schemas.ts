@@ -38,6 +38,26 @@ const ChatGptUsageWindowSchema = Type.Object({
   resetsAt: Type.Optional(Type.Number()),
 });
 
+/** One rate-limit reset credit (redeemable, spent, or expired). */
+const ChatGptResetCreditSchema = Type.Object({
+  id: Type.String(),
+  /** What the credit resets, as reported by the backend. */
+  resetType: Type.Optional(Type.String()),
+  /** Backend status pass-through; unknown values must stay visible as-is. */
+  status: Type.String(),
+  /** Unix epoch ms when OpenAI granted the credit. */
+  grantedAt: Type.Optional(Type.Number()),
+  /** Unix epoch ms when the credit expires. */
+  expiresAt: Type.Optional(Type.Number()),
+  /** Unix epoch ms when the credit was redeemed. */
+  redeemedAt: Type.Optional(Type.Number()),
+  /** Human copy from the backend — promo grants explain themselves here. */
+  title: Type.Optional(Type.String()),
+  description: Type.Optional(Type.String()),
+});
+
+export type ChatGptResetCredit = Static<typeof ChatGptResetCreditSchema>;
+
 /**
  * Point-in-time plan-quota snapshot for a ChatGPT connector. Every field the
  * backend did not report is omitted — the backend contract is unversioned and
@@ -62,6 +82,8 @@ export const ChatGptUsageSnapshotSchema = Type.Object({
       availableCount: Type.Number(),
       /** Unix epoch ms of the soonest expiring available credit. */
       nextExpiresAt: Type.Optional(Type.Number()),
+      /** Per-credit details in backend order, capped defensively. */
+      credits: Type.Optional(Type.Array(ChatGptResetCreditSchema)),
     })
   ),
   /** Pay-as-you-go credits. */

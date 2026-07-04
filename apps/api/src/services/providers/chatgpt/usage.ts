@@ -19,6 +19,7 @@ import { persistChatGptUsageSamples } from './usage-sample-store';
 type UsageWindow = NonNullable<ChatGptUsageSnapshot['primary']>;
 type AdditionalLimit = NonNullable<ChatGptUsageSnapshot['additionalLimits']>[number];
 type ResetCredits = NonNullable<ChatGptUsageSnapshot['resetCredits']>;
+type ResetCreditDetail = NonNullable<ResetCredits['credits']>[number];
 
 /** Default limit family the backend reports headers under. */
 const HEADER_LIMIT_ID = 'codex';
@@ -237,10 +238,46 @@ export function parseChatGptUsagePayload(
 // ---------------------------------------------------------------------------
 
 /**
+ * The credit list rides on every connectors-list response, so a pathological
+ * payload must never bloat it past a screenful.
+ */
+const MAX_RESET_CREDIT_DETAILS = 20;
+
+/** Parses an ISO-8601 timestamp into epoch ms, or undefined when unparseable. */
+function parseIsoEpochMs(value: unknown): number | undefined {
+  if (typeof value !== 'string') return undefined;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+/** Lossy single-credit parse: returns undefined when the identity fields are missing. */
+function parseResetCreditDetail(credit: Record<string, unknown>): ResetCreditDetail | undefined {
+  if (typeof credit.id !== 'string' || credit.id === '') return undefined;
+  if (typeof credit.status !== 'string' || credit.status === '') return undefined;
+
+  const detail: ResetCreditDetail = { id: credit.id, status: credit.status };
+  if (typeof credit.reset_type === 'string' && credit.reset_type) {
+    detail.resetType = credit.reset_type;
+  }
+  const grantedAt = parseIsoEpochMs(credit.granted_at);
+  if (grantedAt !== undefined) detail.grantedAt = grantedAt;
+  const expiresAt = parseIsoEpochMs(credit.expires_at);
+  if (expiresAt !== undefined) detail.expiresAt = expiresAt;
+  const redeemedAt = parseIsoEpochMs(credit.redeemed_at);
+  if (redeemedAt !== undefined) detail.redeemedAt = redeemedAt;
+  if (typeof credit.title === 'string' && credit.title) detail.title = credit.title;
+  if (typeof credit.description === 'string' && credit.description) {
+    detail.description = credit.description;
+  }
+  return detail;
+}
+
+/**
  * Parses a `GET /wham/rate-limit-reset-credits` payload. Unknown credit
  * statuses are treated as opaque (not available), and a credit whose
  * `expires_at` is already past is skipped for "next expiring" even when its
- * status still says available.
+ * status still says available. Per-credit details (including redeemed and
+ * expired ones — they are the reset history) are parsed lossily per element.
  */
 export function parseChatGptResetCreditsPayload(
   payload: unknown,
@@ -252,13 +289,18 @@ export function parseChatGptResetCreditsPayload(
   const entries = Array.isArray(record.credits) ? record.credits : [];
   let availableFromList = 0;
   let nextExpiresAt: number | undefined;
+  const details: ResetCreditDetail[] = [];
   for (const entry of entries) {
     const credit = asRecord(entry);
-    if (credit?.status !== 'available') continue;
+    if (!credit) continue;
+    if (details.length < MAX_RESET_CREDIT_DETAILS) {
+      const detail = parseResetCreditDetail(credit);
+      if (detail) details.push(detail);
+    }
+    if (credit.status !== 'available') continue;
     availableFromList += 1;
-    if (typeof credit.expires_at !== 'string') continue;
-    const expiresAt = Date.parse(credit.expires_at);
-    if (!Number.isFinite(expiresAt) || expiresAt <= now) continue;
+    const expiresAt = parseIsoEpochMs(credit.expires_at);
+    if (expiresAt === undefined || expiresAt <= now) continue;
     if (nextExpiresAt === undefined || expiresAt < nextExpiresAt) nextExpiresAt = expiresAt;
   }
 
@@ -266,6 +308,7 @@ export function parseChatGptResetCreditsPayload(
   return {
     availableCount,
     ...(nextExpiresAt !== undefined ? { nextExpiresAt } : {}),
+    ...(details.length > 0 ? { credits: details } : {}),
   };
 }
 

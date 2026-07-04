@@ -270,6 +270,7 @@ describe('ChatGPT connector lifecycle E2E', () => {
     restoreAuth = restore;
 
     const nextExpiry = new Date(Date.now() + 86_400_000).toISOString();
+    const grantedAt = new Date(Date.now() - 86_400_000).toISOString();
     harness.fakeChatGpt.usagePayload = {
       plan_type: 'plus',
       rate_limit: {
@@ -281,8 +282,15 @@ describe('ChatGPT connector lifecycle E2E', () => {
     harness.fakeChatGpt.resetCreditsPayload = {
       available_count: 2,
       credits: [
-        { status: 'available', expires_at: nextExpiry },
-        { status: 'available', expires_at: null },
+        {
+          id: 'credit-1',
+          reset_type: 'weekly',
+          status: 'available',
+          granted_at: grantedAt,
+          expires_at: nextExpiry,
+          title: 'Promo reset',
+        },
+        { id: 'credit-2', status: 'available', expires_at: null },
       ],
     };
 
@@ -293,7 +301,21 @@ describe('ChatGPT connector lifecycle E2E', () => {
       planType: 'plus',
       primary: { usedPercent: 25, windowMinutes: 300 },
       secondary: { usedPercent: 40, windowMinutes: 10_080 },
-      resetCredits: { availableCount: 2, nextExpiresAt: Date.parse(nextExpiry) },
+      resetCredits: {
+        availableCount: 2,
+        nextExpiresAt: Date.parse(nextExpiry),
+        credits: [
+          {
+            id: 'credit-1',
+            resetType: 'weekly',
+            status: 'available',
+            grantedAt: Date.parse(grantedAt),
+            expiresAt: Date.parse(nextExpiry),
+            title: 'Promo reset',
+          },
+          { id: 'credit-2', status: 'available' },
+        ],
+      },
     });
 
     // A generation response then updates the snapshot passively via headers.
