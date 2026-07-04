@@ -109,6 +109,18 @@ describe('doctor ChatGPT section (integration)', () => {
     expect(find(results, 'ChatGPT auth').status).toBe('ok');
     expect(find(results, 'ChatGPT backend').status).toBe('ok');
     expect(fakeChatGpt.countTokenRequests()).toBe(0);
+    expect(secretStore.store.has('mangostudio:__doctor-write-probe__')).toBe(false);
+  });
+
+  it('fails the storage check when token-sized writes are rejected (Windows blob limit)', async () => {
+    secretStore.setSecret = () =>
+      Promise.reject(new Error('The stub received bad data. (code: 1783)'));
+
+    const results = await collectChatGptDoctorChecks(makeConfig(), [], false, makeDeps());
+
+    const secrets = find(results, 'ChatGPT secrets');
+    expect(secrets.status).toBe('fail');
+    expect(secrets.detail).toContain('code: 1783');
   });
 
   it('rotates and persists the refresh token with the live refresh probe', async () => {
