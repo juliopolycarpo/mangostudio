@@ -9,6 +9,12 @@ import { parseRuntimeEnvFile } from '@mangostudio/shared/runtime-env';
 import type { SecretMetadataRow } from '@mangostudio/shared/types';
 import { parse as parseToml } from 'smol-toml';
 import {
+  type BuildInfo,
+  getBuildInfo,
+  getCurrentCheckoutBuildInfo,
+  readFrontendBuildInfo,
+} from '../../lib/build-info';
+import {
   getConfigEnvFilePath,
   getHomeMangoDir,
   getVersion,
@@ -42,6 +48,7 @@ import {
   checkFrontend,
   checkInstance,
   checkRuntime,
+  collectBuildIdentityChecks,
   collectCursorDoctorChecks,
   cursorRuntimeChainReady,
   type FsProbe,
@@ -64,6 +71,9 @@ export interface DoctorDeps {
     connectors: readonly SecretMetadataRow[],
     refresh: boolean
   ) => Promise<CheckResult[]>;
+  getBuildInfo: () => BuildInfo;
+  getCheckoutBuildInfo: () => BuildInfo;
+  readFrontendBuildInfo: (frontendDir: string) => BuildInfo | null;
   log: (msg: string) => void;
   exit: (code: number) => void;
 }
@@ -90,16 +100,26 @@ async function collectResults(
   d: Required<DoctorDeps>
 ): Promise<CheckResult[]> {
   const instance = await inspectInstance(d);
+  const frontendDir = instance.alive
+    ? (instance.state?.frontendDir ?? d.frontendDir())
+    : d.frontendDir();
+  const serverBuild = instance.alive ? (instance.state?.buildInfo ?? null) : d.getBuildInfo();
   const results: CheckResult[] = [
     checkDir('Home directory', getHomeMangoDir(), d.fs),
     checkDir('Logs directory', getLogsDir(), d.fs),
     checkDir('Run directory', getRunDir(), d.fs),
     checkConfig(config),
     checkDatabase(config, d.fs),
-    checkFrontend(d.frontendDir(), d.fs),
+    checkFrontend(frontendDir, d.fs),
     checkAuthSecret(config),
     checkInstance(instance.state, instance.alive),
     checkRuntime(getVersion(), isStandaloneExecutable()),
+    ...collectBuildIdentityChecks({
+      serverBuild,
+      checkoutBuild: d.getCheckoutBuildInfo(),
+      frontendBuild: d.readFrontendBuildInfo(frontendDir),
+      frontendDir,
+    }),
   ];
 
   if (d.isCursorConfigured(config) || options.all) {
@@ -182,6 +202,9 @@ function resolveDeps(deps: Partial<DoctorDeps>): Required<DoctorDeps> {
     collectChatGptChecks:
       deps.collectChatGptChecks ??
       ((config, connectors, refresh) => collectChatGptDoctorChecks(config, connectors, refresh)),
+    getBuildInfo: deps.getBuildInfo ?? getBuildInfo,
+    getCheckoutBuildInfo: deps.getCheckoutBuildInfo ?? getCurrentCheckoutBuildInfo,
+    readFrontendBuildInfo: deps.readFrontendBuildInfo ?? readFrontendBuildInfo,
     log: deps.log ?? writeLine,
     exit: deps.exit ?? ((code) => process.exit(code)),
   };

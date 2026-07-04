@@ -78,7 +78,8 @@ advanced debugging use `MANGO_CHATGPT_AUTH_BASE_URL` and `MANGO_CHATGPT_BASE_URL
 ## Single instance
 
 Only one server may run at a time. On startup the server writes a state file at
-`~/.mango/run/server.json` (`{ pid, port, host, startedAt, logFile, version }`)
+`~/.mango/run/server.json`
+(`{ pid, port, host, startedAt, logFile, version, buildInfo, frontendDir }`)
 once the port is bound, and removes it on graceful shutdown. A second
 `serve` / `serve -d` reads that file and refuses to start if the recorded
 process is still alive. A state file whose process has died is treated as stale
@@ -99,6 +100,10 @@ Foreground `serve` logs to the terminal instead of a file.
 
 `mangostudio doctor` prints a plain-text checklist for home directories, config,
 database, frontend, auth secret, running instance, and MangoStudio runtime.
+It also reports the running server build SHA, build date, dirty flag, current
+checkout SHA, and the frontend asset SHA from `build-info.json`. If the server
+SHA is behind the checkout or differs from the served frontend assets, restart
+or rebuild so the API and browser bundle come from the same source revision.
 
 When a Cursor connector is configured (API key in env, `~/.mango/.env`, or
 `[cursor_api_keys]` in `config.toml`), doctor also reports each link in the

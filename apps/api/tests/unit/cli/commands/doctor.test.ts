@@ -1,11 +1,18 @@
 import { describe, expect, it } from 'bun:test';
 import { runDoctor } from '../../../../src/cli/commands/doctor';
 import type { FsProbe } from '../../../../src/cli/doctor-checks';
+import type { BuildInfo } from '../../../../src/lib/build-info';
 import type { MangoConfig } from '../../../../src/lib/config';
 import { FakeProcessController } from '../../../support/mocks/fake-process-controller';
 
 const ALL_OK: FsProbe = { exists: () => true, isWritable: () => true };
 const NOTHING: FsProbe = { exists: () => false, isWritable: () => false };
+const BUILD_INFO: BuildInfo = {
+  gitSha: 'abc123',
+  gitDirty: false,
+  builtAt: '2026-07-04T12:00:00.000Z',
+  buildType: 'production',
+};
 
 const FAILING_NODE_CHAIN = [
   {
@@ -70,6 +77,9 @@ function makeDoctorDeps(overrides: Record<string, unknown> = {}) {
       Promise.resolve([
         { label: 'ChatGPT secrets', status: 'ok' as const, detail: 'secret store reachable' },
       ]),
+    getBuildInfo: () => BUILD_INFO,
+    getCheckoutBuildInfo: () => BUILD_INFO,
+    readFrontendBuildInfo: () => BUILD_INFO,
     log: () => undefined,
     exit: () => undefined,
     ...overrides,
@@ -229,5 +239,25 @@ describe('runDoctor', () => {
     const text = lines.join('\n');
     expect(text).toContain('Cursor probe');
     expect(text).toContain('auth rejected probe key');
+  });
+
+  it('warns when checkout and frontend build stamps differ from the server', async () => {
+    const lines: string[] = [];
+
+    await runDoctor(
+      { all: false, cursorProbe: false, chatgptRefresh: false },
+      {
+        ...makeDoctorDeps({
+          getCheckoutBuildInfo: () => ({ ...BUILD_INFO, gitSha: 'checkout123' }),
+          readFrontendBuildInfo: () => ({ ...BUILD_INFO, gitSha: 'frontend123' }),
+        }),
+        log: (msg) => lines.push(msg),
+      }
+    );
+
+    const text = lines.join('\n');
+    expect(text).toContain('checkout checkout123 differs from server abc123');
+    expect(text).toContain('frontend frontend123 differs from server abc123');
+    expect(text).toContain('2 warning(s), 0 failure(s).');
   });
 });

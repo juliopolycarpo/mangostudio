@@ -30,6 +30,13 @@ interface BinaryBuildOptions {
   version: string;
 }
 
+interface BuildStamp {
+  gitSha: string;
+  gitDirty: boolean | 'unknown';
+  builtAt: string;
+  buildType: string;
+}
+
 function printHelp(): never {
   console.log(`Usage: bun run build [workspace flags]
        bun run build --binary [--platform <target>] [--production | --development]
@@ -75,6 +82,7 @@ async function buildStandaloneTarget(
   context: {
     apiSource: string;
     buildTime: string;
+    buildInfo: BuildStamp;
     frontendDist: string;
     outDir: string;
     cursorSidecar: CursorSidecarStaging | null;
@@ -110,6 +118,12 @@ async function buildStandaloneTarget(
       binaryPath,
       '--define',
       `process.env.BUILD_TIME=${JSON.stringify(context.buildTime)}`,
+      '--define',
+      `process.env.BUILD_BUILT_AT=${JSON.stringify(context.buildInfo.builtAt)}`,
+      '--define',
+      `process.env.BUILD_GIT_SHA=${JSON.stringify(context.buildInfo.gitSha)}`,
+      '--define',
+      `process.env.BUILD_GIT_DIRTY=${JSON.stringify(String(context.buildInfo.gitDirty))}`,
       '--define',
       `process.env.BUILD_TYPE=${JSON.stringify(options.buildType)}`,
       '--define',
@@ -155,6 +169,40 @@ async function buildStandaloneTarget(
     console.error(`❌ Error building ${target.arch}:`, caughtError);
     return false;
   }
+}
+
+async function resolveBuildStamp(buildTime: string, buildType: string): Promise<BuildStamp> {
+  const gitSha = await captureGitValue(['rev-parse', '--short=12', 'HEAD']);
+  const dirtyOutput = await captureGitValue(['status', '--porcelain']);
+
+  return {
+    gitSha: gitSha || 'unknown',
+    gitDirty: dirtyOutput === null ? 'unknown' : dirtyOutput.length > 0,
+    builtAt: buildTime,
+    buildType,
+  };
+}
+
+async function captureGitValue(args: string[]): Promise<string | null> {
+  try {
+    const { stdout, exitCode } = await captureCommand(['git', ...args], { cwd: ROOT_DIR });
+    if (exitCode !== 0) {
+      return null;
+    }
+
+    return stdout.trim();
+  } catch {
+    return null;
+  }
+}
+
+async function writeFrontendBuildInfo(frontendDist: string, buildInfo: BuildStamp): Promise<void> {
+  if (!existsSync(frontendDist)) {
+    return;
+  }
+
+  await Bun.write(join(frontendDist, 'build-info.json'), `${JSON.stringify(buildInfo, null, 2)}\n`);
+  console.log(`🧾 Frontend build stamp written to ${join(frontendDist, 'build-info.json')}`);
 }
 
 async function writeStandaloneArtifacts(
@@ -370,6 +418,7 @@ async function buildStandaloneBinary(options: BinaryBuildOptions): Promise<void>
   }
 
   const buildTime = new Date().toISOString();
+  const buildInfo = await resolveBuildStamp(buildTime, options.buildType);
   const outDir = join(ROOT_DIR, '.mango', 'out');
   const apiSource = join(ROOT_DIR, 'apps/api/src/index.ts');
   const frontendDist = join(ROOT_DIR, 'apps/frontend/dist');
@@ -378,11 +427,15 @@ async function buildStandaloneBinary(options: BinaryBuildOptions): Promise<void>
 
   console.log(`📦 Building MangoStudio v${options.version}`);
   console.log(`📅 Build time: ${buildTime}`);
+  console.log(`🧾 Build SHA: ${buildInfo.gitSha} (${formatDirtyState(buildInfo.gitDirty)})`);
   console.log(`🎯 Build type: ${options.buildType}`);
   console.log(`📁 Output directory: ${outDir}`);
   console.log('---');
 
   await buildFrontendSidecar(options.dryRun);
+  if (!options.dryRun) {
+    await writeFrontendBuildInfo(frontendDist, buildInfo);
+  }
 
   const cursorSidecar = options.dryRun ? null : await prepareCursorSidecarStaging(targets);
 
@@ -395,6 +448,7 @@ async function buildStandaloneBinary(options: BinaryBuildOptions): Promise<void>
         buildStandaloneTarget(target, options, {
           apiSource,
           buildTime,
+          buildInfo,
           frontendDist,
           outDir,
           cursorSidecar,
@@ -489,4 +543,22 @@ const result = await runCommand('build', createTurboBuildCommand(buildTargets), 
   cwd: ROOT_DIR,
 });
 
+if (result.exitCode === 0 && buildTargets.includes('frontend')) {
+  const buildTime = new Date().toISOString();
+  await writeFrontendBuildInfo(
+    join(ROOT_DIR, 'apps/frontend/dist'),
+    await resolveBuildStamp(buildTime, 'production')
+  );
+}
+
 process.exit(result.exitCode);
+
+function formatDirtyState(state: BuildStamp['gitDirty']): string {
+  if (state === true) {
+    return 'dirty';
+  }
+  if (state === false) {
+    return 'clean';
+  }
+  return 'dirty unknown';
+}
