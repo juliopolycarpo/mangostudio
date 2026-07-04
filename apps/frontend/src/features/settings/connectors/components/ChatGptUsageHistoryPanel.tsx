@@ -1,8 +1,7 @@
 import type { ChatGptUsageSample } from '@mangostudio/shared/connectors';
 import type { Locale, Messages } from '@mangostudio/shared/i18n';
 import { useQuery } from '@tanstack/react-query';
-import { ChevronDown, History, RefreshCw, TriangleAlert } from 'lucide-react';
-import { useState } from 'react';
+import { History, RefreshCw, TriangleAlert } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { useI18n } from '@/hooks/use-i18n';
 import { getChatGptUsageHistory } from '../api';
@@ -11,6 +10,7 @@ type ConnectorMessages = Messages['settings']['connectors'];
 
 const HISTORY_DAYS = 7;
 const QUERY_STALE_MS = 60_000;
+const QUERY_REFETCH_MS = 60_000;
 
 /** Sparkline geometry (viewBox units). */
 const CHART_WIDTH = 300;
@@ -133,66 +133,55 @@ function UsageHistoryChart({
 }
 
 /**
- * Collapsible weekly-window usage history for a ChatGPT connector: a sparkline
- * of the persisted used-percent samples with reset boundaries marked.
+ * Weekly-window usage history for a ChatGPT connector: a sparkline of the
+ * persisted used-percent samples with reset boundaries marked. Rendered
+ * expanded on the metrics card; the snapshot is polled in the background.
  */
 export function ChatGptUsageHistoryPanel({ connectorId }: { connectorId: string }) {
   const { t, locale } = useI18n();
   const s = t.settings.connectors;
-  const [isOpen, setIsOpen] = useState(false);
   const panelId = `chatgpt-usage-history-${connectorId}`;
   const historyQuery = useQuery({
     queryKey: historyQueryKey(connectorId),
     queryFn: () => getChatGptUsageHistory(connectorId, { window: 'secondary', days: HISTORY_DAYS }),
-    enabled: isOpen,
     staleTime: QUERY_STALE_MS,
+    refetchInterval: QUERY_REFETCH_MS,
   });
   const samples = historyQuery.data?.samples ?? [];
 
   return (
-    <div className="mt-1.5 max-w-xs space-y-2">
-      <Button
-        type="button"
-        variant="ghost"
-        size="sm"
-        onClick={() => setIsOpen((current) => !current)}
-        aria-expanded={isOpen}
-        aria-controls={panelId}
-        className="px-2"
-      >
-        <History size={14} />
+    <div className="space-y-2">
+      <p className="flex items-center gap-1.5 text-[10px] font-medium uppercase text-on-surface-variant/55">
+        <History size={13} />
         {s.chatgptHistoryToggle}
-        <ChevronDown size={14} className={`transition-transform ${isOpen ? 'rotate-180' : ''}`} />
-      </Button>
+      </p>
 
-      {isOpen && (
-        <div
-          id={panelId}
-          className="space-y-3 rounded-xl border border-outline-variant/10 bg-surface-container-low px-3 py-3"
-        >
-          {historyQuery.isLoading || historyQuery.isFetching ? (
-            <p className="flex items-center gap-2 text-[11px] text-on-surface-variant/60">
-              <RefreshCw size={13} className="animate-spin" />
-              {s.chatgptHistoryLoading}
+      <div
+        id={panelId}
+        className="space-y-3 rounded-xl border border-outline-variant/10 bg-surface-container-low px-3 py-3"
+      >
+        {historyQuery.isLoading ? (
+          <p className="flex items-center gap-2 text-[11px] text-on-surface-variant/60">
+            <RefreshCw size={13} className="animate-spin" />
+            {s.chatgptHistoryLoading}
+          </p>
+        ) : historyQuery.isError ? (
+          <div className="flex items-center justify-between gap-3">
+            <p className="flex items-center gap-2 text-[11px] text-error">
+              <TriangleAlert size={13} />
+              {s.failedToLoad}
             </p>
-          ) : historyQuery.isError ? (
-            <div className="flex items-center justify-between gap-3">
-              <p className="flex items-center gap-2 text-[11px] text-error">
-                <TriangleAlert size={13} />
-                {s.failedToLoad}
-              </p>
-              <Button variant="ghost" size="sm" onClick={() => void historyQuery.refetch()}>
-                <RefreshCw size={13} />
-                {t.common.retry}
-              </Button>
-            </div>
-          ) : samples.length === 0 ? (
-            <p className="text-[11px] text-on-surface-variant/60">{s.chatgptHistoryEmpty}</p>
-          ) : (
-            <UsageHistoryChart samples={samples} locale={locale} s={s} />
-          )}
-        </div>
-      )}
+            <Button variant="ghost" size="sm" onClick={() => void historyQuery.refetch()}>
+              <RefreshCw size={13} />
+              {t.common.retry}
+            </Button>
+          </div>
+        ) : samples.length === 0 ? (
+          <p className="text-[11px] text-on-surface-variant/60">{s.chatgptHistoryEmpty}</p>
+        ) : (
+          <UsageHistoryChart samples={samples} locale={locale} s={s} />
+        )}
+      </div>
     </div>
   );
 }

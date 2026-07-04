@@ -428,6 +428,7 @@ export const messages = {
       chatgptReauthenticating: 'Aguardando login...',
       chatgptReconnectSuccess: 'ChatGPT reconectado.',
       chatgptSignedInAs: 'Conectado como {account}',
+      chatgptSeeMetrics: 'Ver métricas',
       chatgptAccountUnknown: 'Conta ChatGPT',
       chatgptPlanBadge: 'Plano {plan}',
       chatgptPlanPlus: 'Plus',
@@ -632,7 +633,7 @@ export const messages = {
       title: 'Métricas',
       description:
         'Contadores em memória para taxa de acerto de cache dos providers e total de timeouts de probes.',
-      refresh: 'Atualizar',
+      chatgptUsageEmpty: 'Nenhum dado de uso disponível para esta conta ainda.',
       failedToLoad: 'Falha ao carregar métricas',
       empty: 'Nenhuma métrica de provider foi registrada ainda.',
       generatedAtLabel: 'Última atualização: {value}',

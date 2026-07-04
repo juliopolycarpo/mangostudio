@@ -1,6 +1,7 @@
 import type { Connector } from '@mangostudio/shared';
-import type { Messages } from '@mangostudio/shared/i18n';
+import { Link } from '@tanstack/react-router';
 import {
+  BarChart3,
   CheckCircle2,
   Database,
   FileCode,
@@ -14,18 +15,14 @@ import {
 import { Button } from '@/components/ui/Button';
 import { useI18n } from '@/hooks/use-i18n';
 import { useChatGptOAuth } from '../hooks/use-chatgpt-oauth';
+import { formatPlan } from '../lib/format-plan';
 import { ChatGptPromoChip } from './ChatGptPromoChip';
-import { ChatGptResetCreditAction } from './ChatGptResetCreditAction';
-import { ChatGptUsageHistoryPanel } from './ChatGptUsageHistoryPanel';
-import { ChatGptUsageMeter } from './ChatGptUsageMeter';
-import { ChatGptUsageStatsPanel } from './ChatGptUsageStatsPanel';
 
 interface ConnectorCardProps {
   connector: Connector;
   onConfigure: (connector: Connector) => void;
   onDelete: (connector: Connector) => void;
   onReauthenticated: (connector: Connector) => void | Promise<void>;
-  onUsageChanged: () => void | Promise<void>;
 }
 
 function isReadOnlySharedConnector(connector: Connector): boolean {
@@ -36,33 +33,11 @@ function isReadOnlySharedConnector(connector: Connector): boolean {
   );
 }
 
-function formatPlan(
-  planType: string | null | undefined,
-  s: Messages['settings']['connectors']
-): string {
-  const normalizedPlanType = planType?.toLowerCase() ?? '';
-  switch (normalizedPlanType) {
-    case 'plus':
-      return s.chatgptPlanPlus;
-    case 'pro':
-      return s.chatgptPlanPro;
-    case 'team':
-      return s.chatgptPlanTeam;
-    case 'free':
-      return s.chatgptPlanFree;
-    case '':
-      return s.chatgptPlanUnknown;
-    default:
-      return s.chatgptPlanCustom.replace('{plan}', planType ?? normalizedPlanType);
-  }
-}
-
 export function ConnectorCard({
   connector: c,
   onConfigure,
   onDelete,
   onReauthenticated,
-  onUsageChanged,
 }: ConnectorCardProps) {
   const { t } = useI18n();
   const s = t.settings.connectors;
@@ -149,20 +124,8 @@ export function ConnectorCard({
               {s.chatgptReauthWarning}
             </p>
           ) : null}
-          {isChatGpt && !c.needsReauth ? (
-            <>
-              {c.usage ? (
-                <>
-                  <ChatGptUsageMeter usage={c.usage} />
-                  <ChatGptResetCreditAction connector={c} onRedeemed={onUsageChanged} />
-                  {c.usage.promoMessage ? (
-                    <ChatGptPromoChip connectorId={c.id} message={c.usage.promoMessage} />
-                  ) : null}
-                </>
-              ) : null}
-              <ChatGptUsageHistoryPanel connectorId={c.id} />
-              <ChatGptUsageStatsPanel connectorId={c.id} />
-            </>
+          {isChatGpt && !c.needsReauth && c.usage?.promoMessage ? (
+            <ChatGptPromoChip connectorId={c.id} message={c.usage.promoMessage} />
           ) : null}
           {chatGptOAuth.error ? (
             <p className="text-[11px] leading-relaxed text-error">{chatGptOAuth.error}</p>
@@ -174,6 +137,15 @@ export function ConnectorCard({
       </div>
 
       <div className="flex items-center gap-2">
+        {isChatGpt && !c.needsReauth ? (
+          <Link
+            to="/settings/metrics"
+            className="inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-bold text-on-surface/70 transition-all duration-200 hover:bg-surface-container-high hover:text-on-surface active:scale-95"
+          >
+            <BarChart3 size={15} />
+            {s.chatgptSeeMetrics}
+          </Link>
+        ) : null}
         {isChatGpt && c.needsReauth ? (
           <Button
             variant="secondary"

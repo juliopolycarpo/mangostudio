@@ -424,6 +424,7 @@ export const messages: Messages = {
       chatgptReauthenticating: 'Waiting for sign-in...',
       chatgptReconnectSuccess: 'ChatGPT reconnected.',
       chatgptSignedInAs: 'Signed in as {account}',
+      chatgptSeeMetrics: 'See metrics',
       chatgptAccountUnknown: 'ChatGPT account',
       chatgptPlanBadge: '{plan} plan',
       chatgptPlanPlus: 'Plus',
@@ -624,7 +625,7 @@ export const messages: Messages = {
     metrics: {
       title: 'Metrics',
       description: 'Live in-memory counters for provider cache hit rates and probe timeout totals.',
-      refresh: 'Refresh',
+      chatgptUsageEmpty: 'No usage data available for this account yet.',
       failedToLoad: 'Failed to load metrics',
       empty: 'No provider metrics have been recorded yet.',
       generatedAtLabel: 'Last updated: {value}',

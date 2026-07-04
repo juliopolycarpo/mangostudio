@@ -1,8 +1,8 @@
 import type { ChatGptUsageStats } from '@mangostudio/shared/connectors';
 import type { Locale, Messages } from '@mangostudio/shared/i18n';
 import { useQuery } from '@tanstack/react-query';
-import { BarChart3, ChevronDown, RefreshCw, TriangleAlert } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { BarChart3, RefreshCw, TriangleAlert } from 'lucide-react';
+import { useMemo } from 'react';
 import { Button } from '@/components/ui/Button';
 import { useI18n } from '@/hooks/use-i18n';
 import { getChatGptUsageStats } from '../api';
@@ -12,6 +12,7 @@ type DailyUsageBucket = NonNullable<ChatGptUsageStats['dailyUsage']>[number];
 
 const MAX_DAILY_BUCKETS = 30;
 const QUERY_STALE_MS = 60_000;
+const QUERY_REFETCH_MS = 60_000;
 
 const statsQueryKey = (connectorId: string) => ['chatgpt-usage-stats', connectorId] as const;
 
@@ -169,60 +170,53 @@ function StatsBody({
   );
 }
 
+/**
+ * Account-level usage stats for a ChatGPT connector: lifetime tokens, peak day,
+ * longest turn, streaks, and a 30-day token chart. Rendered expanded on the
+ * metrics card; the stats snapshot is polled in the background.
+ */
 export function ChatGptUsageStatsPanel({ connectorId }: { connectorId: string }) {
   const { t, locale } = useI18n();
   const s = t.settings.connectors;
-  const [isOpen, setIsOpen] = useState(false);
   const panelId = `chatgpt-usage-stats-${connectorId}`;
   const statsQuery = useQuery({
     queryKey: statsQueryKey(connectorId),
     queryFn: () => getChatGptUsageStats(connectorId),
-    enabled: isOpen,
     staleTime: QUERY_STALE_MS,
+    refetchInterval: QUERY_REFETCH_MS,
   });
 
   return (
-    <div className="mt-1.5 max-w-xs space-y-2">
-      <Button
-        type="button"
-        variant="ghost"
-        size="sm"
-        onClick={() => setIsOpen((current) => !current)}
-        aria-expanded={isOpen}
-        aria-controls={panelId}
-        className="px-2"
-      >
-        <BarChart3 size={14} />
+    <div className="space-y-2">
+      <p className="flex items-center gap-1.5 text-[10px] font-medium uppercase text-on-surface-variant/55">
+        <BarChart3 size={13} />
         {s.chatgptStatsToggle}
-        <ChevronDown size={14} className={`transition-transform ${isOpen ? 'rotate-180' : ''}`} />
-      </Button>
+      </p>
 
-      {isOpen && (
-        <div
-          id={panelId}
-          className="space-y-3 rounded-xl border border-outline-variant/10 bg-surface-container-low px-3 py-3"
-        >
-          {statsQuery.isLoading || statsQuery.isFetching ? (
-            <p className="flex items-center gap-2 text-[11px] text-on-surface-variant/60">
-              <RefreshCw size={13} className="animate-spin" />
-              {s.chatgptStatsLoading}
+      <div
+        id={panelId}
+        className="space-y-3 rounded-xl border border-outline-variant/10 bg-surface-container-low px-3 py-3"
+      >
+        {statsQuery.isLoading ? (
+          <p className="flex items-center gap-2 text-[11px] text-on-surface-variant/60">
+            <RefreshCw size={13} className="animate-spin" />
+            {s.chatgptStatsLoading}
+          </p>
+        ) : statsQuery.isError ? (
+          <div className="flex items-center justify-between gap-3">
+            <p className="flex items-center gap-2 text-[11px] text-error">
+              <TriangleAlert size={13} />
+              {s.failedToLoad}
             </p>
-          ) : statsQuery.isError ? (
-            <div className="flex items-center justify-between gap-3">
-              <p className="flex items-center gap-2 text-[11px] text-error">
-                <TriangleAlert size={13} />
-                {s.failedToLoad}
-              </p>
-              <Button variant="ghost" size="sm" onClick={() => void statsQuery.refetch()}>
-                <RefreshCw size={13} />
-                {t.common.retry}
-              </Button>
-            </div>
-          ) : (
-            <StatsBody stats={statsQuery.data?.stats ?? null} locale={locale} s={s} />
-          )}
-        </div>
-      )}
+            <Button variant="ghost" size="sm" onClick={() => void statsQuery.refetch()}>
+              <RefreshCw size={13} />
+              {t.common.retry}
+            </Button>
+          </div>
+        ) : (
+          <StatsBody stats={statsQuery.data?.stats ?? null} locale={locale} s={s} />
+        )}
+      </div>
     </div>
   );
 }
