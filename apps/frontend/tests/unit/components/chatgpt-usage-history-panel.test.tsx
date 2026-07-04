@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChatGptUsageHistoryPanel } from '@/features/settings/connectors/components/ChatGptUsageHistoryPanel';
-import { fireEvent, render, screen, waitFor } from '../../support/harness/render';
+import { render, screen } from '../../support/harness/render';
 
 const mockGetChatGptUsageHistory = vi.fn();
 
@@ -13,7 +13,7 @@ describe('ChatGptUsageHistoryPanel', () => {
     mockGetChatGptUsageHistory.mockReset();
   });
 
-  it('fetches lazily on open and renders the weekly sparkline with reset boundaries', async () => {
+  it('fetches eagerly and renders the weekly sparkline with reset boundaries', async () => {
     const now = Date.now();
     mockGetChatGptUsageHistory.mockResolvedValue({
       window: 'secondary',
@@ -27,17 +27,12 @@ describe('ChatGptUsageHistoryPanel', () => {
     });
 
     render(<ChatGptUsageHistoryPanel connectorId="connector-1" />);
-    expect(mockGetChatGptUsageHistory).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByRole('button', { name: /usage history/i }));
-
-    await waitFor(() =>
-      expect(mockGetChatGptUsageHistory).toHaveBeenCalledWith('connector-1', {
-        window: 'secondary',
-        days: 7,
-      })
-    );
     const chart = await screen.findByRole('img', { name: 'Weekly limit — last 7 days' });
+    expect(mockGetChatGptUsageHistory).toHaveBeenCalledWith('connector-1', {
+      window: 'secondary',
+      days: 7,
+    });
     expect(chart).toBeInTheDocument();
     expect(chart.querySelectorAll('circle')).toHaveLength(3);
     expect(chart.querySelectorAll('line')).toHaveLength(1);
@@ -57,7 +52,6 @@ describe('ChatGptUsageHistoryPanel', () => {
     });
 
     render(<ChatGptUsageHistoryPanel connectorId="connector-partial" />);
-    fireEvent.click(screen.getByRole('button', { name: /usage history/i }));
 
     const chart = await screen.findByRole('img', { name: 'Weekly limit — last 7 days' });
     expect(chart.querySelectorAll('circle')).toHaveLength(1);
@@ -69,7 +63,6 @@ describe('ChatGptUsageHistoryPanel', () => {
     mockGetChatGptUsageHistory.mockResolvedValue({ window: 'secondary', days: 7, samples: [] });
 
     render(<ChatGptUsageHistoryPanel connectorId="connector-empty" />);
-    fireEvent.click(screen.getByRole('button', { name: /usage history/i }));
 
     expect(await screen.findByText('No usage history recorded yet.')).toBeInTheDocument();
   });

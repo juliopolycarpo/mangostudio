@@ -1,7 +1,7 @@
 import type { ChatGptUsageStats } from '@mangostudio/shared/connectors';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChatGptUsageStatsPanel } from '@/features/settings/connectors/components/ChatGptUsageStatsPanel';
-import { fireEvent, render, screen, waitFor } from '../../support/harness/render';
+import { render, screen } from '../../support/harness/render';
 
 const mockGetChatGptUsageStats = vi.fn();
 
@@ -14,7 +14,7 @@ describe('ChatGptUsageStatsPanel', () => {
     mockGetChatGptUsageStats.mockReset();
   });
 
-  it('fetches lazily when the panel is opened and renders counters plus the chart', async () => {
+  it('fetches eagerly and renders counters plus the chart', async () => {
     mockGetChatGptUsageStats.mockResolvedValue({
       stats: {
         lifetimeTokens: 123_456,
@@ -30,12 +30,9 @@ describe('ChatGptUsageStatsPanel', () => {
     });
 
     render(<ChatGptUsageStatsPanel connectorId="connector-1" />);
-    expect(mockGetChatGptUsageStats).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByRole('button', { name: /usage stats/i }));
-
-    await waitFor(() => expect(mockGetChatGptUsageStats).toHaveBeenCalledWith('connector-1'));
     expect(await screen.findByText('Lifetime tokens')).toBeInTheDocument();
+    expect(mockGetChatGptUsageStats).toHaveBeenCalledWith('connector-1');
     expect(screen.getByText('123,456')).toBeInTheDocument();
     expect(screen.getByText('Peak day')).toBeInTheDocument();
     expect(screen.getByText('8,000')).toBeInTheDocument();
@@ -53,7 +50,6 @@ describe('ChatGptUsageStatsPanel', () => {
     mockGetChatGptUsageStats.mockResolvedValue({ stats: null });
 
     render(<ChatGptUsageStatsPanel connectorId="connector-empty" />);
-    fireEvent.click(screen.getByRole('button', { name: /usage stats/i }));
 
     expect(
       await screen.findByText('No usage stats available for this account.')
@@ -71,7 +67,6 @@ describe('ChatGptUsageStatsPanel', () => {
     });
 
     render(<ChatGptUsageStatsPanel connectorId="connector-numeric-date" />);
-    fireEvent.click(screen.getByRole('button', { name: /usage stats/i }));
 
     expect(
       await screen.findByRole('img', { name: 'Tokens per day — last 30 days' })

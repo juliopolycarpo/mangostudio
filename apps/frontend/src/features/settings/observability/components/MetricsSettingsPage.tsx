@@ -4,11 +4,15 @@ import type {
   ProviderProbeOperation,
 } from '@mangostudio/shared/observability';
 import { useQuery } from '@tanstack/react-query';
-import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
+import { connectorQueryOptions } from '@/features/settings/connectors/hooks/use-connectors';
 import { useI18n } from '@/hooks/use-i18n';
 import { observabilityMetricsQueryOptions } from '../queries';
 import { formatPercent, formatTimestamp } from '../utils';
+import { ChatGptMetricsCard } from './ChatGptMetricsCard';
+
+/** ChatGPT usage snapshots are cached ~5 min server-side, so poll leisurely. */
+const CHATGPT_REFETCH_MS = 60_000;
 
 function CacheMetricsTable(props: {
   cacheLabel: string;
@@ -50,8 +54,13 @@ function CacheMetricsTable(props: {
 
 export function MetricsSettingsPage() {
   const { t } = useI18n();
-  const { data, error, isLoading, isFetching, refetch } = useQuery(
-    observabilityMetricsQueryOptions()
+  const { data, error, isLoading } = useQuery(observabilityMetricsQueryOptions());
+  const connectorsQuery = useQuery({
+    ...connectorQueryOptions(),
+    refetchInterval: CHATGPT_REFETCH_MS,
+  });
+  const chatGptConnectors = (connectorsQuery.data?.connectors ?? []).filter(
+    (connector) => connector.provider === 'chatgpt' && !connector.needsReauth
   );
   const labels = t.settings.metrics;
   const generatedAtLabel = data?.generatedAt ? formatTimestamp(data.generatedAt) : '-';
@@ -65,40 +74,33 @@ export function MetricsSettingsPage() {
     'model-list': labels.operations.modelList,
   };
 
-  if (isLoading) {
-    return (
-      <Card variant="solid" className="p-4 sm:p-6 text-sm text-on-surface-variant/70">
-        {t.common.loading}
-      </Card>
-    );
-  }
-
-  if (error) {
-    return (
-      <Card variant="solid" className="p-4 sm:p-6 text-sm text-error">
-        {labels.failedToLoad}
-      </Card>
-    );
-  }
-
   return (
     <div className="space-y-4">
-      <Card variant="solid" className="space-y-4 p-4 sm:p-6">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-          <div className="space-y-1">
-            <h2 className="text-lg font-semibold text-on-surface">{labels.title}</h2>
-            <p className="text-sm text-on-surface-variant/70">{labels.description}</p>
-            <p className="text-xs text-on-surface-variant/60">
-              {labels.generatedAtLabel.replace('{value}', generatedAtLabel)}
-            </p>
-          </div>
-          <Button variant="secondary" size="sm" onClick={() => void refetch()} loading={isFetching}>
-            {labels.refresh}
-          </Button>
-        </div>
+      <Card variant="solid" className="space-y-1 p-4 sm:p-6">
+        <h2 className="text-lg font-semibold text-on-surface">{labels.title}</h2>
+        <p className="text-sm text-on-surface-variant/70">{labels.description}</p>
+        <p className="text-xs text-on-surface-variant/60">
+          {labels.generatedAtLabel.replace('{value}', generatedAtLabel)}
+        </p>
       </Card>
 
-      {data?.providers.length ? (
+      {chatGptConnectors.map((connector) => (
+        <ChatGptMetricsCard
+          key={connector.id}
+          connector={connector}
+          onRedeemed={() => void connectorsQuery.refetch()}
+        />
+      ))}
+
+      {isLoading ? (
+        <Card variant="solid" className="p-4 sm:p-6 text-sm text-on-surface-variant/70">
+          {t.common.loading}
+        </Card>
+      ) : error ? (
+        <Card variant="solid" className="p-4 sm:p-6 text-sm text-error">
+          {labels.failedToLoad}
+        </Card>
+      ) : data?.providers.length ? (
         data.providers.map((providerMetrics) => (
           <Card key={providerMetrics.provider} variant="solid" className="space-y-4 p-4 sm:p-6">
             <div className="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between">
