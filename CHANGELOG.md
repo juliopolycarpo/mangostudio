@@ -4,6 +4,72 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com), and this
 project adheres to [Semantic Versioning](https://semver.org).
 
+## [0.1.1] - 2026-07-05
+
+### 🚀 Features
+
+- **(cli)** Report build identity in diagnostics (#453)
+- **(observability)** Per-provider usage metrics on the metrics page (#452)
+- **(connectors)** Show per-credit ChatGPT reset details on metrics card (#451)
+- **(connectors)** Move ChatGPT usage widgets to metrics-page card (#450)
+- **(connectors)** ChatGPT usage history, burn pace, and quota alerts (#446)
+- **(connectors)** Add ChatGPT reset credits and usage stats (#445)
+- **(cli)** Add ChatGPT connector diagnostics to mango doctor (#444)
+- **(connectors)** Surface ChatGPT plan usage and rate limits (#443)
+- **(connectors)** Harden ChatGPT connector lifecycle and smoke (#441)
+- **(connectors)** Add ChatGPT OAuth settings flow (#440)
+- **(providers)** Wire ChatGPT subscription generation via Responses (#439)
+- ChatGPT subscription OAuth sign-in foundation (#430)
+- **(cli)** Add per-link Cursor runtime diagnostics to doctor (#427)
+- **(providers)** Harden Cursor Node sidecar adapter (runtime resolution, lifecycle, protocol) (#425)
+- **(providers)** Cursor agentic-turn parity with real tool call/result UI (#423)
+- **(providers)** Add Cursor SDK connector as local adapter (#419)
+- **(frontend)** Adopt new mango logo, add favicon and PWA manifest (#418)
+
+### 🐛 Bug Fixes
+
+- **(build)** Embed frontend in standalone binaries (#454)
+- **(connectors)** Guard ChatGPT stats date sorting (#449)
+- **(connectors)** Coerce ChatGPT stats start dates (#448)
+- **(connectors)** Fix ChatGPT OAuth secret persistence on Windows (#447)
+- **(api)** Install shutdown handlers before ready state (#429)
+- **(ci)** Make docker-stage test resilient to action version bumps (#428)
+- **(providers)** Validate Cursor sidecar package tree (#421)
+- **(providers)** Route Cursor validation through sidecar (#420)
+- **(release)** Always open a verified, signed-off changelog PR (#416)
+- **(release)** Land protected-branch changelog updates via REST API (#415)
+- **(tooling)** Allow excluded files in dprint hook (#414)
+
+### 🏗️ Build
+
+- **(cargo)** Enable binstall release archives (#460)
+- **(release)** Land CHANGELOG pre-tag and drop post-tag write-back (#458)
+
+### 🧹 Miscellaneous
+
+- **(ci)** Bump docker/setup-buildx-action from 3.12.0 to 4.2.0 (#349)
+- **(ci)** Bump actions/cache from 5.0.5 to 6.1.0 (#412)
+- **(ci)** Bump docker/setup-qemu-action from 3.7.0 to 4.2.0 (#422)
+
+### ♻️ Refactor
+
+- **(build)** Remove public/ sidecar from release packaging (#455)
+- Extract provider-agnostic OAuth connector core (#442)
+- **(providers)** Extract shared Responses protocol core (#438)
+- **(providers)** Extract Node sidecar core (#426)
+
+### 🧪 Testing
+
+- **(ci)** Add Cursor connector validation to binary smoke (#424)
+
+### ⬆️ Dependencies
+
+- **(deps)** Bump @playwright/test (#409)
+
+### 👷 CI
+
+- **(release)** Enforce release env contracts (#461)
+- **(canary)** Publish canary to npm and GitHub releases only (#456)
 ## [0.1.0] - 2026-06-30
 
 ### 🚀 Features
