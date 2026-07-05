@@ -22,7 +22,10 @@ assets.
 `cargo binstall mangostudio` installs the prebuilt app binary directly from the
 matching GitHub release archive instead of building the launcher. The installed
 binary is pinned to that crate version and does not use the launcher cache, but
-it reports the same `mangostudio --version`.
+it reports the same `mangostudio --version`. binstall extracts only the binary,
+so it **omits the `cursor-sidecar/`** the archive bundles on Cursor-supported
+platforms — the Cursor provider is unavailable on a binstall install. Use the
+shell installer or `cargo install` for the full Cursor SDK.
 
 ## Environment overrides
 
@@ -38,5 +41,7 @@ it reports the same `mangostudio --version`.
   picks the glibc archive; Alpine users should prefer the shell installer (runtime musl detection)
   or build this crate with a musl toolchain.
 - `cargo binstall` uses the release archive for the matching platform and
-  extracts `mangostudio` (or `mangostudio.exe`) directly. If no matching release
-  archive exists, binstall can still fall back to compiling this launcher.
+  extracts `mangostudio` (or `mangostudio.exe`) directly — the `cursor-sidecar/`
+  members of the archive are not installed (binstall installs binaries, not
+  archive trees), so binstall installs lack the Cursor SDK. If no matching
+  release archive exists, binstall can still fall back to compiling this launcher.

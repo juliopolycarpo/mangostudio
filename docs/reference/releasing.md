@@ -385,9 +385,12 @@ One-time setup (already done; documented for future projects):
 ## crates.io installs
 
 `cargo binstall mangostudio` installs the prebuilt app binary directly from the
-GitHub release archive matching the crate version and target. The installed
-binary is the complete app for that version; it does not use the launcher cache
-under `~/.mango/dist/`.
+GitHub release archive matching the crate version and target. binstall extracts
+only the `mangostudio` binary, so it **omits the bundled `cursor-sidecar/`** that
+the archive ships on Cursor-supported platforms — the Cursor provider is
+unavailable on a binstall install. Use the shell installer or `cargo install`
+(below) for the full Cursor SDK. The binstall binary does not use the launcher
+cache under `~/.mango/dist/`.
 
 `cargo install mangostudio` builds the thin Rust launcher from
 `packages/cargo-shim/` — the only Rust in the repository. On first run it
@@ -401,8 +404,11 @@ Design notes:
 
 - binstall metadata maps Rust target triples to the release archive platform ids
   (`linux-x64`, `darwin-arm64`, `windows-x64`, and so on). The archives have a
-  flat root with only `mangostudio` (or `mangostudio.exe`) plus `README.md`, so
-  binstall can extract a complete app binary directly.
+  flat root: `mangostudio` (or `mangostudio.exe`), `README.md`, and — on
+  Cursor-supported platforms — a `cursor-sidecar/` tree. binstall installs only
+  the binary; the sidecar is dropped (binstall installs binaries, not archive
+  trees), which is why `cargo install`/the shell installer remain the paths that
+  deliver the Cursor SDK.
 - musl is detected at compile time (`target_env = "musl"`); Alpine users should
   prefer the shell installer, which detects musl at runtime.
 - The crate's CI lane (`.github/workflows/cargo-shim.yml`) is path-filtered to

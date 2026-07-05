@@ -24,7 +24,7 @@ against `SHA256SUMS` where applicable.
 | Homebrew (macOS/Linux) | `brew install juliopolycarpo/tap/mangostudio`                                                                            |
 | Shell installer        | `curl -fsSL https://mangostudio.dev/install.sh \| bash`                                                                  |
 | Scoop (Windows)        | `scoop bucket add juliopolycarpo https://github.com/juliopolycarpo/scoop-bucket` then `scoop install mangostudio`        |
-| Cargo                  | `cargo install mangostudio` (or `cargo binstall mangostudio`)                                                            |
+| Cargo                  | `cargo install mangostudio` (full app) or `cargo binstall mangostudio` (prebuilt, no Cursor SDK — see below)             |
 | Docker                 | `docker run -p 3001:3001 -v mango-data:/data ghcr.io/juliopolycarpo/mangostudio`                                         |
 | Manual                 | Download from [GitHub Releases](https://github.com/juliopolycarpo/mangostudio/releases/latest), verify with `SHA256SUMS` |
 
@@ -140,6 +140,9 @@ The **Cursor** provider runs local Cursor SDK agents against your workspace. It 
 
 - `CURSOR_API_KEY` (or `[cursor_api_keys]` in `config.toml`)
 - **Node.js 22.13+** on the host (the agent loop runs in a Node sidecar)
+- An install that includes the bundled Cursor SDK sidecar. Every install channel
+  ships it **except `cargo binstall`**, which installs only the app binary — use
+  the shell installer or `cargo install mangostudio` if you need the Cursor provider.
 
 Optional workspace override:
 
