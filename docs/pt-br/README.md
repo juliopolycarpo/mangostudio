@@ -24,7 +24,7 @@ downloads contra `SHA256SUMS` quando aplicável.
 | Homebrew (macOS/Linux) | `brew install juliopolycarpo/tap/mangostudio`                                                                          |
 | Instalador shell       | `curl -fsSL https://mangostudio.dev/install.sh \| bash`                                                                |
 | Scoop (Windows)        | `scoop bucket add juliopolycarpo https://github.com/juliopolycarpo/scoop-bucket` e depois `scoop install mangostudio`  |
-| Cargo                  | `cargo install mangostudio` (ou `cargo binstall mangostudio`)                                                          |
+| Cargo                  | `cargo install mangostudio` (app completo) ou `cargo binstall mangostudio` (pré-compilado, sem Cursor SDK)             |
 | Docker                 | `docker run -p 3001:3001 -v mango-data:/data ghcr.io/juliopolycarpo/mangostudio`                                       |
 | Manual                 | Baixe em [GitHub Releases](https://github.com/juliopolycarpo/mangostudio/releases/latest) e verifique com `SHA256SUMS` |
 
