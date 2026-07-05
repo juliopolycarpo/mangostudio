@@ -14,7 +14,7 @@ AI-powered image generation and chat studio supporting Gemini, OpenAI-compatible
 ## Install
 
 Run MangoStudio without cloning the repository. Every channel ships the same
-prebuilt binary (plus its `public/` frontend sidecar) and verifies downloads
+prebuilt binary and verifies downloads
 against `SHA256SUMS` where applicable.
 
 | Channel                | Command                                                                                                                  |
@@ -410,9 +410,7 @@ The `Messages` type is inferred directly from the `pt-BR.ts` dictionary (`as con
 The `bun run build --binary` command compiles the API into platform-specific binaries under `.mango/out/<platform>/`.
 
 - The database is persisted at `~/.mango/database.sqlite` by default.
-- Frontend assets are embedded into the executable at build time; a `public/`
-  directory next to the binary is never served, so a stale copy left behind by
-  an upgrade cannot shadow the bundled UI.
+- Frontend assets are embedded into the executable at build time.
 
 ## License
 

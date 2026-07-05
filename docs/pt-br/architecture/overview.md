@@ -212,4 +212,4 @@ Colunas usam `camelCase`; tabelas usam `snake_case`. Aliases tipados do Kysely s
 
 ## Build Standalone
 
-`bun run build --binary` compila a API em binários específicos por plataforma via `bun build --compile`. Os assets do frontend são embarcados como arquivos sidecar. Há suporte a 8 plataformas (linux/windows/darwin × x64/arm64 + glibc/musl). O banco de dados usa `~/.mango/database.sqlite` por padrão.
+`bun run build --binary` compila a API em binários específicos por plataforma via `bun build --compile`. Os assets do frontend são embarcados no executável. Há suporte a 8 plataformas (linux/windows/darwin × x64/arm64 + glibc/musl). O banco de dados usa `~/.mango/database.sqlite` por padrão.

@@ -46,7 +46,7 @@ estão documentados em
 bun run build --binary
 ```
 
-Isso compila a API em binários sob `.mango/out/<platform>/` com os assets do frontend como arquivos sidecar.
+Isso compila a API em binários sob `.mango/out/<platform>/` com o frontend embarcado no executável.
 
 ## Alvos De Plataforma
 
@@ -65,13 +65,12 @@ Isso compila a API em binários sob `.mango/out/<platform>/` com os assets do fr
 
 ```
 .mango/out/linux-x64/
-  ├── mangostudio       # Binário compilado estaticamente
-  ├── public/           # Assets SPA do frontend (index.html, JS, CSS)
+  ├── mangostudio       # Binário compilado (frontend embarcado)
   ├── run.sh            # Script auxiliar de inicialização
   └── README.md         # Notas da plataforma
 ```
 
-O binário serve a SPA do frontend a partir do diretório `public/` ao lado do executável. Rotas da API são servidas sob `/api/`, e rotas SPA fazem fallback para `index.html`.
+O binário serve a SPA do frontend embarcada. Rotas da API são servidas sob `/api/`, e rotas SPA fazem fallback para `index.html`.
 
 ## Configuração
 
