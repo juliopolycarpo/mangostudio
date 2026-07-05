@@ -38,10 +38,8 @@ export interface DockerStageTarget {
   readonly platform: BinaryTarget;
   readonly sourceDir: string;
   readonly binaryPath: string;
-  readonly publicDir: string;
   readonly contextArchDir: string;
   readonly stagedBinaryPath: string;
-  readonly stagedPublicDir: string;
 }
 
 export interface DockerStagePlan {
@@ -111,10 +109,8 @@ function createDockerStageTarget(
     platform,
     sourceDir,
     binaryPath: join(sourceDir, platform.name),
-    publicDir: join(sourceDir, 'public'),
     contextArchDir,
     stagedBinaryPath: join(contextArchDir, platform.name),
-    stagedPublicDir: join(contextArchDir, 'public'),
   };
 }
 

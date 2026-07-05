@@ -50,12 +50,11 @@ Cursor runs its own agent loop for model reasoning; MangoStudio does **not** imp
 
 ## Standalone Builds
 
-Binary builds vendor a self-contained `cursor-sidecar/` beside the executable (similar to the frontend `public/` sidecar):
+Binary builds vendor a self-contained `cursor-sidecar/` beside the executable:
 
 ```
 <platform>/
   mangostudio
-  public/
   cursor-sidecar/
     run-agent.mjs
     node_modules/@cursor/sdk             # platform-independent SDK JS

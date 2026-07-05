@@ -1,8 +1,7 @@
 //! Thin launcher for MangoStudio, published to crates.io.
 //!
-//! The product is a Bun-compiled binary distributed via GitHub Releases
-//! together with its `public/` frontend sidecar; this crate is not the app
-//! source. On first run the launcher downloads the platform archive matching
+//! The product is a Bun-compiled binary distributed via GitHub Releases with
+//! the frontend embedded in the executable; this crate is not the app source. On first run the launcher downloads the platform archive matching
 //! the crate version into `~/.mango/dist/<version>/` (checksum-verified, the
 //! same layout the shell installer uses), then hands over to the real binary
 //! with arguments and environment untouched.
@@ -145,13 +144,6 @@ fn install(install_dir: &Path) -> Result<(), String> {
     if !staged_binary.is_file() {
         let _ = fs::remove_dir_all(&staging);
         return Err(format!("archive is missing {BINARY_NAME}"));
-    }
-    // The binary serves its UI from the sibling `public/` sidecar, so reject an
-    // archive that dropped it instead of installing a binary that fails later.
-    // Mirrors the shell installer's `public/index.html` check.
-    if !staging.join("public").join("index.html").is_file() {
-        let _ = fs::remove_dir_all(&staging);
-        return Err("archive is missing public/index.html".to_string());
     }
     make_executable(&staged_binary)?;
 

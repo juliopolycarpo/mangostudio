@@ -178,7 +178,6 @@ install_archive() {
   tar -xzf "$archive" -C "$tmp_install"
 
   [ -f "${tmp_install}/mangostudio" ] || fail 'archive is missing mangostudio'
-  [ -f "${tmp_install}/public/index.html" ] || fail 'archive is missing public/index.html'
   chmod +x "${tmp_install}/mangostudio"
 
   rm -rf "$install_dir"

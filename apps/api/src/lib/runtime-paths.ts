@@ -31,7 +31,8 @@ function getExecutablePath(): string {
  *
  * In development we use the current working directory so local workspace
  * commands keep writing to the repo. In standalone mode we use the executable
- * directory so `public/` and `uploads/` resolve beside the binary.
+ * directory so runtime files such as `uploads/` resolve beside the binary.
+ * The frontend is embedded in the binary, not read from disk.
  */
 export function getRuntimeBaseDir(): string {
   if (isStandaloneExecutable()) {

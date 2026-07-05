@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 
-import { cpSync, existsSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { createTurboBuildCommand, selectBuildWorkspaces } from './lib/build';
@@ -84,7 +84,6 @@ async function buildStandaloneTarget(
     apiSource: string;
     buildTime: string;
     buildInfo: BuildStamp;
-    frontendDist: string;
     outDir: string;
     cursorSidecar: CursorSidecarStaging | null;
   }
@@ -99,7 +98,6 @@ async function buildStandaloneTarget(
   if (options.dryRun) {
     console.log(`   (dry run) Would compile for ${target.target}`);
     console.log(`✅ Successfully built ${target.name} for ${target.arch} (dry run)`);
-    console.log(`📁 Would copy frontend dist to ${join(platformOutDir, 'public')}`);
     if (cursorNativePackageFor(target)) {
       console.log(`📁 Would vendor Cursor sidecar to ${join(platformOutDir, 'cursor-sidecar')}`);
     } else {
@@ -148,12 +146,6 @@ async function buildStandaloneTarget(
 
     console.log(`✅ Successfully built ${target.name} for ${target.arch}`);
     if (stdout.trim()) console.log(stdout.trim());
-
-    const frontendDestination = join(platformOutDir, 'public');
-    if (existsSync(context.frontendDist)) {
-      cpSync(context.frontendDist, frontendDestination, { recursive: true });
-      console.log(`📁 Copied frontend dist to ${frontendDestination}`);
-    }
 
     if (context.cursorSidecar) {
       const cursorSidecarDestination = join(platformOutDir, 'cursor-sidecar');
@@ -228,11 +220,9 @@ Each platform has its own directory under \`.mango/out/\`:
 \`\`\`
 .mango/out/
 ├── linux-x64/
-│   ├── mangostudio           # Executable
-│   └── public/               # Frontend static files
+│   └── mangostudio           # Executable (frontend embedded)
 ├── windows-x64/
-│   ├── mangostudio.exe       # Executable
-│   └── public/               # Frontend static files
+│   └── mangostudio.exe       # Executable (frontend embedded)
 └── ... (other platforms)
 \`\`\`
 
@@ -285,8 +275,7 @@ Each platform has its own directory under \`.mango/out/\`:
 - Binaries are standalone and include all dependencies
 - No Node.js/Bun runtime required
 - Database is stored externally (not embedded in binary)
-- Frontend assets are embedded in the executable; the \`public/\` copy beside it
-  is staged for compatibility only and is never served
+- Frontend assets are embedded in the executable
 `;
 
   await Bun.write(join(outDir, 'README.md'), readmeContent);
@@ -464,7 +453,6 @@ async function buildStandaloneBinary(options: BinaryBuildOptions): Promise<void>
           apiSource,
           buildTime,
           buildInfo,
-          frontendDist,
           outDir,
           cursorSidecar,
         })

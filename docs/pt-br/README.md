@@ -14,7 +14,7 @@ Estúdio de geração de imagens e chat alimentado por IA com suporte a modelos 
 ## Instalar
 
 Execute o MangoStudio sem clonar o repositório. Cada canal distribui o mesmo
-binário pré-compilado (mais o sidecar `public/` do frontend) e verifica
+binário pré-compilado e verifica
 downloads contra `SHA256SUMS` quando aplicável.
 
 | Canal                  | Comando                                                                                                                |
@@ -409,7 +409,7 @@ Quando uma alteração relevante for feita em `docs/`, a versão correspondente 
 O comando `bun run build --binary` compila a API em binários específicos por plataforma em `.mango/out/<platform>/`.
 
 - O banco de dados é persistido em `~/.mango/database.sqlite` por padrão.
-- Os assets do frontend são servidos a partir do diretório `public/` vizinho ao executável.
+- Os assets do frontend são embarcados no executável em tempo de compilação.
 
 ## Licença
 

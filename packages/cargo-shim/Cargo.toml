@@ -26,9 +26,9 @@ tar = "0.4"
 zip = { version = "8", default-features = false, features = ["deflate"] }
 
 [package.metadata.binstall]
-# The release archives bundle the Bun-compiled app *plus* its `public/`
-# frontend sidecar, but binstall installs only binaries out of an archive — a
-# passthrough install would silently drop the UI. Disabling the prebuilt
+# The release archives bundle the Bun-compiled app binary (frontend embedded)
+# plus an optional cursor-sidecar/ tree, but binstall installs only binaries
+# out of an archive — a passthrough install would silently drop the Cursor SDK. Disabling the prebuilt
 # strategies makes `cargo binstall mangostudio` compile this launcher instead
 # (same as `cargo install`), which downloads the complete archive on first run.
 disabled-strategies = ["crate-meta-data", "quick-install"]

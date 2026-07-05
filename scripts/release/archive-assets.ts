@@ -92,7 +92,6 @@ async function archivePlatformZip(plan: PlatformArchivePlan, assetsDir: string):
   mkdirSync(stagingDir, { recursive: true });
 
   cpSync(plan.binaryPath, join(stagingDir, plan.platform.name));
-  cpSync(plan.publicDir, join(stagingDir, 'public'), { recursive: true });
   cpSync(plan.readmePath, join(stagingDir, 'README.md'));
 
   const includeCursorSidecar = platformRequiresCursorSidecar(plan);
@@ -114,8 +113,6 @@ async function archiveFrontend(plan: FrontendArchivePlan): Promise<void> {
 
 function assertPlatformInputs(plan: PlatformArchivePlan): void {
   assertFile(plan.binaryPath, `${plan.platform.arch} binary`);
-  assertDirectory(plan.publicDir, `${plan.platform.arch} public directory`);
-  assertFile(join(plan.publicDir, 'index.html'), `${plan.platform.arch} public/index.html`);
   const npmPlatform = NPM_PLATFORMS.find((platform) => platform.arch === plan.platform.arch);
   if (npmPlatform && cursorNativePackageFor(plan.platform)) {
     const layoutErrors = collectCursorSidecarLayoutErrors(plan.sourceDir, npmPlatform);

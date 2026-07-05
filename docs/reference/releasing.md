@@ -47,9 +47,9 @@ updating every template and installer in the same release.
 | `mangostudio-<version>-frontend-dist.tar.gz` | Frontend bundle only (`apps/frontend/dist`)                                                                                |
 | `SHA256SUMS`                                 | Checksums for every asset above                                                                                            |
 
-Each platform archive has a **flat root**: `mangostudio` (or `mangostudio.exe`),
-`public/`, and `README.md` — no nested platform directory. The binary resolves
-its frontend sidecar beside the real executable path.
+Each platform archive has a **flat root**: `mangostudio` (or `mangostudio.exe`)
+and `README.md` — no nested platform directory. The binary embeds the frontend
+UI; no sibling asset directory is required at runtime.
 
 `scripts/release/archive-assets.ts` assembles the full set; `scripts/lib/release-assets.ts`
 defines the naming contract and is covered by unit tests.
@@ -223,7 +223,7 @@ validated against the committed version the same way.
 `mangostudio` is a thin wrapper: its `bin/mangostudio.js` shim resolves the
 `@mangostudio/cli-<os>-<cpu>` optional dependency npm installed for the host and
 execs the prebuilt binary (esbuild-style). Each platform package carries the
-binary plus its `public/` frontend sidecar. Builders live in
+binary (frontend embedded at build time). Builders live in
 `scripts/lib/npm-pack.ts`; staging in `scripts/release/pack-npm.ts`.
 
 `scripts/release/publish-npm.ts` owns npm publication. It checks
@@ -293,9 +293,8 @@ The `homebrew` job updates the formula on every tag push:
    the remote between each. It only ever touches the mapped files, never other
    formulas.
 
-The formula installs the flat archive (`mangostudio` + `public/` + `README.md`)
-into `libexec` and symlinks the binary, because the binary resolves its
-`public/` frontend sidecar beside its real (symlink-resolved) executable path.
+The formula installs the flat archive (`mangostudio` + `README.md`) into
+`libexec` and symlinks the binary so the real executable path resolves correctly.
 
 `push-dist-repo.ts` is distribution-agnostic — the [Scoop bucket](#scoop-bucket)
 reuses it with a different `--repo` and `--file` mapping:
@@ -341,8 +340,7 @@ The `scoop` job updates the manifest on every tag push, mirroring `homebrew`:
    `mangostudio-<version>-windows-{x64,arm64}.zip` archives are present (failing
    loud on naming-contract drift), and renders
    `scripts/release/templates/mangostudio.json.tmpl`. The manifest declares
-   `"bin": "mangostudio.exe"`; Scoop's shim execs the real exe path, so the
-   binary resolves its `public/` frontend sidecar beside it.
+   `"bin": "mangostudio.exe"`; Scoop's shim execs the real exe path.
 2. `scripts/release/push-dist-repo.ts` clones the bucket, copies the manifest only
    if its content changed (re-runs are no-ops), commits as `github-actions[bot]`,
    and pushes with rebase-retry — the same machinery the tap uses.
@@ -370,9 +368,9 @@ same layout as the shell installer) and execs the real binary. See
 Design notes:
 
 - binstall's prebuilt strategies are **intentionally disabled** in the crate
-  metadata: the app needs its `public/` sidecar beside the binary, and binstall
-  only installs binaries out of an archive, which would drop the UI. binstall
-  therefore falls back to compiling the launcher, which installs the complete
+  metadata: binstall only installs binaries out of an archive, which would omit
+  the Cursor SDK sidecar and other non-binary assets. binstall therefore falls
+  back to compiling the launcher, which downloads and installs the complete
   archive on first run.
 - musl is detected at compile time (`target_env = "musl"`); Alpine users should
   prefer the shell installer, which detects musl at runtime.

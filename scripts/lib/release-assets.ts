@@ -18,7 +18,6 @@ export interface PlatformArchivePlan {
   readonly platform: BinaryTarget;
   readonly sourceDir: string;
   readonly binaryPath: string;
-  readonly publicDir: string;
   /** Vendored Cursor SDK sidecar dir; only present for platforms with a native package. */
   readonly cursorSidecarDir: string;
   readonly readmePath: string;
@@ -85,7 +84,6 @@ function createPlatformArchivePlan(
     platform: target,
     sourceDir,
     binaryPath: join(sourceDir, target.name),
-    publicDir: join(sourceDir, 'public'),
     cursorSidecarDir: join(sourceDir, 'cursor-sidecar'),
     readmePath: join(outDir, 'README.md'),
     assetName,
@@ -103,7 +101,7 @@ export function platformArchiveMembers(
   plan: PlatformArchivePlan,
   options: { readonly includeCursorSidecar: boolean }
 ): string[] {
-  const members = [plan.platform.name, 'public'];
+  const members = [plan.platform.name];
   if (options.includeCursorSidecar) {
     members.push('cursor-sidecar');
   }

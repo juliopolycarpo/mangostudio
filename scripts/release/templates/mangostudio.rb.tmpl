@@ -27,9 +27,8 @@ class Mangostudio < Formula
   end
 
   def install
-    # The binary resolves its frontend sidecar (public/) beside the real
-    # executable path, so install the whole flat archive into libexec and
-    # expose only the symlinked binary on PATH.
+    # Install the whole flat archive into libexec and expose only the symlinked
+    # binary on PATH so the real executable path resolves correctly.
     libexec.install Dir["*"]
     bin.install_symlink libexec/"mangostudio"
   end

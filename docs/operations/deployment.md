@@ -115,13 +115,12 @@ This compiles the API into binaries under `.mango/out/<platform>/` with the fron
 
 ```
 .mango/out/linux-x64/
-  ├── mangostudio       # Statically compiled binary
-  ├── public/            # Frontend SPA assets (index.html, JS, CSS)
+  ├── mangostudio       # Statically compiled binary (frontend embedded)
   ├── run.sh             # Startup helper script
   └── README.md          # Platform notes
 ```
 
-The binary serves the frontend SPA from the `public/` directory next to the executable. API routes are served under `/api/` and SPA routes fallback to `index.html`.
+The binary serves the embedded frontend SPA. API routes are served under `/api/` and SPA routes fallback to `index.html`.
 
 ## Configuration
 

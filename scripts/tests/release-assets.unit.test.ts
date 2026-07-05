@@ -73,7 +73,6 @@ describe('createReleaseAssetPlan', () => {
     expect(plan.platformArchives).toHaveLength(1);
     expect(archive.sourceDir).toBe(join('/repo', '.mango', 'out', 'linux-x64'));
     expect(archive.binaryPath).toBe(join('/repo', '.mango', 'out', 'linux-x64', 'mangostudio'));
-    expect(archive.publicDir).toBe(join('/repo', '.mango', 'out', 'linux-x64', 'public'));
     expect(archive.cursorSidecarDir).toBe(
       join('/repo', '.mango', 'out', 'linux-x64', 'cursor-sidecar')
     );
@@ -95,13 +94,9 @@ describe('platformArchiveMembers', () => {
       onlyPlatform: 'linux-x64',
     }).platformArchives;
 
-    expect(platformArchiveMembers(linux, { includeCursorSidecar: false })).toEqual([
-      'mangostudio',
-      'public',
-    ]);
+    expect(platformArchiveMembers(linux, { includeCursorSidecar: false })).toEqual(['mangostudio']);
     expect(platformArchiveMembers(linux, { includeCursorSidecar: true })).toEqual([
       'mangostudio',
-      'public',
       'cursor-sidecar',
     ]);
   });

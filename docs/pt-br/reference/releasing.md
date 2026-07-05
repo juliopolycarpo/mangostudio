@@ -50,8 +50,9 @@ renomeie sem atualizar todos os templates e instaladores na mesma release.
 | `SHA256SUMS`                                 | Checksums de todos os assets acima |
 
 Cada arquivo de plataforma tem **raiz plana**: `mangostudio` (ou
-`mangostudio.exe`), `public/` e `README.md` — sem diretório de plataforma
-aninhado.
+`mangostudio.exe`) e `README.md` — sem diretório de plataforma aninhado. O
+binário embarca a UI do frontend; nenhum diretório de assets vizinho é
+necessário em tempo de execução.
 
 Os scripts de instalação **não** são assets de release. Os instaladores
 canônicos ficam hospedados em [mangostudio.dev](https://mangostudio.dev)

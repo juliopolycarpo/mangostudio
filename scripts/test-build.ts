@@ -65,7 +65,6 @@ const BINARY_NAME = PLATFORM.name;
 const CAN_EXECUTE = canExecutePlatform(PLATFORM);
 const PLATFORM_DIR = join(OUT_DIR, PLATFORM.arch);
 const BINARY_PATH = join(PLATFORM_DIR, BINARY_NAME);
-const PUBLIC_DIR = join(PLATFORM_DIR, 'public');
 const ARCHIVE_PATH = join(RELEASE_ASSETS_DIR, releaseArchiveFileName(VERSION, PLATFORM));
 
 // ---------------------------------------------------------------------------
@@ -151,17 +150,6 @@ function validateLayout(): void {
   if (!existsSync(BINARY_PATH)) fail(`Missing binary: ${BINARY_PATH}`);
   pass(`Binary exists: ${BINARY_NAME}`);
 
-  if (!existsSync(join(PUBLIC_DIR, 'index.html'))) fail(`Missing public/index.html`);
-  pass('public/index.html exists');
-
-  const jsFiles = Array.from(new Bun.Glob('*.js').scanSync(join(PUBLIC_DIR, 'assets')));
-  if (jsFiles.length === 0) fail('No JS files in public/assets/');
-  pass(`JS assets: ${jsFiles.length} file(s)`);
-
-  const cssFiles = Array.from(new Bun.Glob('*.css').scanSync(join(PUBLIC_DIR, 'assets')));
-  if (cssFiles.length === 0) fail('No CSS files in public/assets/');
-  pass(`CSS assets: ${cssFiles.length} file(s)`);
-
   if (NPM_PLATFORM && platformShipsCursorSidecar(NPM_PLATFORM)) {
     const layoutErrors = collectCursorSidecarLayoutErrors(PLATFORM_DIR, NPM_PLATFORM);
     if (layoutErrors.length > 0) {
@@ -204,13 +192,11 @@ function validateExtractedArchive(extractDir: string): void {
   if (existsSync(join(extractDir, PLATFORM.arch)))
     fail('Archive contains nested platform directory');
   if (!existsSync(join(extractDir, BINARY_NAME))) fail(`Archive is missing ${BINARY_NAME}`);
-  if (!existsSync(join(extractDir, 'public', 'index.html')))
-    fail('Archive is missing public/index.html');
   if (!existsSync(join(extractDir, 'README.md'))) fail('Archive is missing README.md');
 
   const mode = statSync(join(extractDir, BINARY_NAME)).mode;
   if ((mode & 0o111) === 0) fail(`${BINARY_NAME} is not executable in archive`);
-  pass('Archive has flat root with executable binary and public/index.html');
+  pass('Archive has flat root with executable binary and README.md');
 }
 
 async function smokeLocalInstaller(): Promise<void> {
