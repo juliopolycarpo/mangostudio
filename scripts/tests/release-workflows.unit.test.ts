@@ -1,6 +1,22 @@
 import { describe, expect, test } from 'bun:test';
+import { readdirSync } from 'node:fs';
+import { join } from 'node:path';
 
+import { ROOT_DIR } from '../lib/config';
+import {
+  RELEASE_SCRIPT_ENV_CONTRACTS,
+  type ReleaseScriptPath,
+  requiredEnvForReleaseScriptInvocation,
+} from '../release/env-contract';
 import { readText } from './support/read-text';
+
+interface WorkflowRunStep {
+  readonly workflowPath: string;
+  readonly job: string;
+  readonly name: string;
+  readonly block: string;
+  readonly env: ReadonlySet<string>;
+}
 
 // Isolate a single top-level job's block (up to the next `  <job>:` header or
 // EOF) so an assertion about one job cannot be masked or satisfied by a later
@@ -15,7 +31,134 @@ function expectJobNeeds(workflow: string, job: string, needs: string): void {
   expect(block).toMatch(new RegExp(`\\n    needs: ${needs}(?:\\n|$)`));
 }
 
+function extractJobsBlock(workflow: string): string {
+  return /\njobs:\n([\s\S]*?)(?=\n\S|$)/.exec(workflow)?.[1] ?? '';
+}
+
+function extractJobBlocks(workflow: string): Array<{ job: string; block: string }> {
+  const jobsBlock = extractJobsBlock(workflow);
+  const headers = [...jobsBlock.matchAll(/^ {2}([\w-]+):$/gm)];
+  return headers.map((header, index) => {
+    const next = headers[index + 1];
+    return {
+      job: header[1],
+      block: jobsBlock.slice(header.index ?? 0, next?.index),
+    };
+  });
+}
+
+function extractWorkflowRunSteps(workflowPath: string): WorkflowRunStep[] {
+  const workflow = readText(workflowPath);
+  const workflowEnv = collectEnvKeys(workflow, 0);
+  const steps: WorkflowRunStep[] = [];
+
+  for (const { job, block: jobBlock } of extractJobBlocks(workflow)) {
+    const jobEnv = collectEnvKeys(jobBlock, 4);
+    for (const stepBlock of extractStepBlocks(jobBlock)) {
+      if (!/^ {8}run:/m.test(stepBlock)) continue;
+      steps.push({
+        workflowPath,
+        job,
+        name: extractStepName(stepBlock),
+        block: stepBlock,
+        env: new Set([...workflowEnv, ...jobEnv, ...collectEnvKeys(stepBlock, 8)]),
+      });
+    }
+  }
+
+  return steps;
+}
+
+function extractStepBlocks(jobBlock: string): string[] {
+  const headers = [...jobBlock.matchAll(/^ {6}- /gm)];
+  return headers.map((header, index) => {
+    const next = headers[index + 1];
+    return jobBlock.slice(header.index ?? 0, next?.index);
+  });
+}
+
+function extractStepName(stepBlock: string): string {
+  return (
+    /^ {6}- name: (.+)$/m.exec(stepBlock)?.[1] ??
+    /^ {6}- id: (.+)$/m.exec(stepBlock)?.[1] ??
+    'unnamed step'
+  );
+}
+
+function collectEnvKeys(block: string, envIndent: number): string[] {
+  const lines = block.split('\n');
+  const keys = new Set<string>();
+  const envPrefix = `${' '.repeat(envIndent)}env:`;
+  const keyPattern = new RegExp(`^${' '.repeat(envIndent + 2)}([A-Z0-9_]+):`);
+
+  for (let index = 0; index < lines.length; index += 1) {
+    if (lines[index] !== envPrefix) continue;
+    for (let envIndex = index + 1; envIndex < lines.length; envIndex += 1) {
+      const line = lines[envIndex];
+      if (line.trim() === '') continue;
+      if (!line.startsWith(' '.repeat(envIndent + 2))) break;
+      const key = keyPattern.exec(line)?.[1];
+      if (key) keys.add(key);
+    }
+  }
+
+  return [...keys];
+}
+
+function releaseScriptsInStep(stepBlock: string): ReleaseScriptPath[] {
+  const scripts = new Set<ReleaseScriptPath>();
+  const pattern = /\.\/(scripts\/release\/[\w-]+\.ts)\b/g;
+  for (const match of stepBlock.matchAll(pattern)) {
+    const scriptPath = match[1];
+    if (scriptPath in RELEASE_SCRIPT_ENV_CONTRACTS) {
+      scripts.add(scriptPath as ReleaseScriptPath);
+    }
+  }
+  return [...scripts];
+}
+
 describe('release workflow binary gate', () => {
+  test('release env contract declares every release TypeScript entrypoint', () => {
+    const scripts = readdirSync(join(ROOT_DIR, 'scripts', 'release'))
+      .filter((file) => file.endsWith('.ts'))
+      .map((file) => `scripts/release/${file}`)
+      .filter((path) => readText(path).startsWith('#!/usr/bin/env bun'))
+      .sort();
+
+    expect(Object.keys(RELEASE_SCRIPT_ENV_CONTRACTS).sort()).toEqual(scripts);
+  });
+
+  test('release script invocations provide their required env explicitly', () => {
+    for (const step of [
+      ...extractWorkflowRunSteps('.github/workflows/release.yml'),
+      ...extractWorkflowRunSteps('.github/workflows/canary.yml'),
+    ]) {
+      for (const scriptPath of releaseScriptsInStep(step.block)) {
+        const missing = requiredEnvForReleaseScriptInvocation(scriptPath, step.block).filter(
+          (envName) => !step.env.has(envName)
+        );
+        expect(
+          missing,
+          `${step.workflowPath} job "${step.job}" step "${step.name}" invokes ${scriptPath} without env: ${missing.join(', ')}`
+        ).toEqual([]);
+      }
+    }
+  });
+
+  test('release build preflights static publish secrets before setup', () => {
+    const workflow = readText('.github/workflows/release.yml');
+    const buildBlock = extractJobBlock(workflow, 'build');
+    const preflightIndex = buildBlock.indexOf('name: Preflight release secrets');
+    const secretPrefix = '$' + '{{ secrets.';
+
+    expect(preflightIndex).toBeGreaterThan(-1);
+    expect(preflightIndex).toBeLessThan(buildBlock.indexOf('actions/checkout@'));
+    expect(buildBlock).toContain(`NPM_TOKEN: ${secretPrefix}NPM_TOKEN }}`);
+    expect(buildBlock).toContain(`DIST_REPOS_TOKEN: ${secretPrefix}DIST_REPOS_TOKEN }}`);
+    expect(buildBlock).toContain(`CARGO_REGISTRY_TOKEN: ${secretPrefix}CARGO_REGISTRY_TOKEN }}`);
+    expect(buildBlock).toContain('Missing required release secret(s): %s');
+  });
+
   test('pre-merge binary smoke covers native host platforms and Docker variants', () => {
     const workflow = readText('.github/workflows/smoke-binary.yml');
     const platformExpression = '$' + '{{ matrix.platform }}';
