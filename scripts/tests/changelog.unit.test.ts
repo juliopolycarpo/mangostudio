@@ -1,9 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  assertChangelogHasRelease,
   type CliffResult,
   cliffArgs,
   PREVIEW_MARKER,
   parseChangelogArgs,
+  releaseHeading,
   runChangelog,
   wrapPreviewComment,
 } from '../lib/changelog';
@@ -107,6 +109,44 @@ describe('wrapPreviewComment', () => {
 
   test('falls back to a placeholder for empty bodies', () => {
     expect(wrapPreviewComment('   ')).toContain('No changelog-relevant commits');
+  });
+});
+
+describe('releaseHeading', () => {
+  test('matches the cliff.toml body template and normalizes a leading v', () => {
+    expect(releaseHeading('0.1.0')).toBe('## [0.1.0]');
+    expect(releaseHeading('v0.1.0')).toBe('## [0.1.0]');
+  });
+});
+
+describe('assertChangelogHasRelease', () => {
+  const changelog = [
+    '# Changelog',
+    '',
+    '## [0.2.0] - 2026-07-05',
+    '',
+    '### 🚀 Features',
+    '',
+    '- New thing',
+    '',
+    '## [0.1.0] - 2026-06-30',
+    '',
+  ].join('\n');
+
+  test('passes when the release section is present', () => {
+    expect(() => assertChangelogHasRelease(changelog, '0.2.0')).not.toThrow();
+    expect(() => assertChangelogHasRelease(changelog, 'v0.1.0')).not.toThrow();
+  });
+
+  test('fails with the release:prepare fix when the section is missing', () => {
+    expect(() => assertChangelogHasRelease(changelog, '0.3.0')).toThrow(
+      /no "## \[0\.3\.0\]" release section[\s\S]*bun run release:prepare 0\.3\.0/
+    );
+  });
+
+  test('a prerelease heading never satisfies the stable release gate', () => {
+    const prerelease = '## [0.3.0-rc.1] - 2026-07-05\n';
+    expect(() => assertChangelogHasRelease(prerelease, '0.3.0')).toThrow(/release section/);
   });
 });
 

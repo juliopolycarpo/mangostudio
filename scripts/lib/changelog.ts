@@ -33,6 +33,29 @@ export function cliffArgs(mode: ChangelogMode): string[] {
   }
 }
 
+/** The release heading line prefix cliff.toml's body template writes for a
+ * version, e.g. `## [0.1.0]`.
+ * // Usage: releaseHeading('v0.1.0') -> '## [0.1.0]' */
+export function releaseHeading(version: string): string {
+  return `## [${stripLeadingV(version)}]`;
+}
+
+/** Assert a generated CHANGELOG.md already contains the release section for
+ * `version`. The release workflow gates on this before building any artifact:
+ * the changelog lands on main in the release-prep commit, before the tag.
+ * // Usage: assertChangelogHasRelease(readFileSync('CHANGELOG.md', 'utf8'), '0.2.0') */
+export function assertChangelogHasRelease(changelog: string, version: string): void {
+  const heading = releaseHeading(version);
+  if (changelog.split('\n').some((line) => line.startsWith(heading))) {
+    return;
+  }
+  throw new Error(
+    `CHANGELOG.md has no "${heading}" release section. The changelog must land on main ` +
+      `before the tag: run \`bun run release:prepare ${stripLeadingV(version)}\`, commit the ` +
+      `result, and tag that commit.`
+  );
+}
+
 /** Wrap a git-cliff preview body as the sticky PR comment (with its marker). */
 export function wrapPreviewComment(body: string): string {
   const trimmed = body.trim();

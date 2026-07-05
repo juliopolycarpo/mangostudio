@@ -3,9 +3,16 @@
 // cargo-shim Cargo.toml/Cargo.lock versions have drifted. They must release in
 // lockstep so the binary, npm packages, crates.io launcher, and changelog all
 // carry the same version. Pass `--expect <version>` (used by the release
-// workflow) to also assert the committed version matches the pushed tag.
+// workflow) to also assert the committed version matches the pushed tag and
+// that CHANGELOG.md already carries the release section — the changelog lands
+// pre-tag via `bun run release:prepare`.
 // Usage: bun run check:versions [--expect <version>]
 
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
+import { assertChangelogHasRelease } from './lib/changelog';
+import { ROOT_DIR } from './lib/config';
 import { assertVersionsInLockstep, normalizeVersion } from './lib/release-version';
 import { fatal, header, log, success } from './lib/runner';
 
@@ -17,6 +24,7 @@ the cargo-shim Cargo.toml and Cargo.lock carry the same version.
 
 Flags:
   --expect <version>  Also require the root version to equal <version> (the tag)
+                      and CHANGELOG.md to contain the <version> release section
   --help              Show this help message`);
   process.exit(0);
 }
@@ -50,6 +58,11 @@ try {
     fatal(
       `Tag version ${normalizeVersion(expected)} does not match package.json version ${rootVersion}.`
     );
+  }
+
+  if (expected) {
+    assertChangelogHasRelease(readFileSync(join(ROOT_DIR, 'CHANGELOG.md'), 'utf8'), expected);
+    log(`  CHANGELOG.md → carries the v${rootVersion} release section`);
   }
 
   for (const entry of entries) {
