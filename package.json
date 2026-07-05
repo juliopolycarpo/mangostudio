@@ -2,7 +2,7 @@
   "name": "@mangostudio/root",
   "private": true,
   "license": "MIT",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "AI-powered image generation and chat studio supporting Gemini, OpenAI-compatible, and Anthropic models.",
   "author": "Julio Polycarpo",
   "homepage": "https://mangostudio.dev",
