@@ -133,35 +133,27 @@ describe('release workflow binary gate', () => {
     expect(workflow).not.toContain('- "Dockerfile.alpine"');
   });
 
-  test('changelog update always opens a pull request, never pushes to main directly', () => {
+  test('changelog lands pre-tag: no write-back job, gated by the build lockstep check', () => {
     const workflow = readText('.github/workflows/release.yml');
-    const job = extractJobBlock(workflow, 'update-changelog');
-    expect(job, 'update-changelog job not found').not.toBe('');
 
-    // The workflow token only needs to write the commit through the Contents
-    // API. Opening the pull request always uses CHANGELOG_PR_TOKEN, since the
-    // workflow GITHUB_TOKEN is barred from creating PRs.
-    expect(job).toContain('contents: write');
-    expect(job).not.toContain('pull-requests: write');
+    // The changelog is generated in the release-prep commit before the tag is
+    // pushed; no job regenerates or lands CHANGELOG.md after the fact, so the
+    // extra PAT and its PR flow are gone entirely.
+    expect(extractJobBlock(workflow, 'update-changelog')).toBe('');
+    expect(workflow).not.toContain('push-changelog');
+    expect(workflow).not.toContain('CHANGELOG_PR_TOKEN');
+    expect(workflow).not.toContain('bun run changelog --release');
 
-    // A dedicated, ref-independent concurrency group serializes CHANGELOG.md
-    // writes when two tags release at once.
-    expect(job).toContain('group: update-changelog');
-    expect(job).toContain('cancel-in-progress: false');
+    // The build job's fail-fast verify step gates the changelog section (via
+    // check:versions --expect) before any artifact is produced.
+    const buildBlock = extractJobBlock(workflow, 'build');
+    expect(buildBlock).toContain('bun run check:versions --expect "$EXPECTED_VERSION"');
+    expect(buildBlock).toContain('CHANGELOG.md lacks this release');
+    expect(buildBlock).toContain('bun run release:prepare');
 
-    // Landing goes through the reusable script (always opens a PR via the REST
-    // API, never a direct push), with the version passed via env rather than
-    // interpolated into the shell.
-    expect(job).toContain(
-      'bun ./scripts/release/push-changelog.ts --version "$VERSION" --branch main'
-    );
-    expect(job).toContain(`GH_ACTIONS_TOKEN: $${'{{ github.token }}'}`);
-    expect(job).toContain(`GH_PR_TOKEN: $${'{{ secrets.CHANGELOG_PR_TOKEN }}'}`);
-    expect(job).toContain('bun run changelog --release "$VERSION"');
-
-    // No raw direct push to main remains; landing only happens via the script.
-    expect(job).not.toContain('git push origin main');
-    expect(workflow).not.toContain('If branch protection later blocks bot pushes');
+    // github-release notes generation is unaffected by the gate.
+    const releaseBlock = extractJobBlock(workflow, 'github-release');
+    expect(releaseBlock).toContain('--latest --strip all');
   });
 
   test('stateful release retry loops document why they do not use retry_command', () => {
