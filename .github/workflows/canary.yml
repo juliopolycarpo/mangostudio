@@ -49,10 +49,14 @@ jobs:
         run: VERSION="${{ steps.identity.outputs.version }}" bun run build --binary
 
       - name: Assemble npm distribution
-        run: VERSION="${{ steps.identity.outputs.version }}" bun ./scripts/release/pack-npm.ts
+        env:
+          VERSION: ${{ steps.identity.outputs.version }}
+        run: bun ./scripts/release/pack-npm.ts
 
       - name: Archive release assets
-        run: VERSION="${{ steps.identity.outputs.version }}" bun ./scripts/release/archive-assets.ts
+        env:
+          VERSION: ${{ steps.identity.outputs.version }}
+        run: bun ./scripts/release/archive-assets.ts
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
