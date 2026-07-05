@@ -16,13 +16,14 @@ if [ ! -f "$binary_path" ]; then
 fi
 
 binary_path="$(realpath "$binary_path")"
-binary_dir="$(dirname "$binary_path")"
 actual_version="$("$binary_path" --version)"
 
 if [ "$actual_version" != "$expected_version" ]; then
   echo "Expected binary version ${expected_version}, got ${actual_version}" >&2
   exit 1
 fi
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 # Source the shared boot/health helper relative to this script so the smoke
 # works regardless of the caller's CWD.
@@ -42,15 +43,28 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# Regression for the stale-sidecar bug: run a copy of the binary from a staging
+# directory that carries a doctored `public/` beside it. The frontend is
+# embedded in the executable, so the stale sidecar must be provably ignored.
+# (A copy — not a symlink — because the server resolves its own realpath.)
+stale_sentinel="STALE-PUBLIC-SENTINEL-$$"
+staging_dir="${tmp_home}/staging"
+mkdir -p "${staging_dir}/public/assets"
+cp "$binary_path" "${staging_dir}/"
+staged_binary="${staging_dir}/$(basename "$binary_path")"
+chmod +x "$staged_binary" 2>/dev/null || true
+printf '<html><body>%s</body></html>\n' "$stale_sentinel" >"${staging_dir}/public/index.html"
+printf 'console.log("%s")\n' "$stale_sentinel" >"${staging_dir}/public/assets/index-stale0000.js"
+
 (
-  cd "$binary_dir"
+  cd "$staging_dir"
   HOME="$tmp_home" \
     DATABASE_PATH="${tmp_home}/smoke.sqlite" \
     API_HOST=127.0.0.1 \
     API_PORT="$port" \
     BETTER_AUTH_SECRET="${BETTER_AUTH_SECRET:-smoke-test-secret-at-least-32-characters-long}" \
     GEMINI_API_KEY="${GEMINI_API_KEY:-dummy}" \
-    "$binary_path" serve "127.0.0.1:${port}" >"$server_log" 2>&1
+    "$staged_binary" serve "127.0.0.1:${port}" >"$server_log" 2>&1
 ) &
 server_pid="$!"
 
@@ -69,4 +83,41 @@ if [ "$boot_status" -ne 0 ]; then
   exit 1
 fi
 
-echo "MangoStudio ${expected_version} served /api/health successfully on port ${port}."
+# The served UI shell must come from the embedded assets, never the planted
+# stale sidecar.
+served_index="${tmp_home}/served-index.html"
+curl -fsS "http://localhost:${port}/" -o "$served_index"
+if grep -q "$stale_sentinel" "$served_index"; then
+  echo "Served index.html came from the stale public/ sidecar." >&2
+  exit 1
+fi
+
+# The bundle referenced by the served index must resolve from the embedded set
+# (the stale sidecar only contains the doctored bundle name).
+asset_path="$(grep -oE '/assets/[A-Za-z0-9._-]+\.js' "$served_index" | head -n 1 || true)"
+if [ -z "$asset_path" ]; then
+  echo "Served index.html references no /assets/*.js bundle." >&2
+  cat "$served_index" >&2
+  exit 1
+fi
+served_asset="${tmp_home}/served-asset.js"
+curl -fsS "http://localhost:${port}${asset_path}" -o "$served_asset"
+if grep -q "$stale_sentinel" "$served_asset"; then
+  echo "Served bundle ${asset_path} came from the stale public/ sidecar." >&2
+  exit 1
+fi
+
+# When the freshly built frontend dist is available (same-job smokes), the
+# served shell must match it byte-for-byte.
+dist_index="${repo_root}/apps/frontend/dist/index.html"
+if [ -f "$dist_index" ]; then
+  served_hash="$(sha256sum "$served_index" | cut -d' ' -f1)"
+  dist_hash="$(sha256sum "$dist_index" | cut -d' ' -f1)"
+  if [ "$served_hash" != "$dist_hash" ]; then
+    echo "Served index.html (${served_hash}) differs from built dist (${dist_hash})." >&2
+    exit 1
+  fi
+  echo "Served index.html matches apps/frontend/dist (${dist_hash})."
+fi
+
+echo "MangoStudio ${expected_version} served /api/health, / and ${asset_path} from embedded assets on port ${port}."
