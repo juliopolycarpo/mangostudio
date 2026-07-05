@@ -33,7 +33,7 @@ export const CARGO_SHIM_MANIFEST = 'packages/cargo-shim/Cargo.toml';
 export const CARGO_SHIM_LOCKFILE = 'packages/cargo-shim/Cargo.lock';
 
 /** The crate name the lockstep check looks up inside Cargo.lock. */
-const CARGO_SHIM_CRATE = 'mangostudio';
+export const CARGO_SHIM_CRATE = 'mangostudio';
 
 export interface VersionEntry {
   /** Manifest path (package.json, Cargo.toml, or Cargo.lock) relative to the repo root. */
