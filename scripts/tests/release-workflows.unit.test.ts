@@ -275,15 +275,13 @@ describe('release workflow binary gate', () => {
 
     // The calling job's permissions are the ceiling for the reusable workflow,
     // since ci.yml's top-level grant is read-only.
-    expect(canaryBlock).toContain('packages: write');
+    expect(canaryBlock).not.toContain('packages: write');
     expect(canaryBlock).toContain('id-token: write');
     expect(canaryBlock).toContain('contents: write');
   });
 
-  test('canary publishes Docker, npm, and fixed-version crates as isolated jobs', () => {
+  test('canary publishes npm and GitHub release assets as isolated jobs', () => {
     const workflow = readText('.github/workflows/canary.yml');
-    const imageVar = '$' + '{IMAGE}';
-    const sha7Var = '$' + '{SHA7}';
     const cargoVersionOutput = '$' + '{{ steps.identity.outputs.cargo_version }}';
     const cargoVersionNeeds = '$' + '{{ needs.build.outputs.cargo_version }}';
     const cargoVersionVar = '$' + '{CARGO_VERSION}';
@@ -295,47 +293,35 @@ describe('release workflow binary gate', () => {
     expect(workflow).toContain('cancel-in-progress: true');
 
     expectJobNeeds(workflow, 'npm-canary', 'build');
-    expectJobNeeds(workflow, 'docker-canary', 'build');
-    expectJobNeeds(workflow, 'crates-canary', 'build');
+    expectJobNeeds(workflow, 'github-release-canary', 'build');
+    expect(extractJobBlock(workflow, 'docker-canary')).toBe('');
+    expect(extractJobBlock(workflow, 'crates-canary')).toBe('');
     expect(workflow).toContain(`cargo_version: ${cargoVersionOutput}`);
-    expect(workflow).toContain('name: canary-cargo-assets');
-
-    // Docker: bookworm multi-arch, rolling + immutable canary tags, no Alpine.
-    const dockerBlock = extractJobBlock(workflow, 'docker-canary');
-    expect(dockerBlock).toContain('retry_command 3 30 docker buildx build');
-    expect(dockerBlock).toContain('--platform linux/amd64,linux/arm64');
-    expect(dockerBlock).toContain(`--tag "${imageVar}:canary"`);
-    expect(dockerBlock).toContain(`--tag "${imageVar}:canary-${sha7Var}"`);
-    expect(dockerBlock).not.toContain('Dockerfile.alpine');
+    expect(workflow).toContain('name: canary-release-assets');
+    expect(workflow).not.toContain('name: canary-cargo-assets');
+    expect(workflow).not.toContain('packages: write');
+    expect(workflow).not.toContain('CARGO_REGISTRY_TOKEN');
+    expect(workflow).not.toContain('docker/setup-qemu-action');
+    expect(workflow).not.toContain('docker/setup-buildx-action');
+    expect(workflow).not.toContain('cargo publish --locked --allow-dirty');
 
     // npm: canary dist-tag so `latest` never moves.
     const npmBlock = extractJobBlock(workflow, 'npm-canary');
     expect(npmBlock).toContain('bun ./scripts/release/publish-npm.ts dist-npm --tag canary');
 
-    // crates: fixed <root>-canary crate, backed by rolling v<root>-canary assets.
-    // The per-SHA app version is only used to build/rename assets, never as the
-    // crate version or GitHub pre-release tag.
-    const cratesBlock = extractJobBlock(workflow, 'crates-canary');
-    expect(cratesBlock).toContain(`CARGO_VERSION: ${cargoVersionNeeds}`);
-    expect(cratesBlock).toContain(`tag="v${cargoVersionVar}"`);
-    expect(cratesBlock).toContain('gh release create "$tag" cargo-canary-assets/*');
-    expect(cratesBlock).toContain('gh release upload "$tag" cargo-canary-assets/* --clobber');
-    expect(cratesBlock).toContain('CRATES_IO_INDEX_URL: https://index.crates.io/ma/ng/mangostudio');
-    expect(cratesBlock).toContain(
-      'CRATES_IO_USER_AGENT: "mangostudio-release (https://github.com/juliopolycarpo/mangostudio)"'
+    // GitHub Releases: fixed <root>-canary asset names, with the full per-SHA
+    // canary version retained in notes for traceability.
+    const releaseBlock = extractJobBlock(workflow, 'github-release-canary');
+    expect(releaseBlock).toContain(`VERSION: ${'$'}{{ needs.build.outputs.version }}`);
+    expect(releaseBlock).toContain(`CARGO_VERSION: ${cargoVersionNeeds}`);
+    expect(releaseBlock).toContain(
+      `github-canary-assets/${'$'}{target/${versionVar}/${cargoVersionVar}}`
     );
-    expect(cratesBlock).not.toContain('https://crates.io/api/v1/crates/mangostudio');
-    expect(cratesBlock).toContain('source scripts/release/crates-published.sh');
-    // Pre-publish check hard-fails on an ambiguous index; the post-failure
-    // visibility poll is subshell-wrapped so the retry loop keeps going.
-    expect(cratesBlock).toContain('if published "$CARGO_VERSION"; then');
-    expect(cratesBlock).toContain('if (published "$CARGO_VERSION"); then');
-    expect(cratesBlock).toContain('bun ./scripts/release/stamp-cargo-version.ts "$CARGO_VERSION"');
-    expect(cratesBlock).toContain('cargo publish --locked --allow-dirty');
-    expect(
-      cratesBlock.indexOf('gh release upload "$tag" cargo-canary-assets/* --clobber')
-    ).toBeLessThan(cratesBlock.indexOf('if published "$CARGO_VERSION"; then'));
-    expect(cratesBlock).not.toContain(`tag="v${versionVar}"`);
+    expect(releaseBlock).toContain(`tag="v${cargoVersionVar}"`);
+    expect(releaseBlock).toContain(`Canary version: ${versionVar}`);
+    expect(releaseBlock).toContain('gh release create "$tag" github-canary-assets/*');
+    expect(releaseBlock).toContain('gh release upload "$tag" github-canary-assets/* --clobber');
+    expect(releaseBlock).not.toContain(`tag="v${versionVar}"`);
     expect(workflow).not.toContain('prune-canary-releases.sh');
   });
 
@@ -345,8 +331,7 @@ describe('release workflow binary gate', () => {
     const alwaysExpression = '$' + '{{ always() }}';
     const buildResult = '$' + '{{ needs.build.result }}';
     const npmResult = '$' + '{{ needs.npm-canary.result }}';
-    const dockerResult = '$' + '{{ needs.docker-canary.result }}';
-    const cratesResult = '$' + '{{ needs.crates-canary.result }}';
+    const githubReleaseResult = '$' + '{{ needs.github-release-canary.result }}';
     expect(summaryBlock, 'canary-summary job not found').not.toBe('');
 
     expect(summaryBlock).toContain(`if: ${alwaysExpression}`);
@@ -355,8 +340,9 @@ describe('release workflow binary gate', () => {
     // channels all showing "skipped".
     expect(summaryBlock).toContain(`build=${buildResult}`);
     expect(summaryBlock).toContain(`npm-canary=${npmResult}`);
-    expect(summaryBlock).toContain(`docker-canary=${dockerResult}`);
-    expect(summaryBlock).toContain(`crates-canary=${cratesResult}`);
+    expect(summaryBlock).toContain(`github-release-canary=${githubReleaseResult}`);
+    expect(summaryBlock).not.toContain('docker-canary=');
+    expect(summaryBlock).not.toContain('crates-canary=');
   });
 
   test('binary smoke helper checks version, delegates the health poll, and surfaces failure logs', () => {

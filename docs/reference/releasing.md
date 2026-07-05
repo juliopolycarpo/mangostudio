@@ -13,13 +13,13 @@ release procedure. The workflow validates version lockstep, builds every artifac
 publishes each channel independently, and always opens a pull request updating
 `CHANGELOG.md` on `main` (never a direct push).
 
-| Secret                      | Used by                                                                          | Scope                                                                                                                                                                                                                        |
-| --------------------------- | -------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `NPM_TOKEN`                 | `npm-publish`, `npm-canary`                                                      | Publish rights on `mangostudio` and `@mangostudio/cli-*`                                                                                                                                                                     |
-| `DIST_REPOS_TOKEN`          | `homebrew`, `scoop`                                                              | Fine-grained PAT with contents read/write on `juliopolycarpo/homebrew-tap` and `juliopolycarpo/scoop-bucket`                                                                                                                 |
-| `CARGO_REGISTRY_TOKEN`      | `cargo-publish`, `crates-canary`                                                 | Temporary crates.io fallback until Trusted Publishing is registered and verified for the `mangostudio` crate                                                                                                                 |
-| `CHANGELOG_PR_TOKEN`        | `update-changelog`                                                               | Fine-grained PAT with pull requests write (+ contents read) on this repository; opens the changelog PR, since the workflow `GITHUB_TOKEN` cannot create pull requests                                                        |
-| *(built-in `GITHUB_TOKEN`)* | `github-release`, `docker`, `update-changelog`, the canary channel, attestations | No extra setup — workflow grants `packages: write` for GHCR, `contents: write` so `update-changelog` can write the GitHub-Verified changelog commit via the REST Contents API, and `id-token: write` for crates.io OIDC auth |
+| Secret                      | Used by                                                                          | Scope                                                                                                                                                                                                                           |
+| --------------------------- | -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `NPM_TOKEN`                 | `npm-publish`, `npm-canary`                                                      | Publish rights on `mangostudio` and `@mangostudio/cli-*`                                                                                                                                                                        |
+| `DIST_REPOS_TOKEN`          | `homebrew`, `scoop`                                                              | Fine-grained PAT with contents read/write on `juliopolycarpo/homebrew-tap` and `juliopolycarpo/scoop-bucket`                                                                                                                    |
+| `CARGO_REGISTRY_TOKEN`      | `cargo-publish`                                                                  | Temporary crates.io fallback until Trusted Publishing is registered and verified for the `mangostudio` crate                                                                                                                    |
+| `CHANGELOG_PR_TOKEN`        | `update-changelog`                                                               | Fine-grained PAT with pull requests write (+ contents read) on this repository; opens the changelog PR, since the workflow `GITHUB_TOKEN` cannot create pull requests                                                           |
+| *(built-in `GITHUB_TOKEN`)* | `github-release`, `docker`, `update-changelog`, the canary channel, attestations | No extra setup — tag releases grant `packages: write` for GHCR, `contents: write` so `update-changelog` can write the GitHub-Verified changelog commit via the REST Contents API, and `id-token: write` for crates.io OIDC auth |
 
 ### One-time setup checklist
 
@@ -124,47 +124,50 @@ push to `main`, so the commit that just went green is the canary source — ther
 no separate trigger or SHA re-resolution. It calls the reusable
 `.github/workflows/canary.yml`, whose jobs share the build and fan out per channel.
 
-Docker and npm use `<root-version>-canary.<sha7>` (e.g.
-`0.1.0-canary.1234abc`), where `<sha7>` is the 7-char short commit SHA. Cargo
-uses a fixed `<root-version>-canary` prerelease (e.g. `0.1.0-canary`) whose
-downloaded assets are refreshed by every green `main` commit. Consume any canary
-channel:
+npm uses `<root-version>-canary.<sha7>` (e.g. `0.1.0-canary.1234abc`), where
+`<sha7>` is the 7-char short commit SHA. GitHub Releases uses a rolling
+`v<root-version>-canary` pre-release whose notes record the source SHA and full
+canary version. Its asset names stay fixed at `<root-version>-canary` so the
+already-published Cargo canary launcher can keep resolving them. Consume canary
+builds with npm or the GitHub pre-release archives:
 
 ```bash
-# Docker — rolling tag (newest green) or the immutable per-commit tag
-docker pull ghcr.io/juliopolycarpo/mangostudio:canary
-docker pull ghcr.io/juliopolycarpo/mangostudio:canary-1234abc
-
 # npm — the `canary` dist-tag; `latest` is never touched
 npm install -g mangostudio@canary
 
-# Cargo — fixed prerelease version backed by rolling GitHub release assets
+# GitHub Releases — rolling pre-release archives and SHA256SUMS
+gh release download v0.1.0-canary --repo juliopolycarpo/mangostudio
+
+# Cargo — existing fixed prerelease launcher backed by the rolling assets
 cargo install mangostudio --version 0.1.0-canary
 ```
 
-| Channel | Job             | What it publishes                                                                                                                       |
-| ------- | --------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| Docker  | `docker-canary` | Debian Bookworm multi-arch (amd64 + arm64) under the rolling `canary` tag and the immutable `canary-<sha7>` tag. Alpine stays tag-only. |
-| npm     | `npm-canary`    | `mangostudio@<version>` under the `canary` dist-tag, so `npm i -g mangostudio` (latest) never resolves to a canary.                     |
-| crates  | `crates-canary` | `mangostudio <root>-canary`, backed by a rolling `v<root>-canary` GitHub pre-release whose assets are clobbered each green main commit. |
+| Channel         | Job                     | What it publishes                                                                                                                      |
+| --------------- | ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| GitHub Releases | `github-release-canary` | Rolling `v<root>-canary` pre-release assets and `SHA256SUMS`, clobbered each green main commit and named for the fixed Cargo launcher. |
+| npm             | `npm-canary`            | `mangostudio@<version>` under the `canary` dist-tag, so `npm i -g mangostudio` (latest) never resolves to a canary.                    |
 
-Each channel is independent and idempotent, exactly like the tag release: a docker
-failure never blocks npm or crates, and **Re-run failed jobs** re-runs only the failed
-channel (the `canary-summary` job writes a per-channel ✅/❌ table naming
-the job to re-run). The `canary-publish` concurrency group cancels superseded
-in-flight runs so the rolling `canary` tag and dist-tag always track the newest
-green commit; per-commit versions are unique, so a cancelled run never leaves a
-conflicting half-publish.
+Each channel is independent and idempotent, exactly like the tag release: a
+GitHub release upload failure never blocks npm, and **Re-run failed jobs**
+re-runs only the failed channel (the `canary-summary` job writes a per-channel
+✅/❌ table naming the job to re-run). The `canary-publish` concurrency group
+cancels superseded in-flight runs so the rolling pre-release and npm dist-tag
+always track the newest green commit; per-commit npm versions are unique, so a
+cancelled run never leaves a conflicting half-publish.
 
 Caveats:
 
-- The crates.io canary deliberately does **not** publish
-  `…-canary.<sha7>` versions. crates.io versions are permanent (only yankable,
-  never deletable), so a compromised per-SHA canary crate could not be removed
-  without contacting the crates.io team.
-- crates.io has no npm-style mutable `canary` dist-tag for `cargo install`; Cargo
-  canary is a fixed prerelease for the current root version, while the GitHub
-  release assets behind that launcher are mutable.
+- `ghcr.io/juliopolycarpo/mangostudio:canary` and
+  `ghcr.io/juliopolycarpo/mangostudio:canary-<sha7>` are no longer updated.
+  Existing GHCR canary tags remain in the registry until manually cleaned up.
+  Docker users who need between-tag builds should switch to the npm canary
+  (`npm install -g mangostudio@canary`) or download the GitHub pre-release
+  archives. Tagged releases still publish the full Docker image set.
+- The workflow no longer publishes crates.io canaries. The currently published
+  `<root>-canary` launcher keeps working because the rolling GitHub pre-release
+  assets keep refreshing under the same asset names. A future root-version bump
+  will not get a new `<root>-canary` crate unless Cargo canary publishing is
+  intentionally reintroduced.
 - Canary-like `v<version>-canary.<sha7>` tags remain excluded from the tag release
   trigger (`!v*-canary*`) as a guard for legacy or manual per-SHA tags.
 
@@ -269,9 +272,10 @@ state. No extra registry secret is required because the release job grants
 GHCR package public in the repository package settings if public pulls are
 desired.
 
-Between tags, the [Canary channel](#canary-channel) publishes the same image under
-the `canary` (rolling) and `canary-<sha7>` (immutable) tags — Bookworm multi-arch
-only.
+The [Canary channel](#canary-channel) no longer updates Docker images. Existing
+`canary` and `canary-<sha7>` GHCR tags remain available until manually removed,
+but they do not track new `main` commits. Tagged releases still publish the full
+Bookworm and Alpine image set.
 
 ## Homebrew tap
 
@@ -379,10 +383,10 @@ Design notes:
 - The `cargo-publish` release job checks crates.io before publishing and
   re-checks between retries, so workflow re-runs converge instead of failing on
   "version already exists".
-- The [Canary channel](#canary-channel) publishes only the fixed
-  `<root>-canary` crate version for Cargo, never a per-SHA
-  `…-canary.<sha7>` crate. The launcher refreshes canary assets on each run so
-  installed canary users track the rolling `v<root>-canary` GitHub pre-release.
+- The [Canary channel](#canary-channel) no longer publishes crates.io canaries.
+  Existing installs of the current `<root>-canary` launcher continue to track the
+  rolling `v<root>-canary` GitHub pre-release because those assets keep
+  refreshing under stable names.
 
 ## Prerequisites
 
