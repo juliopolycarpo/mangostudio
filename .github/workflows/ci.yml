@@ -69,7 +69,6 @@ jobs:
     if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
     permissions:
       contents: write
-      packages: write
       id-token: write
     uses: ./.github/workflows/canary.yml
     secrets: inherit
