@@ -84,7 +84,6 @@ async function buildStandaloneTarget(
     apiSource: string;
     buildTime: string;
     buildInfo: BuildStamp;
-    frontendDist: string;
     outDir: string;
     cursorSidecar: CursorSidecarStaging | null;
   }
@@ -99,7 +98,6 @@ async function buildStandaloneTarget(
   if (options.dryRun) {
     console.log(`   (dry run) Would compile for ${target.target}`);
     console.log(`✅ Successfully built ${target.name} for ${target.arch} (dry run)`);
-    console.log(`📁 Would copy frontend dist to ${join(platformOutDir, 'public')}`);
     if (cursorNativePackageFor(target)) {
       console.log(`📁 Would vendor Cursor sidecar to ${join(platformOutDir, 'cursor-sidecar')}`);
     } else {
@@ -455,7 +453,6 @@ async function buildStandaloneBinary(options: BinaryBuildOptions): Promise<void>
           apiSource,
           buildTime,
           buildInfo,
-          frontendDist,
           outDir,
           cursorSidecar,
         })
