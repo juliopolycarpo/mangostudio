@@ -191,7 +191,6 @@ describe('assertNpmDistributionAssets', () => {
   test('rejects a staged distribution with a missing platform binary', () => {
     const distDir = makeTempDir();
     const packageDir = join(distDir, `${LINUX_X64.os}-${LINUX_X64.cpu}`);
-    mkdirSync(packageDir, { recursive: true });
     writePlatformPackage(packageDir, LINUX_X64);
     rmSync(join(packageDir, LINUX_X64.binary));
     writeMainPackage(join(distDir, 'cli'));
@@ -202,7 +201,6 @@ describe('assertNpmDistributionAssets', () => {
   test('rejects a wrapper whose optionalDependencies omit a platform package', () => {
     const distDir = makeTempDir();
     const packageDir = join(distDir, `${LINUX_X64.os}-${LINUX_X64.cpu}`);
-    mkdirSync(packageDir, { recursive: true });
     writePlatformPackage(packageDir, LINUX_X64);
     const cliDir = join(distDir, 'cli');
     writeMainPackage(cliDir);
