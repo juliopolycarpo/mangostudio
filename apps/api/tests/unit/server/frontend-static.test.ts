@@ -81,6 +81,25 @@ describe('registerFrontend with embedded assets', () => {
     expect((await get('/assets/missing.js')).status).toBe(404);
   });
 
+  test('does not shadow mounted wildcard routes such as Better Auth /api/auth/*', async () => {
+    // Reproduces the binary-smoke regression: Better Auth mounts /api/auth/*
+    // as a wildcard on a prefixed sub-instance (routes/auth.ts). A root
+    // app.get('/*') intercepts it; the explicit-route + onError design must
+    // let the mounted handler win.
+    registerEmbeddedFrontend({
+      '/index.html': join(assetDir, 'index.html'),
+      '/assets/index-AbCd1234.js': join(assetDir, 'index-AbCd1234.js'),
+    });
+    const app = new Elysia().group('/api', (api) =>
+      api.group('/auth', (auth) => auth.all('/*', () => new Response('auth-handler')))
+    );
+    registerFrontend(app as unknown as App, '/nonexistent-frontend-dir');
+
+    const response = await app.handle(new Request('http://localhost/api/auth/get-session'));
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe('auth-handler');
+  });
+
   test('ignores the filesystem frontend directory entirely', async () => {
     registerEmbeddedFrontend({ '/index.html': join(assetDir, 'index.html') });
     // A stale sidecar directory with a different index must never be served.

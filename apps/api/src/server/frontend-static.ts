@@ -6,7 +6,6 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { staticPlugin } from '@elysiajs/static';
-import { NotFoundError } from 'elysia';
 import type { App } from '../app';
 import { isSpaRoute } from '../lib/spa-guard';
 import { type EmbeddedFrontendFiles, getEmbeddedFrontend } from './embedded-frontend';
@@ -50,13 +49,17 @@ function serveIndexFile(indexPath: string, cacheControl?: string): Response {
 }
 
 /**
- * Serve everything from the embedded manifest with a single catch-all route.
- * Exact API/plugin routes win over the wildcard in Elysia's router, so this
- * only sees paths no other handler claimed — the staticPlugin workarounds
- * needed for compiled binaries (explicit GET / route, inverted ignorePatterns)
- * do not apply here. Vite content-hashes `/assets/*`, so those are immutable;
- * index.html must revalidate so browsers pick up new bundles after an upgrade
- * instead of serving a stale cached shell.
+ * Serve embedded assets without a root catch-all wildcard. A root
+ * `app.get('/*')` would shadow other root-level wildcard routes — most
+ * notably Better Auth's mounted `/api/auth/*` handler — so this mirrors the
+ * filesystem path in `registerSpa`: one explicit GET route per embedded
+ * asset, plus a NOT_FOUND error handler for SPA fallback. Explicit API
+ * routes and mounted plugins keep matching first; the SPA shell only lands
+ * on paths nothing else claimed.
+ *
+ * Vite content-hashes `/assets/*`, so those are immutable; index.html must
+ * revalidate so browsers pick up new bundles after an upgrade instead of
+ * serving a stale cached shell.
  */
 function registerEmbeddedSpa(app: App, files: EmbeddedFrontendFiles): void {
   const indexPath = files['/index.html'];
@@ -67,33 +70,29 @@ function registerEmbeddedSpa(app: App, files: EmbeddedFrontendFiles): void {
   }
 
   const serveEmbeddedIndex = () => serveIndexFile(indexPath, 'no-cache');
-  const serveEmbedded = (pathname: string): Response => {
-    if (pathname === '/' || pathname === '/index.html') {
-      return serveEmbeddedIndex();
+
+  app.get('/', serveEmbeddedIndex);
+
+  for (const urlPath of Object.keys(files)) {
+    if (urlPath === '/index.html') {
+      app.get('/index.html', serveEmbeddedIndex);
+      continue;
     }
+    const filePath = files[urlPath];
+    const headers = urlPath.startsWith('/assets/')
+      ? { 'Cache-Control': 'public, max-age=31536000, immutable' }
+      : undefined;
+    app.get(urlPath, () => new Response(Bun.file(filePath), { headers }));
+  }
 
-    const embeddedPath = files[pathname];
-    if (embeddedPath) {
-      return new Response(
-        Bun.file(embeddedPath),
-        pathname.startsWith('/assets/')
-          ? { headers: { 'Cache-Control': 'public, max-age=31536000, immutable' } }
-          : undefined
-      );
+  app.onError(({ code, request }) => {
+    if (code === 'NOT_FOUND' && request.method === 'GET') {
+      const { pathname } = new URL(request.url);
+      if (isSpaRoute(pathname)) {
+        return serveEmbeddedIndex();
+      }
     }
-
-    if (isSpaRoute(pathname)) {
-      return serveEmbeddedIndex();
-    }
-
-    // Unmatched non-SPA paths (e.g. unknown /api/* routes) flow through the
-    // regular NOT_FOUND error pipeline, matching the filesystem serving path.
-    throw new NotFoundError();
-  };
-
-  app
-    .get('/', serveEmbeddedIndex)
-    .get('/*', ({ request }) => serveEmbedded(new URL(request.url).pathname));
+  });
 }
 
 function registerSpa(app: App, frontendDir: string): void {
