@@ -89,6 +89,11 @@ export function checkFrontend(frontendDir: string, fs: FsProbe): CheckResult {
   return warn('Frontend', `${frontendDir} (missing — API only)`);
 }
 
+/** Frontend assets compiled into the standalone binary — always present. */
+export function checkEmbeddedFrontend(fileCount: number): CheckResult {
+  return ok('Frontend', `embedded in binary (${fileCount} files)`);
+}
+
 export function checkAuthSecret(config: MangoConfig): CheckResult {
   const message = getAuthSecretValidationMessage(config.auth.secret);
   if (message) {

@@ -1,4 +1,7 @@
 import { describe, expect, it } from 'bun:test';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { runDoctor } from '../../../../src/cli/commands/doctor';
 import type { FsProbe } from '../../../../src/cli/doctor-checks';
 import type { BuildInfo } from '../../../../src/lib/build-info';
@@ -259,5 +262,36 @@ describe('runDoctor', () => {
     expect(text).toContain('checkout checkout123 differs from server abc123');
     expect(text).toContain('frontend frontend123 differs from server abc123');
     expect(text).toContain('2 warning(s), 0 failure(s).');
+  });
+
+  it('reports the embedded frontend and its build stamp when assets are compiled in', async () => {
+    const embedDir = mkdtempSync(join(tmpdir(), 'doctor-embed-'));
+    const buildInfoPath = join(embedDir, 'build-info.json');
+    writeFileSync(buildInfoPath, JSON.stringify(BUILD_INFO));
+
+    const lines: string[] = [];
+    try {
+      await runDoctor(
+        { all: false, cursorProbe: false, chatgptRefresh: false },
+        {
+          ...makeDoctorDeps({
+            getEmbeddedFrontend: () => ({
+              '/index.html': join(embedDir, 'index.html'),
+              '/build-info.json': buildInfoPath,
+            }),
+            // Embedded assets must win over any filesystem sidecar stamp.
+            readFrontendBuildInfo: () => ({ ...BUILD_INFO, gitSha: 'stale-sidecar' }),
+          }),
+          log: (msg) => lines.push(msg),
+        }
+      );
+    } finally {
+      rmSync(embedDir, { recursive: true, force: true });
+    }
+
+    const text = lines.join('\n');
+    expect(text).toContain('embedded in binary (2 files)');
+    expect(text).not.toContain('stale-sidecar');
+    expect(text).toContain('0 warning(s), 0 failure(s).');
   });
 });
