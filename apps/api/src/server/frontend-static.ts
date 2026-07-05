@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import { staticPlugin } from '@elysiajs/static';
 import type { App } from '../app';
 import { isSpaRoute } from '../lib/spa-guard';
+import { type EmbeddedFrontendFiles, getEmbeddedFrontend } from './embedded-frontend';
 
 /** True when a built frontend (index.html) exists in the directory. // Usage: hasFrontend(dir) */
 export function hasFrontend(frontendDir: string): boolean {
@@ -22,6 +23,13 @@ export function hasFrontend(frontendDir: string): boolean {
 /** Register static assets + SPA fallback, or a bare 404 when no frontend exists. */
 // Usage: registerFrontend(app, getDefaultFrontendDir());
 export function registerFrontend(app: App, frontendDir: string): void {
+  const embedded = getEmbeddedFrontend();
+  if (embedded) {
+    console.warn('[frontend] Serving embedded frontend assets');
+    registerEmbeddedSpa(app, embedded);
+    return;
+  }
+
   if (!hasFrontend(frontendDir)) {
     console.warn(`[frontend] No frontend found at: ${frontendDir}`);
     registerApiOnly(app);
@@ -32,8 +40,59 @@ export function registerFrontend(app: App, frontendDir: string): void {
   registerSpa(app, frontendDir);
 }
 
-function serveIndexFile(indexPath: string): Response {
-  return new Response(Bun.file(indexPath), { headers: { 'Content-Type': 'text/html' } });
+function serveIndexFile(indexPath: string, cacheControl?: string): Response {
+  const headers: Record<string, string> = { 'Content-Type': 'text/html' };
+  if (cacheControl) {
+    headers['Cache-Control'] = cacheControl;
+  }
+  return new Response(Bun.file(indexPath), { headers });
+}
+
+/**
+ * Serve embedded assets without a root catch-all wildcard. A root
+ * `app.get('/*')` would shadow other root-level wildcard routes — most
+ * notably Better Auth's mounted `/api/auth/*` handler — so this mirrors the
+ * filesystem path in `registerSpa`: one explicit GET route per embedded
+ * asset, plus a NOT_FOUND error handler for SPA fallback. Explicit API
+ * routes and mounted plugins keep matching first; the SPA shell only lands
+ * on paths nothing else claimed.
+ *
+ * Vite content-hashes `/assets/*`, so those are immutable; index.html must
+ * revalidate so browsers pick up new bundles after an upgrade instead of
+ * serving a stale cached shell.
+ */
+function registerEmbeddedSpa(app: App, files: EmbeddedFrontendFiles): void {
+  const indexPath = files['/index.html'];
+  if (!indexPath) {
+    console.warn('[frontend] Embedded frontend has no index.html; serving API only');
+    registerApiOnly(app);
+    return;
+  }
+
+  const serveEmbeddedIndex = () => serveIndexFile(indexPath, 'no-cache');
+
+  app.get('/', serveEmbeddedIndex);
+
+  for (const urlPath of Object.keys(files)) {
+    if (urlPath === '/index.html') {
+      app.get('/index.html', serveEmbeddedIndex);
+      continue;
+    }
+    const filePath = files[urlPath];
+    const headers = urlPath.startsWith('/assets/')
+      ? { 'Cache-Control': 'public, max-age=31536000, immutable' }
+      : undefined;
+    app.get(urlPath, () => new Response(Bun.file(filePath), { headers }));
+  }
+
+  app.onError(({ code, request }) => {
+    if (code === 'NOT_FOUND' && request.method === 'GET') {
+      const { pathname } = new URL(request.url);
+      if (isSpaRoute(pathname)) {
+        return serveEmbeddedIndex();
+      }
+    }
+  });
 }
 
 function registerSpa(app: App, frontendDir: string): void {

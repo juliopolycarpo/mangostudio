@@ -9,9 +9,11 @@ import { parseRuntimeEnvFile } from '@mangostudio/shared/runtime-env';
 import type { SecretMetadataRow } from '@mangostudio/shared/types';
 import { parse as parseToml } from 'smol-toml';
 import {
+  BUILD_INFO_FILENAME,
   type BuildInfo,
   getBuildInfo,
   getCurrentCheckoutBuildInfo,
+  readBuildInfoFile,
   readFrontendBuildInfo,
 } from '../../lib/build-info';
 import {
@@ -30,6 +32,11 @@ import {
   hasProviderTomlSecret,
   PROVIDER_SECRET_CONFIG,
 } from '../../modules/connectors/domain/connector';
+import {
+  EMBEDDED_FRONTEND_DIR,
+  type EmbeddedFrontendFiles,
+  getEmbeddedFrontend,
+} from '../../server/embedded-frontend';
 import { detectNodeRuntime } from '../../services/providers/cursor/node-runtime';
 import {
   type CursorRuntimeChainStep,
@@ -45,6 +52,7 @@ import {
   checkConfig,
   checkDatabase,
   checkDir,
+  checkEmbeddedFrontend,
   checkFrontend,
   checkInstance,
   checkRuntime,
@@ -52,6 +60,7 @@ import {
   collectCursorDoctorChecks,
   cursorRuntimeChainReady,
   type FsProbe,
+  ok,
 } from '../doctor-checks';
 import { writeLine } from '../output';
 import { createProcessController, type ProcessController } from '../process-control';
@@ -74,6 +83,7 @@ export interface DoctorDeps {
   getBuildInfo: () => BuildInfo;
   getCheckoutBuildInfo: () => BuildInfo;
   readFrontendBuildInfo: (frontendDir: string) => BuildInfo | null;
+  getEmbeddedFrontend: () => EmbeddedFrontendFiles | null;
   log: (msg: string) => void;
   exit: (code: number) => void;
 }
@@ -100,9 +110,12 @@ async function collectResults(
   d: Required<DoctorDeps>
 ): Promise<CheckResult[]> {
   const instance = await inspectInstance(d);
-  const frontendDir = instance.alive
-    ? (instance.state?.frontendDir ?? d.frontendDir())
-    : d.frontendDir();
+  const embedded = d.getEmbeddedFrontend();
+  const frontendDir = embedded
+    ? EMBEDDED_FRONTEND_DIR
+    : instance.alive
+      ? (instance.state?.frontendDir ?? d.frontendDir())
+      : d.frontendDir();
   const serverBuild = instance.alive ? (instance.state?.buildInfo ?? null) : d.getBuildInfo();
   const results: CheckResult[] = [
     checkDir('Home directory', getHomeMangoDir(), d.fs),
@@ -110,14 +123,16 @@ async function collectResults(
     checkDir('Run directory', getRunDir(), d.fs),
     checkConfig(config),
     checkDatabase(config, d.fs),
-    checkFrontend(frontendDir, d.fs),
+    resolveFrontendCheck(frontendDir, embedded, d),
     checkAuthSecret(config),
     checkInstance(instance.state, instance.alive),
     checkRuntime(getVersion(), isStandaloneExecutable()),
     ...collectBuildIdentityChecks({
       serverBuild,
       checkoutBuild: d.getCheckoutBuildInfo(),
-      frontendBuild: d.readFrontendBuildInfo(frontendDir),
+      frontendBuild: embedded
+        ? readEmbeddedFrontendBuildInfo(embedded)
+        : d.readFrontendBuildInfo(frontendDir),
       frontendDir,
     }),
   ];
@@ -139,6 +154,32 @@ async function collectResults(
   }
 
   return results;
+}
+
+/**
+ * Embedded assets ship inside the binary, so the frontend is present by
+ * construction. A live instance may still report the embedded sentinel while
+ * doctor runs from a source checkout — surface that instead of probing the
+ * filesystem for a directory that does not exist.
+ */
+function resolveFrontendCheck(
+  frontendDir: string,
+  embedded: EmbeddedFrontendFiles | null,
+  d: Required<DoctorDeps>
+): CheckResult {
+  if (embedded) {
+    return checkEmbeddedFrontend(Object.keys(embedded).length);
+  }
+  if (frontendDir === EMBEDDED_FRONTEND_DIR) {
+    return ok('Frontend', 'embedded in running server binary');
+  }
+  return checkFrontend(frontendDir, d.fs);
+}
+
+/** Frontend build stamp travels inside the embedded manifest as /build-info.json. */
+function readEmbeddedFrontendBuildInfo(embedded: EmbeddedFrontendFiles): BuildInfo | null {
+  const path = embedded[`/${BUILD_INFO_FILENAME}`];
+  return path ? readBuildInfoFile(path) : null;
 }
 
 async function inspectInstance(d: Required<DoctorDeps>): Promise<InstanceProbe> {
@@ -205,6 +246,7 @@ function resolveDeps(deps: Partial<DoctorDeps>): Required<DoctorDeps> {
     getBuildInfo: deps.getBuildInfo ?? getBuildInfo,
     getCheckoutBuildInfo: deps.getCheckoutBuildInfo ?? getCurrentCheckoutBuildInfo,
     readFrontendBuildInfo: deps.readFrontendBuildInfo ?? readFrontendBuildInfo,
+    getEmbeddedFrontend: deps.getEmbeddedFrontend ?? getEmbeddedFrontend,
     log: deps.log ?? writeLine,
     exit: deps.exit ?? ((code) => process.exit(code)),
   };

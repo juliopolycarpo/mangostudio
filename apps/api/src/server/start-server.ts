@@ -21,6 +21,7 @@ import {
   flushObservabilitySnapshot,
   loadObservabilitySnapshot,
 } from '../services/providers/core/provider-observability';
+import { EMBEDDED_FRONTEND_DIR, getEmbeddedFrontend } from './embedded-frontend';
 import { registerFrontend } from './frontend-static';
 import { runMigrations } from './migrations';
 
@@ -48,7 +49,7 @@ export async function startServer(options: StartOptions = {}): Promise<ServerHan
 
   await runMigrations();
   await loadObservabilitySnapshot();
-  const frontendDir = getDefaultFrontendDir();
+  const frontendDir = getEmbeddedFrontend() ? EMBEDDED_FRONTEND_DIR : getDefaultFrontendDir();
   registerFrontend(app, frontendDir);
 
   listenOrExit(port, host);

@@ -11,6 +11,7 @@ import {
   cursorNativePackageFor,
   prepareCursorSidecarStaging,
 } from './lib/cursor-sidecar';
+import { writeEmbedModules } from './lib/embed-frontend';
 import { ALL_BINARY_TARGETS, type BinaryTarget, filterBinaryTargets } from './lib/release-targets';
 import { resolveReleaseVersion } from './lib/release-version';
 import {
@@ -275,7 +276,7 @@ Each platform has its own directory under \`.mango/out/\`:
    - The executable will create the database file if it doesn't exist
    - It will run migrations automatically
    - Uploads directory will be created automatically
-   - Frontend assets are served from the sidecar public/ directory
+   - Frontend assets are embedded in the executable
    - API endpoints are available under /api/*
    - Background (-d) runs write logs to ~/.mango/logs/ and track a single
      running instance via ~/.mango/run/server.json
@@ -284,7 +285,8 @@ Each platform has its own directory under \`.mango/out/\`:
 - Binaries are standalone and include all dependencies
 - No Node.js/Bun runtime required
 - Database is stored externally (not embedded in binary)
-- Frontend assets are copied beside the executable in \`public/\`
+- Frontend assets are embedded in the executable; the \`public/\` copy beside it
+  is staged for compatibility only and is never served
 `;
 
   await Bun.write(join(outDir, 'README.md'), readmeContent);
@@ -420,7 +422,7 @@ async function buildStandaloneBinary(options: BinaryBuildOptions): Promise<void>
   const buildTime = new Date().toISOString();
   const buildInfo = await resolveBuildStamp(buildTime, options.buildType);
   const outDir = join(ROOT_DIR, '.mango', 'out');
-  const apiSource = join(ROOT_DIR, 'apps/api/src/index.ts');
+  let apiSource = join(ROOT_DIR, 'apps/api/src/index.ts');
   const frontendDist = join(ROOT_DIR, 'apps/frontend/dist');
 
   mkdirSync(outDir, { recursive: true });
@@ -433,8 +435,21 @@ async function buildStandaloneBinary(options: BinaryBuildOptions): Promise<void>
   console.log('---');
 
   await buildFrontendSidecar(options.dryRun);
-  if (!options.dryRun) {
+  if (options.dryRun) {
+    console.log('   (dry run) Would generate embedded frontend modules and compile them in');
+  } else {
     await writeFrontendBuildInfo(frontendDist, buildInfo);
+
+    // Compile a generated entry that embeds the frontend dist into the binary,
+    // so a stale `public/` sidecar beside the executable can never be served.
+    const embed = writeEmbedModules({
+      distDir: frontendDist,
+      embedDir: join(outDir, 'embed'),
+      registryModulePath: join(ROOT_DIR, 'apps/api/src/server/embedded-frontend.ts'),
+      apiEntryPath: apiSource,
+    });
+    apiSource = embed.entryPath;
+    console.log(`📦 Embedding frontend into binary (${embed.fileCount} asset file(s))`);
   }
 
   const cursorSidecar = options.dryRun ? null : await prepareCursorSidecarStaging(targets);

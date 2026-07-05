@@ -62,6 +62,11 @@ export function readFrontendBuildInfo(frontendDir: string): BuildInfo | null {
     return null;
   }
 
+  return readBuildInfoFile(path);
+}
+
+/** Parse a build-info.json at an explicit path (e.g. an embedded asset). */
+export function readBuildInfoFile(path: string): BuildInfo | null {
   try {
     const parsed = JSON.parse(readFileSync(path, 'utf8')) as unknown;
     return isBuildInfo(parsed) ? parsed : null;

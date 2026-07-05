@@ -410,7 +410,9 @@ The `Messages` type is inferred directly from the `pt-BR.ts` dictionary (`as con
 The `bun run build --binary` command compiles the API into platform-specific binaries under `.mango/out/<platform>/`.
 
 - The database is persisted at `~/.mango/database.sqlite` by default.
-- Frontend assets are served from the `public/` directory next to the executable.
+- Frontend assets are embedded into the executable at build time; a `public/`
+  directory next to the binary is never served, so a stale copy left behind by
+  an upgrade cannot shadow the bundled UI.
 
 ## License
 
