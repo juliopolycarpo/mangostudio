@@ -6,6 +6,13 @@
 
 import { dirname, join } from 'node:path';
 import {
+  BUILD_INFO_FILENAME,
+  type BuildInfo,
+  formatBuildInfo,
+  formatBuildSha,
+  isKnownBuildSha,
+} from '../lib/build-info';
+import {
   AUTH_SECRET_MIN_LENGTH,
   getAuthSecretValidationMessage,
   type MangoConfig,
@@ -25,6 +32,13 @@ export interface CheckResult {
 export interface FsProbe {
   exists(path: string): boolean;
   isWritable(path: string): boolean;
+}
+
+export interface BuildIdentityInput {
+  serverBuild: BuildInfo | null;
+  checkoutBuild: BuildInfo;
+  frontendBuild: BuildInfo | null;
+  frontendDir: string;
 }
 
 export function ok(label: string, detail: string): CheckResult {
@@ -100,6 +114,45 @@ export function checkRuntime(version: string, standalone: boolean): CheckResult 
   );
 }
 
+export function collectBuildIdentityChecks(input: BuildIdentityInput): CheckResult[] {
+  const results: CheckResult[] = [
+    input.serverBuild
+      ? ok('Server build', formatBuildInfo(input.serverBuild))
+      : warn('Server build', 'running server did not report build metadata'),
+  ];
+
+  if (buildsDiffer(input.serverBuild, input.checkoutBuild)) {
+    results.push(
+      warn(
+        'Checkout build',
+        `checkout ${formatBuildSha(input.checkoutBuild)} differs from server ${formatBuildSha(input.serverBuild)}; restart or rebuild if unexpected`
+      )
+    );
+  } else {
+    results.push(ok('Checkout build', formatBuildInfo(input.checkoutBuild)));
+  }
+
+  if (!input.frontendBuild) {
+    results.push(
+      warn(
+        'Frontend build',
+        `${join(input.frontendDir, BUILD_INFO_FILENAME)} missing; rebuild frontend assets to compare`
+      )
+    );
+  } else if (buildsDiffer(input.serverBuild, input.frontendBuild)) {
+    results.push(
+      warn(
+        'Frontend build',
+        `frontend ${formatBuildSha(input.frontendBuild)} differs from server ${formatBuildSha(input.serverBuild)}`
+      )
+    );
+  } else {
+    results.push(ok('Frontend build', formatBuildInfo(input.frontendBuild)));
+  }
+
+  return results;
+}
+
 const CURSOR_CHAIN_LABELS: Record<CursorRuntimeChainStep['link'], string> = {
   node: 'Cursor Node',
   sidecar: 'Cursor sidecar',
@@ -132,6 +185,13 @@ export function collectCursorDoctorChecks(
 /** True when every prerequisite chain link passed (probe may still be pending). */
 export function cursorRuntimeChainReady(steps: readonly CursorRuntimeChainStep[]): boolean {
   return steps.every((step) => step.ok);
+}
+
+function buildsDiffer(
+  left: BuildInfo | null | undefined,
+  right: BuildInfo | null | undefined
+): boolean {
+  return isKnownBuildSha(left) && isKnownBuildSha(right) && left.gitSha !== right.gitSha;
 }
 
 function isUsableDir(path: string, fs: FsProbe): boolean {

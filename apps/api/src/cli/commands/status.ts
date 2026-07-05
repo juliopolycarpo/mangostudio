@@ -2,6 +2,7 @@
  * `status` command: report whether a server is running and its details.
  */
 
+import { formatBuildInfo, formatBuildSha } from '../../lib/build-info';
 import { isStateLive, readState, removeState, type ServerState } from '../../lib/server-state';
 import { formatUptime } from '../format';
 import { writeLine } from '../output';
@@ -39,7 +40,8 @@ function printRunning(state: ServerState, d: Required<StatusDeps>): void {
   d.log(`  Uptime:  ${formatUptime(d.now() - state.startedAt)}`);
   d.log(`  Logs:    ${state.logFile || '(foreground)'}`);
   d.log('  Health:  not probed');
-  d.log(`  Version: ${state.version}`);
+  d.log(`  Version: ${state.version} (${formatBuildSha(state.buildInfo)})`);
+  d.log(`  Build:   ${formatBuildInfo(state.buildInfo)}`);
 }
 
 function resolveDeps(deps: Partial<StatusDeps>): Required<StatusDeps> {

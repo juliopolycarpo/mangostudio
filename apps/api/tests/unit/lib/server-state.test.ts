@@ -19,6 +19,13 @@ function makeState(overrides: Partial<ServerState> = {}): ServerState {
     startedAt: 1_700_000_000_000,
     logFile: '/home/user/.mango/logs/server.log',
     version: 'test',
+    buildInfo: {
+      gitSha: 'abc123',
+      gitDirty: false,
+      builtAt: '2026-07-04T12:00:00.000Z',
+      buildType: 'production',
+    },
+    frontendDir: '/app/public',
     ...overrides,
   };
 }

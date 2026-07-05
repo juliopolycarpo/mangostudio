@@ -10,6 +10,12 @@ const STATE: ServerState = {
   startedAt: 0,
   logFile: '/x.log',
   version: 't',
+  buildInfo: {
+    gitSha: 'abc123',
+    gitDirty: false,
+    builtAt: '2026-07-04T12:00:00.000Z',
+    buildType: 'production',
+  },
 };
 
 function capture(): { lines: string[]; log: (msg: string) => void } {
@@ -69,5 +75,7 @@ describe('runStatus', () => {
     expect(text).toContain('PID:     42');
     expect(text).toContain('Uptime:  5s');
     expect(text).toContain('Health:  not probed');
+    expect(text).toContain('Version: t (abc123)');
+    expect(text).toContain('Build:   abc123');
   });
 });

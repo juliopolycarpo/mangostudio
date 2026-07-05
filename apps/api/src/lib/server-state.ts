@@ -8,6 +8,7 @@
  */
 
 import { readFile, rename, rm, writeFile } from 'node:fs/promises';
+import type { BuildInfo } from './build-info';
 import { getPidFilePath } from './mango-paths';
 
 export interface ServerState {
@@ -17,6 +18,8 @@ export interface ServerState {
   startedAt: number;
   logFile: string;
   version: string;
+  buildInfo?: BuildInfo;
+  frontendDir?: string;
 }
 
 /** Read and parse the state file; null when absent or corrupt. // Usage: await readState() */

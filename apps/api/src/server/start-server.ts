@@ -6,6 +6,7 @@
 
 import { app } from '../app';
 import { closeDb } from '../db/database';
+import { getBuildInfo } from '../lib/build-info';
 import {
   assertValidAuthSecret,
   displayHost,
@@ -47,14 +48,15 @@ export async function startServer(options: StartOptions = {}): Promise<ServerHan
 
   await runMigrations();
   await loadObservabilitySnapshot();
-  registerFrontend(app, getDefaultFrontendDir());
+  const frontendDir = getDefaultFrontendDir();
+  registerFrontend(app, frontendDir);
 
   listenOrExit(port, host);
 
   registerShutdown();
 
   if (options.writeStateFile !== false) {
-    await persistState(port, host);
+    await persistState(port, host, frontendDir);
   }
 
   logRunning(host, port);
@@ -83,7 +85,7 @@ function isAddressInUse(error: unknown): boolean {
 }
 
 /** Record the running instance so status/stop/killserver can manage it. */
-async function persistState(port: number, host: string): Promise<void> {
+async function persistState(port: number, host: string, frontendDir: string): Promise<void> {
   await ensureRuntimeDirs();
   const state: ServerState = {
     pid: process.pid,
@@ -93,6 +95,8 @@ async function persistState(port: number, host: string): Promise<void> {
     // Set by the detached parent so `status` can surface the log path; empty in foreground.
     logFile: process.env.MANGO_LOG_FILE ?? '',
     version: getVersion(),
+    buildInfo: getBuildInfo(),
+    frontendDir,
   };
   await writeState(state);
 }
