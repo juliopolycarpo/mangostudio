@@ -56,18 +56,18 @@ describe('filterNpmPlatforms', () => {
 });
 
 describe('buildPlatformManifest', () => {
-  test('gates the package by os + cpu and ships the binary + public + cursor sidecar', () => {
+  test('gates the package by os + cpu and ships the binary + cursor sidecar', () => {
     const manifest = buildPlatformManifest(LINUX_X64, '1.2.3');
     expect(manifest.name).toBe('@mangostudio/cli-linux-x64');
     expect(manifest.version).toBe('1.2.3');
     expect(manifest.os).toEqual(['linux']);
     expect(manifest.cpu).toEqual(['x64']);
-    expect(manifest.files).toEqual(['mangostudio', 'public', 'cursor-sidecar']);
+    expect(manifest.files).toEqual(['mangostudio', 'cursor-sidecar']);
   });
 
   test('omits the cursor sidecar on platforms without a native package', () => {
     const manifest = buildPlatformManifest(WIN_ARM64, '1.2.3');
-    expect(manifest.files).toEqual(['mangostudio.exe', 'public']);
+    expect(manifest.files).toEqual(['mangostudio.exe']);
   });
 
   test('includes public npm metadata', () => {

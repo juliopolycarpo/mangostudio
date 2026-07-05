@@ -12,7 +12,7 @@ import {
   parseDockerArchFilter,
   parseDockerVariantFilter,
 } from '../lib/docker-stage';
-import { assertDirectory, assertFile, assertSafeToDelete } from '../lib/fs-assert';
+import { assertFile, assertSafeToDelete } from '../lib/fs-assert';
 import { resolveReleaseVersion } from '../lib/release-version';
 import {
   assertNoUnexpectedArguments,
@@ -73,7 +73,7 @@ function prepareContextDir(contextDir: string): void {
 }
 
 function stageFromBuildOutput(target: DockerStageTarget): void {
-  copyTarget(target, target.binaryPath, target.publicDir);
+  copyTarget(target, target.binaryPath);
 }
 
 async function stageFromReleaseAsset(
@@ -92,22 +92,19 @@ async function stageFromReleaseAsset(
   );
   try {
     await runCommand(['tar', '-xzf', archivePath, '-C', extractDir]);
-    copyTarget(target, join(extractDir, target.platform.name), join(extractDir, 'public'));
+    copyTarget(target, join(extractDir, target.platform.name));
   } finally {
     rmSync(extractDir, { force: true, recursive: true });
   }
 }
 
-function copyTarget(target: DockerStageTarget, binaryPath: string, publicDir: string): void {
+function copyTarget(target: DockerStageTarget, binaryPath: string): void {
   assertFile(binaryPath, `${target.platform.arch} binary`);
-  assertDirectory(publicDir, `${target.platform.arch} public directory`);
-  assertFile(join(publicDir, 'index.html'), `${target.platform.arch} public/index.html`);
 
   rmSync(target.contextArchDir, { force: true, recursive: true });
   mkdirSync(target.contextArchDir, { recursive: true });
   cpSync(binaryPath, target.stagedBinaryPath);
   chmodSync(target.stagedBinaryPath, 0o755);
-  cpSync(publicDir, target.stagedPublicDir, { recursive: true });
 }
 
 async function runCommand(cmd: string[]): Promise<void> {

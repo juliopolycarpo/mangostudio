@@ -89,7 +89,7 @@ const parseCliArgs = (args: readonly string[]): CliArgs => {
   };
 };
 
-// Stage one platform package: manifest + binary + frontend public/ sidecar.
+// Stage one platform package: manifest + binary (+ optional Cursor sidecar).
 const stagePlatform = (platform: NpmPlatform, version: string): NpmPlatform => {
   const sourceDir = join(OUT_DIR, platform.arch);
   const binarySource = join(sourceDir, platform.binary);
@@ -99,9 +99,6 @@ const stagePlatform = (platform: NpmPlatform, version: string): NpmPlatform => {
   mkdirSync(packageDir, { recursive: true });
   writeManifest(packageDir, buildPlatformManifest(platform, version));
   cpSync(binarySource, join(packageDir, platform.binary));
-
-  const publicSource = join(sourceDir, 'public');
-  cpSync(publicSource, join(packageDir, 'public'), { recursive: true });
 
   // Ship the vendored Cursor SDK sidecar when the binary build produced it, so
   // installs on hosts with Node.js can run the Cursor connector.

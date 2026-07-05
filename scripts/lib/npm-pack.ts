@@ -66,7 +66,7 @@ export function buildPlatformManifest(
   platform: NpmPlatform,
   version: string
 ): Record<string, unknown> {
-  const files = [platform.binary, 'public'];
+  const files = [platform.binary];
   if (platformShipsCursorSidecar(platform)) {
     files.push('cursor-sidecar');
   }

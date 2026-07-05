@@ -39,9 +39,8 @@ const writeJson = (filePath: string, value: Record<string, unknown>): void => {
 };
 
 const writePlatformPackage = (packageDir: string, platform: NpmPlatform): void => {
-  mkdirSync(join(packageDir, 'public'), { recursive: true });
+  mkdirSync(packageDir, { recursive: true });
   writeFileSync(join(packageDir, platform.binary), 'binary');
-  writeFileSync(join(packageDir, 'public', 'index.html'), '<!doctype html>');
   writeCursorSidecar(packageDir, platform);
   writeJson(join(packageDir, 'package.json'), buildPlatformManifest(platform, '1.2.3'));
 };
@@ -95,26 +94,13 @@ afterEach(() => {
 describe('assertPlatformBuildAssets', () => {
   test('rejects build output with a missing platform binary', () => {
     const sourceDir = makeTempDir();
-    mkdirSync(join(sourceDir, 'public'), { recursive: true });
-    writeFileSync(join(sourceDir, 'public', 'index.html'), '<!doctype html>');
 
     expect(() => assertPlatformBuildAssets(sourceDir, LINUX_X64)).toThrow(/Missing binary/);
   });
 
-  test('rejects build output with a missing frontend sidecar', () => {
-    const sourceDir = makeTempDir();
-    writeFileSync(join(sourceDir, LINUX_X64.binary), 'binary');
-
-    expect(() => assertPlatformBuildAssets(sourceDir, LINUX_X64)).toThrow(
-      /Missing frontend index\.html/
-    );
-  });
-
   test('rejects build output with a missing Cursor sidecar', () => {
     const sourceDir = makeTempDir();
-    mkdirSync(join(sourceDir, 'public'), { recursive: true });
     writeFileSync(join(sourceDir, LINUX_X64.binary), 'binary');
-    writeFileSync(join(sourceDir, 'public', 'index.html'), '<!doctype html>');
 
     expect(() => assertPlatformBuildAssets(sourceDir, LINUX_X64)).toThrow(
       /Missing Cursor sidecar script/
@@ -152,25 +138,12 @@ describe('assertPlatformPackageAssets', () => {
     expect(() => assertPlatformPackageAssets(packageDir, WINDOWS_ARM64)).not.toThrow();
   });
 
-  test('rejects a package manifest that omits the frontend sidecar', () => {
-    const packageDir = makeTempDir();
-    writePlatformPackage(packageDir, LINUX_X64);
-    writeJson(join(packageDir, 'package.json'), {
-      ...buildPlatformManifest(LINUX_X64, '1.2.3'),
-      files: [LINUX_X64.binary],
-    });
-
-    expect(() => assertPlatformPackageAssets(packageDir, LINUX_X64)).toThrow(
-      /Manifest files must include public/
-    );
-  });
-
   test('rejects a package manifest that omits the Cursor sidecar', () => {
     const packageDir = makeTempDir();
     writePlatformPackage(packageDir, LINUX_X64);
     writeJson(join(packageDir, 'package.json'), {
       ...buildPlatformManifest(LINUX_X64, '1.2.3'),
-      files: [LINUX_X64.binary, 'public'],
+      files: [LINUX_X64.binary],
     });
 
     expect(() => assertPlatformPackageAssets(packageDir, LINUX_X64)).toThrow(
@@ -218,6 +191,7 @@ describe('assertNpmDistributionAssets', () => {
   test('rejects a staged distribution with a missing platform binary', () => {
     const distDir = makeTempDir();
     const packageDir = join(distDir, `${LINUX_X64.os}-${LINUX_X64.cpu}`);
+    mkdirSync(packageDir, { recursive: true });
     writePlatformPackage(packageDir, LINUX_X64);
     rmSync(join(packageDir, LINUX_X64.binary));
     writeMainPackage(join(distDir, 'cli'));
@@ -225,21 +199,10 @@ describe('assertNpmDistributionAssets', () => {
     expect(() => assertNpmDistributionAssets(distDir, [LINUX_X64])).toThrow(/Missing binary/);
   });
 
-  test('rejects a staged distribution with a missing frontend sidecar', () => {
-    const distDir = makeTempDir();
-    const packageDir = join(distDir, `${LINUX_X64.os}-${LINUX_X64.cpu}`);
-    writePlatformPackage(packageDir, LINUX_X64);
-    rmSync(join(packageDir, 'public', 'index.html'));
-    writeMainPackage(join(distDir, 'cli'));
-
-    expect(() => assertNpmDistributionAssets(distDir, [LINUX_X64])).toThrow(
-      /Missing frontend index\.html/
-    );
-  });
-
   test('rejects a wrapper whose optionalDependencies omit a platform package', () => {
     const distDir = makeTempDir();
     const packageDir = join(distDir, `${LINUX_X64.os}-${LINUX_X64.cpu}`);
+    mkdirSync(packageDir, { recursive: true });
     writePlatformPackage(packageDir, LINUX_X64);
     const cliDir = join(distDir, 'cli');
     writeMainPackage(cliDir);

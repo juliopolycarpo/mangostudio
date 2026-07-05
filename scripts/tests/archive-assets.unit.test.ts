@@ -27,9 +27,8 @@ describe('archiveReleaseAssets', () => {
     const rootDir = makeTempDir();
     const outDir = join(rootDir, 'out');
     const sourceDir = join(outDir, 'linux-x64');
-    mkdirSync(join(sourceDir, 'public'), { recursive: true });
+    mkdirSync(sourceDir, { recursive: true });
     writeFileSync(join(sourceDir, 'mangostudio'), 'binary');
-    writeFileSync(join(sourceDir, 'public', 'index.html'), '<!doctype html>');
     writeFileSync(join(outDir, 'README.md'), '# Standalone build\n');
 
     const plan = createReleaseAssetPlan({
@@ -50,9 +49,8 @@ describe('archiveReleaseAssets', () => {
     const outDir = join(rootDir, 'out');
     const sourceDir = join(outDir, 'linux-x64');
     const sidecarDir = join(sourceDir, 'cursor-sidecar');
-    mkdirSync(join(sourceDir, 'public'), { recursive: true });
+    mkdirSync(sourceDir, { recursive: true });
     writeFileSync(join(sourceDir, 'mangostudio'), 'binary');
-    writeFileSync(join(sourceDir, 'public', 'index.html'), '<!doctype html>');
     writeFileSync(join(outDir, 'README.md'), '# Standalone build\n');
     mkdirSync(sidecarDir, { recursive: true });
     writeFileSync(join(sidecarDir, 'run-agent.mjs'), '#!/usr/bin/env node');
