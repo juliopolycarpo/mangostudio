@@ -4,24 +4,25 @@ O MangoStudio é distribuído como binários standalone (GitHub Releases), image
 Docker no GHCR, CLI npm (`mangostudio`), tap Homebrew, bucket Scoop
 (Windows) e crate launcher no crates.io (`cargo install mangostudio`). O
 changelog é gerado a partir de Conventional Commits com
-[git-cliff](https://git-cliff.org); nada é editado manualmente.
+[git-cliff](https://git-cliff.org) na preparação da release e verificado no
+momento da tag; nada é editado manualmente.
 
 > 🇺🇸 [English version](../../reference/releasing.md)
 
 ## Contrato one-shot
 
-Configure os secrets abaixo e faça push de uma tag semver assinada (`v0.2.0`) —
-esse é o procedimento completo de release. O workflow valida lockstep de versão,
-gera todos os artefatos, publica cada canal de forma independente e faz commit de
-`CHANGELOG.md` de volta em `main` via push direto ou PR criada pela API REST.
+Com os secrets abaixo configurados, a release é `bun run release:prepare
+<versão>`, um commit e o push de uma tag semver assinada (`v0.2.0`). O workflow
+valida o lockstep de versão e o changelog pré-tag, gera todos os artefatos e
+publica cada canal de forma independente. A tag carrega o próprio
+`CHANGELOG.md` — nada é escrito de volta em `main` após a release.
 
-| Secret                      | Usado por                                                | Escopo                                                                                                                                                                                                                        |
-| --------------------------- | -------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `NPM_TOKEN`                 | `npm-publish`, `npm-canary`                              | Direitos de publicação em `mangostudio` e `@mangostudio/cli-*`                                                                                                                                                                |
-| `DIST_REPOS_TOKEN`          | `homebrew`, `scoop`                                      | PAT fine-grained com contents read/write em `juliopolycarpo/homebrew-tap` e `juliopolycarpo/scoop-bucket`                                                                                                                     |
-| `CARGO_REGISTRY_TOKEN`      | `cargo-publish`                                          | Fallback temporário no crates.io até Trusted Publishing estar registrado e verificado para o crate `mangostudio`                                                                                                              |
-| `CHANGELOG_PR_TOKEN`        | `update-changelog`                                       | PAT fine-grained com pull requests read/write neste repositório; usado só quando a proteção de branch rejeita o push direto do changelog                                                                                      |
-| *(built-in `GITHUB_TOKEN`)* | `github-release`, `docker`, o canal canary, attestations | Sem setup extra — releases por tag concedem `packages: write` para GHCR e `contents: write` para o `update-changelog` gravar o commit de changelog verificado via REST API, e `id-token: write` para a auth OIDC do crates.io |
+| Secret                      | Usado por                                                | Escopo                                                                                                                    |
+| --------------------------- | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `NPM_TOKEN`                 | `npm-publish`, `npm-canary`                              | Direitos de publicação em `mangostudio` e `@mangostudio/cli-*`                                                            |
+| `DIST_REPOS_TOKEN`          | `homebrew`, `scoop`                                      | PAT fine-grained com contents read/write em `juliopolycarpo/homebrew-tap` e `juliopolycarpo/scoop-bucket`                 |
+| `CARGO_REGISTRY_TOKEN`      | `cargo-publish`                                          | Fallback temporário no crates.io até Trusted Publishing estar registrado e verificado para o crate `mangostudio`          |
+| *(built-in `GITHUB_TOKEN`)* | `github-release`, `docker`, o canal canary, attestations | Sem setup extra — releases por tag concedem `packages: write` para GHCR e `id-token: write` para a auth OIDC do crates.io |
 
 ### Checklist de setup único
 
@@ -31,10 +32,10 @@ Complete uma vez por fork ou org antes do primeiro push de tag:
 2. Crie o bucket Scoop compartilhado [`juliopolycarpo/scoop-bucket`](https://github.com/juliopolycarpo/scoop-bucket) com diretório `bucket/`.
 3. Reserve o nome do crate `mangostudio` no [crates.io](https://crates.io) e gere um token de API para o primeiro publish.
 4. Configure Trusted Publishing no crates.io para o crate `mangostudio`: **Settings -> Trusted Publishing -> Add -> GitHub**, repository owner `juliopolycarpo`, repository name `mangostudio`, workflow filename `release.yml`, sem environment a menos que o job de release passe a usar um GitHub environment.
-5. Adicione os repo secrets (`NPM_TOKEN`, `DIST_REPOS_TOKEN`, `CHANGELOG_PR_TOKEN` e o fallback temporário `CARGO_REGISTRY_TOKEN`) neste repositório.
+5. Adicione os repo secrets (`NPM_TOKEN`, `DIST_REPOS_TOKEN` e o fallback temporário `CARGO_REGISTRY_TOKEN`) neste repositório.
 6. Depois que uma release provar que `cargo-publish` gerou o token de Trusted Publishing, remova o secret `CARGO_REGISTRY_TOKEN`. Até lá, o job usa o secret como fallback se o crates.io ainda não aceitar o publisher OIDC.
 7. Após o primeiro push no GHCR, defina a visibilidade do pacote `ghcr.io/juliopolycarpo/mangostudio` como **public** nas configurações de pacotes do GitHub.
-8. Não é preciso afrouxar a proteção de branch para o changelog: o job `update-changelog` faz push direto de `CHANGELOG.md` em `main` quando possível (`contents: write`) e, se a proteção rejeitar o push, cria uma PR com `CHANGELOG_PR_TOKEN` pela API REST do GitHub. Revise e faça merge dessa PR depois que os checks passarem.
+8. Não é preciso token extra nem ajuste de proteção de branch para o changelog: `CHANGELOG.md` entra em `main` no commit de preparação da release (`bun run release:prepare`) **antes** do push da tag, e o workflow de release apenas verifica que ele está lá.
 
 ## Nomenclatura de assets de release
 
@@ -120,27 +121,44 @@ Ressalvas:
 
 Releases são orientadas por tag. A partir de um `main` atualizado:
 
-1. Faça bump da versão em todos os `package.json` lockstep e em
-   `packages/cargo-shim/Cargo.toml`, depois atualize o lockfile com
-   `cargo update --workspace` (dentro de `packages/cargo-shim/`).
-2. Rode `bun run check:versions` e faça commit do bump.
-3. Crie e faça push da tag (deve coincidir com a versão commitada):
+1. Prepare a release — um comando faz bump de todos os manifests lockstep,
+   regenera `CHANGELOG.md` com git-cliff e re-executa
+   `check:versions --expect` como autoverificação:
+
+   ```bash
+   bun run release:prepare 0.2.0
+   ```
+
+2. Faça commit da árvore preparada como o commit de preparação da release
+   (`cliff.toml` ignora commits `chore(release)`, então ele nunca reentra em um
+   changelog futuro):
+
+   ```bash
+   git add -A && git commit -s -S -m "chore(release): v0.2.0"
+   ```
+
+3. Depois que esse commit entrar em `main` (pelo fluxo normal de PR), crie e
+   faça push da tag (deve coincidir com a versão commitada):
 
    ```bash
    git tag -s v0.2.0 -m "v0.2.0"
    git push origin v0.2.0
    ```
 
-**Re-run failed jobs** é sempre seguro: jobs de canal são independentes — uma
-falha nunca bloqueia as outras. Versões npm já publicadas são ignoradas, assets
-de release usam clobber e o push do changelog faz rebase antes de retentar. Para
-durabilidade extra: artefatos de build retêm por 30 dias, o job `docker` retenta
-cada push multi-arch e baixa o GitHub Release publicado se o artefato expirou, e o
-job `release-summary` (sempre executa) escreve uma tabela ✅/❌ por canal.
+Uma tag cujo commit não tenha a seção de changelog ou uma versão em lockstep
+falha no job `build` antes de qualquer artefato ser produzido, apontando a
+correção (`bun run release:prepare`).
 
-O workflow executa 14 jobs: `build`, `verify-build`, `github-release`, `docker`,
+**Re-run failed jobs** é sempre seguro: jobs de canal são independentes — uma
+falha nunca bloqueia as outras. Versões npm já publicadas são ignoradas e assets
+de release usam clobber. Para durabilidade extra: artefatos de build retêm por
+30 dias, o job `docker` retenta cada push multi-arch e baixa o GitHub Release
+publicado se o artefato expirou, e o job `release-summary` (sempre executa)
+escreve uma tabela ✅/❌ por canal.
+
+O workflow executa 13 jobs: `build`, `verify-build`, `github-release`, `docker`,
 `verify-image`, `npm-publish`, `homebrew`, `scoop`, `cargo-publish`,
-`verify-release`, `verify-cargo`, `verify-homebrew`, `update-changelog` e
+`verify-release`, `verify-cargo`, `verify-homebrew` e
 `release-summary`. Veja a
 [versão em inglês](../../reference/releasing.md#cutting-a-release) para a tabela
 completa de jobs e detalhes por canal (npm, Docker, Homebrew, Scoop, crates.io).

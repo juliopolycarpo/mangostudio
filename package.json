@@ -31,6 +31,7 @@
     "verify": "bun ./scripts/verify.ts",
     "clean": "bun ./scripts/clean.ts",
     "changelog": "bun ./scripts/changelog.ts",
+    "release:prepare": "bun ./scripts/release/prepare-release.ts",
     "turbo": "turbo",
     "turbo:version": "turbo --version",
     "turbo:dry": "turbo run build --dry=json",

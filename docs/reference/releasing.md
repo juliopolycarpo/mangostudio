@@ -3,23 +3,23 @@
 MangoStudio ships as standalone binaries (GitHub Releases), as a Docker image on
 GHCR, as an npm CLI (`mangostudio`), via a Homebrew tap, via a Scoop bucket
 (Windows), and as a crates.io launcher crate (`cargo install mangostudio`). The
-changelog is generated from Conventional Commits with [git-cliff](https://git-cliff.org);
-nothing here is hand-edited.
+changelog is generated from Conventional Commits with [git-cliff](https://git-cliff.org)
+at release preparation and enforced at tag time; nothing here is hand-edited.
 
 ## One-shot contract
 
-Setting the secrets below and pushing a signed semver tag (`v0.2.0`) is the entire
-release procedure. The workflow validates version lockstep, builds every artifact,
-publishes each channel independently, and always opens a pull request updating
-`CHANGELOG.md` on `main` (never a direct push).
+With the secrets below set, releasing is `bun run release:prepare <version>`, one
+commit, and a signed semver tag push (`v0.2.0`). The workflow validates version
+lockstep and the pre-tag changelog, builds every artifact, and publishes each
+channel independently. The tag ships its own `CHANGELOG.md` — nothing writes back
+to `main` after the release.
 
-| Secret                      | Used by                                                                          | Scope                                                                                                                                                                                                                           |
-| --------------------------- | -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `NPM_TOKEN`                 | `npm-publish`, `npm-canary`                                                      | Publish rights on `mangostudio` and `@mangostudio/cli-*`                                                                                                                                                                        |
-| `DIST_REPOS_TOKEN`          | `homebrew`, `scoop`                                                              | Fine-grained PAT with contents read/write on `juliopolycarpo/homebrew-tap` and `juliopolycarpo/scoop-bucket`                                                                                                                    |
-| `CARGO_REGISTRY_TOKEN`      | `cargo-publish`                                                                  | Temporary crates.io fallback until Trusted Publishing is registered and verified for the `mangostudio` crate                                                                                                                    |
-| `CHANGELOG_PR_TOKEN`        | `update-changelog`                                                               | Fine-grained PAT with pull requests write (+ contents read) on this repository; opens the changelog PR, since the workflow `GITHUB_TOKEN` cannot create pull requests                                                           |
-| *(built-in `GITHUB_TOKEN`)* | `github-release`, `docker`, `update-changelog`, the canary channel, attestations | No extra setup — tag releases grant `packages: write` for GHCR, `contents: write` so `update-changelog` can write the GitHub-Verified changelog commit via the REST Contents API, and `id-token: write` for crates.io OIDC auth |
+| Secret                      | Used by                                                      | Scope                                                                                                        |
+| --------------------------- | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------ |
+| `NPM_TOKEN`                 | `npm-publish`, `npm-canary`                                  | Publish rights on `mangostudio` and `@mangostudio/cli-*`                                                     |
+| `DIST_REPOS_TOKEN`          | `homebrew`, `scoop`                                          | Fine-grained PAT with contents read/write on `juliopolycarpo/homebrew-tap` and `juliopolycarpo/scoop-bucket` |
+| `CARGO_REGISTRY_TOKEN`      | `cargo-publish`                                              | Temporary crates.io fallback until Trusted Publishing is registered and verified for the `mangostudio` crate |
+| *(built-in `GITHUB_TOKEN`)* | `github-release`, `docker`, the canary channel, attestations | No extra setup — tag releases grant `packages: write` for GHCR and `id-token: write` for crates.io OIDC auth |
 
 ### One-time setup checklist
 
@@ -29,10 +29,10 @@ Complete these once per fork or org before the first tag push:
 2. Create the shared Scoop bucket [`juliopolycarpo/scoop-bucket`](https://github.com/juliopolycarpo/scoop-bucket) with a `bucket/` directory.
 3. Reserve the `mangostudio` crate name on [crates.io](https://crates.io) and generate an API token for the initial publish.
 4. Configure crates.io Trusted Publishing for the existing `mangostudio` crate: crate **Settings -> Trusted Publishing -> Add -> GitHub**, repository owner `juliopolycarpo`, repository name `mangostudio`, workflow filename `release.yml`, and no environment unless the release job is later moved behind a GitHub environment.
-5. Add the repo secrets (`NPM_TOKEN`, `DIST_REPOS_TOKEN`, `CHANGELOG_PR_TOKEN`, and the temporary `CARGO_REGISTRY_TOKEN` fallback) to this repository.
+5. Add the repo secrets (`NPM_TOKEN`, `DIST_REPOS_TOKEN`, and the temporary `CARGO_REGISTRY_TOKEN` fallback) to this repository.
 6. After one release proves `cargo-publish` minted a Trusted Publishing token successfully, remove the `CARGO_REGISTRY_TOKEN` repo secret. Until then, the release job falls back to the secret if crates.io has not accepted the OIDC publisher yet.
 7. After the first GHCR push, set the `ghcr.io/juliopolycarpo/mangostudio` package visibility to **public** in GitHub package settings.
-8. No branch-protection tuning is required for the changelog: the `update-changelog` job always opens a pull request with `CHANGELOG_PR_TOKEN` through GitHub's REST API rather than pushing to `main` directly. The commit itself is written with the built-in `GITHUB_TOKEN` via the REST Contents API, so it lands GitHub-Verified and carries a DCO `Signed-off-by: github-actions[bot]` trailer. Review and merge that PR with a merge commit after checks pass.
+8. No branch-protection tuning or extra token is required for the changelog: `CHANGELOG.md` lands on `main` in the release-prep commit (`bun run release:prepare`) **before** the tag is pushed, and the release workflow only verifies it is there.
 
 ## Release asset naming
 
@@ -78,10 +78,18 @@ lockstep:
   `--locked`, so both must move together)
 
 `bun run check:versions` enforces this; it also runs as part of `bun run check`.
-Pass `--expect <version>` to additionally require the committed version to match a
-tag (the release workflow runs `bun run check:versions --expect <tag>`).
+Pass `--expect <version>` to additionally require the committed version to match
+a tag **and** `CHANGELOG.md` to carry the `<version>` release section (the
+release workflow runs `bun run check:versions --expect <tag>` before building
+any artifact). `bun run release:prepare <version>` stages all of the above in
+one command.
 
 ## Changelog
+
+The changelog is generated at release preparation — `bun run release:prepare`
+regenerates `CHANGELOG.md` alongside the version bump, so the section for a
+release lands on `main` **before** its tag is pushed. The release workflow only
+gates on it being there; no job writes the changelog back after the fact.
 
 `bun run changelog` wraps git-cliff (config: `cliff.toml`):
 
@@ -175,48 +183,61 @@ Caveats:
 
 Releases are tag-driven. From an up-to-date `main`:
 
-1. Bump the version to the same value in every lockstep `package.json` (root,
-   `apps/*`, and `packages/cli`; see [Version source](#version-source)) and in
-   `packages/cargo-shim/Cargo.toml`, then refresh the crate lockfile with
-   `cargo update --workspace` (run inside `packages/cargo-shim/`).
-2. Run `bun run check:versions` to confirm they agree, then commit the bump.
-3. Tag and push (the tag must match the committed version):
+1. Stage the release — one command bumps every lockstep manifest (see
+   [Version source](#version-source)), regenerates `CHANGELOG.md` with
+   git-cliff, and re-runs `check:versions --expect` as a self-check:
+
+   ```bash
+   bun run release:prepare 0.2.0
+   ```
+
+2. Commit the staged tree as the release-prep commit (`cliff.toml` skips
+   `chore(release)` commits, so it never re-enters a future changelog):
+
+   ```bash
+   git add -A && git commit -s -S -m "chore(release): v0.2.0"
+   ```
+
+3. Land that commit on `main` (via the normal PR flow), then tag it and push
+   (the tag must match the committed version):
 
    ```bash
    git tag -s v0.2.0 -m "v0.2.0"
    git push origin v0.2.0
    ```
 
+A tag whose commit lacks the changelog section or a lockstep version fails in
+the `build` job before any artifact is produced, naming the fix
+(`bun run release:prepare`).
+
 `.github/workflows/release.yml` is designed to converge when a networked release
 step flakes: **Re-run failed jobs** is always safe because channel jobs are
 independent — one failing never blocks the others. Published npm versions are
-skipped, release assets upload with clobber semantics, and the changelog push
-rebases before retrying (or opens a REST-created PR if `main` is protected). For extra
+skipped and release assets upload with clobber semantics. For extra
 durability: build artifacts retain for 30 days, the `docker` job retries each
 multi-arch push and falls back to downloading the published GitHub Release when
 its build artifact has expired (so it re-runs in isolation long after the run),
 and the always-run `release-summary` job writes a per-channel ✅/❌ table naming
 the exact job to re-run.
 
-It runs 14 jobs — the publish channels, the gates that verify them, and a final
+It runs 13 jobs — the publish channels, the gates that verify them, and a final
 summary, listed here in workflow order:
 
-| Job                | What it does                                                                                                                                                                                                                                                                                                                                                                 |
-| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `build`            | Verifies versions are in lockstep with the tag, cross-compiles every platform binary (`build.ts`), assembles the npm distribution (`pack-npm.ts`), and uploads binary archives plus `SHA256SUMS`.                                                                                                                                                                            |
-| `verify-build`     | Smoke-tests the freshly built linux-x64 archive (`smoke-binary.sh`) before any channel publishes, so a broken binary fails the release early. Gates `github-release`, `docker`, and `npm-publish`.                                                                                                                                                                           |
-| `github-release`   | Creates the GitHub Release, or updates an existing one by refreshing notes and uploading assets with `--clobber`.                                                                                                                                                                                                                                                            |
-| `docker`           | Stages Linux glibc and musl archives into `docker-ctx/` (`stage-docker-ctx.ts`) and publishes Bookworm and Alpine images for amd64 and arm64. It uses only `GITHUB_TOKEN` with `packages: write`.                                                                                                                                                                            |
-| `verify-image`     | Pulls each published GHCR image (Bookworm and Alpine, amd64 and arm64) and boots it (`smoke-docker-image.sh`). Depends on `docker`; its matrix legs are non-blocking for the other channels.                                                                                                                                                                                 |
-| `npm-publish`      | Publishes the platform packages, then the `mangostudio` wrapper; already-published versions are skipped, transient failures are retried, and provenance falls back to a warning-only publish if npm rejects it.                                                                                                                                                              |
-| `homebrew`         | Renders `Formula/mangostudio.rb` from `SHA256SUMS` (`update-homebrew.ts`) and pushes it to `juliopolycarpo/homebrew-tap` (`push-dist-repo.ts`). No other job depends on it, so a tap failure never blocks npm or the Release.                                                                                                                                                |
-| `scoop`            | Renders `bucket/mangostudio.json` from `SHA256SUMS` (`update-scoop.ts`) and pushes it to `juliopolycarpo/scoop-bucket` (`push-dist-repo.ts`). No other job depends on it, so a bucket failure never blocks npm or the Release.                                                                                                                                               |
-| `cargo-publish`    | Publishes the `mangostudio` launcher crate (`packages/cargo-shim`) to crates.io using Trusted Publishing when crates.io has registered `.github/workflows/release.yml`, with `CARGO_REGISTRY_TOKEN` as a temporary fallback. Idempotent: already-published versions are skipped, publishes are retried, and an upload that lands despite an error is detected. Non-blocking. |
-| `verify-release`   | Installs `mangostudio@<version>` from npm on Ubuntu, macOS, and Windows; downloads the matching release tarball, verifies `SHA256SUMS`, and runs `mangostudio --version`. Windows arm64 is published but not verified.                                                                                                                                                       |
-| `verify-cargo`     | Installs `mangostudio` from crates.io, points the launcher at the GitHub Release assets, and checks `mangostudio --version`. Depends on `cargo-publish`.                                                                                                                                                                                                                     |
-| `verify-homebrew`  | Taps `juliopolycarpo/homebrew-tap`, `brew install`s the formula on macOS, and checks `mangostudio --version`. Depends on `homebrew`.                                                                                                                                                                                                                                         |
-| `update-changelog` | Regenerates `CHANGELOG.md` and lands it on `main` via `push-changelog.ts`: direct push (rebasing if another commit landed first), or a REST-created PR when branch protection rejects the push. A dedicated concurrency group serializes it across concurrent tag releases.                                                                                                  |
-| `release-summary`  | Always runs (even when a channel fails) and writes a per-channel ✅/❌ status table to the run summary (`publish-summary.sh`), naming the exact job to re-run. Because the fan-out isolates failures, a partial release is recovered by re-running only the failed job(s).                                                                                                   |
+| Job               | What it does                                                                                                                                                                                                                                                                                                                                                                 |
+| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `build`           | Verifies versions are in lockstep with the tag and that `CHANGELOG.md` carries the release section (`check:versions --expect`), cross-compiles every platform binary (`build.ts`), assembles the npm distribution (`pack-npm.ts`), and uploads binary archives plus `SHA256SUMS`.                                                                                            |
+| `verify-build`    | Smoke-tests the freshly built linux-x64 archive (`smoke-binary.sh`) before any channel publishes, so a broken binary fails the release early. Gates `github-release`, `docker`, and `npm-publish`.                                                                                                                                                                           |
+| `github-release`  | Creates the GitHub Release, or updates an existing one by refreshing notes and uploading assets with `--clobber`.                                                                                                                                                                                                                                                            |
+| `docker`          | Stages Linux glibc and musl archives into `docker-ctx/` (`stage-docker-ctx.ts`) and publishes Bookworm and Alpine images for amd64 and arm64. It uses only `GITHUB_TOKEN` with `packages: write`.                                                                                                                                                                            |
+| `verify-image`    | Pulls each published GHCR image (Bookworm and Alpine, amd64 and arm64) and boots it (`smoke-docker-image.sh`). Depends on `docker`; its matrix legs are non-blocking for the other channels.                                                                                                                                                                                 |
+| `npm-publish`     | Publishes the platform packages, then the `mangostudio` wrapper; already-published versions are skipped, transient failures are retried, and provenance falls back to a warning-only publish if npm rejects it.                                                                                                                                                              |
+| `homebrew`        | Renders `Formula/mangostudio.rb` from `SHA256SUMS` (`update-homebrew.ts`) and pushes it to `juliopolycarpo/homebrew-tap` (`push-dist-repo.ts`). No other job depends on it, so a tap failure never blocks npm or the Release.                                                                                                                                                |
+| `scoop`           | Renders `bucket/mangostudio.json` from `SHA256SUMS` (`update-scoop.ts`) and pushes it to `juliopolycarpo/scoop-bucket` (`push-dist-repo.ts`). No other job depends on it, so a bucket failure never blocks npm or the Release.                                                                                                                                               |
+| `cargo-publish`   | Publishes the `mangostudio` launcher crate (`packages/cargo-shim`) to crates.io using Trusted Publishing when crates.io has registered `.github/workflows/release.yml`, with `CARGO_REGISTRY_TOKEN` as a temporary fallback. Idempotent: already-published versions are skipped, publishes are retried, and an upload that lands despite an error is detected. Non-blocking. |
+| `verify-release`  | Installs `mangostudio@<version>` from npm on Ubuntu, macOS, and Windows; downloads the matching release tarball, verifies `SHA256SUMS`, and runs `mangostudio --version`. Windows arm64 is published but not verified.                                                                                                                                                       |
+| `verify-cargo`    | Installs `mangostudio` from crates.io, points the launcher at the GitHub Release assets, and checks `mangostudio --version`. Depends on `cargo-publish`.                                                                                                                                                                                                                     |
+| `verify-homebrew` | Taps `juliopolycarpo/homebrew-tap`, `brew install`s the formula on macOS, and checks `mangostudio --version`. Depends on `homebrew`.                                                                                                                                                                                                                                         |
+| `release-summary` | Always runs (even when a channel fails) and writes a per-channel ✅/❌ status table to the run summary (`publish-summary.sh`), naming the exact job to re-run. Because the fan-out isolates failures, a partial release is recovered by re-running only the failed job(s).                                                                                                   |
 
 `workflow_dispatch` accepts an explicit `version` input for a manual run; it is
 validated against the committed version the same way.
@@ -400,18 +421,11 @@ The [One-shot contract](#one-shot-contract) table lists every secret. In short:
 - **`CARGO_REGISTRY_TOKEN`** repo secret: crates.io API token with
   `publish-new` + `publish-update` scope for the `mangostudio` crate (see
   [crates.io launcher](#cratesio-launcher)).
-- **`CHANGELOG_PR_TOKEN`** repo secret: fine-grained PAT with pull requests
-  write (+ contents read) on this repository, used to open the changelog PR
-  (the workflow `GITHUB_TOKEN` cannot create pull requests).
-- Permission for the release workflow to land `CHANGELOG.md` on `main`: the
-  `update-changelog` job grants `contents: write` so the built-in `GITHUB_TOKEN`
-  can write the changelog commit via the REST Contents API (GitHub-Verified,
-  with a DCO `Signed-off-by` trailer), then opens the pull request with
-  `CHANGELOG_PR_TOKEN` — `main` stays protected and no branch-protection
-  changes are needed.
+
+No token or write permission is needed for the changelog: it lands on `main` in
+the release-prep commit before the tag exists, so the release workflow never
+writes to the repository.
 
 The npm publish job grants `id-token: write` so token-based publishes can include
 npm provenance. npm trusted publishing (OIDC without `NPM_TOKEN`) is the future
 upgrade path once the packages are configured on npmjs.com.
-
-The first release (`v0.1.0`) is cut by pushing the tag after this work merges.

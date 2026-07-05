@@ -10,14 +10,13 @@ import { join } from 'node:path';
 import { setCargoLockVersion, setCargoManifestVersion } from '../lib/cargo-version';
 import { ROOT_DIR } from '../lib/config';
 import {
+  CARGO_SHIM_CRATE,
   CARGO_SHIM_LOCKFILE,
   CARGO_SHIM_MANIFEST,
   isValidSemver,
   normalizeVersion,
 } from '../lib/release-version';
 import { error, success } from '../lib/runner';
-
-const CRATE = 'mangostudio';
 
 function main(): void {
   const input = (process.argv[2] ?? '').trim();
@@ -29,7 +28,10 @@ function main(): void {
   const manifestPath = join(ROOT_DIR, CARGO_SHIM_MANIFEST);
   const lockPath = join(ROOT_DIR, CARGO_SHIM_LOCKFILE);
   writeFileSync(manifestPath, setCargoManifestVersion(readFileSync(manifestPath, 'utf8'), version));
-  writeFileSync(lockPath, setCargoLockVersion(readFileSync(lockPath, 'utf8'), CRATE, version));
+  writeFileSync(
+    lockPath,
+    setCargoLockVersion(readFileSync(lockPath, 'utf8'), CARGO_SHIM_CRATE, version)
+  );
   success(`Stamped cargo-shim manifest + lockfile to ${version}.`);
 }
 

@@ -42,6 +42,7 @@ importing the specific module in new code:
 | `changelog.ts`       | git-cliff arg/format logic (wrapped behind a project API)       |
 | `npm-pack.ts`        | npm distribution manifest builders                              |
 | `release-version.ts` | Canonical release version resolver + lockstep consistency check |
+| `prepare-release.ts` | Two-phase lockstep version bump for release preparation         |
 
 ## qa-gate/ — PR comment automation
 
@@ -62,21 +63,22 @@ Powers the bot comments the `pr-qa-gate.yml` workflow manages on every PR:
 
 Run by `.github/workflows/release.yml`; each is also runnable locally:
 
-| Script                   | Concern                                                                        |
-| ------------------------ | ------------------------------------------------------------------------------ |
-| `archive-assets.ts`      | Assemble `release-assets/` (platform archives, installers, `SHA256SUMS`)       |
-| `stage-docker-ctx.ts`    | Stage Linux glibc/musl binaries into `docker-ctx/` for Docker Buildx           |
-| `pack-npm.ts`            | Stage `.mango/out/<arch>` binaries into the npm distribution                   |
-| `publish-npm.ts`         | Idempotent npm publication with retry + provenance fallback (`--tag` dist-tag) |
-| `canary-version.ts`      | Print the canary identity (`version=…`, `sha=…`) for the current commit        |
-| `stamp-cargo-version.ts` | Stamp an ephemeral version into the cargo-shim manifest + lockfile (canary)    |
-| `verify-checksum.ts`     | Check one downloaded asset against `SHA256SUMS`                                |
-| `dist-manifest.ts`       | Shared renderer: fill `{{VERSION}}`/`{{SHA_*}}` from `SHA256SUMS`              |
-| `update-homebrew.ts`     | Render `Formula/mangostudio.rb` from `SHA256SUMS` + `templates/`               |
-| `update-scoop.ts`        | Render `bucket/mangostudio.json` from `SHA256SUMS` + `templates/`              |
-| `push-dist-repo.ts`      | Push changed files into an external dist repo (tap/bucket), idempotently       |
-| `publish-summary.sh`     | Render a per-channel ✅/❌ publish table into the GitHub step summary          |
-| `retry.sh`               | `retry_command` helper sourced by workflow shell steps                         |
+| Script                   | Concern                                                                             |
+| ------------------------ | ----------------------------------------------------------------------------------- |
+| `prepare-release.ts`     | Stage a release: lockstep bump + changelog + self-check (`bun run release:prepare`) |
+| `archive-assets.ts`      | Assemble `release-assets/` (platform archives, installers, `SHA256SUMS`)            |
+| `stage-docker-ctx.ts`    | Stage Linux glibc/musl binaries into `docker-ctx/` for Docker Buildx                |
+| `pack-npm.ts`            | Stage `.mango/out/<arch>` binaries into the npm distribution                        |
+| `publish-npm.ts`         | Idempotent npm publication with retry + provenance fallback (`--tag` dist-tag)      |
+| `canary-version.ts`      | Print the canary identity (`version=…`, `sha=…`) for the current commit             |
+| `stamp-cargo-version.ts` | Stamp an ephemeral version into the cargo-shim manifest + lockfile (canary)         |
+| `verify-checksum.ts`     | Check one downloaded asset against `SHA256SUMS`                                     |
+| `dist-manifest.ts`       | Shared renderer: fill `{{VERSION}}`/`{{SHA_*}}` from `SHA256SUMS`                   |
+| `update-homebrew.ts`     | Render `Formula/mangostudio.rb` from `SHA256SUMS` + `templates/`                    |
+| `update-scoop.ts`        | Render `bucket/mangostudio.json` from `SHA256SUMS` + `templates/`                   |
+| `push-dist-repo.ts`      | Push changed files into an external dist repo (tap/bucket), idempotently            |
+| `publish-summary.sh`     | Render a per-channel ✅/❌ publish table into the GitHub step summary               |
+| `retry.sh`               | `retry_command` helper sourced by workflow shell steps                              |
 
 ## Conventions
 
@@ -113,7 +115,13 @@ The release version (build, npm packaging, and changelog) resolves through
 `lib/release-version.ts`: the root `package.json` version, overridable by the
 `VERSION` env var, validated as semver. `bun run check:versions` keeps the root,
 workspace, and `packages/cargo-shim/Cargo.toml`/`Cargo.lock` versions in
-lockstep.
+lockstep; with `--expect <version>` it also requires `CHANGELOG.md` to carry the
+`<version>` release section (the release workflow's pre-build gate).
+
+`bun run release:prepare <version>` stages a release in one command: it bumps
+every lockstep manifest (`lib/prepare-release.ts`), regenerates `CHANGELOG.md`
+via `changelog --release`, and re-runs `check:versions --expect` as a
+self-check. Committing and tagging stay manual.
 
 `scripts/release/pack-npm.ts` turns `.mango/out/<arch>` binaries into the npm
 distribution. See `docs/reference/releasing.md` for the full release flow.

@@ -3,18 +3,17 @@ name: Release
 # Cut a release: cross-compile standalone binaries for every platform, assemble
 # the npm distribution, publish a GitHub Release with the binaries + git-cliff
 # notes, publish the GHCR image, publish the npm packages, update the Homebrew tap
-# formula and the Scoop bucket manifest, publish the crates.io launcher crate,
-# and open a pull request updating CHANGELOG.md on main.
+# formula and the Scoop bucket manifest, and publish the crates.io launcher crate.
 #
 # Trigger by pushing a semver tag (git tag -s v0.1.0 && git push origin v0.1.0)
-# or via workflow_dispatch with an explicit version.
+# or via workflow_dispatch with an explicit version. The tagged commit must
+# already carry the release's CHANGELOG.md section (staged by `bun run
+# release:prepare`); the build job's lockstep check gates on it.
 #
 # Prerequisites: an NPM_TOKEN repo secret with publish rights to mangostudio and
-# @mangostudio/cli-*, a single DIST_REPOS_TOKEN fine-grained PAT with contents
-# read/write on both dist repos (juliopolycarpo/homebrew-tap and
-# juliopolycarpo/scoop-bucket), and CHANGELOG_PR_TOKEN with pull-requests write
-# on this repo to open the changelog pull request (the workflow GITHUB_TOKEN
-# is barred from creating PRs).
+# @mangostudio/cli-*, and a single DIST_REPOS_TOKEN fine-grained PAT with
+# contents read/write on both dist repos (juliopolycarpo/homebrew-tap and
+# juliopolycarpo/scoop-bucket).
 # crates.io publishing prefers Trusted Publishing via OIDC and temporarily falls
 # back to CARGO_REGISTRY_TOKEN until the trusted publisher is registered and
 # proven. GHCR uses the workflow GITHUB_TOKEN.
@@ -71,7 +70,9 @@ jobs:
 
       - name: Verify versions are in lockstep
         # Fail before producing artifacts if the root and workspace package.json
-        # versions disagree, or if they do not match the tag being released.
+        # versions disagree, if they do not match the tag being released, or if
+        # CHANGELOG.md lacks this release's section (the changelog lands on main
+        # in the release-prep commit, before the tag — bun run release:prepare).
         # Pass the version via env (not shell interpolation) so a crafted tag
         # cannot inject commands, matching the resolve step above.
         env:
@@ -630,48 +631,6 @@ jobs:
             echo "Expected Homebrew CLI version ${VERSION}, got ${actual}"
             exit 1
           fi
-
-  update-changelog:
-    name: Open CHANGELOG pull request
-    needs: [build, github-release]
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      # contents: write lets the workflow token create the changelog branch and
-      # commit through the REST Contents API (a GitHub-Verified github-actions[bot]
-      # commit). Opening the pull request itself always uses CHANGELOG_PR_TOKEN
-      # instead, since GitHub refuses to let the workflow GITHUB_TOKEN create PRs.
-      contents: write
-    # Serialize the changelog landing across concurrent tag releases (the
-    # workflow's top-level group is per-ref, so two tags can release at once).
-    # Keyed on the workflow, not the ref, so their CHANGELOG.md writes never race;
-    # cancel-in-progress: false lets an in-flight update finish before the next.
-    concurrency:
-      group: update-changelog
-      cancel-in-progress: false
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          ref: main
-          fetch-depth: 0
-
-      - uses: ./.github/actions/setup-mango
-
-      - name: Regenerate CHANGELOG.md
-        env:
-          VERSION: ${{ needs.build.outputs.version }}
-        run: bun run changelog --release "$VERSION"
-
-      # Always opens a pull request with the regenerated changelog instead of
-      # pushing to main directly, so it goes through normal review and is
-      # merged by hand with a merge commit. No-ops when the changelog is
-      # already current.
-      - name: Open CHANGELOG.md pull request
-        env:
-          GH_ACTIONS_TOKEN: ${{ github.token }}
-          GH_PR_TOKEN: ${{ secrets.CHANGELOG_PR_TOKEN }}
-          VERSION: ${{ needs.build.outputs.version }}
-        run: bun ./scripts/release/push-changelog.ts --version "$VERSION" --branch main
 
   release-summary:
     # Always runs, even when a publish channel fails, and writes a per-channel
