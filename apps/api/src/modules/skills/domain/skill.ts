@@ -4,6 +4,9 @@ import {
   type SkillSource,
 } from '@mangostudio/shared/skills';
 
+/** Name of the builtin tool that lazy-loads skill content. */
+export const SKILL_TOOL_NAME = 'skill';
+
 const SKILL_SLUG_REGEX = new RegExp(SKILL_SLUG_PATTERN);
 const SKILL_SOURCES: ReadonlyArray<SkillSource> = ['mango', 'agents', 'claude'];
 

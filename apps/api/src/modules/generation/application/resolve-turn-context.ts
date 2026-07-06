@@ -17,6 +17,7 @@ import { GENERATE_IMAGE_TOOL_NAME } from '../../../services/tools/builtin/genera
 import { getAgentProfile } from '../../agents/application/agent-settings-service';
 import { getAppSettings } from '../../app-settings/application/app-settings-service';
 import { assertChatOwnership } from '../../chats/domain/chat-ownership';
+import { appendSkillsPromptSection } from '../../skills/application/skills-prompt-section';
 import { shouldExposeDelegateTool } from './delegate-tool-availability';
 import {
   type ResolvedAgentRuntime,
@@ -123,6 +124,7 @@ export async function resolveTurnContext(
       'The user explicitly clicked Create images for this turn. Use the image generation tool when appropriate.';
     effectiveSystemPrompt = effectiveSystemPrompt ? `${effectiveSystemPrompt}\n\n${hint}` : hint;
   }
+  effectiveSystemPrompt = appendSkillsPromptSection(effectiveSystemPrompt, allowedToolNames);
 
   return {
     chatId: input.chatId,

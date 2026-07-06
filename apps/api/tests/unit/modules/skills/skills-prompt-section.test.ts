@@ -1,7 +1,19 @@
-import { describe, expect, it } from 'bun:test';
+import { afterEach, describe, expect, it } from 'bun:test';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { SkillDescriptor } from '@mangostudio/shared/skills';
-import { buildSkillsPromptSection } from '../../../../src/modules/skills/application/skills-prompt-section';
-import { parseSkillKey, skillKey } from '../../../../src/modules/skills/domain/skill';
+import { loadConfigForTest } from '../../../../src/lib/config';
+import { resetSkillsCache } from '../../../../src/modules/skills/application/skill-discovery';
+import {
+  appendSkillsPromptSection,
+  buildSkillsPromptSection,
+} from '../../../../src/modules/skills/application/skills-prompt-section';
+import {
+  parseSkillKey,
+  SKILL_TOOL_NAME,
+  skillKey,
+} from '../../../../src/modules/skills/domain/skill';
 
 function makeSkill(overrides: Partial<SkillDescriptor> = {}): SkillDescriptor {
   return {
@@ -61,6 +73,53 @@ describe('buildSkillsPromptSection', () => {
     expect(line?.length).toBeLessThanOrEqual(1_024 + '- demo — '.length);
     expect(line?.endsWith('…')).toBe(true);
     expect(line).toContain('multi line');
+  });
+});
+
+describe('appendSkillsPromptSection', () => {
+  let skillsDir: string | undefined;
+
+  afterEach(() => {
+    if (skillsDir) rmSync(skillsDir, { recursive: true, force: true });
+    skillsDir = undefined;
+    resetSkillsCache();
+  });
+
+  function installSkill(): void {
+    skillsDir = mkdtempSync(join(tmpdir(), 'mango-skills-append-'));
+    loadConfigForTest({ skills: { dir: skillsDir } });
+    resetSkillsCache();
+    const dir = join(skillsDir, 'demo');
+    mkdirSync(dir);
+    writeFileSync(join(dir, 'SKILL.md'), '---\nname: demo\ndescription: A demo\n---\nBody', 'utf8');
+  }
+
+  it('appends the section when the skill tool is allowed and skills exist', () => {
+    installSkill();
+    const result = appendSkillsPromptSection('Base prompt.', new Set([SKILL_TOOL_NAME]));
+    expect(result?.startsWith('Base prompt.\n\n<available-skills>')).toBe(true);
+    expect(result).toContain('- demo — A demo');
+  });
+
+  it('returns the section alone when there is no base prompt', () => {
+    installSkill();
+    const result = appendSkillsPromptSection(undefined, new Set([SKILL_TOOL_NAME]));
+    expect(result?.startsWith('<available-skills>')).toBe(true);
+  });
+
+  it('leaves the prompt unchanged when the skill tool is not allowed', () => {
+    installSkill();
+    expect(appendSkillsPromptSection('Base prompt.', new Set(['read_file']))).toBe('Base prompt.');
+  });
+
+  it('leaves the prompt unchanged when no usable skills exist', () => {
+    skillsDir = mkdtempSync(join(tmpdir(), 'mango-skills-append-'));
+    loadConfigForTest({ skills: { dir: skillsDir } });
+    resetSkillsCache();
+    expect(appendSkillsPromptSection('Base prompt.', new Set([SKILL_TOOL_NAME]))).toBe(
+      'Base prompt.'
+    );
+    expect(appendSkillsPromptSection(undefined, new Set([SKILL_TOOL_NAME]))).toBeUndefined();
   });
 });
 

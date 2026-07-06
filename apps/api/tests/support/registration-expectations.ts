@@ -26,6 +26,7 @@ export const REQUIRED_TOOL_NAMES = [
   'glob',
   'grep',
   'delegate_to_agent',
+  'skill',
 ] as const;
 
 export const SHELL_TOOL_NAMES = [

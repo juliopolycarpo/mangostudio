@@ -6,6 +6,8 @@
  */
 
 import type { SkillDescriptor } from '@mangostudio/shared/skills';
+import { SKILL_TOOL_NAME } from '../domain/skill';
+import { listUsableSkills } from './skill-discovery';
 
 const MAX_LISTED_SKILLS = 64;
 const MAX_DESCRIPTION_CHARS = 1_024;
@@ -31,6 +33,23 @@ export function buildSkillsPromptSection(
     .map((skill) => `- ${skill.name} — ${clampDescription(skill.description)}`);
 
   return ['<available-skills>', SKILLS_INSTRUCTION, ...lines, '</available-skills>'].join('\n');
+}
+
+/**
+ * Appends the skills advertisement to a turn's system prompt when the `skill`
+ * tool is allowed and at least one usable skill exists; otherwise returns the
+ * prompt unchanged. Shared by the primary turn pipeline and the subagent
+ * runner so both advertise skills consistently with their own tool profiles.
+ * // Usage: effectiveSystemPrompt = appendSkillsPromptSection(effectiveSystemPrompt, allowedToolNames);
+ */
+export function appendSkillsPromptSection(
+  systemPrompt: string | undefined,
+  allowedToolNames: ReadonlySet<string>
+): string | undefined {
+  if (!allowedToolNames.has(SKILL_TOOL_NAME)) return systemPrompt;
+  const section = buildSkillsPromptSection(listUsableSkills());
+  if (!section) return systemPrompt;
+  return systemPrompt ? `${systemPrompt}\n\n${section}` : section;
 }
 
 function clampDescription(description: string): string {
