@@ -32,6 +32,11 @@ dir = ""
 # Empty = auto-detect: ~/.mango/agents in all runtimes
 dir = ""
 
+[skills]
+# Agent Skills directory scanned for <slug>/SKILL.md entries.
+# Empty = auto-detect: ~/.mango/skills in all runtimes
+dir = ""
+
 [auth]
 # Minimum 32 characters. If empty, `mangostudio serve` can generate and store one.
 secret = "your-secret-key-here-min-32-chars"

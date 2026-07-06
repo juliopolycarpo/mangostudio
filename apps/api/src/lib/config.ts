@@ -53,6 +53,9 @@ export interface MangoConfig {
   agents: {
     dir: string;
   };
+  skills: {
+    dir: string;
+  };
   auth: {
     secret: string;
     url: string;
@@ -100,6 +103,7 @@ const DEFAULT_CONFIG: Omit<MangoConfig, 'corsOrigins' | 'configFilePath'> = {
   uploads: { dir: '' },
   images: { dir: '' },
   agents: { dir: '' },
+  skills: { dir: '' },
   auth: { secret: '', url: '' },
   security: { trustProxy: false },
   cursor: { workspaceDir: '', sidecarScriptPath: '', nodePath: '' },
@@ -143,6 +147,9 @@ const ENV_KEY_MAP: Record<string, (cfg: MangoConfig, value: string) => void> = {
   },
   AGENTS_DIR: (cfg, v) => {
     cfg.agents.dir = v;
+  },
+  SKILLS_DIR: (cfg, v) => {
+    cfg.skills.dir = v;
   },
   BETTER_AUTH_SECRET: (cfg, v) => {
     cfg.auth.secret = v;
@@ -295,6 +302,7 @@ function cloneDefaults(): MangoConfig {
     uploads: { ...DEFAULT_CONFIG.uploads },
     images: { ...DEFAULT_CONFIG.images },
     agents: { ...DEFAULT_CONFIG.agents },
+    skills: { ...DEFAULT_CONFIG.skills },
     auth: { ...DEFAULT_CONFIG.auth },
     security: { ...DEFAULT_CONFIG.security },
     cursor: { ...DEFAULT_CONFIG.cursor },
@@ -337,6 +345,11 @@ function applyToml(cfg: MangoConfig, parsed: Record<string, unknown>): void {
   const agents = parsed.agents as Record<string, unknown> | undefined;
   if (agents) {
     if (typeof agents.dir === 'string') cfg.agents.dir = agents.dir;
+  }
+
+  const skills = parsed.skills as Record<string, unknown> | undefined;
+  if (skills) {
+    if (typeof skills.dir === 'string') cfg.skills.dir = skills.dir;
   }
 
   const auth = parsed.auth as Record<string, unknown> | undefined;
@@ -426,6 +439,12 @@ function computeDerived(cfg: MangoConfig, tomlPath: string): void {
     cfg.agents.dir = join(getHomeMangoDir(), 'agents');
   } else {
     cfg.agents.dir = resolveUserPath(cfg.agents.dir);
+  }
+
+  if (!cfg.skills.dir) {
+    cfg.skills.dir = join(getHomeMangoDir(), 'skills');
+  } else {
+    cfg.skills.dir = resolveUserPath(cfg.skills.dir);
   }
 
   if (cfg.cursor.workspaceDir) {
@@ -521,6 +540,7 @@ function loadTestSandboxConfig(): MangoConfig {
   cfg.uploads.dir = join(TEST_MANAGED_CONFIG_DIR, 'uploads');
   cfg.images.dir = join(TEST_MANAGED_CONFIG_DIR, 'images');
   cfg.agents.dir = join(TEST_MANAGED_CONFIG_DIR, 'agents');
+  cfg.skills.dir = join(TEST_MANAGED_CONFIG_DIR, 'skills');
   computeDerived(cfg, TEST_MANAGED_CONFIG_PATH);
 
   if (!warnedTestSandboxFallback) {
@@ -612,6 +632,7 @@ export function loadConfigForTest(partial: Partial<MangoConfig> = {}): MangoConf
   if (partial.uploads) Object.assign(cfg.uploads, partial.uploads);
   if (partial.images) Object.assign(cfg.images, partial.images);
   if (partial.agents) Object.assign(cfg.agents, partial.agents);
+  if (partial.skills) Object.assign(cfg.skills, partial.skills);
   if (partial.auth) Object.assign(cfg.auth, partial.auth);
   if (partial.security) Object.assign(cfg.security, partial.security);
   if (partial.cursor) Object.assign(cfg.cursor, partial.cursor);
