@@ -102,17 +102,27 @@ function describeSkill(source: SkillSource, slug: string, path: string): SkillDe
   }
 
   const { frontmatter } = parseMarkdownFrontmatter(markdown);
-  const name = frontmatter.name;
-  const description = frontmatter.description;
+  // The frontmatter parser coerces unquoted scalars, so a numeric-only slug like
+  // `2048` arrives here as a number; accept scalar values so valid slugs are not
+  // rejected for failing the `typeof === 'string'` check.
+  const name = frontmatterScalarString(frontmatter.name)?.trim();
+  const description = frontmatterScalarString(frontmatter.description)?.trim();
 
-  if (typeof name !== 'string' || name.trim() !== slug) {
+  if (name !== slug) {
     return invalidSkill(base, 'Frontmatter "name" must match the skill directory name.');
   }
-  if (typeof description !== 'string' || !description.trim()) {
+  if (!description) {
     return invalidSkill(base, 'Frontmatter "description" must be a non-empty string.');
   }
 
-  return { ...base, name: name.trim(), description: description.trim(), valid: true };
+  return { ...base, name, description, valid: true };
+}
+
+/** Renders a scalar frontmatter value as a string; arrays/undefined yield undefined. */
+function frontmatterScalarString(value: unknown): string | undefined {
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  return undefined;
 }
 
 function invalidSkill(

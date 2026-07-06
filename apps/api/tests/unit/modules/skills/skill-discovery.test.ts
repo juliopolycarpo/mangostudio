@@ -67,6 +67,15 @@ describe('skill discovery', () => {
     expect(listUsableSkills()).toEqual([]);
   });
 
+  it('accepts numeric-only slugs whose frontmatter the parser coerces to a number', () => {
+    writeSkill('2048', 'name: 2048\ndescription: A numeric skill');
+
+    const [skill] = listSkills();
+    expect(skill?.valid).toBe(true);
+    expect(skill?.name).toBe('2048');
+    expect(skill?.description).toBe('A numeric skill');
+  });
+
   it('flags invalid slugs, missing SKILL.md, and missing descriptions', () => {
     mkdirSync(join(skillsDir, 'Bad_Slug'));
     mkdirSync(join(skillsDir, 'empty-dir'));
