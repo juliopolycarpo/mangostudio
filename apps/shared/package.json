@@ -32,6 +32,7 @@
     "./contracts": "./src/contracts/index.ts",
     "./test-utils": "./src/test-utils/index.ts",
     "./i18n": "./src/i18n/index.ts",
+    "./markdown": "./src/markdown/index.ts",
     "./utils/model-detection": "./src/utils/model-detection.ts",
     "./runtime-env": "./src/runtime-env/index.ts",
     "./prompt-rules": "./src/prompt-rules/index.ts"
