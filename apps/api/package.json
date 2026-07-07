@@ -23,7 +23,7 @@
     "test:coverage": "MANGOSTUDIO_DIAGNOSTIC_LOGS=0 bun test --coverage --parallel=1 tests/unit tests/integration"
   },
   "dependencies": {
-    "@ai-sdk/deepseek": "^2.0.32",
+    "@ai-sdk/deepseek": "^3.0.2",
     "@anthropic-ai/sdk": "^0.95.1",
     "@cursor/sdk": "^1.0.22",
     "@elysiajs/cors": "^1.4.2",
