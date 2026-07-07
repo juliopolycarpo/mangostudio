@@ -7,10 +7,11 @@ import {
   buildShellTool,
   normalizeShellToolSettings,
   SHELL_DEFAULT_MAX_OUTPUT_BYTES,
-  SHELL_DEFAULT_TIMEOUT_MS,
-  SHELL_MAX_TIMEOUT_MS,
-  SHELL_MIN_TIMEOUT_MS,
+  SHELL_DEFAULT_TIMEOUT_SECONDS,
+  SHELL_MAX_TIMEOUT_SECONDS,
+  SHELL_MIN_TIMEOUT_SECONDS,
 } from '../../../../src/services/tools/builtin/_shell-tool';
+import { TOOL_EXECUTION_TIMEOUT_PARAM } from '../../../../src/services/tools/execution-timeout';
 import {
   clearRegistry,
   executeTool,
@@ -18,6 +19,7 @@ import {
   getTool,
   registerTool,
 } from '../../../../src/services/tools/registry';
+import { mergeToolSettings } from '../../../../src/services/tools/settings-policy';
 import type { RegisteredTool, ToolContext } from '../../../../src/services/tools/types';
 
 const hasBash = isShellAvailable('bash');
@@ -59,30 +61,39 @@ describe('buildShellTool', () => {
 
   it('exposes timeout, output-size, and env-policy parameters', () => {
     const names = buildShellTool('bash').settings.parameterDescriptors.map((d) => d.name);
-    expect(names).toEqual(['timeoutMs', 'maxOutputBytes', 'allowedEnvVars', 'deniedEnvVars']);
+    expect(names).toEqual([
+      TOOL_EXECUTION_TIMEOUT_PARAM,
+      'maxOutputBytes',
+      'allowedEnvVars',
+      'deniedEnvVars',
+    ]);
   });
 });
 
 describe('normalizeShellToolSettings', () => {
   it('falls back to defaults for missing values', () => {
     const settings = normalizeShellToolSettings({});
-    expect(settings.timeoutMs).toBe(SHELL_DEFAULT_TIMEOUT_MS);
+    expect(settings.timeoutSeconds).toBe(SHELL_DEFAULT_TIMEOUT_SECONDS);
     expect(settings.maxOutputBytes).toBe(SHELL_DEFAULT_MAX_OUTPUT_BYTES);
   });
 
   it('falls back to defaults for non-numeric values', () => {
-    const settings = normalizeShellToolSettings({ timeoutMs: 'soon', maxOutputBytes: null });
-    expect(settings.timeoutMs).toBe(SHELL_DEFAULT_TIMEOUT_MS);
+    const settings = normalizeShellToolSettings({ timeoutSeconds: 'soon', maxOutputBytes: null });
+    expect(settings.timeoutSeconds).toBe(SHELL_DEFAULT_TIMEOUT_SECONDS);
     expect(settings.maxOutputBytes).toBe(SHELL_DEFAULT_MAX_OUTPUT_BYTES);
   });
 
   it('clamps the timeout to its bounds', () => {
-    expect(normalizeShellToolSettings({ timeoutMs: 1 }).timeoutMs).toBe(SHELL_MIN_TIMEOUT_MS);
-    expect(normalizeShellToolSettings({ timeoutMs: 999_999 }).timeoutMs).toBe(SHELL_MAX_TIMEOUT_MS);
+    expect(normalizeShellToolSettings({ timeoutSeconds: 1 }).timeoutSeconds).toBe(
+      SHELL_MIN_TIMEOUT_SECONDS
+    );
+    expect(normalizeShellToolSettings({ timeoutSeconds: 999_999 }).timeoutSeconds).toBe(
+      SHELL_MAX_TIMEOUT_SECONDS
+    );
   });
 
   it('rounds fractional values before clamping', () => {
-    expect(normalizeShellToolSettings({ timeoutMs: 5000.7 }).timeoutMs).toBe(5001);
+    expect(normalizeShellToolSettings({ timeoutSeconds: 45.7 }).timeoutSeconds).toBe(46);
   });
 
   it('defaults the env allow/deny lists to empty', () => {
@@ -97,6 +108,17 @@ describe('normalizeShellToolSettings', () => {
 
     const fromString = normalizeShellToolSettings({ deniedEnvVars: 'HOME\n\nTMPDIR' });
     expect(fromString.deniedEnvVars).toEqual(['HOME', 'TMPDIR']);
+  });
+});
+
+describe('mergeToolSettings legacy shell timeout migration', () => {
+  it('migrates saved timeoutMs values to timeoutSeconds', () => {
+    const merged = mergeToolSettings(buildShellTool('bash'), {
+      enabled: true,
+      parameters: { timeoutMs: 20_000, maxOutputBytes: 1000 },
+    });
+    expect(merged.parameters.timeoutSeconds).toBe(20);
+    expect(merged.parameters).not.toHaveProperty('timeoutMs');
   });
 });
 

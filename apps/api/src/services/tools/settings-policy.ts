@@ -2,6 +2,7 @@ import type {
   ToolParameterDescriptor,
   ToolSettingsDescriptor,
 } from '@mangostudio/shared/tool-settings';
+import { migrateLegacyToolParameters } from './execution-timeout';
 import {
   normalizePathItemArray,
   normalizePathList,
@@ -31,11 +32,19 @@ export function mergeToolSettings(
 ): EffectiveToolSettings {
   const defaults = getDefaultToolSettings(tool);
   const enabled = savedSettings?.enabled ?? defaults.enabled;
-  const parameters = normalizeToolParameters(tool, {
-    ...defaults.parameters,
-    ...(savedSettings?.parameters ?? {}),
-    ...(parameterUpdates ?? {}),
-  });
+  const parameters = normalizeToolParameters(
+    tool,
+    migrateLegacyToolParameters(
+      tool.definition.name,
+      {
+        ...defaults.parameters,
+        ...(savedSettings?.parameters ?? {}),
+        ...(parameterUpdates ?? {}),
+      },
+      savedSettings?.parameters,
+      parameterUpdates
+    )
+  );
 
   return { enabled, parameters };
 }

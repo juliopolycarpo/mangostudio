@@ -8,6 +8,10 @@ import { generateId } from '../../../utils/id';
 import { warmProviderForRequest } from '../../providers/core/provider-readiness';
 import { getProvider, getProviderForModel } from '../../providers/core/provider-registry';
 import type { ImageGenerationRequest, ImageGenerationResult } from '../../providers/types';
+import {
+  buildToolExecutionTimeoutDescriptor,
+  TOOL_EXECUTION_TIMEOUT_SECONDS_DEFAULT,
+} from '../execution-timeout';
 import { registerTool } from '../registry';
 import type { EffectiveToolSettings, ToolContext, ToolDefinition } from '../types';
 
@@ -249,8 +253,10 @@ export function register(): void {
         maxImagesPerCall: GENERATE_IMAGE_DEFAULT_MAX_IMAGES,
         defaultModel: GENERATE_IMAGE_AUTO_MODEL,
         letAiDecideQuality: false,
+        timeoutSeconds: TOOL_EXECUTION_TIMEOUT_SECONDS_DEFAULT,
       },
       parameterDescriptors: [
+        buildToolExecutionTimeoutDescriptor(),
         {
           name: 'letAiDecideQuality',
           label: 'Let AI decide quality',
