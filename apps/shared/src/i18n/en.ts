@@ -185,6 +185,7 @@ export const messages: Messages = {
       tools: 'Tools',
       metrics: 'Metrics',
       logs: 'Logs',
+      skills: 'Skills',
     },
     context: {
       title: 'Context',
@@ -718,6 +719,41 @@ export const messages: Messages = {
     app: {
       loadError: 'Failed to load app settings',
       saveError: 'Failed to save app settings',
+    },
+    skills: {
+      title: 'Skills',
+      description:
+        "Skills extend the model's capabilities. Enable third-party sources to discover skills installed for other agents.",
+      sources: {
+        title: 'Skill sources',
+        description:
+          'Third-party skill directories, mirroring the fixed rule-file paths. The ~/.mango/skills directory is always on.',
+        agentsLabel: '~/.agents/skills',
+        agentsDescription: 'Shared skills from the agents ecosystem.',
+        claudeLabel: '~/.claude/skills',
+        claudeDescription: 'Claude-managed skills.',
+        enabled: 'Enabled',
+        disabled: 'Disabled',
+        pathMissing: 'Directory not found',
+      },
+      skillsList: {
+        title: 'Installed skills',
+        empty:
+          'No skills found. Install a skill in ~/.mango/skills or enable a third-party source.',
+        sourceBadge: {
+          mango: 'mango',
+          agents: 'agents',
+          claude: 'claude',
+        },
+        shadowedBadge: 'shadowed',
+        invalidBadge: 'invalid',
+        enabled: 'Enabled',
+        disabled: 'Disabled',
+        pathLabel: 'Path',
+        errorLabel: 'Error',
+        saveError: 'Failed to save skill setting',
+        loadError: 'Failed to load skills',
+      },
     },
   },
 

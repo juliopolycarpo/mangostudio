@@ -187,6 +187,7 @@ export const messages = {
       tools: 'Ferramentas',
       metrics: 'Métricas',
       logs: 'Logs',
+      skills: 'Habilidades',
     },
     context: {
       title: 'Contexto',
@@ -725,6 +726,41 @@ export const messages = {
     app: {
       loadError: 'Falha ao carregar configurações do app',
       saveError: 'Falha ao salvar configurações do app',
+    },
+    skills: {
+      title: 'Habilidades',
+      description:
+        'Habilidades estendem as capacidades do modelo. Ative as fontes de terceiros para descobrir habilidades instaladas para outros agentes.',
+      sources: {
+        title: 'Fontes de habilidades',
+        description:
+          'Diretórios de habilidades de terceiros, espelhando os caminhos fixos de regras. O diretório ~/.mango/skills é sempre ativado.',
+        agentsLabel: '~/.agents/skills',
+        agentsDescription: 'Habilidades compartilhadas do ecossistema de agentes.',
+        claudeLabel: '~/.claude/skills',
+        claudeDescription: 'Habilidades gerenciadas pelo Claude.',
+        enabled: 'Ativada',
+        disabled: 'Desativada',
+        pathMissing: 'Diretório não encontrado',
+      },
+      skillsList: {
+        title: 'Habilidades instaladas',
+        empty:
+          'Nenhuma habilidade encontrada. Instale uma habilidade em ~/.mango/skills ou ative uma fonte de terceiros.',
+        sourceBadge: {
+          mango: 'mango',
+          agents: 'agents',
+          claude: 'claude',
+        },
+        shadowedBadge: 'sombreada',
+        invalidBadge: 'inválida',
+        enabled: 'Ativada',
+        disabled: 'Desativada',
+        pathLabel: 'Caminho',
+        errorLabel: 'Erro',
+        saveError: 'Falha ao salvar a configuração da habilidade',
+        loadError: 'Falha ao carregar habilidades',
+      },
     },
   },
 

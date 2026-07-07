@@ -45,6 +45,17 @@ export const MultiAgentSettingsSchema = Type.Object({
   }),
 });
 
+/**
+ * Opt-in toggles for the third-party skill source directories. The native
+ * `~/.mango/skills` source is always on; `~/.agents/skills` and
+ * `~/.claude/skills` are off by default because they were authored for other
+ * agents and may not suit MangoStudio.
+ */
+export const SkillSourcesSettingsSchema = Type.Object({
+  agents: Type.Boolean(),
+  claude: Type.Boolean(),
+});
+
 export const AppSettingsSchema = Type.Object({
   promptSettings: PromptSettingsSchema,
   globalImageQuality: ImageQualitySchema,
@@ -57,10 +68,12 @@ export const AppSettingsSchema = Type.Object({
   multiAgentSettings: MultiAgentSettingsSchema,
   contextSettings: ContextSettingsSchema,
   chatTitleSettings: ChatTitleSettingsSchema,
+  skillSources: SkillSourcesSettingsSchema,
 });
 
 export type ImageQuality = Static<typeof ImageQualitySchema>;
 export type ChatTitleSettings = Static<typeof ChatTitleSettingsSchema>;
 export type ChatTitleStrategy = ChatTitleSettings['strategy'];
 export type MultiAgentSettings = Static<typeof MultiAgentSettingsSchema>;
+export type SkillSourcesSettings = Static<typeof SkillSourcesSettingsSchema>;
 export type AppSettings = Static<typeof AppSettingsSchema>;

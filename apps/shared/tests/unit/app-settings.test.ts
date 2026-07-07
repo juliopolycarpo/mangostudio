@@ -6,6 +6,7 @@ import {
   DEFAULT_CONTEXT_SETTINGS,
   DEFAULT_MULTI_AGENT_SETTINGS,
   DEFAULT_PROMPT_SETTINGS,
+  DEFAULT_SKILL_SOURCES_SETTINGS,
   IMAGE_QUALITY_OPTIONS,
   MAX_SUBAGENT_CALLS_MAX,
   MAX_SUBAGENT_CALLS_MIN,
@@ -17,6 +18,7 @@ import {
   normalizeContextSettings,
   normalizeMultiAgentSettings,
   normalizePromptSettings,
+  normalizeSkillSourcesSettings,
   SUBAGENT_MAX_TURNS_MAX,
   SUBAGENT_MAX_TURNS_MIN,
 } from '../../src/app-settings';
@@ -399,5 +401,34 @@ describe('normalizeAppSettings', () => {
     expect(result.promptSettings.customRules).toEqual([]);
     expect(result.contextSettings.compactionBehavior).toBe('off');
     expect(result.chatTitleSettings.strategy).toBe('model');
+  });
+
+  it('defaults skill sources to opt-in (third-party off)', () => {
+    expect(DEFAULT_APP_SETTINGS.skillSources).toEqual(DEFAULT_SKILL_SOURCES_SETTINGS);
+    expect(DEFAULT_SKILL_SOURCES_SETTINGS).toEqual({ agents: false, claude: false });
+  });
+
+  it('normalizes skill sources with per-field fallbacks', () => {
+    expect(normalizeSkillSourcesSettings(undefined)).toEqual(DEFAULT_SKILL_SOURCES_SETTINGS);
+    expect(normalizeSkillSourcesSettings('nope')).toEqual(DEFAULT_SKILL_SOURCES_SETTINGS);
+    expect(normalizeSkillSourcesSettings({ agents: 'yes', claude: 1 })).toEqual(
+      DEFAULT_SKILL_SOURCES_SETTINGS
+    );
+    expect(normalizeSkillSourcesSettings({ agents: true })).toEqual({
+      agents: true,
+      claude: false,
+    });
+    expect(normalizeSkillSourcesSettings({ agents: true, claude: true })).toEqual({
+      agents: true,
+      claude: true,
+    });
+  });
+
+  it('normalizes skill sources through normalizeAppSettings', () => {
+    expect(normalizeAppSettings({}).skillSources).toEqual(DEFAULT_SKILL_SOURCES_SETTINGS);
+    expect(normalizeAppSettings({ skillSources: { agents: true } }).skillSources).toEqual({
+      agents: true,
+      claude: false,
+    });
   });
 });

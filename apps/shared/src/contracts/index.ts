@@ -27,7 +27,7 @@ export type {
   UserAgentId,
 } from '../agents';
 // App settings
-export type { AppSettings, ImageQuality } from '../app-settings';
+export type { AppSettings, ImageQuality, SkillSourcesSettings } from '../app-settings';
 // Auth
 export type { SignInBody, SignUpBody } from '../auth';
 // Catalog
@@ -99,7 +99,14 @@ export type {
   ReasoningPolicy,
 } from '../provider-settings';
 // Skills
-export type { SkillDescriptor, SkillListResponse, SkillSource } from '../skills';
+export type {
+  SkillDescriptor,
+  SkillListResponse,
+  SkillSource,
+  SkillSourceState,
+  SkillSourcesState,
+  UpdateSkillSettingsBody,
+} from '../skills';
 // Streaming SSE events
 export type {
   SSEContextEvent,
