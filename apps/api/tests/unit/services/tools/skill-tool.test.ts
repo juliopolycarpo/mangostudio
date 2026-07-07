@@ -2,15 +2,17 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { getDb } from '../../../../src/db/database';
 import { loadConfigForTest } from '../../../../src/lib/config';
 import { resetSkillsCache } from '../../../../src/modules/skills/application/skill-discovery';
+import { upsertSkillSettings } from '../../../../src/modules/skills/infrastructure/skill-settings-repository';
 import { executeTool, getTool } from '../../../../src/services/tools';
 import { register, SKILL_TOOL_NAME } from '../../../../src/services/tools/builtin/skill';
 import type { ToolContext } from '../../../../src/services/tools/types';
 
 let skillsDir: string;
 
-const context: ToolContext = { userId: 'user-1', chatId: 'chat-1', parameters: {} };
+const context: ToolContext = { userId: 'user-skill-tool-test', chatId: 'chat-1', parameters: {} };
 
 beforeEach(() => {
   skillsDir = mkdtempSync(join(tmpdir(), 'mango-skill-tool-'));
@@ -69,6 +71,18 @@ describe('skill tool', () => {
     await expect(executeTool(SKILL_TOOL_NAME, { name: 'nope' }, context)).rejects.toThrow(
       /Unknown skill "nope". Available skills: pdf-tools/
     );
+  });
+
+  it('rejects a skill the user disabled in settings', async () => {
+    const disabledContext: ToolContext = {
+      ...context,
+      userId: 'user-skill-tool-disabled-test',
+    };
+    await upsertSkillSettings(getDb(), disabledContext.userId, 'mango:pdf-tools', false);
+
+    await expect(
+      executeTool(SKILL_TOOL_NAME, { name: 'pdf-tools' }, disabledContext)
+    ).rejects.toThrow(/is disabled in settings/);
   });
 
   it('rejects execution when the tool is disabled', async () => {

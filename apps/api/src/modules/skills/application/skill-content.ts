@@ -9,9 +9,16 @@ import { type Dirent, readdirSync, realpathSync } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
 import { parseMarkdownFrontmatter } from '@mangostudio/shared/markdown';
 import type { SkillDescriptor } from '@mangostudio/shared/skills';
+import type { Kysely } from 'kysely';
+import type { Database } from '../../../db/types';
 import { RegularFileReadError, readRegularFileUtf8 } from '../../../lib/safe-file';
 import { SkillError } from '../domain/skill';
-import { listUsableSkills, MAX_SKILL_FILE_BYTES, SKILL_FILE_NAME } from './skill-discovery';
+import {
+  listSkills,
+  listUsableSkills,
+  MAX_SKILL_FILE_BYTES,
+  SKILL_FILE_NAME,
+} from './skill-discovery';
 
 const MAX_LISTED_FILES = 100;
 const MAX_LISTING_DEPTH = 3;
@@ -36,9 +43,13 @@ export interface SkillFileResult {
   readonly truncated: boolean;
 }
 
-/** Loads a skill's instructions and bundled-file listing. // Usage: loadSkillBody('pdf-tools') */
-export function loadSkillBody(name: string): SkillBodyResult {
-  const skill = findSkillByName(name);
+/** Loads a skill's instructions and bundled-file listing. // Usage: await loadSkillBody(db, userId, 'pdf-tools') */
+export async function loadSkillBody(
+  db: Kysely<Database>,
+  userId: string,
+  name: string
+): Promise<SkillBodyResult> {
+  const skill = await findSkillByName(db, userId, name);
   const markdown = readSkillText(join(skill.path, SKILL_FILE_NAME));
   const listing = listBundledFiles(skill.path);
 
@@ -52,9 +63,14 @@ export function loadSkillBody(name: string): SkillBodyResult {
   };
 }
 
-/** Reads one bundled file, confined to the skill directory. // Usage: loadSkillFile('pdf-tools', 'reference.md') */
-export function loadSkillFile(name: string, file: string): SkillFileResult {
-  const skill = findSkillByName(name);
+/** Reads one bundled file, confined to the skill directory. // Usage: await loadSkillFile(db, userId, 'pdf-tools', 'reference.md') */
+export async function loadSkillFile(
+  db: Kysely<Database>,
+  userId: string,
+  name: string,
+  file: string
+): Promise<SkillFileResult> {
+  const skill = await findSkillByName(db, userId, name);
   const filePath = resolveInsideSkillDir(skill.path, file);
   const content = readSkillText(filePath);
 
@@ -66,10 +82,16 @@ export function loadSkillFile(name: string, file: string): SkillFileResult {
   };
 }
 
-function findSkillByName(name: string): SkillDescriptor {
-  const skills = listUsableSkills();
+async function findSkillByName(
+  db: Kysely<Database>,
+  userId: string,
+  name: string
+): Promise<SkillDescriptor> {
+  const skills = await listUsableSkills(db, userId);
   const skill = skills.find((candidate) => candidate.name === name);
   if (skill) return skill;
+
+  await assertSkillNotDisabled(db, userId, name);
 
   const validNames = skills
     .slice(0, MAX_NAMES_IN_ERROR)
@@ -82,6 +104,21 @@ function findSkillByName(name: string): SkillDescriptor {
     404,
     'NOT_FOUND'
   );
+}
+
+/** Turns a lookup of a known-but-disabled skill into an explicit error. */
+async function assertSkillNotDisabled(
+  db: Kysely<Database>,
+  userId: string,
+  name: string
+): Promise<void> {
+  const skills = await listSkills(db, userId);
+  const disabled = skills.find(
+    (candidate) => candidate.name === name && candidate.valid && !candidate.shadowed
+  );
+  if (disabled) {
+    throw new SkillError(`Skill "${name}" is disabled in settings.`, 403, 'SKILL_DISABLED');
+  }
 }
 
 /**

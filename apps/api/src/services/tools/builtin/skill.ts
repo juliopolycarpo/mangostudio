@@ -5,6 +5,7 @@
  * or one of its bundled resource files — into context on demand.
  */
 
+import { getDb } from '../../../db/database';
 import {
   loadSkillBody,
   loadSkillFile,
@@ -14,6 +15,7 @@ import {
 import { SKILL_TOOL_NAME } from '../../../modules/skills/domain/skill';
 import { getOptionalString, getRequiredString } from '../arg-parsing';
 import { registerTool } from '../registry';
+import type { ToolContext } from '../types';
 
 export { SKILL_TOOL_NAME };
 
@@ -43,10 +45,16 @@ const definition = {
 };
 
 // biome-ignore lint/suspicious/useAwait: tool executors are async by contract
-async function execute(args: Record<string, unknown>): Promise<SkillBodyResult | SkillFileResult> {
+async function execute(
+  args: Record<string, unknown>,
+  context: ToolContext
+): Promise<SkillBodyResult | SkillFileResult> {
   const name = getRequiredString(args.name, 'name');
   const file = getOptionalString(args.file);
-  return file ? loadSkillFile(name, file) : loadSkillBody(name);
+  const db = getDb();
+  return file
+    ? loadSkillFile(db, context.userId, name, file)
+    : loadSkillBody(db, context.userId, name);
 }
 
 /** Registers this built-in tool. // Usage: register() */

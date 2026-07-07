@@ -124,7 +124,12 @@ export async function resolveTurnContext(
       'The user explicitly clicked Create images for this turn. Use the image generation tool when appropriate.';
     effectiveSystemPrompt = effectiveSystemPrompt ? `${effectiveSystemPrompt}\n\n${hint}` : hint;
   }
-  effectiveSystemPrompt = appendSkillsPromptSection(effectiveSystemPrompt, allowedToolNames);
+  effectiveSystemPrompt = await appendSkillsPromptSection(
+    db,
+    input.userId,
+    effectiveSystemPrompt,
+    allowedToolNames
+  );
 
   return {
     chatId: input.chatId,

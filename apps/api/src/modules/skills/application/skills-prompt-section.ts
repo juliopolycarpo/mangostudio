@@ -6,6 +6,8 @@
  */
 
 import type { SkillDescriptor } from '@mangostudio/shared/skills';
+import type { Kysely } from 'kysely';
+import type { Database } from '../../../db/types';
 import { SKILL_TOOL_NAME } from '../domain/skill';
 import { listUsableSkills } from './skill-discovery';
 
@@ -24,7 +26,7 @@ const SKILLS_INSTRUCTION =
 export function buildSkillsPromptSection(
   skills: ReadonlyArray<SkillDescriptor>
 ): string | undefined {
-  const usable = skills.filter((skill) => skill.valid && skill.enabled);
+  const usable = skills.filter((skill) => skill.valid && skill.enabled && !skill.shadowed);
   if (usable.length === 0) return undefined;
 
   const lines = [...usable]
@@ -40,14 +42,16 @@ export function buildSkillsPromptSection(
  * tool is allowed and at least one usable skill exists; otherwise returns the
  * prompt unchanged. Shared by the primary turn pipeline and the subagent
  * runner so both advertise skills consistently with their own tool profiles.
- * // Usage: effectiveSystemPrompt = appendSkillsPromptSection(effectiveSystemPrompt, allowedToolNames);
+ * // Usage: effectiveSystemPrompt = await appendSkillsPromptSection(db, userId, effectiveSystemPrompt, allowedToolNames);
  */
-export function appendSkillsPromptSection(
+export async function appendSkillsPromptSection(
+  db: Kysely<Database>,
+  userId: string,
   systemPrompt: string | undefined,
   allowedToolNames: ReadonlySet<string>
-): string | undefined {
+): Promise<string | undefined> {
   if (!allowedToolNames.has(SKILL_TOOL_NAME)) return systemPrompt;
-  const section = buildSkillsPromptSection(listUsableSkills());
+  const section = buildSkillsPromptSection(await listUsableSkills(db, userId));
   if (!section) return systemPrompt;
   return systemPrompt ? `${systemPrompt}\n\n${section}` : section;
 }
