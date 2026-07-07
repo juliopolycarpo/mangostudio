@@ -16,6 +16,7 @@ import type {
 import { executeTool, getSafeEffectiveToolSettings, getTool } from '../../../services/tools';
 import { DELEGATE_TO_AGENT_TOOL_NAME } from '../../../services/tools/builtin/delegate-to-agent';
 import type { EffectiveToolSettings } from '../../../services/tools/types';
+import { appendSkillsPromptSection } from '../../skills/application/skills-prompt-section';
 import type { ResolvedAgentRuntime } from './resolve-agent-runtime';
 import { resolveAgentRuntime } from './resolve-agent-runtime';
 import type { ResolvedModel } from './resolve-model';
@@ -100,7 +101,13 @@ export async function prepareSubagentTurn(
     input,
     resolvedModel,
     provider,
-    runtime,
+    runtime: {
+      ...runtime,
+      effectiveSystemPrompt: appendSkillsPromptSection(
+        runtime.effectiveSystemPrompt,
+        allowedToolNames
+      ),
+    },
     toolDefinitions,
     allowedToolNames,
     prompt,

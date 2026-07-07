@@ -98,6 +98,8 @@ export type {
   ProviderSettingsListResponse,
   ReasoningPolicy,
 } from '../provider-settings';
+// Skills
+export type { SkillDescriptor, SkillListResponse, SkillSource } from '../skills';
 // Streaming SSE events
 export type {
   SSEContextEvent,
