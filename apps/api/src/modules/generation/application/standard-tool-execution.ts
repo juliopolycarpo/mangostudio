@@ -5,6 +5,8 @@ import type { MultiAgentSettings } from '@mangostudio/shared/app-settings';
 import { SUBAGENT_MAX_TURNS_MAX, SUBAGENT_MAX_TURNS_MIN } from '@mangostudio/shared/app-settings';
 import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';
+import { executeMcpTool } from '../../../services/mcp/tool-bridge';
+import { isMcpToolName } from '../../../services/mcp/tool-naming';
 import { executeTool, getSafeEffectiveToolSettings, getTool } from '../../../services/tools';
 import {
   getBoundedOptionalInteger,
@@ -85,15 +87,20 @@ export type ToolExecutionProgressItem =
   | { kind: 'event'; event: ToolStreamEvent }
   | { kind: 'execution'; execution: StandardToolExecution };
 
+export interface StandardToolExecutionContext {
+  userId: string;
+  chatId: string;
+  settingsByToolName: ReadonlyMap<string, EffectiveToolSettings>;
+  allowedToolNames: ReadonlySet<string>;
+  delegationRuntime?: DelegationRuntime;
+  /** Required to route `mcp__` tool calls to their owning server. */
+  db?: Kysely<Database>;
+  signal?: AbortSignal;
+}
+
 export async function* executeStandardToolCallsWithProgress(
   calls: ReadonlyArray<[string, { name: string; argsStr: string }]>,
-  context: {
-    userId: string;
-    chatId: string;
-    settingsByToolName: ReadonlyMap<string, EffectiveToolSettings>;
-    allowedToolNames: ReadonlySet<string>;
-    delegationRuntime?: DelegationRuntime;
-  }
+  context: StandardToolExecutionContext
 ): AsyncGenerator<ToolExecutionProgressItem> {
   // No calls means no completion callbacks ever fire, so the queue would never
   // close and `yield* queue` would hang. Exit before arming the queue.
@@ -133,13 +140,7 @@ async function executeStandardToolCall(
   callId: string,
   name: string,
   argsStr: string,
-  context: {
-    userId: string;
-    chatId: string;
-    settingsByToolName: ReadonlyMap<string, EffectiveToolSettings>;
-    allowedToolNames: ReadonlySet<string>;
-    delegationRuntime?: DelegationRuntime;
-  }
+  context: StandardToolExecutionContext
 ): Promise<StandardToolExecution> {
   const args = parseToolArgs(argsStr);
   let result: unknown;
@@ -153,7 +154,11 @@ async function executeStandardToolCall(
       throw new Error(`Tool "${name}" is not allowed for this agent.`);
     }
     const runtime = context.delegationRuntime;
-    if (name === DELEGATE_TO_AGENT_TOOL_NAME && runtime) {
+    if (isMcpToolName(name)) {
+      const mcpResult = await executeMcpToolCall(name, args, context);
+      result = mcpResult.result;
+      isError = mcpResult.isError;
+    } else if (name === DELEGATE_TO_AGENT_TOOL_NAME && runtime) {
       const tool = getTool(name);
       if (!tool) throw new Error(`Unknown tool: "${name}"`);
       const effectiveSettings = getSafeEffectiveToolSettings(
@@ -220,6 +225,31 @@ async function executeStandardToolCall(
     resultStr: stringifyToolResult(providerResult),
     isError,
     ...(subagentTrace ? { subagentTrace } : {}),
+  };
+}
+
+/**
+ * Routes a namespaced `mcp__<slug>__<tool>` call to the bridge. The per-call
+ * timeout comes from the server row (SDK-enforced, so a timed-out request is
+ * actually cancelled); a user-disabled tool is rejected before any connect.
+ */
+async function executeMcpToolCall(
+  name: string,
+  args: Record<string, unknown>,
+  context: StandardToolExecutionContext
+): Promise<{ result: unknown; isError: boolean }> {
+  if (!context.db) {
+    throw new Error(`Tool "${name}" is not available in this context.`);
+  }
+  if (context.settingsByToolName.get(name)?.enabled === false) {
+    throw new Error(`Tool "${name}" is disabled for this user.`);
+  }
+  const mcpResult = await executeMcpTool(context.db, context.userId, name, args, {
+    signal: context.signal,
+  });
+  return {
+    result: mcpResult.isError ? { error: mcpResult.contentText } : mcpResult.contentText,
+    isError: mcpResult.isError,
   };
 }
 

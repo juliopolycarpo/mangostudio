@@ -12,7 +12,9 @@ import {
   StreamableHTTPClientTransport,
   StreamableHTTPError,
 } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { ToolListChangedNotificationSchema } from '@modelcontextprotocol/sdk/types.js';
 import { getVersion } from '../../lib/config';
+import { flattenMcpContent } from './content-mapping';
 import { readMcpHeaders } from './header-secrets';
 import { buildStdioEnv } from './stdio-env';
 import {
@@ -31,6 +33,8 @@ export interface ConnectMcpClientOptions {
   resolveHeaders?: (serverId: string) => Promise<Record<string, string>>;
   /** Fires once when the session drops out from under us (crash, socket close). */
   onSessionClosed?: () => void;
+  /** Fires when the server announces `notifications/tools/list_changed`. */
+  onToolListChanged?: () => void;
 }
 
 /**
@@ -43,7 +47,7 @@ export async function connectMcpClient(
 ): Promise<McpClientHandle> {
   const client =
     config.transport === 'stdio' ? await connectStdio(config) : await connectHttp(config, options);
-  return wrapMcpClient(client, config, options.onSessionClosed);
+  return wrapMcpClient(client, config, options);
 }
 
 /**
@@ -126,12 +130,19 @@ function toConnectionError(config: McpServerRuntimeConfig, error: unknown): McpC
 export function wrapMcpClient(
   client: Client,
   config: Pick<McpServerRuntimeConfig, 'timeoutMs'>,
-  onSessionClosed?: () => void
+  callbacks: Pick<ConnectMcpClientOptions, 'onSessionClosed' | 'onToolListChanged'> = {}
 ): McpClientHandle {
   let closedByUs = false;
   client.onclose = () => {
-    if (!closedByUs) onSessionClosed?.();
+    if (!closedByUs) callbacks.onSessionClosed?.();
   };
+  if (callbacks.onToolListChanged) {
+    const onToolListChanged = callbacks.onToolListChanged;
+    // Servers that never send the notification simply leave the cache warm.
+    client.setNotificationHandler(ToolListChangedNotificationSchema, () => {
+      onToolListChanged();
+    });
+  }
 
   const requestOptions = (options?: McpRequestOptions) => ({
     timeout: options?.timeoutMs ?? config.timeoutMs ?? DEFAULT_MCP_TIMEOUT_MS,
@@ -174,13 +185,8 @@ export function wrapMcpClient(
 
 function mapCallResult(result: Awaited<ReturnType<Client['callTool']>>): McpCallResult {
   const content = Array.isArray(result.content) ? result.content : [];
-  const contentText = content
-    .filter((block): block is { type: 'text'; text: string } => block.type === 'text')
-    .map((block) => block.text)
-    .join('\n');
-
   return {
-    contentText,
+    contentText: flattenMcpContent(content),
     isError: result.isError === true,
     rawContentKinds: content.map((block) => block.type),
   };

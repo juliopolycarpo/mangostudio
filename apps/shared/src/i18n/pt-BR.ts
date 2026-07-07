@@ -587,6 +587,7 @@ export const messages = {
         system: 'Sistema',
         image: 'Imagem',
         interaction: 'Interação',
+        mcp: 'MCP',
       },
       enabled: 'Ativada',
       disabled: 'Desativada',

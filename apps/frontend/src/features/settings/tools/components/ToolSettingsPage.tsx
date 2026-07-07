@@ -16,7 +16,7 @@ interface ToolSettingsPageProps {
   setMaxToolIterations: (value: number) => void;
 }
 
-const CATEGORIES: ToolSettingsCategory[] = ['system', 'image', 'interaction'];
+const CATEGORIES: ToolSettingsCategory[] = ['system', 'image', 'interaction', 'mcp'];
 
 export function ToolSettingsPage({
   maxToolIterations,
@@ -31,6 +31,7 @@ export function ToolSettingsPage({
       system: [],
       image: [],
       interaction: [],
+      mcp: [],
     };
     for (const d of descriptors) {
       map[d.category]?.push(d);

@@ -7,6 +7,12 @@ import type {
 import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';
 import {
+  getMcpServerRowBySlug,
+  listMcpBridgeTools,
+  type McpBridgeTool,
+} from '../../../services/mcp/tool-bridge';
+import { isMcpToolName, parseMcpToolName } from '../../../services/mcp/tool-naming';
+import {
   getAllTools,
   getDefaultToolSettings,
   getTool,
@@ -36,8 +42,16 @@ export async function listToolSettingsDescriptors(
   db: Kysely<Database>,
   userId: string
 ): Promise<ToolSettingsListResponse> {
-  const savedSettings = await listSavedToolSettings(db, userId);
-  return { tools: getToolDescriptors(resolveEffectiveSettings(savedSettings)) };
+  const [savedSettings, mcpTools] = await Promise.all([
+    listSavedToolSettings(db, userId),
+    listMcpBridgeTools(db, userId),
+  ]);
+  return {
+    tools: [
+      ...getToolDescriptors(resolveEffectiveSettings(savedSettings)),
+      ...mcpTools.map((tool) => buildMcpToolDescriptor(tool, savedSettings.get(tool.name))),
+    ],
+  };
 }
 
 export async function updateToolSettingsDescriptor(
@@ -46,6 +60,9 @@ export async function updateToolSettingsDescriptor(
   toolName: string,
   updates: UpdateToolSettingsBody
 ): Promise<ToolSettingsDescriptor> {
+  if (isMcpToolName(toolName)) {
+    return updateMcpToolSettings(db, userId, toolName, updates);
+  }
   const tool = getTool(toolName);
   if (!tool) {
     throw new ToolSettingsError(`Unknown tool "${toolName}".`, 404, ERROR_CODES.NOT_FOUND);
@@ -67,6 +84,65 @@ export async function updateToolSettingsDescriptor(
   return getToolDescriptors(new Map([[toolName, persistedSettings]])).find(
     (descriptor) => descriptor.name === toolName
   ) as ToolSettingsDescriptor;
+}
+
+/**
+ * MCP tools have no parameters — only the enabled toggle persists, keyed by
+ * the namespaced name in the same `user_tool_settings` table as builtins.
+ * The tool itself is not required to be listable right now (the server may be
+ * offline); only server ownership gates the write.
+ */
+async function updateMcpToolSettings(
+  db: Kysely<Database>,
+  userId: string,
+  toolName: string,
+  updates: UpdateToolSettingsBody
+): Promise<ToolSettingsDescriptor> {
+  const parsed = parseMcpToolName(toolName);
+  const server = parsed && (await getMcpServerRowBySlug(db, userId, parsed.serverSlug));
+  if (!parsed || !server) {
+    throw new ToolSettingsError(`Unknown tool "${toolName}".`, 404, ERROR_CODES.NOT_FOUND);
+  }
+  if (updates.parameters && Object.keys(updates.parameters).length > 0) {
+    throw new ToolSettingsError(
+      `Tool "${toolName}" has no configurable parameters.`,
+      422,
+      ERROR_CODES.VALIDATION
+    );
+  }
+
+  const savedSettings = await getSavedToolSettings(db, userId, toolName);
+  const nextSettings: EffectiveToolSettings = {
+    enabled: updates.enabled ?? savedSettings?.enabled ?? true,
+    parameters: {},
+  };
+  const persistedSettings = await upsertToolSettings(db, userId, toolName, nextSettings);
+  return buildMcpToolDescriptor(
+    {
+      name: toolName,
+      serverName: server.name,
+      serverSlug: parsed.serverSlug,
+      toolName: parsed.toolName,
+      definition: { name: toolName, description: '', parameters: {} },
+    },
+    persistedSettings
+  );
+}
+
+function buildMcpToolDescriptor(
+  tool: McpBridgeTool,
+  savedSettings: EffectiveToolSettings | undefined
+): ToolSettingsDescriptor {
+  return {
+    name: tool.name,
+    title: `${tool.serverName}: ${tool.toolName}`,
+    description: tool.definition.description,
+    category: 'mcp',
+    enabled: savedSettings?.enabled ?? true,
+    canDisable: true,
+    parameters: {},
+    parameterDescriptors: [],
+  };
 }
 
 function validateSettingsUpdate(

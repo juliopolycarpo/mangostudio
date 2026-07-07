@@ -6,9 +6,9 @@
  * reconnects on next use.
  */
 
-import type { McpServerStatus } from '@mangostudio/shared/mcp';
+import type { McpServerStatus, McpToolDescriptor } from '@mangostudio/shared/mcp';
 import { connectMcpClient } from './client-factory';
-import type { McpClientHandle, McpServerRuntimeConfig } from './types';
+import type { McpClientHandle, McpRequestOptions, McpServerRuntimeConfig } from './types';
 
 export interface McpRuntimeStatus {
   status: McpServerStatus;
@@ -21,6 +21,8 @@ interface ManagedConnection {
   connectPromise: Promise<McpClientHandle> | null;
   status: McpServerStatus;
   error?: string;
+  /** listTools cache for the live session; null until first listing. */
+  tools: McpToolDescriptor[] | null;
 }
 
 const connections = new Map<string, ManagedConnection>();
@@ -58,7 +60,12 @@ export function getMcpClient(
   if (existing?.handle) return Promise.resolve(existing.handle);
   if (existing?.connectPromise) return existing.connectPromise;
 
-  const entry: ManagedConnection = { handle: null, connectPromise: null, status: 'connecting' };
+  const entry: ManagedConnection = {
+    handle: null,
+    connectPromise: null,
+    status: 'connecting',
+    tools: null,
+  };
   connections.set(key, entry);
 
   const connect = connectorOverride ?? connectMcpClient;
@@ -68,6 +75,10 @@ export function getMcpClient(
       // handle but keep the entry so status reads `disconnected` until reuse.
       entry.handle = null;
       entry.status = 'disconnected';
+      entry.tools = null;
+    },
+    onToolListChanged: () => {
+      entry.tools = null;
     },
   }).then(
     (handle) => {
@@ -85,6 +96,28 @@ export function getMcpClient(
     }
   );
   return entry.connectPromise;
+}
+
+/**
+ * Lists a server's tools through the per-session cache, connecting on first
+ * use. The cache lives on the managed connection, so reconnects and
+ * `notifications/tools/list_changed` both invalidate it.
+ * // Usage: const tools = await listMcpToolsCached(userId, config)
+ */
+export async function listMcpToolsCached(
+  userId: string,
+  config: McpServerRuntimeConfig,
+  options?: McpRequestOptions
+): Promise<McpToolDescriptor[]> {
+  const key = connectionKey(userId, config.id);
+  const cached = connections.get(key);
+  if (cached?.handle && cached.tools) return cached.tools;
+
+  const handle = await getMcpClient(userId, config);
+  const tools = await handle.listTools(options);
+  const entry = connections.get(key);
+  if (entry?.handle === handle) entry.tools = tools;
+  return tools;
 }
 
 /**

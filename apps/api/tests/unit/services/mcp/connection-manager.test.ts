@@ -5,6 +5,7 @@ import {
   disposeMcpServer,
   getMcpClient,
   getMcpRuntimeStatus,
+  listMcpToolsCached,
   setMcpClientConnectorForTest,
 } from '../../../../src/services/mcp/connection-manager';
 import type { McpClientHandle, McpServerRuntimeConfig } from '../../../../src/services/mcp/types';
@@ -180,5 +181,64 @@ describe('mcp connection manager', () => {
     expect(closed).toBe(2);
     expect(getMcpRuntimeStatus('user-1', 'server-1')).toEqual({ status: 'disconnected' });
     expect(getMcpRuntimeStatus('user-2', 'server-2')).toEqual({ status: 'disconnected' });
+  });
+});
+
+describe('listMcpToolsCached', () => {
+  const tool = { name: 'echo', description: '', inputSchema: { type: 'object' } };
+
+  function makeListingHandle(onList: () => void): McpClientHandle {
+    return {
+      ...makeHandle(),
+      listTools: () => {
+        onList();
+        return Promise.resolve([tool]);
+      },
+    };
+  }
+
+  it('lists once per session and serves subsequent reads from the cache', async () => {
+    let listCalls = 0;
+    setMcpClientConnectorForTest(() => Promise.resolve(makeListingHandle(() => listCalls++)));
+
+    const config = makeConfig('server-1');
+    expect(await listMcpToolsCached('user-1', config)).toEqual([tool]);
+    expect(await listMcpToolsCached('user-1', config)).toEqual([tool]);
+    expect(listCalls).toBe(1);
+  });
+
+  it('invalidates the cache on tools/list_changed and on session loss', async () => {
+    let listCalls = 0;
+    const listChangers: Array<() => void> = [];
+    const sessionClosers: Array<() => void> = [];
+    setMcpClientConnectorForTest(
+      (_config: McpServerRuntimeConfig, options?: ConnectMcpClientOptions) => {
+        if (options?.onToolListChanged) listChangers.push(options.onToolListChanged);
+        if (options?.onSessionClosed) sessionClosers.push(options.onSessionClosed);
+        return Promise.resolve(makeListingHandle(() => listCalls++));
+      }
+    );
+
+    const config = makeConfig('server-1');
+    await listMcpToolsCached('user-1', config);
+    listChangers[0]?.();
+    await listMcpToolsCached('user-1', config);
+    expect(listCalls).toBe(2);
+
+    sessionClosers[0]?.();
+    await listMcpToolsCached('user-1', config);
+    expect(listCalls).toBe(3);
+  });
+
+  it('drops the cache when the server is disposed', async () => {
+    let listCalls = 0;
+    setMcpClientConnectorForTest(() => Promise.resolve(makeListingHandle(() => listCalls++)));
+
+    const config = makeConfig('server-1');
+    await listMcpToolsCached('user-1', config);
+    await disposeMcpServer('user-1', 'server-1');
+    await listMcpToolsCached('user-1', config);
+
+    expect(listCalls).toBe(2);
   });
 });

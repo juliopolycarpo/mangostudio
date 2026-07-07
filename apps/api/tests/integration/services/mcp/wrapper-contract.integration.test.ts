@@ -57,17 +57,29 @@ describe('mcp client wrapper contract', () => {
 
   it('notifies onSessionClosed when the server drops the session, not on our close', async () => {
     let drops = 0;
-    wrapMcpClient(await connectInMemory(), { timeoutMs: null }, () => {
-      drops += 1;
-    });
+    wrapMcpClient(
+      await connectInMemory(),
+      { timeoutMs: null },
+      {
+        onSessionClosed: () => {
+          drops += 1;
+        },
+      }
+    );
 
     await server?.close();
     await Bun.sleep(0);
     expect(drops).toBe(1);
 
-    const second = wrapMcpClient(await connectInMemory(), { timeoutMs: null }, () => {
-      drops += 1;
-    });
+    const second = wrapMcpClient(
+      await connectInMemory(),
+      { timeoutMs: null },
+      {
+        onSessionClosed: () => {
+          drops += 1;
+        },
+      }
+    );
     await second.close();
     await Bun.sleep(0);
     expect(drops).toBe(1);

@@ -20,7 +20,11 @@ import {
   persistMcpHeaders,
   removeMcpHeaders,
 } from '../../../services/mcp/header-secrets';
-import type { McpServerRuntimeConfig } from '../../../services/mcp/types';
+import {
+  parseJsonStringArray,
+  parseJsonStringRecord,
+  toMcpRuntimeConfig,
+} from '../../../services/mcp/runtime-config';
 import { generateId } from '../../../utils/id';
 import { assertTransportInvariants, McpServerError } from '../domain/mcp-server';
 import {
@@ -143,7 +147,7 @@ export async function testMcpServer(
   id: string
 ): Promise<TestMcpServerResponse> {
   const row = await requireMcpServerRow(db, userId, id);
-  const config = toRuntimeConfig(row);
+  const config = toMcpRuntimeConfig(row);
 
   try {
     const tools = await withHardTimeout(
@@ -173,7 +177,7 @@ export async function listMcpServerTools(
   const row = await requireMcpServerRow(db, userId, id);
 
   try {
-    const handle = await getMcpClient(userId, toRuntimeConfig(row));
+    const handle = await getMcpClient(userId, toMcpRuntimeConfig(row));
     return { tools: await handle.listTools() };
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
@@ -191,19 +195,6 @@ async function requireMcpServerRow(
     throw new McpServerError('MCP server not found.', 404, ERROR_CODES.NOT_FOUND);
   }
   return row;
-}
-
-function toRuntimeConfig(row: McpServerSelect): McpServerRuntimeConfig {
-  return {
-    id: row.id,
-    slug: row.slug,
-    transport: row.transport,
-    command: row.command,
-    args: parseJsonStringArray(row.argsJson),
-    env: parseJsonStringRecord(row.envJson),
-    url: row.url,
-    timeoutMs: row.timeoutMs,
-  };
 }
 
 async function toPublicServer(userId: string, row: McpServerSelect): Promise<McpServer> {
@@ -225,29 +216,6 @@ async function toPublicServer(userId: string, row: McpServerSelect): Promise<Mcp
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
-}
-
-function parseJsonStringArray(raw: string): string[] {
-  try {
-    const parsed: unknown = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed.filter((item) => typeof item === 'string') : [];
-  } catch {
-    return [];
-  }
-}
-
-function parseJsonStringRecord(raw: string): Record<string, string> {
-  try {
-    const parsed: unknown = JSON.parse(raw);
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
-    const record: Record<string, string> = {};
-    for (const [key, value] of Object.entries(parsed)) {
-      if (typeof value === 'string') record[key] = value;
-    }
-    return record;
-  } catch {
-    return {};
-  }
 }
 
 async function withHardTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {

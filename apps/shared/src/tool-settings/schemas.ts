@@ -29,6 +29,7 @@ export const ToolSettingsCategorySchema = Type.Union([
   Type.Literal('system'),
   Type.Literal('image'),
   Type.Literal('interaction'),
+  Type.Literal('mcp'),
 ]);
 
 export const ToolParameterOptionSchema = Type.Object({
