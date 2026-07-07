@@ -16,6 +16,7 @@ import {
   type MultiAgentSettings,
   normalizeAppSettings,
   normalizeChatTitleSettings,
+  type SkillSourcesSettings,
 } from '@mangostudio/shared/app-settings';
 import type { ContextCompactionBehavior, ContextSettings } from '@mangostudio/shared/chat';
 import type { RuleFileSetting } from '@mangostudio/shared/prompt-rules';
@@ -162,6 +163,16 @@ export function useGlobalSettings() {
     [saveSettings]
   );
 
+  const updateSkillSources = useCallback(
+    (updates: Partial<SkillSourcesSettings>) => {
+      saveSettings((current) => ({
+        ...current,
+        skillSources: { ...current.skillSources, ...updates },
+      }));
+    },
+    [saveSettings]
+  );
+
   const setTextSystemPrompt = useCallback(
     (value: string) => {
       updatePromptSettings((current) => ({ ...current, textSystemPrompt: value }));
@@ -288,6 +299,9 @@ export function useGlobalSettings() {
       updateChatTitleSettings({ promptPrefixLength: value }),
     setPreferredChatTitleModel: (value: string) =>
       updateChatTitleSettings({ preferredModel: value }),
+    skillSources: settings.skillSources,
+    setSkillSourceEnabled: (source: 'agents' | 'claude', enabled: boolean) =>
+      updateSkillSources({ [source]: enabled }),
     resetSettings,
   };
 }

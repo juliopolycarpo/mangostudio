@@ -265,4 +265,19 @@ describe('useGlobalSettings', () => {
 
     expect(mockPut.mock.calls[0]?.[0]).toEqual(DEFAULT_APP_SETTINGS);
   });
+
+  it('persists skill source toggles through the app-settings mutation', async () => {
+    const { result } = renderHook(() => useGlobalSettings());
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.skillSources).toEqual(DEFAULT_APP_SETTINGS.skillSources);
+
+    act(() => {
+      result.current.setSkillSourceEnabled('agents', true);
+    });
+
+    await waitFor(() => expect(mockPut).toHaveBeenCalledTimes(1));
+    const persisted = mockPut.mock.calls[0]?.[0] as AppSettings;
+    expect(persisted.skillSources).toEqual({ agents: true, claude: false });
+  });
 });
