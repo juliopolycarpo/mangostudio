@@ -18,6 +18,7 @@ import { Route as AuthenticatedSettingsRouteImport } from './routes/_authenticat
 import { Route as AuthenticatedGalleryRouteImport } from './routes/_authenticated/gallery'
 import { Route as AuthenticatedSettingsIndexRouteImport } from './routes/_authenticated/settings/index'
 import { Route as AuthenticatedSettingsToolsRouteImport } from './routes/_authenticated/settings/tools'
+import { Route as AuthenticatedSettingsSkillsRouteImport } from './routes/_authenticated/settings/skills'
 import { Route as AuthenticatedSettingsProvidersRouteImport } from './routes/_authenticated/settings/providers'
 import { Route as AuthenticatedSettingsPromptsRouteImport } from './routes/_authenticated/settings/prompts'
 import { Route as AuthenticatedSettingsMetricsRouteImport } from './routes/_authenticated/settings/metrics'
@@ -74,6 +75,12 @@ const AuthenticatedSettingsToolsRoute =
   AuthenticatedSettingsToolsRouteImport.update({
     id: '/tools',
     path: '/tools',
+    getParentRoute: () => AuthenticatedSettingsRoute,
+  } as any)
+const AuthenticatedSettingsSkillsRoute =
+  AuthenticatedSettingsSkillsRouteImport.update({
+    id: '/skills',
+    path: '/skills',
     getParentRoute: () => AuthenticatedSettingsRoute,
   } as any)
 const AuthenticatedSettingsProvidersRoute =
@@ -159,6 +166,7 @@ export interface FileRoutesByFullPath {
   '/settings/metrics': typeof AuthenticatedSettingsMetricsRoute
   '/settings/prompts': typeof AuthenticatedSettingsPromptsRoute
   '/settings/providers': typeof AuthenticatedSettingsProvidersRouteWithChildren
+  '/settings/skills': typeof AuthenticatedSettingsSkillsRoute
   '/settings/tools': typeof AuthenticatedSettingsToolsRoute
   '/settings/': typeof AuthenticatedSettingsIndexRoute
   '/settings/providers/$provider': typeof AuthenticatedSettingsProvidersProviderRoute
@@ -178,6 +186,7 @@ export interface FileRoutesByTo {
   '/settings/logs': typeof AuthenticatedSettingsLogsRoute
   '/settings/metrics': typeof AuthenticatedSettingsMetricsRoute
   '/settings/prompts': typeof AuthenticatedSettingsPromptsRoute
+  '/settings/skills': typeof AuthenticatedSettingsSkillsRoute
   '/settings/tools': typeof AuthenticatedSettingsToolsRoute
   '/settings': typeof AuthenticatedSettingsIndexRoute
   '/settings/providers/$provider': typeof AuthenticatedSettingsProvidersProviderRoute
@@ -201,6 +210,7 @@ export interface FileRoutesById {
   '/_authenticated/settings/metrics': typeof AuthenticatedSettingsMetricsRoute
   '/_authenticated/settings/prompts': typeof AuthenticatedSettingsPromptsRoute
   '/_authenticated/settings/providers': typeof AuthenticatedSettingsProvidersRouteWithChildren
+  '/_authenticated/settings/skills': typeof AuthenticatedSettingsSkillsRoute
   '/_authenticated/settings/tools': typeof AuthenticatedSettingsToolsRoute
   '/_authenticated/settings/': typeof AuthenticatedSettingsIndexRoute
   '/_authenticated/settings/providers/$provider': typeof AuthenticatedSettingsProvidersProviderRoute
@@ -224,6 +234,7 @@ export interface FileRouteTypes {
     | '/settings/metrics'
     | '/settings/prompts'
     | '/settings/providers'
+    | '/settings/skills'
     | '/settings/tools'
     | '/settings/'
     | '/settings/providers/$provider'
@@ -243,6 +254,7 @@ export interface FileRouteTypes {
     | '/settings/logs'
     | '/settings/metrics'
     | '/settings/prompts'
+    | '/settings/skills'
     | '/settings/tools'
     | '/settings'
     | '/settings/providers/$provider'
@@ -265,6 +277,7 @@ export interface FileRouteTypes {
     | '/_authenticated/settings/metrics'
     | '/_authenticated/settings/prompts'
     | '/_authenticated/settings/providers'
+    | '/_authenticated/settings/skills'
     | '/_authenticated/settings/tools'
     | '/_authenticated/settings/'
     | '/_authenticated/settings/providers/$provider'
@@ -340,6 +353,13 @@ declare module '@tanstack/react-router' {
       path: '/tools'
       fullPath: '/settings/tools'
       preLoaderRoute: typeof AuthenticatedSettingsToolsRouteImport
+      parentRoute: typeof AuthenticatedSettingsRoute
+    }
+    '/_authenticated/settings/skills': {
+      id: '/_authenticated/settings/skills'
+      path: '/skills'
+      fullPath: '/settings/skills'
+      preLoaderRoute: typeof AuthenticatedSettingsSkillsRouteImport
       parentRoute: typeof AuthenticatedSettingsRoute
     }
     '/_authenticated/settings/providers': {
@@ -450,6 +470,7 @@ interface AuthenticatedSettingsRouteChildren {
   AuthenticatedSettingsMetricsRoute: typeof AuthenticatedSettingsMetricsRoute
   AuthenticatedSettingsPromptsRoute: typeof AuthenticatedSettingsPromptsRoute
   AuthenticatedSettingsProvidersRoute: typeof AuthenticatedSettingsProvidersRouteWithChildren
+  AuthenticatedSettingsSkillsRoute: typeof AuthenticatedSettingsSkillsRoute
   AuthenticatedSettingsToolsRoute: typeof AuthenticatedSettingsToolsRoute
   AuthenticatedSettingsIndexRoute: typeof AuthenticatedSettingsIndexRoute
 }
@@ -465,6 +486,7 @@ const AuthenticatedSettingsRouteChildren: AuthenticatedSettingsRouteChildren = {
   AuthenticatedSettingsPromptsRoute: AuthenticatedSettingsPromptsRoute,
   AuthenticatedSettingsProvidersRoute:
     AuthenticatedSettingsProvidersRouteWithChildren,
+  AuthenticatedSettingsSkillsRoute: AuthenticatedSettingsSkillsRoute,
   AuthenticatedSettingsToolsRoute: AuthenticatedSettingsToolsRoute,
   AuthenticatedSettingsIndexRoute: AuthenticatedSettingsIndexRoute,
 }
