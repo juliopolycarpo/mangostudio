@@ -676,7 +676,6 @@ export const messages = {
       commandPlaceholder: 'ex. bunx @modelcontextprotocol/server-everything',
       argsLabel: 'Argumentos',
       argPlaceholder: 'ex. --verbose',
-      noArgs: 'Nenhum argumento.',
       envLabel: 'Variáveis de ambiente',
       envHint: 'Os valores são armazenados como texto simples. Não coloque segredos aqui.',
       urlLabel: 'URL',
@@ -708,9 +707,6 @@ export const messages = {
       testingButton: 'Testando...',
       testSuccess: 'Conectado — {count} ferramentas disponíveis',
       testFailed: 'Falha na conexão',
-      toolsTitle: 'Ferramentas',
-      toolCount: '{count} ferramentas',
-      toolCountOne: '1 ferramenta',
       showTools: 'Mostrar ferramentas',
       hideTools: 'Ocultar ferramentas',
       noToolsDiscovered:
