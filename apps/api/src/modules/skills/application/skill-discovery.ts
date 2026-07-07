@@ -72,11 +72,15 @@ type ScannedSkill = Omit<SkillDescriptor, 'enabled' | 'shadowed'>;
 
 interface SkillsCache {
   readonly scannedAt: number;
-  readonly dirsKey: string;
   readonly skills: ScannedSkill[];
 }
 
-let cache: SkillsCache | null = null;
+/**
+ * Memoized scans keyed by the source-dir signature, so users on different
+ * source toggles don't evict each other's entry (the set of distinct keys is
+ * bounded by the source combinations, at most a handful).
+ */
+const cacheByDirs = new Map<string, SkillsCache>();
 
 /**
  * Lists every skill discovered in the user's enabled sources (valid and
@@ -118,7 +122,7 @@ export async function listUsableSkills(
 
 /** Drops the discovery memo — for tests. // Usage: resetSkillsCache() */
 export function resetSkillsCache(): void {
-  cache = null;
+  cacheByDirs.clear();
 }
 
 /**
@@ -143,14 +147,15 @@ function scanSkillSources(sourceDirs: SkillSourceDir[], now: () => number): Scan
   const dirsKey = sourceDirs.map((entry) => `${entry.source}:${entry.dir}`).join('\n');
   const timestamp = now();
 
-  if (cache && cache.dirsKey === dirsKey && timestamp - cache.scannedAt < CACHE_TTL_MS) {
-    return cache.skills;
+  const cached = cacheByDirs.get(dirsKey);
+  if (cached && timestamp - cached.scannedAt < CACHE_TTL_MS) {
+    return cached.skills;
   }
 
   const skills = sourceDirs
     .flatMap((sourceDir) => scanSourceDir(sourceDir))
     .sort((left, right) => left.key.localeCompare(right.key));
-  cache = { scannedAt: timestamp, dirsKey, skills };
+  cacheByDirs.set(dirsKey, { scannedAt: timestamp, skills });
   return skills;
 }
 
