@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { getDb } from '../../../../src/db/database';
 import { loadConfigForTest } from '../../../../src/lib/config';
 import {
   loadSkillBody,
@@ -10,6 +11,7 @@ import {
 import { resetSkillsCache } from '../../../../src/modules/skills/application/skill-discovery';
 import { SkillError } from '../../../../src/modules/skills/domain/skill';
 
+const USER_ID = 'skill-content-test-user';
 let skillsDir: string;
 let outsideDir: string;
 
@@ -38,8 +40,8 @@ afterEach(() => {
 });
 
 describe('loadSkillBody', () => {
-  it('returns the frontmatter-stripped body, base dir, and bundled files', () => {
-    const result = loadSkillBody('pdf-tools');
+  it('returns the frontmatter-stripped body, base dir, and bundled files', async () => {
+    const result = await loadSkillBody('pdf-tools', getDb(), USER_ID);
 
     expect(result.body).toBe('Run `scripts/fix.sh`.');
     expect(result.baseDir).toBe(join(skillsDir, 'pdf-tools'));
@@ -47,39 +49,45 @@ describe('loadSkillBody', () => {
     expect(result.filesTruncated).toBe(false);
   });
 
-  it('rejects unknown skills with the valid names listed', () => {
-    expect(() => loadSkillBody('nope')).toThrow(SkillError);
-    expect(() => loadSkillBody('nope')).toThrow(/Available skills: pdf-tools/);
+  it('rejects unknown skills with the valid names listed', async () => {
+    await expect(loadSkillBody('nope', getDb(), USER_ID)).rejects.toThrow(SkillError);
+    await expect(loadSkillBody('nope', getDb(), USER_ID)).rejects.toThrow(
+      /Available skills: pdf-tools/
+    );
   });
 });
 
 describe('loadSkillFile', () => {
-  it('reads a bundled file relative to the skill directory', () => {
-    const result = loadSkillFile('pdf-tools', 'scripts/fix.sh');
+  it('reads a bundled file relative to the skill directory', async () => {
+    const result = await loadSkillFile('pdf-tools', 'scripts/fix.sh', getDb(), USER_ID);
     expect(result.content).toContain('echo fixed');
     expect(result.truncated).toBe(false);
   });
 
-  it('rejects traversal, absolute paths, and the empty path', () => {
+  it('rejects traversal, absolute paths, and the empty path', async () => {
     for (const attempt of ['../outside.txt', '../../etc/passwd', '/etc/passwd', '', '.']) {
-      expect(() => loadSkillFile('pdf-tools', attempt)).toThrow(/stay inside the skill directory/);
+      await expect(loadSkillFile('pdf-tools', attempt, getDb(), USER_ID)).rejects.toThrow(
+        /stay inside the skill directory/
+      );
     }
   });
 
-  it('rejects symlinks that escape the skill directory', () => {
+  it('rejects symlinks that escape the skill directory', async () => {
     symlinkSync(join(outsideDir, 'secret.txt'), join(skillsDir, 'pdf-tools', 'escape.txt'));
-    expect(() => loadSkillFile('pdf-tools', 'escape.txt')).toThrow(
+    await expect(loadSkillFile('pdf-tools', 'escape.txt', getDb(), USER_ID)).rejects.toThrow(
       /stay inside the skill directory/
     );
   });
 
-  it('returns not-found for missing bundled files', () => {
-    expect(() => loadSkillFile('pdf-tools', 'missing.txt')).toThrow(/Skill file not found/);
+  it('returns not-found for missing bundled files', async () => {
+    await expect(loadSkillFile('pdf-tools', 'missing.txt', getDb(), USER_ID)).rejects.toThrow(
+      /Skill file not found/
+    );
   });
 
-  it('truncates oversized bundled files and flags it', () => {
+  it('truncates oversized bundled files and flags it', async () => {
     writeFileSync(join(skillsDir, 'pdf-tools', 'big.txt'), 'y'.repeat(256 * 1024 + 10), 'utf8');
-    const result = loadSkillFile('pdf-tools', 'big.txt');
+    const result = await loadSkillFile('pdf-tools', 'big.txt', getDb(), USER_ID);
     expect(result.truncated).toBe(true);
     expect(result.content.length).toBe(256 * 1024);
   });

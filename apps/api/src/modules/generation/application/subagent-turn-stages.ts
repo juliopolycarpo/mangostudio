@@ -103,9 +103,11 @@ export async function prepareSubagentTurn(
     provider,
     runtime: {
       ...runtime,
-      effectiveSystemPrompt: appendSkillsPromptSection(
+      effectiveSystemPrompt: await appendSkillsPromptSection(
         runtime.effectiveSystemPrompt,
-        allowedToolNames
+        allowedToolNames,
+        input.db,
+        input.userId
       ),
     },
     toolDefinitions,

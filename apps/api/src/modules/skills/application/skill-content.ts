@@ -9,6 +9,8 @@ import { type Dirent, readdirSync, realpathSync } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
 import { parseMarkdownFrontmatter } from '@mangostudio/shared/markdown';
 import type { SkillDescriptor } from '@mangostudio/shared/skills';
+import type { Kysely } from 'kysely';
+import type { Database } from '../../../db/types';
 import { RegularFileReadError, readRegularFileUtf8 } from '../../../lib/safe-file';
 import { SkillError } from '../domain/skill';
 import { listUsableSkills, MAX_SKILL_FILE_BYTES, SKILL_FILE_NAME } from './skill-discovery';
@@ -36,9 +38,13 @@ export interface SkillFileResult {
   readonly truncated: boolean;
 }
 
-/** Loads a skill's instructions and bundled-file listing. // Usage: loadSkillBody('pdf-tools') */
-export function loadSkillBody(name: string): SkillBodyResult {
-  const skill = findSkillByName(name);
+/** Loads a skill's instructions and bundled-file listing. // Usage: await loadSkillBody('pdf-tools', db, userId) */
+export async function loadSkillBody(
+  name: string,
+  db: Kysely<Database>,
+  userId: string
+): Promise<SkillBodyResult> {
+  const skill = await findSkillByName(name, db, userId);
   const markdown = readSkillText(join(skill.path, SKILL_FILE_NAME));
   const listing = listBundledFiles(skill.path);
 
@@ -52,9 +58,14 @@ export function loadSkillBody(name: string): SkillBodyResult {
   };
 }
 
-/** Reads one bundled file, confined to the skill directory. // Usage: loadSkillFile('pdf-tools', 'reference.md') */
-export function loadSkillFile(name: string, file: string): SkillFileResult {
-  const skill = findSkillByName(name);
+/** Reads one bundled file, confined to the skill directory. // Usage: await loadSkillFile('pdf-tools', 'reference.md', db, userId) */
+export async function loadSkillFile(
+  name: string,
+  file: string,
+  db: Kysely<Database>,
+  userId: string
+): Promise<SkillFileResult> {
+  const skill = await findSkillByName(name, db, userId);
   const filePath = resolveInsideSkillDir(skill.path, file);
   const content = readSkillText(filePath);
 
@@ -66,8 +77,12 @@ export function loadSkillFile(name: string, file: string): SkillFileResult {
   };
 }
 
-function findSkillByName(name: string): SkillDescriptor {
-  const skills = listUsableSkills();
+async function findSkillByName(
+  name: string,
+  db: Kysely<Database>,
+  userId: string
+): Promise<SkillDescriptor> {
+  const skills = await listUsableSkills(db, userId);
   const skill = skills.find((candidate) => candidate.name === name);
   if (skill) return skill;
 

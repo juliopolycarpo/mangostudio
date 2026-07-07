@@ -169,6 +169,16 @@ export interface UserAgentSettingsTable {
   updatedAt: number;
 }
 
+export interface UserSkillSettingsTable {
+  id: string;
+  userId: string;
+  /** Stable `<source>:<slug>` identity (see `skillKey` in the skills domain). */
+  skillKey: string;
+  enabled: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface ConnectorUsageSamplesTable {
   id: string;
   /** ChatGPT account id — usage windows are account-scoped, not connector-scoped. */
@@ -201,6 +211,7 @@ export interface Database {
   user_tool_settings: UserToolSettingsTable;
   user_app_settings: UserAppSettingsTable;
   user_agent_settings: UserAgentSettingsTable;
+  user_skill_settings: UserSkillSettingsTable;
   observability_snapshot: ObservabilitySnapshotTable;
   connector_usage_samples: ConnectorUsageSamplesTable;
 }
@@ -217,3 +228,5 @@ export type UserToolSettingsSelect = Selectable<UserToolSettingsTable>;
 export type UserAppSettingsSelect = Selectable<UserAppSettingsTable>;
 
 export type UserAgentSettingsSelect = Selectable<UserAgentSettingsTable>;
+
+export type UserSkillSettingsSelect = Selectable<UserSkillSettingsTable>;
