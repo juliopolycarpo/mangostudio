@@ -91,6 +91,23 @@ describe('labeler coverage', () => {
     expect(buildSection).not.toContain('.gitignore');
   });
 
+  test('classifies skills and MCP feature changes', () => {
+    const labeler = readText('.github/labeler.yml');
+
+    expect(labeler).toContain('"area: skills":');
+    const skillsSection = extractLabelSection(labeler, '"area: skills":', '"area: mcp":');
+    expect(skillsSection).toContain('- "apps/api/src/modules/skills/**"');
+    expect(skillsSection).toContain('- "apps/frontend/src/features/settings/skills/**"');
+    expect(skillsSection).toContain('- "apps/shared/src/skills/**"');
+
+    expect(labeler).toContain('"area: mcp":');
+    const mcpSection = extractLabelSection(labeler, '"area: mcp":', '"area: tooling":');
+    expect(mcpSection).toContain('- "apps/api/src/services/mcp/**"');
+    expect(mcpSection).toContain('- "apps/api/src/modules/mcp-servers/**"');
+    expect(mcpSection).toContain('- "apps/frontend/src/features/settings/mcp/**"');
+    expect(mcpSection).toContain('- "apps/shared/src/mcp/**"');
+  });
+
   test('applies type: dependencies as a Dependabot auto-label for both ecosystems', () => {
     const dependabot = readText('.github/dependabot.yml');
 

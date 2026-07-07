@@ -78,6 +78,8 @@ Useful docs:
 - `area: connectors` — connector modules, secret store, `apps/shared/src/connectors/**`
 - `area: settings` — app/provider/tool settings modules + frontend settings
 - `area: tools` — tool registry, tool settings, `apps/shared/src/tool-settings/**`
+- `area: skills` — `apps/api/src/modules/skills/**`, `apps/frontend/src/features/settings/skills/**`, `apps/shared/src/skills/**`
+- `area: mcp` — `apps/api/src/services/mcp/**`, `apps/api/src/modules/mcp-servers/**`, `apps/frontend/src/features/settings/mcp/**`, `apps/shared/src/mcp/**`
 - `area: i18n` — `apps/shared/src/i18n/**`
 - `area: components` — `apps/frontend/src/components/**`
 
@@ -107,6 +109,8 @@ Useful docs:
 - Changelog or release: `cliff.toml`, `scripts/changelog.ts`, `scripts/lib/changelog.ts`, `scripts/lib/release-version.ts`, `scripts/lib/prepare-release.ts`, `scripts/check-versions.ts`, `scripts/release/prepare-release.ts`, `scripts/release/pack-npm.ts`, `packages/cli/`, `packages/cargo-shim/`, `.github/workflows/{pr-qa-gate,release,cargo-shim}.yml`, `docs/reference/releasing.md`
 - Attachments: `apps/api/src/modules/attachments/application/attachment-storage.ts`, `apps/api/src/modules/attachments/application/attachment-validation.ts`, `apps/frontend/src/features/chat/components/MessageParts.tsx`
 - Tools: `apps/api/src/services/tools/registry.ts`, `apps/api/src/services/tools/builtin/generate-image.ts`, `apps/api/src/modules/tool-settings/http/tool-settings-routes.ts`, `apps/frontend/src/features/settings/tools/index.tsx`
+- Skills: `apps/api/src/modules/skills/application/skill-discovery.ts`, `apps/api/src/modules/skills/application/skill-content.ts`, `apps/api/src/modules/skills/application/skills-prompt-section.ts`, `apps/api/src/services/tools/builtin/skill.ts`, `apps/api/src/modules/skills/http/skill-routes.ts`, `apps/frontend/src/features/settings/skills/`, `apps/shared/src/skills/`, `docs/reference/skills.md`
+- MCP servers: `apps/api/src/services/mcp/`, `apps/api/src/modules/mcp-servers/`, `apps/frontend/src/features/settings/mcp/`, `apps/shared/src/mcp/`, `docs/reference/mcp.md`
 - Prompt rules: `apps/api/src/modules/prompt-rules/application/prompt-composer.ts`, `apps/api/src/modules/prompt-rules/application/rule-file-resolver.ts`, `apps/api/src/modules/prompt-rules/http/rule-file-routes.ts`, `apps/frontend/src/features/settings/prompts/`
 - Image generation: `apps/api/src/modules/generation/application/generate-image.ts`, `apps/api/src/services/generated-images/generated-image-storage.ts`, `apps/frontend/src/features/gallery/GalleryPage.tsx`
 
