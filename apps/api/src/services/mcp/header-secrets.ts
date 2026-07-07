@@ -25,11 +25,17 @@ export async function persistMcpHeaders(
   await store.setSecret(headerSecretDescriptor(serverId), JSON.stringify(headers));
 }
 
-/** Reads the header bundle; missing or malformed bundles resolve to `{}`. */
+/**
+ * Reads the header bundle; missing or malformed bundles resolve to `{}`.
+ * An unavailable secret store also reads as empty: writes fail loudly at
+ * configure time, so nothing can be stored that this would silently drop —
+ * and header-less HTTP servers must stay reachable without OS secrets.
+ */
 export async function readMcpHeaders(
   serverId: string,
   store: SecretStore = bunSecretStore
 ): Promise<Record<string, string>> {
+  if (!(await store.isAvailable())) return {};
   const raw = await store.getSecret(headerSecretDescriptor(serverId));
   if (!raw) return {};
 
