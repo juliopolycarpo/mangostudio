@@ -14,6 +14,7 @@ import { geminiAliasRoutes } from '../../modules/connectors/http/gemini-aliases-
 import { observabilityRoutes } from '../../modules/observability/http/observability-routes';
 import { ruleFileRoutes } from '../../modules/prompt-rules/http/rule-file-routes';
 import { providerSettingsRoutes } from '../../modules/provider-settings/http/provider-settings-routes';
+import { skillRoutes } from '../../modules/skills/http/skill-routes';
 import { toolSettingsRoutes } from '../../modules/tool-settings/http/tool-settings-routes';
 import { modelRoutes } from './models';
 
@@ -27,6 +28,7 @@ export const settingsRoutes = (app: Elysia) =>
       .use(chatGptUsageRoutes)
       .use(modelRoutes)
       .use(providerSettingsRoutes)
+      .use(skillRoutes)
       .use(toolSettingsRoutes)
       .use(observabilityRoutes)
       .use(ruleFileRoutes)
