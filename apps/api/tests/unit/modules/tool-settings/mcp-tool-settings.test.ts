@@ -24,7 +24,7 @@ async function insertServer(userId: string, slug: string, name: string): Promise
   await getDb()
     .insertInto('mcp_servers')
     .values({
-      id: `server-${slug}-${seq}`,
+      id: `${userId}-server-${slug}-${seq}`,
       userId,
       name,
       slug,

@@ -32,7 +32,7 @@ async function insertServer(
   await getDb()
     .insertInto('mcp_servers')
     .values({
-      id: `server-${slug}-${seq}`,
+      id: `${userId}-server-${slug}-${seq}`,
       userId,
       name: overrides.name ?? `Server ${slug}`,
       slug,

@@ -17,7 +17,7 @@ function nextUserId(): string {
 
 async function insertServer(userId: string, slug: string, enabled = 1): Promise<string> {
   seq += 1;
-  const id = `server-${slug}-${seq}`;
+  const id = `${userId}-server-${slug}-${seq}`;
   const now = Date.now();
   await getDb()
     .insertInto('mcp_servers')
