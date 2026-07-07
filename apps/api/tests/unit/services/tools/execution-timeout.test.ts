@@ -101,6 +101,24 @@ describe('migrateLegacyToolParameters', () => {
     ).toEqual({ timeoutSeconds: 45 });
   });
 
+  it('clamps sub-minimum legacy timeouts up to the floor instead of throwing', () => {
+    const migrated = migrateLegacyToolParameters('bash', {
+      timeoutMs: 1_000,
+      maxOutputBytes: 5_000,
+    });
+    expect(migrated).toEqual({
+      timeoutSeconds: TOOL_EXECUTION_TIMEOUT_SECONDS_MIN,
+      maxOutputBytes: 5_000,
+    });
+    // The migrated shape must survive normalization so unrelated settings are kept.
+    const merged = mergeToolSettings(buildShellTool('bash'), {
+      enabled: true,
+      parameters: { timeoutMs: 1_000, maxOutputBytes: 5_000 },
+    });
+    expect(merged.parameters.timeoutSeconds).toBe(TOOL_EXECUTION_TIMEOUT_SECONDS_MIN);
+    expect(merged.parameters.maxOutputBytes).toBe(5_000);
+  });
+
   it('leaves non-shell tools untouched', () => {
     const params = { timeoutMs: 5000 };
     expect(migrateLegacyToolParameters('grep', params)).toBe(params);

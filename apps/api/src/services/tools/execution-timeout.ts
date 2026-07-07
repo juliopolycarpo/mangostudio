@@ -43,7 +43,13 @@ export function migrateLegacyToolParameters(
   const { timeoutMs: _legacy, ...rest } = parameters;
   return {
     ...rest,
-    [TOOL_EXECUTION_TIMEOUT_PARAM]: Math.max(1, Math.round(legacyMs / 1000)),
+    // Clamp into the current bounds: legacy `timeoutMs` allowed values as low as
+    // 1s, which would round below the new 5s floor and make normalization throw,
+    // resetting every other saved shell setting to defaults.
+    [TOOL_EXECUTION_TIMEOUT_PARAM]: Math.min(
+      TOOL_EXECUTION_TIMEOUT_SECONDS_MAX,
+      Math.max(TOOL_EXECUTION_TIMEOUT_SECONDS_MIN, Math.round(legacyMs / 1000))
+    ),
   };
 }
 
