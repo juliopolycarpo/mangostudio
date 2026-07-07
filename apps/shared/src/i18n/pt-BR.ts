@@ -185,6 +185,7 @@ export const messages = {
       agents: 'Agentes',
       prompts: 'Prompts',
       tools: 'Ferramentas',
+      skills: 'Skills',
       metrics: 'Métricas',
       logs: 'Logs',
     },
@@ -636,6 +637,28 @@ export const messages = {
         pathPlaceholder: 'ex. /home/usuario/projetos',
         noPaths: 'Nenhum caminho configurado.',
       },
+    },
+    skills: {
+      title: 'Skills',
+      description: 'Ative ou desative Agent Skills instaladas e habilite fontes de terceiros.',
+      sourcesTitle: 'Fontes de skills',
+      sourcesDescription:
+        'Skills em ~/.mango/skills estão sempre disponíveis. Diretórios escritos para outros agentes são opcionais.',
+      sourceLabels: {
+        mango: 'MangoStudio',
+        agents: 'Agents',
+        claude: 'Claude',
+      },
+      sourceNotFound: 'Diretório não encontrado',
+      enabled: 'Ativada',
+      disabled: 'Desativada',
+      invalidBadge: 'Inválida',
+      shadowedBadge: 'Sombreada',
+      shadowedHint:
+        'Uma fonte de maior prioridade fornece uma skill com o mesmo nome, então esta cópia está inativa.',
+      loadError: 'Falha ao carregar skills',
+      saveError: 'Falha ao salvar configurações de skills',
+      noSkills: 'Nenhuma skill instalada.',
     },
     metrics: {
       title: 'Métricas',

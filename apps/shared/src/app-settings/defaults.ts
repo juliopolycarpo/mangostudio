@@ -18,7 +18,13 @@ import type {
   RuleFileSetting,
 } from '../prompt-rules';
 import type { ReasoningEffort } from '../types';
-import type { AppSettings, ChatTitleSettings, ImageQuality, MultiAgentSettings } from './schemas';
+import type {
+  AppSettings,
+  ChatTitleSettings,
+  ImageQuality,
+  MultiAgentSettings,
+  SkillSourceSettings,
+} from './schemas';
 
 const CURRENT_MODEL_SETTING = 'current_model';
 
@@ -84,6 +90,11 @@ export const DEFAULT_MULTI_AGENT_SETTINGS: MultiAgentSettings = {
   defaultMaxTurns: SUBAGENT_MAX_TURNS_DEFAULT,
 };
 
+export const DEFAULT_SKILL_SOURCE_SETTINGS: SkillSourceSettings = {
+  agents: false,
+  claude: false,
+};
+
 export const DEFAULT_APP_SETTINGS: AppSettings = {
   promptSettings: DEFAULT_PROMPT_SETTINGS,
   globalImageQuality: '1K',
@@ -93,6 +104,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   multiAgentSettings: DEFAULT_MULTI_AGENT_SETTINGS,
   contextSettings: DEFAULT_CONTEXT_SETTINGS,
   chatTitleSettings: DEFAULT_CHAT_TITLE_SETTINGS,
+  skillSources: DEFAULT_SKILL_SOURCE_SETTINGS,
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -300,6 +312,15 @@ export function normalizeMultiAgentSettings(value: unknown): MultiAgentSettings 
   };
 }
 
+export function normalizeSkillSourceSettings(value: unknown): SkillSourceSettings {
+  if (!isRecord(value)) return DEFAULT_SKILL_SOURCE_SETTINGS;
+
+  return {
+    agents: typeof value.agents === 'boolean' ? value.agents : DEFAULT_SKILL_SOURCE_SETTINGS.agents,
+    claude: typeof value.claude === 'boolean' ? value.claude : DEFAULT_SKILL_SOURCE_SETTINGS.claude,
+  };
+}
+
 export function normalizeAppSettings(value: unknown): AppSettings {
   if (!isRecord(value)) return DEFAULT_APP_SETTINGS;
 
@@ -323,5 +344,6 @@ export function normalizeAppSettings(value: unknown): AppSettings {
     multiAgentSettings: normalizeMultiAgentSettings(value.multiAgentSettings),
     contextSettings: normalizeContextSettings(value.contextSettings),
     chatTitleSettings: normalizeChatTitleSettings(value.chatTitleSettings),
+    skillSources: normalizeSkillSourceSettings(value.skillSources),
   };
 }

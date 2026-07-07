@@ -152,6 +152,16 @@ export interface UserToolSettingsTable {
   updatedAt: number;
 }
 
+export interface UserSkillSettingsTable {
+  id: string;
+  userId: string;
+  /** Stable `<source>:<slug>` skill identity. */
+  skillKey: string;
+  enabled: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface UserAppSettingsTable {
   id: string;
   userId: string;
@@ -199,6 +209,7 @@ export interface Database {
   verification: VerificationTable;
   user_provider_settings: UserProviderSettingsTable;
   user_tool_settings: UserToolSettingsTable;
+  user_skill_settings: UserSkillSettingsTable;
   user_app_settings: UserAppSettingsTable;
   user_agent_settings: UserAgentSettingsTable;
   observability_snapshot: ObservabilitySnapshotTable;

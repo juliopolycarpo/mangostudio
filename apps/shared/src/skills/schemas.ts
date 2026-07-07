@@ -5,9 +5,9 @@ export const SKILL_SLUG_PATTERN = '^[a-z0-9]+(?:-[a-z0-9]+)*$';
 export const SKILL_SLUG_MAX_LENGTH = 64;
 
 /**
- * Where a skill was discovered. Only `mango` (~/.mango/skills) is scanned
- * today; `agents` and `claude` are reserved for third-party skill sources so
- * the `<source>:<slug>` key format never has to migrate.
+ * Where a skill was discovered. `mango` (~/.mango/skills) is always scanned;
+ * `agents` (~/.agents/skills) and `claude` (~/.claude/skills) are opt-in
+ * third-party sources toggled through app settings.
  */
 export const SkillSourceSchema = Type.Union([
   Type.Literal('mango'),
@@ -27,14 +27,34 @@ export const SkillDescriptorSchema = Type.Object({
   path: Type.String({ minLength: 1 }),
   valid: Type.Boolean(),
   enabled: Type.Boolean(),
+  /** True when a higher-precedence source (mango > agents > claude) owns the slug. */
+  shadowed: Type.Boolean(),
   /** Why the descriptor was flagged invalid, when `valid` is false. */
   error: Type.Optional(Type.String()),
 });
 
+/** Discovery state of one opt-in third-party skill source directory. */
+export const SkillSourceStateSchema = Type.Object({
+  enabled: Type.Boolean(),
+  /** Absolute path of the source's skills directory. */
+  path: Type.String({ minLength: 1 }),
+  exists: Type.Boolean(),
+});
+
 export const SkillListResponseSchema = Type.Object({
   skills: Type.Array(SkillDescriptorSchema),
+  sources: Type.Object({
+    agents: SkillSourceStateSchema,
+    claude: SkillSourceStateSchema,
+  }),
+});
+
+export const UpdateSkillSettingsBodySchema = Type.Object({
+  enabled: Type.Boolean(),
 });
 
 export type SkillSource = Static<typeof SkillSourceSchema>;
 export type SkillDescriptor = Static<typeof SkillDescriptorSchema>;
+export type SkillSourceState = Static<typeof SkillSourceStateSchema>;
 export type SkillListResponse = Static<typeof SkillListResponseSchema>;
+export type UpdateSkillSettingsBody = Static<typeof UpdateSkillSettingsBodySchema>;

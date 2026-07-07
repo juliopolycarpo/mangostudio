@@ -5,6 +5,7 @@ export {
   DEFAULT_CONTEXT_SETTINGS,
   DEFAULT_MULTI_AGENT_SETTINGS,
   DEFAULT_PROMPT_SETTINGS,
+  DEFAULT_SKILL_SOURCE_SETTINGS,
   IMAGE_QUALITY_OPTIONS,
   MAX_SUBAGENT_CALLS_DEFAULT,
   MAX_SUBAGENT_CALLS_MAX,
@@ -17,6 +18,7 @@ export {
   normalizeContextSettings,
   normalizeMultiAgentSettings,
   normalizePromptSettings,
+  normalizeSkillSourceSettings,
   SUBAGENT_MAX_TURNS_DEFAULT,
   SUBAGENT_MAX_TURNS_MAX,
   SUBAGENT_MAX_TURNS_MIN,
@@ -31,4 +33,6 @@ export {
   ImageQualitySchema,
   type MultiAgentSettings,
   MultiAgentSettingsSchema,
+  type SkillSourceSettings,
+  SkillSourceSettingsSchema,
 } from './schemas';
