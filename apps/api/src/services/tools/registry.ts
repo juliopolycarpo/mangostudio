@@ -5,6 +5,7 @@
 
 import type { AgentProfile } from '@mangostudio/shared/agents';
 import type { ToolSettingsDescriptor } from '@mangostudio/shared/tool-settings';
+import { toolNameMatches } from '../mcp/tool-naming';
 import {
   getSafeEffectiveToolSettings,
   getToolDefinitionsForTools,
@@ -65,8 +66,8 @@ export function getToolDefinitionsForAgent(
   const allowedToolNames = new Set(profile.toolNames);
   if (allowedToolNames.size === 0) return [];
 
-  const tools = getAllTools().filter(
-    (tool) => allowedToolNames.has('*') || allowedToolNames.has(tool.definition.name)
+  const tools = getAllTools().filter((tool) =>
+    toolNameMatches(allowedToolNames, tool.definition.name)
   );
 
   return getToolDefinitionsForTools(tools, settingsByToolName);

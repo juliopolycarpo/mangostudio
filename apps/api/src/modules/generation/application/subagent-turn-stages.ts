@@ -1,8 +1,12 @@
 import type { AgentProfile } from '@mangostudio/shared/agents';
 import type { ProviderRuntimeSettings } from '@mangostudio/shared/provider-settings';
 import type { SubagentTracePart } from '@mangostudio/shared/types';
+import type { Kysely } from 'kysely';
+import type { Database } from '../../../db/types';
 import { createDiagnosticLogger } from '../../../lib/logger';
 import { safeJsonParse } from '../../../lib/safe-parse';
+import { executeMcpTool } from '../../../services/mcp/tool-bridge';
+import { isMcpToolName } from '../../../services/mcp/tool-naming';
 import {
   getProviderForModel,
   getProvider as getRegisteredProvider,
@@ -222,11 +226,13 @@ export async function runSubagentStreamLoop(
     if (!turnCompleted || pendingCalls.size === 0) break;
     toolResults = await executeSubagentTools({
       calls: pendingCalls,
+      db: input.db,
       userId: input.userId,
       chatId: input.chatId,
       allowedToolNames: session.allowedToolNames,
       settingsByToolName: runtime.toolSettingsByName,
       tools: session.tools,
+      signal: input.signal,
     });
     isFirstIteration = false;
   }
@@ -552,11 +558,13 @@ async function streamSubagentSummarizeTurn(input: {
 // biome-ignore lint/suspicious/useAwait: Migrated from ESLint
 async function executeSubagentTools(input: {
   readonly calls: ReadonlyMap<string, { name: string; argsStr: string }>;
+  readonly db: Kysely<Database>;
   readonly userId: string;
   readonly chatId: string;
   readonly allowedToolNames: ReadonlySet<string>;
   readonly settingsByToolName: ReadonlyMap<string, EffectiveToolSettings>;
   readonly tools: Array<{ callId: string; name: string; isError?: boolean }>;
+  readonly signal: AbortSignal;
 }): Promise<NonNullable<AgentTurnRequest['toolResults']>> {
   return Promise.all(
     Array.from(input.calls.entries()).map(async ([callId, call]) => {
@@ -583,15 +591,37 @@ async function executeSubagentTools(input: {
             'TOOL_NOT_ALLOWED'
           );
         }
-        const tool = getTool(call.name);
-        if (!tool)
-          throw new SubagentDelegationError(`Unknown tool: "${call.name}"`, 'UNKNOWN_TOOL');
-        result = await executeTool(
-          call.name,
-          safeJsonParse(call.argsStr) ?? {},
-          { userId: input.userId, chatId: input.chatId, parameters: {} },
-          getSafeEffectiveToolSettings(tool, input.settingsByToolName.get(call.name))
-        );
+        if (isMcpToolName(call.name)) {
+          if (input.settingsByToolName.get(call.name)?.enabled === false) {
+            throw new SubagentDelegationError(
+              `Tool "${call.name}" is disabled for this user.`,
+              'TOOL_NOT_ALLOWED'
+            );
+          }
+          const mcpResult = await executeMcpTool(
+            input.db,
+            input.userId,
+            call.name,
+            safeJsonParse(call.argsStr) ?? {},
+            { signal: input.signal }
+          );
+          if (mcpResult.isError) {
+            result = { error: mcpResult.contentText };
+            isError = true;
+          } else {
+            result = mcpResult.contentText;
+          }
+        } else {
+          const tool = getTool(call.name);
+          if (!tool)
+            throw new SubagentDelegationError(`Unknown tool: "${call.name}"`, 'UNKNOWN_TOOL');
+          result = await executeTool(
+            call.name,
+            safeJsonParse(call.argsStr) ?? {},
+            { userId: input.userId, chatId: input.chatId, parameters: {} },
+            getSafeEffectiveToolSettings(tool, input.settingsByToolName.get(call.name))
+          );
+        }
       } catch (error) {
         result = { error: error instanceof Error ? error.message : 'Subagent tool failed' };
         isError = true;

@@ -3,6 +3,8 @@ import type { ProviderRuntimeSettings } from '@mangostudio/shared/provider-setti
 import type { ProviderType } from '@mangostudio/shared/types';
 import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';
+import { listMcpToolDefinitions } from '../../../services/mcp/tool-bridge';
+import { toolNameMatches } from '../../../services/mcp/tool-naming';
 import { mergeProviderRuntimeSettings } from '../../../services/providers/core/provider-settings-policy';
 import type { ToolDefinition } from '../../../services/providers/types';
 import { getToolDefinitionsForAgent } from '../../../services/tools';
@@ -53,15 +55,19 @@ export async function resolveAgentRuntime(
   const requestedAgentId = resolveRuntimeAgentId(input.agentMode, input.agentId);
   const profile =
     input.profile ?? (await getAgentProfile(input.db, input.userId, requestedAgentId));
-  const [savedProviderSettings, toolSettings] = await Promise.all([
+  const [savedProviderSettings, toolSettings, mcpToolDefinitions] = await Promise.all([
     getProviderSettings(input.db, input.userId, input.provider),
     listSavedToolSettings(input.db, input.userId),
+    profile.toolsEnabled ? listMcpToolDefinitions(input.db, input.userId) : [],
   ]);
   const runtimeSettings = mergeProviderRuntimeSettings(input.provider, savedProviderSettings, {
     ...input.requestRuntimeSettings,
     ...getAgentRuntimeSettings(profile),
   });
-  const toolDefinitions = getToolDefinitionsForAgent(profile, toolSettings);
+  const toolDefinitions = [
+    ...getToolDefinitionsForAgent(profile, toolSettings),
+    ...filterMcpToolDefinitions(mcpToolDefinitions, profile, toolSettings),
+  ];
   const allowedToolNames = new Set(toolDefinitions.map((definition) => definition.name));
   const effectiveSystemPrompt = profile.systemPrompt.trim() || undefined;
   const runtimeHash = computeAgentRuntimeHash({ profile, runtimeSettings, toolDefinitions });
@@ -80,6 +86,24 @@ export async function resolveAgentRuntime(
     },
     runtimeHash,
   };
+}
+
+/**
+ * MCP definitions honor the same gates as builtins: the agent allowlist
+ * (exact name, `'*'`, or the per-server `mcp__<slug>__*` wildcard) and the
+ * user's per-tool toggle — a disabled tool never reaches the provider.
+ */
+function filterMcpToolDefinitions(
+  definitions: ReadonlyArray<ToolDefinition>,
+  profile: AgentProfile,
+  toolSettings: ReadonlyMap<string, EffectiveToolSettings>
+): ToolDefinition[] {
+  const allowlist = new Set(profile.toolNames);
+  return definitions.filter(
+    (definition) =>
+      toolNameMatches(allowlist, definition.name) &&
+      (toolSettings.get(definition.name)?.enabled ?? true)
+  );
 }
 
 function getAgentRuntimeSettings(profile: AgentProfile): Partial<ProviderRuntimeSettings> {

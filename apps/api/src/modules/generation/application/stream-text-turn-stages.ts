@@ -523,6 +523,8 @@ async function* executePendingToolCalls(
       settingsByToolName: toolSettings,
       allowedToolNames,
       delegationRuntime,
+      db,
+      signal,
     })) {
       yield* collectToolExecutionResult(item, {
         allParts: session.allParts,
@@ -550,6 +552,8 @@ async function* executePendingToolCalls(
             settingsByToolName: toolSettings,
             allowedToolNames,
             delegationRuntime,
+            db,
+            signal,
           })) {
             nonImageResultEntries.push(item);
           }
