@@ -21,6 +21,7 @@ import { userAgentSettings } from './020_user_agent_settings';
 import { chatAgentSelection } from './021_chat_agent_selection';
 import { connectorUsageSamples } from './022_connector_usage_samples';
 import { userSkillSettings } from './023_user_skill_settings';
+import { mcpServers } from './024_mcp_servers';
 
 export const allMigrations = {
   '001_initial_schema': initialSchema,
@@ -46,4 +47,5 @@ export const allMigrations = {
   '021_chat_agent_selection': chatAgentSelection,
   '022_connector_usage_samples': connectorUsageSamples,
   '023_user_skill_settings': userSkillSettings,
+  '024_mcp_servers': mcpServers,
 };

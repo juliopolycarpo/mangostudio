@@ -4,7 +4,7 @@
 
 import type { InteractionMode } from '@mangostudio/shared';
 import type { ChatAttachmentKind } from '@mangostudio/shared/chat';
-import type { Insertable, Selectable } from 'kysely';
+import type { Insertable, Selectable, Updateable } from 'kysely';
 
 export interface ChatsTable {
   id: string;
@@ -190,6 +190,28 @@ export interface ConnectorUsageSamplesTable {
   sampledAt: number;
 }
 
+export interface McpServersTable {
+  id: string;
+  userId: string;
+  /** Display name. */
+  name: string;
+  /** Per-user unique identifier; becomes the tool namespace prefix. */
+  slug: string;
+  transport: 'stdio' | 'http';
+  /** stdio transport only. */
+  command: string | null;
+  argsJson: string; // JSON-serialized string[]
+  /** Non-secret stdio child env; JSON-serialized Record<string, string>. */
+  envJson: string;
+  /** http transport only. */
+  url: string | null;
+  enabled: number;
+  /** Per-request cap in ms; null falls back to the built-in default. */
+  timeoutMs: number | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface ObservabilitySnapshotTable {
   id: string;
   snapshotJson: string;
@@ -212,6 +234,7 @@ export interface Database {
   user_skill_settings: UserSkillSettingsTable;
   user_app_settings: UserAppSettingsTable;
   user_agent_settings: UserAgentSettingsTable;
+  mcp_servers: McpServersTable;
   observability_snapshot: ObservabilitySnapshotTable;
   connector_usage_samples: ConnectorUsageSamplesTable;
 }
@@ -228,3 +251,7 @@ export type UserToolSettingsSelect = Selectable<UserToolSettingsTable>;
 export type UserAppSettingsSelect = Selectable<UserAppSettingsTable>;
 
 export type UserAgentSettingsSelect = Selectable<UserAgentSettingsTable>;
+
+export type McpServerSelect = Selectable<McpServersTable>;
+export type McpServerInsert = Insertable<McpServersTable>;
+export type McpServerUpdate = Updateable<McpServersTable>;
