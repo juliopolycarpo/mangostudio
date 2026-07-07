@@ -93,6 +93,33 @@ Open these first:
 - `apps/frontend/src/features/generation/hooks/use-text-generation.ts`
 - `apps/frontend/src/features/settings/tools/`
 
+## Skills
+
+Open these first:
+
+- `apps/api/src/modules/skills/application/skill-discovery.ts` (source scan, precedence, memo)
+- `apps/api/src/modules/skills/application/skill-content.ts` (body + sandboxed file reads)
+- `apps/api/src/modules/skills/application/skills-prompt-section.ts` (`<available-skills>`)
+- `apps/api/src/modules/skills/application/skill-settings-service.ts`
+- `apps/api/src/modules/skills/http/skill-routes.ts`
+- `apps/api/src/services/tools/builtin/skill.ts` (lazy-load tool)
+- `apps/shared/src/skills/`
+- `apps/frontend/src/features/settings/skills/`
+- Reference: `docs/reference/skills.md`
+
+## MCP Servers
+
+Open these first:
+
+- `apps/api/src/services/mcp/client-factory.ts` (SDK boundary, transports)
+- `apps/api/src/services/mcp/connection-manager.ts` (per-user sessions, reconnect)
+- `apps/api/src/services/mcp/tool-bridge.ts` (namespacing + per-turn resolution)
+- `apps/api/src/services/mcp/tool-naming.ts`, `content-mapping.ts`, `header-secrets.ts`
+- `apps/api/src/modules/mcp-servers/http/mcp-server-routes.ts`
+- `apps/shared/src/mcp/`
+- `apps/frontend/src/features/settings/mcp/`
+- Reference: `docs/reference/mcp.md`
+
 ## Attachments
 
 Open these first:

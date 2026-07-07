@@ -9,6 +9,11 @@
 
 AI-powered image generation and chat studio supporting Gemini, OpenAI-compatible, Anthropic, Cursor, DeepSeek, and ChatGPT models.
 
+Extend the agent without touching the codebase:
+
+- **Agent Skills** — drop reusable instruction packs (plus bundled files and scripts) into a skills directory; MangoStudio advertises them to the model and loads each one on demand. See [`docs/reference/skills.md`](docs/reference/skills.md).
+- **MCP servers** — connect [Model Context Protocol](https://modelcontextprotocol.io) servers over stdio or HTTP and expose their tools to the agent, namespaced per server and scoped by per-agent allowlists. See [`docs/reference/mcp.md`](docs/reference/mcp.md).
+
 > 🇧🇷 [Leia em Português](docs/pt-br/README.md)
 
 ## Install

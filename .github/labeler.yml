@@ -80,6 +80,21 @@
           - "apps/api/src/modules/tool-settings/**"
           - "apps/shared/src/tool-settings/**"
 
+"area: skills":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "apps/api/src/modules/skills/**"
+          - "apps/frontend/src/features/settings/skills/**"
+          - "apps/shared/src/skills/**"
+
+"area: mcp":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "apps/api/src/services/mcp/**"
+          - "apps/api/src/modules/mcp-servers/**"
+          - "apps/frontend/src/features/settings/mcp/**"
+          - "apps/shared/src/mcp/**"
+
 "area: tooling":
   - changed-files:
       - any-glob-to-any-file:
