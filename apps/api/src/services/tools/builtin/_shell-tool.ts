@@ -143,6 +143,7 @@ function buildSettings(label: string, description: string): RegisteredTool['sett
       allowedEnvVars: [],
       deniedEnvVars: [],
     },
+    managesOwnTimeout: true,
     parameterDescriptors: [
       buildToolExecutionTimeoutDescriptor(),
       {

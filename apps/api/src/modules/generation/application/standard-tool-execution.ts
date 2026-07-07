@@ -193,22 +193,24 @@ async function executeStandardToolCall(
       }
 
       try {
-        result = await withToolTimeout(
-          executeTool(
-            name,
-            args,
-            {
-              userId: context.userId,
-              chatId: context.chatId,
-              parameters: {},
-              signal: timeoutController.signal,
-            },
-            effectiveSettings
-          ),
+        const toolPromise = executeTool(
           name,
-          timeoutMs,
-          timeoutController
+          args,
+          {
+            userId: context.userId,
+            chatId: context.chatId,
+            parameters: {},
+            signal: timeoutController.signal,
+          },
+          effectiveSettings
         );
+
+        // Tools that enforce their own timeout (e.g. shells) are not wrapped,
+        // because a second, equally-long timer can win the race and reject
+        // before the tool has finished killing and reaping its child process.
+        result = tool.settings.managesOwnTimeout
+          ? await toolPromise
+          : await withToolTimeout(toolPromise, name, timeoutMs, timeoutController);
       } finally {
         parentSignal?.removeEventListener('abort', onParentAbort);
       }
