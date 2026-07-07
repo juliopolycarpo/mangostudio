@@ -15,6 +15,7 @@ import { generateRoutes } from './modules/generation/http/generate-routes';
 import { respondRoutes } from './modules/generation/http/respond-routes';
 import { respondStreamRoutes } from './modules/generation/http/respond-stream-routes';
 import { messageRoutes } from './modules/messages/http/message-routes';
+import { skillRoutes } from './modules/skills/http/skill-routes';
 import { errorHandler } from './plugins/error-handler';
 import { rateLimit } from './plugins/rate-limit';
 import { classifyRateLimit } from './plugins/rate-limit-policy';
@@ -54,7 +55,8 @@ const api = new Elysia({ prefix: '/api' })
   .use(generateRoutes)
   .use(respondRoutes)
   .use(respondStreamRoutes)
-  .use(settingsRoutes);
+  .use(settingsRoutes)
+  .use(skillRoutes);
 
 /**
  * Main application instance.
