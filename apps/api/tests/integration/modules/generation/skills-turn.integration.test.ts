@@ -47,6 +47,7 @@ let user: UserFixture;
 let skillsDir: string;
 let agentsDir: string;
 let previousProvider: AIProvider | null = null;
+let captured = false;
 
 /**
  * Named fake provider that scripts a skills turn: advertise → load body →
@@ -203,6 +204,7 @@ beforeEach(async () => {
 afterEach(() => {
   if (previousProvider) registerProvider(previousProvider);
   previousProvider = null;
+  captured = false;
   rmSync(skillsDir, { recursive: true, force: true });
   rmSync(agentsDir, { recursive: true, force: true });
   setThirdPartySkillDirsForTest(null);
@@ -210,10 +212,16 @@ afterEach(() => {
 });
 
 function installProvider(provider: AIProvider): void {
-  try {
-    previousProvider = getProvider('openai-compatible');
-  } catch {
-    previousProvider = null;
+  // Capture the original provider only on the first install of a test; a second
+  // install would otherwise snapshot the fake we just registered, and afterEach
+  // would restore that fake instead of the real provider.
+  if (!captured) {
+    try {
+      previousProvider = getProvider('openai-compatible');
+    } catch {
+      previousProvider = null;
+    }
+    captured = true;
   }
   registerProvider(provider);
 }

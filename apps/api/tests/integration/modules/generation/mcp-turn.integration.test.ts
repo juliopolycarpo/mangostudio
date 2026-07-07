@@ -50,6 +50,7 @@ let user: UserFixture;
 let chatId: string;
 let skillsDir: string;
 let previousProvider: AIProvider | null = null;
+let captured = false;
 
 /**
  * Named fake provider that calls a single named tool on the first iteration,
@@ -228,10 +229,16 @@ async function loadAiParts(): Promise<Array<Record<string, unknown>>> {
 }
 
 function installProvider(provider: AIProvider): void {
-  try {
-    previousProvider = getProvider('openai-compatible');
-  } catch {
-    previousProvider = null;
+  // Capture the original provider only on the first install of a test; a second
+  // install would otherwise snapshot the fake we just registered, and afterEach
+  // would restore that fake instead of the real provider.
+  if (!captured) {
+    try {
+      previousProvider = getProvider('openai-compatible');
+    } catch {
+      previousProvider = null;
+    }
+    captured = true;
   }
   registerProvider(provider);
 }
@@ -254,6 +261,7 @@ beforeEach(async () => {
 afterEach(async () => {
   if (previousProvider) registerProvider(previousProvider);
   previousProvider = null;
+  captured = false;
   setMcpClientConnectorForTest(null);
   await closeAllMcpClients();
   setThirdPartySkillDirsForTest(null);
