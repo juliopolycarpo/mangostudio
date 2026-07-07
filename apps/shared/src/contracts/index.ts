@@ -68,6 +68,19 @@ export type {
   GenerateImageResponse,
   GenerateTextResponse,
 } from '../generation';
+// MCP
+export type {
+  AddMcpServerBody,
+  DeleteMcpServerResponse,
+  McpServer,
+  McpServerListResponse,
+  McpServerStatus,
+  McpServerToolsResponse,
+  McpToolDescriptor,
+  McpTransport,
+  TestMcpServerResponse,
+  UpdateMcpServerBody,
+} from '../mcp';
 // Observability
 export type {
   ObservabilityLogKind,

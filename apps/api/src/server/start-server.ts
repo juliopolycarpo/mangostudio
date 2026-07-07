@@ -17,6 +17,7 @@ import {
 import { ensureRuntimeDirs } from '../lib/mango-paths';
 import { getDefaultFrontendDir } from '../lib/runtime-paths';
 import { removeState, type ServerState, writeState } from '../lib/server-state';
+import { closeAllMcpClients } from '../services/mcp/connection-manager';
 import {
   flushObservabilitySnapshot,
   loadObservabilitySnapshot,
@@ -108,9 +109,10 @@ function logRunning(host: string, port: number): void {
   console.warn(`[api] Scalar UI available at http://${shown}:${port}/scalar`);
 }
 
-/** Flush observability, drop the state file, and close the database. */
+/** Flush observability, close MCP sessions, drop the state file, and close the database. */
 async function gracefulStop(): Promise<void> {
   await flushObservabilitySnapshot();
+  await closeAllMcpClients();
   await removeState();
   await closeDb();
 }

@@ -14,6 +14,7 @@ import { chatRoutes } from './modules/chats/http/chat-routes';
 import { generateRoutes } from './modules/generation/http/generate-routes';
 import { respondRoutes } from './modules/generation/http/respond-routes';
 import { respondStreamRoutes } from './modules/generation/http/respond-stream-routes';
+import { mcpServerRoutes } from './modules/mcp-servers/http/mcp-server-routes';
 import { messageRoutes } from './modules/messages/http/message-routes';
 import { skillRoutes } from './modules/skills/http/skill-routes';
 import { errorHandler } from './plugins/error-handler';
@@ -56,7 +57,8 @@ const api = new Elysia({ prefix: '/api' })
   .use(respondRoutes)
   .use(respondStreamRoutes)
   .use(settingsRoutes)
-  .use(skillRoutes);
+  .use(skillRoutes)
+  .use(mcpServerRoutes);
 
 /**
  * Main application instance.
