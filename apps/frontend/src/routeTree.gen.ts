@@ -22,6 +22,7 @@ import { Route as AuthenticatedSettingsSkillsRouteImport } from './routes/_authe
 import { Route as AuthenticatedSettingsProvidersRouteImport } from './routes/_authenticated/settings/providers'
 import { Route as AuthenticatedSettingsPromptsRouteImport } from './routes/_authenticated/settings/prompts'
 import { Route as AuthenticatedSettingsMetricsRouteImport } from './routes/_authenticated/settings/metrics'
+import { Route as AuthenticatedSettingsMcpRouteImport } from './routes/_authenticated/settings/mcp'
 import { Route as AuthenticatedSettingsLogsRouteImport } from './routes/_authenticated/settings/logs'
 import { Route as AuthenticatedSettingsGeneralRouteImport } from './routes/_authenticated/settings/general'
 import { Route as AuthenticatedSettingsContextRouteImport } from './routes/_authenticated/settings/context'
@@ -101,6 +102,12 @@ const AuthenticatedSettingsMetricsRoute =
     path: '/metrics',
     getParentRoute: () => AuthenticatedSettingsRoute,
   } as any)
+const AuthenticatedSettingsMcpRoute =
+  AuthenticatedSettingsMcpRouteImport.update({
+    id: '/mcp',
+    path: '/mcp',
+    getParentRoute: () => AuthenticatedSettingsRoute,
+  } as any)
 const AuthenticatedSettingsLogsRoute =
   AuthenticatedSettingsLogsRouteImport.update({
     id: '/logs',
@@ -163,6 +170,7 @@ export interface FileRoutesByFullPath {
   '/settings/context': typeof AuthenticatedSettingsContextRoute
   '/settings/general': typeof AuthenticatedSettingsGeneralRoute
   '/settings/logs': typeof AuthenticatedSettingsLogsRoute
+  '/settings/mcp': typeof AuthenticatedSettingsMcpRoute
   '/settings/metrics': typeof AuthenticatedSettingsMetricsRoute
   '/settings/prompts': typeof AuthenticatedSettingsPromptsRoute
   '/settings/providers': typeof AuthenticatedSettingsProvidersRouteWithChildren
@@ -184,6 +192,7 @@ export interface FileRoutesByTo {
   '/settings/context': typeof AuthenticatedSettingsContextRoute
   '/settings/general': typeof AuthenticatedSettingsGeneralRoute
   '/settings/logs': typeof AuthenticatedSettingsLogsRoute
+  '/settings/mcp': typeof AuthenticatedSettingsMcpRoute
   '/settings/metrics': typeof AuthenticatedSettingsMetricsRoute
   '/settings/prompts': typeof AuthenticatedSettingsPromptsRoute
   '/settings/skills': typeof AuthenticatedSettingsSkillsRoute
@@ -207,6 +216,7 @@ export interface FileRoutesById {
   '/_authenticated/settings/context': typeof AuthenticatedSettingsContextRoute
   '/_authenticated/settings/general': typeof AuthenticatedSettingsGeneralRoute
   '/_authenticated/settings/logs': typeof AuthenticatedSettingsLogsRoute
+  '/_authenticated/settings/mcp': typeof AuthenticatedSettingsMcpRoute
   '/_authenticated/settings/metrics': typeof AuthenticatedSettingsMetricsRoute
   '/_authenticated/settings/prompts': typeof AuthenticatedSettingsPromptsRoute
   '/_authenticated/settings/providers': typeof AuthenticatedSettingsProvidersRouteWithChildren
@@ -231,6 +241,7 @@ export interface FileRouteTypes {
     | '/settings/context'
     | '/settings/general'
     | '/settings/logs'
+    | '/settings/mcp'
     | '/settings/metrics'
     | '/settings/prompts'
     | '/settings/providers'
@@ -252,6 +263,7 @@ export interface FileRouteTypes {
     | '/settings/context'
     | '/settings/general'
     | '/settings/logs'
+    | '/settings/mcp'
     | '/settings/metrics'
     | '/settings/prompts'
     | '/settings/skills'
@@ -274,6 +286,7 @@ export interface FileRouteTypes {
     | '/_authenticated/settings/context'
     | '/_authenticated/settings/general'
     | '/_authenticated/settings/logs'
+    | '/_authenticated/settings/mcp'
     | '/_authenticated/settings/metrics'
     | '/_authenticated/settings/prompts'
     | '/_authenticated/settings/providers'
@@ -383,6 +396,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedSettingsMetricsRouteImport
       parentRoute: typeof AuthenticatedSettingsRoute
     }
+    '/_authenticated/settings/mcp': {
+      id: '/_authenticated/settings/mcp'
+      path: '/mcp'
+      fullPath: '/settings/mcp'
+      preLoaderRoute: typeof AuthenticatedSettingsMcpRouteImport
+      parentRoute: typeof AuthenticatedSettingsRoute
+    }
     '/_authenticated/settings/logs': {
       id: '/_authenticated/settings/logs'
       path: '/logs'
@@ -467,6 +487,7 @@ interface AuthenticatedSettingsRouteChildren {
   AuthenticatedSettingsContextRoute: typeof AuthenticatedSettingsContextRoute
   AuthenticatedSettingsGeneralRoute: typeof AuthenticatedSettingsGeneralRoute
   AuthenticatedSettingsLogsRoute: typeof AuthenticatedSettingsLogsRoute
+  AuthenticatedSettingsMcpRoute: typeof AuthenticatedSettingsMcpRoute
   AuthenticatedSettingsMetricsRoute: typeof AuthenticatedSettingsMetricsRoute
   AuthenticatedSettingsPromptsRoute: typeof AuthenticatedSettingsPromptsRoute
   AuthenticatedSettingsProvidersRoute: typeof AuthenticatedSettingsProvidersRouteWithChildren
@@ -482,6 +503,7 @@ const AuthenticatedSettingsRouteChildren: AuthenticatedSettingsRouteChildren = {
   AuthenticatedSettingsContextRoute: AuthenticatedSettingsContextRoute,
   AuthenticatedSettingsGeneralRoute: AuthenticatedSettingsGeneralRoute,
   AuthenticatedSettingsLogsRoute: AuthenticatedSettingsLogsRoute,
+  AuthenticatedSettingsMcpRoute: AuthenticatedSettingsMcpRoute,
   AuthenticatedSettingsMetricsRoute: AuthenticatedSettingsMetricsRoute,
   AuthenticatedSettingsPromptsRoute: AuthenticatedSettingsPromptsRoute,
   AuthenticatedSettingsProvidersRoute:
