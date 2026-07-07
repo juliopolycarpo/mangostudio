@@ -105,8 +105,13 @@ export async function updateMcpServer(
     updatedAt: Date.now(),
   });
 
-  if (body.headers !== undefined) {
-    await persistMcpHeaders(id, body.headers);
+  // Headers belong to http servers only. Persist them there, and drop any
+  // bundle a prior http config left behind when the transport switches to
+  // stdio, so an auth token never lingers in the secret store unused.
+  if (merged.transport === 'http') {
+    if (body.headers !== undefined) await persistMcpHeaders(id, body.headers);
+  } else if (body.transport === 'stdio') {
+    await removeMcpHeaders(id);
   }
 
   // The old session runs with stale config; drop it so next use reconnects.
