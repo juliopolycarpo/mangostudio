@@ -28,6 +28,8 @@ export interface RunShellCommandInput {
   maxOutputBytes: number;
   /** Operator overrides for which env vars reach the child (secrets stripped by default). */
   envPolicy?: ShellEnvPolicy;
+  /** When aborted, the child process is killed immediately. */
+  signal?: AbortSignal;
 }
 
 export interface ShellCommandResult {
@@ -89,24 +91,36 @@ export async function runShellCommand(input: RunShellCommandInput): Promise<Shel
 
   const startedAt = Date.now();
   const proc = spawnShell(executable, input);
-
-  const [stdout, stderr] = await Promise.all([
-    readStreamCapped(proc.stdout, input.maxOutputBytes),
-    readStreamCapped(proc.stderr, input.maxOutputBytes),
-  ]);
-  await proc.exited;
-
-  return {
-    shell: input.kind,
-    command: input.command,
-    exitCode: proc.exitCode,
-    signal: proc.signalCode,
-    stdout: stdout.text,
-    stderr: stderr.text,
-    truncated: stdout.truncated || stderr.truncated,
-    timedOut: proc.signalCode === 'SIGKILL',
-    durationMs: Date.now() - startedAt,
+  const abortHandler = () => {
+    try {
+      proc.kill('SIGKILL');
+    } catch {
+      // Process may already have exited.
+    }
   };
+  input.signal?.addEventListener('abort', abortHandler, { once: true });
+
+  try {
+    const [stdout, stderr] = await Promise.all([
+      readStreamCapped(proc.stdout, input.maxOutputBytes),
+      readStreamCapped(proc.stderr, input.maxOutputBytes),
+    ]);
+    await proc.exited;
+
+    return {
+      shell: input.kind,
+      command: input.command,
+      exitCode: proc.exitCode,
+      signal: proc.signalCode,
+      stdout: stdout.text,
+      stderr: stderr.text,
+      truncated: stdout.truncated || stderr.truncated,
+      timedOut: proc.signalCode === 'SIGKILL',
+      durationMs: Date.now() - startedAt,
+    };
+  } finally {
+    input.signal?.removeEventListener('abort', abortHandler);
+  }
 }
 
 function spawnShell(executable: string, input: RunShellCommandInput) {

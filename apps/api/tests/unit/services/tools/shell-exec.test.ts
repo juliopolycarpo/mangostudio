@@ -127,6 +127,25 @@ describe('runShellCommand', () => {
     expect(result.exitCode).toBeNull();
     expect(Date.now() - startedAt).toBeLessThan(4000);
   });
+
+  it.skipIf(!hasBash)('kills the process when the abort signal fires', async () => {
+    const controller = new AbortController();
+    const run = runShellCommand({
+      kind: 'bash',
+      command: 'echo $$; sleep 5',
+      timeoutMs: 30_000,
+      maxOutputBytes: 1000,
+      signal: controller.signal,
+    });
+    setTimeout(() => controller.abort(), 300);
+
+    const result = await run;
+    expect(result.timedOut).toBe(true);
+
+    const pid = Number(result.stdout.trim().split('\n')[0]);
+    expect(Number.isFinite(pid)).toBe(true);
+    expect(() => process.kill(pid, 0)).toThrow();
+  });
 });
 
 describe('runShellCommand env sanitization', () => {

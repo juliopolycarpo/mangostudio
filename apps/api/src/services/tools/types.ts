@@ -23,6 +23,8 @@ export interface ToolContext {
   userId: string;
   chatId: string;
   parameters: Record<string, unknown>;
+  /** When aborted, long-running tools should stop work and release resources. */
+  signal?: AbortSignal;
   delegateToAgent?: (input: DelegateToAgentInput) => Promise<unknown>;
 }
 
