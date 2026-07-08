@@ -47,7 +47,8 @@ export function assertTransportInvariants(fields: McpTransportFields): void {
   }
 }
 
-function isHttpUrl(value: string): boolean {
+/** True when `value` parses as an http(s) URL. */
+export function isHttpUrl(value: string): boolean {
   try {
     const url = new URL(value);
     return url.protocol === 'http:' || url.protocol === 'https:';

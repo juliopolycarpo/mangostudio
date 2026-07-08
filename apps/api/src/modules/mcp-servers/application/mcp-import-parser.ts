@@ -13,7 +13,7 @@ import type {
   McpImportReason,
 } from '@mangostudio/shared/mcp';
 import { MCP_SERVER_NAME_MAX_LENGTH, MCP_SERVER_SLUG_MAX_LENGTH } from '@mangostudio/shared/mcp';
-import { isValidMcpServerSlug, McpServerError } from '../domain/mcp-server';
+import { isHttpUrl, isValidMcpServerSlug, McpServerError } from '../domain/mcp-server';
 
 export interface ParsedImportEntry {
   preview: McpImportPreviewEntry;
@@ -203,15 +203,6 @@ function readStringRecord(value: unknown): Record<string, string> | null {
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function isHttpUrl(value: string): boolean {
-  try {
-    const url = new URL(value);
-    return url.protocol === 'http:' || url.protocol === 'https:';
-  } catch {
-    return false;
-  }
 }
 
 function unsupported(
