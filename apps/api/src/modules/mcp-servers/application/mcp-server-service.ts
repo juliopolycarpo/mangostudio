@@ -185,7 +185,7 @@ export async function listMcpServerTools(
   }
 }
 
-async function requireMcpServerRow(
+export async function requireMcpServerRow(
   db: Kysely<Database>,
   userId: string,
   id: string

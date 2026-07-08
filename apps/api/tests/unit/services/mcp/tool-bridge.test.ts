@@ -13,6 +13,7 @@ import {
 } from '../../../../src/services/mcp/tool-bridge';
 import type { McpClientHandle, McpRequestOptions } from '../../../../src/services/mcp/types';
 import { McpConnectionError } from '../../../../src/services/mcp/types';
+import { makeFakeMcpHandle } from '../../../support/fixtures/mcp/fake-handle';
 
 // The in-memory database and the connection registry are shared per process,
 // so every test uses fresh user/server ids for isolation.
@@ -50,13 +51,7 @@ async function insertServer(
 }
 
 function makeHandle(overrides: Partial<McpClientHandle> = {}): McpClientHandle {
-  return {
-    listTools: () => Promise.resolve([]),
-    callTool: () =>
-      Promise.resolve({ contentText: '', isError: false, rawContentKinds: [], content: [] }),
-    close: () => Promise.resolve(),
-    ...overrides,
-  };
+  return makeFakeMcpHandle(overrides);
 }
 
 function echoTools(tools: McpToolDescriptor[]): McpClientHandle {

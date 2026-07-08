@@ -18,7 +18,7 @@ import { insertChatAttachment } from '../../modules/attachments/infrastructure/a
 import { getById as getChatById } from '../../modules/chats/infrastructure/chat-repository';
 import { generateId } from '../../utils/id';
 import { saveGeneratedImage } from '../generated-images/generated-image-storage';
-import type { McpContentBlock } from './types';
+import type { McpContentBlock, McpResourceContents } from './types';
 
 /** Per-block ceiling on decoded media bytes accepted from an MCP server. */
 export const MCP_MEDIA_MAX_BYTES = 10 * 1024 * 1024;
@@ -35,6 +35,14 @@ const IMAGE_MIME_EXTENSIONS: Record<string, string> = {
 /** Non-image binary mime types persisted as chat attachments. */
 const FILE_MIME_POLICIES: Record<string, { extension: string; kind: ChatAttachmentKind }> = {
   'application/pdf': { extension: 'pdf', kind: 'pdf' },
+};
+
+/** Text mime types persisted as chat attachments by the resource attach flow. */
+const TEXT_MIME_EXTENSIONS: Record<string, string> = {
+  'text/plain': 'txt',
+  'text/markdown': 'md',
+  'text/csv': 'csv',
+  'application/json': 'json',
 };
 
 const logger = createDiagnosticLogger('mcp-media');
@@ -205,6 +213,74 @@ function createDefaultMcpMediaStorage(
       return attachment.url;
     },
   };
+}
+
+/**
+ * Persists `resources/read` contents as chat attachments so a turn can carry
+ * them as context: text contents by their text mime policy, binary blobs by
+ * the image/pdf allowlists. Unsupported or oversized entries are logged and
+ * skipped, mirroring tool-result media behavior.
+ *
+ * // Usage: const attachments = await persistMcpResourceAttachments(contents, scope)
+ */
+export async function persistMcpResourceAttachments(
+  contents: ReadonlyArray<McpResourceContents>,
+  scope: { db: Kysely<Database>; userId: string; chatId: string; chatTitle: string }
+): Promise<ChatAttachment[]> {
+  const attachments: ChatAttachment[] = [];
+  for (const entry of contents) {
+    try {
+      const file = toAttachableResourceFile(entry);
+      if (!file) continue;
+      attachments.push(await storeMcpResourceAttachment(file, scope));
+    } catch (error) {
+      logger.warn('resource_attach_failed', { uri: entry.uri, mimeType: entry.mimeType, error });
+    }
+  }
+  return attachments;
+}
+
+function toAttachableResourceFile(
+  entry: McpResourceContents
+): Parameters<typeof storeMcpResourceAttachment>[0] | null {
+  if (entry.text !== undefined) {
+    const mimeType =
+      entry.mimeType && entry.mimeType in TEXT_MIME_EXTENSIONS ? entry.mimeType : 'text/plain';
+    const extension = TEXT_MIME_EXTENSIONS[mimeType];
+    const data = new TextEncoder().encode(entry.text);
+    assertAttachableSize(data);
+    return {
+      data,
+      mimeType,
+      originalName: resourceFileName(entry.uri, extension),
+      extension,
+      kind: 'text',
+    };
+  }
+  if (entry.blob === undefined || !entry.mimeType) return null;
+
+  const imageExtension = IMAGE_MIME_EXTENSIONS[entry.mimeType];
+  const filePolicy = FILE_MIME_POLICIES[entry.mimeType];
+  if (!imageExtension && !filePolicy) return null;
+
+  const data = decodeMediaPayload(entry.blob);
+  const extension = imageExtension ?? filePolicy.extension;
+  return {
+    data,
+    mimeType: entry.mimeType,
+    originalName: resourceFileName(entry.uri, extension),
+    extension,
+    kind: imageExtension ? 'image' : filePolicy.kind,
+  };
+}
+
+function assertAttachableSize(data: Uint8Array): void {
+  if (data.byteLength === 0) throw new Error('Resource content is empty.');
+  if (data.byteLength > MCP_MEDIA_MAX_BYTES) {
+    throw new Error(
+      `Resource content exceeds the ${MCP_MEDIA_MAX_BYTES / (1024 * 1024)} MiB limit.`
+    );
+  }
 }
 
 /**

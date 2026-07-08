@@ -9,6 +9,7 @@ import {
   setMcpClientConnectorForTest,
 } from '../../../../src/services/mcp/connection-manager';
 import type { McpClientHandle, McpServerRuntimeConfig } from '../../../../src/services/mcp/types';
+import { makeFakeMcpHandle } from '../../../support/fixtures/mcp/fake-handle';
 
 function makeConfig(id: string): McpServerRuntimeConfig {
   return {
@@ -24,15 +25,12 @@ function makeConfig(id: string): McpServerRuntimeConfig {
 }
 
 function makeHandle(onClose?: () => void): McpClientHandle {
-  return {
-    listTools: () => Promise.resolve([]),
-    callTool: () =>
-      Promise.resolve({ contentText: '', isError: false, rawContentKinds: [], content: [] }),
+  return makeFakeMcpHandle({
     close: () => {
       onClose?.();
       return Promise.resolve();
     },
-  };
+  });
 }
 
 afterEach(async () => {
