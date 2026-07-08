@@ -103,6 +103,83 @@ export const UpdateMcpServerBodySchema = Type.Partial(
   })
 );
 
+/** Ceiling on an import source, whether read from disk or pasted as JSON. */
+export const MCP_IMPORT_MAX_SOURCE_BYTES = 1024 * 1024;
+
+const importSourceFields = {
+  /** Absolute or `~`-prefixed path to a `.json` file on the API host. */
+  path: Type.Optional(Type.String({ minLength: 1 })),
+  /** Raw JSON text pasted by the user. */
+  json: Type.Optional(Type.String({ minLength: 1, maxLength: MCP_IMPORT_MAX_SOURCE_BYTES })),
+};
+
+/** Exactly one of `path` / `json` must be present; the API enforces it. */
+export const PreviewMcpImportBodySchema = Type.Object(importSourceFields);
+
+export const ImportMcpServersBodySchema = Type.Object({
+  ...importSourceFields,
+  /** Slugs picked from the preview; entries outside this list are ignored. */
+  slugs: Type.Array(Type.String({ minLength: 1 }), { minItems: 1 }),
+});
+
+export const McpImportActionSchema = Type.Union([
+  Type.Literal('create'),
+  Type.Literal('skip-duplicate'),
+  Type.Literal('unsupported'),
+]);
+
+/**
+ * Machine-readable cause for a non-`create` action, so the frontend can
+ * localize it. `detail` optionally carries the offending raw value.
+ */
+export const McpImportReasonSchema = Type.Union([
+  Type.Literal('duplicate-slug'),
+  Type.Literal('duplicate-in-source'),
+  Type.Literal('unsupported-transport'),
+  Type.Literal('placeholder-value'),
+  Type.Literal('invalid-entry'),
+  Type.Literal('invalid-slug'),
+]);
+
+/**
+ * One entry of the `mcpServers` map as it would be imported. Auth header
+ * values never leave the API — only their names are echoed.
+ */
+export const McpImportPreviewEntrySchema = Type.Object({
+  /** Original key in the source map. */
+  key: Type.String(),
+  /** Normalized slug the server would be created under; empty when underivable. */
+  slug: Type.String(),
+  name: Type.String(),
+  transport: Type.Optional(McpTransportSchema),
+  command: Type.Optional(Type.String()),
+  url: Type.Optional(Type.String()),
+  headerNames: Type.Array(Type.String()),
+  action: McpImportActionSchema,
+  reason: Type.Optional(McpImportReasonSchema),
+  detail: Type.Optional(Type.String()),
+});
+
+export const McpImportPreviewResponseSchema = Type.Object({
+  entries: Type.Array(McpImportPreviewEntrySchema),
+});
+
+export const McpImportResultEntrySchema = Type.Object({
+  slug: Type.String(),
+  result: Type.Union([
+    Type.Literal('created'),
+    Type.Literal('skip-duplicate'),
+    Type.Literal('unsupported'),
+  ]),
+  reason: Type.Optional(McpImportReasonSchema),
+  /** Row id when `result` is `created`. */
+  serverId: Type.Optional(Type.String()),
+});
+
+export const ImportMcpServersResponseSchema = Type.Object({
+  results: Type.Array(McpImportResultEntrySchema),
+});
+
 export const McpToolDescriptorSchema = Type.Object({
   name: Type.String({ minLength: 1 }),
   description: Type.String(),
@@ -130,6 +207,14 @@ export const DeleteMcpServerResponseSchema = Type.Object({
 });
 
 export type McpTransport = Static<typeof McpTransportSchema>;
+export type PreviewMcpImportBody = Static<typeof PreviewMcpImportBodySchema>;
+export type ImportMcpServersBody = Static<typeof ImportMcpServersBodySchema>;
+export type McpImportAction = Static<typeof McpImportActionSchema>;
+export type McpImportReason = Static<typeof McpImportReasonSchema>;
+export type McpImportPreviewEntry = Static<typeof McpImportPreviewEntrySchema>;
+export type McpImportPreviewResponse = Static<typeof McpImportPreviewResponseSchema>;
+export type McpImportResultEntry = Static<typeof McpImportResultEntrySchema>;
+export type ImportMcpServersResponse = Static<typeof ImportMcpServersResponseSchema>;
 export type McpServerStatus = Static<typeof McpServerStatusSchema>;
 export type McpServer = Static<typeof McpServerSchema>;
 export type AddMcpServerBody = Static<typeof AddMcpServerBodySchema>;

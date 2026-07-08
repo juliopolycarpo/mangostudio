@@ -6,10 +6,11 @@
 
 import type { McpServer } from '@mangostudio/shared/mcp';
 import { useQueryClient } from '@tanstack/react-query';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   useAddMcpServer,
   useDeleteMcpServer,
+  useImportMcpServers,
   useMcpServers,
   useTestMcpServer,
 } from '../../../src/features/settings/mcp/hooks/use-mcp-servers';
@@ -81,6 +82,36 @@ describe('MCP server hooks', () => {
       });
     });
 
+    expect(result.current.queryClient.getQueryState(mcpServerKeys.list())?.isInvalidated).toBe(
+      true
+    );
+    expect(result.current.queryClient.getQueryState(toolSettingsKeys.list())?.isInvalidated).toBe(
+      true
+    );
+  });
+
+  it('useImportMcpServers posts and invalidates server-list and tool-settings caches', async () => {
+    fetchScenario.respondWithJson('POST', '/api/mcp/servers/import', {
+      body: { results: [{ slug: 'everything', result: 'created', serverId: 'srv-1' }] },
+    });
+
+    const { result } = renderHook(() => ({
+      mutation: useImportMcpServers(),
+      queryClient: useQueryClient(),
+    }));
+
+    result.current.queryClient.setQueryData(mcpServerKeys.list(), { servers: [] });
+    result.current.queryClient.setQueryData(toolSettingsKeys.list(), { tools: [] });
+
+    let response: unknown;
+    await act(async () => {
+      response = await result.current.mutation.mutateAsync({
+        json: '{"mcpServers":{"everything":{"command":"bunx"}}}',
+        slugs: ['everything'],
+      });
+    });
+
+    expect(response).toMatchObject({ results: [{ slug: 'everything', result: 'created' }] });
     expect(result.current.queryClient.getQueryState(mcpServerKeys.list())?.isInvalidated).toBe(
       true
     );

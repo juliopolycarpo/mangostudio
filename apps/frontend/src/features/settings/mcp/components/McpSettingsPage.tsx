@@ -4,7 +4,7 @@
  */
 
 import type { McpServer } from '@mangostudio/shared/mcp';
-import { Plus } from 'lucide-react';
+import { FileDown, Plus } from 'lucide-react';
 import { useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { useToast } from '@/components/ui/Toast';
@@ -17,6 +17,7 @@ import {
 } from '../hooks/use-mcp-servers';
 import { buildAddBody, buildUpdateBody, type McpServerFormState } from '../lib/server-form';
 import { DeleteServerDialog } from './DeleteServerDialog';
+import { ImportServersDialog } from './ImportServersDialog';
 import { McpServerCard } from './McpServerCard';
 import { McpServerForm } from './McpServerForm';
 
@@ -29,6 +30,7 @@ export function McpSettingsPage() {
 
   const { servers, isLoading, error, refetch } = useMcpServers();
   const [formMode, setFormMode] = useState<FormMode | null>(null);
+  const [importOpen, setImportOpen] = useState(false);
   const [serverToDelete, setServerToDelete] = useState<McpServer | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
@@ -99,10 +101,16 @@ export function McpSettingsPage() {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
         <p className="text-sm text-on-surface-variant/60">{s.description}</p>
-        <Button size="sm" className="shrink-0" onClick={() => setFormMode({ kind: 'add' })}>
-          <Plus size={14} />
-          {s.addServer}
-        </Button>
+        <div className="flex gap-2 shrink-0">
+          <Button variant="secondary" size="sm" onClick={() => setImportOpen(true)}>
+            <FileDown size={14} />
+            {s.import.button}
+          </Button>
+          <Button size="sm" onClick={() => setFormMode({ kind: 'add' })}>
+            <Plus size={14} />
+            {s.addServer}
+          </Button>
+        </div>
       </div>
 
       {servers.length === 0 ? (
@@ -132,6 +140,8 @@ export function McpSettingsPage() {
           onClose={closeForm}
         />
       )}
+
+      {importOpen && <ImportServersDialog onClose={() => setImportOpen(false)} />}
 
       {serverToDelete && (
         <DeleteServerDialog
