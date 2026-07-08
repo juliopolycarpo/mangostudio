@@ -7,7 +7,7 @@
   "scripts": {
     "check": "bun run check:quick && bun run typecheck",
     "check:quick": "biome check src tests",
-    "typecheck": "tsgo --noEmit",
+    "typecheck": "tsc --noEmit",
     "circular": "madge --circular --extensions ts,tsx .",
     "fix": "biome check --write src tests",
     "test": "bun run test:unit",
@@ -41,7 +41,7 @@
   },
   "devDependencies": {
     "@types/bun": "^1.3.14",
-    "typescript": "~6.0.3"
+    "typescript": "7.0.2"
   },
   "dependencies": {
     "@faker-js/faker": "^10.4.0",

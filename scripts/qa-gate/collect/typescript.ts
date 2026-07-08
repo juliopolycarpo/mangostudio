@@ -1,4 +1,4 @@
-// TypeScript error count per workspace via tsgo --noEmit.
+// TypeScript error count per workspace via tsc --noEmit.
 
 import type { WorkspaceName } from '../../lib/config';
 import { runCapture } from './support';
@@ -10,7 +10,7 @@ export const countTsErrors = async (workspace: WorkspaceName): Promise<number> =
   const cfg = `apps/${workspace}/tsconfig.json`;
   const { stdout, stderr } = await runCapture([
     'bunx',
-    'tsgo',
+    'tsc',
     '-p',
     cfg,
     '--noEmit',

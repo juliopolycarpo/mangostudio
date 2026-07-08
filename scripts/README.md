@@ -10,7 +10,7 @@ script (`bun run <name>`).
 scripts/
 ├── dev.ts            Start dev servers (bun run dev)
 ├── build.ts          Build workspaces or standalone binaries (bun run build)
-├── check.ts          Biome + dprint + madge + tsgo, in parallel (bun run check)
+├── check.ts          Biome + dprint + madge + tsc, in parallel (bun run check)
 ├── check-versions.ts Assert root + workspace + cargo-shim versions agree (bun run check:versions)
 ├── fix.ts            Apply Biome + dprint fixes (bun run fix)
 ├── test.ts           Run unit/integration/e2e/coverage lanes (bun run test)

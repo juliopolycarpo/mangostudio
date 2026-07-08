@@ -78,7 +78,6 @@
 
   "dprint.path": "./node_modules/.bin/dprint",
 
-  "js/ts.experimental.useTsgo": true,
   "typescript.enablePromptUseWorkspaceTsdk": true,
   "typescript.preferences.preferTypeOnlyAutoImports": true,
   "typescript.preferences.importModuleSpecifier": "shortest",
@@ -113,8 +112,6 @@
     "**/playwright-report/**": true,
     "**/test-results/**": true
   },
-  "typescript.native-preview.tsdk": "./node_modules/@typescript/native-preview",
-  "typescript.experimental.useTsgo": true,
   "dprint.experimentalLsp": true,
   "biome.lsp.trace.server": "messages",
   "biome.lsp.watcher.kind": "recommended",
