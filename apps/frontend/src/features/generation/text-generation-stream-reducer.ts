@@ -104,6 +104,8 @@ export function reduceTextGenerationStreamChunk(
       return reduceSubagentCompleted(nextState, chunk.callId, chunk.summary, chunk.toolCallCount);
     case 'subagent_failed':
       return reduceSubagentFailed(nextState, chunk.callId, chunk.error);
+    case 'mcp_media':
+      return reduceMcpMedia(nextState, chunk);
     case 'image_generation_started':
       return reduceImageGenerationStarted(nextState, chunk);
     case 'image_generation_completed':
@@ -271,6 +273,28 @@ function reduceSubagentFailed(state: TextGenerationStreamState, callId: string, 
     summary: error,
     error,
   }));
+  return withAiMessageUpdate({ ...state, parts }, { parts });
+}
+
+function reduceMcpMedia(
+  state: TextGenerationStreamState,
+  chunk: Extract<StreamChunk, { type: 'mcp_media' }>
+) {
+  const mediaPart: MessagePart = {
+    type: 'mcp_media',
+    toolCallId: chunk.toolCallId,
+    serverSlug: chunk.serverSlug,
+    toolName: chunk.toolName,
+    kind: chunk.kind,
+    mimeType: chunk.mimeType,
+    url: chunk.url,
+    ...(chunk.uri ? { uri: chunk.uri } : {}),
+  };
+  const exists = state.parts.some(
+    (part) =>
+      part.type === 'mcp_media' && part.toolCallId === chunk.toolCallId && part.url === chunk.url
+  );
+  const parts = exists ? state.parts : [...state.parts, mediaPart];
   return withAiMessageUpdate({ ...state, parts }, { parts });
 }
 

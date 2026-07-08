@@ -18,6 +18,11 @@ import type { McpClientHandle } from '../../../../src/services/mcp/types';
 /** Length of the oversized `big` tool payload; well past the 64 KiB result cap. */
 export const OVERSIZED_TOOL_OUTPUT_LENGTH = 100_000;
 
+/** Payloads returned by the `picture` tool (rich-content mapping coverage). */
+export const PICTURE_TOOL_IMAGE_BASE64 = Buffer.from('fixture-png-bytes').toString('base64');
+export const PICTURE_TOOL_PDF_BASE64 = Buffer.from('fixture-pdf-bytes').toString('base64');
+export const PICTURE_TOOL_NOTES_TEXT = 'chart notes';
+
 /** Builds the turn-fixture MCP server with one tool per failure mode. */
 export function createTurnMcpServer(): Server {
   const server = new Server(
@@ -51,6 +56,11 @@ export function createTurnMcpServer(): Server {
         description: 'Never resolves, to exercise the per-server timeout.',
         inputSchema: { type: 'object' as const, properties: {} },
       },
+      {
+        name: 'picture',
+        description: 'Returns mixed rich content: image, pdf resource, and text.',
+        inputSchema: { type: 'object' as const, properties: {} },
+      },
     ],
   }));
 
@@ -68,6 +78,22 @@ export function createTurnMcpServer(): Server {
     }
     if (name === 'hang') {
       await new Promise(() => undefined);
+    }
+    if (name === 'picture') {
+      return {
+        content: [
+          { type: 'text', text: PICTURE_TOOL_NOTES_TEXT },
+          { type: 'image', data: PICTURE_TOOL_IMAGE_BASE64, mimeType: 'image/png' },
+          {
+            type: 'resource',
+            resource: {
+              uri: 'file:///report.pdf',
+              mimeType: 'application/pdf',
+              blob: PICTURE_TOOL_PDF_BASE64,
+            },
+          },
+        ],
+      };
     }
     return { content: [{ type: 'text', text: `Unknown tool: ${name}` }], isError: true };
   });

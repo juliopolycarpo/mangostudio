@@ -5,6 +5,7 @@ import { MarkdownContent } from '@/components/MarkdownContent';
 import { useI18n } from '@/hooks/use-i18n';
 import { ContinuationEventMarker } from './ContinuationEventMarker';
 import { GeneratedImagePart } from './GeneratedImagePart';
+import { McpMediaPartBlock } from './McpMediaPartBlock';
 import { SystemEventMarker } from './SystemEventMarker';
 import { ThinkingBlock } from './ThinkingBlock';
 import { ToolCallBlock } from './ToolCallBlock';
@@ -64,6 +65,8 @@ export function MessageParts({ parts, messageId, isStreaming }: MessagePartsProp
             return null;
           case 'generated_image':
             return <GeneratedImagePart key={part.imageId} part={part} />;
+          case 'mcp_media':
+            return <McpMediaPartBlock key={`${part.toolCallId}-${part.url}`} part={part} />;
           case 'subagent_trace':
             return (
               <SubagentTraceBlock

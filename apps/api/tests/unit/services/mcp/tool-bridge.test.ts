@@ -52,7 +52,8 @@ async function insertServer(
 function makeHandle(overrides: Partial<McpClientHandle> = {}): McpClientHandle {
   return {
     listTools: () => Promise.resolve([]),
-    callTool: () => Promise.resolve({ contentText: '', isError: false, rawContentKinds: [] }),
+    callTool: () =>
+      Promise.resolve({ contentText: '', isError: false, rawContentKinds: [], content: [] }),
     close: () => Promise.resolve(),
     ...overrides,
   };
@@ -179,6 +180,7 @@ describe('executeMcpTool', () => {
               contentText: 'issue created',
               isError: false,
               rawContentKinds: ['text'],
+              content: [{ type: 'text' as const, text: 'issue created' }],
             });
           },
         })
@@ -193,6 +195,7 @@ describe('executeMcpTool', () => {
       contentText: 'issue created',
       isError: false,
       rawContentKinds: ['text'],
+      content: [{ type: 'text', text: 'issue created' }],
     });
     expect(calls).toEqual([
       {
@@ -212,7 +215,12 @@ describe('executeMcpTool', () => {
         makeHandle({
           callTool: (_name, _args, options) => {
             seen = options;
-            return Promise.resolve({ contentText: '', isError: false, rawContentKinds: [] });
+            return Promise.resolve({
+              contentText: '',
+              isError: false,
+              rawContentKinds: [],
+              content: [],
+            });
           },
         })
       )
@@ -230,7 +238,12 @@ describe('executeMcpTool', () => {
       Promise.resolve(
         makeHandle({
           callTool: () =>
-            Promise.resolve({ contentText: 'boom', isError: true, rawContentKinds: ['text'] }),
+            Promise.resolve({
+              contentText: 'boom',
+              isError: true,
+              rawContentKinds: ['text'],
+              content: [{ type: 'text' as const, text: 'boom' }],
+            }),
         })
       )
     );

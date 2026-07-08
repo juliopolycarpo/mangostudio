@@ -14,7 +14,7 @@ import {
 } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { ToolListChangedNotificationSchema } from '@modelcontextprotocol/sdk/types.js';
 import { getVersion } from '../../lib/config';
-import { flattenMcpContent } from './content-mapping';
+import { flattenMcpContent, normalizeMcpContent } from './content-mapping';
 import { readMcpHeaders } from './header-secrets';
 import { buildStdioEnv } from './stdio-env';
 import {
@@ -184,10 +184,12 @@ export function wrapMcpClient(
 }
 
 function mapCallResult(result: Awaited<ReturnType<Client['callTool']>>): McpCallResult {
-  const content = Array.isArray(result.content) ? result.content : [];
+  const rawContent = Array.isArray(result.content) ? result.content : [];
+  const content = normalizeMcpContent(rawContent);
   return {
     contentText: flattenMcpContent(content),
     isError: result.isError === true,
-    rawContentKinds: content.map((block) => block.type),
+    rawContentKinds: rawContent.map((block) => block.type),
+    content,
   };
 }

@@ -12,6 +12,7 @@ export type {
   ContinuationReasonCode,
   GeneratedImagePart,
   GeneratedImageStatus,
+  McpMediaPart,
   MessagePart,
   SubagentTraceEvent,
   SubagentTraceEventName,

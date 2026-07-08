@@ -45,6 +45,19 @@ export interface SSEImageGenerationFailedEvent {
   done: false;
 }
 
+/** SSE event: an MCP tool call produced persisted rich media (image or file). */
+export interface SSEMcpMediaEvent {
+  type: 'mcp_media';
+  toolCallId: string;
+  serverSlug: string;
+  toolName: string;
+  kind: 'image' | 'resource';
+  mimeType: string;
+  url: string;
+  uri?: string;
+  done: false;
+}
+
 /** SSE event: persisted user message id for the current streamed turn. */
 export interface SSEUserMessageIdEvent {
   type: 'user_message_id';
@@ -117,6 +130,7 @@ export type StreamChunk =
   | SSEImageGenerationStartedEvent
   | SSEImageGenerationCompletedEvent
   | SSEImageGenerationFailedEvent
+  | SSEMcpMediaEvent
   | {
       type: 'context_info';
       estimatedInputTokens: number;

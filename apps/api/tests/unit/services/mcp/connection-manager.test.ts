@@ -26,7 +26,8 @@ function makeConfig(id: string): McpServerRuntimeConfig {
 function makeHandle(onClose?: () => void): McpClientHandle {
   return {
     listTools: () => Promise.resolve([]),
-    callTool: () => Promise.resolve({ contentText: '', isError: false, rawContentKinds: [] }),
+    callTool: () =>
+      Promise.resolve({ contentText: '', isError: false, rawContentKinds: [], content: [] }),
     close: () => {
       onClose?.();
       return Promise.resolve();

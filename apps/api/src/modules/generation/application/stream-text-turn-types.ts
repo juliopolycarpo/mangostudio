@@ -1,4 +1,9 @@
-import type { ContinuationReasonCode, ProviderType, ReasoningEffort } from '@mangostudio/shared';
+import type {
+  ContinuationReasonCode,
+  McpMediaPart,
+  ProviderType,
+  ReasoningEffort,
+} from '@mangostudio/shared';
 import type { AgentExecutionMode, AgentId, AgentProfile } from '@mangostudio/shared/agents';
 import type { ContextSettings } from '@mangostudio/shared/chat';
 import type { ToolIntent } from '@mangostudio/shared/generation';
@@ -58,6 +63,7 @@ export type StreamEvent =
       modelName?: string;
       generationTime?: string;
     }
+  | { type: 'mcp_media'; part: McpMediaPart }
   | { type: 'fallback_notice'; from: string; to: string; reason: string }
   | {
       type: 'continuation_transition';

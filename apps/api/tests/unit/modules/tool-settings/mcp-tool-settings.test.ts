@@ -51,7 +51,8 @@ function fakeServerWithTools(...toolNames: string[]): McpClientHandle {
           inputSchema: { type: 'object' },
         }))
       ),
-    callTool: () => Promise.resolve({ contentText: '', isError: false, rawContentKinds: [] }),
+    callTool: () =>
+      Promise.resolve({ contentText: '', isError: false, rawContentKinds: [], content: [] }),
     close: () => Promise.resolve(),
   };
 }
