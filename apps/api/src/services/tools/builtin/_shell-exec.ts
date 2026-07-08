@@ -99,6 +99,10 @@ export async function runShellCommand(input: RunShellCommandInput): Promise<Shel
     }
   };
   input.signal?.addEventListener('abort', abortHandler, { once: true });
+  // A signal already aborted at spawn time never re-dispatches `abort` to a
+  // freshly added listener, so kill the child directly instead of leaking it
+  // until its own timeout.
+  if (input.signal?.aborted) abortHandler();
 
   try {
     const [stdout, stderr] = await Promise.all([

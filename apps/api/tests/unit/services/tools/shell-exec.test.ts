@@ -146,6 +146,22 @@ describe('runShellCommand', () => {
     expect(Number.isFinite(pid)).toBe(true);
     expect(() => process.kill(pid, 0)).toThrow();
   });
+
+  it.skipIf(!hasBash)('kills the process when the signal is already aborted', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const startedAt = Date.now();
+    const result = await runShellCommand({
+      kind: 'bash',
+      command: 'sleep 5',
+      timeoutMs: 30_000,
+      maxOutputBytes: 1000,
+      signal: controller.signal,
+    });
+    // Without the already-aborted guard the child would run the full sleep.
+    expect(result.timedOut).toBe(true);
+    expect(Date.now() - startedAt).toBeLessThan(4000);
+  });
 });
 
 describe('runShellCommand env sanitization', () => {
