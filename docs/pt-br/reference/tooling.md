@@ -2,6 +2,43 @@
 
 > 🇺🇸 [English version](../../reference/tooling.md)
 
+## TypeScript 7
+
+O monorepo verifica tipos com [TypeScript 7](https://devblogs.microsoft.com/typescript/announcing-typescript-7-0/),
+o port nativo em Go. O TS 7 traz um único binário `tsc` que paraleliza parsing,
+type-checking e emit entre núcleos, tipicamente 8–12x mais rápido que o TS 6 em
+builds completos.
+
+### Type-checking
+
+Cada workspace executa `tsc --noEmit` (fixado em `7.0.2`) via seu script
+`typecheck`. O Turbo orquestra esses scripts entre workspaces em paralelo, e
+cada invocação do `tsc` paraleliza internamente — as duas camadas compõem sem
+conflito.
+
+### Ajuste de paralelismo
+
+O TS 7 expõe flags experimentais para ajustar o paralelismo:
+
+| Flag               | Padrão | Finalidade                                                                                                                 |
+| ------------------ | ------ | -------------------------------------------------------------------------------------------------------------------------- |
+| `--checkers N`     | 4      | Número de workers de type-checker. Aumente em máquinas com mais núcleos; defina como 1 em runners de CI com pouca memória. |
+| `--builders N`     | 1      | Builders de project-references paralelos sob `--build`. Não usado aqui — o Turbo cuida da orquestração entre workspaces.   |
+| `--singleThreaded` | off    | Desabilita todo o paralelismo. Útil para depurar diagnósticos dependentes de ordem.                                        |
+
+Os padrões são mantidos; o monorepo é pequeno o suficiente para que
+`--checkers 4` seja o ponto ideal. Se os runners de CI ficarem com pouca
+memória, defina `--checkers 2` ou `--checkers 1` nos scripts de `typecheck`
+dos workspaces.
+
+### API de compatibilidade
+
+O TS 7.0 não expõe uma API programática estável. Os scripts de cobertura do
+QA-gate (`scripts/qa-gate/source-*-coverage.ts`) importam a API do compilador
+de `@typescript/typescript6` (fixado em `6.0.2`), o pacote oficial de
+compatibilidade side-by-side. Quando o TS 7.1 lançar uma nova API, a dependência
+de compatibilidade pode ser removida.
+
 ## Turborepo
 
 Este monorepo usa [Turborepo](https://turborepo.dev) **2.x** (atualmente

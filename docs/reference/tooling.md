@@ -1,5 +1,41 @@
 # Tooling
 
+## TypeScript 7
+
+The monorepo type-checks with [TypeScript 7](https://devblogs.microsoft.com/typescript/announcing-typescript-7-0/),
+the native Go port. TS 7 ships a single `tsc` binary that parallelizes parsing,
+type-checking, and emitting across cores, typically 8–12x faster than TS 6 on
+full builds.
+
+### Type-checking
+
+Each workspace runs `tsc --noEmit` (pinned to `7.0.2`) via its `typecheck`
+script. Turbo orchestrates these across workspaces in parallel, and each `tsc`
+invocation further parallelizes internally — the two layers compose without
+conflict.
+
+### Parallelization tuning
+
+TS 7 exposes experimental flags for fine-tuning parallelism:
+
+| Flag               | Default | Purpose                                                                                                           |
+| ------------------ | ------- | ----------------------------------------------------------------------------------------------------------------- |
+| `--checkers N`     | 4       | Number of type-checker workers. Increase on machines with more cores; set to 1 on memory-constrained CI runners.  |
+| `--builders N`     | 1       | Parallel project-reference builders under `--build`. Not used here — Turbo handles cross-workspace orchestration. |
+| `--singleThreaded` | off     | Disables all parallelism. Useful for debugging order-dependent diagnostics.                                       |
+
+The defaults are left in place; the monorepo is small enough that `--checkers 4`
+is the sweet spot. If CI runners run low on memory, set `--checkers 2` or
+`--checkers 1` in the workspace `typecheck` scripts.
+
+### Compatibility API
+
+TS 7.0 does not expose a stable programmatic API. The QA-gate coverage scripts
+(`scripts/qa-gate/source-*-coverage.ts`) import the compiler API from
+`@typescript/typescript6` (pinned to `6.0.2`), the official side-by-side
+compatibility package. When TS 7.1 ships a new API, the compat dependency can
+be removed.
+
 ## Turborepo
 
 This monorepo uses [Turborepo](https://turborepo.dev) **2.x** (currently
