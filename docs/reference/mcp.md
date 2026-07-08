@@ -93,8 +93,43 @@ SDK so a timed-out request is actually cancelled.
 
 Failures degrade instead of aborting the turn: a server tool error, an unreachable server, or a
 timeout is recorded as a typed error tool result and the turn continues. Oversized results are
-capped at 64 KiB with a truncation marker (`apps/api/src/services/mcp/content-mapping.ts`), and
-non-text content blocks are replaced with a bracketed placeholder.
+capped at 64 KiB with a truncation marker (`apps/api/src/services/mcp/content-mapping.ts`).
+
+## Rich tool results
+
+The model always receives the flattened text result: text blocks and text-bearing embedded
+resources are inlined (capped at 64 KiB), and rich blocks contribute a bracketed placeholder.
+In parallel, image content blocks and allowlisted binary embedded resources of a successful
+call are persisted (`apps/api/src/services/mcp/rich-content.ts`) and rendered inline in chat as
+`mcp_media` message parts carrying provenance (server slug, tool name, tool call id):
+
+- **Images** (`image/png|jpeg|webp|gif|avif`) go through generated-image storage and render
+  like `generate_image` output. They are not registered as gallery artifacts.
+- **Binary embedded resources** (`application/pdf`) become chat attachments with a download
+  chip.
+
+Persistence is best-effort per block with a 10 MiB decoded-size cap: an oversized, disallowed,
+or failing block is logged and skipped, leaving only the text placeholder — never failing the
+tool call.
+
+## Resources and prompts
+
+Servers advertising the `resources` or `prompts` capability get two extra surfaces
+(`apps/api/src/modules/mcp-servers/application/mcp-resource-prompt-service.ts`):
+
+- **Settings → MCP** — each server card has a resources browser that lists resources and
+  previews text contents inline.
+- **Chat composer** — the MCP menu lists every enabled server's prompts and resources. A prompt
+  inserts its resolved text into the input (argument-bearing prompts get a small form first).
+  A resource is attached to the current chat as context: `POST
+  /mcp/servers/:id/resources/read` with a `chatId` persists text (`text/plain`, `markdown`,
+  `csv`, `json`), image, and PDF contents as chat attachments, and the next turn carries their
+  ids through the existing attachments pipeline.
+
+Endpoints are capability-gated: a server that did not advertise the primitive answers 404 with
+code `UNSUPPORTED`, and the UI hides the affordance. Prompt resolution
+(`POST /mcp/servers/:id/prompts/resolve`) flattens each prompt message to plain text — inserted
+prompts are ordinary composer text with no new message semantics.
 
 ## Trust model
 
