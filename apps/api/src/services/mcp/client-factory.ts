@@ -4,7 +4,11 @@
  * `@modelcontextprotocol/sdk`; everything else consumes `McpClientHandle`.
  */
 
-import type { McpToolDescriptor } from '@mangostudio/shared/mcp';
+import type {
+  McpPromptDescriptor,
+  McpResourceDescriptor,
+  McpToolDescriptor,
+} from '@mangostudio/shared/mcp';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
@@ -14,14 +18,17 @@ import {
 } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { ToolListChangedNotificationSchema } from '@modelcontextprotocol/sdk/types.js';
 import { getVersion } from '../../lib/config';
-import { flattenMcpContent } from './content-mapping';
+import { flattenMcpContent, normalizeMcpContent } from './content-mapping';
 import { readMcpHeaders } from './header-secrets';
 import { buildStdioEnv } from './stdio-env';
 import {
   type McpCallResult,
   type McpClientHandle,
   McpConnectionError,
+  type McpPromptResult,
   type McpRequestOptions,
+  type McpResourceContents,
+  type McpServerCapabilities,
   type McpServerRuntimeConfig,
 } from './types';
 
@@ -150,6 +157,15 @@ export function wrapMcpClient(
   });
 
   return {
+    getCapabilities(): McpServerCapabilities {
+      const capabilities = client.getServerCapabilities();
+      return {
+        tools: capabilities?.tools !== undefined,
+        resources: capabilities?.resources !== undefined,
+        prompts: capabilities?.prompts !== undefined,
+      };
+    },
+
     async listTools(options) {
       const tools: McpToolDescriptor[] = [];
       let cursor: string | undefined;
@@ -176,6 +192,75 @@ export function wrapMcpClient(
       return mapCallResult(result);
     },
 
+    async listResources(options) {
+      const resources: McpResourceDescriptor[] = [];
+      let cursor: string | undefined;
+      do {
+        const page = await client.listResources({ cursor }, requestOptions(options));
+        for (const resource of page.resources) {
+          resources.push({
+            uri: resource.uri,
+            name: resource.title ?? resource.name,
+            ...(resource.description !== undefined ? { description: resource.description } : {}),
+            ...(resource.mimeType !== undefined ? { mimeType: resource.mimeType } : {}),
+            ...(resource.size !== undefined ? { sizeBytes: resource.size } : {}),
+          });
+        }
+        cursor = page.nextCursor;
+      } while (cursor);
+      return resources;
+    },
+
+    async readResource(uri, options) {
+      const result = await client.readResource({ uri }, requestOptions(options));
+      return result.contents.map((entry): McpResourceContents => {
+        const text = 'text' in entry && typeof entry.text === 'string' ? entry.text : undefined;
+        const blob = 'blob' in entry && typeof entry.blob === 'string' ? entry.blob : undefined;
+        return {
+          uri: entry.uri,
+          ...(entry.mimeType !== undefined ? { mimeType: entry.mimeType } : {}),
+          ...(text !== undefined ? { text } : {}),
+          ...(blob !== undefined ? { blob } : {}),
+        };
+      });
+    },
+
+    async listPrompts(options) {
+      const prompts: McpPromptDescriptor[] = [];
+      let cursor: string | undefined;
+      do {
+        const page = await client.listPrompts({ cursor }, requestOptions(options));
+        for (const prompt of page.prompts) {
+          prompts.push({
+            name: prompt.name,
+            ...(prompt.description !== undefined ? { description: prompt.description } : {}),
+            arguments: (prompt.arguments ?? []).map((argument) => ({
+              name: argument.name,
+              ...(argument.description !== undefined ? { description: argument.description } : {}),
+              ...(argument.required !== undefined ? { required: argument.required } : {}),
+            })),
+          });
+        }
+        cursor = page.nextCursor;
+      } while (cursor);
+      return prompts;
+    },
+
+    async getPrompt(name, args, options) {
+      const result = await client.getPrompt(
+        { name, ...(args ? { arguments: args } : {}) },
+        requestOptions(options)
+      );
+      const prompt: McpPromptResult = {
+        ...(result.description !== undefined ? { description: result.description } : {}),
+        messages: result.messages.map((message) => ({
+          role: message.role,
+          text: flattenMcpContent(normalizeMcpContent([message.content])),
+        })),
+      };
+      return prompt;
+    },
+
     async close() {
       closedByUs = true;
       await client.close();
@@ -184,10 +269,12 @@ export function wrapMcpClient(
 }
 
 function mapCallResult(result: Awaited<ReturnType<Client['callTool']>>): McpCallResult {
-  const content = Array.isArray(result.content) ? result.content : [];
+  const rawContent = Array.isArray(result.content) ? result.content : [];
+  const content = normalizeMcpContent(rawContent);
   return {
     contentText: flattenMcpContent(content),
     isError: result.isError === true,
-    rawContentKinds: content.map((block) => block.type),
+    rawContentKinds: rawContent.map((block) => block.type),
+    content,
   };
 }

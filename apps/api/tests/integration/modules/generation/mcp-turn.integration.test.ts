@@ -49,6 +49,7 @@ const RESOLVED_MODEL = {
 let user: UserFixture;
 let chatId: string;
 let skillsDir: string;
+let mediaDir: string;
 let previousProvider: AIProvider | null = null;
 let captured = false;
 
@@ -245,10 +246,13 @@ function installProvider(provider: AIProvider): void {
 
 beforeEach(async () => {
   skillsDir = mkdtempSync(join(tmpdir(), 'mango-mcp-turn-skills-'));
+  mediaDir = mkdtempSync(join(tmpdir(), 'mango-mcp-turn-media-'));
   loadConfigForTest({
     auth: { secret: 'test-secret-at-least-32-characters-long', url: 'http://localhost:3001' },
     database: { path: ':memory:' },
     skills: { dir: skillsDir },
+    images: { dir: join(mediaDir, 'images') },
+    uploads: { dir: join(mediaDir, 'uploads') },
   });
   setThirdPartySkillDirsForTest({});
   resetSkillsCache();
@@ -267,6 +271,7 @@ afterEach(async () => {
   setThirdPartySkillDirsForTest(null);
   resetSkillsCache();
   rmSync(skillsDir, { recursive: true, force: true });
+  rmSync(mediaDir, { recursive: true, force: true });
 });
 
 describe('MCP tool round trip end-to-end', () => {
@@ -295,6 +300,52 @@ describe('MCP tool round trip end-to-end', () => {
         isError: false,
       })
     );
+  });
+
+  it('persists image and binary-resource blocks as mcp_media parts', async () => {
+    await insertServer('camera');
+    const provider = new SingleToolCallProvider('mcp__camera__picture', {});
+    installProvider(provider);
+
+    const events = await collectTurn('Take a picture.');
+
+    const mediaEvents = events.filter((event) => event.type === 'mcp_media');
+    expect(mediaEvents).toHaveLength(2);
+    expect(mediaEvents[0]?.part).toMatchObject({
+      type: 'mcp_media',
+      toolCallId: 'call-1',
+      serverSlug: 'camera',
+      toolName: 'picture',
+      kind: 'image',
+      mimeType: 'image/png',
+    });
+    expect(mediaEvents[0]?.part.url).toStartWith('/images/mcp-');
+    expect(mediaEvents[1]?.part).toMatchObject({
+      kind: 'resource',
+      mimeType: 'application/pdf',
+      uri: 'file:///report.pdf',
+    });
+    expect(mediaEvents[1]?.part.url).toStartWith('/uploads/');
+
+    // The model-facing result keeps the text and placeholder notes.
+    const result = toolResult(events, 'call-1');
+    expect(result?.isError).toBe(false);
+    expect(result?.result).toContain('chart notes');
+
+    const parts = await loadAiParts();
+    expect(parts.filter((part) => part.type === 'mcp_media')).toHaveLength(2);
+    expect(parts).toContainEqual(
+      expect.objectContaining({ type: 'mcp_media', kind: 'image', serverSlug: 'camera' })
+    );
+
+    // The stored binary resource is a queryable chat attachment.
+    const attachments = await getDb()
+      .selectFrom('chat_attachments')
+      .selectAll()
+      .where('chatId', '=', chatId)
+      .execute();
+    expect(attachments).toHaveLength(1);
+    expect(attachments[0]?.mimeType).toBe('application/pdf');
   });
 
   it('hides a disabled server tools on the next turn', async () => {

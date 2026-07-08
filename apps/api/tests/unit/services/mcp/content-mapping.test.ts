@@ -4,7 +4,50 @@ import {
   flattenMcpContent,
   MCP_RESULT_MAX_BYTES,
   MCP_RESULT_TRUNCATION_MARKER,
+  normalizeMcpContent,
 } from '../../../../src/services/mcp/content-mapping';
+
+describe('normalizeMcpContent', () => {
+  it('maps text, image, audio, and resource blocks to the project shapes', () => {
+    const blocks = normalizeMcpContent([
+      { type: 'text', text: 'caption' },
+      { type: 'image', data: 'aGk=', mimeType: 'image/png' },
+      { type: 'audio', data: 'aGk=', mimeType: 'audio/wav' },
+      {
+        type: 'resource',
+        resource: { uri: 'file:///notes.md', mimeType: 'text/markdown', text: 'notes' },
+      },
+      {
+        type: 'resource',
+        resource: { uri: 'file:///doc.pdf', mimeType: 'application/pdf', blob: 'aGk=' },
+      },
+    ]);
+
+    expect(blocks).toEqual([
+      { type: 'text', text: 'caption' },
+      { type: 'image', data: 'aGk=', mimeType: 'image/png' },
+      { type: 'audio', data: 'aGk=', mimeType: 'audio/wav' },
+      { type: 'resource', uri: 'file:///notes.md', mimeType: 'text/markdown', text: 'notes' },
+      { type: 'resource', uri: 'file:///doc.pdf', mimeType: 'application/pdf', blob: 'aGk=' },
+    ]);
+  });
+
+  it('degrades malformed blocks to unknown instead of throwing', () => {
+    const blocks = normalizeMcpContent([
+      { type: 'text', text: 42 },
+      { type: 'image', mimeType: 'image/png' },
+      { type: 'resource', resource: { mimeType: 'text/plain' } },
+      { type: 'video', mimeType: 'video/mp4' },
+    ]);
+
+    expect(blocks).toEqual([
+      { type: 'unknown', blockType: 'text' },
+      { type: 'unknown', blockType: 'image', mimeType: 'image/png' },
+      { type: 'unknown', blockType: 'resource' },
+      { type: 'unknown', blockType: 'video', mimeType: 'video/mp4' },
+    ]);
+  });
+});
 
 describe('flattenMcpContent', () => {
   it('joins text blocks with blank lines', () => {
@@ -16,26 +59,31 @@ describe('flattenMcpContent', () => {
     expect(text).toBe('first\n\nsecond');
   });
 
-  it('replaces rich media blocks with a placeholder note', () => {
+  it('inlines text-bearing resources and notes rich or binary blocks', () => {
     const text = flattenMcpContent([
       { type: 'text', text: 'caption' },
-      { type: 'image', mimeType: 'image/png' },
-      { type: 'audio', mimeType: 'audio/wav' },
-      { type: 'resource' },
+      { type: 'image', data: 'aGk=', mimeType: 'image/png' },
+      { type: 'audio', data: 'aGk=', mimeType: 'audio/wav' },
+      {
+        type: 'resource',
+        uri: 'file:///notes.md',
+        mimeType: 'text/markdown',
+        text: 'inline notes',
+      },
+      { type: 'resource', uri: 'file:///doc.pdf', mimeType: 'application/pdf', blob: 'aGk=' },
+      { type: 'unknown', blockType: 'video' },
     ]);
 
     expect(text).toBe(
       [
         'caption',
-        '[unsupported image content, image/png]',
-        '[unsupported audio content, audio/wav]',
-        '[unsupported resource content]',
+        '[image content, image/png]',
+        '[audio content, audio/wav]',
+        'inline notes',
+        '[binary resource file:///doc.pdf, application/pdf]',
+        '[unsupported video content]',
       ].join('\n\n')
     );
-  });
-
-  it('treats a text block without a string payload as unsupported', () => {
-    expect(flattenMcpContent([{ type: 'text', text: 42 }])).toBe('[unsupported text content]');
   });
 
   it('returns an empty string for empty content', () => {

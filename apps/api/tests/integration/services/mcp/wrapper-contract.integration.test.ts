@@ -48,7 +48,12 @@ describe('mcp client wrapper contract', () => {
     const handle = wrapMcpClient(await connectInMemory(), { timeoutMs: null });
 
     const ok = await handle.callTool('echo', { text: 'hello mcp' });
-    expect(ok).toEqual({ contentText: 'hello mcp', isError: false, rawContentKinds: ['text'] });
+    expect(ok).toEqual({
+      contentText: 'hello mcp',
+      isError: false,
+      rawContentKinds: ['text'],
+      content: [{ type: 'text', text: 'hello mcp' }],
+    });
 
     const failed = await handle.callTool('nonexistent', {});
     expect(failed.isError).toBe(true);

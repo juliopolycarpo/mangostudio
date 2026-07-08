@@ -8,6 +8,7 @@ import {
   setMcpClientConnectorForTest,
 } from '../../../../src/services/mcp/connection-manager';
 import type { McpClientHandle } from '../../../../src/services/mcp/types';
+import { makeFakeMcpHandle } from '../../../support/fixtures/mcp/fake-handle';
 
 let seq = 0;
 function nextUserId(): string {
@@ -41,14 +42,12 @@ async function insertServer(userId: string, slug: string, enabled = 1): Promise<
 }
 
 function fakeServerWithTools(...toolNames: string[]): McpClientHandle {
-  return {
+  return makeFakeMcpHandle({
     listTools: () =>
       Promise.resolve(
         toolNames.map((name) => ({ name, description: '', inputSchema: { type: 'object' } }))
       ),
-    callTool: () => Promise.resolve({ contentText: '', isError: false, rawContentKinds: [] }),
-    close: () => Promise.resolve(),
-  };
+  });
 }
 
 function makeProfile(toolNames: string[]): AgentProfile {

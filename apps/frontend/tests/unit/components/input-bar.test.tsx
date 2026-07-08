@@ -90,7 +90,7 @@ describe('InputBar — chat-only composer', () => {
     await user.type(screen.getByRole('textbox'), 'hello world');
     await user.click(screen.getByRole('button', { name: 'Send' }));
 
-    expect(onSubmit).toHaveBeenCalledWith('hello world');
+    expect(onSubmit).toHaveBeenCalledWith('hello world', undefined);
   });
 
   it('renders a Stop button instead of Send when generating', () => {

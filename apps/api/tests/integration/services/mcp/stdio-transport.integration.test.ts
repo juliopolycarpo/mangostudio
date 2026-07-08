@@ -50,7 +50,12 @@ describe('mcp stdio transport', () => {
     expect(tools.map((tool) => tool.name)).toEqual(['echo', 'env-keys', 'crash']);
 
     const result = await handle.callTool('echo', { text: 'spawned' });
-    expect(result).toEqual({ contentText: 'spawned', isError: false, rawContentKinds: ['text'] });
+    expect(result).toEqual({
+      contentText: 'spawned',
+      isError: false,
+      rawContentKinds: ['text'],
+      content: [{ type: 'text', text: 'spawned' }],
+    });
 
     await handle.close();
   });

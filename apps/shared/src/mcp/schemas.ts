@@ -1,4 +1,5 @@
 import { type Static, Type } from '@sinclair/typebox';
+import { ChatAttachmentSchema } from '../chat/schemas';
 
 /** Per-user unique server identifier; becomes the tool namespace prefix. */
 export const MCP_SERVER_SLUG_PATTERN = '^[a-z0-9]+(?:-[a-z0-9]+)*$';
@@ -206,6 +207,78 @@ export const DeleteMcpServerResponseSchema = Type.Object({
   ok: Type.Boolean(),
 });
 
+/** One resource advertised by a server's `resources/list`. */
+export const McpResourceDescriptorSchema = Type.Object({
+  uri: Type.String({ minLength: 1 }),
+  name: Type.String(),
+  description: Type.Optional(Type.String()),
+  mimeType: Type.Optional(Type.String()),
+  sizeBytes: Type.Optional(Type.Number()),
+});
+
+export const McpServerResourcesResponseSchema = Type.Object({
+  resources: Type.Array(McpResourceDescriptorSchema),
+});
+
+/**
+ * Read a resource's contents. With `chatId`, supported contents are also
+ * persisted as chat attachments so a turn can reference them as context.
+ */
+export const ReadMcpResourceBodySchema = Type.Object({
+  uri: Type.String({ minLength: 1 }),
+  chatId: Type.Optional(Type.String({ minLength: 1 })),
+});
+
+/**
+ * One `resources/read` content entry. Text is inlined (capped); binary
+ * payloads never travel inline — they surface only via `attachments`.
+ */
+export const McpResourceContentSchema = Type.Object({
+  uri: Type.String(),
+  mimeType: Type.Optional(Type.String()),
+  text: Type.Optional(Type.String()),
+  isBinary: Type.Boolean(),
+});
+
+export const ReadMcpResourceResponseSchema = Type.Object({
+  contents: Type.Array(McpResourceContentSchema),
+  /** Chat attachments created from the contents when `chatId` was provided. */
+  attachments: Type.Optional(Type.Array(ChatAttachmentSchema)),
+});
+
+export const McpPromptArgumentSchema = Type.Object({
+  name: Type.String({ minLength: 1 }),
+  description: Type.Optional(Type.String()),
+  required: Type.Optional(Type.Boolean()),
+});
+
+/** One prompt advertised by a server's `prompts/list`. */
+export const McpPromptDescriptorSchema = Type.Object({
+  name: Type.String({ minLength: 1 }),
+  description: Type.Optional(Type.String()),
+  arguments: Type.Array(McpPromptArgumentSchema),
+});
+
+export const McpServerPromptsResponseSchema = Type.Object({
+  prompts: Type.Array(McpPromptDescriptorSchema),
+});
+
+export const GetMcpPromptBodySchema = Type.Object({
+  name: Type.String({ minLength: 1 }),
+  arguments: Type.Optional(Type.Record(Type.String(), Type.String())),
+});
+
+/** A resolved prompt with each message flattened to plain text. */
+export const GetMcpPromptResponseSchema = Type.Object({
+  description: Type.Optional(Type.String()),
+  messages: Type.Array(
+    Type.Object({
+      role: Type.Union([Type.Literal('user'), Type.Literal('assistant')]),
+      text: Type.String(),
+    })
+  ),
+});
+
 export type McpTransport = Static<typeof McpTransportSchema>;
 export type PreviewMcpImportBody = Static<typeof PreviewMcpImportBodySchema>;
 export type ImportMcpServersBody = Static<typeof ImportMcpServersBodySchema>;
@@ -224,3 +297,13 @@ export type McpServerListResponse = Static<typeof McpServerListResponseSchema>;
 export type McpServerToolsResponse = Static<typeof McpServerToolsResponseSchema>;
 export type TestMcpServerResponse = Static<typeof TestMcpServerResponseSchema>;
 export type DeleteMcpServerResponse = Static<typeof DeleteMcpServerResponseSchema>;
+export type McpResourceDescriptor = Static<typeof McpResourceDescriptorSchema>;
+export type McpServerResourcesResponse = Static<typeof McpServerResourcesResponseSchema>;
+export type ReadMcpResourceBody = Static<typeof ReadMcpResourceBodySchema>;
+export type McpResourceContent = Static<typeof McpResourceContentSchema>;
+export type ReadMcpResourceResponse = Static<typeof ReadMcpResourceResponseSchema>;
+export type McpPromptArgument = Static<typeof McpPromptArgumentSchema>;
+export type McpPromptDescriptor = Static<typeof McpPromptDescriptorSchema>;
+export type McpServerPromptsResponse = Static<typeof McpServerPromptsResponseSchema>;
+export type GetMcpPromptBody = Static<typeof GetMcpPromptBodySchema>;
+export type GetMcpPromptResponse = Static<typeof GetMcpPromptResponseSchema>;

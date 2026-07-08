@@ -1,12 +1,13 @@
-import type { MessagePart } from '@mangostudio/shared';
+import type { McpMediaPart, MessagePart } from '@mangostudio/shared';
 import type { AgentProfile } from '@mangostudio/shared/agents';
 import { isAgentId } from '@mangostudio/shared/agents';
 import type { MultiAgentSettings } from '@mangostudio/shared/app-settings';
 import { SUBAGENT_MAX_TURNS_MAX, SUBAGENT_MAX_TURNS_MIN } from '@mangostudio/shared/app-settings';
 import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';
+import { persistMcpMediaParts } from '../../../services/mcp/rich-content';
 import { executeMcpTool } from '../../../services/mcp/tool-bridge';
-import { isMcpToolName } from '../../../services/mcp/tool-naming';
+import { isMcpToolName, parseMcpToolName } from '../../../services/mcp/tool-naming';
 import { executeTool, getSafeEffectiveToolSettings, getTool } from '../../../services/tools';
 import {
   getBoundedOptionalInteger,
@@ -41,6 +42,8 @@ export interface StandardToolExecution {
   resultStr: string;
   isError: boolean;
   subagentTrace?: Extract<MessagePart, { type: 'subagent_trace' }>;
+  /** Persisted rich media (images, files) an MCP tool call produced. */
+  mcpMedia?: McpMediaPart[];
 }
 
 export interface DelegationRuntime {
@@ -145,6 +148,7 @@ async function executeStandardToolCall(
   let result: unknown;
   let isError = false;
   let subagentTrace: Extract<MessagePart, { type: 'subagent_trace' }> | undefined;
+  let mcpMedia: McpMediaPart[] | undefined;
   const isDelegationTool =
     name === DELEGATE_TO_AGENT_TOOL_NAME && Boolean(context.delegationRuntime);
 
@@ -154,9 +158,10 @@ async function executeStandardToolCall(
     }
     const runtime = context.delegationRuntime;
     if (isMcpToolName(name)) {
-      const mcpResult = await executeMcpToolCall(name, args, context);
+      const mcpResult = await executeMcpToolCall(callId, name, args, context);
       result = mcpResult.result;
       isError = mcpResult.isError;
+      mcpMedia = mcpResult.mediaParts;
     } else if (name === DELEGATE_TO_AGENT_TOOL_NAME && runtime) {
       const tool = getTool(name);
       if (!tool) throw new Error(`Unknown tool: "${name}"`);
@@ -246,6 +251,7 @@ async function executeStandardToolCall(
     resultStr: stringifyToolResult(providerResult),
     isError,
     ...(subagentTrace ? { subagentTrace } : {}),
+    ...(mcpMedia?.length ? { mcpMedia } : {}),
   };
 }
 
@@ -253,12 +259,14 @@ async function executeStandardToolCall(
  * Routes a namespaced `mcp__<slug>__<tool>` call to the bridge. The per-call
  * timeout comes from the server row (SDK-enforced, so a timed-out request is
  * actually cancelled); a user-disabled tool is rejected before any connect.
+ * Rich content blocks of a successful call are persisted as media parts.
  */
 async function executeMcpToolCall(
+  callId: string,
   name: string,
   args: Record<string, unknown>,
   context: StandardToolExecutionContext
-): Promise<{ result: unknown; isError: boolean }> {
+): Promise<{ result: unknown; isError: boolean; mediaParts?: McpMediaPart[] }> {
   if (!context.db) {
     throw new Error(`Tool "${name}" is not available in this context.`);
   }
@@ -268,9 +276,22 @@ async function executeMcpToolCall(
   const mcpResult = await executeMcpTool(context.db, context.userId, name, args, {
     signal: context.signal,
   });
+  const parsed = parseMcpToolName(name);
+  const mediaParts =
+    !mcpResult.isError && parsed
+      ? await persistMcpMediaParts(mcpResult.content, {
+          db: context.db,
+          userId: context.userId,
+          chatId: context.chatId,
+          toolCallId: callId,
+          serverSlug: parsed.serverSlug,
+          toolName: parsed.toolName,
+        })
+      : undefined;
   return {
     result: mcpResult.isError ? { error: mcpResult.contentText } : mcpResult.contentText,
     isError: mcpResult.isError,
+    ...(mediaParts?.length ? { mediaParts } : {}),
   };
 }
 

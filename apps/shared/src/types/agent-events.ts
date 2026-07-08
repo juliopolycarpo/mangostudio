@@ -48,6 +48,24 @@ export interface GeneratedImagePart {
   generationTime?: string;
 }
 
+/**
+ * Rich media produced by an MCP tool call: an image content block persisted
+ * to image storage, or a binary embedded resource persisted as a chat
+ * attachment. Provenance is carried by (serverSlug, toolName, toolCallId).
+ */
+export interface McpMediaPart {
+  type: 'mcp_media';
+  toolCallId: string;
+  serverSlug: string;
+  toolName: string;
+  kind: 'image' | 'resource';
+  mimeType: string;
+  /** URL of the persisted content (`/images/...` or `/uploads/...`). */
+  url: string;
+  /** Source URI when the block was an embedded resource. */
+  uri?: string;
+}
+
 export interface SubagentTraceMessage {
   role: 'assistant' | 'system';
   text: string;
@@ -118,6 +136,7 @@ export type MessagePart =
   | { type: 'tool_call'; toolCallId: string; name: string; args: Record<string, unknown> }
   | { type: 'tool_result'; toolCallId: string; content: string; isError?: boolean }
   | GeneratedImagePart
+  | McpMediaPart
   | SubagentTracePart
   | { type: 'error'; text: string }
   | { type: 'system_event'; event: string; detail?: string }

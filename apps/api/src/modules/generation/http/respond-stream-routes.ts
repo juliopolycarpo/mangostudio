@@ -167,6 +167,18 @@ function toSsePayload(event: StreamEvent): object {
         generationTime: event.generationTime,
         done: false,
       };
+    case 'mcp_media':
+      return {
+        type: 'mcp_media',
+        toolCallId: event.part.toolCallId,
+        serverSlug: event.part.serverSlug,
+        toolName: event.part.toolName,
+        kind: event.part.kind,
+        mimeType: event.part.mimeType,
+        url: event.part.url,
+        uri: event.part.uri,
+        done: false,
+      };
     case 'fallback_notice':
       return {
         type: 'fallback_notice',

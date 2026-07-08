@@ -1,10 +1,12 @@
 import type { ReasoningEffort } from '@mangostudio/shared';
 import type { AgentExecutionMode, AgentProfile } from '@mangostudio/shared/agents';
-import { Image, Mic, Send, Square } from 'lucide-react';
+import type { ChatAttachment } from '@mangostudio/shared/chat';
+import { FileText, Image, Mic, Send, Square, X } from 'lucide-react';
 import { useState } from 'react';
 import { ThinkingToggle } from '@/components/layout/ThinkingToggle';
 import type { ContextInfo } from '@/features/generation/types';
 import { useI18n } from '@/hooks/use-i18n';
+import { McpComposerMenu } from './McpComposerMenu';
 
 function formatTokensCompact(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
@@ -13,7 +15,8 @@ function formatTokensCompact(n: number): string {
 }
 
 interface Props {
-  onSubmit: (prompt: string) => void;
+  onSubmit: (prompt: string, attachmentIds?: string[]) => void;
+  chatId?: string | null;
   disabled?: boolean;
   submitDisabled?: boolean;
   isGenerating?: boolean;
@@ -36,6 +39,7 @@ interface Props {
 
 export function InputBar({
   onSubmit,
+  chatId = null,
   disabled,
   submitDisabled = false,
   isGenerating,
@@ -57,6 +61,7 @@ export function InputBar({
 }: Props) {
   const { t } = useI18n();
   const [prompt, setPrompt] = useState('');
+  const [pendingAttachments, setPendingAttachments] = useState<ChatAttachment[]>([]);
   const selectableAgents = agents.filter(
     (agent) => agent.role === 'primary' || agent.role === 'both'
   );
@@ -64,8 +69,23 @@ export function InputBar({
   const handleSubmit = (e: { preventDefault: () => void }) => {
     e.preventDefault();
     if (!prompt.trim() || disabled || submitDisabled) return;
-    onSubmit(prompt);
+    const attachmentIds = pendingAttachments.map((attachment) => attachment.id);
+    onSubmit(prompt, attachmentIds.length > 0 ? attachmentIds : undefined);
     setPrompt('');
+    setPendingAttachments([]);
+  };
+
+  const handleInsertPrompt = (text: string) => {
+    if (!text) return;
+    setPrompt((current) => (current.trim() ? `${current}\n\n${text}` : text));
+  };
+
+  const handleAttachments = (attachments: ChatAttachment[]) => {
+    if (attachments.length === 0) return;
+    setPendingAttachments((current) => {
+      const known = new Set(current.map((attachment) => attachment.id));
+      return [...current, ...attachments.filter((attachment) => !known.has(attachment.id))];
+    });
   };
 
   return (
@@ -129,6 +149,13 @@ export function InputBar({
               />
             ) : null}
 
+            <McpComposerMenu
+              chatId={chatId}
+              disabled={disabled}
+              onInsertPrompt={handleInsertPrompt}
+              onAttachments={handleAttachments}
+            />
+
             {onImageToolIntentChange && (
               <button
                 type="button"
@@ -170,6 +197,32 @@ export function InputBar({
             )}
           </div>
         </div>
+
+        {pendingAttachments.length > 0 && (
+          <div className="mb-2 flex flex-wrap gap-1.5">
+            {pendingAttachments.map((attachment) => (
+              <span
+                key={attachment.id}
+                className="flex items-center gap-1.5 rounded-full border border-outline-variant/20 bg-surface-container-lowest px-2.5 py-1 text-[11px] text-on-surface-variant"
+              >
+                <FileText size={12} className="shrink-0 text-primary/70" />
+                <span className="max-w-[12rem] truncate">{attachment.originalName}</span>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setPendingAttachments((current) =>
+                      current.filter((pending) => pending.id !== attachment.id)
+                    )
+                  }
+                  className="text-on-surface-variant/60 hover:text-on-surface"
+                  aria-label={t.chat.input.removeAttachment}
+                >
+                  <X size={12} />
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
 
         <form
           onSubmit={handleSubmit}

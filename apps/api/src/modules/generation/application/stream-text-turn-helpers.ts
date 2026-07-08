@@ -78,6 +78,10 @@ export function* collectToolExecutionResult(
   if (execution.subagentTrace && sink.includeSubagentTrace) {
     sink.allParts.push(execution.subagentTrace);
   }
+  for (const mediaPart of execution.mcpMedia ?? []) {
+    sink.allParts.push(mediaPart);
+    yield { type: 'mcp_media', part: mediaPart };
+  }
   yield {
     type: 'tool_result',
     callId: execution.callId,

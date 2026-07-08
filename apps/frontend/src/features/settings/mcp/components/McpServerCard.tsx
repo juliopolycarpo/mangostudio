@@ -11,6 +11,7 @@ import { Card } from '@/components/ui/Card';
 import { Toggle } from '@/components/ui/Toggle';
 import { useI18n } from '@/hooks/use-i18n';
 import { useTestMcpServer, useUpdateMcpServer } from '../hooks/use-mcp-servers';
+import { McpServerResources } from './McpServerResources';
 import { McpServerTools } from './McpServerTools';
 
 interface McpServerCardProps {
@@ -31,6 +32,7 @@ export function McpServerCard({ server, onEdit, onDelete }: McpServerCardProps) 
   const s = t.settings.mcp;
 
   const [toolsOpen, setToolsOpen] = useState(false);
+  const [resourcesOpen, setResourcesOpen] = useState(false);
   const [testResult, setTestResult] = useState<TestMcpServerResponse | null>(null);
   const [testError, setTestError] = useState<string | null>(null);
 
@@ -135,6 +137,22 @@ export function McpServerCard({ server, onEdit, onDelete }: McpServerCardProps) 
       {toolsOpen && (
         <div className="border-t border-outline-variant/10">
           <McpServerTools server={server} />
+        </div>
+      )}
+
+      <button
+        type="button"
+        onClick={() => setResourcesOpen((open) => !open)}
+        className="flex items-center gap-1.5 text-xs font-medium text-on-surface-variant hover:text-on-surface transition-colors"
+        aria-expanded={resourcesOpen}
+      >
+        {resourcesOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+        {resourcesOpen ? s.resources.hide : s.resources.show}
+      </button>
+
+      {resourcesOpen && (
+        <div className="border-t border-outline-variant/10">
+          <McpServerResources server={server} />
         </div>
       )}
     </Card>
