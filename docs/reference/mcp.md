@@ -38,6 +38,19 @@ Servers are stored in the database and managed through the API
 | `enabled`   | both       | Disabled servers contribute no tools.                                                      |
 | `timeoutMs` | both       | Per-request cap; `null` uses the built-in default.                                         |
 
+### Importing from mcp.json
+
+Settings → MCP → "Import" copies servers out of the ecosystem's portable `mcpServers` JSON
+format (Claude Code `.mcp.json` / `~/.claude.json`, Cursor `mcp.json`, VS Code `mcp.json`
+with its `servers` key). The API previews the source first
+(`POST /mcp/servers/import/preview`), reporting per entry whether it would be created,
+skipped as a duplicate slug, or is unsupported — SSE/WebSocket transports, `${VAR}`-style
+placeholder values, and malformed entries are reported, never guessed. Selected entries are
+then created as normal managed rows (`POST /mcp/servers/import`), idempotently: duplicate
+slugs are skipped and reported. The copy is one-shot — later changes to the file are not
+synced. Sources may be pasted as JSON or read from an absolute (or `~`-prefixed) `.json`
+path, capped at 1 MiB; imported http `headers` land in the secret store like any manual add.
+
 ## Secret handling
 
 Auth is kept out of plaintext config. For http servers, header **values** are accepted on

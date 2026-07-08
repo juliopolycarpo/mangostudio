@@ -1,15 +1,23 @@
 import type { ApiErrorResponse } from '@mangostudio/shared/errors';
 import type {
   DeleteMcpServerResponse,
+  ImportMcpServersResponse,
+  McpImportPreviewResponse,
   McpServer,
   McpServerListResponse,
   McpServerToolsResponse,
   TestMcpServerResponse,
 } from '@mangostudio/shared/mcp';
-import { AddMcpServerBodySchema, UpdateMcpServerBodySchema } from '@mangostudio/shared/mcp';
+import {
+  AddMcpServerBodySchema,
+  ImportMcpServersBodySchema,
+  PreviewMcpImportBodySchema,
+  UpdateMcpServerBodySchema,
+} from '@mangostudio/shared/mcp';
 import { Elysia, t } from 'elysia';
 import { getDb } from '../../../db/database';
 import { requireAuth } from '../../../plugins/auth-middleware';
+import { importMcpServers, previewMcpImport } from '../application/mcp-import-service';
 import {
   createMcpServer,
   listMcpServers,
@@ -52,6 +60,30 @@ export const mcpServerRoutes = new Elysia()
       }
     },
     { body: AddMcpServerBodySchema }
+  )
+
+  .post(
+    '/mcp/servers/import/preview',
+    async ({ body, set, user }): Promise<McpImportPreviewResponse | ApiErrorResponse> => {
+      try {
+        return await previewMcpImport(getDb(), user?.id ?? '', body);
+      } catch (error) {
+        return handleMcpServerError(error, set);
+      }
+    },
+    { body: PreviewMcpImportBodySchema }
+  )
+
+  .post(
+    '/mcp/servers/import',
+    async ({ body, set, user }): Promise<ImportMcpServersResponse | ApiErrorResponse> => {
+      try {
+        return await importMcpServers(getDb(), user?.id ?? '', body);
+      } catch (error) {
+        return handleMcpServerError(error, set);
+      }
+    },
+    { body: ImportMcpServersBodySchema }
   )
 
   .put(
