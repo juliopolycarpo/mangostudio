@@ -15,6 +15,8 @@ export interface DoctorArgs {
   all: boolean;
   cursorProbe: boolean;
   chatgptRefresh: boolean;
+  /** Actively connect to each enabled MCP server (spawns children / hits URLs). */
+  probe: boolean;
 }
 
 const PORT_MIN = 1;
@@ -51,11 +53,12 @@ export function parseServeArgs(rest: string[]): ServeArgs {
   return { host, port, detached };
 }
 
-/** Parse `doctor` args: optional --all, --cursor-probe, and --chatgpt-refresh flags. */
+/** Parse `doctor` args: optional --all, --cursor-probe, --chatgpt-refresh, and --probe flags. */
 export function parseDoctorArgs(rest: string[]): DoctorArgs {
   let all = false;
   let cursorProbe = false;
   let chatgptRefresh = false;
+  let probe = false;
 
   for (const arg of rest) {
     if (arg === '--all') {
@@ -70,10 +73,14 @@ export function parseDoctorArgs(rest: string[]): DoctorArgs {
       chatgptRefresh = true;
       continue;
     }
+    if (arg === '--probe') {
+      probe = true;
+      continue;
+    }
     throw new CliError(`Unknown option for doctor: ${arg}`);
   }
 
-  return { all, cursorProbe, chatgptRefresh };
+  return { all, cursorProbe, chatgptRefresh, probe };
 }
 
 interface ServeTarget {

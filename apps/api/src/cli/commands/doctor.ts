@@ -5,9 +5,11 @@
 
 import { Database as SQLiteDatabase } from 'bun:sqlite';
 import { accessSync, constants, existsSync, readFileSync } from 'node:fs';
+import { normalizeSkillSourceSettings } from '@mangostudio/shared/app-settings';
 import { parseRuntimeEnvFile } from '@mangostudio/shared/runtime-env';
 import type { SecretMetadataRow } from '@mangostudio/shared/types';
 import { parse as parseToml } from 'smol-toml';
+import type { McpServerSelect } from '../../db/types';
 import {
   BUILD_INFO_FILENAME,
   type BuildInfo,
@@ -32,6 +34,7 @@ import {
   hasProviderTomlSecret,
   PROVIDER_SECRET_CONFIG,
 } from '../../modules/connectors/domain/connector';
+import type { SkillsConfigOrigin } from '../../modules/skills/application/skill-diagnostics';
 import {
   EMBEDDED_FRONTEND_DIR,
   type EmbeddedFrontendFiles,
@@ -62,8 +65,10 @@ import {
   type FsProbe,
   ok,
 } from '../doctor-checks';
+import { collectMcpDoctorChecks } from '../mcp-doctor-checks';
 import { writeLine } from '../output';
 import { createProcessController, type ProcessController } from '../process-control';
+import { collectSkillsDoctorChecks } from '../skills-doctor-checks';
 
 export interface DoctorDeps {
   loadConfig: () => MangoConfig;
@@ -84,6 +89,12 @@ export interface DoctorDeps {
   getCheckoutBuildInfo: () => BuildInfo;
   readFrontendBuildInfo: (frontendDir: string) => BuildInfo | null;
   getEmbeddedFrontend: () => EmbeddedFrontendFiles | null;
+  collectSkillsChecks: (config: MangoConfig) => CheckResult[];
+  listMcpServers: (config: MangoConfig) => McpServerSelect[];
+  collectMcpChecks: (
+    rows: readonly McpServerSelect[],
+    options: { probe: boolean; serverRunning: boolean }
+  ) => Promise<CheckResult[]>;
   log: (msg: string) => void;
   exit: (code: number) => void;
 }
@@ -95,7 +106,7 @@ interface InstanceProbe {
 
 /** Run diagnostics and print a checklist; exit 1 on any failure. // Usage: await runDoctor() */
 export async function runDoctor(
-  options: DoctorArgs = { all: false, cursorProbe: false, chatgptRefresh: false },
+  options: DoctorArgs = { all: false, cursorProbe: false, chatgptRefresh: false, probe: false },
   deps: Partial<DoctorDeps> = {}
 ): Promise<void> {
   const d = resolveDeps(deps);
@@ -150,6 +161,18 @@ async function collectResults(
   if (chatgptConnectors.length > 0 || options.all) {
     results.push(
       ...(await d.collectChatGptChecks(config, chatgptConnectors, options.chatgptRefresh))
+    );
+  }
+
+  results.push(...d.collectSkillsChecks(config));
+
+  const mcpServers = d.listMcpServers(config);
+  if (mcpServers.length > 0 || options.all) {
+    results.push(
+      ...(await d.collectMcpChecks(mcpServers, {
+        probe: options.probe,
+        serverRunning: instance.alive,
+      }))
     );
   }
 
@@ -247,6 +270,9 @@ function resolveDeps(deps: Partial<DoctorDeps>): Required<DoctorDeps> {
     getCheckoutBuildInfo: deps.getCheckoutBuildInfo ?? getCurrentCheckoutBuildInfo,
     readFrontendBuildInfo: deps.readFrontendBuildInfo ?? readFrontendBuildInfo,
     getEmbeddedFrontend: deps.getEmbeddedFrontend ?? getEmbeddedFrontend,
+    collectSkillsChecks: deps.collectSkillsChecks ?? collectSkillsDoctorSection,
+    listMcpServers: deps.listMcpServers ?? listMcpServerRows,
+    collectMcpChecks: deps.collectMcpChecks ?? ((rows, opts) => collectMcpDoctorChecks(rows, opts)),
     log: deps.log ?? writeLine,
     exit: deps.exit ?? ((code) => process.exit(code)),
   };
@@ -273,20 +299,10 @@ export function isCursorConnectorConfigured(config: MangoConfig): boolean {
  * (fresh install) simply means no connectors.
  */
 export function listChatGptConnectorRows(config: MangoConfig): SecretMetadataRow[] {
-  const dbPath = config.database.path;
-  if (dbPath === ':memory:' || !existsSync(dbPath)) return [];
-
-  let db: SQLiteDatabase | null = null;
-  try {
-    db = new SQLiteDatabase(dbPath, { readonly: true });
-    return db
-      .query("SELECT * FROM secret_metadata WHERE provider = 'chatgpt'")
-      .all() as unknown as SecretMetadataRow[];
-  } catch {
-    return [];
-  } finally {
-    db?.close();
-  }
+  return readDbRows<SecretMetadataRow>(
+    config,
+    "SELECT * FROM secret_metadata WHERE provider = 'chatgpt'"
+  );
 }
 
 function mergeConnectorSecretEnv(config: MangoConfig): Record<string, string | undefined> {
@@ -299,4 +315,103 @@ function mergeConnectorSecretEnv(config: MangoConfig): Record<string, string | u
   }
 
   return merged;
+}
+
+/**
+ * Gathers the skills-section inputs doctor needs (source toggles, per-skill
+ * disabled flags, and where the effective `skills.dir` came from) and renders
+ * the checklist. All reads are offline: SQLite is opened read-only and the
+ * filesystem scan never mutates.
+ */
+function collectSkillsDoctorSection(config: MangoConfig): CheckResult[] {
+  return collectSkillsDoctorChecks({
+    configDir: config.skills.dir,
+    configOrigin: resolveSkillsConfigOrigin(config),
+    sourceToggles: readSkillSourceToggles(config),
+    disabledKeys: readDisabledSkillKeys(config),
+  });
+}
+
+/**
+ * Resolves the provenance of the effective `skills.dir`, mirroring config
+ * precedence: `SKILLS_DIR` (process env or the `.env` beside config.toml) wins,
+ * then a `[skills].dir` in config.toml, else the built-in default.
+ */
+function resolveSkillsConfigOrigin(config: MangoConfig): SkillsConfigOrigin {
+  if (process.env.SKILLS_DIR?.trim()) return 'env';
+  const envFile = parseRuntimeEnvFile(getConfigEnvFilePath(config.configFilePath));
+  if (envFile.SKILLS_DIR?.trim()) return 'env';
+
+  const configPath = config.configFilePath;
+  if (configPath && existsSync(configPath)) {
+    try {
+      const parsed = parseToml(readFileSync(configPath, 'utf8')) as Record<string, unknown>;
+      const skills = parsed.skills as Record<string, unknown> | undefined;
+      if (skills && typeof skills.dir === 'string' && skills.dir.trim()) return 'toml';
+    } catch {
+      // A malformed config.toml is reported by the Config row; treat as default here.
+    }
+  }
+  return 'default';
+}
+
+/**
+ * Skill keys switched off in per-skill settings, across all users (doctor is a
+ * local single-user tool). A key disabled for any user counts as disabled.
+ */
+function readDisabledSkillKeys(config: MangoConfig): Set<string> {
+  const rows = readDbRows<{ skillKey: string }>(
+    config,
+    'SELECT skillKey FROM user_skill_settings WHERE enabled = 0'
+  );
+  return new Set(rows.map((row) => row.skillKey));
+}
+
+/** Third-party source toggles; a source enabled for any user is treated as on. */
+function readSkillSourceToggles(config: MangoConfig): { agents: boolean; claude: boolean } {
+  const rows = readDbRows<{ settingsJson: string }>(
+    config,
+    'SELECT settingsJson FROM user_app_settings'
+  );
+  const toggles = { agents: false, claude: false };
+  for (const row of rows) {
+    const sources = normalizeSkillSourceSettings(parseSettingsJson(row.settingsJson).skillSources);
+    if (sources.agents) toggles.agents = true;
+    if (sources.claude) toggles.claude = true;
+  }
+  return toggles;
+}
+
+function parseSettingsJson(raw: string): Record<string, unknown> {
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : {};
+  } catch {
+    return {};
+  }
+}
+
+/** MCP server rows across all users, ordered like the settings list. */
+function listMcpServerRows(config: MangoConfig): McpServerSelect[] {
+  return readDbRows<McpServerSelect>(config, 'SELECT * FROM mcp_servers ORDER BY createdAt ASC');
+}
+
+/**
+ * Runs a read-only query against the SQLite file, returning [] on any failure
+ * (missing file, absent table on a fresh install). Doctor never creates or
+ * migrates the database.
+ */
+function readDbRows<T>(config: MangoConfig, query: string): T[] {
+  const dbPath = config.database.path;
+  if (dbPath === ':memory:' || !existsSync(dbPath)) return [];
+
+  let db: SQLiteDatabase | null = null;
+  try {
+    db = new SQLiteDatabase(dbPath, { readonly: true });
+    return db.query(query).all() as unknown as T[];
+  } catch {
+    return [];
+  } finally {
+    db?.close();
+  }
 }

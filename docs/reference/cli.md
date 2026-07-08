@@ -34,6 +34,7 @@ copy-paste commands, or:
 | `doctor --all`                     | Include Cursor and ChatGPT connector checks even without a configured connector.    |
 | `doctor --cursor-probe`            | After chain checks pass, spawn the sidecar `validate_api_key` RPC with a dummy key. |
 | `doctor --chatgpt-refresh`         | Perform a live ChatGPT token refresh probe (rotates the stored refresh token).      |
+| `doctor --probe`                   | Actively connect to each enabled MCP server (spawns children / hits URLs).          |
 | `version`, `--version`, `-v`       | Print the embedded MangoStudio version.                                             |
 
 `-d` / `--detach` and the positional host/port target may be combined in any
@@ -165,6 +166,48 @@ its own is only a warning (it refreshes on next use); a failed refresh or a
 connector flagged for re-auth is a failure that means "sign in with ChatGPT
 again". Network probes use the standard 5-second provider probe timeout, so
 doctor never hangs offline.
+
+### Skills checks
+
+Doctor always runs a skills section. Skills fail quietly on the filesystem — an
+unreadable directory, a frontmatter typo, a skill silently shadowed by a
+higher-precedence source, one the user disabled and forgot — so each state gets
+its own row:
+
+| Check           | What it verifies                                                                             |
+| --------------- | -------------------------------------------------------------------------------------------- |
+| `Skills config` | The effective `skills.dir` and where it came from (`default` / `toml` / `env`).              |
+| `Skills mango`  | The `~/.mango/skills` source: read health and discovered skill count.                        |
+| `Skills agents` | The `~/.agents/skills` source: same, plus whether the opt-in toggle is on.                   |
+| `Skills claude` | The `~/.claude/skills` source: same, plus whether the opt-in toggle is on.                   |
+| `Skill <key>`   | Per skill, only when not silently active: `invalid` (fail), `shadowed` or `disabled` (note). |
+
+Precedence is `mango` > `agents` > `claude`: on a slug collision the lower
+source is reported as shadowed so a copy the user believes is active is visible.
+Disabled third-party sources are still scanned and counted, but their skills
+stay out of the active set.
+
+### MCP checks
+
+When at least one MCP server exists (or with `--all`), doctor runs an MCP
+section. It is offline by default — the DB rows are read read-only and stdio
+`command`s are resolved on `PATH` — and never connects unless `--probe` is
+passed:
+
+| Check                | What it verifies                                                                      |
+| -------------------- | ------------------------------------------------------------------------------------- |
+| `MCP <slug>`         | Transport and whether the server is enabled.                                          |
+| `MCP <slug> command` | stdio only: the `command` resolves on `PATH` (catches spawn `ENOENT` before a probe). |
+| `MCP <slug> probe`   | Only with `--probe`: connect + `listTools` under the 10 s budget, or a typed failure. |
+| `MCP <slug> tools`   | Only with `--probe`: namespaced tool names over the provider 64-char cap are skipped. |
+
+`--probe` connects to every enabled server, so it spawns stdio children and
+reaches out to URLs; failures come back typed (`spawn ENOENT`, connection
+refused, auth `401/403`, protocol mismatch, timeout). Each probe session is
+force-disposed afterward so a CLI run leaves no lingering child. When a
+MangoStudio server is already running, a leading `MCP probe` note flags that the
+probe spawns a second stdio child per server — safe for the per-client stdio
+servers MCP is designed around.
 
 ## Exit codes
 
