@@ -5,7 +5,11 @@
 import { en } from '@mangostudio/shared/i18n';
 import type {
   AddMcpServerBody,
+  ImportMcpServersBody,
+  ImportMcpServersResponse,
+  McpImportPreviewResponse,
   McpServer,
+  PreviewMcpImportBody,
   TestMcpServerResponse,
   UpdateMcpServerBody,
 } from '@mangostudio/shared/mcp';
@@ -35,4 +39,20 @@ export async function testMcpServer(id: string): Promise<TestMcpServerResponse> 
   const { data, error } = await client.api.mcp.servers({ id }).test.post();
   if (error) throw new Error(extractApiError(error.value, fallback.testFailed));
   return data as TestMcpServerResponse;
+}
+
+export async function previewMcpImport(
+  body: PreviewMcpImportBody
+): Promise<McpImportPreviewResponse> {
+  const { data, error } = await client.api.mcp.servers.import.preview.post(body);
+  if (error) throw new Error(extractApiError(error.value, fallback.import.previewFailed));
+  return data as McpImportPreviewResponse;
+}
+
+export async function importMcpServers(
+  body: ImportMcpServersBody
+): Promise<ImportMcpServersResponse> {
+  const { data, error } = await client.api.mcp.servers.import.post(body);
+  if (error) throw new Error(extractApiError(error.value, fallback.import.failed));
+  return data as ImportMcpServersResponse;
 }
