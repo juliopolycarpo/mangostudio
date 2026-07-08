@@ -118,4 +118,26 @@ describe('collectMcpDoctorChecks', () => {
     expect(find(results, 'MCP github').detail).toBe('stdio, disabled');
     expect(results.some((row) => row.label === 'MCP github probe')).toBe(false);
   });
+
+  it('warns (not fails) when a disabled server command is missing', async () => {
+    const results = await collectMcpDoctorChecks(
+      [makeRow({ enabled: 0 })],
+      { probe: false, serverRunning: false },
+      makeDeps({ resolveCommandOnPath: () => false })
+    );
+
+    const command = find(results, 'MCP github command');
+    expect(command.status).toBe('warn');
+    expect(command.detail).toContain('server disabled');
+  });
+
+  it('omits the running-server note when no enabled server would be probed', async () => {
+    const results = await collectMcpDoctorChecks(
+      [makeRow({ enabled: 0 })],
+      { probe: true, serverRunning: true },
+      makeDeps()
+    );
+
+    expect(results.some((row) => row.label === 'MCP probe')).toBe(false);
+  });
 });

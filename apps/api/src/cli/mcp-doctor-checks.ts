@@ -29,7 +29,10 @@ export async function collectMcpDoctorChecks(
   const diagnostics = await collectMcpDiagnostics(rows, options, deps);
   const results: CheckResult[] = [];
 
-  if (diagnostics.probed && diagnostics.serverRunning) {
+  // Only worth the note when there is at least one enabled server to probe; a
+  // bare `--all` run with no (enabled) servers spawns nothing.
+  const probesSomething = diagnostics.servers.some((server) => server.enabled);
+  if (diagnostics.probed && diagnostics.serverRunning && probesSomething) {
     results.push(
       warn(
         'MCP probe',
@@ -52,11 +55,16 @@ function renderServer(server: McpServerDiagnostic): CheckResult[] {
 
   if (server.transport === 'stdio' && server.commandOnPath !== null) {
     const command = server.command ?? '';
-    results.push(
-      server.commandOnPath
-        ? ok(`${label} command`, `${command} resolvable on PATH`)
-        : fail(`${label} command`, `${command} not found on PATH (spawn would ENOENT)`)
-    );
+    if (server.commandOnPath) {
+      results.push(ok(`${label} command`, `${command} resolvable on PATH`));
+    } else if (server.enabled) {
+      results.push(fail(`${label} command`, `${command} not found on PATH (spawn would ENOENT)`));
+    } else {
+      // A disabled server is never spawned, so a missing command is not a
+      // failure — mirror the skills section, which only warns on disabled-source
+      // problems rather than failing the whole run.
+      results.push(warn(`${label} command`, `${command} not found on PATH (server disabled)`));
+    }
   }
 
   if (server.probe) {
