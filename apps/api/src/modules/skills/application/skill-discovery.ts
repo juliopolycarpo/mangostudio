@@ -28,7 +28,7 @@ export const SKILL_FILE_NAME = 'SKILL.md';
 const CACHE_TTL_MS = 2_000;
 
 /** Highest precedence first: on slug collisions the earlier source wins. */
-const SKILL_SOURCE_PRECEDENCE: ReadonlyArray<SkillSource> = ['mango', 'agents', 'claude'];
+export const SKILL_SOURCE_PRECEDENCE: ReadonlyArray<SkillSource> = ['mango', 'agents', 'claude'];
 
 export type ThirdPartySkillSource = Exclude<SkillSource, 'mango'>;
 
@@ -68,7 +68,7 @@ function getSkillSourceDirs(sources: SkillSourceSettings): SkillSourceDir[] {
 }
 
 /** Descriptor fields produced by the pure filesystem scan, before settings. */
-type ScannedSkill = Omit<SkillDescriptor, 'enabled' | 'shadowed'>;
+export type ScannedSkill = Omit<SkillDescriptor, 'enabled' | 'shadowed'>;
 
 interface SkillsCache {
   readonly scannedAt: number;
@@ -131,7 +131,7 @@ export function resetSkillsCache(): void {
  * winner still shadows lower-precedence copies, so precedence stays
  * predictable instead of flipping with toggles.
  */
-function resolveWinnersBySlug(skills: ReadonlyArray<ScannedSkill>): Map<string, string> {
+export function resolveWinnersBySlug(skills: ReadonlyArray<ScannedSkill>): Map<string, string> {
   const winners = new Map<string, string>();
   for (const source of SKILL_SOURCE_PRECEDENCE) {
     for (const skill of skills) {
@@ -175,7 +175,7 @@ function readSkillsDirEntries(dir: string): Dirent[] {
   }
 }
 
-function describeSkill(source: SkillSource, slug: string, path: string): ScannedSkill {
+export function describeSkill(source: SkillSource, slug: string, path: string): ScannedSkill {
   const base = { key: skillKey(source, slug), slug, source, path };
 
   if (!isValidSkillSlug(slug)) {
