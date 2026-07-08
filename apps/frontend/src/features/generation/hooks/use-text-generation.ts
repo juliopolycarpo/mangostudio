@@ -163,7 +163,7 @@ export function useTextGeneration({
   );
 
   const handleRespond = useCallback(
-    async (prompt: string, toolIntent?: ToolIntent) => {
+    async (prompt: string, toolIntent?: ToolIntent, attachmentIds?: string[]) => {
       if (stream.abortControllerRef.current) return;
       stream.setIsGenerating(true);
 
@@ -236,6 +236,7 @@ export function useTextGeneration({
           {
             chatId: activeChatId,
             prompt,
+            attachmentIds,
             model,
             systemPrompt: systemPrompt || undefined,
             promptSettings,

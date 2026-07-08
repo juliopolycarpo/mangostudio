@@ -10,7 +10,7 @@ import { useChatContextControls, useChatPageMessages } from './hooks/use-chat-pa
 
 interface ChatPageProps {
   chatId: string | null;
-  onSubmit: (prompt: string) => void;
+  onSubmit: (prompt: string, attachmentIds?: string[]) => void;
   disabled: boolean;
   isGenerating: boolean;
   onStop: () => void;
@@ -96,6 +96,7 @@ export function ChatPage({
       )}
       <InputBar
         onSubmit={onSubmit}
+        chatId={chatId}
         disabled={disabled}
         submitDisabled={contextControls.requiresDecision || isContextActionPending}
         isGenerating={isGenerating}

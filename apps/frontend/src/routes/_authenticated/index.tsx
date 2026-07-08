@@ -17,7 +17,7 @@ function ChatRoute() {
   return (
     <ChatPage
       chatId={app.currentChatId}
-      onSubmit={(prompt) => void app.handleSubmit(prompt)}
+      onSubmit={(prompt, attachmentIds) => void app.handleSubmit(prompt, attachmentIds)}
       disabled={app.isGenerating}
       isGenerating={app.isGenerating}
       onStop={app.handleStop}

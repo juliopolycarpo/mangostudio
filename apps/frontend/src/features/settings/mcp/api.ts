@@ -5,11 +5,15 @@
 import { en } from '@mangostudio/shared/i18n';
 import type {
   AddMcpServerBody,
+  GetMcpPromptBody,
+  GetMcpPromptResponse,
   ImportMcpServersBody,
   ImportMcpServersResponse,
   McpImportPreviewResponse,
   McpServer,
   PreviewMcpImportBody,
+  ReadMcpResourceBody,
+  ReadMcpResourceResponse,
   TestMcpServerResponse,
   UpdateMcpServerBody,
 } from '@mangostudio/shared/mcp';
@@ -39,6 +43,24 @@ export async function testMcpServer(id: string): Promise<TestMcpServerResponse> 
   const { data, error } = await client.api.mcp.servers({ id }).test.post();
   if (error) throw new Error(extractApiError(error.value, fallback.testFailed));
   return data as TestMcpServerResponse;
+}
+
+export async function readMcpResource(
+  id: string,
+  body: ReadMcpResourceBody
+): Promise<ReadMcpResourceResponse> {
+  const { data, error } = await client.api.mcp.servers({ id }).resources.read.post(body);
+  if (error) throw new Error(extractApiError(error.value, fallback.resources.readFailed));
+  return data as ReadMcpResourceResponse;
+}
+
+export async function getMcpPrompt(
+  id: string,
+  body: GetMcpPromptBody
+): Promise<GetMcpPromptResponse> {
+  const { data, error } = await client.api.mcp.servers({ id }).prompts.resolve.post(body);
+  if (error) throw new Error(extractApiError(error.value, fallback.prompts.getFailed));
+  return data as GetMcpPromptResponse;
 }
 
 export async function previewMcpImport(

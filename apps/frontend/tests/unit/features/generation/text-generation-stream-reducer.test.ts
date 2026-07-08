@@ -215,6 +215,54 @@ describe('text generation stream reducer', () => {
     });
   });
 
+  it('appends MCP media parts once, deduplicated by tool call and url', () => {
+    const mediaChunk = {
+      type: 'mcp_media',
+      toolCallId: 'tool-1',
+      serverSlug: 'charts',
+      toolName: 'render',
+      kind: 'image',
+      mimeType: 'image/png',
+      url: '/images/mcp-1.png',
+      done: false,
+    } as const;
+
+    const state = reduceChunks([
+      { type: 'tool_call_started', callId: 'tool-1', name: 'mcp__charts__render', done: false },
+      mediaChunk,
+      mediaChunk,
+      {
+        ...mediaChunk,
+        kind: 'resource',
+        mimeType: 'application/pdf',
+        url: '/uploads/r.pdf',
+        uri: 'file:///r.pdf',
+      },
+    ]);
+
+    expect(getPartsByType(state.parts, 'mcp_media')).toEqual([
+      {
+        type: 'mcp_media',
+        toolCallId: 'tool-1',
+        serverSlug: 'charts',
+        toolName: 'render',
+        kind: 'image',
+        mimeType: 'image/png',
+        url: '/images/mcp-1.png',
+      },
+      {
+        type: 'mcp_media',
+        toolCallId: 'tool-1',
+        serverSlug: 'charts',
+        toolName: 'render',
+        kind: 'resource',
+        mimeType: 'application/pdf',
+        url: '/uploads/r.pdf',
+        uri: 'file:///r.pdf',
+      },
+    ]);
+  });
+
   it('appends a terminal error part without losing accumulated text', () => {
     const state = reduceChunks([
       { type: 'text', text: 'partial answer', done: false },
