@@ -1,5 +1,5 @@
 import { dirname } from 'node:path';
-import * as ts from 'typescript';
+import * as ts from '@typescript/typescript6';
 
 import type { CoverageBucket } from './parse-lcov';
 import { type LcovFileCoverage, parseLcovLineHits } from './source-branch-coverage';

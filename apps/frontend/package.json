@@ -10,7 +10,7 @@
     "preview": "vite preview",
     "check": "bun run check:quick && bun run typecheck",
     "check:quick": "biome check src tests",
-    "typecheck": "tsgo --noEmit",
+    "typecheck": "tsc --noEmit",
     "circular": "madge --circular --extensions ts,tsx .",
     "fix": "biome check --write src tests",
     "test": "bun run test:unit && bun run test:integration",
@@ -56,7 +56,7 @@
     "jsdom": "^29.1.1",
     "smol-toml": "^1.6.1",
     "tailwindcss": "^4.3.0",
-    "typescript": "~6.0.3",
+    "typescript": "7.0.2",
     "vite": "^8.0.13",
     "vitest": "^4.1.9"
   }

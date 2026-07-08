@@ -20,7 +20,7 @@
       // tsbuildinfo is per-workspace gitignored incremental state that all
       // workspaces write into one shared root dir. Declaring it as an output
       // here makes every workspace's typecheck task claim the same glob, which
-      // overlaps across tasks and cross-contaminates the restored cache. tsgo
+      // overlaps across tasks and cross-contaminates the restored cache. tsc
       // re-validates buildinfo on disk, so it is left out of the Turbo cache.
       "inputs": ["$TURBO_ROOT$/tsconfig.json", "$TURBO_DEFAULT$"]
     },

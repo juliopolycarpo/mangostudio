@@ -27,7 +27,7 @@ import {
 function printHelp(): never {
   console.log(`Usage: bun run check [workspace flags] [mode flags]
 
-Runs Biome, dprint, madge circular checks, and tsgo typechecks in parallel.
+Runs Biome, dprint, madge circular checks, and tsc typechecks in parallel.
 Default workspace selection: --all
 
 Workspace flags:

@@ -83,7 +83,7 @@ const SAMPLE_LOGS: Static<typeof ProviderObservabilityLogsResponseSchema> = {
 
 describe('contract/schema parity', () => {
   it('keeps the type-level parity assertions compiling under bun run check', () => {
-    // The assertType<> calls above are enforced by tsgo; this body documents
+    // The assertType<> calls above are enforced by tsc; this body documents
     // that the suite intentionally relies on compile-time verification.
     expect(true).toBe(true);
   });
