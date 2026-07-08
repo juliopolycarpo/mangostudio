@@ -5,14 +5,24 @@
  */
 
 import { clampIntegerSetting, getOptionalString, getRequiredString } from '../arg-parsing';
+import {
+  buildToolExecutionTimeoutDescriptor,
+  TOOL_EXECUTION_TIMEOUT_SECONDS_DEFAULT,
+  TOOL_EXECUTION_TIMEOUT_SECONDS_MAX,
+  TOOL_EXECUTION_TIMEOUT_SECONDS_MIN,
+} from '../execution-timeout';
 import type { RegisteredTool, ToolContext } from '../types';
 import { normalizeStringList } from './_fs-utils';
-import { runShellCommand, type ShellCommandResult, type ShellKind } from './_shell-exec';
+import {
+  runShellCommand,
+  type ShellCommandResult,
+  ShellExecutionError,
+  type ShellKind,
+} from './_shell-exec';
 
-export const SHELL_DEFAULT_TIMEOUT_MS = 15_000;
-export const SHELL_MIN_TIMEOUT_MS = 1_000;
-/** Capped at the registry's 30s per-tool budget so Bun kills the child first. */
-export const SHELL_MAX_TIMEOUT_MS = 30_000;
+export const SHELL_DEFAULT_TIMEOUT_SECONDS = TOOL_EXECUTION_TIMEOUT_SECONDS_DEFAULT;
+export const SHELL_MIN_TIMEOUT_SECONDS = TOOL_EXECUTION_TIMEOUT_SECONDS_MIN;
+export const SHELL_MAX_TIMEOUT_SECONDS = TOOL_EXECUTION_TIMEOUT_SECONDS_MAX;
 
 export const SHELL_DEFAULT_MAX_OUTPUT_BYTES = 100_000;
 export const SHELL_MIN_MAX_OUTPUT_BYTES = 1_000;
@@ -30,7 +40,7 @@ const PRESENTATION: Record<ShellKind, ShellPresentation> = {
 };
 
 interface ShellToolSettings {
-  timeoutMs: number;
+  timeoutSeconds: number;
   maxOutputBytes: number;
   /** Secret-shaped env vars forwarded to commands anyway (denylist exceptions). */
   allowedEnvVars: string[];
@@ -54,11 +64,11 @@ export function buildShellTool(kind: ShellKind): RegisteredTool {
 
 export function normalizeShellToolSettings(parameters: Record<string, unknown>): ShellToolSettings {
   return {
-    timeoutMs: clampIntegerSetting(
-      parameters.timeoutMs,
-      SHELL_DEFAULT_TIMEOUT_MS,
-      SHELL_MIN_TIMEOUT_MS,
-      SHELL_MAX_TIMEOUT_MS
+    timeoutSeconds: clampIntegerSetting(
+      parameters.timeoutSeconds,
+      SHELL_DEFAULT_TIMEOUT_SECONDS,
+      SHELL_MIN_TIMEOUT_SECONDS,
+      SHELL_MAX_TIMEOUT_SECONDS
     ),
     maxOutputBytes: clampIntegerSetting(
       parameters.maxOutputBytes,
@@ -71,7 +81,7 @@ export function normalizeShellToolSettings(parameters: Record<string, unknown>):
   };
 }
 
-function execute(
+async function execute(
   kind: ShellKind,
   args: Record<string, unknown>,
   context: ToolContext
@@ -79,14 +89,19 @@ function execute(
   const command = getRequiredString(args.command, 'command');
   const cwd = getOptionalString(args.cwd);
   const settings = normalizeShellToolSettings(context.parameters);
-  return runShellCommand({
+  const result = await runShellCommand({
     kind,
     command,
     ...(cwd ? { cwd } : {}),
-    timeoutMs: settings.timeoutMs,
+    timeoutMs: settings.timeoutSeconds * 1000,
     maxOutputBytes: settings.maxOutputBytes,
     envPolicy: { allow: settings.allowedEnvVars, deny: settings.deniedEnvVars },
+    ...(context.signal ? { signal: context.signal } : {}),
   });
+  if (result.timedOut) {
+    throw new ShellExecutionError(`Command timed out after ${settings.timeoutSeconds} seconds.`);
+  }
+  return result;
 }
 
 function buildDefinition(kind: ShellKind, description: string) {
@@ -123,22 +138,14 @@ function buildSettings(label: string, description: string): RegisteredTool['sett
     enabledByDefault: false,
     canDisable: true,
     defaultParameters: {
-      timeoutMs: SHELL_DEFAULT_TIMEOUT_MS,
+      timeoutSeconds: SHELL_DEFAULT_TIMEOUT_SECONDS,
       maxOutputBytes: SHELL_DEFAULT_MAX_OUTPUT_BYTES,
       allowedEnvVars: [],
       deniedEnvVars: [],
     },
+    managesOwnTimeout: true,
     parameterDescriptors: [
-      {
-        name: 'timeoutMs',
-        label: 'Timeout (ms)',
-        description: 'Maximum time a command may run before it is killed.',
-        type: 'number',
-        required: true,
-        defaultValue: SHELL_DEFAULT_TIMEOUT_MS,
-        min: SHELL_MIN_TIMEOUT_MS,
-        max: SHELL_MAX_TIMEOUT_MS,
-      },
+      buildToolExecutionTimeoutDescriptor(),
       {
         name: 'maxOutputBytes',
         label: 'Max output bytes',

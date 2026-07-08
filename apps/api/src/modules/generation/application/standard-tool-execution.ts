@@ -14,6 +14,7 @@ import {
   getRequiredString,
 } from '../../../services/tools/arg-parsing';
 import { DELEGATE_TO_AGENT_TOOL_NAME } from '../../../services/tools/builtin/delegate-to-agent';
+import { resolveEffectiveToolTimeoutMs } from '../../../services/tools/execution-timeout';
 import type { EffectiveToolSettings } from '../../../services/tools/types';
 import { shouldExposeDelegateTool } from './delegate-tool-availability';
 import { ensureDelegationResult, isSubagentRunResult, logDelegationWarn } from './delegation-retry';
@@ -31,8 +32,6 @@ import {
   type SubagentRunResult,
 } from './subagent-runner';
 import { errorToToolMessage, parseToolArgs, stringifyToolResult } from './tool-result-utils';
-
-const TOOL_TIMEOUT_MS = 30_000;
 
 export interface StandardToolExecution {
   callId: string;
@@ -180,19 +179,41 @@ async function executeStandardToolCall(
           executeDelegationToolCall(delegationCallId, delegationRequest, runtime),
       });
     } else {
-      result = await withToolTimeout(
-        executeTool(
+      const tool = getTool(name);
+      if (!tool) throw new Error(`Unknown tool: "${name}"`);
+      const savedSettings = context.settingsByToolName.get(name);
+      const effectiveSettings = getSafeEffectiveToolSettings(tool, savedSettings);
+      const timeoutMs = resolveEffectiveToolTimeoutMs(tool, effectiveSettings);
+      const timeoutController = new AbortController();
+      const parentSignal = context.signal;
+      const onParentAbort = () => timeoutController.abort(parentSignal?.reason);
+      if (parentSignal) {
+        if (parentSignal.aborted) timeoutController.abort(parentSignal.reason);
+        else parentSignal.addEventListener('abort', onParentAbort, { once: true });
+      }
+
+      try {
+        const toolPromise = executeTool(
           name,
           args,
           {
             userId: context.userId,
             chatId: context.chatId,
             parameters: {},
+            signal: timeoutController.signal,
           },
-          context.settingsByToolName.get(name)
-        ),
-        name
-      );
+          effectiveSettings
+        );
+
+        // Tools that enforce their own timeout (e.g. shells) are not wrapped,
+        // because a second, equally-long timer can win the race and reject
+        // before the tool has finished killing and reaping its child process.
+        result = tool.settings.managesOwnTimeout
+          ? await toolPromise
+          : await withToolTimeout(toolPromise, name, timeoutMs, timeoutController);
+      } finally {
+        parentSignal?.removeEventListener('abort', onParentAbort);
+      }
     }
     if (isSubagentRunResult(result)) {
       subagentTrace = createSubagentTraceForTool(callId, result);
@@ -474,13 +495,18 @@ function createAsyncQueue<T>(): AsyncIterable<T> & {
   };
 }
 
-function withToolTimeout<T>(promise: Promise<T>, name: string): Promise<T> {
+function withToolTimeout<T>(
+  promise: Promise<T>,
+  name: string,
+  timeoutMs: number,
+  abortController?: AbortController
+): Promise<T> {
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
   const timeoutPromise = new Promise<never>((_, reject) => {
-    timeoutId = setTimeout(
-      () => reject(new Error(`Tool "${name}" timed out after ${TOOL_TIMEOUT_MS}ms`)),
-      TOOL_TIMEOUT_MS
-    );
+    timeoutId = setTimeout(() => {
+      abortController?.abort();
+      reject(new Error(`Tool "${name}" timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
   });
 
   return Promise.race([promise, timeoutPromise]).finally(() => {

@@ -7,6 +7,13 @@ import {
   type GenerateImageToolOutcome,
   summarizeGenerateImageToolResult,
 } from '../../../src/services/tools/builtin/generate-image';
+import {
+  TOOL_EXECUTION_TIMEOUT_PARAM,
+  TOOL_EXECUTION_TIMEOUT_SECONDS_DEFAULT,
+  TOOL_EXECUTION_TIMEOUT_SECONDS_MAX,
+  TOOL_EXECUTION_TIMEOUT_SECONDS_MIN,
+} from '../../../src/services/tools/execution-timeout';
+import { getTool } from '../../../src/services/tools/registry';
 
 describe('generate_image tool planning', () => {
   it('builds a one-image plan from defaults', () => {
@@ -130,6 +137,18 @@ describe('generate_image tool planning', () => {
 });
 
 describe('generate_image provider definition', () => {
+  it('exposes timeoutSeconds in tool settings descriptors', () => {
+    const descriptor = getTool('generate_image')?.settings.parameterDescriptors.find(
+      (item) => item.name === TOOL_EXECUTION_TIMEOUT_PARAM
+    );
+    expect(descriptor).toMatchObject({
+      type: 'number',
+      defaultValue: TOOL_EXECUTION_TIMEOUT_SECONDS_DEFAULT,
+      min: TOOL_EXECUTION_TIMEOUT_SECONDS_MIN,
+      max: TOOL_EXECUTION_TIMEOUT_SECONDS_MAX,
+    });
+  });
+
   it('reflects the effective image count limit in the tool schema', () => {
     const definition = buildGenerateImageToolDefinition({
       enabled: true,

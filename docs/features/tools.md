@@ -76,8 +76,8 @@ Creates one or more images via image generation models during a text chat turn.
 - **Tool name:** `generate_image`
 - **Category:** `image`
 - **Parameters:** `prompt` (required), `count` (1–4), `quality`, `model`
-- **Settings-aware schema:** `maxImagesPerCall` is dynamically capped based on user settings.
-- **Execution:** Plans images via `createGenerateImageToolPlan()`, streams per-image outcomes, summarizes into a single result.
+- **Settings:** `timeoutSeconds` (5s–600s, default 30s), `maxImagesPerCall`, `defaultQuality`, `defaultModel`, `letAiDecideQuality`
+- **Execution:** Plans images via `createGenerateImageToolPlan()`, streams per-image outcomes, summarizes into a single result. Honors the configured `timeoutSeconds` execution budget.
 
 ### `get_current_datetime`
 
@@ -136,9 +136,9 @@ Run a shell command and return its captured `stdout`, `stderr`, exit code, and t
 - **Tool names:** `bash`, `zsh`, `powershell`
 - **Category:** `system`
 - **Parameters:** `command` (required), `cwd` (optional working directory; `~` is expanded)
-- **Settings:** `timeoutMs` (1s–30s, default 15s), `maxOutputBytes` (1KB–1MB per stream, default 100KB)
+- **Settings:** `timeoutSeconds` (5s–600s, default 30s), `maxOutputBytes` (1KB–1MB per stream, default 100KB)
 - **Availability:** Registered at import time only when the interpreter exists — `bash`/`zsh` via `Bun.which`, `powershell` only on Windows (`pwsh` then `powershell`). Unavailable shells are never offered to models.
-- **Safety:** Disabled by default (`enabledByDefault: false`); requires explicit opt-in. The process is killed with `SIGKILL` after `timeoutMs`, and per-stream output is capped at `maxOutputBytes` (flagged via `truncated`).
+- **Safety:** Disabled by default (`enabledByDefault: false`); requires explicit opt-in. The process is killed with `SIGKILL` after the configured timeout, and per-stream output is capped at `maxOutputBytes` (flagged via `truncated`).
 - **Execution:** `runShellCommand()` spawns the interpreter with `Bun.spawn` (`bash -c` / `zsh -c` / `powershell -NoProfile -NonInteractive -Command`), reads both streams under the byte cap, and returns a structured `ShellCommandResult`.
 
 ## Settings Policy
@@ -153,6 +153,8 @@ The settings policy (`settings-policy.ts`) provides pure functions for:
 | `getToolDefinitionsForTools(tools, settings?)` | Filters enabled tools and produces definitions            |
 
 Parameter normalization throws `ToolParameterError` with a descriptive message on invalid values. The `executeTool()` function catches this via `getSafeEffectiveToolSettings()` and falls back to defaults to prevent corrupted saved settings from breaking tool execution.
+
+Long-running builtins (`bash`, `zsh`, `powershell`, `generate_image`) expose a `timeoutSeconds` setting (5–600, default 30). The chat execution layer reads this value and cancels the tool call when the budget is exceeded; shell tools also forward the abort signal so timed-out child processes are killed instead of orphaned. Tools without `timeoutSeconds` keep the 30-second default.
 
 ## Tool Settings API
 

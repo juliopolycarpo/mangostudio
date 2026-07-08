@@ -23,6 +23,8 @@ export interface ToolContext {
   userId: string;
   chatId: string;
   parameters: Record<string, unknown>;
+  /** When aborted, long-running tools should stop work and release resources. */
+  signal?: AbortSignal;
   delegateToAgent?: (input: DelegateToAgentInput) => Promise<unknown>;
 }
 
@@ -40,6 +42,11 @@ export interface ToolSettingsMetadata {
   canDisable: boolean;
   defaultParameters: Record<string, unknown>;
   parameterDescriptors: ReadonlyArray<ToolParameterDescriptor>;
+  /**
+   * When true, the tool enforces its own execution timeout and the generic
+   * wrapper should not add a second, racing timeout layer.
+   */
+  managesOwnTimeout?: boolean;
 }
 
 /** A fully registered tool: its schema definition + its executor. */

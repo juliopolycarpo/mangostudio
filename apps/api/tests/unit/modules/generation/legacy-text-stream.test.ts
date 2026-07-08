@@ -140,7 +140,7 @@ describe('runLegacyTextStream', () => {
     );
     let capturedRequest: TextGenerationRequest | undefined;
     const toolSettingsByName = new Map([
-      ['bash', { enabled: true, parameters: { timeoutMs: 5000, maxOutputBytes: 12_000 } }],
+      ['bash', { enabled: true, parameters: { timeoutSeconds: 5, maxOutputBytes: 12_000 } }],
     ]);
     const session = createSession([{ type: 'text', text: '', done: true }], {
       onRequest: (req) => {
@@ -163,7 +163,7 @@ describe('runLegacyTextStream', () => {
     expect(capturedRequest?.generationConfig?.tools).toEqual(session.toolDefs);
     expect(capturedRequest?.generationConfig?.toolSettings?.bash).toEqual({
       enabled: true,
-      parameters: { timeoutMs: 5000, maxOutputBytes: 12_000 },
+      parameters: { timeoutSeconds: 5, maxOutputBytes: 12_000 },
     });
   });
 });
