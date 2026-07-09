@@ -18,7 +18,11 @@ import {
   ProviderObservabilityMetricsResponseSchema,
 } from '../../src/observability';
 import type { ProviderTypeSchema, ReasoningEffortSchema } from '../../src/provider-settings';
-import type { SSEErrorEvent as StreamingSSEErrorEvent } from '../../src/streaming';
+import type {
+  StreamChunk,
+  StreamChunkSchema,
+  SSEErrorEvent as StreamingSSEErrorEvent,
+} from '../../src/streaming';
 import { assertType, type Equals } from '../../src/test-utils/type-assert';
 import type { ProviderType, ReasoningEffort } from '../../src/types';
 
@@ -35,6 +39,9 @@ assertType<Equals<AgentProfile, Static<typeof AgentProfileSchema>>>();
 
 // 3. `SSEErrorEvent` is now defined once (errors) and re-exported by streaming.
 assertType<Equals<StreamingSSEErrorEvent, ErrorsSSEErrorEvent>>();
+
+// 3b. `StreamChunk` is derived from `StreamChunkSchema` (schema-first).
+assertType<Equals<StreamChunk, Static<typeof StreamChunkSchema>>>();
 
 // 4. The compatibility barrel must stay identical to the canonical modules.
 assertType<Equals<BarrelAppSettings, ModuleAppSettings>>();
