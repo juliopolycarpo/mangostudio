@@ -244,7 +244,7 @@ export const SSESystemEventSchema = Type.Object({
   type: Type.Literal('system_event'),
   event: Type.String(),
   detail: Type.Optional(Type.String()),
-  done: Type.Boolean(),
+  done: Type.Literal(false),
 });
 
 export type SSESystemEvent = Static<typeof SSESystemEventSchema>;
