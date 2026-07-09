@@ -14,6 +14,7 @@ import type { PromptSettings } from '@mangostudio/shared/prompt-rules';
 import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useState } from 'react';
 import { useChatStream } from '@/features/chat/hooks/use-chat-stream';
+import { setChatTodos } from '@/features/chat/hooks/use-chat-todos';
 import type { useChats } from '@/features/chat/hooks/use-chats';
 import { messageKeys } from '@/features/chat/queries';
 import { generateChatTitleSuggestion } from '@/features/chat/services/chat-title';
@@ -275,6 +276,10 @@ export function useTextGeneration({
 
             if (chunk.type === 'fallback_notice') {
               stream.setFallbackNotice({ from: chunk.from, to: chunk.to, reason: chunk.reason });
+            }
+
+            if (chunk.type === 'todo_update') {
+              setChatTodos(queryClient, activeChatId, chunk.todos);
             }
           },
           controller.signal

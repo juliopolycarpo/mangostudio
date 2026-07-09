@@ -25,7 +25,14 @@ export const TodoWriteArgsSchema = Type.Object({
   todos: TodoListSchema,
 });
 
+/** `GET /api/chats/:id/todos` — `updatedAt` is null when the chat has no todo row. */
+export const ChatTodosResponseSchema = Type.Object({
+  todos: TodoListSchema,
+  updatedAt: Type.Union([Type.Number(), Type.Null()]),
+});
+
 export type TodoStatus = Static<typeof TodoStatusSchema>;
 export type TodoItem = Static<typeof TodoItemSchema>;
 export type TodoList = Static<typeof TodoListSchema>;
 export type TodoWriteArgs = Static<typeof TodoWriteArgsSchema>;
+export type ChatTodosResponse = Static<typeof ChatTodosResponseSchema>;

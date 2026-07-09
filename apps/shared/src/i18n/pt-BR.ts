@@ -121,6 +121,9 @@ export const messages = {
       statusInProgress: 'Em andamento',
       statusCompleted: 'Concluída',
       empty: 'Lista de tarefas limpa',
+      panelCurrent: 'atual: {task}',
+      panelExpand: 'Mostrar tarefas',
+      panelCollapse: 'Ocultar tarefas',
     },
     context: {
       label: 'Contexto',
