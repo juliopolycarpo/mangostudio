@@ -20,6 +20,7 @@ import type {
 import { executeTool, getSafeEffectiveToolSettings, getTool } from '../../../services/tools';
 import { ASK_USER_QUESTION_TOOL_NAME } from '../../../services/tools/builtin/ask-user-question';
 import { DELEGATE_TO_AGENT_TOOL_NAME } from '../../../services/tools/builtin/delegate-to-agent';
+import { TODO_READ_TOOL_NAME, TODO_WRITE_TOOL_NAME } from '../../../services/tools/builtin/todo';
 import type { EffectiveToolSettings } from '../../../services/tools/types';
 import { appendSkillsPromptSection } from '../../skills/application/skills-prompt-section';
 import type { ResolvedAgentRuntime } from './resolve-agent-runtime';
@@ -98,9 +99,17 @@ export async function prepareSubagentTurn(
   });
   // Subagents can neither delegate further nor ask the human: their turn
   // result flows to the parent model, not the UI, so a question card would
-  // never reach the user.
+  // never reach the user. The todo tools are also withheld — they operate on
+  // the parent chat's single list, so a delegated task would clobber the
+  // orchestrating plan.
+  const subagentExcludedTools: ReadonlySet<string> = new Set([
+    DELEGATE_TO_AGENT_TOOL_NAME,
+    ASK_USER_QUESTION_TOOL_NAME,
+    TODO_WRITE_TOOL_NAME,
+    TODO_READ_TOOL_NAME,
+  ]);
   const toolDefinitions = runtime.toolDefinitions.filter(
-    (tool) => tool.name !== DELEGATE_TO_AGENT_TOOL_NAME && tool.name !== ASK_USER_QUESTION_TOOL_NAME
+    (tool) => !subagentExcludedTools.has(tool.name)
   );
   const allowedToolNames = new Set(toolDefinitions.map((tool) => tool.name));
   const prompt = buildSubagentPrompt(input.request);
