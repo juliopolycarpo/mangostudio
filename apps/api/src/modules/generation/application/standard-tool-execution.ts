@@ -1,4 +1,4 @@
-import type { McpMediaPart, MessagePart } from '@mangostudio/shared';
+import type { McpMediaPart, MessagePart, QuestionPart } from '@mangostudio/shared';
 import type { AgentProfile } from '@mangostudio/shared/agents';
 import { isAgentId } from '@mangostudio/shared/agents';
 import type { MultiAgentSettings } from '@mangostudio/shared/app-settings';
@@ -14,6 +14,10 @@ import {
   getOptionalString,
   getRequiredString,
 } from '../../../services/tools/arg-parsing';
+import {
+  ASK_USER_QUESTION_TOOL_NAME,
+  parseAskUserQuestionArgs,
+} from '../../../services/tools/builtin/ask-user-question';
 import { DELEGATE_TO_AGENT_TOOL_NAME } from '../../../services/tools/builtin/delegate-to-agent';
 import { resolveEffectiveToolTimeoutMs } from '../../../services/tools/execution-timeout';
 import type { EffectiveToolSettings } from '../../../services/tools/types';
@@ -44,6 +48,8 @@ export interface StandardToolExecution {
   subagentTrace?: Extract<MessagePart, { type: 'subagent_trace' }>;
   /** Persisted rich media (images, files) an MCP tool call produced. */
   mcpMedia?: McpMediaPart[];
+  /** Questions an ask_user_question call presented, rendered as a chat card. */
+  questionPart?: QuestionPart;
 }
 
 export interface DelegationRuntime {
@@ -242,6 +248,8 @@ async function executeStandardToolCall(
     });
   }
   const providerResult = isSubagentRunResult(result) ? createSubagentToolResult(result) : result;
+  const questionPart =
+    name === ASK_USER_QUESTION_TOOL_NAME && !isError ? createQuestionPart(callId, args) : undefined;
 
   return {
     callId,
@@ -252,6 +260,7 @@ async function executeStandardToolCall(
     isError,
     ...(subagentTrace ? { subagentTrace } : {}),
     ...(mcpMedia?.length ? { mcpMedia } : {}),
+    ...(questionPart ? { questionPart } : {}),
   };
 }
 
@@ -460,6 +469,18 @@ function createSubagentToolResult(result: SubagentRunResult): Record<string, unk
     toolCallCount: result.toolCallCount,
     durationMs: result.durationMs,
     ...(result.error ? { error: result.error.message } : {}),
+  };
+}
+
+/**
+ * Rebuilds the question card payload from the args a successful
+ * ask_user_question execution already validated.
+ */
+function createQuestionPart(callId: string, args: Record<string, unknown>): QuestionPart {
+  return {
+    type: 'question',
+    toolCallId: callId,
+    questions: parseAskUserQuestionArgs(args).questions,
   };
 }
 

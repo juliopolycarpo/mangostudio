@@ -27,6 +27,7 @@ export const REQUIRED_TOOL_NAMES = [
   'grep',
   'delegate_to_agent',
   'skill',
+  'ask_user_question',
 ] as const;
 
 export const SHELL_TOOL_NAMES = [

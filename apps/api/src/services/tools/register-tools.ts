@@ -1,4 +1,5 @@
 import { isShellAvailable } from './builtin/_shell-exec';
+import { register as registerAskUserQuestionTool } from './builtin/ask-user-question';
 import { register as registerBashTool } from './builtin/bash';
 import { register as registerDelegateToAgentTool } from './builtin/delegate-to-agent';
 import { register as registerGenerateImageTool } from './builtin/generate-image';
@@ -23,6 +24,7 @@ export function registerTools(): void {
   registerGrepTool();
   registerDelegateToAgentTool();
   registerSkillTool();
+  registerAskUserQuestionTool();
   registerAvailableShellTools();
 }
 

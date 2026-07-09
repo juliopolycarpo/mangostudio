@@ -82,6 +82,10 @@ export function* collectToolExecutionResult(
     sink.allParts.push(mediaPart);
     yield { type: 'mcp_media', part: mediaPart };
   }
+  if (execution.questionPart) {
+    sink.allParts.push(execution.questionPart);
+    yield { type: 'question', part: execution.questionPart };
+  }
   yield {
     type: 'tool_result',
     callId: execution.callId,
