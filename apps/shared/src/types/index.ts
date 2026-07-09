@@ -12,6 +12,7 @@ export type {
   ContinuationReasonCode,
   GeneratedImagePart,
   GeneratedImageStatus,
+  McpElicitationPart,
   McpMediaPart,
   MessagePart,
   QuestionPart,

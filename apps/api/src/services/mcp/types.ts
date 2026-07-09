@@ -27,6 +27,8 @@ export interface McpRequestOptions {
   /** Per-request cap; falls back to the server row's timeout, then the default. */
   timeoutMs?: number;
   signal?: AbortSignal;
+  /** Provenance for mid-call elicitation cards (namespaced tool call id). */
+  toolCallId?: string;
 }
 
 /**

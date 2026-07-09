@@ -70,6 +70,7 @@ export function getMcpClient(
 
   const connect = connectorOverride ?? connectMcpClient;
   entry.connectPromise = connect(config, {
+    userId,
     onSessionClosed: () => {
       // The server dropped the session (crash, socket close): forget the dead
       // handle but keep the entry so status reads `disconnected` until reuse.

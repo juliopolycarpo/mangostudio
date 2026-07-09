@@ -14,11 +14,28 @@ import { createEchoMcpServer } from '../../../support/fixtures/mcp/create-echo-m
 let server: Server | undefined;
 let client: Client | undefined;
 
+function wrapOptions(
+  overrides: Partial<{
+    onSessionClosed: () => void;
+    onToolListChanged: () => void;
+  }> = {}
+) {
+  return {
+    userId: 'wrapper-contract-user',
+    serverId: 'wrapper-server',
+    serverSlug: 'wrapper-server',
+    ...overrides,
+  };
+}
+
 async function connectInMemory(): Promise<Client> {
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   server = createEchoMcpServer();
   await server.connect(serverTransport);
-  client = new Client({ name: 'wrapper-contract-test', version: '0.0.0' });
+  client = new Client(
+    { name: 'wrapper-contract-test', version: '0.0.0' },
+    { capabilities: { elicitation: { form: {} } } }
+  );
   await client.connect(clientTransport);
   return client;
 }
@@ -32,7 +49,7 @@ afterEach(async () => {
 
 describe('mcp client wrapper contract', () => {
   it('lists tools as flattened descriptors', async () => {
-    const handle = wrapMcpClient(await connectInMemory(), { timeoutMs: null });
+    const handle = wrapMcpClient(await connectInMemory(), { timeoutMs: null }, wrapOptions());
 
     const tools = await handle.listTools();
 
@@ -45,7 +62,7 @@ describe('mcp client wrapper contract', () => {
   });
 
   it('maps text content and error flags from tool calls', async () => {
-    const handle = wrapMcpClient(await connectInMemory(), { timeoutMs: null });
+    const handle = wrapMcpClient(await connectInMemory(), { timeoutMs: null }, wrapOptions());
 
     const ok = await handle.callTool('echo', { text: 'hello mcp' });
     expect(ok).toEqual({
@@ -65,11 +82,11 @@ describe('mcp client wrapper contract', () => {
     wrapMcpClient(
       await connectInMemory(),
       { timeoutMs: null },
-      {
+      wrapOptions({
         onSessionClosed: () => {
           drops += 1;
         },
-      }
+      })
     );
 
     await server?.close();
@@ -79,11 +96,11 @@ describe('mcp client wrapper contract', () => {
     const second = wrapMcpClient(
       await connectInMemory(),
       { timeoutMs: null },
-      {
+      wrapOptions({
         onSessionClosed: () => {
           drops += 1;
         },
-      }
+      })
     );
     await second.close();
     await Bun.sleep(0);

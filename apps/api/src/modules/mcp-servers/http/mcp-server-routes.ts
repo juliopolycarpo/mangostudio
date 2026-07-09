@@ -10,6 +10,7 @@ import type {
   McpServerResourcesResponse,
   McpServerToolsResponse,
   ReadMcpResourceResponse,
+  RespondMcpElicitationResponse,
   TestMcpServerResponse,
 } from '@mangostudio/shared/mcp';
 import {
@@ -18,11 +19,13 @@ import {
   ImportMcpServersBodySchema,
   PreviewMcpImportBodySchema,
   ReadMcpResourceBodySchema,
+  RespondMcpElicitationBodySchema,
   UpdateMcpServerBodySchema,
 } from '@mangostudio/shared/mcp';
 import { Elysia, t } from 'elysia';
 import { getDb } from '../../../db/database';
 import { requireAuth } from '../../../plugins/auth-middleware';
+import { respondElicitation } from '../../../services/mcp/elicitation-registry';
 import { importMcpServers, previewMcpImport } from '../application/mcp-import-service';
 import {
   getMcpServerPrompt,
@@ -52,9 +55,23 @@ function handleMcpServerError(error: unknown, set: { status?: number | string })
 }
 
 const idParams = t.Object({ id: t.String() });
+const elicitationIdParams = t.Object({ id: t.String({ minLength: 1 }) });
 
 export const mcpServerRoutes = new Elysia()
   .use(requireAuth)
+
+  .post(
+    '/mcp/elicitations/:id/respond',
+    ({ body, params, set, user }): RespondMcpElicitationResponse | ApiErrorResponse => {
+      const status = respondElicitation(user?.id ?? '', params.id, body);
+      if (!status) {
+        set.status = 404;
+        return { error: 'Elicitation not found or already resolved.', code: 'NOT_FOUND' };
+      }
+      return { ok: true, status };
+    },
+    { params: elicitationIdParams, body: RespondMcpElicitationBodySchema }
+  )
 
   .get('/mcp/servers', ({ user }): Promise<McpServerListResponse> => {
     return listMcpServers(getDb(), user?.id ?? '');

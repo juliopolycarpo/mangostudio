@@ -16,9 +16,15 @@ import {
   StreamableHTTPClientTransport,
   StreamableHTTPError,
 } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import { ToolListChangedNotificationSchema } from '@modelcontextprotocol/sdk/types.js';
+import {
+  ElicitRequestSchema,
+  type ElicitResult,
+  ToolListChangedNotificationSchema,
+} from '@modelcontextprotocol/sdk/types.js';
 import { getVersion } from '../../lib/config';
 import { flattenMcpContent, normalizeMcpContent } from './content-mapping';
+import { createPendingElicitation, type McpElicitationResult } from './elicitation-registry';
+import { flattenElicitationSchema } from './elicitation-schema';
 import { readMcpHeaders } from './header-secrets';
 import { buildStdioEnv } from './stdio-env';
 import {
@@ -36,6 +42,8 @@ import {
 export const DEFAULT_MCP_TIMEOUT_MS = 30_000;
 
 export interface ConnectMcpClientOptions {
+  /** Owning user; required so elicitation requests can be auth-scoped. */
+  userId: string;
   /** Header lookup override for tests; defaults to the secret-store bundle. */
   resolveHeaders?: (serverId: string) => Promise<Record<string, string>>;
   /** Fires once when the session drops out from under us (crash, socket close). */
@@ -44,17 +52,31 @@ export interface ConnectMcpClientOptions {
   onToolListChanged?: () => void;
 }
 
+export interface WrapMcpClientOptions
+  extends Pick<ConnectMcpClientOptions, 'onSessionClosed' | 'onToolListChanged' | 'userId'> {
+  /** Server row id for pending-elicitation ownership. */
+  serverId: string;
+  /** Server slug shown on the elicitation card. */
+  serverSlug: string;
+}
+
 /**
  * Connects to an MCP server and returns the project-owned handle.
  * // Usage: const handle = await connectMcpClient(config)
  */
 export async function connectMcpClient(
   config: McpServerRuntimeConfig,
-  options: ConnectMcpClientOptions = {}
+  options: ConnectMcpClientOptions
 ): Promise<McpClientHandle> {
   const client =
     config.transport === 'stdio' ? await connectStdio(config) : await connectHttp(config, options);
-  return wrapMcpClient(client, config, options);
+  return wrapMcpClient(client, config, {
+    userId: options.userId,
+    serverId: config.id,
+    serverSlug: config.slug,
+    onSessionClosed: options.onSessionClosed,
+    onToolListChanged: options.onToolListChanged,
+  });
 }
 
 /**
@@ -71,7 +93,10 @@ export function shouldFallBackToSse(error: unknown): boolean {
 }
 
 function createClient(): Client {
-  return new Client({ name: 'mangostudio', version: getVersion() });
+  return new Client(
+    { name: 'mangostudio', version: getVersion() },
+    { capabilities: { elicitation: { form: {} } } }
+  );
 }
 
 async function connectStdio(config: McpServerRuntimeConfig): Promise<Client> {
@@ -137,9 +162,11 @@ function toConnectionError(config: McpServerRuntimeConfig, error: unknown): McpC
 export function wrapMcpClient(
   client: Client,
   config: Pick<McpServerRuntimeConfig, 'timeoutMs'>,
-  callbacks: Pick<ConnectMcpClientOptions, 'onSessionClosed' | 'onToolListChanged'> = {}
+  callbacks: WrapMcpClientOptions
 ): McpClientHandle {
   let closedByUs = false;
+  let activeToolCallId: string | undefined;
+  let activeSignal: AbortSignal | undefined;
   client.onclose = () => {
     if (!closedByUs) callbacks.onSessionClosed?.();
   };
@@ -150,6 +177,26 @@ export function wrapMcpClient(
       onToolListChanged();
     });
   }
+
+  client.setRequestHandler(ElicitRequestSchema, async (request): Promise<ElicitResult> => {
+    const params = request.params;
+    // Form mode is the only capability we declare; URL (or unknown) modes
+    // cancel so servers degrade instead of hanging on an unsupported UI.
+    if (params.mode === 'url' || !('requestedSchema' in params)) {
+      return { action: 'cancel' };
+    }
+
+    const result = await createPendingElicitation({
+      userId: callbacks.userId,
+      serverId: callbacks.serverId,
+      serverSlug: callbacks.serverSlug,
+      toolCallId: activeToolCallId ?? `mcp:${callbacks.serverSlug}`,
+      message: params.message,
+      fields: flattenElicitationSchema(params.requestedSchema),
+      signal: activeSignal,
+    });
+    return toElicitResult(result);
+  });
 
   const requestOptions = (options?: McpRequestOptions) => ({
     timeout: options?.timeoutMs ?? config.timeoutMs ?? DEFAULT_MCP_TIMEOUT_MS,
@@ -184,12 +231,21 @@ export function wrapMcpClient(
     },
 
     async callTool(name, args, options) {
-      const result = await client.callTool(
-        { name, arguments: args },
-        undefined,
-        requestOptions(options)
-      );
-      return mapCallResult(result);
+      const previousToolCallId = activeToolCallId;
+      const previousSignal = activeSignal;
+      activeToolCallId = options?.toolCallId ?? previousToolCallId;
+      activeSignal = options?.signal ?? previousSignal;
+      try {
+        const result = await client.callTool(
+          { name, arguments: args },
+          undefined,
+          requestOptions(options)
+        );
+        return mapCallResult(result);
+      } finally {
+        activeToolCallId = previousToolCallId;
+        activeSignal = previousSignal;
+      }
     },
 
     async listResources(options) {
@@ -266,6 +322,13 @@ export function wrapMcpClient(
       await client.close();
     },
   };
+}
+
+function toElicitResult(result: McpElicitationResult): ElicitResult {
+  if (result.action === 'accept') {
+    return { action: 'accept', content: result.content ?? {} };
+  }
+  return { action: result.action };
 }
 
 function mapCallResult(result: Awaited<ReturnType<Client['callTool']>>): McpCallResult {

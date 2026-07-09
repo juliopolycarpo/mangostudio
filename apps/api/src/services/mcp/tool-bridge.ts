@@ -91,7 +91,7 @@ export async function executeMcpTool(
   userId: string,
   name: string,
   args: Record<string, unknown>,
-  options: { signal?: AbortSignal } = {}
+  options: { signal?: AbortSignal; toolCallId?: string } = {}
 ): Promise<McpCallResult> {
   const parsed = parseMcpToolName(name);
   if (!parsed) throw new Error(`Unknown tool: "${name}"`);
@@ -104,6 +104,7 @@ export async function executeMcpTool(
   return handle.callTool(parsed.toolName, args, {
     timeoutMs: row.timeoutMs ?? MCP_TOOL_EXECUTE_TIMEOUT_MS,
     signal: options.signal,
+    toolCallId: options.toolCallId,
   });
 }
 

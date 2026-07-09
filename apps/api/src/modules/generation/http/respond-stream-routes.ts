@@ -174,6 +174,17 @@ function toSsePayload(event: StreamEvent): object {
         questions: event.part.questions,
         done: false,
       };
+    case 'mcp_elicitation':
+      return {
+        type: 'mcp_elicitation_request',
+        elicitationId: event.part.elicitationId,
+        toolCallId: event.part.toolCallId,
+        serverSlug: event.part.serverSlug,
+        message: event.part.message,
+        fields: event.part.fields,
+        status: event.part.status,
+        done: false,
+      };
     case 'todo_update':
       return {
         type: 'todo_update',

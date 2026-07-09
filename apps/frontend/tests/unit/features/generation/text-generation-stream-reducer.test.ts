@@ -297,6 +297,47 @@ describe('text generation stream reducer', () => {
     });
   });
 
+  it('appends mcp elicitation parts once, deduplicated by elicitation id', () => {
+    const elicitationChunk: Extract<StreamChunk, { type: 'mcp_elicitation_request' }> = {
+      type: 'mcp_elicitation_request',
+      elicitationId: 'elicit-1',
+      toolCallId: 'tool-mcp',
+      serverSlug: 'demo',
+      message: 'Choose a tier',
+      fields: [
+        {
+          name: 'tier',
+          required: true,
+          kind: 'enum',
+          options: [
+            { value: 'free', label: 'Free' },
+            { value: 'pro', label: 'Pro' },
+          ],
+        },
+      ],
+      status: 'pending',
+      done: false,
+    };
+
+    const state = reduceChunks([
+      { type: 'tool_call_started', callId: 'tool-mcp', name: 'mcp__demo__ask', done: false },
+      elicitationChunk,
+      elicitationChunk,
+    ]);
+
+    expect(getPartsByType(state.parts, 'mcp_elicitation')).toEqual([
+      {
+        type: 'mcp_elicitation',
+        elicitationId: 'elicit-1',
+        toolCallId: 'tool-mcp',
+        serverSlug: 'demo',
+        message: 'Choose a tier',
+        fields: elicitationChunk.fields,
+        status: 'pending',
+      },
+    ]);
+  });
+
   it('appends todo parts once, deduplicated by tool call id', () => {
     const todoChunk: Extract<StreamChunk, { type: 'todo_update' }> = {
       type: 'todo_update',

@@ -279,6 +279,90 @@ export const GetMcpPromptResponseSchema = Type.Object({
   ),
 });
 
+/** Lifecycle of a mid-tool-call MCP form elicitation shown in chat. */
+export const McpElicitationStatusSchema = Type.Union([
+  Type.Literal('pending'),
+  Type.Literal('accepted'),
+  Type.Literal('declined'),
+  Type.Literal('cancelled'),
+]);
+
+export const McpElicitationFieldFormatSchema = Type.Union([
+  Type.Literal('email'),
+  Type.Literal('uri'),
+  Type.Literal('date'),
+  Type.Literal('date-time'),
+]);
+
+export const McpElicitationEnumOptionSchema = Type.Object({
+  value: Type.String(),
+  label: Type.String(),
+});
+
+/**
+ * One flattened field from an MCP `requestedSchema` object. Enum / multi-enum
+ * map to option buttons; other primitives map to typed inputs.
+ */
+export const McpElicitationFieldSchema = Type.Object({
+  name: Type.String({ minLength: 1 }),
+  title: Type.Optional(Type.String()),
+  description: Type.Optional(Type.String()),
+  required: Type.Boolean(),
+  kind: Type.Union([
+    Type.Literal('string'),
+    Type.Literal('number'),
+    Type.Literal('integer'),
+    Type.Literal('boolean'),
+    Type.Literal('enum'),
+    Type.Literal('multi_enum'),
+  ]),
+  format: Type.Optional(McpElicitationFieldFormatSchema),
+  minLength: Type.Optional(Type.Number()),
+  maxLength: Type.Optional(Type.Number()),
+  minimum: Type.Optional(Type.Number()),
+  maximum: Type.Optional(Type.Number()),
+  minItems: Type.Optional(Type.Number()),
+  maxItems: Type.Optional(Type.Number()),
+  options: Type.Optional(Type.Array(McpElicitationEnumOptionSchema)),
+  default: Type.Optional(
+    Type.Union([Type.String(), Type.Number(), Type.Boolean(), Type.Array(Type.String())])
+  ),
+});
+
+/** Persisted / streamed card payload for an MCP form elicitation. */
+export const McpElicitationPartSchema = Type.Object({
+  type: Type.Literal('mcp_elicitation'),
+  elicitationId: Type.String({ minLength: 1 }),
+  toolCallId: Type.String({ minLength: 1 }),
+  serverSlug: Type.String({ minLength: 1 }),
+  message: Type.String(),
+  fields: Type.Array(McpElicitationFieldSchema),
+  status: McpElicitationStatusSchema,
+});
+
+export const McpElicitationActionSchema = Type.Union([
+  Type.Literal('accept'),
+  Type.Literal('decline'),
+  Type.Literal('cancel'),
+]);
+
+/** Body for `POST /mcp/elicitations/:id/respond`. */
+export const RespondMcpElicitationBodySchema = Type.Object({
+  action: McpElicitationActionSchema,
+  /** Field values when `action` is `accept`; omitted for decline/cancel. */
+  content: Type.Optional(
+    Type.Record(
+      Type.String(),
+      Type.Union([Type.String(), Type.Number(), Type.Boolean(), Type.Array(Type.String())])
+    )
+  ),
+});
+
+export const RespondMcpElicitationResponseSchema = Type.Object({
+  ok: Type.Literal(true),
+  status: McpElicitationStatusSchema,
+});
+
 export type McpTransport = Static<typeof McpTransportSchema>;
 export type PreviewMcpImportBody = Static<typeof PreviewMcpImportBodySchema>;
 export type ImportMcpServersBody = Static<typeof ImportMcpServersBodySchema>;
@@ -307,3 +391,11 @@ export type McpPromptDescriptor = Static<typeof McpPromptDescriptorSchema>;
 export type McpServerPromptsResponse = Static<typeof McpServerPromptsResponseSchema>;
 export type GetMcpPromptBody = Static<typeof GetMcpPromptBodySchema>;
 export type GetMcpPromptResponse = Static<typeof GetMcpPromptResponseSchema>;
+export type McpElicitationStatus = Static<typeof McpElicitationStatusSchema>;
+export type McpElicitationFieldFormat = Static<typeof McpElicitationFieldFormatSchema>;
+export type McpElicitationEnumOption = Static<typeof McpElicitationEnumOptionSchema>;
+export type McpElicitationField = Static<typeof McpElicitationFieldSchema>;
+export type McpElicitationPart = Static<typeof McpElicitationPartSchema>;
+export type McpElicitationAction = Static<typeof McpElicitationActionSchema>;
+export type RespondMcpElicitationBody = Static<typeof RespondMcpElicitationBodySchema>;
+export type RespondMcpElicitationResponse = Static<typeof RespondMcpElicitationResponseSchema>;
