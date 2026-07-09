@@ -15,9 +15,17 @@ Todos os eventos estendem `StreamChunk`, uma union discriminada pela propriedade
 | `tool_call_started`          | Server → Client | Modelo inicia uma chamada de tool                   |
 | `tool_call_completed`        | Server → Client | Argumentos da tool foram recebidos por completo     |
 | `tool_result`                | Server → Client | Resultado da execução da tool                       |
+| `subagent_started`           | Server → Client | Delegação a subagente iniciada                      |
+| `subagent_text`              | Server → Client | Deltas de texto do subagente                        |
+| `subagent_tool_call_started` | Server → Client | Subagente iniciou uma tool aninhada                 |
+| `subagent_completed`         | Server → Client | Subagente concluiu com sucesso                      |
+| `subagent_failed`            | Server → Client | Subagente falhou                                    |
 | `image_generation_started`   | Server → Client | Geração de imagem iniciada (via tool)               |
 | `image_generation_completed` | Server → Client | Imagem gerada com sucesso                           |
 | `image_generation_failed`    | Server → Client | Falha na geração de imagem                          |
+| `mcp_media`                  | Server → Client | Tool MCP produziu mídia rica persistida             |
+| `question`                   | Server → Client | Perguntas estruturadas para o usuário               |
+| `todo_update`                | Server → Client | Lista de todos do chat substituída                  |
 | `context_info`               | Server → Client | Uso de tokens e status da janela de contexto        |
 | `fallback_notice`            | Server → Client | Notificação de degradação da continuação            |
 | `continuation_transition`    | Server → Client | Transição de modo de continuação                    |

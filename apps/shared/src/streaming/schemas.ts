@@ -1,5 +1,8 @@
 import { type Static, Type } from '@sinclair/typebox';
+import { SSEErrorEventSchema } from '../errors';
 import { ProviderTypeSchema } from '../provider-settings/schemas';
+import { QuestionSpecSchema } from '../questions/schemas';
+import { TODO_MAX_ITEMS, TodoItemSchema } from '../todos/schemas';
 
 // SSE error events are defined once in the errors module and re-exported here so
 // streaming consumers keep a single canonical `SSEErrorEvent` shape.
@@ -17,6 +20,191 @@ const ContinuationReasonCodeSchema = Type.Union([
   Type.Literal('tool_result_cursor_loss'),
   Type.Literal('envelope_malformed'),
 ]);
+
+export const SSEUserMessageIdEventSchema = Type.Object({
+  type: Type.Literal('user_message_id'),
+  messageId: Type.String(),
+  done: Type.Literal(false),
+});
+
+export type SSEUserMessageIdEvent = Static<typeof SSEUserMessageIdEventSchema>;
+
+export const SSEThinkingStartEventSchema = Type.Object({
+  type: Type.Literal('thinking_start'),
+  done: Type.Literal(false),
+});
+
+export type SSEThinkingStartEvent = Static<typeof SSEThinkingStartEventSchema>;
+
+export const SSEThinkingEventSchema = Type.Object({
+  type: Type.Literal('thinking'),
+  text: Type.String(),
+  done: Type.Literal(false),
+});
+
+export type SSEThinkingEvent = Static<typeof SSEThinkingEventSchema>;
+
+export const SSETextEventSchema = Type.Object({
+  type: Type.Literal('text'),
+  text: Type.String(),
+  done: Type.Literal(false),
+});
+
+export type SSETextEvent = Static<typeof SSETextEventSchema>;
+
+export const SSEToolCallStartedEventSchema = Type.Object({
+  type: Type.Literal('tool_call_started'),
+  callId: Type.String(),
+  name: Type.String(),
+  done: Type.Literal(false),
+});
+
+export type SSEToolCallStartedEvent = Static<typeof SSEToolCallStartedEventSchema>;
+
+export const SSEToolCallCompletedEventSchema = Type.Object({
+  type: Type.Literal('tool_call_completed'),
+  callId: Type.String(),
+  name: Type.String(),
+  arguments: Type.String(),
+  done: Type.Literal(false),
+});
+
+export type SSEToolCallCompletedEvent = Static<typeof SSEToolCallCompletedEventSchema>;
+
+export const SSEToolResultEventSchema = Type.Object({
+  type: Type.Literal('tool_result'),
+  callId: Type.String(),
+  result: Type.Unknown(),
+  isError: Type.Optional(Type.Boolean()),
+  done: Type.Literal(false),
+});
+
+export type SSEToolResultEvent = Static<typeof SSEToolResultEventSchema>;
+
+export const SSESubagentStartedEventSchema = Type.Object({
+  type: Type.Literal('subagent_started'),
+  callId: Type.String(),
+  agentId: Type.String(),
+  agentName: Type.String(),
+  task: Type.String(),
+  done: Type.Literal(false),
+});
+
+export type SSESubagentStartedEvent = Static<typeof SSESubagentStartedEventSchema>;
+
+export const SSESubagentTextEventSchema = Type.Object({
+  type: Type.Literal('subagent_text'),
+  callId: Type.String(),
+  agentId: Type.String(),
+  text: Type.String(),
+  done: Type.Literal(false),
+});
+
+export type SSESubagentTextEvent = Static<typeof SSESubagentTextEventSchema>;
+
+export const SSESubagentToolCallStartedEventSchema = Type.Object({
+  type: Type.Literal('subagent_tool_call_started'),
+  callId: Type.String(),
+  agentId: Type.String(),
+  toolCallId: Type.String(),
+  name: Type.String(),
+  done: Type.Literal(false),
+});
+
+export type SSESubagentToolCallStartedEvent = Static<typeof SSESubagentToolCallStartedEventSchema>;
+
+export const SSESubagentCompletedEventSchema = Type.Object({
+  type: Type.Literal('subagent_completed'),
+  callId: Type.String(),
+  agentId: Type.String(),
+  agentName: Type.String(),
+  summary: Type.String(),
+  toolCallCount: Type.Number(),
+  done: Type.Literal(false),
+});
+
+export type SSESubagentCompletedEvent = Static<typeof SSESubagentCompletedEventSchema>;
+
+export const SSESubagentFailedEventSchema = Type.Object({
+  type: Type.Literal('subagent_failed'),
+  callId: Type.String(),
+  agentId: Type.String(),
+  agentName: Type.Optional(Type.String()),
+  error: Type.String(),
+  done: Type.Literal(false),
+});
+
+export type SSESubagentFailedEvent = Static<typeof SSESubagentFailedEventSchema>;
+
+export const SSEImageGenerationStartedEventSchema = Type.Object({
+  type: Type.Literal('image_generation_started'),
+  imageId: Type.String(),
+  toolCallId: Type.String(),
+  prompt: Type.String(),
+  done: Type.Literal(false),
+});
+
+export type SSEImageGenerationStartedEvent = Static<typeof SSEImageGenerationStartedEventSchema>;
+
+export const SSEImageGenerationCompletedEventSchema = Type.Object({
+  type: Type.Literal('image_generation_completed'),
+  imageId: Type.String(),
+  toolCallId: Type.String(),
+  prompt: Type.String(),
+  imageUrl: Type.String(),
+  modelName: Type.Optional(Type.String()),
+  generationTime: Type.Optional(Type.String()),
+  done: Type.Literal(false),
+});
+
+export type SSEImageGenerationCompletedEvent = Static<
+  typeof SSEImageGenerationCompletedEventSchema
+>;
+
+export const SSEImageGenerationFailedEventSchema = Type.Object({
+  type: Type.Literal('image_generation_failed'),
+  imageId: Type.String(),
+  toolCallId: Type.String(),
+  prompt: Type.String(),
+  error: Type.String(),
+  modelName: Type.Optional(Type.String()),
+  generationTime: Type.Optional(Type.String()),
+  done: Type.Literal(false),
+});
+
+export type SSEImageGenerationFailedEvent = Static<typeof SSEImageGenerationFailedEventSchema>;
+
+export const SSEMcpMediaEventSchema = Type.Object({
+  type: Type.Literal('mcp_media'),
+  toolCallId: Type.String(),
+  serverSlug: Type.String(),
+  toolName: Type.String(),
+  kind: Type.Union([Type.Literal('image'), Type.Literal('resource')]),
+  mimeType: Type.String(),
+  url: Type.String(),
+  uri: Type.Optional(Type.String()),
+  done: Type.Literal(false),
+});
+
+export type SSEMcpMediaEvent = Static<typeof SSEMcpMediaEventSchema>;
+
+export const SSEQuestionEventSchema = Type.Object({
+  type: Type.Literal('question'),
+  toolCallId: Type.String(),
+  questions: Type.Array(QuestionSpecSchema),
+  done: Type.Literal(false),
+});
+
+export type SSEQuestionEvent = Static<typeof SSEQuestionEventSchema>;
+
+export const SSETodoUpdateEventSchema = Type.Object({
+  type: Type.Literal('todo_update'),
+  toolCallId: Type.String(),
+  todos: Type.Array(TodoItemSchema, { maxItems: TODO_MAX_ITEMS }),
+  done: Type.Literal(false),
+});
+
+export type SSETodoUpdateEvent = Static<typeof SSETodoUpdateEventSchema>;
 
 export const SSEContextEventSchema = Type.Object({
   type: Type.Literal('context_info'),
@@ -42,13 +230,6 @@ export const SSEContextEventSchema = Type.Object({
 
 export type SSEContextEvent = Static<typeof SSEContextEventSchema>;
 
-export const SSEThinkingStartEventSchema = Type.Object({
-  type: Type.Literal('thinking_start'),
-  done: Type.Literal(false),
-});
-
-export type SSEThinkingStartEvent = Static<typeof SSEThinkingStartEventSchema>;
-
 export const SSEFallbackEventSchema = Type.Object({
   type: Type.Literal('fallback_notice'),
   from: Type.String(),
@@ -63,7 +244,7 @@ export const SSESystemEventSchema = Type.Object({
   type: Type.Literal('system_event'),
   event: Type.String(),
   detail: Type.Optional(Type.String()),
-  done: Type.Boolean(),
+  done: Type.Literal(false),
 });
 
 export type SSESystemEvent = Static<typeof SSESystemEventSchema>;
@@ -81,3 +262,42 @@ export const SSEContinuationTransitionEventSchema = Type.Object({
 });
 
 export type SSEContinuationTransitionEvent = Static<typeof SSEContinuationTransitionEventSchema>;
+
+export const SSEDoneEventSchema = Type.Object({
+  type: Type.Literal('done'),
+  done: Type.Literal(true),
+  messageId: Type.Optional(Type.String()),
+  generationTime: Type.Optional(Type.String()),
+});
+
+export type SSEDoneEvent = Static<typeof SSEDoneEventSchema>;
+
+/** Discriminated union of every SSE chunk emitted by the streaming endpoint. */
+export const StreamChunkSchema = Type.Union([
+  SSEUserMessageIdEventSchema,
+  SSEThinkingStartEventSchema,
+  SSEThinkingEventSchema,
+  SSETextEventSchema,
+  SSEToolCallStartedEventSchema,
+  SSEToolCallCompletedEventSchema,
+  SSEToolResultEventSchema,
+  SSESubagentStartedEventSchema,
+  SSESubagentTextEventSchema,
+  SSESubagentToolCallStartedEventSchema,
+  SSESubagentCompletedEventSchema,
+  SSESubagentFailedEventSchema,
+  SSEImageGenerationStartedEventSchema,
+  SSEImageGenerationCompletedEventSchema,
+  SSEImageGenerationFailedEventSchema,
+  SSEMcpMediaEventSchema,
+  SSEQuestionEventSchema,
+  SSETodoUpdateEventSchema,
+  SSEContextEventSchema,
+  SSEFallbackEventSchema,
+  SSESystemEventSchema,
+  SSEContinuationTransitionEventSchema,
+  SSEDoneEventSchema,
+  SSEErrorEventSchema,
+]);
+
+export type StreamChunk = Static<typeof StreamChunkSchema>;
