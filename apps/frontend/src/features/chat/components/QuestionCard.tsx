@@ -85,7 +85,13 @@ export function QuestionCard({ part, onSubmit }: QuestionCardProps) {
       {part.questions.map((question, questionIndex) => {
         const draft = drafts[questionIndex];
         return (
-          <div key={`${part.toolCallId}-q-${question.question}`} className="space-y-2">
+          <div
+            // Questions are position-stable within a card, so the index is a
+            // valid identity and avoids collisions on duplicate question text.
+            // biome-ignore lint/suspicious/noArrayIndexKey: no per-question id exists
+            key={`${part.toolCallId}-q-${questionIndex}`}
+            className="space-y-2"
+          >
             <div className="flex flex-wrap items-center gap-2">
               {question.header && (
                 <span className="rounded-full bg-surface-container-high px-2 py-0.5 text-xs text-on-surface-variant">

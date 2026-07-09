@@ -83,7 +83,11 @@ export function ChatPage({
         status={status}
         userName={userName}
         onSubmit={onSubmit}
-        onQuestionSubmit={isGenerating || disabled ? undefined : onSubmit}
+        onQuestionSubmit={
+          isGenerating || disabled || contextControls.requiresDecision || isContextActionPending
+            ? undefined
+            : onSubmit
+        }
       />
       {fallbackNotice && <ChatFallbackNotice notice={fallbackNotice} />}
       {contextControls.requiresDecision && (
