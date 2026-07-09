@@ -49,9 +49,9 @@ export function PinnedTodoPanel({ chatId }: PinnedTodoPanelProps) {
             </span>
           )}
           {expanded ? (
-            <ChevronDown size={16} className="ml-auto shrink-0 text-on-surface-variant" />
-          ) : (
             <ChevronUp size={16} className="ml-auto shrink-0 text-on-surface-variant" />
+          ) : (
+            <ChevronDown size={16} className="ml-auto shrink-0 text-on-surface-variant" />
           )}
         </button>
         {expanded && (
