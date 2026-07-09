@@ -4,32 +4,51 @@
  * keeps writes atomic with no per-item bookkeeping.
  */
 
-import { type TodoItem, type TodoList, TodoListSchema } from '@mangostudio/shared/todos';
+import {
+  type ChatTodosResponse,
+  type TodoItem,
+  type TodoList,
+  TodoListSchema,
+} from '@mangostudio/shared/todos';
 import { Value } from '@sinclair/typebox/value';
 import type { Kysely } from 'kysely';
 import type { ChatTodoInsert, ChatTodoSelect, Database } from '../../../db/types';
 
 /**
- * Reads the chat's todo list. A missing row, malformed JSON, or a payload
- * failing the schema all yield an empty list — corrupt state self-heals on
- * the next write. // Usage: const todos = await getChatTodos(db, userId, chatId)
+ * Reads the chat's todo list with its last-write timestamp (`updatedAt: null`
+ * when no row exists). A malformed JSON payload or one failing the schema
+ * yields an empty list — corrupt state self-heals on the next write.
+ * // Usage: const { todos, updatedAt } = await getChatTodosState(db, userId, chatId)
+ */
+export async function getChatTodosState(
+  db: Kysely<Database>,
+  userId: string,
+  chatId: string
+): Promise<ChatTodosResponse> {
+  const row: Pick<ChatTodoSelect, 'items' | 'updatedAt'> | undefined = await db
+    .selectFrom('chat_todos')
+    .select(['items', 'updatedAt'])
+    .where('chatId', '=', chatId)
+    .where('userId', '=', userId)
+    .executeTakeFirst();
+  if (!row) return { todos: [], updatedAt: null };
+
+  const parsed = parseJsonArray(row.items);
+  if (!Value.Check(TodoListSchema, parsed)) return { todos: [], updatedAt: row.updatedAt };
+  return { todos: parsed, updatedAt: row.updatedAt };
+}
+
+/**
+ * Reads the chat's todo list, empty when absent or corrupt.
+ * // Usage: const todos = await getChatTodos(db, userId, chatId)
  */
 export async function getChatTodos(
   db: Kysely<Database>,
   userId: string,
   chatId: string
 ): Promise<TodoItem[]> {
-  const row: Pick<ChatTodoSelect, 'items'> | undefined = await db
-    .selectFrom('chat_todos')
-    .select('items')
-    .where('chatId', '=', chatId)
-    .where('userId', '=', userId)
-    .executeTakeFirst();
-  if (!row) return [];
-
-  const parsed = parseJsonArray(row.items);
-  if (!Value.Check(TodoListSchema, parsed)) return [];
-  return [...parsed];
+  const { todos } = await getChatTodosState(db, userId, chatId);
+  return [...todos];
 }
 
 function parseJsonArray(raw: string): unknown {

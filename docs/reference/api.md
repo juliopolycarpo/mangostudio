@@ -33,13 +33,18 @@ The frontend uses Eden Treaty which handles this automatically.
 
 ## Chat Endpoints
 
-| Method   | Path             | Auth | Purpose                    |
-| -------- | ---------------- | ---- | -------------------------- |
-| `GET`    | `/api/chats`     | Yes  | List user's chats          |
-| `POST`   | `/api/chats`     | Yes  | Create new chat            |
-| `GET`    | `/api/chats/:id` | Yes  | Get chat details           |
-| `PATCH`  | `/api/chats/:id` | Yes  | Update chat (title, model) |
-| `DELETE` | `/api/chats/:id` | Yes  | Delete chat                |
+| Method   | Path                   | Auth | Purpose                    |
+| -------- | ---------------------- | ---- | -------------------------- |
+| `GET`    | `/api/chats`           | Yes  | List user's chats          |
+| `POST`   | `/api/chats`           | Yes  | Create new chat            |
+| `GET`    | `/api/chats/:id`       | Yes  | Get chat details           |
+| `PATCH`  | `/api/chats/:id`       | Yes  | Update chat (title, model) |
+| `DELETE` | `/api/chats/:id`       | Yes  | Delete chat                |
+| `GET`    | `/api/chats/:id/todos` | Yes  | Current todo list state    |
+
+`GET /api/chats/:id/todos` returns `{ todos, updatedAt }` (`ChatTodosResponse` from
+`@mangostudio/shared/todos`); `updatedAt` is `null` when the chat has no todo list yet.
+The list is kept live during streaming by the `todo_update` SSE chunk.
 
 ## Message Endpoints
 

@@ -17,6 +17,7 @@ import { respondStreamRoutes } from './modules/generation/http/respond-stream-ro
 import { mcpServerRoutes } from './modules/mcp-servers/http/mcp-server-routes';
 import { messageRoutes } from './modules/messages/http/message-routes';
 import { skillRoutes } from './modules/skills/http/skill-routes';
+import { todoRoutes } from './modules/todos/http/todo-routes';
 import { errorHandler } from './plugins/error-handler';
 import { rateLimit } from './plugins/rate-limit';
 import { classifyRateLimit } from './plugins/rate-limit-policy';
@@ -51,6 +52,7 @@ const api = new Elysia({ prefix: '/api' })
   // Register features
   .use(authRoutes)
   .use(chatRoutes)
+  .use(todoRoutes)
   .use(messageRoutes)
   .use(uploadRoutes)
   .use(generateRoutes)
