@@ -10,6 +10,7 @@ import { register as registerListDirectoryTool } from './builtin/list-directory'
 import { register as registerPowerShellTool } from './builtin/powershell';
 import { register as registerReadFileTool } from './builtin/read-file';
 import { register as registerSkillTool } from './builtin/skill';
+import { register as registerTodoTools } from './builtin/todo';
 import { register as registerWriteFileTool } from './builtin/write-file';
 import { register as registerZshTool } from './builtin/zsh';
 
@@ -25,6 +26,7 @@ export function registerTools(): void {
   registerDelegateToAgentTool();
   registerSkillTool();
   registerAskUserQuestionTool();
+  registerTodoTools();
   registerAvailableShellTools();
 }
 

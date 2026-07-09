@@ -86,8 +86,11 @@ Open these first:
 - `apps/api/src/services/tools/builtin/generate-image.ts`
 - `apps/api/src/services/tools/builtin/get-current-datetime.ts`
 - `apps/api/src/services/tools/builtin/ask-user-question.ts` (interactive question cards)
+- `apps/api/src/services/tools/builtin/todo.ts` (per-chat task list; prompt-injected via `apps/api/src/modules/todos/`)
 - `apps/shared/src/questions/` (question schemas + answer formatting)
+- `apps/shared/src/todos/` (todo schemas, helpers, prompt-section renderer)
 - `apps/frontend/src/features/chat/components/QuestionCard.tsx`
+- `apps/frontend/src/features/chat/components/TodoListPart.tsx`
 - `apps/api/src/modules/tool-settings/http/tool-settings-routes.ts`
 - `apps/api/src/modules/generation/application/stream-text-turn.ts`
 - `apps/api/src/services/providers/core/continuation-envelope.ts`

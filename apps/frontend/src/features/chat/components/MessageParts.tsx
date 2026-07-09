@@ -1,5 +1,6 @@
 import type { MessagePart } from '@mangostudio/shared';
 import { ASK_USER_QUESTION_TOOL_NAME } from '@mangostudio/shared/questions';
+import { TODO_WRITE_TOOL_NAME } from '@mangostudio/shared/todos';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { MarkdownContent } from '@/components/MarkdownContent';
@@ -10,6 +11,7 @@ import { McpMediaPartBlock } from './McpMediaPartBlock';
 import { QuestionCard } from './QuestionCard';
 import { SystemEventMarker } from './SystemEventMarker';
 import { ThinkingBlock } from './ThinkingBlock';
+import { TodoListPart } from './TodoListPart';
 import { ToolCallBlock } from './ToolCallBlock';
 import { ToolCallGroupBlock } from './ToolCallGroupBlock';
 import { planToolGroups } from './tool-call-grouping';
@@ -51,8 +53,10 @@ export function MessageParts({
             );
           }
           case 'tool_call': {
-            // The question card supersedes the generic collapsed tool block.
+            // The question card and the todo checklist supersede the generic
+            // collapsed tool block for their calls.
             if (part.name === ASK_USER_QUESTION_TOOL_NAME) return null;
+            if (part.name === TODO_WRITE_TOOL_NAME) return null;
             if (consumed.has(idx)) return null;
             const grouped = groups.get(idx);
             if (grouped) {
@@ -86,6 +90,8 @@ export function MessageParts({
                 onSubmit={isStreaming ? undefined : onQuestionSubmit}
               />
             );
+          case 'todo':
+            return <TodoListPart key={`${part.toolCallId}-todo`} part={part} />;
           case 'subagent_trace':
             return (
               <SubagentTraceBlock

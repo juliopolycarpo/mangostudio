@@ -174,6 +174,13 @@ function toSsePayload(event: StreamEvent): object {
         questions: event.part.questions,
         done: false,
       };
+    case 'todo_update':
+      return {
+        type: 'todo_update',
+        toolCallId: event.part.toolCallId,
+        todos: event.part.todos,
+        done: false,
+      };
     case 'mcp_media':
       return {
         type: 'mcp_media',

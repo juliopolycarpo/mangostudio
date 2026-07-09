@@ -11,6 +11,7 @@ export type {
   SSESubagentToolCallStartedEvent,
   SSESystemEvent,
   SSEThinkingStartEvent,
+  SSETodoUpdateEvent,
   StreamChunk,
 } from './events';
 export {

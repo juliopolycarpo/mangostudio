@@ -11,6 +11,7 @@ export type {
 } from './schemas';
 
 import type { QuestionSpec } from '../questions/schemas';
+import type { TodoItem } from '../todos/schemas';
 import type { SSEContinuationTransitionEvent, SSEErrorEvent } from './schemas';
 
 /** SSE event: an image placeholder was created for a tool-generated image. */
@@ -64,6 +65,14 @@ export interface SSEQuestionEvent {
   type: 'question';
   toolCallId: string;
   questions: QuestionSpec[];
+  done: false;
+}
+
+/** SSE event: a todo_write call replaced the chat todo list. */
+export interface SSETodoUpdateEvent {
+  type: 'todo_update';
+  toolCallId: string;
+  todos: TodoItem[];
   done: false;
 }
 
@@ -141,6 +150,7 @@ export type StreamChunk =
   | SSEImageGenerationFailedEvent
   | SSEMcpMediaEvent
   | SSEQuestionEvent
+  | SSETodoUpdateEvent
   | {
       type: 'context_info';
       estimatedInputTokens: number;

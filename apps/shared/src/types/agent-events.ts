@@ -1,4 +1,5 @@
 import type { QuestionSpec } from '../questions/schemas';
+import type { TodoItem } from '../todos/schemas';
 import type { ProviderType } from './provider';
 
 /**
@@ -78,6 +79,17 @@ export interface QuestionPart {
   questions: QuestionSpec[];
 }
 
+/**
+ * Snapshot of the chat todo list a `todo_write` call produced, rendered as an
+ * inline checklist in the chat feed. Full-replace semantics: each part carries
+ * the entire list as of that write.
+ */
+export interface TodoPart {
+  type: 'todo';
+  toolCallId: string;
+  todos: TodoItem[];
+}
+
 export interface SubagentTraceMessage {
   role: 'assistant' | 'system';
   text: string;
@@ -150,6 +162,7 @@ export type MessagePart =
   | GeneratedImagePart
   | McpMediaPart
   | QuestionPart
+  | TodoPart
   | SubagentTracePart
   | { type: 'error'; text: string }
   | { type: 'system_event'; event: string; detail?: string }

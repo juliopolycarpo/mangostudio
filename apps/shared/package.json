@@ -35,6 +35,7 @@
     "./markdown": "./src/markdown/index.ts",
     "./mcp": "./src/mcp/index.ts",
     "./skills": "./src/skills/index.ts",
+    "./todos": "./src/todos/index.ts",
     "./utils/model-detection": "./src/utils/model-detection.ts",
     "./runtime-env": "./src/runtime-env/index.ts",
     "./prompt-rules": "./src/prompt-rules/index.ts",

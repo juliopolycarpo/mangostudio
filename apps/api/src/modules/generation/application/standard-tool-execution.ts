@@ -1,4 +1,4 @@
-import type { McpMediaPart, MessagePart, QuestionPart } from '@mangostudio/shared';
+import type { McpMediaPart, MessagePart, QuestionPart, TodoPart } from '@mangostudio/shared';
 import type { AgentProfile } from '@mangostudio/shared/agents';
 import { isAgentId } from '@mangostudio/shared/agents';
 import type { MultiAgentSettings } from '@mangostudio/shared/app-settings';
@@ -19,6 +19,7 @@ import {
   parseAskUserQuestionArgs,
 } from '../../../services/tools/builtin/ask-user-question';
 import { DELEGATE_TO_AGENT_TOOL_NAME } from '../../../services/tools/builtin/delegate-to-agent';
+import { TODO_WRITE_TOOL_NAME, type TodoToolResult } from '../../../services/tools/builtin/todo';
 import { resolveEffectiveToolTimeoutMs } from '../../../services/tools/execution-timeout';
 import type { EffectiveToolSettings } from '../../../services/tools/types';
 import { shouldExposeDelegateTool } from './delegate-tool-availability';
@@ -50,6 +51,8 @@ export interface StandardToolExecution {
   mcpMedia?: McpMediaPart[];
   /** Questions an ask_user_question call presented, rendered as a chat card. */
   questionPart?: QuestionPart;
+  /** Snapshot of the list a todo_write call produced, rendered as a checklist. */
+  todoPart?: TodoPart;
 }
 
 export interface DelegationRuntime {
@@ -250,6 +253,8 @@ async function executeStandardToolCall(
   const providerResult = isSubagentRunResult(result) ? createSubagentToolResult(result) : result;
   const questionPart =
     name === ASK_USER_QUESTION_TOOL_NAME && !isError ? createQuestionPart(callId, args) : undefined;
+  const todoPart =
+    name === TODO_WRITE_TOOL_NAME && !isError ? createTodoPart(callId, result) : undefined;
 
   return {
     callId,
@@ -261,6 +266,7 @@ async function executeStandardToolCall(
     ...(subagentTrace ? { subagentTrace } : {}),
     ...(mcpMedia?.length ? { mcpMedia } : {}),
     ...(questionPart ? { questionPart } : {}),
+    ...(todoPart ? { todoPart } : {}),
   };
 }
 
@@ -482,6 +488,15 @@ function createQuestionPart(callId: string, args: Record<string, unknown>): Ques
     toolCallId: callId,
     questions: parseAskUserQuestionArgs(args).questions,
   };
+}
+
+/**
+ * Builds the checklist snapshot from a successful todo_write result, which
+ * already carries the validated, persisted list.
+ */
+function createTodoPart(callId: string, result: unknown): TodoPart {
+  const { todos } = result as TodoToolResult;
+  return { type: 'todo', toolCallId: callId, todos };
 }
 
 function createFailedToolExecution(

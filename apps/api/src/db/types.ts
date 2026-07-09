@@ -212,6 +212,15 @@ export interface McpServersTable {
   updatedAt: number;
 }
 
+export interface ChatTodosTable {
+  /** One row per chat; the list is always replaced wholesale. */
+  chatId: string;
+  userId: string;
+  /** JSON-serialized TodoItem[]. */
+  items: string;
+  updatedAt: number;
+}
+
 export interface ObservabilitySnapshotTable {
   id: string;
   snapshotJson: string;
@@ -235,6 +244,7 @@ export interface Database {
   user_app_settings: UserAppSettingsTable;
   user_agent_settings: UserAgentSettingsTable;
   mcp_servers: McpServersTable;
+  chat_todos: ChatTodosTable;
   observability_snapshot: ObservabilitySnapshotTable;
   connector_usage_samples: ConnectorUsageSamplesTable;
 }
@@ -255,3 +265,6 @@ export type UserAgentSettingsSelect = Selectable<UserAgentSettingsTable>;
 export type McpServerSelect = Selectable<McpServersTable>;
 export type McpServerInsert = Insertable<McpServersTable>;
 export type McpServerUpdate = Updateable<McpServersTable>;
+
+export type ChatTodoSelect = Selectable<ChatTodosTable>;
+export type ChatTodoInsert = Insertable<ChatTodosTable>;

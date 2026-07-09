@@ -4,6 +4,7 @@ import type {
   ProviderType,
   QuestionPart,
   ReasoningEffort,
+  TodoPart,
 } from '@mangostudio/shared';
 import type { AgentExecutionMode, AgentId, AgentProfile } from '@mangostudio/shared/agents';
 import type { ContextSettings } from '@mangostudio/shared/chat';
@@ -66,6 +67,7 @@ export type StreamEvent =
     }
   | { type: 'mcp_media'; part: McpMediaPart }
   | { type: 'question'; part: QuestionPart }
+  | { type: 'todo_update'; part: TodoPart }
   | { type: 'fallback_notice'; from: string; to: string; reason: string }
   | {
       type: 'continuation_transition';

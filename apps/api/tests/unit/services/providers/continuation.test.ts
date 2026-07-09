@@ -3,6 +3,7 @@ import {
   type ContinuationEnvelope,
   computeSystemPromptHash,
   computeToolsetHash,
+  createContinuationEnvelope,
   isDurableMode,
   parseContinuationEnvelope,
   serializeContinuationEnvelope,
@@ -686,5 +687,87 @@ describe('decideContinuation provider switch + cursor recovery', () => {
       expect(decision.previousMode).toBe('stateless-loop');
       expect(decision.reason).toContain('toolset');
     }
+  });
+});
+
+describe('continuationSystemPrompt hash exclusion (todo prompt injection)', () => {
+  const basePrompt = 'You are a helpful agent.';
+  const todoSection = '<current-todo-list>\n- [>] step one\n</current-todo-list>';
+
+  it('keeps the envelope hash stable when only the injected todo section changes', () => {
+    const turnOne = createContinuationEnvelope('gemini', 'interactions', {
+      modelName: 'gemini-2.0-flash',
+      systemPrompt: basePrompt,
+      continuationSystemPrompt: basePrompt,
+    });
+    const turnTwo = createContinuationEnvelope('gemini', 'interactions', {
+      modelName: 'gemini-2.0-flash',
+      systemPrompt: `${basePrompt}\n\n${todoSection}`,
+      continuationSystemPrompt: basePrompt,
+    });
+
+    expect(turnOne.systemPromptHash).toBe(turnTwo.systemPromptHash);
+    expect(turnOne.systemPromptHash).toBe(computeSystemPromptHash(basePrompt));
+  });
+
+  it('continues with the cursor across turns whose only difference is the todo section', () => {
+    const envelope = createContinuationEnvelope(
+      'gemini',
+      'interactions',
+      {
+        modelName: 'gemini-2.0-flash',
+        systemPrompt: `${basePrompt}\n\n${todoSection}`,
+        continuationSystemPrompt: basePrompt,
+      },
+      'interaction_xyz'
+    );
+
+    const decision = decideContinuation({
+      lastProviderState: serializeContinuationEnvelope(envelope),
+      provider: 'gemini',
+      modelName: 'gemini-2.0-flash',
+      systemPromptHash: computeSystemPromptHash(basePrompt),
+      toolsetHash: computeToolsetHash([]),
+    });
+
+    expect(decision.type).toBe('continue_with_cursor');
+  });
+
+  it('falls back to hashing the full system prompt when no base is provided', () => {
+    const envelope = createContinuationEnvelope('anthropic', 'stateless-loop', {
+      modelName: 'claude-sonnet-5',
+      systemPrompt: basePrompt,
+    });
+
+    expect(envelope.systemPromptHash).toBe(computeSystemPromptHash(basePrompt));
+  });
+
+  it('hashes the empty base, not the injected todo section, when continuationSystemPrompt is explicitly undefined', () => {
+    // Empty agent prompt: the base is undefined and only the todo section is left
+    // in systemPrompt. The envelope must still hash the (undefined) base so it
+    // matches the decision side, which hashes continuationSystemPrompt directly.
+    const envelope = createContinuationEnvelope(
+      'gemini',
+      'interactions',
+      {
+        modelName: 'gemini-2.0-flash',
+        systemPrompt: todoSection,
+        continuationSystemPrompt: undefined,
+      },
+      'interaction_empty_base'
+    );
+
+    expect(envelope.systemPromptHash).toBe(computeSystemPromptHash(undefined));
+    expect(envelope.systemPromptHash).not.toBe(computeSystemPromptHash(todoSection));
+
+    const decision = decideContinuation({
+      lastProviderState: serializeContinuationEnvelope(envelope),
+      provider: 'gemini',
+      modelName: 'gemini-2.0-flash',
+      systemPromptHash: computeSystemPromptHash(undefined),
+      toolsetHash: computeToolsetHash([]),
+    });
+
+    expect(decision.type).toBe('continue_with_cursor');
   });
 });

@@ -81,6 +81,8 @@ export interface StreamTextTurnSession {
   toolDefs: ToolDefinition[];
   allowedToolNames: Set<string>;
   effectiveSystemPrompt: string | undefined;
+  /** Pre-todo-injection prompt used for the continuation hash (see TurnContext). */
+  continuationSystemPrompt: string | undefined;
   effectivePrompt: string;
   thinkingEnabled: boolean;
   reasoningEffort: ReasoningEffort;
@@ -162,6 +164,7 @@ export async function prepareStreamTextTurn(
     toolDefinitions: toolDefs,
     allowedToolNames,
     effectiveSystemPrompt,
+    continuationSystemPrompt,
     attachmentIds,
     interactionMode,
     chatId,
@@ -208,6 +211,7 @@ export async function prepareStreamTextTurn(
     toolDefs,
     allowedToolNames,
     effectiveSystemPrompt,
+    continuationSystemPrompt,
     effectivePrompt: input.prompt,
     thinkingEnabled: runtimeSettings.thinkingEnabled ?? true,
     reasoningEffort: runtimeSettings.reasoningEffort ?? 'medium',
@@ -295,7 +299,7 @@ export function* emitContinuationDegradation(
 export async function* prepareAgentContinuation(
   session: StreamTextTurnSession
 ): AsyncGenerator<StreamEvent, string | null> {
-  const { db, chatId, provider, agentRuntime, toolDefs, effectiveSystemPrompt, resolvedModel } =
+  const { db, chatId, provider, agentRuntime, toolDefs, continuationSystemPrompt, resolvedModel } =
     session;
   const { modelId } = resolvedModel;
 
@@ -312,7 +316,11 @@ export async function* prepareAgentContinuation(
     modelName: modelId,
     agentId: agentRuntime.profile.id,
     agentRuntimeHash: agentRuntime.runtimeHash,
-    systemPromptHash: computeSystemPromptHash(effectiveSystemPrompt),
+    // Hashes the pre-todo-injection prompt: the todo section changes nearly
+    // every turn during agent work, and hashing it in would degrade stateful
+    // continuation to replay constantly. Providers hash the same base via
+    // AgentTurnRequest.continuationSystemPrompt, keeping both sides aligned.
+    systemPromptHash: computeSystemPromptHash(continuationSystemPrompt),
     toolsetHash: computeToolsetHash(toolDefs),
   });
 
@@ -627,6 +635,7 @@ export async function* runAgentToolLoop(
       agentId: agentRuntime.profile.id,
       agentRuntimeHash: agentRuntime.runtimeHash,
       systemPrompt: effectiveSystemPrompt,
+      continuationSystemPrompt: session.continuationSystemPrompt,
       history: richHistory,
       prompt: loop.isFirstIteration ? effectivePrompt : undefined,
       toolResults: loop.pendingToolResults,

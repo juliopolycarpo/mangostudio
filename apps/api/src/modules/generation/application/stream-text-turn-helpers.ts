@@ -86,6 +86,10 @@ export function* collectToolExecutionResult(
     sink.allParts.push(execution.questionPart);
     yield { type: 'question', part: execution.questionPart };
   }
+  if (execution.todoPart) {
+    sink.allParts.push(execution.todoPart);
+    yield { type: 'todo_update', part: execution.todoPart };
+  }
   yield {
     type: 'tool_result',
     callId: execution.callId,

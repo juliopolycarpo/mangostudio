@@ -213,6 +213,8 @@ export function createContinuationEnvelope(
     agentId?: AgentId;
     agentRuntimeHash?: string;
     systemPrompt?: string;
+    /** Stable hash source excluding per-turn injected sections; see AgentTurnRequest. */
+    continuationSystemPrompt?: string;
     toolDefinitions?: ToolDefinition[];
   },
   cursor?: string,
@@ -225,7 +227,18 @@ export function createContinuationEnvelope(
     modelName: options.modelName,
     ...(options.agentId ? { agentId: options.agentId } : {}),
     ...(options.agentRuntimeHash ? { agentRuntimeHash: options.agentRuntimeHash } : {}),
-    systemPromptHash: computeSystemPromptHash(options.systemPrompt),
+    // When the caller opts into the continuation/system-prompt split it always
+    // sets the key (possibly to undefined, meaning "empty base prompt"), and the
+    // envelope must hash exactly that so it matches the decision side, which
+    // hashes `continuationSystemPrompt` unconditionally. Falling back to
+    // `systemPrompt` on an undefined value would fold the per-turn todo section
+    // into the hash whenever the base prompt is empty, forcing replay every turn.
+    // Legacy callers that omit the key keep hashing `systemPrompt`.
+    systemPromptHash: computeSystemPromptHash(
+      'continuationSystemPrompt' in options
+        ? options.continuationSystemPrompt
+        : options.systemPrompt
+    ),
     toolsetHash: computeToolsetHash(options.toolDefinitions ?? []),
     ...(cursor ? { cursor } : {}),
     ...(context

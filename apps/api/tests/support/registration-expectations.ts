@@ -28,6 +28,8 @@ export const REQUIRED_TOOL_NAMES = [
   'delegate_to_agent',
   'skill',
   'ask_user_question',
+  'todo_write',
+  'todo_read',
 ] as const;
 
 export const SHELL_TOOL_NAMES = [
