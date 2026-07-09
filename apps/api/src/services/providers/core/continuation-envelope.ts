@@ -213,6 +213,8 @@ export function createContinuationEnvelope(
     agentId?: AgentId;
     agentRuntimeHash?: string;
     systemPrompt?: string;
+    /** Stable hash source excluding per-turn injected sections; see AgentTurnRequest. */
+    continuationSystemPrompt?: string;
     toolDefinitions?: ToolDefinition[];
   },
   cursor?: string,
@@ -225,7 +227,9 @@ export function createContinuationEnvelope(
     modelName: options.modelName,
     ...(options.agentId ? { agentId: options.agentId } : {}),
     ...(options.agentRuntimeHash ? { agentRuntimeHash: options.agentRuntimeHash } : {}),
-    systemPromptHash: computeSystemPromptHash(options.systemPrompt),
+    systemPromptHash: computeSystemPromptHash(
+      options.continuationSystemPrompt ?? options.systemPrompt
+    ),
     toolsetHash: computeToolsetHash(options.toolDefinitions ?? []),
     ...(cursor ? { cursor } : {}),
     ...(context

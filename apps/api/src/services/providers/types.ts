@@ -114,6 +114,12 @@ export interface AgentTurnRequest {
   agentId?: AgentId;
   agentRuntimeHash?: string;
   systemPrompt?: string;
+  /**
+   * Stable subset of `systemPrompt` used for the continuation-envelope hash.
+   * Excludes per-turn injected sections (the chat todo list) whose churn would
+   * otherwise degrade stateful continuation to replay on every write.
+   */
+  continuationSystemPrompt?: string;
   /** Full persisted chat history (used when no valid cursor is available). */
   history: ChatTurnContext[];
   /** New user prompt — present only on the first iteration of a turn. */

@@ -18,6 +18,7 @@ import { getAgentProfile } from '../../agents/application/agent-settings-service
 import { getAppSettings } from '../../app-settings/application/app-settings-service';
 import { assertChatOwnership } from '../../chats/domain/chat-ownership';
 import { appendSkillsPromptSection } from '../../skills/application/skills-prompt-section';
+import { appendTodosPromptSection } from '../../todos/application/todos-prompt-section';
 import { shouldExposeDelegateTool } from './delegate-tool-availability';
 import {
   type ResolvedAgentRuntime,
@@ -61,6 +62,12 @@ export interface TurnContext {
   allowedToolNames: Set<string>;
   delegateToolAvailable: boolean;
   effectiveSystemPrompt: string | undefined;
+  /**
+   * The system prompt before the per-turn todo section is appended. Used for
+   * the continuation hash: the todo list changes nearly every turn during
+   * agent work, and hashing it would degrade stateful continuation to replay.
+   */
+  continuationSystemPrompt: string | undefined;
 }
 
 export async function resolveTurnContext(
@@ -130,6 +137,14 @@ export async function resolveTurnContext(
     effectiveSystemPrompt,
     allowedToolNames
   );
+  const continuationSystemPrompt = effectiveSystemPrompt;
+  effectiveSystemPrompt = await appendTodosPromptSection(
+    db,
+    input.userId,
+    input.chatId,
+    effectiveSystemPrompt,
+    allowedToolNames
+  );
 
   return {
     chatId: input.chatId,
@@ -145,6 +160,7 @@ export async function resolveTurnContext(
     allowedToolNames,
     delegateToolAvailable,
     effectiveSystemPrompt,
+    continuationSystemPrompt,
   };
 }
 
