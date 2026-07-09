@@ -116,6 +116,14 @@ export const messages: Messages = {
       answersIntro: 'My answers to your questions:',
       answered: 'Answered',
     },
+    todo: {
+      title: 'Task list',
+      summary: '{completed}/{total} done',
+      statusPending: 'Pending',
+      statusInProgress: 'In progress',
+      statusCompleted: 'Completed',
+      empty: 'Task list cleared',
+    },
     context: {
       label: 'Context',
       tokens: '~{used} / {limit} tokens',

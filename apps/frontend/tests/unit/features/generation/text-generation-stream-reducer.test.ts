@@ -297,6 +297,37 @@ describe('text generation stream reducer', () => {
     });
   });
 
+  it('appends todo parts once, deduplicated by tool call id', () => {
+    const todoChunk: Extract<StreamChunk, { type: 'todo_update' }> = {
+      type: 'todo_update',
+      toolCallId: 'tool-1',
+      todos: [
+        { content: 'plan the work', status: 'completed' },
+        { content: 'do the work', status: 'in_progress' },
+      ],
+      done: false,
+    };
+
+    const state = reduceChunks([
+      { type: 'tool_call_started', callId: 'tool-1', name: 'todo_write', done: false },
+      todoChunk,
+      todoChunk,
+    ]);
+
+    expect(getPartsByType(state.parts, 'todo')).toEqual([
+      {
+        type: 'todo',
+        toolCallId: 'tool-1',
+        todos: todoChunk.todos,
+      },
+    ]);
+    expect(state.aiMessageUpdate?.patch.parts).toContainEqual({
+      type: 'todo',
+      toolCallId: 'tool-1',
+      todos: todoChunk.todos,
+    });
+  });
+
   it('appends a terminal error part without losing accumulated text', () => {
     const state = reduceChunks([
       { type: 'text', text: 'partial answer', done: false },

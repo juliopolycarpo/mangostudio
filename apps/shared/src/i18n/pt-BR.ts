@@ -114,6 +114,14 @@ export const messages = {
       answersIntro: 'Minhas respostas às suas perguntas:',
       answered: 'Respondido',
     },
+    todo: {
+      title: 'Lista de tarefas',
+      summary: '{completed}/{total} concluídas',
+      statusPending: 'Pendente',
+      statusInProgress: 'Em andamento',
+      statusCompleted: 'Concluída',
+      empty: 'Lista de tarefas limpa',
+    },
     context: {
       label: 'Contexto',
       tokens: '~{used} / {limit} tokens',

@@ -108,6 +108,8 @@ export function reduceTextGenerationStreamChunk(
       return reduceMcpMedia(nextState, chunk);
     case 'question':
       return reduceQuestion(nextState, chunk);
+    case 'todo_update':
+      return reduceTodoUpdate(nextState, chunk);
     case 'image_generation_started':
       return reduceImageGenerationStarted(nextState, chunk);
     case 'image_generation_completed':
@@ -313,6 +315,22 @@ function reduceQuestion(
     questions: chunk.questions,
   };
   const parts = exists ? state.parts : [...state.parts, questionPart];
+  return withAiMessageUpdate({ ...state, parts }, { parts });
+}
+
+function reduceTodoUpdate(
+  state: TextGenerationStreamState,
+  chunk: Extract<StreamChunk, { type: 'todo_update' }>
+) {
+  const exists = state.parts.some(
+    (part) => part.type === 'todo' && part.toolCallId === chunk.toolCallId
+  );
+  const todoPart: MessagePart = {
+    type: 'todo',
+    toolCallId: chunk.toolCallId,
+    todos: chunk.todos,
+  };
+  const parts = exists ? state.parts : [...state.parts, todoPart];
   return withAiMessageUpdate({ ...state, parts }, { parts });
 }
 
