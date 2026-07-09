@@ -5,6 +5,8 @@ export {
   type TodoSummary,
 } from './helpers';
 export {
+  type ChatTodosResponse,
+  ChatTodosResponseSchema,
   TODO_CONTENT_MAX_LENGTH,
   TODO_MAX_ITEMS,
   TODO_READ_TOOL_NAME,
