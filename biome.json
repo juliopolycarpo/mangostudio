@@ -1,5 +1,5 @@
 {
-  "$schema": "https://biomejs.dev/schemas/2.4.15/schema.json",
+  "$schema": "https://biomejs.dev/schemas/2.5.2/schema.json",
   "vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true },
   "files": {
     "ignoreUnknown": true,
@@ -30,8 +30,8 @@
   "linter": {
     "enabled": true,
     "rules": {
-      "recommended": true,
-      "nursery": { "useAwaitThenable": "off", "useErrorCause": "off" },
+      "preset": "recommended",
+      "nursery": { "useAwaitThenable": "off" },
       "performance": { "noDelete": "warn" },
       "style": {
         "noNestedTernary": "off",
@@ -82,15 +82,12 @@
           },
           "nursery": {
             "noBaseToString": "error",
-            "noDuplicateEnumValues": "error",
             "noFloatingPromises": "error",
-            "noForIn": "error",
             "noImpliedEval": "error",
             "noMisusedPromises": "error",
             "noUnsafePlusOperands": "error",
             "useExplicitReturnType": "off",
-            "useExplicitType": "off",
-            "useSpread": "error"
+            "useExplicitType": "off"
           },
           "style": {
             "noCommonJs": "error",
@@ -105,7 +102,8 @@
             "useImportType": "error",
             "useNodejsImportProtocol": "error",
             "useTemplate": "error",
-            "useThrowOnlyError": "error"
+            "useThrowOnlyError": "error",
+            "useSpreadOverApply": "error"
           },
           "suspicious": {
             "noClassAssign": "off",
@@ -129,14 +127,16 @@
             "noWith": "off",
             "useAwait": "error",
             "useGetterReturn": "off",
-            "useNamespaceKeyword": "error"
+            "useNamespaceKeyword": "error",
+            "noDuplicateEnumValues": "error",
+            "noForIn": "error"
           }
         }
       }
     },
     {
       "includes": ["apps/api/src/**/*.ts"],
-      "linter": { "rules": { "nursery": { "noUnnecessaryConditions": "off" } } }
+      "linter": { "rules": { "nursery": {}, "suspicious": { "noUnnecessaryConditions": "off" } } }
     },
     {
       "includes": ["scripts/**/*.ts"],
@@ -171,12 +171,12 @@
           "nursery": {
             "noComponentHookFactories": "error",
             "noJsxNamespace": "error",
-            "noScriptUrl": "warn",
             "useReactAsyncServerFunction": "error"
           },
           "security": {
             "noDangerouslySetInnerHtml": "warn",
-            "noDangerouslySetInnerHtmlWithChildren": "error"
+            "noDangerouslySetInnerHtmlWithChildren": "error",
+            "noScriptUrl": "warn"
           },
           "suspicious": {
             "noArrayIndexKey": "warn",
