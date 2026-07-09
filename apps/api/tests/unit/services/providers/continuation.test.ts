@@ -741,4 +741,33 @@ describe('continuationSystemPrompt hash exclusion (todo prompt injection)', () =
 
     expect(envelope.systemPromptHash).toBe(computeSystemPromptHash(basePrompt));
   });
+
+  it('hashes the empty base, not the injected todo section, when continuationSystemPrompt is explicitly undefined', () => {
+    // Empty agent prompt: the base is undefined and only the todo section is left
+    // in systemPrompt. The envelope must still hash the (undefined) base so it
+    // matches the decision side, which hashes continuationSystemPrompt directly.
+    const envelope = createContinuationEnvelope(
+      'gemini',
+      'interactions',
+      {
+        modelName: 'gemini-2.0-flash',
+        systemPrompt: todoSection,
+        continuationSystemPrompt: undefined,
+      },
+      'interaction_empty_base'
+    );
+
+    expect(envelope.systemPromptHash).toBe(computeSystemPromptHash(undefined));
+    expect(envelope.systemPromptHash).not.toBe(computeSystemPromptHash(todoSection));
+
+    const decision = decideContinuation({
+      lastProviderState: serializeContinuationEnvelope(envelope),
+      provider: 'gemini',
+      modelName: 'gemini-2.0-flash',
+      systemPromptHash: computeSystemPromptHash(undefined),
+      toolsetHash: computeToolsetHash([]),
+    });
+
+    expect(decision.type).toBe('continue_with_cursor');
+  });
 });
