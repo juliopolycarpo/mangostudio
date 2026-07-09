@@ -15,9 +15,17 @@ All events extend `StreamChunk`, a discriminated union on `type`:
 | `tool_call_started`          | Server → Client | Model begins a tool call                     |
 | `tool_call_completed`        | Server → Client | Tool call arguments fully received           |
 | `tool_result`                | Server → Client | Tool execution result                        |
+| `subagent_started`           | Server → Client | Subagent delegation began                    |
+| `subagent_text`              | Server → Client | Subagent text deltas                         |
+| `subagent_tool_call_started` | Server → Client | Subagent began a nested tool call            |
+| `subagent_completed`         | Server → Client | Subagent finished successfully               |
+| `subagent_failed`            | Server → Client | Subagent failed                              |
 | `image_generation_started`   | Server → Client | Image generation began (via tool)            |
 | `image_generation_completed` | Server → Client | Image generated successfully                 |
 | `image_generation_failed`    | Server → Client | Image generation failed                      |
+| `mcp_media`                  | Server → Client | MCP tool produced persisted rich media       |
+| `question`                   | Server → Client | Structured questions for the user            |
+| `todo_update`                | Server → Client | Chat todo list replaced                      |
 | `context_info`               | Server → Client | Token usage and context window status        |
 | `fallback_notice`            | Server → Client | Continuation degradation notification        |
 | `continuation_transition`    | Server → Client | Continuation mode transition                 |
