@@ -37,7 +37,7 @@ async function requireChatGptConnector(
   connectorId: string
 ): Promise<SecretMetadataRow> {
   const meta = await getSecretMetadataById(connectorId, userId);
-  if (!meta || meta.provider !== 'chatgpt') throw new ConnectorNotFoundError();
+  if (meta?.provider !== 'chatgpt') throw new ConnectorNotFoundError();
   return meta;
 }
 

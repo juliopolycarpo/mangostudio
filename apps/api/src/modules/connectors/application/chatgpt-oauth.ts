@@ -115,7 +115,7 @@ export async function startChatGptOAuth(
 
   if (body.connectorId) {
     const connector = await getSecretMetadataById(body.connectorId, userId);
-    if (!connector || connector.provider !== 'chatgpt' || connector.userId !== userId) {
+    if (connector?.provider !== 'chatgpt' || connector.userId !== userId) {
       throw new ConnectorNotFoundError();
     }
     targetConnectorId = connector.id;
