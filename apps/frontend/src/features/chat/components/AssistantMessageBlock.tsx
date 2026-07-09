@@ -8,10 +8,12 @@ import { AssistantMessageHeader } from './AssistantMessageHeader';
 interface AssistantMessageBlockProps {
   msg: Message;
   isImageTurn: boolean;
+  /** Present only on the last message while question cards may be answered. */
+  onQuestionSubmit?: (prompt: string) => void;
 }
 
 /** Renders the body for an assistant turn based on its generation state. */
-function AssistantMessageBody({ msg, isImageTurn }: AssistantMessageBlockProps) {
+function AssistantMessageBody({ msg, isImageTurn, onQuestionSubmit }: AssistantMessageBlockProps) {
   const { t } = useI18n();
 
   if (msg.isGenerating) {
@@ -34,7 +36,7 @@ function AssistantMessageBody({ msg, isImageTurn }: AssistantMessageBlockProps) 
           <span>{t.chat.feed.respondedIn.replace('{time}', msg.generationTime)}</span>
         </div>
       )}
-      <CompletedMessageBody msg={msg} />
+      <CompletedMessageBody msg={msg} onQuestionSubmit={onQuestionSubmit} />
     </div>
   );
 }
@@ -45,11 +47,19 @@ function AssistantMessageBody({ msg, isImageTurn }: AssistantMessageBlockProps) 
  *
  * Usage: <AssistantMessageBlock msg={msg} isImageTurn={isImageTurn} />
  */
-export function AssistantMessageBlock({ msg, isImageTurn }: AssistantMessageBlockProps) {
+export function AssistantMessageBlock({
+  msg,
+  isImageTurn,
+  onQuestionSubmit,
+}: AssistantMessageBlockProps) {
   return (
     <div className="group flex flex-col gap-4 w-full">
       <AssistantMessageHeader msg={msg} isImageTurn={isImageTurn} />
-      <AssistantMessageBody msg={msg} isImageTurn={isImageTurn} />
+      <AssistantMessageBody
+        msg={msg}
+        isImageTurn={isImageTurn}
+        onQuestionSubmit={onQuestionSubmit}
+      />
     </div>
   );
 }

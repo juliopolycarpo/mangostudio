@@ -106,6 +106,8 @@ export function reduceTextGenerationStreamChunk(
       return reduceSubagentFailed(nextState, chunk.callId, chunk.error);
     case 'mcp_media':
       return reduceMcpMedia(nextState, chunk);
+    case 'question':
+      return reduceQuestion(nextState, chunk);
     case 'image_generation_started':
       return reduceImageGenerationStarted(nextState, chunk);
     case 'image_generation_completed':
@@ -295,6 +297,22 @@ function reduceMcpMedia(
       part.type === 'mcp_media' && part.toolCallId === chunk.toolCallId && part.url === chunk.url
   );
   const parts = exists ? state.parts : [...state.parts, mediaPart];
+  return withAiMessageUpdate({ ...state, parts }, { parts });
+}
+
+function reduceQuestion(
+  state: TextGenerationStreamState,
+  chunk: Extract<StreamChunk, { type: 'question' }>
+) {
+  const exists = state.parts.some(
+    (part) => part.type === 'question' && part.toolCallId === chunk.toolCallId
+  );
+  const questionPart: MessagePart = {
+    type: 'question',
+    toolCallId: chunk.toolCallId,
+    questions: chunk.questions,
+  };
+  const parts = exists ? state.parts : [...state.parts, questionPart];
   return withAiMessageUpdate({ ...state, parts }, { parts });
 }
 

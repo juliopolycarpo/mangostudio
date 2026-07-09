@@ -12,6 +12,8 @@ interface ChatPageContentProps {
   readonly status: MessageQueryStatus;
   readonly userName: string;
   readonly onSubmit: (prompt: string) => void;
+  /** Present only while question cards may be answered (no generation running). */
+  readonly onQuestionSubmit?: (prompt: string) => void;
 }
 
 export function ChatPageContent({
@@ -20,6 +22,7 @@ export function ChatPageContent({
   status,
   userName,
   onSubmit,
+  onQuestionSubmit,
 }: ChatPageContentProps) {
   if (status === 'pending' && chatId) {
     return <ChatLoadingState />;
@@ -29,7 +32,7 @@ export function ChatPageContent({
     return <ChatEmptyState userName={userName} onSubmit={onSubmit} />;
   }
 
-  return <ChatFeed chatId={chatId} messages={messages} />;
+  return <ChatFeed chatId={chatId} messages={messages} onQuestionSubmit={onQuestionSubmit} />;
 }
 
 function ChatLoadingState() {

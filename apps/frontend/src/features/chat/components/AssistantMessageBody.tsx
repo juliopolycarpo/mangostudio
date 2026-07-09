@@ -50,14 +50,22 @@ export function StreamingMessageBody({ msg, isImageTurn }: BodyProps & { isImage
  *
  * Usage: <CompletedMessageBody msg={msg} />
  */
-export function CompletedMessageBody({ msg }: BodyProps) {
+export function CompletedMessageBody({
+  msg,
+  onQuestionSubmit,
+}: BodyProps & { onQuestionSubmit?: (prompt: string) => void }) {
   const { t } = useI18n();
   const parts = messagePartsFromMessage(msg);
   const hasTextOrTools = parts.some((p) => p.type === 'text' || p.type === 'tool_call');
 
   return (
     <>
-      <MessageParts parts={parts} messageId={msg.id} isStreaming={false} />
+      <MessageParts
+        parts={parts}
+        messageId={msg.id}
+        isStreaming={false}
+        onQuestionSubmit={onQuestionSubmit}
+      />
       {!hasTextOrTools && (
         <div className="bg-surface-container-low p-5 rounded-2xl border border-outline-variant/10 font-body text-sm leading-relaxed text-on-surface max-w-2xl">
           <span className="text-on-surface-variant/50 italic">{t.chat.feed.noResponse}</span>
