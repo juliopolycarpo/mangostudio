@@ -13,7 +13,7 @@ import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:f
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { getDb } from '../../../../src/db/database';
-import { getConfig, loadConfigForTest } from '../../../../src/lib/config';
+import { loadConfigForTest } from '../../../../src/lib/config';
 import {
   getAppSettings,
   updateAppSettings,
