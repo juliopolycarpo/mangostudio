@@ -30,7 +30,16 @@ function EmptyFeed() {
  *
  * Usage: <ChatFeed chatId={chatId} messages={messages} />
  */
-export function ChatFeed({ chatId, messages }: { chatId: string | null; messages: Message[] }) {
+export function ChatFeed({
+  chatId,
+  messages,
+  onQuestionSubmit,
+}: {
+  chatId: string | null;
+  messages: Message[];
+  /** Present only while question cards may be answered (no generation running). */
+  onQuestionSubmit?: (prompt: string) => void;
+}) {
   const { t } = useI18n();
   const { parentRef, showScrollButton, handleScroll, scrollToBottom } = useChatAutoFollow(
     chatId,
@@ -72,6 +81,9 @@ export function ChatFeed({ chatId, messages }: { chatId: string | null; messages
               index={virtualRow.index}
               start={virtualRow.start}
               measureRef={rowVirtualizer.measureElement}
+              onQuestionSubmit={
+                virtualRow.index === messages.length - 1 ? onQuestionSubmit : undefined
+              }
             />
           ))}
         </div>

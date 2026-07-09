@@ -263,6 +263,40 @@ describe('text generation stream reducer', () => {
     ]);
   });
 
+  it('appends question parts once, deduplicated by tool call id', () => {
+    const questionChunk: Extract<StreamChunk, { type: 'question' }> = {
+      type: 'question',
+      toolCallId: 'tool-1',
+      questions: [
+        {
+          question: 'Which deploy target?',
+          header: 'Deploy target',
+          options: [{ label: 'Staging' }, { label: 'Production' }],
+        },
+      ],
+      done: false,
+    };
+
+    const state = reduceChunks([
+      { type: 'tool_call_started', callId: 'tool-1', name: 'ask_user_question', done: false },
+      questionChunk,
+      questionChunk,
+    ]);
+
+    expect(getPartsByType(state.parts, 'question')).toEqual([
+      {
+        type: 'question',
+        toolCallId: 'tool-1',
+        questions: questionChunk.questions,
+      },
+    ]);
+    expect(state.aiMessageUpdate?.patch.parts).toContainEqual({
+      type: 'question',
+      toolCallId: 'tool-1',
+      questions: questionChunk.questions,
+    });
+  });
+
   it('appends a terminal error part without losing accumulated text', () => {
     const state = reduceChunks([
       { type: 'text', text: 'partial answer', done: false },

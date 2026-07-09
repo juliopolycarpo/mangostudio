@@ -37,7 +37,8 @@
     "./skills": "./src/skills/index.ts",
     "./utils/model-detection": "./src/utils/model-detection.ts",
     "./runtime-env": "./src/runtime-env/index.ts",
-    "./prompt-rules": "./src/prompt-rules/index.ts"
+    "./prompt-rules": "./src/prompt-rules/index.ts",
+    "./questions": "./src/questions/index.ts"
   },
   "devDependencies": {
     "@types/bun": "^1.3.14",

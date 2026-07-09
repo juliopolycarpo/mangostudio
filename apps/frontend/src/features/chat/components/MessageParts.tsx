@@ -1,4 +1,5 @@
 import type { MessagePart } from '@mangostudio/shared';
+import { ASK_USER_QUESTION_TOOL_NAME } from '@mangostudio/shared/questions';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { MarkdownContent } from '@/components/MarkdownContent';
@@ -6,6 +7,7 @@ import { useI18n } from '@/hooks/use-i18n';
 import { ContinuationEventMarker } from './ContinuationEventMarker';
 import { GeneratedImagePart } from './GeneratedImagePart';
 import { McpMediaPartBlock } from './McpMediaPartBlock';
+import { QuestionCard } from './QuestionCard';
 import { SystemEventMarker } from './SystemEventMarker';
 import { ThinkingBlock } from './ThinkingBlock';
 import { ToolCallBlock } from './ToolCallBlock';
@@ -16,9 +18,16 @@ interface MessagePartsProps {
   parts: MessagePart[];
   messageId: string;
   isStreaming: boolean;
+  /** Present only while question cards are answerable (last message, idle). */
+  onQuestionSubmit?: (prompt: string) => void;
 }
 
-export function MessageParts({ parts, messageId, isStreaming }: MessagePartsProps) {
+export function MessageParts({
+  parts,
+  messageId,
+  isStreaming,
+  onQuestionSubmit,
+}: MessagePartsProps) {
   const { t } = useI18n();
   const { groups, consumed } = useMemo(
     () => planToolGroups(parts, isStreaming),
@@ -42,6 +51,8 @@ export function MessageParts({ parts, messageId, isStreaming }: MessagePartsProp
             );
           }
           case 'tool_call': {
+            // The question card supersedes the generic collapsed tool block.
+            if (part.name === ASK_USER_QUESTION_TOOL_NAME) return null;
             if (consumed.has(idx)) return null;
             const grouped = groups.get(idx);
             if (grouped) {
@@ -67,6 +78,14 @@ export function MessageParts({ parts, messageId, isStreaming }: MessagePartsProp
             return <GeneratedImagePart key={part.imageId} part={part} />;
           case 'mcp_media':
             return <McpMediaPartBlock key={`${part.toolCallId}-${part.url}`} part={part} />;
+          case 'question':
+            return (
+              <QuestionCard
+                key={`${part.toolCallId}-question`}
+                part={part}
+                onSubmit={isStreaming ? undefined : onQuestionSubmit}
+              />
+            );
           case 'subagent_trace':
             return (
               <SubagentTraceBlock

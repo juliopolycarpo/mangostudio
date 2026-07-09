@@ -3,6 +3,7 @@ export type {
   SSEContinuationTransitionEvent,
   SSEErrorEvent,
   SSEFallbackEvent,
+  SSEQuestionEvent,
   SSESubagentCompletedEvent,
   SSESubagentFailedEvent,
   SSESubagentStartedEvent,

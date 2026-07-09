@@ -10,6 +10,8 @@ interface ChatMessageRowProps {
   index: number;
   start: number;
   measureRef: (element: Element | null) => void;
+  /** Present only on the last row while question cards may be answered. */
+  onQuestionSubmit?: (prompt: string) => void;
 }
 
 /**
@@ -21,7 +23,13 @@ interface ChatMessageRowProps {
  *
  * Usage: <ChatMessageRow message={msg} index={i} start={top} measureRef={measure} />
  */
-function ChatMessageRowComponent({ message, index, start, measureRef }: ChatMessageRowProps) {
+function ChatMessageRowComponent({
+  message,
+  index,
+  start,
+  measureRef,
+  onQuestionSubmit,
+}: ChatMessageRowProps) {
   const isImageTurn = isImageInteraction(message);
   const isUser = message.role === 'user';
 
@@ -48,7 +56,11 @@ function ChatMessageRowComponent({ message, index, start, measureRef }: ChatMess
         {isUser ? (
           <UserMessageBubble msg={message} isImageTurn={isImageTurn} />
         ) : (
-          <AssistantMessageBlock msg={message} isImageTurn={isImageTurn} />
+          <AssistantMessageBlock
+            msg={message}
+            isImageTurn={isImageTurn}
+            onQuestionSubmit={onQuestionSubmit}
+          />
         )}
       </motion.div>
     </div>

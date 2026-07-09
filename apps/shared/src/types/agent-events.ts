@@ -1,3 +1,4 @@
+import type { QuestionSpec } from '../questions/schemas';
 import type { ProviderType } from './provider';
 
 /**
@@ -64,6 +65,17 @@ export interface McpMediaPart {
   url: string;
   /** Source URI when the block was an embedded resource. */
   uri?: string;
+}
+
+/**
+ * Structured questions an `ask_user_question` tool call presented to the user.
+ * The answer arrives as the next user message; the frontend renders the card
+ * interactively only while this part belongs to the last message of the chat.
+ */
+export interface QuestionPart {
+  type: 'question';
+  toolCallId: string;
+  questions: QuestionSpec[];
 }
 
 export interface SubagentTraceMessage {
@@ -137,6 +149,7 @@ export type MessagePart =
   | { type: 'tool_result'; toolCallId: string; content: string; isError?: boolean }
   | GeneratedImagePart
   | McpMediaPart
+  | QuestionPart
   | SubagentTracePart
   | { type: 'error'; text: string }
   | { type: 'system_event'; event: string; detail?: string }

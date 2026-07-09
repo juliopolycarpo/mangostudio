@@ -18,6 +18,7 @@ import type {
   ToolDefinition,
 } from '../../../services/providers/types';
 import { executeTool, getSafeEffectiveToolSettings, getTool } from '../../../services/tools';
+import { ASK_USER_QUESTION_TOOL_NAME } from '../../../services/tools/builtin/ask-user-question';
 import { DELEGATE_TO_AGENT_TOOL_NAME } from '../../../services/tools/builtin/delegate-to-agent';
 import type { EffectiveToolSettings } from '../../../services/tools/types';
 import { appendSkillsPromptSection } from '../../skills/application/skills-prompt-section';
@@ -95,8 +96,11 @@ export async function prepareSubagentTurn(
     requestRuntimeSettings: getSubagentRuntimeSettings(input.targetProfile),
     profile: input.targetProfile,
   });
+  // Subagents can neither delegate further nor ask the human: their turn
+  // result flows to the parent model, not the UI, so a question card would
+  // never reach the user.
   const toolDefinitions = runtime.toolDefinitions.filter(
-    (tool) => tool.name !== DELEGATE_TO_AGENT_TOOL_NAME
+    (tool) => tool.name !== DELEGATE_TO_AGENT_TOOL_NAME && tool.name !== ASK_USER_QUESTION_TOOL_NAME
   );
   const allowedToolNames = new Set(toolDefinitions.map((tool) => tool.name));
   const prompt = buildSubagentPrompt(input.request);

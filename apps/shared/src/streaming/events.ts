@@ -10,6 +10,7 @@ export type {
   SSEThinkingStartEvent,
 } from './schemas';
 
+import type { QuestionSpec } from '../questions/schemas';
 import type { SSEContinuationTransitionEvent, SSEErrorEvent } from './schemas';
 
 /** SSE event: an image placeholder was created for a tool-generated image. */
@@ -55,6 +56,14 @@ export interface SSEMcpMediaEvent {
   mimeType: string;
   url: string;
   uri?: string;
+  done: false;
+}
+
+/** SSE event: an ask_user_question call presented structured questions. */
+export interface SSEQuestionEvent {
+  type: 'question';
+  toolCallId: string;
+  questions: QuestionSpec[];
   done: false;
 }
 
@@ -131,6 +140,7 @@ export type StreamChunk =
   | SSEImageGenerationCompletedEvent
   | SSEImageGenerationFailedEvent
   | SSEMcpMediaEvent
+  | SSEQuestionEvent
   | {
       type: 'context_info';
       estimatedInputTokens: number;

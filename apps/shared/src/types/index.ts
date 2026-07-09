@@ -14,6 +14,7 @@ export type {
   GeneratedImageStatus,
   McpMediaPart,
   MessagePart,
+  QuestionPart,
   SubagentTraceEvent,
   SubagentTraceEventName,
   SubagentTracePart,
