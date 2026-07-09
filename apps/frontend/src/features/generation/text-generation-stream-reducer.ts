@@ -108,6 +108,8 @@ export function reduceTextGenerationStreamChunk(
       return reduceMcpMedia(nextState, chunk);
     case 'question':
       return reduceQuestion(nextState, chunk);
+    case 'mcp_elicitation_request':
+      return reduceMcpElicitation(nextState, chunk);
     case 'todo_update':
       return reduceTodoUpdate(nextState, chunk);
     case 'image_generation_started':
@@ -316,6 +318,26 @@ function reduceQuestion(
   };
   const parts = exists ? state.parts : [...state.parts, questionPart];
   return withAiMessageUpdate({ ...state, parts }, { parts });
+}
+
+function reduceMcpElicitation(
+  state: TextGenerationStreamState,
+  chunk: Extract<StreamChunk, { type: 'mcp_elicitation_request' }>
+) {
+  const exists = state.parts.some(
+    (part) => part.type === 'mcp_elicitation' && part.elicitationId === chunk.elicitationId
+  );
+  const elicitationPart: MessagePart = {
+    type: 'mcp_elicitation',
+    elicitationId: chunk.elicitationId,
+    toolCallId: chunk.toolCallId,
+    serverSlug: chunk.serverSlug,
+    message: chunk.message,
+    fields: chunk.fields,
+    status: chunk.status,
+  };
+  const parts = exists ? state.parts : [...state.parts, elicitationPart];
+  return withAiMessageUpdate({ ...state, parts, activeThinkingIndex: null }, { parts });
 }
 
 function reduceTodoUpdate(

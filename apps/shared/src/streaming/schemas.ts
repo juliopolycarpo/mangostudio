@@ -1,5 +1,6 @@
 import { type Static, Type } from '@sinclair/typebox';
 import { SSEErrorEventSchema } from '../errors';
+import { McpElicitationFieldSchema, McpElicitationStatusSchema } from '../mcp/schemas';
 import { ProviderTypeSchema } from '../provider-settings/schemas';
 import { QuestionSpecSchema } from '../questions/schemas';
 import { TODO_MAX_ITEMS, TodoItemSchema } from '../todos/schemas';
@@ -197,6 +198,19 @@ export const SSEQuestionEventSchema = Type.Object({
 
 export type SSEQuestionEvent = Static<typeof SSEQuestionEventSchema>;
 
+export const SSEMcpElicitationRequestEventSchema = Type.Object({
+  type: Type.Literal('mcp_elicitation_request'),
+  elicitationId: Type.String(),
+  toolCallId: Type.String(),
+  serverSlug: Type.String(),
+  message: Type.String(),
+  fields: Type.Array(McpElicitationFieldSchema),
+  status: McpElicitationStatusSchema,
+  done: Type.Literal(false),
+});
+
+export type SSEMcpElicitationRequestEvent = Static<typeof SSEMcpElicitationRequestEventSchema>;
+
 export const SSETodoUpdateEventSchema = Type.Object({
   type: Type.Literal('todo_update'),
   toolCallId: Type.String(),
@@ -291,6 +305,7 @@ export const StreamChunkSchema = Type.Union([
   SSEImageGenerationFailedEventSchema,
   SSEMcpMediaEventSchema,
   SSEQuestionEventSchema,
+  SSEMcpElicitationRequestEventSchema,
   SSETodoUpdateEventSchema,
   SSEContextEventSchema,
   SSEFallbackEventSchema,

@@ -305,3 +305,46 @@ describe('mcp server routes', () => {
     expect(await tools.json()).toMatchObject({ code: 'PROVIDER_ERROR' });
   });
 });
+
+describe('POST /mcp/elicitations/:id/respond', () => {
+  it('resolves a pending elicitation for the owner and 404s otherwise', async () => {
+    const { bindElicitationSink, createPendingElicitation, resetElicitationRegistryForTest } =
+      await import('../../../src/services/mcp/elicitation-registry');
+    resetElicitationRegistryForTest();
+
+    const app = authedApp();
+    const missing = await app.handle(
+      jsonRequest('/mcp/elicitations/missing/respond', 'POST', { action: 'cancel' })
+    );
+    expect(missing.status).toBe(404);
+    expect(await missing.json()).toMatchObject({ code: 'NOT_FOUND' });
+
+    let elicitationId = '';
+    bindElicitationSink(testUser.id, 'server-1', (part) => {
+      elicitationId = part.elicitationId;
+    });
+    const wait = createPendingElicitation({
+      userId: testUser.id,
+      serverId: 'server-1',
+      serverSlug: 'demo',
+      toolCallId: 'call-1',
+      message: 'Need a name',
+      fields: [{ name: 'name', required: true, kind: 'string' }],
+    });
+
+    const accepted = await app.handle(
+      jsonRequest(`/mcp/elicitations/${elicitationId}/respond`, 'POST', {
+        action: 'accept',
+        content: { name: 'Ada' },
+      })
+    );
+    expect(accepted.status).toBe(200);
+    expect(await accepted.json()).toEqual({ ok: true, status: 'accepted' });
+    await expect(wait).resolves.toEqual({ action: 'accept', content: { name: 'Ada' } });
+
+    const again = await app.handle(
+      jsonRequest(`/mcp/elicitations/${elicitationId}/respond`, 'POST', { action: 'cancel' })
+    );
+    expect(again.status).toBe(404);
+  });
+});

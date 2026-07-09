@@ -116,6 +116,27 @@ const VALID_CHUNKS: StreamChunk[] = [
     done: false,
   },
   {
+    type: 'mcp_elicitation_request',
+    elicitationId: 'elicit-1',
+    toolCallId: 'tool-mcp-elicit',
+    serverSlug: 'demo',
+    message: 'Choose a tier',
+    fields: [
+      {
+        name: 'tier',
+        title: 'Tier',
+        required: true,
+        kind: 'enum',
+        options: [
+          { value: 'free', label: 'Free' },
+          { value: 'pro', label: 'Pro' },
+        ],
+      },
+    ],
+    status: 'pending',
+    done: false,
+  },
+  {
     type: 'todo_update',
     toolCallId: 'tool-todo',
     todos: [

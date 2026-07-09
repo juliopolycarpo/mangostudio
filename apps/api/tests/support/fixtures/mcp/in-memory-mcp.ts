@@ -109,12 +109,21 @@ export function createTurnMcpServer(): Server {
 export function inMemoryMcpConnector(
   createServer: () => Server = createTurnMcpServer
 ): typeof connectMcpClient {
-  return async (config, options = {}): Promise<McpClientHandle> => {
+  return async (config, options): Promise<McpClientHandle> => {
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
     const server = createServer();
     await server.connect(serverTransport);
-    const client = new Client({ name: 'turn-fixture-client', version: '0.0.0' });
+    const client = new Client(
+      { name: 'turn-fixture-client', version: '0.0.0' },
+      { capabilities: { elicitation: { form: {} } } }
+    );
     await client.connect(clientTransport);
-    return wrapMcpClient(client, config, options);
+    return wrapMcpClient(client, config, {
+      userId: options.userId,
+      serverId: config.id,
+      serverSlug: config.slug,
+      onSessionClosed: options.onSessionClosed,
+      onToolListChanged: options.onToolListChanged,
+    });
   };
 }

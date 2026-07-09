@@ -6,6 +6,7 @@ import { useMemo, useState } from 'react';
 import { MarkdownContent } from '@/components/MarkdownContent';
 import { useI18n } from '@/hooks/use-i18n';
 import { ContinuationEventMarker } from './ContinuationEventMarker';
+import { ElicitationCard } from './ElicitationCard';
 import { GeneratedImagePart } from './GeneratedImagePart';
 import { McpMediaPartBlock } from './McpMediaPartBlock';
 import { QuestionCard } from './QuestionCard';
@@ -90,6 +91,8 @@ export function MessageParts({
                 onSubmit={isStreaming ? undefined : onQuestionSubmit}
               />
             );
+          case 'mcp_elicitation':
+            return <ElicitationCard key={part.elicitationId} part={part} />;
           case 'todo':
             return <TodoListPart key={`${part.toolCallId}-todo`} part={part} />;
           case 'subagent_trace':

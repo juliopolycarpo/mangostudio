@@ -51,6 +51,7 @@ describe('mcp http transport', () => {
 
     try {
       const handle = await connectMcpClient(httpConfig(`http://localhost:${bunServer.port}/`), {
+        userId: 'http-transport-user',
         resolveHeaders: () => Promise.resolve({ Authorization: 'Bearer test-token' }),
       });
 
@@ -92,7 +93,9 @@ describe('mcp http transport', () => {
     const { port } = httpServer.address() as AddressInfo;
 
     try {
-      const handle = await connectMcpClient(httpConfig(`http://localhost:${port}/`));
+      const handle = await connectMcpClient(httpConfig(`http://localhost:${port}/`), {
+        userId: 'http-transport-user',
+      });
 
       const tools = await handle.listTools();
       expect(tools.map((tool) => tool.name)).toEqual(['echo', 'env-keys', 'crash']);
@@ -109,7 +112,9 @@ describe('mcp http transport', () => {
 
   it('reports unreachable servers as McpConnectionError without falling back', async () => {
     // Port 9 (discard) is unassigned on loopback — connection refused fast.
-    const attempt = connectMcpClient(httpConfig('http://127.0.0.1:9/'));
+    const attempt = connectMcpClient(httpConfig('http://127.0.0.1:9/'), {
+      userId: 'http-transport-user',
+    });
 
     await expect(attempt).rejects.toBeInstanceOf(McpConnectionError);
   });

@@ -59,6 +59,9 @@ export function* collectToolExecutionResult(
   sink: ToolResultSink
 ): Generator<StreamEvent> {
   if (item.kind === 'event') {
+    if (item.event.type === 'mcp_elicitation') {
+      sink.allParts.push(item.event.part);
+    }
     yield item.event;
     return;
   }
@@ -81,6 +84,13 @@ export function* collectToolExecutionResult(
   for (const mediaPart of execution.mcpMedia ?? []) {
     sink.allParts.push(mediaPart);
     yield { type: 'mcp_media', part: mediaPart };
+  }
+  for (const elicitationPart of execution.mcpElicitations ?? []) {
+    // Mid-flight SSE already appended these; keep a single part reference so
+    // status mutations from respondElicitation persist with the message.
+    if (!sink.allParts.some((part) => part === elicitationPart)) {
+      sink.allParts.push(elicitationPart);
+    }
   }
   if (execution.questionPart) {
     sink.allParts.push(execution.questionPart);

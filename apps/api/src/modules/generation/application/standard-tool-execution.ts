@@ -1,10 +1,21 @@
-import type { McpMediaPart, MessagePart, QuestionPart, TodoPart } from '@mangostudio/shared';
+import type {
+  McpElicitationPart,
+  McpMediaPart,
+  MessagePart,
+  QuestionPart,
+  TodoPart,
+} from '@mangostudio/shared';
 import type { AgentProfile } from '@mangostudio/shared/agents';
 import { isAgentId } from '@mangostudio/shared/agents';
 import type { MultiAgentSettings } from '@mangostudio/shared/app-settings';
 import { SUBAGENT_MAX_TURNS_MAX, SUBAGENT_MAX_TURNS_MIN } from '@mangostudio/shared/app-settings';
 import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';
+import {
+  bindElicitationSink,
+  cancelElicitationsForServer,
+  releaseElicitationSink,
+} from '../../../services/mcp/elicitation-registry';
 import { persistMcpMediaParts } from '../../../services/mcp/rich-content';
 import { executeMcpTool } from '../../../services/mcp/tool-bridge';
 import { isMcpToolName, parseMcpToolName } from '../../../services/mcp/tool-naming';
@@ -49,6 +60,8 @@ export interface StandardToolExecution {
   subagentTrace?: Extract<MessagePart, { type: 'subagent_trace' }>;
   /** Persisted rich media (images, files) an MCP tool call produced. */
   mcpMedia?: McpMediaPart[];
+  /** Mid-call MCP form elicitations presented while the tool was awaited. */
+  mcpElicitations?: McpElicitationPart[];
   /** Questions an ask_user_question call presented, rendered as a chat card. */
   questionPart?: QuestionPart;
   /** Snapshot of the list a todo_write call produced, rendered as a checklist. */
@@ -75,6 +88,7 @@ export interface DelegationRuntime {
  */
 export type ToolStreamEvent =
   | { type: 'system_event'; event: string; detail: string }
+  | { type: 'mcp_elicitation'; part: McpElicitationPart }
   | { type: 'subagent_started'; callId: string; agentId: string; agentName: string; task: string }
   | { type: 'subagent_text'; callId: string; agentId: string; text: string }
   | {
@@ -107,6 +121,8 @@ export interface StandardToolExecutionContext {
   /** Required to route `mcp__` tool calls to their owning server. */
   db?: Kysely<Database>;
   signal?: AbortSignal;
+  /** Mid-flight progress (subagent + MCP elicitation) into the SSE turn. */
+  onEvent?: (event: ToolStreamEvent) => void;
 }
 
 export async function* executeStandardToolCallsWithProgress(
@@ -121,14 +137,16 @@ export async function* executeStandardToolCallsWithProgress(
   let remaining = calls.length;
 
   for (const [callId, call] of calls) {
+    const onEvent = (event: ToolStreamEvent) => queue.push({ kind: 'event', event });
     const runtime = context.delegationRuntime
       ? {
           ...context.delegationRuntime,
-          onEvent: (event: ToolStreamEvent) => queue.push({ kind: 'event', event }),
+          onEvent,
         }
       : undefined;
     void executeStandardToolCall(callId, call.name, call.argsStr, {
       ...context,
+      onEvent,
       delegationRuntime: runtime,
     })
       .then((execution) => queue.push({ kind: 'execution', execution }))
@@ -158,6 +176,7 @@ async function executeStandardToolCall(
   let isError = false;
   let subagentTrace: Extract<MessagePart, { type: 'subagent_trace' }> | undefined;
   let mcpMedia: McpMediaPart[] | undefined;
+  let mcpElicitations: McpElicitationPart[] | undefined;
   const isDelegationTool =
     name === DELEGATE_TO_AGENT_TOOL_NAME && Boolean(context.delegationRuntime);
 
@@ -171,6 +190,7 @@ async function executeStandardToolCall(
       result = mcpResult.result;
       isError = mcpResult.isError;
       mcpMedia = mcpResult.mediaParts;
+      mcpElicitations = mcpResult.elicitationParts;
     } else if (name === DELEGATE_TO_AGENT_TOOL_NAME && runtime) {
       const tool = getTool(name);
       if (!tool) throw new Error(`Unknown tool: "${name}"`);
@@ -265,6 +285,7 @@ async function executeStandardToolCall(
     isError,
     ...(subagentTrace ? { subagentTrace } : {}),
     ...(mcpMedia?.length ? { mcpMedia } : {}),
+    ...(mcpElicitations?.length ? { mcpElicitations } : {}),
     ...(questionPart ? { questionPart } : {}),
     ...(todoPart ? { todoPart } : {}),
   };
@@ -281,33 +302,62 @@ async function executeMcpToolCall(
   name: string,
   args: Record<string, unknown>,
   context: StandardToolExecutionContext
-): Promise<{ result: unknown; isError: boolean; mediaParts?: McpMediaPart[] }> {
+): Promise<{
+  result: unknown;
+  isError: boolean;
+  mediaParts?: McpMediaPart[];
+  elicitationParts?: McpElicitationPart[];
+}> {
   if (!context.db) {
     throw new Error(`Tool "${name}" is not available in this context.`);
   }
   if (context.settingsByToolName.get(name)?.enabled === false) {
     throw new Error(`Tool "${name}" is disabled for this user.`);
   }
-  const mcpResult = await executeMcpTool(context.db, context.userId, name, args, {
-    signal: context.signal,
-  });
+
   const parsed = parseMcpToolName(name);
-  const mediaParts =
-    !mcpResult.isError && parsed
-      ? await persistMcpMediaParts(mcpResult.content, {
-          db: context.db,
-          userId: context.userId,
-          chatId: context.chatId,
-          toolCallId: callId,
-          serverSlug: parsed.serverSlug,
-          toolName: parsed.toolName,
-        })
-      : undefined;
-  return {
-    result: mcpResult.isError ? { error: mcpResult.contentText } : mcpResult.contentText,
-    isError: mcpResult.isError,
-    ...(mediaParts?.length ? { mediaParts } : {}),
-  };
+  if (!parsed) throw new Error(`Unknown tool: "${name}"`);
+
+  const row = await context.db
+    .selectFrom('mcp_servers')
+    .select(['id', 'slug'])
+    .where('userId', '=', context.userId)
+    .where('slug', '=', parsed.serverSlug)
+    .executeTakeFirst();
+  if (!row) throw new Error(`MCP server "${parsed.serverSlug}" is not configured.`);
+
+  const elicitationParts: McpElicitationPart[] = [];
+  bindElicitationSink(context.userId, row.id, (part) => {
+    elicitationParts.push(part);
+    context.onEvent?.({ type: 'mcp_elicitation', part });
+  });
+
+  try {
+    const mcpResult = await executeMcpTool(context.db, context.userId, name, args, {
+      signal: context.signal,
+      toolCallId: callId,
+    });
+    const mediaParts =
+      !mcpResult.isError && parsed
+        ? await persistMcpMediaParts(mcpResult.content, {
+            db: context.db,
+            userId: context.userId,
+            chatId: context.chatId,
+            toolCallId: callId,
+            serverSlug: parsed.serverSlug,
+            toolName: parsed.toolName,
+          })
+        : undefined;
+    return {
+      result: mcpResult.isError ? { error: mcpResult.contentText } : mcpResult.contentText,
+      isError: mcpResult.isError,
+      ...(mediaParts?.length ? { mediaParts } : {}),
+      ...(elicitationParts.length ? { elicitationParts } : {}),
+    };
+  } finally {
+    releaseElicitationSink(context.userId, row.id);
+    cancelElicitationsForServer(context.userId, row.id);
+  }
 }
 
 export function createDelegationRuntime(

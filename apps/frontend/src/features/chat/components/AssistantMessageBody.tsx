@@ -17,7 +17,11 @@ export function StreamingMessageBody({ msg, isImageTurn }: BodyProps & { isImage
   const { t } = useI18n();
   const parts = messagePartsFromMessage(msg);
   const hasContent = parts.some(
-    (p) => p.type === 'thinking' || p.type === 'text' || p.type === 'tool_call'
+    (p) =>
+      p.type === 'thinking' ||
+      p.type === 'text' ||
+      p.type === 'tool_call' ||
+      p.type === 'mcp_elicitation'
   );
 
   if (isImageTurn || !hasContent) {

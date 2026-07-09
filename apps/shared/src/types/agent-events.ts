@@ -1,6 +1,9 @@
+import type { McpElicitationPart } from '../mcp/schemas';
 import type { QuestionSpec } from '../questions/schemas';
 import type { TodoItem } from '../todos/schemas';
 import type { ProviderType } from './provider';
+
+export type { McpElicitationPart } from '../mcp/schemas';
 
 /**
  * Normalized reason for a continuation degradation event.
@@ -162,6 +165,7 @@ export type MessagePart =
   | GeneratedImagePart
   | McpMediaPart
   | QuestionPart
+  | McpElicitationPart
   | TodoPart
   | SubagentTracePart
   | { type: 'error'; text: string }

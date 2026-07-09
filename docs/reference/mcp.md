@@ -95,6 +95,21 @@ Failures degrade instead of aborting the turn: a server tool error, an unreachab
 timeout is recorded as a typed error tool result and the turn continues. Oversized results are
 capped at 64 KiB with a truncation marker (`apps/api/src/services/mcp/content-mapping.ts`).
 
+## Form elicitation
+
+MangoStudio declares the MCP client `elicitation.form` capability
+(`apps/api/src/services/mcp/client-factory.ts`). When a server sends `elicitation/create` during
+an in-flight tool call, the API parks the request
+(`apps/api/src/services/mcp/elicitation-registry.ts`), streams an `mcp_elicitation_request` SSE
+chunk into the open chat turn, and renders a form card. The user accepts (with field values),
+declines, or cancels via `POST /mcp/elicitations/:id/respond`; that unblocks the awaited MCP
+tool call so it can finish normally.
+
+URL-mode elicitation is not declared; unexpected URL requests resolve as `{ action: "cancel" }`
+so servers degrade. If the tool call times out or the turn aborts while a form is pending, the
+registry answers `{ action: "cancel" }` as well. Without an active turn sink (for example a
+server probing elicitation outside a chat tool call), the handler also cancels.
+
 ## Rich tool results
 
 The model always receives the flattened text result: text blocks and text-bearing embedded

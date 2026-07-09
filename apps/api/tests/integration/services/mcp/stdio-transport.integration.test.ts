@@ -44,7 +44,7 @@ afterEach(async () => {
 
 describe('mcp stdio transport', () => {
   it('spawns the server, lists tools, and round-trips a tool call', async () => {
-    const handle = await connectMcpClient(stdioConfig('spawn-test'));
+    const handle = await connectMcpClient(stdioConfig('spawn-test'), { userId: USER_ID });
 
     const tools = await handle.listTools();
     expect(tools.map((tool) => tool.name)).toEqual(['echo', 'env-keys', 'crash']);
@@ -64,7 +64,8 @@ describe('mcp stdio transport', () => {
     process.env.MCP_TEST_LEAKY_SECRET = 'must-not-leak';
     try {
       const handle = await connectMcpClient(
-        stdioConfig('env-test', { MCP_FIXTURE_FLAG: 'forwarded' })
+        stdioConfig('env-test', { MCP_FIXTURE_FLAG: 'forwarded' }),
+        { userId: USER_ID }
       );
 
       const result = await handle.callTool('env-keys', {});
