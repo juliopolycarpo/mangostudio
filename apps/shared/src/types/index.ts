@@ -18,6 +18,7 @@ export type {
   SubagentTraceEvent,
   SubagentTraceEventName,
   SubagentTracePart,
+  TodoPart,
 } from './agent-events';
 export { mergeSubagentTraceEvents } from './agent-events';
 export type { GalleryItem, GeneratedImageArtifact } from './gallery';
