@@ -106,6 +106,14 @@ export const messages = {
       subagentLifecycleTimeout: 'Tempo esgotado',
       subagentLifecycleFallback: 'Resposta fallback criada',
     },
+    question: {
+      title: 'A IA precisa da sua decisão',
+      submit: 'Enviar respostas',
+      ownAnswerPlaceholder: 'Ou escreva sua própria resposta...',
+      multiSelectHint: 'Selecione uma ou mais opções',
+      answersIntro: 'Minhas respostas às suas perguntas:',
+      answered: 'Respondido',
+    },
     context: {
       label: 'Contexto',
       tokens: '~{used} / {limit} tokens',

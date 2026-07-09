@@ -108,6 +108,14 @@ export const messages: Messages = {
       subagentLifecycleTimeout: 'Timed out',
       subagentLifecycleFallback: 'Fallback response created',
     },
+    question: {
+      title: 'The AI needs your decision',
+      submit: 'Send answers',
+      ownAnswerPlaceholder: 'Or write your own answer...',
+      multiSelectHint: 'Select one or more options',
+      answersIntro: 'My answers to your questions:',
+      answered: 'Answered',
+    },
     context: {
       label: 'Context',
       tokens: '~{used} / {limit} tokens',
