@@ -13,7 +13,7 @@ import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';
 import {
   bindElicitationSink,
-  cancelElicitationsForServer,
+  cancelPendingElicitations,
   releaseElicitationSink,
 } from '../../../services/mcp/elicitation-registry';
 import { persistMcpMediaParts } from '../../../services/mcp/rich-content';
@@ -356,7 +356,7 @@ async function executeMcpToolCall(
     };
   } finally {
     releaseElicitationSink(context.userId, row.id);
-    cancelElicitationsForServer(context.userId, row.id);
+    cancelPendingElicitations(elicitationParts.map((part) => part.elicitationId));
   }
 }
 

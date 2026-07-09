@@ -58,13 +58,6 @@ export interface WrapMcpClientOptions
   serverId: string;
   /** Server slug shown on the elicitation card. */
   serverSlug: string;
-  /**
-   * Tool call currently awaiting a result on this session. Set by the tool
-   * bridge around `callTool` so mid-call elicitations carry provenance.
-   */
-  getActiveToolCallId?: () => string | undefined;
-  /** Abort signal for the in-flight tool call; cancels pending elicitations. */
-  getActiveSignal?: () => AbortSignal | undefined;
 }
 
 /**
@@ -197,11 +190,10 @@ export function wrapMcpClient(
       userId: callbacks.userId,
       serverId: callbacks.serverId,
       serverSlug: callbacks.serverSlug,
-      toolCallId:
-        callbacks.getActiveToolCallId?.() ?? activeToolCallId ?? `mcp:${callbacks.serverSlug}`,
+      toolCallId: activeToolCallId ?? `mcp:${callbacks.serverSlug}`,
       message: params.message,
       fields: flattenElicitationSchema(params.requestedSchema),
-      signal: callbacks.getActiveSignal?.() ?? activeSignal,
+      signal: activeSignal,
     });
     return toElicitResult(result);
   });

@@ -141,12 +141,15 @@ export function respondElicitation(
   return status;
 }
 
-/** Cancels every pending elicitation for a server session (timeout / teardown). */
-export function cancelElicitationsForServer(userId: string, serverId: string): void {
-  const matching = [...pending.values()].filter(
-    (entry) => entry.userId === userId && entry.serverId === serverId
-  );
-  for (const entry of matching) {
+/**
+ * Cancels the given still-pending elicitations (leftovers after a tool call
+ * ends or times out). Scoped by id — not by server — so a finishing tool call
+ * never cancels a concurrent same-server call's pending elicitation.
+ */
+export function cancelPendingElicitations(elicitationIds: readonly string[]): void {
+  for (const id of elicitationIds) {
+    const entry = pending.get(id);
+    if (!entry) continue;
     entry.part.status = 'cancelled';
     entry.resolve({ action: 'cancel' });
   }

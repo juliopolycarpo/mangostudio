@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import {
   bindElicitationSink,
-  cancelElicitationsForServer,
+  cancelPendingElicitations,
   createPendingElicitation,
   releaseElicitationSink,
   resetElicitationRegistryForTest,
@@ -147,8 +147,11 @@ describe('elicitation registry', () => {
     await expect(pending).resolves.toEqual({ action: 'cancel' });
   });
 
-  it('cancels leftovers for a server and ignores released sinks', async () => {
-    bindElicitationSink('u1', 's1', () => undefined);
+  it('cancels only the given leftovers and ignores released sinks', async () => {
+    let leftoverId = '';
+    bindElicitationSink('u1', 's1', (part) => {
+      leftoverId = part.elicitationId;
+    });
     const pending = createPendingElicitation({
       userId: 'u1',
       serverId: 's1',
@@ -159,7 +162,7 @@ describe('elicitation registry', () => {
     });
 
     releaseElicitationSink('u1', 's1');
-    cancelElicitationsForServer('u1', 's1');
+    cancelPendingElicitations([leftoverId]);
     await expect(pending).resolves.toEqual({ action: 'cancel' });
 
     const afterRelease = await createPendingElicitation({
@@ -171,5 +174,37 @@ describe('elicitation registry', () => {
       fields: [],
     });
     expect(afterRelease).toEqual({ action: 'cancel' });
+  });
+
+  it('leaves a concurrent same-server elicitation pending when another call cleans up', async () => {
+    const ids: string[] = [];
+    bindElicitationSink('u1', 's1', (part) => {
+      ids.push(part.elicitationId);
+    });
+
+    const first = createPendingElicitation({
+      userId: 'u1',
+      serverId: 's1',
+      serverSlug: 'demo',
+      toolCallId: 'call-1',
+      message: 'First',
+      fields: [],
+    });
+    const second = createPendingElicitation({
+      userId: 'u1',
+      serverId: 's1',
+      serverSlug: 'demo',
+      toolCallId: 'call-2',
+      message: 'Second',
+      fields: [],
+    });
+
+    // The first call finishes and cleans up only its own leftover; the second
+    // call's elicitation must stay pending until its owner responds.
+    cancelPendingElicitations([ids[0] ?? '']);
+    await expect(first).resolves.toEqual({ action: 'cancel' });
+
+    expect(respondElicitation('u1', ids[1] ?? '', { action: 'decline' })).toBe('declined');
+    await expect(second).resolves.toEqual({ action: 'decline' });
   });
 });
