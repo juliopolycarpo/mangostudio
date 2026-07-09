@@ -87,10 +87,13 @@ Open these first:
 - `apps/api/src/services/tools/builtin/get-current-datetime.ts`
 - `apps/api/src/services/tools/builtin/ask-user-question.ts` (interactive question cards)
 - `apps/api/src/services/tools/builtin/todo.ts` (per-chat task list; prompt-injected via `apps/api/src/modules/todos/`)
+- `apps/api/src/modules/todos/http/todo-routes.ts` (`GET /api/chats/:id/todos` current-state endpoint)
 - `apps/shared/src/questions/` (question schemas + answer formatting)
 - `apps/shared/src/todos/` (todo schemas, helpers, prompt-section renderer)
 - `apps/frontend/src/features/chat/components/QuestionCard.tsx`
-- `apps/frontend/src/features/chat/components/TodoListPart.tsx`
+- `apps/frontend/src/features/chat/components/TodoListPart.tsx` (inline feed snapshot; shares `TodoItemRow.tsx`)
+- `apps/frontend/src/features/chat/components/PinnedTodoPanel.tsx` (live panel above the input bar)
+- `apps/frontend/src/features/chat/hooks/use-chat-todos.ts` (todo query + `todo_update` cache writer)
 - `apps/api/src/modules/tool-settings/http/tool-settings-routes.ts`
 - `apps/api/src/modules/generation/application/stream-text-turn.ts`
 - `apps/api/src/services/providers/core/continuation-envelope.ts`

@@ -6,6 +6,7 @@ import { authClient } from '@/lib/auth-client';
 import { ChatPageContent } from './components/ChatPageContent';
 import { ChatContextDecisionNotice, ChatFallbackNotice } from './components/ChatPageNotices';
 import { InputBar } from './components/InputBar';
+import { PinnedTodoPanel } from './components/PinnedTodoPanel';
 import { useChatContextControls, useChatPageMessages } from './hooks/use-chat-page-state';
 
 interface ChatPageProps {
@@ -99,6 +100,7 @@ export function ChatPage({
           onContinue={contextControls.handleContinue}
         />
       )}
+      <PinnedTodoPanel chatId={chatId} />
       <InputBar
         onSubmit={onSubmit}
         chatId={chatId}

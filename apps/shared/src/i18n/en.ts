@@ -123,6 +123,9 @@ export const messages: Messages = {
       statusInProgress: 'In progress',
       statusCompleted: 'Completed',
       empty: 'Task list cleared',
+      panelCurrent: 'current: {task}',
+      panelExpand: 'Show tasks',
+      panelCollapse: 'Hide tasks',
     },
     context: {
       label: 'Context',
