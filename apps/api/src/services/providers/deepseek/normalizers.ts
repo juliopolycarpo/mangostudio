@@ -1,3 +1,4 @@
+import type { DeepSeekLanguageModelOptions } from '@ai-sdk/deepseek';
 import type { ReasoningEffort } from '@mangostudio/shared/types';
 import type { ModelMessage } from 'ai';
 import { appendAttachmentFallbackNotes } from '../core/attachment-content';
@@ -13,7 +14,9 @@ import type { TextGenerationRequest } from '../types';
  * - `xhigh` maps to `max`
  * - `max` stays `max`
  */
-export function normalizeDeepSeekReasoningEffort(effort: ReasoningEffort): string {
+export function normalizeDeepSeekReasoningEffort(
+  effort: ReasoningEffort
+): DeepSeekLanguageModelOptions['reasoningEffort'] {
   switch (effort) {
     case 'low':
     case 'medium':

@@ -32,7 +32,7 @@
     "@google/genai": "^1.52.0",
     "@mangostudio/shared": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.29.0",
-    "ai": "^6.0.208",
+    "ai": "^7.0.19",
     "better-auth": "^1.6.11",
     "elysia": "^1.4.28",
     "file-type": "^22.0.1",
