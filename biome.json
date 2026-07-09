@@ -31,7 +31,7 @@
     "enabled": true,
     "rules": {
       "recommended": true,
-      "nursery": { "useAwaitThenable": "off", "useErrorCause": "off" },
+      "nursery": { "useAwaitThenable": "off" },
       "performance": { "noDelete": "warn" },
       "style": {
         "noNestedTernary": "off",
