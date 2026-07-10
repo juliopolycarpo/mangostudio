@@ -64,6 +64,8 @@ config.toml
 !.claude/hooks/session-path.mjs
 .agent/
 .agents/**
+!.agents/skills/
+!.agents/skills/**
 !.agents/opencode/
 !.agents/opencode/rules/
 !.agents/opencode/rules/01-code-navigation.md
