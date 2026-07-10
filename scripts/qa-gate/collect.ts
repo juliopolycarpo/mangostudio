@@ -1,6 +1,11 @@
 // QA-gate metrics collector entrypoint. Assembles every metric (each failing
-// independently via safe()) and writes the report as JSON to stdout.
-// Collectors live in ./collect/*; shapes in ./collect/types.
+// independently via safe()) and writes the versioned qa-metrics envelope as
+// JSON to stdout. Collectors live in ./collect/*; shapes in ./collect/types
+// and ./metrics-envelope.
+//
+// Provenance comes from the environment (set by the workflow): the repository
+// from GITHUB_REPOSITORY plus QA_PR_NUMBER / QA_BASE_SHA / QA_HEAD_SHA for
+// pull_request runs. Local runs fall back to placeholder provenance.
 //
 // Test-derived metrics (suite outcome + coverage) come from the fragment the
 // CI Test job writes via collect-test-metrics.ts (`--test-metrics <path>`), so
@@ -25,6 +30,7 @@ import type {
 } from './collect/types';
 import { countTsErrors } from './collect/typescript';
 import { readWorkspaceCoverageSummary } from './coverage-summary';
+import { QA_METRICS_SCHEMA_VERSION, type QaMetricsEnvelope } from './metrics-envelope';
 
 const parseTestMetricsPath = (argv: readonly string[]): string | null => {
   const flagIndex = argv.indexOf('--test-metrics');
@@ -103,7 +109,29 @@ const buildMetrics = async (fragment: TestMetricsFragment | null): Promise<Metri
   };
 };
 
+const optionalEnv = (name: string): string | null => {
+  const value = process.env[name];
+  return value && value.length > 0 ? value : null;
+};
+
+const envPrNumber = (): number | null => {
+  const raw = optionalEnv('QA_PR_NUMBER');
+  if (raw === null) return null;
+  const parsed = Number(raw);
+  return Number.isInteger(parsed) && parsed >= 1 ? parsed : null;
+};
+
 const testMetricsPath = parseTestMetricsPath(process.argv.slice(2));
 const fragment = testMetricsPath ? await loadTestMetricsFragment(testMetricsPath) : null;
 const metrics = await buildMetrics(fragment);
-process.stdout.write(`${JSON.stringify(metrics, null, 2)}\n`);
+
+const envelope: QaMetricsEnvelope = {
+  schemaVersion: QA_METRICS_SCHEMA_VERSION,
+  repository: optionalEnv('GITHUB_REPOSITORY') ?? 'local/dev',
+  prNumber: envPrNumber(),
+  baseSha: optionalEnv('QA_BASE_SHA'),
+  headSha: optionalEnv('QA_HEAD_SHA') ?? metrics.sha,
+  metrics,
+};
+
+process.stdout.write(`${JSON.stringify(envelope, null, 2)}\n`);
