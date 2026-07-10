@@ -56,6 +56,8 @@ config.toml
 !.claude/rules/01-commands-and-validation.md
 !.claude/rules/03-code-navigation.md
 !.claude/settings.json
+!.claude/skills/
+!.claude/skills/**
 !.claude/hooks/
 .claude/hooks/*
 !.claude/hooks/auto-fix.mjs
