@@ -43,10 +43,7 @@ const collectErrorNotes = (base: Metrics | null, head: Metrics | null): string[]
       notes.push(`- ${side}/frontendBundle: \`${metrics.frontendBundle.error}\``);
     if (isError(metrics.dependencies))
       notes.push(`- ${side}/dependencies: \`${metrics.dependencies.error}\``);
-    for (const lane of ['unit', 'integration'] as const) {
-      const tests = metrics.tests?.[lane];
-      if (isError(tests)) notes.push(`- ${side}/tests/${lane}: \`${tests.error}\``);
-    }
+    if (isError(metrics.tests)) notes.push(`- ${side}/tests: \`${metrics.tests.error}\``);
   }
   return notes;
 };

@@ -1,38 +1,36 @@
-// Test results comparison table (pass counts per lane, broken down by workspace).
+// Test results comparison table for the single authoritative suite pass,
+// broken down by workspace.
 
-import type { Metrics, TestLaneStats } from '../collect/types';
-import { getTestLane } from './access';
+import type { Metrics, TestSuiteStats } from '../collect/types';
+import { getTestSuite } from './access';
 import { formatNumber, NA, renderDelta } from './format';
 
-const formatTestBreakdown = (lane: TestLaneStats | null): string => {
-  if (!lane) return NA;
+const formatDuration = (suite: TestSuiteStats): string =>
+  suite.durationSeconds == null ? 'duration n/a' : `${formatNumber(suite.durationSeconds)}s`;
+
+const formatSuiteBreakdown = (suite: TestSuiteStats | null): string => {
+  if (!suite) return NA;
   const parts = [
-    `root ${formatNumber(lane.root)}`,
-    `frontend ${formatNumber(lane.frontend)}`,
-    `api ${formatNumber(lane.api)}`,
-    `shared ${formatNumber(lane.shared)}`,
+    `root ${formatNumber(suite.root)}`,
+    `frontend ${formatNumber(suite.frontend)}`,
+    `api ${formatNumber(suite.api)}`,
+    `shared ${formatNumber(suite.shared)}`,
   ];
-  const status = lane.exitCode == null ? 'status n/a' : `exit ${lane.exitCode}`;
-  return `${formatNumber(lane.passed)} passed (${parts.join(' / ')}) · ${status}`;
+  const status = suite.exitCode == null ? 'status n/a' : `exit ${suite.exitCode}`;
+  return `${formatNumber(suite.passed)} passed (${parts.join(' / ')}) · ${status} · ${formatDuration(suite)}`;
 };
 
-const renderTestLaneRow = (
-  base: Metrics | null,
-  head: Metrics | null,
-  lane: 'unit' | 'integration'
-): string => {
-  const baseLane = getTestLane(base, lane);
-  const headLane = getTestLane(head, lane);
-  return `| ${lane} | ${formatTestBreakdown(baseLane)} | ${formatTestBreakdown(headLane)} | ${renderDelta(baseLane?.passed, headLane?.passed, { higherIsBetter: true, precision: 0 })} |`;
-};
-
-export const renderTestsSection = (base: Metrics | null, head: Metrics | null): string =>
-  [
-    '### Tests by Lane',
+export const renderTestsSection = (base: Metrics | null, head: Metrics | null): string => {
+  const baseSuite = getTestSuite(base);
+  const headSuite = getTestSuite(head);
+  return [
+    '### Tests',
     '',
-    '| Lane | Base | Head | Δ passed |',
-    '|---|---|---|---|',
-    renderTestLaneRow(base, head, 'unit'),
-    renderTestLaneRow(base, head, 'integration'),
+    'Single full-suite pass (unit + integration, from the coverage run).',
+    '',
+    '| Base | Head | Δ passed |',
+    '|---|---|---|',
+    `| ${formatSuiteBreakdown(baseSuite)} | ${formatSuiteBreakdown(headSuite)} | ${renderDelta(baseSuite?.passed, headSuite?.passed, { higherIsBetter: true, precision: 0 })} |`,
     '',
   ].join('\n');
+};

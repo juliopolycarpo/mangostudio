@@ -71,7 +71,7 @@ describe('QA gate comment renderer', () => {
     expect(comment).toContain('<summary>Metric details');
     expect(comment).toContain('Frontend Bundle');
     expect(comment).toContain('Dependencies');
-    expect(comment).toContain('Tests by Lane');
+    expect(comment).toContain('### Tests');
     expect(comment).toContain('Repo Tooling');
     expect(comment).toContain('API/shared branches and statements are source-derived');
     expect(comment).toContain('Full repo check');

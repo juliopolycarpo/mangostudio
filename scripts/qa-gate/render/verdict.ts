@@ -7,7 +7,7 @@ import {
   getBundle,
   getCircularDeps,
   getDuplication,
-  getTestLane,
+  getTestSuite,
   getTooling,
   getTotalLineCoverage,
   sumTsErrors,
@@ -46,15 +46,12 @@ const bundleItem = (base: Metrics | null, head: Metrics | null): string | null =
   return `bundle gzip +${formatBytes(growth)}`;
 };
 
-const testLaneItems = (head: Metrics | null): string[] => {
-  const items: string[] = [];
-  for (const lane of ['unit', 'integration'] as const) {
-    const stats = getTestLane(head, lane);
-    if (stats && stats.exitCode !== 0 && stats.exitCode !== null) {
-      items.push(`${lane} tests failing (exit ${stats.exitCode})`);
-    }
+const testSuiteItem = (head: Metrics | null): string | null => {
+  const stats = getTestSuite(head);
+  if (stats && stats.exitCode !== 0 && stats.exitCode !== null) {
+    return `tests failing (exit ${stats.exitCode})`;
   }
-  return items;
+  return null;
 };
 
 /**
@@ -64,7 +61,8 @@ const testLaneItems = (head: Metrics | null): string[] => {
 export const collectAttentionItems = (base: Metrics | null, head: Metrics | null): string[] => {
   const items: string[] = [];
 
-  items.push(...testLaneItems(head));
+  const suiteItem = testSuiteItem(head);
+  if (suiteItem) items.push(suiteItem);
 
   const tooling = getTooling(head);
   if (tooling && tooling.checkExitCode !== 0) {

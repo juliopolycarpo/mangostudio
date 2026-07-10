@@ -37,10 +37,13 @@ export interface DependencyStats {
   readonly lockedPackages: number;
 }
 
-export type TestLaneName = 'unit' | 'integration';
-
-export interface TestLaneStats {
+/**
+ * Outcome of the single authoritative test pass (`bun run test --coverage`),
+ * which runs every workspace's full suite plus the root scripts tests.
+ */
+export interface TestSuiteStats {
   readonly exitCode: number | null;
+  readonly durationSeconds: number | null;
   readonly passed: number;
   readonly root: number;
   readonly frontend: number;
@@ -56,6 +59,16 @@ export interface ToolingCheckStats {
 /** A successfully collected value, or a captured error message in its place. */
 export type Failable<T> = T | { readonly error: string };
 
+/**
+ * Test-derived metrics emitted by the CI Test job right after its single
+ * `bun run test --coverage` pass (see collect-test-metrics.ts). collect.ts
+ * merges this fragment instead of running a second test pass.
+ */
+export interface TestMetricsFragment {
+  readonly tests: Failable<TestSuiteStats>;
+  readonly coverage: Readonly<Record<WorkspaceName, Failable<CoverageSummary>>>;
+}
+
 export interface Metrics {
   readonly sha: string;
   readonly generatedAt: string;
@@ -66,6 +79,6 @@ export interface Metrics {
   readonly circularDeps: Failable<number>;
   readonly frontendBundle: Failable<BundleStats>;
   readonly dependencies: Failable<DependencyStats>;
-  readonly tests: Readonly<Record<TestLaneName, Failable<TestLaneStats>>>;
+  readonly tests: Failable<TestSuiteStats>;
   readonly tooling: Failable<ToolingCheckStats>;
 }

@@ -10,7 +10,7 @@ import type {
   Failable,
   LocBucket,
   Metrics,
-  TestLaneStats,
+  TestSuiteStats,
   ToolingCheckStats,
 } from '../collect/types';
 import type { CoverageBucket } from '../parse-lcov';
@@ -52,10 +52,8 @@ export const getBundle = (metrics: Metrics | null): BundleStats | null =>
 export const getDependencies = (metrics: Metrics | null): DependencyStats | null =>
   ok(metrics?.dependencies) ? metrics.dependencies : null;
 
-export const getTestLane = (
-  metrics: Metrics | null,
-  lane: 'unit' | 'integration'
-): TestLaneStats | null => (ok(metrics?.tests?.[lane]) ? metrics.tests[lane] : null);
+export const getTestSuite = (metrics: Metrics | null): TestSuiteStats | null =>
+  ok(metrics?.tests) ? metrics.tests : null;
 
 export const getTooling = (metrics: Metrics | null): ToolingCheckStats | null =>
   ok(metrics?.tooling) ? metrics.tooling : null;
