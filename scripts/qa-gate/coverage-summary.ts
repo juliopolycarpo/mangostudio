@@ -1,7 +1,12 @@
 import { join } from 'node:path';
 
 import { ALL_WORKSPACE_NAMES, ROOT_DIR, type WorkspaceName } from '../lib/config';
-import { type CoverageBucket, type CoverageSummary, parseLcovSummary } from './parse-lcov';
+import {
+  type CoverageBucket,
+  type CoverageSummary,
+  coverageBucket,
+  parseLcovSummary,
+} from './parse-lcov';
 import { readSourceBranchCoverageSummary } from './source-branch-coverage';
 import { readSourceStatementCoverageSummary } from './source-statement-coverage';
 
@@ -53,15 +58,11 @@ export const readJsonCoverageSummary = async (absPath: string): Promise<Coverage
   };
 };
 
-const sumBuckets = (buckets: readonly CoverageBucket[]): CoverageBucket => {
-  const total = buckets.reduce((sum, bucket) => sum + bucket.total, 0);
-  const covered = buckets.reduce((sum, bucket) => sum + bucket.covered, 0);
-  return {
-    total,
-    covered,
-    pct: total === 0 ? 100 : Number(((covered / total) * 100).toFixed(2)),
-  };
-};
+const sumBuckets = (buckets: readonly CoverageBucket[]): CoverageBucket =>
+  coverageBucket(
+    buckets.reduce((sum, bucket) => sum + bucket.total, 0),
+    buckets.reduce((sum, bucket) => sum + bucket.covered, 0)
+  );
 
 const sumOptionalBuckets = (
   summaries: readonly CoverageSummary[],
@@ -102,13 +103,16 @@ export const readWorkspaceCoverageSummary = async (
   if (!derivedCoverageFile) return summary;
 
   const lcovPath = join(ROOT_DIR, derivedCoverageFile);
+  // Relative SF: records in Bun's LCOV output are workspace-relative; resolve
+  // them against the workspace root, never the artifacts tree.
+  const workspaceDir = join(ROOT_DIR, 'apps', workspace);
   const [branches, statements] = await Promise.all([
     summary.branches
       ? Promise.resolve(summary.branches)
-      : readSourceBranchCoverageSummary(lcovPath),
+      : readSourceBranchCoverageSummary(lcovPath, workspaceDir),
     summary.statements
       ? Promise.resolve(summary.statements)
-      : readSourceStatementCoverageSummary(lcovPath),
+      : readSourceStatementCoverageSummary(lcovPath, workspaceDir),
   ]);
 
   return { ...summary, branches, statements };

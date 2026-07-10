@@ -1,7 +1,8 @@
 export interface CoverageBucket {
   readonly total: number;
   readonly covered: number;
-  readonly pct: number;
+  /** Percentage covered, or `null` ("n/a") when the denominator is zero. */
+  readonly pct: number | null;
 }
 
 export interface CoverageSummary {
@@ -11,10 +12,14 @@ export interface CoverageSummary {
   readonly branches: CoverageBucket | null;
 }
 
-const bucket = (total: number, covered: number): CoverageBucket => ({
+/**
+ * Build a CoverageBucket from raw totals. A zero denominator is a legitimate
+ * "nothing to cover" state and must render as n/a, never as 100%.
+ */
+export const coverageBucket = (total: number, covered: number): CoverageBucket => ({
   total,
   covered,
-  pct: total === 0 ? 100 : Number(((covered / total) * 100).toFixed(2)),
+  pct: total === 0 ? null : Number(((covered / total) * 100).toFixed(2)),
 });
 
 /**
@@ -51,9 +56,9 @@ export const parseLcovSummary = async (lcovPath: string): Promise<CoverageSummar
   }
 
   return {
-    lines: bucket(linesTotal, linesCovered),
-    functions: bucket(fnTotal, fnCovered),
+    lines: coverageBucket(linesTotal, linesCovered),
+    functions: coverageBucket(fnTotal, fnCovered),
     statements: null,
-    branches: sawBranches ? bucket(brTotal, brCovered) : null,
+    branches: sawBranches ? coverageBucket(brTotal, brCovered) : null,
   };
 };

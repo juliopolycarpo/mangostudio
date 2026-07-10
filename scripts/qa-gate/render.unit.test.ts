@@ -79,6 +79,24 @@ describe('QA gate comment renderer', () => {
     expect(comment).toContain('+2pp');
   });
 
+  it('renders a legitimate zero denominator as n/a (0/0) without a delta', async () => {
+    const naBucket = { total: 0, covered: 0, pct: null };
+    const metricsWithNaBranches = (sha: string): Metrics =>
+      makeMetrics(sha, {
+        coverage: {
+          frontend: makeCoverageSummary(),
+          api: { ...makeCoverageSummary(), branches: naBucket },
+          shared: makeCoverageSummary(),
+        },
+      });
+    const basePath = await writeMetrics(metricsWithNaBranches('0123456789'));
+    const headPath = await writeMetrics(metricsWithNaBranches('abcdef1234'));
+
+    const comment = await render(basePath, headPath);
+
+    expect(comment).toContain('| api | branches | n/a (0/0) | n/a (0/0) | n/a |');
+  });
+
   it('surfaces head regressions in the verdict headline', async () => {
     const basePath = await writeMetrics(makeMetrics('0123456789'));
     const headPath = await writeMetrics(

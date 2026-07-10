@@ -2,8 +2,18 @@
 
 import { ALL_WORKSPACE_NAMES, type WorkspaceName } from '../../lib/config';
 import type { Metrics } from '../collect/types';
+import type { CoverageBucket } from '../parse-lcov';
 import { COVERAGE_KEYS, type CoverageKey, getCoverageBucket } from './access';
 import { formatNumber, formatPct, NA, renderDelta } from './format';
+
+// A bucket with a null pct is a legitimate 0/0 ("n/a (0/0)"), distinct from a
+// missing bucket (bare "n/a"), which means the collector failed or the metric
+// does not exist for that workspace.
+const renderCoverageCell = (bucket: CoverageBucket | null): string => {
+  if (!bucket) return NA;
+  const pct = bucket.pct === null ? NA : formatPct(bucket.pct);
+  return `${pct} (${formatNumber(bucket.covered)}/${formatNumber(bucket.total)})`;
+};
 
 const renderCoverageRow = (
   base: Metrics | null,
@@ -13,12 +23,8 @@ const renderCoverageRow = (
 ): string => {
   const baseBucket = getCoverageBucket(base?.coverage?.[workspace], key);
   const headBucket = getCoverageBucket(head?.coverage?.[workspace], key);
-  const baseCell = baseBucket
-    ? `${formatPct(baseBucket.pct)} (${formatNumber(baseBucket.covered)}/${formatNumber(baseBucket.total)})`
-    : NA;
-  const headCell = headBucket
-    ? `${formatPct(headBucket.pct)} (${formatNumber(headBucket.covered)}/${formatNumber(headBucket.total)})`
-    : NA;
+  const baseCell = renderCoverageCell(baseBucket);
+  const headCell = renderCoverageCell(headBucket);
   const delta = renderDelta(baseBucket?.pct ?? null, headBucket?.pct ?? null, {
     higherIsBetter: true,
     suffix: 'pp',

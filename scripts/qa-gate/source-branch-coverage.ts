@@ -1,12 +1,7 @@
-import { dirname, resolve } from 'node:path';
 import * as ts from '@typescript/typescript6';
 
-import type { CoverageBucket } from './parse-lcov';
-
-export interface LcovFileCoverage {
-  readonly sourcePath: string;
-  readonly lineHits: ReadonlyMap<number, number>;
-}
+import { readCoveredSources } from './lcov-sources';
+import { type CoverageBucket, coverageBucket } from './parse-lcov';
 
 interface BranchTotals {
   readonly total: number;
@@ -18,12 +13,6 @@ const SHORT_CIRCUIT_OPERATORS = new Set<ts.SyntaxKind>([
   ts.SyntaxKind.BarBarToken,
   ts.SyntaxKind.QuestionQuestionToken,
 ]);
-
-const bucket = ({ total, covered }: BranchTotals): CoverageBucket => ({
-  total,
-  covered,
-  pct: total === 0 ? 100 : Number(((covered / total) * 100).toFixed(2)),
-});
 
 const lineOf = (sourceFile: ts.SourceFile, position: number): number => {
   return sourceFile.getLineAndCharacterOfPosition(position).line + 1;
@@ -154,47 +143,16 @@ const countBranches = (
   return totals;
 };
 
-export const parseLcovLineHits = (
-  lcovText: string,
-  baseDir: string
-): readonly LcovFileCoverage[] => {
-  const files: LcovFileCoverage[] = [];
-  let sourcePath: string | null = null;
-  let lineHits = new Map<number, number>();
-
-  const push = (): void => {
-    if (sourcePath) files.push({ sourcePath, lineHits });
-    sourcePath = null;
-    lineHits = new Map<number, number>();
-  };
-
-  for (const rawLine of lcovText.split('\n')) {
-    const line = rawLine.trim();
-    if (line.startsWith('SF:')) sourcePath = resolve(baseDir, line.slice(3));
-    else if (line.startsWith('DA:')) {
-      const [lineNumber, hits] = line.slice(3).split(',');
-      lineHits.set(Number(lineNumber), Number(hits));
-    } else if (line === 'end_of_record') push();
-  }
-  push();
-  return files;
-};
-
 export const readSourceBranchCoverageSummary = async (
   lcovPath: string,
-  baseDir = dirname(dirname(lcovPath))
+  baseDir: string
 ): Promise<CoverageBucket> => {
-  const lcovText = await Bun.file(lcovPath).text();
-  const coverageFiles = parseLcovLineHits(lcovText, baseDir);
+  const sources = await readCoveredSources(lcovPath, baseDir);
   let totals: BranchTotals = { total: 0, covered: 0 };
 
-  for (const { sourcePath, lineHits } of coverageFiles) {
-    const file = Bun.file(sourcePath);
-    if (!(await file.exists())) continue;
-    const sourceText = await file.text();
-    const sourceFile = ts.createSourceFile(sourcePath, sourceText, ts.ScriptTarget.Latest, true);
+  for (const { sourceFile, lineHits } of sources) {
     totals = add(totals, countBranches(sourceFile, lineHits));
   }
 
-  return bucket(totals);
+  return coverageBucket(totals.total, totals.covered);
 };

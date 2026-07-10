@@ -1,19 +1,12 @@
-import { dirname } from 'node:path';
 import * as ts from '@typescript/typescript6';
 
-import type { CoverageBucket } from './parse-lcov';
-import { type LcovFileCoverage, parseLcovLineHits } from './source-branch-coverage';
+import { readCoveredSources } from './lcov-sources';
+import { type CoverageBucket, coverageBucket } from './parse-lcov';
 
 interface StatementTotals {
   readonly total: number;
   readonly covered: number;
 }
-
-const bucket = ({ total, covered }: StatementTotals): CoverageBucket => ({
-  total,
-  covered,
-  pct: total === 0 ? 100 : Number(((covered / total) * 100).toFixed(2)),
-});
 
 const lineOf = (sourceFile: ts.SourceFile, position: number): number =>
   sourceFile.getLineAndCharacterOfPosition(position).line + 1;
@@ -84,19 +77,14 @@ const add = (left: StatementTotals, right: StatementTotals): StatementTotals => 
 
 export const readSourceStatementCoverageSummary = async (
   lcovPath: string,
-  baseDir = dirname(dirname(lcovPath))
+  baseDir: string
 ): Promise<CoverageBucket> => {
-  const lcovText = await Bun.file(lcovPath).text();
-  const coverageFiles: readonly LcovFileCoverage[] = parseLcovLineHits(lcovText, baseDir);
+  const sources = await readCoveredSources(lcovPath, baseDir);
   let totals: StatementTotals = { total: 0, covered: 0 };
 
-  for (const { sourcePath, lineHits } of coverageFiles) {
-    const file = Bun.file(sourcePath);
-    if (!(await file.exists())) continue;
-    const sourceText = await file.text();
-    const sourceFile = ts.createSourceFile(sourcePath, sourceText, ts.ScriptTarget.Latest, true);
+  for (const { sourceFile, lineHits } of sources) {
     totals = add(totals, countStatements(sourceFile, lineHits));
   }
 
-  return bucket(totals);
+  return coverageBucket(totals.total, totals.covered);
 };
