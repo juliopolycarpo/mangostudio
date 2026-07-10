@@ -54,4 +54,18 @@ describe('mergeCoverageSummaries', () => {
     expect(summary.statements).toEqual({ total: 100, covered: 80, pct: 80 });
     expect(summary.branches).toEqual({ total: 20, covered: 10, pct: 50 });
   });
+
+  it('reports a zero denominator as n/a, never as 100%', () => {
+    const empty: CoverageSummary = {
+      lines: { total: 0, covered: 0, pct: null },
+      statements: null,
+      functions: { total: 0, covered: 0, pct: null },
+      branches: { total: 0, covered: 0, pct: null },
+    };
+
+    const summary = mergeCoverageSummaries([empty]);
+
+    expect(summary.lines).toEqual({ total: 0, covered: 0, pct: null });
+    expect(summary.branches).toEqual({ total: 0, covered: 0, pct: null });
+  });
 });

@@ -14,9 +14,8 @@ for (const workspace of coverageWorkspaceNames()) {
         continue;
       }
 
-      process.stdout.write(
-        `| ${label} | ${formatPct(bucket.pct)} | ${bucket.covered}/${bucket.total} |\n`
-      );
+      const pct = bucket.pct === null ? 'n/a' : formatPct(bucket.pct);
+      process.stdout.write(`| ${label} | ${pct} | ${bucket.covered}/${bucket.total} |\n`);
     }
     process.stdout.write('\n');
   } catch (err) {
