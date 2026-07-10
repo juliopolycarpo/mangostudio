@@ -32,10 +32,13 @@ that has drifted.
 3. **Register it** in `apps/api/src/db/migrations/index.ts`: add the import and the
    `'NNN_<snake_description>': <namedExport>` entry, keeping numeric order.
 4. **Update `apps/api/src/db/types.ts`:**
-   - Add the `<Entity>Table` interface (hand-written; nothing is generated).
+   - Add the table interface, named `<TableNamePascal>Table` after the *plural*
+     `snake_case` table (e.g. `chat_todos` → `ChatTodosTable`), hand-written;
+     nothing is generated.
    - Add the table to the `Database` interface (key is the `snake_case` table name).
-   - Derive the Kysely aliases the owning module will use:
-     `export type <Entity>Select = Selectable<<Entity>Table>` and likewise
+   - Derive the Kysely aliases the owning module will use, named from the
+     *singular* entity (e.g. `ChatTodo`, not `ChatTodos`):
+     `export type <Entity>Select = Selectable<<TableNamePascal>Table>` and likewise
      `Insert = Insertable<…>` / `Update = Updateable<…>`. Existing entries only
      declare the aliases actually consumed — match that, don't emit all three
      unconditionally.
@@ -44,9 +47,9 @@ that has drifted.
    - JSON payloads are stored as `text` columns (comment the serialized shape, e.g.
      `// JSON-serialized TodoItem[]`).
    - Timestamps are `integer` epoch-millis columns (`createdAt`, `updatedAt`).
-6. **Validate.** Run `bun run check`, then the API tests (`bun run test` in
-   `apps/api/`) — the integration harness applies every registered migration to a
-   fresh database, so a bad migration fails there.
+6. **Validate.** Run `bun run check`, then `bun run test` from the repository root
+   — the API integration harness applies every registered migration to a fresh
+   database, so a bad migration fails there.
 
 ## Scope note
 
