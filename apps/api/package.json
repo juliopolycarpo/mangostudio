@@ -34,7 +34,7 @@
     "@modelcontextprotocol/sdk": "^1.29.0",
     "ai": "^7.0.19",
     "better-auth": "^1.6.11",
-    "elysia": "^1.4.28",
+    "elysia": "^1.4.29",
     "file-type": "^22.0.1",
     "kysely": "^0.29.2",
     "kysely-bun-sqlite": "^0.4.0",
