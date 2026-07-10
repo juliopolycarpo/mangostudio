@@ -80,6 +80,7 @@ describe('labeler coverage', () => {
     expect(toolingSection).toContain('- ".gitmessage"');
     expect(toolingSection).toContain('- ".gitignore"');
     expect(toolingSection).toContain('- ".claude/**"');
+    expect(toolingSection).toContain('- ".agents/skills/**"');
 
     const buildSection = extractLabelSection(labeler, '"area: build":', '"area: docs":');
     expect(buildSection).not.toContain('biome.json');
