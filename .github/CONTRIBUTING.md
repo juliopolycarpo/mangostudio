@@ -2,6 +2,10 @@
 
 Thank you for your interest in contributing to MangoStudio!
 
+## Code of Conduct
+
+This project follows the [Contributor Covenant Code of Conduct](CODE_OF_CONDUCT.md). By participating, you are expected to uphold this code. Please report unacceptable behavior to `julio@polycarpo.dev`.
+
 ## Prerequisites
 
 - [Bun](https://bun.sh/) v1.3.14 or later
