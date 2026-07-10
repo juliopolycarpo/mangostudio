@@ -81,20 +81,19 @@ export const readCoveredSources = async (
   const lcovText = await Bun.file(lcovPath).text();
   const { files, recordCount, malformedRecords } = parseLcovLineHits(lcovText, baseDir);
 
-  const missing: string[] = [];
-  const sources: CoveredSource[] = [];
-  for (const { sourcePath, lineHits } of files) {
-    const file = Bun.file(sourcePath);
-    if (!(await file.exists())) {
-      missing.push(sourcePath);
-      continue;
-    }
-    const sourceText = await file.text();
-    sources.push({
-      sourceFile: ts.createSourceFile(sourcePath, sourceText, ts.ScriptTarget.Latest, true),
-      lineHits,
-    });
-  }
+  // Load every referenced source concurrently; a workspace LCOV can list
+  // hundreds of files, and reading them one await at a time serializes the I/O.
+  const loaded = await Promise.all(
+    files.map(async ({ sourcePath, lineHits }) => {
+      const file = Bun.file(sourcePath);
+      if (!(await file.exists())) return { sourcePath, source: null } as const;
+      const sourceText = await file.text();
+      const sourceFile = ts.createSourceFile(sourcePath, sourceText, ts.ScriptTarget.Latest, true);
+      return { sourcePath, source: { sourceFile, lineHits } } as const;
+    })
+  );
+  const missing = loaded.filter((entry) => !entry.source).map((entry) => entry.sourcePath);
+  const sources = loaded.flatMap((entry) => (entry.source ? [entry.source] : []));
 
   if (missing.length > 0) {
     throw new Error(
