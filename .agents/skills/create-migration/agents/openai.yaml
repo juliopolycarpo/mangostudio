@@ -1,0 +1,7 @@
+interface:
+  display_name: "Create Migration"
+  short_description: "Scaffold a repository Kysely migration"
+  default_prompt: "Use $create-migration to scaffold a new Kysely migration."
+
+policy:
+  allow_implicit_invocation: false

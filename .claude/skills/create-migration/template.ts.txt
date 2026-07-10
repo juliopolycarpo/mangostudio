@@ -1,0 +1,36 @@
+import type { Migration } from 'kysely/migration';
+
+// File: apps/api/src/db/migrations/NNN_<snake_description>.ts
+// Export name: camelCase of the description. Register in migrations/index.ts.
+export const camelCaseDescription: Migration = {
+  async up(db): Promise<void> {
+    await db.schema
+      .createTable('snake_case_table')
+      .ifNotExists()
+      // Columns are camelCase. Choose FK onDelete behavior deliberately.
+      .addColumn('id', 'text', (col) => col.primaryKey())
+      .addColumn('parentId', 'text', (col) =>
+        col.notNull().references('parent_table.id').onDelete('cascade')
+      )
+      .addColumn('userId', 'text', (col) => col.notNull())
+      // JSON payloads are stored as text columns.
+      .addColumn('payloadJson', 'text', (col) => col.notNull())
+      // Timestamps are integer epoch-millis columns.
+      .addColumn('createdAt', 'integer', (col) => col.notNull())
+      .addColumn('updatedAt', 'integer', (col) => col.notNull())
+      .execute();
+
+    await db.schema
+      .createIndex('idx_snake_case_table_user')
+      .ifNotExists()
+      .on('snake_case_table')
+      .column('userId')
+      .execute();
+  },
+
+  async down(db): Promise<void> {
+    // Reverse of up, in reverse order.
+    await db.schema.dropIndex('idx_snake_case_table_user').ifExists().execute();
+    await db.schema.dropTable('snake_case_table').ifExists().execute();
+  },
+};
