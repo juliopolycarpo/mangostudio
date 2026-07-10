@@ -109,6 +109,9 @@
           - ".gitattributes"
           - ".gitmessage"
           - ".gitignore"
+          # Repo-shipped coding-agent configuration (skills, hooks, settings).
+          - ".claude/**"
+          - ".agents/skills/**"
 
 "area: db":
   - changed-files:

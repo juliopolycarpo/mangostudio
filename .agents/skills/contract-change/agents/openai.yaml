@@ -1,0 +1,4 @@
+interface:
+  display_name: "Contract Change"
+  short_description: "Update public API contracts safely"
+  default_prompt: "Use $contract-change to safely update this public API contract."

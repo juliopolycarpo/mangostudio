@@ -1,6 +1,19 @@
 {
   "$schema": "https://turborepo.dev/schema.json",
   "ui": "tui",
+  // Env vars read by the root build/release scripts (scripts/build.ts,
+  // scripts/test-build.ts, scripts/release/*, scripts/lib/release-version.ts),
+  // which run via `bun run` outside turbo tasks. Declared as pass-through so
+  // biome's noUndeclaredEnvVars accepts them without affecting task cache keys.
+  "globalPassThroughEnv": [
+    "API_PORT",
+    "DRY_RUN",
+    "GITHUB_SHA",
+    "ONLY_PLATFORM",
+    "PLATFORM",
+    "SKIP_BUILD",
+    "VERSION"
+  ],
   "tasks": {
     "dev": {
       "cache": false,
