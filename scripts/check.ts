@@ -1,3 +1,4 @@
+import { createActionsLintTasks, touchesActionsLintSurface } from './lib/actions-lint/run';
 import { createTurboCheckCommand, createWorkspaceDprintCommand } from './lib/check';
 import {
   ROOT_BIOME_PATHS,
@@ -27,7 +28,8 @@ import {
 function printHelp(): never {
   console.log(`Usage: bun run check [workspace flags] [mode flags]
 
-Runs Biome, dprint, madge circular checks, and tsc typechecks in parallel.
+Runs Biome, dprint, madge circular checks, tsc typechecks, and workflow
+static analysis (actionlint, zizmor, ShellCheck) in parallel.
 Default workspace selection: --all
 
 Workspace flags:
@@ -111,6 +113,10 @@ header('Check');
 
 let effectiveWorkspaces = workspaces;
 let effectiveIncludeRoot = includeRoot;
+// Full runs lint workflows whenever root checks run; scoped runs only when a
+// staged/changed file touches the analyzed surface — but then always
+// repository-wide, since workflow findings cross file boundaries.
+let includeActionsLint = includeRoot;
 
 if (flags['--staged']) {
   const files = getStagedFiles();
@@ -121,6 +127,7 @@ if (flags['--staged']) {
   const mapped = mapFilesToWorkspaces(files);
   effectiveWorkspaces = mapped.workspaces;
   effectiveIncludeRoot = mapped.includeRoot;
+  includeActionsLint = touchesActionsLintSurface(files);
 } else if (flags['--changed']) {
   const base = values['--base'] ?? resolveDefaultBase();
   const files = getChangedFiles(base);
@@ -131,6 +138,7 @@ if (flags['--staged']) {
   const mapped = mapFilesToWorkspaces(files);
   effectiveWorkspaces = mapped.workspaces;
   effectiveIncludeRoot = mapped.includeRoot;
+  includeActionsLint = touchesActionsLintSurface(files);
 }
 
 const tasks: Array<() => Promise<RunResult>> = [];
@@ -143,6 +151,11 @@ if (effectiveWorkspaces.length > 0) {
 if (effectiveIncludeRoot) {
   info('\nRoot');
   tasks.push(...createRootTasks(flags['--skip-format']));
+}
+
+if (includeActionsLint) {
+  info('\nWorkflow static analysis');
+  tasks.push(...createActionsLintTasks());
 }
 
 if (tasks.length === 0) {
