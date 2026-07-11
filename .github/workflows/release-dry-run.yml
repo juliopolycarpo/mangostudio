@@ -82,6 +82,8 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - uses: ./.github/actions/setup-mango
+        with:
+          cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
       - name: Verify committed versions are in lockstep
         run: bun run check:versions

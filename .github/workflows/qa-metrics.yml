@@ -18,17 +18,17 @@ jobs:
     name: Collect
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    env:
-      CACHE_VERSION: v1
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - uses: ./.github/actions/setup-mango
+        with:
+          cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
       - uses: ./.github/actions/cache-turbo
         with:
           scope: qa-metrics
-          cache-version: ${{ env.CACHE_VERSION }}
+          cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
       - name: Download test metrics fragment
         # continue-on-error: without the fragment the collector still emits an

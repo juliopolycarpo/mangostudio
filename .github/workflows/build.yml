@@ -11,25 +11,23 @@ jobs:
     name: Build (frontend + API)
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    env:
-      CACHE_VERSION: v1
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - uses: ./.github/actions/setup-mango
+        with:
+          cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
       - uses: ./.github/actions/cache-turbo
         with:
           scope: build
-          cache-version: ${{ env.CACHE_VERSION }}
+          cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
-      - name: Restore Vite cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - name: Restore Vite optimizer cache
+        uses: ./.github/actions/cache-vite
         with:
-          path: apps/frontend/node_modules/.vite
-          key: ${{ runner.os }}-${{ env.CACHE_VERSION }}-vite-${{ hashFiles('bun.lock', 'apps/frontend/vite.config.ts') }}
-          restore-keys: |
-            ${{ runner.os }}-${{ env.CACHE_VERSION }}-vite-
+          scope: build
+          cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
       - name: Build frontend and API
         run: bun run build --all

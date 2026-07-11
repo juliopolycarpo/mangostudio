@@ -1,0 +1,46 @@
+name: Cache workflow lint tools
+description: Restore checksum-pinned workflow analysis binaries for the check job.
+inputs:
+  cache-epoch:
+    description: Repository-wide cache epoch used for emergency invalidation.
+    required: true
+outputs:
+  cache-hit:
+    description: "'true' when the primary lint-tools cache key matched"
+    value: ${{ steps.cache.outputs.cache-hit }}
+  primary-key:
+    description: Primary cache key used by this run.
+    value: ${{ steps.keys.outputs.primary-key }}
+  restored-prefix:
+    description: Trusted main-cache prefix considered during restore.
+    value: ${{ steps.keys.outputs.restore-prefix }}
+runs:
+  using: composite
+  steps:
+    - id: keys
+      name: Resolve workflow lint tools cache keys
+      shell: bash
+      env:
+        CACHE_EPOCH: ${{ inputs.cache-epoch }}
+        MANIFEST_HASH: ${{ hashFiles('scripts/lib/actions-lint/manifest.ts') }}
+        WRITE_SCOPE: ${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.event_name == 'push' && github.ref == 'refs/heads/main' && 'main' || format('run-{0}', github.run_id) }}
+      run: |
+        prefix="${RUNNER_OS}-${RUNNER_ARCH}-${CACHE_EPOCH}-lint-tools"
+        echo "primary-key=${prefix}-${WRITE_SCOPE}-${MANIFEST_HASH}" >> "$GITHUB_OUTPUT"
+        echo "restore-key=${prefix}-main-${MANIFEST_HASH}" >> "$GITHUB_OUTPUT"
+        echo "restore-prefix=${prefix}-main-" >> "$GITHUB_OUTPUT"
+
+    - id: cache
+      name: Restore workflow lint tools
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: .mango/artifacts/tools/
+        key: ${{ steps.keys.outputs.primary-key }}
+        restore-keys: |
+          ${{ steps.keys.outputs.restore-key }}
+
+    - name: Summarize workflow lint tools cache
+      shell: bash
+      run: >
+        echo "- Workflow lint tools: hit=\`${{ steps.cache.outputs.cache-hit }}\`, key=\`${{ steps.keys.outputs.primary-key }}\`, restore-prefix=\`${{ steps.keys.outputs.restore-prefix }}\`"
+        >> "$GITHUB_STEP_SUMMARY"
