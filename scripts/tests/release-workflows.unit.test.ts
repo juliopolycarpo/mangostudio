@@ -9,6 +9,7 @@ import {
   requiredEnvForReleaseScriptInvocation,
 } from '../release/env-contract';
 import { readText } from './support/read-text';
+import { extractJobBlock, extractJobBlocks } from './support/workflow-blocks';
 
 interface WorkflowRunStep {
   readonly workflowPath: string;
@@ -18,33 +19,10 @@ interface WorkflowRunStep {
   readonly env: ReadonlySet<string>;
 }
 
-// Isolate a single top-level job's block (up to the next `  <job>:` header or
-// EOF) so an assertion about one job cannot be masked or satisfied by a later
-// job that happens to share the same content. Returns '' when the job is absent.
-function extractJobBlock(workflow: string, job: string): string {
-  return new RegExp(`\\n  ${job}:\\n([\\s\\S]*?)(?=\\n  \\S|$)`).exec(workflow)?.[1] ?? '';
-}
-
 function expectJobNeeds(workflow: string, job: string, needs: string): void {
   const block = extractJobBlock(workflow, job);
   expect(block, `job "${job}" not found in workflow`).not.toBe('');
   expect(block).toMatch(new RegExp(`\\n    needs: ${needs}(?:\\n|$)`));
-}
-
-function extractJobsBlock(workflow: string): string {
-  return /\njobs:\n([\s\S]*?)(?=\n\S|$)/.exec(workflow)?.[1] ?? '';
-}
-
-function extractJobBlocks(workflow: string): Array<{ job: string; block: string }> {
-  const jobsBlock = extractJobsBlock(workflow);
-  const headers = [...jobsBlock.matchAll(/^ {2}([\w-]+):$/gm)];
-  return headers.map((header, index) => {
-    const next = headers[index + 1];
-    return {
-      job: header[1],
-      block: jobsBlock.slice(header.index ?? 0, next?.index),
-    };
-  });
 }
 
 function extractWorkflowRunSteps(workflowPath: string): WorkflowRunStep[] {
@@ -237,10 +215,27 @@ describe('release workflow binary gate', () => {
     );
   });
 
-  test('release dry run also triggers for canary workflow changes', () => {
+  test('release dry run relevance pattern mirrors the release import graph', () => {
     const workflow = readText('.github/workflows/release-dry-run.yml');
+    const source = /release_pattern='([^']+)'/.exec(workflow)?.[1];
+    expect(source, 'release_pattern not found in the changes job').toBeDefined();
+    const pattern = new RegExp(source as string);
 
-    expect(workflow).toContain('- ".github/workflows/canary.yml"');
+    // Everything the release actually imports marks the dry run relevant…
+    expect('.github/workflows/release.yml').toMatch(pattern);
+    expect('.github/workflows/release-dry-run.yml').toMatch(pattern);
+    expect('.github/workflows/canary.yml').toMatch(pattern);
+    expect('scripts/release/pack-npm.ts').toMatch(pattern);
+    expect('scripts/install/install.sh').toMatch(pattern);
+    expect('scripts/build.ts').toMatch(pattern);
+    expect('scripts/lib/release-assets.ts').toMatch(pattern);
+    expect('packages/cli/package.json').toMatch(pattern);
+    expect('packages/cargo-shim/src/main.rs').toMatch(pattern);
+    expect('Dockerfile').toMatch(pattern);
+
+    // …while unrelated app code does not.
+    expect('apps/api/src/app.ts').not.toMatch(pattern);
+    expect('scripts/check.ts').not.toMatch(pattern);
   });
 
   test('release dry run derives placeholder checksums from release targets', () => {
@@ -267,13 +262,15 @@ describe('release workflow binary gate', () => {
     );
   });
 
-  test('release dry run path filter does not over-promise Alpine Docker coverage', () => {
+  test('release dry run relevance pattern does not over-promise Alpine Docker coverage', () => {
     const workflow = readText('.github/workflows/release-dry-run.yml');
+    const source = /release_pattern='([^']+)'/.exec(workflow)?.[1];
+    expect(source, 'release_pattern not found in the changes job').toBeDefined();
 
-    // The dry-run only builds the Bookworm image, so its paths: filter must not
-    // claim to exercise Dockerfile.alpine; ci.yml's smoke job covers that.
-    expect(workflow).toContain('- "Dockerfile"');
-    expect(workflow).not.toContain('- "Dockerfile.alpine"');
+    // The dry-run only builds the Bookworm image, so its relevance pattern
+    // must not claim to exercise Dockerfile.alpine; ci.yml's smoke job covers
+    // that on every PR.
+    expect('Dockerfile.alpine').not.toMatch(new RegExp(source as string));
   });
 
   test('changelog lands pre-tag: no write-back job, gated by the build lockstep check', () => {
@@ -397,13 +394,16 @@ describe('release workflow binary gate', () => {
     expect(summaryBlock).toContain(`cargo-publish=${cargoResult}`);
   });
 
-  test('ci gates the canary publish on every job passing and a push to main', () => {
+  test('ci gates the canary publish on the aggregate gate and a push to main', () => {
     const workflow = readText('.github/workflows/ci.yml');
     const canaryBlock = extractJobBlock(workflow, 'canary');
     const mainPushIf = '$' + "{{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}";
     expect(canaryBlock, 'canary job not found in ci.yml').not.toBe('');
 
-    expectJobNeeds(workflow, 'canary', String.raw`\[check, test, build, browser-smoke, smoke\]`);
+    // The gate is the single definition of a green commit (see
+    // ci-gate.unit.test.ts for its completeness); canary must not duplicate
+    // the mandatory job list.
+    expectJobNeeds(workflow, 'canary', String.raw`\[gate\]`);
     expect(canaryBlock).toContain(`if: ${mainPushIf}`);
     expect(canaryBlock).toContain('uses: ./.github/workflows/canary.yml');
     expect(canaryBlock).toContain('secrets: inherit');

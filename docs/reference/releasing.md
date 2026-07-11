@@ -106,10 +106,12 @@ commit summary and QA metrics comparison.
 
 ## Testing the release pipeline
 
-`.github/workflows/release-dry-run.yml` runs automatically for PRs that touch
-release workflows, release scripts, install scripts, binary build tooling, CLI
-packages, or Dockerfiles. It also runs weekly as a drift check and can be started
-manually with `workflow_dispatch`. (This is read-only and unrelated to the
+`.github/workflows/release-dry-run.yml` triggers on every PR, but a cheap
+`changes` job runs the actual dry-run lanes only for PRs that touch release
+workflows, release scripts, install scripts, binary build tooling, CLI packages,
+or Dockerfiles; its always-reporting `Release Dry Run / Gate` check makes the
+workflow safe to require in branch protection. It also runs weekly as a drift
+check and can be started manually with `workflow_dispatch`. (This is read-only and unrelated to the
 [Canary channel](#canary-channel), which actually publishes from `main`.)
 
 The dry-run is read-only: it verifies lockstep versions, builds one Linux binary
@@ -128,9 +130,11 @@ Those steps stay in `.github/workflows/release.yml`.
 ## Canary channel
 
 Every commit that lands green on `main` is published as a **canary**. The canary
-job in `.github/workflows/ci.yml` is gated on every other CI job passing and on a
-push to `main`, so the commit that just went green is the canary source — there is
-no separate trigger or SHA re-resolution. It calls the reusable
+job in `.github/workflows/ci.yml` is gated on the aggregate `CI / Gate` job — the
+single definition of a green commit, which fails on any mandatory job failure,
+cancellation, or unexpected skip — and on a push to `main`, so the commit that
+just went green is the canary source — there is no separate trigger or SHA
+re-resolution. It calls the reusable
 `.github/workflows/canary.yml`, whose jobs share the build and fan out per channel.
 
 npm uses `<root-version>-canary.<sha7>` (e.g. `0.1.0-canary.1234abc`), where
@@ -411,8 +415,10 @@ Design notes:
   deliver the Cursor SDK.
 - musl is detected at compile time (`target_env = "musl"`); Alpine users should
   prefer the shell installer, which detects musl at runtime.
-- The crate's CI lane (`.github/workflows/cargo-shim.yml`) is path-filtered to
-  `packages/cargo-shim/**`, so Bun-only changes never wait on a Rust toolchain.
+- The crate's CI lane (`.github/workflows/cargo-shim.yml`) triggers on every PR,
+  but a cheap `changes` job skips the Rust toolchain unless
+  `packages/cargo-shim/**` changed; the always-reporting `Cargo Shim / Gate`
+  check makes the lane safe to require in branch protection.
 - The `cargo-publish` release job checks crates.io before publishing and
   re-checks between retries, so workflow re-runs converge instead of failing on
   "version already exists".

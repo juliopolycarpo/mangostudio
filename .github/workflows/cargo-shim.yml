@@ -1,15 +1,16 @@
 name: Cargo Shim
 
 # Lints, tests, and builds the crates.io launcher crate. This is the only Rust
-# in the repository, so the lane is path-filtered: Bun-only changes never wait
-# on a Rust toolchain.
+# in the repository, so the heavy lane only runs when Rust paths change — but
+# the workflow itself triggers on every PR: path detection happens in the
+# cheap `changes` job so the `Cargo Shim / Gate` check below always reports
+# and is safe to require in branch protection (a path-filtered workflow that
+# never starts leaves a required check pending forever). Pushes to main keep
+# the path filter; required checks only apply to PRs.
 
 on:
   pull_request:
     branches: [main]
-    paths:
-      - "packages/cargo-shim/**"
-      - ".github/workflows/cargo-shim.yml"
   push:
     branches: [main]
     paths:
@@ -21,12 +22,44 @@ permissions:
   contents: read
 
 concurrency:
-  group: cargo-shim-${{ github.head_ref || github.ref }}
+  group: cargo-shim-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
+  changes:
+    name: Detect Rust changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      cargo_shim: ${{ steps.changed.outputs.cargo_shim }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+
+      - id: changed
+        name: Check cargo shim paths
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          EVENT_NAME: ${{ github.event_name }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [ "$EVENT_NAME" != "pull_request" ]; then
+            echo "cargo_shim=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          git diff --name-only "$BASE_SHA" "$HEAD_SHA" > "$RUNNER_TEMP/changed-files"
+          if grep -Eq '^(packages/cargo-shim/|\.github/workflows/cargo-shim\.yml$)' "$RUNNER_TEMP/changed-files"; then
+            echo "cargo_shim=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "cargo_shim=false" >> "$GITHUB_OUTPUT"
+          fi
+
   cargo-shim:
     name: fmt, clippy, test, build
+    needs: [changes]
+    if: needs.changes.outputs.cargo_shim == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     defaults:
@@ -47,3 +80,27 @@ jobs:
       - run: cargo test --locked
 
       - run: cargo build --locked
+
+  gate:
+    # Always-reporting aggregate ("Cargo Shim / Gate"): accepts the Rust lane
+    # as skipped only when the `changes` job proved no Rust path changed.
+    name: Gate
+    needs: [changes, cargo-shim]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+
+      - name: Evaluate mandatory job results
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+          ALLOWED_SKIPS: ${{ needs.changes.outputs.cargo_shim == 'false' && 'cargo-shim' || '' }}
+        # Dependency-free script; runs without `bun install`.
+        run: bun ./scripts/ci/evaluate-gate.ts

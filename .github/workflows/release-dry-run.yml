@@ -1,26 +1,13 @@
 name: Release Dry Run
 
+# Triggers on every PR: relevance detection happens in the cheap `changes` job
+# (not a `paths:` filter) so the `Release Dry Run / Gate` check below always
+# reports and is safe to require in branch protection — a path-filtered
+# workflow that never starts leaves a required check pending forever.
+
 on:
   pull_request:
     branches: [main]
-    paths:
-      # Mirror the release import graph; prefer over-triggering. Release-script
-      # logic is also unit-tested via the `test` workflow.
-      - ".github/workflows/release*.yml"
-      - ".github/workflows/canary.yml"
-      - "scripts/release/**"
-      - "scripts/install/**"
-      - "scripts/build.ts"
-      - "scripts/lib/**"
-      - "packages/cli/**"
-      - "packages/cargo-shim/**"
-      # The dry-run builds the default Bookworm image from the staged release
-      # assets (see the Docker steps in dry-run-linux). Dockerfile.alpine is
-      # intentionally absent here: ci.yml's always-on `smoke` job builds both
-      # Dockerfiles from build output on every PR, so the Alpine image is already
-      # exercised pre-merge. This workflow's unique Docker value is the
-      # release-asset staging path, which the Bookworm build covers.
-      - "Dockerfile"
   workflow_dispatch:
   schedule:
     - cron: "0 7 * * 1"
@@ -29,7 +16,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: release-dry-run-${{ github.head_ref || github.ref }}
+  group: release-dry-run-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 env:
@@ -41,6 +28,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
+      release: ${{ steps.changed.outputs.release }}
       cargo_shim: ${{ steps.changed.outputs.cargo_shim }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -48,18 +36,36 @@ jobs:
           fetch-depth: 0
 
       - id: changed
-        name: Check cargo shim paths
+        name: Check release and cargo shim paths
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           EVENT_NAME: ${{ github.event_name }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        # The release pattern mirrors the release import graph; prefer
+        # over-triggering. Release-script logic is also unit-tested via the
+        # `test` workflow. `Dockerfile$` is anchored so Dockerfile.alpine does
+        # not match: the dry-run builds only the default Bookworm image from
+        # the staged release assets (see the Docker steps in dry-run-linux).
+        # ci.yml's always-on `smoke` job builds both Dockerfiles from build
+        # output on every PR, so the Alpine image is already exercised
+        # pre-merge; this workflow's unique Docker value is the release-asset
+        # staging path, which the Bookworm build covers.
         run: |
           if [ "$EVENT_NAME" != "pull_request" ]; then
+            echo "release=true" >> "$GITHUB_OUTPUT"
             echo "cargo_shim=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
           git diff --name-only "$BASE_SHA" "$HEAD_SHA" > "$RUNNER_TEMP/changed-files"
+
+          release_pattern='^(\.github/workflows/release[^/]*\.yml$|\.github/workflows/canary\.yml$|scripts/release/|scripts/install/|scripts/build\.ts$|scripts/lib/|packages/cli/|packages/cargo-shim/|Dockerfile$)'
+          if grep -Eq "$release_pattern" "$RUNNER_TEMP/changed-files"; then
+            echo "release=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "release=false" >> "$GITHUB_OUTPUT"
+          fi
+
           if grep -q '^packages/cargo-shim/' "$RUNNER_TEMP/changed-files"; then
             echo "cargo_shim=true" >> "$GITHUB_OUTPUT"
           else
@@ -68,6 +74,8 @@ jobs:
 
   dry-run-linux:
     name: Linux release dry run
+    needs: [changes]
+    if: needs.changes.outputs.release == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -173,7 +181,7 @@ jobs:
 
   dry-run-cargo:
     name: Cargo publish dry run
-    needs: changes
+    needs: [changes]
     if: needs.changes.outputs.cargo_shim == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -188,3 +196,28 @@ jobs:
           toolchain: 1.96.0
 
       - run: cargo publish --dry-run --locked
+
+  gate:
+    # Always-reporting aggregate ("Release Dry Run / Gate"): each dry-run lane
+    # is accepted as skipped only when the `changes` job proved its relevance
+    # predicate false for this run.
+    name: Gate
+    needs: [changes, dry-run-linux, dry-run-cargo]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+
+      - name: Evaluate mandatory job results
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+          ALLOWED_SKIPS: ${{ format('{0} {1}', needs.changes.outputs.release == 'false' && 'dry-run-linux' || '', needs.changes.outputs.cargo_shim == 'false' && 'dry-run-cargo' || '') }}
+        # Dependency-free script; runs without `bun install`.
+        run: bun ./scripts/ci/evaluate-gate.ts
