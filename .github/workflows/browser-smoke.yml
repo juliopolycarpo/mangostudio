@@ -19,6 +19,12 @@ on:
 permissions:
   contents: read
 
+# ci.yml's caller-level group already supersedes per-PR runs; this group covers
+# direct workflow_dispatch runs. Mirrors ci.yml: main is never cancelled.
+concurrency:
+  group: browser-smoke-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 jobs:
   browser-smoke:
     name: Chromium auth flow

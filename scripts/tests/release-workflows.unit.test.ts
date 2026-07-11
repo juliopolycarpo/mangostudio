@@ -162,7 +162,9 @@ describe('release workflow binary gate', () => {
     expect(workflow).toContain('binary_platform: linux-arm64');
     expect(workflow).toContain('binary_platform: linux-x64-musl');
     expect(workflow).toContain('binary_platform: linux-arm64-musl');
-    expect(workflow).toContain(`--platform linux/${dockerArchExpression}`);
+    const dockerArchVar = '$' + '{DOCKER_ARCH}';
+    expect(workflow).toContain(`DOCKER_ARCH: ${dockerArchExpression}`);
+    expect(workflow).toContain(`--platform "linux/${dockerArchVar}"`);
     expect(workflow).not.toContain('docker/setup-qemu-action');
   });
 
@@ -386,12 +388,22 @@ describe('release workflow binary gate', () => {
 
     expect(summaryBlock).toContain(`if: ${alwaysExpression}`);
     expect(summaryBlock).toContain('bash scripts/release/publish-summary.sh');
-    // The shared build gate is reported too: when it fails every channel goes
-    // "skipped", so without this row the summary would hide the real failure.
-    expect(summaryBlock).toContain(`build=${buildResult}`);
-    expect(summaryBlock).toContain(`docker=${dockerResult}`);
-    expect(summaryBlock).toContain(`npm-publish=${npmResult}`);
-    expect(summaryBlock).toContain(`cargo-publish=${cargoResult}`);
+    // Job results reach the shell through env indirection (zizmor
+    // template-injection). The shared build gate is reported too: when it
+    // fails every channel goes "skipped", so without this row the summary
+    // would hide the real failure.
+    expect(summaryBlock).toContain(`BUILD_RESULT: ${buildResult}`);
+    expect(summaryBlock).toContain(`DOCKER_RESULT: ${dockerResult}`);
+    expect(summaryBlock).toContain(`NPM_PUBLISH_RESULT: ${npmResult}`);
+    expect(summaryBlock).toContain(`CARGO_PUBLISH_RESULT: ${cargoResult}`);
+    const buildResultVar = '$' + '{BUILD_RESULT}';
+    const dockerResultVar = '$' + '{DOCKER_RESULT}';
+    const npmResultVar = '$' + '{NPM_PUBLISH_RESULT}';
+    const cargoResultVar = '$' + '{CARGO_PUBLISH_RESULT}';
+    expect(summaryBlock).toContain(`"build=${buildResultVar}"`);
+    expect(summaryBlock).toContain(`"docker=${dockerResultVar}"`);
+    expect(summaryBlock).toContain(`"npm-publish=${npmResultVar}"`);
+    expect(summaryBlock).toContain(`"cargo-publish=${cargoResultVar}"`);
   });
 
   test('ci gates the canary publish on the aggregate gate and a push to main', () => {
@@ -406,7 +418,10 @@ describe('release workflow binary gate', () => {
     expectJobNeeds(workflow, 'canary', String.raw`\[gate\]`);
     expect(canaryBlock).toContain(`if: ${mainPushIf}`);
     expect(canaryBlock).toContain('uses: ./.github/workflows/canary.yml');
-    expect(canaryBlock).toContain('secrets: inherit');
+    // Explicit secret pass-through: the called workflow sees only what it
+    // declares, never the caller's full secret set (zizmor secrets-inherit).
+    expect(canaryBlock).not.toContain('secrets: inherit');
+    expect(canaryBlock).toContain(`NPM_TOKEN: ${'$'}{{ secrets.NPM_TOKEN }}`);
 
     // The calling job's permissions are the ceiling for the reusable workflow,
     // since ci.yml's top-level grant is read-only.
@@ -471,11 +486,18 @@ describe('release workflow binary gate', () => {
 
     expect(summaryBlock).toContain(`if: ${alwaysExpression}`);
     expect(summaryBlock).toContain('bash scripts/release/publish-summary.sh');
-    // Surface the shared build gate so its failure is not masked by the
-    // channels all showing "skipped".
-    expect(summaryBlock).toContain(`build=${buildResult}`);
-    expect(summaryBlock).toContain(`npm-canary=${npmResult}`);
-    expect(summaryBlock).toContain(`github-release-canary=${githubReleaseResult}`);
+    // Job results reach the shell through env indirection (zizmor
+    // template-injection). Surface the shared build gate so its failure is
+    // not masked by the channels all showing "skipped".
+    expect(summaryBlock).toContain(`BUILD_RESULT: ${buildResult}`);
+    expect(summaryBlock).toContain(`NPM_RESULT: ${npmResult}`);
+    expect(summaryBlock).toContain(`RELEASE_RESULT: ${githubReleaseResult}`);
+    const buildResultVar = '$' + '{BUILD_RESULT}';
+    const npmResultVar = '$' + '{NPM_RESULT}';
+    const releaseResultVar = '$' + '{RELEASE_RESULT}';
+    expect(summaryBlock).toContain(`"build=${buildResultVar}"`);
+    expect(summaryBlock).toContain(`"npm-canary=${npmResultVar}"`);
+    expect(summaryBlock).toContain(`"github-release-canary=${releaseResultVar}"`);
     expect(summaryBlock).not.toContain('docker-canary=');
     expect(summaryBlock).not.toContain('crates-canary=');
   });

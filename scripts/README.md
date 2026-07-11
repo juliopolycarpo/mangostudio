@@ -10,7 +10,7 @@ script (`bun run <name>`).
 scripts/
 ├── dev.ts            Start dev servers (bun run dev)
 ├── build.ts          Build workspaces or standalone binaries (bun run build)
-├── check.ts          Biome + dprint + madge + tsc, in parallel (bun run check)
+├── check.ts          Biome + dprint + madge + tsc + workflow static analysis, in parallel (bun run check)
 ├── check-versions.ts Assert root + workspace + cargo-shim versions agree (bun run check:versions)
 ├── fix.ts            Apply Biome + dprint fixes (bun run fix)
 ├── test.ts           Run unit/integration/e2e/coverage lanes (bun run test)
@@ -43,6 +43,37 @@ importing the specific module in new code:
 | `npm-pack.ts`        | npm distribution manifest builders                              |
 | `release-version.ts` | Canonical release version resolver + lockstep consistency check |
 | `prepare-release.ts` | Two-phase lockstep version bump for release preparation         |
+| `actions-lint/`      | Pinned workflow static analysis: manifest, bootstrap, tasks     |
+
+## actions-lint/ — workflow static analysis
+
+`bun run check` runs three pinned binaries against the repository's automation
+surface, as does CI's Check job (same script):
+
+- **actionlint** over `.github/workflows/**`, with ShellCheck applied to
+  embedded `run:` scripts;
+- **zizmor** over workflows + composite actions in blocking
+  `--persona pedantic --min-confidence high` mode (offline audits only);
+- **ShellCheck** over every tracked `*.sh` file.
+
+`lib/actions-lint/manifest.ts` pins each tool's version, per-platform release
+asset, and SHA-256. `lib/actions-lint/bootstrap.ts` downloads the archive,
+verifies the checksum, rejects unsafe archive entry paths, and caches the
+binary under the ignored `.mango/artifacts/tools/`; nothing unverified is ever
+executed, and a populated cache works offline. Scoped runs (`--staged` /
+`--changed`) trigger the lane only when `.github/**`, `*.sh`, or
+`scripts/lib/actions-lint/**` changed — and then always repository-wide.
+
+Dependabot cannot bump these pins. To update a tool: bump `version`, the asset
+names, and the SHA-256s in `manifest.ts` in one commit, taking checksums from
+the upstream release (`actionlint_<version>_checksums.txt` for actionlint;
+`sha256sum` over the downloaded archives for zizmor/ShellCheck). The unit
+tests and CI cache key (`lint.yml`) follow the manifest automatically.
+
+Suppressions policy: fix findings at the source. When a finding is truly
+unavoidable, suppress it at the narrowest scope (inline
+`# zizmor: ignore[rule]` / `# shellcheck disable=SCnnnn`) with rule ID and
+reason — never a global ignore.
 
 ## qa-gate/ — PR QA report automation
 

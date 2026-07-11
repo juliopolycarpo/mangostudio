@@ -184,9 +184,14 @@ describe('Docker release wiring', () => {
     expect(workflow).toContain('binary_platform: linux-x64-musl');
     expect(workflow).toContain('binary_platform: linux-arm64');
     expect(workflow).toContain('binary_platform: linux-arm64-musl');
-    expect(workflow).toContain(`build:binary --platform ${binaryPlatformExpression}`);
-    expect(workflow).toContain(`stage-docker-ctx.ts --arch ${dockerArchExpression}`);
-    expect(workflow).toContain(`--platform linux/${dockerArchExpression}`);
+    // Matrix values reach run blocks through env indirection so no template
+    // expands inside shell code (zizmor template-injection).
+    expect(workflow).toContain(`BINARY_PLATFORM: ${binaryPlatformExpression}`);
+    expect(workflow).toContain('build:binary --platform "$BINARY_PLATFORM"');
+    const dockerArchVar = '$' + '{DOCKER_ARCH}';
+    expect(workflow).toContain(`DOCKER_ARCH: ${dockerArchExpression}`);
+    expect(workflow).toContain('stage-docker-ctx.ts --arch "$DOCKER_ARCH"');
+    expect(workflow).toContain(`--platform "linux/${dockerArchVar}"`);
     expect(workflow).toContain('docker_arch: amd64');
     expect(workflow).toContain('docker_arch: arm64');
     expect(workflow).toContain('Dockerfile.alpine');

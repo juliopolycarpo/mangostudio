@@ -25,9 +25,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
-      actions: read
-      contents: read
-      security-events: write
+      actions: read # let CodeQL read workflow metadata for its analysis
+      contents: read # checkout of the analyzed source
+      security-events: write # upload SARIF results to code scanning
     strategy:
       fail-fast: false
       matrix:

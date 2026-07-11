@@ -14,6 +14,10 @@ name: Canary
 
 on:
   workflow_call:
+    secrets:
+      NPM_TOKEN:
+        description: npm token used to publish under the canary dist-tag.
+        required: true
 
 permissions:
   contents: read
@@ -76,8 +80,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
-      contents: read
-      id-token: write
+      contents: read # checkout only; publish goes to npm, not the repo
+      id-token: write # npm provenance attestation for the canary publish
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
@@ -109,7 +113,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
-      contents: write
+      contents: write # edit/upload assets on the rolling canary pre-release
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
@@ -165,8 +169,11 @@ jobs:
       - name: Write canary publish summary
         env:
           TITLE: Canary ${{ needs.build.outputs.version }} (canary-${{ needs.build.outputs.sha }})
+          BUILD_RESULT: ${{ needs.build.result }}
+          NPM_RESULT: ${{ needs.npm-canary.result }}
+          RELEASE_RESULT: ${{ needs.github-release-canary.result }}
         run: |
           bash scripts/release/publish-summary.sh \
-            "build=${{ needs.build.result }}" \
-            "npm-canary=${{ needs.npm-canary.result }}" \
-            "github-release-canary=${{ needs.github-release-canary.result }}"
+            "build=${BUILD_RESULT}" \
+            "npm-canary=${NPM_RESULT}" \
+            "github-release-canary=${RELEASE_RESULT}"

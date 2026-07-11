@@ -24,9 +24,9 @@ jobs:
     if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-latest
     permissions:
-      contents: read
-      issues: write
-      pull-requests: write
+      contents: read # read-only API baseline; no checkout happens here
+      issues: write # assign the PR author via the issues assignee API
+      pull-requests: write # request reviewers derived from file history
     steps:
       - name: Assign owners from changed-file history
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0

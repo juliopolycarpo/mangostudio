@@ -74,8 +74,10 @@ describe('privileged publisher side (pr-qa-report.yml)', () => {
   });
 
   test('grants writes only at job scope, limited to pull-requests', () => {
-    expect(workflow).toContain(
-      'permissions:\n      actions: read\n      contents: read\n      pull-requests: write'
+    // Each scope carries an explanatory comment (zizmor
+    // undocumented-permissions), so match line-by-line rather than the block.
+    expect(workflow).toMatch(
+      /permissions:\n {6}actions: read #.*\n {6}contents: read #.*\n {6}pull-requests: write #/
     );
     expect(workflow).not.toContain('contents: write');
   });
