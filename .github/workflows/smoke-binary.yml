@@ -7,6 +7,12 @@ on:
 permissions:
   contents: read
 
+# ci.yml's caller-level group already supersedes per-PR runs; this group covers
+# direct workflow_dispatch runs. Mirrors ci.yml: main is never cancelled.
+concurrency:
+  group: smoke-binary-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 jobs:
   binary:
     name: Binary ${{ matrix.platform }}
@@ -75,25 +81,35 @@ jobs:
       - uses: ./.github/actions/setup-mango
 
       - name: Build Docker binary
-        run: bun run build:binary --platform ${{ matrix.binary_platform }}
+        env:
+          BINARY_PLATFORM: ${{ matrix.binary_platform }}
+        run: bun run build:binary --platform "$BINARY_PLATFORM"
 
       - name: Stage Docker context
-        run: bun ./scripts/release/stage-docker-ctx.ts --arch ${{ matrix.docker_arch }} --variant ${{ matrix.variant }}
+        env:
+          DOCKER_ARCH: ${{ matrix.docker_arch }}
+          VARIANT: ${{ matrix.variant }}
+        run: bun ./scripts/release/stage-docker-ctx.ts --arch "$DOCKER_ARCH" --variant "$VARIANT"
 
       - name: Build Docker image
         # The Dockerfiles use `COPY --chmod`, a BuildKit-only directive. Force
         # BuildKit instead of relying on the runner's default builder.
         env:
           DOCKER_BUILDKIT: "1"
+          DOCKER_ARCH: ${{ matrix.docker_arch }}
+          VARIANT: ${{ matrix.variant }}
+          DOCKERFILE: ${{ matrix.dockerfile }}
         run: |
           docker build \
-            --platform linux/${{ matrix.docker_arch }} \
+            --platform "linux/${DOCKER_ARCH}" \
             --build-arg VERSION=smoke \
-            -f ${{ matrix.dockerfile }} \
-            -t mangostudio:smoke-${{ matrix.variant }}-${{ matrix.docker_arch }} .
+            -f "$DOCKERFILE" \
+            -t "mangostudio:smoke-${VARIANT}-${DOCKER_ARCH}" .
 
       - name: Run Docker smoke test
         env:
           BETTER_AUTH_SECRET: smoke-test-secret-at-least-32-characters-long
           GEMINI_API_KEY: dummy
-        run: scripts/release/smoke-docker-image.sh mangostudio:smoke-${{ matrix.variant }}-${{ matrix.docker_arch }} linux/${{ matrix.docker_arch }} 13002
+          DOCKER_ARCH: ${{ matrix.docker_arch }}
+          VARIANT: ${{ matrix.variant }}
+        run: scripts/release/smoke-docker-image.sh "mangostudio:smoke-${VARIANT}-${DOCKER_ARCH}" "linux/${DOCKER_ARCH}" 13002

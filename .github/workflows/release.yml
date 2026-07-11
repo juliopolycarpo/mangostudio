@@ -155,7 +155,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
-      contents: write
+      contents: write # create the tagged GitHub Release and upload assets
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
@@ -212,8 +212,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
-      contents: read
-      packages: write
+      contents: read # checkout of Dockerfiles and staging scripts
+      packages: write # push release images to GHCR
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
@@ -287,8 +287,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
-      contents: read
-      packages: read
+      contents: read # checkout of the smoke-test scripts
+      packages: read # pull the just-published GHCR image for the smoke test
     strategy:
       fail-fast: false
       matrix:
@@ -317,7 +317,8 @@ jobs:
       - name: Log in to GHCR
         env:
           GHCR_TOKEN: ${{ github.token }}
-        run: echo "$GHCR_TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          GHCR_USER: ${{ github.actor }}
+        run: echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
 
       - name: Pull and smoke published image
         env:
@@ -335,8 +336,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
-      contents: read
-      id-token: write
+      contents: read # checkout only; publish goes to npm, not the repo
+      id-token: write # npm provenance attestation
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
@@ -449,8 +450,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
-      contents: read
-      id-token: write
+      contents: read # checkout only; publish goes to crates.io, not the repo
+      id-token: write # crates.io Trusted Publishing token exchange
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
@@ -682,16 +683,27 @@ jobs:
       - name: Write release publish summary
         env:
           TITLE: Release ${{ needs.build.outputs.version }}
+          BUILD_RESULT: ${{ needs.build.result }}
+          GITHUB_RELEASE_RESULT: ${{ needs.github-release.result }}
+          NPM_PUBLISH_RESULT: ${{ needs.npm-publish.result }}
+          DOCKER_RESULT: ${{ needs.docker.result }}
+          CARGO_PUBLISH_RESULT: ${{ needs.cargo-publish.result }}
+          HOMEBREW_RESULT: ${{ needs.homebrew.result }}
+          SCOOP_RESULT: ${{ needs.scoop.result }}
+          VERIFY_IMAGE_RESULT: ${{ needs.verify-image.result }}
+          VERIFY_RELEASE_RESULT: ${{ needs.verify-release.result }}
+          VERIFY_CARGO_RESULT: ${{ needs.verify-cargo.result }}
+          VERIFY_HOMEBREW_RESULT: ${{ needs.verify-homebrew.result }}
         run: |
           bash scripts/release/publish-summary.sh \
-            "build=${{ needs.build.result }}" \
-            "github-release=${{ needs.github-release.result }}" \
-            "npm-publish=${{ needs.npm-publish.result }}" \
-            "docker=${{ needs.docker.result }}" \
-            "cargo-publish=${{ needs.cargo-publish.result }}" \
-            "homebrew=${{ needs.homebrew.result }}" \
-            "scoop=${{ needs.scoop.result }}" \
-            "verify-image=${{ needs.verify-image.result }}" \
-            "verify-release=${{ needs.verify-release.result }}" \
-            "verify-cargo=${{ needs.verify-cargo.result }}" \
-            "verify-homebrew=${{ needs.verify-homebrew.result }}"
+            "build=${BUILD_RESULT}" \
+            "github-release=${GITHUB_RELEASE_RESULT}" \
+            "npm-publish=${NPM_PUBLISH_RESULT}" \
+            "docker=${DOCKER_RESULT}" \
+            "cargo-publish=${CARGO_PUBLISH_RESULT}" \
+            "homebrew=${HOMEBREW_RESULT}" \
+            "scoop=${SCOOP_RESULT}" \
+            "verify-image=${VERIFY_IMAGE_RESULT}" \
+            "verify-release=${VERIFY_RELEASE_RESULT}" \
+            "verify-cargo=${VERIFY_CARGO_RESULT}" \
+            "verify-homebrew=${VERIFY_HOMEBREW_RESULT}"
