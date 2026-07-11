@@ -27,7 +27,7 @@
       "name": "@mangostudio/api",
       "version": "0.1.1",
       "dependencies": {
-        "@ai-sdk/deepseek": "^3.0.2",
+        "@ai-sdk/deepseek": "^3.0.6",
         "@anthropic-ai/sdk": "^0.95.1",
         "@cursor/sdk": "^1.0.22",
         "@elysiajs/cors": "^1.4.2",
@@ -118,13 +118,13 @@
   "packages": {
     "@adobe/css-tools": ["@adobe/css-tools@4.4.4", "", {}, "sha512-Elp+iwUx5rN5+Y8xLt5/GRoG20WGoDCQ/1Fb+1LiGtvwbDavuSk0jhD/eZdckHAuzcDzccnkv+rEjyWfRx18gg=="],
 
-    "@ai-sdk/deepseek": ["@ai-sdk/deepseek@3.0.2", "", { "dependencies": { "@ai-sdk/provider": "4.0.1", "@ai-sdk/provider-utils": "5.0.2" }, "peerDependencies": { "zod": "^3.25.76 || ^4.1.8" } }, "sha512-0IIbl1xRRX+lI9BXpFF6e8yi7egGXMwXROuawivG/vimcBULtuFHUYlfHHTq0MzSPiG6GbCQ9C5XTFa/SA3iQA=="],
+    "@ai-sdk/deepseek": ["@ai-sdk/deepseek@3.0.6", "", { "dependencies": { "@ai-sdk/provider": "4.0.2", "@ai-sdk/provider-utils": "5.0.6" }, "peerDependencies": { "zod": "^3.25.76 || ^4.1.8" } }, "sha512-mPX5fqMN6flScSq5XvU/Oli4r6GXRx57I7h/NVQSAHChzpZAl4bGirV3eEKCCR9pS65WVEc9iNI4w+hqrFBecQ=="],
 
     "@ai-sdk/gateway": ["@ai-sdk/gateway@4.0.15", "", { "dependencies": { "@ai-sdk/provider": "4.0.3", "@ai-sdk/provider-utils": "5.0.7", "@vercel/oidc": "3.2.0" }, "peerDependencies": { "zod": "^3.25.76 || ^4.1.8" } }, "sha512-JHvgCU4SR6OdjOI+8rxIF3zhIboFAkQ1vEa+QOIdkK5VyME1ONx8SbgM2YtnSY1DOsCtUyhd+EG876pYpRjopg=="],
 
-    "@ai-sdk/provider": ["@ai-sdk/provider@4.0.1", "", { "dependencies": { "json-schema": "^0.4.0" } }, "sha512-6p3C/vGqVIjcptBu1DnVd/BZJ2wWmV9TUv9192vT6ZvT9KNED8EwRTqyqFpoQZKgSbMDSvBSq3dqR524Nt/Crw=="],
+    "@ai-sdk/provider": ["@ai-sdk/provider@4.0.2", "", { "dependencies": { "json-schema": "^0.4.0" } }, "sha512-pfPoy9J1B1xV7cqJ8MYHOsDYrMv5tR3+EMNfI249OhkD2uRakvav3Fo7XpD2luuN/YNCBY7KfEQc7vEV7KEtyw=="],
 
-    "@ai-sdk/provider-utils": ["@ai-sdk/provider-utils@5.0.2", "", { "dependencies": { "@ai-sdk/provider": "4.0.1", "@standard-schema/spec": "^1.1.0", "@workflow/serde": "4.1.0", "eventsource-parser": "^3.0.8" }, "peerDependencies": { "zod": "^3.25.76 || ^4.1.8" } }, "sha512-EcmdjJb7yggsZPCbS3MFBpvAUnKaPW+QvanU5GzF00XCq0bqqAmvJ3MN19ejlmOETbW8sJNiq6qam48wTcbUNw=="],
+    "@ai-sdk/provider-utils": ["@ai-sdk/provider-utils@5.0.6", "", { "dependencies": { "@ai-sdk/provider": "4.0.2", "@standard-schema/spec": "^1.1.0", "@workflow/serde": "4.1.0", "eventsource-parser": "^3.0.8" }, "peerDependencies": { "zod": "^3.25.76 || ^4.1.8" } }, "sha512-i4mVayGtC+HrRmtfPFOxvKKQgFU+1dwTTsh4MY0jY1MaGuppOwDFrNYrJ3dDXWMkO3o6FDVAKY8ZDsy7hLsO9Q=="],
 
     "@anthropic-ai/sdk": ["@anthropic-ai/sdk@0.95.1", "", { "dependencies": { "json-schema-to-ts": "^3.1.1", "standardwebhooks": "^1.0.0" }, "peerDependencies": { "zod": "^3.25.0 || ^4.0.0" }, "optionalPeers": ["zod"], "bin": { "anthropic-ai-sdk": "bin/cli" } }, "sha512-OO9AF7hmAoU492c/mD7Q2cPqI2WNAj7rAPHlawgBeUgpwiboLRiDs+grsErGWeHHP9ZRWfzq2OVrODTt8aITVg=="],
 
