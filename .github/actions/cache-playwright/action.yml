@@ -48,9 +48,12 @@ runs:
       with:
         path: ~/.cache/ms-playwright
         key: ${{ steps.keys.outputs.primary-key }}
+        # Version-exact restore only. A browser cache for a different Playwright
+        # version is unusable (the pinned version's binary would be absent), and
+        # restoring it here would make cache-restored true and skip the install
+        # step below, so the version-agnostic main prefix is deliberately omitted.
         restore-keys: |
           ${{ steps.keys.outputs.restore-key }}
-          ${{ steps.keys.outputs.restore-prefix }}
 
     - name: Save Playwright browser cache
       if: inputs.mode == 'save'
