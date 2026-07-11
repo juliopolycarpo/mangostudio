@@ -305,6 +305,22 @@ escreve LCOV da lógica pura em `.mango/artifacts/coverage/frontend/bun/`:
 bun run --filter @mangostudio/frontend test:coverage
 ```
 
+## Retenção De Artefatos No CI
+
+Os artefatos de CI se dividem em quatro classes de retenção; mantenha novos uploads alinhados a elas:
+
+| Classe                    | Exemplos                                                        | Política                                                               |
+| ------------------------- | --------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| Handoff entre jobs        | fragmento `qa-test-metrics` (test → qa-metrics)                 | 1 dia — consumido dentro do mesmo run                                  |
+| Diagnóstico de falha      | saída bruta de cobertura, traces e relatório HTML do Playwright | 7–14 dias, enviados apenas com `if: failure()`                         |
+| Assets de release         | binários e pacotes preparados no pipeline de release            | 30 dias                                                                |
+| Baselines de push na main | envelopes `qa-metrics` de runs verdes de CI na `main`           | 90 dias — baselines por SHA exato para relatórios de QA de PRs futuros |
+
+Runs verdes resumem seu resultado no step summary (`$GITHUB_STEP_SUMMARY`) em vez
+de enviar artefatos que só existem em caso de sucesso. O workflow de browser-smoke
+mantém um input de `workflow_dispatch` (`always_upload_report`) para enviar o
+relatório HTML de um run verde quando necessário.
+
 ## Checklist De Verificação
 
 Antes de fazer merge, rode:

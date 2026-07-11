@@ -94,15 +94,15 @@ gates on it being there; no job writes the changelog back after the fact.
 
 `bun run changelog` wraps git-cliff (config: `cliff.toml`):
 
-| Command                                  | Effect                                                                  |
-| ---------------------------------------- | ----------------------------------------------------------------------- |
-| `bun run changelog --init [version]`     | Regenerate `CHANGELOG.md` from full history (default tag: root version) |
-| `bun run changelog --preview [--base r]` | Print this branch's entries (powers the PR preview bot)                 |
-| `bun run changelog --release <version>`  | Regenerate `CHANGELOG.md` including `<version>`                         |
+| Command                                             | Effect                                                                  |
+| --------------------------------------------------- | ----------------------------------------------------------------------- |
+| `bun run changelog --init [version]`                | Regenerate `CHANGELOG.md` from full history (default tag: root version) |
+| `bun run changelog --preview [--base r] [--head r]` | Print this branch's entries (powers the PR preview bot)                 |
+| `bun run changelog --release <version>`             | Regenerate `CHANGELOG.md` including `<version>`                         |
 
-Every PR gets a **Changelog Preview** bot comment showing the entries it would
-add. It is published by the PR QA workflow (`.github/workflows/pr-qa-gate.yml`)
-together with the commit summary and QA gate comments.
+Every PR gets a changelog preview as part of the single managed QA report
+comment, published by `.github/workflows/pr-qa-report.yml` together with the
+commit summary and QA metrics comparison.
 
 ## Testing the release pipeline
 
