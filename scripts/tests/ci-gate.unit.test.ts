@@ -20,6 +20,11 @@ const GATED_WORKFLOWS = [
   '.github/workflows/release-dry-run.yml',
 ] as const;
 
+// GitHub expression opener, assembled out of band so the literal `${{` never
+// appears in a plain string — biome's noTemplateCurlyInString would flag it.
+// Interpolating it into a template literal is not flagged.
+const EXPR = '$' + '{{';
+
 describe('gate result evaluation', () => {
   const skips = parseAllowedSkips('qa-metrics');
 
@@ -98,11 +103,11 @@ describe('ci.yml trigger and concurrency policy', () => {
 
   test('one authoritative run per PR: keyed by PR number, never by SHA', () => {
     expect(workflow).toContain(
-      "group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.ref }}"
+      `group: ${EXPR} github.workflow }}-${EXPR} github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.ref }}`
     );
     // A new push must supersede the previous run — except on main, where every
     // push has to reach Canary.
-    expect(workflow).toContain("cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}");
+    expect(workflow).toContain(`cancel-in-progress: ${EXPR} github.ref != 'refs/heads/main' }}`);
     expect(workflow).not.toContain('github.sha');
   });
 });
@@ -121,7 +126,7 @@ describe('CI / Gate aggregate', () => {
 
   test('qa-metrics is the only lane allowed to skip, and only on workflow_dispatch', () => {
     expect(gateBlock).toContain(
-      "ALLOWED_SKIPS: ${{ github.event_name == 'workflow_dispatch' && 'qa-metrics' || '' }}"
+      `ALLOWED_SKIPS: ${EXPR} github.event_name == 'workflow_dispatch' && 'qa-metrics' || '' }}`
     );
   });
 });
@@ -154,7 +159,7 @@ describe('cargo-shim.yml always-reporting gate', () => {
 
     expect(parseNeedsList(gateBlock).sort()).toEqual(['cargo-shim', 'changes']);
     expect(gateBlock).toContain(
-      "ALLOWED_SKIPS: ${{ needs.changes.outputs.cargo_shim == 'false' && 'cargo-shim' || '' }}"
+      `ALLOWED_SKIPS: ${EXPR} needs.changes.outputs.cargo_shim == 'false' && 'cargo-shim' || '' }}`
     );
   });
 });
@@ -189,7 +194,7 @@ describe('release-dry-run.yml always-reporting gate', () => {
 
     expect(parseNeedsList(gateBlock).sort()).toEqual(['changes', 'dry-run-cargo', 'dry-run-linux']);
     expect(gateBlock).toContain(
-      "ALLOWED_SKIPS: ${{ format('{0} {1}', needs.changes.outputs.release == 'false' && 'dry-run-linux' || '', needs.changes.outputs.cargo_shim == 'false' && 'dry-run-cargo' || '') }}"
+      `ALLOWED_SKIPS: ${EXPR} format('{0} {1}', needs.changes.outputs.release == 'false' && 'dry-run-linux' || '', needs.changes.outputs.cargo_shim == 'false' && 'dry-run-cargo' || '') }}`
     );
   });
 });
@@ -203,10 +208,10 @@ describe('shared gate job contract', () => {
     // Runs regardless of dependency outcomes, else a failure would skip the
     // check instead of failing it; evaluation happens in the unit-tested
     // script, not a YAML expression.
-    expect(gateBlock).toContain('if: ${{ always() }}');
+    expect(gateBlock).toContain(`if: ${EXPR} always() }}`);
     expect(gateBlock).toContain('name: Gate');
     expect(gateBlock).toContain('permissions:\n      contents: read');
-    expect(gateBlock).toContain('NEEDS: ${{ toJSON(needs) }}');
+    expect(gateBlock).toContain(`NEEDS: ${EXPR} toJSON(needs) }}`);
     expect(gateBlock).toContain('run: bun ./scripts/ci/evaluate-gate.ts');
   });
 });
