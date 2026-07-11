@@ -1,11 +1,9 @@
-// Pure rendering for the PR commit-summary bot comment: a compact commit list
-// plus an expandable section with each full commit message. The git invocation
-// lives in render-commits.ts; everything here is testable without git.
+// Pure rendering for the commit-summary section of the consolidated PR QA
+// report: a compact commit list plus an expandable section with each full
+// commit message. The git invocation lives in render-report.ts; everything
+// here is testable without git.
 
 import { shortSha } from './render/format';
-
-/** Marker the comment publisher uses to find/replace this comment. */
-export const COMMITS_COMMENT_MARKER = '<!-- pr-commits-comment -->';
 
 // Unit separators emitted by `git log --format` (%x1f / %x1e) so parsing
 // never collides with characters inside commit messages.
@@ -61,9 +59,10 @@ const renderFullMessage = (entry: CommitEntry): string => {
   ].join('\n');
 };
 
-// GitHub rejects issue/PR comment bodies over 65,536 characters with a 422, so
-// the full-message section is dropped before a long-lived branch hits that cap.
-const GITHUB_COMMENT_LIMIT = 65_536;
+// The section shares one GitHub comment (65,536-char cap) with the changelog
+// preview and QA metrics, so it gets a fraction of that budget by default and
+// drops the full-message block first when a long-lived branch outgrows it.
+export const COMMITS_SECTION_MAX_LENGTH = 40_000;
 
 const commitListLines = (entries: readonly CommitEntry[]): string[] =>
   entries.map((entry) => `- \`${shortSha(entry.sha)}\` ${entry.subject}`);
@@ -78,16 +77,14 @@ const fullMessagesLines = (entries: readonly CommitEntry[]): string[] => [
   '</details>',
 ];
 
-const composeCommitsComment = (head: readonly string[], body: readonly string[]): string =>
-  [...head, ...body, '', COMMITS_COMMENT_MARKER].join('\n');
-
 /**
- * Render the commit-summary comment markdown (base..head, oldest first).
- * // Usage: renderCommitsComment(entries, { baseSha, headSha })
+ * Render the commit-summary section markdown (base..head, oldest first).
+ * // Usage: renderCommitsSection(entries, { baseSha, headSha })
  */
-export const renderCommitsComment = (
+export const renderCommitsSection = (
   entries: readonly CommitEntry[],
-  range: { baseSha: string; headSha: string }
+  range: { baseSha: string; headSha: string },
+  maxLength: number = COMMITS_SECTION_MAX_LENGTH
 ): string => {
   const count = entries.length;
   const head = [
@@ -98,16 +95,17 @@ export const renderCommitsComment = (
   ];
 
   if (count === 0) {
-    return composeCommitsComment(head, ['_No commits between base and head._']);
+    return [...head, '_No commits between base and head._'].join('\n');
   }
 
   const list = commitListLines(entries);
-  const withMessages = composeCommitsComment(head, [...list, ...fullMessagesLines(entries)]);
-  if (withMessages.length <= GITHUB_COMMENT_LIMIT) return withMessages;
+  const withMessages = [...head, ...list, ...fullMessagesLines(entries)].join('\n');
+  if (withMessages.length <= maxLength) return withMessages;
 
-  return composeCommitsComment(head, [
+  return [
+    ...head,
     ...list,
     '',
-    "_Full commit messages omitted — they exceed GitHub's comment size limit._",
-  ]);
+    '_Full commit messages omitted — they exceed the comment size budget._',
+  ].join('\n');
 };

@@ -7,7 +7,7 @@ import { renderBundleSection } from './bundle';
 import { renderCoverageSection } from './coverage';
 import { renderDependenciesSection } from './dependencies';
 import { renderDuplicationSection } from './duplication';
-import { isError, shortSha } from './format';
+import { inlineCode, isError, shortSha } from './format';
 import { renderLocSection } from './loc';
 import { renderSummary } from './summary';
 import { renderTestsSection } from './tests';
@@ -28,25 +28,23 @@ const collectErrorNotes = (base: Metrics | null, head: Metrics | null): string[]
     }
     for (const workspace of ALL_WORKSPACE_NAMES) {
       const cov = metrics.coverage?.[workspace];
-      if (isError(cov)) notes.push(`- ${side}/coverage/${workspace}: \`${cov.error}\``);
+      if (isError(cov)) notes.push(`- ${side}/coverage/${workspace}: ${inlineCode(cov.error)}`);
       const ts = metrics.tsErrors?.[workspace];
-      if (isError(ts)) notes.push(`- ${side}/tsErrors/${workspace}: \`${ts.error}\``);
+      if (isError(ts)) notes.push(`- ${side}/tsErrors/${workspace}: ${inlineCode(ts.error)}`);
       const loc = metrics.loc?.[workspace];
-      if (isError(loc)) notes.push(`- ${side}/loc/${workspace}: \`${loc.error}\``);
+      if (isError(loc)) notes.push(`- ${side}/loc/${workspace}: ${inlineCode(loc.error)}`);
     }
-    if (isError(metrics.tooling)) notes.push(`- ${side}/tooling: \`${metrics.tooling.error}\``);
+    if (isError(metrics.tooling))
+      notes.push(`- ${side}/tooling: ${inlineCode(metrics.tooling.error)}`);
     if (isError(metrics.duplication))
-      notes.push(`- ${side}/duplication: \`${metrics.duplication.error}\``);
+      notes.push(`- ${side}/duplication: ${inlineCode(metrics.duplication.error)}`);
     if (isError(metrics.circularDeps))
-      notes.push(`- ${side}/circularDeps: \`${metrics.circularDeps.error}\``);
+      notes.push(`- ${side}/circularDeps: ${inlineCode(metrics.circularDeps.error)}`);
     if (isError(metrics.frontendBundle))
-      notes.push(`- ${side}/frontendBundle: \`${metrics.frontendBundle.error}\``);
+      notes.push(`- ${side}/frontendBundle: ${inlineCode(metrics.frontendBundle.error)}`);
     if (isError(metrics.dependencies))
-      notes.push(`- ${side}/dependencies: \`${metrics.dependencies.error}\``);
-    for (const lane of ['unit', 'integration'] as const) {
-      const tests = metrics.tests?.[lane];
-      if (isError(tests)) notes.push(`- ${side}/tests/${lane}: \`${tests.error}\``);
-    }
+      notes.push(`- ${side}/dependencies: ${inlineCode(metrics.dependencies.error)}`);
+    if (isError(metrics.tests)) notes.push(`- ${side}/tests: ${inlineCode(metrics.tests.error)}`);
   }
   return notes;
 };
@@ -61,7 +59,7 @@ export const renderDocument = (base: Metrics | null, head: Metrics | null): stri
   const lines: string[] = [
     '## QA Gate — Coverage & Quality',
     '',
-    `**Base:** \`${shortSha(base?.sha)}\` • **Head:** \`${shortSha(head?.sha)}\` • _generated ${generated}_`,
+    `**Base:** \`${shortSha(base?.sha)}\` • **Head:** \`${shortSha(head?.sha)}\` • _generated ${inlineCode(generated)}_`,
     '',
     renderVerdict(base, head),
     '',

@@ -3,10 +3,9 @@ import { describe, expect, it } from 'bun:test';
 import {
   COMMIT_FIELD_SEPARATOR,
   COMMIT_RECORD_SEPARATOR,
-  COMMITS_COMMENT_MARKER,
   type CommitEntry,
   parseCommitLog,
-  renderCommitsComment,
+  renderCommitsSection,
 } from './commit-log';
 
 const RANGE = {
@@ -55,7 +54,7 @@ describe('parseCommitLog', () => {
   });
 });
 
-describe('renderCommitsComment', () => {
+describe('renderCommitsSection', () => {
   const entries: CommitEntry[] = [
     {
       sha: 'aaaa111aaaa111aaaa111aaaa111aaaa111aaaa1',
@@ -69,29 +68,28 @@ describe('renderCommitsComment', () => {
     },
   ];
 
-  it('renders the list, expandable full messages, and the marker', () => {
-    const comment = renderCommitsComment(entries, RANGE);
+  it('renders the list and expandable full messages without any marker', () => {
+    const section = renderCommitsSection(entries, RANGE);
 
-    expect(comment).toContain('## Commits — 2 commits');
-    expect(comment).toContain('Base `0123456` → head `fedcba9`');
-    expect(comment).toContain('- `aaaa111` feat(api): add thing');
-    expect(comment).toContain('<summary>Full commit messages</summary>');
-    expect(comment).toContain('#### `bbbb222` fix(ui): repair other');
-    expect(comment).toContain('Long body explaining why.');
-    expect(comment.trimEnd().endsWith(COMMITS_COMMENT_MARKER)).toBe(true);
+    expect(section).toContain('## Commits — 2 commits');
+    expect(section).toContain('Base `0123456` → head `fedcba9`');
+    expect(section).toContain('- `aaaa111` feat(api): add thing');
+    expect(section).toContain('<summary>Full commit messages</summary>');
+    expect(section).toContain('#### `bbbb222` fix(ui): repair other');
+    expect(section).toContain('Long body explaining why.');
+    expect(section).not.toContain('<!--');
   });
 
   it('renders a singular heading and an empty-range note', () => {
-    const single = renderCommitsComment([entries[0] as CommitEntry], RANGE);
+    const single = renderCommitsSection([entries[0] as CommitEntry], RANGE);
     expect(single).toContain('## Commits — 1 commit');
 
-    const empty = renderCommitsComment([], RANGE);
+    const empty = renderCommitsSection([], RANGE);
     expect(empty).toContain('_No commits between base and head._');
     expect(empty).not.toContain('<details>');
-    expect(empty).toContain(COMMITS_COMMENT_MARKER);
   });
 
-  it('drops the full-message section when the body would exceed the GitHub limit', () => {
+  it('drops the full-message section when the body would exceed its budget', () => {
     const huge = 'x'.repeat(2_000);
     const many: CommitEntry[] = Array.from({ length: 40 }, (_, index) => ({
       sha: `${index}`.padStart(40, '0'),
@@ -99,13 +97,12 @@ describe('renderCommitsComment', () => {
       message: `commit ${index}\n\n${huge}`,
     }));
 
-    const comment = renderCommitsComment(many, RANGE);
+    const section = renderCommitsSection(many, RANGE);
 
-    expect(comment.length).toBeLessThanOrEqual(65_536);
-    expect(comment).not.toContain('<details>');
-    expect(comment).toContain('Full commit messages omitted');
-    expect(comment).toContain('- `0000000` commit 0');
-    expect(comment.trimEnd().endsWith(COMMITS_COMMENT_MARKER)).toBe(true);
+    expect(section.length).toBeLessThanOrEqual(40_000);
+    expect(section).not.toContain('<details>');
+    expect(section).toContain('Full commit messages omitted');
+    expect(section).toContain('- `0000000` commit 0');
   });
 
   it('sizes the fence past backtick runs inside the body', () => {
@@ -115,9 +112,9 @@ describe('renderCommitsComment', () => {
       message: 'body with a fence:\n````\ninner\n````',
     };
 
-    const comment = renderCommitsComment([fencey], RANGE);
+    const section = renderCommitsSection([fencey], RANGE);
 
-    expect(comment).toContain('`````text');
-    expect(comment).toContain('\n`````\n');
+    expect(section).toContain('`````text');
+    expect(section).toContain('\n`````\n');
   });
 });

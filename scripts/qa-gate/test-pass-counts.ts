@@ -1,6 +1,6 @@
 import type { WorkspaceName } from '../lib/config';
 
-export interface TestLanePassCounts {
+export interface TestPassCounts {
   readonly root: number;
   readonly frontend: number;
   readonly api: number;
@@ -11,7 +11,7 @@ const WORKSPACE_PASS_RE =
   /^@mangostudio\/(frontend|api|shared) test:[^\s]+:\s+(?:Tests\s+)?(\d+)\s+pass(?:ed)?\b/;
 const ROOT_PASS_RE = /^\s+(\d+)\s+pass$/;
 
-export const parseTestLanePassCounts = (text: string): TestLanePassCounts => {
+export const parseTestPassCounts = (text: string): TestPassCounts => {
   const stats: Record<WorkspaceName | 'root', number> = {
     root: 0,
     frontend: 0,

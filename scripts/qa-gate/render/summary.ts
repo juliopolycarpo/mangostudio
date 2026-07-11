@@ -6,7 +6,7 @@ import {
   getDependencies,
   getDuplication,
   getLoc,
-  getTestLane,
+  getTestSuite,
   getTooling,
   getTotalLineCoverage,
   renderToolingStatus,
@@ -24,8 +24,8 @@ export const renderSummary = (base: Metrics | null, head: Metrics | null): strin
   const headBundle = getBundle(head);
   const baseDeps = getDependencies(base);
   const headDeps = getDependencies(head);
-  const baseUnit = getTestLane(base, 'unit');
-  const headUnit = getTestLane(head, 'unit');
+  const baseSuite = getTestSuite(base);
+  const headSuite = getTestSuite(head);
 
   return [
     `**LoC (code):** ${renderDelta(baseLoc?.code, headLoc?.code, { higherIsBetter: false, precision: 0 })}`,
@@ -34,6 +34,6 @@ export const renderSummary = (base: Metrics | null, head: Metrics | null): strin
     `**Duplication:** ${renderDelta(baseDup?.percentage ?? null, headDup?.percentage ?? null, { higherIsBetter: false, suffix: 'pp' })}`,
     `**Bundle gzip:** ${renderByteDelta(baseBundle?.gzipBytes, headBundle?.gzipBytes)}`,
     `**Locked deps:** ${renderDelta(baseDeps?.lockedPackages, headDeps?.lockedPackages, { higherIsBetter: false, precision: 0 })}`,
-    `**Unit tests:** ${renderDelta(baseUnit?.passed, headUnit?.passed, { higherIsBetter: true, precision: 0 })}`,
+    `**Tests passed:** ${renderDelta(baseSuite?.passed, headSuite?.passed, { higherIsBetter: true, precision: 0 })}`,
   ].join(' • ');
 };

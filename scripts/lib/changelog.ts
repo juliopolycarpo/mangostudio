@@ -5,12 +5,15 @@
 /** Default base ref the PR preview diffs against. */
 export const DEFAULT_PREVIEW_BASE = 'origin/main';
 
+/** Default head ref the PR preview walks up to. */
+export const DEFAULT_PREVIEW_HEAD = 'HEAD';
+
 /** Sticky-comment marker for the PR changelog preview bot. */
 export const PREVIEW_MARKER = '<!-- changelog-preview-comment -->';
 
 export type ChangelogMode =
   | { readonly kind: 'init'; readonly version: string }
-  | { readonly kind: 'preview'; readonly base: string }
+  | { readonly kind: 'preview'; readonly base: string; readonly head: string }
   | { readonly kind: 'release'; readonly version: string };
 
 export interface CliffResult {
@@ -29,7 +32,7 @@ export function cliffArgs(mode: ChangelogMode): string[] {
     case 'release':
       return ['--tag', `v${stripLeadingV(mode.version)}`, '--output', 'CHANGELOG.md'];
     case 'preview':
-      return ['--strip', 'all', `${mode.base}..HEAD`];
+      return ['--strip', 'all', `${mode.base}..${mode.head}`];
   }
 }
 
@@ -56,8 +59,8 @@ export function assertChangelogHasRelease(changelog: string, version: string): v
   );
 }
 
-/** Wrap a git-cliff preview body as the sticky PR comment (with its marker). */
-export function wrapPreviewComment(body: string): string {
+/** Render a git-cliff preview body as a marker-less report section. */
+export function renderChangelogPreviewSection(body: string): string {
   const trimmed = body.trim();
   const content =
     trimmed.length > 0 ? trimmed : '_No changelog-relevant commits on this branch yet._';
@@ -67,9 +70,12 @@ export function wrapPreviewComment(body: string): string {
     'Entries this branch would add to the changelog on release:',
     '',
     content,
-    '',
-    PREVIEW_MARKER,
   ].join('\n');
+}
+
+/** Wrap a git-cliff preview body as the sticky PR comment (with its marker). */
+export function wrapPreviewComment(body: string): string {
+  return [renderChangelogPreviewSection(body), '', PREVIEW_MARKER].join('\n');
 }
 
 /** Run a changelog mode through an injected git-cliff runner. */
@@ -107,9 +113,16 @@ export function parseChangelogArgs(
   }
 
   if (argv.includes('--preview')) {
-    const baseIndex = argv.indexOf('--base');
-    const base = baseIndex !== -1 ? argv[baseIndex + 1] : undefined;
-    return { kind: 'preview', base: base && !base.startsWith('--') ? base : DEFAULT_PREVIEW_BASE };
+    const flagValue = (flag: string, fallback: string): string => {
+      const index = argv.indexOf(flag);
+      const value = index !== -1 ? argv[index + 1] : undefined;
+      return value && !value.startsWith('--') ? value : fallback;
+    };
+    return {
+      kind: 'preview',
+      base: flagValue('--base', DEFAULT_PREVIEW_BASE),
+      head: flagValue('--head', DEFAULT_PREVIEW_HEAD),
+    };
   }
 
   return null;

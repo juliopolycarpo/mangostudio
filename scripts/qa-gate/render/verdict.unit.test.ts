@@ -10,19 +10,24 @@ describe('collectAttentionItems', () => {
     expect(collectAttentionItems(base, makeMetrics('head-sha'))).toEqual([]);
   });
 
-  it('flags failing test lanes and repo check with the failed tasks', () => {
+  it('flags a failing test suite and repo check with the failed tasks', () => {
     const head = makeMetrics('head-sha', {
       tests: {
-        unit: { exitCode: 1, passed: 990, root: 4, frontend: 200, api: 690, shared: 96 },
-        integration: { exitCode: 0, passed: 100, root: 0, frontend: 30, api: 70, shared: 0 },
+        exitCode: 1,
+        durationSeconds: 250,
+        passed: 1_090,
+        root: 4,
+        frontend: 230,
+        api: 760,
+        shared: 96,
       },
       tooling: { checkExitCode: 1, failedTasks: ['typecheck'] },
     });
 
     const items = collectAttentionItems(base, head);
 
-    expect(items).toContain('unit tests failing (exit 1)');
-    expect(items).toContain('repo check failing: typecheck');
+    expect(items).toContain('tests failing (exit 1)');
+    expect(items).toContain('repo check failing: `typecheck`');
   });
 
   it('flags TypeScript errors and circular dependencies with counts', () => {

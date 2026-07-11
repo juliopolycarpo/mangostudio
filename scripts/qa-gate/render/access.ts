@@ -10,11 +10,11 @@ import type {
   Failable,
   LocBucket,
   Metrics,
-  TestLaneStats,
+  TestSuiteStats,
   ToolingCheckStats,
 } from '../collect/types';
 import type { CoverageBucket } from '../parse-lcov';
-import { NA, ok } from './format';
+import { inlineCode, NA, ok } from './format';
 
 export const COVERAGE_KEYS = ['lines', 'statements', 'functions', 'branches'] as const;
 export type CoverageKey = (typeof COVERAGE_KEYS)[number];
@@ -52,10 +52,8 @@ export const getBundle = (metrics: Metrics | null): BundleStats | null =>
 export const getDependencies = (metrics: Metrics | null): DependencyStats | null =>
   ok(metrics?.dependencies) ? metrics.dependencies : null;
 
-export const getTestLane = (
-  metrics: Metrics | null,
-  lane: 'unit' | 'integration'
-): TestLaneStats | null => (ok(metrics?.tests?.[lane]) ? metrics.tests[lane] : null);
+export const getTestSuite = (metrics: Metrics | null): TestSuiteStats | null =>
+  ok(metrics?.tests) ? metrics.tests : null;
 
 export const getTooling = (metrics: Metrics | null): ToolingCheckStats | null =>
   ok(metrics?.tooling) ? metrics.tooling : null;
@@ -95,5 +93,5 @@ export const renderToolingStatus = (stats: ToolingCheckStats | null): string => 
   if (!stats) return NA;
   const status = stats.checkExitCode === 0 ? 'pass' : `FAIL (${stats.checkExitCode})`;
   if (stats.failedTasks.length === 0) return status;
-  return `${status}: ${stats.failedTasks.join(', ')}`;
+  return `${status}: ${stats.failedTasks.map(inlineCode).join(', ')}`;
 };

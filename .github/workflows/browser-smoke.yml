@@ -2,7 +2,19 @@ name: Smoke — Browser
 
 on:
   workflow_call:
+    inputs:
+      always_upload_report:
+        description: Upload the Playwright HTML report even when the suite passes.
+        type: boolean
+        required: false
+        default: false
   workflow_dispatch:
+    inputs:
+      always_upload_report:
+        description: Upload the Playwright HTML report even when the suite passes.
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
@@ -48,9 +60,21 @@ jobs:
         run: bunx playwright install-deps chromium
 
       - name: Run browser smoke suite
-        run: bun run test --e2e
+        run: |
+          set -o pipefail
+          bun run test --e2e 2>&1 | tee smoke-run.log
         env:
           CI: true
+
+      # Green runs leave their outcome in the step summary instead of an
+      # artifact nobody downloads; failures get the full diagnostics below.
+      - name: Smoke summary
+        run: |
+          summary="$(grep -Eo '[0-9]+ passed \([^)]+\)' smoke-run.log | tail -n 1)"
+          {
+            echo '### Browser smoke'
+            echo "- ${summary:-run log did not include a pass summary}"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload traces and screenshots on failure
         if: failure()
@@ -61,8 +85,10 @@ jobs:
             .mango/artifacts/playwright/test-results/
           retention-days: 7
 
+      # Failure diagnostics by default; the always_upload_report dispatch
+      # input keeps a manual escape hatch for inspecting a green run.
       - name: Upload Playwright HTML report
-        if: always()
+        if: ${{ failure() || inputs.always_upload_report }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: playwright-report

@@ -353,6 +353,22 @@ When raising or repairing coverage, prioritize release-critical surfaces first:
 - Chat orchestration and streaming UI states
 - Gallery loading, empty, pagination, and download flows
 
+## CI Artifact Retention
+
+CI artifacts fall into four retention classes; keep new uploads aligned with them:
+
+| Class               | Examples                                               | Policy                                                 |
+| ------------------- | ------------------------------------------------------ | ------------------------------------------------------ |
+| Job-to-job handoff  | `qa-test-metrics` fragment (test → qa-metrics)         | 1 day — consumed within the same run                   |
+| Failure diagnostics | raw coverage output, Playwright traces and HTML report | 7–14 days, uploaded only `if: failure()`               |
+| Release assets      | staged binaries and packages in the release pipeline   | 30 days                                                |
+| Main-push baselines | `qa-metrics` envelopes from green `main` CI runs       | 90 days — exact-SHA baselines for future PR QA reports |
+
+Green runs summarize their outcome in the step summary (`$GITHUB_STEP_SUMMARY`)
+instead of uploading success-only artifacts. The browser-smoke workflow keeps a
+`workflow_dispatch` input (`always_upload_report`) to upload the HTML report for
+a passing run when needed.
+
 ## Verification Checklist
 
 Before merging, run:

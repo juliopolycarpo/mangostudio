@@ -4,19 +4,15 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { PREVIEW_MARKER } from '../../lib/changelog';
-import { COMMITS_COMMENT_MARKER } from '../commit-log';
 import { COMMENT_MARKER } from '../render/document';
 import {
-  CHANGELOG_PREVIEW_MARKER,
-  COMMITS_MARKER,
   fetchCurrentHeadSha,
   isManagedComment,
-  MANAGED_FALLBACKS,
-  MANAGED_MARKER_ORDER,
-  publishManagedComments,
-  QA_GATE_MARKER,
-  readCommentBody,
-  renderQaPendingBody,
+  LEGACY_MARKERS,
+  publishQaReport,
+  QA_REPORT_MARKER,
+  REPORT_FALLBACK_BODY,
+  readReportBody,
 } from './managed-comments';
 
 const tempDirs: string[] = [];
@@ -32,21 +28,22 @@ interface FakeComment {
 }
 
 /**
- * In-memory stand-in for the Octokit surface the publisher touches. Exposes
- * no updateComment on purpose: the publisher must always recreate comments
- * (timeline position), so a regression to in-place edits throws here.
+ * In-memory stand-in for the Octokit surface the publisher touches. Captures
+ * updates, creates, and deletes so the tests can assert the update-or-create
+ * lifecycle and the legacy/duplicate cleanup.
  */
 class FakeGithubClient {
   comments: FakeComment[];
   headSha: string;
   deletedIds: number[] = [];
   createdBodies: string[] = [];
+  updates: Array<{ id: number; body: string }> = [];
   private nextId = 1000;
 
   constructor(
     comments: FakeComment[],
     headSha: string,
-    private readonly failCreates = false
+    private readonly failWrites = false
   ) {
     this.comments = [...comments];
     this.headSha = headSha;
@@ -63,11 +60,19 @@ class FakeGithubClient {
         this.comments = this.comments.filter((comment) => comment.id !== comment_id);
         return Promise.resolve();
       },
-      createComment: ({ body }: { body: string }) => {
-        if (this.failCreates) return Promise.reject(new Error('create failed'));
-        this.createdBodies.push(body);
-        this.comments.push({ id: this.nextId++, body, user: { type: 'Bot' } });
+      updateComment: ({ comment_id, body }: { comment_id: number; body: string }) => {
+        if (this.failWrites) return Promise.reject(new Error('update failed'));
+        this.updates.push({ id: comment_id, body });
+        const target = this.comments.find((comment) => comment.id === comment_id);
+        if (target) target.body = body;
         return Promise.resolve();
+      },
+      createComment: ({ body }: { body: string }) => {
+        if (this.failWrites) return Promise.reject(new Error('create failed'));
+        this.createdBodies.push(body);
+        const comment = { id: this.nextId++, body, user: { type: 'Bot' } };
+        this.comments.push(comment);
+        return Promise.resolve({ data: comment });
       },
     },
   };
@@ -100,200 +105,149 @@ const human = (id: number): FakeComment => ({
   user: { type: 'User' },
 });
 
-const desiredComments = [
-  { marker: QA_GATE_MARKER, body: `qa\n${QA_GATE_MARKER}` },
-  { marker: COMMITS_MARKER, body: `commits\n${COMMITS_MARKER}` },
-  { marker: CHANGELOG_PREVIEW_MARKER, body: `changelog\n${CHANGELOG_PREVIEW_MARKER}` },
-];
+const REPORT_BODY = `fresh report\n${QA_REPORT_MARKER}`;
+const LEGACY_COMMITS_MARKER = '<!-- pr-commits-comment -->';
 
 describe('managed comment markers', () => {
   it('stays in sync with the TypeScript renderers', () => {
-    expect(COMMITS_MARKER).toBe(COMMITS_COMMENT_MARKER);
-    expect(CHANGELOG_PREVIEW_MARKER).toBe(PREVIEW_MARKER);
-    expect(QA_GATE_MARKER).toBe(COMMENT_MARKER);
-    expect(MANAGED_MARKER_ORDER).toEqual([
-      COMMITS_MARKER,
-      CHANGELOG_PREVIEW_MARKER,
-      QA_GATE_MARKER,
-    ]);
-  });
-
-  it('registers a fallback body for every managed marker', () => {
-    expect(Object.keys(MANAGED_FALLBACKS).sort()).toEqual([...MANAGED_MARKER_ORDER].sort());
+    expect(QA_REPORT_MARKER).toBe(COMMENT_MARKER);
+    expect(LEGACY_MARKERS).toEqual([LEGACY_COMMITS_MARKER, PREVIEW_MARKER]);
   });
 });
 
 describe('isManagedComment', () => {
-  it('matches only bot comments ending with a managed marker', () => {
-    expect(isManagedComment(bot(1, QA_GATE_MARKER))).toBe(true);
-    expect(isManagedComment(human(2))).toBe(false);
-    expect(isManagedComment({ id: 3, body: QA_GATE_MARKER, user: { type: 'User' } })).toBe(false);
-    expect(isManagedComment({ id: 4, body: 'no marker', user: { type: 'Bot' } })).toBe(false);
+  it('matches bot comments ending with the report or a legacy marker', () => {
+    expect(isManagedComment(bot(1, QA_REPORT_MARKER))).toBe(true);
+    expect(isManagedComment(bot(2, LEGACY_COMMITS_MARKER))).toBe(true);
+    expect(isManagedComment(bot(3, PREVIEW_MARKER))).toBe(true);
+    expect(isManagedComment(human(4))).toBe(false);
+    expect(isManagedComment({ id: 5, body: QA_REPORT_MARKER, user: { type: 'User' } })).toBe(false);
+    expect(isManagedComment({ id: 6, body: 'no marker', user: { type: 'Bot' } })).toBe(false);
     // Another bot quoting a marker mid-body must never be deleted as ours.
     expect(
       isManagedComment({
-        id: 5,
-        body: `quoting ${QA_GATE_MARKER} mid-body`,
+        id: 7,
+        body: `quoting ${QA_REPORT_MARKER} mid-body`,
         user: { type: 'Bot' },
       })
     ).toBe(false);
   });
 });
 
-describe('renderQaPendingBody', () => {
-  it('includes the short sha, run link, and qa-gate marker', () => {
-    const body = renderQaPendingBody({
-      headSha: 'fedcba9876543210',
-      runUrl: 'https://example.test/runs/1',
-    });
-    expect(body).toContain('`fedcba9`');
-    expect(body).toContain('https://example.test/runs/1');
-    expect(body.endsWith(QA_GATE_MARKER)).toBe(true);
-  });
-});
-
-describe('publishManagedComments', () => {
-  it('recreates the managed comments at the bottom and deletes every previous one', async () => {
+describe('publishQaReport', () => {
+  it('updates the newest report comment in place and cleans up duplicates and legacy comments', async () => {
     const github = new FakeGithubClient(
       [
-        bot(1, QA_GATE_MARKER),
+        bot(1, QA_REPORT_MARKER),
         human(2),
-        bot(3, CHANGELOG_PREVIEW_MARKER),
-        bot(4, COMMITS_MARKER),
-        bot(5, COMMITS_MARKER),
-        bot(6, CHANGELOG_PREVIEW_MARKER),
-        bot(7, QA_GATE_MARKER),
+        bot(3, PREVIEW_MARKER),
+        bot(4, LEGACY_COMMITS_MARKER),
+        bot(5, QA_REPORT_MARKER),
       ],
       'head-sha'
     );
     const core = new FakeCore();
 
-    const published = await publishManagedComments(
+    const published = await publishQaReport(
       { github, context, core },
-      { pullNumber: 7, expectedHeadSha: 'head-sha', comments: desiredComments }
+      { pullNumber: 7, expectedHeadSha: 'head-sha', body: REPORT_BODY }
     );
 
     expect(published).toBe(true);
-    expect(github.createdBodies.map((body) => body.split('\n')[0])).toEqual([
-      'commits',
-      'changelog',
-      'qa',
-    ]);
-    expect(github.deletedIds.sort((a, b) => a - b)).toEqual([1, 3, 4, 5, 6, 7]);
-    expect(github.comments.filter((comment) => comment.user.type === 'User')).toHaveLength(1);
-    // The fresh set sits after the human comment, in display order.
+    expect(github.updates).toEqual([{ id: 5, body: REPORT_BODY }]);
+    expect(github.createdBodies).toEqual([]);
+    expect(github.deletedIds.sort((a, b) => a - b)).toEqual([1, 3, 4]);
     expect(github.comments.map((comment) => comment.body.split('\n')[0])).toEqual([
       'just my opinion',
-      'commits',
-      'changelog',
-      'qa',
+      'fresh report',
     ]);
     expect(core.notices).toEqual([]);
   });
 
-  it('skips publishing when the PR head moved past the expected sha', async () => {
-    const github = new FakeGithubClient([bot(1, QA_GATE_MARKER)], 'newer-sha');
+  it('creates the report comment when none exists yet', async () => {
+    const github = new FakeGithubClient([human(2)], 'head-sha');
     const core = new FakeCore();
 
-    const published = await publishManagedComments(
+    const published = await publishQaReport(
       { github, context, core },
-      { pullNumber: 7, expectedHeadSha: 'old-sha', comments: desiredComments }
+      { pullNumber: 7, expectedHeadSha: 'head-sha', body: REPORT_BODY }
+    );
+
+    expect(published).toBe(true);
+    expect(github.createdBodies).toEqual([REPORT_BODY]);
+    expect(github.updates).toEqual([]);
+    expect(github.deletedIds).toEqual([]);
+  });
+
+  it('skips publishing when the PR head moved past the expected sha', async () => {
+    const github = new FakeGithubClient([bot(1, QA_REPORT_MARKER)], 'newer-sha');
+    const core = new FakeCore();
+
+    const published = await publishQaReport(
+      { github, context, core },
+      { pullNumber: 7, expectedHeadSha: 'old-sha', body: REPORT_BODY }
     );
 
     expect(published).toBe(false);
     expect(github.deletedIds).toEqual([]);
+    expect(github.updates).toEqual([]);
     expect(github.createdBodies).toEqual([]);
     expect(core.notices).toHaveLength(1);
   });
 
-  it('converges to exactly one comment per marker across reruns', async () => {
-    const github = new FakeGithubClient([], 'head-sha');
-    const core = new FakeCore();
-    const options = { pullNumber: 7, expectedHeadSha: 'head-sha', comments: desiredComments };
-
-    await publishManagedComments({ github, context, core }, options);
-    await publishManagedComments({ github, context, core }, options);
-
-    expect(github.createdBodies).toHaveLength(6);
-    expect(github.deletedIds).toHaveLength(3);
-    expect(github.comments.filter(isManagedComment)).toHaveLength(3);
-    expect(github.comments.map((comment) => comment.body.split('\n')[0])).toEqual([
-      'commits',
-      'changelog',
-      'qa',
-    ]);
-  });
-
-  it('keeps the previous comments when a create fails mid-publish', async () => {
-    const github = new FakeGithubClient([bot(1, QA_GATE_MARKER)], 'head-sha', true);
+  it('keeps every existing comment when the write fails', async () => {
+    const github = new FakeGithubClient(
+      [bot(1, QA_REPORT_MARKER), bot(3, PREVIEW_MARKER)],
+      'head-sha',
+      true
+    );
     const core = new FakeCore();
 
     await expect(
-      publishManagedComments(
+      publishQaReport(
         { github, context, core },
-        { pullNumber: 7, expectedHeadSha: 'head-sha', comments: desiredComments }
+        { pullNumber: 7, expectedHeadSha: 'head-sha', body: REPORT_BODY }
       )
-    ).rejects.toThrow('create failed');
+    ).rejects.toThrow('update failed');
 
     expect(github.deletedIds).toEqual([]);
-    expect(github.comments.map((comment) => comment.id)).toEqual([1]);
+    expect(github.comments.map((comment) => comment.id)).toEqual([1, 3]);
   });
 
-  it('rejects bodies not ending with their marker and unknown markers', async () => {
+  it('rejects bodies not ending with the report marker', async () => {
     const github = new FakeGithubClient([], 'head-sha');
     const core = new FakeCore();
 
     await expect(
-      publishManagedComments(
+      publishQaReport(
         { github, context, core },
-        {
-          pullNumber: 7,
-          expectedHeadSha: 'head-sha',
-          comments: [{ marker: QA_GATE_MARKER, body: 'no marker here' }],
-        }
+        { pullNumber: 7, expectedHeadSha: 'head-sha', body: 'no marker here' }
       )
     ).rejects.toThrow('must end with its marker');
-
-    await expect(
-      publishManagedComments(
-        { github, context, core },
-        {
-          pullNumber: 7,
-          expectedHeadSha: 'head-sha',
-          comments: [{ marker: '<!-- rogue -->', body: '<!-- rogue -->' }],
-        }
-      )
-    ).rejects.toThrow('Unknown managed comment marker');
   });
 
-  it('rejects duplicate managed markers in one publish', async () => {
+  it('converges to exactly one report comment across reruns', async () => {
     const github = new FakeGithubClient([], 'head-sha');
     const core = new FakeCore();
+    const options = { pullNumber: 7, expectedHeadSha: 'head-sha', body: REPORT_BODY };
 
-    await expect(
-      publishManagedComments(
-        { github, context, core },
-        {
-          pullNumber: 7,
-          expectedHeadSha: 'head-sha',
-          comments: [
-            { marker: QA_GATE_MARKER, body: `qa\n${QA_GATE_MARKER}` },
-            { marker: QA_GATE_MARKER, body: `qa again\n${QA_GATE_MARKER}` },
-          ],
-        }
-      )
-    ).rejects.toThrow('Duplicate managed comment marker');
+    await publishQaReport({ github, context, core }, options);
+    await publishQaReport({ github, context, core }, options);
+
+    expect(github.createdBodies).toHaveLength(1);
+    expect(github.updates).toHaveLength(1);
+    expect(github.comments.filter(isManagedComment)).toHaveLength(1);
   });
 });
 
-describe('readCommentBody', () => {
+describe('readReportBody', () => {
   it('returns the file content when it ends with the marker', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'mango-publish-'));
     tempDirs.push(dir);
-    const path = join(dir, 'comment.md');
-    await writeFile(path, `rendered body\n${QA_GATE_MARKER}\n`, 'utf8');
+    const path = join(dir, 'report.md');
+    await writeFile(path, `rendered body\n${QA_REPORT_MARKER}\n`, 'utf8');
 
-    expect(await readCommentBody(path, QA_GATE_MARKER)).toBe(`rendered body\n${QA_GATE_MARKER}`);
+    expect(await readReportBody(path)).toBe(`rendered body\n${QA_REPORT_MARKER}`);
   });
 
   it('falls back for missing files and marker-less content', async () => {
@@ -301,16 +255,10 @@ describe('readCommentBody', () => {
     tempDirs.push(dir);
     const markerless = join(dir, 'markerless.md');
     await writeFile(markerless, 'partial output, render crashed midway', 'utf8');
-    const expected = [MANAGED_FALLBACKS[QA_GATE_MARKER], '', QA_GATE_MARKER].join('\n');
 
-    expect(await readCommentBody(join(dir, 'absent.md'), QA_GATE_MARKER)).toBe(expected);
-    expect(await readCommentBody(markerless, QA_GATE_MARKER)).toBe(expected);
-  });
-
-  it('rejects markers without a registered fallback', async () => {
-    await expect(readCommentBody('whatever.md', '<!-- rogue -->')).rejects.toThrow(
-      'Unknown managed comment marker'
-    );
+    expect(await readReportBody(join(dir, 'absent.md'))).toBe(REPORT_FALLBACK_BODY);
+    expect(await readReportBody(markerless)).toBe(REPORT_FALLBACK_BODY);
+    expect(REPORT_FALLBACK_BODY.endsWith(QA_REPORT_MARKER)).toBe(true);
   });
 });
 

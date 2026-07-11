@@ -1,12 +1,8 @@
-import { afterEach, describe, expect, it } from 'bun:test';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { describe, expect, it } from 'bun:test';
 
 import type { Metrics } from './collect/types';
+import { COMMENT_MARKER, renderDocument } from './render/document';
 import { makeCoverageSummary, makeMetrics } from './testing/metrics-fixture';
-
-const tempDirs: string[] = [];
 
 const makeMetricsWithFrontendLines = (sha: string, lineCoverage: number): Metrics =>
   makeMetrics(sha, {
@@ -17,61 +13,21 @@ const makeMetricsWithFrontendLines = (sha: string, lineCoverage: number): Metric
     },
   });
 
-const writeMetrics = async (metrics: Metrics): Promise<string> => {
-  const dir = await mkdtemp(join(tmpdir(), 'mango-render-'));
-  tempDirs.push(dir);
-  const path = join(dir, `${metrics.sha}.json`);
-  await writeFile(path, JSON.stringify(metrics), 'utf8');
-  return path;
-};
-
-interface RenderOptions {
-  readonly expectedStderr?: string;
-}
-
-const render = async (
-  basePath: string,
-  headPath: string,
-  options: RenderOptions = {}
-): Promise<string> => {
-  const proc = Bun.spawn({
-    cmd: ['bun', './scripts/qa-gate/render.ts', basePath, headPath],
-    stdout: 'pipe',
-    stderr: 'pipe',
-  });
-  const [stdout, stderr, exitCode] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-    proc.exited,
-  ]);
-  if (options.expectedStderr) {
-    expect(stderr).toContain(options.expectedStderr);
-  } else {
-    expect(stderr).toBe('');
-  }
-  expect(exitCode).toBe(0);
-  return stdout;
-};
-
-afterEach(async () => {
-  await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
-});
-
-describe('QA gate comment renderer', () => {
-  it('renders a stable marker and coverage delta for sticky PR comments', async () => {
-    const basePath = await writeMetrics(makeMetricsWithFrontendLines('0123456789', 80));
-    const headPath = await writeMetrics(makeMetricsWithFrontendLines('abcdef1234', 82));
-
-    const comment = await render(basePath, headPath);
+describe('QA gate document renderer', () => {
+  it('renders a stable marker and coverage delta', () => {
+    const comment = renderDocument(
+      makeMetricsWithFrontendLines('0123456789', 80),
+      makeMetricsWithFrontendLines('abcdef1234', 82)
+    );
 
     expect(comment).toContain('## QA Gate');
-    expect(comment).toContain('<!-- qa-gate-comment -->');
+    expect(comment.trimEnd().endsWith(COMMENT_MARKER)).toBe(true);
     expect(comment).toContain('✅ **No attention signals**');
     expect(comment).toContain('Line coverage (all workspaces)');
     expect(comment).toContain('<summary>Metric details');
     expect(comment).toContain('Frontend Bundle');
     expect(comment).toContain('Dependencies');
-    expect(comment).toContain('Tests by Lane');
+    expect(comment).toContain('### Tests');
     expect(comment).toContain('Repo Tooling');
     expect(comment).toContain('API/shared branches and statements are source-derived');
     expect(comment).toContain('Full repo check');
@@ -79,7 +35,7 @@ describe('QA gate comment renderer', () => {
     expect(comment).toContain('+2pp');
   });
 
-  it('renders a legitimate zero denominator as n/a (0/0) without a delta', async () => {
+  it('renders a legitimate zero denominator as n/a (0/0) without a delta', () => {
     const naBucket = { total: 0, covered: 0, pct: null };
     const metricsWithNaBranches = (sha: string): Metrics =>
       makeMetrics(sha, {
@@ -89,52 +45,47 @@ describe('QA gate comment renderer', () => {
           shared: makeCoverageSummary(),
         },
       });
-    const basePath = await writeMetrics(metricsWithNaBranches('0123456789'));
-    const headPath = await writeMetrics(metricsWithNaBranches('abcdef1234'));
 
-    const comment = await render(basePath, headPath);
+    const comment = renderDocument(
+      metricsWithNaBranches('0123456789'),
+      metricsWithNaBranches('abcdef1234')
+    );
 
     expect(comment).toContain('| api | branches | n/a (0/0) | n/a (0/0) | n/a |');
   });
 
-  it('surfaces head regressions in the verdict headline', async () => {
-    const basePath = await writeMetrics(makeMetrics('0123456789'));
-    const headPath = await writeMetrics(
+  it('surfaces head regressions in the verdict headline', () => {
+    const comment = renderDocument(
+      makeMetrics('0123456789'),
       makeMetrics('abcdef1234', { tooling: { checkExitCode: 1, failedTasks: ['typecheck'] } })
     );
 
-    const comment = await render(basePath, headPath);
-
-    expect(comment).toContain('⚠️ **Needs attention:** repo check failing: typecheck');
+    expect(comment).toContain('⚠️ **Needs attention:** repo check failing: `typecheck`');
   });
 
-  it('keeps rendering when one metrics file is unavailable', async () => {
-    const basePath = await writeMetrics(makeMetricsWithFrontendLines('0123456789', 80));
-
-    const comment = await render(basePath, '/missing/metrics.json', {
-      expectedStderr: 'failed to load /missing/metrics.json',
-    });
+  it('keeps rendering when one side is unavailable', () => {
+    const comment = renderDocument(makeMetricsWithFrontendLines('0123456789', 80), null);
 
     expect(comment).toContain('Collector errors');
     expect(comment).toContain('metrics file was not loadable');
+    expect(comment).toContain('Verdict unavailable');
   });
 
-  // Regression: when a collector job fails, the workflow writes `{}` as the
-  // placeholder artifact. That parses to a valid object but has no metric
-  // records, which used to crash collectErrorNotes on metrics.coverage[ws].
-  it('keeps rendering when one metrics file is an empty placeholder', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'mango-render-'));
-    tempDirs.push(dir);
-    const emptyBasePath = join(dir, 'empty.json');
-    await writeFile(emptyBasePath, '{}', 'utf8');
-    const headPath = await writeMetrics(makeMetricsWithFrontendLines('abcdef1234', 82));
+  // Artifact strings are untrusted: collector "error" messages and failed
+  // task names must never become active Markdown/HTML in the comment.
+  it('neutralizes markdown and backticks in artifact-supplied strings', () => {
+    const injection = 'boom` <img src=x onerror=alert(1)>\n\n## fake heading';
+    const comment = renderDocument(
+      null,
+      makeMetrics('abcdef1234', {
+        duplication: { error: injection },
+        tooling: { checkExitCode: 1, failedTasks: ['`<script>`'] },
+      })
+    );
 
-    const comment = await render(emptyBasePath, headPath, {
-      expectedStderr: 'lacks metric fields; treating side as absent',
-    });
-
-    expect(comment).toContain('## QA Gate');
-    expect(comment).toContain('<!-- qa-gate-comment -->');
-    expect(comment).toContain('metrics file was not loadable');
+    expect(comment).not.toContain('boom`');
+    expect(comment).not.toContain('\n## fake heading');
+    expect(comment).toContain("boom' <img src=x onerror=alert(1)> ## fake heading");
+    expect(comment).toContain("`'<script>'`");
   });
 });

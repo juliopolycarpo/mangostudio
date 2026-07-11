@@ -12,6 +12,14 @@ export const ok = <T>(value: Failable<T> | null | undefined): value is T =>
 
 export const shortSha = (sha: string | undefined): string => (sha ? sha.slice(0, 7) : NA);
 
+/**
+ * Embed an untrusted metric string (collector error message, task name) as an
+ * inline code span it cannot escape from: backticks are replaced and newlines
+ * collapsed, so artifact-supplied text never becomes active Markdown/HTML.
+ */
+export const inlineCode = (text: string): string =>
+  `\`${text.replace(/`/g, "'").replace(/\s+/g, ' ').trim() || NA}\``;
+
 export const formatNumber = (value: number): string => value.toLocaleString('en-US');
 
 export const formatPct = (value: number): string => `${value.toFixed(2)}%`;

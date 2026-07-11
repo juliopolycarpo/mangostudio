@@ -1,0 +1,145 @@
+name: PR QA Report
+
+# Privileged publisher for the single managed PR comment (commit summary,
+# changelog preview, run status, QA metrics comparison). Report-only — never
+# fails the PR.
+#
+# Trust boundary: this workflow runs with a write-capable token, so it only
+# ever executes default-branch tooling. It never checks out or runs pull
+# request code. Everything derived from the PR side arrives as data:
+# - the PR itself is resolved from the GitHub API by head owner:branch and
+#   must match the triggering run's exact head SHA (never artifact content),
+# - qa-metrics artifacts are size-capped before and after download, extracted
+#   with `unzip -p | head -c` (no paths, no symlinks, hard byte bound), and
+#   schema-validated against API-resolved provenance before rendering,
+# - commits and changelog are rendered from fetched git objects, not from
+#   anything the PR uploaded,
+# - the comment updates in place by marker and is skipped when the PR head
+#   moved on, so a stale run can never clobber a newer report.
+#
+# The unprivileged side (ci.yml → test.yml/qa-metrics.yml) runs PR code with
+# `contents: read` only and communicates exclusively through artifacts.
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+
+permissions: {}
+
+concurrency:
+  group: pr-qa-report-${{ github.event.workflow_run.head_repository.owner.login }}-${{ github.event.workflow_run.head_branch }}
+  cancel-in-progress: true
+
+env:
+  # Mirrors QA_METRICS_MAX_BYTES / QA_METRICS_FILE_NAME in
+  # scripts/qa-gate/metrics-envelope.ts (the validator re-checks the bound).
+  METRICS_MAX_BYTES: 1048576
+  METRICS_FILE_NAME: metrics.json
+
+jobs:
+  report:
+    name: Publish QA Report
+    if: ${{ github.event.workflow_run.event == 'pull_request' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: write
+    steps:
+      # Default-branch checkout: trusted tooling only, full history so the
+      # commit summary and git-cliff can walk base..head once the PR head ref
+      # is fetched below.
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+
+      - uses: ./.github/actions/setup-mango
+
+      - name: Resolve PR and download metrics archives
+        id: resolve
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const { writeFile } = await import('node:fs/promises');
+            const pipeline = await import(
+              `${process.env.GITHUB_WORKSPACE}/scripts/qa-gate/publish/report-pipeline.mjs`
+            );
+            const inputs = await pipeline.resolveReportInputs({ github, context });
+            if (inputs.skip) {
+              core.notice(`Skipping QA report: ${inputs.skip}`);
+              core.setOutput('publish', 'false');
+              return;
+            }
+            await writeFile('report-context.json', JSON.stringify(inputs.reportContext));
+            if (inputs.headArchive) {
+              await writeFile('head-archive.zip', Buffer.from(inputs.headArchive));
+            }
+            if (inputs.baseArchive) {
+              await writeFile('base-archive.zip', Buffer.from(inputs.baseArchive));
+            }
+            core.setOutput('publish', 'true');
+            core.setOutput('pr-number', String(inputs.reportContext.prNumber));
+
+      # `unzip -p` streams the named entry without writing archive-controlled
+      # paths or symlinks to disk; head -c enforces the byte bound before the
+      # TypeBox validator sees the payload.
+      - name: Extract metrics payloads
+        if: ${{ steps.resolve.outputs.publish == 'true' }}
+        run: |
+          set -euo pipefail
+          extract() {
+            local archive="$1" out="$2"
+            [ -f "$archive" ] || return 0
+            if unzip -p "$archive" "$METRICS_FILE_NAME" \
+              | head -c "$((METRICS_MAX_BYTES + 1))" > "$out"; then
+              return 0
+            fi
+            echo "::warning::failed to extract $METRICS_FILE_NAME from $archive"
+            rm -f "$out"
+          }
+          extract head-archive.zip head-metrics.json
+          extract base-archive.zip base-metrics.json
+
+      - name: Fetch PR head commits
+        if: ${{ steps.resolve.outputs.publish == 'true' }}
+        env:
+          PR_NUMBER: ${{ steps.resolve.outputs.pr-number }}
+        # refs/pull/N/head is served by the base repository, so this fetches
+        # git objects (safe data) without checking any of them out.
+        run: git fetch --no-tags origin "refs/pull/${PR_NUMBER}/head"
+
+      # continue-on-error: a renderer crash still reaches the publish step,
+      # which substitutes the fallback body instead of stranding a stale
+      # comment. render-report.ts itself degrades per-section on bad input.
+      - name: Render report
+        if: ${{ steps.resolve.outputs.publish == 'true' }}
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          args=(report-context.json)
+          [ -f head-metrics.json ] && args+=(--head head-metrics.json)
+          [ -f base-metrics.json ] && args+=(--base base-metrics.json)
+          bun ./scripts/qa-gate/render-report.ts "${args[@]}" > report.md
+          echo "## Rendered report preview" >> "$GITHUB_STEP_SUMMARY"
+          cat report.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publish comment
+        if: ${{ steps.resolve.outputs.publish == 'true' }}
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const { readFile } = await import('node:fs/promises');
+            const publish = await import(
+              `${process.env.GITHUB_WORKSPACE}/scripts/qa-gate/publish/managed-comments.mjs`
+            );
+            const reportContext = JSON.parse(await readFile('report-context.json', 'utf8'));
+            await publish.publishQaReport(
+              { github, context, core },
+              {
+                pullNumber: reportContext.prNumber,
+                expectedHeadSha: reportContext.headSha,
+                body: await publish.readReportBody('report.md'),
+              }
+            );
