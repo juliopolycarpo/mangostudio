@@ -369,6 +369,37 @@ instead of uploading success-only artifacts. The browser-smoke workflow keeps a
 `workflow_dispatch` input (`always_upload_report`) to upload the HTML report for
 a passing run when needed.
 
+## CI Cache Policy
+
+All dependency and intermediate-state caches are owned by composites under
+`.github/actions/`; workflows must not call `actions/cache` directly. Every
+composite uses the same immutable `actions/cache` revision and writes its hit,
+primary key, and restored key to the job's `Cache policy` summary.
+
+| Family                | Producer / consumer            | Path                               | Invalidators                                    | Size / writes                     |
+| --------------------- | ------------------------------ | ---------------------------------- | ----------------------------------------------- | --------------------------------- |
+| Bun install           | every job using `setup-mango`  | `~/.bun/install/cache`             | OS, arch, Bun version, lockfile                 | moderate; concurrent writes safe  |
+| Turbo task output     | check, test, build, QA metrics | `.turbo/cache`                     | OS, arch, Bun/Turbo versions, lane, task config | moderate; lane-partitioned writes |
+| Vite optimizer        | test and build                 | `apps/frontend/node_modules/.vite` | lockfile and frontend/Vite/Vitest/TS config     | small; lane-partitioned writes    |
+| TypeScript build info | check                          | `.mango/artifacts/tsbuildinfo/`    | TypeScript version, tsconfig graph, TS sources  | small; one check writer           |
+| Workflow lint tools   | check                          | `.mango/artifacts/tools/`          | pinned tool manifest                            | small; exact trusted restore only |
+| Playwright browser    | browser smoke                  | `~/.cache/ms-playwright`           | OS, arch, Playwright version                    | large; one browser-smoke writer   |
+
+`CI_CACHE_EPOCH` is the repository-wide emergency invalidation lever. It is an
+Actions repository variable with a documented `v1` fallback, passed explicitly
+to every cache composite. Increment it (for example, to `v2`) to force a clean
+miss after suspected poisoning or a broken key rollout. Removing the variable
+returns to `v1`; only do that for a benign rollback because old `v1` entries may
+still exist.
+
+Main pushes write reusable `main` keys. Pull requests first restore a matching
+trusted `main` key, then write only a `pr-<number>` primary key; fork permissions
+may make that final save restore-only. Other trusted triggers use run-scoped
+primary keys and can restore only `main` prefixes. Consequently, privileged
+release jobs never restore a PR-produced cache. Cache paths contain dependencies
+or rebuildable intermediate state only—distribution and QA artifacts keep their
+separate upload/download policies above.
+
 ## Verification Checklist
 
 Before merging, run:

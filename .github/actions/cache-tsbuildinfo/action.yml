@@ -1,17 +1,12 @@
-name: Cache Vite optimizer
-description: >
-  Restore the frontend Vite dependency optimizer cache. Scope partitions
-  concurrent writers while trusted main caches remain available to PR runs.
+name: Cache TypeScript build info
+description: Restore incremental TypeScript build metadata for the repository graph.
 inputs:
-  scope:
-    description: Writer lane, such as test or build.
-    required: true
   cache-epoch:
     description: Repository-wide cache epoch used for emergency invalidation.
     required: true
 outputs:
   cache-hit:
-    description: "'true' when the primary Vite cache key matched"
+    description: "'true' when the primary TypeScript cache key matched"
     value: ${{ steps.cache.outputs.cache-hit }}
   primary-key:
     description: Primary cache key used by this run.
@@ -22,35 +17,39 @@ outputs:
 runs:
   using: composite
   steps:
+    - id: toolchain
+      name: Resolve TypeScript version
+      shell: bash
+      run: echo "typescript=$(bunx --bun tsc --version | awk '{print $2}')" >> "$GITHUB_OUTPUT"
+
     - id: keys
-      name: Resolve Vite cache keys
+      name: Resolve TypeScript cache keys
       shell: bash
       env:
         CACHE_EPOCH: ${{ inputs.cache-epoch }}
-        CACHE_SCOPE: ${{ inputs.scope }}
-        CONTENT_HASH: ${{ hashFiles('bun.lock', 'apps/frontend/package.json', 'apps/frontend/vite.config.ts', 'apps/frontend/vitest.config.ts', 'apps/frontend/tsconfig*.json') }}
+        CONFIG_HASH: ${{ hashFiles('tsconfig*.json', 'apps/**/tsconfig*.json', 'packages/**/tsconfig*.json') }}
+        SOURCE_HASH: ${{ hashFiles('apps/**/*.ts', 'apps/**/*.tsx', 'packages/**/*.ts', 'scripts/**/*.ts') }}
+        TYPESCRIPT_VERSION: ${{ steps.toolchain.outputs.typescript }}
         WRITE_SCOPE: ${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.event_name == 'push' && github.ref == 'refs/heads/main' && 'main' || format('run-{0}', github.run_id) }}
       run: |
-        prefix="${RUNNER_OS}-${RUNNER_ARCH}-${CACHE_EPOCH}-vite"
-        validity="${CACHE_SCOPE}-${CONTENT_HASH}"
+        prefix="${RUNNER_OS}-${RUNNER_ARCH}-${CACHE_EPOCH}-tsbuildinfo"
+        validity="typescript-${TYPESCRIPT_VERSION}-${CONFIG_HASH}-${SOURCE_HASH}"
         echo "primary-key=${prefix}-${WRITE_SCOPE}-${validity}" >> "$GITHUB_OUTPUT"
         echo "restore-key=${prefix}-main-${validity}" >> "$GITHUB_OUTPUT"
-        echo "restore-prefix=${prefix}-main-${CACHE_SCOPE}-" >> "$GITHUB_OUTPUT"
+        echo "restore-prefix=${prefix}-main-typescript-${TYPESCRIPT_VERSION}-" >> "$GITHUB_OUTPUT"
 
     - id: cache
-      name: Restore Vite optimizer cache
+      name: Restore TypeScript build info
       uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
-        path: apps/frontend/node_modules/.vite
+        path: .mango/artifacts/tsbuildinfo/
         key: ${{ steps.keys.outputs.primary-key }}
         restore-keys: |
           ${{ steps.keys.outputs.restore-key }}
           ${{ steps.keys.outputs.restore-prefix }}
 
-    - name: Summarize Vite cache
+    - name: Summarize TypeScript cache
       shell: bash
-      env:
-        CACHE_SCOPE: ${{ inputs.scope }}
       run: >
-        echo "- Vite (${CACHE_SCOPE}): hit=\`${{ steps.cache.outputs.cache-hit }}\`, key=\`${{ steps.keys.outputs.primary-key }}\`, restore-prefix=\`${{ steps.keys.outputs.restore-prefix }}\`"
+        echo "- TypeScript: hit=\`${{ steps.cache.outputs.cache-hit }}\`, key=\`${{ steps.keys.outputs.primary-key }}\`, restore-prefix=\`${{ steps.keys.outputs.restore-prefix }}\`"
         >> "$GITHUB_STEP_SUMMARY"

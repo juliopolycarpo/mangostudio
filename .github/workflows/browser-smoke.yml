@@ -30,40 +30,34 @@ jobs:
     name: Chromium auth flow
     runs-on: ubuntu-24.04
     timeout-minutes: 10
-    env:
-      CACHE_VERSION: v1
-
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - uses: ./.github/actions/setup-mango
-
-      - name: Resolve Playwright version
-        id: pw
-        shell: bash
-        run: |
-          version=$(bunx --bun playwright --version | awk '{print $2}')
-          echo "version=$version" >> "$GITHUB_OUTPUT"
+        with:
+          cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
       - name: Restore Playwright browser cache
         id: pw-cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        uses: ./.github/actions/cache-playwright
         with:
-          path: ~/.cache/ms-playwright
-          # Key is tied to the exact Playwright version so a browser update
-          # always triggers a fresh download. CACHE_VERSION provides a manual
-          # rollback lever in case of cache poisoning.
-          key: ${{ runner.os }}-${{ env.CACHE_VERSION }}-playwright-${{ steps.pw.outputs.version }}
-          restore-keys: |
-            ${{ runner.os }}-${{ env.CACHE_VERSION }}-playwright-
+          mode: restore
+          cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
       - name: Install Playwright Chromium
-        if: steps.pw-cache.outputs.cache-hit != 'true'
+        if: steps.pw-cache.outputs.cache-restored != 'true'
         run: bun run test:e2e:setup
 
       - name: Install OS deps for Chromium (cache hit path)
-        if: steps.pw-cache.outputs.cache-hit == 'true'
+        if: steps.pw-cache.outputs.cache-restored == 'true'
         run: bunx playwright install-deps chromium
+
+      - name: Save Playwright browser cache
+        if: steps.pw-cache.outputs.cache-restored != 'true'
+        uses: ./.github/actions/cache-playwright
+        with:
+          mode: save
+          cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
       - name: Run browser smoke suite
         run: |
