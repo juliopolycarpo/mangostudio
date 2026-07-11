@@ -12,7 +12,7 @@ import {
   getTotalLineCoverage,
   sumTsErrors,
 } from './access';
-import { formatBytes } from './format';
+import { formatBytes, inlineCode } from './format';
 
 // Ignore sub-0.1pp percentage drift and sub-10KiB gzip growth — both are
 // routine noise on unrelated changes and would make the verdict cry wolf.
@@ -66,7 +66,8 @@ export const collectAttentionItems = (base: Metrics | null, head: Metrics | null
 
   const tooling = getTooling(head);
   if (tooling && tooling.checkExitCode !== 0) {
-    const failed = tooling.failedTasks.length > 0 ? `: ${tooling.failedTasks.join(', ')}` : '';
+    const failed =
+      tooling.failedTasks.length > 0 ? `: ${tooling.failedTasks.map(inlineCode).join(', ')}` : '';
     items.push(`repo check failing${failed}`);
   }
 

@@ -9,7 +9,9 @@ function printHelp(): never {
 Project wrapper around git-cliff (see cliff.toml). Modes:
   --init [version]       Regenerate CHANGELOG.md from full history (default tag:
                          the root package.json version)
-  --preview [--base ref] Print this branch's changelog entries (default base: origin/main)
+  --preview [--base ref] [--head ref]
+                         Print a branch's changelog entries (defaults:
+                         base origin/main, head HEAD)
   --release <version>    Regenerate CHANGELOG.md including <version>
   --help                 Show this help message`);
   process.exit(0);

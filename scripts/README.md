@@ -44,20 +44,28 @@ importing the specific module in new code:
 | `release-version.ts` | Canonical release version resolver + lockstep consistency check |
 | `prepare-release.ts` | Two-phase lockstep version bump for release preparation         |
 
-## qa-gate/ — PR comment automation
+## qa-gate/ — PR QA report automation
 
-Powers the bot comments the `pr-qa-gate.yml` workflow manages on every PR:
+Powers the consolidated QA report comment on every PR. Collection runs
+unprivileged inside CI (`ci.yml`); publishing runs in the trusted
+`pr-qa-report.yml` workflow with default-branch tooling only:
 
-- `collect.ts` + `collect/*` — gather coverage, LoC, bundle, dependency,
-  duplication, test, and tooling metrics into a `metrics.json`.
-- `render.ts` + `render/*` — render the QA-gate comparison comment (verdict
-  headline, summary deltas, collapsed metric tables) from base/head metrics.
-- `render-commits.ts` + `commit-log.ts` — render the commit-summary comment
-  (list + expandable full messages) from the PR's base..head range.
-- `publish/managed-comments.mjs` — publisher that re-posts the managed
-  comments at the bottom of the PR timeline (creates the new set, then deletes
-  the previous one). Plain ESM so `actions/github-script` imports it directly;
-  it skips publishing when the PR head has moved on.
+- `collect-test-metrics.ts` — emit the test fragment (suite outcome, duration,
+  coverage summaries) right after CI's single `bun run test --coverage` pass.
+- `collect.ts` + `collect/*` — merge the test fragment with LoC, bundle,
+  dependency, duplication, and tooling metrics into the versioned `qa-metrics`
+  envelope (`metrics-envelope.ts`), uploaded for PR heads and main baselines.
+- `metrics-envelope.ts` — TypeBox schema + provenance validation the publisher
+  applies to untrusted artifact JSON (size cap, shape, repository/SHA/PR match).
+- `render-report.ts` + `report-document.ts` + `render/*` + `commit-log.ts` —
+  render the consolidated comment: commit summary, changelog preview, and the
+  QA comparison (verdict headline, summary deltas, collapsed metric tables).
+- `publish/report-pipeline.mjs` — trusted-side input resolution (open-PR
+  lookup by exact head SHA, size-capped artifact downloads, exact-base
+  baseline run lookup). Plain ESM so `actions/github-script` imports it.
+- `publish/managed-comments.mjs` — publisher that updates the report comment
+  in place by marker (update-or-create), cleans up legacy/duplicate managed
+  comments, and skips publishing when the PR head has moved on.
 
 ## release/ — release-time packaging + publication
 

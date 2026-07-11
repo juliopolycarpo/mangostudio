@@ -27,7 +27,7 @@ describe('collectAttentionItems', () => {
     const items = collectAttentionItems(base, head);
 
     expect(items).toContain('tests failing (exit 1)');
-    expect(items).toContain('repo check failing: typecheck');
+    expect(items).toContain('repo check failing: `typecheck`');
   });
 
   it('flags TypeScript errors and circular dependencies with counts', () => {

@@ -55,11 +55,16 @@ describe('cliffArgs', () => {
     ]);
   });
 
-  test('preview strips boilerplate and scopes to base..HEAD', () => {
-    expect(cliffArgs({ kind: 'preview', base: 'origin/main' })).toEqual([
+  test('preview strips boilerplate and scopes to base..head', () => {
+    expect(cliffArgs({ kind: 'preview', base: 'origin/main', head: 'HEAD' })).toEqual([
       '--strip',
       'all',
       'origin/main..HEAD',
+    ]);
+    expect(cliffArgs({ kind: 'preview', base: 'abc123', head: 'def456' })).toEqual([
+      '--strip',
+      'all',
+      'abc123..def456',
     ]);
   });
 });
@@ -77,10 +82,19 @@ describe('parseChangelogArgs', () => {
     expect(parseChangelogArgs(['--preview'], BASELINE_VERSION)).toEqual({
       kind: 'preview',
       base: 'origin/main',
+      head: 'HEAD',
     });
     expect(parseChangelogArgs(['--preview', '--base', 'abc123'], BASELINE_VERSION)).toEqual({
       kind: 'preview',
       base: 'abc123',
+      head: 'HEAD',
+    });
+    expect(
+      parseChangelogArgs(['--preview', '--base', 'abc123', '--head', 'def456'], BASELINE_VERSION)
+    ).toEqual({
+      kind: 'preview',
+      base: 'abc123',
+      head: 'def456',
     });
   });
 
@@ -153,7 +167,10 @@ describe('assertChangelogHasRelease', () => {
 describe('runChangelog', () => {
   test('preview wraps git-cliff stdout as a comment', () => {
     const fake = new FakeCliff({ stdout: '### Features\n- new', exitCode: 0 });
-    const { output, exitCode } = runChangelog({ kind: 'preview', base: 'origin/main' }, fake.run);
+    const { output, exitCode } = runChangelog(
+      { kind: 'preview', base: 'origin/main', head: 'HEAD' },
+      fake.run
+    );
     expect(fake.lastArgs).toEqual(['--strip', 'all', 'origin/main..HEAD']);
     expect(output).toContain('### Features');
     expect(output).toContain(PREVIEW_MARKER);
