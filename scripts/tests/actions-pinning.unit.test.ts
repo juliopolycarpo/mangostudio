@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { ROOT_DIR } from '../lib/config';
@@ -10,6 +10,11 @@ import { ROOT_DIR } from '../lib/config';
 // this repository's own checked-out commit and are exempt.
 const PINNED_USES_PATTERN = /^[\w.-]+\/[\w./-]+@[a-f0-9]{40} # \S+/;
 
+function actionManifest(actionDir: string): string {
+  const yaml = join(actionDir, 'action.yaml');
+  return existsSync(yaml) ? yaml : join(actionDir, 'action.yml');
+}
+
 function workflowAndActionFiles(): string[] {
   const workflowsDir = join(ROOT_DIR, '.github', 'workflows');
   const actionsDir = join(ROOT_DIR, '.github', 'actions');
@@ -17,7 +22,9 @@ function workflowAndActionFiles(): string[] {
     ...readdirSync(workflowsDir)
       .filter((file) => file.endsWith('.yml') || file.endsWith('.yaml'))
       .map((file) => join(workflowsDir, file)),
-    ...readdirSync(actionsDir).map((dir) => join(actionsDir, dir, 'action.yml')),
+    ...readdirSync(actionsDir, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => actionManifest(join(actionsDir, entry.name))),
   ];
 }
 
