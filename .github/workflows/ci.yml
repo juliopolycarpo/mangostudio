@@ -1,35 +1,27 @@
 name: CI
 
+# The pull_request event is the authoritative CI signal for development
+# branches: one commit on an open PR produces exactly one run, and that run
+# produces the PR's checks and artifacts. Pushes to main gate Canary. Pre-PR
+# validation is local (`bun run check && bun run test`) or a manual
+# workflow_dispatch of this workflow.
+
 on:
   pull_request:
     branches: [main]
   push:
-    branches:
-      - main
-      - "ci/**"
-      - "feat/**"
-      - "fix/**"
-      - "chore/**"
-      - "test/**"
-      - "docs/**"
-      - "refactor/**"
-      - "migration/**"
-      - "perf/**"
-      - "security/**"
-      - "release/**"
-      - "hotfix/**"
-      - "bugfix/**"
-      - "build/**"
-      - "style/**"
-      - "copilot/**"
-      - "claude/**"
+    branches: [main]
   workflow_dispatch:
 
 permissions:
   contents: read
 
+# One authoritative run per PR — keyed by PR number so a new push supersedes
+# (cancels) the previous run even across branch renames or forks, and never by
+# SHA, which would let stale runs survive. Runs on main are never cancelled so
+# every green push reaches Canary.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
@@ -69,14 +61,43 @@ jobs:
     name: Smoke — Binary
     uses: ./.github/workflows/smoke-binary.yml
 
+  gate:
+    # Single stable check ("CI / Gate") aggregating every mandatory job, so
+    # branch protection and Canary depend on one name instead of tracking
+    # internal job names and matrix shapes. Every job above except this one
+    # and canary must be in `needs`; the ci-gate unit tests enforce that.
+    # qa-metrics only runs for PRs and main pushes, so its skip is accepted
+    # solely on workflow_dispatch; any other non-success fails the gate.
+    name: Gate
+    needs: [check, test, build, browser-smoke, qa-metrics, smoke]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+
+      - name: Evaluate mandatory job results
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+          ALLOWED_SKIPS: ${{ github.event_name == 'workflow_dispatch' && 'qa-metrics' || '' }}
+        # Dependency-free script; runs without `bun install`.
+        run: bun ./scripts/ci/evaluate-gate.ts
+
   canary:
-    # Publish a canary build from the latest green commit on main. Gating on every
-    # other CI job means this only runs once the commit is fully green, so that
-    # commit is the canary source. The job-level permissions here are the ceiling
-    # for the called workflow (ci.yml's top-level grant is read-only); canary.yml's
+    # Publish a canary build from the latest green commit on main. The
+    # aggregate gate is the single definition of "green": if any mandatory job
+    # failed, was cancelled, or skipped unexpectedly, the gate fails and this
+    # job never runs. The job-level permissions here are the ceiling for the
+    # called workflow (ci.yml's top-level grant is read-only); canary.yml's
     # own jobs scope down further.
     name: Canary
-    needs: [check, test, build, browser-smoke, smoke]
+    needs: [gate]
     if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
     permissions:
       contents: write
