@@ -14,6 +14,18 @@ async function runTar(args: readonly string[]): Promise<string> {
   return result.stdout;
 }
 
+export function distributionTarArgs(
+  operation: 'list' | 'extract',
+  bundle: string,
+  destination?: string,
+  platform: NodeJS.Platform = process.platform
+): string[] {
+  const args = platform === 'win32' ? ['--force-local'] : [];
+  if (operation === 'list') return [...args, '-tzf', bundle];
+  if (!destination) throw new Error('Distribution extraction requires a destination.');
+  return [...args, '-xzf', bundle, '-C', destination];
+}
+
 async function main(): Promise<void> {
   const [bundleArg, destinationArg, ...extra] = process.argv.slice(2);
   if (!bundleArg || !destinationArg || extra.length > 0) {
@@ -24,15 +36,17 @@ async function main(): Promise<void> {
 
   const bundle = resolve(bundleArg);
   const destination = resolve(destinationArg);
-  const listing = await runTar(['-tzf', bundle]);
+  const listing = await runTar(distributionTarArgs('list', bundle));
   assertSafeDistributionArchiveEntries(listing.split('\n').filter(Boolean));
-  await runTar(['-xzf', bundle, '-C', destination]);
+  await runTar(distributionTarArgs('extract', bundle, destination));
   success(`Distribution bundle extracted to ${destination}`);
 }
 
-try {
-  await main();
-} catch (caught) {
-  error(caught instanceof Error ? caught.message : String(caught));
-  process.exit(1);
+if (import.meta.main) {
+  try {
+    await main();
+  } catch (caught) {
+    error(caught instanceof Error ? caught.message : String(caught));
+    process.exit(1);
+  }
 }
