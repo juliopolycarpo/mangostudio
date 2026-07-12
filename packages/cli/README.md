@@ -53,6 +53,16 @@ The database is created and migrated automatically on first run.
 `win32-arm64`. Other targets (including musl builds) are available as direct
 downloads on the [releases page](https://github.com/juliopolycarpo/mangostudio/releases).
 
+To check which platform package the wrapper resolved (for example when
+diagnosing an install), run it with `MANGOSTUDIO_WRAPPER_INFO=1`:
+
+```bash
+MANGOSTUDIO_WRAPPER_INFO=1 mangostudio
+```
+
+This prints the detected platform, the resolved `@mangostudio/cli-*` package,
+its version, and the binary path, then exits without starting the CLI.
+
 ## License
 
 MIT
