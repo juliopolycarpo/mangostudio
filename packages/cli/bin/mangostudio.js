@@ -44,18 +44,20 @@ function resolveBinary() {
   const binaryName = process.platform === 'win32' ? 'mangostudio.exe' : 'mangostudio';
   return {
     packageName,
-    packageVersion: require(manifestPath).version,
+    manifestPath,
     binaryPath: join(dirname(manifestPath), binaryName),
   };
 }
 
 function printWrapperInfo(resolved) {
+  // Read the manifest version lazily here: the normal spawn path never needs
+  // it, so parsing package.json belongs only on the diagnostic path.
   process.stdout.write(
     [
       `platform=${process.platform}`,
       `arch=${process.arch}`,
       `package=${resolved.packageName}`,
-      `packageVersion=${resolved.packageVersion}`,
+      `packageVersion=${require(resolved.manifestPath).version}`,
       `binary=${resolved.binaryPath}`,
       '',
     ].join('\n')
