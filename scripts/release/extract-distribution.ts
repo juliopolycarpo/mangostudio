@@ -20,10 +20,13 @@ export function distributionTarArgs(
   destination?: string,
   platform: NodeJS.Platform = process.platform
 ): string[] {
+  // Git Bash ships MSYS GNU tar, which cannot open backslash-separated paths.
+  const toTarPath = (path: string): string =>
+    platform === 'win32' ? path.replaceAll('\\', '/') : path;
   const args = platform === 'win32' ? ['--force-local'] : [];
-  if (operation === 'list') return [...args, '-tzf', bundle];
+  if (operation === 'list') return [...args, '-tzf', toTarPath(bundle)];
   if (!destination) throw new Error('Distribution extraction requires a destination.');
-  return [...args, '-xzf', bundle, '-C', destination];
+  return [...args, '-xzf', toTarPath(bundle), '-C', toTarPath(destination)];
 }
 
 async function main(): Promise<void> {
