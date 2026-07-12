@@ -9,6 +9,12 @@
 const { spawnSync } = require('node:child_process');
 const { dirname, join } = require('node:path');
 
+// Setting MANGOSTUDIO_WRAPPER_INFO=1 prints how the wrapper resolved the
+// platform package (key=value lines, no environment passthrough) and exits
+// without spawning the binary. Release verification uses it to assert the
+// right platform package was installed, not merely that a binary ran.
+const WRAPPER_INFO_ENV = 'MANGOSTUDIO_WRAPPER_INFO';
+
 const PLATFORM_PACKAGES = {
   'linux-x64': '@mangostudio/cli-linux-x64',
   'linux-arm64': '@mangostudio/cli-linux-arm64',
@@ -18,7 +24,7 @@ const PLATFORM_PACKAGES = {
   'win32-arm64': '@mangostudio/cli-win32-arm64',
 };
 
-function resolveBinaryPath() {
+function resolveBinary() {
   const key = `${process.platform}-${process.arch}`;
   const packageName = PLATFORM_PACKAGES[key];
   if (!packageName) {
@@ -36,11 +42,35 @@ function resolveBinaryPath() {
   }
 
   const binaryName = process.platform === 'win32' ? 'mangostudio.exe' : 'mangostudio';
-  return join(dirname(manifestPath), binaryName);
+  return {
+    packageName,
+    manifestPath,
+    binaryPath: join(dirname(manifestPath), binaryName),
+  };
+}
+
+function printWrapperInfo(resolved) {
+  // Read the manifest version lazily here: the normal spawn path never needs
+  // it, so parsing package.json belongs only on the diagnostic path.
+  process.stdout.write(
+    [
+      `platform=${process.platform}`,
+      `arch=${process.arch}`,
+      `package=${resolved.packageName}`,
+      `packageVersion=${require(resolved.manifestPath).version}`,
+      `binary=${resolved.binaryPath}`,
+      '',
+    ].join('\n')
+  );
 }
 
 function main() {
-  const result = spawnSync(resolveBinaryPath(), process.argv.slice(2), { stdio: 'inherit' });
+  const resolved = resolveBinary();
+  if (process.env[WRAPPER_INFO_ENV] === '1') {
+    printWrapperInfo(resolved);
+    return;
+  }
+  const result = spawnSync(resolved.binaryPath, process.argv.slice(2), { stdio: 'inherit' });
   if (result.error) {
     throw result.error;
   }

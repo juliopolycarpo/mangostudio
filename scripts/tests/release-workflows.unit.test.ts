@@ -243,7 +243,16 @@ describe('release workflow binary gate', () => {
     expect(workflow).toContain('platform: linux-arm64');
     expect(workflow).toContain('os: macos-15-intel');
     expect(workflow).toContain('platform: darwin-x64');
-    expect(workflow).toContain('windows-arm64 remains uncovered');
+    expect(workflow).toContain('os: windows-11-arm');
+    expect(workflow).toContain('platform: windows-arm64');
+
+    // Each npm install must prove the wrapper picked this runner's platform
+    // package at the released version, not merely that a binary answered.
+    const verifyReleaseBlock = extractJobBlock(workflow, 'verify-release');
+    expect(verifyReleaseBlock).toContain('name: Verify npm wrapper platform resolution');
+    expect(verifyReleaseBlock).toContain('MANGOSTUDIO_WRAPPER_INFO=1 mangostudio');
+    const platformVar = '$' + '{PLATFORM/windows/win32}';
+    expect(verifyReleaseBlock).toContain(`expected_package="@mangostudio/cli-${platformVar}"`);
 
     expectJobNeeds(workflow, 'verify-release', String.raw`\[build, npm-publish, github-release\]`);
     expectJobNeeds(workflow, 'verify-cargo', String.raw`\[build, cargo-publish, github-release\]`);

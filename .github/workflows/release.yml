@@ -595,7 +595,7 @@ jobs:
           done
 
   verify-release:
-    name: Verify release install (${{ matrix.os }})
+    name: Verify release install (${{ matrix.platform }})
     needs: [build, npm-publish, github-release]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
@@ -620,8 +620,9 @@ jobs:
           - os: windows-latest
             platform: windows-x64
             binary: mangostudio.exe
-          # windows-arm64 remains uncovered; the npm wrapper smoke already
-          # exercises the Windows install path on x64.
+          - os: windows-11-arm
+            platform: windows-arm64
+            binary: mangostudio.exe
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
@@ -639,6 +640,29 @@ jobs:
           actual="$(mangostudio --version)"
           if [ "$actual" != "$VERSION" ]; then
             echo "Expected npm CLI version ${VERSION}, got ${actual}"
+            exit 1
+          fi
+
+      - name: Verify npm wrapper platform resolution
+        # A same-named binary answering --version is not enough: assert the
+        # wrapper resolved this runner's platform package at this exact
+        # version, so a wrong-arch optional dependency cannot pass silently.
+        shell: bash
+        env:
+          PLATFORM: ${{ matrix.platform }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          expected_package="@mangostudio/cli-${PLATFORM/windows/win32}"
+          info="$(MANGOSTUDIO_WRAPPER_INFO=1 mangostudio)"
+          printf '%s\n' "$info"
+          resolved_package="$(printf '%s\n' "$info" | sed -n 's/^package=//p')"
+          resolved_version="$(printf '%s\n' "$info" | sed -n 's/^packageVersion=//p')"
+          if [ "$resolved_package" != "$expected_package" ]; then
+            echo "Expected wrapper to resolve ${expected_package}, got ${resolved_package}"
+            exit 1
+          fi
+          if [ "$resolved_version" != "$VERSION" ]; then
+            echo "Expected platform package version ${VERSION}, got ${resolved_version}"
             exit 1
           fi
 
