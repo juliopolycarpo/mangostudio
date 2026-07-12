@@ -1,7 +1,10 @@
+import { appendFileSync } from 'node:fs';
 import { NPM_PLATFORMS } from './npm-pack';
 import { log, warn } from './runner';
 
 export const PUBLISH_RETRY_DELAYS_MS = [10_000, 30_000, 90_000] as const;
+
+export type ProvenancePolicy = 'required' | 'optional' | 'disabled';
 
 export interface NpmPublishPackage {
   readonly dir: string;
@@ -34,7 +37,8 @@ export interface NpmPublishOptions {
   /** npm dist-tag to publish under (e.g. 'canary'). Omitted ⇒ npm's default 'latest'. */
   readonly distTag?: string;
   readonly logger?: NpmPublishLogger;
-  readonly provenance?: boolean;
+  /** Provenance policy. Defaults to `required` (fail closed). */
+  readonly provenancePolicy?: ProvenancePolicy;
   readonly retryDelaysMs?: readonly number[];
   readonly sleep?: (ms: number) => Promise<void>;
 }
@@ -44,12 +48,17 @@ export interface NpmPublishSummary {
   readonly skipped: number;
   readonly dryRun: number;
   readonly provenance: NpmPublishProvenanceOutcome;
+  readonly auth: NpmPublishAuthMode;
 }
+
+/** Auth mode reported for the npm channel while token auth is still in use. */
+export type NpmPublishAuthMode = 'legacy-explicit' | 'not-published' | 'failed';
 
 export type NpmPublishProvenanceOutcome =
   | { readonly status: 'disabled' }
   | { readonly status: 'dropped'; readonly package: string }
-  | { readonly status: 'full' };
+  | { readonly status: 'explicit' }
+  | { readonly status: 'failed'; readonly package?: string };
 
 export type NpmPublishFailureKind = 'conflict' | 'fatal' | 'provenance' | 'transient';
 
@@ -57,6 +66,7 @@ interface PublishContext {
   readonly dryRun: boolean;
   readonly distTag: string | undefined;
   readonly logger: NpmPublishLogger;
+  readonly policy: ProvenancePolicy;
   readonly retryDelaysMs: readonly number[];
   readonly runner: NpmRunner;
   readonly sleep: (ms: number) => Promise<void>;
@@ -64,8 +74,10 @@ interface PublishContext {
 }
 
 interface PublishState {
-  provenance: boolean;
+  /** Whether the next publish attempt should pass `--provenance`. */
+  useProvenance: boolean;
   provenanceDroppedAt?: string;
+  provenanceFailedAt?: string;
 }
 
 type PackageOutcome = 'dryRun' | 'published' | 'skipped';
@@ -100,6 +112,18 @@ const CONFLICT_PATTERNS = [
 ];
 
 const PROVENANCE_PATTERNS = [/provenance/i, /attestation/i, /sigstore/i, /oidc/i, /id-token/i];
+
+const PROVENANCE_POLICIES = new Set<ProvenancePolicy>(['required', 'optional', 'disabled']);
+
+/** Parse a provenance policy string. // Usage: parseProvenancePolicy('required') */
+export function parseProvenancePolicy(value: string): ProvenancePolicy {
+  if (!PROVENANCE_POLICIES.has(value as ProvenancePolicy)) {
+    throw new Error(
+      `Invalid provenance policy "${value}". Expected one of: required, optional, disabled.`
+    );
+  }
+  return value as ProvenancePolicy;
+}
 
 /** Order platform package directories before the wrapper. // Usage: orderNpmPackageDirs(['cli','linux-x64']) */
 export function orderNpmPackageDirs(dirNames: readonly string[]): string[] {
@@ -140,14 +164,27 @@ export async function publishPackages(
     summary[outcome] += 1;
   }
 
-  return { ...summary, provenance: summarizeProvenance(context.state) };
+  return {
+    ...summary,
+    provenance: summarizeProvenance(context),
+    auth: summarizeAuth(summary),
+  };
 }
 
 /** Format the final npm publish status line. // Usage: success(formatNpmPublishSummary(summary)) */
 export function formatNpmPublishSummary(summary: NpmPublishSummary): string {
-  return `npm publish complete: ${summary.published} published, ${summary.skipped} skipped, ${summary.dryRun} dry-run. Provenance: ${formatProvenanceOutcome(
+  return `npm publish complete: ${summary.published} published, ${summary.skipped} skipped, ${summary.dryRun} dry-run. Auth: ${summary.auth}. Provenance: ${formatProvenanceOutcome(
     summary.provenance
   )}.`;
+}
+
+/** Append auth/provenance lines to GITHUB_OUTPUT synchronously. // Usage: appendNpmPublishGithubOutputs(summary) */
+export function appendNpmPublishGithubOutputs(
+  summary: NpmPublishSummary,
+  outputPath = process.env.GITHUB_OUTPUT
+): void {
+  if (!outputPath) return;
+  appendFileSync(outputPath, `auth=${summary.auth}\nprovenance=${summary.provenance.status}\n`);
 }
 
 function comparePackageDirs(left: string, right: string): number {
@@ -160,14 +197,16 @@ function packageDirSortKey(dirName: string): number {
 }
 
 function createContext(options: NpmPublishOptions): PublishContext {
+  const policy = options.provenancePolicy ?? 'required';
   return {
     dryRun: options.dryRun ?? false,
     distTag: options.distTag,
     logger: options.logger ?? DEFAULT_LOGGER,
+    policy,
     retryDelaysMs: options.retryDelaysMs ?? PUBLISH_RETRY_DELAYS_MS,
     runner: options.runner,
     sleep: options.sleep ?? sleep,
-    state: { provenance: options.provenance ?? true },
+    state: { useProvenance: policy !== 'disabled' },
   };
 }
 
@@ -216,14 +255,21 @@ async function publishOnce(
   attempt: number
 ): Promise<NpmCommandResult> {
   const first = await runPublish(packageInfo, context, attempt);
-  if (first.exitCode === 0 || !context.state.provenance) return first;
+  if (first.exitCode === 0 || !context.state.useProvenance) return first;
   if (classifyPublishFailure(first) !== 'provenance') return first;
+
+  if (context.policy === 'required') {
+    context.state.provenanceFailedAt = packageSpec(packageInfo);
+    return first;
+  }
+
+  if (context.policy !== 'optional') return first;
 
   context.logger.warn(
     `npm rejected provenance for ${packageSpec(packageInfo)}; retrying without it.`
   );
   context.state.provenanceDroppedAt = packageSpec(packageInfo);
-  context.state.provenance = false;
+  context.state.useProvenance = false;
   return runPublish(packageInfo, context, attempt);
 }
 
@@ -235,7 +281,7 @@ function runPublish(
   const args = ['publish'];
   if (isScopedPackage(packageInfo.name)) args.push('--access', 'public');
   if (context.distTag) args.push('--tag', context.distTag);
-  if (context.state.provenance) args.push('--provenance');
+  if (context.state.useProvenance) args.push('--provenance');
 
   context.logger.info(
     `Publishing ${packageSpec(packageInfo)} (${attempt}/${maxPublishAttempts(context)})...`
@@ -307,16 +353,31 @@ function maxPublishAttempts(context: PublishContext): number {
   return context.retryDelaysMs.length + 1;
 }
 
-function summarizeProvenance(state: PublishState): NpmPublishProvenanceOutcome {
-  if (state.provenance) return { status: 'full' };
-  if (state.provenanceDroppedAt) {
-    return { status: 'dropped', package: state.provenanceDroppedAt };
+function summarizeProvenance(context: PublishContext): NpmPublishProvenanceOutcome {
+  if (context.state.provenanceFailedAt) {
+    return { status: 'failed', package: context.state.provenanceFailedAt };
   }
-  return { status: 'disabled' };
+  if (context.policy === 'disabled') return { status: 'disabled' };
+  if (context.state.provenanceDroppedAt) {
+    return { status: 'dropped', package: context.state.provenanceDroppedAt };
+  }
+  return { status: 'explicit' };
+}
+
+function summarizeAuth(summary: {
+  readonly published: number;
+  readonly skipped: number;
+  readonly dryRun: number;
+}): NpmPublishAuthMode {
+  if (summary.published === 0 && summary.dryRun === 0 && summary.skipped > 0) {
+    return 'not-published';
+  }
+  return 'legacy-explicit';
 }
 
 function formatProvenanceOutcome(outcome: NpmPublishProvenanceOutcome): string {
   if (outcome.status === 'dropped') return `dropped at ${outcome.package}`;
+  if (outcome.status === 'failed' && outcome.package) return `failed at ${outcome.package}`;
   return outcome.status;
 }
 

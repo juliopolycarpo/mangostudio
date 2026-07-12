@@ -10,13 +10,11 @@ name: Release
 # already carry the release's CHANGELOG.md section (staged by `bun run
 # release:prepare`); the preparation job's lockstep check gates on it.
 #
-# Prerequisites: an NPM_TOKEN repo secret with publish rights to mangostudio and
-# @mangostudio/cli-*, and a single DIST_REPOS_TOKEN fine-grained PAT with
-# contents read/write on both dist repos (juliopolycarpo/homebrew-tap and
-# juliopolycarpo/scoop-bucket).
-# crates.io publishing prefers Trusted Publishing via OIDC and temporarily falls
-# back to CARGO_REGISTRY_TOKEN until the trusted publisher is registered and
-# proven. GHCR uses the workflow GITHUB_TOKEN.
+# Prerequisites: channel secrets are validated in the jobs that need them —
+# NPM_TOKEN for npm-publish, DIST_REPOS_TOKEN for homebrew/scoop. crates.io
+# uses Trusted Publishing via OIDC by default; CARGO_REGISTRY_TOKEN is only
+# accepted when workflow_dispatch sets allow_legacy_cargo_token=true. GHCR uses
+# the workflow GITHUB_TOKEN.
 
 on:
   push:
@@ -31,6 +29,10 @@ on:
       version:
         description: "Version to release without the leading v (e.g. 0.1.0)"
         required: true
+      allow_legacy_cargo_token:
+        description: "Allow CARGO_REGISTRY_TOKEN when crates.io OIDC mint fails (migration only)"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -48,23 +50,6 @@ jobs:
       version: ${{ steps.resolve.outputs.version }}
       source_sha: ${{ steps.source.outputs.sha }}
     steps:
-      - name: Preflight release secrets
-        env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-          DIST_REPOS_TOKEN: ${{ secrets.DIST_REPOS_TOKEN }}
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-        run: |
-          missing=()
-          for name in NPM_TOKEN DIST_REPOS_TOKEN CARGO_REGISTRY_TOKEN; do
-            if [ -z "${!name}" ]; then
-              missing+=("$name")
-            fi
-          done
-          if [ "${#missing[@]}" -gt 0 ]; then
-            printf 'Missing required release secret(s): %s\n' "${missing[*]}"
-            exit 1
-          fi
-
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
@@ -328,11 +313,27 @@ jobs:
     needs: [build, verify-build]
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    outputs:
+      auth: ${{ steps.publish.outputs.auth }}
+      provenance: ${{ steps.publish.outputs.provenance }}
     permissions:
       contents: read # checkout only; publish goes to npm, not the repo
       id-token: write # npm provenance attestation
     steps:
+      - name: Preflight npm publish secret
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "$NPM_TOKEN" ]; then
+            echo "Missing required release secret: NPM_TOKEN"
+            exit 1
+          fi
+
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22.14.0"
 
       - uses: ./.github/actions/setup-mango
         with:
@@ -356,12 +357,23 @@ jobs:
       - name: Validate npm distribution
         run: bun ./scripts/release/pack-npm.ts --validate dist-npm
 
-      - name: Publish to npm
+      - name: Verify Node for provenance
+        run: |
+          node_major="$(node -p "process.versions.node.split('.')[0]")"
+          node_minor="$(node -p "process.versions.node.split('.')[1]")"
+          if [ "$node_major" -lt 22 ] || { [ "$node_major" -eq 22 ] && [ "$node_minor" -lt 14 ]; }; then
+            echo "Node $(node --version) is below the 22.14.0 floor required for npm provenance."
+            exit 1
+          fi
+          echo "Node $(node --version); publish uses npx npm@11.5.1"
+
+      - id: publish
+        name: Publish to npm
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           echo "//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}" > ~/.npmrc
-          bun ./scripts/release/publish-npm.ts dist-npm
+          bun ./scripts/release/publish-npm.ts dist-npm --provenance-policy required
 
   homebrew:
     # Renders Formula/mangostudio.rb from the released SHA256SUMS and pushes it
@@ -375,6 +387,15 @@ jobs:
     permissions:
       contents: read
     steps:
+      - name: Preflight Homebrew dist-repos secret
+        env:
+          DIST_REPOS_TOKEN: ${{ secrets.DIST_REPOS_TOKEN }}
+        run: |
+          if [ -z "$DIST_REPOS_TOKEN" ]; then
+            echo "Missing required release secret: DIST_REPOS_TOKEN"
+            exit 1
+          fi
+
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - uses: ./.github/actions/setup-mango
@@ -414,6 +435,15 @@ jobs:
     permissions:
       contents: read
     steps:
+      - name: Preflight Scoop dist-repos secret
+        env:
+          DIST_REPOS_TOKEN: ${{ secrets.DIST_REPOS_TOKEN }}
+        run: |
+          if [ -z "$DIST_REPOS_TOKEN" ]; then
+            echo "Missing required release secret: DIST_REPOS_TOKEN"
+            exit 1
+          fi
+
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - uses: ./.github/actions/setup-mango
@@ -447,13 +477,15 @@ jobs:
     # install mangostudio` resolves this release. Only the post-publish
     # verify-cargo check depends on this job, so a crates.io failure never
     # blocks the GitHub Release, npm, or Homebrew channels. Already-published
-    # versions are skipped, and an upload that
-    # lands despite a reported error is detected between retries, so re-runs
-    # converge.
+    # versions are skipped before minting credentials. New publishes require
+    # Trusted Publishing OIDC unless workflow_dispatch explicitly allows the
+    # legacy CARGO_REGISTRY_TOKEN fallback.
     name: Publish to crates.io
     needs: [build, verify-build, github-release]
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    outputs:
+      auth: ${{ steps.auth-mode.outputs.auth }}
     permissions:
       contents: read # checkout only; publish goes to crates.io, not the repo
       id-token: write # crates.io Trusted Publishing token exchange
@@ -464,19 +496,9 @@ jobs:
         with:
           toolchain: 1.96.0
 
-      - id: crates-auth
-        name: Mint crates.io Trusted Publishing token
-        continue-on-error: true
-        uses: rust-lang/crates-io-auth-action@c6f97d42243bad5fab37ca0427f495c86d5b1a18 # v1.0.5
-
-      - name: Report crates.io token fallback
-        if: steps.crates-auth.outcome != 'success'
-        run: echo "Trusted Publishing token unavailable; falling back to CARGO_REGISTRY_TOKEN during migration."
-
-      - name: Publish launcher crate (idempotent)
+      - id: already-published
+        name: Check whether the crate version is already on crates.io
         env:
-          CRATES_IO_TRUSTED_PUBLISHING_TOKEN: ${{ steps.crates-auth.outputs.token }}
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
           CRATES_IO_INDEX_URL: https://index.crates.io/ma/ng/mangostudio
           CRATES_IO_USER_AGENT: "mangostudio-release (https://github.com/juliopolycarpo/mangostudio)"
           VERSION: ${{ needs.build.outputs.version }}
@@ -484,21 +506,77 @@ jobs:
           source scripts/release/crates-published.sh
           if published "$VERSION"; then
             echo "mangostudio ${VERSION} is already on crates.io; skipping."
+            echo "published=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "published=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - id: crates-auth
+        name: Mint crates.io Trusted Publishing token
+        if: steps.already-published.outputs.published != 'true'
+        continue-on-error: true
+        uses: rust-lang/crates-io-auth-action@c6f97d42243bad5fab37ca0427f495c86d5b1a18 # v1.0.5
+
+      - id: auth-mode
+        name: Resolve crates.io auth mode
+        if: always() && steps.already-published.outcome == 'success'
+        env:
+          ALREADY_PUBLISHED: ${{ steps.already-published.outputs.published }}
+          CRATES_AUTH_OUTCOME: ${{ steps.crates-auth.outcome }}
+          CRATES_IO_TRUSTED_PUBLISHING_TOKEN: ${{ steps.crates-auth.outputs.token }}
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          ALLOW_LEGACY: ${{ github.event_name == 'workflow_dispatch' && inputs.allow_legacy_cargo_token }}
+        run: |
+          if [ "$ALREADY_PUBLISHED" = "true" ]; then
+            echo "auth=not-published" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          # A token is only required to actually publish; the idempotency check
-          # above already short-circuits already-published versions so re-runs
-          # converge even after CARGO_REGISTRY_TOKEN is removed.
-          publish_token="${CRATES_IO_TRUSTED_PUBLISHING_TOKEN:-$CARGO_REGISTRY_TOKEN}"
-          if [ -z "$publish_token" ]; then
-            echo "No crates.io publish token available. Configure Trusted Publishing for .github/workflows/release.yml or restore CARGO_REGISTRY_TOKEN."
-            exit 1
+          if [ "$CRATES_AUTH_OUTCOME" = "success" ] && [ -n "$CRATES_IO_TRUSTED_PUBLISHING_TOKEN" ]; then
+            echo "auth=oidc" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
+          if [ "$ALLOW_LEGACY" = "true" ]; then
+            if [ -z "$CARGO_REGISTRY_TOKEN" ]; then
+              echo "allow_legacy_cargo_token was set but CARGO_REGISTRY_TOKEN is missing."
+              echo "auth=failed" >> "$GITHUB_OUTPUT"
+              exit 1
+            fi
+            echo "Trusted Publishing unavailable; using explicit CARGO_REGISTRY_TOKEN fallback."
+            echo "auth=legacy-explicit" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "crates.io Trusted Publishing token mint failed and legacy fallback is disabled."
+          echo "auth=failed" >> "$GITHUB_OUTPUT"
+          exit 1
+
+      - name: Publish launcher crate (idempotent)
+        if: steps.already-published.outputs.published != 'true'
+        env:
+          AUTH_MODE: ${{ steps.auth-mode.outputs.auth }}
+          CRATES_IO_TRUSTED_PUBLISHING_TOKEN: ${{ steps.crates-auth.outputs.token }}
+          CARGO_REGISTRY_TOKEN_SECRET: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          CRATES_IO_INDEX_URL: https://index.crates.io/ma/ng/mangostudio
+          CRATES_IO_USER_AGENT: "mangostudio-release (https://github.com/juliopolycarpo/mangostudio)"
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
           # Stateful retry: scripts/release/retry.sh only repeats one command,
           # while cargo publish can fail after crates.io accepts the upload, so
           # keep the published() visibility probe between attempts.
+          source scripts/release/crates-published.sh
+          case "$AUTH_MODE" in
+            oidc)
+              export CARGO_REGISTRY_TOKEN="$CRATES_IO_TRUSTED_PUBLISHING_TOKEN"
+              ;;
+            legacy-explicit)
+              export CARGO_REGISTRY_TOKEN="$CARGO_REGISTRY_TOKEN_SECRET"
+              ;;
+            *)
+              echo "Unexpected crates.io auth mode: ${AUTH_MODE}"
+              exit 1
+              ;;
+          esac
           for attempt in 1 2 3; do
-            if (cd packages/cargo-shim && CARGO_REGISTRY_TOKEN="$publish_token" cargo publish --locked); then
+            if (cd packages/cargo-shim && cargo publish --locked); then
               exit 0
             fi
             # Probe in a subshell so a transient or unreachable-index failure
@@ -701,6 +779,10 @@ jobs:
           VERIFY_RELEASE_RESULT: ${{ needs.verify-release.result }}
           VERIFY_CARGO_RESULT: ${{ needs.verify-cargo.result }}
           VERIFY_HOMEBREW_RESULT: ${{ needs.verify-homebrew.result }}
+          NPM_PUBLISH_AUTH: ${{ needs.npm-publish.outputs.auth }}
+          NPM_PUBLISH_PROVENANCE: ${{ needs.npm-publish.outputs.provenance }}
+          NPM_CHANNEL_NAME: npm-publish
+          CARGO_PUBLISH_AUTH: ${{ needs.cargo-publish.outputs.auth }}
         run: |
           bash scripts/release/publish-summary.sh \
             "build=${BUILD_RESULT}" \

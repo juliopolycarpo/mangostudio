@@ -123,18 +123,34 @@ describe('release workflow binary gate', () => {
     }
   });
 
-  test('release preparation preflights static publish secrets before setup', () => {
+  test('release channel jobs preflight their own secrets instead of prepare', () => {
     const workflow = readText('.github/workflows/release.yml');
     const prepareBlock = extractJobBlock(workflow, 'prepare');
-    const preflightIndex = prepareBlock.indexOf('name: Preflight release secrets');
+    const npmBlock = extractJobBlock(workflow, 'npm-publish');
+    const homebrewBlock = extractJobBlock(workflow, 'homebrew');
+    const scoopBlock = extractJobBlock(workflow, 'scoop');
+    const cargoBlock = extractJobBlock(workflow, 'cargo-publish');
     const secretPrefix = '$' + '{{ secrets.';
 
-    expect(preflightIndex).toBeGreaterThan(-1);
-    expect(preflightIndex).toBeLessThan(prepareBlock.indexOf('actions/checkout@'));
-    expect(prepareBlock).toContain(`NPM_TOKEN: ${secretPrefix}NPM_TOKEN }}`);
-    expect(prepareBlock).toContain(`DIST_REPOS_TOKEN: ${secretPrefix}DIST_REPOS_TOKEN }}`);
-    expect(prepareBlock).toContain(`CARGO_REGISTRY_TOKEN: ${secretPrefix}CARGO_REGISTRY_TOKEN }}`);
-    expect(prepareBlock).toContain('Missing required release secret(s): %s');
+    expect(prepareBlock).not.toContain('name: Preflight release secrets');
+    expect(prepareBlock).not.toContain(
+      `CARGO_REGISTRY_TOKEN: ${secretPrefix}CARGO_REGISTRY_TOKEN }}`
+    );
+
+    expect(npmBlock).toContain('name: Preflight npm publish secret');
+    expect(npmBlock).toContain(`NPM_TOKEN: ${secretPrefix}NPM_TOKEN }}`);
+    expect(npmBlock).toContain('Missing required release secret: NPM_TOKEN');
+    expect(npmBlock).toContain('id-token: write');
+    expect(npmBlock).toContain('actions/setup-node@');
+    expect(npmBlock).toContain('--provenance-policy required');
+
+    expect(homebrewBlock).toContain('name: Preflight Homebrew dist-repos secret');
+    expect(homebrewBlock).toContain(`DIST_REPOS_TOKEN: ${secretPrefix}DIST_REPOS_TOKEN }}`);
+    expect(scoopBlock).toContain('name: Preflight Scoop dist-repos secret');
+    expect(scoopBlock).toContain(`DIST_REPOS_TOKEN: ${secretPrefix}DIST_REPOS_TOKEN }}`);
+
+    expect(cargoBlock).not.toContain('Missing required release secret: CARGO_REGISTRY_TOKEN');
+    expect(cargoBlock).toContain('allow_legacy_cargo_token');
   });
 
   test('pre-merge binary smoke covers native host platforms and Docker variants', () => {
@@ -345,9 +361,7 @@ describe('release workflow binary gate', () => {
     expect(cargoPublishBlock).toContain(
       'Stateful retry: scripts/release/retry.sh only repeats one command'
     );
-    expect(cargoPublishBlock).toContain(
-      '(cd packages/cargo-shim && CARGO_REGISTRY_TOKEN="$publish_token" cargo publish --locked)'
-    );
+    expect(cargoPublishBlock).toContain('(cd packages/cargo-shim && cargo publish --locked)');
     expect(cargoPublishBlock).toContain(
       'CRATES_IO_INDEX_URL: https://index.crates.io/ma/ng/mangostudio'
     );
@@ -356,9 +370,16 @@ describe('release workflow binary gate', () => {
     );
     expect(cargoPublishBlock).not.toContain('https://crates.io/api/v1/crates/mangostudio');
     expect(cargoPublishBlock).toContain('source scripts/release/crates-published.sh');
-    // Pre-publish check hard-fails on an ambiguous index; the post-failure
-    // visibility poll is subshell-wrapped so a transient index error is
-    // contained and the retry loop keeps going.
+    // Already-published check runs before OIDC mint; post-failure visibility
+    // poll stays subshell-wrapped so a transient index error is contained.
+    expect(cargoPublishBlock).toContain(
+      'name: Check whether the crate version is already on crates.io'
+    );
+    expect(cargoPublishBlock).toContain('name: Mint crates.io Trusted Publishing token');
+    expect(cargoPublishBlock).toContain('continue-on-error: true');
+    expect(cargoPublishBlock).toContain('auth=oidc');
+    expect(cargoPublishBlock).toContain('auth=legacy-explicit');
+    expect(cargoPublishBlock).toContain('auth=failed');
     expect(cargoPublishBlock).toContain('if published "$VERSION"; then');
     expect(cargoPublishBlock).toContain('if (published "$VERSION"); then');
     expect(cargoPublishBlock).toContain(`Version became visible after attempt ${attemptVar}`);
@@ -436,6 +457,16 @@ describe('release workflow binary gate', () => {
     expect(summaryBlock).toContain(`"docker=${dockerResultVar}"`);
     expect(summaryBlock).toContain(`"npm-publish=${npmResultVar}"`);
     expect(summaryBlock).toContain(`"cargo-publish=${cargoResultVar}"`);
+    expect(summaryBlock).toContain('NPM_PUBLISH_AUTH:');
+    expect(summaryBlock).toContain('NPM_PUBLISH_PROVENANCE:');
+    expect(summaryBlock).toContain('CARGO_PUBLISH_AUTH:');
+  });
+
+  test('release dispatch exposes an explicit legacy cargo token escape hatch', () => {
+    const workflow = readText('.github/workflows/release.yml');
+    expect(workflow).toContain('allow_legacy_cargo_token:');
+    expect(workflow).toContain('type: boolean');
+    expect(workflow).toContain('default: false');
   });
 
   test('ci gates the canary publish on the aggregate gate and a push to main', () => {
@@ -486,9 +517,14 @@ describe('release workflow binary gate', () => {
     expect(workflow).not.toContain('docker/setup-buildx-action');
     expect(workflow).not.toContain('cargo publish --locked --allow-dirty');
 
-    // npm: canary dist-tag so `latest` never moves.
+    // npm: canary dist-tag so `latest` never moves; provenance is required.
     const npmBlock = extractJobBlock(workflow, 'npm-canary');
-    expect(npmBlock).toContain('bun ./scripts/release/publish-npm.ts dist-npm --tag canary');
+    expect(npmBlock).toContain('name: Preflight npm canary secret');
+    expect(npmBlock).toContain('id-token: write');
+    expect(npmBlock).toContain('actions/setup-node@');
+    expect(npmBlock).toContain(
+      'bun ./scripts/release/publish-npm.ts dist-npm --tag canary --provenance-policy required'
+    );
 
     // GitHub Releases: fixed <root>-canary asset names, with the full per-SHA
     // canary version retained in notes for traceability.

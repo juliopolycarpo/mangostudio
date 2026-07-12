@@ -1,5 +1,9 @@
 import { describe, expect, test } from 'bun:test';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
+  appendNpmPublishGithubOutputs,
   classifyPublishFailure,
   formatNpmPublishSummary,
   isMissingPackageViewResult,
@@ -9,6 +13,8 @@ import {
   type NpmPublishPackage,
   type NpmRunner,
   orderNpmPackageDirs,
+  type ProvenancePolicy,
+  parseProvenancePolicy,
   publishPackages,
 } from '../lib/npm-publish';
 
@@ -72,7 +78,7 @@ const publishWithFakes = (
   packages: readonly NpmPublishPackage[] = [PLATFORM_PACKAGE],
   options: {
     readonly dryRun?: boolean;
-    readonly provenance?: boolean;
+    readonly provenancePolicy?: ProvenancePolicy;
     readonly retryDelaysMs?: readonly number[];
   } = {}
 ) => {
@@ -84,7 +90,7 @@ const publishWithFakes = (
     retryDelaysMs: options.retryDelaysMs ?? [10],
     runner,
     sleep: sleeper.sleep,
-    provenance: options.provenance,
+    provenancePolicy: options.provenancePolicy,
   });
 
   return { logger, result, sleeper };
@@ -98,6 +104,18 @@ describe('orderNpmPackageDirs', () => {
       'windows-x64',
       'cli',
     ]);
+  });
+});
+
+describe('parseProvenancePolicy', () => {
+  test('accepts required, optional, and disabled', () => {
+    expect(parseProvenancePolicy('required')).toBe('required');
+    expect(parseProvenancePolicy('optional')).toBe('optional');
+    expect(parseProvenancePolicy('disabled')).toBe('disabled');
+  });
+
+  test('rejects unknown policies', () => {
+    expect(() => parseProvenancePolicy('maybe')).toThrow(/Invalid provenance policy/);
   });
 });
 
@@ -134,12 +152,13 @@ describe('publishPackages', () => {
       published: 0,
       skipped: 1,
       dryRun: 0,
-      provenance: { status: 'full' },
+      auth: 'not-published',
+      provenance: { status: 'explicit' },
     });
     expect(runner.calls.map((call) => call.args[0])).toEqual(['view']);
   });
 
-  test('publishes missing packages with provenance by default', async () => {
+  test('publishes missing packages with provenance by default (required)', async () => {
     const runner = new FakeNpmRunner([missing(), ok()]);
     const { result } = publishWithFakes(runner);
 
@@ -147,7 +166,8 @@ describe('publishPackages', () => {
       published: 1,
       skipped: 0,
       dryRun: 0,
-      provenance: { status: 'full' },
+      auth: 'legacy-explicit',
+      provenance: { status: 'explicit' },
     });
     expect(runner.calls[1].args).toEqual(['publish', '--access', 'public', '--provenance']);
   });
@@ -182,7 +202,8 @@ describe('publishPackages', () => {
       published: 1,
       skipped: 0,
       dryRun: 0,
-      provenance: { status: 'full' },
+      auth: 'legacy-explicit',
+      provenance: { status: 'explicit' },
     });
     expect(runner.calls[1].args).toEqual(['publish', '--provenance']);
   });
@@ -195,7 +216,8 @@ describe('publishPackages', () => {
       published: 1,
       skipped: 0,
       dryRun: 0,
-      provenance: { status: 'full' },
+      auth: 'legacy-explicit',
+      provenance: { status: 'explicit' },
     });
     expect(runner.calls.map((call) => call.args[0])).toEqual(['view', 'publish', 'publish']);
     expect(sleeper.delays).toEqual([10]);
@@ -213,13 +235,30 @@ describe('publishPackages', () => {
       published: 1,
       skipped: 0,
       dryRun: 0,
-      provenance: { status: 'full' },
+      auth: 'legacy-explicit',
+      provenance: { status: 'explicit' },
     });
     expect(runner.calls.map((call) => call.args[0])).toEqual(['view', 'publish', 'view']);
     expect(sleeper.delays).toEqual([]);
   });
 
-  test('falls back to non-provenance publish when npm rejects provenance', async () => {
+  test('required policy never retries without provenance', async () => {
+    const runner = new FakeNpmRunner([
+      missing(),
+      fail('npm ERR! provenance is not supported for this run'),
+    ]);
+    const { result } = publishWithFakes(runner, [PLATFORM_PACKAGE], {
+      provenancePolicy: 'required',
+    });
+
+    await expect(result).rejects.toThrow(/npm publish failed/);
+    expect(runner.calls.map((call) => call.args)).toEqual([
+      ['view', '@mangostudio/cli-linux-x64@1.2.3', 'version'],
+      ['publish', '--access', 'public', '--provenance'],
+    ]);
+  });
+
+  test('optional policy falls back to non-provenance publish when npm rejects provenance', async () => {
     const runner = new FakeNpmRunner([
       missing(),
       fail('npm ERR! provenance is not supported for this run'),
@@ -227,12 +266,15 @@ describe('publishPackages', () => {
       missing(),
       ok(),
     ]);
-    const { result } = publishWithFakes(runner, [PLATFORM_PACKAGE, CLI_PACKAGE]);
+    const { result } = publishWithFakes(runner, [PLATFORM_PACKAGE, CLI_PACKAGE], {
+      provenancePolicy: 'optional',
+    });
 
     await expect(result).resolves.toEqual({
       published: 2,
       skipped: 0,
       dryRun: 0,
+      auth: 'legacy-explicit',
       provenance: {
         status: 'dropped',
         package: '@mangostudio/cli-linux-x64@1.2.3',
@@ -245,12 +287,15 @@ describe('publishPackages', () => {
 
   test('summarizes disabled provenance without passing the flag', async () => {
     const runner = new FakeNpmRunner([missing(), ok()]);
-    const { result } = publishWithFakes(runner, [PLATFORM_PACKAGE], { provenance: false });
+    const { result } = publishWithFakes(runner, [PLATFORM_PACKAGE], {
+      provenancePolicy: 'disabled',
+    });
 
     await expect(result).resolves.toEqual({
       published: 1,
       skipped: 0,
       dryRun: 0,
+      auth: 'legacy-explicit',
       provenance: { status: 'disabled' },
     });
     expect(runner.calls[1].args).toEqual(['publish', '--access', 'public']);
@@ -262,10 +307,11 @@ describe('publishPackages', () => {
         published: 2,
         skipped: 1,
         dryRun: 0,
+        auth: 'legacy-explicit',
         provenance: { status: 'dropped', package: '@mangostudio/cli-linux-x64@1.2.3' },
       })
     ).toBe(
-      'npm publish complete: 2 published, 1 skipped, 0 dry-run. Provenance: dropped at @mangostudio/cli-linux-x64@1.2.3.'
+      'npm publish complete: 2 published, 1 skipped, 0 dry-run. Auth: legacy-explicit. Provenance: dropped at @mangostudio/cli-linux-x64@1.2.3.'
     );
   });
 
@@ -277,7 +323,8 @@ describe('publishPackages', () => {
       published: 0,
       skipped: 0,
       dryRun: 1,
-      provenance: { status: 'full' },
+      auth: 'legacy-explicit',
+      provenance: { status: 'explicit' },
     });
     expect(runner.calls.map((call) => call.args[0])).toEqual(['view']);
     expect(logger.messages.join('\n')).toContain('would publish @mangostudio/cli-linux-x64@1.2.3');
@@ -291,5 +338,25 @@ describe('publishPackages', () => {
 
     await expect(result).rejects.toThrow(/remains unpublished/);
     expect(sleeper.delays).toEqual([5]);
+  });
+
+  test('writes auth and provenance to GITHUB_OUTPUT', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'npm-publish-out-'));
+    const outputPath = join(dir, 'github_output');
+    try {
+      appendNpmPublishGithubOutputs(
+        {
+          published: 1,
+          skipped: 0,
+          dryRun: 0,
+          auth: 'legacy-explicit',
+          provenance: { status: 'explicit' },
+        },
+        outputPath
+      );
+      expect(readFileSync(outputPath, 'utf8')).toBe('auth=legacy-explicit\nprovenance=explicit\n');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
