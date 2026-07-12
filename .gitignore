@@ -5,6 +5,8 @@ dist/
 dist-npm/
 release-assets/
 docker-ctx/
+.distribution-bundles/
+distribution-manifest.json
 coverage/
 playwright-report/
 test-results/

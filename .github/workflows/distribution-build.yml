@@ -1,0 +1,175 @@
+name: Distribution Build
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: Exact version embedded into every distribution target.
+        type: string
+        required: true
+      source_sha:
+        description: Exact source commit to build.
+        type: string
+        required: true
+      channel:
+        description: Distribution channel recorded in the manifest.
+        type: string
+        required: true
+      retention_days:
+        description: Actions artifact retention in days.
+        type: number
+        required: true
+    outputs:
+      version:
+        description: Version embedded into the distribution.
+        value: ${{ inputs.version }}
+      source_sha:
+        description: Source commit embedded into the distribution.
+        value: ${{ inputs.source_sha }}
+      packaged_artifact:
+        description: Content-addressed release assets and npm distribution artifact.
+        value: ${{ jobs.build.outputs.packaged_artifact }}
+      target_artifacts:
+        description: JSON map of target IDs to content-addressed artifact names.
+        value: ${{ jobs.build.outputs.target_artifacts }}
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build immutable distribution
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      id-token: write # mint provenance for immutable distribution bundles
+      attestations: write # attach provenance to the bundle digests
+    outputs:
+      packaged_artifact: ${{ steps.bundle.outputs.packaged_artifact }}
+      target_artifacts: ${{ steps.bundle.outputs.target_artifacts }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.source_sha }}
+
+      - uses: ./.github/actions/setup-mango
+        with:
+          cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
+
+      - name: Verify checked out source identity
+        env:
+          EXPECTED_SHA: ${{ inputs.source_sha }}
+        run: |
+          actual="$(git rev-parse HEAD)"
+          if [ "$actual" != "$EXPECTED_SHA" ]; then
+            echo "Expected source SHA $EXPECTED_SHA, got $actual"
+            exit 1
+          fi
+
+      - name: Build standalone binaries once
+        env:
+          VERSION: ${{ inputs.version }}
+        run: bun run build --binary
+
+      - name: Assemble npm distribution
+        env:
+          VERSION: ${{ inputs.version }}
+        run: bun ./scripts/release/pack-npm.ts
+
+      - name: Archive release assets
+        env:
+          VERSION: ${{ inputs.version }}
+        run: bun ./scripts/release/archive-assets.ts
+
+      - name: Create and verify distribution manifest
+        env:
+          DISTRIBUTION_CHANNEL: ${{ inputs.channel }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          bun ./scripts/release/distribution-manifest.ts
+          bun ./scripts/release/distribution-manifest.ts --validate distribution-manifest.json
+
+      - id: bundle
+        name: Create content-addressed bundles
+        run: bun ./scripts/release/bundle-distribution.ts
+
+      - name: Upload packaged distribution
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ steps.bundle.outputs.packaged_artifact }}
+          path: .distribution-bundles/packaged.tar.gz
+          retention-days: ${{ inputs.retention_days }}
+          overwrite: false
+
+      - name: Upload linux-x64 target
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ fromJSON(steps.bundle.outputs.target_artifacts)['linux-x64'] }}
+          path: .distribution-bundles/linux-x64.tar.gz
+          retention-days: ${{ inputs.retention_days }}
+          overwrite: false
+
+      - name: Upload linux-arm64 target
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ fromJSON(steps.bundle.outputs.target_artifacts)['linux-arm64'] }}
+          path: .distribution-bundles/linux-arm64.tar.gz
+          retention-days: ${{ inputs.retention_days }}
+          overwrite: false
+
+      - name: Upload linux-x64-musl target
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ fromJSON(steps.bundle.outputs.target_artifacts)['linux-x64-musl'] }}
+          path: .distribution-bundles/linux-x64-musl.tar.gz
+          retention-days: ${{ inputs.retention_days }}
+          overwrite: false
+
+      - name: Upload linux-arm64-musl target
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ fromJSON(steps.bundle.outputs.target_artifacts)['linux-arm64-musl'] }}
+          path: .distribution-bundles/linux-arm64-musl.tar.gz
+          retention-days: ${{ inputs.retention_days }}
+          overwrite: false
+
+      - name: Upload darwin-x64 target
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ fromJSON(steps.bundle.outputs.target_artifacts)['darwin-x64'] }}
+          path: .distribution-bundles/darwin-x64.tar.gz
+          retention-days: ${{ inputs.retention_days }}
+          overwrite: false
+
+      - name: Upload darwin-arm64 target
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ fromJSON(steps.bundle.outputs.target_artifacts)['darwin-arm64'] }}
+          path: .distribution-bundles/darwin-arm64.tar.gz
+          retention-days: ${{ inputs.retention_days }}
+          overwrite: false
+
+      - name: Upload windows-x64 target
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ fromJSON(steps.bundle.outputs.target_artifacts)['windows-x64'] }}
+          path: .distribution-bundles/windows-x64.tar.gz
+          retention-days: ${{ inputs.retention_days }}
+          overwrite: false
+
+      - name: Upload windows-arm64 target
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ fromJSON(steps.bundle.outputs.target_artifacts)['windows-arm64'] }}
+          path: .distribution-bundles/windows-arm64.tar.gz
+          retention-days: ${{ inputs.retention_days }}
+          overwrite: false
+
+      - name: Attest distribution bundles
+        if: github.event_name != 'pull_request'
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-path: .distribution-bundles/*.tar.gz

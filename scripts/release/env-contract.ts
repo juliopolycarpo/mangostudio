@@ -14,7 +14,11 @@ export const RELEASE_SCRIPT_ENV_CONTRACTS = {
   'scripts/release/archive-assets.ts': {
     requiredEnv: ['VERSION'],
   },
-  'scripts/release/canary-version.ts': {},
+  'scripts/release/bundle-distribution.ts': {},
+  'scripts/release/distribution-manifest.ts': {
+    requiredEnv: ['DISTRIBUTION_CHANNEL', 'SOURCE_SHA', 'VERSION'],
+  },
+  'scripts/release/extract-distribution.ts': {},
   'scripts/release/fill-dry-run-checksums.ts': {},
   'scripts/release/pack-npm.ts': {
     requirements: [{ env: ['VERSION'], unlessArgsInclude: '--validate' }],

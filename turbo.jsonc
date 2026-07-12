@@ -8,12 +8,16 @@
   "globalPassThroughEnv": [
     "ALLOWED_SKIPS",
     "API_PORT",
+    "DISTRIBUTION_CHANNEL",
+    "DISTRIBUTION_MANIFEST_PATH",
     "DRY_RUN",
+    "GITHUB_OUTPUT",
     "GITHUB_SHA",
     "NEEDS",
     "ONLY_PLATFORM",
     "PLATFORM",
     "SKIP_BUILD",
+    "SOURCE_SHA",
     "VERSION"
   ],
   "tasks": {

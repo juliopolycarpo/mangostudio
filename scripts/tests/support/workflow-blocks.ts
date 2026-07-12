@@ -42,5 +42,10 @@ export function sectionKeys(sectionBody: string): string[] {
 /** Parse a job block's inline `needs: [a, b]` list. Returns [] when absent. */
 export function parseNeedsList(jobBlock: string): string[] {
   const list = /\n\s+needs: \[([^\]]*)\]/.exec(jobBlock)?.[1];
-  return list ? list.split(',').map((need) => need.trim()) : [];
+  return list
+    ? list
+        .split(',')
+        .map((need) => need.trim())
+        .filter(Boolean)
+    : [];
 }

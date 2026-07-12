@@ -123,18 +123,18 @@ describe('release workflow binary gate', () => {
     }
   });
 
-  test('release build preflights static publish secrets before setup', () => {
+  test('release preparation preflights static publish secrets before setup', () => {
     const workflow = readText('.github/workflows/release.yml');
-    const buildBlock = extractJobBlock(workflow, 'build');
-    const preflightIndex = buildBlock.indexOf('name: Preflight release secrets');
+    const prepareBlock = extractJobBlock(workflow, 'prepare');
+    const preflightIndex = prepareBlock.indexOf('name: Preflight release secrets');
     const secretPrefix = '$' + '{{ secrets.';
 
     expect(preflightIndex).toBeGreaterThan(-1);
-    expect(preflightIndex).toBeLessThan(buildBlock.indexOf('actions/checkout@'));
-    expect(buildBlock).toContain(`NPM_TOKEN: ${secretPrefix}NPM_TOKEN }}`);
-    expect(buildBlock).toContain(`DIST_REPOS_TOKEN: ${secretPrefix}DIST_REPOS_TOKEN }}`);
-    expect(buildBlock).toContain(`CARGO_REGISTRY_TOKEN: ${secretPrefix}CARGO_REGISTRY_TOKEN }}`);
-    expect(buildBlock).toContain('Missing required release secret(s): %s');
+    expect(preflightIndex).toBeLessThan(prepareBlock.indexOf('actions/checkout@'));
+    expect(prepareBlock).toContain(`NPM_TOKEN: ${secretPrefix}NPM_TOKEN }}`);
+    expect(prepareBlock).toContain(`DIST_REPOS_TOKEN: ${secretPrefix}DIST_REPOS_TOKEN }}`);
+    expect(prepareBlock).toContain(`CARGO_REGISTRY_TOKEN: ${secretPrefix}CARGO_REGISTRY_TOKEN }}`);
+    expect(prepareBlock).toContain('Missing required release secret(s): %s');
   });
 
   test('pre-merge binary smoke covers native host platforms and Docker variants', () => {
@@ -166,6 +166,31 @@ describe('release workflow binary gate', () => {
     expect(workflow).toContain(`DOCKER_ARCH: ${dockerArchExpression}`);
     expect(workflow).toContain(`--platform "linux/${dockerArchVar}"`);
     expect(workflow).not.toContain('docker/setup-qemu-action');
+  });
+
+  test('one reusable builder creates manifest-backed target and packaged artifacts', () => {
+    const workflow = readText('.github/workflows/distribution-build.yml');
+
+    expect(workflow.match(/bun run build --binary/g)).toHaveLength(1);
+    expect(workflow.match(/bun \.\/scripts\/release\/pack-npm\.ts/g)).toHaveLength(1);
+    expect(workflow.match(/bun \.\/scripts\/release\/archive-assets\.ts/g)).toHaveLength(1);
+    expect(workflow).toContain('bun ./scripts/release/distribution-manifest.ts --validate');
+    expect(workflow).toContain('bun ./scripts/release/bundle-distribution.ts');
+    expect(workflow.match(/overwrite: false/g)).toHaveLength(9);
+    expect(workflow).toContain('actions/attest-build-provenance@');
+    expect(workflow).toContain('subject-path: .distribution-bundles/*.tar.gz');
+  });
+
+  test('binary and Docker smoke consume target artifacts without rebuilding by default', () => {
+    const workflow = readText('.github/workflows/smoke-binary.yml');
+    const skipBuildExpression = '$' + "{{ inputs.rebuild && '0' || '1' }}";
+
+    expect(workflow.match(/uses: \.\/\.github\/actions\/download-distribution/g)).toHaveLength(2);
+    expect(workflow).toContain(`SKIP_BUILD: ${skipBuildExpression}`);
+    expect(workflow).toContain('name: Build Docker binary (manual fallback)');
+    expect(workflow).toMatch(
+      /name: Build Docker binary \(manual fallback\)\n\s+if: \$\{\{ inputs\.rebuild \}\}/
+    );
   });
 
   test('runs the built linux-x64 archive before any publish channel starts', () => {
@@ -286,12 +311,12 @@ describe('release workflow binary gate', () => {
     expect(workflow).not.toContain('CHANGELOG_PR_TOKEN');
     expect(workflow).not.toContain('bun run changelog --release');
 
-    // The build job's fail-fast verify step gates the changelog section (via
+    // The preparation job's fail-fast verify step gates the changelog section (via
     // check:versions --expect) before any artifact is produced.
-    const buildBlock = extractJobBlock(workflow, 'build');
-    expect(buildBlock).toContain('bun run check:versions --expect "$EXPECTED_VERSION"');
-    expect(buildBlock).toContain('CHANGELOG.md lacks this release');
-    expect(buildBlock).toContain('bun run release:prepare');
+    const prepareBlock = extractJobBlock(workflow, 'prepare');
+    expect(prepareBlock).toContain('bun run check:versions --expect "$EXPECTED_VERSION"');
+    expect(prepareBlock).toContain('CHANGELOG.md lacks this release');
+    expect(prepareBlock).toContain('bun run release:prepare');
 
     // github-release notes generation is unaffected by the gate.
     const releaseBlock = extractJobBlock(workflow, 'github-release');
@@ -348,21 +373,22 @@ describe('release workflow binary gate', () => {
 
     // 30 days widens the window for re-running just the docker/npm publish job
     // off the original artifacts.
-    expect(buildBlock).not.toContain('retention-days: 7');
-    expect(buildBlock).toContain('retention-days: 30');
+    expect(buildBlock).not.toContain('retention_days: 7');
+    expect(buildBlock).toContain('retention_days: 30');
+    expect(buildBlock).toContain('uses: ./.github/workflows/distribution-build.yml');
   });
 
-  test('docker job re-runs durably: GHCR-asset fallback plus retried scripted buildx', () => {
+  test('docker job consumes only the verified distribution and retries scripted buildx', () => {
     const workflow = readText('.github/workflows/release.yml');
     const dockerBlock = extractJobBlock(workflow, 'docker');
     const versionVar = '$' + '{VERSION}';
     const imageVar = '$' + '{IMAGE}';
 
-    // The artifact download is tolerant; a fallback fetches the published release
-    // so a late, isolated re-run still has the binaries to stage from.
-    expect(dockerBlock).toContain('continue-on-error: true');
-    expect(dockerBlock).toContain("if: steps.assets.outcome != 'success'");
-    expect(dockerBlock).toContain(`retry_command 3 30 gh release download "v${versionVar}"`);
+    // Publication never silently substitutes bytes from a previous release if
+    // the run-scoped immutable artifact is missing or fails verification.
+    expect(dockerBlock).toContain('uses: ./.github/actions/download-distribution');
+    expect(dockerBlock).not.toContain('continue-on-error: true');
+    expect(dockerBlock).not.toContain('gh release download');
 
     // Scripted buildx (not build-push-action) so each multi-arch push is retried;
     // the full tag set is preserved.
@@ -412,10 +438,9 @@ describe('release workflow binary gate', () => {
     const mainPushIf = '$' + "{{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}";
     expect(canaryBlock, 'canary job not found in ci.yml').not.toBe('');
 
-    // The gate is the single definition of a green commit (see
-    // ci-gate.unit.test.ts for its completeness); canary must not duplicate
-    // the mandatory job list.
-    expectJobNeeds(workflow, 'canary', String.raw`\[gate\]`);
+    // The gate is the definition of a green commit; the other dependencies
+    // expose the exact artifact identity to the reusable publisher.
+    expectJobNeeds(workflow, 'canary', String.raw`\[gate, distribution-identity, distribution\]`);
     expect(canaryBlock).toContain(`if: ${mainPushIf}`);
     expect(canaryBlock).toContain('uses: ./.github/workflows/canary.yml');
     // Explicit secret pass-through: the called workflow sees only what it
@@ -432,8 +457,7 @@ describe('release workflow binary gate', () => {
 
   test('canary publishes npm and GitHub release assets as isolated jobs', () => {
     const workflow = readText('.github/workflows/canary.yml');
-    const cargoVersionOutput = '$' + '{{ steps.identity.outputs.cargo_version }}';
-    const cargoVersionNeeds = '$' + '{{ needs.build.outputs.cargo_version }}';
+    const cargoVersionInput = '$' + '{{ inputs.cargo_version }}';
     const cargoVersionVar = '$' + '{CARGO_VERSION}';
     const versionVar = '$' + '{VERSION}';
 
@@ -442,12 +466,13 @@ describe('release workflow binary gate', () => {
     expect(workflow).toContain('group: canary-publish');
     expect(workflow).toContain('cancel-in-progress: true');
 
-    expectJobNeeds(workflow, 'npm-canary', 'build');
-    expectJobNeeds(workflow, 'github-release-canary', 'build');
+    expectJobNeeds(workflow, 'npm-canary', 'verify');
+    expectJobNeeds(workflow, 'github-release-canary', 'verify');
     expect(extractJobBlock(workflow, 'docker-canary')).toBe('');
     expect(extractJobBlock(workflow, 'crates-canary')).toBe('');
-    expect(workflow).toContain(`cargo_version: ${cargoVersionOutput}`);
-    expect(workflow).toContain('name: canary-release-assets');
+    expect(workflow).toContain('uses: ./.github/actions/download-distribution');
+    expect(workflow).not.toContain('bun run build --binary');
+    expect(workflow).not.toContain('actions/upload-artifact@');
     expect(workflow).not.toContain('name: canary-cargo-assets');
     expect(workflow).not.toContain('packages: write');
     expect(workflow).not.toContain('CARGO_REGISTRY_TOKEN');
@@ -462,8 +487,8 @@ describe('release workflow binary gate', () => {
     // GitHub Releases: fixed <root>-canary asset names, with the full per-SHA
     // canary version retained in notes for traceability.
     const releaseBlock = extractJobBlock(workflow, 'github-release-canary');
-    expect(releaseBlock).toContain(`VERSION: ${'$'}{{ needs.build.outputs.version }}`);
-    expect(releaseBlock).toContain(`CARGO_VERSION: ${cargoVersionNeeds}`);
+    expect(releaseBlock).toContain(`VERSION: ${'$'}{{ inputs.version }}`);
+    expect(releaseBlock).toContain(`CARGO_VERSION: ${cargoVersionInput}`);
     expect(releaseBlock).toContain(
       `github-canary-assets/${'$'}{target/${versionVar}/${cargoVersionVar}}`
     );
@@ -479,7 +504,7 @@ describe('release workflow binary gate', () => {
     const workflow = readText('.github/workflows/canary.yml');
     const summaryBlock = extractJobBlock(workflow, 'canary-summary');
     const alwaysExpression = '$' + '{{ always() }}';
-    const buildResult = '$' + '{{ needs.build.result }}';
+    const buildResult = '$' + '{{ needs.verify.result }}';
     const npmResult = '$' + '{{ needs.npm-canary.result }}';
     const githubReleaseResult = '$' + '{{ needs.github-release-canary.result }}';
     expect(summaryBlock, 'canary-summary job not found').not.toBe('');

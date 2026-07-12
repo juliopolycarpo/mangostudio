@@ -8,7 +8,7 @@ name: Release
 # Trigger by pushing a semver tag (git tag -s v0.1.0 && git push origin v0.1.0)
 # or via workflow_dispatch with an explicit version. The tagged commit must
 # already carry the release's CHANGELOG.md section (staged by `bun run
-# release:prepare`); the build job's lockstep check gates on it.
+# release:prepare`); the preparation job's lockstep check gates on it.
 #
 # Prerequisites: an NPM_TOKEN repo secret with publish rights to mangostudio and
 # @mangostudio/cli-*, and a single DIST_REPOS_TOKEN fine-grained PAT with
@@ -40,12 +40,13 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  build:
-    name: Build binaries & npm packages
+  prepare:
+    name: Prepare release identity
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 10
     outputs:
       version: ${{ steps.resolve.outputs.version }}
+      source_sha: ${{ steps.source.outputs.sha }}
     steps:
       - name: Preflight release secrets
         env:
@@ -98,32 +99,23 @@ jobs:
           EXPECTED_VERSION: ${{ steps.resolve.outputs.version }}
         run: bun run check:versions --expect "$EXPECTED_VERSION"
 
-      - name: Build standalone binaries (all platforms)
-        run: VERSION="${{ steps.resolve.outputs.version }}" bun run build --binary
+      - id: source
+        name: Resolve release source SHA
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
-      - name: Assemble npm distribution
-        env:
-          VERSION: ${{ steps.resolve.outputs.version }}
-        run: bun ./scripts/release/pack-npm.ts
-
-      - name: Archive release assets
-        env:
-          VERSION: ${{ steps.resolve.outputs.version }}
-        run: bun ./scripts/release/archive-assets.ts
-
-      # 30-day retention widens the window for re-running a single failed publish
-      # job (e.g. docker) off the original build artifacts before they expire.
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: release-assets
-          path: release-assets/
-          retention-days: 30
-
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: npm-dist
-          path: dist-npm/
-          retention-days: 30
+  build:
+    name: Build immutable release distribution
+    needs: prepare
+    permissions:
+      contents: read
+      id-token: write # mint provenance for the stable release distribution
+      attestations: write # persist provenance for stable release bundles
+    uses: ./.github/workflows/distribution-build.yml
+    with:
+      version: ${{ needs.prepare.outputs.version }}
+      source_sha: ${{ needs.prepare.outputs.source_sha }}
+      channel: release
+      retention_days: 30
 
   verify-build:
     name: Verify built Linux binary
@@ -135,10 +127,12 @@ jobs:
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: ./.github/actions/download-distribution
         with:
-          name: release-assets
-          path: release-assets
+          artifact-name: ${{ needs.build.outputs.packaged_artifact }}
+          source-sha: ${{ needs.build.outputs.source_sha }}
+          version: ${{ needs.build.outputs.version }}
+          channel: release
 
       - name: Run Linux x64 binary smoke test
         env:
@@ -167,10 +161,12 @@ jobs:
         with:
           cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: ./.github/actions/download-distribution
         with:
-          name: release-assets
-          path: release-assets
+          artifact-name: ${{ needs.build.outputs.packaged_artifact }}
+          source-sha: ${{ needs.build.outputs.source_sha }}
+          version: ${{ needs.build.outputs.version }}
+          channel: release
 
       - name: Generate release notes
         run: bunx git-cliff --tag "v${{ needs.build.outputs.version }}" --latest --strip all > RELEASE_NOTES.md
@@ -225,25 +221,12 @@ jobs:
         with:
           cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
-      - id: assets
-        continue-on-error: true
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: ./.github/actions/download-distribution
         with:
-          name: release-assets
-          path: release-assets
-
-      - name: Fetch release assets if the build artifact expired
-        # Re-running this job alone (e.g. after a transient registry failure) long
-        # after the run still works: fall back to the published GitHub Release,
-        # which stage-docker-ctx --release-assets can stage from too.
-        if: steps.assets.outcome != 'success'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ needs.build.outputs.version }}
-        run: |
-          source scripts/release/retry.sh
-          mkdir -p release-assets
-          retry_command 3 30 gh release download "v${VERSION}" --dir release-assets --clobber
+          artifact-name: ${{ needs.build.outputs.packaged_artifact }}
+          source-sha: ${{ needs.build.outputs.source_sha }}
+          version: ${{ needs.build.outputs.version }}
+          channel: release
 
       - name: Stage Docker build context
         env:
@@ -351,10 +334,12 @@ jobs:
         with:
           cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: ./.github/actions/download-distribution
         with:
-          name: npm-dist
-          path: dist-npm
+          artifact-name: ${{ needs.build.outputs.packaged_artifact }}
+          source-sha: ${{ needs.build.outputs.source_sha }}
+          version: ${{ needs.build.outputs.version }}
+          channel: release
 
       - name: Restore executable bit on platform binaries
         # actions/upload-artifact zips files and drops Unix mode bits, so the
@@ -392,10 +377,12 @@ jobs:
         with:
           cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: ./.github/actions/download-distribution
         with:
-          name: release-assets
-          path: release-assets
+          artifact-name: ${{ needs.build.outputs.packaged_artifact }}
+          source-sha: ${{ needs.build.outputs.source_sha }}
+          version: ${{ needs.build.outputs.version }}
+          channel: release
 
       - name: Render formula and push to juliopolycarpo/homebrew-tap
         env:
@@ -429,10 +416,12 @@ jobs:
         with:
           cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: ./.github/actions/download-distribution
         with:
-          name: release-assets
-          path: release-assets
+          artifact-name: ${{ needs.build.outputs.packaged_artifact }}
+          source-sha: ${{ needs.build.outputs.source_sha }}
+          version: ${{ needs.build.outputs.version }}
+          channel: release
 
       - name: Render manifest and push to juliopolycarpo/scoop-bucket
         env:

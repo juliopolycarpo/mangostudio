@@ -14,6 +14,22 @@ name: Canary
 
 on:
   workflow_call:
+    inputs:
+      version:
+        type: string
+        required: true
+      cargo_version:
+        type: string
+        required: true
+      source_sha:
+        type: string
+        required: true
+      channel:
+        type: string
+        required: true
+      packaged_artifact:
+        type: string
+        required: true
     secrets:
       NPM_TOKEN:
         description: npm token used to publish under the canary dist-tag.
@@ -30,55 +46,23 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build:
-    name: Build canary binaries & npm packages
+  verify:
+    name: Verify tested canary distribution
     runs-on: ubuntu-latest
-    timeout-minutes: 20
-    outputs:
-      version: ${{ steps.identity.outputs.version }}
-      cargo_version: ${{ steps.identity.outputs.cargo_version }}
-      sha: ${{ steps.identity.outputs.sha }}
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - uses: ./.github/actions/download-distribution
         with:
-          fetch-depth: 0
-
-      - uses: ./.github/actions/setup-mango
-        with:
-          cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
-
-      - name: Resolve canary identity
-        id: identity
-        run: bun ./scripts/release/canary-version.ts >> "$GITHUB_OUTPUT"
-
-      - name: Build standalone binaries (all platforms)
-        run: VERSION="${{ steps.identity.outputs.version }}" bun run build --binary
-
-      - name: Assemble npm distribution
-        env:
-          VERSION: ${{ steps.identity.outputs.version }}
-        run: bun ./scripts/release/pack-npm.ts
-
-      - name: Archive release assets
-        env:
-          VERSION: ${{ steps.identity.outputs.version }}
-        run: bun ./scripts/release/archive-assets.ts
-
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: canary-npm-dist
-          path: dist-npm/
-          retention-days: 7
-
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: canary-release-assets
-          path: release-assets/
-          retention-days: 7
+          artifact-name: ${{ inputs.packaged_artifact }}
+          source-sha: ${{ inputs.source_sha }}
+          version: ${{ inputs.version }}
+          channel: ${{ inputs.channel }}
 
   npm-canary:
     name: Publish npm (canary dist-tag)
-    needs: build
+    needs: verify
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -91,10 +75,12 @@ jobs:
         with:
           cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: ./.github/actions/download-distribution
         with:
-          name: canary-npm-dist
-          path: dist-npm
+          artifact-name: ${{ inputs.packaged_artifact }}
+          source-sha: ${{ inputs.source_sha }}
+          version: ${{ inputs.version }}
+          channel: ${{ inputs.channel }}
 
       - name: Restore executable bit on platform binaries
         # actions/upload-artifact drops Unix mode bits, so restore +x before
@@ -113,7 +99,7 @@ jobs:
 
   github-release-canary:
     name: Publish GitHub pre-release assets
-    needs: build
+    needs: verify
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -121,15 +107,17 @@ jobs:
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: ./.github/actions/download-distribution
         with:
-          name: canary-release-assets
-          path: release-assets
+          artifact-name: ${{ inputs.packaged_artifact }}
+          source-sha: ${{ inputs.source_sha }}
+          version: ${{ inputs.version }}
+          channel: ${{ inputs.channel }}
 
       - name: Stage rolling canary release assets
         env:
-          VERSION: ${{ needs.build.outputs.version }}
-          CARGO_VERSION: ${{ needs.build.outputs.cargo_version }}
+          VERSION: ${{ inputs.version }}
+          CARGO_VERSION: ${{ inputs.cargo_version }}
         run: |
           mkdir -p github-canary-assets
           for asset in release-assets/mangostudio-"${VERSION}"-*; do
@@ -143,12 +131,13 @@ jobs:
         # fixed-version canary launchers keep working as these assets are clobbered.
         env:
           GH_TOKEN: ${{ github.token }}
-          CARGO_VERSION: ${{ needs.build.outputs.cargo_version }}
-          VERSION: ${{ needs.build.outputs.version }}
+          CARGO_VERSION: ${{ inputs.cargo_version }}
+          VERSION: ${{ inputs.version }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
         run: |
           source scripts/release/retry.sh
           tag="v${CARGO_VERSION}"
-          notes="Rolling canary build from ${GITHUB_SHA}. Canary version: ${VERSION}. Assets use ${CARGO_VERSION} names for launcher compatibility."
+          notes="Rolling canary build from ${SOURCE_SHA}. Canary version: ${VERSION}. Assets use ${CARGO_VERSION} names for launcher compatibility."
           if gh release view "$tag" >/dev/null 2>&1; then
             retry_command 3 30 gh release edit "$tag" --prerelease --title "$tag" --notes "$notes"
             retry_command 3 30 gh release upload "$tag" github-canary-assets/* --clobber
@@ -161,7 +150,7 @@ jobs:
 
   canary-summary:
     name: Canary publish summary
-    needs: [build, npm-canary, github-release-canary]
+    needs: [verify, npm-canary, github-release-canary]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -172,8 +161,8 @@ jobs:
 
       - name: Write canary publish summary
         env:
-          TITLE: Canary ${{ needs.build.outputs.version }} (canary-${{ needs.build.outputs.sha }})
-          BUILD_RESULT: ${{ needs.build.result }}
+          TITLE: Canary ${{ inputs.version }}
+          BUILD_RESULT: ${{ needs.verify.result }}
           NPM_RESULT: ${{ needs.npm-canary.result }}
           RELEASE_RESULT: ${{ needs.github-release-canary.result }}
         run: |
