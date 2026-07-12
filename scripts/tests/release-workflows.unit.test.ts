@@ -186,6 +186,12 @@ describe('release workflow binary gate', () => {
     const skipBuildExpression = '$' + "{{ inputs.rebuild && '0' || '1' }}";
 
     expect(workflow.match(/uses: \.\/\.github\/actions\/download-distribution/g)).toHaveLength(2);
+    for (const job of ['binary', 'docker']) {
+      const jobBlock = extractJobBlock(workflow, job);
+      expect(jobBlock.indexOf('uses: ./.github/actions/setup-mango')).toBeLessThan(
+        jobBlock.indexOf('uses: ./.github/actions/download-distribution')
+      );
+    }
     expect(workflow).toContain(`SKIP_BUILD: ${skipBuildExpression}`);
     expect(workflow).toContain('name: Build Docker binary (manual fallback)');
     expect(workflow).toMatch(
