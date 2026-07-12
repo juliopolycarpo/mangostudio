@@ -1,0 +1,369 @@
+name: Nightly Distribution Health
+
+# Scheduled verification of the *published* distribution channels — the bytes a
+# user actually installs — across native operating systems. Per-PR CI already
+# builds and smokes every source target, so each lane here covers a path absent
+# from that pipeline:
+#   - npm: fresh install of the exact resolved version, `--version` assert, a
+#     hermetic `doctor` in a throwaway home, and an upgrade from the pinned
+#     stable release to the resolved version.
+#   - GitHub Releases: download the matching platform archive, verify it against
+#     the SHA256SUMS snapshot pinned at resolve time, extract, and run the
+#     shared binary health smoke.
+#
+# The resolve job pins one immutable identity up front and every lane consumes
+# it, so a canary publish landing mid-run can never make jobs disagree — it
+# surfaces as an explicit checksum/version mismatch instead.
+#
+# Homebrew and Scoop have no canary channel; their stable manifests are rendered
+# and verified by the release pipeline, so this workflow does not reinstall
+# them. No build or dependency caches are used: the lanes test published bytes
+# and installer metadata, not source reproducibility.
+#
+# Failures rely on the standard failed-scheduled-run notification; diagnostics
+# are uploaded only on failure. See docs/reference/releasing.md.
+
+on:
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: Distribution channel to verify.
+        type: choice
+        options:
+          - canary
+          - stable
+        default: canary
+      version:
+        description: Exact published npm version to verify instead of the channel dist-tag.
+        type: string
+        default: ""
+      deep_diagnostics:
+        description: Run `doctor --all` (includes provider sections even when unconfigured).
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly-distribution-health-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  resolve:
+    name: Resolve channel identity
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      channel: ${{ steps.identity.outputs.channel }}
+      npm_version: ${{ steps.identity.outputs.npm_version }}
+      stable_version: ${{ steps.identity.outputs.stable_version }}
+      release_tag: ${{ steps.identity.outputs.release_tag }}
+      asset_version: ${{ steps.identity.outputs.asset_version }}
+      archive_version: ${{ steps.identity.outputs.archive_version }}
+    steps:
+      - id: identity
+        name: Pin one immutable identity for every lane
+        env:
+          CHANNEL: ${{ inputs.channel || 'canary' }}
+          VERSION_OVERRIDE: ${{ inputs.version || '' }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          packument="$(curl -fsS --retry 3 https://registry.npmjs.org/mangostudio)"
+
+          dist_tag=latest
+          if [ "$CHANNEL" = "canary" ]; then dist_tag=canary; fi
+          npm_version="$VERSION_OVERRIDE"
+          if [ -z "$npm_version" ]; then
+            npm_version="$(jq -r --arg tag "$dist_tag" '.["dist-tags"][$tag] // empty' <<<"$packument")"
+          fi
+          if [ -z "$npm_version" ]; then
+            echo "The npm registry has no '${dist_tag}' dist-tag for mangostudio." >&2
+            exit 1
+          fi
+          if ! jq -e --arg v "$npm_version" '.versions[$v] != null' <<<"$packument" >/dev/null; then
+            echo "Version ${npm_version} is not published on npm." >&2
+            exit 1
+          fi
+          stable_version="$(jq -r '.["dist-tags"].latest // empty' <<<"$packument")"
+
+          # Canary npm versions are <root>-canary.<sha7>; release assets drop the
+          # .<sha7> so the fixed Cargo launcher keeps resolving them.
+          if [ "$CHANNEL" = "canary" ]; then
+            if [[ ! "$npm_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+-canary\.[0-9a-f]{7}$ ]]; then
+              echo "Unexpected canary version shape: ${npm_version}" >&2
+              exit 1
+            fi
+            asset_version="${npm_version%.*}"
+          else
+            if [[ ! "$npm_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "Unexpected stable version shape: ${npm_version}" >&2
+              exit 1
+            fi
+            asset_version="$npm_version"
+          fi
+          release_tag="v${asset_version}"
+
+          # The rolling canary pre-release records its exact canary version in
+          # the notes; that is the version the archived binary reports. Stable
+          # tags are immutable, so the archive version equals the npm version.
+          archive_version="$npm_version"
+          if [ "$CHANNEL" = "canary" ]; then
+            notes="$(gh release view "$release_tag" --json body --jq .body)"
+            archive_version="$(grep -oE 'Canary version: [0-9]+\.[0-9]+\.[0-9]+-canary\.[0-9a-f]{7}' <<<"$notes" | head -n 1 | awk '{print $3}')"
+            if [ -z "$archive_version" ]; then
+              echo "Could not parse the canary version from the ${release_tag} release notes." >&2
+              exit 1
+            fi
+            if [ "$archive_version" != "$npm_version" ]; then
+              echo "::warning::npm canary (${npm_version}) and the ${release_tag} pre-release (${archive_version}) diverge — one channel likely failed its last publish."
+            fi
+          fi
+
+          mkdir -p pinned-checksums
+          gh release download "$release_tag" --pattern SHA256SUMS --dir pinned-checksums
+          echo "Pinned SHA256SUMS from ${release_tag}:"
+          cat pinned-checksums/SHA256SUMS
+
+          {
+            echo "channel=${CHANNEL}"
+            echo "npm_version=${npm_version}"
+            echo "stable_version=${stable_version}"
+            echo "release_tag=${release_tag}"
+            echo "asset_version=${asset_version}"
+            echo "archive_version=${archive_version}"
+          } >> "$GITHUB_OUTPUT"
+          {
+            echo "### Resolved distribution identity"
+            echo "- Channel: \`${CHANNEL}\`"
+            echo "- npm version: \`${npm_version}\`"
+            echo "- GitHub release: \`${release_tag}\` (binary reports \`${archive_version}\`)"
+            echo "- Stable (upgrade baseline): \`${stable_version:-none}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Pin the SHA256SUMS snapshot for the archive lanes
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: pinned-checksums
+          path: pinned-checksums/SHA256SUMS
+          retention-days: 1
+
+  npm-install:
+    name: npm ${{ matrix.platform }}
+    needs: resolve
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux-x64
+            runner: ubuntu-latest
+          - platform: darwin-arm64
+            runner: macos-latest
+          - platform: windows-x64
+            runner: windows-latest
+    defaults:
+      run:
+        shell: bash
+    env:
+      NPM_VERSION: ${{ needs.resolve.outputs.npm_version }}
+      STABLE_VERSION: ${{ needs.resolve.outputs.stable_version }}
+      DEEP_DIAGNOSTICS: ${{ inputs.deep_diagnostics }}
+      BETTER_AUTH_SECRET: nightly-smoke-secret-at-least-32-characters-long
+      GEMINI_API_KEY: dummy
+    steps:
+      # The repo is Bun-native, but npm is the distribution channel under test
+      # here: these steps exercise what `npm install -g mangostudio` gives users.
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22.14.0"
+
+      - name: Fresh install of the resolved version, then hermetic doctor
+        # Installing the published package from the registry is the very path
+        # under test; there is deliberately no lockfile.
+        run: | # zizmor: ignore[adhoc-packages]
+          set -euo pipefail
+          export NPM_CONFIG_PREFIX="$RUNNER_TEMP/npm-fresh"
+          mkdir -p "$NPM_CONFIG_PREFIX"
+          npm install -g --no-fund --no-audit "mangostudio@${NPM_VERSION}"
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            bin="$NPM_CONFIG_PREFIX/mangostudio"
+          else
+            bin="$NPM_CONFIG_PREFIX/bin/mangostudio"
+          fi
+          actual="$("$bin" --version)"
+          if [ "$actual" != "$NPM_VERSION" ]; then
+            echo "Expected mangostudio ${NPM_VERSION}, got ${actual}" >&2
+            exit 1
+          fi
+          home="$RUNNER_TEMP/mango-home-fresh"
+          mkdir -p "$home"
+          if [ "$DEEP_DIAGNOSTICS" = "true" ]; then
+            HOME="$home" USERPROFILE="$home" "$bin" doctor --all
+          else
+            HOME="$home" USERPROFILE="$home" "$bin" doctor
+          fi
+
+      - name: Upgrade from the pinned stable to the resolved version
+        # Same as above: the registry install path is the lane's subject.
+        run: | # zizmor: ignore[adhoc-packages]
+          set -euo pipefail
+          if [ -z "$STABLE_VERSION" ]; then
+            echo "No stable release on npm yet; skipping the upgrade path."
+            exit 0
+          fi
+          export NPM_CONFIG_PREFIX="$RUNNER_TEMP/npm-upgrade"
+          mkdir -p "$NPM_CONFIG_PREFIX"
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            bin="$NPM_CONFIG_PREFIX/mangostudio"
+          else
+            bin="$NPM_CONFIG_PREFIX/bin/mangostudio"
+          fi
+          npm install -g --no-fund --no-audit "mangostudio@${STABLE_VERSION}"
+          before="$("$bin" --version)"
+          if [ "$before" != "$STABLE_VERSION" ]; then
+            echo "Expected stable mangostudio ${STABLE_VERSION}, got ${before}" >&2
+            exit 1
+          fi
+          npm install -g --no-fund --no-audit "mangostudio@${NPM_VERSION}"
+          after="$("$bin" --version)"
+          if [ "$after" != "$NPM_VERSION" ]; then
+            echo "Upgrade ${STABLE_VERSION} -> ${NPM_VERSION} left version ${after}" >&2
+            exit 1
+          fi
+          home="$RUNNER_TEMP/mango-home-upgrade"
+          mkdir -p "$home"
+          HOME="$home" USERPROFILE="$home" "$bin" doctor
+
+      - name: Stage npm failure diagnostics
+        if: failure()
+        run: |
+          set -euo pipefail
+          mkdir -p npm-failure-logs
+          cache_dir="$(npm config get cache)"
+          cp -R "${cache_dir}/_logs/." npm-failure-logs/ 2>/dev/null || true
+
+      - name: Upload npm failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: npm-failure-logs-${{ matrix.platform }}
+          path: npm-failure-logs
+          retention-days: 14
+          if-no-files-found: ignore
+
+  release-archive:
+    name: Archive ${{ matrix.platform }}
+    needs: resolve
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux-x64
+            runner: ubuntu-latest
+            archive_ext: tar.gz
+          - platform: darwin-arm64
+            runner: macos-latest
+            archive_ext: tar.gz
+          - platform: windows-x64
+            runner: windows-latest
+            archive_ext: zip
+    defaults:
+      run:
+        shell: bash
+    env:
+      RELEASE_TAG: ${{ needs.resolve.outputs.release_tag }}
+      ASSET_VERSION: ${{ needs.resolve.outputs.asset_version }}
+      ARCHIVE_VERSION: ${{ needs.resolve.outputs.archive_version }}
+      PLATFORM: ${{ matrix.platform }}
+      ARCHIVE_EXT: ${{ matrix.archive_ext }}
+    steps:
+      # Checkout provides only the release smoke script; no toolchain, install,
+      # or cache — the archive under test must stand on its own.
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Download the pinned SHA256SUMS snapshot
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: pinned-checksums
+          path: pinned-checksums
+
+      - name: Download the release archive
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          asset="mangostudio-${ASSET_VERSION}-${PLATFORM}.${ARCHIVE_EXT}"
+          gh release download "$RELEASE_TAG" --pattern "$asset" --dir release-archive
+          echo "ASSET_NAME=${asset}" >> "$GITHUB_ENV"
+
+      - name: Verify the archive against the pinned checksums
+        run: |
+          set -euo pipefail
+          expected="$(awk -v name="$ASSET_NAME" '$2 == name || $2 == "*" name { print $1 }' pinned-checksums/SHA256SUMS)"
+          if [ -z "$expected" ]; then
+            echo "Pinned SHA256SUMS has no entry for ${ASSET_NAME}." >&2
+            exit 1
+          fi
+          actual="$(sha256sum "release-archive/${ASSET_NAME}" | awk '{ print $1 }')"
+          if [ "$actual" != "$expected" ]; then
+            echo "Checksum mismatch for ${ASSET_NAME}: expected ${expected}, got ${actual}." >&2
+            echo "If this is the canary channel, the rolling pre-release may have been republished mid-run — re-run the workflow." >&2
+            exit 1
+          fi
+          echo "Checksum verified: ${ASSET_NAME}"
+
+      - name: Extract and smoke the published binary
+        run: |
+          set -euo pipefail
+          mkdir -p extracted
+          case "$ASSET_NAME" in
+            *.tar.gz) tar -xzf "release-archive/${ASSET_NAME}" -C extracted ;;
+            *.zip) (cd extracted && 7z x -y "../release-archive/${ASSET_NAME}" >/dev/null) ;;
+            *) echo "Unknown archive type: ${ASSET_NAME}" >&2; exit 1 ;;
+          esac
+          binary="extracted/mangostudio"
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            binary="extracted/mangostudio.exe"
+          fi
+          chmod +x "$binary" 2>/dev/null || true
+          scripts/release/smoke-binary.sh "$binary" "$ARCHIVE_VERSION" 13003
+        env:
+          BETTER_AUTH_SECRET: nightly-smoke-secret-at-least-32-characters-long
+          GEMINI_API_KEY: dummy
+
+  health-summary:
+    name: Nightly health summary
+    needs: [resolve, npm-install, release-archive]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Write the matrix summary
+        env:
+          CHANNEL: ${{ needs.resolve.outputs.channel }}
+          NPM_VERSION: ${{ needs.resolve.outputs.npm_version }}
+          RELEASE_TAG: ${{ needs.resolve.outputs.release_tag }}
+          ARCHIVE_VERSION: ${{ needs.resolve.outputs.archive_version }}
+          RESOLVE_RESULT: ${{ needs.resolve.result }}
+          NPM_RESULT: ${{ needs.npm-install.result }}
+          ARCHIVE_RESULT: ${{ needs.release-archive.result }}
+        run: |
+          set -euo pipefail
+          icon() { if [ "$1" = "success" ]; then echo "✅"; else echo "❌"; fi; }
+          {
+            echo "## Nightly distribution health — ${CHANNEL:-unresolved}"
+            echo ""
+            echo "| Lane | Identity | Result |"
+            echo "| --- | --- | --- |"
+            echo "| Resolve | ${NPM_VERSION:-n/a} / ${RELEASE_TAG:-n/a} | $(icon "$RESOLVE_RESULT") ${RESOLVE_RESULT} |"
+            echo "| npm install + upgrade | ${NPM_VERSION:-n/a} | $(icon "$NPM_RESULT") ${NPM_RESULT} |"
+            echo "| Release archive smoke | ${RELEASE_TAG:-n/a} (${ARCHIVE_VERSION:-n/a}) | $(icon "$ARCHIVE_RESULT") ${ARCHIVE_RESULT} |"
+          } >> "$GITHUB_STEP_SUMMARY"
