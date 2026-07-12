@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
 
 import { NPM_PLATFORMS, platformPackageName } from './npm-pack';
@@ -280,15 +280,18 @@ function validateFile(rootDir: string, file: DistributionFile): void {
   if (relativePath.startsWith(`..${sep}`) || relativePath === '..') {
     throw new Error(`Distribution manifest path escapes the workspace: ${file.path}`);
   }
-  if (!existsSync(path)) throw new Error(`Distribution file is missing: ${file.path}`);
-  const stat = statSync(path);
-  if (!stat.isFile()) throw new Error(`Distribution entry is not a file: ${file.path}`);
-  if (stat.size !== file.size) {
+  let contents: Buffer;
+  try {
+    contents = readFileSync(path);
+  } catch {
+    throw new Error(`Distribution file cannot be read: ${file.path}`);
+  }
+  if (contents.byteLength !== file.size) {
     throw new Error(
-      `Distribution size mismatch for ${file.path}: expected ${file.size}, got ${stat.size}`
+      `Distribution size mismatch for ${file.path}: expected ${file.size}, got ${contents.byteLength}`
     );
   }
-  const actual = createHash('sha256').update(readFileSync(path)).digest('hex');
+  const actual = createHash('sha256').update(contents).digest('hex');
   if (actual !== file.sha256) {
     throw new Error(
       `Distribution SHA-256 mismatch for ${file.path}: expected ${file.sha256}, got ${actual}`

@@ -116,7 +116,7 @@ describe('distribution manifest', () => {
     const binary = join(rootDir, '.mango', 'out', 'linux-x64', 'mangostudio');
     rmSync(binary);
     expect(() => validateDistributionManifest(manifest, { ...base, target: 'linux-x64' })).toThrow(
-      /file is missing/
+      /file cannot be read/
     );
     writeFileSync(binary, 'tampered');
     expect(() => validateDistributionManifest(manifest, { ...base, target: 'linux-x64' })).toThrow(
