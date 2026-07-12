@@ -30,6 +30,17 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # shellcheck source=wait-for-health.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/wait-for-health.sh"
 
+# Native Windows executables do not understand MSYS paths handed over via env
+# vars (git-bash rewrites only command-line arguments), so convert them when
+# running under git-bash. Everywhere else this is the identity function.
+to_native_path() {
+  if command -v cygpath >/dev/null 2>&1; then
+    cygpath -w "$1"
+  else
+    printf '%s\n' "$1"
+  fi
+}
+
 tmp_home="$(mktemp -d)"
 server_log="${tmp_home}/mangostudio-smoke.log"
 server_pid=""
@@ -56,10 +67,13 @@ chmod +x "$staged_binary" 2>/dev/null || true
 printf '<html><body>%s</body></html>\n' "$stale_sentinel" >"${staging_dir}/public/index.html"
 printf 'console.log("%s")\n' "$stale_sentinel" >"${staging_dir}/public/assets/index-stale0000.js"
 
+native_tmp_home="$(to_native_path "$tmp_home")"
+
 (
   cd "$staging_dir"
-  HOME="$tmp_home" \
-    DATABASE_PATH="${tmp_home}/smoke.sqlite" \
+  HOME="$native_tmp_home" \
+    USERPROFILE="$native_tmp_home" \
+    DATABASE_PATH="$(to_native_path "${tmp_home}/smoke.sqlite")" \
     API_HOST=127.0.0.1 \
     API_PORT="$port" \
     BETTER_AUTH_SECRET="${BETTER_AUTH_SECRET:-smoke-test-secret-at-least-32-characters-long}" \
