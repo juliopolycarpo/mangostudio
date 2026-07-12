@@ -25,6 +25,48 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
+  distribution-identity:
+    name: Resolve distribution identity
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.identity.outputs.version }}
+      channel: ${{ steps.identity.outputs.channel }}
+      cargo_version: ${{ steps.identity.outputs.cargo_version }}
+      source_sha: ${{ steps.source.outputs.sha }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+
+      - id: source
+        name: Resolve checked out source SHA
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - id: identity
+        name: Resolve distribution version and channel
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          SOURCE_SHA: ${{ steps.source.outputs.sha }}
+        run: bun ./scripts/ci/distribution-identity.ts >> "$GITHUB_OUTPUT"
+
+  distribution:
+    name: Distribution
+    needs: [distribution-identity]
+    permissions:
+      contents: read
+      id-token: write # mint the reusable builder's provenance attestation token
+      attestations: write # persist provenance for main-push distribution bundles
+    uses: ./.github/workflows/distribution-build.yml
+    with:
+      version: ${{ needs.distribution-identity.outputs.version }}
+      source_sha: ${{ needs.distribution-identity.outputs.source_sha }}
+      channel: ${{ needs.distribution-identity.outputs.channel }}
+      retention_days: 7
+
   check:
     name: Check
     uses: ./.github/workflows/lint.yml
@@ -53,13 +95,17 @@ jobs:
     uses: ./.github/workflows/qa-metrics.yml
 
   smoke:
-    # Builds and boots native host binaries across the supported OS/arch runners,
-    # then builds both Dockerfiles (Bookworm + Alpine, amd64 + arm64) from the
-    # local build output. release-dry-run.yml does not repeat the Docker smoke;
-    # it instead exercises the release-asset staging path
-    # (stage-docker-ctx.ts --release-assets) that this job does not cover.
+    # Boots the exact target artifacts produced once by distribution, then
+    # stages those same Linux bytes into both Docker variants. The reusable
+    # smoke workflow retains a manual rebuild fallback for one transition cycle.
     name: Smoke — Binary
+    needs: [distribution-identity, distribution]
     uses: ./.github/workflows/smoke-binary.yml
+    with:
+      version: ${{ needs.distribution-identity.outputs.version }}
+      source_sha: ${{ needs.distribution-identity.outputs.source_sha }}
+      channel: ${{ needs.distribution-identity.outputs.channel }}
+      target_artifacts: ${{ needs.distribution.outputs.target_artifacts }}
 
   gate:
     # Single stable check ("CI / Gate") aggregating every mandatory job, so
@@ -69,7 +115,16 @@ jobs:
     # qa-metrics only runs for PRs and main pushes, so its skip is accepted
     # solely on workflow_dispatch; any other non-success fails the gate.
     name: Gate
-    needs: [check, test, build, browser-smoke, qa-metrics, smoke]
+    needs: [
+      distribution-identity,
+      distribution,
+      check,
+      test,
+      build,
+      browser-smoke,
+      qa-metrics,
+      smoke,
+    ]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -97,11 +152,17 @@ jobs:
     # called workflow (ci.yml's top-level grant is read-only); canary.yml's
     # own jobs scope down further.
     name: Canary
-    needs: [gate]
+    needs: [gate, distribution-identity, distribution]
     if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
     permissions:
       contents: write # canary.yml updates the rolling GitHub pre-release
       id-token: write # npm provenance for the canary dist-tag publish
     uses: ./.github/workflows/canary.yml
+    with:
+      version: ${{ needs.distribution-identity.outputs.version }}
+      cargo_version: ${{ needs.distribution-identity.outputs.cargo_version }}
+      source_sha: ${{ needs.distribution-identity.outputs.source_sha }}
+      channel: ${{ needs.distribution-identity.outputs.channel }}
+      packaged_artifact: ${{ needs.distribution.outputs.packaged_artifact }}
     secrets:
       NPM_TOKEN: ${{ secrets.NPM_TOKEN }}

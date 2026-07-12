@@ -12,7 +12,10 @@
  *
  * Environment variables:
  *   PLATFORM      - Target platform (for example linux-x64). Required.
- *   SKIP_BUILD    - Set to 1 to skip the standalone build step.
+ *   SKIP_BUILD    - Set to 1 to verify a manifest-backed prebuilt target.
+ *   SOURCE_SHA    - Expected source commit when SKIP_BUILD=1.
+ *   DISTRIBUTION_CHANNEL - Expected artifact channel when SKIP_BUILD=1.
+ *   DISTRIBUTION_MANIFEST_PATH - Optional manifest override for tests.
  *   API_PORT      - Port for the smoke server (default: 13001).
  */
 
@@ -21,6 +24,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { startFakeChatGptServer } from '../apps/api/tests/support/chatgpt/fake-server';
 import { createCursorSmokeSidecarFixture } from './lib/cursor-smoke-sidecar-fixture';
+import {
+  DISTRIBUTION_MANIFEST_FILE,
+  readDistributionManifest,
+  validateDistributionManifest,
+} from './lib/distribution-manifest';
 import { captureCommand } from './lib/exec';
 import { NPM_PLATFORMS, platformShipsCursorSidecar } from './lib/npm-pack';
 import { collectCursorSidecarLayoutErrors } from './lib/npm-package-validation';
@@ -42,6 +50,8 @@ const REQUESTED_PLATFORM = process.env.PLATFORM;
 const SKIP_BUILD = process.env.SKIP_BUILD === '1';
 const PORT = parseInt(process.env.API_PORT ?? '13001', 10);
 const RELEASE_ASSETS_DIR = join(ROOT_DIR, 'release-assets');
+const DISTRIBUTION_MANIFEST_PATH =
+  process.env.DISTRIBUTION_MANIFEST_PATH?.trim() || join(ROOT_DIR, DISTRIBUTION_MANIFEST_FILE);
 const NPM_PLATFORM = NPM_PLATFORMS.find((platform) => platform.arch === REQUESTED_PLATFORM);
 const CHATGPT_CALLBACK_PORT = 1455;
 // Resolve via the canonical helper so the archive name we expect matches the one
@@ -156,6 +166,27 @@ function validateLayout(): void {
       fail(`Cursor sidecar layout invalid:\n- ${layoutErrors.join('\n- ')}`);
     }
     pass('cursor-sidecar layout includes SDK chunks and native runtime package');
+  }
+}
+
+function validatePrebuiltDistribution(): void {
+  const sourceSha = process.env.SOURCE_SHA?.trim();
+  const channel = process.env.DISTRIBUTION_CHANNEL?.trim();
+  if (!sourceSha) fail('SOURCE_SHA is required when SKIP_BUILD=1.');
+  if (!channel) fail('DISTRIBUTION_CHANNEL is required when SKIP_BUILD=1.');
+
+  try {
+    const manifest = readDistributionManifest(DISTRIBUTION_MANIFEST_PATH);
+    validateDistributionManifest(manifest, {
+      rootDir: ROOT_DIR,
+      sourceSha,
+      packageVersion: VERSION,
+      channel,
+      target: PLATFORM.arch,
+    });
+    pass(`Prebuilt distribution verified for ${PLATFORM.arch}`);
+  } catch (caught) {
+    fail(caught instanceof Error ? caught.message : String(caught));
   }
 }
 
@@ -601,10 +632,12 @@ console.log(`   Can execute on this host: ${CAN_EXECUTE}`);
 
 if (!SKIP_BUILD) {
   await buildBinary();
+  await archiveAssets();
+} else {
+  validatePrebuiltDistribution();
 }
 
 validateLayout();
-await archiveAssets();
 await validateReleaseArchive();
 await smokeLocalInstaller();
 

@@ -1,4 +1,6 @@
 import { describe, expect, test } from 'bun:test';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { createTurboBuildCommand, selectBuildWorkspaces } from '../lib/build';
 import { readText } from './support/read-text';
 
@@ -65,13 +67,21 @@ describe('build script', () => {
       cmd: ['bun', 'run', 'scripts/test-build.ts'],
       env: {
         ...process.env,
+        DISTRIBUTION_CHANNEL: 'test',
+        DISTRIBUTION_MANIFEST_PATH: join(
+          tmpdir(),
+          'mangostudio-missing-distribution-manifest.json'
+        ),
         PLATFORM: 'linux-x64-musl',
         SKIP_BUILD: '1',
+        SOURCE_SHA: 'abcdef0',
       },
     });
     const output = `${result.stdout.toString()}${result.stderr.toString()}`;
 
     expect(output).toContain('platform: linux-x64-musl');
+    expect(output).toContain('Missing distribution manifest');
+    expect(output).not.toContain('Building binary');
     expect(output).not.toContain('ReferenceError');
   });
 });
