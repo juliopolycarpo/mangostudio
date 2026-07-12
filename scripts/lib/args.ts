@@ -99,3 +99,10 @@ export function assertNoUnexpectedArguments(positional: string[]): void {
     fatal(`Unknown argument(s): ${positional.join(' ')}`);
   }
 }
+
+/** Read and trim a required environment variable, throwing when it is unset or blank. */
+export function requiredEnv(name: string): string {
+  const value = process.env[name]?.trim();
+  if (!value) throw new Error(`${name} is required.`);
+  return value;
+}

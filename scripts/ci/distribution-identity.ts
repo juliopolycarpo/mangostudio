@@ -5,13 +5,7 @@ import {
   canaryReleaseVersion,
   rootReleaseVersion,
 } from '../lib/release-version';
-import { error } from '../lib/runner';
-
-function requiredEnv(name: string): string {
-  const value = process.env[name]?.trim();
-  if (!value) throw new Error(`${name} is required.`);
-  return value;
-}
+import { error, requiredEnv } from '../lib/runner';
 
 function resolveIdentity(): {
   readonly version: string;

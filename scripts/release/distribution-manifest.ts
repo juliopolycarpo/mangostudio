@@ -11,7 +11,7 @@ import {
   validateDistributionManifest,
 } from '../lib/distribution-manifest';
 import { captureCommand } from '../lib/exec';
-import { error, header, success } from '../lib/runner';
+import { error, header, requiredEnv, success } from '../lib/runner';
 
 interface Args {
   readonly validate: boolean;
@@ -57,12 +57,6 @@ function parseArgs(args: readonly string[]): Args {
 function requiredValue(args: readonly string[], index: number, flag: string): string {
   const value = args[index];
   if (!value || value.startsWith('--')) throw new Error(`${flag} requires a value`);
-  return value;
-}
-
-function requiredEnv(name: string): string {
-  const value = process.env[name]?.trim();
-  if (!value) throw new Error(`${name} is required.`);
   return value;
 }
 
