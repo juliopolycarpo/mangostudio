@@ -19,9 +19,9 @@ publica cada canal de forma independente. A tag carrega o próprio
 
 | Secret                      | Usado por                                                | Escopo                                                                                                                    |
 | --------------------------- | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `NPM_TOKEN`                 | `npm-publish`, `npm-canary`                              | Direitos de publicação em `mangostudio` e `@mangostudio/cli-*`                                                            |
+| `NPM_TOKEN`                 | `npm-publish`, `npm-canary`                              | Direitos de publicação em `mangostudio` e `@mangostudio/cli-*` (validado só nesses jobs)                                  |
 | `DIST_REPOS_TOKEN`          | `homebrew`, `scoop`                                      | PAT fine-grained com contents read/write em `juliopolycarpo/homebrew-tap` e `juliopolycarpo/scoop-bucket`                 |
-| `CARGO_REGISTRY_TOKEN`      | `cargo-publish`                                          | Fallback temporário no crates.io até Trusted Publishing estar registrado e verificado para o crate `mangostudio`          |
+| `CARGO_REGISTRY_TOKEN`      | `cargo-publish` (opcional)                               | Token legado do crates.io usado só quando `workflow_dispatch` define `allow_legacy_cargo_token=true`                      |
 | *(built-in `GITHUB_TOKEN`)* | `github-release`, `docker`, o canal canary, attestations | Sem setup extra — releases por tag concedem `packages: write` para GHCR e `id-token: write` para a auth OIDC do crates.io |
 
 ### Checklist de setup único
@@ -30,12 +30,14 @@ Complete uma vez por fork ou org antes do primeiro push de tag:
 
 1. Crie o tap Homebrew compartilhado [`juliopolycarpo/homebrew-tap`](https://github.com/juliopolycarpo/homebrew-tap) com diretório `Formula/`.
 2. Crie o bucket Scoop compartilhado [`juliopolycarpo/scoop-bucket`](https://github.com/juliopolycarpo/scoop-bucket) com diretório `bucket/`.
-3. Reserve o nome do crate `mangostudio` no [crates.io](https://crates.io) e gere um token de API para o primeiro publish.
+3. Reserve o nome do crate `mangostudio` no [crates.io](https://crates.io) e gere um token de API só se ainda precisar do fallback legado temporário.
 4. Configure Trusted Publishing no crates.io para o crate `mangostudio`: **Settings -> Trusted Publishing -> Add -> GitHub**, repository owner `juliopolycarpo`, repository name `mangostudio`, workflow filename `release.yml`, sem environment a menos que o job de release passe a usar um GitHub environment.
-5. Adicione os repo secrets (`NPM_TOKEN`, `DIST_REPOS_TOKEN` e o fallback temporário `CARGO_REGISTRY_TOKEN`) neste repositório.
-6. Depois que uma release provar que `cargo-publish` gerou o token de Trusted Publishing, remova o secret `CARGO_REGISTRY_TOKEN`. Até lá, o job usa o secret como fallback se o crates.io ainda não aceitar o publisher OIDC.
-7. Após o primeiro push no GHCR, defina a visibilidade do pacote `ghcr.io/juliopolycarpo/mangostudio` como **public** nas configurações de pacotes do GitHub.
-8. Não é preciso token extra nem ajuste de proteção de branch para o changelog: `CHANGELOG.md` entra em `main` no commit de preparação da release (`bun run release:prepare`) **antes** do push da tag, e o workflow de release apenas verifica que ele está lá.
+5. Adicione os secrets de canal (`NPM_TOKEN`, `DIST_REPOS_TOKEN`) neste repositório. Mantenha `CARGO_REGISTRY_TOKEN` só enquanto o escape hatch `allow_legacy_cargo_token` ainda for necessário.
+6. Depois que uma release provar que `cargo-publish` gerou o token de Trusted Publishing, revogue e remova `CARGO_REGISTRY_TOKEN`.
+7. Configure Trusted Publishing no npm para `mangostudio` e cada `@mangostudio/cli-*` quando for remover `NPM_TOKEN`. Até lá, a auth por token ainda exige provenance (`--provenance-policy required`).
+8. Opcionalmente proteja um GitHub Environment nos jobs de publish estável e exija review de tag/ruleset para `v*`. São configurações do repositório — aplique só com confirmação explícita do maintainer.
+9. Após o primeiro push no GHCR, defina a visibilidade do pacote `ghcr.io/juliopolycarpo/mangostudio` como **public** nas configurações de pacotes do GitHub.
+10. Não é preciso token extra nem ajuste de proteção de branch para o changelog: `CHANGELOG.md` entra em `main` no commit de preparação da release (`bun run release:prepare`) **antes** do push da tag, e o workflow de release apenas verifica que ele está lá.
 
 ## Nomenclatura de assets de release
 
@@ -152,9 +154,9 @@ correção (`bun run release:prepare`).
 **Re-run failed jobs** é sempre seguro: jobs de canal são independentes — uma
 falha nunca bloqueia as outras. Versões npm já publicadas são ignoradas e assets
 de release usam clobber. Para durabilidade extra: artefatos de build retêm por
-30 dias, o job `docker` retenta cada push multi-arch e baixa o GitHub Release
-publicado se o artefato expirou, e o job `release-summary` (sempre executa)
-escreve uma tabela ✅/❌ por canal.
+30 dias, o job `docker` retenta cada push multi-arch contra o artefato de
+distribuição verificado, e o job `release-summary` (sempre executa) escreve uma
+tabela ✅/❌ por canal mais o resultado de auth/provenance do npm e do crates.io.
 
 O workflow executa 13 jobs: `build`, `verify-build`, `github-release`, `docker`,
 `verify-image`, `npm-publish`, `homebrew`, `scoop`, `cargo-publish`,

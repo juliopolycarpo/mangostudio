@@ -69,11 +69,27 @@ jobs:
     needs: verify
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    outputs:
+      auth: ${{ steps.publish.outputs.auth }}
+      provenance: ${{ steps.publish.outputs.provenance }}
     permissions:
       contents: read # checkout only; publish goes to npm, not the repo
       id-token: write # npm provenance attestation for the canary publish
     steps:
+      - name: Preflight npm canary secret
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "$NPM_TOKEN" ]; then
+            echo "Missing required canary secret: NPM_TOKEN"
+            exit 1
+          fi
+
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22.14.0"
 
       - uses: ./.github/actions/setup-mango
         with:
@@ -94,12 +110,23 @@ jobs:
       - name: Validate npm distribution
         run: bun ./scripts/release/pack-npm.ts --validate dist-npm
 
-      - name: Publish to npm under the canary dist-tag
+      - name: Verify Node for provenance
+        run: |
+          node_major="$(node -p "process.versions.node.split('.')[0]")"
+          node_minor="$(node -p "process.versions.node.split('.')[1]")"
+          if [ "$node_major" -lt 22 ] || { [ "$node_major" -eq 22 ] && [ "$node_minor" -lt 14 ]; }; then
+            echo "Node $(node --version) is below the 22.14.0 floor required for npm provenance."
+            exit 1
+          fi
+          echo "Node $(node --version); publish uses npx npm@11.5.1"
+
+      - id: publish
+        name: Publish to npm under the canary dist-tag
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           echo "//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}" > ~/.npmrc
-          bun ./scripts/release/publish-npm.ts dist-npm --tag canary
+          bun ./scripts/release/publish-npm.ts dist-npm --tag canary --provenance-policy required
 
   github-release-canary:
     name: Publish GitHub pre-release assets
@@ -173,6 +200,9 @@ jobs:
           BUILD_RESULT: ${{ needs.verify.result }}
           NPM_RESULT: ${{ needs.npm-canary.result }}
           RELEASE_RESULT: ${{ needs.github-release-canary.result }}
+          NPM_PUBLISH_AUTH: ${{ needs.npm-canary.outputs.auth }}
+          NPM_PUBLISH_PROVENANCE: ${{ needs.npm-canary.outputs.provenance }}
+          NPM_CHANNEL_NAME: npm-canary
         run: |
           bash scripts/release/publish-summary.sh \
             "build=${BUILD_RESULT}" \
