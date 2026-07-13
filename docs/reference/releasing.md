@@ -186,6 +186,59 @@ Caveats:
 - Canary-like `v<version>-canary.<sha7>` tags remain excluded from the tag release
   trigger (`!v*-canary*`) as a guard for legacy or manual per-SHA tags.
 
+## Nightly distribution health
+
+`.github/workflows/nightly-distribution-health.yml` runs daily at 06:00 UTC (plus
+`workflow_dispatch`) and verifies the **published** channels — the bytes users
+actually install — instead of rebuilding source targets that per-PR CI already
+smokes on every pull request.
+
+A `resolve` job pins one immutable identity up front: the exact npm version
+behind the channel dist-tag, the matching GitHub release tag, the canary version
+recorded in that release's notes, and a snapshot of its `SHA256SUMS` (handed to
+the matrix as a run artifact). Every lane consumes that pin, so a canary publish
+landing mid-run can never make jobs disagree — it surfaces as an explicit
+checksum or version mismatch instead. If the npm canary and the rolling
+pre-release diverge (one channel failed its last publish), the resolve job emits
+a warning naming both versions.
+
+| Lane                               | Unique signal                                                                                                                                         |
+| ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `npm <os>` (Linux, macOS, Windows) | Fresh `npm install -g` of the exact resolved version, `--version` assert, hermetic `doctor` in a throwaway home; then upgrade from the pinned stable. |
+| `Archive <os>`                     | Download the release archive, verify it against the pinned `SHA256SUMS`, extract, and run `scripts/release/smoke-binary.sh`.                          |
+
+Dispatch inputs: `channel` (`canary` default, or `stable`), `version` (exact npm
+version override), and `deep_diagnostics` (runs `doctor --all`).
+
+Deliberate boundaries:
+
+- No build or dependency caches — the lanes test published bytes and installer
+  metadata, not source reproducibility.
+- Homebrew and Scoop have no canary channel; their stable manifests are rendered
+  and verified by the release pipeline (`update-homebrew.ts` / `update-scoop.ts`),
+  so the nightly does not reinstall them.
+- A migration/recovery lane against an older database is deferred until a
+  checked-in, non-secret fixture policy exists.
+
+Failures rely on the standard failed-scheduled-run notification (no auto-filed
+issues); npm debug logs are uploaded only on failure and retained for 14 days.
+Reproduce a lane locally:
+
+```bash
+# npm lane (any OS with node)
+npm install -g mangostudio@<exact-version>
+mangostudio --version && mangostudio doctor
+
+# archive lane (substitute the resolved tag/platform)
+gh release download v0.1.1-canary -p 'mangostudio-0.1.1-canary-linux-x64.tar.gz' -p SHA256SUMS
+bun ./scripts/release/verify-checksum.ts SHA256SUMS mangostudio-0.1.1-canary-linux-x64.tar.gz
+tar -xzf mangostudio-0.1.1-canary-linux-x64.tar.gz
+scripts/release/smoke-binary.sh ./mangostudio <canary-version-from-release-notes>
+```
+
+The workflow contract (pinned identity, no caches, failure-only diagnostics) is
+enforced by `scripts/tests/nightly-distribution-health.unit.test.ts`.
+
 ## Cutting a release
 
 Releases are tag-driven. From an up-to-date `main`:
