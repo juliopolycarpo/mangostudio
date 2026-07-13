@@ -64,10 +64,14 @@ describe('MCP server hooks', () => {
 
     const { result } = renderHook(() => {
       const query = useMcpServers();
-      return { servers: query.servers, mutation: useAddMcpServer() };
+      return { servers: query.servers, isLoading: query.isLoading, mutation: useAddMcpServer() };
     });
 
-    await waitFor(() => expect(result.current.servers).toEqual([]));
+    // `servers` defaults to `[]` while loading, so gate on the initial fetch
+    // actually resolving before re-registering the GET mock — otherwise the
+    // reload response could race (and shadow) the initial one.
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.servers).toEqual([]);
     fetchScenario.respondWithJson('GET', '/api/mcp/servers', { body: { servers: [SERVER] } });
 
     await act(async () => {
