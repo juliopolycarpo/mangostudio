@@ -194,12 +194,12 @@ section. It is offline by default — the DB rows are read read-only and stdio
 `command`s are resolved on `PATH` — and never connects unless `--probe` is
 passed:
 
-| Check                | What it verifies                                                                      |
-| -------------------- | ------------------------------------------------------------------------------------- |
-| `MCP <slug>`         | Transport and whether the server is enabled.                                          |
-| `MCP <slug> command` | stdio only: the `command` resolves on `PATH` (catches spawn `ENOENT` before a probe). |
-| `MCP <slug> probe`   | Only with `--probe`: connect + `listTools` under the 10 s budget, or a typed failure. |
-| `MCP <slug> tools`   | Only with `--probe`: namespaced tool names over the provider 64-char cap are skipped. |
+| Check                | What it verifies                                                                                                                                |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `MCP <slug>`         | Transport and whether the server is enabled.                                                                                                    |
+| `MCP <slug> command` | stdio only: the `command` is present and resolves on `PATH`, or is missing/empty (fail when enabled, warn when disabled).                       |
+| `MCP <slug> probe`   | Only with `--probe`: connect + `listTools` under the 10 s budget, or a typed failure. Skipped for structurally invalid stdio rows (no command). |
+| `MCP <slug> tools`   | Only with `--probe`: namespaced tool names over the provider 64-char cap are skipped.                                                           |
 
 `--probe` connects to every enabled server, so it spawns stdio children and
 reaches out to URLs; failures come back typed (`spawn ENOENT`, connection

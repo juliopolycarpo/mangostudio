@@ -53,18 +53,9 @@ function renderServer(server: McpServerDiagnostic): CheckResult[] {
   const state = server.enabled ? 'enabled' : 'disabled';
   const results: CheckResult[] = [ok(label, `${server.transport}, ${state}`)];
 
-  if (server.transport === 'stdio' && server.commandOnPath !== null) {
-    const command = server.command ?? '';
-    if (server.commandOnPath) {
-      results.push(ok(`${label} command`, `${command} resolvable on PATH`));
-    } else if (server.enabled) {
-      results.push(fail(`${label} command`, `${command} not found on PATH (spawn would ENOENT)`));
-    } else {
-      // A disabled server is never spawned, so a missing command is not a
-      // failure — mirror the skills section, which only warns on disabled-source
-      // problems rather than failing the whole run.
-      results.push(warn(`${label} command`, `${command} not found on PATH (server disabled)`));
-    }
+  const commandCheck = renderCommandCheck(server);
+  if (commandCheck) {
+    results.push(commandCheck);
   }
 
   if (server.probe) {
@@ -85,4 +76,32 @@ function renderServer(server: McpServerDiagnostic): CheckResult[] {
   }
 
   return results;
+}
+
+function renderCommandCheck(server: McpServerDiagnostic): CheckResult | null {
+  const label = `MCP ${server.slug} command`;
+  const command = server.command ?? '';
+
+  switch (server.commandPathStatus) {
+    case 'not_applicable':
+      return null;
+    case 'missing':
+      if (server.enabled) {
+        return fail(label, 'no command configured (stdio MCP servers require a command)');
+      }
+      return warn(
+        label,
+        'no command configured (stdio MCP servers require a command, server disabled)'
+      );
+    case 'found':
+      return ok(label, `${command} resolvable on PATH`);
+    case 'not_found':
+      if (server.enabled) {
+        return fail(label, `${command} not found on PATH (spawn would ENOENT)`);
+      }
+      // A disabled server is never spawned, so a missing command is not a
+      // failure — mirror the skills section, which only warns on disabled-source
+      // problems rather than failing the whole run.
+      return warn(label, `${command} not found on PATH (server disabled)`);
+  }
 }

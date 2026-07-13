@@ -100,7 +100,7 @@ function createClient(): Client {
 }
 
 async function connectStdio(config: McpServerRuntimeConfig): Promise<Client> {
-  if (!config.command) {
+  if (!config.command?.trim()) {
     throw new McpConnectionError(`MCP server "${config.slug}" has no command configured.`);
   }
 

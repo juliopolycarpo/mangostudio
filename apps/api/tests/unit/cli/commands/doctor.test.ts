@@ -329,6 +329,33 @@ describe('runDoctor', () => {
     expect(lines.join('\n')).not.toContain('MCP github');
   });
 
+  it('exits 1 when an MCP command check fails', async () => {
+    let exited = -1;
+
+    await runDoctor(
+      { all: false, cursorProbe: false, chatgptRefresh: false, probe: false },
+      {
+        ...makeDoctorDeps({
+          listMcpServers: () => [{ slug: 'github' }] as never,
+          collectMcpChecks: () =>
+            Promise.resolve([
+              { label: 'MCP github', status: 'ok' as const, detail: 'stdio, enabled' },
+              {
+                label: 'MCP github command',
+                status: 'fail' as const,
+                detail: 'no command configured (stdio MCP servers require a command)',
+              },
+            ]),
+        }),
+        exit: (code) => {
+          exited = code;
+        },
+      }
+    );
+
+    expect(exited).toBe(1);
+  });
+
   it('renders the MCP section and forwards probe + running flags when servers exist', async () => {
     const lines: string[] = [];
     const received: Array<{ probe: boolean; serverRunning: boolean }> = [];
