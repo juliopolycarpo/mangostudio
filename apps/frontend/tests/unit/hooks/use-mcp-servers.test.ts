@@ -58,16 +58,21 @@ describe('MCP server hooks', () => {
     expect(result.current.servers).toEqual([SERVER]);
   });
 
-  it('useAddMcpServer posts and invalidates server-list and tool-settings caches', async () => {
+  it('useAddMcpServer refetches the rendered server list after invalidation', async () => {
+    fetchScenario.respondWithJson('GET', '/api/mcp/servers', { body: { servers: [] } });
     fetchScenario.respondWithJson('POST', '/api/mcp/servers', { status: 201, body: SERVER });
 
-    const { result } = renderHook(() => ({
-      mutation: useAddMcpServer(),
-      queryClient: useQueryClient(),
-    }));
+    const { result } = renderHook(() => {
+      const query = useMcpServers();
+      return { servers: query.servers, isLoading: query.isLoading, mutation: useAddMcpServer() };
+    });
 
-    result.current.queryClient.setQueryData(mcpServerKeys.list(), { servers: [] });
-    result.current.queryClient.setQueryData(toolSettingsKeys.list(), { tools: [] });
+    // `servers` defaults to `[]` while loading, so gate on the initial fetch
+    // actually resolving before re-registering the GET mock — otherwise the
+    // reload response could race (and shadow) the initial one.
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.servers).toEqual([]);
+    fetchScenario.respondWithJson('GET', '/api/mcp/servers', { body: { servers: [SERVER] } });
 
     await act(async () => {
       await result.current.mutation.mutateAsync({
@@ -82,12 +87,7 @@ describe('MCP server hooks', () => {
       });
     });
 
-    expect(result.current.queryClient.getQueryState(mcpServerKeys.list())?.isInvalidated).toBe(
-      true
-    );
-    expect(result.current.queryClient.getQueryState(toolSettingsKeys.list())?.isInvalidated).toBe(
-      true
-    );
+    await waitFor(() => expect(result.current.servers).toEqual([SERVER]));
   });
 
   it('useImportMcpServers posts and invalidates server-list and tool-settings caches', async () => {

@@ -48,12 +48,17 @@ describe('useChatTodos', () => {
       body: { todos: INITIAL_TODOS, updatedAt: 100 },
     });
 
-    const { result, rerender } = renderHook(() => ({
-      query: useChatTodos(CHAT_ID),
-      queryClient: useQueryClient(),
-    }));
+    const { result } = renderHook(() => {
+      const query = useChatTodos(CHAT_ID);
+      return {
+        isSuccess: query.isSuccess,
+        todos: query.data?.todos,
+        updatedAt: query.data?.updatedAt,
+        queryClient: useQueryClient(),
+      };
+    });
 
-    await waitFor(() => expect(result.current.query.isSuccess).toBe(true));
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
     const streamedTodos: TodoList = [
       { content: 'Add validation', status: 'completed' },
@@ -62,13 +67,9 @@ describe('useChatTodos', () => {
     act(() => {
       setChatTodos(result.current.queryClient, CHAT_ID, streamedTodos);
     });
-    // jsdom drops the observer's re-render notification for external cache
-    // writes; the observer state itself is updated, so a manual rerender
-    // exposes it without any refetch.
-    rerender();
 
-    expect(result.current.query.data?.todos).toEqual(streamedTodos);
-    expect(result.current.query.data?.updatedAt).toBeTypeOf('number');
+    await waitFor(() => expect(result.current.todos).toEqual(streamedTodos));
+    expect(result.current.updatedAt).toBeTypeOf('number');
     expect(fetchScenario.fetchMock).toHaveBeenCalledTimes(1);
   });
 });
