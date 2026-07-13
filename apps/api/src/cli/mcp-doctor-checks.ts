@@ -103,5 +103,11 @@ function renderCommandCheck(server: McpServerDiagnostic): CheckResult | null {
       // failure — mirror the skills section, which only warns on disabled-source
       // problems rather than failing the whole run.
       return warn(label, `${command} not found on PATH (server disabled)`);
+    default: {
+      // Exhaustiveness guard: a new McpCommandPathStatus member must be handled
+      // above, or renderServer would silently drop the command row.
+      const unexpected: never = server.commandPathStatus;
+      throw new Error(`Unhandled MCP command path status: ${String(unexpected)}`);
+    }
   }
 }
