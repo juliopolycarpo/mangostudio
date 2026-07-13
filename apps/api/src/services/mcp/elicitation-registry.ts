@@ -11,6 +11,7 @@ import type {
   McpElicitationStatus,
   RespondMcpElicitationBody,
 } from '@mangostudio/shared/mcp';
+import { createDiagnosticLogger } from '../../lib/logger';
 
 export type McpElicitationResultAction = 'accept' | 'decline' | 'cancel';
 
@@ -46,23 +47,25 @@ interface PendingElicitation {
 
 const pending = new Map<string, PendingElicitation>();
 const sinks = new Map<string, McpElicitationSink>();
+const logger = createDiagnosticLogger('mcp-elicitation');
 
-function sinkKey(userId: string, serverId: string): string {
-  return `${userId}:${serverId}`;
+function sinkKey(userId: string, serverId: string, toolCallId: string): string {
+  return JSON.stringify([userId, serverId, toolCallId]);
 }
 
 /** Binds a turn-scoped sink for mid-call elicitation events. */
 export function bindElicitationSink(
   userId: string,
   serverId: string,
+  toolCallId: string,
   sink: McpElicitationSink
 ): void {
-  sinks.set(sinkKey(userId, serverId), sink);
+  sinks.set(sinkKey(userId, serverId, toolCallId), sink);
 }
 
 /** Removes the turn-scoped sink; does not cancel already-pending entries. */
-export function releaseElicitationSink(userId: string, serverId: string): void {
-  sinks.delete(sinkKey(userId, serverId));
+export function releaseElicitationSink(userId: string, serverId: string, toolCallId: string): void {
+  sinks.delete(sinkKey(userId, serverId, toolCallId));
 }
 
 /**
@@ -72,8 +75,15 @@ export function releaseElicitationSink(userId: string, serverId: string): void {
 export function createPendingElicitation(
   input: McpElicitationRequestInput
 ): Promise<McpElicitationResult> {
-  const sink = sinks.get(sinkKey(input.userId, input.serverId));
+  const sink = sinks.get(sinkKey(input.userId, input.serverId, input.toolCallId));
   if (!sink || input.signal?.aborted) {
+    logger.warn(
+      input.signal?.aborted ? 'elicitation_parent_aborted' : 'elicitation_sink_unavailable',
+      {
+        serverSlug: input.serverSlug,
+        toolCallId: input.toolCallId,
+      }
+    );
     return Promise.resolve({ action: 'cancel' });
   }
 

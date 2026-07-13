@@ -616,7 +616,7 @@ async function executeSubagentTools(input: {
             input.userId,
             call.name,
             safeJsonParse(call.argsStr) ?? {},
-            { signal: input.signal }
+            { signal: input.signal, toolCallId: callId }
           );
           if (mcpResult.isError) {
             result = { error: mcpResult.contentText };

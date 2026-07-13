@@ -320,7 +320,7 @@ describe('POST /mcp/elicitations/:id/respond', () => {
     expect(await missing.json()).toMatchObject({ code: 'NOT_FOUND' });
 
     let elicitationId = '';
-    bindElicitationSink(testUser.id, 'server-1', (part) => {
+    bindElicitationSink(testUser.id, 'server-1', 'call-1', (part) => {
       elicitationId = part.elicitationId;
     });
     const wait = createPendingElicitation({
