@@ -19,6 +19,8 @@ import {
 import {
   ElicitRequestSchema,
   type ElicitResult,
+  ErrorCode,
+  McpError,
   ToolListChangedNotificationSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import { getVersion } from '../../lib/config';
@@ -405,6 +407,18 @@ export function wrapMcpClient(
       await client.close();
     },
   };
+}
+
+/**
+ * Distinguishes why a `callTool` request failed, so callers can report the
+ * precise end-of-life reason for elicitations that were still pending.
+ */
+export function classifyMcpCallFailure(error: unknown): 'timeout' | 'server_closed' | 'other' {
+  if (error instanceof McpError) {
+    if (error.code === ErrorCode.RequestTimeout) return 'timeout';
+    if (error.code === ErrorCode.ConnectionClosed) return 'server_closed';
+  }
+  return 'other';
 }
 
 function toElicitResult(result: McpElicitationResult): ElicitResult {

@@ -137,6 +137,7 @@ describe('MCP call serialization', () => {
     let elicitationId = '';
     let elicitationCallId = '';
     let responseSignal: Promise<McpElicitationResult> | undefined;
+    const statusEvents: Array<{ status: string; reason: string }> = [];
     bindElicitationSink(
       'serialization-user',
       'primary-server',
@@ -146,7 +147,8 @@ describe('MCP call serialization', () => {
         elicitationCallId = part.toolCallId;
         responseSignal = waitForResponse;
         elicitationObserved.resolve();
-      }
+      },
+      ({ status, reason }) => statusEvents.push({ status, reason })
     );
 
     const first = primary.callTool('needs-input', {}, { toolCallId: 'call-a' });
@@ -185,6 +187,7 @@ describe('MCP call serialization', () => {
       action: 'accept',
       content: { value: 'chosen' },
     });
+    expect(statusEvents).toEqual([{ status: 'accepted', reason: 'responded' }]);
 
     await expect(first).resolves.toMatchObject({ contentText: 'needs-input', isError: false });
     await expect(second).resolves.toMatchObject({ contentText: 'queued', isError: false });

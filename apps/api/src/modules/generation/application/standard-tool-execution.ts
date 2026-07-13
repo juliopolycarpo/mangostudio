@@ -11,9 +11,12 @@ import type { MultiAgentSettings } from '@mangostudio/shared/app-settings';
 import { SUBAGENT_MAX_TURNS_MAX, SUBAGENT_MAX_TURNS_MIN } from '@mangostudio/shared/app-settings';
 import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';
+import { classifyMcpCallFailure } from '../../../services/mcp/client-factory';
 import {
   bindElicitationSink,
   cancelPendingElicitations,
+  type McpElicitationCancelReason,
+  type McpElicitationStatusEvent,
   releaseElicitationSink,
 } from '../../../services/mcp/elicitation-registry';
 import { persistMcpMediaParts } from '../../../services/mcp/rich-content';
@@ -89,6 +92,7 @@ export interface DelegationRuntime {
 export type ToolStreamEvent =
   | { type: 'system_event'; event: string; detail: string }
   | { type: 'mcp_elicitation'; part: McpElicitationPart }
+  | ({ type: 'mcp_elicitation_status' } & McpElicitationStatusEvent)
   | { type: 'subagent_started'; callId: string; agentId: string; agentName: string; task: string }
   | { type: 'subagent_text'; callId: string; agentId: string; text: string }
   | {
@@ -318,11 +322,20 @@ async function executeMcpToolCall(
   const target = await resolveMcpToolExecution(context.db, context.userId, name);
 
   const elicitationParts: McpElicitationPart[] = [];
-  bindElicitationSink(context.userId, target.server.id, callId, (part) => {
-    elicitationParts.push(part);
-    context.onEvent?.({ type: 'mcp_elicitation', part });
-  });
+  bindElicitationSink(
+    context.userId,
+    target.server.id,
+    callId,
+    (part) => {
+      elicitationParts.push(part);
+      context.onEvent?.({ type: 'mcp_elicitation', part });
+    },
+    (statusEvent) => {
+      context.onEvent?.({ type: 'mcp_elicitation_status', ...statusEvent });
+    }
+  );
 
+  let cancelReason: McpElicitationCancelReason = 'tool_finished';
   try {
     const mcpResult = await executeResolvedMcpTool(context.userId, target, args, {
       signal: context.signal,
@@ -344,9 +357,17 @@ async function executeMcpToolCall(
       ...(mediaParts?.length ? { mediaParts } : {}),
       ...(elicitationParts.length ? { elicitationParts } : {}),
     };
+  } catch (error) {
+    const failure = classifyMcpCallFailure(error);
+    if (failure === 'timeout') cancelReason = 'tool_timeout';
+    else if (failure === 'server_closed') cancelReason = 'server_closed';
+    throw error;
   } finally {
     releaseElicitationSink(context.userId, target.server.id, callId);
-    cancelPendingElicitations(elicitationParts.map((part) => part.elicitationId));
+    cancelPendingElicitations(
+      elicitationParts.map((part) => part.elicitationId),
+      cancelReason
+    );
   }
 }
 

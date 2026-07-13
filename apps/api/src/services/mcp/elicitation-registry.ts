@@ -9,6 +9,8 @@ import type {
   McpElicitationField,
   McpElicitationPart,
   McpElicitationStatus,
+  McpElicitationTerminalReason,
+  McpElicitationTerminalStatus,
   RespondMcpElicitationBody,
 } from '@mangostudio/shared/mcp';
 import { createDiagnosticLogger } from '../../lib/logger';
@@ -35,32 +37,62 @@ export type McpElicitationSink = (
   waitForResponse: Promise<McpElicitationResult>
 ) => void;
 
+/** First (and only) terminal transition of a pending elicitation. */
+export interface McpElicitationStatusEvent {
+  elicitationId: string;
+  toolCallId: string;
+  status: McpElicitationTerminalStatus;
+  reason: McpElicitationTerminalReason;
+}
+
+export type McpElicitationStatusObserver = (event: McpElicitationStatusEvent) => void;
+
+/** Server-side causes for cancelling a still-pending elicitation. */
+export type McpElicitationCancelReason = Extract<
+  McpElicitationTerminalReason,
+  'tool_timeout' | 'tool_finished' | 'server_closed'
+>;
+
 interface PendingElicitation {
   userId: string;
   serverId: string;
   serverSlug: string;
   toolCallId: string;
   part: McpElicitationPart;
-  resolve: (result: McpElicitationResult) => void;
+  settle: (
+    status: McpElicitationTerminalStatus,
+    reason: McpElicitationTerminalReason,
+    result: McpElicitationResult
+  ) => void;
   cleanup: () => void;
 }
 
+interface BoundSink {
+  sink: McpElicitationSink;
+  onStatus?: McpElicitationStatusObserver;
+}
+
 const pending = new Map<string, PendingElicitation>();
-const sinks = new Map<string, McpElicitationSink>();
+const sinks = new Map<string, BoundSink>();
 const logger = createDiagnosticLogger('mcp-elicitation');
 
 function sinkKey(userId: string, serverId: string, toolCallId: string): string {
   return JSON.stringify([userId, serverId, toolCallId]);
 }
 
-/** Binds a turn-scoped sink for mid-call elicitation events. */
+/**
+ * Binds a turn-scoped sink for mid-call elicitation events. The optional
+ * status observer is captured per pending entry at creation time, so terminal
+ * transitions still notify after the sink itself is released.
+ */
 export function bindElicitationSink(
   userId: string,
   serverId: string,
   toolCallId: string,
-  sink: McpElicitationSink
+  sink: McpElicitationSink,
+  onStatus?: McpElicitationStatusObserver
 ): void {
-  sinks.set(sinkKey(userId, serverId, toolCallId), sink);
+  sinks.set(sinkKey(userId, serverId, toolCallId), { sink, onStatus });
 }
 
 /** Removes the turn-scoped sink; does not cancel already-pending entries. */
@@ -75,8 +107,8 @@ export function releaseElicitationSink(userId: string, serverId: string, toolCal
 export function createPendingElicitation(
   input: McpElicitationRequestInput
 ): Promise<McpElicitationResult> {
-  const sink = sinks.get(sinkKey(input.userId, input.serverId, input.toolCallId));
-  if (!sink || input.signal?.aborted) {
+  const bound = sinks.get(sinkKey(input.userId, input.serverId, input.toolCallId));
+  if (!bound || input.signal?.aborted) {
     logger.warn(
       input.signal?.aborted ? 'elicitation_parent_aborted' : 'elicitation_sink_unavailable',
       {
@@ -98,17 +130,23 @@ export function createPendingElicitation(
     status: 'pending',
   };
 
+  const onStatus = bound.onStatus;
   let settled = false;
   const waitForResponse = new Promise<McpElicitationResult>((resolve) => {
-    const finish = (result: McpElicitationResult) => {
+    const settle: PendingElicitation['settle'] = (status, reason, result) => {
       if (settled) return;
       settled = true;
       pending.delete(elicitationId);
       input.signal?.removeEventListener('abort', onAbort);
+      // Mutate in place so the MessagePart already pushed into the turn's
+      // `allParts` (same object reference) reflects the final status on
+      // persist; notify only after the part carries that status.
+      part.status = status;
+      onStatus?.({ elicitationId, toolCallId: input.toolCallId, status, reason });
       resolve(result);
     };
 
-    const onAbort = () => finish({ action: 'cancel' });
+    const onAbort = () => settle('cancelled', 'turn_aborted', { action: 'cancel' });
     if (input.signal) {
       input.signal.addEventListener('abort', onAbort, { once: true });
     }
@@ -119,18 +157,19 @@ export function createPendingElicitation(
       serverSlug: input.serverSlug,
       toolCallId: input.toolCallId,
       part,
-      resolve: finish,
+      settle,
       cleanup: () => input.signal?.removeEventListener('abort', onAbort),
     });
   });
 
-  sink(part, waitForResponse);
+  bound.sink(part, waitForResponse);
   return waitForResponse;
 }
 
 /**
  * Resolves a pending elicitation for the owning user. Returns the new status,
- * or `null` when the id is unknown / owned by someone else.
+ * or `null` when the id is unknown, already terminal, or owned by someone
+ * else — a late response can never move a settled state.
  */
 export function respondElicitation(
   userId: string,
@@ -141,10 +180,7 @@ export function respondElicitation(
   if (!entry || entry.userId !== userId) return null;
 
   const status = actionToStatus(body.action);
-  // Mutate in place so the MessagePart already pushed into the turn's
-  // `allParts` (same object reference) reflects the final status on persist.
-  entry.part.status = status;
-  entry.resolve({
+  entry.settle(status, 'responded', {
     action: body.action,
     ...(body.action === 'accept' && body.content ? { content: body.content } : {}),
   });
@@ -153,29 +189,30 @@ export function respondElicitation(
 
 /**
  * Cancels the given still-pending elicitations (leftovers after a tool call
- * ends or times out). Scoped by id — not by server — so a finishing tool call
- * never cancels a concurrent same-server call's pending elicitation.
+ * ends, times out, or loses its session). Scoped by id — not by server — so a
+ * finishing tool call never cancels a concurrent same-server call's pending
+ * elicitation.
  */
-export function cancelPendingElicitations(elicitationIds: readonly string[]): void {
+export function cancelPendingElicitations(
+  elicitationIds: readonly string[],
+  reason: McpElicitationCancelReason = 'tool_finished'
+): void {
   for (const id of elicitationIds) {
-    const entry = pending.get(id);
-    if (!entry) continue;
-    entry.part.status = 'cancelled';
-    entry.resolve({ action: 'cancel' });
+    pending.get(id)?.settle('cancelled', reason, { action: 'cancel' });
   }
 }
 
 /** Test helper: drop all pending elicitations and sinks. */
 export function resetElicitationRegistryForTest(): void {
-  for (const entry of pending.values()) {
+  for (const entry of [...pending.values()]) {
     entry.cleanup();
-    entry.resolve({ action: 'cancel' });
+    entry.settle('cancelled', 'server_closed', { action: 'cancel' });
   }
   pending.clear();
   sinks.clear();
 }
 
-function actionToStatus(action: RespondMcpElicitationBody['action']): McpElicitationStatus {
+function actionToStatus(action: RespondMcpElicitationBody['action']): McpElicitationTerminalStatus {
   switch (action) {
     case 'accept':
       return 'accepted';
