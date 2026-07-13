@@ -93,7 +93,9 @@ export function createFakeClock(): FakeClock {
       const due = timers.filter((timer) => timer.at <= nowMs).sort((a, b) => a.at - b.at);
       for (const timer of due) {
         const idx = timers.findIndex((entry) => entry.id === timer.id);
-        if (idx >= 0) timers.splice(idx, 1);
+        // A callback earlier in this drain may have cleared this timer; skip it.
+        if (idx < 0) continue;
+        timers.splice(idx, 1);
         timer.fn();
       }
     },
