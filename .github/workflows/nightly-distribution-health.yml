@@ -312,7 +312,13 @@ jobs:
             echo "Pinned SHA256SUMS has no entry for ${ASSET_NAME}." >&2
             exit 1
           fi
-          actual="$(sha256sum "release-archive/${ASSET_NAME}" | awk '{ print $1 }')"
+          # macOS runners ship `shasum`, not GNU `sha256sum`; fall back the same
+          # way scripts/install/install.sh does so the darwin lane can verify.
+          if command -v sha256sum >/dev/null 2>&1; then
+            actual="$(sha256sum "release-archive/${ASSET_NAME}" | awk '{ print $1 }')"
+          else
+            actual="$(shasum -a 256 "release-archive/${ASSET_NAME}" | awk '{ print $1 }')"
+          fi
           if [ "$actual" != "$expected" ]; then
             echo "Checksum mismatch for ${ASSET_NAME}: expected ${expected}, got ${actual}." >&2
             echo "If this is the canary channel, the rolling pre-release may have been republished mid-run — re-run the workflow." >&2
