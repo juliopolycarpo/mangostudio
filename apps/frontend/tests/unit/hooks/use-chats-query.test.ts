@@ -4,7 +4,7 @@
  */
 
 import type { Chat } from '@mangostudio/shared';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   chatKeys,
@@ -13,7 +13,7 @@ import {
   useUpdateChatMutation,
 } from '../../../src/features/chat/queries';
 import type * as ApiClient from '../../../src/lib/api-client';
-import { act, renderHook } from '../../support/harness/render';
+import { act, renderHook, waitFor } from '../../support/harness/render';
 
 const EXISTING_CHAT: Chat = {
   id: 'chat-existing',
@@ -132,13 +132,19 @@ describe('useUpdateChatMutation', () => {
 
     const { result } = renderHook(() => {
       const mutation = useUpdateChatMutation();
-      const queryClient = useQueryClient();
-      return { mutation, queryClient };
-    });
-
-    act(() => {
-      result.current.queryClient.setQueryData(chatKeys.lists(), [EXISTING_CHAT]);
-      result.current.queryClient.setQueryData(chatKeys.detail(EXISTING_CHAT.id), EXISTING_CHAT);
+      const listQuery = useQuery({
+        queryKey: chatKeys.lists(),
+        queryFn: () => Promise.resolve([EXISTING_CHAT]),
+        initialData: [EXISTING_CHAT],
+        staleTime: Number.POSITIVE_INFINITY,
+      });
+      const detailQuery = useQuery({
+        queryKey: chatKeys.detail(EXISTING_CHAT.id),
+        queryFn: () => Promise.resolve(EXISTING_CHAT),
+        initialData: EXISTING_CHAT,
+        staleTime: Number.POSITIVE_INFINITY,
+      });
+      return { mutation, chats: listQuery.data, detail: detailQuery.data };
     });
 
     await act(async () => {
@@ -148,10 +154,8 @@ describe('useUpdateChatMutation', () => {
       });
     });
 
-    expect(result.current.queryClient.getQueryData(chatKeys.lists())).toEqual([updatedChat]);
-    expect(result.current.queryClient.getQueryData(chatKeys.detail(EXISTING_CHAT.id))).toEqual(
-      updatedChat
-    );
+    await waitFor(() => expect(result.current.chats).toEqual([updatedChat]));
+    expect(result.current.detail).toEqual(updatedChat);
   });
 
   it('throws when the API returns an error', async () => {
