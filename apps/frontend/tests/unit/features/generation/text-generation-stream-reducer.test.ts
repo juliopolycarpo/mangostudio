@@ -338,6 +338,64 @@ describe('text generation stream reducer', () => {
     ]);
   });
 
+  it('moves an existing elicitation part to its first terminal status in place', () => {
+    const requestChunk: Extract<StreamChunk, { type: 'mcp_elicitation_request' }> = {
+      type: 'mcp_elicitation_request',
+      elicitationId: 'elicit-1',
+      toolCallId: 'tool-mcp',
+      serverSlug: 'demo',
+      message: 'Choose a tier',
+      fields: [],
+      status: 'pending',
+      done: false,
+    };
+    const statusChunk: Extract<StreamChunk, { type: 'mcp_elicitation_status' }> = {
+      type: 'mcp_elicitation_status',
+      elicitationId: 'elicit-1',
+      toolCallId: 'tool-mcp',
+      status: 'declined',
+      reason: 'responded',
+      done: false,
+    };
+
+    const state = reduceChunks([
+      requestChunk,
+      statusChunk,
+      // Neither a late status nor a replayed pending request moves it back.
+      { ...statusChunk, status: 'cancelled', reason: 'tool_finished' },
+      requestChunk,
+    ]);
+
+    expect(getPartsByType(state.parts, 'mcp_elicitation')).toEqual([
+      {
+        type: 'mcp_elicitation',
+        elicitationId: 'elicit-1',
+        toolCallId: 'tool-mcp',
+        serverSlug: 'demo',
+        message: 'Choose a tier',
+        fields: [],
+        status: 'declined',
+      },
+    ]);
+    expect(state.aiMessageUpdate?.patch.parts).toContainEqual(
+      expect.objectContaining({ type: 'mcp_elicitation', status: 'declined' })
+    );
+  });
+
+  it('ignores a status event for an unknown elicitation id', () => {
+    const state = reduceChunks([
+      {
+        type: 'mcp_elicitation_status',
+        elicitationId: 'unknown',
+        toolCallId: 'tool-mcp',
+        status: 'cancelled',
+        reason: 'turn_aborted',
+        done: false,
+      },
+    ]);
+    expect(getPartsByType(state.parts, 'mcp_elicitation')).toEqual([]);
+  });
+
   it('appends todo parts once, deduplicated by tool call id', () => {
     const todoChunk: Extract<StreamChunk, { type: 'todo_update' }> = {
       type: 'todo_update',

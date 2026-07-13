@@ -6,11 +6,17 @@
  */
 
 import type { MessagePart } from '@mangostudio/shared';
-import type { McpElicitationField, RespondMcpElicitationBody } from '@mangostudio/shared/mcp';
+import type {
+  McpElicitationField,
+  McpElicitationStatus,
+  RespondMcpElicitationBody,
+} from '@mangostudio/shared/mcp';
+import { useQueryClient } from '@tanstack/react-query';
 import { Check, CircleHelp } from 'lucide-react';
 import { useState } from 'react';
+import { messageKeys } from '@/features/chat/queries';
 import { useI18n } from '@/hooks/use-i18n';
-import { respondMcpElicitation } from '@/services/mcp-elicitation-service';
+import { McpElicitationGoneError, respondMcpElicitation } from '@/services/mcp-elicitation-service';
 
 type ElicitationPart = Extract<MessagePart, { type: 'mcp_elicitation' }>;
 
@@ -26,12 +32,16 @@ interface ElicitationCardProps {
 export function ElicitationCard({ part }: ElicitationCardProps) {
   const { t } = useI18n();
   const labels = t.chat.elicitation;
+  const queryClient = useQueryClient();
   const [values, setValues] = useState<Record<string, FieldValue>>(() =>
     initialValues(part.fields)
   );
-  const [status, setStatus] = useState(part.status);
+  const [optimisticStatus, setOptimisticStatus] = useState<McpElicitationStatus | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The server part is authoritative: any terminal status streamed or
+  // refetched into the prop wins over local submission state.
+  const status = part.status !== 'pending' ? part.status : (optimisticStatus ?? 'pending');
   const interactive = status === 'pending';
 
   const setField = (name: string, value: FieldValue) => {
@@ -55,9 +65,16 @@ export function ElicitationCard({ part }: ElicitationCardProps) {
     setError(null);
     try {
       const result = await respondMcpElicitation(part.elicitationId, body);
-      setStatus(result.status);
-    } catch {
-      setError(labels.submitError);
+      setOptimisticStatus(result.status);
+    } catch (respondError) {
+      if (respondError instanceof McpElicitationGoneError) {
+        // Stale card: the server already resolved this elicitation. Refetch
+        // the owning messages so the persisted terminal state (if any)
+        // replaces the pending prop instead of inventing a status here.
+        await queryClient.invalidateQueries({ queryKey: messageKeys.lists() });
+      } else {
+        setError(labels.submitError);
+      }
     } finally {
       setSubmitting(false);
     }
@@ -98,7 +115,7 @@ export function ElicitationCard({ part }: ElicitationCardProps) {
         />
       ))}
 
-      {error && <p className="text-xs text-error">{error}</p>}
+      {interactive && error && <p className="text-xs text-error">{error}</p>}
 
       {interactive && (
         <div className="flex flex-wrap justify-end gap-2">
