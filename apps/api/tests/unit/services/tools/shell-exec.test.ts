@@ -6,8 +6,14 @@ import {
   findShellExecutable,
   isShellAvailable,
   runShellCommand,
+  runShellCommandWithDeps,
   ShellExecutionError,
 } from '../../../../src/services/tools/builtin/_shell-exec';
+import {
+  createFakeClock,
+  createFakeShellDeps,
+  createHangingFakeShellProcess,
+} from './support/fake-shell-exec';
 
 const hasBash = isShellAvailable('bash');
 const isWindows = process.platform === 'win32';
@@ -65,7 +71,7 @@ describe('runShellCommand', () => {
     expect(result.stderr).toBe('');
     expect(result.exitCode).toBe(0);
     expect(result.signal).toBeNull();
-    expect(result.timedOut).toBe(false);
+    expect(result.termination).toEqual({ kind: 'exited' });
     expect(result.truncated).toBe(false);
     expect(result.durationMs).toBeGreaterThanOrEqual(0);
   });
@@ -78,6 +84,7 @@ describe('runShellCommand', () => {
       maxOutputBytes: 1000,
     });
     expect(result.exitCode).toBe(3);
+    expect(result.termination).toEqual({ kind: 'exited' });
   });
 
   it.skipIf(!hasBash)('captures stderr separately from stdout', async () => {
@@ -122,7 +129,7 @@ describe('runShellCommand', () => {
       maxOutputBytes: 1000,
     });
 
-    expect(result.timedOut).toBe(true);
+    expect(result.termination).toEqual({ kind: 'timed_out' });
     expect(result.signal).toBe('SIGKILL');
     expect(result.exitCode).toBeNull();
     expect(Date.now() - startedAt).toBeLessThan(4000);
@@ -140,7 +147,7 @@ describe('runShellCommand', () => {
     setTimeout(() => controller.abort(), 300);
 
     const result = await run;
-    expect(result.timedOut).toBe(true);
+    expect(result.termination).toEqual({ kind: 'aborted' });
 
     const pid = Number(result.stdout.trim().split('\n')[0]);
     expect(Number.isFinite(pid)).toBe(true);
@@ -159,8 +166,96 @@ describe('runShellCommand', () => {
       signal: controller.signal,
     });
     // Without the already-aborted guard the child would run the full sleep.
-    expect(result.timedOut).toBe(true);
+    expect(result.termination).toEqual({ kind: 'aborted' });
     expect(Date.now() - startedAt).toBeLessThan(4000);
+  });
+});
+
+describe('runShellCommand termination races', () => {
+  const baseInput = {
+    kind: 'bash' as const,
+    command: 'sleep 5',
+    timeoutMs: 1000,
+    maxOutputBytes: 1000,
+  };
+
+  it.skipIf(!hasBash)('reports exited when the child finishes before the timer', async () => {
+    const proc = createHangingFakeShellProcess();
+    const clock = createFakeClock();
+    const run = runShellCommandWithDeps(baseInput, createFakeShellDeps(proc, clock));
+    proc.complete(0);
+    const result = await run;
+
+    expect(result.termination).toEqual({ kind: 'exited' });
+    expect(clock.pendingCount()).toBe(0);
+  });
+
+  it.skipIf(!hasBash)('claims timed_out when the owned timer fires first', async () => {
+    const proc = createHangingFakeShellProcess();
+    const clock = createFakeClock();
+    const run = runShellCommandWithDeps(baseInput, createFakeShellDeps(proc, clock));
+    clock.advance(1000);
+    const result = await run;
+
+    expect(result.termination).toEqual({ kind: 'timed_out' });
+    expect(proc.killCalls).toBe(1);
+    expect(clock.pendingCount()).toBe(0);
+  });
+
+  it.skipIf(!hasBash)('claims aborted when the parent signal fires first', async () => {
+    const proc = createHangingFakeShellProcess();
+    const clock = createFakeClock();
+    const controller = new AbortController();
+    const run = runShellCommandWithDeps(
+      { ...baseInput, signal: controller.signal },
+      createFakeShellDeps(proc, clock)
+    );
+    controller.abort();
+    const result = await run;
+
+    expect(result.termination).toEqual({ kind: 'aborted' });
+    expect(proc.killCalls).toBe(1);
+  });
+
+  it.skipIf(!hasBash)('keeps aborted when abort wins the race with the timer', async () => {
+    const proc = createHangingFakeShellProcess();
+    const clock = createFakeClock();
+    const controller = new AbortController();
+    const run = runShellCommandWithDeps(
+      { ...baseInput, signal: controller.signal },
+      createFakeShellDeps(proc, clock)
+    );
+    controller.abort();
+    clock.advance(1000);
+    const result = await run;
+
+    expect(result.termination).toEqual({ kind: 'aborted' });
+  });
+
+  it.skipIf(!hasBash)('keeps timed_out when the timer wins the race with abort', async () => {
+    const proc = createHangingFakeShellProcess();
+    const clock = createFakeClock();
+    const controller = new AbortController();
+    const run = runShellCommandWithDeps(
+      { ...baseInput, signal: controller.signal },
+      createFakeShellDeps(proc, clock)
+    );
+    clock.advance(1000);
+    controller.abort();
+    const result = await run;
+
+    expect(result.termination).toEqual({ kind: 'timed_out' });
+  });
+
+  it.skipIf(!hasBash)('swallows kill errors after the child already exited', async () => {
+    const proc = createHangingFakeShellProcess();
+    const clock = createFakeClock();
+    const run = runShellCommandWithDeps(baseInput, createFakeShellDeps(proc, clock));
+    proc.complete(0);
+    clock.advance(1000);
+    const result = await run;
+
+    expect(result.termination).toEqual({ kind: 'exited' });
   });
 });
 

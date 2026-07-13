@@ -97,4 +97,65 @@ describe('executeStandardToolCallsWithProgress timeouts', () => {
     },
     15_000
   );
+
+  it.skipIf(!hasBash)(
+    'returns an abort error without a timeout message when cancelled early',
+    async () => {
+      const controller = new AbortController();
+      const pidFile = join(tempDir, 'pid-abort.txt');
+      const settingsByToolName = new Map([
+        [
+          'bash',
+          {
+            enabled: true,
+            parameters: {
+              timeoutSeconds: 30,
+              maxOutputBytes: 10_000,
+              allowedEnvVars: [],
+              deniedEnvVars: [],
+            },
+          },
+        ],
+      ]);
+
+      const run = executeStandardToolCallsWithProgress(
+        [
+          [
+            'call-abort',
+            {
+              name: 'bash',
+              argsStr: JSON.stringify({
+                command: `echo $$ > ${pidFile}; sleep 10`,
+              }),
+            },
+          ],
+        ],
+        {
+          userId: 'user-1',
+          chatId: 'chat-1',
+          settingsByToolName,
+          allowedToolNames: new Set(['bash']),
+          signal: controller.signal,
+        }
+      );
+      setTimeout(() => controller.abort(), 300);
+
+      const items = [];
+      for await (const item of run) {
+        items.push(item);
+      }
+
+      const execution = items.find((item) => item.kind === 'execution');
+      expect(execution?.kind).toBe('execution');
+      if (execution?.kind !== 'execution') return;
+
+      expect(execution.execution.isError).toBe(true);
+      expect(execution.execution.resultStr.toLowerCase()).not.toContain('timed out');
+
+      const pid = Number(readFileSync(pidFile, 'utf8').trim());
+      expect(Number.isFinite(pid)).toBe(true);
+      expect(() => process.kill(pid, 0)).toThrow();
+    },
+    15_000
+  );
 });

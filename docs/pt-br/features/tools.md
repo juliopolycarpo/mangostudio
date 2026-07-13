@@ -138,8 +138,8 @@ Executam um comando de shell e retornam `stdout`, `stderr`, código de saída e 
 - **Parâmetros:** `command` (obrigatório), `cwd` (diretório de trabalho opcional; `~` é expandido)
 - **Settings:** `timeoutSeconds` (5s–600s, padrão 30s), `maxOutputBytes` (1KB–1MB por stream, padrão 100KB)
 - **Disponibilidade:** Registradas no import apenas quando o interpretador existe — `bash`/`zsh` via `Bun.which`, `powershell` somente no Windows (`pwsh` e depois `powershell`). Shells indisponíveis nunca são oferecidos aos modelos.
-- **Segurança:** Desabilitadas por padrão (`enabledByDefault: false`); exigem ativação explícita. O processo é encerrado com `SIGKILL` após o tempo configurado, e a saída por stream é limitada a `maxOutputBytes` (sinalizado por `truncated`).
-- **Execução:** `runShellCommand()` inicia o interpretador com `Bun.spawn` (`bash -c` / `zsh -c` / `powershell -NoProfile -NonInteractive -Command`), lê ambos os streams dentro do limite de bytes e retorna um `ShellCommandResult` estruturado.
+- **Segurança:** Desabilitadas por padrão (`enabledByDefault: false`); exigem ativação explícita. O processo é encerrado com `SIGKILL` após o tempo configurado, e a saída por stream é limitada a `maxOutputBytes` (sinalizado por `truncated`). Abort do pai (cancelamento do usuário ou encerramento do stream) é rastreado separadamente do timeout e não aparece como erro de timeout.
+- **Execução:** `runShellCommand()` inicia o interpretador com `Bun.spawn` (`bash -c` / `zsh -c` / `powershell -NoProfile -NonInteractive -Command`), aplica o timeout com um timer próprio (não o timeout do spawn do Bun), lê ambos os streams dentro do limite de bytes e retorna um `ShellCommandResult` estruturado com o campo `termination` (`exited`, `timed_out`, `aborted` ou `signalled`).
 
 ## Settings Policy
 
@@ -154,7 +154,7 @@ A settings policy em `settings-policy.ts` oferece funções puras para:
 
 A normalização de parâmetros lança `ToolParameterError` com mensagem descritiva quando valores são inválidos. `executeTool()` captura isso via `getSafeEffectiveToolSettings()` e cai para defaults para evitar que settings corrompidos quebrem a execução da tool.
 
-Builtins de execução longa (`bash`, `zsh`, `powershell`, `generate_image`) expõem `timeoutSeconds` (5–600, padrão 30). A camada de execução do chat lê esse valor e cancela a chamada quando o orçamento estoura; tools de shell também repassam o sinal de abort para encerrar processos filhos em vez de deixá-los órfãos. Tools sem `timeoutSeconds` mantêm o padrão de 30 segundos.
+Builtins de execução longa (`bash`, `zsh`, `powershell`, `generate_image`) expõem `timeoutSeconds` (5–600, padrão 30). A camada de execução do chat lê esse valor e cancela a chamada quando o orçamento estoura; tools de shell também repassam o sinal de abort para encerrar processos filhos em timeout ou cancelamento em vez de deixá-los órfãos. Tools de shell distinguem timeout de abort do pai em `ShellCommandResult.termination`, de modo que apenas timeouts genuínos exibem a mensagem de timeout. Tools sem `timeoutSeconds` mantêm o padrão de 30 segundos.
 
 ## API De Tool Settings
 
