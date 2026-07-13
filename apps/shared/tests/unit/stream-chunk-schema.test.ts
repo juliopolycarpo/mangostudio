@@ -137,6 +137,14 @@ const VALID_CHUNKS: StreamChunk[] = [
     done: false,
   },
   {
+    type: 'mcp_elicitation_status',
+    elicitationId: 'elicit-1',
+    toolCallId: 'tool-mcp-elicit',
+    status: 'cancelled',
+    reason: 'tool_timeout',
+    done: false,
+  },
+  {
     type: 'todo_update',
     toolCallId: 'tool-todo',
     todos: [
@@ -233,6 +241,28 @@ describe('StreamChunkSchema', () => {
           type: 'question',
           toolCallId: 't',
           questions: [{ question: 'Q?', options: [{ label: 'only-one' }] }],
+          done: false,
+        },
+      },
+      {
+        label: 'mcp_elicitation_status non-terminal status',
+        value: {
+          type: 'mcp_elicitation_status',
+          elicitationId: 'e',
+          toolCallId: 't',
+          status: 'pending',
+          reason: 'responded',
+          done: false,
+        },
+      },
+      {
+        label: 'mcp_elicitation_status unknown reason',
+        value: {
+          type: 'mcp_elicitation_status',
+          elicitationId: 'e',
+          toolCallId: 't',
+          status: 'accepted',
+          reason: 'because',
           done: false,
         },
       },

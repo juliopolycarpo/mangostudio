@@ -279,12 +279,32 @@ export const GetMcpPromptResponseSchema = Type.Object({
   ),
 });
 
+/** Final state of a resolved elicitation; `pending` never appears here. */
+export const McpElicitationTerminalStatusSchema = Type.Union([
+  Type.Literal('accepted'),
+  Type.Literal('declined'),
+  Type.Literal('cancelled'),
+]);
+
 /** Lifecycle of a mid-tool-call MCP form elicitation shown in chat. */
 export const McpElicitationStatusSchema = Type.Union([
   Type.Literal('pending'),
   Type.Literal('accepted'),
   Type.Literal('declined'),
   Type.Literal('cancelled'),
+]);
+
+/**
+ * Why an elicitation reached its terminal status: a user response, or a
+ * server-side end of life (timeout, turn abort, tool completion, session
+ * close) that cancelled it without input.
+ */
+export const McpElicitationTerminalReasonSchema = Type.Union([
+  Type.Literal('responded'),
+  Type.Literal('tool_timeout'),
+  Type.Literal('turn_aborted'),
+  Type.Literal('tool_finished'),
+  Type.Literal('server_closed'),
 ]);
 
 export const McpElicitationFieldFormatSchema = Type.Union([
@@ -392,6 +412,8 @@ export type McpServerPromptsResponse = Static<typeof McpServerPromptsResponseSch
 export type GetMcpPromptBody = Static<typeof GetMcpPromptBodySchema>;
 export type GetMcpPromptResponse = Static<typeof GetMcpPromptResponseSchema>;
 export type McpElicitationStatus = Static<typeof McpElicitationStatusSchema>;
+export type McpElicitationTerminalStatus = Static<typeof McpElicitationTerminalStatusSchema>;
+export type McpElicitationTerminalReason = Static<typeof McpElicitationTerminalReasonSchema>;
 export type McpElicitationFieldFormat = Static<typeof McpElicitationFieldFormatSchema>;
 export type McpElicitationEnumOption = Static<typeof McpElicitationEnumOptionSchema>;
 export type McpElicitationField = Static<typeof McpElicitationFieldSchema>;

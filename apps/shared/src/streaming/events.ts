@@ -11,6 +11,7 @@ export type {
   SSEImageGenerationFailedEvent,
   SSEImageGenerationStartedEvent,
   SSEMcpElicitationRequestEvent,
+  SSEMcpElicitationStatusEvent,
   SSEMcpMediaEvent,
   SSEQuestionEvent,
   SSESubagentCompletedEvent,
