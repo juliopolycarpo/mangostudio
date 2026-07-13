@@ -36,13 +36,15 @@ export interface McpProbeDiagnostic {
   detail: string;
 }
 
+/** stdio command PATH resolution outcome; http rows are `not_applicable`. */
+export type McpCommandPathStatus = 'not_applicable' | 'missing' | 'not_found' | 'found';
+
 export interface McpServerDiagnostic {
   slug: string;
   transport: McpTransport;
   enabled: boolean;
   command: string | null;
-  /** stdio: whether `command` resolves on PATH; null for http or empty command. */
-  commandOnPath: boolean | null;
+  commandPathStatus: McpCommandPathStatus;
   /** Namespaced tool names over the provider cap (probe only; empty otherwise). */
   longToolNames: string[];
   /** Present only when the probe ran (enabled servers, `--probe`). */
@@ -97,23 +99,25 @@ export async function collectMcpDiagnostics(
 
   for (const row of rows) {
     const enabled = row.enabled !== 0;
-    const commandOnPath =
-      row.transport === 'stdio' && row.command?.trim()
-        ? deps.resolveCommandOnPath(row.command)
-        : null;
+    const commandPathStatus = resolveCommandPathStatus(
+      row.transport,
+      row.command,
+      deps.resolveCommandOnPath
+    );
 
     const diagnostic: McpServerDiagnostic = {
       slug: row.slug,
       transport: row.transport,
       enabled,
       command: row.command,
-      commandOnPath,
+      commandPathStatus,
       longToolNames: [],
     };
 
     // Disabled servers are never used at runtime, so probing them would spawn a
-    // child for nothing; skip straight to the passive row.
-    if (options.probe && enabled) {
+    // child for nothing. Structurally invalid stdio rows (no command) are skipped
+    // too — the passive check already reports why spawn would fail.
+    if (options.probe && enabled && commandPathStatus !== 'missing') {
       const attempt = await deps.probeServer(row.userId, toMcpRuntimeConfig(row));
       diagnostic.probe = toProbeDiagnostic(attempt);
       diagnostic.longToolNames = overlongToolNames(row.slug, attempt.tools ?? []);
@@ -123,6 +127,16 @@ export async function collectMcpDiagnostics(
   }
 
   return { servers, serverRunning: options.serverRunning, probed: options.probe };
+}
+
+function resolveCommandPathStatus(
+  transport: McpTransport,
+  command: string | null,
+  resolveCommandOnPath: (command: string) => boolean
+): McpCommandPathStatus {
+  if (transport !== 'stdio') return 'not_applicable';
+  if (!command?.trim()) return 'missing';
+  return resolveCommandOnPath(command) ? 'found' : 'not_found';
 }
 
 /** Namespaced (`mcp__<slug>__<tool>`) names that exceed the provider cap. */

@@ -52,19 +52,77 @@ describe('collectMcpDiagnostics', () => {
       })
     );
 
-    expect(diag.servers[0]).toMatchObject({ commandOnPath: false, transport: 'stdio' });
+    expect(diag.servers[0]).toMatchObject({ commandPathStatus: 'not_found', transport: 'stdio' });
     expect(diag.servers[0]?.probe).toBeUndefined();
     expect(probed).toBe(false);
   });
 
-  it('leaves commandOnPath null for http servers', async () => {
+  it('leaves commandPathStatus not_applicable for http servers', async () => {
     const diag = await collectMcpDiagnostics(
       [makeRow({ transport: 'http', command: null, url: 'https://example.test/mcp' })],
       { probe: false, serverRunning: false },
       makeDeps()
     );
 
-    expect(diag.servers[0]?.commandOnPath).toBeNull();
+    expect(diag.servers[0]?.commandPathStatus).toBe('not_applicable');
+  });
+
+  it.each([
+    [null, 'missing'],
+    ['', 'missing'],
+    ['   ', 'missing'],
+  ] as const)('marks stdio command %p as %p', async (command, status) => {
+    const diag = await collectMcpDiagnostics(
+      [makeRow({ command })],
+      { probe: false, serverRunning: false },
+      makeDeps()
+    );
+
+    expect(diag.servers[0]?.commandPathStatus).toBe(status);
+  });
+
+  it('marks a present stdio command as found when it resolves on PATH', async () => {
+    const diag = await collectMcpDiagnostics(
+      [makeRow({ command: 'uvx' })],
+      { probe: false, serverRunning: false },
+      makeDeps({ resolveCommandOnPath: () => true })
+    );
+
+    expect(diag.servers[0]?.commandPathStatus).toBe('found');
+  });
+
+  it('does not resolve PATH for a missing stdio command', async () => {
+    let resolved = false;
+    await collectMcpDiagnostics(
+      [makeRow({ command: null })],
+      { probe: false, serverRunning: false },
+      makeDeps({
+        resolveCommandOnPath: () => {
+          resolved = true;
+          return true;
+        },
+      })
+    );
+
+    expect(resolved).toBe(false);
+  });
+
+  it('skips the probe for stdio servers with a missing command', async () => {
+    let probed = false;
+    const diag = await collectMcpDiagnostics(
+      [makeRow({ command: '' })],
+      { probe: true, serverRunning: false },
+      makeDeps({
+        probeServer: () => {
+          probed = true;
+          return Promise.resolve({ ok: true, tools: [] });
+        },
+      })
+    );
+
+    expect(probed).toBe(false);
+    expect(diag.servers[0]?.commandPathStatus).toBe('missing');
+    expect(diag.servers[0]?.probe).toBeUndefined();
   });
 
   it('probes enabled servers and surfaces the tool count', async () => {

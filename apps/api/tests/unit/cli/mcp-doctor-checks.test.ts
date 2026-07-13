@@ -48,7 +48,7 @@ describe('collectMcpDoctorChecks', () => {
     expect(find(results, 'MCP github command').status).toBe('ok');
   });
 
-  it('fails the PATH check when the command is missing', async () => {
+  it('fails the PATH check when the command is missing on PATH', async () => {
     const results = await collectMcpDoctorChecks(
       [makeRow()],
       { probe: false, serverRunning: false },
@@ -108,7 +108,54 @@ describe('collectMcpDoctorChecks', () => {
     expect(find(results, 'MCP probe').detail).toContain('MangoStudio server is running');
   });
 
-  it('marks a disabled server without a command row', async () => {
+  it('fails when an enabled stdio server has no command configured', async () => {
+    const results = await collectMcpDoctorChecks(
+      [makeRow({ command: null })],
+      { probe: false, serverRunning: false },
+      makeDeps()
+    );
+
+    const command = find(results, 'MCP github command');
+    expect(command.status).toBe('fail');
+    expect(command.detail).toContain('stdio MCP servers require a command');
+  });
+
+  it('warns when a disabled stdio server has no command configured', async () => {
+    const results = await collectMcpDoctorChecks(
+      [makeRow({ command: '', enabled: 0 })],
+      { probe: false, serverRunning: false },
+      makeDeps()
+    );
+
+    const command = find(results, 'MCP github command');
+    expect(command.status).toBe('warn');
+    expect(command.detail).toContain('server disabled');
+  });
+
+  it('omits a command row for http servers', async () => {
+    const results = await collectMcpDoctorChecks(
+      [makeRow({ transport: 'http', command: null, url: 'https://example.test/mcp' })],
+      { probe: false, serverRunning: false },
+      makeDeps()
+    );
+
+    expect(results.some((row) => row.label === 'MCP github command')).toBe(false);
+  });
+
+  it('does not probe stdio servers with a missing command', async () => {
+    const results = await collectMcpDoctorChecks(
+      [makeRow({ command: '   ' })],
+      { probe: true, serverRunning: false },
+      makeDeps({
+        probeServer: () => Promise.resolve({ ok: true, tools: [] }),
+      })
+    );
+
+    expect(results.some((row) => row.label === 'MCP github probe')).toBe(false);
+    expect(find(results, 'MCP github command').status).toBe('fail');
+  });
+
+  it('marks a disabled server without a probe row', async () => {
     const results = await collectMcpDoctorChecks(
       [makeRow({ enabled: 0 })],
       { probe: true, serverRunning: false },
