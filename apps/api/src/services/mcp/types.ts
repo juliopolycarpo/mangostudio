@@ -80,6 +80,7 @@ export interface McpClientHandle {
   /** Capabilities from the initialize handshake; available without a request. */
   getCapabilities(): McpServerCapabilities;
   listTools(options?: McpRequestOptions): Promise<McpToolDescriptor[]>;
+  /** Serialized FIFO per handle so server-initiated requests retain call context. */
   callTool(
     name: string,
     args: Record<string, unknown>,

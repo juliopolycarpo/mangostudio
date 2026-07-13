@@ -99,7 +99,7 @@ describe('elicitation registry', () => {
 
   it('notifies the sink and resolves accept/decline/cancel for the owner', async () => {
     const seen: string[] = [];
-    bindElicitationSink('u1', 's1', (part) => {
+    bindElicitationSink('u1', 's1', 'call-1', (part) => {
       seen.push(part.elicitationId);
     });
 
@@ -131,7 +131,7 @@ describe('elicitation registry', () => {
 
   it('cancels pending elicitations when the parent signal aborts', async () => {
     const controller = new AbortController();
-    bindElicitationSink('u1', 's1', () => undefined);
+    bindElicitationSink('u1', 's1', 'call-1', () => undefined);
 
     const pending = createPendingElicitation({
       userId: 'u1',
@@ -149,7 +149,7 @@ describe('elicitation registry', () => {
 
   it('cancels only the given leftovers and ignores released sinks', async () => {
     let leftoverId = '';
-    bindElicitationSink('u1', 's1', (part) => {
+    bindElicitationSink('u1', 's1', 'call-1', (part) => {
       leftoverId = part.elicitationId;
     });
     const pending = createPendingElicitation({
@@ -161,7 +161,7 @@ describe('elicitation registry', () => {
       fields: [],
     });
 
-    releaseElicitationSink('u1', 's1');
+    releaseElicitationSink('u1', 's1', 'call-1');
     cancelPendingElicitations([leftoverId]);
     await expect(pending).resolves.toEqual({ action: 'cancel' });
 
@@ -176,10 +176,13 @@ describe('elicitation registry', () => {
     expect(afterRelease).toEqual({ action: 'cancel' });
   });
 
-  it('leaves a concurrent same-server elicitation pending when another call cleans up', async () => {
+  it('routes concurrent same-server elicitations to their call-specific sinks', async () => {
     const ids: string[] = [];
-    bindElicitationSink('u1', 's1', (part) => {
-      ids.push(part.elicitationId);
+    bindElicitationSink('u1', 's1', 'call-1', (part) => {
+      ids[0] = part.elicitationId;
+    });
+    bindElicitationSink('u1', 's1', 'call-2', (part) => {
+      ids[1] = part.elicitationId;
     });
 
     const first = createPendingElicitation({
@@ -199,8 +202,7 @@ describe('elicitation registry', () => {
       fields: [],
     });
 
-    // The first call finishes and cleans up only its own leftover; the second
-    // call's elicitation must stay pending until its owner responds.
+    releaseElicitationSink('u1', 's1', 'call-1');
     cancelPendingElicitations([ids[0] ?? '']);
     await expect(first).resolves.toEqual({ action: 'cancel' });
 

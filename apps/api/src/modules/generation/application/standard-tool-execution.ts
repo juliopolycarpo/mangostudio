@@ -17,8 +17,8 @@ import {
   releaseElicitationSink,
 } from '../../../services/mcp/elicitation-registry';
 import { persistMcpMediaParts } from '../../../services/mcp/rich-content';
-import { executeMcpTool } from '../../../services/mcp/tool-bridge';
-import { isMcpToolName, parseMcpToolName } from '../../../services/mcp/tool-naming';
+import { executeResolvedMcpTool, resolveMcpToolExecution } from '../../../services/mcp/tool-bridge';
+import { isMcpToolName } from '../../../services/mcp/tool-naming';
 import { executeTool, getSafeEffectiveToolSettings, getTool } from '../../../services/tools';
 import {
   getBoundedOptionalInteger,
@@ -315,39 +315,29 @@ async function executeMcpToolCall(
     throw new Error(`Tool "${name}" is disabled for this user.`);
   }
 
-  const parsed = parseMcpToolName(name);
-  if (!parsed) throw new Error(`Unknown tool: "${name}"`);
-
-  const row = await context.db
-    .selectFrom('mcp_servers')
-    .select(['id', 'slug'])
-    .where('userId', '=', context.userId)
-    .where('slug', '=', parsed.serverSlug)
-    .executeTakeFirst();
-  if (!row) throw new Error(`MCP server "${parsed.serverSlug}" is not configured.`);
+  const target = await resolveMcpToolExecution(context.db, context.userId, name);
 
   const elicitationParts: McpElicitationPart[] = [];
-  bindElicitationSink(context.userId, row.id, (part) => {
+  bindElicitationSink(context.userId, target.server.id, callId, (part) => {
     elicitationParts.push(part);
     context.onEvent?.({ type: 'mcp_elicitation', part });
   });
 
   try {
-    const mcpResult = await executeMcpTool(context.db, context.userId, name, args, {
+    const mcpResult = await executeResolvedMcpTool(context.userId, target, args, {
       signal: context.signal,
       toolCallId: callId,
     });
-    const mediaParts =
-      !mcpResult.isError && parsed
-        ? await persistMcpMediaParts(mcpResult.content, {
-            db: context.db,
-            userId: context.userId,
-            chatId: context.chatId,
-            toolCallId: callId,
-            serverSlug: parsed.serverSlug,
-            toolName: parsed.toolName,
-          })
-        : undefined;
+    const mediaParts = !mcpResult.isError
+      ? await persistMcpMediaParts(mcpResult.content, {
+          db: context.db,
+          userId: context.userId,
+          chatId: context.chatId,
+          toolCallId: callId,
+          serverSlug: target.parsed.serverSlug,
+          toolName: target.parsed.toolName,
+        })
+      : undefined;
     return {
       result: mcpResult.isError ? { error: mcpResult.contentText } : mcpResult.contentText,
       isError: mcpResult.isError,
@@ -355,7 +345,7 @@ async function executeMcpToolCall(
       ...(elicitationParts.length ? { elicitationParts } : {}),
     };
   } finally {
-    releaseElicitationSink(context.userId, row.id);
+    releaseElicitationSink(context.userId, target.server.id, callId);
     cancelPendingElicitations(elicitationParts.map((part) => part.elicitationId));
   }
 }

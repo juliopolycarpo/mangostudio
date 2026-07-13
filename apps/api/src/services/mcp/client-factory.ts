@@ -22,6 +22,7 @@ import {
   ToolListChangedNotificationSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import { getVersion } from '../../lib/config';
+import { createDiagnosticLogger } from '../../lib/logger';
 import { flattenMcpContent, normalizeMcpContent } from './content-mapping';
 import { createPendingElicitation, type McpElicitationResult } from './elicitation-registry';
 import { flattenElicitationSchema } from './elicitation-schema';
@@ -40,6 +41,74 @@ import {
 
 /** Request cap applied when neither the call nor the server row sets one. */
 export const DEFAULT_MCP_TIMEOUT_MS = 30_000;
+
+const logger = createDiagnosticLogger('mcp-client');
+
+interface QueuedToolCall {
+  enqueuedAt: number;
+  signal?: AbortSignal;
+  onAbort: () => void;
+  resolve: (slot: ToolCallSlot) => void;
+}
+
+interface ToolCallSlot {
+  queued: boolean;
+  queueWaitMs: number;
+  release: () => void;
+}
+
+/** FIFO gate for callTool only; discovery, resources, and prompts stay parallel. */
+class ToolCallQueue {
+  private active = false;
+  private readonly waiting: QueuedToolCall[] = [];
+
+  acquire(signal?: AbortSignal): Promise<ToolCallSlot> {
+    signal?.throwIfAborted();
+    if (!this.active) {
+      this.active = true;
+      return Promise.resolve(this.createSlot(false, 0));
+    }
+
+    return new Promise<ToolCallSlot>((resolve, reject) => {
+      const entry: QueuedToolCall = {
+        enqueuedAt: Date.now(),
+        signal,
+        onAbort: () => {
+          const index = this.waiting.indexOf(entry);
+          if (index < 0) return;
+          this.waiting.splice(index, 1);
+          reject(signal?.reason ?? new DOMException('The operation was aborted.', 'AbortError'));
+        },
+        resolve,
+      };
+      signal?.addEventListener('abort', entry.onAbort, { once: true });
+      this.waiting.push(entry);
+    });
+  }
+
+  private createSlot(queued: boolean, queueWaitMs: number): ToolCallSlot {
+    let released = false;
+    return {
+      queued,
+      queueWaitMs,
+      release: () => {
+        if (released) return;
+        released = true;
+        this.releaseNext();
+      },
+    };
+  }
+
+  private releaseNext(): void {
+    const next = this.waiting.shift();
+    if (!next) {
+      this.active = false;
+      return;
+    }
+    next.signal?.removeEventListener('abort', next.onAbort);
+    next.resolve(this.createSlot(true, Date.now() - next.enqueuedAt));
+  }
+}
 
 export interface ConnectMcpClientOptions {
   /** Owning user; required so elicitation requests can be auth-scoped. */
@@ -165,8 +234,8 @@ export function wrapMcpClient(
   callbacks: WrapMcpClientOptions
 ): McpClientHandle {
   let closedByUs = false;
-  let activeToolCallId: string | undefined;
-  let activeSignal: AbortSignal | undefined;
+  let activeToolCall: { id: string; signal?: AbortSignal } | undefined;
+  const toolCallQueue = new ToolCallQueue();
   client.onclose = () => {
     if (!closedByUs) callbacks.onSessionClosed?.();
   };
@@ -183,6 +252,15 @@ export function wrapMcpClient(
     // Form mode is the only capability we declare; URL (or unknown) modes
     // cancel so servers degrade instead of hanging on an unsupported UI.
     if (params.mode === 'url' || !('requestedSchema' in params)) {
+      logger.warn('elicitation_unsupported_mode', {
+        serverSlug: callbacks.serverSlug,
+        mode: params.mode,
+      });
+      return { action: 'cancel' };
+    }
+
+    if (!activeToolCall) {
+      logger.warn('elicitation_outside_tool_call', { serverSlug: callbacks.serverSlug });
       return { action: 'cancel' };
     }
 
@@ -190,10 +268,10 @@ export function wrapMcpClient(
       userId: callbacks.userId,
       serverId: callbacks.serverId,
       serverSlug: callbacks.serverSlug,
-      toolCallId: activeToolCallId ?? `mcp:${callbacks.serverSlug}`,
+      toolCallId: activeToolCall.id,
       message: params.message,
       fields: flattenElicitationSchema(params.requestedSchema),
-      signal: activeSignal,
+      signal: activeToolCall.signal,
     });
     return toElicitResult(result);
   });
@@ -231,11 +309,16 @@ export function wrapMcpClient(
     },
 
     async callTool(name, args, options) {
-      const previousToolCallId = activeToolCallId;
-      const previousSignal = activeSignal;
-      activeToolCallId = options?.toolCallId ?? previousToolCallId;
-      activeSignal = options?.signal ?? previousSignal;
+      const slot = await toolCallQueue.acquire(options?.signal);
       try {
+        if (slot.queued) {
+          logger.debug('tool_call_queue_wait', {
+            serverSlug: callbacks.serverSlug,
+            queueWaitMs: slot.queueWaitMs,
+          });
+        }
+        const toolCallId = options?.toolCallId?.trim();
+        activeToolCall = toolCallId ? { id: toolCallId, signal: options?.signal } : undefined;
         const result = await client.callTool(
           { name, arguments: args },
           undefined,
@@ -243,8 +326,8 @@ export function wrapMcpClient(
         );
         return mapCallResult(result);
       } finally {
-        activeToolCallId = previousToolCallId;
-        activeSignal = previousSignal;
+        activeToolCall = undefined;
+        slot.release();
       }
     },
 

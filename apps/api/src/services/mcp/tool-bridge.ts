@@ -12,7 +12,12 @@ import { createDiagnosticLogger } from '../../lib/logger';
 import type { ToolDefinition } from '../providers/types';
 import { getMcpClient, listMcpToolsCached } from './connection-manager';
 import { toMcpRuntimeConfig } from './runtime-config';
-import { buildMcpToolName, MCP_TOOL_NAME_MAX_LENGTH, parseMcpToolName } from './tool-naming';
+import {
+  buildMcpToolName,
+  MCP_TOOL_NAME_MAX_LENGTH,
+  type ParsedMcpToolName,
+  parseMcpToolName,
+} from './tool-naming';
 import type { McpCallResult } from './types';
 
 /** Per-server budget for the lazy connect + listTools during turn resolution. */
@@ -31,6 +36,11 @@ export interface McpBridgeTool {
   serverSlug: string;
   toolName: string;
   definition: ToolDefinition;
+}
+
+export interface ResolvedMcpToolExecution {
+  parsed: ParsedMcpToolName;
+  server: McpServerSelect;
 }
 
 /**
@@ -93,6 +103,16 @@ export async function executeMcpTool(
   args: Record<string, unknown>,
   options: { signal?: AbortSignal; toolCallId?: string } = {}
 ): Promise<McpCallResult> {
+  const target = await resolveMcpToolExecution(db, userId, name);
+  return executeResolvedMcpTool(userId, target, args, options);
+}
+
+/** Resolves and authorizes one namespaced tool against its full owned server row. */
+export async function resolveMcpToolExecution(
+  db: Kysely<Database>,
+  userId: string,
+  name: string
+): Promise<ResolvedMcpToolExecution> {
   const parsed = parseMcpToolName(name);
   if (!parsed) throw new Error(`Unknown tool: "${name}"`);
 
@@ -100,9 +120,26 @@ export async function executeMcpTool(
   if (!row) throw new Error(`MCP server "${parsed.serverSlug}" is not configured.`);
   if (row.enabled === 0) throw new Error(`MCP server "${parsed.serverSlug}" is disabled.`);
 
-  const handle = await getMcpClient(userId, toMcpRuntimeConfig(row));
-  return handle.callTool(parsed.toolName, args, {
-    timeoutMs: row.timeoutMs ?? MCP_TOOL_EXECUTE_TIMEOUT_MS,
+  return { parsed, server: row };
+}
+
+/** Executes an already authorized target without repeating its database lookup. */
+export async function executeResolvedMcpTool(
+  userId: string,
+  target: ResolvedMcpToolExecution,
+  args: Record<string, unknown>,
+  options: { signal?: AbortSignal; toolCallId?: string } = {}
+): Promise<McpCallResult> {
+  if (target.server.userId !== userId || target.server.slug !== target.parsed.serverSlug) {
+    throw new Error(`MCP server "${target.parsed.serverSlug}" is not configured.`);
+  }
+  if (target.server.enabled === 0) {
+    throw new Error(`MCP server "${target.parsed.serverSlug}" is disabled.`);
+  }
+
+  const handle = await getMcpClient(userId, toMcpRuntimeConfig(target.server));
+  return handle.callTool(target.parsed.toolName, args, {
+    timeoutMs: target.server.timeoutMs ?? MCP_TOOL_EXECUTE_TIMEOUT_MS,
     signal: options.signal,
     toolCallId: options.toolCallId,
   });
