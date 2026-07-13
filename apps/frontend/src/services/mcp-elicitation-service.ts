@@ -2,7 +2,7 @@
  * Client for mid-tool-call MCP form elicitation responses.
  */
 
-import type { ApiErrorResponse } from '@mangostudio/shared/errors';
+import { type ApiErrorResponse, ERROR_CODES } from '@mangostudio/shared/errors';
 import type {
   RespondMcpElicitationBody,
   RespondMcpElicitationResponse,
@@ -29,7 +29,7 @@ export async function respondMcpElicitation(
   if (error) {
     const message = extractApiError(error.value, 'Failed to respond to elicitation.');
     const code = (error.value as Partial<ApiErrorResponse> | null)?.code;
-    if (code === 'NOT_FOUND') throw new McpElicitationGoneError(message);
+    if (code === ERROR_CODES.NOT_FOUND) throw new McpElicitationGoneError(message);
     throw new Error(message);
   }
   return data as RespondMcpElicitationResponse;
