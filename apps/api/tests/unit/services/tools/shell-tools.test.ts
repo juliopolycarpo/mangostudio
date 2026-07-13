@@ -172,4 +172,52 @@ describe('shell tool registration and execution', () => {
     }
     expect(threw).toBe(true);
   });
+
+  it.skipIf(!hasBash)(
+    'throws a timeout error when the command exceeds its budget',
+    async () => {
+      let threw = false;
+      try {
+        await executeTool('bash', { command: 'sleep 10' }, makeContext(), {
+          enabled: true,
+          parameters: {
+            timeoutSeconds: 5,
+            maxOutputBytes: 10_000,
+            allowedEnvVars: [],
+            deniedEnvVars: [],
+          },
+        });
+      } catch (error) {
+        threw = true;
+        expect((error as Error).message.toLowerCase()).toContain('timed out');
+      }
+      expect(threw).toBe(true);
+    },
+    15_000
+  );
+
+  it.skipIf(!hasBash)(
+    'throws an abort error instead of a timeout when cancelled early',
+    async () => {
+      const controller = new AbortController();
+      const run = executeTool(
+        'bash',
+        { command: 'sleep 10' },
+        { ...makeContext({ timeoutSeconds: 30 }), signal: controller.signal },
+        { enabled: true, parameters: { timeoutSeconds: 30 } }
+      );
+      setTimeout(() => controller.abort(), 300);
+
+      let threw = false;
+      try {
+        await run;
+      } catch (error) {
+        threw = true;
+        expect((error as Error).name).toBe('AbortError');
+        expect((error as Error).message.toLowerCase()).not.toContain('timed out');
+      }
+      expect(threw).toBe(true);
+    },
+    15_000
+  );
 });

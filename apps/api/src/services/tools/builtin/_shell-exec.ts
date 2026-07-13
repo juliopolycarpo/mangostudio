@@ -17,6 +17,13 @@ export class ShellExecutionError extends Error {
   }
 }
 
+/** Why a shell child process ended, distinct from raw exitCode/signal facts. */
+export type ShellTermination =
+  | { kind: 'exited' }
+  | { kind: 'timed_out' }
+  | { kind: 'aborted' }
+  | { kind: 'signalled'; signal: string };
+
 export interface RunShellCommandInput {
   kind: ShellKind;
   command: string;
@@ -40,11 +47,29 @@ export interface ShellCommandResult {
   stdout: string;
   stderr: string;
   truncated: boolean;
-  timedOut: boolean;
+  /** Authoritative termination cause; use this instead of inferring from signal alone. */
+  termination: ShellTermination;
   durationMs: number;
 }
 
+/** Injectable seams for deterministic race tests. */
+export interface ShellExecDependencies {
+  spawn: typeof Bun.spawn;
+  setTimeout: (fn: () => void, ms: number) => ReturnType<typeof setTimeout>;
+  clearTimeout: (id: ReturnType<typeof setTimeout>) => void;
+  now: () => number;
+}
+
+const defaultDeps: ShellExecDependencies = {
+  spawn: Bun.spawn.bind(Bun),
+  setTimeout,
+  clearTimeout,
+  now: () => Date.now(),
+};
+
 const executableCache = new Map<ShellKind, string | null>();
+
+type TerminationClaim = 'timed_out' | 'aborted';
 
 /**
  * Resolves the executable path for a shell kind, honoring platform rules.
@@ -83,20 +108,51 @@ export function isShellAvailable(kind: ShellKind): boolean {
  *
  * // Usage: await runShellCommand({ kind: 'bash', command: 'echo hi', timeoutMs: 5000, maxOutputBytes: 65536 })
  */
-export async function runShellCommand(input: RunShellCommandInput): Promise<ShellCommandResult> {
+export function runShellCommand(
+  input: RunShellCommandInput,
+  deps: Partial<ShellExecDependencies> = {}
+): Promise<ShellCommandResult> {
+  return runShellCommandWithDeps(input, { ...defaultDeps, ...deps });
+}
+
+/** @internal Testable entry with explicit dependency injection. */
+export async function runShellCommandWithDeps(
+  input: RunShellCommandInput,
+  deps: ShellExecDependencies
+): Promise<ShellCommandResult> {
   const executable = findShellExecutable(input.kind);
   if (!executable) {
     throw new ShellExecutionError(`The "${input.kind}" shell is not available on this system.`);
   }
 
-  const startedAt = Date.now();
-  const proc = spawnShell(executable, input);
-  const abortHandler = () => {
+  const startedAt = deps.now();
+  const proc = spawnShell(deps.spawn, executable, input);
+  let claimed: TerminationClaim | null = null;
+
+  const claim = (kind: TerminationClaim): boolean => {
+    if (claimed) return false;
+    claimed = kind;
+    return true;
+  };
+
+  const killChild = () => {
     try {
       proc.kill('SIGKILL');
     } catch {
       // Process may already have exited.
     }
+  };
+
+  const naturallyExited = () => proc.exitCode !== null && proc.signalCode === null;
+
+  const timeoutId = deps.setTimeout(() => {
+    if (naturallyExited()) return;
+    if (claim('timed_out')) killChild();
+  }, input.timeoutMs);
+
+  const abortHandler = () => {
+    if (naturallyExited()) return;
+    if (claim('aborted')) killChild();
   };
   input.signal?.addEventListener('abort', abortHandler, { once: true });
   // A signal already aborted at spawn time never re-dispatches `abort` to a
@@ -119,26 +175,35 @@ export async function runShellCommand(input: RunShellCommandInput): Promise<Shel
       stdout: stdout.text,
       stderr: stderr.text,
       truncated: stdout.truncated || stderr.truncated,
-      timedOut: proc.signalCode === 'SIGKILL',
-      durationMs: Date.now() - startedAt,
+      termination: resolveTermination(claimed, proc.signalCode),
+      durationMs: deps.now() - startedAt,
     };
   } finally {
+    deps.clearTimeout(timeoutId);
     input.signal?.removeEventListener('abort', abortHandler);
   }
 }
 
-function spawnShell(executable: string, input: RunShellCommandInput) {
+function resolveTermination(
+  claimed: TerminationClaim | null,
+  signalCode: string | null
+): ShellTermination {
+  if (claimed === 'timed_out') return { kind: 'timed_out' };
+  if (claimed === 'aborted') return { kind: 'aborted' };
+  if (signalCode) return { kind: 'signalled', signal: signalCode };
+  return { kind: 'exited' };
+}
+
+function spawnShell(spawn: typeof Bun.spawn, executable: string, input: RunShellCommandInput) {
   const cwd = resolveWorkingDirectory(input.cwd);
   try {
-    return Bun.spawn(buildInvocation(input.kind, executable, input.command), {
+    return spawn(buildInvocation(input.kind, executable, input.command), {
       ...(cwd ? { cwd } : {}),
       // Withhold connector API keys and the auth secret from AI-run commands.
       env: sanitizeShellEnv(input.envPolicy),
       stdin: 'ignore',
       stdout: 'pipe',
       stderr: 'pipe',
-      timeout: input.timeoutMs,
-      killSignal: 'SIGKILL',
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to start shell process';

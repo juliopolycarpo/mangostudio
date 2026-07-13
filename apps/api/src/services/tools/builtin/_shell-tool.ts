@@ -98,10 +98,20 @@ async function execute(
     envPolicy: { allow: settings.allowedEnvVars, deny: settings.deniedEnvVars },
     ...(context.signal ? { signal: context.signal } : {}),
   });
-  if (result.timedOut) {
+  if (result.termination.kind === 'timed_out') {
     throw new ShellExecutionError(`Command timed out after ${settings.timeoutSeconds} seconds.`);
   }
+  if (result.termination.kind === 'aborted') {
+    throw createShellAbortError(context.signal?.reason);
+  }
   return result;
+}
+
+function createShellAbortError(reason: unknown): Error {
+  if (reason instanceof Error && reason.name === 'AbortError') {
+    return reason;
+  }
+  return new DOMException('Command aborted.', 'AbortError');
 }
 
 function buildDefinition(kind: ShellKind, description: string) {
