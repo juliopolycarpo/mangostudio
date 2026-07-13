@@ -310,15 +310,15 @@ export function wrapMcpClient(
 
     async callTool(name, args, options) {
       const slot = await toolCallQueue.acquire(options?.signal);
-      if (slot.queued) {
-        logger.debug('tool_call_queue_wait', {
-          serverSlug: callbacks.serverSlug,
-          queueWaitMs: slot.queueWaitMs,
-        });
-      }
-      const toolCallId = options?.toolCallId?.trim();
-      activeToolCall = toolCallId ? { id: toolCallId, signal: options?.signal } : undefined;
       try {
+        if (slot.queued) {
+          logger.debug('tool_call_queue_wait', {
+            serverSlug: callbacks.serverSlug,
+            queueWaitMs: slot.queueWaitMs,
+          });
+        }
+        const toolCallId = options?.toolCallId?.trim();
+        activeToolCall = toolCallId ? { id: toolCallId, signal: options?.signal } : undefined;
         const result = await client.callTool(
           { name, arguments: args },
           undefined,
