@@ -1,6 +1,11 @@
 import { type Static, Type } from '@sinclair/typebox';
 import { SSEErrorEventSchema } from '../errors';
-import { McpElicitationFieldSchema, McpElicitationStatusSchema } from '../mcp/schemas';
+import {
+  McpElicitationFieldSchema,
+  McpElicitationStatusSchema,
+  McpElicitationTerminalReasonSchema,
+  McpElicitationTerminalStatusSchema,
+} from '../mcp/schemas';
 import { ProviderTypeSchema } from '../provider-settings/schemas';
 import { QuestionSpecSchema } from '../questions/schemas';
 import { TODO_MAX_ITEMS, TodoItemSchema } from '../todos/schemas';
@@ -211,6 +216,21 @@ export const SSEMcpElicitationRequestEventSchema = Type.Object({
 
 export type SSEMcpElicitationRequestEvent = Static<typeof SSEMcpElicitationRequestEventSchema>;
 
+/**
+ * First terminal transition of an already-streamed elicitation request, so a
+ * mounted card becomes non-interactive without waiting for a refetch.
+ */
+export const SSEMcpElicitationStatusEventSchema = Type.Object({
+  type: Type.Literal('mcp_elicitation_status'),
+  elicitationId: Type.String(),
+  toolCallId: Type.String(),
+  status: McpElicitationTerminalStatusSchema,
+  reason: McpElicitationTerminalReasonSchema,
+  done: Type.Literal(false),
+});
+
+export type SSEMcpElicitationStatusEvent = Static<typeof SSEMcpElicitationStatusEventSchema>;
+
 export const SSETodoUpdateEventSchema = Type.Object({
   type: Type.Literal('todo_update'),
   toolCallId: Type.String(),
@@ -306,6 +326,7 @@ export const StreamChunkSchema = Type.Union([
   SSEMcpMediaEventSchema,
   SSEQuestionEventSchema,
   SSEMcpElicitationRequestEventSchema,
+  SSEMcpElicitationStatusEventSchema,
   SSETodoUpdateEventSchema,
   SSEContextEventSchema,
   SSEFallbackEventSchema,

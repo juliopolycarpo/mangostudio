@@ -110,6 +110,8 @@ export function reduceTextGenerationStreamChunk(
       return reduceQuestion(nextState, chunk);
     case 'mcp_elicitation_request':
       return reduceMcpElicitation(nextState, chunk);
+    case 'mcp_elicitation_status':
+      return reduceMcpElicitationStatus(nextState, chunk);
     case 'todo_update':
       return reduceTodoUpdate(nextState, chunk);
     case 'image_generation_started':
@@ -336,8 +338,36 @@ function reduceMcpElicitation(
     fields: chunk.fields,
     status: chunk.status,
   };
-  const parts = exists ? state.parts : [...state.parts, elicitationPart];
+  // A repeated request for a known id updates the existing part in place so a
+  // status carried by the duplicate is never dropped.
+  const parts = exists
+    ? updateElicitationStatus(state.parts, chunk.elicitationId, chunk.status)
+    : [...state.parts, elicitationPart];
   return withAiMessageUpdate({ ...state, parts, activeThinkingIndex: null }, { parts });
+}
+
+function reduceMcpElicitationStatus(
+  state: TextGenerationStreamState,
+  chunk: Extract<StreamChunk, { type: 'mcp_elicitation_status' }>
+) {
+  const parts = updateElicitationStatus(state.parts, chunk.elicitationId, chunk.status);
+  return withAiMessageUpdate({ ...state, parts }, { parts });
+}
+
+function updateElicitationStatus(
+  parts: MessagePart[],
+  elicitationId: string,
+  status: Extract<MessagePart, { type: 'mcp_elicitation' }>['status']
+): MessagePart[] {
+  // The first terminal status wins; a late or duplicate event never moves it.
+  return parts.map((part) =>
+    part.type === 'mcp_elicitation' &&
+    part.elicitationId === elicitationId &&
+    part.status === 'pending' &&
+    part.status !== status
+      ? { ...part, status }
+      : part
+  );
 }
 
 function reduceTodoUpdate(

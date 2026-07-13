@@ -185,6 +185,15 @@ function toSsePayload(event: StreamEvent): object {
         status: event.part.status,
         done: false,
       };
+    case 'mcp_elicitation_status':
+      return {
+        type: 'mcp_elicitation_status',
+        elicitationId: event.elicitationId,
+        toolCallId: event.toolCallId,
+        status: event.status,
+        reason: event.reason,
+        done: false,
+      };
     case 'todo_update':
       return {
         type: 'todo_update',
