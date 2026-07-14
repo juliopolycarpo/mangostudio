@@ -1,4 +1,10 @@
 import type { MessagePart } from '@mangostudio/shared';
+import {
+  isActiveToolExecutionStatus,
+  resolveToolCallStatus,
+  type ToolExecutionSnapshot,
+  type ToolExecutionStatus,
+} from '@mangostudio/shared/tool-executions';
 
 /**
  * Tool names whose consecutive calls collapse into a single grouped block.
@@ -6,13 +12,17 @@ import type { MessagePart } from '@mangostudio/shared';
  */
 const GROUPABLE_TOOLS = new Set(['read_file', 'write_file', 'list_directory', 'glob', 'grep']);
 
-/** A single tool call paired with its result, ready for rendering. */
+/** A single tool call paired with its result and lifecycle, ready for rendering. */
 export interface ToolCallEntry {
   toolCallId: string;
   name: string;
   args: Record<string, unknown>;
   result: string | null;
   isError?: boolean;
+  /** Normalized lifecycle status (legacy parts inferred from their result). */
+  status: ToolExecutionStatus;
+  /** Lifecycle snapshot, when the part was written by the unified pipeline. */
+  execution?: ToolExecutionSnapshot;
   isPending: boolean;
 }
 
@@ -44,7 +54,7 @@ export function planToolGroups(parts: MessagePart[], isStreaming: boolean): Tool
 
     groups.set(
       i,
-      members.map((idx) => toEntry(parts, idx, isStreaming))
+      members.map((idx) => toToolCallEntry(parts, idx, isStreaming))
     );
     for (let m = 1; m < members.length; m++) consumed.add(members[m]);
   }
@@ -67,8 +77,17 @@ function collectRun(parts: MessagePart[], start: number, name: string): number[]
   return members;
 }
 
-/** Builds a render entry for the tool_call at `index`, resolving its matching result. */
-function toEntry(parts: MessagePart[], index: number, isStreaming: boolean): ToolCallEntry {
+/**
+ * Builds a render entry for the tool_call at `index`, resolving its matching
+ * result and normalizing its lifecycle status (legacy parts included).
+ *
+ * // Usage: const entry = toToolCallEntry(parts, index, isStreaming);
+ */
+export function toToolCallEntry(
+  parts: MessagePart[],
+  index: number,
+  isStreaming: boolean
+): ToolCallEntry {
   const call = parts[index];
   if (call.type !== 'tool_call') {
     throw new Error(`Expected tool_call at index ${index}`);
@@ -77,12 +96,21 @@ function toEntry(parts: MessagePart[], index: number, isStreaming: boolean): Too
     | Extract<MessagePart, { type: 'tool_result' }>
     | undefined;
 
+  const status = resolveToolCallStatus({
+    execution: call.execution,
+    hasResult: result !== undefined,
+    isError: result?.isError,
+    isStreaming,
+  });
+
   return {
     toolCallId: call.toolCallId,
     name: call.name,
     args: call.args,
     result: result?.content ?? null,
-    isError: result?.isError,
-    isPending: isStreaming && !result,
+    isError: result?.isError ?? (status === 'failed' || status === 'timed_out' || undefined),
+    status,
+    execution: call.execution,
+    isPending: isActiveToolExecutionStatus(status),
   };
 }

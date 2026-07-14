@@ -25,6 +25,20 @@ const VALID_CHUNKS: StreamChunk[] = [
     done: false,
   },
   {
+    type: 'tool_execution',
+    callId: 'tool-1',
+    name: 'search',
+    execution: {
+      status: 'succeeded',
+      source: 'builtin',
+      queuedAt: 1_000,
+      startedAt: 1_001,
+      finishedAt: 1_500,
+      durationMs: 499,
+    },
+    done: false,
+  },
+  {
     type: 'subagent_started',
     callId: 'delegate-1',
     agentId: 'explore',
@@ -213,6 +227,31 @@ describe('StreamChunkSchema', () => {
       {
         label: 'tool_call_started missing callId',
         value: { type: 'tool_call_started', name: 'search', done: false },
+      },
+      {
+        label: 'tool_execution unknown status',
+        value: {
+          type: 'tool_execution',
+          callId: 'tool-1',
+          name: 'search',
+          execution: { status: 'paused', source: 'builtin', queuedAt: 1_000 },
+          done: false,
+        },
+      },
+      {
+        label: 'tool_execution unknown reason code',
+        value: {
+          type: 'tool_execution',
+          callId: 'tool-1',
+          name: 'search',
+          execution: {
+            status: 'failed',
+            source: 'builtin',
+            queuedAt: 1_000,
+            reasonCode: 'because',
+          },
+          done: false,
+        },
       },
       {
         label: 'done with done:false',

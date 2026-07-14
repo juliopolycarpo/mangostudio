@@ -15,7 +15,7 @@ import { ThinkingBlock } from './ThinkingBlock';
 import { TodoListPart } from './TodoListPart';
 import { ToolCallBlock } from './ToolCallBlock';
 import { ToolCallGroupBlock } from './ToolCallGroupBlock';
-import { planToolGroups } from './tool-call-grouping';
+import { planToolGroups, toToolCallEntry } from './tool-call-grouping';
 
 interface MessagePartsProps {
   parts: MessagePart[];
@@ -63,17 +63,15 @@ export function MessageParts({
             if (grouped) {
               return <ToolCallGroupBlock key={part.toolCallId} calls={grouped} />;
             }
-            const result = parts.find(
-              (p) => p.type === 'tool_result' && p.toolCallId === part.toolCallId
-            ) as Extract<MessagePart, { type: 'tool_result' }> | undefined;
+            const entry = toToolCallEntry(parts, idx, isStreaming);
             return (
               <ToolCallBlock
                 key={part.toolCallId}
-                name={part.name}
-                args={part.args}
-                result={result?.content ?? null}
-                isError={result?.isError}
-                isPending={isStreaming && !result}
+                name={entry.name}
+                args={entry.args}
+                result={entry.result}
+                status={entry.status}
+                execution={entry.execution}
               />
             );
           }

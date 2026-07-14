@@ -52,6 +52,7 @@ import {
 import {
   collectToolExecutionResult,
   executeImageGenerationCall,
+  finalizeDanglingToolExecutions,
   handleTurnCompleted,
   mergeMessageParts,
 } from './stream-text-turn-helpers';
@@ -836,6 +837,7 @@ export async function* finalizeSuccessfulTurn(
     }
   }
 
+  finalizeDanglingToolExecutions(session.allParts);
   const finalParts = mergeMessageParts(session.allParts);
 
   await persistAiResponse(
@@ -908,6 +910,7 @@ export async function* finalizeToolLoopExhausted(
   }
 
   const generationTime = `${((Date.now() - startTime) / 1000).toFixed(1)}s`;
+  finalizeDanglingToolExecutions(session.allParts);
   const errorParts: MessagePart[] = [
     ...session.allParts,
     { type: 'error', text: TOOL_LOOP_EXHAUSTED_MESSAGE },
@@ -983,6 +986,7 @@ export async function* finalizeTurnError(
 
   try {
     const generationTime = `${((Date.now() - startTime) / 1000).toFixed(1)}s`;
+    finalizeDanglingToolExecutions(session.allParts);
     const errorParts: MessagePart[] = [...session.allParts, { type: 'error', text: message }];
     await persistErrorResponse(
       {

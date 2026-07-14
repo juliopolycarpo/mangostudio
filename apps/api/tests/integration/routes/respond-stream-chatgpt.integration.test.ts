@@ -344,11 +344,13 @@ describe('POST /respond/stream — chatgpt provider', () => {
     const aiMessage = insertedMessages.find((message) => message.role === 'ai');
     expect(aiMessage).toBeDefined();
     const parts = parsePersistedParts(aiMessage?.parts);
-    expect(parts).toContainEqual({
+    const toolCallPart = parts.find((part) => part.type === 'tool_call');
+    expect(toolCallPart).toMatchObject({
       type: 'tool_call',
       toolCallId: 'call_1',
       name: 'read_file',
       args: { path: 'README.md' },
+      execution: { status: 'succeeded', source: 'builtin' },
     });
     expect(parts).toContainEqual({
       type: 'tool_result',

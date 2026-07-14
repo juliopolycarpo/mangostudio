@@ -94,6 +94,8 @@ export function reduceTextGenerationStreamChunk(
       return reduceToolCallCompleted(nextState, chunk.callId, chunk.arguments);
     case 'tool_result':
       return reduceToolResult(nextState, chunk.callId, chunk.result, chunk.isError);
+    case 'tool_execution':
+      return reduceToolExecution(nextState, chunk);
     case 'subagent_started':
       return reduceSubagentStarted(nextState, chunk);
     case 'subagent_text':
@@ -207,6 +209,35 @@ function reduceToolResult(
       isError,
     } satisfies MessagePart,
   ];
+  return withAiMessageUpdate({ ...state, parts }, { parts });
+}
+
+function reduceToolExecution(
+  state: TextGenerationStreamState,
+  chunk: Extract<StreamChunk, { type: 'tool_execution' }>
+) {
+  const exists = state.parts.some(
+    (part) => part.type === 'tool_call' && part.toolCallId === chunk.callId
+  );
+  // The queued transition normally follows tool_call_started, so the part
+  // exists; a missing part (e.g. provider skipped start events) is created so
+  // the lifecycle is never dropped.
+  const parts = exists
+    ? state.parts.map((part) =>
+        part.type === 'tool_call' && part.toolCallId === chunk.callId
+          ? { ...part, execution: chunk.execution }
+          : part
+      )
+    : [
+        ...state.parts,
+        {
+          type: 'tool_call',
+          toolCallId: chunk.callId,
+          name: chunk.name,
+          args: {},
+          execution: chunk.execution,
+        } satisfies MessagePart,
+      ];
   return withAiMessageUpdate({ ...state, parts }, { parts });
 }
 
