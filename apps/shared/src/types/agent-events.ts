@@ -1,6 +1,7 @@
 import type { McpElicitationPart } from '../mcp/schemas';
 import type { QuestionSpec } from '../questions/schemas';
 import type { TodoItem } from '../todos/schemas';
+import type { ToolExecutionSnapshot } from '../tool-executions/schemas';
 import type { ProviderType } from './provider';
 
 export type { McpElicitationPart } from '../mcp/schemas';
@@ -160,7 +161,18 @@ export interface SubagentTracePart {
 export type MessagePart =
   | { type: 'text'; text: string }
   | { type: 'thinking'; text: string; redacted?: boolean }
-  | { type: 'tool_call'; toolCallId: string; name: string; args: Record<string, unknown> }
+  | {
+      type: 'tool_call';
+      toolCallId: string;
+      name: string;
+      args: Record<string, unknown>;
+      /**
+       * Lifecycle snapshot written by the execution owner. Absent on parts
+       * persisted before the unified lifecycle existed and on provider-internal
+       * tool loops; readers normalize those via `resolveToolCallStatus`.
+       */
+      execution?: ToolExecutionSnapshot;
+    }
   | { type: 'tool_result'; toolCallId: string; content: string; isError?: boolean }
   | GeneratedImagePart
   | McpMediaPart

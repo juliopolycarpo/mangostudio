@@ -26,6 +26,7 @@ export type {
   SSETodoUpdateEvent,
   SSEToolCallCompletedEvent,
   SSEToolCallStartedEvent,
+  SSEToolExecutionEvent,
   SSEToolResultEvent,
   SSEUserMessageIdEvent,
   StreamChunk,

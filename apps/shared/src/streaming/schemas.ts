@@ -9,6 +9,7 @@ import {
 import { ProviderTypeSchema } from '../provider-settings/schemas';
 import { QuestionSpecSchema } from '../questions/schemas';
 import { TODO_MAX_ITEMS, TodoItemSchema } from '../todos/schemas';
+import { ToolExecutionSnapshotSchema } from '../tool-executions/schemas';
 
 // SSE error events are defined once in the errors module and re-exported here so
 // streaming consumers keep a single canonical `SSEErrorEvent` shape.
@@ -86,6 +87,21 @@ export const SSEToolResultEventSchema = Type.Object({
 });
 
 export type SSEToolResultEvent = Static<typeof SSEToolResultEventSchema>;
+
+/**
+ * One lifecycle transition of a tool call, emitted by the execution owner on
+ * every state change (queued, running, awaiting_user, and exactly one terminal
+ * state). Carries the full snapshot so consumers upsert instead of patching.
+ */
+export const SSEToolExecutionEventSchema = Type.Object({
+  type: Type.Literal('tool_execution'),
+  callId: Type.String(),
+  name: Type.String(),
+  execution: ToolExecutionSnapshotSchema,
+  done: Type.Literal(false),
+});
+
+export type SSEToolExecutionEvent = Static<typeof SSEToolExecutionEventSchema>;
 
 export const SSESubagentStartedEventSchema = Type.Object({
   type: Type.Literal('subagent_started'),
@@ -315,6 +331,7 @@ export const StreamChunkSchema = Type.Union([
   SSEToolCallStartedEventSchema,
   SSEToolCallCompletedEventSchema,
   SSEToolResultEventSchema,
+  SSEToolExecutionEventSchema,
   SSESubagentStartedEventSchema,
   SSESubagentTextEventSchema,
   SSESubagentToolCallStartedEventSchema,
