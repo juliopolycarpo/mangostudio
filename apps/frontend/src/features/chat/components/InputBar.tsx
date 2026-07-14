@@ -6,6 +6,7 @@ import { useState } from 'react';
 import { ThinkingToggle } from '@/components/layout/ThinkingToggle';
 import type { ContextInfo } from '@/features/generation/types';
 import { useI18n } from '@/hooks/use-i18n';
+import { CapabilityInspector } from './CapabilityInspector';
 import { McpComposerMenu } from './McpComposerMenu';
 
 function formatTokensCompact(n: number): string {
@@ -29,6 +30,7 @@ interface Props {
   contextInfo?: ContextInfo | null;
   imageToolIntent?: boolean;
   onImageToolIntentChange?: (active: boolean) => void;
+  activeModel?: string | null;
   agentExecutionMode?: AgentExecutionMode;
   selectedAgentId?: string;
   agents?: ReadonlyArray<AgentProfile>;
@@ -52,6 +54,7 @@ export function InputBar({
   contextInfo,
   imageToolIntent = false,
   onImageToolIntentChange,
+  activeModel = null,
   agentExecutionMode = 'chat',
   selectedAgentId = 'default',
   agents = [],
@@ -154,6 +157,14 @@ export function InputBar({
               disabled={disabled}
               onInsertPrompt={handleInsertPrompt}
               onAttachments={handleAttachments}
+            />
+
+            <CapabilityInspector
+              chatId={chatId}
+              disabled={disabled}
+              activeModel={activeModel}
+              agentMode={agentExecutionMode}
+              selectedAgentId={agentExecutionMode === 'agent' ? selectedAgentId : undefined}
             />
 
             {onImageToolIntentChange && (

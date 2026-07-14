@@ -1,0 +1,53 @@
+/**
+ * Chat capability inspector query. The effective capability set is resolved
+ * server-side by the same runtime resolver generation uses — the frontend
+ * only renders the projection, never re-derives eligibility.
+ */
+
+import { type AgentExecutionMode, isAgentId } from '@mangostudio/shared/agents';
+import type { ChatCapabilitiesResponse } from '@mangostudio/shared/capabilities';
+import { en } from '@mangostudio/shared/i18n';
+import { queryOptions } from '@tanstack/react-query';
+import { client } from '@/lib/api-client';
+import { extractApiError } from '@/lib/utils';
+
+export interface ChatCapabilitiesSelection {
+  readonly chatId: string;
+  readonly model?: string;
+  readonly agentMode?: AgentExecutionMode;
+  readonly agentId?: string;
+}
+
+export const chatCapabilitiesKeys = {
+  all: ['chat-capabilities'] as const,
+  selection: (selection: ChatCapabilitiesSelection) =>
+    [
+      ...chatCapabilitiesKeys.all,
+      selection.chatId,
+      selection.model ?? null,
+      selection.agentMode ?? 'chat',
+      selection.agentId ?? null,
+    ] as const,
+};
+
+export function chatCapabilitiesQueryOptions(selection: ChatCapabilitiesSelection) {
+  return queryOptions({
+    queryKey: chatCapabilitiesKeys.selection(selection),
+    staleTime: 30_000,
+    queryFn: async () => {
+      const agentId =
+        selection.agentMode === 'agent' && selection.agentId && isAgentId(selection.agentId)
+          ? selection.agentId
+          : undefined;
+      const { data, error } = await client.api.chats({ id: selection.chatId }).capabilities.get({
+        query: {
+          ...(selection.model ? { model: selection.model } : {}),
+          ...(selection.agentMode ? { agentMode: selection.agentMode } : {}),
+          ...(agentId ? { agentId } : {}),
+        },
+      });
+      if (error) throw new Error(extractApiError(error.value, en.chat.capabilities.loadError));
+      return data as ChatCapabilitiesResponse;
+    },
+  });
+}
