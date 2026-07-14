@@ -976,6 +976,23 @@ export const messages = {
     argsLabel: 'argumentos',
     errorLabel: 'erro',
     resultLabel: 'resultado',
+    copyResult: 'Copiar resultado',
+    resultCopied: 'Resultado copiado',
+    status: {
+      queued: 'Na fila',
+      running: 'Executando',
+      awaiting_user: 'Aguardando você',
+      succeeded: 'Concluído',
+      failed: 'Falhou',
+      cancelled: 'Cancelado',
+      timed_out: 'Tempo esgotado',
+    },
+    sources: {
+      builtin: 'Integrada',
+      skill: 'Skill',
+      mcp: 'MCP',
+      subagent: 'Subagente',
+    },
     labels: {
       list_directory: 'Listar',
       read_file: 'Leu',

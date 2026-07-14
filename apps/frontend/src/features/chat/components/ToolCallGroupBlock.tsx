@@ -86,8 +86,8 @@ export function ToolCallGroupBlock({ calls }: ToolCallGroupBlockProps) {
                 name={call.name}
                 args={call.args}
                 result={call.result}
-                isError={call.isError}
-                isPending={call.isPending}
+                status={call.status}
+                execution={call.execution}
               />
             ))}
           </motion.div>

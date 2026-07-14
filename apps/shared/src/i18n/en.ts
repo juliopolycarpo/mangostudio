@@ -965,6 +965,23 @@ export const messages: Messages = {
     argsLabel: 'args',
     errorLabel: 'error',
     resultLabel: 'result',
+    copyResult: 'Copy result',
+    resultCopied: 'Result copied',
+    status: {
+      queued: 'Queued',
+      running: 'Running',
+      awaiting_user: 'Waiting for you',
+      succeeded: 'Done',
+      failed: 'Failed',
+      cancelled: 'Cancelled',
+      timed_out: 'Timed out',
+    },
+    sources: {
+      builtin: 'Built-in',
+      skill: 'Skill',
+      mcp: 'MCP',
+      subagent: 'Subagent',
+    },
     labels: {
       list_directory: 'List',
       read_file: 'Read',

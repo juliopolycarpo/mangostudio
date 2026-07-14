@@ -10,6 +10,7 @@ function entry(overrides: Partial<ToolCallEntry> = {}): ToolCallEntry {
     name: 'read_file',
     args: { path: '/home/polycarpo/a.ts' },
     result: '{"content":"a"}',
+    status: 'succeeded',
     isPending: false,
     ...overrides,
   };
@@ -63,7 +64,7 @@ describe('ToolCallGroupBlock', () => {
       <ToolCallGroupBlock
         calls={[
           entry({ toolCallId: 't1' }),
-          entry({ toolCallId: 't2', isError: true, result: 'denied' }),
+          entry({ toolCallId: 't2', isError: true, status: 'failed', result: 'denied' }),
         ]}
       />
     );

@@ -71,6 +71,73 @@ describe('text generation stream reducer', () => {
     ]);
   });
 
+  it('upserts lifecycle snapshots onto existing tool call parts', () => {
+    const queued = {
+      status: 'queued',
+      source: 'builtin',
+      queuedAt: 1_000,
+    } as const;
+    const succeeded = {
+      status: 'succeeded',
+      source: 'builtin',
+      queuedAt: 1_000,
+      startedAt: 1_001,
+      finishedAt: 1_400,
+      durationMs: 399,
+    } as const;
+    const state = reduceChunks([
+      { type: 'tool_call_started', callId: 'tool-1', name: 'search', done: false },
+      {
+        type: 'tool_call_completed',
+        callId: 'tool-1',
+        name: 'search',
+        arguments: '{"q":"x"}',
+        done: false,
+      },
+      { type: 'tool_execution', callId: 'tool-1', name: 'search', execution: queued, done: false },
+      {
+        type: 'tool_execution',
+        callId: 'tool-1',
+        name: 'search',
+        execution: succeeded,
+        done: false,
+      },
+    ]);
+
+    const toolCalls = getPartsByType(state.parts, 'tool_call');
+    expect(toolCalls).toHaveLength(1);
+    expect(toolCalls[0].execution).toEqual(succeeded);
+  });
+
+  it('creates a tool call part when a lifecycle transition arrives without start events', () => {
+    const cancelled = {
+      status: 'cancelled',
+      source: 'mcp',
+      queuedAt: 1_000,
+      finishedAt: 1_050,
+      reasonCode: 'user_cancelled',
+    } as const;
+    const state = reduceChunks([
+      {
+        type: 'tool_execution',
+        callId: 'tool-9',
+        name: 'mcp__demo__slow',
+        execution: cancelled,
+        done: false,
+      },
+    ]);
+
+    expect(state.parts).toEqual([
+      {
+        type: 'tool_call',
+        toolCallId: 'tool-9',
+        name: 'mcp__demo__slow',
+        args: {},
+        execution: cancelled,
+      },
+    ]);
+  });
+
   it('upserts generated image parts as image events progress', () => {
     const state = reduceChunks([
       {
