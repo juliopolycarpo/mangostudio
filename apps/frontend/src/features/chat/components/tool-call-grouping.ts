@@ -54,7 +54,7 @@ export function planToolGroups(parts: MessagePart[], isStreaming: boolean): Tool
 
     groups.set(
       i,
-      members.map((idx) => toEntry(parts, idx, isStreaming))
+      members.map((idx) => toToolCallEntry(parts, idx, isStreaming))
     );
     for (let m = 1; m < members.length; m++) consumed.add(members[m]);
   }
@@ -88,10 +88,6 @@ export function toToolCallEntry(
   index: number,
   isStreaming: boolean
 ): ToolCallEntry {
-  return toEntry(parts, index, isStreaming);
-}
-
-function toEntry(parts: MessagePart[], index: number, isStreaming: boolean): ToolCallEntry {
   const call = parts[index];
   if (call.type !== 'tool_call') {
     throw new Error(`Expected tool_call at index ${index}`);
