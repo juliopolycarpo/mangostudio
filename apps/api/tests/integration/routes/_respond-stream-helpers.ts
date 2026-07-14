@@ -39,6 +39,7 @@ import type { AgentTurnRequest } from '../../../src/services/providers/types';
 import {
   executeTool,
   getAllToolDefinitions,
+  getAllTools,
   getSafeEffectiveToolSettings,
   getTool,
   getToolDefinitionsForAgent,
@@ -58,6 +59,7 @@ export const realDeleteChat = deleteChat;
 export const realGetProviderForModel = getProviderForModel;
 export const realGetProvider = getProvider;
 export const realRegisterProvider = registerProvider;
+export const realGetAllTools = getAllTools;
 export const realGetAllToolDefinitions = getAllToolDefinitions;
 export const realGetToolDefinitionsForAgent = getToolDefinitionsForAgent;
 export const realExecuteTool = executeTool;
@@ -97,6 +99,7 @@ export async function restoreAllMocks(): Promise<void> {
     registerProvider: realRegisterProvider,
   }));
   await mock.module('../../../src/services/tools', () => ({
+    getAllTools: realGetAllTools,
     getAllToolDefinitions: realGetAllToolDefinitions,
     getToolDefinitionsForAgent: realGetToolDefinitionsForAgent,
     executeTool: realExecuteTool,

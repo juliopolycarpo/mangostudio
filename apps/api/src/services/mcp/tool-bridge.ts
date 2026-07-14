@@ -44,16 +44,33 @@ export interface ResolvedMcpToolExecution {
 }
 
 /**
- * Resolves every tool of the user's enabled MCP servers. A server that fails
- * to connect or list within the budget is skipped and logged — it never fails
- * the turn or hides other servers' tools.
- *
- * // Usage: const tools = await listMcpBridgeTools(db, userId)
+ * Per-server resolution outcome for one turn, with enough provenance for the
+ * capability inspector to explain what was skipped and why.
  */
-export async function listMcpBridgeTools(
+export interface McpBridgeServerSnapshot {
+  serverId: string;
+  slug: string;
+  name: string;
+  /** Tools usable this turn (namespaced, within the provider name cap). */
+  tools: McpBridgeTool[];
+  /** Namespaced names skipped for exceeding {@link MCP_TOOL_NAME_MAX_LENGTH}. */
+  overlongToolNames: string[];
+  /** False when the server failed to connect or list within the budget. */
+  listed: boolean;
+}
+
+/**
+ * Resolves the tools of every enabled MCP server, one snapshot per server. A
+ * server that fails to connect or list within the budget is reported with
+ * `listed: false` and logged — it never fails the turn or hides other
+ * servers' tools.
+ *
+ * // Usage: const servers = await listMcpBridgeServers(db, userId)
+ */
+export async function listMcpBridgeServers(
   db: Kysely<Database>,
   userId: string
-): Promise<McpBridgeTool[]> {
+): Promise<McpBridgeServerSnapshot[]> {
   const rows = await db
     .selectFrom('mcp_servers')
     .selectAll()
@@ -62,22 +79,44 @@ export async function listMcpBridgeTools(
     .orderBy('createdAt', 'asc')
     .execute();
 
-  const perServer = await Promise.all(
+  return Promise.all(
     rows.map(async (row) => {
+      const snapshot: McpBridgeServerSnapshot = {
+        serverId: row.id,
+        slug: row.slug,
+        name: row.name,
+        tools: [],
+        overlongToolNames: [],
+        listed: false,
+      };
       try {
         const tools = await withBudget(
           listMcpToolsCached(userId, toMcpRuntimeConfig(row)),
           MCP_TOOL_LIST_BUDGET_MS,
           `MCP server "${row.slug}" did not list tools within ${MCP_TOOL_LIST_BUDGET_MS}ms.`
         );
-        return toBridgeTools(row, tools);
+        const bridged = toBridgeTools(row, tools);
+        snapshot.tools = bridged.tools;
+        snapshot.overlongToolNames = bridged.overlongToolNames;
+        snapshot.listed = true;
       } catch (error) {
         logger.warn('server_tools_unavailable', { serverSlug: row.slug, error });
-        return [];
       }
+      return snapshot;
     })
   );
-  return perServer.flat();
+}
+
+/**
+ * Resolves every tool of the user's enabled MCP servers, flattened across
+ * servers. // Usage: const tools = await listMcpBridgeTools(db, userId)
+ */
+export async function listMcpBridgeTools(
+  db: Kysely<Database>,
+  userId: string
+): Promise<McpBridgeTool[]> {
+  const servers = await listMcpBridgeServers(db, userId);
+  return servers.flatMap((server) => server.tools);
 }
 
 /** Same resolution as {@link listMcpBridgeTools}, flattened for providers. */
@@ -159,12 +198,17 @@ export function getMcpServerRowBySlug(
     .executeTakeFirst();
 }
 
-function toBridgeTools(row: McpServerSelect, tools: McpToolDescriptor[]): McpBridgeTool[] {
+function toBridgeTools(
+  row: McpServerSelect,
+  tools: McpToolDescriptor[]
+): { tools: McpBridgeTool[]; overlongToolNames: string[] } {
   const bridged: McpBridgeTool[] = [];
+  const overlongToolNames: string[] = [];
   for (const tool of tools) {
     const name = buildMcpToolName(row.slug, tool.name);
     if (name.length > MCP_TOOL_NAME_MAX_LENGTH) {
       logger.warn('tool_name_too_long', { serverSlug: row.slug, toolName: tool.name });
+      overlongToolNames.push(name);
       continue;
     }
     bridged.push({
@@ -179,7 +223,7 @@ function toBridgeTools(row: McpServerSelect, tools: McpToolDescriptor[]): McpBri
       },
     });
   }
-  return bridged;
+  return { tools: bridged, overlongToolNames };
 }
 
 /** Passes JSON Schema through verbatim; anything malformed becomes a no-arg tool. */
