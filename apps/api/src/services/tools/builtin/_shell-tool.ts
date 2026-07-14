@@ -10,6 +10,7 @@ import {
   TOOL_EXECUTION_TIMEOUT_SECONDS_DEFAULT,
   TOOL_EXECUTION_TIMEOUT_SECONDS_MAX,
   TOOL_EXECUTION_TIMEOUT_SECONDS_MIN,
+  ToolExecutionTimedOutError,
 } from '../execution-timeout';
 import type { RegisteredTool, ToolContext } from '../types';
 import { normalizeStringList } from './_fs-utils';
@@ -99,7 +100,9 @@ async function execute(
     ...(context.signal ? { signal: context.signal } : {}),
   });
   if (result.termination.kind === 'timed_out') {
-    throw new ShellExecutionError(`Command timed out after ${settings.timeoutSeconds} seconds.`);
+    throw new ToolExecutionTimedOutError(
+      `Command timed out after ${settings.timeoutSeconds} seconds.`
+    );
   }
   if (result.termination.kind === 'aborted') {
     throw createShellAbortError(context.signal?.reason);

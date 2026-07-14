@@ -1,5 +1,17 @@
 import type { EffectiveToolSettings, RegisteredTool } from './types';
 
+/**
+ * A tool call exceeded its execution budget. Thrown by both the shared timeout
+ * wrapper and tools that manage their own timeout (shells), so the lifecycle
+ * owner can classify the outcome as `timed_out` without matching message text.
+ */
+export class ToolExecutionTimedOutError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ToolExecutionTimedOutError';
+  }
+}
+
 /** Well-known tool-settings parameter for per-tool execution budgets. */
 export const TOOL_EXECUTION_TIMEOUT_PARAM = 'timeoutSeconds';
 

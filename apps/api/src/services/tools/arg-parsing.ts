@@ -3,9 +3,17 @@
  * objects from provider streams.
  */
 
+/** Model-supplied arguments failed validation; classified as `validation_failed`. */
+export class ToolArgumentError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ToolArgumentError';
+  }
+}
+
 export function getRequiredString(value: unknown, name: string): string {
   const text = typeof value === 'string' ? value.trim() : '';
-  if (!text) throw new Error(`Missing required field "${name}".`);
+  if (!text) throw new ToolArgumentError(`Missing required field "${name}".`);
   return text;
 }
 
@@ -21,7 +29,7 @@ export function getBoundedOptionalInteger(
 ): number | undefined {
   if (value === undefined) return undefined;
   if (typeof value !== 'number' || !Number.isFinite(value)) {
-    throw new Error(`Field "${name}" must be a finite number.`);
+    throw new ToolArgumentError(`Field "${name}" must be a finite number.`);
   }
   return Math.max(bounds.min, Math.min(bounds.max, Math.round(value)));
 }

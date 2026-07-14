@@ -1,4 +1,8 @@
 import type { GeneratedImagePart, MessagePart, ProviderType } from '@mangostudio/shared';
+import {
+  applyToolExecutionTransition,
+  isTerminalToolExecutionStatus,
+} from '@mangostudio/shared/tool-executions';
 import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';
 import { safeJsonParse } from '../../../lib/safe-parse';
@@ -37,6 +41,12 @@ import type { EffectiveToolSettings } from '../../../services/tools/types';
 import type { PersistedGeneratedImageInput } from '../infrastructure/conversation-persistence';
 import type { ToolExecutionProgressItem } from './standard-tool-execution';
 import type { StreamEvent } from './stream-text-turn-types';
+import {
+  classifyToolExecutionFailure,
+  ToolExecutionLifecycle,
+  type ToolExecutionTransitionEvent,
+  ToolPolicyError,
+} from './tool-execution-lifecycle';
 import { errorToToolMessage, parseToolArgs, stringifyToolResult } from './tool-result-utils';
 
 /** Accumulators a completed tool execution writes into for the turn. */
@@ -71,6 +81,7 @@ export function* collectToolExecutionResult(
     toolCallId: execution.callId,
     name: execution.name,
     args: execution.args,
+    execution: execution.execution,
   });
   sink.allParts.push({
     type: 'tool_result',
@@ -142,19 +153,39 @@ export async function* executeImageGenerationCall(
   const args = parseToolArgs(argsStr);
   let result: unknown;
   let isError = false;
+  let thrown: { error: unknown } | undefined;
 
-  ctx.allParts.push({ type: 'tool_call', toolCallId: callId, name, args });
+  // This path yields stream events directly instead of routing through the
+  // async queue, so lifecycle transitions buffer here and drain between stages.
+  const lifecycleEvents: ToolExecutionTransitionEvent[] = [];
+  const lifecycle = new ToolExecutionLifecycle(callId, name, (event) =>
+    lifecycleEvents.push(event)
+  );
+  lifecycle.emitQueued();
+
+  const toolCallPart: Extract<MessagePart, { type: 'tool_call' }> = {
+    type: 'tool_call',
+    toolCallId: callId,
+    name,
+    args,
+    execution: lifecycle.current,
+  };
+  ctx.allParts.push(toolCallPart);
+  yield* drainLifecycleEvents(lifecycleEvents);
 
   try {
     const imageTool = getTool(name);
     if (!ctx.allowedToolNames.has(name)) {
-      throw new Error(`Tool "${name}" is not allowed for this agent.`);
+      throw new ToolPolicyError(`Tool "${name}" is not allowed for this agent.`, 'not_allowed');
     }
-    if (!imageTool) throw new Error(`Unknown tool: "${name}"`);
+    if (!imageTool) throw new ToolPolicyError(`Unknown tool: "${name}"`, 'unknown_tool');
     const effectiveSettings = getSafeEffectiveToolSettings(imageTool, ctx.toolSettings.get(name));
     if (!effectiveSettings.enabled) {
-      throw new Error(`Tool "${name}" is disabled for this user.`);
+      throw new ToolPolicyError(`Tool "${name}" is disabled for this user.`, 'tool_disabled');
     }
+    lifecycle.transition('running');
+    toolCallPart.execution = lifecycle.current;
+    yield* drainLifecycleEvents(lifecycleEvents);
 
     const plan = createGenerateImageToolPlan(args, {
       toolCallId: callId,
@@ -232,12 +263,29 @@ export async function* executeImageGenerationCall(
   } catch (error) {
     result = { error: errorToToolMessage(error) };
     isError = true;
+    thrown = { error };
   }
+
+  if (thrown) {
+    const failure = classifyToolExecutionFailure(thrown.error, ctx.signal);
+    lifecycle.transition(failure.status, failure.reasonCode);
+  } else {
+    lifecycle.transition(isError ? 'failed' : 'succeeded', isError ? 'execution_error' : undefined);
+  }
+  toolCallPart.execution = lifecycle.current;
+  yield* drainLifecycleEvents(lifecycleEvents);
 
   const resultStr = stringifyToolResult(result);
   ctx.allParts.push({ type: 'tool_result', toolCallId: callId, content: resultStr, isError });
   yield { type: 'tool_result', callId, name, result, isError };
   ctx.nextToolResults.push({ callId, name, result: resultStr, isError });
+}
+
+function* drainLifecycleEvents(events: ToolExecutionTransitionEvent[]): Generator<StreamEvent> {
+  while (events.length > 0) {
+    const event = events.shift();
+    if (event) yield event;
+  }
 }
 
 /** Inputs the turn_completed handler needs to persist state and report context. */
@@ -371,6 +419,26 @@ export function computeTurnLocalCharCount(
     }
   }
   return total > 0 ? total : undefined;
+}
+
+/**
+ * Force a terminal state onto any tool_call part still carrying a live
+ * lifecycle snapshot, so a partial/exhausted/errored turn never persists a
+ * call as queued/running/awaiting_user. Runs immediately before the assistant
+ * message is written.
+ *
+ * // Usage: finalizeDanglingToolExecutions(session.allParts);
+ */
+export function finalizeDanglingToolExecutions(parts: MessagePart[]): void {
+  for (const part of parts) {
+    if (part.type !== 'tool_call' || !part.execution) continue;
+    if (isTerminalToolExecutionStatus(part.execution.status)) continue;
+    part.execution = applyToolExecutionTransition(part.execution, {
+      status: 'cancelled',
+      at: Date.now(),
+      reasonCode: 'turn_aborted',
+    });
+  }
 }
 
 /**

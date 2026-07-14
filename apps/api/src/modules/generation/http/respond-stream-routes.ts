@@ -92,6 +92,14 @@ function toSsePayload(event: StreamEvent): object {
         isError: event.isError,
         done: false,
       };
+    case 'tool_execution':
+      return {
+        type: 'tool_execution',
+        callId: event.callId,
+        name: event.name,
+        execution: event.execution,
+        done: false,
+      };
     case 'subagent_started':
       return {
         type: 'subagent_started',

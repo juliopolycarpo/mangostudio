@@ -9,6 +9,7 @@ import type { AgentProfile } from '@mangostudio/shared/agents';
 import { isAgentId } from '@mangostudio/shared/agents';
 import type { MultiAgentSettings } from '@mangostudio/shared/app-settings';
 import { SUBAGENT_MAX_TURNS_MAX, SUBAGENT_MAX_TURNS_MIN } from '@mangostudio/shared/app-settings';
+import type { ToolExecutionSnapshot } from '@mangostudio/shared/tool-executions';
 import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';
 import { classifyMcpCallFailure } from '../../../services/mcp/client-factory';
@@ -34,7 +35,10 @@ import {
 } from '../../../services/tools/builtin/ask-user-question';
 import { DELEGATE_TO_AGENT_TOOL_NAME } from '../../../services/tools/builtin/delegate-to-agent';
 import { TODO_WRITE_TOOL_NAME, type TodoToolResult } from '../../../services/tools/builtin/todo';
-import { resolveEffectiveToolTimeoutMs } from '../../../services/tools/execution-timeout';
+import {
+  resolveEffectiveToolTimeoutMs,
+  ToolExecutionTimedOutError,
+} from '../../../services/tools/execution-timeout';
 import type { EffectiveToolSettings } from '../../../services/tools/types';
 import { shouldExposeDelegateTool } from './delegate-tool-availability';
 import { ensureDelegationResult, isSubagentRunResult, logDelegationWarn } from './delegation-retry';
@@ -51,6 +55,12 @@ import {
   type SubagentProgressEvent,
   type SubagentRunResult,
 } from './subagent-runner';
+import {
+  subagentStatusToTerminal,
+  ToolExecutionLifecycle,
+  type ToolExecutionTransitionEvent,
+  ToolPolicyError,
+} from './tool-execution-lifecycle';
 import { errorToToolMessage, parseToolArgs, stringifyToolResult } from './tool-result-utils';
 
 export interface StandardToolExecution {
@@ -60,6 +70,8 @@ export interface StandardToolExecution {
   result: unknown;
   resultStr: string;
   isError: boolean;
+  /** Terminal lifecycle snapshot the execution owner recorded for this call. */
+  execution: ToolExecutionSnapshot;
   subagentTrace?: Extract<MessagePart, { type: 'subagent_trace' }>;
   /** Persisted rich media (images, files) an MCP tool call produced. */
   mcpMedia?: McpMediaPart[];
@@ -91,6 +103,7 @@ export interface DelegationRuntime {
  */
 export type ToolStreamEvent =
   | { type: 'system_event'; event: string; detail: string }
+  | ToolExecutionTransitionEvent
   | { type: 'mcp_elicitation'; part: McpElicitationPart }
   | ({ type: 'mcp_elicitation_status' } & McpElicitationStatusEvent)
   | { type: 'subagent_started'; callId: string; agentId: string; agentName: string; task: string }
@@ -148,7 +161,11 @@ export async function* executeStandardToolCallsWithProgress(
           onEvent,
         }
       : undefined;
-    void executeStandardToolCall(callId, call.name, call.argsStr, {
+    // The lifecycle is announced as queued before the call is scheduled, so
+    // consumers see every call enter the pipeline even when it never starts.
+    const lifecycle = new ToolExecutionLifecycle(callId, call.name, onEvent);
+    lifecycle.emitQueued();
+    void executeStandardToolCall(callId, call.name, call.argsStr, lifecycle, {
       ...context,
       onEvent,
       delegationRuntime: runtime,
@@ -157,7 +174,7 @@ export async function* executeStandardToolCallsWithProgress(
       .catch((error: unknown) =>
         queue.push({
           kind: 'execution',
-          execution: createFailedToolExecution(callId, call.name, call.argsStr, error),
+          execution: createFailedToolExecution(callId, call.name, call.argsStr, lifecycle, error),
         })
       )
       .finally(() => {
@@ -173,11 +190,14 @@ async function executeStandardToolCall(
   callId: string,
   name: string,
   argsStr: string,
+  lifecycle: ToolExecutionLifecycle,
   context: StandardToolExecutionContext
 ): Promise<StandardToolExecution> {
   const args = parseToolArgs(argsStr);
   let result: unknown;
   let isError = false;
+  let didThrow = false;
+  let thrownError: unknown;
   let subagentTrace: Extract<MessagePart, { type: 'subagent_trace' }> | undefined;
   let mcpMedia: McpMediaPart[] | undefined;
   let mcpElicitations: McpElicitationPart[] | undefined;
@@ -186,24 +206,25 @@ async function executeStandardToolCall(
 
   try {
     if (!context.allowedToolNames.has(name)) {
-      throw new Error(`Tool "${name}" is not allowed for this agent.`);
+      throw new ToolPolicyError(`Tool "${name}" is not allowed for this agent.`, 'not_allowed');
     }
+    lifecycle.transition('running');
     const runtime = context.delegationRuntime;
     if (isMcpToolName(name)) {
-      const mcpResult = await executeMcpToolCall(callId, name, args, context);
+      const mcpResult = await executeMcpToolCall(callId, name, args, lifecycle, context);
       result = mcpResult.result;
       isError = mcpResult.isError;
       mcpMedia = mcpResult.mediaParts;
       mcpElicitations = mcpResult.elicitationParts;
     } else if (name === DELEGATE_TO_AGENT_TOOL_NAME && runtime) {
       const tool = getTool(name);
-      if (!tool) throw new Error(`Unknown tool: "${name}"`);
+      if (!tool) throw new ToolPolicyError(`Unknown tool: "${name}"`, 'unknown_tool');
       const effectiveSettings = getSafeEffectiveToolSettings(
         tool,
         context.settingsByToolName.get(name)
       );
       if (!effectiveSettings.enabled) {
-        throw new Error(`Tool "${name}" is disabled for this user.`);
+        throw new ToolPolicyError(`Tool "${name}" is disabled for this user.`, 'tool_disabled');
       }
       const request = parseDelegationRequest(args);
       // Retry/cache-recovery wraps each single-attempt delegation; the per-call
@@ -218,7 +239,7 @@ async function executeStandardToolCall(
       });
     } else {
       const tool = getTool(name);
-      if (!tool) throw new Error(`Unknown tool: "${name}"`);
+      if (!tool) throw new ToolPolicyError(`Unknown tool: "${name}"`, 'unknown_tool');
       const savedSettings = context.settingsByToolName.get(name);
       const effectiveSettings = getSafeEffectiveToolSettings(tool, savedSettings);
       const timeoutMs = resolveEffectiveToolTimeoutMs(tool, effectiveSettings);
@@ -260,6 +281,19 @@ async function executeStandardToolCall(
   } catch (error) {
     result = { error: errorToToolMessage(error) };
     isError = true;
+    didThrow = true;
+    thrownError = error;
+  }
+
+  // Exactly one terminal transition, applied before the execution result is
+  // surfaced so persisted parts can never carry a live state for a settled call.
+  if (didThrow) {
+    lifecycle.fail(thrownError, context.signal);
+  } else if (isSubagentRunResult(result)) {
+    const terminal = subagentStatusToTerminal(result.status);
+    lifecycle.transition(terminal.status, terminal.reasonCode);
+  } else {
+    lifecycle.transition(isError ? 'failed' : 'succeeded', isError ? 'execution_error' : undefined);
   }
 
   if (isDelegationTool) {
@@ -287,6 +321,7 @@ async function executeStandardToolCall(
     result: providerResult,
     resultStr: stringifyToolResult(providerResult),
     isError,
+    execution: lifecycle.current,
     ...(subagentTrace ? { subagentTrace } : {}),
     ...(mcpMedia?.length ? { mcpMedia } : {}),
     ...(mcpElicitations?.length ? { mcpElicitations } : {}),
@@ -305,6 +340,7 @@ async function executeMcpToolCall(
   callId: string,
   name: string,
   args: Record<string, unknown>,
+  lifecycle: ToolExecutionLifecycle,
   context: StandardToolExecutionContext
 ): Promise<{
   result: unknown;
@@ -313,10 +349,10 @@ async function executeMcpToolCall(
   elicitationParts?: McpElicitationPart[];
 }> {
   if (!context.db) {
-    throw new Error(`Tool "${name}" is not available in this context.`);
+    throw new ToolPolicyError(`Tool "${name}" is not available in this context.`, 'not_allowed');
   }
   if (context.settingsByToolName.get(name)?.enabled === false) {
-    throw new Error(`Tool "${name}" is disabled for this user.`);
+    throw new ToolPolicyError(`Tool "${name}" is disabled for this user.`, 'tool_disabled');
   }
 
   const target = await resolveMcpToolExecution(context.db, context.userId, name);
@@ -328,9 +364,13 @@ async function executeMcpToolCall(
     callId,
     (part) => {
       elicitationParts.push(part);
+      // The call is now blocked on user input; it resumes when the
+      // elicitation reaches a terminal status.
+      lifecycle.transition('awaiting_user');
       context.onEvent?.({ type: 'mcp_elicitation', part });
     },
     (statusEvent) => {
+      lifecycle.transition('running');
       context.onEvent?.({ type: 'mcp_elicitation_status', ...statusEvent });
     }
   );
@@ -564,8 +604,10 @@ function createFailedToolExecution(
   callId: string,
   name: string,
   argsStr: string,
+  lifecycle: ToolExecutionLifecycle,
   error: unknown
 ): StandardToolExecution {
+  lifecycle.fail(error);
   const result = { error: errorToToolMessage(error) };
   return {
     callId,
@@ -574,6 +616,7 @@ function createFailedToolExecution(
     result,
     resultStr: stringifyToolResult(result),
     isError: true,
+    execution: lifecycle.current,
   };
 }
 
@@ -623,7 +666,7 @@ function withToolTimeout<T>(
   const timeoutPromise = new Promise<never>((_, reject) => {
     timeoutId = setTimeout(() => {
       abortController?.abort();
-      reject(new Error(`Tool "${name}" timed out after ${timeoutMs}ms`));
+      reject(new ToolExecutionTimedOutError(`Tool "${name}" timed out after ${timeoutMs}ms`));
     }, timeoutMs);
   });
 

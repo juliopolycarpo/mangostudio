@@ -130,11 +130,13 @@ describe('ChatGPT connector lifecycle E2E', () => {
       .where('role', '=', 'ai')
       .executeTakeFirstOrThrow();
     const parts = parseParts(aiMessage.parts);
-    expect(parts).toContainEqual({
+    const persistedToolCall = parts.find((part) => part.type === 'tool_call');
+    expect(persistedToolCall).toMatchObject({
       type: 'tool_call',
       toolCallId: 'call_time',
       name: 'get_current_datetime',
       args: { timezone: 'UTC', locale: 'en-US' },
+      execution: { status: 'succeeded', source: 'builtin' },
     });
     const persistedToolResult = parts.find((part) => part.type === 'tool_result');
     expect(persistedToolResult).toMatchObject({
