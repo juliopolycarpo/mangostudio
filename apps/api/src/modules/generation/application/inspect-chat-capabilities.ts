@@ -4,8 +4,10 @@
  * the shared `ChatCapabilitiesResponse` contract. Eligibility rules are never
  * duplicated here — tool candidates come from `resolveAgentRuntime` and the
  * delegate gate from `shouldExposeDelegateTool`, the same functions a real
- * turn uses. MCP health is passive (last-known status); inspection never
- * spawns servers or probes URLs beyond the turn pipeline's own cached listing.
+ * turn uses. Resolving that runtime performs the turn pipeline's own cached
+ * MCP tool listing, which connects lazily — inspecting a chat can therefore
+ * spawn an enabled server on a cache miss, exactly as the first turn would.
+ * Health itself is read passively (last-known status, no extra probe).
  */
 
 import type { AgentExecutionMode, AgentId } from '@mangostudio/shared/agents';
@@ -202,8 +204,9 @@ function toMcpServerEntry(
     return { ...base, state: 'disabled', reason: 'server-disabled', health: 'disabled' };
   }
 
-  // Passive last-known status only — the inspector never forces a connect and
-  // never surfaces raw transport error text.
+  // Last-known status: reading it adds no probe of its own, and the runtime
+  // listing above has already settled. Raw transport error text is never
+  // surfaced — only the status code.
   const health = getMcpRuntimeStatus(userId, row.id).status;
   if (!toolsEnabled) {
     return { ...base, state: 'disabled', reason: 'agent-tools-disabled', health };
