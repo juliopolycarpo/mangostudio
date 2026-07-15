@@ -45,6 +45,16 @@ const STATE_DOT_CLASS: Record<CapabilityState, string> = {
   unavailable: 'bg-warning',
 };
 
+/** The dot is decorative; this label is what carries state to assistive tech. */
+const STATE_LABEL_KEY: Record<
+  CapabilityState,
+  'stateEnabled' | 'stateDisabled' | 'stateUnavailable'
+> = {
+  enabled: 'stateEnabled',
+  disabled: 'stateDisabled',
+  unavailable: 'stateUnavailable',
+};
+
 interface CapabilityInspectorProps {
   chatId: string | null;
   disabled?: boolean;
@@ -107,9 +117,7 @@ export function CapabilityInspector({
           )}
           {chatId && capabilitiesQuery.isError && (
             <p className="text-xs text-error" role="alert">
-              {capabilitiesQuery.error instanceof Error
-                ? capabilitiesQuery.error.message
-                : labels.loadError}
+              {capabilitiesQuery.error.message}
             </p>
           )}
           {chatId && capabilitiesQuery.data && (
@@ -165,6 +173,7 @@ function CapabilityPanel({
         {builtinTools.map((tool) => (
           <CapabilityRow
             key={tool.name}
+            labels={labels}
             title={tool.title}
             state={tool.state}
             reasonText={reasonText(labels, tool.reason)}
@@ -208,6 +217,7 @@ function CapabilityPanel({
         {capabilities.skills.map((skill: CapabilitySkillEntry) => (
           <CapabilityRow
             key={skill.key}
+            labels={labels}
             title={skill.name}
             subtitle={skill.source}
             state={skill.state}
@@ -231,6 +241,7 @@ function McpServerRows({
   return (
     <div className="space-y-0.5">
       <CapabilityRow
+        labels={labels}
         title={server.name}
         subtitle={labels.health[server.health]}
         state={server.state}
@@ -239,6 +250,7 @@ function McpServerRows({
       {tools.map((tool) => (
         <div key={tool.name} className="pl-4">
           <CapabilityRow
+            labels={labels}
             title={tool.title}
             state={tool.state}
             reasonText={reasonText(labels, tool.reason)}
@@ -278,11 +290,13 @@ function CapabilitySection({
 }
 
 function CapabilityRow({
+  labels,
   title,
   subtitle,
   state,
   reasonText,
 }: {
+  labels: CapabilityLabels;
   title: string;
   subtitle?: string;
   state: CapabilityState;
@@ -301,6 +315,7 @@ function CapabilityRow({
           }`}
         >
           {title}
+          <span className="sr-only"> · {labels[STATE_LABEL_KEY[state]]}</span>
           {subtitle && <span className="text-on-surface-variant/50"> · {subtitle}</span>}
         </span>
         {reasonText && (
