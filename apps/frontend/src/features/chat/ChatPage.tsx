@@ -29,6 +29,7 @@ interface ChatPageProps {
   onStartSummarizedChat: () => Promise<void>;
   imageToolIntent: boolean;
   onImageToolIntentChange: (active: boolean) => void;
+  activeModel?: string | null;
   agentExecutionMode?: AgentExecutionMode;
   selectedAgentId?: string;
   agents?: ReadonlyArray<AgentProfile>;
@@ -57,6 +58,7 @@ export function ChatPage({
   onStartSummarizedChat,
   imageToolIntent,
   onImageToolIntentChange,
+  activeModel = null,
   agentExecutionMode = 'chat',
   selectedAgentId = 'default',
   agents = [],
@@ -116,6 +118,7 @@ export function ChatPage({
         contextInfo={contextInfo}
         imageToolIntent={imageToolIntent}
         onImageToolIntentChange={onImageToolIntentChange}
+        activeModel={activeModel}
         agentExecutionMode={agentExecutionMode}
         selectedAgentId={selectedAgentId}
         agents={agents}

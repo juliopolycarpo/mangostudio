@@ -35,6 +35,7 @@ function ChatRoute() {
       onStartSummarizedChat={app.handleStartSummarizedChat}
       imageToolIntent={app.imageToolIntent}
       onImageToolIntentChange={app.setImageToolIntent}
+      activeModel={app.activeModel}
       agentExecutionMode={app.agentExecutionMode}
       selectedAgentId={app.selectedAgentId}
       agents={app.agents}

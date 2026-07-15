@@ -54,24 +54,28 @@ describe('POST /respond/stream — tool execution edge cases', () => {
         description: 'Get current time',
         parameters: {},
       };
+      const registeredTool = {
+        definition: toolDefinition,
+        settings: {
+          title: 'DateTime',
+          description: 'Get current time',
+          category: 'system',
+          enabledByDefault: true,
+          canDisable: true,
+          defaultParameters: {},
+          parameterDescriptors: [],
+        },
+        execute: () => Promise.resolve({ time: '12:00' }),
+      };
 
       return {
+        getAllTools: () => [registeredTool],
         getAllToolDefinitions: () => [toolDefinition],
         getToolDefinitionsForAgent: () => [toolDefinition],
-        getTool: () => ({
-          definition: toolDefinition,
-          settings: {
-            title: 'DateTime',
-            description: 'Get current time',
-            category: 'system',
-            enabledByDefault: true,
-            canDisable: true,
-            defaultParameters: {},
-            parameterDescriptors: [],
-          },
-          execute: () => Promise.resolve({ time: '12:00' }),
-        }),
-        getSafeEffectiveToolSettings: () => ({ enabled: false, parameters: {} }),
+        getTool: () => registeredTool,
+        // Enabled at definition time so the model still sees the tool; the
+        // user disables it before execution, which rejects the stale call.
+        getSafeEffectiveToolSettings: () => ({ enabled: true, parameters: {} }),
         executeTool: (name: string) => {
           throw new Error(`Tool "${name}" is disabled for this user.`);
         },
@@ -191,6 +195,7 @@ describe('POST /respond/stream — tool execution edge cases', () => {
       };
 
       return {
+        getAllTools: () => [],
         getAllToolDefinitions: () => [toolDefinition],
         getToolDefinitionsForAgent: () => [],
         getTool: () => ({
@@ -355,14 +360,8 @@ describe('POST /respond/stream — tool execution edge cases', () => {
       },
     }));
 
-    await mock.module('../../../src/services/tools', () => ({
-      getAllToolDefinitions: () => [
-        { name: 'delegate_to_agent', description: 'delegate', parameters: {} },
-      ],
-      getToolDefinitionsForAgent: () => [
-        { name: 'delegate_to_agent', description: 'delegate', parameters: {} },
-      ],
-      getTool: () => ({
+    await mock.module('../../../src/services/tools', () => {
+      const delegateTool = {
         definition: { name: 'delegate_to_agent', description: 'delegate', parameters: {} },
         settings: {
           title: 'Delegate',
@@ -374,10 +373,17 @@ describe('POST /respond/stream — tool execution edge cases', () => {
           parameterDescriptors: [],
         },
         execute: () => Promise.resolve({}),
-      }),
-      getSafeEffectiveToolSettings: () => ({ enabled: true, parameters: {} }),
-      executeTool: () => Promise.resolve({}),
-    }));
+      };
+
+      return {
+        getAllTools: () => [delegateTool],
+        getAllToolDefinitions: () => [delegateTool.definition],
+        getToolDefinitionsForAgent: () => [delegateTool.definition],
+        getTool: () => delegateTool,
+        getSafeEffectiveToolSettings: () => ({ enabled: true, parameters: {} }),
+        executeTool: () => Promise.resolve({}),
+      };
+    });
 
     await mock.module('../../../src/services/providers/core/provider-registry', () => ({
       getProviderForModel: () =>
