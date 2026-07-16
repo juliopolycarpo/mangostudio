@@ -7,6 +7,7 @@
 export type { AuthSession, AuthUser } from '../auth/contracts';
 // Chat domain types — source of truth is chat/entities.ts
 export type { Chat, Message } from '../chat/entities';
+export type { TurnCheckpointPart } from '../turn-recovery';
 export type {
   AgentEvent,
   ContinuationReasonCode,

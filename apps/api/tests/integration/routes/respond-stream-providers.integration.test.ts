@@ -4,6 +4,7 @@ import type { AgentTurnRequest } from '../../../src/services/providers/types';
 import { insertTestUser, type UserFixture } from '../../support/factories';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
 import {
+  createTestStreamDb,
   makeChain,
   parsePersistedParts,
   parseSseEvents,
@@ -77,23 +78,13 @@ describe('POST /respond/stream — provider cursor and switching', () => {
       executeTool: () => Promise.resolve({}),
     }));
 
-    await mock.module('../../../src/db/database', () => ({
-      getDb: () => ({
-        selectFrom: () => makeChain({ userId: TEST_USER.id, lastProviderState: OPENAI_ENVELOPE }),
-        insertInto: (_table: string) => ({
-          values: (values: Record<string, unknown>) => {
-            if (_table === 'messages') insertedMessages.push({ ...values });
-            return { execute: () => Promise.resolve() };
-          },
-        }),
-        updateTable: () => ({
-          set: (values: Record<string, unknown>) => {
-            chatSetCalls.push({ ...values });
-            return makeChain(undefined);
-          },
-        }),
-      }),
-    }));
+    const dbMock = createTestStreamDb({
+      userId: TEST_USER.id,
+      insertedMessages,
+      chatSetCalls,
+      selectFrom: () => makeChain({ userId: TEST_USER.id, lastProviderState: OPENAI_ENVELOPE }),
+    });
+    await mock.module('../../../src/db/database', () => ({ getDb: () => dbMock }));
 
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
     restoreAuth = restore;
@@ -193,13 +184,11 @@ describe('POST /respond/stream — provider cursor and switching', () => {
       executeTool: () => Promise.resolve({}),
     }));
 
-    await mock.module('../../../src/db/database', () => ({
-      getDb: () => ({
-        selectFrom: () => makeChain({ userId: TEST_USER.id, lastProviderState: GEMINI_ENVELOPE }),
-        insertInto: () => ({ values: () => ({ execute: () => Promise.resolve() }) }),
-        updateTable: () => makeChain(undefined),
-      }),
-    }));
+    const dbMock = createTestStreamDb({
+      userId: TEST_USER.id,
+      selectFrom: () => makeChain({ userId: TEST_USER.id, lastProviderState: GEMINI_ENVELOPE }),
+    });
+    await mock.module('../../../src/db/database', () => ({ getDb: () => dbMock }));
 
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
     restoreAuth = restore;
@@ -268,18 +257,12 @@ describe('POST /respond/stream — provider cursor and switching', () => {
       executeTool: () => Promise.resolve({}),
     }));
 
-    await mock.module('../../../src/db/database', () => ({
-      getDb: () => ({
-        selectFrom: () => makeChain({ userId: TEST_USER.id, lastProviderState: STATELESS_STATE }),
-        insertInto: () => ({ values: () => ({ execute: () => Promise.resolve() }) }),
-        updateTable: () => ({
-          set: (values: Record<string, unknown>) => {
-            chatSetCalls.push({ ...values });
-            return makeChain(undefined);
-          },
-        }),
-      }),
-    }));
+    const dbMock = createTestStreamDb({
+      userId: TEST_USER.id,
+      chatSetCalls,
+      selectFrom: () => makeChain({ userId: TEST_USER.id, lastProviderState: STATELESS_STATE }),
+    });
+    await mock.module('../../../src/db/database', () => ({ getDb: () => dbMock }));
 
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
     restoreAuth = restore;

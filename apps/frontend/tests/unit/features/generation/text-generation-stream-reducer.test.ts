@@ -282,6 +282,19 @@ describe('text generation stream reducer', () => {
     });
   });
 
+  it('adopts the durable assistant id before content arrives', () => {
+    const state = reduceChunks([
+      { type: 'assistant_message_id', messageId: 'server-ai-early', done: false },
+    ]);
+
+    expect(state.currentAiMessageId).toBe('server-ai-early');
+    expect(state.receivedServerAiMessageId).toBe(true);
+    expect(state.aiMessageUpdate).toEqual({
+      targetMessageId: 'optimistic-ai-1',
+      patch: { id: 'server-ai-early' },
+    });
+  });
+
   it('appends MCP media parts once, deduplicated by tool call and url', () => {
     const mediaChunk = {
       type: 'mcp_media',

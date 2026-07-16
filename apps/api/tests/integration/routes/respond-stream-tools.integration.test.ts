@@ -5,7 +5,7 @@ import { insertTestUser, type UserFixture } from '../../support/factories';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
 import {
   buildRespondStreamRequest,
-  makeChain,
+  createTestStreamDb,
   mockPassThroughDb,
   mockProviderRegistry,
   mockVerifiedChatOwnership,
@@ -83,20 +83,12 @@ describe('POST /respond/stream — tools', () => {
       { generateImage: generateImage }
     );
 
-    const dbMock: Record<string, unknown> = {};
-    Object.assign(dbMock, {
-      selectFrom: () => makeChain({ userId: TEST_USER.id }),
-      insertInto: (table: string) => ({
-        values: (values: Record<string, unknown>) => {
-          if (table === 'messages') insertedMessages.push({ ...values });
-          if (table === 'generated_images') insertedGeneratedImages.push({ ...values });
-          return { execute: () => Promise.resolve() };
-        },
-      }),
-      updateTable: () => ({ set: () => makeChain(undefined) }),
-      transaction: () => ({
-        execute: (callback: (trx: Record<string, unknown>) => Promise<unknown>) => callback(dbMock),
-      }),
+    const dbMock = createTestStreamDb({
+      userId: TEST_USER.id,
+      insertedMessages,
+      onInsert: (table, values) => {
+        if (table === 'generated_images') insertedGeneratedImages.push({ ...values });
+      },
     });
 
     await mock.module('../../../src/db/database', () => ({ getDb: () => dbMock }));

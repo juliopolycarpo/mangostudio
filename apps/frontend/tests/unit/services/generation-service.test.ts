@@ -13,21 +13,46 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as ApiClient from '../../../src/lib/api-client';
 
 // Eden Treaty's generic types are too strict for vi.fn() mocks, so the factory is cast via unknown.
-const { mockGeneratePost, mockUploadPost } = vi.hoisted(() => ({
-  mockGeneratePost: vi.fn(),
-  mockUploadPost: vi.fn(),
-}));
+const {
+  mockGeneratePost,
+  mockUploadPost,
+  mockRecoveryChats,
+  mockRecoveryMessages,
+  mockRecoveryCancelPost,
+  mockRecoveryDismissPost,
+} = vi.hoisted(() => {
+  const mockRecoveryCancelPost = vi.fn();
+  const mockRecoveryDismissPost = vi.fn();
+  const mockRecoveryMessages = vi.fn(() => ({
+    recovery: {
+      cancel: { post: mockRecoveryCancelPost },
+      dismiss: { post: mockRecoveryDismissPost },
+    },
+  }));
+  const mockRecoveryChats = vi.fn(() => ({ messages: mockRecoveryMessages }));
+  return {
+    mockGeneratePost: vi.fn(),
+    mockUploadPost: vi.fn(),
+    mockRecoveryChats,
+    mockRecoveryMessages,
+    mockRecoveryCancelPost,
+    mockRecoveryDismissPost,
+  };
+});
 
 vi.mock('../../../src/lib/api-client', () => ({
   client: {
     api: {
       generate: { post: mockGeneratePost },
       upload: { post: mockUploadPost },
+      chats: mockRecoveryChats,
     },
   } as unknown as typeof ApiClient,
 }));
 
 import {
+  cancelInterruptedTurn,
+  dismissInterruptedTurn,
   type GenerateImageRequest,
   generateImage,
   respondTextStream,
@@ -65,6 +90,36 @@ function collectChunks() {
   const chunks: StreamChunk[] = [];
   return { chunks, onChunk: (chunk: StreamChunk) => chunks.push(chunk) };
 }
+
+describe('turn recovery actions', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('calls the message-scoped cancel and dismiss endpoints', async () => {
+    mockRecoveryCancelPost.mockResolvedValue({ data: {}, error: null });
+    mockRecoveryDismissPost.mockResolvedValue({ data: {}, error: null });
+
+    await cancelInterruptedTurn('chat-1', 'message-1');
+    await dismissInterruptedTurn('chat-1', 'message-1');
+
+    expect(mockRecoveryChats).toHaveBeenCalledWith({ id: 'chat-1' });
+    expect(mockRecoveryMessages).toHaveBeenCalledWith({ messageId: 'message-1' });
+    expect(mockRecoveryCancelPost).toHaveBeenCalledOnce();
+    expect(mockRecoveryDismissPost).toHaveBeenCalledOnce();
+  });
+
+  it('surfaces a recovery action error from the API', async () => {
+    mockRecoveryCancelPost.mockResolvedValue({
+      data: null,
+      error: { value: { error: 'Turn already completed' } },
+    });
+
+    await expect(cancelInterruptedTurn('chat-1', 'message-1')).rejects.toThrow(
+      'Turn already completed'
+    );
+  });
+});
 
 describe('respondTextStream', () => {
   let fetchMock: ReturnType<typeof vi.fn>;

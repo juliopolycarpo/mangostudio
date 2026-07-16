@@ -2,6 +2,7 @@ import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';
 import {
   clearStaleProviderState,
+  finalizeInterruptedTurn,
   finalizeSuccessfulTurn,
   finalizeToolLoopExhausted,
   finalizeTurnError,
@@ -21,6 +22,7 @@ export async function* streamTextTurn(
 ): AsyncGenerator<StreamEvent> {
   const session = await prepareStreamTextTurn(input, db);
   yield { type: 'user_message_id', messageId: session.userMsgId };
+  yield { type: 'assistant_message_id', messageId: session.aiMsgId };
 
   try {
     await resolveTurnAttachments(session);
@@ -40,7 +42,13 @@ export async function* streamTextTurn(
       yield* runSingleShotTextGeneration(session);
     }
 
-    if (!session.signal?.aborted) {
+    if (session.signal?.aborted) {
+      const reason = session.signal.reason;
+      await finalizeInterruptedTurn(
+        session,
+        reason === 'client_disconnect' || reason === 'user_cancelled' ? reason : 'unknown'
+      );
+    } else {
       yield* finalizeSuccessfulTurn(session);
     }
   } catch (error: unknown) {

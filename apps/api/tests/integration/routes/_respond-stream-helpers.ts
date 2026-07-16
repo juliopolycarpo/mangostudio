@@ -161,6 +161,14 @@ export interface CapturedDbMock {
   moduleFactory: () => { getDb: () => Record<string, unknown> };
 }
 
+export interface TestStreamDbOptions {
+  userId: string;
+  insertedMessages?: Array<Record<string, unknown>>;
+  chatSetCalls?: Array<Record<string, unknown>>;
+  selectFrom?: (table: string) => Record<string, unknown>;
+  onInsert?: (table: string, values: Record<string, unknown>) => void;
+}
+
 export type AgentStreamFactory = (req: AgentTurnRequest) => AsyncIterable<Record<string, unknown>>;
 
 export interface ProviderRegistryMockOptions {
@@ -213,6 +221,21 @@ export function mockPassThroughDb(userId: string): () => { getDb: () => Record<s
   return () => ({
     getDb: () => createCapturedDb(userId, [], []),
   });
+}
+
+/** Builds a transactional stream DB mock that applies assistant-row updates. */
+export function createTestStreamDb(options: TestStreamDbOptions): Record<string, unknown> {
+  const insertedMessages = options.insertedMessages ?? [];
+  const chatSetCalls = options.chatSetCalls ?? [];
+  const db: Record<string, unknown> = {
+    selectFrom: options.selectFrom ?? (() => makeChain({ userId: options.userId })),
+    insertInto: (table: string) => createInsertCapture(table, insertedMessages, options.onInsert),
+    updateTable: (table: string) => createUpdateCapture(table, insertedMessages, chatSetCalls),
+  };
+  db.transaction = () => ({
+    execute: (callback: (trx: Record<string, unknown>) => unknown) => callback(db),
+  });
+  return db;
 }
 
 /**
@@ -319,34 +342,68 @@ function createCapturedDb(
   insertedMessages: Array<Record<string, unknown>>,
   chatSetCalls: Array<Record<string, unknown>>
 ): Record<string, unknown> {
-  return {
-    selectFrom: () => makeChain({ userId }),
-    insertInto: (table: string) => createInsertCapture(table, insertedMessages),
-    updateTable: () => createUpdateCapture(chatSetCalls),
-  };
+  return createTestStreamDb({
+    userId,
+    insertedMessages,
+    chatSetCalls,
+  });
 }
 
 function createInsertCapture(
   table: string,
-  insertedMessages: Array<Record<string, unknown>>
+  insertedMessages: Array<Record<string, unknown>>,
+  onInsert?: (table: string, values: Record<string, unknown>) => void
 ): Record<string, unknown> {
   return {
     values: (values: Record<string, unknown>) => {
       if (table === 'messages') insertedMessages.push({ ...values });
+      onInsert?.(table, values);
       return { execute: () => Promise.resolve() };
     },
   };
 }
 
 function createUpdateCapture(
+  table: string,
+  insertedMessages: Array<Record<string, unknown>>,
   chatSetCalls: Array<Record<string, unknown>>
 ): Record<string, unknown> {
+  let updateValues: Record<string, unknown> = {};
+  const conditions: Array<{ field: string; value: unknown }> = [];
+  const applyUpdate = (): boolean => {
+    if (table !== 'messages') return true;
+    const message = insertedMessages.find((row) =>
+      conditions.every(({ field, value }) => valuesMatch(row[field], value))
+    );
+    if (!message) return false;
+    Object.assign(message, updateValues);
+    return true;
+  };
+  const chain: Record<string, unknown> = {
+    where: (field: string, _operator: string, value: unknown) => {
+      conditions.push({ field, value });
+      return chain;
+    },
+    execute: () => {
+      applyUpdate();
+      return Promise.resolve([]);
+    },
+    executeTakeFirst: () => Promise.resolve({ numUpdatedRows: applyUpdate() ? 1n : 0n }),
+  };
   return {
     set: (values: Record<string, unknown>) => {
-      chatSetCalls.push({ ...values });
-      return makeChain(undefined);
+      updateValues = { ...values };
+      if (table === 'chats') chatSetCalls.push({ ...values });
+      return chain;
     },
   };
+}
+
+function valuesMatch(actual: unknown, expected: unknown): boolean {
+  if (typeof actual === 'boolean' && typeof expected === 'number') {
+    return Number(actual) === expected;
+  }
+  return actual === expected;
 }
 
 function createProviderMock(

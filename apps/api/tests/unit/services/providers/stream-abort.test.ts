@@ -31,6 +31,18 @@ function makeChain(firstValue: unknown): Record<string, unknown> {
   return proxy;
 }
 
+function makeDb(): Record<string, unknown> {
+  const db: Record<string, unknown> = {
+    selectFrom: () => makeChain({ userId: TEST_USER.id }),
+    insertInto: () => ({ values: () => ({ execute: () => Promise.resolve() }) }),
+    updateTable: () => makeChain({ numUpdatedRows: 1n }),
+  };
+  db.transaction = () => ({
+    execute: (callback: (trx: Record<string, unknown>) => unknown) => callback(db),
+  });
+  return db;
+}
+
 describe('respond-stream abort signal', () => {
   it('provider receives the signal and it is not aborted during normal generation', async () => {
     let receivedSignal: AbortSignal | undefined;
@@ -56,11 +68,7 @@ describe('respond-stream abort signal', () => {
     }));
 
     await mock.module('../../../../src/db/database', () => ({
-      getDb: () => ({
-        selectFrom: () => makeChain({ userId: TEST_USER.id }),
-        insertInto: () => ({ values: () => ({ execute: () => Promise.resolve() }) }),
-        updateTable: () => makeChain(undefined),
-      }),
+      getDb: makeDb,
     }));
 
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
@@ -107,11 +115,7 @@ describe('respond-stream abort signal', () => {
     }));
 
     await mock.module('../../../../src/db/database', () => ({
-      getDb: () => ({
-        selectFrom: () => makeChain({ userId: TEST_USER.id }),
-        insertInto: () => ({ values: () => ({ execute: () => Promise.resolve() }) }),
-        updateTable: () => makeChain(undefined),
-      }),
+      getDb: makeDb,
     }));
 
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);

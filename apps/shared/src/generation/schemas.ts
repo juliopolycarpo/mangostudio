@@ -4,6 +4,7 @@ import { AgentExecutionModeSchema, AgentIdSchema } from '../agents/schemas';
 import { ContextSettingsSchema } from '../chat/schemas';
 import { PromptSettingsSchema } from '../prompt-rules/schemas';
 import { ReasoningEffortSchema } from '../provider-settings/schemas';
+import { ResumeInterruptedTurnSchema } from '../turn-recovery/schemas';
 
 export const ToolIntentSchema = Type.Optional(
   Type.Union([Type.Literal('image_generation_requested')])
@@ -73,6 +74,7 @@ export const RespondStreamBodySchema = Type.Object({
   toolIntent: ToolIntentSchema,
   agentMode: Type.Optional(AgentExecutionModeSchema),
   agentId: Type.Optional(AgentIdSchema),
+  recovery: Type.Optional(ResumeInterruptedTurnSchema),
 });
 
 export type RespondStreamBody = Static<typeof RespondStreamBodySchema>;

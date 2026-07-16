@@ -30,5 +30,6 @@ export * from './i18n';
 export * from './observability';
 export * from './provider-settings';
 export * from './tool-settings';
+export * from './turn-recovery';
 export * from './types/index';
 export * from './utils/model-detection';

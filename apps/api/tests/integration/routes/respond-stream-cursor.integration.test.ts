@@ -10,6 +10,7 @@ import { insertTestUser, type UserFixture } from '../../support/factories';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
 import {
   buildRespondStreamRequest,
+  createTestStreamDb,
   makeChain,
   mockNoopTools,
   mockVerifiedChatOwnership,
@@ -29,7 +30,8 @@ beforeAll(async () => {
 let restoreAuth: (() => void) | null = null;
 
 async function mockCursorLegacyProvider(
-  streamFactory: () => AsyncIterable<StreamingChunk>
+  streamFactory: () => AsyncIterable<StreamingChunk>,
+  insertedMessages: Array<Record<string, unknown>>
 ): Promise<void> {
   await mockVerifiedChatOwnership();
   await mockNoopTools();
@@ -37,7 +39,10 @@ async function mockCursorLegacyProvider(
   await mock.module('../../../src/modules/messages/infrastructure/message-repository', () => ({
     loadHistory: () => Promise.resolve([]),
     loadRichHistory: () => Promise.resolve([]),
-    insertMessage: () => Promise.resolve(),
+    insertMessage: (message: Record<string, unknown>) => {
+      insertedMessages.push({ ...message });
+      return Promise.resolve();
+    },
     updateMessage: () => Promise.resolve(),
     listByChatId: () => Promise.resolve([]),
     verifyMessageOwnership: () => Promise.resolve(true),
@@ -58,21 +63,11 @@ async function mockCursorLegacyProvider(
 }
 
 function mockCursorStreamDb(insertedMessages: Array<Record<string, unknown>>) {
-  const dbMock: Record<string, unknown> = {
+  const dbMock = createTestStreamDb({
+    userId: TEST_USER.id,
+    insertedMessages,
     selectFrom: () => makeChain({ userId: TEST_USER.id, lastProviderState: null }),
-    insertInto: (table: string) => ({
-      values: (values: Record<string, unknown>) => {
-        if (table === 'messages') insertedMessages.push({ ...values });
-        return { execute: () => Promise.resolve() };
-      },
-    }),
-    updateTable: () => ({
-      set: () => makeChain(undefined),
-    }),
-    transaction: () => ({
-      execute: (callback: (trx: Record<string, unknown>) => Promise<unknown>) => callback(dbMock),
-    }),
-  };
+  });
 
   return () => ({ getDb: () => dbMock });
 }
@@ -142,7 +137,7 @@ describe('POST /respond/stream — cursor legacy provider', () => {
       await Promise.resolve();
       yield { type: 'text', text: 'Hi from Cursor', done: false };
       yield { type: 'text', text: '', done: true };
-    });
+    }, insertedMessages);
     await mock.module('../../../src/db/database', mockCursorStreamDb(insertedMessages));
 
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
@@ -178,7 +173,7 @@ describe('POST /respond/stream — cursor legacy provider', () => {
         done: false,
       };
       yield { type: 'error', content: 'Cursor agent run failed.', done: true };
-    });
+    }, insertedMessages);
     await mock.module('../../../src/db/database', mockCursorStreamDb(insertedMessages));
 
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
@@ -337,9 +332,16 @@ describe('POST /respond/stream — cursor agent turn provider', () => {
     expect(sseEvents.find((event) => event.type === 'done')).toBeUndefined();
 
     const aiMessage = insertedMessages.find((message) => message.role === 'ai');
-    if (aiMessage) {
-      const parts = parsePersistedParts(aiMessage.parts);
-      expect(parts.some((part) => part.type === 'error')).toBe(true);
-    }
+    expect(aiMessage).toMatchObject({ text: 'Working…', isGenerating: 0 });
+    const parts = parsePersistedParts(aiMessage?.parts);
+    expect(parts.some((part) => part.type === 'error')).toBe(true);
+    expect(parts).toContainEqual(
+      expect.objectContaining({
+        type: 'turn_checkpoint',
+        status: 'interrupted',
+        reasonCode: 'provider_error',
+        lastAssistantText: 'Working…',
+      })
+    );
   });
 });

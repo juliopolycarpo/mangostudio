@@ -60,6 +60,72 @@ export async function persistUserMessage(
   });
 }
 
+export interface PersistTextTurnStartInput {
+  userId: string;
+  userMessageId: string;
+  assistantMessageId: string;
+  chatId: string;
+  displayPrompt: string;
+  attachmentIds?: string[];
+  timestamp: number;
+  interactionMode: Exclude<InteractionMode, 'image'>;
+  modelName: string;
+  assistantParts: MessagePart[];
+}
+
+/** Inserts the user message and durable assistant placeholder atomically. */
+export function persistTextTurnStart(
+  input: PersistTextTurnStartInput,
+  db: Kysely<Database>
+): Promise<ChatAttachment[]> {
+  return db.transaction().execute(async (trx) => {
+    await insertMessage(
+      {
+        id: input.userMessageId,
+        chatId: input.chatId,
+        role: 'user',
+        text: input.displayPrompt,
+        timestamp: input.timestamp,
+        isGenerating: false,
+        interactionMode: input.interactionMode,
+      },
+      trx
+    );
+
+    const attachmentIds = input.attachmentIds ?? [];
+    const attachments =
+      attachmentIds.length > 0
+        ? await linkAttachmentsToMessage(
+            {
+              attachmentIds,
+              userId: input.userId,
+              chatId: input.chatId,
+              messageId: input.userMessageId,
+              updatedAt: input.timestamp,
+            },
+            trx
+          )
+        : [];
+
+    await insertMessage(
+      {
+        id: input.assistantMessageId,
+        chatId: input.chatId,
+        role: 'ai',
+        text: '',
+        timestamp: input.timestamp + 1,
+        isGenerating: true,
+        modelName: input.modelName,
+        interactionMode: input.interactionMode,
+        parts: JSON.stringify(input.assistantParts),
+      },
+      trx
+    );
+
+    return attachments;
+  });
+}
+
 export interface PersistAiResponseInput {
   id: string;
   userId?: string;
@@ -141,6 +207,66 @@ export async function persistErrorResponse(
     input,
     db
   );
+}
+
+export interface FinalizeCheckpointedAiResponseInput {
+  id: string;
+  userId: string;
+  chatId: string;
+  text: string;
+  parts: MessagePart[];
+  providerState?: string | null;
+  generationTime: string;
+  modelName: string;
+  generatedImages?: PersistedGeneratedImageInput[];
+}
+
+/**
+ * Finalizes the existing assistant placeholder and its image artifacts in one
+ * transaction. The `isGenerating` guard makes the first terminal writer win.
+ */
+export function finalizeCheckpointedAiResponse(
+  input: FinalizeCheckpointedAiResponseInput,
+  db: Kysely<Database>
+): Promise<boolean> {
+  return db.transaction().execute(async (trx) => {
+    const result = await trx
+      .updateTable('messages')
+      .set({
+        text: input.text,
+        parts: JSON.stringify(input.parts),
+        providerState: input.providerState ?? null,
+        isGenerating: 0,
+        generationTime: input.generationTime,
+        modelName: input.modelName,
+      })
+      .where('id', '=', input.id)
+      .where('isGenerating', '=', 1)
+      .executeTakeFirst();
+
+    if (result.numUpdatedRows === 0n) return false;
+
+    for (const generatedImage of input.generatedImages ?? []) {
+      await insertGeneratedImageArtifact(
+        {
+          id: generatedImage.id,
+          userId: input.userId,
+          chatId: input.chatId,
+          messageId: input.id,
+          prompt: generatedImage.prompt,
+          imageUrl: generatedImage.imageUrl,
+          createdAt: generatedImage.createdAt,
+          toolCallId: generatedImage.toolCallId ?? null,
+          modelName: generatedImage.modelName ?? null,
+          generationTime: generatedImage.generationTime ?? null,
+          metadata: generatedImage.metadata ?? null,
+        },
+        trx
+      );
+    }
+
+    return true;
+  });
 }
 
 export async function updateChatAfterTurn(

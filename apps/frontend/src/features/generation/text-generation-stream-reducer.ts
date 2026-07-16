@@ -80,6 +80,8 @@ export function reduceTextGenerationStreamChunk(
   switch (chunk.type) {
     case 'user_message_id':
       return withUserMessageUpdate(nextState, { id: chunk.messageId }, chunk.messageId, true);
+    case 'assistant_message_id':
+      return withAiMessageUpdate(nextState, { id: chunk.messageId }, chunk.messageId, true);
     case 'error':
       return reduceStreamError(nextState, chunk.error);
     case 'thinking_start':

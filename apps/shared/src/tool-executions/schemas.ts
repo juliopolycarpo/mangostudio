@@ -39,6 +39,7 @@ export const TOOL_EXECUTION_REASON_CODES = [
   'validation_failed',
   'server_closed',
   'execution_error',
+  'outcome_unknown',
 ] as const;
 
 export const ToolExecutionReasonCodeSchema = Type.Union(

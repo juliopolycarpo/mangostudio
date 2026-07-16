@@ -205,6 +205,33 @@ export const messages: Messages = {
       compactFailed: 'Failed to compact chat',
       summarizedChatFailed: 'Failed to start summarized chat',
     },
+    recovery: {
+      title: 'Agent turn interrupted',
+      detail:
+        'MangoStudio saved the latest durable progress. Review tool outcomes before resuming.',
+      completedCalls: 'Completed tools ({count})',
+      incompleteCalls: 'Incomplete tools ({count})',
+      retryHint:
+        'Only selected incomplete tools may be retried. Read-only tools are selected by default.',
+      safeRead: 'Read-only',
+      confirmationRequired: 'May change data',
+      unknownSafety: 'Unknown safety',
+      failed: 'Failed',
+      resume: 'Resume turn',
+      resuming: 'Resuming...',
+      dismiss: 'Dismiss',
+      dismissing: 'Dismissing...',
+      resumeUserMessage: 'Continue the interrupted turn from its saved progress.',
+      actionFailed: 'Could not update the interrupted turn. Try again.',
+      reason: {
+        clientDisconnect: 'The client disconnected while the agent was working.',
+        serverRestart: 'The server restarted while the agent was working.',
+        providerError: 'The provider stopped the turn with an error.',
+        userCancelled: 'The turn was stopped before it completed.',
+        toolLoopExhausted: 'The turn reached its tool iteration limit.',
+        unknown: 'The turn ended before completion could be confirmed.',
+      },
+    },
     fallback: {
       toReplay: 'Stateful continuation is no longer available. Continuing with transcript replay.',
       generic: 'Conversation mode changed from {from} to {to}.',

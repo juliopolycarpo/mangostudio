@@ -42,6 +42,8 @@ function ChatRoute() {
       isAgentListLoading={app.isAgentListLoading}
       onAgentExecutionModeChange={app.setAgentExecutionMode}
       onSelectedAgentIdChange={app.setSelectedAgentId}
+      onResumeInterruptedTurn={app.handleResumeInterruptedTurn}
+      onDismissInterruptedTurn={app.handleDismissInterruptedTurn}
     />
   );
 }

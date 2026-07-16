@@ -5,6 +5,7 @@ import { insertTestUser, type UserFixture } from '../../support/factories';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
 import {
   buildRespondStreamRequest,
+  createTestStreamDb,
   makeChain,
   mockDbWithFullCapture,
   mockDbWithMessageCapture,
@@ -303,32 +304,30 @@ describe('POST /respond/stream — context and continuation', () => {
       },
     ];
 
-    await mock.module('../../../src/db/database', () => ({
-      getDb: () => ({
-        selectFrom: (table: string) => {
-          if (table === 'messages') {
-            return {
-              select: () => ({
+    const dbMock = createTestStreamDb({
+      userId: TEST_USER.id,
+      selectFrom: (table: string) => {
+        if (table === 'messages') {
+          return {
+            select: () => ({
+              where: () => ({
                 where: () => ({
-                  where: () => ({
-                    orderBy: () => ({
-                      limit: () => ({
-                        where: () => ({ execute: () => Promise.resolve(messageRows) }),
-                        execute: () => Promise.resolve(messageRows),
-                      }),
+                  orderBy: () => ({
+                    limit: () => ({
+                      where: () => ({ execute: () => Promise.resolve(messageRows) }),
+                      execute: () => Promise.resolve(messageRows),
                     }),
                   }),
                 }),
               }),
-            };
-          }
+            }),
+          };
+        }
 
-          return makeChain({ userId: TEST_USER.id });
-        },
-        insertInto: () => ({ values: () => ({ execute: () => Promise.resolve() }) }),
-        updateTable: () => makeChain(undefined),
-      }),
-    }));
+        return makeChain({ userId: TEST_USER.id });
+      },
+    });
+    await mock.module('../../../src/db/database', () => ({ getDb: () => dbMock }));
 
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
     restoreAuth = restore;
