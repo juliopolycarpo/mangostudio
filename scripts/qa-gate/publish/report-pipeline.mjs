@@ -80,7 +80,7 @@ async function findBaselineRun(github, context, baseSha) {
  */
 export async function resolveReportInputs({ github, context }) {
   const run = context.payload.workflow_run;
-  if (!run || run.event !== 'pull_request') {
+  if (run?.event !== 'pull_request') {
     return { skip: 'triggering run is not a pull_request run' };
   }
 

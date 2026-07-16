@@ -229,7 +229,8 @@ mangostudio/
 | `bun run dev --api`       | Start only the API dev server                                  |
 | `bun run build`           | Build the frontend for production                              |
 | `bun run build --binary`  | Generate standalone binaries with embedded frontend            |
-| `bun run check`           | Run Biome, dprint, madge, and typecheck                        |
+| `bun run check`           | Run formatting, lint, typecheck, and code-health gates         |
+| `bun run code-health`     | Run the standalone Knip unused code/dependency report          |
 | `bun run test`            | Run unit and integration lanes                                 |
 | `bun run test --unit`     | Run unit suites only                                           |
 | `bun run test:e2e:setup`  | Install Playwright Chromium for browser smoke tests            |
@@ -248,6 +249,7 @@ mangostudio/
 | **dprint**     | Markdown, MDX, TOML, YAML, Dockerfile         | Pluggable formatter with WASM-based plugins        |
 | **lefthook**   | Git hooks (pre-commit)                        | Git hooks manager that runs checks on staged files |
 | **madge**      | JS/TS dependency graphs                       | Circular dependency detection across workspaces    |
+| **Knip**       | Root and workspace entry graphs               | Unused code and dependency detection               |
 | **jscpd**      | All source files                              | Copy/paste detection for code duplication alerts   |
 | **bun:test**   | Unit tests (api, shared, frontend pure logic) | Fast native test runner with LCOV coverage         |
 | **Vitest**     | Frontend React and Vite-bound tests           | jsdom, Vite plugins, coverage, and watch mode      |
@@ -261,18 +263,18 @@ These binaries are installed as devDependencies and invoked through the root `bu
 
 A [lefthook](https://github.com/evilmartians/lefthook) pre-commit hook is installed automatically via `bun install` (through the `prepare` script). It runs the following checks in parallel on every `git commit`:
 
-| Hook                 | Trigger      | Files targeted              | Command                                                              |
-| -------------------- | ------------ | --------------------------- | -------------------------------------------------------------------- |
-| `biome`              | `pre-commit` | `*.{ts,tsx,js,jsx,json}`    | `bunx biome check --write {staged_files}`                            |
-| `dprint`             | `pre-commit` | `*.{md,mdx,toml,yml,yaml}`  | `bunx dprint fmt {staged_files}`                                     |
-| `dprint-dockerfile`  | `pre-commit` | `{Dockerfile,Dockerfile.*}` | `bunx dprint fmt {staged_files}`                                     |
-| `typecheck-affected` | `pre-commit` | All staged files            | `bun run check --staged --skip-format` (skipped during merge/rebase) |
+| Hook                | Trigger      | Files targeted              | Command                                                              |
+| ------------------- | ------------ | --------------------------- | -------------------------------------------------------------------- |
+| `biome`             | `pre-commit` | `*.{ts,tsx,js,jsx,json}`    | `bunx biome check --write {staged_files}`                            |
+| `dprint`            | `pre-commit` | `*.{md,mdx,toml,yml,yaml}`  | `bunx dprint fmt {staged_files}`                                     |
+| `dprint-dockerfile` | `pre-commit` | `{Dockerfile,Dockerfile.*}` | `bunx dprint fmt {staged_files}`                                     |
+| `check-affected`    | `pre-commit` | All staged files            | `bun run check --staged --skip-format` (skipped during merge/rebase) |
 
 Files that pass formatting are re-staged automatically. All hooks must succeed for the commit to proceed.
 
 ### Manual Checks
 
-- `bun run check` — full check (Biome, dprint, typecheck, circular deps).
+- `bun run check` — full check (Biome, dprint, typecheck, circular deps, and Knip).
 - `bun run check --staged` — only the workspaces touched by staged files (used by the pre-commit hook).
 - `bun run check --changed` — only the workspaces changed vs `origin/main`.
 - `bun run fix --staged` — auto-fix only the affected workspaces.

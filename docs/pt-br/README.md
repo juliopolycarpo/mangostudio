@@ -239,12 +239,12 @@ Estes binários são instalados como devDependencies e invocados através dos sc
 
 Um hook [lefthook](https://github.com/evilmartians/lefthook) de pre-commit é instalado automaticamente via `bun install` (através do script `prepare`). Ele executa as seguintes verificações em paralelo a cada `git commit`:
 
-| Hook                 | Gatilho      | Arquivos alvo               | Comando                                                                |
-| -------------------- | ------------ | --------------------------- | ---------------------------------------------------------------------- |
-| `biome`              | `pre-commit` | `*.{ts,tsx,js,jsx,json}`    | `bunx biome check --write {staged_files}`                              |
-| `dprint`             | `pre-commit` | `*.{md,mdx,toml,yml,yaml}`  | `bunx dprint fmt {staged_files}`                                       |
-| `dprint-dockerfile`  | `pre-commit` | `{Dockerfile,Dockerfile.*}` | `bunx dprint fmt {staged_files}`                                       |
-| `typecheck-affected` | `pre-commit` | Todos os arquivos staged    | `bun run check --staged --skip-format` (ignorado durante merge/rebase) |
+| Hook                | Gatilho      | Arquivos alvo               | Comando                                                                |
+| ------------------- | ------------ | --------------------------- | ---------------------------------------------------------------------- |
+| `biome`             | `pre-commit` | `*.{ts,tsx,js,jsx,json}`    | `bunx biome check --write {staged_files}`                              |
+| `dprint`            | `pre-commit` | `*.{md,mdx,toml,yml,yaml}`  | `bunx dprint fmt {staged_files}`                                       |
+| `dprint-dockerfile` | `pre-commit` | `{Dockerfile,Dockerfile.*}` | `bunx dprint fmt {staged_files}`                                       |
+| `check-affected`    | `pre-commit` | Todos os arquivos staged    | `bun run check --staged --skip-format` (ignorado durante merge/rebase) |
 
 Arquivos formatados são re-adicionados ao stage automaticamente. Todos os hooks devem ser bem-sucedidos para o commit prosseguir.
 

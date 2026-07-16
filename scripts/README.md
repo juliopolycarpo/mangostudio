@@ -112,7 +112,6 @@ Run by `.github/workflows/release.yml`; each is also runnable locally:
 | `stage-docker-ctx.ts`      | Stage Linux glibc/musl binaries into `docker-ctx/` for Docker Buildx                                |
 | `pack-npm.ts`              | Stage `.mango/out/<arch>` binaries into the npm distribution                                        |
 | `publish-npm.ts`           | Idempotent npm publication with retry + required provenance policy (`--tag`, `--provenance-policy`) |
-| `stamp-cargo-version.ts`   | Stamp an ephemeral version into the cargo-shim manifest + lockfile (canary)                         |
 | `verify-checksum.ts`       | Check one downloaded asset against `SHA256SUMS`                                                     |
 | `dist-manifest.ts`         | Shared renderer: fill `{{VERSION}}`/`{{SHA_*}}` from `SHA256SUMS`                                   |
 | `update-homebrew.ts`       | Render `Formula/mangostudio.rb` from `SHA256SUMS` + `templates/`                                    |
@@ -134,8 +133,10 @@ Run by `.github/workflows/release.yml`; each is also runnable locally:
 
 ## Code health scan
 
-Run `bun run code-health` from the repo root to produce the Knip unused code and dependency report.
-Scanner-specific entrypoints and false-positive dependency ignores live in `knip.json`.
+`bun run check` runs Knip as a blocking repository-wide task. Use
+`bun run code-health` for the standalone unused code and dependency report.
+Register runtime-loaded files as narrow workspace entries in `knip.json`; dependency
+ignores require execution evidence documented in `docs/reference/testing.md`.
 
 ## Adding a script
 

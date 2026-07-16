@@ -17,4 +17,11 @@ describe('lefthook pre-commit config', () => {
     expect(dprintConfig.excludes).toContain('**/CHANGELOG.md');
     expect(dprintHook).toContain('run: bunx dprint fmt --allow-no-files {staged_files}');
   });
+
+  test('runs affected workspace and code-health checks for staged files', () => {
+    const lefthook = readText('lefthook.yml');
+    const affectedCheck = extractPreCommitCommand(lefthook, 'check-affected');
+
+    expect(affectedCheck).toContain('run: bun run check --staged --skip-format');
+  });
 });

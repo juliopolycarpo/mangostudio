@@ -13,7 +13,7 @@ pre-commit:
       glob: "{Dockerfile,Dockerfile.*}"
       run: bunx dprint fmt --allow-no-files {staged_files}
       stage_fixed: true
-    typecheck-affected:
+    check-affected:
       run: bun run check --staged --skip-format
       skip:
         - merge

@@ -40,14 +40,15 @@ Default local URLs:
 
 A [lefthook](https://github.com/evilmartians/lefthook) pre-commit hook is installed automatically during `bun install`. It runs these checks on every commit:
 
-| Check              | Trigger      | Files targeted              | Fails commit on                    |
-| ------------------ | ------------ | --------------------------- | ---------------------------------- |
-| Biome format/lint  | `pre-commit` | `*.{ts,tsx,js,jsx,json}`    | Format or lint errors              |
-| dprint format      | `pre-commit` | `*.{md,mdx,toml,yml,yaml}`  | Format errors                      |
-| dprint Dockerfile  | `pre-commit` | `{Dockerfile,Dockerfile.*}` | Format errors                      |
-| Typecheck affected | `pre-commit` | All staged files            | Type errors in affected workspaces |
+| Check             | Trigger      | Files targeted              | Fails commit on                                                      |
+| ----------------- | ------------ | --------------------------- | -------------------------------------------------------------------- |
+| Biome format/lint | `pre-commit` | `*.{ts,tsx,js,jsx,json}`    | Format or lint errors                                                |
+| dprint format     | `pre-commit` | `*.{md,mdx,toml,yml,yaml}`  | Format errors                                                        |
+| dprint Dockerfile | `pre-commit` | `{Dockerfile,Dockerfile.*}` | Format errors                                                        |
+| Affected checks   | `pre-commit` | All staged files            | Workspace validation and relevant repository-wide code-health errors |
 
-Formatted files are re-staged automatically. The typecheck step is skipped during merge or rebase.
+Formatted files are re-staged automatically. The affected-check step is skipped during merge or
+rebase.
 
 ## 5. Common Commands
 
