@@ -18,8 +18,8 @@ import type { EffectiveToolSettings, ToolContext, ToolDefinition } from '../type
 export const GENERATE_IMAGE_TOOL_NAME = 'generate_image';
 
 export const GENERATE_IMAGE_DEFAULT_QUALITY = '1K';
-export const GENERATE_IMAGE_DEFAULT_MAX_IMAGES = 4;
-export const GENERATE_IMAGE_HARD_MAX_IMAGES = 8;
+const GENERATE_IMAGE_DEFAULT_MAX_IMAGES = 4;
+const GENERATE_IMAGE_HARD_MAX_IMAGES = 8;
 export const GENERATE_IMAGE_AUTO_MODEL = 'auto';
 
 const QUALITY_OPTIONS = ['512px', '1K', '2K', '4K'] as const;
@@ -39,7 +39,7 @@ export interface CreateGenerateImageToolPlanInput {
   imageIds?: string[];
 }
 
-export interface GenerateImageToolCompletedOutcome {
+interface GenerateImageToolCompletedOutcome {
   type: 'completed';
   imageId: string;
   prompt: string;
@@ -49,7 +49,7 @@ export interface GenerateImageToolCompletedOutcome {
   createdAt: number;
 }
 
-export interface GenerateImageToolFailedOutcome {
+interface GenerateImageToolFailedOutcome {
   type: 'failed';
   imageId: string;
   prompt: string;

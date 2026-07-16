@@ -21,7 +21,7 @@ import {
 import type { McpCallResult } from './types';
 
 /** Per-server budget for the lazy connect + listTools during turn resolution. */
-export const MCP_TOOL_LIST_BUDGET_MS = 3_000;
+const MCP_TOOL_LIST_BUDGET_MS = 3_000;
 
 /** Execution cap when the server row does not configure its own timeout. */
 export const MCP_TOOL_EXECUTE_TIMEOUT_MS = 60_000;

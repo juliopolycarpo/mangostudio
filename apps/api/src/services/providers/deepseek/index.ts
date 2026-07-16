@@ -198,7 +198,7 @@ const deepSeekProvider: AIProvider = {
   },
 };
 
-export class DeepSeekConnectorError extends Error {
+class DeepSeekConnectorError extends Error {
   constructor(message: string, options?: ErrorOptions) {
     super(message, options);
     this.name = 'DeepSeekConnectorError';

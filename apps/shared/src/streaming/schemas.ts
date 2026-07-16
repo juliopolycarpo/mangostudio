@@ -36,13 +36,11 @@ export const SSEUserMessageIdEventSchema = Type.Object({
 
 export type SSEUserMessageIdEvent = Static<typeof SSEUserMessageIdEventSchema>;
 
-export const SSEAssistantMessageIdEventSchema = Type.Object({
+const SSEAssistantMessageIdEventSchema = Type.Object({
   type: Type.Literal('assistant_message_id'),
   messageId: Type.String(),
   done: Type.Literal(false),
 });
-
-export type SSEAssistantMessageIdEvent = Static<typeof SSEAssistantMessageIdEventSchema>;
 
 export const SSEThinkingStartEventSchema = Type.Object({
   type: Type.Literal('thinking_start'),
@@ -244,7 +242,7 @@ export type SSEMcpElicitationRequestEvent = Static<typeof SSEMcpElicitationReque
  * First terminal transition of an already-streamed elicitation request, so a
  * mounted card becomes non-interactive without waiting for a refetch.
  */
-export const SSEMcpElicitationStatusEventSchema = Type.Object({
+const SSEMcpElicitationStatusEventSchema = Type.Object({
   type: Type.Literal('mcp_elicitation_status'),
   elicitationId: Type.String(),
   toolCallId: Type.String(),
@@ -252,8 +250,6 @@ export const SSEMcpElicitationStatusEventSchema = Type.Object({
   reason: McpElicitationTerminalReasonSchema,
   done: Type.Literal(false),
 });
-
-export type SSEMcpElicitationStatusEvent = Static<typeof SSEMcpElicitationStatusEventSchema>;
 
 export const SSETodoUpdateEventSchema = Type.Object({
   type: Type.Literal('todo_update'),

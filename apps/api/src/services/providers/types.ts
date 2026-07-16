@@ -222,7 +222,7 @@ export interface ModelInfo {
   capabilities: ModelCapabilities;
 }
 
-export type ProviderWarmupPurpose = 'text' | 'stream-text' | 'agent-turn' | 'image';
+type ProviderWarmupPurpose = 'text' | 'stream-text' | 'agent-turn' | 'image';
 
 export interface ProviderWarmupRequest {
   userId: string;

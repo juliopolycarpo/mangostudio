@@ -19,7 +19,7 @@ import { registerTool } from '../registry';
 
 export { ASK_USER_QUESTION_TOOL_NAME };
 
-export interface AskUserQuestionResult {
+interface AskUserQuestionResult {
   status: 'presented';
   questionCount: number;
   note: string;

@@ -5,7 +5,7 @@ import type {
 } from '@mangostudio/shared/prompt-rules';
 import { loadRuleFileContent } from './rule-file-resolver';
 
-export interface AppliedRuleFile {
+interface AppliedRuleFile {
   label: string;
   path: string;
   role: PromptInjectionRole;

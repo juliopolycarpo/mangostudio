@@ -2,7 +2,7 @@ import { appendFileSync } from 'node:fs';
 import { NPM_PLATFORMS } from './npm-pack';
 import { log, warn } from './runner';
 
-export const PUBLISH_RETRY_DELAYS_MS = [10_000, 30_000, 90_000] as const;
+const PUBLISH_RETRY_DELAYS_MS = [10_000, 30_000, 90_000] as const;
 
 export type ProvenancePolicy = 'required' | 'optional' | 'disabled';
 
@@ -52,9 +52,9 @@ export interface NpmPublishSummary {
 }
 
 /** Auth mode reported for the npm channel while token auth is still in use. */
-export type NpmPublishAuthMode = 'legacy-explicit' | 'not-published' | 'failed';
+type NpmPublishAuthMode = 'legacy-explicit' | 'not-published' | 'failed';
 
-export type NpmPublishProvenanceOutcome =
+type NpmPublishProvenanceOutcome =
   | { readonly status: 'disabled' }
   | { readonly status: 'dropped'; readonly package: string }
   | { readonly status: 'explicit' }

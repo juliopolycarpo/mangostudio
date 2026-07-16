@@ -21,7 +21,7 @@ export interface ListDirectoryToolArgs {
   path: string;
 }
 
-export interface ListDirectoryEntry {
+interface ListDirectoryEntry {
   name: string;
   type: 'file' | 'directory';
 }

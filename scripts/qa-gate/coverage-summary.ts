@@ -10,9 +10,9 @@ import {
 import { readSourceBranchCoverageSummary } from './source-branch-coverage';
 import { readSourceStatementCoverageSummary } from './source-statement-coverage';
 
-export type CoverageSourceKind = 'json-summary' | 'lcov';
+type CoverageSourceKind = 'json-summary' | 'lcov';
 
-export interface CoverageSource {
+interface CoverageSource {
   readonly kind: CoverageSourceKind;
   readonly file: string;
 }
@@ -26,9 +26,7 @@ interface JsonCoverageSummaryShape {
   };
 }
 
-export const WORKSPACE_COVERAGE_SOURCES: Readonly<
-  Record<WorkspaceName, readonly CoverageSource[]>
-> = {
+const WORKSPACE_COVERAGE_SOURCES: Readonly<Record<WorkspaceName, readonly CoverageSource[]>> = {
   frontend: [
     {
       kind: 'json-summary',
@@ -85,7 +83,7 @@ export const mergeCoverageSummaries = (summaries: readonly CoverageSummary[]): C
   };
 };
 
-export const readCoverageSource = (source: CoverageSource): Promise<CoverageSummary> => {
+const readCoverageSource = (source: CoverageSource): Promise<CoverageSummary> => {
   const absPath = join(ROOT_DIR, source.file);
   return source.kind === 'json-summary'
     ? readJsonCoverageSummary(absPath)

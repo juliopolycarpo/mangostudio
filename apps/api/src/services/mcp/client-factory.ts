@@ -43,7 +43,7 @@ import {
 } from './types';
 
 /** Request cap applied when neither the call nor the server row sets one. */
-export const DEFAULT_MCP_TIMEOUT_MS = 30_000;
+const DEFAULT_MCP_TIMEOUT_MS = 30_000;
 
 const logger = createDiagnosticLogger('mcp-client');
 

@@ -3,10 +3,10 @@
 // these to the actual binary.
 
 /** Default base ref the PR preview diffs against. */
-export const DEFAULT_PREVIEW_BASE = 'origin/main';
+const DEFAULT_PREVIEW_BASE = 'origin/main';
 
 /** Default head ref the PR preview walks up to. */
-export const DEFAULT_PREVIEW_HEAD = 'HEAD';
+const DEFAULT_PREVIEW_HEAD = 'HEAD';
 
 /** Sticky-comment marker for the PR changelog preview bot. */
 export const PREVIEW_MARKER = '<!-- changelog-preview-comment -->';

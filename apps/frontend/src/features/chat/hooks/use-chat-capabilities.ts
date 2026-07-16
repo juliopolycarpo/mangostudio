@@ -18,7 +18,7 @@ export interface ChatCapabilitiesSelection {
   readonly agentId?: string;
 }
 
-export const chatCapabilitiesKeys = {
+const chatCapabilitiesKeys = {
   all: ['chat-capabilities'] as const,
   selection: (selection: ChatCapabilitiesSelection) =>
     [

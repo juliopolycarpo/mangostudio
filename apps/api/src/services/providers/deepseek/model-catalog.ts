@@ -8,7 +8,7 @@ import { normalizeDeepSeekBaseUrl } from './options';
 const MODEL_LIST_TIMEOUT_MS = 5_000;
 type FetchLike = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 
-export const DEEPSEEK_FALLBACK_MODELS = [
+const DEEPSEEK_FALLBACK_MODELS = [
   'deepseek-v4-flash',
   'deepseek-v4-pro',
   'deepseek-chat',
@@ -98,7 +98,7 @@ export function getDeepSeekFallbackModels(): ModelInfo[] {
   return DEEPSEEK_FALLBACK_MODELS.map(toDeepSeekModelInfo);
 }
 
-export class DeepSeekApiError extends Error {
+class DeepSeekApiError extends Error {
   constructor(message: string, options?: ErrorOptions) {
     super(message, options);
     this.name = 'DeepSeekApiError';

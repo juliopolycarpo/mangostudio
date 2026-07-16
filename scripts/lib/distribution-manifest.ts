@@ -9,16 +9,16 @@ import {
   releaseArchiveFileName,
 } from './release-targets';
 
-export const DISTRIBUTION_MANIFEST_SCHEMA_VERSION = 1;
+const DISTRIBUTION_MANIFEST_SCHEMA_VERSION = 1;
 export const DISTRIBUTION_MANIFEST_FILE = 'distribution-manifest.json';
 
-export interface DistributionFile {
+interface DistributionFile {
   readonly path: string;
   readonly size: number;
   readonly sha256: string;
 }
 
-export interface DistributionTarget {
+interface DistributionTarget {
   readonly id: ReleasePlatformId;
   readonly bunTarget: string;
   readonly binary: string;

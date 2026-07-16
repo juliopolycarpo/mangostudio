@@ -34,7 +34,7 @@ export type ToolExecutor = (
   context: ToolContext
 ) => Promise<unknown>;
 
-export interface ToolSettingsMetadata {
+interface ToolSettingsMetadata {
   title: string;
   description: string;
   category: ToolSettingsCategory;

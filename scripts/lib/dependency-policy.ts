@@ -8,7 +8,7 @@ const MANIFEST_SECTIONS = [
   'optionalDependencies',
 ] as const;
 
-export type ManifestSection = (typeof MANIFEST_SECTIONS)[number];
+type ManifestSection = (typeof MANIFEST_SECTIONS)[number];
 export type PackageManifest = Partial<Record<ManifestSection, Record<string, string>>>;
 
 export interface DisallowedWorkspaceDependency {

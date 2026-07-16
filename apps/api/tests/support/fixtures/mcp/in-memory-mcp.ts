@@ -16,15 +16,15 @@ import { wrapMcpClient } from '../../../../src/services/mcp/client-factory';
 import type { McpClientHandle } from '../../../../src/services/mcp/types';
 
 /** Length of the oversized `big` tool payload; well past the 64 KiB result cap. */
-export const OVERSIZED_TOOL_OUTPUT_LENGTH = 100_000;
+const OVERSIZED_TOOL_OUTPUT_LENGTH = 100_000;
 
 /** Payloads returned by the `picture` tool (rich-content mapping coverage). */
-export const PICTURE_TOOL_IMAGE_BASE64 = Buffer.from('fixture-png-bytes').toString('base64');
-export const PICTURE_TOOL_PDF_BASE64 = Buffer.from('fixture-pdf-bytes').toString('base64');
+const PICTURE_TOOL_IMAGE_BASE64 = Buffer.from('fixture-png-bytes').toString('base64');
+const PICTURE_TOOL_PDF_BASE64 = Buffer.from('fixture-pdf-bytes').toString('base64');
 export const PICTURE_TOOL_NOTES_TEXT = 'chart notes';
 export const PICTURE_TOOL_RESOURCE_TEXT = 'resource notes';
 
-export interface TurnMcpFixtureControls {
+interface TurnMcpFixtureControls {
   /** Resolves when the named tool reaches its request handler. */
   waitForCall(name: string, occurrence?: number): Promise<void>;
   /** Releases every delayed call using the matching key. */
@@ -87,7 +87,7 @@ export interface ControlledTurnMcpFixture {
 }
 
 /** Builds the turn-fixture MCP server with one tool per failure mode. */
-export function createTurnMcpServer(
+function createTurnMcpServer(
   controls: MutableTurnMcpFixtureControls = createTurnMcpFixtureControls()
 ): Server {
   const server = new Server(

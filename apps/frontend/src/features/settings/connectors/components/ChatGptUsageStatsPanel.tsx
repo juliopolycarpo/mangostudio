@@ -16,7 +16,7 @@ const QUERY_REFETCH_MS = 60_000;
 
 const statsQueryKey = (connectorId: string) => ['chatgpt-usage-stats', connectorId] as const;
 
-export function formatTokenCount(value: number, locale: Locale): string {
+function formatTokenCount(value: number, locale: Locale): string {
   return new Intl.NumberFormat(locale, { maximumFractionDigits: 0 }).format(Math.round(value));
 }
 

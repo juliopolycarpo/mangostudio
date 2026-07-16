@@ -19,7 +19,7 @@ import { writeLine } from './output';
 
 export type AuthSecretStorageTarget = 'env' | 'toml';
 
-export interface AuthSecretStorageOptions {
+interface AuthSecretStorageOptions {
   envPath: string;
   tomlPath: string;
 }

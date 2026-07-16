@@ -29,7 +29,7 @@ const realValidateBaseUrl = validateBaseUrl;
 type FetchImpl = typeof globalThis.fetch;
 
 /** Connector list/CRUD response shapes used across connector route tests. */
-export interface ConnectorEntry {
+interface ConnectorEntry {
   id: string;
   userId: string | null;
   provider: string;

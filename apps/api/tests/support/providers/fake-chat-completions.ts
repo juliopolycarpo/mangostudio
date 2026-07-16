@@ -82,13 +82,6 @@ export function* toolCallArgumentsDeltaChunk(
   };
 }
 
-/** Yields a stop chunk with tool_calls present (signals completion). */
-export function* toolCallStopChunk(): Generator<ChatCompletionChunk> {
-  yield {
-    choices: [{ delta: {}, finish_reason: 'stop' }],
-  };
-}
-
 /** Convenience: chains multiple chunk generators into one async iterable. */
 export async function* chainChunks(
   ...generators: Generator<ChatCompletionChunk>[]

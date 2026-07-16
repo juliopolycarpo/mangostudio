@@ -3,7 +3,7 @@ import { type QueryClient, useQuery } from '@tanstack/react-query';
 import { client } from '@/lib/api-client';
 import { extractApiError } from '@/lib/utils';
 
-export const chatTodoKeys = {
+const chatTodoKeys = {
   all: ['chat-todos'] as const,
   detail: (chatId: string) => [...chatTodoKeys.all, chatId] as const,
 };

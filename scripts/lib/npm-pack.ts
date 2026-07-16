@@ -5,9 +5,9 @@
 import { cursorNativePackageForArch } from './cursor-sidecar';
 import type { ReleasePlatformId } from './release-targets';
 
-export const CLI_SCOPE = '@mangostudio';
+const CLI_SCOPE = '@mangostudio';
 export const MAIN_PACKAGE = 'mangostudio';
-export const PLATFORM_PACKAGE_PREFIX = `${CLI_SCOPE}/cli`;
+const PLATFORM_PACKAGE_PREFIX = `${CLI_SCOPE}/cli`;
 const REPOSITORY_URL = 'git+https://github.com/juliopolycarpo/mangostudio.git';
 const HOMEPAGE_URL = 'https://mangostudio.dev';
 const BUGS_URL = 'https://github.com/juliopolycarpo/mangostudio/issues';

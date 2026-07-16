@@ -10,8 +10,8 @@ import {
 export type DockerArch = 'amd64' | 'arm64';
 export type DockerVariant = 'bookworm' | 'alpine';
 
-export const DOCKER_ARCHES: readonly DockerArch[] = ['amd64', 'arm64'];
-export const DOCKER_VARIANTS: readonly DockerVariant[] = ['bookworm', 'alpine'];
+const DOCKER_ARCHES: readonly DockerArch[] = ['amd64', 'arm64'];
+const DOCKER_VARIANTS: readonly DockerVariant[] = ['bookworm', 'alpine'];
 
 const DOCKER_PLATFORM_BY_VARIANT: Record<DockerVariant, Record<DockerArch, ReleasePlatformId>> = {
   bookworm: {

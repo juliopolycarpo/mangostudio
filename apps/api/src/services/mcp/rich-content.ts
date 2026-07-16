@@ -287,7 +287,7 @@ function assertAttachableSize(data: Uint8Array): void {
  * Writes binary content to attachment storage and records the chat-scoped
  * attachment row. Shared by tool-result media and the resource attach flow.
  */
-export async function storeMcpResourceAttachment(
+async function storeMcpResourceAttachment(
   file: {
     data: Uint8Array;
     mimeType: string;

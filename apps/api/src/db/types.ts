@@ -6,7 +6,7 @@ import type { InteractionMode } from '@mangostudio/shared';
 import type { ChatAttachmentKind } from '@mangostudio/shared/chat';
 import type { Insertable, Selectable, Updateable } from 'kysely';
 
-export interface ChatsTable {
+interface ChatsTable {
   id: string;
   title: string;
   createdAt: number;
@@ -21,7 +21,7 @@ export interface ChatsTable {
   lastContextState: string | null;
 }
 
-export interface MessagesTable {
+interface MessagesTable {
   id: string;
   chatId: string;
   role: 'user' | 'ai';
@@ -38,7 +38,7 @@ export interface MessagesTable {
   providerState: string | null; // opaque provider continuity JSON
 }
 
-export interface GeneratedImagesTable {
+interface GeneratedImagesTable {
   id: string;
   userId: string;
   chatId: string;
@@ -52,7 +52,7 @@ export interface GeneratedImagesTable {
   metadataJson: string | null;
 }
 
-export interface ChatAttachmentsTable {
+interface ChatAttachmentsTable {
   id: string;
   userId: string;
   chatId: string;
@@ -68,7 +68,7 @@ export interface ChatAttachmentsTable {
   updatedAt: number;
 }
 
-export interface SecretMetadataTable {
+interface SecretMetadataTable {
   id: string;
   name: string;
   provider: string;
@@ -87,7 +87,7 @@ export interface SecretMetadataTable {
   projectId: string | null;
 }
 
-export interface UserTable {
+interface UserTable {
   id: string;
   name: string;
   email: string;
@@ -97,7 +97,7 @@ export interface UserTable {
   updatedAt: number;
 }
 
-export interface SessionTable {
+interface SessionTable {
   id: string;
   expiresAt: number;
   token: string;
@@ -108,7 +108,7 @@ export interface SessionTable {
   userId: string;
 }
 
-export interface AccountTable {
+interface AccountTable {
   id: string;
   accountId: string;
   providerId: string;
@@ -124,7 +124,7 @@ export interface AccountTable {
   updatedAt: number;
 }
 
-export interface VerificationTable {
+interface VerificationTable {
   id: string;
   identifier: string;
   value: string;
@@ -133,7 +133,7 @@ export interface VerificationTable {
   updatedAt: number;
 }
 
-export interface UserProviderSettingsTable {
+interface UserProviderSettingsTable {
   id: string;
   userId: string;
   provider: string;
@@ -142,7 +142,7 @@ export interface UserProviderSettingsTable {
   updatedAt: number;
 }
 
-export interface UserToolSettingsTable {
+interface UserToolSettingsTable {
   id: string;
   userId: string;
   toolName: string;
@@ -152,7 +152,7 @@ export interface UserToolSettingsTable {
   updatedAt: number;
 }
 
-export interface UserSkillSettingsTable {
+interface UserSkillSettingsTable {
   id: string;
   userId: string;
   /** Stable `<source>:<slug>` skill identity. */
@@ -162,7 +162,7 @@ export interface UserSkillSettingsTable {
   updatedAt: number;
 }
 
-export interface UserAppSettingsTable {
+interface UserAppSettingsTable {
   id: string;
   userId: string;
   settingsJson: string;
@@ -170,7 +170,7 @@ export interface UserAppSettingsTable {
   updatedAt: number;
 }
 
-export interface UserAgentSettingsTable {
+interface UserAgentSettingsTable {
   id: string;
   userId: string;
   agentId: string;
@@ -179,7 +179,7 @@ export interface UserAgentSettingsTable {
   updatedAt: number;
 }
 
-export interface ConnectorUsageSamplesTable {
+interface ConnectorUsageSamplesTable {
   id: string;
   /** ChatGPT account id — usage windows are account-scoped, not connector-scoped. */
   accountId: string;
@@ -190,7 +190,7 @@ export interface ConnectorUsageSamplesTable {
   sampledAt: number;
 }
 
-export interface McpServersTable {
+interface McpServersTable {
   id: string;
   userId: string;
   /** Display name. */
@@ -212,7 +212,7 @@ export interface McpServersTable {
   updatedAt: number;
 }
 
-export interface ChatTodosTable {
+interface ChatTodosTable {
   /** One row per chat; the list is always replaced wholesale. */
   chatId: string;
   userId: string;
@@ -221,7 +221,7 @@ export interface ChatTodosTable {
   updatedAt: number;
 }
 
-export interface ObservabilitySnapshotTable {
+interface ObservabilitySnapshotTable {
   id: string;
   snapshotJson: string;
   updatedAt: number;

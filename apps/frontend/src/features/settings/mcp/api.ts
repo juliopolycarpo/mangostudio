@@ -12,11 +12,9 @@ import type {
   GetMcpPromptResponse,
   ImportMcpServersBody,
   ImportMcpServersResponse,
-  McpImportPreviewResponse,
   McpPortabilityApplyResponse,
   McpPortabilityPreviewResponse,
   McpServer,
-  PreviewMcpImportBody,
   PreviewMcpPortabilityImportBody,
   ReadMcpResourceBody,
   ReadMcpResourceResponse,
@@ -67,14 +65,6 @@ export async function getMcpPrompt(
   const { data, error } = await client.api.mcp.servers({ id }).prompts.resolve.post(body);
   if (error) throw new Error(extractApiError(error.value, fallback.prompts.getFailed));
   return data as GetMcpPromptResponse;
-}
-
-export async function previewMcpImport(
-  body: PreviewMcpImportBody
-): Promise<McpImportPreviewResponse> {
-  const { data, error } = await client.api.mcp.servers.import.preview.post(body);
-  if (error) throw new Error(extractApiError(error.value, fallback.import.previewFailed));
-  return data as McpImportPreviewResponse;
 }
 
 export async function importMcpServers(

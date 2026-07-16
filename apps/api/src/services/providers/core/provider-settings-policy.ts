@@ -158,12 +158,8 @@ export function isProviderType(value: string): value is ProviderType {
   return PROVIDER_TYPES.includes(value as ProviderType);
 }
 
-export function getProviderSettingsPolicy(provider: ProviderType): ProviderSettingsPolicy {
+function getProviderSettingsPolicy(provider: ProviderType): ProviderSettingsPolicy {
   return PROVIDER_POLICIES[provider];
-}
-
-export function getDefaultProviderSettings(provider: ProviderType): ProviderRuntimeSettings {
-  return normalizeProviderRuntimeSettings(provider, PROVIDER_POLICIES[provider].defaults);
 }
 
 export async function getProviderRuntimeAvailability(provider: ProviderType): Promise<{

@@ -11,8 +11,8 @@ export type ReleasePlatformId =
   | 'linux-x64-musl'
   | 'linux-arm64-musl';
 
-export type ReleaseArchiveFormat = 'tar.gz' | 'zip';
-export type ReleaseBinaryName = 'mangostudio' | 'mangostudio.exe';
+type ReleaseArchiveFormat = 'tar.gz' | 'zip';
+type ReleaseBinaryName = 'mangostudio' | 'mangostudio.exe';
 
 export interface BinaryTarget {
   readonly target: string;

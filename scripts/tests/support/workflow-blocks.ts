@@ -12,7 +12,7 @@ export function extractJobBlock(workflow: string, job: string): string {
 }
 
 /** Isolate the body of the top-level `jobs:` section. */
-export function extractJobsBlock(workflow: string): string {
+function extractJobsBlock(workflow: string): string {
   return /\njobs:\n([\s\S]*?)(?=\n\S|$)/.exec(workflow)?.[1] ?? '';
 }
 

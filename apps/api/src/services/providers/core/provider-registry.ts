@@ -172,13 +172,6 @@ export function invalidateProviderRoutingCache(userId?: string): void {
 }
 
 /**
- * Overrides the DB accessor used by model routing. Intended for test isolation only.
- */
-export function setProviderRegistryDbForTests(dbAccessor?: typeof getDb): void {
-  providerRegistry.setProviderRegistryDbForTests(dbAccessor);
-}
-
-/**
  * Registers an AI provider. Calling this again with the same type replaces
  * the existing registration (useful in tests).
  */

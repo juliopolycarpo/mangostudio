@@ -15,7 +15,6 @@ import {
   deleteMcpServer,
   exportPortableMcpServers,
   importMcpServers,
-  previewMcpImport,
   previewPortableMcpImport,
   testMcpServer,
   updateMcpServer,
@@ -66,11 +65,6 @@ export function useDeleteMcpServer() {
     mutationFn: (id: string) => deleteMcpServer(id),
     onSuccess: () => invalidate(),
   });
-}
-
-/** Stateless dry run against an import source; nothing to invalidate. */
-export function usePreviewMcpImport() {
-  return useMutation({ mutationFn: previewMcpImport });
 }
 
 export function useImportMcpServers() {

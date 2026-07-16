@@ -62,7 +62,7 @@ const renderFullMessage = (entry: CommitEntry): string => {
 // The section shares one GitHub comment (65,536-char cap) with the changelog
 // preview and QA metrics, so it gets a fraction of that budget by default and
 // drops the full-message block first when a long-lived branch outgrows it.
-export const COMMITS_SECTION_MAX_LENGTH = 40_000;
+const COMMITS_SECTION_MAX_LENGTH = 40_000;
 
 const commitListLines = (entries: readonly CommitEntry[]): string[] =>
   entries.map((entry) => `- \`${shortSha(entry.sha)}\` ${entry.subject}`);

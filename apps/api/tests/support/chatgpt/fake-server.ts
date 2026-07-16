@@ -331,7 +331,7 @@ export function startFakeChatGptServer(options?: FakeChatGptServerOptions): Fake
   return new FakeChatGptServer(options);
 }
 
-export function sseResponse(
+function sseResponse(
   events: Array<Record<string, unknown>>,
   extraHeaders?: Record<string, string>
 ): Response {

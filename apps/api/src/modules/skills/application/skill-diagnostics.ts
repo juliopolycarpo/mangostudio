@@ -16,7 +16,7 @@ import { describeSkill, resolveWinnersBySlug, type ScannedSkill } from './skill-
 export type SkillsConfigOrigin = 'default' | 'toml' | 'env';
 
 /** Read state of one source directory. */
-export type SkillSourceHealth = 'ok' | 'missing' | 'unreadable';
+type SkillSourceHealth = 'ok' | 'missing' | 'unreadable';
 
 export interface SkillSourceDiagnostic {
   source: SkillSource;
@@ -29,7 +29,7 @@ export interface SkillSourceDiagnostic {
 }
 
 /** Per-skill classification, one of the mutually exclusive diagnosis states. */
-export type SkillState = 'active' | 'disabled' | 'shadowed' | 'invalid';
+type SkillState = 'active' | 'disabled' | 'shadowed' | 'invalid';
 
 export interface SkillDiagnostic {
   key: string;
@@ -41,7 +41,7 @@ export interface SkillDiagnostic {
   error?: string;
 }
 
-export interface SkillConfigDiagnostic {
+interface SkillConfigDiagnostic {
   dir: string;
   origin: SkillsConfigOrigin;
 }

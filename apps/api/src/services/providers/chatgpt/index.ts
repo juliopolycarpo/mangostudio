@@ -42,8 +42,6 @@ import { CHATGPT_BASE_INSTRUCTIONS } from './base-instructions';
 import { createChatGptClient } from './client';
 import { ChatGptBackendAuthError, fetchChatGptModelIds, listChatGptModels } from './model-catalog';
 
-export { ChatGptReauthRequiredError };
-
 export const CHATGPT_RESPONSES_POLICY: ResponsesRequestPolicy = {
   provider: 'chatgpt',
   store: false,

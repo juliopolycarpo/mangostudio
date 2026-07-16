@@ -480,7 +480,7 @@ export async function* handleTurnCompleted(ctx: TurnCompletedContext): AsyncGene
  *
  * // Usage: const mode = resolveDisplayMode(envelope, degraded, 'openai');
  */
-export function resolveDisplayMode(
+function resolveDisplayMode(
   envelope: ContinuationEnvelope | null,
   degraded: boolean,
   providerType: ProviderType
@@ -497,7 +497,7 @@ export function resolveDisplayMode(
  *
  * // Usage: const chars = computeTurnLocalCharCount(prompt, providerState);
  */
-export function computeTurnLocalCharCount(
+function computeTurnLocalCharCount(
   prompt: string,
   providerState: string | null
 ): number | undefined {

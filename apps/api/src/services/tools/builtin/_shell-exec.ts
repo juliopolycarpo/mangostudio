@@ -18,7 +18,7 @@ export class ShellExecutionError extends Error {
 }
 
 /** Why a shell child process ended, distinct from raw exitCode/signal facts. */
-export type ShellTermination =
+type ShellTermination =
   | { kind: 'exited' }
   | { kind: 'timed_out' }
   | { kind: 'aborted' }

@@ -10,7 +10,7 @@ import {
   type ProviderRuntimeUnavailableReasonParams,
 } from '@mangostudio/shared/provider-settings';
 import { getCursorSidecarScriptPath } from '../../../lib/runtime-paths';
-import { detectNodeRuntime, type NodeRuntimeStatus, resetNodeRuntimeCache } from './node-runtime';
+import { detectNodeRuntime, type NodeRuntimeStatus } from './node-runtime';
 import { formatCursorRuntimeUnavailableReason } from './runtime-reason';
 
 export interface CursorRuntimeStatus extends NodeRuntimeStatus {
@@ -27,7 +27,7 @@ export interface CursorRuntimeAvailabilityOptions {
   platform?: string;
 }
 
-export type CursorRuntimeChainLink = 'node' | 'sidecar' | 'sdk' | 'native';
+type CursorRuntimeChainLink = 'node' | 'sidecar' | 'sdk' | 'native';
 
 export interface CursorRuntimeChainStep {
   link: CursorRuntimeChainLink;
@@ -361,14 +361,4 @@ export function detectCursorRuntimeAvailability(options?: {
 
   inflight = probe;
   return probe;
-}
-
-/**
- * Clears the cached availability probe, including the underlying Node runtime
- * cache it is derived from, so the next detect re-evaluates from scratch.
- */
-export function resetCursorRuntimeAvailabilityCache(): void {
-  cached = null;
-  inflight = null;
-  resetNodeRuntimeCache();
 }

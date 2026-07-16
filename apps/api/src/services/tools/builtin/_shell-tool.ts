@@ -14,20 +14,15 @@ import {
 } from '../execution-timeout';
 import type { RegisteredTool, ToolContext } from '../types';
 import { normalizeStringList } from './_fs-utils';
-import {
-  runShellCommand,
-  type ShellCommandResult,
-  ShellExecutionError,
-  type ShellKind,
-} from './_shell-exec';
+import { runShellCommand, type ShellCommandResult, type ShellKind } from './_shell-exec';
 
 export const SHELL_DEFAULT_TIMEOUT_SECONDS = TOOL_EXECUTION_TIMEOUT_SECONDS_DEFAULT;
 export const SHELL_MIN_TIMEOUT_SECONDS = TOOL_EXECUTION_TIMEOUT_SECONDS_MIN;
 export const SHELL_MAX_TIMEOUT_SECONDS = TOOL_EXECUTION_TIMEOUT_SECONDS_MAX;
 
 export const SHELL_DEFAULT_MAX_OUTPUT_BYTES = 100_000;
-export const SHELL_MIN_MAX_OUTPUT_BYTES = 1_000;
-export const SHELL_MAX_MAX_OUTPUT_BYTES = 1_000_000;
+const SHELL_MIN_MAX_OUTPUT_BYTES = 1_000;
+const SHELL_MAX_MAX_OUTPUT_BYTES = 1_000_000;
 
 interface ShellPresentation {
   label: string;

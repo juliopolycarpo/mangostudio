@@ -445,7 +445,7 @@ const cursorProvider: AIProvider = {
   },
 };
 
-export class CursorConnectorError extends Error {
+class CursorConnectorError extends Error {
   constructor(message: string, options?: ErrorOptions) {
     super(message, options);
     this.name = 'CursorConnectorError';

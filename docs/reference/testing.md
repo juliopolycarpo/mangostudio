@@ -67,7 +67,8 @@ Interactive fixtures must use local SDK servers, explicit synchronization barrie
 ## Root Scripts
 
 ```bash
-bun run check               # format + lint + typecheck across all workspaces
+bun run check               # format + lint + typecheck + code health
+bun run code-health         # standalone Knip unused code/dependency report
 bun run test                # unit + integration (e2e is opt-in)
 bun run test --unit         # API, shared, and frontend unit suites
 bun run test --integration  # API and frontend integration suites
@@ -90,6 +91,24 @@ bun run verify              # full local CI gate: check → test --coverage → 
 
 Turbo skips packages that do not define a given task, so passing all workspace
 filters is safe — no per-workspace metadata is needed to gate lane participation.
+
+### Code Health
+
+`bun run check` includes a repository-wide Knip scan. Change-scoped checks run it
+when staged or changed files can affect dependencies, package exports, runtime or
+test entrypoints, scripts, hooks, workflows, or workspace source. Run
+`bun run code-health` directly while classifying a report.
+
+Files loaded by runtime discovery, process spawning, test configuration, or build
+aliases belong in the narrowest `entry` list in `knip.json`. Do not hide them with
+file ignores. A dependency may be ignored only when repository execution evidence
+shows it is loaded outside a JavaScript or TypeScript import:
+
+| Workspace | Dependency                                               | Execution evidence                                                      |
+| --------- | -------------------------------------------------------- | ----------------------------------------------------------------------- |
+| root      | `@dprint/markdown`, `@dprint/toml`, `@dprint/dockerfile` | `dprint.json` loads each package's WASM plugin from `node_modules`      |
+| root      | `jscpd`                                                  | `scripts/qa-gate/collect/duplication.ts` spawns the installed CLI       |
+| frontend  | `tailwindcss`                                            | `apps/frontend/src/index.css` loads it through the CSS `@import` syntax |
 
 ## Browser Smoke
 

@@ -7,7 +7,7 @@ import type { ResponsesRequestPolicy } from '../core/responses-protocol/request-
 import { streamAgentTurnWithResponses, streamResponses } from '../core/responses-protocol/stream';
 import type { AgentEvent, AgentTurnRequest, StreamingChunk, TextGenerationRequest } from '../types';
 
-export const OPENAI_RESPONSES_POLICY: ResponsesRequestPolicy = {
+const OPENAI_RESPONSES_POLICY: ResponsesRequestPolicy = {
   provider: 'openai',
   store: true,
   continuation: 'previous-response-id',

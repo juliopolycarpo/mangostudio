@@ -97,11 +97,6 @@ export function setupTestEnvironment(): Promise<void> {
   return setupPromise;
 }
 
-/** True once config and services are installed for this test process. */
-export function isTestEnvironmentReady(): boolean {
-  return initialized;
-}
-
 /**
  * Throws an actionable error when the test environment was never initialized —
  * almost always because tests were started from the wrong directory, so Bun

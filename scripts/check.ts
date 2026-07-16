@@ -1,5 +1,6 @@
 import { createActionsLintTasks, touchesActionsLintSurface } from './lib/actions-lint/run';
 import { createTurboCheckCommand, createWorkspaceDprintCommand } from './lib/check';
+import { touchesCodeHealthSurface } from './lib/code-health';
 import {
   ROOT_BIOME_PATHS,
   ROOT_DIR,
@@ -28,8 +29,8 @@ import {
 function printHelp(): never {
   console.log(`Usage: bun run check [workspace flags] [mode flags]
 
-Runs Biome, dprint, madge circular checks, tsc typechecks, and workflow
-static analysis (actionlint, zizmor, ShellCheck) in parallel.
+Runs Biome, dprint, madge circular checks, tsc typechecks, Knip code health,
+and workflow static analysis (actionlint, zizmor, ShellCheck) in parallel.
 Default workspace selection: --all
 
 Workspace flags:
@@ -117,6 +118,9 @@ let effectiveIncludeRoot = includeRoot;
 // staged/changed file touches the analyzed surface — but then always
 // repository-wide, since workflow findings cross file boundaries.
 let includeActionsLint = includeRoot;
+// Full/root runs always scan the repository. Scoped runs scan only when a
+// changed file can affect Knip's entry graph or dependency report.
+let includeCodeHealth = includeRoot;
 
 if (flags['--staged']) {
   const files = getStagedFiles();
@@ -128,6 +132,7 @@ if (flags['--staged']) {
   effectiveWorkspaces = mapped.workspaces;
   effectiveIncludeRoot = mapped.includeRoot;
   includeActionsLint = touchesActionsLintSurface(files);
+  includeCodeHealth = touchesCodeHealthSurface(files);
 } else if (flags['--changed']) {
   const base = values['--base'] ?? resolveDefaultBase();
   const files = getChangedFiles(base);
@@ -139,6 +144,7 @@ if (flags['--staged']) {
   effectiveWorkspaces = mapped.workspaces;
   effectiveIncludeRoot = mapped.includeRoot;
   includeActionsLint = touchesActionsLintSurface(files);
+  includeCodeHealth = touchesCodeHealthSurface(files);
 }
 
 const tasks: Array<() => Promise<RunResult>> = [];
@@ -156,6 +162,13 @@ if (effectiveIncludeRoot) {
 if (includeActionsLint) {
   info('\nWorkflow static analysis');
   tasks.push(...createActionsLintTasks());
+}
+
+if (includeCodeHealth) {
+  info('\nCode health');
+  tasks.push(() =>
+    runCommand('root:code-health', ['bun', 'run', 'code-health'], { cwd: ROOT_DIR })
+  );
 }
 
 if (tasks.length === 0) {

@@ -5,14 +5,14 @@
 import { getModelContextLimit } from '../core/context-policy';
 import type { ModelInfo, ModelParameterInfo } from '../types';
 
-export const CURSOR_FALLBACK_MODELS = ['composer-2.5', 'auto'] as const;
+const CURSOR_FALLBACK_MODELS = ['composer-2.5', 'auto'] as const;
 
 interface CursorModelParameterDefinition {
   id: string;
   values: Array<{ value: string }>;
 }
 
-export function normalizeCursorModelParameters(
+function normalizeCursorModelParameters(
   definitions: CursorModelParameterDefinition[] | undefined
 ): ModelParameterInfo[] | undefined {
   if (!definitions?.length) return undefined;

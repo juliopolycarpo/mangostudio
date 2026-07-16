@@ -5,7 +5,7 @@
 import { resolve } from 'node:path';
 import { normalizePathList, normalizeStringList, type PathListItem } from '../list-normalization';
 
-export { normalizePathList, normalizeStringList, type PathListItem };
+export { normalizePathList, normalizeStringList };
 
 export function expandHome(path: string): string {
   if (path === '~' || path.startsWith('~/')) {

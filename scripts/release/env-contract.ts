@@ -4,7 +4,7 @@ export interface ReleaseScriptEnvContract {
   readonly requirements?: readonly ConditionalEnvRequirement[];
 }
 
-export interface ConditionalEnvRequirement {
+interface ConditionalEnvRequirement {
   readonly env: readonly string[];
   readonly whenArgsInclude?: string;
   readonly unlessArgsInclude?: string;
@@ -33,7 +33,6 @@ export const RELEASE_SCRIPT_ENV_CONTRACTS = {
   'scripts/release/stage-docker-ctx.ts': {
     requirements: [{ env: ['VERSION'], whenArgsInclude: '--release-assets' }],
   },
-  'scripts/release/stamp-cargo-version.ts': {},
   'scripts/release/update-homebrew.ts': {},
   'scripts/release/update-scoop.ts': {},
   'scripts/release/verify-checksum.ts': {},

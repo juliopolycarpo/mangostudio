@@ -6,7 +6,7 @@
 import { isAbsolute, relative, resolve } from 'node:path';
 import * as ts from '@typescript/typescript6';
 
-export interface LcovFileCoverage {
+interface LcovFileCoverage {
   readonly sourcePath: string;
   readonly lineHits: ReadonlyMap<number, number>;
 }
