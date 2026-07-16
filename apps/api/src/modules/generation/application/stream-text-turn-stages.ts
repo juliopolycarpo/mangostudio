@@ -56,6 +56,7 @@ import {
   mergeMessageParts,
   synchronizeToolProgressForCheckpoint,
   upsertToolCallPart,
+  upsertToolResultPart,
 } from './stream-text-turn-helpers';
 import type { StreamEvent, StreamTextTurnInput } from './stream-text-turn-types';
 import { parseToolArgs, stringifyToolResult } from './tool-result-utils';
@@ -477,7 +478,7 @@ export async function* emitAgentStreamEvent(
           args: parseToolArgs(satisfiedCall.argsStr),
         });
       }
-      session.allParts.push({
+      upsertToolResultPart(session.allParts, {
         type: 'tool_result',
         toolCallId: event.callId,
         content:
@@ -1003,7 +1004,9 @@ export async function* finalizeToolLoopExhausted(
   const generationTime = `${((Date.now() - startTime) / 1000).toFixed(1)}s`;
   reconcileInterruptedMessageParts(session.allParts);
   session.allParts.push({ type: 'error', text: TOOL_LOOP_EXHAUSTED_MESSAGE });
-  if (!session.fullText) session.fullText = TOOL_LOOP_EXHAUSTED_MESSAGE;
+  // The failure text is a placeholder for the row, never durable assistant
+  // output: writing it into `fullText` would republish it to the resume prompt
+  // as authoritative content the model believes it produced.
   await session.checkpointWriter.prepareFinal('interrupted', 'tool_loop_exhausted');
   sealUnresolvedToolCalls(session.allParts);
   const errorParts = mergeMessageParts(session.allParts);
@@ -1014,7 +1017,7 @@ export async function* finalizeToolLoopExhausted(
         id: aiMsgId,
         userId,
         chatId,
-        text: session.fullText,
+        text: session.fullText || TOOL_LOOP_EXHAUSTED_MESSAGE,
         parts: errorParts,
         providerState: executionState.durableProviderState,
         generationTime,
@@ -1085,7 +1088,8 @@ export async function* finalizeTurnError(
     const generationTime = `${((Date.now() - startTime) / 1000).toFixed(1)}s`;
     reconcileInterruptedMessageParts(session.allParts);
     session.allParts.push({ type: 'error', text: message });
-    if (!session.fullText) session.fullText = message;
+    // See finalizeToolLoopExhausted: the error text must not reach `fullText`,
+    // which the checkpoint republishes as durable assistant output on resume.
     await session.checkpointWriter.prepareFinal('interrupted', 'provider_error');
     sealUnresolvedToolCalls(session.allParts);
     const errorParts = mergeMessageParts(session.allParts);
@@ -1094,7 +1098,7 @@ export async function* finalizeTurnError(
         id: aiMsgId,
         userId,
         chatId,
-        text: session.fullText,
+        text: session.fullText || message,
         parts: errorParts,
         providerState: executionState.durableProviderState,
         generationTime,

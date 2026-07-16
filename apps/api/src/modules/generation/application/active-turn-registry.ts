@@ -31,7 +31,3 @@ export function cancelActiveTurn(
   turn.abort(reasonCode);
   return true;
 }
-
-export function resetActiveTurnRegistryForTest(): void {
-  activeTurns.clear();
-}

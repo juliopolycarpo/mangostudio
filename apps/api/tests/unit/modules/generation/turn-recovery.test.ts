@@ -268,6 +268,36 @@ describe('interrupted turn recovery', () => {
     });
   });
 
+  it('clears stale rows that carry no checkpoint instead of leaving them generating', async () => {
+    const { chat } = await createOwnedChat();
+    const legacyId = crypto.randomUUID();
+    await insertMessage(
+      {
+        id: legacyId,
+        chatId: chat.id,
+        role: 'ai',
+        text: 'written before turn recovery existed',
+        timestamp: Date.now(),
+        isGenerating: true,
+        interactionMode: 'chat',
+      },
+      getDb()
+    );
+
+    expect(
+      await reconcileStaleTurns({ chatId: chat.id, reasonCode: 'server_restart' }, getDb())
+    ).toBe(1);
+
+    const row = await getDb()
+      .selectFrom('messages')
+      .select(['isGenerating', 'parts'])
+      .where('id', '=', legacyId)
+      .executeTakeFirstOrThrow();
+    expect(row.isGenerating).toBe(0);
+    // Nothing to seal and no checkpoint to record, so parts stay untouched.
+    expect(row.parts).toBeNull();
+  });
+
   it('finalizes the original assistant row once', async () => {
     const { user, chat } = await createOwnedChat();
     const userMessageId = crypto.randomUUID();

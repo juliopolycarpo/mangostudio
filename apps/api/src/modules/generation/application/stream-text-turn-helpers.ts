@@ -357,7 +357,7 @@ export function upsertToolCallPart(
   };
 }
 
-function upsertToolResultPart(
+export function upsertToolResultPart(
   parts: MessagePart[],
   next: Extract<MessagePart, { type: 'tool_result' }>
 ): void {

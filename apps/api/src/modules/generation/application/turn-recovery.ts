@@ -249,19 +249,27 @@ export async function interruptCheckpointedMessage(
 
   const parsed = parseMessageParts(row.parts);
   const checkpoint = parsed.find(isTurnCheckpointPart);
-  if (!checkpoint) return false;
   reconcileInterruptedMessageParts(parsed);
-  refreshTurnCheckpointPart(
-    checkpoint,
-    { text: row.text, parts: parsed, providerState: row.providerState },
-    Date.now(),
-    { force: true, status: 'interrupted', reasonCode: input.reasonCode }
-  );
+  // A row without a readable checkpoint predates turn recovery or came from the
+  // message create route. It carries no resumable state, but clearing
+  // `isGenerating` still matters: otherwise it spins in the UI forever and every
+  // later reconcile pass re-reads it.
+  if (checkpoint) {
+    refreshTurnCheckpointPart(
+      checkpoint,
+      { text: row.text, parts: parsed, providerState: row.providerState },
+      Date.now(),
+      { force: true, status: 'interrupted', reasonCode: input.reasonCode }
+    );
+  }
   sealUnresolvedToolCalls(parsed);
 
   const result = await db
     .updateTable('messages')
-    .set({ parts: JSON.stringify(parsed), isGenerating: 0 })
+    .set({
+      ...(parsed.length > 0 ? { parts: JSON.stringify(parsed) } : {}),
+      isGenerating: 0,
+    })
     .where('id', '=', input.messageId)
     .where('isGenerating', '=', 1)
     .executeTakeFirst();

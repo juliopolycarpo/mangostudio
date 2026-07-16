@@ -52,8 +52,15 @@ function findLatestInterruptedTurn(messages: readonly Message[]): InterruptedTur
   for (let messageIndex = messages.length - 1; messageIndex >= 0; messageIndex--) {
     const message = messages[messageIndex];
     if (message.role !== 'ai') continue;
-    const checkpoint = message.parts?.find(isTurnCheckpointPart);
-    if (checkpoint?.status === 'interrupted') return { messageId: message.id, checkpoint };
+    // This runs on every message change, so every streaming delta re-scans the
+    // whole chat. Narrow on the discriminator first and pay for full schema
+    // validation only on a part that already claims to be an interrupted turn.
+    const candidate = message.parts?.find(
+      (part) => part.type === 'turn_checkpoint' && part.status === 'interrupted'
+    );
+    if (candidate && isTurnCheckpointPart(candidate)) {
+      return { messageId: message.id, checkpoint: candidate };
+    }
   }
   return null;
 }
