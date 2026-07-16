@@ -1,9 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { existsSync } from 'node:fs';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import {
+  createManagedProcessFixture,
+  type ManagedProcessFixture,
+} from '../../support/fixtures/managed-process';
 
 /**
  * Boots the real server via the hidden `__serve` command in an isolated HOME so
@@ -15,25 +18,6 @@ const ENTRY = join(import.meta.dir, '../../../src/index.ts');
 const START_TIMEOUT_MS = 15_000;
 const TEST_TIMEOUT_MS = 30_000;
 const VALID_AUTH_SECRET = 'test-secret-at-least-32-characters-long';
-
-/** Reserve a free TCP port by briefly binding to port 0. */
-async function reserveFreePort(): Promise<number> {
-  const server = createServer();
-  await new Promise<void>((resolve, reject) => {
-    server.once('error', reject);
-    server.listen(0, '127.0.0.1', resolve);
-  });
-
-  const address = server.address();
-  await new Promise<void>((resolve, reject) => {
-    server.close((error) => (error ? reject(error) : resolve()));
-  });
-
-  if (!address || typeof address === 'string') {
-    throw new Error('failed to reserve a free port');
-  }
-  return address.port;
-}
 
 /**
  * Environment for the spawned server. It boots the real production server, so
@@ -66,18 +50,6 @@ async function probeHealthOnce(host: string, port: number): Promise<boolean> {
   }
 }
 
-async function waitForHealth(host: string, port: number): Promise<void> {
-  const deadline = Date.now() + START_TIMEOUT_MS;
-  while (Date.now() < deadline) {
-    if (await probeHealthOnce(host, port)) {
-      return;
-    }
-    await sleep(150);
-  }
-  const url = `http://${host}:${port}/api/health`;
-  throw new Error(`server health check did not pass at ${url} within ${START_TIMEOUT_MS}ms`);
-}
-
 /**
  * Wait for the single-instance state file to appear. Health is reachable the
  * instant the server listens, but persistState writes the file a beat later, so
@@ -94,69 +66,51 @@ async function waitForState(pidFile: string, timeoutMs = START_TIMEOUT_MS): Prom
   throw new Error(`server state file was not created at ${pidFile} within ${timeoutMs}ms`);
 }
 
-async function waitForServerReady(host: string, port: number, pidFile: string): Promise<void> {
-  await waitForHealth(host, port);
-  await waitForState(pidFile);
-}
-
-async function waitForExit(child: Bun.Subprocess): Promise<number> {
-  const timedOut = Symbol('timedOut');
-  const result = await Promise.race([child.exited, sleep(5000).then(() => timedOut)]);
-  if (typeof result !== 'number') {
-    throw new Error('child process did not exit in time');
-  }
-  return result;
-}
-
-function readStderr(child: Bun.Subprocess): Promise<string> {
-  if (!child.stderr || typeof child.stderr === 'number') {
-    return Promise.resolve('');
-  }
-  return Bun.readableStreamToText(child.stderr);
-}
-
 describe('startServer via __serve', () => {
-  let home = '';
-  let child: Bun.Subprocess | null = null;
+  let fixture: ManagedProcessFixture | null = null;
 
   beforeEach(async () => {
-    home = await mkdtemp(join(tmpdir(), 'mango-serve-'));
+    fixture = await createManagedProcessFixture({ tempPrefix: 'mango-serve-' });
   });
 
   afterEach(async () => {
-    if (child && child.exitCode === null) {
-      child.kill('SIGKILL');
-      await waitForExit(child);
-    }
-    child = null;
-    await rm(home, { force: true, recursive: true });
+    if (!fixture) return;
+    await fixture.cleanup();
+    await fixture.assertReleased();
+    fixture = null;
   });
 
   it(
     'listens, writes state, serves health, and cleans up on SIGTERM',
     async () => {
-      const port = await reserveFreePort();
+      if (!fixture) throw new Error('Expected a managed process fixture.');
+      const { port, tempDir: home } = fixture;
       const pidFile = join(home, '.mango', 'run', 'server.json');
 
-      child = Bun.spawn({
+      const child = fixture.spawn({
         cmd: ['bun', ENTRY, '__serve', String(port)],
         env: {
           ...serverEnv(home, port),
           BETTER_AUTH_SECRET: VALID_AUTH_SECRET,
         },
-        stdout: 'ignore',
-        stderr: 'ignore',
       });
 
-      await waitForServerReady('127.0.0.1', port, pidFile);
+      await fixture.waitUntilReady(() => probeHealthOnce('127.0.0.1', port), {
+        label: `server health at 127.0.0.1:${port}`,
+        timeoutMs: START_TIMEOUT_MS,
+        intervalMs: 150,
+      });
+      await fixture.waitUntilReady(() => existsSync(pidFile), {
+        label: `server state file ${pidFile}`,
+        timeoutMs: START_TIMEOUT_MS,
+      });
 
       const state = JSON.parse(await readFile(pidFile, 'utf8'));
       expect(state.pid).toBe(child.pid);
       expect(state.port).toBe(port);
       expect(state.host).toBe('127.0.0.1');
 
-      child.kill('SIGTERM');
-      const exitCode = await waitForExit(child);
+      const exitCode = await fixture.stop('SIGTERM');
 
       expect(exitCode).toBe(0);
       expect(existsSync(pidFile)).toBe(false);
@@ -167,23 +121,21 @@ describe('startServer via __serve', () => {
   it(
     'exits before listening when the auth secret is missing',
     async () => {
-      const port = await reserveFreePort();
+      if (!fixture) throw new Error('Expected a managed process fixture.');
+      const { port, tempDir: home } = fixture;
 
-      child = Bun.spawn({
+      fixture.spawn({
         cmd: ['bun', ENTRY, '__serve', String(port)],
         env: {
           ...serverEnv(home, port),
           BETTER_AUTH_SECRET: '   ',
         },
-        stdout: 'ignore',
-        stderr: 'pipe',
       });
 
-      const stderr = readStderr(child);
-      const exitCode = await waitForExit(child);
+      const exitCode = await fixture.waitForExit();
 
       expect(exitCode).toBe(1);
-      expect(await stderr).toContain('BETTER_AUTH_SECRET is required');
+      expect(fixture.diagnostics()).toContain('BETTER_AUTH_SECRET is required');
       expect(await probeHealthOnce('127.0.0.1', port)).toBe(false);
     },
     TEST_TIMEOUT_MS

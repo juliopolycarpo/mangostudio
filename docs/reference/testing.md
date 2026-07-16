@@ -38,6 +38,24 @@ apps/
 - `integration`: covers a flow that crosses module boundaries inside the same workspace.
 - `browser-smoke`: minimal Playwright Chromium suite covering end-to-end auth flows (signup, login, authenticated landing, logout, re-login).
 
+### Interactive MCP coverage matrix
+
+Keep the combinatorial protocol matrix below the browser layer. The API suites use real MCP SDK transports and the public SSE/HTTP contracts; frontend integration owns mounted and reloaded React state; Playwright is reserved for behavior that depends on an actual browser.
+
+| Behavior                                                                                              | Owning layer              | Coverage                                                                                            |
+| ----------------------------------------------------------------------------------------------------- | ------------------------- | --------------------------------------------------------------------------------------------------- |
+| Text success, tool error, result cap, disabled server, Skill coexistence                              | API turn integration      | `modules/generation/mcp-turn.integration.test.ts`                                                   |
+| Image, audio, text resource, binary resource, unsupported link, malformed content, durable provenance | API turn integration      | `modules/generation/mcp-turn.integration.test.ts`                                                   |
+| Elicitation accept, decline, cancel, timeout, user abort, stale response, pending/terminal reload     | API route E2E             | `routes/respond-stream-mcp-interactive.integration.test.ts`                                         |
+| Ordered `StreamChunkSchema` events and tool lifecycle snapshots                                       | API route E2E             | `routes/respond-stream-mcp-interactive.integration.test.ts`                                         |
+| Same-server FIFO/correlation, disconnect, interrupted recovery handoff                                | API route E2E             | `routes/respond-stream-mcp-interactive.integration.test.ts`                                         |
+| SDK wrapper, HTTP transport, stdio spawn/exit, session reconnect                                      | API transport integration | `services/mcp/*-transport.integration.test.ts`, `services/mcp/wrapper-contract.integration.test.ts` |
+| Mounted terminal elicitation, persisted MCP media, question resume                                    | Frontend integration      | `components/interactive-chat-flows.integration.test.tsx`                                            |
+| Streamed todo cache update and persisted reload on chat switch                                        | Frontend integration      | `components/interactive-chat-flows.integration.test.tsx`                                            |
+| Browser-only navigation, focus, download, or native rendering behavior                                | Browser smoke             | Add a focused Playwright case only when jsdom and API E2E cannot prove the behavior                 |
+
+Interactive fixtures must use local SDK servers, explicit synchronization barriers, ephemeral ports, bounded diagnostics, and teardown assertions. They must not contact public MCP services, use production credentials, or depend on arbitrary sleeps for tool ordering.
+
 ## Workspace Runners
 
 | Workspace       | Runner                | Environment                                     |

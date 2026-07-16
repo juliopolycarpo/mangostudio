@@ -40,6 +40,15 @@ describe('classifyToolExecutionFailure', () => {
       status: 'cancelled',
       reasonCode: 'user_cancelled',
     });
+    expect(
+      classifyToolExecutionFailure(
+        new McpError(ErrorCode.RequestTimeout, 'user_cancelled'),
+        controller.signal
+      )
+    ).toEqual({
+      status: 'cancelled',
+      reasonCode: 'user_cancelled',
+    });
   });
 
   it('maps policy and validation errors to their reason codes', () => {
