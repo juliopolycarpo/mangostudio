@@ -33,6 +33,8 @@ export const McpServerSchema = Type.Object({
   args: Type.Array(Type.String()),
   /** stdio transport: non-secret child environment variables. */
   env: Type.Record(Type.String(), Type.String()),
+  /** Names of stored stdio environment secrets; values are write-only. */
+  secretEnvNames: Type.Array(Type.String()),
   /** http transport: Streamable HTTP endpoint. */
   url: Type.Union([Type.String(), Type.Null()]),
   /** Names of stored auth headers; values are write-only. */
@@ -64,6 +66,8 @@ export const AddStdioMcpServerBodySchema = Type.Object({
   command: Type.String({ minLength: 1 }),
   args: Type.Optional(Type.Array(Type.String())),
   env: Type.Optional(Type.Record(Type.String(), Type.String())),
+  /** Secret child environment variables — accepted on write only. */
+  secretEnv: Type.Optional(Type.Record(Type.String(), Type.String())),
 });
 
 export const AddHttpMcpServerBodySchema = Type.Object({
@@ -96,6 +100,8 @@ export const UpdateMcpServerBodySchema = Type.Partial(
     command: Type.String({ minLength: 1 }),
     args: Type.Array(Type.String()),
     env: Type.Record(Type.String(), Type.String()),
+    /** Replaces the stored stdio secret environment bundle when present. */
+    secretEnv: Type.Record(Type.String(), Type.String()),
     url: Type.String({ minLength: 1 }),
     /** Replaces the stored header bundle when present. */
     headers: Type.Record(Type.String(), Type.String()),
@@ -179,6 +185,165 @@ export const McpImportResultEntrySchema = Type.Object({
 
 export const ImportMcpServersResponseSchema = Type.Object({
   results: Type.Array(McpImportResultEntrySchema),
+});
+
+/** Portable, secret-free stdio configuration in the ecosystem `mcpServers` shape. */
+export const McpPortableStdioServerSchema = Type.Object({
+  type: Type.Literal('stdio'),
+  command: Type.String({ minLength: 1 }),
+  args: Type.Optional(Type.Array(Type.String())),
+  env: Type.Optional(Type.Record(Type.String(), Type.String())),
+});
+
+/** Portable, secret-free Streamable HTTP configuration. */
+export const McpPortableHttpServerSchema = Type.Object({
+  type: Type.Literal('http'),
+  url: Type.String({ minLength: 1 }),
+});
+
+export const McpPortableServerSchema = Type.Union([
+  McpPortableStdioServerSchema,
+  McpPortableHttpServerSchema,
+]);
+
+const McpPortableSecretNameSchema = Type.String({ minLength: 1 });
+
+/** MangoStudio-only metadata that remains safe to serialize. */
+export const McpPortableServerMetadataSchema = Type.Object({
+  name: Type.String({ minLength: 1, maxLength: MCP_SERVER_NAME_MAX_LENGTH }),
+  enabled: Type.Boolean(),
+  timeoutMs: Type.Union([Type.Number({ minimum: 1 }), Type.Null()]),
+  /** Unresolved write-only secret names. Values are never portable. */
+  secretEnvNames: Type.Array(McpPortableSecretNameSchema, { uniqueItems: true }),
+  headerNames: Type.Array(McpPortableSecretNameSchema, { uniqueItems: true }),
+});
+
+export const McpPortableDocumentSchema = Type.Object({
+  version: Type.Literal(1),
+  mcpServers: Type.Record(Type.String(), McpPortableServerSchema),
+  'x-mangostudio': Type.Optional(
+    Type.Object({
+      servers: Type.Record(Type.String(), McpPortableServerMetadataSchema),
+    })
+  ),
+});
+
+/** Export all owned servers or an explicit non-empty subset. */
+export const ExportMcpServersBodySchema = Type.Union([
+  Type.Object({ all: Type.Literal(true) }),
+  Type.Object({
+    serverIds: Type.Array(Type.String({ minLength: 1 }), {
+      minItems: 1,
+      uniqueItems: true,
+    }),
+  }),
+]);
+
+export const ExportMcpServersResponseSchema = Type.Object({
+  filename: Type.String({ minLength: 1 }),
+  content: Type.String({ minLength: 1 }),
+  serverCount: Type.Number({ minimum: 1 }),
+});
+
+/** SHA-256 over normalized, secret-free configuration. */
+export const McpNormalizedFingerprintSchema = Type.String({
+  pattern: '^[a-f0-9]{64}$',
+});
+
+export const McpPortabilityConflictKeySchema = Type.Union([
+  Type.Literal('fingerprint'),
+  Type.Literal('slug'),
+  Type.Literal('name'),
+  Type.Literal('url'),
+  Type.Literal('command-args'),
+]);
+
+export const McpPortabilityDecisionSchema = Type.Union([
+  Type.Literal('add'),
+  Type.Literal('skip'),
+  Type.Literal('replace'),
+  Type.Literal('copy'),
+]);
+
+export const McpPortabilitySecretReferenceSchema = Type.Object({
+  kind: Type.Union([Type.Literal('env'), Type.Literal('header')]),
+  name: Type.String({ minLength: 1 }),
+  source: Type.Union([Type.Literal('literal'), Type.Literal('reference')]),
+  /** Reference-only values must be supplied by the destination before apply. */
+  required: Type.Boolean(),
+});
+
+export const McpPortabilityConflictCandidateSchema = Type.Object({
+  serverId: Type.String({ minLength: 1 }),
+  name: Type.String({ minLength: 1 }),
+  slug: Type.String({ minLength: 1 }),
+  keys: Type.Array(McpPortabilityConflictKeySchema, { minItems: 1 }),
+  exact: Type.Boolean(),
+});
+
+export const McpPortabilityInvalidReasonSchema = Type.Union([
+  Type.Literal('unsupported-transport'),
+  Type.Literal('placeholder-value'),
+  Type.Literal('invalid-entry'),
+  Type.Literal('invalid-slug'),
+  Type.Literal('duplicate-in-source'),
+]);
+
+/** Secret-free plan entry produced before any mutation. */
+export const McpPortabilityPreviewEntrySchema = Type.Object({
+  key: Type.String(),
+  name: Type.String(),
+  slug: Type.String(),
+  transport: Type.Optional(McpTransportSchema),
+  command: Type.Optional(Type.String()),
+  url: Type.Optional(Type.String()),
+  fingerprint: Type.Optional(McpNormalizedFingerprintSchema),
+  status: Type.Union([Type.Literal('ready'), Type.Literal('invalid')]),
+  reason: Type.Optional(McpPortabilityInvalidReasonSchema),
+  conflicts: Type.Array(McpPortabilityConflictCandidateSchema),
+  allowedDecisions: Type.Array(McpPortabilityDecisionSchema, { minItems: 1 }),
+  suggestedDecision: McpPortabilityDecisionSchema,
+  copyName: Type.Optional(Type.String()),
+  copySlug: Type.Optional(Type.String()),
+  secretReferences: Type.Array(McpPortabilitySecretReferenceSchema),
+});
+
+export const PreviewMcpPortabilityImportBodySchema = Type.Object(importSourceFields);
+
+export const McpPortabilityPreviewResponseSchema = Type.Object({
+  previewToken: McpNormalizedFingerprintSchema,
+  entries: Type.Array(McpPortabilityPreviewEntrySchema),
+});
+
+export const McpPortabilityDecisionInputSchema = Type.Object({
+  key: Type.String(),
+  decision: McpPortabilityDecisionSchema,
+  /** Required for replace and must name a candidate shown in preview. */
+  targetServerId: Type.Optional(Type.String({ minLength: 1 })),
+  /** Destination-supplied write-only values for unresolved exported references. */
+  secretEnv: Type.Optional(Type.Record(Type.String(), Type.String())),
+  headers: Type.Optional(Type.Record(Type.String(), Type.String())),
+});
+
+export const ApplyMcpPortabilityImportBodySchema = Type.Object({
+  ...importSourceFields,
+  previewToken: McpNormalizedFingerprintSchema,
+  decisions: Type.Array(McpPortabilityDecisionInputSchema),
+});
+
+export const McpPortabilityApplyResultSchema = Type.Object({
+  key: Type.String(),
+  decision: McpPortabilityDecisionSchema,
+  serverId: Type.Optional(Type.String()),
+});
+
+export const McpPortabilityApplyResponseSchema = Type.Object({
+  added: Type.Number({ minimum: 0 }),
+  replaced: Type.Number({ minimum: 0 }),
+  copied: Type.Number({ minimum: 0 }),
+  skipped: Type.Number({ minimum: 0 }),
+  invalid: Type.Number({ minimum: 0 }),
+  results: Type.Array(McpPortabilityApplyResultSchema),
 });
 
 export const McpToolDescriptorSchema = Type.Object({
@@ -392,6 +557,26 @@ export type McpImportPreviewEntry = Static<typeof McpImportPreviewEntrySchema>;
 export type McpImportPreviewResponse = Static<typeof McpImportPreviewResponseSchema>;
 export type McpImportResultEntry = Static<typeof McpImportResultEntrySchema>;
 export type ImportMcpServersResponse = Static<typeof ImportMcpServersResponseSchema>;
+export type McpPortableStdioServer = Static<typeof McpPortableStdioServerSchema>;
+export type McpPortableHttpServer = Static<typeof McpPortableHttpServerSchema>;
+export type McpPortableServer = Static<typeof McpPortableServerSchema>;
+export type McpPortableServerMetadata = Static<typeof McpPortableServerMetadataSchema>;
+export type McpPortableDocument = Static<typeof McpPortableDocumentSchema>;
+export type ExportMcpServersBody = Static<typeof ExportMcpServersBodySchema>;
+export type ExportMcpServersResponse = Static<typeof ExportMcpServersResponseSchema>;
+export type McpNormalizedFingerprint = Static<typeof McpNormalizedFingerprintSchema>;
+export type McpPortabilityConflictKey = Static<typeof McpPortabilityConflictKeySchema>;
+export type McpPortabilityDecision = Static<typeof McpPortabilityDecisionSchema>;
+export type McpPortabilitySecretReference = Static<typeof McpPortabilitySecretReferenceSchema>;
+export type McpPortabilityConflictCandidate = Static<typeof McpPortabilityConflictCandidateSchema>;
+export type McpPortabilityInvalidReason = Static<typeof McpPortabilityInvalidReasonSchema>;
+export type McpPortabilityPreviewEntry = Static<typeof McpPortabilityPreviewEntrySchema>;
+export type PreviewMcpPortabilityImportBody = Static<typeof PreviewMcpPortabilityImportBodySchema>;
+export type McpPortabilityPreviewResponse = Static<typeof McpPortabilityPreviewResponseSchema>;
+export type McpPortabilityDecisionInput = Static<typeof McpPortabilityDecisionInputSchema>;
+export type ApplyMcpPortabilityImportBody = Static<typeof ApplyMcpPortabilityImportBodySchema>;
+export type McpPortabilityApplyResult = Static<typeof McpPortabilityApplyResultSchema>;
+export type McpPortabilityApplyResponse = Static<typeof McpPortabilityApplyResponseSchema>;
 export type McpServerStatus = Static<typeof McpServerStatusSchema>;
 export type McpServer = Static<typeof McpServerSchema>;
 export type AddMcpServerBody = Static<typeof AddMcpServerBodySchema>;

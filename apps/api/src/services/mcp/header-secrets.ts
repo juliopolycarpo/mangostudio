@@ -68,5 +68,5 @@ export async function listMcpHeaderNames(
   serverId: string,
   store: SecretStore = bunSecretStore
 ): Promise<string[]> {
-  return Object.keys(await readMcpHeaders(serverId, store));
+  return Object.keys(await readMcpHeaders(serverId, store)).sort();
 }

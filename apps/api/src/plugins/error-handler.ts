@@ -8,17 +8,21 @@ import { type ApiErrorResponse, ERROR_CODES } from '@mangostudio/shared/errors';
 import { Elysia } from 'elysia';
 
 export const errorHandler = new Elysia({ name: 'error-handler' }).onError(
+  { as: 'global' },
   ({ code, error, set }): ApiErrorResponse => {
+    if (code === 'VALIDATION') {
+      // Elysia validation errors include the rejected request value. Do not log
+      // the error object because write-only credentials may be present there.
+      console.error('[error-handler][VALIDATION] Invalid request body');
+      set.status = 422;
+      return { error: 'Invalid request body', code: ERROR_CODES.VALIDATION };
+    }
+
     console.error(`[error-handler][${code}]`, error);
 
     if (code === 'NOT_FOUND') {
       set.status = 404;
       return { error: 'Not found', code: ERROR_CODES.NOT_FOUND };
-    }
-
-    if (code === 'VALIDATION') {
-      set.status = 422;
-      return { error: 'Invalid request body', code: ERROR_CODES.VALIDATION };
     }
 
     set.status = 500;

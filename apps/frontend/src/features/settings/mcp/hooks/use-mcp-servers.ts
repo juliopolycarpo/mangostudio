@@ -2,14 +2,21 @@
  * Hooks: MCP server list plus create/update/delete/test/import mutations.
  */
 
-import type { AddMcpServerBody, UpdateMcpServerBody } from '@mangostudio/shared/mcp';
+import type {
+  AddMcpServerBody,
+  ApplyMcpPortabilityImportBody,
+  UpdateMcpServerBody,
+} from '@mangostudio/shared/mcp';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toolSettingsKeys } from '@/features/settings/tools/queries';
 import {
   addMcpServer,
+  applyPortableMcpImport,
   deleteMcpServer,
+  exportPortableMcpServers,
   importMcpServers,
   previewMcpImport,
+  previewPortableMcpImport,
   testMcpServer,
   updateMcpServer,
 } from '../api';
@@ -70,6 +77,22 @@ export function useImportMcpServers() {
   const invalidate = useInvalidateMcpCaches();
   return useMutation({
     mutationFn: importMcpServers,
+    onSuccess: () => invalidate(),
+  });
+}
+
+export function useExportPortableMcpServers() {
+  return useMutation({ mutationFn: exportPortableMcpServers });
+}
+
+export function usePreviewPortableMcpImport() {
+  return useMutation({ mutationFn: previewPortableMcpImport });
+}
+
+export function useApplyPortableMcpImport() {
+  const invalidate = useInvalidateMcpCaches();
+  return useMutation({
+    mutationFn: (body: ApplyMcpPortabilityImportBody) => applyPortableMcpImport(body),
     onSuccess: () => invalidate(),
   });
 }

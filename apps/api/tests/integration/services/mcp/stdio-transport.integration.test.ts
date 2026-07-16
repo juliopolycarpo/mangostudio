@@ -81,6 +81,21 @@ describe('mcp stdio transport', () => {
     }
   });
 
+  it('merges write-only stdio env secrets into the child without process inheritance', async () => {
+    const handle = await connectMcpClient(stdioConfig('secret-env-test', { PUBLIC_FLAG: 'yes' }), {
+      userId: USER_ID,
+      resolveSecretEnv: async () => ({ MCP_SECRET_FLAG: 'write-only-value' }),
+    });
+
+    const result = await handle.callTool('env-keys', {});
+    const childEnvKeys = JSON.parse(result.contentText) as string[];
+    expect(childEnvKeys).toContain('PUBLIC_FLAG');
+    expect(childEnvKeys).toContain('MCP_SECRET_FLAG');
+    expect(result.contentText).not.toContain('write-only-value');
+
+    await handle.close();
+  });
+
   it('recovers from a crash mid-session: status drops, next use reconnects', async () => {
     const config = stdioConfig('crash-test');
     const handle = await getMcpClient(USER_ID, config);

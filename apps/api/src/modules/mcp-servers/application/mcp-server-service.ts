@@ -25,6 +25,11 @@ import {
   parseJsonStringRecord,
   toMcpRuntimeConfig,
 } from '../../../services/mcp/runtime-config';
+import {
+  listMcpSecretEnvNames,
+  persistMcpSecretEnv,
+  removeMcpSecretEnv,
+} from '../../../services/mcp/stdio-env-secrets';
 import { generateId } from '../../../utils/id';
 import { assertTransportInvariants, McpServerError } from '../domain/mcp-server';
 import {
@@ -58,24 +63,27 @@ export async function createMcpServer(
 
   const now = Date.now();
   const id = generateId();
-  await insertMcpServerRow(db, {
-    id,
-    userId,
-    name: body.name,
-    slug: body.slug,
-    transport: body.transport,
-    command,
-    argsJson: JSON.stringify(stdio ? (body.args ?? []) : []),
-    envJson: JSON.stringify(stdio ? (body.env ?? {}) : {}),
-    url,
-    enabled: (body.enabled ?? true) ? 1 : 0,
-    timeoutMs: body.timeoutMs ?? null,
-    createdAt: now,
-    updatedAt: now,
-  });
-
-  if (!stdio && body.headers) {
-    await persistMcpHeaders(id, body.headers);
+  try {
+    if (stdio && body.secretEnv) await persistMcpSecretEnv(id, body.secretEnv);
+    if (!stdio && body.headers) await persistMcpHeaders(id, body.headers);
+    await insertMcpServerRow(db, {
+      id,
+      userId,
+      name: body.name,
+      slug: body.slug,
+      transport: body.transport,
+      command,
+      argsJson: JSON.stringify(stdio ? (body.args ?? []) : []),
+      envJson: JSON.stringify(stdio ? (body.env ?? {}) : {}),
+      url,
+      enabled: (body.enabled ?? true) ? 1 : 0,
+      timeoutMs: body.timeoutMs ?? null,
+      createdAt: now,
+      updatedAt: now,
+    });
+  } catch (error) {
+    await Promise.all([removeMcpHeaders(id), removeMcpSecretEnv(id)]);
+    throw error;
   }
 
   return toPublicServer(userId, await requireMcpServerRow(db, userId, id));
@@ -114,8 +122,12 @@ export async function updateMcpServer(
   // stdio, so an auth token never lingers in the secret store unused.
   if (merged.transport === 'http') {
     if (body.headers !== undefined) await persistMcpHeaders(id, body.headers);
+    if (body.transport === 'http') await removeMcpSecretEnv(id);
   } else if (body.transport === 'stdio') {
     await removeMcpHeaders(id);
+  }
+  if (merged.transport === 'stdio' && body.secretEnv !== undefined) {
+    await persistMcpSecretEnv(id, body.secretEnv);
   }
 
   // The old session runs with stale config; drop it so next use reconnects.
@@ -131,7 +143,7 @@ export async function removeMcpServer(
 ): Promise<DeleteMcpServerResponse> {
   await requireMcpServerRow(db, userId, id);
   await deleteMcpServerRow(db, userId, id);
-  await removeMcpHeaders(id);
+  await Promise.all([removeMcpHeaders(id), removeMcpSecretEnv(id)]);
   await disposeMcpServer(userId, id);
   return { ok: true };
 }
@@ -207,6 +219,7 @@ async function toPublicServer(userId: string, row: McpServerSelect): Promise<Mcp
     command: row.command,
     args: parseJsonStringArray(row.argsJson),
     env: parseJsonStringRecord(row.envJson),
+    secretEnvNames: row.transport === 'stdio' ? await listMcpSecretEnvNames(row.id) : [],
     url: row.url,
     headerNames: row.transport === 'http' ? await listMcpHeaderNames(row.id) : [],
     enabled: row.enabled !== 0,

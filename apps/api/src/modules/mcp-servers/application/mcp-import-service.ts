@@ -79,19 +79,21 @@ async function parseSourceAgainstExisting(
   userId: string,
   body: PreviewMcpImportBody
 ): Promise<ParsedImportEntry[]> {
-  const source = loadImportSource(body);
+  const source = loadMcpImportSource(body);
   const entries = parseMcpImportSource(source);
   const existingSlugs = new Set((await listMcpServerRows(db, userId)).map((row) => row.slug));
 
   return entries.map((entry) => {
     if (entry.preview.action !== 'create' || !existingSlugs.has(entry.preview.slug)) return entry;
     return {
+      ...entry,
       preview: { ...entry.preview, action: 'skip-duplicate', reason: 'duplicate-slug' },
+      body: undefined,
     };
   });
 }
 
-function loadImportSource(body: PreviewMcpImportBody): string {
+export function loadMcpImportSource(body: PreviewMcpImportBody): string {
   if ((body.path === undefined) === (body.json === undefined)) {
     throw new McpServerError(
       'Provide exactly one of "path" or "json".',

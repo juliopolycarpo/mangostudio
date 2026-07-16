@@ -162,7 +162,8 @@ describe('mcp import routes', () => {
         slug: 'github',
         transport: 'stdio',
         command: 'bunx',
-        env: { GITHUB_TOKEN: 'literal-token' },
+        env: {},
+        secretEnvNames: ['GITHUB_TOKEN'],
       },
       { slug: 'remote', transport: 'http', headerNames: ['Authorization'] },
     ]);

@@ -22,6 +22,7 @@ const HTTP_SERVER: McpServer = {
   command: null,
   args: [],
   env: {},
+  secretEnvNames: [],
   url: 'https://example.com/mcp',
   headerNames: ['Authorization'],
   enabled: true,
@@ -39,6 +40,7 @@ const STDIO_SERVER: McpServer = {
   command: 'bunx',
   args: ['@modelcontextprotocol/server-everything'],
   env: { LOG_LEVEL: 'debug' },
+  secretEnvNames: [],
   url: null,
   headerNames: [],
   enabled: true,
@@ -103,6 +105,7 @@ describe('buildAddBody', () => {
       command: 'bunx server',
       args: ['--verbose', '  '],
       env: [{ key: 'KEY', value: 'v' }],
+      secretEnv: [{ key: 'API_TOKEN', value: 'secret' }],
       url: 'https://leftover.example',
       headers: [{ key: 'Authorization', value: 'secret' }],
     };
@@ -116,6 +119,7 @@ describe('buildAddBody', () => {
       command: 'bunx server',
       args: ['--verbose'],
       env: { KEY: 'v' },
+      secretEnv: { API_TOKEN: 'secret' },
     });
     expect('url' in body).toBe(false);
     expect('headers' in body).toBe(false);
