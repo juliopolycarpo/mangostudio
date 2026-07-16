@@ -3,7 +3,7 @@
 // readCargoLockVersion) so the canary job can rewrite an ephemeral prerelease
 // version into Cargo.toml + Cargo.lock without a TOML dependency, then publish
 // with `cargo publish --locked --allow-dirty`. Pure string transforms — IO lives
-// in scripts/release/stamp-cargo-version.ts so they stay unit-testable.
+// in scripts/lib/prepare-release.ts so they stay unit-testable.
 
 const VERSION_LINE = /^(\s*version\s*=\s*")[^"]+(".*)$/;
 
