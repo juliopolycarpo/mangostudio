@@ -183,6 +183,29 @@ export function McpServerForm({
                 entries={state.env}
                 onChange={(env) => patch({ env })}
               />
+
+              {server && server.secretEnvNames.length > 0 && (
+                <div className="flex flex-wrap gap-2">
+                  {server.secretEnvNames.map((name) => (
+                    <span
+                      key={name}
+                      className="inline-flex items-center gap-1.5 rounded-full bg-surface-container-highest px-3 py-1 text-xs text-on-surface-variant"
+                    >
+                      <span className="font-medium text-on-surface">{name}</span>
+                      <span aria-hidden>••••••</span>
+                      <span className="sr-only">{s.storedSecretEnvValue}</span>
+                    </span>
+                  ))}
+                </div>
+              )}
+
+              <KeyValueListField
+                label={s.secretEnvLabel}
+                hint={s.secretEnvHint}
+                entries={state.secretEnv}
+                onChange={(secretEnv) => patch({ secretEnv })}
+                secretValues
+              />
             </>
           ) : (
             <>

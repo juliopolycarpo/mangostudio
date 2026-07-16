@@ -18,6 +18,7 @@ const STDIO_SERVER: McpServer = {
   command: 'bunx',
   args: ['@modelcontextprotocol/server-everything'],
   env: {},
+  secretEnvNames: [],
   url: null,
   headerNames: [],
   enabled: true,
@@ -35,6 +36,7 @@ const HTTP_SERVER: McpServer = {
   command: null,
   args: [],
   env: {},
+  secretEnvNames: [],
   url: 'https://example.com/mcp',
   headerNames: ['Authorization'],
   enabled: true,
@@ -223,6 +225,101 @@ describe('McpSettingsPage', () => {
       });
       expect(deleteCalls.length).toBe(1);
     });
+  });
+
+  it('previews a stable export for all selected servers', async () => {
+    const user = userEvent.setup();
+    fetchScenario.respondWithJson('GET', '/api/mcp/servers', {
+      body: { servers: [STDIO_SERVER] },
+    });
+    fetchScenario.respondWithJson('POST', '/api/mcp/servers/portability/export', {
+      body: {
+        filename: 'mangostudio-mcp-v1.json',
+        content: '{\n  "version": 1\n}\n',
+        serverCount: 1,
+      },
+    });
+
+    render(<McpSettingsPage />);
+
+    await screen.findByText('Everything');
+    await user.click(screen.getByRole('button', { name: /^export$/i }));
+    expect(screen.getByText('1 selected')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /preview export/i }));
+
+    expect(await screen.findByDisplayValue(/"version": 1/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /download json/i })).toBeInTheDocument();
+  });
+
+  it('reviews a conflict, supplies an unresolved secret, and shows the apply summary', async () => {
+    const user = userEvent.setup();
+    fetchScenario.respondWithJson('GET', '/api/mcp/servers', {
+      body: { servers: [HTTP_SERVER] },
+    });
+    fetchScenario.respondWithJson('POST', '/api/mcp/servers/portability/import/preview', {
+      body: {
+        previewToken: 'a'.repeat(64),
+        entries: [
+          {
+            key: 'remote',
+            name: 'Remote',
+            slug: 'remote',
+            transport: 'http',
+            url: 'https://new.example.com/mcp',
+            fingerprint: 'b'.repeat(64),
+            status: 'ready',
+            conflicts: [
+              {
+                serverId: 'srv-http',
+                name: 'Remote',
+                slug: 'remote',
+                keys: ['slug', 'name'],
+                exact: false,
+              },
+            ],
+            allowedDecisions: ['skip', 'replace', 'copy'],
+            suggestedDecision: 'skip',
+            copyName: 'Remote copy',
+            copySlug: 'remote-copy',
+            secretReferences: [
+              { kind: 'header', name: 'Authorization', source: 'reference', required: true },
+            ],
+          },
+        ],
+      },
+    });
+    fetchScenario.respondWithJson('POST', '/api/mcp/servers/portability/import/apply', {
+      body: {
+        added: 0,
+        replaced: 1,
+        copied: 0,
+        skipped: 0,
+        invalid: 0,
+        results: [{ key: 'remote', decision: 'replace', serverId: 'srv-new' }],
+      },
+    });
+
+    render(<McpSettingsPage />);
+
+    await screen.findByText('Remote');
+    await user.click(screen.getByRole('button', { name: /^import$/i }));
+    await user.click(screen.getByRole('button', { name: /paste json/i }));
+    await user.type(screen.getByLabelText('JSON'), 'source text');
+    await user.click(screen.getByRole('button', { name: /^preview$/i }));
+
+    const decision = await screen.findByLabelText('Decision for Remote');
+    await user.selectOptions(decision, 'replace');
+    expect(screen.getByRole('button', { name: /apply changes/i })).toBeDisabled();
+    await user.type(screen.getByLabelText('Secret value for Authorization'), 'destination-token');
+    expect(screen.getByRole('button', { name: /apply changes/i })).toBeEnabled();
+    fetchScenario.respondWithJson('GET', '/api/mcp/servers', {
+      body: { servers: [HTTP_SERVER] },
+    });
+    await user.click(screen.getByRole('button', { name: /apply changes/i }));
+
+    expect(await screen.findByText('Import complete')).toBeInTheDocument();
+    expect(screen.getByText('Replaced: 1')).toBeInTheDocument();
+    expect(screen.queryByText('destination-token')).not.toBeInTheDocument();
   });
 
   it('lists per-server tools with toggles wired to the tool-settings API', async () => {

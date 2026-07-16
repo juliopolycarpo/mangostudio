@@ -17,6 +17,17 @@ describe('parseMcpImportSource', () => {
     expect(() => parseMcpImportSource('{"mcpServers": []}')).toThrow(McpServerError);
   });
 
+  it('rejects unsupported or malformed portable document versions', () => {
+    expect(() => parseMcpImportSource(JSON.stringify({ version: 2, mcpServers: {} }))).toThrow(
+      'Unsupported MCP portability document version'
+    );
+    expect(() =>
+      parseMcpImportSource(
+        JSON.stringify({ version: 1, mcpServers: {}, 'x-mangostudio': { servers: [] } })
+      )
+    ).toThrow('Portable MCP document does not match the v1 schema');
+  });
+
   it('parses a Claude Code shaped stdio entry with args and env', () => {
     const { preview, body } = parseOne({
       command: 'bunx',
@@ -37,7 +48,8 @@ describe('parseMcpImportSource', () => {
       transport: 'stdio',
       command: 'bunx',
       args: ['@modelcontextprotocol/server-github', '--verbose'],
-      env: { GITHUB_TOKEN: 'literal-token' },
+      env: {},
+      secretEnv: { GITHUB_TOKEN: 'literal-token' },
     });
   });
 
@@ -82,6 +94,67 @@ describe('parseMcpImportSource', () => {
     expect(body?.transport === 'http' && body.headers).toEqual({
       Authorization: 'Bearer secret-token',
     });
+  });
+
+  it('converts URL userinfo to a write-only header and rejects credential query values', () => {
+    const embedded = parseOne({ url: 'https://user:url-password-sentinel@mcp.example.com/path' });
+    expect(embedded.preview).toMatchObject({ url: 'https://mcp.example.com/path' });
+    expect(JSON.stringify(embedded.preview)).not.toContain('url-password-sentinel');
+    expect(embedded.body).toMatchObject({
+      url: 'https://mcp.example.com/path',
+      headers: { Authorization: 'Basic dXNlcjp1cmwtcGFzc3dvcmQtc2VudGluZWw=' },
+    });
+
+    const query = parseOne({ url: 'https://mcp.example.com/path?api_key=query-sentinel' });
+    expect(query.preview).toMatchObject({ action: 'unsupported', reason: 'invalid-entry' });
+    expect(JSON.stringify(query.preview)).not.toContain('query-sentinel');
+  });
+
+  it('loads portable metadata and reports unresolved secret names without values', () => {
+    const [entry] = parseMcpImportSource(
+      JSON.stringify({
+        version: 1,
+        mcpServers: { github: { type: 'stdio', command: 'bunx', env: { LOG_LEVEL: 'debug' } } },
+        'x-mangostudio': {
+          servers: {
+            github: {
+              name: 'GitHub tools',
+              enabled: false,
+              timeoutMs: 5000,
+              secretEnvNames: ['GITHUB_TOKEN'],
+              headerNames: [],
+            },
+          },
+        },
+      })
+    );
+
+    expect(entry?.body).toMatchObject({
+      name: 'GitHub tools',
+      enabled: false,
+      timeoutMs: 5000,
+      env: { LOG_LEVEL: 'debug' },
+    });
+    expect(entry?.secrets.references).toEqual([
+      { kind: 'env', name: 'GITHUB_TOKEN', source: 'reference', required: true },
+    ]);
+    expect(JSON.stringify(entry?.preview)).not.toContain('GITHUB_TOKEN');
+  });
+
+  it('converts credential-shaped env literals to write-only secret input', () => {
+    const entry = parseOne({
+      command: 'bun',
+      env: { LOG_LEVEL: 'debug', DATABASE_URL: 'postgres://user:password@example.com/db' },
+    });
+
+    expect(entry.body).toMatchObject({
+      env: { LOG_LEVEL: 'debug' },
+      secretEnv: { DATABASE_URL: 'postgres://user:password@example.com/db' },
+    });
+    expect(entry.secrets.references).toEqual([
+      { kind: 'env', name: 'DATABASE_URL', source: 'literal', required: false },
+    ]);
+    expect(JSON.stringify(entry.preview)).not.toContain('password');
   });
 
   it('normalizes map keys into slugs and keeps the original key as the name', () => {

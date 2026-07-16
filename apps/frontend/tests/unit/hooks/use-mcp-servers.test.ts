@@ -27,6 +27,7 @@ const SERVER: McpServer = {
   command: 'bunx',
   args: [],
   env: {},
+  secretEnvNames: [],
   url: null,
   headerNames: [],
   enabled: true,

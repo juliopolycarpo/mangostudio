@@ -1,9 +1,12 @@
 import type { ApiErrorResponse } from '@mangostudio/shared/errors';
 import type {
   DeleteMcpServerResponse,
+  ExportMcpServersResponse,
   GetMcpPromptResponse,
   ImportMcpServersResponse,
   McpImportPreviewResponse,
+  McpPortabilityApplyResponse,
+  McpPortabilityPreviewResponse,
   McpServer,
   McpServerListResponse,
   McpServerPromptsResponse,
@@ -15,9 +18,12 @@ import type {
 } from '@mangostudio/shared/mcp';
 import {
   AddMcpServerBodySchema,
+  ApplyMcpPortabilityImportBodySchema,
+  ExportMcpServersBodySchema,
   GetMcpPromptBodySchema,
   ImportMcpServersBodySchema,
   PreviewMcpImportBodySchema,
+  PreviewMcpPortabilityImportBodySchema,
   ReadMcpResourceBodySchema,
   RespondMcpElicitationBodySchema,
   UpdateMcpServerBodySchema,
@@ -27,6 +33,11 @@ import { getDb } from '../../../db/database';
 import { requireAuth } from '../../../plugins/auth-middleware';
 import { respondElicitation } from '../../../services/mcp/elicitation-registry';
 import { importMcpServers, previewMcpImport } from '../application/mcp-import-service';
+import {
+  applyMcpPortabilityImport,
+  exportMcpServers,
+  previewMcpPortabilityImport,
+} from '../application/mcp-portability-service';
 import {
   getMcpServerPrompt,
   listMcpServerPrompts,
@@ -113,6 +124,42 @@ export const mcpServerRoutes = new Elysia()
       }
     },
     { body: ImportMcpServersBodySchema }
+  )
+
+  .post(
+    '/mcp/servers/portability/export',
+    async ({ body, set, user }): Promise<ExportMcpServersResponse | ApiErrorResponse> => {
+      try {
+        return await exportMcpServers(getDb(), user?.id ?? '', body);
+      } catch (error) {
+        return handleMcpServerError(error, set);
+      }
+    },
+    { body: ExportMcpServersBodySchema }
+  )
+
+  .post(
+    '/mcp/servers/portability/import/preview',
+    async ({ body, set, user }): Promise<McpPortabilityPreviewResponse | ApiErrorResponse> => {
+      try {
+        return await previewMcpPortabilityImport(getDb(), user?.id ?? '', body);
+      } catch (error) {
+        return handleMcpServerError(error, set);
+      }
+    },
+    { body: PreviewMcpPortabilityImportBodySchema }
+  )
+
+  .post(
+    '/mcp/servers/portability/import/apply',
+    async ({ body, set, user }): Promise<McpPortabilityApplyResponse | ApiErrorResponse> => {
+      try {
+        return await applyMcpPortabilityImport(getDb(), user?.id ?? '', body);
+      } catch (error) {
+        return handleMcpServerError(error, set);
+      }
+    },
+    { body: ApplyMcpPortabilityImportBodySchema }
   )
 
   .put(

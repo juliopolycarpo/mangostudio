@@ -26,6 +26,8 @@ export interface McpServerFormState {
   command: string;
   args: string[];
   env: KeyValueEntry[];
+  /** Replacement write-only stdio environment-secret bundle. */
+  secretEnv: KeyValueEntry[];
   url: string;
   /**
    * Replacement auth-header bundle. Stored values are write-only, so this
@@ -54,6 +56,7 @@ export function createEmptyFormState(): McpServerFormState {
     command: '',
     args: [],
     env: [],
+    secretEnv: [],
     url: '',
     headers: [],
     timeoutMs: '',
@@ -69,6 +72,7 @@ export function formStateFromServer(server: McpServer): McpServerFormState {
     command: server.command ?? '',
     args: [...server.args],
     env: Object.entries(server.env).map(([key, value]) => ({ key, value })),
+    secretEnv: [],
     url: server.url ?? '',
     headers: [],
     timeoutMs: server.timeoutMs === null ? '' : String(server.timeoutMs),
@@ -116,12 +120,14 @@ export function buildAddBody(state: McpServerFormState): AddMcpServerBody {
     timeoutMs: parseTimeoutMs(state.timeoutMs),
   };
   if (state.transport === 'stdio') {
+    const secretEnv = entriesToRecord(state.secretEnv);
     return {
       ...common,
       transport: 'stdio',
       command: state.command.trim(),
       args: state.args.filter((arg) => arg.trim().length > 0),
       env: entriesToRecord(state.env),
+      ...(Object.keys(secretEnv).length > 0 && { secretEnv }),
     };
   }
   return {
@@ -139,6 +145,10 @@ export function buildAddBody(state: McpServerFormState): AddMcpServerBody {
  */
 export function buildUpdateBody(state: McpServerFormState): UpdateMcpServerBody {
   const body = buildAddBody(state);
+  if (body.transport === 'stdio' && Object.keys(body.secretEnv ?? {}).length === 0) {
+    const { secretEnv: _secretEnv, ...rest } = body;
+    return rest;
+  }
   if (body.transport === 'http' && Object.keys(body.headers ?? {}).length === 0) {
     const { headers: _headers, ...rest } = body;
     return rest;

@@ -5,13 +5,19 @@
 import { en } from '@mangostudio/shared/i18n';
 import type {
   AddMcpServerBody,
+  ApplyMcpPortabilityImportBody,
+  ExportMcpServersBody,
+  ExportMcpServersResponse,
   GetMcpPromptBody,
   GetMcpPromptResponse,
   ImportMcpServersBody,
   ImportMcpServersResponse,
   McpImportPreviewResponse,
+  McpPortabilityApplyResponse,
+  McpPortabilityPreviewResponse,
   McpServer,
   PreviewMcpImportBody,
+  PreviewMcpPortabilityImportBody,
   ReadMcpResourceBody,
   ReadMcpResourceResponse,
   TestMcpServerResponse,
@@ -77,4 +83,28 @@ export async function importMcpServers(
   const { data, error } = await client.api.mcp.servers.import.post(body);
   if (error) throw new Error(extractApiError(error.value, fallback.import.failed));
   return data as ImportMcpServersResponse;
+}
+
+export async function exportPortableMcpServers(
+  body: ExportMcpServersBody
+): Promise<ExportMcpServersResponse> {
+  const { data, error } = await client.api.mcp.servers.portability.export.post(body);
+  if (error) throw new Error(extractApiError(error.value, fallback.portability.exportFailed));
+  return data as ExportMcpServersResponse;
+}
+
+export async function previewPortableMcpImport(
+  body: PreviewMcpPortabilityImportBody
+): Promise<McpPortabilityPreviewResponse> {
+  const { data, error } = await client.api.mcp.servers.portability.import.preview.post(body);
+  if (error) throw new Error(extractApiError(error.value, fallback.portability.previewFailed));
+  return data as McpPortabilityPreviewResponse;
+}
+
+export async function applyPortableMcpImport(
+  body: ApplyMcpPortabilityImportBody
+): Promise<McpPortabilityApplyResponse> {
+  const { data, error } = await client.api.mcp.servers.portability.import.apply.post(body);
+  if (error) throw new Error(extractApiError(error.value, fallback.portability.applyFailed));
+  return data as McpPortabilityApplyResponse;
 }

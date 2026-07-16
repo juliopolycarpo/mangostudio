@@ -33,34 +33,65 @@ Servers are stored in the database and managed through the API
 | `command`   | stdio      | Executable to spawn.                                                                       |
 | `args`      | stdio      | Argument vector.                                                                           |
 | `env`       | stdio      | **Non-secret** child environment variables.                                                |
+| `secretEnv` | stdio      | Secret child environment values — write-only, stored in the secret store.                  |
 | `url`       | http       | Streamable HTTP endpoint.                                                                  |
 | `headers`   | http       | Auth headers — write-only, stored in the secret store.                                     |
 | `enabled`   | both       | Disabled servers contribute no tools.                                                      |
 | `timeoutMs` | both       | Per-request cap; `null` uses the built-in default.                                         |
 
-### Importing from mcp.json
+### Portable export and conflict-aware import
 
-Settings → MCP → "Import" copies servers out of the ecosystem's portable `mcpServers` JSON
-format (Claude Code `.mcp.json` / `~/.claude.json`, Cursor `mcp.json`, VS Code `mcp.json`
-with its `servers` key). The API previews the source first
-(`POST /mcp/servers/import/preview`), reporting per entry whether it would be created,
-skipped as a duplicate slug, or is unsupported — SSE/WebSocket transports, `${VAR}`-style
-placeholder values, and malformed entries are reported, never guessed. Selected entries are
-then created as normal managed rows (`POST /mcp/servers/import`), idempotently: duplicate
-slugs are skipped and reported. The copy is one-shot — later changes to the file are not
-synced. Sources may be pasted as JSON or read from an absolute (or `~`-prefixed) `.json`
-path, capped at 1 MiB; imported http `headers` land in the secret store like any manual add.
+Settings → MCP can export all or selected servers as a stable portable v1 document. Its
+`mcpServers` map stays ecosystem-compatible; the optional `x-mangostudio` namespace carries
+safe metadata and unresolved secret names. Database/user ids, timestamps, runtime status,
+errors, and secret values are never serialized. Entries and object keys are sorted so two
+equivalent exports produce reviewable diffs.
+
+Import accepts a browser file, pasted JSON, or an absolute (or `~`-prefixed) `.json` path on
+the API host (capped at 1 MiB). Preview normalizes configurations and compares exact
+fingerprints, slug/name, canonical URL, and stdio command+arguments. Exact matches default to
+**skip**; non-identical collisions require an explicit **skip**, **replace**, or **copy**
+decision, with a deterministic copy name/slug shown before apply. Unsupported transports,
+`${VAR}`-style placeholders, malformed entries, and duplicate source slugs are reported,
+never guessed.
+
+Credential-shaped literals are redacted in preview and converted to write-only secret
+storage. Exported secret names are unresolved references; the destination must supply their
+values before applying an add, replacement, or copy. A preview token binds the source bytes
+and current managed configuration, so an edited file or concurrent server change requires a
+fresh review.
+
+Legacy public env credentials are exported as unresolved secret names, and URL userinfo is
+converted to an unresolved `Authorization` header. Credential-shaped URL query parameters
+cannot be represented safely and must be moved to write-only headers before export/import.
+
+The portability endpoints are `POST /mcp/servers/portability/export`,
+`POST /mcp/servers/portability/import/preview`, and
+`POST /mcp/servers/portability/import/apply`. Apply prevalidates every decision, assigns new
+ids, stages secret bundles under those ids, then deletes/replaces/inserts all selected rows in
+one Kysely transaction. A database failure rolls back every row and removes all staged
+secrets. After commit, replaced sessions and old secret bundles are disposed. The external
+OS secret store is not part of the SQLite transaction; its atomicity is implemented through
+staging and compensation.
+
+The original create-only `POST /mcp/servers/import/preview` and
+`POST /mcp/servers/import` endpoints remain available for compatible integrations. They keep
+their idempotent duplicate-slug behavior while routing credential-shaped environment values
+into write-only storage.
 
 ## Secret handling
 
 Auth is kept out of plaintext config. For http servers, header **values** are accepted on
 write only and persisted to the secret store; responses and the server row expose only the
-header **names** (`headerNames`). For stdio servers, the `env` map is for non-secret variables;
-the spawned child does **not** inherit the API process environment wholesale. Only a small
+header **names** (`headerNames`). Stdio servers use `env` for non-secret variables and
+`secretEnv` for write-only values; responses expose only `secretEnvNames`. At spawn time the
+two maps are merged, with secret values winning on a duplicate key.
+
+The spawned child does **not** inherit the API process environment wholesale. Only a small
 allowlist (`PATH`, `HOME`, `TERM`, … — see `apps/api/src/services/mcp/stdio-env.ts`) plus the
-row's explicit `env` is forwarded, so connector API keys and the app's auth secret never leak
-into a child server. Exported shell functions are stripped to avoid a Shellshock-style
-injection vector.
+managed public and secret environment maps is forwarded, so connector API keys and the app's
+auth secret never leak accidentally. Exported shell functions are stripped to avoid a
+Shellshock-style injection vector.
 
 ## Tool namespacing and per-agent allowlists
 
@@ -160,9 +191,8 @@ review a server before enabling it and scope agents with per-server allowlists.
   on the settings page to probe the connection and list tools without running a turn.
 - **`status: error` after Test.** The `statusError` detail carries the connection or handshake
   failure (bad command, unreachable URL, rejected headers).
-- **stdio server can't find a binary or config.** The child env is allowlisted; pass anything it
-  needs (non-secret) via the server's `env` map. Secrets belong in http `headers` or the tool's
-  own mechanism, not `env`.
+- **stdio server can't find a binary or config.** The child env is allowlisted; pass public
+  values through `env` and credentials through write-only `secretEnv`.
 - **A tool call returns a timeout error.** Raise the server's `timeoutMs`, or check whether the
   server hangs; the turn still completes with the error result recorded.
 - **A long tool result looks cut off.** Results over 64 KiB are truncated with a marker by

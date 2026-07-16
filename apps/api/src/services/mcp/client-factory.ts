@@ -30,6 +30,7 @@ import { createPendingElicitation, type McpElicitationResult } from './elicitati
 import { flattenElicitationSchema } from './elicitation-schema';
 import { readMcpHeaders } from './header-secrets';
 import { buildStdioEnv } from './stdio-env';
+import { readMcpSecretEnv } from './stdio-env-secrets';
 import {
   type McpCallResult,
   type McpClientHandle,
@@ -117,6 +118,8 @@ export interface ConnectMcpClientOptions {
   userId: string;
   /** Header lookup override for tests; defaults to the secret-store bundle. */
   resolveHeaders?: (serverId: string) => Promise<Record<string, string>>;
+  /** stdio environment-secret lookup override for tests. */
+  resolveSecretEnv?: (serverId: string) => Promise<Record<string, string>>;
   /** Fires once when the session drops out from under us (crash, socket close). */
   onSessionClosed?: () => void;
   /** Fires when the server announces `notifications/tools/list_changed`. */
@@ -140,7 +143,9 @@ export async function connectMcpClient(
   options: ConnectMcpClientOptions
 ): Promise<McpClientHandle> {
   const client =
-    config.transport === 'stdio' ? await connectStdio(config) : await connectHttp(config, options);
+    config.transport === 'stdio'
+      ? await connectStdio(config, options)
+      : await connectHttp(config, options);
   return wrapMcpClient(client, config, {
     userId: options.userId,
     serverId: config.id,
@@ -170,15 +175,19 @@ function createClient(): Client {
   );
 }
 
-async function connectStdio(config: McpServerRuntimeConfig): Promise<Client> {
+async function connectStdio(
+  config: McpServerRuntimeConfig,
+  options: ConnectMcpClientOptions
+): Promise<Client> {
   if (!config.command?.trim()) {
     throw new McpConnectionError(`MCP server "${config.slug}" has no command configured.`);
   }
 
+  const secretEnv = await (options.resolveSecretEnv ?? readMcpSecretEnv)(config.id);
   const transport = new StdioClientTransport({
     command: config.command,
     args: config.args,
-    env: buildStdioEnv(config.env),
+    env: buildStdioEnv({ ...config.env, ...secretEnv }),
     stderr: 'ignore',
   });
 

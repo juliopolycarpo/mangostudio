@@ -113,6 +113,7 @@ describe('mcp server routes', () => {
       command: 'bun',
       args: ['server.ts'],
       env: { MCP_FLAG: 'on' },
+      secretEnvNames: [],
       url: null,
       headerNames: [],
       enabled: true,
@@ -185,6 +186,24 @@ describe('mcp server routes', () => {
       jsonRequest(`/mcp/servers/${payload.id}`, 'PUT', { headers: {} })
     );
     expect(((await cleared.json()) as McpServer).headerNames).toEqual([]);
+  });
+
+  it('stores stdio secret env write-only and removes it with the server', async () => {
+    const app = authedApp();
+    const created = await app.handle(
+      jsonRequest('/mcp/servers', 'POST', {
+        ...stdioBody('secret-env'),
+        secretEnv: { GITHUB_TOKEN: 'stdio-sentinel-secret' },
+      })
+    );
+    const payload = (await created.json()) as McpServer;
+
+    expect(created.status).toBe(201);
+    expect(payload.secretEnvNames).toEqual(['GITHUB_TOKEN']);
+    expect(JSON.stringify(payload)).not.toContain('stdio-sentinel-secret');
+
+    const removed = await app.handle(jsonRequest(`/mcp/servers/${payload.id}`, 'DELETE'));
+    expect(removed.status).toBe(200);
   });
 
   it('updates a server and enforces merged transport invariants', async () => {
