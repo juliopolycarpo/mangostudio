@@ -43,6 +43,9 @@ function createSession(
     toolDefs: [],
     allParts: [],
     fullText: '',
+    checkpointWriter: {
+      checkpoint: () => Promise.resolve(false),
+    },
     runtimeAttachments: [],
     thinkingEnabled: true,
     reasoningEffort: 'medium',

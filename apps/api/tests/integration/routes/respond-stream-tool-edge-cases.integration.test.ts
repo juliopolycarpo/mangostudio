@@ -4,8 +4,8 @@ import type { AgentTurnRequest } from '../../../src/services/providers/types';
 import { insertTestUser, type UserFixture } from '../../support/factories';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
 import {
+  createTestStreamDb,
   makeAgentProfile,
-  makeChain,
   parsePersistedParts,
   parseSseEvents,
   restoreAllMocks,
@@ -115,18 +115,8 @@ describe('POST /respond/stream — tool execution edge cases', () => {
         }),
     }));
 
-    await mock.module('../../../src/db/database', () => ({
-      getDb: () => ({
-        selectFrom: () => makeChain({ userId: TEST_USER.id }),
-        insertInto: (_table: string) => ({
-          values: (values: Record<string, unknown>) => {
-            if (_table === 'messages') insertedMessages.push({ ...values });
-            return { execute: () => Promise.resolve() };
-          },
-        }),
-        updateTable: () => ({ set: () => makeChain(undefined) }),
-      }),
-    }));
+    const dbMock = createTestStreamDb({ userId: TEST_USER.id, insertedMessages });
+    await mock.module('../../../src/db/database', () => ({ getDb: () => dbMock }));
 
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
     restoreAuth = restore;
@@ -249,18 +239,8 @@ describe('POST /respond/stream — tool execution edge cases', () => {
         }),
     }));
 
-    await mock.module('../../../src/db/database', () => ({
-      getDb: () => ({
-        selectFrom: () => makeChain({ userId: TEST_USER.id }),
-        insertInto: (_table: string) => ({
-          values: (values: Record<string, unknown>) => {
-            if (_table === 'messages') insertedMessages.push({ ...values });
-            return { execute: () => Promise.resolve() };
-          },
-        }),
-        updateTable: () => ({ set: () => makeChain(undefined) }),
-      }),
-    }));
+    const dbMock = createTestStreamDb({ userId: TEST_USER.id, insertedMessages });
+    await mock.module('../../../src/db/database', () => ({ getDb: () => dbMock }));
 
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
     restoreAuth = restore;
@@ -413,13 +393,8 @@ describe('POST /respond/stream — tool execution edge cases', () => {
         }),
     }));
 
-    await mock.module('../../../src/db/database', () => ({
-      getDb: () => ({
-        selectFrom: () => makeChain({ userId: TEST_USER.id }),
-        insertInto: () => ({ values: () => ({ execute: () => Promise.resolve() }) }),
-        updateTable: () => ({ set: () => makeChain(undefined) }),
-      }),
-    }));
+    const dbMock = createTestStreamDb({ userId: TEST_USER.id });
+    await mock.module('../../../src/db/database', () => ({ getDb: () => dbMock }));
 
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
     restoreAuth = restore;

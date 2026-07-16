@@ -2,6 +2,7 @@ import type { McpElicitationPart } from '../mcp/schemas';
 import type { QuestionSpec } from '../questions/schemas';
 import type { TodoItem } from '../todos/schemas';
 import type { ToolExecutionSnapshot } from '../tool-executions/schemas';
+import type { TurnCheckpointPart } from '../turn-recovery/schemas';
 import type { ProviderType } from './provider';
 
 export type { McpElicitationPart } from '../mcp/schemas';
@@ -180,6 +181,7 @@ export type MessagePart =
   | McpElicitationPart
   | TodoPart
   | SubagentTracePart
+  | TurnCheckpointPart
   | { type: 'error'; text: string }
   | { type: 'system_event'; event: string; detail?: string }
   | {

@@ -5,7 +5,7 @@ import { insertTestUser, type UserFixture } from '../../support/factories';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
 import {
   buildRespondStreamRequest,
-  makeChain,
+  createTestStreamDb,
   mockProviderRegistry,
   mockVerifiedChatOwnership,
   parsePersistedParts,
@@ -62,20 +62,7 @@ async function mockRealTools(): Promise<void> {
 }
 
 function mockMessageCapturingDb(insertedMessages: Array<Record<string, unknown>>) {
-  const dbMock: Record<string, unknown> = {};
-  Object.assign(dbMock, {
-    selectFrom: () => makeChain({ userId: TEST_USER.id }),
-    insertInto: (table: string) => ({
-      values: (values: Record<string, unknown>) => {
-        if (table === 'messages') insertedMessages.push({ ...values });
-        return { execute: () => Promise.resolve() };
-      },
-    }),
-    updateTable: () => ({ set: () => makeChain(undefined) }),
-    transaction: () => ({
-      execute: (callback: (trx: Record<string, unknown>) => Promise<unknown>) => callback(dbMock),
-    }),
-  });
+  const dbMock = createTestStreamDb({ userId: TEST_USER.id, insertedMessages });
   return mock.module('../../../src/db/database', () => ({ getDb: () => dbMock }));
 }
 
@@ -145,6 +132,17 @@ describe('POST /respond/stream — tool execution lifecycle', () => {
     for (const part of toolCallParts) {
       expect(part.execution).toMatchObject({ status: 'succeeded', source: 'builtin' });
     }
+    expect(parts).toContainEqual(
+      expect.objectContaining({
+        type: 'turn_checkpoint',
+        status: 'completed',
+        completedCalls: [
+          expect.objectContaining({ callId: 'time-1' }),
+          expect.objectContaining({ callId: 'time-2' }),
+        ],
+        incompleteCalls: [],
+      })
+    );
   });
 
   it('marks a disallowed tool as failed with the not_allowed reason and no start time', async () => {

@@ -21,9 +21,10 @@ describe('respond stream test helpers', () => {
     const db = dbMock.moduleFactory().getDb();
 
     await insertMessage(db, { role: 'ai', text: 'Hello' });
+    await updateMessage(db, { text: 'Complete', isGenerating: 0 });
     await updateChat(db, { lastProviderState: null });
 
-    expect(dbMock.insertedMessages).toEqual([{ role: 'ai', text: 'Hello' }]);
+    expect(dbMock.insertedMessages).toEqual([{ role: 'ai', text: 'Complete', isGenerating: 0 }]);
     expect(dbMock.chatSetCalls).toEqual([{ lastProviderState: null }]);
   });
 
@@ -63,8 +64,21 @@ async function updateChat(
   db: Record<string, unknown>,
   values: Record<string, unknown>
 ): Promise<void> {
-  const updateTable = db.updateTable as () => Record<string, unknown>;
-  const update = updateTable();
+  const updateTable = db.updateTable as (table: string) => Record<string, unknown>;
+  const update = updateTable('chats');
+  const setValues = update.set as (values: Record<string, unknown>) => Record<string, unknown>;
+  const chain = setValues(values);
+  const execute = chain.execute as () => Promise<unknown>;
+
+  await execute();
+}
+
+async function updateMessage(
+  db: Record<string, unknown>,
+  values: Record<string, unknown>
+): Promise<void> {
+  const updateTable = db.updateTable as (table: string) => Record<string, unknown>;
+  const update = updateTable('messages');
   const setValues = update.set as (values: Record<string, unknown>) => Record<string, unknown>;
   const chain = setValues(values);
   const execute = chain.execute as () => Promise<unknown>;

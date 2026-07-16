@@ -9,10 +9,10 @@ import {
   createPromptChatTitle,
   isTimestampChatTitle,
 } from '@mangostudio/shared/chat';
-import type { ToolIntent } from '@mangostudio/shared/generation';
+import type { RespondStreamBody, ToolIntent } from '@mangostudio/shared/generation';
 import type { PromptSettings } from '@mangostudio/shared/prompt-rules';
 import { useQueryClient } from '@tanstack/react-query';
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { useChatStream } from '@/features/chat/hooks/use-chat-stream';
 import { setChatTodos } from '@/features/chat/hooks/use-chat-todos';
 import type { useChats } from '@/features/chat/hooks/use-chats';
@@ -26,7 +26,11 @@ import {
   type TextGenerationStreamMessageUpdate,
 } from '@/features/generation/text-generation-stream-reducer';
 import { useI18n } from '@/hooks/use-i18n';
-import { respondTextStream } from '@/services/generation-service';
+import {
+  cancelInterruptedTurn,
+  dismissInterruptedTurn,
+  respondTextStream,
+} from '@/services/generation-service';
 
 interface UseTextGenerationOptions {
   chats: ReturnType<typeof useChats>;
@@ -46,6 +50,8 @@ interface UseTextGenerationOptions {
     readonly agentName?: string;
   };
 }
+
+type RecoveryRequest = NonNullable<RespondStreamBody['recovery']>;
 
 function resolveSummaryModelId(settings: ContextSettings, currentModel: string): string {
   return settings.preferredSummaryModel === 'current_model'
@@ -140,6 +146,9 @@ export function useTextGeneration({
   const pendingSubagentName = t.chat.feed.subagentPendingName;
   const stream = useChatStream({ currentChatId });
   const { appendOptimisticMessages, updateOptimisticMessage } = optimistic;
+  const activeTurnRef = useRef<{ readonly chatId: string; readonly messageId: string } | null>(
+    null
+  );
   const [pendingContextAction, setPendingContextAction] = useState<'compact' | 'new-chat' | null>(
     null
   );
@@ -164,7 +173,12 @@ export function useTextGeneration({
   );
 
   const handleRespond = useCallback(
-    async (prompt: string, toolIntent?: ToolIntent, attachmentIds?: string[]) => {
+    async (
+      prompt: string,
+      toolIntent?: ToolIntent,
+      attachmentIds?: string[],
+      recovery?: RecoveryRequest
+    ) => {
       if (stream.abortControllerRef.current) return;
       stream.setIsGenerating(true);
 
@@ -183,6 +197,7 @@ export function useTextGeneration({
       const interactionMode = agentSelection.mode === 'agent' ? 'agent' : 'chat';
 
       if (
+        !recovery &&
         shouldRenameChatFromPrompt(chatTitleSettings, activeChatTitle, createdChatDuringRequest)
       ) {
         startChatAutoRename({
@@ -248,6 +263,7 @@ export function useTextGeneration({
             toolIntent,
             agentMode: agentSelection.mode,
             agentId: isAgentId(agentSelection.agentId) ? agentSelection.agentId : undefined,
+            recovery,
           },
           (chunk) => {
             streamState = reduceTextGenerationStreamChunk(streamState, chunk, {
@@ -263,6 +279,13 @@ export function useTextGeneration({
               streamState.aiMessageUpdate,
               updateOptimisticMessage
             );
+
+            if (chunk.type === 'assistant_message_id') {
+              activeTurnRef.current = { chatId: activeChatId, messageId: chunk.messageId };
+              if (recovery) {
+                void queryClient.invalidateQueries({ queryKey: messageKeys.list(activeChatId) });
+              }
+            }
 
             if (chunk.type === 'context_info') {
               stream.updateContextInfo(activeChatId, {
@@ -303,13 +326,19 @@ export function useTextGeneration({
             parts: nextParts,
           });
         }
+        if (recovery) throw error;
       } finally {
+        activeTurnRef.current = null;
         stream.setAbortController(null);
         stream.setIsGenerating(false);
         if (createdChatDuringRequest) {
           void chats.loadChats();
         }
-        if (!streamState.receivedServerUserMessageId || !streamState.receivedServerAiMessageId) {
+        if (
+          recovery ||
+          !streamState.receivedServerUserMessageId ||
+          !streamState.receivedServerAiMessageId
+        ) {
           void queryClient.invalidateQueries({ queryKey: messageKeys.list(activeChatId) });
         }
       }
@@ -332,6 +361,43 @@ export function useTextGeneration({
       stream,
       pendingSubagentName,
     ]
+  );
+
+  const handleStop = useCallback(() => {
+    const activeTurn = activeTurnRef.current;
+    if (!activeTurn) {
+      stream.handleStop();
+      return;
+    }
+
+    void cancelInterruptedTurn(activeTurn.chatId, activeTurn.messageId)
+      .catch((error: unknown) => {
+        console.warn('[turn-recovery] Failed to persist turn cancellation', error);
+      })
+      .finally(() => {
+        stream.handleStop();
+      });
+  }, [stream]);
+
+  const handleResumeInterruptedTurn = useCallback(
+    async (messageId: string, retryCallIds: string[]) => {
+      await handleRespond(t.chat.recovery.resumeUserMessage, undefined, undefined, {
+        messageId,
+        requestId: crypto.randomUUID(),
+        retryCallIds,
+      });
+    },
+    [handleRespond, t.chat.recovery.resumeUserMessage]
+  );
+
+  const handleDismissInterruptedTurn = useCallback(
+    async (messageId: string) => {
+      const chatId = chats.currentChatId;
+      if (!chatId) return;
+      await dismissInterruptedTurn(chatId, messageId);
+      await queryClient.invalidateQueries({ queryKey: messageKeys.list(chatId) });
+    },
+    [chats.currentChatId, queryClient]
   );
 
   const handleCompactCurrentChat = useCallback(async () => {
@@ -373,7 +439,9 @@ export function useTextGeneration({
     handleRespond,
     handleCompactCurrentChat,
     handleStartSummarizedChat,
-    handleStop: stream.handleStop,
+    handleStop,
+    handleResumeInterruptedTurn,
+    handleDismissInterruptedTurn,
     contextInfo: stream.contextInfo,
     fallbackNotice: stream.fallbackNotice,
     seedContextInfo: stream.seedContextInfo,

@@ -43,6 +43,8 @@ function renderChatPage(overrides: Partial<React.ComponentProps<typeof ChatPage>
     isContextActionPending: false,
     onCompactCurrentChat: vi.fn().mockResolvedValue(undefined),
     onStartSummarizedChat: vi.fn().mockResolvedValue(undefined),
+    onResumeInterruptedTurn: vi.fn().mockResolvedValue(undefined),
+    onDismissInterruptedTurn: vi.fn().mockResolvedValue(undefined),
     imageToolIntent: false,
     onImageToolIntentChange: vi.fn(),
     ...overrides,

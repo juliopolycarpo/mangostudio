@@ -23,6 +23,7 @@ import {
   ChatAttachmentNotFoundError,
 } from '../../attachments/infrastructure/attachment-repository';
 import { verifyChatOwnership } from '../../chats/infrastructure/chat-repository';
+import { registerActiveTurn, unregisterActiveTurn } from '../application/active-turn-registry';
 import {
   NoModelAvailableError,
   type ResolvedModel,
@@ -34,6 +35,13 @@ import {
   EmptyTextTurnError,
   normalizeTextTurnAttachmentIds,
 } from '../application/text-turn-content';
+import {
+  inspectInterruptedTurnResume,
+  reserveInterruptedTurnResume,
+  TurnRecoveryConflictError,
+  TurnRecoveryNotFoundError,
+  TurnRecoveryValidationError,
+} from '../application/turn-recovery';
 
 const KEEPALIVE_INTERVAL_MS = 15_000;
 
@@ -67,6 +75,8 @@ function toSsePayload(event: StreamEvent): object {
   switch (event.type) {
     case 'user_message_id':
       return { type: 'user_message_id', messageId: event.messageId, done: false };
+    case 'assistant_message_id':
+      return { type: 'assistant_message_id', messageId: event.messageId, done: false };
     case 'thinking_start':
       return { type: 'thinking_start', done: false };
     case 'thinking':
@@ -308,6 +318,31 @@ export const respondStreamRoutes = (app: Elysia) =>
             throw err;
           }
 
+          let inspectedRecovery: Awaited<ReturnType<typeof inspectInterruptedTurnResume>> | null =
+            null;
+          if (body.recovery) {
+            try {
+              inspectedRecovery = await inspectInterruptedTurnResume(
+                { chatId: body.chatId, userId, recovery: body.recovery },
+                db
+              );
+            } catch (err) {
+              if (err instanceof TurnRecoveryNotFoundError) {
+                set.status = 404;
+                return { error: err.message, code: ERROR_CODES.NOT_FOUND };
+              }
+              if (err instanceof TurnRecoveryConflictError) {
+                set.status = 409;
+                return { error: err.message, code: ERROR_CODES.CONFLICT };
+              }
+              if (err instanceof TurnRecoveryValidationError) {
+                set.status = 400;
+                return { error: err.message, code: ERROR_CODES.VALIDATION };
+              }
+              throw err;
+            }
+          }
+
           // Model resolution must be pre-flight to return HTTP 503 before SSE headers flush.
           let resolvedModel: ResolvedModel;
           let resolvedAgent: ResolvedRequestAgent;
@@ -315,11 +350,12 @@ export const respondStreamRoutes = (app: Elysia) =>
             resolvedAgent = await resolveRequestAgent({
               db,
               userId,
-              agentMode: body.agentMode,
-              agentId: body.agentId,
+              agentMode: inspectedRecovery?.agentMode ?? body.agentMode,
+              agentId: inspectedRecovery?.agentId ?? body.agentId,
             });
             resolvedModel = await resolveModel({
-              requestedModel: body.model ?? resolvedAgent.profile.model,
+              requestedModel:
+                inspectedRecovery?.modelName ?? body.model ?? resolvedAgent.profile.model,
               userId,
               type: 'text',
             });
@@ -350,7 +386,52 @@ export const respondStreamRoutes = (app: Elysia) =>
             };
           }
 
+          let reservedRecovery: Awaited<ReturnType<typeof reserveInterruptedTurnResume>> | null =
+            null;
+          if (body.recovery && inspectedRecovery) {
+            try {
+              reservedRecovery = await reserveInterruptedTurnResume(
+                {
+                  chatId: body.chatId,
+                  userId,
+                  displayPrompt: body.prompt,
+                  attachmentIds,
+                  recovery: body.recovery,
+                  inspected: inspectedRecovery,
+                  resolvedModel,
+                  agentId: resolvedAgent.agentId,
+                  agentName: resolvedAgent.profile.name,
+                },
+                db
+              );
+            } catch (err) {
+              if (err instanceof TurnRecoveryNotFoundError) {
+                set.status = 404;
+                return { error: err.message, code: ERROR_CODES.NOT_FOUND };
+              }
+              if (err instanceof TurnRecoveryConflictError) {
+                set.status = 409;
+                return { error: err.message, code: ERROR_CODES.CONFLICT };
+              }
+              if (err instanceof TurnRecoveryValidationError) {
+                set.status = 400;
+                return { error: err.message, code: ERROR_CODES.VALIDATION };
+              }
+              throw err;
+            }
+          }
+
           const abortController = new AbortController();
+          let activeAssistantMessageId = reservedRecovery?.assistantMessageId ?? null;
+          const registerTurn = (messageId: string) => {
+            activeAssistantMessageId = messageId;
+            registerActiveTurn(messageId, {
+              userId,
+              chatId: body.chatId,
+              abort: (reasonCode) => abortController.abort(reasonCode),
+            });
+          };
+          if (activeAssistantMessageId) registerTurn(activeAssistantMessageId);
 
           const stream = new ReadableStream({
             async start(controller) {
@@ -367,7 +448,7 @@ export const respondStreamRoutes = (app: Elysia) =>
                   {
                     chatId: body.chatId,
                     userId,
-                    prompt: body.prompt,
+                    prompt: reservedRecovery?.effectivePrompt ?? body.prompt,
                     attachmentIds,
                     model: resolvedModel.modelId,
                     systemPrompt: body.systemPrompt,
@@ -382,11 +463,20 @@ export const respondStreamRoutes = (app: Elysia) =>
                     resolvedAgentProfile: resolvedAgent.profile,
                     signal: abortController.signal,
                     resolvedModel,
+                    preparedTurn: reservedRecovery
+                      ? {
+                          userMessageId: reservedRecovery.userMessageId,
+                          assistantMessageId: reservedRecovery.assistantMessageId,
+                          checkpoint: reservedRecovery.checkpoint,
+                        }
+                      : undefined,
+                    onTurnPrepared: registerTurn,
                   },
                   db
                 )) {
-                  if (abortController.signal.aborted) break;
-                  controller.enqueue(sseEvent(toSsePayload(event)));
+                  if (!abortController.signal.aborted) {
+                    controller.enqueue(sseEvent(toSsePayload(event)));
+                  }
                 }
               } catch (err) {
                 if (!abortController.signal.aborted) {
@@ -402,11 +492,16 @@ export const respondStreamRoutes = (app: Elysia) =>
                 }
               } finally {
                 clearInterval(heartbeat);
-                controller.close();
+                if (activeAssistantMessageId) unregisterActiveTurn(activeAssistantMessageId);
+                try {
+                  controller.close();
+                } catch {
+                  // The browser may already have cancelled the stream.
+                }
               }
             },
             cancel() {
-              abortController.abort();
+              abortController.abort('client_disconnect');
             },
           });
 

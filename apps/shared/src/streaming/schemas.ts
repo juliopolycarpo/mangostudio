@@ -36,6 +36,14 @@ export const SSEUserMessageIdEventSchema = Type.Object({
 
 export type SSEUserMessageIdEvent = Static<typeof SSEUserMessageIdEventSchema>;
 
+export const SSEAssistantMessageIdEventSchema = Type.Object({
+  type: Type.Literal('assistant_message_id'),
+  messageId: Type.String(),
+  done: Type.Literal(false),
+});
+
+export type SSEAssistantMessageIdEvent = Static<typeof SSEAssistantMessageIdEventSchema>;
+
 export const SSEThinkingStartEventSchema = Type.Object({
   type: Type.Literal('thinking_start'),
   done: Type.Literal(false),
@@ -325,6 +333,7 @@ export type SSEDoneEvent = Static<typeof SSEDoneEventSchema>;
 /** Discriminated union of every SSE chunk emitted by the streaming endpoint. */
 export const StreamChunkSchema = Type.Union([
   SSEUserMessageIdEventSchema,
+  SSEAssistantMessageIdEventSchema,
   SSEThinkingStartEventSchema,
   SSEThinkingEventSchema,
   SSETextEventSchema,

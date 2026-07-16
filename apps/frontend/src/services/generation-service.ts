@@ -39,6 +39,27 @@ export async function generateImage(request: GenerateImageRequest): Promise<Gene
 
 export type { StreamChunk };
 
+function recoveryActionError(error: unknown): Error {
+  const value = (error as { value?: { error?: string } } | null)?.value;
+  return new Error(value?.error ?? en.errors.streamRequestFailed);
+}
+
+export async function cancelInterruptedTurn(chatId: string, messageId: string): Promise<void> {
+  const { error } = await client.api
+    .chats({ id: chatId })
+    .messages({ messageId })
+    .recovery.cancel.post();
+  if (error) throw recoveryActionError(error);
+}
+
+export async function dismissInterruptedTurn(chatId: string, messageId: string): Promise<void> {
+  const { error } = await client.api
+    .chats({ id: chatId })
+    .messages({ messageId })
+    .recovery.dismiss.post();
+  if (error) throw recoveryActionError(error);
+}
+
 /**
  * Calls POST /api/respond/stream and invokes onChunk for each SSE event.
  * Throws if the HTTP request fails or the response has no body; error events

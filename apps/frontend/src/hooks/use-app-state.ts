@@ -92,6 +92,8 @@ export function useAppState() {
     handleStop: generationControls.handleStop,
     handleCompactCurrentChat: textGen.handleCompactCurrentChat,
     handleStartSummarizedChat: textGen.handleStartSummarizedChat,
+    handleResumeInterruptedTurn: textGen.handleResumeInterruptedTurn,
+    handleDismissInterruptedTurn: textGen.handleDismissInterruptedTurn,
     refreshCatalog: catalog.refreshCatalog,
   };
 }

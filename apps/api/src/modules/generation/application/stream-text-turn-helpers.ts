@@ -69,21 +69,27 @@ export function* collectToolExecutionResult(
   sink: ToolResultSink
 ): Generator<StreamEvent> {
   if (item.kind === 'event') {
-    if (item.event.type === 'mcp_elicitation') {
-      sink.allParts.push(item.event.part);
+    const event = item.event;
+    if (
+      event.type === 'mcp_elicitation' &&
+      !sink.allParts.some(
+        (part) => part.type === 'mcp_elicitation' && part.elicitationId === event.part.elicitationId
+      )
+    ) {
+      sink.allParts.push(event.part);
     }
-    yield item.event;
+    yield event;
     return;
   }
   const execution = item.execution;
-  sink.allParts.push({
+  upsertToolCallPart(sink.allParts, {
     type: 'tool_call',
     toolCallId: execution.callId,
     name: execution.name,
     args: execution.args,
     execution: execution.execution,
   });
-  sink.allParts.push({
+  upsertToolResultPart(sink.allParts, {
     type: 'tool_result',
     toolCallId: execution.callId,
     content: execution.resultStr,
@@ -126,6 +132,48 @@ export function* collectToolExecutionResult(
   });
 }
 
+export function synchronizeToolProgressForCheckpoint(
+  item: ToolExecutionProgressItem,
+  parts: MessagePart[]
+): void {
+  if (item.kind === 'event') {
+    const event = item.event;
+    if (event.type === 'tool_execution') {
+      upsertToolCallPart(parts, {
+        type: 'tool_call',
+        toolCallId: event.callId,
+        name: event.name,
+        args: {},
+        execution: event.execution,
+      });
+    }
+    if (
+      event.type === 'mcp_elicitation' &&
+      !parts.some(
+        (part) => part.type === 'mcp_elicitation' && part.elicitationId === event.part.elicitationId
+      )
+    ) {
+      parts.push(event.part);
+    }
+    return;
+  }
+
+  const execution = item.execution;
+  upsertToolCallPart(parts, {
+    type: 'tool_call',
+    toolCallId: execution.callId,
+    name: execution.name,
+    args: execution.args,
+    execution: execution.execution,
+  });
+  upsertToolResultPart(parts, {
+    type: 'tool_result',
+    toolCallId: execution.callId,
+    content: execution.resultStr,
+    isError: execution.isError,
+  });
+}
+
 /** Context an image-generation tool call needs beyond its own identifiers. */
 interface ImageGenerationCallContext {
   userId: string;
@@ -135,6 +183,7 @@ interface ImageGenerationCallContext {
   allParts: MessagePart[];
   generatedImageArtifacts: PersistedGeneratedImageInput[];
   nextToolResults: NonNullable<AgentTurnRequest['toolResults']>;
+  checkpoint?: () => Promise<void>;
 }
 
 /**
@@ -172,6 +221,7 @@ export async function* executeImageGenerationCall(
   };
   ctx.allParts.push(toolCallPart);
   yield* drainLifecycleEvents(lifecycleEvents);
+  await ctx.checkpoint?.();
 
   try {
     const imageTool = getTool(name);
@@ -186,6 +236,7 @@ export async function* executeImageGenerationCall(
     lifecycle.transition('running');
     toolCallPart.execution = lifecycle.current;
     yield* drainLifecycleEvents(lifecycleEvents);
+    await ctx.checkpoint?.();
 
     const plan = createGenerateImageToolPlan(args, {
       toolCallId: callId,
@@ -203,6 +254,7 @@ export async function* executeImageGenerationCall(
       imagePartsById.set(imageId, part);
       ctx.allParts.push(part);
       yield { type: 'image_generation_started', imageId, toolCallId: callId, prompt: plan.prompt };
+      await ctx.checkpoint?.();
     }
 
     const outcomes: GenerateImageToolOutcome[] = [];
@@ -238,6 +290,7 @@ export async function* executeImageGenerationCall(
           modelName: outcome.modelName,
           generationTime: outcome.generationTime,
         };
+        await ctx.checkpoint?.();
       } else {
         if (part) {
           part.status = 'error';
@@ -254,6 +307,7 @@ export async function* executeImageGenerationCall(
           modelName: outcome.modelName,
           generationTime: outcome.generationTime,
         };
+        await ctx.checkpoint?.();
       }
     }
 
@@ -274,11 +328,47 @@ export async function* executeImageGenerationCall(
   }
   toolCallPart.execution = lifecycle.current;
   yield* drainLifecycleEvents(lifecycleEvents);
+  await ctx.checkpoint?.();
 
   const resultStr = stringifyToolResult(result);
   ctx.allParts.push({ type: 'tool_result', toolCallId: callId, content: resultStr, isError });
+  await ctx.checkpoint?.();
   yield { type: 'tool_result', callId, name, result, isError };
   ctx.nextToolResults.push({ callId, name, result: resultStr, isError });
+}
+
+export function upsertToolCallPart(
+  parts: MessagePart[],
+  next: Extract<MessagePart, { type: 'tool_call' }>
+): void {
+  const index = parts.findIndex(
+    (part) => part.type === 'tool_call' && part.toolCallId === next.toolCallId
+  );
+  if (index === -1) {
+    parts.push(next);
+    return;
+  }
+  const current = parts[index];
+  if (current?.type !== 'tool_call') return;
+  parts[index] = {
+    ...current,
+    ...next,
+    args: Object.keys(next.args).length > 0 ? next.args : current.args,
+  };
+}
+
+export function upsertToolResultPart(
+  parts: MessagePart[],
+  next: Extract<MessagePart, { type: 'tool_result' }>
+): void {
+  const index = parts.findIndex(
+    (part) => part.type === 'tool_result' && part.toolCallId === next.toolCallId
+  );
+  if (index === -1) {
+    parts.push(next);
+    return;
+  }
+  parts[index] = next;
 }
 
 function* drainLifecycleEvents(events: ToolExecutionTransitionEvent[]): Generator<StreamEvent> {

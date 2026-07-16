@@ -18,6 +18,7 @@ import { insertTestUser, type UserFixture } from '../../support/factories';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
 import {
   buildRespondStreamRequest,
+  createTestStreamDb,
   makeChain,
   mockVerifiedChatOwnership,
   parsePersistedParts,
@@ -191,19 +192,11 @@ async function mockChatGptHarness(insertedMessages: Array<Record<string, unknown
     listLegacyGalleryImages: () => Promise.resolve([]),
   }));
 
-  const dbMock: Record<string, unknown> = {
+  const dbMock = createTestStreamDb({
+    userId: TEST_USER.id,
+    insertedMessages,
     selectFrom: () => makeChain({ userId: TEST_USER.id, lastProviderState: null }),
-    insertInto: (table: string) => ({
-      values: (values: Record<string, unknown>) => {
-        if (table === 'messages') insertedMessages.push({ ...values });
-        return { execute: () => Promise.resolve() };
-      },
-    }),
-    updateTable: () => ({ set: () => makeChain(undefined) }),
-    transaction: () => ({
-      execute: (callback: (trx: Record<string, unknown>) => Promise<unknown>) => callback(dbMock),
-    }),
-  };
+  });
   await mock.module('../../../src/db/database', () => ({ getDb: () => dbMock }));
 }
 
@@ -426,6 +419,21 @@ describe('POST /respond/stream — chatgpt provider', () => {
     expect(backendRequests[0]?.aborted).toBe(true);
     expect(received).toContain('Working…');
     expect(received).not.toContain('"type":"done"');
+
+    const aiMessage = insertedMessages.find((message) => message.role === 'ai');
+    const checkpointDeadline = Date.now() + 2_000;
+    while (aiMessage?.isGenerating !== 0 && Date.now() < checkpointDeadline) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    expect(aiMessage).toMatchObject({ text: 'Working…', isGenerating: 0 });
+    expect(parsePersistedParts(aiMessage?.parts)).toContainEqual(
+      expect.objectContaining({
+        type: 'turn_checkpoint',
+        status: 'interrupted',
+        reasonCode: 'client_disconnect',
+        lastAssistantText: 'Working…',
+      })
+    );
   });
 
   it('surfaces reauth-required as an SSE error event when the backend keeps rejecting tokens', async () => {

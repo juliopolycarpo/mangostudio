@@ -30,11 +30,13 @@ export interface CreateMessageData {
 
 export interface UpdateMessageData {
   text?: string;
-  imageUrl?: string;
+  imageUrl?: string | null;
   isGenerating?: boolean;
-  generationTime?: string;
-  modelName?: string;
+  generationTime?: string | null;
+  modelName?: string | null;
   styleParams?: string[] | null;
+  parts?: string | null;
+  providerState?: string | null;
 }
 
 interface MessageRow {
@@ -95,6 +97,7 @@ interface ListByChatOptions {
 
 interface ListHistoryOptions {
   excludeId?: string;
+  excludeIds?: readonly string[];
   limit?: number;
 }
 
@@ -104,6 +107,10 @@ interface ListGalleryOptions {
 }
 
 const CONTEXT_BOUNDARY_EVENTS = new Set(['chat_compacted', 'summary_handoff']);
+
+function collectExcludedIds(opts: ListHistoryOptions): string[] {
+  return [...new Set([...(opts.excludeIds ?? []), ...(opts.excludeId ? [opts.excludeId] : [])])];
+}
 
 function mapMessage(
   row: MessageRow,
@@ -168,11 +175,13 @@ export async function updateMessage(
 ): Promise<void> {
   const updates: {
     text?: string;
-    imageUrl?: string;
+    imageUrl?: string | null;
     isGenerating?: 0 | 1;
-    generationTime?: string;
-    modelName?: string;
+    generationTime?: string | null;
+    modelName?: string | null;
     styleParams?: string | null;
+    parts?: string | null;
+    providerState?: string | null;
   } = {};
 
   if (data.text !== undefined) updates.text = data.text;
@@ -181,6 +190,8 @@ export async function updateMessage(
   if (data.generationTime !== undefined) updates.generationTime = data.generationTime;
   if (data.modelName !== undefined) updates.modelName = data.modelName;
   if (data.styleParams !== undefined) updates.styleParams = serializeStyleParams(data.styleParams);
+  if (data.parts !== undefined) updates.parts = data.parts;
+  if (data.providerState !== undefined) updates.providerState = data.providerState;
 
   if (Object.keys(updates).length === 0) return;
 
@@ -239,8 +250,9 @@ export async function loadHistory(
     .orderBy('timestamp', 'desc')
     .limit(opts.limit ?? 200);
 
-  if (opts.excludeId) {
-    q = q.where('id', '!=', opts.excludeId);
+  const excludedIds = collectExcludedIds(opts);
+  if (excludedIds.length > 0) {
+    q = q.where('id', 'not in', excludedIds);
   }
 
   const rows = sliceRowsAfterCompactionBoundary((await q.execute()).reverse());
@@ -260,8 +272,9 @@ export async function loadRichHistory(
     .orderBy('timestamp', 'desc')
     .limit(opts.limit ?? 200);
 
-  if (opts.excludeId) {
-    q = q.where('id', '!=', opts.excludeId);
+  const excludedIds = collectExcludedIds(opts);
+  if (excludedIds.length > 0) {
+    q = q.where('id', 'not in', excludedIds);
   }
 
   const rows = sliceRowsAfterCompactionBoundary((await q.execute()).reverse());

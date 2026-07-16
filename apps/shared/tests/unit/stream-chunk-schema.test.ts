@@ -6,6 +6,7 @@ import { StreamChunkSchema } from '../../src/streaming';
 
 const VALID_CHUNKS: StreamChunk[] = [
   { type: 'user_message_id', messageId: 'msg-user-1', done: false },
+  { type: 'assistant_message_id', messageId: 'msg-ai-1', done: false },
   { type: 'thinking_start', done: false },
   { type: 'thinking', text: 'reasoning…', done: false },
   { type: 'text', text: 'Hello', done: false },

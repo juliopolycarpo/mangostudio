@@ -10,6 +10,7 @@ import type { AgentExecutionMode, AgentId, AgentProfile } from '@mangostudio/sha
 import type { ContextSettings } from '@mangostudio/shared/chat';
 import type { ToolIntent } from '@mangostudio/shared/generation';
 import type { PromptSettings } from '@mangostudio/shared/prompt-rules';
+import type { TurnCheckpointPart } from '@mangostudio/shared/turn-recovery';
 import type {
   ContextSeverity,
   ContinuationDisplayMode,
@@ -35,10 +36,17 @@ export interface StreamTextTurnInput {
   resolvedAgentProfile?: AgentProfile;
   signal?: AbortSignal;
   resolvedModel?: ResolvedModel;
+  preparedTurn?: {
+    readonly userMessageId: string;
+    readonly assistantMessageId: string;
+    readonly checkpoint: TurnCheckpointPart;
+  };
+  onTurnPrepared?: (assistantMessageId: string) => void;
 }
 
 export type StreamEvent =
   | { type: 'user_message_id'; messageId: string }
+  | { type: 'assistant_message_id'; messageId: string }
   | { type: 'thinking_start' }
   | { type: 'thinking'; text: string }
   | { type: 'text'; text: string }

@@ -1,11 +1,14 @@
-import type { ReasoningEffort } from '@mangostudio/shared';
+import type { Message, ReasoningEffort } from '@mangostudio/shared';
 import type { AgentExecutionMode, AgentProfile } from '@mangostudio/shared/agents';
 import type { ContextSettings } from '@mangostudio/shared/chat';
+import { isTurnCheckpointPart, type TurnCheckpointPart } from '@mangostudio/shared/turn-recovery';
+import { useMemo } from 'react';
 import type { ContextInfo, FallbackNotice } from '@/features/generation/types';
 import { authClient } from '@/lib/auth-client';
 import { ChatPageContent } from './components/ChatPageContent';
 import { ChatContextDecisionNotice, ChatFallbackNotice } from './components/ChatPageNotices';
 import { InputBar } from './components/InputBar';
+import { InterruptedTurnNotice } from './components/InterruptedTurnNotice';
 import { PinnedTodoPanel } from './components/PinnedTodoPanel';
 import { useChatContextControls, useChatPageMessages } from './hooks/use-chat-page-state';
 
@@ -36,6 +39,30 @@ interface ChatPageProps {
   isAgentListLoading?: boolean;
   onAgentExecutionModeChange?: (mode: AgentExecutionMode) => void;
   onSelectedAgentIdChange?: (agentId: string) => void;
+  onResumeInterruptedTurn: (messageId: string, retryCallIds: string[]) => Promise<void>;
+  onDismissInterruptedTurn: (messageId: string) => Promise<void>;
+}
+
+interface InterruptedTurn {
+  readonly messageId: string;
+  readonly checkpoint: TurnCheckpointPart;
+}
+
+function findLatestInterruptedTurn(messages: readonly Message[]): InterruptedTurn | null {
+  for (let messageIndex = messages.length - 1; messageIndex >= 0; messageIndex--) {
+    const message = messages[messageIndex];
+    if (message.role !== 'ai') continue;
+    // This runs on every message change, so every streaming delta re-scans the
+    // whole chat. Narrow on the discriminator first and pay for full schema
+    // validation only on a part that already claims to be an interrupted turn.
+    const candidate = message.parts?.find(
+      (part) => part.type === 'turn_checkpoint' && part.status === 'interrupted'
+    );
+    if (candidate && isTurnCheckpointPart(candidate)) {
+      return { messageId: message.id, checkpoint: candidate };
+    }
+  }
+  return null;
 }
 
 export function ChatPage({
@@ -65,8 +92,11 @@ export function ChatPage({
   isAgentListLoading = false,
   onAgentExecutionModeChange,
   onSelectedAgentIdChange,
+  onResumeInterruptedTurn,
+  onDismissInterruptedTurn,
 }: ChatPageProps) {
   const { messages, status } = useChatPageMessages({ chatId, seedContextInfo });
+  const interruptedTurn = useMemo(() => findLatestInterruptedTurn(messages), [messages]);
   const { data: session } = authClient.useSession();
   const userName = session?.user?.name?.split(' ')[0] ?? '';
   const contextControls = useChatContextControls({
@@ -100,6 +130,16 @@ export function ChatPage({
           onCompact={() => void contextControls.handleCompactClick()}
           onStartSummarizedChat={() => void contextControls.handleSummarizedChatClick()}
           onContinue={contextControls.handleContinue}
+        />
+      )}
+      {interruptedTurn && (
+        <InterruptedTurnNotice
+          key={interruptedTurn.messageId}
+          messageId={interruptedTurn.messageId}
+          checkpoint={interruptedTurn.checkpoint}
+          disabled={disabled || isGenerating}
+          onResume={onResumeInterruptedTurn}
+          onDismiss={onDismissInterruptedTurn}
         />
       )}
       <PinnedTodoPanel chatId={chatId} />

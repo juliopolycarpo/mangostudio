@@ -14,6 +14,8 @@ import { act, renderHook, waitFor } from '../../support/harness/render';
 
 vi.mock('../../../src/services/generation-service', () => ({
   respondTextStream: vi.fn(),
+  cancelInterruptedTurn: vi.fn(),
+  dismissInterruptedTurn: vi.fn(),
 }));
 
 vi.mock('../../../src/features/chat/services/chat-title', () => ({
@@ -30,9 +32,15 @@ vi.mock('../../../src/features/chat/queries', () => ({
 }));
 
 import { generateChatTitleSuggestion } from '../../../src/features/chat/services/chat-title';
-import { respondTextStream } from '../../../src/services/generation-service';
+import {
+  cancelInterruptedTurn,
+  dismissInterruptedTurn,
+  respondTextStream,
+} from '../../../src/services/generation-service';
 
 const mockStream = vi.mocked(respondTextStream);
+const mockCancelInterruptedTurn = vi.mocked(cancelInterruptedTurn);
+const mockDismissInterruptedTurn = vi.mocked(dismissInterruptedTurn);
 const mockGenerateChatTitle = vi.mocked(generateChatTitleSuggestion);
 
 /**
@@ -913,5 +921,72 @@ describe('useTextGeneration — stream metadata and abort lifecycle', () => {
       expect.stringContaining('optimistic-ai'),
       { isGenerating: false }
     );
+  });
+});
+
+describe('useTextGeneration — interrupted turn actions', () => {
+  beforeEach(() => {
+    mockStream.mockReset();
+    mockCancelInterruptedTurn.mockReset();
+    mockDismissInterruptedTurn.mockReset();
+  });
+
+  it('starts a bounded continuation with the selected retry call ids', async () => {
+    const props = makeProps();
+    mockStream.mockImplementation(
+      makeStreamFn([
+        { type: 'user_message_id', messageId: 'resume-user', done: false },
+        { type: 'assistant_message_id', messageId: 'resume-ai', done: false },
+        { type: 'done', messageId: 'resume-ai', generationTime: '0.5s', done: true },
+      ])
+    );
+    const { result } = renderHook(() => useTextGeneration(props));
+
+    await act(async () => {
+      await result.current.handleResumeInterruptedTurn('interrupted-ai', ['read-1']);
+    });
+
+    expect(mockStream).toHaveBeenCalledWith(
+      expect.objectContaining({
+        chatId: 'chat-1',
+        recovery: {
+          messageId: 'interrupted-ai',
+          requestId: expect.any(String),
+          retryCallIds: ['read-1'],
+        },
+      }),
+      expect.any(Function),
+      expect.any(AbortSignal)
+    );
+    expect(props.optimistic.appendOptimisticMessages).toHaveBeenCalledTimes(1);
+    expect(props.optimistic.updateOptimisticMessage).toHaveBeenCalledWith(
+      'chat-1',
+      expect.stringContaining('optimistic-ai'),
+      { id: 'resume-ai' }
+    );
+  });
+
+  it('surfaces a failed continuation so the recovery action can be retried', async () => {
+    const props = makeProps();
+    mockStream.mockRejectedValue(new Error('Resume rejected'));
+    const { result } = renderHook(() => useTextGeneration(props));
+
+    await expect(
+      act(async () => {
+        await result.current.handleResumeInterruptedTurn('interrupted-ai', []);
+      })
+    ).rejects.toThrow('Resume rejected');
+  });
+
+  it('dismisses the interrupted checkpoint for the current chat', async () => {
+    const props = makeProps();
+    mockDismissInterruptedTurn.mockResolvedValue(undefined);
+    const { result } = renderHook(() => useTextGeneration(props));
+
+    await act(async () => {
+      await result.current.handleDismissInterruptedTurn('interrupted-ai');
+    });
+
+    expect(mockDismissInterruptedTurn).toHaveBeenCalledWith('chat-1', 'interrupted-ai');
   });
 });

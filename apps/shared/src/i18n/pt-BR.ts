@@ -203,6 +203,33 @@ export const messages = {
       compactFailed: 'Falha ao compactar o chat',
       summarizedChatFailed: 'Falha ao iniciar o chat resumido',
     },
+    recovery: {
+      title: 'Turno do agente interrompido',
+      detail:
+        'O MangoStudio salvou o progresso durável mais recente. Revise os resultados das ferramentas antes de continuar.',
+      completedCalls: 'Ferramentas concluídas ({count})',
+      incompleteCalls: 'Ferramentas incompletas ({count})',
+      retryHint:
+        'Somente ferramentas incompletas selecionadas podem ser repetidas. Ferramentas de leitura são selecionadas por padrão.',
+      safeRead: 'Somente leitura',
+      confirmationRequired: 'Pode alterar dados',
+      unknownSafety: 'Segurança desconhecida',
+      failed: 'Falhou',
+      resume: 'Continuar turno',
+      resuming: 'Continuando...',
+      dismiss: 'Dispensar',
+      dismissing: 'Dispensando...',
+      resumeUserMessage: 'Continue o turno interrompido a partir do progresso salvo.',
+      actionFailed: 'Não foi possível atualizar o turno interrompido. Tente novamente.',
+      reason: {
+        clientDisconnect: 'O cliente desconectou enquanto o agente estava trabalhando.',
+        serverRestart: 'O servidor reiniciou enquanto o agente estava trabalhando.',
+        providerError: 'O provedor encerrou o turno com um erro.',
+        userCancelled: 'O turno foi interrompido antes de terminar.',
+        toolLoopExhausted: 'O turno atingiu o limite de iterações de ferramentas.',
+        unknown: 'O turno terminou antes que a conclusão pudesse ser confirmada.',
+      },
+    },
     fallback: {
       toReplay:
         'Continuação stateful não está mais disponível. Continuando com replay do transcript.',

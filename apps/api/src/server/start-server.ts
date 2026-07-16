@@ -5,7 +5,7 @@
  */
 
 import { app } from '../app';
-import { closeDb } from '../db/database';
+import { closeDb, getDb } from '../db/database';
 import { getBuildInfo } from '../lib/build-info';
 import {
   assertValidAuthSecret,
@@ -17,6 +17,7 @@ import {
 import { ensureRuntimeDirs } from '../lib/mango-paths';
 import { getDefaultFrontendDir } from '../lib/runtime-paths';
 import { removeState, type ServerState, writeState } from '../lib/server-state';
+import { reconcileStaleTurns } from '../modules/generation/application/turn-recovery';
 import { closeAllMcpClients } from '../services/mcp/connection-manager';
 import {
   flushObservabilitySnapshot,
@@ -49,6 +50,7 @@ export async function startServer(options: StartOptions = {}): Promise<ServerHan
   const { port, host } = cfg.server;
 
   await runMigrations();
+  await reconcileStaleTurns({ reasonCode: 'server_restart' }, getDb());
   await loadObservabilitySnapshot();
   const frontendDir = getEmbeddedFrontend() ? EMBEDDED_FRONTEND_DIR : getDefaultFrontendDir();
   registerFrontend(app, frontendDir);

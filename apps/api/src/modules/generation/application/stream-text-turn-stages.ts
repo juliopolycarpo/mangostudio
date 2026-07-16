@@ -35,10 +35,9 @@ import { generateId } from '../../../utils/id';
 import { resolveProviderRuntimeAttachments } from '../../attachments/application/runtime-attachment-resolver';
 import { loadHistory, loadRichHistory } from '../../messages/infrastructure/message-repository';
 import {
+  finalizeCheckpointedAiResponse,
   type PersistedGeneratedImageInput,
-  persistAiResponse,
-  persistErrorResponse,
-  persistUserMessage,
+  persistTextTurnStart,
   updateChatAfterTurn,
 } from '../infrastructure/conversation-persistence';
 import type { ResolvedAgentRuntime } from './resolve-agent-runtime';
@@ -55,9 +54,14 @@ import {
   finalizeDanglingToolExecutions,
   handleTurnCompleted,
   mergeMessageParts,
+  synchronizeToolProgressForCheckpoint,
+  upsertToolCallPart,
+  upsertToolResultPart,
 } from './stream-text-turn-helpers';
 import type { StreamEvent, StreamTextTurnInput } from './stream-text-turn-types';
 import { parseToolArgs, stringifyToolResult } from './tool-result-utils';
+import { createTurnCheckpointPart, TurnCheckpointWriter } from './turn-checkpoint';
+import { reconcileInterruptedMessageParts, sealUnresolvedToolCalls } from './turn-recovery';
 
 export const TOOL_LOOP_EXHAUSTED_MESSAGE =
   'The model exceeded the maximum number of tool interactions.';
@@ -95,6 +99,8 @@ export interface StreamTextTurnSession {
   delegationState: { subagentCallCount: number };
   fullText: string;
   executionState: AgentTurnExecutionState;
+  checkpoint: ReturnType<typeof createTurnCheckpointPart>;
+  checkpointWriter: TurnCheckpointWriter;
 }
 
 interface DegradationContext {
@@ -181,29 +187,47 @@ export async function prepareStreamTextTurn(
   });
 
   const now = Date.now();
-  const userMsgId = generateId();
-  await persistUserMessage(
-    {
-      id: userMsgId,
-      userId: input.userId,
-      chatId: input.chatId,
-      text: input.prompt,
-      attachmentIds,
-      timestamp: now,
-      interactionMode,
-    },
-    db
-  );
+  const userMsgId = input.preparedTurn?.userMessageId ?? generateId();
+  const aiMsgId = input.preparedTurn?.assistantMessageId ?? generateId();
+  const checkpoint =
+    input.preparedTurn?.checkpoint ??
+    createTurnCheckpointPart({
+      turnId: aiMsgId,
+      startedAt: now,
+      provider: provider.providerType,
+      modelName: modelId,
+      agentId: agentRuntime.profile.id,
+      agentName: agentRuntime.profile.name,
+    });
+  const allParts: MessagePart[] = [checkpoint];
 
-  return {
+  if (!input.preparedTurn) {
+    await persistTextTurnStart(
+      {
+        userId: input.userId,
+        userMessageId: userMsgId,
+        assistantMessageId: aiMsgId,
+        chatId: input.chatId,
+        displayPrompt: input.prompt,
+        attachmentIds,
+        timestamp: now,
+        interactionMode,
+        modelName: modelId,
+        assistantParts: allParts,
+      },
+      db
+    );
+  }
+
+  const session = {
     input,
     db,
     chatId,
     userId,
     signal: input.signal,
     userMsgId,
-    aiMsgId: generateId(),
-    startTime: Date.now(),
+    aiMsgId,
+    startTime: now,
     interactionMode,
     resolvedModel,
     provider,
@@ -219,7 +243,7 @@ export async function prepareStreamTextTurn(
     attachmentIds,
     warmupPromise,
     runtimeAttachments: [],
-    allParts: [],
+    allParts,
     generatedImageArtifacts: [],
     delegationState: { subagentCallCount: 0 },
     fullText: '',
@@ -227,7 +251,29 @@ export async function prepareStreamTextTurn(
       durableProviderState: null,
       turnLocalState: null,
     },
-  };
+    checkpoint,
+    checkpointWriter: null as unknown as TurnCheckpointWriter,
+  } satisfies StreamTextTurnSession;
+  session.checkpointWriter = new TurnCheckpointWriter({
+    db,
+    chatId,
+    messageId: aiMsgId,
+    checkpoint,
+    getContent: () => ({
+      text: session.fullText,
+      parts: session.allParts,
+      // Durable state only: turn-local state must never reach the message row,
+      // and every finalizer persists the same narrow value.
+      providerState: session.executionState.durableProviderState,
+      generationTime: `${((Date.now() - session.startTime) / 1000).toFixed(1)}s`,
+    }),
+  });
+  input.onTurnPrepared?.(aiMsgId);
+  return session;
+}
+
+async function checkpointTurn(session: StreamTextTurnSession, force = false): Promise<void> {
+  await session.checkpointWriter.checkpoint({ force });
 }
 
 /**
@@ -342,6 +388,7 @@ export async function* prepareAgentContinuation(
         reasonCode: decision.reasonCode,
         fromProvider: decision.previousProvider,
       });
+      await checkpointTurn(session, true);
       return null;
     case 'start_replay':
       return null;
@@ -376,12 +423,20 @@ export async function* emitAgentStreamEvent(
       }
       session.allParts.push({ type: 'thinking', text: event.text });
       yield { type: 'thinking', text: event.text };
+      await checkpointTurn(session);
       break;
 
     case 'tool_call_started':
       loop.inThinkingSegment = false;
       loop.pendingCalls.set(event.callId, { name: event.name ?? '', argsStr: '' });
+      upsertToolCallPart(session.allParts, {
+        type: 'tool_call',
+        toolCallId: event.callId,
+        name: event.name ?? '',
+        args: {},
+      });
       yield { type: 'tool_call_started', callId: event.callId, name: event.name ?? '' };
+      await checkpointTurn(session, true);
       break;
 
     case 'tool_call_arguments_delta': {
@@ -392,12 +447,19 @@ export async function* emitAgentStreamEvent(
 
     case 'tool_call_completed':
       loop.pendingCalls.set(event.callId, { name: event.name, argsStr: event.arguments });
+      upsertToolCallPart(session.allParts, {
+        type: 'tool_call',
+        toolCallId: event.callId,
+        name: event.name,
+        args: parseToolArgs(event.arguments),
+      });
       yield {
         type: 'tool_call_completed',
         callId: event.callId,
         name: event.name,
         arguments: event.arguments,
       };
+      await checkpointTurn(session, true);
       break;
 
     case 'tool_result': {
@@ -409,14 +471,14 @@ export async function* emitAgentStreamEvent(
       const satisfiedCall = loop.pendingCalls.get(event.callId);
       if (satisfiedCall) {
         loop.pendingCalls.delete(event.callId);
-        session.allParts.push({
+        upsertToolCallPart(session.allParts, {
           type: 'tool_call',
           toolCallId: event.callId,
           name: satisfiedCall.name || event.name,
           args: parseToolArgs(satisfiedCall.argsStr),
         });
       }
-      session.allParts.push({
+      upsertToolResultPart(session.allParts, {
         type: 'tool_result',
         toolCallId: event.callId,
         content:
@@ -430,6 +492,7 @@ export async function* emitAgentStreamEvent(
         result: event.result,
         isError: event.isError ?? false,
       };
+      await checkpointTurn(session, true);
       break;
     }
 
@@ -438,6 +501,7 @@ export async function* emitAgentStreamEvent(
       session.fullText += event.text;
       session.allParts.push({ type: 'text', text: event.text });
       yield { type: 'text', text: event.text };
+      await checkpointTurn(session);
       break;
 
     case 'turn_completed':
@@ -457,6 +521,7 @@ export async function* emitAgentStreamEvent(
         degradedThisTurn: loop.degradedThisTurn,
         executionState,
       });
+      await checkpointTurn(session, true);
       break;
 
     case 'continuation_degraded':
@@ -467,6 +532,7 @@ export async function* emitAgentStreamEvent(
         reason: event.reason,
         reasonCode: event.reasonCode,
       });
+      await checkpointTurn(session, true);
       break;
 
     case 'turn_error':
@@ -535,11 +601,13 @@ async function* executePendingToolCalls(
       db,
       signal,
     })) {
+      synchronizeToolProgressForCheckpoint(item, session.allParts);
       yield* collectToolExecutionResult(item, {
         allParts: session.allParts,
         nextToolResults,
         includeSubagentTrace: multiAgentSettings.traceVisibility !== 'off',
       });
+      await checkpointTurn(session, true);
     }
     return;
   }
@@ -564,6 +632,8 @@ async function* executePendingToolCalls(
             db,
             signal,
           })) {
+            synchronizeToolProgressForCheckpoint(item, session.allParts);
+            await checkpointTurn(session, true);
             nonImageResultEntries.push(item);
           }
         })()
@@ -578,16 +648,19 @@ async function* executePendingToolCalls(
       allParts: session.allParts,
       generatedImageArtifacts: session.generatedImageArtifacts,
       nextToolResults,
+      checkpoint: () => checkpointTurn(session, true),
     });
   }
 
   if (nonImageRunner) await nonImageRunner;
   for (const item of nonImageResultEntries) {
+    // Already projected into allParts as it streamed in above.
     yield* collectToolExecutionResult(item, {
       allParts: session.allParts,
       nextToolResults,
       includeSubagentTrace: multiAgentSettings.traceVisibility !== 'off',
     });
+    await checkpointTurn(session, true);
   }
 }
 
@@ -615,7 +688,11 @@ export async function* runAgentToolLoop(
   const runtimeSettings = agentRuntime.runtimeSettings;
   const maxIter = runtimeSettings.maxToolIterations ?? MAX_TOOL_ITERATIONS_DEFAULT;
 
-  const richHistory = await loadRichHistory(chatId, { excludeId: session.userMsgId }, session.db);
+  const richHistory = await loadRichHistory(
+    chatId,
+    { excludeIds: [session.userMsgId, session.aiMsgId] },
+    session.db
+  );
   const initialProviderState = yield* prepareAgentContinuation(session);
 
   const generateAgentTurnStream = provider.generateAgentTurnStream;
@@ -699,7 +776,11 @@ export async function* runLegacyTextStream(
   } = session;
   const { modelId, capabilities } = resolvedModel;
 
-  const history = await loadHistory(chatId, { excludeId: session.userMsgId }, session.db);
+  const history = await loadHistory(
+    chatId,
+    { excludeIds: [session.userMsgId, session.aiMsgId] },
+    session.db
+  );
   let legacyInThinking = false;
 
   const generateTextStream = provider.generateTextStream;
@@ -730,11 +811,13 @@ export async function* runLegacyTextStream(
       }
       session.allParts.push({ type: 'thinking', text: chunk.text });
       yield { type: 'thinking', text: chunk.text };
+      await checkpointTurn(session);
     } else if (chunk.type === 'text' && chunk.text && !chunk.done) {
       legacyInThinking = false;
       session.fullText += chunk.text;
       session.allParts.push({ type: 'text', text: chunk.text });
       yield { type: 'text', text: chunk.text };
+      await checkpointTurn(session);
     } else if (chunk.type === 'tool_call') {
       // Coarse marker for legacy-path providers without generateAgentTurnStream;
       // agent-turn providers surface real tool_call/tool_result parts instead.
@@ -743,6 +826,7 @@ export async function* runLegacyTextStream(
       legacyInThinking = false;
       session.allParts.push({ type: 'system_event', event: eventName, detail });
       yield { type: 'system_event', event: eventName, detail };
+      await checkpointTurn(session, true);
     }
   }
 }
@@ -764,7 +848,11 @@ export async function* runSingleShotTextGeneration(
   } = session;
   const { modelId, capabilities } = resolvedModel;
 
-  const history = await loadHistory(chatId, { excludeId: session.userMsgId }, session.db);
+  const history = await loadHistory(
+    chatId,
+    { excludeIds: [session.userMsgId, session.aiMsgId] },
+    session.db
+  );
 
   const generateText = provider.generateText;
   if (!generateText) return;
@@ -784,7 +872,9 @@ export async function* runSingleShotTextGeneration(
 
   if (!signal?.aborted) {
     session.fullText = result.text;
+    session.allParts.push({ type: 'text', text: result.text });
     yield { type: 'text', text: session.fullText };
+    await checkpointTurn(session, true);
   }
 }
 
@@ -838,23 +928,25 @@ export async function* finalizeSuccessfulTurn(
   }
 
   finalizeDanglingToolExecutions(session.allParts);
+  await session.checkpointWriter.prepareFinal('completed');
+  sealUnresolvedToolCalls(session.allParts);
   const finalParts = mergeMessageParts(session.allParts);
 
-  await persistAiResponse(
+  const finalized = await finalizeCheckpointedAiResponse(
     {
       id: aiMsgId,
       userId,
       chatId,
       text: session.fullText,
-      parts: finalParts.length > 0 ? finalParts : null,
+      parts: finalParts,
       providerState: executionState.durableProviderState,
-      timestamp: aiTimestamp,
       generationTime,
       modelName: modelId,
       generatedImages: generatedImageArtifacts,
     },
     db
   );
+  if (!finalized) return;
 
   await updateChatAfterTurn(
     chatId,
@@ -910,28 +1002,31 @@ export async function* finalizeToolLoopExhausted(
   }
 
   const generationTime = `${((Date.now() - startTime) / 1000).toFixed(1)}s`;
-  finalizeDanglingToolExecutions(session.allParts);
-  const errorParts: MessagePart[] = [
-    ...session.allParts,
-    { type: 'error', text: TOOL_LOOP_EXHAUSTED_MESSAGE },
-  ];
+  reconcileInterruptedMessageParts(session.allParts);
+  session.allParts.push({ type: 'error', text: TOOL_LOOP_EXHAUSTED_MESSAGE });
+  // The failure text is a placeholder for the row, never durable assistant
+  // output: writing it into `fullText` would republish it to the resume prompt
+  // as authoritative content the model believes it produced.
+  await session.checkpointWriter.prepareFinal('interrupted', 'tool_loop_exhausted');
+  sealUnresolvedToolCalls(session.allParts);
+  const errorParts = mergeMessageParts(session.allParts);
 
   try {
-    await persistErrorResponse(
+    const finalized = await finalizeCheckpointedAiResponse(
       {
         id: aiMsgId,
         userId,
         chatId,
         text: session.fullText || TOOL_LOOP_EXHAUSTED_MESSAGE,
         parts: errorParts,
-        timestamp: Date.now(),
+        providerState: executionState.durableProviderState,
         generationTime,
         modelName: modelId,
         generatedImages: generatedImageArtifacts,
-        interactionMode,
       },
       db
     );
+    if (!finalized) return;
     await updateChatAfterTurn(
       chatId,
       Date.now(),
@@ -961,9 +1056,14 @@ export async function* finalizeTurnError(
     startTime,
     resolvedModel,
     generatedImageArtifacts,
+    interactionMode,
+    agentRuntime,
   } = session;
 
-  if (signal?.aborted) return;
+  if (signal?.aborted) {
+    await finalizeInterruptedTurn(session, getAbortInterruptionReason(signal));
+    return;
+  }
 
   const message = error instanceof Error ? error.message : 'Stream generation failed';
   const code = getErrorCode(error);
@@ -986,25 +1086,91 @@ export async function* finalizeTurnError(
 
   try {
     const generationTime = `${((Date.now() - startTime) / 1000).toFixed(1)}s`;
-    finalizeDanglingToolExecutions(session.allParts);
-    const errorParts: MessagePart[] = [...session.allParts, { type: 'error', text: message }];
-    await persistErrorResponse(
+    reconcileInterruptedMessageParts(session.allParts);
+    session.allParts.push({ type: 'error', text: message });
+    // See finalizeToolLoopExhausted: the error text must not reach `fullText`,
+    // which the checkpoint republishes as durable assistant output on resume.
+    await session.checkpointWriter.prepareFinal('interrupted', 'provider_error');
+    sealUnresolvedToolCalls(session.allParts);
+    const errorParts = mergeMessageParts(session.allParts);
+    const finalized = await finalizeCheckpointedAiResponse(
       {
         id: aiMsgId,
         userId,
         chatId,
         text: session.fullText || message,
         parts: errorParts,
-        timestamp: Date.now(),
+        providerState: executionState.durableProviderState,
         generationTime,
         modelName: resolvedModel.modelId,
         generatedImages: generatedImageArtifacts,
       },
       db
     );
+    if (finalized) {
+      await updateChatAfterTurn(
+        chatId,
+        Date.now(),
+        interactionMode,
+        interactionMode === 'agent' ? agentRuntime.profile.id : null,
+        db
+      );
+    }
   } catch {
     // best-effort
   }
 
   yield { type: 'error', error: message, ...(code ? { code } : {}) };
+}
+
+export async function finalizeInterruptedTurn(
+  session: StreamTextTurnSession,
+  reasonCode: 'client_disconnect' | 'user_cancelled' | 'unknown'
+): Promise<void> {
+  const {
+    db,
+    aiMsgId,
+    userId,
+    chatId,
+    startTime,
+    interactionMode,
+    agentRuntime,
+    resolvedModel,
+    generatedImageArtifacts,
+    executionState,
+  } = session;
+  reconcileInterruptedMessageParts(session.allParts);
+  const generationTime = `${((Date.now() - startTime) / 1000).toFixed(1)}s`;
+  await session.checkpointWriter.prepareFinal('interrupted', reasonCode);
+  sealUnresolvedToolCalls(session.allParts);
+  const finalized = await finalizeCheckpointedAiResponse(
+    {
+      id: aiMsgId,
+      userId,
+      chatId,
+      text: session.fullText,
+      parts: mergeMessageParts(session.allParts),
+      providerState: executionState.durableProviderState,
+      generationTime,
+      modelName: resolvedModel.modelId,
+      generatedImages: generatedImageArtifacts,
+    },
+    db
+  );
+  if (!finalized) return;
+  await updateChatAfterTurn(
+    chatId,
+    Date.now(),
+    interactionMode,
+    interactionMode === 'agent' ? agentRuntime.profile.id : null,
+    db
+  );
+}
+
+export function getAbortInterruptionReason(
+  signal: AbortSignal
+): 'client_disconnect' | 'user_cancelled' | 'unknown' {
+  const reason = signal.reason;
+  if (reason === 'client_disconnect' || reason === 'user_cancelled') return reason;
+  return 'unknown';
 }

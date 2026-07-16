@@ -38,6 +38,9 @@ function makeSession(capabilities: ModelCapabilities): StreamTextTurnSession {
     toolDefs: [],
     effectiveSystemPrompt: undefined,
     executionState: { durableProviderState: null, turnLocalState: null },
+    checkpointWriter: {
+      checkpoint: () => Promise.resolve(false),
+    },
     provider: { providerType: 'cursor' },
     resolvedModel: { modelId: 'composer-2.5', capabilities },
   } as unknown as StreamTextTurnSession;
@@ -116,7 +119,9 @@ describe('emitAgentStreamEvent — provider-supplied tool_result', () => {
     ]);
 
     expect(loop.pendingCalls.size).toBe(1);
-    expect(session.allParts).toEqual([]);
+    expect(session.allParts).toEqual([
+      { type: 'tool_call', toolCallId: 'call-1', name: 'bash', args: {} },
+    ]);
     expect(emitted.filter((event) => event.type === 'tool_result')).toEqual([]);
   });
 });
