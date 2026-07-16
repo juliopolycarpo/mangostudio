@@ -121,5 +121,14 @@ export const TurnRecoveryActionResponseSchema = Type.Object({
 export type TurnRecoveryActionResponse = Static<typeof TurnRecoveryActionResponseSchema>;
 
 export function isTurnCheckpointPart(value: unknown): value is TurnCheckpointPart {
+  // Callers scan every part of every message, so reject on the cheap
+  // discriminator before paying for full schema validation.
+  if (
+    typeof value !== 'object' ||
+    value === null ||
+    (value as { type?: unknown }).type !== 'turn_checkpoint'
+  ) {
+    return false;
+  }
   return Value.Check(TurnCheckpointPartSchema, value);
 }

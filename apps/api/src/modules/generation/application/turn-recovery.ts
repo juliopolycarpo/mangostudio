@@ -257,6 +257,7 @@ export async function interruptCheckpointedMessage(
     Date.now(),
     { force: true, status: 'interrupted', reasonCode: input.reasonCode }
   );
+  sealUnresolvedToolCalls(parsed);
 
   const result = await db
     .updateTable('messages')
@@ -275,9 +276,11 @@ export async function reconcileStaleTurns(
   },
   db: Kysely<Database>
 ): Promise<number> {
+  // Only the id is needed: interruptCheckpointedMessage re-reads each candidate
+  // row under its own isGenerating guard.
   let query = db
     .selectFrom('messages')
-    .select(['id', 'text', 'parts', 'providerState'])
+    .select(['id'])
     .where('role', '=', 'ai')
     .where('isGenerating', '=', 1);
   if (input.chatId) query = query.where('chatId', '=', input.chatId);
@@ -432,4 +435,35 @@ export function reconcileInterruptedMessageParts(parts: MessagePart[]): void {
       reasonCode: outcomeUnknown ? 'outcome_unknown' : 'turn_aborted',
     });
   }
+}
+
+/**
+ * Appends a synthetic error result for every tool call left without one.
+ * Providers reject a replayed tool call that carries no matching result, so an
+ * unsealed turn would break every later turn in the chat.
+ *
+ * Must run after the checkpoint is refreshed: the checkpoint derives
+ * `incompleteCalls` from the calls that still have no result.
+ */
+export function sealUnresolvedToolCalls(parts: MessagePart[]): void {
+  const resultIds = new Set(
+    parts.filter((part) => part.type === 'tool_result').map((part) => part.toolCallId)
+  );
+  const sealed: MessagePart[] = [];
+  for (const part of parts) {
+    if (part.type !== 'tool_call' || resultIds.has(part.toolCallId)) continue;
+    resultIds.add(part.toolCallId);
+    sealed.push({
+      type: 'tool_result',
+      toolCallId: part.toolCallId,
+      content: JSON.stringify({
+        error:
+          part.execution?.reasonCode === 'outcome_unknown'
+            ? 'The turn was interrupted while this tool call was running; its outcome is unknown.'
+            : 'The turn was interrupted before this tool call produced a result.',
+      }),
+      isError: true,
+    });
+  }
+  parts.push(...sealed);
 }

@@ -174,41 +174,6 @@ export async function persistAiResponse(
   );
 }
 
-export interface PersistErrorResponseInput {
-  id: string;
-  userId?: string;
-  chatId: string;
-  text: string;
-  parts?: MessagePart[] | null;
-  timestamp: number;
-  generationTime: string;
-  modelName: string;
-  generatedImages?: PersistedGeneratedImageInput[];
-  interactionMode?: InteractionMode;
-}
-
-export async function persistErrorResponse(
-  input: PersistErrorResponseInput,
-  db: Kysely<Database>
-): Promise<void> {
-  await insertAiMessageWithGeneratedImages(
-    {
-      id: input.id,
-      chatId: input.chatId,
-      role: 'ai',
-      text: input.text,
-      parts: input.parts ? JSON.stringify(input.parts) : null,
-      timestamp: input.timestamp,
-      isGenerating: false,
-      generationTime: input.generationTime,
-      modelName: input.modelName,
-      interactionMode: input.interactionMode ?? 'chat',
-    },
-    input,
-    db
-  );
-}
-
 export interface FinalizeCheckpointedAiResponseInput {
   id: string;
   userId: string;

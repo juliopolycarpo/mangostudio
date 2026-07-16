@@ -18,6 +18,7 @@ import {
 } from '@mangostudio/shared/turn-recovery';
 import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';
+import { logPersistenceError } from '../../../services/providers/core/continuation-logger';
 
 export const CHECKPOINT_TEXT_INTERVAL_CHARS = 512;
 export const CHECKPOINT_MAX_INTERVAL_MS = 1_000;
@@ -40,6 +41,7 @@ export interface TurnCheckpointContent {
 
 interface TurnCheckpointWriterOptions {
   readonly db: Kysely<Database>;
+  readonly chatId: string;
   readonly messageId: string;
   readonly checkpoint: TurnCheckpointPart;
   readonly getContent: () => TurnCheckpointContent;
@@ -78,21 +80,36 @@ export class TurnCheckpointWriter {
     this.lastWrittenAt = now;
     refreshTurnCheckpointPart(this.options.checkpoint, content, now, options);
     const serializedParts = JSON.stringify(content.parts);
-    this.pendingWrite = this.pendingWrite.then(() =>
-      this.options.db
-        .updateTable('messages')
-        .set({
-          text: content.text,
-          parts: serializedParts,
-          providerState: content.providerState,
-          generationTime: content.generationTime,
-        })
-        .where('id', '=', this.options.messageId)
-        .where('isGenerating', '=', 1)
-        .execute()
-        .then(() => undefined)
-    );
-    return this.pendingWrite.then(() => true);
+    // Checkpointing is best effort: a failed write is logged and swallowed so a
+    // transient DB error can neither abort the live turn nor reject every later
+    // write chained onto this promise.
+    const write = this.pendingWrite
+      .then(() =>
+        this.options.db
+          .updateTable('messages')
+          .set({
+            text: content.text,
+            parts: serializedParts,
+            providerState: content.providerState,
+            generationTime: content.generationTime,
+          })
+          .where('id', '=', this.options.messageId)
+          .where('isGenerating', '=', 1)
+          .execute()
+      )
+      .then(
+        () => true,
+        (error: unknown) => {
+          logPersistenceError({
+            chatId: this.options.chatId,
+            error: String(error),
+            phase: 'turn_checkpoint',
+          });
+          return false;
+        }
+      );
+    this.pendingWrite = write.then(() => undefined);
+    return write;
   }
 
   flush(): Promise<void> {

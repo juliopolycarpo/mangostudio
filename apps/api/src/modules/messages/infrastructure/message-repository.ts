@@ -108,6 +108,10 @@ interface ListGalleryOptions {
 
 const CONTEXT_BOUNDARY_EVENTS = new Set(['chat_compacted', 'summary_handoff']);
 
+function collectExcludedIds(opts: ListHistoryOptions): string[] {
+  return [...new Set([...(opts.excludeIds ?? []), ...(opts.excludeId ? [opts.excludeId] : [])])];
+}
+
 function mapMessage(
   row: MessageRow,
   generatedImages?: GeneratedImageArtifact[],
@@ -246,9 +250,7 @@ export async function loadHistory(
     .orderBy('timestamp', 'desc')
     .limit(opts.limit ?? 200);
 
-  const excludedIds = [
-    ...new Set([...(opts.excludeIds ?? []), ...(opts.excludeId ? [opts.excludeId] : [])]),
-  ];
+  const excludedIds = collectExcludedIds(opts);
   if (excludedIds.length > 0) {
     q = q.where('id', 'not in', excludedIds);
   }
@@ -270,9 +272,7 @@ export async function loadRichHistory(
     .orderBy('timestamp', 'desc')
     .limit(opts.limit ?? 200);
 
-  const excludedIds = [
-    ...new Set([...(opts.excludeIds ?? []), ...(opts.excludeId ? [opts.excludeId] : [])]),
-  ];
+  const excludedIds = collectExcludedIds(opts);
   if (excludedIds.length > 0) {
     q = q.where('id', 'not in', excludedIds);
   }

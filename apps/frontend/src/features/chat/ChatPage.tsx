@@ -2,6 +2,7 @@ import type { Message, ReasoningEffort } from '@mangostudio/shared';
 import type { AgentExecutionMode, AgentProfile } from '@mangostudio/shared/agents';
 import type { ContextSettings } from '@mangostudio/shared/chat';
 import { isTurnCheckpointPart, type TurnCheckpointPart } from '@mangostudio/shared/turn-recovery';
+import { useMemo } from 'react';
 import type { ContextInfo, FallbackNotice } from '@/features/generation/types';
 import { authClient } from '@/lib/auth-client';
 import { ChatPageContent } from './components/ChatPageContent';
@@ -88,7 +89,7 @@ export function ChatPage({
   onDismissInterruptedTurn,
 }: ChatPageProps) {
   const { messages, status } = useChatPageMessages({ chatId, seedContextInfo });
-  const interruptedTurn = findLatestInterruptedTurn(messages);
+  const interruptedTurn = useMemo(() => findLatestInterruptedTurn(messages), [messages]);
   const { data: session } = authClient.useSession();
   const userName = session?.user?.name?.split(' ')[0] ?? '';
   const contextControls = useChatContextControls({

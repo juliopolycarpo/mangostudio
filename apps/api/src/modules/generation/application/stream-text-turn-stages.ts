@@ -60,7 +60,7 @@ import {
 import type { StreamEvent, StreamTextTurnInput } from './stream-text-turn-types';
 import { parseToolArgs, stringifyToolResult } from './tool-result-utils';
 import { createTurnCheckpointPart, TurnCheckpointWriter } from './turn-checkpoint';
-import { reconcileInterruptedMessageParts } from './turn-recovery';
+import { reconcileInterruptedMessageParts, sealUnresolvedToolCalls } from './turn-recovery';
 
 export const TOOL_LOOP_EXHAUSTED_MESSAGE =
   'The model exceeded the maximum number of tool interactions.';
@@ -255,13 +255,15 @@ export async function prepareStreamTextTurn(
   } satisfies StreamTextTurnSession;
   session.checkpointWriter = new TurnCheckpointWriter({
     db,
+    chatId,
     messageId: aiMsgId,
     checkpoint,
     getContent: () => ({
       text: session.fullText,
       parts: session.allParts,
-      providerState:
-        session.executionState.durableProviderState ?? session.executionState.turnLocalState,
+      // Durable state only: turn-local state must never reach the message row,
+      // and every finalizer persists the same narrow value.
+      providerState: session.executionState.durableProviderState,
       generationTime: `${((Date.now() - session.startTime) / 1000).toFixed(1)}s`,
     }),
   });
@@ -599,7 +601,6 @@ async function* executePendingToolCalls(
       signal,
     })) {
       synchronizeToolProgressForCheckpoint(item, session.allParts);
-      await checkpointTurn(session, true);
       yield* collectToolExecutionResult(item, {
         allParts: session.allParts,
         nextToolResults,
@@ -652,7 +653,7 @@ async function* executePendingToolCalls(
 
   if (nonImageRunner) await nonImageRunner;
   for (const item of nonImageResultEntries) {
-    synchronizeToolProgressForCheckpoint(item, session.allParts);
+    // Already projected into allParts as it streamed in above.
     yield* collectToolExecutionResult(item, {
       allParts: session.allParts,
       nextToolResults,
@@ -927,6 +928,7 @@ export async function* finalizeSuccessfulTurn(
 
   finalizeDanglingToolExecutions(session.allParts);
   await session.checkpointWriter.prepareFinal('completed');
+  sealUnresolvedToolCalls(session.allParts);
   const finalParts = mergeMessageParts(session.allParts);
 
   const finalized = await finalizeCheckpointedAiResponse(
@@ -1003,6 +1005,7 @@ export async function* finalizeToolLoopExhausted(
   session.allParts.push({ type: 'error', text: TOOL_LOOP_EXHAUSTED_MESSAGE });
   if (!session.fullText) session.fullText = TOOL_LOOP_EXHAUSTED_MESSAGE;
   await session.checkpointWriter.prepareFinal('interrupted', 'tool_loop_exhausted');
+  sealUnresolvedToolCalls(session.allParts);
   const errorParts = mergeMessageParts(session.allParts);
 
   try {
@@ -1084,6 +1087,7 @@ export async function* finalizeTurnError(
     session.allParts.push({ type: 'error', text: message });
     if (!session.fullText) session.fullText = message;
     await session.checkpointWriter.prepareFinal('interrupted', 'provider_error');
+    sealUnresolvedToolCalls(session.allParts);
     const errorParts = mergeMessageParts(session.allParts);
     const finalized = await finalizeCheckpointedAiResponse(
       {
@@ -1134,6 +1138,7 @@ export async function finalizeInterruptedTurn(
   reconcileInterruptedMessageParts(session.allParts);
   const generationTime = `${((Date.now() - startTime) / 1000).toFixed(1)}s`;
   await session.checkpointWriter.prepareFinal('interrupted', reasonCode);
+  sealUnresolvedToolCalls(session.allParts);
   const finalized = await finalizeCheckpointedAiResponse(
     {
       id: aiMsgId,
@@ -1158,7 +1163,7 @@ export async function finalizeInterruptedTurn(
   );
 }
 
-function getAbortInterruptionReason(
+export function getAbortInterruptionReason(
   signal: AbortSignal
 ): 'client_disconnect' | 'user_cancelled' | 'unknown' {
   const reason = signal.reason;

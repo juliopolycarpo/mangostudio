@@ -69,6 +69,7 @@ describe('turn checkpoints', () => {
 
     const writer = new TurnCheckpointWriter({
       db: getDb(),
+      chatId: chat.id,
       messageId: turnId,
       checkpoint: part,
       getContent: () => ({ text, parts, providerState: null }),
@@ -214,6 +215,14 @@ describe('interrupted turn recovery', () => {
       'outcome_unknown'
     );
     expect(elicitation?.type === 'mcp_elicitation' && elicitation.status).toBe('cancelled');
+    // Every tool call must carry a result once persisted: providers reject a
+    // replayed call with no matching output, which would break later turns.
+    for (const callId of ['read-1', 'write-1']) {
+      const sealed = reconciled.find(
+        (item) => item.type === 'tool_result' && item.toolCallId === callId
+      );
+      expect(sealed?.type === 'tool_result' && sealed.isError).toBe(true);
+    }
     expect(reconciledCheckpoint?.incompleteCalls).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ callId: 'read-1', outcome: 'interrupted' }),

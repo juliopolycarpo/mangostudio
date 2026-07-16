@@ -6,6 +6,7 @@ import {
   finalizeSuccessfulTurn,
   finalizeToolLoopExhausted,
   finalizeTurnError,
+  getAbortInterruptionReason,
   prepareStreamTextTurn,
   resolveTurnAttachments,
   runAgentToolLoop,
@@ -43,11 +44,7 @@ export async function* streamTextTurn(
     }
 
     if (session.signal?.aborted) {
-      const reason = session.signal.reason;
-      await finalizeInterruptedTurn(
-        session,
-        reason === 'client_disconnect' || reason === 'user_cancelled' ? reason : 'unknown'
-      );
+      await finalizeInterruptedTurn(session, getAbortInterruptionReason(session.signal));
     } else {
       yield* finalizeSuccessfulTurn(session);
     }

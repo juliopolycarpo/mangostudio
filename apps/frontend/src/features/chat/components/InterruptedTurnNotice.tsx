@@ -46,6 +46,9 @@ export function InterruptedTurnNotice({
       await callback();
     } catch {
       toast(t.chat.recovery.actionFailed, 'error');
+    } finally {
+      // A resume that no-ops (another turn already started) resolves without
+      // unmounting this notice, so the controls must always be released.
       setPendingAction(null);
     }
   };

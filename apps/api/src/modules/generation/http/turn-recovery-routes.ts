@@ -59,11 +59,21 @@ export const turnRecoveryRoutes = (app: Elysia) =>
               { chatId: params.id, messageId: params.messageId, userId },
               getDb()
             );
-            cancelActiveTurn(params.messageId, userId, params.id, 'user_cancelled');
-            await interruptCheckpointedMessage(
-              { messageId: params.messageId, reasonCode: 'user_cancelled' },
-              getDb()
+            // A live turn finalizes itself from its in-memory state, which is
+            // fresher than the last throttled checkpoint. Only reconcile from
+            // the row when no stream owns the turn anymore.
+            const cancelled = cancelActiveTurn(
+              params.messageId,
+              userId,
+              params.id,
+              'user_cancelled'
             );
+            if (!cancelled) {
+              await interruptCheckpointedMessage(
+                { messageId: params.messageId, reasonCode: 'user_cancelled' },
+                getDb()
+              );
+            }
             return {
               messageId: params.messageId,
               status: 'interrupted',
