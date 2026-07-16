@@ -38,7 +38,11 @@ import type {
 } from '../../../../src/services/providers/types';
 import { makeAgentProfile } from '../../../integration/routes/_respond-stream-helpers';
 import { insertTestChat, insertTestUser, type UserFixture } from '../../../support/factories';
-import { inMemoryMcpConnector } from '../../../support/fixtures/mcp/in-memory-mcp';
+import {
+  inMemoryMcpConnector,
+  PICTURE_TOOL_NOTES_TEXT,
+  PICTURE_TOOL_RESOURCE_TEXT,
+} from '../../../support/fixtures/mcp/in-memory-mcp';
 
 const RESOLVED_MODEL = {
   modelId: 'mcp-e2e-model',
@@ -302,7 +306,7 @@ describe('MCP tool round trip end-to-end', () => {
     );
   });
 
-  it('persists image and binary-resource blocks as mcp_media parts', async () => {
+  it('maps every supported content block and reloads rich-media provenance', async () => {
     await insertServer('camera');
     const provider = new SingleToolCallProvider('mcp__camera__picture', {});
     installProvider(provider);
@@ -327,15 +331,44 @@ describe('MCP tool round trip end-to-end', () => {
     });
     expect(mediaEvents[1]?.part.url).toStartWith('/uploads/');
 
-    // The model-facing result keeps the text and placeholder notes.
+    // The model-facing result keeps readable text and explicit placeholders
+    // for content that cannot be inlined into the provider context.
     const result = toolResult(events, 'call-1');
     expect(result?.isError).toBe(false);
-    expect(result?.result).toContain('chart notes');
+    expect(result?.result).toContain(PICTURE_TOOL_NOTES_TEXT);
+    expect(result?.result).toContain('[image content, image/png]');
+    expect(result?.result).toContain('[audio content, audio/wav]');
+    expect(result?.result).toContain(PICTURE_TOOL_RESOURCE_TEXT);
+    expect(result?.result).toContain('[unsupported resource_link content, text/plain]');
+    expect(result?.result).toContain('[binary resource file:///report.pdf, application/pdf]');
 
-    const parts = await loadAiParts();
-    expect(parts.filter((part) => part.type === 'mcp_media')).toHaveLength(2);
-    expect(parts).toContainEqual(
-      expect.objectContaining({ type: 'mcp_media', kind: 'image', serverSlug: 'camera' })
+    // Read the durable row again rather than asserting on the live event
+    // objects: this is the same provenance a page reload consumes.
+    const reloadedParts = await loadAiParts();
+    const reloadedMedia = reloadedParts.filter((part) => part.type === 'mcp_media');
+    expect(reloadedMedia).toHaveLength(2);
+    expect(reloadedMedia).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: 'mcp_media',
+          toolCallId: 'call-1',
+          serverSlug: 'camera',
+          toolName: 'picture',
+          kind: 'image',
+          mimeType: 'image/png',
+          url: expect.stringMatching(/^\/images\/mcp-/),
+        }),
+        expect.objectContaining({
+          type: 'mcp_media',
+          toolCallId: 'call-1',
+          serverSlug: 'camera',
+          toolName: 'picture',
+          kind: 'resource',
+          mimeType: 'application/pdf',
+          uri: 'file:///report.pdf',
+          url: expect.stringMatching(/^\/uploads\//),
+        }),
+      ])
     );
 
     // The stored binary resource is a queryable chat attachment.
@@ -346,6 +379,27 @@ describe('MCP tool round trip end-to-end', () => {
       .execute();
     expect(attachments).toHaveLength(1);
     expect(attachments[0]?.mimeType).toBe('application/pdf');
+  });
+
+  it('rejects malformed SDK content as a typed tool error without unsafe persistence', async () => {
+    await insertServer('odd-server');
+    installProvider(new SingleToolCallProvider('mcp__odd-server__unusual-content'));
+
+    const events = await collectTurn('Inspect unusual content.');
+
+    const result = toolResult(events, 'call-1');
+    expect(result?.isError).toBe(true);
+    expect(result?.result).toEqual(expect.objectContaining({ error: expect.any(String) }));
+    expect(events.filter((event) => event.type === 'mcp_media')).toHaveLength(0);
+
+    const reloadedParts = await loadAiParts();
+    expect(reloadedParts.filter((part) => part.type === 'mcp_media')).toHaveLength(0);
+    const attachments = await getDb()
+      .selectFrom('chat_attachments')
+      .select('id')
+      .where('chatId', '=', chatId)
+      .execute();
+    expect(attachments).toHaveLength(0);
   });
 
   it('hides a disabled server tools on the next turn', async () => {

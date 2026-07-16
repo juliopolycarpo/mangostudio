@@ -5,6 +5,8 @@
  */
 
 import { afterEach, describe, expect, it } from 'bun:test';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { connectMcpClient } from '../../../../src/services/mcp/client-factory';
 import {
@@ -13,6 +15,7 @@ import {
   getMcpRuntimeStatus,
 } from '../../../../src/services/mcp/connection-manager';
 import type { McpServerRuntimeConfig } from '../../../../src/services/mcp/types';
+import { waitForProcessExit } from '../../../support/fixtures/managed-process';
 
 const FIXTURE_PATH = join(import.meta.dir, '../../../support/fixtures/mcp/echo-stdio-server.ts');
 const USER_ID = 'stdio-transport-user';
@@ -44,20 +47,34 @@ afterEach(async () => {
 
 describe('mcp stdio transport', () => {
   it('spawns the server, lists tools, and round-trips a tool call', async () => {
-    const handle = await connectMcpClient(stdioConfig('spawn-test'), { userId: USER_ID });
+    const tempDir = await mkdtemp(join(tmpdir(), 'mango-mcp-stdio-'));
+    const pidFile = join(tempDir, 'server.pid');
+    const handle = await connectMcpClient(
+      stdioConfig('spawn-test', { MCP_FIXTURE_PID_FILE: pidFile }),
+      { userId: USER_ID }
+    );
 
-    const tools = await handle.listTools();
-    expect(tools.map((tool) => tool.name)).toEqual(['echo', 'env-keys', 'crash']);
+    try {
+      const tools = await handle.listTools();
+      expect(tools.map((tool) => tool.name)).toEqual(['echo', 'env-keys', 'crash']);
 
-    const result = await handle.callTool('echo', { text: 'spawned' });
-    expect(result).toEqual({
-      contentText: 'spawned',
-      isError: false,
-      rawContentKinds: ['text'],
-      content: [{ type: 'text', text: 'spawned' }],
-    });
+      const result = await handle.callTool('echo', { text: 'spawned' });
+      expect(result).toEqual({
+        contentText: 'spawned',
+        isError: false,
+        rawContentKinds: ['text'],
+        content: [{ type: 'text', text: 'spawned' }],
+      });
 
-    await handle.close();
+      const pid = Number(await readFile(pidFile, 'utf8'));
+      expect(pid).toBeGreaterThan(0);
+      await handle.close();
+      await waitForProcessExit(pid);
+      expect(() => process.kill(pid, 0)).toThrow();
+    } finally {
+      await handle.close().catch(() => undefined);
+      await rm(tempDir, { force: true, recursive: true });
+    }
   });
 
   it('withholds the parent process env from the child beyond the allowlist', async () => {

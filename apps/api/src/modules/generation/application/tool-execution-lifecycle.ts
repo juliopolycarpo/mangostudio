@@ -129,14 +129,17 @@ export function classifyToolExecutionFailure(
   if (error instanceof ToolExecutionTimedOutError) {
     return { status: 'timed_out', reasonCode: 'timeout' };
   }
+  // MCP aborts surface through the SDK as RequestTimeout even when the parent
+  // signal initiated cancellation. The turn signal is the authoritative cause
+  // in that race; otherwise a user stop is persisted as a server timeout.
+  if (isAbortError(error) || parentSignal?.aborted) {
+    return { status: 'cancelled', reasonCode: 'user_cancelled' };
+  }
   const mcpFailure = classifyMcpCallFailure(error);
   if (mcpFailure === 'timeout') return { status: 'timed_out', reasonCode: 'timeout' };
   if (mcpFailure === 'server_closed') return { status: 'failed', reasonCode: 'server_closed' };
   if (error instanceof SubagentDelegationError) {
     return classifySubagentDelegationFailure(error);
-  }
-  if (isAbortError(error) || parentSignal?.aborted) {
-    return { status: 'cancelled', reasonCode: 'user_cancelled' };
   }
   if (error instanceof ToolPolicyError) {
     return { status: 'failed', reasonCode: error.reasonCode };
