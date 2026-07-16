@@ -125,14 +125,24 @@ export async function createManagedProcessFixture(options: {
     async waitForExit(timeoutMs = DEFAULT_EXIT_TIMEOUT_MS) {
       if (!child) throw new Error('Managed process fixture has not spawned a child.');
       const timedOut = Symbol('timed-out');
-      const result = await Promise.race([child.exited, Bun.sleep(timeoutMs).then(() => timedOut)]);
-      if (typeof result !== 'number') {
-        throw new Error(
-          `Child process did not exit within ${timeoutMs}ms.\n${fixture.diagnostics()}`
-        );
+      // A ref'd timer is cleared once the child exits so the loser of the race
+      // does not keep the event loop alive for the full timeout after teardown.
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const timeout = new Promise<typeof timedOut>((resolve) => {
+        timer = setTimeout(() => resolve(timedOut), timeoutMs);
+      });
+      try {
+        const result = await Promise.race([child.exited, timeout]);
+        if (typeof result !== 'number') {
+          throw new Error(
+            `Child process did not exit within ${timeoutMs}ms.\n${fixture.diagnostics()}`
+          );
+        }
+        await Promise.all([stdoutCapture, stderrCapture]);
+        return result;
+      } finally {
+        if (timer) clearTimeout(timer);
       }
-      await Promise.all([stdoutCapture, stderrCapture]);
-      return result;
     },
     stop(signal = 'SIGTERM') {
       if (!child) throw new Error('Managed process fixture has not spawned a child.');
