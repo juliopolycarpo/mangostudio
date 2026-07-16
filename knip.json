@@ -1,21 +1,42 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
-  "entry": [
-    ".claude/hooks/*.mjs",
-    ".codex/hooks/*.mjs",
-    "scripts/qa-gate/collect.ts",
-    "scripts/qa-gate/render.ts",
-    "scripts/qa-gate/render-commits.ts",
-    "scripts/qa-gate/render-coverage-summary.ts",
-    "scripts/release/**/*.{ts,sh}",
-    "scripts/test-build.ts",
-    "scripts/agent-hooks.test.mjs"
-  ],
-  "ignoreDependencies": [
-    "dprint",
-    "@dprint/markdown",
-    "@dprint/toml",
-    "@dprint/dockerfile",
-    "jscpd"
-  ]
+  "ignoreDependencies": ["@dprint/markdown", "@dprint/toml", "@dprint/dockerfile", "jscpd"],
+  "treatConfigHintsAsErrors": true,
+  "workspaces": {
+    ".": {
+      "entry": [
+        ".claude/hooks/*.mjs",
+        ".codex/hooks/*.mjs",
+        "scripts/ci/{distribution-identity,evaluate-gate}.ts",
+        "scripts/qa-gate/{collect,collect-test-metrics,render-coverage-summary,render-report}.ts",
+        "scripts/qa-gate/**/*.unit.test.ts",
+        "scripts/qa-gate/publish/*.mjs",
+        "scripts/release/{archive-assets,bundle-distribution,distribution-manifest,extract-distribution,fill-dry-run-checksums,pack-npm,prepare-release,publish-npm,push-dist-repo,stage-docker-ctx,update-homebrew,update-scoop,verify-checksum}.ts",
+        "scripts/release/*.sh",
+        "scripts/tests/**/*.test.ts",
+        "scripts/agent-hooks.test.mjs"
+      ],
+      "project": [".claude/hooks/*.mjs", ".codex/hooks/*.mjs", "scripts/**/*.{ts,mjs}"]
+    },
+    "apps/api": {
+      "entry": [
+        "src/services/providers/cursor/sidecar/{run-agent,sidecar-runtime}.mjs",
+        "tests/**/*.{test,integration}.ts",
+        "tests/support/fixtures/mcp/echo-stdio-server.ts"
+      ],
+      "project": ["src/**/*.{ts,mjs}", "tests/**/*.ts"]
+    },
+    "apps/frontend": {
+      "entry": ["tests/**/*.test.{ts,tsx}", "tests/support/setup/motion-react-stub.tsx"],
+      "project": ["src/**/*.{ts,tsx}", "tests/**/*.{ts,tsx}", "*.config.ts"],
+      "ignoreDependencies": ["tailwindcss"]
+    },
+    "apps/shared": {
+      "entry": ["tests/**/*.test.ts"],
+      "project": ["src/**/*.ts", "tests/**/*.ts"]
+    },
+    "packages/cli": {
+      "project": ["bin/**/*.js"]
+    }
+  }
 }
