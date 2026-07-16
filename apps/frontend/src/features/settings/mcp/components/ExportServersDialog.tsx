@@ -29,12 +29,15 @@ export function ExportServersDialog({ servers, onClose }: ExportServersDialogPro
   const handlePreview = () => {
     if (selected.size === 0) return;
     setError(null);
-    const body =
-      selected.size === servers.length ? ({ all: true } as const) : { serverIds: [...selected] };
-    exportMutation.mutate(body, {
-      onSuccess: setPreview,
-      onError: (cause) => setError(cause.message),
-    });
+    // Always name the selected ids: `all` would resolve against the server's
+    // current rows, which can hold servers this list never offered.
+    exportMutation.mutate(
+      { serverIds: [...selected] },
+      {
+        onSuccess: setPreview,
+        onError: (cause) => setError(cause.message),
+      }
+    );
   };
 
   const copyJson = async () => {
@@ -50,7 +53,9 @@ export function ExportServersDialog({ servers, onClose }: ExportServersDialogPro
     anchor.href = url;
     anchor.download = preview.filename;
     anchor.click();
-    URL.revokeObjectURL(url);
+    // Revoking in the same tick cancels the download in Firefox and Safari,
+    // which resolve the blob asynchronously after the synthetic click.
+    setTimeout(() => URL.revokeObjectURL(url), 0);
   };
 
   return (

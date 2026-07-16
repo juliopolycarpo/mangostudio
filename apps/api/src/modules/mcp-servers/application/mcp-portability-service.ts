@@ -23,6 +23,7 @@ import type {
   McpTransport,
   PreviewMcpPortabilityImportBody,
 } from '@mangostudio/shared/mcp';
+import { MCP_SERVER_NAME_MAX_LENGTH, MCP_SERVER_SLUG_MAX_LENGTH } from '@mangostudio/shared/mcp';
 import type { Kysely } from 'kysely';
 import type { Database, McpServerInsert, McpServerSelect } from '../../../db/types';
 import { disposeMcpServer } from '../../../services/mcp/connection-manager';
@@ -594,9 +595,11 @@ function deriveCopyIdentity(
   for (let suffix = 1; suffix < 10_000; suffix += 1) {
     const marker = suffix === 1 ? 'copy' : `copy-${suffix}`;
     const nameMarker = suffix === 1 ? ' copy' : ` copy ${suffix}`;
-    const slugBase = server.slug.slice(0, Math.max(1, 64 - marker.length - 1)).replace(/-+$/, '');
+    const slugBudget = MCP_SERVER_SLUG_MAX_LENGTH - marker.length - 1;
+    const slugBase = server.slug.slice(0, Math.max(1, slugBudget)).replace(/-+$/, '');
     const slug = `${slugBase}-${marker}`;
-    const name = `${server.name.slice(0, Math.max(1, 100 - nameMarker.length)).trimEnd()}${nameMarker}`;
+    const nameBudget = MCP_SERVER_NAME_MAX_LENGTH - nameMarker.length;
+    const name = `${server.name.slice(0, Math.max(1, nameBudget)).trimEnd()}${nameMarker}`;
     if (!reservedSlugs.has(slug) && !reservedNames.has(normalizeName(name))) return { name, slug };
   }
   throw new McpServerError(

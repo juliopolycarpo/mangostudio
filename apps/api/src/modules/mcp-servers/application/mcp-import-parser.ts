@@ -203,7 +203,7 @@ function mapStdioEntry(
     else publicEnv[name] = item;
   }
   const unresolvedSecretEnvNames = metadata.secretEnvNames
-    .filter((name) => secretEnv[name] === undefined)
+    .filter((name) => !Object.hasOwn(secretEnv, name))
     .sort();
   const literalNames = Object.keys(secretEnv).sort();
   const references: McpPortabilitySecretReference[] = [
@@ -285,7 +285,7 @@ function mapHttpEntry(
   const url = analyzedUrl.normalizedUrl;
 
   const unresolvedHeaderNames = metadata.headerNames
-    .filter((name) => headers[name] === undefined)
+    .filter((name) => !Object.hasOwn(headers, name))
     .sort();
   const literalNames = Object.keys(headers).sort();
   const headerNames = [...new Set([...literalNames, ...unresolvedHeaderNames])].sort();

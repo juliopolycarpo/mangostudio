@@ -63,13 +63,14 @@ export function ImportServersDialog({ onClose }: ImportServersDialogProps) {
     setSubmitError(null);
     previewMutation.mutate(body, {
       onSuccess: ({ entries, previewToken }) => {
+        // The preview only ever suggests `add` or `skip`, so no entry starts
+        // out needing a replacement target; `setDecision` picks one if the
+        // reviewer switches to `replace`.
         const decisions = Object.fromEntries(
           entries.map((entry) => [
             entry.key,
             {
               decision: entry.suggestedDecision,
-              ...(entry.suggestedDecision === 'replace' &&
-                entry.conflicts[0] && { targetServerId: entry.conflicts[0].serverId }),
               secretEnv: {},
               headers: {},
             } satisfies DecisionState,
@@ -119,16 +120,18 @@ export function ImportServersDialog({ onClose }: ImportServersDialogProps) {
       {
         ...body,
         previewToken: step.previewToken,
-        decisions: step.entries.map((entry) => {
+        decisions: step.entries.flatMap((entry) => {
           const state = step.decisions[entry.key];
-          if (!state) throw new Error('Missing preview decision');
-          return {
-            key: entry.key,
-            decision: state.decision,
-            ...(state.targetServerId !== undefined && { targetServerId: state.targetServerId }),
-            ...(Object.keys(state.secretEnv).length > 0 && { secretEnv: state.secretEnv }),
-            ...(Object.keys(state.headers).length > 0 && { headers: state.headers }),
-          };
+          if (!state) return [];
+          return [
+            {
+              key: entry.key,
+              decision: state.decision,
+              ...(state.targetServerId !== undefined && { targetServerId: state.targetServerId }),
+              ...(Object.keys(state.secretEnv).length > 0 && { secretEnv: state.secretEnv }),
+              ...(Object.keys(state.headers).length > 0 && { headers: state.headers }),
+            },
+          ];
         }),
       },
       {

@@ -117,17 +117,16 @@ export async function updateMcpServer(
     updatedAt: Date.now(),
   });
 
-  // Headers belong to http servers only. Persist them there, and drop any
-  // bundle a prior http config left behind when the transport switches to
-  // stdio, so an auth token never lingers in the secret store unused.
+  // Each transport owns exactly one secret bundle: headers for http, the child
+  // environment for stdio. Persist the bundle the merged transport owns, and
+  // drop the other one whenever the body switches transport, so a token never
+  // lingers in the secret store unused.
   if (merged.transport === 'http') {
     if (body.headers !== undefined) await persistMcpHeaders(id, body.headers);
     if (body.transport === 'http') await removeMcpSecretEnv(id);
-  } else if (body.transport === 'stdio') {
-    await removeMcpHeaders(id);
-  }
-  if (merged.transport === 'stdio' && body.secretEnv !== undefined) {
-    await persistMcpSecretEnv(id, body.secretEnv);
+  } else {
+    if (body.secretEnv !== undefined) await persistMcpSecretEnv(id, body.secretEnv);
+    if (body.transport === 'stdio') await removeMcpHeaders(id);
   }
 
   // The old session runs with stale config; drop it so next use reconnects.
