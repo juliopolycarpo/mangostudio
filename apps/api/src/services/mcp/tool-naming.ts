@@ -7,8 +7,8 @@
 
 import { MCP_SERVER_SLUG_PATTERN } from '@mangostudio/shared/mcp';
 
-export const MCP_TOOL_PREFIX = 'mcp__';
-export const MCP_TOOL_SEPARATOR = '__';
+const MCP_TOOL_PREFIX = 'mcp__';
+const MCP_TOOL_SEPARATOR = '__';
 
 /**
  * Some providers cap tool names around 64 characters; longer names are

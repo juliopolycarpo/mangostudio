@@ -21,7 +21,7 @@ import {
   type ToolCapabilityCandidate,
 } from './resolve-capability-candidates';
 
-export interface AgentRuntimeSourceMetadata {
+interface AgentRuntimeSourceMetadata {
   readonly agentId: AgentId;
   readonly source: AgentProfile['source'];
   readonly kind: AgentProfile['kind'];

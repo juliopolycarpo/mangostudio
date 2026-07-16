@@ -11,7 +11,7 @@ import { isSpaRoute } from '../lib/spa-guard';
 import { type EmbeddedFrontendFiles, getEmbeddedFrontend } from './embedded-frontend';
 
 /** True when a built frontend (index.html) exists in the directory. // Usage: hasFrontend(dir) */
-export function hasFrontend(frontendDir: string): boolean {
+function hasFrontend(frontendDir: string): boolean {
   try {
     return existsSync(frontendDir) && existsSync(join(frontendDir, 'index.html'));
   } catch (error) {

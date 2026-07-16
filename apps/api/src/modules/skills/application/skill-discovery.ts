@@ -28,7 +28,7 @@ export const SKILL_FILE_NAME = 'SKILL.md';
 const CACHE_TTL_MS = 2_000;
 
 /** Highest precedence first: on slug collisions the earlier source wins. */
-export const SKILL_SOURCE_PRECEDENCE: ReadonlyArray<SkillSource> = ['mango', 'agents', 'claude'];
+const SKILL_SOURCE_PRECEDENCE: ReadonlyArray<SkillSource> = ['mango', 'agents', 'claude'];
 
 export type ThirdPartySkillSource = Exclude<SkillSource, 'mango'>;
 

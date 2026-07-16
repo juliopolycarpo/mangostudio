@@ -63,7 +63,7 @@ function StatusIcon({ status, name }: { status: ToolExecutionStatus; name: strin
 }
 
 /** Formats a monotonic duration for the chip, e.g. `640ms` or `2.4s`. */
-export function formatToolDuration(durationMs: number): string {
+function formatToolDuration(durationMs: number): string {
   if (durationMs < 1000) return `${Math.max(0, Math.round(durationMs))}ms`;
   return `${(durationMs / 1000).toFixed(1)}s`;
 }

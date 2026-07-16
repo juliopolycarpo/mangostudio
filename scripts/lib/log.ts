@@ -2,11 +2,11 @@
 // Plain ANSI colors only — these are user-facing CLI messages, not structured logs.
 
 export const RESET = '\x1b[0m';
-export const BOLD = '\x1b[1m';
+const BOLD = '\x1b[1m';
 export const RED = '\x1b[31m';
 export const GREEN = '\x1b[32m';
-export const YELLOW = '\x1b[33m';
-export const CYAN = '\x1b[36m';
+const YELLOW = '\x1b[33m';
+const CYAN = '\x1b[36m';
 export const DIM = '\x1b[2m';
 
 export function log(msg: string): void {

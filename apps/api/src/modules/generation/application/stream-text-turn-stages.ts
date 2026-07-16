@@ -63,10 +63,9 @@ import { parseToolArgs, stringifyToolResult } from './tool-result-utils';
 import { createTurnCheckpointPart, TurnCheckpointWriter } from './turn-checkpoint';
 import { reconcileInterruptedMessageParts, sealUnresolvedToolCalls } from './turn-recovery';
 
-export const TOOL_LOOP_EXHAUSTED_MESSAGE =
-  'The model exceeded the maximum number of tool interactions.';
+const TOOL_LOOP_EXHAUSTED_MESSAGE = 'The model exceeded the maximum number of tool interactions.';
 
-export const streamTextTurnLogger = createDiagnosticLogger('stream-text-turn');
+const streamTextTurnLogger = createDiagnosticLogger('stream-text-turn');
 
 /** Mutable session state threaded through all stream-text-turn stages. */
 export interface StreamTextTurnSession {
@@ -297,7 +296,7 @@ export async function resolveTurnAttachments(session: StreamTextTurnSession): Pr
 /**
  * Yield continuation-degradation stream events and record the transition part.
  */
-export function* emitContinuationDegradation(
+function* emitContinuationDegradation(
   session: StreamTextTurnSession,
   ctx: DegradationContext
 ): Generator<StreamEvent> {
@@ -343,7 +342,7 @@ export function* emitContinuationDegradation(
 /**
  * Decide cross-turn continuation and yield any degradation events.
  */
-export async function* prepareAgentContinuation(
+async function* prepareAgentContinuation(
   session: StreamTextTurnSession
 ): AsyncGenerator<StreamEvent, string | null> {
   const { db, chatId, provider, agentRuntime, toolDefs, continuationSystemPrompt, resolvedModel } =

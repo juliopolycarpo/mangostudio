@@ -49,36 +49,36 @@ import {
 // mock.module(). Bun's mock.module() updates live namespace bindings, so
 // spreading a namespace object in afterEach would spread already-mocked values.
 // Capturing individual named exports as constants avoids that trap.
-export const realGetDb = getDb;
-export const realVerifyChatOwnership = verifyChatOwnership;
-export const realListByUserId = listByUserId;
-export const realGetById = getById;
-export const realCreateChat = createChat;
-export const realUpdateChat = updateChat;
-export const realDeleteChat = deleteChat;
-export const realGetProviderForModel = getProviderForModel;
-export const realGetProvider = getProvider;
-export const realRegisterProvider = registerProvider;
-export const realGetAllTools = getAllTools;
+const realGetDb = getDb;
+const realVerifyChatOwnership = verifyChatOwnership;
+const realListByUserId = listByUserId;
+const realGetById = getById;
+const realCreateChat = createChat;
+const realUpdateChat = updateChat;
+const realDeleteChat = deleteChat;
+const realGetProviderForModel = getProviderForModel;
+const realGetProvider = getProvider;
+const realRegisterProvider = registerProvider;
+const realGetAllTools = getAllTools;
 export const realGetAllToolDefinitions = getAllToolDefinitions;
 export const realGetToolDefinitionsForAgent = getToolDefinitionsForAgent;
 export const realExecuteTool = executeTool;
 export const realGetTool = getTool;
 export const realGetSafeEffectiveToolSettings = getSafeEffectiveToolSettings;
-export const realGetAgentProfile = getAgentProfile;
-export const realGetAppSettings = getAppSettings;
-export const realRunSubagentTurn = runSubagentTurn;
+const realGetAgentProfile = getAgentProfile;
+const realGetAppSettings = getAppSettings;
+const realRunSubagentTurn = runSubagentTurn;
 export const realSubagentDelegationError = SubagentDelegationError;
-export const realGemini = { ...realGeminiNs };
-export const realProviderSettingsRepo = { ...realProviderSettingsRepoNs };
-export const realToolSettingsRepo = { ...realToolSettingsRepoNs };
-export const realInsertMessage = insertMessage;
-export const realUpdateMessage = updateMessage;
-export const realListMessagesByChatId = listMessagesByChatId;
-export const realLoadHistory = loadHistory;
-export const realLoadRichHistory = loadRichHistory;
-export const realVerifyMessageOwnership = verifyMessageOwnership;
-export const realListLegacyGalleryImages = listLegacyGalleryImages;
+const realGemini = { ...realGeminiNs };
+const realProviderSettingsRepo = { ...realProviderSettingsRepoNs };
+const realToolSettingsRepo = { ...realToolSettingsRepoNs };
+const realInsertMessage = insertMessage;
+const realUpdateMessage = updateMessage;
+const realListMessagesByChatId = listMessagesByChatId;
+const realLoadHistory = loadHistory;
+const realLoadRichHistory = loadRichHistory;
+const realVerifyMessageOwnership = verifyMessageOwnership;
+const realListLegacyGalleryImages = listLegacyGalleryImages;
 
 export { AgentSettingsError };
 

@@ -3,9 +3,9 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 export const BUILD_INFO_FILENAME = 'build-info.json';
-export const UNKNOWN_BUILD_VALUE = 'unknown';
+const UNKNOWN_BUILD_VALUE = 'unknown';
 
-export type BuildDirtyState = boolean | 'unknown';
+type BuildDirtyState = boolean | 'unknown';
 
 export interface BuildInfo {
   gitSha: string;

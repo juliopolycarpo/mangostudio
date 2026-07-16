@@ -21,7 +21,7 @@ import { promisify } from 'node:util';
 const execFileAsync = promisify(execFile);
 const DEFAULT_CACHE_TTL_MS = 30_000;
 
-export interface NodeRuntimeReasonParams {
+interface NodeRuntimeReasonParams {
   foundVersion?: string;
   nodePath?: string;
   packageName?: string;
@@ -36,12 +36,12 @@ export interface NodeRuntimeStatus<ReasonCode extends string = string> {
   version?: string;
 }
 
-export interface MinimumNodeVersion {
+interface MinimumNodeVersion {
   major: number;
   minor: number;
 }
 
-export interface NodeRuntimeReasonCodes<ReasonCode extends string> {
+interface NodeRuntimeReasonCodes<ReasonCode extends string> {
   nodeNotFound: ReasonCode;
   nodeInvalid: ReasonCode;
   versionInsufficient: ReasonCode;

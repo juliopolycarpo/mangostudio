@@ -33,7 +33,7 @@ export const CHATGPT_STATIC_MODEL_IDS = [
  */
 const UNSERVABLE_MODEL_ID_PATTERN = /-pro$/;
 
-export function toChatGptModelInfo(modelId: string): ModelInfo {
+function toChatGptModelInfo(modelId: string): ModelInfo {
   return {
     modelId,
     displayName: modelId,
@@ -56,7 +56,7 @@ export function toChatGptModelInfo(modelId: string): ModelInfo {
   };
 }
 
-export function getChatGptStaticModels(): ModelInfo[] {
+function getChatGptStaticModels(): ModelInfo[] {
   return CHATGPT_STATIC_MODEL_IDS.map((modelId) => toChatGptModelInfo(modelId));
 }
 

@@ -148,10 +148,3 @@ export function logProviderDegrade(params: ProviderDegradeParams): void {
     ...(params.toolResults !== undefined ? { toolResults: params.toolResults } : {}),
   });
 }
-
-export function logAbortToolLoop(params: { chatId?: string; provider: string }): void {
-  logEvent('abort_tool_loop', {
-    ...(params.chatId ? { chatId: params.chatId } : {}),
-    provider: params.provider,
-  });
-}

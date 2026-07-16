@@ -15,7 +15,7 @@ import type {
 } from '@mangostudio/shared/mcp';
 import { createDiagnosticLogger } from '../../lib/logger';
 
-export type McpElicitationResultAction = 'accept' | 'decline' | 'cancel';
+type McpElicitationResultAction = 'accept' | 'decline' | 'cancel';
 
 export interface McpElicitationResult {
   action: McpElicitationResultAction;

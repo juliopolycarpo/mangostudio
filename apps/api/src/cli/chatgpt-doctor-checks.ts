@@ -46,7 +46,7 @@ export interface ChatGptDoctorDeps {
   timeoutMs: number;
 }
 
-export function createChatGptDoctorDeps(): ChatGptDoctorDeps {
+function createChatGptDoctorDeps(): ChatGptDoctorDeps {
   const tokenService = createChatGptTokenService();
   return {
     secretStore: bunSecretStore,

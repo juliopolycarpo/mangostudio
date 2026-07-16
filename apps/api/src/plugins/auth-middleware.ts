@@ -6,7 +6,7 @@ import { getAuth } from '../auth';
  * Plugin Elysia que resolve a sessão do usuário a partir dos cookies.
  * Disponibiliza `user` e `session` no contexto de todas as rotas descendentes.
  */
-export const authMiddleware = (app: Elysia) =>
+const authMiddleware = (app: Elysia) =>
   app.derive(async ({ request }) => {
     const session = await getAuth().api.getSession({
       headers: request.headers,

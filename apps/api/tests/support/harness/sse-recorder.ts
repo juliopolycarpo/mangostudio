@@ -1,6 +1,6 @@
 /** Bounded incremental SSE reader for route-level integration tests. */
 
-export const MAX_RECORDED_SSE_BYTES = 1024 * 1024;
+const MAX_RECORDED_SSE_BYTES = 1024 * 1024;
 
 export class SseRecorder {
   readonly events: Array<Record<string, unknown>> = [];

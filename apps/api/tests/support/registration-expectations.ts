@@ -7,7 +7,7 @@
 import type { ProviderType } from '@mangostudio/shared/types';
 import { isShellAvailable, type ShellKind } from '../../src/services/tools/builtin/_shell-exec';
 
-export const EXPECTED_PROVIDER_TYPES = [
+const EXPECTED_PROVIDER_TYPES = [
   'anthropic',
   'chatgpt',
   'cursor',
@@ -17,7 +17,7 @@ export const EXPECTED_PROVIDER_TYPES = [
   'openai-compatible',
 ] as const satisfies readonly ProviderType[];
 
-export const REQUIRED_TOOL_NAMES = [
+const REQUIRED_TOOL_NAMES = [
   'get_current_datetime',
   'generate_image',
   'read_file',
@@ -32,11 +32,7 @@ export const REQUIRED_TOOL_NAMES = [
   'todo_read',
 ] as const;
 
-export const SHELL_TOOL_NAMES = [
-  'bash',
-  'zsh',
-  'powershell',
-] as const satisfies readonly ShellKind[];
+const SHELL_TOOL_NAMES = ['bash', 'zsh', 'powershell'] as const satisfies readonly ShellKind[];
 
 /** Sorted tool names expected on this host (shell tools only when available). // Usage: expectedToolNames() */
 export function expectedToolNames(): string[] {

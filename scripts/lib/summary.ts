@@ -8,7 +8,7 @@ import { DIM, error, GREEN, header, RED, RESET, success } from './log';
 const SCRIPT_START = performance.now();
 
 /** Print a pass/fail line per task plus the total elapsed time. */
-export function printSummary(results: RunResult[]): void {
+function printSummary(results: RunResult[]): void {
   header('Summary');
   for (const r of results) {
     const icon = r.exitCode === 0 ? `${GREEN}pass${RESET}` : `${RED}FAIL${RESET}`;

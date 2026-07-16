@@ -25,7 +25,7 @@ type ResetCreditDetail = NonNullable<ResetCredits['credits']>[number];
 const HEADER_LIMIT_ID = 'codex';
 
 /** Snapshots older than this are refreshed on the next status read. */
-export const CHATGPT_USAGE_STALE_MS = 5 * 60_000;
+const CHATGPT_USAGE_STALE_MS = 5 * 60_000;
 
 /** Coerces a number that may arrive as number or numeric string. */
 function coerceNumber(value: unknown): number | undefined {

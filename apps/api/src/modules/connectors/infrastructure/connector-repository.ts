@@ -7,7 +7,5 @@ export {
   deleteSecretMetadata,
   getSecretMetadataById,
   listAllSecretMetadata,
-  listSecretMetadata,
-  type SecretMetadataInput,
   upsertSecretMetadata,
 } from '../../../services/secret-store/metadata';

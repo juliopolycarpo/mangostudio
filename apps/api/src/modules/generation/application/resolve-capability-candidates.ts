@@ -16,7 +16,7 @@ import { getSafeEffectiveToolSettings } from '../../../services/tools';
 import type { EffectiveToolSettings, RegisteredTool } from '../../../services/tools/types';
 
 /** Reasons a candidate can be rejected at runtime resolution. */
-export type ToolCandidateReason = Extract<
+type ToolCandidateReason = Extract<
   CapabilityReasonCode,
   'agent-tools-disabled' | 'agent-allowlist' | 'tool-setting-disabled' | 'name-over-provider-limit'
 >;

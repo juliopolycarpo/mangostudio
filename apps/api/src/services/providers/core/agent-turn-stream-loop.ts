@@ -86,12 +86,12 @@ interface ChatCompletionsChoice {
   readonly finish_reason?: unknown;
 }
 
-export interface ChatCompletionsAgentStreamChunk {
+interface ChatCompletionsAgentStreamChunk {
   readonly choices?: readonly ChatCompletionsChoice[];
   readonly usage?: ChatCompletionsUsage | null;
 }
 
-export interface ChatCompletionsAgentStreamContext {
+interface ChatCompletionsAgentStreamContext {
   providerReportedInputTokens?: number;
   promptCacheHitTokens?: number;
   promptCacheMissTokens?: number;

@@ -76,7 +76,3 @@ export function useChatGptUsageAlerts(connectors: Connector[]) {
 
   return { threshold, updateThreshold };
 }
-
-export function resetChatGptUsageAlertStateForTests(): void {
-  alertState = EMPTY_USAGE_ALERT_STATE;
-}

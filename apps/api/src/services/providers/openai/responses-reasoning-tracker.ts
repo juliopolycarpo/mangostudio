@@ -1,4 +1,1 @@
-export {
-  createResponsesReasoningTracker,
-  type ResponsesReasoningTracker,
-} from '../core/responses-protocol/reasoning-tracker';
+export { createResponsesReasoningTracker } from '../core/responses-protocol/reasoning-tracker';

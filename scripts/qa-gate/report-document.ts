@@ -11,7 +11,7 @@ import { inlineCode, shortSha } from './render/format';
 export const GITHUB_COMMENT_LIMIT = 65_536;
 
 /** Budget for the changelog preview section inside the shared comment. */
-export const CHANGELOG_SECTION_MAX_LENGTH = 10_000;
+const CHANGELOG_SECTION_MAX_LENGTH = 10_000;
 
 export interface ReportStatus {
   readonly headSha: string;

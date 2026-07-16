@@ -24,9 +24,9 @@ import { buildOpenAIResponsesReplay } from '../replay-builder';
 
 const RESPONSES_ATTACHMENT_KINDS = ['image', 'pdf', 'text'] as const;
 
-export type ResponsesContinuationPolicy = 'previous-response-id' | 'stateless-replay';
+type ResponsesContinuationPolicy = 'previous-response-id' | 'stateless-replay';
 export type ResponsesReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh';
-export type ResponsesReasoningSummary = 'auto' | 'concise';
+type ResponsesReasoningSummary = 'auto' | 'concise';
 
 const REASONING_EFFORT_ORDER: readonly ResponsesReasoningEffort[] = [
   'low',
@@ -253,7 +253,7 @@ export function buildResponsesInput(req: TextGenerationRequest): Array<Record<st
   return buildResponsesTextInput(req);
 }
 
-export function buildResponsesCurrentUserInput(
+function buildResponsesCurrentUserInput(
   req: Pick<
     AgentTurnRequest | TextGenerationRequest,
     'prompt' | 'attachments' | 'modelCapabilities'

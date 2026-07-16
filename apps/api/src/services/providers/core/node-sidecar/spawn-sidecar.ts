@@ -75,7 +75,7 @@ export function spawnNodeSidecarProcess(
   };
 }
 
-export function waitForChildExit(child: ChildProcessWithoutNullStreams): Promise<ChildExitStatus> {
+function waitForChildExit(child: ChildProcessWithoutNullStreams): Promise<ChildExitStatus> {
   if (isNodeSidecarClosed(child)) {
     return Promise.resolve({ code: child.exitCode, signal: child.signalCode });
   }
@@ -116,7 +116,7 @@ function isNodeSidecarClosed(child: ChildProcessWithoutNullStreams): boolean {
   return child.exitCode !== null || child.signalCode !== null;
 }
 
-export interface NodeSidecarToolRequestEvent {
+interface NodeSidecarToolRequestEvent {
   type: 'tool_request';
   id: string;
   name: string;

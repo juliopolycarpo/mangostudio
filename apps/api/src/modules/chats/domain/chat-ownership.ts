@@ -2,8 +2,6 @@ import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';
 import { verifyChatOwnership } from '../infrastructure/chat-repository';
 
-export { verifyChatOwnership };
-
 export async function assertChatOwnership(
   chatId: string,
   userId: string,

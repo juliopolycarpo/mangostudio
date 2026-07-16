@@ -2,8 +2,6 @@ import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';
 import { verifyMessageOwnership } from '../infrastructure/message-repository';
 
-export { verifyMessageOwnership };
-
 export async function assertMessageOwnership(
   messageId: string,
   userId: string,

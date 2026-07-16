@@ -145,7 +145,7 @@ const metricsSchema = Type.Object(
   { additionalProperties: false }
 );
 
-export const QaMetricsEnvelopeSchema = Type.Object(
+const QaMetricsEnvelopeSchema = Type.Object(
   {
     schemaVersion: Type.Integer({ minimum: 1 }),
     repository: Type.String({ pattern: '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$', maxLength: 140 }),
@@ -168,7 +168,7 @@ export interface QaMetricsEnvelope {
 
 // Compile-time guard that the schema stays in sync with collect/types.ts: a
 // document accepted by the schema must be a valid Metrics for the renderer.
-export const METRICS_SCHEMA_MATCHES_TYPES: Static<
+const _METRICS_SCHEMA_MATCHES_TYPES: Static<
   typeof QaMetricsEnvelopeSchema
 >['metrics'] extends Metrics
   ? true

@@ -113,7 +113,7 @@ async function executeRead(
  *
  * // Usage: const { todos } = parseTodoWriteArgs(args);
  */
-export function parseTodoWriteArgs(args: Record<string, unknown>): TodoWriteArgs {
+function parseTodoWriteArgs(args: Record<string, unknown>): TodoWriteArgs {
   if (!Value.Check(TodoWriteArgsSchema, args)) {
     const firstError = Value.Errors(TodoWriteArgsSchema, args).First();
     const detail = firstError

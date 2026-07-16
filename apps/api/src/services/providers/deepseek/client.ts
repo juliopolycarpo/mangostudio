@@ -92,7 +92,7 @@ export async function validateDeepSeekApiKey(params: {
   }
 }
 
-export class DeepSeekValidationError extends Error {
+class DeepSeekValidationError extends Error {
   constructor(message: string, options?: ErrorOptions) {
     super(message, options);
     this.name = 'DeepSeekValidationError';

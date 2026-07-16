@@ -26,11 +26,7 @@ import {
   resolveCursorSidecarScriptPath,
 } from './sidecar-process';
 
-export {
-  buildCursorSidecarEnv,
-  CURSOR_SIDECAR_PROTOCOL_VERSION,
-  resolveCursorSidecarScriptPath,
-} from './sidecar-process';
+export { buildCursorSidecarEnv } from './sidecar-process';
 
 const READY_TIMEOUT_MS = 10_000;
 const IDLE_TIMEOUT_MS = 300_000;

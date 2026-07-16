@@ -49,7 +49,7 @@ export interface GrepToolArgs {
   caseInsensitive?: boolean;
 }
 
-export interface GrepMatch {
+interface GrepMatch {
   file: string;
   line: number;
   text: string;

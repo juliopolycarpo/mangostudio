@@ -6,13 +6,6 @@
 import { registerTool } from '../registry';
 import type { ToolContext } from '../types';
 
-export interface GetCurrentDatetimeArgs {
-  /** IANA timezone name (e.g. "America/Sao_Paulo"). Defaults to "UTC". */
-  timezone?: string;
-  /** BCP 47 locale tag (e.g. "pt-BR"). Defaults to "en-US". */
-  locale?: string;
-}
-
 export interface GetCurrentDatetimeResult {
   isoUtc: string;
   unixMs: number;

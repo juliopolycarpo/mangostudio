@@ -17,7 +17,6 @@ export {
   getDefaultToolSettings,
   getSafeEffectiveToolSettings,
   mergeToolSettings,
-  normalizeToolParameters,
   ToolParameterError,
 } from './settings-policy';
 

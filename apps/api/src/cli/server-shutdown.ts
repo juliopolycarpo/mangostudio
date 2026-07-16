@@ -25,7 +25,7 @@ interface RunServerStopCommandOptions {
   removeStateAfterSignal?: boolean;
 }
 
-export function resolveServerShutdownDeps(
+function resolveServerShutdownDeps(
   deps: Partial<ServerShutdownDeps> = {}
 ): Required<ServerShutdownDeps> {
   return {

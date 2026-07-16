@@ -18,7 +18,7 @@ export interface ExpectedEnvelope {
  * Finds the `turn_completed` event in an event array and returns its
  * raw providerState string, or undefined when no such event exists.
  */
-export function findTurnCompletedProviderState(events: AgentEvent[]): string | undefined {
+function findTurnCompletedProviderState(events: AgentEvent[]): string | undefined {
   const completed = events.find(
     (e): e is AgentEvent & { type: 'turn_completed' } => e.type === 'turn_completed'
   );
@@ -71,22 +71,4 @@ export function expectContinuationDegraded(
   expect(degraded.from).toBe(expected.from);
   expect(degraded.to).toBe(expected.to);
   expect(degraded.reasonCode).toBe(expected.reasonCode);
-}
-
-/**
- * Asserts that a `turn_error` event exists and returns its error message.
- */
-export function expectTurnError(events: AgentEvent[]): string | undefined {
-  const error = events.find(
-    (e): e is AgentEvent & { type: 'turn_error' } => e.type === 'turn_error'
-  );
-  expect(error).toBeDefined();
-  return error?.error;
-}
-
-/**
- * Asserts that no `turn_error` event exists in the event array.
- */
-export function expectNoTurnError(events: AgentEvent[]): void {
-  expect(events.some((e) => e.type === 'turn_error')).toBe(false);
 }

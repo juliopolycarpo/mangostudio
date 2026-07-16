@@ -9,7 +9,7 @@ export type ToolName = 'actionlint' | 'zizmor' | 'shellcheck';
 
 export type PlatformKey = 'linux-x64' | 'linux-arm64' | 'darwin-x64' | 'darwin-arm64';
 
-export interface ToolAsset {
+interface ToolAsset {
   /** Release asset file name, appended to the tool's baseUrl. */
   readonly assetName: string;
   /** Hex SHA-256 of the release archive. */

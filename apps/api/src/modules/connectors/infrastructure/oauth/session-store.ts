@@ -9,7 +9,7 @@
 
 import type { OAuthLoopbackServer } from './loopback-server';
 
-export type OAuthSessionStatus = 'pending' | 'completed' | 'failed' | 'expired';
+type OAuthSessionStatus = 'pending' | 'completed' | 'failed' | 'expired';
 
 export interface OAuthSessionBase {
   id: string;

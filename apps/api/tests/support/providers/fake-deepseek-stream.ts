@@ -21,32 +21,9 @@ export function* reasoningDeltaChunk(reasoning: string, content?: string): Gener
 }
 
 /** Delta with only `reasoning_content` (thinking before text). */
-export function* reasoningOnlyChunk(text: string): Generator<Chunk> {
+function* reasoningOnlyChunk(text: string): Generator<Chunk> {
   yield {
     choices: [{ delta: { content: null, reasoning_content: text }, finish_reason: null }],
-  };
-}
-
-/** Delta with `reasoning_content` AND a tool call start. */
-export function* reasoningWithToolCallChunk(
-  reasoning: string,
-  toolIndex: number,
-  toolId: string,
-  toolName: string
-): Generator<Chunk> {
-  yield {
-    choices: [
-      {
-        delta: {
-          content: null,
-          reasoning_content: reasoning,
-          tool_calls: [
-            { index: toolIndex, id: toolId, function: { name: toolName, arguments: '' } },
-          ],
-        },
-        finish_reason: null,
-      },
-    ],
   };
 }
 

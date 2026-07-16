@@ -68,7 +68,7 @@ export interface CursorSidecarStaging {
 }
 
 /** Reads the installed `@cursor/sdk` version so the vendored copy matches the lockfile. */
-export function resolveCursorSdkVersion(): string {
+function resolveCursorSdkVersion(): string {
   const installed = join(ROOT_DIR, 'apps/api/node_modules/@cursor/sdk/package.json');
   if (existsSync(installed)) {
     const pkg = JSON.parse(readFileSync(installed, 'utf8')) as { version?: string };
@@ -245,7 +245,7 @@ export function collectCursorSdkChunks(sdkPackageDir: string): CursorSdkChunkMan
   };
 }
 
-export function cursorSdkChunkErrors(
+function cursorSdkChunkErrors(
   sdkPackageDir: string,
   expectedChunks?: CursorSdkChunkManifest
 ): string[] {
@@ -319,7 +319,7 @@ function declaredPackageEntrypoints(manifest: Record<string, unknown>): string[]
   return [...entrypoints];
 }
 
-export function packageDeclaredEntrypointErrors(packageDir: string, label: string): string[] {
+function packageDeclaredEntrypointErrors(packageDir: string, label: string): string[] {
   const { errors, manifest } = readPackageManifest(packageDir, label);
   if (!manifest) return errors;
 
@@ -343,10 +343,7 @@ export function cursorSdkPackageTreeErrors(
   ];
 }
 
-export function cursorNativePackageTreeErrors(
-  nodeModulesDir: string,
-  nativePackage: string
-): string[] {
+function cursorNativePackageTreeErrors(nodeModulesDir: string, nativePackage: string): string[] {
   return packageDeclaredEntrypointErrors(
     packageDir(nodeModulesDir, nativePackage),
     `Cursor native package ${nativePackage}`

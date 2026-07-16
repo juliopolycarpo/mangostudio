@@ -17,7 +17,7 @@ import type { McpServerRuntimeConfig } from '../../../services/mcp/types';
 import { commandResolvesOnPath } from './command-path';
 
 /** Hard cap on the probe (connect + listTools), matching the test endpoint. */
-export const MCP_PROBE_TIMEOUT_MS = 10_000;
+const MCP_PROBE_TIMEOUT_MS = 10_000;
 
 /** Typed failure category for a probe, so the reason is greppable, not free text. */
 export type McpProbeReason =
@@ -28,7 +28,7 @@ export type McpProbeReason =
   | 'timeout'
   | 'unreachable';
 
-export interface McpProbeDiagnostic {
+interface McpProbeDiagnostic {
   ok: boolean;
   toolCount?: number;
   reason?: McpProbeReason;
@@ -37,7 +37,7 @@ export interface McpProbeDiagnostic {
 }
 
 /** stdio command PATH resolution outcome; http rows are `not_applicable`. */
-export type McpCommandPathStatus = 'not_applicable' | 'missing' | 'not_found' | 'found';
+type McpCommandPathStatus = 'not_applicable' | 'missing' | 'not_found' | 'found';
 
 export interface McpServerDiagnostic {
   slug: string;
@@ -77,7 +77,7 @@ export interface McpDiagnosticsDeps {
   probeServer(userId: string, config: McpServerRuntimeConfig): Promise<ProbeAttempt>;
 }
 
-export function createMcpDiagnosticsDeps(): McpDiagnosticsDeps {
+function createMcpDiagnosticsDeps(): McpDiagnosticsDeps {
   return {
     resolveCommandOnPath: commandResolvesOnPath,
     probeServer: realProbeServer,

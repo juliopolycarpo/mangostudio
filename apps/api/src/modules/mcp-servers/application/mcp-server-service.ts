@@ -41,7 +41,7 @@ import {
 } from '../infrastructure/mcp-server-repository';
 
 /** Hard cap on the explicit connection probe (connect + listTools). */
-export const TEST_MCP_SERVER_TIMEOUT_MS = 10_000;
+const TEST_MCP_SERVER_TIMEOUT_MS = 10_000;
 
 export async function listMcpServers(
   db: Kysely<Database>,

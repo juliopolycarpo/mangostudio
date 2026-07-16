@@ -15,7 +15,7 @@ import {
 export const LIBRARY_NOTES_URI = 'file:///library/notes.md';
 export const LIBRARY_NOTES_TEXT = '# Notes\n\nremember the mango';
 export const LIBRARY_REPORT_URI = 'file:///library/report.pdf';
-export const LIBRARY_REPORT_BASE64 = Buffer.from('library-pdf-bytes').toString('base64');
+const LIBRARY_REPORT_BASE64 = Buffer.from('library-pdf-bytes').toString('base64');
 
 export function createLibraryMcpServer(): Server {
   const server = new Server(

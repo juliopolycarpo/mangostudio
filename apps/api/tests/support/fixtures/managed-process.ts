@@ -28,7 +28,7 @@ export interface ManagedProcessFixture {
 }
 
 /** Allocates an OS-selected loopback port and releases the reservation immediately. */
-export async function reserveEphemeralPort(): Promise<number> {
+async function reserveEphemeralPort(): Promise<number> {
   const server = createServer();
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject);

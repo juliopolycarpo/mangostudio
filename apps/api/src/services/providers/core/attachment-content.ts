@@ -47,7 +47,7 @@ export function appendAttachmentFallbackNotes(
   return prompt.trim().length > 0 ? `${prompt}\n\n${noteText}` : noteText;
 }
 
-export function isAttachmentSupportedByModel(
+function isAttachmentSupportedByModel(
   attachment: ProviderRuntimeAttachment,
   capabilities: ModelCapabilities | undefined
 ): boolean {

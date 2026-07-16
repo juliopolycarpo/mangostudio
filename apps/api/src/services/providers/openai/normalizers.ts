@@ -10,7 +10,6 @@ export {
   extractReasoningFromCompleted,
   extractResponsesUsage,
   type ResponseStreamEvent,
-  type ResponsesUsage,
 } from '../core/responses-protocol/normalizers';
 
 // ---------------------------------------------------------------------------

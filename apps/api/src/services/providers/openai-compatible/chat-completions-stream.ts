@@ -41,7 +41,7 @@ interface OAICompatTurnLocalLoopState {
   loopMessages: Array<OpenAI.ChatCompletionMessageParam>;
 }
 
-export function parseOAICompatTurnLocalLoopState(
+function parseOAICompatTurnLocalLoopState(
   turnLocalLoopState: string | null | undefined
 ): OAICompatTurnLocalLoopState | null {
   return parseJsonWith(turnLocalLoopState, (parsed) => {

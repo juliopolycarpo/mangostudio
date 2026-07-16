@@ -34,7 +34,7 @@ export abstract class OAuthReauthRequiredError extends Error {
 }
 
 /** Provider-independent fields of a persisted token bundle. */
-export interface OAuthTokenBundleBase {
+interface OAuthTokenBundleBase {
   version: 1;
   accessToken: string;
   refreshToken: string;

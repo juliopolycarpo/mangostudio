@@ -319,10 +319,7 @@ export function assembleSubagentResult(
 
 // -- Shared helpers (used by stages and the outer runner) -------------------
 
-export function enforceSubagentSummary(
-  summary: string,
-  tools: ReadonlyArray<{ name: string }>
-): string {
+function enforceSubagentSummary(summary: string, tools: ReadonlyArray<{ name: string }>): string {
   const trimmed = summary.trim();
   if (trimmed) return trimmed;
   if (tools.length === 0) return SUBAGENT_EMPTY_TEXT_FALLBACK;
@@ -356,7 +353,7 @@ export function enforceSubagentRunResult(result: SubagentRunResult): SubagentRun
   };
 }
 
-export function createCompletedResult(input: {
+function createCompletedResult(input: {
   readonly profile: AgentProfile;
   readonly summary: string;
   readonly messages: ReadonlyArray<{ role: 'assistant' | 'system'; text: string }>;

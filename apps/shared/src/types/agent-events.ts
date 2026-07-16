@@ -95,12 +95,12 @@ export interface TodoPart {
   todos: TodoItem[];
 }
 
-export interface SubagentTraceMessage {
+interface SubagentTraceMessage {
   role: 'assistant' | 'system';
   text: string;
 }
 
-export interface SubagentToolTrace {
+interface SubagentToolTrace {
   callId: string;
   name: string;
   isError?: boolean;

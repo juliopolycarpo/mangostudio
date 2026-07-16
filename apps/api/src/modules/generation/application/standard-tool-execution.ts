@@ -63,7 +63,7 @@ import {
 } from './tool-execution-lifecycle';
 import { errorToToolMessage, parseToolArgs, stringifyToolResult } from './tool-result-utils';
 
-export interface StandardToolExecution {
+interface StandardToolExecution {
   callId: string;
   name: string;
   args: Record<string, unknown>;

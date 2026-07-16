@@ -298,7 +298,7 @@ export function isCursorConnectorConfigured(config: MangoConfig): boolean {
  * doctor never creates or migrates the database; a missing file or table
  * (fresh install) simply means no connectors.
  */
-export function listChatGptConnectorRows(config: MangoConfig): SecretMetadataRow[] {
+function listChatGptConnectorRows(config: MangoConfig): SecretMetadataRow[] {
   return readDbRows<SecretMetadataRow>(
     config,
     "SELECT * FROM secret_metadata WHERE provider = 'chatgpt'"

@@ -19,7 +19,7 @@ import {
   toolAssetUrl,
 } from './manifest';
 
-export const TOOL_CACHE_DIR = join(ROOT_DIR, '.mango', 'artifacts', 'tools');
+const TOOL_CACHE_DIR = join(ROOT_DIR, '.mango', 'artifacts', 'tools');
 
 /** Injectable I/O surface so unit tests never touch the network or tar. */
 export interface BootstrapIo {
@@ -28,7 +28,7 @@ export interface BootstrapIo {
   extractArchive(archivePath: string, destDir: string): Promise<void>;
 }
 
-export const defaultBootstrapIo: BootstrapIo = {
+const defaultBootstrapIo: BootstrapIo = {
   async download(url) {
     const response = await fetch(url);
     if (!response.ok) {
