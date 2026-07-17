@@ -453,6 +453,7 @@ describe('POST /respond/stream — interactive MCP end to end', () => {
         type: 'mcp_elicitation',
         elicitationId,
         status: 'cancelled',
+        reason: 'turn_aborted',
       })
     );
     expect(interruptedParts).toContainEqual(
