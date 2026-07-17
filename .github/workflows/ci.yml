@@ -110,8 +110,9 @@ jobs:
   gate:
     # Single stable check ("CI / Gate") aggregating every mandatory job, so
     # branch protection and Canary depend on one name instead of tracking
-    # internal job names and matrix shapes. Every job above except this one
-    # and canary must be in `needs`; the ci-gate unit tests enforce that.
+    # internal job names and matrix shapes. Every job except this one and jobs
+    # that already need this gate must be in `needs`; the ci-gate unit tests
+    # derive that set dynamically so a new mandatory lane cannot bypass it.
     # qa-metrics only runs for PRs and main pushes, so its skip is accepted
     # solely on workflow_dispatch; any other non-success fails the gate.
     name: Gate
