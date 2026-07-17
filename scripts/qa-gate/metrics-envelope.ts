@@ -182,6 +182,11 @@ export interface ExpectedEnvelope {
   readonly prNumber: number | null;
 }
 
+export interface EnvelopeParseOptions {
+  /** Head envelopes record the mutable PR base tip; identity is repo+headSha+prNumber. */
+  readonly enforceBaseSha?: boolean;
+}
+
 const firstSchemaError = (value: unknown): string => {
   const first = Value.Errors(QaMetricsEnvelopeSchema, value).First();
   return first ? `${first.path || '/'}: ${first.message}` : 'unknown schema violation';
@@ -191,15 +196,18 @@ const firstSchemaError = (value: unknown): string => {
  * Parse and validate an untrusted qa-metrics artifact payload.
  *
  * Enforces the size cap, the TypeBox schema, the collector version, and an
- * exact match of every provenance field against `expected` (values the
- * publisher derived from trusted GitHub API data, never from the artifact).
- * Throws with a reason on any mismatch.
+ * exact match of provenance fields against `expected` (values the publisher
+ * derived from trusted GitHub API data, never from the artifact). Head
+ * envelopes may skip the mutable `baseSha` comparison because repository,
+ * headSha, and prNumber establish their identity. Throws with a reason on any
+ * enforced mismatch.
  *
- * // Usage: parseQaMetricsEnvelope(text, { repository, headSha, baseSha, prNumber })
+ * // Usage: parseQaMetricsEnvelope(text, { repository, headSha, baseSha, prNumber }, { enforceBaseSha })
  */
 export const parseQaMetricsEnvelope = (
   text: string,
-  expected: ExpectedEnvelope
+  expected: ExpectedEnvelope,
+  options: EnvelopeParseOptions = {}
 ): QaMetricsEnvelope => {
   if (Buffer.byteLength(text, 'utf8') > QA_METRICS_MAX_BYTES) {
     throw new Error(`metrics payload exceeds ${QA_METRICS_MAX_BYTES} bytes`);
@@ -229,7 +237,7 @@ export const parseQaMetricsEnvelope = (
   if (parsed.headSha !== expected.headSha) {
     throw new Error(`metrics headSha ${parsed.headSha} does not match ${expected.headSha}`);
   }
-  if (parsed.baseSha !== expected.baseSha) {
+  if ((options.enforceBaseSha ?? true) && parsed.baseSha !== expected.baseSha) {
     throw new Error(`metrics baseSha ${parsed.baseSha} does not match ${expected.baseSha}`);
   }
   if (parsed.prNumber !== expected.prNumber) {

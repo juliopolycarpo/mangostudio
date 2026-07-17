@@ -10,7 +10,11 @@ import { cliffArgs, renderChangelogPreviewSection } from '../lib/changelog';
 import { ROOT_DIR } from '../lib/config';
 import type { Metrics } from './collect/types';
 import { COMMIT_LOG_FORMAT, parseCommitLog, renderCommitsSection } from './commit-log';
-import { type ExpectedEnvelope, parseQaMetricsEnvelope } from './metrics-envelope';
+import {
+  type EnvelopeParseOptions,
+  type ExpectedEnvelope,
+  parseQaMetricsEnvelope,
+} from './metrics-envelope';
 import { composeReport } from './report-document';
 
 interface ArtifactStatus {
@@ -55,14 +59,15 @@ const loadMetrics = async (
   path: string | null,
   artifact: ArtifactStatus,
   expected: ExpectedEnvelope,
-  side: 'head' | 'base'
+  side: 'head' | 'base',
+  options: EnvelopeParseOptions = {}
 ): Promise<{ metrics: Metrics | null; note: string | null }> => {
   if (!artifact.found) return { metrics: null, note: artifact.reason ?? 'artifact not found' };
   if (!path || !(await Bun.file(path).exists())) {
     return { metrics: null, note: 'artifact payload could not be extracted' };
   }
   try {
-    const envelope = parseQaMetricsEnvelope(await Bun.file(path).text(), expected);
+    const envelope = parseQaMetricsEnvelope(await Bun.file(path).text(), expected, options);
     return { metrics: envelope.metrics, note: null };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -114,7 +119,9 @@ const head = await loadMetrics(
     baseSha: context.baseSha,
     prNumber: context.prNumber,
   },
-  'head'
+  'head',
+  // #516: a PR base.sha follows the live base tip and can advance after head collection.
+  { enforceBaseSha: false }
 );
 const base = await loadMetrics(
   basePath,
