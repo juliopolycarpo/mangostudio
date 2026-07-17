@@ -2,13 +2,29 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { executeStandardToolCallsWithProgress } from '../../../../src/modules/generation/application/standard-tool-execution';
+import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
+import {
+  classifyMcpElicitationCancelReason,
+  executeStandardToolCallsWithProgress,
+} from '../../../../src/modules/generation/application/standard-tool-execution';
 import { isShellAvailable } from '../../../../src/services/tools/builtin/_shell-exec';
 import { buildShellTool } from '../../../../src/services/tools/builtin/_shell-tool';
 import { clearRegistry, getAllTools, registerTool } from '../../../../src/services/tools/registry';
 import type { RegisteredTool } from '../../../../src/services/tools/types';
 
 const hasBash = isShellAvailable('bash');
+
+describe('classifyMcpElicitationCancelReason', () => {
+  it('distinguishes timeouts, closed sessions, and other tool failures', () => {
+    expect(
+      classifyMcpElicitationCancelReason(new McpError(ErrorCode.RequestTimeout, 'timed out'))
+    ).toBe('tool_timeout');
+    expect(
+      classifyMcpElicitationCancelReason(new McpError(ErrorCode.ConnectionClosed, 'closed'))
+    ).toBe('server_closed');
+    expect(classifyMcpElicitationCancelReason(new Error('tool failed'))).toBe('tool_failed');
+  });
+});
 
 function snapshotRegistry(): RegisteredTool[] {
   return getAllTools().map((tool) => ({

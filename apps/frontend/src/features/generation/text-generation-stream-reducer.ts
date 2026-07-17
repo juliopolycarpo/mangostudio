@@ -383,14 +383,20 @@ function reduceMcpElicitationStatus(
   state: TextGenerationStreamState,
   chunk: Extract<StreamChunk, { type: 'mcp_elicitation_status' }>
 ) {
-  const parts = updateElicitationStatus(state.parts, chunk.elicitationId, chunk.status);
+  const parts = updateElicitationStatus(
+    state.parts,
+    chunk.elicitationId,
+    chunk.status,
+    chunk.reason
+  );
   return withAiMessageUpdate({ ...state, parts }, { parts });
 }
 
 function updateElicitationStatus(
   parts: MessagePart[],
   elicitationId: string,
-  status: Extract<MessagePart, { type: 'mcp_elicitation' }>['status']
+  status: Extract<MessagePart, { type: 'mcp_elicitation' }>['status'],
+  reason?: Extract<MessagePart, { type: 'mcp_elicitation' }>['reason']
 ): MessagePart[] {
   // The first terminal status wins; a late or duplicate event never moves it.
   return parts.map((part) =>
@@ -398,7 +404,7 @@ function updateElicitationStatus(
     part.elicitationId === elicitationId &&
     part.status === 'pending' &&
     part.status !== status
-      ? { ...part, status }
+      ? { ...part, status, ...(reason ? { reason } : {}) }
       : part
   );
 }

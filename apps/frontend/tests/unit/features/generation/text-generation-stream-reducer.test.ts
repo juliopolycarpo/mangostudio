@@ -433,8 +433,8 @@ describe('text generation stream reducer', () => {
       type: 'mcp_elicitation_status',
       elicitationId: 'elicit-1',
       toolCallId: 'tool-mcp',
-      status: 'declined',
-      reason: 'responded',
+      status: 'cancelled',
+      reason: 'tool_failed',
       done: false,
     };
 
@@ -454,11 +454,16 @@ describe('text generation stream reducer', () => {
         serverSlug: 'demo',
         message: 'Choose a tier',
         fields: [],
-        status: 'declined',
+        status: 'cancelled',
+        reason: 'tool_failed',
       },
     ]);
     expect(state.aiMessageUpdate?.patch.parts).toContainEqual(
-      expect.objectContaining({ type: 'mcp_elicitation', status: 'declined' })
+      expect.objectContaining({
+        type: 'mcp_elicitation',
+        status: 'cancelled',
+        reason: 'tool_failed',
+      })
     );
   });
 

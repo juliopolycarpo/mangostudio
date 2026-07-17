@@ -146,6 +146,11 @@ function createTurnMcpServer(
         inputSchema: { type: 'object' as const, properties: {} },
       },
       {
+        name: 'fail-after-elicit',
+        description: 'Fails while a form elicitation remains pending.',
+        inputSchema: { type: 'object' as const, properties: {} },
+      },
+      {
         name: 'disconnect',
         description: 'Drops the MCP session during a tool request.',
         inputSchema: { type: 'object' as const, properties: {} },
@@ -237,6 +242,22 @@ function createTurnMcpServer(
         },
       });
       return { content: [{ type: 'text', text: JSON.stringify(response) }] };
+    }
+    if (name === 'fail-after-elicit') {
+      void server
+        .elicitInput({
+          mode: 'form',
+          message: 'Approve the failing operation',
+          requestedSchema: {
+            type: 'object',
+            properties: {
+              approved: { type: 'boolean', title: 'Approved' },
+            },
+          },
+        })
+        .catch(() => undefined);
+      await controls.waitForRelease('fail-after-elicit');
+      throw new Error('fixture tool failed after eliciting input');
     }
     if (name === 'disconnect') {
       queueMicrotask(() => void server.close());

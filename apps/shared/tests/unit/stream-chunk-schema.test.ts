@@ -156,7 +156,7 @@ const VALID_CHUNKS: StreamChunk[] = [
     elicitationId: 'elicit-1',
     toolCallId: 'tool-mcp-elicit',
     status: 'cancelled',
-    reason: 'tool_timeout',
+    reason: 'tool_failed',
     done: false,
   },
   {

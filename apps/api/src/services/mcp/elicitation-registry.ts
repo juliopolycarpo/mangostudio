@@ -50,7 +50,7 @@ export type McpElicitationStatusObserver = (event: McpElicitationStatusEvent) =>
 /** Server-side causes for cancelling a still-pending elicitation. */
 export type McpElicitationCancelReason = Extract<
   McpElicitationTerminalReason,
-  'tool_timeout' | 'tool_finished' | 'server_closed'
+  'tool_timeout' | 'tool_finished' | 'tool_failed' | 'server_closed'
 >;
 
 interface PendingElicitation {
@@ -139,9 +139,10 @@ export function createPendingElicitation(
       pending.delete(elicitationId);
       input.signal?.removeEventListener('abort', onAbort);
       // Mutate in place so the MessagePart already pushed into the turn's
-      // `allParts` (same object reference) reflects the final status on
-      // persist; notify only after the part carries that status.
+      // `allParts` (same object reference) reflects the terminal state on
+      // persist; notify only after the part carries both status and reason.
       part.status = status;
+      part.reason = reason;
       onStatus?.({ elicitationId, toolCallId: input.toolCallId, status, reason });
       resolve(result);
     };
