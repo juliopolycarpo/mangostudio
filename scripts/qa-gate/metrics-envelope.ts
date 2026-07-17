@@ -202,7 +202,7 @@ const firstSchemaError = (value: unknown): string => {
  * headSha, and prNumber establish their identity. Throws with a reason on any
  * enforced mismatch.
  *
- * // Usage: parseQaMetricsEnvelope(text, { repository, headSha, baseSha, prNumber })
+ * // Usage: parseQaMetricsEnvelope(text, { repository, headSha, baseSha, prNumber }, { enforceBaseSha })
  */
 export const parseQaMetricsEnvelope = (
   text: string,
