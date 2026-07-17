@@ -112,9 +112,11 @@ commit summary and QA metrics comparison.
 `changes` job runs the actual dry-run lanes only for PRs that touch release
 workflows, release scripts, install scripts, binary build tooling, CLI packages,
 or Dockerfiles; its always-reporting `Release Dry Run / Gate` check makes the
-workflow safe to require in branch protection. It also runs weekly as a drift
-check and can be started manually with `workflow_dispatch`. (This is read-only and unrelated to the
-[Canary channel](#canary-channel), which actually publishes from `main`.)
+workflow safe to require in branch protection (see
+[`ci.md`](./ci.md#branch-protection--required-checks)). It also runs weekly as a
+drift check and can be started manually with `workflow_dispatch`. (This is
+read-only and unrelated to the [Canary channel](#canary-channel), which actually
+publishes from `main`.)
 
 The dry-run is read-only: it verifies lockstep versions, builds one Linux binary
 with a synthetic prerelease version, assembles and validates the matching npm
@@ -474,7 +476,8 @@ Design notes:
 - The crate's CI lane (`.github/workflows/cargo-shim.yml`) triggers on every PR,
   but a cheap `changes` job skips the Rust toolchain unless
   `packages/cargo-shim/**` changed; the always-reporting `Cargo Shim / Gate`
-  check makes the lane safe to require in branch protection.
+  check makes the lane safe to require in branch protection (see
+  [`ci.md`](./ci.md#branch-protection--required-checks)).
 - The `cargo-publish` release job checks crates.io before publishing and
   re-checks between retries, so workflow re-runs converge instead of failing on
   "version already exists".
