@@ -11,6 +11,7 @@ import { makeMetrics } from './testing/metrics-fixture';
 
 const HEAD_SHA = `${'a'.repeat(39)}1`;
 const BASE_SHA = `${'b'.repeat(39)}2`;
+const ADVANCED_BASE_SHA = `${'c'.repeat(39)}3`;
 
 const expected: ExpectedEnvelope = {
   repository: 'mango/studio',
@@ -56,6 +57,28 @@ describe('parseQaMetricsEnvelope', () => {
     });
 
     expect(envelope.headSha).toBe(BASE_SHA);
+  });
+
+  it('accepts a head envelope with a stale base sha when enforcement is disabled', () => {
+    const envelope = parseQaMetricsEnvelope(
+      JSON.stringify(makeEnvelope()),
+      {
+        ...expected,
+        baseSha: ADVANCED_BASE_SHA,
+      },
+      { enforceBaseSha: false }
+    );
+
+    expect(envelope.baseSha).toBe(BASE_SHA);
+  });
+
+  it('rejects the same stale head base sha with default enforcement', () => {
+    expect(() =>
+      parseQaMetricsEnvelope(JSON.stringify(makeEnvelope()), {
+        ...expected,
+        baseSha: ADVANCED_BASE_SHA,
+      })
+    ).toThrow('baseSha');
   });
 
   it('accepts collector-error placeholders for individual metrics', () => {
