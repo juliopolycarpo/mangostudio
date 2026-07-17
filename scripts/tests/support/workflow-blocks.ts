@@ -52,7 +52,7 @@ export function parseNeedsList(jobBlock: string): string[] {
 
 /**
  * Jobs that must appear in an aggregate gate's `needs`: every job except the
- * gate itself and any job that already depends on the gate (downstream of it).
+ * gate itself and any job that directly lists the gate in its own `needs`.
  * That second clause excludes canary-style publishers without naming them.
  */
 export function expectedGateNeeds(workflow: string): string[] {
