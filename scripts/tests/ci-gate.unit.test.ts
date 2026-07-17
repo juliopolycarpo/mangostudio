@@ -3,6 +3,7 @@ import { describe, expect, test } from 'bun:test';
 import { evaluateGate, parseAllowedSkips, parseNeeds } from '../ci/evaluate-gate';
 import { readText } from './support/read-text';
 import {
+  expectedGateNeeds,
   extractJobBlock,
   extractJobBlocks,
   extractOnBlock,
@@ -116,12 +117,9 @@ describe('CI / Gate aggregate', () => {
   const workflow = readText('.github/workflows/ci.yml');
   const gateBlock = extractJobBlock(workflow, 'gate');
 
-  test('needs every job except itself and canary, so new jobs cannot bypass it', () => {
-    const jobs = extractJobBlocks(workflow).map(({ job }) => job);
-    const mandatory = jobs.filter((job) => job !== 'gate' && job !== 'canary');
-
-    expect(jobs).toContain('gate');
-    expect(parseNeedsList(gateBlock).sort()).toEqual([...mandatory].sort());
+  test('needs every mandatory job, so new jobs cannot bypass it', () => {
+    expect(extractJobBlocks(workflow).map(({ job }) => job)).toContain('gate');
+    expect(parseNeedsList(gateBlock).sort()).toEqual(expectedGateNeeds(workflow));
   });
 
   test('qa-metrics is the only lane allowed to skip, and only on workflow_dispatch', () => {
@@ -154,10 +152,10 @@ describe('cargo-shim.yml always-reporting gate', () => {
     );
   });
 
-  test('gate accepts the Rust lane skip only when no Rust path changed', () => {
+  test('gate needs every mandatory job and accepts the Rust skip only when irrelevant', () => {
     const gateBlock = extractJobBlock(workflow, 'gate');
 
-    expect(parseNeedsList(gateBlock).sort()).toEqual(['cargo-shim', 'changes']);
+    expect(parseNeedsList(gateBlock).sort()).toEqual(expectedGateNeeds(workflow));
     expect(gateBlock).toContain(
       `ALLOWED_SKIPS: ${EXPR} needs.changes.outputs.cargo_shim == 'false' && 'cargo-shim' || '' }}`
     );
@@ -189,10 +187,10 @@ describe('release-dry-run.yml always-reporting gate', () => {
     expect(workflow).toContain('echo "release=true" >> "$GITHUB_OUTPUT"');
   });
 
-  test('gate accepts each lane skip only when its predicate evaluated false', () => {
+  test('gate needs every mandatory job and accepts each lane skip only when irrelevant', () => {
     const gateBlock = extractJobBlock(workflow, 'gate');
 
-    expect(parseNeedsList(gateBlock).sort()).toEqual(['changes', 'dry-run-cargo', 'dry-run-linux']);
+    expect(parseNeedsList(gateBlock).sort()).toEqual(expectedGateNeeds(workflow));
     expect(gateBlock).toContain(
       `ALLOWED_SKIPS: ${EXPR} format('{0} {1}', needs.changes.outputs.release == 'false' && 'dry-run-linux' || '', needs.changes.outputs.cargo_shim == 'false' && 'dry-run-cargo' || '') }}`
     );
@@ -213,5 +211,36 @@ describe('shared gate job contract', () => {
     expect(gateBlock).toContain('permissions:\n      contents: read');
     expect(gateBlock).toContain(`NEEDS: ${EXPR} toJSON(needs) }}`);
     expect(gateBlock).toContain('run: bun ./scripts/ci/evaluate-gate.ts');
+  });
+
+  test.each([
+    ...GATED_WORKFLOWS,
+  ])('%s gate needs includes changes when the workflow has a changes job', (path) => {
+    const workflow = readText(path);
+    const jobs = extractJobBlocks(workflow).map(({ job }) => job);
+    if (!jobs.includes('changes')) {
+      return;
+    }
+
+    // Skip predicates read outputs from `changes`; dangling ALLOWED_SKIPS
+    // would silently accept the wrong lanes if it dropped out of needs.
+    expect(expectedGateNeeds(workflow)).toContain('changes');
+    expect(parseNeedsList(extractJobBlock(workflow, 'gate'))).toContain('changes');
+  });
+
+  test('expectedGateNeeds picks up a synthetic job that is not gated', () => {
+    const base = readText('.github/workflows/cargo-shim.yml');
+    const withOrphan = `${base}\n  orphan-lane:\n    runs-on: ubuntu-latest\n    steps:\n      - run: 'true'\n`;
+
+    expect(expectedGateNeeds(withOrphan)).toContain('orphan-lane');
+    expect(parseNeedsList(extractJobBlock(withOrphan, 'gate')).sort()).not.toEqual(
+      expectedGateNeeds(withOrphan)
+    );
+  });
+
+  test('expectedGateNeeds excludes jobs that already depend on the gate', () => {
+    const base = readText('.github/workflows/ci.yml');
+    expect(expectedGateNeeds(base)).not.toContain('canary');
+    expect(expectedGateNeeds(base)).not.toContain('gate');
   });
 });
