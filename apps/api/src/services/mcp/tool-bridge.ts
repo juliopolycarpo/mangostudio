@@ -119,15 +119,6 @@ export async function listMcpBridgeTools(
   return servers.flatMap((server) => server.tools);
 }
 
-/** Same resolution as {@link listMcpBridgeTools}, flattened for providers. */
-export async function listMcpToolDefinitions(
-  db: Kysely<Database>,
-  userId: string
-): Promise<ToolDefinition[]> {
-  const tools = await listMcpBridgeTools(db, userId);
-  return tools.map((tool) => tool.definition);
-}
-
 /**
  * Executes a namespaced MCP tool call against its owning server. Ownership is
  * enforced by the (userId, slug) lookup; a disabled server rejects the call

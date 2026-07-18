@@ -30,7 +30,6 @@ import {
 import * as realProviderSettingsRepoNs from '../../../src/modules/provider-settings/infrastructure/provider-settings-repository';
 import * as realToolSettingsRepoNs from '../../../src/modules/tool-settings/infrastructure/tool-settings-repository';
 import * as realGeminiNs from '../../../src/services/gemini';
-import { toolNameMatches } from '../../../src/services/mcp/tool-naming';
 import {
   getProvider,
   getProviderForModel,
@@ -63,8 +62,8 @@ const realGetProviderForModel = getProviderForModel;
 const realGetProvider = getProvider;
 const realRegisterProvider = registerProvider;
 const realTools = { ...realToolsNs };
+export const realGetAllTools = realTools.getAllTools;
 export const realGetAllToolDefinitions = realTools.getAllToolDefinitions;
-export const realGetToolDefinitionsForAgent = realTools.getToolDefinitionsForAgent;
 export const realExecuteTool = realTools.executeTool;
 export const realGetTool = realTools.getTool;
 export const realGetSafeEffectiveToolSettings = realTools.getSafeEffectiveToolSettings;
@@ -290,17 +289,6 @@ export async function mockToolsModule(tools: RegisteredTool[]): Promise<void> {
     getToolDefinitionsForSettings: (
       settingsByToolName: ReadonlyMap<string, EffectiveToolSettings> = new Map()
     ) => getToolDefinitionsForTools(getAllTools(), settingsByToolName),
-    getToolDefinitionsForAgent: (
-      profile: AgentProfile,
-      settingsByToolName: ReadonlyMap<string, EffectiveToolSettings> = new Map()
-    ) => {
-      if (!profile.toolsEnabled) return [];
-      const allowedToolNames = new Set(profile.toolNames);
-      const allowedTools = getAllTools().filter((tool) =>
-        toolNameMatches(allowedToolNames, tool.definition.name)
-      );
-      return getToolDefinitionsForTools(allowedTools, settingsByToolName);
-    },
     executeTool: (
       name: string,
       args: Record<string, unknown>,

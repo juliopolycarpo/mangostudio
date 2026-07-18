@@ -71,7 +71,6 @@ describe('POST /respond/stream — tool execution edge cases', () => {
       return {
         getAllTools: () => [registeredTool],
         getAllToolDefinitions: () => [toolDefinition],
-        getToolDefinitionsForAgent: () => [toolDefinition],
         getTool: () => registeredTool,
         // Enabled at definition time so the model still sees the tool; the
         // user disables it before execution, which rejects the stale call.
@@ -187,7 +186,6 @@ describe('POST /respond/stream — tool execution edge cases', () => {
       return {
         getAllTools: () => [],
         getAllToolDefinitions: () => [toolDefinition],
-        getToolDefinitionsForAgent: () => [],
         getTool: () => ({
           definition: toolDefinition,
           settings: {
@@ -358,7 +356,6 @@ describe('POST /respond/stream — tool execution edge cases', () => {
       return {
         getAllTools: () => [delegateTool],
         getAllToolDefinitions: () => [delegateTool.definition],
-        getToolDefinitionsForAgent: () => [delegateTool.definition],
         getTool: () => delegateTool,
         getSafeEffectiveToolSettings: () => ({ enabled: true, parameters: {} }),
         executeTool: () => Promise.resolve({}),

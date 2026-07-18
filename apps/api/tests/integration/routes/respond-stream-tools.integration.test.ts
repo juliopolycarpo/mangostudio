@@ -13,9 +13,9 @@ import {
   parseSseEvents,
   realExecuteTool,
   realGetAllToolDefinitions,
+  realGetAllTools,
   realGetSafeEffectiveToolSettings,
   realGetTool,
-  realGetToolDefinitionsForAgent,
   restoreAllMocks,
 } from './_respond-stream-helpers';
 
@@ -48,8 +48,8 @@ describe('POST /respond/stream — tools', () => {
     await mockVerifiedChatOwnership();
 
     await mock.module('../../../src/services/tools', () => ({
+      getAllTools: realGetAllTools,
       getAllToolDefinitions: realGetAllToolDefinitions,
-      getToolDefinitionsForAgent: realGetToolDefinitionsForAgent,
       executeTool: realExecuteTool,
       getTool: realGetTool,
       getSafeEffectiveToolSettings: realGetSafeEffectiveToolSettings,
@@ -273,8 +273,8 @@ describe('POST /respond/stream — tools', () => {
     });
 
     await mock.module('../../../src/services/tools', () => ({
+      getAllTools: realGetAllTools,
       getAllToolDefinitions: realGetAllToolDefinitions,
-      getToolDefinitionsForAgent: realGetToolDefinitionsForAgent,
       executeTool: realExecuteTool,
       getTool: realGetTool,
       getSafeEffectiveToolSettings: realGetSafeEffectiveToolSettings,
