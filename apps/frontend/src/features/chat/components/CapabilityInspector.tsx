@@ -122,7 +122,7 @@ export function CapabilityInspector({
           )}
           {chatId && capabilitiesQuery.isError && (
             <p className="text-xs text-error" role="alert">
-              {capabilitiesQuery.error.message}
+              {labels.loadError}
             </p>
           )}
           {chatId && capabilitiesQuery.data && (

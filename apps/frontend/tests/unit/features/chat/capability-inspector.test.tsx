@@ -194,8 +194,9 @@ describe('CapabilityInspector', () => {
     await userEvent.click(screen.getByRole('button', { name: /capabilities/i }));
 
     await waitFor(() => {
-      expect(screen.getByRole('alert')).toBeInTheDocument();
+      expect(screen.getByRole('alert')).toHaveTextContent('Failed to load capabilities');
     });
+    expect(screen.queryByText('boom')).not.toBeInTheDocument();
   });
 
   it('refetches a cached projection after a tool setting changes', async () => {

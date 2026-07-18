@@ -6,7 +6,6 @@
 
 import { type AgentExecutionMode, isAgentId } from '@mangostudio/shared/agents';
 import type { ChatCapabilitiesResponse } from '@mangostudio/shared/capabilities';
-import { en } from '@mangostudio/shared/i18n';
 import { type QueryClient, queryOptions } from '@tanstack/react-query';
 import { client } from '@/lib/api-client';
 import { extractApiError } from '@/lib/utils';
@@ -53,7 +52,7 @@ export function chatCapabilitiesQueryOptions(selection: ChatCapabilitiesSelectio
           ...(agentId ? { agentId } : {}),
         },
       });
-      if (error) throw new Error(extractApiError(error.value, en.chat.capabilities.loadError));
+      if (error) throw new Error(extractApiError(error.value));
       return data as ChatCapabilitiesResponse;
     },
   });
