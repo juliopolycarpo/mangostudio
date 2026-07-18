@@ -1,13 +1,13 @@
 import { afterEach, beforeAll, describe, expect, it, mock } from 'bun:test';
 import { respondStreamRoutes } from '../../../src/modules/generation/http/respond-stream-routes';
 import type { AgentTurnRequest } from '../../../src/services/providers/types';
-import type { RegisteredTool } from '../../../src/services/tools/types';
 import { insertTestUser, type UserFixture } from '../../support/factories';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
 import {
   buildRespondStreamRequest,
   createTestStreamDb,
   makeChain,
+  makeRegisteredTool,
   mockDbWithFullCapture,
   mockDbWithMessageCapture,
   mockNoopTools,
@@ -20,19 +20,7 @@ import {
   restoreAllMocks,
 } from './_respond-stream-helpers';
 
-const NOOP_TOOL: RegisteredTool = {
-  definition: { name: 'noop', description: 'no-op', parameters: {} },
-  settings: {
-    title: 'Noop',
-    description: 'No-op tool',
-    category: 'system',
-    enabledByDefault: true,
-    canDisable: true,
-    defaultParameters: {},
-    parameterDescriptors: [],
-  },
-  execute: () => Promise.resolve({ ok: true }),
-};
+const NOOP_TOOL = makeRegisteredTool('noop', 'no-op', () => Promise.resolve({ ok: true }));
 
 let TEST_USER!: UserFixture;
 

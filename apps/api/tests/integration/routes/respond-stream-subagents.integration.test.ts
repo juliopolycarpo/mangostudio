@@ -1,12 +1,12 @@
 import { afterEach, beforeAll, describe, expect, it, mock } from 'bun:test';
 import { respondStreamRoutes } from '../../../src/modules/generation/http/respond-stream-routes';
 import type { AgentTurnRequest } from '../../../src/services/providers/types';
-import type { RegisteredTool } from '../../../src/services/tools/types';
 import { insertTestUser, type UserFixture } from '../../support/factories';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
 import {
   buildRespondStreamRequest,
   createSubagentDelegationError,
+  makeRegisteredTool,
   mockDbWithMessageCapture,
   mockMultiAgentAppSettings,
   mockPassThroughDb,
@@ -19,36 +19,11 @@ import {
   restoreAllMocks,
 } from './_respond-stream-helpers';
 
-const NOOP_TOOL: RegisteredTool = {
-  definition: { name: 'noop', description: 'no-op', parameters: {} },
-  settings: {
-    title: 'Noop',
-    description: 'No-op tool',
-    category: 'system',
-    enabledByDefault: true,
-    canDisable: true,
-    defaultParameters: {},
-    parameterDescriptors: [],
-  },
-  execute: () => Promise.resolve({ ok: true }),
-};
-
-const DELEGATE_TO_AGENT_TOOL: RegisteredTool = {
-  definition: { name: 'delegate_to_agent', description: 'delegate', parameters: {} },
-  settings: {
-    title: 'Delegate',
-    description: 'Delegate tool',
-    category: 'system',
-    enabledByDefault: true,
-    canDisable: true,
-    defaultParameters: {},
-    parameterDescriptors: [],
-  },
-  execute: () => Promise.resolve({}),
-};
-
 async function mockSubagentTools(): Promise<void> {
-  await mockToolsModule([NOOP_TOOL, DELEGATE_TO_AGENT_TOOL]);
+  await mockToolsModule([
+    makeRegisteredTool('noop', 'no-op', () => Promise.resolve({ ok: true })),
+    makeRegisteredTool('delegate_to_agent', 'delegate', () => Promise.resolve({})),
+  ]);
 }
 
 let TEST_USER!: UserFixture;

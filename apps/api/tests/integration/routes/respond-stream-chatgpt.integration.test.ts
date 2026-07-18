@@ -13,7 +13,6 @@ import { respondStreamRoutes } from '../../../src/modules/generation/http/respon
 import * as realCatalogNs from '../../../src/services/providers/catalog';
 import { chatGptProvider } from '../../../src/services/providers/chatgpt/index';
 import * as realMetadataNs from '../../../src/services/secret-store/metadata';
-import type { RegisteredTool } from '../../../src/services/tools/types';
 import { makeTokenBundle, TEST_ACCOUNT_ID } from '../../support/chatgpt';
 import { insertTestUser, type UserFixture } from '../../support/factories';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
@@ -21,6 +20,7 @@ import {
   buildRespondStreamRequest,
   createTestStreamDb,
   makeChain,
+  makeRegisteredTool,
   mockToolsModule,
   mockVerifiedChatOwnership,
   parsePersistedParts,
@@ -31,23 +31,12 @@ import {
 const realCatalog = { ...realCatalogNs };
 const realMetadata = { ...realMetadataNs };
 
-const READ_FILE_TOOL: RegisteredTool = {
-  definition: {
-    name: 'read_file',
-    description: 'Read a file from the workspace.',
-    parameters: { type: 'object', properties: { path: { type: 'string' } } },
-  },
-  settings: {
-    title: 'Read file',
-    description: 'Read a file from the workspace.',
-    category: 'system',
-    enabledByDefault: true,
-    canDisable: true,
-    defaultParameters: {},
-    parameterDescriptors: [],
-  },
-  execute: () => Promise.resolve('# MangoStudio'),
-};
+const READ_FILE_TOOL = makeRegisteredTool(
+  'read_file',
+  'Read a file from the workspace.',
+  () => Promise.resolve('# MangoStudio'),
+  { type: 'object', properties: { path: { type: 'string' } } }
+);
 
 const TOKEN_BUNDLE = makeTokenBundle();
 

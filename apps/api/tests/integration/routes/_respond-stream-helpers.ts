@@ -321,6 +321,31 @@ export async function mockNoopTools(): Promise<void> {
 }
 
 /**
+ * Builds a RegisteredTool fixture with default, enabled system-tool settings.
+ * // Usage: makeRegisteredTool('noop', 'no-op', () => Promise.resolve({ ok: true }))
+ */
+export function makeRegisteredTool(
+  name: string,
+  description: string,
+  execute: RegisteredTool['execute'],
+  parameters: RegisteredTool['definition']['parameters'] = {}
+): RegisteredTool {
+  return {
+    definition: { name, description, parameters },
+    settings: {
+      title: name,
+      description,
+      category: 'system',
+      enabledByDefault: true,
+      canDisable: true,
+      defaultParameters: {},
+      parameterDescriptors: [],
+    },
+    execute,
+  };
+}
+
+/**
  * Mocks default parent/subagent profiles used by delegation tests.
  * // Usage: await mockSubagentAgentSettings({ subagentOverrides: { toolsEnabled: true } })
  */
