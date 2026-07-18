@@ -137,6 +137,9 @@ export async function inspectChatCapabilities(
       effectiveSkills: skillEntries.filter((skill) => skill.state === 'enabled').length,
     },
     contextInfo: extractContextInfo(chat?.lastContextState, chat?.lastProviderState),
+    // Profile/provider-derived settings only: composer-level runtime overrides
+    // are not hashed. Thread requestRuntimeSettings through the query contract
+    // before using this value as a staleness signal.
     runtimeHash: agentRuntime.runtimeHash,
   };
 }

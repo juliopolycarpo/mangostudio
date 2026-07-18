@@ -128,7 +128,12 @@ export const ChatCapabilitiesResponseSchema = Type.Object({
   }),
   /** Persisted continuation/context snapshot for the chat, when one exists. */
   contextInfo: Type.Union([ContextInfoSchema, Type.Null()]),
-  /** Hash of the resolved runtime; changes whenever the effective set would. */
+  /**
+   * Hash of profile/provider-derived runtime settings and the effective tool
+   * set. Composer-level runtime overrides are not hashed; thread
+   * `requestRuntimeSettings` through the query contract before using this as
+   * a staleness signal.
+   */
   runtimeHash: Type.String({ minLength: 1 }),
 });
 
