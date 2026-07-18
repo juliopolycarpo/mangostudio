@@ -21,7 +21,11 @@ import {
   releaseElicitationSink,
 } from '../../../services/mcp/elicitation-registry';
 import { persistMcpMediaParts } from '../../../services/mcp/rich-content';
-import { executeResolvedMcpTool, resolveMcpToolExecution } from '../../../services/mcp/tool-bridge';
+import {
+  executeResolvedMcpTool,
+  type ResolvedMcpToolExecution,
+  resolveMcpToolExecution,
+} from '../../../services/mcp/tool-bridge';
 import { isMcpToolName } from '../../../services/mcp/tool-naming';
 import { executeTool, getSafeEffectiveToolSettings, getTool } from '../../../services/tools';
 import {
@@ -39,7 +43,7 @@ import {
   resolveEffectiveToolTimeoutMs,
   ToolExecutionTimedOutError,
 } from '../../../services/tools/execution-timeout';
-import type { EffectiveToolSettings } from '../../../services/tools/types';
+import type { EffectiveToolSettings, RegisteredTool } from '../../../services/tools/types';
 import { shouldExposeDelegateTool } from './delegate-tool-availability';
 import { ensureDelegationResult, isSubagentRunResult, logDelegationWarn } from './delegation-retry';
 import {
@@ -142,6 +146,22 @@ export interface StandardToolExecutionContext {
   onEvent?: (event: ToolStreamEvent) => void;
 }
 
+type PreparedStandardToolCall =
+  | {
+      kind: 'mcp';
+      db: Kysely<Database>;
+      target: ResolvedMcpToolExecution;
+    }
+  | {
+      kind: 'delegation';
+      runtime: DelegationRuntime;
+    }
+  | {
+      kind: 'builtin';
+      tool: RegisteredTool;
+      effectiveSettings: EffectiveToolSettings;
+    };
+
 export async function* executeStandardToolCallsWithProgress(
   calls: ReadonlyArray<[string, { name: string; argsStr: string }]>,
   context: StandardToolExecutionContext
@@ -205,44 +225,28 @@ async function executeStandardToolCall(
     name === DELEGATE_TO_AGENT_TOOL_NAME && Boolean(context.delegationRuntime);
 
   try {
-    if (!context.allowedToolNames.has(name)) {
-      throw new ToolPolicyError(`Tool "${name}" is not allowed for this agent.`, 'not_allowed');
-    }
+    const prepared = await prepareStandardToolCall(name, context);
     lifecycle.transition('running');
-    const runtime = context.delegationRuntime;
-    if (isMcpToolName(name)) {
-      const mcpResult = await executeMcpToolCall(callId, name, args, lifecycle, context);
+    if (prepared.kind === 'mcp') {
+      const mcpResult = await executeMcpToolCall(callId, args, lifecycle, context, prepared);
       result = mcpResult.result;
       isError = mcpResult.isError;
       mcpMedia = mcpResult.mediaParts;
       mcpElicitations = mcpResult.elicitationParts;
-    } else if (name === DELEGATE_TO_AGENT_TOOL_NAME && runtime) {
-      const tool = getTool(name);
-      if (!tool) throw new ToolPolicyError(`Unknown tool: "${name}"`, 'unknown_tool');
-      const effectiveSettings = getSafeEffectiveToolSettings(
-        tool,
-        context.settingsByToolName.get(name)
-      );
-      if (!effectiveSettings.enabled) {
-        throw new ToolPolicyError(`Tool "${name}" is disabled for this user.`, 'tool_disabled');
-      }
+    } else if (prepared.kind === 'delegation') {
       const request = parseDelegationRequest(args);
       // Retry/cache-recovery wraps each single-attempt delegation; the per-call
       // runtime carries the abort signal, timeout, and the onEvent sink that
       // streams subagent progress back to the caller.
       result = await ensureDelegationResult(callId, request, {
-        signal: runtime.signal,
-        timeoutMs: runtime.settings.timeoutMs,
-        onEvent: runtime.onEvent,
+        signal: prepared.runtime.signal,
+        timeoutMs: prepared.runtime.settings.timeoutMs,
+        onEvent: prepared.runtime.onEvent,
         executeDelegation: (delegationCallId, delegationRequest) =>
-          executeDelegationToolCall(delegationCallId, delegationRequest, runtime),
+          executeDelegationToolCall(delegationCallId, delegationRequest, prepared.runtime),
       });
     } else {
-      const tool = getTool(name);
-      if (!tool) throw new ToolPolicyError(`Unknown tool: "${name}"`, 'unknown_tool');
-      const savedSettings = context.settingsByToolName.get(name);
-      const effectiveSettings = getSafeEffectiveToolSettings(tool, savedSettings);
-      const timeoutMs = resolveEffectiveToolTimeoutMs(tool, effectiveSettings);
+      const timeoutMs = resolveEffectiveToolTimeoutMs(prepared.tool, prepared.effectiveSettings);
       const timeoutController = new AbortController();
       const parentSignal = context.signal;
       const onParentAbort = () => timeoutController.abort(parentSignal?.reason);
@@ -261,13 +265,14 @@ async function executeStandardToolCall(
             parameters: {},
             signal: timeoutController.signal,
           },
-          effectiveSettings
+          prepared.effectiveSettings,
+          prepared
         );
 
         // Tools that enforce their own timeout (e.g. shells) are not wrapped,
         // because a second, equally-long timer can win the race and reject
         // before the tool has finished killing and reaping its child process.
-        result = tool.settings.managesOwnTimeout
+        result = prepared.tool.settings.managesOwnTimeout
           ? await toolPromise
           : await withToolTimeout(toolPromise, name, timeoutMs, timeoutController);
       } finally {
@@ -330,6 +335,50 @@ async function executeStandardToolCall(
   };
 }
 
+/** Resolves every policy decision before a call is marked as running. */
+async function prepareStandardToolCall(
+  name: string,
+  context: StandardToolExecutionContext
+): Promise<PreparedStandardToolCall> {
+  if (!context.allowedToolNames.has(name)) {
+    throw new ToolPolicyError(`Tool "${name}" is not allowed for this agent.`, 'not_allowed');
+  }
+
+  if (isMcpToolName(name)) {
+    if (!context.db) {
+      throw new ToolPolicyError(`Tool "${name}" is not available in this context.`, 'not_allowed');
+    }
+    if (context.settingsByToolName.get(name)?.enabled === false) {
+      throw new ToolPolicyError(`Tool "${name}" is disabled for this user.`, 'tool_disabled');
+    }
+    try {
+      return {
+        kind: 'mcp',
+        db: context.db,
+        target: await resolveMcpToolExecution(context.db, context.userId, name),
+      };
+    } catch (error) {
+      throw new ToolPolicyError(errorToToolMessage(error), 'unknown_tool');
+    }
+  }
+
+  const tool = getTool(name);
+  if (!tool) throw new ToolPolicyError(`Unknown tool: "${name}"`, 'unknown_tool');
+  const effectiveSettings = getSafeEffectiveToolSettings(
+    tool,
+    context.settingsByToolName.get(name)
+  );
+  if (!effectiveSettings.enabled) {
+    throw new ToolPolicyError(`Tool "${name}" is disabled for this user.`, 'tool_disabled');
+  }
+
+  const runtime = context.delegationRuntime;
+  if (name === DELEGATE_TO_AGENT_TOOL_NAME && runtime) {
+    return { kind: 'delegation', runtime };
+  }
+  return { kind: 'builtin', tool, effectiveSettings };
+}
+
 /**
  * Routes a namespaced `mcp__<slug>__<tool>` call to the bridge. The per-call
  * timeout comes from the server row (SDK-enforced, so a timed-out request is
@@ -338,29 +387,20 @@ async function executeStandardToolCall(
  */
 async function executeMcpToolCall(
   callId: string,
-  name: string,
   args: Record<string, unknown>,
   lifecycle: ToolExecutionLifecycle,
-  context: StandardToolExecutionContext
+  context: StandardToolExecutionContext,
+  prepared: Extract<PreparedStandardToolCall, { kind: 'mcp' }>
 ): Promise<{
   result: unknown;
   isError: boolean;
   mediaParts?: McpMediaPart[];
   elicitationParts?: McpElicitationPart[];
 }> {
-  if (!context.db) {
-    throw new ToolPolicyError(`Tool "${name}" is not available in this context.`, 'not_allowed');
-  }
-  if (context.settingsByToolName.get(name)?.enabled === false) {
-    throw new ToolPolicyError(`Tool "${name}" is disabled for this user.`, 'tool_disabled');
-  }
-
-  const target = await resolveMcpToolExecution(context.db, context.userId, name);
-
   const elicitationParts: McpElicitationPart[] = [];
   bindElicitationSink(
     context.userId,
-    target.server.id,
+    prepared.target.server.id,
     callId,
     (part) => {
       elicitationParts.push(part);
@@ -377,18 +417,18 @@ async function executeMcpToolCall(
 
   let cancelReason: McpElicitationCancelReason = 'tool_finished';
   try {
-    const mcpResult = await executeResolvedMcpTool(context.userId, target, args, {
+    const mcpResult = await executeResolvedMcpTool(context.userId, prepared.target, args, {
       signal: context.signal,
       toolCallId: callId,
     });
     const mediaParts = !mcpResult.isError
       ? await persistMcpMediaParts(mcpResult.content, {
-          db: context.db,
+          db: prepared.db,
           userId: context.userId,
           chatId: context.chatId,
           toolCallId: callId,
-          serverSlug: target.parsed.serverSlug,
-          toolName: target.parsed.toolName,
+          serverSlug: prepared.target.parsed.serverSlug,
+          toolName: prepared.target.parsed.toolName,
         })
       : undefined;
     return {
@@ -401,7 +441,7 @@ async function executeMcpToolCall(
     cancelReason = classifyMcpElicitationCancelReason(error);
     throw error;
   } finally {
-    releaseElicitationSink(context.userId, target.server.id, callId);
+    releaseElicitationSink(context.userId, prepared.target.server.id, callId);
     cancelPendingElicitations(
       elicitationParts.map((part) => part.elicitationId),
       cancelReason

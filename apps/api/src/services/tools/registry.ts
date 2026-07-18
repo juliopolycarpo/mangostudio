@@ -81,13 +81,15 @@ export async function executeTool(
   name: string,
   args: Record<string, unknown>,
   context: ToolContext,
-  settings?: EffectiveToolSettings
+  settings?: EffectiveToolSettings,
+  resolved?: { tool: RegisteredTool; effectiveSettings: EffectiveToolSettings }
 ): Promise<unknown> {
-  const tool = getTool(name);
+  const tool = resolved?.tool ?? getTool(name);
   if (!tool) {
     throw new Error(`Unknown tool: "${name}"`);
   }
-  const effectiveSettings = getSafeEffectiveToolSettings(tool, settings);
+  const effectiveSettings =
+    resolved?.effectiveSettings ?? getSafeEffectiveToolSettings(tool, settings);
   if (!effectiveSettings.enabled) {
     throw new Error(`Tool "${name}" is disabled for this user.`);
   }
