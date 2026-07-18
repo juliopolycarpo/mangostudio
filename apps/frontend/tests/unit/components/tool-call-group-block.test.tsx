@@ -64,11 +64,54 @@ describe('ToolCallGroupBlock', () => {
       <ToolCallGroupBlock
         calls={[
           entry({ toolCallId: 't1' }),
-          entry({ toolCallId: 't2', isError: true, status: 'failed', result: 'denied' }),
+          entry({ toolCallId: 't2', isError: false, status: 'failed', result: 'denied' }),
         ]}
       />
     );
 
     expect(screen.getByRole('button').className).toContain('text-error');
+  });
+
+  it('shows a neutral tone when any call was cancelled and none failed', () => {
+    const { container } = render(
+      <ToolCallGroupBlock
+        calls={[
+          entry({ toolCallId: 't1' }),
+          entry({ toolCallId: 't2', status: 'cancelled', isPending: false }),
+        ]}
+      />
+    );
+
+    const summary = screen.getByRole('button');
+    expect(summary.className).toContain('text-on-surface-variant');
+    expect(summary.className).not.toContain('text-success');
+    expect(container.querySelector('.lucide-ban')).toBeInTheDocument();
+    expect(container.querySelector('.lucide-circle-check-big')).not.toBeInTheDocument();
+  });
+
+  it('shows an error tone when any call timed out', () => {
+    render(
+      <ToolCallGroupBlock
+        calls={[
+          entry({ toolCallId: 't1' }),
+          entry({ toolCallId: 't2', status: 'timed_out', isError: false }),
+        ]}
+      />
+    );
+
+    expect(screen.getByRole('button').className).toContain('text-error');
+  });
+
+  it('shows a pending tone when any call awaits user input', () => {
+    render(
+      <ToolCallGroupBlock
+        calls={[
+          entry({ toolCallId: 't1' }),
+          entry({ toolCallId: 't2', status: 'awaiting_user', isPending: false }),
+        ]}
+      />
+    );
+
+    expect(screen.getByRole('button').className).toContain('text-primary');
   });
 });

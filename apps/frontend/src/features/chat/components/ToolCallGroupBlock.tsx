@@ -1,4 +1,5 @@
-import { AlertCircle, ArrowRight, CheckCircle, ChevronDown } from 'lucide-react';
+import { isActiveToolExecutionStatus } from '@mangostudio/shared/tool-executions';
+import { AlertCircle, ArrowRight, Ban, CheckCircle, ChevronDown } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { useState } from 'react';
 import { useI18n } from '@/hooks/use-i18n';
@@ -27,13 +28,16 @@ export function ToolCallGroupBlock({ calls }: ToolCallGroupBlockProps) {
   const moreCount = calls.length - 1;
   const moreLabel = t.tools.moreCount.replace('{count}', String(moreCount));
 
-  const anyPending = calls.some((c) => c.isPending);
-  const anyError = calls.some((c) => c.isError);
+  const anyPending = calls.some((call) => isActiveToolExecutionStatus(call.status));
+  const anyError = calls.some((call) => call.status === 'failed' || call.status === 'timed_out');
+  const anyCancelled = calls.some((call) => call.status === 'cancelled');
   const tone = anyError
     ? 'border-error/30 text-error'
     : anyPending
       ? 'border-primary/30 text-primary'
-      : 'border-success/25 text-success';
+      : anyCancelled
+        ? 'border-outline-variant/30 text-on-surface-variant'
+        : 'border-success/25 text-success';
 
   return (
     <div className="mb-3">
@@ -43,10 +47,12 @@ export function ToolCallGroupBlock({ calls }: ToolCallGroupBlockProps) {
         className={`glass-surface flex items-center gap-2 text-xs py-1.5 px-3 rounded-full w-fit max-w-full border
                    transition-all duration-200 cursor-pointer ${tone}`}
       >
-        {anyPending ? (
-          <ToolIcon toolName={name} className="animate-pulse shrink-0" />
-        ) : anyError ? (
+        {anyError ? (
           <AlertCircle size={11} className="shrink-0" />
+        ) : anyPending ? (
+          <ToolIcon toolName={name} className="animate-pulse shrink-0" />
+        ) : anyCancelled ? (
+          <Ban size={11} className="shrink-0" />
         ) : (
           <CheckCircle size={11} className="shrink-0" />
         )}
