@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { ApiErrorResponse } from '@mangostudio/shared/errors';
+import { ApiErrorResponseSchema } from '@mangostudio/shared/errors';
 import type {
   ExportMcpServersResponse,
   McpPortabilityApplyResponse,
@@ -15,6 +17,8 @@ import {
   McpPortabilityPreviewResponseSchema,
 } from '@mangostudio/shared/mcp';
 import { Value } from '@sinclair/typebox/value';
+import { sql } from 'kysely';
+import { getDb } from '../../../src/db/database';
 import { loadConfigForTest } from '../../../src/lib/config';
 import { mcpServerRoutes } from '../../../src/modules/mcp-servers/http/mcp-server-routes';
 import { errorHandler } from '../../../src/plugins/error-handler';
@@ -398,7 +402,7 @@ describe('mcp portability routes', () => {
     ).toEqual(['concurrent']);
   });
 
-  it('rolls back every row and compensates staged secrets on a multi-entry failure', async () => {
+  it('rejects a replacement that cannot free the incoming slug before staging writes', async () => {
     const app = authedApp();
     const alpha = await addServer(app, {
       name: 'Alpha',
@@ -442,6 +446,14 @@ describe('mcp portability routes', () => {
     expect(alphaEntry?.conflicts.map((candidate) => candidate.serverId).sort()).toEqual(
       [alpha.id, beta.id].sort()
     );
+    expect(
+      alphaEntry?.conflicts.find((candidate) => candidate.serverId === alpha.id)
+        ?.replaceBlockedBySlug
+    ).toBeUndefined();
+    expect(
+      alphaEntry?.conflicts.find((candidate) => candidate.serverId === beta.id)
+        ?.replaceBlockedBySlug
+    ).toEqual({ slug: 'alpha', holderName: 'Alpha' });
 
     const applyResponse = await app.handle(
       jsonRequest('/mcp/servers/portability/import/apply', 'POST', {
@@ -453,7 +465,13 @@ describe('mcp portability routes', () => {
         ],
       })
     );
-    expect(applyResponse.status).toBe(409);
+    const error = (await applyResponse.json()) as ApiErrorResponse;
+    expect(applyResponse.status).toBe(422);
+    expect(Value.Check(ApiErrorResponseSchema, error)).toBe(true);
+    expect(error.code).toBe('VALIDATION');
+    expect(error.error).toContain('Replacing "Beta"');
+    expect(error.error).toContain('slug "alpha"');
+    expect(error.error).toContain('belongs to "Alpha"');
 
     const listResponse = await app.handle(jsonRequest('/mcp/servers', 'GET'));
     const list = (await listResponse.json()) as McpServerListResponse;
@@ -463,5 +481,63 @@ describe('mcp portability routes', () => {
     const stored = existsSync(secretFile) ? readFileSync(secretFile, 'utf8') : '';
     expect(stored).not.toContain('staged-good-sentinel');
     expect(stored).not.toContain('staged-replacement-sentinel');
+  });
+
+  it('keeps the database slug guard and compensates staged secrets on an unseen write', async () => {
+    const app = authedApp();
+    const source = JSON.stringify({
+      mcpServers: {
+        race: {
+          type: 'http',
+          url: 'https://race.example.com/mcp',
+          headers: { Authorization: 'Bearer staged-race-sentinel' },
+        },
+      },
+    });
+    const plan = await preview(app, source);
+    const db = getDb();
+    await sql
+      .raw(`
+      CREATE TRIGGER mcp_portability_slug_race
+      BEFORE INSERT ON mcp_servers
+      WHEN NEW.slug = 'race'
+      BEGIN
+        INSERT INTO mcp_servers (
+          id, userId, name, slug, transport, command, argsJson, envJson,
+          url, enabled, timeoutMs, createdAt, updatedAt
+        ) VALUES (
+          'mcp-portability-race-holder', NEW.userId, 'Concurrent race', NEW.slug,
+          'stdio', 'bun', '[]', '{}', NULL, 1, NULL, NEW.createdAt, NEW.updatedAt
+        );
+      END;
+    `)
+      .execute(db);
+
+    let applyResponse: Response;
+    try {
+      applyResponse = await app.handle(
+        jsonRequest('/mcp/servers/portability/import/apply', 'POST', {
+          json: source,
+          previewToken: plan.previewToken,
+          decisions: [{ key: 'race', decision: 'add' }],
+        })
+      );
+    } finally {
+      await sql.raw('DROP TRIGGER IF EXISTS mcp_portability_slug_race').execute(db);
+    }
+
+    const error = (await applyResponse.json()) as ApiErrorResponse;
+    expect(applyResponse.status).toBe(409);
+    expect(Value.Check(ApiErrorResponseSchema, error)).toBe(true);
+    expect(error).toMatchObject({
+      error: 'An MCP server with slug "race" already exists.',
+      code: 'CONFLICT',
+    });
+
+    const listResponse = await app.handle(jsonRequest('/mcp/servers', 'GET'));
+    expect(((await listResponse.json()) as McpServerListResponse).servers).toEqual([]);
+    const secretFile = join(secretDir, 'secrets.json');
+    const stored = existsSync(secretFile) ? readFileSync(secretFile, 'utf8') : '';
+    expect(stored).not.toContain('staged-race-sentinel');
   });
 });

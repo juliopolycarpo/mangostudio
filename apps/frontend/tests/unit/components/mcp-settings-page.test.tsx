@@ -322,6 +322,75 @@ describe('McpSettingsPage', () => {
     expect(screen.queryByText('destination-token')).not.toBeInTheDocument();
   });
 
+  it('disables replacement targets that cannot free the incoming slug', async () => {
+    const user = userEvent.setup();
+    fetchScenario.respondWithJson('GET', '/api/mcp/servers', {
+      body: { servers: [HTTP_SERVER] },
+    });
+    fetchScenario.respondWithJson('POST', '/api/mcp/servers/portability/import/preview', {
+      body: {
+        previewToken: 'a'.repeat(64),
+        entries: [
+          {
+            key: 'incoming',
+            name: 'Incoming',
+            slug: 'foo',
+            transport: 'http',
+            url: 'https://match.example.com/mcp',
+            fingerprint: 'b'.repeat(64),
+            status: 'ready',
+            conflicts: [
+              {
+                serverId: 'srv-url-match',
+                name: 'URL match',
+                slug: 'bar',
+                keys: ['url'],
+                exact: false,
+                replaceBlockedBySlug: { slug: 'foo', holderName: 'Foo owner' },
+              },
+              {
+                serverId: 'srv-foo-owner',
+                name: 'Foo owner',
+                slug: 'foo',
+                keys: ['slug'],
+                exact: false,
+              },
+            ],
+            allowedDecisions: ['skip', 'replace', 'copy'],
+            suggestedDecision: 'skip',
+            copyName: 'Incoming copy',
+            copySlug: 'foo-copy',
+            secretReferences: [],
+          },
+        ],
+      },
+    });
+
+    render(<McpSettingsPage />);
+
+    await screen.findByText('Remote');
+    await user.click(screen.getByRole('button', { name: /^import$/i }));
+    await user.click(screen.getByRole('button', { name: /paste json/i }));
+    await user.type(screen.getByLabelText('JSON'), 'source text');
+    await user.click(screen.getByRole('button', { name: /^preview$/i }));
+    await user.selectOptions(await screen.findByLabelText('Decision for Incoming'), 'replace');
+
+    expect(screen.getByRole('combobox', { name: 'Server to replace' })).toHaveValue(
+      'srv-foo-owner'
+    );
+    expect(
+      screen.getByRole('option', {
+        name: /URL match \(bar\).*will not free slug "foo".*"Foo owner"/,
+      })
+    ).toBeDisabled();
+    expect(
+      screen.getByText(
+        'Replacing this server will not free slug "foo", which belongs to "Foo owner".'
+      )
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /apply changes/i })).toBeEnabled();
+  });
+
   it('lists per-server tools with toggles wired to the tool-settings API', async () => {
     const user = userEvent.setup();
     fetchScenario.respondWithJson('GET', '/api/mcp/servers', {
