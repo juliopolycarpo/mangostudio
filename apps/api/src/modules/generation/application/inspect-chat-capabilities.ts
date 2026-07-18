@@ -72,6 +72,8 @@ export async function inspectChatCapabilities(
     : await getProviderForModel(resolvedModel.modelId, input.userId);
 
   const [chat, agentRuntime, appSettings, serverRows, skills] = await Promise.all([
+    // Ownership stays centralized in the domain helper above; this second read
+    // deliberately fetches the row needed to project its persisted context.
     getById(input.chatId, input.db),
     resolveAgentRuntime({
       db: input.db,
@@ -137,6 +139,9 @@ export async function inspectChatCapabilities(
       effectiveSkills: skillEntries.filter((skill) => skill.state === 'enabled').length,
     },
     contextInfo: extractContextInfo(chat?.lastContextState, chat?.lastProviderState),
+    // Profile/provider-derived settings only: composer-level runtime overrides
+    // are not hashed. Thread requestRuntimeSettings through the query contract
+    // before using this value as a staleness signal.
     runtimeHash: agentRuntime.runtimeHash,
   };
 }
@@ -174,13 +179,15 @@ function toToolEntry(
   if (candidate.definition) return { ...base, state: 'enabled' };
   return {
     ...base,
-    state: candidateState(candidate),
+    state: candidateState(candidate.reason),
     ...(candidate.reason ? { reason: candidate.reason } : {}),
   };
 }
 
-function candidateState(candidate: ToolCapabilityCandidate): CapabilityState {
-  return candidate.reason === 'tool-setting-disabled' || candidate.reason === 'agent-tools-disabled'
+export function candidateState(reason: ToolCapabilityCandidate['reason']): CapabilityState {
+  return reason === 'tool-setting-disabled' ||
+    reason === 'agent-tools-disabled' ||
+    reason === 'agent-allowlist'
     ? 'disabled'
     : 'unavailable';
 }

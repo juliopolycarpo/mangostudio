@@ -55,6 +55,11 @@ const STATE_LABEL_KEY: Record<
   unavailable: 'stateUnavailable',
 };
 
+const AGENT_SETTINGS_REASONS = new Set<CapabilityReasonCode>([
+  'agent-tools-disabled',
+  'agent-allowlist',
+]);
+
 interface CapabilityInspectorProps {
   chatId: string | null;
   disabled?: boolean;
@@ -117,7 +122,7 @@ export function CapabilityInspector({
           )}
           {chatId && capabilitiesQuery.isError && (
             <p className="text-xs text-error" role="alert">
-              {capabilitiesQuery.error.message}
+              {labels.loadError}
             </p>
           )}
           {chatId && capabilitiesQuery.data && (
@@ -177,6 +182,7 @@ function CapabilityPanel({
             title={tool.title}
             state={tool.state}
             reasonText={reasonText(labels, tool.reason)}
+            reasonManageTo={reasonManageTo(tool.reason)}
           />
         ))}
       </CapabilitySection>
@@ -222,6 +228,7 @@ function CapabilityPanel({
             subtitle={skill.source}
             state={skill.state}
             reasonText={reasonText(labels, skill.reason)}
+            reasonManageTo={reasonManageTo(skill.reason)}
           />
         ))}
       </CapabilitySection>
@@ -246,6 +253,7 @@ function McpServerRows({
         subtitle={labels.health[server.health]}
         state={server.state}
         reasonText={reasonText(labels, server.reason)}
+        reasonManageTo={reasonManageTo(server.reason)}
       />
       {tools.map((tool) => (
         <div key={tool.name} className="pl-4">
@@ -254,6 +262,7 @@ function McpServerRows({
             title={tool.title}
             state={tool.state}
             reasonText={reasonText(labels, tool.reason)}
+            reasonManageTo={reasonManageTo(tool.reason)}
           />
         </div>
       ))}
@@ -295,12 +304,14 @@ function CapabilityRow({
   subtitle,
   state,
   reasonText,
+  reasonManageTo,
 }: {
   labels: CapabilityLabels;
   title: string;
   subtitle?: string;
   state: CapabilityState;
   reasonText?: string;
+  reasonManageTo?: '/settings/agents';
 }) {
   return (
     <div className="flex items-start gap-2 rounded-xl px-2 py-1">
@@ -318,7 +329,15 @@ function CapabilityRow({
           <span className="sr-only"> · {labels[STATE_LABEL_KEY[state]]}</span>
           {subtitle && <span className="text-on-surface-variant/50"> · {subtitle}</span>}
         </span>
-        {reasonText && (
+        {reasonText && reasonManageTo && (
+          <Link
+            to={reasonManageTo}
+            className="block truncate text-[11px] text-primary/80 hover:text-primary"
+          >
+            {reasonText}
+          </Link>
+        )}
+        {reasonText && !reasonManageTo && (
           <span className="block truncate text-[11px] text-on-surface-variant/60">
             {reasonText}
           </span>
@@ -334,6 +353,10 @@ function reasonText(
 ): string | undefined {
   if (!reason) return undefined;
   return labels.reasons[REASON_LABEL_KEY[reason]];
+}
+
+function reasonManageTo(reason: CapabilityReasonCode | undefined): '/settings/agents' | undefined {
+  return reason && AGENT_SETTINGS_REASONS.has(reason) ? '/settings/agents' : undefined;
 }
 
 function enabledCountLabel(

@@ -48,6 +48,8 @@ export interface ResolveToolCandidatesInput {
  * Resolves every known tool candidate for a turn, effective and rejected
  * alike, preserving the definition order the turn pipeline sends to the
  * provider (builtins in registry order, then MCP tools per server).
+ * Callers pass no MCP servers when the profile disables tools; server rows
+ * are labeled `agent-tools-disabled` by the capability projection upstream.
  * // Usage: const candidates = resolveToolCandidates({ profile, toolSettings, registeredTools, mcpServers })
  */
 export function resolveToolCandidates(
@@ -103,7 +105,6 @@ function resolveMcpCandidates(
 
   const candidates = server.tools.map((tool): ToolCapabilityCandidate => {
     const base = { name: tool.name, title: tool.toolName, ...provenance };
-    if (!input.profile.toolsEnabled) return { ...base, reason: 'agent-tools-disabled' };
     if (!toolNameMatches(allowlist, tool.name)) return { ...base, reason: 'agent-allowlist' };
     if (!(input.toolSettings.get(tool.name)?.enabled ?? true)) {
       return { ...base, reason: 'tool-setting-disabled' };

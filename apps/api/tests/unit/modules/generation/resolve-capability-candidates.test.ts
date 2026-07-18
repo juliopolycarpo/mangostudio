@@ -82,12 +82,14 @@ function settingsMap(
 }
 
 describe('resolveToolCandidates', () => {
-  it('marks every candidate agent-tools-disabled when the profile disables tools', () => {
+  it('marks builtin candidates agent-tools-disabled when the profile disables tools', () => {
+    // Real callers pass no MCP servers when tools are disabled (see
+    // resolveAgentRuntime), so only the builtin gate is exercised here.
     const candidates = resolveToolCandidates({
       profile: makeProfile({ toolsEnabled: false }),
       toolSettings: new Map(),
-      registeredTools: [makeRegisteredTool('alpha')],
-      mcpServers: [makeSnapshot('srv', ['ping'])],
+      registeredTools: [makeRegisteredTool('alpha'), makeRegisteredTool('beta')],
+      mcpServers: [],
     });
 
     expect(candidates.map((candidate) => candidate.reason)).toEqual([
