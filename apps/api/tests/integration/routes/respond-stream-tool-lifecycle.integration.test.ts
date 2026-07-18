@@ -6,6 +6,7 @@ import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-
 import {
   buildRespondStreamRequest,
   createTestStreamDb,
+  makeAgentProfile,
   mockProviderRegistry,
   mockVerifiedChatOwnership,
   parsePersistedParts,
@@ -59,6 +60,76 @@ async function mockRealTools(): Promise<void> {
     getTool: realGetTool,
     getSafeEffectiveToolSettings: realGetSafeEffectiveToolSettings,
   }));
+}
+
+async function mockRejectedToolPolicy(options: {
+  exists: boolean;
+  enabled: boolean;
+}): Promise<void> {
+  let settingsResolutionCount = 0;
+  const definition = {
+    name: 'policy_probe',
+    description: 'Probe tool policy handling',
+    parameters: {},
+  };
+  const tool = {
+    definition,
+    settings: {
+      title: 'Policy probe',
+      description: 'Probe tool policy handling',
+      category: 'system' as const,
+      enabledByDefault: true,
+      canDisable: true,
+      defaultParameters: {},
+      parameterDescriptors: [],
+    },
+    execute: () => Promise.resolve({ ok: true }),
+  };
+
+  await mock.module('../../../src/modules/agents/application/agent-settings-service', () => ({
+    getAgentProfile: () =>
+      Promise.resolve(
+        makeAgentProfile({
+          id: 'chat',
+          name: 'Chat',
+          role: 'both',
+          systemPrompt: 'Chat agent.',
+          toolNames: ['policy_probe'],
+          toolsEnabled: true,
+        })
+      ),
+  }));
+  await mock.module('../../../src/services/tools', () => ({
+    getAllTools: () => [tool],
+    getAllToolDefinitions: () => [definition],
+    getToolDefinitionsForAgent: () => [definition],
+    getTool: () => (options.exists ? tool : undefined),
+    getSafeEffectiveToolSettings: () => ({
+      // A disabled call was already advertised to the provider before the
+      // saved setting changed; the pre-dispatch lookup sees the new policy.
+      enabled: options.enabled || settingsResolutionCount++ === 0,
+      parameters: {},
+    }),
+    executeTool: () => {
+      throw new Error('Policy-rejected tools must not be dispatched.');
+    },
+  }));
+}
+
+async function streamSingleToolCall(name: string) {
+  let iteration = 0;
+  await mockProviderRegistry(async function* streamToolCall() {
+    await Promise.resolve();
+    iteration += 1;
+    if (iteration !== 1) {
+      yield { type: 'assistant_text_delta', text: 'Done' };
+      yield { type: 'turn_completed', providerState: null };
+      return;
+    }
+    yield { type: 'tool_call_started', callId: 'policy-1', name };
+    yield { type: 'tool_call_completed', callId: 'policy-1', name, arguments: '{}' };
+    yield { type: 'turn_completed', providerState: null };
+  });
 }
 
 function mockMessageCapturingDb(insertedMessages: Array<Record<string, unknown>>) {
@@ -202,4 +273,47 @@ describe('POST /respond/stream — tool execution lifecycle', () => {
       reasonCode: 'not_allowed',
     });
   });
+
+  for (const policyCase of [
+    { label: 'unknown', exists: false, enabled: true, reasonCode: 'unknown_tool' },
+    { label: 'disabled', exists: true, enabled: false, reasonCode: 'tool_disabled' },
+  ] as const) {
+    it(`rejects a ${policyCase.label} tool from queued without recording a start time`, async () => {
+      const insertedMessages: Array<Record<string, unknown>> = [];
+
+      await mockVerifiedChatOwnership();
+      await mockRejectedToolPolicy(policyCase);
+      await streamSingleToolCall('policy_probe');
+      await mockMessageCapturingDb(insertedMessages);
+
+      const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
+      restoreAuth = restore;
+
+      const response = await app.handle(
+        buildRespondStreamRequest({ chatId: 'test-chat', prompt: 'Probe', model: 'test-model' })
+      );
+      const sseEvents = parseSseEvents(await response.text());
+
+      expect(response.status).toBe(200);
+      const transitions = toolExecutionEvents(sseEvents, 'policy-1');
+      expect(transitions.map((snapshot) => snapshot.status)).toEqual(['queued', 'failed']);
+      expect(transitions.at(-1)).toMatchObject({
+        status: 'failed',
+        reasonCode: policyCase.reasonCode,
+      });
+      expect(transitions.at(-1)?.startedAt).toBeUndefined();
+
+      const aiMessage = insertedMessages.find((message) => message.role === 'ai');
+      const parts = parsePersistedParts(aiMessage?.parts);
+      const toolCallPart = parts.find(
+        (part) => part.type === 'tool_call' && part.toolCallId === 'policy-1'
+      );
+      const persistedExecution = toolCallPart?.execution as ToolExecutionSnapshot | undefined;
+      expect(persistedExecution).toMatchObject({
+        status: 'failed',
+        reasonCode: policyCase.reasonCode,
+      });
+      expect(persistedExecution?.startedAt).toBeUndefined();
+    });
+  }
 });

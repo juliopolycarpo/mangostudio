@@ -21,7 +21,11 @@ import {
   releaseElicitationSink,
 } from '../../../services/mcp/elicitation-registry';
 import { persistMcpMediaParts } from '../../../services/mcp/rich-content';
-import { executeResolvedMcpTool, resolveMcpToolExecution } from '../../../services/mcp/tool-bridge';
+import {
+  executeResolvedMcpTool,
+  type ResolvedMcpToolExecution,
+  resolveMcpToolExecution,
+} from '../../../services/mcp/tool-bridge';
 import { isMcpToolName } from '../../../services/mcp/tool-naming';
 import { executeTool, getSafeEffectiveToolSettings, getTool } from '../../../services/tools';
 import {
@@ -39,7 +43,7 @@ import {
   resolveEffectiveToolTimeoutMs,
   ToolExecutionTimedOutError,
 } from '../../../services/tools/execution-timeout';
-import type { EffectiveToolSettings } from '../../../services/tools/types';
+import type { EffectiveToolSettings, RegisteredTool } from '../../../services/tools/types';
 import { shouldExposeDelegateTool } from './delegate-tool-availability';
 import { ensureDelegationResult, isSubagentRunResult, logDelegationWarn } from './delegation-retry';
 import {
@@ -80,6 +84,13 @@ interface StandardToolExecution {
   /** Questions an ask_user_question call presented, rendered as a chat card. */
   questionPart?: QuestionPart;
   /** Snapshot of the list a todo_write call produced, rendered as a checklist. */
+  todoPart?: TodoPart;
+}
+
+interface ShapedToolExecutionResult {
+  providerResult: unknown;
+  resultStr: string;
+  questionPart?: QuestionPart;
   todoPart?: TodoPart;
 }
 
@@ -142,6 +153,22 @@ export interface StandardToolExecutionContext {
   onEvent?: (event: ToolStreamEvent) => void;
 }
 
+type PreparedStandardToolCall =
+  | {
+      kind: 'mcp';
+      db: Kysely<Database>;
+      target: ResolvedMcpToolExecution;
+    }
+  | {
+      kind: 'delegation';
+      runtime: DelegationRuntime;
+    }
+  | {
+      kind: 'builtin';
+      tool: RegisteredTool;
+      effectiveSettings: EffectiveToolSettings;
+    };
+
 export async function* executeStandardToolCallsWithProgress(
   calls: ReadonlyArray<[string, { name: string; argsStr: string }]>,
   context: StandardToolExecutionContext
@@ -198,6 +225,7 @@ async function executeStandardToolCall(
   let isError = false;
   let didThrow = false;
   let thrownError: unknown;
+  let shapedResult: ShapedToolExecutionResult;
   let subagentTrace: Extract<MessagePart, { type: 'subagent_trace' }> | undefined;
   let mcpMedia: McpMediaPart[] | undefined;
   let mcpElicitations: McpElicitationPart[] | undefined;
@@ -205,44 +233,28 @@ async function executeStandardToolCall(
     name === DELEGATE_TO_AGENT_TOOL_NAME && Boolean(context.delegationRuntime);
 
   try {
-    if (!context.allowedToolNames.has(name)) {
-      throw new ToolPolicyError(`Tool "${name}" is not allowed for this agent.`, 'not_allowed');
-    }
+    const prepared = await prepareStandardToolCall(name, context);
     lifecycle.transition('running');
-    const runtime = context.delegationRuntime;
-    if (isMcpToolName(name)) {
-      const mcpResult = await executeMcpToolCall(callId, name, args, lifecycle, context);
+    if (prepared.kind === 'mcp') {
+      const mcpResult = await executeMcpToolCall(callId, args, lifecycle, context, prepared);
       result = mcpResult.result;
       isError = mcpResult.isError;
       mcpMedia = mcpResult.mediaParts;
       mcpElicitations = mcpResult.elicitationParts;
-    } else if (name === DELEGATE_TO_AGENT_TOOL_NAME && runtime) {
-      const tool = getTool(name);
-      if (!tool) throw new ToolPolicyError(`Unknown tool: "${name}"`, 'unknown_tool');
-      const effectiveSettings = getSafeEffectiveToolSettings(
-        tool,
-        context.settingsByToolName.get(name)
-      );
-      if (!effectiveSettings.enabled) {
-        throw new ToolPolicyError(`Tool "${name}" is disabled for this user.`, 'tool_disabled');
-      }
+    } else if (prepared.kind === 'delegation') {
       const request = parseDelegationRequest(args);
       // Retry/cache-recovery wraps each single-attempt delegation; the per-call
       // runtime carries the abort signal, timeout, and the onEvent sink that
       // streams subagent progress back to the caller.
       result = await ensureDelegationResult(callId, request, {
-        signal: runtime.signal,
-        timeoutMs: runtime.settings.timeoutMs,
-        onEvent: runtime.onEvent,
+        signal: prepared.runtime.signal,
+        timeoutMs: prepared.runtime.settings.timeoutMs,
+        onEvent: prepared.runtime.onEvent,
         executeDelegation: (delegationCallId, delegationRequest) =>
-          executeDelegationToolCall(delegationCallId, delegationRequest, runtime),
+          executeDelegationToolCall(delegationCallId, delegationRequest, prepared.runtime),
       });
     } else {
-      const tool = getTool(name);
-      if (!tool) throw new ToolPolicyError(`Unknown tool: "${name}"`, 'unknown_tool');
-      const savedSettings = context.settingsByToolName.get(name);
-      const effectiveSettings = getSafeEffectiveToolSettings(tool, savedSettings);
-      const timeoutMs = resolveEffectiveToolTimeoutMs(tool, effectiveSettings);
+      const timeoutMs = resolveEffectiveToolTimeoutMs(prepared.tool, prepared.effectiveSettings);
       const timeoutController = new AbortController();
       const parentSignal = context.signal;
       const onParentAbort = () => timeoutController.abort(parentSignal?.reason);
@@ -261,13 +273,14 @@ async function executeStandardToolCall(
             parameters: {},
             signal: timeoutController.signal,
           },
-          effectiveSettings
+          prepared.effectiveSettings,
+          prepared
         );
 
         // Tools that enforce their own timeout (e.g. shells) are not wrapped,
         // because a second, equally-long timer can win the race and reject
         // before the tool has finished killing and reaping its child process.
-        result = tool.settings.managesOwnTimeout
+        result = prepared.tool.settings.managesOwnTimeout
           ? await toolPromise
           : await withToolTimeout(toolPromise, name, timeoutMs, timeoutController);
       } finally {
@@ -278,15 +291,23 @@ async function executeStandardToolCall(
       subagentTrace = createSubagentTraceForTool(callId, result);
       isError = result.status !== 'completed';
     }
+    // Result shaping is deliberately part of the fallible execution region.
+    // A malformed successful result must fail before the terminal snapshot is
+    // chosen, otherwise persisted lifecycle state can disagree with isError.
+    shapedResult = shapeToolExecutionResult(callId, name, args, result, isError);
   } catch (error) {
     result = { error: errorToToolMessage(error) };
+    shapedResult = {
+      providerResult: result,
+      resultStr: stringifyToolResult(result),
+    };
     isError = true;
     didThrow = true;
     thrownError = error;
   }
 
-  // Exactly one terminal transition, applied before the execution result is
-  // surfaced so persisted parts can never carry a live state for a settled call.
+  // Exactly one terminal transition, applied after every fallible execution
+  // and shaping step but before the result is surfaced.
   if (didThrow) {
     lifecycle.fail(thrownError, context.signal);
   } else if (isSubagentRunResult(result)) {
@@ -308,6 +329,29 @@ async function executeStandardToolCall(
       cachedPartialChars: entry?.partialText?.length ?? 0,
     });
   }
+  return {
+    callId,
+    name,
+    args,
+    result: shapedResult.providerResult,
+    resultStr: shapedResult.resultStr,
+    isError,
+    execution: lifecycle.current,
+    ...(subagentTrace ? { subagentTrace } : {}),
+    ...(mcpMedia?.length ? { mcpMedia } : {}),
+    ...(mcpElicitations?.length ? { mcpElicitations } : {}),
+    ...(shapedResult.questionPart ? { questionPart: shapedResult.questionPart } : {}),
+    ...(shapedResult.todoPart ? { todoPart: shapedResult.todoPart } : {}),
+  };
+}
+
+function shapeToolExecutionResult(
+  callId: string,
+  name: string,
+  args: Record<string, unknown>,
+  result: unknown,
+  isError: boolean
+): ShapedToolExecutionResult {
   const providerResult = isSubagentRunResult(result) ? createSubagentToolResult(result) : result;
   const questionPart =
     name === ASK_USER_QUESTION_TOOL_NAME && !isError ? createQuestionPart(callId, args) : undefined;
@@ -315,19 +359,55 @@ async function executeStandardToolCall(
     name === TODO_WRITE_TOOL_NAME && !isError ? createTodoPart(callId, result) : undefined;
 
   return {
-    callId,
-    name,
-    args,
-    result: providerResult,
+    providerResult,
     resultStr: stringifyToolResult(providerResult),
-    isError,
-    execution: lifecycle.current,
-    ...(subagentTrace ? { subagentTrace } : {}),
-    ...(mcpMedia?.length ? { mcpMedia } : {}),
-    ...(mcpElicitations?.length ? { mcpElicitations } : {}),
     ...(questionPart ? { questionPart } : {}),
     ...(todoPart ? { todoPart } : {}),
   };
+}
+
+/** Resolves every policy decision before a call is marked as running. */
+async function prepareStandardToolCall(
+  name: string,
+  context: StandardToolExecutionContext
+): Promise<PreparedStandardToolCall> {
+  if (!context.allowedToolNames.has(name)) {
+    throw new ToolPolicyError(`Tool "${name}" is not allowed for this agent.`, 'not_allowed');
+  }
+
+  if (isMcpToolName(name)) {
+    if (!context.db) {
+      throw new ToolPolicyError(`Tool "${name}" is not available in this context.`, 'not_allowed');
+    }
+    if (context.settingsByToolName.get(name)?.enabled === false) {
+      throw new ToolPolicyError(`Tool "${name}" is disabled for this user.`, 'tool_disabled');
+    }
+    try {
+      return {
+        kind: 'mcp',
+        db: context.db,
+        target: await resolveMcpToolExecution(context.db, context.userId, name),
+      };
+    } catch (error) {
+      throw new ToolPolicyError(errorToToolMessage(error), 'unknown_tool');
+    }
+  }
+
+  const tool = getTool(name);
+  if (!tool) throw new ToolPolicyError(`Unknown tool: "${name}"`, 'unknown_tool');
+  const effectiveSettings = getSafeEffectiveToolSettings(
+    tool,
+    context.settingsByToolName.get(name)
+  );
+  if (!effectiveSettings.enabled) {
+    throw new ToolPolicyError(`Tool "${name}" is disabled for this user.`, 'tool_disabled');
+  }
+
+  const runtime = context.delegationRuntime;
+  if (name === DELEGATE_TO_AGENT_TOOL_NAME && runtime) {
+    return { kind: 'delegation', runtime };
+  }
+  return { kind: 'builtin', tool, effectiveSettings };
 }
 
 /**
@@ -338,29 +418,20 @@ async function executeStandardToolCall(
  */
 async function executeMcpToolCall(
   callId: string,
-  name: string,
   args: Record<string, unknown>,
   lifecycle: ToolExecutionLifecycle,
-  context: StandardToolExecutionContext
+  context: StandardToolExecutionContext,
+  prepared: Extract<PreparedStandardToolCall, { kind: 'mcp' }>
 ): Promise<{
   result: unknown;
   isError: boolean;
   mediaParts?: McpMediaPart[];
   elicitationParts?: McpElicitationPart[];
 }> {
-  if (!context.db) {
-    throw new ToolPolicyError(`Tool "${name}" is not available in this context.`, 'not_allowed');
-  }
-  if (context.settingsByToolName.get(name)?.enabled === false) {
-    throw new ToolPolicyError(`Tool "${name}" is disabled for this user.`, 'tool_disabled');
-  }
-
-  const target = await resolveMcpToolExecution(context.db, context.userId, name);
-
   const elicitationParts: McpElicitationPart[] = [];
   bindElicitationSink(
     context.userId,
-    target.server.id,
+    prepared.target.server.id,
     callId,
     (part) => {
       elicitationParts.push(part);
@@ -377,18 +448,18 @@ async function executeMcpToolCall(
 
   let cancelReason: McpElicitationCancelReason = 'tool_finished';
   try {
-    const mcpResult = await executeResolvedMcpTool(context.userId, target, args, {
+    const mcpResult = await executeResolvedMcpTool(context.userId, prepared.target, args, {
       signal: context.signal,
       toolCallId: callId,
     });
     const mediaParts = !mcpResult.isError
       ? await persistMcpMediaParts(mcpResult.content, {
-          db: context.db,
+          db: prepared.db,
           userId: context.userId,
           chatId: context.chatId,
           toolCallId: callId,
-          serverSlug: target.parsed.serverSlug,
-          toolName: target.parsed.toolName,
+          serverSlug: prepared.target.parsed.serverSlug,
+          toolName: prepared.target.parsed.toolName,
         })
       : undefined;
     return {
@@ -401,7 +472,7 @@ async function executeMcpToolCall(
     cancelReason = classifyMcpElicitationCancelReason(error);
     throw error;
   } finally {
-    releaseElicitationSink(context.userId, target.server.id, callId);
+    releaseElicitationSink(context.userId, prepared.target.server.id, callId);
     cancelPendingElicitations(
       elicitationParts.map((part) => part.elicitationId),
       cancelReason

@@ -9,6 +9,7 @@ import {
 } from '../../../../src/modules/generation/application/standard-tool-execution';
 import { isShellAvailable } from '../../../../src/services/tools/builtin/_shell-exec';
 import { buildShellTool } from '../../../../src/services/tools/builtin/_shell-tool';
+import { TODO_WRITE_TOOL_NAME } from '../../../../src/services/tools/builtin/todo';
 import { clearRegistry, getAllTools, registerTool } from '../../../../src/services/tools/registry';
 import type { RegisteredTool } from '../../../../src/services/tools/types';
 
@@ -174,4 +175,65 @@ describe('executeStandardToolCallsWithProgress timeouts', () => {
     },
     15_000
   );
+});
+
+describe('executeStandardToolCallsWithProgress result shaping', () => {
+  let snapshot: RegisteredTool[];
+
+  beforeEach(() => {
+    snapshot = snapshotRegistry();
+    clearRegistry();
+    registerTool({
+      definition: {
+        name: TODO_WRITE_TOOL_NAME,
+        description: 'Return a malformed todo result',
+        parameters: {},
+      },
+      settings: {
+        title: 'Todo',
+        description: 'Return a malformed todo result',
+        category: 'system',
+        enabledByDefault: true,
+        canDisable: true,
+        defaultParameters: {},
+        parameterDescriptors: [],
+      },
+      execute: () => Promise.resolve(null),
+    });
+  });
+
+  afterEach(() => {
+    restoreRegistry(snapshot);
+  });
+
+  it('fails the lifecycle when a successful tool result cannot be shaped', async () => {
+    const items = [];
+    for await (const item of executeStandardToolCallsWithProgress(
+      [['todo-1', { name: TODO_WRITE_TOOL_NAME, argsStr: '{}' }]],
+      {
+        userId: 'user-1',
+        chatId: 'chat-1',
+        settingsByToolName: new Map(),
+        allowedToolNames: new Set([TODO_WRITE_TOOL_NAME]),
+      }
+    )) {
+      items.push(item);
+    }
+
+    const statuses = items.flatMap((item) =>
+      item.kind === 'event' && item.event.type === 'tool_execution'
+        ? [item.event.execution.status]
+        : []
+    );
+    expect(statuses).toEqual(['queued', 'running', 'failed']);
+
+    const execution = items.find((item) => item.kind === 'execution');
+    expect(execution?.kind).toBe('execution');
+    if (execution?.kind !== 'execution') return;
+    expect(execution.execution).toMatchObject({
+      isError: true,
+      result: { error: expect.any(String) },
+      execution: { status: 'failed', reasonCode: 'execution_error' },
+    });
+  });
 });
