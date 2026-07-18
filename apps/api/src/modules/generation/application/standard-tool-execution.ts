@@ -398,9 +398,7 @@ async function executeMcpToolCall(
       ...(elicitationParts.length ? { elicitationParts } : {}),
     };
   } catch (error) {
-    const failure = classifyMcpCallFailure(error);
-    if (failure === 'timeout') cancelReason = 'tool_timeout';
-    else if (failure === 'server_closed') cancelReason = 'server_closed';
+    cancelReason = classifyMcpElicitationCancelReason(error);
     throw error;
   } finally {
     releaseElicitationSink(context.userId, target.server.id, callId);
@@ -409,6 +407,14 @@ async function executeMcpToolCall(
       cancelReason
     );
   }
+}
+
+/** Maps a thrown MCP call failure to the terminal reason exposed to elicitations. */
+export function classifyMcpElicitationCancelReason(error: unknown): McpElicitationCancelReason {
+  const failure = classifyMcpCallFailure(error);
+  if (failure === 'timeout') return 'tool_timeout';
+  if (failure === 'server_closed') return 'server_closed';
+  return 'tool_failed';
 }
 
 export function createDelegationRuntime(

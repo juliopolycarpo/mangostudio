@@ -461,14 +461,15 @@ export const McpElicitationStatusSchema = Type.Union([
 
 /**
  * Why an elicitation reached its terminal status: a user response, or a
- * server-side end of life (timeout, turn abort, tool completion, session
- * close) that cancelled it without input.
+ * server-side end of life (timeout, turn abort, tool completion, tool failure,
+ * session close) that cancelled it without input.
  */
 export const McpElicitationTerminalReasonSchema = Type.Union([
   Type.Literal('responded'),
   Type.Literal('tool_timeout'),
   Type.Literal('turn_aborted'),
   Type.Literal('tool_finished'),
+  Type.Literal('tool_failed'),
   Type.Literal('server_closed'),
 ]);
 
@@ -523,6 +524,7 @@ export const McpElicitationPartSchema = Type.Object({
   message: Type.String(),
   fields: Type.Array(McpElicitationFieldSchema),
   status: McpElicitationStatusSchema,
+  reason: Type.Optional(McpElicitationTerminalReasonSchema),
 });
 
 export const McpElicitationActionSchema = Type.Union([

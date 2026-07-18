@@ -428,6 +428,7 @@ export function reconcileInterruptedMessageParts(parts: MessagePart[]): void {
   for (const part of parts) {
     if (part.type === 'mcp_elicitation' && part.status === 'pending') {
       part.status = 'cancelled';
+      part.reason = 'turn_aborted';
       continue;
     }
     if (part.type !== 'tool_call' || resultIds.has(part.toolCallId)) continue;

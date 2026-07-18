@@ -288,9 +288,9 @@ describe('elicitation terminal status notifications', () => {
     const pending = park('call-1');
 
     releaseElicitationSink('u1', 's1', 'call-1');
-    cancelPendingElicitations([getId()], 'tool_timeout');
+    cancelPendingElicitations([getId()], 'tool_failed');
 
     await expect(pending).resolves.toEqual({ action: 'cancel' });
-    expect(statuses[0]).toMatchObject({ status: 'cancelled', reason: 'tool_timeout' });
+    expect(statuses[0]).toMatchObject({ status: 'cancelled', reason: 'tool_failed' });
   });
 });

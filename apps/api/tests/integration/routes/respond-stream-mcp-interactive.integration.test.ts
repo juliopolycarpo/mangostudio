@@ -378,6 +378,53 @@ describe('POST /respond/stream — interactive MCP end to end', () => {
     );
   });
 
+  it('reports a failed tool when cancelling its pending elicitation', async () => {
+    const provider = installProvider([
+      {
+        callId: 'failed-call',
+        name: `mcp__${SERVER_SLUG}__fail-after-elicit`,
+      },
+    ]);
+    const { recorder } = await startStream();
+    const requestEvent = await recorder.readUntil(
+      (event) => event.type === 'mcp_elicitation_request'
+    );
+    const elicitationId = String(requestEvent.elicitationId);
+
+    fixture.controls.release('fail-after-elicit');
+    const events = await recorder.finish();
+
+    assertPublicStreamSchema(events);
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: 'mcp_elicitation_status',
+        elicitationId,
+        toolCallId: 'failed-call',
+        status: 'cancelled',
+        reason: 'tool_failed',
+      })
+    );
+    expect(executionStatuses(events, 'failed-call').at(-1)).toEqual({
+      status: 'failed',
+      reasonCode: 'execution_error',
+    });
+    expect(events).toContainEqual(
+      expect.objectContaining({ type: 'tool_result', callId: 'failed-call', isError: true })
+    );
+    expect(assistantParts(await reloadMessages())).toContainEqual(
+      expect.objectContaining({
+        type: 'mcp_elicitation',
+        elicitationId,
+        status: 'cancelled',
+        reason: 'tool_failed',
+      })
+    );
+    expect(provider.requests[1]?.toolResults?.[0]).toMatchObject({
+      callId: 'failed-call',
+      isError: true,
+    });
+  });
+
   it('persists turn-aborted elicitation state and hands it to recovery', async () => {
     const provider = installProvider([
       { callId: 'abort-call', name: `mcp__${SERVER_SLUG}__elicit` },
@@ -406,6 +453,7 @@ describe('POST /respond/stream — interactive MCP end to end', () => {
         type: 'mcp_elicitation',
         elicitationId,
         status: 'cancelled',
+        reason: 'turn_aborted',
       })
     );
     expect(interruptedParts).toContainEqual(
