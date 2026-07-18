@@ -126,6 +126,18 @@ Failures degrade instead of aborting the turn: a server tool error, an unreachab
 timeout is recorded as a typed error tool result and the turn continues. Oversized results are
 capped at 64 KiB with a truncation marker (`apps/api/src/services/mcp/content-mapping.ts`).
 
+### Capability inspection and lazy connections
+
+Enabled MCP servers are also connected lazily when the chat capability inspector opens. The
+inspector performs the same cached tool listing as turn startup so its projection matches exactly
+what the selected chat, model, and agent would send to the provider. That connection is shared
+with the turn pipeline, so inspecting capabilities also warms the next turn.
+
+This means opening the inspector can spawn an enabled stdio server or open an enabled remote MCP
+session even though the projection is read through a `GET` endpoint. Disable a server in
+**Settings → MCP** when it should not be started or contacted. This parity-versus-side-effect
+trade-off is intentional; see [#540](https://github.com/juliopolycarpo/mangostudio/issues/540).
+
 ## Form elicitation
 
 MangoStudio declares the MCP client `elicitation.form` capability

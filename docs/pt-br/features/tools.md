@@ -30,6 +30,20 @@ Camada do provedor (tool-mapper.ts) ──→ formatos wire específicos
 6. **Devolução do resultado** — Tool results são serializados e enviados ao modelo na próxima iteração do loop.
 7. **Nova iteração** — Os passos 4–6 se repetem até que o modelo produza uma resposta em texto ou o limite máximo de iterações seja atingido.
 
+### Inspeção De Capacidades E Conexões MCP Lazy
+
+Servidores MCP habilitados também são conectados de forma lazy quando o inspetor de capacidades
+do chat é aberto. O inspetor executa a mesma listagem de tools em cache usada no início de um
+turno, garantindo que a projeção corresponda exatamente ao que o chat, o modelo e o agente
+selecionados enviariam ao provedor. A conexão é compartilhada com o pipeline do turno, portanto a
+inspeção também aquece o próximo turno.
+
+Isso significa que abrir o inspetor pode iniciar um servidor stdio habilitado ou abrir uma sessão
+MCP remota habilitada, embora a projeção seja lida por um endpoint `GET`. Desabilite o servidor em
+**Settings → MCP** quando ele não deve ser iniciado nem acessado. Essa escolha entre paridade e
+efeito colateral é intencional; consulte
+[#540](https://github.com/juliopolycarpo/mangostudio/issues/540).
+
 ## Tipos Centrais
 
 ### ToolDefinition
