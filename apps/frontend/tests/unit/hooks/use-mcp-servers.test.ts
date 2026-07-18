@@ -7,8 +7,10 @@
 import type { McpServer } from '@mangostudio/shared/mcp';
 import { useQueryClient } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { chatCapabilitiesQueryOptions } from '../../../src/features/chat/hooks/use-chat-capabilities';
 import {
   useAddMcpServer,
+  useApplyPortableMcpImport,
   useDeleteMcpServer,
   useImportMcpServers,
   useMcpServers,
@@ -36,6 +38,10 @@ const SERVER: McpServer = {
   createdAt: 1,
   updatedAt: 1,
 };
+
+const CAPABILITIES_KEY: readonly unknown[] = chatCapabilitiesQueryOptions({
+  chatId: 'chat-1',
+}).queryKey;
 
 describe('MCP server hooks', () => {
   const fetchScenario = createFetchScenario();
@@ -103,6 +109,7 @@ describe('MCP server hooks', () => {
 
     result.current.queryClient.setQueryData(mcpServerKeys.list(), { servers: [] });
     result.current.queryClient.setQueryData(toolSettingsKeys.list(), { tools: [] });
+    result.current.queryClient.setQueryData(CAPABILITIES_KEY, { runtimeHash: 'cached' });
 
     let response: unknown;
     await act(async () => {
@@ -119,6 +126,29 @@ describe('MCP server hooks', () => {
     expect(result.current.queryClient.getQueryState(toolSettingsKeys.list())?.isInvalidated).toBe(
       true
     );
+    expect(result.current.queryClient.getQueryState(CAPABILITIES_KEY)?.isInvalidated).toBe(true);
+  });
+
+  it('invalidates capability projections after applying a portable import', async () => {
+    fetchScenario.respondWithJson('POST', '/api/mcp/servers/portability/import/apply', {
+      body: { added: 1, replaced: 0, copied: 0, skipped: 0, invalid: 0, results: [] },
+    });
+
+    const { result } = renderHook(() => ({
+      mutation: useApplyPortableMcpImport(),
+      queryClient: useQueryClient(),
+    }));
+    result.current.queryClient.setQueryData(CAPABILITIES_KEY, { runtimeHash: 'cached' });
+
+    await act(async () => {
+      await result.current.mutation.mutateAsync({
+        json: '{"mcpServers":{}}',
+        previewToken: 'preview-token',
+        decisions: [],
+      });
+    });
+
+    expect(result.current.queryClient.getQueryState(CAPABILITIES_KEY)?.isInvalidated).toBe(true);
   });
 
   it('useTestMcpServer posts to the test endpoint and invalidates the tools cache', async () => {

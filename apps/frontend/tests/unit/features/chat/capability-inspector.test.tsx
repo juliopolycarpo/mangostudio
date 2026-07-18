@@ -11,6 +11,7 @@ import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CapabilityInspector } from '../../../../src/features/chat/components/CapabilityInspector';
+import { useUpdateToolSetting } from '../../../../src/features/settings/tools/hooks/use-tool-settings';
 import { render } from '../../../support/harness/render';
 import { createFetchScenario } from '../../../support/mocks/create-fetch-scenario';
 
@@ -102,6 +103,23 @@ const RESPONSE: ChatCapabilitiesResponse = {
 
 const scenario = createFetchScenario();
 
+function InspectorWithToolSettingMutation() {
+  const mutation = useUpdateToolSetting();
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => mutation.mutate({ toolName: 'generate_image', body: { enabled: false } })}
+      >
+        Disable image generation
+      </button>
+      {mutation.isSuccess && <span>Tool setting saved</span>}
+      <CapabilityInspector chatId="chat-1" activeModel="gpt-test" agentMode="chat" />
+    </>
+  );
+}
+
 beforeEach(() => {
   scenario.install();
 });
@@ -166,5 +184,55 @@ describe('CapabilityInspector', () => {
     await waitFor(() => {
       expect(screen.getByRole('alert')).toBeInTheDocument();
     });
+  });
+
+  it('refetches a cached projection after a tool setting changes', async () => {
+    const disabledResponse: ChatCapabilitiesResponse = {
+      ...RESPONSE,
+      tools: RESPONSE.tools.map((tool) =>
+        tool.name === 'generate_image'
+          ? { ...tool, state: 'disabled', reason: 'tool-setting-disabled' }
+          : tool
+      ),
+      counts: { ...RESPONSE.counts, effectiveTools: RESPONSE.counts.effectiveTools - 1 },
+      runtimeHash: 'hash-2',
+    };
+    const capabilitiesPath = '/api/chats/chat-1/capabilities?model=gpt-test&agentMode=chat';
+    scenario.respondWithJson('GET', capabilitiesPath, { body: RESPONSE });
+    scenario.respondWithJson('PUT', '/api/settings/tools/generate_image', {
+      body: {
+        name: 'generate_image',
+        title: 'Image generation',
+        description: 'Generate images.',
+        category: 'image',
+        enabled: false,
+        canDisable: true,
+        parameters: {},
+        parameterDescriptors: [],
+      },
+    });
+
+    render(<InspectorWithToolSettingMutation />);
+
+    const inspectorButton = screen.getByRole('button', { name: /capabilities/i });
+    await userEvent.click(inspectorButton);
+    expect(await screen.findByText('Image generation')).toBeInTheDocument();
+    await userEvent.click(inspectorButton);
+
+    scenario.respondWithJson('GET', capabilitiesPath, { body: disabledResponse });
+    await userEvent.click(screen.getByRole('button', { name: 'Disable image generation' }));
+    expect(await screen.findByText('Tool setting saved')).toBeInTheDocument();
+
+    await userEvent.click(inspectorButton);
+    await waitFor(() => {
+      expect(screen.getAllByText('disabled in tool settings')).toHaveLength(2);
+    });
+
+    const capabilityRequests = scenario.fetchMock.mock.calls.filter((call) => {
+      const input = call[0];
+      const url = input instanceof Request ? input.url : String(input);
+      return new URL(url, 'http://localhost').pathname === '/api/chats/chat-1/capabilities';
+    });
+    expect(capabilityRequests).toHaveLength(2);
   });
 });

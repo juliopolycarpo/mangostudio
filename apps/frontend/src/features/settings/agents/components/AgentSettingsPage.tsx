@@ -11,6 +11,7 @@ import { useMemo, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { useToast } from '@/components/ui/Toast';
+import { invalidateChatCapabilities } from '@/features/chat/hooks/use-chat-capabilities';
 import { useI18n } from '@/hooks/use-i18n';
 import { useModelCatalog } from '@/hooks/use-model-catalog';
 import { toolSettingsListQueryOptions } from '../../tools/queries';
@@ -57,7 +58,10 @@ export function AgentSettingsPage() {
   };
 
   const invalidateAgents = async () => {
-    await queryClient.invalidateQueries({ queryKey: agentSettingsKeys.list() });
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: agentSettingsKeys.list() }),
+      invalidateChatCapabilities(queryClient),
+    ]);
   };
 
   const saveMutation = useMutation({

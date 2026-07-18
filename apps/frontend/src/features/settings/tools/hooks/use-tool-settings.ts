@@ -7,6 +7,7 @@ import type {
   UpdateToolSettingsBody,
 } from '@mangostudio/shared/tool-settings';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { invalidateChatCapabilities } from '@/features/chat/hooks/use-chat-capabilities';
 import { updateToolSetting } from '../api';
 import { toolSettingsKeys, toolSettingsListQueryOptions } from '../queries';
 
@@ -41,6 +42,7 @@ export function useUpdateToolSetting() {
     },
     onSuccess: (descriptor) => {
       syncToolSettingsListCache(queryClient, descriptor);
+      return invalidateChatCapabilities(queryClient);
     },
   });
 }

@@ -1,4 +1,6 @@
+import { useQueryClient } from '@tanstack/react-query';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { chatCapabilitiesQueryOptions } from '../../../src/features/chat/hooks/use-chat-capabilities';
 import { useModelCatalog } from '../../../src/hooks/use-model-catalog';
 import { client } from '../../../src/lib/api-client';
 import { EMPTY_MODEL_CATALOG } from '../../../src/utils/model-utils';
@@ -17,6 +19,9 @@ vi.mock('../../../src/lib/api-client', () => ({
 }));
 
 const mockGet = vi.mocked(client.api.settings.models.get);
+const CAPABILITIES_KEY: readonly unknown[] = chatCapabilitiesQueryOptions({
+  chatId: 'chat-1',
+}).queryKey;
 
 type MockGetResult = Awaited<ReturnType<typeof mockGet>>;
 function mockResult(data: unknown, error: unknown = null) {
@@ -92,18 +97,23 @@ describe('useModelCatalog', () => {
 
     mockGet.mockResolvedValue(mockResult(initialCatalog));
 
-    const { result } = renderHook(() => useModelCatalog());
+    const { result } = renderHook(() => ({
+      catalog: useModelCatalog(),
+      queryClient: useQueryClient(),
+    }));
 
-    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    await waitFor(() => expect(result.current.catalog.isLoading).toBe(false));
+    result.current.queryClient.setQueryData(CAPABILITIES_KEY, { runtimeHash: 'cached' });
 
     mockGet.mockResolvedValue(mockResult(updatedCatalog));
 
     await act(async () => {
-      await result.current.refreshCatalog();
+      await result.current.catalog.refreshCatalog();
     });
 
     await waitFor(() => {
-      expect(result.current.catalog).toEqual(updatedCatalog);
+      expect(result.current.catalog.catalog).toEqual(updatedCatalog);
     });
+    expect(result.current.queryClient.getQueryState(CAPABILITIES_KEY)?.isInvalidated).toBe(true);
   });
 });
