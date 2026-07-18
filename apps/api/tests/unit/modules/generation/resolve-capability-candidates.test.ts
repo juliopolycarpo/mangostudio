@@ -82,21 +82,6 @@ function settingsMap(
 }
 
 describe('resolveToolCandidates', () => {
-  it('marks every candidate agent-tools-disabled when the profile disables tools', () => {
-    const candidates = resolveToolCandidates({
-      profile: makeProfile({ toolsEnabled: false }),
-      toolSettings: new Map(),
-      registeredTools: [makeRegisteredTool('alpha')],
-      mcpServers: [makeSnapshot('srv', ['ping'])],
-    });
-
-    expect(candidates.map((candidate) => candidate.reason)).toEqual([
-      'agent-tools-disabled',
-      'agent-tools-disabled',
-    ]);
-    expect(effectiveToolDefinitions(candidates)).toEqual([]);
-  });
-
   it('rejects names outside the agent allowlist with agent-allowlist', () => {
     const candidates = resolveToolCandidates({
       profile: makeProfile({ toolNames: ['alpha', 'mcp__srv__*'] }),

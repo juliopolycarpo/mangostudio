@@ -72,6 +72,8 @@ export async function inspectChatCapabilities(
     : await getProviderForModel(resolvedModel.modelId, input.userId);
 
   const [chat, agentRuntime, appSettings, serverRows, skills] = await Promise.all([
+    // Ownership stays centralized in the domain helper above; this second read
+    // deliberately fetches the row needed to project its persisted context.
     getById(input.chatId, input.db),
     resolveAgentRuntime({
       db: input.db,
