@@ -74,7 +74,6 @@ describe('POST /respond/stream — provider cursor and switching', () => {
     await mock.module('../../../src/services/tools', () => ({
       getAllTools: () => [],
       getAllToolDefinitions: () => [],
-      getToolDefinitionsForAgent: () => [],
       executeTool: () => Promise.resolve({}),
     }));
 
@@ -180,7 +179,6 @@ describe('POST /respond/stream — provider cursor and switching', () => {
     await mock.module('../../../src/services/tools', () => ({
       getAllTools: () => [],
       getAllToolDefinitions: () => [],
-      getToolDefinitionsForAgent: () => [],
       executeTool: () => Promise.resolve({}),
     }));
 
@@ -253,7 +251,6 @@ describe('POST /respond/stream — provider cursor and switching', () => {
     await mock.module('../../../src/services/tools', () => ({
       getAllTools: () => [],
       getAllToolDefinitions: () => [],
-      getToolDefinitionsForAgent: () => [],
       executeTool: () => Promise.resolve({}),
     }));
 

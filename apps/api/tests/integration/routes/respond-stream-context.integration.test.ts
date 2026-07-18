@@ -7,16 +7,20 @@ import {
   buildRespondStreamRequest,
   createTestStreamDb,
   makeChain,
+  makeRegisteredTool,
   mockDbWithFullCapture,
   mockDbWithMessageCapture,
   mockNoopTools,
   mockPassThroughDb,
   mockProviderRegistry,
+  mockToolsModule,
   mockVerifiedChatOwnership,
   parsePersistedParts,
   parseSseEvents,
   restoreAllMocks,
 } from './_respond-stream-helpers';
+
+const NOOP_TOOL = makeRegisteredTool('noop', 'no-op', () => Promise.resolve({ ok: true }));
 
 let TEST_USER!: UserFixture;
 
@@ -363,11 +367,7 @@ describe('POST /respond/stream — context and continuation', () => {
       yield { type: 'turn_completed', providerState: null };
     });
 
-    await mock.module('../../../src/services/tools', () => ({
-      getAllToolDefinitions: () => [{ name: 'noop', description: 'no-op', parameters: {} }],
-      getToolDefinitionsForAgent: () => [{ name: 'noop', description: 'no-op', parameters: {} }],
-      executeTool: () => Promise.resolve({ ok: true }),
-    }));
+    await mockToolsModule([NOOP_TOOL]);
 
     await mock.module('../../../src/db/database', dbMock.moduleFactory);
 
@@ -407,11 +407,7 @@ describe('POST /respond/stream — context and continuation', () => {
       yield { type: 'turn_completed', providerState: null };
     });
 
-    await mock.module('../../../src/services/tools', () => ({
-      getAllToolDefinitions: () => [{ name: 'noop', description: 'no-op', parameters: {} }],
-      getToolDefinitionsForAgent: () => [{ name: 'noop', description: 'no-op', parameters: {} }],
-      executeTool: () => Promise.resolve({ ok: true }),
-    }));
+    await mockToolsModule([NOOP_TOOL]);
 
     await mock.module('../../../src/db/database', dbMock.moduleFactory);
 

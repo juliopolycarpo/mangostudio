@@ -1,12 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import type { AgentProfile } from '@mangostudio/shared/agents';
 import {
   clearRegistry,
   executeTool,
   getAllToolDefinitions,
   getAllTools,
   getTool,
-  getToolDefinitionsForAgent,
   getToolDefinitionsForSettings,
   getToolDescriptors,
   registerTool,
@@ -49,23 +47,6 @@ function makeTool(
       parameterDescriptors: [],
     },
     execute,
-  };
-}
-
-function makeAgentProfile(overrides: Partial<AgentProfile>): AgentProfile {
-  return {
-    id: 'user:tool-runner',
-    name: 'Tool Runner',
-    description: '',
-    kind: 'user',
-    role: 'primary',
-    source: { type: 'markdown' },
-    systemPrompt: 'Use selected tools only.',
-    toolNames: [],
-    toolsEnabled: false,
-    subagentIds: [],
-    metadata: {},
-    ...overrides,
   };
 }
 
@@ -188,39 +169,6 @@ describe('getAllTools / getAllToolDefinitions', () => {
 
     expect(defs).toHaveLength(1);
     expect(defs[0].parameters).toMatchObject({ maxItems: 2 });
-  });
-
-  it('filters provider definitions through an agent allowlist', () => {
-    registerTool(makeTool('read_file'));
-    registerTool(makeTool('generate_image'));
-
-    const defs = getToolDefinitionsForAgent(
-      makeAgentProfile({ toolsEnabled: true, toolNames: ['read_file'] })
-    );
-
-    expect(defs.map((definition) => definition.name)).toEqual(['read_file']);
-  });
-
-  it('does not expose tools for an empty agent allowlist', () => {
-    registerTool(makeTool('read_file'));
-
-    const defs = getToolDefinitionsForAgent(
-      makeAgentProfile({ toolsEnabled: true, toolNames: [] })
-    );
-
-    expect(defs).toEqual([]);
-  });
-
-  it('keeps globally disabled tools disabled for wildcard agents', () => {
-    registerTool(makeTool('read_file'));
-    registerTool(makeTool('generate_image'));
-
-    const defs = getToolDefinitionsForAgent(
-      makeAgentProfile({ toolsEnabled: true, toolNames: ['*'] }),
-      new Map([['generate_image', { enabled: false, parameters: {} }]])
-    );
-
-    expect(defs.map((definition) => definition.name)).toEqual(['read_file']);
   });
 });
 

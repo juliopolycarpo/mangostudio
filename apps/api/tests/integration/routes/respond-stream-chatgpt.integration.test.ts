@@ -20,6 +20,8 @@ import {
   buildRespondStreamRequest,
   createTestStreamDb,
   makeChain,
+  makeRegisteredTool,
+  mockToolsModule,
   mockVerifiedChatOwnership,
   parsePersistedParts,
   parseSseEvents,
@@ -29,11 +31,12 @@ import {
 const realCatalog = { ...realCatalogNs };
 const realMetadata = { ...realMetadataNs };
 
-const READ_FILE_TOOL = {
-  name: 'read_file',
-  description: 'Read a file from the workspace.',
-  parameters: { type: 'object', properties: { path: { type: 'string' } } },
-};
+const READ_FILE_TOOL = makeRegisteredTool(
+  'read_file',
+  'Read a file from the workspace.',
+  () => Promise.resolve('# MangoStudio'),
+  { type: 'object', properties: { path: { type: 'string' } } }
+);
 
 const TOKEN_BUNDLE = makeTokenBundle();
 
@@ -173,11 +176,7 @@ async function mockChatGptHarness(insertedMessages: Array<Record<string, unknown
     getProviderForModel: () => Promise.resolve(chatGptProvider),
   }));
 
-  await mock.module('../../../src/services/tools', () => ({
-    getAllToolDefinitions: () => [READ_FILE_TOOL],
-    getToolDefinitionsForAgent: () => [READ_FILE_TOOL],
-    executeTool: () => Promise.resolve('# MangoStudio'),
-  }));
+  await mockToolsModule([READ_FILE_TOOL]);
 
   await mock.module('../../../src/modules/messages/infrastructure/message-repository', () => ({
     loadHistory: () => Promise.resolve([]),

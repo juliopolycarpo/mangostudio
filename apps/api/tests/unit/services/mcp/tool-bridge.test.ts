@@ -8,7 +8,6 @@ import {
 import {
   executeMcpTool,
   listMcpBridgeTools,
-  listMcpToolDefinitions,
   MCP_TOOL_EXECUTE_TIMEOUT_MS,
 } from '../../../../src/services/mcp/tool-bridge';
 import type { McpClientHandle, McpRequestOptions } from '../../../../src/services/mcp/types';
@@ -102,9 +101,9 @@ describe('listMcpBridgeTools', () => {
       )
     );
 
-    const definitions = await listMcpToolDefinitions(getDb(), userId);
+    const tools = await listMcpBridgeTools(getDb(), userId);
 
-    expect(definitions.map((definition) => definition.parameters)).toEqual([
+    expect(tools.map((tool) => tool.definition.parameters)).toEqual([
       { type: 'object', properties: {} },
       { type: 'object', properties: {} },
     ]);
@@ -122,9 +121,9 @@ describe('listMcpBridgeTools', () => {
       )
     );
 
-    const definitions = await listMcpToolDefinitions(getDb(), userId);
+    const tools = await listMcpBridgeTools(getDb(), userId);
 
-    expect(definitions.map((definition) => definition.name)).toEqual(['mcp__srv__ok']);
+    expect(tools.map((tool) => tool.definition.name)).toEqual(['mcp__srv__ok']);
   });
 
   it('skips a failing server but keeps the other servers’ tools', async () => {
@@ -140,9 +139,9 @@ describe('listMcpBridgeTools', () => {
       );
     });
 
-    const definitions = await listMcpToolDefinitions(getDb(), userId);
+    const tools = await listMcpBridgeTools(getDb(), userId);
 
-    expect(definitions.map((definition) => definition.name)).toEqual(['mcp__healthy__ping']);
+    expect(tools.map((tool) => tool.definition.name)).toEqual(['mcp__healthy__ping']);
   });
 
   it('ignores disabled servers and other users’ servers', async () => {
@@ -153,7 +152,7 @@ describe('listMcpBridgeTools', () => {
       Promise.resolve(echoTools([{ name: 'ping', description: '', inputSchema: {} }]))
     );
 
-    expect(await listMcpToolDefinitions(getDb(), userId)).toEqual([]);
+    expect(await listMcpBridgeTools(getDb(), userId)).toEqual([]);
   });
 });
 

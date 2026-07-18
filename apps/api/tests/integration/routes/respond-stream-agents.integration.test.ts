@@ -126,11 +126,6 @@ describe('POST /respond/stream — agent resolution', () => {
       yield { type: 'assistant_text_delta', text: 'Agent response' };
       yield { type: 'turn_completed', providerState: null };
     });
-    await mock.module('../../../src/services/tools', () => ({
-      getAllToolDefinitions: () => [{ name: 'noop', description: 'no-op', parameters: {} }],
-      getToolDefinitionsForAgent: () => [],
-      executeTool: () => Promise.resolve({ ok: true }),
-    }));
     await mock.module('../../../src/db/database', mockPassThroughDb(TEST_USER.id));
 
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);

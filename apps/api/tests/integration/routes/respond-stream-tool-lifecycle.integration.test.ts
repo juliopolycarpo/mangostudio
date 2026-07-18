@@ -13,9 +13,9 @@ import {
   parseSseEvents,
   realExecuteTool,
   realGetAllToolDefinitions,
+  realGetAllTools,
   realGetSafeEffectiveToolSettings,
   realGetTool,
-  realGetToolDefinitionsForAgent,
   restoreAllMocks,
 } from './_respond-stream-helpers';
 
@@ -54,8 +54,8 @@ function toolExecutionEvents(
 
 async function mockRealTools(): Promise<void> {
   await mock.module('../../../src/services/tools', () => ({
+    getAllTools: realGetAllTools,
     getAllToolDefinitions: realGetAllToolDefinitions,
-    getToolDefinitionsForAgent: realGetToolDefinitionsForAgent,
     executeTool: realExecuteTool,
     getTool: realGetTool,
     getSafeEffectiveToolSettings: realGetSafeEffectiveToolSettings,
@@ -102,7 +102,6 @@ async function mockRejectedToolPolicy(options: {
   await mock.module('../../../src/services/tools', () => ({
     getAllTools: () => [tool],
     getAllToolDefinitions: () => [definition],
-    getToolDefinitionsForAgent: () => [definition],
     getTool: () => (options.exists ? tool : undefined),
     getSafeEffectiveToolSettings: () => ({
       // A disabled call was already advertised to the provider before the

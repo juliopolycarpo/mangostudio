@@ -3,9 +3,7 @@
  * Tools self-register at import time via registerTool().
  */
 
-import type { AgentProfile } from '@mangostudio/shared/agents';
 import type { ToolSettingsDescriptor } from '@mangostudio/shared/tool-settings';
-import { toolNameMatches } from '../mcp/tool-naming';
 import {
   getSafeEffectiveToolSettings,
   getToolDefinitionsForTools,
@@ -54,22 +52,6 @@ export function getToolDefinitionsForSettings(
   settingsByToolName: ReadonlyMap<string, EffectiveToolSettings> = new Map()
 ): ToolDefinition[] {
   return getToolDefinitionsForTools(getAllTools(), settingsByToolName);
-}
-
-export function getToolDefinitionsForAgent(
-  profile: AgentProfile,
-  settingsByToolName: ReadonlyMap<string, EffectiveToolSettings> = new Map()
-): ToolDefinition[] {
-  if (!profile.toolsEnabled) return [];
-
-  const allowedToolNames = new Set(profile.toolNames);
-  if (allowedToolNames.size === 0) return [];
-
-  const tools = getAllTools().filter((tool) =>
-    toolNameMatches(allowedToolNames, tool.definition.name)
-  );
-
-  return getToolDefinitionsForTools(tools, settingsByToolName);
 }
 
 /**
