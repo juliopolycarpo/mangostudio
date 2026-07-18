@@ -87,6 +87,13 @@ interface StandardToolExecution {
   todoPart?: TodoPart;
 }
 
+interface ShapedToolExecutionResult {
+  providerResult: unknown;
+  resultStr: string;
+  questionPart?: QuestionPart;
+  todoPart?: TodoPart;
+}
+
 export interface DelegationRuntime {
   db: Kysely<Database>;
   userId: string;
@@ -218,6 +225,7 @@ async function executeStandardToolCall(
   let isError = false;
   let didThrow = false;
   let thrownError: unknown;
+  let shapedResult: ShapedToolExecutionResult;
   let subagentTrace: Extract<MessagePart, { type: 'subagent_trace' }> | undefined;
   let mcpMedia: McpMediaPart[] | undefined;
   let mcpElicitations: McpElicitationPart[] | undefined;
@@ -283,15 +291,23 @@ async function executeStandardToolCall(
       subagentTrace = createSubagentTraceForTool(callId, result);
       isError = result.status !== 'completed';
     }
+    // Result shaping is deliberately part of the fallible execution region.
+    // A malformed successful result must fail before the terminal snapshot is
+    // chosen, otherwise persisted lifecycle state can disagree with isError.
+    shapedResult = shapeToolExecutionResult(callId, name, args, result, isError);
   } catch (error) {
     result = { error: errorToToolMessage(error) };
+    shapedResult = {
+      providerResult: result,
+      resultStr: stringifyToolResult(result),
+    };
     isError = true;
     didThrow = true;
     thrownError = error;
   }
 
-  // Exactly one terminal transition, applied before the execution result is
-  // surfaced so persisted parts can never carry a live state for a settled call.
+  // Exactly one terminal transition, applied after every fallible execution
+  // and shaping step but before the result is surfaced.
   if (didThrow) {
     lifecycle.fail(thrownError, context.signal);
   } else if (isSubagentRunResult(result)) {
@@ -313,6 +329,29 @@ async function executeStandardToolCall(
       cachedPartialChars: entry?.partialText?.length ?? 0,
     });
   }
+  return {
+    callId,
+    name,
+    args,
+    result: shapedResult.providerResult,
+    resultStr: shapedResult.resultStr,
+    isError,
+    execution: lifecycle.current,
+    ...(subagentTrace ? { subagentTrace } : {}),
+    ...(mcpMedia?.length ? { mcpMedia } : {}),
+    ...(mcpElicitations?.length ? { mcpElicitations } : {}),
+    ...(shapedResult.questionPart ? { questionPart: shapedResult.questionPart } : {}),
+    ...(shapedResult.todoPart ? { todoPart: shapedResult.todoPart } : {}),
+  };
+}
+
+function shapeToolExecutionResult(
+  callId: string,
+  name: string,
+  args: Record<string, unknown>,
+  result: unknown,
+  isError: boolean
+): ShapedToolExecutionResult {
   const providerResult = isSubagentRunResult(result) ? createSubagentToolResult(result) : result;
   const questionPart =
     name === ASK_USER_QUESTION_TOOL_NAME && !isError ? createQuestionPart(callId, args) : undefined;
@@ -320,16 +359,8 @@ async function executeStandardToolCall(
     name === TODO_WRITE_TOOL_NAME && !isError ? createTodoPart(callId, result) : undefined;
 
   return {
-    callId,
-    name,
-    args,
-    result: providerResult,
+    providerResult,
     resultStr: stringifyToolResult(providerResult),
-    isError,
-    execution: lifecycle.current,
-    ...(subagentTrace ? { subagentTrace } : {}),
-    ...(mcpMedia?.length ? { mcpMedia } : {}),
-    ...(mcpElicitations?.length ? { mcpElicitations } : {}),
     ...(questionPart ? { questionPart } : {}),
     ...(todoPart ? { todoPart } : {}),
   };
