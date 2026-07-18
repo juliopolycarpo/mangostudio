@@ -1,5 +1,8 @@
+import { useQueryClient } from '@tanstack/react-query';
 import userEvent from '@testing-library/user-event';
+import { useEffect, useSyncExternalStore } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { chatCapabilitiesQueryOptions } from '../../../src/features/chat/hooks/use-chat-capabilities';
 import { AgentSettingsPage } from '../../../src/features/settings/agents/components/AgentSettingsPage';
 import { AgentToolPicker } from '../../../src/features/settings/agents/components/AgentToolPicker';
 import { render, screen } from '../../support/harness/render';
@@ -73,6 +76,29 @@ const TOOLS_RESPONSE = {
     },
   ],
 } as const;
+
+const CAPABILITIES_KEY: readonly unknown[] = chatCapabilitiesQueryOptions({
+  chatId: 'chat-1',
+}).queryKey;
+
+function AgentSettingsWithCapabilityProbe() {
+  const queryClient = useQueryClient();
+  const isInvalidated = useSyncExternalStore(
+    (notify) => queryClient.getQueryCache().subscribe(notify),
+    () => queryClient.getQueryState(CAPABILITIES_KEY)?.isInvalidated ?? false
+  );
+
+  useEffect(() => {
+    queryClient.setQueryData(CAPABILITIES_KEY, 'cached');
+  }, [queryClient]);
+
+  return (
+    <>
+      <output aria-label="Capability cache state">{isInvalidated ? 'stale' : 'fresh'}</output>
+      <AgentSettingsPage />
+    </>
+  );
+}
 
 describe('AgentSettingsPage', () => {
   const fetchScenario = createFetchScenario();
@@ -158,6 +184,47 @@ describe('AgentSettingsPage', () => {
 
     expect(screen.getByRole('heading', { name: 'New Agent' })).toBeInTheDocument();
     expect(screen.getByDisplayValue('New Agent')).toBeInTheDocument();
+  });
+
+  it('invalidates cached capability projections after saving an agent', async () => {
+    const user = userEvent.setup();
+    const updatedAgentsResponse = {
+      agents: AGENTS_RESPONSE.agents.map((agent) =>
+        agent.id === 'chat' ? { ...agent, description: 'Updated chat agent.' } : agent
+      ),
+    };
+    fetchScenario.respondWithJson('GET', '/api/settings/agents', { body: AGENTS_RESPONSE });
+    fetchScenario.respondWithJson('GET', '/api/settings/tools', { body: TOOLS_RESPONSE });
+    fetchScenario.respondWithJson('GET', '/api/settings/models', {
+      body: {
+        configured: false,
+        status: 'not-configured',
+        allModels: [],
+        textModels: [],
+        imageModels: [],
+        discoveredTextModels: [],
+        discoveredImageModels: [],
+      },
+    });
+    fetchScenario.respondWithJson('PUT', '/api/settings/agents/chat', {
+      body: updatedAgentsResponse.agents[0],
+    });
+
+    render(<AgentSettingsWithCapabilityProbe />);
+
+    expect(await screen.findByRole('heading', { name: 'Chat' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Capability cache state')).toHaveTextContent('fresh');
+    const description = screen.getByLabelText('Description');
+    await user.clear(description);
+    await user.type(description, 'Updated chat agent.');
+    fetchScenario.respondWithJson('GET', '/api/settings/agents', {
+      body: updatedAgentsResponse,
+    });
+
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+
+    expect(await screen.findByText('Agent saved')).toBeInTheDocument();
+    expect(screen.getByLabelText('Capability cache state')).toHaveTextContent('stale');
   });
 });
 

@@ -7,7 +7,7 @@
 import { type AgentExecutionMode, isAgentId } from '@mangostudio/shared/agents';
 import type { ChatCapabilitiesResponse } from '@mangostudio/shared/capabilities';
 import { en } from '@mangostudio/shared/i18n';
-import { queryOptions } from '@tanstack/react-query';
+import { type QueryClient, queryOptions } from '@tanstack/react-query';
 import { client } from '@/lib/api-client';
 import { extractApiError } from '@/lib/utils';
 
@@ -30,9 +30,16 @@ const chatCapabilitiesKeys = {
     ] as const,
 };
 
+/** Marks every cached capability projection stale after a runtime input changes. */
+export function invalidateChatCapabilities(queryClient: QueryClient): Promise<void> {
+  return queryClient.invalidateQueries({ queryKey: chatCapabilitiesKeys.all });
+}
+
 export function chatCapabilitiesQueryOptions(selection: ChatCapabilitiesSelection) {
   return queryOptions({
     queryKey: chatCapabilitiesKeys.selection(selection),
+    // Invalidation covers in-app mutations. Keep a short freshness window for
+    // external changes without relisting MCP tools on every popover open.
     staleTime: 30_000,
     queryFn: async () => {
       const agentId =

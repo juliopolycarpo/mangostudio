@@ -7,6 +7,7 @@ import type {
   UpdateProviderRuntimeSettingsBody,
 } from '@mangostudio/shared/provider-settings';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { invalidateChatCapabilities } from '@/features/chat/hooks/use-chat-capabilities';
 import { updateProviderSettings } from '../api';
 import {
   providerSettingsDetailQueryOptions,
@@ -63,6 +64,7 @@ export function useUpdateProviderSettings(provider: string) {
     mutationFn: (body: UpdateProviderRuntimeSettingsBody) => updateProviderSettings(provider, body),
     onSuccess: (descriptor) => {
       syncProviderSettingsCaches(queryClient, descriptor);
+      return invalidateChatCapabilities(queryClient);
     },
   });
 }
