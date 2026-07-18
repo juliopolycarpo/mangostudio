@@ -48,6 +48,14 @@ const RESPONSE: ChatCapabilitiesResponse = {
       category: 'system',
     },
     {
+      name: 'todo',
+      title: 'Todo',
+      source: 'builtin',
+      state: 'disabled',
+      reason: 'agent-allowlist',
+      category: 'system',
+    },
+    {
       name: 'mcp__github__create_issue',
       title: 'create_issue',
       source: 'mcp',
@@ -151,6 +159,10 @@ describe('CapabilityInspector', () => {
     // Disabled builtin renders its typed reason as a translated string.
     expect(screen.getByText('Bash')).toBeInTheDocument();
     expect(screen.getByText('disabled in tool settings')).toBeInTheDocument();
+    expect(screen.getByText('not in the agent tool allowlist')).toHaveAttribute(
+      'href',
+      '/settings/agents'
+    );
 
     // MCP servers show health and their tools; disabled server shows a reason.
     expect(screen.getByText(/GitHub/)).toBeInTheDocument();

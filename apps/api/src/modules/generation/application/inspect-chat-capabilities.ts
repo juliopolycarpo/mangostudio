@@ -174,13 +174,15 @@ function toToolEntry(
   if (candidate.definition) return { ...base, state: 'enabled' };
   return {
     ...base,
-    state: candidateState(candidate),
+    state: candidateState(candidate.reason),
     ...(candidate.reason ? { reason: candidate.reason } : {}),
   };
 }
 
-function candidateState(candidate: ToolCapabilityCandidate): CapabilityState {
-  return candidate.reason === 'tool-setting-disabled' || candidate.reason === 'agent-tools-disabled'
+export function candidateState(reason: ToolCapabilityCandidate['reason']): CapabilityState {
+  return reason === 'tool-setting-disabled' ||
+    reason === 'agent-tools-disabled' ||
+    reason === 'agent-allowlist'
     ? 'disabled'
     : 'unavailable';
 }

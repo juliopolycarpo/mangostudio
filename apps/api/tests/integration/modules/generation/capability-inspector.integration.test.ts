@@ -273,6 +273,33 @@ describe('inspectChatCapabilities', () => {
     expect(beta?.health).toBe('disabled');
   });
 
+  it('reports allowlist exclusions as disabled while preserving turn parity', async () => {
+    await updateAgentProfile(getDb(), user.id, 'chat', {
+      name: 'Chat',
+      description: '',
+      role: 'primary',
+      systemPrompt: '',
+      toolNames: [],
+      toolsEnabled: true,
+      subagentIds: [],
+      metadata: {},
+    });
+
+    const [capabilities, turnContext] = [
+      await inspect(),
+      await resolveTurnContext(
+        { chatId, userId: user.id, prompt: 'allowlist parity probe', model: MODEL_ID },
+        getDb()
+      ),
+    ];
+    const excludedTool = capabilities.tools.find((tool) => tool.reason === 'agent-allowlist');
+
+    expect(excludedTool?.state).toBe('disabled');
+    expect(effectiveToolNames(capabilities)).toEqual(
+      turnContext.toolDefinitions.map((definition) => definition.name)
+    );
+  });
+
   it('reports skill provenance: enabled, disabled, and shadowed copies', async () => {
     writeSkill(skillsDir, 'notes');
     writeSkill(skillsDir, 'draft');
