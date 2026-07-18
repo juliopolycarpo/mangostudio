@@ -1,7 +1,7 @@
 import { afterEach, beforeAll, describe, expect, it, mock } from 'bun:test';
-import type { AgentProfile } from '@mangostudio/shared/agents';
 import { respondStreamRoutes } from '../../../src/modules/generation/http/respond-stream-routes';
 import type { AgentTurnRequest } from '../../../src/services/providers/types';
+import type { RegisteredTool } from '../../../src/services/tools/types';
 import { insertTestUser, type UserFixture } from '../../support/factories';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
 import {
@@ -12,11 +12,44 @@ import {
   mockPassThroughDb,
   mockProviderRegistry,
   mockSubagentAgentSettings,
+  mockToolsModule,
   mockVerifiedChatOwnership,
   parsePersistedParts,
   parseSseEvents,
   restoreAllMocks,
 } from './_respond-stream-helpers';
+
+const NOOP_TOOL: RegisteredTool = {
+  definition: { name: 'noop', description: 'no-op', parameters: {} },
+  settings: {
+    title: 'Noop',
+    description: 'No-op tool',
+    category: 'system',
+    enabledByDefault: true,
+    canDisable: true,
+    defaultParameters: {},
+    parameterDescriptors: [],
+  },
+  execute: () => Promise.resolve({ ok: true }),
+};
+
+const DELEGATE_TO_AGENT_TOOL: RegisteredTool = {
+  definition: { name: 'delegate_to_agent', description: 'delegate', parameters: {} },
+  settings: {
+    title: 'Delegate',
+    description: 'Delegate tool',
+    category: 'system',
+    enabledByDefault: true,
+    canDisable: true,
+    defaultParameters: {},
+    parameterDescriptors: [],
+  },
+  execute: () => Promise.resolve({}),
+};
+
+async function mockSubagentTools(): Promise<void> {
+  await mockToolsModule([NOOP_TOOL, DELEGATE_TO_AGENT_TOOL]);
+}
 
 let TEST_USER!: UserFixture;
 
@@ -113,76 +146,7 @@ describe('POST /respond/stream — subagent delegation', () => {
       subagentOverrides: { toolNames: ['noop'], toolsEnabled: true },
     });
 
-    await mock.module('../../../src/services/tools', () => {
-      const noopTool = {
-        definition: { name: 'noop', description: 'no-op', parameters: {} },
-        settings: {
-          title: 'Noop',
-          description: 'No-op tool',
-          category: 'system',
-          enabledByDefault: true,
-          canDisable: true,
-          defaultParameters: {},
-          parameterDescriptors: [],
-        },
-        execute: (_args: Record<string, unknown>, _context: Record<string, unknown>) =>
-          Promise.resolve({ ok: true }),
-      };
-
-      const delegateTool = {
-        definition: { name: 'delegate_to_agent', description: 'delegate', parameters: {} },
-        settings: {
-          title: 'Delegate',
-          description: 'Delegate tool',
-          category: 'system',
-          enabledByDefault: true,
-          canDisable: true,
-          defaultParameters: {},
-          parameterDescriptors: [],
-        },
-        execute: (
-          _args: Record<string, unknown>,
-          context: { delegateToAgent?: (input: unknown) => Promise<unknown> }
-        ) => {
-          if (!context.delegateToAgent) throw new Error('Delegation unavailable');
-          return context.delegateToAgent(_args);
-        },
-      };
-
-      const toolsByName = new Map([
-        ['noop', noopTool],
-        ['delegate_to_agent', delegateTool],
-      ]);
-
-      return {
-        getAllToolDefinitions: () => [noopTool.definition, delegateTool.definition],
-        getToolDefinitionsForAgent: (profile: AgentProfile) => {
-          if (!profile.toolsEnabled) return [];
-          const allowed = new Set(profile.toolNames);
-          return Array.from(toolsByName.values())
-            .filter((tool) => allowed.has('*') || allowed.has(tool.definition.name))
-            .map((tool) => tool.definition);
-        },
-        getTool: (name: string) => toolsByName.get(name),
-        getSafeEffectiveToolSettings: (
-          _tool: unknown,
-          settings?: { enabled?: boolean; parameters?: Record<string, unknown> }
-        ) => ({
-          enabled: settings?.enabled ?? true,
-          parameters: settings?.parameters ?? {},
-        }),
-        // biome-ignore lint/suspicious/useAwait: Migrated from ESLint
-        executeTool: async (
-          name: string,
-          args: Record<string, unknown>,
-          context: { delegateToAgent?: (input: unknown) => Promise<unknown> }
-        ) => {
-          const tool = toolsByName.get(name);
-          if (!tool) throw new Error(`Unknown tool: "${name}"`);
-          return tool.execute(args, context);
-        },
-      };
-    });
+    await mockSubagentTools();
 
     await mockProviderRegistry(async function* streamSummarizeFallback(req: AgentTurnRequest) {
       await Promise.resolve();
@@ -272,29 +236,7 @@ describe('POST /respond/stream — subagent delegation', () => {
       SubagentDelegationError: createSubagentDelegationError(),
     }));
 
-    await mock.module('../../../src/services/tools', () => ({
-      getAllToolDefinitions: () => [
-        { name: 'delegate_to_agent', description: 'delegate', parameters: {} },
-      ],
-      getToolDefinitionsForAgent: () => [
-        { name: 'delegate_to_agent', description: 'delegate', parameters: {} },
-      ],
-      getTool: () => ({
-        definition: { name: 'delegate_to_agent', description: 'delegate', parameters: {} },
-        settings: {
-          title: 'Delegate',
-          description: 'Delegate tool',
-          category: 'system',
-          enabledByDefault: true,
-          canDisable: true,
-          defaultParameters: {},
-          parameterDescriptors: [],
-        },
-        execute: () => Promise.resolve({}),
-      }),
-      getSafeEffectiveToolSettings: () => ({ enabled: true, parameters: {} }),
-      executeTool: () => Promise.resolve({}),
-    }));
+    await mockSubagentTools();
 
     await mockProviderRegistry(async function* streamDelegationRetry(req: AgentTurnRequest) {
       await Promise.resolve();
@@ -369,29 +311,7 @@ describe('POST /respond/stream — subagent delegation', () => {
       SubagentDelegationError: createSubagentDelegationError(),
     }));
 
-    await mock.module('../../../src/services/tools', () => ({
-      getAllToolDefinitions: () => [
-        { name: 'delegate_to_agent', description: 'delegate', parameters: {} },
-      ],
-      getToolDefinitionsForAgent: () => [
-        { name: 'delegate_to_agent', description: 'delegate', parameters: {} },
-      ],
-      getTool: () => ({
-        definition: { name: 'delegate_to_agent', description: 'delegate', parameters: {} },
-        settings: {
-          title: 'Delegate',
-          description: 'Delegate tool',
-          category: 'system',
-          enabledByDefault: true,
-          canDisable: true,
-          defaultParameters: {},
-          parameterDescriptors: [],
-        },
-        execute: () => Promise.resolve({}),
-      }),
-      getSafeEffectiveToolSettings: () => ({ enabled: true, parameters: {} }),
-      executeTool: () => Promise.resolve({}),
-    }));
+    await mockSubagentTools();
 
     await mockProviderRegistry(async function* streamCacheRecovery(req: AgentTurnRequest) {
       await Promise.resolve();
@@ -450,29 +370,7 @@ describe('POST /respond/stream — subagent delegation', () => {
       SubagentDelegationError: createSubagentDelegationError(),
     }));
 
-    await mock.module('../../../src/services/tools', () => ({
-      getAllToolDefinitions: () => [
-        { name: 'delegate_to_agent', description: 'delegate', parameters: {} },
-      ],
-      getToolDefinitionsForAgent: () => [
-        { name: 'delegate_to_agent', description: 'delegate', parameters: {} },
-      ],
-      getTool: () => ({
-        definition: { name: 'delegate_to_agent', description: 'delegate', parameters: {} },
-        settings: {
-          title: 'Delegate',
-          description: 'Delegate tool',
-          category: 'system',
-          enabledByDefault: true,
-          canDisable: true,
-          defaultParameters: {},
-          parameterDescriptors: [],
-        },
-        execute: () => Promise.resolve({}),
-      }),
-      getSafeEffectiveToolSettings: () => ({ enabled: true, parameters: {} }),
-      executeTool: () => Promise.resolve({}),
-    }));
+    await mockSubagentTools();
 
     await mockProviderRegistry(async function* streamNoOutputFallback(req: AgentTurnRequest) {
       await Promise.resolve();
@@ -530,29 +428,7 @@ describe('POST /respond/stream — subagent delegation', () => {
       SubagentDelegationError: createSubagentDelegationError(),
     }));
 
-    await mock.module('../../../src/services/tools', () => ({
-      getAllToolDefinitions: () => [
-        { name: 'delegate_to_agent', description: 'delegate', parameters: {} },
-      ],
-      getToolDefinitionsForAgent: () => [
-        { name: 'delegate_to_agent', description: 'delegate', parameters: {} },
-      ],
-      getTool: () => ({
-        definition: { name: 'delegate_to_agent', description: 'delegate', parameters: {} },
-        settings: {
-          title: 'Delegate',
-          description: 'Delegate tool',
-          category: 'system',
-          enabledByDefault: true,
-          canDisable: true,
-          defaultParameters: {},
-          parameterDescriptors: [],
-        },
-        execute: () => Promise.resolve({}),
-      }),
-      getSafeEffectiveToolSettings: () => ({ enabled: true, parameters: {} }),
-      executeTool: () => Promise.resolve({}),
-    }));
+    await mockSubagentTools();
 
     await mockProviderRegistry(async function* streamTimeoutFallback(req: AgentTurnRequest) {
       await Promise.resolve();
@@ -628,29 +504,7 @@ describe('POST /respond/stream — subagent delegation', () => {
       SubagentDelegationError: createSubagentDelegationError(),
     }));
 
-    await mock.module('../../../src/services/tools', () => ({
-      getAllToolDefinitions: () => [
-        { name: 'delegate_to_agent', description: 'delegate', parameters: {} },
-      ],
-      getToolDefinitionsForAgent: () => [
-        { name: 'delegate_to_agent', description: 'delegate', parameters: {} },
-      ],
-      getTool: () => ({
-        definition: { name: 'delegate_to_agent', description: 'delegate', parameters: {} },
-        settings: {
-          title: 'Delegate',
-          description: 'Delegate tool',
-          category: 'system',
-          enabledByDefault: true,
-          canDisable: true,
-          defaultParameters: {},
-          parameterDescriptors: [],
-        },
-        execute: () => Promise.resolve({}),
-      }),
-      getSafeEffectiveToolSettings: () => ({ enabled: true, parameters: {} }),
-      executeTool: () => Promise.resolve({}),
-    }));
+    await mockSubagentTools();
 
     await mockProviderRegistry(async function* streamManyDelegations(req: AgentTurnRequest) {
       await Promise.resolve();

@@ -1,6 +1,7 @@
 import { afterEach, beforeAll, describe, expect, it, mock } from 'bun:test';
 import { respondStreamRoutes } from '../../../src/modules/generation/http/respond-stream-routes';
 import type { AgentTurnRequest } from '../../../src/services/providers/types';
+import type { RegisteredTool } from '../../../src/services/tools/types';
 import { insertTestUser, type UserFixture } from '../../support/factories';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
 import {
@@ -12,11 +13,26 @@ import {
   mockNoopTools,
   mockPassThroughDb,
   mockProviderRegistry,
+  mockToolsModule,
   mockVerifiedChatOwnership,
   parsePersistedParts,
   parseSseEvents,
   restoreAllMocks,
 } from './_respond-stream-helpers';
+
+const NOOP_TOOL: RegisteredTool = {
+  definition: { name: 'noop', description: 'no-op', parameters: {} },
+  settings: {
+    title: 'Noop',
+    description: 'No-op tool',
+    category: 'system',
+    enabledByDefault: true,
+    canDisable: true,
+    defaultParameters: {},
+    parameterDescriptors: [],
+  },
+  execute: () => Promise.resolve({ ok: true }),
+};
 
 let TEST_USER!: UserFixture;
 
@@ -363,11 +379,7 @@ describe('POST /respond/stream — context and continuation', () => {
       yield { type: 'turn_completed', providerState: null };
     });
 
-    await mock.module('../../../src/services/tools', () => ({
-      getAllToolDefinitions: () => [{ name: 'noop', description: 'no-op', parameters: {} }],
-      getToolDefinitionsForAgent: () => [{ name: 'noop', description: 'no-op', parameters: {} }],
-      executeTool: () => Promise.resolve({ ok: true }),
-    }));
+    await mockToolsModule([NOOP_TOOL]);
 
     await mock.module('../../../src/db/database', dbMock.moduleFactory);
 
@@ -407,11 +419,7 @@ describe('POST /respond/stream — context and continuation', () => {
       yield { type: 'turn_completed', providerState: null };
     });
 
-    await mock.module('../../../src/services/tools', () => ({
-      getAllToolDefinitions: () => [{ name: 'noop', description: 'no-op', parameters: {} }],
-      getToolDefinitionsForAgent: () => [{ name: 'noop', description: 'no-op', parameters: {} }],
-      executeTool: () => Promise.resolve({ ok: true }),
-    }));
+    await mockToolsModule([NOOP_TOOL]);
 
     await mock.module('../../../src/db/database', dbMock.moduleFactory);
 

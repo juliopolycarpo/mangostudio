@@ -30,20 +30,23 @@ import {
 import * as realProviderSettingsRepoNs from '../../../src/modules/provider-settings/infrastructure/provider-settings-repository';
 import * as realToolSettingsRepoNs from '../../../src/modules/tool-settings/infrastructure/tool-settings-repository';
 import * as realGeminiNs from '../../../src/services/gemini';
+import { toolNameMatches } from '../../../src/services/mcp/tool-naming';
 import {
   getProvider,
   getProviderForModel,
   registerProvider,
 } from '../../../src/services/providers/core/provider-registry';
 import type { AgentTurnRequest } from '../../../src/services/providers/types';
+import * as realToolsNs from '../../../src/services/tools';
 import {
-  executeTool,
-  getAllToolDefinitions,
-  getAllTools,
-  getSafeEffectiveToolSettings,
-  getTool,
-  getToolDefinitionsForAgent,
-} from '../../../src/services/tools';
+  getToolDefinitionsForTools,
+  getToolDescriptorsForTools,
+} from '../../../src/services/tools/settings-policy';
+import type {
+  EffectiveToolSettings,
+  RegisteredTool,
+  ToolContext,
+} from '../../../src/services/tools/types';
 
 // Snapshot real implementations at module-load time, before any test can call
 // mock.module(). Bun's mock.module() updates live namespace bindings, so
@@ -59,12 +62,12 @@ const realDeleteChat = deleteChat;
 const realGetProviderForModel = getProviderForModel;
 const realGetProvider = getProvider;
 const realRegisterProvider = registerProvider;
-const realGetAllTools = getAllTools;
-export const realGetAllToolDefinitions = getAllToolDefinitions;
-export const realGetToolDefinitionsForAgent = getToolDefinitionsForAgent;
-export const realExecuteTool = executeTool;
-export const realGetTool = getTool;
-export const realGetSafeEffectiveToolSettings = getSafeEffectiveToolSettings;
+const realTools = { ...realToolsNs };
+export const realGetAllToolDefinitions = realTools.getAllToolDefinitions;
+export const realGetToolDefinitionsForAgent = realTools.getToolDefinitionsForAgent;
+export const realExecuteTool = realTools.executeTool;
+export const realGetTool = realTools.getTool;
+export const realGetSafeEffectiveToolSettings = realTools.getSafeEffectiveToolSettings;
 const realGetAgentProfile = getAgentProfile;
 const realGetAppSettings = getAppSettings;
 const realRunSubagentTurn = runSubagentTurn;
@@ -98,14 +101,7 @@ export async function restoreAllMocks(): Promise<void> {
     getProvider: realGetProvider,
     registerProvider: realRegisterProvider,
   }));
-  await mock.module('../../../src/services/tools', () => ({
-    getAllTools: realGetAllTools,
-    getAllToolDefinitions: realGetAllToolDefinitions,
-    getToolDefinitionsForAgent: realGetToolDefinitionsForAgent,
-    executeTool: realExecuteTool,
-    getTool: realGetTool,
-    getSafeEffectiveToolSettings: realGetSafeEffectiveToolSettings,
-  }));
+  await mock.module('../../../src/services/tools', () => realTools);
   await mock.module('../../../src/modules/app-settings/application/app-settings-service', () => ({
     getAppSettings: realGetAppSettings,
   }));
@@ -271,15 +267,69 @@ export async function mockProviderRegistry(
 }
 
 /**
- * Mocks the tools service with empty definitions and no-op execution.
+ * Mocks every tools-module export from one in-memory registry. Registry reads,
+ * definitions, descriptors, and execution cannot drift onto the real module
+ * when production changes which entrypoint it uses.
+ */
+export async function mockToolsModule(tools: RegisteredTool[]): Promise<void> {
+  const toolsByName = new Map(tools.map((tool) => [tool.definition.name, tool]));
+  const getAllTools = () => Array.from(toolsByName.values());
+  const getTool = (name: string) => toolsByName.get(name);
+
+  await mock.module('../../../src/services/tools', () => ({
+    ...realTools,
+    registerTool: (tool: RegisteredTool) => toolsByName.set(tool.definition.name, tool),
+    getTool,
+    getAllTools,
+    getAllToolDefinitions: (
+      settingsByToolName: ReadonlyMap<string, EffectiveToolSettings> = new Map()
+    ) => getToolDefinitionsForTools(getAllTools(), settingsByToolName),
+    getToolDescriptors: (
+      settingsByToolName: ReadonlyMap<string, EffectiveToolSettings> = new Map()
+    ) => getToolDescriptorsForTools(getAllTools(), settingsByToolName),
+    getToolDefinitionsForSettings: (
+      settingsByToolName: ReadonlyMap<string, EffectiveToolSettings> = new Map()
+    ) => getToolDefinitionsForTools(getAllTools(), settingsByToolName),
+    getToolDefinitionsForAgent: (
+      profile: AgentProfile,
+      settingsByToolName: ReadonlyMap<string, EffectiveToolSettings> = new Map()
+    ) => {
+      if (!profile.toolsEnabled) return [];
+      const allowedToolNames = new Set(profile.toolNames);
+      const allowedTools = getAllTools().filter((tool) =>
+        toolNameMatches(allowedToolNames, tool.definition.name)
+      );
+      return getToolDefinitionsForTools(allowedTools, settingsByToolName);
+    },
+    executeTool: (
+      name: string,
+      args: Record<string, unknown>,
+      context: ToolContext,
+      settings?: EffectiveToolSettings,
+      resolved?: { tool: RegisteredTool; effectiveSettings: EffectiveToolSettings }
+    ) => {
+      const tool = resolved?.tool ?? getTool(name);
+      if (!tool) throw new Error(`Unknown tool: "${name}"`);
+      const effectiveSettings =
+        resolved?.effectiveSettings ?? realTools.getSafeEffectiveToolSettings(tool, settings);
+      if (!effectiveSettings.enabled) {
+        throw new Error(`Tool "${name}" is disabled for this user.`);
+      }
+      return tool.execute(args, {
+        ...context,
+        parameters: { ...effectiveSettings.parameters, ...context.parameters },
+      });
+    },
+    clearRegistry: () => toolsByName.clear(),
+  }));
+}
+
+/**
+ * Mocks the tools service with an empty registry.
  * // Usage: await mockNoopTools()
  */
 export async function mockNoopTools(): Promise<void> {
-  await mock.module('../../../src/services/tools', () => ({
-    getAllToolDefinitions: () => [],
-    getToolDefinitionsForAgent: () => [],
-    executeTool: () => Promise.resolve({}),
-  }));
+  await mockToolsModule([]);
 }
 
 /**

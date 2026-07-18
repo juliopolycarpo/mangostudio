@@ -13,6 +13,7 @@ import { respondStreamRoutes } from '../../../src/modules/generation/http/respon
 import * as realCatalogNs from '../../../src/services/providers/catalog';
 import { chatGptProvider } from '../../../src/services/providers/chatgpt/index';
 import * as realMetadataNs from '../../../src/services/secret-store/metadata';
+import type { RegisteredTool } from '../../../src/services/tools/types';
 import { makeTokenBundle, TEST_ACCOUNT_ID } from '../../support/chatgpt';
 import { insertTestUser, type UserFixture } from '../../support/factories';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
@@ -20,6 +21,7 @@ import {
   buildRespondStreamRequest,
   createTestStreamDb,
   makeChain,
+  mockToolsModule,
   mockVerifiedChatOwnership,
   parsePersistedParts,
   parseSseEvents,
@@ -29,10 +31,22 @@ import {
 const realCatalog = { ...realCatalogNs };
 const realMetadata = { ...realMetadataNs };
 
-const READ_FILE_TOOL = {
-  name: 'read_file',
-  description: 'Read a file from the workspace.',
-  parameters: { type: 'object', properties: { path: { type: 'string' } } },
+const READ_FILE_TOOL: RegisteredTool = {
+  definition: {
+    name: 'read_file',
+    description: 'Read a file from the workspace.',
+    parameters: { type: 'object', properties: { path: { type: 'string' } } },
+  },
+  settings: {
+    title: 'Read file',
+    description: 'Read a file from the workspace.',
+    category: 'system',
+    enabledByDefault: true,
+    canDisable: true,
+    defaultParameters: {},
+    parameterDescriptors: [],
+  },
+  execute: () => Promise.resolve('# MangoStudio'),
 };
 
 const TOKEN_BUNDLE = makeTokenBundle();
@@ -173,11 +187,7 @@ async function mockChatGptHarness(insertedMessages: Array<Record<string, unknown
     getProviderForModel: () => Promise.resolve(chatGptProvider),
   }));
 
-  await mock.module('../../../src/services/tools', () => ({
-    getAllToolDefinitions: () => [READ_FILE_TOOL],
-    getToolDefinitionsForAgent: () => [READ_FILE_TOOL],
-    executeTool: () => Promise.resolve('# MangoStudio'),
-  }));
+  await mockToolsModule([READ_FILE_TOOL]);
 
   await mock.module('../../../src/modules/messages/infrastructure/message-repository', () => ({
     loadHistory: () => Promise.resolve([]),
