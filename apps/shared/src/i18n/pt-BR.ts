@@ -652,11 +652,11 @@ export const messages = {
       noModelsDiscovered: 'Nenhum modelo foi descoberto para este conector ainda.',
       addSuccess: 'Conector adicionado com sucesso!',
       deleteSuccess: 'Conector excluído com sucesso!',
-      updateModelsSuccess: 'Modelos atualizados com sucesso!',
       errorRequired: 'Nome e Chave de API são obrigatórios.',
       failedToLoad: 'Falha ao carregar conectores',
       failedToAdd: 'Falha ao adicionar conector',
       failedToDelete: 'Falha ao excluir conector',
+      failedToUpdateModels: 'Falha ao atualizar modelos',
       noSearchResults: 'Nenhum modelo corresponde à sua pesquisa',
     },
     providers: {

@@ -646,11 +646,11 @@ export const messages: Messages = {
       noModelsDiscovered: 'No models have been discovered for this connector yet.',
       addSuccess: 'Connector added successfully!',
       deleteSuccess: 'Connector deleted successfully!',
-      updateModelsSuccess: 'Models updated successfully!',
       errorRequired: 'Name and API Key are required.',
       failedToLoad: 'Failed to load connectors',
       failedToAdd: 'Failed to add connector',
       failedToDelete: 'Failed to delete connector',
+      failedToUpdateModels: 'Failed to update models',
       noSearchResults: 'No models match your search',
     },
     providers: {
