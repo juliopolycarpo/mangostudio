@@ -4,6 +4,7 @@
 
 import type { Connector, ProviderType } from '@mangostudio/shared';
 import { useState } from 'react';
+import { resolveApiErrorMessage } from '@/lib/utils';
 import { addConnector } from '../api';
 
 interface ConnectorFormState {
@@ -86,7 +87,7 @@ export function useConnectorForm({
       await onSuccess();
       reset();
     } catch (err) {
-      setFormError(err instanceof Error ? err.message : unknownError);
+      setFormError(resolveApiErrorMessage(err, unknownError));
     } finally {
       setIsSaving(false);
     }

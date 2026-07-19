@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Toggle } from '@/components/ui/Toggle';
 import { useI18n } from '@/hooks/use-i18n';
+import { resolveApiErrorMessage } from '@/lib/utils';
 import { useTestMcpServer, useUpdateMcpServer } from '../hooks/use-mcp-servers';
 import { McpServerResources } from './McpServerResources';
 import { McpServerTools } from './McpServerTools';
@@ -44,7 +45,7 @@ export function McpServerCard({ server, onEdit, onDelete }: McpServerCardProps) 
     setTestError(null);
     testMutation.mutate(server.id, {
       onSuccess: (result) => setTestResult(result),
-      onError: (error) => setTestError(error.message),
+      onError: (error) => setTestError(resolveApiErrorMessage(error, s.testFailed)),
     });
   };
 

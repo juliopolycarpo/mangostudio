@@ -26,6 +26,7 @@ import {
   type TextGenerationStreamMessageUpdate,
 } from '@/features/generation/text-generation-stream-reducer';
 import { useI18n } from '@/hooks/use-i18n';
+import { resolveApiErrorMessage } from '@/lib/utils';
 import {
   cancelInterruptedTurn,
   dismissInterruptedTurn,
@@ -315,7 +316,7 @@ export function useTextGeneration({
           });
         } else {
           console.error('[respond]', error);
-          const errorText = error instanceof Error ? error.message : t.errors.textGenerationFailed;
+          const errorText = resolveApiErrorMessage(error, t.errors.textGenerationFailed);
           const alreadyHasError = streamState.parts.some((part) => part.type === 'error');
           const nextParts: MessagePart[] = alreadyHasError
             ? streamState.parts

@@ -21,3 +21,16 @@ export function extractApiError(value: unknown, fallback = defaultApiErrorFallba
   }
   return fallback;
 }
+
+/**
+ * Picks the user-facing message for a failed request: the API's own error text
+ * when the server sent one, otherwise the caller's localized label. Data-layer
+ * modules throw neutral `extractApiError` messages, so the non-localized
+ * last-resort fallback must not leak into localized UI.
+ */
+export function resolveApiErrorMessage(error: unknown, localizedFallback: string): string {
+  if (error instanceof Error && error.message && error.message !== defaultApiErrorFallback) {
+    return error.message;
+  }
+  return localizedFallback;
+}

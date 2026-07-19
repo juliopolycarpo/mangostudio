@@ -14,6 +14,7 @@ import { useToast } from '@/components/ui/Toast';
 import { invalidateChatCapabilities } from '@/features/chat/hooks/use-chat-capabilities';
 import { useI18n } from '@/hooks/use-i18n';
 import { useModelCatalog } from '@/hooks/use-model-catalog';
+import { resolveApiErrorMessage } from '@/lib/utils';
 import { toolSettingsListQueryOptions } from '../../tools/queries';
 import {
   createAgentProfile,
@@ -83,7 +84,7 @@ export function AgentSettingsPage() {
       toast(labels.saved, 'success');
     },
     onError: (error) => {
-      toast(error instanceof Error ? error.message : labels.saveError, 'error');
+      toast(resolveApiErrorMessage(error, labels.saveError), 'error');
     },
   });
 
@@ -97,7 +98,7 @@ export function AgentSettingsPage() {
       toast(labels.previewed, 'success');
     },
     onError: (error) => {
-      toast(error instanceof Error ? error.message : labels.previewError, 'error');
+      toast(resolveApiErrorMessage(error, labels.previewError), 'error');
     },
   });
 
@@ -110,7 +111,7 @@ export function AgentSettingsPage() {
       toast(labels.deleted, 'success');
     },
     onError: (error) => {
-      toast(error instanceof Error ? error.message : labels.deleteError, 'error');
+      toast(resolveApiErrorMessage(error, labels.deleteError), 'error');
     },
   });
 

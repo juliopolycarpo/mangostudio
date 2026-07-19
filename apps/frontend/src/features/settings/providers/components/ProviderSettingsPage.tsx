@@ -10,6 +10,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { useToast } from '@/components/ui/Toast';
 import { useI18n } from '@/hooks/use-i18n';
+import { resolveApiErrorMessage } from '@/lib/utils';
 import { useProviderSettings, useUpdateProviderSettings } from '../hooks/use-provider-settings';
 import { CacheSettingsSection } from './CacheSettingsSection';
 import { ProviderAdvancedSection } from './ProviderAdvancedSection';
@@ -113,7 +114,7 @@ function ProviderSettingsEditor({
       setForm((currentForm) =>
         areProviderSettingsEqual(currentForm, requestedForm) ? committedForm : currentForm
       );
-      toast(err instanceof Error ? err.message : s.saveError, 'error');
+      toast(resolveApiErrorMessage(err, s.saveError), 'error');
     }
   }, [committedForm, dirty, form, s.saveError, toast, updateMutation]);
 

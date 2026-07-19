@@ -9,6 +9,7 @@ import { useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { useToast } from '@/components/ui/Toast';
 import { useI18n } from '@/hooks/use-i18n';
+import { resolveApiErrorMessage } from '@/lib/utils';
 import {
   useAddMcpServer,
   useDeleteMcpServer,
@@ -55,7 +56,7 @@ export function McpSettingsPage() {
           closeForm();
           toast(s.addSuccess, 'success');
         },
-        onError: (err) => setSubmitError(err.message),
+        onError: (err) => setSubmitError(resolveApiErrorMessage(err, s.failedToAdd)),
       });
       return;
     }
@@ -67,7 +68,7 @@ export function McpSettingsPage() {
           closeForm();
           toast(s.updateSuccess, 'success');
         },
-        onError: (err) => setSubmitError(err.message),
+        onError: (err) => setSubmitError(resolveApiErrorMessage(err, s.failedToUpdate)),
       }
     );
   };
@@ -75,7 +76,7 @@ export function McpSettingsPage() {
   const handleDelete = (server: McpServer) => {
     deleteMutation.mutate(server.id, {
       onSuccess: () => toast(s.deleteSuccess, 'success'),
-      onError: (err) => toast(err.message, 'error'),
+      onError: (err) => toast(resolveApiErrorMessage(err, s.failedToDelete), 'error'),
       onSettled: () => setServerToDelete(null),
     });
   };
