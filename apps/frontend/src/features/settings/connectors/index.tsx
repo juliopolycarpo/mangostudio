@@ -40,7 +40,7 @@ export function ConnectorsSettings({ modelCatalog, reloadModelCatalog }: Connect
   const connectorForm = useConnectorForm({
     errorRequired: s.errorRequired,
     baseUrlRequired: s.baseUrlRequired,
-    unknownError: t.errors.unknown,
+    addError: s.failedToAdd,
     onSuccess: async () => {
       setIsAddModalOpen(false);
       toast(s.addSuccess, 'success');
