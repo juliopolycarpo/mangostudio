@@ -657,7 +657,6 @@ export const messages = {
       failedToLoad: 'Falha ao carregar conectores',
       failedToAdd: 'Falha ao adicionar conector',
       failedToDelete: 'Falha ao excluir conector',
-      unknownError: 'Ocorreu um erro desconhecido',
       noSearchResults: 'Nenhum modelo corresponde à sua pesquisa',
     },
     providers: {
@@ -862,7 +861,6 @@ export const messages = {
         importButton: 'Importar {count}',
         importingButton: 'Importando...',
         emptyPreview: 'Nenhum servidor encontrado nesta origem.',
-        previewFailed: 'Não foi possível ler esta origem',
         successToast: '{count} servidores importados',
         nothingImportedToast: 'Nenhum servidor foi importado',
         reasons: {

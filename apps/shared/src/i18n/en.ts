@@ -651,7 +651,6 @@ export const messages: Messages = {
       failedToLoad: 'Failed to load connectors',
       failedToAdd: 'Failed to add connector',
       failedToDelete: 'Failed to delete connector',
-      unknownError: 'An unknown error occurred',
       noSearchResults: 'No models match your search',
     },
     providers: {
@@ -851,7 +850,6 @@ export const messages: Messages = {
         importButton: 'Import {count}',
         importingButton: 'Importing...',
         emptyPreview: 'No servers found in this source.',
-        previewFailed: 'Could not read this source',
         successToast: '{count} servers imported',
         nothingImportedToast: 'No servers were imported',
         reasons: {
