@@ -219,22 +219,18 @@ describe('respondTextStream', () => {
     await expect(respondTextStream(makeRequest(), onChunk)).rejects.toThrow('Rate limited');
   });
 
-  it('throws the fallback message when an error response has no parseable body', async () => {
+  it('throws the neutral fallback when an error response has no parseable body', async () => {
     fetchMock.mockResolvedValue(new Response('upstream exploded', { status: 500 }));
     const { onChunk } = collectChunks();
 
-    await expect(respondTextStream(makeRequest(), onChunk)).rejects.toThrow(
-      en.errors.streamRequestFailed
-    );
+    await expect(respondTextStream(makeRequest(), onChunk)).rejects.toThrow(en.errors.unknown);
   });
 
-  it('throws when an ok response carries no body', async () => {
+  it('throws the neutral fallback when an ok response carries no body', async () => {
     fetchMock.mockResolvedValue(new Response(null, { status: 200 }));
     const { onChunk } = collectChunks();
 
-    await expect(respondTextStream(makeRequest(), onChunk)).rejects.toThrow(
-      en.errors.streamResponseNoBody
-    );
+    await expect(respondTextStream(makeRequest(), onChunk)).rejects.toThrow(en.errors.unknown);
   });
 });
 
@@ -263,12 +259,10 @@ describe('generateImage', () => {
     await expect(generateImage(makeImageRequest())).rejects.toThrow('No credits');
   });
 
-  it('throws a localized fallback when the error has no message', async () => {
+  it('throws the neutral fallback when the error has no message', async () => {
     mockGeneratePost.mockResolvedValue({ data: null, error: { value: null } });
 
-    await expect(generateImage(makeImageRequest())).rejects.toThrow(
-      en.errors.imageGenerationFailed
-    );
+    await expect(generateImage(makeImageRequest())).rejects.toThrow(en.errors.unknown);
   });
 });
 
