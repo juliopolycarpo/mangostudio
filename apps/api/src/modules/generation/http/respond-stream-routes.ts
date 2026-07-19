@@ -386,6 +386,22 @@ export const respondStreamRoutes = (app: Elysia) =>
             };
           }
 
+          const abortController = new AbortController();
+          let activeAssistantMessageId: string | null = null;
+          const registerTurn = (messageId: string) => {
+            activeAssistantMessageId = messageId;
+            registerActiveTurn(messageId, {
+              userId,
+              chatId: body.chatId,
+              abort: (reasonCode) => abortController.abort(reasonCode),
+            });
+          };
+          const unregisterTurn = () => {
+            if (!activeAssistantMessageId) return;
+            unregisterActiveTurn(activeAssistantMessageId);
+            activeAssistantMessageId = null;
+          };
+
           let reservedRecovery: Awaited<ReturnType<typeof reserveInterruptedTurnResume>> | null =
             null;
           if (body.recovery && inspectedRecovery) {
@@ -401,10 +417,12 @@ export const respondStreamRoutes = (app: Elysia) =>
                   resolvedModel,
                   agentId: resolvedAgent.agentId,
                   agentName: resolvedAgent.profile.name,
+                  onTurnReserved: registerTurn,
                 },
                 db
               );
             } catch (err) {
+              unregisterTurn();
               if (err instanceof TurnRecoveryNotFoundError) {
                 set.status = 404;
                 return { error: err.message, code: ERROR_CODES.NOT_FOUND };
@@ -420,18 +438,6 @@ export const respondStreamRoutes = (app: Elysia) =>
               throw err;
             }
           }
-
-          const abortController = new AbortController();
-          let activeAssistantMessageId = reservedRecovery?.assistantMessageId ?? null;
-          const registerTurn = (messageId: string) => {
-            activeAssistantMessageId = messageId;
-            registerActiveTurn(messageId, {
-              userId,
-              chatId: body.chatId,
-              abort: (reasonCode) => abortController.abort(reasonCode),
-            });
-          };
-          if (activeAssistantMessageId) registerTurn(activeAssistantMessageId);
 
           const stream = new ReadableStream({
             async start(controller) {
@@ -492,7 +498,7 @@ export const respondStreamRoutes = (app: Elysia) =>
                 }
               } finally {
                 clearInterval(heartbeat);
-                if (activeAssistantMessageId) unregisterActiveTurn(activeAssistantMessageId);
+                unregisterTurn();
                 try {
                   controller.close();
                 } catch {

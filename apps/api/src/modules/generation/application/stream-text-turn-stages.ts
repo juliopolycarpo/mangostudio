@@ -200,6 +200,8 @@ export async function prepareStreamTextTurn(
     });
   const allParts: MessagePart[] = [checkpoint];
 
+  input.onTurnPrepared?.(aiMsgId);
+
   if (!input.preparedTurn) {
     await persistTextTurnStart(
       {
@@ -267,7 +269,6 @@ export async function prepareStreamTextTurn(
       generationTime: `${((Date.now() - session.startTime) / 1000).toFixed(1)}s`,
     }),
   });
-  input.onTurnPrepared?.(aiMsgId);
   return session;
 }
 

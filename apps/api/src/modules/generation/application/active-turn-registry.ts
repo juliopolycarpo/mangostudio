@@ -8,6 +8,10 @@ interface ActiveTurn {
 
 const activeTurns = new Map<string, ActiveTurn>();
 
+/**
+ * A row with isGenerating = 1 must never be observable while its live turn is
+ * unregistered. Register the turn before inserting its assistant row.
+ */
 export function registerActiveTurn(messageId: string, turn: ActiveTurn): void {
   activeTurns.set(messageId, turn);
 }

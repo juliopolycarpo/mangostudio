@@ -25,6 +25,7 @@ import {
 } from './turn-checkpoint';
 
 const RECOVERY_PROMPT_MAX_LENGTH = 16_000;
+export const STALE_TURN_CHECKPOINT_AGE_MS = 10_000;
 
 export class TurnRecoveryNotFoundError extends Error {
   constructor() {
@@ -111,6 +112,7 @@ export function reserveInterruptedTurnResume(
     readonly resolvedModel: ResolvedModel;
     readonly agentId: AgentId;
     readonly agentName?: string;
+    readonly onTurnReserved: (assistantMessageId: string) => void;
   },
   db: Kysely<Database>
 ): Promise<ReservedTurnResume> {
@@ -179,6 +181,7 @@ export function reserveInterruptedTurnResume(
         trx
       );
     }
+    input.onTurnReserved(assistantMessageId);
     await insertMessage(
       {
         id: assistantMessageId,
@@ -237,6 +240,7 @@ export async function interruptCheckpointedMessage(
   input: {
     readonly messageId: string;
     readonly reasonCode: TurnInterruptionReasonCode;
+    readonly checkpointedBefore?: number;
   },
   db: Kysely<Database>
 ): Promise<boolean> {
@@ -249,6 +253,12 @@ export async function interruptCheckpointedMessage(
 
   const parsed = parseMessageParts(row.parts);
   const checkpoint = parsed.find(isTurnCheckpointPart);
+  if (
+    input.checkpointedBefore !== undefined &&
+    (!checkpoint || checkpoint.checkpointedAt > input.checkpointedBefore)
+  ) {
+    return false;
+  }
   reconcileInterruptedMessageParts(parsed);
   // A row without a readable checkpoint predates turn recovery or came from the
   // message create route. It carries no resumable state, but clearing
@@ -277,11 +287,16 @@ export async function interruptCheckpointedMessage(
 }
 
 export async function reconcileStaleTurns(
-  input: {
-    readonly chatId?: string;
-    readonly reasonCode: Extract<TurnInterruptionReasonCode, 'server_restart' | 'unknown'>;
-    readonly isActive?: (messageId: string) => boolean;
-  },
+  input:
+    | {
+        readonly chatId?: string;
+        readonly reasonCode: 'server_restart';
+      }
+    | {
+        readonly chatId?: string;
+        readonly reasonCode: 'unknown';
+        readonly isActive: (messageId: string) => boolean;
+      },
   db: Kysely<Database>
 ): Promise<number> {
   // Only the id is needed: interruptCheckpointedMessage re-reads each candidate
@@ -294,11 +309,20 @@ export async function reconcileStaleTurns(
   if (input.chatId) query = query.where('chatId', '=', input.chatId);
 
   const rows = await query.execute();
+  const checkpointedBefore =
+    input.reasonCode === 'unknown' ? Date.now() - STALE_TURN_CHECKPOINT_AGE_MS : undefined;
   let reconciled = 0;
   for (const row of rows) {
-    if (input.isActive?.(row.id)) continue;
+    if (input.reasonCode === 'unknown' && input.isActive(row.id)) continue;
     if (
-      await interruptCheckpointedMessage({ messageId: row.id, reasonCode: input.reasonCode }, db)
+      await interruptCheckpointedMessage(
+        {
+          messageId: row.id,
+          reasonCode: input.reasonCode,
+          ...(checkpointedBefore !== undefined ? { checkpointedBefore } : {}),
+        },
+        db
+      )
     ) {
       reconciled += 1;
     }

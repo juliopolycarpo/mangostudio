@@ -15,6 +15,7 @@ import {
   inspectInterruptedTurnResume,
   reconcileStaleTurns,
   reserveInterruptedTurnResume,
+  STALE_TURN_CHECKPOINT_AGE_MS,
   TurnRecoveryConflictError,
 } from '../../../../src/modules/generation/application/turn-recovery';
 import {
@@ -139,6 +140,112 @@ describe('turn checkpoints', () => {
 });
 
 describe('interrupted turn recovery', () => {
+  it('skips an unregistered turn with a fresh checkpoint', async () => {
+    const { chat } = await createOwnedChat();
+    const messageId = crypto.randomUUID();
+    const part = checkpoint(messageId);
+    part.checkpointedAt = Date.now();
+    await insertMessage(
+      {
+        id: messageId,
+        chatId: chat.id,
+        role: 'ai',
+        text: 'still running',
+        timestamp: Date.now(),
+        isGenerating: true,
+        interactionMode: 'chat',
+        parts: JSON.stringify([part]),
+      },
+      getDb()
+    );
+
+    expect(
+      await reconcileStaleTurns(
+        { chatId: chat.id, reasonCode: 'unknown', isActive: () => false },
+        getDb()
+      )
+    ).toBe(0);
+
+    const row = await getDb()
+      .selectFrom('messages')
+      .select('isGenerating')
+      .where('id', '=', messageId)
+      .executeTakeFirstOrThrow();
+    expect(row.isGenerating).toBe(1);
+  });
+
+  it('interrupts an unregistered turn with a stale checkpoint', async () => {
+    const { chat } = await createOwnedChat();
+    const messageId = crypto.randomUUID();
+    const part = checkpoint(messageId);
+    part.checkpointedAt = Date.now() - STALE_TURN_CHECKPOINT_AGE_MS - 1;
+    await insertMessage(
+      {
+        id: messageId,
+        chatId: chat.id,
+        role: 'ai',
+        text: 'stale partial response',
+        timestamp: Date.now(),
+        isGenerating: true,
+        interactionMode: 'chat',
+        parts: JSON.stringify([part]),
+      },
+      getDb()
+    );
+
+    expect(
+      await reconcileStaleTurns(
+        { chatId: chat.id, reasonCode: 'unknown', isActive: () => false },
+        getDb()
+      )
+    ).toBe(1);
+
+    const row = await getDb()
+      .selectFrom('messages')
+      .select(['isGenerating', 'parts'])
+      .where('id', '=', messageId)
+      .executeTakeFirstOrThrow();
+    const reconciledCheckpoint = (JSON.parse(row.parts ?? '[]') as MessagePart[]).find(
+      isTurnCheckpointPart
+    );
+    expect(row.isGenerating).toBe(0);
+    expect(reconciledCheckpoint).toMatchObject({ status: 'interrupted', reasonCode: 'unknown' });
+  });
+
+  it('skips a registered turn even when its checkpoint is stale', async () => {
+    const { chat } = await createOwnedChat();
+    const messageId = crypto.randomUUID();
+    const part = checkpoint(messageId);
+    part.checkpointedAt = Date.now() - STALE_TURN_CHECKPOINT_AGE_MS - 1;
+    await insertMessage(
+      {
+        id: messageId,
+        chatId: chat.id,
+        role: 'ai',
+        text: 'waiting for user input',
+        timestamp: Date.now(),
+        isGenerating: true,
+        interactionMode: 'chat',
+        parts: JSON.stringify([part]),
+      },
+      getDb()
+    );
+
+    expect(
+      await reconcileStaleTurns(
+        { chatId: chat.id, reasonCode: 'unknown', isActive: (id) => id === messageId },
+        getDb()
+      )
+    ).toBe(0);
+
+    const row = await getDb()
+      .selectFrom('messages')
+      .select('isGenerating')
+      .where('id', '=', messageId)
+      .executeTakeFirstOrThrow();
+    expect(row.isGenerating).toBe(1);
+  });
+
   it('reconciles stale execution and elicitation state without claiming unknown mutations failed', async () => {
     const { chat } = await createOwnedChat();
     const messageId = crypto.randomUUID();
@@ -184,10 +291,7 @@ describe('interrupted turn recovery', () => {
     );
 
     expect(
-      await reconcileStaleTurns(
-        { chatId: chat.id, reasonCode: 'server_restart', isActive: () => false },
-        getDb()
-      )
+      await reconcileStaleTurns({ chatId: chat.id, reasonCode: 'server_restart' }, getDb())
     ).toBe(1);
 
     const row = await getDb()
@@ -268,7 +372,7 @@ describe('interrupted turn recovery', () => {
     });
   });
 
-  it('clears stale rows that carry no checkpoint instead of leaving them generating', async () => {
+  it('leaves checkpointless rows to unconditional startup recovery', async () => {
     const { chat } = await createOwnedChat();
     const legacyId = crypto.randomUUID();
     await insertMessage(
@@ -285,10 +389,23 @@ describe('interrupted turn recovery', () => {
     );
 
     expect(
+      await reconcileStaleTurns(
+        { chatId: chat.id, reasonCode: 'unknown', isActive: () => false },
+        getDb()
+      )
+    ).toBe(0);
+    let row = await getDb()
+      .selectFrom('messages')
+      .select(['isGenerating', 'parts'])
+      .where('id', '=', legacyId)
+      .executeTakeFirstOrThrow();
+    expect(row.isGenerating).toBe(1);
+
+    expect(
       await reconcileStaleTurns({ chatId: chat.id, reasonCode: 'server_restart' }, getDb())
     ).toBe(1);
 
-    const row = await getDb()
+    row = await getDb()
       .selectFrom('messages')
       .select(['isGenerating', 'parts'])
       .where('id', '=', legacyId)
@@ -406,6 +523,7 @@ describe('interrupted turn recovery', () => {
       getDb()
     );
 
+    const registeredAssistantMessageIds: string[] = [];
     const reserved = await reserveInterruptedTurnResume(
       {
         chatId: chat.id,
@@ -416,9 +534,14 @@ describe('interrupted turn recovery', () => {
         inspected,
         resolvedModel: { modelId: 'gpt-test', providerType: 'openai' },
         agentId: 'chat',
+        onTurnReserved: (assistantMessageId) => {
+          registeredAssistantMessageIds.push(assistantMessageId);
+        },
       },
       getDb()
     );
+
+    expect(registeredAssistantMessageIds).toEqual([reserved.assistantMessageId]);
 
     await expect(
       inspectInterruptedTurnResume({ chatId: chat.id, userId: user.id, recovery }, getDb())
