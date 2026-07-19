@@ -13,6 +13,14 @@ export interface ChatFixture {
   userId: string;
 }
 
+export interface ConnectorFixture {
+  id: string;
+  name: string;
+  provider: string;
+  enabledModels: string[];
+  userId: string;
+}
+
 /**
  * Creates a user row in the test database with realistic faker-generated data.
  * Returns the inserted user so it can be passed to createAuthenticatedApiTestApp.
@@ -69,4 +77,46 @@ export async function insertTestChat(
     .execute();
 
   return chat;
+}
+
+/**
+ * Creates a configured connector row so provider routing resolves the given
+ * models for the user. Tests that register a fake provider need this row;
+ * without it the streaming routes reject the model as unavailable.
+ */
+export async function insertTestConnector(
+  userId: string,
+  overrides: Partial<ConnectorFixture> = {}
+): Promise<ConnectorFixture> {
+  const connector: ConnectorFixture = {
+    id: faker.string.uuid(),
+    name: faker.company.name(),
+    provider: 'openai-compatible',
+    enabledModels: [],
+    userId,
+    ...overrides,
+  };
+  const now = Date.now();
+
+  await getDb()
+    .insertInto('secret_metadata')
+    .values({
+      id: connector.id,
+      name: connector.name,
+      provider: connector.provider,
+      configured: 1,
+      source: 'config-file',
+      maskedSuffix: null,
+      updatedAt: now,
+      lastValidatedAt: now,
+      lastValidationError: null,
+      enabledModels: JSON.stringify(connector.enabledModels),
+      userId: connector.userId,
+      baseUrl: null,
+      organizationId: null,
+      projectId: null,
+    })
+    .execute();
+
+  return connector;
 }
