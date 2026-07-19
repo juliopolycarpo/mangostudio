@@ -95,7 +95,10 @@ export function ImportServersDialog({ onClose }: ImportServersDialogProps) {
   const setDecision = (entry: McpPortabilityPreviewEntry, decision: McpPortabilityDecision) => {
     patchDecision(entry.key, {
       decision,
-      targetServerId: decision === 'replace' ? entry.conflicts[0]?.serverId : undefined,
+      targetServerId:
+        decision === 'replace'
+          ? entry.conflicts.find((candidate) => !candidate.replaceBlockedBySlug)?.serverId
+          : undefined,
     });
   };
 
@@ -354,6 +357,9 @@ function PreviewStep({
       {entries.map((entry) => {
         const state = decisions[entry.key];
         if (!state) return null;
+        const eligibleReplacementCount = entry.conflicts.filter(
+          (candidate) => !candidate.replaceBlockedBySlug
+        ).length;
         return (
           <section
             key={entry.key}
@@ -383,7 +389,11 @@ function PreviewStep({
                 className="rounded-xl border border-outline-variant/30 bg-surface-container-high px-3 py-2 text-sm text-on-surface focus:border-primary/60 focus:outline-none"
               >
                 {entry.allowedDecisions.map((decision) => (
-                  <option key={decision} value={decision}>
+                  <option
+                    key={decision}
+                    value={decision}
+                    disabled={decision === 'replace' && eligibleReplacementCount === 0}
+                  >
                     {s.portability.decisions[decision]}
                   </option>
                 ))}
@@ -402,13 +412,32 @@ function PreviewStep({
                 <p className="text-xs font-semibold text-on-surface-variant">
                   {s.portability.conflictsTitle}
                 </p>
-                {entry.conflicts.map((candidate) => (
-                  <div key={candidate.serverId} className="text-xs text-on-surface-variant/80">
-                    <span className="font-medium text-on-surface">{candidate.name}</span>
-                    <span> ({candidate.slug}) · </span>
-                    {candidate.keys.map((key) => s.portability.conflictKeys[key]).join(', ')}
-                  </div>
-                ))}
+                {entry.conflicts.map((candidate) => {
+                  const blockedMessage = candidate.replaceBlockedBySlug
+                    ? formatReplaceBlockedBySlug(
+                        s.portability.replaceBlockedBySlug,
+                        candidate.replaceBlockedBySlug
+                      )
+                    : undefined;
+                  return (
+                    <div key={candidate.serverId} className="text-xs text-on-surface-variant/80">
+                      <div>
+                        <span className="font-medium text-on-surface">{candidate.name}</span>
+                        <span> ({candidate.slug}) · </span>
+                        {candidate.keys.map((key) => s.portability.conflictKeys[key]).join(', ')}
+                      </div>
+                      {blockedMessage && (
+                        <p
+                          className="mt-1 flex items-center gap-1.5 text-error"
+                          title={blockedMessage}
+                        >
+                          <AlertTriangle size={12} />
+                          {blockedMessage}
+                        </p>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             ) : (
               <p className="flex items-center gap-2 text-xs text-on-surface-variant/60">
@@ -425,11 +454,25 @@ function PreviewStep({
                   onChange={(event) => onReplaceTarget(entry.key, event.target.value)}
                   className="w-full rounded-xl border border-outline-variant/20 bg-surface-container-high px-3 py-2 text-sm text-on-surface focus:border-primary/60 focus:outline-none"
                 >
-                  {entry.conflicts.map((candidate) => (
-                    <option key={candidate.serverId} value={candidate.serverId}>
-                      {candidate.name} ({candidate.slug})
-                    </option>
-                  ))}
+                  {entry.conflicts.map((candidate) => {
+                    const blockedMessage = candidate.replaceBlockedBySlug
+                      ? formatReplaceBlockedBySlug(
+                          s.portability.replaceBlockedBySlug,
+                          candidate.replaceBlockedBySlug
+                        )
+                      : undefined;
+                    return (
+                      <option
+                        key={candidate.serverId}
+                        value={candidate.serverId}
+                        disabled={blockedMessage !== undefined}
+                        title={blockedMessage}
+                      >
+                        {candidate.name} ({candidate.slug})
+                        {blockedMessage ? ` — ${blockedMessage}` : ''}
+                      </option>
+                    );
+                  })}
                 </select>
               </label>
             )}
@@ -498,6 +541,12 @@ function canApplyPreview(step: Extract<Step, { kind: 'preview' }>): boolean {
   return step.entries.every((entry) => {
     const state = step.decisions[entry.key];
     if (!state || state.decision === 'skip') return true;
+    if (state.decision === 'replace') {
+      const target = entry.conflicts.find(
+        (candidate) => candidate.serverId === state.targetServerId
+      );
+      if (!target || target.replaceBlockedBySlug) return false;
+    }
     return entry.secretReferences.every((reference) => {
       if (!reference.required) return true;
       return reference.kind === 'env'
@@ -505,6 +554,13 @@ function canApplyPreview(step: Extract<Step, { kind: 'preview' }>): boolean {
         : Boolean(state.headers[reference.name]);
     });
   });
+}
+
+function formatReplaceBlockedBySlug(
+  template: string,
+  blocker: NonNullable<McpPortabilityPreviewEntry['conflicts'][number]['replaceBlockedBySlug']>
+): string {
+  return template.replace('{slug}', blocker.slug).replace('{holderName}', blocker.holderName);
 }
 
 function SummaryStep({ summary }: { summary: McpPortabilityApplyResponse }) {

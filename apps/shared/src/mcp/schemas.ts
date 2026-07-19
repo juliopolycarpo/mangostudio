@@ -279,6 +279,12 @@ export const McpPortabilityConflictCandidateSchema = Type.Object({
   slug: Type.String({ minLength: 1 }),
   keys: Type.Array(McpPortabilityConflictKeySchema, { minItems: 1 }),
   exact: Type.Boolean(),
+  replaceBlockedBySlug: Type.Optional(
+    Type.Object({
+      slug: Type.String({ minLength: 1 }),
+      holderName: Type.String({ minLength: 1 }),
+    })
+  ),
 });
 
 export const McpPortabilityInvalidReasonSchema = Type.Union([

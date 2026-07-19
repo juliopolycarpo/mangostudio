@@ -48,6 +48,10 @@ import {
 import { analyzeMcpHttpUrl, looksCredentialShaped } from './mcp-credential-policy';
 import { type ParsedImportEntry, parseMcpImportSource } from './mcp-import-parser';
 import { loadMcpImportSource } from './mcp-import-service';
+import {
+  assertUniquePostApplySlugs,
+  findReplacementSlugBlocker,
+} from './mcp-portability-slug-validation';
 
 interface NormalizedServer {
   key: string;
@@ -77,6 +81,7 @@ interface PortabilityPlanEntry {
 
 interface PortabilityPlan {
   entries: PortabilityPlanEntry[];
+  existing: ExistingServer[];
   previewToken: string;
   stateHash: string;
 }
@@ -159,7 +164,7 @@ export async function applyMcpPortabilityImport(
     throw stalePreviewError();
   }
 
-  const decisions = validateDecisions(plan.entries, body.decisions);
+  const decisions = validateDecisions(plan.entries, plan.existing, body.decisions);
   const operations = buildSelectedOperations(plan.entries, decisions);
   const stagedIds: string[] = [];
 
@@ -267,7 +272,7 @@ async function buildPortabilityPlan(
     stateHash,
     entries: entries.map((entry) => entry.preview),
   });
-  return { entries, previewToken, stateHash };
+  return { entries, existing, previewToken, stateHash };
 }
 
 function invalidPlanEntry(entry: ParsedImportEntry): PortabilityPlanEntry {
@@ -393,12 +398,14 @@ function findConflicts(
       keys.push('command-args');
     }
     if (keys.length === 0) continue;
+    const replaceBlockedBySlug = findReplacementSlugBlocker(incoming.slug, current, existing);
     candidates.push({
       serverId: current.id,
       name: current.name,
       slug: current.slug,
       keys: CONFLICT_KEY_ORDER.filter((key) => keys.includes(key)),
       exact: keys.includes('fingerprint'),
+      ...(replaceBlockedBySlug !== undefined && { replaceBlockedBySlug }),
     });
   }
   return candidates.sort((left, right) => compareText(left.slug, right.slug));
@@ -406,6 +413,7 @@ function findConflicts(
 
 function validateDecisions(
   entries: PortabilityPlanEntry[],
+  existing: ExistingServer[],
   decisions: McpPortabilityDecisionInput[]
 ): Map<string, McpPortabilityDecisionInput> {
   const byKey = new Map<string, McpPortabilityDecisionInput>();
@@ -423,12 +431,24 @@ function validateDecisions(
       validationError(`Decision for "${entry.preview.key}" is not allowed by the preview.`);
     }
     if (decision.decision === 'replace') {
-      if (
-        !decision.targetServerId ||
-        !entry.preview.conflicts.some((candidate) => candidate.serverId === decision.targetServerId)
-      ) {
+      const candidate = entry.preview.conflicts.find(
+        (candidate) => candidate.serverId === decision.targetServerId
+      );
+      if (!decision.targetServerId || !candidate) {
         validationError(
           `Replacement target for "${entry.preview.key}" is not a preview candidate.`
+        );
+      }
+      const target = existing.find((server) => server.id === decision.targetServerId);
+      if (!target) {
+        validationError(
+          `Replacement target for "${entry.preview.key}" is not a preview candidate.`
+        );
+      }
+      const blocker = findReplacementSlugBlocker(entry.preview.slug, target, existing);
+      if (blocker) {
+        validationError(
+          `Replacing "${target.name}" will not free slug "${blocker.slug}", which belongs to "${blocker.holderName}". Replace that server instead, or import as a copy.`
         );
       }
     } else if (decision.targetServerId !== undefined) {
@@ -443,6 +463,22 @@ function validateDecisions(
   if (new Set(replaceIds).size !== replaceIds.length) {
     validationError('Two imported entries cannot replace the same managed server.');
   }
+  assertUniquePostApplySlugs(
+    existing,
+    entries.flatMap((entry) =>
+      entry.normalized
+        ? [
+            {
+              key: entry.preview.key,
+              name: entry.preview.name,
+              slug: entry.normalized.slug,
+              ...(entry.preview.copySlug !== undefined && { copySlug: entry.preview.copySlug }),
+            },
+          ]
+        : []
+    ),
+    byKey
+  );
   return byKey;
 }
 
