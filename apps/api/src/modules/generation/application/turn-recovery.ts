@@ -25,6 +25,12 @@ import {
 } from './turn-checkpoint';
 
 const RECOVERY_PROMPT_MAX_LENGTH = 16_000;
+const RECOVERY_RESULT_INITIAL_LENGTH = 512;
+const RECOVERY_RESULT_MIN_LENGTH = 64;
+const RECOVERY_ASSISTANT_TEXT_FLOOR = 2_000;
+const RECOVERY_TODO_CONTENT_LENGTH = 80;
+const RECOVERY_COMPLETED_CALL_INITIAL_LIMIT = 20;
+const RECOVERY_INCOMPLETE_CALL_NAME_LENGTH = 40;
 export const STALE_TURN_CHECKPOINT_AGE_MS = 10_000;
 
 export class TurnRecoveryNotFoundError extends Error {
@@ -331,56 +337,187 @@ export function buildRecoveryPrompt(
   retryCallIds: readonly string[]
 ): string {
   const retryIds = new Set(retryCallIds);
-  const succeeded = checkpoint.completedCalls.filter((call) => !call.isError);
-  const failed = checkpoint.completedCalls.filter((call) => call.isError);
   const prefix = [
     'Continue the interrupted turn from the durable recovery checkpoint below.',
     'Treat succeeded call IDs and their results as authoritative. Do not repeat them.',
     'Do not retry incomplete calls unless their call ID appears in selectedRetryCallIds.',
     'For calls with an unknown outcome, verify state before attempting any mutation.',
+    'Fields marked omitted were dropped to fit the size budget; verify independently.',
     '<turn-recovery>',
   ].join('\n');
   const suffix = '\n</turn-recovery>';
-  let durableContent = checkpoint.lastAssistantText;
-  let resultLength = 512;
+  const selectedRetryCalls = checkpoint.incompleteCalls.filter((call) => retryIds.has(call.callId));
+  const selectedRetryCallIds = selectedRetryCalls.map((call) => call.callId);
+  const state: RecoveryPromptState = {
+    durableContent: checkpoint.lastAssistantText,
+    resultLength: RECOVERY_RESULT_INITIAL_LENGTH,
+    todoSnapshot: checkpoint.todoSnapshot,
+    todoSnapshotOmitted: false,
+    completedCallLimit: null,
+    summarizeIncompleteCalls: false,
+  };
 
-  while (true) {
-    const prompt = `${prefix}\n${JSON.stringify({
+  const render = () => {
+    let completedCalls = checkpoint.completedCalls;
+    if (state.completedCallLimit !== null) {
+      completedCalls =
+        state.completedCallLimit === 0
+          ? []
+          : checkpoint.completedCalls.slice(-state.completedCallLimit);
+    }
+    const omittedCompletedCallCount = checkpoint.completedCalls.length - completedCalls.length;
+    const succeeded = completedCalls.filter((call) => !call.isError);
+    const failed = completedCalls.filter((call) => call.isError);
+    const omittedIncompleteCalls = state.summarizeIncompleteCalls
+      ? checkpoint.incompleteCalls.filter((call) => !retryIds.has(call.callId))
+      : [];
+    const incompleteCalls = state.summarizeIncompleteCalls
+      ? selectedRetryCalls
+      : checkpoint.incompleteCalls;
+
+    return `${prefix}\n${JSON.stringify({
       interruptedTurnId: checkpoint.turnId,
       interruptionReason: checkpoint.reasonCode ?? 'unknown',
-      lastDurableAssistantContent: durableContent,
-      todoSnapshot: checkpoint.todoSnapshot,
+      lastDurableAssistantContent: state.durableContent,
+      ...(!state.todoSnapshotOmitted ? { todoSnapshot: state.todoSnapshot } : {}),
+      ...(state.todoSnapshotOmitted ? { todoSnapshotOmitted: true } : {}),
       succeededCalls: succeeded.map((call) => ({
         callId: call.callId,
         name: call.name,
-        result: call.result.slice(0, resultLength),
+        result: call.result.slice(0, state.resultLength),
       })),
       failedCalls: failed.map((call) => ({
         callId: call.callId,
         name: call.name,
-        result: call.result.slice(0, resultLength),
+        result: call.result.slice(0, state.resultLength),
       })),
-      incompleteCalls: checkpoint.incompleteCalls.map((call) => ({
+      ...(omittedCompletedCallCount > 0 ? { omittedCompletedCallCount } : {}),
+      incompleteCalls: incompleteCalls.map((call) => ({
         callId: call.callId,
         name: call.name,
         retrySafety: call.retrySafety,
         outcome: call.outcome,
       })),
-      selectedRetryCallIds: checkpoint.incompleteCalls
-        .filter((call) => retryIds.has(call.callId))
-        .map((call) => call.callId),
+      ...(omittedIncompleteCalls.length > 0
+        ? {
+            omittedIncompleteCallCount: omittedIncompleteCalls.length,
+            omittedIncompleteCallNames: [
+              ...new Set(
+                omittedIncompleteCalls.map((call) =>
+                  call.name.slice(0, RECOVERY_INCOMPLETE_CALL_NAME_LENGTH)
+                )
+              ),
+            ],
+          }
+        : {}),
+      selectedRetryCallIds,
     })}${suffix}`;
+  };
+
+  let prompt = render();
+  const trimPasses: Array<() => boolean> = [
+    () => halveNumberAtFloor(state, 'resultLength', RECOVERY_RESULT_MIN_LENGTH),
+    () => trimAssistantTextToFloor(state, RECOVERY_ASSISTANT_TEXT_FLOOR),
+    () => truncateTodoContents(state),
+    () => dropCompletedTodos(state),
+    () => omitTodoSnapshot(state),
+    () => reduceCompletedCallLimit(state, checkpoint.completedCalls.length),
+    () =>
+      summarizeIncompleteCalls(state, checkpoint.incompleteCalls.length, selectedRetryCalls.length),
+    () => trimAssistantTextToFloor(state, 0),
+  ];
+
+  for (const trim of trimPasses) {
+    while (prompt.length > RECOVERY_PROMPT_MAX_LENGTH && trim()) prompt = render();
     if (prompt.length <= RECOVERY_PROMPT_MAX_LENGTH) return prompt;
-    if (durableContent.length > 0) {
-      durableContent = durableContent.slice(0, Math.floor(durableContent.length / 2));
-      continue;
-    }
-    if (resultLength > 0) {
-      resultLength = Math.floor(resultLength / 2);
-      continue;
-    }
-    throw new TurnRecoveryValidationError('The recovery checkpoint exceeds the prompt limit.');
   }
+
+  const minimalPrompt = `${prefix}\n${JSON.stringify({
+    interruptedTurnId: checkpoint.turnId,
+    interruptionReason: checkpoint.reasonCode ?? 'unknown',
+    selectedRetryCallIds,
+    recoveryContextOmitted: true,
+  })}${suffix}`;
+  if (minimalPrompt.length <= RECOVERY_PROMPT_MAX_LENGTH) return minimalPrompt;
+
+  return `${prefix}\n${JSON.stringify({
+    interruptedTurnId: checkpoint.turnId,
+    interruptionReason: checkpoint.reasonCode ?? 'unknown',
+    retrySelectionOmitted: true,
+    recoveryContextOmitted: true,
+  })}${suffix}`;
+}
+
+interface RecoveryPromptState {
+  durableContent: string;
+  resultLength: number;
+  todoSnapshot: TurnCheckpointPart['todoSnapshot'];
+  todoSnapshotOmitted: boolean;
+  completedCallLimit: number | null;
+  summarizeIncompleteCalls: boolean;
+}
+
+function halveNumberAtFloor(
+  state: RecoveryPromptState,
+  field: 'resultLength',
+  floor: number
+): boolean {
+  const current = state[field];
+  if (current <= floor) return false;
+  state[field] = Math.max(floor, Math.floor(current / 2));
+  return true;
+}
+
+function trimAssistantTextToFloor(state: RecoveryPromptState, floor: number): boolean {
+  if (state.durableContent.length <= floor) return false;
+  const nextLength = Math.max(floor, Math.floor(state.durableContent.length / 2));
+  state.durableContent = state.durableContent.slice(0, nextLength);
+  return true;
+}
+
+function truncateTodoContents(state: RecoveryPromptState): boolean {
+  if (!state.todoSnapshot.some((todo) => todo.content.length > RECOVERY_TODO_CONTENT_LENGTH)) {
+    return false;
+  }
+  state.todoSnapshot = state.todoSnapshot.map((todo) => ({
+    ...todo,
+    content: todo.content.slice(0, RECOVERY_TODO_CONTENT_LENGTH),
+  }));
+  return true;
+}
+
+function dropCompletedTodos(state: RecoveryPromptState): boolean {
+  if (!state.todoSnapshot.some((todo) => todo.status === 'completed')) return false;
+  state.todoSnapshot = state.todoSnapshot.filter((todo) => todo.status !== 'completed');
+  if (state.todoSnapshot.length === 0) state.todoSnapshotOmitted = true;
+  return true;
+}
+
+function omitTodoSnapshot(state: RecoveryPromptState): boolean {
+  if (state.todoSnapshot.length === 0) return false;
+  state.todoSnapshot = [];
+  state.todoSnapshotOmitted = true;
+  return true;
+}
+
+function reduceCompletedCallLimit(state: RecoveryPromptState, totalCount: number): boolean {
+  const currentCount = state.completedCallLimit ?? totalCount;
+  if (currentCount === 0) return false;
+  state.completedCallLimit =
+    currentCount > RECOVERY_COMPLETED_CALL_INITIAL_LIMIT
+      ? RECOVERY_COMPLETED_CALL_INITIAL_LIMIT
+      : Math.floor(currentCount / 2);
+  return state.completedCallLimit < currentCount;
+}
+
+function summarizeIncompleteCalls(
+  state: RecoveryPromptState,
+  totalCount: number,
+  selectedCount: number
+): boolean {
+  if (state.summarizeIncompleteCalls || totalCount === selectedCount) return false;
+  state.summarizeIncompleteCalls = true;
+  return true;
 }
 
 function assertResumeAvailable(
