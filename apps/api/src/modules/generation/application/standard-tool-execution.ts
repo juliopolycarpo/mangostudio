@@ -456,20 +456,21 @@ async function executeMcpToolCall(
     // MCP tools usually report failure in CallToolResult (`isError: true`)
     // rather than throwing; treat that the same as a thrown tool failure for
     // any elicitation left pending when the call returns.
-    if (mcpResult.isError) cancelReason = 'tool_failed';
-    const mediaParts = !mcpResult.isError
-      ? await persistMcpMediaParts(mcpResult.content, {
+    const { isError } = mcpResult;
+    if (isError) cancelReason = 'tool_failed';
+    const mediaParts = isError
+      ? undefined
+      : await persistMcpMediaParts(mcpResult.content, {
           db: prepared.db,
           userId: context.userId,
           chatId: context.chatId,
           toolCallId: callId,
           serverSlug: prepared.target.parsed.serverSlug,
           toolName: prepared.target.parsed.toolName,
-        })
-      : undefined;
+        });
     return {
-      result: mcpResult.isError ? { error: mcpResult.contentText } : mcpResult.contentText,
-      isError: mcpResult.isError,
+      result: isError ? { error: mcpResult.contentText } : mcpResult.contentText,
+      isError,
       ...(mediaParts?.length ? { mediaParts } : {}),
       ...(elicitationParts.length ? { elicitationParts } : {}),
     };
