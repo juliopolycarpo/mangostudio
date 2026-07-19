@@ -39,7 +39,7 @@
     "kysely": "^0.29.2",
     "kysely-bun-sqlite": "^0.4.0",
     "openai": "^6.47.0",
-    "smol-toml": "^1.6.1"
+    "smol-toml": "^1.7.0"
   },
   "devDependencies": {
     "@faker-js/faker": "^10.4.0",
