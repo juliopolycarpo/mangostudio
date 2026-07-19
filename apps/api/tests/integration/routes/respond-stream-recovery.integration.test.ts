@@ -15,7 +15,12 @@ import type {
   AgentTurnRequest,
   AIProvider,
 } from '../../../src/services/providers/types';
-import { insertTestChat, insertTestUser, type UserFixture } from '../../support/factories';
+import {
+  insertTestChat,
+  insertTestConnector,
+  insertTestUser,
+  type UserFixture,
+} from '../../support/factories';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
 import { buildRespondStreamRequest } from './_respond-stream-helpers';
 
@@ -62,26 +67,11 @@ beforeEach(async () => {
   registerProvider(provider);
   user = await insertTestUser();
   chatId = (await insertTestChat(user.id)).id;
-  const now = Date.now();
-  await getDb()
-    .insertInto('secret_metadata')
-    .values({
-      id: `${user.id}-recovery-prompt-fit`,
-      name: 'Recovery Prompt Fit Test Connector',
-      provider: 'openai-compatible',
-      configured: 1,
-      source: 'config-file',
-      maskedSuffix: null,
-      updatedAt: now,
-      lastValidatedAt: now,
-      lastValidationError: null,
-      enabledModels: JSON.stringify([MODEL_ID]),
-      userId: user.id,
-      baseUrl: null,
-      organizationId: null,
-      projectId: null,
-    })
-    .execute();
+  await insertTestConnector(user.id, {
+    id: `${user.id}-recovery-prompt-fit`,
+    name: 'Recovery Prompt Fit Test Connector',
+    enabledModels: [MODEL_ID],
+  });
   invalidateProviderRoutingCache(user.id);
   const authenticated = createAuthenticatedApiTestApp(user, respondStreamRoutes);
   app = authenticated.app;

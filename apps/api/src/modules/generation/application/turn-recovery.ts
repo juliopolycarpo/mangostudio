@@ -375,12 +375,13 @@ export function buildRecoveryPrompt(
       ? selectedRetryCalls
       : checkpoint.incompleteCalls;
 
-    return `${prefix}\n${JSON.stringify({
+    return `${prefix}\n${encodeRecoveryPayload({
       interruptedTurnId: checkpoint.turnId,
       interruptionReason: checkpoint.reasonCode ?? 'unknown',
       lastDurableAssistantContent: state.durableContent,
-      ...(!state.todoSnapshotOmitted ? { todoSnapshot: state.todoSnapshot } : {}),
-      ...(state.todoSnapshotOmitted ? { todoSnapshotOmitted: true } : {}),
+      ...(state.todoSnapshotOmitted
+        ? { todoSnapshotOmitted: true }
+        : { todoSnapshot: state.todoSnapshot }),
       succeededCalls: succeeded.map((call) => ({
         callId: call.callId,
         name: call.name,
@@ -416,7 +417,7 @@ export function buildRecoveryPrompt(
 
   let prompt = render();
   const trimPasses: Array<() => boolean> = [
-    () => halveNumberAtFloor(state, 'resultLength', RECOVERY_RESULT_MIN_LENGTH),
+    () => trimResultLength(state),
     () => trimAssistantTextToFloor(state, RECOVERY_ASSISTANT_TEXT_FLOOR),
     () => truncateTodoContents(state),
     () => dropCompletedTodos(state),
@@ -432,7 +433,7 @@ export function buildRecoveryPrompt(
     if (prompt.length <= RECOVERY_PROMPT_MAX_LENGTH) return prompt;
   }
 
-  const minimalPrompt = `${prefix}\n${JSON.stringify({
+  const minimalPrompt = `${prefix}\n${encodeRecoveryPayload({
     interruptedTurnId: checkpoint.turnId,
     interruptionReason: checkpoint.reasonCode ?? 'unknown',
     selectedRetryCallIds,
@@ -440,12 +441,22 @@ export function buildRecoveryPrompt(
   })}${suffix}`;
   if (minimalPrompt.length <= RECOVERY_PROMPT_MAX_LENGTH) return minimalPrompt;
 
-  return `${prefix}\n${JSON.stringify({
+  return `${prefix}\n${encodeRecoveryPayload({
     interruptedTurnId: checkpoint.turnId,
     interruptionReason: checkpoint.reasonCode ?? 'unknown',
     retrySelectionOmitted: true,
     recoveryContextOmitted: true,
   })}${suffix}`;
+}
+
+/**
+ * `JSON.stringify` leaves `<` unescaped, so checkpoint content holding a literal
+ * `</turn-recovery>` would close the block early and let model- or tool-authored
+ * text pose as top-level recovery instructions. `<` keeps the payload valid
+ * JSON while making the closing delimiter unforgeable.
+ */
+function encodeRecoveryPayload(payload: unknown): string {
+  return JSON.stringify(payload).replaceAll('<', '\\u003c');
 }
 
 interface RecoveryPromptState {
@@ -457,14 +468,9 @@ interface RecoveryPromptState {
   summarizeIncompleteCalls: boolean;
 }
 
-function halveNumberAtFloor(
-  state: RecoveryPromptState,
-  field: 'resultLength',
-  floor: number
-): boolean {
-  const current = state[field];
-  if (current <= floor) return false;
-  state[field] = Math.max(floor, Math.floor(current / 2));
+function trimResultLength(state: RecoveryPromptState): boolean {
+  if (state.resultLength <= RECOVERY_RESULT_MIN_LENGTH) return false;
+  state.resultLength = Math.max(RECOVERY_RESULT_MIN_LENGTH, Math.floor(state.resultLength / 2));
   return true;
 }
 
