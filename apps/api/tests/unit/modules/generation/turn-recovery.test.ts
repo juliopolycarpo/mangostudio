@@ -498,6 +498,108 @@ describe('interrupted turn recovery', () => {
     expect(payload.omittedCompletedCallCount).toBe(50 - keptCallIds.length);
   });
 
+  it('spends the completed-call budget on succeeded calls before failed ones', () => {
+    const part = checkpoint('succeeded-priority-turn', 'interrupted');
+    part.lastAssistantText = 'a'.repeat(8_000);
+    // Interleaved so a recency-only budget would keep roughly half failures.
+    part.completedCalls = Array.from({ length: 50 }, (_, index) => ({
+      callId: maxLengthValue('completed', index),
+      name: 'read_file',
+      retrySafety: 'safe_read' as const,
+      result: 'r'.repeat(2_000),
+      ...(index % 2 === 1 ? { isError: true } : {}),
+    }));
+
+    const payload = parseRecoveryPrompt(buildRecoveryPrompt(part, []));
+
+    // A dropped success can be re-executed; a dropped failure only costs context.
+    expect((payload.failedCalls as unknown[]).length).toBe(0);
+    expect((payload.succeededCalls as unknown[]).length).toBeGreaterThan(0);
+  });
+
+  it('names omitted succeeded calls so their side effects are not repeated', () => {
+    const part = checkpoint('omitted-succeeded-turn', 'interrupted');
+    part.lastAssistantText = 'a'.repeat(8_000);
+    part.completedCalls = Array.from({ length: 50 }, (_, index) => ({
+      callId: maxLengthValue('completed', index),
+      name: index === 0 ? 'delete_database' : 'read_file',
+      retrySafety: 'confirmation_required' as const,
+      result: 'r'.repeat(2_000),
+    }));
+
+    const payload = parseRecoveryPrompt(buildRecoveryPrompt(part, []));
+
+    expect(payload.omittedCompletedCallCount).toBe(30);
+    // The oldest call is budgeted out, but the model must still learn it ran.
+    expect(payload.omittedSucceededCallNames).toContain('delete_database');
+  });
+
+  it('reports completed todos dropped from a still-present snapshot', () => {
+    const part = checkpoint('todo-drop-turn', 'interrupted');
+    part.lastAssistantText = 'a'.repeat(2_000);
+    part.todoSnapshot = Array.from({ length: 50 }, (_, index) => ({
+      content: `todo ${index} `.padEnd(500, 'x'),
+      status: index % 2 === 0 ? ('completed' as const) : ('in_progress' as const),
+    }));
+    // Ballast that no earlier trim pass can shrink, forcing the todo drop.
+    part.incompleteCalls = Array.from({ length: 9 }, (_, index) => ({
+      callId: maxLengthValue('incomplete', index),
+      name: maxLengthValue('incomplete-name', index),
+      retrySafety: 'unknown' as const,
+      status: 'cancelled' as const,
+      outcome: 'not_started' as const,
+    }));
+
+    const payload = parseRecoveryPrompt(
+      buildRecoveryPrompt(
+        part,
+        part.incompleteCalls.map((call) => call.callId)
+      )
+    );
+    const todos = payload.todoSnapshot as Array<{ status: string }>;
+
+    expect(todos).toHaveLength(25);
+    expect(todos.some((todo) => todo.status === 'completed')).toBe(false);
+    // Without this marker the residual list reads as the complete todo state.
+    expect(payload.omittedCompletedTodoCount).toBe(25);
+  });
+
+  it('marks truncated todo content so it cannot read as a whole instruction', () => {
+    const part = checkpoint('todo-truncate-turn', 'interrupted');
+    part.lastAssistantText = 'a'.repeat(8_000);
+    part.todoSnapshot = Array.from({ length: 50 }, () => ({
+      content: 'Delete the staging database, then restore it from the nightly backup'.padEnd(
+        500,
+        ' '
+      ),
+      status: 'in_progress' as const,
+    }));
+
+    const payload = parseRecoveryPrompt(buildRecoveryPrompt(part, []));
+    const todos = payload.todoSnapshot as Array<{ content: string }>;
+
+    expect(todos[0]?.content).toMatch(/…$/);
+    expect(todos.every((todo) => todo.content.length <= 80)).toBe(true);
+  });
+
+  it('preserves the unknown-outcome count when incomplete calls are summarized', () => {
+    const part = checkpoint('unknown-outcome-turn', 'interrupted');
+    part.lastAssistantText = 'a'.repeat(8_000);
+    part.incompleteCalls = Array.from({ length: 50 }, (_, index) => ({
+      callId: maxLengthValue('incomplete', index),
+      name: 'wire_transfer',
+      retrySafety: 'confirmation_required' as const,
+      status: 'cancelled' as const,
+      outcome: index < 7 ? ('unknown' as const) : ('not_started' as const),
+    }));
+
+    const payload = parseRecoveryPrompt(buildRecoveryPrompt(part, []));
+
+    expect(payload.omittedIncompleteCallCount).toBe(50);
+    // Summarizing must not hide that seven mutations may already have landed.
+    expect(payload.omittedUnknownOutcomeCount).toBe(7);
+  });
+
   it('trims adversarial checkpoints in priority order while preserving retry IDs', () => {
     const part = checkpoint(maxLengthValue('turn', 0), 'interrupted');
     part.lastAssistantText = 'a'.repeat(8_000);

@@ -30,7 +30,7 @@ const RECOVERY_RESULT_MIN_LENGTH = 64;
 const RECOVERY_ASSISTANT_TEXT_FLOOR = 2_000;
 const RECOVERY_TODO_CONTENT_LENGTH = 80;
 const RECOVERY_COMPLETED_CALL_INITIAL_LIMIT = 20;
-const RECOVERY_INCOMPLETE_CALL_NAME_LENGTH = 40;
+const RECOVERY_OMITTED_CALL_NAME_LENGTH = 40;
 export const STALE_TURN_CHECKPOINT_AGE_MS = 10_000;
 
 export class TurnRecoveryNotFoundError extends Error {
@@ -353,24 +353,33 @@ export function buildRecoveryPrompt(
     resultLength: RECOVERY_RESULT_INITIAL_LENGTH,
     todoSnapshot: checkpoint.todoSnapshot,
     todoSnapshotOmitted: false,
+    omittedCompletedTodoCount: 0,
     completedCallLimit: null,
     summarizeIncompleteCalls: false,
   };
 
   const render = () => {
-    let completedCalls = checkpoint.completedCalls;
-    if (state.completedCallLimit !== null) {
-      completedCalls =
-        state.completedCallLimit === 0
-          ? []
-          : checkpoint.completedCalls.slice(-state.completedCallLimit);
-    }
-    const omittedCompletedCallCount = checkpoint.completedCalls.length - completedCalls.length;
+    const completedCalls = selectCompletedCalls(
+      checkpoint.completedCalls,
+      state.completedCallLimit
+    );
+    const kept = new Set(completedCalls);
+    const omittedCompletedCalls = checkpoint.completedCalls.filter((call) => !kept.has(call));
+    // Only succeeded omissions are actionable: repeating one re-applies a side
+    // effect the checkpoint already recorded, while a failed call is safe to retry.
+    const omittedSucceededCallNames = summarizeCallNames(
+      omittedCompletedCalls.filter((call) => !call.isError)
+    );
     const succeeded = completedCalls.filter((call) => !call.isError);
     const failed = completedCalls.filter((call) => call.isError);
     const omittedIncompleteCalls = state.summarizeIncompleteCalls
       ? checkpoint.incompleteCalls.filter((call) => !retryIds.has(call.callId))
       : [];
+    // Dropping the per-call `outcome` would hide that some of these may have
+    // partially executed, which the prefix tells the model to verify.
+    const omittedUnknownOutcomeCount = omittedIncompleteCalls.filter(
+      (call) => call.outcome === 'unknown'
+    ).length;
     const incompleteCalls = state.summarizeIncompleteCalls
       ? selectedRetryCalls
       : checkpoint.incompleteCalls;
@@ -381,7 +390,12 @@ export function buildRecoveryPrompt(
       lastDurableAssistantContent: state.durableContent,
       ...(state.todoSnapshotOmitted
         ? { todoSnapshotOmitted: true }
-        : { todoSnapshot: state.todoSnapshot }),
+        : {
+            todoSnapshot: state.todoSnapshot,
+            ...(state.omittedCompletedTodoCount > 0
+              ? { omittedCompletedTodoCount: state.omittedCompletedTodoCount }
+              : {}),
+          }),
       succeededCalls: succeeded.map((call) => ({
         callId: call.callId,
         name: call.name,
@@ -392,7 +406,12 @@ export function buildRecoveryPrompt(
         name: call.name,
         result: call.result.slice(0, state.resultLength),
       })),
-      ...(omittedCompletedCallCount > 0 ? { omittedCompletedCallCount } : {}),
+      ...(omittedCompletedCalls.length > 0
+        ? {
+            omittedCompletedCallCount: omittedCompletedCalls.length,
+            ...(omittedSucceededCallNames.length > 0 ? { omittedSucceededCallNames } : {}),
+          }
+        : {}),
       incompleteCalls: incompleteCalls.map((call) => ({
         callId: call.callId,
         name: call.name,
@@ -402,13 +421,8 @@ export function buildRecoveryPrompt(
       ...(omittedIncompleteCalls.length > 0
         ? {
             omittedIncompleteCallCount: omittedIncompleteCalls.length,
-            omittedIncompleteCallNames: [
-              ...new Set(
-                omittedIncompleteCalls.map((call) =>
-                  call.name.slice(0, RECOVERY_INCOMPLETE_CALL_NAME_LENGTH)
-                )
-              ),
-            ],
+            omittedIncompleteCallNames: summarizeCallNames(omittedIncompleteCalls),
+            ...(omittedUnknownOutcomeCount > 0 ? { omittedUnknownOutcomeCount } : {}),
           }
         : {}),
       selectedRetryCallIds,
@@ -464,8 +478,35 @@ interface RecoveryPromptState {
   resultLength: number;
   todoSnapshot: TurnCheckpointPart['todoSnapshot'];
   todoSnapshotOmitted: boolean;
+  omittedCompletedTodoCount: number;
   completedCallLimit: number | null;
   summarizeIncompleteCalls: boolean;
+}
+
+/** Deduplicated, length-capped tool names standing in for calls dropped from the payload. */
+function summarizeCallNames(calls: readonly { readonly name: string }[]): string[] {
+  return [...new Set(calls.map((call) => call.name.slice(0, RECOVERY_OMITTED_CALL_NAME_LENGTH)))];
+}
+
+/**
+ * Spends the completed-call budget on succeeded calls before failed ones. The
+ * prompt tells the model that succeeded calls are authoritative and must not be
+ * repeated, so dropping one risks re-applying its side effect; a dropped failure
+ * only costs the model the knowledge that a retry already failed once.
+ */
+function selectCompletedCalls(
+  completedCalls: TurnCheckpointPart['completedCalls'],
+  limit: number | null
+): TurnCheckpointPart['completedCalls'] {
+  if (limit === null) return completedCalls;
+  if (limit === 0) return [];
+  const kept = new Set(completedCalls.filter((call) => !call.isError).slice(-limit));
+  if (kept.size < limit) {
+    for (const call of completedCalls.filter((call) => call.isError).slice(kept.size - limit)) {
+      kept.add(call);
+    }
+  }
+  return completedCalls.filter((call) => kept.has(call));
 }
 
 function trimResultLength(state: RecoveryPromptState): boolean {
@@ -485,16 +526,20 @@ function truncateTodoContents(state: RecoveryPromptState): boolean {
   if (!state.todoSnapshot.some((todo) => todo.content.length > RECOVERY_TODO_CONTENT_LENGTH)) {
     return false;
   }
-  state.todoSnapshot = state.todoSnapshot.map((todo) => ({
-    ...todo,
-    content: todo.content.slice(0, RECOVERY_TODO_CONTENT_LENGTH),
-  }));
+  state.todoSnapshot = state.todoSnapshot.map((todo) =>
+    todo.content.length > RECOVERY_TODO_CONTENT_LENGTH
+      ? // The ellipsis keeps a clipped todo from reading as a complete instruction.
+        { ...todo, content: `${todo.content.slice(0, RECOVERY_TODO_CONTENT_LENGTH - 1)}…` }
+      : todo
+  );
   return true;
 }
 
 function dropCompletedTodos(state: RecoveryPromptState): boolean {
-  if (!state.todoSnapshot.some((todo) => todo.status === 'completed')) return false;
+  const completedCount = state.todoSnapshot.filter((todo) => todo.status === 'completed').length;
+  if (completedCount === 0) return false;
   state.todoSnapshot = state.todoSnapshot.filter((todo) => todo.status !== 'completed');
+  state.omittedCompletedTodoCount = completedCount;
   if (state.todoSnapshot.length === 0) state.todoSnapshotOmitted = true;
   return true;
 }

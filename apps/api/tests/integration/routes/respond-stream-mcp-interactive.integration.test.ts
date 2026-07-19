@@ -22,7 +22,12 @@ import type {
   AgentTurnRequest,
   AIProvider,
 } from '../../../src/services/providers/types';
-import { insertTestChat, insertTestUser, type UserFixture } from '../../support/factories';
+import {
+  insertTestChat,
+  insertTestConnector,
+  insertTestUser,
+  type UserFixture,
+} from '../../support/factories';
 import {
   type ControlledTurnMcpFixture,
   createControlledTurnMcpFixture,
@@ -101,25 +106,11 @@ beforeEach(async () => {
   chatId = (await insertTestChat(user.id)).id;
   serverId = `${user.id}-interactive-mcp`;
   const now = Date.now();
-  await getDb()
-    .insertInto('secret_metadata')
-    .values({
-      id: `${user.id}-interactive-connector`,
-      name: 'Interactive MCP Test Connector',
-      provider: 'openai-compatible',
-      configured: 1,
-      source: 'config-file',
-      maskedSuffix: null,
-      updatedAt: now,
-      lastValidatedAt: now,
-      lastValidationError: null,
-      enabledModels: JSON.stringify([MODEL_ID]),
-      userId: user.id,
-      baseUrl: null,
-      organizationId: null,
-      projectId: null,
-    })
-    .execute();
+  await insertTestConnector(user.id, {
+    id: `${user.id}-interactive-connector`,
+    name: 'Interactive MCP Test Connector',
+    enabledModels: [MODEL_ID],
+  });
   await getDb()
     .insertInto('mcp_servers')
     .values({
