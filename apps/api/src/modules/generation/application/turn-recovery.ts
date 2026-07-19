@@ -316,11 +316,7 @@ export async function reconcileStaleTurns(
     if (input.reasonCode === 'unknown' && input.isActive(row.id)) continue;
     if (
       await interruptCheckpointedMessage(
-        {
-          messageId: row.id,
-          reasonCode: input.reasonCode,
-          ...(checkpointedBefore !== undefined ? { checkpointedBefore } : {}),
-        },
+        { messageId: row.id, reasonCode: input.reasonCode, checkpointedBefore },
         db
       )
     ) {
