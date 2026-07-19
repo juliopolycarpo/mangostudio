@@ -50,14 +50,18 @@ describe('useModelSelection', () => {
   });
 
   it('starts with no selected connector and empty search query', () => {
-    const { result } = renderHook(() => useModelSelection(makeCatalog(), vi.fn(), vi.fn()));
+    const { result } = renderHook(() =>
+      useModelSelection(makeCatalog(), vi.fn(), vi.fn(), vi.fn())
+    );
 
     expect(result.current.selectedConnector).toBeNull();
     expect(result.current.modelSearchQuery).toBe('');
   });
 
   it('opens modal for a connector and clears search', () => {
-    const { result } = renderHook(() => useModelSelection(makeCatalog(), vi.fn(), vi.fn()));
+    const { result } = renderHook(() =>
+      useModelSelection(makeCatalog(), vi.fn(), vi.fn(), vi.fn())
+    );
 
     act(() => {
       result.current.openModals(makeConnector({ name: 'Test' }));
@@ -68,7 +72,9 @@ describe('useModelSelection', () => {
   });
 
   it('closes modal and clears selected connector', () => {
-    const { result } = renderHook(() => useModelSelection(makeCatalog(), vi.fn(), vi.fn()));
+    const { result } = renderHook(() =>
+      useModelSelection(makeCatalog(), vi.fn(), vi.fn(), vi.fn())
+    );
 
     act(() => {
       result.current.openModals(makeConnector());
@@ -94,7 +100,7 @@ describe('useModelSelection', () => {
       ] as ModelCatalogResponse['discoveredImageModels'],
     });
 
-    const { result } = renderHook(() => useModelSelection(catalog, vi.fn(), vi.fn()));
+    const { result } = renderHook(() => useModelSelection(catalog, vi.fn(), vi.fn(), vi.fn()));
     const models = result.current.getDiscoveredModels(makeConnector({ provider: 'openai' }));
 
     expect(models.textModels).toHaveLength(3);
@@ -106,10 +112,11 @@ describe('useModelSelection', () => {
   it('toggles a model on and persists', async () => {
     const reloadConnectors = vi.fn().mockResolvedValue(undefined);
     const reloadModelCatalog = vi.fn().mockResolvedValue(undefined);
+    const onToggleError = vi.fn();
     const connector = makeConnector({ id: 'c1', enabledModels: [] });
 
     const { result } = renderHook(() =>
-      useModelSelection(makeCatalog(), reloadConnectors, reloadModelCatalog)
+      useModelSelection(makeCatalog(), reloadConnectors, reloadModelCatalog, onToggleError)
     );
 
     act(() => {
@@ -124,6 +131,7 @@ describe('useModelSelection', () => {
     expect(mockUpdateConnectorModels).toHaveBeenCalledWith('c1', ['m1']);
     expect(reloadConnectors).toHaveBeenCalled();
     expect(reloadModelCatalog).toHaveBeenCalled();
+    expect(onToggleError).not.toHaveBeenCalled();
   });
 
   it('toggles a model off and persists', async () => {
@@ -132,7 +140,7 @@ describe('useModelSelection', () => {
     const connector = makeConnector({ id: 'c1', enabledModels: ['m1', 'm2'] });
 
     const { result } = renderHook(() =>
-      useModelSelection(makeCatalog(), reloadConnectors, reloadModelCatalog)
+      useModelSelection(makeCatalog(), reloadConnectors, reloadModelCatalog, vi.fn())
     );
 
     act(() => {
@@ -148,7 +156,9 @@ describe('useModelSelection', () => {
   });
 
   it('does nothing when toggling without a selected connector', async () => {
-    const { result } = renderHook(() => useModelSelection(makeCatalog(), vi.fn(), vi.fn()));
+    const { result } = renderHook(() =>
+      useModelSelection(makeCatalog(), vi.fn(), vi.fn(), vi.fn())
+    );
 
     await act(async () => {
       await result.current.handleToggleModel('m1', true);
@@ -157,13 +167,16 @@ describe('useModelSelection', () => {
     expect(mockUpdateConnectorModels).not.toHaveBeenCalled();
   });
 
-  it('swallows update errors and logs them', async () => {
-    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {
-      /* swallow expected error logs in test */
-    });
-    mockUpdateConnectorModels.mockRejectedValue(new Error('network down'));
+  it('reverts optimistic state and reports on update failure', async () => {
+    const reloadConnectors = vi.fn().mockResolvedValue(undefined);
+    const reloadModelCatalog = vi.fn().mockResolvedValue(undefined);
+    const onToggleError = vi.fn();
+    const failure = new Error('network down');
+    mockUpdateConnectorModels.mockRejectedValue(failure);
 
-    const { result } = renderHook(() => useModelSelection(makeCatalog(), vi.fn(), vi.fn()));
+    const { result } = renderHook(() =>
+      useModelSelection(makeCatalog(), reloadConnectors, reloadModelCatalog, onToggleError)
+    );
 
     act(() => {
       result.current.openModals(makeConnector({ id: 'c1', enabledModels: [] }));
@@ -173,11 +186,52 @@ describe('useModelSelection', () => {
       await result.current.handleToggleModel('m1', true);
     });
 
-    expect(consoleSpy).toHaveBeenCalledWith(
-      '[connectors] Failed to update models',
-      expect.any(Error)
+    expect(result.current.selectedConnector?.enabledModels).toEqual([]);
+    expect(onToggleError).toHaveBeenCalledWith(failure);
+    expect(reloadConnectors).not.toHaveBeenCalled();
+    expect(reloadModelCatalog).not.toHaveBeenCalled();
+  });
+
+  it('reverts only the failed toggle when a later toggle succeeded', async () => {
+    const reloadConnectors = vi.fn().mockResolvedValue(undefined);
+    const reloadModelCatalog = vi.fn().mockResolvedValue(undefined);
+    const onToggleError = vi.fn();
+    let rejectA!: (reason?: unknown) => void;
+    const pendingA = new Promise<void>((_resolve, reject) => {
+      rejectA = reject;
+    });
+
+    mockUpdateConnectorModels
+      .mockImplementationOnce(() => pendingA)
+      .mockResolvedValueOnce(undefined);
+
+    const { result } = renderHook(() =>
+      useModelSelection(makeCatalog(), reloadConnectors, reloadModelCatalog, onToggleError)
     );
 
-    consoleSpy.mockRestore();
+    act(() => {
+      result.current.openModals(makeConnector({ id: 'c1', enabledModels: [] }));
+    });
+
+    let toggleA!: Promise<void>;
+    act(() => {
+      toggleA = result.current.handleToggleModel('mA', true);
+    });
+
+    await act(async () => {
+      await result.current.handleToggleModel('mB', true);
+    });
+
+    expect(result.current.selectedConnector?.enabledModels).toEqual(['mA', 'mB']);
+
+    const failure = new Error('toggle A failed');
+    await act(async () => {
+      rejectA(failure);
+      await toggleA;
+    });
+
+    expect(result.current.selectedConnector?.enabledModels).toEqual(['mB']);
+    expect(onToggleError).toHaveBeenCalledWith(failure);
+    expect(onToggleError).toHaveBeenCalledTimes(1);
   });
 });

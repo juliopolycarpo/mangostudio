@@ -50,7 +50,12 @@ export function ConnectorsSettings({ modelCatalog, reloadModelCatalog }: Connect
     },
   });
 
-  const modelSelection = useModelSelection(modelCatalog, reloadConnectors, reloadModelCatalog);
+  const modelSelection = useModelSelection(
+    modelCatalog,
+    reloadConnectors,
+    reloadModelCatalog,
+    (err) => toast(resolveApiErrorMessage(err, s.failedToUpdateModels), 'error')
+  );
 
   const handleDeleteConnector = async (id: string) => {
     const connector = connectors.find((c) => c.id === id);
