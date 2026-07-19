@@ -17,6 +17,7 @@ import {
 import { ensureRuntimeDirs } from '../lib/mango-paths';
 import { getDefaultFrontendDir } from '../lib/runtime-paths';
 import { removeState, type ServerState, writeState } from '../lib/server-state';
+import { isActiveTurn } from '../modules/generation/application/active-turn-registry';
 import { reconcileStaleTurns } from '../modules/generation/application/turn-recovery';
 import { closeAllMcpClients } from '../services/mcp/connection-manager';
 import {
@@ -26,6 +27,10 @@ import {
 import { EMBEDDED_FRONTEND_DIR, getEmbeddedFrontend } from './embedded-frontend';
 import { registerFrontend } from './frontend-static';
 import { runMigrations } from './migrations';
+import {
+  type StaleTurnReconcileSweep,
+  startStaleTurnReconcileSweep,
+} from './stale-turn-reconcile-sweep';
 
 export interface ServerHandle {
   port: number;
@@ -37,6 +42,8 @@ export interface StartOptions {
   /** Write the single-instance state file once listening (default true). */
   writeStateFile?: boolean;
 }
+
+let staleTurnReconcileSweep: StaleTurnReconcileSweep | null = null;
 
 /** Start the API server and return a handle. // Usage: await startServer({ writeStateFile: true }) */
 export async function startServer(options: StartOptions = {}): Promise<ServerHandle> {
@@ -56,6 +63,9 @@ export async function startServer(options: StartOptions = {}): Promise<ServerHan
   registerFrontend(app, frontendDir);
 
   listenOrExit(port, host);
+  staleTurnReconcileSweep = startStaleTurnReconcileSweep(() =>
+    reconcileStaleTurns({ reasonCode: 'unknown', isActive: isActiveTurn }, getDb())
+  );
 
   registerShutdown();
 
@@ -113,6 +123,8 @@ function logRunning(host: string, port: number): void {
 
 /** Flush observability, close MCP sessions, drop the state file, and close the database. */
 async function gracefulStop(): Promise<void> {
+  await staleTurnReconcileSweep?.stop();
+  staleTurnReconcileSweep = null;
   await flushObservabilitySnapshot();
   await closeAllMcpClients();
   await removeState();

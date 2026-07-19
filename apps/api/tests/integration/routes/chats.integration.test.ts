@@ -1,6 +1,12 @@
 import { afterEach, beforeAll, describe, expect, it } from 'bun:test';
 import { getDb } from '../../../src/db/database';
 import { chatRoutes } from '../../../src/modules/chats/http/chat-routes';
+import { createTurnCheckpointPart } from '../../../src/modules/generation/application/turn-checkpoint';
+import {
+  reconcileStaleTurns,
+  STALE_TURN_CHECKPOINT_AGE_MS,
+} from '../../../src/modules/generation/application/turn-recovery';
+import { startStaleTurnReconcileSweep } from '../../../src/server/stale-turn-reconcile-sweep';
 import { buildPersistedContextSnapshot } from '../../../src/services/providers/core/context-policy';
 import {
   getProvider,
@@ -629,6 +635,77 @@ describe('GET /chats/:id/messages', () => {
     expect(Array.isArray(body.messages)).toBe(true);
     expect(body.messages.length).toBe(2);
     expect(body.nextCursor).toBeNull();
+  });
+
+  it('does not reconcile stale turns while reading messages', async () => {
+    const db = getDb();
+    const now = Date.now();
+    const chatId = `messages-stale-turn-${now}`;
+    const messageId = `stale-turn-${now}`;
+    const checkpoint = createTurnCheckpointPart({
+      turnId: messageId,
+      startedAt: now - STALE_TURN_CHECKPOINT_AGE_MS - 1,
+      provider: 'openai',
+      modelName: 'gpt-test',
+      agentId: 'chat',
+    });
+    await db
+      .insertInto('chats')
+      .values({
+        id: chatId,
+        title: 'Stale Turn Chat',
+        createdAt: now,
+        updatedAt: now,
+        model: null,
+        userId: TEST_USER.id,
+      })
+      .execute();
+    await db
+      .insertInto('messages')
+      .values({
+        id: messageId,
+        chatId,
+        role: 'ai',
+        text: 'durable partial response',
+        timestamp: now,
+        isGenerating: 1,
+        interactionMode: 'chat',
+        parts: JSON.stringify([checkpoint]),
+      })
+      .execute();
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, chatRoutes);
+    restoreAuth = restore;
+
+    const response = await app.handle(new Request(`http://localhost/chats/${chatId}/messages`));
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      messages: Array<{ id: string; isGenerating: boolean }>;
+    };
+    expect(body.messages).toContainEqual(
+      expect.objectContaining({ id: messageId, isGenerating: true })
+    );
+    let row = await db
+      .selectFrom('messages')
+      .select('isGenerating')
+      .where('id', '=', messageId)
+      .executeTakeFirstOrThrow();
+    expect(row.isGenerating).toBe(1);
+
+    const sweep = startStaleTurnReconcileSweep(() =>
+      reconcileStaleTurns({ reasonCode: 'unknown', isActive: () => false }, db)
+    );
+    try {
+      await sweep.run();
+    } finally {
+      await sweep.stop();
+    }
+    row = await db
+      .selectFrom('messages')
+      .select('isGenerating')
+      .where('id', '=', messageId)
+      .executeTakeFirstOrThrow();
+    expect(row.isGenerating).toBe(0);
   });
 
   it('returns persisted context info on the first messages page', async () => {
