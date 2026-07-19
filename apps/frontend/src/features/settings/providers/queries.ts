@@ -2,7 +2,6 @@
  * Provider settings query keys and options.
  */
 
-import { en } from '@mangostudio/shared/i18n';
 import type {
   ProviderSettingsDescriptor,
   ProviderSettingsListResponse,
@@ -23,7 +22,7 @@ export function providerSettingsListQueryOptions() {
     staleTime: 30_000,
     queryFn: async () => {
       const { data, error } = await client.api.settings.providers.get();
-      if (error) throw new Error(extractApiError(error.value, en.settings.providers.loadError));
+      if (error) throw new Error(extractApiError(error.value));
       return data as ProviderSettingsListResponse;
     },
   });
@@ -35,7 +34,7 @@ export function providerSettingsDetailQueryOptions(provider: string) {
     staleTime: 30_000,
     queryFn: async () => {
       const { data, error } = await client.api.settings.providers({ provider }).get();
-      if (error) throw new Error(extractApiError(error.value, en.settings.providers.loadError));
+      if (error) throw new Error(extractApiError(error.value));
       return data as ProviderSettingsDescriptor;
     },
   });

@@ -4,6 +4,7 @@ import type { Connector, ModelCatalogResponse } from '@mangostudio/shared';
 import { useState } from 'react';
 import { useToast } from '@/components/ui/Toast';
 import { useI18n } from '@/hooks/use-i18n';
+import { resolveApiErrorMessage } from '@/lib/utils';
 import { deleteConnector } from './api';
 import { AddConnectorModal } from './components/AddConnectorModal';
 import { ConnectorList } from './components/ConnectorList';
@@ -40,7 +41,7 @@ export function ConnectorsSettings({ modelCatalog, reloadModelCatalog }: Connect
   const connectorForm = useConnectorForm({
     errorRequired: s.errorRequired,
     baseUrlRequired: s.baseUrlRequired,
-    unknownError: t.errors.unknown,
+    addError: s.failedToAdd,
     onSuccess: async () => {
       setIsAddModalOpen(false);
       toast(s.addSuccess, 'success');
@@ -65,7 +66,7 @@ export function ConnectorsSettings({ modelCatalog, reloadModelCatalog }: Connect
       toast(s.deleteSuccess, 'success');
     } catch (err) {
       console.error(err);
-      toast(s.failedToDelete, 'error');
+      toast(resolveApiErrorMessage(err, s.failedToDelete), 'error');
     } finally {
       await reloadConnectors();
       setConnectorToDelete(null);

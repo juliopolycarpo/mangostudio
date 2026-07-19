@@ -10,6 +10,7 @@ import { Eye, FileText } from 'lucide-react';
 import { useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { useI18n } from '@/hooks/use-i18n';
+import { resolveApiErrorMessage } from '@/lib/utils';
 import { readMcpResource } from '../api';
 import { mcpServerResourcesQueryOptions } from '../queries';
 
@@ -37,7 +38,7 @@ export function McpServerResources({ server }: McpServerResourcesProps) {
     } catch (error) {
       setPreview({
         uri,
-        error: error instanceof Error ? error.message : s.readFailed,
+        error: resolveApiErrorMessage(error, s.readFailed),
         loading: false,
       });
     }

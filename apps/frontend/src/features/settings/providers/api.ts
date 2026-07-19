@@ -2,7 +2,6 @@
  * Provider settings API mutation functions.
  */
 
-import { en } from '@mangostudio/shared/i18n';
 import type {
   ProviderSettingsDescriptor,
   UpdateProviderRuntimeSettingsBody,
@@ -15,6 +14,6 @@ export async function updateProviderSettings(
   body: UpdateProviderRuntimeSettingsBody
 ): Promise<ProviderSettingsDescriptor> {
   const { data, error } = await client.api.settings.providers({ provider }).put(body);
-  if (error) throw new Error(extractApiError(error.value, en.settings.providers.saveError));
+  if (error) throw new Error(extractApiError(error.value));
   return data as ProviderSettingsDescriptor;
 }

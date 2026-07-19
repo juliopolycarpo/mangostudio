@@ -94,6 +94,17 @@
             "noInferrableTypes": "error",
             "noNamespace": "error",
             "noNonNullAssertion": "error",
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@mangostudio/shared/i18n": {
+                    "importNames": ["en", "ptBR"],
+                    "message": "Locale dictionaries are i18n plumbing. Render layers must localize via useI18n(); data layers must throw neutral extractApiError messages."
+                  }
+                }
+              }
+            },
             "noUselessElse": "error",
             "useArrayLiterals": "error",
             "useAsConstAssertion": "error",
@@ -141,6 +152,10 @@
     {
       "includes": ["scripts/**/*.ts"],
       "linter": { "rules": { "suspicious": { "noConsole": "off" } } }
+    },
+    {
+      "includes": ["apps/frontend/src/hooks/use-i18n.tsx", "apps/frontend/tests/**/*.{ts,tsx}"],
+      "linter": { "rules": { "style": { "noRestrictedImports": "off" } } }
     },
     {
       "includes": [

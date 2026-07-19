@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import { buildGeneratedImageFilename } from '@/lib/download-filenames';
-import { cn, extractApiError } from '@/lib/utils';
+import { cn, extractApiError, resolveApiErrorMessage } from '@/lib/utils';
 
 const defaultErrorFallback = 'An unknown error occurred';
 
@@ -54,6 +54,30 @@ describe('extractApiError', () => {
 
   it('returns custom fallback when provided', () => {
     expect(extractApiError(null, 'Custom fallback')).toBe('Custom fallback');
+  });
+});
+
+describe('resolveApiErrorMessage', () => {
+  const localized = 'Falha ao salvar';
+
+  it('returns the server-provided message when the error carries one', () => {
+    expect(resolveApiErrorMessage(new Error('slug already exists'), localized)).toBe(
+      'slug already exists'
+    );
+  });
+
+  it('returns the localized fallback for the shared last-resort message', () => {
+    expect(resolveApiErrorMessage(new Error(defaultErrorFallback), localized)).toBe(localized);
+  });
+
+  it('returns the localized fallback for an empty message', () => {
+    expect(resolveApiErrorMessage(new Error(''), localized)).toBe(localized);
+  });
+
+  it('returns the localized fallback for non-Error values', () => {
+    expect(resolveApiErrorMessage('boom', localized)).toBe(localized);
+    expect(resolveApiErrorMessage(null, localized)).toBe(localized);
+    expect(resolveApiErrorMessage(undefined, localized)).toBe(localized);
   });
 });
 

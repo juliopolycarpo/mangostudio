@@ -11,6 +11,7 @@ import { useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { useI18n } from '@/hooks/use-i18n';
+import { resolveApiErrorMessage } from '@/lib/utils';
 import { useApplyPortableMcpImport, usePreviewPortableMcpImport } from '../hooks/use-mcp-servers';
 
 interface ImportServersDialogProps {
@@ -78,7 +79,8 @@ export function ImportServersDialog({ onClose }: ImportServersDialogProps) {
         );
         setStep({ kind: 'preview', entries, previewToken, decisions });
       },
-      onError: (error) => setSubmitError(error.message),
+      onError: (error) =>
+        setSubmitError(resolveApiErrorMessage(error, s.portability.previewFailed)),
     });
   };
 
@@ -139,7 +141,8 @@ export function ImportServersDialog({ onClose }: ImportServersDialogProps) {
       },
       {
         onSuccess: (summary) => setStep({ kind: 'summary', summary }),
-        onError: (error) => setSubmitError(error.message),
+        onError: (error) =>
+          setSubmitError(resolveApiErrorMessage(error, s.portability.applyFailed)),
       }
     );
   };

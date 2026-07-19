@@ -2,7 +2,6 @@
  * Tool settings API mutation functions.
  */
 
-import { en } from '@mangostudio/shared/i18n';
 import type {
   ToolSettingsDescriptor,
   UpdateToolSettingsBody,
@@ -15,6 +14,6 @@ export async function updateToolSetting(
   body: UpdateToolSettingsBody
 ): Promise<ToolSettingsDescriptor> {
   const { data, error } = await client.api.settings.tools({ toolName }).put(body);
-  if (error) throw new Error(extractApiError(error.value, en.settings.tools.saveError));
+  if (error) throw new Error(extractApiError(error.value));
   return data as ToolSettingsDescriptor;
 }

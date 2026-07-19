@@ -277,7 +277,6 @@ export const messages = {
       summaryHandoff: 'Este chat começou a partir de um resumo anterior',
       cursorInternalToolCall: 'Cursor usou {tool}',
     },
-    titleGenerationFailed: 'Falha ao gerar título do chat',
   },
 
   studio: {
@@ -419,7 +418,6 @@ export const messages = {
       previewed: 'Markdown validado',
       loadError: 'Falha ao carregar agentes',
       saveError: 'Falha ao salvar agente',
-      createError: 'Falha ao criar agente',
       deleteError: 'Falha ao excluir agente',
       previewError: 'Falha ao pré-visualizar agente',
       deleteTitle: 'Excluir agente',
@@ -659,8 +657,6 @@ export const messages = {
       failedToLoad: 'Falha ao carregar conectores',
       failedToAdd: 'Falha ao adicionar conector',
       failedToDelete: 'Falha ao excluir conector',
-      failedToUpdateModels: 'Falha ao atualizar modelos',
-      unknownError: 'Ocorreu um erro desconhecido',
       noSearchResults: 'Nenhum modelo corresponde à sua pesquisa',
     },
     providers: {
@@ -714,7 +710,6 @@ export const messages = {
       save: 'Salvar',
       saving: 'Salvando...',
       saved: 'Configurações salvas',
-      saveError: 'Falha ao salvar configurações da ferramenta',
       loadError: 'Falha ao carregar ferramentas',
       noTools: 'Nenhuma ferramenta disponível.',
       maxToolIterationsLabel: 'Iterações Máximas de Ferramentas',
@@ -844,10 +839,6 @@ export const messages = {
         preview: 'Visualizar',
         binaryNotice: 'Conteúdo binário ({mime}) — anexe pelo compositor do chat para usá-lo.',
       },
-      prompts: {
-        loadError: 'Falha ao carregar os prompts deste servidor',
-        getFailed: 'Falha ao resolver o prompt',
-      },
       deleteServer: 'Excluir servidor',
       deleteConfirm:
         'Isso remove o servidor e seus cabeçalhos de autenticação armazenados. Excluir',
@@ -870,8 +861,6 @@ export const messages = {
         importButton: 'Importar {count}',
         importingButton: 'Importando...',
         emptyPreview: 'Nenhum servidor encontrado nesta origem.',
-        previewFailed: 'Não foi possível ler esta origem',
-        failed: 'Falha na importação',
         successToast: '{count} servidores importados',
         nothingImportedToast: 'Nenhum servidor foi importado',
         reasons: {
@@ -960,7 +949,6 @@ export const messages = {
       shadowedHint:
         'Uma fonte de maior prioridade fornece uma skill com o mesmo nome, então esta cópia está inativa.',
       loadError: 'Falha ao carregar skills',
-      saveError: 'Falha ao salvar configurações de skills',
       noSkills: 'Nenhuma skill instalada.',
     },
     metrics: {
@@ -1047,10 +1035,6 @@ export const messages = {
         githubLight: 'GitHub Light',
         oneLight: 'One Light',
       },
-    },
-    app: {
-      loadError: 'Falha ao carregar configurações do app',
-      saveError: 'Falha ao salvar configurações do app',
     },
   },
 
@@ -1143,8 +1127,6 @@ export const messages = {
     referenceImageUploadFailed: 'Falha ao enviar a imagem de referência. Tente novamente.',
     textGenerationFailed: 'Falha ao obter uma resposta. Tente novamente.',
     imageGenerationFailed: 'Falha ao gerar imagem. Tente novamente.',
-    streamRequestFailed: 'Falha na requisição de stream',
-    streamResponseNoBody: 'Resposta do stream sem corpo',
   },
 
   models: {

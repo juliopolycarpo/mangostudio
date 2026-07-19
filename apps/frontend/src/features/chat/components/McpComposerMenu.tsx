@@ -18,6 +18,7 @@ import {
   mcpServerResourcesQueryOptions,
 } from '@/features/settings/mcp/queries';
 import { useI18n } from '@/hooks/use-i18n';
+import { resolveApiErrorMessage } from '@/lib/utils';
 import {
   flattenMcpPromptText,
   missingRequiredMcpArguments,
@@ -68,7 +69,7 @@ export function McpComposerMenu({
       setArgumentForm(null);
       setOpen(false);
     } catch (error) {
-      setErrorText(error instanceof Error ? error.message : labels.mcpInsertFailed);
+      setErrorText(resolveApiErrorMessage(error, labels.mcpInsertFailed));
     } finally {
       setBusy(false);
     }
@@ -91,7 +92,7 @@ export function McpComposerMenu({
       onAttachments(response.attachments ?? []);
       setOpen(false);
     } catch (error) {
-      setErrorText(error instanceof Error ? error.message : labels.mcpAttachFailed);
+      setErrorText(resolveApiErrorMessage(error, labels.mcpAttachFailed));
     } finally {
       setBusy(false);
     }

@@ -8,6 +8,7 @@ import { galleryKeys } from '@/features/gallery/queries';
 import type { useOptimisticMessages } from '@/features/generation/hooks/use-optimistic-messages';
 import type { useGlobalSettings } from '@/hooks/use-global-settings';
 import { useI18n } from '@/hooks/use-i18n';
+import { resolveApiErrorMessage } from '@/lib/utils';
 import { generateImage, uploadReferenceImage } from '@/services/generation-service';
 
 interface UseImageGenerationOptions {
@@ -132,7 +133,7 @@ export function useImageGeneration({
         generatedImageSucceeded = true;
       } catch (error: unknown) {
         console.error('[generate]', error);
-        const errorText = error instanceof Error ? error.message : t.errors.imageGenerationFailed;
+        const errorText = resolveApiErrorMessage(error, t.errors.imageGenerationFailed);
         updateOptimisticMessage(activeChatId, optimisticAiMsgId, {
           isGenerating: false,
           text: errorText,

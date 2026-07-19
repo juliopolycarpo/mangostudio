@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { useToast } from '@/components/ui/Toast';
 import { useI18n } from '@/hooks/use-i18n';
+import { resolveApiErrorMessage } from '@/lib/utils';
 import { useExportPortableMcpServers } from '../hooks/use-mcp-servers';
 
 interface ExportServersDialogProps {
@@ -35,7 +36,7 @@ export function ExportServersDialog({ servers, onClose }: ExportServersDialogPro
       { serverIds: [...selected] },
       {
         onSuccess: setPreview,
-        onError: (cause) => setError(cause.message),
+        onError: (cause) => setError(resolveApiErrorMessage(cause, s.portability.exportFailed)),
       }
     );
   };

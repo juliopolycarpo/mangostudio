@@ -3,6 +3,7 @@ import { ERROR_CODES } from '@mangostudio/shared/errors';
 import type { Messages } from '@mangostudio/shared/i18n';
 import { useMutation } from '@tanstack/react-query';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { resolveApiErrorMessage } from '@/lib/utils';
 import {
   ConnectorApiError,
   cancelChatGptOAuth,
@@ -37,7 +38,7 @@ function mapErrorMessage(error: unknown, messages: Messages['settings']['connect
   if (error instanceof ConnectorApiError && error.code === ERROR_CODES.CHATGPT_REAUTH_REQUIRED) {
     return messages.chatgptDeniedError;
   }
-  return error instanceof Error && error.message ? error.message : messages.chatgptFailedError;
+  return resolveApiErrorMessage(error, messages.chatgptFailedError);
 }
 
 function mapFailedStatus(

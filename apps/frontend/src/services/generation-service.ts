@@ -1,10 +1,10 @@
 /* global console */
 import type { GenerateImageResponse } from '@mangostudio/shared';
 import type { GenerateImageBody, RespondStreamBody } from '@mangostudio/shared/generation';
-import { en } from '@mangostudio/shared/i18n';
 import type { StreamChunk } from '@mangostudio/shared/streaming';
 import { getApiBaseUrl } from '../lib/api-base-url';
 import { client } from '../lib/api-client';
+import { DEFAULT_API_ERROR_FALLBACK, extractApiError } from '../lib/utils';
 
 export type GenerateImageRequest = Omit<GenerateImageBody, 'model'> & { model: string };
 export type RespondTextRequest = RespondStreamBody;
@@ -27,9 +27,7 @@ export async function generateImage(request: GenerateImageRequest): Promise<Gene
   const { data, error } = await client.api.generate.post(request);
 
   if (error) {
-    throw new Error(
-      (error.value as { error?: string } | null)?.error || en.errors.imageGenerationFailed
-    );
+    throw new Error(extractApiError(error.value));
   }
 
   // Eden Treaty infers a union that includes the error shape even after the guard above.
@@ -40,8 +38,8 @@ export async function generateImage(request: GenerateImageRequest): Promise<Gene
 export type { StreamChunk };
 
 function recoveryActionError(error: unknown): Error {
-  const value = (error as { value?: { error?: string } } | null)?.value;
-  return new Error(value?.error ?? en.errors.streamRequestFailed);
+  const value = (error as { value?: unknown } | null)?.value;
+  return new Error(extractApiError(value));
 }
 
 export async function cancelInterruptedTurn(chatId: string, messageId: string): Promise<void> {
@@ -83,19 +81,17 @@ export async function respondTextStream(
   });
 
   if (!response.ok) {
-    let message = en.errors.streamRequestFailed;
+    let body: unknown;
     try {
-      const body: unknown = await response.json();
-      if (body && typeof body === 'object' && 'error' in body && typeof body.error === 'string') {
-        message = body.error;
-      }
+      body = await response.json();
     } catch {
-      // ignore parse errors
+      // Non-JSON error body: fall through to the neutral message.
     }
-    throw new Error(message);
+    throw new Error(extractApiError(body));
   }
 
-  if (!response.body) throw new Error(en.errors.streamResponseNoBody);
+  // No server payload to unwrap; the render layer localizes the neutral message.
+  if (!response.body) throw new Error(DEFAULT_API_ERROR_FALLBACK);
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';

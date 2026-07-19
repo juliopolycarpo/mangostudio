@@ -27,7 +27,7 @@ export async function respondMcpElicitation(
     .elicitations({ id: elicitationId })
     .respond.post(body);
   if (error) {
-    const message = extractApiError(error.value, 'Failed to respond to elicitation.');
+    const message = extractApiError(error.value);
     const code = (error.value as Partial<ApiErrorResponse> | null)?.code;
     if (code === ERROR_CODES.NOT_FOUND) throw new McpElicitationGoneError(message);
     throw new Error(message);

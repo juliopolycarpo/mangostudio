@@ -275,7 +275,6 @@ export const messages: Messages = {
       summaryHandoff: 'This chat started from a summarized handoff',
       cursorInternalToolCall: 'Cursor used {tool}',
     },
-    titleGenerationFailed: 'Failed to generate chat title',
   },
 
   studio: {
@@ -415,7 +414,6 @@ export const messages: Messages = {
       previewed: 'Markdown validated',
       loadError: 'Failed to load agents',
       saveError: 'Failed to save agent',
-      createError: 'Failed to create agent',
       deleteError: 'Failed to delete agent',
       previewError: 'Failed to preview agent',
       deleteTitle: 'Delete agent',
@@ -653,8 +651,6 @@ export const messages: Messages = {
       failedToLoad: 'Failed to load connectors',
       failedToAdd: 'Failed to add connector',
       failedToDelete: 'Failed to delete connector',
-      failedToUpdateModels: 'Failed to update models',
-      unknownError: 'An unknown error occurred',
       noSearchResults: 'No models match your search',
     },
     providers: {
@@ -708,7 +704,6 @@ export const messages: Messages = {
       save: 'Save',
       saving: 'Saving...',
       saved: 'Settings saved',
-      saveError: 'Failed to save tool settings',
       loadError: 'Failed to load tools',
       noTools: 'No tools available.',
       maxToolIterationsLabel: 'Max Tool Iterations',
@@ -834,10 +829,6 @@ export const messages: Messages = {
         preview: 'Preview',
         binaryNotice: 'Binary content ({mime}) — attach it from the chat composer to use it.',
       },
-      prompts: {
-        loadError: 'Failed to load prompts for this server',
-        getFailed: 'Failed to resolve prompt',
-      },
       deleteServer: 'Delete server',
       deleteConfirm: 'This removes the server and its stored auth headers. Delete',
       import: {
@@ -859,8 +850,6 @@ export const messages: Messages = {
         importButton: 'Import {count}',
         importingButton: 'Importing...',
         emptyPreview: 'No servers found in this source.',
-        previewFailed: 'Could not read this source',
-        failed: 'Import failed',
         successToast: '{count} servers imported',
         nothingImportedToast: 'No servers were imported',
         reasons: {
@@ -949,7 +938,6 @@ export const messages: Messages = {
       shadowedHint:
         'A higher-priority source provides a skill with the same name, so this copy is inactive.',
       loadError: 'Failed to load skills',
-      saveError: 'Failed to save skill settings',
       noSkills: 'No skills installed.',
     },
     metrics: {
@@ -1036,10 +1024,6 @@ export const messages: Messages = {
         githubLight: 'GitHub Light',
         oneLight: 'One Light',
       },
-    },
-    app: {
-      loadError: 'Failed to load app settings',
-      saveError: 'Failed to save app settings',
     },
   },
 
@@ -1132,8 +1116,6 @@ export const messages: Messages = {
     referenceImageUploadFailed: 'Failed to upload reference image. Please try again.',
     textGenerationFailed: 'Failed to get a response. Please try again.',
     imageGenerationFailed: 'Failed to generate image. Please try again.',
-    streamRequestFailed: 'Stream request failed',
-    streamResponseNoBody: 'Stream response has no body',
   },
 
   models: {

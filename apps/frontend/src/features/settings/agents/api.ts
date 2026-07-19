@@ -6,11 +6,8 @@ import type {
   CreateAgentProfileBody,
   DeleteAgentProfileResponse,
 } from '@mangostudio/shared/agents';
-import { en } from '@mangostudio/shared/i18n';
 import { client } from '@/lib/api-client';
 import { extractApiError } from '@/lib/utils';
-
-const fallback = en.settings.agents;
 
 export async function updateAgentProfile(
   agentId: string,
@@ -19,7 +16,7 @@ export async function updateAgentProfile(
   const { data, error } = await client.api.settings
     .agents({ agentId })
     .put(toMutableAgentBody(body));
-  if (error) throw new Error(extractApiError(error.value, fallback.saveError));
+  if (error) throw new Error(extractApiError(error.value));
   return data as AgentProfile;
 }
 
@@ -28,13 +25,13 @@ export async function createAgentProfile(body: CreateAgentProfileBody): Promise<
     ...toMutableAgentBody(body),
     ...(body.slug ? { slug: body.slug } : {}),
   });
-  if (error) throw new Error(extractApiError(error.value, fallback.createError));
+  if (error) throw new Error(extractApiError(error.value));
   return data as AgentProfile;
 }
 
 export async function deleteAgentProfile(agentId: string): Promise<DeleteAgentProfileResponse> {
   const { data, error } = await client.api.settings.agents({ agentId }).delete();
-  if (error) throw new Error(extractApiError(error.value, fallback.deleteError));
+  if (error) throw new Error(extractApiError(error.value));
   return data as DeleteAgentProfileResponse;
 }
 
@@ -42,7 +39,7 @@ export async function previewAgentMarkdown(
   body: AgentMarkdownPreviewBody
 ): Promise<AgentMarkdownPreviewResponse> {
   const { data, error } = await client.api.settings.agents.preview.post(body);
-  if (error) throw new Error(extractApiError(error.value, fallback.previewError));
+  if (error) throw new Error(extractApiError(error.value));
   return data as AgentMarkdownPreviewResponse;
 }
 
