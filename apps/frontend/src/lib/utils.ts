@@ -1,4 +1,5 @@
 import type { ApiErrorResponse } from '@mangostudio/shared/errors';
+// biome-ignore lint/style/noRestrictedImports: the extractApiError last-resort fallback is the one sanctioned non-localized string
 import { en } from '@mangostudio/shared/i18n';
 import { type ClassValue, clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
