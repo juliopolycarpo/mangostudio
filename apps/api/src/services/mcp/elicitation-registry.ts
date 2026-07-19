@@ -190,9 +190,9 @@ export function respondElicitation(
 
 /**
  * Cancels the given still-pending elicitations (leftovers after a tool call
- * ends, times out, or loses its session). Scoped by id — not by server — so a
- * finishing tool call never cancels a concurrent same-server call's pending
- * elicitation.
+ * ends cleanly, reports `isError`, throws, times out, aborts, or loses its
+ * session). Scoped by id — not by server — so a finishing tool call never
+ * cancels a concurrent same-server call's pending elicitation.
  */
 export function cancelPendingElicitations(
   elicitationIds: readonly string[],
