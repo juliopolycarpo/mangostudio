@@ -2,7 +2,6 @@
  * Tool settings query keys and options.
  */
 
-import { en } from '@mangostudio/shared/i18n';
 import type { ToolSettingsListResponse } from '@mangostudio/shared/tool-settings';
 import { queryOptions } from '@tanstack/react-query';
 import { client } from '@/lib/api-client';
@@ -19,7 +18,7 @@ export function toolSettingsListQueryOptions() {
     staleTime: 30_000,
     queryFn: async () => {
       const { data, error } = await client.api.settings.tools.get();
-      if (error) throw new Error(extractApiError(error.value, en.settings.tools.loadError));
+      if (error) throw new Error(extractApiError(error.value));
       return data as ToolSettingsListResponse;
     },
   });

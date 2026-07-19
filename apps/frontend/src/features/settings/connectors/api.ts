@@ -13,17 +13,14 @@ import type {
   StartChatGptOAuthResponse,
 } from '@mangostudio/shared/connectors';
 import type { ApiErrorResponse } from '@mangostudio/shared/errors';
-import { en } from '@mangostudio/shared/i18n';
 import { client } from '@/lib/api-client';
 import { extractApiError } from '@/lib/utils';
-
-const fallback = en.settings.connectors;
 
 export class ConnectorApiError extends Error {
   readonly code?: string;
 
-  constructor(value: unknown, fallbackMessage: string) {
-    super(extractApiError(value, fallbackMessage));
+  constructor(value: unknown) {
+    super(extractApiError(value));
     this.name = 'ConnectorApiError';
     if (value && typeof value === 'object') {
       const maybeError = value as Partial<ApiErrorResponse>;
@@ -36,25 +33,25 @@ export async function addConnector(
   body: Parameters<typeof client.api.settings.connectors.post>[0]
 ): Promise<Connector> {
   const { data, error } = await client.api.settings.connectors.post(body);
-  if (error) throw new ConnectorApiError(error.value, fallback.failedToAdd);
+  if (error) throw new ConnectorApiError(error.value);
   return data as Connector;
 }
 
 export async function deleteConnector(id: string): Promise<void> {
   const { error } = await client.api.settings.connectors({ id }).delete();
-  if (error) throw new ConnectorApiError(error.value, fallback.failedToDelete);
+  if (error) throw new ConnectorApiError(error.value);
 }
 
 export async function updateConnectorModels(id: string, enabledModels: string[]): Promise<void> {
   const { error } = await client.api.settings.connectors({ id }).models.put({ enabledModels });
-  if (error) throw new ConnectorApiError(error.value, fallback.failedToUpdateModels);
+  if (error) throw new ConnectorApiError(error.value);
 }
 
 export async function startChatGptOAuth(
   body: StartChatGptOAuthBody
 ): Promise<StartChatGptOAuthResponse> {
   const { data, error } = await client.api.settings.connectors.chatgpt.oauth.start.post(body);
-  if (error) throw new ConnectorApiError(error.value, fallback.chatgptFailedError);
+  if (error) throw new ConnectorApiError(error.value);
   return data as StartChatGptOAuthResponse;
 }
 
@@ -64,7 +61,7 @@ export async function getChatGptOAuthStatus(sessionId: string): Promise<ChatGptO
       sessionId,
     })
     .status.get();
-  if (error) throw new ConnectorApiError(error.value, fallback.chatgptFailedError);
+  if (error) throw new ConnectorApiError(error.value);
   return data as ChatGptOAuthStatus;
 }
 
@@ -75,13 +72,13 @@ export async function redeemChatGptResetCredit(
   const { data, error } = await client.api.settings
     .connectors({ id })
     .usage.reset.post({ redeemRequestId });
-  if (error) throw new ConnectorApiError(error.value, fallback.chatgptRedeemFailed);
+  if (error) throw new ConnectorApiError(error.value);
   return data as RedeemChatGptResetCreditResponse;
 }
 
 export async function getChatGptUsageStats(id: string): Promise<ChatGptUsageStatsResponse> {
   const { data, error } = await client.api.settings.connectors({ id }).usage.stats.get();
-  if (error) throw new ConnectorApiError(error.value, fallback.failedToLoad);
+  if (error) throw new ConnectorApiError(error.value);
   return data as ChatGptUsageStatsResponse;
 }
 
@@ -90,7 +87,7 @@ export async function getChatGptUsageHistory(
   query: { window: ChatGptUsageWindowKey; days: number }
 ): Promise<ChatGptUsageHistoryResponse> {
   const { data, error } = await client.api.settings.connectors({ id }).usage.history.get({ query });
-  if (error) throw new ConnectorApiError(error.value, fallback.failedToLoad);
+  if (error) throw new ConnectorApiError(error.value);
   return data as ChatGptUsageHistoryResponse;
 }
 
@@ -100,5 +97,5 @@ export async function cancelChatGptOAuth(sessionId: string): Promise<void> {
       sessionId,
     })
     .cancel.post();
-  if (error) throw new ConnectorApiError(error.value, fallback.chatgptFailedError);
+  if (error) throw new ConnectorApiError(error.value);
 }
