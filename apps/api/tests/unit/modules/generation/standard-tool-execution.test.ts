@@ -25,6 +25,25 @@ describe('classifyMcpElicitationCancelReason', () => {
     ).toBe('server_closed');
     expect(classifyMcpElicitationCancelReason(new Error('tool failed'))).toBe('tool_failed');
   });
+
+  it('prefers turn abort over MCP timeout classification', () => {
+    const abortError = new Error('aborted');
+    abortError.name = 'AbortError';
+    expect(classifyMcpElicitationCancelReason(abortError)).toBe('turn_aborted');
+
+    const parent = new AbortController();
+    parent.abort();
+    expect(
+      classifyMcpElicitationCancelReason(
+        new McpError(ErrorCode.RequestTimeout, 'timed out'),
+        parent.signal
+      )
+    ).toBe('turn_aborted');
+
+    expect(
+      classifyMcpElicitationCancelReason(new McpError(ErrorCode.RequestTimeout, 'timed out'))
+    ).toBe('tool_timeout');
+  });
 });
 
 function snapshotRegistry(): RegisteredTool[] {

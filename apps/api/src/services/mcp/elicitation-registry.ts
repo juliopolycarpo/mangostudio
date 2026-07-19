@@ -50,7 +50,7 @@ export type McpElicitationStatusObserver = (event: McpElicitationStatusEvent) =>
 /** Server-side causes for cancelling a still-pending elicitation. */
 export type McpElicitationCancelReason = Extract<
   McpElicitationTerminalReason,
-  'tool_timeout' | 'tool_finished' | 'tool_failed' | 'server_closed'
+  'tool_timeout' | 'turn_aborted' | 'tool_finished' | 'tool_failed' | 'server_closed'
 >;
 
 interface PendingElicitation {

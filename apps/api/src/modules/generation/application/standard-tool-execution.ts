@@ -60,6 +60,7 @@ import {
   type SubagentRunResult,
 } from './subagent-runner';
 import {
+  isAbortError,
   subagentStatusToTerminal,
   ToolExecutionLifecycle,
   type ToolExecutionTransitionEvent,
@@ -473,7 +474,7 @@ async function executeMcpToolCall(
       ...(elicitationParts.length ? { elicitationParts } : {}),
     };
   } catch (error) {
-    cancelReason = classifyMcpElicitationCancelReason(error);
+    cancelReason = classifyMcpElicitationCancelReason(error, context.signal);
     throw error;
   } finally {
     releaseElicitationSink(context.userId, prepared.target.server.id, callId);
@@ -484,8 +485,16 @@ async function executeMcpToolCall(
   }
 }
 
-/** Maps a thrown MCP call failure to the terminal reason exposed to elicitations. */
-export function classifyMcpElicitationCancelReason(error: unknown): McpElicitationCancelReason {
+/**
+ * Maps a thrown MCP call failure to the terminal reason exposed to elicitations.
+ * Abort precedence mirrors `classifyToolExecutionFailure`: MCP SDK aborts can
+ * surface as RequestTimeout, so the parent turn signal is authoritative.
+ */
+export function classifyMcpElicitationCancelReason(
+  error: unknown,
+  parentSignal?: AbortSignal
+): McpElicitationCancelReason {
+  if (isAbortError(error) || parentSignal?.aborted) return 'turn_aborted';
   const failure = classifyMcpCallFailure(error);
   if (failure === 'timeout') return 'tool_timeout';
   if (failure === 'server_closed') return 'server_closed';
