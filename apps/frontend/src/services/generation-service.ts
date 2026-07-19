@@ -4,7 +4,7 @@ import type { GenerateImageBody, RespondStreamBody } from '@mangostudio/shared/g
 import type { StreamChunk } from '@mangostudio/shared/streaming';
 import { getApiBaseUrl } from '../lib/api-base-url';
 import { client } from '../lib/api-client';
-import { extractApiError } from '../lib/utils';
+import { DEFAULT_API_ERROR_FALLBACK, extractApiError } from '../lib/utils';
 
 export type GenerateImageRequest = Omit<GenerateImageBody, 'model'> & { model: string };
 export type RespondTextRequest = RespondStreamBody;
@@ -91,7 +91,7 @@ export async function respondTextStream(
   }
 
   // No server payload to unwrap; the render layer localizes the neutral message.
-  if (!response.body) throw new Error(extractApiError(null));
+  if (!response.body) throw new Error(DEFAULT_API_ERROR_FALLBACK);
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
