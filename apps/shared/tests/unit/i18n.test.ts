@@ -21,11 +21,11 @@ describe('i18n provider-neutral copy', () => {
     expect(ptBR.models.noModelsAvailable).toBe('Nenhum modelo disponível');
   });
 
-  it('provides stream error fallback labels', () => {
-    expect(en.errors.streamRequestFailed).toBe('Stream request failed');
-    expect(en.errors.streamResponseNoBody).toBe('Stream response has no body');
-    expect(ptBR.errors.streamRequestFailed).toBe('Falha na requisição de stream');
-    expect(ptBR.errors.streamResponseNoBody).toBe('Resposta do stream sem corpo');
+  it('provides generation error fallback labels', () => {
+    expect(en.errors.textGenerationFailed).toBe('Failed to get a response. Please try again.');
+    expect(en.errors.imageGenerationFailed).toBe('Failed to generate image. Please try again.');
+    expect(ptBR.errors.textGenerationFailed).toBe('Falha ao obter uma resposta. Tente novamente.');
+    expect(ptBR.errors.imageGenerationFailed).toBe('Falha ao gerar imagem. Tente novamente.');
   });
 
   it('provides accessibility labels', () => {
