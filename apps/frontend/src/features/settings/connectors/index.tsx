@@ -54,7 +54,10 @@ export function ConnectorsSettings({ modelCatalog, reloadModelCatalog }: Connect
     modelCatalog,
     reloadConnectors,
     reloadModelCatalog,
-    (err) => toast(resolveApiErrorMessage(err, s.failedToUpdateModels), 'error')
+    (err) => {
+      console.error('[connectors] Failed to update models', err);
+      toast(resolveApiErrorMessage(err, s.failedToUpdateModels), 'error');
+    }
   );
 
   const handleDeleteConnector = async (id: string) => {

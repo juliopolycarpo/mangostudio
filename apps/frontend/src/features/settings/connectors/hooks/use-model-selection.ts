@@ -21,20 +21,21 @@ export function useModelSelection(
   onToggleError: (err: unknown) => void
 ) {
   const [selectedConnector, setSelectedConnector] = useState<Connector | null>(null);
+  // Mirrors selectedConnector so overlapping toggles read the latest value instead of a
+  // stale render closure. Every mutation goes through setConnector to keep the two in sync.
   const selectedConnectorRef = useRef(selectedConnector);
-  selectedConnectorRef.current = selectedConnector;
+  const setConnector = (value: Connector | null) => {
+    selectedConnectorRef.current = value;
+    setSelectedConnector(value);
+  };
   const [modelSearchQuery, setModelSearchQuery] = useState('');
 
   const openModals = (connector: Connector) => {
-    selectedConnectorRef.current = connector;
-    setSelectedConnector(connector);
+    setConnector(connector);
     setModelSearchQuery('');
   };
 
-  const closeModal = () => {
-    selectedConnectorRef.current = null;
-    setSelectedConnector(null);
-  };
+  const closeModal = () => setConnector(null);
 
   const getDiscoveredModels = (connector: Connector) => {
     const textModels = modelCatalog.discoveredTextModels.filter(
@@ -51,24 +52,28 @@ export function useModelSelection(
     if (!current) return;
     const connectorId = current.id;
     const next = withModelToggled(current.enabledModels, modelId, checked);
-    const optimistic = { ...current, enabledModels: next };
-    selectedConnectorRef.current = optimistic;
-    setSelectedConnector(optimistic);
+    setConnector({ ...current, enabledModels: next });
 
     try {
       await updateConnectorModels(connectorId, next);
+    } catch (err) {
+      // Undo only this toggle; concurrent toggles that already landed stay applied.
+      const pending = selectedConnectorRef.current;
+      if (pending && pending.id === connectorId) {
+        setConnector({
+          ...pending,
+          enabledModels: withModelToggled(pending.enabledModels, modelId, !checked),
+        });
+      }
+      onToggleError(err);
+      return;
+    }
+
+    // The write persisted, so a refresh failure must surface without reverting the toggle.
+    try {
       await reloadConnectors();
       await reloadModelCatalog();
     } catch (err) {
-      setSelectedConnector((prev) => {
-        if (!prev || prev.id !== connectorId) return prev;
-        const reverted = {
-          ...prev,
-          enabledModels: withModelToggled(prev.enabledModels, modelId, !checked),
-        };
-        selectedConnectorRef.current = reverted;
-        return reverted;
-      });
       onToggleError(err);
     }
   };

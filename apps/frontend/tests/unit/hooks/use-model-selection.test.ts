@@ -192,6 +192,30 @@ describe('useModelSelection', () => {
     expect(reloadModelCatalog).not.toHaveBeenCalled();
   });
 
+  it('keeps the toggle applied when the write persisted but a reload failed', async () => {
+    const reloadConnectors = vi.fn().mockResolvedValue(undefined);
+    const failure = new Error('catalog refresh failed');
+    const reloadModelCatalog = vi.fn().mockRejectedValue(failure);
+    const onToggleError = vi.fn();
+    mockUpdateConnectorModels.mockResolvedValue(undefined);
+
+    const { result } = renderHook(() =>
+      useModelSelection(makeCatalog(), reloadConnectors, reloadModelCatalog, onToggleError)
+    );
+
+    act(() => {
+      result.current.openModals(makeConnector({ id: 'c1', enabledModels: [] }));
+    });
+
+    await act(async () => {
+      await result.current.handleToggleModel('m1', true);
+    });
+
+    expect(mockUpdateConnectorModels).toHaveBeenCalledWith('c1', ['m1']);
+    expect(result.current.selectedConnector?.enabledModels).toEqual(['m1']);
+    expect(onToggleError).toHaveBeenCalledWith(failure);
+  });
+
   it('reverts only the failed toggle when a later toggle succeeded', async () => {
     const reloadConnectors = vi.fn().mockResolvedValue(undefined);
     const reloadModelCatalog = vi.fn().mockResolvedValue(undefined);
