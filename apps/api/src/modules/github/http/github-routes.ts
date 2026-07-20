@@ -11,7 +11,7 @@ import {
 import { Elysia } from 'elysia';
 import { getDb } from '../../../db/database';
 import { requireAuth } from '../../../plugins/auth-middleware';
-import { resolveChatWorkdir } from '../../git/application/chat-workdir';
+import { chatAccessDenied, resolveChatWorkdir } from '../../chats/application/chat-workdir';
 import {
   type GetGithubContext,
   GithubContextError,
@@ -27,31 +27,28 @@ export function createGithubRoutes(resolveContext: GetGithubContext = getGithubC
       '/context',
       async ({ query, request, set, user }): Promise<RouteResult> => {
         const resolution = await resolveChatWorkdir(query.chatId, user?.id ?? '', getDb());
-        switch (resolution.state) {
-          case 'not-found':
-            set.status = 404;
-            return { error: 'Chat not found', code: ERROR_CODES.NOT_FOUND };
-          case 'forbidden':
-            set.status = 403;
-            return { error: 'Chat belongs to another user', code: ERROR_CODES.OWNERSHIP };
-          case 'no-workdir':
-            set.status = 409;
-            return { error: 'Chat has no working directory', code: ERROR_CODES.CONFLICT };
-          case 'ok':
-            break;
+        if (resolution.state === 'no-workdir') {
+          set.status = 409;
+          return { error: 'Chat has no working directory', code: ERROR_CODES.CONFLICT };
         }
+        if (resolution.state !== 'ok') return chatAccessDenied(resolution, set);
 
         try {
           return await resolveContext(resolution.workdir, request.signal);
         } catch (error) {
-          if (error instanceof GhCliError && !error.aborted) {
-            console.error('[github] gh command failed', {
-              args: error.args,
-              exitCode: error.exitCode,
-              stderr: error.stderr,
-            });
+          if (error instanceof GhCliError) {
+            // A cancelled request is the client hanging up, not a server fault worth logging.
+            if (!error.aborted) {
+              console.error('[github] gh command failed', {
+                args: error.args,
+                exitCode: error.exitCode,
+                stderr: error.stderr,
+              });
+            }
           } else if (error instanceof GithubContextError) {
             console.error('[github] invalid gh output', { command: error.command });
+          } else {
+            console.error('[github] context resolution failed', error);
           }
           set.status = 500;
           return {

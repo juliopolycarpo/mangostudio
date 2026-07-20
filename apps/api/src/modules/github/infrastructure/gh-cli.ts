@@ -1,6 +1,6 @@
 const DEFAULT_TIMEOUT_MS = 15_000;
 const PROBE_TIMEOUT_MS = 5_000;
-const AUTH_CACHE_TTL_MS = 60_000;
+const PROBE_CACHE_TTL_MS = 60_000;
 const MAX_OUTPUT_BYTES = 1024 * 1024;
 
 const GH_REPO_FIELDS = 'nameWithOwner,defaultBranchRef,url';
@@ -101,7 +101,7 @@ export type GhCommandRunner = (
 interface CreateGhCliOptions {
   readonly environment?: NodeJS.ProcessEnv;
   readonly now?: () => number;
-  readonly authCacheTtlMs?: number;
+  readonly probeCacheTtlMs?: number;
   readonly runner?: GhCommandRunner;
 }
 
@@ -182,48 +182,57 @@ async function runGh(args: GhCommandArgs, options: RunGhOptions): Promise<GhComm
   }
 }
 
-/** Creates the typed command facade and owns the process-lifetime probe caches. */
+/**
+ * Caches a boolean probe for a TTL and single-flights concurrent callers.
+ *
+ * Failures expire like successes so an operator who installs gh or runs
+ * `gh auth login` recovers without restarting the server.
+ */
+function createCachedProbe(
+  probe: (cwd: string) => Promise<unknown>,
+  now: () => number,
+  ttlMs: number
+): (cwd: string) => Promise<boolean> {
+  let inFlight: Promise<boolean> | null = null;
+  let cache: { readonly value: boolean; readonly expiresAt: number } | null = null;
+
+  return (cwd) => {
+    if (cache && now() < cache.expiresAt) return Promise.resolve(cache.value);
+    inFlight ??= probe(cwd)
+      .then(
+        () => true,
+        () => false
+      )
+      .then((value) => {
+        cache = { value, expiresAt: now() + ttlMs };
+        return value;
+      })
+      .finally(() => {
+        inFlight = null;
+      });
+    return inFlight;
+  };
+}
+
+/** Creates the typed command facade and owns the TTL-bounded probe caches. */
 export function createGhCli(options: CreateGhCliOptions = {}): GithubCli {
   const now = options.now ?? Date.now;
-  const authCacheTtlMs = options.authCacheTtlMs ?? AUTH_CACHE_TTL_MS;
+  const probeCacheTtlMs = options.probeCacheTtlMs ?? PROBE_CACHE_TTL_MS;
   const execute: GhCommandRunner =
     options.runner ??
     ((args, runOptions) =>
       runGh(args, { ...runOptions, environment: options.environment ?? process.env }));
 
-  let availabilityProbe: Promise<boolean> | null = null;
-  let authenticationProbe: Promise<boolean> | null = null;
-  let authenticationCache: { readonly value: boolean; readonly expiresAt: number } | null = null;
+  const probe = (args: GhCommandArgs) =>
+    createCachedProbe(
+      (cwd) => execute(args, { cwd, timeoutMs: PROBE_TIMEOUT_MS }),
+      now,
+      probeCacheTtlMs
+    );
 
   return {
-    isAvailable(cwd) {
-      availabilityProbe ??= execute(['--version'], { cwd, timeoutMs: PROBE_TIMEOUT_MS }).then(
-        () => true,
-        () => false
-      );
-      return availabilityProbe;
-    },
-    isAuthenticated(cwd) {
-      if (authenticationCache && now() < authenticationCache.expiresAt) {
-        return Promise.resolve(authenticationCache.value);
-      }
-      authenticationProbe ??= execute(['auth', 'status'], {
-        cwd,
-        timeoutMs: PROBE_TIMEOUT_MS,
-      })
-        .then(
-          () => true,
-          () => false
-        )
-        .then((value) => {
-          authenticationCache = { value, expiresAt: now() + authCacheTtlMs };
-          return value;
-        })
-        .finally(() => {
-          authenticationProbe = null;
-        });
-      return authenticationProbe;
-    },
+    isAvailable: probe(['--version']),
+    isAuthenticated: probe(['auth', 'status']),
     viewRepo(cwd, signal) {
       return execute(['repo', 'view', '--json', GH_REPO_FIELDS], { cwd, signal });
     },

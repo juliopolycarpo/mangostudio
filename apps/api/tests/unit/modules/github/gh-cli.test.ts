@@ -74,7 +74,7 @@ describe('GitHub CLI adapter', () => {
       authCalls += 1;
       return authenticated ? Promise.resolve(success) : Promise.reject(new Error('not logged in'));
     };
-    const cli = createGhCli({ runner, now: () => now, authCacheTtlMs: 60_000 });
+    const cli = createGhCli({ runner, now: () => now, probeCacheTtlMs: 60_000 });
 
     expect(await cli.isAuthenticated('/repo')).toBe(false);
     authenticated = true;
@@ -85,6 +85,28 @@ describe('GitHub CLI adapter', () => {
     now += 1;
     expect(await cli.isAuthenticated('/repo')).toBe(true);
     expect(authCalls).toBe(2);
+  });
+
+  it('re-probes availability after the TTL so installing gh needs no restart', async () => {
+    let now = 1_000;
+    let installed = false;
+    let versionCalls = 0;
+    const runner: GhCommandRunner = (args) => {
+      if (args[0] !== '--version') return Promise.resolve(success);
+      versionCalls += 1;
+      return installed ? Promise.resolve(success) : Promise.reject(new Error('gh: not found'));
+    };
+    const cli = createGhCli({ runner, now: () => now, probeCacheTtlMs: 60_000 });
+
+    expect(await cli.isAvailable('/repo')).toBe(false);
+    installed = true;
+    now += 59_999;
+    expect(await cli.isAvailable('/repo')).toBe(false);
+    expect(versionCalls).toBe(1);
+
+    now += 1;
+    expect(await cli.isAvailable('/repo')).toBe(true);
+    expect(versionCalls).toBe(2);
   });
 
   it('single-flights concurrent authentication probes', async () => {

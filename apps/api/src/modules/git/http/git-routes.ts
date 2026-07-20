@@ -26,9 +26,9 @@ import { Elysia } from 'elysia';
 import { getDb } from '../../../db/database';
 import { requireAuth } from '../../../plugins/auth-middleware';
 import { getAppSettings } from '../../app-settings/application/app-settings-service';
+import { chatAccessDenied, resolveChatWorkdir } from '../../chats/application/chat-workdir';
 import { getById } from '../../chats/infrastructure/chat-repository';
 import { NoModelAvailableError } from '../../generation/application/resolve-model';
-import { resolveChatWorkdir } from '../application/chat-workdir';
 import {
   EmptyGeneratedCommitMessageError,
   generateCommitMessageUseCase,
@@ -93,15 +93,8 @@ export const gitRoutes = new Elysia().use(requireAuth).group('/git', (app) =>
       '/state',
       async ({ query, request, set, user }): Promise<RouteResult<GitRepoState>> => {
         const resolution = await resolveChatWorkdir(query.chatId, user?.id ?? '', getDb());
-        if (resolution.state === 'not-found') {
-          set.status = 404;
-          return { error: 'Chat not found', code: ERROR_CODES.NOT_FOUND };
-        }
-        if (resolution.state === 'forbidden') {
-          set.status = 403;
-          return { error: 'Chat belongs to another user', code: ERROR_CODES.OWNERSHIP };
-        }
         if (resolution.state === 'no-workdir') return { state: 'no-workdir' };
+        if (resolution.state !== 'ok') return chatAccessDenied(resolution, set);
 
         try {
           return await getRepoState(resolution.workdir, request.signal);

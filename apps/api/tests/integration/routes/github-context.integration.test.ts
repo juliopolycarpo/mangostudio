@@ -184,11 +184,16 @@ describe('GitHub context routes', () => {
       await bindWorkdir(chat.id, workdir);
       const plugin = await createGithubPlugin(workdir, scenario);
       const { app, restore } = createAuthenticatedApiTestApp(user, plugin);
+      restoreAuth = restore;
 
-      const response = await getContext(app, chat.id);
-      restore();
-      expect(response.status).toBe(200);
-      expect(await response.json()).toEqual({ state: expected });
+      try {
+        const response = await getContext(app, chat.id);
+        expect(response.status).toBe(200);
+        expect(await response.json()).toEqual({ state: expected });
+      } finally {
+        restore();
+        restoreAuth = null;
+      }
     }
   });
 
@@ -220,6 +225,10 @@ describe('GitHub context routes', () => {
       error: 'Chat has no working directory',
       code: 'CONFLICT',
     });
+
+    const missing = await getContext(app, 'chat-does-not-exist');
+    expect(missing.status).toBe(404);
+    expect(await missing.json()).toEqual({ error: 'Chat not found', code: 'NOT_FOUND' });
   });
 
   it('returns a typed API error when gh emits invalid JSON', async () => {
