@@ -40,7 +40,7 @@
         "better-auth": "^1.6.11",
         "elysia": "^1.4.29",
         "file-type": "^22.0.1",
-        "kysely": "^0.29.2",
+        "kysely": "^0.29.3",
         "kysely-bun-sqlite": "^0.4.0",
         "openai": "^6.47.0",
         "smol-toml": "^1.7.0",
@@ -1166,7 +1166,7 @@
 
     "knip": ["knip@6.17.1", "", { "dependencies": { "fdir": "^6.5.0", "formatly": "^0.3.0", "get-tsconfig": "4.14.0", "jiti": "^2.7.0", "oxc-parser": "^0.135.0", "oxc-resolver": "^11.20.0", "picomatch": "^4.0.4", "smol-toml": "^1.6.1", "strip-json-comments": "5.0.3", "tinyglobby": "^0.2.17", "unbash": "^4.0.1", "yaml": "^2.9.0", "zod": "^4.1.11" }, "bin": { "knip": "bin/knip.js", "knip-bun": "bin/knip-bun.js" } }, "sha512-HcQsZSQ4Ymhuay4BVzJtM5pFZNDSomYYqcNCZOSITPQh9g18a09DqziWAxSt2G+BH9wGlG+0ZjWpEnaFlnKseQ=="],
 
-    "kysely": ["kysely@0.29.2", "", {}, "sha512-s6WVJyEZrbm6jhBpiKHsGHyePMrVQKJ85wZCFCr9W4QHv6WTjWIrdvTmO9hDEA3bNK0xkrE2DqrHsXMLWuZpQg=="],
+    "kysely": ["kysely@0.29.3", "", {}, "sha512-VHtBdW6XB/pgoTSqraM3UAa2rYoYdNXqnNPpX+8XXP+cwYbVEFuAp3HyPt1vpNfU9l7Y2kpUrA9QDPsy8uUqOQ=="],
 
     "kysely-bun-sqlite": ["kysely-bun-sqlite@0.4.0", "", { "dependencies": { "bun-types": "^1.1.31" }, "peerDependencies": { "kysely": "^0.28.2" } }, "sha512-2EkQE5sT4ewiw7IWfJsAkpxJ/QPVKXKO5sRYI/xjjJIJlECuOdtG+ssYM0twZJySrdrmuildNPFYVreyu1EdZg=="],
 
