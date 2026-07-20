@@ -12,12 +12,10 @@ import {
   useAddMcpServer,
   useApplyPortableMcpImport,
   useDeleteMcpServer,
-  useImportMcpServers,
   useMcpServers,
   useTestMcpServer,
 } from '../../../src/features/settings/mcp/hooks/use-mcp-servers';
 import { mcpServerKeys } from '../../../src/features/settings/mcp/queries';
-import { toolSettingsKeys } from '../../../src/features/settings/tools/queries';
 import { act, renderHook, waitFor } from '../../support/harness/render';
 import { createFetchScenario } from '../../support/mocks/create-fetch-scenario';
 
@@ -95,41 +93,6 @@ describe('MCP server hooks', () => {
     });
 
     await waitFor(() => expect(result.current.servers).toEqual([SERVER]));
-  });
-
-  it('useImportMcpServers posts and invalidates server-list and tool-settings caches', async () => {
-    fetchScenario.respondWithJson('POST', '/api/mcp/servers/import', {
-      body: { results: [{ slug: 'everything', result: 'created', serverId: 'srv-1' }] },
-    });
-
-    const { result } = renderHook(() => ({
-      mutation: useImportMcpServers(),
-      queryClient: useQueryClient(),
-    }));
-
-    result.current.queryClient.setQueryData(mcpServerKeys.list(), { servers: [] });
-    result.current.queryClient.setQueryData(toolSettingsKeys.list(), { tools: [] });
-    await act(async () => {
-      await Promise.resolve();
-    });
-    result.current.queryClient.setQueryData(CAPABILITIES_KEY, { runtimeHash: 'cached' });
-
-    let response: unknown;
-    await act(async () => {
-      response = await result.current.mutation.mutateAsync({
-        json: '{"mcpServers":{"everything":{"command":"bunx"}}}',
-        slugs: ['everything'],
-      });
-    });
-
-    expect(response).toMatchObject({ results: [{ slug: 'everything', result: 'created' }] });
-    expect(result.current.queryClient.getQueryState(mcpServerKeys.list())?.isInvalidated).toBe(
-      true
-    );
-    expect(result.current.queryClient.getQueryState(toolSettingsKeys.list())?.isInvalidated).toBe(
-      true
-    );
-    expect(result.current.queryClient.getQueryState(CAPABILITIES_KEY)?.isInvalidated).toBe(true);
   });
 
   it('invalidates capability projections after applying a portable import', async () => {

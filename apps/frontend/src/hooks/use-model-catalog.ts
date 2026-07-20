@@ -24,7 +24,7 @@ export const catalogQueryOptions = () =>
 export function useModelCatalog() {
   const queryClient = useQueryClient();
 
-  const { data, isLoading, error, refetch } = useQuery(catalogQueryOptions());
+  const { data, isLoading, refetch } = useQuery(catalogQueryOptions());
 
   const refreshCatalog = useCallback(async () => {
     await refetch();
@@ -40,7 +40,6 @@ export function useModelCatalog() {
   return {
     catalog: data || EMPTY_MODEL_CATALOG,
     isLoading,
-    error: error ? error.message : null,
     refreshCatalog,
     setCatalog,
   };
