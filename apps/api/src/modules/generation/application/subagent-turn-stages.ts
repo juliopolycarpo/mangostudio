@@ -115,7 +115,11 @@ export async function prepareSubagentTurn(
   const allowedToolNames = new Set(toolDefinitions.map((tool) => tool.name));
   const prompt = buildSubagentPrompt(input.request);
 
-  const systemPrompt = appendWorkdirPromptSection(runtime.effectiveSystemPrompt, input.workdir);
+  // Mirrors resolve-turn-context: the workdir is announced only for agent-mode turns.
+  const systemPrompt = appendWorkdirPromptSection(
+    runtime.effectiveSystemPrompt,
+    input.parentMode === 'agent' ? input.workdir : undefined
+  );
 
   return {
     input,
