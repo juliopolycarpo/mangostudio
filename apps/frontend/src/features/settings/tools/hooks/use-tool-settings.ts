@@ -7,6 +7,7 @@ import type {
   UpdateToolSettingsBody,
 } from '@mangostudio/shared/tool-settings';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { invalidateChatCapabilities } from '@/features/chat/hooks/capability-invalidation';
 import { updateToolSetting } from '../api';
 import { toolSettingsKeys, toolSettingsListQueryOptions } from '../queries';
 
@@ -41,6 +42,10 @@ export function useUpdateToolSetting() {
     },
     onSuccess: (descriptor) => {
       syncToolSettingsListCache(queryClient, descriptor);
+      // The sync above no-ops when the list was never fetched (e.g. toggling from
+      // CapabilityInspector without visiting Settings → Tools), emitting no cache
+      // event for the registry to observe. Invalidate unconditionally.
+      return invalidateChatCapabilities(queryClient);
     },
   });
 }

@@ -86,6 +86,38 @@ describe('capability cache invalidation', () => {
     expect(result.current.queryClient.getQueryState(CAPABILITIES_KEY)?.isInvalidated).toBe(true);
   });
 
+  it('invalidates cached projections after a tool update with no cached tool list', async () => {
+    fetchScenario.respondWithJson('PUT', '/api/settings/tools/read_file', {
+      body: {
+        name: 'read_file',
+        title: 'Read file',
+        description: 'Reads a file.',
+        category: 'system',
+        enabled: false,
+        canDisable: true,
+        parameters: {},
+        parameterDescriptors: [],
+      },
+    });
+
+    const { result } = renderHook(() => ({
+      mutation: useUpdateToolSetting(),
+      queryClient: useQueryClient(),
+    }));
+    // No tool-settings list in cache: syncToolSettingsListCache no-ops and the
+    // registry observes nothing, so the mutation must invalidate directly.
+    seedCapabilityProjection(result.current.queryClient);
+
+    await act(async () => {
+      await result.current.mutation.mutateAsync({
+        toolName: 'read_file',
+        body: { enabled: false },
+      });
+    });
+
+    expect(result.current.queryClient.getQueryState(CAPABILITIES_KEY)?.isInvalidated).toBe(true);
+  });
+
   it('invalidates cached projections after a skill setting update', async () => {
     fetchScenario.respondWithJson('PUT', '/api/skills/mango%3Areview', {
       body: {

@@ -15,6 +15,36 @@ async function flushScheduledInvalidation() {
   await Promise.resolve();
 }
 
+/** The registry's blind spot: cache writes that dispatch no event. */
+describe('capability invalidation blind spots', () => {
+  it('sees no event when a source updater returns undefined on an uncached key', async () => {
+    const queryClient = new QueryClient();
+    const unregister = registerCapabilityInvalidationSources(queryClient);
+    queryClient.setQueryData(CAPABILITIES_KEY, { runtimeHash: 'cached' });
+
+    // Mirrors syncToolSettingsListCache when the list was never fetched.
+    queryClient.setQueryData(toolSettingsKeys.list(), (current: unknown) =>
+      current ? { tools: [] } : current
+    );
+    await flushScheduledInvalidation();
+
+    expect(queryClient.getQueryState(CAPABILITIES_KEY)?.isInvalidated).toBe(false);
+    unregister();
+  });
+
+  it('sees no event when invalidating a region holding no cached query', async () => {
+    const queryClient = new QueryClient();
+    const unregister = registerCapabilityInvalidationSources(queryClient);
+    queryClient.setQueryData(CAPABILITIES_KEY, { runtimeHash: 'cached' });
+
+    await queryClient.invalidateQueries({ queryKey: toolSettingsKeys.all });
+    await flushScheduledInvalidation();
+
+    expect(queryClient.getQueryState(CAPABILITIES_KEY)?.isInvalidated).toBe(false);
+    unregister();
+  });
+});
+
 describe('capability invalidation registry', () => {
   it('invalidates capability projections after source data updates', async () => {
     const queryClient = new QueryClient();
