@@ -110,6 +110,16 @@ describe('labeler coverage', () => {
     expect(mcpSection).toContain('- "apps/shared/src/mcp/**"');
   });
 
+  test('classifies the repository status feature as area: git', () => {
+    const labeler = readText('.github/labeler.yml');
+
+    expect(labeler).toContain('"area: git":');
+    const gitSection = extractLabelSection(labeler, '"area: git":', '"area: auth":');
+    expect(gitSection).toContain('- "apps/api/src/modules/git/**"');
+    expect(gitSection).toContain('- "apps/frontend/src/features/workspace/**"');
+    expect(gitSection).toContain('- "apps/shared/src/git/**"');
+  });
+
   test('applies type: dependencies as a Dependabot auto-label for both ecosystems', () => {
     const dependabot = readText('.github/dependabot.yml');
 
