@@ -5,7 +5,7 @@
 import type { SkillListResponse } from '@mangostudio/shared/skills';
 import { queryOptions } from '@tanstack/react-query';
 import { client } from '@/lib/api-client';
-import { extractApiError } from '@/lib/utils';
+import { ApiError } from '@/lib/utils';
 
 export const skillSettingsKeys = {
   all: ['skill-settings'] as const,
@@ -18,7 +18,7 @@ export function skillSettingsListQueryOptions() {
     staleTime: 30_000,
     queryFn: async () => {
       const { data, error } = await client.api.skills.get();
-      if (error) throw new Error(extractApiError(error.value));
+      if (error) throw new ApiError(error.value);
       return data as SkillListResponse;
     },
   });

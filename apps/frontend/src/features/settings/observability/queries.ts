@@ -4,7 +4,7 @@ import type {
 } from '@mangostudio/shared/observability';
 import { queryOptions } from '@tanstack/react-query';
 import { client } from '@/lib/api-client';
-import { extractApiError } from '@/lib/utils';
+import { ApiError } from '@/lib/utils';
 
 const observabilityKeys = {
   all: ['observability'] as const,
@@ -19,7 +19,7 @@ export function observabilityMetricsQueryOptions() {
     refetchInterval: 5_000,
     queryFn: async () => {
       const { data, error } = await client.api.settings.metrics.get();
-      if (error) throw new Error(extractApiError(error.value));
+      if (error) throw new ApiError(error.value);
       return data as ProviderObservabilityMetricsResponse;
     },
   });
@@ -32,7 +32,7 @@ export function observabilityLogsQueryOptions() {
     refetchInterval: 5_000,
     queryFn: async () => {
       const { data, error } = await client.api.settings.logs.get();
-      if (error) throw new Error(extractApiError(error.value));
+      if (error) throw new ApiError(error.value);
       return data as ProviderObservabilityLogsResponse;
     },
   });

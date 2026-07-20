@@ -142,7 +142,7 @@ describe('useModelCatalog', () => {
     });
 
     await waitFor(() => expect(result.current.catalog.isLoading).toBe(false));
-    expect(result.current.catalog.catalog).toEqual(EMPTY_MODEL_CATALOG);
+    expect(result.current.catalog.catalog).toEqual(initialCatalog);
     expect(result.current.queryClient.getQueryState(CAPABILITIES_KEY)?.isInvalidated).toBe(false);
   });
 });

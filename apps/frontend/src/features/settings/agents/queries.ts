@@ -1,7 +1,7 @@
 import type { AgentProfileListResponse } from '@mangostudio/shared/agents';
 import { queryOptions } from '@tanstack/react-query';
 import { client } from '@/lib/api-client';
-import { extractApiError } from '@/lib/utils';
+import { ApiError } from '@/lib/utils';
 
 export const agentSettingsKeys = {
   all: ['agent-settings'] as const,
@@ -14,7 +14,7 @@ export function agentSettingsListQueryOptions() {
     staleTime: 30_000,
     queryFn: async () => {
       const { data, error } = await client.api.settings.agents.get();
-      if (error) throw new Error(extractApiError(error.value));
+      if (error) throw new ApiError(error.value);
       return data as AgentProfileListResponse;
     },
   });

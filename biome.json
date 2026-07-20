@@ -99,8 +99,8 @@
               "options": {
                 "paths": {
                   "@mangostudio/shared/i18n": {
-                    "importNames": ["en", "ptBR"],
-                    "message": "Locale dictionaries are i18n plumbing. Render layers must localize via useI18n(); data layers must throw neutral extractApiError messages."
+                    "allowImportNames": ["Locale", "Messages", "defaultLocale"],
+                    "message": "Locale dictionaries are i18n plumbing. Render layers must localize via useI18n(); data layers must throw ApiError for failed requests."
                   }
                 }
               }

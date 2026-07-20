@@ -1,7 +1,7 @@
 import type { ChatTodosResponse, TodoList } from '@mangostudio/shared/todos';
 import { type QueryClient, useQuery } from '@tanstack/react-query';
 import { client } from '@/lib/api-client';
-import { extractApiError } from '@/lib/utils';
+import { ApiError } from '@/lib/utils';
 
 const chatTodoKeys = {
   all: ['chat-todos'] as const,
@@ -14,7 +14,7 @@ export function useChatTodos(chatId: string | null) {
     queryKey: chatTodoKeys.detail(chatId ?? ''),
     queryFn: async () => {
       const { data, error } = await client.api.chats({ id: chatId ?? '' }).todos.get();
-      if (error) throw new Error(extractApiError(error.value));
+      if (error) throw new ApiError(error.value);
       return data as ChatTodosResponse;
     },
     enabled: !!chatId,

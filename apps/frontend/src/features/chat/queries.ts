@@ -10,7 +10,7 @@ import {
 } from '@tanstack/react-query';
 import type { ContextInfo } from '@/features/generation/types';
 import { client } from '@/lib/api-client';
-import { extractApiError } from '@/lib/utils';
+import { ApiError } from '@/lib/utils';
 
 // ---------------------------------------------------------------------------
 // Chat query keys
@@ -32,7 +32,7 @@ export const chatListQueryOptions = () =>
     queryKey: chatKeys.lists(),
     queryFn: async () => {
       const { data, error } = await client.api.chats.get();
-      if (error) throw new Error(extractApiError(error.value));
+      if (error) throw new ApiError(error.value);
       return data as ChatWithContext[];
     },
   });
@@ -63,7 +63,7 @@ export function useCreateChatMutation() {
   return useMutation({
     mutationFn: async (newChat: { title: string; model?: string }) => {
       const { data, error } = await client.api.chats.post(newChat);
-      if (error) throw new Error(extractApiError(error.value));
+      if (error) throw new ApiError(error.value);
       return data as Chat;
     },
     onSuccess: (chat) => {
@@ -81,7 +81,7 @@ export function useUpdateChatMutation() {
   return useMutation({
     mutationFn: async ({ id, updates }: { id: string; updates: UpdateChatBody }) => {
       const { data, error } = await client.api.chats({ id }).put(updates);
-      if (error) throw new Error(extractApiError(error.value));
+      if (error) throw new ApiError(error.value);
       return data;
     },
     onSuccess: (_, variables) => {
@@ -103,7 +103,7 @@ export function useDeleteChatMutation() {
   return useMutation({
     mutationFn: async (id: string) => {
       const { data, error } = await client.api.chats({ id }).delete();
-      if (error) throw new Error(extractApiError(error.value));
+      if (error) throw new ApiError(error.value);
       return data;
     },
     onSuccess: (_, chatId) => {
@@ -135,7 +135,7 @@ export const messagesQueryOptions = (chatId: string) =>
     queryFn: async ({ pageParam }: { pageParam: string | null }) => {
       const query = pageParam ? { cursor: pageParam, limit: '50' } : { limit: '50' };
       const { data, error } = await client.api.chats({ id: chatId }).messages.get({ query });
-      if (error) throw new Error(extractApiError(error.value));
+      if (error) throw new ApiError(error.value);
       return data as unknown as MessagesPage;
     },
     initialPageParam: null as string | null,
