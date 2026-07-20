@@ -119,6 +119,7 @@ Run by `.github/workflows/release.yml`; each is also runnable locally:
 | `push-dist-repo.ts`        | Push changed files into an external dist repo (tap/bucket), idempotently                            |
 | `publish-summary.sh`       | Render a per-channel ✅/❌ publish table into the GitHub step summary                               |
 | `retry.sh`                 | `retry_command` helper sourced by workflow shell steps                                              |
+| `upload-release-assets.sh` | `upload_release_assets` helper: delete conflicting assets by id, then upload (retry-safe)           |
 
 ## Conventions
 

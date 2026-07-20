@@ -9,9 +9,22 @@ const SCRIPT = join(ROOT_DIR, 'scripts/release/upload-release-assets.sh');
 // Fake `gh` that logs every invocation and serves a canned asset listing for
 // `gh api repos/.../releases/tags/...`. Asset rows come from FAKE_ASSETS_FILE
 // as tab-separated "id<TAB>name" lines, matching the helper's --jq output.
+// FAIL_LIST/FAIL_DELETE inject the transient API failures the helper must
+// surface rather than swallow.
 const FAKE_GH = `#!/usr/bin/env bash
 printf '%s\\n' "$*" >> "$GH_LOG"
-if [ "$1" = "api" ] && [ "$2" != "--method" ]; then
+if [ "$1" = "api" ] && [ "$2" = "--method" ]; then
+  if [ -n "\${FAIL_DELETE:-}" ]; then
+    echo "gh: HTTP 403 Forbidden" >&2
+    exit 1
+  fi
+  exit 0
+fi
+if [ "$1" = "api" ]; then
+  if [ -n "\${FAIL_LIST:-}" ]; then
+    echo "gh: HTTP 502 Bad Gateway" >&2
+    exit 1
+  fi
   cat "$FAKE_ASSETS_FILE"
 fi
 exit 0
@@ -112,6 +125,30 @@ describe('scripts/release/upload-release-assets.sh', () => {
 
     expect(result.exitCode).toBe(0);
     expect(result.log[0]).toContain('repos/someone/fork/releases/tags/v1.2.3');
+  });
+
+  test('fails instead of falling back to a bare --clobber upload when listing fails', () => {
+    const result = runUploadReleaseAssets({
+      args: ['v1.2.3', 'assets/a.tar.gz'],
+      assetRows: ['101\ta.tar.gz'],
+      env: { FAIL_LIST: '1' },
+    });
+
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stderr).toContain('Failed to list existing assets for v1.2.3');
+    expect(result.log.filter((line) => line.startsWith('release upload'))).toEqual([]);
+  });
+
+  test('fails instead of uploading over an asset it could not delete', () => {
+    const result = runUploadReleaseAssets({
+      args: ['v1.2.3', 'assets/a.tar.gz'],
+      assetRows: ['101\ta.tar.gz'],
+      env: { FAIL_DELETE: '1' },
+    });
+
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stderr).toContain('Failed to delete release asset a.tar.gz (id 101)');
+    expect(result.log.filter((line) => line.startsWith('release upload'))).toEqual([]);
   });
 
   test('fails fast when neither GH_REPO nor GITHUB_REPOSITORY is set', () => {
