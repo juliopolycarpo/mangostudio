@@ -56,6 +56,11 @@ export const SkillSourceSettingsSchema = Type.Object({
   claude: Type.Boolean(),
 });
 
+export const GitSettingsSchema = Type.Object({
+  signCommits: Type.Boolean(),
+  signOff: Type.Boolean(),
+});
+
 export const AppSettingsSchema = Type.Object({
   promptSettings: PromptSettingsSchema,
   globalImageQuality: ImageQualitySchema,
@@ -70,6 +75,7 @@ export const AppSettingsSchema = Type.Object({
   chatTitleSettings: ChatTitleSettingsSchema,
   skillSources: SkillSourceSettingsSchema,
   workspaceSettings: WorkspaceSettingsSchema,
+  gitSettings: GitSettingsSchema,
 });
 
 export type ImageQuality = Static<typeof ImageQualitySchema>;
@@ -77,4 +83,5 @@ export type ChatTitleSettings = Static<typeof ChatTitleSettingsSchema>;
 export type ChatTitleStrategy = ChatTitleSettings['strategy'];
 export type MultiAgentSettings = Static<typeof MultiAgentSettingsSchema>;
 export type SkillSourceSettings = Static<typeof SkillSourceSettingsSchema>;
+export type GitSettings = Static<typeof GitSettingsSchema>;
 export type AppSettings = Static<typeof AppSettingsSchema>;

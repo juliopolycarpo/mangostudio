@@ -14,13 +14,19 @@ import {
   FileCode2,
   FolderGit2,
   GitBranch,
+  Minus,
+  Plus,
   RefreshCw,
 } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { useState } from 'react';
 import { Button } from '@/components/ui/Button';
+import { useToast } from '@/components/ui/Toast';
 import { useI18n } from '@/hooks/use-i18n';
-import { useGitState, useInitRepo } from './hooks/use-git-state';
+import { resolveApiErrorMessage } from '@/lib/utils';
+import { CommitForm } from './CommitForm';
+import { useGitState, useInitRepo, useStagePaths, useUnstagePaths } from './hooks/use-git-state';
+import { StashSection } from './StashSection';
 
 interface GitPanelProps {
   readonly chatId: string;
@@ -107,6 +113,7 @@ export function GitPanel({ chatId }: GitPanelProps) {
       */}
       <div className="min-h-0 flex-1 overflow-y-auto p-4">
         <GitPanelContent
+          chatId={chatId}
           state={stateQuery.data}
           loading={stateQuery.isLoading}
           error={stateQuery.error}
@@ -131,6 +138,7 @@ function RepositoryName({ state }: { readonly state: GitRepoState | undefined })
 }
 
 interface GitPanelContentProps {
+  readonly chatId: string;
   readonly state: GitRepoState | undefined;
   readonly loading: boolean;
   readonly error: Error | null;
@@ -141,6 +149,7 @@ interface GitPanelContentProps {
 }
 
 function GitPanelContent({
+  chatId,
   state,
   loading,
   error,
@@ -202,16 +211,34 @@ function GitPanelContent({
         </PanelMessage>
       );
     case 'repo':
-      return <RepositoryStatus status={state.status} />;
+      return <RepositoryStatus chatId={chatId} status={state.status} />;
   }
 }
 
-function RepositoryStatus({ status }: { readonly status: GitStatus }) {
+function RepositoryStatus({
+  chatId,
+  status,
+}: {
+  readonly chatId: string;
+  readonly status: GitStatus;
+}) {
   const { t } = useI18n();
+  const { toast } = useToast();
   const labels = t.git;
+  const stageMutation = useStagePaths(chatId);
+  const unstageMutation = useUnstagePaths(chatId);
   const branchName = status.branch.name
     ? status.branch.name
     : labels.detachedAt.replace('{commit}', status.branch.detachedAt?.slice(0, 8) ?? 'HEAD');
+
+  const mutatePaths = async (action: 'stage' | 'unstage', paths: string[]) => {
+    try {
+      if (action === 'stage') await stageMutation.mutateAsync({ paths });
+      else await unstageMutation.mutateAsync({ paths });
+    } catch (error) {
+      toast(resolveApiErrorMessage(error, labels.actions.failed), 'error');
+    }
+  };
 
   return (
     <div className="space-y-5">
@@ -252,12 +279,38 @@ function RepositoryStatus({ status }: { readonly status: GitStatus }) {
         />
       ) : (
         <div className="space-y-4">
-          <ChangeGroup title={labels.groups.conflicted} changes={status.conflicted} />
-          <ChangeGroup title={labels.groups.staged} changes={status.staged} />
-          <ChangeGroup title={labels.groups.unstaged} changes={status.unstaged} />
-          <ChangeGroup title={labels.groups.untracked} changes={status.untracked} />
+          <ChangeGroup
+            title={labels.groups.conflicted}
+            changes={status.conflicted}
+            action="stage"
+            pending={stageMutation.isPending}
+            onAction={(paths) => void mutatePaths('stage', paths)}
+          />
+          <ChangeGroup
+            title={labels.groups.staged}
+            changes={status.staged}
+            action="unstage"
+            pending={unstageMutation.isPending}
+            onAction={(paths) => void mutatePaths('unstage', paths)}
+          />
+          <ChangeGroup
+            title={labels.groups.unstaged}
+            changes={status.unstaged}
+            action="stage"
+            pending={stageMutation.isPending}
+            onAction={(paths) => void mutatePaths('stage', paths)}
+          />
+          <ChangeGroup
+            title={labels.groups.untracked}
+            changes={status.untracked}
+            action="stage"
+            pending={stageMutation.isPending}
+            onAction={(paths) => void mutatePaths('stage', paths)}
+          />
         </div>
       )}
+      <CommitForm chatId={chatId} hasStagedChanges={status.staged.length > 0} />
+      <StashSection chatId={chatId} />
     </div>
   );
 }
@@ -280,11 +333,22 @@ function DivergenceBadge({
 function ChangeGroup({
   title,
   changes,
+  action,
+  pending,
+  onAction,
 }: {
   readonly title: string;
   readonly changes: readonly GitFileChange[];
+  readonly action: 'stage' | 'unstage';
+  readonly pending: boolean;
+  readonly onAction: (paths: string[]) => void;
 }) {
+  const { t } = useI18n();
   if (changes.length === 0) return null;
+  const allLabel =
+    action === 'stage'
+      ? t.git.actions.stageAll.replace('{group}', title)
+      : t.git.actions.unstageAll.replace('{group}', title);
   return (
     <section>
       <h3 className="mb-1.5 flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.12em] text-on-surface-variant">
@@ -292,12 +356,25 @@ function ChangeGroup({
         <span className="rounded-full bg-surface-container-high px-1.5 py-0.5 font-mono text-[9px] tracking-normal">
           {changes.length}
         </span>
+        <button
+          type="button"
+          aria-label={allLabel}
+          title={allLabel}
+          disabled={pending}
+          onClick={() => onAction(changePaths(changes))}
+          className="ml-auto cursor-pointer rounded px-1.5 py-0.5 text-[9px] tracking-normal text-primary transition-colors hover:bg-primary/10 disabled:cursor-wait disabled:opacity-50"
+        >
+          {action === 'stage' ? t.git.actions.stageAllButton : t.git.actions.unstageAllButton}
+        </button>
       </h3>
       <ul className="overflow-hidden rounded-xl border border-outline-variant/15 bg-surface-container-lowest/40">
         {changes.map((change) => (
           <FileChangeRow
             key={`${change.status}:${change.oldPath ?? ''}:${change.path}`}
             change={change}
+            action={action}
+            pending={pending}
+            onAction={() => onAction(changePaths([change]))}
           />
         ))}
       </ul>
@@ -305,12 +382,26 @@ function ChangeGroup({
   );
 }
 
-function FileChangeRow({ change }: { readonly change: GitFileChange }) {
+function FileChangeRow({
+  change,
+  action,
+  pending,
+  onAction,
+}: {
+  readonly change: GitFileChange;
+  readonly action: 'stage' | 'unstage';
+  readonly pending: boolean;
+  readonly onAction: () => void;
+}) {
   const { t } = useI18n();
   const presentation = STATUS_PRESENTATION[change.status];
   const statusLabel = t.git.status[presentation.labelKey];
+  const actionLabel = (action === 'stage' ? t.git.actions.stage : t.git.actions.unstage).replace(
+    '{path}',
+    change.path
+  );
   return (
-    <li className="flex min-w-0 items-start gap-2 border-b border-outline-variant/10 px-2.5 py-2 last:border-b-0">
+    <li className="group flex min-w-0 items-start gap-2 border-b border-outline-variant/10 px-2.5 py-2 last:border-b-0">
       <span
         className={`w-3 shrink-0 pt-px text-center font-mono text-[11px] font-bold ${presentation.color}`}
         title={statusLabel}
@@ -329,8 +420,26 @@ function FileChangeRow({ change }: { readonly change: GitFileChange }) {
         ) : null}
         {change.path}
       </span>
+      <button
+        type="button"
+        aria-label={actionLabel}
+        title={actionLabel}
+        disabled={pending}
+        onClick={onAction}
+        className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded text-on-surface-variant opacity-60 transition-colors hover:bg-surface-container-high hover:text-primary group-hover:opacity-100 disabled:cursor-wait disabled:opacity-30"
+      >
+        {action === 'stage' ? <Plus size={13} /> : <Minus size={13} />}
+      </button>
     </li>
   );
+}
+
+function changePaths(changes: readonly GitFileChange[]): string[] {
+  return [
+    ...new Set(
+      changes.flatMap((change) => (change.oldPath ? [change.oldPath, change.path] : [change.path]))
+    ),
+  ];
 }
 
 function PanelMessage({

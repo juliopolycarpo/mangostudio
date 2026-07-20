@@ -24,6 +24,7 @@ import { Route as AuthenticatedSettingsPromptsRouteImport } from './routes/_auth
 import { Route as AuthenticatedSettingsMetricsRouteImport } from './routes/_authenticated/settings/metrics'
 import { Route as AuthenticatedSettingsMcpRouteImport } from './routes/_authenticated/settings/mcp'
 import { Route as AuthenticatedSettingsLogsRouteImport } from './routes/_authenticated/settings/logs'
+import { Route as AuthenticatedSettingsGitRouteImport } from './routes/_authenticated/settings/git'
 import { Route as AuthenticatedSettingsGeneralRouteImport } from './routes/_authenticated/settings/general'
 import { Route as AuthenticatedSettingsContextRouteImport } from './routes/_authenticated/settings/context'
 import { Route as AuthenticatedSettingsConnectorsRouteImport } from './routes/_authenticated/settings/connectors'
@@ -114,6 +115,12 @@ const AuthenticatedSettingsLogsRoute =
     path: '/logs',
     getParentRoute: () => AuthenticatedSettingsRoute,
   } as any)
+const AuthenticatedSettingsGitRoute =
+  AuthenticatedSettingsGitRouteImport.update({
+    id: '/git',
+    path: '/git',
+    getParentRoute: () => AuthenticatedSettingsRoute,
+  } as any)
 const AuthenticatedSettingsGeneralRoute =
   AuthenticatedSettingsGeneralRouteImport.update({
     id: '/general',
@@ -169,6 +176,7 @@ export interface FileRoutesByFullPath {
   '/settings/connectors': typeof AuthenticatedSettingsConnectorsRoute
   '/settings/context': typeof AuthenticatedSettingsContextRoute
   '/settings/general': typeof AuthenticatedSettingsGeneralRoute
+  '/settings/git': typeof AuthenticatedSettingsGitRoute
   '/settings/logs': typeof AuthenticatedSettingsLogsRoute
   '/settings/mcp': typeof AuthenticatedSettingsMcpRoute
   '/settings/metrics': typeof AuthenticatedSettingsMetricsRoute
@@ -191,6 +199,7 @@ export interface FileRoutesByTo {
   '/settings/connectors': typeof AuthenticatedSettingsConnectorsRoute
   '/settings/context': typeof AuthenticatedSettingsContextRoute
   '/settings/general': typeof AuthenticatedSettingsGeneralRoute
+  '/settings/git': typeof AuthenticatedSettingsGitRoute
   '/settings/logs': typeof AuthenticatedSettingsLogsRoute
   '/settings/mcp': typeof AuthenticatedSettingsMcpRoute
   '/settings/metrics': typeof AuthenticatedSettingsMetricsRoute
@@ -215,6 +224,7 @@ export interface FileRoutesById {
   '/_authenticated/settings/connectors': typeof AuthenticatedSettingsConnectorsRoute
   '/_authenticated/settings/context': typeof AuthenticatedSettingsContextRoute
   '/_authenticated/settings/general': typeof AuthenticatedSettingsGeneralRoute
+  '/_authenticated/settings/git': typeof AuthenticatedSettingsGitRoute
   '/_authenticated/settings/logs': typeof AuthenticatedSettingsLogsRoute
   '/_authenticated/settings/mcp': typeof AuthenticatedSettingsMcpRoute
   '/_authenticated/settings/metrics': typeof AuthenticatedSettingsMetricsRoute
@@ -240,6 +250,7 @@ export interface FileRouteTypes {
     | '/settings/connectors'
     | '/settings/context'
     | '/settings/general'
+    | '/settings/git'
     | '/settings/logs'
     | '/settings/mcp'
     | '/settings/metrics'
@@ -262,6 +273,7 @@ export interface FileRouteTypes {
     | '/settings/connectors'
     | '/settings/context'
     | '/settings/general'
+    | '/settings/git'
     | '/settings/logs'
     | '/settings/mcp'
     | '/settings/metrics'
@@ -285,6 +297,7 @@ export interface FileRouteTypes {
     | '/_authenticated/settings/connectors'
     | '/_authenticated/settings/context'
     | '/_authenticated/settings/general'
+    | '/_authenticated/settings/git'
     | '/_authenticated/settings/logs'
     | '/_authenticated/settings/mcp'
     | '/_authenticated/settings/metrics'
@@ -410,6 +423,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedSettingsLogsRouteImport
       parentRoute: typeof AuthenticatedSettingsRoute
     }
+    '/_authenticated/settings/git': {
+      id: '/_authenticated/settings/git'
+      path: '/git'
+      fullPath: '/settings/git'
+      preLoaderRoute: typeof AuthenticatedSettingsGitRouteImport
+      parentRoute: typeof AuthenticatedSettingsRoute
+    }
     '/_authenticated/settings/general': {
       id: '/_authenticated/settings/general'
       path: '/general'
@@ -486,6 +506,7 @@ interface AuthenticatedSettingsRouteChildren {
   AuthenticatedSettingsConnectorsRoute: typeof AuthenticatedSettingsConnectorsRoute
   AuthenticatedSettingsContextRoute: typeof AuthenticatedSettingsContextRoute
   AuthenticatedSettingsGeneralRoute: typeof AuthenticatedSettingsGeneralRoute
+  AuthenticatedSettingsGitRoute: typeof AuthenticatedSettingsGitRoute
   AuthenticatedSettingsLogsRoute: typeof AuthenticatedSettingsLogsRoute
   AuthenticatedSettingsMcpRoute: typeof AuthenticatedSettingsMcpRoute
   AuthenticatedSettingsMetricsRoute: typeof AuthenticatedSettingsMetricsRoute
@@ -502,6 +523,7 @@ const AuthenticatedSettingsRouteChildren: AuthenticatedSettingsRouteChildren = {
   AuthenticatedSettingsConnectorsRoute: AuthenticatedSettingsConnectorsRoute,
   AuthenticatedSettingsContextRoute: AuthenticatedSettingsContextRoute,
   AuthenticatedSettingsGeneralRoute: AuthenticatedSettingsGeneralRoute,
+  AuthenticatedSettingsGitRoute: AuthenticatedSettingsGitRoute,
   AuthenticatedSettingsLogsRoute: AuthenticatedSettingsLogsRoute,
   AuthenticatedSettingsMcpRoute: AuthenticatedSettingsMcpRoute,
   AuthenticatedSettingsMetricsRoute: AuthenticatedSettingsMetricsRoute,

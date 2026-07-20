@@ -24,6 +24,8 @@ describe('git CLI boundary', () => {
       PATH: '/bin',
       HOME: '/home/test',
       XDG_CONFIG_HOME: '/config',
+      SSH_AUTH_SOCK: '/run/agent.sock',
+      GNUPGHOME: '/home/test/.gnupg',
       LC_ALL: 'pt_BR.UTF-8',
       GITHUB_TOKEN: 'never-forward',
       PROVIDER_API_KEY: 'never-forward',
@@ -33,6 +35,9 @@ describe('git CLI boundary', () => {
       PATH: '/bin',
       HOME: '/home/test',
       XDG_CONFIG_HOME: '/config',
+      // Commit signing needs the agent socket and GnuPG home to reach the key.
+      SSH_AUTH_SOCK: '/run/agent.sock',
+      GNUPGHOME: '/home/test/.gnupg',
       GIT_TERMINAL_PROMPT: '0',
       GIT_OPTIONAL_LOCKS: '0',
       LC_ALL: 'C',

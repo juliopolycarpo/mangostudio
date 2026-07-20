@@ -169,6 +169,16 @@ export function useGlobalSettings() {
     [saveSettings]
   );
 
+  const updateGitSettings = useCallback(
+    (updates: Partial<AppSettings['gitSettings']>) => {
+      saveSettings((current) => ({
+        ...current,
+        gitSettings: { ...current.gitSettings, ...updates },
+      }));
+    },
+    [saveSettings]
+  );
+
   const setTextSystemPrompt = useCallback(
     (value: string) => {
       updatePromptSettings((current) => ({ ...current, textSystemPrompt: value }));
@@ -266,6 +276,7 @@ export function useGlobalSettings() {
     contextSettings: settings.contextSettings,
     multiAgentSettings: settings.multiAgentSettings,
     workspaceSettings: settings.workspaceSettings,
+    gitSettings: settings.gitSettings,
     chatTitleSettings: settings.chatTitleSettings,
     setContextCompactionBehavior: (value: ContextCompactionBehavior) =>
       updateContextSettings({ compactionBehavior: value }),
@@ -306,6 +317,8 @@ export function useGlobalSettings() {
       updateChatTitleSettings({ promptPrefixLength: value }),
     setPreferredChatTitleModel: (value: string) =>
       updateChatTitleSettings({ preferredModel: value }),
+    setSignCommits: (value: boolean) => updateGitSettings({ signCommits: value }),
+    setSignOff: (value: boolean) => updateGitSettings({ signOff: value }),
     resetSettings,
   };
 }

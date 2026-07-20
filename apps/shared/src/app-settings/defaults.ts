@@ -22,6 +22,7 @@ import { RECENT_WORKDIRS_MAX, type WorkspaceSettings } from '../workspaces';
 import type {
   AppSettings,
   ChatTitleSettings,
+  GitSettings,
   ImageQuality,
   MultiAgentSettings,
   SkillSourceSettings,
@@ -101,6 +102,11 @@ export const DEFAULT_WORKSPACE_SETTINGS: WorkspaceSettings = {
   recentWorkdirs: [],
 };
 
+export const DEFAULT_GIT_SETTINGS: GitSettings = {
+  signCommits: false,
+  signOff: false,
+};
+
 export const DEFAULT_APP_SETTINGS: AppSettings = {
   promptSettings: DEFAULT_PROMPT_SETTINGS,
   globalImageQuality: '1K',
@@ -112,6 +118,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   chatTitleSettings: DEFAULT_CHAT_TITLE_SETTINGS,
   skillSources: DEFAULT_SKILL_SOURCE_SETTINGS,
   workspaceSettings: DEFAULT_WORKSPACE_SETTINGS,
+  gitSettings: DEFAULT_GIT_SETTINGS,
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -347,6 +354,16 @@ export function normalizeWorkspaceSettings(value: unknown): WorkspaceSettings {
   };
 }
 
+export function normalizeGitSettings(value: unknown): GitSettings {
+  if (!isRecord(value)) return DEFAULT_GIT_SETTINGS;
+
+  return {
+    signCommits:
+      typeof value.signCommits === 'boolean' ? value.signCommits : DEFAULT_GIT_SETTINGS.signCommits,
+    signOff: typeof value.signOff === 'boolean' ? value.signOff : DEFAULT_GIT_SETTINGS.signOff,
+  };
+}
+
 export function normalizeAppSettings(value: unknown): AppSettings {
   if (!isRecord(value)) return DEFAULT_APP_SETTINGS;
 
@@ -372,5 +389,6 @@ export function normalizeAppSettings(value: unknown): AppSettings {
     chatTitleSettings: normalizeChatTitleSettings(value.chatTitleSettings),
     skillSources: normalizeSkillSourceSettings(value.skillSources),
     workspaceSettings: normalizeWorkspaceSettings(value.workspaceSettings),
+    gitSettings: normalizeGitSettings(value.gitSettings),
   };
 }

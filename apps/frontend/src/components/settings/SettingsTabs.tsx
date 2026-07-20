@@ -16,6 +16,7 @@ export function SettingsTabs() {
     { to: '/settings/prompts' as const, label: t.settings.tabs.prompts },
     { to: '/settings/appearance' as const, label: t.settings.tabs.appearance },
     { to: '/settings/context' as const, label: t.settings.tabs.context },
+    { to: '/settings/git' as const, label: t.settings.tabs.git },
     { to: '/settings/tools' as const, label: t.settings.tabs.tools },
     { to: '/settings/skills' as const, label: t.settings.tabs.skills },
     { to: '/settings/mcp' as const, label: t.settings.tabs.mcp },
