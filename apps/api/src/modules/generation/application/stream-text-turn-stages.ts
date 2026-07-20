@@ -78,6 +78,7 @@ export interface StreamTextTurnSession {
   aiMsgId: string;
   startTime: number;
   interactionMode: 'chat' | 'agent';
+  workdir: string | undefined;
   resolvedModel: ResolvedModel;
   provider: AIProvider;
   agentRuntime: ResolvedAgentRuntime;
@@ -173,6 +174,7 @@ export async function prepareStreamTextTurn(
     continuationSystemPrompt,
     attachmentIds,
     interactionMode,
+    workdir,
     chatId,
     userId,
   } = turnContext;
@@ -230,6 +232,7 @@ export async function prepareStreamTextTurn(
     aiMsgId,
     startTime: now,
     interactionMode,
+    workdir,
     resolvedModel,
     provider,
     agentRuntime,
@@ -568,6 +571,7 @@ async function* executePendingToolCalls(
     multiAgentSettings,
     allowedToolNames,
     interactionMode,
+    workdir,
     resolvedModel,
     delegationState,
     signal,
@@ -582,6 +586,7 @@ async function* executePendingToolCalls(
     parentAgentProfile: agentRuntime.profile,
     parentModelName: modelId,
     interactionMode,
+    workdir,
     settings: multiAgentSettings,
     signal,
     state: delegationState,
@@ -595,6 +600,7 @@ async function* executePendingToolCalls(
     for await (const item of executeStandardToolCallsWithProgress(pendingCallEntries, {
       userId,
       chatId,
+      workdir,
       settingsByToolName: toolSettings,
       allowedToolNames,
       delegationRuntime,
@@ -626,6 +632,7 @@ async function* executePendingToolCalls(
           for await (const item of executeStandardToolCallsWithProgress(nonImageEntries, {
             userId,
             chatId,
+            workdir,
             settingsByToolName: toolSettings,
             allowedToolNames,
             delegationRuntime,

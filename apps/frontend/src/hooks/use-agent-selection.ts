@@ -22,15 +22,22 @@ interface UseAgentSelectionParams {
     chatId: string,
     updates: PersistAgentSelectionUpdates
   ) => Promise<void>;
+  readonly defaultWorkdir: string;
+  readonly updateChatWorkdir: (chatId: string, workdir: string | null) => Promise<void>;
+  readonly addRecentWorkdir: (workdir: string) => void;
 }
 
 export function useAgentSelection({
   currentChatId,
   currentChat,
   updateChatAgentSelection,
+  defaultWorkdir,
+  updateChatWorkdir,
+  addRecentWorkdir,
 }: UseAgentSelectionParams) {
   const [agentSelectionOverride, setAgentSelectionOverride] =
     useState<AgentSelectionOverride | null>(null);
+  const [isWorkdirPickerOpen, setWorkdirPickerOpen] = useState(false);
   const agentsQuery = useQuery(agentSettingsListQueryOptions());
   const agents = useMemo(() => agentsQuery.data?.agents ?? [], [agentsQuery.data?.agents]);
   const persistedAgentSelection = useMemo(
@@ -67,8 +74,25 @@ export function useAgentSelection({
     (mode: AgentExecutionMode) => {
       const nextAgentId = mode === 'agent' ? selectedAgentId || 'default' : 'chat';
       persistAgentSelection(mode, nextAgentId);
+      if (mode !== 'agent' || !currentChatId || currentChat?.workdir) return;
+      if (!defaultWorkdir) {
+        setWorkdirPickerOpen(true);
+        return;
+      }
+
+      void updateChatWorkdir(currentChatId, defaultWorkdir)
+        .then(() => addRecentWorkdir(defaultWorkdir))
+        .catch(() => setWorkdirPickerOpen(true));
     },
-    [persistAgentSelection, selectedAgentId]
+    [
+      addRecentWorkdir,
+      currentChat?.workdir,
+      currentChatId,
+      defaultWorkdir,
+      persistAgentSelection,
+      selectedAgentId,
+      updateChatWorkdir,
+    ]
   );
 
   const setSelectedAgentId = useCallback(
@@ -78,13 +102,30 @@ export function useAgentSelection({
     [persistAgentSelection]
   );
 
+  const openWorkdirPicker = useCallback(() => setWorkdirPickerOpen(true), []);
+  const closeWorkdirPicker = useCallback(() => setWorkdirPickerOpen(false), []);
+  const selectWorkdir = useCallback(
+    async (workdir: string) => {
+      if (!currentChatId) return;
+      await updateChatWorkdir(currentChatId, workdir);
+      addRecentWorkdir(workdir);
+      setWorkdirPickerOpen(false);
+    },
+    [addRecentWorkdir, currentChatId, updateChatWorkdir]
+  );
+
   return {
     agents,
     isAgentListLoading: agentsQuery.isLoading,
     agentExecutionMode,
     selectedAgentId,
     selectedAgent,
+    currentWorkdir: currentChat?.workdir ?? null,
+    isWorkdirPickerOpen,
     setAgentExecutionMode,
     setSelectedAgentId,
+    openWorkdirPicker,
+    closeWorkdirPicker,
+    selectWorkdir,
   };
 }

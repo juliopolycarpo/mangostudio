@@ -195,6 +195,31 @@ describe('useGlobalSettings', () => {
     });
   });
 
+  it('persists a default workdir and keeps deduplicated recent workdirs', async () => {
+    const { result } = renderHook(() => useGlobalSettings());
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    act(() => {
+      result.current.setDefaultWorkdir('/srv/projects/mango');
+      result.current.addRecentWorkdir('/srv/projects/other');
+      result.current.addRecentWorkdir('/srv/projects/mango');
+      result.current.addRecentWorkdir('/srv/projects/other');
+    });
+
+    await waitFor(() =>
+      expect(result.current.workspaceSettings).toEqual({
+        defaultWorkdir: '/srv/projects/mango',
+        recentWorkdirs: ['/srv/projects/other', '/srv/projects/mango'],
+      })
+    );
+    await waitFor(() => expect(mockPut).toHaveBeenCalledTimes(1));
+    expect(mockPut.mock.calls[0]?.[0].workspaceSettings).toEqual({
+      defaultWorkdir: '/srv/projects/mango',
+      recentWorkdirs: ['/srv/projects/other', '/srv/projects/mango'],
+    });
+  });
+
   it('batches rapid prompt updates into a single persisted request', async () => {
     const { result } = renderHook(() => useGlobalSettings());
 

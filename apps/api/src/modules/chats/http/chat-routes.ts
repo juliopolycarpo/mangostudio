@@ -5,13 +5,14 @@ import {
   SummarizeToNewChatBodySchema,
   UpdateChatBodySchema,
 } from '@mangostudio/shared/chat';
-import type { ApiErrorResponse } from '@mangostudio/shared/contracts';
-import { ERROR_CODES } from '@mangostudio/shared/errors';
+import { type ApiErrorResponse, ERROR_CODES } from '@mangostudio/shared/errors';
 import { type Elysia, t } from 'elysia';
 import { getDb } from '../../../db/database';
 import { requireAuth } from '../../../plugins/auth-middleware';
 import { parseQueryInt } from '../../../utils/query';
 import { NoModelAvailableError } from '../../generation/application/resolve-model';
+import { WorkdirValidationError } from '../../workspaces/application/workdir-validation';
+import { WorkspacePathError } from '../../workspaces/application/workspace-path';
 import {
   compactChatUseCase,
   EmptyChatCompactionError,
@@ -83,23 +84,36 @@ export const chatRoutes = (app: Elysia) =>
       /** Update a chat owned by the authenticated user. */
       .put(
         '/:id',
-        async ({ params, body, user }) => {
-          await updateChatUseCase(
-            {
-              chatId: params.id,
-              userId: user?.id ?? '',
-              updates: {
-                title: body.title,
-                model: body.model,
-                textModel: body.textModel,
-                imageModel: body.imageModel,
-                lastUsedMode: body.lastUsedMode,
-                selectedAgentId: body.selectedAgentId,
+        async ({ params, body, user, set }) => {
+          try {
+            await updateChatUseCase(
+              {
+                chatId: params.id,
+                userId: user?.id ?? '',
+                updates: {
+                  title: body.title,
+                  model: body.model,
+                  textModel: body.textModel,
+                  imageModel: body.imageModel,
+                  lastUsedMode: body.lastUsedMode,
+                  selectedAgentId: body.selectedAgentId,
+                  workdir: body.workdir,
+                },
               },
-            },
-            getDb()
-          );
-          return { success: true };
+              getDb()
+            );
+            return { success: true };
+          } catch (error) {
+            if (error instanceof WorkdirValidationError) {
+              set.status = 422;
+              return apiError(error.message, ERROR_CODES.VALIDATION);
+            }
+            if (error instanceof WorkspacePathError) {
+              set.status = 400;
+              return apiError(error.message, ERROR_CODES.VALIDATION);
+            }
+            throw error;
+          }
         },
         {
           params: t.Object({ id: t.String() }),

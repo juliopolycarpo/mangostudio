@@ -106,6 +106,7 @@ export const UpdateChatBodySchema = Type.Object({
   imageModel: Type.Optional(Type.String()),
   lastUsedMode: Type.Optional(InteractionModeSchema),
   selectedAgentId: Type.Optional(Type.String()),
+  workdir: Type.Optional(Type.Union([Type.String(), Type.Null()])),
 });
 
 export type UpdateChatBody = Static<typeof UpdateChatBodySchema>;

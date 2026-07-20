@@ -1,4 +1,7 @@
 import { afterEach, beforeAll, describe, expect, it } from 'bun:test';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { getDb } from '../../../src/db/database';
 import { chatRoutes } from '../../../src/modules/chats/http/chat-routes';
 import { createTurnCheckpointPart } from '../../../src/modules/generation/application/turn-checkpoint';
@@ -27,15 +30,23 @@ beforeAll(async () => {
 
 let restoreAuth: (() => void) | null = null;
 let previousOpenAICompatibleProvider: AIProvider | null = null;
+const tempDirs: string[] = [];
 
-afterEach(() => {
+afterEach(async () => {
   restoreAuth?.();
   restoreAuth = null;
   if (previousOpenAICompatibleProvider) {
     registerProvider(previousOpenAICompatibleProvider);
   }
   previousOpenAICompatibleProvider = null;
+  await Promise.all(tempDirs.splice(0).map((path) => rm(path, { recursive: true, force: true })));
 });
+
+async function createTempDir(): Promise<string> {
+  const path = await mkdtemp(join(tmpdir(), 'mango-chat-workdir-'));
+  tempDirs.push(path);
+  return path;
+}
 
 function registerSummaryProvider(summaryText: string) {
   try {
@@ -357,6 +368,85 @@ describe('PUT /chats/:id', () => {
       .where('id', '=', chatId)
       .executeTakeFirst();
     expect(row?.title).toBe('Updated Title');
+  });
+
+  it('sets and clears a validated working directory', async () => {
+    const db = getDb();
+    const chatId = `workdir-target-${Date.now()}`;
+    const workdir = await createTempDir();
+    await mkdir(join(workdir, 'project'));
+    await db
+      .insertInto('chats')
+      .values({
+        id: chatId,
+        title: 'Workdir Chat',
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        model: null,
+        userId: TEST_USER.id,
+      })
+      .execute();
+
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, chatRoutes);
+    restoreAuth = restore;
+    const update = (value: string | null) =>
+      app.handle(
+        new Request(`http://localhost/chats/${chatId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ workdir: value }),
+        })
+      );
+
+    const setResponse = await update(join(workdir, 'project'));
+    expect(setResponse.status).toBe(200);
+    expect(
+      await db.selectFrom('chats').select('workdir').where('id', '=', chatId).executeTakeFirst()
+    ).toEqual({ workdir: join(workdir, 'project') });
+
+    const clearResponse = await update(null);
+    expect(clearResponse.status).toBe(200);
+    expect(
+      await db.selectFrom('chats').select('workdir').where('id', '=', chatId).executeTakeFirst()
+    ).toEqual({ workdir: null });
+  });
+
+  it('rejects a workdir that is missing or not a directory', async () => {
+    const db = getDb();
+    const chatId = `invalid-workdir-${Date.now()}`;
+    const root = await createTempDir();
+    const file = join(root, 'file.txt');
+    await writeFile(file, 'file');
+    await db
+      .insertInto('chats')
+      .values({
+        id: chatId,
+        title: 'Invalid Workdir Chat',
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        model: null,
+        userId: TEST_USER.id,
+      })
+      .execute();
+
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, chatRoutes);
+    restoreAuth = restore;
+    const update = (workdir: string) =>
+      app.handle(
+        new Request(`http://localhost/chats/${chatId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ workdir }),
+        })
+      );
+
+    const missing = await update(join(root, 'missing'));
+    const notDirectory = await update(file);
+
+    expect(missing.status).toBe(422);
+    expect(await missing.json()).toMatchObject({ code: 'VALIDATION' });
+    expect(notDirectory.status).toBe(422);
+    expect(await notDirectory.json()).toMatchObject({ code: 'VALIDATION' });
   });
 
   it('returns 422 when body is missing required schema fields', async () => {

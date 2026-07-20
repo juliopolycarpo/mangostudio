@@ -76,6 +76,15 @@ describe('executeGrep', () => {
     expect(lines).toEqual([1, 1, 1]);
   });
 
+  it('uses the chat workdir when path is omitted', async () => {
+    await seedFile(join(tempDir, 'workdir.txt'), 'find this marker');
+
+    const result = await executeGrep({ pattern: 'marker' }, { ...makeContext(), workdir: tempDir });
+
+    expect(result.path).toBe(tempDir);
+    expect(result.matches).toHaveLength(1);
+  });
+
   it('respects the glob filter on directory searches', async () => {
     await seedTree();
     const result = await executeGrep(

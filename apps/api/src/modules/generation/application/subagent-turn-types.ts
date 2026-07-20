@@ -52,6 +52,7 @@ export interface SubagentRuntimeInput {
   readonly db: Kysely<Database>;
   readonly userId: string;
   readonly chatId: string;
+  readonly workdir?: string;
   readonly parentAgentProfile: AgentProfile;
   readonly parentModelName: string;
   readonly parentMode: 'chat' | 'agent';

@@ -16,6 +16,7 @@ interface ChatsTable {
   imageModel: string | null;
   lastUsedMode: string | null;
   selectedAgentId: string | null;
+  workdir: string | null;
   userId: string | null;
   lastProviderState: string | null;
   lastContextState: string | null;

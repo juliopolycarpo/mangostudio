@@ -42,6 +42,12 @@ function ChatRoute() {
       isAgentListLoading={app.isAgentListLoading}
       onAgentExecutionModeChange={app.setAgentExecutionMode}
       onSelectedAgentIdChange={app.setSelectedAgentId}
+      workdir={app.currentWorkdir}
+      workspaceSettings={app.settings.workspaceSettings}
+      isWorkdirPickerOpen={app.isWorkdirPickerOpen}
+      onOpenWorkdirPicker={app.openWorkdirPicker}
+      onCloseWorkdirPicker={app.closeWorkdirPicker}
+      onSelectWorkdir={app.selectWorkdir}
       onResumeInterruptedTurn={app.handleResumeInterruptedTurn}
       onDismissInterruptedTurn={app.handleDismissInterruptedTurn}
     />

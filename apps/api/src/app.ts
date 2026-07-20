@@ -20,6 +20,7 @@ import { mcpServerRoutes } from './modules/mcp-servers/http/mcp-server-routes';
 import { messageRoutes } from './modules/messages/http/message-routes';
 import { skillRoutes } from './modules/skills/http/skill-routes';
 import { todoRoutes } from './modules/todos/http/todo-routes';
+import { workspaceRoutes } from './modules/workspaces/http/workspace-routes';
 import { errorHandler } from './plugins/error-handler';
 import { rateLimit } from './plugins/rate-limit';
 import { classifyRateLimit } from './plugins/rate-limit-policy';
@@ -64,7 +65,8 @@ const api = new Elysia({ prefix: '/api' })
   .use(turnRecoveryRoutes)
   .use(settingsRoutes)
   .use(skillRoutes)
-  .use(mcpServerRoutes);
+  .use(mcpServerRoutes)
+  .use(workspaceRoutes);
 
 /**
  * Main application instance.

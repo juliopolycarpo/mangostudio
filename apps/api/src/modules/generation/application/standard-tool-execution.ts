@@ -102,6 +102,7 @@ export interface DelegationRuntime {
   parentAgentProfile: AgentProfile;
   parentModelName: string;
   interactionMode: 'chat' | 'agent';
+  workdir?: string;
   settings: MultiAgentSettings;
   signal?: AbortSignal;
   state: { subagentCallCount: number };
@@ -144,6 +145,7 @@ export type ToolExecutionProgressItem =
 export interface StandardToolExecutionContext {
   userId: string;
   chatId: string;
+  workdir?: string;
   settingsByToolName: ReadonlyMap<string, EffectiveToolSettings>;
   allowedToolNames: ReadonlySet<string>;
   delegationRuntime?: DelegationRuntime;
@@ -271,6 +273,7 @@ async function executeStandardToolCall(
           {
             userId: context.userId,
             chatId: context.chatId,
+            workdir: context.workdir,
             parameters: {},
             signal: timeoutController.signal,
           },
@@ -537,6 +540,7 @@ async function executeDelegationToolCall(
     db: runtime.db,
     userId: runtime.userId,
     chatId: runtime.chatId,
+    workdir: runtime.workdir,
     parentAgentProfile: runtime.parentAgentProfile,
     parentModelName: runtime.parentModelName,
     parentMode: runtime.interactionMode,

@@ -26,6 +26,9 @@ export function useAppState() {
     currentChatId: chats.currentChatId,
     currentChat,
     updateChatAgentSelection: chats.updateChatAgentSelection,
+    defaultWorkdir: settings.workspaceSettings.defaultWorkdir,
+    updateChatWorkdir: chats.updateChatWorkdir,
+    addRecentWorkdir: settings.addRecentWorkdir,
   });
 
   const textGen = useTextGeneration({
@@ -64,6 +67,8 @@ export function useAppState() {
     selectedAgentId: agentSelection.selectedAgentId,
     agents: agentSelection.agents,
     isAgentListLoading: agentSelection.isAgentListLoading,
+    currentWorkdir: agentSelection.currentWorkdir,
+    isWorkdirPickerOpen: agentSelection.isWorkdirPickerOpen,
     isGenerating: textGen.isGenerating,
     chats: chats.chats,
     currentChatId: chats.currentChatId,
@@ -82,6 +87,9 @@ export function useAppState() {
     setImageToolIntent: generationControls.setImageToolIntent,
     setAgentExecutionMode: agentSelection.setAgentExecutionMode,
     setSelectedAgentId: agentSelection.setSelectedAgentId,
+    openWorkdirPicker: agentSelection.openWorkdirPicker,
+    closeWorkdirPicker: agentSelection.closeWorkdirPicker,
+    selectWorkdir: agentSelection.selectWorkdir,
     handleNewChat: chatActions.handleNewChat,
     handleUpdateChatModel: chatActions.handleUpdateChatModel,
     handleUpdateChatTitle: chatActions.handleUpdateChatTitle,

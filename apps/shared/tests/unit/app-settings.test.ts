@@ -6,6 +6,7 @@ import {
   DEFAULT_CONTEXT_SETTINGS,
   DEFAULT_MULTI_AGENT_SETTINGS,
   DEFAULT_PROMPT_SETTINGS,
+  DEFAULT_WORKSPACE_SETTINGS,
   IMAGE_QUALITY_OPTIONS,
   MAX_SUBAGENT_CALLS_MAX,
   MAX_SUBAGENT_CALLS_MIN,
@@ -17,9 +18,62 @@ import {
   normalizeContextSettings,
   normalizeMultiAgentSettings,
   normalizePromptSettings,
+  normalizeWorkspaceSettings,
   SUBAGENT_MAX_TURNS_MAX,
   SUBAGENT_MAX_TURNS_MIN,
 } from '../../src/app-settings';
+
+describe('normalizeWorkspaceSettings', () => {
+  it('falls back to defaults when input is not an object', () => {
+    expect(normalizeWorkspaceSettings(undefined)).toEqual(DEFAULT_WORKSPACE_SETTINGS);
+    expect(normalizeWorkspaceSettings(null)).toEqual(DEFAULT_WORKSPACE_SETTINGS);
+    expect(normalizeWorkspaceSettings('~/projects')).toEqual(DEFAULT_WORKSPACE_SETTINGS);
+  });
+
+  it('drops invalid recents, deduplicates them, and caps the list', () => {
+    expect(
+      normalizeWorkspaceSettings({
+        defaultWorkdir: '/workspace/default',
+        recentWorkdirs: [
+          '/workspace/0',
+          42,
+          '/workspace/1',
+          '/workspace/0',
+          '',
+          '/workspace/2',
+          '/workspace/3',
+          '/workspace/4',
+          '/workspace/5',
+          '/workspace/6',
+          '/workspace/7',
+          '/workspace/8',
+          '/workspace/9',
+          '/workspace/10',
+        ],
+      })
+    ).toEqual({
+      defaultWorkdir: '/workspace/default',
+      recentWorkdirs: [
+        '/workspace/0',
+        '/workspace/1',
+        '/workspace/2',
+        '/workspace/3',
+        '/workspace/4',
+        '/workspace/5',
+        '/workspace/6',
+        '/workspace/7',
+        '/workspace/8',
+        '/workspace/9',
+      ],
+    });
+  });
+
+  it('falls back invalid fields independently', () => {
+    expect(
+      normalizeWorkspaceSettings({ defaultWorkdir: false, recentWorkdirs: 'not-an-array' })
+    ).toEqual(DEFAULT_WORKSPACE_SETTINGS);
+  });
+});
 
 describe('normalizeChatTitleSettings', () => {
   it('falls back to defaults when input is not an object', () => {

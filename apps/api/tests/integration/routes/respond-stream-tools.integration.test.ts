@@ -1,6 +1,10 @@
 import { afterEach, beforeAll, describe, expect, it, mock } from 'bun:test';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { respondStreamRoutes } from '../../../src/modules/generation/http/respond-stream-routes';
 import type { AgentTurnRequest } from '../../../src/services/providers/types';
+import { isShellAvailable } from '../../../src/services/tools/builtin/_shell-exec';
 import { insertTestUser, type UserFixture } from '../../support/factories';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
 import {
@@ -26,11 +30,13 @@ beforeAll(async () => {
 });
 
 let restoreAuth: (() => void) | null = null;
+const tempDirs: string[] = [];
 
 afterEach(async () => {
   restoreAuth?.();
   restoreAuth = null;
   await restoreAllMocks();
+  await Promise.all(tempDirs.splice(0).map((path) => rm(path, { recursive: true, force: true })));
 });
 
 describe('POST /respond/stream — tools', () => {
@@ -299,4 +305,71 @@ describe('POST /respond/stream — tools', () => {
     expect(response.status).toBe(200);
     expect(toolResult?.result).toMatchObject({ timezone: 'America/Sao_Paulo', locale: 'pt-BR' });
   });
+
+  it.skipIf(!isShellAvailable('bash'))(
+    'runs shell calls without cwd from the chat workdir',
+    async () => {
+      const workdir = await mkdtemp(join(tmpdir(), 'mango-stream-workdir-'));
+      tempDirs.push(workdir);
+      let iteration = 0;
+      let capturedToolResults: AgentTurnRequest['toolResults'];
+      let capturedSystemPrompt: string | undefined;
+
+      await mockVerifiedChatOwnership(workdir);
+      await mock.module(
+        '../../../src/modules/tool-settings/infrastructure/tool-settings-repository',
+        () => ({
+          listSavedToolSettings: () =>
+            Promise.resolve(new Map([['bash', { enabled: true, parameters: {} }]])),
+        })
+      );
+      await mock.module('../../../src/services/tools', () => ({
+        getAllTools: realGetAllTools,
+        getAllToolDefinitions: realGetAllToolDefinitions,
+        executeTool: realExecuteTool,
+        getTool: realGetTool,
+        getSafeEffectiveToolSettings: realGetSafeEffectiveToolSettings,
+      }));
+      await mockProviderRegistry(async function* streamShellWorkdir(req: AgentTurnRequest) {
+        await Promise.resolve();
+        iteration += 1;
+        capturedSystemPrompt ??= req.systemPrompt;
+        if (iteration > 1) {
+          capturedToolResults = req.toolResults;
+          yield { type: 'assistant_text_delta', text: 'Done' };
+          yield { type: 'turn_completed', providerState: null };
+          return;
+        }
+
+        yield { type: 'tool_call_started', callId: 'bash-workdir', name: 'bash' };
+        yield {
+          type: 'tool_call_completed',
+          callId: 'bash-workdir',
+          name: 'bash',
+          arguments: JSON.stringify({ command: 'pwd' }),
+        };
+        yield { type: 'turn_completed', providerState: null };
+      });
+      await mock.module('../../../src/db/database', mockPassThroughDb(TEST_USER.id));
+
+      const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
+      restoreAuth = restore;
+      const response = await app.handle(
+        buildRespondStreamRequest({
+          chatId: 'test-chat',
+          prompt: 'Print the current directory',
+          model: 'test-model',
+          agentMode: 'agent',
+        })
+      );
+      await response.text();
+
+      const shellResult = JSON.parse(capturedToolResults?.[0]?.result ?? '{}') as {
+        stdout?: string;
+      };
+      expect(response.status).toBe(200);
+      expect(shellResult.stdout?.trim()).toBe(workdir);
+      expect(capturedSystemPrompt).toContain(`Working directory:\n${workdir}`);
+    }
+  );
 });

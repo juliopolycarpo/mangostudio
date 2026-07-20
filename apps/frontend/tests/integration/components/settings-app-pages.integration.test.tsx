@@ -57,6 +57,9 @@ function GeneralSettingsHarness() {
       setMaxSubagentCalls={settings.setMaxSubagentCalls}
       setSubagentTimeoutMs={settings.setSubagentTimeoutMs}
       setDefaultSubagentMaxTurns={settings.setDefaultSubagentMaxTurns}
+      workspaceSettings={settings.workspaceSettings}
+      setDefaultWorkdir={settings.setDefaultWorkdir}
+      addRecentWorkdir={settings.addRecentWorkdir}
     />
   );
 }

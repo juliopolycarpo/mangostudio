@@ -27,6 +27,9 @@ function GeneralSettingsRoute() {
       setMaxSubagentCalls={app.settings.setMaxSubagentCalls}
       setSubagentTimeoutMs={app.settings.setSubagentTimeoutMs}
       setDefaultSubagentMaxTurns={app.settings.setDefaultSubagentMaxTurns}
+      workspaceSettings={app.settings.workspaceSettings}
+      setDefaultWorkdir={app.settings.setDefaultWorkdir}
+      addRecentWorkdir={app.settings.addRecentWorkdir}
     />
   );
 }

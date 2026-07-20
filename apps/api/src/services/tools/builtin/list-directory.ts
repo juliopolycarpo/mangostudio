@@ -5,6 +5,7 @@
 
 import type { Dirent } from 'node:fs';
 import { readdir } from 'node:fs/promises';
+import { getOptionalString } from '../arg-parsing';
 import { registerTool } from '../registry';
 import type { ToolContext } from '../types';
 import {
@@ -18,7 +19,7 @@ import {
 const LIST_DIRECTORY_TOOL_NAME = 'list_directory';
 
 export interface ListDirectoryToolArgs {
-  path: string;
+  path?: string;
 }
 
 interface ListDirectoryEntry {
@@ -42,10 +43,10 @@ const definition = {
     properties: {
       path: {
         type: 'string',
-        description: 'Absolute directory path or path starting with ~ (home directory).',
+        description:
+          'Optional directory path. Defaults to the chat working directory when available.',
       },
     },
-    required: ['path'],
     additionalProperties: false,
   },
 };
@@ -64,18 +65,19 @@ export async function executeListDirectory(
   context: ToolContext
 ): Promise<ListDirectoryToolResult> {
   const settings = normalizeListDirectoryToolSettings(context.parameters);
-  const resolvedPath = resolveAndValidatePath(args.path, settings);
+  const path = getRequiredPathArg(args.path ?? context.workdir, 'path');
+  const resolvedPath = resolveAndValidatePath(path, settings);
 
   let dirents: Dirent[];
   try {
     dirents = await readdir(resolvedPath, { withFileTypes: true });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to list directory';
-    throw new PathAccessError(`Cannot list "${args.path}": ${message}`);
+    throw new PathAccessError(`Cannot list "${path}": ${message}`);
   }
 
   return {
-    path: args.path,
+    path,
     entries: dirents.map((entry) => ({
       name: String(entry.name),
       type: entry.isDirectory() ? 'directory' : 'file',
@@ -88,8 +90,8 @@ async function execute(
   args: Record<string, unknown>,
   context: ToolContext
 ): Promise<ListDirectoryToolResult> {
-  const path = getRequiredPathArg(args.path, 'path');
-  return executeListDirectory({ path }, context);
+  const path = getOptionalString(args.path);
+  return executeListDirectory({ ...(path ? { path } : {}) }, context);
 }
 
 /** Registers this built-in tool. // Usage: register() */

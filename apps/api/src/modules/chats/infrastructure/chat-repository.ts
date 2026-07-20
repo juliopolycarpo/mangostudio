@@ -15,6 +15,7 @@ export interface UpdateChatData {
   imageModel?: string;
   lastUsedMode?: string;
   selectedAgentId?: string;
+  workdir?: string | null;
 }
 
 export interface ChatRecord {
@@ -27,6 +28,7 @@ export interface ChatRecord {
   imageModel: string | null;
   lastUsedMode: string | null;
   selectedAgentId: string | null;
+  workdir: string | null;
   userId: string | null;
   lastProviderState: string | null;
   lastContextState: string | null;
@@ -59,6 +61,7 @@ export async function createChat(data: CreateChatData, db: Kysely<Database>): Pr
     imageModel: null,
     lastUsedMode: null,
     selectedAgentId: null,
+    workdir: null,
     userId: data.userId,
     lastProviderState: null,
     lastContextState: null,
@@ -80,6 +83,7 @@ export async function updateChat(
   if (data.imageModel !== undefined) updates.imageModel = data.imageModel;
   if (data.lastUsedMode !== undefined) updates.lastUsedMode = data.lastUsedMode;
   if (data.selectedAgentId !== undefined) updates.selectedAgentId = data.selectedAgentId;
+  if (data.workdir !== undefined) updates.workdir = data.workdir;
 
   if (Object.keys(updates).length === 0) return;
 
@@ -106,4 +110,23 @@ export async function verifyChatOwnership(
     .where('id', '=', chatId)
     .executeTakeFirst();
   return chat?.userId === userId;
+}
+
+/** Chat fields a generation turn needs; excludes the large persisted state blobs. */
+export interface OwnedChatRecord {
+  workdir: string | null;
+}
+
+// biome-ignore lint/suspicious/useAwait: Kysely returns a promise-like query result.
+export async function getOwnedChat(
+  chatId: string,
+  userId: string,
+  db: Kysely<Database>
+): Promise<OwnedChatRecord | undefined> {
+  return db
+    .selectFrom('chats')
+    .select('workdir')
+    .where('id', '=', chatId)
+    .where('userId', '=', userId)
+    .executeTakeFirst();
 }
