@@ -21,7 +21,7 @@ import { executeTool, getSafeEffectiveToolSettings, getTool } from '../../../ser
 import { ASK_USER_QUESTION_TOOL_NAME } from '../../../services/tools/builtin/ask-user-question';
 import { DELEGATE_TO_AGENT_TOOL_NAME } from '../../../services/tools/builtin/delegate-to-agent';
 import { TODO_READ_TOOL_NAME, TODO_WRITE_TOOL_NAME } from '../../../services/tools/builtin/todo';
-import type { EffectiveToolSettings } from '../../../services/tools/types';
+import type { EffectiveToolSettings, WorkdirPolicy } from '../../../services/tools/types';
 import { appendSkillsPromptSection } from '../../skills/application/skills-prompt-section';
 import { appendWorkdirPromptSection } from '../../workspaces/application/workdir-prompt-section';
 import type { ResolvedAgentRuntime } from './resolve-agent-runtime';
@@ -118,7 +118,8 @@ export async function prepareSubagentTurn(
   // Mirrors resolve-turn-context: the workdir is announced only for agent-mode turns.
   const systemPrompt = appendWorkdirPromptSection(
     runtime.effectiveSystemPrompt,
-    input.parentMode === 'agent' ? input.workdir : undefined
+    input.parentMode === 'agent' ? input.workdir : undefined,
+    input.parentMode === 'agent' && Boolean(input.workdirPolicy?.restricted)
   );
 
   return {
@@ -253,6 +254,7 @@ export async function runSubagentStreamLoop(
       settingsByToolName: runtime.toolSettingsByName,
       tools: session.tools,
       workdir: input.workdir,
+      workdirPolicy: input.workdirPolicy,
       signal: input.signal,
     });
     isFirstIteration = false;
@@ -580,6 +582,7 @@ async function executeSubagentTools(input: {
   readonly userId: string;
   readonly chatId: string;
   readonly workdir?: string;
+  readonly workdirPolicy?: WorkdirPolicy;
   readonly allowedToolNames: ReadonlySet<string>;
   readonly settingsByToolName: ReadonlyMap<string, EffectiveToolSettings>;
   readonly tools: Array<{ callId: string; name: string; isError?: boolean }>;
@@ -641,6 +644,7 @@ async function executeSubagentTools(input: {
               userId: input.userId,
               chatId: input.chatId,
               workdir: input.workdir,
+              workdirPolicy: input.workdirPolicy,
               parameters: {},
             },
             getSafeEffectiveToolSettings(tool, input.settingsByToolName.get(call.name))

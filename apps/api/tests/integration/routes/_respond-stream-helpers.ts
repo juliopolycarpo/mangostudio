@@ -208,7 +208,7 @@ export function buildRespondStreamRequest(body: Record<string, unknown>): Reques
 export async function mockVerifiedChatOwnership(workdir: string | null = null): Promise<void> {
   await mock.module('../../../src/modules/chats/infrastructure/chat-repository', () => ({
     verifyChatOwnership: () => Promise.resolve(true),
-    getOwnedChat: () => Promise.resolve({ workdir }),
+    getOwnedChat: () => Promise.resolve({ workdir, restrictToolsToWorkdir: null }),
   }));
 }
 

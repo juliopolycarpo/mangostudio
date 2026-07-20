@@ -17,6 +17,8 @@ interface ChatsTable {
   lastUsedMode: string | null;
   selectedAgentId: string | null;
   workdir: string | null;
+  /** null = inherit workspace default; 0/1 stored as boolean override */
+  restrictToolsToWorkdir: number | null;
   userId: string | null;
   lastProviderState: string | null;
   lastContextState: string | null;

@@ -315,6 +315,8 @@ export function useGlobalSettings() {
       updateMultiAgentSettings({ defaultMaxTurns: value }),
     setDefaultWorkdir: (value: string) =>
       updateWorkspaceSettings((current) => ({ ...current, defaultWorkdir: value })),
+    setRestrictToolsToWorkdir: (value: boolean) =>
+      updateWorkspaceSettings((current) => ({ ...current, restrictToolsToWorkdir: value })),
     addRecentWorkdir: (value: string) =>
       updateWorkspaceSettings((current) => ({
         ...current,

@@ -8,7 +8,7 @@ import { stat } from 'node:fs/promises';
 import { relative, resolve as resolvePath } from 'node:path';
 import { clampIntegerSetting, getOptionalString, getRequiredString } from '../arg-parsing';
 import { registerTool } from '../registry';
-import type { ToolContext } from '../types';
+import type { ToolContext, WorkdirPolicy } from '../types';
 import {
   expandHome,
   getRequiredPathArg,
@@ -137,7 +137,7 @@ export async function executeGrep(
   const settings = normalizeGrepToolSettings(context.parameters);
   const regex = buildRegex(args.pattern, args.caseInsensitive === true);
   const path = getRequiredPathArg(args.path ?? context.workdir, 'path');
-  const rootPath = resolveAndValidatePath(expandHome(path), settings);
+  const rootPath = resolveAndValidatePath(expandHome(path), settings, context.workdirPolicy);
   const rootStats = await statSafe(rootPath, path);
 
   const matches: GrepMatch[] = [];
@@ -177,7 +177,7 @@ export async function executeGrep(
       absolute: false,
     })) {
       const absolute = resolvePath(rootPath, relativePath);
-      if (!isPathAllowed(absolute, settings)) continue;
+      if (!isPathAllowed(absolute, settings, context.workdirPolicy)) continue;
       filesScanned += 1;
       const fileTruncated = await searchFile({
         absolute,
@@ -277,9 +277,13 @@ async function statSafe(absolute: string, original: string) {
   }
 }
 
-function isPathAllowed(absolute: string, settings: PathValidationSettings): boolean {
+function isPathAllowed(
+  absolute: string,
+  settings: PathValidationSettings,
+  workdirPolicy?: WorkdirPolicy
+): boolean {
   try {
-    resolveAndValidatePath(absolute, settings);
+    resolveAndValidatePath(absolute, settings, workdirPolicy);
     return true;
   } catch (error) {
     if (error instanceof PathAccessError) return false;

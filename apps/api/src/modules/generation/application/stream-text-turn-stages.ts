@@ -31,6 +31,7 @@ import type {
   ToolDefinition,
 } from '../../../services/providers/types';
 import { GENERATE_IMAGE_TOOL_NAME } from '../../../services/tools/builtin/generate-image';
+import type { WorkdirPolicy } from '../../../services/tools/types';
 import { generateId } from '../../../utils/id';
 import { resolveProviderRuntimeAttachments } from '../../attachments/application/runtime-attachment-resolver';
 import { loadHistory, loadRichHistory } from '../../messages/infrastructure/message-repository';
@@ -79,6 +80,7 @@ export interface StreamTextTurnSession {
   startTime: number;
   interactionMode: 'chat' | 'agent';
   workdir: string | undefined;
+  workdirPolicy: WorkdirPolicy | undefined;
   resolvedModel: ResolvedModel;
   provider: AIProvider;
   agentRuntime: ResolvedAgentRuntime;
@@ -175,6 +177,7 @@ export async function prepareStreamTextTurn(
     attachmentIds,
     interactionMode,
     workdir,
+    workdirPolicy,
     chatId,
     userId,
   } = turnContext;
@@ -233,6 +236,7 @@ export async function prepareStreamTextTurn(
     startTime: now,
     interactionMode,
     workdir,
+    workdirPolicy,
     resolvedModel,
     provider,
     agentRuntime,
@@ -572,6 +576,7 @@ async function* executePendingToolCalls(
     allowedToolNames,
     interactionMode,
     workdir,
+    workdirPolicy,
     resolvedModel,
     delegationState,
     signal,
@@ -587,6 +592,7 @@ async function* executePendingToolCalls(
     parentModelName: modelId,
     interactionMode,
     workdir,
+    workdirPolicy,
     settings: multiAgentSettings,
     signal,
     state: delegationState,
@@ -601,6 +607,7 @@ async function* executePendingToolCalls(
       userId,
       chatId,
       workdir,
+      workdirPolicy,
       settingsByToolName: toolSettings,
       allowedToolNames,
       delegationRuntime,
@@ -633,6 +640,7 @@ async function* executePendingToolCalls(
             userId,
             chatId,
             workdir,
+            workdirPolicy,
             settingsByToolName: toolSettings,
             allowedToolNames,
             delegationRuntime,

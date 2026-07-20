@@ -29,6 +29,7 @@ function GeneralSettingsRoute() {
       setDefaultSubagentMaxTurns={app.settings.setDefaultSubagentMaxTurns}
       workspaceSettings={app.settings.workspaceSettings}
       setDefaultWorkdir={app.settings.setDefaultWorkdir}
+      setRestrictToolsToWorkdir={app.settings.setRestrictToolsToWorkdir}
       addRecentWorkdir={app.settings.addRecentWorkdir}
     />
   );

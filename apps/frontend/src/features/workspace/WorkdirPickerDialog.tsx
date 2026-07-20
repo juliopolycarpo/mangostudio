@@ -23,6 +23,10 @@ interface WorkdirPickerDialogProps {
   defaultWorkdir?: string;
   recentWorkdirs?: ReadonlyArray<string>;
   showUseDefault?: boolean;
+  showRestrictToolsOverride?: boolean;
+  globalRestrictToolsToWorkdir?: boolean;
+  restrictToolsToWorkdirOverride?: boolean | null;
+  onRestrictToolsToWorkdirOverrideChange?: (value: boolean | null) => void | Promise<void>;
   onSelect: (path: string) => void | Promise<void>;
   onClose: () => void;
 }
@@ -54,6 +58,10 @@ export function WorkdirPickerDialog({
   defaultWorkdir = '',
   recentWorkdirs = [],
   showUseDefault = true,
+  showRestrictToolsOverride = false,
+  globalRestrictToolsToWorkdir = false,
+  restrictToolsToWorkdirOverride = null,
+  onRestrictToolsToWorkdirOverrideChange,
   onSelect,
   onClose,
 }: WorkdirPickerDialogProps) {
@@ -301,6 +309,41 @@ export function WorkdirPickerDialog({
             </div>
           </main>
         </div>
+
+        {showRestrictToolsOverride && onRestrictToolsToWorkdirOverrideChange ? (
+          <div className="border-t border-outline-variant/15 px-5 py-4 sm:px-6">
+            <label
+              htmlFor="restrict-tools-override"
+              className="mb-2 block font-label text-[10px] font-bold uppercase tracking-widest text-on-surface-variant/70"
+            >
+              {s.restrictToolsChatOverrideLabel}
+            </label>
+            <select
+              id="restrict-tools-override"
+              value={
+                restrictToolsToWorkdirOverride === null
+                  ? 'inherit'
+                  : restrictToolsToWorkdirOverride
+                    ? 'on'
+                    : 'off'
+              }
+              onChange={(event) => {
+                const next = event.target.value === 'inherit' ? null : event.target.value === 'on';
+                void onRestrictToolsToWorkdirOverrideChange(next);
+              }}
+              className="w-full rounded-xl border border-outline-variant/20 bg-surface-container-lowest px-3 py-2 text-sm text-on-surface outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
+            >
+              <option value="inherit">
+                {s.restrictToolsInherit.replace(
+                  '{state}',
+                  globalRestrictToolsToWorkdir ? s.restrictToolsGlobalOn : s.restrictToolsGlobalOff
+                )}
+              </option>
+              <option value="on">{s.restrictToolsOn}</option>
+              <option value="off">{s.restrictToolsOff}</option>
+            </select>
+          </div>
+        ) : null}
 
         <footer className="flex flex-col gap-3 border-t border-outline-variant/15 px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
           <div className="min-h-5 text-xs text-error" role="alert">

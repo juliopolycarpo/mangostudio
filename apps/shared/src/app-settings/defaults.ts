@@ -106,6 +106,7 @@ export const DEFAULT_SKILL_SOURCE_SETTINGS: SkillSourceSettings = {
 export const DEFAULT_WORKSPACE_SETTINGS: WorkspaceSettings = {
   defaultWorkdir: '',
   recentWorkdirs: [],
+  restrictToolsToWorkdir: false,
 };
 
 export const DEFAULT_GIT_SETTINGS: GitSettings = {
@@ -362,6 +363,10 @@ export function normalizeWorkspaceSettings(value: unknown): WorkspaceSettings {
   return {
     defaultWorkdir: typeof value.defaultWorkdir === 'string' ? value.defaultWorkdir : '',
     recentWorkdirs,
+    restrictToolsToWorkdir:
+      typeof value.restrictToolsToWorkdir === 'boolean'
+        ? value.restrictToolsToWorkdir
+        : DEFAULT_WORKSPACE_SETTINGS.restrictToolsToWorkdir,
   };
 }
 

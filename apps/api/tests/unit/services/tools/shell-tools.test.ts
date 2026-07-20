@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   isShellAvailable,
   type ShellKind,
@@ -24,6 +26,7 @@ import { mergeToolSettings } from '../../../../src/services/tools/settings-polic
 import type { RegisteredTool, ToolContext } from '../../../../src/services/tools/types';
 
 const hasBash = isShellAvailable('bash');
+const outsideDir = tmpdir();
 const SHELL_KINDS: ShellKind[] = ['bash', 'zsh', 'powershell'];
 
 function snapshotRegistry(): RegisteredTool[] {
@@ -172,6 +175,31 @@ describe('shell tool registration and execution', () => {
     )) as { stdout: string };
 
     expect(result.stdout.trim()).toBe(tmpdir());
+  });
+
+  it.skipIf(!hasBash)('rejects a cwd outside the chat workdir when restricted', async () => {
+    const workdir = mkdtempSync(join(tmpdir(), 'shell-workdir-'));
+    try {
+      let threw = false;
+      try {
+        await executeTool(
+          'bash',
+          { command: 'pwd', cwd: outsideDir },
+          {
+            ...makeContext(),
+            workdir,
+            workdirPolicy: { root: workdir, restricted: true },
+          },
+          { enabled: true, parameters: {} }
+        );
+      } catch (error) {
+        threw = true;
+        expect((error as Error).message).toContain('outside the chat working directory');
+      }
+      expect(threw).toBe(true);
+    } finally {
+      rmSync(workdir, { recursive: true, force: true });
+    }
   });
 
   it.skipIf(!hasBash)('throws when the command argument is missing', async () => {

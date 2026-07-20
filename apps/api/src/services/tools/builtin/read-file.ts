@@ -58,7 +58,7 @@ export async function executeReadFile(
   context: ToolContext
 ): Promise<ReadFileToolResult> {
   const settings = normalizeReadFileToolSettings(context.parameters);
-  const resolvedPath = resolveAndValidatePath(args.path, settings);
+  const resolvedPath = resolveAndValidatePath(args.path, settings, context.workdirPolicy);
 
   const file = Bun.file(resolvedPath);
   const exists = await file.exists();

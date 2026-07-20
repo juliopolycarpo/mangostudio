@@ -84,7 +84,7 @@ export async function executeGlob(
   context: ToolContext
 ): Promise<GlobToolResult> {
   const settings = normalizeGlobToolSettings(context.parameters);
-  const cwd = resolveCwd(args.cwd ?? context.workdir, settings);
+  const cwd = resolveCwd(args.cwd ?? context.workdir, settings, context);
 
   const matches: string[] = [];
   let truncated = false;
@@ -116,15 +116,32 @@ export async function executeGlob(
   };
 }
 
-function resolveCwd(input: string | undefined, settings: PathValidationSettings): string {
+function resolveCwd(
+  input: string | undefined,
+  settings: PathValidationSettings,
+  context: ToolContext
+): string {
+  const policy = context.workdirPolicy;
   if (!input) {
-    return resolveAndValidatePath(process.cwd(), settings);
+    if (policy?.restricted) {
+      return resolveAndValidatePath(policy.root, settings, policy);
+    }
+    if (context.workdir) {
+      return resolveAndValidatePath(context.workdir, settings, policy);
+    }
+    return resolveAndValidatePath(process.cwd(), settings, policy);
   }
   const trimmed = input.trim();
   if (!trimmed) {
-    return resolveAndValidatePath(process.cwd(), settings);
+    if (policy?.restricted) {
+      return resolveAndValidatePath(policy.root, settings, policy);
+    }
+    if (context.workdir) {
+      return resolveAndValidatePath(context.workdir, settings, policy);
+    }
+    return resolveAndValidatePath(process.cwd(), settings, policy);
   }
-  return resolveAndValidatePath(expandHome(trimmed), settings);
+  return resolveAndValidatePath(expandHome(trimmed), settings, policy);
 }
 
 function execute(args: Record<string, unknown>, context: ToolContext): Promise<GlobToolResult> {

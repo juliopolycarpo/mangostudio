@@ -264,12 +264,14 @@ describe('useGlobalSettings', () => {
       expect(result.current.workspaceSettings).toEqual({
         defaultWorkdir: '/srv/projects/mango',
         recentWorkdirs: ['/srv/projects/other', '/srv/projects/mango'],
+        restrictToolsToWorkdir: false,
       })
     );
     await waitFor(() => expect(mockPut).toHaveBeenCalledTimes(1));
     expect(mockPut.mock.calls[0]?.[0].workspaceSettings).toEqual({
       defaultWorkdir: '/srv/projects/mango',
       recentWorkdirs: ['/srv/projects/other', '/srv/projects/mango'],
+      restrictToolsToWorkdir: false,
     });
   });
 

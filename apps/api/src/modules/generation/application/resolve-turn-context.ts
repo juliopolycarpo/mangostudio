@@ -1,6 +1,7 @@
 import type { ProviderType, ReasoningEffort } from '@mangostudio/shared';
 import type { AgentExecutionMode, AgentId, AgentProfile } from '@mangostudio/shared/agents';
 import type { MultiAgentSettings } from '@mangostudio/shared/app-settings';
+import { DEFAULT_WORKSPACE_SETTINGS } from '@mangostudio/shared/app-settings';
 import type { ContextSettings } from '@mangostudio/shared/chat';
 import type { ToolIntent } from '@mangostudio/shared/generation';
 import type { PromptSettings } from '@mangostudio/shared/prompt-rules';
@@ -14,11 +15,16 @@ import {
 import type { AIProvider, ToolDefinition } from '../../../services/providers/types';
 import { DELEGATE_TO_AGENT_TOOL_NAME } from '../../../services/tools/builtin/delegate-to-agent';
 import { GENERATE_IMAGE_TOOL_NAME } from '../../../services/tools/builtin/generate-image';
+import type { WorkdirPolicy } from '../../../services/tools/types';
 import { getAgentProfile } from '../../agents/application/agent-settings-service';
 import { getAppSettings } from '../../app-settings/application/app-settings-service';
 import { getOwnedChatOrThrow } from '../../chats/domain/chat-ownership';
 import { appendSkillsPromptSection } from '../../skills/application/skills-prompt-section';
 import { appendTodosPromptSection } from '../../todos/application/todos-prompt-section';
+import {
+  buildWorkdirPolicy,
+  resolveEffectiveRestrictToolsToWorkdir,
+} from '../../workspaces/application/workdir-policy';
 import { appendWorkdirPromptSection } from '../../workspaces/application/workdir-prompt-section';
 import { shouldExposeDelegateTool } from './delegate-tool-availability';
 import {
@@ -56,6 +62,7 @@ export interface TurnContext {
   attachmentIds: string[];
   interactionMode: 'chat' | 'agent';
   workdir: string | undefined;
+  workdirPolicy: WorkdirPolicy | undefined;
   resolvedModel: ResolvedModel;
   provider: AIProvider;
   agentRuntime: ResolvedAgentRuntime;
@@ -113,6 +120,12 @@ export async function resolveTurnContext(
   ]);
 
   const multiAgentSettings = appSettings.multiAgentSettings;
+  const restrictToolsToWorkdir = resolveEffectiveRestrictToolsToWorkdir(
+    appSettings.workspaceSettings?.restrictToolsToWorkdir ??
+      DEFAULT_WORKSPACE_SETTINGS.restrictToolsToWorkdir,
+    chat.restrictToolsToWorkdir
+  );
+  const workdirPolicy = buildWorkdirPolicy(workdir, restrictToolsToWorkdir);
   const delegateToolAvailable = shouldExposeDelegateTool({
     interactionMode,
     profile: agentRuntime.profile,
@@ -135,7 +148,11 @@ export async function resolveTurnContext(
     effectiveSystemPrompt = effectiveSystemPrompt ? `${effectiveSystemPrompt}\n\n${hint}` : hint;
   }
   if (interactionMode === 'agent') {
-    effectiveSystemPrompt = appendWorkdirPromptSection(effectiveSystemPrompt, workdir);
+    effectiveSystemPrompt = appendWorkdirPromptSection(
+      effectiveSystemPrompt,
+      workdir,
+      Boolean(workdirPolicy?.restricted)
+    );
   }
   effectiveSystemPrompt = await appendSkillsPromptSection(
     db,
@@ -159,6 +176,7 @@ export async function resolveTurnContext(
     attachmentIds,
     interactionMode,
     workdir,
+    workdirPolicy,
     resolvedModel,
     provider,
     agentRuntime,

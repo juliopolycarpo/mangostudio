@@ -107,6 +107,7 @@ export const UpdateChatBodySchema = Type.Object({
   lastUsedMode: Type.Optional(InteractionModeSchema),
   selectedAgentId: Type.Optional(Type.String()),
   workdir: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+  restrictToolsToWorkdir: Type.Optional(Type.Union([Type.Boolean(), Type.Null()])),
 });
 
 export type UpdateChatBody = Static<typeof UpdateChatBodySchema>;

@@ -90,6 +90,8 @@ export function useAppState() {
     openWorkdirPicker: agentSelection.openWorkdirPicker,
     closeWorkdirPicker: agentSelection.closeWorkdirPicker,
     selectWorkdir: agentSelection.selectWorkdir,
+    restrictToolsToWorkdirOverride: currentChat?.restrictToolsToWorkdir ?? null,
+    updateChatRestrictToolsToWorkdir: chats.updateChatRestrictToolsToWorkdir,
     handleNewChat: chatActions.handleNewChat,
     handleUpdateChatModel: chatActions.handleUpdateChatModel,
     handleUpdateChatTitle: chatActions.handleUpdateChatTitle,

@@ -66,7 +66,7 @@ export async function executeWriteFile(
   context: ToolContext
 ): Promise<WriteFileToolResult> {
   const settings = normalizeWriteFileToolSettings(context.parameters);
-  const resolvedPath = resolveAndValidatePath(args.path, settings);
+  const resolvedPath = resolveAndValidatePath(args.path, settings, context.workdirPolicy);
 
   const existingFile = Bun.file(resolvedPath);
   const created = !(await existingFile.exists());

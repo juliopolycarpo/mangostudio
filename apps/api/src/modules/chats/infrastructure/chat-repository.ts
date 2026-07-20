@@ -1,6 +1,16 @@
-import type { Kysely } from 'kysely';
+import type { Kysely, Selectable, Updateable } from 'kysely';
 import type { Database } from '../../../db/types';
 import { generateId } from '../../../utils/id';
+
+function mapChatRow(row: Selectable<Database['chats']>): ChatRecord {
+  return {
+    ...row,
+    restrictToolsToWorkdir:
+      row.restrictToolsToWorkdir === null || row.restrictToolsToWorkdir === undefined
+        ? null
+        : row.restrictToolsToWorkdir !== 0,
+  };
+}
 
 export interface CreateChatData {
   title: string;
@@ -16,6 +26,7 @@ export interface UpdateChatData {
   lastUsedMode?: string;
   selectedAgentId?: string;
   workdir?: string | null;
+  restrictToolsToWorkdir?: boolean | null;
 }
 
 export interface ChatRecord {
@@ -29,29 +40,30 @@ export interface ChatRecord {
   lastUsedMode: string | null;
   selectedAgentId: string | null;
   workdir: string | null;
+  restrictToolsToWorkdir: boolean | null;
   userId: string | null;
   lastProviderState: string | null;
   lastContextState: string | null;
 }
 
-// biome-ignore lint/suspicious/useAwait: Migrated from ESLint
 export async function listByUserId(userId: string, db: Kysely<Database>): Promise<ChatRecord[]> {
-  return db
+  const rows = await db
     .selectFrom('chats')
     .selectAll()
     .where('userId', '=', userId)
     .orderBy('updatedAt', 'desc')
     .execute();
+  return rows.map(mapChatRow);
 }
 
-// biome-ignore lint/suspicious/useAwait: Migrated from ESLint
 export async function getById(id: string, db: Kysely<Database>): Promise<ChatRecord | undefined> {
-  return db.selectFrom('chats').selectAll().where('id', '=', id).executeTakeFirst();
+  const row = await db.selectFrom('chats').selectAll().where('id', '=', id).executeTakeFirst();
+  return row ? mapChatRow(row) : undefined;
 }
 
 export async function createChat(data: CreateChatData, db: Kysely<Database>): Promise<ChatRecord> {
   const now = Date.now();
-  const chat = {
+  const chat: ChatRecord = {
     id: generateId(),
     title: data.title,
     createdAt: now,
@@ -62,11 +74,18 @@ export async function createChat(data: CreateChatData, db: Kysely<Database>): Pr
     lastUsedMode: null,
     selectedAgentId: null,
     workdir: null,
+    restrictToolsToWorkdir: null,
     userId: data.userId,
     lastProviderState: null,
     lastContextState: null,
   };
-  await db.insertInto('chats').values(chat).execute();
+  await db
+    .insertInto('chats')
+    .values({
+      ...chat,
+      restrictToolsToWorkdir: null,
+    })
+    .execute();
   return chat;
 }
 
@@ -84,12 +103,28 @@ export async function updateChat(
   if (data.lastUsedMode !== undefined) updates.lastUsedMode = data.lastUsedMode;
   if (data.selectedAgentId !== undefined) updates.selectedAgentId = data.selectedAgentId;
   if (data.workdir !== undefined) updates.workdir = data.workdir;
+  if (data.restrictToolsToWorkdir !== undefined) {
+    updates.restrictToolsToWorkdir = data.restrictToolsToWorkdir;
+  }
 
   if (Object.keys(updates).length === 0) return;
 
+  const dbUpdates: Updateable<Database['chats']> = {};
+  if (updates.title !== undefined) dbUpdates.title = updates.title;
+  if (updates.model !== undefined) dbUpdates.model = updates.model;
+  if (updates.textModel !== undefined) dbUpdates.textModel = updates.textModel;
+  if (updates.imageModel !== undefined) dbUpdates.imageModel = updates.imageModel;
+  if (updates.lastUsedMode !== undefined) dbUpdates.lastUsedMode = updates.lastUsedMode;
+  if (updates.selectedAgentId !== undefined) dbUpdates.selectedAgentId = updates.selectedAgentId;
+  if (updates.workdir !== undefined) dbUpdates.workdir = updates.workdir;
+  if (data.restrictToolsToWorkdir !== undefined) {
+    dbUpdates.restrictToolsToWorkdir =
+      data.restrictToolsToWorkdir === null ? null : data.restrictToolsToWorkdir ? 1 : 0;
+  }
+
   await db
     .updateTable('chats')
-    .set(updates)
+    .set(dbUpdates)
     .where('id', '=', id)
     .where('userId', '=', userId)
     .execute();
@@ -115,18 +150,26 @@ export async function verifyChatOwnership(
 /** Chat fields a generation turn needs; excludes the large persisted state blobs. */
 export interface OwnedChatRecord {
   workdir: string | null;
+  restrictToolsToWorkdir: boolean | null;
 }
 
-// biome-ignore lint/suspicious/useAwait: Kysely returns a promise-like query result.
 export async function getOwnedChat(
   chatId: string,
   userId: string,
   db: Kysely<Database>
 ): Promise<OwnedChatRecord | undefined> {
-  return db
+  const row = await db
     .selectFrom('chats')
-    .select('workdir')
+    .select(['workdir', 'restrictToolsToWorkdir'])
     .where('id', '=', chatId)
     .where('userId', '=', userId)
     .executeTakeFirst();
+  if (!row) return undefined;
+  return {
+    workdir: row.workdir,
+    restrictToolsToWorkdir:
+      row.restrictToolsToWorkdir === null || row.restrictToolsToWorkdir === undefined
+        ? null
+        : row.restrictToolsToWorkdir !== 0,
+  };
 }

@@ -16,6 +16,7 @@ export interface Chat {
   lastUsedMode?: InteractionMode;
   selectedAgentId?: string | null;
   workdir?: string | null;
+  restrictToolsToWorkdir?: boolean | null;
 }
 
 /** Represents a message within a chat. */
