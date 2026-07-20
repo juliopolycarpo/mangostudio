@@ -1,5 +1,6 @@
 import type {
   CommitResponse,
+  GenerateCommitMessageResponse,
   GitRepoState,
   GitStatus,
   InitRepoResponse,
@@ -30,6 +31,9 @@ interface CommitInput {
   title: string;
   body?: string;
   amend?: boolean;
+}
+interface GenerateCommitMessageInput {
+  model?: string;
 }
 interface StashSaveInput {
   message?: string;
@@ -115,6 +119,18 @@ export function useCommit(chatId: string) {
       return data as CommitResponse;
     },
     onSuccess: () => invalidateGitWrites(queryClient, chatId),
+  });
+}
+
+export function useGenerateCommitMessage(chatId: string) {
+  return useMutation({
+    mutationFn: async (
+      input: GenerateCommitMessageInput = {}
+    ): Promise<GenerateCommitMessageResponse> => {
+      const { data, error } = await client.api.git['commit-message'].post({ chatId, ...input });
+      if (error) throw new ApiError(error.value);
+      return data as GenerateCommitMessageResponse;
+    },
   });
 }
 

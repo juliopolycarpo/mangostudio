@@ -35,7 +35,34 @@ describe('normalizeGitSettings', () => {
     expect(normalizeGitSettings({ signCommits: true, signOff: false })).toEqual({
       signCommits: true,
       signOff: false,
+      commitMessage: DEFAULT_GIT_SETTINGS.commitMessage,
     });
+  });
+
+  it('normalizes commit-message generation settings and clamps the diff budget', () => {
+    expect(
+      normalizeGitSettings({
+        commitMessage: {
+          preferredModel: 'fast-model',
+          systemPrompt: 'Write a focused commit message.',
+          maxDiffKb: 900,
+        },
+      })
+    ).toEqual({
+      signCommits: false,
+      signOff: false,
+      commitMessage: {
+        preferredModel: 'fast-model',
+        systemPrompt: 'Write a focused commit message.',
+        maxDiffKb: 512,
+      },
+    });
+
+    expect(
+      normalizeGitSettings({
+        commitMessage: { preferredModel: '', systemPrompt: '   ', maxDiffKb: 1 },
+      }).commitMessage
+    ).toEqual({ ...DEFAULT_GIT_SETTINGS.commitMessage, maxDiffKb: 16 });
   });
 });
 

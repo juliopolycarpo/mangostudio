@@ -14,6 +14,10 @@ function GitSettingsRoute() {
       settings={app.settings.gitSettings}
       setSignCommits={app.settings.setSignCommits}
       setSignOff={app.settings.setSignOff}
+      setPreferredCommitMessageModel={app.settings.setPreferredCommitMessageModel}
+      setCommitMessageSystemPrompt={app.settings.setCommitMessageSystemPrompt}
+      resetCommitMessageSystemPrompt={app.settings.resetCommitMessageSystemPrompt}
+      setCommitMessageMaxDiffKb={app.settings.setCommitMessageMaxDiffKb}
     />
   );
 }

@@ -110,11 +110,45 @@ describe('useGlobalSettings', () => {
     });
 
     await waitFor(() =>
-      expect(result.current.gitSettings).toEqual({ signCommits: true, signOff: true })
+      expect(result.current.gitSettings).toEqual({
+        ...DEFAULT_APP_SETTINGS.gitSettings,
+        signCommits: true,
+        signOff: true,
+      })
     );
     await waitFor(() => expect(mockPut).toHaveBeenCalledTimes(1));
     expect(mockPut.mock.calls[0]?.[0]).toMatchObject({
       gitSettings: { signCommits: true, signOff: true },
+    });
+  });
+
+  it('persists commit-message generation preferences', async () => {
+    const { result } = renderHook(() => useGlobalSettings());
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    act(() => {
+      result.current.setPreferredCommitMessageModel('fast-model');
+      result.current.setCommitMessageSystemPrompt('Write a focused message.');
+      result.current.setCommitMessageMaxDiffKb(200);
+    });
+
+    await waitFor(() =>
+      expect(result.current.gitSettings.commitMessage).toEqual({
+        preferredModel: 'fast-model',
+        systemPrompt: 'Write a focused message.',
+        maxDiffKb: 200,
+      })
+    );
+    await waitFor(() => expect(mockPut).toHaveBeenCalledTimes(1));
+    expect(mockPut.mock.calls[0]?.[0]).toMatchObject({
+      gitSettings: {
+        commitMessage: {
+          preferredModel: 'fast-model',
+          systemPrompt: 'Write a focused message.',
+          maxDiffKb: 200,
+        },
+      },
     });
   });
 

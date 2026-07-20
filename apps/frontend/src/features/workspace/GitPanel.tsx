@@ -309,7 +309,11 @@ function RepositoryStatus({
           />
         </div>
       )}
-      <CommitForm chatId={chatId} hasStagedChanges={status.staged.length > 0} />
+      <CommitForm
+        chatId={chatId}
+        hasChanges={!status.clean}
+        hasStagedChanges={status.staged.length > 0}
+      />
       <StashSection chatId={chatId} />
     </div>
   );

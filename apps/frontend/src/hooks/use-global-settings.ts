@@ -16,6 +16,7 @@ import {
   normalizeChatTitleSettings,
 } from '@mangostudio/shared/app-settings';
 import type { ContextCompactionBehavior, ContextSettings } from '@mangostudio/shared/chat';
+import { DEFAULT_COMMIT_MESSAGE_PROMPT } from '@mangostudio/shared/git';
 import type { RuleFileSetting } from '@mangostudio/shared/prompt-rules';
 import { RECENT_WORKDIRS_MAX, type WorkspaceSettings } from '@mangostudio/shared/workspaces';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -179,6 +180,19 @@ export function useGlobalSettings() {
     [saveSettings]
   );
 
+  const updateCommitMessageSettings = useCallback(
+    (updates: Partial<AppSettings['gitSettings']['commitMessage']>) => {
+      saveSettings((current) => ({
+        ...current,
+        gitSettings: {
+          ...current.gitSettings,
+          commitMessage: { ...current.gitSettings.commitMessage, ...updates },
+        },
+      }));
+    },
+    [saveSettings]
+  );
+
   const setTextSystemPrompt = useCallback(
     (value: string) => {
       updatePromptSettings((current) => ({ ...current, textSystemPrompt: value }));
@@ -319,6 +333,13 @@ export function useGlobalSettings() {
       updateChatTitleSettings({ preferredModel: value }),
     setSignCommits: (value: boolean) => updateGitSettings({ signCommits: value }),
     setSignOff: (value: boolean) => updateGitSettings({ signOff: value }),
+    setPreferredCommitMessageModel: (value: string) =>
+      updateCommitMessageSettings({ preferredModel: value }),
+    setCommitMessageSystemPrompt: (value: string) =>
+      updateCommitMessageSettings({ systemPrompt: value }),
+    resetCommitMessageSystemPrompt: () =>
+      updateCommitMessageSettings({ systemPrompt: DEFAULT_COMMIT_MESSAGE_PROMPT }),
+    setCommitMessageMaxDiffKb: (value: number) => updateCommitMessageSettings({ maxDiffKb: value }),
     resetSettings,
   };
 }

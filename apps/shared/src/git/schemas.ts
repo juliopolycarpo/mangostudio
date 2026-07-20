@@ -102,6 +102,17 @@ export const CommitResponseSchema = Type.Object({
   subject: Type.String({ minLength: 1 }),
 });
 
+export const GenerateCommitMessageBodySchema = Type.Object({
+  chatId: Type.String({ minLength: 1 }),
+  model: Type.Optional(Type.String({ minLength: 1 })),
+});
+
+export const GenerateCommitMessageResponseSchema = Type.Object({
+  title: Type.String(),
+  body: Type.String(),
+  truncated: Type.Boolean(),
+});
+
 export const StashSaveBodySchema = Type.Object({
   chatId: Type.String({ minLength: 1 }),
   message: Type.Optional(Type.String()),
@@ -135,6 +146,8 @@ export type StagePathsBody = Static<typeof StagePathsBodySchema>;
 export type UnstagePathsBody = Static<typeof UnstagePathsBodySchema>;
 export type CommitBody = Static<typeof CommitBodySchema>;
 export type CommitResponse = Static<typeof CommitResponseSchema>;
+export type GenerateCommitMessageBody = Static<typeof GenerateCommitMessageBodySchema>;
+export type GenerateCommitMessageResponse = Static<typeof GenerateCommitMessageResponseSchema>;
 export type StashSaveBody = Static<typeof StashSaveBodySchema>;
 export type StashPopBody = Static<typeof StashPopBodySchema>;
 export type StashEntry = Static<typeof StashEntrySchema>;

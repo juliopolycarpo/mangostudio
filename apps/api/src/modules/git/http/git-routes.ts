@@ -6,6 +6,9 @@ import {
 import {
   CommitBodySchema,
   CommitResponseSchema,
+  GenerateCommitMessageBodySchema,
+  type GenerateCommitMessageResponse,
+  GenerateCommitMessageResponseSchema,
   type GitRepoState,
   GitRepoStateSchema,
   GitStateQuerySchema,
@@ -24,6 +27,12 @@ import { getDb } from '../../../db/database';
 import { requireAuth } from '../../../plugins/auth-middleware';
 import { getAppSettings } from '../../app-settings/application/app-settings-service';
 import { getById } from '../../chats/infrastructure/chat-repository';
+import { NoModelAvailableError } from '../../generation/application/resolve-model';
+import {
+  EmptyGeneratedCommitMessageError,
+  generateCommitMessageUseCase,
+  NoCommitChangesError,
+} from '../application/generate-commit-message';
 import { getRepoState, initRepo } from '../application/git-status-service';
 import {
   commitChanges,
@@ -186,6 +195,72 @@ export const gitRoutes = new Elysia().use(requireAuth).group('/git', (app) =>
           409: ApiErrorResponseSchema,
           422: ApiErrorResponseSchema,
           500: ApiErrorResponseSchema,
+        },
+      }
+    )
+    .post(
+      '/commit-message',
+      async ({ body, request, set, user }): Promise<RouteResult<GenerateCommitMessageResponse>> => {
+        const db = getDb();
+        const userId = user?.id ?? '';
+        const chat = await getById(body.chatId, db);
+        const accessError = chatAccessError(chat, userId, set);
+        if (accessError) return accessError;
+        if (!chat?.workdir) {
+          set.status = 409;
+          return { error: 'Chat has no working directory', code: ERROR_CODES.CONFLICT };
+        }
+
+        try {
+          const repoState = await getRepoState(chat.workdir, request.signal);
+          if (repoState.state !== 'repo') {
+            set.status = 409;
+            return {
+              error: 'Working directory is not a Git repository',
+              code: ERROR_CODES.CONFLICT,
+            };
+          }
+          const settings = await getAppSettings(db, userId);
+          return await generateCommitMessageUseCase({
+            userId,
+            chatId: chat.id,
+            repoRoot: repoState.root,
+            status: repoState.status,
+            requestedModel: body.model,
+            preferredModel: settings.gitSettings.commitMessage.preferredModel,
+            chatModel: chat.textModel ?? chat.model,
+            systemPrompt: settings.gitSettings.commitMessage.systemPrompt,
+            maxDiffBytes: settings.gitSettings.commitMessage.maxDiffKb * 1024,
+            signal: request.signal,
+          });
+        } catch (error) {
+          if (error instanceof GitCliError) return gitCommandError(error, set);
+          if (error instanceof NoCommitChangesError) {
+            set.status = 409;
+            return { error: error.message, code: ERROR_CODES.NOTHING_TO_COMMIT };
+          }
+          if (error instanceof EmptyGeneratedCommitMessageError) {
+            set.status = 422;
+            return { error: error.message, code: ERROR_CODES.GENERATION_EMPTY };
+          }
+          if (error instanceof NoModelAvailableError) {
+            set.status = 503;
+            return { error: error.message, code: ERROR_CODES.PROVIDER_ERROR };
+          }
+          set.status = 500;
+          return { error: 'Commit message generation failed', code: ERROR_CODES.PROVIDER_ERROR };
+        }
+      },
+      {
+        body: GenerateCommitMessageBodySchema,
+        response: {
+          200: GenerateCommitMessageResponseSchema,
+          403: ApiErrorResponseSchema,
+          404: ApiErrorResponseSchema,
+          409: ApiErrorResponseSchema,
+          422: ApiErrorResponseSchema,
+          500: ApiErrorResponseSchema,
+          503: ApiErrorResponseSchema,
         },
       }
     )

@@ -203,7 +203,7 @@ describe('Git write routes', () => {
 
       await updateAppSettings(getDb(), user.id, {
         ...DEFAULT_APP_SETTINGS,
-        gitSettings: { signCommits: false, signOff: true },
+        gitSettings: { ...DEFAULT_APP_SETTINGS.gitSettings, signCommits: false, signOff: true },
       });
       await writeFile(join(workdir, 'tracked.txt'), 'second\n');
       await postJson(app, '/git/stage', { chatId, all: true });
@@ -406,6 +406,7 @@ describe('Git write routes', () => {
         chatId: foreignChat.id,
         title: 'foreign commit',
       }),
+      postJson(authenticated.app, '/git/commit-message', { chatId: foreignChat.id }),
       postJson(authenticated.app, '/git/stash', { chatId: foreignChat.id }),
       postJson(authenticated.app, '/git/stash/pop', { chatId: foreignChat.id }),
       getStashes(authenticated.app, foreignChat.id),
@@ -423,6 +424,7 @@ describe('Git write routes', () => {
       postJson(app, '/git/stage', { chatId: 'chat-1', paths: ['file.txt'] }),
       postJson(app, '/git/unstage', { chatId: 'chat-1', paths: ['file.txt'] }),
       postJson(app, '/git/commit', { chatId: 'chat-1', title: 'unauthorized commit' }),
+      postJson(app, '/git/commit-message', { chatId: 'chat-1' }),
       postJson(app, '/git/stash', { chatId: 'chat-1' }),
       postJson(app, '/git/stash/pop', { chatId: 'chat-1' }),
       getStashes(app, 'chat-1'),

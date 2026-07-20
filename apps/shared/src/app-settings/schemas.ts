@@ -9,6 +9,10 @@ import {
 } from '../agentic-limits';
 import { ContextSettingsSchema } from '../chat';
 import { CHAT_TITLE_PROMPT_LENGTH_MAX, CHAT_TITLE_PROMPT_LENGTH_MIN } from '../chat/title';
+import {
+  COMMIT_MESSAGE_MAX_DIFF_KB_MAX,
+  COMMIT_MESSAGE_MAX_DIFF_KB_MIN,
+} from '../git/commit-message';
 import { PromptSettingsSchema } from '../prompt-rules';
 import { ReasoningEffortSchema } from '../provider-settings';
 import { WorkspaceSettingsSchema } from '../workspaces';
@@ -56,9 +60,19 @@ export const SkillSourceSettingsSchema = Type.Object({
   claude: Type.Boolean(),
 });
 
+export const CommitMessageSettingsSchema = Type.Object({
+  preferredModel: Type.String(),
+  systemPrompt: Type.String({ minLength: 1 }),
+  maxDiffKb: Type.Integer({
+    minimum: COMMIT_MESSAGE_MAX_DIFF_KB_MIN,
+    maximum: COMMIT_MESSAGE_MAX_DIFF_KB_MAX,
+  }),
+});
+
 export const GitSettingsSchema = Type.Object({
   signCommits: Type.Boolean(),
   signOff: Type.Boolean(),
+  commitMessage: CommitMessageSettingsSchema,
 });
 
 export const AppSettingsSchema = Type.Object({
@@ -83,5 +97,6 @@ export type ChatTitleSettings = Static<typeof ChatTitleSettingsSchema>;
 export type ChatTitleStrategy = ChatTitleSettings['strategy'];
 export type MultiAgentSettings = Static<typeof MultiAgentSettingsSchema>;
 export type SkillSourceSettings = Static<typeof SkillSourceSettingsSchema>;
+export type CommitMessageSettings = Static<typeof CommitMessageSettingsSchema>;
 export type GitSettings = Static<typeof GitSettingsSchema>;
 export type AppSettings = Static<typeof AppSettingsSchema>;
