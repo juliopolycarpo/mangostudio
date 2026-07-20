@@ -289,12 +289,12 @@ function isPathAllowed(absolute: string, settings: PathValidationSettings): bool
 
 function execute(args: Record<string, unknown>, context: ToolContext): Promise<GrepToolResult> {
   const pattern = getRequiredString(args.pattern, 'pattern');
-  const path = getRequiredPathArg(args.path ?? context.workdir, 'path');
+  const path = getOptionalString(args.path);
   const glob = getOptionalString(args.glob);
   return executeGrep(
     {
       pattern,
-      path,
+      ...(path ? { path } : {}),
       ...(glob ? { glob } : {}),
       caseInsensitive: args.caseInsensitive === true,
     },

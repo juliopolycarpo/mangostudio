@@ -56,7 +56,7 @@ const definition = {
       cwd: {
         type: 'string',
         description:
-          'Optional base directory. Absolute path or one starting with ~. Defaults to the process working directory.',
+          'Optional base directory. Absolute path or one starting with ~. Defaults to the chat working directory when available, otherwise the process working directory.',
       },
     },
     required: ['pattern'],

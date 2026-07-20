@@ -128,7 +128,8 @@ function buildDefinition(kind: ShellKind, description: string) {
         },
         cwd: {
           type: 'string',
-          description: 'Optional working directory. Absolute path or one starting with ~.',
+          description:
+            'Optional working directory. Absolute path or one starting with ~. Defaults to the chat working directory when available.',
         },
       },
       required: ['command'],

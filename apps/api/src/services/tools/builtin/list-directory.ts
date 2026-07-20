@@ -5,6 +5,7 @@
 
 import type { Dirent } from 'node:fs';
 import { readdir } from 'node:fs/promises';
+import { getOptionalString } from '../arg-parsing';
 import { registerTool } from '../registry';
 import type { ToolContext } from '../types';
 import {
@@ -89,8 +90,8 @@ async function execute(
   args: Record<string, unknown>,
   context: ToolContext
 ): Promise<ListDirectoryToolResult> {
-  const path = getRequiredPathArg(args.path ?? context.workdir, 'path');
-  return executeListDirectory({ path }, context);
+  const path = getOptionalString(args.path);
+  return executeListDirectory({ ...(path ? { path } : {}) }, context);
 }
 
 /** Registers this built-in tool. // Usage: register() */
