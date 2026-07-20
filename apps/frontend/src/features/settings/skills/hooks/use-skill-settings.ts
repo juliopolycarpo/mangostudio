@@ -9,7 +9,6 @@ import {
 } from '@mangostudio/shared/app-settings';
 import type { SkillDescriptor, SkillListResponse } from '@mangostudio/shared/skills';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { invalidateChatCapabilities } from '@/features/chat/hooks/use-chat-capabilities';
 import { updateAppSettings } from '@/features/settings/app/api';
 import { appSettingsKeys, appSettingsQueryOptions } from '@/features/settings/app/queries';
 import { updateSkillSetting } from '../api';
@@ -52,7 +51,6 @@ export function useUpdateSkillSetting() {
     },
     onSuccess: (descriptor) => {
       syncSkillListCache(queryClient, descriptor);
-      return invalidateChatCapabilities(queryClient);
     },
   });
 }
@@ -80,10 +78,7 @@ export function useToggleSkillSource() {
     },
     onSuccess: async (savedSettings) => {
       queryClient.setQueryData(appSettingsKeys.current(), normalizeAppSettings(savedSettings));
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: skillSettingsKeys.all }),
-        invalidateChatCapabilities(queryClient),
-      ]);
+      await queryClient.invalidateQueries({ queryKey: skillSettingsKeys.all });
     },
   });
 }

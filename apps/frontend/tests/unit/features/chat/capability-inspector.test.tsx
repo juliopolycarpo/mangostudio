@@ -6,12 +6,15 @@
  */
 
 import type { ChatCapabilitiesResponse } from '@mangostudio/shared/capabilities';
+import { useQueryClient } from '@tanstack/react-query';
 import type * as TanstackRouter from '@tanstack/react-router';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { useEffect } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CapabilityInspector } from '../../../../src/features/chat/components/CapabilityInspector';
 import { useUpdateToolSetting } from '../../../../src/features/settings/tools/hooks/use-tool-settings';
+import { toolSettingsKeys } from '../../../../src/features/settings/tools/queries';
 import { render } from '../../../support/harness/render';
 import { createFetchScenario } from '../../../support/mocks/create-fetch-scenario';
 
@@ -112,7 +115,12 @@ const RESPONSE: ChatCapabilitiesResponse = {
 const scenario = createFetchScenario();
 
 function InspectorWithToolSettingMutation() {
+  const queryClient = useQueryClient();
   const mutation = useUpdateToolSetting();
+
+  useEffect(() => {
+    queryClient.setQueryData(toolSettingsKeys.list(), { tools: [] });
+  }, [queryClient]);
 
   return (
     <>

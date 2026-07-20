@@ -11,7 +11,6 @@ import { useMemo, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { useToast } from '@/components/ui/Toast';
-import { invalidateChatCapabilities } from '@/features/chat/hooks/use-chat-capabilities';
 import { useI18n } from '@/hooks/use-i18n';
 import { useModelCatalog } from '@/hooks/use-model-catalog';
 import { resolveApiErrorMessage } from '@/lib/utils';
@@ -58,12 +57,8 @@ export function AgentSettingsPage() {
     setSelectedAgentId(draft.id);
   };
 
-  const invalidateAgents = async () => {
-    await Promise.all([
-      queryClient.invalidateQueries({ queryKey: agentSettingsKeys.list() }),
-      invalidateChatCapabilities(queryClient),
-    ]);
-  };
+  const invalidateAgents = () =>
+    queryClient.invalidateQueries({ queryKey: agentSettingsKeys.list() });
 
   const saveMutation = useMutation({
     // biome-ignore lint/suspicious/useAwait: Migrated from ESLint

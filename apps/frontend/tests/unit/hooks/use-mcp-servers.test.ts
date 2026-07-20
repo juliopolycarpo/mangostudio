@@ -109,6 +109,9 @@ describe('MCP server hooks', () => {
 
     result.current.queryClient.setQueryData(mcpServerKeys.list(), { servers: [] });
     result.current.queryClient.setQueryData(toolSettingsKeys.list(), { tools: [] });
+    await act(async () => {
+      await Promise.resolve();
+    });
     result.current.queryClient.setQueryData(CAPABILITIES_KEY, { runtimeHash: 'cached' });
 
     let response: unknown;
@@ -138,6 +141,10 @@ describe('MCP server hooks', () => {
       mutation: useApplyPortableMcpImport(),
       queryClient: useQueryClient(),
     }));
+    result.current.queryClient.setQueryData(mcpServerKeys.list(), { servers: [] });
+    await act(async () => {
+      await Promise.resolve();
+    });
     result.current.queryClient.setQueryData(CAPABILITIES_KEY, { runtimeHash: 'cached' });
 
     await act(async () => {

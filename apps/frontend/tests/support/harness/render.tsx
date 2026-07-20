@@ -7,17 +7,21 @@ import {
 } from '@testing-library/react';
 import type React from 'react';
 import { ToastProvider } from '../../../src/components/ui/Toast';
+import { registerCapabilityInvalidationSources } from '../../../src/features/chat/hooks/capability-invalidation';
 import { I18nProvider } from '../../../src/hooks/use-i18n';
 import { ThemeProvider } from '../../../src/hooks/use-theme';
 
-const createTestQueryClient = () =>
-  new QueryClient({
+const createTestQueryClient = () => {
+  const queryClient = new QueryClient({
     defaultOptions: {
       queries: {
         retry: false,
       },
     },
   });
+  registerCapabilityInvalidationSources(queryClient);
+  return queryClient;
+};
 
 function render(ui: React.ReactElement, options?: Omit<RenderOptions, 'wrapper'>) {
   const testQueryClient = createTestQueryClient();

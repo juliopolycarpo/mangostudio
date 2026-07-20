@@ -6,7 +6,7 @@
 
 import { type AgentExecutionMode, isAgentId } from '@mangostudio/shared/agents';
 import type { ChatCapabilitiesResponse } from '@mangostudio/shared/capabilities';
-import { type QueryClient, queryOptions } from '@tanstack/react-query';
+import { queryOptions } from '@tanstack/react-query';
 import { client } from '@/lib/api-client';
 import { extractApiError } from '@/lib/utils';
 
@@ -17,7 +17,7 @@ export interface ChatCapabilitiesSelection {
   readonly agentId?: string;
 }
 
-const chatCapabilitiesKeys = {
+export const chatCapabilitiesKeys = {
   all: ['chat-capabilities'] as const,
   selection: (selection: ChatCapabilitiesSelection) =>
     [
@@ -28,11 +28,6 @@ const chatCapabilitiesKeys = {
       selection.agentId ?? null,
     ] as const,
 };
-
-/** Marks every cached capability projection stale after a runtime input changes. */
-export function invalidateChatCapabilities(queryClient: QueryClient): Promise<void> {
-  return queryClient.invalidateQueries({ queryKey: chatCapabilitiesKeys.all });
-}
 
 export function chatCapabilitiesQueryOptions(selection: ChatCapabilitiesSelection) {
   return queryOptions({
