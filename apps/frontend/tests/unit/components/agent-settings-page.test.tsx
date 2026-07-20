@@ -1,11 +1,11 @@
-import { useQueryClient } from '@tanstack/react-query';
+import { type QueryClient, useQueryClient } from '@tanstack/react-query';
 import userEvent from '@testing-library/user-event';
 import { useEffect, useSyncExternalStore } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { chatCapabilitiesQueryOptions } from '../../../src/features/chat/hooks/use-chat-capabilities';
 import { AgentSettingsPage } from '../../../src/features/settings/agents/components/AgentSettingsPage';
 import { AgentToolPicker } from '../../../src/features/settings/agents/components/AgentToolPicker';
-import { render, screen } from '../../support/harness/render';
+import { act, render, screen } from '../../support/harness/render';
 import { createFetchScenario } from '../../support/mocks/create-fetch-scenario';
 
 const AGENTS_RESPONSE = {
@@ -81,7 +81,11 @@ const CAPABILITIES_KEY: readonly unknown[] = chatCapabilitiesQueryOptions({
   chatId: 'chat-1',
 }).queryKey;
 
-function AgentSettingsWithCapabilityProbe() {
+function AgentSettingsWithCapabilityProbe({
+  onQueryClient,
+}: {
+  onQueryClient?: (queryClient: QueryClient) => void;
+}) {
   const queryClient = useQueryClient();
   const isInvalidated = useSyncExternalStore(
     (notify) => queryClient.getQueryCache().subscribe(notify),
@@ -89,8 +93,9 @@ function AgentSettingsWithCapabilityProbe() {
   );
 
   useEffect(() => {
+    onQueryClient?.(queryClient);
     queryClient.setQueryData(CAPABILITIES_KEY, 'cached');
-  }, [queryClient]);
+  }, [onQueryClient, queryClient]);
 
   return (
     <>
@@ -210,9 +215,13 @@ describe('AgentSettingsPage', () => {
       body: updatedAgentsResponse.agents[0],
     });
 
-    render(<AgentSettingsWithCapabilityProbe />);
+    let queryClient: QueryClient | undefined;
+    render(<AgentSettingsWithCapabilityProbe onQueryClient={(client) => (queryClient = client)} />);
 
     expect(await screen.findByRole('heading', { name: 'Chat' })).toBeInTheDocument();
+    act(() => {
+      queryClient?.setQueryData(CAPABILITIES_KEY, 'cached');
+    });
     expect(screen.getByLabelText('Capability cache state')).toHaveTextContent('fresh');
     const description = screen.getByLabelText('Description');
     await user.clear(description);

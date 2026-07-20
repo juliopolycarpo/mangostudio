@@ -19,7 +19,6 @@ import type { ContextCompactionBehavior, ContextSettings } from '@mangostudio/sh
 import type { RuleFileSetting } from '@mangostudio/shared/prompt-rules';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef } from 'react';
-import { invalidateChatCapabilities } from '@/features/chat/hooks/use-chat-capabilities';
 import { updateAppSettings } from '@/features/settings/app/api';
 import { appSettingsKeys, appSettingsQueryOptions } from '@/features/settings/app/queries';
 
@@ -67,7 +66,6 @@ export function useGlobalSettings() {
     },
     onSuccess: (savedSettings) => {
       queryClient.setQueryData(appSettingsKeys.current(), normalizeAppSettings(savedSettings));
-      return invalidateChatCapabilities(queryClient);
     },
   });
 

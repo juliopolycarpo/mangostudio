@@ -5,15 +5,19 @@
  */
 
 import { DEFAULT_APP_SETTINGS } from '@mangostudio/shared/app-settings';
-import { useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { chatCapabilitiesQueryOptions } from '../../../../src/features/chat/hooks/use-chat-capabilities';
+import { appSettingsKeys } from '../../../../src/features/settings/app/queries';
 import { useUpdateProviderSettings } from '../../../../src/features/settings/providers/hooks/use-provider-settings';
+import { providerSettingsKeys } from '../../../../src/features/settings/providers/queries';
 import {
   useToggleSkillSource,
   useUpdateSkillSetting,
 } from '../../../../src/features/settings/skills/hooks/use-skill-settings';
+import { skillSettingsKeys } from '../../../../src/features/settings/skills/queries';
 import { useUpdateToolSetting } from '../../../../src/features/settings/tools/hooks/use-tool-settings';
+import { toolSettingsKeys } from '../../../../src/features/settings/tools/queries';
 import { useGlobalSettings } from '../../../../src/hooks/use-global-settings';
 import { act, renderHook, waitFor } from '../../../support/harness/render';
 import { createFetchScenario } from '../../../support/mocks/create-fetch-scenario';
@@ -25,6 +29,18 @@ const CAPABILITIES_KEY: readonly unknown[] = chatCapabilitiesQueryOptions({
 function seedCapabilityProjection(queryClient: ReturnType<typeof useQueryClient>) {
   queryClient.setQueryData(CAPABILITIES_KEY, { runtimeHash: 'cached' });
   expect(queryClient.getQueryState(CAPABILITIES_KEY)?.isInvalidated).toBe(false);
+}
+
+async function seedSourceThenProjection(
+  queryClient: ReturnType<typeof useQueryClient>,
+  queryKey: readonly unknown[],
+  data: unknown
+) {
+  queryClient.setQueryData(queryKey, data);
+  await act(async () => {
+    await Promise.resolve();
+  });
+  seedCapabilityProjection(queryClient);
 }
 
 describe('capability cache invalidation', () => {
@@ -56,6 +72,40 @@ describe('capability cache invalidation', () => {
       mutation: useUpdateToolSetting(),
       queryClient: useQueryClient(),
     }));
+    await seedSourceThenProjection(result.current.queryClient, toolSettingsKeys.list(), {
+      tools: [],
+    });
+
+    await act(async () => {
+      await result.current.mutation.mutateAsync({
+        toolName: 'read_file',
+        body: { enabled: false },
+      });
+    });
+
+    expect(result.current.queryClient.getQueryState(CAPABILITIES_KEY)?.isInvalidated).toBe(true);
+  });
+
+  it('invalidates cached projections after a tool update with no cached tool list', async () => {
+    fetchScenario.respondWithJson('PUT', '/api/settings/tools/read_file', {
+      body: {
+        name: 'read_file',
+        title: 'Read file',
+        description: 'Reads a file.',
+        category: 'system',
+        enabled: false,
+        canDisable: true,
+        parameters: {},
+        parameterDescriptors: [],
+      },
+    });
+
+    const { result } = renderHook(() => ({
+      mutation: useUpdateToolSetting(),
+      queryClient: useQueryClient(),
+    }));
+    // No tool-settings list in cache: syncToolSettingsListCache no-ops and the
+    // registry observes nothing, so the mutation must invalidate directly.
     seedCapabilityProjection(result.current.queryClient);
 
     await act(async () => {
@@ -100,7 +150,9 @@ describe('capability cache invalidation', () => {
       mutation: useUpdateSkillSetting(),
       queryClient: useQueryClient(),
     }));
-    seedCapabilityProjection(result.current.queryClient);
+    await seedSourceThenProjection(result.current.queryClient, skillSettingsKeys.list(), {
+      skills: [],
+    });
 
     await act(async () => {
       await result.current.mutation.mutateAsync({ skillKey: 'mango:review', enabled: false });
@@ -122,7 +174,11 @@ describe('capability cache invalidation', () => {
       mutation: useToggleSkillSource(),
       queryClient: useQueryClient(),
     }));
-    seedCapabilityProjection(result.current.queryClient);
+    await seedSourceThenProjection(
+      result.current.queryClient,
+      appSettingsKeys.current(),
+      DEFAULT_APP_SETTINGS
+    );
 
     await act(async () => {
       await result.current.mutation.mutateAsync({ source: 'agents', enabled: true });
@@ -161,7 +217,11 @@ describe('capability cache invalidation', () => {
       mutation: useUpdateProviderSettings('deepseek'),
       queryClient: useQueryClient(),
     }));
-    seedCapabilityProjection(result.current.queryClient);
+    await seedSourceThenProjection(
+      result.current.queryClient,
+      providerSettingsKeys.detail('deepseek'),
+      {}
+    );
 
     await act(async () => {
       await result.current.mutation.mutateAsync({ thinkingEnabled: false });
@@ -184,7 +244,11 @@ describe('capability cache invalidation', () => {
       queryClient: useQueryClient(),
     }));
     await waitFor(() => expect(result.current.settings.isLoading).toBe(false));
-    seedCapabilityProjection(result.current.queryClient);
+    await seedSourceThenProjection(
+      result.current.queryClient,
+      appSettingsKeys.current(),
+      DEFAULT_APP_SETTINGS
+    );
 
     act(() => {
       result.current.settings.setMultiAgentEnabled(false);
@@ -193,5 +257,25 @@ describe('capability cache invalidation', () => {
     await waitFor(() =>
       expect(result.current.queryClient.getQueryState(CAPABILITIES_KEY)?.isInvalidated).toBe(true)
     );
+  });
+
+  it('invalidates projections when a future mutation only invalidates its source region', async () => {
+    const { result } = renderHook(() => {
+      const queryClient = useQueryClient();
+      const mutation = useMutation({
+        mutationFn: () => Promise.resolve(),
+        onSuccess: () => queryClient.invalidateQueries({ queryKey: toolSettingsKeys.all }),
+      });
+      return { mutation, queryClient };
+    });
+    await seedSourceThenProjection(result.current.queryClient, toolSettingsKeys.list(), {
+      tools: [],
+    });
+
+    await act(async () => {
+      await result.current.mutation.mutateAsync();
+    });
+
+    expect(result.current.queryClient.getQueryState(CAPABILITIES_KEY)?.isInvalidated).toBe(true);
   });
 });

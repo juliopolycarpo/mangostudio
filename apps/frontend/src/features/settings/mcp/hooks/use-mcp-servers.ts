@@ -8,7 +8,6 @@ import type {
   UpdateMcpServerBody,
 } from '@mangostudio/shared/mcp';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { invalidateChatCapabilities } from '@/features/chat/hooks/use-chat-capabilities';
 import { toolSettingsKeys } from '@/features/settings/tools/queries';
 import {
   addMcpServer,
@@ -38,7 +37,6 @@ function useInvalidateMcpCaches() {
     const invalidations: Promise<void>[] = [
       queryClient.invalidateQueries({ queryKey: mcpServerKeys.list() }),
       queryClient.invalidateQueries({ queryKey: toolSettingsKeys.all }),
-      invalidateChatCapabilities(queryClient),
     ];
     if (serverId) {
       invalidations.push(

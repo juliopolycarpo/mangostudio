@@ -1,12 +1,11 @@
 import type { ModelCatalogResponse } from '@mangostudio/shared';
 import { queryOptions, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback } from 'react';
-import { invalidateChatCapabilities } from '@/features/chat/hooks/use-chat-capabilities';
 import { client } from '../lib/api-client';
 import { extractApiError } from '../lib/utils';
 import { EMPTY_MODEL_CATALOG } from '../utils/model-utils';
 
-const catalogKeys = {
+export const catalogKeys = {
   all: ['model-catalog'] as const,
 };
 
@@ -28,11 +27,8 @@ export function useModelCatalog() {
   const { data, isLoading, error, refetch } = useQuery(catalogQueryOptions());
 
   const refreshCatalog = useCallback(async () => {
-    const result = await refetch();
-    if (result.isSuccess) {
-      await invalidateChatCapabilities(queryClient);
-    }
-  }, [queryClient, refetch]);
+    await refetch();
+  }, [refetch]);
 
   const setCatalog = useCallback(
     (newData: ModelCatalogResponse) => {
