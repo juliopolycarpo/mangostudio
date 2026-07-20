@@ -79,6 +79,14 @@ describe('executeGlob', () => {
     expect(result.truncated).toBe(false);
   });
 
+  it('uses the chat workdir when cwd is omitted', async () => {
+    await seedTree();
+
+    const result = await executeGlob({ pattern: '*.md' }, { ...makeContext(), workdir: tempDir });
+
+    expect(result.matches).toEqual(['README.md']);
+  });
+
   it('skips dotfiles by default and includes them when enabled', async () => {
     await seedTree();
     const without = await executeGlob({ pattern: '*.ts', cwd: tempDir }, makeContext());

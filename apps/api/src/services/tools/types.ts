@@ -22,6 +22,8 @@ export interface DelegateToAgentInput {
 export interface ToolContext {
   userId: string;
   chatId: string;
+  /** Chat-bound server directory used when a filesystem tool omits its own path. */
+  workdir?: string;
   parameters: Record<string, unknown>;
   /** When aborted, long-running tools should stop work and release resources. */
   signal?: AbortSignal;

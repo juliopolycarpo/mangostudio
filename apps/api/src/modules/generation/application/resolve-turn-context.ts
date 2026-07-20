@@ -16,9 +16,10 @@ import { DELEGATE_TO_AGENT_TOOL_NAME } from '../../../services/tools/builtin/del
 import { GENERATE_IMAGE_TOOL_NAME } from '../../../services/tools/builtin/generate-image';
 import { getAgentProfile } from '../../agents/application/agent-settings-service';
 import { getAppSettings } from '../../app-settings/application/app-settings-service';
-import { assertChatOwnership } from '../../chats/domain/chat-ownership';
+import { getOwnedChatOrThrow } from '../../chats/domain/chat-ownership';
 import { appendSkillsPromptSection } from '../../skills/application/skills-prompt-section';
 import { appendTodosPromptSection } from '../../todos/application/todos-prompt-section';
+import { appendWorkdirPromptSection } from '../../workspaces/application/workdir-prompt-section';
 import { shouldExposeDelegateTool } from './delegate-tool-availability';
 import {
   type ResolvedAgentRuntime,
@@ -54,6 +55,7 @@ export interface TurnContext {
   prompt: string;
   attachmentIds: string[];
   interactionMode: 'chat' | 'agent';
+  workdir: string | undefined;
   resolvedModel: ResolvedModel;
   provider: AIProvider;
   agentRuntime: ResolvedAgentRuntime;
@@ -74,7 +76,7 @@ export async function resolveTurnContext(
   input: TurnContextInput,
   db: Kysely<Database>
 ): Promise<TurnContext> {
-  await assertChatOwnership(input.chatId, input.userId, db);
+  const chat = await getOwnedChatOrThrow(input.chatId, input.userId, db);
   const attachmentIds = normalizeTextTurnAttachmentIds(input.attachmentIds);
   assertTextTurnHasContent(input.prompt, attachmentIds);
 
@@ -91,6 +93,7 @@ export async function resolveTurnContext(
 
   const { modelId, providerType } = resolvedModel;
   const interactionMode = input.agentMode === 'agent' ? 'agent' : 'chat';
+  const workdir = chat.workdir ?? undefined;
 
   const provider = providerType
     ? getProvider(providerType)
@@ -131,6 +134,9 @@ export async function resolveTurnContext(
       'The user explicitly clicked Create images for this turn. Use the image generation tool when appropriate.';
     effectiveSystemPrompt = effectiveSystemPrompt ? `${effectiveSystemPrompt}\n\n${hint}` : hint;
   }
+  if (interactionMode === 'agent') {
+    effectiveSystemPrompt = appendWorkdirPromptSection(effectiveSystemPrompt, workdir);
+  }
   effectiveSystemPrompt = await appendSkillsPromptSection(
     db,
     input.userId,
@@ -152,6 +158,7 @@ export async function resolveTurnContext(
     prompt: input.prompt,
     attachmentIds,
     interactionMode,
+    workdir,
     resolvedModel,
     provider,
     agentRuntime,

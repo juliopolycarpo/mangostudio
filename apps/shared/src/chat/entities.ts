@@ -15,6 +15,7 @@ export interface Chat {
   imageModel?: string;
   lastUsedMode?: InteractionMode;
   selectedAgentId?: string | null;
+  workdir?: string | null;
 }
 
 /** Represents a message within a chat. */

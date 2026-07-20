@@ -23,6 +23,7 @@ import { DELEGATE_TO_AGENT_TOOL_NAME } from '../../../services/tools/builtin/del
 import { TODO_READ_TOOL_NAME, TODO_WRITE_TOOL_NAME } from '../../../services/tools/builtin/todo';
 import type { EffectiveToolSettings } from '../../../services/tools/types';
 import { appendSkillsPromptSection } from '../../skills/application/skills-prompt-section';
+import { appendWorkdirPromptSection } from '../../workspaces/application/workdir-prompt-section';
 import type { ResolvedAgentRuntime } from './resolve-agent-runtime';
 import { resolveAgentRuntime } from './resolve-agent-runtime';
 import type { ResolvedModel } from './resolve-model';
@@ -114,6 +115,8 @@ export async function prepareSubagentTurn(
   const allowedToolNames = new Set(toolDefinitions.map((tool) => tool.name));
   const prompt = buildSubagentPrompt(input.request);
 
+  const systemPrompt = appendWorkdirPromptSection(runtime.effectiveSystemPrompt, input.workdir);
+
   return {
     input,
     resolvedModel,
@@ -123,7 +126,7 @@ export async function prepareSubagentTurn(
       effectiveSystemPrompt: await appendSkillsPromptSection(
         input.db,
         input.userId,
-        runtime.effectiveSystemPrompt,
+        systemPrompt,
         allowedToolNames
       ),
     },
@@ -245,6 +248,7 @@ export async function runSubagentStreamLoop(
       allowedToolNames: session.allowedToolNames,
       settingsByToolName: runtime.toolSettingsByName,
       tools: session.tools,
+      workdir: input.workdir,
       signal: input.signal,
     });
     isFirstIteration = false;
@@ -571,6 +575,7 @@ async function executeSubagentTools(input: {
   readonly db: Kysely<Database>;
   readonly userId: string;
   readonly chatId: string;
+  readonly workdir?: string;
   readonly allowedToolNames: ReadonlySet<string>;
   readonly settingsByToolName: ReadonlyMap<string, EffectiveToolSettings>;
   readonly tools: Array<{ callId: string; name: string; isError?: boolean }>;
@@ -628,7 +633,12 @@ async function executeSubagentTools(input: {
           result = await executeTool(
             call.name,
             safeJsonParse(call.argsStr) ?? {},
-            { userId: input.userId, chatId: input.chatId, parameters: {} },
+            {
+              userId: input.userId,
+              chatId: input.chatId,
+              workdir: input.workdir,
+              parameters: {},
+            },
             getSafeEffectiveToolSettings(tool, input.settingsByToolName.get(call.name))
           );
         }

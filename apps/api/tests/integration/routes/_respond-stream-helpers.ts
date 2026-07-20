@@ -9,6 +9,7 @@ import {
   createChat,
   deleteChat,
   getById,
+  getOwnedChat,
   listByUserId,
   updateChat,
   verifyChatOwnership,
@@ -55,6 +56,7 @@ const realGetDb = getDb;
 const realVerifyChatOwnership = verifyChatOwnership;
 const realListByUserId = listByUserId;
 const realGetById = getById;
+const realGetOwnedChat = getOwnedChat;
 const realCreateChat = createChat;
 const realUpdateChat = updateChat;
 const realDeleteChat = deleteChat;
@@ -91,6 +93,7 @@ export async function restoreAllMocks(): Promise<void> {
     verifyChatOwnership: realVerifyChatOwnership,
     listByUserId: realListByUserId,
     getById: realGetById,
+    getOwnedChat: realGetOwnedChat,
     createChat: realCreateChat,
     updateChat: realUpdateChat,
     deleteChat: realDeleteChat,
@@ -202,9 +205,10 @@ export function buildRespondStreamRequest(body: Record<string, unknown>): Reques
  * Mocks chat ownership as verified for streaming route authorization.
  * // Usage: await mockVerifiedChatOwnership()
  */
-export async function mockVerifiedChatOwnership(): Promise<void> {
+export async function mockVerifiedChatOwnership(workdir: string | null = null): Promise<void> {
   await mock.module('../../../src/modules/chats/infrastructure/chat-repository', () => ({
     verifyChatOwnership: () => Promise.resolve(true),
+    getOwnedChat: () => Promise.resolve({ workdir }),
   }));
 }
 

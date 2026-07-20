@@ -44,7 +44,7 @@ export class GrepPatternError extends Error {
 
 export interface GrepToolArgs {
   pattern: string;
-  path: string;
+  path?: string;
   glob?: string;
   caseInsensitive?: boolean;
 }
@@ -87,7 +87,7 @@ const definition = {
       path: {
         type: 'string',
         description:
-          'File or directory to search. Absolute path or one starting with ~. Directories are scanned recursively.',
+          'Optional file or directory to search. Defaults to the chat working directory when available.',
       },
       glob: {
         type: 'string',
@@ -99,7 +99,7 @@ const definition = {
         description: 'When true, the regular expression is matched case-insensitively.',
       },
     },
-    required: ['pattern', 'path'],
+    required: ['pattern'],
     additionalProperties: false,
   },
 };
@@ -136,8 +136,9 @@ export async function executeGrep(
 ): Promise<GrepToolResult> {
   const settings = normalizeGrepToolSettings(context.parameters);
   const regex = buildRegex(args.pattern, args.caseInsensitive === true);
-  const rootPath = resolveAndValidatePath(expandHome(args.path), settings);
-  const rootStats = await statSafe(rootPath, args.path);
+  const path = getRequiredPathArg(args.path ?? context.workdir, 'path');
+  const rootPath = resolveAndValidatePath(expandHome(path), settings);
+  const rootStats = await statSafe(rootPath, path);
 
   const matches: GrepMatch[] = [];
   let filesScanned = 0;
@@ -154,7 +155,7 @@ export async function executeGrep(
     filesScanned = 1;
     return {
       pattern: args.pattern,
-      path: args.path,
+      path,
       matches,
       filesScanned,
       truncated: fileTruncated,
@@ -162,7 +163,7 @@ export async function executeGrep(
   }
 
   if (!rootStats.isDirectory()) {
-    throw new PathAccessError(`Path "${args.path}" is not a regular file or directory.`);
+    throw new PathAccessError(`Path "${path}" is not a regular file or directory.`);
   }
 
   const filter = args.glob && args.glob.trim().length > 0 ? args.glob.trim() : DEFAULT_FILE_GLOB;
@@ -194,12 +195,12 @@ export async function executeGrep(
   } catch (error) {
     if (error instanceof PathAccessError) throw error;
     const message = error instanceof Error ? error.message : 'Failed to walk directory';
-    throw new PathAccessError(`Cannot search "${args.path}": ${message}`);
+    throw new PathAccessError(`Cannot search "${path}": ${message}`);
   }
 
   return {
     pattern: args.pattern,
-    path: args.path,
+    path,
     matches,
     filesScanned,
     truncated,
@@ -288,7 +289,7 @@ function isPathAllowed(absolute: string, settings: PathValidationSettings): bool
 
 function execute(args: Record<string, unknown>, context: ToolContext): Promise<GrepToolResult> {
   const pattern = getRequiredString(args.pattern, 'pattern');
-  const path = getRequiredPathArg(args.path, 'path');
+  const path = getRequiredPathArg(args.path ?? context.workdir, 'path');
   const glob = getOptionalString(args.glob);
   return executeGrep(
     {

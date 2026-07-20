@@ -89,6 +89,15 @@ describe('executeListDirectory', () => {
     expect(fileEntry?.type).toBe('file');
   });
 
+  it('uses the chat workdir when path is omitted', async () => {
+    await seedFile(join(tempDir, 'workdir-file.txt'), 'content');
+
+    const result = await executeListDirectory({}, { ...makeContext(), workdir: tempDir });
+
+    expect(result.path).toBe(tempDir);
+    expect(result.entries.some((entry) => entry.name === 'workdir-file.txt')).toBe(true);
+  });
+
   it('throws when directory does not exist', async () => {
     const dirPath = join(tempDir, 'missing');
 

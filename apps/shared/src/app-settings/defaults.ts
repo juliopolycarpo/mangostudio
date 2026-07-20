@@ -18,6 +18,7 @@ import type {
   RuleFileSetting,
 } from '../prompt-rules';
 import type { ReasoningEffort } from '../types';
+import type { WorkspaceSettings } from '../workspaces';
 import type {
   AppSettings,
   ChatTitleSettings,
@@ -95,6 +96,11 @@ export const DEFAULT_SKILL_SOURCE_SETTINGS: SkillSourceSettings = {
   claude: false,
 };
 
+export const DEFAULT_WORKSPACE_SETTINGS: WorkspaceSettings = {
+  defaultWorkdir: '',
+  recentWorkdirs: [],
+};
+
 export const DEFAULT_APP_SETTINGS: AppSettings = {
   promptSettings: DEFAULT_PROMPT_SETTINGS,
   globalImageQuality: '1K',
@@ -105,6 +111,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   contextSettings: DEFAULT_CONTEXT_SETTINGS,
   chatTitleSettings: DEFAULT_CHAT_TITLE_SETTINGS,
   skillSources: DEFAULT_SKILL_SOURCE_SETTINGS,
+  workspaceSettings: DEFAULT_WORKSPACE_SETTINGS,
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -321,6 +328,25 @@ export function normalizeSkillSourceSettings(value: unknown): SkillSourceSetting
   };
 }
 
+export function normalizeWorkspaceSettings(value: unknown): WorkspaceSettings {
+  if (!isRecord(value)) return DEFAULT_WORKSPACE_SETTINGS;
+
+  const recentWorkdirs = Array.isArray(value.recentWorkdirs)
+    ? Array.from(
+        new Set(
+          value.recentWorkdirs.filter(
+            (workdir): workdir is string => typeof workdir === 'string' && workdir.length > 0
+          )
+        )
+      ).slice(0, 10)
+    : [];
+
+  return {
+    defaultWorkdir: typeof value.defaultWorkdir === 'string' ? value.defaultWorkdir : '',
+    recentWorkdirs,
+  };
+}
+
 export function normalizeAppSettings(value: unknown): AppSettings {
   if (!isRecord(value)) return DEFAULT_APP_SETTINGS;
 
@@ -345,5 +371,6 @@ export function normalizeAppSettings(value: unknown): AppSettings {
     contextSettings: normalizeContextSettings(value.contextSettings),
     chatTitleSettings: normalizeChatTitleSettings(value.chatTitleSettings),
     skillSources: normalizeSkillSourceSettings(value.skillSources),
+    workspaceSettings: normalizeWorkspaceSettings(value.workspaceSettings),
   };
 }

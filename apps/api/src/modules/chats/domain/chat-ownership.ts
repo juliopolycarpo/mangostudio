@@ -1,6 +1,10 @@
 import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';
-import { verifyChatOwnership } from '../infrastructure/chat-repository';
+import {
+  type ChatRecord,
+  getOwnedChat,
+  verifyChatOwnership,
+} from '../infrastructure/chat-repository';
 
 export async function assertChatOwnership(
   chatId: string,
@@ -11,6 +15,18 @@ export async function assertChatOwnership(
   if (!owns) {
     throw new ChatNotFoundError(chatId);
   }
+}
+
+export async function getOwnedChatOrThrow(
+  chatId: string,
+  userId: string,
+  db: Kysely<Database>
+): Promise<ChatRecord> {
+  const chat = await getOwnedChat(chatId, userId, db);
+  if (!chat) {
+    throw new ChatNotFoundError(chatId);
+  }
+  return chat;
 }
 
 export class ChatNotFoundError extends Error {

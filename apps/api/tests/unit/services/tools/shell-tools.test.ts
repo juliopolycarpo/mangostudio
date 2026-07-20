@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import { tmpdir } from 'node:os';
 import {
   isShellAvailable,
   type ShellKind,
@@ -160,6 +161,17 @@ describe('shell tool registration and execution', () => {
 
     expect(result.stdout.trim()).toBe('from-registry');
     expect(result.exitCode).toBe(0);
+  });
+
+  it.skipIf(!hasBash)('defaults command execution to the chat workdir', async () => {
+    const result = (await executeTool(
+      'bash',
+      { command: 'pwd' },
+      { ...makeContext(), workdir: tmpdir() },
+      { enabled: true, parameters: {} }
+    )) as { stdout: string };
+
+    expect(result.stdout.trim()).toBe(tmpdir());
   });
 
   it.skipIf(!hasBash)('throws when the command argument is missing', async () => {

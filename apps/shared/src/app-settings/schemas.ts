@@ -11,6 +11,7 @@ import { ContextSettingsSchema } from '../chat';
 import { CHAT_TITLE_PROMPT_LENGTH_MAX, CHAT_TITLE_PROMPT_LENGTH_MIN } from '../chat/title';
 import { PromptSettingsSchema } from '../prompt-rules';
 import { ReasoningEffortSchema } from '../provider-settings';
+import { WorkspaceSettingsSchema } from '../workspaces';
 
 export const ImageQualitySchema = Type.Union([
   Type.Literal('512px'),
@@ -68,6 +69,7 @@ export const AppSettingsSchema = Type.Object({
   contextSettings: ContextSettingsSchema,
   chatTitleSettings: ChatTitleSettingsSchema,
   skillSources: SkillSourceSettingsSchema,
+  workspaceSettings: WorkspaceSettingsSchema,
 });
 
 export type ImageQuality = Static<typeof ImageQualitySchema>;

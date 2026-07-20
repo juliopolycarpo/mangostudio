@@ -23,6 +23,7 @@ import { connectorUsageSamples } from './022_connector_usage_samples';
 import { userSkillSettings } from './023_user_skill_settings';
 import { mcpServers } from './024_mcp_servers';
 import { chatTodos } from './025_chat_todos';
+import { chatWorkdir } from './026_chat_workdir';
 
 export const allMigrations = {
   '001_initial_schema': initialSchema,
@@ -50,4 +51,5 @@ export const allMigrations = {
   '023_user_skill_settings': userSkillSettings,
   '024_mcp_servers': mcpServers,
   '025_chat_todos': chatTodos,
+  '026_chat_workdir': chatWorkdir,
 };

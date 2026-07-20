@@ -83,7 +83,7 @@ async function execute(
   context: ToolContext
 ): Promise<ShellCommandResult> {
   const command = getRequiredString(args.command, 'command');
-  const cwd = getOptionalString(args.cwd);
+  const cwd = getOptionalString(args.cwd) ?? context.workdir;
   const settings = normalizeShellToolSettings(context.parameters);
   const result = await runShellCommand({
     kind,

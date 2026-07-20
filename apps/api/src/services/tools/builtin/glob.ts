@@ -84,7 +84,7 @@ export async function executeGlob(
   context: ToolContext
 ): Promise<GlobToolResult> {
   const settings = normalizeGlobToolSettings(context.parameters);
-  const cwd = resolveCwd(args.cwd, settings);
+  const cwd = resolveCwd(args.cwd ?? context.workdir, settings);
 
   const matches: string[] = [];
   let truncated = false;
@@ -129,7 +129,7 @@ function resolveCwd(input: string | undefined, settings: PathValidationSettings)
 
 function execute(args: Record<string, unknown>, context: ToolContext): Promise<GlobToolResult> {
   const pattern = getRequiredString(args.pattern, 'pattern');
-  const cwd = getOptionalString(args.cwd);
+  const cwd = getOptionalString(args.cwd) ?? context.workdir;
   return executeGlob({ pattern, ...(cwd ? { cwd } : {}) }, context);
 }
 
