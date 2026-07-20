@@ -117,7 +117,6 @@ export const StashEntrySchema = Type.Object({
   index: Type.Integer({ minimum: 0 }),
   message: Type.String(),
   branch: Type.Optional(Type.String()),
-  createdAt: Type.Optional(Type.String()),
 });
 
 export const StashListResponseSchema = Type.Object({

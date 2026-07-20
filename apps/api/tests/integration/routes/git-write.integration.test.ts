@@ -140,6 +140,28 @@ describe('Git write routes', () => {
     });
   });
 
+  it.skipIf(!hasGit)('refuses to widen a selection through a magic pathspec', async () => {
+    const workdir = await createTempRepo();
+    await writeFile(join(workdir, 'tracked.txt'), 'initial\n');
+    await runFixtureGit(workdir, ['add', 'tracked.txt']);
+    await runFixtureGit(workdir, ['commit', '-m', 'initial']);
+    await writeFile(join(workdir, 'tracked.txt'), 'changed\n');
+    await writeFile(join(workdir, 'secret.txt'), 'not selected\n');
+    const { app, chatId } = await createRouteFixture(workdir);
+
+    // `:/` means "everything from the repository top" and survives `--`, so
+    // without literal pathspecs this single entry would stage secret.txt too.
+    const staged = await postJson(app, '/git/stage', { chatId, paths: [':/'] });
+
+    expect(staged.status).toBe(422);
+    expect(await staged.json()).toMatchObject({ code: 'GIT_COMMAND_FAILED' });
+
+    const state = await postJson(app, '/git/unstage', { chatId, all: true });
+    const payload = (await state.json()) as GitStatus;
+    expect(payload.staged).toEqual([]);
+    expect(payload.untracked).toContainEqual({ path: 'secret.txt', status: 'untracked' });
+  });
+
   it.skipIf(!hasGit)(
     'unstages an explicit path before the repository has a first commit',
     async () => {

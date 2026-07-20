@@ -7,7 +7,17 @@ export class GitPathValidationError extends Error {
   }
 }
 
-/** Re-validates untrusted pathspecs before they cross the Git process boundary. */
+/**
+ * Re-validates untrusted paths and returns them as Git pathspecs.
+ *
+ * Containment is only half the job: `--` separates revisions from paths but
+ * does NOT disable pathspec magic, so `:/` or `:(exclude)x` would pass a purely
+ * lexical check — they resolve inside the root — and still widen the operation
+ * to files the caller never selected. The `:(literal)` prefix pins each entry
+ * to the exact path. It is applied per pathspec rather than through
+ * `GIT_LITERAL_PATHSPECS`, because that variable also strips the magic Git
+ * generates internally and would silently break commands like `stash push -u`.
+ */
 export function validateRepoPaths(root: string, paths: readonly string[]): string[] {
   const resolvedRoot = resolve(root);
 
@@ -25,6 +35,6 @@ export function validateRepoPaths(root: string, paths: readonly string[]): strin
       throw new GitPathValidationError(path);
     }
 
-    return path;
+    return `:(literal)${path}`;
   });
 }

@@ -15,6 +15,11 @@ const GIT_ENV_KEYS = [
   'XDG_CONFIG_HOME',
   'GIT_CONFIG_GLOBAL',
   'PROGRAMDATA',
+  // Commit signing resolves its key through the SSH agent or a relocated GnuPG
+  // home; without these, `--gpg-sign` fails for correctly configured users.
+  'SSH_AUTH_SOCK',
+  'GNUPGHOME',
+  'GPG_TTY',
 ] as const;
 
 export interface RunGitOptions {

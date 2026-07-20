@@ -14,13 +14,14 @@ import type {
 import { buildCommitArgs } from '../domain/commit-command';
 import { GitPathValidationError, validateRepoPaths } from '../domain/path-validation';
 import { parseStashList } from '../domain/stash-parser';
-import { GitCliError, runGit } from '../infrastructure/git-cli';
+import { GitCliError, isGitAvailable, runGit } from '../infrastructure/git-cli';
 import { getRepoRoot, getRepoStatus } from './git-status-service';
 
 type PathSelection = Pick<StagePathsBody | UnstagePathsBody, 'all' | 'paths'>;
 
 const mutationQueues = new Map<string, Promise<void>>();
 const COMMIT_TIMEOUT_MS = 60_000;
+const MERGE_CONFLICT_PATTERN = /CONFLICT|Merge conflict|needs merge/i;
 
 export class GitWriteError extends Error {
   constructor(
@@ -34,26 +35,29 @@ export class GitWriteError extends Error {
   }
 }
 
-/** Serializes index mutations for one workdir while allowing independent repos to proceed. */
-async function withMutationLock<T>(workdir: string, mutation: () => Promise<T>): Promise<T> {
-  const previous = mutationQueues.get(workdir) ?? Promise.resolve();
+/** Serializes index mutations for one repository while allowing other repos to proceed. */
+async function withMutationLock<T>(root: string, mutation: () => Promise<T>): Promise<T> {
+  const previous = mutationQueues.get(root) ?? Promise.resolve();
   let release!: () => void;
   const current = new Promise<void>((resolve) => {
     release = resolve;
   });
   const queue = previous.then(() => current);
-  mutationQueues.set(workdir, queue);
+  mutationQueues.set(root, queue);
 
   await previous;
   try {
     return await mutation();
   } finally {
     release();
-    if (mutationQueues.get(workdir) === queue) mutationQueues.delete(workdir);
+    if (mutationQueues.get(root) === queue) mutationQueues.delete(root);
   }
 }
 
 async function requireRepoRoot(workdir: string, signal?: AbortSignal): Promise<string> {
+  if (!(await isGitAvailable())) {
+    throw new GitWriteError('Git is not available on this system.', 409, ERROR_CODES.CONFLICT);
+  }
   const root = await getRepoRoot(workdir, signal);
   if (root) return root;
   throw new GitWriteError('Working directory is not a Git repository.', 409, ERROR_CODES.CONFLICT);
@@ -113,7 +117,7 @@ async function hasHead(root: string, signal?: AbortSignal): Promise<boolean> {
   }
 }
 
-function mapCommitFailure(error: unknown): never {
+function mapCommitFailure(error: unknown, operation: string): never {
   if (error instanceof GitCliError) {
     const output = combinedCommandOutput(error);
     if (
@@ -144,7 +148,27 @@ function mapCommitFailure(error: unknown): never {
       );
     }
   }
-  return mapWriteFailure(error, 'Commit');
+  return mapWriteFailure(error, operation);
+}
+
+/**
+ * Resolves the repository root before locking so every workdir that points into
+ * the same repository serializes on one key — two chats rooted at `/repo` and
+ * `/repo/sub` share a single `.git/index` and must not mutate it concurrently.
+ */
+async function runRepoMutation<T>(
+  workdir: string,
+  signal: AbortSignal | undefined,
+  operation: string,
+  mutation: (root: string) => Promise<T>,
+  mapFailure: (error: unknown, operation: string) => never = mapWriteFailure
+): Promise<T> {
+  try {
+    const root = await requireRepoRoot(workdir, signal);
+    return await withMutationLock(root, () => mutation(root));
+  } catch (error) {
+    return mapFailure(error, operation);
+  }
 }
 
 function selectedPaths(root: string, selection: PathSelection): string[] {
@@ -157,18 +181,13 @@ export function stagePaths(
   selection: PathSelection,
   signal?: AbortSignal
 ): Promise<GitStatus> {
-  return withMutationLock(workdir, async () => {
-    try {
-      const root = await requireRepoRoot(workdir, signal);
-      const paths = selectedPaths(root, selection);
-      await runGit(selection.all ? ['add', '-A'] : ['add', '--', ...paths], {
-        cwd: root,
-        signal,
-      });
-      return await getRepoStatus(root, signal);
-    } catch (error) {
-      return mapWriteFailure(error, 'Staging files');
-    }
+  return runRepoMutation(workdir, signal, 'Staging files', async (root) => {
+    const paths = selectedPaths(root, selection);
+    await runGit(selection.all ? ['add', '-A'] : ['add', '--', ...paths], {
+      cwd: root,
+      signal,
+    });
+    return await getRepoStatus(root, signal);
   });
 }
 
@@ -177,22 +196,17 @@ export function unstagePaths(
   selection: PathSelection,
   signal?: AbortSignal
 ): Promise<GitStatus> {
-  return withMutationLock(workdir, async () => {
-    try {
-      const root = await requireRepoRoot(workdir, signal);
-      const paths = selectedPaths(root, selection);
-      const args =
-        selection.all || !(await hasHead(root, signal))
-          ? ['reset', '--', ...paths]
-          : ['restore', '--staged', '--', ...paths];
-      await runGit(args, {
-        cwd: root,
-        signal,
-      });
-      return await getRepoStatus(root, signal);
-    } catch (error) {
-      return mapWriteFailure(error, 'Unstaging files');
-    }
+  return runRepoMutation(workdir, signal, 'Unstaging files', async (root) => {
+    const paths = selectedPaths(root, selection);
+    const args =
+      selection.all || !(await hasHead(root, signal))
+        ? ['reset', '--', ...paths]
+        : ['restore', '--staged', '--', ...paths];
+    await runGit(args, {
+      cwd: root,
+      signal,
+    });
+    return await getRepoStatus(root, signal);
   });
 }
 
@@ -202,9 +216,11 @@ export function commitChanges(
   settings: GitSettings,
   signal?: AbortSignal
 ): Promise<CommitResponse> {
-  return withMutationLock(workdir, async () => {
-    try {
-      const root = await requireRepoRoot(workdir, signal);
+  return runRepoMutation(
+    workdir,
+    signal,
+    'Commit',
+    async (root) => {
       const amend = input.amend ?? false;
       if (amend && !(await hasHead(root, signal))) {
         throw new GitWriteError(
@@ -233,10 +249,9 @@ export function commitChanges(
         hash: result.stdout.slice(0, separator).trim(),
         subject: result.stdout.slice(separator + 1).trim(),
       };
-    } catch (error) {
-      return mapCommitFailure(error);
-    }
-  });
+    },
+    mapCommitFailure
+  );
 }
 
 export function stashSave(
@@ -244,23 +259,18 @@ export function stashSave(
   input: Pick<StashSaveBody, 'message' | 'includeUntracked'>,
   signal?: AbortSignal
 ): Promise<GitRepoState> {
-  return withMutationLock(workdir, async () => {
-    try {
-      const root = await requireRepoRoot(workdir, signal);
-      const message = input.message?.trim();
-      await runGit(
-        [
-          'stash',
-          'push',
-          ...(input.includeUntracked ? ['-u'] : []),
-          ...(message ? ['-m', message] : []),
-        ],
-        { cwd: root, signal }
-      );
-      return await currentRepoState(workdir, root, signal);
-    } catch (error) {
-      return mapWriteFailure(error, 'Saving stash');
-    }
+  return runRepoMutation(workdir, signal, 'Saving stash', async (root) => {
+    const message = input.message?.trim();
+    await runGit(
+      [
+        'stash',
+        'push',
+        ...(input.includeUntracked ? ['-u'] : []),
+        ...(message ? ['-m', message] : []),
+      ],
+      { cwd: root, signal }
+    );
+    return await currentRepoState(workdir, root, signal);
   });
 }
 
@@ -269,29 +279,30 @@ export function stashPop(
   input: Pick<StashPopBody, 'index'>,
   signal?: AbortSignal
 ): Promise<GitRepoState> {
-  return withMutationLock(workdir, async () => {
+  return runRepoMutation(workdir, signal, 'Applying stash', async (root) => {
     try {
-      const root = await requireRepoRoot(workdir, signal);
-      try {
-        await runGit(['stash', 'pop', `stash@{${input.index ?? 0}}`], { cwd: root, signal });
-      } catch (error) {
-        if (error instanceof GitCliError) {
-          const status = await getRepoStatus(root, signal);
-          if (status.conflicted.length > 0) {
-            throw new GitWriteError(
-              'The stash was applied with conflicts. Resolve them in the working tree.',
-              409,
-              ERROR_CODES.STASH_CONFLICT,
-              commandDetail(error)
-            );
-          }
-        }
-        throw error;
-      }
-      return await currentRepoState(workdir, root, signal);
+      await runGit(['stash', 'pop', `stash@{${input.index ?? 0}}`], { cwd: root, signal });
     } catch (error) {
-      return mapWriteFailure(error, 'Applying stash');
+      // Only a merge-conflict failure means the stash actually landed; other
+      // failures (a dirty index, a missing entry) must not be reported as an
+      // applied-with-conflicts pop just because the repo already had conflicts.
+      if (
+        error instanceof GitCliError &&
+        MERGE_CONFLICT_PATTERN.test(combinedCommandOutput(error))
+      ) {
+        const status = await getRepoStatus(root, signal);
+        if (status.conflicted.length > 0) {
+          throw new GitWriteError(
+            'The stash was applied with conflicts. Resolve them in the working tree.',
+            409,
+            ERROR_CODES.STASH_CONFLICT,
+            commandDetail(error)
+          );
+        }
+      }
+      throw error;
     }
+    return await currentRepoState(workdir, root, signal);
   });
 }
 
