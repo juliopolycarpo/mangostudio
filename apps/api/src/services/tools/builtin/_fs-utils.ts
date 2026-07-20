@@ -46,6 +46,24 @@ export function getRequiredPathArg(value: unknown, name: string): string {
   return text;
 }
 
+/**
+ * Enforces the chat workdir policy on an already-resolved path, restating
+ * containment failures as PathAccessError so tools report them uniformly.
+ */
+export function assertWorkdirContainment(
+  resolvedPath: string,
+  workdirPolicy: WorkdirPolicy | undefined
+): void {
+  if (!workdirPolicy?.restricted) return;
+  try {
+    assertInsideWorkdir(workdirPolicy.root, resolvedPath);
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : 'Path is outside the working directory.';
+    throw new PathAccessError(message);
+  }
+}
+
 export function resolveAndValidatePath(
   inputPath: string,
   settings: PathValidationSettings,
@@ -76,15 +94,7 @@ export function resolveAndValidatePath(
     }
   }
 
-  if (workdirPolicy?.restricted) {
-    try {
-      assertInsideWorkdir(workdirPolicy.root, resolved);
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : 'Path is outside the working directory.';
-      throw new PathAccessError(message);
-    }
-  }
+  assertWorkdirContainment(resolved, workdirPolicy);
 
   return resolved;
 }

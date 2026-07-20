@@ -3,7 +3,11 @@
  * Returns filesystem paths matching a glob pattern, evaluated by Bun.Glob.
  */
 
-import { relative } from 'node:path';
+import { relative, resolve as resolvePath } from 'node:path';
+import {
+  isInsideResolvedRoot,
+  resolveContainmentRoot,
+} from '../../../modules/workspaces/application/path-containment';
 import { clampIntegerSetting, getOptionalString, getRequiredString } from '../arg-parsing';
 import { registerTool } from '../registry';
 import type { ToolContext } from '../types';
@@ -89,6 +93,11 @@ export async function executeGlob(
   const matches: string[] = [];
   let truncated = false;
 
+  // The pattern itself can traverse upward (e.g. "../*"), so validating cwd is
+  // not enough — every match is checked against the workdir policy.
+  const policy = context.workdirPolicy;
+  const containmentRoot = policy?.restricted ? resolveContainmentRoot(policy.root) : undefined;
+
   const glob = new Bun.Glob(args.pattern);
   try {
     for await (const match of glob.scan({
@@ -97,6 +106,9 @@ export async function executeGlob(
       absolute: settings.absolute,
       onlyFiles: false,
     })) {
+      if (containmentRoot && !isInsideResolvedRoot(containmentRoot, resolvePath(cwd, match))) {
+        continue;
+      }
       if (matches.length >= settings.maxResults) {
         truncated = true;
         break;
@@ -122,26 +134,11 @@ function resolveCwd(
   context: ToolContext
 ): string {
   const policy = context.workdirPolicy;
-  if (!input) {
-    if (policy?.restricted) {
-      return resolveAndValidatePath(policy.root, settings, policy);
-    }
-    if (context.workdir) {
-      return resolveAndValidatePath(context.workdir, settings, policy);
-    }
-    return resolveAndValidatePath(process.cwd(), settings, policy);
-  }
-  const trimmed = input.trim();
-  if (!trimmed) {
-    if (policy?.restricted) {
-      return resolveAndValidatePath(policy.root, settings, policy);
-    }
-    if (context.workdir) {
-      return resolveAndValidatePath(context.workdir, settings, policy);
-    }
-    return resolveAndValidatePath(process.cwd(), settings, policy);
-  }
-  return resolveAndValidatePath(expandHome(trimmed), settings, policy);
+  const trimmed = input?.trim();
+  const base = trimmed
+    ? expandHome(trimmed)
+    : ((policy?.restricted ? policy.root : context.workdir) ?? process.cwd());
+  return resolveAndValidatePath(base, settings, policy);
 }
 
 function execute(args: Record<string, unknown>, context: ToolContext): Promise<GlobToolResult> {

@@ -1,6 +1,9 @@
-import { realpathSync } from 'node:fs';
+import { lstatSync, readlinkSync, realpathSync } from 'node:fs';
 import { basename, dirname, resolve, sep } from 'node:path';
 import { resolveWorkspacePath } from './workspace-path';
+
+/** Guards against symlink cycles while following dangling links manually. */
+const MAX_SYMLINK_HOPS = 32;
 
 export class WorkdirContainmentError extends Error {
   constructor(message: string) {
@@ -17,6 +20,15 @@ export function isPathPrefix(root: string, candidate: string): boolean {
   return candidate.startsWith(`${root}${sep}`);
 }
 
+/** Returns the target of `path` when it is a symlink, otherwise undefined. */
+function readSymlinkTarget(path: string): string | undefined {
+  try {
+    return lstatSync(path).isSymbolicLink() ? readlinkSync(path) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Resolves a path for containment checks. Existing paths are canonicalized with
  * realpath; missing leaf paths walk up to the nearest existing ancestor so
@@ -26,6 +38,7 @@ export function resolvePathForContainment(inputPath: string): string {
   const resolved = resolveWorkspacePath(inputPath);
   let probe = resolved;
   const pending: string[] = [];
+  let hops = 0;
 
   while (true) {
     try {
@@ -38,6 +51,15 @@ export function resolvePathForContainment(inputPath: string): string {
       }
     }
 
+    // realpath reports a dangling symlink as ENOENT, but writes through it still
+    // land on the target, so follow it manually instead of treating it as missing.
+    const target = hops < MAX_SYMLINK_HOPS ? readSymlinkTarget(probe) : undefined;
+    if (target !== undefined) {
+      hops += 1;
+      probe = resolve(dirname(probe), target);
+      continue;
+    }
+
     const name = basename(probe);
     const parent = dirname(probe);
     if (parent === probe) {
@@ -48,10 +70,18 @@ export function resolvePathForContainment(inputPath: string): string {
   }
 }
 
+/** Canonicalizes a containment root once so per-candidate checks can reuse it. */
+export function resolveContainmentRoot(root: string): string {
+  return realpathSync(resolveWorkspacePath(root));
+}
+
+/** Containment check against an already-canonical root, for hot loops. */
+export function isInsideResolvedRoot(resolvedRoot: string, candidate: string): boolean {
+  return isPathPrefix(resolvedRoot, resolvePathForContainment(candidate));
+}
+
 export function isInside(root: string, candidate: string): boolean {
-  const resolvedRoot = realpathSync(resolveWorkspacePath(root));
-  const resolvedCandidate = resolvePathForContainment(candidate);
-  return isPathPrefix(resolvedRoot, resolvedCandidate);
+  return isInsideResolvedRoot(resolveContainmentRoot(root), candidate);
 }
 
 export function assertInsideWorkdir(root: string, candidate: string): void {

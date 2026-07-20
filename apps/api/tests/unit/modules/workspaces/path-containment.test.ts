@@ -56,6 +56,19 @@ describe('isInside', () => {
     expect(isInside(rootDir, join(linkPath, 'file.txt'))).toBe(true);
   });
 
+  it('rejects a dangling symlink whose target lands outside the root', () => {
+    // realpath reports a dangling link as ENOENT, but a write through it escapes.
+    const linkPath = join(rootDir, 'nested', 'dangling.txt');
+    symlinkSync(join(outsideDir, 'planted.txt'), linkPath);
+    expect(isInside(rootDir, linkPath)).toBe(false);
+  });
+
+  it('allows a dangling symlink whose target stays inside the root', () => {
+    const linkPath = join(rootDir, 'nested', 'pending.txt');
+    symlinkSync(join(rootDir, 'nested', 'not-yet.txt'), linkPath);
+    expect(isInside(rootDir, linkPath)).toBe(true);
+  });
+
   it('checks planned write paths that do not exist yet', () => {
     const planned = join(rootDir, 'nested', 'new-file.txt');
     expect(resolvePathForContainment(planned)).toBe(planned);

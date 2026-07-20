@@ -5,7 +5,6 @@
  */
 
 import { resolve } from 'node:path';
-import { assertInsideWorkdir } from '../../../modules/workspaces/application/path-containment';
 import { clampIntegerSetting, getOptionalString, getRequiredString } from '../arg-parsing';
 import {
   buildToolExecutionTimeoutDescriptor,
@@ -15,7 +14,7 @@ import {
   ToolExecutionTimedOutError,
 } from '../execution-timeout';
 import type { RegisteredTool, ToolContext } from '../types';
-import { expandHome, normalizeStringList, PathAccessError } from './_fs-utils';
+import { assertWorkdirContainment, expandHome, normalizeStringList } from './_fs-utils';
 import { runShellCommand, type ShellCommandResult, type ShellKind } from './_shell-exec';
 
 export const SHELL_DEFAULT_TIMEOUT_SECONDS = TOOL_EXECUTION_TIMEOUT_SECONDS_DEFAULT;
@@ -85,15 +84,12 @@ async function execute(
   context: ToolContext
 ): Promise<ShellCommandResult> {
   const command = getRequiredString(args.command, 'command');
-  const cwd = getOptionalString(args.cwd) ?? context.workdir;
-  if (cwd && context.workdirPolicy?.restricted) {
-    try {
-      assertInsideWorkdir(context.workdirPolicy.root, resolve(expandHome(cwd)));
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : 'Working directory is outside the chat workdir.';
-      throw new PathAccessError(message);
-    }
+  const requestedCwd = getOptionalString(args.cwd) ?? context.workdir;
+  // Spawn with the same resolved path that was validated, so `~` and relative
+  // inputs cannot diverge between the containment check and the child process.
+  const cwd = requestedCwd ? resolve(expandHome(requestedCwd)) : undefined;
+  if (cwd) {
+    assertWorkdirContainment(cwd, context.workdirPolicy);
   }
   const settings = normalizeShellToolSettings(context.parameters);
   const result = await runShellCommand({
