@@ -11,8 +11,12 @@ import {
   SUBAGENT_MAX_TURNS_MIN,
 } from '@mangostudio/shared/app-settings';
 import type { Locale } from '@mangostudio/shared/i18n';
+import type { WorkspaceSettings } from '@mangostudio/shared/workspaces';
+import { FolderOpen, X } from 'lucide-react';
+import { useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
+import { WorkdirPickerDialog } from '@/features/workspace/WorkdirPickerDialog';
 import { useI18n } from '@/hooks/use-i18n';
 
 interface GeneralSettingsProps {
@@ -32,6 +36,9 @@ interface GeneralSettingsProps {
   setMaxSubagentCalls: (value: number) => void;
   setSubagentTimeoutMs: (value: number) => void;
   setDefaultSubagentMaxTurns: (value: number) => void;
+  workspaceSettings: WorkspaceSettings;
+  setDefaultWorkdir: (value: string) => void;
+  addRecentWorkdir: (value: string) => void;
 }
 
 const IMAGE_QUALITY_OPTIONS = ['512px', '1K', '2K', '4K'] as const;
@@ -65,9 +72,14 @@ export function GeneralSettings({
   setMaxSubagentCalls,
   setSubagentTimeoutMs,
   setDefaultSubagentMaxTurns,
+  workspaceSettings,
+  setDefaultWorkdir,
+  addRecentWorkdir,
 }: GeneralSettingsProps) {
   const { t, locale, setLocale } = useI18n();
   const s = t.settings.general;
+  const workspace = t.workspace;
+  const [isWorkdirPickerOpen, setWorkdirPickerOpen] = useState(false);
   const missingTitleModelOption =
     chatTitleSettings.preferredModel !== 'current_model' &&
     !availableTitleModels.some((model) => model.modelId === chatTitleSettings.preferredModel)
@@ -105,6 +117,61 @@ export function GeneralSettings({
             </option>
           ))}
         </select>
+      </Card>
+
+      <Card variant="solid" className="space-y-4 p-4 sm:p-6">
+        <div className="space-y-1">
+          <h3 className="text-xs uppercase tracking-widest font-bold text-on-surface-variant/80 font-label">
+            {workspace.settingsLabel}
+          </h3>
+          <p className="text-sm text-on-surface-variant/60">{workspace.settingsDescription}</p>
+        </div>
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <button
+            type="button"
+            onClick={() => setWorkdirPickerOpen(true)}
+            className="flex min-w-0 flex-1 items-center gap-3 rounded-xl border border-outline-variant/20 bg-surface-container-lowest px-3 py-2.5 text-left transition-colors hover:border-primary/35"
+            title={workspaceSettings.defaultWorkdir || workspace.defaultEmpty}
+          >
+            <FolderOpen size={17} className="shrink-0 text-primary/80" />
+            <span className="min-w-0 flex-1">
+              <span className="block font-label text-[10px] font-bold uppercase tracking-widest text-on-surface-variant/55">
+                {workspace.defaultLabel}
+              </span>
+              <span className="block truncate font-mono text-xs text-on-surface">
+                {workspaceSettings.defaultWorkdir || workspace.defaultEmpty}
+              </span>
+            </span>
+          </button>
+          <div className="flex gap-2">
+            <Button type="button" variant="secondary" onClick={() => setWorkdirPickerOpen(true)}>
+              {workspace.changeDefault}
+            </Button>
+            {workspaceSettings.defaultWorkdir ? (
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => setDefaultWorkdir('')}
+                aria-label={workspace.clearDefault}
+                title={workspace.clearDefault}
+              >
+                <X size={16} />
+              </Button>
+            ) : null}
+          </div>
+        </div>
+        <WorkdirPickerDialog
+          open={isWorkdirPickerOpen}
+          initialPath={workspaceSettings.defaultWorkdir}
+          recentWorkdirs={workspaceSettings.recentWorkdirs}
+          showUseDefault={false}
+          onSelect={(path) => {
+            setDefaultWorkdir(path);
+            addRecentWorkdir(path);
+            setWorkdirPickerOpen(false);
+          }}
+          onClose={() => setWorkdirPickerOpen(false)}
+        />
       </Card>
 
       {/* ── Default Image Quality ── */}

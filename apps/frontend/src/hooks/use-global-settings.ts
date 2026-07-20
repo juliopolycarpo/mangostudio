@@ -17,6 +17,7 @@ import {
 } from '@mangostudio/shared/app-settings';
 import type { ContextCompactionBehavior, ContextSettings } from '@mangostudio/shared/chat';
 import type { RuleFileSetting } from '@mangostudio/shared/prompt-rules';
+import type { WorkspaceSettings } from '@mangostudio/shared/workspaces';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { updateAppSettings } from '@/features/settings/app/api';
@@ -158,6 +159,16 @@ export function useGlobalSettings() {
     [saveSettings]
   );
 
+  const updateWorkspaceSettings = useCallback(
+    (updater: (current: WorkspaceSettings) => WorkspaceSettings) => {
+      saveSettings((current) => ({
+        ...current,
+        workspaceSettings: updater(current.workspaceSettings),
+      }));
+    },
+    [saveSettings]
+  );
+
   const setTextSystemPrompt = useCallback(
     (value: string) => {
       updatePromptSettings((current) => ({ ...current, textSystemPrompt: value }));
@@ -254,6 +265,7 @@ export function useGlobalSettings() {
     },
     contextSettings: settings.contextSettings,
     multiAgentSettings: settings.multiAgentSettings,
+    workspaceSettings: settings.workspaceSettings,
     chatTitleSettings: settings.chatTitleSettings,
     setContextCompactionBehavior: (value: ContextCompactionBehavior) =>
       updateContextSettings({ compactionBehavior: value }),
@@ -276,6 +288,16 @@ export function useGlobalSettings() {
     setSubagentTimeoutMs: (value: number) => updateMultiAgentSettings({ timeoutMs: value }),
     setDefaultSubagentMaxTurns: (value: number) =>
       updateMultiAgentSettings({ defaultMaxTurns: value }),
+    setDefaultWorkdir: (value: string) =>
+      updateWorkspaceSettings((current) => ({ ...current, defaultWorkdir: value })),
+    addRecentWorkdir: (value: string) =>
+      updateWorkspaceSettings((current) => ({
+        ...current,
+        recentWorkdirs: [
+          value,
+          ...current.recentWorkdirs.filter((workdir) => workdir !== value),
+        ].slice(0, 10),
+      })),
     setChatAutoRenameEnabled: (value: boolean) =>
       updateChatTitleSettings({ autoRenameEnabled: value }),
     setChatTitleStrategy: (value: ChatTitleStrategy) =>
