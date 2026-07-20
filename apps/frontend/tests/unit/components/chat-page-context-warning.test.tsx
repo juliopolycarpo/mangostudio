@@ -18,6 +18,10 @@ vi.mock('../../../src/lib/auth-client', () => ({
   },
 }));
 
+vi.mock('../../../src/features/workspace/GitPanel', () => ({
+  GitPanel: ({ chatId }: { chatId: string }) => <div data-testid="git-panel">{chatId}</div>,
+}));
+
 function renderChatPage(overrides: Partial<React.ComponentProps<typeof ChatPage>> = {}) {
   const props: React.ComponentProps<typeof ChatPage> = {
     chatId: 'chat-1',
@@ -50,8 +54,7 @@ function renderChatPage(overrides: Partial<React.ComponentProps<typeof ChatPage>
     ...overrides,
   };
 
-  render(<ChatPage {...props} />);
-  return props;
+  return { ...render(<ChatPage {...props} />), props };
 }
 
 describe('ChatPage context warning', () => {
@@ -79,5 +82,16 @@ describe('ChatPage context warning', () => {
 
     expect(screen.queryByRole('button', { name: 'Continue anyway' })).toBeNull();
     expect(screen.getByRole('button', { name: 'Send' })).toBeEnabled();
+  });
+
+  it('shows the repository rail only for an Agent-mode chat with a workdir', () => {
+    const { props, rerender } = renderChatPage({
+      agentExecutionMode: 'agent',
+      workdir: '/srv/projects/mangostudio',
+    });
+    expect(screen.getByTestId('git-panel')).toHaveTextContent('chat-1');
+
+    rerender(<ChatPage {...props} agentExecutionMode="chat" />);
+    expect(screen.queryByTestId('git-panel')).not.toBeInTheDocument();
   });
 });

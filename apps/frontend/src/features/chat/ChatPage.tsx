@@ -5,6 +5,7 @@ import { isTurnCheckpointPart, type TurnCheckpointPart } from '@mangostudio/shar
 import type { WorkspaceSettings } from '@mangostudio/shared/workspaces';
 import { useMemo } from 'react';
 import type { ContextInfo, FallbackNotice } from '@/features/generation/types';
+import { GitPanel } from '@/features/workspace/GitPanel';
 import { WorkdirPickerDialog } from '@/features/workspace/WorkdirPickerDialog';
 import { authClient } from '@/lib/auth-client';
 import { ChatPageContent } from './components/ChatPageContent';
@@ -123,65 +124,70 @@ export function ChatPage({
   });
 
   return (
-    <div className="flex flex-col h-full min-h-0">
-      <ChatPageContent
-        chatId={chatId}
-        messages={messages}
-        status={status}
-        userName={userName}
-        onSubmit={onSubmit}
-        onQuestionSubmit={
-          isGenerating || disabled || contextControls.requiresDecision || isContextActionPending
-            ? undefined
-            : onSubmit
-        }
-      />
-      {fallbackNotice && <ChatFallbackNotice notice={fallbackNotice} />}
-      {contextControls.requiresDecision && (
-        <ChatContextDecisionNotice
-          warningMessage={contextControls.warningMessage}
-          isPending={isContextActionPending}
-          onCompact={() => void contextControls.handleCompactClick()}
-          onStartSummarizedChat={() => void contextControls.handleSummarizedChatClick()}
-          onContinue={contextControls.handleContinue}
-        />
-      )}
-      {interruptedTurn && (
-        <InterruptedTurnNotice
-          key={interruptedTurn.messageId}
-          messageId={interruptedTurn.messageId}
-          checkpoint={interruptedTurn.checkpoint}
-          disabled={disabled || isGenerating}
-          onResume={onResumeInterruptedTurn}
-          onDismiss={onDismissInterruptedTurn}
-        />
-      )}
-      <PinnedTodoPanel chatId={chatId} />
-      <InputBar
-        onSubmit={onSubmit}
-        chatId={chatId}
-        disabled={disabled}
-        submitDisabled={contextControls.requiresDecision || isContextActionPending}
-        isGenerating={isGenerating}
-        onStop={onStop}
-        thinkingEnabled={thinkingEnabled}
-        reasoningEffort={reasoningEffort}
-        onThinkingToggle={onThinkingToggle}
-        onReasoningEffortChange={onReasoningEffortChange}
-        reasoningVisible={reasoningVisible}
-        contextInfo={contextInfo}
-        imageToolIntent={imageToolIntent}
-        onImageToolIntentChange={onImageToolIntentChange}
-        activeModel={activeModel}
-        agentExecutionMode={agentExecutionMode}
-        selectedAgentId={selectedAgentId}
-        agents={agents}
-        isAgentListLoading={isAgentListLoading}
-        onAgentExecutionModeChange={onAgentExecutionModeChange}
-        onSelectedAgentIdChange={onSelectedAgentIdChange}
-        workdir={workdir}
-        onWorkdirClick={onOpenWorkdirPicker}
-      />
+    <>
+      <div className="flex h-full min-h-0">
+        <div className="flex min-w-0 flex-1 flex-col">
+          <ChatPageContent
+            chatId={chatId}
+            messages={messages}
+            status={status}
+            userName={userName}
+            onSubmit={onSubmit}
+            onQuestionSubmit={
+              isGenerating || disabled || contextControls.requiresDecision || isContextActionPending
+                ? undefined
+                : onSubmit
+            }
+          />
+          {fallbackNotice && <ChatFallbackNotice notice={fallbackNotice} />}
+          {contextControls.requiresDecision && (
+            <ChatContextDecisionNotice
+              warningMessage={contextControls.warningMessage}
+              isPending={isContextActionPending}
+              onCompact={() => void contextControls.handleCompactClick()}
+              onStartSummarizedChat={() => void contextControls.handleSummarizedChatClick()}
+              onContinue={contextControls.handleContinue}
+            />
+          )}
+          {interruptedTurn && (
+            <InterruptedTurnNotice
+              key={interruptedTurn.messageId}
+              messageId={interruptedTurn.messageId}
+              checkpoint={interruptedTurn.checkpoint}
+              disabled={disabled || isGenerating}
+              onResume={onResumeInterruptedTurn}
+              onDismiss={onDismissInterruptedTurn}
+            />
+          )}
+          <PinnedTodoPanel chatId={chatId} />
+          <InputBar
+            onSubmit={onSubmit}
+            chatId={chatId}
+            disabled={disabled}
+            submitDisabled={contextControls.requiresDecision || isContextActionPending}
+            isGenerating={isGenerating}
+            onStop={onStop}
+            thinkingEnabled={thinkingEnabled}
+            reasoningEffort={reasoningEffort}
+            onThinkingToggle={onThinkingToggle}
+            onReasoningEffortChange={onReasoningEffortChange}
+            reasoningVisible={reasoningVisible}
+            contextInfo={contextInfo}
+            imageToolIntent={imageToolIntent}
+            onImageToolIntentChange={onImageToolIntentChange}
+            activeModel={activeModel}
+            agentExecutionMode={agentExecutionMode}
+            selectedAgentId={selectedAgentId}
+            agents={agents}
+            isAgentListLoading={isAgentListLoading}
+            onAgentExecutionModeChange={onAgentExecutionModeChange}
+            onSelectedAgentIdChange={onSelectedAgentIdChange}
+            workdir={workdir}
+            onWorkdirClick={onOpenWorkdirPicker}
+          />
+        </div>
+        {agentExecutionMode === 'agent' && chatId && workdir ? <GitPanel chatId={chatId} /> : null}
+      </div>
       {workspaceSettings && onCloseWorkdirPicker && onSelectWorkdir ? (
         <WorkdirPickerDialog
           open={isWorkdirPickerOpen}
@@ -192,6 +198,6 @@ export function ChatPage({
           onClose={onCloseWorkdirPicker}
         />
       ) : null}
-    </div>
+    </>
   );
 }

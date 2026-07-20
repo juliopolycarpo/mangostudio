@@ -31,7 +31,12 @@ vi.mock('../../../src/features/chat/queries', () => ({
   messageKeys: { list: (id: string) => ['messages', id] },
 }));
 
+vi.mock('../../../src/features/workspace/hooks/use-git-state', () => ({
+  invalidateGitState: vi.fn().mockResolvedValue(undefined),
+}));
+
 import { generateChatTitleSuggestion } from '../../../src/features/chat/services/chat-title';
+import { invalidateGitState } from '../../../src/features/workspace/hooks/use-git-state';
 import {
   cancelInterruptedTurn,
   dismissInterruptedTurn,
@@ -42,6 +47,7 @@ const mockStream = vi.mocked(respondTextStream);
 const mockCancelInterruptedTurn = vi.mocked(cancelInterruptedTurn);
 const mockDismissInterruptedTurn = vi.mocked(dismissInterruptedTurn);
 const mockGenerateChatTitle = vi.mocked(generateChatTitleSuggestion);
+const mockInvalidateGitState = vi.mocked(invalidateGitState);
 
 /**
  * Builds a fake respondTextStream implementation that delivers a sequence of
@@ -837,6 +843,21 @@ describe('useTextGeneration — toolIntent forwarding', () => {
 describe('useTextGeneration — stream metadata and abort lifecycle', () => {
   beforeEach(() => {
     mockStream.mockReset();
+    mockInvalidateGitState.mockClear();
+  });
+
+  it('refreshes repository state when a turn completes', async () => {
+    const props = makeProps();
+    mockStream.mockImplementation(
+      makeStreamFn([{ type: 'done', done: true, generationTime: '0.5s' }])
+    );
+
+    const { result } = renderHook(() => useTextGeneration(props));
+    await act(async () => {
+      await result.current.handleRespond('inspect the repository');
+    });
+
+    expect(mockInvalidateGitState).toHaveBeenCalledWith(expect.anything(), 'chat-1');
   });
 
   it('updates context info from stream metadata chunks', async () => {

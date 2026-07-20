@@ -25,6 +25,7 @@ import {
   reduceTextGenerationStreamChunk,
   type TextGenerationStreamMessageUpdate,
 } from '@/features/generation/text-generation-stream-reducer';
+import { invalidateGitState } from '@/features/workspace/hooks/use-git-state';
 import { useI18n } from '@/hooks/use-i18n';
 import { resolveApiErrorMessage } from '@/lib/utils';
 import {
@@ -332,6 +333,7 @@ export function useTextGeneration({
         activeTurnRef.current = null;
         stream.setAbortController(null);
         stream.setIsGenerating(false);
+        void invalidateGitState(queryClient, activeChatId);
         if (createdChatDuringRequest) {
           void chats.loadChats();
         }
