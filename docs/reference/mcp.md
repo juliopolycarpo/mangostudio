@@ -149,9 +149,11 @@ declines, or cancels via `POST /mcp/elicitations/:id/respond`; that unblocks the
 tool call so it can finish normally.
 
 URL-mode elicitation is not declared; unexpected URL requests resolve as `{ action: "cancel" }`
-so servers degrade. If the tool call times out or the turn aborts while a form is pending, the
-registry answers `{ action: "cancel" }` as well. Without an active turn sink (for example a
-server probing elicitation outside a chat tool call), the handler also cancels.
+so servers degrade. If the tool call ends while a form is still pending — it returns cleanly,
+returns `isError: true`, throws, times out, aborts, or loses its session — the registry answers
+`{ action: "cancel" }` as well and records the cause as the elicitation's terminal reason.
+Without an active turn sink (for example a server probing elicitation outside a chat tool
+call), the handler also cancels.
 
 ## Rich tool results
 

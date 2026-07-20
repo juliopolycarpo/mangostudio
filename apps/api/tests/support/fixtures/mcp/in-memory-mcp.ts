@@ -151,12 +151,38 @@ function createTurnMcpServer(
         inputSchema: { type: 'object' as const, properties: {} },
       },
       {
+        name: 'error-after-elicit',
+        description: 'Returns isError while a form elicitation remains pending.',
+        inputSchema: { type: 'object' as const, properties: {} },
+      },
+      {
         name: 'disconnect',
         description: 'Drops the MCP session during a tool request.',
         inputSchema: { type: 'object' as const, properties: {} },
       },
     ],
   }));
+
+  /**
+   * Raises a form elicitation the test never answers, then parks until the
+   * test releases the call — so the tool terminates with the request still
+   * pending and the server-side cancel reason is what gets asserted.
+   */
+  async function elicitThenWaitForRelease(message: string, releaseKey: string): Promise<void> {
+    void server
+      .elicitInput({
+        mode: 'form',
+        message,
+        requestedSchema: {
+          type: 'object',
+          properties: {
+            approved: { type: 'boolean', title: 'Approved' },
+          },
+        },
+      })
+      .catch(() => undefined);
+    await controls.waitForRelease(releaseKey);
+  }
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name } = request.params;
@@ -244,20 +270,15 @@ function createTurnMcpServer(
       return { content: [{ type: 'text', text: JSON.stringify(response) }] };
     }
     if (name === 'fail-after-elicit') {
-      void server
-        .elicitInput({
-          mode: 'form',
-          message: 'Approve the failing operation',
-          requestedSchema: {
-            type: 'object',
-            properties: {
-              approved: { type: 'boolean', title: 'Approved' },
-            },
-          },
-        })
-        .catch(() => undefined);
-      await controls.waitForRelease('fail-after-elicit');
+      await elicitThenWaitForRelease('Approve the failing operation', name);
       throw new Error('fixture tool failed after eliciting input');
+    }
+    if (name === 'error-after-elicit') {
+      await elicitThenWaitForRelease('Approve the erroring operation', name);
+      return {
+        content: [{ type: 'text', text: 'tool reported failure' }],
+        isError: true,
+      };
     }
     if (name === 'disconnect') {
       queueMicrotask(() => void server.close());

@@ -190,6 +190,7 @@ function classifySubagentDelegationFailure(
   }
 }
 
-function isAbortError(error: unknown): boolean {
+/** True when the thrown value is a DOM/Node AbortError (parent cancel). */
+export function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === 'AbortError';
 }

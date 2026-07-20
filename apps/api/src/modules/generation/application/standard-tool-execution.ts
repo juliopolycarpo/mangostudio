@@ -60,6 +60,7 @@ import {
   type SubagentRunResult,
 } from './subagent-runner';
 import {
+  isAbortError,
   subagentStatusToTerminal,
   ToolExecutionLifecycle,
   type ToolExecutionTransitionEvent,
@@ -452,24 +453,29 @@ async function executeMcpToolCall(
       signal: context.signal,
       toolCallId: callId,
     });
-    const mediaParts = !mcpResult.isError
-      ? await persistMcpMediaParts(mcpResult.content, {
+    // MCP tools usually report failure in CallToolResult (`isError: true`)
+    // rather than throwing; treat that the same as a thrown tool failure for
+    // any elicitation left pending when the call returns.
+    const { isError } = mcpResult;
+    if (isError) cancelReason = 'tool_failed';
+    const mediaParts = isError
+      ? undefined
+      : await persistMcpMediaParts(mcpResult.content, {
           db: prepared.db,
           userId: context.userId,
           chatId: context.chatId,
           toolCallId: callId,
           serverSlug: prepared.target.parsed.serverSlug,
           toolName: prepared.target.parsed.toolName,
-        })
-      : undefined;
+        });
     return {
-      result: mcpResult.isError ? { error: mcpResult.contentText } : mcpResult.contentText,
-      isError: mcpResult.isError,
+      result: isError ? { error: mcpResult.contentText } : mcpResult.contentText,
+      isError,
       ...(mediaParts?.length ? { mediaParts } : {}),
       ...(elicitationParts.length ? { elicitationParts } : {}),
     };
   } catch (error) {
-    cancelReason = classifyMcpElicitationCancelReason(error);
+    cancelReason = classifyMcpElicitationCancelReason(error, context.signal);
     throw error;
   } finally {
     releaseElicitationSink(context.userId, prepared.target.server.id, callId);
@@ -480,8 +486,16 @@ async function executeMcpToolCall(
   }
 }
 
-/** Maps a thrown MCP call failure to the terminal reason exposed to elicitations. */
-export function classifyMcpElicitationCancelReason(error: unknown): McpElicitationCancelReason {
+/**
+ * Maps a thrown MCP call failure to the terminal reason exposed to elicitations.
+ * Abort precedence mirrors `classifyToolExecutionFailure`: MCP SDK aborts can
+ * surface as RequestTimeout, so the parent turn signal is authoritative.
+ */
+export function classifyMcpElicitationCancelReason(
+  error: unknown,
+  parentSignal?: AbortSignal
+): McpElicitationCancelReason {
+  if (isAbortError(error) || parentSignal?.aborted) return 'turn_aborted';
   const failure = classifyMcpCallFailure(error);
   if (failure === 'timeout') return 'tool_timeout';
   if (failure === 'server_closed') return 'server_closed';

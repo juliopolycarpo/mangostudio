@@ -416,6 +416,53 @@ describe('POST /respond/stream — interactive MCP end to end', () => {
     });
   });
 
+  it('cancels pending elicitations as tool_failed when CallToolResult isError', async () => {
+    const provider = installProvider([
+      {
+        callId: 'error-call',
+        name: `mcp__${SERVER_SLUG}__error-after-elicit`,
+      },
+    ]);
+    const { recorder } = await startStream();
+    const requestEvent = await recorder.readUntil(
+      (event) => event.type === 'mcp_elicitation_request'
+    );
+    const elicitationId = String(requestEvent.elicitationId);
+
+    fixture.controls.release('error-after-elicit');
+    const events = await recorder.finish();
+
+    assertPublicStreamSchema(events);
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: 'mcp_elicitation_status',
+        elicitationId,
+        toolCallId: 'error-call',
+        status: 'cancelled',
+        reason: 'tool_failed',
+      })
+    );
+    expect(executionStatuses(events, 'error-call').at(-1)).toEqual({
+      status: 'failed',
+      reasonCode: 'execution_error',
+    });
+    expect(events).toContainEqual(
+      expect.objectContaining({ type: 'tool_result', callId: 'error-call', isError: true })
+    );
+    expect(assistantParts(await reloadMessages())).toContainEqual(
+      expect.objectContaining({
+        type: 'mcp_elicitation',
+        elicitationId,
+        status: 'cancelled',
+        reason: 'tool_failed',
+      })
+    );
+    expect(provider.requests[1]?.toolResults?.[0]).toMatchObject({
+      callId: 'error-call',
+      isError: true,
+    });
+  });
+
   it('persists turn-aborted elicitation state and hands it to recovery', async () => {
     const provider = installProvider([
       { callId: 'abort-call', name: `mcp__${SERVER_SLUG}__elicit` },
