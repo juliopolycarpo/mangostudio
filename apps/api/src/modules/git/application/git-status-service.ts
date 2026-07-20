@@ -18,25 +18,31 @@ function isMissingRepository(error: unknown): boolean {
   );
 }
 
+export async function getRepoRoot(workdir: string, signal?: AbortSignal): Promise<string | null> {
+  try {
+    const result = await runGit(['rev-parse', '--show-toplevel'], { cwd: workdir, signal });
+    return result.stdout.trim();
+  } catch (error) {
+    if (isMissingRepository(error)) return null;
+    throw error;
+  }
+}
+
+export async function getRepoStatus(root: string, signal?: AbortSignal) {
+  const result = await runGit(['status', '--porcelain=v2', '--branch', '-z'], {
+    cwd: root,
+    signal,
+  });
+  return parseGitStatus(result.stdout);
+}
+
 export async function getRepoState(workdir: string, signal?: AbortSignal): Promise<GitRepoState> {
   if (!(await isGitAvailable())) return { state: 'git-unavailable' };
 
-  let root: string;
-  try {
-    const result = await runGit(['rev-parse', '--show-toplevel'], { cwd: workdir, signal });
-    root = result.stdout.trim();
-  } catch (error) {
-    if (isMissingRepository(error)) {
-      return { state: 'not-a-repo', workdir };
-    }
-    throw error;
-  }
+  const root = await getRepoRoot(workdir, signal);
+  if (!root) return { state: 'not-a-repo', workdir };
 
-  const result = await runGit(['status', '--porcelain=v2', '--branch', '-z'], {
-    cwd: workdir,
-    signal,
-  });
-  return { state: 'repo', workdir, root, status: parseGitStatus(result.stdout) };
+  return { state: 'repo', workdir, root, status: await getRepoStatus(root, signal) };
 }
 
 export async function initRepo(workdir: string, signal?: AbortSignal): Promise<InitRepoResponse> {

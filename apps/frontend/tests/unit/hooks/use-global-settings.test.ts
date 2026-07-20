@@ -99,6 +99,25 @@ describe('useGlobalSettings', () => {
     });
   });
 
+  it('persists Git commit preferences through the app settings mutation', async () => {
+    const { result } = renderHook(() => useGlobalSettings());
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    act(() => {
+      result.current.setSignCommits(true);
+      result.current.setSignOff(true);
+    });
+
+    await waitFor(() =>
+      expect(result.current.gitSettings).toEqual({ signCommits: true, signOff: true })
+    );
+    await waitFor(() => expect(mockPut).toHaveBeenCalledTimes(1));
+    expect(mockPut.mock.calls[0]?.[0]).toMatchObject({
+      gitSettings: { signCommits: true, signOff: true },
+    });
+  });
+
   it('persists model-based chat title settings through the app settings mutation', async () => {
     const { result } = renderHook(() => useGlobalSettings());
 

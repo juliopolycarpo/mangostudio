@@ -32,16 +32,24 @@ export interface GitCommandResult {
 export class GitCliError extends Error {
   readonly exitCode: number | null;
   readonly stderr: string;
+  readonly stdout: string;
   readonly args: readonly string[];
   /** True when the caller cancelled the request rather than Git failing. */
   readonly aborted: boolean;
 
-  constructor(args: readonly string[], exitCode: number | null, stderr: string, aborted = false) {
-    const detail = stderr.trim() || 'Git command failed.';
+  constructor(
+    args: readonly string[],
+    exitCode: number | null,
+    stderr: string,
+    aborted = false,
+    stdout = ''
+  ) {
+    const detail = stderr.trim() || stdout.trim() || 'Git command failed.';
     super(detail);
     this.name = 'GitCliError';
     this.exitCode = exitCode;
     this.stderr = stderr.trim();
+    this.stdout = stdout.trim();
     this.args = [...args];
     this.aborted = aborted;
   }
@@ -120,7 +128,7 @@ export async function runGit(
       throw new GitCliError(args, exitCode, `Git output exceeded ${MAX_OUTPUT_BYTES} bytes.`);
     }
     if (exitCode !== 0) {
-      throw new GitCliError(args, exitCode, stderr.text);
+      throw new GitCliError(args, exitCode, stderr.text, false, stdout.text);
     }
 
     return { stdout: stdout.text, stderr: stderr.text, exitCode };

@@ -4,6 +4,7 @@ import {
   DEFAULT_APP_SETTINGS,
   DEFAULT_CHAT_TITLE_SETTINGS,
   DEFAULT_CONTEXT_SETTINGS,
+  DEFAULT_GIT_SETTINGS,
   DEFAULT_MULTI_AGENT_SETTINGS,
   DEFAULT_PROMPT_SETTINGS,
   DEFAULT_WORKSPACE_SETTINGS,
@@ -16,12 +17,27 @@ import {
   normalizeAppSettings,
   normalizeChatTitleSettings,
   normalizeContextSettings,
+  normalizeGitSettings,
   normalizeMultiAgentSettings,
   normalizePromptSettings,
   normalizeWorkspaceSettings,
   SUBAGENT_MAX_TURNS_MAX,
   SUBAGENT_MAX_TURNS_MIN,
 } from '../../src/app-settings';
+
+describe('normalizeGitSettings', () => {
+  it('defaults missing or malformed signing preferences', () => {
+    expect(normalizeGitSettings(undefined)).toEqual(DEFAULT_GIT_SETTINGS);
+    expect(normalizeGitSettings({ signCommits: 'yes', signOff: 1 })).toEqual(DEFAULT_GIT_SETTINGS);
+  });
+
+  it('preserves explicit signing and sign-off choices independently', () => {
+    expect(normalizeGitSettings({ signCommits: true, signOff: false })).toEqual({
+      signCommits: true,
+      signOff: false,
+    });
+  });
+});
 
 describe('normalizeWorkspaceSettings', () => {
   it('falls back to defaults when input is not an object', () => {
@@ -408,6 +424,10 @@ describe('normalizeAppSettings', () => {
     expect(normalizeAppSettings({}).chatTitleSettings).toEqual(
       DEFAULT_APP_SETTINGS.chatTitleSettings
     );
+  });
+
+  it('normalizes missing Git settings to the shared defaults', () => {
+    expect(normalizeAppSettings({}).gitSettings).toEqual(DEFAULT_GIT_SETTINGS);
   });
 
   it('falls back individual top-level fields when types are invalid', () => {
