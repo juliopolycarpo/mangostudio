@@ -2,13 +2,15 @@ import type { Kysely, Selectable, Updateable } from 'kysely';
 import type { Database } from '../../../db/types';
 import { generateId } from '../../../utils/id';
 
+/** SQLite stores the tri-state override as NULL (inherit) or 0/1. */
+function toOverrideFlag(value: number | null): boolean | null {
+  return value === null ? null : value !== 0;
+}
+
 function mapChatRow(row: Selectable<Database['chats']>): ChatRecord {
   return {
     ...row,
-    restrictToolsToWorkdir:
-      row.restrictToolsToWorkdir === null || row.restrictToolsToWorkdir === undefined
-        ? null
-        : row.restrictToolsToWorkdir !== 0,
+    restrictToolsToWorkdir: toOverrideFlag(row.restrictToolsToWorkdir),
   };
 }
 
@@ -81,10 +83,7 @@ export async function createChat(data: CreateChatData, db: Kysely<Database>): Pr
   };
   await db
     .insertInto('chats')
-    .values({
-      ...chat,
-      restrictToolsToWorkdir: null,
-    })
+    .values({ ...chat, restrictToolsToWorkdir: null })
     .execute();
   return chat;
 }
@@ -95,32 +94,20 @@ export async function updateChat(
   data: UpdateChatData,
   db: Kysely<Database>
 ): Promise<void> {
-  const updates: UpdateChatData = {};
-  if (data.title !== undefined) updates.title = data.title;
-  if (data.model !== undefined) updates.model = data.model;
-  if (data.textModel !== undefined) updates.textModel = data.textModel;
-  if (data.imageModel !== undefined) updates.imageModel = data.imageModel;
-  if (data.lastUsedMode !== undefined) updates.lastUsedMode = data.lastUsedMode;
-  if (data.selectedAgentId !== undefined) updates.selectedAgentId = data.selectedAgentId;
-  if (data.workdir !== undefined) updates.workdir = data.workdir;
-  if (data.restrictToolsToWorkdir !== undefined) {
-    updates.restrictToolsToWorkdir = data.restrictToolsToWorkdir;
-  }
-
-  if (Object.keys(updates).length === 0) return;
-
   const dbUpdates: Updateable<Database['chats']> = {};
-  if (updates.title !== undefined) dbUpdates.title = updates.title;
-  if (updates.model !== undefined) dbUpdates.model = updates.model;
-  if (updates.textModel !== undefined) dbUpdates.textModel = updates.textModel;
-  if (updates.imageModel !== undefined) dbUpdates.imageModel = updates.imageModel;
-  if (updates.lastUsedMode !== undefined) dbUpdates.lastUsedMode = updates.lastUsedMode;
-  if (updates.selectedAgentId !== undefined) dbUpdates.selectedAgentId = updates.selectedAgentId;
-  if (updates.workdir !== undefined) dbUpdates.workdir = updates.workdir;
+  if (data.title !== undefined) dbUpdates.title = data.title;
+  if (data.model !== undefined) dbUpdates.model = data.model;
+  if (data.textModel !== undefined) dbUpdates.textModel = data.textModel;
+  if (data.imageModel !== undefined) dbUpdates.imageModel = data.imageModel;
+  if (data.lastUsedMode !== undefined) dbUpdates.lastUsedMode = data.lastUsedMode;
+  if (data.selectedAgentId !== undefined) dbUpdates.selectedAgentId = data.selectedAgentId;
+  if (data.workdir !== undefined) dbUpdates.workdir = data.workdir;
   if (data.restrictToolsToWorkdir !== undefined) {
     dbUpdates.restrictToolsToWorkdir =
       data.restrictToolsToWorkdir === null ? null : data.restrictToolsToWorkdir ? 1 : 0;
   }
+
+  if (Object.keys(dbUpdates).length === 0) return;
 
   await db
     .updateTable('chats')
@@ -167,9 +154,6 @@ export async function getOwnedChat(
   if (!row) return undefined;
   return {
     workdir: row.workdir,
-    restrictToolsToWorkdir:
-      row.restrictToolsToWorkdir === null || row.restrictToolsToWorkdir === undefined
-        ? null
-        : row.restrictToolsToWorkdir !== 0,
+    restrictToolsToWorkdir: toOverrideFlag(row.restrictToolsToWorkdir),
   };
 }
