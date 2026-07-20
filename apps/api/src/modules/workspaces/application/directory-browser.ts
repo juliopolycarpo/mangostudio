@@ -9,16 +9,23 @@ import type {
 } from '@mangostudio/shared/workspaces';
 import { resolveWorkspacePath, WorkspacePathError } from './workspace-path';
 
+/** Reused across comparisons; constructing a collator per compare dominates large listings. */
+const INSENSITIVE_COLLATOR = new Intl.Collator(undefined, { sensitivity: 'base' });
+const CASE_COLLATOR = new Intl.Collator();
+
+const REASON_MESSAGES: Record<WorkdirValidationReason | 'invalid-path', string> = {
+  'invalid-path': 'Directory browsing requires an absolute path.',
+  'not-found': 'The requested directory does not exist.',
+  'not-a-directory': 'The requested path is not a directory.',
+  'permission-denied': 'The server cannot access the requested directory.',
+};
+
 export class DirectoryBrowserError extends Error {
   constructor(
     readonly code: 'VALIDATION' | 'FILESYSTEM',
     readonly reason: WorkdirValidationReason | 'invalid-path'
   ) {
-    super(
-      code === 'VALIDATION'
-        ? 'Directory browsing requires an absolute path.'
-        : 'The requested directory is not accessible.'
-    );
+    super(REASON_MESSAGES[reason]);
     this.name = 'DirectoryBrowserError';
   }
 }
@@ -59,11 +66,9 @@ async function isDirectoryEntry(
   }
 }
 
-async function listFilesystemRoots(): Promise<string[]> {
-  if (process.platform !== 'win32') {
-    return ['/'];
-  }
+let cachedRoots: Promise<string[]> | undefined;
 
+async function probeWindowsDrives(): Promise<string[]> {
   const candidates = Array.from(
     { length: 26 },
     (_, index) => `${String.fromCharCode(65 + index)}:\\`
@@ -79,6 +84,18 @@ async function listFilesystemRoots(): Promise<string[]> {
     })
   );
   return roots.filter((root): root is string => root !== undefined);
+}
+
+/**
+ * Mounted roots change rarely but probing them costs 26 syscalls on Windows,
+ * so the result is resolved once and shared by every listing.
+ */
+function listFilesystemRoots(): Promise<string[]> {
+  if (process.platform !== 'win32') {
+    return Promise.resolve(['/']);
+  }
+  cachedRoots ??= probeWindowsDrives();
+  return cachedRoots;
 }
 
 export async function listDirectory(path = homedir()): Promise<ListDirectoryResponse> {
@@ -120,10 +137,8 @@ export async function listDirectory(path = homedir()): Promise<ListDirectoryResp
   )
     .filter((entry): entry is DirectoryEntry => entry !== undefined)
     .sort((left, right) => {
-      const insensitiveOrder = left.name
-        .toLocaleLowerCase()
-        .localeCompare(right.name.toLocaleLowerCase());
-      return insensitiveOrder || left.name.localeCompare(right.name);
+      const insensitiveOrder = INSENSITIVE_COLLATOR.compare(left.name, right.name);
+      return insensitiveOrder || CASE_COLLATOR.compare(left.name, right.name);
     });
 
   const root = parse(resolvedPath).root;

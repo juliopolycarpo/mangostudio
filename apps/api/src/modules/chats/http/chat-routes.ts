@@ -12,6 +12,7 @@ import { requireAuth } from '../../../plugins/auth-middleware';
 import { parseQueryInt } from '../../../utils/query';
 import { NoModelAvailableError } from '../../generation/application/resolve-model';
 import { WorkdirValidationError } from '../../workspaces/application/workdir-validation';
+import { WorkspacePathError } from '../../workspaces/application/workspace-path';
 import {
   compactChatUseCase,
   EmptyChatCompactionError,
@@ -105,6 +106,10 @@ export const chatRoutes = (app: Elysia) =>
           } catch (error) {
             if (error instanceof WorkdirValidationError) {
               set.status = 422;
+              return apiError(error.message, ERROR_CODES.VALIDATION);
+            }
+            if (error instanceof WorkspacePathError) {
+              set.status = 400;
               return apiError(error.message, ERROR_CODES.VALIDATION);
             }
             throw error;

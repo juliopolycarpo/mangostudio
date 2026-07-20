@@ -1,10 +1,11 @@
-import type { ApiErrorResponse } from '@mangostudio/shared/errors';
+import { type ApiErrorResponse, ERROR_CODES } from '@mangostudio/shared/errors';
 import type { ListDirectoryResponse, ValidatePathResponse } from '@mangostudio/shared/workspaces';
 import { ValidatePathBodySchema } from '@mangostudio/shared/workspaces';
 import { Elysia, t } from 'elysia';
 import { requireAuth } from '../../../plugins/auth-middleware';
 import { DirectoryBrowserError, listDirectory } from '../application/directory-browser';
 import { validateWorkdir } from '../application/workdir-validation';
+import { WorkspacePathError } from '../application/workspace-path';
 
 function handleDirectoryBrowserError(
   error: unknown,
@@ -53,7 +54,17 @@ export const workspaceRoutes = new Elysia().use(requireAuth).group('/workspace/f
     )
     .post(
       '/validate',
-      async ({ body }): Promise<ValidatePathResponse> => validateWorkdir(body.path),
+      async ({ body, set }): Promise<ValidatePathResponse | ApiErrorResponse> => {
+        try {
+          return await validateWorkdir(body.path);
+        } catch (error) {
+          if (error instanceof WorkspacePathError) {
+            set.status = 400;
+            return { error: error.message, code: ERROR_CODES.VALIDATION };
+          }
+          throw error;
+        }
+      },
       { body: ValidatePathBodySchema }
     )
 );
