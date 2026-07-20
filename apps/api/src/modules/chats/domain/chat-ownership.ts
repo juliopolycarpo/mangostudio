@@ -1,8 +1,8 @@
 import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';
 import {
-  type ChatRecord,
   getOwnedChat,
+  type OwnedChatRecord,
   verifyChatOwnership,
 } from '../infrastructure/chat-repository';
 
@@ -21,7 +21,7 @@ export async function getOwnedChatOrThrow(
   chatId: string,
   userId: string,
   db: Kysely<Database>
-): Promise<ChatRecord> {
+): Promise<OwnedChatRecord> {
   const chat = await getOwnedChat(chatId, userId, db);
   if (!chat) {
     throw new ChatNotFoundError(chatId);

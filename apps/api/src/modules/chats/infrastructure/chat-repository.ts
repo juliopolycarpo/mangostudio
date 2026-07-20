@@ -112,15 +112,20 @@ export async function verifyChatOwnership(
   return chat?.userId === userId;
 }
 
+/** Chat fields a generation turn needs; excludes the large persisted state blobs. */
+export interface OwnedChatRecord {
+  workdir: string | null;
+}
+
 // biome-ignore lint/suspicious/useAwait: Kysely returns a promise-like query result.
 export async function getOwnedChat(
   chatId: string,
   userId: string,
   db: Kysely<Database>
-): Promise<ChatRecord | undefined> {
+): Promise<OwnedChatRecord | undefined> {
   return db
     .selectFrom('chats')
-    .selectAll()
+    .select('workdir')
     .where('id', '=', chatId)
     .where('userId', '=', userId)
     .executeTakeFirst();
