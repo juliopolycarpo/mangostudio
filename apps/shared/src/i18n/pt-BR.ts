@@ -316,6 +316,21 @@ export const messages = {
       signOffLabel: 'Adicionar trailer Signed-off-by',
       signOffDescription:
         'Adiciona a identidade configurada no Git como aprovação DCO em cada commit.',
+      commitMessages: {
+        title: 'Mensagens de commit',
+        description:
+          'Gere uma sugestão editável usando as alterações selecionadas e o histórico do repositório.',
+        dataNotice:
+          'O diff selecionado e os assuntos de commits recentes são enviados ao provedor do modelo configurado.',
+        modelLabel: 'Modelo preferido',
+        modelDescription: 'Use o modelo de texto do chat ou escolha um modelo específico.',
+        modelCurrent: 'Usar o modelo atual do chat',
+        promptLabel: 'Prompt do sistema',
+        promptDescription: 'Oriente o estilo e o conteúdo da mensagem gerada.',
+        resetPrompt: 'Restaurar padrão',
+        maxDiffLabel: 'Tamanho máximo do diff (KB)',
+        maxDiffDescription: 'Limite de conteúdo do diff enviado ao modelo, entre 16 e 512 KB.',
+      },
     },
     context: {
       title: 'Contexto',
@@ -1140,6 +1155,10 @@ export const messages = {
       titleCount: '{count}/72',
       bodyLabel: 'Corpo do commit',
       bodyPlaceholder: 'Explique a alteração (opcional)',
+      generate: 'Gerar mensagem',
+      generating: 'Gerando mensagem...',
+      generateError: 'Não foi possível gerar uma mensagem de commit.',
+      truncatedNotice: 'O diff era grande e foi truncado antes da geração.',
       amendLabel: 'Alterar o commit mais recente',
       amendHint: 'Substitui o commit local mais recente.',
       submit: 'Criar commit',
@@ -1153,6 +1172,13 @@ export const messages = {
         'A alteração substitui o commit mais recente. Continue somente quando for seguro reescrever o histórico local.',
       cancel: 'Cancelar',
       confirm: 'Confirmar alteração',
+    },
+    commitMessageOverwrite: {
+      title: 'Substituir a mensagem atual?',
+      description:
+        'Uma sugestão foi gerada, mas o formulário já contém texto. Confirme para substituir o título e o corpo atuais.',
+      cancel: 'Manter mensagem atual',
+      confirm: 'Usar sugestão',
     },
     stash: {
       title: 'Stashes',

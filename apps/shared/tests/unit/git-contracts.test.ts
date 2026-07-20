@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'bun:test';
 import {
   CommitBodySchema,
+  GenerateCommitMessageBodySchema,
+  GenerateCommitMessageResponseSchema,
   StagePathsBodySchema,
   StashPopBodySchema,
   UnstagePathsBodySchema,
@@ -28,6 +30,23 @@ describe('Git write contracts', () => {
     );
     expect(Value.Check(CommitBodySchema, { chatId: 'chat-1', title: '   ' })).toBe(false);
     expect(Value.Check(CommitBodySchema, { chatId: 'chat-1', title: 'x'.repeat(73) })).toBe(false);
+  });
+
+  it('validates commit-message generation requests and responses', () => {
+    expect(Value.Check(GenerateCommitMessageBodySchema, { chatId: 'chat-1' })).toBe(true);
+    expect(
+      Value.Check(GenerateCommitMessageBodySchema, { chatId: 'chat-1', model: 'fast-model' })
+    ).toBe(true);
+    expect(Value.Check(GenerateCommitMessageBodySchema, { chatId: 'chat-1', model: '' })).toBe(
+      false
+    );
+    expect(
+      Value.Check(GenerateCommitMessageResponseSchema, {
+        title: 'feat(git): generate commit messages',
+        body: 'Use the staged diff as context.',
+        truncated: false,
+      })
+    ).toBe(true);
   });
 
   it('defaults stash selection at the application boundary while rejecting negative indexes', () => {

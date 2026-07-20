@@ -1,8 +1,20 @@
 export {
+  COMMIT_MESSAGE_MAX_DIFF_KB_DEFAULT,
+  COMMIT_MESSAGE_MAX_DIFF_KB_MAX,
+  COMMIT_MESSAGE_MAX_DIFF_KB_MIN,
+  DEFAULT_COMMIT_MESSAGE_PROMPT,
+  type ParsedCommitMessage,
+  parseCommitMessageOutput,
+} from './commit-message';
+export {
   type CommitBody,
   CommitBodySchema,
   type CommitResponse,
   CommitResponseSchema,
+  type GenerateCommitMessageBody,
+  GenerateCommitMessageBodySchema,
+  type GenerateCommitMessageResponse,
+  GenerateCommitMessageResponseSchema,
   type GitBranchInfo,
   GitBranchInfoSchema,
   type GitFileChange,

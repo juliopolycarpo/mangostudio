@@ -11,6 +11,12 @@ import {
 } from '../agentic-limits';
 import type { ContextCompactionBehavior, ContextSettings } from '../chat';
 import { CHAT_TITLE_PROMPT_LENGTH_DEFAULT, clampChatTitlePromptLength } from '../chat/title';
+import {
+  COMMIT_MESSAGE_MAX_DIFF_KB_DEFAULT,
+  COMMIT_MESSAGE_MAX_DIFF_KB_MAX,
+  COMMIT_MESSAGE_MAX_DIFF_KB_MIN,
+  DEFAULT_COMMIT_MESSAGE_PROMPT,
+} from '../git/commit-message';
 import type {
   PromptInjectionRole,
   PromptSendFrequency,
@@ -105,6 +111,11 @@ export const DEFAULT_WORKSPACE_SETTINGS: WorkspaceSettings = {
 export const DEFAULT_GIT_SETTINGS: GitSettings = {
   signCommits: false,
   signOff: false,
+  commitMessage: {
+    preferredModel: '',
+    systemPrompt: DEFAULT_COMMIT_MESSAGE_PROMPT,
+    maxDiffKb: COMMIT_MESSAGE_MAX_DIFF_KB_DEFAULT,
+  },
 };
 
 export const DEFAULT_APP_SETTINGS: AppSettings = {
@@ -357,10 +368,29 @@ export function normalizeWorkspaceSettings(value: unknown): WorkspaceSettings {
 export function normalizeGitSettings(value: unknown): GitSettings {
   if (!isRecord(value)) return DEFAULT_GIT_SETTINGS;
 
+  const commitMessage = isRecord(value.commitMessage) ? value.commitMessage : {};
+
   return {
     signCommits:
       typeof value.signCommits === 'boolean' ? value.signCommits : DEFAULT_GIT_SETTINGS.signCommits,
     signOff: typeof value.signOff === 'boolean' ? value.signOff : DEFAULT_GIT_SETTINGS.signOff,
+    commitMessage: {
+      preferredModel:
+        typeof commitMessage.preferredModel === 'string'
+          ? commitMessage.preferredModel
+          : DEFAULT_GIT_SETTINGS.commitMessage.preferredModel,
+      systemPrompt:
+        typeof commitMessage.systemPrompt === 'string' &&
+        commitMessage.systemPrompt.trim().length > 0
+          ? commitMessage.systemPrompt
+          : DEFAULT_COMMIT_MESSAGE_PROMPT,
+      maxDiffKb: clampInteger(
+        commitMessage.maxDiffKb,
+        COMMIT_MESSAGE_MAX_DIFF_KB_DEFAULT,
+        COMMIT_MESSAGE_MAX_DIFF_KB_MIN,
+        COMMIT_MESSAGE_MAX_DIFF_KB_MAX
+      ),
+    },
   };
 }
 

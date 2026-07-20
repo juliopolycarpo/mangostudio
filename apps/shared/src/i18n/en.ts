@@ -313,6 +313,21 @@ export const messages: Messages = {
       signCommitsDescription: 'Uses your Git config signing key — GPG or SSH.',
       signOffLabel: 'Add Signed-off-by trailer',
       signOffDescription: 'Adds the configured Git identity as a DCO sign-off to each commit.',
+      commitMessages: {
+        title: 'Commit messages',
+        description:
+          'Generate an editable suggestion from the selected changes and repository history.',
+        dataNotice:
+          'The selected diff and recent commit subjects are sent to the configured model provider.',
+        modelLabel: 'Preferred model',
+        modelDescription: 'Use the chat text model or choose a specific model.',
+        modelCurrent: 'Use current chat model',
+        promptLabel: 'System prompt',
+        promptDescription: 'Guide the style and content of the generated message.',
+        resetPrompt: 'Reset to default',
+        maxDiffLabel: 'Maximum diff size (KB)',
+        maxDiffDescription: 'Limits diff content sent to the model to between 16 and 512 KB.',
+      },
     },
     context: {
       title: 'Context',
@@ -1126,6 +1141,10 @@ export const messages: Messages = {
       titleCount: '{count}/72',
       bodyLabel: 'Commit body',
       bodyPlaceholder: 'Explain the change (optional)',
+      generate: 'Generate message',
+      generating: 'Generating message...',
+      generateError: 'The commit message could not be generated.',
+      truncatedNotice: 'The diff was large and was truncated before generation.',
       amendLabel: 'Amend latest commit',
       amendHint: 'Replaces the latest local commit.',
       submit: 'Commit changes',
@@ -1139,6 +1158,13 @@ export const messages: Messages = {
         'Amending replaces the latest commit. Only continue when rewriting local history is safe.',
       cancel: 'Cancel',
       confirm: 'Confirm amend',
+    },
+    commitMessageOverwrite: {
+      title: 'Replace the current message?',
+      description:
+        'A suggestion was generated, but the form already contains text. Confirm to replace the current title and body.',
+      cancel: 'Keep current message',
+      confirm: 'Use suggestion',
     },
     stash: {
       title: 'Stashes',

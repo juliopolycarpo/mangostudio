@@ -17,6 +17,7 @@ const hooks = vi.hoisted(() => ({
   stage: vi.fn(),
   unstage: vi.fn(),
   commit: vi.fn(),
+  generate: vi.fn(),
   stashSave: vi.fn(),
   stashPop: vi.fn(),
   stashes: [] as Array<{ index: number; message: string; branch?: string }>,
@@ -38,6 +39,7 @@ vi.mock('../../../src/features/workspace/hooks/use-git-state', () => ({
   useStagePaths: () => ({ mutateAsync: hooks.stage, isPending: false }),
   useUnstagePaths: () => ({ mutateAsync: hooks.unstage, isPending: false }),
   useCommit: () => ({ mutateAsync: hooks.commit, isPending: false }),
+  useGenerateCommitMessage: () => ({ mutateAsync: hooks.generate, isPending: false }),
   useGitStashes: () => ({ data: { stashes: hooks.stashes }, isLoading: false, error: null }),
   useStashSave: () => ({ mutateAsync: hooks.stashSave, isPending: false }),
   useStashPop: () => ({ mutateAsync: hooks.stashPop, isPending: false }),
@@ -55,6 +57,7 @@ beforeEach(() => {
   hooks.stage.mockReset();
   hooks.unstage.mockReset();
   hooks.commit.mockReset();
+  hooks.generate.mockReset();
   hooks.stashSave.mockReset();
   hooks.stashPop.mockReset();
   hooks.stashes = [];
@@ -175,6 +178,75 @@ describe('GitPanel', () => {
       amend: false,
     });
     expect(await screen.findByText('Committed abcdef12')).toBeInTheDocument();
+  });
+
+  it('generates an editable commit message and reports diff truncation', async () => {
+    const user = userEvent.setup();
+    hooks.generate.mockResolvedValue({
+      title: 'feat(git): generate commit messages',
+      body: 'Build the message from worktree context.',
+      truncated: true,
+    });
+    hooks.data = {
+      state: 'repo',
+      workdir: '/srv/projects/mangostudio',
+      root: '/srv/projects/mangostudio',
+      status: {
+        branch: { name: 'feat/git-panel', ahead: 0, behind: 0 },
+        staged: [],
+        unstaged: [{ path: 'src/panel.tsx', status: 'modified' }],
+        untracked: [],
+        conflicted: [],
+        clean: false,
+      },
+    };
+
+    render(<GitPanel chatId="chat-1" />);
+    await user.click(screen.getByRole('button', { name: 'Generate message' }));
+
+    expect(hooks.generate).toHaveBeenCalledOnce();
+    expect(screen.getByRole('textbox', { name: 'Commit title' })).toHaveValue(
+      'feat(git): generate commit messages'
+    );
+    expect(screen.getByRole('textbox', { name: 'Commit body' })).toHaveValue(
+      'Build the message from worktree context.'
+    );
+    expect(
+      screen.getByText('The diff was large and was truncated before generation.')
+    ).toBeVisible();
+  });
+
+  it('confirms before replacing a message the user already entered', async () => {
+    const user = userEvent.setup();
+    hooks.generate.mockResolvedValue({
+      title: 'generated title',
+      body: 'generated body',
+      truncated: false,
+    });
+    hooks.data = {
+      state: 'repo',
+      workdir: '/srv/projects/mangostudio',
+      root: '/srv/projects/mangostudio',
+      status: {
+        branch: { name: 'feat/git-panel', ahead: 0, behind: 0 },
+        staged: [{ path: 'src/panel.tsx', status: 'modified' }],
+        unstaged: [],
+        untracked: [],
+        conflicted: [],
+        clean: false,
+      },
+    };
+
+    render(<GitPanel chatId="chat-1" />);
+    const titleInput = screen.getByRole('textbox', { name: 'Commit title' });
+    await user.type(titleInput, 'manual title');
+    await user.click(screen.getByRole('button', { name: 'Generate message' }));
+
+    expect(screen.getByRole('dialog', { name: 'Replace the current message?' })).toBeVisible();
+    expect(titleInput).toHaveValue('manual title');
+    await user.click(screen.getByRole('button', { name: 'Use suggestion' }));
+    expect(titleInput).toHaveValue('generated title');
+    expect(screen.getByRole('textbox', { name: 'Commit body' })).toHaveValue('generated body');
   });
 
   it('requires a per-session confirmation before enabling amend', async () => {

@@ -33,6 +33,8 @@ export {
   type ChatTitleSettings,
   ChatTitleSettingsSchema,
   type ChatTitleStrategy,
+  type CommitMessageSettings,
+  CommitMessageSettingsSchema,
   type GitSettings,
   GitSettingsSchema,
   type ImageQuality,
