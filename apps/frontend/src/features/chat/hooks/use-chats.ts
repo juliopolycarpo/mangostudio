@@ -67,6 +67,16 @@ export function useChats() {
     [updateMutation]
   );
 
+  const updateChatWorkdir = useCallback(
+    async (chatId: string, workdir: string | null) => {
+      await updateMutation.mutateAsync({
+        id: chatId,
+        updates: { workdir },
+      });
+    },
+    [updateMutation]
+  );
+
   const deleteChat = useCallback(
     async (chatId: string) => {
       await deleteMutation.mutateAsync(chatId);
@@ -95,6 +105,7 @@ export function useChats() {
     updateChatModel,
     updateChatTitle,
     updateChatAgentSelection,
+    updateChatWorkdir,
     deleteChat,
     selectChat,
     setCurrentChatId,

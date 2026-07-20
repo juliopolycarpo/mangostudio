@@ -1,7 +1,7 @@
 import type { ReasoningEffort } from '@mangostudio/shared';
 import type { AgentExecutionMode, AgentProfile } from '@mangostudio/shared/agents';
 import type { ChatAttachment } from '@mangostudio/shared/chat';
-import { FileText, Image, Mic, Send, Square, X } from 'lucide-react';
+import { FileText, FolderOpen, Image, Mic, Send, Square, X } from 'lucide-react';
 import { useState } from 'react';
 import { ThinkingToggle } from '@/components/layout/ThinkingToggle';
 import type { ContextInfo } from '@/features/generation/types';
@@ -37,6 +37,14 @@ interface Props {
   isAgentListLoading?: boolean;
   onAgentExecutionModeChange?: (mode: AgentExecutionMode) => void;
   onSelectedAgentIdChange?: (agentId: string) => void;
+  workdir?: string | null;
+  onWorkdirClick?: () => void;
+}
+
+function getWorkdirName(workdir: string): string {
+  const withoutTrailingSeparators = workdir.replace(/[\\/]+$/, '');
+  if (!withoutTrailingSeparators) return workdir;
+  return withoutTrailingSeparators.split(/[\\/]/).filter(Boolean).at(-1) ?? workdir;
 }
 
 export function InputBar({
@@ -61,6 +69,8 @@ export function InputBar({
   isAgentListLoading = false,
   onAgentExecutionModeChange,
   onSelectedAgentIdChange,
+  workdir = null,
+  onWorkdirClick,
 }: Props) {
   const { t } = useI18n();
   const [prompt, setPrompt] = useState('');
@@ -68,6 +78,7 @@ export function InputBar({
   const selectableAgents = agents.filter(
     (agent) => agent.role === 'primary' || agent.role === 'both'
   );
+  const workdirName = workdir ? getWorkdirName(workdir) : null;
 
   const handleSubmit = (e: { preventDefault: () => void }) => {
     e.preventDefault();
@@ -121,6 +132,24 @@ export function InputBar({
               <label className="sr-only" htmlFor="chat-agent-selector">
                 {t.chat.input.selectAgent}
               </label>
+            ) : null}
+
+            {agentExecutionMode === 'agent' && onWorkdirClick ? (
+              <button
+                type="button"
+                onClick={onWorkdirClick}
+                disabled={disabled}
+                className="flex h-7 max-w-[14rem] items-center gap-1.5 rounded-full border border-outline-variant/20 bg-surface-container-lowest px-2.5 text-[10px] font-medium text-on-surface-variant transition-colors hover:border-primary/30 hover:text-on-surface sm:text-[11px]"
+                title={workdir ?? t.workspace.chooseWorkdir}
+                aria-label={
+                  workdirName
+                    ? t.workspace.changeWorkdir.replace('{name}', workdirName)
+                    : t.workspace.chooseWorkdir
+                }
+              >
+                <FolderOpen size={13} className="shrink-0 text-primary/80" />
+                <span className="truncate">{workdirName ?? t.workspace.chooseWorkdir}</span>
+              </button>
             ) : null}
             {agentExecutionMode === 'agent' && onSelectedAgentIdChange ? (
               <select

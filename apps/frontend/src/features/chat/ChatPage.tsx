@@ -2,8 +2,10 @@ import type { Message, ReasoningEffort } from '@mangostudio/shared';
 import type { AgentExecutionMode, AgentProfile } from '@mangostudio/shared/agents';
 import type { ContextSettings } from '@mangostudio/shared/chat';
 import { isTurnCheckpointPart, type TurnCheckpointPart } from '@mangostudio/shared/turn-recovery';
+import type { WorkspaceSettings } from '@mangostudio/shared/workspaces';
 import { useMemo } from 'react';
 import type { ContextInfo, FallbackNotice } from '@/features/generation/types';
+import { WorkdirPickerDialog } from '@/features/workspace/WorkdirPickerDialog';
 import { authClient } from '@/lib/auth-client';
 import { ChatPageContent } from './components/ChatPageContent';
 import { ChatContextDecisionNotice, ChatFallbackNotice } from './components/ChatPageNotices';
@@ -39,6 +41,12 @@ interface ChatPageProps {
   isAgentListLoading?: boolean;
   onAgentExecutionModeChange?: (mode: AgentExecutionMode) => void;
   onSelectedAgentIdChange?: (agentId: string) => void;
+  workdir?: string | null;
+  workspaceSettings?: WorkspaceSettings;
+  isWorkdirPickerOpen?: boolean;
+  onOpenWorkdirPicker?: () => void;
+  onCloseWorkdirPicker?: () => void;
+  onSelectWorkdir?: (path: string) => void | Promise<void>;
   onResumeInterruptedTurn: (messageId: string, retryCallIds: string[]) => Promise<void>;
   onDismissInterruptedTurn: (messageId: string) => Promise<void>;
 }
@@ -92,6 +100,12 @@ export function ChatPage({
   isAgentListLoading = false,
   onAgentExecutionModeChange,
   onSelectedAgentIdChange,
+  workdir = null,
+  workspaceSettings,
+  isWorkdirPickerOpen = false,
+  onOpenWorkdirPicker,
+  onCloseWorkdirPicker,
+  onSelectWorkdir,
   onResumeInterruptedTurn,
   onDismissInterruptedTurn,
 }: ChatPageProps) {
@@ -165,7 +179,19 @@ export function ChatPage({
         isAgentListLoading={isAgentListLoading}
         onAgentExecutionModeChange={onAgentExecutionModeChange}
         onSelectedAgentIdChange={onSelectedAgentIdChange}
+        workdir={workdir}
+        onWorkdirClick={onOpenWorkdirPicker}
       />
+      {workspaceSettings && onCloseWorkdirPicker && onSelectWorkdir ? (
+        <WorkdirPickerDialog
+          open={isWorkdirPickerOpen}
+          initialPath={workdir || workspaceSettings.defaultWorkdir}
+          defaultWorkdir={workspaceSettings.defaultWorkdir}
+          recentWorkdirs={workspaceSettings.recentWorkdirs}
+          onSelect={onSelectWorkdir}
+          onClose={onCloseWorkdirPicker}
+        />
+      ) : null}
     </div>
   );
 }

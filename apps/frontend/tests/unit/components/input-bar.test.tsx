@@ -70,6 +70,22 @@ describe('InputBar — chat-only composer', () => {
     expect(onAgentExecutionModeChange).toHaveBeenCalledWith('agent');
   });
 
+  it('shows the active workdir basename in Agent mode and reopens the picker', async () => {
+    const user = userEvent.setup();
+    const onWorkdirClick = vi.fn();
+    renderInputBar({
+      agentExecutionMode: 'agent',
+      workdir: '/srv/projects/mangostudio',
+      onWorkdirClick,
+    });
+
+    const button = screen.getByRole('button', { name: 'Change working directory: mangostudio' });
+    expect(button).toHaveAttribute('title', '/srv/projects/mangostudio');
+    await user.click(button);
+
+    expect(onWorkdirClick).toHaveBeenCalledOnce();
+  });
+
   it('does not render a reference image upload button', () => {
     renderInputBar();
 

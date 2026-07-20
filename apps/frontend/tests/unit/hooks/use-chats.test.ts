@@ -247,6 +247,26 @@ describe('useChats', () => {
     });
   });
 
+  describe('updateChatWorkdir', () => {
+    it('sets and clears the chat workdir through the update mutation', async () => {
+      const { result } = renderHook(() => useChats());
+
+      await act(async () => {
+        await result.current.updateChatWorkdir(CHAT_A.id, '/srv/projects/mango');
+        await result.current.updateChatWorkdir(CHAT_A.id, null);
+      });
+
+      expect(mockUpdateChat).toHaveBeenNthCalledWith(1, {
+        id: CHAT_A.id,
+        updates: { workdir: '/srv/projects/mango' },
+      });
+      expect(mockUpdateChat).toHaveBeenNthCalledWith(2, {
+        id: CHAT_A.id,
+        updates: { workdir: null },
+      });
+    });
+  });
+
   describe('deleteChat', () => {
     it('calls the delete mutation', async () => {
       mockChatsQueryResult.mockReturnValue({
