@@ -14,13 +14,13 @@ import type {
 } from '@mangostudio/shared/connectors';
 import type { ApiErrorResponse } from '@mangostudio/shared/errors';
 import { client } from '@/lib/api-client';
-import { extractApiError } from '@/lib/utils';
+import { ApiError } from '@/lib/utils';
 
-export class ConnectorApiError extends Error {
+export class ConnectorApiError extends ApiError {
   readonly code?: string;
 
   constructor(value: unknown) {
-    super(extractApiError(value));
+    super(value);
     this.name = 'ConnectorApiError';
     if (value && typeof value === 'object') {
       const maybeError = value as Partial<ApiErrorResponse>;

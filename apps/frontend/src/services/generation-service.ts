@@ -4,7 +4,7 @@ import type { GenerateImageBody, RespondStreamBody } from '@mangostudio/shared/g
 import type { StreamChunk } from '@mangostudio/shared/streaming';
 import { getApiBaseUrl } from '../lib/api-base-url';
 import { client } from '../lib/api-client';
-import { DEFAULT_API_ERROR_FALLBACK, extractApiError } from '../lib/utils';
+import { ApiError } from '../lib/utils';
 
 export type GenerateImageRequest = Omit<GenerateImageBody, 'model'> & { model: string };
 export type RespondTextRequest = RespondStreamBody;
@@ -27,7 +27,7 @@ export async function generateImage(request: GenerateImageRequest): Promise<Gene
   const { data, error } = await client.api.generate.post(request);
 
   if (error) {
-    throw new Error(extractApiError(error.value));
+    throw new ApiError(error.value);
   }
 
   // Eden Treaty infers a union that includes the error shape even after the guard above.
@@ -37,9 +37,9 @@ export async function generateImage(request: GenerateImageRequest): Promise<Gene
 
 export type { StreamChunk };
 
-function recoveryActionError(error: unknown): Error {
+function recoveryActionError(error: unknown): ApiError {
   const value = (error as { value?: unknown } | null)?.value;
-  return new Error(extractApiError(value));
+  return new ApiError(value);
 }
 
 export async function cancelInterruptedTurn(chatId: string, messageId: string): Promise<void> {
@@ -87,11 +87,11 @@ export async function respondTextStream(
     } catch {
       // Non-JSON error body: fall through to the neutral message.
     }
-    throw new Error(extractApiError(body));
+    throw new ApiError(body);
   }
 
   // No server payload to unwrap; the render layer localizes the neutral message.
-  if (!response.body) throw new Error(DEFAULT_API_ERROR_FALLBACK);
+  if (!response.body) throw new ApiError(null);
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';

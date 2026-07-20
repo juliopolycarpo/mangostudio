@@ -711,7 +711,7 @@ describe('useTextGeneration — failure surfaced as timeline item', () => {
     mockStream.mockReset();
   });
 
-  it('appends an error message part when the stream throws', async () => {
+  it('appends a localized error message part when the stream throws', async () => {
     const props = makeProps();
     mockStream.mockImplementation(() => Promise.reject(new Error('network boom')));
 
@@ -731,7 +731,9 @@ describe('useTextGeneration — failure surfaced as timeline item', () => {
     if (!finalCall) throw new Error('expected a terminal update');
     const errorParts = (finalCall[2].parts ?? []).filter((p) => p.type === 'error');
     expect(errorParts).toHaveLength(1);
-    expect(errorParts[0].type === 'error' && errorParts[0].text).toBe('network boom');
+    expect(errorParts[0].type === 'error' && errorParts[0].text).toBe(
+      'Failed to get a response. Please try again.'
+    );
   });
 
   it('uses the localized fallback when the stream throws a non-Error value', async () => {

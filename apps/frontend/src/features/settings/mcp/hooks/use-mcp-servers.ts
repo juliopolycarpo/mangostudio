@@ -1,5 +1,5 @@
 /**
- * Hooks: MCP server list plus create/update/delete/test/import mutations.
+ * Hooks: MCP server list plus create/update/delete/test mutations.
  */
 
 import type {
@@ -14,7 +14,6 @@ import {
   applyPortableMcpImport,
   deleteMcpServer,
   exportPortableMcpServers,
-  importMcpServers,
   previewPortableMcpImport,
   testMcpServer,
   updateMcpServer,
@@ -68,14 +67,6 @@ export function useDeleteMcpServer() {
   const invalidate = useInvalidateMcpCaches();
   return useMutation({
     mutationFn: (id: string) => deleteMcpServer(id),
-    onSuccess: () => invalidate(),
-  });
-}
-
-export function useImportMcpServers() {
-  const invalidate = useInvalidateMcpCaches();
-  return useMutation({
-    mutationFn: importMcpServers,
     onSuccess: () => invalidate(),
   });
 }

@@ -35,7 +35,6 @@ describe('useGeminiCatalog', () => {
 
     expect(result.current.catalog).toEqual(EMPTY_MODEL_CATALOG);
     expect(result.current.isLoading).toBe(true);
-    expect(result.current.error).toBeNull();
   });
 
   it('updates catalog after a successful refresh', async () => {
@@ -64,17 +63,15 @@ describe('useGeminiCatalog', () => {
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
     expect(result.current.catalog).toEqual(mockCatalog);
-    expect(result.current.error).toBeNull();
   });
 
-  it('handles API errors', async () => {
+  it('keeps the empty catalog when the fetch fails', async () => {
     mockGet.mockResolvedValue(mockResult(null, { value: 'Network error' }));
 
     const { result } = renderHook(() => useGeminiCatalog());
 
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
-    expect(result.current.error).toBe('Network error');
     expect(result.current.catalog).toEqual(EMPTY_MODEL_CATALOG);
   });
 

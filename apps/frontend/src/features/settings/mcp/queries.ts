@@ -11,7 +11,7 @@ import type {
 } from '@mangostudio/shared/mcp';
 import { queryOptions } from '@tanstack/react-query';
 import { client } from '@/lib/api-client';
-import { extractApiError } from '@/lib/utils';
+import { ApiError } from '@/lib/utils';
 
 export const mcpServerKeys = {
   all: ['mcp-servers'] as const,
@@ -36,7 +36,7 @@ export function mcpServerListQueryOptions() {
     staleTime: 30_000,
     queryFn: async () => {
       const { data, error } = await client.api.mcp.servers.get();
-      if (error) throw new Error(extractApiError(error.value));
+      if (error) throw new ApiError(error.value);
       return data as McpServerListResponse;
     },
   });
@@ -48,7 +48,7 @@ export function mcpServerToolsQueryOptions(serverId: string) {
     staleTime: 30_000,
     queryFn: async () => {
       const { data, error } = await client.api.mcp.servers({ id: serverId }).tools.get();
-      if (error) throw new Error(extractApiError(error.value));
+      if (error) throw new ApiError(error.value);
       return data as McpServerToolsResponse;
     },
   });
@@ -63,7 +63,7 @@ export function mcpServerResourcesQueryOptions(serverId: string) {
       const { data, error } = await client.api.mcp.servers({ id: serverId }).resources.get();
       if (error) {
         if (isUnsupportedCapability(error.value)) return null;
-        throw new Error(extractApiError(error.value));
+        throw new ApiError(error.value);
       }
       return data as McpServerResourcesResponse;
     },
@@ -79,7 +79,7 @@ export function mcpServerPromptsQueryOptions(serverId: string) {
       const { data, error } = await client.api.mcp.servers({ id: serverId }).prompts.get();
       if (error) {
         if (isUnsupportedCapability(error.value)) return null;
-        throw new Error(extractApiError(error.value));
+        throw new ApiError(error.value);
       }
       return data as McpServerPromptsResponse;
     },

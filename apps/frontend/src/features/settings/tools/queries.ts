@@ -5,7 +5,7 @@
 import type { ToolSettingsListResponse } from '@mangostudio/shared/tool-settings';
 import { queryOptions } from '@tanstack/react-query';
 import { client } from '@/lib/api-client';
-import { extractApiError } from '@/lib/utils';
+import { ApiError } from '@/lib/utils';
 
 export const toolSettingsKeys = {
   all: ['tool-settings'] as const,
@@ -18,7 +18,7 @@ export function toolSettingsListQueryOptions() {
     staleTime: 30_000,
     queryFn: async () => {
       const { data, error } = await client.api.settings.tools.get();
-      if (error) throw new Error(extractApiError(error.value));
+      if (error) throw new ApiError(error.value);
       return data as ToolSettingsListResponse;
     },
   });

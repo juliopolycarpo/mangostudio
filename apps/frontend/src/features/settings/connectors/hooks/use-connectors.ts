@@ -6,7 +6,7 @@ import type { ConnectorStatus } from '@mangostudio/shared';
 import { queryOptions, useQuery } from '@tanstack/react-query';
 import { useCallback } from 'react';
 import { client } from '@/lib/api-client';
-import { extractApiError } from '@/lib/utils';
+import { ApiError } from '@/lib/utils';
 
 const connectorKeys = {
   status: ['connector-status'] as const,
@@ -18,7 +18,7 @@ export const connectorQueryOptions = () =>
     queryFn: async () => {
       const { data, error } = await client.api.settings.connectors.get();
       if (error) {
-        throw new Error(extractApiError(error.value));
+        throw new ApiError(error.value);
       }
       return data as ConnectorStatus;
     },
