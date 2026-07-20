@@ -17,7 +17,7 @@ import {
 } from '@mangostudio/shared/app-settings';
 import type { ContextCompactionBehavior, ContextSettings } from '@mangostudio/shared/chat';
 import type { RuleFileSetting } from '@mangostudio/shared/prompt-rules';
-import type { WorkspaceSettings } from '@mangostudio/shared/workspaces';
+import { RECENT_WORKDIRS_MAX, type WorkspaceSettings } from '@mangostudio/shared/workspaces';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { updateAppSettings } from '@/features/settings/app/api';
@@ -296,7 +296,7 @@ export function useGlobalSettings() {
         recentWorkdirs: [
           value,
           ...current.recentWorkdirs.filter((workdir) => workdir !== value),
-        ].slice(0, 10),
+        ].slice(0, RECENT_WORKDIRS_MAX),
       })),
     setChatAutoRenameEnabled: (value: boolean) =>
       updateChatTitleSettings({ autoRenameEnabled: value }),

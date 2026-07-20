@@ -3,7 +3,6 @@ import { type Static, Type } from '@sinclair/typebox';
 export const DirectoryEntrySchema = Type.Object({
   name: Type.String(),
   path: Type.String(),
-  hasChildren: Type.Optional(Type.Boolean()),
   hidden: Type.Optional(Type.Boolean()),
 });
 
@@ -32,9 +31,12 @@ export const ValidatePathResponseSchema = Type.Object({
   reason: Type.Optional(WorkdirValidationReasonSchema),
 });
 
+/** Upper bound on remembered working directories, shared by the schema, normalizer, and UI. */
+export const RECENT_WORKDIRS_MAX = 10;
+
 export const WorkspaceSettingsSchema = Type.Object({
   defaultWorkdir: Type.String(),
-  recentWorkdirs: Type.Array(Type.String(), { maxItems: 10 }),
+  recentWorkdirs: Type.Array(Type.String(), { maxItems: RECENT_WORKDIRS_MAX }),
 });
 
 export type DirectoryEntry = Static<typeof DirectoryEntrySchema>;

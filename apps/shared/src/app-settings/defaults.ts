@@ -18,7 +18,7 @@ import type {
   RuleFileSetting,
 } from '../prompt-rules';
 import type { ReasoningEffort } from '../types';
-import type { WorkspaceSettings } from '../workspaces';
+import { RECENT_WORKDIRS_MAX, type WorkspaceSettings } from '../workspaces';
 import type {
   AppSettings,
   ChatTitleSettings,
@@ -338,7 +338,7 @@ export function normalizeWorkspaceSettings(value: unknown): WorkspaceSettings {
             (workdir): workdir is string => typeof workdir === 'string' && workdir.length > 0
           )
         )
-      ).slice(0, 10)
+      ).slice(0, RECENT_WORKDIRS_MAX)
     : [];
 
   return {
