@@ -18,12 +18,19 @@ export interface DelegateToAgentInput {
   maxTurns?: number;
 }
 
+export interface WorkdirPolicy {
+  root: string;
+  restricted: boolean;
+}
+
 /** Runtime context injected into every tool call. */
 export interface ToolContext {
   userId: string;
   chatId: string;
   /** Chat-bound server directory used when a filesystem tool omits its own path. */
   workdir?: string;
+  /** When set with `restricted: true`, builtin path tools must stay inside `root`. */
+  workdirPolicy?: WorkdirPolicy;
   parameters: Record<string, unknown>;
   /** When aborted, long-running tools should stop work and release resources. */
   signal?: AbortSignal;

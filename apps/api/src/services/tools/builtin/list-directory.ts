@@ -66,7 +66,7 @@ export async function executeListDirectory(
 ): Promise<ListDirectoryToolResult> {
   const settings = normalizeListDirectoryToolSettings(context.parameters);
   const path = getRequiredPathArg(args.path ?? context.workdir, 'path');
-  const resolvedPath = resolveAndValidatePath(path, settings);
+  const resolvedPath = resolveAndValidatePath(path, settings, context.workdirPolicy);
 
   let dirents: Dirent[];
   try {

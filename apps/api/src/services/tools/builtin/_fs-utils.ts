@@ -3,7 +3,12 @@
  */
 
 import { resolve } from 'node:path';
+import {
+  assertInsideWorkdir,
+  isPathPrefix,
+} from '../../../modules/workspaces/application/path-containment';
 import { normalizePathList, normalizeStringList, type PathListItem } from '../list-normalization';
+import type { WorkdirPolicy } from '../types';
 
 export { normalizePathList, normalizeStringList };
 
@@ -41,9 +46,28 @@ export function getRequiredPathArg(value: unknown, name: string): string {
   return text;
 }
 
+/**
+ * Enforces the chat workdir policy on an already-resolved path, restating
+ * containment failures as PathAccessError so tools report them uniformly.
+ */
+export function assertWorkdirContainment(
+  resolvedPath: string,
+  workdirPolicy: WorkdirPolicy | undefined
+): void {
+  if (!workdirPolicy?.restricted) return;
+  try {
+    assertInsideWorkdir(workdirPolicy.root, resolvedPath);
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : 'Path is outside the working directory.';
+    throw new PathAccessError(message);
+  }
+}
+
 export function resolveAndValidatePath(
   inputPath: string,
-  settings: PathValidationSettings
+  settings: PathValidationSettings,
+  workdirPolicy?: WorkdirPolicy
 ): string {
   const expanded = expandHome(inputPath);
   const resolved = resolve(expanded);
@@ -52,7 +76,7 @@ export function resolveAndValidatePath(
   if (enabledAllowed.length > 0) {
     const isAllowed = enabledAllowed.some((allowed) => {
       const allowedResolved = resolve(expandHome(allowed.path));
-      return resolved === allowedResolved || resolved.startsWith(`${allowedResolved}/`);
+      return isPathPrefix(allowedResolved, resolved);
     });
     if (!isAllowed) {
       throw new PathAccessError(`Path "${inputPath}" is not in the allowed paths.`);
@@ -63,12 +87,14 @@ export function resolveAndValidatePath(
   if (enabledDenied.length > 0) {
     const isDenied = enabledDenied.some((denied) => {
       const deniedResolved = resolve(expandHome(denied.path));
-      return resolved === deniedResolved || resolved.startsWith(`${deniedResolved}/`);
+      return isPathPrefix(deniedResolved, resolved);
     });
     if (isDenied) {
       throw new PathAccessError(`Path "${inputPath}" is in the denied paths.`);
     }
   }
+
+  assertWorkdirContainment(resolved, workdirPolicy);
 
   return resolved;
 }

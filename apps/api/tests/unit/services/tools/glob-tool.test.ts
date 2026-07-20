@@ -71,6 +71,28 @@ describe('normalizeGlobToolSettings', () => {
 });
 
 describe('executeGlob', () => {
+  it('drops matches that a traversing pattern pulls outside the workdir', async () => {
+    const base = mkdtempSync(join(tmpdir(), 'glob-escape-'));
+    try {
+      const root = join(base, 'root');
+      const outside = join(base, 'outside');
+      mkdirSync(root);
+      mkdirSync(outside);
+      await seedFile(join(root, 'inside.txt'), 'ok');
+      await seedFile(join(outside, 'secret.txt'), 'SECRET');
+
+      const result = await executeGlob({ pattern: '../outside/*.txt' }, {
+        ...makeContext(),
+        workdir: root,
+        workdirPolicy: { root, restricted: true },
+      } as ToolContext);
+
+      expect(result.matches).toEqual([]);
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
+  });
+
   it('matches files by pattern from the given cwd', async () => {
     await seedTree();
     const result = await executeGlob({ pattern: '**/*.ts', cwd: tempDir }, makeContext());

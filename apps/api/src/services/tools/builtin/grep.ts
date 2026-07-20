@@ -6,6 +6,10 @@
 
 import { stat } from 'node:fs/promises';
 import { relative, resolve as resolvePath } from 'node:path';
+import {
+  isInsideResolvedRoot,
+  resolveContainmentRoot,
+} from '../../../modules/workspaces/application/path-containment';
 import { clampIntegerSetting, getOptionalString, getRequiredString } from '../arg-parsing';
 import { registerTool } from '../registry';
 import type { ToolContext } from '../types';
@@ -137,7 +141,7 @@ export async function executeGrep(
   const settings = normalizeGrepToolSettings(context.parameters);
   const regex = buildRegex(args.pattern, args.caseInsensitive === true);
   const path = getRequiredPathArg(args.path ?? context.workdir, 'path');
-  const rootPath = resolveAndValidatePath(expandHome(path), settings);
+  const rootPath = resolveAndValidatePath(expandHome(path), settings, context.workdirPolicy);
   const rootStats = await statSafe(rootPath, path);
 
   const matches: GrepMatch[] = [];
@@ -169,6 +173,11 @@ export async function executeGrep(
   const filter = args.glob && args.glob.trim().length > 0 ? args.glob.trim() : DEFAULT_FILE_GLOB;
   const fileGlob = new Bun.Glob(filter);
 
+  // Canonicalized once: the per-file containment check runs for every candidate,
+  // and re-resolving the root there would cost an extra realpath syscall each time.
+  const policy = context.workdirPolicy;
+  const containmentRoot = policy?.restricted ? resolveContainmentRoot(policy.root) : undefined;
+
   try {
     for await (const relativePath of fileGlob.scan({
       cwd: rootPath,
@@ -177,6 +186,7 @@ export async function executeGrep(
       absolute: false,
     })) {
       const absolute = resolvePath(rootPath, relativePath);
+      if (containmentRoot && !isInsideResolvedRoot(containmentRoot, absolute)) continue;
       if (!isPathAllowed(absolute, settings)) continue;
       filesScanned += 1;
       const fileTruncated = await searchFile({

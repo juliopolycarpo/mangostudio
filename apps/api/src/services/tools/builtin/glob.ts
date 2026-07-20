@@ -3,7 +3,11 @@
  * Returns filesystem paths matching a glob pattern, evaluated by Bun.Glob.
  */
 
-import { relative } from 'node:path';
+import { relative, resolve as resolvePath } from 'node:path';
+import {
+  isInsideResolvedRoot,
+  resolveContainmentRoot,
+} from '../../../modules/workspaces/application/path-containment';
 import { clampIntegerSetting, getOptionalString, getRequiredString } from '../arg-parsing';
 import { registerTool } from '../registry';
 import type { ToolContext } from '../types';
@@ -84,10 +88,15 @@ export async function executeGlob(
   context: ToolContext
 ): Promise<GlobToolResult> {
   const settings = normalizeGlobToolSettings(context.parameters);
-  const cwd = resolveCwd(args.cwd ?? context.workdir, settings);
+  const cwd = resolveCwd(args.cwd ?? context.workdir, settings, context);
 
   const matches: string[] = [];
   let truncated = false;
+
+  // The pattern itself can traverse upward (e.g. "../*"), so validating cwd is
+  // not enough — every match is checked against the workdir policy.
+  const policy = context.workdirPolicy;
+  const containmentRoot = policy?.restricted ? resolveContainmentRoot(policy.root) : undefined;
 
   const glob = new Bun.Glob(args.pattern);
   try {
@@ -97,6 +106,9 @@ export async function executeGlob(
       absolute: settings.absolute,
       onlyFiles: false,
     })) {
+      if (containmentRoot && !isInsideResolvedRoot(containmentRoot, resolvePath(cwd, match))) {
+        continue;
+      }
       if (matches.length >= settings.maxResults) {
         truncated = true;
         break;
@@ -116,15 +128,17 @@ export async function executeGlob(
   };
 }
 
-function resolveCwd(input: string | undefined, settings: PathValidationSettings): string {
-  if (!input) {
-    return resolveAndValidatePath(process.cwd(), settings);
-  }
-  const trimmed = input.trim();
-  if (!trimmed) {
-    return resolveAndValidatePath(process.cwd(), settings);
-  }
-  return resolveAndValidatePath(expandHome(trimmed), settings);
+function resolveCwd(
+  input: string | undefined,
+  settings: PathValidationSettings,
+  context: ToolContext
+): string {
+  const policy = context.workdirPolicy;
+  const trimmed = input?.trim();
+  const base = trimmed
+    ? expandHome(trimmed)
+    : ((policy?.restricted ? policy.root : context.workdir) ?? process.cwd());
+  return resolveAndValidatePath(base, settings, policy);
 }
 
 function execute(args: Record<string, unknown>, context: ToolContext): Promise<GlobToolResult> {

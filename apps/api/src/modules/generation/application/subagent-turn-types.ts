@@ -3,6 +3,7 @@ import type { MultiAgentSettings } from '@mangostudio/shared/app-settings';
 import type { SubagentTracePart } from '@mangostudio/shared/types';
 import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';
+import type { WorkdirPolicy } from '../../../services/tools/types';
 
 export const SUBAGENT_TIMEOUT_CODE = 'TIMEOUT';
 export const SUBAGENT_ABORT_CODE = 'ABORTED';
@@ -53,6 +54,7 @@ export interface SubagentRuntimeInput {
   readonly userId: string;
   readonly chatId: string;
   readonly workdir?: string;
+  readonly workdirPolicy?: WorkdirPolicy;
   readonly parentAgentProfile: AgentProfile;
   readonly parentModelName: string;
   readonly parentMode: 'chat' | 'agent';

@@ -48,6 +48,8 @@ interface ChatPageProps {
   onOpenWorkdirPicker?: () => void;
   onCloseWorkdirPicker?: () => void;
   onSelectWorkdir?: (path: string) => void | Promise<void>;
+  restrictToolsToWorkdirOverride?: boolean | null;
+  onRestrictToolsToWorkdirOverrideChange?: (value: boolean | null) => void | Promise<void>;
   onResumeInterruptedTurn: (messageId: string, retryCallIds: string[]) => Promise<void>;
   onDismissInterruptedTurn: (messageId: string) => Promise<void>;
 }
@@ -107,6 +109,8 @@ export function ChatPage({
   onOpenWorkdirPicker,
   onCloseWorkdirPicker,
   onSelectWorkdir,
+  restrictToolsToWorkdirOverride = null,
+  onRestrictToolsToWorkdirOverrideChange,
   onResumeInterruptedTurn,
   onDismissInterruptedTurn,
 }: ChatPageProps) {
@@ -194,6 +198,10 @@ export function ChatPage({
           initialPath={workdir || workspaceSettings.defaultWorkdir}
           defaultWorkdir={workspaceSettings.defaultWorkdir}
           recentWorkdirs={workspaceSettings.recentWorkdirs}
+          showRestrictToolsOverride={Boolean(chatId && onRestrictToolsToWorkdirOverrideChange)}
+          globalRestrictToolsToWorkdir={workspaceSettings.restrictToolsToWorkdir}
+          restrictToolsToWorkdirOverride={restrictToolsToWorkdirOverride}
+          onRestrictToolsToWorkdirOverrideChange={onRestrictToolsToWorkdirOverrideChange}
           onSelect={onSelectWorkdir}
           onClose={onCloseWorkdirPicker}
         />

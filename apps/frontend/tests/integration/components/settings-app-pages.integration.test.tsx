@@ -59,6 +59,7 @@ function GeneralSettingsHarness() {
       setDefaultSubagentMaxTurns={settings.setDefaultSubagentMaxTurns}
       workspaceSettings={settings.workspaceSettings}
       setDefaultWorkdir={settings.setDefaultWorkdir}
+      setRestrictToolsToWorkdir={settings.setRestrictToolsToWorkdir}
       addRecentWorkdir={settings.addRecentWorkdir}
     />
   );

@@ -98,6 +98,7 @@ export const chatRoutes = (app: Elysia) =>
                   lastUsedMode: body.lastUsedMode,
                   selectedAgentId: body.selectedAgentId,
                   workdir: body.workdir,
+                  restrictToolsToWorkdir: body.restrictToolsToWorkdir,
                 },
               },
               getDb()

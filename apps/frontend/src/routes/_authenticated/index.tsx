@@ -48,6 +48,12 @@ function ChatRoute() {
       onOpenWorkdirPicker={app.openWorkdirPicker}
       onCloseWorkdirPicker={app.closeWorkdirPicker}
       onSelectWorkdir={app.selectWorkdir}
+      restrictToolsToWorkdirOverride={app.restrictToolsToWorkdirOverride}
+      onRestrictToolsToWorkdirOverrideChange={
+        app.currentChatId
+          ? (value) => app.updateChatRestrictToolsToWorkdir(app.currentChatId as string, value)
+          : undefined
+      }
       onResumeInterruptedTurn={app.handleResumeInterruptedTurn}
       onDismissInterruptedTurn={app.handleDismissInterruptedTurn}
     />

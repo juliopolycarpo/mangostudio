@@ -108,6 +108,7 @@ describe('normalizeWorkspaceSettings', () => {
         '/workspace/8',
         '/workspace/9',
       ],
+      restrictToolsToWorkdir: false,
     });
   });
 

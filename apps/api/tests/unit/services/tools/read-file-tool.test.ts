@@ -71,6 +71,23 @@ describe('normalizeReadFileToolSettings', () => {
 });
 
 describe('executeReadFile', () => {
+  it('rejects paths outside the workdir when restriction is enabled', async () => {
+    const filePath = join(tempDir, 'inside.txt');
+    await seedFile(filePath, 'ok');
+    const outsidePath = join(tmpdir(), 'outside-read.txt');
+
+    await expect(
+      executeReadFile(
+        { path: outsidePath },
+        {
+          ...makeContext(),
+          workdir: tempDir,
+          workdirPolicy: { root: tempDir, restricted: true },
+        }
+      )
+    ).rejects.toThrow('outside the chat working directory');
+  });
+
   it('reads a text file and returns its content and size', async () => {
     const filePath = join(tempDir, 'hello.txt');
     await seedFile(filePath, 'Hello, world!');

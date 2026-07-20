@@ -1100,6 +1100,15 @@ export const messages = {
     defaultEmpty: 'Nenhuma pasta padrão selecionada',
     changeDefault: 'Escolher pasta',
     clearDefault: 'Limpar padrão',
+    restrictToolsLabel: 'Restringir ferramentas ao diretório de trabalho',
+    restrictToolsDescription:
+      'Quando ativado, ferramentas integradas de arquivo e shell não podem usar caminhos fora do diretório de trabalho. Isso é uma proteção, não um sandbox — comandos shell ainda podem acessar outros caminhos no servidor.',
+    restrictToolsInherit: 'Usar padrão do workspace ({state})',
+    restrictToolsOn: 'Restrito ao diretório de trabalho',
+    restrictToolsOff: 'Sem restrição',
+    restrictToolsGlobalOn: 'ativado',
+    restrictToolsGlobalOff: 'desativado',
+    restrictToolsChatOverrideLabel: 'Restrição de caminhos das ferramentas neste chat',
   },
 
   git: {

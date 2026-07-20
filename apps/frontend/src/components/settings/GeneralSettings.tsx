@@ -38,6 +38,7 @@ interface GeneralSettingsProps {
   setDefaultSubagentMaxTurns: (value: number) => void;
   workspaceSettings: WorkspaceSettings;
   setDefaultWorkdir: (value: string) => void;
+  setRestrictToolsToWorkdir: (value: boolean) => void;
   addRecentWorkdir: (value: string) => void;
 }
 
@@ -74,6 +75,7 @@ export function GeneralSettings({
   setDefaultSubagentMaxTurns,
   workspaceSettings,
   setDefaultWorkdir,
+  setRestrictToolsToWorkdir,
   addRecentWorkdir,
 }: GeneralSettingsProps) {
   const { t, locale, setLocale } = useI18n();
@@ -159,6 +161,21 @@ export function GeneralSettings({
               </Button>
             ) : null}
           </div>
+        </div>
+        <div className="flex items-start justify-between gap-4 border-t border-outline-variant/15 pt-4">
+          <div className="space-y-1">
+            <p className="text-sm font-medium text-on-surface">{workspace.restrictToolsLabel}</p>
+            <p className="text-sm text-on-surface-variant/60">
+              {workspace.restrictToolsDescription}
+            </p>
+          </div>
+          <input
+            type="checkbox"
+            checked={workspaceSettings.restrictToolsToWorkdir}
+            onChange={(event) => setRestrictToolsToWorkdir(event.target.checked)}
+            aria-label={workspace.restrictToolsLabel}
+            className="mt-1 h-4 w-4 shrink-0 rounded border-outline-variant/30 accent-primary"
+          />
         </div>
         <WorkdirPickerDialog
           open={isWorkdirPickerOpen}

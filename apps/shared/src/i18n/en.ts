@@ -1087,6 +1087,15 @@ export const messages: Messages = {
     defaultEmpty: 'No default folder selected',
     changeDefault: 'Choose folder',
     clearDefault: 'Clear default',
+    restrictToolsLabel: 'Restrict tools to working directory',
+    restrictToolsDescription:
+      'When enabled, built-in file and shell tools cannot target paths outside the working directory. This is a guardrail, not a sandbox — shell commands can still access other paths on the server.',
+    restrictToolsInherit: 'Use workspace default ({state})',
+    restrictToolsOn: 'Restricted to working directory',
+    restrictToolsOff: 'Not restricted',
+    restrictToolsGlobalOn: 'on',
+    restrictToolsGlobalOff: 'off',
+    restrictToolsChatOverrideLabel: 'Tool path restriction for this chat',
   },
 
   git: {

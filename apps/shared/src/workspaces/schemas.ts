@@ -37,6 +37,7 @@ export const RECENT_WORKDIRS_MAX = 10;
 export const WorkspaceSettingsSchema = Type.Object({
   defaultWorkdir: Type.String(),
   recentWorkdirs: Type.Array(Type.String(), { maxItems: RECENT_WORKDIRS_MAX }),
+  restrictToolsToWorkdir: Type.Boolean(),
 });
 
 export type DirectoryEntry = Static<typeof DirectoryEntrySchema>;

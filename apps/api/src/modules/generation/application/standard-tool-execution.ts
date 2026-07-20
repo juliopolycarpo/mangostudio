@@ -43,7 +43,11 @@ import {
   resolveEffectiveToolTimeoutMs,
   ToolExecutionTimedOutError,
 } from '../../../services/tools/execution-timeout';
-import type { EffectiveToolSettings, RegisteredTool } from '../../../services/tools/types';
+import type {
+  EffectiveToolSettings,
+  RegisteredTool,
+  WorkdirPolicy,
+} from '../../../services/tools/types';
 import { shouldExposeDelegateTool } from './delegate-tool-availability';
 import { ensureDelegationResult, isSubagentRunResult, logDelegationWarn } from './delegation-retry';
 import {
@@ -103,6 +107,7 @@ export interface DelegationRuntime {
   parentModelName: string;
   interactionMode: 'chat' | 'agent';
   workdir?: string;
+  workdirPolicy?: WorkdirPolicy;
   settings: MultiAgentSettings;
   signal?: AbortSignal;
   state: { subagentCallCount: number };
@@ -146,6 +151,7 @@ export interface StandardToolExecutionContext {
   userId: string;
   chatId: string;
   workdir?: string;
+  workdirPolicy?: WorkdirPolicy;
   settingsByToolName: ReadonlyMap<string, EffectiveToolSettings>;
   allowedToolNames: ReadonlySet<string>;
   delegationRuntime?: DelegationRuntime;
@@ -274,6 +280,7 @@ async function executeStandardToolCall(
             userId: context.userId,
             chatId: context.chatId,
             workdir: context.workdir,
+            workdirPolicy: context.workdirPolicy,
             parameters: {},
             signal: timeoutController.signal,
           },
@@ -541,6 +548,7 @@ async function executeDelegationToolCall(
     userId: runtime.userId,
     chatId: runtime.chatId,
     workdir: runtime.workdir,
+    workdirPolicy: runtime.workdirPolicy,
     parentAgentProfile: runtime.parentAgentProfile,
     parentModelName: runtime.parentModelName,
     parentMode: runtime.interactionMode,
