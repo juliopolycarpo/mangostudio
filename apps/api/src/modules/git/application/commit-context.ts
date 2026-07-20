@@ -1,6 +1,7 @@
 import type { GitFileChange, GitStatus } from '@mangostudio/shared/git';
 
 export const DIFF_TRUNCATED_MARKER = '[diff truncated]';
+export const RECENT_COMMIT_SUBJECTS_LIMIT = 10;
 
 export interface BuildCommitContextInput {
   readonly status: GitStatus;
@@ -114,17 +115,22 @@ function truncateDiff(diff: string, maxBytes: number): TruncatedDiff {
   const marker = `\n${DIFF_TRUNCATED_MARKER}`;
   const separatorBytes = Math.max(0, chunks.length - 1);
   let remainingBytes = Math.max(0, maxBytes - byteLength(marker) - separatorBytes);
-  const clippedChunks: string[] = [];
+  const clippedChunks: string[] = new Array(chunks.length).fill('');
 
-  for (const [index, chunk] of chunks.entries()) {
-    const remainingFiles = chunks.length - index;
-    const fairShare = Math.floor(remainingBytes / remainingFiles);
-    const clipped = clipAtLineBoundary(chunk, fairShare);
-    if (clipped) clippedChunks.push(clipped);
+  // Allocating smallest-first lets the budget a small file leaves unused flow to the larger
+  // ones, instead of stranding it behind files that were already clipped.
+  const bySizeAscending = chunks
+    .map((chunk, index) => ({ index, size: byteLength(chunk) }))
+    .sort((left, right) => left.size - right.size);
+
+  for (const [position, entry] of bySizeAscending.entries()) {
+    const fairShare = Math.floor(remainingBytes / (bySizeAscending.length - position));
+    const clipped = clipAtLineBoundary(chunks[entry.index], fairShare);
+    clippedChunks[entry.index] = clipped;
     remainingBytes -= byteLength(clipped);
   }
 
-  return { text: `${clippedChunks.join('\n')}${marker}`, truncated: true };
+  return { text: `${clippedChunks.filter(Boolean).join('\n')}${marker}`, truncated: true };
 }
 
 function formatUntrackedNames(status: GitStatus): string | null {
@@ -143,7 +149,7 @@ export function buildCommitContextWithMetadata(
     input.maxDiffBytes
   );
   const untrackedNames = formatUntrackedNames(input.status);
-  const recentSubjects = input.recentSubjects.slice(0, 10);
+  const recentSubjects = input.recentSubjects.slice(0, RECENT_COMMIT_SUBJECTS_LIMIT);
 
   return {
     context: [
@@ -164,8 +170,4 @@ export function buildCommitContextWithMetadata(
       .join('\n\n'),
     truncated: diff.truncated,
   };
-}
-
-export function buildCommitContext(input: BuildCommitContextInput): string {
-  return buildCommitContextWithMetadata(input).context;
 }

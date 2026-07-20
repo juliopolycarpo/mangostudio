@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import type { GitStatus } from '@mangostudio/shared/git';
 import {
-  buildCommitContext,
   buildCommitContextWithMetadata,
   DIFF_TRUNCATED_MARKER,
 } from '../../../../src/modules/git/application/commit-context';
@@ -20,9 +19,9 @@ function status(overrides: Partial<GitStatus>): GitStatus {
   };
 }
 
-describe('buildCommitContext', () => {
+describe('buildCommitContextWithMetadata', () => {
   it('selects only the staged diff when the index contains changes', () => {
-    const context = buildCommitContext({
+    const { context } = buildCommitContextWithMetadata({
       status: status({ staged: [{ path: 'staged.ts', status: 'modified' }] }),
       stagedDiff: 'diff --git a/staged.ts b/staged.ts\n+staged content',
       unstagedDiff: 'diff --git a/unstaged.ts b/unstaged.ts\n+unstaged content',
@@ -37,7 +36,7 @@ describe('buildCommitContext', () => {
   });
 
   it('uses the unstaged diff and lists untracked names when the index is empty', () => {
-    const context = buildCommitContext({
+    const { context } = buildCommitContextWithMetadata({
       status: status({
         unstaged: [{ path: 'tracked.ts', status: 'modified' }],
         untracked: [{ path: 'new.ts', status: 'untracked' }],
@@ -80,8 +79,29 @@ describe('buildCommitContext', () => {
     }
   });
 
+  it('redirects the budget a small file leaves unused to the larger one', () => {
+    const smallDiff = 'diff --git a/small.ts b/small.ts\n--- a/small.ts\n+++ b/small.ts\n+tiny\n';
+    const largePrefix = 'diff --git a/large.ts b/large.ts\n--- a/large.ts\n+++ b/large.ts\n';
+    const { context } = buildCommitContextWithMetadata({
+      status: status({
+        staged: [
+          { path: 'small.ts', status: 'modified' },
+          { path: 'large.ts', status: 'modified' },
+        ],
+      }),
+      stagedDiff: `${largePrefix}${'+large line\n'.repeat(200)}${smallDiff}`,
+      unstagedDiff: '',
+      recentSubjects: [],
+      maxDiffBytes: 600,
+    });
+
+    // The small file fits whole, so the large file must receive far more than an even split.
+    expect(context).toContain('+tiny');
+    expect(context.split('\n').filter((line) => line === '+large line').length).toBeGreaterThan(30);
+  });
+
   it('lists binary files without embedding binary patch data', () => {
-    const context = buildCommitContext({
+    const { context } = buildCommitContextWithMetadata({
       status: status({ staged: [{ path: 'asset.png', status: 'modified' }] }),
       stagedDiff:
         'diff --git a/asset.png b/asset.png\nnew file mode 100644\nindex 000..111\nGIT binary patch\nliteral 100\nsensitive-patch-data',

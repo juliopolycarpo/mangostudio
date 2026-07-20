@@ -96,6 +96,8 @@ export function CommitForm({
       }
       applySuggestion(suggestion);
     } catch (error) {
+      // The notice describes the applied suggestion, so a failed run must not leave it standing.
+      setDiffWasTruncated(false);
       toast(resolveApiErrorMessage(error, labels.generateError), 'error');
     }
   };

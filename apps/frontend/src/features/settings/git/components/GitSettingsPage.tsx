@@ -44,6 +44,21 @@ export function GitSettingsPage({
     setSystemPromptDraft(nextPrompt);
     setCommitMessageSystemPrompt(nextPrompt);
   };
+
+  // Held as a draft because persisting mid-edit clamps the value to the minimum and blocks typing.
+  const [maxDiffKbDraft, setMaxDiffKbDraft] = useState(String(settings.commitMessage.maxDiffKb));
+  useEffect(() => {
+    setMaxDiffKbDraft(String(settings.commitMessage.maxDiffKb));
+  }, [settings.commitMessage.maxDiffKb]);
+
+  const persistMaxDiffKb = () => {
+    const parsed = Number.parseInt(maxDiffKbDraft, 10);
+    const nextMaxDiffKb = Number.isNaN(parsed)
+      ? settings.commitMessage.maxDiffKb
+      : Math.min(COMMIT_MESSAGE_MAX_DIFF_KB_MAX, Math.max(COMMIT_MESSAGE_MAX_DIFF_KB_MIN, parsed));
+    setMaxDiffKbDraft(String(nextMaxDiffKb));
+    setCommitMessageMaxDiffKb(nextMaxDiffKb);
+  };
   const missingModel =
     settings.commitMessage.preferredModel &&
     !catalog.textModels.some((model) => model.modelId === settings.commitMessage.preferredModel)
@@ -152,8 +167,9 @@ export function GitSettingsPage({
             min={COMMIT_MESSAGE_MAX_DIFF_KB_MIN}
             max={COMMIT_MESSAGE_MAX_DIFF_KB_MAX}
             step={1}
-            value={settings.commitMessage.maxDiffKb}
-            onChange={(event) => setCommitMessageMaxDiffKb(Number(event.target.value))}
+            value={maxDiffKbDraft}
+            onChange={(event) => setMaxDiffKbDraft(event.target.value)}
+            onBlur={persistMaxDiffKb}
             aria-label={commitMessageLabels.maxDiffLabel}
             className="w-full rounded-xl border border-outline-variant/20 bg-surface-container-lowest px-4 py-2.5 text-sm text-on-surface outline-none transition-colors focus:border-primary/60 focus:ring-1 focus:ring-primary/20"
           />

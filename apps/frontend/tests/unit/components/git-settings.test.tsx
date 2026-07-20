@@ -63,10 +63,44 @@ describe('GitSettingsPage', () => {
 
     const maxDiff = screen.getByRole('spinbutton', { name: 'Maximum diff size (KB)' });
     fireEvent.change(maxDiff, { target: { value: '200' } });
+    fireEvent.blur(maxDiff);
     expect(setCommitMessageMaxDiffKb).toHaveBeenLastCalledWith(200);
 
     await user.click(screen.getByRole('button', { name: 'Reset to default' }));
     expect(resetCommitMessageSystemPrompt).toHaveBeenCalledOnce();
+  });
+
+  it('keeps the diff budget editable while typing and clamps it on blur', () => {
+    const setCommitMessageMaxDiffKb = vi.fn();
+
+    render(
+      <GitSettingsPage
+        settings={DEFAULT_GIT_SETTINGS}
+        setSignCommits={vi.fn()}
+        setSignOff={vi.fn()}
+        setPreferredCommitMessageModel={vi.fn()}
+        setCommitMessageSystemPrompt={vi.fn()}
+        resetCommitMessageSystemPrompt={vi.fn()}
+        setCommitMessageMaxDiffKb={setCommitMessageMaxDiffKb}
+      />
+    );
+
+    // "2" is below the minimum but is a valid prefix of "256"; clamping it mid-edit would
+    // rewrite the field and make larger values impossible to type.
+    const maxDiff = screen.getByRole('spinbutton', { name: 'Maximum diff size (KB)' });
+    fireEvent.change(maxDiff, { target: { value: '2' } });
+    expect(maxDiff).toHaveValue(2);
+    expect(setCommitMessageMaxDiffKb).not.toHaveBeenCalled();
+
+    fireEvent.change(maxDiff, { target: { value: '256' } });
+    fireEvent.blur(maxDiff);
+    expect(setCommitMessageMaxDiffKb).toHaveBeenLastCalledWith(256);
+
+    fireEvent.change(maxDiff, { target: { value: '' } });
+    fireEvent.blur(maxDiff);
+    expect(setCommitMessageMaxDiffKb).toHaveBeenLastCalledWith(
+      DEFAULT_GIT_SETTINGS.commitMessage.maxDiffKb
+    );
   });
 
   it('allows replacing the full prompt and restores the default for blank input', () => {

@@ -7,7 +7,7 @@ import {
 } from '../../../services/providers/core/provider-registry';
 import { resolveModel } from '../../generation/application/resolve-model';
 import { GitCliError, runGit } from '../infrastructure/git-cli';
-import { buildCommitContextWithMetadata } from './commit-context';
+import { buildCommitContextWithMetadata, RECENT_COMMIT_SUBJECTS_LIMIT } from './commit-context';
 
 const COMMIT_MESSAGE_MAX_OUTPUT_TOKENS = 512;
 const NO_HEAD_PATTERN =
@@ -42,7 +42,10 @@ export interface GenerateCommitMessageInput {
 
 async function recentCommitSubjects(root: string, signal?: AbortSignal): Promise<string[]> {
   try {
-    const result = await runGit(['log', '--format=%s', '-10'], { cwd: root, signal });
+    const result = await runGit(['log', '--format=%s', `-${RECENT_COMMIT_SUBJECTS_LIMIT}`], {
+      cwd: root,
+      signal,
+    });
     return result.stdout
       .split('\n')
       .map((subject) => subject.trim())

@@ -15,11 +15,14 @@ export interface ParsedCommitMessage {
 
 const WRAPPER_CHARS = new Set(['"', "'", '`']);
 
+/** Strips only matched wrapper pairs, so a title such as `` `git log` output `` stays intact. */
 function trimWrapperChars(value: string): string {
   let start = 0;
   let end = value.length;
-  while (start < end && WRAPPER_CHARS.has(value[start])) start += 1;
-  while (end > start && WRAPPER_CHARS.has(value[end - 1])) end -= 1;
+  while (end - start > 1 && WRAPPER_CHARS.has(value[start]) && value[end - 1] === value[start]) {
+    start += 1;
+    end -= 1;
+  }
   return value.slice(start, end);
 }
 
@@ -39,8 +42,10 @@ function sanitizeTitle(value: string): string {
   let title = trimWrapperChars(value.trim()).trim();
   title = stripLabel(title, 'title');
   title = trimWrapperChars(title).trim();
+  // Clip before stripping punctuation so a clipped title cannot keep a trailing period.
+  title = title.slice(0, 72).trimEnd();
   while (title.endsWith('.')) title = title.slice(0, -1).trimEnd();
-  return title.slice(0, 72).trimEnd();
+  return title;
 }
 
 /** Parses the tolerant plain-text formats commonly returned by text models. */

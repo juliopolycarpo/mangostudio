@@ -247,6 +247,10 @@ export const gitRoutes = new Elysia().use(requireAuth).group('/git', (app) =>
             set.status = 503;
             return { error: error.message, code: ERROR_CODES.PROVIDER_ERROR };
           }
+          // A cancelled request is the client hanging up, not a server fault worth logging.
+          if (!request.signal.aborted) {
+            console.error('[git] commit message generation failed', error);
+          }
           set.status = 500;
           return { error: 'Commit message generation failed', code: ERROR_CODES.PROVIDER_ERROR };
         }

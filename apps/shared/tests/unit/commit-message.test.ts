@@ -35,6 +35,16 @@ Keep the form editable after generation.
     expect(parsed.body).toBe('Body text.');
   });
 
+  it('keeps unmatched wrapper characters that belong to the title', () => {
+    expect(parseCommitMessageOutput('`git log` output is no longer truncated').title).toBe(
+      '`git log` output is no longer truncated'
+    );
+  });
+
+  it('strips punctuation left at the clip boundary of a long title', () => {
+    expect(parseCommitMessageOutput(`${'a'.repeat(71)}.tail`).title).toBe('a'.repeat(71));
+  });
+
   it('returns an empty title for blank model output', () => {
     expect(parseCommitMessageOutput('  \n```\n')).toEqual({ title: '', body: '' });
   });
