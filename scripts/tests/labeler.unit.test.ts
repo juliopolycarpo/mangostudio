@@ -116,8 +116,10 @@ describe('labeler coverage', () => {
     expect(labeler).toContain('"area: git":');
     const gitSection = extractLabelSection(labeler, '"area: git":', '"area: auth":');
     expect(gitSection).toContain('- "apps/api/src/modules/git/**"');
+    expect(gitSection).toContain('- "apps/api/src/modules/github/**"');
     expect(gitSection).toContain('- "apps/frontend/src/features/workspace/**"');
     expect(gitSection).toContain('- "apps/shared/src/git/**"');
+    expect(gitSection).toContain('- "apps/shared/src/github/**"');
   });
 
   test('applies type: dependencies as a Dependabot auto-label for both ecosystems', () => {

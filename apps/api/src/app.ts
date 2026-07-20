@@ -17,6 +17,7 @@ import { respondRoutes } from './modules/generation/http/respond-routes';
 import { respondStreamRoutes } from './modules/generation/http/respond-stream-routes';
 import { turnRecoveryRoutes } from './modules/generation/http/turn-recovery-routes';
 import { gitRoutes } from './modules/git/http/git-routes';
+import { githubRoutes } from './modules/github/http/github-routes';
 import { mcpServerRoutes } from './modules/mcp-servers/http/mcp-server-routes';
 import { messageRoutes } from './modules/messages/http/message-routes';
 import { skillRoutes } from './modules/skills/http/skill-routes';
@@ -65,6 +66,7 @@ const api = new Elysia({ prefix: '/api' })
   .use(respondStreamRoutes)
   .use(turnRecoveryRoutes)
   .use(gitRoutes)
+  .use(githubRoutes)
   .use(settingsRoutes)
   .use(skillRoutes)
   .use(mcpServerRoutes)

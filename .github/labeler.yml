@@ -18,8 +18,10 @@
   - changed-files:
       - any-glob-to-any-file:
           - "apps/api/src/modules/git/**"
+          - "apps/api/src/modules/github/**"
           - "apps/frontend/src/features/workspace/**"
           - "apps/shared/src/git/**"
+          - "apps/shared/src/github/**"
 
 "area: auth":
   - changed-files:
