@@ -361,8 +361,11 @@ describe('release workflow binary gate', () => {
     const cargoPublishBlock = extractJobBlock(workflow, 'cargo-publish');
 
     expect(githubReleaseBlock).toContain('source scripts/release/retry.sh');
+    expect(githubReleaseBlock).toContain('source scripts/release/upload-release-assets.sh');
     expect(githubReleaseBlock).toContain('retry_command 3 30 gh release edit');
-    expect(githubReleaseBlock).toContain('retry_command 3 30 gh release upload');
+    expect(githubReleaseBlock).toContain(
+      'retry_command 3 30 upload_release_assets "$tag" release-assets/*'
+    );
     expect(githubReleaseBlock).toContain('Stateful retry: scripts/release/retry.sh cannot model');
     expect(githubReleaseBlock).toContain('if gh release create "$tag"');
     expect(githubReleaseBlock).toContain('if gh release view "$tag" >/dev/null 2>&1; then');
@@ -546,7 +549,10 @@ describe('release workflow binary gate', () => {
     expect(releaseBlock).toContain(`tag="v${cargoVersionVar}"`);
     expect(releaseBlock).toContain(`Canary version: ${versionVar}`);
     expect(releaseBlock).toContain('gh release create "$tag" github-canary-assets/*');
-    expect(releaseBlock).toContain('gh release upload "$tag" github-canary-assets/* --clobber');
+    expect(releaseBlock).toContain('source scripts/release/upload-release-assets.sh');
+    expect(releaseBlock).toContain(
+      'retry_command 3 30 upload_release_assets "$tag" github-canary-assets/*'
+    );
     expect(releaseBlock).not.toContain(`tag="v${versionVar}"`);
     expect(workflow).not.toContain('prune-canary-releases.sh');
   });

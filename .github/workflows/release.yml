@@ -166,10 +166,11 @@ jobs:
           VERSION: ${{ needs.build.outputs.version }}
         run: |
           source scripts/release/retry.sh
+          source scripts/release/upload-release-assets.sh
           tag="v${VERSION}"
           update_release() {
             retry_command 3 30 gh release edit "$tag" --title "$tag" --notes-file RELEASE_NOTES.md
-            retry_command 3 30 gh release upload "$tag" release-assets/* --clobber
+            retry_command 3 30 upload_release_assets "$tag" release-assets/*
           }
           if gh release view "$tag" >/dev/null 2>&1; then
             update_release

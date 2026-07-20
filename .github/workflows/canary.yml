@@ -171,11 +171,12 @@ jobs:
           SOURCE_SHA: ${{ inputs.source_sha }}
         run: |
           source scripts/release/retry.sh
+          source scripts/release/upload-release-assets.sh
           tag="v${CARGO_VERSION}"
           notes="Rolling canary build from ${SOURCE_SHA}. Canary version: ${VERSION}. Assets use ${CARGO_VERSION} names for launcher compatibility."
           if gh release view "$tag" >/dev/null 2>&1; then
             retry_command 3 30 gh release edit "$tag" --prerelease --title "$tag" --notes "$notes"
-            retry_command 3 30 gh release upload "$tag" github-canary-assets/* --clobber
+            retry_command 3 30 upload_release_assets "$tag" github-canary-assets/*
           else
             retry_command 3 30 gh release create "$tag" github-canary-assets/* \
               --prerelease \
