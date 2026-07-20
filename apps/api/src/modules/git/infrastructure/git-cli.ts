@@ -33,14 +33,17 @@ export class GitCliError extends Error {
   readonly exitCode: number | null;
   readonly stderr: string;
   readonly args: readonly string[];
+  /** True when the caller cancelled the request rather than Git failing. */
+  readonly aborted: boolean;
 
-  constructor(args: readonly string[], exitCode: number | null, stderr: string) {
+  constructor(args: readonly string[], exitCode: number | null, stderr: string, aborted = false) {
     const detail = stderr.trim() || 'Git command failed.';
     super(detail);
     this.name = 'GitCliError';
     this.exitCode = exitCode;
     this.stderr = stderr.trim();
     this.args = [...args];
+    this.aborted = aborted;
   }
 }
 
@@ -108,7 +111,7 @@ export async function runGit(
     const exitCode = await proc.exited;
 
     if (termination === 'abort') {
-      throw new GitCliError(args, exitCode, 'Git command aborted.');
+      throw new GitCliError(args, exitCode, 'Git command aborted.', true);
     }
     if (termination === 'timeout') {
       throw new GitCliError(args, exitCode, 'Git command timed out.');

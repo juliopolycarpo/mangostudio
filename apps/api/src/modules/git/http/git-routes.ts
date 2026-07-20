@@ -37,7 +37,8 @@ function chatAccessError(
 }
 
 function gitCommandError(error: unknown, set: { status?: number | string }): ApiErrorResponse {
-  if (error instanceof GitCliError) {
+  // A cancelled request is the client hanging up, not a server fault worth logging.
+  if (error instanceof GitCliError && !error.aborted) {
     console.error('[git] command failed', {
       args: error.args,
       exitCode: error.exitCode,

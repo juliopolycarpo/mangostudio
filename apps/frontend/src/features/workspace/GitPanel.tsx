@@ -26,37 +26,21 @@ interface GitPanelProps {
   readonly chatId: string;
 }
 
-const STATUS_GLYPHS: Readonly<Record<GitFileStatus, string>> = {
-  modified: 'M',
-  added: 'A',
-  deleted: 'D',
-  renamed: 'R',
-  copied: 'C',
-  untracked: '?',
-  conflicted: '!',
-  'type-changed': 'T',
-};
+interface StatusPresentation {
+  readonly glyph: string;
+  readonly labelKey: keyof Messages['git']['status'];
+  readonly color: string;
+}
 
-const STATUS_LABEL_KEYS: Readonly<Record<GitFileStatus, keyof Messages['git']['status']>> = {
-  modified: 'modified',
-  added: 'added',
-  deleted: 'deleted',
-  renamed: 'renamed',
-  copied: 'copied',
-  untracked: 'untracked',
-  conflicted: 'conflicted',
-  'type-changed': 'typeChanged',
-};
-
-const STATUS_COLORS: Readonly<Record<GitFileStatus, string>> = {
-  modified: 'text-warning',
-  added: 'text-success',
-  deleted: 'text-error',
-  renamed: 'text-primary',
-  copied: 'text-primary',
-  untracked: 'text-on-surface-variant',
-  conflicted: 'text-error',
-  'type-changed': 'text-warning',
+const STATUS_PRESENTATION: Readonly<Record<GitFileStatus, StatusPresentation>> = {
+  modified: { glyph: 'M', labelKey: 'modified', color: 'text-warning' },
+  added: { glyph: 'A', labelKey: 'added', color: 'text-success' },
+  deleted: { glyph: 'D', labelKey: 'deleted', color: 'text-error' },
+  renamed: { glyph: 'R', labelKey: 'renamed', color: 'text-primary' },
+  copied: { glyph: 'C', labelKey: 'copied', color: 'text-primary' },
+  untracked: { glyph: '?', labelKey: 'untracked', color: 'text-on-surface-variant' },
+  conflicted: { glyph: '!', labelKey: 'conflicted', color: 'text-error' },
+  'type-changed': { glyph: 'T', labelKey: 'typeChanged', color: 'text-warning' },
 };
 
 export function GitPanel({ chatId }: GitPanelProps) {
@@ -116,7 +100,12 @@ export function GitPanel({ chatId }: GitPanelProps) {
         </button>
       </header>
 
-      <div className="min-h-0 flex-1 overflow-y-auto p-4" aria-live="polite">
+      {/*
+        No live region here: the file list re-renders on every refetch, and
+        announcing it would interrupt the user. The panel is a labelled aside
+        that screen-reader users navigate to when they want it.
+      */}
+      <div className="min-h-0 flex-1 overflow-y-auto p-4">
         <GitPanelContent
           state={stateQuery.data}
           loading={stateQuery.isLoading}
@@ -318,15 +307,16 @@ function ChangeGroup({
 
 function FileChangeRow({ change }: { readonly change: GitFileChange }) {
   const { t } = useI18n();
-  const statusLabel = t.git.status[STATUS_LABEL_KEYS[change.status]];
+  const presentation = STATUS_PRESENTATION[change.status];
+  const statusLabel = t.git.status[presentation.labelKey];
   return (
     <li className="flex min-w-0 items-start gap-2 border-b border-outline-variant/10 px-2.5 py-2 last:border-b-0">
       <span
-        className={`w-3 shrink-0 pt-px text-center font-mono text-[11px] font-bold ${STATUS_COLORS[change.status]}`}
+        className={`w-3 shrink-0 pt-px text-center font-mono text-[11px] font-bold ${presentation.color}`}
         title={statusLabel}
         aria-hidden="true"
       >
-        {STATUS_GLYPHS[change.status]}
+        {presentation.glyph}
       </span>
       <span className="sr-only">{statusLabel}</span>
       <FileCode2 size={13} className="mt-0.5 shrink-0 text-on-surface-variant/70" />

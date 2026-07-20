@@ -48,24 +48,23 @@ export function parseGitStatus(output: string): GitStatus {
     }
 
     if (record.startsWith('2 ')) {
-      const { fields, path: pairedPath } = splitFixedFields(record, 9);
-      const tabIndex = pairedPath.indexOf('\t');
-      const path = tabIndex >= 0 ? pairedPath.slice(0, tabIndex) : pairedPath;
-      const oldPath =
-        tabIndex >= 0 ? pairedPath.slice(tabIndex + 1) : (records[index + 1] ?? undefined);
-      if (tabIndex < 0 && oldPath !== undefined) index++;
+      const { fields, path } = splitFixedFields(record, 9);
+      // Under -z the original path is its own NUL-terminated record, so it is
+      // consumed here. Paths may contain tabs, so they are never split on one.
+      const oldPath = records[++index] || undefined;
       appendTrackedChanges(fields[1], path, oldPath, staged, unstaged);
       continue;
     }
 
     if (record.startsWith('u ')) {
       const { path } = splitFixedFields(record, 10);
-      conflicted.push({ path, status: 'conflicted' });
+      if (path.length > 0) conflicted.push({ path, status: 'conflicted' });
       continue;
     }
 
     if (record.startsWith('? ')) {
-      untracked.push({ path: record.slice(2), status: 'untracked' });
+      const path = record.slice(2);
+      if (path.length > 0) untracked.push({ path, status: 'untracked' });
     }
   }
 
@@ -124,7 +123,9 @@ function appendTrackedChanges(
   const stagedStatus = STATUS_BY_CODE[xy[0]];
   const unstagedStatus = STATUS_BY_CODE[xy[1]];
   if (stagedStatus) staged.push(createChange(path, stagedStatus, oldPath));
-  if (unstagedStatus) unstaged.push(createChange(path, unstagedStatus, oldPath));
+  // A rename/copy lives in the index only; the worktree side is a plain edit of
+  // the new path, so it must not inherit the original path.
+  if (unstagedStatus) unstaged.push(createChange(path, unstagedStatus, undefined));
 }
 
 function createChange(

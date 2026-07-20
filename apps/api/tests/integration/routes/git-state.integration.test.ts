@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -23,7 +23,9 @@ let restoreAuth: (() => void) | null = null;
 async function createTempDir(): Promise<string> {
   const path = await mkdtemp(join(tmpdir(), 'mango-git-routes-'));
   tempDirs.push(path);
-  return path;
+  // `git rev-parse --show-toplevel` resolves symlinks, and the system temp dir
+  // is one on macOS, so compare against the real path the routes will report.
+  return realpath(path);
 }
 
 async function bindWorkdir(chatId: string, workdir: string): Promise<void> {

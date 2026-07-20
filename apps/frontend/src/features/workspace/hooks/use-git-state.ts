@@ -30,8 +30,8 @@ export function invalidateGitState(queryClient: QueryClient, chatId: string): Pr
   return queryClient.invalidateQueries({ queryKey: gitStateKeys.detail(chatId) });
 }
 
-export function useGitState(chatId: string, enabled = true) {
-  return useQuery({ ...gitStateQueryOptions(chatId), enabled });
+export function useGitState(chatId: string) {
+  return useQuery(gitStateQueryOptions(chatId));
 }
 
 export function useInitRepo(chatId: string) {

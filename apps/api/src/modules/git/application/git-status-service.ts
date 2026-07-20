@@ -3,6 +3,20 @@ import { parseGitStatus } from '../domain/status-parser';
 import { GitCliError, isGitAvailable, runGit } from '../infrastructure/git-cli';
 
 const NOT_A_REPOSITORY_EXIT_CODE = 128;
+/**
+ * Git exits 128 for every fatal error, so the message is what separates "this
+ * directory has no repository" from failures that must stay visible — dubious
+ * ownership, an unreadable object store, a missing working directory.
+ */
+const NOT_A_REPOSITORY_PATTERN = /not a git repository/i;
+
+function isMissingRepository(error: unknown): boolean {
+  return (
+    error instanceof GitCliError &&
+    error.exitCode === NOT_A_REPOSITORY_EXIT_CODE &&
+    NOT_A_REPOSITORY_PATTERN.test(error.stderr)
+  );
+}
 
 export async function getRepoState(workdir: string, signal?: AbortSignal): Promise<GitRepoState> {
   if (!(await isGitAvailable())) return { state: 'git-unavailable' };
@@ -12,7 +26,7 @@ export async function getRepoState(workdir: string, signal?: AbortSignal): Promi
     const result = await runGit(['rev-parse', '--show-toplevel'], { cwd: workdir, signal });
     root = result.stdout.trim();
   } catch (error) {
-    if (error instanceof GitCliError && error.exitCode === NOT_A_REPOSITORY_EXIT_CODE) {
+    if (isMissingRepository(error)) {
       return { state: 'not-a-repo', workdir };
     }
     throw error;

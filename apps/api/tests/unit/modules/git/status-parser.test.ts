@@ -49,11 +49,28 @@ describe('parseGitStatus', () => {
     ]);
   });
 
-  it('parses copied paths and the tab-paired compatibility form', () => {
-    const copied = `2 C. N... 100644 100644 100644 ${HASH} ${HASH} C100 copy.ts\tsource.ts`;
-    const status = parseGitStatus(fixture(...branch(copied)));
+  it('parses copied paths from their NUL-delimited pair', () => {
+    const status = parseGitStatus(fixture(...branch(renamed('C.', 'copy.ts'), 'source.ts')));
 
     expect(status.staged).toEqual([{ path: 'copy.ts', oldPath: 'source.ts', status: 'copied' }]);
+  });
+
+  it('keeps tabs inside renamed paths instead of splitting on them', () => {
+    const status = parseGitStatus(
+      fixture(...branch(renamed('R.', 're\tnamed.ts'), 'we\tird.ts'), '? plain.txt')
+    );
+
+    expect(status.staged).toEqual([
+      { path: 're\tnamed.ts', oldPath: 'we\tird.ts', status: 'renamed' },
+    ]);
+    expect(status.untracked).toEqual([{ path: 'plain.txt', status: 'untracked' }]);
+  });
+
+  it('attributes the original path to the index side of a rename-and-edit', () => {
+    const status = parseGitStatus(fixture(...branch(renamed('RM', 'new.ts'), 'old.ts')));
+
+    expect(status.staged).toEqual([{ path: 'new.ts', oldPath: 'old.ts', status: 'renamed' }]);
+    expect(status.unstaged).toEqual([{ path: 'new.ts', status: 'modified' }]);
   });
 
   it('groups unmerged entries as conflicts', () => {
