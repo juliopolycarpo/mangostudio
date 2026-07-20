@@ -1198,6 +1198,24 @@ export const messages = {
     },
   },
 
+  github: {
+    title: 'GitHub',
+    loading: 'Lendo o contexto do GitHub...',
+    loadError: 'Não foi possível ler o contexto do GitHub.',
+    installHint:
+      'Instale a GitHub CLI no servidor para ver o contexto do repositório e do pull request.',
+    authHint: 'Execute gh auth login no servidor para conectar o GitHub.',
+    noPr: 'Nenhum pull request para esta branch.',
+    defaultBranch: 'Branch padrão: {branch}',
+    refs: '{base} ← {head}',
+    states: {
+      open: 'Aberto',
+      closed: 'Fechado',
+      merged: 'Integrado',
+      draft: 'Rascunho',
+    },
+  },
+
   common: {
     loading: 'Carregando...',
     appName: 'Mango Studio',

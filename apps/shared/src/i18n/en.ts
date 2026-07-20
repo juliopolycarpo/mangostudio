@@ -1184,6 +1184,23 @@ export const messages: Messages = {
     },
   },
 
+  github: {
+    title: 'GitHub',
+    loading: 'Reading GitHub context...',
+    loadError: 'GitHub context could not be read.',
+    installHint: 'Install GitHub CLI on the server to see repository and pull request context.',
+    authHint: 'Run gh auth login on the server to connect GitHub.',
+    noPr: 'No pull request for this branch.',
+    defaultBranch: 'Default branch: {branch}',
+    refs: '{base} ← {head}',
+    states: {
+      open: 'Open',
+      closed: 'Closed',
+      merged: 'Merged',
+      draft: 'Draft',
+    },
+  },
+
   common: {
     loading: 'Loading...',
     appName: 'Mango Studio',

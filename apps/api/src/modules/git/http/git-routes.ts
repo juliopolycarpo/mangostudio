@@ -26,6 +26,7 @@ import { Elysia } from 'elysia';
 import { getDb } from '../../../db/database';
 import { requireAuth } from '../../../plugins/auth-middleware';
 import { getAppSettings } from '../../app-settings/application/app-settings-service';
+import { chatAccessDenied, resolveChatWorkdir } from '../../chats/application/chat-workdir';
 import { getById } from '../../chats/infrastructure/chat-repository';
 import { NoModelAvailableError } from '../../generation/application/resolve-model';
 import {
@@ -91,13 +92,12 @@ export const gitRoutes = new Elysia().use(requireAuth).group('/git', (app) =>
     .get(
       '/state',
       async ({ query, request, set, user }): Promise<RouteResult<GitRepoState>> => {
-        const chat = await getById(query.chatId, getDb());
-        const accessError = chatAccessError(chat, user?.id ?? '', set);
-        if (accessError) return accessError;
-        if (!chat?.workdir) return { state: 'no-workdir' };
+        const resolution = await resolveChatWorkdir(query.chatId, user?.id ?? '', getDb());
+        if (resolution.state === 'no-workdir') return { state: 'no-workdir' };
+        if (resolution.state !== 'ok') return chatAccessDenied(resolution, set);
 
         try {
-          return await getRepoState(chat.workdir, request.signal);
+          return await getRepoState(resolution.workdir, request.signal);
         } catch (error) {
           return gitCommandError(error, set);
         }

@@ -1,4 +1,5 @@
 import type { GitRepoState } from '@mangostudio/shared/git';
+import type { GithubContext } from '@mangostudio/shared/github';
 import { screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -21,6 +22,21 @@ const hooks = vi.hoisted(() => ({
   stashSave: vi.fn(),
   stashPop: vi.fn(),
   stashes: [] as Array<{ index: number; message: string; branch?: string }>,
+  githubData: { state: 'no-remote' } as GithubContext,
+  githubError: null as Error | null,
+  githubLoading: false,
+  githubFetching: false,
+  githubRefetch: vi.fn(),
+}));
+
+vi.mock('../../../src/features/workspace/hooks/use-github-context', () => ({
+  useGithubContext: () => ({
+    data: hooks.githubData,
+    error: hooks.githubError,
+    isLoading: hooks.githubLoading,
+    isFetching: hooks.githubFetching,
+    refetch: hooks.githubRefetch,
+  }),
 }));
 
 vi.mock('../../../src/features/workspace/hooks/use-git-state', () => ({
@@ -61,6 +77,11 @@ beforeEach(() => {
   hooks.stashSave.mockReset();
   hooks.stashPop.mockReset();
   hooks.stashes = [];
+  hooks.githubData = { state: 'no-remote' };
+  hooks.githubError = null;
+  hooks.githubLoading = false;
+  hooks.githubFetching = false;
+  hooks.githubRefetch.mockReset();
   sessionStorage.clear();
 });
 
@@ -90,6 +111,109 @@ describe('GitPanel', () => {
     expect(screen.getByText('src/conflict.ts')).toBeInTheDocument();
     expect(screen.getByText('src/old.ts')).toBeInTheDocument();
     expect(screen.getByText('src/new.ts')).toBeInTheDocument();
+  });
+
+  it('links the GitHub repository and current pull request', () => {
+    hooks.data = {
+      state: 'repo',
+      workdir: '/srv/projects/mangostudio',
+      root: '/srv/projects/mangostudio',
+      status: {
+        branch: { name: 'feat/github-context', ahead: 0, behind: 0 },
+        staged: [],
+        unstaged: [],
+        untracked: [],
+        conflicted: [],
+        clean: true,
+      },
+    };
+    hooks.githubData = {
+      state: 'ok',
+      repo: {
+        nameWithOwner: 'mango/mangostudio',
+        defaultBranch: 'main',
+        url: 'https://github.example/mango/mangostudio',
+      },
+      pr: {
+        number: 42,
+        title: 'Expose GitHub context',
+        state: 'OPEN',
+        isDraft: false,
+        url: 'https://github.example/mango/mangostudio/pull/42',
+        headRefName: 'feat/github-context',
+        baseRefName: 'main',
+      },
+    };
+
+    render(<GitPanel chatId="chat-1" />);
+
+    expect(screen.getByRole('link', { name: 'mango/mangostudio' })).toHaveAttribute(
+      'href',
+      'https://github.example/mango/mangostudio'
+    );
+    expect(screen.getByRole('link', { name: '#42 Expose GitHub context' })).toHaveAttribute(
+      'href',
+      'https://github.example/mango/mangostudio/pull/42'
+    );
+    expect(screen.getByText('Open')).toBeVisible();
+    expect(screen.getByText('main ← feat/github-context')).toBeVisible();
+  });
+
+  it('treats a missing branch pull request as normal repository context', () => {
+    hooks.data = {
+      state: 'repo',
+      workdir: '/srv/projects/mangostudio',
+      root: '/srv/projects/mangostudio',
+      status: {
+        branch: { name: 'feat/no-pr', ahead: 0, behind: 0 },
+        staged: [],
+        unstaged: [],
+        untracked: [],
+        conflicted: [],
+        clean: true,
+      },
+    };
+    hooks.githubData = {
+      state: 'ok',
+      repo: {
+        nameWithOwner: 'mango/mangostudio',
+        defaultBranch: 'main',
+        url: 'https://github.example/mango/mangostudio',
+      },
+      pr: null,
+    };
+
+    render(<GitPanel chatId="chat-1" />);
+
+    expect(screen.getByText('No pull request for this branch.')).toBeVisible();
+  });
+
+  it('shows actionable gh setup hints and hides non-GitHub remotes', () => {
+    hooks.data = {
+      state: 'repo',
+      workdir: '/srv/projects/mangostudio',
+      root: '/srv/projects/mangostudio',
+      status: {
+        branch: { name: 'main', ahead: 0, behind: 0 },
+        staged: [],
+        unstaged: [],
+        untracked: [],
+        conflicted: [],
+        clean: true,
+      },
+    };
+    hooks.githubData = { state: 'gh-not-installed' };
+
+    const { rerender } = render(<GitPanel chatId="chat-1" />);
+    expect(screen.getByText(/Install GitHub CLI/)).toBeVisible();
+
+    hooks.githubData = { state: 'not-authenticated' };
+    rerender(<GitPanel chatId="chat-1" />);
+    expect(screen.getByText(/gh auth login/)).toBeVisible();
+
+    hooks.githubData = { state: 'not-a-github-remote' };
+    rerender(<GitPanel chatId="chat-1" />);
+    expect(screen.queryByText('GitHub')).not.toBeInTheDocument();
   });
 
   it('initializes a working directory that is not a repository', async () => {
