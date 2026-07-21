@@ -26,6 +26,7 @@ export interface RunGitOptions {
   readonly cwd: string;
   readonly timeoutMs?: number;
   readonly signal?: AbortSignal;
+  readonly acceptedExitCodes?: readonly number[];
 }
 
 export interface GitCommandResult {
@@ -132,7 +133,7 @@ export async function runGit(
     if (stdout.truncated || stderr.truncated) {
       throw new GitCliError(args, exitCode, `Git output exceeded ${MAX_OUTPUT_BYTES} bytes.`);
     }
-    if (exitCode !== 0) {
+    if (exitCode !== 0 && !options.acceptedExitCodes?.includes(exitCode)) {
       throw new GitCliError(args, exitCode, stderr.text, false, stdout.text);
     }
 

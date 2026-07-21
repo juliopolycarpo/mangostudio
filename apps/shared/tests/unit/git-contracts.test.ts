@@ -1,10 +1,14 @@
 import { describe, expect, it } from 'bun:test';
 import {
   CommitBodySchema,
+  CreateBranchBodySchema,
   GenerateCommitMessageBodySchema,
   GenerateCommitMessageResponseSchema,
+  GitDiffQuerySchema,
+  GitHistoryQuerySchema,
   StagePathsBodySchema,
   StashPopBodySchema,
+  SwitchBranchBodySchema,
   UnstagePathsBodySchema,
 } from '@mangostudio/shared/git';
 import { Value } from '@sinclair/typebox/value';
@@ -53,5 +57,22 @@ describe('Git write contracts', () => {
     expect(Value.Check(StashPopBodySchema, { chatId: 'chat-1' })).toBe(true);
     expect(Value.Check(StashPopBodySchema, { chatId: 'chat-1', index: 2 })).toBe(true);
     expect(Value.Check(StashPopBodySchema, { chatId: 'chat-1', index: -1 })).toBe(false);
+  });
+
+  it('validates branch, history, and diff navigation inputs', () => {
+    expect(Value.Check(SwitchBranchBodySchema, { chatId: 'chat-1', name: 'feat/history' })).toBe(
+      true
+    );
+    expect(Value.Check(CreateBranchBodySchema, { chatId: 'chat-1', name: '' })).toBe(false);
+    expect(Value.Check(GitHistoryQuerySchema, { chatId: 'chat-1', cursor: '20' })).toBe(true);
+    expect(Value.Check(GitHistoryQuerySchema, { chatId: 'chat-1', cursor: '-1' })).toBe(false);
+    expect(
+      Value.Check(GitDiffQuerySchema, {
+        chatId: 'chat-1',
+        path: 'src/panel.tsx',
+        commit: 'abcdef1',
+      })
+    ).toBe(true);
+    expect(Value.Check(GitDiffQuerySchema, { chatId: 'chat-1', path: '../secret' })).toBe(true);
   });
 });

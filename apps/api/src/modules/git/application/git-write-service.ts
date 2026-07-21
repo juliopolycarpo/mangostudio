@@ -3,6 +3,7 @@ import { ERROR_CODES, type ErrorCode } from '@mangostudio/shared/errors';
 import type {
   CommitBody,
   CommitResponse,
+  GitBranchesResponse,
   GitRepoState,
   GitStatus,
   StagePathsBody,
@@ -11,6 +12,7 @@ import type {
   StashSaveBody,
   UnstagePathsBody,
 } from '@mangostudio/shared/git';
+import { parseBranchList, parseCheckoutBlockedPaths } from '../domain/branch-parser';
 import { buildCommitArgs } from '../domain/commit-command';
 import { GitPathValidationError, validateRepoPaths } from '../domain/path-validation';
 import { parseStashList } from '../domain/stash-parser';
@@ -21,6 +23,7 @@ type PathSelection = Pick<StagePathsBody | UnstagePathsBody, 'all' | 'paths'>;
 
 const mutationQueues = new Map<string, Promise<void>>();
 const COMMIT_TIMEOUT_MS = 60_000;
+const REMOTE_TIMEOUT_MS = 120_000;
 const MERGE_CONFLICT_PATTERN = /CONFLICT|Merge conflict|needs merge/i;
 
 export class GitWriteError extends Error {
@@ -54,7 +57,7 @@ async function withMutationLock<T>(root: string, mutation: () => Promise<T>): Pr
   }
 }
 
-async function requireRepoRoot(workdir: string, signal?: AbortSignal): Promise<string> {
+export async function requireRepoRoot(workdir: string, signal?: AbortSignal): Promise<string> {
   if (!(await isGitAvailable())) {
     throw new GitWriteError('Git is not available on this system.', 409, ERROR_CODES.CONFLICT);
   }
@@ -79,7 +82,7 @@ function combinedCommandOutput(error: GitCliError): string {
   return [error.stderr, error.stdout].filter(Boolean).join('\n');
 }
 
-function mapWriteFailure(error: unknown, operation: string): never {
+export function mapWriteFailure(error: unknown, operation: string): never {
   if (error instanceof GitWriteError) throw error;
   if (error instanceof GitPathValidationError) {
     throw new GitWriteError(
@@ -317,4 +320,174 @@ export async function stashList(workdir: string, signal?: AbortSignal): Promise<
   } catch (error) {
     return mapWriteFailure(error, 'Listing stashes');
   }
+}
+
+export async function listBranches(
+  workdir: string,
+  signal?: AbortSignal
+): Promise<GitBranchesResponse> {
+  try {
+    const root = await requireRepoRoot(workdir, signal);
+    const result = await runGit(
+      [
+        'for-each-ref',
+        '--format=%(refname:short)%1f%(HEAD)%1f%(upstream:short)%1f%(upstream:track,nobracket)%00',
+        'refs/heads',
+      ],
+      { cwd: root, signal }
+    );
+    return { branches: parseBranchList(result.stdout) };
+  } catch (error) {
+    return mapWriteFailure(error, 'Listing branches');
+  }
+}
+
+export function switchBranch(
+  workdir: string,
+  name: string,
+  signal?: AbortSignal
+): Promise<GitRepoState> {
+  return runRepoMutation(workdir, signal, 'Switching branches', async (root) => {
+    try {
+      await runGit(['switch', '--', name], { cwd: root, signal });
+    } catch (error) {
+      mapBranchSwitchFailure(error);
+    }
+    return await currentRepoState(workdir, root, signal);
+  });
+}
+
+export function createBranch(
+  workdir: string,
+  name: string,
+  signal?: AbortSignal
+): Promise<GitRepoState> {
+  return runRepoMutation(workdir, signal, 'Creating branch', async (root) => {
+    await runGit(['check-ref-format', '--branch', name], { cwd: root, signal });
+    await runGit(['switch', '-c', name], { cwd: root, signal });
+    return await currentRepoState(workdir, root, signal);
+  });
+}
+
+export function fetchRemote(
+  workdir: string,
+  prune: boolean,
+  signal?: AbortSignal
+): Promise<GitRepoState> {
+  return runRemoteMutation(workdir, signal, 'Fetching remote', async (root) => {
+    await runGit(['fetch', ...(prune ? ['--prune'] : [])], {
+      cwd: root,
+      signal,
+      timeoutMs: REMOTE_TIMEOUT_MS,
+    });
+  });
+}
+
+export function pullFastForward(workdir: string, signal?: AbortSignal): Promise<GitRepoState> {
+  return runRemoteMutation(workdir, signal, 'Pulling changes', async (root) => {
+    await runGit(['pull', '--ff-only'], { cwd: root, signal, timeoutMs: REMOTE_TIMEOUT_MS });
+  });
+}
+
+export function pushBranch(workdir: string, signal?: AbortSignal): Promise<GitRepoState> {
+  return runRemoteMutation(workdir, signal, 'Pushing changes', async (root) => {
+    const status = await getRepoStatus(root, signal);
+    if (!status.branch.name) {
+      throw new GitWriteError(
+        'Create or switch to a branch before pushing.',
+        409,
+        ERROR_CODES.CONFLICT
+      );
+    }
+    const args = status.branch.upstream
+      ? ['push']
+      : [
+          'push',
+          '--set-upstream',
+          await defaultPushRemote(root, signal),
+          `refs/heads/${status.branch.name}`,
+        ];
+    await runGit(args, { cwd: root, signal, timeoutMs: REMOTE_TIMEOUT_MS });
+  });
+}
+
+function runRemoteMutation(
+  workdir: string,
+  signal: AbortSignal | undefined,
+  operation: string,
+  command: (root: string) => Promise<void>
+): Promise<GitRepoState> {
+  return runRepoMutation(
+    workdir,
+    signal,
+    operation,
+    async (root) => {
+      await command(root);
+      return await currentRepoState(workdir, root, signal);
+    },
+    mapRemoteFailure
+  );
+}
+
+async function defaultPushRemote(root: string, signal?: AbortSignal): Promise<string> {
+  const result = await runGit(['remote'], { cwd: root, signal });
+  const remotes = result.stdout.split(/\r?\n/).filter(Boolean);
+  if (remotes.includes('origin')) return 'origin';
+  if (remotes.length === 1 && remotes[0]) return remotes[0];
+  throw new GitWriteError(
+    remotes.length === 0
+      ? 'Add a Git remote before pushing.'
+      : 'Set an upstream branch before pushing from a repository with multiple remotes.',
+    409,
+    ERROR_CODES.CONFLICT
+  );
+}
+
+function mapBranchSwitchFailure(error: unknown): never {
+  if (error instanceof GitCliError) {
+    const output = combinedCommandOutput(error);
+    const paths = parseCheckoutBlockedPaths(output);
+    if (paths.length > 0 || /would be overwritten by (?:checkout|switch)/i.test(output)) {
+      throw new GitWriteError(
+        'Local changes would be overwritten by switching branches.',
+        409,
+        ERROR_CODES.CHECKOUT_BLOCKED,
+        paths.join('\n')
+      );
+    }
+  }
+  return mapWriteFailure(error, 'Switching branches');
+}
+
+function mapRemoteFailure(error: unknown, operation: string): never {
+  if (error instanceof GitWriteError) throw error;
+  if (error instanceof GitCliError) {
+    const output = combinedCommandOutput(error);
+    if (
+      /authentication failed|could not read (?:username|password)|permission denied \(publickey\)|terminal prompts disabled/i.test(
+        output
+      )
+    ) {
+      throw new GitWriteError(
+        'Git authentication is required. Check your credential helper or SSH agent.',
+        422,
+        ERROR_CODES.AUTH_REQUIRED
+      );
+    }
+    if (/not possible to fast-forward|cannot fast-forward/i.test(output)) {
+      throw new GitWriteError(
+        'The branch cannot be fast-forwarded. Resolve the divergence in a terminal.',
+        409,
+        ERROR_CODES.NON_FAST_FORWARD
+      );
+    }
+    if (/non-fast-forward|fetch first|updates were rejected|stale info/i.test(output)) {
+      throw new GitWriteError(
+        'The remote history has diverged. Fetch and resolve it before pushing again.',
+        409,
+        ERROR_CODES.HISTORY_DIVERGED
+      );
+    }
+  }
+  return mapWriteFailure(error, operation);
 }

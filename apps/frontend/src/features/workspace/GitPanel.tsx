@@ -8,13 +8,10 @@ import type { GithubContext, GithubPrState } from '@mangostudio/shared/github';
 import type { Messages } from '@mangostudio/shared/i18n';
 import {
   AlertTriangle,
-  ArrowDown,
-  ArrowUp,
   Check,
   ExternalLink,
   FileCode2,
   FolderGit2,
-  GitBranch,
   GitPullRequest,
   Minus,
   Plus,
@@ -26,9 +23,13 @@ import { Button } from '@/components/ui/Button';
 import { useToast } from '@/components/ui/Toast';
 import { useI18n } from '@/hooks/use-i18n';
 import { resolveApiErrorMessage } from '@/lib/utils';
+import { BranchControl } from './BranchControl';
 import { CommitForm } from './CommitForm';
+import { type DiffSelection, DiffViewer } from './DiffViewer';
 import { useGitState, useInitRepo, useStagePaths, useUnstagePaths } from './hooks/use-git-state';
 import { useGithubContext } from './hooks/use-github-context';
+import { RemoteActions } from './RemoteActions';
+import { RepositoryHistory } from './RepositoryHistory';
 import { StashSection } from './StashSection';
 
 interface GitPanelProps {
@@ -234,6 +235,8 @@ function RepositoryStatus({
   const labels = t.git;
   const stageMutation = useStagePaths(chatId);
   const unstageMutation = useUnstagePaths(chatId);
+  const [view, setView] = useState<'changes' | 'history'>('changes');
+  const [diffSelection, setDiffSelection] = useState<DiffSelection | null>(null);
   const branchName = status.branch.name
     ? status.branch.name
     : labels.detachedAt.replace('{commit}', status.branch.detachedAt?.slice(0, 8) ?? 'HEAD');
@@ -249,32 +252,14 @@ function RepositoryStatus({
 
   return (
     <div className="space-y-5">
-      <section aria-label={branchName}>
-        <div className="flex items-center gap-2">
-          <GitBranch size={15} className="shrink-0 text-primary" />
-          <span className="min-w-0 flex-1 truncate font-mono text-xs font-semibold text-on-surface">
-            {branchName}
-          </span>
-        </div>
+      <section aria-label={branchName} className="relative z-20">
+        <BranchControl chatId={chatId} branch={status.branch} detachedLabel={branchName} />
         {status.branch.upstream ? (
           <p className="mt-1 truncate pl-6 font-mono text-[11px] text-on-surface-variant">
             {status.branch.upstream}
           </p>
         ) : null}
-        {status.branch.ahead > 0 || status.branch.behind > 0 ? (
-          <div className="mt-2 flex flex-wrap gap-1.5 pl-6">
-            {status.branch.ahead > 0 ? (
-              <DivergenceBadge icon={<ArrowUp size={11} />}>
-                {labels.ahead.replace('{count}', String(status.branch.ahead))}
-              </DivergenceBadge>
-            ) : null}
-            {status.branch.behind > 0 ? (
-              <DivergenceBadge icon={<ArrowDown size={11} />}>
-                {labels.behind.replace('{count}', String(status.branch.behind))}
-              </DivergenceBadge>
-            ) : null}
-          </div>
-        ) : null}
+        <RemoteActions chatId={chatId} branch={status.branch} />
       </section>
 
       <GithubSection
@@ -284,51 +269,101 @@ function RepositoryStatus({
         onRetry={onGithubRetry}
       />
 
-      {status.clean ? (
-        <PanelMessage
-          icon={<Check size={22} />}
-          title={labels.cleanTitle}
-          detail={labels.cleanHint}
-          tone="success"
+      <div className="grid grid-cols-2 rounded-xl bg-surface-container/60 p-1" role="tablist">
+        {(['changes', 'history'] as const).map((tab) => (
+          <button
+            key={tab}
+            type="button"
+            role="tab"
+            aria-selected={view === tab}
+            onClick={() => {
+              setView(tab);
+              setDiffSelection(null);
+            }}
+            className={`cursor-pointer rounded-lg px-2 py-1.5 text-[11px] font-semibold transition-colors ${
+              view === tab
+                ? 'bg-surface-container-highest text-on-surface shadow-sm'
+                : 'text-on-surface-variant hover:text-on-surface'
+            }`}
+          >
+            {labels.navigation[tab]}
+          </button>
+        ))}
+      </div>
+
+      {diffSelection ? (
+        <DiffViewer
+          chatId={chatId}
+          selection={diffSelection}
+          onClose={() => setDiffSelection(null)}
         />
+      ) : view === 'history' ? (
+        <RepositoryHistory chatId={chatId} onOpenDiff={setDiffSelection} />
       ) : (
-        <div className="space-y-4">
-          <ChangeGroup
-            title={labels.groups.conflicted}
-            changes={status.conflicted}
-            action="stage"
-            pending={stageMutation.isPending}
-            onAction={(paths) => void mutatePaths('stage', paths)}
+        <>
+          {status.clean ? (
+            <PanelMessage
+              icon={<Check size={22} />}
+              title={labels.cleanTitle}
+              detail={labels.cleanHint}
+              tone="success"
+            />
+          ) : (
+            <div className="space-y-4">
+              <ChangeGroup
+                title={labels.groups.conflicted}
+                changes={status.conflicted}
+                action="stage"
+                pending={stageMutation.isPending}
+                onAction={(paths) => void mutatePaths('stage', paths)}
+                onDiff={(path) =>
+                  setDiffSelection({ path, title: labels.diff.view.replace('{path}', path) })
+                }
+              />
+              <ChangeGroup
+                title={labels.groups.staged}
+                changes={status.staged}
+                action="unstage"
+                pending={unstageMutation.isPending}
+                onAction={(paths) => void mutatePaths('unstage', paths)}
+                onDiff={(path) =>
+                  setDiffSelection({
+                    path,
+                    staged: true,
+                    title: labels.diff.view.replace('{path}', path),
+                  })
+                }
+              />
+              <ChangeGroup
+                title={labels.groups.unstaged}
+                changes={status.unstaged}
+                action="stage"
+                pending={stageMutation.isPending}
+                onAction={(paths) => void mutatePaths('stage', paths)}
+                onDiff={(path) =>
+                  setDiffSelection({ path, title: labels.diff.view.replace('{path}', path) })
+                }
+              />
+              <ChangeGroup
+                title={labels.groups.untracked}
+                changes={status.untracked}
+                action="stage"
+                pending={stageMutation.isPending}
+                onAction={(paths) => void mutatePaths('stage', paths)}
+                onDiff={(path) =>
+                  setDiffSelection({ path, title: labels.diff.view.replace('{path}', path) })
+                }
+              />
+            </div>
+          )}
+          <CommitForm
+            chatId={chatId}
+            hasChanges={!status.clean}
+            hasStagedChanges={status.staged.length > 0}
           />
-          <ChangeGroup
-            title={labels.groups.staged}
-            changes={status.staged}
-            action="unstage"
-            pending={unstageMutation.isPending}
-            onAction={(paths) => void mutatePaths('unstage', paths)}
-          />
-          <ChangeGroup
-            title={labels.groups.unstaged}
-            changes={status.unstaged}
-            action="stage"
-            pending={stageMutation.isPending}
-            onAction={(paths) => void mutatePaths('stage', paths)}
-          />
-          <ChangeGroup
-            title={labels.groups.untracked}
-            changes={status.untracked}
-            action="stage"
-            pending={stageMutation.isPending}
-            onAction={(paths) => void mutatePaths('stage', paths)}
-          />
-        </div>
+          <StashSection chatId={chatId} />
+        </>
       )}
-      <CommitForm
-        chatId={chatId}
-        hasChanges={!status.clean}
-        hasStagedChanges={status.staged.length > 0}
-      />
-      <StashSection chatId={chatId} />
     </div>
   );
 }
@@ -456,33 +491,20 @@ function GithubPrBadge({
   );
 }
 
-function DivergenceBadge({
-  icon,
-  children,
-}: {
-  readonly icon: ReactNode;
-  readonly children: ReactNode;
-}) {
-  return (
-    <span className="inline-flex items-center gap-1 rounded-full bg-surface-container-high px-2 py-1 text-[10px] font-semibold text-on-surface-variant">
-      {icon}
-      {children}
-    </span>
-  );
-}
-
 function ChangeGroup({
   title,
   changes,
   action,
   pending,
   onAction,
+  onDiff,
 }: {
   readonly title: string;
   readonly changes: readonly GitFileChange[];
   readonly action: 'stage' | 'unstage';
   readonly pending: boolean;
   readonly onAction: (paths: string[]) => void;
+  readonly onDiff: (path: string) => void;
 }) {
   const { t } = useI18n();
   if (changes.length === 0) return null;
@@ -516,6 +538,7 @@ function ChangeGroup({
             action={action}
             pending={pending}
             onAction={() => onAction(changePaths([change]))}
+            onDiff={() => onDiff(change.path)}
           />
         ))}
       </ul>
@@ -528,11 +551,13 @@ function FileChangeRow({
   action,
   pending,
   onAction,
+  onDiff,
 }: {
   readonly change: GitFileChange;
   readonly action: 'stage' | 'unstage';
   readonly pending: boolean;
   readonly onAction: () => void;
+  readonly onDiff: () => void;
 }) {
   const { t } = useI18n();
   const presentation = STATUS_PRESENTATION[change.status];
@@ -552,7 +577,12 @@ function FileChangeRow({
       </span>
       <span className="sr-only">{statusLabel}</span>
       <FileCode2 size={13} className="mt-0.5 shrink-0 text-on-surface-variant/70" />
-      <span className="min-w-0 flex-1 break-all font-mono text-[11px] leading-4 text-on-surface">
+      <button
+        type="button"
+        onClick={onDiff}
+        aria-label={t.git.actions.viewDiff.replace('{path}', change.path)}
+        className="min-w-0 flex-1 cursor-pointer break-all text-left font-mono text-[11px] leading-4 text-on-surface hover:text-primary"
+      >
         {change.oldPath ? (
           <>
             <span className="text-on-surface-variant line-through">{change.oldPath}</span>
@@ -560,7 +590,7 @@ function FileChangeRow({
           </>
         ) : null}
         {change.path}
-      </span>
+      </button>
       <button
         type="button"
         aria-label={actionLabel}

@@ -118,6 +118,29 @@ export function highlightCode(code: string, lang: string, theme: CodeThemeId): s
   }
 }
 
+export interface HighlightToken {
+  readonly content: string;
+  readonly color?: string;
+  readonly offset: number;
+}
+
+/** Returns safe token data for code surfaces that render their own line chrome. */
+export function highlightCodeTokens(
+  code: string,
+  lang: string,
+  theme: CodeThemeId
+): readonly HighlightToken[] | null {
+  const language = resolveLanguageId(lang);
+  if (!highlighterInstance || !language) return null;
+  if (!isLanguageLoaded(highlighterInstance, language)) return null;
+
+  try {
+    return highlighterInstance.codeToTokensBase(code, { lang: language, theme })[0] ?? [];
+  } catch {
+    return null;
+  }
+}
+
 function resolveUniqueLanguageIds(languages: readonly string[]): ShikiLanguageId[] {
   return [...new Set(languages.map(resolveLanguageId).filter(isLanguageId))];
 }

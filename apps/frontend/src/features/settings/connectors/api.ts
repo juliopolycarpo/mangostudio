@@ -12,20 +12,13 @@ import type {
   StartChatGptOAuthBody,
   StartChatGptOAuthResponse,
 } from '@mangostudio/shared/connectors';
-import type { ApiErrorResponse } from '@mangostudio/shared/errors';
 import { client } from '@/lib/api-client';
 import { ApiError } from '@/lib/utils';
 
 export class ConnectorApiError extends ApiError {
-  readonly code?: string;
-
   constructor(value: unknown) {
     super(value);
     this.name = 'ConnectorApiError';
-    if (value && typeof value === 'object') {
-      const maybeError = value as Partial<ApiErrorResponse>;
-      if (typeof maybeError.code === 'string') this.code = maybeError.code;
-    }
   }
 }
 

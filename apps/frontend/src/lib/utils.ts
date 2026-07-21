@@ -36,12 +36,18 @@ export function extractApiError(value: unknown, fallback = DEFAULT_API_ERROR_FAL
  */
 export class ApiError extends Error {
   readonly serverMessage: string | null;
+  readonly code: string | null;
+  readonly details: Readonly<Record<string, string>> | null;
 
   constructor(value: unknown) {
     const serverMessage = extractServerMessage(value);
     super(serverMessage ?? DEFAULT_API_ERROR_FALLBACK);
     this.name = 'ApiError';
     this.serverMessage = serverMessage;
+    const response =
+      value && typeof value === 'object' ? (value as Partial<ApiErrorResponse>) : null;
+    this.code = typeof response?.code === 'string' ? response.code : null;
+    this.details = response?.details ?? null;
   }
 }
 

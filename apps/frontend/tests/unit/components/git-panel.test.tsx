@@ -1,9 +1,16 @@
-import type { GitRepoState } from '@mangostudio/shared/git';
+import type {
+  GitBranchesResponse,
+  GitCommitDetailsResponse,
+  GitDiffResponse,
+  GitHistoryResponse,
+  GitRepoState,
+} from '@mangostudio/shared/git';
 import type { GithubContext } from '@mangostudio/shared/github';
 import { screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { GitPanel } from '../../../src/features/workspace/GitPanel';
+import { ApiError } from '../../../src/lib/utils';
 import { render } from '../../support/harness/render';
 
 const hooks = vi.hoisted(() => ({
@@ -22,6 +29,16 @@ const hooks = vi.hoisted(() => ({
   stashSave: vi.fn(),
   stashPop: vi.fn(),
   stashes: [] as Array<{ index: number; message: string; branch?: string }>,
+  branches: { branches: [] } as GitBranchesResponse,
+  branchSwitch: vi.fn(),
+  branchCreate: vi.fn(),
+  gitFetch: vi.fn(),
+  gitPull: vi.fn(),
+  gitPush: vi.fn(),
+  historyPages: [] as GitHistoryResponse[],
+  historyLoading: false,
+  commitDetails: undefined as GitCommitDetailsResponse | undefined,
+  diff: undefined as GitDiffResponse | undefined,
   githubData: { state: 'no-remote' } as GithubContext,
   githubError: null as Error | null,
   githubLoading: false,
@@ -59,6 +76,22 @@ vi.mock('../../../src/features/workspace/hooks/use-git-state', () => ({
   useGitStashes: () => ({ data: { stashes: hooks.stashes }, isLoading: false, error: null }),
   useStashSave: () => ({ mutateAsync: hooks.stashSave, isPending: false }),
   useStashPop: () => ({ mutateAsync: hooks.stashPop, isPending: false }),
+  useGitBranches: () => ({ data: hooks.branches, isLoading: false, error: null }),
+  useSwitchBranch: () => ({ mutateAsync: hooks.branchSwitch, isPending: false }),
+  useCreateBranch: () => ({ mutateAsync: hooks.branchCreate, isPending: false }),
+  useGitFetch: () => ({ mutateAsync: hooks.gitFetch, isPending: false }),
+  useGitPull: () => ({ mutateAsync: hooks.gitPull, isPending: false }),
+  useGitPush: () => ({ mutateAsync: hooks.gitPush, isPending: false }),
+  useGitHistory: () => ({
+    data: { pages: hooks.historyPages },
+    isLoading: hooks.historyLoading,
+    error: null,
+    hasNextPage: false,
+    isFetchingNextPage: false,
+    fetchNextPage: vi.fn(),
+  }),
+  useGitCommit: () => ({ data: hooks.commitDetails, isLoading: false, error: null }),
+  useGitDiff: () => ({ data: hooks.diff, isLoading: false, error: null }),
 }));
 
 beforeEach(() => {
@@ -77,6 +110,16 @@ beforeEach(() => {
   hooks.stashSave.mockReset();
   hooks.stashPop.mockReset();
   hooks.stashes = [];
+  hooks.branches = { branches: [] };
+  hooks.branchSwitch.mockReset();
+  hooks.branchCreate.mockReset();
+  hooks.gitFetch.mockReset();
+  hooks.gitPull.mockReset();
+  hooks.gitPush.mockReset();
+  hooks.historyPages = [];
+  hooks.historyLoading = false;
+  hooks.commitDetails = undefined;
+  hooks.diff = undefined;
   hooks.githubData = { state: 'no-remote' };
   hooks.githubError = null;
   hooks.githubLoading = false;
@@ -105,12 +148,87 @@ describe('GitPanel', () => {
 
     expect(screen.getByText('mangostudio')).toBeInTheDocument();
     expect(screen.getByText('feat/git-panel')).toBeInTheDocument();
-    expect(screen.getByText('2 ahead')).toBeInTheDocument();
-    expect(screen.getByText('1 behind')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Push 2 commits' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Pull 1 commits' })).toBeInTheDocument();
     expect(screen.getByText('Conflicts')).toBeInTheDocument();
     expect(screen.getByText('src/conflict.ts')).toBeInTheDocument();
     expect(screen.getByText('src/old.ts')).toBeInTheDocument();
     expect(screen.getByText('src/new.ts')).toBeInTheDocument();
+  });
+
+  it('offers stash-first recovery when local changes block a branch switch', async () => {
+    const user = userEvent.setup();
+    hooks.data = {
+      state: 'repo',
+      workdir: '/srv/projects/mangostudio',
+      root: '/srv/projects/mangostudio',
+      status: {
+        branch: { name: 'main', ahead: 0, behind: 0 },
+        staged: [],
+        unstaged: [{ path: 'src/panel.tsx', status: 'modified' }],
+        untracked: [],
+        conflicted: [],
+        clean: false,
+      },
+    };
+    hooks.branches = {
+      branches: [
+        { name: 'main', current: true, ahead: 0, behind: 0 },
+        { name: 'feat/history', current: false, ahead: 0, behind: 0 },
+      ],
+    };
+    hooks.branchSwitch
+      .mockRejectedValueOnce(
+        new ApiError({
+          error: 'Local changes would be overwritten.',
+          code: 'CHECKOUT_BLOCKED',
+          details: { paths: 'src/panel.tsx' },
+        })
+      )
+      .mockResolvedValueOnce(undefined);
+
+    render(<GitPanel chatId="chat-1" />);
+
+    await user.click(screen.getByLabelText('Change branch'));
+    await user.click(screen.getByRole('button', { name: 'Switch to feat/history' }));
+    const dialog = screen.getByRole('dialog', { name: 'Local changes block this switch' });
+    expect(dialog).toBeVisible();
+    expect(dialog).toHaveTextContent('src/panel.tsx');
+
+    await user.click(screen.getByRole('button', { name: 'Stash and switch' }));
+    expect(hooks.stashSave).toHaveBeenCalledWith({
+      message: 'Before switching to feat/history',
+      includeUntracked: true,
+    });
+    expect(hooks.branchSwitch).toHaveBeenLastCalledWith('feat/history');
+  });
+
+  it('creates and switches to a named branch from the branch menu', async () => {
+    const user = userEvent.setup();
+    hooks.data = {
+      state: 'repo',
+      workdir: '/srv/projects/mangostudio',
+      root: '/srv/projects/mangostudio',
+      status: {
+        branch: { name: 'main', ahead: 0, behind: 0 },
+        staged: [],
+        unstaged: [],
+        untracked: [],
+        conflicted: [],
+        clean: true,
+      },
+    };
+    hooks.branches = {
+      branches: [{ name: 'main', current: true, ahead: 0, behind: 0 }],
+    };
+
+    render(<GitPanel chatId="chat-1" />);
+
+    await user.click(screen.getByLabelText('Change branch'));
+    await user.type(screen.getByPlaceholderText('feat/branch-name'), 'feat/navigation');
+    await user.click(screen.getByRole('button', { name: 'Create branch' }));
+
+    expect(hooks.branchCreate).toHaveBeenCalledWith('feat/navigation');
   });
 
   it('links the GitHub repository and current pull request', () => {
@@ -259,6 +377,84 @@ describe('GitPanel', () => {
 
     await user.click(screen.getByRole('button', { name: 'Unstage src/new.ts' }));
     expect(hooks.unstage).toHaveBeenCalledWith({ paths: ['src/old.ts', 'src/new.ts'] });
+  });
+
+  it('opens a line-numbered worktree diff from a changed file', async () => {
+    const user = userEvent.setup();
+    hooks.data = {
+      state: 'repo',
+      workdir: '/srv/projects/mangostudio',
+      root: '/srv/projects/mangostudio',
+      status: {
+        branch: { name: 'feat/git-panel', ahead: 0, behind: 0 },
+        staged: [],
+        unstaged: [{ path: 'src/panel.tsx', status: 'modified' }],
+        untracked: [],
+        conflicted: [],
+        clean: false,
+      },
+    };
+    hooks.diff = {
+      path: 'src/panel.tsx',
+      binary: false,
+      diff: '@@ -4,2 +4,2 @@\n-old title\n+new title\n',
+    };
+
+    render(<GitPanel chatId="chat-1" />);
+    await user.click(screen.getByRole('button', { name: 'View diff for src/panel.tsx' }));
+
+    const diff = screen.getByRole('region', { name: 'View diff for src/panel.tsx' });
+    expect(diff).toBeVisible();
+    expect(diff).toHaveTextContent('old title');
+    expect(diff).toHaveTextContent('new title');
+    expect(screen.getAllByText('4')).toHaveLength(2);
+  });
+
+  it('navigates commit history and opens a commit file diff', async () => {
+    const user = userEvent.setup();
+    const commit = {
+      hash: '1234567890abcdef',
+      shortHash: '1234567',
+      subject: 'Ship repository navigation',
+      author: 'Mango Maintainer',
+      authoredAt: '2026-07-21T12:00:00.000Z',
+      refs: ['HEAD -> main'],
+      changedFiles: 1,
+      additions: 4,
+      deletions: 2,
+    };
+    hooks.data = {
+      state: 'repo',
+      workdir: '/srv/projects/mangostudio',
+      root: '/srv/projects/mangostudio',
+      status: {
+        branch: { name: 'main', ahead: 0, behind: 0 },
+        staged: [],
+        unstaged: [],
+        untracked: [],
+        conflicted: [],
+        clean: true,
+      },
+    };
+    hooks.historyPages = [{ commits: [commit] }];
+    hooks.commitDetails = {
+      commit,
+      files: [{ path: 'src/git.ts', status: 'modified', additions: 4, deletions: 2 }],
+    };
+    hooks.diff = {
+      path: 'src/git.ts',
+      binary: false,
+      diff: '@@ -1 +1 @@\n-old\n+new\n',
+    };
+
+    render(<GitPanel chatId="chat-1" />);
+    await user.click(screen.getByRole('tab', { name: 'History' }));
+    await user.click(screen.getByRole('button', { name: /Ship repository navigation/ }));
+
+    expect(screen.getByRole('region', { name: 'Commit details' })).toBeVisible();
+    expect(screen.getByText('1234567890abcdef')).toBeVisible();
+    await user.click(screen.getByRole('button', { name: /src\/git\.ts/ }));
+    expect(screen.getByRole('region', { name: 'View diff for src/git.ts' })).toBeVisible();
   });
 
   it('commits staged changes and reports the short hash', async () => {
