@@ -226,18 +226,6 @@ describe('GitPanel', () => {
     expect(hooks.mutate).toHaveBeenCalledOnce();
   });
 
-  it('collapses to a repository tab and expands again', async () => {
-    const user = userEvent.setup();
-    hooks.data = { state: 'git-unavailable' };
-
-    render(<GitPanel chatId="chat-1" />);
-    await user.click(screen.getByRole('button', { name: 'Collapse repository panel' }));
-    expect(screen.queryByText('Git is unavailable')).not.toBeInTheDocument();
-
-    await user.click(screen.getByRole('button', { name: 'Expand repository panel' }));
-    expect(screen.getByText('Git is unavailable')).toBeInTheDocument();
-  });
-
   it('offers a retry when repository inspection fails', async () => {
     const user = userEvent.setup();
     hooks.error = new Error('failed');

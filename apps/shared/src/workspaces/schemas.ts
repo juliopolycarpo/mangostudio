@@ -34,10 +34,33 @@ export const ValidatePathResponseSchema = Type.Object({
 /** Upper bound on remembered working directories, shared by the schema, normalizer, and UI. */
 export const RECENT_WORKDIRS_MAX = 10;
 
+export const WORKSPACE_PANEL_IDS = ['git', 'todos'] as const;
+export const WORKSPACE_PANEL_WIDTH_MIN = 280;
+export const WORKSPACE_PANEL_WIDTH_MAX = 480;
+export const WORKSPACE_PANEL_WIDTH_DEFAULT = 320;
+
+export const WorkspacePanelIdSchema = Type.Union([Type.Literal('git'), Type.Literal('todos')]);
+
+export const WorkspacePanelSettingsSchema = Type.Object({
+  visiblePanelIds: Type.Array(WorkspacePanelIdSchema, {
+    maxItems: WORKSPACE_PANEL_IDS.length,
+    uniqueItems: true,
+  }),
+  panelOrder: Type.Array(WorkspacePanelIdSchema, {
+    maxItems: WORKSPACE_PANEL_IDS.length,
+    uniqueItems: true,
+  }),
+  width: Type.Integer({
+    minimum: WORKSPACE_PANEL_WIDTH_MIN,
+    maximum: WORKSPACE_PANEL_WIDTH_MAX,
+  }),
+});
+
 export const WorkspaceSettingsSchema = Type.Object({
   defaultWorkdir: Type.String(),
   recentWorkdirs: Type.Array(Type.String(), { maxItems: RECENT_WORKDIRS_MAX }),
   restrictToolsToWorkdir: Type.Boolean(),
+  sidePanel: WorkspacePanelSettingsSchema,
 });
 
 export type DirectoryEntry = Static<typeof DirectoryEntrySchema>;
@@ -45,4 +68,6 @@ export type ListDirectoryResponse = Static<typeof ListDirectoryResponseSchema>;
 export type ValidatePathBody = Static<typeof ValidatePathBodySchema>;
 export type WorkdirValidationReason = Static<typeof WorkdirValidationReasonSchema>;
 export type ValidatePathResponse = Static<typeof ValidatePathResponseSchema>;
+export type WorkspacePanelId = Static<typeof WorkspacePanelIdSchema>;
+export type WorkspacePanelSettings = Static<typeof WorkspacePanelSettingsSchema>;
 export type WorkspaceSettings = Static<typeof WorkspaceSettingsSchema>;

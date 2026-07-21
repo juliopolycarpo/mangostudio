@@ -18,8 +18,16 @@ vi.mock('../../../src/lib/auth-client', () => ({
   },
 }));
 
-vi.mock('../../../src/features/workspace/GitPanel', () => ({
-  GitPanel: ({ chatId }: { chatId: string }) => <div data-testid="git-panel">{chatId}</div>,
+vi.mock('../../../src/features/workspace/rail/WorkspaceRail', () => ({
+  WorkspaceRail: ({ chatId }: { chatId: string }) => (
+    <div data-testid="workspace-rail">{chatId}</div>
+  ),
+}));
+
+vi.mock('../../../src/features/chat/components/PinnedTodoPanel', () => ({
+  PinnedTodoPanel: ({ chatId }: { chatId: string | null }) => (
+    <div data-testid="pinned-todos">{chatId}</div>
+  ),
 }));
 
 function renderChatPage(overrides: Partial<React.ComponentProps<typeof ChatPage>> = {}) {
@@ -84,14 +92,16 @@ describe('ChatPage context warning', () => {
     expect(screen.getByRole('button', { name: 'Send' })).toBeEnabled();
   });
 
-  it('shows the repository rail only for an Agent-mode chat with a workdir', () => {
+  it('moves tasks into the workspace rail only in Agent mode', () => {
     const { props, rerender } = renderChatPage({
-      agentExecutionMode: 'agent',
+      agentExecutionMode: 'chat',
       workdir: '/srv/projects/mangostudio',
     });
-    expect(screen.getByTestId('git-panel')).toHaveTextContent('chat-1');
+    expect(screen.getByTestId('pinned-todos')).toHaveTextContent('chat-1');
+    expect(screen.queryByTestId('workspace-rail')).not.toBeInTheDocument();
 
-    rerender(<ChatPage {...props} agentExecutionMode="chat" />);
-    expect(screen.queryByTestId('git-panel')).not.toBeInTheDocument();
+    rerender(<ChatPage {...props} agentExecutionMode="agent" />);
+    expect(screen.getByTestId('workspace-rail')).toHaveTextContent('chat-1');
+    expect(screen.queryByTestId('pinned-todos')).not.toBeInTheDocument();
   });
 });

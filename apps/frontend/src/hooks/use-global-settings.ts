@@ -18,7 +18,12 @@ import {
 import type { ContextCompactionBehavior, ContextSettings } from '@mangostudio/shared/chat';
 import { DEFAULT_COMMIT_MESSAGE_PROMPT } from '@mangostudio/shared/git';
 import type { RuleFileSetting } from '@mangostudio/shared/prompt-rules';
-import { RECENT_WORKDIRS_MAX, type WorkspaceSettings } from '@mangostudio/shared/workspaces';
+import {
+  RECENT_WORKDIRS_MAX,
+  type WorkspacePanelId,
+  type WorkspacePanelSettings,
+  type WorkspaceSettings,
+} from '@mangostudio/shared/workspaces';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { updateAppSettings } from '@/features/settings/app/api';
@@ -170,6 +175,44 @@ export function useGlobalSettings() {
     [saveSettings]
   );
 
+  const updateWorkspacePanelSettings = useCallback(
+    (updater: (current: WorkspacePanelSettings) => WorkspacePanelSettings) => {
+      updateWorkspaceSettings((current) => ({
+        ...current,
+        sidePanel: updater(current.sidePanel),
+      }));
+    },
+    [updateWorkspaceSettings]
+  );
+
+  const setWorkspacePanelVisible = useCallback(
+    (panelId: WorkspacePanelId, visible: boolean) => {
+      updateWorkspacePanelSettings((current) => {
+        const visiblePanelIds = current.visiblePanelIds.filter((id) => id !== panelId);
+        if (visible) visiblePanelIds.push(panelId);
+        return { ...current, visiblePanelIds };
+      });
+    },
+    [updateWorkspacePanelSettings]
+  );
+
+  const moveWorkspacePanel = useCallback(
+    (panelId: WorkspacePanelId, direction: 'up' | 'down') => {
+      updateWorkspacePanelSettings((current) => {
+        const panelOrder = [...current.panelOrder];
+        const currentIndex = panelOrder.indexOf(panelId);
+        const nextIndex = currentIndex + (direction === 'up' ? -1 : 1);
+        if (currentIndex === -1 || nextIndex < 0 || nextIndex >= panelOrder.length) return current;
+        [panelOrder[currentIndex], panelOrder[nextIndex]] = [
+          panelOrder[nextIndex],
+          panelOrder[currentIndex],
+        ];
+        return { ...current, panelOrder };
+      });
+    },
+    [updateWorkspacePanelSettings]
+  );
+
   const updateGitSettings = useCallback(
     (updates: Partial<AppSettings['gitSettings']>) => {
       saveSettings((current) => ({
@@ -317,6 +360,10 @@ export function useGlobalSettings() {
       updateWorkspaceSettings((current) => ({ ...current, defaultWorkdir: value })),
     setRestrictToolsToWorkdir: (value: boolean) =>
       updateWorkspaceSettings((current) => ({ ...current, restrictToolsToWorkdir: value })),
+    setWorkspacePanelVisible,
+    moveWorkspacePanel,
+    setWorkspacePanelWidth: (value: number) =>
+      updateWorkspacePanelSettings((current) => ({ ...current, width: value })),
     addRecentWorkdir: (value: string) =>
       updateWorkspaceSettings((current) => ({
         ...current,

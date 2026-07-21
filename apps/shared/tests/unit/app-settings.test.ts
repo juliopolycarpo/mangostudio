@@ -24,6 +24,7 @@ import {
   SUBAGENT_MAX_TURNS_MAX,
   SUBAGENT_MAX_TURNS_MIN,
 } from '../../src/app-settings';
+import { WORKSPACE_PANEL_WIDTH_MAX } from '../../src/workspaces';
 
 describe('normalizeGitSettings', () => {
   it('defaults missing or malformed signing preferences', () => {
@@ -95,6 +96,7 @@ describe('normalizeWorkspaceSettings', () => {
         ],
       })
     ).toEqual({
+      ...DEFAULT_WORKSPACE_SETTINGS,
       defaultWorkdir: '/workspace/default',
       recentWorkdirs: [
         '/workspace/0',
@@ -108,7 +110,25 @@ describe('normalizeWorkspaceSettings', () => {
         '/workspace/8',
         '/workspace/9',
       ],
-      restrictToolsToWorkdir: false,
+    });
+  });
+
+  it('normalizes panel visibility, ordering, and width', () => {
+    expect(
+      normalizeWorkspaceSettings({
+        sidePanel: {
+          visiblePanelIds: ['todos', 'unknown', 'todos'],
+          panelOrder: ['todos', 'unknown', 'todos'],
+          width: 900,
+        },
+      })
+    ).toEqual({
+      ...DEFAULT_WORKSPACE_SETTINGS,
+      sidePanel: {
+        visiblePanelIds: ['todos'],
+        panelOrder: ['todos', 'git'],
+        width: WORKSPACE_PANEL_WIDTH_MAX,
+      },
     });
   });
 

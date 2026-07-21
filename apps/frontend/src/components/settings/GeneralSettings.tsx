@@ -11,8 +11,21 @@ import {
   SUBAGENT_MAX_TURNS_MIN,
 } from '@mangostudio/shared/app-settings';
 import type { Locale } from '@mangostudio/shared/i18n';
-import type { WorkspaceSettings } from '@mangostudio/shared/workspaces';
-import { FolderOpen, X } from 'lucide-react';
+import {
+  WORKSPACE_PANEL_WIDTH_DEFAULT,
+  type WorkspacePanelId,
+  type WorkspaceSettings,
+} from '@mangostudio/shared/workspaces';
+import {
+  ArrowDown,
+  ArrowUp,
+  FolderGit2,
+  FolderOpen,
+  ListTodo,
+  PanelRight,
+  RotateCcw,
+  X,
+} from 'lucide-react';
 import { useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
@@ -39,6 +52,9 @@ interface GeneralSettingsProps {
   workspaceSettings: WorkspaceSettings;
   setDefaultWorkdir: (value: string) => void;
   setRestrictToolsToWorkdir: (value: boolean) => void;
+  setWorkspacePanelVisible: (panelId: WorkspacePanelId, visible: boolean) => void;
+  moveWorkspacePanel: (panelId: WorkspacePanelId, direction: 'up' | 'down') => void;
+  setWorkspacePanelWidth: (value: number) => void;
   addRecentWorkdir: (value: string) => void;
 }
 
@@ -76,11 +92,22 @@ export function GeneralSettings({
   workspaceSettings,
   setDefaultWorkdir,
   setRestrictToolsToWorkdir,
+  setWorkspacePanelVisible,
+  moveWorkspacePanel,
+  setWorkspacePanelWidth,
   addRecentWorkdir,
 }: GeneralSettingsProps) {
   const { t, locale, setLocale } = useI18n();
   const s = t.settings.general;
   const workspace = t.workspace;
+  const panelLabels: Readonly<Record<WorkspacePanelId, string>> = {
+    git: t.git.title,
+    todos: t.chat.todo.title,
+  };
+  const panelIcons = {
+    git: FolderGit2,
+    todos: ListTodo,
+  } satisfies Readonly<Record<WorkspacePanelId, typeof FolderGit2>>;
   const [isWorkdirPickerOpen, setWorkdirPickerOpen] = useState(false);
   const missingTitleModelOption =
     chatTitleSettings.preferredModel !== 'current_model' &&
@@ -189,6 +216,82 @@ export function GeneralSettings({
           }}
           onClose={() => setWorkdirPickerOpen(false)}
         />
+      </Card>
+
+      <Card variant="solid" className="space-y-4 p-4 sm:p-6">
+        <div className="flex items-start gap-3">
+          <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+            <PanelRight size={18} />
+          </span>
+          <div className="min-w-0 flex-1 space-y-1">
+            <h3 className="font-label text-xs font-bold uppercase tracking-widest text-on-surface-variant/80">
+              {workspace.sidePanelTitle}
+            </h3>
+            <p className="text-sm text-on-surface-variant/60">{workspace.sidePanelDescription}</p>
+          </div>
+        </div>
+
+        <div className="overflow-hidden rounded-2xl border border-outline-variant/20 bg-surface-container-lowest">
+          {workspaceSettings.sidePanel.panelOrder.map((panelId, index) => {
+            const Icon = panelIcons[panelId];
+            const label = panelLabels[panelId];
+            const isVisible = workspaceSettings.sidePanel.visiblePanelIds.includes(panelId);
+            return (
+              <div
+                key={panelId}
+                className="flex items-center gap-3 border-b border-outline-variant/15 px-3 py-2.5 last:border-b-0"
+              >
+                <input
+                  type="checkbox"
+                  checked={isVisible}
+                  onChange={(event) => setWorkspacePanelVisible(panelId, event.target.checked)}
+                  aria-label={workspace.sidePanelShow.replace('{panel}', label)}
+                  className="size-4 shrink-0 rounded border-outline-variant/30 accent-primary"
+                />
+                <Icon size={17} className="shrink-0 text-primary/80" />
+                <span className="min-w-0 flex-1 truncate text-sm font-medium text-on-surface">
+                  {label}
+                </span>
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => moveWorkspacePanel(panelId, 'up')}
+                    disabled={index === 0}
+                    aria-label={workspace.sidePanelMoveUp.replace('{panel}', label)}
+                    className="flex size-8 items-center justify-center rounded-lg text-on-surface-variant transition-colors hover:bg-surface-container-high hover:text-on-surface disabled:opacity-25"
+                  >
+                    <ArrowUp size={15} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => moveWorkspacePanel(panelId, 'down')}
+                    disabled={index === workspaceSettings.sidePanel.panelOrder.length - 1}
+                    aria-label={workspace.sidePanelMoveDown.replace('{panel}', label)}
+                    className="flex size-8 items-center justify-center rounded-lg text-on-surface-variant transition-colors hover:bg-surface-container-high hover:text-on-surface disabled:opacity-25"
+                  >
+                    <ArrowDown size={15} />
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="flex items-center justify-between gap-3 text-xs text-on-surface-variant/60">
+          <span>
+            {workspace.sidePanelWidth.replace('{width}', String(workspaceSettings.sidePanel.width))}
+          </span>
+          {workspaceSettings.sidePanel.width !== WORKSPACE_PANEL_WIDTH_DEFAULT ? (
+            <button
+              type="button"
+              onClick={() => setWorkspacePanelWidth(WORKSPACE_PANEL_WIDTH_DEFAULT)}
+              className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-on-surface-variant transition-colors hover:bg-surface-container-high hover:text-on-surface"
+            >
+              <RotateCcw size={13} />
+              {workspace.sidePanelResetWidth}
+            </button>
+          ) : null}
+        </div>
       </Card>
 
       {/* ── Default Image Quality ── */}

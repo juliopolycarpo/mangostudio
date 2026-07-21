@@ -1,0 +1,359 @@
+import type { AgentExecutionMode } from '@mangostudio/shared/agents';
+import {
+  WORKSPACE_PANEL_WIDTH_MAX,
+  WORKSPACE_PANEL_WIDTH_MIN,
+  type WorkspacePanelId,
+  type WorkspacePanelSettings,
+} from '@mangostudio/shared/workspaces';
+import { PanelRightOpen } from 'lucide-react';
+import {
+  type KeyboardEvent,
+  type PointerEvent,
+  type Ref,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
+import { useChatTodos } from '@/features/chat/hooks/use-chat-todos';
+import { useI18n } from '@/hooks/use-i18n';
+import {
+  getAvailableWorkspacePanels,
+  type RailPanelDefinition,
+  type RailPanelTitleKey,
+} from './panel-registry';
+import { RailPanel } from './RailPanel';
+import { readRailCollapsed, writeRailCollapsed } from './rail-state';
+
+const DESKTOP_RAIL_QUERY = '(min-width: 1024px)';
+const COLLAPSED_RAIL_WIDTH = 48;
+const RESIZE_STEP = 16;
+
+interface WorkspaceRailProps {
+  readonly chatId: string;
+  readonly agentExecutionMode: AgentExecutionMode;
+  readonly workdir: string | null;
+  readonly settings: WorkspacePanelSettings;
+  readonly onWidthChange?: (width: number) => void;
+}
+
+export function WorkspaceRail({
+  chatId,
+  agentExecutionMode,
+  workdir,
+  settings,
+  onWidthChange,
+}: WorkspaceRailProps) {
+  const { t } = useI18n();
+  const todosQuery = useChatTodos(chatId);
+  const todos = todosQuery.data?.todos ?? [];
+  const panelTitles: Readonly<Record<RailPanelTitleKey, string>> = {
+    git: t.git.title,
+    todos: t.chat.todo.title,
+  };
+  const availablePanels = useMemo(
+    () =>
+      getAvailableWorkspacePanels(
+        { agentExecutionMode, chatId, workdir, todoCount: todos.length },
+        settings
+      ),
+    [agentExecutionMode, chatId, settings, todos.length, workdir]
+  );
+  const availablePanelKey = availablePanels.map((panel) => panel.id).join(':');
+  const [activePanelId, setActivePanelId] = useState<WorkspacePanelId | null>(
+    () => availablePanels[0]?.id ?? null
+  );
+  const [collapsed, setCollapsedState] = useState(() => readRailCollapsed(chatId));
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [width, setWidth] = useState(settings.width);
+  const widthRef = useRef(width);
+  const mobileTriggerRef = useRef<HTMLButtonElement>(null);
+  const mobileCloseRef = useRef<HTMLButtonElement>(null);
+  const isDesktop = useDesktopRail();
+
+  useEffect(() => {
+    setWidth(settings.width);
+    widthRef.current = settings.width;
+  }, [settings.width]);
+
+  useEffect(() => {
+    if (!availablePanels.some((panel) => panel.id === activePanelId)) {
+      setActivePanelId(availablePanels[0]?.id ?? null);
+    }
+  }, [activePanelId, availablePanelKey, availablePanels]);
+
+  const closeMobile = useCallback(() => {
+    setMobileOpen(false);
+    mobileTriggerRef.current?.focus();
+  }, []);
+
+  useEffect(() => {
+    if (!mobileOpen) return;
+    mobileCloseRef.current?.focus();
+    const handleKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key === 'Escape') closeMobile();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [closeMobile, mobileOpen]);
+
+  useEffect(() => {
+    if (isDesktop) setMobileOpen(false);
+  }, [isDesktop]);
+
+  const setCollapsed = (nextCollapsed: boolean) => {
+    setCollapsedState(nextCollapsed);
+    writeRailCollapsed(chatId, nextCollapsed);
+  };
+
+  const selectPanel = (panelId: WorkspacePanelId) => {
+    setActivePanelId(panelId);
+    if (collapsed) setCollapsed(false);
+  };
+
+  const resize = (nextWidth: number) => {
+    const clamped = clampWidth(nextWidth);
+    widthRef.current = clamped;
+    setWidth(clamped);
+  };
+
+  const commitWidth = (nextWidth: number) => {
+    const clamped = clampWidth(nextWidth);
+    resize(clamped);
+    onWidthChange?.(clamped);
+  };
+
+  if (availablePanels.length === 0) return null;
+
+  const activePanel =
+    availablePanels.find((panel) => panel.id === activePanelId) ?? availablePanels[0];
+  const activeTitle = panelTitles[activePanel.titleKey];
+  const ActivePanelContent = activePanel.component;
+  const panelContent = (
+    closeMode: 'collapse' | 'close',
+    onClose: () => void,
+    closeButtonRef?: Ref<HTMLButtonElement>
+  ) => (
+    <RailPanel
+      icon={activePanel.icon}
+      title={activeTitle}
+      closeMode={closeMode}
+      closeButtonRef={closeButtonRef}
+      closeLabel={
+        closeMode === 'collapse' ? t.workspace.sidePanelCollapse : t.workspace.sidePanelClose
+      }
+      onClose={onClose}
+    >
+      <ActivePanelContent chatId={chatId} todos={todos} />
+    </RailPanel>
+  );
+
+  if (isDesktop) {
+    return (
+      <aside
+        aria-label={t.workspace.sidePanelTitle}
+        className="relative flex h-full shrink-0 border-l border-outline-variant/15 bg-surface-container-low"
+        style={{ width: collapsed ? COLLAPSED_RAIL_WIDTH : width }}
+      >
+        {!collapsed ? (
+          <RailResizeHandle
+            width={width}
+            label={t.workspace.sidePanelResize}
+            onResize={resize}
+            onResizeEnd={() => commitWidth(widthRef.current)}
+            onKeyboardResize={commitWidth}
+          />
+        ) : null}
+        <PanelDock
+          panels={availablePanels}
+          panelTitles={panelTitles}
+          activePanelId={activePanel.id}
+          navigationLabel={t.workspace.sidePanelNavigation}
+          switchLabel={t.workspace.sidePanelSwitch}
+          onSelect={selectPanel}
+        />
+        {!collapsed ? (
+          <div className="min-w-0 flex-1">{panelContent('collapse', () => setCollapsed(true))}</div>
+        ) : null}
+      </aside>
+    );
+  }
+
+  return (
+    <>
+      <button
+        ref={mobileTriggerRef}
+        type="button"
+        onClick={() => setMobileOpen(true)}
+        aria-label={t.workspace.sidePanelOpen}
+        title={t.workspace.sidePanelOpen}
+        className="fixed bottom-24 right-3 z-30 flex size-11 items-center justify-center rounded-2xl border border-outline-variant/25 bg-surface-container-high text-on-surface shadow-xl transition-all hover:border-primary/40 hover:text-primary active:scale-95 motion-reduce:transition-none"
+      >
+        <PanelRightOpen size={19} />
+      </button>
+      {mobileOpen ? (
+        <>
+          <div
+            aria-hidden="true"
+            onClick={closeMobile}
+            className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm"
+          />
+          <aside
+            role="dialog"
+            aria-modal="true"
+            aria-label={t.workspace.sidePanelTitle}
+            className="fixed inset-y-0 right-0 z-50 flex w-[min(92vw,24rem)] border-l border-outline-variant/20 bg-surface-container-low shadow-2xl"
+          >
+            <PanelDock
+              panels={availablePanels}
+              panelTitles={panelTitles}
+              activePanelId={activePanel.id}
+              navigationLabel={t.workspace.sidePanelNavigation}
+              switchLabel={t.workspace.sidePanelSwitch}
+              onSelect={selectPanel}
+            />
+            <div className="min-w-0 flex-1">
+              {panelContent('close', closeMobile, mobileCloseRef)}
+            </div>
+          </aside>
+        </>
+      ) : null}
+    </>
+  );
+}
+
+interface PanelDockProps {
+  readonly panels: readonly RailPanelDefinition[];
+  readonly panelTitles: Readonly<Record<RailPanelTitleKey, string>>;
+  readonly activePanelId: WorkspacePanelId;
+  readonly navigationLabel: string;
+  readonly switchLabel: string;
+  readonly onSelect: (panelId: WorkspacePanelId) => void;
+}
+
+function PanelDock({
+  panels,
+  panelTitles,
+  activePanelId,
+  navigationLabel,
+  switchLabel,
+  onSelect,
+}: PanelDockProps) {
+  return (
+    <nav
+      aria-label={navigationLabel}
+      className="flex w-12 shrink-0 flex-col items-center gap-1 border-r border-outline-variant/15 bg-surface-container-lowest py-2"
+    >
+      {panels.map((panel) => {
+        const Icon = panel.icon;
+        const title = panelTitles[panel.titleKey];
+        const active = panel.id === activePanelId;
+        return (
+          <button
+            key={panel.id}
+            type="button"
+            onClick={() => onSelect(panel.id)}
+            aria-label={switchLabel.replace('{panel}', title)}
+            aria-pressed={active}
+            title={title}
+            className={`relative flex size-10 items-center justify-center rounded-xl transition-colors focus-visible:outline-2 focus-visible:outline-primary ${
+              active
+                ? 'bg-primary/12 text-primary'
+                : 'text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface'
+            }`}
+          >
+            {active ? (
+              <span className="absolute -left-1 h-5 w-0.5 rounded-r-full bg-primary" />
+            ) : null}
+            <Icon size={18} />
+          </button>
+        );
+      })}
+    </nav>
+  );
+}
+
+interface RailResizeHandleProps {
+  readonly width: number;
+  readonly label: string;
+  readonly onResize: (width: number) => void;
+  readonly onResizeEnd: () => void;
+  readonly onKeyboardResize: (width: number) => void;
+}
+
+function RailResizeHandle({
+  width,
+  label,
+  onResize,
+  onResizeEnd,
+  onKeyboardResize,
+}: RailResizeHandleProps) {
+  const dragRef = useRef<{ pointerId: number; startX: number; startWidth: number } | null>(null);
+
+  const handlePointerDown = (event: PointerEvent<HTMLHRElement>) => {
+    dragRef.current = { pointerId: event.pointerId, startX: event.clientX, startWidth: width };
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+  };
+
+  const handlePointerMove = (event: PointerEvent<HTMLHRElement>) => {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    onResize(drag.startWidth + drag.startX - event.clientX);
+  };
+
+  const handlePointerUp = (event: PointerEvent<HTMLHRElement>) => {
+    if (dragRef.current?.pointerId !== event.pointerId) return;
+    dragRef.current = null;
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+    onResizeEnd();
+  };
+
+  const handleKeyDown = (event: KeyboardEvent<HTMLHRElement>) => {
+    let nextWidth: number | null = null;
+    if (event.key === 'ArrowLeft') nextWidth = width + RESIZE_STEP;
+    if (event.key === 'ArrowRight') nextWidth = width - RESIZE_STEP;
+    if (event.key === 'Home') nextWidth = WORKSPACE_PANEL_WIDTH_MIN;
+    if (event.key === 'End') nextWidth = WORKSPACE_PANEL_WIDTH_MAX;
+    if (nextWidth === null) return;
+    event.preventDefault();
+    onKeyboardResize(nextWidth);
+  };
+
+  return (
+    <hr
+      aria-orientation="vertical"
+      aria-label={label}
+      aria-valuemin={WORKSPACE_PANEL_WIDTH_MIN}
+      aria-valuemax={WORKSPACE_PANEL_WIDTH_MAX}
+      aria-valuenow={width}
+      tabIndex={0}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+      onKeyDown={handleKeyDown}
+      className="absolute inset-y-0 left-0 z-10 m-0 w-2 -translate-x-1/2 cursor-col-resize touch-none border-0 bg-transparent transition-colors hover:bg-primary/15 focus-visible:bg-primary/20 focus-visible:outline-none"
+    />
+  );
+}
+
+function useDesktopRail(): boolean {
+  const [matches, setMatches] = useState(() => window.matchMedia(DESKTOP_RAIL_QUERY).matches);
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia(DESKTOP_RAIL_QUERY);
+    const handleChange = () => setMatches(mediaQuery.matches);
+    mediaQuery.addEventListener('change', handleChange);
+    handleChange();
+    return () => mediaQuery.removeEventListener('change', handleChange);
+  }, []);
+
+  return matches;
+}
+
+function clampWidth(width: number): number {
+  return Math.min(
+    WORKSPACE_PANEL_WIDTH_MAX,
+    Math.max(WORKSPACE_PANEL_WIDTH_MIN, Math.round(width))
+  );
+}

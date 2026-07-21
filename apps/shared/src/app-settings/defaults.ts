@@ -24,7 +24,15 @@ import type {
   RuleFileSetting,
 } from '../prompt-rules';
 import type { ReasoningEffort } from '../types';
-import { RECENT_WORKDIRS_MAX, type WorkspaceSettings } from '../workspaces';
+import {
+  RECENT_WORKDIRS_MAX,
+  WORKSPACE_PANEL_IDS,
+  WORKSPACE_PANEL_WIDTH_DEFAULT,
+  WORKSPACE_PANEL_WIDTH_MAX,
+  WORKSPACE_PANEL_WIDTH_MIN,
+  type WorkspacePanelId,
+  type WorkspaceSettings,
+} from '../workspaces';
 import type {
   AppSettings,
   ChatTitleSettings,
@@ -107,6 +115,11 @@ export const DEFAULT_WORKSPACE_SETTINGS: WorkspaceSettings = {
   defaultWorkdir: '',
   recentWorkdirs: [],
   restrictToolsToWorkdir: false,
+  sidePanel: {
+    visiblePanelIds: [...WORKSPACE_PANEL_IDS],
+    panelOrder: [...WORKSPACE_PANEL_IDS],
+    width: WORKSPACE_PANEL_WIDTH_DEFAULT,
+  },
 };
 
 export const DEFAULT_GIT_SETTINGS: GitSettings = {
@@ -360,6 +373,19 @@ export function normalizeWorkspaceSettings(value: unknown): WorkspaceSettings {
       ).slice(0, RECENT_WORKDIRS_MAX)
     : [];
 
+  const sidePanel = isRecord(value.sidePanel) ? value.sidePanel : {};
+  const visiblePanelIds = normalizeWorkspacePanelIds(
+    sidePanel.visiblePanelIds,
+    DEFAULT_WORKSPACE_SETTINGS.sidePanel.visiblePanelIds
+  );
+  const panelOrder = normalizeWorkspacePanelIds(
+    sidePanel.panelOrder,
+    DEFAULT_WORKSPACE_SETTINGS.sidePanel.panelOrder
+  );
+  for (const panelId of WORKSPACE_PANEL_IDS) {
+    if (!panelOrder.includes(panelId)) panelOrder.push(panelId);
+  }
+
   return {
     defaultWorkdir: typeof value.defaultWorkdir === 'string' ? value.defaultWorkdir : '',
     recentWorkdirs,
@@ -367,7 +393,33 @@ export function normalizeWorkspaceSettings(value: unknown): WorkspaceSettings {
       typeof value.restrictToolsToWorkdir === 'boolean'
         ? value.restrictToolsToWorkdir
         : DEFAULT_WORKSPACE_SETTINGS.restrictToolsToWorkdir,
+    sidePanel: {
+      visiblePanelIds,
+      panelOrder,
+      width: clampInteger(
+        sidePanel.width,
+        WORKSPACE_PANEL_WIDTH_DEFAULT,
+        WORKSPACE_PANEL_WIDTH_MIN,
+        WORKSPACE_PANEL_WIDTH_MAX
+      ),
+    },
   };
+}
+
+function normalizeWorkspacePanelIds(
+  value: unknown,
+  fallback: readonly WorkspacePanelId[]
+): WorkspacePanelId[] {
+  if (!Array.isArray(value)) return [...fallback];
+
+  return Array.from(
+    new Set(
+      value.filter(
+        (panelId): panelId is WorkspacePanelId =>
+          typeof panelId === 'string' && WORKSPACE_PANEL_IDS.includes(panelId as WorkspacePanelId)
+      )
+    )
+  );
 }
 
 export function normalizeGitSettings(value: unknown): GitSettings {

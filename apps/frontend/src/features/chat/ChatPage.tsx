@@ -1,11 +1,12 @@
 import type { Message, ReasoningEffort } from '@mangostudio/shared';
 import type { AgentExecutionMode, AgentProfile } from '@mangostudio/shared/agents';
+import { DEFAULT_WORKSPACE_SETTINGS } from '@mangostudio/shared/app-settings';
 import type { ContextSettings } from '@mangostudio/shared/chat';
 import { isTurnCheckpointPart, type TurnCheckpointPart } from '@mangostudio/shared/turn-recovery';
 import type { WorkspaceSettings } from '@mangostudio/shared/workspaces';
 import { useMemo } from 'react';
 import type { ContextInfo, FallbackNotice } from '@/features/generation/types';
-import { GitPanel } from '@/features/workspace/GitPanel';
+import { WorkspaceRail } from '@/features/workspace/rail/WorkspaceRail';
 import { WorkdirPickerDialog } from '@/features/workspace/WorkdirPickerDialog';
 import { authClient } from '@/lib/auth-client';
 import { ChatPageContent } from './components/ChatPageContent';
@@ -44,6 +45,7 @@ interface ChatPageProps {
   onSelectedAgentIdChange?: (agentId: string) => void;
   workdir?: string | null;
   workspaceSettings?: WorkspaceSettings;
+  onWorkspacePanelWidthChange?: (width: number) => void;
   isWorkdirPickerOpen?: boolean;
   onOpenWorkdirPicker?: () => void;
   onCloseWorkdirPicker?: () => void;
@@ -104,7 +106,8 @@ export function ChatPage({
   onAgentExecutionModeChange,
   onSelectedAgentIdChange,
   workdir = null,
-  workspaceSettings,
+  workspaceSettings = DEFAULT_WORKSPACE_SETTINGS,
+  onWorkspacePanelWidthChange,
   isWorkdirPickerOpen = false,
   onOpenWorkdirPicker,
   onCloseWorkdirPicker,
@@ -163,7 +166,7 @@ export function ChatPage({
               onDismiss={onDismissInterruptedTurn}
             />
           )}
-          <PinnedTodoPanel chatId={chatId} />
+          {agentExecutionMode !== 'agent' ? <PinnedTodoPanel chatId={chatId} /> : null}
           <InputBar
             onSubmit={onSubmit}
             chatId={chatId}
@@ -190,9 +193,18 @@ export function ChatPage({
             onWorkdirClick={onOpenWorkdirPicker}
           />
         </div>
-        {agentExecutionMode === 'agent' && chatId && workdir ? <GitPanel chatId={chatId} /> : null}
+        {agentExecutionMode === 'agent' && chatId ? (
+          <WorkspaceRail
+            key={chatId}
+            chatId={chatId}
+            agentExecutionMode={agentExecutionMode}
+            workdir={workdir}
+            settings={workspaceSettings.sidePanel}
+            onWidthChange={onWorkspacePanelWidthChange}
+          />
+        ) : null}
       </div>
-      {workspaceSettings && onCloseWorkdirPicker && onSelectWorkdir ? (
+      {onCloseWorkdirPicker && onSelectWorkdir ? (
         <WorkdirPickerDialog
           open={isWorkdirPickerOpen}
           initialPath={workdir || workspaceSettings.defaultWorkdir}

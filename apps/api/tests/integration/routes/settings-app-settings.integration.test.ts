@@ -60,6 +60,14 @@ describe('settings app settings routes', () => {
             compactionBehavior: 'off',
             providerCompactionEnabled: false,
           },
+          workspaceSettings: {
+            ...DEFAULT_APP_SETTINGS.workspaceSettings,
+            sidePanel: {
+              visiblePanelIds: ['todos'],
+              panelOrder: ['todos', 'git'],
+              width: 420,
+            },
+          },
           promptSettings: {
             ...DEFAULT_APP_SETTINGS.promptSettings,
             textSystemPrompt: 'Persisted text prompt',
@@ -89,6 +97,13 @@ describe('settings app settings routes', () => {
       contextSettings: {
         compactionBehavior: 'off',
         providerCompactionEnabled: false,
+      },
+      workspaceSettings: {
+        sidePanel: {
+          visiblePanelIds: ['todos'],
+          panelOrder: ['todos', 'git'],
+          width: 420,
+        },
       },
       promptSettings: {
         textSystemPrompt: 'Persisted text prompt',

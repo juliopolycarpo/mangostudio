@@ -1109,6 +1109,20 @@ export const messages = {
     restrictToolsGlobalOn: 'ativado',
     restrictToolsGlobalOff: 'desativado',
     restrictToolsChatOverrideLabel: 'Restrição de caminhos das ferramentas neste chat',
+    sidePanelTitle: 'Painel lateral do agente',
+    sidePanelDescription:
+      'Escolha quais painéis do workspace aparecem no modo Agente e organize a ordem deles.',
+    sidePanelWidth: 'Largura atual: {width}px',
+    sidePanelResetWidth: 'Redefinir largura',
+    sidePanelShow: 'Mostrar {panel}',
+    sidePanelMoveUp: 'Mover {panel} para cima',
+    sidePanelMoveDown: 'Mover {panel} para baixo',
+    sidePanelOpen: 'Abrir painel lateral do agente',
+    sidePanelCollapse: 'Recolher painel lateral do agente',
+    sidePanelClose: 'Fechar painel lateral do agente',
+    sidePanelResize: 'Redimensionar painel lateral do agente',
+    sidePanelNavigation: 'Painéis do agente',
+    sidePanelSwitch: 'Mostrar painel {panel}',
   },
 
   git: {

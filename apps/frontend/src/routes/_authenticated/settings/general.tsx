@@ -30,6 +30,9 @@ function GeneralSettingsRoute() {
       workspaceSettings={app.settings.workspaceSettings}
       setDefaultWorkdir={app.settings.setDefaultWorkdir}
       setRestrictToolsToWorkdir={app.settings.setRestrictToolsToWorkdir}
+      setWorkspacePanelVisible={app.settings.setWorkspacePanelVisible}
+      moveWorkspacePanel={app.settings.moveWorkspacePanel}
+      setWorkspacePanelWidth={app.settings.setWorkspacePanelWidth}
       addRecentWorkdir={app.settings.addRecentWorkdir}
     />
   );
