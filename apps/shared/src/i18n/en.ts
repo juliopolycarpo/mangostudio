@@ -1114,8 +1114,6 @@ export const messages: Messages = {
 
   git: {
     title: 'Repository',
-    expand: 'Expand repository panel',
-    collapse: 'Collapse repository panel',
     refresh: 'Refresh repository state',
     loading: 'Reading repository...',
     loadError: 'The repository state could not be read.',

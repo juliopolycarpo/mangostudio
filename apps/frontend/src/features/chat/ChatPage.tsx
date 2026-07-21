@@ -129,6 +129,7 @@ export function ChatPage({
     onCompactCurrentChat,
     onStartSummarizedChat,
   });
+  const railShowsTodos = workspaceSettings.sidePanel.visiblePanelIds.includes('todos');
 
   return (
     <>
@@ -166,7 +167,14 @@ export function ChatPage({
               onDismiss={onDismissInterruptedTurn}
             />
           )}
-          {agentExecutionMode !== 'agent' ? <PinnedTodoPanel chatId={chatId} /> : null}
+          {/*
+            Agent mode surfaces todos in the rail instead — but only when the user
+            kept that panel visible, so the pinned panel stays the fallback rather
+            than todos vanishing entirely.
+          */}
+          {agentExecutionMode !== 'agent' || !railShowsTodos ? (
+            <PinnedTodoPanel chatId={chatId} />
+          ) : null}
           <InputBar
             onSubmit={onSubmit}
             chatId={chatId}

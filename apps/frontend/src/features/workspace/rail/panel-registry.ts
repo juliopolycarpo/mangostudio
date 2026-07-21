@@ -6,8 +6,6 @@ import type { ComponentType } from 'react';
 import { GitPanel } from '../GitPanel';
 import { TodoRailPanel } from './TodoRailPanel';
 
-export type RailPanelTitleKey = 'git' | 'todos';
-
 export interface RailPanelAvailabilityState {
   readonly agentExecutionMode: AgentExecutionMode;
   readonly chatId: string | null;
@@ -22,7 +20,6 @@ interface RailPanelContentProps {
 
 export interface RailPanelDefinition {
   readonly id: WorkspacePanelId;
-  readonly titleKey: RailPanelTitleKey;
   readonly icon: LucideIcon;
   readonly availability: (state: RailPanelAvailabilityState) => boolean;
   readonly component: ComponentType<RailPanelContentProps>;
@@ -31,7 +28,6 @@ export interface RailPanelDefinition {
 export const WORKSPACE_PANEL_REGISTRY: readonly RailPanelDefinition[] = [
   {
     id: 'git',
-    titleKey: 'git',
     icon: FolderGit2,
     availability: ({ agentExecutionMode, chatId, workdir }) =>
       agentExecutionMode === 'agent' && Boolean(chatId && workdir),
@@ -39,7 +35,6 @@ export const WORKSPACE_PANEL_REGISTRY: readonly RailPanelDefinition[] = [
   },
   {
     id: 'todos',
-    titleKey: 'todos',
     icon: ListTodo,
     availability: ({ agentExecutionMode, chatId, todoCount }) =>
       agentExecutionMode === 'agent' && Boolean(chatId) && todoCount > 0,
@@ -47,15 +42,16 @@ export const WORKSPACE_PANEL_REGISTRY: readonly RailPanelDefinition[] = [
   },
 ];
 
+const REGISTRY_BY_ID = new Map(WORKSPACE_PANEL_REGISTRY.map((panel) => [panel.id, panel]));
+
 export function getAvailableWorkspacePanels(
   state: RailPanelAvailabilityState,
   settings: WorkspacePanelSettings
 ): RailPanelDefinition[] {
   const visibleIds = new Set(settings.visiblePanelIds);
-  const registryById = new Map(WORKSPACE_PANEL_REGISTRY.map((panel) => [panel.id, panel]));
 
   return settings.panelOrder.flatMap((panelId) => {
-    const panel = registryById.get(panelId);
+    const panel = REGISTRY_BY_ID.get(panelId);
     return panel && visibleIds.has(panelId) && panel.availability(state) ? [panel] : [];
   });
 }

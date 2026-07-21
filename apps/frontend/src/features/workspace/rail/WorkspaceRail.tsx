@@ -18,11 +18,7 @@ import {
 } from 'react';
 import { useChatTodos } from '@/features/chat/hooks/use-chat-todos';
 import { useI18n } from '@/hooks/use-i18n';
-import {
-  getAvailableWorkspacePanels,
-  type RailPanelDefinition,
-  type RailPanelTitleKey,
-} from './panel-registry';
+import { getAvailableWorkspacePanels, type RailPanelDefinition } from './panel-registry';
 import { RailPanel } from './RailPanel';
 import { readRailCollapsed, writeRailCollapsed } from './rail-state';
 
@@ -48,7 +44,7 @@ export function WorkspaceRail({
   const { t } = useI18n();
   const todosQuery = useChatTodos(chatId);
   const todos = todosQuery.data?.todos ?? [];
-  const panelTitles: Readonly<Record<RailPanelTitleKey, string>> = {
+  const panelTitles: Readonly<Record<WorkspacePanelId, string>> = {
     git: t.git.title,
     todos: t.chat.todo.title,
   };
@@ -60,7 +56,6 @@ export function WorkspaceRail({
       ),
     [agentExecutionMode, chatId, settings, todos.length, workdir]
   );
-  const availablePanelKey = availablePanels.map((panel) => panel.id).join(':');
   const [activePanelId, setActivePanelId] = useState<WorkspacePanelId | null>(
     () => availablePanels[0]?.id ?? null
   );
@@ -81,7 +76,7 @@ export function WorkspaceRail({
     if (!availablePanels.some((panel) => panel.id === activePanelId)) {
       setActivePanelId(availablePanels[0]?.id ?? null);
     }
-  }, [activePanelId, availablePanelKey, availablePanels]);
+  }, [activePanelId, availablePanels]);
 
   const closeMobile = useCallback(() => {
     setMobileOpen(false);
@@ -119,16 +114,15 @@ export function WorkspaceRail({
   };
 
   const commitWidth = (nextWidth: number) => {
-    const clamped = clampWidth(nextWidth);
-    resize(clamped);
-    onWidthChange?.(clamped);
+    resize(nextWidth);
+    onWidthChange?.(widthRef.current);
   };
 
   if (availablePanels.length === 0) return null;
 
   const activePanel =
     availablePanels.find((panel) => panel.id === activePanelId) ?? availablePanels[0];
-  const activeTitle = panelTitles[activePanel.titleKey];
+  const activeTitle = panelTitles[activePanel.id];
   const ActivePanelContent = activePanel.component;
   const panelContent = (
     closeMode: 'collapse' | 'close',
@@ -162,7 +156,6 @@ export function WorkspaceRail({
             label={t.workspace.sidePanelResize}
             onResize={resize}
             onResizeEnd={() => commitWidth(widthRef.current)}
-            onKeyboardResize={commitWidth}
           />
         ) : null}
         <PanelDock
@@ -225,7 +218,7 @@ export function WorkspaceRail({
 
 interface PanelDockProps {
   readonly panels: readonly RailPanelDefinition[];
-  readonly panelTitles: Readonly<Record<RailPanelTitleKey, string>>;
+  readonly panelTitles: Readonly<Record<WorkspacePanelId, string>>;
   readonly activePanelId: WorkspacePanelId;
   readonly navigationLabel: string;
   readonly switchLabel: string;
@@ -247,7 +240,7 @@ function PanelDock({
     >
       {panels.map((panel) => {
         const Icon = panel.icon;
-        const title = panelTitles[panel.titleKey];
+        const title = panelTitles[panel.id];
         const active = panel.id === activePanelId;
         return (
           <button
@@ -279,19 +272,14 @@ interface RailResizeHandleProps {
   readonly label: string;
   readonly onResize: (width: number) => void;
   readonly onResizeEnd: () => void;
-  readonly onKeyboardResize: (width: number) => void;
 }
 
-function RailResizeHandle({
-  width,
-  label,
-  onResize,
-  onResizeEnd,
-  onKeyboardResize,
-}: RailResizeHandleProps) {
+function RailResizeHandle({ width, label, onResize, onResizeEnd }: RailResizeHandleProps) {
   const dragRef = useRef<{ pointerId: number; startX: number; startWidth: number } | null>(null);
+  const keyboardResizedRef = useRef(false);
 
   const handlePointerDown = (event: PointerEvent<HTMLHRElement>) => {
+    if (event.button !== 0) return;
     dragRef.current = { pointerId: event.pointerId, startX: event.clientX, startWidth: width };
     event.currentTarget.setPointerCapture?.(event.pointerId);
   };
@@ -302,7 +290,12 @@ function RailResizeHandle({
     onResize(drag.startWidth + drag.startX - event.clientX);
   };
 
-  const handlePointerUp = (event: PointerEvent<HTMLHRElement>) => {
+  /**
+   * Also wired to `pointercancel`/`lostpointercapture`: without them an interrupted
+   * drag would leave `dragRef` populated, and the next hover over the handle would
+   * resize the rail with no button held down.
+   */
+  const endDrag = (event: PointerEvent<HTMLHRElement>) => {
     if (dragRef.current?.pointerId !== event.pointerId) return;
     dragRef.current = null;
     event.currentTarget.releasePointerCapture?.(event.pointerId);
@@ -317,7 +310,15 @@ function RailResizeHandle({
     if (event.key === 'End') nextWidth = WORKSPACE_PANEL_WIDTH_MAX;
     if (nextWidth === null) return;
     event.preventDefault();
-    onKeyboardResize(nextWidth);
+    keyboardResizedRef.current = true;
+    onResize(nextWidth);
+  };
+
+  // Held arrow keys resize live but persist once, so a repeat burst is one settings write.
+  const endKeyboardResize = () => {
+    if (!keyboardResizedRef.current) return;
+    keyboardResizedRef.current = false;
+    onResizeEnd();
   };
 
   return (
@@ -330,8 +331,12 @@ function RailResizeHandle({
       tabIndex={0}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
-      onPointerUp={handlePointerUp}
+      onPointerUp={endDrag}
+      onPointerCancel={endDrag}
+      onLostPointerCapture={endDrag}
       onKeyDown={handleKeyDown}
+      onKeyUp={endKeyboardResize}
+      onBlur={endKeyboardResize}
       className="absolute inset-y-0 left-0 z-10 m-0 w-2 -translate-x-1/2 cursor-col-resize touch-none border-0 bg-transparent transition-colors hover:bg-primary/15 focus-visible:bg-primary/20 focus-visible:outline-none"
     />
   );

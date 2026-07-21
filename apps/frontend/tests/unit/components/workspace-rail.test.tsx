@@ -1,6 +1,7 @@
 import { DEFAULT_WORKSPACE_SETTINGS } from '@mangostudio/shared/app-settings';
+import { fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { railCollapsedStorageKey } from '../../../src/features/workspace/rail/rail-state';
 import { WorkspaceRail } from '../../../src/features/workspace/rail/WorkspaceRail';
 import { render, screen } from '../../support/harness/render';
@@ -23,16 +24,20 @@ vi.mock('../../../src/features/workspace/GitPanel', () => ({
 }));
 
 function setDesktopMediaQuery(matches: boolean) {
-  window.matchMedia = vi.fn().mockImplementation((query: string) => ({
-    matches,
-    media: query,
-    onchange: null,
-    addListener: vi.fn(),
-    removeListener: vi.fn(),
-    addEventListener: vi.fn(),
-    removeEventListener: vi.fn(),
-    dispatchEvent: vi.fn(),
-  }));
+  // Stubbed rather than assigned so the shared harness `matchMedia` is restored after this file.
+  vi.stubGlobal(
+    'matchMedia',
+    vi.fn().mockImplementation((query: string) => ({
+      matches,
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    }))
+  );
 }
 
 function renderRail(overrides: Partial<React.ComponentProps<typeof WorkspaceRail>> = {}) {
@@ -51,6 +56,10 @@ describe('WorkspaceRail', () => {
   beforeEach(() => {
     window.localStorage.clear();
     setDesktopMediaQuery(true);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
   it('switches registry panels in configured order', async () => {
@@ -94,6 +103,23 @@ describe('WorkspaceRail', () => {
       '{ArrowLeft}'
     );
     expect(onWidthChange).toHaveBeenCalledWith(336);
+  });
+
+  it('stops tracking the pointer once a drag is cancelled', () => {
+    const onWidthChange = vi.fn();
+    renderRail({ onWidthChange });
+    const handle = screen.getByRole('separator', { name: 'Resize agent side panel' });
+
+    fireEvent.pointerDown(handle, { pointerId: 1, button: 0, clientX: 500 });
+    fireEvent.pointerMove(handle, { pointerId: 1, clientX: 460 });
+    expect(handle).toHaveAttribute('aria-valuenow', '360');
+
+    fireEvent.pointerCancel(handle, { pointerId: 1 });
+    expect(onWidthChange).toHaveBeenCalledExactlyOnceWith(360);
+
+    // Merely hovering the handle afterwards must not keep resizing the rail.
+    fireEvent.pointerMove(handle, { pointerId: 1, clientX: 300 });
+    expect(handle).toHaveAttribute('aria-valuenow', '360');
   });
 
   it('opens the same panels in a mobile slide-over', async () => {

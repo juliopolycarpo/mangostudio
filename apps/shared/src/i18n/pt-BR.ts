@@ -1127,8 +1127,6 @@ export const messages = {
 
   git: {
     title: 'Repositório',
-    expand: 'Expandir painel do repositório',
-    collapse: 'Recolher painel do repositório',
     refresh: 'Atualizar estado do repositório',
     loading: 'Lendo o repositório...',
     loadError: 'Não foi possível ler o estado do repositório.',
