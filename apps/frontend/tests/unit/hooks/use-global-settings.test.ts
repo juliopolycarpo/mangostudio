@@ -265,6 +265,7 @@ describe('useGlobalSettings', () => {
         defaultWorkdir: '/srv/projects/mango',
         recentWorkdirs: ['/srv/projects/other', '/srv/projects/mango'],
         restrictToolsToWorkdir: false,
+        sidePanel: DEFAULT_APP_SETTINGS.workspaceSettings.sidePanel,
       })
     );
     await waitFor(() => expect(mockPut).toHaveBeenCalledTimes(1));
@@ -272,6 +273,33 @@ describe('useGlobalSettings', () => {
       defaultWorkdir: '/srv/projects/mango',
       recentWorkdirs: ['/srv/projects/other', '/srv/projects/mango'],
       restrictToolsToWorkdir: false,
+      sidePanel: DEFAULT_APP_SETTINGS.workspaceSettings.sidePanel,
+    });
+  });
+
+  it('persists side panel visibility, order, and clamped width', async () => {
+    const { result } = renderHook(() => useGlobalSettings());
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    act(() => {
+      result.current.setWorkspacePanelVisible('git', false);
+      result.current.moveWorkspacePanel('todos', 'up');
+      result.current.setWorkspacePanelWidth(10_000);
+    });
+
+    await waitFor(() =>
+      expect(result.current.workspaceSettings.sidePanel).toEqual({
+        visiblePanelIds: ['todos'],
+        panelOrder: ['todos', 'git'],
+        width: 480,
+      })
+    );
+    await waitFor(() => expect(mockPut).toHaveBeenCalledTimes(1));
+    expect(mockPut.mock.calls[0]?.[0].workspaceSettings.sidePanel).toEqual({
+      visiblePanelIds: ['todos'],
+      panelOrder: ['todos', 'git'],
+      width: 480,
     });
   });
 

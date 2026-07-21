@@ -60,6 +60,9 @@ function GeneralSettingsHarness() {
       workspaceSettings={settings.workspaceSettings}
       setDefaultWorkdir={settings.setDefaultWorkdir}
       setRestrictToolsToWorkdir={settings.setRestrictToolsToWorkdir}
+      setWorkspacePanelVisible={settings.setWorkspacePanelVisible}
+      moveWorkspacePanel={settings.moveWorkspacePanel}
+      setWorkspacePanelWidth={settings.setWorkspacePanelWidth}
       addRecentWorkdir={settings.addRecentWorkdir}
     />
   );
@@ -307,6 +310,96 @@ describe('app settings pages integration', () => {
 
       expect(body.chatTitleSettings.strategy).toBe('model');
       expect(body.chatTitleSettings.preferredModel).toBe('title-model');
+    });
+  });
+
+  it('persists side panel visibility, order, and width controls', async () => {
+    const user = userEvent.setup();
+    const initialSettings: AppSettings = {
+      ...DEFAULT_APP_SETTINGS,
+      workspaceSettings: {
+        ...DEFAULT_APP_SETTINGS.workspaceSettings,
+        sidePanel: {
+          ...DEFAULT_APP_SETTINGS.workspaceSettings.sidePanel,
+          width: 420,
+        },
+      },
+    };
+    const visibilitySettings: AppSettings = {
+      ...initialSettings,
+      workspaceSettings: {
+        ...initialSettings.workspaceSettings,
+        sidePanel: {
+          visiblePanelIds: ['todos'],
+          panelOrder: ['git', 'todos'],
+          width: 420,
+        },
+      },
+    };
+    const orderedSettings: AppSettings = {
+      ...visibilitySettings,
+      workspaceSettings: {
+        ...visibilitySettings.workspaceSettings,
+        sidePanel: {
+          ...visibilitySettings.workspaceSettings.sidePanel,
+          panelOrder: ['todos', 'git'],
+        },
+      },
+    };
+    const expectedSettings: AppSettings = {
+      ...orderedSettings,
+      workspaceSettings: {
+        ...orderedSettings.workspaceSettings,
+        sidePanel: {
+          ...orderedSettings.workspaceSettings.sidePanel,
+          width: 320,
+        },
+      },
+    };
+
+    fetchScenario.respondWithJson('GET', '/api/settings/app', { body: initialSettings });
+    fetchScenario.respondWithJson('PUT', '/api/settings/app', { body: visibilitySettings });
+
+    render(<GeneralSettingsHarness />);
+
+    await screen.findByText('Current width: 420px');
+    await user.click(await screen.findByLabelText('Show Repository'));
+
+    await waitFor(() => {
+      const body = getLatestRequestBody(
+        fetchScenario.fetchMock.mock.calls,
+        '/api/settings/app',
+        'PUT'
+      );
+      expect(body.workspaceSettings.sidePanel).toEqual(
+        visibilitySettings.workspaceSettings.sidePanel
+      );
+    });
+
+    fetchScenario.respondWithJson('PUT', '/api/settings/app', { body: orderedSettings });
+    await user.click(screen.getByRole('button', { name: 'Move Task list up' }));
+
+    await waitFor(() => {
+      const body = getLatestRequestBody(
+        fetchScenario.fetchMock.mock.calls,
+        '/api/settings/app',
+        'PUT'
+      );
+      expect(body.workspaceSettings.sidePanel).toEqual(orderedSettings.workspaceSettings.sidePanel);
+    });
+
+    fetchScenario.respondWithJson('PUT', '/api/settings/app', { body: expectedSettings });
+    await user.click(screen.getByRole('button', { name: 'Reset width' }));
+
+    await waitFor(() => {
+      const body = getLatestRequestBody(
+        fetchScenario.fetchMock.mock.calls,
+        '/api/settings/app',
+        'PUT'
+      );
+      expect(body.workspaceSettings.sidePanel).toEqual(
+        expectedSettings.workspaceSettings.sidePanel
+      );
     });
   });
 });

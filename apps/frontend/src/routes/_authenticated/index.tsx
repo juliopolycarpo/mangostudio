@@ -44,6 +44,7 @@ function ChatRoute() {
       onSelectedAgentIdChange={app.setSelectedAgentId}
       workdir={app.currentWorkdir}
       workspaceSettings={app.settings.workspaceSettings}
+      onWorkspacePanelWidthChange={app.settings.setWorkspacePanelWidth}
       isWorkdirPickerOpen={app.isWorkdirPickerOpen}
       onOpenWorkdirPicker={app.openWorkdirPicker}
       onCloseWorkdirPicker={app.closeWorkdirPicker}

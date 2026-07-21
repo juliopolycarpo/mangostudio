@@ -11,7 +11,6 @@ import {
   ArrowDown,
   ArrowUp,
   Check,
-  ChevronRight,
   ExternalLink,
   FileCode2,
   FolderGit2,
@@ -56,7 +55,6 @@ const STATUS_PRESENTATION: Readonly<Record<GitFileStatus, StatusPresentation>> =
 export function GitPanel({ chatId }: GitPanelProps) {
   const { t } = useI18n();
   const labels = t.git;
-  const [expanded, setExpanded] = useState(true);
   const stateQuery = useGitState(chatId);
   const githubQuery = useGithubContext(chatId, stateQuery.data);
   const initMutation = useInitRepo(chatId);
@@ -68,33 +66,10 @@ export function GitPanel({ chatId }: GitPanelProps) {
     await Promise.all(requests);
   };
 
-  if (!expanded) {
-    return (
-      <aside
-        aria-label={labels.title}
-        className="hidden h-full w-12 shrink-0 flex-col items-center border-l border-outline-variant/15 bg-surface-container-low lg:flex"
-      >
-        <button
-          type="button"
-          onClick={() => setExpanded(true)}
-          aria-label={labels.expand}
-          className="flex h-14 w-full cursor-pointer items-center justify-center text-on-surface-variant transition-colors hover:bg-surface-container-high hover:text-on-surface focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-primary"
-        >
-          <FolderGit2 size={18} />
-        </button>
-      </aside>
-    );
-  }
-
   return (
-    <aside
-      aria-label={labels.title}
-      className="hidden h-full w-80 shrink-0 flex-col border-l border-outline-variant/15 bg-surface-container-low lg:flex"
-    >
-      <header className="flex h-14 shrink-0 items-center gap-3 border-b border-outline-variant/15 px-4">
-        <FolderGit2 size={18} className="shrink-0 text-primary" />
-        <div className="min-w-0 flex-1">
-          <h2 className="truncate text-sm font-bold text-on-surface">{labels.title}</h2>
+    <section aria-label={labels.title} className="flex h-full min-h-0 flex-col">
+      <div className="flex h-10 shrink-0 items-center gap-2 border-b border-outline-variant/15 px-4">
+        <div className="min-w-0 flex-1 text-on-surface-variant">
           <RepositoryName state={stateQuery.data} />
         </div>
         <button
@@ -107,23 +82,14 @@ export function GitPanel({ chatId }: GitPanelProps) {
         >
           <RefreshCw size={15} className={isFetching ? 'animate-spin' : undefined} />
         </button>
-        <button
-          type="button"
-          onClick={() => setExpanded(false)}
-          aria-label={labels.collapse}
-          title={labels.collapse}
-          className="flex size-8 cursor-pointer items-center justify-center rounded-lg text-on-surface-variant transition-colors hover:bg-surface-container-high hover:text-on-surface focus-visible:outline-2 focus-visible:outline-primary"
-        >
-          <ChevronRight size={16} />
-        </button>
-      </header>
+      </div>
 
       {/*
         No live region here: the file list re-renders on every refetch, and
-        announcing it would interrupt the user. The panel is a labelled aside
+        announcing it would interrupt the user. The panel is a labelled region
         that screen-reader users navigate to when they want it.
       */}
-      <div className="min-h-0 flex-1 overflow-y-auto p-4">
+      <div className="app-scrollbar min-h-0 flex-1 overflow-y-auto p-4">
         <GitPanelContent
           chatId={chatId}
           state={stateQuery.data}
@@ -139,7 +105,7 @@ export function GitPanel({ chatId }: GitPanelProps) {
           onGithubRetry={() => void githubQuery.refetch()}
         />
       </div>
-    </aside>
+    </section>
   );
 }
 
