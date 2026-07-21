@@ -12,6 +12,12 @@ import type {
   ReasoningEffort,
 } from '@mangostudio/shared/types';
 
+/** Chat workdir restriction policy (same shape as tool {@link ToolContext.workdirPolicy}). */
+interface ProviderWorkdirPolicy {
+  root: string;
+  restricted: boolean;
+}
+
 export type { AgentEvent };
 
 /** Minimal message shape for text generation context. */
@@ -110,6 +116,10 @@ export interface AgentTurnRequest {
   userId: string;
   /** Owning chat — required for provider-routed tool execution (e.g. Cursor sidecar RPC). */
   chatId?: string;
+  /** Chat-bound server directory for builtin path tools when the provider runs its own tool loop. */
+  workdir?: string;
+  /** When set with `restricted: true`, builtin path tools must stay inside `workdir`. */
+  workdirPolicy?: ProviderWorkdirPolicy;
   modelName: string;
   agentId?: AgentId;
   agentRuntimeHash?: string;
@@ -157,6 +167,8 @@ export interface TextGenerationRequest {
   userId: string;
   /** Owning chat — required for provider-routed tool execution (e.g. Cursor sidecar RPC). */
   chatId?: string;
+  workdir?: string;
+  workdirPolicy?: ProviderWorkdirPolicy;
   history: TextContextMessage[];
   prompt: string;
   systemPrompt?: string;

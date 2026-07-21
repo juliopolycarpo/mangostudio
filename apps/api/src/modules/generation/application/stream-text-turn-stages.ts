@@ -724,6 +724,8 @@ export async function* runAgentToolLoop(
     const req: AgentTurnRequest = {
       userId,
       chatId,
+      workdir: session.workdir,
+      workdirPolicy: session.workdirPolicy,
       modelName: modelId,
       agentId: agentRuntime.profile.id,
       agentRuntimeHash: agentRuntime.runtimeHash,
@@ -804,6 +806,8 @@ export async function* runLegacyTextStream(
   for await (const chunk of generateTextStream({
     userId,
     chatId,
+    workdir: session.workdir,
+    workdirPolicy: session.workdirPolicy,
     history,
     prompt: effectivePrompt,
     systemPrompt: effectiveSystemPrompt,
@@ -875,6 +879,8 @@ export async function* runSingleShotTextGeneration(
   const result = await generateText({
     userId,
     chatId,
+    workdir: session.workdir,
+    workdirPolicy: session.workdirPolicy,
     history,
     prompt: effectivePrompt,
     systemPrompt: effectiveSystemPrompt,

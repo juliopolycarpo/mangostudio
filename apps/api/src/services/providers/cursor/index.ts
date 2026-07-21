@@ -3,7 +3,8 @@ import type { ReasoningEffort, SecretMetadataRow } from '@mangostudio/shared/typ
 import { getConfig } from '../../../lib/config';
 import { stringifyToolResult } from '../../../modules/generation/application/tool-result-utils';
 import { DELEGATE_TO_AGENT_TOOL_NAME } from '../../tools/builtin/delegate-to-agent';
-import { executeTool } from '../../tools/registry';
+import * as toolRegistry from '../../tools/registry';
+import type { WorkdirPolicy } from '../../tools/types';
 import { selectConnectorRowsForModel } from '../core/connector-model-rows';
 import { withModelCache } from '../core/model-cache';
 import { createProviderLifecycle } from '../core/provider-lifecycle';
@@ -99,10 +100,29 @@ function buildAllowedToolNameSet(tools: ToolDefinition[] | undefined): ReadonlyS
 interface CursorToolExecutionContext {
   userId: string;
   chatId: string;
+  workdir?: string;
+  workdirPolicy?: WorkdirPolicy;
   toolSettings?: GenerationConfig['toolSettings'];
 }
 
-async function executeCursorCustomTool(
+function toolExecutionFromRequest(req: {
+  userId: string;
+  chatId?: string;
+  workdir?: string;
+  workdirPolicy?: WorkdirPolicy;
+  generationConfig?: GenerationConfig;
+  toolDefinitions?: ToolDefinition[];
+}): CursorToolExecutionContext {
+  return {
+    userId: req.userId,
+    chatId: req.chatId ?? '',
+    workdir: req.workdir,
+    workdirPolicy: req.workdirPolicy,
+    toolSettings: req.generationConfig?.toolSettings,
+  };
+}
+
+export async function executeCursorCustomTool(
   ctx: CursorToolExecutionContext,
   allowedToolNames: ReadonlySet<string>,
   name: string,
@@ -113,12 +133,14 @@ async function executeCursorCustomTool(
   }
 
   try {
-    const result = await executeTool(
+    const result = await toolRegistry.executeTool(
       name,
       args,
       {
         userId: ctx.userId,
         chatId: ctx.chatId,
+        workdir: ctx.workdir,
+        workdirPolicy: ctx.workdirPolicy,
         parameters: {},
       },
       ctx.toolSettings?.[name]
@@ -268,11 +290,7 @@ async function runCursorGeneration(req: TextGenerationRequest): Promise<string> 
     prompt,
     modelParams,
     tools: req.generationConfig?.tools,
-    toolExecution: {
-      userId: req.userId,
-      chatId: req.chatId ?? '',
-      toolSettings: req.generationConfig?.toolSettings,
-    },
+    toolExecution: toolExecutionFromRequest(req),
   });
 
   let text = '';
@@ -323,11 +341,7 @@ async function* runCursorAgentTurn(req: AgentTurnRequest): AsyncIterable<AgentEv
     prompt,
     modelParams,
     tools: req.toolDefinitions,
-    toolExecution: {
-      userId: req.userId,
-      chatId: req.chatId ?? '',
-      toolSettings: req.generationConfig?.toolSettings,
-    },
+    toolExecution: toolExecutionFromRequest(req),
   });
 
   const abortController = new AbortController();
@@ -398,11 +412,7 @@ const cursorProvider: AIProvider = {
       prompt,
       modelParams,
       tools: req.generationConfig?.tools,
-      toolExecution: {
-        userId: req.userId,
-        chatId: req.chatId ?? '',
-        toolSettings: req.generationConfig?.toolSettings,
-      },
+      toolExecution: toolExecutionFromRequest(req),
     });
 
     for await (const chunk of streamCursorAgentSidecar(sidecar.request, req.signal, {
