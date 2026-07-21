@@ -1,6 +1,10 @@
 import type {
   CommitResponse,
   GenerateCommitMessageResponse,
+  GitBranchesResponse,
+  GitCommitDetailsResponse,
+  GitDiffResponse,
+  GitHistoryResponse,
   GitRepoState,
   GitStatus,
   InitRepoResponse,
@@ -9,6 +13,7 @@ import type {
 import {
   type QueryClient,
   queryOptions,
+  useInfiniteQuery,
   useMutation,
   useQuery,
   useQueryClient,
@@ -26,6 +31,27 @@ const gitStashKeys = {
   detail: (chatId: string) => [...gitStashKeys.all, chatId] as const,
 };
 
+const gitBranchKeys = {
+  all: ['git-branches'] as const,
+  detail: (chatId: string) => [...gitBranchKeys.all, chatId] as const,
+};
+
+const gitHistoryKeys = {
+  all: ['git-history'] as const,
+  detail: (chatId: string) => [...gitHistoryKeys.all, chatId] as const,
+};
+
+const gitCommitKeys = {
+  all: ['git-commit'] as const,
+  detail: (chatId: string, hash: string) => [...gitCommitKeys.all, chatId, hash] as const,
+};
+
+const gitDiffKeys = {
+  all: ['git-diff'] as const,
+  detail: (chatId: string, input: GitDiffInput) =>
+    [...gitDiffKeys.all, chatId, input.path, input.staged ?? false, input.commit ?? null] as const,
+};
+
 type GitPathSelection = { paths: string[] } | { all: true };
 interface CommitInput {
   title: string;
@@ -41,6 +67,11 @@ interface StashSaveInput {
 }
 interface StashPopInput {
   index?: number;
+}
+export interface GitDiffInput {
+  path: string;
+  staged?: boolean;
+  commit?: string;
 }
 
 function gitStateQueryOptions(chatId: string) {
@@ -67,6 +98,11 @@ async function invalidateGitWrites(queryClient: QueryClient, chatId: string): Pr
   await Promise.all([
     invalidateGitState(queryClient, chatId),
     invalidateGitStashes(queryClient, chatId),
+    queryClient.invalidateQueries({ queryKey: gitBranchKeys.detail(chatId) }),
+    queryClient.invalidateQueries({ queryKey: gitHistoryKeys.detail(chatId) }),
+    queryClient.invalidateQueries({ queryKey: [...gitCommitKeys.all, chatId] }),
+    queryClient.invalidateQueries({ queryKey: [...gitDiffKeys.all, chatId] }),
+    queryClient.invalidateQueries({ queryKey: ['github-context', chatId] }),
   ]);
 }
 
@@ -167,4 +203,107 @@ export function useStashPop(chatId: string) {
     },
     onSuccess: () => invalidateGitWrites(queryClient, chatId),
   });
+}
+
+export function useGitBranches(chatId: string) {
+  return useQuery({
+    queryKey: gitBranchKeys.detail(chatId),
+    queryFn: async (): Promise<GitBranchesResponse> => {
+      const { data, error } = await client.api.git.branches.get({ query: { chatId } });
+      if (error) throw new ApiError(error.value);
+      return data as GitBranchesResponse;
+    },
+  });
+}
+
+export function useSwitchBranch(chatId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (name: string): Promise<GitRepoState> => {
+      const { data, error } = await client.api.git.branches.switch.post({ chatId, name });
+      if (error) throw new ApiError(error.value);
+      return data as GitRepoState;
+    },
+    onSuccess: () => invalidateGitWrites(queryClient, chatId),
+  });
+}
+
+export function useCreateBranch(chatId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (name: string): Promise<GitRepoState> => {
+      const { data, error } = await client.api.git.branches.post({ chatId, name });
+      if (error) throw new ApiError(error.value);
+      return data as GitRepoState;
+    },
+    onSuccess: () => invalidateGitWrites(queryClient, chatId),
+  });
+}
+
+export function useGitHistory(chatId: string) {
+  return useInfiniteQuery({
+    queryKey: gitHistoryKeys.detail(chatId),
+    initialPageParam: undefined as string | undefined,
+    queryFn: async ({ pageParam }): Promise<GitHistoryResponse> => {
+      const query = pageParam ? { chatId, cursor: pageParam } : { chatId };
+      const { data, error } = await client.api.git.history.get({ query });
+      if (error) throw new ApiError(error.value);
+      return data as GitHistoryResponse;
+    },
+    getNextPageParam: (lastPage) => lastPage.nextCursor,
+  });
+}
+
+export function useGitCommit(chatId: string, hash: string | null) {
+  return useQuery({
+    queryKey: gitCommitKeys.detail(chatId, hash ?? ''),
+    enabled: hash !== null,
+    queryFn: async (): Promise<GitCommitDetailsResponse> => {
+      if (!hash) throw new Error('A commit hash is required.');
+      const { data, error } = await client.api.git.commit.get({ query: { chatId, hash } });
+      if (error) throw new ApiError(error.value);
+      return data as GitCommitDetailsResponse;
+    },
+  });
+}
+
+export function useGitDiff(chatId: string, input: GitDiffInput | null) {
+  return useQuery({
+    queryKey: gitDiffKeys.detail(chatId, input ?? { path: '' }),
+    enabled: input !== null,
+    queryFn: async (): Promise<GitDiffResponse> => {
+      if (!input) throw new Error('A diff selection is required.');
+      const { data, error } = await client.api.git.diff.get({
+        query: { chatId, ...input },
+      });
+      if (error) throw new ApiError(error.value);
+      return data as GitDiffResponse;
+    },
+  });
+}
+
+function useRemoteMutation(chatId: string, operation: 'fetch' | 'pull' | 'push') {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { prune?: boolean } = {}): Promise<GitRepoState> => {
+      const endpoint = client.api.git[operation];
+      const body = operation === 'fetch' ? { chatId, prune: input.prune } : { chatId };
+      const { data, error } = await endpoint.post(body);
+      if (error) throw new ApiError(error.value);
+      return data as GitRepoState;
+    },
+    onSuccess: () => invalidateGitWrites(queryClient, chatId),
+  });
+}
+
+export function useGitFetch(chatId: string) {
+  return useRemoteMutation(chatId, 'fetch');
+}
+
+export function useGitPull(chatId: string) {
+  return useRemoteMutation(chatId, 'pull');
+}
+
+export function useGitPush(chatId: string) {
+  return useRemoteMutation(chatId, 'push');
 }

@@ -134,6 +134,94 @@ export const StashListResponseSchema = Type.Object({
   stashes: ReadonlyArraySchema(StashEntrySchema),
 });
 
+const GitBranchNameSchema = Type.String({ minLength: 1, maxLength: 255 });
+const GitCommitHashSchema = Type.String({ pattern: '^[0-9a-fA-F]{7,64}$' });
+
+export const GitBranchSchema = Type.Object({
+  name: GitBranchNameSchema,
+  current: Type.Boolean(),
+  upstream: Type.Optional(Type.String()),
+  ahead: Type.Integer({ minimum: 0 }),
+  behind: Type.Integer({ minimum: 0 }),
+});
+
+export const GitBranchesResponseSchema = Type.Object({
+  branches: ReadonlyArraySchema(GitBranchSchema),
+});
+
+export const SwitchBranchBodySchema = Type.Object({
+  chatId: Type.String({ minLength: 1 }),
+  name: GitBranchNameSchema,
+});
+
+export const CreateBranchBodySchema = Type.Object({
+  chatId: Type.String({ minLength: 1 }),
+  name: GitBranchNameSchema,
+});
+
+export const GitHistoryQuerySchema = Type.Object({
+  chatId: Type.String({ minLength: 1 }),
+  cursor: Type.Optional(Type.String({ pattern: '^\\d{1,10}$' })),
+});
+
+export const GitCommitSummarySchema = Type.Object({
+  hash: GitCommitHashSchema,
+  // `%h` honors `core.abbrev`, which repositories may configure below 7.
+  shortHash: Type.String({ minLength: 4 }),
+  subject: Type.String(),
+  author: Type.String(),
+  authoredAt: Type.String({ format: 'date-time' }),
+  refs: ReadonlyArraySchema(Type.String()),
+  changedFiles: Type.Integer({ minimum: 0 }),
+  additions: Type.Integer({ minimum: 0 }),
+  deletions: Type.Integer({ minimum: 0 }),
+});
+
+export const GitHistoryResponseSchema = Type.Object({
+  commits: ReadonlyArraySchema(GitCommitSummarySchema),
+  nextCursor: Type.Optional(Type.String({ pattern: '^\\d{1,10}$' })),
+});
+
+export const GitCommitQuerySchema = Type.Object({
+  chatId: Type.String({ minLength: 1 }),
+  hash: GitCommitHashSchema,
+});
+
+export const GitCommitFileSchema = Type.Object({
+  path: Type.String(),
+  oldPath: Type.Optional(Type.String()),
+  status: GitFileStatusSchema,
+  additions: Type.Union([Type.Integer({ minimum: 0 }), Type.Null()]),
+  deletions: Type.Union([Type.Integer({ minimum: 0 }), Type.Null()]),
+});
+
+export const GitCommitDetailsResponseSchema = Type.Object({
+  commit: GitCommitSummarySchema,
+  files: ReadonlyArraySchema(GitCommitFileSchema),
+});
+
+export const GitDiffQuerySchema = Type.Object({
+  chatId: Type.String({ minLength: 1 }),
+  path: Type.String({ minLength: 1 }),
+  staged: Type.Optional(Type.Boolean()),
+  commit: Type.Optional(GitCommitHashSchema),
+});
+
+export const GitDiffResponseSchema = Type.Object({
+  path: Type.String(),
+  diff: Type.String(),
+  binary: Type.Boolean(),
+});
+
+export const GitFetchBodySchema = Type.Object({
+  chatId: Type.String({ minLength: 1 }),
+  prune: Type.Optional(Type.Boolean()),
+});
+
+export const GitRemoteBodySchema = Type.Object({
+  chatId: Type.String({ minLength: 1 }),
+});
+
 export type GitFileStatus = Static<typeof GitFileStatusSchema>;
 export type GitFileChange = Static<typeof GitFileChangeSchema>;
 export type GitBranchInfo = Static<typeof GitBranchInfoSchema>;
@@ -152,3 +240,17 @@ export type StashSaveBody = Static<typeof StashSaveBodySchema>;
 export type StashPopBody = Static<typeof StashPopBodySchema>;
 export type StashEntry = Static<typeof StashEntrySchema>;
 export type StashListResponse = Static<typeof StashListResponseSchema>;
+export type GitBranch = Static<typeof GitBranchSchema>;
+export type GitBranchesResponse = Static<typeof GitBranchesResponseSchema>;
+export type SwitchBranchBody = Static<typeof SwitchBranchBodySchema>;
+export type CreateBranchBody = Static<typeof CreateBranchBodySchema>;
+export type GitHistoryQuery = Static<typeof GitHistoryQuerySchema>;
+export type GitCommitSummary = Static<typeof GitCommitSummarySchema>;
+export type GitHistoryResponse = Static<typeof GitHistoryResponseSchema>;
+export type GitCommitQuery = Static<typeof GitCommitQuerySchema>;
+export type GitCommitFile = Static<typeof GitCommitFileSchema>;
+export type GitCommitDetailsResponse = Static<typeof GitCommitDetailsResponseSchema>;
+export type GitDiffQuery = Static<typeof GitDiffQuerySchema>;
+export type GitDiffResponse = Static<typeof GitDiffResponseSchema>;
+export type GitFetchBody = Static<typeof GitFetchBodySchema>;
+export type GitRemoteBody = Static<typeof GitRemoteBodySchema>;

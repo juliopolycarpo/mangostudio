@@ -118,6 +118,33 @@ export function highlightCode(code: string, lang: string, theme: CodeThemeId): s
   }
 }
 
+export interface HighlightToken {
+  readonly content: string;
+  readonly color?: string;
+  readonly offset: number;
+}
+
+/**
+ * Returns safe token data for a SINGLE line, for code surfaces that render
+ * their own line chrome. Only the first line of `line` is tokenized, so callers
+ * must split multi-line input themselves.
+ */
+export function highlightLineTokens(
+  line: string,
+  lang: string,
+  theme: CodeThemeId
+): readonly HighlightToken[] | null {
+  const language = resolveLanguageId(lang);
+  if (!highlighterInstance || !language) return null;
+  if (!isLanguageLoaded(highlighterInstance, language)) return null;
+
+  try {
+    return highlighterInstance.codeToTokensBase(line, { lang: language, theme })[0] ?? [];
+  } catch {
+    return null;
+  }
+}
+
 function resolveUniqueLanguageIds(languages: readonly string[]): ShikiLanguageId[] {
   return [...new Set(languages.map(resolveLanguageId).filter(isLanguageId))];
 }

@@ -1,3 +1,4 @@
+import { realpath } from 'node:fs/promises';
 import { isAbsolute, relative, resolve, sep, win32 } from 'node:path';
 
 export class GitPathValidationError extends Error {
@@ -37,4 +38,38 @@ export function validateRepoPaths(root: string, paths: readonly string[]): strin
 
     return `:(literal)${path}`;
   });
+}
+
+/**
+ * Resolves a repository-relative path to its real location and re-checks
+ * containment after following symlinks.
+ *
+ * `validateRepoPaths` is purely lexical, which is enough for pathspecs because
+ * Git refuses to traverse a symlinked directory while walking the worktree.
+ * Commands that read the filesystem directly — notably `git diff --no-index` —
+ * do follow them, so a `link -> /etc` directory symlink inside the repository
+ * would otherwise expose files outside the root. Returns the contained
+ * repository-relative path, or null when the path does not exist.
+ */
+export async function resolveContainedPath(root: string, path: string): Promise<string | null> {
+  validateRepoPaths(root, [path]);
+
+  const realRoot = await realpath(resolve(root));
+  let realPath: string;
+  try {
+    realPath = await realpath(resolve(realRoot, path.replaceAll('\\', '/')));
+  } catch {
+    return null;
+  }
+
+  const relativePath = relative(realRoot, realPath);
+  if (
+    relativePath.length === 0 ||
+    relativePath === '..' ||
+    relativePath.startsWith(`..${sep}`) ||
+    isAbsolute(relativePath)
+  ) {
+    throw new GitPathValidationError(path);
+  }
+  return relativePath;
 }

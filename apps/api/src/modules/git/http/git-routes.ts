@@ -6,9 +6,19 @@ import {
 import {
   CommitBodySchema,
   CommitResponseSchema,
+  CreateBranchBodySchema,
   GenerateCommitMessageBodySchema,
   type GenerateCommitMessageResponse,
   GenerateCommitMessageResponseSchema,
+  GitBranchesResponseSchema,
+  GitCommitDetailsResponseSchema,
+  GitCommitQuerySchema,
+  GitDiffQuerySchema,
+  GitDiffResponseSchema,
+  GitFetchBodySchema,
+  GitHistoryQuerySchema,
+  GitHistoryResponseSchema,
+  GitRemoteBodySchema,
   type GitRepoState,
   GitRepoStateSchema,
   GitStateQuerySchema,
@@ -20,6 +30,7 @@ import {
   StashListResponseSchema,
   StashPopBodySchema,
   StashSaveBodySchema,
+  SwitchBranchBodySchema,
   UnstagePathsBodySchema,
 } from '@mangostudio/shared/git';
 import { Elysia } from 'elysia';
@@ -34,14 +45,21 @@ import {
   generateCommitMessageUseCase,
   NoCommitChangesError,
 } from '../application/generate-commit-message';
+import { getCommitDetails, getFileDiff, listHistory } from '../application/git-navigation-service';
 import { getRepoState, initRepo } from '../application/git-status-service';
 import {
   commitChanges,
+  createBranch,
+  fetchRemote,
   GitWriteError,
+  listBranches,
+  pullFastForward,
+  pushBranch,
   stagePaths,
   stashList,
   stashPop,
   stashSave,
+  switchBranch,
   unstagePaths,
 } from '../application/git-write-service';
 import { GitCliError } from '../infrastructure/git-cli';
@@ -83,8 +101,31 @@ function gitWriteError(error: unknown, set: { status?: number | string }): ApiEr
   return {
     error: error.message,
     code: error.code,
-    ...(error.detail ? { details: { stderr: error.detail } } : {}),
+    ...(error.detail
+      ? {
+          details:
+            error.code === ERROR_CODES.CHECKOUT_BLOCKED
+              ? { paths: error.detail }
+              : { stderr: error.detail },
+        }
+      : {}),
   };
+}
+
+async function routeWorkdir(
+  chatId: string,
+  userId: string,
+  set: { status?: number | string }
+): Promise<{ workdir: string } | { error: ApiErrorResponse }> {
+  const resolution = await resolveChatWorkdir(chatId, userId, getDb());
+  if (resolution.state === 'ok') return { workdir: resolution.workdir };
+  if (resolution.state === 'no-workdir') {
+    set.status = 409;
+    return {
+      error: { error: 'Chat has no working directory', code: ERROR_CODES.CONFLICT },
+    };
+  }
+  return { error: chatAccessDenied(resolution, set) };
 }
 
 export const gitRoutes = new Elysia().use(requireAuth).group('/git', (app) =>
@@ -379,6 +420,213 @@ export const gitRoutes = new Elysia().use(requireAuth).group('/git', (app) =>
         query: GitStateQuerySchema,
         response: {
           200: StashListResponseSchema,
+          403: ApiErrorResponseSchema,
+          404: ApiErrorResponseSchema,
+          409: ApiErrorResponseSchema,
+          422: ApiErrorResponseSchema,
+          500: ApiErrorResponseSchema,
+        },
+      }
+    )
+    .get(
+      '/branches',
+      async ({ query, request, set, user }) => {
+        const resolved = await routeWorkdir(query.chatId, user?.id ?? '', set);
+        if ('error' in resolved) return resolved.error;
+        try {
+          return await listBranches(resolved.workdir, request.signal);
+        } catch (error) {
+          return gitWriteError(error, set);
+        }
+      },
+      {
+        query: GitStateQuerySchema,
+        response: {
+          200: GitBranchesResponseSchema,
+          403: ApiErrorResponseSchema,
+          404: ApiErrorResponseSchema,
+          409: ApiErrorResponseSchema,
+          422: ApiErrorResponseSchema,
+          500: ApiErrorResponseSchema,
+        },
+      }
+    )
+    .post(
+      '/branches/switch',
+      async ({ body, request, set, user }) => {
+        const resolved = await routeWorkdir(body.chatId, user?.id ?? '', set);
+        if ('error' in resolved) return resolved.error;
+        try {
+          return await switchBranch(resolved.workdir, body.name, request.signal);
+        } catch (error) {
+          return gitWriteError(error, set);
+        }
+      },
+      {
+        body: SwitchBranchBodySchema,
+        response: {
+          200: GitRepoStateSchema,
+          403: ApiErrorResponseSchema,
+          404: ApiErrorResponseSchema,
+          409: ApiErrorResponseSchema,
+          422: ApiErrorResponseSchema,
+          500: ApiErrorResponseSchema,
+        },
+      }
+    )
+    .post(
+      '/branches',
+      async ({ body, request, set, user }) => {
+        const resolved = await routeWorkdir(body.chatId, user?.id ?? '', set);
+        if ('error' in resolved) return resolved.error;
+        try {
+          return await createBranch(resolved.workdir, body.name, request.signal);
+        } catch (error) {
+          return gitWriteError(error, set);
+        }
+      },
+      {
+        body: CreateBranchBodySchema,
+        response: {
+          200: GitRepoStateSchema,
+          403: ApiErrorResponseSchema,
+          404: ApiErrorResponseSchema,
+          409: ApiErrorResponseSchema,
+          422: ApiErrorResponseSchema,
+          500: ApiErrorResponseSchema,
+        },
+      }
+    )
+    .get(
+      '/history',
+      async ({ query, request, set, user }) => {
+        const resolved = await routeWorkdir(query.chatId, user?.id ?? '', set);
+        if ('error' in resolved) return resolved.error;
+        try {
+          return await listHistory(resolved.workdir, query.cursor, request.signal);
+        } catch (error) {
+          return gitWriteError(error, set);
+        }
+      },
+      {
+        query: GitHistoryQuerySchema,
+        response: {
+          200: GitHistoryResponseSchema,
+          403: ApiErrorResponseSchema,
+          404: ApiErrorResponseSchema,
+          409: ApiErrorResponseSchema,
+          422: ApiErrorResponseSchema,
+          500: ApiErrorResponseSchema,
+        },
+      }
+    )
+    .get(
+      '/commit',
+      async ({ query, request, set, user }) => {
+        const resolved = await routeWorkdir(query.chatId, user?.id ?? '', set);
+        if ('error' in resolved) return resolved.error;
+        try {
+          return await getCommitDetails(resolved.workdir, query.hash, request.signal);
+        } catch (error) {
+          return gitWriteError(error, set);
+        }
+      },
+      {
+        query: GitCommitQuerySchema,
+        response: {
+          200: GitCommitDetailsResponseSchema,
+          403: ApiErrorResponseSchema,
+          404: ApiErrorResponseSchema,
+          409: ApiErrorResponseSchema,
+          422: ApiErrorResponseSchema,
+          500: ApiErrorResponseSchema,
+        },
+      }
+    )
+    .get(
+      '/diff',
+      async ({ query, request, set, user }) => {
+        const resolved = await routeWorkdir(query.chatId, user?.id ?? '', set);
+        if ('error' in resolved) return resolved.error;
+        try {
+          return await getFileDiff(resolved.workdir, query, request.signal);
+        } catch (error) {
+          return gitWriteError(error, set);
+        }
+      },
+      {
+        query: GitDiffQuerySchema,
+        response: {
+          200: GitDiffResponseSchema,
+          403: ApiErrorResponseSchema,
+          404: ApiErrorResponseSchema,
+          409: ApiErrorResponseSchema,
+          422: ApiErrorResponseSchema,
+          500: ApiErrorResponseSchema,
+        },
+      }
+    )
+    .post(
+      '/fetch',
+      async ({ body, request, set, user }) => {
+        const resolved = await routeWorkdir(body.chatId, user?.id ?? '', set);
+        if ('error' in resolved) return resolved.error;
+        try {
+          return await fetchRemote(resolved.workdir, body.prune ?? false, request.signal);
+        } catch (error) {
+          return gitWriteError(error, set);
+        }
+      },
+      {
+        body: GitFetchBodySchema,
+        response: {
+          200: GitRepoStateSchema,
+          403: ApiErrorResponseSchema,
+          404: ApiErrorResponseSchema,
+          409: ApiErrorResponseSchema,
+          422: ApiErrorResponseSchema,
+          500: ApiErrorResponseSchema,
+        },
+      }
+    )
+    .post(
+      '/pull',
+      async ({ body, request, set, user }) => {
+        const resolved = await routeWorkdir(body.chatId, user?.id ?? '', set);
+        if ('error' in resolved) return resolved.error;
+        try {
+          return await pullFastForward(resolved.workdir, request.signal);
+        } catch (error) {
+          return gitWriteError(error, set);
+        }
+      },
+      {
+        body: GitRemoteBodySchema,
+        response: {
+          200: GitRepoStateSchema,
+          403: ApiErrorResponseSchema,
+          404: ApiErrorResponseSchema,
+          409: ApiErrorResponseSchema,
+          422: ApiErrorResponseSchema,
+          500: ApiErrorResponseSchema,
+        },
+      }
+    )
+    .post(
+      '/push',
+      async ({ body, request, set, user }) => {
+        const resolved = await routeWorkdir(body.chatId, user?.id ?? '', set);
+        if ('error' in resolved) return resolved.error;
+        try {
+          return await pushBranch(resolved.workdir, request.signal);
+        } catch (error) {
+          return gitWriteError(error, set);
+        }
+      },
+      {
+        body: GitRemoteBodySchema,
+        response: {
+          200: GitRepoStateSchema,
           403: ApiErrorResponseSchema,
           404: ApiErrorResponseSchema,
           409: ApiErrorResponseSchema,
