@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -219,6 +219,28 @@ describe('Git navigation routes', () => {
       );
     }
   );
+
+  it.skipIf(!hasGit)('keeps diff reads inside the repository root', async () => {
+    const workdir = await createTempRepo();
+    await writeFile(join(workdir, 'tracked.txt'), 'base\n');
+    await fixtureGit(workdir, ['add', 'tracked.txt']);
+    await fixtureGit(workdir, ['commit', '-m', 'base']);
+
+    const outside = await tempDirectory('mango-git-outside-');
+    await writeFile(join(outside, 'secret.txt'), 'TOPSECRET\n');
+    // An untracked directory symlink escapes a purely lexical containment check,
+    // and `git diff --no-index` follows it where Git's own worktree walk will not.
+    await symlink(outside, join(workdir, 'escape'));
+
+    const { app, chatId } = await createRouteFixture(workdir);
+
+    const traversal = await getRoute(app, '/git/diff', { chatId, path: '../secret.txt' });
+    expect(traversal.status).toBe(422);
+
+    const viaSymlink = await getRoute(app, '/git/diff', { chatId, path: 'escape/secret.txt' });
+    expect(viaSymlink.status).toBe(422);
+    expect(JSON.stringify(await viaSymlink.json())).not.toContain('TOPSECRET');
+  });
 
   it.skipIf(!hasGit)('pushes, fetches, pulls fast-forward, and rejects divergence', async () => {
     const remote = await tempDirectory('mango-git-remote-');

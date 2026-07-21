@@ -6,7 +6,11 @@ import type {
   GitHistoryResponse,
 } from '@mangostudio/shared/git';
 import { GIT_LOG_FORMAT, parseCommitFiles, parseHistoryLog } from '../domain/history-parser';
-import { GitPathValidationError, validateRepoPaths } from '../domain/path-validation';
+import {
+  GitPathValidationError,
+  resolveContainedPath,
+  validateRepoPaths,
+} from '../domain/path-validation';
 import { GitCliError, runGit } from '../infrastructure/git-cli';
 import { GitWriteError, mapWriteFailure, requireRepoRoot } from './git-write-service';
 
@@ -51,7 +55,8 @@ export async function getCommitDetails(
   try {
     const root = await requireRepoRoot(workdir, signal);
     const [summaryResult, nameStatusResult, numstatResult] = await Promise.all([
-      runGit(['show', '-s', `--format=${GIT_LOG_FORMAT}`, '--numstat', hash], {
+      // `-s` suppresses the diff, so the totals come from `sumCommitFiles`.
+      runGit(['show', '-s', `--format=${GIT_LOG_FORMAT}`, hash], {
         cwd: root,
         signal,
       }),
@@ -127,13 +132,19 @@ export async function getFileDiff(
         )
       ).stdout;
       if (!input.staged && !diff && !(await isTracked(root, pathspec, signal))) {
-        diff = (
-          await runGit(['diff', '--no-index', '--no-color', '--', '/dev/null', input.path], {
-            cwd: root,
-            signal,
-            acceptedExitCodes: [1],
-          })
-        ).stdout;
+        // `--no-index` reads the worktree directly instead of walking it as Git
+        // does, so it follows symlinks out of the repository. Re-resolve the
+        // path and re-check containment before handing it over.
+        const containedPath = await resolveContainedPath(root, input.path);
+        diff = containedPath
+          ? (
+              await runGit(['diff', '--no-index', '--no-color', '--', '/dev/null', containedPath], {
+                cwd: root,
+                signal,
+                acceptedExitCodes: [1],
+              })
+            ).stdout
+          : '';
       }
     }
     return { path: input.path, diff, binary: BINARY_DIFF_PATTERN.test(diff) };

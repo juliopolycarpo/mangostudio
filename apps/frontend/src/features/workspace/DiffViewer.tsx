@@ -1,9 +1,9 @@
 import { type GitDiffLine, parseGitDiff } from '@mangostudio/shared/git';
 import { AlertTriangle, ArrowLeft, FileDiff, LoaderCircle } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { memo, useEffect, useMemo, useState } from 'react';
 import { useI18n } from '@/hooks/use-i18n';
 import { useTheme } from '@/hooks/use-theme';
-import { highlightCodeTokens, preloadCodeLanguages } from '@/lib/shiki';
+import { highlightLineTokens, preloadCodeLanguages } from '@/lib/shiki';
 import type { GitDiffInput } from './hooks/use-git-state';
 import { useGitDiff } from './hooks/use-git-state';
 
@@ -103,16 +103,21 @@ export function DiffViewer({
   );
 }
 
-function DiffLineRow({
+const DiffLineRow = memo(function DiffLineRow({
   line,
   language,
   theme,
 }: {
   readonly line: GitDiffLine;
   readonly language: string | null;
-  readonly theme: Parameters<typeof highlightCodeTokens>[2];
+  readonly theme: Parameters<typeof highlightLineTokens>[2];
 }) {
-  const highlighted = language ? highlightCodeTokens(line.content || ' ', language, theme) : null;
+  // Tokenizing is synchronous Shiki work per line; a large diff re-runs it for
+  // every row on any parent re-render without this.
+  const highlighted = useMemo(
+    () => (language ? highlightLineTokens(line.content || ' ', language, theme) : null),
+    [line.content, language, theme]
+  );
   const tone = {
     addition: 'bg-success/10',
     deletion: 'bg-error/10',
@@ -142,7 +147,7 @@ function DiffLineRow({
       )}
     </div>
   );
-}
+});
 
 function inferLanguage(path: string): string | null {
   const extension = path.split('.').at(-1)?.toLowerCase();

@@ -1128,8 +1128,6 @@ export const messages: Messages = {
     cleanTitle: 'Working tree clean',
     cleanHint: 'No local changes to review.',
     detachedAt: 'Detached at {commit}',
-    ahead: '{count} ahead',
-    behind: '{count} behind',
     navigation: {
       changes: 'Changes',
       history: 'History',
@@ -1160,6 +1158,7 @@ export const messages: Messages = {
       pull: 'Pull {count} commits',
       pulling: 'Pulling...',
       push: 'Push {count} commits',
+      publish: 'Publish branch',
       pushing: 'Pushing...',
       fetched: 'Remote refs updated.',
       pulled: 'Branch fast-forwarded.',

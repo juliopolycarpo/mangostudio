@@ -65,7 +65,11 @@ export function RemoteActions({
               : labels.pull.replace('{count}', String(branch.behind))}
           </button>
         ) : null}
-        {branch.ahead > 0 ? (
+        {/*
+          A branch with no upstream reports ahead: 0, so it needs its own entry
+          point — otherwise a freshly created branch could never be published.
+        */}
+        {branch.name !== null && (branch.ahead > 0 || !branch.upstream) ? (
           <button
             type="button"
             disabled={pending}
@@ -75,7 +79,9 @@ export function RemoteActions({
             <ArrowUp size={11} />
             {pushMutation.isPending
               ? labels.pushing
-              : labels.push.replace('{count}', String(branch.ahead))}
+              : branch.upstream
+                ? labels.push.replace('{count}', String(branch.ahead))
+                : labels.publish}
           </button>
         ) : null}
       </div>

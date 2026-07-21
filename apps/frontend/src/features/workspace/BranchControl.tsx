@@ -1,3 +1,4 @@
+import { ERROR_CODES } from '@mangostudio/shared/errors';
 import type { GitBranchInfo } from '@mangostudio/shared/git';
 import { Check, ChevronDown, GitBranch, Plus } from 'lucide-react';
 import { type FormEvent, useRef, useState } from 'react';
@@ -43,7 +44,7 @@ export function BranchControl({
       menuRef.current?.removeAttribute('open');
       toast(labels.switched.replace('{branch}', name), 'success');
     } catch (error) {
-      if (error instanceof ApiError && error.code === 'CHECKOUT_BLOCKED') {
+      if (error instanceof ApiError && error.code === ERROR_CODES.CHECKOUT_BLOCKED) {
         setBlockedSwitch({
           name,
           paths: error.details?.paths?.split('\n').filter(Boolean) ?? [],

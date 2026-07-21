@@ -1142,8 +1142,6 @@ export const messages = {
     cleanTitle: 'Árvore de trabalho limpa',
     cleanHint: 'Nenhuma alteração local para revisar.',
     detachedAt: 'HEAD destacado em {commit}',
-    ahead: '{count} à frente',
-    behind: '{count} atrás',
     navigation: {
       changes: 'Alterações',
       history: 'Histórico',
@@ -1174,6 +1172,7 @@ export const messages = {
       pull: 'Baixar {count} commits',
       pulling: 'Baixando...',
       push: 'Enviar {count} commits',
+      publish: 'Publicar branch',
       pushing: 'Enviando...',
       fetched: 'Referências remotas atualizadas.',
       pulled: 'Branch avançada com fast-forward.',

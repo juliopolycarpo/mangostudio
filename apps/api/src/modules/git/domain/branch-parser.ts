@@ -41,7 +41,9 @@ export function parseCheckoutBlockedPaths(output: string): string[] {
       paths.push(line.trim());
       continue;
     }
-    if (paths.length > 0) break;
+    // Git can emit a tracked block and an untracked block in one failure, so
+    // close the current block instead of stopping at the first one.
+    collecting = false;
   }
   return [...new Set(paths)];
 }

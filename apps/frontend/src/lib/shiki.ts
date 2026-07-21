@@ -124,9 +124,13 @@ export interface HighlightToken {
   readonly offset: number;
 }
 
-/** Returns safe token data for code surfaces that render their own line chrome. */
-export function highlightCodeTokens(
-  code: string,
+/**
+ * Returns safe token data for a SINGLE line, for code surfaces that render
+ * their own line chrome. Only the first line of `line` is tokenized, so callers
+ * must split multi-line input themselves.
+ */
+export function highlightLineTokens(
+  line: string,
   lang: string,
   theme: CodeThemeId
 ): readonly HighlightToken[] | null {
@@ -135,7 +139,7 @@ export function highlightCodeTokens(
   if (!isLanguageLoaded(highlighterInstance, language)) return null;
 
   try {
-    return highlighterInstance.codeToTokensBase(code, { lang: language, theme })[0] ?? [];
+    return highlighterInstance.codeToTokensBase(line, { lang: language, theme })[0] ?? [];
   } catch {
     return null;
   }

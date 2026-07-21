@@ -203,7 +203,9 @@ function GitPanelContent({
       );
     case 'repo':
       return (
+        // Keyed by chat so the view tab and the open diff reset with the repository.
         <RepositoryStatus
+          key={chatId}
           chatId={chatId}
           status={state.status}
           githubContext={githubContext}
@@ -291,17 +293,27 @@ function RepositoryStatus({
         ))}
       </div>
 
-      {diffSelection ? (
-        <DiffViewer
-          chatId={chatId}
-          selection={diffSelection}
-          onClose={() => setDiffSelection(null)}
-        />
-      ) : view === 'history' ? (
-        <RepositoryHistory chatId={chatId} onOpenDiff={setDiffSelection} />
+      {view === 'history' ? (
+        diffSelection ? (
+          <DiffViewer
+            chatId={chatId}
+            selection={diffSelection}
+            onClose={() => setDiffSelection(null)}
+          />
+        ) : (
+          <RepositoryHistory chatId={chatId} onOpenDiff={setDiffSelection} />
+        )
       ) : (
+        // CommitForm stays mounted while a diff is open: it holds the in-progress
+        // commit message in local state, and unmounting it would discard the draft.
         <>
-          {status.clean ? (
+          {diffSelection ? (
+            <DiffViewer
+              chatId={chatId}
+              selection={diffSelection}
+              onClose={() => setDiffSelection(null)}
+            />
+          ) : status.clean ? (
             <PanelMessage
               icon={<Check size={22} />}
               title={labels.cleanTitle}

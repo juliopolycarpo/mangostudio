@@ -34,4 +34,20 @@ describe('branch parser', () => {
       )
     ).toEqual(['src/panel.tsx', 'README.md']);
   });
+
+  it('collects paths from every conflict block in one failure', () => {
+    expect(
+      parseCheckoutBlockedPaths(
+        [
+          'error: Your local changes to the following files would be overwritten by checkout:',
+          '\tsrc/panel.tsx',
+          'Please commit your changes or stash them before you switch branches.',
+          'error: The following untracked working tree files would be overwritten by checkout:',
+          '\tsrc/generated.ts',
+          'Please move or remove them before you switch branches.',
+          'Aborting',
+        ].join('\n')
+      )
+    ).toEqual(['src/panel.tsx', 'src/generated.ts']);
+  });
 });

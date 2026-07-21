@@ -166,7 +166,8 @@ export const GitHistoryQuerySchema = Type.Object({
 
 export const GitCommitSummarySchema = Type.Object({
   hash: GitCommitHashSchema,
-  shortHash: Type.String({ minLength: 7 }),
+  // `%h` honors `core.abbrev`, which repositories may configure below 7.
+  shortHash: Type.String({ minLength: 4 }),
   subject: Type.String(),
   author: Type.String(),
   authoredAt: Type.String({ format: 'date-time' }),
