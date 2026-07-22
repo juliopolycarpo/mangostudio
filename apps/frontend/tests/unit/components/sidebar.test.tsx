@@ -72,6 +72,7 @@ describe('Sidebar', () => {
     );
     const handle = screen.getByRole('separator', { name: /resize chat sidebar/i });
     expect(handle).toHaveAttribute('aria-valuenow', '256');
+    expect(handle.nextElementSibling).toHaveClass('bg-outline-variant/50');
 
     fireEvent.keyDown(handle, { key: 'ArrowRight' });
     fireEvent.keyUp(handle, { key: 'ArrowRight' });

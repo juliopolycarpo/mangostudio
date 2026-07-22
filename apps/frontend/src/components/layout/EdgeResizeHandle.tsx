@@ -84,22 +84,28 @@ export function EdgeResizeHandle({
   const positionClass = edge === 'right' ? 'right-0 translate-x-1/2' : 'left-0 -translate-x-1/2';
 
   return (
-    <hr
-      aria-orientation="vertical"
-      aria-label={label}
-      aria-valuemin={min}
-      aria-valuemax={max}
-      aria-valuenow={width}
-      tabIndex={0}
-      onPointerDown={handlePointerDown}
-      onPointerMove={handlePointerMove}
-      onPointerUp={endDrag}
-      onPointerCancel={endDrag}
-      onLostPointerCapture={endDrag}
-      onKeyDown={handleKeyDown}
-      onKeyUp={endKeyboardResize}
-      onBlur={endKeyboardResize}
-      className={`absolute inset-y-0 z-10 m-0 w-2 cursor-col-resize touch-none border-0 bg-transparent transition-colors hover:bg-primary/15 focus-visible:bg-primary/20 focus-visible:outline-none ${positionClass}`}
-    />
+    <>
+      <hr
+        aria-orientation="vertical"
+        aria-label={label}
+        aria-valuemin={min}
+        aria-valuemax={max}
+        aria-valuenow={width}
+        tabIndex={0}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={endDrag}
+        onPointerCancel={endDrag}
+        onLostPointerCapture={endDrag}
+        onKeyDown={handleKeyDown}
+        onKeyUp={endKeyboardResize}
+        onBlur={endKeyboardResize}
+        className={`peer absolute inset-y-0 z-10 m-0 w-2 cursor-col-resize touch-none border-0 bg-transparent transition-colors hover:bg-primary/15 focus-visible:bg-primary/20 focus-visible:outline-none ${positionClass}`}
+      />
+      <span
+        aria-hidden="true"
+        className={`pointer-events-none absolute top-1/2 z-10 h-12 w-1 -translate-y-1/2 rounded-full bg-outline-variant/50 transition-colors peer-hover:bg-primary/70 peer-focus-visible:bg-primary/70 ${positionClass}`}
+      />
+    </>
   );
 }
