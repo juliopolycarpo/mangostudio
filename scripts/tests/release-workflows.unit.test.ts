@@ -360,15 +360,20 @@ describe('release workflow binary gate', () => {
     const githubReleaseBlock = extractJobBlock(workflow, 'github-release');
     const cargoPublishBlock = extractJobBlock(workflow, 'cargo-publish');
 
-    expect(githubReleaseBlock).toContain('source scripts/release/retry.sh');
-    expect(githubReleaseBlock).toContain('source scripts/release/upload-release-assets.sh');
-    expect(githubReleaseBlock).toContain('retry_command 3 30 gh release edit');
-    expect(githubReleaseBlock).toContain(
-      'retry_command 3 30 upload_release_assets "$tag" release-assets/*'
-    );
-    expect(githubReleaseBlock).toContain('Stateful retry: scripts/release/retry.sh cannot model');
-    expect(githubReleaseBlock).toContain('if gh release create "$tag"');
-    expect(githubReleaseBlock).toContain('if gh release view "$tag" >/dev/null 2>&1; then');
+    // Release creation/update lives in the shared helper so canary and stable
+    // share the post-failure view probe; the workflow only sources and calls it.
+    expect(githubReleaseBlock).toContain('source scripts/release/create-or-update-release.sh');
+    expect(githubReleaseBlock).toContain('create_or_update_release "$tag" release-assets/* --');
+    expect(githubReleaseBlock).toContain('--notes-file RELEASE_NOTES.md');
+    expect(githubReleaseBlock).not.toContain('retry_command 3 30 gh release create');
+    expect(githubReleaseBlock).not.toContain('if gh release create "$tag"');
+
+    const helper = readText('scripts/release/create-or-update-release.sh');
+    expect(helper).toContain('Stateful retry: scripts/release/retry.sh cannot model');
+    expect(helper).toContain('if gh release create "$tag"');
+    expect(helper).toContain('if gh release view "$tag" >/dev/null 2>&1; then');
+    expect(helper).toContain('retry_command 3 30 gh release edit');
+    expect(helper).toContain('retry_command 3 30 upload_release_assets');
 
     expect(cargoPublishBlock).toContain(
       'Stateful retry: scripts/release/retry.sh only repeats one command'
@@ -548,11 +553,13 @@ describe('release workflow binary gate', () => {
     );
     expect(releaseBlock).toContain(`tag="v${cargoVersionVar}"`);
     expect(releaseBlock).toContain(`Canary version: ${versionVar}`);
-    expect(releaseBlock).toContain('gh release create "$tag" github-canary-assets/*');
-    expect(releaseBlock).toContain('source scripts/release/upload-release-assets.sh');
-    expect(releaseBlock).toContain(
-      'retry_command 3 30 upload_release_assets "$tag" github-canary-assets/*'
-    );
+    expect(releaseBlock).toContain('source scripts/release/create-or-update-release.sh');
+    expect(releaseBlock).toContain('create_or_update_release "$tag" github-canary-assets/* --');
+    expect(releaseBlock).toContain('--prerelease');
+    expect(releaseBlock).toContain('--notes "$notes"');
+    // Canary must not fall back to a bare create retry that wedges on
+    // 422 already_exists after a partial create.
+    expect(releaseBlock).not.toContain('retry_command 3 30 gh release create');
     expect(releaseBlock).not.toContain(`tag="v${versionVar}"`);
     expect(workflow).not.toContain('prune-canary-releases.sh');
   });
