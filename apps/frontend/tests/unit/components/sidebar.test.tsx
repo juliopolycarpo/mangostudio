@@ -82,6 +82,27 @@ describe('Sidebar', () => {
     expect(container.querySelector('aside')).toHaveStyle({ width: '272px' });
   });
 
+  // The rail handle sits on the opposite edge, so a shared component that mixed
+  // the two directions up would still pass the rail's drag test.
+  it('grows the sidebar when its right-edge handle is dragged right', () => {
+    const onWidthPreview = vi.fn();
+    const { container } = render(
+      <Sidebar
+        {...defaultProps}
+        width={256}
+        onWidthPreview={onWidthPreview}
+        onWidthChange={vi.fn()}
+      />
+    );
+    const handle = screen.getByRole('separator', { name: /resize chat sidebar/i });
+
+    fireEvent.pointerDown(handle, { pointerId: 1, button: 0, clientX: 256 });
+    fireEvent.pointerMove(handle, { pointerId: 1, clientX: 296 });
+
+    expect(onWidthPreview).toHaveBeenLastCalledWith(296);
+    expect(container.querySelector('aside')).toHaveStyle({ width: '296px' });
+  });
+
   it('mobile shortcuts close the sidebar after navigation', () => {
     const onNavigate = vi.fn();
     const onMobileClose = vi.fn();
