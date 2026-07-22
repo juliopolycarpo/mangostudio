@@ -165,33 +165,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.build.outputs.version }}
         run: |
-          source scripts/release/retry.sh
-          source scripts/release/upload-release-assets.sh
+          source scripts/release/create-or-update-release.sh
           tag="v${VERSION}"
-          update_release() {
-            retry_command 3 30 gh release edit "$tag" --title "$tag" --notes-file RELEASE_NOTES.md
-            retry_command 3 30 upload_release_assets "$tag" release-assets/*
-          }
-          if gh release view "$tag" >/dev/null 2>&1; then
-            update_release
-          else
-            # Stateful retry: scripts/release/retry.sh cannot model the
-            # post-failure release lookup that recovers from a partially
-            # created tag, so keep the idempotency probe between attempts.
-            for attempt in 1 2 3; do
-              if gh release create "$tag" release-assets/* --title "$tag" --notes-file RELEASE_NOTES.md; then
-                exit 0
-              fi
-              if gh release view "$tag" >/dev/null 2>&1; then
-                update_release
-                exit 0
-              fi
-              if [ "$attempt" = "3" ]; then
-                exit 1
-              fi
-              sleep 30
-            done
-          fi
+          create_or_update_release "$tag" release-assets/* -- \
+            --title "$tag" \
+            --notes-file RELEASE_NOTES.md
 
   docker:
     # Publishes container images from the Linux binaries already produced by

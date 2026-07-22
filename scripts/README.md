@@ -102,24 +102,25 @@ unprivileged inside CI (`ci.yml`); publishing runs in the trusted
 
 Run by `.github/workflows/release.yml`; each is also runnable locally:
 
-| Script                     | Concern                                                                                             |
-| -------------------------- | --------------------------------------------------------------------------------------------------- |
-| `prepare-release.ts`       | Stage a release: lockstep bump + changelog + self-check (`bun run release:prepare`)                 |
-| `archive-assets.ts`        | Assemble `release-assets/` (platform archives, installers, `SHA256SUMS`)                            |
-| `bundle-distribution.ts`   | Create content-addressed packaged and per-target distribution bundles                               |
-| `distribution-manifest.ts` | Record and verify distribution identity, file sizes, and SHA-256 checksums                          |
-| `extract-distribution.ts`  | Reject unsafe bundle paths, then extract a downloaded distribution                                  |
-| `stage-docker-ctx.ts`      | Stage Linux glibc/musl binaries into `docker-ctx/` for Docker Buildx                                |
-| `pack-npm.ts`              | Stage `.mango/out/<arch>` binaries into the npm distribution                                        |
-| `publish-npm.ts`           | Idempotent npm publication with retry + required provenance policy (`--tag`, `--provenance-policy`) |
-| `verify-checksum.ts`       | Check one downloaded asset against `SHA256SUMS`                                                     |
-| `dist-manifest.ts`         | Shared renderer: fill `{{VERSION}}`/`{{SHA_*}}` from `SHA256SUMS`                                   |
-| `update-homebrew.ts`       | Render `Formula/mangostudio.rb` from `SHA256SUMS` + `templates/`                                    |
-| `update-scoop.ts`          | Render `bucket/mangostudio.json` from `SHA256SUMS` + `templates/`                                   |
-| `push-dist-repo.ts`        | Push changed files into an external dist repo (tap/bucket), idempotently                            |
-| `publish-summary.sh`       | Render a per-channel ✅/❌ publish table into the GitHub step summary                               |
-| `retry.sh`                 | `retry_command` helper sourced by workflow shell steps                                              |
-| `upload-release-assets.sh` | `upload_release_assets` helper: delete conflicting assets by id, then upload (retry-safe)           |
+| Script                        | Concern                                                                                              |
+| ----------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `prepare-release.ts`          | Stage a release: lockstep bump + changelog + self-check (`bun run release:prepare`)                  |
+| `archive-assets.ts`           | Assemble `release-assets/` (platform archives, installers, `SHA256SUMS`)                             |
+| `bundle-distribution.ts`      | Create content-addressed packaged and per-target distribution bundles                                |
+| `distribution-manifest.ts`    | Record and verify distribution identity, file sizes, and SHA-256 checksums                           |
+| `extract-distribution.ts`     | Reject unsafe bundle paths, then extract a downloaded distribution                                   |
+| `stage-docker-ctx.ts`         | Stage Linux glibc/musl binaries into `docker-ctx/` for Docker Buildx                                 |
+| `pack-npm.ts`                 | Stage `.mango/out/<arch>` binaries into the npm distribution                                         |
+| `publish-npm.ts`              | Idempotent npm publication with retry + required provenance policy (`--tag`, `--provenance-policy`)  |
+| `verify-checksum.ts`          | Check one downloaded asset against `SHA256SUMS`                                                      |
+| `dist-manifest.ts`            | Shared renderer: fill `{{VERSION}}`/`{{SHA_*}}` from `SHA256SUMS`                                    |
+| `update-homebrew.ts`          | Render `Formula/mangostudio.rb` from `SHA256SUMS` + `templates/`                                     |
+| `update-scoop.ts`             | Render `bucket/mangostudio.json` from `SHA256SUMS` + `templates/`                                    |
+| `push-dist-repo.ts`           | Push changed files into an external dist repo (tap/bucket), idempotently                             |
+| `publish-summary.sh`          | Render a per-channel ✅/❌ publish table into the GitHub step summary                                |
+| `retry.sh`                    | `retry_command` helper sourced by workflow shell steps                                               |
+| `upload-release-assets.sh`    | `upload_release_assets` helper: delete conflicting assets by id, then upload (retry-safe)            |
+| `create-or-update-release.sh` | `create_or_update_release` helper: stateful create/edit with post-failure `gh release view` recovery |
 
 ## Conventions
 
