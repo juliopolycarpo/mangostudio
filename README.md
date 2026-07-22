@@ -148,6 +148,8 @@ The **Cursor** provider runs local Cursor SDK agents against your workspace. It 
 - An install that includes the bundled Cursor SDK sidecar. Every install channel
   ships it **except `cargo binstall`**, which installs only the app binary — use
   the shell installer or `cargo install mangostudio` if you need the Cursor provider.
+  Docker images also omit the sidecar and Node.js, so the Cursor connector is
+  unavailable in containers; see [docs/providers/cursor.md](docs/providers/cursor.md).
 
 Optional workspace override:
 
