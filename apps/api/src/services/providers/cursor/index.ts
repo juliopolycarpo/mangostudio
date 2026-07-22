@@ -111,7 +111,6 @@ function toolExecutionFromRequest(req: {
   workdir?: string;
   workdirPolicy?: WorkdirPolicy;
   generationConfig?: GenerationConfig;
-  toolDefinitions?: ToolDefinition[];
 }): CursorToolExecutionContext {
   return {
     userId: req.userId,
