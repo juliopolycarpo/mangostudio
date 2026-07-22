@@ -115,6 +115,8 @@ describe('executeGrep', () => {
     );
     expect(result.filesScanned).toBe(1);
     expect(result.matches).toHaveLength(1);
+    // Absolute so the model can feed the reported file back into another tool.
+    expect(result.matches[0]?.file).toBe(join(tempDir, 'a.ts'));
     expect(result.matches[0]?.line).toBe(3);
     expect(result.matches[0]?.text).toContain('console.log');
   });

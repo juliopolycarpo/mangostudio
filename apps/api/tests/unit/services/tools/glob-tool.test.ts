@@ -120,6 +120,34 @@ describe('executeGlob', () => {
     expect(result.matches).toEqual(['c.ts']);
   });
 
+  it('reports an absolute cwd so the model can feed it back verbatim', async () => {
+    await seedTree();
+
+    const first = await executeGlob(
+      { pattern: '*.ts', cwd: 'nested' },
+      { ...makeContext(), workdir: tempDir }
+    );
+    expect(first.cwd).toBe(join(tempDir, 'nested'));
+
+    const second = await executeGlob(
+      { pattern: '*.ts', cwd: first.cwd },
+      { ...makeContext(), workdir: tempDir }
+    );
+    expect(second.matches).toEqual(first.matches);
+  });
+
+  it('falls back to the chat workdir when cwd is blank', async () => {
+    await seedTree();
+
+    const result = await executeGlob(
+      { pattern: '*.ts', cwd: '   ' },
+      { ...makeContext(), workdir: tempDir }
+    );
+
+    expect(result.cwd).toBe(tempDir);
+    expect(result.matches.sort()).toEqual(['a.ts', 'b.ts']);
+  });
+
   it('skips dotfiles by default and includes them when enabled', async () => {
     await seedTree();
     const without = await executeGlob({ pattern: '*.ts', cwd: tempDir }, makeContext());

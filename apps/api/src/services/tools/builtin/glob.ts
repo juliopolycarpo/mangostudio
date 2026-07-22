@@ -3,7 +3,7 @@
  * Returns filesystem paths matching a glob pattern, evaluated by Bun.Glob.
  */
 
-import { relative, resolve as resolvePath } from 'node:path';
+import { resolve as resolvePath } from 'node:path';
 import {
   isInsideResolvedRoot,
   resolveContainmentRoot,
@@ -87,7 +87,7 @@ export async function executeGlob(
   context: ToolContext
 ): Promise<GlobToolResult> {
   const settings = normalizeGlobToolSettings(context.parameters);
-  const cwd = resolveCwd(args.cwd ?? context.workdir, settings, context);
+  const cwd = resolveCwd(args.cwd, settings, context);
 
   const matches: string[] = [];
   let truncated = false;
@@ -121,7 +121,9 @@ export async function executeGlob(
 
   return {
     pattern: args.pattern,
-    cwd: settings.absolute ? cwd : relative(process.cwd(), cwd) || '.',
+    // Always absolute: a `cwd` relative to the API process directory would be
+    // re-resolved against the chat workdir if the model fed it back in.
+    cwd,
     matches,
     truncated,
   };
@@ -133,8 +135,8 @@ function resolveCwd(
   context: ToolContext
 ): string {
   const policy = context.workdirPolicy;
-  const trimmed = input?.trim();
-  const base = trimmed ?? (policy?.restricted ? policy.root : context.workdir) ?? process.cwd();
+  const base =
+    input?.trim() || (policy?.restricted ? policy.root : context.workdir) || process.cwd();
   return resolveAndValidatePath(base, {
     settings,
     workdir: context.workdir,
@@ -144,7 +146,7 @@ function resolveCwd(
 
 function execute(args: Record<string, unknown>, context: ToolContext): Promise<GlobToolResult> {
   const pattern = getRequiredString(args.pattern, 'pattern');
-  const cwd = getOptionalString(args.cwd) ?? context.workdir;
+  const cwd = getOptionalString(args.cwd);
   return executeGlob({ pattern, ...(cwd ? { cwd } : {}) }, context);
 }
 

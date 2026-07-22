@@ -27,10 +27,14 @@ export interface PathValidationSettings {
   deniedPaths: readonly PathListItem[];
 }
 
-export interface ResolvePathOptions {
-  settings: PathValidationSettings;
+/** Chat-bound directory a relative tool path is resolved against. */
+export interface WorkdirResolutionOptions {
   workdir?: string;
   workdirPolicy?: WorkdirPolicy;
+}
+
+export interface ResolvePathOptions extends WorkdirResolutionOptions {
+  settings: PathValidationSettings;
 }
 
 export class PathAccessError extends Error {
@@ -70,9 +74,32 @@ export function assertWorkdirContainment(
   }
 }
 
-export function resolveAndValidatePath(inputPath: string, options: ResolvePathOptions): string {
+/**
+ * Expands `~` and resolves a tool path argument, anchoring relative input to the
+ * chat working directory. Relative input is rejected when no workdir is bound so
+ * tools never silently fall back to the API process directory.
+ *
+ * // Usage: resolveWorkdirRelativePath('src/index.ts', context)
+ */
+export function resolveWorkdirRelativePath(
+  inputPath: string,
+  options: WorkdirResolutionOptions
+): string {
   const expanded = expandHome(inputPath);
-  const resolved = resolvePath(expanded, inputPath, options);
+  if (isAbsolute(expanded)) return resolve(expanded);
+
+  const workdir = options.workdirPolicy?.root ?? options.workdir;
+  if (!workdir) {
+    throw new PathAccessError(
+      `Relative path "${inputPath}" cannot be resolved: no working directory is bound to this chat. Pass an absolute path.`
+    );
+  }
+
+  return resolve(workdir, expanded);
+}
+
+export function resolveAndValidatePath(inputPath: string, options: ResolvePathOptions): string {
+  const resolved = resolveWorkdirRelativePath(inputPath, options);
   const { settings, workdirPolicy } = options;
 
   const enabledAllowed = settings.allowedPaths.filter((item) => item.enabled);
@@ -100,17 +127,4 @@ export function resolveAndValidatePath(inputPath: string, options: ResolvePathOp
   assertWorkdirContainment(resolved, workdirPolicy);
 
   return resolved;
-}
-
-function resolvePath(expandedPath: string, inputPath: string, options: ResolvePathOptions): string {
-  if (isAbsolute(expandedPath)) return resolve(expandedPath);
-
-  const workdir = options.workdirPolicy?.root ?? options.workdir;
-  if (!workdir) {
-    throw new PathAccessError(
-      `Relative path "${inputPath}" cannot be resolved: no working directory is bound to this chat. Pass an absolute path.`
-    );
-  }
-
-  return resolve(workdir, expandedPath);
 }

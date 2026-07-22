@@ -5,7 +5,7 @@
  */
 
 import { stat } from 'node:fs/promises';
-import { relative, resolve as resolvePath } from 'node:path';
+import { resolve as resolvePath } from 'node:path';
 import {
   isInsideResolvedRoot,
   resolveContainmentRoot,
@@ -154,7 +154,9 @@ export async function executeGrep(
   if (rootStats.isFile()) {
     const fileTruncated = await searchFile({
       absolute: rootPath,
-      display: relative(process.cwd(), rootPath) || rootPath,
+      // Absolute: a path relative to the API process directory would be
+      // re-resolved against the chat workdir if the model fed it back in.
+      display: rootPath,
       regex,
       matches,
       settings,
