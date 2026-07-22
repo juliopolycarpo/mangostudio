@@ -14,19 +14,19 @@ function handleDirectoryBrowserError(
   if (error instanceof DirectoryBrowserError) {
     if (error.code === 'VALIDATION') {
       set.status = 400;
-      return { error: error.message, code: 'VALIDATION' };
+      return { error: error.message, code: ERROR_CODES.VALIDATION };
     }
 
     switch (error.reason) {
       case 'not-found':
         set.status = 404;
-        return { error: error.message, code: 'NOT_FOUND' };
+        return { error: error.message, code: ERROR_CODES.NOT_FOUND };
       case 'not-a-directory':
         set.status = 422;
-        return { error: error.message, code: 'NOT_A_DIRECTORY' };
+        return { error: error.message, code: ERROR_CODES.NOT_A_DIRECTORY };
       case 'permission-denied':
         set.status = 403;
-        return { error: error.message, code: 'PERMISSION_DENIED' };
+        return { error: error.message, code: ERROR_CODES.PERMISSION_DENIED };
       default:
         break;
     }
@@ -34,7 +34,7 @@ function handleDirectoryBrowserError(
 
   console.error('[workspace] Unexpected directory browsing error:', error);
   set.status = 500;
-  return { error: 'Unexpected directory browsing error.', code: 'INTERNAL' };
+  return { error: 'Unexpected directory browsing error.', code: ERROR_CODES.INTERNAL };
 }
 
 export const workspaceRoutes = new Elysia().use(requireAuth).group('/workspace/fs', (app) =>

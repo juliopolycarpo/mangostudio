@@ -1,3 +1,4 @@
+import { ERROR_CODES } from '@mangostudio/shared/errors';
 import type { WorkdirValidationReason } from '@mangostudio/shared/workspaces';
 import {
   ArrowUp,
@@ -14,7 +15,7 @@ import {
 import { type FormEvent, useEffect, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { useI18n } from '@/hooks/use-i18n';
-import { resolveApiErrorMessage } from '@/lib/utils';
+import { ApiError, resolveApiErrorMessage } from '@/lib/utils';
 import { useDirectoryListing, validateWorkspacePath } from './use-directory-listing';
 
 interface WorkdirPickerDialogProps {
@@ -49,6 +50,32 @@ function validationMessage(
       return messages.permissionDenied;
     default:
       return fallback;
+  }
+}
+
+export type WorkdirBrowseErrorMessages = {
+  loadError: string;
+  validationReasons: {
+    notFound: string;
+    notDirectory: string;
+    permissionDenied: string;
+  };
+};
+
+export function browseErrorMessage(error: unknown, s: WorkdirBrowseErrorMessages): string {
+  if (!(error instanceof ApiError)) {
+    return s.loadError;
+  }
+
+  switch (error.code) {
+    case ERROR_CODES.NOT_FOUND:
+      return validationMessage('not-found', s.validationReasons, s.loadError);
+    case ERROR_CODES.NOT_A_DIRECTORY:
+      return validationMessage('not-a-directory', s.validationReasons, s.loadError);
+    case ERROR_CODES.PERMISSION_DENIED:
+      return validationMessage('permission-denied', s.validationReasons, s.loadError);
+    default:
+      return s.loadError;
   }
 }
 
@@ -280,7 +307,7 @@ export function WorkdirPickerDialog({
                 </div>
               ) : listing.isError ? (
                 <div className="flex h-full min-h-48 items-center justify-center text-center text-sm text-error">
-                  {resolveApiErrorMessage(listing.error, s.loadError)}
+                  {browseErrorMessage(listing.error, s)}
                 </div>
               ) : visibleEntries.length === 0 ? (
                 <div className="flex h-full min-h-48 items-center justify-center text-center text-sm text-on-surface-variant/60">
