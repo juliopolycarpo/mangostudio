@@ -98,10 +98,10 @@ export function WorkspaceRail({
     if (collapsed) setCollapsed(false);
   };
 
+  // EdgeResizeHandle already clamps and rounds against the same bounds.
   const resize = (nextWidth: number) => {
-    const clamped = clampWidth(nextWidth);
-    widthRef.current = clamped;
-    setWidth(clamped);
+    widthRef.current = nextWidth;
+    setWidth(nextWidth);
   };
 
   const commitWidth = (nextWidth: number) => {
@@ -273,11 +273,4 @@ function useDesktopRail(): boolean {
   }, []);
 
   return matches;
-}
-
-function clampWidth(width: number): number {
-  return Math.min(
-    WORKSPACE_PANEL_WIDTH_MAX,
-    Math.max(WORKSPACE_PANEL_WIDTH_MIN, Math.round(width))
-  );
 }

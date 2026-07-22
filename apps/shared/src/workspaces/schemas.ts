@@ -44,9 +44,6 @@ export const CHAT_SIDEBAR_WIDTH_MIN = 240;
 export const CHAT_SIDEBAR_WIDTH_MAX = 420;
 export const CHAT_SIDEBAR_WIDTH_DEFAULT = 256;
 
-/** Floor reserved for the chat column when both side panes are open. */
-export const CHAT_CONTENT_MIN_WIDTH = 420;
-
 export const WorkspacePanelIdSchema = Type.Union([Type.Literal('git'), Type.Literal('todos')]);
 
 export const WorkspacePanelSettingsSchema = Type.Object({

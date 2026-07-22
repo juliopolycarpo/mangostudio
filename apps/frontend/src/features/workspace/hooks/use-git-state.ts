@@ -1,5 +1,6 @@
 import type {
   CommitResponse,
+  DiscardPathsBody,
   GenerateCommitMessageResponse,
   GitBranchesResponse,
   GitCommitDetailsResponse,
@@ -87,6 +88,7 @@ export const gitWriteScopes = {
 } as const satisfies Record<string, readonly GitScope[]>;
 
 type GitPathSelection = { paths: string[] } | { all: true };
+export type GitDiscardSelection = Pick<DiscardPathsBody, 'paths' | 'mode'>;
 interface CommitInput {
   title: string;
   body?: string;
@@ -186,10 +188,7 @@ export function useUnstagePaths(chatId: string) {
 export function useDiscardPaths(chatId: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (input: {
-      paths: string[];
-      mode: 'tracked' | 'untracked';
-    }): Promise<GitStatus> => {
+    mutationFn: async (input: GitDiscardSelection): Promise<GitStatus> => {
       const { data, error } = await client.api.git.discard.post({ chatId, ...input });
       if (error) throw new ApiError(error.value);
       return data as GitStatus;

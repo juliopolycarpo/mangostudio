@@ -33,9 +33,14 @@ export function BranchControl({
   const stashMutation = useStashSave(chatId);
   const menuRef = useRef<HTMLDetailsElement>(null);
   const [newBranch, setNewBranch] = useState('');
-  const [blockedSwitch, setBlockedSwitch] = useState<{ name: string; paths: string[] } | null>(
-    null
-  );
+  // `remoteRef` is set only when the blocked checkout targeted a remote-tracking
+  // ref: retrying it must re-create the local tracking branch, not `git switch`
+  // a local branch that does not exist yet.
+  const [blockedSwitch, setBlockedSwitch] = useState<{
+    name: string;
+    remoteRef?: string;
+    paths: string[];
+  } | null>(null);
   const branchName = branch.name ?? detachedLabel;
   const pending =
     switchMutation.isPending ||
@@ -70,6 +75,7 @@ export function BranchControl({
       if (error instanceof ApiError && error.code === ERROR_CODES.CHECKOUT_BLOCKED) {
         setBlockedSwitch({
           name: localName,
+          remoteRef,
           paths: error.details?.paths?.split('\n').filter(Boolean) ?? [],
         });
         return;
@@ -99,7 +105,11 @@ export function BranchControl({
         message: labels.stashMessage.replace('{branch}', blockedSwitch.name),
         includeUntracked: true,
       });
-      await switchMutation.mutateAsync(blockedSwitch.name);
+      if (blockedSwitch.remoteRef) {
+        await checkoutRemoteMutation.mutateAsync(blockedSwitch.remoteRef);
+      } else {
+        await switchMutation.mutateAsync(blockedSwitch.name);
+      }
       toast(labels.switched.replace('{branch}', blockedSwitch.name), 'success');
       setBlockedSwitch(null);
       menuRef.current?.removeAttribute('open');

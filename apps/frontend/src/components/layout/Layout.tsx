@@ -1,6 +1,6 @@
 import type { Chat } from '@mangostudio/shared';
 import { CHAT_SIDEBAR_WIDTH_DEFAULT } from '@mangostudio/shared/workspaces';
-import type { ReactNode } from 'react';
+import { type ReactNode, useEffect, useState } from 'react';
 import type { ContextInfo } from '@/features/generation/types';
 import { Sidebar } from '@/features/sidebar/components/Sidebar';
 
@@ -37,10 +37,17 @@ export function Layout({
   chatSidebarWidth = CHAT_SIDEBAR_WIDTH_DEFAULT,
   onChatSidebarWidthChange,
 }: LayoutProps) {
+  // The sidebar is fixed-positioned, so `main` reserves its space through this
+  // variable. It has to follow the drag preview, not the persisted width, or the
+  // content column stays put while the sidebar grows over it.
+  const [previewWidth, setPreviewWidth] = useState(chatSidebarWidth);
+
+  useEffect(() => setPreviewWidth(chatSidebarWidth), [chatSidebarWidth]);
+
   return (
     <div
       className="flex h-screen overflow-hidden bg-surface text-on-surface font-body selection:bg-primary/30"
-      style={{ ['--chat-sidebar-width' as string]: `${chatSidebarWidth}px` }}
+      style={{ ['--chat-sidebar-width' as string]: `${previewWidth}px` }}
     >
       <Sidebar
         currentPage={currentPage}
@@ -55,6 +62,7 @@ export function Layout({
         isMobileOpen={isMobileSidebarOpen}
         onMobileClose={onMobileSidebarClose}
         width={chatSidebarWidth}
+        onWidthPreview={setPreviewWidth}
         onWidthChange={onChatSidebarWidthChange}
       />
       <main className="flex-1 md:ml-[var(--chat-sidebar-width)] flex flex-col h-full relative w-full min-w-0">

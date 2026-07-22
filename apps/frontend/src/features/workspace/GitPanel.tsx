@@ -29,6 +29,7 @@ import { BranchControl } from './BranchControl';
 import { CommitForm } from './CommitForm';
 import { type DiffSelection, DiffViewer } from './DiffViewer';
 import {
+  type GitDiscardSelection,
   useDiscardPaths,
   useGitState,
   useInitRepo,
@@ -248,10 +249,7 @@ function RepositoryStatus({
   const discardMutation = useDiscardPaths(chatId);
   const [view, setView] = useState<'changes' | 'history'>('changes');
   const [diffSelection, setDiffSelection] = useState<DiffSelection | null>(null);
-  const [discardRequest, setDiscardRequest] = useState<{
-    paths: string[];
-    mode: 'tracked' | 'untracked';
-  } | null>(null);
+  const [discardRequest, setDiscardRequest] = useState<GitDiscardSelection | null>(null);
   const branchName = status.branch.name
     ? status.branch.name
     : labels.detachedAt.replace('{commit}', status.branch.detachedAt?.slice(0, 8) ?? 'HEAD');
@@ -364,30 +362,28 @@ function RepositoryStatus({
                   {labels.conflicts.hint}
                 </div>
               ) : null}
-              {(hasStaged || hasUnstagedWork) && (
-                <div className="flex flex-wrap gap-1.5">
-                  {hasUnstagedWork ? (
-                    <button
-                      type="button"
-                      disabled={stageMutation.isPending}
-                      onClick={() => void mutatePaths('stage', { all: true })}
-                      className="inline-flex cursor-pointer items-center rounded-full bg-primary/10 px-2.5 py-1 text-[10px] font-semibold text-primary disabled:cursor-wait disabled:opacity-50"
-                    >
-                      {labels.actions.stageEverything}
-                    </button>
-                  ) : null}
-                  {hasStaged ? (
-                    <button
-                      type="button"
-                      disabled={unstageMutation.isPending}
-                      onClick={() => void mutatePaths('unstage', { all: true })}
-                      className="inline-flex cursor-pointer items-center rounded-full bg-surface-container-high px-2.5 py-1 text-[10px] font-semibold text-on-surface-variant hover:text-primary disabled:cursor-wait disabled:opacity-50"
-                    >
-                      {labels.actions.unstageEverything}
-                    </button>
-                  ) : null}
-                </div>
-              )}
+              <div className="flex flex-wrap gap-1.5">
+                {hasUnstagedWork ? (
+                  <button
+                    type="button"
+                    disabled={stageMutation.isPending}
+                    onClick={() => void mutatePaths('stage', { all: true })}
+                    className="inline-flex cursor-pointer items-center rounded-full bg-primary/10 px-2.5 py-1 text-[10px] font-semibold text-primary disabled:cursor-wait disabled:opacity-50"
+                  >
+                    {labels.actions.stageEverything}
+                  </button>
+                ) : null}
+                {hasStaged ? (
+                  <button
+                    type="button"
+                    disabled={unstageMutation.isPending}
+                    onClick={() => void mutatePaths('unstage', { all: true })}
+                    className="inline-flex cursor-pointer items-center rounded-full bg-surface-container-high px-2.5 py-1 text-[10px] font-semibold text-on-surface-variant hover:text-primary disabled:cursor-wait disabled:opacity-50"
+                  >
+                    {labels.actions.unstageEverything}
+                  </button>
+                ) : null}
+              </div>
               <ChangeGroup
                 title={labels.groups.conflicted}
                 changes={status.conflicted}
@@ -639,7 +635,7 @@ function ChangeGroup({
   readonly title: string;
   readonly changes: readonly GitFileChange[];
   readonly action: 'stage' | 'unstage';
-  readonly discardMode?: 'tracked' | 'untracked';
+  readonly discardMode?: GitDiscardSelection['mode'];
   readonly pending: boolean;
   readonly onAction: (paths: string[]) => void;
   readonly onDiscard?: (paths: string[]) => void;
@@ -660,7 +656,7 @@ function ChangeGroup({
         <span className="rounded-full bg-surface-container-high px-1.5 py-0.5 font-mono text-[9px] tracking-normal">
           {changes.length}
         </span>
-        <div className="ml-auto flex items-center gap-1">
+        <span className="ml-auto flex items-center gap-1">
           {onDiscard && discardMode ? (
             <button
               type="button"
@@ -685,7 +681,7 @@ function ChangeGroup({
           >
             {action === 'stage' ? t.git.actions.stageAllButton : t.git.actions.unstageAllButton}
           </button>
-        </div>
+        </span>
       </h3>
       <ul className="overflow-hidden rounded-xl border border-outline-variant/15 bg-surface-container-lowest/40">
         {changes.map((change) => (
@@ -716,7 +712,7 @@ function FileChangeRow({
 }: {
   readonly change: GitFileChange;
   readonly action: 'stage' | 'unstage';
-  readonly discardMode?: 'tracked' | 'untracked';
+  readonly discardMode?: GitDiscardSelection['mode'];
   readonly pending: boolean;
   readonly onAction: () => void;
   readonly onDiscard?: () => void;

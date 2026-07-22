@@ -26,6 +26,8 @@ interface Props {
   isMobileOpen?: boolean;
   onMobileClose?: () => void;
   width?: number;
+  /** Fires on every drag/keyboard step so the layout can reserve the new space live. */
+  onWidthPreview?: (width: number) => void;
   onWidthChange?: (width: number) => void;
 }
 
@@ -42,6 +44,7 @@ export function Sidebar({
   isMobileOpen = false,
   onMobileClose,
   width = CHAT_SIDEBAR_WIDTH_DEFAULT,
+  onWidthPreview,
   onWidthChange,
 }: Props) {
   const [editingChatId, setEditingChatId] = useState<string | null>(null);
@@ -103,6 +106,7 @@ export function Sidebar({
   const resize = (nextWidth: number) => {
     widthRef.current = nextWidth;
     setLiveWidth(nextWidth);
+    onWidthPreview?.(nextWidth);
   };
 
   const commitWidth = () => {
@@ -126,9 +130,11 @@ export function Sidebar({
           aria-hidden="true"
         />
       )}
+      {/* The width preference is a desktop one, so `max-w` keeps the mobile
+          slide-over inside narrow viewports. */}
       <aside
-        style={{ width: liveWidth, ['--chat-sidebar-width' as string]: `${liveWidth}px` }}
-        className={`bg-surface-container-low flex-col h-full border-r border-outline-variant/20 fixed left-0 top-0 z-50 transition-transform duration-300 ease-out
+        style={{ width: liveWidth }}
+        className={`bg-surface-container-low flex-col h-full max-w-[85vw] md:max-w-none border-r border-outline-variant/20 fixed left-0 top-0 z-50 transition-transform duration-300 ease-out
           ${isMobileOpen ? 'flex translate-x-0' : 'hidden -translate-x-full'} md:flex md:translate-x-0
         `}
       >
@@ -218,7 +224,6 @@ export function Sidebar({
                 key={chat.id}
                 role="button"
                 tabIndex={0}
-                title={chat.title}
                 className={`group relative flex items-center gap-3 px-4 py-2.5 rounded-lg transition-all duration-300 w-full text-left truncate cursor-pointer ${currentPage === 'chat' && currentChatId === chat.id ? 'text-primary bg-surface-container-high' : 'text-on-surface/70 hover:bg-surface-container-high hover:text-on-surface'}`}
                 onClick={activateChat}
                 onKeyDown={(e) => {
@@ -305,18 +310,16 @@ export function Sidebar({
         </div>
 
         {onWidthChange ? (
-          <div className="pointer-events-none absolute inset-y-0 right-0 hidden md:block">
-            <div className="pointer-events-auto relative h-full">
-              <EdgeResizeHandle
-                edge="right"
-                width={liveWidth}
-                min={CHAT_SIDEBAR_WIDTH_MIN}
-                max={CHAT_SIDEBAR_WIDTH_MAX}
-                label={t.workspace.chatSidebarResize}
-                onResize={resize}
-                onResizeEnd={commitWidth}
-              />
-            </div>
+          <div className="absolute inset-y-0 right-0 hidden md:block">
+            <EdgeResizeHandle
+              edge="right"
+              width={liveWidth}
+              min={CHAT_SIDEBAR_WIDTH_MIN}
+              max={CHAT_SIDEBAR_WIDTH_MAX}
+              label={t.workspace.chatSidebarResize}
+              onResize={resize}
+              onResizeEnd={commitWidth}
+            />
           </div>
         ) : null}
       </aside>
