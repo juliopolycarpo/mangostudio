@@ -5,7 +5,9 @@ import { twMerge } from 'tailwind-merge';
 /**
  * Neutral, non-localized message used when a failed request carries no server
  * text. Render layers swap absent server messages for a localized label via
- * `resolveApiErrorMessage`.
+ * `resolveApiErrorMessage`. Duplicates `en.errors.unknown` on purpose (importing
+ * `en` here would violate the frontend i18n import guard); a unit test pins
+ * the two strings together.
  */
 export const DEFAULT_API_ERROR_FALLBACK = 'An unknown error occurred';
 
@@ -20,14 +22,6 @@ function extractServerMessage(value: unknown): string | null {
     if (typeof v.error === 'string' && v.error) return v.error;
   }
   return null;
-}
-
-/**
- * Extracts a human-readable message from an Eden Treaty error value.
- * API routes return `ApiErrorResponse` on failure; this unwraps the error field.
- */
-export function extractApiError(value: unknown, fallback = DEFAULT_API_ERROR_FALLBACK): string {
-  return extractServerMessage(value) ?? fallback;
 }
 
 /**
