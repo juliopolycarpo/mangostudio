@@ -100,7 +100,7 @@ export async function resolveTurnContext(
 
   const { modelId, providerType } = resolvedModel;
   const interactionMode = input.agentMode === 'agent' ? 'agent' : 'chat';
-  const workdir = chat.workdir ?? undefined;
+  const workdir = interactionMode === 'agent' ? (chat.workdir ?? undefined) : undefined;
 
   const provider = providerType
     ? getProvider(providerType)
@@ -147,13 +147,11 @@ export async function resolveTurnContext(
       'The user explicitly clicked Create images for this turn. Use the image generation tool when appropriate.';
     effectiveSystemPrompt = effectiveSystemPrompt ? `${effectiveSystemPrompt}\n\n${hint}` : hint;
   }
-  if (interactionMode === 'agent') {
-    effectiveSystemPrompt = appendWorkdirPromptSection(
-      effectiveSystemPrompt,
-      workdir,
-      Boolean(workdirPolicy?.restricted)
-    );
-  }
+  effectiveSystemPrompt = appendWorkdirPromptSection(
+    effectiveSystemPrompt,
+    workdir,
+    Boolean(workdirPolicy?.restricted)
+  );
   effectiveSystemPrompt = await appendSkillsPromptSection(
     db,
     input.userId,

@@ -1,0 +1,159 @@
+/**
+ * resolveTurnContext workdir scoping: the chat row may store a workdir for the
+ * agent UI, but TurnContext only exposes it (and policy) in agent mode so
+ * prompts and filesystem tools agree.
+ */
+
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { getDb } from '../../../../src/db/database';
+import { loadConfigForTest } from '../../../../src/lib/config';
+import { updateAgentProfile } from '../../../../src/modules/agents/application/agent-settings-service';
+import { resolveTurnContext } from '../../../../src/modules/generation/application/resolve-turn-context';
+import {
+  resetSkillsCache,
+  setThirdPartySkillDirsForTest,
+} from '../../../../src/modules/skills/application/skill-discovery';
+import { WORKDIR_RESTRICTED_PROMPT_LINE } from '../../../../src/modules/workspaces/application/workdir-prompt-section';
+import {
+  getProvider,
+  registerProvider,
+} from '../../../../src/services/providers/core/provider-registry';
+import type { AgentEvent, AIProvider } from '../../../../src/services/providers/types';
+import { insertTestChat, insertTestUser, type UserFixture } from '../../../support/factories';
+
+const MODEL_ID = 'workdir-scope-model';
+
+class NoopProvider implements AIProvider {
+  readonly providerType = 'openai-compatible' as const;
+
+  generateText(): ReturnType<AIProvider['generateText']> {
+    return Promise.resolve({ text: '' });
+  }
+
+  listModels(): ReturnType<AIProvider['listModels']> {
+    return Promise.resolve([]);
+  }
+
+  validateApiKey(): Promise<void> {
+    return Promise.resolve();
+  }
+
+  resolveApiKey(): Promise<string> {
+    return Promise.resolve('test-key');
+  }
+
+  async *generateAgentTurnStream(): AsyncIterable<AgentEvent> {
+    await Promise.resolve();
+    yield { type: 'turn_completed' };
+  }
+}
+
+let user: UserFixture;
+let chatId: string;
+let boundWorkdir: string;
+let agentsDir: string;
+let previousProvider: AIProvider | null = null;
+
+async function insertConnectorForModel(): Promise<void> {
+  await getDb()
+    .insertInto('secret_metadata')
+    .values({
+      id: `${user.id}-workdir-scope-connector`,
+      name: 'Workdir scope connector',
+      provider: 'openai-compatible',
+      configured: 1,
+      source: 'config-file',
+      maskedSuffix: null,
+      updatedAt: Date.now(),
+      lastValidatedAt: null,
+      lastValidationError: null,
+      enabledModels: JSON.stringify([MODEL_ID]),
+      userId: user.id,
+      baseUrl: null,
+      organizationId: null,
+      projectId: null,
+    })
+    .execute();
+}
+
+async function allowAllToolsForChatAgent(): Promise<void> {
+  await updateAgentProfile(getDb(), user.id, 'chat', {
+    name: 'Chat',
+    description: '',
+    role: 'primary',
+    systemPrompt: '',
+    toolNames: ['*'],
+    toolsEnabled: true,
+    subagentIds: [],
+    metadata: {},
+  });
+}
+
+beforeEach(async () => {
+  agentsDir = mkdtempSync(join(tmpdir(), 'mango-workdir-scope-agents-'));
+  boundWorkdir = mkdtempSync(join(tmpdir(), 'mango-bound-workdir-'));
+  loadConfigForTest({
+    auth: { secret: 'test-secret-at-least-32-characters-long', url: 'http://localhost:3001' },
+    database: { path: ':memory:' },
+    skills: { dir: mkdtempSync(join(tmpdir(), 'mango-workdir-scope-skills-')) },
+  });
+  setThirdPartySkillDirsForTest({ agents: agentsDir });
+  resetSkillsCache();
+
+  user = await insertTestUser();
+  const chat = await insertTestChat(user.id);
+  chatId = chat.id;
+  await getDb()
+    .updateTable('chats')
+    .set({ workdir: boundWorkdir, restrictToolsToWorkdir: 1 })
+    .where('id', '=', chatId)
+    .execute();
+  await insertConnectorForModel();
+  await allowAllToolsForChatAgent();
+
+  try {
+    previousProvider = getProvider('openai-compatible');
+  } catch {
+    previousProvider = null;
+  }
+  registerProvider(new NoopProvider());
+});
+
+afterEach(() => {
+  if (previousProvider) registerProvider(previousProvider);
+  previousProvider = null;
+  setThirdPartySkillDirsForTest(null);
+  resetSkillsCache();
+  rmSync(agentsDir, { recursive: true, force: true });
+  rmSync(boundWorkdir, { recursive: true, force: true });
+});
+
+describe('resolveTurnContext workdir scope', () => {
+  it('omits workdir and policy in chat mode even when the chat row is bound', async () => {
+    const context = await resolveTurnContext(
+      { chatId, userId: user.id, prompt: 'Hello', model: MODEL_ID, agentMode: 'chat' },
+      getDb()
+    );
+
+    expect(context.interactionMode).toBe('chat');
+    expect(context.workdir).toBeUndefined();
+    expect(context.workdirPolicy).toBeUndefined();
+    expect(context.effectiveSystemPrompt ?? '').not.toContain('Working directory:');
+  });
+
+  it('populates workdir, policy, and prompt section in agent mode', async () => {
+    const context = await resolveTurnContext(
+      { chatId, userId: user.id, prompt: 'Hello', model: MODEL_ID, agentMode: 'agent' },
+      getDb()
+    );
+
+    expect(context.interactionMode).toBe('agent');
+    expect(context.workdir).toBe(boundWorkdir);
+    expect(context.workdirPolicy).toEqual({ root: boundWorkdir, restricted: true });
+    expect(context.effectiveSystemPrompt).toContain(`Working directory:\n${boundWorkdir}`);
+    expect(context.effectiveSystemPrompt).toContain(WORKDIR_RESTRICTED_PROMPT_LINE);
+  });
+});

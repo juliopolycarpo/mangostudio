@@ -115,11 +115,14 @@ export async function prepareSubagentTurn(
   const allowedToolNames = new Set(toolDefinitions.map((tool) => tool.name));
   const prompt = buildSubagentPrompt(input.request);
 
-  // Mirrors resolve-turn-context: the workdir is announced only for agent-mode turns.
+  // input.workdir is already scoped to agent-mode turns upstream: resolveTurnContext
+  // drops the chat workdir in chat mode, so a chat-mode delegation (permitted when
+  // chatDelegationEnabled) arrives here with workdir undefined. No parentMode guard
+  // is needed — announcing input.workdir stays in lockstep with the tools that use it.
   const systemPrompt = appendWorkdirPromptSection(
     runtime.effectiveSystemPrompt,
-    input.parentMode === 'agent' ? input.workdir : undefined,
-    input.parentMode === 'agent' && Boolean(input.workdirPolicy?.restricted)
+    input.workdir,
+    Boolean(input.workdirPolicy?.restricted)
   );
 
   return {

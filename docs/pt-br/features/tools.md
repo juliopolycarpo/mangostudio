@@ -83,6 +83,15 @@ interface ToolSettingsMetadata {
 
 ## Tools Built-in
 
+Chats podem vincular um diretório de trabalho no servidor para turnos em **modo
+agente**. Nesse modo, ferramentas de filesystem usam o diretório vinculado
+quando `path` / `cwd` são omitidos, e o system prompt do agente anuncia esse
+caminho. O **modo chat** não injeta o diretório vinculado: `bash`, `glob` e
+shells relacionados voltam ao diretório de trabalho do processo da API quando
+`cwd` é omitido, e ferramentas como `list_directory` e `grep` ainda exigem um
+`path` explícito. Com restrição habilitada no modo agente, a política de
+contenção de caminhos se aplica às tools roteadas.
+
 ### `generate_image`
 
 Cria uma ou mais imagens via modelos de geração de imagem durante um turno de chat de texto.
