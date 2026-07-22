@@ -72,6 +72,8 @@ describe('Sidebar', () => {
     );
     const handle = screen.getByRole('separator', { name: /resize chat sidebar/i });
     expect(handle).toHaveAttribute('aria-valuenow', '256');
+    // `h-auto` overrides the preflight `hr { height: 0 }`; without it the handle is unhittable.
+    expect(handle).toHaveClass('h-auto');
     expect(handle.nextElementSibling).toHaveClass('bg-outline-variant/50');
 
     fireEvent.keyDown(handle, { key: 'ArrowRight' });
