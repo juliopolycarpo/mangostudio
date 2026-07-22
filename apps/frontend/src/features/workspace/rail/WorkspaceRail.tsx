@@ -104,8 +104,7 @@ export function WorkspaceRail({
     setWidth(nextWidth);
   };
 
-  const commitWidth = (nextWidth: number) => {
-    resize(nextWidth);
+  const commitWidth = () => {
     onWidthChange?.(widthRef.current);
   };
 
@@ -149,7 +148,7 @@ export function WorkspaceRail({
             max={WORKSPACE_PANEL_WIDTH_MAX}
             label={t.workspace.sidePanelResize}
             onResize={resize}
-            onResizeEnd={() => commitWidth(widthRef.current)}
+            onResizeEnd={commitWidth}
           />
         ) : null}
         <PanelDock

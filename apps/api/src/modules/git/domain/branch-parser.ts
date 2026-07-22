@@ -40,10 +40,7 @@ export function parseRemoteBranchList(output: string): GitRemoteBranch[] {
       if (ref.endsWith('/HEAD')) return [];
       const slash = ref.indexOf('/');
       if (slash <= 0 || slash === ref.length - 1) return [];
-      const remote = ref.slice(0, slash);
-      const name = ref.slice(slash + 1);
-      if (!remote || !name) return [];
-      return [{ name, remote, ref }];
+      return [{ name: ref.slice(slash + 1), remote: ref.slice(0, slash), ref }];
     })
     .sort((left, right) => {
       const remoteOrder = left.remote.localeCompare(right.remote);
