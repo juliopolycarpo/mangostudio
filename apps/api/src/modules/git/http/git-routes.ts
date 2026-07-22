@@ -37,8 +37,12 @@ import { Elysia } from 'elysia';
 import { getDb } from '../../../db/database';
 import { requireAuth } from '../../../plugins/auth-middleware';
 import { getAppSettings } from '../../app-settings/application/app-settings-service';
-import { chatAccessDenied, resolveChatWorkdir } from '../../chats/application/chat-workdir';
-import { getById } from '../../chats/infrastructure/chat-repository';
+import {
+  chatAccessDenied,
+  chatWorkdirConflict,
+  resolveChatWorkdir,
+} from '../../chats/application/chat-workdir';
+import type { ChatRecord } from '../../chats/infrastructure/chat-repository';
 import { NoModelAvailableError } from '../../generation/application/resolve-model';
 import {
   EmptyGeneratedCommitMessageError,
@@ -65,22 +69,6 @@ import {
 import { GitCliError } from '../infrastructure/git-cli';
 
 type RouteResult<T> = T | ApiErrorResponse;
-
-function chatAccessError(
-  chat: Awaited<ReturnType<typeof getById>>,
-  userId: string,
-  set: { status?: number | string }
-): ApiErrorResponse | null {
-  if (!chat) {
-    set.status = 404;
-    return { error: 'Chat not found', code: ERROR_CODES.NOT_FOUND };
-  }
-  if (chat.userId !== userId) {
-    set.status = 403;
-    return { error: 'Chat belongs to another user', code: ERROR_CODES.OWNERSHIP };
-  }
-  return null;
-}
 
 function gitCommandError(error: unknown, set: { status?: number | string }): ApiErrorResponse {
   // A cancelled request is the client hanging up, not a server fault worth logging.
@@ -116,14 +104,13 @@ async function routeWorkdir(
   chatId: string,
   userId: string,
   set: { status?: number | string }
-): Promise<{ workdir: string } | { error: ApiErrorResponse }> {
+): Promise<{ workdir: string; chat: ChatRecord } | { error: ApiErrorResponse }> {
   const resolution = await resolveChatWorkdir(chatId, userId, getDb());
-  if (resolution.state === 'ok') return { workdir: resolution.workdir };
+  if (resolution.state === 'ok') {
+    return { workdir: resolution.workdir, chat: resolution.chat };
+  }
   if (resolution.state === 'no-workdir') {
-    set.status = 409;
-    return {
-      error: { error: 'Chat has no working directory', code: ERROR_CODES.CONFLICT },
-    };
+    return { error: chatWorkdirConflict(set) };
   }
   return { error: chatAccessDenied(resolution, set) };
 }
@@ -156,16 +143,11 @@ export const gitRoutes = new Elysia().use(requireAuth).group('/git', (app) =>
     .post(
       '/init',
       async ({ body, request, set, user }): Promise<RouteResult<InitRepoResponse>> => {
-        const chat = await getById(body.chatId, getDb());
-        const accessError = chatAccessError(chat, user?.id ?? '', set);
-        if (accessError) return accessError;
-        if (!chat?.workdir) {
-          set.status = 409;
-          return { error: 'Chat has no working directory', code: ERROR_CODES.CONFLICT };
-        }
+        const resolved = await routeWorkdir(body.chatId, user?.id ?? '', set);
+        if ('error' in resolved) return resolved.error;
 
         try {
-          return await initRepo(chat.workdir, request.signal);
+          return await initRepo(resolved.workdir, request.signal);
         } catch (error) {
           return gitCommandError(error, set);
         }
@@ -184,16 +166,11 @@ export const gitRoutes = new Elysia().use(requireAuth).group('/git', (app) =>
     .post(
       '/stage',
       async ({ body, request, set, user }) => {
-        const chat = await getById(body.chatId, getDb());
-        const accessError = chatAccessError(chat, user?.id ?? '', set);
-        if (accessError) return accessError;
-        if (!chat?.workdir) {
-          set.status = 409;
-          return { error: 'Chat has no working directory', code: ERROR_CODES.CONFLICT };
-        }
+        const resolved = await routeWorkdir(body.chatId, user?.id ?? '', set);
+        if ('error' in resolved) return resolved.error;
 
         try {
-          return await stagePaths(chat.workdir, body, request.signal);
+          return await stagePaths(resolved.workdir, body, request.signal);
         } catch (error) {
           return gitWriteError(error, set);
         }
@@ -213,16 +190,11 @@ export const gitRoutes = new Elysia().use(requireAuth).group('/git', (app) =>
     .post(
       '/unstage',
       async ({ body, request, set, user }) => {
-        const chat = await getById(body.chatId, getDb());
-        const accessError = chatAccessError(chat, user?.id ?? '', set);
-        if (accessError) return accessError;
-        if (!chat?.workdir) {
-          set.status = 409;
-          return { error: 'Chat has no working directory', code: ERROR_CODES.CONFLICT };
-        }
+        const resolved = await routeWorkdir(body.chatId, user?.id ?? '', set);
+        if ('error' in resolved) return resolved.error;
 
         try {
-          return await unstagePaths(chat.workdir, body, request.signal);
+          return await unstagePaths(resolved.workdir, body, request.signal);
         } catch (error) {
           return gitWriteError(error, set);
         }
@@ -244,16 +216,12 @@ export const gitRoutes = new Elysia().use(requireAuth).group('/git', (app) =>
       async ({ body, request, set, user }): Promise<RouteResult<GenerateCommitMessageResponse>> => {
         const db = getDb();
         const userId = user?.id ?? '';
-        const chat = await getById(body.chatId, db);
-        const accessError = chatAccessError(chat, userId, set);
-        if (accessError) return accessError;
-        if (!chat?.workdir) {
-          set.status = 409;
-          return { error: 'Chat has no working directory', code: ERROR_CODES.CONFLICT };
-        }
+        const resolved = await routeWorkdir(body.chatId, userId, set);
+        if ('error' in resolved) return resolved.error;
+        const { workdir, chat } = resolved;
 
         try {
-          const repoState = await getRepoState(chat.workdir, request.signal);
+          const repoState = await getRepoState(workdir, request.signal);
           if (repoState.state !== 'repo') {
             set.status = 409;
             return {
@@ -314,17 +282,12 @@ export const gitRoutes = new Elysia().use(requireAuth).group('/git', (app) =>
       async ({ body, request, set, user }) => {
         const db = getDb();
         const userId = user?.id ?? '';
-        const chat = await getById(body.chatId, db);
-        const accessError = chatAccessError(chat, userId, set);
-        if (accessError) return accessError;
-        if (!chat?.workdir) {
-          set.status = 409;
-          return { error: 'Chat has no working directory', code: ERROR_CODES.CONFLICT };
-        }
+        const resolved = await routeWorkdir(body.chatId, userId, set);
+        if ('error' in resolved) return resolved.error;
 
         try {
           const settings = await getAppSettings(db, userId);
-          return await commitChanges(chat.workdir, body, settings.gitSettings, request.signal);
+          return await commitChanges(resolved.workdir, body, settings.gitSettings, request.signal);
         } catch (error) {
           return gitWriteError(error, set);
         }
@@ -344,16 +307,11 @@ export const gitRoutes = new Elysia().use(requireAuth).group('/git', (app) =>
     .post(
       '/stash',
       async ({ body, request, set, user }) => {
-        const chat = await getById(body.chatId, getDb());
-        const accessError = chatAccessError(chat, user?.id ?? '', set);
-        if (accessError) return accessError;
-        if (!chat?.workdir) {
-          set.status = 409;
-          return { error: 'Chat has no working directory', code: ERROR_CODES.CONFLICT };
-        }
+        const resolved = await routeWorkdir(body.chatId, user?.id ?? '', set);
+        if ('error' in resolved) return resolved.error;
 
         try {
-          return await stashSave(chat.workdir, body, request.signal);
+          return await stashSave(resolved.workdir, body, request.signal);
         } catch (error) {
           return gitWriteError(error, set);
         }
@@ -373,16 +331,11 @@ export const gitRoutes = new Elysia().use(requireAuth).group('/git', (app) =>
     .post(
       '/stash/pop',
       async ({ body, request, set, user }) => {
-        const chat = await getById(body.chatId, getDb());
-        const accessError = chatAccessError(chat, user?.id ?? '', set);
-        if (accessError) return accessError;
-        if (!chat?.workdir) {
-          set.status = 409;
-          return { error: 'Chat has no working directory', code: ERROR_CODES.CONFLICT };
-        }
+        const resolved = await routeWorkdir(body.chatId, user?.id ?? '', set);
+        if ('error' in resolved) return resolved.error;
 
         try {
-          return await stashPop(chat.workdir, body, request.signal);
+          return await stashPop(resolved.workdir, body, request.signal);
         } catch (error) {
           return gitWriteError(error, set);
         }
@@ -402,16 +355,11 @@ export const gitRoutes = new Elysia().use(requireAuth).group('/git', (app) =>
     .get(
       '/stashes',
       async ({ query, request, set, user }) => {
-        const chat = await getById(query.chatId, getDb());
-        const accessError = chatAccessError(chat, user?.id ?? '', set);
-        if (accessError) return accessError;
-        if (!chat?.workdir) {
-          set.status = 409;
-          return { error: 'Chat has no working directory', code: ERROR_CODES.CONFLICT };
-        }
+        const resolved = await routeWorkdir(query.chatId, user?.id ?? '', set);
+        if ('error' in resolved) return resolved.error;
 
         try {
-          return await stashList(chat.workdir, request.signal);
+          return await stashList(resolved.workdir, request.signal);
         } catch (error) {
           return gitWriteError(error, set);
         }

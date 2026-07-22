@@ -432,4 +432,28 @@ describe('Git write routes', () => {
 
     for (const response of responses) expect(response.status).toBe(401);
   });
+
+  it('returns conflict and not found when staging requires a bound workdir', async () => {
+    const user = await insertTestUser();
+    const chat = await insertTestChat(user.id);
+    const authenticated = createAuthenticatedApiTestApp(user, gitRoutes);
+    restoreAuth = authenticated.restore;
+
+    const noWorkdir = await postJson(authenticated.app, '/git/stage', {
+      chatId: chat.id,
+      paths: ['file.txt'],
+    });
+    expect(noWorkdir.status).toBe(409);
+    expect(await noWorkdir.json()).toEqual({
+      error: 'Chat has no working directory',
+      code: 'CONFLICT',
+    });
+
+    const missing = await postJson(authenticated.app, '/git/stage', {
+      chatId: 'chat-does-not-exist',
+      paths: ['file.txt'],
+    });
+    expect(missing.status).toBe(404);
+    expect(await missing.json()).toEqual({ error: 'Chat not found', code: 'NOT_FOUND' });
+  });
 });
