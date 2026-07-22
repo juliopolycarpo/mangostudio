@@ -36,7 +36,7 @@ const definition = {
     properties: {
       path: {
         type: 'string',
-        description: 'Absolute file path or path starting with ~ (home directory).',
+        description: 'Absolute path, ~ path, or path relative to the chat working directory.',
       },
     },
     required: ['path'],
@@ -58,7 +58,11 @@ export async function executeReadFile(
   context: ToolContext
 ): Promise<ReadFileToolResult> {
   const settings = normalizeReadFileToolSettings(context.parameters);
-  const resolvedPath = resolveAndValidatePath(args.path, settings, context.workdirPolicy);
+  const resolvedPath = resolveAndValidatePath(args.path, {
+    settings,
+    workdir: context.workdir,
+    workdirPolicy: context.workdirPolicy,
+  });
 
   const file = Bun.file(resolvedPath);
   const exists = await file.exists();

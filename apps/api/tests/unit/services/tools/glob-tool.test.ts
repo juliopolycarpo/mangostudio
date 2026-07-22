@@ -109,6 +109,17 @@ describe('executeGlob', () => {
     expect(result.matches).toEqual(['README.md']);
   });
 
+  it('resolves an explicit relative cwd from the chat workdir', async () => {
+    await seedTree();
+
+    const result = await executeGlob(
+      { pattern: '*.ts', cwd: 'nested' },
+      { ...makeContext(), workdir: tempDir }
+    );
+
+    expect(result.matches).toEqual(['c.ts']);
+  });
+
   it('skips dotfiles by default and includes them when enabled', async () => {
     await seedTree();
     const without = await executeGlob({ pattern: '*.ts', cwd: tempDir }, makeContext());

@@ -98,6 +98,20 @@ describe('executeListDirectory', () => {
     expect(result.entries.some((entry) => entry.name === 'workdir-file.txt')).toBe(true);
   });
 
+  it('resolves an explicit relative path from the chat workdir', async () => {
+    const nested = join(tempDir, 'src');
+    mkdirSync(nested);
+    await seedFile(join(nested, 'index.ts'), 'content');
+
+    const result = await executeListDirectory(
+      { path: 'src' },
+      { ...makeContext(), workdir: tempDir }
+    );
+
+    expect(result.path).toBe('src');
+    expect(result.entries).toEqual([{ name: 'index.ts', type: 'file' }]);
+  });
+
   it('throws when directory does not exist', async () => {
     const dirPath = join(tempDir, 'missing');
 

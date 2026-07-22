@@ -14,7 +14,6 @@ import { clampIntegerSetting, getOptionalString, getRequiredString } from '../ar
 import { registerTool } from '../registry';
 import type { ToolContext } from '../types';
 import {
-  expandHome,
   getRequiredPathArg,
   normalizePathList,
   PathAccessError,
@@ -91,7 +90,7 @@ const definition = {
       path: {
         type: 'string',
         description:
-          'Optional file or directory to search. Defaults to the chat working directory when available.',
+          'Optional absolute path, ~ path, or path relative to the chat working directory. Defaults to the chat working directory when available.',
       },
       glob: {
         type: 'string',
@@ -141,7 +140,11 @@ export async function executeGrep(
   const settings = normalizeGrepToolSettings(context.parameters);
   const regex = buildRegex(args.pattern, args.caseInsensitive === true);
   const path = getRequiredPathArg(args.path ?? context.workdir, 'path');
-  const rootPath = resolveAndValidatePath(expandHome(path), settings, context.workdirPolicy);
+  const rootPath = resolveAndValidatePath(path, {
+    settings,
+    workdir: context.workdir,
+    workdirPolicy: context.workdirPolicy,
+  });
   const rootStats = await statSafe(rootPath, path);
 
   const matches: GrepMatch[] = [];
@@ -289,7 +292,7 @@ async function statSafe(absolute: string, original: string) {
 
 function isPathAllowed(absolute: string, settings: PathValidationSettings): boolean {
   try {
-    resolveAndValidatePath(absolute, settings);
+    resolveAndValidatePath(absolute, { settings });
     return true;
   } catch (error) {
     if (error instanceof PathAccessError) return false;

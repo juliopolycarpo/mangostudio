@@ -12,7 +12,6 @@ import { clampIntegerSetting, getOptionalString, getRequiredString } from '../ar
 import { registerTool } from '../registry';
 import type { ToolContext } from '../types';
 import {
-  expandHome,
   normalizePathList,
   PathAccessError,
   type PathValidationSettings,
@@ -60,7 +59,7 @@ const definition = {
       cwd: {
         type: 'string',
         description:
-          'Optional base directory. Absolute path or one starting with ~. Defaults to the chat working directory when available, otherwise the process working directory.',
+          'Optional absolute path, ~ path, or path relative to the chat working directory. Defaults to the chat working directory when available, otherwise the process working directory.',
       },
     },
     required: ['pattern'],
@@ -135,10 +134,12 @@ function resolveCwd(
 ): string {
   const policy = context.workdirPolicy;
   const trimmed = input?.trim();
-  const base = trimmed
-    ? expandHome(trimmed)
-    : ((policy?.restricted ? policy.root : context.workdir) ?? process.cwd());
-  return resolveAndValidatePath(base, settings, policy);
+  const base = trimmed ?? (policy?.restricted ? policy.root : context.workdir) ?? process.cwd();
+  return resolveAndValidatePath(base, {
+    settings,
+    workdir: context.workdir,
+    workdirPolicy: policy,
+  });
 }
 
 function execute(args: Record<string, unknown>, context: ToolContext): Promise<GlobToolResult> {

@@ -44,7 +44,7 @@ const definition = {
       path: {
         type: 'string',
         description:
-          'Optional directory path. Defaults to the chat working directory when available.',
+          'Optional absolute path, ~ path, or path relative to the chat working directory. Defaults to the chat working directory when available.',
       },
     },
     additionalProperties: false,
@@ -66,7 +66,11 @@ export async function executeListDirectory(
 ): Promise<ListDirectoryToolResult> {
   const settings = normalizeListDirectoryToolSettings(context.parameters);
   const path = getRequiredPathArg(args.path ?? context.workdir, 'path');
-  const resolvedPath = resolveAndValidatePath(path, settings, context.workdirPolicy);
+  const resolvedPath = resolveAndValidatePath(path, {
+    settings,
+    workdir: context.workdir,
+    workdirPolicy: context.workdirPolicy,
+  });
 
   let dirents: Dirent[];
   try {

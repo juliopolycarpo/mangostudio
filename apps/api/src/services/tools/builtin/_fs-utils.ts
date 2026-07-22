@@ -2,7 +2,7 @@
  * Shared utilities for filesystem tools: path expansion, allowlist/denylist validation.
  */
 
-import { resolve } from 'node:path';
+import { isAbsolute, resolve } from 'node:path';
 import {
   assertInsideWorkdir,
   isPathPrefix,
@@ -25,6 +25,12 @@ export function expandHome(path: string): string {
 export interface PathValidationSettings {
   allowedPaths: readonly PathListItem[];
   deniedPaths: readonly PathListItem[];
+}
+
+export interface ResolvePathOptions {
+  settings: PathValidationSettings;
+  workdir?: string;
+  workdirPolicy?: WorkdirPolicy;
 }
 
 export class PathAccessError extends Error {
@@ -64,13 +70,10 @@ export function assertWorkdirContainment(
   }
 }
 
-export function resolveAndValidatePath(
-  inputPath: string,
-  settings: PathValidationSettings,
-  workdirPolicy?: WorkdirPolicy
-): string {
+export function resolveAndValidatePath(inputPath: string, options: ResolvePathOptions): string {
   const expanded = expandHome(inputPath);
-  const resolved = resolve(expanded);
+  const resolved = resolvePath(expanded, inputPath, options);
+  const { settings, workdirPolicy } = options;
 
   const enabledAllowed = settings.allowedPaths.filter((item) => item.enabled);
   if (enabledAllowed.length > 0) {
@@ -97,4 +100,17 @@ export function resolveAndValidatePath(
   assertWorkdirContainment(resolved, workdirPolicy);
 
   return resolved;
+}
+
+function resolvePath(expandedPath: string, inputPath: string, options: ResolvePathOptions): string {
+  if (isAbsolute(expandedPath)) return resolve(expandedPath);
+
+  const workdir = options.workdirPolicy?.root ?? options.workdir;
+  if (!workdir) {
+    throw new PathAccessError(
+      `Relative path "${inputPath}" cannot be resolved: no working directory is bound to this chat. Pass an absolute path.`
+    );
+  }
+
+  return resolve(workdir, expandedPath);
 }

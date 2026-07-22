@@ -1053,7 +1053,8 @@ export const messages: Messages = {
 
   workspace: {
     title: 'Working directory',
-    description: 'Choose a folder on the server filesystem for the agent tools to use.',
+    description:
+      'Choose a folder on the server filesystem. Agent file tools resolve relative paths from this folder.',
     serverLabel: 'Server',
     home: 'Home',
     roots: 'Roots',
