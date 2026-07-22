@@ -2,7 +2,7 @@
  * Shared utilities for filesystem tools: path expansion, allowlist/denylist validation.
  */
 
-import { resolve } from 'node:path';
+import { isAbsolute, resolve } from 'node:path';
 import {
   assertInsideWorkdir,
   isPathPrefix,
@@ -25,6 +25,16 @@ export function expandHome(path: string): string {
 export interface PathValidationSettings {
   allowedPaths: readonly PathListItem[];
   deniedPaths: readonly PathListItem[];
+}
+
+/** Chat-bound directory a relative tool path is resolved against. */
+export interface WorkdirResolutionOptions {
+  workdir?: string;
+  workdirPolicy?: WorkdirPolicy;
+}
+
+export interface ResolvePathOptions extends WorkdirResolutionOptions {
+  settings: PathValidationSettings;
 }
 
 export class PathAccessError extends Error {
@@ -64,13 +74,33 @@ export function assertWorkdirContainment(
   }
 }
 
-export function resolveAndValidatePath(
+/**
+ * Expands `~` and resolves a tool path argument, anchoring relative input to the
+ * chat working directory. Relative input is rejected when no workdir is bound so
+ * tools never silently fall back to the API process directory.
+ *
+ * // Usage: resolveWorkdirRelativePath('src/index.ts', context)
+ */
+export function resolveWorkdirRelativePath(
   inputPath: string,
-  settings: PathValidationSettings,
-  workdirPolicy?: WorkdirPolicy
+  options: WorkdirResolutionOptions
 ): string {
   const expanded = expandHome(inputPath);
-  const resolved = resolve(expanded);
+  if (isAbsolute(expanded)) return resolve(expanded);
+
+  const workdir = options.workdirPolicy?.root ?? options.workdir;
+  if (!workdir) {
+    throw new PathAccessError(
+      `Relative path "${inputPath}" cannot be resolved: no working directory is bound to this chat. Pass an absolute path.`
+    );
+  }
+
+  return resolve(workdir, expanded);
+}
+
+export function resolveAndValidatePath(inputPath: string, options: ResolvePathOptions): string {
+  const resolved = resolveWorkdirRelativePath(inputPath, options);
+  const { settings, workdirPolicy } = options;
 
   const enabledAllowed = settings.allowedPaths.filter((item) => item.enabled);
   if (enabledAllowed.length > 0) {

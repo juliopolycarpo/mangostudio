@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -71,6 +71,26 @@ describe('normalizeReadFileToolSettings', () => {
 });
 
 describe('executeReadFile', () => {
+  it('reads a relative path from the chat workdir', async () => {
+    const filePath = join(tempDir, 'src', 'index.ts');
+    mkdirSync(join(tempDir, 'src'));
+    await seedFile(filePath, 'export const value = 1;');
+
+    const result = await executeReadFile(
+      { path: 'src/index.ts' },
+      { ...makeContext(), workdir: tempDir }
+    );
+
+    expect(result.path).toBe('src/index.ts');
+    expect(result.content).toBe('export const value = 1;');
+  });
+
+  it('rejects a relative path when no chat workdir is available', async () => {
+    await expect(executeReadFile({ path: 'src/index.ts' }, makeContext())).rejects.toThrow(
+      'no working directory is bound to this chat'
+    );
+  });
+
   it('rejects paths outside the workdir when restriction is enabled', async () => {
     const filePath = join(tempDir, 'inside.txt');
     await seedFile(filePath, 'ok');

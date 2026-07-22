@@ -85,6 +85,18 @@ describe('executeGrep', () => {
     expect(result.matches).toHaveLength(1);
   });
 
+  it('resolves an explicit relative path from the chat workdir', async () => {
+    await seedTree();
+
+    const result = await executeGrep(
+      { pattern: 'nested level', path: 'nested' },
+      { ...makeContext(), workdir: tempDir }
+    );
+
+    expect(result.path).toBe('nested');
+    expect(result.matches).toEqual([{ file: 'c.txt', line: 1, text: 'TODO at nested level' }]);
+  });
+
   it('respects the glob filter on directory searches', async () => {
     await seedTree();
     const result = await executeGrep(
@@ -103,6 +115,8 @@ describe('executeGrep', () => {
     );
     expect(result.filesScanned).toBe(1);
     expect(result.matches).toHaveLength(1);
+    // Absolute so the model can feed the reported file back into another tool.
+    expect(result.matches[0]?.file).toBe(join(tempDir, 'a.ts'));
     expect(result.matches[0]?.line).toBe(3);
     expect(result.matches[0]?.text).toContain('console.log');
   });

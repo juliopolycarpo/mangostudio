@@ -40,7 +40,7 @@ const definition = {
     properties: {
       path: {
         type: 'string',
-        description: 'Absolute file path or path starting with ~ (home directory).',
+        description: 'Absolute path, ~ path, or path relative to the chat working directory.',
       },
       content: {
         type: 'string',
@@ -66,7 +66,11 @@ export async function executeWriteFile(
   context: ToolContext
 ): Promise<WriteFileToolResult> {
   const settings = normalizeWriteFileToolSettings(context.parameters);
-  const resolvedPath = resolveAndValidatePath(args.path, settings, context.workdirPolicy);
+  const resolvedPath = resolveAndValidatePath(args.path, {
+    settings,
+    workdir: context.workdir,
+    workdirPolicy: context.workdirPolicy,
+  });
 
   const existingFile = Bun.file(resolvedPath);
   const created = !(await existingFile.exists());

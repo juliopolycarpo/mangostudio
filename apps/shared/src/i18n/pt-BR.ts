@@ -1066,7 +1066,7 @@ export const messages = {
   workspace: {
     title: 'Diretório de trabalho',
     description:
-      'Escolha uma pasta no sistema de arquivos do servidor para as ferramentas do agente.',
+      'Escolha uma pasta no sistema de arquivos do servidor. As ferramentas de arquivo do agente resolvem caminhos relativos a partir desta pasta.',
     serverLabel: 'Servidor',
     home: 'Início',
     roots: 'Raízes',

@@ -85,8 +85,8 @@ interface ToolSettingsMetadata {
 
 Chats podem vincular um diretório de trabalho no servidor para turnos em **modo
 agente**. Nesse modo, ferramentas de filesystem usam o diretório vinculado
-quando `path` / `cwd` são omitidos, e o system prompt do agente anuncia esse
-caminho. O **modo chat** não injeta o diretório vinculado: `bash`, `glob` e
+quando `path` / `cwd` são omitidos, resolvem argumentos relativos a partir dele,
+e o system prompt do agente anuncia esse caminho. O **modo chat** não injeta o diretório vinculado: `bash`, `glob` e
 shells relacionados voltam ao diretório de trabalho do processo da API quando
 `cwd` é omitido, e ferramentas como `list_directory` e `grep` ainda exigem um
 `path` explícito. Com restrição habilitada no modo agente, a política de
@@ -117,7 +117,7 @@ Lê o conteúdo de um arquivo de texto do disco.
 
 - **Nome da tool:** `read_file`
 - **Categoria:** `system`
-- **Parâmetros:** `path` (obrigatório, absoluto ou começando com `~`)
+- **Parâmetros:** `path` (obrigatório, absoluto, começando com `~`, ou relativo ao diretório de trabalho do chat)
 - **Settings:** `allowedPaths`, `deniedPaths` (listas de caminhos; aplicadas por `resolveAndValidatePath`)
 - **Execução:** Lê o arquivo com `Bun.file().text()` e retorna `{ content, path, size }`.
 
@@ -127,7 +127,7 @@ Lista arquivos e diretórios em um caminho.
 
 - **Nome da tool:** `list_directory`
 - **Categoria:** `system`
-- **Parâmetros:** `path` (obrigatório, absoluto ou começando com `~`)
+- **Parâmetros:** `path` (obrigatório, absoluto, começando com `~`, ou relativo ao diretório de trabalho do chat)
 - **Settings:** `allowedPaths`, `deniedPaths`
 - **Execução:** Chama `readdir(path, { withFileTypes: true })` e retorna `{ path, entries: { name, type }[] }`.
 
@@ -137,7 +137,7 @@ Encontra caminhos do filesystem que correspondem a um padrão glob, avaliados po
 
 - **Nome da tool:** `glob`
 - **Categoria:** `system`
-- **Parâmetros:** `pattern` (obrigatório, suporta `*`, `**`, `?`, `[]`, `{a,b}`, `!`), `cwd` (diretório base opcional; padrão `process.cwd()`)
+- **Parâmetros:** `pattern` (obrigatório, suporta `*`, `**`, `?`, `[]`, `{a,b}`, `!`), `cwd` (diretório base opcional; absoluto, começando com `~`, ou relativo ao diretório de trabalho do chat; padrão é o diretório de trabalho do chat, senão `process.cwd()`)
 - **Settings:** `allowedPaths`, `deniedPaths`, `maxResults` (1–5.000; padrão 200), `includeDotfiles` (padrão `false`), `absolute` (padrão `false`)
 - **Execução:** Itera os matches com `new Bun.Glob(pattern).scan({ cwd, dot, absolute, onlyFiles: false })`, para ao atingir o limite e sinaliza `truncated`.
 
@@ -147,7 +147,7 @@ Pesquisa nos arquivos por linhas que correspondam a uma expressão regular.
 
 - **Nome da tool:** `grep`
 - **Categoria:** `system`
-- **Parâmetros:** `pattern` (regex obrigatória), `path` (arquivo ou diretório obrigatório), `glob` (filtro opcional para buscas em diretório), `caseInsensitive`
+- **Parâmetros:** `pattern` (regex obrigatória), `path` (arquivo ou diretório obrigatório; absoluto, começando com `~`, ou relativo ao diretório de trabalho do chat), `glob` (filtro opcional para buscas em diretório), `caseInsensitive`
 - **Settings:** `allowedPaths`, `deniedPaths`, `maxResults` (1–5.000; padrão 100), `maxMatchesPerFile` (padrão 20), `maxFileSizeBytes` (padrão 1 MB), `includeDotfiles`
 - **Segurança:** Arquivos com byte nulo nos primeiros 1 KB são tratados como binários e ignorados; arquivos acima de `maxFileSizeBytes` também são pulados. A regex é compilada com `new RegExp` e rejeitada via `GrepPatternError` quando inválida.
 - **Execução:** Quando `path` é um diretório, percorre-o com `Bun.Glob` (filtrado pelo `glob` opcional); para cada candidato lê com `Bun.file().text()`, divide por linha e registra matches `{ file, line, text }`.
@@ -158,7 +158,7 @@ Executam um comando de shell e retornam `stdout`, `stderr`, código de saída e 
 
 - **Nomes das tools:** `bash`, `zsh`, `powershell`
 - **Categoria:** `system`
-- **Parâmetros:** `command` (obrigatório), `cwd` (diretório de trabalho opcional; `~` é expandido)
+- **Parâmetros:** `command` (obrigatório), `cwd` (diretório de trabalho opcional; absoluto, começando com `~`, ou relativo ao diretório de trabalho do chat)
 - **Settings:** `timeoutSeconds` (5s–600s, padrão 30s), `maxOutputBytes` (1KB–1MB por stream, padrão 100KB)
 - **Disponibilidade:** Registradas no import apenas quando o interpretador existe — `bash`/`zsh` via `Bun.which`, `powershell` somente no Windows (`pwsh` e depois `powershell`). Shells indisponíveis nunca são oferecidos aos modelos.
 - **Segurança:** Desabilitadas por padrão (`enabledByDefault: false`); exigem ativação explícita. O processo é encerrado com `SIGKILL` após o tempo configurado, e a saída por stream é limitada a `maxOutputBytes` (sinalizado por `truncated`). Abort do pai (cancelamento do usuário ou encerramento do stream) é rastreado separadamente do timeout e não aparece como erro de timeout.

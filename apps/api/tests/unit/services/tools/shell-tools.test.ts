@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -175,6 +175,37 @@ describe('shell tool registration and execution', () => {
     )) as { stdout: string };
 
     expect(result.stdout.trim()).toBe(tmpdir());
+  });
+
+  it.skipIf(!hasBash)('resolves a relative cwd from the chat workdir', async () => {
+    const workdir = mkdtempSync(join(tmpdir(), 'shell-workdir-'));
+    try {
+      mkdirSync(join(workdir, 'nested'));
+      const result = (await executeTool(
+        'bash',
+        { command: 'pwd', cwd: 'nested' },
+        { ...makeContext(), workdir },
+        { enabled: true, parameters: {} }
+      )) as { stdout: string };
+
+      expect(result.stdout.trim()).toBe(join(workdir, 'nested'));
+    } finally {
+      rmSync(workdir, { recursive: true, force: true });
+    }
+  });
+
+  it.skipIf(!hasBash)('rejects a relative cwd when no chat workdir is bound', async () => {
+    let threw = false;
+    try {
+      await executeTool('bash', { command: 'pwd', cwd: 'nested' }, makeContext(), {
+        enabled: true,
+        parameters: {},
+      });
+    } catch (error) {
+      threw = true;
+      expect((error as Error).message).toContain('no working directory is bound to this chat');
+    }
+    expect(threw).toBe(true);
   });
 
   it.skipIf(!hasBash)('rejects a cwd outside the chat workdir when restricted', async () => {

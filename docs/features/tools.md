@@ -71,7 +71,8 @@ interface ToolSettingsMetadata {
 
 Chats can bind a server-side working directory for **agent mode** turns. In that
 mode, filesystem tools default omitted `path` / `cwd` arguments to the bound
-directory, and the agent system prompt announces it. **Chat mode** does not
+directory, resolve relative arguments against it, and the agent system prompt
+announces it. **Chat mode** does not
 inject the bound directory: `bash`, `glob`, and related shell tools fall back
 to the API process working directory when `cwd` is omitted, and tools such as
 `list_directory` and `grep` still require an explicit `path`. When restriction
@@ -102,7 +103,7 @@ Reads the contents of a text file from disk.
 
 - **Tool name:** `read_file`
 - **Category:** `system`
-- **Parameters:** `path` (required, absolute or `~`-prefixed)
+- **Parameters:** `path` (required, absolute, `~`-prefixed, or relative to the chat working directory)
 - **Settings:** `allowedPaths`, `deniedPaths` (path lists; enforced by `resolveAndValidatePath`)
 - **Execution:** Reads the file with `Bun.file().text()` and returns `{ content, path, size }`.
 
@@ -112,7 +113,7 @@ Lists files and directories at a path.
 
 - **Tool name:** `list_directory`
 - **Category:** `system`
-- **Parameters:** `path` (required, absolute or `~`-prefixed)
+- **Parameters:** `path` (required, absolute, `~`-prefixed, or relative to the chat working directory)
 - **Settings:** `allowedPaths`, `deniedPaths`
 - **Execution:** Calls `readdir(path, { withFileTypes: true })` and returns `{ path, entries: { name, type }[] }`.
 
@@ -122,7 +123,7 @@ Finds filesystem paths matching a glob pattern, evaluated by `Bun.Glob`.
 
 - **Tool name:** `glob`
 - **Category:** `system`
-- **Parameters:** `pattern` (required, supports `*`, `**`, `?`, `[]`, `{a,b}`, `!`), `cwd` (optional base directory; defaults to `process.cwd()`)
+- **Parameters:** `pattern` (required, supports `*`, `**`, `?`, `[]`, `{a,b}`, `!`), `cwd` (optional base directory; absolute, `~`-prefixed, or relative to the chat working directory; defaults to the chat working directory, otherwise `process.cwd()`)
 - **Settings:** `allowedPaths`, `deniedPaths`, `maxResults` (1–5,000; default 200), `includeDotfiles` (default `false`), `absolute` (default `false`)
 - **Execution:** Streams matches with `new Bun.Glob(pattern).scan({ cwd, dot, absolute, onlyFiles: false })`, stops at the cap, and reports `truncated`.
 
@@ -132,7 +133,7 @@ Searches files for lines matching a regular expression.
 
 - **Tool name:** `grep`
 - **Category:** `system`
-- **Parameters:** `pattern` (required regex), `path` (required file or directory), `glob` (optional file filter for directory searches), `caseInsensitive`
+- **Parameters:** `pattern` (required regex), `path` (required file or directory; absolute, `~`-prefixed, or relative to the chat working directory), `glob` (optional file filter for directory searches), `caseInsensitive`
 - **Settings:** `allowedPaths`, `deniedPaths`, `maxResults` (1–5,000; default 100), `maxMatchesPerFile` (default 20), `maxFileSizeBytes` (default 1 MB), `includeDotfiles`
 - **Safety:** Files containing a null byte in the first 1 KB are treated as binary and skipped; files above `maxFileSizeBytes` are skipped. The regex is compiled with `new RegExp` and rejected via `GrepPatternError` if invalid.
 - **Execution:** When `path` is a directory, walks it with `Bun.Glob` (filtered by the optional `glob`); for each candidate, reads with `Bun.file().text()`, splits by newline, and records `{ file, line, text }` matches.
@@ -143,7 +144,7 @@ Run a shell command and return its captured `stdout`, `stderr`, exit code, and t
 
 - **Tool names:** `bash`, `zsh`, `powershell`
 - **Category:** `system`
-- **Parameters:** `command` (required), `cwd` (optional working directory; `~` is expanded)
+- **Parameters:** `command` (required), `cwd` (optional working directory; absolute, `~`-prefixed, or relative to the chat working directory)
 - **Settings:** `timeoutSeconds` (5s–600s, default 30s), `maxOutputBytes` (1KB–1MB per stream, default 100KB)
 - **Availability:** Registered at import time only when the interpreter exists — `bash`/`zsh` via `Bun.which`, `powershell` only on Windows (`pwsh` then `powershell`). Unavailable shells are never offered to models.
 - **Safety:** Disabled by default (`enabledByDefault: false`); requires explicit opt-in. The process is killed with `SIGKILL` after the configured timeout, and per-stream output is capped at `maxOutputBytes` (flagged via `truncated`). Parent abort (user cancel or stream teardown) is tracked separately from timeout and does not surface as a timeout error.

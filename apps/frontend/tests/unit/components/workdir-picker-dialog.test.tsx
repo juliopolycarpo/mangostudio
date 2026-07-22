@@ -54,6 +54,9 @@ describe('WorkdirPickerDialog', () => {
       />
     );
 
+    expect(
+      screen.getByText(/Agent file tools resolve relative paths from this folder/)
+    ).toBeInTheDocument();
     expect(await screen.findByRole('button', { name: 'mangostudio' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '.private' })).toBeNull();
 

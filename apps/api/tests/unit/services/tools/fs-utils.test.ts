@@ -96,16 +96,59 @@ describe('expandHome', () => {
 
 describe('resolveAndValidatePath', () => {
   it('resolves and returns a valid path when no restrictions are set', () => {
-    const resolved = resolveAndValidatePath(tempDir, { allowedPaths: [], deniedPaths: [] });
+    const resolved = resolveAndValidatePath(tempDir, {
+      settings: { allowedPaths: [], deniedPaths: [] },
+    });
     expect(resolved).toBe(tempDir);
+  });
+
+  it('resolves a relative path from the chat workdir', () => {
+    const resolved = resolveAndValidatePath('src/index.ts', {
+      settings: { allowedPaths: [], deniedPaths: [] },
+      workdir: tempDir,
+    });
+
+    expect(resolved).toBe(join(tempDir, 'src/index.ts'));
+  });
+
+  it('uses the workdir policy root for relative paths when available', () => {
+    const policyRoot = join(tempDir, 'policy-root');
+    const resolved = resolveAndValidatePath('src/index.ts', {
+      settings: { allowedPaths: [], deniedPaths: [] },
+      workdir: join(tempDir, 'context-workdir'),
+      workdirPolicy: { root: policyRoot, restricted: false },
+    });
+
+    expect(resolved).toBe(join(policyRoot, 'src/index.ts'));
+  });
+
+  it('rejects a relative path when no chat workdir is available', () => {
+    expect(() =>
+      resolveAndValidatePath('src/index.ts', {
+        settings: { allowedPaths: [], deniedPaths: [] },
+      })
+    ).toThrow(
+      'Relative path "src/index.ts" cannot be resolved: no working directory is bound to this chat. Pass an absolute path.'
+    );
+  });
+
+  it('rejects a relative path that escapes a restricted workdir', () => {
+    expect(() =>
+      resolveAndValidatePath('../../etc/passwd', {
+        settings: { allowedPaths: [], deniedPaths: [] },
+        workdirPolicy: { root: tempDir, restricted: true },
+      })
+    ).toThrow('outside the chat working directory');
   });
 
   it('allows paths inside an allowed directory', () => {
     const subDir = join(tempDir, 'sub');
     mkdirSync(subDir);
     const resolved = resolveAndValidatePath(subDir, {
-      allowedPaths: [{ path: tempDir, enabled: true }],
-      deniedPaths: [],
+      settings: {
+        allowedPaths: [{ path: tempDir, enabled: true }],
+        deniedPaths: [],
+      },
     });
     expect(resolved).toBe(subDir);
   });
@@ -113,8 +156,10 @@ describe('resolveAndValidatePath', () => {
   it('rejects paths outside the allowed list', () => {
     expect(() =>
       resolveAndValidatePath('/etc', {
-        allowedPaths: [{ path: tempDir, enabled: true }],
-        deniedPaths: [],
+        settings: {
+          allowedPaths: [{ path: tempDir, enabled: true }],
+          deniedPaths: [],
+        },
       })
     ).toThrow(PathAccessError);
   });
@@ -122,8 +167,10 @@ describe('resolveAndValidatePath', () => {
   it('rejects denied paths', () => {
     expect(() =>
       resolveAndValidatePath('/etc/passwd', {
-        allowedPaths: [],
-        deniedPaths: [{ path: '/etc/passwd', enabled: true }],
+        settings: {
+          allowedPaths: [],
+          deniedPaths: [{ path: '/etc/passwd', enabled: true }],
+        },
       })
     ).toThrow(PathAccessError);
   });
@@ -131,8 +178,10 @@ describe('resolveAndValidatePath', () => {
   it('rejects paths inside a denied directory', () => {
     expect(() =>
       resolveAndValidatePath('/etc/ssh', {
-        allowedPaths: [],
-        deniedPaths: [{ path: '/etc', enabled: true }],
+        settings: {
+          allowedPaths: [],
+          deniedPaths: [{ path: '/etc', enabled: true }],
+        },
       })
     ).toThrow(PathAccessError);
   });
@@ -141,8 +190,10 @@ describe('resolveAndValidatePath', () => {
     const subDir = join(tempDir, 'nested');
     mkdirSync(subDir);
     const resolved = resolveAndValidatePath(subDir, {
-      allowedPaths: [{ path: tempDir, enabled: true }],
-      deniedPaths: [{ path: '/unrelated', enabled: true }],
+      settings: {
+        allowedPaths: [{ path: tempDir, enabled: true }],
+        deniedPaths: [{ path: '/unrelated', enabled: true }],
+      },
     });
     expect(resolved).toBe(subDir);
   });
@@ -152,8 +203,10 @@ describe('resolveAndValidatePath', () => {
     mkdirSync(deniedSub);
     expect(() =>
       resolveAndValidatePath(deniedSub, {
-        allowedPaths: [{ path: tempDir, enabled: true }],
-        deniedPaths: [{ path: deniedSub, enabled: true }],
+        settings: {
+          allowedPaths: [{ path: tempDir, enabled: true }],
+          deniedPaths: [{ path: deniedSub, enabled: true }],
+        },
       })
     ).toThrow(PathAccessError);
   });
@@ -162,9 +215,11 @@ describe('resolveAndValidatePath', () => {
     const home = Bun.env.HOME ?? '';
     if (!home) return;
     expect(() =>
-      resolveAndValidatePath(home, {
-        allowedPaths: [{ path: '~', enabled: true }],
-        deniedPaths: [],
+      resolveAndValidatePath('~', {
+        settings: {
+          allowedPaths: [{ path: '~', enabled: true }],
+          deniedPaths: [],
+        },
       })
     ).not.toThrow();
   });
@@ -172,11 +227,13 @@ describe('resolveAndValidatePath', () => {
   it('ignores disabled allowed paths', () => {
     expect(() =>
       resolveAndValidatePath('/etc', {
-        allowedPaths: [
-          { path: tempDir, enabled: true },
-          { path: '/etc', enabled: false },
-        ],
-        deniedPaths: [],
+        settings: {
+          allowedPaths: [
+            { path: tempDir, enabled: true },
+            { path: '/etc', enabled: false },
+          ],
+          deniedPaths: [],
+        },
       })
     ).toThrow(PathAccessError);
   });
@@ -185,11 +242,13 @@ describe('resolveAndValidatePath', () => {
     const subDir = join(tempDir, 'allowed');
     mkdirSync(subDir);
     const resolved = resolveAndValidatePath(subDir, {
-      allowedPaths: [],
-      deniedPaths: [
-        { path: tempDir, enabled: false },
-        { path: '/other', enabled: true },
-      ],
+      settings: {
+        allowedPaths: [],
+        deniedPaths: [
+          { path: tempDir, enabled: false },
+          { path: '/other', enabled: true },
+        ],
+      },
     });
     expect(resolved).toBe(subDir);
   });

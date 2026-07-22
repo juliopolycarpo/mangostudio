@@ -4,7 +4,6 @@
  * interpreter and copy differ, so they are built from this single source.
  */
 
-import { resolve } from 'node:path';
 import { clampIntegerSetting, getOptionalString, getRequiredString } from '../arg-parsing';
 import {
   buildToolExecutionTimeoutDescriptor,
@@ -14,7 +13,11 @@ import {
   ToolExecutionTimedOutError,
 } from '../execution-timeout';
 import type { RegisteredTool, ToolContext } from '../types';
-import { assertWorkdirContainment, expandHome, normalizeStringList } from './_fs-utils';
+import {
+  assertWorkdirContainment,
+  normalizeStringList,
+  resolveWorkdirRelativePath,
+} from './_fs-utils';
 import { runShellCommand, type ShellCommandResult, type ShellKind } from './_shell-exec';
 
 export const SHELL_DEFAULT_TIMEOUT_SECONDS = TOOL_EXECUTION_TIMEOUT_SECONDS_DEFAULT;
@@ -87,7 +90,8 @@ async function execute(
   const requestedCwd = getOptionalString(args.cwd) ?? context.workdir;
   // Spawn with the same resolved path that was validated, so `~` and relative
   // inputs cannot diverge between the containment check and the child process.
-  const cwd = requestedCwd ? resolve(expandHome(requestedCwd)) : undefined;
+  // Relative input anchors to the chat workdir, matching the filesystem tools.
+  const cwd = requestedCwd ? resolveWorkdirRelativePath(requestedCwd, context) : undefined;
   if (cwd) {
     assertWorkdirContainment(cwd, context.workdirPolicy);
   }
@@ -136,7 +140,7 @@ function buildDefinition(kind: ShellKind, description: string) {
         cwd: {
           type: 'string',
           description:
-            'Optional working directory. Absolute path or one starting with ~. Defaults to the chat working directory when available.',
+            'Optional absolute path, ~ path, or path relative to the chat working directory. Defaults to the chat working directory when available.',
         },
       },
       required: ['command'],

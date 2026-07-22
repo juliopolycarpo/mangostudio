@@ -75,6 +75,29 @@ describe('normalizeWriteFileToolSettings', () => {
 });
 
 describe('executeWriteFile', () => {
+  it('writes a relative path inside the chat workdir', async () => {
+    const filePath = join(tempDir, 'src', 'index.ts');
+
+    const result = await executeWriteFile(
+      { path: 'src/index.ts', content: 'export const value = 1;' },
+      { ...makeContext(), workdir: tempDir }
+    );
+
+    expect(result.path).toBe('src/index.ts');
+    expect(result.created).toBe(true);
+    expect(await readBack(filePath)).toBe('export const value = 1;');
+  });
+
+  it('rejects a relative path without a workdir before writing anything', async () => {
+    const relativePath = `write-file-no-workdir-${crypto.randomUUID()}/index.ts`;
+    const processRelativePath = join(process.cwd(), relativePath);
+
+    await expect(
+      executeWriteFile({ path: relativePath, content: 'must not be written' }, makeContext())
+    ).rejects.toThrow('no working directory is bound to this chat');
+    expect(existsSync(processRelativePath)).toBe(false);
+  });
+
   it('writes content to a new file and returns created=true', async () => {
     const filePath = join(tempDir, 'hello.txt');
 

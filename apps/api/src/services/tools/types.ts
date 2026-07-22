@@ -27,7 +27,7 @@ export interface WorkdirPolicy {
 export interface ToolContext {
   userId: string;
   chatId: string;
-  /** Chat-bound server directory used when a filesystem tool omits its own path. */
+  /** Chat-bound server directory: defaults omitted tool paths and anchors relative ones. */
   workdir?: string;
   /** When set with `restricted: true`, builtin path tools must stay inside `root`. */
   workdirPolicy?: WorkdirPolicy;
