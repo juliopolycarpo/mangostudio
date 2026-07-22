@@ -1127,7 +1127,7 @@ export const messages = {
     chatSidebarDescription:
       'Arraste a borda da barra lateral no desktop para ver títulos de chat mais longos.',
     chatSidebarWidth: 'Largura atual: {width}px',
-    chatSidebarResetWidth: 'Redefinir largura',
+    chatSidebarResetWidth: 'Redefinir largura da barra lateral',
     chatSidebarResize: 'Redimensionar barra lateral de chats',
   },
 
@@ -1240,7 +1240,7 @@ export const messages = {
       unstageAll: 'Remover tudo de {group} da preparação',
       stageAllButton: 'Preparar tudo',
       unstageAllButton: 'Remover tudo',
-      stageEverything: 'Preparar tudo',
+      stageEverything: 'Preparar tudo do repositório',
       unstageEverything: 'Remover tudo da preparação',
       failed: 'A ação do Git falhou.',
       viewDiff: 'Ver diff de {path}',

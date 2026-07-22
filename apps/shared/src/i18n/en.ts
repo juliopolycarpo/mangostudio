@@ -1113,7 +1113,7 @@ export const messages: Messages = {
     chatSidebarTitle: 'Chat sidebar',
     chatSidebarDescription: 'Drag the sidebar edge on desktop to show longer chat titles.',
     chatSidebarWidth: 'Current width: {width}px',
-    chatSidebarResetWidth: 'Reset width',
+    chatSidebarResetWidth: 'Reset sidebar width',
     chatSidebarResize: 'Resize chat sidebar',
   },
 
