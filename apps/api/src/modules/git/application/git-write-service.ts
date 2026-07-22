@@ -243,7 +243,20 @@ export function discardPaths(
       }
     }
     await runGit(['clean', '-f', '--', ...pathspecs], { cwd: root, signal });
-    return await getRepoStatus(root, signal);
+    const cleaned = await getRepoStatus(root, signal);
+    // `git clean -f` refuses to delete a directory owned by another Git
+    // repository and still exits 0, so a surviving entry is a silent no-op that
+    // must not be reported to the caller as a successful deletion.
+    const survivors = new Set(cleaned.untracked.map((change) => change.path));
+    const skipped = input.paths.filter((path) => survivors.has(path));
+    if (skipped.length > 0) {
+      throw new GitWriteError(
+        `Git refused to delete paths owned by another repository: ${skipped.join(', ')}`,
+        409,
+        ERROR_CODES.CONFLICT
+      );
+    }
+    return cleaned;
   });
 }
 
@@ -418,21 +431,19 @@ export function checkoutRemoteBranch(
     }
     const localName = remoteRef.slice(slash + 1);
 
-    try {
-      await runGit(['rev-parse', '--verify', '--quiet', `refs/remotes/${remoteRef}`], {
-        cwd: root,
-        signal,
-      });
-    } catch (error) {
-      if (error instanceof GitCliError) {
-        throw new GitWriteError(
-          `Remote branch was not found: ${remoteRef}`,
-          404,
-          ERROR_CODES.NOT_FOUND,
-          commandDetail(error)
-        );
-      }
-      throw error;
+    // `--quiet` turns a missing ref into exit 1 with no output; every other
+    // failure (a malformed ref, an unreadable object store, an aborted command)
+    // still raises and must not be reported as a missing branch.
+    const verified = await runGit(
+      ['rev-parse', '--verify', '--quiet', `refs/remotes/${remoteRef}`],
+      { cwd: root, signal, acceptedExitCodes: [1] }
+    );
+    if (verified.exitCode !== 0) {
+      throw new GitWriteError(
+        `Remote branch was not found: ${remoteRef}`,
+        404,
+        ERROR_CODES.NOT_FOUND
+      );
     }
 
     try {
@@ -449,16 +460,12 @@ export function checkoutRemoteBranch(
 }
 
 async function hasLocalBranch(root: string, name: string, signal?: AbortSignal): Promise<boolean> {
-  try {
-    await runGit(['show-ref', '--verify', '--quiet', `refs/heads/${name}`], {
-      cwd: root,
-      signal,
-    });
-    return true;
-  } catch (error) {
-    if (error instanceof GitCliError && error.exitCode === 1) return false;
-    throw error;
-  }
+  const result = await runGit(['show-ref', '--verify', '--quiet', `refs/heads/${name}`], {
+    cwd: root,
+    signal,
+    acceptedExitCodes: [1],
+  });
+  return result.exitCode === 0;
 }
 
 export function createBranch(

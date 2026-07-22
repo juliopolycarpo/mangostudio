@@ -512,6 +512,28 @@ describe('Git write routes', () => {
     }
   );
 
+  it.skipIf(!hasGit)('reports the untracked paths Git refused to delete', async () => {
+    const workdir = await createTempRepo();
+    await writeFile(join(workdir, 'tracked.txt'), 'initial\n');
+    await runFixtureGit(workdir, ['add', 'tracked.txt']);
+    await runFixtureGit(workdir, ['commit', '-m', 'initial']);
+    // `git clean -f` skips a directory owned by another repository and still
+    // exits 0, so the route must not report the no-op as a deletion.
+    await mkdir(join(workdir, 'nested'));
+    await runFixtureGit(join(workdir, 'nested'), ['init']);
+    await writeFile(join(workdir, 'nested', 'inner.txt'), 'inner\n');
+    const { app, chatId } = await createRouteFixture(workdir);
+
+    const response = await postJson(app, '/git/discard', {
+      chatId,
+      paths: ['nested/'],
+      mode: 'untracked',
+    });
+    expect(response.status).toBe(409);
+    expect(((await response.json()) as { code: string }).code).toBe('CONFLICT');
+    expect(await Bun.file(join(workdir, 'nested', 'inner.txt')).exists()).toBe(true);
+  });
+
   it.skipIf(!hasGit)('lists remote branches and creates a local tracking branch', async () => {
     const bare = await realpath(await mkdtemp(join(tmpdir(), 'mango-git-bare-')));
     tempDirs.push(bare);
