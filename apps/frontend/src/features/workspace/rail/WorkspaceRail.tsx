@@ -6,16 +6,8 @@ import {
   type WorkspacePanelSettings,
 } from '@mangostudio/shared/workspaces';
 import { PanelRightOpen } from 'lucide-react';
-import {
-  type KeyboardEvent,
-  type PointerEvent,
-  type Ref,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from 'react';
+import { type Ref, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { EdgeResizeHandle } from '@/components/layout/EdgeResizeHandle';
 import { useChatTodos } from '@/features/chat/hooks/use-chat-todos';
 import { useI18n } from '@/hooks/use-i18n';
 import { getAvailableWorkspacePanels, type RailPanelDefinition } from './panel-registry';
@@ -24,7 +16,6 @@ import { readRailCollapsed, writeRailCollapsed } from './rail-state';
 
 const DESKTOP_RAIL_QUERY = '(min-width: 1024px)';
 const COLLAPSED_RAIL_WIDTH = 48;
-const RESIZE_STEP = 16;
 
 interface WorkspaceRailProps {
   readonly chatId: string;
@@ -107,14 +98,13 @@ export function WorkspaceRail({
     if (collapsed) setCollapsed(false);
   };
 
+  // EdgeResizeHandle already clamps and rounds against the same bounds.
   const resize = (nextWidth: number) => {
-    const clamped = clampWidth(nextWidth);
-    widthRef.current = clamped;
-    setWidth(clamped);
+    widthRef.current = nextWidth;
+    setWidth(nextWidth);
   };
 
-  const commitWidth = (nextWidth: number) => {
-    resize(nextWidth);
+  const commitWidth = () => {
     onWidthChange?.(widthRef.current);
   };
 
@@ -151,11 +141,14 @@ export function WorkspaceRail({
         style={{ width: collapsed ? COLLAPSED_RAIL_WIDTH : width }}
       >
         {!collapsed ? (
-          <RailResizeHandle
+          <EdgeResizeHandle
+            edge="left"
             width={width}
+            min={WORKSPACE_PANEL_WIDTH_MIN}
+            max={WORKSPACE_PANEL_WIDTH_MAX}
             label={t.workspace.sidePanelResize}
             onResize={resize}
-            onResizeEnd={() => commitWidth(widthRef.current)}
+            onResizeEnd={commitWidth}
           />
         ) : null}
         <PanelDock
@@ -267,81 +260,6 @@ function PanelDock({
   );
 }
 
-interface RailResizeHandleProps {
-  readonly width: number;
-  readonly label: string;
-  readonly onResize: (width: number) => void;
-  readonly onResizeEnd: () => void;
-}
-
-function RailResizeHandle({ width, label, onResize, onResizeEnd }: RailResizeHandleProps) {
-  const dragRef = useRef<{ pointerId: number; startX: number; startWidth: number } | null>(null);
-  const keyboardResizedRef = useRef(false);
-
-  const handlePointerDown = (event: PointerEvent<HTMLHRElement>) => {
-    if (event.button !== 0) return;
-    dragRef.current = { pointerId: event.pointerId, startX: event.clientX, startWidth: width };
-    event.currentTarget.setPointerCapture?.(event.pointerId);
-  };
-
-  const handlePointerMove = (event: PointerEvent<HTMLHRElement>) => {
-    const drag = dragRef.current;
-    if (!drag || drag.pointerId !== event.pointerId) return;
-    onResize(drag.startWidth + drag.startX - event.clientX);
-  };
-
-  /**
-   * Also wired to `pointercancel`/`lostpointercapture`: without them an interrupted
-   * drag would leave `dragRef` populated, and the next hover over the handle would
-   * resize the rail with no button held down.
-   */
-  const endDrag = (event: PointerEvent<HTMLHRElement>) => {
-    if (dragRef.current?.pointerId !== event.pointerId) return;
-    dragRef.current = null;
-    event.currentTarget.releasePointerCapture?.(event.pointerId);
-    onResizeEnd();
-  };
-
-  const handleKeyDown = (event: KeyboardEvent<HTMLHRElement>) => {
-    let nextWidth: number | null = null;
-    if (event.key === 'ArrowLeft') nextWidth = width + RESIZE_STEP;
-    if (event.key === 'ArrowRight') nextWidth = width - RESIZE_STEP;
-    if (event.key === 'Home') nextWidth = WORKSPACE_PANEL_WIDTH_MIN;
-    if (event.key === 'End') nextWidth = WORKSPACE_PANEL_WIDTH_MAX;
-    if (nextWidth === null) return;
-    event.preventDefault();
-    keyboardResizedRef.current = true;
-    onResize(nextWidth);
-  };
-
-  // Held arrow keys resize live but persist once, so a repeat burst is one settings write.
-  const endKeyboardResize = () => {
-    if (!keyboardResizedRef.current) return;
-    keyboardResizedRef.current = false;
-    onResizeEnd();
-  };
-
-  return (
-    <hr
-      aria-orientation="vertical"
-      aria-label={label}
-      aria-valuemin={WORKSPACE_PANEL_WIDTH_MIN}
-      aria-valuemax={WORKSPACE_PANEL_WIDTH_MAX}
-      aria-valuenow={width}
-      tabIndex={0}
-      onPointerDown={handlePointerDown}
-      onPointerMove={handlePointerMove}
-      onPointerUp={endDrag}
-      onPointerCancel={endDrag}
-      onLostPointerCapture={endDrag}
-      onKeyDown={handleKeyDown}
-      onKeyUp={endKeyboardResize}
-      onBlur={endKeyboardResize}
-      className="absolute inset-y-0 left-0 z-10 m-0 w-2 -translate-x-1/2 cursor-col-resize touch-none border-0 bg-transparent transition-colors hover:bg-primary/15 focus-visible:bg-primary/20 focus-visible:outline-none"
-    />
-  );
-}
-
 function useDesktopRail(): boolean {
   const [matches, setMatches] = useState(() => window.matchMedia(DESKTOP_RAIL_QUERY).matches);
 
@@ -354,11 +272,4 @@ function useDesktopRail(): boolean {
   }, []);
 
   return matches;
-}
-
-function clampWidth(width: number): number {
-  return Math.min(
-    WORKSPACE_PANEL_WIDTH_MAX,
-    Math.max(WORKSPACE_PANEL_WIDTH_MIN, Math.round(width))
-  );
 }

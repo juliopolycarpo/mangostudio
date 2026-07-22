@@ -1,9 +1,10 @@
+import { ERROR_CODES } from '@mangostudio/shared/errors';
 import type { GitBranchInfo } from '@mangostudio/shared/git';
 import { ArrowDown, ArrowUp, CloudDownload } from 'lucide-react';
 import { useState } from 'react';
 import { useToast } from '@/components/ui/Toast';
 import { useI18n } from '@/hooks/use-i18n';
-import { resolveApiErrorMessage } from '@/lib/utils';
+import { ApiError, resolveApiErrorMessage } from '@/lib/utils';
 import { useGitFetch, useGitPull, useGitPush } from './hooks/use-git-state';
 
 export function RemoteActions({
@@ -17,16 +18,26 @@ export function RemoteActions({
   const { toast } = useToast();
   const labels = t.git.remote;
   const [prune, setPrune] = useState(true);
+  const [guidance, setGuidance] = useState<string | null>(null);
   const fetchMutation = useGitFetch(chatId);
   const pullMutation = useGitPull(chatId);
   const pushMutation = useGitPush(chatId);
   const pending = fetchMutation.isPending || pullMutation.isPending || pushMutation.isPending;
+
+  const resolveGuidance = (error: unknown): string | null => {
+    if (!(error instanceof ApiError)) return null;
+    if (error.code === ERROR_CODES.AUTH_REQUIRED) return labels.authRequired;
+    if (error.code === ERROR_CODES.NON_FAST_FORWARD) return labels.nonFastForward;
+    if (error.code === ERROR_CODES.HISTORY_DIVERGED) return labels.historyDiverged;
+    return null;
+  };
 
   const run = async (operation: 'fetch' | 'pull' | 'push') => {
     try {
       if (operation === 'fetch') await fetchMutation.mutateAsync({ prune });
       else if (operation === 'pull') await pullMutation.mutateAsync({});
       else await pushMutation.mutateAsync({});
+      setGuidance(null);
       toast(
         operation === 'fetch'
           ? labels.fetched
@@ -36,12 +47,21 @@ export function RemoteActions({
         'success'
       );
     } catch (error) {
+      const nextGuidance = resolveGuidance(error);
+      setGuidance(nextGuidance);
       toast(resolveApiErrorMessage(error, labels.actionError), 'error');
     }
   };
 
   return (
     <div className="mt-2 space-y-2 pl-6">
+      {(branch.ahead > 0 || branch.behind > 0) && branch.upstream ? (
+        <p className="font-mono text-[11px] text-on-surface-variant">
+          {labels.syncSummary
+            .replace('{ahead}', String(branch.ahead))
+            .replace('{behind}', String(branch.behind))}
+        </p>
+      ) : null}
       <div className="flex flex-wrap gap-1.5">
         <button
           type="button"
@@ -94,6 +114,11 @@ export function RemoteActions({
         />
         {labels.prune}
       </label>
+      {guidance ? (
+        <p className="rounded-lg border border-warning/30 bg-warning/10 px-2 py-1.5 text-[11px] leading-4 text-warning">
+          {guidance}
+        </p>
+      ) : null}
     </div>
   );
 }

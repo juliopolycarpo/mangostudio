@@ -1,6 +1,12 @@
 import type { Chat } from '@mangostudio/shared';
+import {
+  CHAT_SIDEBAR_WIDTH_DEFAULT,
+  CHAT_SIDEBAR_WIDTH_MAX,
+  CHAT_SIDEBAR_WIDTH_MIN,
+} from '@mangostudio/shared/workspaces';
 import { Image, LayoutGrid, MessageSquare, Pencil, Plus, Settings, Trash2, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+import { EdgeResizeHandle } from '@/components/layout/EdgeResizeHandle';
 import { useToast } from '@/components/ui';
 import { Logo } from '@/components/ui/Logo';
 import type { ContextInfo } from '@/features/generation/types';
@@ -19,6 +25,10 @@ interface Props {
   contextCache?: Map<string, ContextInfo>;
   isMobileOpen?: boolean;
   onMobileClose?: () => void;
+  width?: number;
+  /** Fires on every drag/keyboard step so the layout can reserve the new space live. */
+  onWidthPreview?: (width: number) => void;
+  onWidthChange?: (width: number) => void;
 }
 
 export function Sidebar({
@@ -33,12 +43,22 @@ export function Sidebar({
   contextCache,
   isMobileOpen = false,
   onMobileClose,
+  width = CHAT_SIDEBAR_WIDTH_DEFAULT,
+  onWidthPreview,
+  onWidthChange,
 }: Props) {
   const [editingChatId, setEditingChatId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState('');
+  const [liveWidth, setLiveWidth] = useState(width);
+  const widthRef = useRef(width);
   const editInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
   const { t } = useI18n();
+
+  useEffect(() => {
+    setLiveWidth(width);
+    widthRef.current = width;
+  }, [width]);
 
   useEffect(() => {
     if (editingChatId && editInputRef.current) {
@@ -83,6 +103,16 @@ export function Sidebar({
     onMobileClose?.();
   };
 
+  const resize = (nextWidth: number) => {
+    widthRef.current = nextWidth;
+    setLiveWidth(nextWidth);
+    onWidthPreview?.(nextWidth);
+  };
+
+  const commitWidth = () => {
+    onWidthChange?.(widthRef.current);
+  };
+
   const navItemClass = (page: 'gallery' | 'settings' | 'studio') =>
     `flex items-center gap-3 px-4 py-3 rounded-lg transition-all duration-300 w-full text-left ${
       currentPage === page
@@ -100,8 +130,11 @@ export function Sidebar({
           aria-hidden="true"
         />
       )}
+      {/* The width preference is a desktop one, so `max-w` keeps the mobile
+          slide-over inside narrow viewports. */}
       <aside
-        className={`bg-surface-container-low flex-col h-full border-r border-outline-variant/20 w-64 fixed left-0 top-0 z-50 transition-transform duration-300 ease-out
+        style={{ width: liveWidth }}
+        className={`bg-surface-container-low flex-col h-full max-w-[85vw] md:max-w-none border-r border-outline-variant/20 fixed left-0 top-0 z-50 transition-transform duration-300 ease-out
           ${isMobileOpen ? 'flex translate-x-0' : 'hidden -translate-x-full'} md:flex md:translate-x-0
         `}
       >
@@ -219,7 +252,9 @@ export function Sidebar({
                     />
                   </div>
                 ) : (
-                  <span className="font-body text-sm truncate flex-1">{chat.title}</span>
+                  <span className="font-body text-sm truncate flex-1" title={chat.title}>
+                    {chat.title}
+                  </span>
                 )}
 
                 {editingChatId !== chat.id && (
@@ -273,6 +308,20 @@ export function Sidebar({
             <span className="font-label font-medium text-sm">{t.settings.title}</span>
           </button>
         </div>
+
+        {onWidthChange ? (
+          <div className="absolute inset-y-0 right-0 hidden md:block">
+            <EdgeResizeHandle
+              edge="right"
+              width={liveWidth}
+              min={CHAT_SIDEBAR_WIDTH_MIN}
+              max={CHAT_SIDEBAR_WIDTH_MAX}
+              label={t.workspace.chatSidebarResize}
+              onResize={resize}
+              onResizeEnd={commitWidth}
+            />
+          </div>
+        ) : null}
       </aside>
     </>
   );

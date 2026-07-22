@@ -1,4 +1,7 @@
 export {
+  CHAT_SIDEBAR_WIDTH_DEFAULT,
+  CHAT_SIDEBAR_WIDTH_MAX,
+  CHAT_SIDEBAR_WIDTH_MIN,
   type DirectoryEntry,
   DirectoryEntrySchema,
   type ListDirectoryResponse,

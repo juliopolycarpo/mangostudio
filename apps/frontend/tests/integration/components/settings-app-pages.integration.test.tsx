@@ -63,6 +63,7 @@ function GeneralSettingsHarness() {
       setWorkspacePanelVisible={settings.setWorkspacePanelVisible}
       moveWorkspacePanel={settings.moveWorkspacePanel}
       setWorkspacePanelWidth={settings.setWorkspacePanelWidth}
+      setChatSidebarWidth={settings.setChatSidebarWidth}
       addRecentWorkdir={settings.addRecentWorkdir}
     />
   );
@@ -352,7 +353,7 @@ describe('app settings pages integration', () => {
         ...orderedSettings.workspaceSettings,
         sidePanel: {
           ...orderedSettings.workspaceSettings.sidePanel,
-          width: 320,
+          width: 360,
         },
       },
     };

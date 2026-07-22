@@ -33,6 +33,7 @@ function GeneralSettingsRoute() {
       setWorkspacePanelVisible={app.settings.setWorkspacePanelVisible}
       moveWorkspacePanel={app.settings.moveWorkspacePanel}
       setWorkspacePanelWidth={app.settings.setWorkspacePanelWidth}
+      setChatSidebarWidth={app.settings.setChatSidebarWidth}
       addRecentWorkdir={app.settings.addRecentWorkdir}
     />
   );

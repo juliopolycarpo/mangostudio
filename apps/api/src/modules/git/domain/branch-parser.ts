@@ -1,4 +1,4 @@
-import type { GitBranch } from '@mangostudio/shared/git';
+import type { GitBranch, GitRemoteBranch } from '@mangostudio/shared/git';
 
 const TRACKING_COUNT = /(ahead|behind) (\d+)/g;
 
@@ -24,6 +24,27 @@ export function parseBranchList(output: string): GitBranch[] {
     .sort((left, right) => {
       if (left.current !== right.current) return left.current ? -1 : 1;
       return left.name.localeCompare(right.name);
+    });
+}
+
+/**
+ * Parses remote-tracking refs from `git for-each-ref refs/remotes`.
+ * Symbolic remote HEADs (`origin/HEAD`) are omitted.
+ */
+export function parseRemoteBranchList(output: string): GitRemoteBranch[] {
+  return output
+    .split('\0')
+    .map((record) => record.trim())
+    .filter(Boolean)
+    .flatMap((ref) => {
+      if (ref.endsWith('/HEAD')) return [];
+      const slash = ref.indexOf('/');
+      if (slash <= 0 || slash === ref.length - 1) return [];
+      return [{ name: ref.slice(slash + 1), remote: ref.slice(0, slash), ref }];
+    })
+    .sort((left, right) => {
+      const remoteOrder = left.remote.localeCompare(right.remote);
+      return remoteOrder !== 0 ? remoteOrder : left.name.localeCompare(right.name);
     });
 }
 

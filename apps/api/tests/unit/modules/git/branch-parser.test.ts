@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import {
   parseBranchList,
   parseCheckoutBlockedPaths,
+  parseRemoteBranchList,
 } from '../../../../src/modules/git/domain/branch-parser';
 
 describe('branch parser', () => {
@@ -49,5 +50,12 @@ describe('branch parser', () => {
         ].join('\n')
       )
     ).toEqual(['src/panel.tsx', 'src/generated.ts']);
+  });
+
+  it('parses remote-tracking refs and drops symbolic remote HEADs', () => {
+    expect(parseRemoteBranchList('origin/HEAD\0origin/main\0upstream/feat/x\0')).toEqual([
+      { name: 'main', remote: 'origin', ref: 'origin/main' },
+      { name: 'feat/x', remote: 'upstream', ref: 'upstream/feat/x' },
+    ]);
   });
 });

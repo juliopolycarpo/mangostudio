@@ -24,14 +24,16 @@ const hooks = vi.hoisted(() => ({
   initError: null as Error | null,
   stage: vi.fn(),
   unstage: vi.fn(),
+  discard: vi.fn(),
   commit: vi.fn(),
   generate: vi.fn(),
   stashSave: vi.fn(),
   stashPop: vi.fn(),
   stashes: [] as Array<{ index: number; message: string; branch?: string }>,
-  branches: { branches: [] } as GitBranchesResponse,
+  branches: { branches: [], remotes: [] } as GitBranchesResponse,
   branchSwitch: vi.fn(),
   branchCreate: vi.fn(),
+  checkoutRemote: vi.fn(),
   gitFetch: vi.fn(),
   gitPull: vi.fn(),
   gitPush: vi.fn(),
@@ -71,6 +73,7 @@ vi.mock('../../../src/features/workspace/hooks/use-git-state', () => ({
   }),
   useStagePaths: () => ({ mutateAsync: hooks.stage, isPending: false }),
   useUnstagePaths: () => ({ mutateAsync: hooks.unstage, isPending: false }),
+  useDiscardPaths: () => ({ mutateAsync: hooks.discard, isPending: false }),
   useCommit: () => ({ mutateAsync: hooks.commit, isPending: false }),
   useGenerateCommitMessage: () => ({ mutateAsync: hooks.generate, isPending: false }),
   useGitStashes: () => ({ data: { stashes: hooks.stashes }, isLoading: false, error: null }),
@@ -79,6 +82,7 @@ vi.mock('../../../src/features/workspace/hooks/use-git-state', () => ({
   useGitBranches: () => ({ data: hooks.branches, isLoading: false, error: null }),
   useSwitchBranch: () => ({ mutateAsync: hooks.branchSwitch, isPending: false }),
   useCreateBranch: () => ({ mutateAsync: hooks.branchCreate, isPending: false }),
+  useCheckoutRemoteBranch: () => ({ mutateAsync: hooks.checkoutRemote, isPending: false }),
   useGitFetch: () => ({ mutateAsync: hooks.gitFetch, isPending: false }),
   useGitPull: () => ({ mutateAsync: hooks.gitPull, isPending: false }),
   useGitPush: () => ({ mutateAsync: hooks.gitPush, isPending: false }),
@@ -105,14 +109,16 @@ beforeEach(() => {
   hooks.mutate.mockReset();
   hooks.stage.mockReset();
   hooks.unstage.mockReset();
+  hooks.discard.mockReset();
   hooks.commit.mockReset();
   hooks.generate.mockReset();
   hooks.stashSave.mockReset();
   hooks.stashPop.mockReset();
   hooks.stashes = [];
-  hooks.branches = { branches: [] };
+  hooks.branches = { branches: [], remotes: [] };
   hooks.branchSwitch.mockReset();
   hooks.branchCreate.mockReset();
+  hooks.checkoutRemote.mockReset();
   hooks.gitFetch.mockReset();
   hooks.gitPull.mockReset();
   hooks.gitPush.mockReset();
@@ -176,6 +182,7 @@ describe('GitPanel', () => {
         { name: 'main', current: true, ahead: 0, behind: 0 },
         { name: 'feat/history', current: false, ahead: 0, behind: 0 },
       ],
+      remotes: [],
     };
     hooks.branchSwitch
       .mockRejectedValueOnce(
@@ -220,6 +227,7 @@ describe('GitPanel', () => {
     };
     hooks.branches = {
       branches: [{ name: 'main', current: true, ahead: 0, behind: 0 }],
+      remotes: [],
     };
 
     render(<GitPanel chatId="chat-1" />);
@@ -612,5 +620,59 @@ describe('GitPanel', () => {
 
     await user.click(screen.getByRole('button', { name: 'Pop stash Agent draft' }));
     expect(hooks.stashPop).toHaveBeenCalledWith({ index: 2 });
+  });
+
+  it('stages everything with the global action and discards untracked files after confirm', async () => {
+    const user = userEvent.setup();
+    hooks.data = {
+      state: 'repo',
+      workdir: '/srv/projects/mangostudio',
+      root: '/srv/projects/mangostudio',
+      status: {
+        branch: { name: 'main', ahead: 0, behind: 0 },
+        staged: [],
+        unstaged: [{ path: 'src/panel.tsx', status: 'modified' }],
+        untracked: [{ path: 'notes.txt', status: 'untracked' }],
+        conflicted: [],
+        clean: false,
+      },
+    };
+
+    render(<GitPanel chatId="chat-1" />);
+
+    await user.click(screen.getByRole('button', { name: 'Stage everything' }));
+    expect(hooks.stage).toHaveBeenCalledWith({ all: true });
+
+    await user.click(screen.getByRole('button', { name: 'Delete untracked file notes.txt' }));
+    expect(screen.getByRole('dialog', { name: 'Delete untracked files?' })).toBeVisible();
+    await user.click(screen.getByRole('button', { name: 'Delete files' }));
+    expect(hooks.discard).toHaveBeenCalledWith({ paths: ['notes.txt'], mode: 'untracked' });
+  });
+
+  it('checks out a remote-tracking branch from the branch menu', async () => {
+    const user = userEvent.setup();
+    hooks.data = {
+      state: 'repo',
+      workdir: '/srv/projects/mangostudio',
+      root: '/srv/projects/mangostudio',
+      status: {
+        branch: { name: 'main', ahead: 0, behind: 0 },
+        staged: [],
+        unstaged: [],
+        untracked: [],
+        conflicted: [],
+        clean: true,
+      },
+    };
+    hooks.branches = {
+      branches: [{ name: 'main', current: true, ahead: 0, behind: 0 }],
+      remotes: [{ name: 'feat/remote', remote: 'origin', ref: 'origin/feat/remote' }],
+    };
+
+    render(<GitPanel chatId="chat-1" />);
+
+    await user.click(screen.getByLabelText('Change branch'));
+    await user.click(screen.getByRole('button', { name: 'Check out origin/feat/remote' }));
+    expect(hooks.checkoutRemote).toHaveBeenCalledWith('origin/feat/remote');
   });
 });

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import {
   CommitBodySchema,
   CreateBranchBodySchema,
+  DiscardPathsBodySchema,
   GenerateCommitMessageBodySchema,
   GenerateCommitMessageResponseSchema,
   GitDiffQuerySchema,
@@ -26,6 +27,33 @@ describe('Git write contracts', () => {
 
     expect(Value.Check(StagePathsBodySchema, { chatId: 'chat-1', paths: [] })).toBe(false);
     expect(Value.Check(StagePathsBodySchema, { chatId: 'chat-1' })).toBe(false);
+  });
+
+  it('requires an explicit discard mode with at least one path', () => {
+    expect(
+      Value.Check(DiscardPathsBodySchema, {
+        chatId: 'chat-1',
+        paths: ['src/panel.tsx'],
+        mode: 'tracked',
+      })
+    ).toBe(true);
+    expect(
+      Value.Check(DiscardPathsBodySchema, {
+        chatId: 'chat-1',
+        paths: ['scratch.ts'],
+        mode: 'untracked',
+      })
+    ).toBe(true);
+    expect(
+      Value.Check(DiscardPathsBodySchema, { chatId: 'chat-1', paths: [], mode: 'tracked' })
+    ).toBe(false);
+    expect(
+      Value.Check(DiscardPathsBodySchema, {
+        chatId: 'chat-1',
+        paths: ['src/panel.tsx'],
+        mode: 'staged',
+      })
+    ).toBe(false);
   });
 
   it('constrains commit titles after surrounding whitespace is removed', () => {

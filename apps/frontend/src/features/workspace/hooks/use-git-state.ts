@@ -1,5 +1,6 @@
 import type {
   CommitResponse,
+  DiscardPathsBody,
   GenerateCommitMessageResponse,
   GitBranchesResponse,
   GitCommitDetailsResponse,
@@ -73,18 +74,21 @@ export const gitWriteScopes = {
   init: GIT_SCOPES,
   stage: ['state', 'diffs'],
   unstage: ['state', 'diffs'],
+  discard: ['state', 'diffs'],
   commit: ['state', 'history', 'commits', 'branches', 'diffs', 'github'],
   stashSave: ['state', 'stashes', 'diffs'],
   stashPop: ['state', 'stashes', 'diffs'],
   // createBranch runs `git switch -c` at the current HEAD — log is unchanged.
   createBranch: ['state', 'branches'],
   switchBranch: ['state', 'branches', 'history', 'diffs', 'github'],
+  checkoutRemote: ['state', 'branches', 'history', 'diffs', 'github'],
   fetch: ['state', 'branches', 'github'],
   pull: ['state', 'branches', 'history', 'commits', 'diffs', 'github'],
   push: ['state', 'branches', 'github'],
 } as const satisfies Record<string, readonly GitScope[]>;
 
 type GitPathSelection = { paths: string[] } | { all: true };
+export type GitDiscardSelection = Pick<DiscardPathsBody, 'paths' | 'mode'>;
 interface CommitInput {
   title: string;
   body?: string;
@@ -181,6 +185,18 @@ export function useUnstagePaths(chatId: string) {
   });
 }
 
+export function useDiscardPaths(chatId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: GitDiscardSelection): Promise<GitStatus> => {
+      const { data, error } = await client.api.git.discard.post({ chatId, ...input });
+      if (error) throw new ApiError(error.value);
+      return data as GitStatus;
+    },
+    onSuccess: () => invalidateGitScopes(queryClient, chatId, gitWriteScopes.discard),
+  });
+}
+
 export function useCommit(chatId: string) {
   const queryClient = useQueryClient();
   return useMutation({
@@ -272,6 +288,21 @@ export function useCreateBranch(chatId: string) {
       return data as GitRepoState;
     },
     onSuccess: () => invalidateGitScopes(queryClient, chatId, gitWriteScopes.createBranch),
+  });
+}
+
+export function useCheckoutRemoteBranch(chatId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (remoteRef: string): Promise<GitRepoState> => {
+      const { data, error } = await client.api.git.branches['checkout-remote'].post({
+        chatId,
+        remoteRef,
+      });
+      if (error) throw new ApiError(error.value);
+      return data as GitRepoState;
+    },
+    onSuccess: () => invalidateGitScopes(queryClient, chatId, gitWriteScopes.checkoutRemote),
   });
 }
 

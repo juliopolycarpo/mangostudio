@@ -1,12 +1,13 @@
 import { ERROR_CODES } from '@mangostudio/shared/errors';
 import type { GitBranchInfo } from '@mangostudio/shared/git';
-import { Check, ChevronDown, GitBranch, Plus } from 'lucide-react';
+import { Check, ChevronDown, Cloud, GitBranch, Plus } from 'lucide-react';
 import { type FormEvent, useRef, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { useToast } from '@/components/ui/Toast';
 import { useI18n } from '@/hooks/use-i18n';
 import { ApiError, resolveApiErrorMessage } from '@/lib/utils';
 import {
+  useCheckoutRemoteBranch,
   useCreateBranch,
   useGitBranches,
   useStashSave,
@@ -28,14 +29,24 @@ export function BranchControl({
   const branches = useGitBranches(chatId);
   const switchMutation = useSwitchBranch(chatId);
   const createMutation = useCreateBranch(chatId);
+  const checkoutRemoteMutation = useCheckoutRemoteBranch(chatId);
   const stashMutation = useStashSave(chatId);
   const menuRef = useRef<HTMLDetailsElement>(null);
   const [newBranch, setNewBranch] = useState('');
-  const [blockedSwitch, setBlockedSwitch] = useState<{ name: string; paths: string[] } | null>(
-    null
-  );
+  // `remoteRef` is set only when the blocked checkout targeted a remote-tracking
+  // ref: retrying it must re-create the local tracking branch, not `git switch`
+  // a local branch that does not exist yet.
+  const [blockedSwitch, setBlockedSwitch] = useState<{
+    name: string;
+    remoteRef?: string;
+    paths: string[];
+  } | null>(null);
   const branchName = branch.name ?? detachedLabel;
-  const pending = switchMutation.isPending || createMutation.isPending || stashMutation.isPending;
+  const pending =
+    switchMutation.isPending ||
+    createMutation.isPending ||
+    stashMutation.isPending ||
+    checkoutRemoteMutation.isPending;
 
   const switchTo = async (name: string) => {
     if (name === branch.name) return;
@@ -47,6 +58,24 @@ export function BranchControl({
       if (error instanceof ApiError && error.code === ERROR_CODES.CHECKOUT_BLOCKED) {
         setBlockedSwitch({
           name,
+          paths: error.details?.paths?.split('\n').filter(Boolean) ?? [],
+        });
+        return;
+      }
+      toast(resolveApiErrorMessage(error, labels.actionError), 'error');
+    }
+  };
+
+  const checkoutRemote = async (remoteRef: string, localName: string) => {
+    try {
+      await checkoutRemoteMutation.mutateAsync(remoteRef);
+      menuRef.current?.removeAttribute('open');
+      toast(labels.switched.replace('{branch}', localName), 'success');
+    } catch (error) {
+      if (error instanceof ApiError && error.code === ERROR_CODES.CHECKOUT_BLOCKED) {
+        setBlockedSwitch({
+          name: localName,
+          remoteRef,
           paths: error.details?.paths?.split('\n').filter(Boolean) ?? [],
         });
         return;
@@ -76,7 +105,11 @@ export function BranchControl({
         message: labels.stashMessage.replace('{branch}', blockedSwitch.name),
         includeUntracked: true,
       });
-      await switchMutation.mutateAsync(blockedSwitch.name);
+      if (blockedSwitch.remoteRef) {
+        await checkoutRemoteMutation.mutateAsync(blockedSwitch.remoteRef);
+      } else {
+        await switchMutation.mutateAsync(blockedSwitch.name);
+      }
       toast(labels.switched.replace('{branch}', blockedSwitch.name), 'success');
       setBlockedSwitch(null);
       menuRef.current?.removeAttribute('open');
@@ -84,6 +117,8 @@ export function BranchControl({
       toast(resolveApiErrorMessage(error, labels.actionError), 'error');
     }
   };
+
+  const remotes = branches.data?.remotes ?? [];
 
   return (
     <>
@@ -93,7 +128,10 @@ export function BranchControl({
           className="flex cursor-pointer list-none items-center gap-2 rounded-lg px-1 py-1 text-on-surface transition-colors hover:bg-surface-container-high [&::-webkit-details-marker]:hidden"
         >
           <GitBranch size={15} className="shrink-0 text-primary" />
-          <span className="min-w-0 flex-1 truncate font-mono text-xs font-semibold">
+          <span
+            className="min-w-0 flex-1 truncate font-mono text-xs font-semibold"
+            title={branchName}
+          >
             {branchName}
           </span>
           <ChevronDown
@@ -101,28 +139,59 @@ export function BranchControl({
             className="shrink-0 text-on-surface-variant transition-transform group-open:rotate-180"
           />
         </summary>
-        <div className="absolute left-0 top-full z-30 mt-1 w-64 overflow-hidden rounded-xl border border-outline-variant/20 bg-surface-container-high shadow-2xl">
-          <div className="app-scrollbar max-h-52 overflow-y-auto p-1.5">
+        <div className="absolute left-0 right-0 top-full z-30 mt-1 min-w-64 overflow-hidden rounded-xl border border-outline-variant/20 bg-surface-container-high shadow-2xl">
+          <div className="app-scrollbar max-h-64 overflow-y-auto p-1.5">
             {branches.isLoading ? (
               <p className="px-2 py-3 text-xs text-on-surface-variant">{t.common.loading}</p>
-            ) : branches.data?.branches.length ? (
-              branches.data.branches.map((item) => (
-                <button
-                  key={item.name}
-                  type="button"
-                  disabled={pending || item.current}
-                  onClick={() => void switchTo(item.name)}
-                  aria-label={labels.switchTo.replace('{branch}', item.name)}
-                  className="flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-2 text-left hover:bg-surface-container-highest disabled:cursor-default"
-                >
-                  <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-on-surface">
-                    {item.name}
-                  </span>
-                  {item.current ? <Check size={13} className="text-primary" /> : null}
-                </button>
-              ))
             ) : (
-              <p className="px-2 py-3 text-xs text-on-surface-variant">{labels.empty}</p>
+              <>
+                <p className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">
+                  {labels.localSection}
+                </p>
+                {branches.data?.branches.length ? (
+                  branches.data.branches.map((item) => (
+                    <button
+                      key={item.name}
+                      type="button"
+                      disabled={pending || item.current}
+                      onClick={() => void switchTo(item.name)}
+                      aria-label={labels.switchTo.replace('{branch}', item.name)}
+                      title={item.name}
+                      className="flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-2 text-left hover:bg-surface-container-highest disabled:cursor-default"
+                    >
+                      <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-on-surface">
+                        {item.name}
+                      </span>
+                      {item.current ? <Check size={13} className="text-primary" /> : null}
+                    </button>
+                  ))
+                ) : (
+                  <p className="px-2 py-3 text-xs text-on-surface-variant">{labels.empty}</p>
+                )}
+                {remotes.length > 0 ? (
+                  <>
+                    <p className="mt-1 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">
+                      {labels.remoteSection}
+                    </p>
+                    {remotes.map((item) => (
+                      <button
+                        key={item.ref}
+                        type="button"
+                        disabled={pending}
+                        onClick={() => void checkoutRemote(item.ref, item.name)}
+                        aria-label={labels.checkoutRemote.replace('{branch}', item.ref)}
+                        title={item.ref}
+                        className="flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-2 text-left hover:bg-surface-container-highest disabled:cursor-default"
+                      >
+                        <Cloud size={12} className="shrink-0 text-on-surface-variant" />
+                        <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-on-surface">
+                          {item.ref}
+                        </span>
+                      </button>
+                    ))}
+                  </>
+                ) : null}
+              </>
             )}
           </div>
           <form
@@ -176,7 +245,7 @@ export function BranchControl({
                 </p>
                 <ul className="max-h-32 overflow-y-auto rounded-xl bg-surface-container-lowest p-2 font-mono text-[11px]">
                   {blockedSwitch.paths.map((path) => (
-                    <li key={path} className="truncate py-0.5">
+                    <li key={path} className="truncate py-0.5" title={path}>
                       {path}
                     </li>
                   ))}

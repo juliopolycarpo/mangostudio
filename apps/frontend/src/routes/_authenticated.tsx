@@ -77,6 +77,8 @@ function AuthenticatedLayout() {
         contextCache={app.contextCache}
         isMobileSidebarOpen={isMobileSidebarOpen}
         onMobileSidebarClose={() => setIsMobileSidebarOpen(false)}
+        chatSidebarWidth={app.settings.workspaceSettings.chatSidebarWidth}
+        onChatSidebarWidthChange={app.settings.setChatSidebarWidth}
       >
         <Header
           activeModel={app.activeModel}

@@ -16,6 +16,8 @@ import {
   Minus,
   Plus,
   RefreshCw,
+  RotateCcw,
+  Trash2,
 } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { useState } from 'react';
@@ -26,7 +28,14 @@ import { resolveApiErrorMessage } from '@/lib/utils';
 import { BranchControl } from './BranchControl';
 import { CommitForm } from './CommitForm';
 import { type DiffSelection, DiffViewer } from './DiffViewer';
-import { useGitState, useInitRepo, useStagePaths, useUnstagePaths } from './hooks/use-git-state';
+import {
+  type GitDiscardSelection,
+  useDiscardPaths,
+  useGitState,
+  useInitRepo,
+  useStagePaths,
+  useUnstagePaths,
+} from './hooks/use-git-state';
 import { useGithubContext } from './hooks/use-github-context';
 import { RemoteActions } from './RemoteActions';
 import { RepositoryHistory } from './RepositoryHistory';
@@ -69,7 +78,7 @@ export function GitPanel({ chatId }: GitPanelProps) {
 
   return (
     <section aria-label={labels.title} className="flex h-full min-h-0 flex-col">
-      <div className="flex h-10 shrink-0 items-center gap-2 border-b border-outline-variant/15 px-4">
+      <div className="flex h-9 shrink-0 items-center gap-2 border-b border-outline-variant/15 px-3">
         <div className="min-w-0 flex-1 text-on-surface-variant">
           <RepositoryName state={stateQuery.data} />
         </div>
@@ -79,9 +88,9 @@ export function GitPanel({ chatId }: GitPanelProps) {
           aria-label={labels.refresh}
           title={labels.refresh}
           disabled={isFetching}
-          className="flex size-8 cursor-pointer items-center justify-center rounded-lg text-on-surface-variant transition-colors hover:bg-surface-container-high hover:text-on-surface disabled:cursor-wait disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-primary"
+          className="flex size-7 cursor-pointer items-center justify-center rounded-lg text-on-surface-variant transition-colors hover:bg-surface-container-high hover:text-on-surface disabled:cursor-wait disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-primary"
         >
-          <RefreshCw size={15} className={isFetching ? 'animate-spin' : undefined} />
+          <RefreshCw size={14} className={isFetching ? 'animate-spin' : undefined} />
         </button>
       </div>
 
@@ -237,27 +246,53 @@ function RepositoryStatus({
   const labels = t.git;
   const stageMutation = useStagePaths(chatId);
   const unstageMutation = useUnstagePaths(chatId);
+  const discardMutation = useDiscardPaths(chatId);
   const [view, setView] = useState<'changes' | 'history'>('changes');
   const [diffSelection, setDiffSelection] = useState<DiffSelection | null>(null);
+  const [discardRequest, setDiscardRequest] = useState<GitDiscardSelection | null>(null);
   const branchName = status.branch.name
     ? status.branch.name
     : labels.detachedAt.replace('{commit}', status.branch.detachedAt?.slice(0, 8) ?? 'HEAD');
 
-  const mutatePaths = async (action: 'stage' | 'unstage', paths: string[]) => {
+  const mutatePaths = async (action: 'stage' | 'unstage', paths: string[] | { all: true }) => {
     try {
-      if (action === 'stage') await stageMutation.mutateAsync({ paths });
-      else await unstageMutation.mutateAsync({ paths });
+      if (action === 'stage') {
+        await stageMutation.mutateAsync(Array.isArray(paths) ? { paths } : paths);
+      } else {
+        await unstageMutation.mutateAsync(Array.isArray(paths) ? { paths } : paths);
+      }
     } catch (error) {
       toast(resolveApiErrorMessage(error, labels.actions.failed), 'error');
     }
   };
+
+  const confirmDiscard = async () => {
+    if (!discardRequest) return;
+    try {
+      await discardMutation.mutateAsync(discardRequest);
+      toast(
+        discardRequest.mode === 'untracked' ? labels.discard.deleted : labels.discard.restored,
+        'success'
+      );
+      setDiscardRequest(null);
+    } catch (error) {
+      toast(resolveApiErrorMessage(error, labels.actions.failed), 'error');
+    }
+  };
+
+  const hasStaged = status.staged.length > 0;
+  const hasUnstagedWork =
+    status.unstaged.length > 0 || status.untracked.length > 0 || status.conflicted.length > 0;
 
   return (
     <div className="space-y-5">
       <section aria-label={branchName} className="relative z-20">
         <BranchControl chatId={chatId} branch={status.branch} detachedLabel={branchName} />
         {status.branch.upstream ? (
-          <p className="mt-1 truncate pl-6 font-mono text-[11px] text-on-surface-variant">
+          <p
+            className="mt-1 truncate pl-6 font-mono text-[11px] text-on-surface-variant"
+            title={status.branch.upstream}
+          >
             {status.branch.upstream}
           </p>
         ) : null}
@@ -322,11 +357,38 @@ function RepositoryStatus({
             />
           ) : (
             <div className="space-y-4">
+              {status.conflicted.length > 0 ? (
+                <div className="rounded-xl border border-error/30 bg-error/10 px-3 py-2.5 text-[11px] leading-4 text-error">
+                  {labels.conflicts.hint}
+                </div>
+              ) : null}
+              <div className="flex flex-wrap gap-1.5">
+                {hasUnstagedWork ? (
+                  <button
+                    type="button"
+                    disabled={stageMutation.isPending}
+                    onClick={() => void mutatePaths('stage', { all: true })}
+                    className="inline-flex cursor-pointer items-center rounded-full bg-primary/10 px-2.5 py-1 text-[10px] font-semibold text-primary disabled:cursor-wait disabled:opacity-50"
+                  >
+                    {labels.actions.stageEverything}
+                  </button>
+                ) : null}
+                {hasStaged ? (
+                  <button
+                    type="button"
+                    disabled={unstageMutation.isPending}
+                    onClick={() => void mutatePaths('unstage', { all: true })}
+                    className="inline-flex cursor-pointer items-center rounded-full bg-surface-container-high px-2.5 py-1 text-[10px] font-semibold text-on-surface-variant hover:text-primary disabled:cursor-wait disabled:opacity-50"
+                  >
+                    {labels.actions.unstageEverything}
+                  </button>
+                ) : null}
+              </div>
               <ChangeGroup
                 title={labels.groups.conflicted}
                 changes={status.conflicted}
                 action="stage"
-                pending={stageMutation.isPending}
+                pending={stageMutation.isPending || discardMutation.isPending}
                 onAction={(paths) => void mutatePaths('stage', paths)}
                 onDiff={(path) =>
                   setDiffSelection({ path, title: labels.diff.view.replace('{path}', path) })
@@ -336,7 +398,7 @@ function RepositoryStatus({
                 title={labels.groups.staged}
                 changes={status.staged}
                 action="unstage"
-                pending={unstageMutation.isPending}
+                pending={stageMutation.isPending || unstageMutation.isPending}
                 onAction={(paths) => void mutatePaths('unstage', paths)}
                 onDiff={(path) =>
                   setDiffSelection({
@@ -350,8 +412,12 @@ function RepositoryStatus({
                 title={labels.groups.unstaged}
                 changes={status.unstaged}
                 action="stage"
-                pending={stageMutation.isPending}
+                discardMode="tracked"
+                pending={
+                  stageMutation.isPending || unstageMutation.isPending || discardMutation.isPending
+                }
                 onAction={(paths) => void mutatePaths('stage', paths)}
+                onDiscard={(paths) => setDiscardRequest({ paths, mode: 'tracked' })}
                 onDiff={(path) =>
                   setDiffSelection({ path, title: labels.diff.view.replace('{path}', path) })
                 }
@@ -360,8 +426,10 @@ function RepositoryStatus({
                 title={labels.groups.untracked}
                 changes={status.untracked}
                 action="stage"
-                pending={stageMutation.isPending}
+                discardMode="untracked"
+                pending={stageMutation.isPending || discardMutation.isPending}
                 onAction={(paths) => void mutatePaths('stage', paths)}
+                onDiscard={(paths) => setDiscardRequest({ paths, mode: 'untracked' })}
                 onDiff={(path) =>
                   setDiffSelection({ path, title: labels.diff.view.replace('{path}', path) })
                 }
@@ -376,6 +444,57 @@ function RepositoryStatus({
           <StashSection chatId={chatId} />
         </>
       )}
+
+      {discardRequest ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="git-discard-title"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm"
+        >
+          <div className="w-full max-w-sm space-y-4 rounded-3xl border border-outline-variant/20 bg-surface-container-high p-6 shadow-2xl">
+            <div className="space-y-2">
+              <h3 id="git-discard-title" className="text-lg font-bold text-on-surface">
+                {discardRequest.mode === 'untracked'
+                  ? labels.discard.deleteTitle
+                  : labels.discard.restoreTitle}
+              </h3>
+              <p className="text-sm leading-5 text-on-surface-variant">
+                {discardRequest.mode === 'untracked'
+                  ? labels.discard.deleteHint
+                  : labels.discard.restoreHint}
+              </p>
+            </div>
+            <ul className="max-h-32 overflow-y-auto rounded-xl bg-surface-container-lowest p-2 font-mono text-[11px]">
+              {discardRequest.paths.map((path) => (
+                <li key={path} className="truncate py-0.5" title={path}>
+                  {path}
+                </li>
+              ))}
+            </ul>
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                className="flex-1"
+                onClick={() => setDiscardRequest(null)}
+              >
+                {labels.discard.cancel}
+              </Button>
+              <Button
+                type="button"
+                className="flex-1"
+                loading={discardMutation.isPending}
+                onClick={() => void confirmDiscard()}
+              >
+                {discardRequest.mode === 'untracked'
+                  ? labels.discard.confirmDelete
+                  : labels.discard.confirmRestore}
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -507,15 +626,19 @@ function ChangeGroup({
   title,
   changes,
   action,
+  discardMode,
   pending,
   onAction,
+  onDiscard,
   onDiff,
 }: {
   readonly title: string;
   readonly changes: readonly GitFileChange[];
   readonly action: 'stage' | 'unstage';
+  readonly discardMode?: GitDiscardSelection['mode'];
   readonly pending: boolean;
   readonly onAction: (paths: string[]) => void;
+  readonly onDiscard?: (paths: string[]) => void;
   readonly onDiff: (path: string) => void;
 }) {
   const { t } = useI18n();
@@ -524,6 +647,8 @@ function ChangeGroup({
     action === 'stage'
       ? t.git.actions.stageAll.replace('{group}', title)
       : t.git.actions.unstageAll.replace('{group}', title);
+  const discardAllLabel =
+    discardMode === 'untracked' ? t.git.discard.deleteAll : t.git.discard.restoreAll;
   return (
     <section>
       <h3 className="mb-1.5 flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.12em] text-on-surface-variant">
@@ -531,16 +656,32 @@ function ChangeGroup({
         <span className="rounded-full bg-surface-container-high px-1.5 py-0.5 font-mono text-[9px] tracking-normal">
           {changes.length}
         </span>
-        <button
-          type="button"
-          aria-label={allLabel}
-          title={allLabel}
-          disabled={pending}
-          onClick={() => onAction(changePaths(changes))}
-          className="ml-auto cursor-pointer rounded px-1.5 py-0.5 text-[9px] tracking-normal text-primary transition-colors hover:bg-primary/10 disabled:cursor-wait disabled:opacity-50"
-        >
-          {action === 'stage' ? t.git.actions.stageAllButton : t.git.actions.unstageAllButton}
-        </button>
+        <span className="ml-auto flex items-center gap-1">
+          {onDiscard && discardMode ? (
+            <button
+              type="button"
+              aria-label={discardAllLabel}
+              title={discardAllLabel}
+              disabled={pending}
+              onClick={() => onDiscard(changePaths(changes))}
+              className="cursor-pointer rounded px-1.5 py-0.5 text-[9px] tracking-normal text-error transition-colors hover:bg-error/10 disabled:cursor-wait disabled:opacity-50"
+            >
+              {discardMode === 'untracked'
+                ? t.git.discard.deleteAllButton
+                : t.git.discard.restoreAllButton}
+            </button>
+          ) : null}
+          <button
+            type="button"
+            aria-label={allLabel}
+            title={allLabel}
+            disabled={pending}
+            onClick={() => onAction(changePaths(changes))}
+            className="cursor-pointer rounded px-1.5 py-0.5 text-[9px] tracking-normal text-primary transition-colors hover:bg-primary/10 disabled:cursor-wait disabled:opacity-50"
+          >
+            {action === 'stage' ? t.git.actions.stageAllButton : t.git.actions.unstageAllButton}
+          </button>
+        </span>
       </h3>
       <ul className="overflow-hidden rounded-xl border border-outline-variant/15 bg-surface-container-lowest/40">
         {changes.map((change) => (
@@ -548,8 +689,10 @@ function ChangeGroup({
             key={`${change.status}:${change.oldPath ?? ''}:${change.path}`}
             change={change}
             action={action}
+            discardMode={discardMode}
             pending={pending}
             onAction={() => onAction(changePaths([change]))}
+            onDiscard={onDiscard ? () => onDiscard(changePaths([change])) : undefined}
             onDiff={() => onDiff(change.path)}
           />
         ))}
@@ -561,14 +704,18 @@ function ChangeGroup({
 function FileChangeRow({
   change,
   action,
+  discardMode,
   pending,
   onAction,
+  onDiscard,
   onDiff,
 }: {
   readonly change: GitFileChange;
   readonly action: 'stage' | 'unstage';
+  readonly discardMode?: GitDiscardSelection['mode'];
   readonly pending: boolean;
   readonly onAction: () => void;
+  readonly onDiscard?: () => void;
   readonly onDiff: () => void;
 }) {
   const { t } = useI18n();
@@ -578,6 +725,9 @@ function FileChangeRow({
     '{path}',
     change.path
   );
+  const discardLabel = (
+    discardMode === 'untracked' ? t.git.discard.deletePath : t.git.discard.restorePath
+  ).replace('{path}', change.path);
   return (
     <li className="group flex min-w-0 items-start gap-2 border-b border-outline-variant/10 px-2.5 py-2 last:border-b-0">
       <span
@@ -593,7 +743,8 @@ function FileChangeRow({
         type="button"
         onClick={onDiff}
         aria-label={t.git.actions.viewDiff.replace('{path}', change.path)}
-        className="min-w-0 flex-1 cursor-pointer break-all text-left font-mono text-[11px] leading-4 text-on-surface hover:text-primary"
+        title={change.path}
+        className="min-w-0 flex-1 cursor-pointer truncate text-left font-mono text-[11px] leading-4 text-on-surface hover:text-primary"
       >
         {change.oldPath ? (
           <>
@@ -603,6 +754,18 @@ function FileChangeRow({
         ) : null}
         {change.path}
       </button>
+      {onDiscard && discardMode ? (
+        <button
+          type="button"
+          aria-label={discardLabel}
+          title={discardLabel}
+          disabled={pending}
+          onClick={onDiscard}
+          className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded text-on-surface-variant opacity-60 transition-colors hover:bg-error/10 hover:text-error group-hover:opacity-100 disabled:cursor-wait disabled:opacity-30"
+        >
+          {discardMode === 'untracked' ? <Trash2 size={12} /> : <RotateCcw size={12} />}
+        </button>
+      ) : null}
       <button
         type="button"
         aria-label={actionLabel}
