@@ -11,7 +11,11 @@ import {
 import { Elysia } from 'elysia';
 import { getDb } from '../../../db/database';
 import { requireAuth } from '../../../plugins/auth-middleware';
-import { chatAccessDenied, resolveChatWorkdir } from '../../chats/application/chat-workdir';
+import {
+  chatAccessDenied,
+  chatWorkdirConflict,
+  resolveChatWorkdir,
+} from '../../chats/application/chat-workdir';
 import {
   type GetGithubContext,
   GithubContextError,
@@ -28,8 +32,7 @@ export function createGithubRoutes(resolveContext: GetGithubContext = getGithubC
       async ({ query, request, set, user }): Promise<RouteResult> => {
         const resolution = await resolveChatWorkdir(query.chatId, user?.id ?? '', getDb());
         if (resolution.state === 'no-workdir') {
-          set.status = 409;
-          return { error: 'Chat has no working directory', code: ERROR_CODES.CONFLICT };
+          return chatWorkdirConflict(set);
         }
         if (resolution.state !== 'ok') return chatAccessDenied(resolution, set);
 

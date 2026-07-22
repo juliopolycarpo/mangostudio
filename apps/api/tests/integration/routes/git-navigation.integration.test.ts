@@ -315,4 +315,30 @@ describe('Git navigation routes', () => {
     ]);
     for (const response of forbidden) expect(response.status).toBe(403);
   });
+
+  it('returns conflict when navigation routes require a bound workdir', async () => {
+    const user = await insertTestUser();
+    const chat = await insertTestChat(user.id);
+    const authenticated = createAuthenticatedApiTestApp(user, gitRoutes);
+    restoreAuth = authenticated.restore;
+
+    const response = await getRoute(authenticated.app, '/git/branches', { chatId: chat.id });
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({
+      error: 'Chat has no working directory',
+      code: 'CONFLICT',
+    });
+  });
+
+  it('returns not found when the chat id does not exist', async () => {
+    const user = await insertTestUser();
+    const authenticated = createAuthenticatedApiTestApp(user, gitRoutes);
+    restoreAuth = authenticated.restore;
+
+    const response = await getRoute(authenticated.app, '/git/branches', {
+      chatId: 'chat-does-not-exist',
+    });
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({ error: 'Chat not found', code: 'NOT_FOUND' });
+  });
 });
