@@ -24,7 +24,7 @@ import {
   SUBAGENT_MAX_TURNS_MAX,
   SUBAGENT_MAX_TURNS_MIN,
 } from '../../src/app-settings';
-import { WORKSPACE_PANEL_WIDTH_MAX } from '../../src/workspaces';
+import { CHAT_SIDEBAR_WIDTH_MAX, WORKSPACE_PANEL_WIDTH_MAX } from '../../src/workspaces';
 
 describe('normalizeGitSettings', () => {
   it('defaults missing or malformed signing preferences', () => {
@@ -113,9 +113,10 @@ describe('normalizeWorkspaceSettings', () => {
     });
   });
 
-  it('normalizes panel visibility, ordering, and width', () => {
+  it('normalizes panel visibility, ordering, and widths', () => {
     expect(
       normalizeWorkspaceSettings({
+        chatSidebarWidth: 900,
         sidePanel: {
           visiblePanelIds: ['todos', 'unknown', 'todos'],
           panelOrder: ['todos', 'unknown', 'todos'],
@@ -124,6 +125,7 @@ describe('normalizeWorkspaceSettings', () => {
       })
     ).toEqual({
       ...DEFAULT_WORKSPACE_SETTINGS,
+      chatSidebarWidth: CHAT_SIDEBAR_WIDTH_MAX,
       sidePanel: {
         visiblePanelIds: ['todos'],
         panelOrder: ['todos', 'git'],

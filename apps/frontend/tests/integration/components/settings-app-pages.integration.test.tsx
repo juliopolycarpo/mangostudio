@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { GeneralSettings } from '../../../src/components/settings/GeneralSettings';
 import { PromptSettings } from '../../../src/components/settings/PromptSettings';
 import { useGlobalSettings } from '../../../src/hooks/use-global-settings';
-import { render, screen, waitFor } from '../../support/harness/render';
+import { render, screen, waitFor, within } from '../../support/harness/render';
 import { createFetchScenario } from '../../support/mocks/create-fetch-scenario';
 
 const TITLE_MODELS = [
@@ -63,6 +63,7 @@ function GeneralSettingsHarness() {
       setWorkspacePanelVisible={settings.setWorkspacePanelVisible}
       moveWorkspacePanel={settings.moveWorkspacePanel}
       setWorkspacePanelWidth={settings.setWorkspacePanelWidth}
+      setChatSidebarWidth={settings.setChatSidebarWidth}
       addRecentWorkdir={settings.addRecentWorkdir}
     />
   );
@@ -352,7 +353,7 @@ describe('app settings pages integration', () => {
         ...orderedSettings.workspaceSettings,
         sidePanel: {
           ...orderedSettings.workspaceSettings.sidePanel,
-          width: 320,
+          width: 360,
         },
       },
     };
@@ -389,7 +390,11 @@ describe('app settings pages integration', () => {
     });
 
     fetchScenario.respondWithJson('PUT', '/api/settings/app', { body: expectedSettings });
-    await user.click(screen.getByRole('button', { name: 'Reset width' }));
+    const sidePanelCard = screen.getByText('Agent side panel').closest('div.rounded-2xl');
+    expect(sidePanelCard).not.toBeNull();
+    await user.click(
+      within(sidePanelCard as HTMLElement).getByRole('button', { name: 'Reset width' })
+    );
 
     await waitFor(() => {
       const body = getLatestRequestBody(

@@ -1110,6 +1110,11 @@ export const messages: Messages = {
     sidePanelResize: 'Resize agent side panel',
     sidePanelNavigation: 'Agent panels',
     sidePanelSwitch: 'Show {panel} panel',
+    chatSidebarTitle: 'Chat sidebar',
+    chatSidebarDescription: 'Drag the sidebar edge on desktop to show longer chat titles.',
+    chatSidebarWidth: 'Current width: {width}px',
+    chatSidebarResetWidth: 'Reset width',
+    chatSidebarResize: 'Resize chat sidebar',
   },
 
   git: {
@@ -1136,6 +1141,7 @@ export const messages: Messages = {
       menu: 'Change branch',
       current: 'Current',
       switchTo: 'Switch to {branch}',
+      checkoutRemote: 'Check out {branch}',
       create: 'Create branch',
       createPlaceholder: 'feat/branch-name',
       creating: 'Creating...',
@@ -1143,6 +1149,8 @@ export const messages: Messages = {
       switched: 'Switched to {branch}.',
       actionError: 'The branch could not be changed.',
       empty: 'No local branches found.',
+      localSection: 'Local',
+      remoteSection: 'Remote',
       checkoutBlockedTitle: 'Local changes block this switch',
       checkoutBlockedHint:
         'Stash the current work, including untracked files, then switch branches safely.',
@@ -1164,6 +1172,13 @@ export const messages: Messages = {
       pulled: 'Branch fast-forwarded.',
       pushed: 'Branch pushed.',
       actionError: 'The remote operation failed.',
+      syncSummary: '↑{ahead} ↓{behind}',
+      authRequired:
+        'Git authentication is required. Check the credential helper or SSH agent on the server.',
+      nonFastForward:
+        'This branch cannot fast-forward. Resolve the divergence in a terminal, then refresh.',
+      historyDiverged:
+        'Remote history diverged. Fetch and resolve it in a terminal before pushing again.',
     },
     history: {
       loading: 'Reading history...',
@@ -1210,8 +1225,30 @@ export const messages: Messages = {
       unstageAll: 'Unstage all {group}',
       stageAllButton: 'Stage all',
       unstageAllButton: 'Unstage all',
+      stageEverything: 'Stage everything',
+      unstageEverything: 'Unstage everything',
       failed: 'The Git action failed.',
       viewDiff: 'View diff for {path}',
+    },
+    discard: {
+      restorePath: 'Discard worktree changes in {path}',
+      deletePath: 'Delete untracked file {path}',
+      restoreAll: 'Discard all unstaged changes in this group',
+      deleteAll: 'Delete all untracked files in this group',
+      restoreAllButton: 'Discard all',
+      deleteAllButton: 'Delete all',
+      restoreTitle: 'Discard worktree changes?',
+      deleteTitle: 'Delete untracked files?',
+      restoreHint: 'Restores only unstaged worktree content. Staged changes stay in the index.',
+      deleteHint: 'Permanently deletes the selected untracked files from disk.',
+      cancel: 'Keep files',
+      confirmRestore: 'Discard changes',
+      confirmDelete: 'Delete files',
+      restored: 'Worktree changes discarded.',
+      deleted: 'Untracked files deleted.',
+    },
+    conflicts: {
+      hint: 'Resolve conflict markers in the working tree, then stage the fixed files. Merge and rebase stay in the terminal for now.',
     },
     commit: {
       title: 'Commit',

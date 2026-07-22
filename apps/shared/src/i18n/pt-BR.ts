@@ -1123,6 +1123,12 @@ export const messages = {
     sidePanelResize: 'Redimensionar painel lateral do agente',
     sidePanelNavigation: 'Painéis do agente',
     sidePanelSwitch: 'Mostrar painel {panel}',
+    chatSidebarTitle: 'Barra lateral de chats',
+    chatSidebarDescription:
+      'Arraste a borda da barra lateral no desktop para ver títulos de chat mais longos.',
+    chatSidebarWidth: 'Largura atual: {width}px',
+    chatSidebarResetWidth: 'Redefinir largura',
+    chatSidebarResize: 'Redimensionar barra lateral de chats',
   },
 
   git: {
@@ -1150,6 +1156,7 @@ export const messages = {
       menu: 'Mudar branch',
       current: 'Atual',
       switchTo: 'Mudar para {branch}',
+      checkoutRemote: 'Obter {branch}',
       create: 'Criar branch',
       createPlaceholder: 'feat/nome-da-branch',
       creating: 'Criando...',
@@ -1157,6 +1164,8 @@ export const messages = {
       switched: 'Branch alterada para {branch}.',
       actionError: 'Não foi possível mudar a branch.',
       empty: 'Nenhuma branch local encontrada.',
+      localSection: 'Locais',
+      remoteSection: 'Remotas',
       checkoutBlockedTitle: 'Alterações locais impedem esta troca',
       checkoutBlockedHint:
         'Salve o trabalho atual em um stash, incluindo arquivos não rastreados, e troque de branch com segurança.',
@@ -1178,6 +1187,13 @@ export const messages = {
       pulled: 'Branch avançada com fast-forward.',
       pushed: 'Branch enviada.',
       actionError: 'A operação remota falhou.',
+      syncSummary: '↑{ahead} ↓{behind}',
+      authRequired:
+        'A autenticação do Git é necessária. Verifique o credential helper ou o agente SSH no servidor.',
+      nonFastForward:
+        'Esta branch não pode avançar com fast-forward. Resolva a divergência no terminal e atualize.',
+      historyDiverged:
+        'O histórico remoto divergiu. Busque e resolva no terminal antes de enviar de novo.',
     },
     history: {
       loading: 'Lendo histórico...',
@@ -1224,8 +1240,31 @@ export const messages = {
       unstageAll: 'Remover tudo de {group} da preparação',
       stageAllButton: 'Preparar tudo',
       unstageAllButton: 'Remover tudo',
+      stageEverything: 'Preparar tudo',
+      unstageEverything: 'Remover tudo da preparação',
       failed: 'A ação do Git falhou.',
       viewDiff: 'Ver diff de {path}',
+    },
+    discard: {
+      restorePath: 'Descartar alterações da árvore de trabalho em {path}',
+      deletePath: 'Excluir arquivo não rastreado {path}',
+      restoreAll: 'Descartar todas as alterações não preparadas deste grupo',
+      deleteAll: 'Excluir todos os arquivos não rastreados deste grupo',
+      restoreAllButton: 'Descartar tudo',
+      deleteAllButton: 'Excluir tudo',
+      restoreTitle: 'Descartar alterações da árvore de trabalho?',
+      deleteTitle: 'Excluir arquivos não rastreados?',
+      restoreHint:
+        'Restaura apenas o conteúdo não preparado da árvore de trabalho. As alterações preparadas permanecem no índice.',
+      deleteHint: 'Exclui permanentemente do disco os arquivos não rastreados selecionados.',
+      cancel: 'Manter arquivos',
+      confirmRestore: 'Descartar alterações',
+      confirmDelete: 'Excluir arquivos',
+      restored: 'Alterações da árvore de trabalho descartadas.',
+      deleted: 'Arquivos não rastreados excluídos.',
+    },
+    conflicts: {
+      hint: 'Resolva os marcadores de conflito na árvore de trabalho e prepare os arquivos corrigidos. Merge e rebase continuam no terminal por enquanto.',
     },
     commit: {
       title: 'Commit',

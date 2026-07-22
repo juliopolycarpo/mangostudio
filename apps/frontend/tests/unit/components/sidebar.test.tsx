@@ -60,6 +60,25 @@ describe('Sidebar', () => {
     expect(aside?.className).toContain('hidden');
   });
 
+  it('exposes chat titles through the title attribute when truncated', () => {
+    render(<Sidebar {...defaultProps} />);
+    expect(screen.getByText('First Chat')).toHaveAttribute('title', 'First Chat');
+  });
+
+  it('resizes from the keyboard and persists the clamped width', () => {
+    const onWidthChange = vi.fn();
+    const { container } = render(
+      <Sidebar {...defaultProps} width={256} onWidthChange={onWidthChange} />
+    );
+    const handle = screen.getByRole('separator', { name: /resize chat sidebar/i });
+    expect(handle).toHaveAttribute('aria-valuenow', '256');
+
+    fireEvent.keyDown(handle, { key: 'ArrowRight' });
+    fireEvent.keyUp(handle, { key: 'ArrowRight' });
+    expect(onWidthChange).toHaveBeenCalledWith(272);
+    expect(container.querySelector('aside')).toHaveStyle({ width: '272px' });
+  });
+
   it('mobile shortcuts close the sidebar after navigation', () => {
     const onNavigate = vi.fn();
     const onMobileClose = vi.fn();

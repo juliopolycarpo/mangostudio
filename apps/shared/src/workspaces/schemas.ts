@@ -36,8 +36,16 @@ export const RECENT_WORKDIRS_MAX = 10;
 
 export const WORKSPACE_PANEL_IDS = ['git', 'todos'] as const;
 export const WORKSPACE_PANEL_WIDTH_MIN = 280;
-export const WORKSPACE_PANEL_WIDTH_MAX = 480;
-export const WORKSPACE_PANEL_WIDTH_DEFAULT = 320;
+export const WORKSPACE_PANEL_WIDTH_MAX = 640;
+export const WORKSPACE_PANEL_WIDTH_DEFAULT = 360;
+
+/** Preferred width of the desktop chat-list sidebar. */
+export const CHAT_SIDEBAR_WIDTH_MIN = 240;
+export const CHAT_SIDEBAR_WIDTH_MAX = 420;
+export const CHAT_SIDEBAR_WIDTH_DEFAULT = 256;
+
+/** Floor reserved for the chat column when both side panes are open. */
+export const CHAT_CONTENT_MIN_WIDTH = 420;
 
 export const WorkspacePanelIdSchema = Type.Union([Type.Literal('git'), Type.Literal('todos')]);
 
@@ -60,6 +68,10 @@ export const WorkspaceSettingsSchema = Type.Object({
   defaultWorkdir: Type.String(),
   recentWorkdirs: Type.Array(Type.String(), { maxItems: RECENT_WORKDIRS_MAX }),
   restrictToolsToWorkdir: Type.Boolean(),
+  chatSidebarWidth: Type.Integer({
+    minimum: CHAT_SIDEBAR_WIDTH_MIN,
+    maximum: CHAT_SIDEBAR_WIDTH_MAX,
+  }),
   sidePanel: WorkspacePanelSettingsSchema,
 });
 

@@ -102,7 +102,7 @@ describe('WorkspaceRail', () => {
       screen.getByRole('separator', { name: 'Resize agent side panel' }),
       '{ArrowLeft}'
     );
-    expect(onWidthChange).toHaveBeenCalledWith(336);
+    expect(onWidthChange).toHaveBeenCalledWith(376);
   });
 
   it('stops tracking the pointer once a drag is cancelled', () => {
@@ -112,14 +112,14 @@ describe('WorkspaceRail', () => {
 
     fireEvent.pointerDown(handle, { pointerId: 1, button: 0, clientX: 500 });
     fireEvent.pointerMove(handle, { pointerId: 1, clientX: 460 });
-    expect(handle).toHaveAttribute('aria-valuenow', '360');
+    expect(handle).toHaveAttribute('aria-valuenow', '400');
 
     fireEvent.pointerCancel(handle, { pointerId: 1 });
-    expect(onWidthChange).toHaveBeenCalledExactlyOnceWith(360);
+    expect(onWidthChange).toHaveBeenCalledExactlyOnceWith(400);
 
     // Merely hovering the handle afterwards must not keep resizing the rail.
     fireEvent.pointerMove(handle, { pointerId: 1, clientX: 300 });
-    expect(handle).toHaveAttribute('aria-valuenow', '360');
+    expect(handle).toHaveAttribute('aria-valuenow', '400');
   });
 
   it('opens the same panels in a mobile slide-over', async () => {

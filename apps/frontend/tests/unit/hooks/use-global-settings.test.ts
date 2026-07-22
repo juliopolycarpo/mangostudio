@@ -265,6 +265,7 @@ describe('useGlobalSettings', () => {
         defaultWorkdir: '/srv/projects/mango',
         recentWorkdirs: ['/srv/projects/other', '/srv/projects/mango'],
         restrictToolsToWorkdir: false,
+        chatSidebarWidth: DEFAULT_APP_SETTINGS.workspaceSettings.chatSidebarWidth,
         sidePanel: DEFAULT_APP_SETTINGS.workspaceSettings.sidePanel,
       })
     );
@@ -273,6 +274,7 @@ describe('useGlobalSettings', () => {
       defaultWorkdir: '/srv/projects/mango',
       recentWorkdirs: ['/srv/projects/other', '/srv/projects/mango'],
       restrictToolsToWorkdir: false,
+      chatSidebarWidth: DEFAULT_APP_SETTINGS.workspaceSettings.chatSidebarWidth,
       sidePanel: DEFAULT_APP_SETTINGS.workspaceSettings.sidePanel,
     });
   });
@@ -286,20 +288,29 @@ describe('useGlobalSettings', () => {
       result.current.setWorkspacePanelVisible('git', false);
       result.current.moveWorkspacePanel('todos', 'up');
       result.current.setWorkspacePanelWidth(10_000);
+      result.current.setChatSidebarWidth(10_000);
     });
 
     await waitFor(() =>
-      expect(result.current.workspaceSettings.sidePanel).toEqual({
-        visiblePanelIds: ['todos'],
-        panelOrder: ['todos', 'git'],
-        width: 480,
+      expect(result.current.workspaceSettings).toEqual({
+        ...DEFAULT_APP_SETTINGS.workspaceSettings,
+        chatSidebarWidth: 420,
+        sidePanel: {
+          visiblePanelIds: ['todos'],
+          panelOrder: ['todos', 'git'],
+          width: 640,
+        },
       })
     );
     await waitFor(() => expect(mockPut).toHaveBeenCalledTimes(1));
-    expect(mockPut.mock.calls[0]?.[0].workspaceSettings.sidePanel).toEqual({
-      visiblePanelIds: ['todos'],
-      panelOrder: ['todos', 'git'],
-      width: 480,
+    expect(mockPut.mock.calls[0]?.[0].workspaceSettings).toEqual({
+      ...DEFAULT_APP_SETTINGS.workspaceSettings,
+      chatSidebarWidth: 420,
+      sidePanel: {
+        visiblePanelIds: ['todos'],
+        panelOrder: ['todos', 'git'],
+        width: 640,
+      },
     });
   });
 

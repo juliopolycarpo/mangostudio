@@ -364,6 +364,8 @@ export function useGlobalSettings() {
     moveWorkspacePanel,
     setWorkspacePanelWidth: (value: number) =>
       updateWorkspacePanelSettings((current) => ({ ...current, width: value })),
+    setChatSidebarWidth: (value: number) =>
+      updateWorkspaceSettings((current) => ({ ...current, chatSidebarWidth: value })),
     addRecentWorkdir: (value: string) =>
       updateWorkspaceSettings((current) => ({
         ...current,

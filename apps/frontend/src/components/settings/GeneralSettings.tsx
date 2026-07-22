@@ -12,6 +12,7 @@ import {
 } from '@mangostudio/shared/app-settings';
 import type { Locale } from '@mangostudio/shared/i18n';
 import {
+  CHAT_SIDEBAR_WIDTH_DEFAULT,
   WORKSPACE_PANEL_WIDTH_DEFAULT,
   type WorkspacePanelId,
   type WorkspaceSettings,
@@ -22,6 +23,7 @@ import {
   FolderGit2,
   FolderOpen,
   ListTodo,
+  PanelLeft,
   PanelRight,
   RotateCcw,
   X,
@@ -55,6 +57,7 @@ interface GeneralSettingsProps {
   setWorkspacePanelVisible: (panelId: WorkspacePanelId, visible: boolean) => void;
   moveWorkspacePanel: (panelId: WorkspacePanelId, direction: 'up' | 'down') => void;
   setWorkspacePanelWidth: (value: number) => void;
+  setChatSidebarWidth: (value: number) => void;
   addRecentWorkdir: (value: string) => void;
 }
 
@@ -95,6 +98,7 @@ export function GeneralSettings({
   setWorkspacePanelVisible,
   moveWorkspacePanel,
   setWorkspacePanelWidth,
+  setChatSidebarWidth,
   addRecentWorkdir,
 }: GeneralSettingsProps) {
   const { t, locale, setLocale } = useI18n();
@@ -216,6 +220,38 @@ export function GeneralSettings({
           }}
           onClose={() => setWorkdirPickerOpen(false)}
         />
+      </Card>
+
+      <Card variant="solid" className="space-y-4 p-4 sm:p-6">
+        <div className="flex items-start gap-3">
+          <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+            <PanelLeft size={18} />
+          </span>
+          <div className="min-w-0 flex-1 space-y-1">
+            <h3 className="font-label text-xs font-bold uppercase tracking-widest text-on-surface-variant/80">
+              {workspace.chatSidebarTitle}
+            </h3>
+            <p className="text-sm text-on-surface-variant/60">{workspace.chatSidebarDescription}</p>
+          </div>
+        </div>
+        <div className="flex items-center justify-between gap-3 text-xs text-on-surface-variant/60">
+          <span>
+            {workspace.chatSidebarWidth.replace(
+              '{width}',
+              String(workspaceSettings.chatSidebarWidth)
+            )}
+          </span>
+          {workspaceSettings.chatSidebarWidth !== CHAT_SIDEBAR_WIDTH_DEFAULT ? (
+            <button
+              type="button"
+              onClick={() => setChatSidebarWidth(CHAT_SIDEBAR_WIDTH_DEFAULT)}
+              className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-on-surface-variant transition-colors hover:bg-surface-container-high hover:text-on-surface"
+            >
+              <RotateCcw size={13} />
+              {workspace.chatSidebarResetWidth}
+            </button>
+          ) : null}
+        </div>
       </Card>
 
       <Card variant="solid" className="space-y-4 p-4 sm:p-6">

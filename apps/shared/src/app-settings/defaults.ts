@@ -25,6 +25,9 @@ import type {
 } from '../prompt-rules';
 import type { ReasoningEffort } from '../types';
 import {
+  CHAT_SIDEBAR_WIDTH_DEFAULT,
+  CHAT_SIDEBAR_WIDTH_MAX,
+  CHAT_SIDEBAR_WIDTH_MIN,
   RECENT_WORKDIRS_MAX,
   WORKSPACE_PANEL_IDS,
   WORKSPACE_PANEL_WIDTH_DEFAULT,
@@ -115,6 +118,7 @@ export const DEFAULT_WORKSPACE_SETTINGS: WorkspaceSettings = {
   defaultWorkdir: '',
   recentWorkdirs: [],
   restrictToolsToWorkdir: false,
+  chatSidebarWidth: CHAT_SIDEBAR_WIDTH_DEFAULT,
   sidePanel: {
     visiblePanelIds: [...WORKSPACE_PANEL_IDS],
     panelOrder: [...WORKSPACE_PANEL_IDS],
@@ -393,6 +397,12 @@ export function normalizeWorkspaceSettings(value: unknown): WorkspaceSettings {
       typeof value.restrictToolsToWorkdir === 'boolean'
         ? value.restrictToolsToWorkdir
         : DEFAULT_WORKSPACE_SETTINGS.restrictToolsToWorkdir,
+    chatSidebarWidth: clampInteger(
+      value.chatSidebarWidth,
+      CHAT_SIDEBAR_WIDTH_DEFAULT,
+      CHAT_SIDEBAR_WIDTH_MIN,
+      CHAT_SIDEBAR_WIDTH_MAX
+    ),
     sidePanel: {
       visiblePanelIds,
       panelOrder,
