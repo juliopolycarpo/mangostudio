@@ -10,8 +10,14 @@ const SCRIPT = join(ROOT_DIR, 'scripts/release/create-or-update-release.sh');
 // FAIL_CREATE / FAIL_EDIT / FAIL_UPLOAD inject the states the helper must
 // handle. CREATE_THEN_EXIST models the wedge: create exits non-zero after the
 // release appears server-side.
+//
+// GH_LOG is space-joined for readable assertions, but space-joining erases
+// argument boundaries: `--notes "a b"` and `--notes a b` log identically, so
+// GH_LOG alone cannot catch a lost `"${flags[@]}"` quote. ARGV_LOG repeats
+// each invocation with a `|` separator so boundaries stay observable.
 const FAKE_GH = `#!/usr/bin/env bash
 printf '%s\\n' "$*" >> "$GH_LOG"
+(IFS='|'; printf '%s\\n' "$*" >> "$ARGV_LOG")
 if [ "$1" = "release" ] && [ "$2" = "view" ]; then
   if [ -f "$RELEASE_MARK" ]; then
     exit 0
@@ -65,6 +71,8 @@ printf 'sleep %s\\n' "$*" >> "$SLEEP_LOG"
 interface RunResult {
   exitCode: number;
   log: string[];
+  /** Same invocations as `log`, `|`-separated so argument boundaries show. */
+  argvLog: string[];
   sleepLog: string[];
   stderr: string;
 }
@@ -72,6 +80,12 @@ interface RunResult {
 function runCreateOrUpdateRelease(options: {
   args: string[];
   env?: Record<string, string | undefined>;
+  /**
+   * Call the helper from an `if` condition, which disables errexit for the
+   * whole function body — the shape that exposes errexit-dependent failure
+   * propagation. Exits 9 when the helper reports failure.
+   */
+  callInCondition?: boolean;
 }): RunResult {
   const dir = mkdtempSync(join(tmpdir(), 'create-or-update-release-'));
   try {
@@ -86,6 +100,8 @@ function runCreateOrUpdateRelease(options: {
 
     const logPath = join(dir, 'gh.log');
     writeFileSync(logPath, '');
+    const argvLogPath = join(dir, 'gh-argv.log');
+    writeFileSync(argvLogPath, '');
     const sleepLogPath = join(dir, 'sleep.log');
     writeFileSync(sleepLogPath, '');
     const releaseMark = join(dir, 'release.exists');
@@ -105,33 +121,38 @@ function runCreateOrUpdateRelease(options: {
       return arg;
     });
     const quotedArgs = resolvedArgs.map((arg) => `'${arg.replaceAll("'", "'\\''")}'`).join(' ');
+    const call = `create_or_update_release ${quotedArgs}`;
+    const script = options.callInCondition
+      ? `source "$1" && if ${call}; then exit 0; else exit 9; fi`
+      : `source "$1" && ${call}`;
 
     const proc = Bun.spawnSync({
-      cmd: [
-        'bash',
-        '-euo',
-        'pipefail',
-        '-c',
-        `source "$1" && create_or_update_release ${quotedArgs}`,
-        'bash',
-        SCRIPT,
-      ],
+      cmd: ['bash', '-euo', 'pipefail', '-c', script, 'bash', SCRIPT],
       cwd: ROOT_DIR,
       env: {
         ...process.env,
         PATH: `${binDir}:${process.env.PATH}`,
         GH_LOG: logPath,
+        ARGV_LOG: argvLogPath,
         SLEEP_LOG: sleepLogPath,
         RELEASE_MARK: releaseMark,
         CREATE_COUNT_FILE: createCountFile,
         GITHUB_REPOSITORY: 'juliopolycarpo/mangostudio',
+        // Neutralize an ambient GH_REPO so upload_release_assets always
+        // resolves the repo from GITHUB_REPOSITORY, as in CI.
+        GH_REPO: undefined,
         ...options.env,
       },
       stderr: 'pipe',
     });
-    const log = readFileSync(logPath, 'utf8').split('\n').filter(Boolean);
-    const sleepLog = readFileSync(sleepLogPath, 'utf8').split('\n').filter(Boolean);
-    return { exitCode: proc.exitCode, log, sleepLog, stderr: proc.stderr.toString() };
+    const readLines = (path: string) => readFileSync(path, 'utf8').split('\n').filter(Boolean);
+    return {
+      exitCode: proc.exitCode,
+      log: readLines(logPath),
+      argvLog: readLines(argvLogPath),
+      sleepLog: readLines(sleepLogPath),
+      stderr: proc.stderr.toString(),
+    };
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -220,7 +241,13 @@ describe('scripts/release/create-or-update-release.sh', () => {
     });
 
     expect(result.exitCode).toBe(0);
-    expect(result.log.some((line) => line.includes(`--notes ${notes}`))).toBe(true);
+    // Asserted against the `|`-separated log: a lost quote around
+    // "${flags[@]}" would split the notes into six arguments, which the
+    // space-joined GH_LOG cannot distinguish from the correct single one.
+    expect(result.argvLog.filter((line) => line.endsWith(`|--notes|${notes}`))).toHaveLength(2);
+    expect(
+      result.argvLog.filter((line) => line.startsWith('release|')).map((line) => line.split('|')[1])
+    ).toEqual(['view', 'create', 'view', 'edit', 'upload']);
   });
 
   test('fails after three create attempts when the release never appears', () => {
@@ -246,6 +273,19 @@ describe('scripts/release/create-or-update-release.sh', () => {
     expect(result.log.filter((line) => line.startsWith('release upload'))).toEqual([]);
   });
 
+  test('propagates edit failures even when the caller disables errexit', () => {
+    const result = runCreateOrUpdateRelease({
+      args: ['v1.2.3', 'ASSET_A', '--', '--title', 'v1.2.3'],
+      env: { RELEASE_EXISTS: '1', FAIL_EDIT: '1' },
+      callInCondition: true,
+    });
+
+    // Without an explicit `|| return`, the failed edit would fall through and
+    // upload assets onto a release whose title/notes never landed.
+    expect(result.exitCode).toBe(9);
+    expect(result.log.filter((line) => line.startsWith('release upload'))).toEqual([]);
+  });
+
   test('rejects a missing asset / flag separator', () => {
     const result = runCreateOrUpdateRelease({
       args: ['v1.2.3', 'ASSET_A', '--title', 'v1.2.3'],
@@ -253,6 +293,16 @@ describe('scripts/release/create-or-update-release.sh', () => {
 
     expect(result.exitCode).not.toBe(0);
     expect(result.stderr).toContain('missing -- separator');
+    expect(result.log).toEqual([]);
+  });
+
+  test('rejects a call with no assets before touching the release', () => {
+    const result = runCreateOrUpdateRelease({
+      args: ['v1.2.3', '--', '--title', 'v1.2.3'],
+    });
+
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stderr).toContain('at least one asset is required');
     expect(result.log).toEqual([]);
   });
 });
