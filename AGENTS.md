@@ -60,6 +60,8 @@ Useful docs:
 
 `.github/labeler.yml` plus the "Verify classification labels" gate (`labeler.yml` workflow) require every PR to carry at least one `area:` or `type:` label. PR ownership is separate: the `auto-assign.yml` workflow assigns the author and requests reviews from prior committers of the PR's changed files (base-branch history), so it needs no per-label owner config. Keep new labels and glob moves in sync between `.github/labeler.yml`, `.github/dependabot.yml`, `scripts/tests/labeler.unit.test.ts`, and this table.
 
+**Issues:** every issue should carry exactly one `type:` label and a `status:` label (`status: needs triage` until maintainers triage it). `area:` labels are optional but encouraged when the affected area is clear — they carry the same routing signal as on PRs. The `issue-triage.yml` workflow enforces the `type:`/`status:` part: it adds `status: needs triage` on open when no `status:` label is present, and applies `status: needs author` plus a one-time comment when an **open** issue has zero or multiple `type:` labels. Closed issues are left alone so label cleanup does not re-nag.
+
 ### `area:` (where)
 
 - `area: build` — `scripts/**`, `.mango/**`, `apps/api/src/lib/{config,runtime-paths}.ts`, `tsconfig*.json`, `turbo.jsonc`, `cliff.toml`, `Dockerfile*`, `.dockerignore`

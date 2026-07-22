@@ -1,0 +1,80 @@
+name: Issue Triage
+
+# Issues created outside the templates (gh issue create, API, etc.) bypass
+# template front-matter labels. PR labeling is handled by labeler.yml and
+# auto-assign.yml on pull_request_target only — nothing triggers on issues:
+# today. This workflow backstops status: needs triage on open and enforces
+# exactly one type: label with minimal issues: write scope on default-branch
+# code (no PR-controlled inputs).
+
+on:
+  issues:
+    types: [opened, labeled, unlabeled]
+
+concurrency:
+  group: issue-triage-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  # type-label runs first so the backstop below observes a settled label set.
+  # Running both in parallel made "no status label present" a race: the two jobs
+  # could each add a status label and leave the issue holding two of them.
+  type-label:
+    name: Validate type label
+    # zizmor: ignore[bot-conditions] loop guard only; not a privilege boundary
+    if: ${{ github.actor != 'github-actions[bot]' && github.event.issue.state == 'open' }}
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write # validate type labels, set status: needs author, and comment once
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      ISSUE_NUMBER: ${{ github.event.issue.number }}
+      MARKER: "<!-- issue-triage: type-label -->"
+      AGENTS_URL: ${{ github.server_url }}/${{ github.repository }}/blob/${{ github.event.repository.default_branch }}/AGENTS.md#classification-labels
+    steps:
+      - name: Require exactly one type label
+        run: |
+          labels="$(gh issue view "$ISSUE_NUMBER" --json labels)"
+          type_count="$(jq '[.labels[].name | select(startswith("type: "))] | length' <<<"$labels")"
+          if [ "$type_count" -eq 1 ]; then
+            has_flag="$(jq 'any(.labels[].name; . == "status: needs author")' <<<"$labels")"
+            if [ "$has_flag" = "true" ]; then
+              gh issue edit "$ISSUE_NUMBER" --remove-label "status: needs author"
+            fi
+            exit 0
+          fi
+          gh issue edit "$ISSUE_NUMBER" --add-label "status: needs author"
+          # shellcheck disable=SC2016 # $ENV.MARKER is a jq lookup, not a shell
+          # expansion — gh's --jq takes one expression and has no --arg flag.
+          has_marker="$(gh issue view "$ISSUE_NUMBER" --json comments \
+            --jq 'any(.comments[].body; contains($ENV.MARKER))')"
+          if [ "$has_marker" != "true" ]; then
+            comment_body=$(printf '%s\n\n%s' "$MARKER" \
+              "Thanks for opening this issue. Please apply **exactly one** \`type:\` label (for example \`type: bug\` or \`type: feature\`). The full list and issue labeling convention are in [AGENTS.md — Classification Labels](${AGENTS_URL}).")
+            gh issue comment "$ISSUE_NUMBER" --body "$comment_body"
+          fi
+
+  needs-triage:
+    name: Backstop needs-triage on open
+    needs: type-label
+    # !cancelled() keeps the backstop running when type-label is skipped (bot
+    # actor) or fails; it is the last line of defence for an unlabelled issue.
+    if: ${{ !cancelled() && github.event.action == 'opened' }}
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write # apply status: needs triage when the issue has no status label
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      ISSUE_NUMBER: ${{ github.event.issue.number }}
+    steps:
+      - name: Add status needs triage when no status label is present
+        run: |
+          status_count="$(gh issue view "$ISSUE_NUMBER" --json labels \
+            --jq '[.labels[].name | select(startswith("status: "))] | length')"
+          if [ "$status_count" -eq 0 ]; then
+            gh issue edit "$ISSUE_NUMBER" --add-label "status: needs triage"
+          fi
