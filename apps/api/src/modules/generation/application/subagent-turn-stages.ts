@@ -191,6 +191,9 @@ export async function runSubagentStreamLoop(
 
     for await (const event of generateAgentTurnStream({
       userId: input.userId,
+      chatId: input.chatId,
+      workdir: input.workdir,
+      workdirPolicy: input.workdirPolicy,
       modelName: resolvedModel.modelId,
       agentId: runtime.profile.id,
       agentRuntimeHash: runtime.runtimeHash,

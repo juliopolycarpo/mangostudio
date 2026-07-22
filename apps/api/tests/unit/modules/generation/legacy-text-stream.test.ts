@@ -169,4 +169,29 @@ describe('runLegacyTextStream', () => {
       parameters: { timeoutSeconds: 5, maxOutputBytes: 12_000 },
     });
   });
+
+  it('forwards workdir and workdirPolicy to legacy text stream requests', async () => {
+    await mockMessageRepository();
+    const { runLegacyTextStream } = await import(
+      '../../../../src/modules/generation/application/stream-text-turn-stages'
+    );
+    let capturedRequest: TextGenerationRequest | undefined;
+    const session = createSession([{ type: 'text', text: '', done: true }], {
+      onRequest: (req) => {
+        capturedRequest = req;
+      },
+    });
+    session.workdir = '/srv/chat-workdir';
+    session.workdirPolicy = { root: '/srv/chat-workdir', restricted: true };
+
+    for await (const _event of runLegacyTextStream(session)) {
+      // consume
+    }
+
+    expect(capturedRequest?.workdir).toBe('/srv/chat-workdir');
+    expect(capturedRequest?.workdirPolicy).toEqual({
+      root: '/srv/chat-workdir',
+      restricted: true,
+    });
+  });
 });
