@@ -451,7 +451,11 @@ GitHub release archive matching the crate version and target. binstall extracts
 only the `mangostudio` binary, so it **omits the bundled `cursor-sidecar/`** that
 the archive ships on Cursor-supported platforms — the Cursor provider is
 unavailable on a binstall install. Use the shell installer or `cargo install`
-(below) for the full Cursor SDK. The binstall binary does not use the launcher
+(below) for the full Cursor SDK. For Node.js requirements, supported platforms,
+and `mangostudio doctor` probes, see
+[docs/providers/cursor.md](../providers/cursor.md).
+
+The binstall binary does not use the launcher
 cache under `~/.mango/dist/`.
 
 `cargo install mangostudio` builds the thin Rust launcher from
