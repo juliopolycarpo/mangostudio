@@ -42,25 +42,48 @@ describe('useModelCatalog', () => {
     expect(result.current.isLoading).toBe(true);
   });
 
-  it('updates catalog after a successful fetch', async () => {
-    const mockCatalog = {
-      configured: true,
-      status: 'ready' as const,
-      allModels: [
-        {
-          modelId: 'gpt-4o',
-          displayName: 'GPT-4o',
-          description: '',
-          supportedActions: ['generateContent'],
-          provider: 'openai-compatible' as const,
-        },
-      ],
-      textModels: [],
-      imageModels: [],
-      discoveredTextModels: [],
-      discoveredImageModels: [],
-    };
-
+  it.each([
+    {
+      label: 'openai-shaped',
+      mockCatalog: {
+        configured: true,
+        status: 'ready' as const,
+        allModels: [
+          {
+            modelId: 'gpt-4o',
+            displayName: 'GPT-4o',
+            description: '',
+            supportedActions: ['generateContent'],
+            provider: 'openai-compatible' as const,
+          },
+        ],
+        textModels: [],
+        imageModels: [],
+        discoveredTextModels: [],
+        discoveredImageModels: [],
+      },
+    },
+    {
+      label: 'gemini-shaped',
+      mockCatalog: {
+        configured: true,
+        status: 'ready' as const,
+        allModels: [
+          {
+            modelId: 'gemini-2.5-flash',
+            resourceName: 'models/gemini-2.5-flash',
+            displayName: 'Gemini 2.5 Flash',
+            description: 'Fast model',
+            supportedActions: ['generateContent'],
+          },
+        ],
+        textModels: [],
+        imageModels: [],
+        discoveredTextModels: [],
+        discoveredImageModels: [],
+      },
+    },
+  ])('updates catalog after a successful fetch ($label)', async ({ mockCatalog }) => {
     mockGet.mockResolvedValue(mockResult(mockCatalog));
 
     const { result } = renderHook(() => useModelCatalog());
