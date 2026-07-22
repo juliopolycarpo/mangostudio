@@ -1,12 +1,7 @@
 import { describe, expect, it } from 'bun:test';
+import { en } from '@mangostudio/shared/i18n';
 import { buildGeneratedImageFilename } from '@/lib/download-filenames';
-import {
-  ApiError,
-  cn,
-  DEFAULT_API_ERROR_FALLBACK,
-  extractApiError,
-  resolveApiErrorMessage,
-} from '@/lib/utils';
+import { ApiError, cn, DEFAULT_API_ERROR_FALLBACK, resolveApiErrorMessage } from '@/lib/utils';
 
 describe('cn', () => {
   it('merges class names', () => {
@@ -28,56 +23,68 @@ describe('cn', () => {
 });
 
 describe('DEFAULT_API_ERROR_FALLBACK', () => {
-  it('is a fixed neutral string', () => {
-    expect(DEFAULT_API_ERROR_FALLBACK).toBe('An unknown error occurred');
-  });
-});
-
-describe('extractApiError', () => {
-  it('returns the error field from an ApiErrorResponse object', () => {
-    expect(extractApiError({ error: 'Something went wrong' })).toBe('Something went wrong');
-  });
-
-  it('returns a string value directly', () => {
-    expect(extractApiError('Network error')).toBe('Network error');
-  });
-
-  it('returns empty string for empty string input', () => {
-    expect(extractApiError('')).toBe(DEFAULT_API_ERROR_FALLBACK);
-  });
-
-  it('returns fallback for null', () => {
-    expect(extractApiError(null)).toBe(DEFAULT_API_ERROR_FALLBACK);
-  });
-
-  it('returns fallback for undefined', () => {
-    expect(extractApiError(undefined)).toBe(DEFAULT_API_ERROR_FALLBACK);
-  });
-
-  it('returns fallback for object without error field', () => {
-    expect(extractApiError({ status: 500 })).toBe(DEFAULT_API_ERROR_FALLBACK);
-  });
-
-  it('returns fallback for object with empty error string', () => {
-    expect(extractApiError({ error: '' })).toBe(DEFAULT_API_ERROR_FALLBACK);
-  });
-
-  it('returns custom fallback when provided', () => {
-    expect(extractApiError(null, 'Custom fallback')).toBe('Custom fallback');
+  it('matches en.errors.unknown', () => {
+    expect(DEFAULT_API_ERROR_FALLBACK).toBe(en.errors.unknown);
   });
 });
 
 describe('ApiError', () => {
+  it('returns the error field from an ApiErrorResponse object', () => {
+    const err = new ApiError({ error: 'Something went wrong' });
+    expect(err.serverMessage).toBe('Something went wrong');
+    expect(err.message).toBe('Something went wrong');
+  });
+
+  it('returns a string value directly', () => {
+    const err = new ApiError('Network error');
+    expect(err.serverMessage).toBe('Network error');
+    expect(err.message).toBe('Network error');
+  });
+
+  it('uses fallback for empty string input', () => {
+    const err = new ApiError('');
+    expect(err.serverMessage).toBeNull();
+    expect(err.message).toBe(DEFAULT_API_ERROR_FALLBACK);
+  });
+
+  it('uses fallback for null', () => {
+    const err = new ApiError(null);
+    expect(err.serverMessage).toBeNull();
+    expect(err.message).toBe(DEFAULT_API_ERROR_FALLBACK);
+  });
+
+  it('uses fallback for undefined', () => {
+    const err = new ApiError(undefined);
+    expect(err.serverMessage).toBeNull();
+    expect(err.message).toBe(DEFAULT_API_ERROR_FALLBACK);
+  });
+
+  it('uses fallback for object without error field', () => {
+    const err = new ApiError({ status: 500 });
+    expect(err.serverMessage).toBeNull();
+    expect(err.message).toBe(DEFAULT_API_ERROR_FALLBACK);
+  });
+
+  it('uses fallback for object with empty error string', () => {
+    const err = new ApiError({ error: '' });
+    expect(err.serverMessage).toBeNull();
+    expect(err.message).toBe(DEFAULT_API_ERROR_FALLBACK);
+  });
+
   it('exposes serverMessage when the API sent text', () => {
     const err = new ApiError({ error: 'slug already exists' });
     expect(err.serverMessage).toBe('slug already exists');
     expect(err.message).toBe('slug already exists');
   });
 
-  it('uses the neutral fallback as message when the server sent no text', () => {
-    const err = new ApiError(null);
-    expect(err.serverMessage).toBeNull();
-    expect(err.message).toBe(DEFAULT_API_ERROR_FALLBACK);
+  it('preserves code and details when the API sent them', () => {
+    const err = new ApiError({
+      error: 'Checkout blocked',
+      code: 'CHECKOUT_BLOCKED',
+      details: { path: '/tmp/repo' },
+    });
+    expect(err.code).toBe('CHECKOUT_BLOCKED');
+    expect(err.details).toEqual({ path: '/tmp/repo' });
   });
 });
 
