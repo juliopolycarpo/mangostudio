@@ -69,11 +69,11 @@ export function browseErrorMessage(error: unknown, s: WorkdirBrowseErrorMessages
 
   switch (error.code) {
     case ERROR_CODES.NOT_FOUND:
-      return validationMessage('not-found', s.validationReasons, s.loadError);
+      return s.validationReasons.notFound;
     case ERROR_CODES.NOT_A_DIRECTORY:
-      return validationMessage('not-a-directory', s.validationReasons, s.loadError);
+      return s.validationReasons.notDirectory;
     case ERROR_CODES.PERMISSION_DENIED:
-      return validationMessage('permission-denied', s.validationReasons, s.loadError);
+      return s.validationReasons.permissionDenied;
     default:
       return s.loadError;
   }
