@@ -78,7 +78,7 @@ function useSeedTrackedQueries(spies: {
   useQuery({
     queryKey: ['git-branches', 'chat-1'],
     queryFn: spies.branches ?? noop,
-    initialData: { branches: [] },
+    initialData: { branches: [], remotes: [] },
     staleTime: Number.POSITIVE_INFINITY,
   });
   useQuery({
@@ -120,7 +120,7 @@ describe('Git write hooks', () => {
     const refetchCommits = vi
       .fn()
       .mockResolvedValue({ hash: 'abc123', subject: 'prior', files: [] });
-    const refetchBranches = vi.fn().mockResolvedValue({ branches: [] });
+    const refetchBranches = vi.fn().mockResolvedValue({ branches: [], remotes: [] });
     const refetchStashes = vi.fn().mockResolvedValue({ stashes: [] });
 
     const { result } = renderHook(() => {
@@ -155,7 +155,7 @@ describe('Git write hooks', () => {
     const refetchCommits = vi
       .fn()
       .mockResolvedValue({ hash: 'abc123', subject: 'prior', files: [] });
-    const refetchBranches = vi.fn().mockResolvedValue({ branches: [] });
+    const refetchBranches = vi.fn().mockResolvedValue({ branches: [], remotes: [] });
 
     const { result } = renderHook(() => {
       useSeedTrackedQueries({
@@ -184,7 +184,7 @@ describe('Git write hooks', () => {
     const refetchCommits = vi
       .fn()
       .mockResolvedValue({ hash: 'abc123', subject: 'prior', files: [] });
-    const refetchBranches = vi.fn().mockResolvedValue({ branches: [] });
+    const refetchBranches = vi.fn().mockResolvedValue({ branches: [], remotes: [] });
     const refetchGithub = vi.fn().mockResolvedValue({ state: 'none' });
     const refetchStashes = vi.fn().mockResolvedValue({ stashes: [] });
 

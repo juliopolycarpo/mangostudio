@@ -84,6 +84,12 @@ function writePathsBodySchema() {
 export const StagePathsBodySchema = writePathsBodySchema();
 export const UnstagePathsBodySchema = writePathsBodySchema();
 
+export const DiscardPathsBodySchema = Type.Object({
+  chatId: Type.String({ minLength: 1 }),
+  paths: GitPathsSchema,
+  mode: Type.Union([Type.Literal('tracked'), Type.Literal('untracked')]),
+});
+
 // The first and last non-whitespace characters bound the trimmed title to
 // 1..72 characters while still accepting harmless surrounding spaces.
 const CommitTitleSchema = Type.String({
@@ -145,13 +151,25 @@ export const GitBranchSchema = Type.Object({
   behind: Type.Integer({ minimum: 0 }),
 });
 
+export const GitRemoteBranchSchema = Type.Object({
+  name: GitBranchNameSchema,
+  remote: GitBranchNameSchema,
+  ref: Type.String({ minLength: 1, maxLength: 512 }),
+});
+
 export const GitBranchesResponseSchema = Type.Object({
   branches: ReadonlyArraySchema(GitBranchSchema),
+  remotes: ReadonlyArraySchema(GitRemoteBranchSchema),
 });
 
 export const SwitchBranchBodySchema = Type.Object({
   chatId: Type.String({ minLength: 1 }),
   name: GitBranchNameSchema,
+});
+
+export const CheckoutRemoteBranchBodySchema = Type.Object({
+  chatId: Type.String({ minLength: 1 }),
+  remoteRef: Type.String({ minLength: 1, maxLength: 512 }),
 });
 
 export const CreateBranchBodySchema = Type.Object({
@@ -232,6 +250,7 @@ export type InitRepoBody = Static<typeof InitRepoBodySchema>;
 export type InitRepoResponse = Static<typeof InitRepoResponseSchema>;
 export type StagePathsBody = Static<typeof StagePathsBodySchema>;
 export type UnstagePathsBody = Static<typeof UnstagePathsBodySchema>;
+export type DiscardPathsBody = Static<typeof DiscardPathsBodySchema>;
 export type CommitBody = Static<typeof CommitBodySchema>;
 export type CommitResponse = Static<typeof CommitResponseSchema>;
 export type GenerateCommitMessageBody = Static<typeof GenerateCommitMessageBodySchema>;
@@ -241,8 +260,10 @@ export type StashPopBody = Static<typeof StashPopBodySchema>;
 export type StashEntry = Static<typeof StashEntrySchema>;
 export type StashListResponse = Static<typeof StashListResponseSchema>;
 export type GitBranch = Static<typeof GitBranchSchema>;
+export type GitRemoteBranch = Static<typeof GitRemoteBranchSchema>;
 export type GitBranchesResponse = Static<typeof GitBranchesResponseSchema>;
 export type SwitchBranchBody = Static<typeof SwitchBranchBodySchema>;
+export type CheckoutRemoteBranchBody = Static<typeof CheckoutRemoteBranchBodySchema>;
 export type CreateBranchBody = Static<typeof CreateBranchBodySchema>;
 export type GitHistoryQuery = Static<typeof GitHistoryQuerySchema>;
 export type GitCommitSummary = Static<typeof GitCommitSummarySchema>;

@@ -3,6 +3,7 @@ import { ERROR_CODES, type ErrorCode } from '@mangostudio/shared/errors';
 import type {
   CommitBody,
   CommitResponse,
+  DiscardPathsBody,
   GitBranchesResponse,
   GitRepoState,
   GitStatus,
@@ -12,7 +13,11 @@ import type {
   StashSaveBody,
   UnstagePathsBody,
 } from '@mangostudio/shared/git';
-import { parseBranchList, parseCheckoutBlockedPaths } from '../domain/branch-parser';
+import {
+  parseBranchList,
+  parseCheckoutBlockedPaths,
+  parseRemoteBranchList,
+} from '../domain/branch-parser';
 import { buildCommitArgs } from '../domain/commit-command';
 import { GitPathValidationError, validateRepoPaths } from '../domain/path-validation';
 import { parseStashList } from '../domain/stash-parser';
@@ -213,6 +218,35 @@ export function unstagePaths(
   });
 }
 
+export function discardPaths(
+  workdir: string,
+  input: Pick<DiscardPathsBody, 'paths' | 'mode'>,
+  signal?: AbortSignal
+): Promise<GitStatus> {
+  return runRepoMutation(workdir, signal, 'Discarding changes', async (root) => {
+    const pathspecs = validateRepoPaths(root, input.paths);
+    if (input.mode === 'tracked') {
+      // Restore only the worktree so staged index entries survive.
+      await runGit(['restore', '--worktree', '--', ...pathspecs], { cwd: root, signal });
+      return await getRepoStatus(root, signal);
+    }
+
+    const status = await getRepoStatus(root, signal);
+    const untracked = new Set(status.untracked.map((change) => change.path));
+    for (const path of input.paths) {
+      if (!untracked.has(path)) {
+        throw new GitWriteError(
+          `Path is not an untracked file: ${path}`,
+          422,
+          ERROR_CODES.VALIDATION
+        );
+      }
+    }
+    await runGit(['clean', '-f', '--', ...pathspecs], { cwd: root, signal });
+    return await getRepoStatus(root, signal);
+  });
+}
+
 export function commitChanges(
   workdir: string,
   input: Pick<CommitBody, 'title' | 'body' | 'amend'>,
@@ -328,15 +362,26 @@ export async function listBranches(
 ): Promise<GitBranchesResponse> {
   try {
     const root = await requireRepoRoot(workdir, signal);
-    const result = await runGit(
-      [
-        'for-each-ref',
-        '--format=%(refname:short)%1f%(HEAD)%1f%(upstream:short)%1f%(upstream:track,nobracket)%00',
-        'refs/heads',
-      ],
-      { cwd: root, signal }
+    const [localResult, remoteResult] = await Promise.all([
+      runGit(
+        [
+          'for-each-ref',
+          '--format=%(refname:short)%1f%(HEAD)%1f%(upstream:short)%1f%(upstream:track,nobracket)%00',
+          'refs/heads',
+        ],
+        { cwd: root, signal }
+      ),
+      runGit(['for-each-ref', '--format=%(refname:short)%00', 'refs/remotes'], {
+        cwd: root,
+        signal,
+      }),
+    ]);
+    const branches = parseBranchList(localResult.stdout);
+    const localNames = new Set(branches.map((branch) => branch.name));
+    const remotes = parseRemoteBranchList(remoteResult.stdout).filter(
+      (remote) => !localNames.has(remote.name)
     );
-    return { branches: parseBranchList(result.stdout) };
+    return { branches, remotes };
   } catch (error) {
     return mapWriteFailure(error, 'Listing branches');
   }
@@ -355,6 +400,65 @@ export function switchBranch(
     }
     return await currentRepoState(workdir, root, signal);
   });
+}
+
+/**
+ * Creates a local tracking branch from a remote-tracking ref (for example
+ * `origin/feat/x`), or switches to the existing local branch of the same name.
+ */
+export function checkoutRemoteBranch(
+  workdir: string,
+  remoteRef: string,
+  signal?: AbortSignal
+): Promise<GitRepoState> {
+  return runRepoMutation(workdir, signal, 'Checking out remote branch', async (root) => {
+    const slash = remoteRef.indexOf('/');
+    if (slash <= 0 || slash === remoteRef.length - 1 || remoteRef.includes('\0')) {
+      throw new GitWriteError('Remote branch ref is invalid.', 422, ERROR_CODES.VALIDATION);
+    }
+    const localName = remoteRef.slice(slash + 1);
+
+    try {
+      await runGit(['rev-parse', '--verify', '--quiet', `refs/remotes/${remoteRef}`], {
+        cwd: root,
+        signal,
+      });
+    } catch (error) {
+      if (error instanceof GitCliError) {
+        throw new GitWriteError(
+          `Remote branch was not found: ${remoteRef}`,
+          404,
+          ERROR_CODES.NOT_FOUND,
+          commandDetail(error)
+        );
+      }
+      throw error;
+    }
+
+    try {
+      if (await hasLocalBranch(root, localName, signal)) {
+        await runGit(['switch', '--', localName], { cwd: root, signal });
+      } else {
+        await runGit(['switch', '--track', '--', remoteRef], { cwd: root, signal });
+      }
+    } catch (error) {
+      mapBranchSwitchFailure(error);
+    }
+    return await currentRepoState(workdir, root, signal);
+  });
+}
+
+async function hasLocalBranch(root: string, name: string, signal?: AbortSignal): Promise<boolean> {
+  try {
+    await runGit(['show-ref', '--verify', '--quiet', `refs/heads/${name}`], {
+      cwd: root,
+      signal,
+    });
+    return true;
+  } catch (error) {
+    if (error instanceof GitCliError && error.exitCode === 1) return false;
+    throw error;
+  }
 }
 
 export function createBranch(

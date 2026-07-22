@@ -456,4 +456,103 @@ describe('Git write routes', () => {
     expect(missing.status).toBe(404);
     expect(await missing.json()).toEqual({ error: 'Chat not found', code: 'NOT_FOUND' });
   });
+
+  it.skipIf(!hasGit)('discards tracked worktree changes without clearing the index', async () => {
+    const workdir = await createTempRepo();
+    await writeFile(join(workdir, 'tracked.txt'), 'initial\n');
+    await runFixtureGit(workdir, ['add', 'tracked.txt']);
+    await runFixtureGit(workdir, ['commit', '-m', 'initial']);
+    await writeFile(join(workdir, 'tracked.txt'), 'staged\n');
+    await runFixtureGit(workdir, ['add', 'tracked.txt']);
+    await writeFile(join(workdir, 'tracked.txt'), 'worktree\n');
+    const { app, chatId } = await createRouteFixture(workdir);
+
+    const discarded = await postJson(app, '/git/discard', {
+      chatId,
+      paths: ['tracked.txt'],
+      mode: 'tracked',
+    });
+    const payload = (await discarded.json()) as GitStatus;
+    expect(discarded.status).toBe(200);
+    expect(Value.Check(GitStatusSchema, payload)).toBe(true);
+    expect(payload.staged).toContainEqual({ path: 'tracked.txt', status: 'modified' });
+    expect(payload.unstaged).toEqual([]);
+    expect(await Bun.file(join(workdir, 'tracked.txt')).text()).toBe('staged\n');
+  });
+
+  it.skipIf(!hasGit)(
+    'deletes only selected untracked files and rejects tracked paths',
+    async () => {
+      const workdir = await createTempRepo();
+      await writeFile(join(workdir, 'tracked.txt'), 'initial\n');
+      await runFixtureGit(workdir, ['add', 'tracked.txt']);
+      await runFixtureGit(workdir, ['commit', '-m', 'initial']);
+      await writeFile(join(workdir, 'keep.txt'), 'keep\n');
+      await writeFile(join(workdir, 'drop.txt'), 'drop\n');
+      const { app, chatId } = await createRouteFixture(workdir);
+
+      const rejected = await postJson(app, '/git/discard', {
+        chatId,
+        paths: ['tracked.txt'],
+        mode: 'untracked',
+      });
+      expect(rejected.status).toBe(422);
+
+      const deleted = await postJson(app, '/git/discard', {
+        chatId,
+        paths: ['drop.txt'],
+        mode: 'untracked',
+      });
+      const payload = (await deleted.json()) as GitStatus;
+      expect(deleted.status).toBe(200);
+      expect(payload.untracked).toContainEqual({ path: 'keep.txt', status: 'untracked' });
+      expect(payload.untracked.some((change) => change.path === 'drop.txt')).toBe(false);
+      expect(await Bun.file(join(workdir, 'keep.txt')).exists()).toBe(true);
+      expect(await Bun.file(join(workdir, 'drop.txt')).exists()).toBe(false);
+    }
+  );
+
+  it.skipIf(!hasGit)('lists remote branches and creates a local tracking branch', async () => {
+    const bare = await realpath(await mkdtemp(join(tmpdir(), 'mango-git-bare-')));
+    tempDirs.push(bare);
+    await runFixtureGit(bare, ['init', '--bare']);
+
+    const workdir = await createTempRepo();
+    await writeFile(join(workdir, 'readme.txt'), 'hello\n');
+    await runFixtureGit(workdir, ['add', 'readme.txt']);
+    await runFixtureGit(workdir, ['commit', '-m', 'initial']);
+    await runFixtureGit(workdir, ['branch', '-M', 'main']);
+    await runFixtureGit(workdir, ['remote', 'add', 'origin', bare]);
+    await runFixtureGit(workdir, ['push', '-u', 'origin', 'main']);
+    await runFixtureGit(workdir, ['checkout', '-b', 'feat/remote-only']);
+    await writeFile(join(workdir, 'feature.txt'), 'feature\n');
+    await runFixtureGit(workdir, ['add', 'feature.txt']);
+    await runFixtureGit(workdir, ['commit', '-m', 'feature']);
+    await runFixtureGit(workdir, ['push', '-u', 'origin', 'feat/remote-only']);
+    await runFixtureGit(workdir, ['checkout', 'main']);
+    await runFixtureGit(workdir, ['branch', '-D', 'feat/remote-only']);
+
+    const { app, chatId } = await createRouteFixture(workdir);
+    const branchesUrl = new URL('http://localhost/git/branches');
+    branchesUrl.searchParams.set('chatId', chatId);
+    const listed = await app.handle(new Request(branchesUrl.toString()));
+    const listedPayload = (await listed.json()) as {
+      branches: Array<{ name: string }>;
+      remotes: Array<{ name: string; remote: string; ref: string }>;
+    };
+    expect(listed.status).toBe(200);
+    expect(listedPayload.remotes).toContainEqual({
+      name: 'feat/remote-only',
+      remote: 'origin',
+      ref: 'origin/feat/remote-only',
+    });
+
+    const checkedOut = await postJson(app, '/git/branches/checkout-remote', {
+      chatId,
+      remoteRef: 'origin/feat/remote-only',
+    });
+    expect(checkedOut.status).toBe(200);
+    const state = (await checkedOut.json()) as { status: { branch: { name: string | null } } };
+    expect(state.status.branch.name).toBe('feat/remote-only');
+  });
 });

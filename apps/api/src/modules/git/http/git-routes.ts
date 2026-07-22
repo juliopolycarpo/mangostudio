@@ -4,9 +4,11 @@ import {
   ERROR_CODES,
 } from '@mangostudio/shared/errors';
 import {
+  CheckoutRemoteBranchBodySchema,
   CommitBodySchema,
   CommitResponseSchema,
   CreateBranchBodySchema,
+  DiscardPathsBodySchema,
   GenerateCommitMessageBodySchema,
   type GenerateCommitMessageResponse,
   GenerateCommitMessageResponseSchema,
@@ -52,8 +54,10 @@ import {
 import { getCommitDetails, getFileDiff, listHistory } from '../application/git-navigation-service';
 import { getRepoState, initRepo } from '../application/git-status-service';
 import {
+  checkoutRemoteBranch,
   commitChanges,
   createBranch,
+  discardPaths,
   fetchRemote,
   GitWriteError,
   listBranches,
@@ -201,6 +205,30 @@ export const gitRoutes = new Elysia().use(requireAuth).group('/git', (app) =>
       },
       {
         body: UnstagePathsBodySchema,
+        response: {
+          200: GitStatusSchema,
+          403: ApiErrorResponseSchema,
+          404: ApiErrorResponseSchema,
+          409: ApiErrorResponseSchema,
+          422: ApiErrorResponseSchema,
+          500: ApiErrorResponseSchema,
+        },
+      }
+    )
+    .post(
+      '/discard',
+      async ({ body, request, set, user }) => {
+        const resolved = await routeWorkdir(body.chatId, user?.id ?? '', set);
+        if ('error' in resolved) return resolved.error;
+
+        try {
+          return await discardPaths(resolved.workdir, body, request.signal);
+        } catch (error) {
+          return gitWriteError(error, set);
+        }
+      },
+      {
+        body: DiscardPathsBodySchema,
         response: {
           200: GitStatusSchema,
           403: ApiErrorResponseSchema,
@@ -412,6 +440,29 @@ export const gitRoutes = new Elysia().use(requireAuth).group('/git', (app) =>
       },
       {
         body: SwitchBranchBodySchema,
+        response: {
+          200: GitRepoStateSchema,
+          403: ApiErrorResponseSchema,
+          404: ApiErrorResponseSchema,
+          409: ApiErrorResponseSchema,
+          422: ApiErrorResponseSchema,
+          500: ApiErrorResponseSchema,
+        },
+      }
+    )
+    .post(
+      '/branches/checkout-remote',
+      async ({ body, request, set, user }) => {
+        const resolved = await routeWorkdir(body.chatId, user?.id ?? '', set);
+        if ('error' in resolved) return resolved.error;
+        try {
+          return await checkoutRemoteBranch(resolved.workdir, body.remoteRef, request.signal);
+        } catch (error) {
+          return gitWriteError(error, set);
+        }
+      },
+      {
+        body: CheckoutRemoteBranchBodySchema,
         response: {
           200: GitRepoStateSchema,
           403: ApiErrorResponseSchema,
