@@ -20,6 +20,7 @@ import {
 } from '@tanstack/react-query';
 import { client } from '@/lib/api-client';
 import { ApiError } from '@/lib/utils';
+import { githubContextKeys } from './use-github-context';
 
 const gitStateKeys = {
   all: ['git-state'] as const,
@@ -51,6 +52,37 @@ const gitDiffKeys = {
   detail: (chatId: string, input: GitDiffInput) =>
     [...gitDiffKeys.all, chatId, input.path, input.staged ?? false, input.commit ?? null] as const,
 };
+
+/** Query families a git write may invalidate. Each mutation declares its own set. */
+export const GIT_SCOPES = [
+  'state',
+  'stashes',
+  'branches',
+  'history',
+  'commits',
+  'diffs',
+  'github',
+] as const;
+export type GitScope = (typeof GIT_SCOPES)[number];
+
+/**
+ * Declarative invalidation map: each write states what it can change so a
+ * single-file stage click does not refetch history or every cached commit.
+ */
+export const gitWriteScopes = {
+  init: GIT_SCOPES,
+  stage: ['state', 'diffs'],
+  unstage: ['state', 'diffs'],
+  commit: ['state', 'history', 'commits', 'branches', 'diffs', 'github'],
+  stashSave: ['state', 'stashes', 'diffs'],
+  stashPop: ['state', 'stashes', 'diffs'],
+  // createBranch runs `git switch -c` at the current HEAD — log is unchanged.
+  createBranch: ['state', 'branches'],
+  switchBranch: ['state', 'branches', 'history', 'diffs', 'github'],
+  fetch: ['state', 'branches', 'github'],
+  pull: ['state', 'branches', 'history', 'commits', 'diffs', 'github'],
+  push: ['state', 'branches', 'github'],
+} as const satisfies Record<string, readonly GitScope[]>;
 
 type GitPathSelection = { paths: string[] } | { all: true };
 interface CommitInput {
@@ -90,20 +122,23 @@ export function invalidateGitState(queryClient: QueryClient, chatId: string): Pr
   return queryClient.invalidateQueries({ queryKey: gitStateKeys.detail(chatId) });
 }
 
-function invalidateGitStashes(queryClient: QueryClient, chatId: string): Promise<void> {
-  return queryClient.invalidateQueries({ queryKey: gitStashKeys.detail(chatId) });
-}
-
-async function invalidateGitWrites(queryClient: QueryClient, chatId: string): Promise<void> {
-  await Promise.all([
-    invalidateGitState(queryClient, chatId),
-    invalidateGitStashes(queryClient, chatId),
-    queryClient.invalidateQueries({ queryKey: gitBranchKeys.detail(chatId) }),
-    queryClient.invalidateQueries({ queryKey: gitHistoryKeys.detail(chatId) }),
-    queryClient.invalidateQueries({ queryKey: [...gitCommitKeys.all, chatId] }),
-    queryClient.invalidateQueries({ queryKey: [...gitDiffKeys.all, chatId] }),
-    queryClient.invalidateQueries({ queryKey: ['github-context', chatId] }),
-  ]);
+async function invalidateGitScopes(
+  queryClient: QueryClient,
+  chatId: string,
+  scopes: readonly GitScope[]
+): Promise<void> {
+  const keys: Record<GitScope, readonly unknown[]> = {
+    state: gitStateKeys.detail(chatId),
+    stashes: gitStashKeys.detail(chatId),
+    branches: gitBranchKeys.detail(chatId),
+    history: gitHistoryKeys.detail(chatId),
+    commits: [...gitCommitKeys.all, chatId],
+    diffs: [...gitDiffKeys.all, chatId],
+    github: [...githubContextKeys.all, chatId],
+  };
+  await Promise.all(
+    scopes.map((scope) => queryClient.invalidateQueries({ queryKey: keys[scope] }))
+  );
 }
 
 export function useGitState(chatId: string) {
@@ -118,7 +153,7 @@ export function useInitRepo(chatId: string) {
       if (error) throw new ApiError(error.value);
       return data as InitRepoResponse;
     },
-    onSuccess: () => invalidateGitWrites(queryClient, chatId),
+    onSuccess: () => invalidateGitScopes(queryClient, chatId, gitWriteScopes.init),
   });
 }
 
@@ -130,7 +165,7 @@ export function useStagePaths(chatId: string) {
       if (error) throw new ApiError(error.value);
       return data as GitStatus;
     },
-    onSuccess: () => invalidateGitWrites(queryClient, chatId),
+    onSuccess: () => invalidateGitScopes(queryClient, chatId, gitWriteScopes.stage),
   });
 }
 
@@ -142,7 +177,7 @@ export function useUnstagePaths(chatId: string) {
       if (error) throw new ApiError(error.value);
       return data as GitStatus;
     },
-    onSuccess: () => invalidateGitWrites(queryClient, chatId),
+    onSuccess: () => invalidateGitScopes(queryClient, chatId, gitWriteScopes.unstage),
   });
 }
 
@@ -154,7 +189,7 @@ export function useCommit(chatId: string) {
       if (error) throw new ApiError(error.value);
       return data as CommitResponse;
     },
-    onSuccess: () => invalidateGitWrites(queryClient, chatId),
+    onSuccess: () => invalidateGitScopes(queryClient, chatId, gitWriteScopes.commit),
   });
 }
 
@@ -189,7 +224,7 @@ export function useStashSave(chatId: string) {
       if (error) throw new ApiError(error.value);
       return data as GitRepoState;
     },
-    onSuccess: () => invalidateGitWrites(queryClient, chatId),
+    onSuccess: () => invalidateGitScopes(queryClient, chatId, gitWriteScopes.stashSave),
   });
 }
 
@@ -201,7 +236,7 @@ export function useStashPop(chatId: string) {
       if (error) throw new ApiError(error.value);
       return data as GitRepoState;
     },
-    onSuccess: () => invalidateGitWrites(queryClient, chatId),
+    onSuccess: () => invalidateGitScopes(queryClient, chatId, gitWriteScopes.stashPop),
   });
 }
 
@@ -224,7 +259,7 @@ export function useSwitchBranch(chatId: string) {
       if (error) throw new ApiError(error.value);
       return data as GitRepoState;
     },
-    onSuccess: () => invalidateGitWrites(queryClient, chatId),
+    onSuccess: () => invalidateGitScopes(queryClient, chatId, gitWriteScopes.switchBranch),
   });
 }
 
@@ -236,7 +271,7 @@ export function useCreateBranch(chatId: string) {
       if (error) throw new ApiError(error.value);
       return data as GitRepoState;
     },
-    onSuccess: () => invalidateGitWrites(queryClient, chatId),
+    onSuccess: () => invalidateGitScopes(queryClient, chatId, gitWriteScopes.createBranch),
   });
 }
 
@@ -292,7 +327,7 @@ function useRemoteMutation(chatId: string, operation: 'fetch' | 'pull' | 'push')
       if (error) throw new ApiError(error.value);
       return data as GitRepoState;
     },
-    onSuccess: () => invalidateGitWrites(queryClient, chatId),
+    onSuccess: () => invalidateGitScopes(queryClient, chatId, gitWriteScopes[operation]),
   });
 }
 

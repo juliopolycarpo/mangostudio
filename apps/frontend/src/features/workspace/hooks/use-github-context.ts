@@ -4,7 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { client } from '@/lib/api-client';
 import { ApiError } from '@/lib/utils';
 
-const githubContextKeys = {
+export const githubContextKeys = {
   all: ['github-context'] as const,
   detail: (chatId: string, branch: string) => [...githubContextKeys.all, chatId, branch] as const,
 };
