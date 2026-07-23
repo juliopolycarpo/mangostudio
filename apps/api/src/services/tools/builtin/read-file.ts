@@ -16,6 +16,9 @@ import {
 
 const READ_FILE_TOOL_NAME = 'read_file';
 
+/** Hard ceiling on bytes loaded by read_file; oversized files fail instead of allocating. */
+export const READ_FILE_MAX_BYTES = 10 * 1024 * 1024;
+
 export interface ReadFileToolArgs {
   path: string;
 }
@@ -66,7 +69,9 @@ export async function executeReadFile(
     workdirPolicy: context.workdirPolicy,
   });
 
-  const { bytes, mtimeMs } = await readFileWithObservedMtime(resolvedPath);
+  const { bytes, mtimeMs } = await readFileWithObservedMtime(resolvedPath, {
+    maxBytes: READ_FILE_MAX_BYTES,
+  });
   const content = new TextDecoder().decode(bytes);
   const sha256 = recordFileRead(context.chatId, resolvedPath, bytes, mtimeMs);
 

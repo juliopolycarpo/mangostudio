@@ -54,6 +54,14 @@ export interface ObservedFileRead {
   readonly mtimeMs: number;
 }
 
+export interface ReadFileWithObservedMtimeOptions {
+  /**
+   * Reject files whose size on the open descriptor exceeds this many bytes.
+   * Defaults to unbounded so freshness hashing can still read any observed file.
+   */
+  readonly maxBytes?: number;
+}
+
 /**
  * Reads a file through a single descriptor and reports the mtime that belongs to
  * the bytes returned. Stat-ing the path after the read could pick up a
@@ -63,7 +71,11 @@ export interface ObservedFileRead {
  *
  * // Usage: const { bytes, mtimeMs } = await readFileWithObservedMtime(path);
  */
-export async function readFileWithObservedMtime(resolvedPath: string): Promise<ObservedFileRead> {
+export async function readFileWithObservedMtime(
+  resolvedPath: string,
+  options: ReadFileWithObservedMtimeOptions = {}
+): Promise<ObservedFileRead> {
+  const maxBytes = options.maxBytes ?? Number.POSITIVE_INFINITY;
   const handle = await open(resolvedPath, 'r').catch((error: unknown) => {
     if (isErrnoException(error, 'ENOENT')) {
       throw new PathAccessError(`File not found: "${resolvedPath}"`);
@@ -75,6 +87,11 @@ export async function readFileWithObservedMtime(resolvedPath: string): Promise<O
     const before = await handle.stat();
     if (!before.isFile()) {
       throw new PathAccessError(`Cannot read "${resolvedPath}": it is not a regular file.`);
+    }
+    if (before.size > maxBytes) {
+      throw new PathAccessError(
+        `Cannot read "${resolvedPath}": file is too large (${before.size} bytes; limit is ${maxBytes}).`
+      );
     }
 
     const bytes = await handle.readFile();
