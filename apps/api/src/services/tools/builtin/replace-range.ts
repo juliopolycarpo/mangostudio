@@ -4,11 +4,12 @@
  */
 
 import { RegularFileWriteError, writeRegularFileAtomic } from '../../../lib/safe-file';
-import { getRequiredTextArg, ToolArgumentError } from '../arg-parsing';
-import { assertFresh, recordFileRead, withPathLocks } from '../file-freshness';
+import { getRequiredInteger, getRequiredTextArg, ToolArgumentError } from '../arg-parsing';
+import { assertFresh, FileNotReadError, recordFileRead, withPathLocks } from '../file-freshness';
 import { registerTool } from '../registry';
 import type { ToolContext } from '../types';
 import {
+  explainUnreadableMutationTarget,
   getRequiredPathArg,
   normalizePathValidationSettings,
   PathAccessError,
@@ -17,7 +18,7 @@ import {
   readFileWithObservedMtime,
   resolveAndValidatePath,
 } from './_fs-utils';
-import { countTotalLines } from './read-file';
+import { countTotalLines, looksBinary } from './read-file';
 
 const REPLACE_RANGE_TOOL_NAME = 'replace_range';
 const NEWLINE = 0x0a;
@@ -44,7 +45,8 @@ const definition = {
     'Replaces a 1-indexed inclusive line range in an existing text file. Line numbers refer ' +
     'to the file as last read with read_file. The file must be read completely first. If the ' +
     'file is stale, re-read it before retrying. The replacement may contain any number of lines ' +
-    'or be empty to delete the range.',
+    'or be empty to delete the range. Every call that changes the line count invalidates the ' +
+    'line numbers of the lines after it, so re-read the file before the next range edit.',
   parameters: {
     type: 'object',
     properties: {
@@ -90,12 +92,20 @@ export async function executeReplaceRange(
   });
 
   return await withPathLocks([resolvedPath], async () => {
-    await assertFresh(context.chatId, resolvedPath);
-    const { bytes } = await readFileWithObservedMtime(resolvedPath);
-    const totalLines = countTotalLines(bytes);
-    validateRange(args, totalLines);
+    try {
+      await assertFresh(context.chatId, resolvedPath);
+    } catch (error) {
+      if (error instanceof FileNotReadError) {
+        throw await explainUnreadableMutationTarget(resolvedPath, 'edit', error);
+      }
+      throw error;
+    }
 
+    const { bytes } = await readFileWithObservedMtime(resolvedPath);
+    // One logical line per split entry, so the split doubles as the line count.
     const sourceLines = splitLines(bytes);
+    validateRange(args, sourceLines.length);
+
     const replacementLines = splitLines(Buffer.from(args.content));
     const updatedLines = [
       ...sourceLines.slice(0, args.startLine - 1),
@@ -103,6 +113,7 @@ export async function executeReplaceRange(
       ...sourceLines.slice(args.endLine),
     ];
     const updated = joinLines(updatedLines, bytes[bytes.byteLength - 1] === NEWLINE);
+    assertStillText(updated, args.path);
 
     let committed: { mtimeMs: number };
     try {
@@ -120,6 +131,19 @@ export async function executeReplaceRange(
       sha256,
     };
   });
+}
+
+/**
+ * Refuses a splice whose result read_file would classify as binary. Writing a
+ * NUL byte into a text file strands it: read_file then refuses it forever, and
+ * every mutation tool gates on that read, so nothing could repair it again.
+ */
+function assertStillText(updated: Uint8Array, inputPath: string): void {
+  if (!looksBinary(updated)) return;
+  throw new ToolArgumentError(
+    `Refusing to edit "${inputPath}": content contains a NUL byte, which would make the file ` +
+      'unreadable by read_file and leave it unrecoverable by the file tools.'
+  );
 }
 
 function validateRange(args: ReplaceRangeToolArgs, totalLines: number): void {
@@ -178,13 +202,6 @@ function execute(
   const endLine = getRequiredInteger(args.endLine, 'endLine');
   const content = getRequiredTextArg(args.content, 'content');
   return executeReplaceRange({ path, startLine, endLine, content }, context);
-}
-
-function getRequiredInteger(value: unknown, name: string): number {
-  if (typeof value !== 'number' || !Number.isInteger(value)) {
-    throw new ToolArgumentError(`Field "${name}" must be an integer.`);
-  }
-  return value;
 }
 
 /** Registers this built-in tool. // Usage: register() */

@@ -33,6 +33,34 @@ export function getRequiredTextArg(value: unknown, name: string): string {
   return value;
 }
 
+/**
+ * Reads a required integer argument, rejecting fractions and non-numbers rather
+ * than rounding: a line number the model guessed at is a bug, not an input to
+ * clamp.
+ *
+ * // Usage: const startLine = getRequiredInteger(args.startLine, 'startLine');
+ */
+export function getRequiredInteger(value: unknown, name: string): number {
+  if (typeof value !== 'number' || !Number.isInteger(value)) {
+    throw new ToolArgumentError(`Field "${name}" must be an integer.`);
+  }
+  return value;
+}
+
+/**
+ * Reads an optional boolean argument, distinguishing "absent" from "not a
+ * boolean" so a truthy string never silently enables a flag.
+ *
+ * // Usage: const replaceAll = getOptionalBoolean(args.replaceAll, 'replaceAll');
+ */
+export function getOptionalBoolean(value: unknown, name: string): boolean | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'boolean') {
+    throw new ToolArgumentError(`Field "${name}" must be a boolean.`);
+  }
+  return value;
+}
+
 export function getOptionalString(value: unknown): string | undefined {
   const text = typeof value === 'string' ? value.trim() : '';
   return text || undefined;

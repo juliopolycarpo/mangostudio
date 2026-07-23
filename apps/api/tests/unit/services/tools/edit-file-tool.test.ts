@@ -161,6 +161,33 @@ describe('executeEditFile', () => {
     expect(await Bun.file(stalePath).text()).toBe('changed outside the tool');
   });
 
+  it('names the binary blocker instead of demanding an impossible read', async () => {
+    const filePath = join(tempDir, 'blob.bin');
+    await Bun.write(filePath, new Uint8Array([0x41, 0x00, 0x42]));
+
+    // read_file refuses binary files, so "read it first" would loop forever.
+    await expect(executeReadFile({ path: filePath }, makeContext())).rejects.toThrow('binary file');
+    const error = (await executeEditFile(
+      { path: filePath, oldString: 'A', newString: 'C' },
+      makeContext()
+    ).catch((thrown: unknown) => thrown)) as Error;
+
+    expect(error).not.toBeInstanceOf(FileNotReadError);
+    expect(error.message).toContain('read-before-edit guard cannot be satisfied');
+  });
+
+  it('refuses a replacement that would turn a text file binary', async () => {
+    const filePath = await seedAndRead('nul.txt', 'hello world\n');
+
+    await expect(
+      executeEditFile(
+        { path: filePath, oldString: 'world', newString: 'w\u0000rld' },
+        makeContext()
+      )
+    ).rejects.toThrow('newString contains a NUL byte');
+    expect(await Bun.file(filePath).text()).toBe('hello world\n');
+  });
+
   it('rejects a file that was only partially read', async () => {
     const content = 'line 1\nline 2\nline 3';
     const filePath = join(tempDir, 'partial.txt');

@@ -4,11 +4,12 @@
  */
 
 import { RegularFileWriteError, writeRegularFileAtomic } from '../../../lib/safe-file';
-import { getRequiredTextArg, ToolArgumentError } from '../arg-parsing';
-import { assertFresh, recordFileRead, withPathLocks } from '../file-freshness';
+import { getOptionalBoolean, getRequiredTextArg, ToolArgumentError } from '../arg-parsing';
+import { assertFresh, FileNotReadError, recordFileRead, withPathLocks } from '../file-freshness';
 import { registerTool } from '../registry';
 import type { ToolContext } from '../types';
 import {
+  explainUnreadableMutationTarget,
   getRequiredPathArg,
   normalizePathValidationSettings,
   PathAccessError,
@@ -17,6 +18,7 @@ import {
   readFileWithObservedMtime,
   resolveAndValidatePath,
 } from './_fs-utils';
+import { looksBinary } from './read-file';
 
 const EDIT_FILE_TOOL_NAME = 'edit_file';
 
@@ -88,7 +90,15 @@ export async function executeEditFile(
   });
 
   return await withPathLocks([resolvedPath], async () => {
-    await assertFresh(context.chatId, resolvedPath);
+    try {
+      await assertFresh(context.chatId, resolvedPath);
+    } catch (error) {
+      if (error instanceof FileNotReadError) {
+        throw await explainUnreadableMutationTarget(resolvedPath, 'edit', error);
+      }
+      throw error;
+    }
+
     const { bytes } = await readFileWithObservedMtime(resolvedPath);
     const source = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
     const oldBytes = Buffer.from(args.oldString);
@@ -110,6 +120,8 @@ export async function executeEditFile(
 
     const selectedOffsets = args.replaceAll ? matchOffsets : [matchOffsets[0]];
     const updated = replaceAtOffsets(source, oldBytes.byteLength, newBytes, selectedOffsets);
+    assertStillText(updated, args.path);
+
     let committed: { mtimeMs: number };
     try {
       committed = await writeRegularFileAtomic(resolvedPath, updated);
@@ -126,6 +138,19 @@ export async function executeEditFile(
       firstChangedLine: countLinesThroughOffset(source, selectedOffsets[0]),
     };
   });
+}
+
+/**
+ * Refuses an edit whose result read_file would classify as binary. Writing a NUL
+ * byte into a text file strands it: read_file then refuses it forever, and every
+ * mutation tool gates on that read, so nothing could repair or delete it again.
+ */
+function assertStillText(updated: Uint8Array, inputPath: string): void {
+  if (!looksBinary(updated)) return;
+  throw new ToolArgumentError(
+    `Refusing to edit "${inputPath}": newString contains a NUL byte, which would make the file ` +
+      'unreadable by read_file and leave it unrecoverable by the file tools.'
+  );
 }
 
 function validateReplacement(oldString: string, newString: string): void {
@@ -185,14 +210,6 @@ function execute(args: Record<string, unknown>, context: ToolContext): Promise<E
     { path, oldString, newString, ...(replaceAll !== undefined ? { replaceAll } : {}) },
     context
   );
-}
-
-function getOptionalBoolean(value: unknown, name: string): boolean | undefined {
-  if (value === undefined) return undefined;
-  if (typeof value !== 'boolean') {
-    throw new ToolArgumentError(`Field "${name}" must be a boolean.`);
-  }
-  return value;
 }
 
 /** Registers this built-in tool. // Usage: register() */
