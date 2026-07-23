@@ -1050,6 +1050,16 @@ export const messages: Messages = {
         default: 'Default',
         comfortable: 'Comfortable',
       },
+      fileChanges: {
+        label: 'File Change Previews',
+        description: 'Control how the agent’s file edits appear in chat',
+        enabled: 'Show diffs for file changes',
+        modeExpanded: 'Always expand',
+        modeCollapsed: 'Always collapse',
+        modeCollapseOlder: 'Collapse older',
+        modeDescription:
+          'Always expand keeps every diff open; Always collapse requires a click; Collapse older keeps only the latest change visible',
+      },
       codeTheme: {
         label: 'Code Theme',
         description: 'Choose the syntax highlighting theme for code blocks',
@@ -1400,6 +1410,18 @@ export const messages: Messages = {
       skill: 'Skill',
       mcp: 'MCP',
       subagent: 'Subagent',
+    },
+    diff: {
+      opCreate: 'new',
+      opOverwrite: 'overwritten',
+      opUpdate: 'edited',
+      opDelete: 'deleted',
+      opMove: 'moved',
+      appliedCount: 'Applied to {count} occurrences',
+      previousContentHidden: 'Previous content not shown',
+      truncated: '+{count} hidden lines — open the raw result',
+      showRaw: 'View raw',
+      hideRaw: 'View diff',
     },
     labels: {
       list_directory: 'List',

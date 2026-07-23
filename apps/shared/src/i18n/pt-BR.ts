@@ -1063,6 +1063,16 @@ export const messages = {
         default: 'Padrão',
         comfortable: 'Confortável',
       },
+      fileChanges: {
+        label: 'Prévia de Alterações de Arquivo',
+        description: 'Controle como as edições de arquivo do agente aparecem no chat',
+        enabled: 'Mostrar diffs das alterações',
+        modeExpanded: 'Sempre expandir',
+        modeCollapsed: 'Sempre recolher',
+        modeCollapseOlder: 'Recolher antigas',
+        modeDescription:
+          'Sempre expandir mostra cada diff aberto; Sempre recolher exige um clique; Recolher antigas mantém apenas a alteração mais recente visível',
+      },
       codeTheme: {
         label: 'Tema de Código',
         description: 'Escolha o tema de destaque de sintaxe para blocos de código',
@@ -1417,6 +1427,18 @@ export const messages = {
       skill: 'Skill',
       mcp: 'MCP',
       subagent: 'Subagente',
+    },
+    diff: {
+      opCreate: 'novo',
+      opOverwrite: 'sobrescrito',
+      opUpdate: 'editado',
+      opDelete: 'excluído',
+      opMove: 'movido',
+      appliedCount: 'Aplicado em {count} ocorrências',
+      previousContentHidden: 'Conteúdo anterior não exibido',
+      truncated: '+{count} linhas ocultas — veja o resultado bruto',
+      showRaw: 'Ver bruto',
+      hideRaw: 'Ver diff',
     },
     labels: {
       list_directory: 'Listar',
