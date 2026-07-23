@@ -4,13 +4,16 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   assertFresh,
+  assertLineNumbersCurrent,
   clearFileFreshness,
   FileNotReadError,
   forgetFile,
   PartialReadError,
+  recordFileEdit,
   recordFileRead,
   rekeyFile,
   StaleFileError,
+  StaleLineNumbersError,
   withPathLocks,
 } from '../../../../src/services/tools/file-freshness';
 
@@ -139,6 +142,48 @@ describe('file freshness ledger', () => {
     } finally {
       chmodSync(filePath, 0o600);
     }
+  });
+
+  it('leaves line numbers addressable until an edit shifts them', async () => {
+    const filePath = join(tempDir, 'file.txt');
+    await Bun.write(filePath, 'a\nb\nc\n');
+    recordFileRead('chat-1', filePath, 'a\nb\nc\n', mtimeOf(filePath));
+
+    expect(() => assertLineNumbersCurrent('chat-1', filePath, 3)).not.toThrow();
+    // A same-height splice moves nothing, so every number still holds.
+    recordFileEdit('chat-1', filePath, 'A\nb\nc\n', mtimeOf(filePath), Number.MAX_SAFE_INTEGER);
+    expect(() => assertLineNumbersCurrent('chat-1', filePath, 3)).not.toThrow();
+  });
+
+  it('narrows line addressability to the prefix an edit left in place', async () => {
+    const filePath = join(tempDir, 'file.txt');
+    await Bun.write(filePath, 'a\nb\nc\n');
+    recordFileRead('chat-1', filePath, 'a\nb\nc\n', mtimeOf(filePath));
+
+    recordFileEdit('chat-1', filePath, 'a\nb1\nb2\nc\n', mtimeOf(filePath), 1);
+
+    expect(() => assertLineNumbersCurrent('chat-1', filePath, 1)).not.toThrow();
+    expect(() => assertLineNumbersCurrent('chat-1', filePath, 2)).toThrow(StaleLineNumbersError);
+  });
+
+  it('keeps the narrowest frontier across edits and restores it on a full read', async () => {
+    const filePath = join(tempDir, 'file.txt');
+    await Bun.write(filePath, 'a\nb\nc\n');
+    recordFileRead('chat-1', filePath, 'a\nb\nc\n', mtimeOf(filePath));
+
+    recordFileEdit('chat-1', filePath, 'a\nb1\nb2\nc\n', mtimeOf(filePath), 1);
+    // A later edit that shifts nothing must not widen the frontier back.
+    recordFileEdit(
+      'chat-1',
+      filePath,
+      'a\nb1\nb2\nC\n',
+      mtimeOf(filePath),
+      Number.MAX_SAFE_INTEGER
+    );
+    expect(() => assertLineNumbersCurrent('chat-1', filePath, 2)).toThrow(StaleLineNumbersError);
+
+    recordFileRead('chat-1', filePath, 'a\nb1\nb2\nC\n', mtimeOf(filePath));
+    expect(() => assertLineNumbersCurrent('chat-1', filePath, 4)).not.toThrow();
   });
 
   it('forgets snapshots explicitly', async () => {

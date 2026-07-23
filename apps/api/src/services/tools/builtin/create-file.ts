@@ -39,8 +39,8 @@ const definition = {
   name: CREATE_FILE_TOOL_NAME,
   description:
     'Creates a new text file on disk, including missing parent directories. Fails if the ' +
-    'path already exists and never overwrites it. Use write_file to replace a file after ' +
-    'reading all of it with read_file.',
+    'path already exists and never overwrites it. After reading an existing file, use ' +
+    'edit_file for exact text changes, replace_range for line changes, or write_file to replace it.',
   parameters: {
     type: 'object',
     properties: {
@@ -107,7 +107,8 @@ async function describeBlockedCreate(resolvedPath: string, inputPath: string): P
   );
   if (exists) {
     return new PathAccessError(
-      `"${inputPath}" already exists. Read it with read_file and use write_file to replace it.`
+      `"${inputPath}" already exists. Read it with read_file, then use edit_file for an exact ` +
+        'text change, replace_range for a line change, or write_file to replace all content.'
     );
   }
   return new PathAccessError(

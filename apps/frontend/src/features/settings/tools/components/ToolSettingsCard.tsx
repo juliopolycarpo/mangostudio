@@ -38,6 +38,16 @@ function getTranslatedToolText(
         title: s.toolNames.writeFile,
         description: s.toolDescriptions.writeFile,
       };
+    case 'edit_file':
+      return {
+        title: s.toolNames.editFile,
+        description: s.toolDescriptions.editFile,
+      };
+    case 'replace_range':
+      return {
+        title: s.toolNames.replaceRange,
+        description: s.toolDescriptions.replaceRange,
+      };
     case 'create_file':
       return {
         title: s.toolNames.createFile,

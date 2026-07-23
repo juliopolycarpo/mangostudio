@@ -39,7 +39,7 @@ describe('registerTools', () => {
   it('ships file lifecycle tools enabled with configurable path policies', () => {
     registerTools();
 
-    for (const name of ['create_file', 'delete_file', 'move_file']) {
+    for (const name of ['edit_file', 'replace_range', 'create_file', 'delete_file', 'move_file']) {
       const settings = getTool(name)?.settings;
       expect(settings).toMatchObject({
         enabledByDefault: true,

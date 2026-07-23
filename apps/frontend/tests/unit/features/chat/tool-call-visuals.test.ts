@@ -10,6 +10,11 @@ describe('getToolHint', () => {
     expect(getToolHint('write_file', { path: '/home/ada/src/index.ts' })).toBe('~/src/index.ts');
   });
 
+  it('returns an abbreviated path for file editing tools', () => {
+    expect(getToolHint('edit_file', { path: '/home/ada/src/index.ts' })).toBe('~/src/index.ts');
+    expect(getToolHint('replace_range', { path: '/home/ada/src/app.ts' })).toBe('~/src/app.ts');
+  });
+
   it('returns abbreviated paths for create_file and delete_file', () => {
     expect(getToolHint('create_file', { path: '/home/ada/new.ts' })).toBe('~/new.ts');
     expect(getToolHint('delete_file', { path: '/home/ada/old.ts' })).toBe('~/old.ts');

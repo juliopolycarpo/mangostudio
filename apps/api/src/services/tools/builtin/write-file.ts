@@ -10,9 +10,9 @@ import { assertFresh, FileNotReadError, recordFileRead, withPathLocks } from '..
 import { registerTool } from '../registry';
 import type { ToolContext } from '../types';
 import {
+  explainUnreadableMutationTarget,
   getRequiredPathArg,
   isErrnoException,
-  isProbablyBinaryFile,
   normalizePathList,
   PathAccessError,
   type PathValidationSettings,
@@ -39,8 +39,9 @@ const definition = {
   name: WRITE_FILE_TOOL_NAME,
   description:
     'Writes text content to a file on disk. Creates parent directories if they do not exist. ' +
-    'Overwriting an existing file requires reading all of it with read_file first. ' +
-    'Use this when the user asks to create, write, or save content to a file.',
+    'Overwriting an existing file requires reading all of it with read_file first, and replaces ' +
+    'every line: prefer edit_file for an exact text change or replace_range for a line change. ' +
+    'Use this when the user asks to create, write, or save a whole file.',
   parameters: {
     type: 'object',
     properties: {
@@ -84,7 +85,9 @@ export async function executeWriteFile(
       try {
         await assertFresh(context.chatId, resolvedPath);
       } catch (error) {
-        if (error instanceof FileNotReadError) throw await explainUnreadFile(resolvedPath, error);
+        if (error instanceof FileNotReadError) {
+          throw await explainUnreadableMutationTarget(resolvedPath, 'overwrite', error);
+        }
         throw error;
       }
     }
@@ -117,23 +120,14 @@ export async function executeWriteFile(
 async function describeOccupiedPath(resolvedPath: string): Promise<Error> {
   const entry = await lstat(resolvedPath).catch(() => null);
   if (entry?.isFile()) {
-    return await explainUnreadFile(resolvedPath, new FileNotReadError(resolvedPath));
+    return await explainUnreadableMutationTarget(
+      resolvedPath,
+      'overwrite',
+      new FileNotReadError(resolvedPath)
+    );
   }
   return new PathAccessError(
     `Cannot write "${resolvedPath}": the path exists and is not a regular file.`
-  );
-}
-
-/**
- * "Read it first" is the right remediation for a text file, but read_file
- * refuses binary files outright, so handing that advice to the model for one
- * sends it into a retry loop with no exit. Name the real blocker instead.
- */
-async function explainUnreadFile(resolvedPath: string, unreadError: Error): Promise<Error> {
-  if (!(await isProbablyBinaryFile(resolvedPath))) return unreadError;
-  return new PathAccessError(
-    `Cannot overwrite "${resolvedPath}": it is a binary file. read_file cannot read binary ` +
-      'files, so the read-before-overwrite guard cannot be satisfied for this path.'
   );
 }
 

@@ -2,11 +2,13 @@ import {
   ArrowRightLeft,
   Clock,
   FileEdit,
+  FilePenLine,
   FilePlus,
   FileSearch,
   FileText,
   FolderOpen,
   ImagePlus,
+  Replace,
   Search,
   Terminal,
   Trash2,
@@ -28,6 +30,10 @@ export function ToolIcon({ toolName, className }: { toolName: string; className?
       return <FileText size={size} className={className} />;
     case 'write_file':
       return <FileEdit size={size} className={className} />;
+    case 'edit_file':
+      return <FilePenLine size={size} className={className} />;
+    case 'replace_range':
+      return <Replace size={size} className={className} />;
     case 'create_file':
       return <FilePlus size={size} className={className} />;
     case 'delete_file':
@@ -76,9 +82,19 @@ export function getToolHint(toolName: string, args: Record<string, unknown>): st
     case 'list_directory':
     case 'read_file':
     case 'write_file':
+    case 'edit_file':
     case 'create_file':
     case 'delete_file':
       return abbreviatePath(args.path);
+    case 'replace_range': {
+      // The line range is what distinguishes one range edit from the next, so it
+      // rides along with the path instead of collapsing every call to one hint.
+      const path = abbreviatePath(args.path);
+      if (!path) return null;
+      const { startLine, endLine } = args;
+      if (typeof startLine !== 'number' || typeof endLine !== 'number') return path;
+      return `${path}:${startLine}-${endLine}`;
+    }
     case 'move_file': {
       const from = abbreviatePath(args.from);
       const to = abbreviatePath(args.to);

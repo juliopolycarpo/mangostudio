@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'bun:test';
 import {
   getBoundedOptionalInteger,
+  getOptionalBoolean,
   getOptionalString,
+  getRequiredInteger,
   getRequiredString,
+  getRequiredTextArg,
 } from '../../../../src/services/tools/arg-parsing';
 
 describe('getRequiredString', () => {
@@ -24,6 +27,52 @@ describe('getRequiredString', () => {
 
   it('throws for undefined', () => {
     expect(() => getRequiredString(undefined, 'field')).toThrow('Missing required field "field"');
+  });
+});
+
+describe('getRequiredTextArg', () => {
+  it('returns payload text verbatim, including whitespace and empty strings', () => {
+    expect(getRequiredTextArg('  line\n', 'content')).toBe('  line\n');
+    expect(getRequiredTextArg('', 'content')).toBe('');
+  });
+
+  it('distinguishes an absent field from a wrongly typed one', () => {
+    expect(() => getRequiredTextArg(undefined, 'content')).toThrow(
+      'Missing required field "content".'
+    );
+    expect(() => getRequiredTextArg(42, 'content')).toThrow('Field "content" must be a string.');
+    expect(() => getRequiredTextArg(null, 'content')).toThrow('Field "content" must be a string.');
+  });
+});
+
+describe('getRequiredInteger', () => {
+  it('returns integer values unchanged, including zero and negatives', () => {
+    expect(getRequiredInteger(0, 'startLine')).toBe(0);
+    expect(getRequiredInteger(-3, 'startLine')).toBe(-3);
+  });
+
+  it('rejects fractions, non-numbers, and non-finite values', () => {
+    for (const value of [1.5, '1', undefined, null, NaN, Infinity]) {
+      expect(() => getRequiredInteger(value, 'startLine')).toThrow(
+        'Field "startLine" must be an integer.'
+      );
+    }
+  });
+});
+
+describe('getOptionalBoolean', () => {
+  it('returns undefined only when the field is absent', () => {
+    expect(getOptionalBoolean(undefined, 'replaceAll')).toBeUndefined();
+    expect(getOptionalBoolean(false, 'replaceAll')).toBe(false);
+    expect(getOptionalBoolean(true, 'replaceAll')).toBe(true);
+  });
+
+  it('rejects truthy stand-ins instead of coercing them', () => {
+    for (const value of ['true', 1, null]) {
+      expect(() => getOptionalBoolean(value, 'replaceAll')).toThrow(
+        'Field "replaceAll" must be a boolean.'
+      );
+    }
   });
 });
 

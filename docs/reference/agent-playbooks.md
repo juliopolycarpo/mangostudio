@@ -84,6 +84,8 @@ Open these first:
 
 - `apps/api/src/services/tools/`
 - `apps/api/src/services/tools/builtin/create-file.ts`
+- `apps/api/src/services/tools/builtin/edit-file.ts`
+- `apps/api/src/services/tools/builtin/replace-range.ts`
 - `apps/api/src/services/tools/builtin/delete-file.ts`
 - `apps/api/src/services/tools/builtin/move-file.ts`
 - `apps/api/src/services/tools/builtin/generate-image.ts`

@@ -13,6 +13,8 @@ import {
 const GROUPABLE_TOOLS = new Set([
   'read_file',
   'write_file',
+  'edit_file',
+  'replace_range',
   'create_file',
   'delete_file',
   'move_file',

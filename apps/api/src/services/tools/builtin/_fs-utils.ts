@@ -111,6 +111,13 @@ export interface ReadFileWithObservedMtimeOptions {
 }
 
 /**
+ * Hard ceiling on bytes read_file loads; oversized files fail instead of
+ * allocating. Lives here because the mutation guards have to reason about the
+ * same limit when they explain why a read-before-write cannot be satisfied.
+ */
+export const READ_FILE_MAX_BYTES = 10 * 1024 * 1024;
+
+/**
  * Reads a file through a single descriptor and reports the mtime that belongs to
  * the bytes returned. Stat-ing the path after the read could pick up a
  * concurrent writer's metadata and pair it with the caller's stale bytes, so the
@@ -165,18 +172,51 @@ export function containsNulByte(bytes: Uint8Array, limit: number): boolean {
 }
 
 /**
- * Whether read_file would refuse this path as binary. Tools that gate a mutation
- * on a prior read need this: "read it first" is unreachable advice for a file
- * read_file will never accept, and sends the model into an endless retry.
- *
- * // Usage: if (await isProbablyBinaryFile(path)) return explainBinaryBlocker();
+ * Whether read_file would refuse this path as binary. Only the mutation guard
+ * below needs it: "read it first" is unreachable advice for a file read_file
+ * will never accept, and sends the model into an endless retry.
  */
-export async function isProbablyBinaryFile(resolvedPath: string): Promise<boolean> {
+async function isProbablyBinaryFile(resolvedPath: string): Promise<boolean> {
   const bytes = await Bun.file(resolvedPath)
     .slice(0, BINARY_SNIFF_BYTES)
     .bytes()
     .catch(() => new Uint8Array());
   return containsNulByte(bytes, BINARY_SNIFF_BYTES);
+}
+
+/**
+ * Restates an unread-file failure when read_file could never satisfy the guard.
+ *
+ * "Read it first" is the right remediation for a text file the model simply has
+ * not opened yet, but read_file refuses binary and oversized files outright, so
+ * handing that advice to the model for one sends it into a retry loop with no
+ * exit. Every read-before-mutate tool shares this, so the wording only varies by
+ * verb.
+ *
+ * // Usage: throw await explainUnreadableMutationTarget(path, 'edit', error);
+ */
+export async function explainUnreadableMutationTarget(
+  resolvedPath: string,
+  action: string,
+  unreadError: Error
+): Promise<Error> {
+  const sizeBytes = await lstat(resolvedPath).then(
+    (entry) => (entry.isFile() ? entry.size : 0),
+    () => 0
+  );
+  if (sizeBytes > READ_FILE_MAX_BYTES) {
+    return new PathAccessError(
+      `Cannot ${action} "${resolvedPath}": it is ${sizeBytes} bytes, past the ${READ_FILE_MAX_BYTES}-byte ` +
+        `read_file limit, so the read-before-${action} guard cannot be satisfied for this path.`
+    );
+  }
+  if (await isProbablyBinaryFile(resolvedPath)) {
+    return new PathAccessError(
+      `Cannot ${action} "${resolvedPath}": it is a binary file. read_file cannot read binary files, ` +
+        `so the read-before-${action} guard cannot be satisfied for this path.`
+    );
+  }
+  return unreadError;
 }
 
 /**
