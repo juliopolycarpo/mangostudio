@@ -52,6 +52,7 @@ function makeConfig(): MangoConfig {
     images: { dir: '/data/images' },
     agents: { dir: '/data/agents' },
     skills: { dir: '/data/skills' },
+    checkpoints: { dir: '/data/checkpoints' },
     auth: { secret: 'x'.repeat(32), url: 'http://localhost:3001' },
     security: { trustProxy: false },
     cursor: { workspaceDir: '', sidecarScriptPath: '', nodePath: '' },

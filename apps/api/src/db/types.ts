@@ -215,6 +215,20 @@ interface McpServersTable {
   updatedAt: number;
 }
 
+interface FileCheckpointsTable {
+  id: string;
+  chatId: string;
+  messageId: string;
+  path: string;
+  op: string;
+  beforeHash: string | null;
+  afterHash: string | null;
+  movedTo: string | null;
+  blobKey: string | null;
+  createdAt: number;
+  revertedAt: number | null;
+}
+
 interface ChatTodosTable {
   /** One row per chat; the list is always replaced wholesale. */
   chatId: string;
@@ -248,6 +262,7 @@ export interface Database {
   user_agent_settings: UserAgentSettingsTable;
   mcp_servers: McpServersTable;
   chat_todos: ChatTodosTable;
+  file_checkpoints: FileCheckpointsTable;
   observability_snapshot: ObservabilitySnapshotTable;
   connector_usage_samples: ConnectorUsageSamplesTable;
 }
@@ -271,3 +286,6 @@ export type McpServerUpdate = Updateable<McpServersTable>;
 
 export type ChatTodoSelect = Selectable<ChatTodosTable>;
 export type ChatTodoInsert = Insertable<ChatTodosTable>;
+
+export type FileCheckpointSelect = Selectable<FileCheckpointsTable>;
+export type FileCheckpointInsert = Insertable<FileCheckpointsTable>;

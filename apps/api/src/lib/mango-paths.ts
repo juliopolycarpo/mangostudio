@@ -8,7 +8,7 @@
 
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
-import { getHomeMangoDir } from './config';
+import { getConfig, getHomeMangoDir } from './config';
 
 /** Directory holding background server log files. // Usage: getLogsDir() */
 export function getLogsDir(): string {
@@ -28,6 +28,11 @@ export function getPidFilePath(): string {
 /** Timestamped log file path for a background server start. // Usage: getServerLogPath(Date.now()) */
 export function getServerLogPath(startedAt: number): string {
   return join(getLogsDir(), `server-${formatTimestamp(startedAt)}.log`);
+}
+
+/** Content-addressed file checkpoint blobs (configurable; defaults under ~/.mango). */
+export function getCheckpointsDir(): string {
+  return getConfig().checkpoints.dir;
 }
 
 /** Managed working directory for Cursor SDK local agents (hooks + cwd). */
