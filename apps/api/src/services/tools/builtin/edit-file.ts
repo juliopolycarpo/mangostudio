@@ -5,7 +5,7 @@
 
 import { RegularFileWriteError, writeRegularFileAtomic } from '../../../lib/safe-file';
 import { getOptionalBoolean, getRequiredTextArg, ToolArgumentError } from '../arg-parsing';
-import { assertFresh, FileNotReadError, recordFileRead, withPathLocks } from '../file-freshness';
+import { assertFresh, FileNotReadError, recordFileEdit, withPathLocks } from '../file-freshness';
 import { registerTool } from '../registry';
 import type { ToolContext } from '../types';
 import {
@@ -21,6 +21,7 @@ import {
 import { looksBinary } from './read-file';
 
 const EDIT_FILE_TOOL_NAME = 'edit_file';
+const NEWLINE = 0x0a;
 
 export interface EditFileToolArgs {
   path: string;
@@ -130,12 +131,23 @@ export async function executeEditFile(
       throw error;
     }
 
-    const sha256 = recordFileRead(context.chatId, resolvedPath, updated, committed.mtimeMs);
+    // Swapping in a different number of newlines renumbers the file from the
+    // first match down, which replace_range has to know about before it trusts
+    // line numbers the model took from the last read.
+    const firstChangedLine = countLinesThroughOffset(source, selectedOffsets[0]);
+    const lineCountChanged = countNewlines(oldBytes) !== countNewlines(newBytes);
+    const sha256 = recordFileEdit(
+      context.chatId,
+      resolvedPath,
+      updated,
+      committed.mtimeMs,
+      lineCountChanged ? firstChangedLine - 1 : Number.MAX_SAFE_INTEGER
+    );
     return {
       path: args.path,
       replacements: selectedOffsets.length,
       sha256,
-      firstChangedLine: countLinesThroughOffset(source, selectedOffsets[0]),
+      firstChangedLine,
     };
   });
 }
@@ -192,11 +204,24 @@ function replaceAtOffsets(
   return Buffer.concat(chunks);
 }
 
+/** Counts newlines in a needle or replacement, never in the whole file. */
+function countNewlines(bytes: Buffer): number {
+  let count = 0;
+  for (
+    let index = bytes.indexOf(NEWLINE);
+    index !== -1;
+    index = bytes.indexOf(NEWLINE, index + 1)
+  ) {
+    count++;
+  }
+  return count;
+}
+
 function countLinesThroughOffset(source: Buffer, offset: number): number {
   let line = 1;
-  for (let index = source.indexOf(0x0a); index !== -1 && index < offset; ) {
+  for (let index = source.indexOf(NEWLINE); index !== -1 && index < offset; ) {
     line++;
-    index = source.indexOf(0x0a, index + 1);
+    index = source.indexOf(NEWLINE, index + 1);
   }
   return line;
 }

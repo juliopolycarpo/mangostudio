@@ -16,6 +16,13 @@ interface FileFreshnessEntry {
   readonly coveredThroughLine: number;
   /** Whether the observation covers the entire file. Only writes gate on this. */
   readonly complete: boolean;
+  /**
+   * Highest line number that still means what the model was last shown. A write
+   * that changes the line count renumbers everything after the first line it
+   * touched, so only the untouched prefix keeps its numbers. Line-addressed
+   * tools gate on this; content-addressed ones do not care.
+   */
+  readonly lineNumbersValidThroughLine: number;
 }
 
 /** The slice of a file a single windowed read put in front of the model. */
@@ -69,6 +76,21 @@ export class StaleFileError extends Error {
   }
 }
 
+export class StaleLineNumbersError extends Error {
+  constructor(resolvedPath: string, validThroughLine: number) {
+    const remaining =
+      validThroughLine > 0
+        ? `only lines 1-${validThroughLine} still match the last read`
+        : 'no line numbers still match the last read';
+    super(
+      `Line numbers for "${resolvedPath}" are stale: an earlier edit in this chat changed the ` +
+        `file's line count, so ${remaining}. Re-read the file with read_file to get the ` +
+        'current numbering before replacing this range.'
+    );
+    this.name = 'StaleLineNumbersError';
+  }
+}
+
 /**
  * Records the exact bytes a chat observed and returns their SHA-256 digest.
  *
@@ -82,6 +104,10 @@ export class StaleFileError extends Error {
  * actually shown; omit it when the caller put the entire content in front of
  * the model. Sequential windows accumulate, so paging through a file from
  * line 1 eventually covers it.
+ *
+ * Whole-content callers are authoritative about line numbering — read_file
+ * shows it, create_file and write_file author it — so this resets any shift
+ * recorded by {@link recordFileEdit}.
  */
 export function recordFileRead(
   chatId: string,
@@ -100,6 +126,42 @@ export function recordFileRead(
     mtimeMs: observedMtimeMs,
     coveredThroughLine,
     complete: coveredThroughLine >= (observedRange?.totalLines ?? 0),
+    lineNumbersValidThroughLine: Number.MAX_SAFE_INTEGER,
+  });
+  return sha256;
+}
+
+/**
+ * Records the bytes a partial mutation just wrote, plus how far the model's
+ * line numbering survived it.
+ *
+ * The written bytes are current, so content-addressed edits may continue, but a
+ * splice that changed the line count moved every line after it — a follow-up
+ * line-addressed edit that still uses the numbering from the last read would
+ * silently hit the wrong lines. Shifts accumulate rather than reset: only a
+ * fresh whole-content observation can widen the frontier again.
+ *
+ * // Usage: recordFileEdit(chatId, path, updated, mtimeMs, startLine - 1)
+ */
+export function recordFileEdit(
+  chatId: string,
+  resolvedPath: string,
+  content: Uint8Array | string,
+  observedMtimeMs: number,
+  lineNumbersValidThroughLine: number
+): string {
+  const previous = entriesByChat.get(chatId)?.get(resolvedPath);
+  const sha256 = hashContent(content);
+  storeEntry(chatId, resolvedPath, {
+    sha256,
+    size: contentSize(content),
+    mtimeMs: observedMtimeMs,
+    coveredThroughLine: Number.MAX_SAFE_INTEGER,
+    complete: true,
+    lineNumbersValidThroughLine: Math.min(
+      previous?.lineNumbersValidThroughLine ?? Number.MAX_SAFE_INTEGER,
+      lineNumbersValidThroughLine
+    ),
   });
   return sha256;
 }
@@ -157,7 +219,29 @@ export async function assertFresh(chatId: string, resolvedPath: string): Promise
     mtimeMs: current.mtimeMs,
     coveredThroughLine: entry.coveredThroughLine,
     complete: entry.complete,
+    lineNumbersValidThroughLine: entry.lineNumbersValidThroughLine,
   });
+}
+
+/**
+ * Verifies that a 1-indexed inclusive range still addresses the lines the model
+ * meant. Call after {@link assertFresh}: matching content only proves the file
+ * is unchanged since the last write, not that the numbering the model is quoting
+ * survived that write.
+ *
+ * // Usage: assertLineNumbersCurrent(chatId, resolvedPath, endLine);
+ */
+export function assertLineNumbersCurrent(
+  chatId: string,
+  resolvedPath: string,
+  endLine: number
+): void {
+  const validThroughLine =
+    entriesByChat.get(chatId)?.get(resolvedPath)?.lineNumbersValidThroughLine ??
+    Number.MAX_SAFE_INTEGER;
+  if (endLine > validThroughLine) {
+    throw new StaleLineNumbersError(resolvedPath, validThroughLine);
+  }
 }
 
 /** Removes a chat's snapshot for a path after the path is deleted or replaced. */

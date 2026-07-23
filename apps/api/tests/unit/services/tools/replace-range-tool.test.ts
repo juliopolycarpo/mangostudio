@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { executeEditFile } from '../../../../src/services/tools/builtin/edit-file';
 import { executeReadFile } from '../../../../src/services/tools/builtin/read-file';
 import {
   executeReplaceRange,
@@ -12,6 +13,7 @@ import {
   clearFileFreshness,
   FileNotReadError,
   StaleFileError,
+  StaleLineNumbersError,
 } from '../../../../src/services/tools/file-freshness';
 import { executeTool } from '../../../../src/services/tools/registry';
 import type { ToolContext } from '../../../../src/services/tools/types';
@@ -89,6 +91,9 @@ describe('executeReplaceRange', () => {
     );
     expect(grown).toMatchObject({ replacedLines: 1, newTotalLines: 6 });
 
+    // Growing renumbered everything below line 1, so the next range needs the
+    // numbering from a fresh read.
+    await executeReadFile({ path: filePath }, makeContext());
     const shrunk = await executeReplaceRange(
       { path: filePath, startLine: 2, endLine: 5, content: 'middle' },
       makeContext()
@@ -109,7 +114,7 @@ describe('executeReplaceRange', () => {
     expect(await Bun.file(filePath).text()).toBe('one\nfour\n');
   });
 
-  it('preserves the final newline when deleting every logical line', async () => {
+  it('empties the file when every logical line is deleted', async () => {
     const filePath = await seedAndRead('delete-all.txt', 'one\ntwo\n');
 
     const result = await executeReplaceRange(
@@ -117,8 +122,8 @@ describe('executeReplaceRange', () => {
       makeContext()
     );
 
-    expect(result.newTotalLines).toBe(1);
-    expect(await Bun.file(filePath).text()).toBe('\n');
+    expect(result.newTotalLines).toBe(0);
+    expect(await Bun.file(filePath).text()).toBe('');
   });
 
   it('preserves whether the source ends with a final newline', async () => {
@@ -232,7 +237,7 @@ describe('executeReplaceRange', () => {
     expect(await Bun.file(filePath).text()).toBe(content);
   });
 
-  it('allows sequential ranges after one read', async () => {
+  it('allows sequential ranges after one read while the line count holds', async () => {
     const filePath = await seedAndRead('sequential.txt', 'one\ntwo\nthree');
 
     await executeReplaceRange(
@@ -245,6 +250,69 @@ describe('executeReplaceRange', () => {
     );
 
     expect(await Bun.file(filePath).text()).toBe('ONE\ntwo\nTHREE');
+  });
+
+  it('refuses line numbers an earlier size-changing splice invalidated', async () => {
+    const filePath = await seedAndRead('shifted.txt', 'a\nb\nc\nd\ne\nf\n');
+
+    await executeReplaceRange(
+      { path: filePath, startLine: 1, endLine: 1, content: 'A1\nA2\nA3' },
+      makeContext()
+    );
+    // 'e' is line 5 in the file the model read and line 7 on disk now; without
+    // the guard this silently rewrote the old line 3.
+    await expect(
+      executeReplaceRange({ path: filePath, startLine: 5, endLine: 5, content: 'E' }, makeContext())
+    ).rejects.toBeInstanceOf(StaleLineNumbersError);
+    expect(await Bun.file(filePath).text()).toBe('A1\nA2\nA3\nb\nc\nd\ne\nf\n');
+
+    await executeReadFile({ path: filePath }, makeContext());
+    await executeReplaceRange(
+      { path: filePath, startLine: 7, endLine: 7, content: 'E' },
+      makeContext()
+    );
+    expect(await Bun.file(filePath).text()).toBe('A1\nA2\nA3\nb\nc\nd\nE\nf\n');
+  });
+
+  it('still accepts ranges inside the prefix a splice left in place', async () => {
+    const filePath = await seedAndRead('prefix.txt', 'a\nb\nc\nd\n');
+
+    await executeReplaceRange(
+      { path: filePath, startLine: 4, endLine: 4, content: 'D1\nD2' },
+      makeContext()
+    );
+    await executeReplaceRange(
+      { path: filePath, startLine: 2, endLine: 2, content: 'B' },
+      makeContext()
+    );
+
+    expect(await Bun.file(filePath).text()).toBe('a\nB\nc\nD1\nD2\n');
+  });
+
+  it('keeps the narrowed frontier when a later edit_file leaves the line count alone', async () => {
+    const filePath = await seedAndRead('mixed.txt', 'a\nb\nc\nd\n');
+
+    await executeReplaceRange(
+      { path: filePath, startLine: 1, endLine: 1, content: 'A1\nA2' },
+      makeContext()
+    );
+    await executeEditFile({ path: filePath, oldString: 'd', newString: 'D' }, makeContext());
+
+    await expect(
+      executeReplaceRange({ path: filePath, startLine: 3, endLine: 3, content: 'C' }, makeContext())
+    ).rejects.toBeInstanceOf(StaleLineNumbersError);
+    expect(await Bun.file(filePath).text()).toBe('A1\nA2\nb\nc\nD\n');
+  });
+
+  it('refuses line numbers an edit_file changed the line count under', async () => {
+    const filePath = await seedAndRead('edited.txt', 'a\nb\nc\nd\n');
+
+    await executeEditFile({ path: filePath, oldString: 'b', newString: 'b1\nb2' }, makeContext());
+
+    await expect(
+      executeReplaceRange({ path: filePath, startLine: 4, endLine: 4, content: 'D' }, makeContext())
+    ).rejects.toThrow('only lines 1-1 still match the last read');
+    expect(await Bun.file(filePath).text()).toBe('a\nb1\nb2\nc\nd\n');
   });
 
   it('enforces path policy before modifying the file', async () => {
