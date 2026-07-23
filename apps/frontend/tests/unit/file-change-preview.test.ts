@@ -50,6 +50,16 @@ describe('buildFileChangePreview', () => {
     ).toBe('create');
   });
 
+  it('renders write_file overwrite with a line diff when before is on the result', () => {
+    const preview = buildFileChangePreview(
+      'write_file',
+      { path: '/a.txt', content: 'new\n' },
+      JSON.stringify({ created: false, before: 'old\n' })
+    );
+    expect(preview?.files[0]?.removed).toBeGreaterThan(0);
+    expect(preview?.files[0]?.added).toBeGreaterThan(0);
+  });
+
   it('diffs edit_file oldString/newString line by line with context', () => {
     const preview = buildFileChangePreview('edit_file', {
       path: '/src/app.ts',

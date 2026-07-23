@@ -76,11 +76,11 @@ export function buildFileChangePreview(
     case 'create_file':
       return contentPreview(args, 'create');
     case 'write_file':
-      return contentPreview(args, writeFileOp(result));
+      return contentPreview(args, writeFileOp(result), result);
     case 'edit_file':
       return editFilePreview(args, result);
     case 'replace_range':
-      return replaceRangePreview(args);
+      return replaceRangePreview(args, result);
     case 'apply_patch':
       return applyPatchPreview(args);
     case 'delete_file':
@@ -130,9 +130,33 @@ function writeFileOp(result: string | null | undefined): FileChangeOp {
   return parsed?.created === false ? 'overwrite' : 'create';
 }
 
-function contentPreview(args: Record<string, unknown>, op: FileChangeOp): FileChangePreview | null {
+function contentPreview(
+  args: Record<string, unknown>,
+  op: FileChangeOp,
+  result?: string | null
+): FileChangePreview | null {
   if (typeof args.path !== 'string' || args.path.length === 0) return null;
   if (typeof args.content !== 'string') return null;
+
+  if (op === 'overwrite') {
+    const parsed = parseResultObject(result);
+    const before = parsed?.before;
+    if (typeof before === 'string') {
+      const lines = lineDiff(before, args.content);
+      return {
+        files: [
+          {
+            op,
+            path: args.path,
+            lines,
+            added: countKind(lines, 'add'),
+            removed: countKind(lines, 'del'),
+          },
+        ],
+      };
+    }
+  }
+
   const lines = splitLines(args.content).map<DiffPreviewLine>((text) => ({ kind: 'add', text }));
   return { files: [{ op, path: args.path, lines, added: lines.length, removed: 0 }] };
 }
@@ -164,7 +188,10 @@ function editFilePreview(
   return preview;
 }
 
-function replaceRangePreview(args: Record<string, unknown>): FileChangePreview | null {
+function replaceRangePreview(
+  args: Record<string, unknown>,
+  result?: string | null
+): FileChangePreview | null {
   if (typeof args.path !== 'string' || args.path.length === 0) return null;
   if (typeof args.content !== 'string') return null;
   // Mirrors the tool's own contract: 1-indexed inclusive integer line numbers.
@@ -173,9 +200,28 @@ function replaceRangePreview(args: Record<string, unknown>): FileChangePreview |
   if (!Number.isInteger(startLine) || !Number.isInteger(endLine)) return null;
   if (startLine < 1 || endLine < startLine) return null;
 
+  const removedCount = endLine - startLine + 1;
+  const parsed = parseResultObject(result);
+  const before = parsed?.before;
+  if (typeof before === 'string') {
+    const beforeLines = splitLines(before);
+    const oldSlice = beforeLines.slice(startLine - 1, endLine).join('\n');
+    const lines = lineDiff(oldSlice, args.content);
+    return {
+      files: [
+        {
+          op: 'update',
+          path: args.path,
+          lines,
+          added: countKind(lines, 'add'),
+          removed: countKind(lines, 'del'),
+        },
+      ],
+    };
+  }
+
   // The replaced lines' previous content is not persisted with the call, so the
   // range is summarized as a unified-diff style marker followed by additions.
-  const removedCount = endLine - startLine + 1;
   const lines: DiffPreviewLine[] = [
     { kind: 'marker', text: `@@ -${startLine},${removedCount} @@` },
     ...splitLines(args.content).map<DiffPreviewLine>((text) => ({ kind: 'add', text })),

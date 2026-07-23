@@ -4,12 +4,15 @@ import { format } from 'date-fns';
 import { Sparkles } from 'lucide-react';
 import { useI18n } from '@/hooks/use-i18n';
 import { CopyMessageButton } from './CopyMessageButton';
+import { RevertFileChangesButton } from './RevertFileChangesButton';
 
 type FeedLabels = Messages['chat']['feed'];
 
 interface AssistantMessageHeaderProps {
   msg: Message;
   isImageTurn: boolean;
+  chatId?: string | null;
+  canRevertFileChanges?: boolean;
 }
 
 /** Picks the status verb shown next to the model name for an assistant turn. */
@@ -24,7 +27,12 @@ function statusVerb(msg: Message, isImageTurn: boolean, labels: FeedLabels): str
  *
  * Usage: <AssistantMessageHeader msg={msg} isImageTurn={isImageTurn} />
  */
-export function AssistantMessageHeader({ msg, isImageTurn }: AssistantMessageHeaderProps) {
+export function AssistantMessageHeader({
+  msg,
+  isImageTurn,
+  chatId,
+  canRevertFileChanges,
+}: AssistantMessageHeaderProps) {
   const { t } = useI18n();
   const labels = t.chat.feed;
   const statusLabel = msg.modelName
@@ -47,6 +55,9 @@ export function AssistantMessageHeader({ msg, isImageTurn }: AssistantMessageHea
           label={t.chat.copyMessage}
           copiedLabel={t.chat.messageCopied}
         />
+      )}
+      {!msg.isGenerating && !isImageTurn && chatId && canRevertFileChanges && (
+        <RevertFileChangesButton chatId={chatId} messageId={msg.id} />
       )}
       {!msg.isGenerating && (
         <span className="opacity-0 group-hover:opacity-100 transition-opacity duration-200 text-[10px] text-on-surface-variant/50 font-label ml-auto">

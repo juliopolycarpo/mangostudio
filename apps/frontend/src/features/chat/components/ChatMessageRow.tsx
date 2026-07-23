@@ -10,6 +10,8 @@ interface ChatMessageRowProps {
   index: number;
   start: number;
   measureRef: (element: Element | null) => void;
+  chatId?: string | null;
+  canRevertFileChanges?: boolean;
   /** Present only on the last row while question cards may be answered. */
   onQuestionSubmit?: (prompt: string) => void;
 }
@@ -28,6 +30,8 @@ function ChatMessageRowComponent({
   index,
   start,
   measureRef,
+  chatId,
+  canRevertFileChanges,
   onQuestionSubmit,
 }: ChatMessageRowProps) {
   const isImageTurn = isImageInteraction(message);
@@ -59,6 +63,8 @@ function ChatMessageRowComponent({
           <AssistantMessageBlock
             msg={message}
             isImageTurn={isImageTurn}
+            chatId={chatId}
+            canRevertFileChanges={canRevertFileChanges}
             onQuestionSubmit={onQuestionSubmit}
           />
         )}

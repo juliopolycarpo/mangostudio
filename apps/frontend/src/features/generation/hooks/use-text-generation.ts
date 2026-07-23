@@ -13,6 +13,7 @@ import type { RespondStreamBody, ToolIntent } from '@mangostudio/shared/generati
 import type { PromptSettings } from '@mangostudio/shared/prompt-rules';
 import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useRef, useState } from 'react';
+import { invalidateChatFileCheckpoints } from '@/features/chat/hooks/use-chat-file-checkpoints';
 import { useChatStream } from '@/features/chat/hooks/use-chat-stream';
 import { setChatTodos } from '@/features/chat/hooks/use-chat-todos';
 import type { useChats } from '@/features/chat/hooks/use-chats';
@@ -334,6 +335,7 @@ export function useTextGeneration({
         stream.setAbortController(null);
         stream.setIsGenerating(false);
         void invalidateGitState(queryClient, activeChatId);
+        invalidateChatFileCheckpoints(queryClient, activeChatId);
         if (createdChatDuringRequest) {
           void chats.loadChats();
         }
