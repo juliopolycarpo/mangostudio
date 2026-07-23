@@ -113,13 +113,22 @@ Retorna a data e hora atuais em um fuso horário e locale solicitados.
 
 ### `read_file`
 
-Lê o conteúdo de um arquivo de texto do disco.
+Lê o conteúdo de um arquivo de texto do disco com saída numerada por linha.
 
 - **Nome da tool:** `read_file`
 - **Categoria:** `system`
-- **Parâmetros:** `path` (obrigatório, absoluto, começando com `~`, ou relativo ao diretório de trabalho do chat)
+- **Parâmetros:**
+  - `path` (obrigatório, absoluto, começando com `~`, ou relativo ao diretório de trabalho do chat)
+  - `startLine` (opcional, base 1; padrão `1`)
+  - `maxLines` (opcional; padrão `2000`, máximo `5000`)
 - **Settings:** `allowedPaths`, `deniedPaths` (listas de caminhos; aplicadas por `resolveAndValidatePath`)
-- **Execução:** Lê o arquivo com `Bun.file().text()` e retorna `{ content, path, size }`.
+- **Execução:** Lê por um único descritor de arquivo (com teto de 10 MiB), rejeita arquivos
+  binários detectados por byte NUL, e devolve conteúdo numerado (estilo `cat -n`) da janela
+  pedida. O `sha256` do arquivo inteiro sempre é registrado no ledger de freshness, mesmo
+  em leitura parcial. Formato do resultado:
+  `{ content, path, size, sha256, totalLines, startLine, endLine, truncated }`.
+  Limites por linha e por bytes da janela podem marcar `truncated` e acrescentar um aviso
+  para usar `startLine`/`maxLines`.
 
 ### `list_directory`
 

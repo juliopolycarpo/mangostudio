@@ -8,6 +8,7 @@ import {
   normalizePathList,
   normalizeStringList,
   PathAccessError,
+  readFileWithObservedMtime,
   resolveAndValidatePath,
 } from '../../../../src/services/tools/builtin/_fs-utils';
 
@@ -251,5 +252,32 @@ describe('resolveAndValidatePath', () => {
       },
     });
     expect(resolved).toBe(subDir);
+  });
+});
+
+describe('readFileWithObservedMtime', () => {
+  it('reads file bytes when under the maxBytes ceiling', async () => {
+    const filePath = join(tempDir, 'small.txt');
+    await Bun.write(filePath, 'hello');
+
+    const { bytes } = await readFileWithObservedMtime(filePath, { maxBytes: 10 });
+    expect(new TextDecoder().decode(bytes)).toBe('hello');
+  });
+
+  it('rejects files larger than maxBytes before allocating content', async () => {
+    const filePath = join(tempDir, 'too-big.txt');
+    await Bun.write(filePath, '0123456789');
+
+    await expect(readFileWithObservedMtime(filePath, { maxBytes: 5 })).rejects.toThrow(
+      /too large \(10 bytes; limit is 5\)/
+    );
+  });
+
+  it('defaults to an unbounded ceiling so freshness hashing stays unrestricted', async () => {
+    const filePath = join(tempDir, 'unbounded.txt');
+    await Bun.write(filePath, 'ok');
+
+    const { bytes } = await readFileWithObservedMtime(filePath);
+    expect(bytes.byteLength).toBe(2);
   });
 });

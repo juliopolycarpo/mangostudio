@@ -54,6 +54,14 @@ export interface ObservedFileRead {
   readonly mtimeMs: number;
 }
 
+export interface ReadFileWithObservedMtimeOptions {
+  /**
+   * Reject files whose size on the open descriptor exceeds this many bytes.
+   * Defaults to unbounded so freshness hashing can still read any observed file.
+   */
+  readonly maxBytes?: number;
+}
+
 /**
  * Reads a file through a single descriptor and reports the mtime that belongs to
  * the bytes returned. Stat-ing the path after the read could pick up a
@@ -63,7 +71,11 @@ export interface ObservedFileRead {
  *
  * // Usage: const { bytes, mtimeMs } = await readFileWithObservedMtime(path);
  */
-export async function readFileWithObservedMtime(resolvedPath: string): Promise<ObservedFileRead> {
+export async function readFileWithObservedMtime(
+  resolvedPath: string,
+  options: ReadFileWithObservedMtimeOptions = {}
+): Promise<ObservedFileRead> {
+  const maxBytes = options.maxBytes ?? Number.POSITIVE_INFINITY;
   const handle = await open(resolvedPath, 'r').catch((error: unknown) => {
     if (isErrnoException(error, 'ENOENT')) {
       throw new PathAccessError(`File not found: "${resolvedPath}"`);
@@ -76,6 +88,11 @@ export async function readFileWithObservedMtime(resolvedPath: string): Promise<O
     if (!before.isFile()) {
       throw new PathAccessError(`Cannot read "${resolvedPath}": it is not a regular file.`);
     }
+    if (before.size > maxBytes) {
+      throw new PathAccessError(
+        `Cannot read "${resolvedPath}": file is too large (${before.size} bytes; limit is ${maxBytes}).`
+      );
+    }
 
     const bytes = await handle.readFile();
     const after = await handle.stat();
@@ -84,6 +101,19 @@ export async function readFileWithObservedMtime(resolvedPath: string): Promise<O
   } finally {
     await handle.close();
   }
+}
+
+/** How much of a file the binary sniff inspects before calling it text. */
+export const BINARY_SNIFF_BYTES = 8 * 1024;
+
+/**
+ * Standard binary sniff: a NUL byte inside the first `limit` bytes. Shared so
+ * every filesystem tool classifies binary content the same way.
+ *
+ * // Usage: if (containsNulByte(bytes, BINARY_SNIFF_BYTES)) return;
+ */
+export function containsNulByte(bytes: Uint8Array, limit: number): boolean {
+  return bytes.subarray(0, limit).indexOf(0x00) !== -1;
 }
 
 /** Narrows a thrown value to a Node errno error with the given code. */
