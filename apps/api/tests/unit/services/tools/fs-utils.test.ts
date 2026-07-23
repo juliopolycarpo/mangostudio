@@ -11,7 +11,6 @@ import {
   readFileWithObservedMtime,
   resolveAndValidatePath,
 } from '../../../../src/services/tools/builtin/_fs-utils';
-import { READ_FILE_MAX_BYTES } from '../../../../src/services/tools/builtin/read-file';
 
 let tempDir: string;
 
@@ -280,9 +279,5 @@ describe('readFileWithObservedMtime', () => {
 
     const { bytes } = await readFileWithObservedMtime(filePath);
     expect(bytes.byteLength).toBe(2);
-  });
-
-  it('exposes the read_file tool ceiling constant at 10 MiB', () => {
-    expect(READ_FILE_MAX_BYTES).toBe(10 * 1024 * 1024);
   });
 });

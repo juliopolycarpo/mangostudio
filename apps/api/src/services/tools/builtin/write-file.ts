@@ -10,6 +10,8 @@ import { assertFresh, FileNotReadError, recordFileRead, withPathLocks } from '..
 import { registerTool } from '../registry';
 import type { ToolContext } from '../types';
 import {
+  BINARY_SNIFF_BYTES,
+  containsNulByte,
   getRequiredPathArg,
   isErrnoException,
   normalizePathList,
@@ -38,7 +40,7 @@ const definition = {
   name: WRITE_FILE_TOOL_NAME,
   description:
     'Writes text content to a file on disk. Creates parent directories if they do not exist. ' +
-    'Overwriting an existing file requires reading it with read_file first. ' +
+    'Overwriting an existing file requires reading all of it with read_file first. ' +
     'Use this when the user asks to create, write, or save content to a file.',
   parameters: {
     type: 'object',
@@ -79,7 +81,14 @@ export async function executeWriteFile(
 
   return await withPathLocks([resolvedPath], async () => {
     const created = !(await Bun.file(resolvedPath).exists());
-    if (!created) await assertFresh(context.chatId, resolvedPath);
+    if (!created) {
+      try {
+        await assertFresh(context.chatId, resolvedPath);
+      } catch (error) {
+        if (error instanceof FileNotReadError) throw await explainUnreadFile(resolvedPath, error);
+        throw error;
+      }
+    }
 
     let committed: { bytesWritten: number; mtimeMs: number };
     try {
@@ -108,9 +117,26 @@ export async function executeWriteFile(
  */
 async function describeOccupiedPath(resolvedPath: string): Promise<Error> {
   const entry = await lstat(resolvedPath).catch(() => null);
-  if (entry?.isFile()) return new FileNotReadError(resolvedPath);
+  if (entry?.isFile()) {
+    return await explainUnreadFile(resolvedPath, new FileNotReadError(resolvedPath));
+  }
   return new PathAccessError(
     `Cannot write "${resolvedPath}": the path exists and is not a regular file.`
+  );
+}
+
+/**
+ * "Read it first" is the right remediation for a text file, but read_file
+ * refuses binary files outright, so handing that advice to the model for one
+ * sends it into a retry loop with no exit. Name the real blocker instead.
+ */
+async function explainUnreadFile(resolvedPath: string, unreadError: Error): Promise<Error> {
+  const probe = Bun.file(resolvedPath).slice(0, BINARY_SNIFF_BYTES);
+  const bytes = await probe.bytes().catch(() => new Uint8Array());
+  if (!containsNulByte(bytes, BINARY_SNIFF_BYTES)) return unreadError;
+  return new PathAccessError(
+    `Cannot overwrite "${resolvedPath}": it is a binary file. read_file cannot read binary ` +
+      'files, so the read-before-overwrite guard cannot be satisfied for this path.'
   );
 }
 

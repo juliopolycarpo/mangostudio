@@ -103,11 +103,14 @@ export async function readFileWithObservedMtime(
   }
 }
 
+/** How much of a file the binary sniff inspects before calling it text. */
+export const BINARY_SNIFF_BYTES = 8 * 1024;
+
 /**
  * Standard binary sniff: a NUL byte inside the first `limit` bytes. Shared so
  * every filesystem tool classifies binary content the same way.
  *
- * // Usage: if (containsNulByte(bytes, 8192)) return;
+ * // Usage: if (containsNulByte(bytes, BINARY_SNIFF_BYTES)) return;
  */
 export function containsNulByte(bytes: Uint8Array, limit: number): boolean {
   return bytes.subarray(0, limit).indexOf(0x00) !== -1;

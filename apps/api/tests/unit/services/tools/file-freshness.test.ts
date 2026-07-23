@@ -7,6 +7,7 @@ import {
   clearFileFreshness,
   FileNotReadError,
   forgetFile,
+  PartialReadError,
   recordFileRead,
   rekeyFile,
   StaleFileError,
@@ -55,6 +56,53 @@ describe('file freshness ledger', () => {
     await Bun.write(filePath, 'after-content');
 
     await expect(assertFresh('chat-1', filePath)).rejects.toBeInstanceOf(StaleFileError);
+  });
+
+  it('rejects a write when the recorded read only observed part of the file', async () => {
+    const filePath = join(tempDir, 'file.txt');
+    await Bun.write(filePath, 'a\nb\nc');
+    recordFileRead('chat-1', filePath, 'a\nb\nc', mtimeOf(filePath), {
+      startLine: 1,
+      endLine: 2,
+      totalLines: 3,
+    });
+
+    await expect(assertFresh('chat-1', filePath)).rejects.toBeInstanceOf(PartialReadError);
+  });
+
+  it('accumulates sequential windows until they cover the file', async () => {
+    const filePath = join(tempDir, 'file.txt');
+    await Bun.write(filePath, 'a\nb\nc');
+    const range = { startLine: 1, endLine: 2, totalLines: 3 };
+    recordFileRead('chat-1', filePath, 'a\nb\nc', mtimeOf(filePath), range);
+    recordFileRead('chat-1', filePath, 'a\nb\nc', mtimeOf(filePath), {
+      ...range,
+      startLine: 3,
+      endLine: 3,
+    });
+
+    await expect(assertFresh('chat-1', filePath)).resolves.toBeUndefined();
+  });
+
+  it('drops accumulated coverage when the file changed between windows', async () => {
+    const filePath = join(tempDir, 'file.txt');
+    await Bun.write(filePath, 'a\nb\nc');
+    recordFileRead('chat-1', filePath, 'a\nb\nc', mtimeOf(filePath), {
+      startLine: 1,
+      endLine: 2,
+      totalLines: 3,
+    });
+
+    // The second window observed different bytes, so the first no longer
+    // describes any part of the file the model is about to overwrite.
+    await Bun.write(filePath, 'a\nb\nd');
+    recordFileRead('chat-1', filePath, 'a\nb\nd', mtimeOf(filePath), {
+      startLine: 3,
+      endLine: 3,
+      totalLines: 3,
+    });
+
+    await expect(assertFresh('chat-1', filePath)).rejects.toBeInstanceOf(PartialReadError);
   });
 
   it('hashes rather than trusting metadata when the read observed no snapshot', async () => {

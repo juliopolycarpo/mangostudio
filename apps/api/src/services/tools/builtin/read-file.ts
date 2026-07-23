@@ -8,6 +8,7 @@ import { recordFileRead } from '../file-freshness';
 import { registerTool } from '../registry';
 import type { ToolContext } from '../types';
 import {
+  BINARY_SNIFF_BYTES,
   containsNulByte,
   getRequiredPathArg,
   normalizePathList,
@@ -20,7 +21,7 @@ import {
 const READ_FILE_TOOL_NAME = 'read_file';
 
 /** Hard ceiling on bytes loaded by read_file; oversized files fail instead of allocating. */
-export const READ_FILE_MAX_BYTES = 10 * 1024 * 1024;
+const READ_FILE_MAX_BYTES = 10 * 1024 * 1024;
 
 const READ_FILE_DEFAULT_START_LINE = 1;
 const READ_FILE_DEFAULT_MAX_LINES = 2000;
@@ -30,7 +31,6 @@ const READ_FILE_MAX_MAX_LINES = 5000;
 const READ_FILE_MAX_START_LINE = 10_000_000;
 export const READ_FILE_MAX_LINE_CHARS = 2000;
 export const READ_FILE_MAX_WINDOW_BYTES = 256 * 1024;
-const BINARY_SNIFF_BYTES = 8 * 1024;
 const LINE_TRUNCATION_MARKER = '…[truncated]';
 const WINDOW_TRUNCATION_NOTICE = '\n\n[truncated: use startLine/maxLines to read more]';
 const NEWLINE = 0x0a;
@@ -121,9 +121,6 @@ export async function executeReadFile(
     );
   }
 
-  // Whole-file sha256 is always recorded so a windowed read still satisfies
-  // the read-before-edit guard.
-  const sha256 = recordFileRead(context.chatId, resolvedPath, bytes, mtimeMs);
   const size = bytes.byteLength;
   const totalLines = countTotalLines(bytes);
 
@@ -140,7 +137,11 @@ export async function executeReadFile(
       content: '',
       path: args.path,
       size,
-      sha256,
+      sha256: recordFileRead(context.chatId, resolvedPath, bytes, mtimeMs, {
+        startLine: 1,
+        endLine: 0,
+        totalLines: 0,
+      }),
       totalLines: 0,
       startLine: 1,
       endLine: 0,
@@ -155,7 +156,13 @@ export async function executeReadFile(
     content: window.content,
     path: args.path,
     size,
-    sha256,
+    // The digest covers the whole file so external edits are still detected,
+    // but only the returned window counts as read for the write guard.
+    sha256: recordFileRead(context.chatId, resolvedPath, bytes, mtimeMs, {
+      startLine,
+      endLine: window.endLine,
+      totalLines,
+    }),
     totalLines,
     startLine,
     endLine: window.endLine,

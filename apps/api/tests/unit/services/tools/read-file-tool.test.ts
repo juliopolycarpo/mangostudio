@@ -39,6 +39,12 @@ function numbered(line: number, body: string): string {
   return `${String(line).padStart(6, ' ')}\t${body}`;
 }
 
+async function sha256Of(filePath: string): Promise<string> {
+  const hasher = new Bun.CryptoHasher('sha256');
+  hasher.update(await Bun.file(filePath).bytes());
+  return hasher.digest('hex');
+}
+
 describe('normalizeReadFileToolSettings', () => {
   it('returns empty arrays by default', () => {
     const settings = normalizeReadFileToolSettings({});
@@ -313,7 +319,7 @@ describe('executeReadFile', () => {
     expect(result.totalLines).toBe(3);
   });
 
-  it('records whole-file sha256 on a windowed read so a later write stays fresh', async () => {
+  it('records whole-file sha256 on a windowed read so external edits stay detectable', async () => {
     const filePath = join(tempDir, 'fresh.txt');
     await seedFile(filePath, 'one\ntwo\nthree\nfour');
 
@@ -322,7 +328,27 @@ describe('executeReadFile', () => {
       makeContext()
     );
     expect(read.endLine).toBe(2);
-    expect(read.sha256).toHaveLength(64);
+    expect(read.sha256).toBe(await sha256Of(filePath));
+  });
+
+  it('refuses to overwrite a file the model has only partially read', async () => {
+    const filePath = join(tempDir, 'partial.txt');
+    await seedFile(filePath, 'one\ntwo\nthree\nfour');
+
+    await executeReadFile({ path: filePath, startLine: 1, maxLines: 2 }, makeContext());
+
+    await expect(
+      executeWriteFile({ path: filePath, content: 'replaced\n' }, makeContext())
+    ).rejects.toThrow(/only lines 1-2 have been read/);
+    expect(await Bun.file(filePath).text()).toBe('one\ntwo\nthree\nfour');
+  });
+
+  it('allows the overwrite once sequential windows have covered the whole file', async () => {
+    const filePath = join(tempDir, 'paged.txt');
+    await seedFile(filePath, 'one\ntwo\nthree\nfour');
+
+    await executeReadFile({ path: filePath, startLine: 1, maxLines: 2 }, makeContext());
+    await executeReadFile({ path: filePath, startLine: 3, maxLines: 2 }, makeContext());
 
     const written = await executeWriteFile(
       { path: filePath, content: 'replaced\n' },
@@ -330,6 +356,53 @@ describe('executeReadFile', () => {
     );
     expect(written.created).toBe(false);
     expect(await Bun.file(filePath).text()).toBe('replaced\n');
+  });
+
+  it('does not let a window that skips earlier lines count as coverage', async () => {
+    const filePath = join(tempDir, 'gap.txt');
+    await seedFile(filePath, 'one\ntwo\nthree\nfour');
+
+    await executeReadFile({ path: filePath, startLine: 3, maxLines: 2 }, makeContext());
+
+    await expect(
+      executeWriteFile({ path: filePath, content: 'replaced\n' }, makeContext())
+    ).rejects.toThrow(/it has not been read from line 1/);
+  });
+
+  it('treats a read that reaches the last line as full coverage', async () => {
+    const filePath = join(tempDir, 'whole.txt');
+    await seedFile(filePath, 'one\ntwo\nthree\nfour');
+
+    await executeReadFile({ path: filePath }, makeContext());
+
+    const written = await executeWriteFile(
+      { path: filePath, content: 'replaced\n' },
+      makeContext()
+    );
+    expect(written.created).toBe(false);
+  });
+
+  it('keeps a written file writable when a later read only windows it', async () => {
+    const filePath = join(tempDir, 'write-then-window.txt');
+    await executeWriteFile({ path: filePath, content: 'one\ntwo\nthree\n' }, makeContext());
+
+    await executeReadFile({ path: filePath, startLine: 2, maxLines: 1 }, makeContext());
+
+    const written = await executeWriteFile({ path: filePath, content: 'again\n' }, makeContext());
+    expect(written.created).toBe(false);
+    expect(await Bun.file(filePath).text()).toBe('again\n');
+  });
+
+  it('explains that a binary file cannot be overwritten instead of demanding a read', async () => {
+    const filePath = join(tempDir, 'blob.bin');
+    await seedFile(filePath, new Uint8Array([0x50, 0x4b, 0x00, 0x01]));
+
+    await expect(executeReadFile({ path: filePath }, makeContext())).rejects.toThrow(
+      /appears to be a binary file/
+    );
+    await expect(
+      executeWriteFile({ path: filePath, content: 'text' }, makeContext())
+    ).rejects.toThrow(/it is a binary file/);
   });
 
   it('expands ~ to home directory', async () => {

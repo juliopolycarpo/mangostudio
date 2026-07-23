@@ -9,6 +9,20 @@ interface FileFreshnessEntry {
   readonly size: number;
   /** `NaN` when the metadata could not be captured, forcing the hash path. */
   readonly mtimeMs: number;
+  /**
+   * Highest line N such that lines 1..N of these exact bytes have been observed.
+   * `Number.MAX_SAFE_INTEGER` when the whole content was observed at once.
+   */
+  readonly coveredThroughLine: number;
+  /** Whether the observation covers the entire file. Only writes gate on this. */
+  readonly complete: boolean;
+}
+
+/** The slice of a file a single windowed read put in front of the model. */
+export interface ObservedLineRange {
+  readonly startLine: number;
+  readonly endLine: number;
+  readonly totalLines: number;
 }
 
 interface FileFreshnessLocation {
@@ -30,6 +44,20 @@ export class FileNotReadError extends Error {
   }
 }
 
+export class PartialReadError extends Error {
+  constructor(resolvedPath: string, coveredThroughLine: number) {
+    const observed =
+      coveredThroughLine > 0
+        ? `only lines 1-${coveredThroughLine} have been read`
+        : 'it has not been read from line 1';
+    super(
+      `Cannot overwrite "${resolvedPath}": ${observed} in this chat. write_file replaces the ` +
+        'whole file, so read the remaining lines with read_file (startLine/maxLines) first.'
+    );
+    this.name = 'PartialReadError';
+  }
+}
+
 export class StaleFileError extends Error {
   constructor(resolvedPath: string) {
     super(
@@ -47,26 +75,58 @@ export class StaleFileError extends Error {
  * or from the descriptor they were written through — so size, mtime, and hash
  * all describe one snapshot. Pass `NaN` when no such observation exists; the
  * entry then always takes the hashing path instead of the metadata fast path.
+ *
+ * `content` is always the whole file, because the digest has to answer "did
+ * this file change on disk". `observedRange` narrows what the model was
+ * actually shown; omit it when the caller put the entire content in front of
+ * the model. Sequential windows accumulate, so paging through a file from
+ * line 1 eventually covers it.
  */
 export function recordFileRead(
   chatId: string,
   resolvedPath: string,
   content: Uint8Array | string,
-  observedMtimeMs: number
+  observedMtimeMs: number,
+  observedRange?: ObservedLineRange
 ): string {
   const sha256 = hashContent(content);
+  const coveredThroughLine = observedRange
+    ? extendCoverage(chatId, resolvedPath, sha256, observedRange)
+    : Number.MAX_SAFE_INTEGER;
   storeEntry(chatId, resolvedPath, {
     sha256,
     size: contentSize(content),
     mtimeMs: observedMtimeMs,
+    coveredThroughLine,
+    complete: coveredThroughLine >= (observedRange?.totalLines ?? 0),
   });
   return sha256;
+}
+
+/**
+ * Merges a freshly observed window into the coverage already recorded for the
+ * same bytes. A window that starts past the covered frontier leaves a hole, so
+ * it cannot extend it; different bytes reset coverage entirely.
+ */
+function extendCoverage(
+  chatId: string,
+  resolvedPath: string,
+  sha256: string,
+  observedRange: ObservedLineRange
+): number {
+  const previous = entriesByChat.get(chatId)?.get(resolvedPath);
+  const carried = previous?.sha256 === sha256 ? previous.coveredThroughLine : 0;
+  if (observedRange.startLine > carried + 1) return carried;
+  return Math.max(carried, observedRange.endLine);
 }
 
 /** Verifies that a file still matches the most recent content observed by this chat. */
 export async function assertFresh(chatId: string, resolvedPath: string): Promise<void> {
   const entry = entriesByChat.get(chatId)?.get(resolvedPath);
   if (!entry) throw new FileNotReadError(resolvedPath);
+  // A windowed read hashes the whole file but only shows part of it, so a
+  // matching digest alone would let the model overwrite lines it never saw.
+  if (!entry.complete) throw new PartialReadError(resolvedPath, entry.coveredThroughLine);
 
   const metadata = await getCurrentMetadata(resolvedPath);
   if (metadata.size === entry.size && metadata.mtimeMs === entry.mtimeMs) {
@@ -94,6 +154,8 @@ export async function assertFresh(chatId: string, resolvedPath: string): Promise
     sha256,
     size: current.bytes.byteLength,
     mtimeMs: current.mtimeMs,
+    coveredThroughLine: entry.coveredThroughLine,
+    complete: entry.complete,
   });
 }
 
