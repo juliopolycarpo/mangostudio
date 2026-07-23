@@ -2,6 +2,7 @@ import {
   ArrowRightLeft,
   Clock,
   FileEdit,
+  FilePenLine,
   FilePlus,
   FileSearch,
   FileText,
@@ -27,6 +28,10 @@ export function ToolIcon({ toolName, className }: { toolName: string; className?
     case 'read_file':
       return <FileText size={size} className={className} />;
     case 'write_file':
+      return <FileEdit size={size} className={className} />;
+    case 'edit_file':
+      return <FilePenLine size={size} className={className} />;
+    case 'replace_range':
       return <FileEdit size={size} className={className} />;
     case 'create_file':
       return <FilePlus size={size} className={className} />;
@@ -76,6 +81,8 @@ export function getToolHint(toolName: string, args: Record<string, unknown>): st
     case 'list_directory':
     case 'read_file':
     case 'write_file':
+    case 'edit_file':
+    case 'replace_range':
     case 'create_file':
     case 'delete_file':
       return abbreviatePath(args.path);

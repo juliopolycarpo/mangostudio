@@ -26,7 +26,10 @@ export function getRequiredString(value: unknown, name: string): string {
  * // Usage: const content = getRequiredTextArg(args.content, 'content');
  */
 export function getRequiredTextArg(value: unknown, name: string): string {
-  if (typeof value !== 'string') throw new ToolArgumentError(`Missing required field "${name}".`);
+  if (value === undefined) throw new ToolArgumentError(`Missing required field "${name}".`);
+  if (typeof value !== 'string') {
+    throw new ToolArgumentError(`Field "${name}" must be a string.`);
+  }
   return value;
 }
 

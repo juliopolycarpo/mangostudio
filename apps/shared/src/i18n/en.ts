@@ -742,6 +742,8 @@ export const messages: Messages = {
       toolNames: {
         readFile: 'Read file',
         writeFile: 'Write file',
+        editFile: 'Edit file',
+        replaceRange: 'Replace range',
         createFile: 'Create file',
         deleteFile: 'Delete file',
         moveFile: 'Move file',
@@ -752,6 +754,8 @@ export const messages: Messages = {
       toolDescriptions: {
         readFile: 'Allows the AI to read text files from disk.',
         writeFile: 'Allows the AI to write text content to files on disk.',
+        editFile: 'Allows the AI to replace exact text in files read in this chat.',
+        replaceRange: 'Allows the AI to replace line ranges in files read in this chat.',
         createFile: 'Allows the AI to create new text files without overwriting existing paths.',
         deleteFile: 'Allows the AI to delete regular files it has read in this chat.',
         moveFile:
@@ -1398,6 +1402,8 @@ export const messages: Messages = {
       list_directory: 'List',
       read_file: 'Read',
       write_file: 'Write',
+      edit_file: 'Edit',
+      replace_range: 'Replace Range',
       create_file: 'Create',
       delete_file: 'Delete',
       move_file: 'Move',

@@ -22,6 +22,8 @@ const REQUIRED_TOOL_NAMES = [
   'generate_image',
   'read_file',
   'write_file',
+  'edit_file',
+  'replace_range',
   'create_file',
   'delete_file',
   'move_file',

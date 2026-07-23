@@ -95,12 +95,12 @@ describe('executeCreateFile', () => {
     await expect(
       executeCreateFile({ path: filePath, content: 'replacement' }, makeContext())
     ).rejects.toThrow(
-      `"${filePath}" already exists. Read it with read_file and use write_file to replace it.`
+      `"${filePath}" already exists. Read it with read_file, then use edit_file for an exact text change, replace_range for a line change, or write_file to replace all content.`
     );
     expect(await Bun.file(filePath).text()).toBe('keep me');
   });
 
-  it('points only at tools that exist when the destination is taken', async () => {
+  it('points at the available tools when the destination is taken', async () => {
     const filePath = join(tempDir, 'taken.txt');
     await Bun.write(filePath, 'keep me');
 
@@ -109,8 +109,10 @@ describe('executeCreateFile', () => {
       makeContext()
     ).catch((thrown: unknown) => thrown)) as Error;
 
-    expect(error.message).not.toContain('edit_file');
-    expect(getTool('create_file')?.definition.description).not.toContain('edit_file');
+    expect(error.message).toContain('edit_file');
+    expect(error.message).toContain('replace_range');
+    expect(getTool('create_file')?.definition.description).toContain('edit_file');
+    expect(getTool('create_file')?.definition.description).toContain('replace_range');
   });
 
   it('names the real blocker when a parent component is a regular file', async () => {
@@ -229,7 +231,7 @@ describe('create_file argument handling', () => {
 
     await expect(
       executeTool('create_file', { path: filePath, content: 42 }, makeContext())
-    ).rejects.toThrow('Missing required field "content"');
+    ).rejects.toThrow('Field "content" must be a string');
     expect(existsSync(filePath)).toBe(false);
   });
 });

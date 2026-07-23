@@ -50,11 +50,10 @@ export class PartialReadError extends Error {
       coveredThroughLine > 0
         ? `only lines 1-${coveredThroughLine} have been read`
         : 'it has not been read from line 1';
-    // Deliberately action-neutral: both write_file and delete_file raise this,
-    // and naming the wrong one hands the model remediation it cannot follow.
     super(
-      `Cannot modify "${resolvedPath}": ${observed} in this chat. Replacing or deleting a file ` +
-        'destroys all of it, so read the remaining lines with read_file (startLine/maxLines) first.'
+      `Cannot modify "${resolvedPath}": ${observed} in this chat. A safe mutation requires a ` +
+        'complete view of the current file, so read the remaining lines with read_file ' +
+        '(startLine/maxLines) first.'
     );
     this.name = 'PartialReadError';
   }

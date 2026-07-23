@@ -30,6 +30,12 @@ describe('planToolGroups', () => {
     expect([...consumed]).toEqual([2, 4]);
   });
 
+  it.each(['edit_file', 'replace_range'])('groups consecutive %s calls', (toolName) => {
+    const parts: MessagePart[] = [call('1', toolName), result('1'), call('2', toolName)];
+
+    expect(planToolGroups(parts, true).groups.get(0)).toHaveLength(2);
+  });
+
   it('does not group a single call', () => {
     const parts: MessagePart[] = [call('1', 'read_file', { path: '/a.ts' }), result('1')];
 

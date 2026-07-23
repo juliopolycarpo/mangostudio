@@ -147,6 +147,8 @@ describe('turn checkpoints', () => {
     expect(classifyToolRetrySafety('read_file')).toBe('safe_read');
     expect(classifyToolRetrySafety('grep')).toBe('safe_read');
     expect(classifyToolRetrySafety('write_file')).toBe('confirmation_required');
+    expect(classifyToolRetrySafety('edit_file')).toBe('confirmation_required');
+    expect(classifyToolRetrySafety('replace_range')).toBe('confirmation_required');
     expect(classifyToolRetrySafety('create_file')).toBe('confirmation_required');
     expect(classifyToolRetrySafety('delete_file')).toBe('confirmation_required');
     expect(classifyToolRetrySafety('move_file')).toBe('confirmation_required');
