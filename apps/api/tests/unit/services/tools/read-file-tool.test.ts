@@ -101,6 +101,12 @@ describe('countTotalLines / looksBinary / findWindowByteRange', () => {
     expect(findWindowByteRange(bytes, 2, 2)).toEqual({ start: 4, end: 8 });
     expect(findWindowByteRange(bytes, 1, 3)).toEqual({ start: 0, end: 13 });
   });
+
+  it('returns an empty range for an inverted window instead of the rest of the file', () => {
+    const bytes = new TextEncoder().encode('one\ntwo\nthree');
+    expect(findWindowByteRange(bytes, 2, 1)).toEqual({ start: 4, end: 4 });
+    expect(findWindowByteRange(bytes, 1, 0)).toEqual({ start: 0, end: 0 });
+  });
 });
 
 describe('executeReadFile', () => {
@@ -249,6 +255,21 @@ describe('executeReadFile', () => {
     expect(result.content).toContain(
       numbered(1, `${'x'.repeat(READ_FILE_MAX_LINE_CHARS)}…[truncated]`)
     );
+  });
+
+  it('never cuts a surrogate pair in half when truncating a long line', async () => {
+    const filePath = join(tempDir, 'surrogate.txt');
+    // The cap lands between the two code units of the first emoji.
+    await seedFile(filePath, `${'a'.repeat(READ_FILE_MAX_LINE_CHARS - 1)}${'🎉'.repeat(4)}`);
+
+    const result = await executeReadFile({ path: filePath }, makeContext());
+
+    expect(result.truncated).toBe(true);
+    expect(result.content).toBe(
+      `${numbered(1, `${'a'.repeat(READ_FILE_MAX_LINE_CHARS - 1)}…[truncated]`)}${'\n\n[truncated: use startLine/maxLines to read more]'}`
+    );
+    expect(result.content).toBe(JSON.parse(JSON.stringify(result.content)));
+    expect(new TextDecoder().decode(new TextEncoder().encode(result.content))).toBe(result.content);
   });
 
   it('stops early when the window byte cap is exceeded', async () => {

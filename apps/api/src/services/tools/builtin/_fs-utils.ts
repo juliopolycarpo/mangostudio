@@ -103,6 +103,16 @@ export async function readFileWithObservedMtime(
   }
 }
 
+/**
+ * Standard binary sniff: a NUL byte inside the first `limit` bytes. Shared so
+ * every filesystem tool classifies binary content the same way.
+ *
+ * // Usage: if (containsNulByte(bytes, 8192)) return;
+ */
+export function containsNulByte(bytes: Uint8Array, limit: number): boolean {
+  return bytes.subarray(0, limit).indexOf(0x00) !== -1;
+}
+
 /** Narrows a thrown value to a Node errno error with the given code. */
 export function isErrnoException(error: unknown, code: string): error is NodeJS.ErrnoException {
   return error instanceof Error && 'code' in error && error.code === code;

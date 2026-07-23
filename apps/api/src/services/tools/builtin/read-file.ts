@@ -8,6 +8,7 @@ import { recordFileRead } from '../file-freshness';
 import { registerTool } from '../registry';
 import type { ToolContext } from '../types';
 import {
+  containsNulByte,
   getRequiredPathArg,
   normalizePathList,
   PathAccessError,
@@ -33,7 +34,9 @@ const BINARY_SNIFF_BYTES = 8 * 1024;
 const LINE_TRUNCATION_MARKER = '…[truncated]';
 const WINDOW_TRUNCATION_NOTICE = '\n\n[truncated: use startLine/maxLines to read more]';
 const NEWLINE = 0x0a;
-const NUL = 0x00;
+const HIGH_SURROGATE_FIRST = 0xd800;
+const HIGH_SURROGATE_LAST = 0xdbff;
+const textDecoder = new TextDecoder();
 
 export interface ReadFileToolArgs {
   path: string;
@@ -57,10 +60,10 @@ export type ReadFileToolSettings = PathValidationSettings;
 const definition = {
   name: READ_FILE_TOOL_NAME,
   description:
-    'Reads the contents of a text file from disk. Output is line-numbered (cat -n style) ' +
-    'so line numbers can feed replace_range and other edit tools. Use startLine/maxLines to ' +
-    'window large files instead of reading everything at once. Use this when the user asks ' +
-    'to inspect, view, or read a file.',
+    'Reads the contents of a text file from disk. Output is line-numbered (cat -n style); ' +
+    'the line numbers are a reading aid and are not part of the file content. Use ' +
+    'startLine/maxLines to window large files instead of reading everything at once. Use ' +
+    'this when the user asks to inspect, view, or read a file.',
   parameters: {
     type: 'object',
     properties: {
@@ -124,12 +127,15 @@ export async function executeReadFile(
   const size = bytes.byteLength;
   const totalLines = countTotalLines(bytes);
 
+  // An empty file still answers line 1, so the floor of 1 keeps the default
+  // read from failing on it while every other overshoot is rejected.
+  if (startLine > Math.max(totalLines, 1)) {
+    throw new PathAccessError(
+      `startLine ${startLine} is past the end of "${args.path}" (${totalLines} lines).`
+    );
+  }
+
   if (totalLines === 0) {
-    if (startLine > 1) {
-      throw new PathAccessError(
-        `startLine ${startLine} is past the end of "${args.path}" (0 lines).`
-      );
-    }
     return {
       content: '',
       path: args.path,
@@ -140,12 +146,6 @@ export async function executeReadFile(
       endLine: 0,
       truncated: false,
     };
-  }
-
-  if (startLine > totalLines) {
-    throw new PathAccessError(
-      `startLine ${startLine} is past the end of "${args.path}" (${totalLines} lines).`
-    );
   }
 
   const requestedEndLine = Math.min(startLine + maxLines - 1, totalLines);
@@ -222,11 +222,7 @@ export function register(): void {
 
 /** NUL in the first 8 KiB means the file is not safe to treat as text. */
 export function looksBinary(bytes: Uint8Array): boolean {
-  const limit = Math.min(bytes.byteLength, BINARY_SNIFF_BYTES);
-  for (let index = 0; index < limit; index++) {
-    if (bytes[index] === NUL) return true;
-  }
-  return false;
+  return containsNulByte(bytes, BINARY_SNIFF_BYTES);
 }
 
 /**
@@ -236,8 +232,12 @@ export function looksBinary(bytes: Uint8Array): boolean {
 export function countTotalLines(bytes: Uint8Array): number {
   if (bytes.byteLength === 0) return 0;
   let lines = 0;
-  for (let index = 0; index < bytes.byteLength; index++) {
-    if (bytes[index] === NEWLINE) lines++;
+  for (
+    let index = bytes.indexOf(NEWLINE);
+    index !== -1;
+    index = bytes.indexOf(NEWLINE, index + 1)
+  ) {
+    lines++;
   }
   if (bytes[bytes.byteLength - 1] !== NEWLINE) lines++;
   return lines;
@@ -265,10 +265,7 @@ function formatWindow(
     windowBytes = windowBytes.subarray(0, windowBytes.byteLength - 1);
   }
 
-  const rawLines =
-    windowBytes.byteLength === 0 && start === end
-      ? []
-      : new TextDecoder().decode(windowBytes).split('\n');
+  const rawLines = start === end ? [] : textDecoder.decode(windowBytes).split('\n');
 
   const numbered: string[] = [];
   let byteBudget = 0;
@@ -277,10 +274,9 @@ function formatWindow(
 
   for (let offset = 0; offset < rawLines.length; offset++) {
     const lineNumber = startLine + offset;
-    const rawLine = rawLines[offset] ?? '';
-    let body = rawLine;
+    let body = rawLines[offset] ?? '';
     if (body.length > READ_FILE_MAX_LINE_CHARS) {
-      body = `${body.slice(0, READ_FILE_MAX_LINE_CHARS)}${LINE_TRUNCATION_MARKER}`;
+      body = `${sliceWithoutSplittingSurrogatePair(body, READ_FILE_MAX_LINE_CHARS)}${LINE_TRUNCATION_MARKER}`;
       truncated = true;
     }
 
@@ -298,7 +294,8 @@ function formatWindow(
   }
 
   if (endLine < startLine) {
-    // startLine pointed at a valid line but the byte budget could not fit it.
+    // No line made it into the window: either the range covered nothing or the
+    // byte budget could not fit even the first line.
     return {
       content: WINDOW_TRUNCATION_NOTICE.trimStart(),
       endLine: startLine - 1,
@@ -316,6 +313,16 @@ function formatWindow(
 }
 
 /**
+ * Cuts a string to `maxLength` UTF-16 code units without leaving a lone high
+ * surrogate behind, which would make the tool result invalid UTF-8 downstream.
+ */
+function sliceWithoutSplittingSurrogatePair(text: string, maxLength: number): string {
+  const lastCode = text.charCodeAt(maxLength - 1);
+  const splitsPair = lastCode >= HIGH_SURROGATE_FIRST && lastCode <= HIGH_SURROGATE_LAST;
+  return text.slice(0, splitsPair ? maxLength - 1 : maxLength);
+}
+
+/**
  * Locates the byte range covering lines [startLine, endLine] inclusive.
  * Newline (0x0A) offsets are UTF-8-safe because 0x0A never appears mid-sequence.
  */
@@ -324,24 +331,23 @@ export function findWindowByteRange(
   startLine: number,
   endLine: number
 ): { start: number; end: number } {
-  let line = 1;
-  let index = 0;
-
-  while (line < startLine && index < bytes.byteLength) {
-    if (bytes[index] === NEWLINE) line++;
-    index++;
-  }
-  const start = index;
-
-  while (line <= endLine && index < bytes.byteLength) {
-    if (bytes[index] === NEWLINE) {
-      line++;
-      if (line > endLine) {
-        return { start, end: index + 1 };
-      }
-    }
-    index++;
+  let start = 0;
+  for (let line = 1; line < startLine; line++) {
+    const next = bytes.indexOf(NEWLINE, start);
+    if (next === -1) return { start: bytes.byteLength, end: bytes.byteLength };
+    start = next + 1;
   }
 
-  return { start, end: bytes.byteLength };
+  // An inverted range covers no lines. Without this the scan below never runs
+  // and the fallthrough would hand back the whole rest of the file.
+  if (endLine < startLine) return { start, end: start };
+
+  let end = start;
+  for (let line = startLine; line <= endLine; line++) {
+    const next = bytes.indexOf(NEWLINE, end);
+    if (next === -1) return { start, end: bytes.byteLength };
+    end = next + 1;
+  }
+
+  return { start, end };
 }

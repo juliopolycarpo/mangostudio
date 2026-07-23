@@ -14,6 +14,7 @@ import { clampIntegerSetting, getOptionalString, getRequiredString } from '../ar
 import { registerTool } from '../registry';
 import type { ToolContext } from '../types';
 import {
+  containsNulByte,
   getRequiredPathArg,
   normalizePathList,
   PathAccessError,
@@ -268,10 +269,7 @@ async function searchFile(input: SearchFileInput): Promise<boolean> {
 async function looksBinary(file: ReturnType<typeof Bun.file>): Promise<boolean> {
   const slice = file.slice(0, Math.min(file.size, BINARY_PROBE_BYTES));
   const bytes = new Uint8Array(await slice.arrayBuffer());
-  for (let i = 0; i < bytes.length; i++) {
-    if (bytes[i] === 0) return true;
-  }
-  return false;
+  return containsNulByte(bytes, BINARY_PROBE_BYTES);
 }
 
 function buildRegex(pattern: string, caseInsensitive: boolean): RegExp {

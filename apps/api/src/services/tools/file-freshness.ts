@@ -76,7 +76,10 @@ export async function assertFresh(chatId: string, resolvedPath: string): Promise
 
   let current: ObservedFileRead;
   try {
-    current = await readFileWithObservedMtime(resolvedPath);
+    // A different byte count cannot hash to the recorded digest, so anything
+    // larger than the snapshot is stale by definition. Capping the re-read at
+    // that size keeps a file that ballooned since the read out of memory.
+    current = await readFileWithObservedMtime(resolvedPath, { maxBytes: entry.size });
   } catch {
     throw new StaleFileError(resolvedPath);
   }
