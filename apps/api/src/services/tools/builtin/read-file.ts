@@ -9,8 +9,8 @@ import type { ToolContext } from '../types';
 import {
   getRequiredPathArg,
   normalizePathList,
-  PathAccessError,
   type PathValidationSettings,
+  readFileWithObservedMtime,
   resolveAndValidatePath,
 } from './_fs-utils';
 
@@ -66,15 +66,9 @@ export async function executeReadFile(
     workdirPolicy: context.workdirPolicy,
   });
 
-  const file = Bun.file(resolvedPath);
-  const exists = await file.exists();
-  if (!exists) {
-    throw new PathAccessError(`File not found: "${args.path}"`);
-  }
-
-  const bytes = new Uint8Array(await file.arrayBuffer());
+  const { bytes, mtimeMs } = await readFileWithObservedMtime(resolvedPath);
   const content = new TextDecoder().decode(bytes);
-  const sha256 = await recordFileRead(context.chatId, resolvedPath, bytes);
+  const sha256 = recordFileRead(context.chatId, resolvedPath, bytes, mtimeMs);
 
   return { content, path: args.path, size: bytes.byteLength, sha256 };
 }

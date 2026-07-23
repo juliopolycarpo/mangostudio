@@ -4,6 +4,7 @@
  */
 
 import { lstat } from 'node:fs/promises';
+import { RegularFileWriteError, writeRegularFileAtomic } from '../../../lib/safe-file';
 import { getRequiredString } from '../arg-parsing';
 import { assertFresh, FileNotReadError, recordFileRead, withPathLocks } from '../file-freshness';
 import { registerTool } from '../registry';
@@ -15,7 +16,6 @@ import {
   PathAccessError,
   type PathValidationSettings,
   resolveAndValidatePath,
-  writeFileAtomic,
 } from './_fs-utils';
 
 const WRITE_FILE_TOOL_NAME = 'write_file';
@@ -81,19 +81,22 @@ export async function executeWriteFile(
     const created = !(await Bun.file(resolvedPath).exists());
     if (!created) await assertFresh(context.chatId, resolvedPath);
 
-    let bytesWritten: number;
+    let committed: { bytesWritten: number; mtimeMs: number };
     try {
-      bytesWritten = await writeFileAtomic(resolvedPath, args.content, { exclusive: created });
+      committed = await writeRegularFileAtomic(resolvedPath, args.content, { exclusive: created });
     } catch (error) {
       if (created && isErrnoException(error, 'EEXIST'))
         throw await describeOccupiedPath(resolvedPath);
+      // The destination policy is the tool's own remediation advice, not a
+      // filesystem failure, so it reaches the model as a path error.
+      if (error instanceof RegularFileWriteError) throw new PathAccessError(error.message);
       throw error;
     }
 
     // Recording the committed bytes makes a later sequential write fresh; the
     // surrounding path lock gives parallel calls the same deterministic order.
-    const sha256 = await recordFileRead(context.chatId, resolvedPath, args.content);
-    return { path: args.path, bytesWritten, created, sha256 };
+    const sha256 = recordFileRead(context.chatId, resolvedPath, args.content, committed.mtimeMs);
+    return { path: args.path, bytesWritten: committed.bytesWritten, created, sha256 };
   });
 }
 

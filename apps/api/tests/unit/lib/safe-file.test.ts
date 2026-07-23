@@ -1,15 +1,25 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import {
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   RegularFileReadError,
   type RegularFileReadFailure,
+  RegularFileWriteError,
   readRegularFileUtf8,
   readUtf8FileOrNull,
   SECRET_FILE_MODE,
   statRegularFile,
   writeFileAtomic,
+  writeRegularFileAtomic,
 } from '../../../src/lib/safe-file';
 
 let dir: string;
@@ -85,6 +95,38 @@ describe('writeFileAtomic', () => {
     writeFileAtomic(target, 'created', { exclusive: true });
 
     expect(readFileSync(target, 'utf8')).toBe('created');
+  });
+});
+
+describe('writeRegularFileAtomic', () => {
+  it('reports the committed inode mtime rather than a later observation', async () => {
+    const target = join(dir, 'note.txt');
+
+    const { bytesWritten, mtimeMs } = await writeRegularFileAtomic(target, 'hello');
+
+    expect(bytesWritten).toBe(5);
+    expect(mtimeMs).toBe(statSync(target).mtimeMs);
+  });
+
+  it('preserves the destination permission bits across an overwrite', async () => {
+    if (isWindows) return;
+    const target = join(dir, 'note.txt');
+    writeFileSync(target, 'first', { mode: 0o640 });
+
+    await writeRegularFileAtomic(target, 'second');
+
+    expect(readFileSync(target, 'utf8')).toBe('second');
+    expect(statSync(target).mode & 0o777).toBe(0o640);
+  });
+
+  it('rejects a non-regular destination and leaves no temp file', async () => {
+    const target = join(dir, 'a-directory');
+    mkdirSync(target);
+
+    await expect(writeRegularFileAtomic(target, 'content')).rejects.toBeInstanceOf(
+      RegularFileWriteError
+    );
+    expect(readdirSync(dir)).toEqual(['a-directory']);
   });
 });
 

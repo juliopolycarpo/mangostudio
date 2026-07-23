@@ -154,6 +154,15 @@ describe('executeReadFile', () => {
     expect(threw).toBe(true);
   });
 
+  it('throws when the path is a directory', async () => {
+    const dirPath = join(tempDir, 'a-directory');
+    mkdirSync(dirPath);
+
+    await expect(executeReadFile({ path: dirPath }, makeContext())).rejects.toThrow(
+      'not a regular file'
+    );
+  });
+
   it('throws when path is outside allowed paths', async () => {
     const filePath = join(tempDir, 'secret.txt');
     await seedFile(filePath, 'secret');

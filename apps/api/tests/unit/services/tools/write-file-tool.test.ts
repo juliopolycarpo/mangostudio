@@ -2,11 +2,13 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import {
   chmodSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
   rmSync,
   statSync,
+  symlinkSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -226,6 +228,50 @@ describe('executeWriteFile', () => {
 
     expect(await readBack(filePath)).toBe('complete content');
     expect(readdirSync(tempDir)).toEqual(['atomic.txt']);
+  });
+
+  it('refuses to replace a symlink and leaves its target untouched', async () => {
+    if (process.platform === 'win32') return;
+
+    const targetPath = join(tempDir, 'target.txt');
+    const linkPath = join(tempDir, 'link.txt');
+    await seedFile(targetPath, 'original');
+    symlinkSync(targetPath, linkPath);
+    await executeReadFile({ path: linkPath }, makeContext());
+
+    const error = await executeWriteFile(
+      { path: linkPath, content: 'via link' },
+      makeContext()
+    ).catch((thrown: unknown) => thrown);
+
+    expect(error).toBeInstanceOf(PathAccessError);
+    expect((error as Error).message).toContain('symbolic link');
+    expect((error as Error).message).toContain(targetPath);
+    expect(lstatSync(linkPath).isSymbolicLink()).toBe(true);
+    expect(await readBack(targetPath)).toBe('original');
+  });
+
+  it('refuses to overwrite a read-only file', async () => {
+    // root bypasses the file's own write permission, so the guard cannot fire.
+    if (process.platform === 'win32' || process.getuid?.() === 0) return;
+
+    const filePath = join(tempDir, 'readonly.txt');
+    await seedFile(filePath, 'protected');
+    await executeReadFile({ path: filePath }, makeContext());
+    chmodSync(filePath, 0o444);
+
+    try {
+      const error = await executeWriteFile(
+        { path: filePath, content: 'replacement' },
+        makeContext()
+      ).catch((thrown: unknown) => thrown);
+
+      expect(error).toBeInstanceOf(PathAccessError);
+      expect((error as Error).message).toContain('not writable');
+      expect(await readBack(filePath)).toBe('protected');
+    } finally {
+      chmodSync(filePath, 0o600);
+    }
   });
 
   it('reports a directory destination instead of demanding an impossible read', async () => {

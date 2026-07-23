@@ -20,6 +20,7 @@ import {
   rmSync,
   writeSync,
 } from 'node:fs';
+import { access, link, lstat, mkdir, open, readlink, rename, unlink } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 
 // O_NOFOLLOW makes a final-component symlink fail the open (ELOOP) instead of
@@ -51,10 +52,9 @@ export function writeFileAtomic(
   data: string | Uint8Array,
   options: SafeWriteOptions = {}
 ): void {
-  const directory = dirname(filePath);
-  mkdirSync(directory, { recursive: true });
+  mkdirSync(dirname(filePath), { recursive: true });
 
-  const tempPath = join(directory, `.${basename(filePath)}.${randomBytes(8).toString('hex')}.tmp`);
+  const tempPath = atomicTempPath(filePath);
   writeTempFile(tempPath, data, options.mode);
 
   try {
@@ -63,6 +63,131 @@ export function writeFileAtomic(
     rmSync(tempPath, { force: true });
     throw error;
   }
+}
+
+/** Raised when a destination is not one {@link writeRegularFileAtomic} may replace. */
+export class RegularFileWriteError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'RegularFileWriteError';
+  }
+}
+
+interface AtomicWriteResult {
+  readonly bytesWritten: number;
+  /** mtime of the committed inode, read from the temp descriptor before commit. */
+  readonly mtimeMs: number;
+}
+
+/**
+ * Asynchronously write `data` to a new or existing regular file, preserving the
+ * destination's permission bits. The async counterpart of {@link writeFileAtomic},
+ * for request paths that must not block the event loop.
+ *
+ * The rename-based commit swaps the destination's directory entry instead of
+ * writing through it, so destinations it would silently detach are rejected: a
+ * symlink would be replaced by a regular file and its target left stale, and a
+ * read-only file would be overwritten despite its own mode. Hard-linked files
+ * are still accepted — there the swap gives copy-on-write semantics, which is
+ * the safer outcome, not a surprising one.
+ *
+ * The returned mtime comes from the temp descriptor before the commit, so it
+ * provably belongs to the bytes written; a post-commit stat could instead
+ * observe another writer's replacement.
+ * // Usage: await writeRegularFileAtomic(path, content, { exclusive: isNew });
+ */
+export async function writeRegularFileAtomic(
+  filePath: string,
+  data: string | Uint8Array,
+  options: { readonly exclusive?: boolean } = {}
+): Promise<AtomicWriteResult> {
+  await mkdir(dirname(filePath), { recursive: true });
+  const destinationMode = await inspectWriteDestination(filePath);
+
+  const tempPath = atomicTempPath(filePath);
+  try {
+    const mtimeMs = await writeTempFileAsync(tempPath, data, destinationMode);
+    await commitTempFileAsync(tempPath, filePath, options.exclusive ?? false);
+    return { bytesWritten: byteLengthOf(data), mtimeMs };
+  } catch (error) {
+    // Best effort: a cleanup failure must never replace the write error.
+    await unlink(tempPath).catch(() => undefined);
+    throw error;
+  }
+}
+
+/**
+ * Returns the destination's permission bits, or `undefined` when nothing is
+ * there yet, rejecting any destination the commit must not replace.
+ */
+async function inspectWriteDestination(filePath: string): Promise<number | undefined> {
+  const entry = await lstat(filePath).catch((error: unknown) => {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw error;
+  });
+  if (!entry) return undefined;
+
+  if (entry.isSymbolicLink()) {
+    const target = await readlink(filePath).catch(() => null);
+    throw new RegularFileWriteError(
+      `Cannot write "${filePath}": it is a symbolic link${target ? ` to "${target}"` : ''}. ` +
+        'Write to the link target instead.'
+    );
+  }
+  if (!entry.isFile()) {
+    throw new RegularFileWriteError(
+      `Cannot write "${filePath}": the path exists and is not a regular file.`
+    );
+  }
+
+  const writable = await access(filePath, fsConstants.W_OK).then(
+    () => true,
+    () => false
+  );
+  if (!writable) {
+    throw new RegularFileWriteError(`Cannot write "${filePath}": the file is not writable.`);
+  }
+
+  return entry.mode & 0o7777;
+}
+
+/** Writes the temp file and returns its mtime, taken from the open descriptor. */
+async function writeTempFileAsync(
+  tempPath: string,
+  data: string | Uint8Array,
+  mode: number | undefined
+): Promise<number> {
+  const handle = await open(tempPath, 'wx', mode);
+  try {
+    await handle.writeFile(data);
+    // open() applies the process umask, so an existing mode has to be reapplied
+    // or an atomic overwrite would silently narrow or widen the user's bits.
+    if (mode !== undefined) await handle.chmod(mode);
+    return (await handle.stat()).mtimeMs;
+  } finally {
+    await handle.close();
+  }
+}
+
+async function commitTempFileAsync(
+  tempPath: string,
+  filePath: string,
+  exclusive: boolean
+): Promise<void> {
+  if (!exclusive) {
+    await rename(tempPath, filePath);
+    return;
+  }
+  await link(tempPath, filePath);
+  await unlink(tempPath);
+}
+
+function atomicTempPath(filePath: string): string {
+  return join(dirname(filePath), `.${basename(filePath)}.${randomBytes(8).toString('hex')}.tmp`);
+}
+
+function byteLengthOf(data: string | Uint8Array): number {
+  return typeof data === 'string' ? Buffer.byteLength(data) : data.byteLength;
 }
 
 function writeTempFile(tempPath: string, data: string | Uint8Array, mode?: number): void {

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { chmodSync, mkdtempSync, renameSync, rmSync, utimesSync } from 'node:fs';
+import { chmodSync, mkdtempSync, renameSync, rmSync, statSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -25,12 +25,16 @@ afterEach(() => {
   rmSync(tempDir, { recursive: true, force: true });
 });
 
+function mtimeOf(filePath: string): number {
+  return statSync(filePath).mtimeMs;
+}
+
 describe('file freshness ledger', () => {
   it('records and verifies the observed content hash', async () => {
     const filePath = join(tempDir, 'file.txt');
     await Bun.write(filePath, 'hello');
 
-    const sha256 = await recordFileRead('chat-1', filePath, 'hello');
+    const sha256 = recordFileRead('chat-1', filePath, 'hello', mtimeOf(filePath));
 
     expect(sha256).toBe('2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824');
     await expect(assertFresh('chat-1', filePath)).resolves.toBeUndefined();
@@ -39,7 +43,7 @@ describe('file freshness ledger', () => {
   it('requires every chat to establish its own snapshot', async () => {
     const filePath = join(tempDir, 'file.txt');
     await Bun.write(filePath, 'hello');
-    await recordFileRead('chat-a', filePath, 'hello');
+    recordFileRead('chat-a', filePath, 'hello', mtimeOf(filePath));
 
     await expect(assertFresh('chat-b', filePath)).rejects.toBeInstanceOf(FileNotReadError);
   });
@@ -47,19 +51,19 @@ describe('file freshness ledger', () => {
   it('rejects content changed after the recorded read', async () => {
     const filePath = join(tempDir, 'file.txt');
     await Bun.write(filePath, 'before');
-    await recordFileRead('chat-1', filePath, 'before');
+    recordFileRead('chat-1', filePath, 'before', mtimeOf(filePath));
     await Bun.write(filePath, 'after-content');
 
     await expect(assertFresh('chat-1', filePath)).rejects.toBeInstanceOf(StaleFileError);
   });
 
-  it('does not trust metadata captured after the observed bytes changed', async () => {
+  it('hashes rather than trusting metadata when the read observed no snapshot', async () => {
     const filePath = join(tempDir, 'file.txt');
-    await Bun.write(filePath, 'new longer content');
+    await Bun.write(filePath, 'new');
 
-    // Simulates the path changing after read_file obtained the old bytes but
-    // before recordFileRead captured the current path metadata.
-    await recordFileRead('chat-1', filePath, 'old');
+    // A same-size rewrite during read_file's own read: the bytes are stale but
+    // the path's size and mtime are not, so only NaN keeps the fast path shut.
+    recordFileRead('chat-1', filePath, 'old', Number.NaN);
 
     await expect(assertFresh('chat-1', filePath)).rejects.toBeInstanceOf(StaleFileError);
   });
@@ -67,7 +71,7 @@ describe('file freshness ledger', () => {
   it('accepts metadata-only changes and refreshes the cached metadata', async () => {
     const filePath = join(tempDir, 'file.txt');
     await Bun.write(filePath, 'unchanged');
-    await recordFileRead('chat-1', filePath, 'unchanged');
+    recordFileRead('chat-1', filePath, 'unchanged', mtimeOf(filePath));
     const changedTime = new Date(Date.now() + 10_000);
     utimesSync(filePath, changedTime, changedTime);
 
@@ -80,7 +84,7 @@ describe('file freshness ledger', () => {
 
     const filePath = join(tempDir, 'file.txt');
     await Bun.write(filePath, 'unchanged');
-    await recordFileRead('chat-1', filePath, 'unchanged');
+    recordFileRead('chat-1', filePath, 'unchanged', mtimeOf(filePath));
     chmodSync(filePath, 0);
     try {
       await expect(assertFresh('chat-1', filePath)).resolves.toBeUndefined();
@@ -92,7 +96,7 @@ describe('file freshness ledger', () => {
   it('forgets snapshots explicitly', async () => {
     const filePath = join(tempDir, 'file.txt');
     await Bun.write(filePath, 'hello');
-    await recordFileRead('chat-1', filePath, 'hello');
+    recordFileRead('chat-1', filePath, 'hello', mtimeOf(filePath));
 
     forgetFile('chat-1', filePath);
 
@@ -103,7 +107,7 @@ describe('file freshness ledger', () => {
     const from = join(tempDir, 'from.txt');
     const to = join(tempDir, 'to.txt');
     await Bun.write(from, 'hello');
-    await recordFileRead('chat-1', from, 'hello');
+    recordFileRead('chat-1', from, 'hello', mtimeOf(from));
     renameSync(from, to);
 
     rekeyFile('chat-1', from, to);
@@ -115,7 +119,7 @@ describe('file freshness ledger', () => {
   it('clears every snapshot for test and restart isolation', async () => {
     const filePath = join(tempDir, 'file.txt');
     await Bun.write(filePath, 'hello');
-    await recordFileRead('chat-1', filePath, 'hello');
+    recordFileRead('chat-1', filePath, 'hello', mtimeOf(filePath));
 
     clearFileFreshness();
 
@@ -126,12 +130,12 @@ describe('file freshness ledger', () => {
     const paths = Array.from({ length: 257 }, (_, index) => join(tempDir, `${index}.txt`));
     await Promise.all(paths.map((path, index) => Bun.write(path, String(index))));
     for (let index = 0; index < 256; index++) {
-      await recordFileRead('chat-1', paths[index], String(index));
+      recordFileRead('chat-1', paths[index], String(index), mtimeOf(paths[index]));
     }
 
     // Touch the first entry, making the second entry the oldest.
     await assertFresh('chat-1', paths[0]);
-    await recordFileRead('chat-1', paths[256], '256');
+    recordFileRead('chat-1', paths[256], '256', mtimeOf(paths[256]));
 
     await expect(assertFresh('chat-1', paths[0])).resolves.toBeUndefined();
     await expect(assertFresh('chat-1', paths[1])).rejects.toBeInstanceOf(FileNotReadError);

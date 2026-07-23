@@ -1,4 +1,5 @@
-import { readFile, stat } from 'node:fs/promises';
+import { stat } from 'node:fs/promises';
+import { type ObservedFileRead, readFileWithObservedMtime } from './builtin/_fs-utils';
 
 const MAX_ENTRIES_PER_CHAT = 256;
 const MAX_ENTRIES_GLOBAL = 10_000;
@@ -39,20 +40,25 @@ export class StaleFileError extends Error {
   }
 }
 
-/** Records the exact bytes a chat observed and returns their SHA-256 digest. */
-export async function recordFileRead(
+/**
+ * Records the exact bytes a chat observed and returns their SHA-256 digest.
+ *
+ * `observedMtimeMs` must come from the descriptor those bytes were read from —
+ * or from the descriptor they were written through — so size, mtime, and hash
+ * all describe one snapshot. Pass `NaN` when no such observation exists; the
+ * entry then always takes the hashing path instead of the metadata fast path.
+ */
+export function recordFileRead(
   chatId: string,
   resolvedPath: string,
-  content: Uint8Array | string
-): Promise<string> {
+  content: Uint8Array | string,
+  observedMtimeMs: number
+): string {
   const sha256 = hashContent(content);
   storeEntry(chatId, resolvedPath, {
     sha256,
-    // Size belongs to the bytes the caller actually observed. If the path
-    // changed between its read and the stat below, the next assertion must hash
-    // it instead of accepting later metadata as a fast-path match.
     size: contentSize(content),
-    mtimeMs: await currentMtimeMs(resolvedPath),
+    mtimeMs: observedMtimeMs,
   });
   return sha256;
 }
@@ -68,23 +74,23 @@ export async function assertFresh(chatId: string, resolvedPath: string): Promise
     return;
   }
 
-  let currentContent: Uint8Array;
+  let current: ObservedFileRead;
   try {
-    currentContent = await readFile(resolvedPath);
+    current = await readFileWithObservedMtime(resolvedPath);
   } catch {
     throw new StaleFileError(resolvedPath);
   }
 
-  const sha256 = hashContent(currentContent);
+  const sha256 = hashContent(current.bytes);
   if (sha256 !== entry.sha256) throw new StaleFileError(resolvedPath);
 
-  // Metadata-only changes do not make the content stale. Refresh the cached
-  // metadata so later checks can use the fast path again, keeping the size tied
-  // to the bytes that were just hashed rather than to the earlier stat.
+  // Metadata-only changes do not make the content stale. Refresh from the read
+  // that was just hashed, so the size and mtime restored to the fast path
+  // describe the same bytes as the digest beside them.
   storeEntry(chatId, resolvedPath, {
     sha256,
-    size: currentContent.byteLength,
-    mtimeMs: metadata.mtimeMs,
+    size: current.bytes.byteLength,
+    mtimeMs: current.mtimeMs,
   });
 }
 
@@ -139,20 +145,6 @@ function hashContent(content: Uint8Array | string): string {
 
 function contentSize(content: Uint8Array | string): number {
   return typeof content === 'string' ? Buffer.byteLength(content) : content.byteLength;
-}
-
-/**
- * Reads the current mtime, or `NaN` when the path can no longer be stat-ed.
- * A read that already succeeded must not be discarded because its follow-up
- * stat lost a race; `NaN` never compares equal, so the entry simply falls back
- * to hashing on the next assertion.
- */
-async function currentMtimeMs(resolvedPath: string): Promise<number> {
-  try {
-    return (await stat(resolvedPath)).mtimeMs;
-  } catch {
-    return Number.NaN;
-  }
 }
 
 async function getCurrentMetadata(

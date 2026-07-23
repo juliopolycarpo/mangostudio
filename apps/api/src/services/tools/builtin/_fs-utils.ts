@@ -2,9 +2,8 @@
  * Shared utilities for filesystem tools: path expansion, allowlist/denylist validation.
  */
 
-import { randomBytes } from 'node:crypto';
-import { chmod, link, mkdir, open, rename, stat, unlink } from 'node:fs/promises';
-import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
+import { open } from 'node:fs/promises';
+import { isAbsolute, resolve } from 'node:path';
 import {
   assertInsideWorkdir,
   isPathPrefix,
@@ -46,68 +45,45 @@ export class PathAccessError extends Error {
   }
 }
 
-export interface AtomicWriteOptions {
-  /** Refuse to replace a destination that appeared after the caller checked it. */
-  readonly exclusive?: boolean;
+export interface ObservedFileRead {
+  readonly bytes: Uint8Array;
+  /**
+   * mtime of the descriptor the bytes came from, or `NaN` when the file changed
+   * while it was being read and no snapshot describes those bytes.
+   */
+  readonly mtimeMs: number;
 }
 
 /**
- * Writes through a unique same-directory temp file, then atomically commits it.
- * Existing permission bits are preserved; exclusive creates never clobber a
- * destination that another process created concurrently.
+ * Reads a file through a single descriptor and reports the mtime that belongs to
+ * the bytes returned. Stat-ing the path after the read could pick up a
+ * concurrent writer's metadata and pair it with the caller's stale bytes, so the
+ * descriptor is stat-ed on both sides of the read and disagreement yields `NaN`.
+ * Symlinks are followed: resolving them is what a read tool is for.
+ *
+ * // Usage: const { bytes, mtimeMs } = await readFileWithObservedMtime(path);
  */
-export async function writeFileAtomic(
-  resolvedPath: string,
-  content: string | Uint8Array,
-  options: AtomicWriteOptions = {}
-): Promise<number> {
-  const directory = dirname(resolvedPath);
-  await mkdir(directory, { recursive: true });
-
-  const existingMode = await getExistingMode(resolvedPath);
-  const tempPath = join(
-    directory,
-    `.${basename(resolvedPath)}.${randomBytes(8).toString('hex')}.tmp`
-  );
-  const handle = await open(tempPath, 'wx', existingMode);
-  try {
-    try {
-      await handle.writeFile(content);
-    } finally {
-      await handle.close();
+export async function readFileWithObservedMtime(resolvedPath: string): Promise<ObservedFileRead> {
+  const handle = await open(resolvedPath, 'r').catch((error: unknown) => {
+    if (isErrnoException(error, 'ENOENT')) {
+      throw new PathAccessError(`File not found: "${resolvedPath}"`);
     }
-    // open() applies the process umask. Reapply an existing mode so an atomic
-    // overwrite cannot silently narrow or widen the user's permissions.
-    if (existingMode !== undefined) await chmod(tempPath, existingMode);
-    if (options.exclusive) {
-      await link(tempPath, resolvedPath);
-      await unlink(tempPath);
-    } else {
-      await rename(tempPath, resolvedPath);
-    }
-  } catch (error) {
-    await discardTempFile(tempPath);
     throw error;
-  }
+  });
 
-  return typeof content === 'string' ? Buffer.byteLength(content) : content.byteLength;
-}
-
-async function getExistingMode(resolvedPath: string): Promise<number | undefined> {
   try {
-    return (await stat(resolvedPath)).mode & 0o7777;
-  } catch (error) {
-    if (isErrnoException(error, 'ENOENT')) return undefined;
-    throw error;
-  }
-}
+    const before = await handle.stat();
+    if (!before.isFile()) {
+      throw new PathAccessError(`Cannot read "${resolvedPath}": it is not a regular file.`);
+    }
 
-/**
- * Best-effort temp-file cleanup that runs on the failure path, so a cleanup
- * error can never replace the write error the caller needs to see.
- */
-async function discardTempFile(path: string): Promise<void> {
-  await unlink(path).catch(() => undefined);
+    const bytes = await handle.readFile();
+    const after = await handle.stat();
+    const stable = after.mtimeMs === before.mtimeMs && after.size === before.size;
+    return { bytes, mtimeMs: stable ? after.mtimeMs : Number.NaN };
+  } finally {
+    await handle.close();
+  }
 }
 
 /** Narrows a thrown value to a Node errno error with the given code. */
