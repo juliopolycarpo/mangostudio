@@ -102,6 +102,19 @@ describe('buildFileChangePreview', () => {
     ).toBeNull();
   });
 
+  it('rejects replace_range line numbers outside the tool contract', () => {
+    const base = { path: '/a.txt', content: '' };
+    expect(
+      buildFileChangePreview('replace_range', { ...base, startLine: 0, endLine: 3 })
+    ).toBeNull();
+    expect(
+      buildFileChangePreview('replace_range', { ...base, startLine: -2, endLine: 3 })
+    ).toBeNull();
+    expect(
+      buildFileChangePreview('replace_range', { ...base, startLine: 1.5, endLine: 3 })
+    ).toBeNull();
+  });
+
   it('renders delete_file and move_file as path banners', () => {
     expect(buildFileChangePreview('delete_file', { path: '/gone.txt' })?.files[0]).toMatchObject({
       op: 'delete',

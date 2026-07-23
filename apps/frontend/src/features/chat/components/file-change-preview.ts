@@ -17,6 +17,16 @@ const FILE_CHANGE_TOOLS = new Set([
   'move_file',
 ]);
 
+/**
+ * True when a tool name mutates files, so its call can render a diff preview.
+ * Cheap membership test callers use before paying for the diff computation.
+ *
+ * // Usage: if (isFileChangeTool(name)) { ... }
+ */
+export function isFileChangeTool(toolName: string): boolean {
+  return FILE_CHANGE_TOOLS.has(toolName);
+}
+
 /** Hard cap on rendered diff lines; the raw result stays available beyond it. */
 export const DIFF_PREVIEW_MAX_LINES = 400;
 
@@ -157,10 +167,11 @@ function editFilePreview(
 function replaceRangePreview(args: Record<string, unknown>): FileChangePreview | null {
   if (typeof args.path !== 'string' || args.path.length === 0) return null;
   if (typeof args.content !== 'string') return null;
+  // Mirrors the tool's own contract: 1-indexed inclusive integer line numbers.
   const { startLine, endLine } = args;
-  if (typeof startLine !== 'number' || typeof endLine !== 'number' || endLine < startLine) {
-    return null;
-  }
+  if (typeof startLine !== 'number' || typeof endLine !== 'number') return null;
+  if (!Number.isInteger(startLine) || !Number.isInteger(endLine)) return null;
+  if (startLine < 1 || endLine < startLine) return null;
 
   // The replaced lines' previous content is not persisted with the call, so the
   // range is summarized as a unified-diff style marker followed by additions.

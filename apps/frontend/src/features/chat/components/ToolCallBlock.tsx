@@ -20,7 +20,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useChatDisplaySettings } from '@/hooks/use-chat-display-settings';
 import { useI18n } from '@/hooks/use-i18n';
 import { FileChangePreviewBody } from './FileChangePreview';
-import { buildFileChangePreview } from './file-change-preview';
+import { buildFileChangePreview, isFileChangeTool } from './file-change-preview';
 import { getToolHint, ToolIcon } from './ToolCallVisuals';
 
 const COPIED_RESET_MS = 2000;
@@ -85,18 +85,23 @@ export function ToolCallBlock({
   const { diffPreviewsEnabled, diffPreviewMode } = useChatDisplaySettings();
   const isError = status === 'failed' || status === 'timed_out';
 
-  const preview = useMemo(
-    () => (diffPreviewsEnabled && !isError ? buildFileChangePreview(name, args, result) : null),
-    [diffPreviewsEnabled, isError, name, args, result]
-  );
-  const previewExpanded =
-    preview !== null &&
+  // Previewability is decided from the tool name alone so the expansion policy
+  // does not depend on arguments that are still streaming in, and so the diff
+  // itself is only computed for a card the reader can actually see.
+  const previewable = diffPreviewsEnabled && !isError && isFileChangeTool(name);
+  const autoExpandPreview =
+    previewable &&
     (diffPreviewMode === 'expanded' ||
       (diffPreviewMode === 'collapse_older' && isLatestFileChange));
 
-  const [expanded, setExpanded] = useState(isError || previewExpanded);
+  const [expanded, setExpanded] = useState(isError || autoExpandPreview);
   const [showRaw, setShowRaw] = useState(false);
   const [copied, setCopied] = useState(false);
+
+  const preview = useMemo(
+    () => (previewable && expanded ? buildFileChangePreview(name, args, result) : null),
+    [previewable, expanded, name, args, result]
+  );
 
   const labels = t.tools.labels as Record<string, string> | undefined;
   const label = labels?.[name] ?? name;
@@ -126,12 +131,18 @@ export function ToolCallBlock({
     if (isError) setExpanded(true);
   }, [isError]);
 
-  // In collapse_older mode a newly arriving mutation collapses the previously
-  // latest card and expands the new one; either can still be toggled by hand.
+  // Applies the display mode once a card turns previewable — a call mounts with
+  // empty arguments while it streams, so the mount-time state is not enough. In
+  // collapse_older a newly arriving mutation collapses the previously latest
+  // card and expands the new one; either can still be toggled by hand.
   useEffect(() => {
-    if (preview === null || diffPreviewMode !== 'collapse_older') return;
-    setExpanded(isError || isLatestFileChange);
-  }, [preview, diffPreviewMode, isError, isLatestFileChange]);
+    if (!previewable) return;
+    if (diffPreviewMode === 'expanded') {
+      setExpanded(true);
+      return;
+    }
+    if (diffPreviewMode === 'collapse_older') setExpanded(isError || isLatestFileChange);
+  }, [previewable, diffPreviewMode, isError, isLatestFileChange]);
 
   const handleCopyResult = async () => {
     if (!displayedResult) return;

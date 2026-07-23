@@ -1,8 +1,11 @@
+import type { ChatDisplaySettings } from '@mangostudio/shared/app-settings';
 import { isActiveToolExecutionStatus } from '@mangostudio/shared/tool-executions';
 import { AlertCircle, ArrowRight, Ban, CheckCircle, ChevronDown } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { useEffect, useState } from 'react';
+import { useChatDisplaySettings } from '@/hooks/use-chat-display-settings';
 import { useI18n } from '@/hooks/use-i18n';
+import { isFileChangeTool } from './file-change-preview';
 import { ToolCallBlock } from './ToolCallBlock';
 import { getToolHint, ToolIcon } from './ToolCallVisuals';
 import type { ToolCallEntry } from './tool-call-grouping';
@@ -21,6 +24,7 @@ interface ToolCallGroupBlockProps {
  */
 export function ToolCallGroupBlock({ calls, latestFileChangeId = null }: ToolCallGroupBlockProps) {
   const { t } = useI18n();
+  const display = useChatDisplaySettings();
   const name = calls[0].name;
   const labels = t.tools.labels as Record<string, string> | undefined;
   const label = labels?.[name] ?? name;
@@ -33,7 +37,11 @@ export function ToolCallGroupBlock({ calls, latestFileChangeId = null }: ToolCal
   const anyPending = calls.some((call) => isActiveToolExecutionStatus(call.status));
   const anyError = calls.some((call) => call.status === 'failed' || call.status === 'timed_out');
   const anyCancelled = calls.some((call) => call.status === 'cancelled');
-  const [expanded, setExpanded] = useState(anyError);
+  // File mutations group like any other repeated tool, so a group that holds a
+  // card the display mode wants open has to open with it — otherwise the diff
+  // preview is unreachable for the common run of consecutive edits.
+  const holdsExpandedPreview = holdsPreviewToExpand(calls, latestFileChangeId, display);
+  const [expanded, setExpanded] = useState(anyError || holdsExpandedPreview);
   const tone = anyError
     ? 'border-error/30 text-error'
     : anyPending
@@ -43,8 +51,8 @@ export function ToolCallGroupBlock({ calls, latestFileChangeId = null }: ToolCal
         : 'border-success/25 text-success';
 
   useEffect(() => {
-    if (anyError) setExpanded(true);
-  }, [anyError]);
+    if (anyError || holdsExpandedPreview) setExpanded(true);
+  }, [anyError, holdsExpandedPreview]);
 
   return (
     <div className="mb-3">
@@ -109,5 +117,24 @@ export function ToolCallGroupBlock({ calls, latestFileChangeId = null }: ToolCal
         )}
       </AnimatePresence>
     </div>
+  );
+}
+
+/**
+ * Whether any grouped call renders a diff preview the display mode opens by
+ * default. Mirrors ToolCallBlock's own gate so the two cannot disagree.
+ */
+function holdsPreviewToExpand(
+  calls: ToolCallEntry[],
+  latestFileChangeId: string | null,
+  display: ChatDisplaySettings
+): boolean {
+  if (!display.diffPreviewsEnabled || display.diffPreviewMode === 'collapsed') return false;
+  return calls.some(
+    (call) =>
+      isFileChangeTool(call.name) &&
+      call.status !== 'failed' &&
+      call.status !== 'timed_out' &&
+      (display.diffPreviewMode === 'expanded' || call.toolCallId === latestFileChangeId)
   );
 }

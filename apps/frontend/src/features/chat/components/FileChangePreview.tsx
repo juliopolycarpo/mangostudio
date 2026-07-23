@@ -47,12 +47,15 @@ export function FileChangePreviewBody({ preview }: FileChangePreviewBodyProps) {
           {d.appliedCount.replace('{count}', String(preview.repeatCount))}
         </p>
       )}
-      {preview.files.map((file) => {
+      {preview.files.map((file, index) => {
         const { lines, hiddenCount } = truncateDiffLines(file.lines, Math.max(0, remainingLines));
         remainingLines -= lines.length;
         return (
           <FileSection
-            key={`${file.op}-${file.path}`}
+            // A patch may touch the same path twice, so only the position is
+            // unique. Sections are position-stable for a given preview.
+            // biome-ignore lint/suspicious/noArrayIndexKey: op+path is not unique across a patch
+            key={index}
             file={file}
             lines={lines}
             hiddenCount={hiddenCount}
