@@ -6,9 +6,9 @@
 import { RegularFileWriteError, writeRegularFileAtomic } from '../../../lib/safe-file';
 import { getRequiredInteger, getRequiredTextArg, ToolArgumentError } from '../arg-parsing';
 import {
-  assertFresh,
   assertLineNumbersCurrent,
   FileNotReadError,
+  readFreshFile,
   recordFileEdit,
   withPathLocks,
 } from '../file-freshness';
@@ -21,7 +21,6 @@ import {
   PathAccessError,
   type PathValidationSettings,
   pathPolicyParameterDescriptors,
-  readFileWithObservedMtime,
   resolveAndValidatePath,
 } from './_fs-utils';
 import { countTotalLines, looksBinary } from './read-file';
@@ -99,8 +98,9 @@ export async function executeReplaceRange(
   });
 
   return await withPathLocks([resolvedPath], async () => {
+    let observed: Awaited<ReturnType<typeof readFreshFile>>;
     try {
-      await assertFresh(context.chatId, resolvedPath);
+      observed = await readFreshFile(context.chatId, resolvedPath);
     } catch (error) {
       if (error instanceof FileNotReadError) {
         throw await explainUnreadableMutationTarget(resolvedPath, 'edit', error);
@@ -109,7 +109,7 @@ export async function executeReplaceRange(
     }
     assertLineNumbersCurrent(context.chatId, resolvedPath, args.endLine);
 
-    const { bytes } = await readFileWithObservedMtime(resolvedPath);
+    const { bytes } = observed;
     // One logical line per split entry, so the split doubles as the line count.
     const sourceLines = splitLines(bytes);
     validateRange(args, sourceLines.length);

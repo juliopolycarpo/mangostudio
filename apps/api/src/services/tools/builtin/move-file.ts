@@ -100,8 +100,7 @@ export async function executeMoveFile(
 
   return await withPathLocks([from, to], async () => {
     const source = await assertRegularFilePath(from, 'move');
-    await mkdir(dirname(to), { recursive: true });
-    await moveWithoutOverwrite(from, to, source.mode & 0o7777);
+    await moveRegularFileWithoutOverwrite(from, to, source.mode & 0o7777);
     rekeyFile(context.chatId, from, to);
     return { from: args.from, to: args.to, moved: true };
   });
@@ -112,7 +111,12 @@ export async function executeMoveFile(
  * one filesystem. copyFile with COPYFILE_EXCL provides the same destination
  * guarantee wherever a hard link cannot be created.
  */
-async function moveWithoutOverwrite(from: string, to: string, mode: number): Promise<void> {
+export async function moveRegularFileWithoutOverwrite(
+  from: string,
+  to: string,
+  mode: number
+): Promise<void> {
+  await mkdir(dirname(to), { recursive: true });
   let destinationCreated = false;
   try {
     try {

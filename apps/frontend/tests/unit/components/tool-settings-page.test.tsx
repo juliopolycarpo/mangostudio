@@ -101,18 +101,23 @@ describe('ToolSettingsPage', () => {
   it('uses localized names and descriptions for file mutation tools', async () => {
     fetchScenario.respondWithJson('GET', '/api/settings/tools', {
       body: {
-        tools: ['edit_file', 'replace_range', 'create_file', 'delete_file', 'move_file'].map(
-          (name) => ({
-            name,
-            title: `Server title for ${name}`,
-            description: `Server description for ${name}`,
-            category: 'system',
-            enabled: true,
-            canDisable: true,
-            parameters: {},
-            parameterDescriptors: [],
-          })
-        ),
+        tools: [
+          'edit_file',
+          'replace_range',
+          'apply_patch',
+          'create_file',
+          'delete_file',
+          'move_file',
+        ].map((name) => ({
+          name,
+          title: `Server title for ${name}`,
+          description: `Server description for ${name}`,
+          category: 'system',
+          enabled: true,
+          canDisable: true,
+          parameters: {},
+          parameterDescriptors: [],
+        })),
       },
     });
 
@@ -121,6 +126,7 @@ describe('ToolSettingsPage', () => {
     expect(await screen.findByText('Create file')).toBeInTheDocument();
     expect(screen.getByText('Edit file')).toBeInTheDocument();
     expect(screen.getByText('Replace range')).toBeInTheDocument();
+    expect(screen.getByText('Apply patch')).toBeInTheDocument();
     expect(screen.getByText('Delete file')).toBeInTheDocument();
     expect(screen.getByText('Move file')).toBeInTheDocument();
     expect(

@@ -76,7 +76,9 @@ export function ToolCallBlock({ name, args, result, status, execution }: ToolCal
 
   const labels = t.tools.labels as Record<string, string> | undefined;
   const label = labels?.[name] ?? name;
-  const hint = getToolHint(name, args);
+  const hint = getToolHint(name, args, (count) =>
+    t.tools.moreCount.replace('{count}', String(count))
+  );
   const source = execution?.source ?? inferToolExecutionSource(name);
   // Non-nominal outcomes and the awaiting state are called out explicitly;
   // success/progress already read from the icon and tone.

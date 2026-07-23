@@ -1,4 +1,5 @@
 import { isShellAvailable } from './builtin/_shell-exec';
+import { register as registerApplyPatchTool } from './builtin/apply-patch';
 import { register as registerAskUserQuestionTool } from './builtin/ask-user-question';
 import { register as registerBashTool } from './builtin/bash';
 import { register as registerCreateFileTool } from './builtin/create-file';
@@ -27,6 +28,7 @@ export function registerTools(): void {
   registerWriteFileTool();
   registerEditFileTool();
   registerReplaceRangeTool();
+  registerApplyPatchTool();
   registerCreateFileTool();
   registerDeleteFileTool();
   registerMoveFileTool();

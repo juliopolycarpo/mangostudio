@@ -22,7 +22,9 @@ export function ToolCallGroupBlock({ calls }: ToolCallGroupBlockProps) {
   const name = calls[0].name;
   const labels = t.tools.labels as Record<string, string> | undefined;
   const label = labels?.[name] ?? name;
-  const firstHint = getToolHint(name, calls[0].args);
+  const firstHint = getToolHint(name, calls[0].args, (count) =>
+    t.tools.moreCount.replace('{count}', String(count))
+  );
   const moreCount = calls.length - 1;
   const moreLabel = t.tools.moreCount.replace('{count}', String(moreCount));
 

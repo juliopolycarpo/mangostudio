@@ -744,6 +744,7 @@ export const messages: Messages = {
         writeFile: 'Write file',
         editFile: 'Edit file',
         replaceRange: 'Replace range',
+        applyPatch: 'Apply patch',
         createFile: 'Create file',
         deleteFile: 'Delete file',
         moveFile: 'Move file',
@@ -756,6 +757,8 @@ export const messages: Messages = {
         writeFile: 'Allows the AI to write text content to files on disk.',
         editFile: 'Allows the AI to replace exact text in files read in this chat.',
         replaceRange: 'Allows the AI to replace line ranges in files read in this chat.',
+        applyPatch:
+          'Allows the AI to apply context-anchored changes across multiple text files at once.',
         createFile: 'Allows the AI to create new text files without overwriting existing paths.',
         deleteFile: 'Allows the AI to delete regular files it has read in this chat.',
         moveFile:
@@ -1404,6 +1407,7 @@ export const messages: Messages = {
       write_file: 'Write',
       edit_file: 'Edit',
       replace_range: 'Replace Range',
+      apply_patch: 'Patch',
       create_file: 'Create',
       delete_file: 'Delete',
       move_file: 'Move',

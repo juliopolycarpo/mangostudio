@@ -183,13 +183,55 @@ function extendCoverage(
   return Math.max(carried, observedRange.endLine);
 }
 
-/** Verifies that a file still matches the most recent content observed by this chat. */
-export async function assertFresh(chatId: string, resolvedPath: string): Promise<void> {
+function getCompleteEntry(chatId: string, resolvedPath: string): FileFreshnessEntry {
   const entry = entriesByChat.get(chatId)?.get(resolvedPath);
   if (!entry) throw new FileNotReadError(resolvedPath);
   // A windowed read hashes the whole file but only shows part of it, so a
   // matching digest alone would let the model overwrite lines it never saw.
   if (!entry.complete) throw new PartialReadError(resolvedPath, entry.coveredThroughLine);
+  return entry;
+}
+
+/**
+ * Verifies supplied bytes against the most recent complete content observed by
+ * this chat. Mutation tools that need the current content should use
+ * {@link readFreshFile} so the bytes they edit are the bytes this check hashed.
+ */
+export function assertFreshContent(
+  chatId: string,
+  resolvedPath: string,
+  content: Uint8Array | string
+): void {
+  const entry = getCompleteEntry(chatId, resolvedPath);
+  if (contentSize(content) !== entry.size || hashContent(content) !== entry.sha256) {
+    throw new StaleFileError(resolvedPath);
+  }
+  touchEntry(chatId, resolvedPath, entry);
+}
+
+/**
+ * Reads and verifies one filesystem snapshot for a read-modify-write operation.
+ * The size ceiling comes from the recorded snapshot: a larger file cannot have
+ * the same digest, and is stale without needing to be loaded into memory.
+ */
+export async function readFreshFile(
+  chatId: string,
+  resolvedPath: string
+): Promise<ObservedFileRead> {
+  const entry = getCompleteEntry(chatId, resolvedPath);
+  let current: ObservedFileRead;
+  try {
+    current = await readFileWithObservedMtime(resolvedPath, { maxBytes: entry.size });
+  } catch {
+    throw new StaleFileError(resolvedPath);
+  }
+  assertFreshContent(chatId, resolvedPath, current.bytes);
+  return current;
+}
+
+/** Verifies that a file still matches the most recent content observed by this chat. */
+export async function assertFresh(chatId: string, resolvedPath: string): Promise<void> {
+  const entry = getCompleteEntry(chatId, resolvedPath);
 
   const metadata = await getCurrentMetadata(resolvedPath);
   if (metadata.size === entry.size && metadata.mtimeMs === entry.mtimeMs) {
