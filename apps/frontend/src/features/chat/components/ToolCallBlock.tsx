@@ -16,8 +16,11 @@ import {
   UserRound,
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { useChatDisplaySettings } from '@/hooks/use-chat-display-settings';
 import { useI18n } from '@/hooks/use-i18n';
+import { FileChangePreviewBody } from './FileChangePreview';
+import { buildFileChangePreview } from './file-change-preview';
 import { getToolHint, ToolIcon } from './ToolCallVisuals';
 
 const COPIED_RESET_MS = 2000;
@@ -28,6 +31,8 @@ interface ToolCallBlockProps {
   result?: string | null;
   status: ToolExecutionStatus;
   execution?: ToolExecutionSnapshot;
+  /** True when this call is the message's most recent file mutation. */
+  isLatestFileChange?: boolean;
 }
 
 /** Chip tone per lifecycle status; active states pulse the tool icon instead. */
@@ -68,10 +73,29 @@ function formatToolDuration(durationMs: number): string {
   return `${(durationMs / 1000).toFixed(1)}s`;
 }
 
-export function ToolCallBlock({ name, args, result, status, execution }: ToolCallBlockProps) {
+export function ToolCallBlock({
+  name,
+  args,
+  result,
+  status,
+  execution,
+  isLatestFileChange = false,
+}: ToolCallBlockProps) {
   const { t } = useI18n();
+  const { diffPreviewsEnabled, diffPreviewMode } = useChatDisplaySettings();
   const isError = status === 'failed' || status === 'timed_out';
-  const [expanded, setExpanded] = useState(isError);
+
+  const preview = useMemo(
+    () => (diffPreviewsEnabled && !isError ? buildFileChangePreview(name, args, result) : null),
+    [diffPreviewsEnabled, isError, name, args, result]
+  );
+  const previewExpanded =
+    preview !== null &&
+    (diffPreviewMode === 'expanded' ||
+      (diffPreviewMode === 'collapse_older' && isLatestFileChange));
+
+  const [expanded, setExpanded] = useState(isError || previewExpanded);
+  const [showRaw, setShowRaw] = useState(false);
   const [copied, setCopied] = useState(false);
 
   const labels = t.tools.labels as Record<string, string> | undefined;
@@ -101,6 +125,13 @@ export function ToolCallBlock({ name, args, result, status, execution }: ToolCal
   useEffect(() => {
     if (isError) setExpanded(true);
   }, [isError]);
+
+  // In collapse_older mode a newly arriving mutation collapses the previously
+  // latest card and expands the new one; either can still be toggled by hand.
+  useEffect(() => {
+    if (preview === null || diffPreviewMode !== 'collapse_older') return;
+    setExpanded(isError || isLatestFileChange);
+  }, [preview, diffPreviewMode, isError, isLatestFileChange]);
 
   const handleCopyResult = async () => {
     if (!displayedResult) return;
@@ -160,7 +191,19 @@ export function ToolCallBlock({ name, args, result, status, execution }: ToolCal
             className="glass-surface-subtle mt-1.5 rounded-xl border border-outline-variant/15 overflow-hidden"
           >
             <div className="p-4 space-y-3 text-xs font-mono max-h-48 sm:max-h-72 md:max-h-96 overflow-y-auto app-scrollbar">
-              {Object.keys(args).length > 0 && (
+              {preview !== null && (
+                <div className="flex justify-end">
+                  <button
+                    type="button"
+                    onClick={() => setShowRaw((v) => !v)}
+                    className="text-[10px] uppercase tracking-wider text-on-surface-variant/50 hover:text-on-surface-variant transition-colors duration-200 cursor-pointer"
+                  >
+                    {showRaw ? t.tools.diff.hideRaw : t.tools.diff.showRaw}
+                  </button>
+                </div>
+              )}
+              {preview !== null && !showRaw && <FileChangePreviewBody preview={preview} />}
+              {(preview === null || showRaw) && Object.keys(args).length > 0 && (
                 <div>
                   <p className="text-on-surface-variant/50 uppercase tracking-wider text-[10px] mb-1">
                     {t.tools.argsLabel}
@@ -170,7 +213,7 @@ export function ToolCallBlock({ name, args, result, status, execution }: ToolCal
                   </pre>
                 </div>
               )}
-              {displayedResult !== null && (
+              {(preview === null || showRaw) && displayedResult !== null && (
                 <div>
                   <div className="flex items-center justify-between mb-1">
                     <p

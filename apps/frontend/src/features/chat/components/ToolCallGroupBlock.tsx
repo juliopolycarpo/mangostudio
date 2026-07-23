@@ -9,6 +9,8 @@ import type { ToolCallEntry } from './tool-call-grouping';
 
 interface ToolCallGroupBlockProps {
   calls: ToolCallEntry[];
+  /** toolCallId of the message's most recent file mutation, if any. */
+  latestFileChangeId?: string | null;
 }
 
 /**
@@ -17,7 +19,7 @@ interface ToolCallGroupBlockProps {
  *
  * // Usage: <ToolCallGroupBlock calls={entries} />
  */
-export function ToolCallGroupBlock({ calls }: ToolCallGroupBlockProps) {
+export function ToolCallGroupBlock({ calls, latestFileChangeId = null }: ToolCallGroupBlockProps) {
   const { t } = useI18n();
   const name = calls[0].name;
   const labels = t.tools.labels as Record<string, string> | undefined;
@@ -100,6 +102,7 @@ export function ToolCallGroupBlock({ calls }: ToolCallGroupBlockProps) {
                 result={call.result}
                 status={call.status}
                 execution={call.execution}
+                isLatestFileChange={call.toolCallId === latestFileChangeId}
               />
             ))}
           </motion.div>

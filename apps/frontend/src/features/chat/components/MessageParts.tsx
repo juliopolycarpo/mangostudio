@@ -7,6 +7,7 @@ import { MarkdownContent } from '@/components/MarkdownContent';
 import { useI18n } from '@/hooks/use-i18n';
 import { ContinuationEventMarker } from './ContinuationEventMarker';
 import { ElicitationCard } from './ElicitationCard';
+import { findLatestFileChangeId } from './file-change-preview';
 import { GeneratedImagePart } from './GeneratedImagePart';
 import { McpMediaPartBlock } from './McpMediaPartBlock';
 import { QuestionCard } from './QuestionCard';
@@ -36,6 +37,7 @@ export function MessageParts({
     () => planToolGroups(parts, isStreaming),
     [parts, isStreaming]
   );
+  const latestFileChangeId = useMemo(() => findLatestFileChangeId(parts), [parts]);
   return (
     <>
       {parts.map((part, idx) => {
@@ -61,7 +63,13 @@ export function MessageParts({
             if (consumed.has(idx)) return null;
             const grouped = groups.get(idx);
             if (grouped) {
-              return <ToolCallGroupBlock key={part.toolCallId} calls={grouped} />;
+              return (
+                <ToolCallGroupBlock
+                  key={part.toolCallId}
+                  calls={grouped}
+                  latestFileChangeId={latestFileChangeId}
+                />
+              );
             }
             const entry = toToolCallEntry(parts, idx, isStreaming);
             return (
@@ -72,6 +80,7 @@ export function MessageParts({
                 result={entry.result}
                 status={entry.status}
                 execution={entry.execution}
+                isLatestFileChange={part.toolCallId === latestFileChangeId}
               />
             );
           }
