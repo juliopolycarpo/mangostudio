@@ -97,18 +97,24 @@ describe('executeReadFile', () => {
   it('rejects paths outside the workdir when restriction is enabled', async () => {
     const filePath = join(tempDir, 'inside.txt');
     await seedFile(filePath, 'ok');
-    const outsidePath = join(tmpdir(), 'outside-read.txt');
+    // mkdtemp (not join(tmpdir(), fixedName)) avoids CodeQL js/insecure-temporary-file.
+    const outsideDir = mkdtempSync(join(tmpdir(), 'outside-read-'));
+    try {
+      const outsidePath = join(outsideDir, 'outside-read.txt');
 
-    await expect(
-      executeReadFile(
-        { path: outsidePath },
-        {
-          ...makeContext(),
-          workdir: tempDir,
-          workdirPolicy: { root: tempDir, restricted: true },
-        }
-      )
-    ).rejects.toThrow('outside the chat working directory');
+      await expect(
+        executeReadFile(
+          { path: outsidePath },
+          {
+            ...makeContext(),
+            workdir: tempDir,
+            workdirPolicy: { root: tempDir, restricted: true },
+          }
+        )
+      ).rejects.toThrow('outside the chat working directory');
+    } finally {
+      rmSync(outsideDir, { recursive: true, force: true });
+    }
   });
 
   it('reads a text file and returns its content and size', async () => {
