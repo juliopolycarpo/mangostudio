@@ -83,6 +83,9 @@ Open these first:
 Open these first:
 
 - `apps/api/src/services/tools/`
+- `apps/api/src/services/tools/builtin/create-file.ts`
+- `apps/api/src/services/tools/builtin/delete-file.ts`
+- `apps/api/src/services/tools/builtin/move-file.ts`
 - `apps/api/src/services/tools/builtin/generate-image.ts`
 - `apps/api/src/services/tools/builtin/get-current-datetime.ts`
 - `apps/api/src/services/tools/builtin/ask-user-question.ts` (interactive question cards)

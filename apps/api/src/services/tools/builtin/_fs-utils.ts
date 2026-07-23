@@ -2,8 +2,10 @@
  * Shared utilities for filesystem tools: path expansion, allowlist/denylist validation.
  */
 
-import { open } from 'node:fs/promises';
+import type { Stats } from 'node:fs';
+import { lstat, open } from 'node:fs/promises';
 import { isAbsolute, resolve } from 'node:path';
+import type { ToolParameterDescriptor } from '@mangostudio/shared/tool-settings';
 import {
   assertInsideWorkdir,
   isPathPrefix,
@@ -26,6 +28,52 @@ export function expandHome(path: string): string {
 export interface PathValidationSettings {
   allowedPaths: readonly PathListItem[];
   deniedPaths: readonly PathListItem[];
+}
+
+/**
+ * Reads the allow/deny path policy every filesystem tool exposes, so the
+ * normalization never drifts between them.
+ *
+ * // Usage: const settings = normalizePathValidationSettings(context.parameters);
+ */
+export function normalizePathValidationSettings(
+  parameters: Record<string, unknown>
+): PathValidationSettings {
+  return {
+    allowedPaths: normalizePathList(parameters.allowedPaths),
+    deniedPaths: normalizePathList(parameters.deniedPaths),
+  };
+}
+
+/**
+ * Builds the `allowedPaths`/`deniedPaths` settings descriptors shared by the
+ * filesystem tools. Only the per-tool wording differs; the frontend overrides
+ * both labels by parameter name, so the descriptions are the API-side copy.
+ *
+ * // Usage: parameterDescriptors: pathPolicyParameterDescriptors(allowText, denyText)
+ */
+export function pathPolicyParameterDescriptors(
+  allowedDescription: string,
+  deniedDescription: string
+): ToolParameterDescriptor[] {
+  return [
+    {
+      name: 'allowedPaths',
+      label: 'Allowed paths',
+      description: allowedDescription,
+      type: 'path_list',
+      required: false,
+      defaultValue: [] as Array<{ path: string; enabled: boolean }>,
+    },
+    {
+      name: 'deniedPaths',
+      label: 'Denied paths',
+      description: deniedDescription,
+      type: 'path_list',
+      required: false,
+      defaultValue: [] as Array<{ path: string; enabled: boolean }>,
+    },
+  ];
 }
 
 /** Chat-bound directory a relative tool path is resolved against. */
@@ -114,6 +162,43 @@ export const BINARY_SNIFF_BYTES = 8 * 1024;
  */
 export function containsNulByte(bytes: Uint8Array, limit: number): boolean {
   return bytes.subarray(0, limit).indexOf(0x00) !== -1;
+}
+
+/**
+ * Whether read_file would refuse this path as binary. Tools that gate a mutation
+ * on a prior read need this: "read it first" is unreachable advice for a file
+ * read_file will never accept, and sends the model into an endless retry.
+ *
+ * // Usage: if (await isProbablyBinaryFile(path)) return explainBinaryBlocker();
+ */
+export async function isProbablyBinaryFile(resolvedPath: string): Promise<boolean> {
+  const bytes = await Bun.file(resolvedPath)
+    .slice(0, BINARY_SNIFF_BYTES)
+    .bytes()
+    .catch(() => new Uint8Array());
+  return containsNulByte(bytes, BINARY_SNIFF_BYTES);
+}
+
+/**
+ * Confirms a mutation target is a regular file, returning its `lstat` entry.
+ * Symlinks are refused rather than followed so a link can never redirect a
+ * delete or a move onto its target.
+ *
+ * // Usage: const entry = await assertRegularFilePath(resolvedPath, 'delete');
+ */
+export async function assertRegularFilePath(resolvedPath: string, action: string): Promise<Stats> {
+  const entry = await lstat(resolvedPath).catch((error: unknown) => {
+    if (isErrnoException(error, 'ENOENT')) {
+      throw new PathAccessError(`File not found: "${resolvedPath}"`);
+    }
+    throw error;
+  });
+  if (!entry.isFile()) {
+    throw new PathAccessError(
+      `Cannot ${action} "${resolvedPath}": it is not a regular file. Directories and symbolic links are not supported.`
+    );
+  }
+  return entry;
 }
 
 /** Narrows a thrown value to a Node errno error with the given code. */

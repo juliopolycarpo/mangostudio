@@ -17,6 +17,19 @@ export function getRequiredString(value: unknown, name: string): string {
   return text;
 }
 
+/**
+ * Reads a required string argument verbatim. File content is the payload, not an
+ * identifier: trimming it would silently drop the trailing newline a text file
+ * is expected to end with, and rejecting `''` would make an empty file
+ * impossible to write.
+ *
+ * // Usage: const content = getRequiredTextArg(args.content, 'content');
+ */
+export function getRequiredTextArg(value: unknown, name: string): string {
+  if (typeof value !== 'string') throw new ToolArgumentError(`Missing required field "${name}".`);
+  return value;
+}
+
 export function getOptionalString(value: unknown): string | undefined {
   const text = typeof value === 'string' ? value.trim() : '';
   return text || undefined;

@@ -10,7 +10,16 @@ import {
  * Tool names whose consecutive calls collapse into a single grouped block.
  * Limited to repetitive filesystem reads where a flat list adds noise.
  */
-const GROUPABLE_TOOLS = new Set(['read_file', 'write_file', 'list_directory', 'glob', 'grep']);
+const GROUPABLE_TOOLS = new Set([
+  'read_file',
+  'write_file',
+  'create_file',
+  'delete_file',
+  'move_file',
+  'list_directory',
+  'glob',
+  'grep',
+]);
 
 /** A single tool call paired with its result and lifecycle, ready for rendering. */
 export interface ToolCallEntry {

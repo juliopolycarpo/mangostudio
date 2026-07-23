@@ -98,6 +98,34 @@ describe('ToolSettingsPage', () => {
     expect(screen.getByText('Interaction')).toBeInTheDocument();
   });
 
+  it('uses localized names and descriptions for file lifecycle tools', async () => {
+    fetchScenario.respondWithJson('GET', '/api/settings/tools', {
+      body: {
+        tools: ['create_file', 'delete_file', 'move_file'].map((name) => ({
+          name,
+          title: `Server title for ${name}`,
+          description: `Server description for ${name}`,
+          category: 'system',
+          enabled: true,
+          canDisable: true,
+          parameters: {},
+          parameterDescriptors: [],
+        })),
+      },
+    });
+
+    render(<ToolSettingsPage maxToolIterations={10} setMaxToolIterations={setMaxToolIterations} />);
+
+    expect(await screen.findByText('Create file')).toBeInTheDocument();
+    expect(screen.getByText('Delete file')).toBeInTheDocument();
+    expect(screen.getByText('Move file')).toBeInTheDocument();
+    expect(
+      screen.getByText('Allows the AI to create new text files without overwriting existing paths.')
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/Server title/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Server description/)).not.toBeInTheDocument();
+  });
+
   it('shows cannot-disable text for tools that cannot be disabled', async () => {
     fetchScenario.respondWithJson('GET', '/api/settings/tools', {
       body: TOOLS_RESPONSE,

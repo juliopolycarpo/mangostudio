@@ -5,15 +5,14 @@
 
 import { lstat } from 'node:fs/promises';
 import { RegularFileWriteError, writeRegularFileAtomic } from '../../../lib/safe-file';
-import { getRequiredString } from '../arg-parsing';
+import { getRequiredTextArg } from '../arg-parsing';
 import { assertFresh, FileNotReadError, recordFileRead, withPathLocks } from '../file-freshness';
 import { registerTool } from '../registry';
 import type { ToolContext } from '../types';
 import {
-  BINARY_SNIFF_BYTES,
-  containsNulByte,
   getRequiredPathArg,
   isErrnoException,
+  isProbablyBinaryFile,
   normalizePathList,
   PathAccessError,
   type PathValidationSettings,
@@ -131,9 +130,7 @@ async function describeOccupiedPath(resolvedPath: string): Promise<Error> {
  * sends it into a retry loop with no exit. Name the real blocker instead.
  */
 async function explainUnreadFile(resolvedPath: string, unreadError: Error): Promise<Error> {
-  const probe = Bun.file(resolvedPath).slice(0, BINARY_SNIFF_BYTES);
-  const bytes = await probe.bytes().catch(() => new Uint8Array());
-  if (!containsNulByte(bytes, BINARY_SNIFF_BYTES)) return unreadError;
+  if (!(await isProbablyBinaryFile(resolvedPath))) return unreadError;
   return new PathAccessError(
     `Cannot overwrite "${resolvedPath}": it is a binary file. read_file cannot read binary ` +
       'files, so the read-before-overwrite guard cannot be satisfied for this path.'
@@ -145,7 +142,7 @@ function execute(
   context: ToolContext
 ): Promise<WriteFileToolResult> {
   const path = getRequiredPathArg(args.path, 'path');
-  const content = getRequiredString(args.content, 'content');
+  const content = getRequiredTextArg(args.content, 'content');
   return executeWriteFile({ path, content }, context);
 }
 

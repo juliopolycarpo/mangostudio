@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { registerTools } from '../../../../src/services/tools/register-tools';
-import { clearRegistry, getAllTools } from '../../../../src/services/tools/registry';
+import { clearRegistry, getAllTools, getTool } from '../../../../src/services/tools/registry';
 import { expectedToolNames } from '../../../support/registration-expectations';
 
 function registeredToolNames(): string[] {
@@ -34,5 +34,25 @@ describe('registerTools', () => {
     registerTools();
 
     expect(registeredToolNames()).toEqual(expectedToolNames());
+  });
+
+  it('ships file lifecycle tools enabled with configurable path policies', () => {
+    registerTools();
+
+    for (const name of ['create_file', 'delete_file', 'move_file']) {
+      const settings = getTool(name)?.settings;
+      expect(settings).toMatchObject({
+        enabledByDefault: true,
+        canDisable: true,
+        defaultParameters: {
+          allowedPaths: [],
+          deniedPaths: [],
+        },
+      });
+      expect(settings?.parameterDescriptors.map((descriptor) => descriptor.name)).toEqual([
+        'allowedPaths',
+        'deniedPaths',
+      ]);
+    }
   });
 });

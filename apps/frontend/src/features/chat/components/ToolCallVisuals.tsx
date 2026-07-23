@@ -1,12 +1,15 @@
 import {
+  ArrowRightLeft,
   Clock,
   FileEdit,
+  FilePlus,
   FileSearch,
   FileText,
   FolderOpen,
   ImagePlus,
   Search,
   Terminal,
+  Trash2,
   Wrench,
 } from 'lucide-react';
 
@@ -25,6 +28,12 @@ export function ToolIcon({ toolName, className }: { toolName: string; className?
       return <FileText size={size} className={className} />;
     case 'write_file':
       return <FileEdit size={size} className={className} />;
+    case 'create_file':
+      return <FilePlus size={size} className={className} />;
+    case 'delete_file':
+      return <Trash2 size={size} className={className} />;
+    case 'move_file':
+      return <ArrowRightLeft size={size} className={className} />;
     case 'generate_image':
       return <ImagePlus size={size} className={className} />;
     case 'get_current_datetime':
@@ -67,7 +76,14 @@ export function getToolHint(toolName: string, args: Record<string, unknown>): st
     case 'list_directory':
     case 'read_file':
     case 'write_file':
+    case 'create_file':
+    case 'delete_file':
       return abbreviatePath(args.path);
+    case 'move_file': {
+      const from = abbreviatePath(args.from);
+      const to = abbreviatePath(args.to);
+      return from && to ? `${from} → ${to}` : null;
+    }
     case 'bash':
     case 'zsh':
     case 'powershell':

@@ -1,12 +1,15 @@
 import { isShellAvailable } from './builtin/_shell-exec';
 import { register as registerAskUserQuestionTool } from './builtin/ask-user-question';
 import { register as registerBashTool } from './builtin/bash';
+import { register as registerCreateFileTool } from './builtin/create-file';
 import { register as registerDelegateToAgentTool } from './builtin/delegate-to-agent';
+import { register as registerDeleteFileTool } from './builtin/delete-file';
 import { register as registerGenerateImageTool } from './builtin/generate-image';
 import { register as registerGetCurrentDatetimeTool } from './builtin/get-current-datetime';
 import { register as registerGlobTool } from './builtin/glob';
 import { register as registerGrepTool } from './builtin/grep';
 import { register as registerListDirectoryTool } from './builtin/list-directory';
+import { register as registerMoveFileTool } from './builtin/move-file';
 import { register as registerPowerShellTool } from './builtin/powershell';
 import { register as registerReadFileTool } from './builtin/read-file';
 import { register as registerSkillTool } from './builtin/skill';
@@ -20,6 +23,9 @@ export function registerTools(): void {
   registerGenerateImageTool();
   registerReadFileTool();
   registerWriteFileTool();
+  registerCreateFileTool();
+  registerDeleteFileTool();
+  registerMoveFileTool();
   registerListDirectoryTool();
   registerGlobTool();
   registerGrepTool();

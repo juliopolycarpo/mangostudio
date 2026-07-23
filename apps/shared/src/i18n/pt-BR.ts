@@ -749,6 +749,9 @@ export const messages = {
       toolNames: {
         readFile: 'Ler arquivo',
         writeFile: 'Escrever arquivo',
+        createFile: 'Criar arquivo',
+        deleteFile: 'Excluir arquivo',
+        moveFile: 'Mover arquivo',
         listDirectory: 'Listar diretório',
         glob: 'Glob',
         grep: 'Grep',
@@ -756,6 +759,11 @@ export const messages = {
       toolDescriptions: {
         readFile: 'Permite que a IA leia arquivos de texto do disco.',
         writeFile: 'Permite que a IA escreva conteúdo de texto em arquivos no disco.',
+        createFile:
+          'Permite que a IA crie novos arquivos de texto sem sobrescrever caminhos existentes.',
+        deleteFile: 'Permite que a IA exclua arquivos regulares lidos neste chat.',
+        moveFile:
+          'Permite que a IA mova ou renomeie arquivos regulares sem sobrescrever caminhos existentes.',
         listDirectory: 'Permite que a IA liste arquivos e diretórios no disco.',
         glob: 'Permite que a IA encontre arquivos e diretórios por padrão glob.',
         grep: 'Permite que a IA pesquise o conteúdo de arquivos com expressões regulares.',
@@ -1407,6 +1415,9 @@ export const messages = {
       list_directory: 'Listar',
       read_file: 'Leu',
       write_file: 'Escreveu',
+      create_file: 'Criar',
+      delete_file: 'Excluir',
+      move_file: 'Mover',
       glob: 'Glob',
       grep: 'Grep',
       generate_image: 'Gerar Imagem',

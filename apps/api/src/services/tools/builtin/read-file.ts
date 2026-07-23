@@ -21,7 +21,7 @@ import {
 const READ_FILE_TOOL_NAME = 'read_file';
 
 /** Hard ceiling on bytes loaded by read_file; oversized files fail instead of allocating. */
-const READ_FILE_MAX_BYTES = 10 * 1024 * 1024;
+export const READ_FILE_MAX_BYTES = 10 * 1024 * 1024;
 
 const READ_FILE_DEFAULT_START_LINE = 1;
 const READ_FILE_DEFAULT_MAX_LINES = 2000;
