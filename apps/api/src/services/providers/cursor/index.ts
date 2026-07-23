@@ -100,6 +100,7 @@ function buildAllowedToolNameSet(tools: ToolDefinition[] | undefined): ReadonlyS
 interface CursorToolExecutionContext {
   userId: string;
   chatId: string;
+  assistantMessageId?: string;
   workdir?: string;
   workdirPolicy?: WorkdirPolicy;
   toolSettings?: GenerationConfig['toolSettings'];
@@ -108,6 +109,7 @@ interface CursorToolExecutionContext {
 function toolExecutionFromRequest(req: {
   userId: string;
   chatId?: string;
+  assistantMessageId?: string;
   workdir?: string;
   workdirPolicy?: WorkdirPolicy;
   generationConfig?: GenerationConfig;
@@ -115,6 +117,7 @@ function toolExecutionFromRequest(req: {
   return {
     userId: req.userId,
     chatId: req.chatId ?? '',
+    assistantMessageId: req.assistantMessageId,
     workdir: req.workdir,
     workdirPolicy: req.workdirPolicy,
     toolSettings: req.generationConfig?.toolSettings,
@@ -138,6 +141,9 @@ export async function executeCursorCustomTool(
       {
         userId: ctx.userId,
         chatId: ctx.chatId,
+        // Sidecar-routed mutations belong to the turn that spawned them, so the
+        // per-message checkpoint covers them like any builtin tool call.
+        assistantMessageId: ctx.assistantMessageId,
         workdir: ctx.workdir,
         workdirPolicy: ctx.workdirPolicy,
         parameters: {},

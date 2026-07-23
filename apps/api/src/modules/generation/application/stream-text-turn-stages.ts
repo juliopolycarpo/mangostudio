@@ -588,6 +588,7 @@ async function* executePendingToolCalls(
     db,
     userId,
     chatId,
+    assistantMessageId: session.aiMsgId,
     parentAgentProfile: agentRuntime.profile,
     parentModelName: modelId,
     interactionMode,
@@ -726,6 +727,7 @@ export async function* runAgentToolLoop(
     const req: AgentTurnRequest = {
       userId,
       chatId,
+      assistantMessageId: session.aiMsgId,
       workdir: session.workdir,
       workdirPolicy: session.workdirPolicy,
       modelName: modelId,
@@ -808,6 +810,7 @@ export async function* runLegacyTextStream(
   for await (const chunk of generateTextStream({
     userId,
     chatId,
+    assistantMessageId: session.aiMsgId,
     workdir: session.workdir,
     workdirPolicy: session.workdirPolicy,
     history,

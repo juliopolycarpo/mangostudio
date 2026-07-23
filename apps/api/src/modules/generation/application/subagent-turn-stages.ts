@@ -195,6 +195,7 @@ export async function runSubagentStreamLoop(
     for await (const event of generateAgentTurnStream({
       userId: input.userId,
       chatId: input.chatId,
+      assistantMessageId: input.assistantMessageId,
       workdir: input.workdir,
       workdirPolicy: input.workdirPolicy,
       modelName: resolvedModel.modelId,
@@ -256,6 +257,7 @@ export async function runSubagentStreamLoop(
       db: input.db,
       userId: input.userId,
       chatId: input.chatId,
+      assistantMessageId: input.assistantMessageId,
       allowedToolNames: session.allowedToolNames,
       settingsByToolName: runtime.toolSettingsByName,
       tools: session.tools,
@@ -587,6 +589,7 @@ async function executeSubagentTools(input: {
   readonly db: Kysely<Database>;
   readonly userId: string;
   readonly chatId: string;
+  readonly assistantMessageId?: string;
   readonly workdir?: string;
   readonly workdirPolicy?: WorkdirPolicy;
   readonly allowedToolNames: ReadonlySet<string>;
@@ -649,6 +652,10 @@ async function executeSubagentTools(input: {
             {
               userId: input.userId,
               chatId: input.chatId,
+              // A subagent's file mutations belong to the delegating turn, so they
+              // land in the same per-message checkpoint the Revert affordance uses.
+              assistantMessageId: input.assistantMessageId,
+              db: input.db,
               workdir: input.workdir,
               workdirPolicy: input.workdirPolicy,
               parameters: {},
