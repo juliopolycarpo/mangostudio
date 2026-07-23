@@ -86,7 +86,7 @@ export async function writeFileAtomic(
       await rename(tempPath, resolvedPath);
     }
   } catch (error) {
-    await unlinkIfPresent(tempPath);
+    await discardTempFile(tempPath);
     throw error;
   }
 
@@ -102,15 +102,16 @@ async function getExistingMode(resolvedPath: string): Promise<number | undefined
   }
 }
 
-async function unlinkIfPresent(path: string): Promise<void> {
-  try {
-    await unlink(path);
-  } catch (error) {
-    if (!isErrnoException(error, 'ENOENT')) throw error;
-  }
+/**
+ * Best-effort temp-file cleanup that runs on the failure path, so a cleanup
+ * error can never replace the write error the caller needs to see.
+ */
+async function discardTempFile(path: string): Promise<void> {
+  await unlink(path).catch(() => undefined);
 }
 
-function isErrnoException(error: unknown, code: string): error is NodeJS.ErrnoException {
+/** Narrows a thrown value to a Node errno error with the given code. */
+export function isErrnoException(error: unknown, code: string): error is NodeJS.ErrnoException {
   return error instanceof Error && 'code' in error && error.code === code;
 }
 

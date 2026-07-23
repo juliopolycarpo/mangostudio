@@ -10,6 +10,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { PathAccessError } from '../../../../src/services/tools/builtin/_fs-utils';
 import { executeReadFile } from '../../../../src/services/tools/builtin/read-file';
 import {
   executeWriteFile,
@@ -225,6 +226,19 @@ describe('executeWriteFile', () => {
 
     expect(await readBack(filePath)).toBe('complete content');
     expect(readdirSync(tempDir)).toEqual(['atomic.txt']);
+  });
+
+  it('reports a directory destination instead of demanding an impossible read', async () => {
+    const dirPath = join(tempDir, 'a-directory');
+    mkdirSync(dirPath);
+
+    const error = await executeWriteFile(
+      { path: dirPath, content: 'content' },
+      makeContext()
+    ).catch((thrown: unknown) => thrown);
+
+    expect(error).toBeInstanceOf(PathAccessError);
+    expect((error as Error).message).toContain('not a regular file');
   });
 
   it('creates parent directories when they do not exist', async () => {

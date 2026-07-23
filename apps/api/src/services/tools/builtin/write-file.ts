@@ -3,13 +3,16 @@
  * Writes text content to a file on disk, creating parent directories as needed.
  */
 
+import { lstat } from 'node:fs/promises';
 import { getRequiredString } from '../arg-parsing';
 import { assertFresh, FileNotReadError, recordFileRead, withPathLocks } from '../file-freshness';
 import { registerTool } from '../registry';
 import type { ToolContext } from '../types';
 import {
   getRequiredPathArg,
+  isErrnoException,
   normalizePathList,
+  PathAccessError,
   type PathValidationSettings,
   resolveAndValidatePath,
   writeFileAtomic,
@@ -82,9 +85,8 @@ export async function executeWriteFile(
     try {
       bytesWritten = await writeFileAtomic(resolvedPath, args.content, { exclusive: created });
     } catch (error) {
-      // A path that appeared after the existence check is now an unread file,
-      // so surface the same remediation as any other guarded overwrite.
-      if (created && isErrnoException(error, 'EEXIST')) throw new FileNotReadError(resolvedPath);
+      if (created && isErrnoException(error, 'EEXIST'))
+        throw await describeOccupiedPath(resolvedPath);
       throw error;
     }
 
@@ -95,8 +97,18 @@ export async function executeWriteFile(
   });
 }
 
-function isErrnoException(error: unknown, code: string): error is NodeJS.ErrnoException {
-  return error instanceof Error && 'code' in error && error.code === code;
+/**
+ * Explains a destination that appeared after the existence check. A regular
+ * file is an unread file, so it gets the same remediation as any guarded
+ * overwrite; a directory or dangling symlink cannot be read at all, so saying
+ * "read it first" would send the model into an unrecoverable retry loop.
+ */
+async function describeOccupiedPath(resolvedPath: string): Promise<Error> {
+  const entry = await lstat(resolvedPath).catch(() => null);
+  if (entry?.isFile()) return new FileNotReadError(resolvedPath);
+  return new PathAccessError(
+    `Cannot write "${resolvedPath}": the path exists and is not a regular file.`
+  );
 }
 
 function execute(

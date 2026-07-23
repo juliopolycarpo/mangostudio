@@ -72,6 +72,24 @@ describe('ToolCallBlock', () => {
     expect(screen.getByText('Failed to generate')).toBeInTheDocument();
   });
 
+  it('opens automatically when a running call later fails', () => {
+    const { rerender } = render(
+      <ToolCallBlock name="write_file" args={{ path: '/a' }} status="running" />
+    );
+    expect(screen.queryByText('args')).not.toBeInTheDocument();
+
+    rerender(
+      <ToolCallBlock
+        name="write_file"
+        args={{ path: '/a' }}
+        status="failed"
+        result='{"error":"Re-read the file and retry."}'
+      />
+    );
+
+    expect(screen.getByText('Re-read the file and retry.')).toBeInTheDocument();
+  });
+
   it('renders a cancelled state with its status label', () => {
     render(<ToolCallBlock name="bash" args={{ command: 'sleep 60' }} status="cancelled" />);
     expect(screen.getByRole('button')).toHaveTextContent('Cancelled');

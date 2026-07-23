@@ -6,8 +6,8 @@ const MAX_ENTRIES_GLOBAL = 10_000;
 interface FileFreshnessEntry {
   readonly sha256: string;
   readonly size: number;
+  /** `NaN` when the metadata could not be captured, forcing the hash path. */
   readonly mtimeMs: number;
-  readonly recordedAt: number;
 }
 
 interface FileFreshnessLocation {
@@ -45,16 +45,14 @@ export async function recordFileRead(
   resolvedPath: string,
   content: Uint8Array | string
 ): Promise<string> {
-  const metadata = await stat(resolvedPath);
   const sha256 = hashContent(content);
   storeEntry(chatId, resolvedPath, {
     sha256,
     // Size belongs to the bytes the caller actually observed. If the path
-    // changed between its read and this stat, the next assertion must hash it
-    // instead of accepting later metadata as a fast-path match.
+    // changed between its read and the stat below, the next assertion must hash
+    // it instead of accepting later metadata as a fast-path match.
     size: contentSize(content),
-    mtimeMs: metadata.mtimeMs,
-    recordedAt: Date.now(),
+    mtimeMs: await currentMtimeMs(resolvedPath),
   });
   return sha256;
 }
@@ -81,12 +79,12 @@ export async function assertFresh(chatId: string, resolvedPath: string): Promise
   if (sha256 !== entry.sha256) throw new StaleFileError(resolvedPath);
 
   // Metadata-only changes do not make the content stale. Refresh the cached
-  // metadata so later checks can use the fast path again.
+  // metadata so later checks can use the fast path again, keeping the size tied
+  // to the bytes that were just hashed rather than to the earlier stat.
   storeEntry(chatId, resolvedPath, {
     sha256,
-    size: metadata.size,
+    size: currentContent.byteLength,
     mtimeMs: metadata.mtimeMs,
-    recordedAt: Date.now(),
   });
 }
 
@@ -141,6 +139,20 @@ function hashContent(content: Uint8Array | string): string {
 
 function contentSize(content: Uint8Array | string): number {
   return typeof content === 'string' ? Buffer.byteLength(content) : content.byteLength;
+}
+
+/**
+ * Reads the current mtime, or `NaN` when the path can no longer be stat-ed.
+ * A read that already succeeded must not be discarded because its follow-up
+ * stat lost a race; `NaN` never compares equal, so the entry simply falls back
+ * to hashing on the next assertion.
+ */
+async function currentMtimeMs(resolvedPath: string): Promise<number> {
+  try {
+    return (await stat(resolvedPath)).mtimeMs;
+  } catch {
+    return Number.NaN;
+  }
 }
 
 async function getCurrentMetadata(
