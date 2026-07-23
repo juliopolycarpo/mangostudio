@@ -63,13 +63,31 @@ describe('ToolCallBlock', () => {
         result="Failed to generate"
       />
     );
-    const button = screen.getByRole('button');
+    const button = screen.getByRole('button', { name: /Generate Image.*Failed/i });
     expect(button).toHaveTextContent(/Generate Image/i);
+    expect(button).toHaveAttribute('aria-expanded', 'true');
 
-    // Open the details
-    fireEvent.click(button);
+    // Failed calls open automatically so remediation is immediately visible.
     expect(screen.getByText('error')).toBeInTheDocument();
     expect(screen.getByText('Failed to generate')).toBeInTheDocument();
+  });
+
+  it('opens automatically when a running call later fails', () => {
+    const { rerender } = render(
+      <ToolCallBlock name="write_file" args={{ path: '/a' }} status="running" />
+    );
+    expect(screen.queryByText('args')).not.toBeInTheDocument();
+
+    rerender(
+      <ToolCallBlock
+        name="write_file"
+        args={{ path: '/a' }}
+        status="failed"
+        result='{"error":"Re-read the file and retry."}'
+      />
+    );
+
+    expect(screen.getByText('Re-read the file and retry.')).toBeInTheDocument();
   });
 
   it('renders a cancelled state with its status label', () => {
@@ -87,7 +105,7 @@ describe('ToolCallBlock', () => {
         execution={snapshot({ status: 'timed_out', reasonCode: 'timeout', durationMs: 30_000 })}
       />
     );
-    const button = screen.getByRole('button');
+    const button = screen.getByRole('button', { name: /Bash.*Timed out/i });
     expect(button).toHaveTextContent('Timed out');
     expect(button).toHaveTextContent('30.0s');
     expect(button.className).toContain('text-error');

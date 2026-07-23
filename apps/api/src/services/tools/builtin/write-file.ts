@@ -3,14 +3,17 @@
  * Writes text content to a file on disk, creating parent directories as needed.
  */
 
-import { mkdir } from 'node:fs/promises';
-import { dirname } from 'node:path';
+import { lstat } from 'node:fs/promises';
+import { RegularFileWriteError, writeRegularFileAtomic } from '../../../lib/safe-file';
 import { getRequiredString } from '../arg-parsing';
+import { assertFresh, FileNotReadError, recordFileRead, withPathLocks } from '../file-freshness';
 import { registerTool } from '../registry';
 import type { ToolContext } from '../types';
 import {
   getRequiredPathArg,
+  isErrnoException,
   normalizePathList,
+  PathAccessError,
   type PathValidationSettings,
   resolveAndValidatePath,
 } from './_fs-utils';
@@ -26,6 +29,7 @@ export interface WriteFileToolResult {
   path: string;
   bytesWritten: number;
   created: boolean;
+  sha256: string;
 }
 
 export type WriteFileToolSettings = PathValidationSettings;
@@ -34,6 +38,7 @@ const definition = {
   name: WRITE_FILE_TOOL_NAME,
   description:
     'Writes text content to a file on disk. Creates parent directories if they do not exist. ' +
+    'Overwriting an existing file requires reading it with read_file first. ' +
     'Use this when the user asks to create, write, or save content to a file.',
   parameters: {
     type: 'object',
@@ -72,15 +77,41 @@ export async function executeWriteFile(
     workdirPolicy: context.workdirPolicy,
   });
 
-  const existingFile = Bun.file(resolvedPath);
-  const created = !(await existingFile.exists());
+  return await withPathLocks([resolvedPath], async () => {
+    const created = !(await Bun.file(resolvedPath).exists());
+    if (!created) await assertFresh(context.chatId, resolvedPath);
 
-  const dir = dirname(resolvedPath);
-  await mkdir(dir, { recursive: true });
+    let committed: { bytesWritten: number; mtimeMs: number };
+    try {
+      committed = await writeRegularFileAtomic(resolvedPath, args.content, { exclusive: created });
+    } catch (error) {
+      if (created && isErrnoException(error, 'EEXIST'))
+        throw await describeOccupiedPath(resolvedPath);
+      // The destination policy is the tool's own remediation advice, not a
+      // filesystem failure, so it reaches the model as a path error.
+      if (error instanceof RegularFileWriteError) throw new PathAccessError(error.message);
+      throw error;
+    }
 
-  const bytesWritten = await Bun.write(resolvedPath, args.content);
+    // Recording the committed bytes makes a later sequential write fresh; the
+    // surrounding path lock gives parallel calls the same deterministic order.
+    const sha256 = recordFileRead(context.chatId, resolvedPath, args.content, committed.mtimeMs);
+    return { path: args.path, bytesWritten: committed.bytesWritten, created, sha256 };
+  });
+}
 
-  return { path: args.path, bytesWritten, created };
+/**
+ * Explains a destination that appeared after the existence check. A regular
+ * file is an unread file, so it gets the same remediation as any guarded
+ * overwrite; a directory or dangling symlink cannot be read at all, so saying
+ * "read it first" would send the model into an unrecoverable retry loop.
+ */
+async function describeOccupiedPath(resolvedPath: string): Promise<Error> {
+  const entry = await lstat(resolvedPath).catch(() => null);
+  if (entry?.isFile()) return new FileNotReadError(resolvedPath);
+  return new PathAccessError(
+    `Cannot write "${resolvedPath}": the path exists and is not a regular file.`
+  );
 }
 
 function execute(
@@ -98,7 +129,8 @@ export function register(): void {
     definition,
     settings: {
       title: 'Write file',
-      description: 'Allows the AI to write text content to files on disk.',
+      description:
+        'Allows the AI to create text files and overwrite files it has read in this chat.',
       category: 'system',
       enabledByDefault: true,
       canDisable: true,

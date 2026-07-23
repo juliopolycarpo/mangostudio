@@ -2,6 +2,7 @@
  * Shared utilities for filesystem tools: path expansion, allowlist/denylist validation.
  */
 
+import { open } from 'node:fs/promises';
 import { isAbsolute, resolve } from 'node:path';
 import {
   assertInsideWorkdir,
@@ -42,6 +43,52 @@ export class PathAccessError extends Error {
     super(message);
     this.name = 'PathAccessError';
   }
+}
+
+export interface ObservedFileRead {
+  readonly bytes: Uint8Array;
+  /**
+   * mtime of the descriptor the bytes came from, or `NaN` when the file changed
+   * while it was being read and no snapshot describes those bytes.
+   */
+  readonly mtimeMs: number;
+}
+
+/**
+ * Reads a file through a single descriptor and reports the mtime that belongs to
+ * the bytes returned. Stat-ing the path after the read could pick up a
+ * concurrent writer's metadata and pair it with the caller's stale bytes, so the
+ * descriptor is stat-ed on both sides of the read and disagreement yields `NaN`.
+ * Symlinks are followed: resolving them is what a read tool is for.
+ *
+ * // Usage: const { bytes, mtimeMs } = await readFileWithObservedMtime(path);
+ */
+export async function readFileWithObservedMtime(resolvedPath: string): Promise<ObservedFileRead> {
+  const handle = await open(resolvedPath, 'r').catch((error: unknown) => {
+    if (isErrnoException(error, 'ENOENT')) {
+      throw new PathAccessError(`File not found: "${resolvedPath}"`);
+    }
+    throw error;
+  });
+
+  try {
+    const before = await handle.stat();
+    if (!before.isFile()) {
+      throw new PathAccessError(`Cannot read "${resolvedPath}": it is not a regular file.`);
+    }
+
+    const bytes = await handle.readFile();
+    const after = await handle.stat();
+    const stable = after.mtimeMs === before.mtimeMs && after.size === before.size;
+    return { bytes, mtimeMs: stable ? after.mtimeMs : Number.NaN };
+  } finally {
+    await handle.close();
+  }
+}
+
+/** Narrows a thrown value to a Node errno error with the given code. */
+export function isErrnoException(error: unknown, code: string): error is NodeJS.ErrnoException {
+  return error instanceof Error && 'code' in error && error.code === code;
 }
 
 /**

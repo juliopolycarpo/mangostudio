@@ -3,13 +3,14 @@
  * Reads the contents of a text file from disk.
  */
 
+import { recordFileRead } from '../file-freshness';
 import { registerTool } from '../registry';
 import type { ToolContext } from '../types';
 import {
   getRequiredPathArg,
   normalizePathList,
-  PathAccessError,
   type PathValidationSettings,
+  readFileWithObservedMtime,
   resolveAndValidatePath,
 } from './_fs-utils';
 
@@ -23,6 +24,7 @@ export interface ReadFileToolResult {
   content: string;
   path: string;
   size: number;
+  sha256: string;
 }
 
 export type ReadFileToolSettings = PathValidationSettings;
@@ -64,16 +66,11 @@ export async function executeReadFile(
     workdirPolicy: context.workdirPolicy,
   });
 
-  const file = Bun.file(resolvedPath);
-  const exists = await file.exists();
-  if (!exists) {
-    throw new PathAccessError(`File not found: "${args.path}"`);
-  }
+  const { bytes, mtimeMs } = await readFileWithObservedMtime(resolvedPath);
+  const content = new TextDecoder().decode(bytes);
+  const sha256 = recordFileRead(context.chatId, resolvedPath, bytes, mtimeMs);
 
-  const content = await file.text();
-  const size = file.size;
-
-  return { content, path: args.path, size };
+  return { content, path: args.path, size: bytes.byteLength, sha256 };
 }
 
 // biome-ignore lint/suspicious/useAwait: Migrated from ESLint
