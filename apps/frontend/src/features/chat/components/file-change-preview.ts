@@ -36,6 +36,9 @@ export const DIFF_PREVIEW_MAX_LINES = 400;
  */
 const LINE_DIFF_CELL_BUDGET = 250_000;
 
+/** Unchanged lines kept on each side of a change, as in a unified diff. */
+const DIFF_CONTEXT_LINES = 3;
+
 type DiffPreviewLineKind = 'add' | 'del' | 'context' | 'marker';
 
 export interface DiffPreviewLine {
@@ -349,13 +352,73 @@ function lineDiff(oldText: string, newText: string): DiffPreviewLine[] {
         ]
       : lcsDiff(oldMid, newMid);
 
-  return [
+  return collapseContext([
     ...oldLines.slice(0, prefix).map<DiffPreviewLine>((text) => ({ kind: 'context', text })),
     ...middle,
     ...oldLines
       .slice(oldLines.length - suffix)
       .map<DiffPreviewLine>((text) => ({ kind: 'context', text })),
-  ];
+  ]);
+}
+
+/**
+ * Drops unchanged runs further than `DIFF_CONTEXT_LINES` from a change, marking
+ * each gap with a unified-diff hunk header. A whole-file diff whose change sits
+ * near the end would otherwise spend the entire render budget on identical
+ * leading lines and show no change at all.
+ */
+function collapseContext(lines: DiffPreviewLine[]): DiffPreviewLine[] {
+  if (!lines.some((line) => line.kind !== 'context')) return [];
+
+  const keep = new Array<boolean>(lines.length).fill(false);
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].kind === 'context') continue;
+    const from = Math.max(0, i - DIFF_CONTEXT_LINES);
+    const to = Math.min(lines.length - 1, i + DIFF_CONTEXT_LINES);
+    for (let j = from; j <= to; j++) keep[j] = true;
+  }
+
+  // 1-indexed positions on each side, advanced as the walk consumes lines.
+  let oldLine = 1;
+  let newLine = 1;
+  const collapsed: DiffPreviewLine[] = [];
+  let index = 0;
+  while (index < lines.length) {
+    if (!keep[index]) {
+      // Only context lines are ever dropped, so both sides advance together.
+      oldLine += 1;
+      newLine += 1;
+      index += 1;
+      continue;
+    }
+
+    const runStart = index;
+    const oldStart = oldLine;
+    const newStart = newLine;
+    let oldCount = 0;
+    let newCount = 0;
+    while (index < lines.length && keep[index]) {
+      if (lines[index].kind !== 'add') {
+        oldLine += 1;
+        oldCount += 1;
+      }
+      if (lines[index].kind !== 'del') {
+        newLine += 1;
+        newCount += 1;
+      }
+      index += 1;
+    }
+
+    // A run starting at the top had nothing elided before it, so it needs no header.
+    if (runStart > 0) {
+      collapsed.push({
+        kind: 'marker',
+        text: `@@ -${oldStart},${oldCount} +${newStart},${newCount} @@`,
+      });
+    }
+    collapsed.push(...lines.slice(runStart, index));
+  }
+  return collapsed;
 }
 
 function lcsDiff(oldLines: string[], newLines: string[]): DiffPreviewLine[] {

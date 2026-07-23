@@ -77,6 +77,63 @@ describe('buildFileChangePreview', () => {
     expect(preview?.repeatCount).toBeUndefined();
   });
 
+  it('collapses unchanged runs far from a change into a hunk marker', () => {
+    const before = Array.from({ length: 40 }, (_, i) => `line ${i + 1}`);
+    const after = [...before];
+    after[29] = 'changed';
+
+    const preview = buildFileChangePreview(
+      'write_file',
+      { path: '/big.txt', content: `${after.join('\n')}\n` },
+      JSON.stringify({ created: false, before: `${before.join('\n')}\n` })
+    );
+
+    const lines = preview?.files[0]?.lines ?? [];
+    // 3 lines of context on each side, the change pair, and one gap marker.
+    expect(lines).toEqual([
+      { kind: 'marker', text: '@@ -27,7 +27,7 @@' },
+      { kind: 'context', text: 'line 27' },
+      { kind: 'context', text: 'line 28' },
+      { kind: 'context', text: 'line 29' },
+      { kind: 'del', text: 'line 30' },
+      { kind: 'add', text: 'changed' },
+      { kind: 'context', text: 'line 31' },
+      { kind: 'context', text: 'line 32' },
+      { kind: 'context', text: 'line 33' },
+    ]);
+    expect(preview?.files[0]?.added).toBe(1);
+    expect(preview?.files[0]?.removed).toBe(1);
+  });
+
+  it('keeps a leading change headerless and marks only later gaps', () => {
+    const before = Array.from({ length: 40 }, (_, i) => `line ${i + 1}`);
+    const after = [...before];
+    after[0] = 'first changed';
+    after[39] = 'last changed';
+
+    const preview = buildFileChangePreview(
+      'write_file',
+      { path: '/big.txt', content: `${after.join('\n')}\n` },
+      JSON.stringify({ created: false, before: `${before.join('\n')}\n` })
+    );
+
+    const lines = preview?.files[0]?.lines ?? [];
+    expect(lines[0]).toEqual({ kind: 'del', text: 'line 1' });
+    expect(lines.filter((line) => line.kind === 'marker')).toEqual([
+      { kind: 'marker', text: '@@ -37,4 +37,4 @@' },
+    ]);
+    expect(lines.map((line) => line.text)).not.toContain('line 20');
+  });
+
+  it('renders an unchanged rewrite as an empty diff body', () => {
+    const preview = buildFileChangePreview(
+      'write_file',
+      { path: '/same.txt', content: 'a\nb\n' },
+      JSON.stringify({ created: false, before: 'a\nb\n' })
+    );
+    expect(preview?.files[0]).toMatchObject({ lines: [], added: 0, removed: 0 });
+  });
+
   it('reports the replaceAll repeat count from the edit_file result', () => {
     const preview = buildFileChangePreview(
       'edit_file',

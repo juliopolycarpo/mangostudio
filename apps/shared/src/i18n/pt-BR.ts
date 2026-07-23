@@ -271,6 +271,9 @@ export const messages = {
       confirmTitle: 'Reverter as alterações em arquivos desta mensagem?',
       confirmBody:
         'Isso restaura ou remove arquivos alterados neste turno do assistente. Edições suas depois disso podem impedir a reversão.',
+      confirmAction: 'Reverter arquivos',
+      cancel: 'Manter arquivos',
+      reverted: '{count} arquivo(s) revertido(s).',
       conflict:
         'Não foi possível reverter: um ou mais arquivos mudaram no disco desde que esta mensagem foi concluída.',
       failed: 'Não foi possível reverter as alterações em arquivos.',
