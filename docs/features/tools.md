@@ -99,13 +99,22 @@ Returns the current date and time in a requested timezone and locale.
 
 ### `read_file`
 
-Reads the contents of a text file from disk.
+Reads the contents of a text file from disk with line-numbered output.
 
 - **Tool name:** `read_file`
 - **Category:** `system`
-- **Parameters:** `path` (required, absolute, `~`-prefixed, or relative to the chat working directory)
+- **Parameters:**
+  - `path` (required, absolute, `~`-prefixed, or relative to the chat working directory)
+  - `startLine` (optional, 1-based; default `1`)
+  - `maxLines` (optional; default `2000`, max `5000`)
 - **Settings:** `allowedPaths`, `deniedPaths` (path lists; enforced by `resolveAndValidatePath`)
-- **Execution:** Reads the file with `Bun.file().text()` and returns `{ content, path, size }`.
+- **Execution:** Reads through a single file descriptor (with a 10 MiB size ceiling), rejects
+  NUL-sniffed binary files, and returns line-numbered (`cat -n` style) content for the
+  requested window. Whole-file `sha256` is always recorded for the freshness ledger, even
+  on a partial read. Result shape:
+  `{ content, path, size, sha256, totalLines, startLine, endLine, truncated }`.
+  Per-line and window byte caps may set `truncated` and append a notice to use
+  `startLine`/`maxLines` for more.
 
 ### `list_directory`
 
