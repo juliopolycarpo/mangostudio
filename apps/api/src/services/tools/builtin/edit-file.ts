@@ -5,7 +5,7 @@
 
 import { RegularFileWriteError, writeRegularFileAtomic } from '../../../lib/safe-file';
 import { getOptionalBoolean, getRequiredTextArg, ToolArgumentError } from '../arg-parsing';
-import { assertFresh, FileNotReadError, recordFileEdit, withPathLocks } from '../file-freshness';
+import { FileNotReadError, readFreshFile, recordFileEdit, withPathLocks } from '../file-freshness';
 import { registerTool } from '../registry';
 import type { ToolContext } from '../types';
 import {
@@ -15,7 +15,6 @@ import {
   PathAccessError,
   type PathValidationSettings,
   pathPolicyParameterDescriptors,
-  readFileWithObservedMtime,
   resolveAndValidatePath,
 } from './_fs-utils';
 import { looksBinary } from './read-file';
@@ -91,8 +90,9 @@ export async function executeEditFile(
   });
 
   return await withPathLocks([resolvedPath], async () => {
+    let observed: Awaited<ReturnType<typeof readFreshFile>>;
     try {
-      await assertFresh(context.chatId, resolvedPath);
+      observed = await readFreshFile(context.chatId, resolvedPath);
     } catch (error) {
       if (error instanceof FileNotReadError) {
         throw await explainUnreadableMutationTarget(resolvedPath, 'edit', error);
@@ -100,7 +100,7 @@ export async function executeEditFile(
       throw error;
     }
 
-    const { bytes } = await readFileWithObservedMtime(resolvedPath);
+    const { bytes } = observed;
     const source = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
     const oldBytes = Buffer.from(args.oldString);
     const newBytes = Buffer.from(args.newString);

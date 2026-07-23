@@ -4,11 +4,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   assertFresh,
+  assertFreshContent,
   assertLineNumbersCurrent,
   clearFileFreshness,
   FileNotReadError,
   forgetFile,
   PartialReadError,
+  readFreshFile,
   recordFileEdit,
   recordFileRead,
   rekeyFile,
@@ -59,6 +61,24 @@ describe('file freshness ledger', () => {
     await Bun.write(filePath, 'after-content');
 
     await expect(assertFresh('chat-1', filePath)).rejects.toBeInstanceOf(StaleFileError);
+  });
+
+  it('verifies the exact bytes supplied by a read-modify-write caller', async () => {
+    const filePath = join(tempDir, 'file.txt');
+    await Bun.write(filePath, 'before');
+    recordFileRead('chat-1', filePath, 'before', mtimeOf(filePath));
+
+    expect(() => assertFreshContent('chat-1', filePath, 'before')).not.toThrow();
+    expect(() => assertFreshContent('chat-1', filePath, 'after!')).toThrow(StaleFileError);
+  });
+
+  it('hashes the snapshot returned to a read-modify-write caller', async () => {
+    const filePath = join(tempDir, 'file.txt');
+    await Bun.write(filePath, 'before');
+    recordFileRead('chat-1', filePath, 'before', mtimeOf(filePath));
+    await Bun.write(filePath, 'after!');
+
+    await expect(readFreshFile('chat-1', filePath)).rejects.toBeInstanceOf(StaleFileError);
   });
 
   it('rejects a write when the recorded read only observed part of the file', async () => {
