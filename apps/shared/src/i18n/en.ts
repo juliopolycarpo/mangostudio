@@ -263,6 +263,15 @@ export const messages: Messages = {
     codeCopied: 'Copied!',
     copyMessage: 'Copy message',
     messageCopied: 'Message copied!',
+    fileCheckpoints: {
+      revert: 'Revert file changes',
+      reverting: 'Reverting…',
+      confirmTitle: 'Revert this message’s file changes?',
+      confirmBody:
+        'This restores or removes files touched during this assistant turn. Changes you made afterward may block the revert.',
+      conflict: 'Could not revert: one or more files changed on disk since this message completed.',
+      failed: 'Could not revert file changes.',
+    },
     scrollToBottom: 'Scroll to bottom',
     emptyGreeting: 'Hello, {name}!',
     emptySubtitle: 'How can I help you today?',

@@ -45,7 +45,8 @@
     "./questions": "./src/questions/index.ts",
     "./workspaces": "./src/workspaces/index.ts",
     "./git": "./src/git/index.ts",
-    "./github": "./src/github/index.ts"
+    "./github": "./src/github/index.ts",
+    "./file-checkpoints": "./src/file-checkpoints/index.ts"
   },
   "devDependencies": {
     "@types/bun": "^1.3.14",
