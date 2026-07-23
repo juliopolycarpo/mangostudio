@@ -12,6 +12,7 @@ import {
   FileNotReadError,
   forgetFile,
   readFreshFile,
+  recordFileEdit,
   recordFileRead,
   rekeyFile,
   StaleFileError,
@@ -76,6 +77,8 @@ interface PlannedUpdate {
   readonly source: Uint8Array;
   readonly content: string;
   readonly hasContentChanges: boolean;
+  /** Highest read_file line number the update leaves in place (see recordFileEdit). */
+  readonly lineNumbersValidThroughLine: number;
 }
 
 type PlannedOperation = PlannedAdd | PlannedDelete | PlannedUpdate;
@@ -201,7 +204,11 @@ async function planOperation(
       `Cannot patch "${operation.path}": the file is not valid UTF-8 text.`
     );
   }
-  const content = applyUpdateHunks(sourceText, operation.hunks, operation.path);
+  const { content, lineNumbersValidThroughLine } = applyUpdateHunks(
+    sourceText,
+    operation.hunks,
+    operation.path
+  );
   assertTextContent(content, operation.path);
   if (!operation.moveTo) {
     return {
@@ -211,6 +218,7 @@ async function planOperation(
       source: source.bytes,
       content,
       hasContentChanges: operation.hunks.length > 0,
+      lineNumbersValidThroughLine,
     };
   }
 
@@ -228,6 +236,7 @@ async function planOperation(
     source: source.bytes,
     content,
     hasContentChanges: operation.hunks.length > 0,
+    lineNumbersValidThroughLine,
   };
 }
 
@@ -365,12 +374,20 @@ async function commitOperations(
     const current = revalidated.get(operation);
     if (!current) throw new Error(`Missing revalidation for "${operation.inputPath}".`);
     if (operation.resolvedMoveTo) rekeyFile(context.chatId, operation.resolvedPath, target);
-    const sha256 = recordFileRead(
-      context.chatId,
-      target,
-      operation.hasContentChanges ? operation.content : current.bytes,
-      written?.mtimeMs ?? current.mtimeMs
-    );
+    const mtimeMs = written?.mtimeMs ?? current.mtimeMs;
+    // A content change renumbers every line after the first splice, so record the
+    // shift the way edit_file/replace_range do — otherwise a later line-addressed
+    // edit would trust the pre-patch numbering and hit the wrong lines. A pure
+    // move leaves the numbering intact, so it stays a whole-content observation.
+    const sha256 = operation.hasContentChanges
+      ? recordFileEdit(
+          context.chatId,
+          target,
+          operation.content,
+          mtimeMs,
+          operation.lineNumbersValidThroughLine
+        )
+      : recordFileRead(context.chatId, target, current.bytes, mtimeMs);
     return operation.moveTo
       ? { path: operation.inputPath, op: 'move', movedTo: operation.moveTo, sha256 }
       : { path: operation.inputPath, op: 'update', sha256 };
@@ -430,14 +447,38 @@ function applyUpdateHunks(
   source: string,
   hunks: readonly V4aUpdateHunk[],
   inputPath: string
-): string {
-  let lines = splitTextLines(source);
+): { content: string; lineNumbersValidThroughLine: number } {
+  const original = splitTextLines(source);
+  let lines = original;
   for (let index = 0; index < hunks.length; index++) {
     const hunk = hunks[index];
     const location = locateHunk(lines, hunk, inputPath, index + 1);
     lines = applyHunkAt(lines, hunk, location);
   }
-  return lines.map((line) => line.content + line.ending).join('');
+  return {
+    content: lines.map((line) => line.content + line.ending).join(''),
+    lineNumbersValidThroughLine: unchangedPrefixLength(original, lines),
+  };
+}
+
+/**
+ * Count of leading lines that kept both their content and their position, so the
+ * model's read_file line numbers still address them. The first differing line is
+ * where a splice may have renumbered everything after it, which a later
+ * line-addressed edit must not trust; a shorter prefix only forces an extra
+ * re-read, never a wrong edit.
+ */
+function unchangedPrefixLength(before: readonly TextLine[], after: readonly TextLine[]): number {
+  const limit = Math.min(before.length, after.length);
+  let index = 0;
+  while (
+    index < limit &&
+    before[index].content === after[index].content &&
+    before[index].ending === after[index].ending
+  ) {
+    index++;
+  }
+  return index;
 }
 
 interface TextLine {
@@ -558,7 +599,7 @@ function assertTextContent(content: string, inputPath: string): void {
 }
 
 function bytesEqual(left: Uint8Array, right: Uint8Array): boolean {
-  return Buffer.from(left).equals(Buffer.from(right));
+  return Buffer.compare(left, right) === 0;
 }
 
 function operationPaths(operation: PlannedOperation): string[] {

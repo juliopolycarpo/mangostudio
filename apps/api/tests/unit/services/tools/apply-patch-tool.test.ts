@@ -8,11 +8,13 @@ import {
   register as registerApplyPatchTool,
 } from '../../../../src/services/tools/builtin/apply-patch';
 import { executeReadFile } from '../../../../src/services/tools/builtin/read-file';
+import { executeReplaceRange } from '../../../../src/services/tools/builtin/replace-range';
 import {
   assertFresh,
   clearFileFreshness,
   FileNotReadError,
   StaleFileError,
+  StaleLineNumbersError,
 } from '../../../../src/services/tools/file-freshness';
 import { clearRegistry, executeTool } from '../../../../src/services/tools/registry';
 import type { ToolContext } from '../../../../src/services/tools/types';
@@ -95,6 +97,33 @@ describe('executeApplyPatch', () => {
     expect(result.files.map((file) => file.op)).toEqual(['add', 'update', 'delete']);
     expect(result.files[0]?.sha256).toHaveLength(64);
     expect(result.files[1]?.sha256).toHaveLength(64);
+  });
+
+  it('stales the line numbering an update shifted for later line-addressed edits', async () => {
+    const filePath = await seedAndRead('lines.txt', 'a\nb\nc\nd\n');
+
+    await executeApplyPatch(
+      {
+        patch: `*** Begin Patch
+*** Update File: lines.txt
+ a
+-b
+ c
+*** End Patch`,
+      },
+      makeContext()
+    );
+
+    expect(await Bun.file(filePath).text()).toBe('a\nc\nd\n');
+    // The patch deleted line 2, so the model's pre-patch numbers past line 1 no
+    // longer address the intended lines; replace_range must force a re-read.
+    await expect(
+      executeReplaceRange(
+        { path: filePath, startLine: 3, endLine: 3, content: 'D\n' },
+        makeContext()
+      )
+    ).rejects.toBeInstanceOf(StaleLineNumbersError);
+    expect(await Bun.file(filePath).text()).toBe('a\nc\nd\n');
   });
 
   it('creates missing parent directories and empty files', async () => {
