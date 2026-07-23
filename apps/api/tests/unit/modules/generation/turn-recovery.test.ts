@@ -147,6 +147,9 @@ describe('turn checkpoints', () => {
     expect(classifyToolRetrySafety('read_file')).toBe('safe_read');
     expect(classifyToolRetrySafety('grep')).toBe('safe_read');
     expect(classifyToolRetrySafety('write_file')).toBe('confirmation_required');
+    expect(classifyToolRetrySafety('create_file')).toBe('confirmation_required');
+    expect(classifyToolRetrySafety('delete_file')).toBe('confirmation_required');
+    expect(classifyToolRetrySafety('move_file')).toBe('confirmation_required');
     expect(classifyToolRetrySafety('run_shell')).toBe('confirmation_required');
     expect(classifyToolRetrySafety('delegate_to_agent')).toBe('unknown');
     expect(classifyToolRetrySafety('mcp__github__create_issue')).toBe('unknown');

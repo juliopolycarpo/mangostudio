@@ -742,6 +742,9 @@ export const messages: Messages = {
       toolNames: {
         readFile: 'Read file',
         writeFile: 'Write file',
+        createFile: 'Create file',
+        deleteFile: 'Delete file',
+        moveFile: 'Move file',
         listDirectory: 'List directory',
         glob: 'Glob',
         grep: 'Grep',
@@ -749,6 +752,10 @@ export const messages: Messages = {
       toolDescriptions: {
         readFile: 'Allows the AI to read text files from disk.',
         writeFile: 'Allows the AI to write text content to files on disk.',
+        createFile: 'Allows the AI to create new text files without overwriting existing paths.',
+        deleteFile: 'Allows the AI to delete regular files it has read in this chat.',
+        moveFile:
+          'Allows the AI to move or rename regular files without overwriting existing paths.',
         listDirectory: 'Allows the AI to list files and directories on disk.',
         glob: 'Allows the AI to find files and directories by glob pattern.',
         grep: 'Allows the AI to search file contents with regular expressions.',
@@ -1391,6 +1398,9 @@ export const messages: Messages = {
       list_directory: 'List',
       read_file: 'Read',
       write_file: 'Write',
+      create_file: 'Create',
+      delete_file: 'Delete',
+      move_file: 'Move',
       glob: 'Glob',
       grep: 'Grep',
       generate_image: 'Generate Image',

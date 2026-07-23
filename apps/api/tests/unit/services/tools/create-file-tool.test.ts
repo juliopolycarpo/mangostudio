@@ -1,0 +1,158 @@
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import {
+  executeCreateFile,
+  normalizeCreateFileToolSettings,
+} from '../../../../src/services/tools/builtin/create-file';
+import { executeWriteFile } from '../../../../src/services/tools/builtin/write-file';
+import { clearFileFreshness } from '../../../../src/services/tools/file-freshness';
+import type { ToolContext } from '../../../../src/services/tools/types';
+
+let tempDir: string;
+
+beforeEach(() => {
+  clearFileFreshness();
+  tempDir = mkdtempSync(join(tmpdir(), 'create-file-test-'));
+});
+
+afterEach(() => {
+  clearFileFreshness();
+  rmSync(tempDir, { recursive: true, force: true });
+});
+
+function makeContext(parameters: Record<string, unknown> = {}): ToolContext {
+  return { userId: 'u1', chatId: 'c1', parameters };
+}
+
+describe('normalizeCreateFileToolSettings', () => {
+  it('normalizes current and legacy path lists', () => {
+    expect(normalizeCreateFileToolSettings({})).toEqual({
+      allowedPaths: [],
+      deniedPaths: [],
+    });
+    expect(
+      normalizeCreateFileToolSettings({
+        allowedPaths: [{ path: '/home', enabled: true }],
+        deniedPaths: '/etc\n/root',
+      })
+    ).toEqual({
+      allowedPaths: [{ path: '/home', enabled: true }],
+      deniedPaths: [
+        { path: '/etc', enabled: true },
+        { path: '/root', enabled: true },
+      ],
+    });
+  });
+});
+
+describe('executeCreateFile', () => {
+  it('creates a new file and missing parents, returning its digest', async () => {
+    const filePath = join(tempDir, 'nested', 'hello.txt');
+
+    const result = await executeCreateFile(
+      { path: filePath, content: 'Hello, world!' },
+      makeContext()
+    );
+
+    expect(result).toEqual({
+      path: filePath,
+      bytesWritten: 13,
+      sha256: '315f5bdb76d078c43b8ac0064e4a0164612b1fce77c869345bfc94c75894edd3',
+    });
+    expect(await Bun.file(filePath).text()).toBe('Hello, world!');
+  });
+
+  it('anchors relative paths to the chat workdir', async () => {
+    const result = await executeCreateFile(
+      { path: 'src/index.ts', content: 'export {};' },
+      { ...makeContext(), workdir: tempDir }
+    );
+
+    expect(result.path).toBe('src/index.ts');
+    expect(await Bun.file(join(tempDir, 'src', 'index.ts')).text()).toBe('export {};');
+  });
+
+  it('rejects a relative path without a chat workdir', async () => {
+    const relativePath = `create-file-no-workdir-${crypto.randomUUID()}/file.txt`;
+
+    await expect(
+      executeCreateFile({ path: relativePath, content: 'nope' }, makeContext())
+    ).rejects.toThrow('no working directory is bound to this chat');
+    expect(existsSync(join(process.cwd(), relativePath))).toBe(false);
+  });
+
+  it('never overwrites an existing file', async () => {
+    const filePath = join(tempDir, 'existing.txt');
+    await Bun.write(filePath, 'keep me');
+
+    await expect(
+      executeCreateFile({ path: filePath, content: 'replacement' }, makeContext())
+    ).rejects.toThrow(
+      `"${filePath}" already exists. Use write_file to overwrite it or edit_file to modify it.`
+    );
+    expect(await Bun.file(filePath).text()).toBe('keep me');
+  });
+
+  it('allows an immediate guarded write because creation records freshness', async () => {
+    const filePath = join(tempDir, 'fresh.txt');
+    await executeCreateFile({ path: filePath, content: 'first' }, makeContext());
+
+    const written = await executeWriteFile({ path: filePath, content: 'second' }, makeContext());
+
+    expect(written.created).toBe(false);
+    expect(await Bun.file(filePath).text()).toBe('second');
+  });
+
+  it('enforces allowed and denied path settings', async () => {
+    const filePath = join(tempDir, 'blocked.txt');
+
+    await expect(
+      executeCreateFile(
+        { path: filePath, content: 'nope' },
+        makeContext({ allowedPaths: ['/somewhere-else'] })
+      )
+    ).rejects.toThrow('not in the allowed paths');
+    await expect(
+      executeCreateFile(
+        { path: filePath, content: 'nope' },
+        makeContext({ deniedPaths: [tempDir] })
+      )
+    ).rejects.toThrow('in the denied paths');
+    expect(existsSync(filePath)).toBe(false);
+  });
+
+  it('enforces restricted workdir containment', async () => {
+    const outsideDir = mkdtempSync(join(tmpdir(), 'create-file-outside-'));
+    try {
+      const outsidePath = join(outsideDir, 'outside.txt');
+      await expect(
+        executeCreateFile(
+          { path: outsidePath, content: 'nope' },
+          {
+            ...makeContext(),
+            workdir: tempDir,
+            workdirPolicy: { root: tempDir, restricted: true },
+          }
+        )
+      ).rejects.toThrow('outside the chat working directory');
+      expect(existsSync(outsidePath)).toBe(false);
+    } finally {
+      rmSync(outsideDir, { recursive: true, force: true });
+    }
+  });
+
+  it('serializes parallel creates so exactly one caller succeeds', async () => {
+    const filePath = join(tempDir, 'parallel.txt');
+
+    const results = await Promise.allSettled([
+      executeCreateFile({ path: filePath, content: 'first' }, makeContext()),
+      executeCreateFile({ path: filePath, content: 'second' }, makeContext()),
+    ]);
+
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+    expect(results.filter((result) => result.status === 'rejected')).toHaveLength(1);
+    expect(await Bun.file(filePath).text()).toBe('first');
+  });
+});

@@ -10,6 +10,25 @@ describe('getToolHint', () => {
     expect(getToolHint('write_file', { path: '/home/ada/src/index.ts' })).toBe('~/src/index.ts');
   });
 
+  it('returns abbreviated paths for create_file and delete_file', () => {
+    expect(getToolHint('create_file', { path: '/home/ada/new.ts' })).toBe('~/new.ts');
+    expect(getToolHint('delete_file', { path: '/home/ada/old.ts' })).toBe('~/old.ts');
+  });
+
+  it('returns a directional path pair for move_file', () => {
+    expect(
+      getToolHint('move_file', {
+        from: '/home/ada/src/old.ts',
+        to: '/home/ada/src/new.ts',
+      })
+    ).toBe('~/src/old.ts → ~/src/new.ts');
+  });
+
+  it('returns null when move_file is missing either path', () => {
+    expect(getToolHint('move_file', { from: '/home/ada/old.ts' })).toBeNull();
+    expect(getToolHint('move_file', { to: '/home/ada/new.ts' })).toBeNull();
+  });
+
   it('returns an abbreviated path for list_directory', () => {
     expect(getToolHint('list_directory', { path: '/var/log' })).toBe('/var/log');
   });
