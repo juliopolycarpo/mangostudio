@@ -3,18 +3,28 @@
  * Deletes a regular file after confirming the chat has read its current contents.
  */
 
-import { lstat, unlink } from 'node:fs/promises';
-import { assertFresh, forgetFile, StaleFileError, withPathLocks } from '../file-freshness';
+import { unlink } from 'node:fs/promises';
+import {
+  assertFresh,
+  FileNotReadError,
+  forgetFile,
+  StaleFileError,
+  withPathLocks,
+} from '../file-freshness';
 import { registerTool } from '../registry';
 import type { ToolContext } from '../types';
 import {
+  assertRegularFilePath,
   getRequiredPathArg,
   isErrnoException,
-  normalizePathList,
+  isProbablyBinaryFile,
+  normalizePathValidationSettings,
   PathAccessError,
   type PathValidationSettings,
+  pathPolicyParameterDescriptors,
   resolveAndValidatePath,
 } from './_fs-utils';
+import { READ_FILE_MAX_BYTES } from './read-file';
 
 const DELETE_FILE_TOOL_NAME = 'delete_file';
 
@@ -51,10 +61,7 @@ const definition = {
 export function normalizeDeleteFileToolSettings(
   parameters: Record<string, unknown>
 ): DeleteFileToolSettings {
-  return {
-    allowedPaths: normalizePathList(parameters.allowedPaths),
-    deniedPaths: normalizePathList(parameters.deniedPaths),
-  };
+  return normalizePathValidationSettings(parameters);
 }
 
 export async function executeDeleteFile(
@@ -69,8 +76,16 @@ export async function executeDeleteFile(
   });
 
   return await withPathLocks([resolvedPath], async () => {
-    await assertRegularFile(resolvedPath);
-    await assertFresh(context.chatId, resolvedPath);
+    const entry = await assertRegularFilePath(resolvedPath, 'delete');
+
+    try {
+      await assertFresh(context.chatId, resolvedPath);
+    } catch (error) {
+      if (error instanceof FileNotReadError) {
+        throw await explainUnreadableFile(resolvedPath, entry.size, error);
+      }
+      throw error;
+    }
 
     try {
       await unlink(resolvedPath);
@@ -84,18 +99,30 @@ export async function executeDeleteFile(
   });
 }
 
-async function assertRegularFile(resolvedPath: string): Promise<void> {
-  const entry = await lstat(resolvedPath).catch((error: unknown) => {
-    if (isErrnoException(error, 'ENOENT')) {
-      throw new PathAccessError(`File not found: "${resolvedPath}"`);
-    }
-    throw error;
-  });
-  if (!entry.isFile()) {
-    throw new PathAccessError(
-      `Cannot delete "${resolvedPath}": it is not a regular file. Directories and symbolic links are not supported.`
+/**
+ * "Read it first" is the right remediation for a text file the model simply has
+ * not opened yet, but read_file refuses binary and oversized files outright, so
+ * handing that advice to the model for one sends it into a retry loop with no
+ * exit. Name the real blocker instead.
+ */
+async function explainUnreadableFile(
+  resolvedPath: string,
+  sizeBytes: number,
+  unreadError: Error
+): Promise<Error> {
+  if (sizeBytes > READ_FILE_MAX_BYTES) {
+    return new PathAccessError(
+      `Cannot delete "${resolvedPath}": it is ${sizeBytes} bytes, past the ${READ_FILE_MAX_BYTES}-byte ` +
+        'read_file limit, so the read-before-delete guard cannot be satisfied for this path.'
     );
   }
+  if (await isProbablyBinaryFile(resolvedPath)) {
+    return new PathAccessError(
+      `Cannot delete "${resolvedPath}": it is a binary file. read_file cannot read binary files, ` +
+        'so the read-before-delete guard cannot be satisfied for this path.'
+    );
+  }
+  return unreadError;
 }
 
 function execute(
@@ -120,26 +147,10 @@ export function register(): void {
         allowedPaths: [],
         deniedPaths: [],
       },
-      parameterDescriptors: [
-        {
-          name: 'allowedPaths',
-          label: 'Allowed paths',
-          description:
-            'List of paths where the tool is allowed to delete files. Leave empty to allow all.',
-          type: 'path_list',
-          required: false,
-          defaultValue: [] as Array<{ path: string; enabled: boolean }>,
-        },
-        {
-          name: 'deniedPaths',
-          label: 'Denied paths',
-          description:
-            'List of paths where the tool is denied from deleting files. Leave empty to deny none.',
-          type: 'path_list',
-          required: false,
-          defaultValue: [] as Array<{ path: string; enabled: boolean }>,
-        },
-      ],
+      parameterDescriptors: pathPolicyParameterDescriptors(
+        'List of paths where the tool is allowed to delete files. Leave empty to allow all.',
+        'List of paths where the tool is denied from deleting files. Leave empty to deny none.'
+      ),
     },
     execute,
   });

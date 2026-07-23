@@ -4,21 +4,38 @@
  */
 
 import { constants as fsConstants } from 'node:fs';
-import { chmod, copyFile, link, lstat, mkdir, unlink } from 'node:fs/promises';
+import { chmod, copyFile, link, mkdir, unlink } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { rekeyFile, withPathLocks } from '../file-freshness';
 import { registerTool } from '../registry';
 import type { ToolContext } from '../types';
 import {
+  assertRegularFilePath,
   getRequiredPathArg,
   isErrnoException,
-  normalizePathList,
+  normalizePathValidationSettings,
   PathAccessError,
   type PathValidationSettings,
+  pathPolicyParameterDescriptors,
   resolveAndValidatePath,
 } from './_fs-utils';
 
 const MOVE_FILE_TOOL_NAME = 'move_file';
+
+/**
+ * `link` failures that mean "this filesystem pair cannot hold a hard link",
+ * not "the move is invalid". EXDEV is the cross-device case; the rest are what
+ * exFAT/FAT, many FUSE and network mounts, and non-NTFS Windows volumes report
+ * for an unsupported or exhausted link. All of them fall back to copy+unlink.
+ */
+const LINK_UNSUPPORTED_CODES = new Set([
+  'EXDEV',
+  'EPERM',
+  'EMLINK',
+  'ENOSYS',
+  'ENOTSUP',
+  'EOPNOTSUPP',
+]);
 
 export interface MoveFileToolArgs {
   from: string;
@@ -61,10 +78,7 @@ const definition = {
 export function normalizeMoveFileToolSettings(
   parameters: Record<string, unknown>
 ): MoveFileToolSettings {
-  return {
-    allowedPaths: normalizePathList(parameters.allowedPaths),
-    deniedPaths: normalizePathList(parameters.deniedPaths),
-  };
+  return normalizePathValidationSettings(parameters);
 }
 
 export async function executeMoveFile(
@@ -85,33 +99,18 @@ export async function executeMoveFile(
   }
 
   return await withPathLocks([from, to], async () => {
-    const source = await inspectSource(from);
+    const source = await assertRegularFilePath(from, 'move');
     await mkdir(dirname(to), { recursive: true });
-    await moveWithoutOverwrite(from, to, source.mode);
+    await moveWithoutOverwrite(from, to, source.mode & 0o7777);
     rekeyFile(context.chatId, from, to);
     return { from: args.from, to: args.to, moved: true };
   });
 }
 
-async function inspectSource(from: string): Promise<{ mode: number }> {
-  const entry = await lstat(from).catch((error: unknown) => {
-    if (isErrnoException(error, 'ENOENT')) {
-      throw new PathAccessError(`File not found: "${from}"`);
-    }
-    throw error;
-  });
-  if (!entry.isFile()) {
-    throw new PathAccessError(
-      `Cannot move "${from}": it is not a regular file. Directories and symbolic links are not supported.`
-    );
-  }
-  return { mode: entry.mode & 0o7777 };
-}
-
 /**
  * A hard link plus unlink gives regular files atomic no-overwrite semantics on
  * one filesystem. copyFile with COPYFILE_EXCL provides the same destination
- * guarantee for cross-device moves, where a hard link cannot be created.
+ * guarantee wherever a hard link cannot be created.
  */
 async function moveWithoutOverwrite(from: string, to: string, mode: number): Promise<void> {
   let destinationCreated = false;
@@ -120,7 +119,7 @@ async function moveWithoutOverwrite(from: string, to: string, mode: number): Pro
       await link(from, to);
       destinationCreated = true;
     } catch (error) {
-      if (!isErrnoException(error, 'EXDEV')) throw error;
+      if (!isLinkUnsupported(error)) throw error;
       await copyFile(from, to, fsConstants.COPYFILE_EXCL);
       destinationCreated = true;
       await chmod(to, mode);
@@ -145,6 +144,11 @@ async function moveWithoutOverwrite(from: string, to: string, mode: number): Pro
   }
 }
 
+function isLinkUnsupported(error: unknown): boolean {
+  if (!(error instanceof Error) || !('code' in error)) return false;
+  return typeof error.code === 'string' && LINK_UNSUPPORTED_CODES.has(error.code);
+}
+
 function execute(args: Record<string, unknown>, context: ToolContext): Promise<MoveFileToolResult> {
   const from = getRequiredPathArg(args.from, 'from');
   const to = getRequiredPathArg(args.to, 'to');
@@ -166,26 +170,10 @@ export function register(): void {
         allowedPaths: [],
         deniedPaths: [],
       },
-      parameterDescriptors: [
-        {
-          name: 'allowedPaths',
-          label: 'Allowed paths',
-          description:
-            'List of paths the tool is allowed to move files from and to. Leave empty to allow all.',
-          type: 'path_list',
-          required: false,
-          defaultValue: [] as Array<{ path: string; enabled: boolean }>,
-        },
-        {
-          name: 'deniedPaths',
-          label: 'Denied paths',
-          description:
-            'List of paths the tool is denied from moving files from or to. Leave empty to deny none.',
-          type: 'path_list',
-          required: false,
-          defaultValue: [] as Array<{ path: string; enabled: boolean }>,
-        },
-      ],
+      parameterDescriptors: pathPolicyParameterDescriptors(
+        'List of paths the tool is allowed to move files from and to. Leave empty to allow all.',
+        'List of paths the tool is denied from moving files from or to. Leave empty to deny none.'
+      ),
     },
     execute,
   });

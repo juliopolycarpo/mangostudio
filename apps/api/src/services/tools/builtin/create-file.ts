@@ -3,17 +3,20 @@
  * Creates a new text file without overwriting an existing path.
  */
 
+import { lstat } from 'node:fs/promises';
+import { dirname } from 'node:path';
 import { RegularFileWriteError, writeRegularFileAtomic } from '../../../lib/safe-file';
-import { getRequiredString } from '../arg-parsing';
+import { getRequiredTextArg } from '../arg-parsing';
 import { recordFileRead, withPathLocks } from '../file-freshness';
 import { registerTool } from '../registry';
 import type { ToolContext } from '../types';
 import {
   getRequiredPathArg,
   isErrnoException,
-  normalizePathList,
+  normalizePathValidationSettings,
   PathAccessError,
   type PathValidationSettings,
+  pathPolicyParameterDescriptors,
   resolveAndValidatePath,
 } from './_fs-utils';
 
@@ -37,7 +40,7 @@ const definition = {
   description:
     'Creates a new text file on disk, including missing parent directories. Fails if the ' +
     'path already exists and never overwrites it. Use write_file to replace a file after ' +
-    'reading it, or edit_file to modify part of a file.',
+    'reading all of it with read_file.',
   parameters: {
     type: 'object',
     properties: {
@@ -47,7 +50,7 @@ const definition = {
       },
       content: {
         type: 'string',
-        description: 'The text content for the new file.',
+        description: 'The exact text content for the new file. May be empty.',
       },
     },
     required: ['path', 'content'],
@@ -58,10 +61,7 @@ const definition = {
 export function normalizeCreateFileToolSettings(
   parameters: Record<string, unknown>
 ): CreateFileToolSettings {
-  return {
-    allowedPaths: normalizePathList(parameters.allowedPaths),
-    deniedPaths: normalizePathList(parameters.deniedPaths),
-  };
+  return normalizePathValidationSettings(parameters);
 }
 
 export async function executeCreateFile(
@@ -80,10 +80,11 @@ export async function executeCreateFile(
     try {
       committed = await writeRegularFileAtomic(resolvedPath, args.content, { exclusive: true });
     } catch (error) {
-      if (isErrnoException(error, 'EEXIST') || error instanceof RegularFileWriteError) {
-        throw new PathAccessError(
-          `"${args.path}" already exists. Use write_file to overwrite it or edit_file to modify it.`
-        );
+      // The destination policy is the tool's own remediation advice, not a
+      // filesystem failure, so it reaches the model as a path error.
+      if (error instanceof RegularFileWriteError) throw new PathAccessError(error.message);
+      if (isErrnoException(error, 'EEXIST')) {
+        throw await describeBlockedCreate(resolvedPath, args.path);
       }
       throw error;
     }
@@ -93,12 +94,33 @@ export async function executeCreateFile(
   });
 }
 
+/**
+ * EEXIST reaches this tool from two places: the destination itself is taken, or
+ * a parent component of it is a regular file, which fails the recursive mkdir.
+ * Naming the wrong one sends the model to write_file for a path that does not
+ * exist and can never be created under that parent.
+ */
+async function describeBlockedCreate(resolvedPath: string, inputPath: string): Promise<Error> {
+  const exists = await lstat(resolvedPath).then(
+    () => true,
+    () => false
+  );
+  if (exists) {
+    return new PathAccessError(
+      `"${inputPath}" already exists. Read it with read_file and use write_file to replace it.`
+    );
+  }
+  return new PathAccessError(
+    `Cannot create "${inputPath}": "${dirname(resolvedPath)}" is not a directory.`
+  );
+}
+
 function execute(
   args: Record<string, unknown>,
   context: ToolContext
 ): Promise<CreateFileToolResult> {
   const path = getRequiredPathArg(args.path, 'path');
-  const content = getRequiredString(args.content, 'content');
+  const content = getRequiredTextArg(args.content, 'content');
   return executeCreateFile({ path, content }, context);
 }
 
@@ -116,26 +138,10 @@ export function register(): void {
         allowedPaths: [],
         deniedPaths: [],
       },
-      parameterDescriptors: [
-        {
-          name: 'allowedPaths',
-          label: 'Allowed paths',
-          description:
-            'List of paths where the tool is allowed to create files. Leave empty to allow all.',
-          type: 'path_list',
-          required: false,
-          defaultValue: [] as Array<{ path: string; enabled: boolean }>,
-        },
-        {
-          name: 'deniedPaths',
-          label: 'Denied paths',
-          description:
-            'List of paths where the tool is denied from creating files. Leave empty to deny none.',
-          type: 'path_list',
-          required: false,
-          defaultValue: [] as Array<{ path: string; enabled: boolean }>,
-        },
-      ],
+      parameterDescriptors: pathPolicyParameterDescriptors(
+        'List of paths where the tool is allowed to create files. Leave empty to allow all.',
+        'List of paths where the tool is denied from creating files. Leave empty to deny none.'
+      ),
     },
     execute,
   });

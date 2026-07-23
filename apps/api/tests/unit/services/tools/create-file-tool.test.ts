@@ -1,24 +1,29 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   executeCreateFile,
   normalizeCreateFileToolSettings,
+  register as registerCreateFileTool,
 } from '../../../../src/services/tools/builtin/create-file';
 import { executeWriteFile } from '../../../../src/services/tools/builtin/write-file';
 import { clearFileFreshness } from '../../../../src/services/tools/file-freshness';
+import { clearRegistry, executeTool, getTool } from '../../../../src/services/tools/registry';
 import type { ToolContext } from '../../../../src/services/tools/types';
 
 let tempDir: string;
 
 beforeEach(() => {
   clearFileFreshness();
+  clearRegistry();
+  registerCreateFileTool();
   tempDir = mkdtempSync(join(tmpdir(), 'create-file-test-'));
 });
 
 afterEach(() => {
   clearFileFreshness();
+  clearRegistry();
   rmSync(tempDir, { recursive: true, force: true });
 });
 
@@ -90,9 +95,41 @@ describe('executeCreateFile', () => {
     await expect(
       executeCreateFile({ path: filePath, content: 'replacement' }, makeContext())
     ).rejects.toThrow(
-      `"${filePath}" already exists. Use write_file to overwrite it or edit_file to modify it.`
+      `"${filePath}" already exists. Read it with read_file and use write_file to replace it.`
     );
     expect(await Bun.file(filePath).text()).toBe('keep me');
+  });
+
+  it('points only at tools that exist when the destination is taken', async () => {
+    const filePath = join(tempDir, 'taken.txt');
+    await Bun.write(filePath, 'keep me');
+
+    const error = (await executeCreateFile(
+      { path: filePath, content: 'replacement' },
+      makeContext()
+    ).catch((thrown: unknown) => thrown)) as Error;
+
+    expect(error.message).not.toContain('edit_file');
+    expect(getTool('create_file')?.definition.description).not.toContain('edit_file');
+  });
+
+  it('names the real blocker when a parent component is a regular file', async () => {
+    const parent = join(tempDir, 'not-a-directory');
+    await Bun.write(parent, 'x');
+    const filePath = join(parent, 'child.txt');
+
+    await expect(
+      executeCreateFile({ path: filePath, content: 'nope' }, makeContext())
+    ).rejects.toThrow(`Cannot create "${filePath}": "${parent}" is not a directory.`);
+  });
+
+  it('reports a non-regular destination instead of claiming it can be overwritten', async () => {
+    const directory = join(tempDir, 'directory');
+    mkdirSync(directory);
+
+    await expect(
+      executeCreateFile({ path: directory, content: 'nope' }, makeContext())
+    ).rejects.toThrow('is not a regular file');
   });
 
   it('allows an immediate guarded write because creation records freshness', async () => {
@@ -154,5 +191,45 @@ describe('executeCreateFile', () => {
     expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
     expect(results.filter((result) => result.status === 'rejected')).toHaveLength(1);
     expect(await Bun.file(filePath).text()).toBe('first');
+  });
+});
+
+describe('create_file argument handling', () => {
+  it('writes model content verbatim, keeping the trailing newline', async () => {
+    const filePath = join(tempDir, 'verbatim.md');
+    const content = '# Title\n\nbody\n';
+
+    const result = (await executeTool(
+      'create_file',
+      { path: filePath, content },
+      makeContext()
+    )) as { bytesWritten: number };
+
+    expect(result.bytesWritten).toBe(Buffer.byteLength(content));
+    expect(await Bun.file(filePath).text()).toBe(content);
+  });
+
+  it('creates an empty file when content is empty', async () => {
+    const filePath = join(tempDir, 'empty.txt');
+
+    const result = (await executeTool(
+      'create_file',
+      { path: filePath, content: '' },
+      makeContext()
+    )) as {
+      bytesWritten: number;
+    };
+
+    expect(result.bytesWritten).toBe(0);
+    expect(await Bun.file(filePath).text()).toBe('');
+  });
+
+  it('still rejects a non-string content argument', async () => {
+    const filePath = join(tempDir, 'invalid.txt');
+
+    await expect(
+      executeTool('create_file', { path: filePath, content: 42 }, makeContext())
+    ).rejects.toThrow('Missing required field "content"');
+    expect(existsSync(filePath)).toBe(false);
   });
 });

@@ -107,6 +107,34 @@ describe('executeDeleteFile', () => {
     expect(await Bun.file(filePath).text()).toBe('replacement from elsewhere');
   });
 
+  it('names the binary blocker instead of demanding an impossible read', async () => {
+    const filePath = join(tempDir, 'blob.bin');
+    await Bun.write(filePath, new Uint8Array([0x01, 0x00, 0x02]));
+
+    // read_file refuses binary files, so "read it first" would loop forever.
+    await expect(executeReadFile({ path: filePath }, makeContext())).rejects.toThrow('binary file');
+    const error = (await executeDeleteFile({ path: filePath }, makeContext()).catch(
+      (thrown: unknown) => thrown
+    )) as Error;
+
+    expect(error).not.toBeInstanceOf(FileNotReadError);
+    expect(error.message).toContain('read-before-delete guard cannot be satisfied');
+    expect(existsSync(filePath)).toBe(true);
+  });
+
+  it('explains a partial read in terms of deletion, not overwriting', async () => {
+    const filePath = join(tempDir, 'partial-wording.txt');
+    await Bun.write(filePath, 'one\ntwo\nthree');
+    await executeReadFile({ path: filePath, maxLines: 1 }, makeContext());
+
+    const error = (await executeDeleteFile({ path: filePath }, makeContext()).catch(
+      (thrown: unknown) => thrown
+    )) as Error;
+
+    expect(error.message).not.toContain('Cannot overwrite');
+    expect(error.message).not.toContain('write_file replaces');
+  });
+
   it('reports missing files without suggesting an impossible read', async () => {
     const filePath = join(tempDir, 'missing.txt');
 
