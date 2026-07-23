@@ -8,6 +8,11 @@ import { dirname } from 'node:path';
 import { RegularFileWriteError, writeRegularFileAtomic } from '../../../lib/safe-file';
 import { getRequiredTextArg } from '../arg-parsing';
 import { recordFileRead, withPathLocks } from '../file-freshness';
+import {
+  attachBeforeFields,
+  ensureFileMutationCheckpoint,
+  recordFileMutationAfterHash,
+} from '../file-mutation-snapshot';
 import { registerTool } from '../registry';
 import type { ToolContext } from '../types';
 import {
@@ -76,6 +81,7 @@ export async function executeCreateFile(
   });
 
   return await withPathLocks([resolvedPath], async () => {
+    const captured = await ensureFileMutationCheckpoint(context, resolvedPath, 'create');
     let committed: { bytesWritten: number; mtimeMs: number };
     try {
       committed = await writeRegularFileAtomic(resolvedPath, args.content, { exclusive: true });
@@ -90,7 +96,11 @@ export async function executeCreateFile(
     }
 
     const sha256 = recordFileRead(context.chatId, resolvedPath, args.content, committed.mtimeMs);
-    return { path: args.path, bytesWritten: committed.bytesWritten, sha256 };
+    await recordFileMutationAfterHash(context, resolvedPath, sha256);
+    return attachBeforeFields(
+      { path: args.path, bytesWritten: committed.bytesWritten, sha256 },
+      captured
+    );
   });
 }
 

@@ -606,6 +606,7 @@ async function* executePendingToolCalls(
     for await (const item of executeStandardToolCallsWithProgress(pendingCallEntries, {
       userId,
       chatId,
+      assistantMessageId: session.aiMsgId,
       workdir,
       workdirPolicy,
       settingsByToolName: toolSettings,
@@ -639,6 +640,7 @@ async function* executePendingToolCalls(
           for await (const item of executeStandardToolCallsWithProgress(nonImageEntries, {
             userId,
             chatId,
+            assistantMessageId: session.aiMsgId,
             workdir,
             workdirPolicy,
             settingsByToolName: toolSettings,

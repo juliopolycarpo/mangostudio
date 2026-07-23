@@ -6,6 +6,11 @@
 import { RegularFileWriteError, writeRegularFileAtomic } from '../../../lib/safe-file';
 import { getOptionalBoolean, getRequiredTextArg, ToolArgumentError } from '../arg-parsing';
 import { FileNotReadError, readFreshFile, recordFileEdit, withPathLocks } from '../file-freshness';
+import {
+  attachBeforeFields,
+  ensureFileMutationCheckpoint,
+  recordFileMutationAfterHash,
+} from '../file-mutation-snapshot';
 import { registerTool } from '../registry';
 import type { ToolContext } from '../types';
 import {
@@ -34,6 +39,8 @@ export interface EditFileToolResult {
   replacements: number;
   sha256: string;
   firstChangedLine: number;
+  before?: string;
+  beforeOmitted?: 'binary' | 'too_large' | 'missing';
 }
 
 export type EditFileToolSettings = PathValidationSettings;
@@ -100,6 +107,8 @@ export async function executeEditFile(
       throw error;
     }
 
+    const captured = await ensureFileMutationCheckpoint(context, resolvedPath, 'edit');
+
     const { bytes } = observed;
     const source = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
     const oldBytes = Buffer.from(args.oldString);
@@ -143,12 +152,16 @@ export async function executeEditFile(
       committed.mtimeMs,
       lineCountChanged ? firstChangedLine - 1 : Number.MAX_SAFE_INTEGER
     );
-    return {
-      path: args.path,
-      replacements: selectedOffsets.length,
-      sha256,
-      firstChangedLine,
-    };
+    await recordFileMutationAfterHash(context, resolvedPath, sha256);
+    return attachBeforeFields(
+      {
+        path: args.path,
+        replacements: selectedOffsets.length,
+        sha256,
+        firstChangedLine,
+      },
+      captured
+    );
   });
 }
 

@@ -7,6 +7,11 @@ import { constants as fsConstants } from 'node:fs';
 import { chmod, copyFile, link, mkdir, unlink } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { rekeyFile, withPathLocks } from '../file-freshness';
+import {
+  ensureFileMutationCheckpoint,
+  hashFileAtPath,
+  recordFileMutationAfterHash,
+} from '../file-mutation-snapshot';
 import { registerTool } from '../registry';
 import type { ToolContext } from '../types';
 import {
@@ -100,8 +105,11 @@ export async function executeMoveFile(
 
   return await withPathLocks([from, to], async () => {
     const source = await assertRegularFilePath(from, 'move');
+    await ensureFileMutationCheckpoint(context, from, 'move', { movedTo: to });
     await moveRegularFileWithoutOverwrite(from, to, source.mode & 0o7777);
     rekeyFile(context.chatId, from, to);
+    const afterHash = await hashFileAtPath(to);
+    await recordFileMutationAfterHash(context, from, afterHash);
     return { from: args.from, to: args.to, moved: true };
   });
 }

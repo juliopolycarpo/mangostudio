@@ -150,6 +150,7 @@ export type ToolExecutionProgressItem =
 export interface StandardToolExecutionContext {
   userId: string;
   chatId: string;
+  assistantMessageId?: string;
   workdir?: string;
   workdirPolicy?: WorkdirPolicy;
   settingsByToolName: ReadonlyMap<string, EffectiveToolSettings>;
@@ -279,6 +280,8 @@ async function executeStandardToolCall(
           {
             userId: context.userId,
             chatId: context.chatId,
+            assistantMessageId: context.assistantMessageId,
+            db: context.db,
             workdir: context.workdir,
             workdirPolicy: context.workdirPolicy,
             parameters: {},

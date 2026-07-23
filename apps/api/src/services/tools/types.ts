@@ -24,9 +24,16 @@ export interface WorkdirPolicy {
 }
 
 /** Runtime context injected into every tool call. */
+import type { Kysely } from 'kysely';
+import type { Database } from '../../db/types';
+
 export interface ToolContext {
   userId: string;
   chatId: string;
+  /** Assistant message id for the active turn; drives per-message file checkpoints. */
+  assistantMessageId?: string;
+  /** Optional DB handle for checkpoint persistence (generation passes the turn db). */
+  db?: Kysely<Database>;
   /** Chat-bound server directory: defaults omitted tool paths and anchors relative ones. */
   workdir?: string;
   /** When set with `restricted: true`, builtin path tools must stay inside `root`. */

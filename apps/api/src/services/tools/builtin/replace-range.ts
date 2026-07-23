@@ -12,6 +12,11 @@ import {
   recordFileEdit,
   withPathLocks,
 } from '../file-freshness';
+import {
+  attachBeforeFields,
+  ensureFileMutationCheckpoint,
+  recordFileMutationAfterHash,
+} from '../file-mutation-snapshot';
 import { registerTool } from '../registry';
 import type { ToolContext } from '../types';
 import {
@@ -40,6 +45,8 @@ export interface ReplaceRangeToolResult {
   replacedLines: number;
   newTotalLines: number;
   sha256: string;
+  before?: string;
+  beforeOmitted?: 'binary' | 'too_large' | 'missing';
 }
 
 export type ReplaceRangeToolSettings = PathValidationSettings;
@@ -109,6 +116,8 @@ export async function executeReplaceRange(
     }
     assertLineNumbersCurrent(context.chatId, resolvedPath, args.endLine);
 
+    const captured = await ensureFileMutationCheckpoint(context, resolvedPath, 'edit');
+
     const { bytes } = observed;
     // One logical line per split entry, so the split doubles as the line count.
     const sourceLines = splitLines(bytes);
@@ -141,12 +150,16 @@ export async function executeReplaceRange(
       committed.mtimeMs,
       replacementLines.length === replacedLines ? Number.MAX_SAFE_INTEGER : args.startLine - 1
     );
-    return {
-      path: args.path,
-      replacedLines,
-      newTotalLines: countTotalLines(updated),
-      sha256,
-    };
+    await recordFileMutationAfterHash(context, resolvedPath, sha256);
+    return attachBeforeFields(
+      {
+        path: args.path,
+        replacedLines,
+        newTotalLines: countTotalLines(updated),
+        sha256,
+      },
+      captured
+    );
   });
 }
 
