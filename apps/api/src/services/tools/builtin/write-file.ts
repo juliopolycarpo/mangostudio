@@ -3,9 +3,8 @@
  * Writes text content to a file on disk, creating parent directories as needed.
  */
 
-import { mkdir } from 'node:fs/promises';
-import { dirname } from 'node:path';
 import { getRequiredString } from '../arg-parsing';
+import { assertFresh, FileNotReadError, recordFileRead, withPathLocks } from '../file-freshness';
 import { registerTool } from '../registry';
 import type { ToolContext } from '../types';
 import {
@@ -13,6 +12,7 @@ import {
   normalizePathList,
   type PathValidationSettings,
   resolveAndValidatePath,
+  writeFileAtomic,
 } from './_fs-utils';
 
 const WRITE_FILE_TOOL_NAME = 'write_file';
@@ -26,6 +26,7 @@ export interface WriteFileToolResult {
   path: string;
   bytesWritten: number;
   created: boolean;
+  sha256: string;
 }
 
 export type WriteFileToolSettings = PathValidationSettings;
@@ -34,6 +35,7 @@ const definition = {
   name: WRITE_FILE_TOOL_NAME,
   description:
     'Writes text content to a file on disk. Creates parent directories if they do not exist. ' +
+    'Overwriting an existing file requires reading it with read_file first. ' +
     'Use this when the user asks to create, write, or save content to a file.',
   parameters: {
     type: 'object',
@@ -72,15 +74,29 @@ export async function executeWriteFile(
     workdirPolicy: context.workdirPolicy,
   });
 
-  const existingFile = Bun.file(resolvedPath);
-  const created = !(await existingFile.exists());
+  return await withPathLocks([resolvedPath], async () => {
+    const created = !(await Bun.file(resolvedPath).exists());
+    if (!created) await assertFresh(context.chatId, resolvedPath);
 
-  const dir = dirname(resolvedPath);
-  await mkdir(dir, { recursive: true });
+    let bytesWritten: number;
+    try {
+      bytesWritten = await writeFileAtomic(resolvedPath, args.content, { exclusive: created });
+    } catch (error) {
+      // A path that appeared after the existence check is now an unread file,
+      // so surface the same remediation as any other guarded overwrite.
+      if (created && isErrnoException(error, 'EEXIST')) throw new FileNotReadError(resolvedPath);
+      throw error;
+    }
 
-  const bytesWritten = await Bun.write(resolvedPath, args.content);
+    // Recording the committed bytes makes a later sequential write fresh; the
+    // surrounding path lock gives parallel calls the same deterministic order.
+    const sha256 = await recordFileRead(context.chatId, resolvedPath, args.content);
+    return { path: args.path, bytesWritten, created, sha256 };
+  });
+}
 
-  return { path: args.path, bytesWritten, created };
+function isErrnoException(error: unknown, code: string): error is NodeJS.ErrnoException {
+  return error instanceof Error && 'code' in error && error.code === code;
 }
 
 function execute(
@@ -98,7 +114,8 @@ export function register(): void {
     definition,
     settings: {
       title: 'Write file',
-      description: 'Allows the AI to write text content to files on disk.',
+      description:
+        'Allows the AI to create text files and overwrite files it has read in this chat.',
       category: 'system',
       enabledByDefault: true,
       canDisable: true,

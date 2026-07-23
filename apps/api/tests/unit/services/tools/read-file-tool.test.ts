@@ -6,15 +6,18 @@ import {
   executeReadFile,
   normalizeReadFileToolSettings,
 } from '../../../../src/services/tools/builtin/read-file';
+import { clearFileFreshness } from '../../../../src/services/tools/file-freshness';
 import type { ToolContext } from '../../../../src/services/tools/types';
 
 let tempDir: string;
 
 beforeEach(() => {
+  clearFileFreshness();
   tempDir = mkdtempSync(join(tmpdir(), 'read-file-test-'));
 });
 
 afterEach(() => {
+  clearFileFreshness();
   rmSync(tempDir, { recursive: true, force: true });
 });
 
@@ -117,6 +120,7 @@ describe('executeReadFile', () => {
     expect(result.path).toBe(filePath);
     expect(result.content).toBe('Hello, world!');
     expect(result.size).toBe(13);
+    expect(result.sha256).toBe('315f5bdb76d078c43b8ac0064e4a0164612b1fce77c869345bfc94c75894edd3');
   });
 
   it('expands ~ to home directory', async () => {

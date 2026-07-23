@@ -1,7 +1,7 @@
 import { isActiveToolExecutionStatus } from '@mangostudio/shared/tool-executions';
 import { AlertCircle, ArrowRight, Ban, CheckCircle, ChevronDown } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useI18n } from '@/hooks/use-i18n';
 import { ToolCallBlock } from './ToolCallBlock';
 import { getToolHint, ToolIcon } from './ToolCallVisuals';
@@ -19,8 +19,6 @@ interface ToolCallGroupBlockProps {
  */
 export function ToolCallGroupBlock({ calls }: ToolCallGroupBlockProps) {
   const { t } = useI18n();
-  const [expanded, setExpanded] = useState(false);
-
   const name = calls[0].name;
   const labels = t.tools.labels as Record<string, string> | undefined;
   const label = labels?.[name] ?? name;
@@ -31,6 +29,7 @@ export function ToolCallGroupBlock({ calls }: ToolCallGroupBlockProps) {
   const anyPending = calls.some((call) => isActiveToolExecutionStatus(call.status));
   const anyError = calls.some((call) => call.status === 'failed' || call.status === 'timed_out');
   const anyCancelled = calls.some((call) => call.status === 'cancelled');
+  const [expanded, setExpanded] = useState(anyError);
   const tone = anyError
     ? 'border-error/30 text-error'
     : anyPending
@@ -39,10 +38,15 @@ export function ToolCallGroupBlock({ calls }: ToolCallGroupBlockProps) {
         ? 'border-outline-variant/30 text-on-surface-variant'
         : 'border-success/25 text-success';
 
+  useEffect(() => {
+    if (anyError) setExpanded(true);
+  }, [anyError]);
+
   return (
     <div className="mb-3">
       <button
         type="button"
+        aria-expanded={expanded}
         onClick={() => setExpanded((v) => !v)}
         className={`glass-surface flex items-center gap-2 text-xs py-1.5 px-3 rounded-full w-fit max-w-full border
                    transition-all duration-200 cursor-pointer ${tone}`}

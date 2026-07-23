@@ -2,7 +2,9 @@
  * Shared utilities for filesystem tools: path expansion, allowlist/denylist validation.
  */
 
-import { isAbsolute, resolve } from 'node:path';
+import { randomBytes } from 'node:crypto';
+import { chmod, link, mkdir, open, rename, stat, unlink } from 'node:fs/promises';
+import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import {
   assertInsideWorkdir,
   isPathPrefix,
@@ -42,6 +44,74 @@ export class PathAccessError extends Error {
     super(message);
     this.name = 'PathAccessError';
   }
+}
+
+export interface AtomicWriteOptions {
+  /** Refuse to replace a destination that appeared after the caller checked it. */
+  readonly exclusive?: boolean;
+}
+
+/**
+ * Writes through a unique same-directory temp file, then atomically commits it.
+ * Existing permission bits are preserved; exclusive creates never clobber a
+ * destination that another process created concurrently.
+ */
+export async function writeFileAtomic(
+  resolvedPath: string,
+  content: string | Uint8Array,
+  options: AtomicWriteOptions = {}
+): Promise<number> {
+  const directory = dirname(resolvedPath);
+  await mkdir(directory, { recursive: true });
+
+  const existingMode = await getExistingMode(resolvedPath);
+  const tempPath = join(
+    directory,
+    `.${basename(resolvedPath)}.${randomBytes(8).toString('hex')}.tmp`
+  );
+  const handle = await open(tempPath, 'wx', existingMode);
+  try {
+    try {
+      await handle.writeFile(content);
+    } finally {
+      await handle.close();
+    }
+    // open() applies the process umask. Reapply an existing mode so an atomic
+    // overwrite cannot silently narrow or widen the user's permissions.
+    if (existingMode !== undefined) await chmod(tempPath, existingMode);
+    if (options.exclusive) {
+      await link(tempPath, resolvedPath);
+      await unlink(tempPath);
+    } else {
+      await rename(tempPath, resolvedPath);
+    }
+  } catch (error) {
+    await unlinkIfPresent(tempPath);
+    throw error;
+  }
+
+  return typeof content === 'string' ? Buffer.byteLength(content) : content.byteLength;
+}
+
+async function getExistingMode(resolvedPath: string): Promise<number | undefined> {
+  try {
+    return (await stat(resolvedPath)).mode & 0o7777;
+  } catch (error) {
+    if (isErrnoException(error, 'ENOENT')) return undefined;
+    throw error;
+  }
+}
+
+async function unlinkIfPresent(path: string): Promise<void> {
+  try {
+    await unlink(path);
+  } catch (error) {
+    if (!isErrnoException(error, 'ENOENT')) throw error;
+  }
+}
+
+function isErrnoException(error: unknown, code: string): error is NodeJS.ErrnoException {
+  return error instanceof Error && 'code' in error && error.code === code;
 }
 
 /**

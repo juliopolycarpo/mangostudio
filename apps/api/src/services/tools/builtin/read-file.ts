@@ -3,6 +3,7 @@
  * Reads the contents of a text file from disk.
  */
 
+import { recordFileRead } from '../file-freshness';
 import { registerTool } from '../registry';
 import type { ToolContext } from '../types';
 import {
@@ -23,6 +24,7 @@ export interface ReadFileToolResult {
   content: string;
   path: string;
   size: number;
+  sha256: string;
 }
 
 export type ReadFileToolSettings = PathValidationSettings;
@@ -70,10 +72,11 @@ export async function executeReadFile(
     throw new PathAccessError(`File not found: "${args.path}"`);
   }
 
-  const content = await file.text();
-  const size = file.size;
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const content = new TextDecoder().decode(bytes);
+  const sha256 = await recordFileRead(context.chatId, resolvedPath, bytes);
 
-  return { content, path: args.path, size };
+  return { content, path: args.path, size: bytes.byteLength, sha256 };
 }
 
 // biome-ignore lint/suspicious/useAwait: Migrated from ESLint

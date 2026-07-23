@@ -1,20 +1,36 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  rmSync,
+  statSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { executeReadFile } from '../../../../src/services/tools/builtin/read-file';
 import {
   executeWriteFile,
   normalizeWriteFileToolSettings,
 } from '../../../../src/services/tools/builtin/write-file';
+import {
+  clearFileFreshness,
+  FileNotReadError,
+  StaleFileError,
+} from '../../../../src/services/tools/file-freshness';
 import type { ToolContext } from '../../../../src/services/tools/types';
 
 let tempDir: string;
 
 beforeEach(() => {
+  clearFileFreshness();
   tempDir = mkdtempSync(join(tmpdir(), 'write-file-test-'));
 });
 
 afterEach(() => {
+  clearFileFreshness();
   rmSync(tempDir, { recursive: true, force: true });
 });
 
@@ -115,6 +131,7 @@ describe('executeWriteFile', () => {
   it('overwrites an existing file and returns created=false', async () => {
     const filePath = join(tempDir, 'existing.txt');
     await seedFile(filePath, 'old content');
+    await executeReadFile({ path: filePath }, makeContext());
 
     const result = await executeWriteFile(
       { path: filePath, content: 'new content' },
@@ -124,7 +141,90 @@ describe('executeWriteFile', () => {
     expect(result.path).toBe(filePath);
     expect(result.created).toBe(false);
     expect(result.bytesWritten).toBe(11);
+    expect(result.sha256).toBe('fe32608c9ef5b6cf7e3f946480253ff76f24f4ec0678f3d0f07f9844cbff9601');
     expect(await readBack(filePath)).toBe('new content');
+  });
+
+  it('rejects overwriting a file that the chat has not read', async () => {
+    const filePath = join(tempDir, 'unread.txt');
+    await seedFile(filePath, 'keep me');
+
+    await expect(
+      executeWriteFile({ path: filePath, content: 'replacement' }, makeContext())
+    ).rejects.toBeInstanceOf(FileNotReadError);
+    expect(await readBack(filePath)).toBe('keep me');
+  });
+
+  it('rejects overwriting a file changed after the chat read it', async () => {
+    const filePath = join(tempDir, 'stale.txt');
+    await seedFile(filePath, 'observed');
+    await executeReadFile({ path: filePath }, makeContext());
+    await seedFile(filePath, 'changed outside the tool');
+
+    await expect(
+      executeWriteFile({ path: filePath, content: 'replacement' }, makeContext())
+    ).rejects.toBeInstanceOf(StaleFileError);
+    expect(await readBack(filePath)).toBe('changed outside the tool');
+  });
+
+  it('allows sequential writes after one read because each write refreshes the snapshot', async () => {
+    const filePath = join(tempDir, 'sequential.txt');
+    await seedFile(filePath, 'initial');
+    await executeReadFile({ path: filePath }, makeContext());
+
+    await executeWriteFile({ path: filePath, content: 'first' }, makeContext());
+    await executeWriteFile({ path: filePath, content: 'second' }, makeContext());
+
+    expect(await readBack(filePath)).toBe('second');
+  });
+
+  it('serializes parallel writes to one path in call order', async () => {
+    const filePath = join(tempDir, 'parallel.txt');
+    await seedFile(filePath, 'initial');
+    await executeReadFile({ path: filePath }, makeContext());
+
+    await Promise.all([
+      executeWriteFile({ path: filePath, content: 'first' }, makeContext()),
+      executeWriteFile({ path: filePath, content: 'second' }, makeContext()),
+    ]);
+
+    expect(await readBack(filePath)).toBe('second');
+  });
+
+  it("does not let another chat use the first chat's read", async () => {
+    const filePath = join(tempDir, 'chat-bound.txt');
+    await seedFile(filePath, 'initial');
+    await executeReadFile({ path: filePath }, makeContext());
+
+    await expect(
+      executeWriteFile(
+        { path: filePath, content: 'other chat' },
+        { ...makeContext(), chatId: 'c2' }
+      )
+    ).rejects.toBeInstanceOf(FileNotReadError);
+    expect(await readBack(filePath)).toBe('initial');
+  });
+
+  it('preserves the existing file mode across an atomic overwrite', async () => {
+    if (process.platform === 'win32') return;
+
+    const filePath = join(tempDir, 'mode.txt');
+    await seedFile(filePath, 'initial');
+    chmodSync(filePath, 0o640);
+    await executeReadFile({ path: filePath }, makeContext());
+
+    await executeWriteFile({ path: filePath, content: 'replacement' }, makeContext());
+
+    expect(statSync(filePath).mode & 0o777).toBe(0o640);
+  });
+
+  it('commits through a same-directory temp file without leaving artifacts', async () => {
+    const filePath = join(tempDir, 'atomic.txt');
+
+    await executeWriteFile({ path: filePath, content: 'complete content' }, makeContext());
+
+    expect(await readBack(filePath)).toBe('complete content');
+    expect(readdirSync(tempDir)).toEqual(['atomic.txt']);
   });
 
   it('creates parent directories when they do not exist', async () => {

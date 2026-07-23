@@ -69,7 +69,30 @@ describe('ToolCallGroupBlock', () => {
       />
     );
 
-    expect(screen.getByRole('button').className).toContain('text-error');
+    expect(screen.getByRole('button', { name: /\+1 more/i }).className).toContain('text-error');
+  });
+
+  it('opens failed calls and presents their remediation without a JSON wrapper', () => {
+    const remediation = 'Re-read the file and retry with the current content.';
+    render(
+      <ToolCallGroupBlock
+        calls={[
+          entry({ toolCallId: 't1' }),
+          entry({
+            toolCallId: 't2',
+            status: 'failed',
+            result: JSON.stringify({ error: remediation }),
+          }),
+        ]}
+      />
+    );
+
+    expect(screen.getByText(remediation)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /\+1 more/i })).toHaveAttribute(
+      'aria-expanded',
+      'true'
+    );
+    expect(screen.queryByText(`{"error":"${remediation}"}`)).not.toBeInTheDocument();
   });
 
   it('shows a neutral tone when any call was cancelled and none failed', () => {
@@ -99,7 +122,7 @@ describe('ToolCallGroupBlock', () => {
       />
     );
 
-    expect(screen.getByRole('button').className).toContain('text-error');
+    expect(screen.getByRole('button', { name: /\+1 more/i }).className).toContain('text-error');
   });
 
   it('shows a pending tone when any call awaits user input', () => {

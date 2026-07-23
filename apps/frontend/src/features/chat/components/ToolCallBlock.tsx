@@ -16,7 +16,7 @@ import {
   UserRound,
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useI18n } from '@/hooks/use-i18n';
 import { getToolHint, ToolIcon } from './ToolCallVisuals';
 
@@ -70,13 +70,13 @@ function formatToolDuration(durationMs: number): string {
 
 export function ToolCallBlock({ name, args, result, status, execution }: ToolCallBlockProps) {
   const { t } = useI18n();
-  const [expanded, setExpanded] = useState(false);
+  const isError = status === 'failed' || status === 'timed_out';
+  const [expanded, setExpanded] = useState(isError);
   const [copied, setCopied] = useState(false);
 
   const labels = t.tools.labels as Record<string, string> | undefined;
   const label = labels?.[name] ?? name;
   const hint = getToolHint(name, args);
-  const isError = status === 'failed' || status === 'timed_out';
   const source = execution?.source ?? inferToolExecutionSource(name);
   // Non-nominal outcomes and the awaiting state are called out explicitly;
   // success/progress already read from the icon and tone.
@@ -94,13 +94,16 @@ export function ToolCallBlock({ name, args, result, status, execution }: ToolCal
       parsedResult = result;
     }
   }
+  const displayedResult = formatToolResult(parsedResult, isError);
+
+  useEffect(() => {
+    if (isError) setExpanded(true);
+  }, [isError]);
 
   const handleCopyResult = async () => {
-    if (!result) return;
-    const text =
-      typeof parsedResult === 'string' ? parsedResult : JSON.stringify(parsedResult, null, 2);
+    if (!displayedResult) return;
     try {
-      await navigator.clipboard.writeText(text);
+      await navigator.clipboard.writeText(displayedResult);
       setCopied(true);
       setTimeout(() => setCopied(false), COPIED_RESET_MS);
     } catch {
@@ -112,6 +115,7 @@ export function ToolCallBlock({ name, args, result, status, execution }: ToolCal
     <div className="mb-3">
       <button
         type="button"
+        aria-expanded={expanded}
         onClick={() => setExpanded((v) => !v)}
         className={`glass-surface flex items-center gap-2 text-xs py-1.5 px-3 rounded-full w-fit max-w-full border
                    transition-all duration-200 cursor-pointer ${statusTone(status)}`}
@@ -164,7 +168,7 @@ export function ToolCallBlock({ name, args, result, status, execution }: ToolCal
                   </pre>
                 </div>
               )}
-              {parsedResult !== null && (
+              {displayedResult !== null && (
                 <div>
                   <div className="flex items-center justify-between mb-1">
                     <p
@@ -184,9 +188,7 @@ export function ToolCallBlock({ name, args, result, status, execution }: ToolCal
                   <pre
                     className={`whitespace-pre-wrap leading-relaxed ${isError ? 'text-error/80' : 'text-on-surface-variant/70'}`}
                   >
-                    {typeof parsedResult === 'string'
-                      ? parsedResult
-                      : JSON.stringify(parsedResult, null, 2)}
+                    {displayedResult}
                   </pre>
                 </div>
               )}
@@ -196,4 +198,19 @@ export function ToolCallBlock({ name, args, result, status, execution }: ToolCal
       </AnimatePresence>
     </div>
   );
+}
+
+function formatToolResult(parsedResult: unknown, isError: boolean): string | null {
+  if (parsedResult === null) return null;
+  if (
+    isError &&
+    typeof parsedResult === 'object' &&
+    'error' in parsedResult &&
+    typeof parsedResult.error === 'string'
+  ) {
+    return parsedResult.error;
+  }
+  return typeof parsedResult === 'string'
+    ? parsedResult
+    : (JSON.stringify(parsedResult, null, 2) ?? null);
 }
