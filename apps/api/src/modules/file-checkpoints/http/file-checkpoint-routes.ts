@@ -1,4 +1,14 @@
-import { type ApiErrorResponse, ERROR_CODES } from '@mangostudio/shared/errors';
+import {
+  type ApiErrorResponse,
+  ApiErrorResponseSchema,
+  ERROR_CODES,
+} from '@mangostudio/shared/errors';
+import {
+  type ChatFileCheckpointsResponse,
+  ChatFileCheckpointsResponseSchema,
+  type RevertChatFileCheckpointsResponse,
+  RevertChatFileCheckpointsResponseSchema,
+} from '@mangostudio/shared/file-checkpoints';
 import { type Elysia, t } from 'elysia';
 import { getDb } from '../../../db/database';
 import { requireAuth } from '../../../plugins/auth-middleware';
@@ -15,7 +25,7 @@ export const fileCheckpointRoutes = (app: Elysia) =>
       .use(requireAuth)
       .get(
         '/:id/checkpoints',
-        async ({ params, user, set }) => {
+        async ({ params, user, set }): Promise<ApiErrorResponse | ChatFileCheckpointsResponse> => {
           const userId = user?.id ?? '';
           try {
             await assertChatOwnership(params.id, userId, getDb());
@@ -29,11 +39,21 @@ export const fileCheckpointRoutes = (app: Elysia) =>
           const checkpoints = await listChatFileCheckpointSummaries(getDb(), params.id);
           return { checkpoints };
         },
-        { params: t.Object({ id: t.String() }) }
+        {
+          params: t.Object({ id: t.String() }),
+          response: {
+            200: ChatFileCheckpointsResponseSchema,
+            404: ApiErrorResponseSchema,
+          },
+        }
       )
       .post(
         '/:id/checkpoints/:messageId/revert',
-        async ({ params, user, set }): Promise<ApiErrorResponse | { revertedFiles: number }> => {
+        async ({
+          params,
+          user,
+          set,
+        }): Promise<ApiErrorResponse | RevertChatFileCheckpointsResponse> => {
           const userId = user?.id ?? '';
           try {
             await assertChatOwnership(params.id, userId, getDb());
@@ -54,6 +74,13 @@ export const fileCheckpointRoutes = (app: Elysia) =>
             throw error;
           }
         },
-        { params: t.Object({ id: t.String(), messageId: t.String() }) }
+        {
+          params: t.Object({ id: t.String(), messageId: t.String() }),
+          response: {
+            200: RevertChatFileCheckpointsResponseSchema,
+            404: ApiErrorResponseSchema,
+            409: ApiErrorResponseSchema,
+          },
+        }
       )
   );

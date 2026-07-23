@@ -1,50 +1,58 @@
 import type { Kysely } from 'kysely';
 import type { Database, FileCheckpointInsert, FileCheckpointSelect } from '../../../db/types';
-import { generateId } from '../../../utils/id';
-import { deleteCheckpointBlobIfUnreferenced, readCheckpointBlob } from './checkpoint-blob-store';
-
-export type FileCheckpointOp = 'create' | 'edit' | 'delete' | 'move';
+import { checkpointBlobSize, deleteCheckpointBlobIfUnreferenced } from './checkpoint-blob-store';
 
 const MAX_CHECKPOINT_MESSAGES_PER_CHAT = 50;
 const MAX_CHECKPOINT_BYTES_PER_CHAT = 256 * 1024 * 1024;
 
+/**
+ * The message's snapshot of what currently sits at `path`, or undefined when
+ * nothing does. The last mutation to start there wins, and a `movedTo` row
+ * carried its content away — that hands the path back, so the next mutation on
+ * it needs a snapshot of its own.
+ */
 export async function findCheckpointRow(
   db: Kysely<Database>,
   chatId: string,
   messageId: string,
   path: string
 ): Promise<FileCheckpointSelect | undefined> {
-  return await db
+  const latest = await db
     .selectFrom('file_checkpoints')
     .selectAll()
     .where('chatId', '=', chatId)
     .where('messageId', '=', messageId)
     .where('path', '=', path)
+    .orderBy('id', 'desc')
     .executeTakeFirst();
+  return latest?.movedTo === null ? latest : undefined;
 }
 
+/** Opens a manifest row, returning the id its after-hash will be recorded against. */
 export async function insertCheckpointRow(
   db: Kysely<Database>,
   row: Omit<FileCheckpointInsert, 'id' | 'createdAt' | 'revertedAt'>
-): Promise<FileCheckpointSelect> {
-  const created: FileCheckpointInsert = {
-    id: generateId(),
-    createdAt: Date.now(),
-    revertedAt: null,
-    ...row,
-  };
-  await db.insertInto('file_checkpoints').values(created).execute();
-  return created as FileCheckpointSelect;
+): Promise<number> {
+  const { id } = await db
+    .insertInto('file_checkpoints')
+    .values({ createdAt: Date.now(), revertedAt: null, ...row })
+    .returning('id')
+    .executeTakeFirstOrThrow();
+  return id;
 }
 
 export async function updateCheckpointAfterHash(
   db: Kysely<Database>,
-  id: string,
+  id: number,
   afterHash: string | null
 ): Promise<void> {
   await db.updateTable('file_checkpoints').set({ afterHash }).where('id', '=', id).execute();
 }
 
+/**
+ * Revertable rows only: a NULL `afterHash` marks a tool that threw before it
+ * finished, so the row records no completed mutation to undo.
+ */
 export async function listActiveCheckpointsForChat(
   db: Kysely<Database>,
   chatId: string
@@ -54,10 +62,12 @@ export async function listActiveCheckpointsForChat(
     .selectAll()
     .where('chatId', '=', chatId)
     .where('revertedAt', 'is', null)
-    .orderBy('createdAt', 'asc')
+    .where('afterHash', 'is not', null)
+    .orderBy('id', 'asc')
     .execute();
 }
 
+/** Ascending id, i.e. the order the mutations happened; revert replays it backwards. */
 export async function listActiveCheckpointsForMessage(
   db: Kysely<Database>,
   chatId: string,
@@ -69,7 +79,8 @@ export async function listActiveCheckpointsForMessage(
     .where('chatId', '=', chatId)
     .where('messageId', '=', messageId)
     .where('revertedAt', 'is', null)
-    .orderBy('createdAt', 'asc')
+    .where('afterHash', 'is not', null)
+    .orderBy('id', 'asc')
     .execute();
 }
 
@@ -97,28 +108,40 @@ async function isBlobKeyReferenced(db: Kysely<Database>, blobKey: string): Promi
   return row !== undefined;
 }
 
-export async function purgeChatCheckpointBlobs(
+/** Every distinct blob a chat's checkpoints reference, captured before deletion. */
+export async function listChatCheckpointBlobKeys(
   db: Kysely<Database>,
   chatId: string
-): Promise<void> {
+): Promise<string[]> {
   const rows = await db
     .selectFrom('file_checkpoints')
     .select('blobKey')
     .where('chatId', '=', chatId)
     .where('blobKey', 'is not', null)
     .execute();
-  const keys = [...new Set(rows.map((row) => row.blobKey).filter((key): key is string => !!key))];
-  for (const blobKey of keys) {
+  return [...new Set(rows.map((row) => row.blobKey).filter((key): key is string => !!key))];
+}
+
+/**
+ * Drops blobs no surviving row points at. Callers must delete the rows first:
+ * a blob is only unreferenced once its last manifest row is gone.
+ */
+export async function releaseCheckpointBlobs(
+  db: Kysely<Database>,
+  blobKeys: readonly string[]
+): Promise<void> {
+  for (const blobKey of blobKeys) {
     await deleteCheckpointBlobIfUnreferenced(blobKey, (key) => isBlobKeyReferenced(db, key));
   }
 }
 
 export async function enforceChatRetention(db: Kysely<Database>, chatId: string): Promise<void> {
+  // Every message, reverted or not: reverted rows still pin blobs on disk, so
+  // leaving them out would make the byte budget unreclaimable.
   const rows = await db
     .selectFrom('file_checkpoints')
     .select(['messageId', 'createdAt'])
     .where('chatId', '=', chatId)
-    .where('revertedAt', 'is', null)
     .execute();
 
   const earliestByMessage = new Map<string, number>();
@@ -151,19 +174,9 @@ export async function enforceChatRetention(db: Kysely<Database>, chatId: string)
 }
 
 async function sumChatBlobBytes(db: Kysely<Database>, chatId: string): Promise<number> {
-  const blobRows = await db
-    .selectFrom('file_checkpoints')
-    .select(['blobKey'])
-    .where('chatId', '=', chatId)
-    .where('blobKey', 'is not', null)
-    .execute();
-
+  const keys = await listChatCheckpointBlobKeys(db, chatId);
   let totalBytes = 0;
-  const keys = [...new Set(blobRows.map((r) => r.blobKey).filter((k): k is string => !!k))];
-  for (const blobKey of keys) {
-    const bytes = await readCheckpointBlob(blobKey);
-    if (bytes) totalBytes += bytes.byteLength;
-  }
+  for (const blobKey of keys) totalBytes += checkpointBlobSize(blobKey);
   return totalBytes;
 }
 
@@ -172,14 +185,20 @@ async function deleteMessageCheckpoints(
   chatId: string,
   messageId: string
 ): Promise<void> {
-  const rows = await listActiveCheckpointsForMessage(db, chatId, messageId);
+  // Every row for the message, not just the revertable ones: the delete below is
+  // unfiltered, so any blob left out here would be orphaned on disk forever.
+  const rows = await db
+    .selectFrom('file_checkpoints')
+    .select('blobKey')
+    .where('chatId', '=', chatId)
+    .where('messageId', '=', messageId)
+    .where('blobKey', 'is not', null)
+    .execute();
   const blobKeys = [...new Set(rows.map((r) => r.blobKey).filter((k): k is string => !!k))];
   await db
     .deleteFrom('file_checkpoints')
     .where('chatId', '=', chatId)
     .where('messageId', '=', messageId)
     .execute();
-  for (const blobKey of blobKeys) {
-    await deleteCheckpointBlobIfUnreferenced(blobKey, (key) => isBlobKeyReferenced(db, key));
-  }
+  await releaseCheckpointBlobs(db, blobKeys);
 }

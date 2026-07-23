@@ -13,7 +13,7 @@ export async function listChatFileCheckpointSummaries(
   const rows = await listActiveCheckpointsForChat(db, chatId);
   const byMessage = new Map<
     string,
-    { fileCount: number; ops: Set<FileCheckpointOp>; createdAt: number }
+    { paths: Set<string>; ops: Set<FileCheckpointOp>; createdAt: number }
   >();
 
   for (const row of rows) {
@@ -21,13 +21,14 @@ export async function listChatFileCheckpointSummaries(
     const existing = byMessage.get(row.messageId);
     if (!existing) {
       byMessage.set(row.messageId, {
-        fileCount: 1,
+        paths: new Set([row.path]),
         ops: new Set([op]),
         createdAt: row.createdAt,
       });
       continue;
     }
-    existing.fileCount += 1;
+    // Paths, not rows: a message may snapshot the same file more than once.
+    existing.paths.add(row.path);
     existing.ops.add(op);
     existing.createdAt = Math.min(existing.createdAt, row.createdAt);
   }
@@ -35,7 +36,7 @@ export async function listChatFileCheckpointSummaries(
   return [...byMessage.entries()]
     .map(([messageId, summary]) => ({
       messageId,
-      fileCount: summary.fileCount,
+      fileCount: summary.paths.size,
       ops: [...summary.ops],
       createdAt: summary.createdAt,
     }))

@@ -119,7 +119,7 @@ export async function executeWriteFile(
     // Recording the committed bytes makes a later sequential write fresh; the
     // surrounding path lock gives parallel calls the same deterministic order.
     const sha256 = recordFileRead(context.chatId, resolvedPath, args.content, committed.mtimeMs);
-    await recordFileMutationAfterHash(context, resolvedPath, sha256);
+    await recordFileMutationAfterHash(context, captured, sha256);
     return attachBeforeFields(
       { path: args.path, bytesWritten: committed.bytesWritten, created, sha256 },
       captured

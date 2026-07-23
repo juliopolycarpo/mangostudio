@@ -105,11 +105,11 @@ export async function executeMoveFile(
 
   return await withPathLocks([from, to], async () => {
     const source = await assertRegularFilePath(from, 'move');
-    await ensureFileMutationCheckpoint(context, from, 'move', { movedTo: to });
+    const captured = await ensureFileMutationCheckpoint(context, from, 'move', { movedTo: to });
     await moveRegularFileWithoutOverwrite(from, to, source.mode & 0o7777);
     rekeyFile(context.chatId, from, to);
     const afterHash = await hashFileAtPath(to);
-    await recordFileMutationAfterHash(context, from, afterHash);
+    await recordFileMutationAfterHash(context, captured, afterHash);
     return { from: args.from, to: args.to, moved: true };
   });
 }

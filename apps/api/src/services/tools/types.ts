@@ -6,6 +6,8 @@ import type {
   ToolParameterDescriptor,
   ToolSettingsCategory,
 } from '@mangostudio/shared/tool-settings';
+import type { Kysely } from 'kysely';
+import type { Database } from '../../db/types';
 import type { ToolDefinition } from '../providers/types';
 
 export type { ToolDefinition };
@@ -24,9 +26,6 @@ export interface WorkdirPolicy {
 }
 
 /** Runtime context injected into every tool call. */
-import type { Kysely } from 'kysely';
-import type { Database } from '../../db/types';
-
 export interface ToolContext {
   userId: string;
   chatId: string;

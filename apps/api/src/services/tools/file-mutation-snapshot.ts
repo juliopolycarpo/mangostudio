@@ -1,19 +1,34 @@
-import type { Kysely } from 'kysely';
+import type { FileCheckpointOp } from '@mangostudio/shared/file-checkpoints';
 import { getDb } from '../../db/database';
-import type { Database } from '../../db/types';
-import { storeCheckpointBlob } from '../../modules/file-checkpoints/infrastructure/checkpoint-blob-store';
+import {
+  hashCheckpointBytes,
+  readCheckpointBlob,
+  storeCheckpointBlob,
+} from '../../modules/file-checkpoints/infrastructure/checkpoint-blob-store';
 import {
   enforceChatRetention,
-  type FileCheckpointOp,
   findCheckpointRow,
   insertCheckpointRow,
   updateCheckpointAfterHash,
 } from '../../modules/file-checkpoints/infrastructure/checkpoint-repository';
-import { containsNulByte, READ_FILE_MAX_BYTES } from './builtin/_fs-utils';
+import { containsNulByte } from './builtin/_fs-utils';
 import type { ToolContext } from './types';
 
 const BINARY_SNIFF_BYTES = 8192;
+/**
+ * `before` travels back to the model inside the tool result and is replayed with
+ * every later turn, so it is capped far below read_file's ceiling. Past it the
+ * preview falls back to the argument-only rendering.
+ */
+const BEFORE_MAX_BYTES = 128 * 1024;
 const textDecoder = new TextDecoder('utf-8', { fatal: true });
+
+/**
+ * `afterHash` for a path the mutation left absent. A NULL `afterHash` means the
+ * tool threw before finishing, so the row describes no completed mutation and is
+ * excluded from the revertable set.
+ */
+export const CHECKPOINT_ABSENT_HASH = 'absent';
 
 type BeforeOmittedReason = 'binary' | 'too_large' | 'missing';
 
@@ -22,7 +37,9 @@ interface FileMutationBeforeFields {
   beforeOmitted?: BeforeOmittedReason;
 }
 
-interface CapturedBefore {
+export interface CapturedBefore {
+  /** Manifest row to complete, or null when this context does not checkpoint. */
+  readonly rowId: number | null;
   readonly bytes: Uint8Array | null;
   readonly beforeHash: string | null;
   readonly blobKey: string | null;
@@ -40,19 +57,20 @@ export async function ensureFileMutationCheckpoint(
   options?: { movedTo?: string }
 ): Promise<CapturedBefore> {
   if (!context.assistantMessageId) {
-    return { bytes: null, beforeHash: null, blobKey: null, fields: {} };
+    return { rowId: null, bytes: null, beforeHash: null, blobKey: null, fields: {} };
   }
 
   const db = context.db ?? getDb();
-  const existing = await findCheckpointRow(
-    db,
-    context.chatId,
-    context.assistantMessageId,
-    resolvedPath
-  );
+  // A move hands its source path back, so `existing` is only reused while the
+  // snapshot still describes what sits at `resolvedPath`.
+  const existing =
+    options?.movedTo === undefined
+      ? await findCheckpointRow(db, context.chatId, context.assistantMessageId, resolvedPath)
+      : undefined;
   if (existing) {
-    const bytes = existing.blobKey !== null ? await readBlobForRow(db, existing.blobKey) : null;
+    const bytes = existing.blobKey !== null ? await readCheckpointBlob(existing.blobKey) : null;
     return {
+      rowId: existing.id,
       bytes,
       beforeHash: existing.beforeHash,
       blobKey: existing.blobKey,
@@ -67,11 +85,11 @@ export async function ensureFileMutationCheckpoint(
 
   if (exists) {
     beforeBytes = await Bun.file(resolvedPath).bytes();
-    beforeHash = hashBytes(beforeBytes);
+    beforeHash = hashCheckpointBytes(beforeBytes);
     blobKey = await storeCheckpointBlob(beforeBytes);
   }
 
-  await insertCheckpointRow(db, {
+  const rowId = await insertCheckpointRow(db, {
     chatId: context.chatId,
     messageId: context.assistantMessageId,
     path: resolvedPath,
@@ -85,6 +103,7 @@ export async function ensureFileMutationCheckpoint(
   await enforceChatRetention(db, context.chatId);
 
   return {
+    rowId,
     bytes: beforeBytes,
     beforeHash,
     blobKey,
@@ -92,17 +111,20 @@ export async function ensureFileMutationCheckpoint(
   };
 }
 
-/** Persists the post-mutation content hash for a manifest row. */
+/**
+ * Completes the manifest row the matching `ensureFileMutationCheckpoint` opened,
+ * which is also what marks it as describing a finished mutation. Pass `null` when
+ * the path is absent afterwards. Keyed on the row rather than the path: a move
+ * leaves its content somewhere else entirely.
+ */
 export async function recordFileMutationAfterHash(
   context: ToolContext,
-  resolvedPath: string,
+  captured: CapturedBefore,
   afterHash: string | null
 ): Promise<void> {
-  if (!context.assistantMessageId) return;
+  if (captured.rowId === null) return;
   const db = context.db ?? getDb();
-  const row = await findCheckpointRow(db, context.chatId, context.assistantMessageId, resolvedPath);
-  if (!row) return;
-  await updateCheckpointAfterHash(db, row.id, afterHash);
+  await updateCheckpointAfterHash(db, captured.rowId, afterHash ?? CHECKPOINT_ABSENT_HASH);
 }
 
 export function attachBeforeFields<T extends object>(
@@ -114,7 +136,7 @@ export function attachBeforeFields<T extends object>(
 
 function beforeFieldsFromBytes(bytes: Uint8Array | null): FileMutationBeforeFields {
   if (bytes === null) return { beforeOmitted: 'missing' };
-  if (bytes.byteLength > READ_FILE_MAX_BYTES) return { beforeOmitted: 'too_large' };
+  if (bytes.byteLength > BEFORE_MAX_BYTES) return { beforeOmitted: 'too_large' };
   if (containsNulByte(bytes, Math.min(bytes.byteLength, BINARY_SNIFF_BYTES))) {
     return { beforeOmitted: 'binary' };
   }
@@ -125,33 +147,19 @@ function beforeFieldsFromBytes(bytes: Uint8Array | null): FileMutationBeforeFiel
   }
 }
 
-function hashBytes(bytes: Uint8Array): string {
-  const hasher = new Bun.CryptoHasher('sha256');
-  hasher.update(bytes);
-  return hasher.digest('hex');
-}
-
-async function readBlobForRow(_db: Kysely<Database>, blobKey: string): Promise<Uint8Array | null> {
-  const { readCheckpointBlob } = await import(
-    '../../modules/file-checkpoints/infrastructure/checkpoint-blob-store'
-  );
-  return readCheckpointBlob(blobKey);
-}
-
 /** Hash of file at path, or null when the path does not exist. */
 export async function hashFileAtPath(resolvedPath: string): Promise<string | null> {
   if (!(await Bun.file(resolvedPath).exists())) return null;
-  const bytes = await Bun.file(resolvedPath).bytes();
-  return hashBytes(bytes);
+  return hashCheckpointBytes(await Bun.file(resolvedPath).bytes());
 }
 
-/** Hash after delete: file must be absent. */
-export async function assertAbsentOrMatchHash(
+/** Verifies a path still holds the content the recorded mutation left behind. */
+export async function assertMatchesAfterHash(
   resolvedPath: string,
-  expectedAfterHash: string | null
+  expectedAfterHash: string
 ): Promise<void> {
   const current = await hashFileAtPath(resolvedPath);
-  if (expectedAfterHash === null) {
+  if (expectedAfterHash === CHECKPOINT_ABSENT_HASH) {
     if (current !== null) throw new FileCheckpointConflictError(resolvedPath);
     return;
   }

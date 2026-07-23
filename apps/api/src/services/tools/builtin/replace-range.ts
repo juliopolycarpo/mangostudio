@@ -150,7 +150,7 @@ export async function executeReplaceRange(
       committed.mtimeMs,
       replacementLines.length === replacedLines ? Number.MAX_SAFE_INTEGER : args.startLine - 1
     );
-    await recordFileMutationAfterHash(context, resolvedPath, sha256);
+    await recordFileMutationAfterHash(context, captured, sha256);
     return attachBeforeFields(
       {
         path: args.path,

@@ -9,7 +9,6 @@ import { RegularFileWriteError, writeRegularFileAtomic } from '../../../lib/safe
 import { getRequiredTextArg } from '../arg-parsing';
 import { recordFileRead, withPathLocks } from '../file-freshness';
 import {
-  attachBeforeFields,
   ensureFileMutationCheckpoint,
   recordFileMutationAfterHash,
 } from '../file-mutation-snapshot';
@@ -96,11 +95,8 @@ export async function executeCreateFile(
     }
 
     const sha256 = recordFileRead(context.chatId, resolvedPath, args.content, committed.mtimeMs);
-    await recordFileMutationAfterHash(context, resolvedPath, sha256);
-    return attachBeforeFields(
-      { path: args.path, bytesWritten: committed.bytesWritten, sha256 },
-      captured
-    );
+    await recordFileMutationAfterHash(context, captured, sha256);
+    return { path: args.path, bytesWritten: committed.bytesWritten, sha256 };
   });
 }
 

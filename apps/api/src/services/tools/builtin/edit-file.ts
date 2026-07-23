@@ -7,7 +7,6 @@ import { RegularFileWriteError, writeRegularFileAtomic } from '../../../lib/safe
 import { getOptionalBoolean, getRequiredTextArg, ToolArgumentError } from '../arg-parsing';
 import { FileNotReadError, readFreshFile, recordFileEdit, withPathLocks } from '../file-freshness';
 import {
-  attachBeforeFields,
   ensureFileMutationCheckpoint,
   recordFileMutationAfterHash,
 } from '../file-mutation-snapshot';
@@ -39,8 +38,6 @@ export interface EditFileToolResult {
   replacements: number;
   sha256: string;
   firstChangedLine: number;
-  before?: string;
-  beforeOmitted?: 'binary' | 'too_large' | 'missing';
 }
 
 export type EditFileToolSettings = PathValidationSettings;
@@ -152,16 +149,13 @@ export async function executeEditFile(
       committed.mtimeMs,
       lineCountChanged ? firstChangedLine - 1 : Number.MAX_SAFE_INTEGER
     );
-    await recordFileMutationAfterHash(context, resolvedPath, sha256);
-    return attachBeforeFields(
-      {
-        path: args.path,
-        replacements: selectedOffsets.length,
-        sha256,
-        firstChangedLine,
-      },
-      captured
-    );
+    await recordFileMutationAfterHash(context, captured, sha256);
+    return {
+      path: args.path,
+      replacements: selectedOffsets.length,
+      sha256,
+      firstChangedLine,
+    };
   });
 }
 

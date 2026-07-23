@@ -4,7 +4,7 @@
 
 import type { InteractionMode } from '@mangostudio/shared';
 import type { ChatAttachmentKind } from '@mangostudio/shared/chat';
-import type { Insertable, Selectable, Updateable } from 'kysely';
+import type { Generated, Insertable, Selectable, Updateable } from 'kysely';
 
 interface ChatsTable {
   id: string;
@@ -216,7 +216,8 @@ interface McpServersTable {
 }
 
 interface FileCheckpointsTable {
-  id: string;
+  /** Rowid alias assigned by SQLite; ascending id is the message's mutation order. */
+  id: Generated<number>;
   chatId: string;
   messageId: string;
   path: string;

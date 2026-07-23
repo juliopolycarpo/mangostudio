@@ -19,6 +19,7 @@ import {
   withPathLocks,
 } from '../file-freshness';
 import {
+  type CapturedBefore,
   ensureFileMutationCheckpoint,
   hashFileAtPath,
   recordFileMutationAfterHash,
@@ -312,17 +313,32 @@ async function commitOperations(
   revalidated: ReadonlyMap<PlannedUpdate | PlannedDelete, RevalidatedUpdate>,
   context: ToolContext
 ): Promise<ApplyPatchToolResult> {
+  // One snapshot per planned operation, kept by operation: the after-hash pass
+  // below completes each row, and a path can appear more than once in a patch.
+  const captured = new Map<PlannedOperation, CapturedBefore>();
   for (const operation of planned) {
     if (operation.type === 'add') {
-      await ensureFileMutationCheckpoint(context, operation.resolvedPath, 'create');
+      captured.set(
+        operation,
+        await ensureFileMutationCheckpoint(context, operation.resolvedPath, 'create')
+      );
     } else if (operation.type === 'delete') {
-      await ensureFileMutationCheckpoint(context, operation.resolvedPath, 'delete');
+      captured.set(
+        operation,
+        await ensureFileMutationCheckpoint(context, operation.resolvedPath, 'delete')
+      );
     } else if (operation.resolvedMoveTo) {
-      await ensureFileMutationCheckpoint(context, operation.resolvedPath, 'move', {
-        movedTo: operation.resolvedMoveTo,
-      });
+      captured.set(
+        operation,
+        await ensureFileMutationCheckpoint(context, operation.resolvedPath, 'move', {
+          movedTo: operation.resolvedMoveTo,
+        })
+      );
     } else {
-      await ensureFileMutationCheckpoint(context, operation.resolvedPath, 'edit');
+      captured.set(
+        operation,
+        await ensureFileMutationCheckpoint(context, operation.resolvedPath, 'edit')
+      );
     }
   }
 
@@ -372,9 +388,12 @@ async function commitOperations(
 
   const files = await Promise.all(
     planned.map(async (operation): Promise<ApplyPatchFileResult> => {
+      const capturedBefore = captured.get(operation);
+      if (!capturedBefore) throw new Error(`Missing checkpoint for "${operation.inputPath}".`);
+
       if (operation.type === 'delete') {
         forgetFile(context.chatId, operation.resolvedPath);
-        await recordFileMutationAfterHash(context, operation.resolvedPath, null);
+        await recordFileMutationAfterHash(context, capturedBefore, null);
         return { path: operation.inputPath, op: 'delete' };
       }
 
@@ -387,7 +406,7 @@ async function commitOperations(
           operation.content,
           committed.mtimeMs
         );
-        await recordFileMutationAfterHash(context, operation.resolvedPath, sha256);
+        await recordFileMutationAfterHash(context, capturedBefore, sha256);
         return { path: operation.inputPath, op: 'add', sha256 };
       }
 
@@ -412,9 +431,9 @@ async function commitOperations(
         : recordFileRead(context.chatId, target, current.bytes, mtimeMs);
       if (operation.resolvedMoveTo) {
         const afterHash = (await hashFileAtPath(target)) ?? sha256;
-        await recordFileMutationAfterHash(context, operation.resolvedPath, afterHash);
+        await recordFileMutationAfterHash(context, capturedBefore, afterHash);
       } else {
-        await recordFileMutationAfterHash(context, operation.resolvedPath, sha256);
+        await recordFileMutationAfterHash(context, capturedBefore, sha256);
       }
       return operation.moveTo
         ? { path: operation.inputPath, op: 'move', movedTo: operation.moveTo, sha256 }

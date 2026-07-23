@@ -5,7 +5,10 @@ export const fileCheckpoints: Migration = {
     await db.schema
       .createTable('file_checkpoints')
       .ifNotExists()
-      .addColumn('id', 'text', (col) => col.primaryKey())
+      // Rowid alias: SQLite assigns it inside the INSERT, so it doubles as the
+      // manifest's insertion order. Revert replays a message's rows in reverse,
+      // which no timestamp can order reliably at sub-millisecond resolution.
+      .addColumn('id', 'integer', (col) => col.primaryKey().autoIncrement())
       .addColumn('chatId', 'text', (col) =>
         col.notNull().references('chats.id').onDelete('cascade')
       )
@@ -36,17 +39,18 @@ export const fileCheckpoints: Migration = {
       .columns(['chatId', 'createdAt'])
       .execute();
 
+    // Not unique: one message can touch the same path more than once — a move
+    // frees its source path for a later create, and a move chain revisits it.
     await db.schema
-      .createIndex('idx_file_checkpoints_unique_path')
+      .createIndex('idx_file_checkpoints_message_path')
       .ifNotExists()
       .on('file_checkpoints')
       .columns(['chatId', 'messageId', 'path'])
-      .unique()
       .execute();
   },
 
   async down(db): Promise<void> {
-    await db.schema.dropIndex('idx_file_checkpoints_unique_path').ifExists().execute();
+    await db.schema.dropIndex('idx_file_checkpoints_message_path').ifExists().execute();
     await db.schema.dropIndex('idx_file_checkpoints_chat_created').ifExists().execute();
     await db.schema.dropIndex('idx_file_checkpoints_chat_message').ifExists().execute();
     await db.schema.dropTable('file_checkpoints').ifExists().execute();
