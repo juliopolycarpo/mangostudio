@@ -1,4 +1,5 @@
 import type { ReasoningEffort } from '@mangostudio/shared';
+import type { ChatDisplaySettings, DiffPreviewMode } from '@mangostudio/shared/app-settings';
 import {
   type AppSettings,
   type ChatTitleSettings,
@@ -213,6 +214,16 @@ export function useGlobalSettings() {
     [updateWorkspacePanelSettings]
   );
 
+  const updateChatDisplaySettings = useCallback(
+    (updates: Partial<ChatDisplaySettings>) => {
+      saveSettings((current) => ({
+        ...current,
+        chatDisplaySettings: { ...current.chatDisplaySettings, ...updates },
+      }));
+    },
+    [saveSettings]
+  );
+
   const updateGitSettings = useCallback(
     (updates: Partial<AppSettings['gitSettings']>) => {
       saveSettings((current) => ({
@@ -335,6 +346,11 @@ export function useGlobalSettings() {
     workspaceSettings: settings.workspaceSettings,
     gitSettings: settings.gitSettings,
     chatTitleSettings: settings.chatTitleSettings,
+    chatDisplaySettings: settings.chatDisplaySettings,
+    setDiffPreviewsEnabled: (value: boolean) =>
+      updateChatDisplaySettings({ diffPreviewsEnabled: value }),
+    setDiffPreviewMode: (value: DiffPreviewMode) =>
+      updateChatDisplaySettings({ diffPreviewMode: value }),
     setContextCompactionBehavior: (value: ContextCompactionBehavior) =>
       updateContextSettings({ compactionBehavior: value }),
     setContextWarningThreshold: (value: number) =>

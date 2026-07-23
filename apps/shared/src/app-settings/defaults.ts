@@ -38,7 +38,9 @@ import {
 } from '../workspaces';
 import type {
   AppSettings,
+  ChatDisplaySettings,
   ChatTitleSettings,
+  DiffPreviewMode,
   GitSettings,
   ImageQuality,
   MultiAgentSettings,
@@ -126,6 +128,11 @@ export const DEFAULT_WORKSPACE_SETTINGS: WorkspaceSettings = {
   },
 };
 
+export const DEFAULT_CHAT_DISPLAY_SETTINGS: ChatDisplaySettings = {
+  diffPreviewsEnabled: true,
+  diffPreviewMode: 'collapse_older',
+};
+
 export const DEFAULT_GIT_SETTINGS: GitSettings = {
   signCommits: false,
   signOff: false,
@@ -148,6 +155,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   skillSources: DEFAULT_SKILL_SOURCE_SETTINGS,
   workspaceSettings: DEFAULT_WORKSPACE_SETTINGS,
   gitSettings: DEFAULT_GIT_SETTINGS,
+  chatDisplaySettings: DEFAULT_CHAT_DISPLAY_SETTINGS,
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -432,6 +440,24 @@ function normalizeWorkspacePanelIds(
   );
 }
 
+function isDiffPreviewMode(value: unknown): value is DiffPreviewMode {
+  return value === 'expanded' || value === 'collapsed' || value === 'collapse_older';
+}
+
+export function normalizeChatDisplaySettings(value: unknown): ChatDisplaySettings {
+  if (!isRecord(value)) return DEFAULT_CHAT_DISPLAY_SETTINGS;
+
+  return {
+    diffPreviewsEnabled:
+      typeof value.diffPreviewsEnabled === 'boolean'
+        ? value.diffPreviewsEnabled
+        : DEFAULT_CHAT_DISPLAY_SETTINGS.diffPreviewsEnabled,
+    diffPreviewMode: isDiffPreviewMode(value.diffPreviewMode)
+      ? value.diffPreviewMode
+      : DEFAULT_CHAT_DISPLAY_SETTINGS.diffPreviewMode,
+  };
+}
+
 export function normalizeGitSettings(value: unknown): GitSettings {
   if (!isRecord(value)) return DEFAULT_GIT_SETTINGS;
 
@@ -487,5 +513,6 @@ export function normalizeAppSettings(value: unknown): AppSettings {
     skillSources: normalizeSkillSourceSettings(value.skillSources),
     workspaceSettings: normalizeWorkspaceSettings(value.workspaceSettings),
     gitSettings: normalizeGitSettings(value.gitSettings),
+    chatDisplaySettings: normalizeChatDisplaySettings(value.chatDisplaySettings),
   };
 }

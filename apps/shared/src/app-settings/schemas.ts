@@ -60,6 +60,17 @@ export const SkillSourceSettingsSchema = Type.Object({
   claude: Type.Boolean(),
 });
 
+export const DiffPreviewModeSchema = Type.Union([
+  Type.Literal('expanded'),
+  Type.Literal('collapsed'),
+  Type.Literal('collapse_older'),
+]);
+
+export const ChatDisplaySettingsSchema = Type.Object({
+  diffPreviewsEnabled: Type.Boolean(),
+  diffPreviewMode: DiffPreviewModeSchema,
+});
+
 export const CommitMessageSettingsSchema = Type.Object({
   preferredModel: Type.String(),
   systemPrompt: Type.String({ minLength: 1 }),
@@ -90,9 +101,12 @@ export const AppSettingsSchema = Type.Object({
   skillSources: SkillSourceSettingsSchema,
   workspaceSettings: WorkspaceSettingsSchema,
   gitSettings: GitSettingsSchema,
+  chatDisplaySettings: ChatDisplaySettingsSchema,
 });
 
 export type ImageQuality = Static<typeof ImageQualitySchema>;
+export type DiffPreviewMode = Static<typeof DiffPreviewModeSchema>;
+export type ChatDisplaySettings = Static<typeof ChatDisplaySettingsSchema>;
 export type ChatTitleSettings = Static<typeof ChatTitleSettingsSchema>;
 export type ChatTitleStrategy = ChatTitleSettings['strategy'];
 export type MultiAgentSettings = Static<typeof MultiAgentSettingsSchema>;

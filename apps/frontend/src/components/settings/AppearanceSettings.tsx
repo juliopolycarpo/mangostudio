@@ -1,4 +1,6 @@
+import type { DiffPreviewMode } from '@mangostudio/shared/app-settings';
 import { Card } from '@/components/ui/Card';
+import { useGlobalSettings } from '@/hooks/use-global-settings';
 import { useI18n } from '@/hooks/use-i18n';
 import type { CodeThemeConfig, ThemeConfig } from '@/hooks/use-theme';
 import { useTheme } from '@/hooks/use-theme';
@@ -108,12 +110,22 @@ function ThemeCard({
 
 const PREVIEW_SENTENCE_KEY = 'The quick brown fox jumps over the lazy dog.';
 
+const DIFF_PREVIEW_MODES = ['expanded', 'collapsed', 'collapse_older'] as const;
+
+const DIFF_PREVIEW_MODE_I18N_KEYS = {
+  expanded: 'modeExpanded',
+  collapsed: 'modeCollapsed',
+  collapse_older: 'modeCollapseOlder',
+} as const satisfies Record<DiffPreviewMode, string>;
+
 /**
- * Appearance settings tab: app theme, code theme, font size, chat density.
+ * Appearance settings tab: app theme, code theme, font size, chat density,
+ * file change previews.
  */
 export function AppearanceSettings() {
   const { t } = useI18n();
   const { config, setConfig } = useTheme();
+  const { chatDisplaySettings, setDiffPreviewsEnabled, setDiffPreviewMode } = useGlobalSettings();
   const s = t.settings.appearance;
 
   const setFontSize = (fontSize: FontSize) => setConfig({ fontSize });
@@ -239,6 +251,35 @@ export function AppearanceSettings() {
         >
           {PREVIEW_SENTENCE_KEY}
         </p>
+      </SettingsSection>
+
+      {/* ── File Change Previews ── */}
+      <SettingsSection title={s.fileChanges.label} description={s.fileChanges.description}>
+        <div className="flex items-start justify-between gap-4">
+          <p className="text-sm font-medium text-on-surface">{s.fileChanges.enabled}</p>
+          <input
+            type="checkbox"
+            checked={chatDisplaySettings.diffPreviewsEnabled}
+            onChange={(event) => setDiffPreviewsEnabled(event.target.checked)}
+            aria-label={s.fileChanges.enabled}
+            className="mt-1 h-4 w-4 shrink-0 rounded border-outline-variant/30 accent-primary"
+          />
+        </div>
+        {chatDisplaySettings.diffPreviewsEnabled && (
+          <>
+            <div className="flex flex-wrap gap-2">
+              {DIFF_PREVIEW_MODES.map((mode) => (
+                <OptionButton
+                  key={mode}
+                  selected={chatDisplaySettings.diffPreviewMode === mode}
+                  onClick={() => setDiffPreviewMode(mode)}
+                  label={s.fileChanges[DIFF_PREVIEW_MODE_I18N_KEYS[mode]]}
+                />
+              ))}
+            </div>
+            <p className="text-xs text-on-surface-variant/50">{s.fileChanges.modeDescription}</p>
+          </>
+        )}
       </SettingsSection>
 
       {/* ── Chat Density ── */}

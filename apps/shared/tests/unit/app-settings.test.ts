@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import {
   clampMaxToolIterations,
   DEFAULT_APP_SETTINGS,
+  DEFAULT_CHAT_DISPLAY_SETTINGS,
   DEFAULT_CHAT_TITLE_SETTINGS,
   DEFAULT_CONTEXT_SETTINGS,
   DEFAULT_GIT_SETTINGS,
@@ -15,6 +16,7 @@ import {
   MAX_TOOL_ITERATIONS_MAX,
   MAX_TOOL_ITERATIONS_MIN,
   normalizeAppSettings,
+  normalizeChatDisplaySettings,
   normalizeChatTitleSettings,
   normalizeContextSettings,
   normalizeGitSettings,
@@ -191,6 +193,26 @@ describe('normalizeChatTitleSettings', () => {
       ...DEFAULT_CHAT_TITLE_SETTINGS,
       preferredModel: DEFAULT_CHAT_TITLE_SETTINGS.preferredModel,
     });
+  });
+});
+
+describe('normalizeChatDisplaySettings', () => {
+  it('falls back to defaults when input is not an object', () => {
+    expect(normalizeChatDisplaySettings(undefined)).toEqual(DEFAULT_CHAT_DISPLAY_SETTINGS);
+    expect(normalizeChatDisplaySettings(null)).toEqual(DEFAULT_CHAT_DISPLAY_SETTINGS);
+    expect(normalizeChatDisplaySettings('always')).toEqual(DEFAULT_CHAT_DISPLAY_SETTINGS);
+  });
+
+  it('preserves valid values', () => {
+    expect(
+      normalizeChatDisplaySettings({ diffPreviewsEnabled: false, diffPreviewMode: 'expanded' })
+    ).toEqual({ diffPreviewsEnabled: false, diffPreviewMode: 'expanded' });
+  });
+
+  it('falls back individual fields when types are invalid', () => {
+    expect(
+      normalizeChatDisplaySettings({ diffPreviewsEnabled: 'yes', diffPreviewMode: 'sometimes' })
+    ).toEqual(DEFAULT_CHAT_DISPLAY_SETTINGS);
   });
 });
 
@@ -478,6 +500,10 @@ describe('normalizeAppSettings', () => {
 
   it('normalizes missing Git settings to the shared defaults', () => {
     expect(normalizeAppSettings({}).gitSettings).toEqual(DEFAULT_GIT_SETTINGS);
+  });
+
+  it('normalizes missing chat display settings to the shared defaults', () => {
+    expect(normalizeAppSettings({}).chatDisplaySettings).toEqual(DEFAULT_CHAT_DISPLAY_SETTINGS);
   });
 
   it('falls back individual top-level fields when types are invalid', () => {
