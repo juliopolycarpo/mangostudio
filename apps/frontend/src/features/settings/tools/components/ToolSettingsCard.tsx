@@ -48,6 +48,11 @@ function getTranslatedToolText(
         title: s.toolNames.replaceRange,
         description: s.toolDescriptions.replaceRange,
       };
+    case 'apply_patch':
+      return {
+        title: s.toolNames.applyPatch,
+        description: s.toolDescriptions.applyPatch,
+      };
     case 'create_file':
       return {
         title: s.toolNames.createFile,

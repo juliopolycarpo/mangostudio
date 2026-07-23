@@ -751,6 +751,7 @@ export const messages = {
         writeFile: 'Escrever arquivo',
         editFile: 'Editar arquivo',
         replaceRange: 'Substituir trecho',
+        applyPatch: 'Aplicar patch',
         createFile: 'Criar arquivo',
         deleteFile: 'Excluir arquivo',
         moveFile: 'Mover arquivo',
@@ -763,6 +764,8 @@ export const messages = {
         writeFile: 'Permite que a IA escreva conteúdo de texto em arquivos no disco.',
         editFile: 'Permite que a IA substitua texto exato em arquivos lidos neste chat.',
         replaceRange: 'Permite que a IA substitua trechos de linhas em arquivos lidos neste chat.',
+        applyPatch:
+          'Permite que a IA aplique alterações ancoradas por contexto em vários arquivos de texto de uma só vez.',
         createFile:
           'Permite que a IA crie novos arquivos de texto sem sobrescrever caminhos existentes.',
         deleteFile: 'Permite que a IA exclua arquivos regulares lidos neste chat.',
@@ -1421,6 +1424,7 @@ export const messages = {
       write_file: 'Escreveu',
       edit_file: 'Editar',
       replace_range: 'Substituir Trecho',
+      apply_patch: 'Aplicar Patch',
       create_file: 'Criar',
       delete_file: 'Excluir',
       move_file: 'Mover',

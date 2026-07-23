@@ -24,6 +24,7 @@ const REQUIRED_TOOL_NAMES = [
   'write_file',
   'edit_file',
   'replace_range',
+  'apply_patch',
   'create_file',
   'delete_file',
   'move_file',

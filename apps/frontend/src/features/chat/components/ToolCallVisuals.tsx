@@ -1,6 +1,7 @@
 import {
   ArrowRightLeft,
   Clock,
+  FileDiff,
   FileEdit,
   FilePenLine,
   FilePlus,
@@ -34,6 +35,8 @@ export function ToolIcon({ toolName, className }: { toolName: string; className?
       return <FilePenLine size={size} className={className} />;
     case 'replace_range':
       return <Replace size={size} className={className} />;
+    case 'apply_patch':
+      return <FileDiff size={size} className={className} />;
     case 'create_file':
       return <FilePlus size={size} className={className} />;
     case 'delete_file':
@@ -77,7 +80,11 @@ function abbreviatePath(rawPath: unknown): string | null {
  *
  * // Usage: getToolHint('read_file', { path: '/home/ada/notes.md' }) // => '~/notes.md'
  */
-export function getToolHint(toolName: string, args: Record<string, unknown>): string | null {
+export function getToolHint(
+  toolName: string,
+  args: Record<string, unknown>,
+  formatAdditionalCount: (count: number) => string = (count) => `+${count} more`
+): string | null {
   switch (toolName) {
     case 'list_directory':
     case 'read_file':
@@ -95,6 +102,8 @@ export function getToolHint(toolName: string, args: Record<string, unknown>): st
       if (typeof startLine !== 'number' || typeof endLine !== 'number') return path;
       return `${path}:${startLine}-${endLine}`;
     }
+    case 'apply_patch':
+      return getPatchHint(args.patch, formatAdditionalCount);
     case 'move_file': {
       const from = abbreviatePath(args.from);
       const to = abbreviatePath(args.to);
@@ -114,4 +123,24 @@ export function getToolHint(toolName: string, args: Record<string, unknown>): st
     default:
       return null;
   }
+}
+
+/**
+ * Extracts only file-operation headers for a cheap, non-throwing patch summary.
+ * The backend parser remains authoritative; chat rendering must tolerate a
+ * partial argument stream while a tool call is still being assembled.
+ */
+function getPatchHint(
+  patch: unknown,
+  formatAdditionalCount: (count: number) => string
+): string | null {
+  if (typeof patch !== 'string') return null;
+  const paths = Array.from(
+    patch.matchAll(/^\*\*\* (?:Add|Update|Delete) File:[ \t]*([^\r\n]+?)[ \t]*$/gm),
+    (match) => match[1]
+  ).filter((path): path is string => typeof path === 'string' && path.length > 0);
+  const first = abbreviatePath(paths[0]);
+  if (!first) return null;
+  const additionalCount = paths.length - 1;
+  return additionalCount > 0 ? `${first} (${formatAdditionalCount(additionalCount)})` : first;
 }

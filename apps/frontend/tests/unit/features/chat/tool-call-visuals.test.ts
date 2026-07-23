@@ -29,6 +29,31 @@ describe('getToolHint', () => {
     ).toBe('~/src/old.ts → ~/src/new.ts');
   });
 
+  it('summarizes the first file and remaining scope for apply_patch', () => {
+    expect(
+      getToolHint('apply_patch', {
+        patch: `*** Begin Patch
+*** Update File: /home/ada/src/app.ts
+-old
++new
+*** Add File: /home/ada/src/new.ts
++content
+*** Delete File: /home/ada/src/dead.ts
+*** End Patch`,
+      })
+    ).toBe('~/src/app.ts (+2 more)');
+  });
+
+  it('tolerates partial or malformed apply_patch arguments', () => {
+    expect(getToolHint('apply_patch', { patch: '*** Begin Patch\n*** Update File:' })).toBeNull();
+    expect(
+      getToolHint('apply_patch', {
+        patch: '*** Begin Patch\n*** Update File:\n-old\n+new',
+      })
+    ).toBeNull();
+    expect(getToolHint('apply_patch', { patch: 42 })).toBeNull();
+  });
+
   it('returns null when move_file is missing either path', () => {
     expect(getToolHint('move_file', { from: '/home/ada/old.ts' })).toBeNull();
     expect(getToolHint('move_file', { to: '/home/ada/new.ts' })).toBeNull();

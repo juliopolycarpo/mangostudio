@@ -148,6 +148,29 @@ describe('ToolCallBlock', () => {
     expect(button).toHaveTextContent(/Date/i);
   });
 
+  it('renders apply_patch with its diff icon and multi-file scope', () => {
+    const { container } = render(
+      <ToolCallBlock
+        name="apply_patch"
+        args={{
+          patch: `*** Begin Patch
+*** Update File: /home/ada/src/app.ts
+-old
++new
+*** Add File: /home/ada/src/new.ts
++content
+*** End Patch`,
+        }}
+        status="running"
+      />
+    );
+
+    const button = screen.getByRole('button');
+    expect(button).toHaveTextContent('Patch');
+    expect(button).toHaveTextContent('~/src/app.ts (+1 more)');
+    expect(container.querySelector('.lucide-file-diff')).toBeInTheDocument();
+  });
+
   it('toggles expansion', async () => {
     render(
       <ToolCallBlock
