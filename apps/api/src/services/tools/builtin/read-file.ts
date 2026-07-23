@@ -1,14 +1,16 @@
 /**
  * Built-in tool: read_file
- * Reads the contents of a text file from disk.
+ * Reads the contents of a text file from disk with line numbers and windowing.
  */
 
+import { getBoundedOptionalInteger } from '../arg-parsing';
 import { recordFileRead } from '../file-freshness';
 import { registerTool } from '../registry';
 import type { ToolContext } from '../types';
 import {
   getRequiredPathArg,
   normalizePathList,
+  PathAccessError,
   type PathValidationSettings,
   readFileWithObservedMtime,
   resolveAndValidatePath,
@@ -19,8 +21,24 @@ const READ_FILE_TOOL_NAME = 'read_file';
 /** Hard ceiling on bytes loaded by read_file; oversized files fail instead of allocating. */
 export const READ_FILE_MAX_BYTES = 10 * 1024 * 1024;
 
+const READ_FILE_DEFAULT_START_LINE = 1;
+const READ_FILE_DEFAULT_MAX_LINES = 2000;
+const READ_FILE_MIN_MAX_LINES = 1;
+const READ_FILE_MAX_MAX_LINES = 5000;
+/** Practical upper bound for startLine so extreme values clamp instead of allocating. */
+const READ_FILE_MAX_START_LINE = 10_000_000;
+export const READ_FILE_MAX_LINE_CHARS = 2000;
+export const READ_FILE_MAX_WINDOW_BYTES = 256 * 1024;
+const BINARY_SNIFF_BYTES = 8 * 1024;
+const LINE_TRUNCATION_MARKER = '…[truncated]';
+const WINDOW_TRUNCATION_NOTICE = '\n\n[truncated: use startLine/maxLines to read more]';
+const NEWLINE = 0x0a;
+const NUL = 0x00;
+
 export interface ReadFileToolArgs {
   path: string;
+  startLine?: number;
+  maxLines?: number;
 }
 
 export interface ReadFileToolResult {
@@ -28,6 +46,10 @@ export interface ReadFileToolResult {
   path: string;
   size: number;
   sha256: string;
+  totalLines: number;
+  startLine: number;
+  endLine: number;
+  truncated: boolean;
 }
 
 export type ReadFileToolSettings = PathValidationSettings;
@@ -35,13 +57,27 @@ export type ReadFileToolSettings = PathValidationSettings;
 const definition = {
   name: READ_FILE_TOOL_NAME,
   description:
-    'Reads the contents of a file from disk. Use this when the user asks to inspect, view, or read a file.',
+    'Reads the contents of a text file from disk. Output is line-numbered (cat -n style) ' +
+    'so line numbers can feed replace_range and other edit tools. Use startLine/maxLines to ' +
+    'window large files instead of reading everything at once. Use this when the user asks ' +
+    'to inspect, view, or read a file.',
   parameters: {
     type: 'object',
     properties: {
       path: {
         type: 'string',
         description: 'Absolute path, ~ path, or path relative to the chat working directory.',
+      },
+      startLine: {
+        type: 'integer',
+        description: '1-based line to start reading from (default 1).',
+        minimum: 1,
+      },
+      maxLines: {
+        type: 'integer',
+        description: `Maximum number of lines to return (default ${READ_FILE_DEFAULT_MAX_LINES}, max ${READ_FILE_MAX_MAX_LINES}).`,
+        minimum: READ_FILE_MIN_MAX_LINES,
+        maximum: READ_FILE_MAX_MAX_LINES,
       },
     },
     required: ['path'],
@@ -69,22 +105,82 @@ export async function executeReadFile(
     workdirPolicy: context.workdirPolicy,
   });
 
+  const startLine = args.startLine ?? READ_FILE_DEFAULT_START_LINE;
+  const maxLines = args.maxLines ?? READ_FILE_DEFAULT_MAX_LINES;
+
   const { bytes, mtimeMs } = await readFileWithObservedMtime(resolvedPath, {
     maxBytes: READ_FILE_MAX_BYTES,
   });
-  const content = new TextDecoder().decode(bytes);
-  const sha256 = recordFileRead(context.chatId, resolvedPath, bytes, mtimeMs);
 
-  return { content, path: args.path, size: bytes.byteLength, sha256 };
+  if (looksBinary(bytes)) {
+    throw new PathAccessError(
+      `"${args.path}" appears to be a binary file and cannot be read as text.`
+    );
+  }
+
+  // Whole-file sha256 is always recorded so a windowed read still satisfies
+  // the read-before-edit guard.
+  const sha256 = recordFileRead(context.chatId, resolvedPath, bytes, mtimeMs);
+  const size = bytes.byteLength;
+  const totalLines = countTotalLines(bytes);
+
+  if (totalLines === 0) {
+    if (startLine > 1) {
+      throw new PathAccessError(
+        `startLine ${startLine} is past the end of "${args.path}" (0 lines).`
+      );
+    }
+    return {
+      content: '',
+      path: args.path,
+      size,
+      sha256,
+      totalLines: 0,
+      startLine: 1,
+      endLine: 0,
+      truncated: false,
+    };
+  }
+
+  if (startLine > totalLines) {
+    throw new PathAccessError(
+      `startLine ${startLine} is past the end of "${args.path}" (${totalLines} lines).`
+    );
+  }
+
+  const requestedEndLine = Math.min(startLine + maxLines - 1, totalLines);
+  const window = formatWindow(bytes, startLine, requestedEndLine, totalLines);
+
+  return {
+    content: window.content,
+    path: args.path,
+    size,
+    sha256,
+    totalLines,
+    startLine,
+    endLine: window.endLine,
+    truncated: window.truncated,
+  };
 }
 
-// biome-ignore lint/suspicious/useAwait: Migrated from ESLint
-async function execute(
-  args: Record<string, unknown>,
-  context: ToolContext
-): Promise<ReadFileToolResult> {
+function execute(args: Record<string, unknown>, context: ToolContext): Promise<ReadFileToolResult> {
   const path = getRequiredPathArg(args.path, 'path');
-  return executeReadFile({ path }, context);
+  const startLine = getBoundedOptionalInteger(args.startLine, 'startLine', {
+    min: 1,
+    max: READ_FILE_MAX_START_LINE,
+  });
+  const maxLines = getBoundedOptionalInteger(args.maxLines, 'maxLines', {
+    min: READ_FILE_MIN_MAX_LINES,
+    max: READ_FILE_MAX_MAX_LINES,
+  });
+  return executeReadFile(
+    {
+      path,
+      ...(startLine !== undefined ? { startLine } : {}),
+      ...(maxLines !== undefined ? { maxLines } : {}),
+    },
+    context
+  );
 }
 
 /** Registers this built-in tool. // Usage: register() */
@@ -122,4 +218,130 @@ export function register(): void {
     },
     execute,
   });
+}
+
+/** NUL in the first 8 KiB means the file is not safe to treat as text. */
+export function looksBinary(bytes: Uint8Array): boolean {
+  const limit = Math.min(bytes.byteLength, BINARY_SNIFF_BYTES);
+  for (let index = 0; index < limit; index++) {
+    if (bytes[index] === NUL) return true;
+  }
+  return false;
+}
+
+/**
+ * Counts logical lines in raw bytes. Empty files are 0; a trailing newline does
+ * not invent an extra blank line beyond the final terminator.
+ */
+export function countTotalLines(bytes: Uint8Array): number {
+  if (bytes.byteLength === 0) return 0;
+  let lines = 0;
+  for (let index = 0; index < bytes.byteLength; index++) {
+    if (bytes[index] === NEWLINE) lines++;
+  }
+  if (bytes[bytes.byteLength - 1] !== NEWLINE) lines++;
+  return lines;
+}
+
+interface FormattedWindow {
+  readonly content: string;
+  readonly endLine: number;
+  readonly truncated: boolean;
+}
+
+/**
+ * Decodes only the requested line window, numbers lines cat -n style, and
+ * applies per-line and window byte caps.
+ */
+function formatWindow(
+  bytes: Uint8Array,
+  startLine: number,
+  requestedEndLine: number,
+  totalLines: number
+): FormattedWindow {
+  const { start, end } = findWindowByteRange(bytes, startLine, requestedEndLine);
+  let windowBytes = bytes.subarray(start, end);
+  if (windowBytes.byteLength > 0 && windowBytes[windowBytes.byteLength - 1] === NEWLINE) {
+    windowBytes = windowBytes.subarray(0, windowBytes.byteLength - 1);
+  }
+
+  const rawLines =
+    windowBytes.byteLength === 0 && start === end
+      ? []
+      : new TextDecoder().decode(windowBytes).split('\n');
+
+  const numbered: string[] = [];
+  let byteBudget = 0;
+  let truncated = false;
+  let endLine = startLine - 1;
+
+  for (let offset = 0; offset < rawLines.length; offset++) {
+    const lineNumber = startLine + offset;
+    const rawLine = rawLines[offset] ?? '';
+    let body = rawLine;
+    if (body.length > READ_FILE_MAX_LINE_CHARS) {
+      body = `${body.slice(0, READ_FILE_MAX_LINE_CHARS)}${LINE_TRUNCATION_MARKER}`;
+      truncated = true;
+    }
+
+    const numberedLine = `${String(lineNumber).padStart(6, ' ')}\t${body}`;
+    const lineBytes = Buffer.byteLength(numberedLine, 'utf8');
+    const separatorBytes = numbered.length > 0 ? 1 : 0;
+    if (byteBudget + separatorBytes + lineBytes > READ_FILE_MAX_WINDOW_BYTES) {
+      truncated = true;
+      break;
+    }
+
+    numbered.push(numberedLine);
+    byteBudget += separatorBytes + lineBytes;
+    endLine = lineNumber;
+  }
+
+  if (endLine < startLine) {
+    // startLine pointed at a valid line but the byte budget could not fit it.
+    return {
+      content: WINDOW_TRUNCATION_NOTICE.trimStart(),
+      endLine: startLine - 1,
+      truncated: true,
+    };
+  }
+
+  let content = numbered.join('\n');
+  if (truncated || endLine < totalLines) {
+    truncated = true;
+    content += WINDOW_TRUNCATION_NOTICE;
+  }
+
+  return { content, endLine, truncated };
+}
+
+/**
+ * Locates the byte range covering lines [startLine, endLine] inclusive.
+ * Newline (0x0A) offsets are UTF-8-safe because 0x0A never appears mid-sequence.
+ */
+export function findWindowByteRange(
+  bytes: Uint8Array,
+  startLine: number,
+  endLine: number
+): { start: number; end: number } {
+  let line = 1;
+  let index = 0;
+
+  while (line < startLine && index < bytes.byteLength) {
+    if (bytes[index] === NEWLINE) line++;
+    index++;
+  }
+  const start = index;
+
+  while (line <= endLine && index < bytes.byteLength) {
+    if (bytes[index] === NEWLINE) {
+      line++;
+      if (line > endLine) {
+        return { start, end: index + 1 };
+      }
+    }
+    index++;
+  }
+
+  return { start, end: bytes.byteLength };
 }
