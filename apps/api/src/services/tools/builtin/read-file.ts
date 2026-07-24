@@ -24,10 +24,10 @@ const READ_FILE_TOOL_NAME = 'read_file';
 
 const READ_FILE_DEFAULT_START_LINE = 1;
 const READ_FILE_DEFAULT_MAX_LINES = 2000;
-const READ_FILE_MIN_MAX_LINES = 1;
-const READ_FILE_MAX_MAX_LINES = 5000;
+export const READ_FILE_MIN_MAX_LINES = 1;
+export const READ_FILE_MAX_MAX_LINES = 5000;
 /** Practical upper bound for startLine so extreme values clamp instead of allocating. */
-const READ_FILE_MAX_START_LINE = 10_000_000;
+export const READ_FILE_MAX_START_LINE = 10_000_000;
 export const READ_FILE_MAX_LINE_CHARS = 2000;
 export const READ_FILE_MAX_WINDOW_BYTES = 256 * 1024;
 const LINE_TRUNCATION_MARKER = '…[truncated]';

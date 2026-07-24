@@ -2,18 +2,26 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { PathAccessError } from '../../../../src/services/tools/builtin/_fs-utils';
 import {
+  type DeleteFileToolResult,
   executeDeleteFile,
   normalizeDeleteFileToolSettings,
+  register as registerDeleteFileTool,
 } from '../../../../src/services/tools/builtin/delete-file';
-import { executeReadFile } from '../../../../src/services/tools/builtin/read-file';
+import {
+  executeReadFile,
+  register as registerReadFile,
+} from '../../../../src/services/tools/builtin/read-file';
 import { executeWriteFile } from '../../../../src/services/tools/builtin/write-file';
 import {
   clearFileFreshness,
   FileNotReadError,
   StaleFileError,
 } from '../../../../src/services/tools/file-freshness';
+import { executeTool } from '../../../../src/services/tools/registry';
 import type { ToolContext } from '../../../../src/services/tools/types';
+import { useToolRegistry } from './support/tool-registry-harness';
 
 let tempDir: string;
 
@@ -203,5 +211,62 @@ describe('executeDeleteFile', () => {
     } finally {
       rmSync(outsideDir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('delete_file registry contract', () => {
+  const harness = useToolRegistry('delete-file-registry', registerDeleteFileTool, registerReadFile);
+
+  function remove(args: Record<string, unknown>): Promise<DeleteFileToolResult> {
+    return executeTool('delete_file', args, harness.context()) as Promise<DeleteFileToolResult>;
+  }
+
+  it('rejects a missing path', async () => {
+    await expect(remove({})).rejects.toThrow('Missing required path.');
+  });
+
+  for (const [label, value] of [
+    ['a number', 42],
+    ['null', null],
+    ['a boolean', true],
+    ['an object', {}],
+    ['an empty string', ''],
+    ['whitespace only', '   '],
+  ] as const) {
+    it(`rejects ${label} path with the missing-path error, not a TypeError`, async () => {
+      const error = await remove({ path: value }).catch((thrown: unknown) => thrown);
+
+      expect(error).toBeInstanceOf(PathAccessError);
+      expect((error as Error).message).toBe('Missing required path.');
+    });
+  }
+
+  it('deletes a file that was read through the registry', async () => {
+    const filePath = harness.path('delete-me.txt');
+    await Bun.write(filePath, 'observed');
+    await executeTool('read_file', { path: filePath }, harness.context());
+
+    const result = await remove({ path: filePath });
+
+    expect(result).toEqual({ path: filePath, deleted: true });
+    expect(existsSync(filePath)).toBe(false);
+  });
+
+  it('trims a padded path before resolving it', async () => {
+    const filePath = harness.path('padded.txt');
+    await Bun.write(filePath, 'observed');
+    await executeTool('read_file', { path: `  ${filePath}  ` }, harness.context());
+
+    await remove({ path: `  ${filePath}  ` });
+
+    expect(existsSync(filePath)).toBe(false);
+  });
+
+  it('still refuses to delete a file the chat never read', async () => {
+    const filePath = harness.path('unread.txt');
+    await Bun.write(filePath, 'keep me');
+
+    await expect(remove({ path: filePath })).rejects.toBeInstanceOf(FileNotReadError);
+    expect(await Bun.file(filePath).text()).toBe('keep me');
   });
 });

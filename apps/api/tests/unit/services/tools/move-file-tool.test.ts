@@ -2,9 +2,12 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { PathAccessError } from '../../../../src/services/tools/builtin/_fs-utils';
 import {
   executeMoveFile,
+  type MoveFileToolResult,
   normalizeMoveFileToolSettings,
+  register as registerMoveFileTool,
 } from '../../../../src/services/tools/builtin/move-file';
 import { executeReadFile } from '../../../../src/services/tools/builtin/read-file';
 import { executeWriteFile } from '../../../../src/services/tools/builtin/write-file';
@@ -13,7 +16,9 @@ import {
   clearFileFreshness,
   FileNotReadError,
 } from '../../../../src/services/tools/file-freshness';
+import { executeTool } from '../../../../src/services/tools/registry';
 import type { ToolContext } from '../../../../src/services/tools/types';
+import { useToolRegistry } from './support/tool-registry-harness';
 
 let tempDir: string;
 
@@ -234,5 +239,71 @@ describe('executeMoveFile', () => {
     expect(await Bun.file(destination).text()).toBe('first');
     expect(existsSync(first)).toBe(false);
     expect(await Bun.file(second).text()).toBe('second');
+  });
+});
+
+describe('move_file registry contract', () => {
+  const harness = useToolRegistry('move-file-registry', registerMoveFileTool);
+
+  function move(args: Record<string, unknown>): Promise<MoveFileToolResult> {
+    return executeTool('move_file', args, harness.context()) as Promise<MoveFileToolResult>;
+  }
+
+  it('rejects a missing from', async () => {
+    await expect(move({ to: harness.path('to.txt') })).rejects.toThrow('Missing required from.');
+  });
+
+  it('rejects a missing to', async () => {
+    await expect(move({ from: harness.path('from.txt') })).rejects.toThrow('Missing required to.');
+  });
+
+  for (const [label, value] of [
+    ['a number', 42],
+    ['null', null],
+    ['a boolean', true],
+    ['an empty string', ''],
+    ['whitespace only', '   '],
+  ] as const) {
+    it(`rejects ${label} from with the missing-argument error, not a TypeError`, async () => {
+      const error = await move({ from: value, to: harness.path('to.txt') }).catch(
+        (thrown: unknown) => thrown
+      );
+
+      expect(error).toBeInstanceOf(PathAccessError);
+      expect((error as Error).message).toBe('Missing required from.');
+    });
+
+    it(`rejects ${label} to with the missing-argument error, not a TypeError`, async () => {
+      const source = harness.path('source.txt');
+      await Bun.write(source, 'keep me');
+
+      const error = await move({ from: source, to: value }).catch((thrown: unknown) => thrown);
+
+      expect(error).toBeInstanceOf(PathAccessError);
+      expect((error as Error).message).toBe('Missing required to.');
+      expect(await Bun.file(source).text()).toBe('keep me');
+    });
+  }
+
+  it('moves a file and echoes both paths as given', async () => {
+    const from = harness.path('source.txt');
+    await Bun.write(from, 'move me');
+
+    const result = await move({ from, to: 'nested/destination.txt' });
+
+    expect(result).toEqual({ from, to: 'nested/destination.txt', moved: true });
+    expect(existsSync(from)).toBe(false);
+    expect(await Bun.file(harness.path('nested', 'destination.txt')).text()).toBe('move me');
+  });
+
+  it('trims padded path arguments before resolving them', async () => {
+    const from = harness.path('padded.txt');
+    const to = harness.path('padded-destination.txt');
+    await Bun.write(from, 'move me');
+
+    await move({ from: `  ${from}  `, to: `  ${to}  ` });
+
+    expect(existsSync(from)).toBe(false);
+    expect(await Bun.file(to).text()).toBe('move me');
   });
 });
