@@ -100,7 +100,7 @@ describe('generate_image tool planning', () => {
 
   it('rejects invalid image requests before provider execution', () => {
     expect(() => createGenerateImageToolPlan({}, { toolCallId: 'tool-4', parameters: {} })).toThrow(
-      'Missing required prompt.'
+      'Missing required field "prompt".'
     );
 
     expect(() =>

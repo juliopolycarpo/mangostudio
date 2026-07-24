@@ -12,9 +12,10 @@ import { clampIntegerSetting, getOptionalString, getRequiredString } from '../ar
 import { registerTool } from '../registry';
 import type { ToolContext } from '../types';
 import {
-  normalizePathList,
+  normalizePathValidationSettings,
   PathAccessError,
   type PathValidationSettings,
+  pathPolicyParameterDescriptors,
   resolveAndValidatePath,
 } from './_fs-utils';
 
@@ -69,8 +70,7 @@ const definition = {
 
 export function normalizeGlobToolSettings(parameters: Record<string, unknown>): GlobToolSettings {
   return {
-    allowedPaths: normalizePathList(parameters.allowedPaths),
-    deniedPaths: normalizePathList(parameters.deniedPaths),
+    ...normalizePathValidationSettings(parameters),
     maxResults: clampIntegerSetting(
       parameters.maxResults,
       GLOB_DEFAULT_MAX_RESULTS,
@@ -168,22 +168,10 @@ export function register(): void {
         absolute: false,
       },
       parameterDescriptors: [
-        {
-          name: 'allowedPaths',
-          label: 'Allowed paths',
-          description: 'Paths the tool may scan. Leave empty to allow all.',
-          type: 'path_list',
-          required: false,
-          defaultValue: [] as Array<{ path: string; enabled: boolean }>,
-        },
-        {
-          name: 'deniedPaths',
-          label: 'Denied paths',
-          description: 'Paths the tool must not scan. Leave empty to deny none.',
-          type: 'path_list',
-          required: false,
-          defaultValue: [] as Array<{ path: string; enabled: boolean }>,
-        },
+        ...pathPolicyParameterDescriptors(
+          'Paths the tool may scan. Leave empty to allow all.',
+          'Paths the tool must not scan. Leave empty to deny none.'
+        ),
         {
           name: 'maxResults',
           label: 'Maximum matches',

@@ -36,7 +36,7 @@ describe('registerTools', () => {
     expect(registeredToolNames()).toEqual(expectedToolNames());
   });
 
-  it('ships file lifecycle tools enabled with configurable path policies', () => {
+  it('ships filesystem tools enabled with configurable path policies', () => {
     registerTools();
 
     for (const name of [
@@ -46,6 +46,9 @@ describe('registerTools', () => {
       'create_file',
       'delete_file',
       'move_file',
+      'write_file',
+      'read_file',
+      'list_directory',
     ]) {
       const settings = getTool(name)?.settings;
       expect(settings).toMatchObject({
@@ -60,6 +63,24 @@ describe('registerTools', () => {
         'allowedPaths',
         'deniedPaths',
       ]);
+    }
+  });
+
+  it('ships grep and glob with path policy descriptors before tool-specific settings', () => {
+    registerTools();
+
+    for (const name of ['grep', 'glob']) {
+      const settings = getTool(name)?.settings;
+      expect(settings).toMatchObject({
+        enabledByDefault: true,
+        canDisable: true,
+        defaultParameters: {
+          allowedPaths: [],
+          deniedPaths: [],
+        },
+      });
+      const names = settings?.parameterDescriptors.map((descriptor) => descriptor.name) ?? [];
+      expect(names.slice(0, 2)).toEqual(['allowedPaths', 'deniedPaths']);
     }
   });
 });

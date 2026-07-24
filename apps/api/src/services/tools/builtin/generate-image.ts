@@ -8,6 +8,7 @@ import { generateId } from '../../../utils/id';
 import { warmProviderForRequest } from '../../providers/core/provider-readiness';
 import { getProvider, getProviderForModel } from '../../providers/core/provider-registry';
 import type { ImageGenerationRequest, ImageGenerationResult } from '../../providers/types';
+import { getOptionalString, getRequiredString } from '../arg-parsing';
 import {
   buildToolExecutionTimeoutDescriptor,
   TOOL_EXECUTION_TIMEOUT_SECONDS_DEFAULT,
@@ -368,16 +369,6 @@ function getImageQuality(value: unknown, fallback: unknown): string {
     throw new Error(`Unsupported image quality: "${quality}".`);
   }
   return quality;
-}
-
-function getRequiredString(value: unknown, name: string): string {
-  const text = getOptionalString(value);
-  if (!text) throw new Error(`Missing required ${name}.`);
-  return text;
-}
-
-function getOptionalString(value: unknown): string | undefined {
-  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined;
 }
 
 function buildImageIds(count: number, providedIds: string[] | undefined): string[] {

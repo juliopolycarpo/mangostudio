@@ -10,9 +10,10 @@ import { registerTool } from '../registry';
 import type { ToolContext } from '../types';
 import {
   getRequiredPathArg,
-  normalizePathList,
+  normalizePathValidationSettings,
   PathAccessError,
   type PathValidationSettings,
+  pathPolicyParameterDescriptors,
   resolveAndValidatePath,
 } from './_fs-utils';
 
@@ -54,10 +55,7 @@ const definition = {
 export function normalizeListDirectoryToolSettings(
   parameters: Record<string, unknown>
 ): ListDirectoryToolSettings {
-  return {
-    allowedPaths: normalizePathList(parameters.allowedPaths),
-    deniedPaths: normalizePathList(parameters.deniedPaths),
-  };
+  return normalizePathValidationSettings(parameters);
 }
 
 export async function executeListDirectory(
@@ -112,24 +110,10 @@ export function register(): void {
         allowedPaths: [],
         deniedPaths: [],
       },
-      parameterDescriptors: [
-        {
-          name: 'allowedPaths',
-          label: 'Allowed paths',
-          description: 'List of paths the tool is allowed to access. Leave empty to allow all.',
-          type: 'path_list',
-          required: false,
-          defaultValue: [] as Array<{ path: string; enabled: boolean }>,
-        },
-        {
-          name: 'deniedPaths',
-          label: 'Denied paths',
-          description: 'List of paths the tool is denied from accessing. Leave empty to deny none.',
-          type: 'path_list',
-          required: false,
-          defaultValue: [] as Array<{ path: string; enabled: boolean }>,
-        },
-      ],
+      parameterDescriptors: pathPolicyParameterDescriptors(
+        'List of paths the tool is allowed to access. Leave empty to allow all.',
+        'List of paths the tool is denied from accessing. Leave empty to deny none.'
+      ),
     },
     execute,
   });

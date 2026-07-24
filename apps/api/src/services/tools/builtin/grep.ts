@@ -16,9 +16,10 @@ import type { ToolContext } from '../types';
 import {
   containsNulByte,
   getRequiredPathArg,
-  normalizePathList,
+  normalizePathValidationSettings,
   PathAccessError,
   type PathValidationSettings,
+  pathPolicyParameterDescriptors,
   resolveAndValidatePath,
 } from './_fs-utils';
 
@@ -110,8 +111,7 @@ const definition = {
 
 export function normalizeGrepToolSettings(parameters: Record<string, unknown>): GrepToolSettings {
   return {
-    allowedPaths: normalizePathList(parameters.allowedPaths),
-    deniedPaths: normalizePathList(parameters.deniedPaths),
+    ...normalizePathValidationSettings(parameters),
     maxResults: clampIntegerSetting(
       parameters.maxResults,
       GREP_DEFAULT_MAX_RESULTS,
@@ -334,22 +334,10 @@ export function register(): void {
         includeDotfiles: false,
       },
       parameterDescriptors: [
-        {
-          name: 'allowedPaths',
-          label: 'Allowed paths',
-          description: 'Paths the tool may search. Leave empty to allow all.',
-          type: 'path_list',
-          required: false,
-          defaultValue: [] as Array<{ path: string; enabled: boolean }>,
-        },
-        {
-          name: 'deniedPaths',
-          label: 'Denied paths',
-          description: 'Paths the tool must not search. Leave empty to deny none.',
-          type: 'path_list',
-          required: false,
-          defaultValue: [] as Array<{ path: string; enabled: boolean }>,
-        },
+        ...pathPolicyParameterDescriptors(
+          'Paths the tool may search. Leave empty to allow all.',
+          'Paths the tool must not search. Leave empty to deny none.'
+        ),
         {
           name: 'maxResults',
           label: 'Maximum matches',

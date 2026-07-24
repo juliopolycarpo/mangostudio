@@ -18,9 +18,10 @@ import {
   explainUnreadableMutationTarget,
   getRequiredPathArg,
   isErrnoException,
-  normalizePathList,
+  normalizePathValidationSettings,
   PathAccessError,
   type PathValidationSettings,
+  pathPolicyParameterDescriptors,
   resolveAndValidatePath,
 } from './_fs-utils';
 
@@ -69,10 +70,7 @@ const definition = {
 export function normalizeWriteFileToolSettings(
   parameters: Record<string, unknown>
 ): WriteFileToolSettings {
-  return {
-    allowedPaths: normalizePathList(parameters.allowedPaths),
-    deniedPaths: normalizePathList(parameters.deniedPaths),
-  };
+  return normalizePathValidationSettings(parameters);
 }
 
 export async function executeWriteFile(
@@ -171,25 +169,10 @@ export function register(): void {
         allowedPaths: [],
         deniedPaths: [],
       },
-      parameterDescriptors: [
-        {
-          name: 'allowedPaths',
-          label: 'Allowed paths',
-          description: 'List of paths the tool is allowed to write to. Leave empty to allow all.',
-          type: 'path_list',
-          required: false,
-          defaultValue: [] as Array<{ path: string; enabled: boolean }>,
-        },
-        {
-          name: 'deniedPaths',
-          label: 'Denied paths',
-          description:
-            'List of paths the tool is denied from writing to. Leave empty to deny none.',
-          type: 'path_list',
-          required: false,
-          defaultValue: [] as Array<{ path: string; enabled: boolean }>,
-        },
-      ],
+      parameterDescriptors: pathPolicyParameterDescriptors(
+        'List of paths the tool is allowed to write to. Leave empty to allow all.',
+        'List of paths the tool is denied from writing to. Leave empty to deny none.'
+      ),
     },
     execute,
   });
