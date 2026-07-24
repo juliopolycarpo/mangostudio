@@ -36,7 +36,7 @@ describe('registerTools', () => {
     expect(registeredToolNames()).toEqual(expectedToolNames());
   });
 
-  it('ships file lifecycle tools enabled with configurable path policies', () => {
+  it('ships filesystem tools enabled with configurable path policies', () => {
     registerTools();
 
     for (const name of [
