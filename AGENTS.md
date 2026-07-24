@@ -23,7 +23,7 @@ Workspace-level `AGENTS.md` files must stay short and contain only workspace-spe
 2. Start from the closest entrypoint to the task: route, component, hook, service, contract, or test.
 3. Trace one layer outward at a time instead of scanning the whole repository.
 4. Run the smallest relevant validation first, then expand only if the change is broad.
-5. Open `docs/reference/agent-playbooks.md` only when a task needs deeper feature-by-feature navigation.
+5. `docs/reference/agent-playbooks.md` is the file map: open the one section matching the task when you need entry points instead of a starting guess.
 
 Useful docs:
 
@@ -98,25 +98,6 @@ Useful docs:
 - `type: hardening` — manual, defensive work closing a class of bugs
 - `type: chore` — manual, maintenance that fits no other type
 - `type: bug`, `type: feature`, `type: migration`, `type: question` — manual / issue-template defaults
-
-## Task Routing
-
-- Auth: `apps/api/src/auth.ts`, `apps/api/src/plugins/auth-middleware.ts`, `apps/frontend/src/lib/auth-client.ts`, `apps/frontend/src/routes/login.tsx`, `apps/frontend/src/routes/signup.tsx`, `tests/browser-smoke/auth-flow.spec.ts`
-- API route or contract: `apps/api/src/app.ts`, the target module under `apps/api/src/modules/*/http/`, `apps/shared/src/contracts/index.ts`, the matching frontend consumer, and relevant tests
-- Chat, streaming, or generation: `apps/api/src/modules/generation/http/respond-stream-routes.ts`, `apps/api/src/modules/generation/application/stream-text-turn.ts`, `apps/api/src/modules/generation/application/resolve-model.ts`, `apps/api/src/modules/chats/http/chat-routes.ts`, `apps/api/src/modules/messages/http/message-routes.ts`, `apps/frontend/src/features/chat/hooks/use-chat-stream.ts`, `apps/frontend/src/features/generation/hooks/use-text-generation.ts`, `apps/frontend/src/features/generation/hooks/use-image-generation.ts`, `apps/frontend/src/services/generation-service.ts`
-- Settings, connectors, or providers: `apps/api/src/modules/connectors/http/`, `apps/api/src/modules/provider-settings/http/`, `apps/api/src/modules/tool-settings/http/`, `apps/api/src/modules/app-settings/http/`, `apps/api/src/services/providers/`, `apps/frontend/src/features/settings/`, `apps/frontend/src/hooks/use-model-catalog.ts`
-- Persistence or migrations: `apps/api/src/db/database.ts`, `apps/api/src/db/types.ts`, `apps/api/src/db/migrations/`, and the owning service or route
-- Shared i18n or types: `apps/shared/src/i18n/`, `apps/shared/src/contracts/`, `apps/shared/src/types/`, and the affected API/frontend consumers
-- Workdir, git, and GitHub context: `apps/api/src/modules/{workspaces,git,github}/`, `apps/frontend/src/features/workspace/`, `apps/shared/src/{workspaces,git,github}/`
-- Config or standalone build: `apps/api/src/lib/config.ts`, `apps/api/src/lib/runtime-paths.ts`, `.mango/config.toml.example`, `.mango/.env.example`, `scripts/build.ts`
-- CLI or server lifecycle (serve/status/stop/killserver/doctor): `apps/api/src/index.ts`, `apps/api/src/cli/`, `apps/api/src/server/start-server.ts`, `apps/api/src/lib/server-state.ts`, `apps/api/src/lib/mango-paths.ts`, `docs/reference/cli.md`
-- Changelog or release: `cliff.toml`, `scripts/changelog.ts`, `scripts/lib/changelog.ts`, `scripts/lib/release-version.ts`, `scripts/lib/prepare-release.ts`, `scripts/check-versions.ts`, `scripts/release/prepare-release.ts`, `scripts/release/pack-npm.ts`, `packages/cli/`, `packages/cargo-shim/`, `.github/workflows/{pr-qa-report,release,cargo-shim}.yml`, `docs/reference/releasing.md`
-- Attachments: `apps/api/src/modules/attachments/application/attachment-storage.ts`, `apps/api/src/modules/attachments/application/attachment-validation.ts`, `apps/frontend/src/features/chat/components/MessageParts.tsx`
-- Tools: `apps/api/src/services/tools/registry.ts`, `apps/api/src/services/tools/builtin/{create-file,edit-file,replace-range,apply-patch,delete-file,move-file}.ts`, `apps/api/src/services/tools/builtin/_v4a-patch.ts`, `apps/api/src/services/tools/builtin/generate-image.ts`, `apps/api/src/services/tools/builtin/ask-user-question.ts`, `apps/api/src/services/tools/builtin/todo.ts`, `apps/api/src/modules/todos/`, `apps/shared/src/questions/`, `apps/shared/src/todos/`, `apps/frontend/src/features/chat/components/{ToolCallVisuals,QuestionCard,TodoListPart}.tsx`, `apps/api/src/modules/tool-settings/http/tool-settings-routes.ts`, `apps/frontend/src/features/settings/tools/index.tsx`
-- Skills: `apps/api/src/modules/skills/application/skill-discovery.ts`, `apps/api/src/modules/skills/application/skill-content.ts`, `apps/api/src/modules/skills/application/skills-prompt-section.ts`, `apps/api/src/services/tools/builtin/skill.ts`, `apps/api/src/modules/skills/http/skill-routes.ts`, `apps/frontend/src/features/settings/skills/`, `apps/shared/src/skills/`, `docs/reference/skills.md`
-- MCP servers: `apps/api/src/services/mcp/`, `apps/api/src/modules/mcp-servers/`, `apps/frontend/src/features/settings/mcp/`, `apps/shared/src/mcp/`, `docs/reference/mcp.md`
-- Prompt rules: `apps/api/src/modules/prompt-rules/application/prompt-composer.ts`, `apps/api/src/modules/prompt-rules/application/rule-file-resolver.ts`, `apps/api/src/modules/prompt-rules/http/rule-file-routes.ts`, `apps/frontend/src/features/settings/prompts/`
-- Image generation: `apps/api/src/modules/generation/application/generate-image.ts`, `apps/api/src/services/generated-images/generated-image-storage.ts`, `apps/frontend/src/features/gallery/GalleryPage.tsx`
 
 ## Validation
 

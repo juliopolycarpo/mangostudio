@@ -82,6 +82,7 @@ Open these first:
 
 Open these first:
 
+- `apps/api/src/services/tools/registry.ts` (registration + lookup)
 - `apps/api/src/services/tools/`
 - `apps/api/src/services/tools/builtin/create-file.ts`
 - `apps/api/src/services/tools/builtin/edit-file.ts`
@@ -97,6 +98,7 @@ Open these first:
 - `apps/api/src/modules/todos/http/todo-routes.ts` (`GET /api/chats/:id/todos` current-state endpoint)
 - `apps/shared/src/questions/` (question schemas + answer formatting)
 - `apps/shared/src/todos/` (todo schemas, helpers, prompt-section renderer)
+- `apps/frontend/src/features/chat/components/ToolCallVisuals.tsx` (per-tool call rendering)
 - `apps/frontend/src/features/chat/components/QuestionCard.tsx`
 - `apps/frontend/src/features/chat/components/TodoListPart.tsx` (inline feed snapshot; shares `TodoItemRow.tsx`)
 - `apps/frontend/src/features/chat/components/PinnedTodoPanel.tsx` (live panel above the input bar)
@@ -148,6 +150,18 @@ Open these first:
 - `apps/api/src/modules/attachments/infrastructure/attachment-repository.ts`
 - `apps/api/src/services/providers/core/attachment-content.ts`
 - `apps/frontend/src/features/chat/components/MessageParts.tsx`
+
+## Workdir, Git, And GitHub Context
+
+Open these first:
+
+- `apps/api/src/modules/workspaces/`
+- `apps/api/src/modules/git/`
+- `apps/api/src/modules/github/`
+- `apps/shared/src/workspaces/`
+- `apps/shared/src/git/`
+- `apps/shared/src/github/`
+- `apps/frontend/src/features/workspace/`
 
 ## Prompt Rules
 
@@ -223,8 +237,39 @@ Open these first:
 Open these first:
 
 - `apps/api/src/lib/config.ts`
+- `apps/api/src/lib/runtime-paths.ts`
 - `apps/api/src/index.ts`
 - `.mango/config.toml.example`
 - `.mango/.env.example`
 - `scripts/build.ts`
 - `scripts/test-build.ts` (binary smoke)
+
+## CLI And Server Lifecycle
+
+Covers `serve`, `status`, `stop`, `killserver`, and `doctor`.
+
+Open these first:
+
+- `apps/api/src/index.ts` (CLI entry)
+- `apps/api/src/cli/` (argument parsing, dispatch, commands, doctor checks)
+- `apps/api/src/server/start-server.ts`
+- `apps/api/src/lib/server-state.ts` (PID and port state)
+- `apps/api/src/lib/mango-paths.ts`
+- Reference: `docs/reference/cli.md`
+
+## Changelog And Release
+
+Open these first:
+
+- `cliff.toml` (git-cliff config; `CHANGELOG.md` is generated, never hand-edited)
+- `scripts/changelog.ts`
+- `scripts/lib/changelog.ts`
+- `scripts/lib/release-version.ts`
+- `scripts/lib/prepare-release.ts`
+- `scripts/release/prepare-release.ts`
+- `scripts/release/pack-npm.ts`
+- `scripts/check-versions.ts`
+- `packages/cli/`
+- `packages/cargo-shim/`
+- `.github/workflows/pr-qa-report.yml`, `.github/workflows/release.yml`, `.github/workflows/cargo-shim.yml`
+- Reference: `docs/reference/releasing.md`

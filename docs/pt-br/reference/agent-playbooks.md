@@ -80,6 +80,7 @@ Abra estes arquivos primeiro:
 
 Abra estes arquivos primeiro:
 
+- `apps/api/src/services/tools/registry.ts` (registro + lookup)
 - `apps/api/src/services/tools/`
 - `apps/api/src/services/tools/builtin/generate-image.ts`
 - `apps/api/src/services/tools/builtin/get-current-datetime.ts`
@@ -89,6 +90,7 @@ Abra estes arquivos primeiro:
 - `apps/api/src/services/providers/core/tool-mapper.ts`
 - `apps/shared/src/types/index.ts`
 - `apps/frontend/src/features/generation/hooks/use-text-generation.ts`
+- `apps/frontend/src/features/chat/components/ToolCallVisuals.tsx` (renderização por tool call)
 - `apps/frontend/src/features/settings/tools/`
 
 ## Attachments
@@ -101,6 +103,18 @@ Abra estes arquivos primeiro:
 - `apps/api/src/modules/attachments/infrastructure/attachment-repository.ts`
 - `apps/api/src/services/providers/core/attachment-content.ts`
 - `apps/frontend/src/features/chat/components/MessageParts.tsx`
+
+## Workdir, Git E Contexto Do GitHub
+
+Abra estes arquivos primeiro:
+
+- `apps/api/src/modules/workspaces/`
+- `apps/api/src/modules/git/`
+- `apps/api/src/modules/github/`
+- `apps/shared/src/workspaces/`
+- `apps/shared/src/git/`
+- `apps/shared/src/github/`
+- `apps/frontend/src/features/workspace/`
 
 ## Prompt Rules
 
@@ -176,8 +190,39 @@ Abra estes arquivos primeiro:
 Abra estes arquivos primeiro:
 
 - `apps/api/src/lib/config.ts`
+- `apps/api/src/lib/runtime-paths.ts`
 - `apps/api/src/index.ts`
 - `.mango/config.toml.example`
 - `.mango/.env.example`
 - `scripts/build.ts`
 - `scripts/test-build.ts` (binary smoke)
+
+## CLI E Ciclo De Vida Do Servidor
+
+Cobre `serve`, `status`, `stop`, `killserver` e `doctor`.
+
+Abra estes arquivos primeiro:
+
+- `apps/api/src/index.ts` (entrada da CLI)
+- `apps/api/src/cli/` (parsing de argumentos, dispatch, comandos, checagens do doctor)
+- `apps/api/src/server/start-server.ts`
+- `apps/api/src/lib/server-state.ts` (estado de PID e porta)
+- `apps/api/src/lib/mango-paths.ts`
+- Referência: `cli.md`
+
+## Changelog E Release
+
+Abra estes arquivos primeiro:
+
+- `cliff.toml` (configuração do git-cliff; `CHANGELOG.md` é gerado, nunca editado à mão)
+- `scripts/changelog.ts`
+- `scripts/lib/changelog.ts`
+- `scripts/lib/release-version.ts`
+- `scripts/lib/prepare-release.ts`
+- `scripts/release/prepare-release.ts`
+- `scripts/release/pack-npm.ts`
+- `scripts/check-versions.ts`
+- `packages/cli/`
+- `packages/cargo-shim/`
+- `.github/workflows/pr-qa-report.yml`, `.github/workflows/release.yml`, `.github/workflows/cargo-shim.yml`
+- Referência: `releasing.md`
