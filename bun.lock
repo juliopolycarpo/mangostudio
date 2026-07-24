@@ -46,7 +46,7 @@
         "smol-toml": "^1.7.0",
       },
       "devDependencies": {
-        "@faker-js/faker": "^10.4.0",
+        "@faker-js/faker": "^10.5.0",
         "@sinclair/typebox": "^0.34.0",
         "@types/bun": "^1.3.14",
         "typescript": "7.0.2",
@@ -99,7 +99,7 @@
       "name": "@mangostudio/shared",
       "version": "0.1.1",
       "dependencies": {
-        "@faker-js/faker": "^10.4.0",
+        "@faker-js/faker": "^10.5.0",
         "@sinclair/typebox": "^0.34.49",
       },
       "devDependencies": {
@@ -340,7 +340,7 @@
 
     "@exodus/bytes": ["@exodus/bytes@1.15.0", "", { "peerDependencies": { "@noble/hashes": "^1.8.0 || ^2.0.0" }, "optionalPeers": ["@noble/hashes"] }, "sha512-UY0nlA+feH81UGSHv92sLEPLCeZFjXOuHhrIo0HQydScuQc8s0A7kL/UdgwgDq8g8ilksmuoF35YVTNphV2aBQ=="],
 
-    "@faker-js/faker": ["@faker-js/faker@10.4.0", "", {}, "sha512-sDBWI3yLy8EcDzgobvJTWq1MJYzAkQdpjXuPukga9wXonhpMRvd1Izuo2Qgwey2OiEoRIBr35RMU9HJRoOHzpw=="],
+    "@faker-js/faker": ["@faker-js/faker@10.5.0", "", {}, "sha512-bsxD8WLS5lIj7aaoCx1YJkktqYj5vlBUE6HWzu2Q51ksrGJ0H737ECCKlFU7Yf8Br45z9t99frBp/J7kzbMPAg=="],
 
     "@fastify/busboy": ["@fastify/busboy@2.1.1", "", {}, "sha512-vBZP4NlzfOlerQTnba4aqZoMhE/a9HY7HRqoOPaETQcSQuWEIyZMHGfVu6w9wGtGK5fED5qRs2DteVCjOH60sA=="],
 
