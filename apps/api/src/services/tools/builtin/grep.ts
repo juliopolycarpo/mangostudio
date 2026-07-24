@@ -10,7 +10,7 @@ import {
   isInsideResolvedRoot,
   resolveContainmentRoot,
 } from '../../../modules/workspaces/application/path-containment';
-import { clampIntegerSetting, getOptionalString, getRequiredString } from '../arg-parsing';
+import { clampIntegerSetting, getOptionalString, ToolArgumentError } from '../arg-parsing';
 import { registerTool } from '../registry';
 import type { ToolContext } from '../types';
 import {
@@ -300,8 +300,21 @@ function isPathAllowed(absolute: string, settings: PathValidationSettings): bool
   }
 }
 
+/**
+ * Reads the search pattern verbatim. Whitespace is part of a regular
+ * expression: trimming `" TODO"` into `"TODO"` silently searches for something
+ * the caller never asked for, so only an absent, non-string, or empty pattern
+ * is rejected.
+ */
+function getRequiredPatternArg(value: unknown): string {
+  if (typeof value !== 'string' || value === '') {
+    throw new ToolArgumentError('Missing required field "pattern".');
+  }
+  return value;
+}
+
 function execute(args: Record<string, unknown>, context: ToolContext): Promise<GrepToolResult> {
-  const pattern = getRequiredString(args.pattern, 'pattern');
+  const pattern = getRequiredPatternArg(args.pattern);
   const path = getOptionalString(args.path);
   const glob = getOptionalString(args.glob);
   return executeGrep(
