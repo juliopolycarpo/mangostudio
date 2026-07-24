@@ -11,6 +11,7 @@ import {
   type GitHistoryResponse,
   GitHistoryResponseSchema,
   type GitRepoState,
+  GitRepoStateSchema,
 } from '@mangostudio/shared/git';
 import { Value } from '@sinclair/typebox/value';
 import { getDb } from '../../../src/db/database';
@@ -22,10 +23,20 @@ import {
 } from '../../support/harness/create-api-test-app';
 
 const hasGit = Bun.which('git') !== null;
-/** Heavy git fixtures (many commits / remotes) need headroom beyond Bun's 5s default. */
-const GIT_NAVIGATION_TIMEOUT_MS = 15_000;
+/**
+ * Every git-backed case spawns real subprocesses, and `git-cli.ts` already gives each
+ * command a 15s budget of its own. The test budget must sit above that so a hung command
+ * surfaces as the route's own timeout error instead of an opaque "test timed out".
+ */
+const GIT_NAVIGATION_TIMEOUT_MS = 30_000;
 const tempDirs: string[] = [];
 let restoreAuth: (() => void) | null = null;
+
+/** Narrows an optional fixture value so call sites do not need an unchecked cast. */
+function required<T>(value: T | undefined | null, label: string): T {
+  if (value === undefined || value === null) throw new Error(`Expected ${label} to be present`);
+  return value;
+}
 
 async function tempDirectory(prefix: string): Promise<string> {
   const path = await realpath(await mkdtemp(join(tmpdir(), prefix)));
@@ -115,7 +126,9 @@ describe('Git navigation routes', () => {
 
       const created = await postJson(app, '/git/branches', { chatId, name: 'feat/navigation' });
       expect(created.status).toBe(200);
-      expect((await created.json()) as GitRepoState).toMatchObject({
+      const createdPayload = (await created.json()) as GitRepoState;
+      expect(Value.Check(GitRepoStateSchema, createdPayload)).toBe(true);
+      expect(createdPayload).toMatchObject({
         state: 'repo',
         status: { branch: { name: 'feat/navigation' } },
       });
@@ -128,8 +141,8 @@ describe('Git navigation routes', () => {
       );
 
       const listed = await getRoute(app, '/git/branches', { chatId });
-      const listedPayload = await listed.json();
       expect(listed.status).toBe(200);
+      const listedPayload = await listed.json();
       expect(Value.Check(GitBranchesResponseSchema, listedPayload)).toBe(true);
       expect(listedPayload).toMatchObject({
         branches: [
@@ -156,23 +169,26 @@ describe('Git navigation routes', () => {
     'paginates history and returns worktree, staged, and commit diffs',
     async () => {
       const workdir = await createTempRepo();
+      // Staging once up front lets every commit use `-a`, halving the git spawns this
+      // fixture needs while keeping the same 22-commit history over `history.ts`.
+      await writeFile(join(workdir, 'history.ts'), 'export const value = 0;\n');
+      await fixtureGit(workdir, ['add', 'history.ts']);
       for (let index = 0; index < 22; index++) {
         await writeFile(join(workdir, 'history.ts'), `export const value = ${index};\n`);
-        await fixtureGit(workdir, ['add', 'history.ts']);
-        await fixtureGit(workdir, ['commit', '-m', `history ${index}`]);
+        await fixtureGit(workdir, ['commit', '-a', '-m', `history ${index}`]);
       }
       const { app, chatId } = await createRouteFixture(workdir);
 
       const firstPage = await getRoute(app, '/git/history', { chatId });
-      const firstPayload = (await firstPage.json()) as GitHistoryResponse;
       expect(firstPage.status).toBe(200);
+      const firstPayload = (await firstPage.json()) as GitHistoryResponse;
       expect(Value.Check(GitHistoryResponseSchema, firstPayload)).toBe(true);
       expect(firstPayload.commits).toHaveLength(20);
       expect(firstPayload.nextCursor).toBe('20');
 
       const secondPage = await getRoute(app, '/git/history', {
         chatId,
-        cursor: firstPayload.nextCursor ?? '20',
+        cursor: required(firstPayload.nextCursor, 'history nextCursor'),
       });
       expect(secondPage.status).toBe(200);
       const secondPayload = (await secondPage.json()) as GitHistoryResponse;
@@ -180,9 +196,8 @@ describe('Git navigation routes', () => {
       expect(secondPayload.commits).toHaveLength(2);
       expect(secondPayload.nextCursor).toBeUndefined();
 
-      const selectedHash = firstPayload.commits[0]?.hash;
-      expect(selectedHash).toBeTruthy();
-      const details = await getRoute(app, '/git/commit', { chatId, hash: selectedHash as string });
+      const selectedHash = required(firstPayload.commits[0]?.hash, 'newest commit hash');
+      const details = await getRoute(app, '/git/commit', { chatId, hash: selectedHash });
       expect(details.status).toBe(200);
       const detailsPayload = (await details.json()) as GitCommitDetailsResponse;
       expect(Value.Check(GitCommitDetailsResponseSchema, detailsPayload)).toBe(true);
@@ -211,7 +226,7 @@ describe('Git navigation routes', () => {
       const commitDiff = await getRoute(app, '/git/diff', {
         chatId,
         path: 'history.ts',
-        commit: selectedHash as string,
+        commit: selectedHash,
       });
       expect(commitDiff.status).toBe(200);
       const commitPayload = (await commitDiff.json()) as GitDiffResponse;
@@ -229,7 +244,8 @@ describe('Git navigation routes', () => {
       await fixtureGit(workdir, ['mv', 'history.ts', 'renamed-history.ts']);
       await fixtureGit(workdir, ['commit', '-m', 'rename history']);
       const renameHash = await fixtureGit(workdir, ['rev-parse', 'HEAD']);
-      expect(renameHash).toMatch(/^[0-9a-f]{40}$/);
+      // SHA-1 repos yield 40 hex chars, SHA-256 repos 64; accept either object format.
+      expect(renameHash).toMatch(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/);
       const renameResponse = await getRoute(app, '/git/commit', { chatId, hash: renameHash });
       expect(renameResponse.status).toBe(200);
       const renameDetails = (await renameResponse.json()) as GitCommitDetailsResponse;
@@ -286,6 +302,7 @@ describe('Git navigation routes', () => {
 
       const firstPush = await postJson(app, '/git/push', { chatId });
       expect(firstPush.status).toBe(200);
+      expect(Value.Check(GitRepoStateSchema, await firstPush.json())).toBe(true);
       expect(await fixtureGit(workdir, ['rev-parse', '--abbrev-ref', '@{upstream}'])).toBe(
         'origin/main'
       );
@@ -303,7 +320,9 @@ describe('Git navigation routes', () => {
 
       const fetched = await postJson(app, '/git/fetch', { chatId, prune: true });
       expect(fetched.status).toBe(200);
-      expect((await fetched.json()) as GitRepoState).toMatchObject({
+      const fetchedPayload = (await fetched.json()) as GitRepoState;
+      expect(Value.Check(GitRepoStateSchema, fetchedPayload)).toBe(true);
+      expect(fetchedPayload).toMatchObject({
         state: 'repo',
         status: { branch: { behind: 1 } },
       });
