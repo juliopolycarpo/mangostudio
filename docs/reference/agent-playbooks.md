@@ -15,6 +15,7 @@ Open these first:
 - `apps/frontend/src/lib/auth-client.ts`
 - `apps/frontend/src/routes/login.tsx`
 - `apps/frontend/src/routes/signup.tsx`
+- `apps/frontend/src/routes/_authenticated.tsx` (client-side route guard)
 - `tests/browser-smoke/auth-flow.spec.ts`
 
 ## API Routes And Contracts
@@ -182,6 +183,8 @@ Open these first:
 - `apps/api/src/modules/provider-settings/http/provider-settings-routes.ts`
 - `apps/api/src/modules/tool-settings/http/tool-settings-routes.ts`
 - `apps/api/src/services/tools/settings-policy.ts`
+- `apps/frontend/src/routes/_authenticated/settings/` (settings route tree)
+- `apps/frontend/src/components/settings/` (shared panels + `SettingsTabs.tsx`)
 - `apps/frontend/src/features/settings/app/`
 - `apps/frontend/src/features/settings/providers/`
 - `apps/frontend/src/features/settings/tools/`

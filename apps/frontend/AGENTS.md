@@ -10,13 +10,10 @@ Read `../../AGENTS.md` first. This file only adds frontend-local entrypoints, in
 - Hooks and services: `src/hooks/`, `src/services/`
 - UI system and layout: `src/components/ui/`, `src/components/layout/`, `src/index.css`
 - API client: `src/lib/api-client.ts`
+- Route guard: `src/routes/_authenticated.tsx`
+- Feature modules: `src/features/<feature>/`
 
-## Diagnose By Task
-
-- Auth or session UX: `src/lib/auth-client.ts`, `src/routes/login.tsx`, `src/routes/signup.tsx`, `src/routes/_authenticated.tsx`, `tests/browser-smoke/auth-flow.spec.ts`
-- Settings or model selection: `src/components/settings/`, `src/routes/_authenticated/settings/`, `src/hooks/use-model-catalog.ts`, and the matching API settings route
-- Chat, gallery, or generation: `src/features/chat/ChatPage.tsx`, `src/components/ChatFeed.tsx`, `src/components/InputBar.tsx`, `src/components/GalleryPage.tsx`, `src/hooks/use-text-chat.ts`, `src/hooks/use-image-generation.ts`, `src/services/`
-- App shell or routing: `src/routes/__root.tsx`, `src/routes/_authenticated.tsx`, `src/router.ts`, `src/main.tsx`
+For per-task file maps, use `docs/reference/agent-playbooks.md`.
 
 ## Frontend Rules
 

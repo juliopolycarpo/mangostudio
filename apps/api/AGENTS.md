@@ -6,18 +6,13 @@ Read `../../AGENTS.md` first. This file only adds API-local entrypoints, invaria
 
 - App and prefix: `src/app.ts`
 - Auth: `src/auth.ts`, `src/routes/auth.ts`, `src/plugins/auth-middleware.ts`
-- Routes: `src/routes/`
+- Domain modules (most routes): `src/modules/<module>/http/`
+- Standalone routes: `src/routes/`
 - Config and runtime: `src/lib/config.ts`, `src/index.ts`
 - Persistence: `src/db/database.ts`, `src/db/types.ts`, `src/db/migrations/`
 - Providers, secrets, and tools: `src/services/providers/`, `src/services/secret-store/`, `src/services/tools/`
 
-## Diagnose By Task
-
-- Route or endpoint: the target file under `src/routes/`, `src/app.ts`, `apps/shared/src/contracts/index.ts`, the matching frontend consumer, and the relevant integration test
-- Auth: `src/auth.ts`, `src/routes/auth.ts`, `src/plugins/auth-middleware.ts`, `apps/frontend/src/lib/auth-client.ts`, `tests/browser-smoke/auth-flow.spec.ts`
-- Chat or streaming: `src/routes/respond.ts`, `src/routes/respond-stream.ts`, `src/routes/chats.ts`, `src/routes/messages.ts`, `src/services/chat-service.ts`, `src/services/message-service.ts`
-- Connectors or providers: `src/routes/settings/`, `src/services/providers/`, `src/services/secret-store/`, `src/lib/config.ts`
-- Persistence or migrations: `src/db/database.ts`, `src/db/types.ts`, `src/db/row-types.ts`, `src/db/migrations/`, and the owning service or route
+For per-task file maps, use `docs/reference/agent-playbooks.md`.
 
 ## API Rules
 
