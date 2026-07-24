@@ -18,6 +18,12 @@ import {
   StaleFileError,
   withPathLocks,
 } from '../file-freshness';
+import {
+  type CapturedBefore,
+  ensureFileMutationCheckpoint,
+  hashFileAtPath,
+  recordFileMutationAfterHash,
+} from '../file-mutation-snapshot';
 import { registerTool } from '../registry';
 import type { ToolContext } from '../types';
 import {
@@ -307,6 +313,35 @@ async function commitOperations(
   revalidated: ReadonlyMap<PlannedUpdate | PlannedDelete, RevalidatedUpdate>,
   context: ToolContext
 ): Promise<ApplyPatchToolResult> {
+  // One snapshot per planned operation, kept by operation: the after-hash pass
+  // below completes each row, and a path can appear more than once in a patch.
+  const captured = new Map<PlannedOperation, CapturedBefore>();
+  for (const operation of planned) {
+    if (operation.type === 'add') {
+      captured.set(
+        operation,
+        await ensureFileMutationCheckpoint(context, operation.resolvedPath, 'create')
+      );
+    } else if (operation.type === 'delete') {
+      captured.set(
+        operation,
+        await ensureFileMutationCheckpoint(context, operation.resolvedPath, 'delete')
+      );
+    } else if (operation.resolvedMoveTo) {
+      captured.set(
+        operation,
+        await ensureFileMutationCheckpoint(context, operation.resolvedPath, 'move', {
+          movedTo: operation.resolvedMoveTo,
+        })
+      );
+    } else {
+      captured.set(
+        operation,
+        await ensureFileMutationCheckpoint(context, operation.resolvedPath, 'edit')
+      );
+    }
+  }
+
   const writes = new Map<PlannedAdd | PlannedUpdate, CommittedWrite>();
   const changedPaths: string[] = [];
   try {
@@ -351,47 +386,60 @@ async function commitOperations(
     throwCommitError(changedPaths, error);
   }
 
-  const files = planned.map((operation): ApplyPatchFileResult => {
-    if (operation.type === 'delete') {
-      forgetFile(context.chatId, operation.resolvedPath);
-      return { path: operation.inputPath, op: 'delete' };
-    }
+  const files = await Promise.all(
+    planned.map(async (operation): Promise<ApplyPatchFileResult> => {
+      const capturedBefore = captured.get(operation);
+      if (!capturedBefore) throw new Error(`Missing checkpoint for "${operation.inputPath}".`);
 
-    if (operation.type === 'add') {
-      const committed = writes.get(operation);
-      if (!committed) throw new Error(`Missing committed write for "${operation.inputPath}".`);
-      const sha256 = recordFileRead(
-        context.chatId,
-        operation.resolvedPath,
-        operation.content,
-        committed.mtimeMs
-      );
-      return { path: operation.inputPath, op: 'add', sha256 };
-    }
+      if (operation.type === 'delete') {
+        forgetFile(context.chatId, operation.resolvedPath);
+        await recordFileMutationAfterHash(context, capturedBefore, null);
+        return { path: operation.inputPath, op: 'delete' };
+      }
 
-    const target = operation.resolvedMoveTo ?? operation.resolvedPath;
-    const written = writes.get(operation);
-    const current = revalidated.get(operation);
-    if (!current) throw new Error(`Missing revalidation for "${operation.inputPath}".`);
-    if (operation.resolvedMoveTo) rekeyFile(context.chatId, operation.resolvedPath, target);
-    const mtimeMs = written?.mtimeMs ?? current.mtimeMs;
-    // A content change renumbers every line after the first splice, so record the
-    // shift the way edit_file/replace_range do — otherwise a later line-addressed
-    // edit would trust the pre-patch numbering and hit the wrong lines. A pure
-    // move leaves the numbering intact, so it stays a whole-content observation.
-    const sha256 = operation.hasContentChanges
-      ? recordFileEdit(
+      if (operation.type === 'add') {
+        const committed = writes.get(operation);
+        if (!committed) throw new Error(`Missing committed write for "${operation.inputPath}".`);
+        const sha256 = recordFileRead(
           context.chatId,
-          target,
+          operation.resolvedPath,
           operation.content,
-          mtimeMs,
-          operation.lineNumbersValidThroughLine
-        )
-      : recordFileRead(context.chatId, target, current.bytes, mtimeMs);
-    return operation.moveTo
-      ? { path: operation.inputPath, op: 'move', movedTo: operation.moveTo, sha256 }
-      : { path: operation.inputPath, op: 'update', sha256 };
-  });
+          committed.mtimeMs
+        );
+        await recordFileMutationAfterHash(context, capturedBefore, sha256);
+        return { path: operation.inputPath, op: 'add', sha256 };
+      }
+
+      const target = operation.resolvedMoveTo ?? operation.resolvedPath;
+      const written = writes.get(operation);
+      const current = revalidated.get(operation);
+      if (!current) throw new Error(`Missing revalidation for "${operation.inputPath}".`);
+      if (operation.resolvedMoveTo) rekeyFile(context.chatId, operation.resolvedPath, target);
+      const mtimeMs = written?.mtimeMs ?? current.mtimeMs;
+      // A content change renumbers every line after the first splice, so record the
+      // shift the way edit_file/replace_range do — otherwise a later line-addressed
+      // edit would trust the pre-patch numbering and hit the wrong lines. A pure
+      // move leaves the numbering intact, so it stays a whole-content observation.
+      const sha256 = operation.hasContentChanges
+        ? recordFileEdit(
+            context.chatId,
+            target,
+            operation.content,
+            mtimeMs,
+            operation.lineNumbersValidThroughLine
+          )
+        : recordFileRead(context.chatId, target, current.bytes, mtimeMs);
+      if (operation.resolvedMoveTo) {
+        const afterHash = (await hashFileAtPath(target)) ?? sha256;
+        await recordFileMutationAfterHash(context, capturedBefore, afterHash);
+      } else {
+        await recordFileMutationAfterHash(context, capturedBefore, sha256);
+      }
+      return operation.moveTo
+        ? { path: operation.inputPath, op: 'move', movedTo: operation.moveTo, sha256 }
+        : { path: operation.inputPath, op: 'update', sha256 };
+    })
+  );
 
   return {
     files,

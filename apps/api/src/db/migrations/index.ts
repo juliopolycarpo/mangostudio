@@ -25,6 +25,7 @@ import { mcpServers } from './024_mcp_servers';
 import { chatTodos } from './025_chat_todos';
 import { chatWorkdir } from './026_chat_workdir';
 import { chatRestrictToolsToWorkdir } from './027_chat_restrict_tools_to_workdir';
+import { fileCheckpoints } from './028_file_checkpoints';
 
 export const allMigrations = {
   '001_initial_schema': initialSchema,
@@ -54,4 +55,5 @@ export const allMigrations = {
   '025_chat_todos': chatTodos,
   '026_chat_workdir': chatWorkdir,
   '027_chat_restrict_tools_to_workdir': chatRestrictToolsToWorkdir,
+  '028_file_checkpoints': fileCheckpoints,
 };

@@ -109,6 +109,8 @@ Open these first:
 - `apps/frontend/src/features/generation/hooks/use-text-generation.ts`
 - `apps/frontend/src/features/settings/tools/`
 
+Per-message **file checkpoints** cover the built-in filesystem mutation tools above, including the ones a subagent (`delegate_to_agent`) or the Cursor sidecar runs — those inherit the delegating turn's `assistantMessageId`, so their mutations join the same manifest. Revert is whole-turn (`POST /api/chats/:id/checkpoints/:messageId/revert`) and compares on-disk hashes before restoring. **Not checkpointed:** shell tools and MCP file writes — only explicit builtin mutators participate.
+
 ## Skills
 
 Open these first:

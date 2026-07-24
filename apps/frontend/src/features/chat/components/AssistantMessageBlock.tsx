@@ -8,6 +8,8 @@ import { AssistantMessageHeader } from './AssistantMessageHeader';
 interface AssistantMessageBlockProps {
   msg: Message;
   isImageTurn: boolean;
+  chatId?: string | null;
+  canRevertFileChanges?: boolean;
   /** Present only on the last message while question cards may be answered. */
   onQuestionSubmit?: (prompt: string) => void;
 }
@@ -50,11 +52,18 @@ function AssistantMessageBody({ msg, isImageTurn, onQuestionSubmit }: AssistantM
 export function AssistantMessageBlock({
   msg,
   isImageTurn,
+  chatId,
+  canRevertFileChanges,
   onQuestionSubmit,
 }: AssistantMessageBlockProps) {
   return (
     <div className="group flex flex-col gap-4 w-full">
-      <AssistantMessageHeader msg={msg} isImageTurn={isImageTurn} />
+      <AssistantMessageHeader
+        msg={msg}
+        isImageTurn={isImageTurn}
+        chatId={chatId}
+        canRevertFileChanges={canRevertFileChanges}
+      />
       <AssistantMessageBody
         msg={msg}
         isImageTurn={isImageTurn}

@@ -2,9 +2,10 @@ import type { Message } from '@mangostudio/shared';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { ArrowDown, Sparkles } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
-import { useCallback } from 'react';
+import { useCallback, useMemo } from 'react';
 import { useI18n } from '@/hooks/use-i18n';
 import { useChatAutoFollow } from '../hooks/use-chat-auto-follow';
+import { useChatFileCheckpoints } from '../hooks/use-chat-file-checkpoints';
 import { ChatMessageRow } from './ChatMessageRow';
 
 const ESTIMATED_ROW_HEIGHT_PX = 150;
@@ -41,6 +42,11 @@ export function ChatFeed({
   onQuestionSubmit?: (prompt: string) => void;
 }) {
   const { t } = useI18n();
+  const { data: checkpointData } = useChatFileCheckpoints(chatId);
+  const revertableMessageIds = useMemo(
+    () => new Set(checkpointData?.checkpoints.map((entry) => entry.messageId) ?? []),
+    [checkpointData]
+  );
   const { parentRef, showScrollButton, handleScroll, scrollToBottom } = useChatAutoFollow(
     chatId,
     messages
@@ -81,6 +87,8 @@ export function ChatFeed({
               index={virtualRow.index}
               start={virtualRow.start}
               measureRef={rowVirtualizer.measureElement}
+              chatId={chatId}
+              canRevertFileChanges={revertableMessageIds.has(messages[virtualRow.index]?.id ?? '')}
               onQuestionSubmit={
                 virtualRow.index === messages.length - 1 ? onQuestionSubmit : undefined
               }

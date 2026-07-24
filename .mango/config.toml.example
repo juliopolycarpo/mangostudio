@@ -37,6 +37,12 @@ dir = ""
 # Empty = auto-detect: ~/.mango/skills in all runtimes
 dir = ""
 
+[checkpoints]
+# Content-addressed snapshots of files the built-in file tools mutate, used to
+# revert an assistant message's file changes.
+# Empty = auto-detect: ~/.mango/checkpoints in all runtimes
+dir = ""
+
 [auth]
 # Minimum 32 characters. If empty, `mangostudio serve` can generate and store one.
 secret = "your-secret-key-here-min-32-chars"

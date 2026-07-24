@@ -11,6 +11,10 @@ import {
   StaleFileError,
   withPathLocks,
 } from '../file-freshness';
+import {
+  ensureFileMutationCheckpoint,
+  recordFileMutationAfterHash,
+} from '../file-mutation-snapshot';
 import { registerTool } from '../registry';
 import type { ToolContext } from '../types';
 import {
@@ -85,6 +89,8 @@ export async function executeDeleteFile(
       throw error;
     }
 
+    const captured = await ensureFileMutationCheckpoint(context, resolvedPath, 'delete');
+
     try {
       await unlink(resolvedPath);
     } catch (error) {
@@ -93,6 +99,7 @@ export async function executeDeleteFile(
     }
 
     forgetFile(context.chatId, resolvedPath);
+    await recordFileMutationAfterHash(context, captured, null);
     return { path: args.path, deleted: true };
   });
 }

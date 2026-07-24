@@ -7,6 +7,11 @@ import { lstat } from 'node:fs/promises';
 import { RegularFileWriteError, writeRegularFileAtomic } from '../../../lib/safe-file';
 import { getRequiredTextArg } from '../arg-parsing';
 import { assertFresh, FileNotReadError, recordFileRead, withPathLocks } from '../file-freshness';
+import {
+  attachBeforeFields,
+  ensureFileMutationCheckpoint,
+  recordFileMutationAfterHash,
+} from '../file-mutation-snapshot';
 import { registerTool } from '../registry';
 import type { ToolContext } from '../types';
 import {
@@ -31,6 +36,8 @@ export interface WriteFileToolResult {
   bytesWritten: number;
   created: boolean;
   sha256: string;
+  before?: string;
+  beforeOmitted?: 'binary' | 'too_large' | 'missing';
 }
 
 export type WriteFileToolSettings = PathValidationSettings;
@@ -81,6 +88,11 @@ export async function executeWriteFile(
 
   return await withPathLocks([resolvedPath], async () => {
     const created = !(await Bun.file(resolvedPath).exists());
+    const captured = await ensureFileMutationCheckpoint(
+      context,
+      resolvedPath,
+      created ? 'create' : 'edit'
+    );
     if (!created) {
       try {
         await assertFresh(context.chatId, resolvedPath);
@@ -107,7 +119,11 @@ export async function executeWriteFile(
     // Recording the committed bytes makes a later sequential write fresh; the
     // surrounding path lock gives parallel calls the same deterministic order.
     const sha256 = recordFileRead(context.chatId, resolvedPath, args.content, committed.mtimeMs);
-    return { path: args.path, bytesWritten: committed.bytesWritten, created, sha256 };
+    await recordFileMutationAfterHash(context, captured, sha256);
+    return attachBeforeFields(
+      { path: args.path, bytesWritten: committed.bytesWritten, created, sha256 },
+      captured
+    );
   });
 }
 

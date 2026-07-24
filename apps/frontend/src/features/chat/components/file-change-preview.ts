@@ -36,6 +36,9 @@ export const DIFF_PREVIEW_MAX_LINES = 400;
  */
 const LINE_DIFF_CELL_BUDGET = 250_000;
 
+/** Unchanged lines kept on each side of a change, as in a unified diff. */
+const DIFF_CONTEXT_LINES = 3;
+
 type DiffPreviewLineKind = 'add' | 'del' | 'context' | 'marker';
 
 export interface DiffPreviewLine {
@@ -76,11 +79,11 @@ export function buildFileChangePreview(
     case 'create_file':
       return contentPreview(args, 'create');
     case 'write_file':
-      return contentPreview(args, writeFileOp(result));
+      return contentPreview(args, writeFileOp(result), result);
     case 'edit_file':
       return editFilePreview(args, result);
     case 'replace_range':
-      return replaceRangePreview(args);
+      return replaceRangePreview(args, result);
     case 'apply_patch':
       return applyPatchPreview(args);
     case 'delete_file':
@@ -130,9 +133,33 @@ function writeFileOp(result: string | null | undefined): FileChangeOp {
   return parsed?.created === false ? 'overwrite' : 'create';
 }
 
-function contentPreview(args: Record<string, unknown>, op: FileChangeOp): FileChangePreview | null {
+function contentPreview(
+  args: Record<string, unknown>,
+  op: FileChangeOp,
+  result?: string | null
+): FileChangePreview | null {
   if (typeof args.path !== 'string' || args.path.length === 0) return null;
   if (typeof args.content !== 'string') return null;
+
+  if (op === 'overwrite') {
+    const parsed = parseResultObject(result);
+    const before = parsed?.before;
+    if (typeof before === 'string') {
+      const lines = lineDiff(before, args.content);
+      return {
+        files: [
+          {
+            op,
+            path: args.path,
+            lines,
+            added: countKind(lines, 'add'),
+            removed: countKind(lines, 'del'),
+          },
+        ],
+      };
+    }
+  }
+
   const lines = splitLines(args.content).map<DiffPreviewLine>((text) => ({ kind: 'add', text }));
   return { files: [{ op, path: args.path, lines, added: lines.length, removed: 0 }] };
 }
@@ -164,7 +191,10 @@ function editFilePreview(
   return preview;
 }
 
-function replaceRangePreview(args: Record<string, unknown>): FileChangePreview | null {
+function replaceRangePreview(
+  args: Record<string, unknown>,
+  result?: string | null
+): FileChangePreview | null {
   if (typeof args.path !== 'string' || args.path.length === 0) return null;
   if (typeof args.content !== 'string') return null;
   // Mirrors the tool's own contract: 1-indexed inclusive integer line numbers.
@@ -173,9 +203,28 @@ function replaceRangePreview(args: Record<string, unknown>): FileChangePreview |
   if (!Number.isInteger(startLine) || !Number.isInteger(endLine)) return null;
   if (startLine < 1 || endLine < startLine) return null;
 
+  const removedCount = endLine - startLine + 1;
+  const parsed = parseResultObject(result);
+  const before = parsed?.before;
+  if (typeof before === 'string') {
+    const beforeLines = splitLines(before);
+    const oldSlice = beforeLines.slice(startLine - 1, endLine).join('\n');
+    const lines = lineDiff(oldSlice, args.content);
+    return {
+      files: [
+        {
+          op: 'update',
+          path: args.path,
+          lines,
+          added: countKind(lines, 'add'),
+          removed: countKind(lines, 'del'),
+        },
+      ],
+    };
+  }
+
   // The replaced lines' previous content is not persisted with the call, so the
   // range is summarized as a unified-diff style marker followed by additions.
-  const removedCount = endLine - startLine + 1;
   const lines: DiffPreviewLine[] = [
     { kind: 'marker', text: `@@ -${startLine},${removedCount} @@` },
     ...splitLines(args.content).map<DiffPreviewLine>((text) => ({ kind: 'add', text })),
@@ -303,13 +352,73 @@ function lineDiff(oldText: string, newText: string): DiffPreviewLine[] {
         ]
       : lcsDiff(oldMid, newMid);
 
-  return [
+  return collapseContext([
     ...oldLines.slice(0, prefix).map<DiffPreviewLine>((text) => ({ kind: 'context', text })),
     ...middle,
     ...oldLines
       .slice(oldLines.length - suffix)
       .map<DiffPreviewLine>((text) => ({ kind: 'context', text })),
-  ];
+  ]);
+}
+
+/**
+ * Drops unchanged runs further than `DIFF_CONTEXT_LINES` from a change, marking
+ * each gap with a unified-diff hunk header. A whole-file diff whose change sits
+ * near the end would otherwise spend the entire render budget on identical
+ * leading lines and show no change at all.
+ */
+function collapseContext(lines: DiffPreviewLine[]): DiffPreviewLine[] {
+  if (!lines.some((line) => line.kind !== 'context')) return [];
+
+  const keep = new Array<boolean>(lines.length).fill(false);
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].kind === 'context') continue;
+    const from = Math.max(0, i - DIFF_CONTEXT_LINES);
+    const to = Math.min(lines.length - 1, i + DIFF_CONTEXT_LINES);
+    for (let j = from; j <= to; j++) keep[j] = true;
+  }
+
+  // 1-indexed positions on each side, advanced as the walk consumes lines.
+  let oldLine = 1;
+  let newLine = 1;
+  const collapsed: DiffPreviewLine[] = [];
+  let index = 0;
+  while (index < lines.length) {
+    if (!keep[index]) {
+      // Only context lines are ever dropped, so both sides advance together.
+      oldLine += 1;
+      newLine += 1;
+      index += 1;
+      continue;
+    }
+
+    const runStart = index;
+    const oldStart = oldLine;
+    const newStart = newLine;
+    let oldCount = 0;
+    let newCount = 0;
+    while (index < lines.length && keep[index]) {
+      if (lines[index].kind !== 'add') {
+        oldLine += 1;
+        oldCount += 1;
+      }
+      if (lines[index].kind !== 'del') {
+        newLine += 1;
+        newCount += 1;
+      }
+      index += 1;
+    }
+
+    // A run starting at the top had nothing elided before it, so it needs no header.
+    if (runStart > 0) {
+      collapsed.push({
+        kind: 'marker',
+        text: `@@ -${oldStart},${oldCount} +${newStart},${newCount} @@`,
+      });
+    }
+    collapsed.push(...lines.slice(runStart, index));
+  }
+  return collapsed;
 }
 
 function lcsDiff(oldLines: string[], newLines: string[]): DiffPreviewLine[] {

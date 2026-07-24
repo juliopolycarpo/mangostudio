@@ -6,6 +6,10 @@
 import { RegularFileWriteError, writeRegularFileAtomic } from '../../../lib/safe-file';
 import { getOptionalBoolean, getRequiredTextArg, ToolArgumentError } from '../arg-parsing';
 import { FileNotReadError, readFreshFile, recordFileEdit, withPathLocks } from '../file-freshness';
+import {
+  ensureFileMutationCheckpoint,
+  recordFileMutationAfterHash,
+} from '../file-mutation-snapshot';
 import { registerTool } from '../registry';
 import type { ToolContext } from '../types';
 import {
@@ -100,6 +104,8 @@ export async function executeEditFile(
       throw error;
     }
 
+    const captured = await ensureFileMutationCheckpoint(context, resolvedPath, 'edit');
+
     const { bytes } = observed;
     const source = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
     const oldBytes = Buffer.from(args.oldString);
@@ -143,6 +149,7 @@ export async function executeEditFile(
       committed.mtimeMs,
       lineCountChanged ? firstChangedLine - 1 : Number.MAX_SAFE_INTEGER
     );
+    await recordFileMutationAfterHash(context, captured, sha256);
     return {
       path: args.path,
       replacements: selectedOffsets.length,

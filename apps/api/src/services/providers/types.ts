@@ -116,6 +116,8 @@ export interface AgentTurnRequest {
   userId: string;
   /** Owning chat — required for provider-routed tool execution (e.g. Cursor sidecar RPC). */
   chatId?: string;
+  /** Assistant message of the turn — file mutations run by the provider join its checkpoint. */
+  assistantMessageId?: string;
   /** Chat-bound server directory for builtin path tools when the provider runs its own tool loop. */
   workdir?: string;
   /** When set with `restricted: true`, builtin path tools must stay inside `workdir`. */
@@ -167,6 +169,8 @@ export interface TextGenerationRequest {
   userId: string;
   /** Owning chat — required for provider-routed tool execution (e.g. Cursor sidecar RPC). */
   chatId?: string;
+  /** Assistant message of the turn — file mutations run by the provider join its checkpoint. */
+  assistantMessageId?: string;
   workdir?: string;
   workdirPolicy?: ProviderWorkdirPolicy;
   history: TextContextMessage[];
