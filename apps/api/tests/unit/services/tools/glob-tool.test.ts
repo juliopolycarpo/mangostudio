@@ -14,7 +14,7 @@ import {
 } from '../../../../src/services/tools/builtin/glob';
 import { executeTool } from '../../../../src/services/tools/registry';
 import type { ToolContext } from '../../../../src/services/tools/types';
-import { useToolRegistry } from './support/tool-registry-harness';
+import { EMPTY_STRING_ARGUMENTS, useToolRegistry } from './support/tool-registry-harness';
 
 let tempDir: string;
 
@@ -253,14 +253,7 @@ describe('glob registry contract', () => {
     await expect(runGlob({})).rejects.toThrow('Missing required field "pattern".');
   });
 
-  for (const [label, value] of [
-    ['a number', 42],
-    ['null', null],
-    ['a boolean', true],
-    ['an object', {}],
-    ['an empty string', ''],
-    ['whitespace only', '   '],
-  ] as const) {
+  for (const [label, value] of EMPTY_STRING_ARGUMENTS) {
     it(`rejects ${label} pattern with the missing-field error, not a TypeError`, async () => {
       const error = await runGlob({ pattern: value }).catch((thrown: unknown) => thrown);
 
@@ -283,12 +276,7 @@ describe('glob registry contract', () => {
     expect(result.matches).toEqual(['b.ts']);
   });
 
-  for (const [label, value] of [
-    ['a number', 42],
-    ['null', null],
-    ['an empty string', ''],
-    ['whitespace only', '   '],
-  ] as const) {
+  for (const [label, value] of EMPTY_STRING_ARGUMENTS) {
     it(`treats ${label} cwd as absent and searches the chat workdir`, async () => {
       const result = await runGlob({ pattern: '*.ts', cwd: value });
 

@@ -27,7 +27,11 @@ import {
 } from '../../../../src/services/tools/file-freshness';
 import { executeTool } from '../../../../src/services/tools/registry';
 import type { ToolContext } from '../../../../src/services/tools/types';
-import { useToolRegistry } from './support/tool-registry-harness';
+import {
+  EMPTY_STRING_ARGUMENTS,
+  NON_STRING_ARGUMENTS,
+  useToolRegistry,
+} from './support/tool-registry-harness';
 
 let tempDir: string;
 
@@ -465,13 +469,7 @@ describe('write_file registry contract', () => {
     );
   });
 
-  for (const [label, value] of [
-    ['a number', 42],
-    ['null', null],
-    ['a boolean', true],
-    ['an empty string', ''],
-    ['whitespace only', '   '],
-  ] as const) {
+  for (const [label, value] of EMPTY_STRING_ARGUMENTS) {
     it(`rejects ${label} path with the missing-path error, not a TypeError`, async () => {
       const error = await write({ path: value, content: 'body' }).catch(
         (thrown: unknown) => thrown
@@ -482,12 +480,7 @@ describe('write_file registry contract', () => {
     });
   }
 
-  for (const [label, value] of [
-    ['a number', 42],
-    ['null', null],
-    ['a boolean', true],
-    ['an object', { text: 'body' }],
-  ] as const) {
+  for (const [label, value] of NON_STRING_ARGUMENTS) {
     it(`rejects ${label} content`, async () => {
       const filePath = harness.path('invalid-content.txt');
 

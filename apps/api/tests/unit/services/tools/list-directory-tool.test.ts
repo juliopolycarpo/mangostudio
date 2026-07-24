@@ -11,7 +11,7 @@ import {
 } from '../../../../src/services/tools/builtin/list-directory';
 import { executeTool } from '../../../../src/services/tools/registry';
 import type { ToolContext } from '../../../../src/services/tools/types';
-import { useToolRegistry } from './support/tool-registry-harness';
+import { EMPTY_STRING_ARGUMENTS, useToolRegistry } from './support/tool-registry-harness';
 
 let tempDir: string;
 
@@ -249,13 +249,7 @@ describe('list_directory registry contract', () => {
     expect(result.entries).toEqual([{ name: 'b.txt', type: 'file' }]);
   });
 
-  for (const [label, value] of [
-    ['a number', 42],
-    ['null', null],
-    ['a boolean', true],
-    ['an empty string', ''],
-    ['whitespace only', '   '],
-  ] as const) {
+  for (const [label, value] of EMPTY_STRING_ARGUMENTS) {
     it(`treats ${label} path as absent and lists the chat workdir`, async () => {
       const result = await list({ path: value });
 

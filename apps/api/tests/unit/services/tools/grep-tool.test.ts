@@ -17,7 +17,11 @@ import {
 } from '../../../../src/services/tools/builtin/grep';
 import { executeTool } from '../../../../src/services/tools/registry';
 import type { ToolContext } from '../../../../src/services/tools/types';
-import { useToolRegistry } from './support/tool-registry-harness';
+import {
+  EMPTY_STRING_ARGUMENTS,
+  NON_STRING_ARGUMENTS,
+  useToolRegistry,
+} from './support/tool-registry-harness';
 
 let tempDir: string;
 
@@ -238,13 +242,7 @@ describe('grep registry contract', () => {
     await expect(runGrep({})).rejects.toThrow('Missing required field "pattern".');
   });
 
-  for (const [label, value] of [
-    ['a number', 42],
-    ['null', null],
-    ['a boolean', true],
-    ['an object', {}],
-    ['an empty string', ''],
-  ] as const) {
+  for (const [label, value] of [...NON_STRING_ARGUMENTS, ['an empty string', '']] as const) {
     it(`rejects ${label} pattern with the missing-field error, not a TypeError`, async () => {
       const error = await runGrep({ pattern: value }).catch((thrown: unknown) => thrown);
 
@@ -283,12 +281,7 @@ describe('grep registry contract', () => {
     ]);
   });
 
-  for (const [label, value] of [
-    ['a number', 42],
-    ['null', null],
-    ['an empty string', ''],
-    ['whitespace only', '   '],
-  ] as const) {
+  for (const [label, value] of EMPTY_STRING_ARGUMENTS) {
     it(`treats ${label} path as absent and searches the chat workdir`, async () => {
       const result = await runGrep({ pattern: 'TODO', path: value });
 

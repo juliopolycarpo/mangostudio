@@ -6,6 +6,28 @@ import { clearFileFreshness } from '../../../../../src/services/tools/file-fresh
 import { clearRegistry } from '../../../../../src/services/tools/registry';
 import type { ToolContext } from '../../../../../src/services/tools/types';
 
+/**
+ * Values a provider stream can put where a string argument belongs. Shared so
+ * every registry-contract suite covers the same shapes instead of each file
+ * hand-picking a subset.
+ */
+export const NON_STRING_ARGUMENTS = [
+  ['a number', 42],
+  ['null', null],
+  ['a boolean', true],
+  ['an object', {}],
+] as const;
+
+/**
+ * Everything a tool that trims a string argument must reject or ignore: the
+ * non-string shapes plus the strings that carry no content once trimmed.
+ */
+export const EMPTY_STRING_ARGUMENTS = [
+  ...NON_STRING_ARGUMENTS,
+  ['an empty string', ''],
+  ['whitespace only', '   '],
+] as const;
+
 export interface ToolRegistryHarness {
   /** Temp directory recreated before every test in the enclosing describe. */
   readonly dir: string;

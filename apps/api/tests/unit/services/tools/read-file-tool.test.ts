@@ -21,7 +21,7 @@ import { executeWriteFile } from '../../../../src/services/tools/builtin/write-f
 import { clearFileFreshness } from '../../../../src/services/tools/file-freshness';
 import { executeTool } from '../../../../src/services/tools/registry';
 import type { ToolContext } from '../../../../src/services/tools/types';
-import { useToolRegistry } from './support/tool-registry-harness';
+import { EMPTY_STRING_ARGUMENTS, useToolRegistry } from './support/tool-registry-harness';
 
 let tempDir: string;
 
@@ -550,14 +550,7 @@ describe('read_file registry contract', () => {
     await expect(read({})).rejects.toThrow('Missing required path.');
   });
 
-  for (const [label, value] of [
-    ['a number', 42],
-    ['null', null],
-    ['a boolean', true],
-    ['an object', {}],
-    ['an empty string', ''],
-    ['whitespace only', '   '],
-  ] as const) {
+  for (const [label, value] of EMPTY_STRING_ARGUMENTS) {
     it(`rejects ${label} path with the missing-path error, not a TypeError`, async () => {
       const error = await read({ path: value }).catch((thrown: unknown) => thrown);
 
