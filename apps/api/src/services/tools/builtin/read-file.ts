@@ -11,9 +11,10 @@ import {
   BINARY_SNIFF_BYTES,
   containsNulByte,
   getRequiredPathArg,
-  normalizePathList,
+  normalizePathValidationSettings,
   PathAccessError,
   type PathValidationSettings,
+  pathPolicyParameterDescriptors,
   READ_FILE_MAX_BYTES,
   readFileWithObservedMtime,
   resolveAndValidatePath,
@@ -89,10 +90,7 @@ const definition = {
 export function normalizeReadFileToolSettings(
   parameters: Record<string, unknown>
 ): ReadFileToolSettings {
-  return {
-    allowedPaths: normalizePathList(parameters.allowedPaths),
-    deniedPaths: normalizePathList(parameters.deniedPaths),
-  };
+  return normalizePathValidationSettings(parameters);
 }
 
 export async function executeReadFile(
@@ -202,24 +200,10 @@ export function register(): void {
         allowedPaths: [],
         deniedPaths: [],
       },
-      parameterDescriptors: [
-        {
-          name: 'allowedPaths',
-          label: 'Allowed paths',
-          description: 'List of paths the tool is allowed to access. Leave empty to allow all.',
-          type: 'path_list',
-          required: false,
-          defaultValue: [] as Array<{ path: string; enabled: boolean }>,
-        },
-        {
-          name: 'deniedPaths',
-          label: 'Denied paths',
-          description: 'List of paths the tool is denied from accessing. Leave empty to deny none.',
-          type: 'path_list',
-          required: false,
-          defaultValue: [] as Array<{ path: string; enabled: boolean }>,
-        },
-      ],
+      parameterDescriptors: pathPolicyParameterDescriptors(
+        'List of paths the tool is allowed to access. Leave empty to allow all.',
+        'List of paths the tool is denied from accessing. Leave empty to deny none.'
+      ),
     },
     execute,
   });
