@@ -17,13 +17,21 @@ import { executeReadFile } from '../../../../src/services/tools/builtin/read-fil
 import {
   executeWriteFile,
   normalizeWriteFileToolSettings,
+  register as registerWriteFileTool,
+  type WriteFileToolResult,
 } from '../../../../src/services/tools/builtin/write-file';
 import {
   clearFileFreshness,
   FileNotReadError,
   StaleFileError,
 } from '../../../../src/services/tools/file-freshness';
+import { executeTool } from '../../../../src/services/tools/registry';
 import type { ToolContext } from '../../../../src/services/tools/types';
+import {
+  EMPTY_STRING_ARGUMENTS,
+  NON_STRING_ARGUMENTS,
+  useToolRegistry,
+} from './support/tool-registry-harness';
 
 let tempDir: string;
 
@@ -441,5 +449,88 @@ describe('executeWriteFile', () => {
 
     expect(result.created).toBe(true);
     expect(await readBack(filePath)).toBe('in existing dir');
+  });
+});
+
+describe('write_file registry contract', () => {
+  const harness = useToolRegistry('write-file-registry', registerWriteFileTool);
+
+  function write(args: Record<string, unknown>): Promise<WriteFileToolResult> {
+    return executeTool('write_file', args, harness.context()) as Promise<WriteFileToolResult>;
+  }
+
+  it('rejects a missing path', async () => {
+    await expect(write({ content: 'body' })).rejects.toThrow('Missing required path.');
+  });
+
+  it('rejects a missing content', async () => {
+    await expect(write({ path: harness.path('no-content.txt') })).rejects.toThrow(
+      'Missing required field "content".'
+    );
+  });
+
+  for (const [label, value] of EMPTY_STRING_ARGUMENTS) {
+    it(`rejects ${label} path with the missing-path error, not a TypeError`, async () => {
+      const error = await write({ path: value, content: 'body' }).catch(
+        (thrown: unknown) => thrown
+      );
+
+      expect(error).toBeInstanceOf(PathAccessError);
+      expect((error as Error).message).toBe('Missing required path.');
+    });
+  }
+
+  for (const [label, value] of NON_STRING_ARGUMENTS) {
+    it(`rejects ${label} content`, async () => {
+      const filePath = harness.path('invalid-content.txt');
+
+      await expect(write({ path: filePath, content: value })).rejects.toThrow(
+        'Field "content" must be a string.'
+      );
+      expect(existsSync(filePath)).toBe(false);
+    });
+  }
+
+  it('writes an empty file when content is an empty string', async () => {
+    const filePath = harness.path('empty.txt');
+
+    const result = await write({ path: filePath, content: '' });
+
+    expect(result.bytesWritten).toBe(0);
+    expect(result.created).toBe(true);
+    expect(await readBack(filePath)).toBe('');
+  });
+
+  it('preserves every trailing newline in the payload', async () => {
+    const filePath = harness.path('trailing.txt');
+    const content = 'a\n\n';
+
+    const result = await write({ path: filePath, content });
+
+    expect(result.bytesWritten).toBe(Buffer.byteLength(content));
+    expect(await readBack(filePath)).toBe(content);
+  });
+
+  it('writes whitespace-only content verbatim', async () => {
+    const filePath = harness.path('whitespace.txt');
+
+    await write({ path: filePath, content: '  \n\t' });
+
+    expect(await readBack(filePath)).toBe('  \n\t');
+  });
+
+  it('trims the path but not the content, because only one of them is an identifier', async () => {
+    const filePath = harness.path('asymmetric.txt');
+
+    await write({ path: `  ${filePath}  `, content: '  body  ' });
+
+    expect(await readBack(filePath)).toBe('  body  ');
+  });
+
+  it('resolves a relative path against the chat workdir', async () => {
+    const result = await write({ path: 'nested/relative.txt', content: 'body' });
+
+    expect(result.path).toBe('nested/relative.txt');
+    expect(await readBack(harness.path('nested', 'relative.txt'))).toBe('body');
   });
 });

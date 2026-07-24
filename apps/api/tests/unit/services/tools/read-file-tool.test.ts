@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { PathAccessError } from '../../../../src/services/tools/builtin/_fs-utils';
 import {
   countTotalLines,
   executeReadFile,
@@ -9,11 +10,18 @@ import {
   looksBinary,
   normalizeReadFileToolSettings,
   READ_FILE_MAX_LINE_CHARS,
+  READ_FILE_MAX_MAX_LINES,
+  READ_FILE_MAX_START_LINE,
   READ_FILE_MAX_WINDOW_BYTES,
+  READ_FILE_MIN_MAX_LINES,
+  type ReadFileToolResult,
+  register as registerReadFileTool,
 } from '../../../../src/services/tools/builtin/read-file';
 import { executeWriteFile } from '../../../../src/services/tools/builtin/write-file';
 import { clearFileFreshness } from '../../../../src/services/tools/file-freshness';
+import { executeTool } from '../../../../src/services/tools/registry';
 import type { ToolContext } from '../../../../src/services/tools/types';
+import { EMPTY_STRING_ARGUMENTS, useToolRegistry } from './support/tool-registry-harness';
 
 let tempDir: string;
 
@@ -520,4 +528,125 @@ describe('executeReadFile', () => {
     );
     expect(result.content).toBe(numbered(1, 'content'));
   });
+});
+
+describe('read_file registry contract', () => {
+  const harness = useToolRegistry('read-file-registry', registerReadFileTool);
+
+  async function seedLines(count: number, name = 'lines.txt'): Promise<string> {
+    const filePath = harness.path(name);
+    await seedFile(
+      filePath,
+      Array.from({ length: count }, (_, index) => `line ${index + 1}`).join('\n')
+    );
+    return filePath;
+  }
+
+  function read(args: Record<string, unknown>): Promise<ReadFileToolResult> {
+    return executeTool('read_file', args, harness.context()) as Promise<ReadFileToolResult>;
+  }
+
+  it('rejects a missing path', async () => {
+    await expect(read({})).rejects.toThrow('Missing required path.');
+  });
+
+  for (const [label, value] of EMPTY_STRING_ARGUMENTS) {
+    it(`rejects ${label} path with the missing-path error, not a TypeError`, async () => {
+      const error = await read({ path: value }).catch((thrown: unknown) => thrown);
+
+      expect(error).toBeInstanceOf(PathAccessError);
+      expect((error as Error).message).toBe('Missing required path.');
+    });
+  }
+
+  it('reads the whole file when startLine and maxLines are absent', async () => {
+    const filePath = await seedLines(3);
+
+    const result = await read({ path: filePath });
+
+    expect(result.startLine).toBe(1);
+    expect(result.endLine).toBe(3);
+    expect(result.truncated).toBe(false);
+  });
+
+  it('windows the file with valid startLine and maxLines', async () => {
+    const filePath = await seedLines(10);
+
+    const result = await read({ path: filePath, startLine: 4, maxLines: 2 });
+
+    expect(result.startLine).toBe(4);
+    expect(result.endLine).toBe(5);
+    expect(result.content).toContain(numbered(4, 'line 4'));
+    expect(result.content).not.toContain(numbered(6, 'line 6'));
+  });
+
+  it('trims the path argument before resolving it', async () => {
+    const filePath = await seedLines(1);
+
+    const result = await read({ path: `  ${filePath}  ` });
+
+    expect(result.totalLines).toBe(1);
+  });
+
+  it('clamps startLine up to the lower bound instead of reading line zero', async () => {
+    const filePath = await seedLines(3);
+
+    const result = await read({ path: filePath, startLine: 0 });
+
+    expect(result.startLine).toBe(1);
+    expect(result.endLine).toBe(3);
+  });
+
+  it('clamps startLine down to the upper bound', async () => {
+    const filePath = await seedLines(3);
+
+    // The clamped value surfaces in the past-the-end message, which is how the
+    // upper bound stays observable without a ten-million-line fixture.
+    await expect(read({ path: filePath, startLine: 5e9 })).rejects.toThrow(
+      `startLine ${READ_FILE_MAX_START_LINE} is past the end`
+    );
+  });
+
+  it('rounds a fractional startLine rather than truncating it', async () => {
+    const filePath = await seedLines(5);
+
+    const result = await read({ path: filePath, startLine: 2.6 });
+
+    expect(result.startLine).toBe(3);
+    expect(result.content).toContain(numbered(3, 'line 3'));
+  });
+
+  it('clamps maxLines up to the lower bound', async () => {
+    const filePath = await seedLines(4);
+
+    const result = await read({ path: filePath, maxLines: 0 });
+
+    expect(result.endLine).toBe(READ_FILE_MIN_MAX_LINES);
+    expect(result.truncated).toBe(true);
+  });
+
+  it('clamps maxLines down to the upper bound', async () => {
+    const filePath = await seedLines(READ_FILE_MAX_MAX_LINES + 1, 'many-lines.txt');
+
+    const result = await read({ path: filePath, maxLines: 10 * READ_FILE_MAX_MAX_LINES });
+
+    expect(result.endLine).toBe(READ_FILE_MAX_MAX_LINES);
+    expect(result.truncated).toBe(true);
+  });
+
+  for (const [label, args] of [
+    ['a non-numeric startLine', { startLine: '2' }],
+    ['a NaN startLine', { startLine: Number.NaN }],
+    ['a non-numeric maxLines', { maxLines: '10' }],
+    ['an infinite maxLines', { maxLines: Number.POSITIVE_INFINITY }],
+  ] as const) {
+    it(`rejects ${label}`, async () => {
+      const filePath = await seedLines(2);
+      const field = 'startLine' in args ? 'startLine' : 'maxLines';
+
+      await expect(read({ path: filePath, ...args })).rejects.toThrow(
+        `Field "${field}" must be a finite number.`
+      );
+    });
+  }
 });

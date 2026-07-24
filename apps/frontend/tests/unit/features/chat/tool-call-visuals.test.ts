@@ -84,6 +84,11 @@ describe('getToolHint', () => {
     expect(getToolHint('grep', { pattern: 'import.*React' })).toBe('import.*React');
   });
 
+  it('keeps edge whitespace in a grep pattern, which the API searches verbatim', () => {
+    expect(getToolHint('grep', { pattern: ' TODO' })).toBe(' TODO');
+    expect(getToolHint('grep', { pattern: '   ' })).toBe('   ');
+  });
+
   it('returns the pattern for glob', () => {
     expect(getToolHint('glob', { pattern: '**/*.ts' })).toBe('**/*.ts');
   });

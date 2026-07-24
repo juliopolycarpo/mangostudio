@@ -2,14 +2,19 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { ToolArgumentError } from '../../../../src/services/tools/arg-parsing';
 import {
   executeGlob,
   GLOB_DEFAULT_MAX_RESULTS,
   GLOB_MAX_MAX_RESULTS,
   GLOB_MIN_MAX_RESULTS,
+  type GlobToolResult,
   normalizeGlobToolSettings,
+  register as registerGlobTool,
 } from '../../../../src/services/tools/builtin/glob';
+import { executeTool } from '../../../../src/services/tools/registry';
 import type { ToolContext } from '../../../../src/services/tools/types';
+import { EMPTY_STRING_ARGUMENTS, useToolRegistry } from './support/tool-registry-harness';
 
 let tempDir: string;
 
@@ -227,5 +232,63 @@ describe('executeGlob', () => {
     const result = await executeGlob({ pattern: '*.zzz', cwd: tempDir }, makeContext());
     expect(result.matches).toEqual([]);
     expect(result.truncated).toBe(false);
+  });
+});
+
+describe('glob registry contract', () => {
+  const harness = useToolRegistry('glob-registry', registerGlobTool);
+
+  function runGlob(args: Record<string, unknown>): Promise<GlobToolResult> {
+    return executeTool('glob', args, harness.context()) as Promise<GlobToolResult>;
+  }
+
+  beforeEach(async () => {
+    await seedFile(harness.path('a.ts'), 'export const a = 1;');
+    await seedFile(harness.path('README.md'), '# title');
+    mkdirSync(harness.path('nested'));
+    await seedFile(harness.path('nested', 'b.ts'), 'export const b = 2;');
+  });
+
+  it('rejects a missing pattern', async () => {
+    await expect(runGlob({})).rejects.toThrow('Missing required field "pattern".');
+  });
+
+  for (const [label, value] of EMPTY_STRING_ARGUMENTS) {
+    it(`rejects ${label} pattern with the missing-field error, not a TypeError`, async () => {
+      const error = await runGlob({ pattern: value }).catch((thrown: unknown) => thrown);
+
+      expect(error).toBeInstanceOf(ToolArgumentError);
+      expect((error as Error).message).toBe('Missing required field "pattern".');
+    });
+  }
+
+  it('defaults cwd to the chat workdir when it is absent', async () => {
+    const result = await runGlob({ pattern: '**/*.ts' });
+
+    expect(result.cwd).toBe(harness.dir);
+    expect(result.matches.sort()).toEqual(['a.ts', 'nested/b.ts']);
+  });
+
+  it('resolves an explicit relative cwd against the chat workdir', async () => {
+    const result = await runGlob({ pattern: '*.ts', cwd: 'nested' });
+
+    expect(result.cwd).toBe(harness.path('nested'));
+    expect(result.matches).toEqual(['b.ts']);
+  });
+
+  for (const [label, value] of EMPTY_STRING_ARGUMENTS) {
+    it(`treats ${label} cwd as absent and searches the chat workdir`, async () => {
+      const result = await runGlob({ pattern: '*.ts', cwd: value });
+
+      expect(result.cwd).toBe(harness.dir);
+      expect(result.matches).toEqual(['a.ts']);
+    });
+  }
+
+  it('trims a padded pattern, because a glob has no meaningful edge whitespace', async () => {
+    const result = await runGlob({ pattern: '  *.ts  ' });
+
+    expect(result.pattern).toBe('*.ts');
+    expect(result.matches).toEqual(['a.ts']);
   });
 });

@@ -2,11 +2,16 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { PathAccessError } from '../../../../src/services/tools/builtin/_fs-utils';
 import {
   executeListDirectory,
+  type ListDirectoryToolResult,
   normalizeListDirectoryToolSettings,
+  register as registerListDirectoryTool,
 } from '../../../../src/services/tools/builtin/list-directory';
+import { executeTool } from '../../../../src/services/tools/registry';
 import type { ToolContext } from '../../../../src/services/tools/types';
+import { EMPTY_STRING_ARGUMENTS, useToolRegistry } from './support/tool-registry-harness';
 
 let tempDir: string;
 
@@ -205,5 +210,65 @@ describe('executeListDirectory', () => {
       })
     );
     expect(result.entries.some((e) => e.name === 'disabled-denied.txt')).toBe(true);
+  });
+});
+
+describe('list_directory registry contract', () => {
+  const harness = useToolRegistry('list-dir-registry', registerListDirectoryTool);
+
+  function list(
+    args: Record<string, unknown>,
+    context = harness.context()
+  ): Promise<ListDirectoryToolResult> {
+    return executeTool('list_directory', args, context) as Promise<ListDirectoryToolResult>;
+  }
+
+  beforeEach(async () => {
+    await seedFile(harness.path('a.txt'), 'a');
+    mkdirSync(harness.path('nested'));
+    await seedFile(harness.path('nested', 'b.txt'), 'b');
+  });
+
+  it('falls back to the chat workdir when path is absent', async () => {
+    const result = await list({});
+
+    expect(result.path).toBe(harness.dir);
+    expect(result.entries.map((entry) => entry.name).sort()).toEqual(['a.txt', 'nested']);
+  });
+
+  it('resolves an explicit relative path against the chat workdir', async () => {
+    const result = await list({ path: 'nested' });
+
+    expect(result.path).toBe('nested');
+    expect(result.entries).toEqual([{ name: 'b.txt', type: 'file' }]);
+  });
+
+  it('trims a padded path argument', async () => {
+    const result = await list({ path: '  nested  ' });
+
+    expect(result.entries).toEqual([{ name: 'b.txt', type: 'file' }]);
+  });
+
+  for (const [label, value] of EMPTY_STRING_ARGUMENTS) {
+    it(`treats ${label} path as absent and lists the chat workdir`, async () => {
+      const result = await list({ path: value });
+
+      expect(result.path).toBe(harness.dir);
+    });
+
+    it(`reports the missing path for ${label} when no workdir is bound`, async () => {
+      const error = await list({ path: value }, harness.contextWithoutWorkdir()).catch(
+        (thrown: unknown) => thrown
+      );
+
+      expect(error).toBeInstanceOf(PathAccessError);
+      expect((error as Error).message).toBe('Missing required path.');
+    });
+  }
+
+  it('reports the missing path when neither an argument nor a workdir is available', async () => {
+    await expect(list({}, harness.contextWithoutWorkdir())).rejects.toThrow(
+      'Missing required path.'
+    );
   });
 });

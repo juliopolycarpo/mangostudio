@@ -115,7 +115,10 @@ export function getToolHint(
       return typeof args.command === 'string' && args.command.trim().length > 0
         ? args.command.trim()
         : null;
+    // Shown verbatim: the API searches the regular expression as given, so
+    // trimming here would advertise a different pattern than the one that ran.
     case 'grep':
+      return typeof args.pattern === 'string' && args.pattern.length > 0 ? args.pattern : null;
     case 'glob':
       return typeof args.pattern === 'string' && args.pattern.trim().length > 0
         ? args.pattern.trim()

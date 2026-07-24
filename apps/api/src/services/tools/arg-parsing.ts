@@ -34,6 +34,21 @@ export function getRequiredTextArg(value: unknown, name: string): string {
 }
 
 /**
+ * Reads a required non-empty string argument verbatim. Edge whitespace is
+ * significant in a search expression: trimming `" TODO"` into `"TODO"` silently
+ * matches something the caller never asked for, so only an absent, non-string,
+ * or empty value is rejected.
+ *
+ * // Usage: const pattern = getRequiredVerbatimString(args.pattern, 'pattern');
+ */
+export function getRequiredVerbatimString(value: unknown, name: string): string {
+  if (typeof value !== 'string' || value === '') {
+    throw new ToolArgumentError(`Missing required field "${name}".`);
+  }
+  return value;
+}
+
+/**
  * Reads a required integer argument, rejecting fractions and non-numbers rather
  * than rounding: a line number the model guessed at is a bug, not an input to
  * clamp.

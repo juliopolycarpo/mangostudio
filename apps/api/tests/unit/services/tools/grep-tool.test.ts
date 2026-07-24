@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { ToolArgumentError } from '../../../../src/services/tools/arg-parsing';
 import {
   executeGrep,
   GREP_DEFAULT_MAX_FILE_BYTES,
@@ -10,9 +11,17 @@ import {
   GREP_MAX_MAX_RESULTS,
   GREP_MIN_MAX_RESULTS,
   GrepPatternError,
+  type GrepToolResult,
   normalizeGrepToolSettings,
+  register as registerGrepTool,
 } from '../../../../src/services/tools/builtin/grep';
+import { executeTool } from '../../../../src/services/tools/registry';
 import type { ToolContext } from '../../../../src/services/tools/types';
+import {
+  EMPTY_STRING_ARGUMENTS,
+  NON_STRING_ARGUMENTS,
+  useToolRegistry,
+} from './support/tool-registry-harness';
 
 let tempDir: string;
 
@@ -210,5 +219,111 @@ describe('executeGrep', () => {
       expect((error as Error).message).toContain('in the denied paths');
     }
     expect(threw).toBe(true);
+  });
+});
+
+describe('grep registry contract', () => {
+  const harness = useToolRegistry('grep-registry', registerGrepTool);
+
+  function runGrep(args: Record<string, unknown>): Promise<GrepToolResult> {
+    return executeTool('grep', args, harness.context()) as Promise<GrepToolResult>;
+  }
+
+  beforeEach(async () => {
+    await seedFile(
+      harness.path('a.ts'),
+      ['TODO: rewrite', 'const TODO = 1;', 'const spaced =   3;'].join('\n')
+    );
+    mkdirSync(harness.path('nested'));
+    await seedFile(harness.path('nested', 'c.txt'), 'todo at nested level');
+  });
+
+  it('rejects a missing pattern', async () => {
+    await expect(runGrep({})).rejects.toThrow('Missing required field "pattern".');
+  });
+
+  for (const [label, value] of [...NON_STRING_ARGUMENTS, ['an empty string', '']] as const) {
+    it(`rejects ${label} pattern with the missing-field error, not a TypeError`, async () => {
+      const error = await runGrep({ pattern: value }).catch((thrown: unknown) => thrown);
+
+      expect(error).toBeInstanceOf(ToolArgumentError);
+      expect((error as Error).message).toBe('Missing required field "pattern".');
+    });
+  }
+
+  it('keeps leading whitespace in the pattern instead of searching for something else', async () => {
+    const result = await runGrep({ pattern: ' TODO' });
+
+    expect(result.pattern).toBe(' TODO');
+    expect(result.matches).toEqual([{ file: 'a.ts', line: 2, text: 'const TODO = 1;' }]);
+  });
+
+  it('keeps trailing whitespace in the pattern', async () => {
+    const result = await runGrep({ pattern: '=   ' });
+
+    expect(result.matches).toEqual([{ file: 'a.ts', line: 3, text: 'const spaced =   3;' }]);
+  });
+
+  it('accepts a whitespace-only pattern as the literal regex it is', async () => {
+    const result = await runGrep({ pattern: '   ' });
+
+    expect(result.pattern).toBe('   ');
+    expect(result.matches.map((match) => match.line)).toEqual([3]);
+  });
+
+  it('defaults path to the chat workdir when it is absent', async () => {
+    const result = await runGrep({ pattern: 'TODO' });
+
+    expect(result.path).toBe(harness.dir);
+    expect(result.matches.map((match) => `${match.file}:${match.line}`)).toEqual([
+      'a.ts:1',
+      'a.ts:2',
+    ]);
+  });
+
+  for (const [label, value] of EMPTY_STRING_ARGUMENTS) {
+    it(`treats ${label} path as absent and searches the chat workdir`, async () => {
+      const result = await runGrep({ pattern: 'TODO', path: value });
+
+      expect(result.path).toBe(harness.dir);
+    });
+
+    it(`treats ${label} glob as absent and scans every file`, async () => {
+      const result = await runGrep({ pattern: 'TODO', glob: value, caseInsensitive: true });
+
+      expect(result.matches.some((match) => match.file === join('nested', 'c.txt'))).toBe(true);
+    });
+  }
+
+  it('applies a string glob filter', async () => {
+    const result = await runGrep({ pattern: 'TODO', glob: '*.ts', caseInsensitive: true });
+
+    expect(result.matches.every((match) => match.file.endsWith('.ts'))).toBe(true);
+  });
+
+  it('matches case-insensitively when caseInsensitive is true', async () => {
+    const result = await runGrep({ pattern: 'todo', caseInsensitive: true });
+
+    expect(result.matches).toHaveLength(3);
+  });
+
+  for (const [label, value] of [
+    ['the string "true"', 'true'],
+    ['a truthy number', 1],
+    ['null', null],
+  ] as const) {
+    it(`does not enable caseInsensitive for ${label}`, async () => {
+      const result = await runGrep({ pattern: 'todo', caseInsensitive: value });
+
+      expect(result.matches).toEqual([
+        { file: join('nested', 'c.txt'), line: 1, text: 'todo at nested level' },
+      ]);
+    });
+  }
+
+  it('surfaces an invalid regex as a pattern error, not a raw SyntaxError', async () => {
+    const error = await runGrep({ pattern: '(' }).catch((thrown: unknown) => thrown);
+
+    expect(error).toBeInstanceOf(GrepPatternError);
   });
 });

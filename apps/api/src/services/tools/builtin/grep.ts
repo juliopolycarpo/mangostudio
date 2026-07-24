@@ -10,7 +10,7 @@ import {
   isInsideResolvedRoot,
   resolveContainmentRoot,
 } from '../../../modules/workspaces/application/path-containment';
-import { clampIntegerSetting, getOptionalString, getRequiredString } from '../arg-parsing';
+import { clampIntegerSetting, getOptionalString, getRequiredVerbatimString } from '../arg-parsing';
 import { registerTool } from '../registry';
 import type { ToolContext } from '../types';
 import {
@@ -301,7 +301,8 @@ function isPathAllowed(absolute: string, settings: PathValidationSettings): bool
 }
 
 function execute(args: Record<string, unknown>, context: ToolContext): Promise<GrepToolResult> {
-  const pattern = getRequiredString(args.pattern, 'pattern');
+  // Verbatim: whitespace is part of the regular expression.
+  const pattern = getRequiredVerbatimString(args.pattern, 'pattern');
   const path = getOptionalString(args.path);
   const glob = getOptionalString(args.glob);
   return executeGrep(
