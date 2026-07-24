@@ -123,7 +123,8 @@ Abra estes arquivos primeiro:
 - `apps/api/src/modules/prompt-rules/application/prompt-composer.ts`
 - `apps/api/src/modules/prompt-rules/application/rule-file-resolver.ts`
 - `apps/api/src/modules/prompt-rules/http/rule-file-routes.ts`
-- `apps/frontend/src/features/settings/prompts/`
+- `apps/frontend/src/components/settings/PromptSettings.tsx`
+- `apps/frontend/src/components/settings/RuleFileCard.tsx`
 
 ## Settings (App, Provider, Tool)
 
@@ -156,7 +157,6 @@ Abra estes arquivos primeiro:
 
 - `apps/api/src/db/database.ts`
 - `apps/api/src/db/types.ts`
-- `apps/api/src/db/row-types.ts`
 - `apps/api/src/db/serializers.ts`
 - `apps/api/src/db/migrations/`
 - o serviço ou rota dono da funcionalidade

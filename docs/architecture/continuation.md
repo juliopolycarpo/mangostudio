@@ -218,14 +218,14 @@ DeepSeek uses `turn-local` continuation strategy. Key rules:
 
 ## Common Failure Modes and Where to Debug
 
-| Symptom                                     | Likely cause                                   | Where to look                                                             |
-| ------------------------------------------- | ---------------------------------------------- | ------------------------------------------------------------------------- |
-| Every turn starts with `degrade_to_replay`  | `chats.lastProviderState` is null or malformed | Check the chat row in DB; look for `[continuation][clear]` log lines      |
-| `cursor_expired` mid-turn with tool results | Cursor went stale during tool execution        | `responses-stream.ts` or `interactions-stream.ts` cursor error handler    |
-| Provider mismatch on every switch           | `lastProviderState` has stale provider         | Expected — first turn after switch always degrades                        |
-| Wrong model called                          | `resolve-model.ts` selected different model    | Check `modelId` at top of `stream-text-turn.ts`                           |
-| Replay sends wrong messages                 | `replay-builder.ts` misformatting              | Unit tests in `tests/unit/services/providers/replay-builder.test.ts`      |
-| Stateless-loop leaks cross-turn             | `loopMessages` persisted as durable            | `decideTurnPersistence` filter — should return `null` for stateless modes |
+| Symptom                                     | Likely cause                                   | Where to look                                                                 |
+| ------------------------------------------- | ---------------------------------------------- | ----------------------------------------------------------------------------- |
+| Every turn starts with `degrade_to_replay`  | `chats.lastProviderState` is null or malformed | Check the chat row in DB; look for `[continuation][clear]` log lines          |
+| `cursor_expired` mid-turn with tool results | Cursor went stale during tool execution        | `responses-stream.ts` or `interactions-stream.ts` cursor error handler        |
+| Provider mismatch on every switch           | `lastProviderState` has stale provider         | Expected — first turn after switch always degrades                            |
+| Wrong model called                          | `resolve-model.ts` selected different model    | Check `modelId` at top of `stream-text-turn.ts`                               |
+| Replay sends wrong messages                 | `replay-builder.ts` misformatting              | Unit tests in `apps/api/tests/unit/services/providers/replay-builder.test.ts` |
+| Stateless-loop leaks cross-turn             | `loopMessages` persisted as durable            | `decideTurnPersistence` filter — should return `null` for stateless modes     |
 
 ---
 
