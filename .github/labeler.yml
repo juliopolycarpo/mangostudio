@@ -1,7 +1,8 @@
 # Path-based PR labeling. This file is the source of truth for the label globs;
-# docs/reference/labels.md documents the taxonomy and is kept in sync by
-# scripts/tests/labeler.unit.test.ts. Globs are matched against the PR's changed
-# file paths only — actions/labeler never checks out or executes PR code.
+# docs/reference/labels.md documents the taxonomy. scripts/tests/labeler.unit.test.ts
+# keeps the label *set* in sync between the two — the glob text quoted in the doc is
+# maintained by hand, so update it here and there together. Globs are matched against
+# the PR's changed file paths only — actions/labeler never checks out or executes PR code.
 
 "area: frontend":
   - changed-files:

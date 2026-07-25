@@ -34,8 +34,11 @@ function labelsFromLabeler(labeler: string): string[] {
 function labelsFromDoc(doc: string): string[] {
   const bullets = doc.split('\n').filter((line) => line.startsWith('- `'));
   return bullets.flatMap((line) => {
-    // A single bullet may list several labels, e.g. "type: bug`, `type: feature".
-    const leading = line.slice(2, line.indexOf(' — '));
+    // Only the text before the em dash names labels; the rest is glob/description
+    // text. A single bullet may list several, e.g. "type: bug`, `type: feature".
+    // Without a separator, scan the whole bullet rather than dropping its last char.
+    const separator = line.indexOf(' — ');
+    const leading = separator < 0 ? line.slice(2) : line.slice(2, separator);
     return [...leading.matchAll(/`((?:area|type): [^`]+)`/g)].map(([, label]) => label as string);
   });
 }

@@ -57,12 +57,24 @@ zero or multiple `type:` labels. Closed issues are left alone so label cleanup d
 - `type: chore` — manual, maintenance that fits no other type
 - `type: bug`, `type: feature`, `type: migration`, `type: question` — manual / issue-template defaults
 
+## `status:` (issues only)
+
+Issues carry exactly one `status:` label. No glob applies these — `issue-triage.yml` seeds the
+first one and maintainers move it by hand from there.
+
+- `status: needs triage` — default on open (issue templates and the `issue-triage.yml` backstop)
+- `status: needs author` — waiting on the reporter; also applied automatically when an open issue has zero or multiple `type:` labels
+- `status: accepted` — triaged and agreed, not started
+- `status: in progress` — actively being worked on
+- `status: blocked` — accepted but waiting on something external
+
 ## Adding or moving a label
 
 Keep new labels and glob moves in sync between `.github/labeler.yml`, `.github/dependabot.yml`,
-and this page. `scripts/tests/labeler.unit.test.ts` asserts that the label set documented here
-matches the one defined in `.github/labeler.yml` (plus the manual-only labels above), so a label
-added to one and not the other fails the test by name.
+and this page. `scripts/tests/labeler.unit.test.ts` asserts that the `area:`/`type:` label set
+documented here matches the one defined in `.github/labeler.yml` (plus the manual-only labels
+above), so a label added to one and not the other fails the test by name. The glob text on each
+bullet and the `status:` list are **not** asserted — keep those accurate by hand.
 
 ## Related
 

@@ -58,12 +58,25 @@ limpeza de labels não gere novas cobranças.
 - `type: chore` — manual, manutenção que não se encaixa em nenhum outro tipo
 - `type: bug`, `type: feature`, `type: migration`, `type: question` — manual / padrões dos templates de issue
 
+## `status:` (somente issues)
+
+Issues carregam exatamente uma label `status:`. Nenhum glob aplica essas labels — o
+`issue-triage.yml` semeia a primeira e os mantenedores a movem manualmente a partir daí.
+
+- `status: needs triage` — padrão na abertura (templates de issue e o backstop do `issue-triage.yml`)
+- `status: needs author` — aguardando o autor; também aplicada automaticamente quando uma issue aberta tem zero ou várias labels `type:`
+- `status: accepted` — triada e aceita, ainda não iniciada
+- `status: in progress` — em desenvolvimento ativo
+- `status: blocked` — aceita, mas aguardando algo externo
+
 ## Adicionar ou mover uma label
 
 Mantenha novas labels e mudanças de glob em sincronia entre `.github/labeler.yml`,
 `.github/dependabot.yml` e esta página. `scripts/tests/labeler.unit.test.ts` garante que o
-conjunto de labels documentado aqui é igual ao definido em `.github/labeler.yml` (mais as labels
-manuais acima), então uma label adicionada em um lugar e não no outro falha o teste pelo nome.
+conjunto de labels `area:`/`type:` documentado aqui é igual ao definido em `.github/labeler.yml`
+(mais as labels manuais acima), então uma label adicionada em um lugar e não no outro falha o
+teste pelo nome. O texto dos globs em cada item e a lista de `status:` **não** são verificados —
+mantenha-os corretos manualmente.
 
 ## Relacionado
 
