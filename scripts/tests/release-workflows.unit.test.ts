@@ -14,6 +14,18 @@ import { uploadArtifactSteps, uploadPaths, workflowFiles } from './support/workf
 
 const COMPRESSED_PAYLOAD = /\.(?:tar\.gz|tgz|zip|tar\.xz|tar\.zst)\b/;
 
+// Jobs that publish a public channel. The tag-restricted `release` environment
+// (deployment rule, reviewers, secrets) is GitHub state and is not asserted
+// here — only that these jobs declare it, and that canary does not.
+const RELEASE_PUBLISHING_JOBS = [
+  'github-release',
+  'docker',
+  'npm-publish',
+  'homebrew',
+  'scoop',
+  'cargo-publish',
+] as const;
+
 interface WorkflowRunStep {
   readonly workflowPath: string;
   readonly job: string;
@@ -146,6 +158,34 @@ describe('release workflow binary gate', () => {
 
     expect(cargoBlock).not.toContain('Missing required release secret: CARGO_REGISTRY_TOKEN');
     expect(cargoBlock).toContain('allow_legacy_cargo_token');
+  });
+
+  test('every publishing job runs in the tag-restricted release environment', () => {
+    const workflow = readText('.github/workflows/release.yml');
+    const publishing = new Set<string>(RELEASE_PUBLISHING_JOBS);
+    const secretPrefix = '$' + '{{ secrets.';
+
+    for (const job of RELEASE_PUBLISHING_JOBS) {
+      expect(extractJobBlock(workflow, job), job).toMatch(/^ {4}environment: release$/m);
+    }
+
+    for (const { job, block } of extractJobBlocks(workflow)) {
+      if (publishing.has(job)) continue;
+      expect(block, job).not.toMatch(/^ {4}environment: release$/m);
+    }
+
+    // A job that can read a repository or environment secret must also declare
+    // the release environment, so a seventh publish channel cannot reach a
+    // credential outside the tag-restricted set.
+    for (const { job, block } of extractJobBlocks(workflow)) {
+      if (!block.includes(secretPrefix)) continue;
+      expect(block, job).toMatch(/^ {4}environment: release$/m);
+    }
+  });
+
+  test('canary publishes outside the tag-restricted release environment', () => {
+    // Canary runs on every green main push; the v*.*.* tag rule would block it.
+    expect(readText('.github/workflows/canary.yml')).not.toContain('environment: release');
   });
 
   test('pre-merge binary smoke covers native host platforms and Docker variants', () => {

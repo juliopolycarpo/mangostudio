@@ -138,6 +138,9 @@ jobs:
     name: Publish GitHub Release
     needs: [build, verify-build]
     runs-on: ubuntu-latest
+    # Publish credentials live only in this environment, restricted to v*.*.*
+    # tags. No required reviewer, so a tag push still releases unattended.
+    environment: release
     timeout-minutes: 10
     permissions:
       contents: write # create the tagged GitHub Release and upload assets
@@ -178,6 +181,7 @@ jobs:
     name: Publish Docker images
     needs: [build, verify-build]
     runs-on: ubuntu-latest
+    environment: release
     timeout-minutes: 15
     permissions:
       contents: read # checkout of Dockerfiles and staging scripts
@@ -291,6 +295,7 @@ jobs:
     name: Publish npm packages
     needs: [build, verify-build]
     runs-on: ubuntu-latest
+    environment: release
     timeout-minutes: 10
     outputs:
       auth: ${{ steps.publish.outputs.auth }}
@@ -362,6 +367,7 @@ jobs:
     name: Update Homebrew tap
     needs: [build, verify-build, github-release]
     runs-on: ubuntu-latest
+    environment: release
     timeout-minutes: 10
     permissions:
       contents: read
@@ -410,6 +416,7 @@ jobs:
     name: Update Scoop bucket
     needs: [build, verify-build, github-release]
     runs-on: ubuntu-latest
+    environment: release
     timeout-minutes: 10
     permissions:
       contents: read
@@ -462,6 +469,7 @@ jobs:
     name: Publish to crates.io
     needs: [build, verify-build, github-release]
     runs-on: ubuntu-latest
+    environment: release
     timeout-minutes: 10
     outputs:
       auth: ${{ steps.auth-mode.outputs.auth }}
