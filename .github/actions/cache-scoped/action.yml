@@ -42,15 +42,19 @@ outputs:
     value: ${{ steps.outcome.outputs.cache-hit }}
   cache-restored:
     description: >
-      'true' when a usable cache was restored. For exact-restore families this
-      includes a version-exact trusted-main match; otherwise it tracks the
-      primary-key hit only.
+      'true' when a usable cache was restored. Only `mode: restore` can observe
+      a trusted-main match, so only that mode reports 'true' for a version-exact
+      trusted-main restore; `restore-save` tracks the primary-key hit alone and
+      must not be used to gate an install step.
     value: ${{ steps.outcome.outputs.cache-restored }}
   primary-key:
     description: Primary cache key used by this run.
     value: ${{ steps.keys.outputs.primary-key }}
   restored-prefix:
-    description: Trusted main-cache prefix considered during restore.
+    description: >
+      Trusted main-cache key considered during restore: the loose main prefix
+      for normal families, or the version-exact main key for exact-restore
+      families (which never consider the loose prefix).
     value: ${{ steps.keys.outputs.restore-prefix }}
 runs:
   using: composite
@@ -104,7 +108,16 @@ runs:
         prefix="${RUNNER_OS}-${RUNNER_ARCH}-${CACHE_EPOCH}-${FAMILY}"
         primary_key="${prefix}-${WRITE_SCOPE}-${VALIDITY}"
         restore_key="${prefix}-main-${VALIDITY}"
-        restore_prefix="${prefix}-main-${RESTORE_PREFIX}"
+        loose_prefix="${prefix}-main-${RESTORE_PREFIX}"
+
+        # Report what restore actually considers: exact-restore families never
+        # see the loose prefix, so advertising it would misdirect cache-miss
+        # debugging.
+        if [ "${EXACT_RESTORE}" = "true" ]; then
+          restore_prefix="${restore_key}"
+        else
+          restore_prefix="${loose_prefix}"
+        fi
 
         {
           echo "primary-key=${primary_key}"
@@ -113,7 +126,7 @@ runs:
           echo "restore-keys<<EOF"
           echo "${restore_key}"
           if [ "${EXACT_RESTORE}" != "true" ]; then
-            echo "${restore_prefix}"
+            echo "${loose_prefix}"
           fi
           echo "EOF"
         } >> "$GITHUB_OUTPUT"
