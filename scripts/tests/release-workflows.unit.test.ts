@@ -614,6 +614,8 @@ describe('release workflow binary gate', () => {
     expect(workflow).toContain('cancel-in-progress: true');
 
     expect(extractJobBlock(workflow, 'verify')).toBe('');
+    expect(extractJobBlock(workflow, 'docker-canary')).toBe('');
+    expect(extractJobBlock(workflow, 'crates-canary')).toBe('');
     expect(workflow).toContain('uses: ./.github/actions/download-distribution');
     expect(workflow).not.toContain('bun run build --binary');
     expect(workflow).not.toContain('actions/upload-artifact@');
