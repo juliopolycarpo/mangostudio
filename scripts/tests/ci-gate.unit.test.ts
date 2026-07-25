@@ -144,6 +144,16 @@ describe('CI / Gate aggregate', () => {
     expect(workflow).toContain('if [ ! -s "$RUNNER_TEMP/changed-files" ]; then');
     expect(workflow).toContain('refusing to skip distribution');
   });
+
+  test('relevance detection cannot silently fail open', () => {
+    // Renames must list both sides, or moving a source file under an
+    // irrelevant path would hide the source-side deletion.
+    expect(workflow).toContain('git diff --no-renames --name-only');
+    // A single grep, never `grep … | grep -q .`: under `set -o pipefail` the
+    // producer dies of SIGPIPE on a large diff and the non-zero pipeline
+    // status reads as "no relevant paths changed".
+    expect(workflow).toContain('if grep -Eqv "$irrelevant" "$RUNNER_TEMP/changed-files"; then');
+  });
 });
 
 describe('cargo-shim.yml always-reporting gate', () => {

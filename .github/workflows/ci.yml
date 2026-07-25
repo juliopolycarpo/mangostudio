@@ -45,21 +45,26 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         # Allowlist, not denylist: a path is irrelevant only if it provably
         # cannot reach a binary. Anything unrecognised triggers the lane.
+        # `--no-renames` lists both sides of a rename, so moving a source file
+        # under an irrelevant path cannot hide the source-side deletion.
         run: |
           if [ "$EVENT_NAME" != "pull_request" ]; then
             echo "distribution=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
-          git diff --name-only "$BASE_SHA" "$HEAD_SHA" > "$RUNNER_TEMP/changed-files"
+          git diff --no-renames --name-only "$BASE_SHA" "$HEAD_SHA" > "$RUNNER_TEMP/changed-files"
 
           if [ ! -s "$RUNNER_TEMP/changed-files" ]; then
             echo "changes job: empty diff between $BASE_SHA and $HEAD_SHA; refusing to skip distribution" >&2
             exit 1
           fi
 
+          # One grep, no pipeline: `grep … | grep -q .` dies of SIGPIPE under
+          # `set -o pipefail` once the reader exits early on a large diff, and
+          # the non-zero pipeline status would read as "nothing relevant".
           irrelevant='^(docs/|\.github/ISSUE_TEMPLATE/|\.github/(CODE_OF_CONDUCT|CONTRIBUTING|SECURITY|pull_request_template)\.md$|[^/]*\.md$|LICENSE$)'
-          if grep -Ev "$irrelevant" "$RUNNER_TEMP/changed-files" | grep -q .; then
+          if grep -Eqv "$irrelevant" "$RUNNER_TEMP/changed-files"; then
             echo "distribution=true" >> "$GITHUB_OUTPUT"
           else
             echo "distribution=false" >> "$GITHUB_OUTPUT"
