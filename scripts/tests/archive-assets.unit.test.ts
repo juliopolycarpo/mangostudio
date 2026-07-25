@@ -100,7 +100,7 @@ const createMuslReleasePlan = (options: {
   };
 };
 
-describe('archiveReleaseAssets', () => {
+describe.serial('archiveReleaseAssets', () => {
   test('rejects supported Cursor platforms when the sidecar is missing', async () => {
     const rootDir = makeTempDir();
     const outDir = join(rootDir, 'out');
