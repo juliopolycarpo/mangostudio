@@ -17,6 +17,7 @@
     "NEEDS",
     "ONLY_PLATFORM",
     "PLATFORM",
+    "QA_FRONTEND_DIST",
     "SKIP_BUILD",
     "SOURCE_SHA",
     "VERSION"
