@@ -12,10 +12,13 @@ outputs:
     value: ${{ steps.cache.outputs.cache-hit }}
   primary-key:
     description: Primary cache key used by this run.
-    value: ${{ steps.keys.outputs.primary-key }}
+    value: ${{ steps.cache.outputs.primary-key }}
   restored-prefix:
     description: Trusted main-cache prefix considered during restore.
-    value: ${{ steps.keys.outputs.restore-prefix }}
+    value: ${{ steps.cache.outputs.restored-prefix }}
+  bun-version:
+    description: Resolved Bun version used for cache keys and downstream families.
+    value: ${{ steps.toolchain.outputs.bun }}
 runs:
   using: composite
   steps:
@@ -28,29 +31,18 @@ runs:
       shell: bash
       run: echo "bun=$(bun --version)" >> "$GITHUB_OUTPUT"
 
-    - id: keys
-      name: Resolve Bun cache keys
+    - name: Start cache policy summary
       shell: bash
-      env:
-        BUN_VERSION: ${{ steps.toolchain.outputs.bun }}
-        CACHE_EPOCH: ${{ inputs.cache-epoch }}
-        LOCK_HASH: ${{ hashFiles('bun.lock') }}
-        WRITE_SCOPE: ${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.event_name == 'push' && github.ref == 'refs/heads/main' && 'main' || format('run-{0}', github.run_id) }}
-      run: |
-        prefix="${RUNNER_OS}-${RUNNER_ARCH}-${CACHE_EPOCH}-bun"
-        echo "primary-key=${prefix}-${WRITE_SCOPE}-${BUN_VERSION}-${LOCK_HASH}" >> "$GITHUB_OUTPUT"
-        echo "restore-key=${prefix}-main-${BUN_VERSION}-${LOCK_HASH}" >> "$GITHUB_OUTPUT"
-        echo "restore-prefix=${prefix}-main-" >> "$GITHUB_OUTPUT"
+      run: echo '### Cache policy' >> "$GITHUB_STEP_SUMMARY"
 
     - id: cache
       name: Restore Bun install cache
-      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      uses: ./.github/actions/cache-scoped
       with:
+        family: bun
         path: ~/.bun/install/cache
-        key: ${{ steps.keys.outputs.primary-key }}
-        restore-keys: |
-          ${{ steps.keys.outputs.restore-key }}
-          ${{ steps.keys.outputs.restore-prefix }}
+        validity: ${{ steps.toolchain.outputs.bun }}-${{ hashFiles('bun.lock') }}
+        cache-epoch: ${{ inputs.cache-epoch }}
 
     - name: Disable Turbo telemetry
       shell: bash
@@ -62,7 +54,3 @@ runs:
         echo "::group::bun install"
         bun install --frozen-lockfile
         echo "::endgroup::"
-        {
-          echo '### Cache policy'
-          echo "- Bun: hit=\`${{ steps.cache.outputs.cache-hit }}\`, key=\`${{ steps.keys.outputs.primary-key }}\`, restore-prefix=\`${{ steps.keys.outputs.restore-prefix }}\`"
-        } >> "$GITHUB_STEP_SUMMARY"

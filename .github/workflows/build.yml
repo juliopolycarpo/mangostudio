@@ -16,19 +16,39 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: ./.github/actions/setup-mango
+      - id: setup
+        uses: ./.github/actions/setup-mango
         with:
           cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
-      - uses: ./.github/actions/cache-turbo
+      - id: toolchain
+        name: Resolve build cache toolchains
+        # An empty version silently poisons the cache key, so fail here rather
+        # than inside cache-scoped's validity guard.
+        run: |
+          set -euo pipefail
+          turbo="$(bun run turbo:version | tail -n 1)"
+          if [ -z "${turbo}" ]; then
+            echo "::error::turbo version probe returned an empty value"
+            exit 1
+          fi
+          echo "turbo=${turbo}" >> "$GITHUB_OUTPUT"
+
+      - uses: ./.github/actions/cache-scoped
         with:
-          scope: build
+          family: turbo
+          path: .turbo/cache
+          validity: build-bun-${{ steps.setup.outputs.bun-version }}-turbo-${{ steps.toolchain.outputs.turbo }}-${{ hashFiles('turbo.jsonc', 'package.json', 'apps/*/package.json', 'packages/*/package.json') }}
+          restore-prefix: build-
           cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
       - name: Restore Vite optimizer cache
-        uses: ./.github/actions/cache-vite
+        uses: ./.github/actions/cache-scoped
         with:
-          scope: build
+          family: vite
+          path: apps/frontend/node_modules/.vite
+          validity: build-${{ hashFiles('bun.lock', 'apps/frontend/package.json', 'apps/frontend/vite.config.ts', 'apps/frontend/vitest.config.ts', 'apps/frontend/tsconfig*.json') }}
+          restore-prefix: build-
           cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
       - name: Build frontend and API

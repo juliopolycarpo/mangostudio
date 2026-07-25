@@ -39,10 +39,27 @@ jobs:
         with:
           cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
+      - id: toolchain
+        name: Resolve Playwright version
+        # An empty version silently poisons the cache key, so fail here rather
+        # than inside cache-scoped's validity guard.
+        run: |
+          set -euo pipefail
+          playwright="$(bunx --bun playwright --version | awk '{print $2}')"
+          if [ -z "${playwright}" ]; then
+            echo "::error::playwright version probe returned an empty value"
+            exit 1
+          fi
+          echo "playwright=${playwright}" >> "$GITHUB_OUTPUT"
+
       - name: Restore Playwright browser cache
         id: pw-cache
-        uses: ./.github/actions/cache-playwright
+        uses: ./.github/actions/cache-scoped
         with:
+          family: playwright
+          path: ~/.cache/ms-playwright
+          validity: ${{ steps.toolchain.outputs.playwright }}
+          exact-restore: "true"
           mode: restore
           cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
@@ -56,8 +73,12 @@ jobs:
 
       - name: Save Playwright browser cache
         if: steps.pw-cache.outputs.cache-restored != 'true'
-        uses: ./.github/actions/cache-playwright
+        uses: ./.github/actions/cache-scoped
         with:
+          family: playwright
+          path: ~/.cache/ms-playwright
+          validity: ${{ steps.toolchain.outputs.playwright }}
+          exact-restore: "true"
           mode: save
           cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
