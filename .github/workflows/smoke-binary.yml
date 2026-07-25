@@ -73,7 +73,13 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: ./.github/actions/setup-mango
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+
+      - name: Install toolchain (manual rebuild)
+        if: ${{ inputs.rebuild }}
+        uses: ./.github/actions/setup-mango
         with:
           cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
@@ -88,7 +94,7 @@ jobs:
           target: ${{ matrix.platform }}
 
       - name: Run binary smoke test
-        run: bun run scripts/test-build.ts
+        run: bun --no-install run scripts/test-build.ts
         env:
           PLATFORM: ${{ matrix.platform }}
           API_PORT: "13001"
@@ -135,7 +141,13 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: ./.github/actions/setup-mango
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+
+      - name: Install toolchain (manual rebuild)
+        if: ${{ inputs.rebuild }}
+        uses: ./.github/actions/setup-mango
         with:
           cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
@@ -159,7 +171,7 @@ jobs:
         env:
           DOCKER_ARCH: ${{ matrix.docker_arch }}
           VARIANT: ${{ matrix.variant }}
-        run: bun ./scripts/release/stage-docker-ctx.ts --arch "$DOCKER_ARCH" --variant "$VARIANT"
+        run: bun --no-install ./scripts/release/stage-docker-ctx.ts --arch "$DOCKER_ARCH" --variant "$VARIANT"
 
       - name: Build Docker image
         # The Dockerfiles use `COPY --chmod`, a BuildKit-only directive. Force
