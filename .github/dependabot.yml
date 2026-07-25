@@ -1,7 +1,12 @@
 version: 2
 updates:
+  # `/` only covers .github/workflows and a root action.yml; the repo-local
+  # composite actions each pin their own third-party SHAs and need an
+  # explicit directory glob or they never get bumped.
   - package-ecosystem: github-actions
-    directory: /
+    directories:
+      - /
+      - /.github/actions/*
     schedule:
       interval: daily
       time: "06:00"
@@ -33,7 +38,9 @@ updates:
       semver-major-days: 7
     labels:
       - "type: dependencies"
-    open-pull-requests-limit: 5
+    # Five grouped PRs are possible in one week; keep headroom so ungrouped
+    # major bumps are not starved out by the limit.
+    open-pull-requests-limit: 10
     groups:
       # Keep the three existing coordinated-release groups: these packages must
       # move together or the workspace breaks.
