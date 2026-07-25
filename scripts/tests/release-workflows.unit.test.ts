@@ -267,7 +267,7 @@ describe('release workflow binary gate', () => {
     expect(workflow.match(/uses: \.\/\.github\/actions\/download-distribution/g)).toHaveLength(2);
     for (const job of ['binary', 'docker']) {
       const jobBlock = extractJobBlock(workflow, job);
-      expect(jobBlock.indexOf('uses: ./.github/actions/setup-mango')).toBeLessThan(
+      expect(jobBlock.indexOf('uses: oven-sh/setup-bun@')).toBeLessThan(
         jobBlock.indexOf('uses: ./.github/actions/download-distribution')
       );
     }
