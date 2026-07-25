@@ -390,6 +390,7 @@ O tipo `Messages` é inferido diretamente do dicionário `pt-BR.ts` (`as const`)
 - [`./reference/releasing.md`](./reference/releasing.md) — runbook de release e canais de distribuição
 - [`./reference/testing.md`](./reference/testing.md) — estratégia e guia de testes
 - [`./reference/agent-playbooks.md`](./reference/agent-playbooks.md) — mapas de arquivos por feature
+- [`./reference/labels.md`](./reference/labels.md) — taxonomia de labels de classificação
 - [`./CONTRIBUTING.md`](./CONTRIBUTING.md) — diretrizes de contribuição em Português
 
 ## Estrutura Espelhada

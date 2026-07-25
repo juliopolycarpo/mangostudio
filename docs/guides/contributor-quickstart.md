@@ -80,7 +80,7 @@ bun run fix --staged      # auto-fix only affected workspaces
 
 ## 7. PR Automation
 
-Pull requests are classified by `.github/labeler.yml`, and the `auto-assign.yml` workflow assigns you as the owner and requests reviews from contributors who have previously committed to the files your PR changes. Both run automatically — there is no per-label routing config to update when adding labels or onboarding contributors.
+Pull requests are classified by `.github/labeler.yml`, and the `auto-assign.yml` workflow assigns you as the owner and requests reviews from contributors who have previously committed to the files your PR changes. Both run automatically — there is no per-label routing config to update when adding labels or onboarding contributors. See [`../reference/labels.md`](../reference/labels.md) for the label taxonomy and when to add one by hand.
 
 ## 8. Related Docs
 

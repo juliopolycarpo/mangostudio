@@ -1,6 +1,7 @@
-# Path-based PR labeling. Mirrors the Repo Map / Task Routing in AGENTS.md.
-# Globs are matched against the PR's changed file paths only — actions/labeler
-# never checks out or executes PR code. Keep these maps in sync with AGENTS.md.
+# Path-based PR labeling. This file is the source of truth for the label globs;
+# docs/reference/labels.md documents the taxonomy and is kept in sync by
+# scripts/tests/labeler.unit.test.ts. Globs are matched against the PR's changed
+# file paths only — actions/labeler never checks out or executes PR code.
 
 "area: frontend":
   - changed-files:
