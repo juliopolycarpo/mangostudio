@@ -9,8 +9,8 @@ import {
   requiredEnvForReleaseScriptInvocation,
 } from '../release/env-contract';
 import { readText } from './support/read-text';
-import { extractJobBlock, extractJobBlocks } from './support/workflow-blocks';
-import { uploadArtifactSteps, workflowFiles } from './support/workflow-files';
+import { extractJobBlock, extractJobBlocks, extractStepBlocks } from './support/workflow-blocks';
+import { uploadArtifactSteps, uploadPaths, workflowFiles } from './support/workflow-files';
 
 const COMPRESSED_PAYLOAD = /\.(?:tar\.gz|tgz|zip|tar\.xz|tar\.zst)\b/;
 
@@ -48,14 +48,6 @@ function extractWorkflowRunSteps(workflowPath: string): WorkflowRunStep[] {
   }
 
   return steps;
-}
-
-function extractStepBlocks(jobBlock: string): string[] {
-  const headers = [...jobBlock.matchAll(/^ {6}- /gm)];
-  return headers.map((header, index) => {
-    const next = headers[index + 1];
-    return jobBlock.slice(header.index ?? 0, next?.index);
-  });
 }
 
 function extractStepName(stepBlock: string): string {
@@ -202,19 +194,20 @@ describe('release workflow binary gate', () => {
 
   test('already-compressed upload payloads skip artifact re-compression', () => {
     const uploads = workflowFiles().flatMap((path) =>
-      uploadArtifactSteps(readText(path)).map((step) => ({ path, step }))
+      uploadArtifactSteps(readText(path)).map((step) => ({
+        path,
+        step,
+        compressed: uploadPaths(step).some((payload) => COMPRESSED_PAYLOAD.test(payload)),
+      }))
     );
-    const compressed = uploads.filter(({ step }) => COMPRESSED_PAYLOAD.test(step));
 
     // Nine distribution bundles today; a tenth must make the same decision
     // deliberately instead of quietly re-Deflating gzip.
-    expect(compressed).toHaveLength(9);
-    for (const { path, step } of compressed) {
-      expect(step, path).toContain('compression-level: 0');
-    }
-    for (const { path, step } of uploads) {
-      if (COMPRESSED_PAYLOAD.test(step)) continue;
-      expect(step, path).not.toContain('compression-level');
+    expect(uploads.filter((upload) => upload.compressed)).toHaveLength(9);
+    for (const { path, step, compressed } of uploads) {
+      // Anchored so a commented-out key can neither satisfy nor trip the policy.
+      if (compressed) expect(step, path).toMatch(/^\s*compression-level: 0$/m);
+      else expect(step, path).not.toMatch(/^\s*compression-level:/m);
     }
   });
 

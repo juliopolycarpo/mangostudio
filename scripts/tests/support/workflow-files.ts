@@ -2,6 +2,7 @@ import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { ROOT_DIR } from '../../lib/config';
+import { extractJobBlocks, extractStepBlocks } from './workflow-blocks';
 
 /** Repo-relative paths of every workflow under `.github/workflows/`. */
 export function workflowFiles(): string[] {
@@ -11,35 +12,42 @@ export function workflowFiles(): string[] {
 }
 
 /**
- * Return each `actions/upload-artifact` step's trailing block (sibling keys
- * such as `with:` plus their nested values), so callers can assert on path
- * and compression settings without depending on step names.
+ * Every `actions/upload-artifact` step block in a workflow. Blocks are anchored
+ * at the step's list item rather than its `uses:` line, so a `with:` mapping
+ * written above `uses:` is still part of the step callers assert on.
  */
 export function uploadArtifactSteps(text: string): string[] {
-  const lines = text.split('\n');
-  const steps: string[] = [];
+  return extractJobBlocks(text)
+    .flatMap(({ block }) => extractStepBlocks(block))
+    .filter((step) => /^\s*(?:-\s+)?uses:\s*actions\/upload-artifact@/m.test(step));
+}
+
+/**
+ * The artifact payload paths a step declares, covering both `path: value` and
+ * the block-scalar (`path: |`) form. Reading the paths rather than the whole
+ * step keeps step names and YAML comments from being mistaken for a payload.
+ */
+export function uploadPaths(step: string): string[] {
+  const lines = step.split('\n');
+  const paths: string[] = [];
 
   for (let index = 0; index < lines.length; index += 1) {
-    const line = lines[index];
-    if (!/^\s*(?:-\s+)?uses:\s*actions\/upload-artifact@/.test(line)) continue;
+    const match = /^(\s*)path:[ \t]*(.*)$/.exec(lines[index]);
+    if (!match) continue;
 
-    const indent = line.search(/\S/);
-    const block: string[] = [];
-    for (let next = index + 1; next < lines.length; next += 1) {
-      const nextLine = lines[next];
-      if (nextLine.trim() === '') {
-        block.push(nextLine);
-        continue;
-      }
-      const nextIndent = nextLine.search(/\S/);
-      if (nextIndent < indent) break;
-      // Same-indent sibling keys (e.g. `with:`) stay in the step; a new
-      // list item at this indent starts the next step.
-      if (nextIndent === indent && /^\s*-\s/.test(nextLine)) break;
-      block.push(nextLine);
+    const [, indent, inline] = match;
+    if (inline !== '' && !inline.startsWith('|') && !inline.startsWith('>')) {
+      paths.push(inline.trim());
+      continue;
     }
-    steps.push(block.join('\n'));
+
+    for (let next = index + 1; next < lines.length; next += 1) {
+      const entry = lines[next].trim();
+      if (entry === '' || entry.startsWith('#')) continue;
+      if (lines[next].search(/\S/) <= indent.length) break;
+      paths.push(entry);
+    }
   }
 
-  return steps;
+  return paths;
 }
