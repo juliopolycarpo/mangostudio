@@ -47,9 +47,9 @@ jobs:
         # `test` workflow. `Dockerfile$` is anchored so Dockerfile.alpine does
         # not match: the dry-run builds only the default Bookworm image from
         # the staged release assets (see the Docker steps in dry-run-linux).
-        # ci.yml's always-on `smoke` job builds both Dockerfiles from build
-        # output on every PR, so the Alpine image is already exercised
-        # pre-merge; this workflow's unique Docker value is the release-asset
+        # ci.yml's `smoke` job builds both Dockerfiles from build output on
+        # distribution-relevant PRs, so the Alpine image is already exercised
+        # pre-merge when binaries run; this workflow's unique Docker value is the release-asset
         # staging path, which the Bookworm build covers.
         run: |
           if [ "$EVENT_NAME" != "pull_request" ]; then
@@ -157,8 +157,8 @@ jobs:
 
       # Docker dry run. The release `docker` job stages images from the published
       # release tarballs (stage-docker-ctx.ts --release-assets), not from the raw
-      # build output. ci.yml's always-on `smoke` job already builds both
-      # Dockerfiles from build output on every PR, so the unique value here is the
+      # build output. ci.yml's `smoke` job already builds both Dockerfiles from
+      # build output on distribution-relevant PRs, so the unique value here is the
       # release-asset staging path. Stage the linux-x64 archive produced above
       # into the Bookworm context, build the default image, and boot it — the same
       # asset → context → image → health chain the real release runs, under

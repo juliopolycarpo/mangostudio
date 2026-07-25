@@ -122,10 +122,37 @@ describe('CI / Gate aggregate', () => {
     expect(parseNeedsList(gateBlock).sort()).toEqual(expectedGateNeeds(workflow));
   });
 
-  test('qa-metrics is the only lane allowed to skip, and only on workflow_dispatch', () => {
-    expect(gateBlock).toContain(
-      `ALLOWED_SKIPS: ${EXPR} github.event_name == 'workflow_dispatch' && 'qa-metrics' || '' }}`
-    );
+  test('gate accepts qa-metrics on workflow_dispatch and distribution skips when irrelevant', () => {
+    expect(gateBlock).toContain(`ALLOWED_SKIPS: ${EXPR} format('{0} {1} {2}',`);
+    expect(gateBlock).toContain("github.event_name == 'workflow_dispatch' && 'qa-metrics'");
+    expect(gateBlock).toContain("needs.changes.outputs.distribution == 'false' && 'distribution'");
+    expect(gateBlock).toContain("needs.changes.outputs.distribution == 'false' && 'smoke'");
+  });
+
+  test('the distribution and smoke lanes run only when the changes job says so', () => {
+    const relevanceIf = `if: ${EXPR} needs.changes.outputs.distribution == 'true' }}`;
+    for (const job of ['distribution', 'smoke']) {
+      expect(extractJobBlock(workflow, job), job).toContain(relevanceIf);
+    }
+  });
+
+  test('non-pull_request events treat every lane as relevant', () => {
+    expect(workflow).toContain('if [ "$EVENT_NAME" != "pull_request" ]');
+  });
+
+  test('an empty PR diff fails closed instead of skipping distribution', () => {
+    expect(workflow).toContain('if [ ! -s "$RUNNER_TEMP/changed-files" ]; then');
+    expect(workflow).toContain('refusing to skip distribution');
+  });
+
+  test('relevance detection cannot silently fail open', () => {
+    // Renames must list both sides, or moving a source file under an
+    // irrelevant path would hide the source-side deletion.
+    expect(workflow).toContain('git diff --no-renames --name-only');
+    // A single grep, never `grep … | grep -q .`: under `set -o pipefail` the
+    // producer dies of SIGPIPE on a large diff and the non-zero pipeline
+    // status reads as "no relevant paths changed".
+    expect(workflow).toContain('if grep -Eqv "$irrelevant" "$RUNNER_TEMP/changed-files"; then');
   });
 });
 

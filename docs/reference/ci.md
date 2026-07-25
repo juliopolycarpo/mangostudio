@@ -11,11 +11,11 @@ results through `scripts/ci/evaluate-gate.ts`. Branch protection and Canary
 depend on these stable names instead of tracking internal job names, matrix
 shapes, or path filters.
 
-| Workflow check name      | Workflow                                | Role                                                                 |
-| ------------------------ | --------------------------------------- | -------------------------------------------------------------------- |
-| `CI / Gate`              | `.github/workflows/ci.yml`              | Mandatory PR / `main` correctness; Canary also depends on this gate  |
-| `Cargo Shim / Gate`      | `.github/workflows/cargo-shim.yml`      | Always reports; accepts the Rust lane skip when no Rust path changed |
-| `Release Dry Run / Gate` | `.github/workflows/release-dry-run.yml` | Always reports; accepts each dry-run lane skip when irrelevant       |
+| Workflow check name      | Workflow                                | Role                                                                                                                                                                              |
+| ------------------------ | --------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `CI / Gate`              | `.github/workflows/ci.yml`              | Always reports; Canary also depends on this gate; accepts `distribution` and `smoke` skips when only documentation-surface paths changed, and `qa-metrics` on `workflow_dispatch` |
+| `Cargo Shim / Gate`      | `.github/workflows/cargo-shim.yml`      | Always reports; accepts the Rust lane skip when no Rust path changed                                                                                                              |
+| `Release Dry Run / Gate` | `.github/workflows/release-dry-run.yml` | Always reports; accepts each dry-run lane skip when irrelevant                                                                                                                    |
 
 Unit tests in `scripts/tests/ci-gate.unit.test.ts` derive each gate's expected
 `needs` from the workflow text: every job except the gate itself and any job

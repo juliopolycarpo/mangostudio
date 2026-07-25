@@ -25,6 +25,51 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
+  changes:
+    name: Detect distribution-relevant changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      distribution: ${{ steps.changed.outputs.distribution }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - id: changed
+        name: Check for changes outside the documentation surface
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          EVENT_NAME: ${{ github.event_name }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        # Allowlist, not denylist: a path is irrelevant only if it provably
+        # cannot reach a binary. Anything unrecognised triggers the lane.
+        # `--no-renames` lists both sides of a rename, so moving a source file
+        # under an irrelevant path cannot hide the source-side deletion.
+        run: |
+          if [ "$EVENT_NAME" != "pull_request" ]; then
+            echo "distribution=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          git diff --no-renames --name-only "$BASE_SHA" "$HEAD_SHA" > "$RUNNER_TEMP/changed-files"
+
+          if [ ! -s "$RUNNER_TEMP/changed-files" ]; then
+            echo "changes job: empty diff between $BASE_SHA and $HEAD_SHA; refusing to skip distribution" >&2
+            exit 1
+          fi
+
+          # One grep, no pipeline: `grep … | grep -q .` dies of SIGPIPE under
+          # `set -o pipefail` once the reader exits early on a large diff, and
+          # the non-zero pipeline status would read as "nothing relevant".
+          irrelevant='^(docs/|\.github/ISSUE_TEMPLATE/|\.github/(CODE_OF_CONDUCT|CONTRIBUTING|SECURITY|pull_request_template)\.md$|[^/]*\.md$|LICENSE$)'
+          if grep -Eqv "$irrelevant" "$RUNNER_TEMP/changed-files"; then
+            echo "distribution=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "distribution=false" >> "$GITHUB_OUTPUT"
+          fi
+
   distribution-identity:
     name: Resolve distribution identity
     runs-on: ubuntu-latest
@@ -57,7 +102,8 @@ jobs:
 
   distribution:
     name: Distribution
-    needs: [distribution-identity]
+    needs: [distribution-identity, changes]
+    if: ${{ needs.changes.outputs.distribution == 'true' }}
     permissions:
       contents: read
       id-token: write # mint the reusable builder's provenance attestation token
@@ -101,7 +147,8 @@ jobs:
     # stages those same Linux bytes into both Docker variants. The reusable
     # smoke workflow retains a manual rebuild fallback for one transition cycle.
     name: Smoke — Binary
-    needs: [distribution-identity, distribution]
+    needs: [distribution-identity, distribution, changes]
+    if: ${{ needs.changes.outputs.distribution == 'true' }}
     uses: ./.github/workflows/smoke-binary.yml
     with:
       version: ${{ needs.distribution-identity.outputs.version }}
@@ -116,10 +163,12 @@ jobs:
     # that already need this gate must be in `needs`; the ci-gate unit tests
     # derive that set dynamically so a new mandatory lane cannot bypass it.
     # qa-metrics only runs for PRs and main pushes, so its skip is accepted
-    # solely on workflow_dispatch; any other non-success fails the gate.
+    # solely on workflow_dispatch; distribution and smoke skips are accepted
+    # only when the changes job proved no distribution-relevant path changed.
     name: Gate
     needs: [
       distribution-identity,
+      changes,
       distribution,
       check,
       test,
@@ -145,7 +194,10 @@ jobs:
       - name: Evaluate mandatory job results
         env:
           NEEDS: ${{ toJSON(needs) }}
-          ALLOWED_SKIPS: ${{ github.event_name == 'workflow_dispatch' && 'qa-metrics' || '' }}
+          ALLOWED_SKIPS: ${{ format('{0} {1} {2}',
+            github.event_name == 'workflow_dispatch' && 'qa-metrics' || '',
+            needs.changes.outputs.distribution == 'false' && 'distribution' || '',
+            needs.changes.outputs.distribution == 'false' && 'smoke' || '') }}
         # Dependency-free script; runs without `bun install`.
         run: bun ./scripts/ci/evaluate-gate.ts
 
