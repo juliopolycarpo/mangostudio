@@ -102,6 +102,9 @@ describe('git routes', () => {
   it.skipIf(!hasGit)('reports staged and unstaged edits from a real repository', async () => {
     const workdir = await createTempDir();
     await runFixtureGit(workdir, ['init']);
+    // Developer machines may set core.hooksPath globally; point at this repo's
+    // own hooks directory so global hooks cannot fail the fixture commit.
+    await runFixtureGit(workdir, ['config', 'core.hooksPath', join(workdir, '.git', 'hooks')]);
     await writeFile(join(workdir, 'tracked.txt'), 'initial\n');
     await runFixtureGit(workdir, ['add', 'tracked.txt']);
     await runFixtureGit(workdir, [
