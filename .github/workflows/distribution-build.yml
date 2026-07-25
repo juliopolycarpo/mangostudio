@@ -116,6 +116,10 @@ jobs:
           path: .distribution-bundles/checksums.tar.gz
           retention-days: ${{ inputs.retention_days }}
           overwrite: false
+          # Payload is already gzip: the artifact zip re-Deflates it for ~0% gain
+          # at a full single-threaded CPU pass, measured at 57s across the nine
+          # uploads of the pre-split layout. Every upload below is level 0 for
+          # the same reason.
           compression-level: 0
 
       - name: Upload assets distribution
@@ -125,9 +129,6 @@ jobs:
           path: .distribution-bundles/assets.tar.gz
           retention-days: ${{ inputs.retention_days }}
           overwrite: false
-          # Payload is already gzip: the artifact zip re-Deflates it for ~0% gain
-          # at a full single-threaded CPU pass, measured at 57s across the eleven
-          # uploads. The per-target uploads below are level 0 for the same reason.
           compression-level: 0
 
       - name: Upload npm distribution
