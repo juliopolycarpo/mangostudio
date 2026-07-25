@@ -72,7 +72,7 @@ describe('unprivileged collection side', () => {
     expect(build).toContain('name: frontend-dist');
     expect(qaMetrics).toContain('name: frontend-dist');
     expect(qaMetrics).toContain('QA_FRONTEND_DIST: ./frontend-dist');
-    expect(qaMetrics).not.toContain('cache-turbo');
+    expect(qaMetrics).not.toContain('cache-scoped');
     expect(ci).toContain('needs: [test, build]');
   });
 });

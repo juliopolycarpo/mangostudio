@@ -1,8 +1,8 @@
-import { existsSync, readdirSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { ROOT_DIR } from '../../lib/config';
-import { extractJobBlocks, extractStepBlocks } from './workflow-blocks';
+import { extractJobBlocks, extractStepBlocks, extractStepBlocksAtIndent } from './workflow-blocks';
 
 /** Repo-relative paths of every workflow under `.github/workflows/`. */
 export function workflowFiles(): string[] {
@@ -26,6 +26,66 @@ export function compositeActionFiles(): string[] {
   return readdirSync(join(ROOT_DIR, '.github', 'actions'), { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
     .map((entry) => actionManifest(entry.name));
+}
+
+const CACHE_SCOPED_USES = /(?:^|\n)\s*(?:-\s+)?uses:\s*\.\/\.github\/actions\/cache-scoped\s*$/m;
+
+export interface CacheScopedCallSite {
+  readonly file: string;
+  /** Step `id:` when present, otherwise null. */
+  readonly id: string | null;
+  readonly inputs: Readonly<Record<string, string>>;
+  readonly block: string;
+}
+
+/** Parse a step's `with:` mapping into a flat string record. */
+function parseWithInputs(step: string): Record<string, string> {
+  const withMatch = /\n(\s*)with:\n([\s\S]*?)(?=\n\1\S|$)/.exec(`\n${step}`);
+  if (!withMatch) return {};
+
+  const body = withMatch[2];
+  const inputs: Record<string, string> = {};
+  for (const line of body.split('\n')) {
+    const match = /^\s+([\w-]+):\s*(.*)$/.exec(line);
+    if (!match) continue;
+    const [, key, raw] = match;
+    if (raw === '' || raw.startsWith('|') || raw.startsWith('>')) continue;
+    inputs[key] = raw.trim().replace(/^['"]|['"]$/g, '');
+  }
+  return inputs;
+}
+
+function callSitesFromSteps(file: string, steps: string[]): CacheScopedCallSite[] {
+  return steps
+    .filter((step) => CACHE_SCOPED_USES.test(step))
+    .map((block) => ({
+      file,
+      id: /^\s*(?:-\s+)?id:\s*(\S+)/m.exec(block)?.[1] ?? null,
+      inputs: parseWithInputs(block),
+      block,
+    }));
+}
+
+/**
+ * Every `cache-scoped` call site across workflows and composite manifests.
+ * Workflow job steps sit at indent 6; composite-action steps sit at indent 4.
+ */
+export function cacheScopedCallSites(): CacheScopedCallSite[] {
+  const sites: CacheScopedCallSite[] = [];
+
+  for (const file of workflowFiles()) {
+    const text = readFileSync(join(ROOT_DIR, file), 'utf8');
+    const steps = extractJobBlocks(text).flatMap(({ block }) => extractStepBlocks(block));
+    sites.push(...callSitesFromSteps(file, steps));
+  }
+
+  for (const file of compositeActionFiles()) {
+    if (file.includes('/cache-scoped/')) continue;
+    const text = readFileSync(join(ROOT_DIR, file), 'utf8');
+    sites.push(...callSitesFromSteps(file, extractStepBlocksAtIndent(text, 4)));
+  }
+
+  return sites;
 }
 
 /**

@@ -1,101 +1,159 @@
 import { describe, expect, test } from 'bun:test';
 
 import { readText } from './support/read-text';
-import { workflowFiles } from './support/workflow-files';
+import {
+  cacheScopedCallSites,
+  compositeActionFiles,
+  workflowFiles,
+} from './support/workflow-files';
 
 const CACHE_ACTION_SHA = '55cc8345863c7cc4c66a329aec7e433d2d1c52a9';
 const EXPRESSION_START = '$' + '{{';
 const CACHE_EPOCH_EXPRESSION = `cache-epoch: ${EXPRESSION_START} vars.CI_CACHE_EPOCH || 'v1' }}`;
-const CACHE_ACTIONS = [
-  'setup-mango',
-  'cache-turbo',
-  'cache-vite',
-  'cache-tsbuildinfo',
-  'cache-lint-tools',
-  'cache-playwright',
+const EXPECTED_FAMILIES = [
+  'bun',
+  'turbo',
+  'vite',
+  'tsbuildinfo',
+  'lint-tools',
+  'playwright',
 ] as const;
 
 describe('CI cache policy', () => {
   test('keeps every cache family behind one composite and one immutable pin', () => {
-    for (const workflowFile of workflowFiles()) {
-      expect(readText(workflowFile), workflowFile).not.toContain('uses: actions/cache@');
+    for (const file of [...workflowFiles(), ...compositeActionFiles()]) {
+      if (file.includes('/cache-scoped/')) continue;
+      expect(readText(file), file).not.toContain('uses: actions/cache');
     }
 
-    for (const action of CACHE_ACTIONS) {
-      const manifest = readText(`.github/actions/${action}/action.yml`);
-      const cacheUses =
-        manifest.match(/uses: actions\/cache(?:\/(?:restore|save))?@[a-f0-9]{40} # v[^\n]+/g) ?? [];
-      expect(cacheUses, action).toHaveLength(action === 'cache-playwright' ? 2 : 1);
-      for (const use of cacheUses) {
-        expect(use, action).toContain(`@${CACHE_ACTION_SHA} # v6.1.0`);
-      }
+    const manifest = readText('.github/actions/cache-scoped/action.yml');
+    const cacheUses =
+      manifest.match(/uses: actions\/cache(?:\/(?:restore|save))?@[a-f0-9]{40} # v[^\n]+/g) ?? [];
+    expect(cacheUses).toHaveLength(3);
+    for (const use of cacheUses) {
+      expect(use).toContain(`@${CACHE_ACTION_SHA} # v6.1.0`);
     }
   });
 
-  test('passes the repository epoch fallback to every cache composite call', () => {
+  test('centralizes trusted main restore prefixes and standardized diagnostics', () => {
+    const manifest = readText('.github/actions/cache-scoped/action.yml');
+    expect(manifest).toMatch(/\$\{RUNNER_OS\}-\$\{RUNNER_ARCH\}/);
+    expect(manifest).toContain(`${EXPRESSION_START} inputs.cache-epoch }}`);
+    expect(manifest).toContain("github.event_name == 'pull_request'");
+    expect(manifest).toContain("github.ref == 'refs/heads/main'");
+    expect(manifest).toContain('-main-');
+    expect(manifest).not.toContain('github.sha');
+    for (const output of ['cache-hit:', 'cache-restored:', 'primary-key:', 'restored-prefix:']) {
+      expect(manifest).toContain(output);
+    }
+    expect(manifest).toContain('$GITHUB_STEP_SUMMARY');
+    expect(manifest).not.toMatch(/path:.*(?:credential|secret|token)/i);
+    expect(manifest).toContain('must not contain empty segments');
+    expect(manifest).toContain("exact-restore must be 'true' or 'false'");
+  });
+
+  test('passes the repository epoch fallback to every cache-scoped call', () => {
+    const sites = cacheScopedCallSites();
+    expect(sites.length).toBeGreaterThan(0);
+
+    for (const site of sites) {
+      const label = `${site.file}:${site.inputs.family}`;
+      if (site.file.startsWith('.github/actions/')) {
+        expect(site.block, label).toContain(
+          `cache-epoch: ${EXPRESSION_START} inputs.cache-epoch }}`
+        );
+        continue;
+      }
+      expect(site.block, label).toContain(CACHE_EPOCH_EXPRESSION);
+    }
+
     for (const workflowFile of workflowFiles()) {
       const lines = readText(workflowFile).split('\n');
       for (const [index, line] of lines.entries()) {
-        if (!line.includes('uses: ./.github/actions/')) continue;
-        if (!CACHE_ACTIONS.some((action) => line.endsWith(`/${action}`))) continue;
-
+        if (!line.includes('uses: ./.github/actions/setup-mango')) continue;
         const followingLines = lines.slice(index + 1, index + 4).map((value) => value.trim());
         expect(followingLines, `${workflowFile}:${index + 1}`).toContain(CACHE_EPOCH_EXPRESSION);
       }
     }
   });
 
-  test('uses trusted main restore prefixes and standardized diagnostics', () => {
-    for (const action of CACHE_ACTIONS) {
-      const manifest = readText(`.github/actions/${action}/action.yml`);
-      expect(manifest, action).toMatch(/\$\{RUNNER_OS\}-\$\{RUNNER_ARCH\}/);
-      expect(manifest, action).toContain(`${EXPRESSION_START} inputs.cache-epoch }}`);
-      expect(manifest, action).toContain("github.event_name == 'pull_request'");
-      expect(manifest, action).toContain("github.ref == 'refs/heads/main'");
-      expect(manifest, action).toContain('-main-');
-      expect(manifest, action).not.toContain('github.sha');
-      for (const output of ['cache-hit:', 'primary-key:', 'restored-prefix:']) {
-        expect(manifest, action).toContain(output);
-      }
-      expect(manifest, action).toContain('$GITHUB_STEP_SUMMARY');
-      expect(manifest, action).not.toMatch(/path:.*(?:credential|secret|token)/i);
-      if (action !== 'cache-playwright') {
-        expect(manifest, action).not.toMatch(
-          /steps\.cache\.outputs\.cache-(?:primary|matched)-key/
-        );
+  test('covers every expected family with coherent restore-prefix inputs', () => {
+    const sites = cacheScopedCallSites();
+    const families = [...new Set(sites.map((site) => site.inputs.family))].sort();
+    expect(families).toEqual([...EXPECTED_FAMILIES].sort());
+
+    for (const site of sites) {
+      const { family, validity, 'restore-prefix': restorePrefix = '' } = site.inputs;
+      expect(validity, `${site.file}:${family}`).toBeTruthy();
+      if (restorePrefix !== '') {
+        expect(validity.startsWith(restorePrefix), `${site.file}:${family}`).toBe(true);
       }
     }
   });
 
   test('keys each family on its actual toolchain and content invalidators', () => {
-    const bun = readText('.github/actions/setup-mango/action.yml');
-    expect(bun).toContain('bun --version');
-    expect(bun).toContain("hashFiles('bun.lock')");
+    const sites = cacheScopedCallSites();
+    const byFamily = (family: string) => sites.filter((site) => site.inputs.family === family);
 
-    const turbo = readText('.github/actions/cache-turbo/action.yml');
-    expect(turbo).toContain('bun run turbo:version');
-    expect(turbo).toContain("hashFiles('turbo.jsonc', 'package.json'");
+    const bun = byFamily('bun');
+    expect(bun).toHaveLength(1);
+    expect(bun[0].inputs.validity).toContain("hashFiles('bun.lock')");
+    expect(readText('.github/actions/setup-mango/action.yml')).toContain('bun --version');
 
-    const vite = readText('.github/actions/cache-vite/action.yml');
-    for (const file of ['bun.lock', 'vite.config.ts', 'vitest.config.ts', 'tsconfig*.json']) {
-      expect(vite).toContain(file);
+    const turbo = byFamily('turbo');
+    expect(turbo.length).toBeGreaterThan(0);
+    for (const site of turbo) {
+      expect(site.inputs.validity).toContain("hashFiles('turbo.jsonc', 'package.json'");
+      expect(site.inputs['restore-prefix']).toMatch(/^(check|test|build)-$/);
+    }
+    expect(readText('.github/workflows/lint.yml')).toContain('bun run turbo:version');
+
+    const vite = byFamily('vite');
+    expect(vite.length).toBeGreaterThan(0);
+    for (const site of vite) {
+      for (const file of ['bun.lock', 'vite.config.ts', 'vitest.config.ts', 'tsconfig*.json']) {
+        expect(site.inputs.validity).toContain(file);
+      }
     }
 
-    const tsbuildinfo = readText('.github/actions/cache-tsbuildinfo/action.yml');
-    expect(tsbuildinfo).toContain('tsc --version');
-    expect(tsbuildinfo).toContain("hashFiles('tsconfig*.json'");
-    expect(tsbuildinfo).toContain("hashFiles('apps/**/*.ts', 'apps/**/*.tsx'");
+    const tsbuildinfo = byFamily('tsbuildinfo');
+    expect(tsbuildinfo).toHaveLength(1);
+    expect(tsbuildinfo[0].inputs.validity).toContain("hashFiles('tsconfig*.json'");
+    expect(tsbuildinfo[0].inputs.validity).toContain("hashFiles('apps/**/*.ts', 'apps/**/*.tsx'");
+    expect(readText('.github/workflows/lint.yml')).toContain('tsc --version');
 
-    const lintTools = readText('.github/actions/cache-lint-tools/action.yml');
-    expect(lintTools).toContain("hashFiles('scripts/lib/actions-lint/manifest.ts')");
+    const lintTools = byFamily('lint-tools');
+    expect(lintTools).toHaveLength(1);
+    expect(lintTools[0].inputs.validity).toContain(
+      "hashFiles('scripts/lib/actions-lint/manifest.ts')"
+    );
+    expect(lintTools[0].inputs['exact-restore']).toBe('true');
 
-    const playwright = readText('.github/actions/cache-playwright/action.yml');
-    expect(playwright).toContain('playwright --version');
-    expect(playwright).toContain("cache-matched-key != ''");
-    expect(playwright).toContain('actions/cache/restore@');
-    expect(playwright).toContain('actions/cache/save@');
+    const playwright = byFamily('playwright');
+    expect(playwright.length).toBe(2);
+    for (const site of playwright) {
+      expect(site.inputs['exact-restore']).toBe('true');
+      expect(['restore', 'save']).toContain(site.inputs.mode);
+    }
+    expect(readText('.github/workflows/browser-smoke.yml')).toContain('playwright --version');
     expect(readText('.github/workflows/browser-smoke.yml')).toContain(
       "steps.pw-cache.outputs.cache-restored == 'true'"
     );
+  });
+
+  test('only exact-restore call sites expose cache-restored to workflows', () => {
+    const sites = cacheScopedCallSites();
+    const exactIds = new Set(
+      sites
+        .filter((site) => site.inputs['exact-restore'] === 'true' && site.id)
+        .map((site) => site.id as string)
+    );
+
+    for (const file of workflowFiles()) {
+      const text = readText(file);
+      for (const match of text.matchAll(/steps\.([\w-]+)\.outputs\.cache-restored/g)) {
+        expect(exactIds.has(match[1]), `${file} references ${match[1]}`).toBe(true);
+      }
+    }
   });
 });

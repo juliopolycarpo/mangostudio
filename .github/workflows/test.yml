@@ -18,19 +18,30 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: ./.github/actions/setup-mango
+      - id: setup
+        uses: ./.github/actions/setup-mango
         with:
           cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
-      - uses: ./.github/actions/cache-turbo
+      - id: toolchain
+        name: Resolve test cache toolchains
+        run: echo "turbo=$(bun run turbo:version | tail -n 1)" >> "$GITHUB_OUTPUT"
+
+      - uses: ./.github/actions/cache-scoped
         with:
-          scope: test
+          family: turbo
+          path: .turbo/cache
+          validity: test-bun-${{ steps.setup.outputs.bun-version }}-turbo-${{ steps.toolchain.outputs.turbo }}-${{ hashFiles('turbo.jsonc', 'package.json', 'apps/*/package.json', 'packages/*/package.json') }}
+          restore-prefix: test-
           cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
       - name: Restore Vite optimizer cache
-        uses: ./.github/actions/cache-vite
+        uses: ./.github/actions/cache-scoped
         with:
-          scope: test
+          family: vite
+          path: apps/frontend/node_modules/.vite
+          validity: test-${{ hashFiles('bun.lock', 'apps/frontend/package.json', 'apps/frontend/vite.config.ts', 'apps/frontend/vitest.config.ts', 'apps/frontend/tsconfig*.json') }}
+          restore-prefix: test-
           cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
       - name: Run database migrations

@@ -39,10 +39,18 @@ jobs:
         with:
           cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
+      - id: toolchain
+        name: Resolve Playwright version
+        run: echo "playwright=$(bunx --bun playwright --version | awk '{print $2}')" >> "$GITHUB_OUTPUT"
+
       - name: Restore Playwright browser cache
         id: pw-cache
-        uses: ./.github/actions/cache-playwright
+        uses: ./.github/actions/cache-scoped
         with:
+          family: playwright
+          path: ~/.cache/ms-playwright
+          validity: ${{ steps.toolchain.outputs.playwright }}
+          exact-restore: "true"
           mode: restore
           cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
@@ -56,8 +64,12 @@ jobs:
 
       - name: Save Playwright browser cache
         if: steps.pw-cache.outputs.cache-restored != 'true'
-        uses: ./.github/actions/cache-playwright
+        uses: ./.github/actions/cache-scoped
         with:
+          family: playwright
+          path: ~/.cache/ms-playwright
+          validity: ${{ steps.toolchain.outputs.playwright }}
+          exact-restore: "true"
           mode: save
           cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 

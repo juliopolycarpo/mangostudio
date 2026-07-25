@@ -1,0 +1,185 @@
+name: Scoped cache
+description: >
+  Restore and/or save one CI cache family behind a shared key policy. Callers
+  supply the family name, path, and validity string; this action owns the
+  write-scope, trusted-main restore keys, and step-summary diagnostics.
+inputs:
+  family:
+    description: Cache family key segment, e.g. bun, turbo, vite, playwright.
+    required: true
+  path:
+    description: Newline-separated paths to cache.
+    required: true
+  validity:
+    description: >
+      Family-specific invalidator (toolchain versions and content hashes).
+      Must not contain empty segments.
+    required: true
+  restore-prefix:
+    description: >
+      Leading slice of validity eligible for a loose trusted-main restore.
+      Empty means the bare family main prefix. Ignored when exact-restore is true.
+    required: false
+    default: ""
+  exact-restore:
+    description: >
+      When 'true', omit the loose main prefix from restore-keys so only a
+      version-exact primary or trusted-main key can match. Required for
+      families where a partial restore would skip a necessary install step
+      (Playwright browsers, checksum-pinned lint tools).
+    required: false
+    default: "false"
+  mode:
+    description: restore-save (default), restore, or save.
+    required: false
+    default: restore-save
+  cache-epoch:
+    description: Repository-wide cache epoch used for emergency invalidation.
+    required: true
+outputs:
+  cache-hit:
+    description: "'true' when the primary cache key matched"
+    value: ${{ steps.outcome.outputs.cache-hit }}
+  cache-restored:
+    description: >
+      'true' when a usable cache was restored. For exact-restore families this
+      includes a version-exact trusted-main match; otherwise it tracks the
+      primary-key hit only.
+    value: ${{ steps.outcome.outputs.cache-restored }}
+  primary-key:
+    description: Primary cache key used by this run.
+    value: ${{ steps.keys.outputs.primary-key }}
+  restored-prefix:
+    description: Trusted main-cache prefix considered during restore.
+    value: ${{ steps.keys.outputs.restore-prefix }}
+runs:
+  using: composite
+  steps:
+    - id: keys
+      name: Resolve scoped cache keys
+      shell: bash
+      env:
+        CACHE_EPOCH: ${{ inputs.cache-epoch }}
+        EXACT_RESTORE: ${{ inputs.exact-restore }}
+        FAMILY: ${{ inputs.family }}
+        MODE: ${{ inputs.mode }}
+        PATH_INPUT: ${{ inputs.path }}
+        RESTORE_PREFIX: ${{ inputs.restore-prefix }}
+        VALIDITY: ${{ inputs.validity }}
+        WRITE_SCOPE: ${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.event_name == 'push' && github.ref == 'refs/heads/main' && 'main' || format('run-{0}', github.run_id) }}
+      run: |
+        set -euo pipefail
+
+        if [ -z "${FAMILY}" ] || [ -z "${PATH_INPUT}" ] || [ -z "${VALIDITY}" ] || [ -z "${CACHE_EPOCH}" ]; then
+          echo "::error::cache-scoped requires non-empty family, path, validity, and cache-epoch"
+          exit 1
+        fi
+
+        case "${MODE}" in
+          restore-save|restore|save) ;;
+          *)
+            echo "::error::cache-scoped mode must be restore-save, restore, or save (got '${MODE}')"
+            exit 1
+            ;;
+        esac
+
+        case "${EXACT_RESTORE}" in
+          true|false) ;;
+          *)
+            echo "::error::cache-scoped exact-restore must be 'true' or 'false' (got '${EXACT_RESTORE}')"
+            exit 1
+            ;;
+        esac
+
+        if [[ "${VALIDITY}" == -* || "${VALIDITY}" == *- || "${VALIDITY}" == *--* ]]; then
+          echo "::error::cache-scoped validity must not contain empty segments: '${VALIDITY}'"
+          exit 1
+        fi
+
+        if [ -n "${RESTORE_PREFIX}" ] && [[ "${VALIDITY}" != "${RESTORE_PREFIX}"* ]]; then
+          echo "::error::cache-scoped restore-prefix '${RESTORE_PREFIX}' is not a prefix of validity '${VALIDITY}'"
+          exit 1
+        fi
+
+        prefix="${RUNNER_OS}-${RUNNER_ARCH}-${CACHE_EPOCH}-${FAMILY}"
+        primary_key="${prefix}-${WRITE_SCOPE}-${VALIDITY}"
+        restore_key="${prefix}-main-${VALIDITY}"
+        restore_prefix="${prefix}-main-${RESTORE_PREFIX}"
+
+        {
+          echo "primary-key=${primary_key}"
+          echo "restore-key=${restore_key}"
+          echo "restore-prefix=${restore_prefix}"
+          echo "restore-keys<<EOF"
+          echo "${restore_key}"
+          if [ "${EXACT_RESTORE}" != "true" ]; then
+            echo "${restore_prefix}"
+          fi
+          echo "EOF"
+        } >> "$GITHUB_OUTPUT"
+
+    - id: cache
+      name: Restore and save scoped cache
+      if: inputs.mode == 'restore-save'
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ inputs.path }}
+        key: ${{ steps.keys.outputs.primary-key }}
+        restore-keys: ${{ steps.keys.outputs.restore-keys }}
+
+    - id: restore
+      name: Restore scoped cache
+      if: inputs.mode == 'restore'
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ inputs.path }}
+        key: ${{ steps.keys.outputs.primary-key }}
+        # Version-exact restore only when exact-restore is true. A cache for a
+        # different toolchain version is unusable, and treating a loose prefix
+        # hit as restored would skip the install that populates the right
+        # binary (Playwright browsers, checksum-pinned lint tools).
+        restore-keys: ${{ steps.keys.outputs.restore-keys }}
+
+    - name: Save scoped cache
+      if: inputs.mode == 'save'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ inputs.path }}
+        key: ${{ steps.keys.outputs.primary-key }}
+
+    - id: outcome
+      name: Summarize scoped cache
+      if: inputs.mode != 'save'
+      shell: bash
+      env:
+        CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}
+        EXACT_RESTORE: ${{ inputs.exact-restore }}
+        FAMILY: ${{ inputs.family }}
+        MODE: ${{ inputs.mode }}
+        PRIMARY_KEY: ${{ steps.keys.outputs.primary-key }}
+        RESTORE_HIT: ${{ steps.restore.outputs.cache-hit }}
+        RESTORE_MATCHED: ${{ steps.restore.outputs.cache-matched-key }}
+        RESTORE_PREFIX: ${{ steps.keys.outputs.restore-prefix }}
+      run: |
+        set -euo pipefail
+
+        if [ "${MODE}" = "restore" ]; then
+          hit="${RESTORE_HIT:-false}"
+          matched="${RESTORE_MATCHED:-}"
+        else
+          hit="${CACHE_HIT:-false}"
+          matched=""
+        fi
+
+        restored=false
+        if [ "${hit}" = "true" ] || { [ "${EXACT_RESTORE}" = "true" ] && [ -n "${matched}" ]; }; then
+          restored=true
+        fi
+
+        {
+          echo "cache-hit=${hit}"
+          echo "cache-restored=${restored}"
+        } >> "$GITHUB_OUTPUT"
+
+        echo "- ${FAMILY}: hit=\`${hit}\`, key=\`${PRIMARY_KEY}\`, restore-prefix=\`${RESTORE_PREFIX}\`" \
+          >> "$GITHUB_STEP_SUMMARY"

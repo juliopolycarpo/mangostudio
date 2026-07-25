@@ -35,10 +35,19 @@ export function extractJobBlocks(workflow: string): Array<{ job: string; block: 
  * order they were written in.
  */
 export function extractStepBlocks(jobBlock: string): string[] {
-  const headers = [...jobBlock.matchAll(/^ {6}- /gm)];
+  return extractStepBlocksAtIndent(jobBlock, 6);
+}
+
+/**
+ * Split YAML step lists whose `- ` markers sit at a fixed indent. Workflow job
+ * steps use indent 6; composite-action steps use indent 4.
+ */
+export function extractStepBlocksAtIndent(source: string, indent: number): string[] {
+  const marker = new RegExp(`^ {${indent}}- `, 'gm');
+  const headers = [...source.matchAll(marker)];
   return headers.map((header, index) => {
     const next = headers[index + 1];
-    return jobBlock.slice(header.index ?? 0, next?.index);
+    return source.slice(header.index ?? 0, next?.index);
   });
 }
 

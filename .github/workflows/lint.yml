@@ -16,23 +16,41 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: ./.github/actions/setup-mango
+      - id: setup
+        uses: ./.github/actions/setup-mango
         with:
           cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
-      - uses: ./.github/actions/cache-turbo
+      - id: toolchain
+        name: Resolve check cache toolchains
+        run: |
+          echo "turbo=$(bun run turbo:version | tail -n 1)" >> "$GITHUB_OUTPUT"
+          echo "typescript=$(bunx --bun tsc --version | awk '{print $2}')" >> "$GITHUB_OUTPUT"
+
+      - uses: ./.github/actions/cache-scoped
         with:
-          scope: check
+          family: turbo
+          path: .turbo/cache
+          validity: check-bun-${{ steps.setup.outputs.bun-version }}-turbo-${{ steps.toolchain.outputs.turbo }}-${{ hashFiles('turbo.jsonc', 'package.json', 'apps/*/package.json', 'packages/*/package.json') }}
+          restore-prefix: check-
           cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
       - name: Restore TypeScript build info
-        uses: ./.github/actions/cache-tsbuildinfo
+        uses: ./.github/actions/cache-scoped
         with:
+          family: tsbuildinfo
+          path: .mango/artifacts/tsbuildinfo/
+          validity: typescript-${{ steps.toolchain.outputs.typescript }}-${{ hashFiles('tsconfig*.json', 'apps/**/tsconfig*.json', 'packages/**/tsconfig*.json') }}-${{ hashFiles('apps/**/*.ts', 'apps/**/*.tsx', 'packages/**/*.ts', 'scripts/**/*.ts') }}
+          restore-prefix: typescript-${{ steps.toolchain.outputs.typescript }}-
           cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
       - name: Restore workflow lint tools
-        uses: ./.github/actions/cache-lint-tools
+        uses: ./.github/actions/cache-scoped
         with:
+          family: lint-tools
+          path: .mango/artifacts/tools/
+          validity: ${{ hashFiles('scripts/lib/actions-lint/manifest.ts') }}
+          exact-restore: "true"
           cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
       - name: Run check
