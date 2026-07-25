@@ -7,6 +7,7 @@ import { ROOT_DIR } from '../lib/config';
 import {
   createDistributionManifest,
   DISTRIBUTION_MANIFEST_FILE,
+  type DistributionManifestScope,
   readDistributionManifest,
   validateDistributionManifest,
 } from '../lib/distribution-manifest';
@@ -17,14 +18,20 @@ interface Args {
   readonly validate: boolean;
   readonly manifestPath: string;
   readonly target?: string;
-  readonly scope: 'all' | 'packaged';
+  readonly scope: DistributionManifestScope;
+}
+
+const MANIFEST_SCOPES = ['all', 'checksums', 'assets', 'npm', 'packaged'] as const;
+
+function isManifestScope(value: string): value is DistributionManifestScope {
+  return (MANIFEST_SCOPES as readonly string[]).includes(value);
 }
 
 function parseArgs(args: readonly string[]): Args {
   let validate = false;
   let manifestPath = join(ROOT_DIR, DISTRIBUTION_MANIFEST_FILE);
   let target: string | undefined;
-  let scope: 'all' | 'packaged' = 'all';
+  let scope: DistributionManifestScope = 'all';
 
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
@@ -43,8 +50,8 @@ function parseArgs(args: readonly string[]): Args {
     }
     if (arg === '--scope') {
       const value = requiredValue(args, ++index, '--scope');
-      if (value !== 'all' && value !== 'packaged') {
-        throw new Error('--scope must be all or packaged');
+      if (!isManifestScope(value)) {
+        throw new Error(`--scope must be one of: ${MANIFEST_SCOPES.join(', ')}`);
       }
       scope = value;
       continue;
