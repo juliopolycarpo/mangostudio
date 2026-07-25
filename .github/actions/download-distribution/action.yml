@@ -22,6 +22,13 @@ inputs:
     description: Manifest scope when no target is selected.
     required: false
     default: packaged
+  verify-attestation:
+    description: >
+      Verify the bundle's build provenance before extracting. Only valid for
+      bundles built outside a pull request: distribution-build.yml skips
+      attestation on PRs, so PR consumers must leave this off.
+    required: false
+    default: "false"
 
 runs:
   using: composite
@@ -31,18 +38,36 @@ runs:
         name: ${{ inputs.artifact-name }}
         path: ${{ runner.temp }}/mango-distribution
 
-    - name: Extract distribution bundle safely
+    - name: Resolve distribution bundle
       shell: bash
       env:
         DOWNLOAD_DIR: ${{ runner.temp }}/mango-distribution
       run: |
+        set -euo pipefail
         shopt -s nullglob
         bundles=("$DOWNLOAD_DIR"/*.tar.gz)
         if [ "${#bundles[@]}" -ne 1 ]; then
-          echo "Expected exactly one distribution bundle, found ${#bundles[@]}."
+          echo "Expected exactly one distribution bundle, found ${#bundles[@]}." >&2
           exit 1
         fi
-        bun ./scripts/release/extract-distribution.ts "${bundles[0]}" "$GITHUB_WORKSPACE"
+        echo "DISTRIBUTION_BUNDLE=${bundles[0]}" >> "$GITHUB_ENV"
+
+    - name: Verify distribution provenance
+      if: inputs.verify-attestation == 'true'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        REPO: ${{ github.repository }}
+      run: |
+        set -euo pipefail
+        gh attestation verify "$DISTRIBUTION_BUNDLE" --repo "$REPO" \
+          --signer-workflow "$REPO/.github/workflows/distribution-build.yml"
+
+    - name: Extract distribution bundle safely
+      shell: bash
+      run: |
+        set -euo pipefail
+        bun ./scripts/release/extract-distribution.ts "$DISTRIBUTION_BUNDLE" "$GITHUB_WORKSPACE"
 
     - name: Verify distribution identity and checksums
       shell: bash
