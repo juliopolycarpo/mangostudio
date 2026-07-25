@@ -134,11 +134,12 @@ jobs:
   qa-metrics:
     # Report-only metrics envelope for the PR QA comment: PR runs produce the
     # head side, main pushes produce the exact-SHA baselines. Runs after Test
-    # to consume its metrics fragment, and still runs when Test fails so the
-    # report can show the failing suite. Publishing happens in the separate
-    # privileged pr-qa-report.yml (workflow_run), never here.
+    # and Build to consume their artifacts (test fragment, frontend dist), and
+    # still runs when Test fails so the report can show the failing suite.
+    # Publishing happens in the separate privileged pr-qa-report.yml
+    # (workflow_run), never here.
     name: QA Metrics
-    needs: [test]
+    needs: [test, build]
     if: ${{ !cancelled() && (github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main')) }}
     uses: ./.github/workflows/qa-metrics.yml
 
