@@ -383,18 +383,15 @@ jobs:
       contents: read # checkout only; publish goes to npm, not the repo
       id-token: write # npm provenance attestation
     steps:
-      - name: Preflight npm publish secret
-        env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: |
-          if [ -z "$NPM_TOKEN" ]; then
-            echo "Missing required release secret: NPM_TOKEN"
-            exit 1
-          fi
-
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+
+      - name: Preflight npm publish secret
+        uses: ./.github/actions/require-secret
+        with:
+          name: NPM_TOKEN
+          value: "${{ secrets.NPM_TOKEN }}"
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -413,34 +410,13 @@ jobs:
           scope: npm
           verify-attestation: "true"
 
-      - name: Restore executable bit on platform binaries
-        # actions/upload-artifact zips files and drops Unix mode bits, so the
-        # downloaded binaries arrive non-executable. npm only force-sets +x on
-        # bin entries (the wrapper's mangostudio.js), not on these plain files,
-        # so without this the published binary fails to spawn (EACCES) on
-        # macOS/Linux. The .exe platforms need no +x.
-        run: find dist-npm -type f -name mangostudio -exec chmod +x {} +
-
-      - name: Validate npm distribution
-        run: bun ./scripts/release/pack-npm.ts --validate dist-npm
-
-      - name: Verify Node for provenance
-        run: |
-          node_major="$(node -p "process.versions.node.split('.')[0]")"
-          node_minor="$(node -p "process.versions.node.split('.')[1]")"
-          if [ "$node_major" -lt 22 ] || { [ "$node_major" -eq 22 ] && [ "$node_minor" -lt 14 ]; }; then
-            echo "Node $(node --version) is below the 22.14.0 floor required for npm provenance."
-            exit 1
-          fi
-          echo "Node $(node --version); publish uses npx npm@11.5.1"
-
       - id: publish
         name: Publish to npm
+        uses: ./.github/actions/publish-npm-distribution
+        with:
+          node-version: "22.14.0"
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: |
-          echo "//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}" > ~/.npmrc
-          bun ./scripts/release/publish-npm.ts dist-npm --provenance-policy required
 
   homebrew:
     # Renders Formula/mangostudio.rb from the released SHA256SUMS and pushes it
@@ -456,18 +432,15 @@ jobs:
       attestations: read # fetch build provenance for gh attestation verify
       contents: read
     steps:
-      - name: Preflight Homebrew dist-repos secret
-        env:
-          DIST_REPOS_TOKEN: ${{ secrets.DIST_REPOS_TOKEN }}
-        run: |
-          if [ -z "$DIST_REPOS_TOKEN" ]; then
-            echo "Missing required release secret: DIST_REPOS_TOKEN"
-            exit 1
-          fi
-
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+
+      - name: Preflight Homebrew dist-repos secret
+        uses: ./.github/actions/require-secret
+        with:
+          name: DIST_REPOS_TOKEN
+          value: "${{ secrets.DIST_REPOS_TOKEN }}"
 
       - uses: ./.github/actions/setup-mango
         with:
@@ -510,18 +483,15 @@ jobs:
       attestations: read # fetch build provenance for gh attestation verify
       contents: read
     steps:
-      - name: Preflight Scoop dist-repos secret
-        env:
-          DIST_REPOS_TOKEN: ${{ secrets.DIST_REPOS_TOKEN }}
-        run: |
-          if [ -z "$DIST_REPOS_TOKEN" ]; then
-            echo "Missing required release secret: DIST_REPOS_TOKEN"
-            exit 1
-          fi
-
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+
+      - name: Preflight Scoop dist-repos secret
+        uses: ./.github/actions/require-secret
+        with:
+          name: DIST_REPOS_TOKEN
+          value: "${{ secrets.DIST_REPOS_TOKEN }}"
 
       - uses: ./.github/actions/setup-mango
         with:
