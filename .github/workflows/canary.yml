@@ -27,7 +27,10 @@ on:
       channel:
         type: string
         required: true
-      packaged_artifact:
+      assets_artifact:
+        type: string
+        required: true
+      npm_artifact:
         type: string
         required: true
     secrets:
@@ -46,33 +49,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  verify:
-    name: Verify tested canary distribution
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      attestations: read # fetch build provenance for gh attestation verify
-      contents: read
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - uses: ./.github/actions/setup-mango
-        with:
-          cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
-
-      - uses: ./.github/actions/download-distribution
-        with:
-          artifact-name: ${{ inputs.packaged_artifact }}
-          source-sha: ${{ inputs.source_sha }}
-          version: ${{ inputs.version }}
-          channel: ${{ inputs.channel }}
-          verify-attestation: "true"
-
   npm-canary:
     name: Publish npm (canary dist-tag)
-    needs: verify
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
@@ -106,10 +84,11 @@ jobs:
 
       - uses: ./.github/actions/download-distribution
         with:
-          artifact-name: ${{ inputs.packaged_artifact }}
+          artifact-name: ${{ inputs.npm_artifact }}
           source-sha: ${{ inputs.source_sha }}
           version: ${{ inputs.version }}
           channel: ${{ inputs.channel }}
+          scope: npm
           verify-attestation: "true"
 
       - name: Restore executable bit on platform binaries
@@ -140,7 +119,6 @@ jobs:
 
   github-release-canary:
     name: Publish GitHub pre-release assets
-    needs: verify
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -157,10 +135,11 @@ jobs:
 
       - uses: ./.github/actions/download-distribution
         with:
-          artifact-name: ${{ inputs.packaged_artifact }}
+          artifact-name: ${{ inputs.assets_artifact }}
           source-sha: ${{ inputs.source_sha }}
           version: ${{ inputs.version }}
           channel: ${{ inputs.channel }}
+          scope: assets
           verify-attestation: "true"
 
       - name: Stage rolling canary release assets
@@ -194,7 +173,7 @@ jobs:
 
   canary-summary:
     name: Canary publish summary
-    needs: [verify, npm-canary, github-release-canary]
+    needs: [npm-canary, github-release-canary]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -208,7 +187,6 @@ jobs:
       - name: Write canary publish summary
         env:
           TITLE: Canary ${{ inputs.version }}
-          BUILD_RESULT: ${{ needs.verify.result }}
           NPM_RESULT: ${{ needs.npm-canary.result }}
           RELEASE_RESULT: ${{ needs.github-release-canary.result }}
           NPM_PUBLISH_AUTH: ${{ needs.npm-canary.outputs.auth }}
@@ -216,6 +194,5 @@ jobs:
           NPM_CHANNEL_NAME: npm-canary
         run: |
           bash scripts/release/publish-summary.sh \
-            "build=${BUILD_RESULT}" \
             "npm-canary=${NPM_RESULT}" \
             "github-release-canary=${RELEASE_RESULT}"
