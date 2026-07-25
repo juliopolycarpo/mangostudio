@@ -409,29 +409,42 @@ a passing run when needed.
 ## CI Cache Policy
 
 All dependency and intermediate-state caches are owned by composites under
-`.github/actions/`; workflows must not call `actions/cache` directly. Every
-composite uses the same immutable `actions/cache` revision and writes its hit,
-primary key, and restored key to the job's `Cache policy` summary.
+`.github/actions/`; workflows must not call `actions/cache` directly. The shared
+`cache-scoped` composite owns the write-scope, trusted-`main` restore keys, and
+step-summary diagnostics for every family. Callers supply `family`, `path`, and
+a `validity` string (toolchain versions plus content hashes). `setup-mango`
+wraps the Bun install family; every other family is invoked from the workflow
+that produces or consumes it.
 
-| Family                | Producer / consumer            | Path                               | Invalidators                                    | Size / writes                     |
-| --------------------- | ------------------------------ | ---------------------------------- | ----------------------------------------------- | --------------------------------- |
-| Bun install           | every job using `setup-mango`  | `~/.bun/install/cache`             | OS, arch, Bun version, lockfile                 | moderate; concurrent writes safe  |
-| Turbo task output     | check, test, build, QA metrics | `.turbo/cache`                     | OS, arch, Bun/Turbo versions, lane, task config | moderate; lane-partitioned writes |
-| Vite optimizer        | test and build                 | `apps/frontend/node_modules/.vite` | lockfile and frontend/Vite/Vitest/TS config     | small; lane-partitioned writes    |
-| TypeScript build info | check                          | `.mango/artifacts/tsbuildinfo/`    | TypeScript version, tsconfig graph, TS sources  | small; one check writer           |
-| Workflow lint tools   | check                          | `.mango/artifacts/tools/`          | pinned tool manifest                            | small; exact trusted restore only |
-| Playwright browser    | browser smoke                  | `~/.cache/ms-playwright`           | OS, arch, Playwright version                    | large; one browser-smoke writer   |
+| Family                | Producer / consumer           | Path                               | Invalidators                                    | Restore behavior                  |
+| --------------------- | ----------------------------- | ---------------------------------- | ----------------------------------------------- | --------------------------------- |
+| Bun install           | every job using `setup-mango` | `~/.bun/install/cache`             | OS, arch, Bun version, lockfile                 | loose trusted-`main` prefix       |
+| Turbo task output     | check, test, build            | `.turbo/cache`                     | OS, arch, Bun/Turbo versions, lane, task config | lane-scoped trusted-`main` prefix |
+| Vite optimizer        | test and build                | `apps/frontend/node_modules/.vite` | lockfile and frontend/Vite/Vitest/TS config     | lane-scoped trusted-`main` prefix |
+| TypeScript build info | check                         | `.mango/artifacts/tsbuildinfo/`    | TypeScript version, tsconfig graph, TS sources  | version-scoped trusted-`main`     |
+| Workflow lint tools   | check                         | `.mango/artifacts/tools/`          | pinned tool manifest                            | exact trusted restore only        |
+| Playwright browser    | browser smoke                 | `~/.cache/ms-playwright`           | OS, arch, Playwright version                    | exact trusted restore only        |
+
+`mode` selects `restore-save` (default), `restore`, or `save`. Exact-restore
+families (`lint-tools`, `playwright`) set `exact-restore: true` so a loose
+prefix hit cannot mark `cache-restored` and skip a required install —
+Playwright browsers and checksum-pinned lint tools are unusable across
+versions. `cache-restored` is therefore only safe to gate install steps when
+the call site opts into exact restore.
 
 The binary and Docker smoke matrix (`smoke-binary.yml`) restores no caches: it
 only pins Bun and runs dependency-free release scripts. Manual `rebuild` dispatches
-still use `setup-mango` because they compile inside the job.
+still use `setup-mango` because they compile inside the job. The QA metrics job
+consumes the frontend dist artifact and does not restore any cache family.
 
 `CI_CACHE_EPOCH` is the repository-wide emergency invalidation lever. It is an
 Actions repository variable with a documented `v1` fallback, passed explicitly
-to every cache composite. Increment it (for example, to `v2`) to force a clean
-miss after suspected poisoning or a broken key rollout. Removing the variable
-returns to `v1`; only do that for a benign rollback because old `v1` entries may
-still exist.
+to every cache call site. Composite actions cannot read the `vars` context, so
+callers must keep supplying `cache-epoch` rather than relying on a composite
+default. Increment the variable (for example, to `v2`) to force a clean miss
+after suspected poisoning or a broken key rollout. Removing the variable returns
+to `v1`; only do that for a benign rollback because old `v1` entries may still
+exist.
 
 Main pushes write reusable `main` keys. Pull requests first restore a matching
 trusted `main` key, then write only a `pr-<number>` primary key; fork permissions
