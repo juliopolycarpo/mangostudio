@@ -23,7 +23,16 @@ jobs:
 
       - id: toolchain
         name: Resolve build cache toolchains
-        run: echo "turbo=$(bun run turbo:version | tail -n 1)" >> "$GITHUB_OUTPUT"
+        # An empty version silently poisons the cache key, so fail here rather
+        # than inside cache-scoped's validity guard.
+        run: |
+          set -euo pipefail
+          turbo="$(bun run turbo:version | tail -n 1)"
+          if [ -z "${turbo}" ]; then
+            echo "::error::turbo version probe returned an empty value"
+            exit 1
+          fi
+          echo "turbo=${turbo}" >> "$GITHUB_OUTPUT"
 
       - uses: ./.github/actions/cache-scoped
         with:

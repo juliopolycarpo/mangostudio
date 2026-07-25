@@ -41,7 +41,16 @@ jobs:
 
       - id: toolchain
         name: Resolve Playwright version
-        run: echo "playwright=$(bunx --bun playwright --version | awk '{print $2}')" >> "$GITHUB_OUTPUT"
+        # An empty version silently poisons the cache key, so fail here rather
+        # than inside cache-scoped's validity guard.
+        run: |
+          set -euo pipefail
+          playwright="$(bunx --bun playwright --version | awk '{print $2}')"
+          if [ -z "${playwright}" ]; then
+            echo "::error::playwright version probe returned an empty value"
+            exit 1
+          fi
+          echo "playwright=${playwright}" >> "$GITHUB_OUTPUT"
 
       - name: Restore Playwright browser cache
         id: pw-cache

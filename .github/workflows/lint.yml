@@ -23,9 +23,20 @@ jobs:
 
       - id: toolchain
         name: Resolve check cache toolchains
+        # An empty version silently poisons the cache key, so fail here rather
+        # than inside cache-scoped's validity guard.
         run: |
-          echo "turbo=$(bun run turbo:version | tail -n 1)" >> "$GITHUB_OUTPUT"
-          echo "typescript=$(bunx --bun tsc --version | awk '{print $2}')" >> "$GITHUB_OUTPUT"
+          set -euo pipefail
+          turbo="$(bun run turbo:version | tail -n 1)"
+          typescript="$(bunx --bun tsc --version | awk '{print $2}')"
+          if [ -z "${turbo}" ] || [ -z "${typescript}" ]; then
+            echo "::error::empty toolchain version (turbo='${turbo}', typescript='${typescript}')"
+            exit 1
+          fi
+          {
+            echo "turbo=${turbo}"
+            echo "typescript=${typescript}"
+          } >> "$GITHUB_OUTPUT"
 
       - uses: ./.github/actions/cache-scoped
         with:
