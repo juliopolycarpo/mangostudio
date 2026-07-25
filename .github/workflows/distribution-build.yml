@@ -103,7 +103,7 @@ jobs:
           VERSION: ${{ inputs.version }}
         run: |
           bun ./scripts/release/distribution-manifest.ts
-          bun ./scripts/release/distribution-manifest.ts --validate distribution-manifest.json
+          bun ./scripts/release/distribution-manifest.ts --validate distribution-manifest.json --expect built
 
       - id: bundle
         name: Create content-addressed bundles

@@ -111,6 +111,7 @@ Run by `.github/workflows/release.yml`; each is also runnable locally:
 | `bundle-distribution.ts`      | Create content-addressed scoped (checksums, assets, npm) and per-target distribution bundles         |
 | `distribution-manifest.ts`    | Record and verify distribution identity, file sizes, and SHA-256 checksums                           |
 | `extract-distribution.ts`     | Reject unsafe bundle paths, then extract a downloaded distribution                                   |
+| `extract-target.ts`           | Safely materialize `.mango/out/<target>` from a verified target archive                              |
 | `stage-docker-ctx.ts`         | Stage Linux glibc/musl binaries into `docker-ctx/` for Docker Buildx                                 |
 | `pack-npm.ts`                 | Stage `.mango/out/<arch>` binaries into the npm distribution                                         |
 | `publish-npm.ts`              | Idempotent npm publication with retry + required provenance policy (`--tag`, `--provenance-policy`)  |

@@ -3,6 +3,7 @@ import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { ROOT_DIR } from '../lib/config';
+import { targetBundleMembers } from '../release/bundle-distribution';
 import {
   RELEASE_SCRIPT_ENV_CONTRACTS,
   type ReleaseScriptPath,
@@ -234,7 +235,9 @@ describe('release workflow binary gate', () => {
     expect(workflow.match(/bun run build --binary/g)).toHaveLength(1);
     expect(workflow.match(/bun \.\/scripts\/release\/pack-npm\.ts/g)).toHaveLength(1);
     expect(workflow.match(/bun \.\/scripts\/release\/archive-assets\.ts/g)).toHaveLength(1);
-    expect(workflow).toContain('bun ./scripts/release/distribution-manifest.ts --validate');
+    expect(workflow).toContain(
+      'bun ./scripts/release/distribution-manifest.ts --validate distribution-manifest.json --expect built'
+    );
     expect(workflow).toContain('bun ./scripts/release/bundle-distribution.ts');
     expect(workflow.match(/overwrite: false/g)).toHaveLength(11);
     expect(workflow).toContain('actions/attest-build-provenance@');
@@ -706,6 +709,23 @@ describe('release workflow binary gate', () => {
     expect(checksums).toContain('SHA256SUMS');
     expect(checksums).not.toContain("'dist-npm'");
     expect(checksums).not.toMatch(/'release-assets'(?!\/)/);
+  });
+
+  test('target bundles carry archives once and materialize them after verification', () => {
+    const action = readText('.github/actions/download-distribution/action.yml');
+
+    expect(targetBundleMembers({ archive: 'release-assets/target.tar.gz' })).toEqual([
+      'distribution-manifest.json',
+      'release-assets/target.tar.gz',
+      'release-assets/SHA256SUMS',
+    ]);
+    expect(action).toContain('--expect downloaded');
+    expect(action.indexOf('Verify distribution identity and checksums')).toBeLessThan(
+      action.indexOf('Materialize target directory')
+    );
+    expect(action).toContain(
+      'bun --no-install ./scripts/release/extract-target.ts --target "$TARGET"'
+    );
   });
 
   test('binary smoke helper checks version, delegates the health poll, and surfaces failure logs', () => {

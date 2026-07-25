@@ -54,10 +54,13 @@ export interface ValidateDistributionManifestOptions {
   readonly channel?: string;
   readonly target?: string;
   readonly scope?: DistributionManifestScope;
+  /** Defaults to downloaded for the prebuilt smoke consumer; producer CLIs pass this explicitly. */
+  readonly expect?: DistributionManifestExpectation;
 }
 
 /** Manifest validation slice for a downloaded distribution bundle. */
 export type DistributionManifestScope = 'all' | 'checksums' | 'assets' | 'npm' | 'packaged';
+export type DistributionManifestExpectation = 'built' | 'downloaded';
 
 const MANIFEST_ROOTS = ['.mango/out', 'release-assets', 'dist-npm'] as const;
 
@@ -193,7 +196,12 @@ export function validateDistributionManifest(
     throw new Error(`Distribution target is missing from manifest: ${options.target}`);
   }
 
-  const files = selectFiles(manifest, target, options.scope ?? 'all');
+  const files = selectFiles(
+    manifest,
+    target,
+    options.scope ?? 'all',
+    options.expect ?? 'downloaded'
+  );
   if (files.length === 0) throw new Error('Distribution manifest selected no files to validate.');
   for (const file of files) validateFile(options.rootDir, file);
 }
@@ -259,12 +267,13 @@ function collectFiles(rootDir: string, relativeRoot: string): DistributionFile[]
 function selectFiles(
   manifest: DistributionManifest,
   target: DistributionTarget | undefined,
-  scope: DistributionManifestScope
+  scope: DistributionManifestScope,
+  expectation: DistributionManifestExpectation
 ): DistributionFile[] {
   if (target) {
     return manifest.files.filter(
       (file) =>
-        file.path.startsWith(`.mango/out/${target.id}/`) ||
+        (expectation === 'built' && file.path.startsWith(`.mango/out/${target.id}/`)) ||
         file.path === target.archive ||
         file.path === 'release-assets/SHA256SUMS'
     );

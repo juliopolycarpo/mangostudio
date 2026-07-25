@@ -29,6 +29,10 @@ async function createBundle(path: string, members: readonly string[]): Promise<v
   }
 }
 
+export function targetBundleMembers(target: { readonly archive: string }): readonly string[] {
+  return [DISTRIBUTION_MANIFEST_FILE, target.archive, 'release-assets/SHA256SUMS'];
+}
+
 // Streamed rather than readFileSync: bundles are hashed concurrently, so buffering
 // each whole tarball would multiply peak memory by the concurrency limit.
 async function digest(path: string): Promise<string> {
@@ -74,12 +78,7 @@ async function main(): Promise<void> {
     archiveConcurrency(),
     async (target) => {
       const bundlePath = join(BUNDLE_DIR, `${target.id}.tar.gz`);
-      await createBundle(bundlePath, [
-        DISTRIBUTION_MANIFEST_FILE,
-        `.mango/out/${target.id}`,
-        target.archive,
-        'release-assets/SHA256SUMS',
-      ]);
+      await createBundle(bundlePath, targetBundleMembers(target));
       return [
         target.id,
         distributionArtifactName(
@@ -107,9 +106,11 @@ async function main(): Promise<void> {
   success(`Distribution bundles written to ${BUNDLE_DIR}`);
 }
 
-try {
-  await main();
-} catch (caught) {
-  error(caught instanceof Error ? caught.message : String(caught));
-  process.exit(1);
+if (import.meta.main) {
+  try {
+    await main();
+  } catch (caught) {
+    error(caught instanceof Error ? caught.message : String(caught));
+    process.exit(1);
+  }
 }

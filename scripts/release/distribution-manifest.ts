@@ -7,6 +7,7 @@ import { ROOT_DIR } from '../lib/config';
 import {
   createDistributionManifest,
   DISTRIBUTION_MANIFEST_FILE,
+  type DistributionManifestExpectation,
   type DistributionManifestScope,
   readDistributionManifest,
   validateDistributionManifest,
@@ -19,12 +20,18 @@ interface Args {
   readonly manifestPath: string;
   readonly target?: string;
   readonly scope: DistributionManifestScope;
+  readonly expect?: DistributionManifestExpectation;
 }
 
 const MANIFEST_SCOPES = ['all', 'checksums', 'assets', 'npm', 'packaged'] as const;
+const MANIFEST_EXPECTATIONS = ['built', 'downloaded'] as const;
 
 function isManifestScope(value: string): value is DistributionManifestScope {
   return (MANIFEST_SCOPES as readonly string[]).includes(value);
+}
+
+function isManifestExpectation(value: string): value is DistributionManifestExpectation {
+  return (MANIFEST_EXPECTATIONS as readonly string[]).includes(value);
 }
 
 function parseArgs(args: readonly string[]): Args {
@@ -32,6 +39,7 @@ function parseArgs(args: readonly string[]): Args {
   let manifestPath = join(ROOT_DIR, DISTRIBUTION_MANIFEST_FILE);
   let target: string | undefined;
   let scope: DistributionManifestScope = 'all';
+  let expect: DistributionManifestExpectation | undefined;
 
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
@@ -56,9 +64,20 @@ function parseArgs(args: readonly string[]): Args {
       scope = value;
       continue;
     }
+    if (arg === '--expect') {
+      const value = requiredValue(args, ++index, '--expect');
+      if (!isManifestExpectation(value)) {
+        throw new Error(`--expect must be one of: ${MANIFEST_EXPECTATIONS.join(', ')}`);
+      }
+      expect = value;
+      continue;
+    }
     throw new Error(`Unknown argument: ${arg}`);
   }
-  return { validate, manifestPath, target, scope };
+  if (validate && !expect) {
+    throw new Error('--expect is required with --validate');
+  }
+  return { validate, manifestPath, target, scope, expect };
 }
 
 function requiredValue(args: readonly string[], index: number, flag: string): string {
@@ -91,6 +110,7 @@ async function main(): Promise<void> {
       channel,
       target: args.target,
       scope: args.scope,
+      expect: args.expect,
     });
     success(`Distribution identity and checksums verified: ${args.manifestPath}`);
     return;

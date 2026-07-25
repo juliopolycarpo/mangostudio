@@ -19,6 +19,7 @@ export const RELEASE_SCRIPT_ENV_CONTRACTS = {
     requiredEnv: ['DISTRIBUTION_CHANNEL', 'SOURCE_SHA', 'VERSION'],
   },
   'scripts/release/extract-distribution.ts': {},
+  'scripts/release/extract-target.ts': {},
   'scripts/release/fill-dry-run-checksums.ts': {},
   'scripts/release/pack-npm.ts': {
     requirements: [{ env: ['VERSION'], unlessArgsInclude: '--validate' }],
