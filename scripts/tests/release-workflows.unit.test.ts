@@ -394,7 +394,7 @@ describe('release workflow binary gate', () => {
     expect('Dockerfile.alpine').not.toMatch(new RegExp(source as string));
   });
 
-  test('changelog lands pre-tag: no write-back job, gated by the build lockstep check', () => {
+  test('changelog lands pre-tag: no write-back job, gated by the prepare lockstep check', () => {
     const workflow = readText('.github/workflows/release.yml');
 
     // The changelog is generated in the release-prep commit before the tag is
@@ -547,6 +547,23 @@ describe('release workflow binary gate', () => {
     expect(workflow).toContain('allow_legacy_cargo_token:');
     expect(workflow).toContain('type: boolean');
     expect(workflow).toContain('default: false');
+  });
+
+  test('release verifies tag provenance and cannot be bypassed by a tag push', () => {
+    const workflow = readText('.github/workflows/release.yml');
+    const prepare = extractJobBlock(workflow, 'prepare');
+    expect(prepare).toContain('git merge-base --is-ancestor');
+    // Resolved through ci.yml's own run, never by the bare check-run name:
+    // cargo-shim.yml and release-dry-run.yml also expose a job named "Gate".
+    expect(prepare).toContain('actions/workflows/ci.yml/runs?head_sha=');
+    expect(prepare).toContain('select(.name == "Gate")');
+    expect(prepare).toContain('"completed:success"');
+    expect(prepare).not.toContain('/check-runs');
+    expect(prepare).toContain(
+      "github.event_name == 'workflow_dispatch' && inputs.allow_unverified_source"
+    );
+    expect(workflow).toContain('allow_unverified_source:');
+    expect(workflow).toContain('actions: read');
   });
 
   test('ci gates the canary publish on the aggregate gate and a push to main', () => {
