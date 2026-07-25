@@ -29,6 +29,19 @@ export function extractJobBlocks(workflow: string): Array<{ job: string; block: 
   });
 }
 
+/**
+ * Split a job block into per-step blocks, in declaration order. Each block
+ * starts at the step's `- ` list item, so keys are visible regardless of the
+ * order they were written in.
+ */
+export function extractStepBlocks(jobBlock: string): string[] {
+  const headers = [...jobBlock.matchAll(/^ {6}- /gm)];
+  return headers.map((header, index) => {
+    const next = headers[index + 1];
+    return jobBlock.slice(header.index ?? 0, next?.index);
+  });
+}
+
 /** Isolate the body of the top-level `on:` trigger section. */
 export function extractOnBlock(workflow: string): string {
   return /\non:\n([\s\S]*?)(?=\n\S|$)/.exec(workflow)?.[1] ?? '';

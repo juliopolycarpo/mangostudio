@@ -3,6 +3,7 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { ROOT_DIR } from '../lib/config';
+import { workflowFiles } from './support/workflow-files';
 
 // Every external action must be pinned to an immutable 40-character commit
 // SHA with a human-readable version comment, so a moved tag can never change
@@ -16,12 +17,9 @@ function actionManifest(actionDir: string): string {
 }
 
 function workflowAndActionFiles(): string[] {
-  const workflowsDir = join(ROOT_DIR, '.github', 'workflows');
   const actionsDir = join(ROOT_DIR, '.github', 'actions');
   return [
-    ...readdirSync(workflowsDir)
-      .filter((file) => file.endsWith('.yml') || file.endsWith('.yaml'))
-      .map((file) => join(workflowsDir, file)),
+    ...workflowFiles().map((file) => join(ROOT_DIR, file)),
     ...readdirSync(actionsDir, { withFileTypes: true })
       .filter((entry) => entry.isDirectory())
       .map((entry) => actionManifest(join(actionsDir, entry.name))),
