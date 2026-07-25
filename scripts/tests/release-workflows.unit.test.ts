@@ -267,7 +267,10 @@ describe('release workflow binary gate', () => {
     expect(workflow.match(/uses: \.\/\.github\/actions\/download-distribution/g)).toHaveLength(2);
     for (const job of ['binary', 'docker']) {
       const jobBlock = extractJobBlock(workflow, job);
-      expect(jobBlock.indexOf('uses: oven-sh/setup-bun@')).toBeLessThan(
+      const setupBunIndex = jobBlock.indexOf('uses: oven-sh/setup-bun@');
+      // A missing step yields -1, which would satisfy the ordering check alone.
+      expect(setupBunIndex, job).toBeGreaterThanOrEqual(0);
+      expect(setupBunIndex).toBeLessThan(
         jobBlock.indexOf('uses: ./.github/actions/download-distribution')
       );
     }

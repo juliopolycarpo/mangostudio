@@ -12,36 +12,34 @@ const KNOWN_SMOKE_ENTRYPOINTS = [
 ] as const;
 
 const BUN_SCRIPT_ENTRY_RE =
-  /\bbun(?:\s+--[^\s]+)*\s+(?:run\s+)?(?:\.\/)?(scripts\/[\w./-]+\.ts)\b/g;
+  /\bbun((?:\s+--[^\s]+)*)\s+(?:run\s+)?(?:\.\/)?(scripts\/[\w./-]+\.ts)\b/g;
 
-function smokeScriptEntrypointsFromWorkflowText(text: string): string[] {
-  const entrypoints = new Set<string>();
-  BUN_SCRIPT_ENTRY_RE.lastIndex = 0;
-  for (
-    let match = BUN_SCRIPT_ENTRY_RE.exec(text);
-    match !== null;
-    match = BUN_SCRIPT_ENTRY_RE.exec(text)
-  ) {
-    const script = match[1];
-    if (script) {
-      entrypoints.add(script);
+const SMOKE_SOURCE_FILES = [
+  '.github/workflows/smoke-binary.yml',
+  '.github/actions/download-distribution/action.yml',
+] as const;
+
+interface BunScriptInvocation {
+  readonly source: string;
+  readonly script: string;
+  readonly flags: readonly string[];
+}
+
+function bunScriptInvocations(): BunScriptInvocation[] {
+  const invocations: BunScriptInvocation[] = [];
+  for (const source of SMOKE_SOURCE_FILES) {
+    for (const match of readText(source).matchAll(BUN_SCRIPT_ENTRY_RE)) {
+      const script = match[2];
+      if (script) {
+        invocations.push({ source, script, flags: (match[1] ?? '').split(/\s+/).filter(Boolean) });
+      }
     }
   }
-  return [...entrypoints].sort();
+  return invocations;
 }
 
 function deriveSmokeScriptEntrypoints(): string[] {
-  const sources = [
-    readText('.github/workflows/smoke-binary.yml'),
-    readText('.github/actions/download-distribution/action.yml'),
-  ];
-  const entrypoints = new Set<string>();
-  for (const source of sources) {
-    for (const script of smokeScriptEntrypointsFromWorkflowText(source)) {
-      entrypoints.add(script);
-    }
-  }
-  return [...entrypoints].sort();
+  return [...new Set(bunScriptInvocations().map((invocation) => invocation.script))].sort();
 }
 
 describe('smoke matrix runtime dependencies', () => {
@@ -50,6 +48,12 @@ describe('smoke matrix runtime dependencies', () => {
     expect(entrypoints.length).toBeGreaterThan(0);
     for (const known of KNOWN_SMOKE_ENTRYPOINTS) {
       expect(entrypoints, known).toContain(known);
+    }
+  });
+
+  test('smoke script invocations opt out of auto-install', () => {
+    for (const { source, script, flags } of bunScriptInvocations()) {
+      expect(flags, `${source} → ${script}`).toContain('--no-install');
     }
   });
 

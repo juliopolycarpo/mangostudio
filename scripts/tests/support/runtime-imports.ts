@@ -8,14 +8,37 @@ export interface RuntimeImportWalkResult {
   readonly externalSpecifiers: ReadonlyMap<string, readonly string[]>;
 }
 
-const IMPORT_FROM_RE = /(?:^|\n)\s*(?:import|export)\s+([\s\S]*?)\s*from\s*['"]([^'"]+)['"]/g;
+// The clause may span lines but never contains a quote or `;`, so a statement
+// cannot swallow the one that follows it.
+const IMPORT_FROM_RE = /(?:^|\n)\s*(?:import|export)\s+([^'";]*?)\s*from\s*['"]([^'"]+)['"]/g;
+/** Side-effect imports (`import 'x'`) carry no clause and no `from`. */
+const SIDE_EFFECT_IMPORT_RE = /(?:^|\n)\s*import\s*['"]([^'"]+)['"]/g;
+/** Deferred runtime edges: `import('x')` and `require('x')` with literal specifiers. */
+const DYNAMIC_IMPORT_RE = /\b(?:import|require)\s*\(\s*['"]([^'"]+)['"]\s*\)/g;
+const BLOCK_COMMENT_RE = /\/\*[\s\S]*?\*\//g;
+const LINE_COMMENT_RE = /(^|[^:'"`\\])\/\/[^\n]*/g;
+
+/**
+ * Strip comments so commented-out or illustrative `import`/`require` snippets do
+ * not register as runtime edges. Newlines are preserved so the anchored import
+ * patterns keep matching.
+ */
+function stripComments(source: string): string {
+  return source
+    .replace(BLOCK_COMMENT_RE, (comment) => comment.replace(/[^\n]/g, ' '))
+    .replace(LINE_COMMENT_RE, (_match, prefix: string) => prefix);
+}
 
 function resolveRelativeModule(fromFile: string, specifier: string): string {
   const base = resolve(dirname(fromFile), specifier);
+  // TS-style ESM specifiers point at the emitted `.js`; the source is `.ts`.
+  const sourceOfEmitted = base.replace(/\.js$/, '');
   const candidates = [
     base,
     `${base}.ts`,
     `${base}.tsx`,
+    `${sourceOfEmitted}.ts`,
+    `${sourceOfEmitted}.tsx`,
     join(base, 'index.ts'),
     join(base, 'index.tsx'),
   ];
@@ -67,26 +90,32 @@ export function walkRuntimeImports(entryRelativePath: string): RuntimeImportWalk
     }
     files.add(filePath);
 
-    const source = readFileSync(filePath, 'utf8');
-    IMPORT_FROM_RE.lastIndex = 0;
-    for (
-      let match = IMPORT_FROM_RE.exec(source);
-      match !== null;
-      match = IMPORT_FROM_RE.exec(source)
-    ) {
-      const clause = match[1] ?? '';
-      const specifier = match[2] ?? '';
-      if (isTypeOnlyImportClause(clause)) {
-        continue;
-      }
+    // `matchAll` clones the pattern, so the shared module-level regexes keep no
+    // `lastIndex` state across the recursive `walk` calls below.
+    const source = stripComments(readFileSync(filePath, 'utf8'));
+
+    function visitSpecifier(specifier: string): void {
       if (specifier.startsWith('node:') || specifier === 'bun') {
-        continue;
+        return;
       }
       if (specifier.startsWith('.')) {
         walk(resolveRelativeModule(filePath, specifier));
-        continue;
+        return;
       }
       recordExternal(specifier, filePath);
+    }
+
+    for (const match of source.matchAll(IMPORT_FROM_RE)) {
+      if (isTypeOnlyImportClause(match[1] ?? '')) {
+        continue;
+      }
+      visitSpecifier(match[2] ?? '');
+    }
+    for (const match of source.matchAll(SIDE_EFFECT_IMPORT_RE)) {
+      visitSpecifier(match[1] ?? '');
+    }
+    for (const match of source.matchAll(DYNAMIC_IMPORT_RE)) {
+      visitSpecifier(match[1] ?? '');
     }
   }
 
