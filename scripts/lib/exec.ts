@@ -109,14 +109,21 @@ export async function mapWithConcurrency<T, R>(
     return [];
   }
 
-  const concurrency = Math.max(1, Math.min(limit, items.length));
+  if (Number.isNaN(limit)) {
+    throw new TypeError(`mapWithConcurrency: limit must be a number, received ${limit}`);
+  }
+
+  // Math.floor keeps a fractional limit from inflating the worker count; Infinity
+  // survives it and collapses to items.length (fully parallel).
+  const concurrency = Math.max(1, Math.min(Math.floor(limit), items.length));
   const results: R[] = new Array(items.length);
   let nextIndex = 0;
+  let failed = false;
   let firstError: unknown;
 
   const workers = Array.from({ length: concurrency }, async () => {
     while (true) {
-      if (firstError !== undefined) {
+      if (failed) {
         return;
       }
 
@@ -129,7 +136,8 @@ export async function mapWithConcurrency<T, R>(
       try {
         results[index] = await fn(items[index]);
       } catch (caught) {
-        if (firstError === undefined) {
+        if (!failed) {
+          failed = true;
           firstError = caught;
         }
         return;
@@ -138,7 +146,7 @@ export async function mapWithConcurrency<T, R>(
   });
 
   await Promise.all(workers);
-  if (firstError !== undefined) {
+  if (failed) {
     throw firstError;
   }
 

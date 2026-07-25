@@ -12,6 +12,26 @@ describe('mapWithConcurrency', () => {
     await expect(mapWithConcurrency([], 4, async () => 1)).resolves.toEqual([]);
   });
 
+  test('rejects a NaN limit instead of silently running nothing', async () => {
+    let calls = 0;
+    await expect(
+      mapWithConcurrency([1, 2, 3], Number('not-a-number'), (value) => {
+        calls += 1;
+        return Promise.resolve(value);
+      })
+    ).rejects.toThrow(/limit must be a number/);
+    expect(calls).toBe(0);
+  });
+
+  test('runs every item when the limit is fractional or infinite', async () => {
+    await expect(mapWithConcurrency([1, 2, 3], 2.7, async (v) => v * 2)).resolves.toEqual([
+      2, 4, 6,
+    ]);
+    await expect(
+      mapWithConcurrency([1, 2, 3], Number.POSITIVE_INFINITY, async (v) => v * 2)
+    ).resolves.toEqual([2, 4, 6]);
+  });
+
   test('preserves input order in results', async () => {
     const items = [1, 2, 3, 4, 5];
     const results = await mapWithConcurrency(items, 3, async (value) => {
