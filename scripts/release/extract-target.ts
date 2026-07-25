@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
 import { mkdirSync, mkdtempSync, readdirSync, renameSync, rmSync } from 'node:fs';
-import { join, relative, resolve, sep } from 'node:path';
+import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 import { ROOT_DIR } from '../lib/config';
 import {
@@ -69,16 +69,22 @@ export function targetArchiveCommands(
       '-NoProfile',
       '-Command',
       [
+        // Without Stop, a non-terminating cmdlet error still exits 0 and the
+        // caller would treat a partial listing as the whole archive.
+        "$ErrorActionPreference = 'Stop'",
         'Add-Type -AssemblyName System.IO.Compression.FileSystem',
         `$zip = [IO.Compression.ZipFile]::OpenRead('${archive}')`,
-        'try { $zip.Entries | ForEach-Object { $_.FullName } } finally { $zip.Dispose() }',
+        // [Console] rather than the pipeline: PowerShell's formatter hard-wraps
+        // emitted strings at the host buffer width, which would split deep
+        // sidecar entry names into fragments the safety check cannot judge.
+        'try { $zip.Entries | ForEach-Object { [Console]::Out.WriteLine($_.FullName) } } finally { $zip.Dispose() }',
       ].join('; '),
     ],
     extract: [
       'powershell',
       '-NoProfile',
       '-Command',
-      `Expand-Archive -LiteralPath '${archive}' -DestinationPath '${target}' -Force`,
+      `$ErrorActionPreference = 'Stop'; Expand-Archive -LiteralPath '${archive}' -DestinationPath '${target}' -Force`,
     ],
   };
 }
@@ -88,9 +94,11 @@ export async function extractTargetArchive(
   dependencies: ExtractTargetArchiveDependencies = {}
 ): Promise<void> {
   const runCommand = dependencies.runCommand ?? ((command) => captureCommand(command));
-  const unzipCommand =
-    dependencies.unzipCommand === undefined ? Bun.which('unzip') : dependencies.unzipCommand;
-  const commands = targetArchiveCommands(
+  const unzipCommand = resolveUnzipCommand(options.archiveFormat, dependencies.unzipCommand);
+  // Only the listing half is used here; extraction always targets the staging
+  // directory below, which cannot exist yet because nothing may be written
+  // before the entries are judged safe.
+  const { list: listCommand } = targetArchiveCommands(
     options.archivePath,
     options.destination,
     options.archiveFormat,
@@ -98,7 +106,7 @@ export async function extractTargetArchive(
     dependencies.platform
   );
 
-  const listing = await runArchiveCommand('list', commands.list, runCommand);
+  const listing = await runArchiveCommand('list', listCommand, runCommand);
   assertSafeDistributionArchiveEntries(listing.split(/\r?\n/).filter(Boolean));
 
   const outDir = resolve(options.destination, '..');
@@ -145,9 +153,19 @@ async function runArchiveCommand(
   return result.stdout;
 }
 
+function resolveUnzipCommand(
+  archiveFormat: 'tar.gz' | 'zip',
+  injected: string | null | undefined
+): string | null {
+  if (injected !== undefined) return injected;
+  // Probed only for zip targets so the tar.gz majority never depends on a tool
+  // it will not run.
+  return archiveFormat === 'zip' ? Bun.which('unzip') : null;
+}
+
 function assertMaterializedMembers(destination: string, expectedMembers: readonly string[]): void {
-  const actual = readdirSync(destination).sort(compareText);
-  const expected = [...expectedMembers].sort(compareText);
+  const actual = readdirSync(destination).sort();
+  const expected = [...expectedMembers].sort();
   if (
     actual.length !== expected.length ||
     actual.some((member, index) => member !== expected[index])
@@ -160,17 +178,15 @@ function assertMaterializedMembers(destination: string, expectedMembers: readonl
 
 function assertWorkspacePath(path: string, rootDir: string, label: string): void {
   const rel = relative(resolve(rootDir), resolve(path));
-  if (rel === '..' || rel.startsWith(`..${sep}`)) {
+  // relative() returns an absolute path when the two sides share no root (a
+  // different Windows drive), which no `..` prefix check would catch.
+  if (isAbsolute(rel) || rel === '..' || rel.startsWith(`..${sep}`)) {
     throw new Error(`${label} escapes the workspace: ${path}`);
   }
 }
 
 function powerShellLiteral(value: string): string {
   return value.replaceAll("'", "''");
-}
-
-function compareText(left: string, right: string): number {
-  return left < right ? -1 : left > right ? 1 : 0;
 }
 
 async function main(): Promise<void> {
