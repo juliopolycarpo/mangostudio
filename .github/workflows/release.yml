@@ -166,6 +166,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
+      attestations: read # fetch build provenance for gh attestation verify
       contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -180,6 +181,7 @@ jobs:
           source-sha: ${{ needs.build.outputs.source_sha }}
           version: ${{ needs.build.outputs.version }}
           channel: release
+          verify-attestation: "true"
 
       - name: Run Linux x64 binary smoke test
         env:
@@ -201,6 +203,7 @@ jobs:
     environment: release
     timeout-minutes: 10
     permissions:
+      attestations: read # fetch build provenance for gh attestation verify
       contents: write # create the tagged GitHub Release and upload assets
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -217,6 +220,7 @@ jobs:
           source-sha: ${{ needs.build.outputs.source_sha }}
           version: ${{ needs.build.outputs.version }}
           channel: release
+          verify-attestation: "true"
 
       - name: Generate release notes
         run: bunx git-cliff --tag "v${{ needs.build.outputs.version }}" --latest --strip all > RELEASE_NOTES.md
@@ -242,6 +246,7 @@ jobs:
     environment: release
     timeout-minutes: 15
     permissions:
+      attestations: read # fetch build provenance for gh attestation verify
       contents: read # checkout of Dockerfiles and staging scripts
       packages: write # push release images to GHCR
     steps:
@@ -257,6 +262,7 @@ jobs:
           source-sha: ${{ needs.build.outputs.source_sha }}
           version: ${{ needs.build.outputs.version }}
           channel: release
+          verify-attestation: "true"
 
       - name: Stage Docker build context
         env:
@@ -359,6 +365,7 @@ jobs:
       auth: ${{ steps.publish.outputs.auth }}
       provenance: ${{ steps.publish.outputs.provenance }}
     permissions:
+      attestations: read # fetch build provenance for gh attestation verify
       contents: read # checkout only; publish goes to npm, not the repo
       id-token: write # npm provenance attestation
     steps:
@@ -387,6 +394,7 @@ jobs:
           source-sha: ${{ needs.build.outputs.source_sha }}
           version: ${{ needs.build.outputs.version }}
           channel: release
+          verify-attestation: "true"
 
       - name: Restore executable bit on platform binaries
         # actions/upload-artifact zips files and drops Unix mode bits, so the
@@ -428,6 +436,7 @@ jobs:
     environment: release
     timeout-minutes: 10
     permissions:
+      attestations: read # fetch build provenance for gh attestation verify
       contents: read
     steps:
       - name: Preflight Homebrew dist-repos secret
@@ -451,6 +460,7 @@ jobs:
           source-sha: ${{ needs.build.outputs.source_sha }}
           version: ${{ needs.build.outputs.version }}
           channel: release
+          verify-attestation: "true"
 
       - name: Render formula and push to juliopolycarpo/homebrew-tap
         env:
@@ -477,6 +487,7 @@ jobs:
     environment: release
     timeout-minutes: 10
     permissions:
+      attestations: read # fetch build provenance for gh attestation verify
       contents: read
     steps:
       - name: Preflight Scoop dist-repos secret
@@ -500,6 +511,7 @@ jobs:
           source-sha: ${{ needs.build.outputs.source_sha }}
           version: ${{ needs.build.outputs.version }}
           channel: release
+          verify-attestation: "true"
 
       - name: Render manifest and push to juliopolycarpo/scoop-bucket
         env:
