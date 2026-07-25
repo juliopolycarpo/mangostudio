@@ -141,18 +141,25 @@ describe('CI cache policy', () => {
     );
   });
 
-  test('only exact-restore call sites expose cache-restored to workflows', () => {
-    const sites = cacheScopedCallSites();
-    const exactIds = new Set(
-      sites
-        .filter((site) => site.inputs['exact-restore'] === 'true' && site.id)
-        .map((site) => site.id as string)
-    );
+  // Only `mode: restore` runs actions/cache/restore, the one path that can see
+  // a trusted-main match; `restore-save` reports the primary-key hit alone.
+  // Gating an install on anything else silently reinstalls on every PR run.
+  test('only exact restore-mode call sites expose cache-restored to workflows', () => {
+    const gatingIds = new Map<string, Set<string>>();
+    for (const site of cacheScopedCallSites()) {
+      if (site.id === null) continue;
+      if (site.inputs['exact-restore'] !== 'true' || site.inputs.mode !== 'restore') continue;
+      const ids = gatingIds.get(site.file) ?? new Set<string>();
+      ids.add(site.id);
+      gatingIds.set(site.file, ids);
+    }
 
     for (const file of workflowFiles()) {
       const text = readText(file);
       for (const match of text.matchAll(/steps\.([\w-]+)\.outputs\.cache-restored/g)) {
-        expect(exactIds.has(match[1]), `${file} references ${match[1]}`).toBe(true);
+        expect(gatingIds.get(file)?.has(match[1]) ?? false, `${file} references ${match[1]}`).toBe(
+          true
+        );
       }
     }
   });
