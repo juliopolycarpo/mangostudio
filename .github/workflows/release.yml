@@ -12,7 +12,10 @@ name: Release
 # admits those tags, so a branch dispatch is rejected before they start. The
 # tagged commit must already carry the release's CHANGELOG.md section (staged
 # by `bun run release:prepare`); the preparation job's lockstep check gates on
-# it.
+# it. The same job also requires the tagged commit to be an ancestor of
+# origin/main with a successful CI / Gate check run (API name "Gate"). Tag
+# pushes cannot skip that provenance gate; workflow_dispatch may set
+# allow_unverified_source=true as a recorded break-glass bypass only.
 #
 # Prerequisites: channel secrets live on the `release` GitHub Environment and
 # are validated in the jobs that need them —
@@ -34,6 +37,10 @@ on:
       version:
         description: "Version to release without the leading v (e.g. 0.1.0)"
         required: true
+      allow_unverified_source:
+        description: "Release a commit that is not a green ancestor of main (break-glass)"
+        type: boolean
+        default: false
       allow_legacy_cargo_token:
         description: "Allow CARGO_REGISTRY_TOKEN when crates.io OIDC mint fails (migration only)"
         type: boolean
@@ -51,6 +58,9 @@ jobs:
     name: Prepare release identity
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: read
+      checks: read # read CI / Gate check runs for the tagged commit
     outputs:
       version: ${{ steps.resolve.outputs.version }}
       source_sha: ${{ steps.source.outputs.sha }}
@@ -92,6 +102,33 @@ jobs:
       - id: source
         name: Resolve release source SHA
         run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Verify the tag is a green commit on main
+        env:
+          ALLOW_UNVERIFIED: ${{ github.event_name == 'workflow_dispatch' && inputs.allow_unverified_source || 'false' }}
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ steps.source.outputs.sha }}
+        run: |
+          set -euo pipefail
+          if [ "$ALLOW_UNVERIFIED" = "true" ]; then
+            echo "::warning::Source verification bypassed via allow_unverified_source."
+            exit 0
+          fi
+
+          git fetch --no-tags origin main
+          if ! git merge-base --is-ancestor "$SOURCE_SHA" origin/main; then
+            echo "Refusing to release ${SOURCE_SHA}: it is not an ancestor of origin/main." >&2
+            exit 1
+          fi
+
+          # API check-run name is "Gate"; GitHub UI / docs label it "CI / Gate".
+          gate="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${SOURCE_SHA}/check-runs" \
+            --jq '[.check_runs[] | select(.name == "Gate")] | first | .conclusion // "missing"')"
+          if [ "$gate" != "success" ]; then
+            echo "Refusing to release ${SOURCE_SHA}: CI / Gate is '${gate}', not 'success'." >&2
+            exit 1
+          fi
+          echo "Source verified: ${SOURCE_SHA} is on main and CI / Gate passed."
 
   build:
     name: Build immutable release distribution
