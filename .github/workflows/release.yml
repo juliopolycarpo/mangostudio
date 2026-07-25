@@ -13,7 +13,8 @@ name: Release
 # tagged commit must already carry the release's CHANGELOG.md section (staged
 # by `bun run release:prepare`); the preparation job's lockstep check gates on
 # it. The same job also requires the tagged commit to be an ancestor of
-# origin/main with a successful CI / Gate check run (API name "Gate"). Tag
+# origin/main whose ci.yml main-push run finished with a successful `Gate` job
+# (the check shown as "CI / Gate"). Tag
 # pushes cannot skip that provenance gate; workflow_dispatch may set
 # allow_unverified_source=true as a recorded break-glass bypass only.
 #
@@ -60,7 +61,7 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: read
-      checks: read # read CI / Gate check runs for the tagged commit
+      actions: read # read ci.yml's run and its Gate job for the tagged commit
     outputs:
       version: ${{ steps.resolve.outputs.version }}
       source_sha: ${{ steps.source.outputs.sha }}
@@ -121,14 +122,29 @@ jobs:
             exit 1
           fi
 
-          # API check-run name is "Gate"; GitHub UI / docs label it "CI / Gate".
-          gate="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${SOURCE_SHA}/check-runs" \
-            --jq '[.check_runs[] | select(.name == "Gate")] | first | .conclusion // "missing"')"
-          if [ "$gate" != "success" ]; then
-            echo "Refusing to release ${SOURCE_SHA}: CI / Gate is '${gate}', not 'success'." >&2
+          # ci.yml, cargo-shim.yml and release-dry-run.yml each expose a job
+          # named "Gate", and the commit check-runs API carries no workflow
+          # prefix — matching on the bare name could read the wrong gate (the
+          # release-prep commit bumps packages/cargo-shim, so "Cargo Shim /
+          # Gate" is always present too). Resolve ci.yml's own main-push run for
+          # this commit, then read that run's "Gate" job.
+          run_id="$(gh api \
+            "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?head_sha=${SOURCE_SHA}&event=push&per_page=100" \
+            --jq '.workflow_runs | sort_by(.run_number) | last | .id // empty')"
+          if [ -z "$run_id" ]; then
+            echo "Refusing to release ${SOURCE_SHA}: no CI run for this commit on main." >&2
             exit 1
           fi
-          echo "Source verified: ${SOURCE_SHA} is on main and CI / Gate passed."
+
+          gate="$(gh api \
+            "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/jobs?filter=latest&per_page=100" \
+            --jq '[.jobs[] | select(.name == "Gate")] | last
+                  | "\(.status // "missing"):\(.conclusion // "none")"')"
+          if [ "$gate" != "completed:success" ]; then
+            echo "Refusing to release ${SOURCE_SHA}: CI / Gate (run ${run_id}) is '${gate}', not 'completed:success'." >&2
+            exit 1
+          fi
+          echo "Source verified: ${SOURCE_SHA} is on main and CI / Gate passed (run ${run_id})."
 
   build:
     name: Build immutable release distribution

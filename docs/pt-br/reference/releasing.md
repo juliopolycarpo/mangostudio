@@ -167,12 +167,15 @@ Releases são orientadas por tag. A partir de um `main` atualizado:
 Uma tag cujo commit não tenha a seção de changelog ou uma versão em lockstep
 falha no job `prepare` antes de qualquer artefato ser produzido, apontando a
 correção (`bun run release:prepare`). O mesmo job recusa liberar um commit que
-não seja ancestral de `origin/main` ou cujo **`CI / Gate`** agregado (nome da
-check-run na API: `Gate`) não tenha concluído com `success`. Push de tag não pode
-pular esse gate de proveniência. Só **`workflow_dispatch`** pode definir
-`allow_unverified_source=true` como escape deliberado (registrado como aviso no
-workflow); use quando as check runs sumiram da API mas o commit ainda é o da
-release, e mencione o bypass nas notas de release.
+não seja ancestral de `origin/main` ou cujo **`CI / Gate`** agregado não tenha
+concluído com `success`. O gate é resolvido pela própria run de push em `main` do
+`ci.yml` para o commit, e não pelo nome da check run, porque `cargo-shim.yml` e
+`release-dry-run.yml` também expõem um job chamado `Gate`. Push de tag não pode
+pular esse gate de proveniência, e um gate ainda em execução também bloqueia —
+espere o CI ficar verde em `main` antes de empurrar a tag. Só
+**`workflow_dispatch`** pode definir `allow_unverified_source=true` como escape
+deliberado (registrado como aviso no workflow); use quando a run de CI sumiu da
+API mas o commit ainda é o da release, e mencione o bypass nas notas de release.
 
 **Re-run failed jobs** é sempre seguro: jobs de canal são independentes — uma
 falha nunca bloqueia as outras. Versões npm já publicadas são ignoradas e assets

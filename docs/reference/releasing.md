@@ -287,12 +287,15 @@ Releases are tag-driven. From an up-to-date `main`:
 A tag whose commit lacks the changelog section or a lockstep version fails in
 the `prepare` job before any artifact is produced, naming the fix
 (`bun run release:prepare`). The same job refuses to release a commit that is
-not an ancestor of `origin/main` or whose aggregate **`CI / Gate`** check (API
-check-run name `Gate`) did not conclude `success`. A tag push cannot skip that
-provenance gate. **`workflow_dispatch`** may set `allow_unverified_source=true`
-only as a deliberate break-glass path (logged as a workflow warning); use it
-when check runs have aged out of the API but the commit is still the intended
-release, and call out the bypass in the release notes.
+not an ancestor of `origin/main` or whose aggregate **`CI / Gate`** check did not
+conclude `success`. It resolves the gate through `ci.yml`'s own main-push run for
+the commit rather than by check-run name, because `cargo-shim.yml` and
+`release-dry-run.yml` also expose a job called `Gate`. A tag push cannot skip that
+provenance gate, and a still-running gate blocks it too — wait for CI on main to
+go green before pushing the tag. **`workflow_dispatch`** may set
+`allow_unverified_source=true` only as a deliberate break-glass path (logged as a
+workflow warning); use it when the CI run has aged out of the API but the commit
+is still the intended release, and call out the bypass in the release notes.
 
 `.github/workflows/release.yml` is designed to converge when a networked release
 step flakes: **Re-run failed jobs** is always safe because channel jobs are
@@ -308,7 +311,7 @@ summary, listed here in workflow order:
 
 | Job               | What it does                                                                                                                                                                                                                                                                                                                                                                       |
 | ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `prepare`         | Resolves the release version and source SHA, verifies versions are in lockstep with the tag and that `CHANGELOG.md` carries the release section (`check:versions --expect`), and requires the tagged commit to be a green ancestor of `origin/main` (`CI / Gate` / API name `Gate`) unless dispatch sets `allow_unverified_source=true`.                                           |
+| `prepare`         | Resolves the release version and source SHA, verifies versions are in lockstep with the tag and that `CHANGELOG.md` carries the release section (`check:versions --expect`), and requires the tagged commit to be a green ancestor of `origin/main` (the `Gate` job of `ci.yml`'s main-push run for that commit) unless dispatch sets `allow_unverified_source=true`.              |
 | `build`           | Cross-compiles every platform binary (`build.ts`), assembles the npm distribution (`pack-npm.ts`), and uploads binary archives plus `SHA256SUMS`.                                                                                                                                                                                                                                  |
 | `verify-build`    | Smoke-tests the freshly built linux-x64 archive (`smoke-binary.sh`) before any channel publishes, so a broken binary fails the release early. Gates `github-release`, `docker`, and `npm-publish`.                                                                                                                                                                                 |
 | `github-release`  | Creates the GitHub Release, or updates an existing one by refreshing notes and uploading assets with `--clobber`.                                                                                                                                                                                                                                                                  |

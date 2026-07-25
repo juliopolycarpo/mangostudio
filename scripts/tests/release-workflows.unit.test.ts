@@ -553,12 +553,17 @@ describe('release workflow binary gate', () => {
     const workflow = readText('.github/workflows/release.yml');
     const prepare = extractJobBlock(workflow, 'prepare');
     expect(prepare).toContain('git merge-base --is-ancestor');
+    // Resolved through ci.yml's own run, never by the bare check-run name:
+    // cargo-shim.yml and release-dry-run.yml also expose a job named "Gate".
+    expect(prepare).toContain('actions/workflows/ci.yml/runs?head_sha=');
     expect(prepare).toContain('select(.name == "Gate")');
+    expect(prepare).toContain('"completed:success"');
+    expect(prepare).not.toContain('/check-runs');
     expect(prepare).toContain(
       "github.event_name == 'workflow_dispatch' && inputs.allow_unverified_source"
     );
     expect(workflow).toContain('allow_unverified_source:');
-    expect(workflow).toContain('checks: read');
+    expect(workflow).toContain('actions: read');
   });
 
   test('ci gates the canary publish on the aggregate gate and a push to main', () => {
