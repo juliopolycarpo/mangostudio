@@ -25,11 +25,13 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+// Release and smoke scripts run without `bun install`; the package catalog
+// barrel re-exports schemas that pull in @sinclair/typebox.
 import {
   CURSOR_NATIVE_PACKAGES,
   cursorNativePackageForPlatform,
   isCursorSdkChunkFileName,
-} from '@mangostudio/shared/catalog';
+} from '../../apps/shared/src/catalog/cursor-native-packages';
 import { ROOT_DIR } from './config';
 import { captureCommand } from './exec';
 import { warn } from './log';

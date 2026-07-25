@@ -422,6 +422,10 @@ primary key, and restored key to the job's `Cache policy` summary.
 | Workflow lint tools   | check                          | `.mango/artifacts/tools/`          | pinned tool manifest                            | small; exact trusted restore only |
 | Playwright browser    | browser smoke                  | `~/.cache/ms-playwright`           | OS, arch, Playwright version                    | large; one browser-smoke writer   |
 
+The binary and Docker smoke matrix (`smoke-binary.yml`) restores no caches: it
+only pins Bun and runs dependency-free release scripts. Manual `rebuild` dispatches
+still use `setup-mango` because they compile inside the job.
+
 `CI_CACHE_EPOCH` is the repository-wide emergency invalidation lever. It is an
 Actions repository variable with a documented `v1` fallback, passed explicitly
 to every cache composite. Increment it (for example, to `v2`) to force a clean

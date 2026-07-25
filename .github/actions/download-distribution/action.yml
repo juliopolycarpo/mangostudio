@@ -1,5 +1,5 @@
 name: Download distribution
-description: Download, extract, and verify one immutable distribution artifact after setup-mango.
+description: Download, extract, and verify one immutable distribution artifact. Call setup-bun or setup-mango before this action when scripts need dependencies.
 
 inputs:
   artifact-name:
@@ -70,7 +70,7 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
-        bun ./scripts/release/extract-distribution.ts "$DISTRIBUTION_BUNDLE" "$GITHUB_WORKSPACE"
+        bun --no-install ./scripts/release/extract-distribution.ts "$DISTRIBUTION_BUNDLE" "$GITHUB_WORKSPACE"
 
     - name: Verify distribution identity and checksums
       shell: bash
@@ -85,4 +85,4 @@ runs:
         if [ -n "$TARGET" ]; then
           args+=(--target "$TARGET")
         fi
-        bun ./scripts/release/distribution-manifest.ts "${args[@]}"
+        bun --no-install ./scripts/release/distribution-manifest.ts "${args[@]}"

@@ -48,6 +48,23 @@ credential, and `gh` reads `GH_TOKEN` from the environment rather than
 `.git/config`. `scripts/release/push-dist-repo.ts` carries its own
 per-invocation credential and is unaffected.
 
+## Dependency-free jobs
+
+Some CI jobs run only the repository-pinned Bun binary and never call
+`bun install` or restore CI caches. They execute small TypeScript entrypoints
+whose import graph stays inside the checkout (no `node_modules`).
+
+| Workflow           | Job(s)                          | Setup                          |
+| ------------------ | ------------------------------- | ------------------------------ |
+| `ci.yml`           | `gate`, `distribution-identity` | `oven-sh/setup-bun` only       |
+| `smoke-binary.yml` | `binary`, `docker` (default)    | `oven-sh/setup-bun` only       |
+| `smoke-binary.yml` | `binary`, `docker` (`rebuild`)  | `setup-mango` (full toolchain) |
+
+Smoke scripts run as `bun --no-install …` so a stray package import fails
+instead of silently auto-installing. `scripts/tests/smoke-dependencies.unit.test.ts`
+walks the smoke script entrypoints declared in the workflow and download
+composite and asserts they have no external runtime imports.
+
 ## Branch protection / required checks
 
 Required checks on `main` should be the three stable gates above, plus the
