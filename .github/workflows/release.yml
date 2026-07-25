@@ -183,10 +183,11 @@ jobs:
 
       - uses: ./.github/actions/download-distribution
         with:
-          artifact-name: ${{ needs.build.outputs.packaged_artifact }}
+          artifact-name: ${{ needs.build.outputs.assets_artifact }}
           source-sha: ${{ needs.build.outputs.source_sha }}
           version: ${{ needs.build.outputs.version }}
           channel: release
+          scope: assets
           verify-attestation: "true"
 
       - name: Run Linux x64 binary smoke test
@@ -223,10 +224,11 @@ jobs:
 
       - uses: ./.github/actions/download-distribution
         with:
-          artifact-name: ${{ needs.build.outputs.packaged_artifact }}
+          artifact-name: ${{ needs.build.outputs.assets_artifact }}
           source-sha: ${{ needs.build.outputs.source_sha }}
           version: ${{ needs.build.outputs.version }}
           channel: release
+          scope: assets
           verify-attestation: "true"
 
       - name: Generate release notes
@@ -267,10 +269,11 @@ jobs:
 
       - uses: ./.github/actions/download-distribution
         with:
-          artifact-name: ${{ needs.build.outputs.packaged_artifact }}
+          artifact-name: ${{ needs.build.outputs.assets_artifact }}
           source-sha: ${{ needs.build.outputs.source_sha }}
           version: ${{ needs.build.outputs.version }}
           channel: release
+          scope: assets
           verify-attestation: "true"
 
       - name: Stage Docker build context
@@ -403,10 +406,11 @@ jobs:
 
       - uses: ./.github/actions/download-distribution
         with:
-          artifact-name: ${{ needs.build.outputs.packaged_artifact }}
+          artifact-name: ${{ needs.build.outputs.npm_artifact }}
           source-sha: ${{ needs.build.outputs.source_sha }}
           version: ${{ needs.build.outputs.version }}
           channel: release
+          scope: npm
           verify-attestation: "true"
 
       - name: Restore executable bit on platform binaries
@@ -471,10 +475,11 @@ jobs:
 
       - uses: ./.github/actions/download-distribution
         with:
-          artifact-name: ${{ needs.build.outputs.packaged_artifact }}
+          artifact-name: ${{ needs.build.outputs.checksums_artifact }}
           source-sha: ${{ needs.build.outputs.source_sha }}
           version: ${{ needs.build.outputs.version }}
           channel: release
+          scope: checksums
           verify-attestation: "true"
 
       - name: Render formula and push to juliopolycarpo/homebrew-tap
@@ -524,10 +529,11 @@ jobs:
 
       - uses: ./.github/actions/download-distribution
         with:
-          artifact-name: ${{ needs.build.outputs.packaged_artifact }}
+          artifact-name: ${{ needs.build.outputs.checksums_artifact }}
           source-sha: ${{ needs.build.outputs.source_sha }}
           version: ${{ needs.build.outputs.version }}
           channel: release
+          scope: checksums
           verify-attestation: "true"
 
       - name: Render manifest and push to juliopolycarpo/scoop-bucket

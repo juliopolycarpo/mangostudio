@@ -53,8 +53,11 @@ export interface ValidateDistributionManifestOptions {
   readonly packageVersion: string;
   readonly channel?: string;
   readonly target?: string;
-  readonly scope?: 'all' | 'packaged';
+  readonly scope?: DistributionManifestScope;
 }
+
+/** Manifest validation slice for a downloaded distribution bundle. */
+export type DistributionManifestScope = 'all' | 'checksums' | 'assets' | 'npm' | 'packaged';
 
 const MANIFEST_ROOTS = ['.mango/out', 'release-assets', 'dist-npm'] as const;
 
@@ -256,7 +259,7 @@ function collectFiles(rootDir: string, relativeRoot: string): DistributionFile[]
 function selectFiles(
   manifest: DistributionManifest,
   target: DistributionTarget | undefined,
-  scope: 'all' | 'packaged'
+  scope: DistributionManifestScope
 ): DistributionFile[] {
   if (target) {
     return manifest.files.filter(
@@ -266,12 +269,22 @@ function selectFiles(
         file.path === 'release-assets/SHA256SUMS'
     );
   }
-  if (scope === 'packaged') {
-    return manifest.files.filter(
-      (file) => file.path.startsWith('release-assets/') || file.path.startsWith('dist-npm/')
-    );
+  switch (scope) {
+    case 'checksums':
+      return manifest.files.filter((file) => file.path === 'release-assets/SHA256SUMS');
+    case 'assets':
+    // Transitional alias of assets; remove after one transition cycle.
+    case 'packaged':
+      return manifest.files.filter((file) => file.path.startsWith('release-assets/'));
+    case 'npm':
+      return manifest.files.filter((file) => file.path.startsWith('dist-npm/'));
+    case 'all':
+      return [...manifest.files];
+    default: {
+      const exhaustive: never = scope;
+      throw new Error(`Unknown distribution manifest scope: ${exhaustive}`);
+    }
   }
-  return [...manifest.files];
 }
 
 function validateFile(rootDir: string, file: DistributionFile): void {

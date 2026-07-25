@@ -236,7 +236,7 @@ describe('release workflow binary gate', () => {
     expect(workflow.match(/bun \.\/scripts\/release\/archive-assets\.ts/g)).toHaveLength(1);
     expect(workflow).toContain('bun ./scripts/release/distribution-manifest.ts --validate');
     expect(workflow).toContain('bun ./scripts/release/bundle-distribution.ts');
-    expect(workflow.match(/overwrite: false/g)).toHaveLength(9);
+    expect(workflow.match(/overwrite: false/g)).toHaveLength(11);
     expect(workflow).toContain('actions/attest-build-provenance@');
     expect(workflow).toContain('subject-path: .distribution-bundles/*.tar.gz');
   });
@@ -250,9 +250,9 @@ describe('release workflow binary gate', () => {
       }))
     );
 
-    // Nine distribution bundles today; a tenth must make the same decision
+    // Eleven distribution bundles today; a twelfth must make the same decision
     // deliberately instead of quietly re-Deflating gzip.
-    expect(uploads.filter((upload) => upload.compressed)).toHaveLength(9);
+    expect(uploads.filter((upload) => upload.compressed)).toHaveLength(11);
     for (const { path, step, compressed } of uploads) {
       // Anchored so a commented-out key can neither satisfy nor trip the policy.
       if (compressed) expect(step, path).toMatch(/^\s*compression-level: 0$/m);
@@ -295,6 +295,7 @@ describe('release workflow binary gate', () => {
     );
     expect(verifyBuild).toContain('contents: read');
     expect(verifyBuild).toContain('verify-attestation: "true"');
+    expect(verifyBuild).toContain('scope: assets');
     expect(workflow).toContain(
       `archive="release-assets/mangostudio-${versionVar}-linux-x64.tar.gz"`
     );
@@ -587,6 +588,8 @@ describe('release workflow binary gate', () => {
     expectJobNeeds(workflow, 'canary', String.raw`\[gate, distribution-identity, distribution\]`);
     expect(canaryBlock).toContain(`if: ${mainPushIf}`);
     expect(canaryBlock).toContain('uses: ./.github/workflows/canary.yml');
+    expect(canaryBlock).toContain('assets_artifact:');
+    expect(canaryBlock).toContain('npm_artifact:');
     // Explicit secret pass-through: the called workflow sees only what it
     // declares, never the caller's full secret set (zizmor secrets-inherit).
     expect(canaryBlock).not.toContain('secrets: inherit');
@@ -610,8 +613,7 @@ describe('release workflow binary gate', () => {
     expect(workflow).toContain('group: canary-publish');
     expect(workflow).toContain('cancel-in-progress: true');
 
-    expectJobNeeds(workflow, 'npm-canary', 'verify');
-    expectJobNeeds(workflow, 'github-release-canary', 'verify');
+    expect(extractJobBlock(workflow, 'verify')).toBe('');
     expect(extractJobBlock(workflow, 'docker-canary')).toBe('');
     expect(extractJobBlock(workflow, 'crates-canary')).toBe('');
     expect(workflow).toContain('uses: ./.github/actions/download-distribution');
@@ -626,6 +628,7 @@ describe('release workflow binary gate', () => {
 
     // npm: canary dist-tag so `latest` never moves; provenance is required.
     const npmBlock = extractJobBlock(workflow, 'npm-canary');
+    expect(npmBlock).toContain('scope: npm');
     expect(npmBlock).toContain('name: Preflight npm canary secret');
     expect(npmBlock).toContain('id-token: write');
     expect(npmBlock).toContain('actions/setup-node@');
@@ -636,6 +639,7 @@ describe('release workflow binary gate', () => {
     // GitHub Releases: fixed <root>-canary asset names, with the full per-SHA
     // canary version retained in notes for traceability.
     const releaseBlock = extractJobBlock(workflow, 'github-release-canary');
+    expect(releaseBlock).toContain('scope: assets');
     expect(releaseBlock).toContain(`VERSION: ${'$'}{{ inputs.version }}`);
     expect(releaseBlock).toContain(`CARGO_VERSION: ${cargoVersionInput}`);
     expect(releaseBlock).toContain(
@@ -658,27 +662,50 @@ describe('release workflow binary gate', () => {
     const workflow = readText('.github/workflows/canary.yml');
     const summaryBlock = extractJobBlock(workflow, 'canary-summary');
     const alwaysExpression = '$' + '{{ always() }}';
-    const buildResult = '$' + '{{ needs.verify.result }}';
     const npmResult = '$' + '{{ needs.npm-canary.result }}';
     const githubReleaseResult = '$' + '{{ needs.github-release-canary.result }}';
     expect(summaryBlock, 'canary-summary job not found').not.toBe('');
 
+    expectJobNeeds(workflow, 'canary-summary', String.raw`\[npm-canary, github-release-canary\]`);
     expect(summaryBlock).toContain(`if: ${alwaysExpression}`);
     expect(summaryBlock).toContain('bash scripts/release/publish-summary.sh');
-    // Job results reach the shell through env indirection (zizmor
-    // template-injection). Surface the shared build gate so its failure is
-    // not masked by the channels all showing "skipped".
-    expect(summaryBlock).toContain(`BUILD_RESULT: ${buildResult}`);
     expect(summaryBlock).toContain(`NPM_RESULT: ${npmResult}`);
     expect(summaryBlock).toContain(`RELEASE_RESULT: ${githubReleaseResult}`);
-    const buildResultVar = '$' + '{BUILD_RESULT}';
     const npmResultVar = '$' + '{NPM_RESULT}';
     const releaseResultVar = '$' + '{RELEASE_RESULT}';
-    expect(summaryBlock).toContain(`"build=${buildResultVar}"`);
     expect(summaryBlock).toContain(`"npm-canary=${npmResultVar}"`);
     expect(summaryBlock).toContain(`"github-release-canary=${releaseResultVar}"`);
+    expect(summaryBlock).not.toContain('build=');
     expect(summaryBlock).not.toContain('docker-canary=');
     expect(summaryBlock).not.toContain('crates-canary=');
+  });
+
+  test('each distribution consumer downloads only the scope it uses', () => {
+    const expected = {
+      'release.yml': {
+        'github-release': 'assets',
+        docker: 'assets',
+        'npm-publish': 'npm',
+        homebrew: 'checksums',
+        scoop: 'checksums',
+        'verify-build': 'assets',
+      },
+      'canary.yml': { 'npm-canary': 'npm', 'github-release-canary': 'assets' },
+    };
+    for (const [file, jobs] of Object.entries(expected)) {
+      const workflow = readText(`.github/workflows/${file}`);
+      for (const [job, scope] of Object.entries(jobs)) {
+        expect(extractJobBlock(workflow, job), `${file} → ${job}`).toContain(`scope: ${scope}`);
+      }
+    }
+  });
+
+  test('the checksums scope stays small enough to be worth splitting out', () => {
+    const source = readText('scripts/release/bundle-distribution.ts');
+    const checksums = /checksums:\s*\[([^\]]*)\]/.exec(source)?.[1] ?? '';
+    expect(checksums).toContain('SHA256SUMS');
+    expect(checksums).not.toContain("'dist-npm'");
+    expect(checksums).not.toMatch(/'release-assets'(?!\/)/);
   });
 
   test('binary smoke helper checks version, delegates the health poll, and surfaces failure logs', () => {

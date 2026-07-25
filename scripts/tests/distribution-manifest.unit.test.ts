@@ -124,6 +124,29 @@ describe('distribution manifest', () => {
     );
   });
 
+  test('validates manifest slices per consumer scope', () => {
+    const { rootDir, manifest } = fixture();
+    const base = {
+      rootDir,
+      sourceSha: manifest.sourceSha,
+      packageVersion: '1.2.3',
+      channel: 'test',
+    };
+
+    rmSync(join(rootDir, 'dist-npm'), { force: true, recursive: true });
+    expect(() =>
+      validateDistributionManifest(manifest, { ...base, scope: 'checksums' })
+    ).not.toThrow();
+    expect(() => validateDistributionManifest(manifest, { ...base, scope: 'npm' })).toThrow(
+      /file cannot be read/
+    );
+
+    rmSync(join(rootDir, 'release-assets', 'SHA256SUMS'));
+    expect(() => validateDistributionManifest(manifest, { ...base, scope: 'checksums' })).toThrow(
+      /file cannot be read/
+    );
+  });
+
   test('derives content-addressed packaged and per-target artifact names', () => {
     const bundleDigest = createHash('sha256').update('bundle').digest('hex');
     expect(distributionArtifactName('linux-x64', 'abcdef0123456789', '1.2.3', bundleDigest)).toBe(

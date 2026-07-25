@@ -19,9 +19,11 @@ inputs:
     required: false
     default: ""
   scope:
-    description: Manifest scope when no target is selected.
+    description: >
+      Manifest scope when no target is selected (all, checksums, assets, npm, or
+      packaged — packaged is a transitional alias of assets).
     required: false
-    default: packaged
+    default: assets
   verify-attestation:
     description: >
       Verify the bundle's build provenance before extracting. Only valid for

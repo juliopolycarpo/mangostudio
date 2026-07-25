@@ -222,6 +222,7 @@ jobs:
       cargo_version: ${{ needs.distribution-identity.outputs.cargo_version }}
       source_sha: ${{ needs.distribution-identity.outputs.source_sha }}
       channel: ${{ needs.distribution-identity.outputs.channel }}
-      packaged_artifact: ${{ needs.distribution.outputs.packaged_artifact }}
+      assets_artifact: ${{ needs.distribution.outputs.assets_artifact }}
+      npm_artifact: ${{ needs.distribution.outputs.npm_artifact }}
     secrets:
       NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
