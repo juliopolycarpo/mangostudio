@@ -285,8 +285,14 @@ Releases are tag-driven. From an up-to-date `main`:
    ```
 
 A tag whose commit lacks the changelog section or a lockstep version fails in
-the `build` job before any artifact is produced, naming the fix
-(`bun run release:prepare`).
+the `prepare` job before any artifact is produced, naming the fix
+(`bun run release:prepare`). The same job refuses to release a commit that is
+not an ancestor of `origin/main` or whose aggregate **`CI / Gate`** check (API
+check-run name `Gate`) did not conclude `success`. A tag push cannot skip that
+provenance gate. **`workflow_dispatch`** may set `allow_unverified_source=true`
+only as a deliberate break-glass path (logged as a workflow warning); use it
+when check runs have aged out of the API but the commit is still the intended
+release, and call out the bypass in the release notes.
 
 `.github/workflows/release.yml` is designed to converge when a networked release
 step flakes: **Re-run failed jobs** is always safe because channel jobs are
@@ -297,12 +303,13 @@ multi-arch push against the verified distribution artifact, and the always-run
 `release-summary` job writes a per-channel ✅/❌ table naming the exact job to
 re-run, plus auth/provenance outcomes for npm and crates.io.
 
-It runs 13 jobs — the publish channels, the gates that verify them, and a final
+It runs 14 jobs — preparation, the publish channels, the gates that verify them, and a final
 summary, listed here in workflow order:
 
 | Job               | What it does                                                                                                                                                                                                                                                                                                                                                                       |
 | ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `build`           | Verifies versions are in lockstep with the tag and that `CHANGELOG.md` carries the release section (`check:versions --expect`), cross-compiles every platform binary (`build.ts`), assembles the npm distribution (`pack-npm.ts`), and uploads binary archives plus `SHA256SUMS`.                                                                                                  |
+| `prepare`         | Resolves the release version and source SHA, verifies versions are in lockstep with the tag and that `CHANGELOG.md` carries the release section (`check:versions --expect`), and requires the tagged commit to be a green ancestor of `origin/main` (`CI / Gate` / API name `Gate`) unless dispatch sets `allow_unverified_source=true`.                                           |
+| `build`           | Cross-compiles every platform binary (`build.ts`), assembles the npm distribution (`pack-npm.ts`), and uploads binary archives plus `SHA256SUMS`.                                                                                                                                                                                                                                  |
 | `verify-build`    | Smoke-tests the freshly built linux-x64 archive (`smoke-binary.sh`) before any channel publishes, so a broken binary fails the release early. Gates `github-release`, `docker`, and `npm-publish`.                                                                                                                                                                                 |
 | `github-release`  | Creates the GitHub Release, or updates an existing one by refreshing notes and uploading assets with `--clobber`.                                                                                                                                                                                                                                                                  |
 | `docker`          | Stages Linux glibc and musl archives into `docker-ctx/` (`stage-docker-ctx.ts`) and publishes Bookworm and Alpine images for amd64 and arm64. It uses only `GITHUB_TOKEN` with `packages: write`.                                                                                                                                                                                  |
@@ -317,7 +324,10 @@ summary, listed here in workflow order:
 | `release-summary` | Always runs (even when a channel fails) and writes a per-channel ✅/❌ status table plus auth/provenance rows to the run summary (`publish-summary.sh`), naming the exact job to re-run. Because the fan-out isolates failures, a partial release is recovered by re-running only the failed job(s).                                                                               |
 
 `workflow_dispatch` accepts an explicit `version` input for a manual run; it is
-validated against the committed version the same way. Point the dispatch at a
+validated against the committed version the same way. Optional boolean inputs:
+`allow_unverified_source` (skip main ancestry and `CI / Gate` provenance —
+break-glass only) and `allow_legacy_cargo_token` (legacy crates.io token when OIDC
+mint fails). Point the dispatch at a
 `v*.*.*` tag ref (`gh workflow run release.yml --ref v0.2.0`) — the publish jobs
 run in the tag-restricted [`release` environment](#release-environment), so a
 dispatch from a branch is rejected before any channel publishes.

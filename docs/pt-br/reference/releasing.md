@@ -165,8 +165,14 @@ Releases são orientadas por tag. A partir de um `main` atualizado:
    ```
 
 Uma tag cujo commit não tenha a seção de changelog ou uma versão em lockstep
-falha no job `build` antes de qualquer artefato ser produzido, apontando a
-correção (`bun run release:prepare`).
+falha no job `prepare` antes de qualquer artefato ser produzido, apontando a
+correção (`bun run release:prepare`). O mesmo job recusa liberar um commit que
+não seja ancestral de `origin/main` ou cujo **`CI / Gate`** agregado (nome da
+check-run na API: `Gate`) não tenha concluído com `success`. Push de tag não pode
+pular esse gate de proveniência. Só **`workflow_dispatch`** pode definir
+`allow_unverified_source=true` como escape deliberado (registrado como aviso no
+workflow); use quando as check runs sumiram da API mas o commit ainda é o da
+release, e mencione o bypass nas notas de release.
 
 **Re-run failed jobs** é sempre seguro: jobs de canal são independentes — uma
 falha nunca bloqueia as outras. Versões npm já publicadas são ignoradas e assets
@@ -175,7 +181,7 @@ de release usam clobber. Para durabilidade extra: artefatos de build retêm por
 distribuição verificado, e o job `release-summary` (sempre executa) escreve uma
 tabela ✅/❌ por canal mais o resultado de auth/provenance do npm e do crates.io.
 
-O workflow executa 13 jobs: `build`, `verify-build`, `github-release`, `docker`,
+O workflow executa 14 jobs: `prepare`, `build`, `verify-build`, `github-release`, `docker`,
 `verify-image`, `npm-publish`, `homebrew`, `scoop`, `cargo-publish`,
 `verify-release`, `verify-cargo`, `verify-homebrew` e
 `release-summary`. Veja a
