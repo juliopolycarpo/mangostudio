@@ -317,7 +317,10 @@ summary, listed here in workflow order:
 | `release-summary` | Always runs (even when a channel fails) and writes a per-channel ✅/❌ status table plus auth/provenance rows to the run summary (`publish-summary.sh`), naming the exact job to re-run. Because the fan-out isolates failures, a partial release is recovered by re-running only the failed job(s).                                                                               |
 
 `workflow_dispatch` accepts an explicit `version` input for a manual run; it is
-validated against the committed version the same way.
+validated against the committed version the same way. Point the dispatch at a
+`v*.*.*` tag ref (`gh workflow run release.yml --ref v0.2.0`) — the publish jobs
+run in the tag-restricted [`release` environment](#release-environment), so a
+dispatch from a branch is rejected before any channel publishes.
 
 ## npm distribution
 

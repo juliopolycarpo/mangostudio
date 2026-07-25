@@ -174,12 +174,21 @@ describe('release workflow binary gate', () => {
       expect(block, job).not.toMatch(/^ {4}environment: release$/m);
     }
 
-    // A job that can read a repository or environment secret must also declare
-    // the release environment, so a seventh publish channel cannot reach a
-    // credential outside the tag-restricted set.
+    // Only the publishing channels may reference a channel secret. Requiring
+    // `environment: release` on any secret-using job instead would contradict
+    // the loop above (and is impossible for a `uses:` job, where GitHub
+    // forbids `environment`). Note the environment does not itself hide
+    // repository secrets — it shadows same-named ones — so the guarantee has
+    // to come from keeping the credential surface inside this job set.
+    // `secrets.GITHUB_TOKEN` is built in and always available, so it is not a
+    // channel credential; the workflow uses `github.token` for it anyway.
+    const githubTokenRef = `${secretPrefix}GITHUB_TOKEN`;
     for (const { job, block } of extractJobBlocks(workflow)) {
-      if (!block.includes(secretPrefix)) continue;
-      expect(block, job).toMatch(/^ {4}environment: release$/m);
+      const usesChannelSecret = block
+        .split('\n')
+        .some((line) => line.includes(secretPrefix) && !line.includes(githubTokenRef));
+      if (!usesChannelSecret) continue;
+      expect(publishing.has(job), job).toBe(true);
     }
   });
 
