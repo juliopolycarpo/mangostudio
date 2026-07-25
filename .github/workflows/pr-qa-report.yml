@@ -54,6 +54,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          # Credentials stay: the "Fetch PR head commits" step below fetches
+          # refs/pull/N/head from origin. Allowlisted in
+          # scripts/tests/workflow-hygiene.unit.test.ts.
+          persist-credentials: true
 
       - uses: ./.github/actions/setup-mango
         with:

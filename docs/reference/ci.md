@@ -22,6 +22,32 @@ Unit tests in `scripts/tests/ci-gate.unit.test.ts` derive each gate's expected
 that already depends on the gate. Adding a mandatory lane without wiring it into
 the gate fails the test.
 
+## Workflow hygiene
+
+`scripts/tests/workflow-hygiene.unit.test.ts` enforces two repository-wide
+workflow policies from the workflow text itself:
+
+- **Job timeouts.** Every job declares `timeout-minutes` instead of inheriting
+  GitHub's 360-minute default. Reusable-workflow callers are the one exemption —
+  GitHub rejects the key on them — and a paired assertion keeps that exemption
+  from widening.
+- **Checkout credentials.** Every `actions/checkout` sets `persist-credentials`
+  explicitly, so no checkout inherits the job's `GITHUB_TOKEN` in `.git/config`
+  by omission. `false` is the rule; `true` is reserved for the jobs listed in
+  `CREDENTIAL_ALLOWLIST`, which do authenticated git network work:
+
+  | Workflow           | Job       | Git network operation                    |
+  | ------------------ | --------- | ---------------------------------------- |
+  | `pr-qa-report.yml` | `report`  | fetches `refs/pull/N/head` from `origin` |
+  | `release.yml`      | `prepare` | fetches `main` to verify the tagged SHA  |
+
+Adding an allowlist entry is a security decision: every step after the checkout,
+including transitively installed tooling, can read a persisted token. Jobs that
+only run local git commands (`rev-parse`, `diff`, `git-cliff`) need no
+credential, and `gh` reads `GH_TOKEN` from the environment rather than
+`.git/config`. `scripts/release/push-dist-repo.ts` carries its own
+per-invocation credential and is unaffected.
+
 ## Branch protection / required checks
 
 Required checks on `main` should be the three stable gates above, plus the
