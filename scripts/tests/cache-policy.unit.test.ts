@@ -1,9 +1,7 @@
 import { describe, expect, test } from 'bun:test';
-import { readdirSync } from 'node:fs';
-import { join } from 'node:path';
 
-import { ROOT_DIR } from '../lib/config';
 import { readText } from './support/read-text';
+import { workflowFiles } from './support/workflow-files';
 
 const CACHE_ACTION_SHA = '55cc8345863c7cc4c66a329aec7e433d2d1c52a9';
 const EXPRESSION_START = '$' + '{{';
@@ -16,12 +14,6 @@ const CACHE_ACTIONS = [
   'cache-lint-tools',
   'cache-playwright',
 ] as const;
-
-function workflowFiles(): string[] {
-  return readdirSync(join(ROOT_DIR, '.github', 'workflows'))
-    .filter((file) => file.endsWith('.yml') || file.endsWith('.yaml'))
-    .map((file) => `.github/workflows/${file}`);
-}
 
 describe('CI cache policy', () => {
   test('keeps every cache family behind one composite and one immutable pin', () => {
