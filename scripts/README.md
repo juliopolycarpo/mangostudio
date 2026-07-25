@@ -108,7 +108,7 @@ Run by `.github/workflows/release.yml`; each is also runnable locally:
 | ----------------------------- | ---------------------------------------------------------------------------------------------------- |
 | `prepare-release.ts`          | Stage a release: lockstep bump + changelog + self-check (`bun run release:prepare`)                  |
 | `archive-assets.ts`           | Assemble `release-assets/` (platform archives, installers, `SHA256SUMS`)                             |
-| `bundle-distribution.ts`      | Create content-addressed packaged and per-target distribution bundles                                |
+| `bundle-distribution.ts`      | Create content-addressed scoped (checksums, assets, npm) and per-target distribution bundles         |
 | `distribution-manifest.ts`    | Record and verify distribution identity, file sizes, and SHA-256 checksums                           |
 | `extract-distribution.ts`     | Reject unsafe bundle paths, then extract a downloaded distribution                                   |
 | `stage-docker-ctx.ts`         | Stage Linux glibc/musl binaries into `docker-ctx/` for Docker Buildx                                 |

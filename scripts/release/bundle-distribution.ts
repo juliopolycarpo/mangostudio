@@ -16,7 +16,7 @@ import { error, header, success } from '../lib/runner';
 
 const BUNDLE_DIR = join(ROOT_DIR, '.distribution-bundles');
 
-const PACKAGED_SCOPES = {
+const BUNDLE_SCOPES = {
   checksums: [DISTRIBUTION_MANIFEST_FILE, 'release-assets/SHA256SUMS'],
   assets: [DISTRIBUTION_MANIFEST_FILE, 'release-assets'],
   npm: [DISTRIBUTION_MANIFEST_FILE, 'dist-npm'],
@@ -48,7 +48,7 @@ async function main(): Promise<void> {
   mkdirSync(BUNDLE_DIR, { recursive: true });
 
   const scopedEntries = await mapWithConcurrency(
-    Object.entries(PACKAGED_SCOPES),
+    Object.entries(BUNDLE_SCOPES),
     archiveConcurrency(),
     async ([scope, members]) => {
       const bundlePath = join(BUNDLE_DIR, `${scope}.tar.gz`);
@@ -65,7 +65,7 @@ async function main(): Promise<void> {
     }
   );
   const scopedArtifacts = Object.fromEntries(scopedEntries) as Record<
-    keyof typeof PACKAGED_SCOPES,
+    keyof typeof BUNDLE_SCOPES,
     string
   >;
 
