@@ -17,8 +17,11 @@ updates:
 
   - package-ecosystem: bun
     directory: /
+    # Weekly, grouped: a daily ungrouped bump costs a full CI run for a
+    # patch-level devDependency.
     schedule:
-      interval: daily
+      interval: weekly
+      day: monday
       time: "06:15"
       timezone: UTC
     commit-message:
@@ -30,7 +33,10 @@ updates:
       semver-major-days: 7
     labels:
       - "type: dependencies"
+    open-pull-requests-limit: 5
     groups:
+      # Keep the three existing coordinated-release groups: these packages must
+      # move together or the workspace breaks.
       typescript:
         patterns:
           - typescript
@@ -42,3 +48,52 @@ updates:
       playwright:
         patterns:
           - "@playwright/*"
+      # Everything else: one PR per update type per week.
+      # Majors stay ungrouped: each needs its own review and its own revert.
+      dev-minor-patch:
+        dependency-type: development
+        update-types:
+          - minor
+          - patch
+      prod-minor-patch:
+        dependency-type: production
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: cargo
+    directory: /packages/cargo-shim
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:30"
+      timezone: UTC
+    commit-message:
+      prefix: chore(deps)
+    cooldown:
+      default-days: 3
+      semver-major-days: 7
+    labels:
+      - "type: dependencies"
+      - "area: cli"
+    groups:
+      cargo-minor-patch:
+        update-types:
+          - minor
+          - patch
+
+  # Both Dockerfile and Dockerfile.alpine live at the repo root; Dependabot
+  # matches filenames containing "dockerfile".
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:45"
+      timezone: UTC
+    commit-message:
+      prefix: chore(ci)
+    cooldown:
+      default-days: 7
+    labels:
+      - "type: dependencies"

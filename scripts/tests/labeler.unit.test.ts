@@ -160,13 +160,13 @@ describe('labeler coverage', () => {
     expect(gitSection).toContain('- "apps/shared/src/github/**"');
   });
 
-  test('applies type: dependencies as a Dependabot auto-label for both ecosystems', () => {
+  test('applies type: dependencies as a Dependabot auto-label for every ecosystem', () => {
     const dependabot = readText('.github/dependabot.yml');
 
-    // One block per ecosystem; each must carry the auto-label so neither the
-    // github-actions nor the bun ecosystem loses dependency classification.
+    // One block per ecosystem; each must carry the auto-label so none of the
+    // shipped ecosystems loses dependency classification.
     const ecosystemBlocks = dependabot.split('package-ecosystem:').slice(1);
-    expect(ecosystemBlocks).toHaveLength(2);
+    expect(ecosystemBlocks).toHaveLength(4);
     for (const block of ecosystemBlocks) {
       expect(block).toContain('"type: dependencies"');
     }
