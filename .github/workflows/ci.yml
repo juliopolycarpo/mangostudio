@@ -156,6 +156,7 @@ jobs:
     needs: [gate, distribution-identity, distribution]
     if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
     permissions:
+      attestations: read # canary jobs verify distribution build provenance
       contents: write # canary.yml updates the rolling GitHub pre-release
       id-token: write # npm provenance for the canary dist-tag publish
     uses: ./.github/workflows/canary.yml
