@@ -83,8 +83,15 @@ runs:
         TARGET: ${{ inputs.target }}
         VERSION: ${{ inputs.version }}
       run: |
-        args=(--validate distribution-manifest.json --scope "$SCOPE")
+        args=(--validate distribution-manifest.json --scope "$SCOPE" --expect downloaded)
         if [ -n "$TARGET" ]; then
           args+=(--target "$TARGET")
         fi
         bun --no-install ./scripts/release/distribution-manifest.ts "${args[@]}"
+
+    - name: Materialize target directory
+      if: inputs.target != ''
+      shell: bash
+      env:
+        TARGET: ${{ inputs.target }}
+      run: bun --no-install ./scripts/release/extract-target.ts --target "$TARGET"

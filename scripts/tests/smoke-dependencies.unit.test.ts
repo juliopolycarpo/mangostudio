@@ -7,6 +7,7 @@ import { extractJobBlock, extractStepBlocks } from './support/workflow-blocks';
 const KNOWN_SMOKE_ENTRYPOINTS = [
   'scripts/test-build.ts',
   'scripts/release/extract-distribution.ts',
+  'scripts/release/extract-target.ts',
   'scripts/release/distribution-manifest.ts',
   'scripts/release/stage-docker-ctx.ts',
 ] as const;

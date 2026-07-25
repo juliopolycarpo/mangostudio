@@ -101,7 +101,12 @@ describe('distribution manifest', () => {
 
   test('rejects SHA, version, missing target, missing file, and checksum mismatches', () => {
     const { rootDir, manifest } = fixture();
-    const base = { rootDir, sourceSha: manifest.sourceSha, packageVersion: '1.2.3' };
+    const base = {
+      rootDir,
+      sourceSha: manifest.sourceSha,
+      packageVersion: '1.2.3',
+      expect: 'built' as const,
+    };
 
     expect(() => validateDistributionManifest(manifest, { ...base, sourceSha: '0000000' })).toThrow(
       /source SHA mismatch/
@@ -124,6 +129,33 @@ describe('distribution manifest', () => {
     );
   });
 
+  test('distinguishes built target layouts from downloaded target bundles', () => {
+    const { rootDir, manifest } = fixture();
+    const targetDir = join(rootDir, '.mango', 'out', 'linux-x64');
+    const base = {
+      rootDir,
+      sourceSha: manifest.sourceSha,
+      packageVersion: '1.2.3',
+      target: 'linux-x64',
+    };
+
+    rmSync(targetDir, { force: true, recursive: true });
+
+    expect(() =>
+      validateDistributionManifest(manifest, { ...base, expect: 'downloaded' })
+    ).not.toThrow();
+    expect(() => validateDistributionManifest(manifest, base)).not.toThrow();
+    expect(() => validateDistributionManifest(manifest, { ...base, expect: 'built' })).toThrow(
+      /file cannot be read/
+    );
+
+    const archive = join(rootDir, 'release-assets', 'mangostudio-1.2.3-linux-x64.tar.gz');
+    writeFileSync(archive, 'tampered');
+    expect(() => validateDistributionManifest(manifest, { ...base, expect: 'downloaded' })).toThrow(
+      /mismatch/
+    );
+  });
+
   test('validates manifest slices per consumer scope', () => {
     const { rootDir, manifest } = fixture();
     const base = {
@@ -131,6 +163,7 @@ describe('distribution manifest', () => {
       sourceSha: manifest.sourceSha,
       packageVersion: '1.2.3',
       channel: 'test',
+      expect: 'downloaded' as const,
     };
 
     rmSync(join(rootDir, 'dist-npm'), { force: true, recursive: true });
