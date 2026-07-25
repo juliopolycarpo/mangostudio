@@ -23,6 +23,7 @@ right depth quickly instead of scanning a flat list of files.
 2. [`guides/contributor-quickstart.md`](./guides/contributor-quickstart.md)
 3. [`reference/testing.md`](./reference/testing.md)
 4. [`reference/agent-playbooks.md`](./reference/agent-playbooks.md) when you need a feature map
+5. [`reference/labels.md`](./reference/labels.md) before opening a PR or issue
 
 ### Backend or architecture work
 

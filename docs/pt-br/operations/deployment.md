@@ -190,7 +190,7 @@ WantedBy=multi-user.target
 Valide o binário antes do deploy:
 
 ```bash
-PLATFORM=linux-x64 bun run test-build
+PLATFORM=linux-x64 bun run scripts/test-build.ts
 ```
 
 Isso verifica:

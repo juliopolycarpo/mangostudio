@@ -2,6 +2,20 @@ import { describe, expect, test } from 'bun:test';
 
 import { readText } from './support/read-text';
 
+/** Labels applied by hand or by an issue template, so they carry no glob in the labeler config. */
+const MANUAL_ONLY_LABELS = [
+  'type: refactor',
+  'type: perf',
+  'type: docs',
+  'type: security',
+  'type: hardening',
+  'type: chore',
+  'type: bug',
+  'type: feature',
+  'type: migration',
+  'type: question',
+];
+
 /** Slice a labeler config into the body of a single label section. */
 function extractLabelSection(labeler: string, start: string, end: string): string {
   const startIdx = labeler.indexOf(start);
@@ -9,6 +23,30 @@ function extractLabelSection(labeler: string, start: string, end: string): strin
   const bodyStart = startIdx + start.length;
   const endIdx = labeler.indexOf(end, bodyStart);
   return endIdx < 0 ? labeler.slice(bodyStart) : labeler.slice(bodyStart, endIdx);
+}
+
+/** Every label defined by a top-level `"area: x":` / `"type: x":` key in the labeler config. */
+function labelsFromLabeler(labeler: string): string[] {
+  return [...labeler.matchAll(/^"((?:area|type): [^"]+)":/gm)].map(([, label]) => label as string);
+}
+
+/** Every label named by a `- \`area: x\`` / `- \`type: x\`` bullet in the reference doc. */
+function labelsFromDoc(doc: string): string[] {
+  const bullets = doc.split('\n').filter((line) => line.startsWith('- `'));
+  return bullets.flatMap((line) => {
+    // Only the text before the em dash names labels; the rest is glob/description
+    // text. A single bullet may list several, e.g. "type: bug`, `type: feature".
+    // Without a separator, scan the whole bullet rather than dropping its last char.
+    const separator = line.indexOf(' — ');
+    const leading = separator < 0 ? line.slice(2) : line.slice(2, separator);
+    return [...leading.matchAll(/`((?:area|type): [^`]+)`/g)].map(([, label]) => label as string);
+  });
+}
+
+/** Sorted set difference, used to name the drifted labels in the failure message. */
+function missingFrom(expected: string[], actual: string[]): string[] {
+  const present = new Set(actual);
+  return [...new Set(expected)].filter((label) => !present.has(label)).sort();
 }
 
 describe('labeler coverage', () => {
@@ -149,6 +187,31 @@ describe('labeler coverage', () => {
     expect(workflow).toContain('ALL_LABELS: $' + '{{ steps.label.outputs.all-labels }}');
     expect(workflow).not.toContain('listLabelsOnIssue');
     expect(workflow).not.toContain('issues: read');
+  });
+
+  test('keeps the reference doc label set equal to the labeler config', () => {
+    // The taxonomy lives in docs/reference/labels.md; the globs live here. Only
+    // the label *set* is asserted — duplicating glob text would recreate the
+    // manual sync this test exists to remove.
+    const labeler = readText('.github/labeler.yml');
+    const doc = readText('docs/reference/labels.md');
+
+    const documented = labelsFromDoc(doc);
+    const expected = [...labelsFromLabeler(labeler), ...MANUAL_ONLY_LABELS];
+
+    expect(missingFrom(expected, documented)).toEqual([]);
+    expect(missingFrom(documented, expected)).toEqual([]);
+  });
+
+  test('mirrors the reference doc label set in the pt-BR translation', () => {
+    const doc = readText('docs/reference/labels.md');
+    const translated = readText('docs/pt-br/reference/labels.md');
+
+    const documented = labelsFromDoc(doc);
+    const mirrored = labelsFromDoc(translated);
+
+    expect(missingFrom(documented, mirrored)).toEqual([]);
+    expect(missingFrom(mirrored, documented)).toEqual([]);
   });
 
   test('documents that ownership routing belongs in auto-assign, not here', () => {
