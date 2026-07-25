@@ -14,6 +14,7 @@ Abra estes arquivos primeiro:
 - `apps/frontend/src/lib/auth-client.ts`
 - `apps/frontend/src/routes/login.tsx`
 - `apps/frontend/src/routes/signup.tsx`
+- `apps/frontend/src/routes/_authenticated.tsx` (guard de rota no cliente)
 - `tests/browser-smoke/auth-flow.spec.ts`
 
 ## Rotas De API E Contratos
@@ -80,6 +81,7 @@ Abra estes arquivos primeiro:
 
 Abra estes arquivos primeiro:
 
+- `apps/api/src/services/tools/registry.ts` (registro + lookup)
 - `apps/api/src/services/tools/`
 - `apps/api/src/services/tools/builtin/generate-image.ts`
 - `apps/api/src/services/tools/builtin/get-current-datetime.ts`
@@ -89,6 +91,7 @@ Abra estes arquivos primeiro:
 - `apps/api/src/services/providers/core/tool-mapper.ts`
 - `apps/shared/src/types/index.ts`
 - `apps/frontend/src/features/generation/hooks/use-text-generation.ts`
+- `apps/frontend/src/features/chat/components/ToolCallVisuals.tsx` (renderização por tool call)
 - `apps/frontend/src/features/settings/tools/`
 
 ## Attachments
@@ -102,6 +105,18 @@ Abra estes arquivos primeiro:
 - `apps/api/src/services/providers/core/attachment-content.ts`
 - `apps/frontend/src/features/chat/components/MessageParts.tsx`
 
+## Workdir, Git E Contexto Do GitHub
+
+Abra estes arquivos primeiro:
+
+- `apps/api/src/modules/workspaces/`
+- `apps/api/src/modules/git/`
+- `apps/api/src/modules/github/`
+- `apps/shared/src/workspaces/`
+- `apps/shared/src/git/`
+- `apps/shared/src/github/`
+- `apps/frontend/src/features/workspace/`
+
 ## Prompt Rules
 
 Abra estes arquivos primeiro:
@@ -109,7 +124,8 @@ Abra estes arquivos primeiro:
 - `apps/api/src/modules/prompt-rules/application/prompt-composer.ts`
 - `apps/api/src/modules/prompt-rules/application/rule-file-resolver.ts`
 - `apps/api/src/modules/prompt-rules/http/rule-file-routes.ts`
-- `apps/frontend/src/features/settings/prompts/`
+- `apps/frontend/src/components/settings/PromptSettings.tsx`
+- `apps/frontend/src/components/settings/RuleFileCard.tsx`
 
 ## Settings (App, Provider, Tool)
 
@@ -120,6 +136,8 @@ Abra estes arquivos primeiro:
 - `apps/api/src/modules/provider-settings/http/provider-settings-routes.ts`
 - `apps/api/src/modules/tool-settings/http/tool-settings-routes.ts`
 - `apps/api/src/services/tools/settings-policy.ts`
+- `apps/frontend/src/routes/_authenticated/settings/` (árvore de rotas de settings)
+- `apps/frontend/src/components/settings/` (painéis compartilhados + `SettingsTabs.tsx`)
 - `apps/frontend/src/features/settings/app/`
 - `apps/frontend/src/features/settings/providers/`
 - `apps/frontend/src/features/settings/tools/`
@@ -142,7 +160,6 @@ Abra estes arquivos primeiro:
 
 - `apps/api/src/db/database.ts`
 - `apps/api/src/db/types.ts`
-- `apps/api/src/db/row-types.ts`
 - `apps/api/src/db/serializers.ts`
 - `apps/api/src/db/migrations/`
 - o serviço ou rota dono da funcionalidade
@@ -176,8 +193,39 @@ Abra estes arquivos primeiro:
 Abra estes arquivos primeiro:
 
 - `apps/api/src/lib/config.ts`
+- `apps/api/src/lib/runtime-paths.ts`
 - `apps/api/src/index.ts`
 - `.mango/config.toml.example`
 - `.mango/.env.example`
 - `scripts/build.ts`
 - `scripts/test-build.ts` (binary smoke)
+
+## CLI E Ciclo De Vida Do Servidor
+
+Cobre `serve`, `status`, `stop`, `killserver` e `doctor`.
+
+Abra estes arquivos primeiro:
+
+- `apps/api/src/index.ts` (entrada da CLI)
+- `apps/api/src/cli/` (parsing de argumentos, dispatch, comandos, checagens do doctor)
+- `apps/api/src/server/start-server.ts`
+- `apps/api/src/lib/server-state.ts` (estado de PID e porta)
+- `apps/api/src/lib/mango-paths.ts`
+- Referência: `cli.md`
+
+## Changelog E Release
+
+Abra estes arquivos primeiro:
+
+- `cliff.toml` (configuração do git-cliff; `CHANGELOG.md` é gerado, nunca editado à mão)
+- `scripts/changelog.ts`
+- `scripts/lib/changelog.ts`
+- `scripts/lib/release-version.ts`
+- `scripts/lib/prepare-release.ts`
+- `scripts/release/prepare-release.ts`
+- `scripts/release/pack-npm.ts`
+- `scripts/check-versions.ts`
+- `packages/cli/`
+- `packages/cargo-shim/`
+- `.github/workflows/pr-qa-report.yml`, `.github/workflows/release.yml`, `.github/workflows/cargo-shim.yml`
+- Referência: `releasing.md`

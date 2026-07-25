@@ -167,14 +167,14 @@ O DeepSeek usa estratégia de continuação `turn-local`. Regras principais:
 
 ## Modos Comuns De Falha E Onde Depurar
 
-| Sintoma                                     | Causa provável                               | Onde olhar                                                                     |
-| ------------------------------------------- | -------------------------------------------- | ------------------------------------------------------------------------------ |
-| Todo turno começa com `degrade_to_replay`   | `chats.lastProviderState` é nulo ou inválido | Verifique a linha do chat no DB e logs `[continuation][clear]`                 |
-| `cursor_expired` no meio do turno com tools | Cursor expirou durante execução de tools     | Handler de erro de cursor em `responses-stream.ts` ou `interactions-stream.ts` |
-| Mismatch de provedor em toda troca          | `lastProviderState` guarda provedor antigo   | Esperado: o primeiro turno após trocar sempre degrada                          |
-| Modelo errado foi chamado                   | `resolve-model.ts` escolheu outro modelo     | Verifique `modelId` no topo de `stream-text-turn.ts`                           |
-| Replay envia mensagens erradas              | `replay-builder.ts` formatou incorretamente  | Testes unitários em `tests/unit/services/providers/replay-builder.test.ts`     |
-| `stateless-loop` vazando entre turnos       | `loopMessages` persistido como durável       | Filtro `decideTurnPersistence`; deve retornar `null` para modos stateless      |
+| Sintoma                                     | Causa provável                               | Onde olhar                                                                          |
+| ------------------------------------------- | -------------------------------------------- | ----------------------------------------------------------------------------------- |
+| Todo turno começa com `degrade_to_replay`   | `chats.lastProviderState` é nulo ou inválido | Verifique a linha do chat no DB e logs `[continuation][clear]`                      |
+| `cursor_expired` no meio do turno com tools | Cursor expirou durante execução de tools     | Handler de erro de cursor em `responses-stream.ts` ou `interactions-stream.ts`      |
+| Mismatch de provedor em toda troca          | `lastProviderState` guarda provedor antigo   | Esperado: o primeiro turno após trocar sempre degrada                               |
+| Modelo errado foi chamado                   | `resolve-model.ts` escolheu outro modelo     | Verifique `modelId` no topo de `stream-text-turn.ts`                                |
+| Replay envia mensagens erradas              | `replay-builder.ts` formatou incorretamente  | Testes unitários em `apps/api/tests/unit/services/providers/replay-builder.test.ts` |
+| `stateless-loop` vazando entre turnos       | `loopMessages` persistido como durável       | Filtro `decideTurnPersistence`; deve retornar `null` para modos stateless           |
 
 ---
 
