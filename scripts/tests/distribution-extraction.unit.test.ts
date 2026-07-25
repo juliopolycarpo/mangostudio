@@ -6,7 +6,6 @@ import {
   readdirSync,
   readFileSync,
   rmSync,
-  statSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -39,9 +38,9 @@ function stageTarget(sourceDir: string, binary: string): void {
 function fileSnapshot(rootDir: string): Record<string, string> {
   const snapshot: Record<string, string> = {};
   const visit = (dir: string): void => {
-    for (const entry of readdirSync(dir)) {
-      const path = join(dir, entry);
-      if (statSync(path).isDirectory()) visit(path);
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const path = join(dir, entry.name);
+      if (entry.isDirectory()) visit(path);
       else snapshot[relative(rootDir, path).replaceAll('\\', '/')] = readFileSync(path, 'utf8');
     }
   };
