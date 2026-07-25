@@ -15,12 +15,29 @@ lockstep and the pre-tag changelog, builds every artifact, and publishes each
 channel independently. The tag ships its own `CHANGELOG.md` — nothing writes back
 to `main` after the release.
 
-| Secret                      | Used by                                                      | Scope                                                                                                        |
-| --------------------------- | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------ |
-| `NPM_TOKEN`                 | `npm-publish`, `npm-canary`                                  | Publish rights on `mangostudio` and `@mangostudio/cli-*` (validated in those jobs only)                      |
-| `DIST_REPOS_TOKEN`          | `homebrew`, `scoop`                                          | Fine-grained PAT with contents read/write on `juliopolycarpo/homebrew-tap` and `juliopolycarpo/scoop-bucket` |
-| `CARGO_REGISTRY_TOKEN`      | `cargo-publish` (optional)                                   | Legacy crates.io token used only when `workflow_dispatch` sets `allow_legacy_cargo_token=true`               |
-| *(built-in `GITHUB_TOKEN`)* | `github-release`, `docker`, the canary channel, attestations | No extra setup — tag releases grant `packages: write` for GHCR and `id-token: write` for crates.io OIDC auth |
+| Secret                      | Used by                                                      | Scope                                                                                                         |
+| --------------------------- | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------- |
+| `NPM_TOKEN`                 | `npm-publish` (env), `npm-canary` (repo)                     | `release` environment secret for stable publish; repository secret kept for canary (validated in those jobs)  |
+| `DIST_REPOS_TOKEN`          | `homebrew`, `scoop`                                          | `release` environment secret — fine-grained PAT with contents read/write on the Homebrew tap and Scoop bucket |
+| `CARGO_REGISTRY_TOKEN`      | `cargo-publish` (optional)                                   | Legacy crates.io token used only when `workflow_dispatch` sets `allow_legacy_cargo_token=true`                |
+| *(built-in `GITHUB_TOKEN`)* | `github-release`, `docker`, the canary channel, attestations | No extra setup — tag releases grant `packages: write` for GHCR and `id-token: write` for crates.io OIDC auth  |
+
+### `release` environment
+
+Stable publish credentials live in the GitHub Environment named `release`, not
+as free-floating repository secrets:
+
+- **Deployment branches and tags:** restricted to tags matching `v*.*.*`.
+- **Required reviewers:** none — a tag push still releases unattended.
+- **Jobs that declare it:** `github-release`, `docker`, `npm-publish`,
+  `homebrew`, `scoop`, and `cargo-publish`. Adding a new publish channel means
+  joining this environment, not adding a repository secret.
+- **Canary is excluded:** `.github/workflows/canary.yml` publishes on every
+  green push to `main`, which the tag rule would block. It keeps using the
+  repository-scoped `NPM_TOKEN`.
+- **Manual dispatch:** because the environment is tag-restricted, a
+  `workflow_dispatch` run of `release.yml` must target a `v*.*.*` tag ref
+  (`gh workflow run release.yml --ref v0.2.0`), not a branch.
 
 ### One-time setup checklist
 
@@ -29,13 +46,12 @@ Complete these once per fork or org before the first tag push:
 1. Create the shared Homebrew tap [`juliopolycarpo/homebrew-tap`](https://github.com/juliopolycarpo/homebrew-tap) with a `Formula/` directory.
 2. Create the shared Scoop bucket [`juliopolycarpo/scoop-bucket`](https://github.com/juliopolycarpo/scoop-bucket) with a `bucket/` directory.
 3. Reserve the `mangostudio` crate name on [crates.io](https://crates.io) and generate an API token only if you need the temporary legacy fallback.
-4. Configure crates.io Trusted Publishing for the existing `mangostudio` crate: crate **Settings -> Trusted Publishing -> Add -> GitHub**, repository owner `juliopolycarpo`, repository name `mangostudio`, workflow filename `release.yml`, and no environment unless the release job is later moved behind a GitHub environment.
-5. Add the channel secrets (`NPM_TOKEN`, `DIST_REPOS_TOKEN`) to this repository. Keep `CARGO_REGISTRY_TOKEN` only while you still need the explicit `allow_legacy_cargo_token` dispatch escape hatch.
+4. Configure crates.io Trusted Publishing for the existing `mangostudio` crate: crate **Settings -> Trusted Publishing -> Add -> GitHub**, repository owner `juliopolycarpo`, repository name `mangostudio`, workflow filename `release.yml`, and leave the environment field empty. The `cargo-publish` job declares `environment: release`, but crates.io configs with no environment still match — do not set an environment on the crates.io side unless you intentionally want to require one.
+5. Create the `release` GitHub Environment (tag rule `v*.*.*`, no required reviewers) and add `NPM_TOKEN` and `DIST_REPOS_TOKEN` as **environment** secrets. Keep a repository-scoped `NPM_TOKEN` for canary. Keep `CARGO_REGISTRY_TOKEN` only while you still need the explicit `allow_legacy_cargo_token` dispatch escape hatch. After a green release through the environment, delete the repository-level `DIST_REPOS_TOKEN`.
 6. After a release proves `cargo-publish` minted a Trusted Publishing token successfully, revoke and delete `CARGO_REGISTRY_TOKEN`. Do not leave a long-lived crates.io write token in the repository once OIDC is proven.
 7. Configure npm Trusted Publishing for `mangostudio` and each `@mangostudio/cli-*` package (npm package **Settings -> Trusted Publisher**) against `.github/workflows/release.yml` / `.github/workflows/canary.yml` once you are ready to drop `NPM_TOKEN`. Until that cutover, token auth still requires provenance (`--provenance-policy required`).
-8. Optionally protect a GitHub Environment used by stable release publish jobs, and require tag/ruleset review for `v*` tags. These are repository settings — apply them only with explicit maintainer confirmation; they are not created by the workflow YAML.
-9. After the first GHCR push, set the `ghcr.io/juliopolycarpo/mangostudio` package visibility to **public** in GitHub package settings.
-10. No branch-protection tuning or extra token is required for the changelog: `CHANGELOG.md` lands on `main` in the release-prep commit (`bun run release:prepare`) **before** the tag is pushed, and the release workflow only verifies it is there.
+8. After the first GHCR push, set the `ghcr.io/juliopolycarpo/mangostudio` package visibility to **public** in GitHub package settings.
+9. No branch-protection tuning or extra token is required for the changelog: `CHANGELOG.md` lands on `main` in the release-prep commit (`bun run release:prepare`) **before** the tag is pushed, and the release workflow only verifies it is there.
 
 ## Release asset naming
 
@@ -405,7 +421,8 @@ One-time setup (already done; documented for future projects):
 1. Create the shared tap repo: `gh repo create juliopolycarpo/homebrew-tap --public`,
    seeded with a `README.md` and a `Formula/` directory.
 2. Create a fine-grained PAT with **contents read/write on the tap repo** (and the
-   Scoop bucket below) and save it as the **`DIST_REPOS_TOKEN`** repo secret.
+   Scoop bucket below) and save it as the **`DIST_REPOS_TOKEN`** secret on the
+   `release` GitHub Environment.
 
 ## Scoop bucket
 
@@ -494,12 +511,14 @@ Design notes:
 
 The [One-shot contract](#one-shot-contract) table lists every secret. In short:
 
-- **`NPM_TOKEN`** repo secret with publish rights to `mangostudio` and the
-  `@mangostudio/cli-*` platform packages (checked in `npm-publish` / `npm-canary`).
-- **`DIST_REPOS_TOKEN`** repo secret: fine-grained PAT with contents read/write
-  on `juliopolycarpo/homebrew-tap` (see [Homebrew tap](#homebrew-tap)) and
-  `juliopolycarpo/scoop-bucket` (see [Scoop bucket](#scoop-bucket)), checked in
-  those jobs only.
+- **`NPM_TOKEN`** — `release` environment secret with publish rights to
+  `mangostudio` and the `@mangostudio/cli-*` platform packages (checked in
+  `npm-publish`), plus a repository-scoped copy for `npm-canary`.
+- **`DIST_REPOS_TOKEN`** — `release` environment secret: fine-grained PAT with
+  contents read/write on `juliopolycarpo/homebrew-tap` (see
+  [Homebrew tap](#homebrew-tap)) and `juliopolycarpo/scoop-bucket` (see
+  [Scoop bucket](#scoop-bucket)), checked in those jobs only. Delete any
+  leftover repository-level copy after a green release through the environment.
 - **`CARGO_REGISTRY_TOKEN`** optional legacy secret: crates.io API token with
   `publish-new` + `publish-update` scope, used only when a maintainer sets
   `allow_legacy_cargo_token=true` on `workflow_dispatch`. Prefer Trusted
