@@ -284,7 +284,10 @@ describe('release workflow binary gate', () => {
 
     expect(workflow).toContain('  verify-build:');
     expect(workflow).toContain('name: Verify built Linux binary');
-    expect(workflow).toContain('permissions:\n      contents: read');
+    expect(workflow).toContain(
+      'attestations: read # fetch build provenance for gh attestation verify'
+    );
+    expect(workflow).toContain('verify-attestation: "true"');
     expect(workflow).toContain(
       `archive="release-assets/mangostudio-${versionVar}-linux-x64.tar.gz"`
     );

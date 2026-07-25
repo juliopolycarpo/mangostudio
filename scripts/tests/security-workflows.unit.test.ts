@@ -52,4 +52,22 @@ describe('security workflows', () => {
       expect(doc).toContain('Dependency Review');
     }
   });
+
+  test('publish-path distribution downloads verify provenance; PR-path downloads do not', () => {
+    for (const file of ['.github/workflows/release.yml', '.github/workflows/canary.yml']) {
+      const uses = readText(file).split('uses: ./.github/actions/download-distribution').slice(1);
+      expect(uses.length, file).toBeGreaterThan(0);
+      for (const call of uses) {
+        expect(call.slice(0, 400), file).toContain('verify-attestation: "true"');
+      }
+    }
+    const smoke = readText('.github/workflows/smoke-binary.yml');
+    expect(smoke).not.toContain('verify-attestation');
+  });
+
+  test('attestation is produced for exactly the events that are later verified', () => {
+    expect(readText('.github/workflows/distribution-build.yml')).toContain(
+      "if: github.event_name != 'pull_request'"
+    );
+  });
 });
