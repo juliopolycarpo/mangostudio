@@ -1,6 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 
 import { readText } from './support/read-text';
+import { extractJobBlocks, extractStepBlocks } from './support/workflow-blocks';
+
+/** Every step of every job in a workflow, as isolated blocks. */
+function workflowSteps(workflow: string): string[] {
+  return extractJobBlocks(workflow).flatMap(({ block }) => extractStepBlocks(block));
+}
 
 function expectWorkflowHasPinnedAction(workflow: string, action: string): void {
   const escapedAction = action.replaceAll('/', String.raw`\/`);
@@ -51,5 +57,30 @@ describe('security workflows', () => {
       expect(doc).toContain('Code scanning results / CodeQL');
       expect(doc).toContain('Dependency Review');
     }
+  });
+
+  test('publish-path distribution downloads verify provenance; PR-path downloads do not', () => {
+    for (const file of ['.github/workflows/release.yml', '.github/workflows/canary.yml']) {
+      // Per step, never a byte window around the `uses:` line: a fixed slice
+      // straddles neighbouring steps, so a call missing the flag could be
+      // satisfied by the next call's text.
+      const downloads = workflowSteps(readText(file)).filter((step) =>
+        step.includes('uses: ./.github/actions/download-distribution')
+      );
+      expect(downloads.length, file).toBeGreaterThan(0);
+      for (const step of downloads) {
+        expect(step, file).toContain('verify-attestation: "true"');
+      }
+    }
+    const smoke = readText('.github/workflows/smoke-binary.yml');
+    expect(smoke).not.toContain('verify-attestation');
+  });
+
+  test('attestation is produced for exactly the events that are later verified', () => {
+    const attest = workflowSteps(readText('.github/workflows/distribution-build.yml')).filter(
+      (step) => step.includes('uses: actions/attest-build-provenance@')
+    );
+    expect(attest).toHaveLength(1);
+    expect(attest[0]).toContain("if: github.event_name != 'pull_request'");
   });
 });

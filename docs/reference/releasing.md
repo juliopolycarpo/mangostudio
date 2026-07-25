@@ -188,6 +188,21 @@ cancels superseded in-flight runs so the rolling pre-release and npm dist-tag
 always track the newest green commit; per-commit npm versions are unique, so a
 cancelled run never leaves a conflicting half-publish.
 
+### Distribution artifact trust
+
+`distribution-build.yml` attests bundles on every build except pull requests
+(attestation needs `id-token: write`, which fork PRs cannot use, and PR builds
+would pollute the attestation log). PR CI still downloads those bundles for
+binary smoke tests, but only within the run that produced them — checksum
+verification against `distribution-manifest.json` detects corruption, not
+substitution, because the manifest ships inside the same artifact.
+
+Release and canary publish jobs opt into `verify-attestation` on
+`download-distribution`, which runs `gh attestation verify` on the bundle
+**before** extraction. That makes build provenance load-bearing on every path
+that publishes to npm, GitHub Releases, Homebrew, or Scoop. Manifest checksum
+validation still runs after extract.
+
 Caveats:
 
 - `ghcr.io/juliopolycarpo/mangostudio:canary` and
