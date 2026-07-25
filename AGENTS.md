@@ -8,15 +8,6 @@ Workspace-level `AGENTS.md` files must stay short and contain only workspace-spe
 1 - **Always assume/use**: `bun` or `bunx`
 2 - **Never use**: `npm`, `npx`, `pnpm` or `yarn`
 
-## Repo Map
-
-- `apps/frontend/` — React 19 + Vite 8 UI with TanStack Router, TanStack Query, Better Auth client integration, and the local UI system.
-- `apps/api/` — Elysia API with Better Auth, Kysely + SQLite persistence, connector management, and provider integrations.
-- `apps/api/src/modules/` — Domain modules organized as `application/domain/http/infrastructure` layers (DDD-inspired).
-- `apps/shared/` — shared contracts, domain types, i18n dictionaries, and framework-agnostic helpers.
-- `tests/browser-smoke/` — Playwright smoke coverage for the auth flow.
-- `.mango/` — example config, env overrides, local runtime artifacts, and standalone build output.
-
 ## Working Loop
 
 1. Read this file, then only the relevant workspace `AGENTS.md`.
@@ -27,8 +18,6 @@ Workspace-level `AGENTS.md` files must stay short and contain only workspace-spe
 
 Useful docs:
 
-- `README.md` — product and runtime overview
-- `package.json` — root scripts
 - `docs/reference/testing.md` — test taxonomy and harness rules
 - `docs/reference/agent-playbooks.md` — detailed file maps by feature area
 - `docs/reference/releasing.md` — changelog (`bun run changelog`) and release pipeline
