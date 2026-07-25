@@ -1,4 +1,4 @@
-import { readdirSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { ROOT_DIR } from '../../lib/config';
@@ -11,11 +11,21 @@ export function workflowFiles(): string[] {
     .map((file) => `.github/workflows/${file}`);
 }
 
-/** Repo-relative paths of every composite action under `.github/actions/`. */
+/**
+ * Repo-relative path of one composite action's manifest. GitHub accepts either
+ * spelling, so probe `action.yaml` before falling back to `action.yml` — naming
+ * only the latter turns a legitimately named action into a missing-file crash.
+ */
+function actionManifest(actionName: string): string {
+  const yaml = `.github/actions/${actionName}/action.yaml`;
+  return existsSync(join(ROOT_DIR, yaml)) ? yaml : `.github/actions/${actionName}/action.yml`;
+}
+
+/** Repo-relative manifest paths of every composite action under `.github/actions/`. */
 export function compositeActionFiles(): string[] {
   return readdirSync(join(ROOT_DIR, '.github', 'actions'), { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
-    .map((entry) => `.github/actions/${entry.name}/action.yml`);
+    .map((entry) => actionManifest(entry.name));
 }
 
 /**

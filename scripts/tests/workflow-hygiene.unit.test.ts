@@ -25,11 +25,25 @@ const CREDENTIAL_ALLOWLIST = new Set([
   '.github/workflows/release.yml::prepare',
 ]);
 
+// A step's `uses: actions/checkout@<sha>` line, in either the `- uses:` or the
+// `name:`-first form.
+const CHECKOUT_USES = /^\s*(?:-\s+)?uses:\s*actions\/checkout@/m;
+
+// The setting as a real YAML key on its own line, never as free text: a step
+// whose comment merely mentions `persist-credentials: false` while omitting the
+// key would satisfy a substring match and inherit the token anyway.
+function persistCredentials(value: 'false' | 'true'): RegExp {
+  return new RegExp(`^\\s+persist-credentials: ${value}\\s*(?:#.*)?$`, 'm');
+}
+
 /** Every `actions/checkout` step block of a job, in declaration order. */
 function checkoutSteps(jobBlock: string): string[] {
-  return extractStepBlocks(jobBlock).filter((step) =>
-    /^\s*(?:-\s+)?uses:\s*actions\/checkout@/m.test(step)
-  );
+  return extractStepBlocks(jobBlock).filter((step) => CHECKOUT_USES.test(step));
+}
+
+/** Every `actions/checkout` line in a file, however the job or step is shaped. */
+function checkoutLineCount(text: string): number {
+  return text.split('\n').filter((line) => CHECKOUT_USES.test(line)).length;
 }
 
 describe('workflow hygiene', () => {
@@ -59,16 +73,28 @@ describe('workflow hygiene', () => {
   test('checkouts drop the Actions token unless the job does git network work', () => {
     let asserted = 0;
     for (const file of workflowFiles()) {
-      for (const { job, block } of extractJobBlocks(readText(file))) {
+      const text = readText(file);
+      let walked = 0;
+      for (const { job, block } of extractJobBlocks(text)) {
+        const steps = checkoutSteps(block);
+        walked += steps.length;
         if (CREDENTIAL_ALLOWLIST.has(`${file}::${job}`)) continue;
         // Per step, never a byte window around the `uses:` line: a fixed slice
         // straddles neighbouring steps, so a checkout missing the setting could
         // be satisfied by the next one's text.
-        for (const step of checkoutSteps(block)) {
-          expect(step, `${file} → ${job}`).toContain('persist-credentials: false');
+        for (const step of steps) {
+          expect(step, `${file} → ${job}`).toMatch(persistCredentials('false'));
           asserted += 1;
         }
       }
+      // The job and step walks key off exact indentation. A workflow written
+      // outside that shape yields zero steps, so its checkouts would be exempt
+      // from the policy while the suite stayed green — the omission this test
+      // exists to catch. Per file, because one unreachable workflow cannot move
+      // a repo-wide total off zero.
+      expect(walked, `${file}: checkouts the step walk never reached`).toBe(
+        checkoutLineCount(text)
+      );
     }
     expect(asserted).toBeGreaterThan(0);
   });
@@ -84,7 +110,7 @@ describe('workflow hygiene', () => {
       // silently exempting nothing.
       expect(steps.length, entry).toBeGreaterThan(0);
       for (const step of steps) {
-        expect(step, entry).toContain('persist-credentials: true');
+        expect(step, entry).toMatch(persistCredentials('true'));
       }
     }
   });
@@ -96,7 +122,7 @@ describe('workflow hygiene', () => {
     const files = compositeActionFiles();
     expect(files.length).toBeGreaterThan(0);
     for (const file of files) {
-      expect(readText(file), file).not.toContain('uses: actions/checkout@');
+      expect(readText(file), file).not.toMatch(CHECKOUT_USES);
     }
   });
 });
