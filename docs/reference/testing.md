@@ -429,13 +429,16 @@ that produces or consumes it.
 families (`lint-tools`, `playwright`) set `exact-restore: true` so a loose
 prefix hit cannot mark `cache-restored` and skip a required install —
 Playwright browsers and checksum-pinned lint tools are unusable across
-versions. `cache-restored` is therefore only safe to gate install steps when
-the call site opts into exact restore.
+versions. Only `mode: restore` uses `actions/cache/restore`, which is the sole
+mode that reports a trusted-`main` match; `restore-save` sees a primary-key hit
+only. `cache-restored` is therefore only safe to gate an install step when the
+call site opts into both exact restore and `mode: restore` (today: Playwright).
 
 The binary and Docker smoke matrix (`smoke-binary.yml`) restores no caches: it
 only pins Bun and runs dependency-free release scripts. Manual `rebuild` dispatches
 still use `setup-mango` because they compile inside the job. The QA metrics job
-consumes the frontend dist artifact and does not restore any cache family.
+consumes the frontend dist artifact and restores no family beyond the Bun
+install cache that `setup-mango` brings with it.
 
 `CI_CACHE_EPOCH` is the repository-wide emergency invalidation lever. It is an
 Actions repository variable with a documented `v1` fallback, passed explicitly
