@@ -86,6 +86,8 @@ unprivileged inside CI (`ci.yml`); publishing runs in the trusted
 - `collect.ts` + `collect/*` — merge the test fragment with LoC, bundle,
   dependency, duplication, and tooling metrics into the versioned `qa-metrics`
   envelope (`metrics-envelope.ts`), uploaded for PR heads and main baselines.
+  In CI, bundle stats measure the frontend `dist` artifact from the Build job
+  (`QA_FRONTEND_DIST`); local runs build the frontend when that env var is unset.
 - `metrics-envelope.ts` — TypeBox schema + provenance validation the publisher
   applies to untrusted artifact JSON (size cap, shape, repository/SHA/PR match).
 - `render-report.ts` + `report-document.ts` + `render/*` + `commit-log.ts` —
