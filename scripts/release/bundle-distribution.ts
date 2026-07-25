@@ -16,6 +16,12 @@ import { error, header, success } from '../lib/runner';
 
 const BUNDLE_DIR = join(ROOT_DIR, '.distribution-bundles');
 
+const PACKAGED_SCOPES = {
+  checksums: [DISTRIBUTION_MANIFEST_FILE, 'release-assets/SHA256SUMS'],
+  assets: [DISTRIBUTION_MANIFEST_FILE, 'release-assets'],
+  npm: [DISTRIBUTION_MANIFEST_FILE, 'dist-npm'],
+} as const;
+
 async function createBundle(path: string, members: readonly string[]): Promise<void> {
   const result = await captureCommand(['tar', '-czf', path, ...members], { cwd: ROOT_DIR });
   if (result.exitCode !== 0) {
@@ -41,14 +47,27 @@ async function main(): Promise<void> {
   rmSync(BUNDLE_DIR, { force: true, recursive: true });
   mkdirSync(BUNDLE_DIR, { recursive: true });
 
-  const packagedPath = join(BUNDLE_DIR, 'packaged.tar.gz');
-  await createBundle(packagedPath, [DISTRIBUTION_MANIFEST_FILE, 'release-assets', 'dist-npm']);
-  const packagedArtifact = distributionArtifactName(
-    'packaged',
-    manifest.sourceSha,
-    manifest.packageVersion,
-    await digest(packagedPath)
+  const scopedEntries = await mapWithConcurrency(
+    Object.entries(PACKAGED_SCOPES),
+    archiveConcurrency(),
+    async ([scope, members]) => {
+      const bundlePath = join(BUNDLE_DIR, `${scope}.tar.gz`);
+      await createBundle(bundlePath, members);
+      return [
+        scope,
+        distributionArtifactName(
+          scope,
+          manifest.sourceSha,
+          manifest.packageVersion,
+          await digest(bundlePath)
+        ),
+      ] as const;
+    }
   );
+  const scopedArtifacts = Object.fromEntries(scopedEntries) as Record<
+    keyof typeof PACKAGED_SCOPES,
+    string
+  >;
 
   const bundles = await mapWithConcurrency(
     manifest.targets,
@@ -75,7 +94,11 @@ async function main(): Promise<void> {
   const targetArtifacts = Object.fromEntries(bundles);
 
   if (process.env.GITHUB_OUTPUT) {
-    appendFileSync(process.env.GITHUB_OUTPUT, `packaged_artifact=${packagedArtifact}\n`);
+    appendFileSync(process.env.GITHUB_OUTPUT, `checksums_artifact=${scopedArtifacts.checksums}\n`);
+    appendFileSync(process.env.GITHUB_OUTPUT, `assets_artifact=${scopedArtifacts.assets}\n`);
+    appendFileSync(process.env.GITHUB_OUTPUT, `npm_artifact=${scopedArtifacts.npm}\n`);
+    // Transitional alias of assets_artifact; remove after one transition cycle.
+    appendFileSync(process.env.GITHUB_OUTPUT, `packaged_artifact=${scopedArtifacts.assets}\n`);
     appendFileSync(
       process.env.GITHUB_OUTPUT,
       `target_artifacts=${JSON.stringify(targetArtifacts)}\n`

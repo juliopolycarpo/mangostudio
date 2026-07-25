@@ -27,8 +27,17 @@ on:
         description: Source commit embedded into the distribution.
         value: ${{ inputs.source_sha }}
       packaged_artifact:
-        description: Content-addressed release assets and npm distribution artifact.
+        description: Transitional alias of assets_artifact; remove after one transition cycle.
         value: ${{ jobs.build.outputs.packaged_artifact }}
+      checksums_artifact:
+        description: Content-addressed checksums-only distribution artifact.
+        value: ${{ jobs.build.outputs.checksums_artifact }}
+      assets_artifact:
+        description: Content-addressed release assets distribution artifact.
+        value: ${{ jobs.build.outputs.assets_artifact }}
+      npm_artifact:
+        description: Content-addressed npm distribution artifact.
+        value: ${{ jobs.build.outputs.npm_artifact }}
       target_artifacts:
         description: JSON map of target IDs to content-addressed artifact names.
         value: ${{ jobs.build.outputs.target_artifacts }}
@@ -47,6 +56,9 @@ jobs:
       attestations: write # attach provenance to the bundle digests
     outputs:
       packaged_artifact: ${{ steps.bundle.outputs.packaged_artifact }}
+      checksums_artifact: ${{ steps.bundle.outputs.checksums_artifact }}
+      assets_artifact: ${{ steps.bundle.outputs.assets_artifact }}
+      npm_artifact: ${{ steps.bundle.outputs.npm_artifact }}
       target_artifacts: ${{ steps.bundle.outputs.target_artifacts }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -97,16 +109,34 @@ jobs:
         name: Create content-addressed bundles
         run: bun ./scripts/release/bundle-distribution.ts
 
-      - name: Upload packaged distribution
+      - name: Upload checksums distribution
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: ${{ steps.bundle.outputs.packaged_artifact }}
-          path: .distribution-bundles/packaged.tar.gz
+          name: ${{ steps.bundle.outputs.checksums_artifact }}
+          path: .distribution-bundles/checksums.tar.gz
+          retention-days: ${{ inputs.retention_days }}
+          overwrite: false
+          compression-level: 0
+
+      - name: Upload assets distribution
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ steps.bundle.outputs.assets_artifact }}
+          path: .distribution-bundles/assets.tar.gz
           retention-days: ${{ inputs.retention_days }}
           overwrite: false
           # Payload is already gzip: the artifact zip re-Deflates it for ~0% gain
-          # at a full single-threaded CPU pass, measured at 57s across the nine
+          # at a full single-threaded CPU pass, measured at 57s across the eleven
           # uploads. The per-target uploads below are level 0 for the same reason.
+          compression-level: 0
+
+      - name: Upload npm distribution
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ steps.bundle.outputs.npm_artifact }}
+          path: .distribution-bundles/npm.tar.gz
+          retention-days: ${{ inputs.retention_days }}
+          overwrite: false
           compression-level: 0
 
       - name: Upload linux-x64 target
