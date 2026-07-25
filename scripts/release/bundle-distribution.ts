@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
 import { createHash } from 'node:crypto';
-import { appendFileSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { appendFileSync, createReadStream, mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { ROOT_DIR } from '../lib/config';
@@ -23,8 +23,14 @@ async function createBundle(path: string, members: readonly string[]): Promise<v
   }
 }
 
-function digest(path: string): string {
-  return createHash('sha256').update(readFileSync(path)).digest('hex');
+// Streamed rather than readFileSync: bundles are hashed concurrently, so buffering
+// each whole tarball would multiply peak memory by the concurrency limit.
+async function digest(path: string): Promise<string> {
+  const hash = createHash('sha256');
+  for await (const chunk of createReadStream(path)) {
+    hash.update(chunk);
+  }
+  return hash.digest('hex');
 }
 
 async function main(): Promise<void> {
@@ -41,7 +47,7 @@ async function main(): Promise<void> {
     'packaged',
     manifest.sourceSha,
     manifest.packageVersion,
-    digest(packagedPath)
+    await digest(packagedPath)
   );
 
   const bundles = await mapWithConcurrency(
@@ -61,7 +67,7 @@ async function main(): Promise<void> {
           target.id,
           manifest.sourceSha,
           manifest.packageVersion,
-          digest(bundlePath)
+          await digest(bundlePath)
         ),
       ] as const;
     }
