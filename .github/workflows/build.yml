@@ -33,3 +33,12 @@ jobs:
 
       - name: Build frontend and API
         run: bun run build --all
+
+      # Handoff to the qa-metrics job in the same run; nothing consumes it
+      # afterwards, so the shortest retention GitHub allows is enough.
+      - name: Upload frontend dist for QA metrics
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: frontend-dist
+          path: apps/frontend/dist
+          retention-days: 1

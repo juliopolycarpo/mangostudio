@@ -18,6 +18,7 @@ import { readText } from './support/read-text';
 const COLLECTION_WORKFLOWS = [
   '.github/workflows/ci.yml',
   '.github/workflows/test.yml',
+  '.github/workflows/build.yml',
   '.github/workflows/qa-metrics.yml',
 ] as const;
 
@@ -53,14 +54,26 @@ describe('unprivileged collection side', () => {
     expect(workflow).toContain("github.event_name == 'push' && 90 || 7");
   });
 
-  test('ci.yml collects metrics only for PRs and main pushes, after the one test pass', () => {
+  test('ci.yml collects metrics only for PRs and main pushes, after test and build', () => {
     const workflow = readText('.github/workflows/ci.yml');
 
     expect(workflow).toContain('uses: ./.github/workflows/qa-metrics.yml');
-    expect(workflow).toMatch(/qa-metrics:\n(.*\n)*?\s+needs: \[test\]/);
+    expect(workflow).toMatch(/qa-metrics:\n(.*\n)*?\s+needs: \[test, build\]/);
     expect(workflow).toContain(
       "!cancelled() && (github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main'))"
     );
+  });
+
+  test('qa-metrics measures the build job artifact rather than rebuilding', () => {
+    const build = readText('.github/workflows/build.yml');
+    const qaMetrics = readText('.github/workflows/qa-metrics.yml');
+    const ci = readText('.github/workflows/ci.yml');
+
+    expect(build).toContain('name: frontend-dist');
+    expect(qaMetrics).toContain('name: frontend-dist');
+    expect(qaMetrics).toContain('QA_FRONTEND_DIST: ./frontend-dist');
+    expect(qaMetrics).not.toContain('cache-turbo');
+    expect(ci).toContain('needs: [test, build]');
   });
 });
 
