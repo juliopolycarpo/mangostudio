@@ -12,7 +12,6 @@ import {
 import { archiveReleaseAssets } from '../release/archive-assets';
 
 let tempDirs: string[] = [];
-let previousArchiveConcurrency: string | undefined;
 
 const makeTempDir = (): string => {
   const dir = mkdtempSync(join(tmpdir(), 'mangostudio-release-assets-'));
@@ -26,19 +25,22 @@ afterEach(() => {
   }
 
   tempDirs = [];
-
-  if (previousArchiveConcurrency === undefined) {
-    delete process.env.MANGO_ARCHIVE_CONCURRENCY;
-  } else {
-    process.env.MANGO_ARCHIVE_CONCURRENCY = previousArchiveConcurrency;
-  }
-  previousArchiveConcurrency = undefined;
 });
 
-const withArchiveConcurrency = (value: string, run: () => Promise<void>): Promise<void> => {
-  previousArchiveConcurrency = process.env.MANGO_ARCHIVE_CONCURRENCY;
+// Save/restore per call (not via shared state) so nested or repeated use inside a
+// single test cannot leak the overridden value into later tests.
+const withArchiveConcurrency = async (value: string, run: () => Promise<void>): Promise<void> => {
+  const previous = process.env.MANGO_ARCHIVE_CONCURRENCY;
   process.env.MANGO_ARCHIVE_CONCURRENCY = value;
-  return run();
+  try {
+    await run();
+  } finally {
+    if (previous === undefined) {
+      delete process.env.MANGO_ARCHIVE_CONCURRENCY;
+    } else {
+      process.env.MANGO_ARCHIVE_CONCURRENCY = previous;
+    }
+  }
 };
 
 const stageMuslPlatforms = (outDir: string, arches: readonly ReleasePlatformId[]): void => {
