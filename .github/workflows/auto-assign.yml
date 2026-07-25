@@ -23,6 +23,7 @@ jobs:
     name: Route PR ownership
     if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     permissions:
       contents: read # read-only API baseline; no checkout happens here
       issues: write # assign the PR author via the issues assignee API

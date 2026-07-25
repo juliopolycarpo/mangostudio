@@ -25,6 +25,7 @@ jobs:
   label:
     name: Apply path-based labels
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     permissions:
       contents: read # labeler reads .github/labeler.yml from the base branch
       pull-requests: write # apply area:/type: labels to the PR

@@ -26,6 +26,7 @@ jobs:
     # zizmor: ignore[bot-conditions] loop guard only; not a privilege boundary
     if: ${{ github.actor != 'github-actions[bot]' && github.event.issue.state == 'open' }}
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     permissions:
       issues: write # validate type labels, set status: needs author, and comment once
     env:
@@ -64,6 +65,7 @@ jobs:
     # actor) or fails; it is the last line of defence for an unlabelled issue.
     if: ${{ !cancelled() && github.event.action == 'opened' }}
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     permissions:
       issues: write # apply status: needs triage when the issue has no status label
     env:
