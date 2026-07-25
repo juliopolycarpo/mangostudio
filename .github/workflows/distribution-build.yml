@@ -103,6 +103,10 @@ jobs:
           path: .distribution-bundles/packaged.tar.gz
           retention-days: ${{ inputs.retention_days }}
           overwrite: false
+          # Payload is already gzip: the artifact zip re-Deflates it for ~0% gain
+          # at a full single-threaded CPU pass, measured at 57s across the nine
+          # uploads. The per-target uploads below are level 0 for the same reason.
+          compression-level: 0
 
       - name: Upload linux-x64 target
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -111,6 +115,7 @@ jobs:
           path: .distribution-bundles/linux-x64.tar.gz
           retention-days: ${{ inputs.retention_days }}
           overwrite: false
+          compression-level: 0
 
       - name: Upload linux-arm64 target
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -119,6 +124,7 @@ jobs:
           path: .distribution-bundles/linux-arm64.tar.gz
           retention-days: ${{ inputs.retention_days }}
           overwrite: false
+          compression-level: 0
 
       - name: Upload linux-x64-musl target
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -127,6 +133,7 @@ jobs:
           path: .distribution-bundles/linux-x64-musl.tar.gz
           retention-days: ${{ inputs.retention_days }}
           overwrite: false
+          compression-level: 0
 
       - name: Upload linux-arm64-musl target
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -135,6 +142,7 @@ jobs:
           path: .distribution-bundles/linux-arm64-musl.tar.gz
           retention-days: ${{ inputs.retention_days }}
           overwrite: false
+          compression-level: 0
 
       - name: Upload darwin-x64 target
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -143,6 +151,7 @@ jobs:
           path: .distribution-bundles/darwin-x64.tar.gz
           retention-days: ${{ inputs.retention_days }}
           overwrite: false
+          compression-level: 0
 
       - name: Upload darwin-arm64 target
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -151,6 +160,7 @@ jobs:
           path: .distribution-bundles/darwin-arm64.tar.gz
           retention-days: ${{ inputs.retention_days }}
           overwrite: false
+          compression-level: 0
 
       - name: Upload windows-x64 target
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -159,6 +169,7 @@ jobs:
           path: .distribution-bundles/windows-x64.tar.gz
           retention-days: ${{ inputs.retention_days }}
           overwrite: false
+          compression-level: 0
 
       - name: Upload windows-arm64 target
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -167,6 +178,7 @@ jobs:
           path: .distribution-bundles/windows-arm64.tar.gz
           retention-days: ${{ inputs.retention_days }}
           overwrite: false
+          compression-level: 0
 
       - name: Attest distribution bundles
         if: github.event_name != 'pull_request'

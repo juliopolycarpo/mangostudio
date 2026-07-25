@@ -10,6 +10,9 @@ import {
 } from '../release/env-contract';
 import { readText } from './support/read-text';
 import { extractJobBlock, extractJobBlocks } from './support/workflow-blocks';
+import { uploadArtifactSteps, workflowFiles } from './support/workflow-files';
+
+const COMPRESSED_PAYLOAD = /\.(?:tar\.gz|tgz|zip|tar\.xz|tar\.zst)\b/;
 
 interface WorkflowRunStep {
   readonly workflowPath: string;
@@ -195,6 +198,24 @@ describe('release workflow binary gate', () => {
     expect(workflow.match(/overwrite: false/g)).toHaveLength(9);
     expect(workflow).toContain('actions/attest-build-provenance@');
     expect(workflow).toContain('subject-path: .distribution-bundles/*.tar.gz');
+  });
+
+  test('already-compressed upload payloads skip artifact re-compression', () => {
+    const uploads = workflowFiles().flatMap((path) =>
+      uploadArtifactSteps(readText(path)).map((step) => ({ path, step }))
+    );
+    const compressed = uploads.filter(({ step }) => COMPRESSED_PAYLOAD.test(step));
+
+    // Nine distribution bundles today; a tenth must make the same decision
+    // deliberately instead of quietly re-Deflating gzip.
+    expect(compressed).toHaveLength(9);
+    for (const { path, step } of compressed) {
+      expect(step, path).toContain('compression-level: 0');
+    }
+    for (const { path, step } of uploads) {
+      if (COMPRESSED_PAYLOAD.test(step)) continue;
+      expect(step, path).not.toContain('compression-level');
+    }
   });
 
   test('binary and Docker smoke consume target artifacts without rebuilding by default', () => {
