@@ -83,4 +83,24 @@ describe('security workflows', () => {
     expect(attest).toHaveLength(1);
     expect(attest[0]).toContain("if: github.event_name != 'pull_request'");
   });
+
+  test('every shipped dependency ecosystem is covered by Dependabot', () => {
+    const config = readText('.github/dependabot.yml');
+    // cargo-shim is published to crates.io and its Cargo.lock is enforced with
+    // --locked; without a cargo entry nothing ever updates it. Docker base
+    // images ship on every release and need the same coverage.
+    for (const ecosystem of ['github-actions', 'bun', 'cargo', 'docker']) {
+      expect(config).toContain(`package-ecosystem: ${ecosystem}`);
+    }
+
+    const bunBlock = config.split('package-ecosystem:').find((block) => block.startsWith(' bun'));
+    expect(bunBlock).toBeDefined();
+    expect(bunBlock).toContain('interval: weekly');
+    expect(bunBlock).toContain('dev-minor-patch:');
+    expect(bunBlock).toContain('prod-minor-patch:');
+  });
+
+  test('the cargo shim has a classification label glob', () => {
+    expect(readText('.github/labeler.yml')).toContain('packages/cargo-shim/**');
+  });
 });
