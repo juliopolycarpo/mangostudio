@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
 import { createHash } from 'node:crypto';
-import { appendFileSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { appendFileSync, createReadStream, mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { ROOT_DIR } from '../lib/config';
@@ -10,7 +10,7 @@ import {
   distributionArtifactName,
   readDistributionManifest,
 } from '../lib/distribution-manifest';
-import { captureCommand } from '../lib/exec';
+import { archiveConcurrency, captureCommand, mapWithConcurrency } from '../lib/exec';
 import { assertSafeToDelete } from '../lib/fs-assert';
 import { error, header, success } from '../lib/runner';
 
@@ -23,8 +23,14 @@ async function createBundle(path: string, members: readonly string[]): Promise<v
   }
 }
 
-function digest(path: string): string {
-  return createHash('sha256').update(readFileSync(path)).digest('hex');
+// Streamed rather than readFileSync: bundles are hashed concurrently, so buffering
+// each whole tarball would multiply peak memory by the concurrency limit.
+async function digest(path: string): Promise<string> {
+  const hash = createHash('sha256');
+  for await (const chunk of createReadStream(path)) {
+    hash.update(chunk);
+  }
+  return hash.digest('hex');
 }
 
 async function main(): Promise<void> {
@@ -41,25 +47,32 @@ async function main(): Promise<void> {
     'packaged',
     manifest.sourceSha,
     manifest.packageVersion,
-    digest(packagedPath)
+    await digest(packagedPath)
   );
 
-  const targetArtifacts: Record<string, string> = {};
-  for (const target of manifest.targets) {
-    const bundlePath = join(BUNDLE_DIR, `${target.id}.tar.gz`);
-    await createBundle(bundlePath, [
-      DISTRIBUTION_MANIFEST_FILE,
-      `.mango/out/${target.id}`,
-      target.archive,
-      'release-assets/SHA256SUMS',
-    ]);
-    targetArtifacts[target.id] = distributionArtifactName(
-      target.id,
-      manifest.sourceSha,
-      manifest.packageVersion,
-      digest(bundlePath)
-    );
-  }
+  const bundles = await mapWithConcurrency(
+    manifest.targets,
+    archiveConcurrency(),
+    async (target) => {
+      const bundlePath = join(BUNDLE_DIR, `${target.id}.tar.gz`);
+      await createBundle(bundlePath, [
+        DISTRIBUTION_MANIFEST_FILE,
+        `.mango/out/${target.id}`,
+        target.archive,
+        'release-assets/SHA256SUMS',
+      ]);
+      return [
+        target.id,
+        distributionArtifactName(
+          target.id,
+          manifest.sourceSha,
+          manifest.packageVersion,
+          await digest(bundlePath)
+        ),
+      ] as const;
+    }
+  );
+  const targetArtifacts = Object.fromEntries(bundles);
 
   if (process.env.GITHUB_OUTPUT) {
     appendFileSync(process.env.GITHUB_OUTPUT, `packaged_artifact=${packagedArtifact}\n`);

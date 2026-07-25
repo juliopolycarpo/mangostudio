@@ -29,21 +29,21 @@ scripts/
 `lib/runner.ts` is a barrel re-exporting focused, single-concern modules — prefer
 importing the specific module in new code:
 
-| Module               | Concern                                                         |
-| -------------------- | --------------------------------------------------------------- |
-| `log.ts`             | Leveled console output + ANSI colors                            |
-| `args.ts`            | CLI argument + workspace-selection parsing                      |
-| `git.ts`             | Change detection (`Bun.spawnSync`), workspace mapping           |
-| `exec.ts`            | `runCommand`, `runWorkspaceScript`, `runParallel`, `runTask`    |
-| `summary.ts`         | Pass/fail reporting + exit handling                             |
-| `fs.ts`              | Cross-platform `removePaths` (no spawned `rm`)                  |
-| `fs-assert.ts`       | `assertFile`/`assertDirectory` (throw) + `fileError` (collect)  |
-| `config.ts`          | Workspace definitions + root lint/format path lists             |
-| `changelog.ts`       | git-cliff arg/format logic (wrapped behind a project API)       |
-| `npm-pack.ts`        | npm distribution manifest builders                              |
-| `release-version.ts` | Canonical release version resolver + lockstep consistency check |
-| `prepare-release.ts` | Two-phase lockstep version bump for release preparation         |
-| `actions-lint/`      | Pinned workflow static analysis: manifest, bootstrap, tasks     |
+| Module               | Concern                                                                                              |
+| -------------------- | ---------------------------------------------------------------------------------------------------- |
+| `log.ts`             | Leveled console output + ANSI colors                                                                 |
+| `args.ts`            | CLI argument + workspace-selection parsing                                                           |
+| `git.ts`             | Change detection (`Bun.spawnSync`), workspace mapping                                                |
+| `exec.ts`            | `runCommand`, `captureCommand`, `mapWithConcurrency`, `archiveConcurrency`, `runParallel`, `runTask` |
+| `summary.ts`         | Pass/fail reporting + exit handling                                                                  |
+| `fs.ts`              | Cross-platform `removePaths` (no spawned `rm`)                                                       |
+| `fs-assert.ts`       | `assertFile`/`assertDirectory` (throw) + `fileError` (collect)                                       |
+| `config.ts`          | Workspace definitions + root lint/format path lists                                                  |
+| `changelog.ts`       | git-cliff arg/format logic (wrapped behind a project API)                                            |
+| `npm-pack.ts`        | npm distribution manifest builders                                                                   |
+| `release-version.ts` | Canonical release version resolver + lockstep consistency check                                      |
+| `prepare-release.ts` | Two-phase lockstep version bump for release preparation                                              |
+| `actions-lint/`      | Pinned workflow static analysis: manifest, bootstrap, tasks                                          |
 
 ## actions-lint/ — workflow static analysis
 

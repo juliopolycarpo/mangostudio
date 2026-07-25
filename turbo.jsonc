@@ -13,6 +13,7 @@
     "DRY_RUN",
     "GITHUB_OUTPUT",
     "GITHUB_SHA",
+    "MANGO_ARCHIVE_CONCURRENCY",
     "NEEDS",
     "ONLY_PLATFORM",
     "PLATFORM",
