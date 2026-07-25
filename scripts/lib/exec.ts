@@ -1,6 +1,8 @@
 // Process execution primitives: spawn a command, run a workspace script, and
 // fan tasks out in parallel. All commands inherit stdio so output streams live.
 
+import { availableParallelism } from 'node:os';
+
 import { ROOT_DIR, WORKSPACES, type WorkspaceName } from './config';
 import { dim, error } from './log';
 
@@ -90,6 +92,72 @@ export async function runWorkspaceScript(
 // biome-ignore lint/suspicious/useAwait: Migrated from ESLint
 export async function runParallel(tasks: Array<() => Promise<RunResult>>): Promise<RunResult[]> {
   return Promise.all(tasks.map((t) => t()));
+}
+
+/**
+ * Run tasks with at most `limit` in flight. Unlike runParallel, this bounds
+ * concurrency for CPU/IO-heavy work (compression) that would thrash the runner
+ * if every task started at once. Results preserve input order.
+ * // Usage: await mapWithConcurrency(targets, 4, (t) => archive(t));
+ */
+export async function mapWithConcurrency<T, R>(
+  items: readonly T[],
+  limit: number,
+  fn: (item: T) => Promise<R>
+): Promise<R[]> {
+  if (items.length === 0) {
+    return [];
+  }
+
+  const concurrency = Math.max(1, Math.min(limit, items.length));
+  const results: R[] = new Array(items.length);
+  let nextIndex = 0;
+  let firstError: unknown;
+
+  const workers = Array.from({ length: concurrency }, async () => {
+    while (true) {
+      if (firstError !== undefined) {
+        return;
+      }
+
+      const index = nextIndex;
+      nextIndex += 1;
+      if (index >= items.length) {
+        return;
+      }
+
+      try {
+        results[index] = await fn(items[index]);
+      } catch (caught) {
+        if (firstError === undefined) {
+          firstError = caught;
+        }
+        return;
+      }
+    }
+  });
+
+  await Promise.all(workers);
+  if (firstError !== undefined) {
+    throw firstError;
+  }
+
+  return results;
+}
+
+/** Release archive/bundle parallelism; override with MANGO_ARCHIVE_CONCURRENCY. */
+export function archiveConcurrency(): number {
+  const raw = process.env.MANGO_ARCHIVE_CONCURRENCY;
+  if (raw === undefined || raw === '') {
+    return Math.max(1, availableParallelism());
+  }
+
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed < 1) {
+    throw new Error(`Invalid MANGO_ARCHIVE_CONCURRENCY: ${raw}`);
+  }
+
+  return parsed;
 }
 
 /**
