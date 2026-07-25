@@ -8,6 +8,7 @@ import { basename, dirname, join } from 'node:path';
 
 import { ROOT_DIR } from '../lib/config';
 import { cursorNativePackageFor } from '../lib/cursor-sidecar';
+import { archiveConcurrency, captureCommand, mapWithConcurrency } from '../lib/exec';
 import { assertDirectory, assertFile, assertSafeToDelete } from '../lib/fs-assert';
 import { NPM_PLATFORMS } from '../lib/npm-pack';
 import { collectCursorSidecarLayoutErrors } from '../lib/npm-package-validation';
@@ -19,14 +20,7 @@ import {
   type ReleaseAssetPlan,
 } from '../lib/release-assets';
 import { resolveReleaseVersion } from '../lib/release-version';
-import {
-  assertNoUnexpectedArguments,
-  captureCommand,
-  error,
-  header,
-  parseArgs,
-  success,
-} from '../lib/runner';
+import { assertNoUnexpectedArguments, error, header, parseArgs, success } from '../lib/runner';
 
 const printHelp = (): never => {
   console.log(`Usage: bun ./scripts/release/archive-assets.ts [--platform <target>]
@@ -43,10 +37,10 @@ Flags:
 export async function archiveReleaseAssets(plan: ReleaseAssetPlan): Promise<void> {
   prepareAssetsDir(plan.assetsDir);
 
-  for (const archive of plan.platformArchives) {
-    await archivePlatform(archive, plan.assetsDir);
-  }
-
+  const concurrency = archiveConcurrency();
+  await mapWithConcurrency(plan.platformArchives, concurrency, (archive) =>
+    archivePlatform(archive, plan.assetsDir)
+  );
   await archiveFrontend(plan.frontendArchive);
   writeChecksumManifest(plan);
 }

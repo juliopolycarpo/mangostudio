@@ -10,7 +10,7 @@ import {
   distributionArtifactName,
   readDistributionManifest,
 } from '../lib/distribution-manifest';
-import { captureCommand } from '../lib/exec';
+import { archiveConcurrency, captureCommand, mapWithConcurrency } from '../lib/exec';
 import { assertSafeToDelete } from '../lib/fs-assert';
 import { error, header, success } from '../lib/runner';
 
@@ -44,22 +44,29 @@ async function main(): Promise<void> {
     digest(packagedPath)
   );
 
-  const targetArtifacts: Record<string, string> = {};
-  for (const target of manifest.targets) {
-    const bundlePath = join(BUNDLE_DIR, `${target.id}.tar.gz`);
-    await createBundle(bundlePath, [
-      DISTRIBUTION_MANIFEST_FILE,
-      `.mango/out/${target.id}`,
-      target.archive,
-      'release-assets/SHA256SUMS',
-    ]);
-    targetArtifacts[target.id] = distributionArtifactName(
-      target.id,
-      manifest.sourceSha,
-      manifest.packageVersion,
-      digest(bundlePath)
-    );
-  }
+  const bundles = await mapWithConcurrency(
+    manifest.targets,
+    archiveConcurrency(),
+    async (target) => {
+      const bundlePath = join(BUNDLE_DIR, `${target.id}.tar.gz`);
+      await createBundle(bundlePath, [
+        DISTRIBUTION_MANIFEST_FILE,
+        `.mango/out/${target.id}`,
+        target.archive,
+        'release-assets/SHA256SUMS',
+      ]);
+      return [
+        target.id,
+        distributionArtifactName(
+          target.id,
+          manifest.sourceSha,
+          manifest.packageVersion,
+          digest(bundlePath)
+        ),
+      ] as const;
+    }
+  );
+  const targetArtifacts = Object.fromEntries(bundles);
 
   if (process.env.GITHUB_OUTPUT) {
     appendFileSync(process.env.GITHUB_OUTPUT, `packaged_artifact=${packagedArtifact}\n`);
