@@ -283,11 +283,15 @@ describe('release workflow binary gate', () => {
     const versionVar = '$' + '{VERSION}';
 
     expect(workflow).toContain('  verify-build:');
-    expect(workflow).toContain('name: Verify built Linux binary');
-    expect(workflow).toContain(
+    // Scope to the job: six release jobs carry the same attestation lines, so a
+    // whole-file assertion would still pass if verify-build lost them.
+    const verifyBuild = extractJobBlock(workflow, 'verify-build');
+    expect(verifyBuild).toContain('name: Verify built Linux binary');
+    expect(verifyBuild).toContain(
       'attestations: read # fetch build provenance for gh attestation verify'
     );
-    expect(workflow).toContain('verify-attestation: "true"');
+    expect(verifyBuild).toContain('contents: read');
+    expect(verifyBuild).toContain('verify-attestation: "true"');
     expect(workflow).toContain(
       `archive="release-assets/mangostudio-${versionVar}-linux-x64.tar.gz"`
     );
