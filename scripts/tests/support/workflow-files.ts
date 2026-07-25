@@ -11,6 +11,13 @@ export function workflowFiles(): string[] {
     .map((file) => `.github/workflows/${file}`);
 }
 
+/** Repo-relative paths of every composite action under `.github/actions/`. */
+export function compositeActionFiles(): string[] {
+  return readdirSync(join(ROOT_DIR, '.github', 'actions'), { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => `.github/actions/${entry.name}/action.yml`);
+}
+
 /**
  * Every `actions/upload-artifact` step block in a workflow. Blocks are anchored
  * at the step's list item rather than its `uses:` line, so a `with:` mapping
