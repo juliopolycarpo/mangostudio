@@ -23,7 +23,7 @@ zero or multiple `type:` labels. Closed issues are left alone so label cleanup d
 ## `area:` (where)
 
 - `area: build` — `scripts/**`, `.mango/**`, `apps/api/src/lib/{config,runtime-paths}.ts`, `tsconfig*.json`, `turbo.jsonc`, `cliff.toml`, `Dockerfile*`, `.dockerignore`
-- `area: cli` — `apps/api/src/cli/**`, `apps/api/src/index.ts`, `apps/api/src/server/**`, `apps/api/src/lib/{server-state,mango-paths}.ts`
+- `area: cli` — `apps/api/src/cli/**`, `apps/api/src/index.ts`, `apps/api/src/server/**`, `apps/api/src/lib/{server-state,mango-paths}.ts`, `packages/cargo-shim/**`
 - `area: tooling` — `biome.json`, `dprint.json`, `lefthook.yml`, `opencode.json`, `.editorconfig`, `.gitattributes`, `.gitmessage`, `.gitignore`, `.claude/**`, `.agents/skills/**`
 - `area: db` — `apps/api/src/db/**`
 - `area: docs` — `docs/**`, `*.md` under any app or package, `LICENSE`, `.github/**/*.md`, issue/PR templates
@@ -47,7 +47,7 @@ zero or multiple `type:` labels. Closed issues are left alone so label cleanup d
 ## `type:` (what)
 
 - `type: ci` — `.github/{workflows,actions,labeler.yml,dependabot.yml}`
-- `type: dependencies` — `package.json`, `bun.lock` (also auto-applied by Dependabot for both `bun` and `github-actions` ecosystems)
+- `type: dependencies` — `package.json`, `bun.lock` (also auto-applied by Dependabot for the `bun`, `github-actions`, `cargo`, and `docker` ecosystems)
 - `type: test` — `**/*.{test,spec}.{ts,tsx}`, `scripts/tests/**`, `tests/**`, `playwright.config.ts`
 - `type: refactor` — manual, mirrors the `refactor` Conventional Commit type
 - `type: perf` — manual, mirrors the `perf` Conventional Commit type

@@ -137,6 +137,7 @@
           - "apps/api/src/server/**"
           - "apps/api/src/lib/server-state.ts"
           - "apps/api/src/lib/mango-paths.ts"
+          - "packages/cargo-shim/**"
 
 "area: i18n":
   - changed-files:

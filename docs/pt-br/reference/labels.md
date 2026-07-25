@@ -24,7 +24,7 @@ limpeza de labels não gere novas cobranças.
 ## `area:` (onde)
 
 - `area: build` — `scripts/**`, `.mango/**`, `apps/api/src/lib/{config,runtime-paths}.ts`, `tsconfig*.json`, `turbo.jsonc`, `cliff.toml`, `Dockerfile*`, `.dockerignore`
-- `area: cli` — `apps/api/src/cli/**`, `apps/api/src/index.ts`, `apps/api/src/server/**`, `apps/api/src/lib/{server-state,mango-paths}.ts`
+- `area: cli` — `apps/api/src/cli/**`, `apps/api/src/index.ts`, `apps/api/src/server/**`, `apps/api/src/lib/{server-state,mango-paths}.ts`, `packages/cargo-shim/**`
 - `area: tooling` — `biome.json`, `dprint.json`, `lefthook.yml`, `opencode.json`, `.editorconfig`, `.gitattributes`, `.gitmessage`, `.gitignore`, `.claude/**`, `.agents/skills/**`
 - `area: db` — `apps/api/src/db/**`
 - `area: docs` — `docs/**`, `*.md` em qualquer app ou pacote, `LICENSE`, `.github/**/*.md`, templates de issue/PR
@@ -48,7 +48,7 @@ limpeza de labels não gere novas cobranças.
 ## `type:` (o quê)
 
 - `type: ci` — `.github/{workflows,actions,labeler.yml,dependabot.yml}`
-- `type: dependencies` — `package.json`, `bun.lock` (também aplicada automaticamente pelo Dependabot nos ecossistemas `bun` e `github-actions`)
+- `type: dependencies` — `package.json`, `bun.lock` (também aplicada automaticamente pelo Dependabot nos ecossistemas `bun`, `github-actions`, `cargo` e `docker`)
 - `type: test` — `**/*.{test,spec}.{ts,tsx}`, `scripts/tests/**`, `tests/**`, `playwright.config.ts`
 - `type: refactor` — manual, espelha o tipo `refactor` de Conventional Commit
 - `type: perf` — manual, espelha o tipo `perf` de Conventional Commit

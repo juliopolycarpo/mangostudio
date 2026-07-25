@@ -32,6 +32,10 @@ async function createTempRepo(): Promise<string> {
   await runFixtureGit(path, ['config', 'user.email', 'git-write@mangostudio.test']);
   await runFixtureGit(path, ['config', 'user.name', 'Git Write Test']);
   await runFixtureGit(path, ['config', 'commit.gpgSign', 'false']);
+  // Developer machines may set core.hooksPath globally (e.g. to force
+  // Signed-off-by). Pointing at this repo's own hooks directory outranks
+  // the global path while still running fixtures that install local hooks.
+  await runFixtureGit(path, ['config', 'core.hooksPath', join(path, '.git', 'hooks')]);
   return path;
 }
 
