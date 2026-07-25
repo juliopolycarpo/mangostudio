@@ -43,7 +43,10 @@ runs:
       env:
         DOWNLOAD_DIR: ${{ runner.temp }}/mango-distribution
       run: |
-        set -euo pipefail
+        # No `-u`: bash 3.2 (the macOS runners' /bin/bash) treats ${#arr[@]} on
+        # an empty array as an unbound variable, which would abort before the
+        # "found 0" diagnostic below ever prints.
+        set -eo pipefail
         shopt -s nullglob
         bundles=("$DOWNLOAD_DIR"/*.tar.gz)
         if [ "${#bundles[@]}" -ne 1 ]; then
