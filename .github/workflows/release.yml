@@ -414,9 +414,8 @@ jobs:
         name: Publish to npm
         uses: ./.github/actions/publish-npm-distribution
         with:
+          node-auth-token: ${{ secrets.NPM_TOKEN }}
           node-version: "22.14.0"
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   homebrew:
     # Renders Formula/mangostudio.rb from the released SHA256SUMS and pushes it

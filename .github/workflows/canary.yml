@@ -93,9 +93,8 @@ jobs:
         uses: ./.github/actions/publish-npm-distribution
         with:
           dist-tag: canary
+          node-auth-token: ${{ secrets.NPM_TOKEN }}
           node-version: "22.14.0"
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   github-release-canary:
     name: Publish GitHub pre-release assets

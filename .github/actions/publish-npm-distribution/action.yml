@@ -6,6 +6,13 @@ inputs:
     description: npm dist-tag to publish under. An empty value publishes as latest.
     required: false
     default: ""
+  node-auth-token:
+    description: >
+      npm automation token for the publish. Declared as an input rather than
+      inherited from the caller's step `env:` so the token requirement is part
+      of this action's signature and the release env-contract test can see it.
+      The value is never printed.
+    required: true
   node-version:
     description: Minimum Node.js version required for npm provenance.
     required: false
@@ -61,6 +68,7 @@ runs:
       shell: bash
       env:
         DIST_TAG: ${{ inputs.dist-tag }}
+        NODE_AUTH_TOKEN: ${{ inputs.node-auth-token }}
         NPM_CONFIG_USERCONFIG: ${{ runner.temp }}/mangostudio-publish-npmrc
       run: |
         set -euo pipefail

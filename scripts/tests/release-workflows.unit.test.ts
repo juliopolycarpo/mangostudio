@@ -16,7 +16,12 @@ import {
   extractStepBlocks,
   extractStepBlocksAtIndent,
 } from './support/workflow-blocks';
-import { uploadArtifactSteps, uploadPaths, workflowFiles } from './support/workflow-files';
+import {
+  compositeActionFiles,
+  uploadArtifactSteps,
+  uploadPaths,
+  workflowFiles,
+} from './support/workflow-files';
 
 const COMPRESSED_PAYLOAD = /\.(?:tar\.gz|tgz|zip|tar\.xz|tar\.zst)\b/;
 
@@ -58,7 +63,7 @@ function extractWorkflowRunSteps(workflowPath: string): WorkflowRunStep[] {
       steps.push({
         workflowPath,
         job,
-        name: extractStepName(stepBlock),
+        name: extractStepName(stepBlock, 6),
         block: stepBlock,
         env: new Set([...workflowEnv, ...jobEnv, ...collectEnvKeys(stepBlock, 8)]),
       });
@@ -68,10 +73,29 @@ function extractWorkflowRunSteps(workflowPath: string): WorkflowRunStep[] {
   return steps;
 }
 
-function extractStepName(stepBlock: string): string {
+/**
+ * The same walk for a composite action manifest, whose steps sit one level
+ * shallower than a job's. Release scripts moved into `.github/actions/*` would
+ * otherwise leave the env-contract assertion below matching nothing and passing
+ * vacuously.
+ */
+function extractCompositeRunSteps(actionPath: string): WorkflowRunStep[] {
+  return extractStepBlocksAtIndent(readText(actionPath), 4)
+    .filter((stepBlock) => /^ {6}run:/m.test(stepBlock))
+    .map((stepBlock) => ({
+      workflowPath: actionPath,
+      job: 'composite',
+      name: extractStepName(stepBlock, 4),
+      block: stepBlock,
+      env: new Set(collectEnvKeys(stepBlock, 6)),
+    }));
+}
+
+function extractStepName(stepBlock: string, indent: number): string {
+  const marker = ' '.repeat(indent);
   return (
-    /^ {6}- name: (.+)$/m.exec(stepBlock)?.[1] ??
-    /^ {6}- id: (.+)$/m.exec(stepBlock)?.[1] ??
+    new RegExp(`^${marker}- name: (.+)$`, 'm').exec(stepBlock)?.[1] ??
+    new RegExp(`^${marker}- id: (.+)$`, 'm').exec(stepBlock)?.[1] ??
     'unnamed step'
   );
 }
@@ -120,19 +144,30 @@ describe('release workflow binary gate', () => {
   });
 
   test('release script invocations provide their required env explicitly', () => {
-    for (const step of [
+    const invocations = [
       ...extractWorkflowRunSteps('.github/workflows/release.yml'),
       ...extractWorkflowRunSteps('.github/workflows/canary.yml'),
-    ]) {
-      for (const scriptPath of releaseScriptsInStep(step.block)) {
-        const missing = requiredEnvForReleaseScriptInvocation(scriptPath, step.block).filter(
-          (envName) => !step.env.has(envName)
-        );
-        expect(
-          missing,
-          `${step.workflowPath} job "${step.job}" step "${step.name}" invokes ${scriptPath} without env: ${missing.join(', ')}`
-        ).toEqual([]);
-      }
+      ...compositeActionFiles().flatMap(extractCompositeRunSteps),
+    ].flatMap((step) =>
+      releaseScriptsInStep(step.block).map((scriptPath) => ({ step, scriptPath }))
+    );
+
+    // Guard the guard: the publish is the one invocation with a token contract,
+    // and it now lives in a composite action. A walk that stops reaching it
+    // would satisfy every assertion below while enforcing nothing.
+    expect(
+      invocations.map(({ scriptPath }) => scriptPath),
+      'the env-contract walk no longer reaches the npm publish'
+    ).toContain('scripts/release/publish-npm.ts');
+
+    for (const { step, scriptPath } of invocations) {
+      const missing = requiredEnvForReleaseScriptInvocation(scriptPath, step.block).filter(
+        (envName) => !step.env.has(envName)
+      );
+      expect(
+        missing,
+        `${step.workflowPath} job "${step.job}" step "${step.name}" invokes ${scriptPath} without env: ${missing.join(', ')}`
+      ).toEqual([]);
     }
   });
 
@@ -140,11 +175,13 @@ describe('release workflow binary gate', () => {
     const release = extractJobBlock(readText('.github/workflows/release.yml'), 'npm-publish');
     const canary = extractJobBlock(readText('.github/workflows/canary.yml'), 'npm-canary');
     const action = readText('.github/actions/publish-npm-distribution/action.yml');
+    const secretPrefix = '$' + '{{ secrets.';
+    const inputPrefix = '$' + '{{ inputs.';
 
     for (const block of [release, canary]) {
       expect(block).toContain('uses: ./.github/actions/publish-npm-distribution');
       expect(block).toContain('node-version: "22.14.0"');
-      expect(block).toContain('NODE_AUTH_TOKEN:');
+      expect(block).toContain(`node-auth-token: ${secretPrefix}NPM_TOKEN }}`);
       expect(block).not.toContain('scripts/release/publish-npm.ts');
     }
     expect(release).not.toMatch(/^ {10}dist-tag:/m);
@@ -154,9 +191,14 @@ describe('release workflow binary gate', () => {
       step.includes('scripts/release/publish-npm.ts')
     );
     expect(publishStep).toBeDefined();
-    expect(publishStep).toContain('NODE_AUTH_TOKEN');
+    expect(publishStep).toContain(`NODE_AUTH_TOKEN: ${inputPrefix}node-auth-token }}`);
     expect(publishStep).toContain('--provenance-policy required');
     expect(publishStep).toContain(`trap 'rm -f "$NPM_CONFIG_USERCONFIG"' EXIT`);
+    // The dist-tag wiring is the highest-consequence branch in the action: a
+    // canary that loses its `--tag` republishes `latest` to every installer.
+    expect(publishStep).toContain(`DIST_TAG: ${inputPrefix}dist-tag }}`);
+    expect(publishStep).toContain('if [ -n "$DIST_TAG" ]; then');
+    expect(publishStep).toContain('args+=(--tag "$DIST_TAG")');
   });
 
   test('the publish composite re-exports auth and provenance to both summaries', () => {
