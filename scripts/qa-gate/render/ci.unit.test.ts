@@ -68,6 +68,19 @@ describe('renderCiDurationSection', () => {
     expect(rendered).not.toContain('Canary / Publish npm');
   });
 
+  it('reports a job skipped on the baseline as skipped rather than 0s', () => {
+    const rendered = renderCiDurationSection(
+      makeCiDurations({
+        base: makeCiRun(1, [
+          makeCiJob('Test / Run tests', 240),
+          makeCiJob('Build / Frontend', 0, { conclusion: 'skipped' }),
+        ]),
+      })
+    );
+
+    expect(rendered).toContain('| `Build / Frontend` | skipped | 1m 20s | n/a |');
+  });
+
   it('degrades a missing payload to a non-fatal placeholder', () => {
     const rendered = renderCiDurationSection(null, 'CI duration payload was not produced');
 

@@ -18,7 +18,12 @@ const timestampMs = (value: string | null): number | null => {
   return Number.isFinite(parsed) ? parsed : null;
 };
 
+const isSkipped = (job: CiJobDuration): boolean => job.conclusion === 'skipped';
+
 const jobDurationSeconds = (job: CiJobDuration): number | null => {
+  // Skipped jobs report started_at === completed_at, which would otherwise read
+  // as a real 0s run and turn "not executed" into a full-duration delta.
+  if (isSkipped(job)) return null;
   const started = timestampMs(job.startedAt);
   const completed = timestampMs(job.completedAt);
   if (started === null || completed === null || completed < started) return null;
@@ -34,8 +39,9 @@ const timedJobs = (run: CiRunDurations): TimedJob[] =>
     .filter((job): job is TimedJob => job !== null);
 
 const wallClockSeconds = (run: CiRunDurations): number | null => {
-  const starts = run.jobs.map((job) => timestampMs(job.startedAt)).filter((time) => time !== null);
-  const completions = run.jobs
+  const executed = run.jobs.filter((job) => !isSkipped(job));
+  const starts = executed.map((job) => timestampMs(job.startedAt)).filter((time) => time !== null);
+  const completions = executed
     .map((job) => timestampMs(job.completedAt))
     .filter((time) => time !== null);
   if (starts.length === 0 || completions.length === 0) return null;
@@ -88,10 +94,11 @@ const matchingDuration = (run: CiRunDurations, name: string): number | null => {
 const jobTimingCell = (run: CiRunDurations, name: string): string => {
   const job = run.jobs.find((candidate) => candidate.name === name);
   if (!job) return NA;
+  if (isSkipped(job)) return 'skipped';
   const duration = jobDurationSeconds(job);
   if (duration !== null) return formatDuration(duration);
   if (job.status !== 'completed') return `${inlineCode(job.status)} (in flight)`;
-  return job.conclusion === 'skipped' ? 'skipped' : 'timing unavailable';
+  return 'timing unavailable';
 };
 
 const unavailableNote = (label: string, run: CiRunDurations): string | null =>
