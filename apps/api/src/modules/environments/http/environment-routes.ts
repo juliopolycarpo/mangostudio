@@ -28,6 +28,7 @@ import {
   type AgentCliDetectionService,
   agentCliDetectionService,
 } from '../application/agent-cli-detection';
+import { type InstallService, installService } from '../application/install-service';
 import {
   type RuntimeDetectionService,
   runtimeDetectionService,
@@ -36,6 +37,7 @@ import {
   type VersionManagerDetectionService,
   versionManagerDetectionService,
 } from '../application/version-manager-detection';
+import { createInstallRoutes } from './install-routes';
 
 const runtimeIdParams = t.Object({ id: RuntimeIdSchema });
 const versionManagerIdParams = t.Object({ id: VersionManagerIdSchema });
@@ -92,7 +94,8 @@ async function getAgentCliOrNotFound(
 export function createEnvironmentRoutes(
   runtimeService: RuntimeDetectionService = runtimeDetectionService,
   versionManagerService: VersionManagerDetectionService = versionManagerDetectionService,
-  agentService: AgentCliDetectionService = agentCliDetectionService
+  agentService: AgentCliDetectionService = agentCliDetectionService,
+  environmentInstallService: InstallService = installService
 ) {
   return new Elysia()
     .use(requireAuth)
@@ -175,7 +178,8 @@ export function createEnvironmentRoutes(
           404: ApiErrorResponseSchema,
         },
       }
-    );
+    )
+    .use(createInstallRoutes(environmentInstallService));
 }
 
 export const environmentRoutes = createEnvironmentRoutes();

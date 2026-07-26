@@ -139,6 +139,12 @@ In-memory rate limiter (`rate-limit.ts`) that counts requests per (bucket, clien
 - Response shapes validated in integration tests via `Value.Check`.
 - Attachment uploads validated for MIME type, magic bytes, size, and UTF-8 correctness.
 
+### Environment Installs
+
+Environment installation is a guarded local-only execution surface built from code-owned recipes,
+bounded downloads and output, user-scoped audit records, and raw SSE logs. See
+[`environment-installs.md`](./environment-installs.md) for its threat model and opt-in controls.
+
 ## Provider Architecture
 
 Providers implement the `AIProvider` interface. The provider registry maps provider types to implementations. Key abstraction layers:
