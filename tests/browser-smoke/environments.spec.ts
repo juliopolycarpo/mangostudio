@@ -3,6 +3,11 @@ import { expect, test } from '@playwright/test';
 const uniqueEmail = () => `env-smoke-${Date.now()}@test.local`;
 
 test('environments surface renders its runtime cards', async ({ page }) => {
+  // Signup plus three cold probes budget more than the 30s project default, so
+  // the per-step waits below would die of the suite timeout rather than their
+  // own — reporting a timeout instead of the assertion that actually failed.
+  test.setTimeout(90_000);
+
   const consoleErrors: string[] = [];
   page.on('pageerror', (error) => consoleErrors.push(error.message));
 
