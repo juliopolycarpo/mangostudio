@@ -28,8 +28,14 @@ const nodeLocationFsProbe: LocationFsProbe = {
       return false;
     }
   },
-  countEntries(path) {
-    return readdirSync(path).length;
+  countEntries(path, layout) {
+    // Dot-prefixed names can never be resource slugs, so the resource writer's
+    // `.slug.suffix.staging` siblings stay out of the reported count.
+    return readdirSync(path, { withFileTypes: true }).filter((entry) => {
+      if (entry.name.startsWith('.')) return false;
+      if (entry.isSymbolicLink()) return true;
+      return layout === 'directory-of-dirs' ? entry.isDirectory() : entry.isFile();
+    }).length;
   },
 };
 
