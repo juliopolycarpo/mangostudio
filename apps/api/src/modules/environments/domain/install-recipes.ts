@@ -5,6 +5,7 @@ import type {
   RecipeInput,
   RuntimeId,
 } from '@mangostudio/shared/environments';
+import { renderShellCommand, shellQuote } from '@mangostudio/shared/environments';
 import { assertRecipeInput, toNvmDefaultArgument, toNvmVersionArgument } from './recipe-input';
 
 const INSTALLER_MIN_BYTES = 256;
@@ -79,15 +80,6 @@ function nvmNodeArgv(
       ? '. "$NVM_DIR/nvm.sh" && nvm install "$1"'
       : '. "$NVM_DIR/nvm.sh" && nvm alias default "$1"';
   return ['bash', '-c', command, 'mangostudio-install', argument];
-}
-
-function shellQuote(value: string): string {
-  if (/^[A-Za-z0-9_./:@%+=,-]+$/.test(value)) return value;
-  return `'${value.replaceAll("'", "'\"'\"'")}'`;
-}
-
-function renderShellCommand(argv: readonly string[]): string {
-  return argv.map(shellQuote).join(' ');
 }
 
 function downloadedCopyCommand(url: string, interpreter: 'bash' | 'sh'): string {

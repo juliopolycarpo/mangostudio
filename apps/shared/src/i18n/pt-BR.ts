@@ -1396,28 +1396,188 @@ export const messages = {
   },
 
   environments: {
-    runtimes: {
+    title: 'Ambientes',
+    nav: 'Ambientes',
+    subtitle: 'O que está instalado, o que está errado e o que realmente roda quando você digita.',
+    tabs: {
+      runtimes: 'Runtimes',
+      agents: 'Agentes',
+      health: 'Diagnóstico',
+    },
+    // Nomes próprios de produtos — iguais em todos os idiomas, mas centralizados
+    // aqui para que a UI nunca use um id cru como `nvm` ou `mangostudio`.
+    names: {
       bun: 'Bun',
       node: 'Node.js',
       nvm: 'nvm',
+      fnm: 'fnm',
+      volta: 'Volta',
+      mangostudio: 'MangoStudio',
+      claude: 'Claude Code',
+      codex: 'Codex',
+      cursor: 'Cursor',
     },
-    health: {
+    status: {
       ok: 'Disponível',
       warn: 'Requer atenção',
       missing: 'Não encontrado',
       error: 'Falha na verificação',
     },
+    origins: {
+      path: 'no PATH',
+      'well-known': 'local conhecido',
+      'version-manager': 'gerenciador de versões',
+      configured: 'configurado',
+    },
+    actions: {
+      refresh: 'Verificar novamente',
+      refreshing: 'Verificando...',
+      refreshFailed: 'A verificação falhou. Os dados abaixo podem estar desatualizados.',
+      retry: 'Tentar novamente',
+      copy: 'Copiar comando',
+      copied: 'Comando copiado',
+      copyFailed: 'Não foi possível copiar o comando.',
+    },
+    loadError: 'Não foi possível carregar o estado do ambiente.',
+    checkedAt: 'Verificado às {time}',
+    runtimes: {
+      description:
+        'Uma vez que dois binários com o mesmo nome existem, só um roda. Aqui está qual.',
+      effectiveLabel: 'Efetivo',
+      pathIndexLabel: 'PATH #{position}',
+      managedByLabel: 'gerenciado por {manager}',
+      versionCount: '{count} versões',
+      singleVersion: '1 versão',
+      aliasReachable: 'acessível por {count} caminhos',
+      otherInstallations: 'Outras instalações',
+      noEffective: 'Nenhum binário utilizável foi encontrado.',
+      notInstalled: '{runtime} ainda não está instalado.',
+      install: 'Instalar {runtime}',
+      update: 'Atualizar {runtime}',
+      empty: 'Nenhum runtime foi detectado nesta máquina.',
+      emptyHint: 'O MangoStudio pode instalar o que estiver faltando por você.',
+    },
+    versions: {
+      title: 'Gerenciado por {manager}',
+      empty: 'Nenhuma versão do Node.js é gerenciada por {manager} ainda.',
+      managerMissing: '{manager} não está instalado.',
+      installManager: 'Instalar {manager}',
+      default: 'padrão',
+      current: 'atual',
+      installLts: 'Instalar LTS',
+      setDefault: 'Definir como padrão',
+      versionColumn: 'Versão',
+      statusColumn: 'Status LTS',
+    },
+    lts: {
+      'current-lts': 'LTS atual',
+      'lts-outdated-patch': 'patch de LTS desatualizado',
+      'lts-superseded': 'LTS substituído',
+      'end-of-life': 'fim de vida',
+      'current-release': 'release atual',
+      unknown: 'status LTS indisponível',
+    },
+    // Uma chave por código de diagnóstico: a tradução é onde a consequência é
+    // dita, então ela não pode ser esquecida.
     findings: {
-      notFound: '{runtime} não foi encontrado.',
-      shadowedByEarlierPath:
-        '{shadowedPath} é sombreado por {effectivePath}, que aparece antes no PATH.',
-      multipleVersions: 'Várias versões de {runtime} estão instaladas: {versions}.',
-      versionBelowMinimum:
-        '{path} usa a versão {version}; a versão mínima compatível é {minimumVersion}.',
-      notExecutable: '{path} existe, mas não informou uma versão executável.',
-      outdatedLts: '{path} usa uma versão LTS desatualizada.',
-      managedButNotOnPath: '{path} é gerenciado por {manager}, mas não está no PATH.',
-      probeTimeout: 'A verificação de {path} excedeu o tempo limite.',
+      'not-found': '{runtime} não foi encontrado no PATH nem nos locais conhecidos.',
+      'shadowed-by-earlier-path':
+        'Digitar o comando roda {shadowedPath} (PATH #{shadowedPathIndex}), não {effectivePath} (PATH #{effectivePathIndex}).',
+      'multiple-versions':
+        'Há mais de uma versão de {runtime} instalada ({versions}); só a primeira do PATH roda.',
+      'version-below-minimum':
+        '{path} usa {version} e recursos que exigem {minimumVersion} ou superior vão falhar.',
+      'not-executable': '{path} existe, mas não respondeu a uma consulta de versão.',
+      'outdated-lts': 'A versão {version} está em {ltsStatus} e deixará de receber correções.',
+      'managed-but-not-on-path':
+        'O alias {defaultAlias} do {manager} não está no PATH, então o Node dele não roda em shells novos.',
+      'probe-timeout': 'A verificação de {path} excedeu o tempo limite e o resultado é incerto.',
+      'cli-not-installed':
+        'A CLI do {targetId} não está instalada, então o MangoStudio não a chama.',
+      'config-home-missing':
+        '{configHome} não existe, então ainda não há configuração para ler ou escrever.',
+      'not-authenticated': 'O {targetId} não está autenticado e as chamadas vão ser recusadas.',
+      'version-probe-failed':
+        '{path} respondeu com uma versão que não foi reconhecida; as checagens de compatibilidade ficam de fora.',
+      'location-unwritable':
+        '{path} não é gravável, então o MangoStudio não consegue publicar recursos em {locationId}.',
+    },
+    agents: {
+      description:
+        'Cada CLI de agente, a configuração que ela lê e os locais onde a Biblioteca pode escrever.',
+      versionLabel: 'Versão',
+      configHomeLabel: 'Configuração',
+      authSignedIn: 'Autenticado',
+      authSignedOut: 'Não autenticado',
+      authUnknown: 'Estado de login desconhecido',
+      authUnknownHint: 'A verificação por arquivo não enxerga chaveiros do sistema.',
+      locations: 'Locais da Biblioteca',
+      locationWritable: 'gravável',
+      locationReadOnly: 'somente leitura',
+      locationMissing: 'ainda não existe',
+      locationUnsupported: 'indisponível nesta plataforma',
+      locationEntries: '{count} itens',
+      notInstalled: 'Não instalada',
+      empty: 'Nenhuma CLI de agente foi detectada.',
+    },
+    health: {
+      description: 'Tudo que está errado, em uma lista só, do mais grave ao menos grave.',
+      empty: 'Nada precisa de atenção.',
+      emptyHint: 'Todos os runtimes, gerenciadores de versão e CLIs de agente estão saudáveis.',
+      scope: {
+        runtime: 'Runtime',
+        'version-manager': 'Gerenciador de versões',
+        agent: 'Agente',
+      },
+      findingCount: '{count} itens precisam de atenção',
+    },
+    install: {
+      confirmTitle: 'Executar instalação',
+      confirmDescription: 'Isto roda um comando nesta máquina. Confira antes de continuar.',
+      commandLabel: 'Comando',
+      willWrite: 'Vai escrever em',
+      requiresNetwork: 'Requer acesso à rede',
+      downloadLabel: 'Instalador baixado',
+      downloadOrigin: 'Instalador baixado de {url}',
+      downloadSize: '{size} recebidos',
+      profileSetup: 'Adicione ao seu perfil de shell depois da instalação:',
+      profileAlreadyPresent: 'Já presente em {files}',
+      run: 'Executar instalação',
+      cancel: 'Cancelar',
+      close: 'Fechar',
+      cancelRun: 'Cancelar instalação',
+      consoleTitle: 'Console de instalação',
+      autoscroll: 'Rolagem automática',
+      waitingForOutput: 'Aguardando saída...',
+      exitSummary: 'Encerrado com código {code} em {duration}',
+      exitSummaryNoCode: 'Encerrado em {duration}',
+      truncated: 'A saída foi truncada pelo servidor.',
+      linesDropped: '{count} linhas antigas foram descartadas.',
+      startError: 'Não foi possível iniciar a instalação.',
+      streamError: 'A conexão com o console de instalação caiu.',
+      reconnecting: 'Reconectando ao console...',
+      unsupported: 'Esta instalação não é suportada nesta plataforma.',
+      missingRequirements: 'Instale antes: {requirements}',
+      runStatus: {
+        running: 'Instalando...',
+        succeeded: 'Instalação concluída',
+        failed: 'A instalação falhou',
+        cancelled: 'Instalação cancelada',
+        'timed-out': 'A instalação excedeu o tempo limite',
+        'spawn-failed': 'A instalação não pôde ser iniciada',
+        interrupted: 'O servidor parou durante a instalação; o resultado é desconhecido',
+      },
+      guardBlockedTitle: 'Instalação automática indisponível',
+      copyCommandHint: 'Rode este comando em um terminal desta máquina:',
+      guardBlocked: {
+        container:
+          'As instalações ficam desativadas dentro de um container: a alteração sumiria no próximo build da imagem.',
+        'server-not-loopback':
+          'As instalações ficam desativadas enquanto o MangoStudio pode ser acessado por outras máquinas.',
+        'client-not-loopback':
+          'Esta requisição não veio desta máquina, então ela não pode instalar nada aqui.',
+        disabled: 'As instalações estão desativadas na configuração deste servidor.',
+      },
     },
   },
 
