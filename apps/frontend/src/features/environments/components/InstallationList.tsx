@@ -6,22 +6,20 @@
  * both as separate rows would undo that.
  */
 
-import type { RuntimeInstallation } from '@mangostudio/shared/environments';
 import { useI18n } from '@/hooks/use-i18n';
-import { displayName, formatMessage, groupInstallations, pathPosition } from '../format';
+import { displayName, formatMessage, type InstallationGroup, pathPosition } from '../format';
 
 interface InstallationListProps {
-  installations: readonly RuntimeInstallation[];
-  /** The effective row is rendered by the card header, so it is skipped here. */
-  skipEffective?: boolean;
+  /**
+   * Already-grouped installations. The caller owns the grouping so a card that
+   * needs the effective group for its header does not pay for it twice.
+   */
+  groups: readonly InstallationGroup[];
 }
 
-export function InstallationList({ installations, skipEffective = false }: InstallationListProps) {
+export function InstallationList({ groups }: InstallationListProps) {
   const { t } = useI18n();
   const e = t.environments;
-  const groups = groupInstallations(installations).filter(
-    (group) => !(skipEffective && group.effective)
-  );
 
   if (groups.length === 0) return null;
 

@@ -123,7 +123,7 @@ export function RuntimeCard({ status, recipes, children }: RuntimeCardProps) {
           <p className="font-label text-[10px] font-bold uppercase tracking-widest text-on-surface-variant/70">
             {e.runtimes.otherInstallations}
           </p>
-          <InstallationList installations={status.installations} skipEffective />
+          <InstallationList groups={groups.filter((group) => !group.effective)} />
         </section>
       )}
 
