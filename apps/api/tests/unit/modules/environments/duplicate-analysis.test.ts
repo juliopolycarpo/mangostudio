@@ -93,6 +93,41 @@ describe('analyzeRuntimeScan', () => {
     });
   });
 
+  it('does not report shadowing when both PATH entries hold the same version', () => {
+    const status = analyzeRuntimeScan(
+      NODE_RUNTIME_DEFINITION,
+      {
+        installations: [
+          {
+            path: '/usr/bin/node',
+            rawPath: '/usr/bin/node',
+            version: 'v22.13.0',
+            origin: 'path',
+            pathIndex: 0,
+            effective: true,
+          },
+          {
+            path: '/usr/local/bin/node',
+            rawPath: '/usr/local/bin/node',
+            version: 'v22.13.0',
+            origin: 'path',
+            pathIndex: 1,
+            effective: false,
+          },
+        ],
+        failures: [],
+      },
+      {
+        installable: false,
+        probedAtMs: 1_700_000_000_000,
+        minimumVersion: { major: 22, minor: 13 },
+      }
+    );
+
+    expect(status.findings).toEqual([]);
+    expect(status.health).toBe('ok');
+  });
+
   it('distinguishes a missing runtime from failed executable probes', () => {
     const missing = analyzeRuntimeScan(
       NODE_RUNTIME_DEFINITION,

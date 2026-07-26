@@ -67,6 +67,9 @@ export function analyzeRuntimeScan(
   if (effectiveCanonical?.pathIndex !== undefined) {
     for (const installation of canonicalInstallations.slice(1)) {
       if (installation.pathIndex === undefined) continue;
+      // Same version at two paths is a layout detail, not a conflict. Only a
+      // version difference makes "which entry comes first in PATH" actionable.
+      if (installation.version === effectiveCanonical.version) continue;
       findings.push({
         code: 'shadowed-by-earlier-path',
         params: {
