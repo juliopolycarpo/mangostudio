@@ -76,6 +76,11 @@ runs:
         ALLOW_LEGACY_TOKEN: ${{ inputs.allow-legacy-token }}
         DIST_TAG: ${{ inputs.dist-tag }}
         LEGACY_NODE_AUTH_TOKEN: ${{ inputs.node-auth-token }}
+        # This step owns the npmrc for every registry call below, so callers
+        # must not configure setup-node's `registry-url`: the npmrc it writes
+        # templates `_authToken=${NODE_AUTH_TOKEN}`, which the OIDC path
+        # deliberately leaves unset. registry.npmjs.org is npm's default and
+        # is what the legacy npmrc below targets.
         NPM_CONFIG_USERCONFIG: ${{ runner.temp }}/mangostudio-publish-npmrc
       run: |
         set -euo pipefail

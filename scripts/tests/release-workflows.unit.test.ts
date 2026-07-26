@@ -181,7 +181,11 @@ describe('release workflow binary gate', () => {
     for (const block of [release, canary]) {
       expect(block).toContain('uses: ./.github/actions/publish-npm-distribution');
       expect(block).toContain('node-version: "22.14.0"');
-      expect(block).toContain('registry-url: https://registry.npmjs.org');
+      // setup-node's registry-url writes an npmrc templating
+      // `_authToken=${NODE_AUTH_TOKEN}`, and the publish step overrides
+      // NPM_CONFIG_USERCONFIG away from it — so it is inert at best, and a
+      // liability if that override is ever narrowed to the legacy path.
+      expect(block).not.toContain('registry-url:');
       expect(block).not.toContain('scripts/release/publish-npm.ts');
     }
     expect(release).toContain('allow-legacy-token:');
