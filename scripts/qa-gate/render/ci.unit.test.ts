@@ -15,7 +15,7 @@ describe('renderCiDurationSection', () => {
       })
     );
 
-    expect(rendered).toContain('| Total wall clock | 4m 0s | 4m 40s | 🔴 ▲ +40s |');
+    expect(rendered).toContain('| Wall clock (shared jobs) | 4m 0s | 4m 40s | 🔴 ▲ +40s |');
     expect(rendered).toContain(
       '| Critical path | `Test / Run tests` · 4m 0s | `Test / Run tests` · 4m 40s | 🔴 ▲ +40s |'
     );
@@ -31,7 +31,7 @@ describe('renderCiDurationSection', () => {
       })
     );
 
-    expect(rendered).toContain('| Total wall clock | n/a | 4m 40s | n/a |');
+    expect(rendered).toContain('| Wall clock (shared jobs) | n/a | 4m 40s | n/a |');
     expect(rendered).toContain('Base CI durations unavailable');
     expect(rendered).toContain('no successful main CI run found');
     expect(rendered).not.toContain('NaN');
@@ -49,6 +49,23 @@ describe('renderCiDurationSection', () => {
 
     expect(rendered).toContain('Head jobs still in flight');
     expect(rendered).toContain('`QA Metrics / Collect` (`in_progress`)');
+  });
+
+  it('excludes main-only baseline stages from the head comparison', () => {
+    const rendered = renderCiDurationSection(
+      makeCiDurations({
+        base: makeCiRun(1, [
+          makeCiJob('Test / Run tests', 240),
+          makeCiJob('Build / Frontend', 60),
+          // Canary only ever runs on main pushes, long after the gate closes.
+          makeCiJob('Canary / Publish npm', 300, { startOffsetSeconds: 240 }),
+        ]),
+      })
+    );
+
+    expect(rendered).toContain('| Wall clock (shared jobs) | 4m 0s | 4m 40s | 🔴 ▲ +40s |');
+    expect(rendered).toContain('| Critical path | `Test / Run tests` · 4m 0s |');
+    expect(rendered).not.toContain('Canary / Publish npm');
   });
 
   it('degrades a missing payload to a non-fatal placeholder', () => {

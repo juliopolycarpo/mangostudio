@@ -1,6 +1,8 @@
 // CI workflow duration comparison collected from the privileged Actions API
 // side. Wall clock captures parallel elapsed time; the critical path is the
-// longest completed job visible through the jobs API.
+// longest completed job visible through the jobs API. Every base/head figure is
+// restricted to the jobs both runs actually ran, because the baseline is a
+// main-push run whose job set is a superset of any pull request run's.
 
 import type { CiDurationComparison, CiJobDuration, CiRunDurations } from '../ci-durations';
 import { inlineCode, NA } from './format';
@@ -39,6 +41,18 @@ const wallClockSeconds = (run: CiRunDurations): number | null => {
   if (starts.length === 0 || completions.length === 0) return null;
   const elapsed = Math.max(...completions) - Math.min(...starts);
   return elapsed < 0 ? null : elapsed / 1000;
+};
+
+/**
+ * Restrict a run to the jobs it shares with `other` so a comparison never spans
+ * job sets that cannot exist on both sides — a main-push baseline also contains
+ * the post-gate `Canary` publish stage, which no pull request run ever has.
+ * Falls back to the full run when the two share no job at all.
+ */
+const sharedWith = (run: CiRunDurations, other: CiRunDurations): CiRunDurations => {
+  const otherNames = new Set(other.jobs.map((job) => job.name));
+  const jobs = run.jobs.filter((job) => otherNames.has(job.name));
+  return jobs.length === 0 ? run : { ...run, jobs };
 };
 
 const criticalJob = (run: CiRunDurations): TimedJob | null =>
@@ -93,8 +107,8 @@ const inFlightNote = (label: string, run: CiRunDurations): string | null => {
 };
 
 const previousRunLine = (durations: CiDurationComparison): string => {
-  const previous = wallClockSeconds(durations.previous);
-  const head = wallClockSeconds(durations.head);
+  const previous = wallClockSeconds(sharedWith(durations.previous, durations.head));
+  const head = wallClockSeconds(sharedWith(durations.head, durations.previous));
   if (previous !== null && head !== null) {
     return `**Since previous PR run:** ${formatDuration(previous)} → ${formatDuration(head)} (${renderDurationDelta(previous, head)})`;
   }
@@ -121,10 +135,14 @@ export const renderCiDurationSection = (
     ].join('\n');
   }
 
-  const baseWallClock = wallClockSeconds(durations.base);
-  const headWallClock = wallClockSeconds(durations.head);
-  const baseCritical = criticalJob(durations.base);
-  const headCritical = criticalJob(durations.head);
+  // Base is a main-push run and head is a pull request run, so only the jobs
+  // they have in common make a like-for-like comparison.
+  const comparableBase = sharedWith(durations.base, durations.head);
+  const comparableHead = sharedWith(durations.head, durations.base);
+  const baseWallClock = wallClockSeconds(comparableBase);
+  const headWallClock = wallClockSeconds(comparableHead);
+  const baseCritical = criticalJob(comparableBase);
+  const headCritical = criticalJob(comparableHead);
   const slowest = timedJobs(durations.head)
     .sort((left, right) => right.seconds - left.seconds)
     .slice(0, 5);
@@ -144,10 +162,11 @@ export const renderCiDurationSection = (
     '### CI Duration',
     '',
     'Report-only timing from the Actions jobs API; runner variance does not affect the gate.',
+    'Comparisons cover the jobs both runs share, so main-only stages never skew the baseline.',
     '',
     '| Metric | Base | Head | Δ |',
     '|---|---|---|---|',
-    `| Total wall clock | ${formatDuration(baseWallClock)} | ${formatDuration(headWallClock)} | ${renderDurationDelta(baseWallClock, headWallClock)} |`,
+    `| Wall clock (shared jobs) | ${formatDuration(baseWallClock)} | ${formatDuration(headWallClock)} | ${renderDurationDelta(baseWallClock, headWallClock)} |`,
     `| Critical path | ${formatCriticalJob(baseCritical)} | ${formatCriticalJob(headCritical)} | ${renderDurationDelta(baseCritical?.seconds ?? null, headCritical?.seconds ?? null)} |`,
     '',
     previousRunLine(durations),
