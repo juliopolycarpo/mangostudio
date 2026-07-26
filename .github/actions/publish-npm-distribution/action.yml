@@ -87,8 +87,16 @@ runs:
         fi
 
         use_legacy=0
-        if [ "$ALLOW_LEGACY_TOKEN" = "true" ] && [ -n "${LEGACY_NODE_AUTH_TOKEN:-}" ]; then
-          use_legacy=1
+        if [ "$ALLOW_LEGACY_TOKEN" = "true" ]; then
+          if [ -n "${LEGACY_NODE_AUTH_TOKEN:-}" ]; then
+            use_legacy=1
+          else
+            # Deliberate fallback to OIDC rather than a hard failure, but say so:
+            # a maintainer who set allow_legacy_npm_token did it because they
+            # expect the token path, and a silent switch makes a later
+            # registry auth error look unrelated.
+            echo "::warning::allow-legacy-token is true but no npm token was supplied; falling back to Trusted Publishing (OIDC)."
+          fi
         fi
 
         if [ "$use_legacy" = "1" ]; then
