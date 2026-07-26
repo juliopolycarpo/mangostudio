@@ -237,4 +237,13 @@ describe('directory resource writes', () => {
     expect(() => lstatSync(join(backupDir, 'apply-oldest'))).toThrow();
     expect(lstatSync(unrelated).isDirectory()).toBe(true);
   });
+
+  it('refuses a backup id that would escape the backup root', async () => {
+    await expect(
+      writeDirectoryResource(
+        { locationId: 'agents-skills', slug: 'gh', sourceDir, env, backupId: '..' },
+        writerDeps()
+      )
+    ).rejects.toThrow(/Invalid library backup id/);
+  });
 });

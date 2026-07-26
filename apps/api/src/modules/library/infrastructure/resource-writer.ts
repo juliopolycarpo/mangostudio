@@ -307,8 +307,14 @@ function createBackupId(deps: ResourceWriterDeps): string {
   return `${deps.now().toISOString().replaceAll(':', '-')}-${deps.randomSuffix()}`;
 }
 
+/**
+ * One path segment that cannot be `.` or `..`, so a caller-supplied id can
+ * never move a backup outside the configured backup root.
+ */
+const BACKUP_ID_PATTERN = /^[A-Za-z0-9_-][A-Za-z0-9._-]*$/;
+
 function assertBackupId(backupId: string): void {
-  if (!/^[A-Za-z0-9._-]+$/.test(backupId)) {
+  if (!BACKUP_ID_PATTERN.test(backupId)) {
     throw new TypeError(`Invalid library backup id: "${backupId}".`);
   }
 }
