@@ -11,6 +11,7 @@ import { Elysia } from 'elysia';
 import { getConfig } from './lib/config';
 import { createDiagnosticLogger } from './lib/logger';
 import { chatRoutes } from './modules/chats/http/chat-routes';
+import { environmentRoutes } from './modules/environments/http/environment-routes';
 import { fileCheckpointRoutes } from './modules/file-checkpoints/http/file-checkpoint-routes';
 import { capabilityRoutes } from './modules/generation/http/capability-routes';
 import { generateRoutes } from './modules/generation/http/generate-routes';
@@ -58,6 +59,7 @@ const api = new Elysia({ prefix: '/api' })
   // Register features
   .use(authRoutes)
   .use(chatRoutes)
+  .use(environmentRoutes)
   .use(capabilityRoutes)
   .use(todoRoutes)
   .use(fileCheckpointRoutes)
