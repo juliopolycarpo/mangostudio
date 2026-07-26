@@ -1,4 +1,4 @@
-import { join, posix, win32 } from 'node:path';
+import { posix, win32 } from 'node:path';
 import type { PathEnv } from '../../../lib/path-env';
 import type { RuntimeDefinition, SemVer } from './binary-scan';
 
@@ -26,12 +26,12 @@ export function wellKnownNodeDirectories(env: PathEnv): string[] {
     const { ProgramFiles, LOCALAPPDATA, NVM_SYMLINK, VOLTA_HOME } = env.env;
     return [
       NVM_SYMLINK,
-      ProgramFiles ? join(ProgramFiles, 'nodejs') : undefined,
+      ProgramFiles ? win32.join(ProgramFiles, 'nodejs') : undefined,
       env.env['ProgramFiles(x86)']
-        ? join(env.env['ProgramFiles(x86)'] as string, 'nodejs')
+        ? win32.join(env.env['ProgramFiles(x86)'] as string, 'nodejs')
         : undefined,
-      LOCALAPPDATA ? join(LOCALAPPDATA, 'Programs', 'nodejs') : undefined,
-      VOLTA_HOME ? join(VOLTA_HOME, 'bin') : undefined,
+      LOCALAPPDATA ? win32.join(LOCALAPPDATA, 'Programs', 'nodejs') : undefined,
+      VOLTA_HOME ? win32.join(VOLTA_HOME, 'bin') : undefined,
     ].filter((directory): directory is string => Boolean(directory?.trim()));
   }
 

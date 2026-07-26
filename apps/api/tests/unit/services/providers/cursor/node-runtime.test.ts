@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { join } from 'node:path';
+import { win32 } from 'node:path';
 import {
   detectNodeRuntime,
   type NodeRuntimeProbeDeps,
@@ -215,8 +215,8 @@ describe('wellKnownNodeDirectories', () => {
     });
 
     expect(dirs[0]).toBe('C:\\nvm\\current');
-    expect(dirs).toContain(join('C:\\Program Files', 'nodejs'));
-    expect(dirs).toContain(join('C:\\Users\\dev\\AppData\\Local', 'Programs', 'nodejs'));
+    expect(dirs).toContain(win32.join('C:\\Program Files', 'nodejs'));
+    expect(dirs).toContain(win32.join('C:\\Users\\dev\\AppData\\Local', 'Programs', 'nodejs'));
     expect(dirs.some((dir) => dir.toLowerCase().includes('volta'))).toBe(false);
   });
 });
