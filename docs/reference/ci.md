@@ -41,9 +41,11 @@ runs are predictable and `main` never loses a green publish path:
   superseding does not leave a half-published conflict.
 - **Scheduled workflows.** Cron-driven runs never cancel in progress.
 
-Reusable workflows invoked from `ci.yml` inherit the caller's group; workflows
-that also support `workflow_dispatch` may declare their own group for direct
-runs (for example `browser-smoke.yml` keys on `github.ref`).
+Reusable workflows do not inherit a `concurrency` group from their caller, but
+cancelling the caller cancels the jobs it invoked, so `ci.yml`'s group already
+governs called workflows on a PR. Callables that also support
+`workflow_dispatch` declare their own group to cover direct runs (for example
+`browser-smoke.yml` keys on `github.ref`).
 
 ## Workflow hygiene
 
