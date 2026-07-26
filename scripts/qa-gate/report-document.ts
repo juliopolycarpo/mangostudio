@@ -3,7 +3,9 @@
 // the stable marker the publisher uses to update the comment in place.
 // I/O (git, git-cliff, artifact files) lives in render-report.ts.
 
+import type { CiDurationComparison } from './ci-durations';
 import type { Metrics } from './collect/types';
+import { renderCiDurationSection } from './render/ci';
 import { COMMENT_MARKER, renderDocument } from './render/document';
 import { inlineCode, shortSha } from './render/format';
 
@@ -60,13 +62,15 @@ export const clampReportBody = (body: string): string => {
 
 /**
  * Compose the full consolidated report comment (ends with the QA marker).
- * // Usage: composeReport(status, { commits, changelog }, baseMetrics, headMetrics)
+ * // Usage: composeReport(status, { commits, changelog }, baseMetrics, headMetrics, ciDurations)
  */
 export const composeReport = (
   status: ReportStatus,
   sections: ReportSections,
   base: Metrics | null,
-  head: Metrics | null
+  head: Metrics | null,
+  ciDurations: CiDurationComparison | null,
+  ciNote: string | null = null
 ): string => {
   const parts = [
     statusBlock(status),
@@ -77,6 +81,7 @@ export const composeReport = (
       CHANGELOG_SECTION_MAX_LENGTH,
       '_…changelog preview truncated…_'
     ),
+    renderCiDurationSection(ciDurations, ciNote),
     // renderDocument ends with COMMENT_MARKER, which must close the comment.
     renderDocument(base, head),
   ];

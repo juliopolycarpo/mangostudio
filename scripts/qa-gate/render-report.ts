@@ -4,10 +4,11 @@
 // GitHub API), renders the commit summary and changelog preview from fetched
 // git data, and writes the final comment markdown to stdout.
 //
-// Usage: bun ./scripts/qa-gate/render-report.ts <context.json> [--head <metrics.json>] [--base <metrics.json>]
+// Usage: bun ./scripts/qa-gate/render-report.ts <context.json> [--head <metrics.json>] [--base <metrics.json>] [--ci <ci-durations.json>]
 
 import { cliffArgs, renderChangelogPreviewSection } from '../lib/changelog';
 import { ROOT_DIR } from '../lib/config';
+import { type CiDurationComparison, parseCiDurationComparison } from './ci-durations';
 import type { Metrics } from './collect/types';
 import { COMMIT_LOG_FORMAT, parseCommitLog, renderCommitsSection } from './commit-log';
 import {
@@ -39,7 +40,12 @@ const stderr = (message: string): void => {
 
 const parseArgs = (
   argv: readonly string[]
-): { contextPath: string; headPath: string | null; basePath: string | null } => {
+): {
+  contextPath: string;
+  headPath: string | null;
+  basePath: string | null;
+  ciPath: string | null;
+} => {
   const [contextPath, ...rest] = argv;
   const flagValue = (flag: string): string | null => {
     const index = rest.indexOf(flag);
@@ -48,11 +54,16 @@ const parseArgs = (
   };
   if (!contextPath) {
     process.stderr.write(
-      'Usage: bun ./scripts/qa-gate/render-report.ts <context.json> [--head <metrics.json>] [--base <metrics.json>]\n'
+      'Usage: bun ./scripts/qa-gate/render-report.ts <context.json> [--head <metrics.json>] [--base <metrics.json>] [--ci <ci-durations.json>]\n'
     );
     process.exit(1);
   }
-  return { contextPath, headPath: flagValue('--head'), basePath: flagValue('--base') };
+  return {
+    contextPath,
+    headPath: flagValue('--head'),
+    basePath: flagValue('--base'),
+    ciPath: flagValue('--ci'),
+  };
 };
 
 const loadMetrics = async (
@@ -107,7 +118,22 @@ const renderChangelog = (baseSha: string, headSha: string): string | null => {
   return renderChangelogPreviewSection(output);
 };
 
-const { contextPath, headPath, basePath } = parseArgs(process.argv.slice(2));
+const loadCiDurations = async (
+  path: string | null
+): Promise<{ durations: CiDurationComparison | null; note: string | null }> => {
+  if (!path || !(await Bun.file(path).exists())) {
+    return { durations: null, note: 'CI duration payload was not produced' };
+  }
+  try {
+    return { durations: parseCiDurationComparison(await Bun.file(path).text()), note: null };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    stderr(`CI durations rejected: ${message}`);
+    return { durations: null, note: message };
+  }
+};
+
+const { contextPath, headPath, basePath, ciPath } = parseArgs(process.argv.slice(2));
 const context = JSON.parse(await Bun.file(contextPath).text()) as ReportContext;
 
 const head = await loadMetrics(
@@ -134,6 +160,7 @@ const base = await loadMetrics(
   },
   'base'
 );
+const ci = await loadCiDurations(ciPath);
 
 const report = composeReport(
   {
@@ -148,7 +175,9 @@ const report = composeReport(
     changelog: renderChangelog(context.baseSha, context.headSha),
   },
   base.metrics,
-  head.metrics
+  head.metrics,
+  ci.durations,
+  ci.note
 );
 
 process.stdout.write(`${report}\n`);

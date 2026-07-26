@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'bun:test';
 
+import { CI_JOBS_MAX_ITEMS } from '../ci-durations';
 import { QA_METRICS_ARTIFACT_NAME as TS_ARTIFACT_NAME } from '../metrics-envelope';
 import {
   CI_WORKFLOW_FILE,
+  collectCiDurations,
   MAX_ARTIFACT_ARCHIVE_BYTES,
+  MAX_CI_JOBS,
   QA_METRICS_ARTIFACT_NAME,
   resolveReportInputs,
 } from './report-pipeline';
@@ -18,11 +21,22 @@ interface FakeArtifact {
   readonly size_in_bytes: number;
 }
 
+interface FakeJob {
+  readonly name: string;
+  readonly status: string;
+  readonly conclusion: string | null;
+  readonly started_at: string | null;
+  readonly completed_at: string | null;
+}
+
 interface FakeOptions {
   readonly pullRequests?: unknown[];
   readonly artifactsByRun?: Record<number, FakeArtifact[]>;
   readonly baselineRuns?: Array<{ id: number; head_sha: string }>;
+  readonly previousRuns?: unknown[];
   readonly archives?: Record<number, Uint8Array>;
+  readonly jobsByRun?: Record<number, FakeJob[]>;
+  readonly jobErrorsByRun?: Record<number, string>;
 }
 
 class FakeGithub {
@@ -35,6 +49,7 @@ class FakeGithub {
     pulls: { list: 'pulls-list-route' },
     actions: {
       listWorkflowRunArtifacts: 'list-artifacts-route',
+      listJobsForWorkflowRun: 'list-jobs-route',
       downloadArtifact: ({ artifact_id }: { artifact_id: number }) => {
         this.downloadedArtifactIds.push(artifact_id);
         const archive = this.options.archives?.[artifact_id] ?? new Uint8Array([123]);
@@ -42,9 +57,9 @@ class FakeGithub {
       },
       listWorkflowRuns: (params: Record<string, unknown>) => {
         this.workflowRunQueries.push(params);
-        const runs = (this.options.baselineRuns ?? []).filter(
-          (run) => run.head_sha === params.head_sha
-        );
+        const runs = params.head_sha
+          ? (this.options.baselineRuns ?? []).filter((run) => run.head_sha === params.head_sha)
+          : (this.options.previousRuns ?? []);
         return Promise.resolve({ data: { workflow_runs: runs } });
       },
     },
@@ -57,9 +72,17 @@ class FakeGithub {
     if (route === this.rest.actions.listWorkflowRunArtifacts) {
       return Promise.resolve(this.options.artifactsByRun?.[params.run_id as number] ?? []);
     }
+    if (route === this.rest.actions.listJobsForWorkflowRun) {
+      const runId = params.run_id as number;
+      const error = this.options.jobErrorsByRun?.[runId];
+      if (error) throw new Error(error);
+      return Promise.resolve(this.options.jobsByRun?.[runId] ?? []);
+    }
     throw new Error('unexpected paginate route');
   };
 }
+
+const FORK_REPOSITORY = { owner: { login: 'forker' } };
 
 const context = {
   repo: { owner: 'mango', repo: 'studio' },
@@ -69,7 +92,7 @@ const context = {
       event: 'pull_request',
       head_sha: HEAD_SHA,
       head_branch: 'feat/thing',
-      head_repository: { owner: { login: 'forker' } },
+      head_repository: FORK_REPOSITORY,
       html_url: 'https://example.test/runs/42',
     },
   },
@@ -89,9 +112,22 @@ const artifact = (id: number, overrides: Partial<FakeArtifact> = {}): FakeArtifa
   ...overrides,
 });
 
+const job = (name: string, overrides: Partial<FakeJob> = {}): FakeJob => ({
+  name,
+  status: 'completed',
+  conclusion: 'success',
+  started_at: '2026-07-25T00:00:00Z',
+  completed_at: '2026-07-25T00:01:00Z',
+  ...overrides,
+});
+
 describe('artifact name pinning', () => {
   it('matches the TypeScript collector constant', () => {
     expect(QA_METRICS_ARTIFACT_NAME).toBe(TS_ARTIFACT_NAME);
+  });
+
+  it('caps collected jobs at the schema bound so oversized runs still render', () => {
+    expect(MAX_CI_JOBS).toBe(CI_JOBS_MAX_ITEMS);
   });
 });
 
@@ -122,8 +158,14 @@ describe('resolveReportInputs', () => {
     const github = new FakeGithub({
       pullRequests: [openPr],
       baselineRuns: [{ id: 90, head_sha: BASE_SHA }],
+      previousRuns: [{ id: 41, pull_requests: [{ number: 7 }] }],
       artifactsByRun: { 42: [artifact(1)], 90: [artifact(2)] },
       archives: { 1: new Uint8Array([104]), 2: new Uint8Array([98]) },
+      jobsByRun: {
+        42: [job('Test / Run tests')],
+        90: [job('Test / Run tests')],
+        41: [job('Test / Run tests')],
+      },
     });
 
     const result = await resolveReportInputs({ github, context });
@@ -131,6 +173,47 @@ describe('resolveReportInputs', () => {
     expect(result.skip).toBeNull();
     expect(result.headArchive).toEqual(new Uint8Array([104]));
     expect(result.baseArchive).toEqual(new Uint8Array([98]));
+    expect(result.ciDurations).toEqual({
+      base: {
+        runId: 90,
+        error: null,
+        jobs: [
+          {
+            name: 'Test / Run tests',
+            status: 'completed',
+            conclusion: 'success',
+            startedAt: '2026-07-25T00:00:00Z',
+            completedAt: '2026-07-25T00:01:00Z',
+          },
+        ],
+      },
+      head: {
+        runId: 42,
+        error: null,
+        jobs: [
+          {
+            name: 'Test / Run tests',
+            status: 'completed',
+            conclusion: 'success',
+            startedAt: '2026-07-25T00:00:00Z',
+            completedAt: '2026-07-25T00:01:00Z',
+          },
+        ],
+      },
+      previous: {
+        runId: 41,
+        error: null,
+        jobs: [
+          {
+            name: 'Test / Run tests',
+            status: 'completed',
+            conclusion: 'success',
+            startedAt: '2026-07-25T00:00:00Z',
+            completedAt: '2026-07-25T00:01:00Z',
+          },
+        ],
+      },
+    });
     expect(github.downloadedArtifactIds).toEqual([1, 2]);
     expect(github.workflowRunQueries).toEqual([
       {
@@ -141,6 +224,15 @@ describe('resolveReportInputs', () => {
         event: 'push',
         status: 'success',
         per_page: 10,
+      },
+      {
+        owner: 'mango',
+        repo: 'studio',
+        workflow_id: CI_WORKFLOW_FILE,
+        branch: 'feat/thing',
+        event: 'pull_request',
+        status: 'success',
+        per_page: 100,
       },
     ]);
     expect(result.reportContext).toEqual({
@@ -192,5 +284,90 @@ describe('resolveReportInputs', () => {
 
     expect(result.headArchive).toBeNull();
     expect(result.reportContext.headArtifact.reason).toContain('no qa-metrics artifact');
+  });
+
+  it('keeps Actions jobs API failures report-only', async () => {
+    const github = new FakeGithub({
+      pullRequests: [openPr],
+      artifactsByRun: { 42: [artifact(1)] },
+      jobErrorsByRun: { 42: 'temporary jobs API outage' },
+    });
+
+    const result = await resolveReportInputs({ github, context });
+
+    expect(result.skip).toBeNull();
+    expect(result.ciDurations.head).toEqual({
+      runId: 42,
+      error: 'Actions jobs API failed: temporary jobs API outage',
+      jobs: [],
+    });
+  });
+
+  it('matches the previous fork run, whose pull_requests array is always empty', async () => {
+    const github = new FakeGithub({
+      pullRequests: [openPr],
+      previousRuns: [
+        { id: 41, pull_requests: [], head_branch: 'feat/thing', head_repository: FORK_REPOSITORY },
+      ],
+      artifactsByRun: { 42: [artifact(1)] },
+      jobsByRun: { 41: [job('Test / Run tests')] },
+    });
+
+    const result = await resolveReportInputs({ github, context });
+
+    expect(result.ciDurations.previous.runId).toBe(41);
+    expect(result.ciDurations.previous.error).toBeNull();
+  });
+
+  it('ignores same-branch runs from a different fork', async () => {
+    const github = new FakeGithub({
+      pullRequests: [openPr],
+      previousRuns: [
+        {
+          id: 41,
+          pull_requests: [],
+          head_branch: 'feat/thing',
+          head_repository: { owner: { login: 'someone-else' } },
+        },
+      ],
+      artifactsByRun: { 42: [artifact(1)] },
+    });
+
+    const result = await resolveReportInputs({ github, context });
+
+    expect(result.ciDurations.previous.runId).toBeNull();
+    expect(result.ciDurations.previous.error).toContain('no previous successful CI run');
+  });
+});
+
+describe('collectCiDurations', () => {
+  it('preserves in-flight jobs with their missing completion timestamp', async () => {
+    const github = new FakeGithub({
+      jobsByRun: {
+        42: [
+          job('QA Metrics / Collect', {
+            status: 'in_progress',
+            conclusion: null,
+            completed_at: null,
+          }),
+        ],
+      },
+    });
+
+    const result = await collectCiDurations(github, context, 42);
+
+    expect(result).toEqual({
+      runId: 42,
+      error: null,
+      jobs: [
+        {
+          name: 'QA Metrics / Collect',
+          status: 'in_progress',
+          conclusion: null,
+          startedAt: '2026-07-25T00:00:00Z',
+          completedAt: null,
+        },
+      ],
+    });
   });
 });
