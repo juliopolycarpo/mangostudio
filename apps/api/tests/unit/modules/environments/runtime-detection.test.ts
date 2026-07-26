@@ -84,6 +84,7 @@ describe('runtime detection cache', () => {
     await Promise.resolve();
     expect(probeCount).toBe(2);
     resolveProbe?.('v23.1.0');
+    expect((await forced)?.effective?.version).toBe('v23.1.0');
     expect(await concurrentForced).toEqual(await forced);
     expect((await service.getRuntimeStatus('node'))?.effective?.version).toBe('v23.1.0');
   });

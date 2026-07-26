@@ -96,7 +96,7 @@ export const CODEX_AGENT_CLI_DEFINITION: ExternalAgentCliDefinition = {
 
 // Verified on Linux 2026-07-26: `cursor-agent --version` printed
 // `2026.07.16-899851b`.
-const CURSOR_AGENT_CLI_DEFINITION: ExternalAgentCliDefinition = {
+export const CURSOR_AGENT_CLI_DEFINITION: ExternalAgentCliDefinition = {
   kind: 'cli',
   targetId: 'cursor',
   runtime: {

@@ -6,6 +6,7 @@ import { createAgentCliDetectionService } from '../../../../src/modules/environm
 import {
   CLAUDE_AGENT_CLI_DEFINITION,
   CODEX_AGENT_CLI_DEFINITION,
+  CURSOR_AGENT_CLI_DEFINITION,
   MANGOSTUDIO_AGENT_CLI_DEFINITION,
   parseClaudeVersion,
   parseCodexVersion,
@@ -328,6 +329,38 @@ describe('agent CLI detection', () => {
         params: { locationId: 'claude-settings', path: settingsPath },
       },
     ]);
+  });
+
+  it('reads Cursor sign-in from a config key rather than a credential file', async () => {
+    const configHome = '/home/tester/.cursor';
+    const cliConfig = `${configHome}/cli-config.json`;
+    const serviceFor = (contents: string) =>
+      createAgentCliDetectionService({
+        definitions: [CURSOR_AGENT_CLI_DEFINITION],
+        createScanDeps: (definition) => scanDeps(definition),
+        createPathEnv: () => LINUX_ENV,
+        fs: new FakeAuthSignalFs(new Map([[cliConfig, contents]]), new Set([configHome])),
+        describeLocations: () => [],
+      });
+
+    const signedIn = await serviceFor(
+      JSON.stringify({ authInfo: { id: 'ada' } })
+    ).getAgentCliStatus('cursor');
+    const signedOut = await serviceFor(JSON.stringify({ editor: 'vim' })).getAgentCliStatus(
+      'cursor'
+    );
+
+    expect(signedIn).toMatchObject({
+      targetId: 'cursor',
+      configHome,
+      configHomeExists: true,
+      authenticated: true,
+      authSignal: 'config-key-present',
+      health: 'ok',
+    });
+    expect(findingCodes(signedIn)).toEqual([]);
+    expect(signedOut?.authenticated).toBe(false);
+    expect(findingCodes(signedOut)).toContain('not-authenticated');
   });
 
   it('describes the running MangoStudio process from in-process identity and the guarded session', async () => {
