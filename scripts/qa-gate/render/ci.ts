@@ -156,7 +156,7 @@ export const renderCiDurationSection = (
   const notes = [
     unavailableNote('Base', durations.base),
     unavailableNote('Head', durations.head),
-    unavailableNote('Previous PR run', durations.previous),
+    // The previous-run reason is already spelled out by previousRunLine.
     inFlightNote('Base', durations.base),
     inFlightNote('Head', durations.head),
     inFlightNote('Previous PR run', durations.previous),
