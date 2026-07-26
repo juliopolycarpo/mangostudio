@@ -77,10 +77,9 @@ async function getAgentCliOrNotFound(
   service: AgentCliDetectionService,
   targetId: LibraryTargetId,
   force: boolean,
-  selfAuthenticated: boolean,
   set: { status?: number | string }
 ): Promise<AgentCliStatus | ApiErrorResponse> {
-  const status = await service.getAgentCliStatus(targetId, { force, selfAuthenticated });
+  const status = await service.getAgentCliStatus(targetId, { force });
   if (status) return status;
 
   set.status = 404;
@@ -152,17 +151,12 @@ export function createEnvironmentRoutes(
         },
       }
     )
-    .get(
-      '/environments/agents',
-      ({ session }) => agentService.listAgentCliStatuses({ selfAuthenticated: session !== null }),
-      {
-        response: { 200: AgentCliStatusListSchema },
-      }
-    )
+    .get('/environments/agents', () => agentService.listAgentCliStatuses(), {
+      response: { 200: AgentCliStatusListSchema },
+    })
     .get(
       '/environments/agents/:targetId',
-      ({ params, session, set }) =>
-        getAgentCliOrNotFound(agentService, params.targetId, false, session !== null, set),
+      ({ params, set }) => getAgentCliOrNotFound(agentService, params.targetId, false, set),
       {
         params: agentTargetParams,
         response: {
@@ -173,8 +167,7 @@ export function createEnvironmentRoutes(
     )
     .post(
       '/environments/agents/:targetId/probe',
-      ({ params, session, set }) =>
-        getAgentCliOrNotFound(agentService, params.targetId, true, session !== null, set),
+      ({ params, set }) => getAgentCliOrNotFound(agentService, params.targetId, true, set),
       {
         params: agentTargetParams,
         response: {

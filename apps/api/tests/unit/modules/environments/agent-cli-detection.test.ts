@@ -330,7 +330,7 @@ describe('agent CLI detection', () => {
     ]);
   });
 
-  it('describes the running MangoStudio process from in-process identity and session state', async () => {
+  it('describes the running MangoStudio process from in-process identity and the guarded session', async () => {
     const configHome = '/home/tester/.mango';
     const service = createAgentCliDetectionService({
       definitions: [MANGOSTUDIO_AGENT_CLI_DEFINITION],
@@ -343,9 +343,7 @@ describe('agent CLI detection', () => {
       now: () => 1_700_000_000_000,
     });
 
-    const status = await service.getAgentCliStatus('mangostudio', {
-      selfAuthenticated: true,
-    });
+    const status = await service.getAgentCliStatus('mangostudio');
 
     expect(status).toMatchObject({
       id: 'mangostudio',

@@ -30,7 +30,6 @@ import { createRuntimeDetectionService, type RuntimeDetectionService } from './r
 
 interface AgentCliDetectionOptions {
   readonly force?: boolean;
-  readonly selfAuthenticated?: boolean;
 }
 
 export interface AgentCliDetectionService {
@@ -142,8 +141,7 @@ export function createAgentCliDetectionService(
 
   const describeSelf = (
     definition: Extract<AgentCliDefinition, { kind: 'self' }>,
-    env: PathEnv,
-    detectOptions?: AgentCliDetectionOptions
+    env: PathEnv
   ): AgentCliStatus => {
     const configHome = getSelfConfigHome();
     const configHomeExists = directoryExists(configHome, fs);
@@ -151,9 +149,6 @@ export function createAgentCliDetectionService(
     const findings: RuntimeFinding[] = [];
     if (!configHomeExists) {
       findings.push({ code: 'config-home-missing', params: { configHome } });
-    }
-    if (!detectOptions?.selfAuthenticated) {
-      findings.push({ code: 'not-authenticated', params: { targetId: definition.targetId } });
     }
     appendLocationFindings(findings, locations);
 
@@ -177,7 +172,9 @@ export function createAgentCliDetectionService(
       probedAtMs: now(),
       configHome,
       configHomeExists,
-      authenticated: detectOptions?.selfAuthenticated ?? false,
+      // Every route that reaches this service is behind `requireAuth`, so the
+      // running process only ever answers on behalf of a signed-in session.
+      authenticated: true,
       authSignal: 'session',
       locations,
     };
@@ -228,26 +225,34 @@ export function createAgentCliDetectionService(
     };
   };
 
+  const describeTarget = (
+    definition: AgentCliDefinition,
+    env: PathEnv,
+    detectOptions?: AgentCliDetectionOptions
+  ): Promise<AgentCliStatus> =>
+    definition.kind === 'self'
+      ? Promise.resolve(describeSelf(definition, env))
+      : describeExternal(definition, env, detectOptions);
+
   const getAgentCliStatus = (
     targetId: LibraryTargetId,
     detectOptions?: AgentCliDetectionOptions
   ): Promise<AgentCliStatus | null> => {
     const definition = definitionsById.get(targetId);
     if (!definition) return Promise.resolve(null);
-    const env = createPathEnv();
-    return definition.kind === 'self'
-      ? Promise.resolve(describeSelf(definition, env, detectOptions))
-      : describeExternal(definition, env, detectOptions);
+    return describeTarget(definition, createPathEnv(), detectOptions);
   };
 
   return {
     getAgentCliStatus,
 
-    async listAgentCliStatuses(detectOptions?: AgentCliDetectionOptions) {
-      const statuses = await Promise.all(
-        definitions.map((definition) => getAgentCliStatus(definition.targetId, detectOptions))
+    listAgentCliStatuses(detectOptions?: AgentCliDetectionOptions) {
+      // One env snapshot per listing: every target reads the same process state,
+      // and rebuilding it per definition re-copies process.env and re-reads config.
+      const env = createPathEnv();
+      return Promise.all(
+        definitions.map((definition) => describeTarget(definition, env, detectOptions))
       );
-      return statuses.filter((status): status is AgentCliStatus => status !== null);
     },
 
     resetAgentCliCache(targetId?: LibraryTargetId) {
