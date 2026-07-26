@@ -28,6 +28,7 @@ import { evaluateInstallGuard } from '../domain/install-guards';
 import { INSTALL_RECIPES, type InstallRecipe } from '../domain/install-recipes';
 import { assertRecipeInput } from '../domain/recipe-input';
 import {
+  type CompleteInstallRun,
   createInstallRunRepository,
   type InstallRunRepository,
 } from '../infrastructure/install-run-repository';
@@ -480,6 +481,30 @@ export function createInstallService(overrides: Partial<InstallServiceDeps> = {}
     }
   };
 
+  /**
+   * The terminal audit write must never change the outcome it records: a run
+   * that exited 0 still succeeded if the row could not be updated. On failure
+   * the row is left `running` for `settleOrphanedRun` to pick up, and the
+   * problem is reported on the stream instead of being raised into the
+   * execution catch, where it would be recorded as an execution failure.
+   */
+  const recordTerminal = async (
+    active: ActiveInstall,
+    result: CompleteInstallRun
+  ): Promise<void> => {
+    try {
+      await deps.repository.complete(active.runId, active.userId, result);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : 'Unknown persistence failure.';
+      active.stream.publish({
+        type: 'log',
+        stream: 'system',
+        line: `Install audit row was not updated: ${detail}`,
+        done: false,
+      });
+    }
+  };
+
   const executeRun = async (
     active: ActiveInstall,
     recipe: InstallRecipe,
@@ -507,7 +532,7 @@ export function createInstallService(overrides: Partial<InstallServiceDeps> = {}
           },
         }
       );
-      await deps.repository.complete(active.runId, active.userId, result);
+      await recordTerminal(active, result);
       await publishProbes(recipe, active.stream);
       active.stream.publish({
         type: 'exit',
@@ -518,18 +543,16 @@ export function createInstallService(overrides: Partial<InstallServiceDeps> = {}
         done: true,
       });
     } catch (error) {
-      const finishedAt = deps.now();
-      try {
-        await deps.repository.complete(active.runId, active.userId, {
-          finishedAt,
-          exitCode: null,
-          status: 'spawn-failed',
-          truncated: false,
-        });
-      } catch {
-        // Preserve the original execution failure in the stream. The initial
-        // audit row remains as evidence if its terminal update also fails.
-      }
+      // The runner reports a failed spawn through its own terminal status, so a
+      // throw here is an unexpected execution failure — not evidence that the
+      // installer never started. Recording `spawn-failed` would make the audit
+      // trail wrong in exactly the case where it has to be trusted.
+      await recordTerminal(active, {
+        finishedAt: deps.now(),
+        exitCode: null,
+        status: 'failed',
+        truncated: false,
+      });
       active.stream.publish({
         type: 'error',
         error: error instanceof Error ? error.message : 'Install execution failed.',
@@ -550,6 +573,31 @@ export function createInstallService(overrides: Partial<InstallServiceDeps> = {}
     }
   };
 
+  /**
+   * A run is `running` only while this process holds it in memory, so a
+   * `running` row with no in-memory owner outlived the process that spawned it.
+   * Such a row can never complete, be cancelled, or produce a terminal stream
+   * event, so it is settled on the next read instead of being left pending
+   * forever. The outcome is genuinely unknown, which is what `interrupted`
+   * reports — the installer may well have finished.
+   */
+  const settleOrphanedRun = async (run: InstallRun, userId: string): Promise<InstallRun> => {
+    if (run.status !== 'running' || activeByRun.has(run.id)) return run;
+    const finishedAt = run.finishedAt ?? deps.now();
+    try {
+      await deps.repository.complete(run.id, userId, {
+        finishedAt,
+        exitCode: run.exitCode,
+        status: 'interrupted',
+        truncated: run.truncated,
+      });
+    } catch {
+      // Reporting the honest status matters more than persisting it, and the
+      // next read of this row retries the update.
+    }
+    return { ...run, finishedAt, status: 'interrupted' };
+  };
+
   const historicalStream = async function* (run: InstallRun): AsyncIterable<InstallStreamEvent> {
     try {
       const content = await deps.readLog(deps.getLogPath(run.id));
@@ -560,16 +608,16 @@ export function createInstallService(overrides: Partial<InstallServiceDeps> = {}
     } catch {
       // The audit row remains useful even if its bounded log was removed.
     }
-    if (run.status !== 'running') {
-      yield {
-        type: 'exit',
-        code: run.exitCode,
-        status: run.status,
-        truncated: run.truncated,
-        durationMs: terminalDuration(run),
-        done: true,
-      };
-    }
+    // Always terminal. A replay that ends without a `done` frame leaves the
+    // client waiting on an EventSource that will never produce another event.
+    yield {
+      type: 'exit',
+      code: run.exitCode,
+      status: run.status === 'running' ? 'interrupted' : run.status,
+      truncated: run.truncated,
+      durationMs: terminalDuration(run),
+      done: true,
+    };
   };
 
   return {
@@ -693,17 +741,17 @@ export function createInstallService(overrides: Partial<InstallServiceDeps> = {}
             ...recipe.env,
             ...(requirements.nvmDir && { NVM_DIR: requirements.nvmDir }),
           };
+          // The install outlives the request that starts it: the response is a
+          // run id and the log arrives on a separate stream. Binding the child
+          // to `context.signal` would let a closed tab SIGKILL an installer
+          // mid-write, and third-party installers have no rollback. Once the
+          // child is spawned, cancellation belongs to POST /:runId/cancel.
+          if (context.signal?.aborted) {
+            throw new InstallPreparationError('Install request was cancelled before it started.');
+          }
+
           const runId = deps.generateId();
           const startedAt = deps.now();
-
-          await deps.repository.create({
-            id: runId,
-            userId: context.userId,
-            recipeId: recipe.id,
-            argv,
-            startedAt,
-          });
-
           const active: ActiveInstall = {
             runId,
             userId: context.userId,
@@ -711,19 +759,28 @@ export function createInstallService(overrides: Partial<InstallServiceDeps> = {}
             abortController: new AbortController(),
             stream: createEventBuffer(),
           };
-          const abortFromRequest = () => active.abortController.abort('request_cancelled');
-          if (context.signal?.aborted) {
-            abortFromRequest();
-          } else {
-            context.signal?.addEventListener('abort', abortFromRequest, { once: true });
-          }
 
+          // Registered before the audit row exists so a concurrent read can
+          // never see a `running` row that this process does not yet own and
+          // mistake it for one orphaned by a restart.
           activeByRecipe.set(recipe.id, active);
           activeByRun.set(runId, active);
+          try {
+            await deps.repository.create({
+              id: runId,
+              userId: context.userId,
+              recipeId: recipe.id,
+              argv,
+              startedAt,
+            });
+          } catch (error) {
+            activeByRecipe.delete(recipe.id);
+            activeByRun.delete(runId);
+            throw error;
+          }
+
           rememberStream(runId, context.userId, active.stream);
-          void executeRun(active, recipe, argv, recipeEnv, artifact).finally(() => {
-            context.signal?.removeEventListener('abort', abortFromRequest);
-          });
+          void executeRun(active, recipe, argv, recipeEnv, artifact);
           return { runId, attached: false };
         } catch (error) {
           await artifact?.cleanup().catch(() => undefined);
@@ -745,14 +802,19 @@ export function createInstallService(overrides: Partial<InstallServiceDeps> = {}
       if (!run) return null;
       const active = activeByRun.get(runId);
       if (!active || active.userId !== userId) {
+        // There is no child to signal. If the row still claims to be running it
+        // belongs to a process that no longer exists, so settle it here rather
+        // than report a cancellation that can never be honoured.
+        await settleOrphanedRun(run, userId);
         return { runId, cancellationRequested: false };
       }
       active.abortController.abort('user_cancelled');
       return { runId, cancellationRequested: true };
     },
 
-    listRuns(userId) {
-      return deps.repository.list(userId);
+    async listRuns(userId) {
+      const runs = await deps.repository.list(userId);
+      return Promise.all(runs.map((run) => settleOrphanedRun(run, userId)));
     },
 
     async getRunStream(runId, userId) {
@@ -760,7 +822,7 @@ export function createInstallService(overrides: Partial<InstallServiceDeps> = {}
       if (!run) return null;
       const recent = recentStreams.get(runId);
       if (recent?.userId === userId) return recent.stream.subscribe();
-      return historicalStream(run);
+      return historicalStream(await settleOrphanedRun(run, userId));
     },
   };
 }

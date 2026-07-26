@@ -405,4 +405,174 @@ describe('install service', () => {
 
     controlled.finish();
   });
+
+  it('keeps a started install alive when the starting request disconnects', async () => {
+    const detection = createDetectionServices();
+    const memory = createMemoryRepository();
+    const controlled = deferredRunner();
+    let runnerSignal: AbortSignal | undefined;
+    const runner: InstallRunner = {
+      run(command, options) {
+        runnerSignal = options?.signal;
+        return controlled.runner.run(command, options);
+      },
+    };
+    const service = createInstallService({
+      recipes: [getInstallRecipe('bun.update')],
+      ...detection,
+      repository: memory.repository,
+      runner,
+      resolveGuard: () => ALLOWED_GUARD,
+      generateId: () => 'detached-run',
+      now: () => 1_700_000_000_000,
+      platform: 'linux',
+    });
+
+    const controller = new AbortController();
+    const started = await service.start(
+      { recipeId: 'bun.update', input: NO_INPUT },
+      { ...REQUEST_CONTEXT, signal: controller.signal }
+    );
+    // The client closed the tab right after receiving its run id.
+    controller.abort('client_disconnected');
+    await Bun.sleep(0);
+    expect(runnerSignal?.aborted).toBe(false);
+
+    controlled.finish();
+    const events = await collectEvents(
+      await service.getRunStream(started.runId, REQUEST_CONTEXT.userId)
+    );
+
+    expect(events.at(-1)).toMatchObject({ type: 'exit', status: 'succeeded', done: true });
+    expect(memory.runs.get('detached-run')?.status).toBe('succeeded');
+  });
+
+  it('settles a run orphaned by a restart and always ends its replay', async () => {
+    const detection = createDetectionServices();
+    const memory = createMemoryRepository();
+    // A row left behind by a process that stopped mid-install: still `running`,
+    // but no in-memory run owns it and nothing can ever complete it.
+    memory.runs.set('orphan-run', {
+      id: 'orphan-run',
+      recipeId: 'bun.update',
+      argv: ['bun', 'upgrade'],
+      startedAt: 1_700_000_000_000,
+      finishedAt: null,
+      exitCode: null,
+      status: 'running',
+      truncated: false,
+    });
+    const service = createInstallService({
+      recipes: [getInstallRecipe('bun.update')],
+      ...detection,
+      repository: memory.repository,
+      resolveGuard: () => ALLOWED_GUARD,
+      now: () => 1_700_000_005_000,
+      readLog: () => Promise.resolve('resolving dependencies\n'),
+      platform: 'linux',
+    });
+
+    const [listed] = await service.listRuns(REQUEST_CONTEXT.userId);
+    expect(listed?.status).toBe('interrupted');
+    expect(listed?.finishedAt).toBe(1_700_000_005_000);
+    expect(memory.runs.get('orphan-run')?.status).toBe('interrupted');
+
+    expect(await service.cancel('orphan-run', REQUEST_CONTEXT.userId)).toEqual({
+      runId: 'orphan-run',
+      cancellationRequested: false,
+    });
+
+    const events = await collectEvents(
+      await service.getRunStream('orphan-run', REQUEST_CONTEXT.userId)
+    );
+
+    expect(events.at(-1)).toEqual({
+      type: 'exit',
+      code: null,
+      status: 'interrupted',
+      truncated: false,
+      durationMs: 5000,
+      done: true,
+    });
+  });
+
+  it('records an execution failure without claiming the installer never started', async () => {
+    const detection = createDetectionServices();
+    const memory = createMemoryRepository();
+    const runner: InstallRunner = {
+      run: () => Promise.reject(new Error('runner exploded')),
+    };
+    const service = createInstallService({
+      recipes: [getInstallRecipe('bun.update')],
+      ...detection,
+      repository: memory.repository,
+      runner,
+      resolveGuard: () => ALLOWED_GUARD,
+      generateId: () => 'exploded-run',
+      now: () => 1_700_000_002_000,
+      platform: 'linux',
+    });
+
+    const started = await service.start(
+      { recipeId: 'bun.update', input: NO_INPUT },
+      REQUEST_CONTEXT
+    );
+    const events = await collectEvents(
+      await service.getRunStream(started.runId, REQUEST_CONTEXT.userId)
+    );
+
+    expect(events.at(-1)).toMatchObject({ type: 'error', done: true });
+    // `spawn-failed` would assert the installer never ran, which this failure
+    // does not establish.
+    expect(memory.runs.get('exploded-run')).toMatchObject({
+      status: 'failed',
+      exitCode: null,
+      finishedAt: 1_700_000_002_000,
+    });
+  });
+
+  it('reports the real outcome when the terminal audit write fails', async () => {
+    const detection = createDetectionServices();
+    const memory = createMemoryRepository();
+    const repository: InstallRunRepository = {
+      ...memory.repository,
+      complete: () => Promise.reject(new Error('database is locked')),
+    };
+    const runner: InstallRunner = {
+      run: () =>
+        Promise.resolve({
+          exitCode: 0,
+          status: 'succeeded',
+          truncated: false,
+          finishedAt: 1_700_000_001_000,
+          durationMs: 1000,
+        }),
+    };
+    const service = createInstallService({
+      recipes: [getInstallRecipe('bun.update')],
+      ...detection,
+      repository,
+      runner,
+      resolveGuard: () => ALLOWED_GUARD,
+      generateId: () => 'unrecorded-run',
+      now: () => 1_700_000_000_000,
+      platform: 'linux',
+    });
+
+    const started = await service.start(
+      { recipeId: 'bun.update', input: NO_INPUT },
+      REQUEST_CONTEXT
+    );
+    const events = await collectEvents(
+      await service.getRunStream(started.runId, REQUEST_CONTEXT.userId)
+    );
+
+    expect(events).toContainEqual({
+      type: 'log',
+      stream: 'system',
+      line: 'Install audit row was not updated: database is locked',
+      done: false,
+    });
+    expect(events.at(-1)).toMatchObject({ type: 'exit', code: 0, status: 'succeeded', done: true });
+  });
 });

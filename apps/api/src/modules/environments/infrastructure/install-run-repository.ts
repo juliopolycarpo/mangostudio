@@ -21,7 +21,7 @@ interface CreateInstallRun {
   readonly startedAt: number;
 }
 
-interface CompleteInstallRun {
+export interface CompleteInstallRun {
   readonly finishedAt: number;
   readonly exitCode: number | null;
   readonly status: Exclude<InstallRunStatus, 'running'>;

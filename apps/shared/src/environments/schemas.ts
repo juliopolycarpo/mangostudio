@@ -262,6 +262,12 @@ export const InstallRunStatusSchema = Type.Union([
   Type.Literal('cancelled'),
   Type.Literal('timed-out'),
   Type.Literal('spawn-failed'),
+  /**
+   * The server stopped while the installer was running. The installer may have
+   * completed, partially completed, or never finished — the outcome is unknown
+   * and is deliberately not reported as a failure.
+   */
+  Type.Literal('interrupted'),
 ]);
 
 export const InstallRunSchema = Type.Object({
