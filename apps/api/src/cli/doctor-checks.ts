@@ -17,8 +17,11 @@ import {
   getAuthSecretValidationMessage,
   type MangoConfig,
 } from '../lib/config';
+import { type FsProbe, nearestExistingWritable } from '../lib/fs-probe';
 import type { ServerState } from '../lib/server-state';
 import type { CursorRuntimeChainStep } from '../services/providers/cursor/runtime-availability';
+
+export type { FsProbe } from '../lib/fs-probe';
 
 export type CheckStatus = 'ok' | 'warn' | 'fail';
 
@@ -26,12 +29,6 @@ export interface CheckResult {
   label: string;
   status: CheckStatus;
   detail: string;
-}
-
-/** Filesystem probe seam so checks run without touching the real disk in tests. */
-export interface FsProbe {
-  exists(path: string): boolean;
-  isWritable(path: string): boolean;
 }
 
 export interface BuildIdentityInput {
@@ -201,21 +198,4 @@ function buildsDiffer(
 
 function isUsableDir(path: string, fs: FsProbe): boolean {
   return fs.exists(path) ? fs.isWritable(path) : nearestExistingWritable(path, fs);
-}
-
-/**
- * Whether a not-yet-created path can be made: walk up to the nearest existing
- * ancestor and check that it is writable. Handles fresh installs where several
- * directory levels (e.g. ~/.mango/logs) do not exist yet.
- */
-function nearestExistingWritable(path: string, fs: FsProbe): boolean {
-  let current = dirname(path);
-  while (!fs.exists(current)) {
-    const parent = dirname(current);
-    if (parent === current) {
-      return false; // reached the filesystem root without finding anything
-    }
-    current = parent;
-  }
-  return fs.isWritable(current);
 }

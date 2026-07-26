@@ -1368,6 +1368,15 @@ export const messages: Messages = {
     disclaimer: 'Artificial Intelligence can make mistakes. Please double-check the results.',
   },
 
+  library: {
+    targets: {
+      mangostudio: 'MangoStudio',
+      claude: 'Claude Code',
+      codex: 'Codex',
+      cursor: 'Cursor',
+    },
+  },
+
   providers: {
     gemini: 'Google Gemini',
     anthropic: 'Anthropic',

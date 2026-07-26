@@ -23,7 +23,8 @@
         "tests/**/*.{test,integration}.ts",
         "tests/support/fixtures/mcp/echo-stdio-server.ts"
       ],
-      "project": ["src/**/*.{ts,mjs}", "tests/**/*.ts"]
+      "project": ["src/**/*.{ts,mjs}", "tests/**/*.ts"],
+      "ignoreBinaries": ["mkfifo"]
     },
     "apps/frontend": {
       "entry": ["tests/**/*.test.{ts,tsx}", "tests/support/setup/motion-react-stub.tsx"],
