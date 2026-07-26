@@ -12,7 +12,14 @@ import type {
   VersionManagerStatus,
 } from '@mangostudio/shared/environments';
 import type { LibraryTargetId } from '@mangostudio/shared/library';
-import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+  type QueryClient,
+  type QueryKey,
+  useMutation,
+  useQueries,
+  useQuery,
+  useQueryClient,
+} from '@tanstack/react-query';
 import { useMemo } from 'react';
 import { probeAgentCli, probeRuntime, probeVersionManager } from '../api';
 import { findingSeverity } from '../format';
@@ -66,6 +73,25 @@ export function useRuntimesScreenData() {
   };
 }
 
+/**
+ * Replaces one entry of a cached status list with a freshly probed one.
+ *
+ * `setQueryData` treats an updater that returns undefined as a no-op, so a list
+ * that is not cached yet would silently swallow the probe result. Invalidate in
+ * that case: the next read refetches rather than showing stale data.
+ */
+function writeProbedStatus<T>(
+  queryClient: QueryClient,
+  queryKey: QueryKey,
+  status: T,
+  isSameEntity: (entry: T) => boolean
+) {
+  const written = queryClient.setQueryData(queryKey, (current: T[] | undefined) =>
+    current?.map((entry) => (isSameEntity(entry) ? status : entry))
+  );
+  if (!written) void queryClient.invalidateQueries({ queryKey });
+}
+
 /** Forces a fresh probe and writes the result straight into the list cache. */
 export function useProbeRuntime() {
   const queryClient = useQueryClient();
@@ -73,8 +99,11 @@ export function useProbeRuntime() {
   return useMutation({
     mutationFn: (id: RuntimeId) => probeRuntime(id),
     onSuccess: (status) => {
-      queryClient.setQueryData(environmentKeys.runtimes(), (current: RuntimeStatus[] | undefined) =>
-        current?.map((entry) => (entry.id === status.id ? status : entry))
+      writeProbedStatus(
+        queryClient,
+        environmentKeys.runtimes(),
+        status,
+        (entry: RuntimeStatus) => entry.id === status.id
       );
     },
   });
@@ -86,10 +115,11 @@ export function useProbeVersionManager() {
   return useMutation({
     mutationFn: (id: VersionManagerId) => probeVersionManager(id),
     onSuccess: (status) => {
-      queryClient.setQueryData(
+      writeProbedStatus(
+        queryClient,
         environmentKeys.versionManagers(),
-        (current: VersionManagerStatus[] | undefined) =>
-          current?.map((entry) => (entry.id === status.id ? status : entry))
+        status,
+        (entry: VersionManagerStatus) => entry.id === status.id
       );
     },
   });
@@ -101,8 +131,11 @@ export function useProbeAgentCli() {
   return useMutation({
     mutationFn: (targetId: LibraryTargetId) => probeAgentCli(targetId),
     onSuccess: (status) => {
-      queryClient.setQueryData(environmentKeys.agents(), (current: AgentCliStatus[] | undefined) =>
-        current?.map((entry) => (entry.targetId === status.targetId ? status : entry))
+      writeProbedStatus(
+        queryClient,
+        environmentKeys.agents(),
+        status,
+        (entry: AgentCliStatus) => entry.targetId === status.targetId
       );
     },
   });
