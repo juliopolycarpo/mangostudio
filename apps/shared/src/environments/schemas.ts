@@ -1,4 +1,5 @@
 import { type Static, Type } from '@sinclair/typebox';
+import { ApiErrorResponseSchema, SSEErrorEventSchema } from '../errors';
 import { LibraryLocationStatusSchema, LibraryTargetIdSchema } from '../library';
 
 export const RuntimeIdSchema = Type.Union([
@@ -129,6 +130,193 @@ export const VersionManagerStatusSchema = Type.Object({
 
 export const VersionManagerStatusListSchema = Type.Array(VersionManagerStatusSchema);
 
+export const InstallRecipeIdSchema = Type.Union([
+  Type.Literal('bun.install.official'),
+  Type.Literal('bun.update'),
+  Type.Literal('nvm.install'),
+  Type.Literal('nvm.node.install'),
+  Type.Literal('nvm.node.set-default'),
+  Type.Literal('claude.install'),
+  Type.Literal('codex.install'),
+  Type.Literal('cursor.install'),
+]);
+
+export const InstallActionSchema = Type.Union([
+  Type.Literal('install'),
+  Type.Literal('update'),
+  Type.Literal('use-version'),
+  Type.Literal('set-default'),
+]);
+
+export const InstallPlatformSchema = Type.Union([Type.Literal('darwin'), Type.Literal('linux')]);
+
+export const NodeVersionSpecSchema = Type.String({
+  minLength: 1,
+  maxLength: 32,
+  pattern: '^(?:lts|latest|\\d+(?:\\.\\d+){0,2})$',
+});
+
+export const RecipeInputSchema = Type.Union([
+  Type.Object(
+    {
+      kind: Type.Literal('none'),
+    },
+    { additionalProperties: false }
+  ),
+  Type.Object(
+    {
+      kind: Type.Literal('node-version'),
+      version: NodeVersionSpecSchema,
+    },
+    { additionalProperties: false }
+  ),
+]);
+
+export const InstallGuardReasonSchema = Type.Union([
+  Type.Literal('container'),
+  Type.Literal('server-not-loopback'),
+  Type.Literal('client-not-loopback'),
+  Type.Literal('disabled'),
+]);
+
+export const InstallGuardSchema = Type.Object({
+  allowed: Type.Boolean(),
+  reasons: Type.Array(InstallGuardReasonSchema),
+});
+
+export const InstallRecipeDownloadSchema = Type.Object({
+  url: Type.String({ minLength: 1 }),
+  sizeBytes: Type.Optional(Type.Integer({ minimum: 1 })),
+  sha256: Type.Optional(Type.String({ pattern: '^[a-f0-9]{64}$' })),
+});
+
+export const InstallProfileSetupSchema = Type.Object({
+  lines: Type.Array(Type.String({ minLength: 1 }), { minItems: 1 }),
+  present: Type.Boolean(),
+  detectedIn: Type.Array(Type.String({ minLength: 1 })),
+});
+
+export const InstallRecipePreviewSchema = Type.Object({
+  id: InstallRecipeIdSchema,
+  runtimeId: RuntimeIdSchema,
+  action: InstallActionSchema,
+  inputKind: Type.Union([Type.Literal('none'), Type.Literal('node-version')]),
+  platforms: Type.Array(InstallPlatformSchema),
+  argv: Type.Array(Type.String()),
+  copyCommand: Type.String({ minLength: 1 }),
+  requires: Type.Array(RuntimeIdSchema),
+  writes: Type.Array(Type.String()),
+  networkAccess: Type.Boolean(),
+  timeoutMs: Type.Integer({ minimum: 1 }),
+  supported: Type.Boolean(),
+  missingRequirements: Type.Array(RuntimeIdSchema),
+  guard: InstallGuardSchema,
+  download: Type.Optional(InstallRecipeDownloadSchema),
+  profileSetup: Type.Optional(InstallProfileSetupSchema),
+});
+
+export const InstallPrepareBodySchema = Type.Object(
+  {
+    recipeId: InstallRecipeIdSchema,
+    input: RecipeInputSchema,
+  },
+  { additionalProperties: false }
+);
+
+export const InstallPreparationSchema = Type.Object({
+  preparationId: Type.Union([Type.String({ minLength: 1 }), Type.Null()]),
+  expiresAt: Type.Union([Type.Number({ minimum: 0 }), Type.Null()]),
+  recipe: InstallRecipePreviewSchema,
+});
+
+export const InstallStartBodySchema = Type.Object(
+  {
+    recipeId: InstallRecipeIdSchema,
+    input: RecipeInputSchema,
+    preparationId: Type.Optional(Type.String({ minLength: 1 })),
+  },
+  { additionalProperties: false }
+);
+
+export const InstallStartResponseSchema = Type.Object({
+  runId: Type.String({ minLength: 1 }),
+  attached: Type.Boolean(),
+});
+
+export const InstallCancelResponseSchema = Type.Object({
+  runId: Type.String({ minLength: 1 }),
+  cancellationRequested: Type.Boolean(),
+});
+
+export const InstallBlockedResponseSchema = Type.Composite([
+  ApiErrorResponseSchema,
+  Type.Object({
+    recipe: InstallRecipePreviewSchema,
+  }),
+]);
+
+export const InstallRunStatusSchema = Type.Union([
+  Type.Literal('running'),
+  Type.Literal('succeeded'),
+  Type.Literal('failed'),
+  Type.Literal('cancelled'),
+  Type.Literal('timed-out'),
+  Type.Literal('spawn-failed'),
+  /**
+   * The server stopped while the installer was running. The installer may have
+   * completed, partially completed, or never finished — the outcome is unknown
+   * and is deliberately not reported as a failure.
+   */
+  Type.Literal('interrupted'),
+]);
+
+export const InstallRunSchema = Type.Object({
+  id: Type.String({ minLength: 1 }),
+  recipeId: InstallRecipeIdSchema,
+  argv: Type.Array(Type.String()),
+  startedAt: Type.Number({ minimum: 0 }),
+  finishedAt: Type.Union([Type.Number({ minimum: 0 }), Type.Null()]),
+  exitCode: Type.Union([Type.Integer(), Type.Null()]),
+  status: InstallRunStatusSchema,
+  truncated: Type.Boolean(),
+});
+
+export const InstallRunListSchema = Type.Array(InstallRunSchema);
+
+export const InstallLogEventSchema = Type.Object({
+  type: Type.Literal('log'),
+  stream: Type.Union([Type.Literal('stdout'), Type.Literal('stderr'), Type.Literal('system')]),
+  line: Type.String(),
+  done: Type.Literal(false),
+});
+
+export const InstallProbeEventSchema = Type.Object({
+  type: Type.Literal('probe'),
+  target: Type.Union([
+    Type.Literal('runtime'),
+    Type.Literal('version-manager'),
+    Type.Literal('agent'),
+  ]),
+  status: Type.Union([RuntimeStatusSchema, VersionManagerStatusSchema, AgentCliStatusSchema]),
+  done: Type.Literal(false),
+});
+
+export const InstallExitEventSchema = Type.Object({
+  type: Type.Literal('exit'),
+  code: Type.Union([Type.Integer(), Type.Null()]),
+  status: Type.Exclude(InstallRunStatusSchema, Type.Literal('running')),
+  truncated: Type.Boolean(),
+  durationMs: Type.Number({ minimum: 0 }),
+  done: Type.Literal(true),
+});
+
+export const InstallStreamEventSchema = Type.Union([
+  InstallLogEventSchema,
+  InstallProbeEventSchema,
+  InstallExitEventSchema,
+  SSEErrorEventSchema,
+]);
+
 export type RuntimeId = Static<typeof RuntimeIdSchema>;
 export type RuntimeOrigin = Static<typeof RuntimeOriginSchema>;
 export type VersionManagerId = Static<typeof VersionManagerIdSchema>;
@@ -145,3 +333,26 @@ export type AgentCliStatusList = Static<typeof AgentCliStatusListSchema>;
 export type ManagedVersion = Static<typeof ManagedVersionSchema>;
 export type VersionManagerStatus = Static<typeof VersionManagerStatusSchema>;
 export type VersionManagerStatusList = Static<typeof VersionManagerStatusListSchema>;
+export type InstallRecipeId = Static<typeof InstallRecipeIdSchema>;
+export type InstallAction = Static<typeof InstallActionSchema>;
+export type InstallPlatform = Static<typeof InstallPlatformSchema>;
+export type NodeVersionSpec = Static<typeof NodeVersionSpecSchema>;
+export type RecipeInput = Static<typeof RecipeInputSchema>;
+export type InstallGuardReason = Static<typeof InstallGuardReasonSchema>;
+export type InstallGuard = Static<typeof InstallGuardSchema>;
+export type InstallRecipeDownload = Static<typeof InstallRecipeDownloadSchema>;
+export type InstallProfileSetup = Static<typeof InstallProfileSetupSchema>;
+export type InstallRecipePreview = Static<typeof InstallRecipePreviewSchema>;
+export type InstallPrepareBody = Static<typeof InstallPrepareBodySchema>;
+export type InstallPreparation = Static<typeof InstallPreparationSchema>;
+export type InstallStartBody = Static<typeof InstallStartBodySchema>;
+export type InstallStartResponse = Static<typeof InstallStartResponseSchema>;
+export type InstallCancelResponse = Static<typeof InstallCancelResponseSchema>;
+export type InstallBlockedResponse = Static<typeof InstallBlockedResponseSchema>;
+export type InstallRunStatus = Static<typeof InstallRunStatusSchema>;
+export type InstallRun = Static<typeof InstallRunSchema>;
+export type InstallRunList = Static<typeof InstallRunListSchema>;
+export type InstallLogEvent = Static<typeof InstallLogEventSchema>;
+export type InstallProbeEvent = Static<typeof InstallProbeEventSchema>;
+export type InstallExitEvent = Static<typeof InstallExitEventSchema>;
+export type InstallStreamEvent = Static<typeof InstallStreamEventSchema>;

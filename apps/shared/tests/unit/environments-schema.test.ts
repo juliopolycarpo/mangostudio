@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'bun:test';
 import { Value } from '@sinclair/typebox/value';
 import {
+  type InstallPreparation,
+  InstallPreparationSchema,
+  type InstallStreamEvent,
+  InstallStreamEventSchema,
   type RuntimeStatus,
   RuntimeStatusSchema,
   type VersionManagerStatus,
@@ -84,5 +88,70 @@ describe('VersionManagerStatusSchema', () => {
         versions: [{ ...status.versions[0], ltsStatus: 'green-ish' }],
       })
     ).toBe(false);
+  });
+});
+
+describe('environment install schemas', () => {
+  it('validates a guarded downloaded-script preparation', () => {
+    const preparation: InstallPreparation = {
+      preparationId: 'prepare-1',
+      expiresAt: 1_700_000_600_000,
+      recipe: {
+        id: 'bun.install.official',
+        runtimeId: 'bun',
+        action: 'install',
+        inputKind: 'none',
+        platforms: ['darwin', 'linux'],
+        argv: ['bash', '/tmp/mango-install/installer.sh'],
+        copyCommand: 'curl -fsSL https://bun.com/install | bash',
+        requires: [],
+        writes: ['$HOME/.bun'],
+        networkAccess: true,
+        timeoutMs: 300_000,
+        supported: true,
+        missingRequirements: [],
+        guard: { allowed: true, reasons: [] },
+        download: {
+          url: 'https://bun.com/install',
+          sizeBytes: 12_345,
+        },
+        profileSetup: {
+          lines: ['export BUN_INSTALL="$HOME/.bun"', 'export PATH="$BUN_INSTALL/bin:$PATH"'],
+          present: false,
+          detectedIn: [],
+        },
+      },
+    };
+
+    expect(Value.Check(InstallPreparationSchema, preparation)).toBe(true);
+  });
+
+  it('keeps exit terminal while probe and log events remain non-terminal', () => {
+    const events: InstallStreamEvent[] = [
+      { type: 'log', stream: 'stdout', line: 'installed', done: false },
+      {
+        type: 'probe',
+        target: 'runtime',
+        status: {
+          id: 'bun',
+          health: 'ok',
+          installations: [],
+          findings: [],
+          installable: true,
+          probedAtMs: 1_700_000_000_000,
+        },
+        done: false,
+      },
+      {
+        type: 'exit',
+        code: 0,
+        status: 'succeeded',
+        truncated: false,
+        durationMs: 100,
+        done: true,
+      },
+    ];
+
+    expect(events.every((event) => Value.Check(InstallStreamEventSchema, event))).toBe(true);
   });
 });

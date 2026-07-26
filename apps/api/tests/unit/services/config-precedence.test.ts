@@ -11,7 +11,7 @@
  * presence of ~/.mango/config.toml in the developer's environment.
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import {
   getConfigEnvFilePath,
@@ -41,6 +41,8 @@ const WATCHED_ENV_KEYS = [
   'MANGO_LIBRARY_BACKUP_DIR',
   'MANGO_LIBRARY_BACKUP_RETENTION_COUNT',
   'MANGO_ENV_LTS_REFRESH',
+  'MANGO_ENV_INSTALLS_ENABLED',
+  'MANGO_CONTAINER',
 ];
 
 function saveEnv(): Record<string, string | undefined> {
@@ -245,6 +247,29 @@ describe('config precedence', () => {
     const cfg = loadConfig(TMP_TOML);
 
     expect(cfg.environments.ltsRefresh).toBe(false);
+  });
+
+  test('keeps environment installs disabled by default and lets env override TOML', () => {
+    const defaults = loadConfig(join(TMP_DIR, 'nonexistent.toml'));
+    expect(defaults.environments.installsEnabled).toBe(false);
+
+    resetConfig();
+    writeFileSync(TMP_TOML, '[environments]\ninstalls_enabled = false\n');
+    process.env.MANGO_ENV_INSTALLS_ENABLED = 'true';
+
+    const cfg = loadConfig(TMP_TOML);
+
+    expect(cfg.environments.installsEnabled).toBe(true);
+  });
+
+  test('exposes container detection and lets MANGO_CONTAINER force it on', () => {
+    const defaults = loadConfig(join(TMP_DIR, 'nonexistent.toml'));
+    expect(defaults.environments.container).toBe(existsSync('/.dockerenv'));
+
+    resetConfig();
+    process.env.MANGO_CONTAINER = '1';
+
+    expect(loadConfig(TMP_TOML).environments.container).toBe(true);
   });
 
   test('loads cursor sidecar script override from config.toml', () => {

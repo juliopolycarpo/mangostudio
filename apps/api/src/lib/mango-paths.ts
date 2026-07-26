@@ -15,6 +15,16 @@ export function getLogsDir(): string {
   return join(getHomeMangoDir(), 'logs');
 }
 
+/** Directory holding bounded runtime/CLI installer logs. */
+export function getInstallLogsDir(): string {
+  return join(getLogsDir(), 'installs');
+}
+
+/** Path to one audited install run's bounded log file. */
+export function getInstallLogPath(runId: string): string {
+  return join(getInstallLogsDir(), `${runId}.log`);
+}
+
 /** Directory holding runtime state such as the pid/state file. // Usage: getRunDir() */
 export function getRunDir(): string {
   return join(getHomeMangoDir(), 'run');
