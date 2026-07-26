@@ -25,7 +25,7 @@ import { getInstallLogPath } from '../../../lib/mango-paths';
 import { isStandaloneExecutable } from '../../../lib/runtime-paths';
 import { generateId } from '../../../utils/id';
 import { detectContainer, evaluateInstallGuard } from '../domain/install-guards';
-import { getInstallRecipe, INSTALL_RECIPES, type InstallRecipe } from '../domain/install-recipes';
+import { INSTALL_RECIPES, type InstallRecipe } from '../domain/install-recipes';
 import { assertRecipeInput } from '../domain/recipe-input';
 import {
   createInstallRunRepository,
@@ -118,6 +118,11 @@ interface RecentInstallStream {
 interface StartingInstall {
   readonly userId: string;
   readonly promise: Promise<InstallStartResponse>;
+}
+
+interface RecipeRequirements {
+  readonly missing: RuntimeId[];
+  readonly nvmDir?: string;
 }
 
 interface InstallServiceDeps {
@@ -240,8 +245,13 @@ function defaultGuard(clientIp: string | undefined): InstallGuard {
   });
 }
 
+/**
+ * Canonical preparation key. Property order must not change the identity of an
+ * input, so the discriminant and its payload are rendered explicitly instead of
+ * relying on `JSON.stringify` key order.
+ */
 function recipeInputKey(input: RecipeInput): string {
-  return JSON.stringify(input);
+  return input.kind === 'none' ? 'none' : `node-version:${input.version}`;
 }
 
 function defaultInput(recipe: InstallRecipe): RecipeInput {
@@ -281,8 +291,13 @@ export function createInstallService(overrides: Partial<InstallServiceDeps> = {}
   const recentStreams = new Map<string, RecentInstallStream>();
   const startingByRecipe = new Map<InstallRecipeId, StartingInstall>();
 
-  const resolveRecipe = (id: InstallRecipeId): InstallRecipe =>
-    recipesById.get(id) ?? getInstallRecipe(id);
+  const resolveRecipe = (id: InstallRecipeId): InstallRecipe => {
+    // Only the configured recipe set is executable. Falling back to the global
+    // registry would let a restricted service run a recipe it does not expose.
+    const recipe = recipesById.get(id);
+    if (!recipe) throw new Error(`Missing install recipe "${id}".`);
+    return recipe;
+  };
 
   const resolveRequirement = async (
     requirement: RuntimeId
@@ -298,9 +313,7 @@ export function createInstallService(overrides: Partial<InstallServiceDeps> = {}
     return { available: Boolean(status && status.installations.length > 0) };
   };
 
-  const inspectRequirements = async (
-    recipe: InstallRecipe
-  ): Promise<{ missing: RuntimeId[]; nvmDir?: string }> => {
+  const inspectRequirements = async (recipe: InstallRecipe): Promise<RecipeRequirements> => {
     const missing: RuntimeId[] = [];
     let nvmDir: string | undefined;
     for (const requirement of recipe.requires) {
@@ -311,12 +324,16 @@ export function createInstallService(overrides: Partial<InstallServiceDeps> = {}
     return { missing, ...(nvmDir && { nvmDir }) };
   };
 
-  const buildPreview = async (
+  /**
+   * Builds a preview and returns the requirement inspection that produced it so
+   * callers that also need the resolved `nvmDir` do not re-run detection.
+   */
+  const buildPreviewDetail = async (
     recipe: InstallRecipe,
     input: RecipeInput,
-    context: InstallRequestContext,
+    guard: InstallGuard,
     artifact?: InstallerArtifact
-  ): Promise<InstallRecipePreview> => {
+  ): Promise<{ preview: InstallRecipePreview; requirements: RecipeRequirements }> => {
     assertRecipeInput(input, recipe.inputKind);
     const requirements = await inspectRequirements(recipe);
     const profileSetup: InstallProfileSetup | undefined = recipe.profileLines
@@ -332,32 +349,44 @@ export function createInstallService(overrides: Partial<InstallServiceDeps> = {}
     });
 
     return {
-      id: recipe.id,
-      runtimeId: recipe.runtimeId,
-      action: recipe.action,
-      inputKind: recipe.inputKind,
-      platforms: [...recipe.platforms],
-      argv: [...argv],
-      copyCommand: recipe.copyCommand(input),
-      requires: [...recipe.requires],
-      writes: [...recipe.writes],
-      networkAccess: recipe.networkAccess,
-      timeoutMs: recipe.timeoutMs,
-      supported,
-      missingRequirements: requirements.missing,
-      guard: deps.resolveGuard(context.clientIp),
-      ...(recipe.download && {
-        download: {
-          url: artifact?.url ?? recipe.download.url,
-          ...(artifact && {
-            sizeBytes: artifact.sizeBytes,
-            sha256: artifact.sha256,
-          }),
-        },
-      }),
-      ...(profileSetup && { profileSetup }),
+      requirements,
+      preview: {
+        id: recipe.id,
+        runtimeId: recipe.runtimeId,
+        action: recipe.action,
+        inputKind: recipe.inputKind,
+        platforms: [...recipe.platforms],
+        argv: [...argv],
+        copyCommand: recipe.copyCommand(input),
+        requires: [...recipe.requires],
+        writes: [...recipe.writes],
+        networkAccess: recipe.networkAccess,
+        timeoutMs: recipe.timeoutMs,
+        supported,
+        missingRequirements: requirements.missing,
+        guard,
+        ...(recipe.download && {
+          download: {
+            url: artifact?.url ?? recipe.download.url,
+            ...(artifact && {
+              sizeBytes: artifact.sizeBytes,
+              sha256: artifact.sha256,
+            }),
+          },
+        }),
+        ...(profileSetup && { profileSetup }),
+      },
     };
   };
+
+  const buildPreview = async (
+    recipe: InstallRecipe,
+    input: RecipeInput,
+    context: InstallRequestContext,
+    artifact?: InstallerArtifact
+  ): Promise<InstallRecipePreview> =>
+    (await buildPreviewDetail(recipe, input, deps.resolveGuard(context.clientIp), artifact))
+      .preview;
 
   const assertAvailable = (preview: InstallRecipePreview): void => {
     if (!preview.guard.allowed) throw new InstallBlockedError(preview);
@@ -377,7 +406,11 @@ export function createInstallService(overrides: Partial<InstallServiceDeps> = {}
 
   const cleanupPreparation = async (preparation: PreparedInstall): Promise<void> => {
     preparations.delete(preparation.id);
-    await preparation.artifact.cleanup();
+    try {
+      await preparation.artifact.cleanup();
+    } catch {
+      // A stale temp directory must never fail the request that swept it.
+    }
   };
 
   const cleanupExpiredPreparations = async (): Promise<void> => {
@@ -430,7 +463,7 @@ export function createInstallService(overrides: Partial<InstallServiceDeps> = {}
         'runtime',
         await deps.runtimeService.getRuntimeStatus(recipe.runtimeId, { force: true })
       );
-      if (recipe.id.startsWith('nvm.node.')) {
+      if (recipe.requires.includes('nvm')) {
         publish(
           'version-manager',
           await deps.versionManagerService.getVersionManagerStatus('nvm', { force: true })
@@ -540,10 +573,14 @@ export function createInstallService(overrides: Partial<InstallServiceDeps> = {}
   };
 
   return {
-    listRecipes(context) {
-      return Promise.all(
-        deps.recipes.map((recipe) => buildPreview(recipe, defaultInput(recipe), context))
+    async listRecipes(context) {
+      // The guard does not vary per recipe, so it is resolved once instead of
+      // re-reading config and probing the container marker for every preview.
+      const guard = deps.resolveGuard(context.clientIp);
+      const details = await Promise.all(
+        deps.recipes.map((recipe) => buildPreviewDetail(recipe, defaultInput(recipe), guard))
       );
+      return details.map((detail) => detail.preview);
     },
 
     async prepare(body, context) {
@@ -640,9 +677,14 @@ export function createInstallService(overrides: Partial<InstallServiceDeps> = {}
         }
 
         try {
-          const executionPreview = await buildPreview(recipe, body.input, context, artifact);
-          assertAvailable(executionPreview);
-          const requirements = await inspectRequirements(recipe);
+          const execution = await buildPreviewDetail(
+            recipe,
+            body.input,
+            deps.resolveGuard(context.clientIp),
+            artifact
+          );
+          assertAvailable(execution.preview);
+          const { requirements } = execution;
           const argv = recipe.argv(body.input, {
             ...(artifact && { installerPath: artifact.path }),
             ...(requirements.nvmDir && { nvmDir: requirements.nvmDir }),
