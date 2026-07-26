@@ -71,7 +71,10 @@ export function describeFinding(t: Messages, finding: RuntimeFinding): string {
       params[key] = value;
     }
   }
-  return formatMessage(t.environments.findings[finding.code], params);
+  // A code added to the contract before its translation lands must degrade to
+  // something readable, exactly as `displayName` does — never crash the page.
+  const template = (t.environments.findings as Record<string, string | undefined>)[finding.code];
+  return template ? formatMessage(template, params) : finding.code;
 }
 
 /** Severity of a finding, which drives both its colour and its sort position. */
