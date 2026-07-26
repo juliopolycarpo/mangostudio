@@ -94,6 +94,34 @@ describe('classifyNodeLtsStatus', () => {
     ).toBe('lts-outdated-patch');
   });
 
+  it('reports majors older than the trimmed schedule as end of life', () => {
+    const trimmed: NodeReleaseSchedule = {
+      ...SCHEDULE,
+      lines: [
+        {
+          major: 16,
+          start: '2021-04-20',
+          lts: '2021-10-26',
+          maintenance: '2022-10-18',
+          end: '2023-09-11',
+          codename: 'gallium',
+          latest: '16.20.2',
+        },
+        ...SCHEDULE.lines,
+      ],
+    };
+
+    expect(classifyNodeLtsStatus('14.21.3', trimmed, { now: TODAY })).toBe('end-of-life');
+  });
+
+  it('stays unknown below an oldest tracked line that is still supported', () => {
+    expect(classifyNodeLtsStatus('14.21.3', SCHEDULE, { now: TODAY })).toBe('unknown');
+  });
+
+  it('stays unknown for majors newer than the trimmed schedule', () => {
+    expect(classifyNodeLtsStatus('28.0.0', SCHEDULE, { now: TODAY })).toBe('unknown');
+  });
+
   it('does not let an older nvm alias cache override bundled patch data', () => {
     expect(
       classifyNodeLtsStatus('24.17.0', SCHEDULE, {

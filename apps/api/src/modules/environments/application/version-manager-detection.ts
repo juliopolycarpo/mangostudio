@@ -3,7 +3,10 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { VersionManagerId, VersionManagerStatus } from '@mangostudio/shared/environments';
 import { getConfig, getHomeMangoDir } from '../../../lib/config';
-import { NODE_RELEASE_DATA_STALE_AFTER_MS, type NodeReleaseSchedule } from '../domain/lts-policy';
+import {
+  NODE_RELEASE_LIVE_DATA_STALE_AFTER_MS,
+  type NodeReleaseSchedule,
+} from '../domain/lts-policy';
 import { NODE_RELEASE_SCHEDULE } from '../domain/node-release-schedule';
 import { createNvmFileSystem, detectNvm, type NvmDetectionDeps } from '../domain/nvm';
 import {
@@ -79,7 +82,7 @@ function environmentKey(deps: NvmDetectionDeps): string {
 function isUsableLiveMetadata(metadata: NodeReleaseMetadata | null, now: number): boolean {
   if (!metadata) return false;
   const age = now - metadata.fetchedAtMs;
-  return age >= 0 && age <= NODE_RELEASE_DATA_STALE_AFTER_MS;
+  return age >= 0 && age <= NODE_RELEASE_LIVE_DATA_STALE_AFTER_MS;
 }
 
 export function createVersionManagerDetectionService(

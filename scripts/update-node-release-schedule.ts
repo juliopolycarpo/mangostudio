@@ -20,7 +20,7 @@ export interface GeneratedScheduleLine {
   readonly major: number;
   readonly start: string;
   readonly lts?: string;
-  readonly maintenance: string;
+  readonly maintenance?: string;
   readonly end: string;
   readonly codename?: string;
   readonly latest?: string;
@@ -94,6 +94,9 @@ export function scheduleLinesFromUpstream(
       }
       const line = rawLine as UpstreamScheduleLine;
       const lts = optionalDate(line.lts, 'lts', major);
+      // Nothing reads `maintenance`, so a newly announced line that upstream has
+      // not dated yet must not abort the whole refresh.
+      const maintenance = optionalDate(line.maintenance, 'maintenance', major);
       const codename =
         typeof line.codename === 'string' && line.codename.trim()
           ? line.codename.trim().toLowerCase()
@@ -103,7 +106,7 @@ export function scheduleLinesFromUpstream(
         major,
         start: requiredDate(line.start, 'start', major),
         ...(lts !== undefined && { lts }),
-        maintenance: requiredDate(line.maintenance, 'maintenance', major),
+        ...(maintenance !== undefined && { maintenance }),
         end: requiredDate(line.end, 'end', major),
         ...(codename !== undefined && { codename }),
         ...(latest !== undefined && { latest }),
@@ -114,7 +117,12 @@ export function scheduleLinesFromUpstream(
 }
 
 function renderProperty(name: string, value: string | number, indentation = 6): string {
-  const rendered = typeof value === 'number' ? String(value) : `'${value}'`;
+  // Codenames come straight from upstream JSON, so quote them defensively rather
+  // than emitting a generated module that no longer parses.
+  const rendered =
+    typeof value === 'number'
+      ? String(value)
+      : `'${value.replaceAll('\\', '\\\\').replaceAll("'", "\\'")}'`;
   return `${' '.repeat(indentation)}${name}: ${rendered},`;
 }
 

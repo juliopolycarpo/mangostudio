@@ -109,6 +109,20 @@ describe('detectNvm', () => {
     expect(status.versions[0]?.isDefault).toBe(true);
   });
 
+  it('follows the lts/* pointer that real nvm writes into its alias cache', async () => {
+    const files = {
+      ...nvmFiles(),
+      [`${DEFAULT_NVM_ROOT}/alias/default`]: 'lts/*\n',
+      [`${DEFAULT_NVM_ROOT}/alias/lts/*`]: 'lts/krypton\n',
+      [`${DEFAULT_NVM_ROOT}/alias/lts/krypton`]: 'v24.18.0\n',
+      [`${DEFAULT_NVM_ROOT}/alias/lts/jod`]: 'v22.23.1\n',
+    };
+
+    const status = await detect(createDeps(files));
+
+    expect(status.defaultVersion).toBe('24.18.0');
+  });
+
   it('resolves a concrete default version directly', async () => {
     const files = {
       ...nvmFiles(DEFAULT_NVM_ROOT, ['v22.13.0']),

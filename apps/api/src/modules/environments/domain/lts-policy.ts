@@ -1,13 +1,19 @@
 import type { LtsStatus } from '@mangostudio/shared/environments';
 
 const DAY_MS = 24 * 60 * 60 * 1_000;
-export const NODE_RELEASE_DATA_STALE_AFTER_MS = 183 * DAY_MS;
+const NODE_RELEASE_DATA_STALE_AFTER_MS = 183 * DAY_MS;
+/**
+ * Live metadata only refreshes latest patches, so it may stand in for bundled
+ * data while it is itself recent. A stale live cache must not keep an equally
+ * stale bundled schedule alive, hence a far tighter bound than the bundled one.
+ */
+export const NODE_RELEASE_LIVE_DATA_STALE_AFTER_MS = 14 * DAY_MS;
 
 export interface NodeReleaseLine {
   readonly major: number;
   readonly start: string;
   readonly lts?: string;
-  readonly maintenance: string;
+  readonly maintenance?: string;
   readonly end: string;
   readonly codename?: string;
   readonly latest?: string;
@@ -86,6 +92,23 @@ function newestActiveLtsMajor(schedule: NodeReleaseSchedule, nowMs: number): num
     );
 }
 
+/**
+ * The bundled schedule is trimmed to still-relevant majors. Anything older than
+ * its oldest tracked line is definitively past end of life once that line has
+ * ended, so it must not be reported as merely unknown.
+ */
+function isBelowOldestEndedLine(
+  schedule: NodeReleaseSchedule,
+  major: number,
+  nowMs: number
+): boolean {
+  const oldest = schedule.lines.reduce<NodeReleaseLine | undefined>(
+    (lowest, line) => (lowest === undefined || line.major < lowest.major ? line : lowest),
+    undefined
+  );
+  return oldest !== undefined && major < oldest.major && nowMs >= endOfDay(oldest.end);
+}
+
 function latestVersionForLine(
   line: NodeReleaseLine,
   latestByMajor: ReadonlyMap<number, string> | undefined
@@ -109,10 +132,12 @@ export function classifyNodeLtsStatus(
   const version = parseNodeVersion(versionValue);
   if (!version) return 'unknown';
 
-  const line = schedule.lines.find((candidate) => candidate.major === version.major);
-  if (!line) return 'unknown';
-
   const nowMs = options.now.getTime();
+  const line = schedule.lines.find((candidate) => candidate.major === version.major);
+  if (!line) {
+    return isBelowOldestEndedLine(schedule, version.major, nowMs) ? 'end-of-life' : 'unknown';
+  }
+
   if (nowMs < startOfDay(line.start)) return 'unknown';
   if (nowMs >= endOfDay(line.end)) return 'end-of-life';
 

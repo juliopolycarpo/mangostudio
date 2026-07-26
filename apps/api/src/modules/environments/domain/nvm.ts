@@ -36,6 +36,8 @@ export interface NvmDetectionDeps extends Pick<PathEnv, 'platform' | 'homeDir' |
 
 interface NvmAliasCache {
   readonly aliases: ReadonlyMap<string, string>;
+  /** `lts/*` holds `lts/<codename>` rather than a version, so pointers resolve separately. */
+  readonly pointers: ReadonlyMap<string, string>;
   readonly latestByMajor: ReadonlyMap<number, string>;
 }
 
@@ -117,18 +119,24 @@ async function resolveNvmRoot(deps: NvmDetectionDeps): Promise<string | undefine
 async function readNvmAliasCache(root: string, fs: NvmFileSystem): Promise<NvmAliasCache> {
   const aliasRoot = join(root, 'alias', 'lts');
   const aliases = new Map<string, string>();
+  const pointers = new Map<string, string>();
   const latestByMajor = new Map<number, string>();
 
   for (const aliasName of await listOptionalDirectory(fs, aliasRoot)) {
     if (!SAFE_ALIAS_PATTERN.test(aliasName)) continue;
-    const value = await readOptionalFile(fs, join(aliasRoot, aliasName));
-    const version = normalizeNodeVersion(value ?? '');
-    if (!version) continue;
+    const value = (await readOptionalFile(fs, join(aliasRoot, aliasName)))?.trim();
+    if (!value) continue;
+    const version = normalizeNodeVersion(value);
+    if (!version) {
+      if (SAFE_ALIAS_PATTERN.test(value))
+        pointers.set(aliasName.toLowerCase(), value.toLowerCase());
+      continue;
+    }
     aliases.set(aliasName.toLowerCase(), version);
     preferNewerVersion(latestByMajor, version);
   }
 
-  return { aliases, latestByMajor };
+  return { aliases, pointers, latestByMajor };
 }
 
 async function readInstalledVersions(
@@ -176,8 +184,15 @@ function resolveDefaultAlias(
     return highestVersion(installedVersions);
   }
   if (normalizedAlias === 'lts/*') {
+    // Real nvm writes `lts/<codename>` into `alias/lts/*`, so follow that pointer
+    // before falling back to the newest version the alias cache knows about.
+    const pointer = aliasCache.pointers.get('*');
+    const pointed = pointer?.startsWith('lts/')
+      ? aliasCache.aliases.get(pointer.slice('lts/'.length))
+      : undefined;
     return (
       aliasCache.aliases.get('*') ??
+      pointed ??
       [...aliasCache.latestByMajor.values()].sort(compareVersionStrings).at(-1)
     );
   }

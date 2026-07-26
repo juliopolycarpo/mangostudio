@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { normalizeNodeVersion, parseNodeVersion } from '../domain/lts-policy';
@@ -131,7 +132,9 @@ async function writeCachedMetadata(
   metadata: NodeReleaseMetadata,
   io: NodeReleaseCacheIo
 ): Promise<void> {
-  const temporaryFile = `${cacheFile}.${process.pid}.tmp`;
+  // Concurrent forced probes bypass in-flight dedup, so the pid alone would let
+  // two writers interleave into one temporary file and rename garbage into place.
+  const temporaryFile = `${cacheFile}.${process.pid}.${randomUUID()}.tmp`;
   try {
     await io.mkdir(dirname(cacheFile));
     await io.writeFile(temporaryFile, serializeMetadata(metadata));
