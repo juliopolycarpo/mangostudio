@@ -9,6 +9,8 @@ import type { ModelOption as ModuleModelOption } from '../../src/catalog';
 import type {
   AgentCliStatus as BarrelAgentCliStatus,
   AppSettings as BarrelAppSettings,
+  InstallProfileSetup as BarrelInstallProfileSetup,
+  InstallRun as BarrelInstallRun,
   LibraryLocationStatus as BarrelLibraryLocationStatus,
   LibraryResource as BarrelLibraryResource,
   LibraryTargetDescriptor as BarrelLibraryTargetDescriptor,
@@ -19,6 +21,8 @@ import type {
 } from '../../src/contracts';
 import type {
   AgentCliStatus as ModuleAgentCliStatus,
+  InstallProfileSetup as ModuleInstallProfileSetup,
+  InstallRun as ModuleInstallRun,
   RuntimeStatus as ModuleRuntimeStatus,
   VersionManagerStatus as ModuleVersionManagerStatus,
 } from '../../src/environments';
@@ -69,6 +73,8 @@ assertType<Equals<BarrelLibraryTargetDescriptor, ModuleLibraryTargetDescriptor>>
 assertType<Equals<BarrelAgentCliStatus, ModuleAgentCliStatus>>();
 assertType<Equals<BarrelRuntimeStatus, ModuleRuntimeStatus>>();
 assertType<Equals<BarrelVersionManagerStatus, ModuleVersionManagerStatus>>();
+assertType<Equals<BarrelInstallProfileSetup, ModuleInstallProfileSetup>>();
+assertType<Equals<BarrelInstallRun, ModuleInstallRun>>();
 
 const SAMPLE_PROFILE: AgentProfile = {
   id: 'user:reviewer',
