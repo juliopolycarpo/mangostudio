@@ -234,25 +234,36 @@ describe('agent CLI detection', () => {
     expect(findingCodes(status)).not.toContain('cli-not-installed');
   });
 
-  it('warns for existing unwritable locations without flagging uncreated paths', async () => {
+  it('warns only for unwritable locations propagation would actually write to', async () => {
     const configHome = '/home/tester/.codex';
     const unwritableLocation: LibraryLocationStatus = {
-      id: 'codex-settings',
-      kind: 'setting',
-      path: `${configHome}/config.toml`,
-      access: 'read-only',
+      id: 'codex-skills',
+      kind: 'skill',
+      path: `${configHome}/skills`,
+      access: 'read-write',
       exists: true,
       readable: true,
       writable: false,
       targetIds: ['codex'],
     };
     const uncreatedLocation: LibraryLocationStatus = {
-      id: 'codex-hooks',
-      kind: 'hook',
-      path: `${configHome}/hooks.json`,
-      access: 'read-only',
+      id: 'codex-agents',
+      kind: 'subagent',
+      path: `${configHome}/agents`,
+      access: 'read-write',
       exists: false,
       readable: false,
+      writable: false,
+      targetIds: ['codex'],
+    };
+    // Never a propagation destination, so its mode is not the user's problem.
+    const readOnlyLocation: LibraryLocationStatus = {
+      id: 'codex-settings',
+      kind: 'setting',
+      path: `${configHome}/config.toml`,
+      access: 'read-only',
+      exists: true,
+      readable: true,
       writable: false,
       targetIds: ['codex'],
     };
@@ -264,27 +275,59 @@ describe('agent CLI detection', () => {
         new Map([[`${configHome}/auth.json`, 'never read']]),
         new Set([configHome])
       ),
-      describeLocations: () => [unwritableLocation, uncreatedLocation],
+      describeLocations: () => [unwritableLocation, uncreatedLocation, readOnlyLocation],
     });
 
     const status = await service.getAgentCliStatus('codex');
 
     expect(status?.health).toBe('warn');
-    expect(status?.locations).toEqual([unwritableLocation, uncreatedLocation]);
-    expect(status?.findings).toContainEqual({
-      code: 'location-unwritable',
-      params: {
-        locationId: 'codex-settings',
-        path: `${configHome}/config.toml`,
+    expect(status?.locations).toEqual([unwritableLocation, uncreatedLocation, readOnlyLocation]);
+    expect(status?.findings).toEqual([
+      {
+        code: 'location-unwritable',
+        params: {
+          locationId: 'codex-skills',
+          path: `${configHome}/skills`,
+        },
       },
+    ]);
+  });
+
+  it('reports one finding per path when several locations resolve to the same file', async () => {
+    const configHome = '/home/tester/.claude';
+    const settingsPath = `${configHome}/settings.json`;
+    const sharedFile = (id: LibraryLocationStatus['id'], kind: LibraryLocationStatus['kind']) => ({
+      id,
+      kind,
+      path: settingsPath,
+      access: 'read-write' as const,
+      exists: true,
+      readable: true,
+      writable: false,
+      targetIds: ['claude' as const],
     });
-    expect(status?.findings).not.toContainEqual({
-      code: 'location-unwritable',
-      params: {
-        locationId: 'codex-hooks',
-        path: `${configHome}/hooks.json`,
+    const service = createAgentCliDetectionService({
+      definitions: [CLAUDE_AGENT_CLI_DEFINITION],
+      createScanDeps: (definition) => scanDeps(definition),
+      createPathEnv: () => LINUX_ENV,
+      fs: new FakeAuthSignalFs(
+        new Map([[`${configHome}/.credentials.json`, 'never read']]),
+        new Set([configHome])
+      ),
+      describeLocations: () => [
+        sharedFile('claude-settings', 'setting'),
+        sharedFile('claude-hooks', 'hook'),
+      ],
+    });
+
+    const status = await service.getAgentCliStatus('claude');
+
+    expect(status?.findings).toEqual([
+      {
+        code: 'location-unwritable',
+        params: { locationId: 'claude-settings', path: settingsPath },
       },
-    });
+    ]);
   });
 
   it('describes the running MangoStudio process from in-process identity and session state', async () => {

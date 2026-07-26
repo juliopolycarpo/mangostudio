@@ -73,8 +73,16 @@ function appendLocationFindings(
   findings: RuntimeFinding[],
   locations: readonly LibraryLocationStatus[]
 ): void {
+  // Distinct location ids can resolve to one file (Claude reads settings.json as
+  // both `claude-settings` and `claude-hooks`), so report each path only once.
+  const reportedPaths = new Set<string>();
   for (const location of locations) {
+    // Propagation never writes to a read-only location, so its mode cannot make
+    // an apply fail — warning about it would be a permanent, unactionable nag.
+    if (location.access !== 'read-write') continue;
     if (!location.exists || location.path === null || location.writable) continue;
+    if (reportedPaths.has(location.path)) continue;
+    reportedPaths.add(location.path);
     findings.push({
       code: 'location-unwritable',
       params: { locationId: location.id, path: location.path },
