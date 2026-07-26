@@ -3,11 +3,12 @@ import { CHAT_SIDEBAR_WIDTH_DEFAULT } from '@mangostudio/shared/workspaces';
 import { type ReactNode, useEffect, useState } from 'react';
 import type { ContextInfo } from '@/features/generation/types';
 import { Sidebar } from '@/features/sidebar/components/Sidebar';
+import type { AppPage } from '@/hooks/use-chat-route-actions';
 
 interface LayoutProps {
   children: ReactNode;
-  currentPage: 'chat' | 'gallery' | 'settings' | 'studio';
-  onNavigate: (page: 'chat' | 'gallery' | 'settings' | 'studio') => void;
+  currentPage: AppPage;
+  onNavigate: (page: AppPage) => void;
   chats: Chat[];
   currentChatId: string | null;
   onSelectChat: (chatId: string) => void;

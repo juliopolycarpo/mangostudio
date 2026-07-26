@@ -3,6 +3,7 @@ import { useNavigate } from '@tanstack/react-router';
 import { Menu, Plus, Settings } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useToast } from '@/components/ui/Toast';
+import type { AppPage } from '@/hooks/use-chat-route-actions';
 import { useI18n } from '@/hooks/use-i18n';
 import { authClient } from '@/lib/auth-client';
 import { ModelSelector } from './ModelSelector';
@@ -12,7 +13,7 @@ export interface HeaderProps {
   activeModels: ModelOption[];
   isModelSelectorDisabled: boolean;
   currentChatId: string | null;
-  currentPage: 'chat' | 'gallery' | 'settings' | 'studio';
+  currentPage: AppPage;
   onUpdateChatModel: (chatId: string, model: string) => void;
   onSetPageModel: (model: string) => void;
   onNewChat: () => void;

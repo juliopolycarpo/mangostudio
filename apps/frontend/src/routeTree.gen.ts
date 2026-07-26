@@ -16,7 +16,9 @@ import { Route as AuthenticatedIndexRouteImport } from './routes/_authenticated/
 import { Route as AuthenticatedStudioRouteImport } from './routes/_authenticated/studio'
 import { Route as AuthenticatedSettingsRouteImport } from './routes/_authenticated/settings'
 import { Route as AuthenticatedGalleryRouteImport } from './routes/_authenticated/gallery'
+import { Route as AuthenticatedEnvironmentsRouteImport } from './routes/_authenticated/environments'
 import { Route as AuthenticatedSettingsIndexRouteImport } from './routes/_authenticated/settings/index'
+import { Route as AuthenticatedEnvironmentsIndexRouteImport } from './routes/_authenticated/environments/index'
 import { Route as AuthenticatedSettingsToolsRouteImport } from './routes/_authenticated/settings/tools'
 import { Route as AuthenticatedSettingsSkillsRouteImport } from './routes/_authenticated/settings/skills'
 import { Route as AuthenticatedSettingsProvidersRouteImport } from './routes/_authenticated/settings/providers'
@@ -30,6 +32,9 @@ import { Route as AuthenticatedSettingsContextRouteImport } from './routes/_auth
 import { Route as AuthenticatedSettingsConnectorsRouteImport } from './routes/_authenticated/settings/connectors'
 import { Route as AuthenticatedSettingsAppearanceRouteImport } from './routes/_authenticated/settings/appearance'
 import { Route as AuthenticatedSettingsAgentsRouteImport } from './routes/_authenticated/settings/agents'
+import { Route as AuthenticatedEnvironmentsRuntimesRouteImport } from './routes/_authenticated/environments/runtimes'
+import { Route as AuthenticatedEnvironmentsHealthRouteImport } from './routes/_authenticated/environments/health'
+import { Route as AuthenticatedEnvironmentsAgentsRouteImport } from './routes/_authenticated/environments/agents'
 import { Route as AuthenticatedSettingsProvidersIndexRouteImport } from './routes/_authenticated/settings/providers/index'
 import { Route as AuthenticatedSettingsProvidersProviderRouteImport } from './routes/_authenticated/settings/providers.$provider'
 
@@ -67,11 +72,23 @@ const AuthenticatedGalleryRoute = AuthenticatedGalleryRouteImport.update({
   path: '/gallery',
   getParentRoute: () => AuthenticatedRoute,
 } as any)
+const AuthenticatedEnvironmentsRoute =
+  AuthenticatedEnvironmentsRouteImport.update({
+    id: '/environments',
+    path: '/environments',
+    getParentRoute: () => AuthenticatedRoute,
+  } as any)
 const AuthenticatedSettingsIndexRoute =
   AuthenticatedSettingsIndexRouteImport.update({
     id: '/',
     path: '/',
     getParentRoute: () => AuthenticatedSettingsRoute,
+  } as any)
+const AuthenticatedEnvironmentsIndexRoute =
+  AuthenticatedEnvironmentsIndexRouteImport.update({
+    id: '/',
+    path: '/',
+    getParentRoute: () => AuthenticatedEnvironmentsRoute,
   } as any)
 const AuthenticatedSettingsToolsRoute =
   AuthenticatedSettingsToolsRouteImport.update({
@@ -151,6 +168,24 @@ const AuthenticatedSettingsAgentsRoute =
     path: '/agents',
     getParentRoute: () => AuthenticatedSettingsRoute,
   } as any)
+const AuthenticatedEnvironmentsRuntimesRoute =
+  AuthenticatedEnvironmentsRuntimesRouteImport.update({
+    id: '/runtimes',
+    path: '/runtimes',
+    getParentRoute: () => AuthenticatedEnvironmentsRoute,
+  } as any)
+const AuthenticatedEnvironmentsHealthRoute =
+  AuthenticatedEnvironmentsHealthRouteImport.update({
+    id: '/health',
+    path: '/health',
+    getParentRoute: () => AuthenticatedEnvironmentsRoute,
+  } as any)
+const AuthenticatedEnvironmentsAgentsRoute =
+  AuthenticatedEnvironmentsAgentsRouteImport.update({
+    id: '/agents',
+    path: '/agents',
+    getParentRoute: () => AuthenticatedEnvironmentsRoute,
+  } as any)
 const AuthenticatedSettingsProvidersIndexRoute =
   AuthenticatedSettingsProvidersIndexRouteImport.update({
     id: '/',
@@ -168,9 +203,13 @@ export interface FileRoutesByFullPath {
   '/': typeof AuthenticatedIndexRoute
   '/login': typeof LoginRoute
   '/signup': typeof SignupRoute
+  '/environments': typeof AuthenticatedEnvironmentsRouteWithChildren
   '/gallery': typeof AuthenticatedGalleryRoute
   '/settings': typeof AuthenticatedSettingsRouteWithChildren
   '/studio': typeof AuthenticatedStudioRoute
+  '/environments/agents': typeof AuthenticatedEnvironmentsAgentsRoute
+  '/environments/health': typeof AuthenticatedEnvironmentsHealthRoute
+  '/environments/runtimes': typeof AuthenticatedEnvironmentsRuntimesRoute
   '/settings/agents': typeof AuthenticatedSettingsAgentsRoute
   '/settings/appearance': typeof AuthenticatedSettingsAppearanceRoute
   '/settings/connectors': typeof AuthenticatedSettingsConnectorsRoute
@@ -184,6 +223,7 @@ export interface FileRoutesByFullPath {
   '/settings/providers': typeof AuthenticatedSettingsProvidersRouteWithChildren
   '/settings/skills': typeof AuthenticatedSettingsSkillsRoute
   '/settings/tools': typeof AuthenticatedSettingsToolsRoute
+  '/environments/': typeof AuthenticatedEnvironmentsIndexRoute
   '/settings/': typeof AuthenticatedSettingsIndexRoute
   '/settings/providers/$provider': typeof AuthenticatedSettingsProvidersProviderRoute
   '/settings/providers/': typeof AuthenticatedSettingsProvidersIndexRoute
@@ -194,6 +234,9 @@ export interface FileRoutesByTo {
   '/gallery': typeof AuthenticatedGalleryRoute
   '/studio': typeof AuthenticatedStudioRoute
   '/': typeof AuthenticatedIndexRoute
+  '/environments/agents': typeof AuthenticatedEnvironmentsAgentsRoute
+  '/environments/health': typeof AuthenticatedEnvironmentsHealthRoute
+  '/environments/runtimes': typeof AuthenticatedEnvironmentsRuntimesRoute
   '/settings/agents': typeof AuthenticatedSettingsAgentsRoute
   '/settings/appearance': typeof AuthenticatedSettingsAppearanceRoute
   '/settings/connectors': typeof AuthenticatedSettingsConnectorsRoute
@@ -206,6 +249,7 @@ export interface FileRoutesByTo {
   '/settings/prompts': typeof AuthenticatedSettingsPromptsRoute
   '/settings/skills': typeof AuthenticatedSettingsSkillsRoute
   '/settings/tools': typeof AuthenticatedSettingsToolsRoute
+  '/environments': typeof AuthenticatedEnvironmentsIndexRoute
   '/settings': typeof AuthenticatedSettingsIndexRoute
   '/settings/providers/$provider': typeof AuthenticatedSettingsProvidersProviderRoute
   '/settings/providers': typeof AuthenticatedSettingsProvidersIndexRoute
@@ -215,10 +259,14 @@ export interface FileRoutesById {
   '/_authenticated': typeof AuthenticatedRouteWithChildren
   '/login': typeof LoginRoute
   '/signup': typeof SignupRoute
+  '/_authenticated/environments': typeof AuthenticatedEnvironmentsRouteWithChildren
   '/_authenticated/gallery': typeof AuthenticatedGalleryRoute
   '/_authenticated/settings': typeof AuthenticatedSettingsRouteWithChildren
   '/_authenticated/studio': typeof AuthenticatedStudioRoute
   '/_authenticated/': typeof AuthenticatedIndexRoute
+  '/_authenticated/environments/agents': typeof AuthenticatedEnvironmentsAgentsRoute
+  '/_authenticated/environments/health': typeof AuthenticatedEnvironmentsHealthRoute
+  '/_authenticated/environments/runtimes': typeof AuthenticatedEnvironmentsRuntimesRoute
   '/_authenticated/settings/agents': typeof AuthenticatedSettingsAgentsRoute
   '/_authenticated/settings/appearance': typeof AuthenticatedSettingsAppearanceRoute
   '/_authenticated/settings/connectors': typeof AuthenticatedSettingsConnectorsRoute
@@ -232,6 +280,7 @@ export interface FileRoutesById {
   '/_authenticated/settings/providers': typeof AuthenticatedSettingsProvidersRouteWithChildren
   '/_authenticated/settings/skills': typeof AuthenticatedSettingsSkillsRoute
   '/_authenticated/settings/tools': typeof AuthenticatedSettingsToolsRoute
+  '/_authenticated/environments/': typeof AuthenticatedEnvironmentsIndexRoute
   '/_authenticated/settings/': typeof AuthenticatedSettingsIndexRoute
   '/_authenticated/settings/providers/$provider': typeof AuthenticatedSettingsProvidersProviderRoute
   '/_authenticated/settings/providers/': typeof AuthenticatedSettingsProvidersIndexRoute
@@ -242,9 +291,13 @@ export interface FileRouteTypes {
     | '/'
     | '/login'
     | '/signup'
+    | '/environments'
     | '/gallery'
     | '/settings'
     | '/studio'
+    | '/environments/agents'
+    | '/environments/health'
+    | '/environments/runtimes'
     | '/settings/agents'
     | '/settings/appearance'
     | '/settings/connectors'
@@ -258,6 +311,7 @@ export interface FileRouteTypes {
     | '/settings/providers'
     | '/settings/skills'
     | '/settings/tools'
+    | '/environments/'
     | '/settings/'
     | '/settings/providers/$provider'
     | '/settings/providers/'
@@ -268,6 +322,9 @@ export interface FileRouteTypes {
     | '/gallery'
     | '/studio'
     | '/'
+    | '/environments/agents'
+    | '/environments/health'
+    | '/environments/runtimes'
     | '/settings/agents'
     | '/settings/appearance'
     | '/settings/connectors'
@@ -280,6 +337,7 @@ export interface FileRouteTypes {
     | '/settings/prompts'
     | '/settings/skills'
     | '/settings/tools'
+    | '/environments'
     | '/settings'
     | '/settings/providers/$provider'
     | '/settings/providers'
@@ -288,10 +346,14 @@ export interface FileRouteTypes {
     | '/_authenticated'
     | '/login'
     | '/signup'
+    | '/_authenticated/environments'
     | '/_authenticated/gallery'
     | '/_authenticated/settings'
     | '/_authenticated/studio'
     | '/_authenticated/'
+    | '/_authenticated/environments/agents'
+    | '/_authenticated/environments/health'
+    | '/_authenticated/environments/runtimes'
     | '/_authenticated/settings/agents'
     | '/_authenticated/settings/appearance'
     | '/_authenticated/settings/connectors'
@@ -305,6 +367,7 @@ export interface FileRouteTypes {
     | '/_authenticated/settings/providers'
     | '/_authenticated/settings/skills'
     | '/_authenticated/settings/tools'
+    | '/_authenticated/environments/'
     | '/_authenticated/settings/'
     | '/_authenticated/settings/providers/$provider'
     | '/_authenticated/settings/providers/'
@@ -367,12 +430,26 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedGalleryRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
+    '/_authenticated/environments': {
+      id: '/_authenticated/environments'
+      path: '/environments'
+      fullPath: '/environments'
+      preLoaderRoute: typeof AuthenticatedEnvironmentsRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
     '/_authenticated/settings/': {
       id: '/_authenticated/settings/'
       path: '/'
       fullPath: '/settings/'
       preLoaderRoute: typeof AuthenticatedSettingsIndexRouteImport
       parentRoute: typeof AuthenticatedSettingsRoute
+    }
+    '/_authenticated/environments/': {
+      id: '/_authenticated/environments/'
+      path: '/'
+      fullPath: '/environments/'
+      preLoaderRoute: typeof AuthenticatedEnvironmentsIndexRouteImport
+      parentRoute: typeof AuthenticatedEnvironmentsRoute
     }
     '/_authenticated/settings/tools': {
       id: '/_authenticated/settings/tools'
@@ -465,6 +542,27 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedSettingsAgentsRouteImport
       parentRoute: typeof AuthenticatedSettingsRoute
     }
+    '/_authenticated/environments/runtimes': {
+      id: '/_authenticated/environments/runtimes'
+      path: '/runtimes'
+      fullPath: '/environments/runtimes'
+      preLoaderRoute: typeof AuthenticatedEnvironmentsRuntimesRouteImport
+      parentRoute: typeof AuthenticatedEnvironmentsRoute
+    }
+    '/_authenticated/environments/health': {
+      id: '/_authenticated/environments/health'
+      path: '/health'
+      fullPath: '/environments/health'
+      preLoaderRoute: typeof AuthenticatedEnvironmentsHealthRouteImport
+      parentRoute: typeof AuthenticatedEnvironmentsRoute
+    }
+    '/_authenticated/environments/agents': {
+      id: '/_authenticated/environments/agents'
+      path: '/agents'
+      fullPath: '/environments/agents'
+      preLoaderRoute: typeof AuthenticatedEnvironmentsAgentsRouteImport
+      parentRoute: typeof AuthenticatedEnvironmentsRoute
+    }
     '/_authenticated/settings/providers/': {
       id: '/_authenticated/settings/providers/'
       path: '/'
@@ -481,6 +579,27 @@ declare module '@tanstack/react-router' {
     }
   }
 }
+
+interface AuthenticatedEnvironmentsRouteChildren {
+  AuthenticatedEnvironmentsAgentsRoute: typeof AuthenticatedEnvironmentsAgentsRoute
+  AuthenticatedEnvironmentsHealthRoute: typeof AuthenticatedEnvironmentsHealthRoute
+  AuthenticatedEnvironmentsRuntimesRoute: typeof AuthenticatedEnvironmentsRuntimesRoute
+  AuthenticatedEnvironmentsIndexRoute: typeof AuthenticatedEnvironmentsIndexRoute
+}
+
+const AuthenticatedEnvironmentsRouteChildren: AuthenticatedEnvironmentsRouteChildren =
+  {
+    AuthenticatedEnvironmentsAgentsRoute: AuthenticatedEnvironmentsAgentsRoute,
+    AuthenticatedEnvironmentsHealthRoute: AuthenticatedEnvironmentsHealthRoute,
+    AuthenticatedEnvironmentsRuntimesRoute:
+      AuthenticatedEnvironmentsRuntimesRoute,
+    AuthenticatedEnvironmentsIndexRoute: AuthenticatedEnvironmentsIndexRoute,
+  }
+
+const AuthenticatedEnvironmentsRouteWithChildren =
+  AuthenticatedEnvironmentsRoute._addFileChildren(
+    AuthenticatedEnvironmentsRouteChildren,
+  )
 
 interface AuthenticatedSettingsProvidersRouteChildren {
   AuthenticatedSettingsProvidersProviderRoute: typeof AuthenticatedSettingsProvidersProviderRoute
@@ -541,6 +660,7 @@ const AuthenticatedSettingsRouteWithChildren =
   )
 
 interface AuthenticatedRouteChildren {
+  AuthenticatedEnvironmentsRoute: typeof AuthenticatedEnvironmentsRouteWithChildren
   AuthenticatedGalleryRoute: typeof AuthenticatedGalleryRoute
   AuthenticatedSettingsRoute: typeof AuthenticatedSettingsRouteWithChildren
   AuthenticatedStudioRoute: typeof AuthenticatedStudioRoute
@@ -548,6 +668,7 @@ interface AuthenticatedRouteChildren {
 }
 
 const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
+  AuthenticatedEnvironmentsRoute: AuthenticatedEnvironmentsRouteWithChildren,
   AuthenticatedGalleryRoute: AuthenticatedGalleryRoute,
   AuthenticatedSettingsRoute: AuthenticatedSettingsRouteWithChildren,
   AuthenticatedStudioRoute: AuthenticatedStudioRoute,

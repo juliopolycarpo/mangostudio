@@ -13,6 +13,7 @@ import { chatListQueryOptions, messagesQueryOptions } from '@/features/chat/quer
 import { agentSettingsListQueryOptions } from '@/features/settings/agents/queries';
 import { appSettingsQueryOptions } from '@/features/settings/app/queries';
 import { useAppState } from '@/hooks/use-app-state';
+import type { AppPage } from '@/hooks/use-chat-route-actions';
 import { catalogQueryOptions } from '@/hooks/use-model-catalog';
 import { AppContext } from '@/lib/app-context';
 
@@ -58,10 +59,11 @@ function AuthenticatedLayout() {
     return null;
   }
 
-  let activePage: 'chat' | 'gallery' | 'settings' | 'studio' = 'chat';
+  let activePage: AppPage = 'chat';
   if (currentPath.includes('/gallery')) activePage = 'gallery';
   if (currentPath.includes('/settings')) activePage = 'settings';
   if (currentPath.includes('/studio')) activePage = 'studio';
+  if (currentPath.includes('/environments')) activePage = 'environments';
 
   return (
     <AppContext value={app}>

@@ -4,18 +4,29 @@ import {
   CHAT_SIDEBAR_WIDTH_MAX,
   CHAT_SIDEBAR_WIDTH_MIN,
 } from '@mangostudio/shared/workspaces';
-import { Image, LayoutGrid, MessageSquare, Pencil, Plus, Settings, Trash2, X } from 'lucide-react';
+import {
+  Image,
+  LayoutGrid,
+  MessageSquare,
+  MonitorCog,
+  Pencil,
+  Plus,
+  Settings,
+  Trash2,
+  X,
+} from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { EdgeResizeHandle } from '@/components/layout/EdgeResizeHandle';
 import { useToast } from '@/components/ui';
 import { Logo } from '@/components/ui/Logo';
 import type { ContextInfo } from '@/features/generation/types';
+import type { AppPage } from '@/hooks/use-chat-route-actions';
 import { useI18n } from '@/hooks/use-i18n';
 import { ContextRing } from './ContextRing';
 
 interface Props {
-  currentPage: 'chat' | 'gallery' | 'settings' | 'studio';
-  onNavigate: (page: 'chat' | 'gallery' | 'settings' | 'studio') => void;
+  currentPage: AppPage;
+  onNavigate: (page: AppPage) => void;
   chats: Chat[];
   currentChatId: string | null;
   onSelectChat: (chatId: string) => void;
@@ -98,7 +109,7 @@ export function Sidebar({
     }
   };
 
-  const handleMobileNav = (page: 'chat' | 'gallery' | 'settings' | 'studio') => {
+  const handleMobileNav = (page: AppPage) => {
     onNavigate(page);
     onMobileClose?.();
   };
@@ -113,7 +124,7 @@ export function Sidebar({
     onWidthChange?.(widthRef.current);
   };
 
-  const navItemClass = (page: 'gallery' | 'settings' | 'studio') =>
+  const navItemClass = (page: Exclude<AppPage, 'chat'>) =>
     `flex items-center gap-3 px-4 py-3 rounded-lg transition-all duration-300 w-full text-left ${
       currentPage === page
         ? 'text-primary bg-surface-container-high'
@@ -166,7 +177,7 @@ export function Sidebar({
 
         {/* Mobile quick shortcuts */}
         <div className="px-4 mb-4 md:hidden" data-testid="mobile-shortcuts">
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-4 gap-2">
             <button
               type="button"
               onClick={() => handleMobileNav('studio')}
@@ -190,6 +201,18 @@ export function Sidebar({
             >
               <LayoutGrid size={20} />
               <span>{t.gallery.title}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => handleMobileNav('environments')}
+              className={`flex flex-col items-center justify-center gap-1 p-2 rounded-lg transition-all duration-200 text-xs font-medium ${
+                currentPage === 'environments'
+                  ? 'text-primary bg-surface-container-high'
+                  : 'text-on-surface/70 hover:bg-surface-container-high hover:text-on-surface'
+              }`}
+            >
+              <MonitorCog size={20} />
+              <span>{t.environments.nav}</span>
             </button>
             <button
               type="button"
@@ -298,6 +321,14 @@ export function Sidebar({
           >
             <LayoutGrid size={18} />
             <span className="font-label font-medium text-sm">{t.gallery.title}</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => handleMobileNav('environments')}
+            className={navItemClass('environments')}
+          >
+            <MonitorCog size={18} />
+            <span className="font-label font-medium text-sm">{t.environments.nav}</span>
           </button>
           <button
             type="button"
