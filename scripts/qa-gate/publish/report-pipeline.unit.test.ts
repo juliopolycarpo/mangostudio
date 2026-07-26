@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'bun:test';
 
+import { CI_JOBS_MAX_ITEMS } from '../ci-durations';
 import { QA_METRICS_ARTIFACT_NAME as TS_ARTIFACT_NAME } from '../metrics-envelope';
 import {
   CI_WORKFLOW_FILE,
   collectCiDurations,
   MAX_ARTIFACT_ARCHIVE_BYTES,
+  MAX_CI_JOBS,
   QA_METRICS_ARTIFACT_NAME,
   resolveReportInputs,
 } from './report-pipeline';
@@ -122,6 +124,10 @@ const job = (name: string, overrides: Partial<FakeJob> = {}): FakeJob => ({
 describe('artifact name pinning', () => {
   it('matches the TypeScript collector constant', () => {
     expect(QA_METRICS_ARTIFACT_NAME).toBe(TS_ARTIFACT_NAME);
+  });
+
+  it('caps collected jobs at the schema bound so oversized runs still render', () => {
+    expect(MAX_CI_JOBS).toBe(CI_JOBS_MAX_ITEMS);
   });
 });
 

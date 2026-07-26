@@ -80,6 +80,9 @@ const errorMessage = (error, prefix = '') => {
 
 const unavailableDurations = (runId, error) => ({ runId, error, jobs: [] });
 
+/** Mirrors the `jobs` maxItems bound in scripts/qa-gate/ci-durations.ts (pinned by test). */
+export const MAX_CI_JOBS = 500;
+
 /**
  * Collect job timestamps from the privileged publisher side. Failures stay
  * inside the report as data so duration visibility can never block the PR.
@@ -96,7 +99,9 @@ export async function collectCiDurations(github, context, runId) {
     return {
       runId,
       error: null,
-      jobs: jobs.map((job) => ({
+      // Truncate rather than overflow the schema bound: an oversized matrix
+      // would otherwise fail validation and drop every run from the report.
+      jobs: jobs.slice(0, MAX_CI_JOBS).map((job) => ({
         name: boundedText(job.name, 500, 'unnamed job'),
         status: boundedText(job.status, 40, 'unknown'),
         conclusion: job.conclusion === null ? null : boundedText(job.conclusion, 40, 'unknown'),

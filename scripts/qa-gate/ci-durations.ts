@@ -8,6 +8,9 @@ import { Value } from '@sinclair/typebox/value';
 /** Hard cap for the trusted-side JSON handoff into the report renderer. */
 const CI_DURATIONS_MAX_BYTES = 1024 * 1024;
 
+/** Job-count bound shared with the collector (pinned to report-pipeline.mjs by test). */
+export const CI_JOBS_MAX_ITEMS = 500;
+
 const nullableTimestamp = Type.Union([Type.String({ maxLength: 64 }), Type.Null()]);
 
 const CiJobDurationSchema = Type.Object(
@@ -25,7 +28,7 @@ const CiRunDurationsSchema = Type.Object(
   {
     runId: Type.Union([Type.Integer({ minimum: 1 }), Type.Null()]),
     error: Type.Union([Type.String({ maxLength: 2000 }), Type.Null()]),
-    jobs: Type.Array(CiJobDurationSchema, { maxItems: 500 }),
+    jobs: Type.Array(CiJobDurationSchema, { maxItems: CI_JOBS_MAX_ITEMS }),
   },
   { additionalProperties: false }
 );
