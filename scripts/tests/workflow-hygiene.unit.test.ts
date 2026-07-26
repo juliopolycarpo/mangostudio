@@ -127,12 +127,22 @@ describe('workflow hygiene', () => {
   });
 
   test('pull-request workflows key concurrency on the PR number, not the SHA', () => {
+    // Both blocks are matched as "the key line, then its indented body", so the
+    // scan cannot run past `on:`/`concurrency:` into the rest of the workflow.
+    const ON_BLOCK = /\non:\n(?:[ \t#].*\n)*/;
+    const CONCURRENCY_BLOCK = /\nconcurrency:\n(?:[ \t#].*\n)*/;
+    let checked = 0;
     for (const file of workflowFiles()) {
       const workflow = readText(file);
-      if (!/\non:\n(?:.|\n)*?\n {2}pull_request:/.test(workflow)) continue;
-      if (!workflow.includes('\nconcurrency:')) continue;
-      expect(workflow, file).toContain('github.event.pull_request.number');
-      expect(workflow, file).not.toContain('github.sha');
+      const onBlock = workflow.match(ON_BLOCK)?.[0];
+      if (!onBlock?.includes('\n  pull_request:\n')) continue;
+      const concurrency = workflow.match(CONCURRENCY_BLOCK)?.[0];
+      if (!concurrency) continue;
+      checked += 1;
+      expect(concurrency, file).toContain('github.event.pull_request.number');
+      expect(concurrency, file).not.toContain('github.sha');
     }
+    // Guards against the policy silently covering zero workflows.
+    expect(checked).toBeGreaterThan(0);
   });
 });
