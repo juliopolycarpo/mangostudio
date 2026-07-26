@@ -180,6 +180,26 @@ describe('useInstallStream', () => {
     expect(signal?.aborted).toBe(true);
   });
 
+  it('treats a server error event as terminal and keeps its message', async () => {
+    fetchMock.mockImplementation(() =>
+      Promise.resolve(
+        streamingResponse([
+          sse([{ type: 'log', stream: 'stdout', line: 'boom', done: false }]),
+          sse([{ type: 'error', error: 'Install log stream failed.', done: true }]),
+        ])
+      )
+    );
+
+    const { result } = renderHook(() => useInstallStream({ runId: 'run-5' }));
+
+    await waitFor(() => expect(result.current.phase).toBe('failed'));
+    // Reconnecting would only replay the same failure, and the server's own
+    // sentence is the only one that says what actually went wrong.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(result.current.streamError).toBe('Install log stream failed.');
+    expect(result.current.lines.map((line) => line.text)).toEqual(['boom']);
+  });
+
   it('resets to idle when no run is active', () => {
     const { result } = renderHook(() => useInstallStream({ runId: null }));
 

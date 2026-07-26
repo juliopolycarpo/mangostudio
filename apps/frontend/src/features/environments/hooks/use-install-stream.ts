@@ -41,7 +41,16 @@ export interface InstallStreamState {
   readonly phase: InstallStreamPhase;
   readonly exit: InstallExitEvent | null;
   readonly reconnecting: boolean;
+  /** The server's own explanation when it ended the stream with an error event. */
+  readonly streamError: string | null;
 }
+
+/**
+ * How one connection attempt ended. Only `dropped` is retryable: an exit means
+ * the buffer is complete, and a server-sent error means retrying replays the
+ * same failure.
+ */
+type ConsumeOutcome = 'exited' | 'failed' | 'dropped';
 
 export interface UseInstallStreamOptions {
   readonly runId: string | null;
@@ -56,6 +65,7 @@ const IDLE_STATE: InstallStreamState = {
   phase: 'idle',
   exit: null,
   reconnecting: false,
+  streamError: null,
 };
 
 function parseEvent(payload: string): InstallStreamEvent | null {
@@ -92,11 +102,8 @@ export function useInstallStream({
     // fetch abort to propagate before the component is gone.
     let activeReader: ReadableStreamDefaultReader<Uint8Array> | null = null;
 
-    /**
-     * One connection attempt. Resolves `true` when the run reported its exit —
-     * the only outcome that must not be retried, because the buffer is complete.
-     */
-    const consume = async (): Promise<boolean> => {
+    /** One connection attempt; see `ConsumeOutcome` for what may be retried. */
+    const consume = async (): Promise<ConsumeOutcome> => {
       const response = await fetch(
         `${getApiBaseUrl()}/api/environments/install/${encodeURIComponent(runId)}/log`,
         { credentials: 'include', signal: controller.signal }
@@ -113,6 +120,7 @@ export function useInstallStream({
       let lines: InstallStreamLine[] = [];
       let droppedLines = 0;
       let exit: InstallExitEvent | null = null;
+      let streamError: string | null = null;
       let dirty = false;
 
       // Each `read()` can carry hundreds of lines; flushing per chunk keeps the
@@ -123,12 +131,14 @@ export function useInstallStream({
         const snapshot = [...lines];
         const droppedSnapshot = droppedLines;
         const exitSnapshot = exit;
+        const errorSnapshot = streamError;
         setState((previous) => ({
           lines: snapshot,
           droppedLines: droppedSnapshot,
-          phase: exitSnapshot ? 'finished' : 'streaming',
+          phase: exitSnapshot ? 'finished' : errorSnapshot ? 'failed' : 'streaming',
           exit: exitSnapshot ?? previous.exit,
           reconnecting: false,
+          streamError: errorSnapshot ?? previous.streamError,
         }));
       };
 
@@ -167,12 +177,15 @@ export function useInstallStream({
               onExitRef.current?.(event);
             } else {
               // An `error` event ends the run just as an exit does, but the
-              // server sends no exit code with it.
+              // server sends no exit code with it. Retrying would only replay
+              // the same failure, so it is terminal and keeps its own message.
+              streamError = event.error;
               dirty = true;
             }
           }
 
           flush();
+          if (exit || streamError) break;
         }
       } finally {
         activeReader = null;
@@ -182,7 +195,8 @@ export function useInstallStream({
       }
 
       flush();
-      return exit !== null;
+      if (exit) return 'exited';
+      return streamError ? 'failed' : 'dropped';
     };
 
     const run = async () => {
@@ -195,7 +209,8 @@ export function useInstallStream({
         }));
 
         try {
-          if (await consume()) return;
+          // Both terminal outcomes have already written their own final state.
+          if ((await consume()) !== 'dropped') return;
         } catch (error) {
           if (disposed || (error instanceof Error && error.name === 'AbortError')) return;
         }

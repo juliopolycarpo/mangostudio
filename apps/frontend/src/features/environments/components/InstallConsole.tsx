@@ -127,7 +127,11 @@ export function InstallConsole({ stream, onCancel, onClose }: InstallConsoleProp
         </p>
       )}
       {exit?.truncated && <p className="text-xs text-on-surface-variant/60">{s.truncated}</p>}
-      {stream.phase === 'failed' && !exit && <p className="text-xs text-error">{s.streamError}</p>}
+      {stream.phase === 'failed' && !exit && (
+        // The server's own explanation beats the generic one whenever it sent
+        // an error event rather than simply dropping the connection.
+        <p className="text-xs text-error">{stream.streamError ?? s.streamError}</p>
+      )}
     </section>
   );
 }
