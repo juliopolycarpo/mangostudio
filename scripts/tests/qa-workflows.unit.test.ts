@@ -35,6 +35,12 @@ describe('unprivileged collection side', () => {
     expect(workflow).not.toContain('github-script');
   });
 
+  test('qa-metrics.yml holds only contents: read at workflow scope', () => {
+    const workflow = readText('.github/workflows/qa-metrics.yml');
+
+    expect(workflow).toContain('permissions:\n  contents: read\n\njobs:');
+  });
+
   test('test.yml hands the fragment off with 1-day retention and failure-only coverage', () => {
     const workflow = readText('.github/workflows/test.yml');
 
@@ -110,6 +116,11 @@ describe('privileged publisher side (pr-qa-report.yml)', () => {
   test('mirrors the payload bounds pinned in metrics-envelope.ts', () => {
     expect(workflow).toContain(`METRICS_MAX_BYTES: ${QA_METRICS_MAX_BYTES}`);
     expect(workflow).toContain(`METRICS_FILE_NAME: ${QA_METRICS_FILE_NAME}`);
+  });
+
+  test('hands privileged Actions job timings to the report renderer', () => {
+    expect(workflow).toContain(`writeFile('ci-durations.json'`);
+    expect(workflow).toContain('args+=(--ci ci-durations.json)');
   });
 
   test('fetches PR history as git data only', () => {

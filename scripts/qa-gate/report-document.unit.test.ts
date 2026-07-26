@@ -7,7 +7,7 @@ import {
   GITHUB_COMMENT_LIMIT,
   type ReportStatus,
 } from './report-document';
-import { makeMetrics } from './testing/metrics-fixture';
+import { makeCiDurations, makeMetrics } from './testing/metrics-fixture';
 
 const HEAD_SHA = 'fedcba9876543210fedcba9876543210fedcba98';
 const BASE_SHA = '0123456789abcdef0123456789abcdef01234567';
@@ -28,12 +28,19 @@ const sections = {
 
 describe('composeReport', () => {
   it('assembles status, commits, changelog, and QA sections with one trailing marker', () => {
-    const report = composeReport(status(), sections, makeMetrics(BASE_SHA), makeMetrics(HEAD_SHA));
+    const report = composeReport(
+      status(),
+      sections,
+      makeMetrics(BASE_SHA),
+      makeMetrics(HEAD_SHA),
+      makeCiDurations()
+    );
 
     expect(report).toContain('**PR head:** `fedcba9`');
     expect(report).toContain('[CI run](https://example.test/runs/1)');
     expect(report).toContain('## Commits — 1 commit');
     expect(report).toContain('## 📝 Changelog Preview');
+    expect(report).toContain('### CI Duration');
     expect(report).toContain('## QA Gate — Coverage & Quality');
     expect(report.endsWith(COMMENT_MARKER)).toBe(true);
     expect(report.indexOf(COMMENT_MARKER)).toBe(report.lastIndexOf(COMMENT_MARKER));
@@ -46,6 +53,7 @@ describe('composeReport', () => {
         baseNote: `no successful main CI run found for base ${BASE_SHA}`,
       }),
       sections,
+      null,
       null,
       null
     );
@@ -60,7 +68,8 @@ describe('composeReport', () => {
       status(),
       { commits: null, changelog: null },
       null,
-      makeMetrics(HEAD_SHA)
+      makeMetrics(HEAD_SHA),
+      null
     );
 
     expect(report).toContain('_Commit summary failed to render for this run._');
@@ -72,7 +81,8 @@ describe('composeReport', () => {
       status(),
       { ...sections, changelog: `## 📝 Changelog Preview\n\n${'x'.repeat(20_000)}` },
       makeMetrics(BASE_SHA),
-      makeMetrics(HEAD_SHA)
+      makeMetrics(HEAD_SHA),
+      null
     );
 
     expect(report).toContain('_…changelog preview truncated…_');

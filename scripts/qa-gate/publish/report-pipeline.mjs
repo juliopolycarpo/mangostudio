@@ -66,6 +66,73 @@ async function findBaselineRun(github, context, baseSha) {
   return data.workflow_runs?.[0] ?? null;
 }
 
+const boundedText = (value, maxLength, fallback) => {
+  const text = String(value ?? '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return (text || fallback).slice(0, maxLength);
+};
+
+const errorMessage = (error, prefix = '') => {
+  const message = error instanceof Error ? error.message : String(error);
+  return boundedText(`${prefix}${message}`, 2000, 'unknown Actions API error');
+};
+
+const unavailableDurations = (runId, error) => ({ runId, error, jobs: [] });
+
+/**
+ * Collect job timestamps from the privileged publisher side. Failures stay
+ * inside the report as data so duration visibility can never block the PR.
+ */
+export async function collectCiDurations(github, context, runId) {
+  if (!runId) return unavailableDurations(null, 'workflow run is unavailable');
+  try {
+    const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun, {
+      ...context.repo,
+      run_id: runId,
+      filter: 'latest',
+      per_page: 100,
+    });
+    return {
+      runId,
+      error: null,
+      jobs: jobs.map((job) => ({
+        name: boundedText(job.name, 500, 'unnamed job'),
+        status: boundedText(job.status, 40, 'unknown'),
+        conclusion: job.conclusion === null ? null : boundedText(job.conclusion, 40, 'unknown'),
+        startedAt: typeof job.started_at === 'string' ? job.started_at.slice(0, 64) : null,
+        completedAt: typeof job.completed_at === 'string' ? job.completed_at.slice(0, 64) : null,
+      })),
+    };
+  } catch (error) {
+    return unavailableDurations(runId, errorMessage(error, 'Actions jobs API failed: '));
+  }
+}
+
+async function findPreviousPullRequestRun(github, context, run, pullRequest) {
+  try {
+    const { data } = await github.rest.actions.listWorkflowRuns({
+      ...context.repo,
+      workflow_id: CI_WORKFLOW_FILE,
+      branch: run.head_branch,
+      event: 'pull_request',
+      status: 'completed',
+      per_page: 100,
+    });
+    const previous = data.workflow_runs?.find(
+      (candidate) =>
+        candidate.id !== run.id &&
+        candidate.id < run.id &&
+        candidate.pull_requests?.some((pull) => pull.number === pullRequest.number)
+    );
+    return previous
+      ? { run: previous, error: null }
+      : { run: null, error: 'no previous completed CI run found for this pull request' };
+  } catch (error) {
+    return { run: null, error: errorMessage(error, 'previous CI run lookup failed: ') };
+  }
+}
+
 /**
  * Resolve everything the publisher needs from trusted API data: the open PR
  * matching the triggering run's exact head SHA, the head qa-metrics archive
@@ -90,15 +157,35 @@ export async function resolveReportInputs({ github, context }) {
   }
 
   const head = await downloadMetricsArchive(github, context, run.id);
-  const baselineRun = await findBaselineRun(github, context, pullRequest.base.sha);
+  const [baselineRun, previousRun] = await Promise.all([
+    findBaselineRun(github, context, pullRequest.base.sha),
+    findPreviousPullRequestRun(github, context, run, pullRequest),
+  ]);
   const base = baselineRun
     ? await downloadMetricsArchive(github, context, baselineRun.id)
     : { archive: null, reason: `no successful main CI run found for base ${pullRequest.base.sha}` };
+  const [headDurations, baseDurations, previousDurations] = await Promise.all([
+    collectCiDurations(github, context, run.id),
+    baselineRun
+      ? collectCiDurations(github, context, baselineRun.id)
+      : unavailableDurations(
+          null,
+          `no successful main CI run found for base ${pullRequest.base.sha}`
+        ),
+    previousRun.run
+      ? collectCiDurations(github, context, previousRun.run.id)
+      : unavailableDurations(null, previousRun.error),
+  ]);
 
   return {
     skip: null,
     headArchive: head.archive,
     baseArchive: base.archive,
+    ciDurations: {
+      base: baseDurations,
+      head: headDurations,
+      previous: previousDurations,
+    },
     reportContext: {
       repository: `${context.repo.owner}/${context.repo.repo}`,
       prNumber: pullRequest.number,

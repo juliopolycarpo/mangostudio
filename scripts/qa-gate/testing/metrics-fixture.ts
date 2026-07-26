@@ -2,6 +2,7 @@
 // the renderer and verdict suites share one fixture without cross-importing
 // test modules.
 
+import type { CiDurationComparison, CiJobDuration, CiRunDurations } from '../ci-durations';
 import type { CoverageSummary, Metrics } from '../collect/types';
 
 /** Build a coverage summary where every bucket sits at `pct`. // Usage: makeCoverageSummary(82) */
@@ -54,5 +55,45 @@ export const makeMetrics = (sha: string, overrides: Partial<Metrics> = {}): Metr
     shared: 96,
   },
   tooling: { checkExitCode: 0, failedTasks: [] },
+  ...overrides,
+});
+
+const CI_TIME_ORIGIN = Date.parse('2026-05-16T00:00:00.000Z');
+
+/** Build one Actions job timing around a stable test timestamp. */
+export const makeCiJob = (
+  name: string,
+  durationSeconds: number | null,
+  overrides: Partial<CiJobDuration> & { readonly startOffsetSeconds?: number } = {}
+): CiJobDuration => {
+  const { startOffsetSeconds = 0, ...jobOverrides } = overrides;
+  const startedAt = new Date(CI_TIME_ORIGIN + startOffsetSeconds * 1000).toISOString();
+  return {
+    name,
+    status: durationSeconds === null ? 'in_progress' : 'completed',
+    conclusion: durationSeconds === null ? null : 'success',
+    startedAt,
+    completedAt:
+      durationSeconds === null
+        ? null
+        : new Date(CI_TIME_ORIGIN + (startOffsetSeconds + durationSeconds) * 1000).toISOString(),
+    ...jobOverrides,
+  };
+};
+
+/** Build one workflow-run timing snapshot. */
+export const makeCiRun = (
+  runId: number | null,
+  jobs: readonly CiJobDuration[] = [],
+  error: string | null = null
+): CiRunDurations => ({ runId, error, jobs: [...jobs] });
+
+/** Build base/head/previous CI timing data for renderer tests. */
+export const makeCiDurations = (
+  overrides: Partial<CiDurationComparison> = {}
+): CiDurationComparison => ({
+  base: makeCiRun(1, [makeCiJob('Test / Run tests', 240), makeCiJob('Build / Frontend', 60)]),
+  head: makeCiRun(2, [makeCiJob('Test / Run tests', 280), makeCiJob('Build / Frontend', 80)]),
+  previous: makeCiRun(3, [makeCiJob('Test / Run tests', 260)]),
   ...overrides,
 });

@@ -44,7 +44,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
-      actions: read # download the qa-metrics artifacts from the CI run
+      actions: read # download metrics and read CI job durations
       contents: read # default-branch checkout for trusted report tooling
       pull-requests: write # publish/update the managed QA report comment
     steps:
@@ -79,6 +79,7 @@ jobs:
               return;
             }
             await writeFile('report-context.json', JSON.stringify(inputs.reportContext));
+            await writeFile('ci-durations.json', JSON.stringify(inputs.ciDurations));
             if (inputs.headArchive) {
               await writeFile('head-archive.zip', Buffer.from(inputs.headArchive));
             }
@@ -127,6 +128,7 @@ jobs:
           args=(report-context.json)
           [ -f head-metrics.json ] && args+=(--head head-metrics.json)
           [ -f base-metrics.json ] && args+=(--base base-metrics.json)
+          [ -f ci-durations.json ] && args+=(--ci ci-durations.json)
           bun ./scripts/qa-gate/render-report.ts "${args[@]}" > report.md
           echo "## Rendered report preview" >> "$GITHUB_STEP_SUMMARY"
           cat report.md >> "$GITHUB_STEP_SUMMARY"
