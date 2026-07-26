@@ -8,12 +8,18 @@ import type { AppSettings as ModuleAppSettings } from '../../src/app-settings';
 import type { ModelOption as ModuleModelOption } from '../../src/catalog';
 import type {
   AppSettings as BarrelAppSettings,
+  LibraryLocationStatus as BarrelLibraryLocationStatus,
   LibraryResource as BarrelLibraryResource,
+  LibraryTargetDescriptor as BarrelLibraryTargetDescriptor,
   ModelOption as BarrelModelOption,
   ProviderObservabilityMetrics as BarrelObsMetrics,
 } from '../../src/contracts';
 import type { SSEErrorEvent as ErrorsSSEErrorEvent } from '../../src/errors';
-import type { LibraryResource as ModuleLibraryResource } from '../../src/library';
+import type {
+  LibraryLocationStatus as ModuleLibraryLocationStatus,
+  LibraryResource as ModuleLibraryResource,
+  LibraryTargetDescriptor as ModuleLibraryTargetDescriptor,
+} from '../../src/library';
 import {
   type ProviderObservabilityMetrics as ModuleObsMetrics,
   ProviderObservabilityLogsResponseSchema,
@@ -50,6 +56,8 @@ assertType<Equals<BarrelAppSettings, ModuleAppSettings>>();
 assertType<Equals<BarrelModelOption, ModuleModelOption>>();
 assertType<Equals<BarrelObsMetrics, ModuleObsMetrics>>();
 assertType<Equals<BarrelLibraryResource, ModuleLibraryResource>>();
+assertType<Equals<BarrelLibraryLocationStatus, ModuleLibraryLocationStatus>>();
+assertType<Equals<BarrelLibraryTargetDescriptor, ModuleLibraryTargetDescriptor>>();
 
 const SAMPLE_PROFILE: AgentProfile = {
   id: 'user:reviewer',

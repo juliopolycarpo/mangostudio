@@ -56,6 +56,12 @@ export interface MangoConfig {
   skills: {
     dir: string;
   };
+  library: {
+    /** Recoverable copies created before library resources are overwritten. */
+    backupDir: string;
+    /** Maximum number of apply backup sets retained on disk. */
+    backupRetentionCount: number;
+  };
   checkpoints: {
     dir: string;
   };
@@ -107,6 +113,7 @@ const DEFAULT_CONFIG: Omit<MangoConfig, 'corsOrigins' | 'configFilePath'> = {
   images: { dir: '' },
   agents: { dir: '' },
   skills: { dir: '' },
+  library: { backupDir: '', backupRetentionCount: 10 },
   checkpoints: { dir: '' },
   auth: { secret: '', url: '' },
   security: { trustProxy: false },
@@ -184,6 +191,15 @@ const ENV_KEY_MAP: Record<string, (cfg: MangoConfig, value: string) => void> = {
   },
   MANGO_SECRET_STORE_UNSAFE_FILE_FALLBACK_DIR: (cfg, v) => {
     cfg.secretStore.unsafeFileFallbackDir = v;
+  },
+  MANGO_LIBRARY_BACKUP_DIR: (cfg, v) => {
+    cfg.library.backupDir = v;
+  },
+  MANGO_LIBRARY_BACKUP_RETENTION_COUNT: (cfg, v) => {
+    const count = Number(v);
+    if (Number.isSafeInteger(count) && count > 0) {
+      cfg.library.backupRetentionCount = count;
+    }
   },
 };
 
@@ -310,6 +326,7 @@ function cloneDefaults(): MangoConfig {
     images: { ...DEFAULT_CONFIG.images },
     agents: { ...DEFAULT_CONFIG.agents },
     skills: { ...DEFAULT_CONFIG.skills },
+    library: { ...DEFAULT_CONFIG.library },
     checkpoints: { ...DEFAULT_CONFIG.checkpoints },
     auth: { ...DEFAULT_CONFIG.auth },
     security: { ...DEFAULT_CONFIG.security },
@@ -358,6 +375,18 @@ function applyToml(cfg: MangoConfig, parsed: Record<string, unknown>): void {
   const skills = parsed.skills as Record<string, unknown> | undefined;
   if (skills) {
     if (typeof skills.dir === 'string') cfg.skills.dir = skills.dir;
+  }
+
+  const library = parsed.library as Record<string, unknown> | undefined;
+  if (library) {
+    if (typeof library.backup_dir === 'string') cfg.library.backupDir = library.backup_dir;
+    if (
+      typeof library.backup_retention_count === 'number' &&
+      Number.isSafeInteger(library.backup_retention_count) &&
+      library.backup_retention_count > 0
+    ) {
+      cfg.library.backupRetentionCount = library.backup_retention_count;
+    }
   }
 
   const checkpoints = parsed.checkpoints as Record<string, unknown> | undefined;
@@ -460,6 +489,12 @@ function computeDerived(cfg: MangoConfig, tomlPath: string): void {
     cfg.skills.dir = resolveUserPath(cfg.skills.dir);
   }
 
+  if (!cfg.library.backupDir) {
+    cfg.library.backupDir = join(getHomeMangoDir(), 'library-backups');
+  } else {
+    cfg.library.backupDir = resolveUserPath(cfg.library.backupDir);
+  }
+
   if (!cfg.checkpoints.dir) {
     cfg.checkpoints.dir = join(getHomeMangoDir(), 'checkpoints');
   } else {
@@ -560,6 +595,7 @@ function loadTestSandboxConfig(): MangoConfig {
   cfg.images.dir = join(TEST_MANAGED_CONFIG_DIR, 'images');
   cfg.agents.dir = join(TEST_MANAGED_CONFIG_DIR, 'agents');
   cfg.skills.dir = join(TEST_MANAGED_CONFIG_DIR, 'skills');
+  cfg.library.backupDir = join(TEST_MANAGED_CONFIG_DIR, 'library-backups');
   cfg.checkpoints.dir = join(TEST_MANAGED_CONFIG_DIR, 'checkpoints');
   computeDerived(cfg, TEST_MANAGED_CONFIG_PATH);
 
@@ -653,6 +689,7 @@ export function loadConfigForTest(partial: Partial<MangoConfig> = {}): MangoConf
   if (partial.images) Object.assign(cfg.images, partial.images);
   if (partial.agents) Object.assign(cfg.agents, partial.agents);
   if (partial.skills) Object.assign(cfg.skills, partial.skills);
+  if (partial.library) Object.assign(cfg.library, partial.library);
   if (partial.checkpoints) Object.assign(cfg.checkpoints, partial.checkpoints);
   if (partial.auth) Object.assign(cfg.auth, partial.auth);
   if (partial.security) Object.assign(cfg.security, partial.security);
@@ -666,6 +703,9 @@ export function loadConfigForTest(partial: Partial<MangoConfig> = {}): MangoConf
   // silently deleting just-created connectors). The test environment removes
   // this file between tests, so config-file writes never leak across tests.
   if (!cfg.database.path) cfg.database.path = ':memory:';
+  if (!cfg.library.backupDir) {
+    cfg.library.backupDir = join(TEST_MANAGED_CONFIG_DIR, 'library-backups');
+  }
   const configFilePath = partial.configFilePath ?? TEST_MANAGED_CONFIG_PATH;
 
   computeDerived(cfg, configFilePath);

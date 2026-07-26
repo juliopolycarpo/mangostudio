@@ -28,6 +28,7 @@ export const ResourceFormatSchema = Type.Union([
   Type.Literal('markdown-plain'),
   Type.Literal('markdown-frontmatter'),
   Type.Literal('mdc'),
+  Type.Literal('toml-agent'),
   Type.Literal('agent-profile-db'),
   Type.Literal('json-settings'),
   Type.Literal('toml-settings'),
@@ -120,6 +121,35 @@ export const LibraryResourceSchema = Type.Object({
   contentGroups: Type.Array(LibraryContentGroupSchema),
 });
 
+export const LibraryLocationStatusSchema = Type.Object({
+  id: LibraryLocationIdSchema,
+  kind: ResourceKindSchema,
+  /** Null when the code-defined location is unsupported on this platform. */
+  path: Type.Union([Type.String({ minLength: 1 }), Type.Null()]),
+  access: LocationAccessSchema,
+  exists: Type.Boolean(),
+  readable: Type.Boolean(),
+  writable: Type.Boolean(),
+  targetIds: Type.Array(LibraryTargetIdSchema),
+  entryCount: Type.Optional(Type.Integer({ minimum: 0 })),
+});
+
+const LibraryTargetReadsSchema = Type.Object({
+  skill: Type.Array(LibraryLocationIdSchema),
+  subagent: Type.Array(LibraryLocationIdSchema),
+  instruction: Type.Array(LibraryLocationIdSchema),
+  setting: Type.Array(LibraryLocationIdSchema),
+  hook: Type.Array(LibraryLocationIdSchema),
+});
+
+export const LibraryTargetDescriptorSchema = Type.Object({
+  id: LibraryTargetIdSchema,
+  /** Key in the shared i18n catalog, never a user-visible literal. */
+  displayNameKey: Type.String({ minLength: 1 }),
+  /** Per-kind location precedence, highest priority first. */
+  reads: LibraryTargetReadsSchema,
+});
+
 export type ResourceKind = Static<typeof ResourceKindSchema>;
 export type LibraryTargetId = Static<typeof LibraryTargetIdSchema>;
 export type LibraryLocationId = Static<typeof LibraryLocationIdSchema>;
@@ -134,6 +164,8 @@ export type LibraryCoverage = Static<typeof LibraryCoverageSchema>;
 export type LibraryDivergence = Static<typeof LibraryDivergenceSchema>;
 export type LibraryContentGroup = Static<typeof LibraryContentGroupSchema>;
 export type LibraryResource = Static<typeof LibraryResourceSchema>;
+export type LibraryLocationStatus = Static<typeof LibraryLocationStatusSchema>;
+export type LibraryTargetDescriptor = Static<typeof LibraryTargetDescriptorSchema>;
 
 export const SKILL_SOURCE_TO_LOCATION_ID: Record<SkillSource, LibraryLocationId> = {
   mango: 'mango-skills',

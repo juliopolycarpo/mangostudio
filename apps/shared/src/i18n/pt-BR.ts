@@ -1386,6 +1386,15 @@ export const messages = {
     disclaimer: 'A Inteligencia Artificial pode cometer erros, verifique os resultados com cautela',
   },
 
+  library: {
+    targets: {
+      mangostudio: 'MangoStudio',
+      claude: 'Claude Code',
+      codex: 'Codex',
+      cursor: 'Cursor',
+    },
+  },
+
   providers: {
     gemini: 'Google Gemini',
     anthropic: 'Anthropic',
