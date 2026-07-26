@@ -68,6 +68,21 @@ export type {
   GenerateImageResponse,
   GenerateTextResponse,
 } from '../generation';
+// Library
+export type {
+  LibraryContentGroup,
+  LibraryCoverage,
+  LibraryDivergence,
+  LibraryInstance,
+  LibraryInvalidReason,
+  LibraryLocationId,
+  LibraryResource,
+  LibraryResourceRef,
+  LibraryTargetId,
+  LocationAccess,
+  ResourceFormat,
+  ResourceKind,
+} from '../library';
 // MCP
 export type {
   AddMcpServerBody,
