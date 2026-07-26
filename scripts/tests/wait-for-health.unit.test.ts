@@ -28,12 +28,10 @@ describe('scripts/lib/wait-for-health', () => {
         throw new Error(`Could not parse default retries from ${shellPath}`);
       }
       const defaultRetries = Number(retriesMatch[1]);
-      expect(shell).toMatch(/sleep 1/);
+      // Anchored: a bare /sleep 1/ would also accept `sleep 10`.
+      expect(shell).toMatch(/^\s*sleep 1$/m);
+      expect(defaultRetries).toBe(30);
       expect(DEFAULT_READY_BUDGET_MS).toBe(defaultRetries * 1000);
-    });
-
-    test('default budget matches scripts/release/wait-for-health.sh (30 × 1s = 30s)', () => {
-      expect(DEFAULT_READY_BUDGET_MS).toBe(30_000);
     });
 
     test('Windows budget gives GitHub runners extra headroom for cold starts', () => {
