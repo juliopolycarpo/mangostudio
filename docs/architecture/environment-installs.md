@@ -30,8 +30,9 @@ blocked it. Execution requires all of these conditions:
 - The server binds to a loopback address, unless it is a standalone binary launched by the user.
 - The request's socket peer is loopback. Forwarded client-IP headers are never trusted for this
   decision.
-- The process is not running in a container. `/.dockerenv` and `MANGO_CONTAINER=1` both block
-  installs.
+- The process is not running in a container. `/.dockerenv` and `MANGO_CONTAINER` both block
+  installs; the result is resolved once into `environments.container` by
+  `apps/api/src/lib/config.ts`, so it is visible wherever configuration is reported.
 - Environment installs are explicitly enabled.
 
 Blocked recipes remain useful: the response includes a shell command the user can review, copy,
@@ -53,7 +54,9 @@ nvm is loaded directly from its detected `nvm.sh`, so the user's login profile i
 
 Official script installers have a prepare step before execution:
 
-1. Fetch the code-owned HTTPS URL, allowing only HTTPS redirects.
+1. Fetch the code-owned HTTPS URL, allowing only HTTPS redirects. Every hop, including the first,
+   is checked against the same address policy used for provider base URLs, so a hijacked
+   installer host cannot redirect the server onto a loopback, private, or link-local endpoint.
 2. Stream the response through a size bound before allocating the complete body.
 3. Reject empty or implausibly small responses, oversized responses, HTML, and content without a
    shell shebang.
@@ -75,7 +78,9 @@ variables are withheld.
 Each run has:
 
 - a recipe-specific timeout followed by `SIGKILL`;
-- explicit cancellation;
+- explicit cancellation through the cancel endpoint, and only that. A run outlives the request
+  that started it, so closing the page or dropping the log stream never kills an installer
+  mid-write;
 - a combined one-MiB output and log-file cap with a truncation event;
 - one active process per recipe ID, with same-user duplicate requests attaching to that run;
 - raw line-by-line SSE output, followed by refreshed runtime, version-manager, or agent status;
@@ -98,6 +103,11 @@ Third-party installers are not transactional. Cancellation, timeout, or failure 
 partial tool installation, and MangoStudio does not claim to roll it back. The audit record and
 bounded raw log are the source of truth for diagnosis and recovery with the tool's own
 instructions.
+
+A run is `running` only while the process that spawned it holds it in memory. If the server stops
+mid-install, the row is settled as `interrupted` on the next read — not `failed`, because the
+installer may well have completed. The replay of a finished run always ends with a terminal
+event, so a reconnecting client never waits on a stream that has nothing left to send.
 
 ## API Surface
 
