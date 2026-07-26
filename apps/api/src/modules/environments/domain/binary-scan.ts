@@ -18,13 +18,15 @@ export interface RuntimeDefinition {
   readonly binaryNames: readonly string[];
   readonly versionArgs: readonly string[];
   readonly parseVersion: (stdout: string) => SemVer | null;
+  /** Finding to emit when the command runs but its output no longer parses. */
+  readonly unparsedVersionCode?: 'not-executable' | 'version-probe-failed';
   readonly wellKnownDirs: (env: PathEnv) => readonly string[];
   /** Retains the sidecar detector's final OS-resolved fallback. */
   readonly includeBareBinaryNames?: boolean;
 }
 
 interface RuntimeScanFailure {
-  readonly code: 'not-executable' | 'probe-timeout';
+  readonly code: 'not-executable' | 'probe-timeout' | 'version-probe-failed';
   readonly path: string;
 }
 
@@ -297,11 +299,22 @@ export async function scanRuntime(
       }
 
       const version = probe.version?.trim();
-      if (!version || !definition.parseVersion(version)) {
+      if (!version) {
         return candidate.requiresExistenceCheck
           ? {
               kind: 'failure',
               failure: { code: 'not-executable', path: candidate.path },
+            }
+          : null;
+      }
+      if (!definition.parseVersion(version)) {
+        return candidate.requiresExistenceCheck
+          ? {
+              kind: 'failure',
+              failure: {
+                code: definition.unparsedVersionCode ?? 'not-executable',
+                path: candidate.path,
+              },
             }
           : null;
       }

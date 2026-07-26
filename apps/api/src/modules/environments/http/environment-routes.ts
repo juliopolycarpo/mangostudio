@@ -1,10 +1,13 @@
 import type {
+  AgentCliStatus,
   RuntimeId,
   RuntimeStatus,
   VersionManagerId,
   VersionManagerStatus,
 } from '@mangostudio/shared/environments';
 import {
+  AgentCliStatusListSchema,
+  AgentCliStatusSchema,
   RuntimeIdSchema,
   RuntimeStatusListSchema,
   RuntimeStatusSchema,
@@ -17,8 +20,14 @@ import {
   ApiErrorResponseSchema,
   ERROR_CODES,
 } from '@mangostudio/shared/errors';
+import type { LibraryTargetId } from '@mangostudio/shared/library';
+import { LibraryTargetIdSchema } from '@mangostudio/shared/library';
 import { Elysia, t } from 'elysia';
 import { requireAuth } from '../../../plugins/auth-middleware';
+import {
+  type AgentCliDetectionService,
+  agentCliDetectionService,
+} from '../application/agent-cli-detection';
 import {
   type RuntimeDetectionService,
   runtimeDetectionService,
@@ -30,6 +39,7 @@ import {
 
 const runtimeIdParams = t.Object({ id: RuntimeIdSchema });
 const versionManagerIdParams = t.Object({ id: VersionManagerIdSchema });
+const agentTargetParams = t.Object({ targetId: LibraryTargetIdSchema });
 
 async function getRuntimeOrNotFound(
   service: RuntimeDetectionService,
@@ -63,9 +73,26 @@ async function getVersionManagerOrNotFound(
   };
 }
 
+async function getAgentCliOrNotFound(
+  service: AgentCliDetectionService,
+  targetId: LibraryTargetId,
+  force: boolean,
+  set: { status?: number | string }
+): Promise<AgentCliStatus | ApiErrorResponse> {
+  const status = await service.getAgentCliStatus(targetId, { force });
+  if (status) return status;
+
+  set.status = 404;
+  return {
+    error: `Agent CLI detection is not available for ${targetId}.`,
+    code: ERROR_CODES.NOT_FOUND,
+  };
+}
+
 export function createEnvironmentRoutes(
   runtimeService: RuntimeDetectionService = runtimeDetectionService,
-  versionManagerService: VersionManagerDetectionService = versionManagerDetectionService
+  versionManagerService: VersionManagerDetectionService = versionManagerDetectionService,
+  agentService: AgentCliDetectionService = agentCliDetectionService
 ) {
   return new Elysia()
     .use(requireAuth)
@@ -120,6 +147,31 @@ export function createEnvironmentRoutes(
         params: versionManagerIdParams,
         response: {
           200: VersionManagerStatusSchema,
+          404: ApiErrorResponseSchema,
+        },
+      }
+    )
+    .get('/environments/agents', () => agentService.listAgentCliStatuses(), {
+      response: { 200: AgentCliStatusListSchema },
+    })
+    .get(
+      '/environments/agents/:targetId',
+      ({ params, set }) => getAgentCliOrNotFound(agentService, params.targetId, false, set),
+      {
+        params: agentTargetParams,
+        response: {
+          200: AgentCliStatusSchema,
+          404: ApiErrorResponseSchema,
+        },
+      }
+    )
+    .post(
+      '/environments/agents/:targetId/probe',
+      ({ params, set }) => getAgentCliOrNotFound(agentService, params.targetId, true, set),
+      {
+        params: agentTargetParams,
+        response: {
+          200: AgentCliStatusSchema,
           404: ApiErrorResponseSchema,
         },
       }

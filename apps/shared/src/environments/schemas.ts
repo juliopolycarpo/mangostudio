@@ -1,9 +1,14 @@
 import { type Static, Type } from '@sinclair/typebox';
+import { LibraryLocationStatusSchema, LibraryTargetIdSchema } from '../library';
 
 export const RuntimeIdSchema = Type.Union([
   Type.Literal('bun'),
   Type.Literal('node'),
   Type.Literal('nvm'),
+  Type.Literal('mangostudio'),
+  Type.Literal('claude'),
+  Type.Literal('codex'),
+  Type.Literal('cursor'),
 ]);
 
 export const RuntimeOriginSchema = Type.Union([
@@ -44,6 +49,19 @@ export const RuntimeFindingCodeSchema = Type.Union([
   Type.Literal('outdated-lts'),
   Type.Literal('managed-but-not-on-path'),
   Type.Literal('probe-timeout'),
+  Type.Literal('cli-not-installed'),
+  Type.Literal('config-home-missing'),
+  Type.Literal('not-authenticated'),
+  Type.Literal('version-probe-failed'),
+  Type.Literal('location-unwritable'),
+]);
+
+export const AgentAuthSignalSchema = Type.Union([
+  Type.Literal('file-present'),
+  Type.Literal('file-absent'),
+  Type.Literal('config-key-present'),
+  Type.Literal('session'),
+  Type.Literal('unknown'),
 ]);
 
 export const RuntimeInstallationSchema = Type.Object({
@@ -73,6 +91,20 @@ export const RuntimeStatusSchema = Type.Object({
 });
 
 export const RuntimeStatusListSchema = Type.Array(RuntimeStatusSchema);
+
+export const AgentCliStatusSchema = Type.Composite([
+  RuntimeStatusSchema,
+  Type.Object({
+    targetId: LibraryTargetIdSchema,
+    configHome: Type.String({ minLength: 1 }),
+    configHomeExists: Type.Boolean(),
+    authenticated: Type.Boolean(),
+    authSignal: AgentAuthSignalSchema,
+    locations: Type.Array(LibraryLocationStatusSchema),
+  }),
+]);
+
+export const AgentCliStatusListSchema = Type.Array(AgentCliStatusSchema);
 
 export const ManagedVersionSchema = Type.Object({
   version: Type.String({ minLength: 1 }),
@@ -107,6 +139,9 @@ export type RuntimeInstallation = Static<typeof RuntimeInstallationSchema>;
 export type RuntimeFinding = Static<typeof RuntimeFindingSchema>;
 export type RuntimeStatus = Static<typeof RuntimeStatusSchema>;
 export type RuntimeStatusList = Static<typeof RuntimeStatusListSchema>;
+export type AgentAuthSignal = Static<typeof AgentAuthSignalSchema>;
+export type AgentCliStatus = Static<typeof AgentCliStatusSchema>;
+export type AgentCliStatusList = Static<typeof AgentCliStatusListSchema>;
 export type ManagedVersion = Static<typeof ManagedVersionSchema>;
 export type VersionManagerStatus = Static<typeof VersionManagerStatusSchema>;
 export type VersionManagerStatusList = Static<typeof VersionManagerStatusListSchema>;

@@ -115,6 +115,7 @@ export function createRuntimeDetectionService(
   const isInstallable = options.isInstallable ?? (() => false);
   const cache = new Map<RuntimeId, RuntimeCacheEntry>();
   const inflight = new Map<string, Promise<RuntimeStatus>>();
+  const forcedInflight = new Map<string, Promise<RuntimeStatus>>();
   const probeGenerations = new Map<RuntimeId, number>();
 
   const getRuntimeStatus = (
@@ -137,11 +138,14 @@ export function createRuntimeDetectionService(
     }
 
     const inflightKey = `${id}:${environmentKey}`;
-    const pending = inflight.get(inflightKey);
-    if (!detectOptions?.force && pending) return pending;
+    const pending = detectOptions?.force
+      ? forcedInflight.get(inflightKey)
+      : (forcedInflight.get(inflightKey) ?? inflight.get(inflightKey));
+    if (pending) return pending;
 
     const generation = (probeGenerations.get(id) ?? 0) + 1;
     probeGenerations.set(id, generation);
+    const targetInflight = detectOptions?.force ? forcedInflight : inflight;
     const probe = scanRuntime(definition, deps)
       .then((scan) => {
         const probedAtMs = now();
@@ -156,10 +160,10 @@ export function createRuntimeDetectionService(
         return status;
       })
       .finally(() => {
-        if (inflight.get(inflightKey) === probe) inflight.delete(inflightKey);
+        if (targetInflight.get(inflightKey) === probe) targetInflight.delete(inflightKey);
       });
 
-    inflight.set(inflightKey, probe);
+    targetInflight.set(inflightKey, probe);
     return probe;
   };
 
@@ -180,10 +184,14 @@ export function createRuntimeDetectionService(
         for (const key of inflight.keys()) {
           if (key.startsWith(`${id}:`)) inflight.delete(key);
         }
+        for (const key of forcedInflight.keys()) {
+          if (key.startsWith(`${id}:`)) forcedInflight.delete(key);
+        }
         return;
       }
       cache.clear();
       inflight.clear();
+      forcedInflight.clear();
       for (const definition of definitions) {
         const runtimeId = definition.id;
         probeGenerations.set(runtimeId, (probeGenerations.get(runtimeId) ?? 0) + 1);
