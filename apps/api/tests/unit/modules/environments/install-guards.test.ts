@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'bun:test';
 import {
-  detectContainer,
   evaluateInstallGuard,
   type InstallGuardContext,
   isLoopbackAddress,
@@ -89,11 +88,5 @@ describe('install guards', () => {
       allowed: false,
       reasons: ['container', 'server-not-loopback', 'client-not-loopback', 'disabled'],
     });
-  });
-
-  it('detects explicit and filesystem container signals', () => {
-    expect(detectContainer({ MANGO_CONTAINER: '1' }, () => false)).toBe(true);
-    expect(detectContainer({}, (path) => path === '/.dockerenv')).toBe(true);
-    expect(detectContainer({}, () => false)).toBe(false);
   });
 });

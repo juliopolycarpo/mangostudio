@@ -24,7 +24,7 @@ import { getConfig } from '../../../lib/config';
 import { getInstallLogPath } from '../../../lib/mango-paths';
 import { isStandaloneExecutable } from '../../../lib/runtime-paths';
 import { generateId } from '../../../utils/id';
-import { detectContainer, evaluateInstallGuard } from '../domain/install-guards';
+import { evaluateInstallGuard } from '../domain/install-guards';
 import { INSTALL_RECIPES, type InstallRecipe } from '../domain/install-recipes';
 import { assertRecipeInput } from '../domain/recipe-input';
 import {
@@ -241,7 +241,7 @@ function defaultGuard(clientIp: string | undefined): InstallGuard {
     clientIp,
     installsEnabled: config.environments.installsEnabled,
     standalone: isStandaloneExecutable(),
-    container: detectContainer(),
+    container: config.environments.container,
   });
 }
 

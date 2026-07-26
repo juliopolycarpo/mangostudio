@@ -83,6 +83,12 @@ export interface MangoConfig {
     ltsRefresh: boolean;
     /** Permit guarded local runtime and agent CLI installation. */
     installsEnabled: boolean;
+    /**
+     * True when the API runs inside a container. Derived from `/.dockerenv` and
+     * forced on by `MANGO_CONTAINER`. Installs are refused here because they are
+     * discarded on restart and mutate an image the user did not build.
+     */
+    container: boolean;
   };
   /** Computed CORS origins derived from frontend host/port. */
   corsOrigins: string[];
@@ -123,7 +129,7 @@ const DEFAULT_CONFIG: Omit<MangoConfig, 'corsOrigins' | 'configFilePath'> = {
   checkpoints: { dir: '' },
   auth: { secret: '', url: '' },
   security: { trustProxy: false },
-  environments: { ltsRefresh: false, installsEnabled: false },
+  environments: { ltsRefresh: false, installsEnabled: false, container: false },
   cursor: { workspaceDir: '', sidecarScriptPath: '', nodePath: '' },
   chatgpt: {
     authBaseUrl: 'https://auth.openai.com',
@@ -186,6 +192,11 @@ const ENV_KEY_MAP: Record<string, (cfg: MangoConfig, value: string) => void> = {
   },
   MANGO_ENV_INSTALLS_ENABLED: (cfg, v) => {
     cfg.environments.installsEnabled = parseBooleanFlag(v);
+  },
+  // Only ever forces container mode on. A container the runtime detects must
+  // not become invisible because an env file says otherwise.
+  MANGO_CONTAINER: (cfg, v) => {
+    cfg.environments.container = cfg.environments.container || parseBooleanFlag(v);
   },
   CURSOR_WORKSPACE_DIR: (cfg, v) => {
     cfg.cursor.workspaceDir = v;
@@ -474,6 +485,10 @@ function applyEnvOverrides(cfg: MangoConfig, env: Record<string, string>): void 
 /** Computes derived values after all overrides are applied. */
 function computeDerived(cfg: MangoConfig, tomlPath: string): void {
   cfg.configFilePath = tomlPath;
+
+  // The container marker is a fact about the runtime, not a preference, so it
+  // is OR-ed over whatever MANGO_CONTAINER asked for.
+  cfg.environments.container = cfg.environments.container || existsSync('/.dockerenv');
 
   // auth.url defaults to the server address; the 0.0.0.0 wildcard is not a valid
   // browser baseURL, so fall back to localhost (matches the running-server log).

@@ -1,4 +1,3 @@
-import { existsSync } from 'node:fs';
 import type { InstallGuard, InstallGuardReason } from '@mangostudio/shared/environments';
 
 export interface InstallGuardContext {
@@ -31,13 +30,6 @@ export function isLoopbackAddress(value: string | undefined): boolean {
   }
   if (octets.some((octet) => Number(octet) > 255)) return false;
   return Number(octets[0]) === 127;
-}
-
-export function detectContainer(
-  env: NodeJS.ProcessEnv = process.env,
-  pathExists: (path: string) => boolean = existsSync
-): boolean {
-  return env.MANGO_CONTAINER === '1' || pathExists('/.dockerenv');
 }
 
 export function evaluateInstallGuard(context: InstallGuardContext): InstallGuard {
