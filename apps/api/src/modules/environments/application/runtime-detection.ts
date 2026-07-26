@@ -90,6 +90,8 @@ function runtimeEnvironmentKey(deps: BinaryScanDeps): string {
     .update('\0')
     .update(deps.env.NVM_HOME ?? '')
     .update('\0')
+    .update(deps.env.NVM_DIR ?? '')
+    .update('\0')
     .update(deps.env.NVM_SYMLINK ?? '')
     .update('\0')
     .update(deps.env.FNM_DIR ?? '')

@@ -40,6 +40,7 @@ const WATCHED_ENV_KEYS = [
   'MANGO_SECRET_STORE_UNSAFE_FILE_FALLBACK_DIR',
   'MANGO_LIBRARY_BACKUP_DIR',
   'MANGO_LIBRARY_BACKUP_RETENTION_COUNT',
+  'MANGO_ENV_LTS_REFRESH',
 ];
 
 function saveEnv(): Record<string, string | undefined> {
@@ -235,6 +236,15 @@ describe('config precedence', () => {
     const cfg = loadConfig(join(TMP_DIR, 'nonexistent.toml'));
 
     expect(cfg.security.trustProxy).toBe(true);
+  });
+
+  test('keeps live Node LTS refresh opt-in and lets env override TOML', () => {
+    writeFileSync(TMP_TOML, '[environments]\nlts_refresh = true\n');
+    process.env.MANGO_ENV_LTS_REFRESH = 'false';
+
+    const cfg = loadConfig(TMP_TOML);
+
+    expect(cfg.environments.ltsRefresh).toBe(false);
   });
 
   test('loads cursor sidecar script override from config.toml', () => {
