@@ -26,6 +26,7 @@ export {
 } from './agents';
 export * from './app-settings';
 export * from './contracts/index';
+export * from './environments';
 export * from './i18n';
 export * from './observability';
 export * from './provider-settings';

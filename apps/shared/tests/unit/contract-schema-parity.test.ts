@@ -13,7 +13,9 @@ import type {
   LibraryTargetDescriptor as BarrelLibraryTargetDescriptor,
   ModelOption as BarrelModelOption,
   ProviderObservabilityMetrics as BarrelObsMetrics,
+  RuntimeStatus as BarrelRuntimeStatus,
 } from '../../src/contracts';
+import type { RuntimeStatus as ModuleRuntimeStatus } from '../../src/environments';
 import type { SSEErrorEvent as ErrorsSSEErrorEvent } from '../../src/errors';
 import type {
   LibraryLocationStatus as ModuleLibraryLocationStatus,
@@ -58,6 +60,7 @@ assertType<Equals<BarrelObsMetrics, ModuleObsMetrics>>();
 assertType<Equals<BarrelLibraryResource, ModuleLibraryResource>>();
 assertType<Equals<BarrelLibraryLocationStatus, ModuleLibraryLocationStatus>>();
 assertType<Equals<BarrelLibraryTargetDescriptor, ModuleLibraryTargetDescriptor>>();
+assertType<Equals<BarrelRuntimeStatus, ModuleRuntimeStatus>>();
 
 const SAMPLE_PROFILE: AgentProfile = {
   id: 'user:reviewer',

@@ -60,6 +60,18 @@ export type {
   DeleteConnectorResponse as DeleteGeminiSecretResponse,
   UpdateConnectorModelsBody,
 } from '../connectors';
+// Environments
+export type {
+  RuntimeFinding,
+  RuntimeFindingCode,
+  RuntimeHealth,
+  RuntimeId,
+  RuntimeInstallation,
+  RuntimeOrigin,
+  RuntimeStatus,
+  RuntimeStatusList,
+  VersionManagerId,
+} from '../environments';
 // Errors
 export type { ApiErrorResponse, SSEErrorEvent } from '../errors';
 // Generation

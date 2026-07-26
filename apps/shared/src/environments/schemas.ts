@@ -1,0 +1,76 @@
+import { type Static, Type } from '@sinclair/typebox';
+
+export const RuntimeIdSchema = Type.Union([
+  Type.Literal('bun'),
+  Type.Literal('node'),
+  Type.Literal('nvm'),
+]);
+
+export const RuntimeOriginSchema = Type.Union([
+  Type.Literal('path'),
+  Type.Literal('well-known'),
+  Type.Literal('version-manager'),
+  Type.Literal('configured'),
+]);
+
+export const VersionManagerIdSchema = Type.Union([
+  Type.Literal('nvm'),
+  Type.Literal('fnm'),
+  Type.Literal('volta'),
+]);
+
+export const RuntimeHealthSchema = Type.Union([
+  Type.Literal('ok'),
+  Type.Literal('warn'),
+  Type.Literal('missing'),
+  Type.Literal('error'),
+]);
+
+export const RuntimeFindingCodeSchema = Type.Union([
+  Type.Literal('not-found'),
+  Type.Literal('shadowed-by-earlier-path'),
+  Type.Literal('multiple-versions'),
+  Type.Literal('version-below-minimum'),
+  Type.Literal('not-executable'),
+  Type.Literal('outdated-lts'),
+  Type.Literal('managed-but-not-on-path'),
+  Type.Literal('probe-timeout'),
+]);
+
+export const RuntimeInstallationSchema = Type.Object({
+  path: Type.String({ minLength: 1 }),
+  rawPath: Type.String({ minLength: 1 }),
+  version: Type.String({ minLength: 1 }),
+  origin: RuntimeOriginSchema,
+  pathIndex: Type.Optional(Type.Integer({ minimum: 0 })),
+  effective: Type.Boolean(),
+  aliasOf: Type.Optional(Type.String({ minLength: 1 })),
+  managedBy: Type.Optional(VersionManagerIdSchema),
+});
+
+export const RuntimeFindingSchema = Type.Object({
+  code: RuntimeFindingCodeSchema,
+  params: Type.Optional(Type.Record(Type.String(), Type.String())),
+});
+
+export const RuntimeStatusSchema = Type.Object({
+  id: RuntimeIdSchema,
+  health: RuntimeHealthSchema,
+  installations: Type.Array(RuntimeInstallationSchema),
+  effective: Type.Optional(RuntimeInstallationSchema),
+  findings: Type.Array(RuntimeFindingSchema),
+  installable: Type.Boolean(),
+  probedAtMs: Type.Number({ minimum: 0 }),
+});
+
+export const RuntimeStatusListSchema = Type.Array(RuntimeStatusSchema);
+
+export type RuntimeId = Static<typeof RuntimeIdSchema>;
+export type RuntimeOrigin = Static<typeof RuntimeOriginSchema>;
+export type VersionManagerId = Static<typeof VersionManagerIdSchema>;
+export type RuntimeHealth = Static<typeof RuntimeHealthSchema>;
+export type RuntimeFindingCode = Static<typeof RuntimeFindingCodeSchema>;
+export type RuntimeInstallation = Static<typeof RuntimeInstallationSchema>;
+export type RuntimeFinding = Static<typeof RuntimeFindingSchema>;
+export type RuntimeStatus = Static<typeof RuntimeStatusSchema>;
+export type RuntimeStatusList = Static<typeof RuntimeStatusListSchema>;
