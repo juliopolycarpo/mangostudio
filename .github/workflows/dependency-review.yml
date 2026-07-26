@@ -11,7 +11,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: dependency-review-${{ github.head_ref || github.ref }}
+  group: dependency-review-pr-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 jobs:

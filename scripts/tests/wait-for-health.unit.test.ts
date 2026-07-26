@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 import {
   DEFAULT_READY_BUDGET_MS,
@@ -18,8 +20,18 @@ function stubProcessPlatform(platform: NodeJS.Platform): () => void {
 
 describe('scripts/lib/wait-for-health', () => {
   describe('budget constants', () => {
-    test('default budget matches scripts/release/wait-for-health.sh (30 × 1s = 30s)', () => {
-      expect(DEFAULT_READY_BUDGET_MS).toBe(30_000);
+    test('default budget matches scripts/release/wait-for-health.sh default retries × 1s sleep', () => {
+      const shellPath = join(import.meta.dir, '../release/wait-for-health.sh');
+      const shell = readFileSync(shellPath, 'utf8');
+      const retriesMatch = shell.match(/local retries="\$\{HEALTH_RETRIES:-\$\{3:-(\d+)\}\}"/);
+      if (!retriesMatch) {
+        throw new Error(`Could not parse default retries from ${shellPath}`);
+      }
+      const defaultRetries = Number(retriesMatch[1]);
+      // Anchored: a bare /sleep 1/ would also accept `sleep 10`.
+      expect(shell).toMatch(/^\s*sleep 1$/m);
+      expect(defaultRetries).toBe(30);
+      expect(DEFAULT_READY_BUDGET_MS).toBe(defaultRetries * 1000);
     });
 
     test('Windows budget gives GitHub runners extra headroom for cold starts', () => {

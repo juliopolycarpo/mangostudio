@@ -22,15 +22,43 @@ Unit tests in `scripts/tests/ci-gate.unit.test.ts` derive each gate's expected
 that already depends on the gate. Adding a mandatory lane without wiring it into
 the gate fails the test.
 
+## Concurrency policy
+
+Workflows that declare `concurrency` follow a small set of rules so overlapping
+runs are predictable and `main` never loses a green publish path:
+
+- **Pull requests.** Workflows triggered by `pull_request` key the concurrency
+  group on the PR number (`github.event.pull_request.number`), not the commit
+  SHA, so a new push supersedes the previous run even across branch renames or
+  forks. Those runs use `cancel-in-progress: true` unless the workflow also
+  serves pushes to `main` (see below).
+- **Pushes to `main`.** Runs on `refs/heads/main` are never cancelled in
+  progress, so every green commit can reach Canary and downstream publish steps.
+- **Publish workflows.** `release.yml` never cancels mid-publish
+  (`cancel-in-progress: false`). `canary.yml` is the exception: it cancels
+  in-flight canary publishes so only the newest green commit owns the rolling
+  pre-release and npm `canary` dist-tag; per-commit versions are unique, so
+  superseding does not leave a half-published conflict.
+- **Scheduled workflows.** Cron-driven runs never cancel in progress.
+
+Reusable workflows do not inherit a `concurrency` group from their caller, but
+cancelling the caller cancels the jobs it invoked, so `ci.yml`'s group already
+governs called workflows on a PR. Callables that also support
+`workflow_dispatch` declare their own group to cover direct runs (for example
+`browser-smoke.yml` keys on `github.ref`).
+
 ## Workflow hygiene
 
-`scripts/tests/workflow-hygiene.unit.test.ts` enforces two repository-wide
-workflow policies from the workflow text itself:
+`scripts/tests/workflow-hygiene.unit.test.ts` enforces repository-wide workflow
+policies from the workflow text itself:
 
 - **Job timeouts.** Every job declares `timeout-minutes` instead of inheriting
   GitHub's 360-minute default. Reusable-workflow callers are the one exemption —
   GitHub rejects the key on them — and a paired assertion keeps that exemption
   from widening.
+- **PR concurrency keys.** Every workflow with both `pull_request` and
+  `concurrency` keys the group on `github.event.pull_request.number` and never
+  on `github.sha`.
 - **Checkout credentials.** Every `actions/checkout` sets `persist-credentials`
   explicitly, so no checkout inherits the job's `GITHUB_TOKEN` in `.git/config`
   by omission. `false` is the rule; `true` is reserved for the jobs listed in
