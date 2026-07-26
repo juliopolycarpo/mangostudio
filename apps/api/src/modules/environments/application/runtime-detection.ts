@@ -8,6 +8,7 @@ import type { RuntimeId, RuntimeStatus } from '@mangostudio/shared/environments'
 import { CURSOR_MIN_NODE_VERSION } from '@mangostudio/shared/provider-settings';
 import { type BinaryScanDeps, type RuntimeDefinition, scanRuntime } from '../domain/binary-scan';
 import { analyzeRuntimeScan, type MinimumRuntimeVersion } from '../domain/duplicate-analysis';
+import { hasInstallRecipeForRuntime } from '../domain/install-recipes';
 import { BUN_RUNTIME_DEFINITION, NODE_RUNTIME_DEFINITION } from '../domain/runtime-definitions';
 
 const execFileAsync = promisify(execFile);
@@ -112,7 +113,7 @@ export function createRuntimeDetectionService(
     ...DEFAULT_MINIMUM_VERSIONS,
     ...options.minimumVersions,
   };
-  const isInstallable = options.isInstallable ?? (() => false);
+  const isInstallable = options.isInstallable ?? hasInstallRecipeForRuntime;
   const cache = new Map<RuntimeId, RuntimeCacheEntry>();
   const inflight = new Map<string, Promise<RuntimeStatus>>();
   const forcedInflight = new Map<string, Promise<RuntimeStatus>>();

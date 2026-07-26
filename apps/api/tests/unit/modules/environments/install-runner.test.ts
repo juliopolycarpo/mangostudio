@@ -1,0 +1,169 @@
+import { describe, expect, it } from 'bun:test';
+import {
+  buildInstallEnvironment,
+  createInstallRunner,
+  type InstallLogLine,
+} from '../../../../src/modules/environments/infrastructure/install-runner';
+
+class FakeInstallProcess {
+  readonly stdout: ReadableStream<Uint8Array>;
+  readonly stderr: ReadableStream<Uint8Array>;
+  readonly exited: Promise<number>;
+  exitCode: number | null = null;
+  killedWith: string | null = null;
+  private resolveExit!: (code: number) => void;
+
+  constructor(stdout: string, stderr: string, exitCode?: number) {
+    this.stdout = streamFrom(stdout);
+    this.stderr = streamFrom(stderr);
+    this.exited = new Promise((resolve) => {
+      this.resolveExit = resolve;
+    });
+    if (exitCode !== undefined) {
+      queueMicrotask(() => this.finish(exitCode));
+    }
+  }
+
+  kill(signal: 'SIGKILL'): void {
+    this.killedWith = signal;
+    this.finish(137);
+  }
+
+  private finish(code: number): void {
+    if (this.exitCode !== null) return;
+    this.exitCode = code;
+    this.resolveExit(code);
+  }
+}
+
+function streamFrom(text: string): ReadableStream<Uint8Array> {
+  return new ReadableStream({
+    start(controller) {
+      if (text) controller.enqueue(new TextEncoder().encode(text));
+      controller.close();
+    },
+  });
+}
+
+function createRunner(process: FakeInstallProcess, captured: { log: Uint8Array[] }) {
+  return createInstallRunner({
+    spawn: () => process,
+    prepareLog: () => Promise.resolve(),
+    appendLog: (_path, bytes) => {
+      captured.log.push(bytes);
+      return Promise.resolve();
+    },
+  });
+}
+
+const COMMAND = {
+  argv: ['echo', 'hello'],
+  timeoutMs: 1000,
+  logPath: '/tmp/install.log',
+} as const;
+
+describe('install runner', () => {
+  it('passes only allowlisted environment keys plus constant recipe overrides', () => {
+    const env = buildInstallEnvironment(
+      {
+        PATH: '/bin',
+        HOME: '/home/tester',
+        XDG_CONFIG_HOME: '/home/tester/.config',
+        HTTPS_PROXY: 'https://proxy.test',
+        ANTHROPIC_API_KEY: 'secret',
+        GITHUB_TOKEN: 'secret',
+      },
+      {
+        PROFILE: '/dev/null',
+        NVM_DIR: '/home/tester/.nvm',
+        ANTHROPIC_API_KEY: 'still-secret',
+      }
+    );
+
+    expect(env).toEqual({
+      PATH: '/bin',
+      HOME: '/home/tester',
+      XDG_CONFIG_HOME: '/home/tester/.config',
+      HTTPS_PROXY: 'https://proxy.test',
+      PROFILE: '/dev/null',
+      NVM_DIR: '/home/tester/.nvm',
+    });
+  });
+
+  it('streams lines, writes a bounded raw log, and records success', async () => {
+    const process = new FakeInstallProcess('hello\nworld\n', 'warning\n', 0);
+    const captured = { log: [] as Uint8Array[] };
+    const events: InstallLogLine[] = [];
+    const runner = createRunner(process, captured);
+
+    const result = await runner.run(COMMAND, { onLog: (event) => events.push(event) });
+
+    expect(result.status).toBe('succeeded');
+    expect(result.exitCode).toBe(0);
+    expect(result.truncated).toBe(false);
+    expect(events).toEqual([
+      { stream: 'stdout', line: 'hello' },
+      { stream: 'stdout', line: 'world' },
+      { stream: 'stderr', line: 'warning' },
+    ]);
+    expect(
+      new TextDecoder().decode(Uint8Array.from(captured.log.flatMap((chunk) => [...chunk])))
+    ).toBe('hello\nworld\nwarning\n');
+  });
+
+  it('caps captured output while continuing to a terminal result', async () => {
+    const process = new FakeInstallProcess('0123456789', '', 0);
+    const captured = { log: [] as Uint8Array[] };
+    const events: InstallLogLine[] = [];
+    const runner = createRunner(process, captured);
+
+    const result = await runner.run(COMMAND, {
+      outputLimitBytes: 4,
+      onLog: (event) => events.push(event),
+    });
+
+    expect(result.truncated).toBe(true);
+    expect(captured.log.reduce((total, chunk) => total + chunk.byteLength, 0)).toBe(4);
+    expect(events).toContainEqual({
+      stream: 'system',
+      line: 'Output truncated after 4 bytes.',
+    });
+  });
+
+  it('kills timed-out and cancelled children with SIGKILL', async () => {
+    const timedOut = new FakeInstallProcess('', '');
+    const timedOutResult = await createRunner(timedOut, { log: [] }).run({
+      ...COMMAND,
+      timeoutMs: 1,
+    });
+    expect(timedOutResult.status).toBe('timed-out');
+    expect(timedOut.killedWith).toBe('SIGKILL');
+
+    const cancelled = new FakeInstallProcess('', '');
+    const controller = new AbortController();
+    const cancelledResultPromise = createRunner(cancelled, { log: [] }).run(COMMAND, {
+      signal: controller.signal,
+    });
+    await Promise.resolve();
+    controller.abort();
+    const cancelledResult = await cancelledResultPromise;
+    expect(cancelledResult.status).toBe('cancelled');
+    expect(cancelled.killedWith).toBe('SIGKILL');
+  });
+
+  it('reports a synchronous spawn failure without throwing', async () => {
+    const events: InstallLogLine[] = [];
+    const runner = createInstallRunner({
+      spawn: () => {
+        throw new Error('binary missing');
+      },
+      prepareLog: () => Promise.resolve(),
+    });
+
+    const result = await runner.run(COMMAND, { onLog: (event) => events.push(event) });
+
+    expect(result.status).toBe('spawn-failed');
+    expect(result.exitCode).toBeNull();
+    expect(events).toEqual([{ stream: 'system', line: 'binary missing' }]);
+  });
+});

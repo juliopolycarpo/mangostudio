@@ -26,6 +26,7 @@ import {
   probeConfigKey,
 } from '../domain/auth-signal';
 import type { BinaryScanDeps, RuntimeDefinition } from '../domain/binary-scan';
+import { hasInstallRecipeForRuntime } from '../domain/install-recipes';
 import { createRuntimeDetectionService, type RuntimeDetectionService } from './runtime-detection';
 
 interface AgentCliDetectionOptions {
@@ -129,7 +130,8 @@ export function createAgentCliDetectionService(
       ...(options.createScanDeps && { createDeps: options.createScanDeps }),
       now,
       isInstallable: (id, platform) =>
-        options.isInstallable?.(id as LibraryTargetId, platform) ?? false,
+        options.isInstallable?.(id as LibraryTargetId, platform) ??
+        hasInstallRecipeForRuntime(id, platform),
     });
   const createPathEnv = options.createPathEnv ?? createLibraryPathEnv;
   const fs = options.fs ?? NODE_AUTH_SIGNAL_FS;
