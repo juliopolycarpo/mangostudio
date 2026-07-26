@@ -31,6 +31,14 @@ export interface NpmPublishLogger {
   warn(message: string): void;
 }
 
+type NpmPublishAuthMode = 'failed' | 'legacy-explicit' | 'not-published' | 'oidc';
+
+export interface ResolveNpmPublishAuthInput {
+  readonly allowLegacy: boolean;
+  readonly oidcAvailable: boolean;
+  readonly tokenPresent: boolean;
+}
+
 export interface NpmPublishOptions {
   readonly runner: NpmRunner;
   readonly dryRun?: boolean;
@@ -41,6 +49,10 @@ export interface NpmPublishOptions {
   readonly provenancePolicy?: ProvenancePolicy;
   readonly retryDelaysMs?: readonly number[];
   readonly sleep?: (ms: number) => Promise<void>;
+  /** Resolved auth mode; skips env resolution (tests). */
+  readonly authMode?: 'legacy-explicit' | 'oidc';
+  /** Allow NODE_AUTH_TOKEN when OIDC is unavailable (dispatch escape hatch). */
+  readonly allowLegacyToken?: boolean;
 }
 
 export interface NpmPublishSummary {
@@ -50,9 +62,6 @@ export interface NpmPublishSummary {
   readonly provenance: NpmPublishProvenanceOutcome;
   readonly auth: NpmPublishAuthMode;
 }
-
-/** Auth mode reported for the npm channel while token auth is still in use. */
-type NpmPublishAuthMode = 'legacy-explicit' | 'not-published' | 'failed';
 
 type NpmPublishProvenanceOutcome =
   | { readonly status: 'disabled' }
@@ -143,6 +152,42 @@ export function isMissingPackageViewResult(result: NpmCommandResult): boolean {
   );
 }
 
+/** True when GitHub Actions can mint an OIDC token for npm Trusted Publishing. */
+export function isNpmPublishOidcAvailable(env: NodeJS.ProcessEnv = process.env): boolean {
+  const requestUrl = env.ACTIONS_ID_TOKEN_REQUEST_URL;
+  const requestToken = env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
+  return (
+    typeof requestUrl === 'string' &&
+    requestUrl.length > 0 &&
+    typeof requestToken === 'string' &&
+    requestToken.length > 0
+  );
+}
+
+/** True when a non-empty npm automation token is present in the environment. */
+export function isNpmPublishTokenPresent(env: NodeJS.ProcessEnv = process.env): boolean {
+  const token = env.NODE_AUTH_TOKEN;
+  return typeof token === 'string' && token.length > 0;
+}
+
+/**
+ * Choose npm publish auth mode. Fails closed when neither OIDC nor an allowed
+ * legacy token is available.
+ */
+export function resolveNpmPublishAuth(
+  input: ResolveNpmPublishAuthInput
+): 'legacy-explicit' | 'oidc' {
+  if (input.allowLegacy && input.tokenPresent) {
+    return 'legacy-explicit';
+  }
+  if (input.oidcAvailable) {
+    return 'oidc';
+  }
+  throw new Error(
+    'npm publish authentication failed: Trusted Publishing (OIDC) is unavailable and legacy token fallback is not allowed or missing.'
+  );
+}
+
 /** Classify a failed `npm publish` result. // Usage: classifyPublishFailure(result) */
 export function classifyPublishFailure(result: NpmCommandResult): NpmPublishFailureKind {
   if (matchesAny(result, PROVENANCE_PATTERNS)) return 'provenance';
@@ -156,6 +201,13 @@ export async function publishPackages(
   packages: readonly NpmPublishPackage[],
   options: NpmPublishOptions
 ): Promise<NpmPublishSummary> {
+  const publishAuthMode =
+    options.authMode ??
+    resolveNpmPublishAuth({
+      allowLegacy: options.allowLegacyToken ?? false,
+      oidcAvailable: isNpmPublishOidcAvailable(),
+      tokenPresent: isNpmPublishTokenPresent(),
+    });
   const context = createContext(options);
   const summary = { published: 0, skipped: 0, dryRun: 0 };
 
@@ -167,7 +219,7 @@ export async function publishPackages(
   return {
     ...summary,
     provenance: summarizeProvenance(context),
-    auth: summarizeAuth(summary),
+    auth: summarizeAuth(summary, publishAuthMode),
   };
 }
 
@@ -364,15 +416,18 @@ function summarizeProvenance(context: PublishContext): NpmPublishProvenanceOutco
   return { status: 'explicit' };
 }
 
-function summarizeAuth(summary: {
-  readonly published: number;
-  readonly skipped: number;
-  readonly dryRun: number;
-}): NpmPublishAuthMode {
+function summarizeAuth(
+  summary: {
+    readonly published: number;
+    readonly skipped: number;
+    readonly dryRun: number;
+  },
+  publishAuthMode: 'legacy-explicit' | 'oidc'
+): NpmPublishAuthMode {
   if (summary.published === 0 && summary.dryRun === 0 && summary.skipped > 0) {
     return 'not-published';
   }
-  return 'legacy-explicit';
+  return publishAuthMode;
 }
 
 function formatProvenanceOutcome(outcome: NpmPublishProvenanceOutcome): string {
