@@ -35,7 +35,11 @@ export function InstallAction({
 }: InstallActionProps) {
   const { t } = useI18n();
   const flow = useInstallFlow();
-  const runId = flow.state.step === 'running' ? flow.state.runId : null;
+  // The console must survive the run that produced it: `finished` keeps the same
+  // runId as `running`, so the stream hook is not torn down (and its buffer
+  // reset to idle) the instant the exit event moves the flow forward.
+  const runId =
+    flow.state.step === 'running' || flow.state.step === 'finished' ? flow.state.runId : null;
   const stream = useInstallStream({
     runId,
     onExit: () => void flow.complete(),
