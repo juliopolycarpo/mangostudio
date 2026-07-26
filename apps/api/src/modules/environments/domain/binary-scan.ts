@@ -201,6 +201,11 @@ function normalizedPath(path: string): string {
   return path.replaceAll('\\', '/').toLowerCase();
 }
 
+/** Version-manager roots are compared as prefixes, so trailing separators must go. */
+function normalizedRoot(path: string): string {
+  return normalizedPath(path.trim()).replace(/\/+$/, '');
+}
+
 function detectVersionManager(
   rawPath: string,
   realpath: string,
@@ -216,7 +221,8 @@ function detectVersionManager(
   for (const [manager, ...roots] of configuredRoots) {
     const normalizedRoots = roots
       .filter((root): root is string => Boolean(root?.trim()))
-      .map(normalizedPath);
+      .map(normalizedRoot)
+      .filter(Boolean);
     if (normalizedRoots.some((root) => paths.some((path) => path.startsWith(`${root}/`)))) {
       return manager;
     }
