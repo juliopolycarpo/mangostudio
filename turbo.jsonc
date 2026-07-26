@@ -6,6 +6,8 @@
   // scripts/ci/*), which run via `bun run` outside turbo tasks. Declared as pass-through so
   // biome's noUndeclaredEnvVars accepts them without affecting task cache keys.
   "globalPassThroughEnv": [
+    "ACTIONS_ID_TOKEN_REQUEST_TOKEN",
+    "ACTIONS_ID_TOKEN_REQUEST_URL",
     "ALLOWED_SKIPS",
     "API_PORT",
     "DISTRIBUTION_CHANNEL",
@@ -15,6 +17,8 @@
     "GITHUB_SHA",
     "MANGO_ARCHIVE_CONCURRENCY",
     "NEEDS",
+    "NODE_AUTH_TOKEN",
+    "NPM_PUBLISH_ALLOW_LEGACY_TOKEN",
     "ONLY_PLATFORM",
     "PLATFORM",
     "QA_FRONTEND_DIST",

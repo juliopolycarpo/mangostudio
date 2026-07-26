@@ -6,13 +6,19 @@ inputs:
     description: npm dist-tag to publish under. An empty value publishes as latest.
     required: false
     default: ""
+  allow-legacy-token:
+    description: >
+      When true, a non-empty node-auth-token may be written to a temporary npmrc
+      (workflow_dispatch escape hatch). When false, publish uses Trusted
+      Publishing OIDC and must not receive a token.
+    required: false
+    default: "false"
   node-auth-token:
     description: >
-      npm automation token for the publish. Declared as an input rather than
-      inherited from the caller's step `env:` so the token requirement is part
-      of this action's signature and the release env-contract test can see it.
-      The value is never printed.
-    required: true
+      npm automation token for legacy publish only. Omit on the OIDC path. The
+      value is never printed.
+    required: false
+    default: ""
   node-version:
     description: Minimum Node.js version required for npm provenance.
     required: false
@@ -67,14 +73,49 @@ runs:
       name: Publish to npm
       shell: bash
       env:
+        ALLOW_LEGACY_TOKEN: ${{ inputs.allow-legacy-token }}
         DIST_TAG: ${{ inputs.dist-tag }}
-        NODE_AUTH_TOKEN: ${{ inputs.node-auth-token }}
+        LEGACY_NODE_AUTH_TOKEN: ${{ inputs.node-auth-token }}
+        # This step owns the npmrc for every registry call below, so callers
+        # must not configure setup-node's `registry-url`: the npmrc it writes
+        # templates `_authToken=${NODE_AUTH_TOKEN}`, which the OIDC path
+        # deliberately leaves unset. registry.npmjs.org is npm's default and
+        # is what the legacy npmrc below targets.
         NPM_CONFIG_USERCONFIG: ${{ runner.temp }}/mangostudio-publish-npmrc
       run: |
         set -euo pipefail
         trap 'rm -f "$NPM_CONFIG_USERCONFIG"' EXIT
-        umask 077
-        printf '//registry.npmjs.org/:_authToken=%s\n' "$NODE_AUTH_TOKEN" > "$NPM_CONFIG_USERCONFIG"
+
+        oidc_available=0
+        if [ -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ] && [ -n "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ]; then
+          oidc_available=1
+        fi
+
+        use_legacy=0
+        if [ "$ALLOW_LEGACY_TOKEN" = "true" ]; then
+          if [ -n "${LEGACY_NODE_AUTH_TOKEN:-}" ]; then
+            use_legacy=1
+          else
+            # Deliberate fallback to OIDC rather than a hard failure, but say so:
+            # a maintainer who set allow_legacy_npm_token did it because they
+            # expect the token path, and a silent switch makes a later
+            # registry auth error look unrelated.
+            echo "::warning::allow-legacy-token is true but no npm token was supplied; falling back to Trusted Publishing (OIDC)."
+          fi
+        fi
+
+        if [ "$use_legacy" = "1" ]; then
+          umask 077
+          printf '//registry.npmjs.org/:_authToken=%s\n' "$LEGACY_NODE_AUTH_TOKEN" > "$NPM_CONFIG_USERCONFIG"
+          export NODE_AUTH_TOKEN="$LEGACY_NODE_AUTH_TOKEN"
+          export NPM_PUBLISH_ALLOW_LEGACY_TOKEN=true
+        elif [ "$oidc_available" = "1" ]; then
+          unset NODE_AUTH_TOKEN
+          export NPM_PUBLISH_ALLOW_LEGACY_TOKEN=false
+        else
+          echo "npm publish authentication failed: neither Trusted Publishing (OIDC) nor an allowed legacy token is available."
+          exit 1
+        fi
 
         args=(dist-npm)
         if [ -n "$DIST_TAG" ]; then

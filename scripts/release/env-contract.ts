@@ -25,9 +25,7 @@ export const RELEASE_SCRIPT_ENV_CONTRACTS = {
     requirements: [{ env: ['VERSION'], unlessArgsInclude: '--validate' }],
   },
   'scripts/release/prepare-release.ts': {},
-  'scripts/release/publish-npm.ts': {
-    requiredEnv: ['NODE_AUTH_TOKEN'],
-  },
+  'scripts/release/publish-npm.ts': {},
   'scripts/release/push-dist-repo.ts': {
     tokenEnvFlag: '--token-env',
   },

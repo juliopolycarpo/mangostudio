@@ -20,7 +20,9 @@ name: Release
 #
 # Prerequisites: channel secrets live on the `release` GitHub Environment and
 # are validated in the jobs that need them —
-# NPM_TOKEN for npm-publish, DIST_REPOS_TOKEN for homebrew/scoop. crates.io
+# NPM_TOKEN for npm-publish is only used when workflow_dispatch sets
+# allow_legacy_npm_token=true. DIST_REPOS_TOKEN for homebrew/scoop.
+# crates.io
 # uses Trusted Publishing via OIDC by default; CARGO_REGISTRY_TOKEN is only
 # accepted when workflow_dispatch sets allow_legacy_cargo_token=true. GHCR uses
 # the workflow GITHUB_TOKEN.
@@ -44,6 +46,10 @@ on:
         default: false
       allow_legacy_cargo_token:
         description: "Allow CARGO_REGISTRY_TOKEN when crates.io OIDC mint fails (migration only)"
+        type: boolean
+        default: false
+      allow_legacy_npm_token:
+        description: "Allow NPM_TOKEN when npm Trusted Publishing (OIDC) is unavailable (migration only)"
         type: boolean
         default: false
 
@@ -381,21 +387,16 @@ jobs:
     permissions:
       attestations: read # fetch build provenance for gh attestation verify
       contents: read # checkout only; publish goes to npm, not the repo
-      id-token: write # npm provenance attestation
+      id-token: write # npm Trusted Publishing OIDC and provenance attestation
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      - name: Preflight npm publish secret
-        uses: ./.github/actions/require-secret
-        with:
-          name: NPM_TOKEN
-          value: "${{ secrets.NPM_TOKEN }}"
-
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "22.14.0"
+          package-manager-cache: false
 
       - uses: ./.github/actions/setup-mango
         with:
@@ -414,7 +415,8 @@ jobs:
         name: Publish to npm
         uses: ./.github/actions/publish-npm-distribution
         with:
-          node-auth-token: ${{ secrets.NPM_TOKEN }}
+          allow-legacy-token: ${{ github.event_name == 'workflow_dispatch' && inputs.allow_legacy_npm_token }}
+          node-auth-token: ${{ github.event_name == 'workflow_dispatch' && inputs.allow_legacy_npm_token && secrets.NPM_TOKEN || '' }}
           node-version: "22.14.0"
 
   homebrew:

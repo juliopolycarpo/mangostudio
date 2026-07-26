@@ -17,12 +17,12 @@ valida o lockstep de versão e o changelog pré-tag, gera todos os artefatos e
 publica cada canal de forma independente. A tag carrega o próprio
 `CHANGELOG.md` — nada é escrito de volta em `main` após a release.
 
-| Secret                      | Usado por                                                | Escopo                                                                                                                    |
-| --------------------------- | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `NPM_TOKEN`                 | `npm-publish` (env), `npm-canary` (repo)                 | Secret do environment `release` para publish estável; secret do repositório mantido para o canary (validado nesses jobs)  |
-| `DIST_REPOS_TOKEN`          | `homebrew`, `scoop`                                      | Secret do environment `release` — PAT fine-grained com contents read/write no tap Homebrew e no bucket Scoop              |
-| `CARGO_REGISTRY_TOKEN`      | `cargo-publish` (opcional)                               | Token legado do crates.io usado só quando `workflow_dispatch` define `allow_legacy_cargo_token=true`                      |
-| *(built-in `GITHUB_TOKEN`)* | `github-release`, `docker`, o canal canary, attestations | Sem setup extra — releases por tag concedem `packages: write` para GHCR e `id-token: write` para a auth OIDC do crates.io |
+| Secret                      | Usado por                                                | Escopo                                                                                                                      |
+| --------------------------- | -------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `NPM_TOKEN`                 | `npm-publish` (env opcional), `npm-canary` (repo)        | Token legado só quando `workflow_dispatch` define `allow_legacy_npm_token=true`; secret do repositório para canary          |
+| `DIST_REPOS_TOKEN`          | `homebrew`, `scoop`                                      | Secret do environment `release` — PAT fine-grained com contents read/write no tap Homebrew e no bucket Scoop                |
+| `CARGO_REGISTRY_TOKEN`      | `cargo-publish` (opcional)                               | Token legado do crates.io usado só quando `workflow_dispatch` define `allow_legacy_cargo_token=true`                        |
+| *(built-in `GITHUB_TOKEN`)* | `github-release`, `docker`, o canal canary, attestations | Sem setup extra — releases por tag concedem `packages: write` para GHCR e `id-token: write` para OIDC do crates.io e do npm |
 
 ### Environment `release`
 
@@ -50,11 +50,12 @@ Complete uma vez por fork ou org antes do primeiro push de tag:
 2. Crie o bucket Scoop compartilhado [`juliopolycarpo/scoop-bucket`](https://github.com/juliopolycarpo/scoop-bucket) com diretório `bucket/`.
 3. Reserve o nome do crate `mangostudio` no [crates.io](https://crates.io) e gere um token de API só se ainda precisar do fallback legado temporário.
 4. Configure Trusted Publishing no crates.io para o crate `mangostudio`: **Settings -> Trusted Publishing -> Add -> GitHub**, repository owner `juliopolycarpo`, repository name `mangostudio`, workflow filename `release.yml`, e deixe o campo de environment vazio. O job `cargo-publish` declara `environment: release`, mas configs do crates.io sem environment continuam batendo — só preencha o environment no crates.io se quiser exigir um de propósito.
-5. Crie o GitHub Environment `release` (regra de tag `v*.*.*`, sem reviewers) e adicione `NPM_TOKEN` e `DIST_REPOS_TOKEN` como secrets do **environment**. Mantenha um `NPM_TOKEN` com escopo de repositório para o canary. Mantenha `CARGO_REGISTRY_TOKEN` só enquanto o escape hatch `allow_legacy_cargo_token` ainda for necessário. Depois de uma release verde pelo environment, remova o `DIST_REPOS_TOKEN` de nível de repositório.
+5. Crie o GitHub Environment `release` (regra de tag `v*.*.*`, sem reviewers) e adicione `DIST_REPOS_TOKEN` como secret do **environment**. Mantenha `NPM_TOKEN` no environment só enquanto o escape hatch `allow_legacy_npm_token` ainda puder ser necessário. Mantenha um `NPM_TOKEN` com escopo de repositório para o canary. Mantenha `CARGO_REGISTRY_TOKEN` só enquanto o escape hatch `allow_legacy_cargo_token` ainda for necessário. Depois de uma release verde pelo environment, remova o `DIST_REPOS_TOKEN` de nível de repositório.
 6. Depois que uma release provar que `cargo-publish` gerou o token de Trusted Publishing, revogue e remova `CARGO_REGISTRY_TOKEN`.
-7. Configure Trusted Publishing no npm para `mangostudio` e cada `@mangostudio/cli-*` quando for remover `NPM_TOKEN`. Até lá, a auth por token ainda exige provenance (`--provenance-policy required`).
-8. Após o primeiro push no GHCR, defina a visibilidade do pacote `ghcr.io/juliopolycarpo/mangostudio` como **public** nas configurações de pacotes do GitHub.
-9. Não é preciso token extra nem ajuste de proteção de branch para o changelog: `CHANGELOG.md` entra em `main` no commit de preparação da release (`bun run release:prepare`) **antes** do push da tag, e o workflow de release apenas verifica que ele está lá.
+7. Configure Trusted Publishing no npm para `mangostudio` e cada pacote `@mangostudio/cli-*` (**Settings -> Trusted Publisher**): repositório `juliopolycarpo/mangostudio`, workflow `release.yml`, environment `release`, ação `npm publish`. O npm permite só um trusted publisher por pacote; o canary continua com `NPM_TOKEN` do repositório (o workflow validado seria `ci.yml`, não `canary.yml`). Não ative “disallow tokens” no npm enquanto o canary precisar de token.
+8. Após a primeira release estável verde via OIDC no npm, remova o `NPM_TOKEN` do environment `release` se o caminho legado não for mais necessário.
+9. Após o primeiro push no GHCR, defina a visibilidade do pacote `ghcr.io/juliopolycarpo/mangostudio` como **public** nas configurações de pacotes do GitHub.
+10. Não é preciso token extra nem ajuste de proteção de branch para o changelog: `CHANGELOG.md` entra em `main` no commit de preparação da release (`bun run release:prepare`) **antes** do push da tag, e o workflow de release apenas verifica que ele está lá.
 
 ## Nomenclatura de assets de release
 

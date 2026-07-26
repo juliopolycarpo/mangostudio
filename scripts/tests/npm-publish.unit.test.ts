@@ -7,6 +7,8 @@ import {
   classifyPublishFailure,
   formatNpmPublishSummary,
   isMissingPackageViewResult,
+  isNpmPublishOidcAvailable,
+  isNpmPublishTokenPresent,
   type NpmCommandOptions,
   type NpmCommandResult,
   type NpmPublishLogger,
@@ -16,6 +18,7 @@ import {
   type ProvenancePolicy,
   parseProvenancePolicy,
   publishPackages,
+  resolveNpmPublishAuth,
 } from '../lib/npm-publish';
 
 const PLATFORM_PACKAGE: NpmPublishPackage = {
@@ -77,6 +80,8 @@ const publishWithFakes = (
   runner: FakeNpmRunner,
   packages: readonly NpmPublishPackage[] = [PLATFORM_PACKAGE],
   options: {
+    readonly allowLegacyToken?: boolean;
+    readonly authMode?: 'legacy-explicit' | 'oidc';
     readonly dryRun?: boolean;
     readonly provenancePolicy?: ProvenancePolicy;
     readonly retryDelaysMs?: readonly number[];
@@ -85,6 +90,8 @@ const publishWithFakes = (
   const sleeper = new FakeSleeper();
   const logger = new CapturingLogger();
   const result = publishPackages(packages, {
+    allowLegacyToken: options.allowLegacyToken,
+    authMode: options.authMode ?? 'legacy-explicit',
     dryRun: options.dryRun,
     logger,
     retryDelaysMs: options.retryDelaysMs ?? [10],
@@ -143,6 +150,173 @@ describe('npm publish failure classification', () => {
   });
 });
 
+describe('resolveNpmPublishAuth', () => {
+  test('prefers OIDC when available and legacy is not explicitly used', () => {
+    expect(
+      resolveNpmPublishAuth({
+        allowLegacy: false,
+        oidcAvailable: true,
+        tokenPresent: false,
+      })
+    ).toBe('oidc');
+    expect(
+      resolveNpmPublishAuth({
+        allowLegacy: false,
+        oidcAvailable: true,
+        tokenPresent: true,
+      })
+    ).toBe('oidc');
+  });
+
+  test('uses legacy-explicit only when legacy is allowed and a token is present', () => {
+    expect(
+      resolveNpmPublishAuth({
+        allowLegacy: true,
+        oidcAvailable: true,
+        tokenPresent: true,
+      })
+    ).toBe('legacy-explicit');
+  });
+
+  test('falls back to OIDC when legacy is allowed but no token is present', () => {
+    expect(
+      resolveNpmPublishAuth({
+        allowLegacy: true,
+        oidcAvailable: true,
+        tokenPresent: false,
+      })
+    ).toBe('oidc');
+  });
+
+  test('fails closed when neither OIDC nor an allowed legacy token is available', () => {
+    expect(() =>
+      resolveNpmPublishAuth({
+        allowLegacy: false,
+        oidcAvailable: false,
+        tokenPresent: false,
+      })
+    ).toThrow(/authentication failed/);
+    expect(() =>
+      resolveNpmPublishAuth({
+        allowLegacy: true,
+        oidcAvailable: false,
+        tokenPresent: false,
+      })
+    ).toThrow(/authentication failed/);
+    expect(() =>
+      resolveNpmPublishAuth({
+        allowLegacy: false,
+        oidcAvailable: false,
+        tokenPresent: true,
+      })
+    ).toThrow(/authentication failed/);
+  });
+});
+
+describe('npm publish OIDC detection', () => {
+  test('detects GitHub Actions OIDC request env', () => {
+    expect(
+      isNpmPublishOidcAvailable({
+        ACTIONS_ID_TOKEN_REQUEST_URL: 'https://example/actions/id-token',
+        ACTIONS_ID_TOKEN_REQUEST_TOKEN: 'secret',
+      })
+    ).toBe(true);
+    expect(isNpmPublishOidcAvailable({})).toBe(false);
+  });
+
+  test('detects a non-empty NODE_AUTH_TOKEN', () => {
+    expect(isNpmPublishTokenPresent({ NODE_AUTH_TOKEN: 'tok' })).toBe(true);
+    expect(isNpmPublishTokenPresent({ NODE_AUTH_TOKEN: '' })).toBe(false);
+    expect(isNpmPublishTokenPresent({})).toBe(false);
+  });
+});
+
+describe('publishPackages auth reporting', () => {
+  test('reports auth=oidc when OIDC env is present', async () => {
+    const runner = new FakeNpmRunner([missing(), ok()]);
+    const priorUrl = process.env.ACTIONS_ID_TOKEN_REQUEST_URL;
+    const priorToken = process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
+    process.env.ACTIONS_ID_TOKEN_REQUEST_URL = 'https://example/actions/id-token';
+    process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN = 'secret';
+    try {
+      await expect(
+        publishPackages([PLATFORM_PACKAGE], {
+          logger: new CapturingLogger(),
+          retryDelaysMs: [10],
+          runner,
+          sleep: () => Promise.resolve(),
+        })
+      ).resolves.toMatchObject({ auth: 'oidc', published: 1 });
+    } finally {
+      if (priorUrl === undefined) delete process.env.ACTIONS_ID_TOKEN_REQUEST_URL;
+      else process.env.ACTIONS_ID_TOKEN_REQUEST_URL = priorUrl;
+      if (priorToken === undefined) delete process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
+      else process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN = priorToken;
+    }
+  });
+
+  test('fails closed when publishPackages runs without OIDC or allowed legacy token', async () => {
+    const runner = new FakeNpmRunner([missing(), ok()]);
+    const priorUrl = process.env.ACTIONS_ID_TOKEN_REQUEST_URL;
+    const priorToken = process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
+    const priorNpm = process.env.NODE_AUTH_TOKEN;
+    delete process.env.ACTIONS_ID_TOKEN_REQUEST_URL;
+    delete process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
+    delete process.env.NODE_AUTH_TOKEN;
+    try {
+      await expect(
+        publishPackages([PLATFORM_PACKAGE], {
+          allowLegacyToken: false,
+          logger: new CapturingLogger(),
+          retryDelaysMs: [10],
+          runner,
+          sleep: () => Promise.resolve(),
+        })
+      ).rejects.toThrow(/authentication failed/);
+      expect(runner.calls).toHaveLength(0);
+    } finally {
+      if (priorUrl === undefined) delete process.env.ACTIONS_ID_TOKEN_REQUEST_URL;
+      else process.env.ACTIONS_ID_TOKEN_REQUEST_URL = priorUrl;
+      if (priorToken === undefined) delete process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
+      else process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN = priorToken;
+      if (priorNpm === undefined) delete process.env.NODE_AUTH_TOKEN;
+      else process.env.NODE_AUTH_TOKEN = priorNpm;
+    }
+  });
+
+  // release-dry-run.yml runs `publish-npm.ts --dry-run` with only
+  // `contents: read` and no NPM_TOKEN, and the same command is documented for
+  // local use, so a dry run must never demand publish credentials.
+  test('a dry run needs no credentials and reports auth=not-published', async () => {
+    const runner = new FakeNpmRunner([missing()]);
+    const priorUrl = process.env.ACTIONS_ID_TOKEN_REQUEST_URL;
+    const priorToken = process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
+    const priorNpm = process.env.NODE_AUTH_TOKEN;
+    delete process.env.ACTIONS_ID_TOKEN_REQUEST_URL;
+    delete process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
+    delete process.env.NODE_AUTH_TOKEN;
+    try {
+      await expect(
+        publishPackages([PLATFORM_PACKAGE], {
+          allowLegacyToken: false,
+          dryRun: true,
+          logger: new CapturingLogger(),
+          retryDelaysMs: [10],
+          runner,
+          sleep: () => Promise.resolve(),
+        })
+      ).resolves.toMatchObject({ auth: 'not-published', dryRun: 1, published: 0 });
+    } finally {
+      if (priorUrl === undefined) delete process.env.ACTIONS_ID_TOKEN_REQUEST_URL;
+      else process.env.ACTIONS_ID_TOKEN_REQUEST_URL = priorUrl;
+      if (priorToken === undefined) delete process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
+      else process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN = priorToken;
+      if (priorNpm === undefined) delete process.env.NODE_AUTH_TOKEN;
+      else process.env.NODE_AUTH_TOKEN = priorNpm;
+    }
+  });
+});
+
 describe('publishPackages', () => {
   test('skips versions that already exist', async () => {
     const runner = new FakeNpmRunner([ok('1.2.3\n')]);
@@ -176,6 +350,7 @@ describe('publishPackages', () => {
     const runner = new FakeNpmRunner([missing(), ok()]);
     const sleeper = new FakeSleeper();
     await publishPackages([PLATFORM_PACKAGE], {
+      authMode: 'legacy-explicit',
       distTag: 'canary',
       logger: new CapturingLogger(),
       retryDelaysMs: [10],
@@ -349,12 +524,12 @@ describe('publishPackages', () => {
           published: 1,
           skipped: 0,
           dryRun: 0,
-          auth: 'legacy-explicit',
+          auth: 'oidc',
           provenance: { status: 'explicit' },
         },
         outputPath
       );
-      expect(readFileSync(outputPath, 'utf8')).toBe('auth=legacy-explicit\nprovenance=explicit\n');
+      expect(readFileSync(outputPath, 'utf8')).toBe('auth=oidc\nprovenance=explicit\n');
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

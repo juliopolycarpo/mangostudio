@@ -146,6 +146,11 @@ const readPackage = (distDir: string, dirName: string): NpmPublishPackage => {
   return { dir, name: manifest.name, version: manifest.version };
 };
 
+const parseAllowLegacyToken = (): boolean => {
+  const value = process.env.NPM_PUBLISH_ALLOW_LEGACY_TOKEN;
+  return value === 'true' || value === '1';
+};
+
 const main = async (): Promise<void> => {
   const args = parseArgs(process.argv.slice(2));
   const packages = loadPackages(args.distDir);
@@ -153,6 +158,7 @@ const main = async (): Promise<void> => {
   const tagLabel = args.distTag ? ` (dist-tag: ${args.distTag})` : '';
   header(`${args.dryRun ? 'Dry-run npm publish' : 'Publish npm packages'}${tagLabel}`);
   const summary = await publishPackages(packages, {
+    allowLegacyToken: parseAllowLegacyToken(),
     dryRun: args.dryRun,
     distTag: args.distTag,
     provenancePolicy: args.provenancePolicy,

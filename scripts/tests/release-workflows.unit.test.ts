@@ -152,9 +152,9 @@ describe('release workflow binary gate', () => {
       releaseScriptsInStep(step.block).map((scriptPath) => ({ step, scriptPath }))
     );
 
-    // Guard the guard: the publish is the one invocation with a token contract,
-    // and it now lives in a composite action. A walk that stops reaching it
-    // would satisfy every assertion below while enforcing nothing.
+    // Guard the guard: the publish is the deepest invocation the walk has to
+    // reach (it lives in a composite action, not a workflow). A walk that stops
+    // reaching it would satisfy every assertion below while enforcing nothing.
     expect(
       invocations.map(({ scriptPath }) => scriptPath),
       'the env-contract walk no longer reaches the npm publish'
@@ -181,17 +181,30 @@ describe('release workflow binary gate', () => {
     for (const block of [release, canary]) {
       expect(block).toContain('uses: ./.github/actions/publish-npm-distribution');
       expect(block).toContain('node-version: "22.14.0"');
-      expect(block).toContain(`node-auth-token: ${secretPrefix}NPM_TOKEN }}`);
+      // setup-node's registry-url writes an npmrc templating
+      // `_authToken=${NODE_AUTH_TOKEN}`, and the publish step overrides
+      // NPM_CONFIG_USERCONFIG away from it — so it is inert at best, and a
+      // liability if that override is ever narrowed to the legacy path.
+      expect(block).not.toContain('registry-url:');
       expect(block).not.toContain('scripts/release/publish-npm.ts');
     }
+    expect(release).toContain('allow-legacy-token:');
+    expect(release).toContain('allow_legacy_npm_token');
+    expect(release).not.toMatch(/^ {10}node-auth-token: \$\{\{ secrets\.NPM_TOKEN \}\}/m);
+    // A stable release must publish as `latest`: any dist-tag wired into the
+    // release job would divert it away from the tag every installer reads.
     expect(release).not.toMatch(/^ {10}dist-tag:/m);
     expect(canary).toContain('dist-tag: canary');
+    expect(canary).toContain('allow-legacy-token: "true"');
+    expect(canary).toContain(`node-auth-token: ${secretPrefix}NPM_TOKEN }}`);
 
     const publishStep = extractStepBlocksAtIndent(action, 4).find((step) =>
       step.includes('scripts/release/publish-npm.ts')
     );
     expect(publishStep).toBeDefined();
-    expect(publishStep).toContain(`NODE_AUTH_TOKEN: ${inputPrefix}node-auth-token }}`);
+    expect(publishStep).toContain(`LEGACY_NODE_AUTH_TOKEN: ${inputPrefix}node-auth-token }}`);
+    expect(publishStep).toContain('unset NODE_AUTH_TOKEN');
+    expect(publishStep).toContain('_authToken');
     expect(publishStep).toContain('--provenance-policy required');
     expect(publishStep).toContain(`trap 'rm -f "$NPM_CONFIG_USERCONFIG"' EXIT`);
     // The dist-tag wiring is the highest-consequence branch in the action: a
@@ -232,7 +245,6 @@ describe('release workflow binary gate', () => {
     );
 
     for (const [workflow, job, secret] of [
-      [release, 'npm-publish', 'NPM_TOKEN'],
       [release, 'homebrew', 'DIST_REPOS_TOKEN'],
       [release, 'scoop', 'DIST_REPOS_TOKEN'],
       [canary, 'npm-canary', 'NPM_TOKEN'],
@@ -247,13 +259,18 @@ describe('release workflow binary gate', () => {
     }
     expect(
       `${release}\n${canary}`.match(/uses: \.\/\.github\/actions\/require-secret/g)
-    ).toHaveLength(4);
+    ).toHaveLength(3);
     expect(`${release}\n${canary}`).not.toMatch(
       /if \[ -z "\$(?:NPM_TOKEN|DIST_REPOS_TOKEN)" \]; then/
     );
 
     expect(cargoBlock).not.toContain('Missing required release secret: CARGO_REGISTRY_TOKEN');
     expect(cargoBlock).toContain('allow_legacy_cargo_token');
+
+    const npmPublishBlock = extractJobBlock(release, 'npm-publish');
+    expect(npmPublishBlock).not.toContain('uses: ./.github/actions/require-secret');
+    expect(npmPublishBlock).toContain('allow-legacy-token:');
+    expect(npmPublishBlock).toContain('allow_legacy_npm_token');
 
     const action = readText('.github/actions/require-secret/action.yml');
     const inputPrefix = '$' + '{{ inputs.';
@@ -663,6 +680,15 @@ describe('release workflow binary gate', () => {
     expect(workflow).toContain('allow_legacy_cargo_token:');
     expect(workflow).toContain('type: boolean');
     expect(workflow).toContain('default: false');
+  });
+
+  test('npm publishing prefers OIDC with a dispatch-only legacy fallback', () => {
+    const workflow = readText('.github/workflows/release.yml');
+    expect(workflow).toContain('allow_legacy_npm_token:');
+    const npmBlock = extractJobBlock(workflow, 'npm-publish');
+    expect(npmBlock).toContain(
+      "github.event_name == 'workflow_dispatch' && inputs.allow_legacy_npm_token"
+    );
   });
 
   test('release verifies tag provenance and cannot be bypassed by a tag push', () => {
