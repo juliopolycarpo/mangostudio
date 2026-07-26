@@ -128,6 +128,19 @@ Open these first:
 - `apps/frontend/src/features/settings/skills/`
 - Reference: `docs/reference/skills.md`
 
+## Environments (Runtimes, Version Managers, Agent CLIs)
+
+Open these first:
+
+- `apps/api/src/modules/environments/application/runtime-detection.ts` (PATH scan, cache, probe)
+- `apps/api/src/modules/environments/application/version-manager-detection.ts` (nvm + LTS)
+- `apps/api/src/modules/environments/application/agent-cli-detection.ts` (per-target CLI + auth)
+- `apps/api/src/modules/environments/application/install-service.ts` (guards, prepare, run)
+- `apps/api/src/modules/environments/http/environment-routes.ts`, `install-routes.ts`
+- `apps/shared/src/environments/schemas.ts` (single source of truth for every shape)
+- `apps/frontend/src/features/environments/` (`format.ts` holds the presentation rules)
+- `apps/frontend/src/routes/_authenticated/environments/`
+
 ## MCP Servers
 
 Open these first:
