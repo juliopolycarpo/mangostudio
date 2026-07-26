@@ -9,6 +9,7 @@
 
 import type {
   AgentCliStatus,
+  InstallBlockedResponse,
   InstallCancelResponse,
   InstallPreparation,
   InstallRecipeId,
@@ -58,11 +59,14 @@ function toRefusal(error: EdenErrorLike): InstallRefusal | null {
   if (error.status !== 403 && error.status !== 409) return null;
   const value = error.value;
   if (!value || typeof value !== 'object' || !('recipe' in value)) return null;
-  const { recipe, error: message } = value as { recipe: InstallRecipePreview; error?: unknown };
+  // The blocked body is `InstallBlockedResponseSchema`; the shared type is the
+  // authority on its shape rather than a locally restated one.
+  const blocked = value as Partial<InstallBlockedResponse>;
+  if (!blocked.recipe) return null;
   return {
     outcome: 'refused',
-    recipe,
-    message: typeof message === 'string' ? message : '',
+    recipe: blocked.recipe,
+    message: typeof blocked.error === 'string' ? blocked.error : '',
   };
 }
 
