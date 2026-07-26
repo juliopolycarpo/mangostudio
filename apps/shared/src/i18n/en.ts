@@ -1414,6 +1414,7 @@ export const messages: Messages = {
     actions: {
       refresh: 'Re-check',
       refreshing: 'Checking...',
+      refreshFailed: 'Re-check failed. The details below may be out of date.',
       retry: 'Try again',
       copy: 'Copy command',
       copied: 'Command copied',

@@ -12,13 +12,12 @@ import type {
   LtsStatus,
   VersionManagerStatus,
 } from '@mangostudio/shared/environments';
-import { RefreshCw } from 'lucide-react';
-import { Button } from '@/components/ui/Button';
 import { useI18n } from '@/hooks/use-i18n';
 import { displayName, formatMessage, ltsLabel } from '../format';
 import { useProbeVersionManager } from '../hooks/use-runtime-status';
 import { FindingList } from './FindingList';
 import { InstallAction } from './InstallAction';
+import { ProbeButton } from './ProbeButton';
 
 interface NodeVersionTableProps {
   status: VersionManagerStatus;
@@ -76,15 +75,13 @@ export function NodeVersionTable({ status, recipes }: NodeVersionTableProps) {
         <p className="font-label text-[10px] font-bold uppercase tracking-widest text-on-surface-variant/70">
           {formatMessage(e.versions.title, { manager })}
         </p>
-        <Button
-          variant="ghost"
-          size="sm"
-          loading={probe.isPending}
-          onClick={() => probe.mutate(status.id)}
-          aria-label={e.actions.refresh}
-        >
-          <RefreshCw size={14} />
-        </Button>
+        <div className="flex items-center gap-2">
+          <ProbeButton
+            isPending={probe.isPending}
+            isError={probe.isError}
+            onProbe={() => probe.mutate(status.id)}
+          />
+        </div>
       </div>
 
       <FindingList findings={status.findings} />

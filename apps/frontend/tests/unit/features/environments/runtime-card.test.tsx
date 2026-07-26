@@ -4,12 +4,17 @@
  */
 
 import { en } from '@mangostudio/shared/i18n';
-import { describe, expect, it } from 'vitest';
+import userEvent from '@testing-library/user-event';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { RuntimeCard } from '../../../../src/features/environments/components/RuntimeCard';
 import { render, screen, within } from '../../../support/harness/render';
 import { installation, runtimeStatus } from './fixtures';
 
 describe('RuntimeCard', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it('renders the effective installation first regardless of array order', () => {
     const status = runtimeStatus({
       id: 'node',
@@ -114,5 +119,26 @@ describe('RuntimeCard', () => {
     render(<RuntimeCard status={status} recipes={[]} />);
 
     expect(screen.getByText('Bun is not installed yet.')).toBeInTheDocument();
+  });
+
+  it('says a failed re-check failed instead of leaving the card silently stale', async () => {
+    vi.stubGlobal('fetch', () =>
+      Promise.resolve(
+        new Response(JSON.stringify({ error: 'probe failed' }), {
+          status: 500,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      )
+    );
+    const status = runtimeStatus({ id: 'bun' });
+
+    render(<RuntimeCard status={status} recipes={[]} />);
+    await userEvent.click(screen.getByRole('button', { name: en.environments.actions.refresh }));
+
+    // The card keeps rendering its last known state, so a probe that failed has
+    // to say so — otherwise the spinner stopping reads as "nothing changed".
+    expect(await screen.findByTestId('probe-error')).toHaveTextContent(
+      en.environments.actions.refreshFailed
+    );
   });
 });

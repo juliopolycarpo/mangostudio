@@ -9,14 +9,14 @@
 
 import type { AgentCliStatus, InstallRecipePreview } from '@mangostudio/shared/environments';
 import type { Messages } from '@mangostudio/shared/i18n';
-import { Download, RefreshCw } from 'lucide-react';
-import { Button } from '@/components/ui/Button';
+import { Download } from 'lucide-react';
 import { useI18n } from '@/hooks/use-i18n';
 import { displayName, formatMessage } from '../format';
 import { useProbeAgentCli } from '../hooks/use-runtime-status';
 import { FindingList } from './FindingList';
 import { HealthBadge } from './HealthBadge';
 import { InstallAction } from './InstallAction';
+import { ProbeButton } from './ProbeButton';
 
 interface AgentCliCardProps {
   status: AgentCliStatus;
@@ -49,15 +49,11 @@ export function AgentCliCard({ status, recipes }: AgentCliCardProps) {
         </div>
         <div className="flex items-center gap-2">
           <HealthBadge health={status.health} />
-          <Button
-            variant="ghost"
-            size="sm"
-            loading={probe.isPending}
-            onClick={() => probe.mutate(status.targetId)}
-            aria-label={e.actions.refresh}
-          >
-            <RefreshCw size={14} />
-          </Button>
+          <ProbeButton
+            isPending={probe.isPending}
+            isError={probe.isError}
+            onProbe={() => probe.mutate(status.targetId)}
+          />
         </div>
       </header>
 

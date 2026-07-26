@@ -1432,6 +1432,7 @@ export const messages = {
     actions: {
       refresh: 'Verificar novamente',
       refreshing: 'Verificando...',
+      refreshFailed: 'A verificação falhou. Os dados abaixo podem estar desatualizados.',
       retry: 'Tentar novamente',
       copy: 'Copiar comando',
       copied: 'Comando copiado',

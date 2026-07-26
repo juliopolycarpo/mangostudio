@@ -7,8 +7,7 @@
  */
 
 import type { InstallRecipePreview, RuntimeStatus } from '@mangostudio/shared/environments';
-import { Download, RefreshCw } from 'lucide-react';
-import { Button } from '@/components/ui/Button';
+import { Download } from 'lucide-react';
 import { useI18n } from '@/hooks/use-i18n';
 import { displayName, formatMessage, groupInstallations, pathPosition } from '../format';
 import { useProbeRuntime } from '../hooks/use-runtime-status';
@@ -16,6 +15,7 @@ import { FindingList } from './FindingList';
 import { HealthBadge } from './HealthBadge';
 import { InstallAction } from './InstallAction';
 import { InstallationList } from './InstallationList';
+import { ProbeButton } from './ProbeButton';
 
 interface RuntimeCardProps {
   status: RuntimeStatus;
@@ -62,15 +62,11 @@ export function RuntimeCard({ status, recipes, children }: RuntimeCardProps) {
         </div>
         <div className="flex items-center gap-2">
           <HealthBadge health={status.health} />
-          <Button
-            variant="ghost"
-            size="sm"
-            loading={probe.isPending}
-            onClick={() => probe.mutate(status.id)}
-            aria-label={e.actions.refresh}
-          >
-            <RefreshCw size={14} />
-          </Button>
+          <ProbeButton
+            isPending={probe.isPending}
+            isError={probe.isError}
+            onProbe={() => probe.mutate(status.id)}
+          />
         </div>
       </header>
 
