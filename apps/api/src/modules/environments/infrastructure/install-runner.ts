@@ -228,7 +228,6 @@ export function createInstallRunner(overrides: Partial<InstallRunnerDeps> = {}):
           process.exited,
         ]);
         exitCode = results[2];
-        await logWrites;
       } catch (error) {
         kill('cancelled');
         streamFailed = true;
@@ -238,6 +237,16 @@ export function createInstallRunner(overrides: Partial<InstallRunnerDeps> = {}):
       } finally {
         clearTimeout(timeoutId);
         options.signal?.removeEventListener('abort', abortHandler);
+      }
+
+      // The queued log writes are drained on every path so a rejected append can
+      // never surface as an unhandled rejection, and a log-file failure never
+      // overrides the child's own terminal status.
+      try {
+        await logWrites;
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : 'Unknown log write failure.';
+        emitLine(options, 'system', `Install log write failed: ${detail}`);
       }
 
       const finishedAt = deps.now();
